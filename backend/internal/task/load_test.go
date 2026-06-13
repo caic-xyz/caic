@@ -870,6 +870,7 @@ func TestParseState(t *testing.T) {
 		want State
 	}{
 		{"failed", StateFailed},
+		{"crashed", StateCrashed},
 		{"stopped", StateStopped},
 		{"purged", StatePurged},
 		{"terminated", StatePurged}, // backward compat

@@ -506,7 +506,7 @@ function createAppStore() {
     const tid = actionId();
     if (!tid) return;
     const t = tasks().find((task) => task.id === tid);
-    if (t && (t.state === "purging" || t.state === "purged" || t.state === "failed" || t.state === "stopping" || t.state === "stopped" || t.state === "provisioning")) {
+    if (t && (t.state === "purging" || t.state === "purged" || t.state === "failed" || t.state === "crashed" || t.state === "stopping" || t.state === "stopped" || t.state === "provisioning")) {
       setActionId(null);
     }
   });

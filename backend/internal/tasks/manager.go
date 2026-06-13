@@ -355,9 +355,9 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 func (m *Manager) Purge(ctx context.Context, entry *Entry) error {
 	state, changed := entry.task.SetStateIfAny(task.StatePurging,
 		task.StateWaiting, task.StateAsking, task.StateHasPlan,
-		task.StateRunning, task.StateStopping, task.StateStopped)
+		task.StateRunning, task.StateStopping, task.StateStopped, task.StateCrashed)
 	if !changed {
-		return conflict("task is not running or waiting")
+		return conflict("task is not running, waiting, stopped, or crashed")
 	}
 	m.NotifyTaskChange()
 	runner := m.resolveRunner(entry.task)
@@ -387,10 +387,10 @@ func (m *Manager) Stop(ctx context.Context, entry *Entry) error {
 	return nil
 }
 
-// Revive restarts a stopped task.
+// Revive restarts a stopped or crashed task.
 func (m *Manager) Revive(ctx context.Context, entry *Entry) error {
-	if _, changed := entry.task.SetStateIfAny(task.StateProvisioning, task.StateStopped); !changed {
-		return conflict("task is not stopped")
+	if _, changed := entry.task.SetStateIfAny(task.StateProvisioning, task.StateStopped, task.StateCrashed); !changed {
+		return conflict("task is not stopped or crashed")
 	}
 	runner := m.resolveRunner(entry.task)
 	entry.Reset()
@@ -505,9 +505,9 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 	source := sourceEntry.task
 	state := source.GetState()
 	switch state {
-	case task.StateRunning, task.StateWaiting, task.StateAsking, task.StateHasPlan:
+	case task.StateRunning, task.StateWaiting, task.StateAsking, task.StateHasPlan, task.StateCrashed:
 	default:
-		return "", conflict("task must be running or waiting to fork")
+		return "", conflict("task must be running, waiting, or crashed to fork")
 	}
 	if source.RuntimeInstanceID() == "" {
 		return "", conflict("task has no instance")
@@ -886,7 +886,7 @@ func (m *Manager) ListPendingBotTasks() []BotPendingTask {
 			continue
 		}
 		st := snap.State
-		if st == task.StateWaiting || st == task.StateStopped || st == task.StateFailed || st == task.StatePurged {
+		if st == task.StateWaiting || st == task.StateStopped || st == task.StateCrashed || st == task.StateFailed || st == task.StatePurged {
 			continue
 		}
 		out = append(out, BotPendingTask{
@@ -908,7 +908,7 @@ func (m *Manager) WatchTaskCompletion(ctx context.Context, taskID string) (state
 	for {
 		st := entry.task.GetState()
 		switch st { //nolint:exhaustive // only terminal/idle states are relevant
-		case task.StateWaiting, task.StateStopped, task.StateFailed, task.StatePurged:
+		case task.StateWaiting, task.StateStopped, task.StateCrashed, task.StateFailed, task.StatePurged:
 			return st.String(), lastResultText(entry.task), nil
 		}
 		m.mu.Lock()
@@ -1033,7 +1033,7 @@ func (m *Manager) Sync(ctx context.Context, entry *Entry, target SyncTarget, for
 	switch t.GetState() { //nolint:exhaustive // only terminal/blocked states are relevant
 	case task.StatePending:
 		return nil, conflict("task has no instance yet")
-	case task.StateStopping, task.StateStopped, task.StatePurging, task.StateFailed, task.StatePurged:
+	case task.StateStopping, task.StateStopped, task.StatePurging, task.StateCrashed, task.StateFailed, task.StatePurged:
 		return nil, conflict("task is in a terminal state")
 	}
 
@@ -1129,7 +1129,7 @@ func (m *Manager) pushStats(ctx context.Context) {
 			continue
 		}
 		st := t.GetState()
-		if st == task.StatePurged || st == task.StateFailed || st == task.StateStopped || st == task.StateStopping {
+		if st == task.StatePurged || st == task.StateFailed || st == task.StateCrashed || st == task.StateStopped || st == task.StateStopping {
 			continue
 		}
 		active = append(active, entry{task: t, name: name})
@@ -1226,7 +1226,7 @@ func (m *Manager) handleRuntimeInstanceExit(instanceID runtime.InstanceID) {
 	// one lock also prevents clobbering a state a concurrent Stop/Purge sets
 	// between our check and our write.
 	prevState, changed := t.SetStateUnless(task.StateStopped,
-		task.StatePurged, task.StateFailed, task.StateStopped,
+		task.StatePurged, task.StateCrashed, task.StateFailed, task.StateStopped,
 		task.StateStopping, task.StatePurging)
 	if !changed {
 		return
@@ -1494,6 +1494,9 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	}
 	applyLoadedSessionMetadata(t, lt)
 	t.SetStateAt(t.GetState(), stateUpdatedAt)
+	if lt != nil && (lt.State == task.StateCrashed || lt.State == task.StateFailed) {
+		t.SetStateAt(lt.State, stateUpdatedAt)
+	}
 
 	// Full log parse for PR recovery.
 	if lt != nil && t.GetPR() == 0 {
@@ -1511,7 +1514,13 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	}
 
 	if isExited {
-		t.SetState(task.StateStopped)
+		if t.GetState() != task.StateCrashed {
+			if t.LastExitError() != "" {
+				t.RecordSessionCrash(ctx, errors.New("agent subprocess exited before adoption"))
+			} else {
+				t.SetState(task.StateStopped)
+			}
+		}
 	} else if !relayAlive {
 		relayLog := m.relay.ReadLog(ctx, relayTarget, 4096)
 		if relayLog != "" {
@@ -1519,7 +1528,12 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		}
 		trace.Logf(ctx, "adopt", "%s: relay-dead", c.ID)
 		if t.LastExitError() != "" {
-			t.RecordSessionFailure(ctx, errors.New("relay exited before adoption"))
+			t.RecordSessionCrash(ctx, errors.New("relay exited before adoption"))
+			if runner.Runtime != nil {
+				if err := runner.Runtime.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // adoption must outlive request
+					slog.Error("stop failed after adopted relay crash", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", err)
+				}
+			}
 		} else if t.GetState() == task.StateRunning {
 			t.SetStateAt(task.StateWaiting, stateUpdatedAt)
 			slog.Warn("relay", "msg", "dead, marking waiting",
@@ -1529,25 +1543,28 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	}
 
 	entry := NewEntry(t)
-	if t.GetState() == task.StateFailed {
-		failureErr := errors.New("agent session failed")
+	if t.GetState() == task.StateCrashed || t.GetState() == task.StateFailed {
+		resultErr := errors.New("agent session failed")
+		if t.GetState() == task.StateCrashed {
+			resultErr = errors.New("agent session crashed")
+		}
 		if exitErr := t.LastExitError(); exitErr != "" {
-			failureErr = errors.New(exitErr)
+			resultErr = errors.New(exitErr)
 		}
 		costUSD, numTurns, duration, usage, _ := t.LiveStats()
 		result := &task.Result{
-			State:       task.StateFailed,
+			State:       t.GetState(),
 			DiffStat:    t.LiveDiffStat(),
 			CostUSD:     costUSD,
 			Duration:    duration,
 			NumTurns:    numTurns,
 			Usage:       usage,
 			AgentResult: t.LastAgentResult(),
-			Err:         failureErr,
+			Err:         resultErr,
 		}
 		entry.Finish(result)
-		if err := writeAdoptedFailureTrailer(t, result); err != nil {
-			slog.Warn("write adopted failure trailer failed", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", err)
+		if err := writeTaskResultTrailer(t, result); err != nil {
+			slog.Warn("write adopted result trailer failed", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", err)
 		}
 	}
 
@@ -1595,7 +1612,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 			m.NotifyTaskChange()
 			m.watchSession(entry, runner, h)
 		}()
-	} else if !relayAlive && t.GetState() != task.StateStopped && t.GetState() != task.StateFailed {
+	} else if !relayAlive && t.GetState() != task.StateStopped && t.GetState() != task.StateCrashed && t.GetState() != task.StateFailed {
 		slog.Error("relay dead, stopping instance",
 			"repo", ri.RelPath, "br", branch, "instance", c.ID,
 			"state", t.GetState())
@@ -1618,7 +1635,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	}, nil
 }
 
-func writeAdoptedFailureTrailer(t *task.Task, r *task.Result) error {
+func writeTaskResultTrailer(t *task.Task, r *task.Result) error {
 	msg := &agent.MetaResultMessage{
 		MessageType:              "caic_result",
 		State:                    r.State.String(),
@@ -1706,14 +1723,34 @@ func (m *Manager) watchSession(entry *Entry, runner *task.Runner, h *task.Sessio
 			attrs := []any{"repo", watchPrimaryName, "br", watchPrimaryBranch, "instance", t.RuntimeInstanceID()}
 			if sessionErr != nil {
 				slog.Warn("session exited with error", append(attrs, "err", sessionErr)...)
-				if t.RecordSessionFailure(m.serverCtx, sessionErr) {
+				if t.RecordSessionCrash(m.serverCtx, sessionErr) {
 					m.stopFailedSessionInstance(runner, t, attrs)
+					crashErr := sessionErr
+					if exitErr := t.LastExitError(); exitErr != "" {
+						crashErr = errors.New(exitErr)
+					}
+					costUSD, numTurns, duration, usage, _ := t.LiveStats()
+					result := &task.Result{
+						State:       task.StateCrashed,
+						DiffStat:    t.LiveDiffStat(),
+						CostUSD:     costUSD,
+						Duration:    duration,
+						NumTurns:    numTurns,
+						Usage:       usage,
+						AgentResult: t.LastAgentResult(),
+						Err:         crashErr,
+					}
+					entry.Finish(result)
+					if err := writeTaskResultTrailer(t, result); err != nil {
+						slog.Warn("write crashed task trailer failed", append(attrs, "err", err)...)
+					}
+				} else if t.RecordSessionFailure(m.serverCtx, sessionErr) {
 					failureErr := sessionErr
 					if exitErr := t.LastExitError(); exitErr != "" {
 						failureErr = errors.New(exitErr)
 					}
 					costUSD, numTurns, duration, usage, _ := t.LiveStats()
-					entry.Finish(&task.Result{
+					result := &task.Result{
 						State:       task.StateFailed,
 						DiffStat:    t.LiveDiffStat(),
 						CostUSD:     costUSD,
@@ -1722,7 +1759,11 @@ func (m *Manager) watchSession(entry *Entry, runner *task.Runner, h *task.Sessio
 						Usage:       usage,
 						AgentResult: t.LastAgentResult(),
 						Err:         failureErr,
-					})
+					}
+					entry.Finish(result)
+					if err := writeTaskResultTrailer(t, result); err != nil {
+						slog.Warn("write failed task trailer failed", append(attrs, "err", err)...)
+					}
 				}
 			} else {
 				slog.Info("session exited", attrs...)

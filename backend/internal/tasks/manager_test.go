@@ -420,7 +420,7 @@ func TestManager(t *testing.T) {
 		t.Run("valid_skips_terminal_states", func(t *testing.T) {
 			t.Parallel()
 			m := New(Config{ServerCtx: t.Context()})
-			for _, st := range []task.State{task.StateWaiting, task.StateStopped, task.StateFailed, task.StatePurged} {
+			for _, st := range []task.State{task.StateWaiting, task.StateStopped, task.StateCrashed, task.StateFailed, task.StatePurged} {
 				tk := &task.Task{
 					ID:            ksid.NewID(),
 					InitialPrompt: agent.Prompt{Text: "test"},
@@ -1730,6 +1730,42 @@ func TestManager(t *testing.T) {
 				t.Fatalf("err = %v, want KindConflict", err)
 			}
 		})
+		t.Run("valid_accepts_crashed", func(t *testing.T) {
+			t.Parallel()
+			releaseRevive := make(chan struct{})
+			fake := &tasktest.FakeRuntimeBackend{
+				ReviveFunc: func(ctx context.Context, _ runtime.InstanceID) error {
+					select {
+					case <-releaseRevive:
+						return errors.New("revive boom")
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				},
+			}
+			m := New(Config{ServerCtx: t.Context(), Backend: fake})
+			tk := &task.Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "x"},
+			}
+			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetState(task.StateCrashed)
+			entry := NewEntry(tk)
+			m.Insert(tk.ID.String(), entry)
+
+			if err := m.Revive(t.Context(), entry); err != nil {
+				t.Fatalf("Revive: %v", err)
+			}
+			if got := tk.GetState(); got != task.StateProvisioning {
+				t.Fatalf("state = %v, want provisioning", got)
+			}
+			close(releaseRevive)
+			select {
+			case <-entry.Done():
+			case <-time.After(time.Second):
+				t.Fatal("failed revive did not close done")
+			}
+		})
 		t.Run("error_failure_closes_done_and_publishes_result", func(t *testing.T) {
 			t.Parallel()
 			releaseRevive := make(chan struct{})
@@ -1810,7 +1846,7 @@ func TestManager(t *testing.T) {
 		})
 	})
 	t.Run("watchSession", func(t *testing.T) {
-		t.Run("valid_session_error_stops_instance", func(t *testing.T) {
+		t.Run("valid_session_error_crashes_and_stops_instance", func(t *testing.T) {
 			t.Parallel()
 			cmd := exec.CommandContext(t.Context(), "sh", "-c", "exit 255")
 			stdin, err := cmd.StdinPipe()
@@ -1844,8 +1880,8 @@ func TestManager(t *testing.T) {
 			case <-time.After(time.Second):
 				t.Fatal("watchSession did not finish")
 			}
-			if got := tk.GetState(); got != task.StateFailed {
-				t.Fatalf("state = %v, want failed", got)
+			if got := tk.GetState(); got != task.StateCrashed {
+				t.Fatalf("state = %v, want crashed", got)
 			}
 			if got := runtimeBackend.Count("Stop"); got != 1 {
 				t.Fatalf("Stop count = %d, want 1", got)
@@ -2091,7 +2127,7 @@ func TestManager(t *testing.T) {
 				t.Errorf("manager Len = %d, want 1", m.Len())
 			}
 		})
-		t.Run("valid_dead_relay_exit_error_fails_adopted_task", func(t *testing.T) {
+		t.Run("valid_dead_relay_exit_error_crashes_adopted_task", func(t *testing.T) {
 			t.Parallel()
 			ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
 			defer cancel()
@@ -2146,8 +2182,8 @@ func TestManager(t *testing.T) {
 			if len(adopted) != 1 {
 				t.Fatalf("adopted len = %d, want 1", len(adopted))
 			}
-			if got := adopted[0].Task.GetState(); got != task.StateFailed {
-				t.Errorf("state = %v, want failed", got)
+			if got := adopted[0].Task.GetState(); got != task.StateCrashed {
+				t.Errorf("state = %v, want crashed", got)
 			}
 			if adopted[0].Entry.Result() == nil {
 				t.Fatal("entry result is nil")
@@ -2159,11 +2195,11 @@ func TestManager(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(string(persisted), `"type":"caic_result"`) || !strings.Contains(string(persisted), `"state":"failed"`) {
-				t.Fatalf("log missing failed caic_result trailer:\n%s", persisted)
+			if !strings.Contains(string(persisted), `"type":"caic_result"`) || !strings.Contains(string(persisted), `"state":"crashed"`) {
+				t.Fatalf("log missing crashed caic_result trailer:\n%s", persisted)
 			}
 		})
-		t.Run("valid_dead_relay_tail_exit_error_fails_adopted_task", func(t *testing.T) {
+		t.Run("valid_dead_relay_tail_exit_error_crashes_adopted_task", func(t *testing.T) {
 			t.Parallel()
 			taskID := ksid.NewID()
 			fake := &fakeMD{metadata: map[string]string{
@@ -2204,8 +2240,8 @@ func TestManager(t *testing.T) {
 			if len(adopted) != 1 {
 				t.Fatalf("adopted len = %d, want 1", len(adopted))
 			}
-			if got := adopted[0].Task.GetState(); got != task.StateFailed {
-				t.Fatalf("state = %v, want failed", got)
+			if got := adopted[0].Task.GetState(); got != task.StateCrashed {
+				t.Fatalf("state = %v, want crashed", got)
 			}
 			if err := adopted[0].Entry.Result().Err; err == nil || !strings.Contains(err.Error(), "Unknown option: --approve") {
 				t.Fatalf("result err = %v, want relay stderr", err)

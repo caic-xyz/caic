@@ -78,7 +78,7 @@ func (s *taskHTTPHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Reque
 	// the on-disk log without materializing it into memory. This keeps server
 	// memory O(1) for the very large logs that previously failed to load.
 	state := entry.Task().GetState()
-	if (state == task.StatePurged || state == task.StateFailed) && entry.LoadedTask() != nil {
+	if (state == task.StatePurged || state == task.StateCrashed || state == task.StateFailed) && entry.LoadedTask() != nil {
 		s.streamHistoryFromDisk(w, flusher, entry)
 		return
 	}
@@ -121,7 +121,7 @@ func (s *taskHTTPHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Reque
 	_, _ = fmt.Fprint(w, "event: ready\ndata: {}\n\n")
 	flusher.Flush()
 
-	if state == task.StatePurged || state == task.StateFailed {
+	if state == task.StatePurged || state == task.StateCrashed || state == task.StateFailed {
 		return
 	}
 

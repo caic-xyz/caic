@@ -277,6 +277,7 @@ public struct TaskState: Codable, Equatable, Hashable {
     public static let Stopping = TaskState("stopping")
     public static let Stopped = TaskState("stopped")
     public static let Purging = TaskState("purging")
+    public static let Crashed = TaskState("crashed")
     public static let Failed = TaskState("failed")
     public static let Purged = TaskState("purged")
 

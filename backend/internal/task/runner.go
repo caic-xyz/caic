@@ -513,7 +513,7 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 	}
 	tlog := r.log.With("br", primaryBranch, "instance", name)
 	tlog.InfoContext(ctx, "stop starting", "state", t.GetState())
-	if _, changed := t.SetStateUnless(StateStopping, StatePurging, StatePurged, StateFailed, StateStopped); !changed {
+	if _, changed := t.SetStateUnless(StateStopping, StatePurging, StatePurged, StateCrashed, StateFailed, StateStopped); !changed {
 		tlog.InfoContext(ctx, "stop skipped", "state", t.GetState())
 		return
 	}
@@ -553,7 +553,7 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 		tlog.DebugContext(ctx, "stop: session drained", "dur", time.Since(dStart).Round(time.Millisecond))
 	}
 
-	if _, changed := t.SetStateUnless(StateStopped, StatePurging, StatePurged, StateFailed); !changed {
+	if _, changed := t.SetStateUnless(StateStopped, StatePurging, StatePurged, StateCrashed, StateFailed); !changed {
 		if h != nil && h.LogW != nil {
 			_ = h.LogW.Close()
 		}
@@ -587,7 +587,7 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 		"cost", res.CostUSD, "turns", res.NumTurns)
 }
 
-// ReviveTask restarts a stopped instance and resumes the agent session.
+// ReviveTask restarts a stopped or crashed instance and resumes the agent session.
 // The instance's filesystem is preserved from the previous run.
 func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error) {
 	r.initDefaults()
@@ -608,7 +608,7 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 	tlog := r.log.With("br", primaryBranch, "instance", instanceID)
 
 	// 1. Revive the instance.
-	if state, changed := t.SetStateIfAny(StateProvisioning, StateStopped, StateProvisioning); !changed {
+	if state, changed := t.SetStateIfAny(StateProvisioning, StateStopped, StateCrashed, StateProvisioning); !changed {
 		return nil, fmt.Errorf("cannot revive in state %s", state)
 	}
 	tlog.Info("reviving instance")

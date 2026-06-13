@@ -264,6 +264,7 @@ export class VoiceSession {
             (t) =>
               t.state === "purged" ||
               t.state === "failed" ||
+              t.state === "crashed" ||
               t.state === "stopped" ||
               t.state === "stopping",
           )

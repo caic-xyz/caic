@@ -494,6 +494,10 @@ sealed interface TaskState {
         override val value = "purging"
     }
     @Serializable
+    data object Crashed : TaskState {
+        override val value = "crashed"
+    }
+    @Serializable
     data object Failed : TaskState {
         override val value = "failed"
     }
@@ -524,6 +528,7 @@ object TaskStateSerializer : KSerializer<TaskState> {
             "stopping" -> TaskState.Stopping
             "stopped" -> TaskState.Stopped
             "purging" -> TaskState.Purging
+            "crashed" -> TaskState.Crashed
             "failed" -> TaskState.Failed
             "purged" -> TaskState.Purged
             else -> TaskState.Other(v)

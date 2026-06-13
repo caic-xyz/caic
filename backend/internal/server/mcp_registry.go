@@ -39,9 +39,12 @@ A task has a prompt (what to build), a repo, a branch, and a state:
 - has_plan: agent produced a plan, awaiting approval
 - pulling: pulling changes from container
 - pushing: pushing changes to remote
+- stopping: graceful stop in progress
+- stopped: container stopped and can be revived
 - purging: cleanup in progress, container being deleted
 - purged: container deleted; result contains the outcome
-- failed: agent crashed or was aborted; error has the reason
+- crashed: agent session crashed; container is preserved and can be revived
+- failed: unrecoverable failure; error has the reason
 
 ## Context you have
 At session start this prompt includes a snapshot of all current tasks. Use it to answer questions about task status without calling tasks_list first. Call task_get_detail when the user asks for specifics (recent events, diffs).
@@ -252,8 +255,8 @@ func (c *caicToolRegistry) specsForState(s *caicToolCatalogState) []mcp.ToolSpec
 		annotateTool(mcp.NewToolSpec("task_answer_question", "Answer task question", "Answer an agent's question by task number. The agent is in 'asking' state.", c.handleTaskAnswerQuestion), mcp.ToolAnnotations{Title: "Answer task question", DestructiveHint: false, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("task_push_branch_to_remote", "Push task branch", "Sync or push a task's changes to GitHub. Push to task branch (default) or squash-push to main.", c.handleTaskPushBranchToRemote), mcp.ToolAnnotations{Title: "Push task branch", DestructiveHint: true, OpenWorldHint: true}),
 		annotateTool(mcp.NewToolSpec("task_stop", "Stop task", "Stop a running or waiting task. The container is preserved and can be revived later.", c.handleTaskStop), mcp.ToolAnnotations{Title: "Stop task", DestructiveHint: true, OpenWorldHint: false}),
-		annotateTool(mcp.NewToolSpec("task_purge", "Purge task", "Permanently delete a stopped task's container. Cannot be undone.", c.handleTaskPurge), mcp.ToolAnnotations{Title: "Purge task", DestructiveHint: true, OpenWorldHint: false}),
-		annotateTool(mcp.NewToolSpec("task_revive", "Revive task", "Revive a stopped task, restarting its container and agent session.", c.handleTaskRevive), mcp.ToolAnnotations{Title: "Revive task", DestructiveHint: false, OpenWorldHint: false}),
+		annotateTool(mcp.NewToolSpec("task_purge", "Purge task", "Permanently delete a stopped or crashed task's container. Cannot be undone.", c.handleTaskPurge), mcp.ToolAnnotations{Title: "Purge task", DestructiveHint: true, OpenWorldHint: false}),
+		annotateTool(mcp.NewToolSpec("task_revive", "Revive task", "Revive a stopped or crashed task, restarting its container and agent session.", c.handleTaskRevive), mcp.ToolAnnotations{Title: "Revive task", DestructiveHint: false, OpenWorldHint: false}),
 		forkSpec,
 		annotateTool(mcp.NewToolSpec("get_usage", "Get usage", "Check current API quota utilization and limits.", c.handleGetUsage), mcp.ToolAnnotations{Title: "Get usage", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: true}),
 		annotateTool(mcp.NewToolSpec("clone_repo", "Clone repository", "Clone a git repository by URL. Optionally specify a local path.", c.handleCloneRepo), mcp.ToolAnnotations{Title: "Clone repository", DestructiveHint: true, OpenWorldHint: true}),
@@ -425,7 +428,10 @@ func (c *caicToolRegistry) handleTaskGetDetail(ctx context.Context, args mcpTask
 		lines = append(lines, "**Result:** "+t.Result)
 	}
 	if t.State == v1.TaskStateStopped {
-		lines = append(lines, "**Stopped:** container died")
+		lines = append(lines, "**Stopped:** container stopped")
+	}
+	if t.State == v1.TaskStateCrashed && t.Error != "" {
+		lines = append(lines, "**Crashed:** "+t.Error)
 	}
 	if t.State == v1.TaskStateFailed && t.Error != "" {
 		lines = append(lines, "**Error:** "+t.Error)
@@ -853,7 +859,10 @@ func taskSummaryLine(num int, t *v1.Task) string {
 		return base + " — " + truncate(t.Result, 120)
 	}
 	if t.State == v1.TaskStateStopped {
-		return base + " — container died"
+		return base + " — container stopped"
+	}
+	if t.State == v1.TaskStateCrashed && t.Error != "" {
+		return base + " — " + t.Error
 	}
 	if t.State == v1.TaskStateFailed && t.Error != "" {
 		return base + " — " + t.Error

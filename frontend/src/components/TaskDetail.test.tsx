@@ -115,6 +115,18 @@ describe("TaskDetail", () => {
     await user.click(getByText("Diff"));
     expect(navigateMock).toHaveBeenCalledWith("/task/@abc+test-task/diff");
   });
+
+  it("shows recover actions for crashed tasks", async () => {
+    const user = userEvent.setup();
+    const onRevive = vi.fn();
+    const { getByLabelText, getByText, getByTestId } = renderTaskDetail({ taskState: "crashed", onRevive });
+    expect(getByTestId("send-input")).toBeDisabled();
+
+    await user.click(getByLabelText("Context actions"));
+    await user.click(getByText("Revive"));
+
+    expect(onRevive).toHaveBeenCalledWith("abc");
+  });
 });
 
 // Helper type for a controllable fake EventSource.

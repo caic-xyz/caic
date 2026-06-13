@@ -59,6 +59,8 @@ export function stateColor(state: TaskState): string {
       return "#cce5ff";
     case "has_plan":
       return "#ede9fe";
+    case "crashed":
+      return "#ffe0d6";
     case "failed":
       return "#f8d7da";
     case "purging":

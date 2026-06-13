@@ -66,6 +66,8 @@ func TaskState(ctx context.Context, s task.State) v1.TaskState {
 		return v1.TaskStateStopped
 	case task.StatePurging:
 		return v1.TaskStatePurging
+	case task.StateCrashed:
+		return v1.TaskStateCrashed
 	case task.StateFailed:
 		return v1.TaskStateFailed
 	case task.StatePurged:

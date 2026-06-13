@@ -35,8 +35,8 @@ const naturalCompare = (a: string, b: string) =>
 
 /** Sort tasks according to sidebar grouping: active by ID desc, stopped/purged by last state change desc. */
 export function sortTasks(tasks: Task[]): Task[] {
-  const active = tasks.filter((t) => t.state !== "stopped" && t.state !== "purged" && t.state !== "failed");
-  const stopped = tasks.filter((t) => t.state === "stopped");
+  const active = tasks.filter((t) => t.state !== "stopped" && t.state !== "crashed" && t.state !== "purged" && t.state !== "failed");
+  const stopped = tasks.filter((t) => t.state === "stopped" || t.state === "crashed");
   const purged = tasks.filter((t) => t.state === "purged" || t.state === "failed");
 
   // Sort by length first (longer = larger numeric value), then lexicographically.
@@ -103,7 +103,7 @@ export default function TaskList(props: TaskListProps) {
         const g = groups[repoName];
         if (t.state === "purged" || t.state === "failed") {
           g.purged.push(t);
-        } else if (t.state === "stopped") {
+        } else if (t.state === "stopped" || t.state === "crashed") {
           g.stopped.push(t);
         } else {
           g.active.push(t);
@@ -116,7 +116,7 @@ export default function TaskList(props: TaskListProps) {
       if (!t.repos?.[0]?.name) {
         if (t.state === "purged" || t.state === "failed") {
           other.purged.push(t);
-        } else if (t.state === "stopped") {
+        } else if (t.state === "stopped" || t.state === "crashed") {
           other.stopped.push(t);
         } else {
           other.active.push(t);

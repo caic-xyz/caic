@@ -148,6 +148,7 @@ const (
 	TaskStateStopping     TaskState = "stopping"
 	TaskStateStopped      TaskState = "stopped"
 	TaskStatePurging      TaskState = "purging"
+	TaskStateCrashed      TaskState = "crashed"
 	TaskStateFailed       TaskState = "failed"
 	TaskStatePurged       TaskState = "purged"
 )

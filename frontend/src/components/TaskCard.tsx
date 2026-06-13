@@ -76,6 +76,7 @@ const terminalStates = new Set([
   "stopped",
   "purging",
   "purged",
+  "crashed",
   "failed",
 ]);
 
@@ -181,8 +182,8 @@ export default function TaskCard(props: TaskCardProps) {
               <TokenIcon width="0.7rem" height="0.7rem" />
             </span>
           </Show>
-          {/* Stopped: revive + purge buttons */}
-          <Show when={props.state === "stopped"}>
+          {/* Stopped/crashed: revive + purge buttons */}
+          <Show when={props.state === "stopped" || props.state === "crashed"}>
             <Show when={props.onRevive}>
               <span class={styles.reviveBtn}>
                 <button
@@ -232,6 +233,7 @@ export default function TaskCard(props: TaskCardProps) {
           <Show
             when={
               props.state !== "stopped" &&
+              props.state !== "crashed" &&
               props.onStop &&
               !terminalStates.has(props.state)
             }

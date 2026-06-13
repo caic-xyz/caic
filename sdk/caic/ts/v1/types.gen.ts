@@ -433,6 +433,7 @@ export type TaskState =
   | "stopping"
   | "stopped"
   | "purging"
+  | "crashed"
   | "failed"
   | "purged";
 /**
@@ -451,6 +452,7 @@ export const TaskStatePushing: TaskState = "pushing";
 export const TaskStateStopping: TaskState = "stopping";
 export const TaskStateStopped: TaskState = "stopped";
 export const TaskStatePurging: TaskState = "purging";
+export const TaskStateCrashed: TaskState = "crashed";
 export const TaskStateFailed: TaskState = "failed";
 export const TaskStatePurged: TaskState = "purged";
 

@@ -574,7 +574,7 @@ func TestRunner(t *testing.T) {
 
 	t.Run("StopTask", func(t *testing.T) {
 		t.Parallel()
-		for _, state := range []State{StatePurging, StatePurged, StateFailed} {
+		for _, state := range []State{StatePurging, StatePurged, StateCrashed, StateFailed} {
 			t.Run(state.String(), func(t *testing.T) {
 				t.Parallel()
 				stub := &stubContainer{}

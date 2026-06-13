@@ -51,7 +51,8 @@ const (
 	StateStopping           // Graceful stop in progress (instance being stopped, preserved for revival).
 	StateStopped            // Runtime stopped but not deleted; can be revived.
 	StatePurging            // User requested purge; cleanup in progress.
-	StateFailed             // Failed at some stage.
+	StateCrashed            // Agent session crashed; runtime is stopped and can be revived.
+	StateFailed             // Failed at some stage and cannot be recovered automatically.
 	StatePurged             // Runtime deleted, task is final.
 )
 
@@ -83,6 +84,8 @@ func (s State) String() string {
 		return "stopped"
 	case StatePurging:
 		return "purging"
+	case StateCrashed:
+		return "crashed"
 	case StateFailed:
 		return "failed"
 	case StatePurged:
@@ -1024,9 +1027,9 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 	// agent finished its turn and is waiting for user input (or asking a
 	// question). Skip trailing DiffStatMessages — the relay emits periodic
 	// diff stats that can appear after the ResultMessage.
-	// Only override non-terminal states — purged/failed tasks loaded from
-	// logs must keep their recorded state.
-	if len(msgs) > 0 && t.state != StatePurged && t.state != StateFailed && t.state != StatePurging {
+	// Only override non-terminal states — purged/crashed/failed tasks loaded
+	// from logs must keep their recorded state.
+	if len(msgs) > 0 && t.state != StatePurged && t.state != StateCrashed && t.state != StateFailed && t.state != StatePurging {
 		if lastAgentMessage(msgs) != nil {
 			switch {
 			case lastTurnHasAsk(msgs):
@@ -1348,11 +1351,31 @@ func (t *Task) GenerateTitle(ctx context.Context) {
 	t.SetTitle(title)
 }
 
-// RecordSessionFailure marks an active startup/run session as failed and emits
-// a user-visible error result. It returns false if the task is no longer in a
-// state owned by the active agent session.
+// RecordSessionCrash marks an agent session as crashed and emits a
+// user-visible error result. It returns false if the task is no longer in a
+// state owned by a recoverable agent session.
+func (t *Task) RecordSessionCrash(ctx context.Context, err error) bool {
+	if _, changed := t.SetStateIfAny(StateCrashed, StateRunning, StateWaiting, StateAsking, StateHasPlan); !changed {
+		return false
+	}
+	msg := "Agent session crashed: " + err.Error()
+	if exitErr := t.LastExitError(); exitErr != "" {
+		msg = "Agent session crashed: " + exitErr
+	}
+	t.addMessage(ctx, &agent.ResultMessage{
+		MessageType: "result",
+		Subtype:     "error",
+		IsError:     true,
+		Result:      msg,
+	}, true)
+	return true
+}
+
+// RecordSessionFailure marks an active startup session as failed and emits a
+// user-visible error result. It returns false if the task is no longer in a
+// startup state.
 func (t *Task) RecordSessionFailure(ctx context.Context, err error) bool {
-	if _, changed := t.SetStateIfAny(StateFailed, StateStarting, StateRunning); !changed {
+	if _, changed := t.SetStateIfAny(StateFailed, StateStarting); !changed {
 		return false
 	}
 	msg := "Agent session failed: " + err.Error()

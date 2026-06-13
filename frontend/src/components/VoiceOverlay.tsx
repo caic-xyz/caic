@@ -52,7 +52,7 @@ export default function VoiceOverlay(props: Props) {
       const tasks = untrack(() => props.tasks());
       const prePurged = new Set(
         tasks
-          .filter((t) => t.state === "purged" || t.state === "failed" || t.state === "stopped" || t.state === "stopping")
+          .filter((t) => t.state === "purged" || t.state === "failed" || t.state === "crashed" || t.state === "stopped" || t.state === "stopping")
           .map((t) => t.id),
       );
       setPreTerminatedIds(prePurged);
@@ -417,7 +417,9 @@ function buildNotification(task: Task, session: VoiceSession): string | null {
     case "purged":
       return task.result ? `[Task #${num} (${shortName}) — completed: ${task.result}]` : null;
     case "stopped":
-      return `[Task #${num} (${shortName}) — stopped: container died]`;
+      return `[Task #${num} (${shortName}) — stopped]`;
+    case "crashed":
+      return `[Task #${num} (${shortName}) — crashed: ${task.error ?? "unknown"}]`;
     case "failed":
       return `[Task #${num} (${shortName}) — failed: ${task.error ?? "unknown"}]`;
     case "pending":

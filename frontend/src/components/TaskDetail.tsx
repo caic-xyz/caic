@@ -406,7 +406,7 @@ export default function TaskDetail(props: Props) {
         es?.close();
         es = null;
         const st = props.taskState;
-        if (live && (st === "purged" || st === "failed")) {
+        if (live && (st === "purged" || st === "crashed" || st === "failed")) {
           return;
         }
         // Cancel any pending timer before scheduling a new one. Without this,
@@ -472,6 +472,8 @@ export default function TaskDetail(props: Props) {
   };
 
   const isWaiting = () => props.taskState === "waiting" || props.taskState === "asking" || props.taskState === "has_plan";
+  const isRecoverable = () => props.taskState === "stopped" || props.taskState === "crashed";
+  const canSendInput = () => isActive() && props.taskState !== "purging";
   const prURL = () => {
     const owner = props.forgeOwner;
     const repo = props.forgeRepo;
@@ -630,7 +632,7 @@ export default function TaskDetail(props: Props) {
         <Show when={(props.diffStat?.length ?? 0) > 0}>
           <A class={styles.diffLink} href={`${location.pathname}/diff`}>Diff</A>
         </Show>
-        <Show when={props.taskState !== "pending" && props.taskState !== "branching" && props.taskState !== "provisioning" && props.taskState !== "starting" && props.taskState !== "purged" && props.taskState !== "failed"}>
+        <Show when={props.taskState !== "pending" && props.taskState !== "branching" && props.taskState !== "provisioning" && props.taskState !== "starting" && props.taskState !== "stopped" && props.taskState !== "crashed" && props.taskState !== "purged" && props.taskState !== "failed"}>
           <A class={styles.diffLink} href={`${location.pathname}/processes`}>Processes</A>
         </Show>
         <Show when={(props.vncPort ?? 0) > 0}>
@@ -742,20 +744,21 @@ export default function TaskDetail(props: Props) {
 
       <ProgressPanel messages={messages()} />
 
-      <Show when={isActive() || !!pendingAction()}>
-        <form onSubmit={(e) => { e.preventDefault(); sendInput(); }} class={styles.inputForm} data-testid="task-detail-form">
+      <Show when={isActive() || isRecoverable() || !!pendingAction()}>
+        <form onSubmit={(e) => { e.preventDefault(); if (canSendInput()) sendInput(); }} class={styles.inputForm} data-testid="task-detail-form">
           <PromptInput
             ref={(el) => { promptRef = el; }}
             value={props.inputDraft}
             onInput={props.onInputDraft}
             onSubmit={sendInput}
-            placeholder="Send message to agent..."
+            placeholder={isRecoverable() ? "Revive or fork to continue..." : "Send message to agent..."}
+            disabled={!canSendInput()}
             class={styles.textInput}
             tabIndex={0}
             supportsImages={props.supportsImages}
             images={props.inputImages}
             onImagesChange={props.onInputImages}
-            sendButton={<Button type="submit" disabled={sending() || (!props.inputDraft.trim() && props.inputImages.length === 0)} title="Send" data-testid="send-input"><SendIcon width="1.1em" height="1.1em" /></Button>}
+            sendButton={<Button type="submit" disabled={!canSendInput() || sending() || (!props.inputDraft.trim() && props.inputImages.length === 0)} title="Send" data-testid="send-input"><SendIcon width="1.1em" height="1.1em" /></Button>}
           />
           <Dropdown
             open={contextMenuOpen()}
@@ -780,13 +783,13 @@ export default function TaskDetail(props: Props) {
                     Stop
                   </button>
                 </Show>
-                <Show when={props.taskState === "stopped"}>
+                <Show when={isRecoverable()}>
                   <button type="button" class={styles.syncDropdownItem} onClick={() => { setContextMenuOpen(false); props.onRevive(props.taskId); }}>
                     <RestartIcon width="1em" height="1em" />
                     Revive
                   </button>
                 </Show>
-                <Show when={isActive() || props.taskState === "stopped"}>
+                <Show when={isActive() || isRecoverable()}>
                   <button type="button" class={`${styles.syncDropdownItem} ${styles.syncDropdownItemDanger}`} onClick={() => { setContextMenuOpen(false); if (confirmTaskAction("Purge", props.title ?? "", props.branch)) props.onPurge(props.taskId); }}>
                     <DeleteIcon width="1em" height="1em" />
                     Purge

@@ -1032,6 +1032,8 @@ func parseState(s string) State {
 	switch s {
 	case "failed":
 		return StateFailed
+	case "crashed":
+		return StateCrashed
 	case "stopped":
 		return StateStopped
 	case "purged", "terminated": // "terminated" is for backward compat with pre-rename logs; remove once old logs age out

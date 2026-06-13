@@ -808,7 +808,7 @@ func TestTask(t *testing.T) {
 			// TextMessages should NOT transition terminal or
 			// setup states (except StateStarting, which is
 			// tested separately above).
-			for _, state := range []State{StatePending, StateBranching, StateProvisioning, StatePurging, StateFailed, StatePurged} {
+			for _, state := range []State{StatePending, StateBranching, StateProvisioning, StatePurging, StateCrashed, StateFailed, StatePurged} {
 				tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 				tk.SetState(state)
 				tk.addMessage(t.Context(), &agent.TextMessage{Text: "output"}, false)
@@ -1511,7 +1511,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("TerminalStatePreserved", func(t *testing.T) {
 			t.Parallel()
-			for _, state := range []State{StatePurged, StateFailed, StatePurging} {
+			for _, state := range []State{StatePurged, StateCrashed, StateFailed, StatePurging} {
 				tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 				tk.SetState(state)
 				msgs := []agent.Message{
@@ -2234,6 +2234,7 @@ func TestState(t *testing.T) {
 			{StatePulling, "pulling"},
 			{StatePushing, "pushing"},
 			{StatePurging, "purging"},
+			{StateCrashed, "crashed"},
 			{StateFailed, "failed"},
 			{StateStopping, "stopping"},
 			{StateStopped, "stopped"},
