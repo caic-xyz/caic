@@ -1,98 +1,68 @@
 # Future Enhancements for Agent Communication
 
-This document describes the cross-provider architecture for enhancing caic's
-agent capabilities. Each harness has its own `docs/MORE.md` with
-provider-specific opportunities:
+This document tracks cross-provider agent capabilities that caic does not yet
+expose, and the wire mechanisms each backend offers to implement them. It is a
+roadmap, not a description of current behaviour.
 
-- [`opencode/docs/MORE.md`](../opencode/docs/MORE.md) — OpenCode ACP enhancements
+## Capability Pattern (established)
 
-## Cross-Provider Architecture
+Capabilities are added without breaking the `WireFormat` interface (`WritePrompt`
++ `ParseMessage`). Two pieces work together, using **compact** as the worked
+example:
 
-The key design principle: **capabilities should be interfaces, not
-assumptions**. Each enhancement is gated behind an optional interface
-that backends can implement.
+1. An **optional interface** on `WireFormat` carries the wire write:
+   ```go
+   // agent/agent.go
+   type CompactCommand interface {
+       WriteCompact(w io.Writer, instructions string, logW io.Writer) error
+   }
+   ```
+   A backend opts in by implementing it; backends that don't are unaffected.
 
-### Extending WireFormat
+2. The **`Backend` advertises** the capability to clients with a plain bool
+   method (`SupportsCompact() bool`, backed by `Base.Compact`). The frontend
+   reads it from harness metadata and conditionally renders the control.
 
-The current `WireFormat` interface has two methods: `WritePrompt` and
-`ParseMessage`. Rather than adding methods to `WireFormat` (which would
-break all backends), use optional interfaces:
+New capabilities should follow the same shape: an optional `Write*` interface
+plus a `Supports*` bool the UI can gate on.
 
-```go
-// In agent/agent.go:
+## Provider Mapping
 
-type CompactCommand interface {
-    WriteCompact(w io.Writer, instructions string, logW io.Writer) error
-}
+Wire mechanism per provider. `✅` = implemented in caic. `?` = needs
+investigation. `N/A` = not supported by provider.
 
-type ModelSwitcher interface {
-    WriteSetModel(w io.Writer, model string, logW io.Writer) error
-}
+| Feature            | Claude Code              | Codex                       | OpenCode                     | Kilo | Pi  |
+|--------------------|--------------------------|-----------------------------|------------------------------|------|-----|
+| Compact            | ✅ `/compact` msg        | ✅ `thread/compact/start`   | ✅ `/compact` prompt         | N/A  | ✅  |
+| Context usage      | ✅ per-turn usage        | ✅ `tokenUsage/updated`     | ✅ `usage_update`            | ✅   | ✅  |
+| Interrupt          | `ControlInterrupt`       | `turn/interrupt`            | `session/cancel`             | ?    | ?   |
+| Model switch       | `ControlSetModel`        | `turn/start` model param    | `session/set_model`          | ?    | ?   |
+| Steer              | N/A                      | `turn/steer`                | N/A                          | ?    | ?   |
+| Session fork       | N/A                      | `thread/fork`               | `unstable_forkSession`       | N/A  | ?   |
+| Session resume     | `--resume`               | N/A                         | `unstable_resumeSession`     | N/A  | ?   |
+| Mode switch        | N/A                      | N/A                         | `session/set_mode`           | N/A  | ?   |
+| Code review        | N/A                      | `review/start`              | N/A                          | N/A  | ?   |
+| Rollback           | N/A                      | `thread/rollback`           | N/A                          | N/A  | ?   |
 
-type Interruptable interface {
-    WriteInterrupt(w io.Writer, logW io.Writer) error
-}
+Context usage is surfaced today via per-turn token counts plus the model's
+context-window limit (`ContextWindowLimit`), not the provider-specific
+"get context usage" requests; that was sufficient for the UI fill indicator.
 
-type Steerable interface {
-    WriteSteer(w io.Writer, p Prompt, logW io.Writer) error
-}
+## Open Tasks
 
-type ApprovalHandler interface {
-    WriteApproval(w io.Writer, requestID string, approved bool, logW io.Writer) error
-}
-```
+Ordered by effort-to-value:
 
-### Server-Side Capability Discovery
+1. **Interrupt/cancel** — medium effort, high value. Today `Stop` (`SendStop`)
+   kills the whole session; there is no way to abort a single runaway turn and
+   keep the conversation. Add a `WriteInterrupt` optional interface + a
+   `Supports*` bool + a distinct UI button. Each provider has a mechanism (see
+   table).
+2. **Model switching** — low-medium effort, niche. Switch model mid-session
+   instead of starting a new task. Useful for cost escalation (start cheap,
+   escalate). Marginal while "new task" is an acceptable workaround.
+3. **Turn steering** (Codex `turn/steer`) — medium effort, Codex-specific but
+   novel UX: inject guidance mid-turn without interrupting.
+4. **Session fork / resume / list** — Codex and OpenCode only; low priority.
 
-The server checks which capabilities a backend supports:
-
-```go
-func hasCapability[T any](wire WireFormat) bool {
-    _, ok := wire.(T)
-    return ok
-}
-```
-
-The frontend queries available capabilities via the existing harness metadata
-endpoint and conditionally renders UI controls.
-
-### Provider Mapping
-
-| Feature            | Claude Code              | Codex                       | OpenCode                     | Kilo |
-|--------------------|--------------------------|-----------------------------|------------------------------|------|
-| Interrupt          | `ControlInterrupt`       | `turn/interrupt`            | `session/cancel`             | ?    |
-| Steer              | N/A                      | `turn/steer`                | N/A                          | ?    |
-| Compact            | `/compact` msg           | `thread/compact/start`      | `/compact` prompt            | ?    |
-| Context usage      | `ControlGetContextUsage` | `tokenUsage/updated` notif  | `usage_update` notif         | ?    |
-| Model switch       | `ControlSetModel`        | `turn/start` model param    | `session/set_model`          | ?    |
-| Mode switch        | N/A                      | N/A                         | `session/set_mode`           | ?    |
-| Approval flow      | `control_request`        | approval request notif      | `session/request_permission` | ?    |
-| Session fork       | N/A                      | `thread/fork`               | `unstable_forkSession`       | N/A  |
-| Session resume     | N/A                      | N/A                         | `unstable_resumeSession`     | N/A  |
-| Session list       | N/A                      | N/A                         | `unstable_listSessions`      | N/A  |
-| Available commands | N/A                      | N/A                         | `available_commands_update`  | N/A  |
-| Code review        | N/A                      | `review/start`              | N/A                          | N/A  |
-| Rollback           | N/A                      | `thread/rollback`           | N/A                          | N/A  |
-| Image generation   | N/A                      | `imageGeneration` item      | N/A                          | N/A  |
-| Cost               | `/cost` msg              | N/A                         | N/A                          | N/A  |
-| Keep-alive         | `InputKeepAlive`         | N/A                         | N/A                          | N/A  |
-| Env vars           | `InputUpdateEnvVars`     | N/A                         | N/A                          | N/A  |
-
-`?` = needs investigation. `N/A` = not supported by provider.
-
-### Implementation Priority
-
-Ordered by effort-to-value ratio across all providers:
-
-1. **Context usage display** — low effort, high value. Most providers
-   already emit usage data; just surface it more prominently in the UI.
-2. **Interrupt/cancel** — medium effort, high value. Each provider has a
-   mechanism; needs `WriteInterrupt` + UI button.
-3. **Compact** — low effort. All three providers support it via different
-   mechanisms.
-4. **Model switching** — low-medium effort. All three providers support it.
-5. **Approval flow** — high effort, high value. Requires bidirectional
-   response handling and interactive UI cards. All three providers support it.
-6. **Turn steering** — medium effort, Codex-specific but novel UX.
-7. **Session fork** — medium effort. Codex and OpenCode support it.
-8. **Mode switching** — low effort, OpenCode-specific.
+See [`opencode/docs/MORE.md`](../opencode/docs/MORE.md) for OpenCode-specific
+protocol notes.
