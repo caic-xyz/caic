@@ -1,17 +1,42 @@
-// Tests for ExportDiscussion JSONL-to-markdown conversion.
+// Tests for ExportDiscussion task-log-to-markdown conversion.
 
 package agent
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
+	"iter"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
+
 	"github.com/caic-xyz/caic/backend/internal/harness"
 )
+
+type errorReader struct{}
+
+func (errorReader) Read([]byte) (int, error) {
+	return 0, errors.New("read failed")
+}
+
+type testZstdReadCloser struct {
+	dec  *zstd.Decoder
+	file *os.File
+}
+
+func (r *testZstdReadCloser) Read(p []byte) (int, error) {
+	return r.dec.Read(p)
+}
+
+func (r *testZstdReadCloser) Close() error {
+	r.dec.Close()
+	return r.file.Close()
+}
 
 // exportParseFn is a minimal parser for export tests. It recognises the
 // message types that ExportDiscussion renders and ignores the rest.
@@ -98,6 +123,70 @@ func writeJSONL(t *testing.T, lines []string) string {
 	return path
 }
 
+func seqOf(lines ...string) iter.Seq[[]byte] {
+	return func(yield func([]byte) bool) {
+		for _, line := range lines {
+			if !yield([]byte(line)) {
+				return
+			}
+		}
+	}
+}
+
+func writeCompressedJSONL(t *testing.T, lines iter.Seq[[]byte]) string {
+	compressed := filepath.Join(t.TempDir(), "test.jsonl.zst")
+	out, err := os.OpenFile(filepath.Clean(compressed), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc, err := zstd.NewWriter(out)
+	if err != nil {
+		_ = out.Close()
+		t.Fatal(err)
+	}
+	var writeErr error
+	for line := range lines {
+		if _, err := enc.Write(line); err != nil {
+			writeErr = err
+			break
+		}
+		if _, err := enc.Write([]byte("\n")); err != nil {
+			writeErr = err
+			break
+		}
+	}
+	if err := errors.Join(writeErr, enc.Close(), out.Close()); err != nil {
+		t.Fatal(err)
+	}
+	return compressed
+}
+
+func openTestLogReader(t *testing.T, path string) io.ReadCloser {
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(path, ".zst") {
+		return f
+	}
+	d, err := zstd.NewReader(f)
+	if err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	return &testZstdReadCloser{dec: d, file: f}
+}
+
+func exportDiscussionPath(t *testing.T, path string) (string, error) {
+	r := openTestLogReader(t, path)
+	t.Cleanup(func() {
+		if err := r.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	return ExportDiscussion(r, path, exportParseFn)
+}
+
 // metaLine returns a caic_meta JSON line with the given prompt and harness.
 func metaLine(prompt, harnessName string) string {
 	return `{"type":"caic_meta","version":1,"prompt":` + jsonStr(prompt) + `,"harness":` + jsonStr(harnessName) + `,"repos":[],"started_at":"2025-01-15T10:00:00Z"}`
@@ -133,7 +222,7 @@ func TestExportDiscussion(t *testing.T) {
 				`{"type":"caic_result","state":"completed","cost_usd":0.05,"duration":120,"num_turns":3}`,
 			})
 
-			md, err := ExportDiscussion(path, exportParseFn)
+			md, err := exportDiscussionPath(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -164,7 +253,7 @@ func TestExportDiscussion(t *testing.T) {
 				metaLine("hello", "claude"),
 			})
 
-			md, err := ExportDiscussion(path, exportParseFn)
+			md, err := exportDiscussionPath(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -172,6 +261,23 @@ func TestExportDiscussion(t *testing.T) {
 			assertContains(t, md, "**Harness**: claude")
 			assertContains(t, md, "# Task Discussion")
 			assertContains(t, md, "---")
+		})
+
+		t.Run("compressed_log", func(t *testing.T) {
+			t.Parallel()
+			path := writeCompressedJSONL(t, seqOf(
+				metaLine("compress me", "pi"),
+				`{"type":"user_input","text":"hello"}`,
+				`{"type":"text","text":"done"}`,
+				`{"type":"caic_result","state":"completed"}`,
+			))
+
+			md, err := exportDiscussionPath(t, path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertContains(t, md, "**Prompt**: compress me")
+			assertContains(t, md, "## Assistant\n\ndone")
 		})
 
 		t.Run("with_PR_info", func(t *testing.T) {
@@ -182,7 +288,7 @@ func TestExportDiscussion(t *testing.T) {
 				`{"type":"caic_pr","forge_owner":"octo","forge_repo":"app","forge_pr":42}`,
 			})
 
-			md, err := ExportDiscussion(path, exportParseFn)
+			md, err := exportDiscussionPath(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -194,7 +300,7 @@ func TestExportDiscussion(t *testing.T) {
 			line := `{"type":"caic_meta","version":1,"prompt":"test","harness":"pi","repos":[],"started_at":"2025-01-15T10:00:00Z","tailscale":true,"display":true}`
 			path := writeJSONL(t, []string{line})
 
-			md, err := ExportDiscussion(path, exportParseFn)
+			md, err := exportDiscussionPath(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -206,7 +312,7 @@ func TestExportDiscussion(t *testing.T) {
 			line := `{"type":"caic_meta","version":1,"prompt":"test","harness":"pi","repos":[{"name":"app","base_branch":"main","branch":"fix-bug"}],"started_at":"2025-01-15T10:00:00Z"}`
 			path := writeJSONL(t, []string{line})
 
-			md, err := ExportDiscussion(path, exportParseFn)
+			md, err := exportDiscussionPath(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -221,7 +327,7 @@ func TestExportDiscussion(t *testing.T) {
 				`{"type":"caic_result","state":"failed","error":"container died","cost_usd":0.01,"duration":10}`,
 			})
 
-			md, err := ExportDiscussion(path, exportParseFn)
+			md, err := exportDiscussionPath(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -236,7 +342,7 @@ func TestExportDiscussion(t *testing.T) {
 				`{"type":"tool_result","tool_use_id":"t1","error":"command not found"}`,
 			})
 
-			md, err := ExportDiscussion(path, exportParseFn)
+			md, err := exportDiscussionPath(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -251,7 +357,7 @@ func TestExportDiscussion(t *testing.T) {
 				`{"type":"subagent_end","task_id":"sub1","status":"completed"}`,
 			})
 
-			md, err := ExportDiscussion(path, exportParseFn)
+			md, err := exportDiscussionPath(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -266,7 +372,7 @@ func TestExportDiscussion(t *testing.T) {
 				`{"type":"system","subtype":"compact_boundary"}`,
 			})
 
-			md, err := ExportDiscussion(path, exportParseFn)
+			md, err := exportDiscussionPath(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -283,7 +389,7 @@ func TestExportDiscussion(t *testing.T) {
 				`{"type":"text","text":"visible"}`,
 			})
 
-			md, err := ExportDiscussion(path, exportParseFn)
+			md, err := exportDiscussionPath(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -301,7 +407,7 @@ func TestExportDiscussion(t *testing.T) {
 				`{"type":"thinking","text":` + jsonStr(long) + `}`,
 			})
 
-			md, err := ExportDiscussion(path, exportParseFn)
+			md, err := exportDiscussionPath(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -317,7 +423,7 @@ func TestExportDiscussion(t *testing.T) {
 				`{"type":"caic_result","state":"completed","duration":7200}`,
 			})
 
-			md, err := ExportDiscussion(path, exportParseFn)
+			md, err := exportDiscussionPath(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -331,7 +437,7 @@ func TestExportDiscussion(t *testing.T) {
 				`{"type":"caic_result","state":"completed","duration":45}`,
 			})
 
-			md, err := ExportDiscussion(path, exportParseFn)
+			md, err := exportDiscussionPath(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -348,7 +454,7 @@ func TestExportDiscussion(t *testing.T) {
 				`{"type":"text","text":"After"}`,
 			})
 
-			md, err := ExportDiscussion(path, exportParseFn)
+			md, err := exportDiscussionPath(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -368,7 +474,7 @@ func TestExportDiscussion(t *testing.T) {
 				`{"type":"text","text":"done"}`,
 			})
 
-			md, err := ExportDiscussion(path, exportParseFn)
+			md, err := exportDiscussionPath(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -382,7 +488,7 @@ func TestExportDiscussion(t *testing.T) {
 				`{"type":"tool_use","id":"t1","name":"Write","input":{"path":"out.txt","content":"hello world"}}`,
 			})
 
-			md, err := ExportDiscussion(path, exportParseFn)
+			md, err := exportDiscussionPath(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -397,7 +503,7 @@ func TestExportDiscussion(t *testing.T) {
 				`{"type":"tool_use","id":"t1","name":"Read","input":{"path":"main.go"}}`,
 			})
 
-			md, err := ExportDiscussion(path, exportParseFn)
+			md, err := exportDiscussionPath(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -411,7 +517,7 @@ func TestExportDiscussion(t *testing.T) {
 				`{"type":"tool_use","id":"t1","name":"Grep","input":{"pattern":"TODO","path":"."}}`,
 			})
 
-			md, err := ExportDiscussion(path, exportParseFn)
+			md, err := exportDiscussionPath(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -436,14 +542,14 @@ func TestExportDiscussion(t *testing.T) {
 	t.Run("error", func(t *testing.T) {
 		t.Parallel()
 
-		t.Run("file_not_found", func(t *testing.T) {
+		t.Run("reader_error", func(t *testing.T) {
 			t.Parallel()
-			_, err := ExportDiscussion("/nonexistent/file.jsonl", exportParseFn)
+			_, err := ExportDiscussion(errorReader{}, "broken.jsonl", exportParseFn)
 			if err == nil {
-				t.Fatal("expected error for missing file")
+				t.Fatal("expected error for reader failure")
 			}
-			if !strings.Contains(err.Error(), "open") {
-				t.Errorf("error = %q, want it to mention 'open'", err.Error())
+			if !strings.Contains(err.Error(), "scan broken.jsonl") {
+				t.Errorf("error = %q, want it to mention 'scan broken.jsonl'", err.Error())
 			}
 		})
 
@@ -452,7 +558,7 @@ func TestExportDiscussion(t *testing.T) {
 			path := writeJSONL(t, []string{
 				`{"type":"text","text":"orphan message"}`,
 			})
-			_, err := ExportDiscussion(path, exportParseFn)
+			_, err := exportDiscussionPath(t, path)
 			if err == nil {
 				t.Fatal("expected error for missing caic_meta")
 			}
@@ -467,7 +573,7 @@ func TestExportDiscussion(t *testing.T) {
 			if err := os.WriteFile(path, []byte(""), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			_, err := ExportDiscussion(path, exportParseFn)
+			_, err := exportDiscussionPath(t, path)
 			if err == nil {
 				t.Fatal("expected error for empty file")
 			}
@@ -481,7 +587,7 @@ func TestExportDiscussion(t *testing.T) {
 				`{"type":"text","text":"visible"}`,
 			})
 
-			md, err := ExportDiscussion(path, exportParseFn)
+			md, err := exportDiscussionPath(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}

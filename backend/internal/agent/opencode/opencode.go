@@ -73,11 +73,6 @@ func (b *Backend) RecordHandshake(ctx context.Context, stdin io.Writer, stdout i
 	return hs.wire, br, nil
 }
 
-// ExportDiscussion reads a JSONL log and returns the conversation as markdown.
-func (b *Backend) ExportDiscussion(path string) (string, error) {
-	return agent.ExportDiscussion(path, b.NewWire().ParseMessage)
-}
-
 // Models returns the current model list, updated dynamically after each handshake.
 func (b *Backend) Models() []string {
 	b.mu.Lock()

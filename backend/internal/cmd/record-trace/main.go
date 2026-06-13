@@ -319,11 +319,11 @@ func writeGoldenFile(ctx context.Context, ctr, workDir string, b agent.Backend, 
 
 	// Generate the golden markdown file.
 	mdPath := strings.TrimSuffix(outputPath, ".jsonl") + ".md"
-	md, err := agent.ExportDiscussion(outputPath, b.NewWire().ParseMessage)
+	md, err := agent.ExportDiscussion(strings.NewReader(sanitized), outputPath, b.NewWire().ParseMessage)
 	if err != nil {
 		return fmt.Errorf("export discussion: %w", err)
 	}
-	if err := os.WriteFile(filepath.Clean(mdPath), []byte(md), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Clean(mdPath), []byte(md), 0o600); err != nil { //nolint:gosec // output path is from flag
 		return fmt.Errorf("write golden md: %w", err)
 	}
 	slog.Info("Golden markdown saved", "path", mdPath)

@@ -1,5 +1,4 @@
-// Reads a harness-specific JSONL log and renders the conversation as markdown.
-// Used by Backend.ExportDiscussion to provide a harness-agnostic export.
+// Renders an already-open harness-specific task log as markdown.
 
 package agent
 
@@ -7,8 +6,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
+	"io"
 	"strings"
 )
 
@@ -17,22 +15,12 @@ type exportLine struct {
 	Type string `json:"type"`
 }
 
-// ExportDiscussion reads a JSONL log file using the given harness parser and
+// ExportDiscussion reads an open task log using the given harness parser and
 // returns a self-contained markdown document. The parser should be a fresh
 // instance from Backend.NewParser() so stateful wire formats can synthesize
 // terminal messages.
-func ExportDiscussion(path string, parseFn func([]byte) ([]Message, error)) (string, error) {
-	f, err := os.Open(filepath.Clean(path))
-	if err != nil {
-		return "", fmt.Errorf("open %s: %w", path, err)
-	}
-	defer func() {
-		if cerr := f.Close(); cerr != nil && err == nil {
-			err = cerr
-		}
-	}()
-
-	scanner := bufio.NewScanner(f)
+func ExportDiscussion(r io.Reader, src string, parseFn func([]byte) ([]Message, error)) (string, error) {
+	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
 
 	var (
@@ -87,10 +75,10 @@ func ExportDiscussion(path string, parseFn func([]byte) ([]Message, error)) (str
 	}
 
 	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("scan %s: %w", path, err)
+		return "", fmt.Errorf("scan %s: %w", src, err)
 	}
 	if !metaSet {
-		return "", fmt.Errorf("%s: no caic_meta header", path)
+		return "", fmt.Errorf("%s: no caic_meta header", src)
 	}
 
 	return renderDiscussion(&meta, result, pr, msgs), nil

@@ -50,7 +50,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -710,32 +709,6 @@ func yieldMessages(r io.Reader, parseFn func([]byte) ([]Message, error), skipFir
 		}
 		if err := scanner.Err(); err != nil {
 			yield(nil, err)
-		}
-	}
-}
-
-// StreamLogFile streams NDJSON messages from a local file, yielding each in
-// order. When offset > 0 the file is seeked there first and the partial first
-// line is skipped, so only the tail of a large log is replayed. Memory usage
-// is O(1) regardless of file size.
-func StreamLogFile(path string, parseFn func([]byte) ([]Message, error), offset int64) iter.Seq2[Message, error] {
-	return func(yield func(Message, error) bool) {
-		f, err := os.Open(filepath.Clean(path))
-		if err != nil {
-			yield(nil, fmt.Errorf("open %s: %w", path, err))
-			return
-		}
-		defer func() { _ = f.Close() }()
-		if offset > 0 {
-			if _, err := f.Seek(offset, io.SeekStart); err != nil {
-				yield(nil, fmt.Errorf("seek %s to %d: %w", path, offset, err))
-				return
-			}
-		}
-		for m, e := range yieldMessages(f, parseFn, offset > 0, path) {
-			if !yield(m, e) {
-				return
-			}
 		}
 	}
 }

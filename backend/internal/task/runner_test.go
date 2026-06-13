@@ -509,6 +509,14 @@ func TestRunner(t *testing.T) {
 			// Purge the stopped task — should reopen the log and write the trailer.
 			r.Cleanup(t.Context(), tk, StatePurged)
 
+			plainPath := filepath.Join(logDir, tk.ID.String()+"-org-repo-caic-0.jsonl")
+			if _, err := os.Stat(plainPath); !os.IsNotExist(err) {
+				t.Fatalf("plain log stat err = %v, want os.ErrNotExist", err)
+			}
+			if _, err := os.Stat(plainPath + ".zst"); err != nil {
+				t.Fatal(err)
+			}
+
 			// Load the log and verify the trailer was written.
 			lt, err := LoadLogs(logDir)
 			if err != nil {

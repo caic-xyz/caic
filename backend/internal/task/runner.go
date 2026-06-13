@@ -475,12 +475,22 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 			tlog.WarnContext(ctx, "reopen log for trailer failed", "err", reopenErr)
 		}
 	}
-	if err := writeLogTrailer(logW, t.Title(), &res); err != nil {
-		tlog.WarnContext(ctx, "write log trailer failed", "err", err)
+	trailerErr := writeLogTrailer(logW, t.Title(), &res)
+	if trailerErr != nil {
+		tlog.WarnContext(ctx, "write log trailer failed", "err", trailerErr)
 	}
 	if logW != nil {
-		_ = logW.Close()
-		tlog.DebugContext(ctx, "cleanup: log trailer written and closed")
+		closeErr := logW.Close()
+		if closeErr != nil {
+			tlog.WarnContext(ctx, "close log failed", "err", closeErr)
+		} else {
+			tlog.DebugContext(ctx, "cleanup: log trailer written and closed")
+		}
+		if trailerErr == nil && closeErr == nil {
+			if err := t.compressLogIfDone(reason); err != nil {
+				tlog.WarnContext(ctx, "compress task log failed", "err", err)
+			}
+		}
 	}
 	tlog.InfoContext(ctx, "cleanup done", "dur", time.Since(start).Round(time.Millisecond),
 		"cost", res.CostUSD, "turns", res.NumTurns, "reason", reason)

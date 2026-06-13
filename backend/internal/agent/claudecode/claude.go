@@ -50,11 +50,6 @@ func New() *Backend {
 	return b
 }
 
-// ExportDiscussion reads a JSONL log and returns the conversation as markdown.
-func (b *Backend) ExportDiscussion(path string) (string, error) {
-	return agent.ExportDiscussion(path, b.NewWire().ParseMessage)
-}
-
 // Wire is the wire format for Claude Code (stream-json over stdin/stdout).
 var Wire agent.WireFormat = New()
 

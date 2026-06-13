@@ -4,11 +4,15 @@ package task
 
 import (
 	"encoding/json"
+	"errors"
+	"iter"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
@@ -29,6 +33,45 @@ func writeLogFile(t *testing.T, dir, name string, lines ...string) {
 		data = append(data, '\n')
 	}
 	if err := os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func seqOf(lines ...string) iter.Seq[[]byte] {
+	return func(yield func([]byte) bool) {
+		for _, line := range lines {
+			if !yield([]byte(line)) {
+				return
+			}
+		}
+	}
+}
+
+func writeCompressedLogFile(t *testing.T, dir, name string, lines iter.Seq[[]byte]) {
+	if !isLogCompressed(name) {
+		t.Fatalf("compressed test log name %q must end in %s", name, logCompressedExt)
+	}
+	out, err := os.OpenFile(filepath.Clean(filepath.Join(dir, name)), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc, err := zstd.NewWriter(out)
+	if err != nil {
+		_ = out.Close()
+		t.Fatal(err)
+	}
+	var writeErr error
+	for line := range lines {
+		if _, err := enc.Write(line); err != nil {
+			writeErr = err
+			break
+		}
+		if _, err := enc.Write([]byte("\n")); err != nil {
+			writeErr = err
+			break
+		}
+	}
+	if err := errors.Join(writeErr, enc.Close(), out.Close()); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -90,6 +133,56 @@ func TestLoadLogs(t *testing.T) {
 		}
 		if tasks[0].State != StatePurged {
 			t.Errorf("State = %v, want %v", tasks[0].State, StatePurged)
+		}
+	})
+	t.Run("ValidCompressed", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "compressed", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude"})
+		asst := claudeAssistant(t, map[string]any{"type": "text", "text": "hello"})
+		prMsg := mustJSON(t, agent.MetaPRMessage{MessageType: "caic_pr", ForgeOwner: "octo", ForgeRepo: "repo", ForgePR: 7})
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		writeCompressedLogFile(t, dir, "a.jsonl.zst", seqOf(meta, asst, prMsg, trailer))
+
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(tasks) != 1 {
+			t.Fatalf("len = %d, want 1", len(tasks))
+		}
+		lt := tasks[0]
+		if lt.Prompt != "compressed" {
+			t.Errorf("Prompt = %q, want compressed", lt.Prompt)
+		}
+		if lt.State != StatePurged {
+			t.Errorf("State = %v, want StatePurged", lt.State)
+		}
+		if lt.ForgePR != 7 {
+			t.Errorf("ForgePR = %d, want 7", lt.ForgePR)
+		}
+		if !isLogCompressed(lt.LogPath()) {
+			t.Errorf("LogPath = %q, want compressed path", lt.LogPath())
+		}
+	})
+	t.Run("PreferCompressedDuplicate", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		plainMeta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "plain", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude"})
+		compressedMeta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "compressed", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude"})
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		writeCompressedLogFile(t, dir, "a.jsonl.zst", seqOf(compressedMeta, trailer))
+		writeLogFile(t, dir, "a.jsonl", plainMeta, trailer)
+
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(tasks) != 1 {
+			t.Fatalf("len = %d, want 1", len(tasks))
+		}
+		if tasks[0].Prompt != "compressed" {
+			t.Errorf("Prompt = %q, want compressed", tasks[0].Prompt)
 		}
 	})
 	t.Run("NotExist", func(t *testing.T) {
@@ -508,6 +601,39 @@ func TestLoadLogs(t *testing.T) {
 	})
 }
 
+func TestCompressTerminalLogs(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "task", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude"})
+	asst := claudeAssistant(t, map[string]any{"type": "text", "text": "hello"})
+	trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+	writeLogFile(t, dir, "t.jsonl", meta, asst, trailer)
+
+	tasks, err := LoadLogs(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := CompressTerminalLogs(tasks); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "t.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("plain log stat err = %v, want os.ErrNotExist", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "t.jsonl.zst")); err != nil {
+		t.Fatal(err)
+	}
+	if !isLogCompressed(tasks[0].LogPath()) {
+		t.Fatalf("LogPath = %q, want compressed path", tasks[0].LogPath())
+	}
+	setClaudeParser(tasks)
+	if err := tasks[0].LoadMessages(); err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks[0].Msgs) != 1 {
+		t.Errorf("Msgs len = %d, want 1", len(tasks[0].Msgs))
+	}
+}
+
 func TestTsToTime(t *testing.T) {
 	t.Parallel()
 	// 1735689600.5 = 2025-01-01T00:00:00.5Z (exact in float64).
@@ -563,6 +689,34 @@ func TestLoadedTask(t *testing.T) {
 		}
 	})
 
+	t.Run("StreamMessagesCompressed", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "stream task", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude"})
+		a1 := claudeAssistant(t, map[string]any{"type": "text", "text": "hello"})
+		a2 := claudeAssistant(t, map[string]any{"type": "text", "text": "world"})
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "waiting"})
+		writeCompressedLogFile(t, dir, "t.jsonl.zst", seqOf(meta, a1, a2, trailer))
+
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		setClaudeParser(tasks)
+		lt := tasks[0]
+
+		var streamed []agent.Message
+		for m, e := range lt.StreamMessages() {
+			if e != nil {
+				t.Fatal(e)
+			}
+			streamed = append(streamed, m)
+		}
+		if len(streamed) != 2 {
+			t.Fatalf("streamed %d messages, want 2", len(streamed))
+		}
+	})
+
 	t.Run("Primary", func(t *testing.T) {
 		t.Parallel()
 		t.Run("NoRepos", func(t *testing.T) {
@@ -606,6 +760,16 @@ func TestLoadedTask(t *testing.T) {
 			lt := &LoadedTask{path: "/does/not/exist.jsonl"}
 			if err := lt.LoadMessages(); err == nil {
 				t.Fatal("expected error when no parser is set")
+			}
+		})
+		t.Run("LoadLogFileNoParser", func(t *testing.T) {
+			t.Parallel()
+			_, err := loadLogFile("/does/not/exist.jsonl", nil)
+			if err == nil {
+				t.Fatal("expected error when parseFn is nil")
+			}
+			if !strings.Contains(err.Error(), "parseFn is nil") {
+				t.Errorf("error = %q, want parseFn nil error", err.Error())
 			}
 		})
 		t.Run("StreamNoParser", func(t *testing.T) {

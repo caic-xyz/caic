@@ -130,6 +130,11 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	go func() {
 		defer trace.StartRegion(ctx, "load-logs").End()
 		logs, err := task.LoadLogs(logDir)
+		if err == nil {
+			if compressErr := task.CompressTerminalLogs(logs); compressErr != nil {
+				slog.Warn("compress terminal task logs failed", "err", compressErr)
+			}
+		}
 		logCh <- logsResult{logs, err}
 	}()
 	go func() {

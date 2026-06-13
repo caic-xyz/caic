@@ -26,7 +26,16 @@ func RunExportDiscussionGolden(t *testing.T, parser func([]byte) ([]agent.Messag
 		base := strings.TrimSuffix(filepath.Base(f), ".jsonl")
 		t.Run(base, func(t *testing.T) {
 			t.Parallel()
-			got, err := agent.ExportDiscussion(f, parser)
+			logFile, err := os.Open(filepath.Clean(f))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := logFile.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			got, err := agent.ExportDiscussion(logFile, f, parser)
 			if err != nil {
 				t.Fatal(err)
 			}

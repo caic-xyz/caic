@@ -52,6 +52,15 @@ type tailResult struct {
 	Usage        agent.Usage `json:"usage"`
 }
 
+type logTailScan struct {
+	fw *jsonutil.FieldWarner
+
+	lastResultCostUSD  float64
+	lastResultDuration time.Duration
+	lastResultNumTurns int
+	lastResultUsage    agent.Usage
+}
+
 // TODO: Trim legacyCaicInit after 2026-08 once legacy caic_init logs are old enough to ignore.
 // legacyCaicInit is the OpenCode pre-caic_session session metadata record.
 type legacyCaicInit struct {
@@ -60,7 +69,7 @@ type legacyCaicInit struct {
 	Version   string `json:"version"`
 }
 
-// LoadedTask holds the data reconstructed from a single JSONL log file.
+// LoadedTask holds the data reconstructed from a single task log file.
 type LoadedTask struct {
 	TaskID            string // Task ID parsed from log filename; empty if unparseable.
 	Prompt            string
@@ -99,12 +108,12 @@ func (lt *LoadedTask) Primary() *RepoMount {
 	return &lt.Repos[0]
 }
 
-// LogPath returns the absolute JSONL log path used to load the task.
+// LogPath returns the absolute task log path used to load the task.
 func (lt *LoadedTask) LogPath() string {
 	return lt.path
 }
 
-// LoadLogs scans logDir for *.jsonl files and loads task metadata.
+// LoadLogs scans logDir for task log files and loads task metadata.
 // Only the header and result trailer are parsed; call LoadMessages for
 // full conversation history. Call SetParser on each task before LoadMessages.
 func LoadLogs(logDir string) ([]*LoadedTask, error) {
@@ -116,13 +125,24 @@ func LoadLogs(logDir string) ([]*LoadedTask, error) {
 		return nil, err
 	}
 
-	// Filter to .jsonl files.
-	var paths []string
+	// Filter to task log files. If both plain and compressed logs exist for
+	// the same base name, prefer the compressed file.
+	pathsByBase := make(map[string]string)
 	for _, e := range entries {
-		if !e.IsDir() && filepath.Ext(e.Name()) == ".jsonl" {
-			paths = append(paths, filepath.Join(logDir, e.Name()))
+		if e.IsDir() || !IsLogName(e.Name()) {
+			continue
+		}
+		base := trimLogExt(e.Name())
+		path := filepath.Join(logDir, e.Name())
+		if prev := pathsByBase[base]; prev == "" || isLogCompressed(path) {
+			pathsByBase[base] = path
 		}
 	}
+	paths := make([]string, 0, len(pathsByBase))
+	for _, p := range pathsByBase {
+		paths = append(paths, p)
+	}
+	slices.Sort(paths)
 
 	// Parse headers in parallel — each file is independent.
 	type result struct {
@@ -254,7 +274,7 @@ func (lt *LoadedTask) StreamMessages() iter.Seq2[agent.Message, error] {
 			yield(nil, fmt.Errorf("no parser set for harness %q; call SetParser first", lt.Harness))
 			return
 		}
-		for m, e := range agent.StreamLogFile(lt.path, lt.replayParser(), 0) {
+		for m, e := range streamLogFile(lt.path, lt.replayParser(), 0) {
 			if !yield(m, e) {
 				return
 			}
@@ -294,6 +314,70 @@ func (lt *LoadedTask) replayParser() func([]byte) ([]agent.Message, error) {
 			return nil, nil
 		default:
 			return lt.parseFn(line)
+		}
+	}
+}
+
+// streamLogFile streams parsed messages from a plain or compressed task log.
+func streamLogFile(path string, parseFn func([]byte) ([]agent.Message, error), offset int64) iter.Seq2[agent.Message, error] {
+	return func(yield func(agent.Message, error) bool) {
+		if offset > 0 && isLogCompressed(path) {
+			yield(nil, fmt.Errorf("seek compressed log %s to %d: unsupported", path, offset))
+			return
+		}
+		f, err := openLogReader(path)
+		if err != nil {
+			yield(nil, fmt.Errorf("open %s: %w", path, err))
+			return
+		}
+		defer func() { _ = f.Close() }()
+		if offset > 0 {
+			sf, ok := f.(io.Seeker)
+			if !ok {
+				yield(nil, fmt.Errorf("seek %s to %d: unsupported", path, offset))
+				return
+			}
+			if _, err := sf.Seek(offset, io.SeekStart); err != nil {
+				yield(nil, fmt.Errorf("seek %s to %d: %w", path, offset, err))
+				return
+			}
+		}
+		for m, e := range yieldLogMessages(f, parseFn, offset > 0, path) {
+			if !yield(m, e) {
+				return
+			}
+		}
+	}
+}
+
+// yieldLogMessages scans JSONL records and yields parsed conversation messages.
+func yieldLogMessages(r io.Reader, parseFn func([]byte) ([]agent.Message, error), skipFirst bool, src string) iter.Seq2[agent.Message, error] {
+	return func(yield func(agent.Message, error) bool) {
+		scanner := bufio.NewScanner(r)
+		scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
+		first := skipFirst
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if len(line) == 0 {
+				continue
+			}
+			if first {
+				first = false
+				continue
+			}
+			parsed, parseErr := parseFn(line)
+			if parseErr != nil {
+				slog.Warn("log", "msg", "skipping unparseable output line", "src", src, "err", parseErr)
+				continue
+			}
+			for _, m := range parsed {
+				if !yield(m, nil) {
+					return
+				}
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			yield(nil, err)
 		}
 	}
 }
@@ -368,8 +452,99 @@ func applySessionMetadataMessages(lt *LoadedTask, msgs []agent.Message) bool {
 	return false
 }
 
+// maybeLogTailRecord cheaply filters ordinary conversation lines before JSON decoding.
+func maybeLogTailRecord(line []byte) bool {
+	return bytes.Contains(line, []byte(`"caic_`)) ||
+		bytes.Contains(line, []byte(`"system"`)) ||
+		bytes.Contains(line, []byte(`"result"`))
+}
+
+func (s *logTailScan) apply(lt *LoadedTask, line []byte) {
+	if !maybeLogTailRecord(line) {
+		return
+	}
+	var typeEnv typeEnvelope
+	if json.Unmarshal(line, &typeEnv) != nil {
+		return
+	}
+	switch typeEnv.Type {
+	case "caic_session", "caic_init":
+		applySessionMetadataLine(lt, typeEnv.Type, line)
+	case "caic_pr":
+		var mp agent.MetaPRMessage
+		if json.Unmarshal(line, &mp) == nil && mp.ForgePR > 0 {
+			lt.ForgeOwner = mp.ForgeOwner
+			lt.ForgeRepo = mp.ForgeRepo
+			lt.ForgePR = mp.ForgePR
+		}
+	case "caic_diff_stat":
+		var ds agent.DiffStatMessage
+		if json.Unmarshal(line, &ds) == nil && ds.Ts > 0 {
+			if t := tsToTime(ds.Ts); t.After(lt.LastStateUpdateAt) {
+				lt.LastStateUpdateAt = t
+			}
+		}
+	case "caic_result":
+		var mr agent.MetaResultMessage
+		if err := json.Unmarshal(line, &mr); err == nil {
+			var raw map[string]json.RawMessage
+			if s.fw != nil && json.Unmarshal(line, &raw) == nil {
+				s.fw.Warn("caic_result", jsonutil.CollectUnknown(raw, resultKnown))
+			}
+			lt.State = parseState(mr.State)
+			if mr.Title != "" {
+				lt.Title = mr.Title
+			}
+			lt.Result = &Result{
+				State:    lt.State,
+				CostUSD:  mr.CostUSD,
+				Duration: time.Duration(mr.Duration * float64(time.Second)),
+				NumTurns: mr.NumTurns,
+				Usage: agent.Usage{
+					InputTokens:              mr.InputTokens,
+					OutputTokens:             mr.OutputTokens,
+					CacheCreationInputTokens: mr.CacheCreationInputTokens,
+					CacheReadInputTokens:     mr.CacheReadInputTokens,
+				},
+				DiffStat:    mr.DiffStat,
+				AgentResult: mr.AgentResult,
+			}
+			if mr.Error != "" {
+				lt.Result.Err = errors.New(mr.Error)
+			}
+		}
+	case "system":
+		var sm tailInit
+		if json.Unmarshal(line, &sm) == nil && sm.Subtype == "init" {
+			if sm.Model != "" {
+				lt.Model = sm.Model
+			}
+			if sm.Version != "" {
+				lt.AgentVersion = sm.Version
+			}
+		}
+	case "result":
+		var rm tailResult
+		if json.Unmarshal(line, &rm) == nil {
+			s.lastResultCostUSD = rm.TotalCostUSD
+			s.lastResultDuration = time.Duration(rm.DurationMs) * time.Millisecond
+			s.lastResultNumTurns = rm.NumTurns
+			s.lastResultUsage = rm.Usage
+		}
+	}
+}
+
+func (s *logTailScan) finish(lt *LoadedTask) {
+	if lt.Result != nil && lt.Result.CostUSD == 0 && s.lastResultCostUSD > 0 {
+		lt.Result.CostUSD = s.lastResultCostUSD
+		lt.Result.Duration = s.lastResultDuration
+		lt.Result.NumTurns = s.lastResultNumTurns
+		lt.Result.Usage = s.lastResultUsage
+	}
+}
+
 func loadLogSessionMetadata(path string, parseFn func([]byte) ([]agent.Message, error)) (_ *LoadedTask, retErr error) {
-	f, err := os.Open(filepath.Clean(path))
+	f, err := openLogReader(path)
 	if err != nil {
 		return nil, err
 	}
@@ -408,10 +583,13 @@ func loadLogSessionMetadata(path string, parseFn func([]byte) ([]agent.Message, 
 	return lt, scanner.Err()
 }
 
-// loadLogHeader reads only the metadata header (first line) and the result
-// trailer (last line) from a JSONL log file. It does NOT parse individual
-// messages — call LoadMessages for that. The path is stored for lazy loading.
+// loadLogHeader reads the metadata header and result trailer from a task log.
+// It does NOT parse individual messages — call LoadMessages for that. The path
+// is stored for lazy loading.
 func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
+	if isLogCompressed(path) {
+		return loadCompressedLogHeader(path)
+	}
 	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return nil, err
@@ -442,8 +620,8 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 		return nil, err
 	}
 
-	// Parse task ID from filename: "<taskID>-<safeRepo>-<safeBranch>.jsonl".
-	base := strings.TrimSuffix(filepath.Base(path), ".jsonl")
+	// Parse task ID from filename: "<taskID>-<safeRepo>-<safeBranch>.jsonl[.zst]".
+	base := trimLogExt(filepath.Base(path))
 	taskIDStr := base
 	if before, _, ok := strings.Cut(base, "-"); ok {
 		taskIDStr = before
@@ -483,112 +661,105 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 	buf := make([]byte, size-offset)
 	n, _ := f.ReadAt(buf, offset)
 	if n > 0 {
-		// Track the last ResultMessage stats from the tail for backfill
-		// when the trailer has zero cost (session exited without final ResultMessage).
-		var lastResultCostUSD float64
-		var lastResultDuration time.Duration
-		var lastResultNumTurns int
-		var lastResultUsage agent.Usage
+		scan := logTailScan{fw: fw}
 		for line := range bytes.SplitSeq(buf[:n], []byte("\n")) {
 			line = bytes.TrimSpace(line)
 			if len(line) == 0 {
 				continue
 			}
-			// Match caic-internal messages by type field, not substring,
-			// to avoid false positives from harness messages.
-			var typeEnv typeEnvelope
-			if json.Unmarshal(line, &typeEnv) == nil {
-				switch typeEnv.Type {
-				case "caic_session", "caic_init":
-					applySessionMetadataLine(lt, typeEnv.Type, line)
-				case "caic_pr":
-					var mp agent.MetaPRMessage
-					if json.Unmarshal(line, &mp) == nil && mp.ForgePR > 0 {
-						lt.ForgeOwner = mp.ForgeOwner
-						lt.ForgeRepo = mp.ForgeRepo
-						lt.ForgePR = mp.ForgePR
-					}
-				case "caic_diff_stat":
-					var ds agent.DiffStatMessage
-					if json.Unmarshal(line, &ds) == nil && ds.Ts > 0 {
-						if t := tsToTime(ds.Ts); t.After(lt.LastStateUpdateAt) {
-							lt.LastStateUpdateAt = t
-						}
-					}
-				case "caic_result":
-					var mr agent.MetaResultMessage
-					if err := json.Unmarshal(line, &mr); err == nil {
-						var raw map[string]json.RawMessage
-						if json.Unmarshal(line, &raw) == nil {
-							fw.Warn("caic_result", jsonutil.CollectUnknown(raw, resultKnown))
-						}
-						lt.State = parseState(mr.State)
-						if mr.Title != "" {
-							lt.Title = mr.Title
-						}
-						lt.Result = &Result{
-							State:    lt.State,
-							CostUSD:  mr.CostUSD,
-							Duration: time.Duration(mr.Duration * float64(time.Second)),
-							NumTurns: mr.NumTurns,
-							Usage: agent.Usage{
-								InputTokens:              mr.InputTokens,
-								OutputTokens:             mr.OutputTokens,
-								CacheCreationInputTokens: mr.CacheCreationInputTokens,
-								CacheReadInputTokens:     mr.CacheReadInputTokens,
-							},
-							DiffStat:    mr.DiffStat,
-							AgentResult: mr.AgentResult,
-						}
-						if mr.Error != "" {
-							lt.Result.Err = errors.New(mr.Error)
-						}
-					}
-				case "system":
-					// Extract model and version from system/init messages
-					// in the tail. For long logs the init may be outside
-					// the 64 KiB window — model/version will be empty.
-					var sm tailInit
-					if json.Unmarshal(line, &sm) == nil && sm.Subtype == "init" {
-						if sm.Model != "" {
-							lt.Model = sm.Model
-						}
-						// TODO: This is a claudecode hack.
-						if sm.Version != "" {
-							lt.AgentVersion = sm.Version
-						}
-					}
-				case "result":
-					// Track the last ResultMessage for backfill when
-					// the caic_result trailer has zero cost.
-					var rm tailResult
-					// TODO: This is a claudecode hack.
-					if json.Unmarshal(line, &rm) == nil {
-						lastResultCostUSD = rm.TotalCostUSD
-						lastResultDuration = time.Duration(rm.DurationMs) * time.Millisecond
-						lastResultNumTurns = rm.NumTurns
-						lastResultUsage = rm.Usage
-					}
-				}
-			}
+			scan.apply(lt, line)
 		}
-		// Backfill trailer result from last ResultMessage when the trailer
-		// has zero cost (session exited without a final ResultMessage).
-		if lt.Result != nil && lt.Result.CostUSD == 0 && lastResultCostUSD > 0 {
-			lt.Result.CostUSD = lastResultCostUSD
-			lt.Result.Duration = lastResultDuration
-			lt.Result.NumTurns = lastResultNumTurns
-			lt.Result.Usage = lastResultUsage
-		}
+		scan.finish(lt)
 	}
 
 	return lt, nil
 }
 
-// loadLogFile parses a single JSONL log file. Returns nil if the file has no
-// valid caic_meta header.
+// loadCompressedLogHeader reads compressed metadata and trailers sequentially.
+//
+// Plain logs can seek near EOF and scan only the tail for caic_result, caic_pr,
+// and caic_diff_stat records. Zstd logs do not support that random access in
+// this format, so compressed headers use one streaming pass instead.
+func loadCompressedLogHeader(path string) (_ *LoadedTask, retErr error) {
+	f, err := openLogReader(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err2 := f.Close(); retErr == nil {
+			retErr = err2
+		}
+	}()
+
+	info, err := os.Stat(filepath.Clean(path))
+	if err != nil {
+		return nil, err
+	}
+
+	fw := &jsonutil.FieldWarner{}
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 4096), 32<<20)
+	if !scanner.Scan() {
+		return nil, errNotLogFile
+	}
+	var meta agent.MetaMessage
+	if err := unmarshalMeta(scanner.Bytes(), &meta, fw); err != nil {
+		return nil, errNotLogFile
+	}
+	if err := meta.Validate(); err != nil {
+		return nil, err
+	}
+
+	base := trimLogExt(filepath.Base(path))
+	taskIDStr := base
+	if before, _, ok := strings.Cut(base, "-"); ok {
+		taskIDStr = before
+	}
+
+	repos := make([]RepoMount, len(meta.Repos))
+	for i, mr := range meta.Repos {
+		repos[i] = RepoMountFromMeta(mr, "")
+	}
+	lt := &LoadedTask{
+		path:              path,
+		TaskID:            taskIDStr,
+		Prompt:            meta.Prompt,
+		Title:             meta.Title,
+		Repos:             repos,
+		Harness:           meta.Harness,
+		Model:             meta.Model,
+		Effort:            meta.Effort,
+		StartedAt:         meta.StartedAt,
+		LastStateUpdateAt: info.ModTime().UTC(),
+		State:             StateRunning,
+		ForgeIssue:        meta.ForgeIssue,
+		Tailscale:         meta.Tailscale,
+		USB:               meta.USB,
+		Display:           meta.Display,
+		Sudo:              meta.Sudo,
+		GitHubToken:       meta.GitHubToken,
+		LogSize:           info.Size(),
+	}
+
+	scan := logTailScan{fw: fw}
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		scan.apply(lt, line)
+	}
+	scan.finish(lt)
+	return lt, scanner.Err()
+}
+
+// loadLogFile parses a single task log file and requires a message parser.
+// Returns nil if the file has no valid caic_meta header.
 func loadLogFile(path string, parseFn func([]byte) ([]agent.Message, error)) (_ *LoadedTask, retErr error) {
-	f, err := os.Open(filepath.Clean(path))
+	if parseFn == nil {
+		return nil, errors.New("load log file: parseFn is nil")
+	}
+	f, err := openLogReader(path)
 	if err != nil {
 		return nil, err
 	}
@@ -619,7 +790,7 @@ func loadLogFile(path string, parseFn func([]byte) ([]agent.Message, error)) (_ 
 	// Use the file modification time as a best-effort approximation of the
 	// last state change (the file is written to as messages arrive).
 	var mtime time.Time
-	if info, err := f.Stat(); err == nil {
+	if info, err := os.Stat(filepath.Clean(path)); err == nil {
 		mtime = info.ModTime().UTC()
 	}
 
@@ -721,6 +892,9 @@ func loadLogFile(path string, parseFn func([]byte) ([]agent.Message, error)) (_ 
 // line (metadata header), then seeks to (size - tailBytes) and parses only the
 // remaining lines. This avoids loading multi-GB files into memory.
 func loadLogFileTail(path string, parseFn func([]byte) ([]agent.Message, error), tailBytes int64) (_ *LoadedTask, retErr error) {
+	if isLogCompressed(path) {
+		return loadLogFile(path, parseFn)
+	}
 	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return nil, err
