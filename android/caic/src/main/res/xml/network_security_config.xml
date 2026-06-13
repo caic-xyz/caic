@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Allow cleartext (HTTP) everywhere. The caic server typically runs on a
-     LAN address without TLS; restricting to specific IPs is impractical since
-     Android's domain-config only matches exact hostnames, not IP subnets. -->
-<network-security-config>
-    <base-config cleartextTrafficPermitted="true" />
-</network-security-config>

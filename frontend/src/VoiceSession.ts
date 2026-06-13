@@ -1,4 +1,4 @@
-// Core voice gateway session manager for the web frontend via WebRTC. Keep in sync with android/caic/src/main/java/com/fghbuild/caic/voice/VoiceSession.kt
+// Core voice gateway session manager for the web frontend via WebRTC.
 import { createStore, produce } from "solid-js/store";
 import { voiceRTCOffer } from "./api";
 import type { Task } from "@sdk/types.gen";

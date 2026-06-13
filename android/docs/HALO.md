@@ -1,9 +1,8 @@
 # Halo Device Support
 
 Supporting the [Brilliant Halo](https://docs.brilliant.xyz/halo/halo/) smart glasses
-over Bluetooth LE from both Android apps:
+over Bluetooth LE from Go Mode and shared Android SDK code:
 
-- `:caic` (`com.fghbuild.caic`) owns caic task peripheral behavior.
 - `:gomode` (`com.fghbuild.gomode`) owns shell-level Halo device management and
   must stay independent of caic domain APIs.
 - Shared BLE transport and typed messaging code belongs in `:halo-sdk`.
@@ -11,9 +10,7 @@ over Bluetooth LE from both Android apps:
 ## Architecture Boundary
 
 ```
-Android apps
-  ├── :caic
-  │   └── com.fghbuild.caic.halo.HaloService       task state -> Halo display, clicks -> actions
+Android modules
   ├── :gomode
   │   └── com.fghbuild.gomode.halo.HaloController  shell-owned scan/connect/disconnect
   └── :halo-sdk
@@ -65,27 +62,24 @@ Supported bridge operations: `ping`, `connect_repl`, `execute_lua`, `start`,
 `get_framebuffer`. Android code can use `HaloEmulatorBridgeClient` from
 `:halo-sdk` instead of writing raw WebSocket JSON.
 
-Until the caic Halo app Lua is moved out of `HaloService.mainLuaSource()`, use
-the emulator against extracted scratch Lua or upstream examples. Once the Lua
-lives under app assets, add emulator-backed tests for display output and click
-message payloads.
+Use the emulator against Go Mode-owned Lua assets or upstream examples. Add
+emulator-backed tests for display output and click message payloads once Go Mode
+ships a device-side app.
 
 ## Remaining Work
 
-### caic Peripheral
+### Go Mode Integration
 
 - Auto-reconnect: observe `SettingsRepository.haloAddress` and reconnect on app
-  start when `haloAutoConnect` is enabled.
-- Task state display: send `TxSprite` state badges instead of text-only
-  `TxPlainText` status lines.
-- Notifications: suppress `TaskNotifier` attention notifications while Halo is
-  connected.
-- Double click: read the latest agent message aloud once the audio path exists.
+  start when auto-connect is enabled.
+- Service display: keep device output service-neutral unless the hosted frontend
+  exposes a shell capability for richer status.
+- Double click: trigger a shell-owned voice action once the audio path exists.
 
 ### Device App
 
-- Move inline Lua from `HaloService.mainLuaSource()` to `assets/halo/main.lua`
-  once `HalosideApp` has an asset-loading API.
+- Move Go Mode Lua assets to `assets/halo/main.lua` once `HalosideApp` has an
+  asset-loading API.
 - Add emulator-backed Lua tests using `halo_emulator` once the device app lives
   in assets: assert framebuffer output and button/click payloads without
   requiring Halo hardware.
@@ -106,15 +100,13 @@ message payloads.
 
 ## Target Display Mapping
 
-| caic task state | Halo display |
-|-----------------|--------------|
-| `running` | Spinner + "Running" + task count |
-| `waiting` | Yellow dot + "Awaiting input" + task title |
-| `asking` | Question mark + "Asking" + task title |
-| `has_plan` | Plan icon + "Plan ready" + task title |
-| `failed` | Red X + "Failed" + error snippet |
-| `purging` / `pushed` | Dimmed + task title |
-| `purged` | Checkmark flash, then task count |
+| Service-neutral state | Halo display |
+|-----------------------|--------------|
+| Active | Spinner + concise status |
+| Attention needed | Yellow dot + hosted-service label |
+| Question | Question mark + hosted-service label |
+| Failed | Red X + error snippet |
+| Complete | Checkmark flash |
 
 Halo's display is 256x256 and round. Keep text compact; use `TxSprite` for state
 badges and `TxPlainText` for labels.

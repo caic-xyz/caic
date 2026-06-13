@@ -1,5 +1,4 @@
-// Bidirectional task ID ↔ stable 1-based number mapping for voice mode,
-// parallel to android/voice/TaskNumberMap.kt.
+// Bidirectional task ID ↔ stable 1-based number mapping for web voice mode.
 import type { Task } from "@sdk/types.gen";
 
 export class TaskNumberMap {

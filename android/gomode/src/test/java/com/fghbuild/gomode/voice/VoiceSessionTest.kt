@@ -8,10 +8,10 @@ class VoiceSessionTest {
     @Test
     fun resolveServiceURLUsesConfiguredServiceOriginForRelativePaths() {
         assertEquals(
-            "http://10.0.2.2:2242/api/caic/v1/mcp",
+            "http://10.0.2.2:2242/service/mcp",
             VoiceSession.resolveServiceURL(
-                baseURL = "http://10.0.2.2:2242/mobile/task/123",
-                advertisedURL = "/api/caic/v1/mcp",
+                baseURL = "http://10.0.2.2:2242/mobile/screen/123",
+                advertisedURL = "/service/mcp",
             ),
         )
     }

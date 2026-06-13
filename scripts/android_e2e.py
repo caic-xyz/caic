@@ -2,7 +2,6 @@
 """Run Android E2E tests against the fake backend.
 
 By default this runs all Android E2E modules. Use --module to run one module:
-  python3 scripts/android_e2e.py --module caic
   python3 scripts/android_e2e.py --module gomode
   python3 scripts/android_e2e.py --module halo-sdk
   python3 scripts/android_e2e.py --module all
@@ -13,8 +12,8 @@ Steps:
   3. Wait until the backend responds.
   4. Run the selected connectedAndroidTest module(s) via Gradle, passing
      10.0.2.2:PORT (emulator's host alias — no adb reverse needed).
-  5. Pull and convert screenshots when the app module ran; focused gomode and
-     halo-sdk runs skip screenshot collection.
+  5. Clear stale Go Mode screenshots before tests, then pull and convert fresh
+     screenshots when the gomode module ran; halo-sdk runs skip screenshot collection.
   6. Dump logcat on failure for CI diagnostics.
   7. Kill the backend on exit.
 """
@@ -34,13 +33,12 @@ import urllib.request
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCREENSHOT_DIR = os.path.join(ROOT_DIR, "e2e", "screenshots", "android")
+GOMODE_DEVICE_SCREENSHOT_DIR = "/sdcard/Pictures/gomode-screenshots"
 TEST_TASKS_BY_MODULE: dict[str, tuple[str, ...]] = {
-    "caic": (":caic:connectedAndroidTest",),
     "gomode": (":gomode:connectedAndroidTest",),
     "halo-sdk": (":halo-sdk:connectedAndroidTest",),
 }
 TEST_TASKS_BY_MODULE["all"] = (
-    *TEST_TASKS_BY_MODULE["caic"],
     *TEST_TASKS_BY_MODULE["gomode"],
     *TEST_TASKS_BY_MODULE["halo-sdk"],
 )
@@ -117,8 +115,6 @@ def stop_logcat(proc, logcat_file=None):
 
 
 APP_PACKAGES = (
-    "com.fghbuild.caic",
-    "com.fghbuild.caic.test",
     "com.fghbuild.gomode",
     "com.fghbuild.gomode.test",
 )
@@ -190,9 +186,13 @@ def dump_logcat_on_failure(logcat_path):
     print("--- END APP LOGCAT ---", file=sys.stderr)
 
 
-def persist_logcat_for_artifact(logcat_path):
-    """Copy logcat to android/caic/build/reports/ so CI can upload it as an artifact."""
-    dest_dir = os.path.join(ROOT_DIR, "android", "caic", "build", "reports", "androidTests", "connected")
+def persist_logcat_for_artifact(logcat_path, module):
+    """Copy logcat to the failed module's reports directory for CI upload."""
+    module_reports = {
+        "gomode": os.path.join(ROOT_DIR, "android", "gomode", "build", "reports", "androidTests", "connected"),
+        "halo-sdk": os.path.join(ROOT_DIR, "sdk", "halo", "build", "reports", "androidTests", "connected"),
+    }
+    dest_dir = module_reports.get(module, module_reports["gomode"])
     os.makedirs(dest_dir, exist_ok=True)
     dest = os.path.join(dest_dir, "logcat.txt")
     shutil.copy2(logcat_path, dest)
@@ -208,6 +208,13 @@ def is_emulator():
         timeout=5,
     )
     return "emulator" in result.stdout
+
+
+def module_for_task(task):
+    for module, tasks in TEST_TASKS_BY_MODULE.items():
+        if module != "all" and task in tasks:
+            return module
+    return "gomode"
 
 
 def run_tests(port, module):
@@ -230,12 +237,20 @@ def run_tests(port, module):
             cwd=os.path.join(ROOT_DIR, "android"),
         )
         if result.returncode != 0:
-            return result.returncode
-    return 0
+            return result.returncode, module_for_task(task)
+    return 0, module
 
 
 def module_generates_screenshots(module):
-    return module in ("all", "caic")
+    return module in ("all", "gomode")
+
+
+def clear_device_screenshots():
+    """Remove stale screenshots whose directory may be owned by a prior app UID."""
+    subprocess.run(
+        ["adb", "shell", "rm", "-rf", GOMODE_DEVICE_SCREENSHOT_DIR],
+        capture_output=True,
+    )
 
 
 def pull_screenshots():
@@ -247,9 +262,8 @@ def pull_screenshots():
             file=sys.stderr,
         )
 
-    device_dir = "/sdcard/Pictures/caic-screenshots"
     result = subprocess.run(
-        ["adb", "shell", "ls", f"{device_dir}/"],
+        ["adb", "shell", "ls", f"{GOMODE_DEVICE_SCREENSHOT_DIR}/"],
         capture_output=True,
         text=True,
     )
@@ -274,7 +288,7 @@ def pull_screenshots():
 
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
     for name in names:
-        remote = f"{device_dir}/{name}.png"
+        remote = f"{GOMODE_DEVICE_SCREENSHOT_DIR}/{name}.png"
         local_png = os.path.join(SCREENSHOT_DIR, f"{name}.png")
         local_webp = os.path.join(SCREENSHOT_DIR, f"{name}.webp")
         subprocess.run(["adb", "pull", remote, local_png], capture_output=True)
@@ -301,7 +315,7 @@ def pull_screenshots():
             print(f"  {name}.png")
 
     subprocess.run(
-        ["adb", "shell", "rm", "-rf", device_dir],
+        ["adb", "shell", "rm", "-rf", GOMODE_DEVICE_SCREENSHOT_DIR],
         capture_output=True,
     )
     return 0
@@ -371,17 +385,19 @@ def main():
                     file=sys.stderr,
                 )
                 return 1
+            if module_generates_screenshots(args.module):
+                clear_device_screenshots()
             print(f"Running Android E2E tests for {args.module}...")
             logcat_proc, logcat_path, logcat_file = start_logcat(tmp_dir)
             try:
-                rc = run_tests(port, args.module)
+                rc, failed_module = run_tests(port, args.module)
             finally:
                 stop_logcat(logcat_proc, logcat_file)
 
             if rc != 0:
                 print(f"Tests failed (exit {rc}). Dumping logcat:", file=sys.stderr)
                 dump_logcat_on_failure(logcat_path)
-                persist_logcat_for_artifact(logcat_path)
+                persist_logcat_for_artifact(logcat_path, failed_module)
             elif module_generates_screenshots(args.module):
                 print("Pulling screenshots...")
                 rc = pull_screenshots()

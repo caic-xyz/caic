@@ -1,18 +1,18 @@
 # Build, test, lint, and development workflow targets for the full stack (Go backend, TypeScript frontend, Android).
 
-.PHONY: help build check fake-dev test smoke smoke-voice coverage lint lint-go lint-frontend lint-python lint-binaries lint-fix lint-docs refresh-generated generate-sdks git-hooks frontend-build frontend-dev upgrade frontend-e2e android-sdk android-check android-push-caic android-push-gomode android-e2e android-setup-emulator android-start-emulator android-stop-emulator
+.PHONY: help build check fake-dev test smoke smoke-voice coverage lint lint-go lint-frontend lint-python lint-binaries lint-fix lint-docs refresh-generated generate-sdks git-hooks frontend-build frontend-dev upgrade frontend-e2e android-sdk android-check android-push-gomode android-e2e android-setup-emulator android-start-emulator android-stop-emulator
 
 FRONTEND_STAMP=node_modules/.stamp
 HTTP?=:2242
 ANDROID_GRADLE=cd android && ./gradlew --no-daemon
 export NPM_CONFIG_AUDIT=false
 export NPM_CONFIG_FUND=false
-ANDROID_BUILD_TASKS=:caic:assembleDebug :gomode:assembleDebug :halo-sdk:assembleDebug :caic-sdk:assemble :gomode-sdk:assemble :mcp-sdk:assemble :voicegateway-sdk:assemble
-ANDROID_TEST_BUILD_TASKS=:caic:assembleDebugAndroidTest :gomode:assembleDebugAndroidTest :halo-sdk:assembleDebugAndroidTest
-ANDROID_TEST_TASKS=:caic:testDebugUnitTest :gomode:testDebugUnitTest :halo-sdk:testDebugUnitTest :caic-sdk:test :gomode-sdk:test :mcp-sdk:test :voicegateway-sdk:test
-ANDROID_COVERAGE_REPORT_TASKS=:caic:createDebugUnitTestCoverageReport :gomode:createDebugUnitTestCoverageReport :halo-sdk:createDebugUnitTestCoverageReport
+ANDROID_BUILD_TASKS=:gomode:assembleDebug :halo-sdk:assembleDebug :caic-sdk:assemble :gomode-sdk:assemble :mcp-sdk:assemble :voicegateway-sdk:assemble
+ANDROID_TEST_BUILD_TASKS=:gomode:assembleDebugAndroidTest :halo-sdk:assembleDebugAndroidTest
+ANDROID_TEST_TASKS=:gomode:testDebugUnitTest :caic-sdk:test :gomode-sdk:test :mcp-sdk:test :voicegateway-sdk:test
+ANDROID_COVERAGE_REPORT_TASKS=:gomode:createDebugUnitTestCoverageReport :halo-sdk:createDebugUnitTestCoverageReport
 ANDROID_COVERAGE_TASKS=$(ANDROID_TEST_TASKS) $(ANDROID_COVERAGE_REPORT_TASKS)
-ANDROID_LINT_TASKS=:caic:detekt :gomode:detekt :halo-sdk:detekt :caic:lint :gomode:lint :halo-sdk:lint
+ANDROID_LINT_TASKS=:gomode:detekt :halo-sdk:detekt :gomode:lint :halo-sdk:lint
 
 help:
 	@echo "caic - Manage multiple coding agents"
@@ -29,7 +29,6 @@ help:
 	@echo "  make refresh-generated      - Regenerate API SDKs, AGENTS indexes, and backend architecture docs"
 	@echo "  make android-check          - Run Android lint, build, unit tests, and coverage"
 	@echo "  make android-e2e            - Run Android instrumented tests and generate screenshots"
-	@echo "  make android-push-caic      - Build, install, and start caic APK on connected device"
 	@echo "  make android-push-gomode    - Build, install, and start GoMode APK on connected device"
 	@echo "  make android-start-emulator - Set up and start the headless Android emulator"
 	@echo "  make android-stop-emulator  - Stop the running Android emulator"
@@ -117,17 +116,6 @@ android-start-emulator: android-setup-emulator
 android-stop-emulator:
 	@echo "Stopping emulator..."
 	@(command -v adb >/dev/null 2>&1 && adb emu kill) || pkill -f emulator || true
-
-android-push-caic: android-check
-	@devices=$$(adb devices | awk '/\tdevice$$/{print $$1}'); \
-	[ -n "$$devices" ] || { echo "No devices connected"; exit 1; }; \
-	for d in $$devices; do \
-		(echo "Pushing to $$d..." && \
-		 adb -s $$d install -r android/caic/build/outputs/apk/debug/caic-debug.apk && \
-		 adb -s $$d shell am start -n com.fghbuild.caic/.MainActivity && \
-		 echo "Done: $$d") & \
-	done; \
-	wait
 
 android-push-gomode: android-check
 	@devices=$$(adb devices | awk '/\tdevice$$/{print $$1}'); \

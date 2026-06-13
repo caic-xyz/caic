@@ -1,4 +1,0 @@
-<resources>
-    <!-- Dark theme. Compose handles Material 3 theming at runtime. -->
-    <style name="Theme.Caic" parent="android:Theme.Material.NoActionBar" />
-</resources>

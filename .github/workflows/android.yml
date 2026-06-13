@@ -39,7 +39,6 @@ jobs:
         with:
           name: android-debug-apks
           path: |
-            android/caic/build/outputs/apk/debug/caic-debug.apk
             android/gomode/build/outputs/apk/debug/gomode-debug.apk
           retention-days: 7
       - name: Upload Coverage
@@ -47,7 +46,7 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           flags: android-unit
-          files: android/caic/build/reports/jacoco/testDebugUnitTestCoverage/testDebugUnitTestCoverage.xml,android/gomode/build/reports/jacoco/testDebugUnitTestCoverage/testDebugUnitTestCoverage.xml,sdk/halo/build/reports/jacoco/testDebugUnitTestCoverage/testDebugUnitTestCoverage.xml
+          files: android/gomode/build/reports/jacoco/testDebugUnitTestCoverage/testDebugUnitTestCoverage.xml,sdk/halo/build/reports/jacoco/testDebugUnitTestCoverage/testDebugUnitTestCoverage.xml
       - name: Upload lint results
         if: always()
         uses: actions/upload-artifact@v7
@@ -110,4 +109,6 @@ jobs:
           path: |
             android/*/build/reports/androidTests/connected/**
             android/*/build/outputs/androidTest-results/connected/**
+            sdk/halo/build/reports/androidTests/connected/**
+            sdk/halo/build/outputs/androidTest-results/connected/**
           retention-days: 7

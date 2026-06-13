@@ -1,6 +1,6 @@
-// Shared formatting utilities, parallel to android/util/Formatting.kt.
-// Note: formatElapsed takes milliseconds (JS timestamps); the Android
-// equivalent takes seconds. Call formatElapsed(seconds * 1000) for API durations.
+// Shared formatting utilities for caic web UI values.
+// Note: formatElapsed takes milliseconds (JS timestamps). Call
+// formatElapsed(seconds * 1000) for API durations.
 import type { TaskState } from "@sdk/types.gen";
 
 /** Returns the currency symbol for a currency code. Unknown codes return "??". */

@@ -1,12 +1,12 @@
 # Debugging with the Android Emulator
 
-Guide for debugging the caic Android app when a physical device is unavailable.
+Guide for debugging the Go Mode Android app when a physical device is unavailable.
 
 ## Prerequisites
 
 - A host that can run the Android emulator. On Linux, `/dev/kvm` must exist for
   hardware acceleration.
-- The caic backend running (real or fake mode)
+- A backend-hosted frontend running (the caic backend in real or fake mode works)
 
 ## Start The Emulator
 
@@ -54,8 +54,8 @@ adb emu kill
 Skip runtime permission dialogs:
 
 ```bash
-adb -s <device-id> shell pm grant com.fghbuild.caic android.permission.RECORD_AUDIO
-adb -s <device-id> shell pm grant com.fghbuild.caic android.permission.POST_NOTIFICATIONS
+adb -s <device-id> shell pm grant com.fghbuild.gomode android.permission.RECORD_AUDIO
+adb -s <device-id> shell pm grant com.fghbuild.gomode android.permission.POST_NOTIFICATIONS
 ```
 
 ## Set Up Port Forwarding
@@ -77,10 +77,10 @@ Alternative: the emulator maps `10.0.2.2` to the host, so
 cd android && ./gradlew assembleDebug --no-daemon
 
 # Install
-adb -s <device-id> install -r caic/build/outputs/apk/debug/caic-debug.apk
+adb -s <device-id> install -r gomode/build/outputs/apk/debug/gomode-debug.apk
 
 # Launch
-adb -s <device-id> shell am start -n com.fghbuild.caic/.MainActivity
+adb -s <device-id> shell am start -n com.fghbuild.gomode/.MainActivity
 ```
 
 If a physical device is also connected, always pass `-s emulator-5554` to target
@@ -90,8 +90,7 @@ the emulator. Without it, `adb` fails with "more than one device/emulator".
 
 The server URL must be set in Settings before the app is functional.
 
-**Option A — via the UI**: Tap the gear icon, enter `http://localhost:2242`, tap
-"Test Connection" to verify.
+**Option A — via the UI**: enter `http://localhost:2242`, then tap "Load".
 
 **Option B — via uiautomator** (scriptable):
 
@@ -129,7 +128,7 @@ adb -s <device-id> logcat -s "VoiceSession:*"
 adb -s <device-id> logcat | grep -E "VoiceSession|WebSocket|Error"
 
 # App-process only (warnings and errors)
-PID=$(adb -s <device-id> shell pidof com.fghbuild.caic)
+PID=$(adb -s <device-id> shell pidof com.fghbuild.gomode)
 adb -s <device-id> logcat -d | grep "$PID" | grep -E " W | E "
 ```
 
@@ -245,11 +244,7 @@ with the key or network, not the app.
    the manual setup steps.
 
 3. **Scriptable server URL configuration**: add an intent extra or a debug-only
-   broadcast receiver that sets the server URL without touching the UI:
-   ```bash
-   adb shell am broadcast -a com.fghbuild.caic.SET_SERVER_URL \
-       --es url "http://localhost:2242"
-   ```
+   bootstrap hook that sets the Go Mode service URL without touching the UI.
 
 4. **Instrumented UI tests**: Espresso or Compose UI tests that verify the voice
    connection flow on the emulator (up to `setupComplete`), without needing a

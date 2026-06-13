@@ -15,7 +15,7 @@ run `make generate-sdks`.
 Keep each SDK's TypeScript, Kotlin, Swift, and `API.md` outputs together when
 moving or regenerating generated SDKs.
 
-Android consumes Kotlin SDKs through Gradle targets `:caic-sdk`,
+The Android Gradle workspace exposes Kotlin SDKs through targets `:caic-sdk`,
 `:voicegateway-sdk`, `:mcp-sdk`, and `:gomode-sdk`.
 
 ## Halo SDK
