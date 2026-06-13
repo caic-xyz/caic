@@ -4,8 +4,6 @@ This document describes the cross-provider architecture for enhancing caic's
 agent capabilities. Each harness has its own `docs/MORE.md` with
 provider-specific opportunities:
 
-- [`claude/docs/MORE.md`](../claude/docs/MORE.md) — Claude Code enhancements
-- [`codex/docs/MORE.md`](../codex/docs/MORE.md) — Codex CLI enhancements
 - [`opencode/docs/MORE.md`](../opencode/docs/MORE.md) — OpenCode ACP enhancements
 
 ## Cross-Provider Architecture
