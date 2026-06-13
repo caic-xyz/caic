@@ -64,5 +64,5 @@ Ordered by effort-to-value:
    novel UX: inject guidance mid-turn without interrupting.
 4. **Session fork / resume / list** — Codex and OpenCode only; low priority.
 
-See [`opencode/docs/MORE.md`](../opencode/docs/MORE.md) for OpenCode-specific
-protocol notes.
+Per-provider wire details live with each provider in
+`github.com/maruel/genai/providers/*` and that package's `CLAUDE.md`.

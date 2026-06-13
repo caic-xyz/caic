@@ -9,7 +9,6 @@ JSON-RPC 2.0 over stdin/stdout, analogous to the Codex harness.
 - `wire_test.go` — Wire type unmarshaling tests (types from `github.com/maruel/genai/providers/opencode`)
 - `parse.go` — Stateless parser: `session/update` notifications → `agent.Message`
 - `parse_test.go` — Parser tests including wireFormat prompt response handling
-- `docs/MORE.md` — Future enhancement opportunities (cancel, fork, resume, compact, modes, etc.)
 
 Wire types are provided by `github.com/maruel/genai/providers/opencode` (imported as `oc`).
 
