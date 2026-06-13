@@ -158,6 +158,26 @@ func (s *taskAPIService) createTask(ctx context.Context, req *v1.CreateTaskReq) 
 	return &v1.CreateTaskResp{Status: "accepted", ID: entry.Task().ID}, nil
 }
 
+// relayStatus describes the state of the runtime-instance relay daemon, probed
+// over SSH when SendInput fails. Combined with the task state and session
+// status (from task.SendInput's error), the three values pinpoint why input
+// delivery failed:
+//
+//   - state=waiting session=none  relay=dead → relay died, reconnect failed.
+//   - state=waiting session=exited relay=alive → SSH attach exited but relay
+//     is still running; reconnect should recover.
+//   - state=running session=none  relay=alive → state-machine bug: state says
+//     running but no Go-side session object exists.
+//   - state=pending session=none  relay=no-instance → task never started.
+type relayStatus string
+
+const (
+	relayAlive       relayStatus = "alive"        // Relay socket exists; daemon is running.
+	relayDead        relayStatus = "dead"         // No socket; daemon exited or was never started.
+	relayCheckFailed relayStatus = "check-failed" // SSH probe failed (runtime instance unreachable).
+	relayNoInstance  relayStatus = "no-instance"  // Task has no runtime instance yet.
+)
+
 // sendInput forwards user input to the agent session. On failure, it probes
 // the relay daemon's liveness over SSH and returns diagnostic details in the
 // 409 response so the frontend can show the user what went wrong.

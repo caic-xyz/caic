@@ -3,7 +3,9 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -24,7 +26,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
-	"github.com/caic-xyz/caic/backend/internal/usage"
 )
 
 // taskHTTPHandlers owns task HTTP protocol concerns.
@@ -192,6 +193,157 @@ func (s *taskHTTPHandlers) streamHistoryFromDisk(w http.ResponseWriter, flusher 
 	flusher.Flush()
 }
 
+// handleTaskListEvents streams patch events for the task list as SSE. On first
+// iteration it sends a full snapshot; thereafter it sends only upsert/delete
+// events for changed or removed tasks. It pushes immediately when a
+// server-handled mutation fires the changed channel, and falls back to a
+// 2-second ticker to catch runner-internal state transitions.
+func (s *taskHTTPHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, api.InternalError("streaming not supported"))
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	flusher.Flush()
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	// With GitHub App configured, CI updates arrive via check_suite webhooks;
+	// use a nil channel so the ticker case is never selected. With no CI service
+	// wired (e.g. a router built without automation), never poll.
+	var ciTickerC <-chan time.Time
+	if s.ciService != nil && s.forge.GitHubApp() == nil {
+		t := time.NewTicker(5 * time.Minute)
+		defer t.Stop()
+		ciTickerC = t.C
+	}
+
+	// Seed CI status immediately on connect (once); subsequent updates come from
+	// webhooks (App) or the ciTicker (polling).
+	ctx := r.Context()
+	if s.ciService != nil {
+		go s.ciService.PollCIForActiveRepos(context.WithoutCancel(ctx))
+	}
+
+	// prevByID tracks the last marshalled JSON for each task ID.
+	prevByID := map[string][]byte{}
+	var prevReposJSON []byte
+	var lastWarnTime time.Time
+	first := true
+
+	for {
+		out := s.service.taskListSnapshot(ctx)
+		ch := s.taskMgr.Changed()
+		repoList := repoListFromSnapshot(s.repos.SnapshotWithCI())
+		var newWarnings []serverWarning
+		if s.warnings != nil {
+			newWarnings = s.warnings.Since(lastWarnTime)
+		}
+
+		reposJSON, err := json.Marshal(repoList)
+		if err != nil {
+			slog.Warn("marshal repos", "err", err)
+			return
+		}
+
+		if first {
+			if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "snapshot", Snapshot: out}); err != nil {
+				slog.Warn("marshal task list snapshot", "err", err)
+				return
+			}
+			if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "repos", Repos: *repoList}); err != nil {
+				slog.Warn("marshal repos snapshot", "err", err)
+				return
+			}
+			for i := range out {
+				data, err := json.Marshal(&out[i])
+				if err != nil {
+					slog.Warn("marshal task entry", "err", err)
+					continue
+				}
+				prevByID[out[i].ID.String()] = data
+			}
+			prevReposJSON = reposJSON
+			first = false
+		} else {
+			// Emit upserts/patches for new or changed tasks.
+			currentIDs := make(map[string]struct{}, len(out))
+			for i := range out {
+				id := out[i].ID.String()
+				currentIDs[id] = struct{}{}
+				data, err := json.Marshal(&out[i])
+				if err != nil {
+					slog.Warn("marshal task", "id", id, "err", err)
+					continue
+				}
+				if !bytes.Equal(data, prevByID[id]) {
+					prev := prevByID[id]
+					prevByID[id] = data
+					if prev == nil {
+						// New task: emit full object.
+						if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "upsert", Upsert: &out[i]}); err != nil {
+							slog.Warn("marshal task upsert", "id", id, "err", err)
+							return
+						}
+					} else {
+						// Existing task changed: emit only the diff.
+						patch, err := computeTaskPatch(prev, data)
+						if err != nil {
+							slog.Warn("compute task patch", "id", id, "err", err)
+							continue
+						}
+						if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "patch", Patch: patch}); err != nil {
+							slog.Warn("marshal task patch", "id", id, "err", err)
+							return
+						}
+					}
+				}
+			}
+			// Emit deletes for removed tasks.
+			for id := range prevByID {
+				if _, ok := currentIDs[id]; !ok {
+					if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "delete", Delete: id}); err != nil {
+						slog.Warn("marshal task delete", "id", id, "err", err)
+						return
+					}
+					delete(prevByID, id)
+				}
+			}
+			// Emit any new warnings.
+			for _, warn := range newWarnings {
+				if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "warning", Warning: warn.msg}); err != nil {
+					slog.Warn("marshal warning", "err", err)
+					return
+				}
+				lastWarnTime = warn.ts
+			}
+
+			// Emit repos update when default-branch CI status has changed.
+			if !bytes.Equal(reposJSON, prevReposJSON) {
+				prevReposJSON = reposJSON
+				if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "repos", Repos: *repoList}); err != nil {
+					slog.Warn("marshal repos update", "err", err)
+					return
+				}
+			}
+		}
+
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ch:
+		case <-ticker.C:
+		case <-ciTickerC:
+			go s.ciService.PollCIForActiveRepos(context.WithoutCancel(r.Context()))
+		}
+	}
+}
+
 // handleTaskToolInput returns the full (untruncated) input for a tool call.
 // It scans the task's message history for the ToolUseMessage with the given
 // toolUseID and returns its Input field.
@@ -323,11 +475,4 @@ func taskEntryFromRequest(r *http.Request, taskMgr *tasks.Manager, authStore *au
 		}
 	}
 	return entry, nil
-}
-
-// SetUsageFetchers replaces the provider usage fetchers used by the usage
-// endpoints. Intended for e2e tests to inject fake fetchers that return
-// canned data without real API credentials.
-func (s *Router) SetUsageFetchers(fetchers []usage.ProviderFetcher) {
-	s.usageHandlers.fetchers = fetchers
 }

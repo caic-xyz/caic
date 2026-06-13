@@ -7,15 +7,20 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
+	voiceapi "github.com/caic-xyz/caic/backend/internal/voicegateway/api"
 )
 
 type validatable interface {
@@ -173,4 +178,136 @@ func populatePathParams(r *http.Request, input any) {
 			}
 		}
 	}
+}
+
+// writeError writes a structured JSON error response. If err implements
+// api.ErrorWithStatus, the HTTP status, error code and details are taken from
+// it; otherwise 500 is used.
+func writeError(w http.ResponseWriter, err error) {
+	statusCode := http.StatusInternalServerError
+	code := api.CodeInternalError
+	var details map[string]any
+
+	var ews api.ErrorWithStatus
+	if errors.As(err, &ews) {
+		statusCode = ews.StatusCode()
+		code = ews.Code()
+		details = ews.Details()
+	}
+	var voiceEWS voiceapi.ErrorWithStatus
+	if errors.As(err, &voiceEWS) {
+		statusCode = voiceEWS.StatusCode()
+		code = api.ErrorCode(voiceEWS.Code())
+		details = voiceEWS.Details()
+	}
+
+	slog.Error("handler error", "err", err, "statusCode", statusCode, "code", code)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	resp := api.ErrorResponse{
+		Error:   api.ErrorDetails{Code: code, Message: err.Error()},
+		Details: details,
+	}
+	if encErr := json.NewEncoder(w).Encode(resp); encErr != nil {
+		slog.Warn("failed to encode error response", "err", encErr)
+	}
+}
+
+// writeJSONResponse writes a JSON success response or a structured error
+// response, unifying both paths into a single call.
+func writeJSONResponse[Out any](w http.ResponseWriter, output *Out, err error) {
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(output); encErr != nil {
+		slog.Warn("failed to encode JSON response", "err", encErr)
+	}
+}
+
+// userIDFromCtx returns the authenticated user's ID, or "default" in no-auth mode.
+func userIDFromCtx(ctx context.Context) string {
+	if u, ok := auth.UserFromContext(ctx); ok {
+		return u.ID
+	}
+	return "default"
+}
+
+// computeTaskPatch returns a sparse map containing only the fields that differ
+// between oldJSON and newJSON, always including "id". Fields present in oldJSON
+// but absent in newJSON are set to null so clients can clear them.
+func computeTaskPatch(oldJSON, newJSON []byte) (map[string]json.RawMessage, error) {
+	var oldMap, newMap map[string]json.RawMessage
+	if err := json.Unmarshal(oldJSON, &oldMap); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(newJSON, &newMap); err != nil {
+		return nil, err
+	}
+	patch := map[string]json.RawMessage{"id": newMap["id"]}
+	for k, newVal := range newMap {
+		if oldVal, ok := oldMap[k]; !ok || !bytes.Equal(oldVal, newVal) {
+			patch[k] = newVal
+		}
+	}
+	for k := range oldMap {
+		if _, ok := newMap[k]; !ok {
+			patch[k] = json.RawMessage("null")
+		}
+	}
+	return patch, nil
+}
+
+// emitTaskListEvent marshals ev and writes it as an SSE message event.
+func emitTaskListEvent(w http.ResponseWriter, flusher http.Flusher, ev v1.TaskListEvent) error { //nolint:gocritic // struct size grew with Repos field; refactor not worth it
+	data, err := json.Marshal(ev)
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(w, "event: message\ndata: %s\n\n", data)
+	flusher.Flush()
+	return nil
+}
+
+// roundDuration rounds d to 3 significant digits with minimum 1us precision.
+func roundDuration(d time.Duration) time.Duration {
+	for t := 100 * time.Second; t >= 100*time.Microsecond; t /= 10 {
+		if d >= t {
+			return d.Round(t / 100)
+		}
+	}
+	return d.Round(time.Microsecond)
+}
+
+// responseWriter wraps http.ResponseWriter to capture status code and response size.
+type responseWriter struct {
+	http.ResponseWriter
+
+	status int
+	size   int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.status = code
+	rw.ResponseWriter.WriteHeader(code)
+}
+
+func (rw *responseWriter) Write(b []byte) (int, error) {
+	n, err := rw.ResponseWriter.Write(b)
+	rw.size += n
+	return n, err
+}
+
+// Flush implements http.Flusher so SSE handlers can flush through the wrapper.
+func (rw *responseWriter) Flush() {
+	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap returns the underlying ResponseWriter so http.NewResponseController
+// can discover interfaces like http.Flusher.
+func (rw *responseWriter) Unwrap() http.ResponseWriter {
+	return rw.ResponseWriter
 }
