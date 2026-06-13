@@ -31,8 +31,7 @@ help:
 	@echo "  make android-e2e            - Run Android instrumented tests and generate screenshots"
 	@echo "  make android-push-caic      - Build, install, and start caic APK on connected device"
 	@echo "  make android-push-gomode    - Build, install, and start GoMode APK on connected device"
-	@echo "  make android-setup-emulator - Install SDK tools, emulator, system image, create AVD"
-	@echo "  make android-start-emulator - Start the headless Android emulator"
+	@echo "  make android-start-emulator - Set up and start the headless Android emulator"
 	@echo "  make android-stop-emulator  - Stop the running Android emulator"
 	@echo "  make android-sdk            - Install required Android SDK packages"
 	@echo "  make git-hooks              - Install git pre-commit hooks"
@@ -104,19 +103,15 @@ lint-binaries:
 	@python3 scripts/lint_binaries.py
 
 android-sdk:
-	@set -eu; \
-	sdk_root="$${ANDROID_HOME:-$${ANDROID_SDK_ROOT:-$(HOME)/.local/share/android-sdk}}"; \
-	command -v sdkmanager >/dev/null || { echo "sdkmanager not found"; exit 1; }; \
-	if [ ! -d "$$sdk_root/platforms/android-36" ]; then sdkmanager --install "platforms;android-36"; fi; \
-	if [ ! -d "$$sdk_root/build-tools/36.0.0" ]; then sdkmanager --install "build-tools;36.0.0"; fi
+	@python3 scripts/android_sdk.py check
 
 android-check: android-sdk
 	@$(ANDROID_GRADLE) $(ANDROID_LINT_TASKS) $(ANDROID_BUILD_TASKS) $(ANDROID_TEST_BUILD_TASKS) $(ANDROID_COVERAGE_TASKS)
 
 android-setup-emulator:
-	@python3 scripts/android_setup_emulator.py
+	@python3 scripts/android_sdk.py setup-emulator
 
-android-start-emulator:
+android-start-emulator: android-setup-emulator
 	@python3 scripts/android_start_emulator.py
 
 android-stop-emulator:

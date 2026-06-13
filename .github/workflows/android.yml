@@ -6,13 +6,13 @@ on:
     paths:
       - '.github/workflows/android.yml'
       - 'android/**'
-      - 'scripts/android_e2e.py'
+      - 'scripts/android*.*'
       - 'sdk/**'
   pull_request:
     paths:
       - '.github/workflows/android.yml'
       - 'android/**'
-      - 'scripts/android_e2e.py'
+      - 'scripts/android*.*'
       - 'sdk/**'
   workflow_dispatch:
 permissions:

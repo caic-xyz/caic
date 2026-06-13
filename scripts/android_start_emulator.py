@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Start the caic_test Android emulator and wait until adb can see it.
 
-Requires a completed "make android-setup-emulator" first.
+The make target runs SDK and AVD setup before starting this script.
 Works on Linux and macOS.
 """
 
@@ -15,6 +15,7 @@ import tempfile
 import time
 
 AVD_NAME = "caic_test"
+DEFAULT_SDK_ROOT = os.path.expanduser("~/.local/share/android-sdk")
 
 EMULATOR_ARGS = [
     "-no-window",
@@ -27,17 +28,24 @@ EMULATOR_ARGS = [
 
 
 def _sdk_root() -> str | None:
-    """Return the Android SDK root from environment or default location."""
+    """Return the Android SDK root from common local and CI locations."""
+    roots: list[str] = []
     for var in ("ANDROID_HOME", "ANDROID_SDK_ROOT"):
-        val = os.environ.get(var)
-        if val and os.path.isdir(val):
-            return val
-
-    default = os.path.expanduser("~/Android/Sdk")
-    if os.path.isdir(default):
-        return default
-
-    print("Could not find Android SDK. Set ANDROID_HOME or run:\n  make android-setup-emulator", file=sys.stderr)
+        value = os.environ.get(var)
+        if value and value not in roots:
+            roots.append(value)
+    for root in (
+        DEFAULT_SDK_ROOT,
+        os.path.expanduser("~/Android/Sdk"),
+        os.path.expanduser("~/Library/Android/sdk"),
+        "/usr/local/lib/android/sdk",
+    ):
+        if root not in roots:
+            roots.append(root)
+    for root in roots:
+        if os.path.isdir(root):
+            return root
+    print("Could not find Android SDK. Set ANDROID_HOME or run:\n  make android-start-emulator", file=sys.stderr)
     return None
 
 
@@ -54,7 +62,7 @@ def _find_tool(name: str, sdk_root: str) -> str | None:
             return candidate
 
     print(
-        f"Could not find '{name}'. Run 'make android-setup-emulator' first.\nSearched PATH and {sdk_root}",
+        f"Could not find '{name}'. Run 'make android-start-emulator' first.\nSearched PATH and {sdk_root}",
         file=sys.stderr,
     )
     return None

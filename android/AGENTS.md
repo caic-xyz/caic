@@ -64,10 +64,11 @@ python3 scripts/android_e2e.py --module halo-sdk
 ## Emulator
 
 ```bash
-make android-setup-emulator
 make android-start-emulator
 make android-stop-emulator
 ```
+
+`make android-start-emulator` runs setup first.
 
 The emulator reaches the host at `10.0.2.2`. For a fake caic backend:
 

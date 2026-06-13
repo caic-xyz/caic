@@ -4,49 +4,40 @@ Guide for debugging the caic Android app when a physical device is unavailable.
 
 ## Prerequisites
 
-- Android SDK with build-tools and platform `android-36` (preinstalled in the dev container)
-- A system image: `system-images;android-35;google_apis;x86_64`
-- KVM access (`/dev/kvm` must exist for hardware acceleration)
+- A host that can run the Android emulator. On Linux, `/dev/kvm` must exist for
+  hardware acceleration.
 - The caic backend running (real or fake mode)
 
-## One-Time Setup
+## Start The Emulator
 
-You can use the make target to automate the system image installation and AVD creation:
-
-```bash
-make android-setup-emulator
-```
-
-Or perform the steps manually:
-
-### 1. Install the system image and create an AVD
-
-```bash
-yes | sdkmanager --install "system-images;android-36;google_apis;x86_64"
-echo "no" | avdmanager create avd -n caic_test -k "system-images;android-36;google_apis;x86_64" -d "pixel_6" --force
-```
-
-We use Android 36 because it is the target SDK.
-The `google_apis` variant is required for Google Play Services compatibility.
-
-### 2. Start the emulator headless
-
-You can use the make target:
+The start target installs required SDK packages, creates the AVD if needed, then
+starts the emulator and waits for boot:
 
 ```bash
 make android-start-emulator
 ```
 
-Or start it manually:
+The start script runs the emulator with these flags:
 
 ```bash
 $ANDROID_HOME/emulator/emulator -avd caic_test \
     -no-window -no-audio -gpu swiftshader_indirect -no-boot-anim -wipe-data &
 ```
 
-### 3. Stop the emulator
+Flags:
+- `-no-window`: no GUI (required in headless/SSH environments)
+- `-no-audio`: skip host audio (emulator mic sends silence; see Limitations)
+- `-gpu swiftshader_indirect`: software rendering (works without GPU passthrough)
+- `-no-boot-anim`: faster boot
+- `-wipe-data`: clean state each time
 
-Use the make target:
+Check the connected device when debugging adb state:
+
+```bash
+adb devices  # should show <device-id>
+```
+
+Stop the emulator:
 
 ```bash
 make android-stop-emulator
@@ -58,21 +49,7 @@ Or manually:
 adb emu kill
 ```
 
-Flags:
-- `-no-window`: no GUI (required in headless/SSH environments)
-- `-no-audio`: skip host audio (emulator mic sends silence — see Limitations)
-- `-gpu swiftshader_indirect`: software rendering (works without GPU passthrough)
-- `-no-boot-anim`: faster boot
-- `-wipe-data`: clean state each time
-
-Wait for the device:
-
-```bash
-adb wait-for-device
-adb devices  # should show <device-id>
-```
-
-### 3. Grant permissions upfront
+## Grant Permissions Upfront
 
 Skip runtime permission dialogs:
 
@@ -81,7 +58,7 @@ adb -s <device-id> shell pm grant com.fghbuild.caic android.permission.RECORD_AU
 adb -s <device-id> shell pm grant com.fghbuild.caic android.permission.POST_NOTIFICATIONS
 ```
 
-### 4. Set up port forwarding
+## Set Up Port Forwarding
 
 The emulator needs to reach the backend. Use `adb reverse` so `localhost:2242`
 inside the emulator maps to the host:
