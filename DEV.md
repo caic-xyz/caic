@@ -6,7 +6,7 @@ Dependencies to build locally from scratch including the frontend:
 - brotli
 - make
 - node
-- pnpm
+- pnpm 11 or newer
 
 Then run:
 
