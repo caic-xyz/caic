@@ -280,7 +280,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	ciService := ci.NewService(cache, provider, ciAdapter)
 	botService := bot.New(ctx, botClient)
 
-	ipgeoChecker, err := ipgeo.NewChecker(ctx, cfg.IPGeo.Allowlist, cfg.IPGeo.DB, "")
+	ipgeoChecker, err := ipgeo.NewChecker(ctx, cfg.IPGeo.Allowlist, cfg.IPGeo.DB, cfg.Dirs.CacheDir)
 	if err != nil {
 		return nil, fmt.Errorf("ipgeo: %w", err)
 	}

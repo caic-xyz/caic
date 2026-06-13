@@ -238,10 +238,10 @@ type DebugConfig struct {
 type IPGeoConfig struct {
 	// DB is the path to a MaxMind MMDB file (e.g. GeoLite2-Country.mmdb).
 	DB string
-	// Allowlist is a comma-separated list of permitted country codes and
-	// special values "local" and "tailscale". When set, requests from IPs that
-	// do not resolve to an allowed value are rejected with 403. Requires DB when
-	// any token is not "local" or "tailscale".
+	// Allowlist is a comma-separated list of permitted country codes, CIDRs, and
+	// named origins: "local", "tailscale", "anthropic", "github", and "openai".
+	// When set, requests from IPs that do not resolve to an allowed value are
+	// rejected with 403. Requires DB for country-code tokens.
 	Allowlist string
 }
 

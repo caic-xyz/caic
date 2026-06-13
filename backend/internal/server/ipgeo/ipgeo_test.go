@@ -3,11 +3,12 @@
 package ipgeo
 
 import (
-	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"testing"
+	"time"
 )
 
 func TestGetClientIP(t *testing.T) {
@@ -83,12 +84,24 @@ func TestCountryCode(t *testing.T) {
 	t.Run("named CIDR groups", func(t *testing.T) {
 		t.Parallel()
 		c := &Checker{namedCIDRs: []namedPrefix{
+			{name: "anthropic", prefix: anthropicOutboundPrefix},
 			{name: "github", prefix: netip.MustParsePrefix("192.30.252.0/22")},
 			{name: "github", prefix: netip.MustParsePrefix("185.199.108.0/22")},
+			{name: "openai", prefix: netip.MustParsePrefix("20.0.53.96/28")},
 		}}
-		for _, ip := range []string{"192.30.252.1", "192.30.255.255", "185.199.108.0", "185.199.111.255"} {
-			if got := c.CountryCode(ip); got != "github" {
-				t.Errorf("CountryCode(%q) = %q, want %q", ip, got, "github")
+		for _, tt := range []struct {
+			ip   string
+			want string
+		}{
+			{ip: "160.79.104.1", want: "anthropic"},
+			{ip: "192.30.252.1", want: "github"},
+			{ip: "192.30.255.255", want: "github"},
+			{ip: "185.199.108.0", want: "github"},
+			{ip: "185.199.111.255", want: "github"},
+			{ip: "20.0.53.100", want: "openai"},
+		} {
+			if got := c.CountryCode(tt.ip); got != tt.want {
+				t.Errorf("CountryCode(%q) = %q, want %q", tt.ip, got, tt.want)
 			}
 		}
 		// Local/tailscale take priority over named CIDRs (they wouldn't overlap in practice).
@@ -207,11 +220,15 @@ func TestNeedsDB(t *testing.T) {
 		{"local", false},
 		{"tailscale", false},
 		{"local,tailscale", false},
-		{"github", false}, // named origin — no DB needed
+		{"anthropic", false}, // named origin — no DB needed
+		{"github", false},    // named origin — no DB needed
+		{"openai", false},    // named origin — no DB needed
 		{"CA", true},
 		{"local,CA", true},
 		{"tailscale,US", true},
+		{"anthropic,CA", true},    // named origin + country code — DB needed
 		{"github,CA", true},       // named origin + country code — DB needed
+		{"openai,CA", true},       // named origin + country code — DB needed
 		{"34.74.90.64/28", false}, // CIDR only — no DB needed
 		{"34.74.90.64/28,local", false},
 		{"34.74.90.64/28,CA", true},
@@ -229,17 +246,22 @@ func TestNeedsDB(t *testing.T) {
 
 func TestNewChecker(t *testing.T) {
 	t.Parallel()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"hooks": []string{"192.30.252.0/22", "185.199.108.0/22"},
-		})
-	}))
-	t.Cleanup(srv.Close)
 
-	t.Run("github in allowlist fetches CIDRs", func(t *testing.T) {
+	t.Run("anthropic in allowlist uses static CIDR", func(t *testing.T) {
 		t.Parallel()
-		c, err := NewChecker(t.Context(), "local,tailscale,github", "", srv.URL+"/meta")
+		c, err := NewChecker(t.Context(), "local,tailscale,anthropic", "", "")
+		if err != nil {
+			t.Fatalf("NewChecker: %v", err)
+		}
+		if got := c.CountryCode("160.79.104.1"); got != "anthropic" {
+			t.Errorf("CountryCode(anthropic ip) = %q, want %q", got, "anthropic")
+		}
+	})
+	t.Run("github in allowlist uses cached CIDRs", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeOriginCache(t, dir, "github", time.Now(), []string{"192.30.252.0/22", "185.199.108.0/22"})
+		c, err := NewChecker(t.Context(), "local,tailscale,github", "", dir)
 		if err != nil {
 			t.Fatalf("NewChecker: %v", err)
 		}
@@ -263,8 +285,9 @@ func TestNewChecker(t *testing.T) {
 	})
 	t.Run("fetch failure is non-fatal", func(t *testing.T) {
 		t.Parallel()
-		if _, err := NewChecker(t.Context(), "local,tailscale,github", "", "http://127.0.0.1:0/meta"); err != nil {
-			t.Errorf("NewChecker should not fail on fetch error: %v", err)
+		source := &testOriginSource{name: "github", err: errors.New("offline")}
+		if prefixes := resolveOriginPrefixes(t.Context(), nil, source); len(prefixes) != 0 {
+			t.Errorf("resolveOriginPrefixes returned %v, want none", prefixes)
 		}
 	})
 	t.Run("country code without DB returns error", func(t *testing.T) {
