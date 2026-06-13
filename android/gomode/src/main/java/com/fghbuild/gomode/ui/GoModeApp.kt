@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -32,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -134,6 +137,8 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
         ?.voiceGateway
         ?.url
         ?.isNotBlank() == true
+    val density = LocalDensity.current
+    val keyboardOpen = WindowInsets.ime.getBottom(density) > 0
 
     LaunchedEffect(voiceState.errorId) {
         val error = voiceState.error ?: return@LaunchedEffect
@@ -159,7 +164,13 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            Box(modifier = Modifier.weight(1f)) {
+            // Resize hosted WebViews above the IME. Without native IME insets, Android WebView
+            // keeps reporting a full-height viewport and fixed bottom web inputs sit under the keyboard.
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .imePadding(),
+            ) {
                 GoModeContent(
                     settings = settings,
                     settingsRepository = settingsRepository,
@@ -171,28 +182,30 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
                     onReload = { reloadToken += 1 },
                 )
             }
-            VoicePanel(
-                voiceState = voiceState,
-                voiceEnabled = voiceAvailable,
-                onConnect = {
-                    if (ContextCompat.checkSelfPermission(
-                            context,
-                            Manifest.permission.RECORD_AUDIO,
-                        ) == PackageManager.PERMISSION_GRANTED
-                    ) {
-                        voiceSession.connect()
-                    } else {
-                        onMicGranted = { voiceSession.connect() }
-                        micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                    }
-                },
-                onDisconnect = { voiceSession.disconnect() },
-                onToggleMute = { voiceSession.toggleMute() },
-                onSelectDevice = { voiceSession.selectAudioDevice(it) },
-                onClearTranscript = { voiceSession.clearTranscript() },
-                onOpenSettings = { activeNativeScreen = NativeScreen.Settings },
-                modifier = Modifier.fillMaxWidth(),
-            )
+            if (!keyboardOpen) {
+                VoicePanel(
+                    voiceState = voiceState,
+                    voiceEnabled = voiceAvailable,
+                    onConnect = {
+                        if (ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.RECORD_AUDIO,
+                            ) == PackageManager.PERMISSION_GRANTED
+                        ) {
+                            voiceSession.connect()
+                        } else {
+                            onMicGranted = { voiceSession.connect() }
+                            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        }
+                    },
+                    onDisconnect = { voiceSession.disconnect() },
+                    onToggleMute = { voiceSession.toggleMute() },
+                    onSelectDevice = { voiceSession.selectAudioDevice(it) },
+                    onClearTranscript = { voiceSession.clearTranscript() },
+                    onOpenSettings = { activeNativeScreen = NativeScreen.Settings },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
     }
 }

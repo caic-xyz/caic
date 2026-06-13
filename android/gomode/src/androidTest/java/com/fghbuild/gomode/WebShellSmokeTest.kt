@@ -6,9 +6,13 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.uiautomator.UiDevice
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlin.math.roundToInt
 
 @RunWith(AndroidJUnit4::class)
 class WebShellSmokeTest : GoModeE2eTestBase() {
@@ -82,13 +86,123 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
     }
 
     @Test
+    fun webShellResizesAboveKeyboardForHostedTextInput() {
+        openWebShell()
+        loadHostedTestPage()
+        waitForDom("test prompt loaded") { "document.getElementById('prompt') !== null" }
+
+        try {
+            tapDomElement("prompt")
+
+            composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) {
+                val imeTop = imeTopOrNull() ?: return@waitUntil false
+                webViewScreenBottom() <= imeTop + SCREEN_EDGE_TOLERANCE_PX
+            }
+        } finally {
+            UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).pressBack()
+        }
+    }
+
+    @Test
     fun gomodePackageNameIsAppSpecific() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertEquals("com.fghbuild.gomode", context.packageName)
     }
 
+    private fun loadHostedTestPage() {
+        val latch = CountDownLatch(1)
+        val view = waitForWebView()
+        composeRule.activity.runOnUiThread {
+            view.loadDataWithBaseURL(baseUrl, IME_TEST_PAGE, "text/html", "UTF-8", null)
+            latch.countDown()
+        }
+        check(latch.await(JS_TIMEOUT_MS, TimeUnit.MILLISECONDS)) { "Test page load timed out" }
+    }
+
+    private fun tapDomElement(id: String) {
+        val view = waitForWebView()
+        val widthScale = view.width / js("window.innerWidth").toFloat()
+        val xCss = js(
+            """
+            (() => {
+              const r = document.getElementById('$id').getBoundingClientRect();
+              return r.left + r.width / 2;
+            })()
+            """.trimIndent(),
+        ).toFloat()
+        val yCss = js(
+            """
+            (() => {
+              const r = document.getElementById('$id').getBoundingClientRect();
+              return r.top + r.height / 2;
+            })()
+            """.trimIndent(),
+        ).toFloat()
+        val location = webViewScreenLocation()
+        UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).click(
+            location[0] + (xCss * widthScale).roundToInt(),
+            location[1] + (yCss * widthScale).roundToInt(),
+        )
+    }
+
+    private fun imeTopOrNull(): Int? {
+        var top: Int? = null
+        val latch = CountDownLatch(1)
+        composeRule.activity.runOnUiThread {
+            val root = composeRule.activity.window.decorView.rootView
+            val imeBottom = root.rootWindowInsets
+                ?.getInsets(android.view.WindowInsets.Type.ime())
+                ?.bottom
+                ?: 0
+            if (imeBottom > 0) {
+                top = root.height - imeBottom
+            }
+            latch.countDown()
+        }
+        check(latch.await(JS_TIMEOUT_MS, TimeUnit.MILLISECONDS)) { "IME inset lookup timed out" }
+        return top
+    }
+
+    private fun webViewScreenBottom(): Int {
+        val view = waitForWebView()
+        val location = webViewScreenLocation()
+        return location[1] + view.height
+    }
+
+    private fun webViewScreenLocation(): IntArray {
+        val view = waitForWebView()
+        val location = IntArray(2)
+        val latch = CountDownLatch(1)
+        composeRule.activity.runOnUiThread {
+            view.getLocationOnScreen(location)
+            latch.countDown()
+        }
+        check(latch.await(JS_TIMEOUT_MS, TimeUnit.MILLISECONDS)) { "WebView bounds lookup timed out" }
+        return location
+    }
+
     companion object {
         private const val BACK_TEST_PATH = "/gomode-e2e-route"
         private const val SQL_JOKE_PREFIX = "A SQL query walks into a bar"
+        private const val SCREEN_EDGE_TOLERANCE_PX = 8
+        private const val JS_TIMEOUT_MS = 5_000L
+        private val IME_TEST_PAGE = """
+            <!doctype html>
+            <html>
+              <head>
+                <meta name="viewport" content="width=device-width, initial-scale=1" />
+                <style>
+                  html, body { margin: 0; height: 100%; }
+                  body { display: flex; flex-direction: column; font-family: sans-serif; }
+                  main { flex: 1; }
+                  #prompt { min-height: 44px; border: 1px solid #999; padding: 12px; }
+                </style>
+              </head>
+              <body>
+                <main>Hosted content</main>
+                <div id="prompt" role="textbox" contenteditable="true">Prompt</div>
+              </body>
+            </html>
+        """.trimIndent()
     }
 }
