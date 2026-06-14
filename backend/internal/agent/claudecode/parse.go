@@ -49,18 +49,6 @@ type TodoInput struct {
 // built on first use. Uses sync.Map: few writes (once per type), many reads.
 var outputKnownFields sync.Map
 
-var extraKnownOutputFields = map[string][]string{
-	"OutputInitMsg": {
-		"analytics_disabled",
-		"product_feedback_disabled",
-	},
-	"OutputResultMsg": {
-		"ttft_ms",
-		"ttft_stream_ms",
-		"time_to_request_ms",
-	},
-}
-
 // unmarshalOutput unmarshals data into v and warns via fw for any unknown
 // JSON fields. The name identifies the type for logging.
 func unmarshalOutput(data []byte, v any, name string, fw *jsonutil.FieldWarner) error {
@@ -75,12 +63,6 @@ func unmarshalOutput(data []byte, v any, name string, fw *jsonutil.FieldWarner) 
 	if !ok2 {
 		return fmt.Errorf("outputKnownFields stored unexpected type %T", val)
 	}
-	if extra := extraKnownOutputFields[name]; len(extra) > 0 {
-		known = cloneFieldSet(known)
-		for _, k := range extra {
-			known[k] = struct{}{}
-		}
-	}
 	if fw != nil {
 		var raw map[string]json.RawMessage
 		if json.Unmarshal(data, &raw) == nil {
@@ -89,14 +71,6 @@ func unmarshalOutput(data []byte, v any, name string, fw *jsonutil.FieldWarner) 
 		fw.WarnOverflows(name, v)
 	}
 	return nil
-}
-
-func cloneFieldSet(in map[string]struct{}) map[string]struct{} {
-	out := make(map[string]struct{}, len(in))
-	for k := range in {
-		out[k] = struct{}{}
-	}
-	return out
 }
 
 // WidgetTracker tracks which content block indices are widget tools during

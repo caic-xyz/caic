@@ -18,7 +18,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/invopop/jsonschema"
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers"
 	"github.com/maruel/genai/providers/llamacpp"
@@ -422,10 +421,13 @@ func genaiToolDefs(tools []voicev1.ToolDeclaration) ([]genai.ToolDef, error) {
 	out := make([]genai.ToolDef, len(tools))
 	var errs []error
 	for i := range tools {
-		schema := &jsonschema.Schema{Type: "object"}
+		schema := genai.JSONSchema(`{"type":"object"}`)
 		if len(tools[i].Parameters) != 0 {
-			if err := json.Unmarshal(tools[i].Parameters, schema); err != nil {
+			var schemaObject map[string]json.RawMessage
+			if err := json.Unmarshal(tools[i].Parameters, &schemaObject); err != nil {
 				errs = append(errs, fmt.Errorf("tool %q parameters: %w", tools[i].Name, err))
+			} else {
+				schema = append(genai.JSONSchema(nil), tools[i].Parameters...)
 			}
 		}
 		out[i] = genai.ToolDef{

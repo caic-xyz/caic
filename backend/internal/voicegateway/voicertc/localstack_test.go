@@ -286,8 +286,14 @@ func TestGenaiToolDefs(t *testing.T) {
 		if tools[0].Name != "tasks_list" {
 			t.Errorf("Name = %q, want tasks_list", tools[0].Name)
 		}
-		if tools[0].InputSchemaOverride == nil || tools[0].InputSchemaOverride.Type != "object" {
-			t.Errorf("InputSchemaOverride = %#v, want object schema", tools[0].InputSchemaOverride)
+		var schema struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(tools[0].InputSchemaOverride, &schema); err != nil {
+			t.Fatal(err)
+		}
+		if schema.Type != "object" {
+			t.Errorf("InputSchemaOverride type = %q, want object", schema.Type)
 		}
 	})
 

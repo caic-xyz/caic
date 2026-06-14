@@ -4,6 +4,7 @@ package claudecode
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 
 	genclaudecode "github.com/maruel/genai/providers/claudecode"
@@ -77,6 +78,54 @@ func TestAPIMessage(t *testing.T) {
 			t.Errorf("AppliedEdits[1].ClearedThinkingTurns = %d, want 7", edit.ClearedThinkingTurns)
 		}
 	})
+}
+
+func TestOutputKnownFields(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		typ  any
+		line string
+	}{
+		{
+			name: "OutputSystemMsg",
+			typ:  genclaudecode.OutputSystemMsg{},
+			line: `{"type":"system","subtype":"task_started","task_id":"task-abc","tool_use_id":"toolu_1","description":"Find harness/model selection logic","subagent_type":"Explore","task_type":"local_agent","prompt":"Find harness/model selection logic","uuid":"u1","session_id":"s1"}`,
+		},
+		{
+			name: "OutputUserMsg",
+			typ:  genclaudecode.OutputUserMsg{},
+			line: `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Find harness/model selection logic"}]},"parent_tool_use_id":"toolu_1","session_id":"s1","uuid":"u1","timestamp":"2026-06-13T20:16:11.423Z","subagent_type":"Explore","task_description":"Find harness/model selection logic"}`,
+		},
+		{
+			name: "OutputAssistantMsg",
+			typ:  genclaudecode.OutputAssistantMsg{},
+			line: `{"type":"assistant","message":{"model":"claude-opus-4-8","id":"msg_1","type":"message","role":"assistant","content":[],"usage":{}},"parent_tool_use_id":"toolu_1","session_id":"s1","uuid":"u1","subagent_type":"Explore","task_description":"Find harness/model selection logic"}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			known := jsonutil.KnownFields(tt.typ)
+			var raw map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(tt.line), &raw); err != nil {
+				t.Fatal(err)
+			}
+			unknown := jsonutil.CollectUnknown(raw, known)
+			if len(unknown) != 0 {
+				t.Fatalf("unknown fields = %v, want none", sortedRawMessageKeys(unknown))
+			}
+		})
+	}
+}
+
+func sortedRawMessageKeys(m map[string]json.RawMessage) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
 }
 
 func TestParseMessage(t *testing.T) {
