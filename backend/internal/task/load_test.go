@@ -849,6 +849,34 @@ func TestLoadedTask(t *testing.T) {
 				t.Fatal("Result not restored from tail")
 			}
 		})
+		t.Run("CompressedTailKeepsBoundedRecentLines", func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "compressed", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude"})
+			oldMsg := claudeAssistant(t, map[string]any{"type": "text", "text": "old output"})
+			recentMsg := claudeAssistant(t, map[string]any{"type": "text", "text": "recent output"})
+			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+			writeCompressedLogFile(t, dir, "compressed.jsonl.zst", seqOf(meta, oldMsg, recentMsg, trailer))
+
+			path := filepath.Join(dir, "compressed.jsonl.zst")
+			lt, err := loadLogFileTail(path, claudecode.New().NewWire().ParseMessage, int64(len(recentMsg)+len(trailer)+2))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if lt.Result == nil || lt.State != StatePurged {
+				t.Fatalf("Result = %+v, State = %v", lt.Result, lt.State)
+			}
+			if len(lt.Msgs) != 1 {
+				t.Fatalf("Msgs len = %d, want 1", len(lt.Msgs))
+			}
+			msg, ok := lt.Msgs[0].(*agent.TextMessage)
+			if !ok {
+				t.Fatalf("Msgs[0] = %T, want *agent.TextMessage", lt.Msgs[0])
+			}
+			if msg.Text != "recent output" {
+				t.Errorf("Text = %q, want recent output", msg.Text)
+			}
+		})
 		t.Run("AlreadyLoaded", func(t *testing.T) {
 			t.Parallel()
 			lt := &LoadedTask{Msgs: []agent.Message{&agent.TextMessage{Text: "cached"}}}

@@ -156,6 +156,25 @@ function makeSyncReadyMock(
   });
 }
 
+function makeManualReadyMock(
+  created: FakeES[],
+  capturedCb: { value: ((ev: EventMessage) => void) | null },
+  readyHandler: { value: (() => void) | null },
+) {
+  vi.mocked(taskEvents).mockImplementation((_id, cb) => {
+    capturedCb.value = cb as (ev: EventMessage) => void;
+    const fakeES: FakeES = {
+      addEventListener: vi.fn((event: string, handler: () => void) => {
+        if (event === "ready") readyHandler.value = handler;
+      }),
+      close: vi.fn(),
+      onerror: null,
+    };
+    created.push(fakeES);
+    return fakeES as unknown as EventSource;
+  });
+}
+
 describe("SSE connection", () => {
   beforeEach(() => {
     // Fake timers so we can control setTimeout (reconnect delays) and
@@ -220,6 +239,26 @@ describe("SSE connection", () => {
 
     expect(document.body.textContent).toContain("planning tool 1");
     expect(document.body.textContent).toContain("planning tool 2");
+  });
+
+  it("replayed textDelta events appear before the SSE ready marker", () => {
+    // Replayed history can be huge; the UI must render it incrementally instead
+    // of buffering every event until the server sends ready.
+    const created: FakeES[] = [];
+    const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
+    const readyHandler = { value: null as (() => void) | null };
+    makeManualReadyMock(created, capturedCb, readyHandler);
+
+    renderTaskDetail();
+
+    if (!capturedCb.value) throw new Error("taskEvents callback not captured");
+    capturedCb.value({ kind: "textDelta", ts: 1, textDelta: { text: "replayed output" } });
+
+    // Flush the rAF batch: vi.useFakeTimers() polyfills rAF as setTimeout(fn, 16).
+    vi.advanceTimersByTime(20);
+
+    expect(document.body.textContent).toContain("replayed output");
+    expect(readyHandler.value).not.toBeNull();
   });
 
   it("live textDelta events appear in the message list after SSE fires them", () => {

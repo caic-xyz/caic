@@ -37,6 +37,11 @@ type typeEnvelope struct {
 	Type string `json:"type"`
 }
 
+func decodeTypeEnvelope(line []byte) (typeEnvelope, bool) {
+	var env typeEnvelope
+	return env, json.Unmarshal(line, &env) == nil
+}
+
 // tailInit is the subset of a system/init message parsed from the tail scan.
 type tailInit struct {
 	Subtype string `json:"subtype"`
@@ -223,10 +228,10 @@ func (lt *LoadedTask) LoadSessionMetadata() error {
 // tail only, skipping older messages to avoid OOM.
 const maxTailLoadBytes = 64 << 20 // 64 MiB
 
-// LoadMessagesTail loads messages from the log file, reading only the tail if
-// the file is larger than maxTailLoadBytes. This is used for on-demand loading
-// (SSE events endpoint) to avoid OOM on multi-GB log files. Metadata (PR,
-// result, diff stat) is always extracted from the tail since it's appended last.
+// LoadMessagesTail loads messages from the log file, reading only the tail when
+// the log may be large. This is used for on-demand loading to avoid OOM on
+// multi-GB log files. Plain logs can seek to the tail; compressed logs are
+// scanned once while retaining only the tail window in memory.
 func (lt *LoadedTask) LoadMessagesTail() error {
 	if lt.Msgs != nil || lt.path == "" {
 		return nil
@@ -234,8 +239,10 @@ func (lt *LoadedTask) LoadMessagesTail() error {
 	if lt.parseFn == nil {
 		return fmt.Errorf("no parser set for harness %q; call SetParser first", lt.Harness)
 	}
-	// For small files, use the regular full load.
-	if lt.LogSize <= maxTailLoadBytes {
+	// For small plain files, use the regular full load. Compressed files are
+	// measured by compressed bytes on disk, so their decompressed history can be
+	// much larger than LogSize; keep them on the bounded tail path.
+	if !isLogCompressed(lt.path) && lt.LogSize <= maxTailLoadBytes {
 		return lt.LoadMessages()
 	}
 	slog.Info("load: reading tail only", "path", lt.path, "size", lt.LogSize, "tail", maxTailLoadBytes)
@@ -260,11 +267,10 @@ func (lt *LoadedTask) LoadMessagesTail() error {
 }
 
 // StreamMessages streams the task's conversation messages directly from the log
-// file, yielding each in order without materializing them into Msgs. For logs
-// larger than maxTailLoadBytes only the tail is replayed (matching
-// LoadMessagesTail). Memory usage is O(1) regardless of log size, so it is the
-// preferred path for replaying terminal tasks to SSE clients without retaining
-// the full history in memory.
+// file, yielding each in order without materializing them into Msgs. Memory
+// usage is O(1) regardless of log size, so it is the preferred path for
+// replaying terminal tasks to SSE clients without retaining the full history in
+// memory.
 func (lt *LoadedTask) StreamMessages() iter.Seq2[agent.Message, error] {
 	return func(yield func(agent.Message, error) bool) {
 		if lt.path == "" {
@@ -893,7 +899,7 @@ func loadLogFile(path string, parseFn func([]byte) ([]agent.Message, error)) (_ 
 // remaining lines. This avoids loading multi-GB files into memory.
 func loadLogFileTail(path string, parseFn func([]byte) ([]agent.Message, error), tailBytes int64) (_ *LoadedTask, retErr error) {
 	if isLogCompressed(path) {
-		return loadLogFile(path, parseFn)
+		return loadCompressedLogFileTail(path, parseFn, tailBytes)
 	}
 	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
@@ -1017,6 +1023,150 @@ func loadLogFileTail(path string, parseFn func([]byte) ([]agent.Message, error),
 		}
 	}
 	return lt, scanner.Err()
+}
+
+// loadCompressedLogFileTail scans a zstd log once and retains only the latest
+// decompressed JSONL records bounded by tailBytes.
+func loadCompressedLogFileTail(path string, parseFn func([]byte) ([]agent.Message, error), tailBytes int64) (_ *LoadedTask, retErr error) {
+	f, err := openLogReader(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err2 := f.Close(); retErr == nil {
+			retErr = err2
+		}
+	}()
+
+	info, err := os.Stat(filepath.Clean(path))
+	if err != nil {
+		return nil, err
+	}
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
+	if !scanner.Scan() {
+		return nil, errNotLogFile
+	}
+	var meta agent.MetaMessage
+	if err := unmarshalMeta(scanner.Bytes(), &meta, &jsonutil.FieldWarner{}); err != nil {
+		return nil, errNotLogFile
+	}
+	if err := meta.Validate(); err != nil {
+		return nil, err
+	}
+
+	repos := make([]RepoMount, len(meta.Repos))
+	for i, mr := range meta.Repos {
+		repos[i] = RepoMountFromMeta(mr, "")
+	}
+	lt := &LoadedTask{
+		Prompt:            meta.Prompt,
+		Title:             meta.Title,
+		Repos:             repos,
+		Harness:           meta.Harness,
+		Model:             meta.Model,
+		Effort:            meta.Effort,
+		StartedAt:         meta.StartedAt,
+		LastStateUpdateAt: info.ModTime().UTC(),
+		State:             StateRunning,
+		ForgeIssue:        meta.ForgeIssue,
+		Tailscale:         meta.Tailscale,
+		USB:               meta.USB,
+		Display:           meta.Display,
+		Sudo:              meta.Sudo,
+		GitHubToken:       meta.GitHubToken,
+		LogSize:           info.Size(),
+	}
+
+	var lines [][]byte
+	var total int64
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		line = bytes.Clone(line)
+		lines = append(lines, line)
+		total += int64(len(line) + 1)
+		for total > tailBytes && len(lines) > 1 {
+			total -= int64(len(lines[0]) + 1)
+			lines = lines[1:]
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	for _, line := range lines {
+		if err := applyLoadedLogLine(lt, line, parseFn, path); err != nil {
+			return nil, err
+		}
+	}
+	return lt, nil
+}
+
+func applyLoadedLogLine(lt *LoadedTask, line []byte, parseFn func([]byte) ([]agent.Message, error), path string) error {
+	envelope, ok := decodeTypeEnvelope(line)
+	if !ok {
+		return nil
+	}
+
+	switch envelope.Type {
+	case "caic_session", "caic_init":
+		applySessionMetadataLine(lt, envelope.Type, line)
+
+	case "caic_pr":
+		var mp agent.MetaPRMessage
+		if json.Unmarshal(line, &mp) == nil && mp.ForgePR > 0 {
+			lt.ForgeOwner = mp.ForgeOwner
+			lt.ForgeRepo = mp.ForgeRepo
+			lt.ForgePR = mp.ForgePR
+		}
+
+	case "caic_diff_stat":
+		var ds agent.DiffStatMessage
+		if json.Unmarshal(line, &ds) == nil && ds.Ts > 0 {
+			if t := tsToTime(ds.Ts); t.After(lt.LastStateUpdateAt) {
+				lt.LastStateUpdateAt = t
+			}
+		}
+
+	case "caic_result":
+		var mr agent.MetaResultMessage
+		if err := json.Unmarshal(line, &mr); err != nil {
+			return fmt.Errorf("invalid caic_result: %w", err)
+		}
+		lt.State = parseState(mr.State)
+		if mr.Title != "" {
+			lt.Title = mr.Title
+		}
+		lt.Result = &Result{
+			State:    lt.State,
+			CostUSD:  mr.CostUSD,
+			Duration: time.Duration(mr.Duration * float64(time.Second)),
+			NumTurns: mr.NumTurns,
+			Usage: agent.Usage{
+				InputTokens:              mr.InputTokens,
+				OutputTokens:             mr.OutputTokens,
+				CacheCreationInputTokens: mr.CacheCreationInputTokens,
+				CacheReadInputTokens:     mr.CacheReadInputTokens,
+			},
+			DiffStat:    mr.DiffStat,
+			AgentResult: mr.AgentResult,
+		}
+		if mr.Error != "" {
+			lt.Result.Err = errors.New(mr.Error)
+		}
+
+	default:
+		parsed, err := parseFn(line)
+		if err != nil {
+			slog.Warn("failed to parse message", "err", err, "path", path)
+			return nil
+		}
+		lt.Msgs = append(lt.Msgs, parsed...)
+	}
+	return nil
 }
 
 // tsToTime converts a Unix epoch float64 (seconds with sub-second precision)

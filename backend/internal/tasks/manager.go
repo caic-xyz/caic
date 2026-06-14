@@ -1683,7 +1683,7 @@ func (m *Manager) setParser(lt *task.LoadedTask) {
 func (m *Manager) loadTaskMessagesOnDemand(entry *Entry) {
 	entry.LoadMessagesOnce(func() {
 		lt := entry.LoadedTask()
-		if err := lt.LoadMessages(); err != nil {
+		if err := lt.LoadMessagesTail(); err != nil {
 			slog.Warn("lazy load messages failed", "task", entry.Task().ID, "err", err)
 			return
 		}

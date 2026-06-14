@@ -359,36 +359,42 @@ export default function TaskDetail(props: Props) {
     let es: EventSource | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let delay = 500;
-    // Buffer accumulates replayed history; swapped into signal on "ready" event.
-    let buf: EventMessage[] = [];
     let live = false;
-    // rAF batching for live events: reduces setMessages calls from one-per-event
-    // to one-per-frame, cutting O(n²) streaming overhead to O(n/fps).
-    let pendingLive: EventMessage[] = [];
+    // rAF batching covers both history replay and live events: it streams large
+    // replays into the UI while still reducing setMessages calls to one per frame.
+    let pendingEvents: EventMessage[] = [];
     let rafId: number | null = null;
+    let replaceOnNextFlush = true;
 
-    function flushLive() {
+    function flushPendingEvents() {
       rafId = null;
-      const evs = pendingLive;
-      pendingLive = [];
+      const evs = pendingEvents;
+      pendingEvents = [];
+      if (evs.length === 0) return;
       // Each ExitPlanMode event keeps its own planContent snapshot so the evolution
       // of the plan is visible at each point it was written.
-      setMessages((prev) => [...prev, ...evs]);
+      if (replaceOnNextFlush) {
+        setMessages(evs);
+        replaceOnNextFlush = false;
+      } else {
+        setMessages((prev) => [...prev, ...evs]);
+      }
+    }
+
+    function scheduleFlush() {
+      if (rafId === null) rafId = requestAnimationFrame(flushPendingEvents);
     }
 
     function connect() {
       // Close any stale connection that may exist if connect() is called while
       // a previous EventSource is still open (e.g. from a duplicate timer fire).
       es?.close();
-      buf = [];
+      pendingEvents = [];
       live = false;
+      replaceOnNextFlush = true;
       es = taskEvents(id, (ev) => {
-        if (live) {
-          pendingLive.push(ev);
-          if (rafId === null) rafId = requestAnimationFrame(flushLive);
-        } else {
-          buf.push(ev);
-        }
+        pendingEvents.push(ev);
+        scheduleFlush();
       }, (err) => {
         const msg = err instanceof Error ? err.message : String(err);
         untrack(() => props.onError(`Task event error: ${msg}`));
@@ -397,10 +403,17 @@ export default function TaskDetail(props: Props) {
         delay = 500;
       });
       // The server sends a "ready" event after replaying full history.
-      // Swap the buffer in atomically to avoid a flash of empty content.
+      // Flush any final replay events before switching reconnect handling to live mode.
       es.addEventListener("ready", () => {
+        if (rafId !== null) {
+          cancelAnimationFrame(rafId);
+          flushPendingEvents();
+        }
+        if (replaceOnNextFlush) {
+          setMessages([]);
+          replaceOnNextFlush = false;
+        }
         live = true;
-        setMessages(buf);
       });
       es.onerror = () => {
         es?.close();
@@ -427,8 +440,8 @@ export default function TaskDetail(props: Props) {
       if (rafId !== null) {
         cancelAnimationFrame(rafId);
         rafId = null;
-        pendingLive = [];
       }
+      pendingEvents = [];
       // Reset incremental grouping cache on disconnect.
       resetGroupIncCache();
     });
