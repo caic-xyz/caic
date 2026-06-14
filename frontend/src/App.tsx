@@ -9,7 +9,7 @@ import RepoChipStrip from "./components/RepoChipStrip";
 import LoginPage from "./pages/LoginPage";
 import AutoResizeTextarea from "./components/AutoResizeTextarea";
 import Button from "./components/Button";
-import { ControlSelect, ToggleChip } from "./components/FormControls";
+import { HarnessControls, ToggleChip } from "./components/FormControls";
 import UsageBadges from "./components/UsageBadges";
 import VoiceOverlay from "./components/VoiceOverlay";
 import CloneRepoDialog from "./components/CloneRepoDialog";
@@ -141,62 +141,34 @@ function Shell(props: { children?: JSX.Element }) {
             />
           </Show>
           <div class={styles.forkRow}>
-            <Show when={s.harnesses().length > 1}>
-              <ControlSelect
-                aria-label="Fork harness"
-                value={s.forkHarness()}
-                onChange={(e) => {
-                  const h = e.currentTarget.value;
-                  s.setForkHarness(h);
-                  const models = s.harnesses().find((x) => x.name === h)?.models ?? [];
-                  const prefModel = s.getPrefModel(h);
-                  const model = prefModel && models.includes(prefModel) ? prefModel : "";
-                  s.setForkModel(model);
-                  const efforts = effortOptions(h as Harness);
-                  const effort = s.getPrefEffort(h, model);
-                  s.setForkEffort(effort && efforts.includes(effort) ? effort : "");
-                }}
-              >
-                <For each={s.harnesses()}>
-                  {(h) => <option value={h.name}>{h.name}</option>}
-                </For>
-              </ControlSelect>
-            </Show>
-            <Show when={(s.harnesses().find((h) => h.name === s.forkHarness())?.models ?? []).length > 0}>
-              <ControlSelect
-                aria-label="Fork model"
-                value={s.forkModel()}
-                onChange={(e) => {
-                  const model = e.currentTarget.value;
-                  s.setForkModel(model);
-                  s.setPrefModel(s.forkHarness(), model);
-                  const efforts = effortOptions(s.forkHarness() as Harness);
-                  const effort = s.getPrefEffort(s.forkHarness(), model);
-                  s.setForkEffort(effort && efforts.includes(effort) ? effort : "");
-                }}
-              >
-                <option value="">Default model</option>
-                <For each={s.harnesses().find((h) => h.name === s.forkHarness())?.models ?? []}>
-                  {(m) => <option value={m}>{m}</option>}
-                </For>
-              </ControlSelect>
-            </Show>
-            <Show when={effortOptions(s.forkHarness() as Harness).length > 0}>
-              <ControlSelect
-                aria-label="Fork effort"
-                value={s.forkEffort()}
-                onChange={(e) => {
-                  const effort = e.currentTarget.value;
-                  s.setForkEffort(effort);
-                  s.setPrefEffort(s.forkHarness(), s.forkModel(), effort);
-                }}
-              >
-                <option value="">Default effort</option>
-                <For each={effortOptions(s.forkHarness() as Harness)}>
-                  {(e) => <option value={e}>{e}</option>}
-                </For>
-              </ControlSelect>
-            </Show>
+            <HarnessControls
+              labelPrefix="Fork "
+              harnesses={s.harnesses()}
+              harness={s.forkHarness()}
+              model={s.forkModel()}
+              effort={s.forkEffort()}
+              onHarness={(h) => {
+                s.setForkHarness(h);
+                const models = s.harnesses().find((x) => x.name === h)?.models ?? [];
+                const prefModel = s.getPrefModel(h);
+                const model = prefModel && models.includes(prefModel) ? prefModel : "";
+                s.setForkModel(model);
+                const efforts = effortOptions(h as Harness);
+                const effort = s.getPrefEffort(h, model);
+                s.setForkEffort(effort && efforts.includes(effort) ? effort : "");
+              }}
+              onModel={(model) => {
+                s.setForkModel(model);
+                s.setPrefModel(s.forkHarness(), model);
+                const efforts = effortOptions(s.forkHarness() as Harness);
+                const effort = s.getPrefEffort(s.forkHarness(), model);
+                s.setForkEffort(effort && efforts.includes(effort) ? effort : "");
+              }}
+              onEffort={(effort) => {
+                s.setForkEffort(effort);
+                s.setPrefEffort(s.forkHarness(), s.forkModel(), effort);
+              }}
+            />
           </div>
           <div class={styles.forkRow}>
             <Show when={s.tailscaleAvailable()}>

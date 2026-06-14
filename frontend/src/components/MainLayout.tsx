@@ -1,14 +1,12 @@
 // Default layout: the new-task form, the sidebar task list, and the routed detail pane.
-import { For, Show, type JSX } from "solid-js";
-import type { Harness } from "@sdk/types.gen";
+import { type JSX } from "solid-js";
 import RepoChipStrip from "./RepoChipStrip";
 import PromptInput from "./PromptInput";
 import Button from "./Button";
 import TaskList from "./TaskList";
 import { useAppState } from "../AppState";
-import { effortOptions } from "../effortOptions";
 import { voiceConnected, getVoiceTaskNumber } from "../VoiceState";
-import { ControlSelect, ToggleChip } from "./FormControls";
+import { HarnessControls, ToggleChip } from "./FormControls";
 import { Layout } from "./Layout";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
@@ -35,41 +33,15 @@ export default function MainLayout(props: { children?: JSX.Element }) {
           onClone={() => { s.setCloneOpen(true); s.setCloneError(""); }}
           data-testid="repo-chips"
         />
-        <Show when={s.harnesses().length > 1}>
-          <ControlSelect
-            aria-label="Harness"
-            value={s.selectedHarness()}
-            onChange={(e) => s.setSelectedHarness(e.currentTarget.value)}
-          >
-            <For each={s.harnesses()}>
-              {(h) => <option value={h.name}>{h.name}</option>}
-            </For>
-          </ControlSelect>
-        </Show>
-        <Show when={(s.harnesses().find((h) => h.name === s.selectedHarness())?.models ?? []).length > 0}>
-          <ControlSelect
-            aria-label="Model"
-            value={s.selectedModel()}
-            onChange={(e) => s.setSelectedModel(e.currentTarget.value)}
-          >
-            <option value="">Default model</option>
-            <For each={s.harnesses().find((h) => h.name === s.selectedHarness())?.models ?? []}>
-              {(m) => <option value={m}>{m}</option>}
-            </For>
-          </ControlSelect>
-        </Show>
-        <Show when={effortOptions(s.selectedHarness() as Harness).length > 0}>
-          <ControlSelect
-            aria-label="Effort"
-            value={s.selectedEffort()}
-            onChange={(e) => s.setSelectedEffort(e.currentTarget.value)}
-          >
-            <option value="">Default effort</option>
-            <For each={effortOptions(s.selectedHarness() as Harness)}>
-              {(e) => <option value={e}>{e}</option>}
-            </For>
-          </ControlSelect>
-        </Show>
+        <HarnessControls
+          harnesses={s.harnesses()}
+          harness={s.selectedHarness()}
+          model={s.selectedModel()}
+          effort={s.selectedEffort()}
+          onHarness={s.setSelectedHarness}
+          onModel={s.setSelectedModel}
+          onEffort={s.setSelectedEffort}
+        />
         <ToggleChip
           checked={s.tailscaleEnabled()}
           disabled={!s.tailscaleAvailable()}
