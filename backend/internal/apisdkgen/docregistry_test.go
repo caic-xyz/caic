@@ -11,8 +11,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caic-xyz/caic/backend/internal/mcp"
+	"github.com/caic-xyz/caic/backend/internal/apisdkgen/apispec"
 )
+
+type TestJSONRPCRequest struct{}
+
+type TestJSONRPCResponse struct{}
 
 type TestSDKEvent struct {
 	Kind string `json:"kind"`
@@ -22,8 +26,8 @@ type TestSDKEvent struct {
 func TestGenConfigGoTypeToDoc(t *testing.T) {
 	t.Parallel()
 
-	cfg := &Config{
-		SpecialTypes: []SpecialType{
+	cfg := &apispec.Config{
+		SpecialTypes: []apispec.SpecialType{
 			{Type: reflect.TypeFor[json.RawMessage](), DocType: "JSONValue"},
 			{Type: reflect.TypeFor[any](), DocType: "JSONValue"},
 		},
@@ -41,7 +45,7 @@ func TestGenConfigGoTypeToDoc(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := cfg.goTypeToDoc(tc.typ)
+			got, err := goTypeToDoc(cfg, tc.typ)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -57,20 +61,20 @@ func TestDocRegistryGenerateKotlinMCPClient(t *testing.T) {
 
 	outDir := t.TempDir()
 	docs := &docRegistry{
-		cfg: &Config{
-			Routes: []Route{
+		cfg: &apispec.Config{
+			Routes: []apispec.Route{
 				{
 					Name:       "mcp",
 					Method:     "POST",
 					Path:       "",
-					Req:        reflect.TypeFor[mcp.JSONRPCRequest](),
-					Resp:       reflect.TypeFor[mcp.JSONRPCResponse](),
+					Req:        reflect.TypeFor[TestJSONRPCRequest](),
+					Resp:       reflect.TypeFor[TestJSONRPCResponse](),
 					HeadersArg: true,
 				},
 			},
 			KotlinPackage:      "com.example.mcp",
 			MCPProtocolVersion: "2026-07-28",
-			ErrorModel: ClientErrorModel{
+			ErrorModel: apispec.ClientErrorModel{
 				TypeName:      "JSONRPCResponse",
 				KTCodeExpr:    "err.error?.code?.toString() ?: \"UNKNOWN\"",
 				KTMessageExpr: "err.error?.message ?: \"\"",
@@ -109,7 +113,7 @@ func TestDocRegistryGenerateTSValidate(t *testing.T) {
 		}
 
 		docs := &docRegistry{
-			cfg: &Config{},
+			cfg: &apispec.Config{},
 		}
 		if err := docs.generateTSValidate(outDir); err != nil {
 			t.Fatal(err)
@@ -125,8 +129,8 @@ func TestDocRegistryGenerateTSValidate(t *testing.T) {
 		outDir := t.TempDir()
 		eventType := reflect.TypeFor[TestSDKEvent]()
 		docs := &docRegistry{
-			cfg: &Config{
-				Routes: []Route{{Name: "events", Resp: eventType, IsSSE: true}},
+			cfg: &apispec.Config{
+				Routes: []apispec.Route{{Name: "events", Resp: eventType, IsSSE: true}},
 				SDKPackagePaths: map[string]struct{}{
 					eventType.PkgPath(): {},
 				},

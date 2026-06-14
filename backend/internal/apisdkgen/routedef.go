@@ -4,38 +4,24 @@ package apisdkgen
 
 import (
 	"fmt"
-	"reflect"
 	"slices"
 	"strings"
+
+	"github.com/caic-xyz/caic/backend/internal/apisdkgen/apispec"
 )
 
-// Route describes a single API endpoint for generated clients and docs.
-type Route struct {
-	Name        string
-	Doc         string
-	Method      string
-	Path        string
-	Category    string
-	Req         reflect.Type
-	Resp        reflect.Type
-	IsArray     bool
-	IsSSE       bool
-	QueryParams []string
-	HeadersArg  bool
-}
-
-func (r *Route) reqName() string {
+func routeReqName(r *apispec.Route) string {
 	if r.Req == nil {
 		return ""
 	}
 	return r.Req.Name()
 }
 
-func (r *Route) respName() string {
+func routeRespName(r *apispec.Route) string {
 	return r.Resp.Name()
 }
 
-func (r *Route) categoryName() string {
+func routeCategoryName(r *apispec.Route) string {
 	if r.Category != "" {
 		return r.Category
 	}
@@ -49,11 +35,11 @@ func (r *Route) categoryName() string {
 	return strings.ToUpper(p[:1]) + p[1:]
 }
 
-func (r *Route) writeTSJSONMethod(b *strings.Builder, params []string) {
+func writeRouteTSJSONMethod(r *apispec.Route, b *strings.Builder, params []string) {
 	if r.Doc != "" {
 		b.WriteString(formatBlockDoc(r.Doc, "    "))
 	}
-	respType := r.respName()
+	respType := routeRespName(r)
 	if r.IsArray {
 		respType += "[]"
 	}
@@ -67,7 +53,7 @@ func (r *Route) writeTSJSONMethod(b *strings.Builder, params []string) {
 	}
 	hasReq := r.Req != nil
 	if hasReq {
-		args = append(args, "req: "+r.reqName())
+		args = append(args, "req: "+routeReqName(r))
 	}
 	if r.HeadersArg {
 		args = append(args, "headers: Record<string, string> = {}")
@@ -89,7 +75,7 @@ func (r *Route) writeTSJSONMethod(b *strings.Builder, params []string) {
 	}
 }
 
-func (r *Route) writeTSSSEMethod(b *strings.Builder, params []string) {
+func writeRouteTSSSEMethod(r *apispec.Route, b *strings.Builder, params []string) {
 	if r.Doc != "" {
 		b.WriteString(formatBlockDoc(r.Doc, "    "))
 	}
@@ -98,7 +84,7 @@ func (r *Route) writeTSSSEMethod(b *strings.Builder, params []string) {
 		args = append(args, p+": string")
 	}
 	tsPath := buildTSPath(r.Path, params, nil)
-	respName := r.respName()
+	respName := routeRespName(r)
 	validatorName := "validate" + respName
 	args = append(args, "onMessage: (event: "+respName+") => void", "onError: (err: unknown) => void")
 	fmt.Fprintf(b, "    %s: (%s): EventSource => {\n", r.Name, strings.Join(args, ", "))
@@ -114,11 +100,11 @@ func (r *Route) writeTSSSEMethod(b *strings.Builder, params []string) {
 	b.WriteString("    },\n")
 }
 
-func (r *Route) writeKotlinJSONFunc(b *strings.Builder, params []string) {
+func writeRouteKotlinJSONFunc(r *apispec.Route, b *strings.Builder, params []string) {
 	if r.Doc != "" {
 		b.WriteString(formatBlockDoc(r.Doc, "    "))
 	}
-	respType := r.respName()
+	respType := routeRespName(r)
 	if r.IsArray {
 		respType = "List<" + respType + ">"
 	}
@@ -133,7 +119,7 @@ func (r *Route) writeKotlinJSONFunc(b *strings.Builder, params []string) {
 	}
 	hasReq := r.Req != nil
 	if hasReq {
-		args = append(args, "req: "+r.reqName())
+		args = append(args, "req: "+routeReqName(r))
 	}
 	if r.HeadersArg {
 		args = append(args, "headers: Map<String, String> = emptyMap()")
@@ -156,7 +142,7 @@ func (r *Route) writeKotlinJSONFunc(b *strings.Builder, params []string) {
 	}
 }
 
-func (r *Route) writeKotlinSSEFunc(b *strings.Builder, params []string) {
+func writeRouteKotlinSSEFunc(r *apispec.Route, b *strings.Builder, params []string) {
 	if r.Doc != "" {
 		b.WriteString(formatBlockDoc(r.Doc, "    "))
 	}
@@ -165,11 +151,11 @@ func (r *Route) writeKotlinSSEFunc(b *strings.Builder, params []string) {
 		args = append(args, p+": String")
 	}
 	ktPath := buildKotlinPath(r.Path, nil)
-	respName := r.respName()
+	respName := routeRespName(r)
 	fmt.Fprintf(b, "    fun %s(%s): Flow<%s> = sseFlow<%s>(%s)\n", r.Name, strings.Join(args, ", "), respName, respName, ktPath)
 }
 
-func (r *Route) writeKotlinReconnectingFunc(b *strings.Builder, params []string) {
+func writeRouteKotlinReconnectingFunc(r *apispec.Route, b *strings.Builder, params []string) {
 	if r.Doc != "" {
 		b.WriteString(formatBlockDoc(r.Doc, "    "))
 	}
@@ -185,14 +171,14 @@ func (r *Route) writeKotlinReconnectingFunc(b *strings.Builder, params []string)
 	}
 
 	fmt.Fprintf(b, "    fun %s(%s): Flow<%s> = reconnectingFlow { %s(%s) }\n",
-		reconnectName, strings.Join(args, ", "), r.respName(), r.Name, strings.Join(callArgs, ", "))
+		reconnectName, strings.Join(args, ", "), routeRespName(r), r.Name, strings.Join(callArgs, ", "))
 }
 
-func (r *Route) writeSwiftJSONFunc(b *strings.Builder, params []string) {
+func writeRouteSwiftJSONFunc(r *apispec.Route, b *strings.Builder, params []string) {
 	if r.Doc != "" {
 		b.WriteString(formatSwiftDoc(r.Doc, "    "))
 	}
-	respType := r.respName()
+	respType := routeRespName(r)
 	if r.IsArray {
 		respType = "[" + respType + "]"
 	}
@@ -206,7 +192,7 @@ func (r *Route) writeSwiftJSONFunc(b *strings.Builder, params []string) {
 	}
 	hasReq := r.Req != nil
 	if hasReq {
-		args = append(args, "req: "+r.reqName())
+		args = append(args, "req: "+routeReqName(r))
 	}
 	if r.HeadersArg {
 		args = append(args, "headers: [String: String] = [:]")
@@ -226,7 +212,7 @@ func (r *Route) writeSwiftJSONFunc(b *strings.Builder, params []string) {
 	b.WriteString("    }\n")
 }
 
-func (r *Route) writeSwiftSSEFunc(b *strings.Builder, params []string) {
+func writeRouteSwiftSSEFunc(r *apispec.Route, b *strings.Builder, params []string) {
 	if r.Doc != "" {
 		b.WriteString(formatSwiftDoc(r.Doc, "    "))
 	}
@@ -235,13 +221,13 @@ func (r *Route) writeSwiftSSEFunc(b *strings.Builder, params []string) {
 		args = append(args, p+": String")
 	}
 	swiftPath := buildSwiftPath(r.Path, nil)
-	respName := r.respName()
+	respName := routeRespName(r)
 	fmt.Fprintf(b, "    public func %s(%s) -> AsyncThrowingStream<%s, Error> {\n", r.Name, strings.Join(args, ", "), respName)
 	fmt.Fprintf(b, "        sseStream(path: %s)\n", swiftPath)
 	b.WriteString("    }\n")
 }
 
-func (r *Route) writeSwiftReconnectingFunc(b *strings.Builder, params []string) {
+func writeRouteSwiftReconnectingFunc(r *apispec.Route, b *strings.Builder, params []string) {
 	allParams := slices.Concat(params, r.QueryParams)
 	args := make([]string, 0, len(allParams))
 	callArgs := make([]string, 0, len(allParams))
@@ -250,7 +236,7 @@ func (r *Route) writeSwiftReconnectingFunc(b *strings.Builder, params []string) 
 		callArgs = append(callArgs, p+": "+p)
 	}
 	reconnectName := r.Name + "Reconnecting"
-	respName := r.respName()
+	respName := routeRespName(r)
 	fmt.Fprintf(b, "    public func %s(%s) -> AsyncThrowingStream<%s, Error> {\n",
 		reconnectName, strings.Join(args, ", "), respName)
 	fmt.Fprintf(b, "        reconnectingStream { self.%s(%s) }\n", r.Name, strings.Join(callArgs, ", "))

@@ -4,6 +4,8 @@ package apisdkgen
 import (
 	"errors"
 	"fmt"
+
+	"github.com/caic-xyz/caic/backend/internal/apisdkgen/apispec"
 )
 
 // OutputConfig names the generated output directories for each target.
@@ -18,7 +20,7 @@ type OutputConfig struct {
 type API struct {
 	SourceDir string
 	Output    OutputConfig
-	Config    Config
+	Config    apispec.Config
 }
 
 // Generate writes configured SDK outputs for one API surface.
