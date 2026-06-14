@@ -19,11 +19,11 @@
 # Environment variables added to those inherited by the server process. Each key
 # falls back to the host environment when omitted here.
 [core.env]
-# Tailscale API key — required for the Tailscale ephemeral node.
-# https://login.tailscale.com/admin/settings/keys
+# Tailscale API key: required for Tailscale ephemeral node.
+# Obtain from https://login.tailscale.com/admin/settings/keys
 # TAILSCALE_API_KEY = "tskey-..."
-# Gemini API key — required for the Gemini Live voice agent and for title
-# generation when provider is "gemini". https://aistudio.google.com/app/apikey
+# Gemini API key: required for the Gemini Live voice agent and for title
+# generation when provider is "gemini". Obtain from https://aistudio.google.com/app/apikey
 # GEMINI_API_KEY = "AIza..."
 
 # ── Server ───────────────────────────────────────────────────────────────────
@@ -53,21 +53,20 @@
 #allow_origins = ["local", "tailscale", "github"]
 
 # ── Voice Gateway ────────────────────────────────────────────────────────────
+
 # Voice support is derived automatically:
 #   url set                       advertise that standalone gateway.
 #   no url and GEMINI_API_KEY set  host the embedded gateway in-process.
 #   no url and no GEMINI_API_KEY   disabled.
-
 [voice-gateway]
 # Standalone voice gateway URL.
 #url = ""  # e.g. "https://voice.example.com"
 
 # Embedded gateway runtime config, used only when caic hosts the gateway
-# in-process. Same shape as contrib/voice-gateway-config.toml. The API key is
-# always read from GEMINI_API_KEY.
+# in-process. Same shape as contrib/voice-gateway-config.toml.
 [voice-gateway.config]
+# The API key is always read from GEMINI_API_KEY.
 #model = "gemini-3.1-flash-live-preview"
-#backend = "gemini-live"
 
 [voice-gateway.config.server]
 # UDP port for WebRTC ICE (single-port mux). 0 = OS-assigned ephemeral port;
@@ -98,19 +97,23 @@
 #model = ""  # e.g. "claude-haiku-4-5-20251001"
 
 # ── Harness ──────────────────────────────────────────────────────────────────
-# Per-harness environment variables injected into containers. They supplement
-# the automatic *_API_KEY forwarding from the host and feed the startup model
-# list fetch. Uncomment a section and add KEY = "value" pairs.
-#
-# [harness.claude.env]
+# Per-harness environment variables injected into containers.
+
+[harness.claude.env]
 # Warning: ANTHROPIC_API_KEY makes Claude Code use API billing and ignore your subscription.
 # ANTHROPIC_API_KEY = "sk-..."
-#
-# [harness.codex.env]    — see https://developers.openai.com/codex/config-reference
-# [harness.opencode.env] — see https://opencode.ai/docs/config/
-#
-# [harness.pi.env]
+
+[harness.codex.env]
+# Most of codex configuration is via its configuration described at
+# https://developers.openai.com/codex/config-reference
+
+[harness.opencode.env]
+# Most of opencode configuration is via its configuration described at
+# https://opencode.ai/docs/config/
+
+[harness.pi.env]
 # See https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/providers.md
+# Here's example keys, you can set any environment variable you want.
 # DEEPSEEK_API_KEY = "..."
 # GEMINI_API_KEY = "AIza..."
 # OPENROUTER_API_KEY = "sk-or-..."
@@ -125,21 +128,24 @@
 # CLI is in PATH, caic uses `gh auth token` automatically.
 #token = ""  # e.g. "ghp_..."
 
-# OAuth multi-user login. https://docs.caic.xyz/caic/github
+# OAuth — multi-user login.
+# See https://docs.caic.xyz/caic/github for OAuth app setup instructions.
 #oauth_client_id = ""
 #oauth_client_secret = ""
 # GitHub users allowed to log in (highly recommended).
 # oauth_allowed_users = ["alice", "bob"]
 
-# GitHub App — org-wide webhooks and automatic task creation; layered on top of
-# PAT or OAuth. https://docs.caic.xyz/caic/
+# GitHub App — org-wide webhooks and automatic task creation.
+# Layered on top of PAT or OAuth; not mutually exclusive with either.
+# See https://docs.caic.xyz/caic/ for GitHub App setup instructions.
 #app_id = 0  # e.g. 12345
 # PEM file path (relative paths resolve against the config directory).
 #app_private_key_pem = ""  # e.g. "private-key.pem"
 # Owners/orgs allowed to install the app (highly recommended).
-# app_allowed_owners = ["my-org", "my-username"]
+#app_allowed_owners = ["my-org", "my-username"]
 
-# HMAC-SHA256 secret for webhook verification (openssl rand -hex 32).
+# HMAC-SHA256 secret for webhook verification.
+# Generate with: openssl rand -hex 32
 #webhook_secret = ""
 
 # ── GitLab ───────────────────────────────────────────────────────────────────
@@ -147,20 +153,23 @@
 
 [gitlab]
 # PAT — single-user / headless, mutually exclusive with OAuth. Scope: api.
-# https://gitlab.com/-/user_settings/personal_access_tokens
+# Create at https://gitlab.com/-/user_settings/personal_access_tokens
+# Required scope: api
 #token = ""  # e.g. "glpat-..."
 
 # OAuth multi-user login, mutually exclusive with token.
-# https://docs.caic.xyz/caic/gitlab
+# See https://docs.caic.xyz/caic/gitlab for OAuth app setup instructions.
 #oauth_client_id = ""
 #oauth_client_secret = ""
-# oauth_allowed_users = ["alice", "bob"]
+# GitLab users allowed to login. Highly recommended.
+#oauth_allowed_users = ["alice", "bob"]
 
 # GitLab instance URL. Empty targets gitlab.com (the REST API always does); set
 # only for self-hosted OAuth login.
 #url = ""  # e.g. "https://gitlab.example.com"
 
-# Webhook verification secret (openssl rand -hex 32).
+# Shared secret for webhook verification.
+# Generate with: openssl rand -hex 32
 #webhook_secret = ""
 
 # ── Debug ────────────────────────────────────────────────────────────────────
