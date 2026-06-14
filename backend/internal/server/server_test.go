@@ -1953,6 +1953,30 @@ func TestBuildHandler(t *testing.T) {
 		}
 	})
 
+	t.Run("blocked origin error includes IP and category", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t)
+		checker, err := ipgeo.NewChecker(t.Context(), "tailscale", "", "")
+		if err != nil {
+			t.Fatalf("ipgeo.NewChecker: %v", err)
+		}
+		s.ipgeoChecker = checker
+		h, err := s.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler() error = %v", err)
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/server/config", http.NoBody)
+		req.Header.Set("X-Forwarded-For", "127.0.0.1")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusForbidden)
+		}
+		if got, want := strings.TrimSpace(w.Body.String()), "forbidden: origin 127.0.0.1 (local) not allowed"; got != want {
+			t.Fatalf("body = %q, want %q", got, want)
+		}
+	})
+
 	t.Run("MCP protected resource metadata is public", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)

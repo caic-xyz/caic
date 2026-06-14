@@ -11,6 +11,25 @@ import (
 	"time"
 )
 
+type countingResolver struct {
+	name   string
+	prefix netip.Prefix
+	calls  int
+}
+
+func (r *countingResolver) Resolve(addr netip.Addr) string {
+	r.calls++
+	if r.prefix.Contains(addr) {
+		return r.name
+	}
+	return ""
+}
+
+func originOf(c *Checker, ip string) string {
+	origin, _ := c.CheckOrigin(ip)
+	return origin
+}
+
 func TestGetClientIP(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -45,12 +64,14 @@ func TestGetClientIP(t *testing.T) {
 	}
 }
 
-func TestCountryCode(t *testing.T) {
+func TestCheckOrigin(t *testing.T) {
 	t.Parallel()
 	t.Run("special addresses", func(t *testing.T) {
 		t.Parallel()
-		// A nil-reader Checker handles all special cases; public IPs return "".
-		c := &Checker{}
+		c, err := NewChecker(t.Context(), "local,tailscale", "", "")
+		if err != nil {
+			t.Fatalf("NewChecker: %v", err)
+		}
 		tests := []struct {
 			ip   string
 			want string
@@ -75,20 +96,23 @@ func TestCountryCode(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.ip, func(t *testing.T) {
 				t.Parallel()
-				if got := c.CountryCode(tt.ip); got != tt.want {
-					t.Errorf("CountryCode(%q) = %q, want %q", tt.ip, got, tt.want)
+				if got := originOf(c, tt.ip); got != tt.want {
+					t.Errorf("CheckOrigin(%q) origin = %q, want %q", tt.ip, got, tt.want)
 				}
 			})
 		}
 	})
 	t.Run("named CIDR groups", func(t *testing.T) {
 		t.Parallel()
-		c := &Checker{namedCIDRs: []namedPrefix{
-			{name: "anthropic", prefix: anthropicOutboundPrefix},
-			{name: "github", prefix: netip.MustParsePrefix("192.30.252.0/22")},
-			{name: "github", prefix: netip.MustParsePrefix("185.199.108.0/22")},
-			{name: "openai", prefix: netip.MustParsePrefix("20.0.53.96/28")},
-		}}
+		c, err := NewChecker(t.Context(), "local,tailscale,anthropic", "", "")
+		if err != nil {
+			t.Fatalf("NewChecker: %v", err)
+		}
+		c.resolvers = append(c.resolvers,
+			namedPrefix{name: "github", prefix: netip.MustParsePrefix("192.30.252.0/22")},
+			namedPrefix{name: "github", prefix: netip.MustParsePrefix("185.199.108.0/22")},
+			namedPrefix{name: "openai", prefix: netip.MustParsePrefix("20.0.53.96/28")},
+		)
 		for _, tt := range []struct {
 			ip   string
 			want string
@@ -100,30 +124,77 @@ func TestCountryCode(t *testing.T) {
 			{ip: "185.199.111.255", want: "github"},
 			{ip: "20.0.53.100", want: "openai"},
 		} {
-			if got := c.CountryCode(tt.ip); got != tt.want {
-				t.Errorf("CountryCode(%q) = %q, want %q", tt.ip, got, tt.want)
+			if got := originOf(c, tt.ip); got != tt.want {
+				t.Errorf("CheckOrigin(%q) origin = %q, want %q", tt.ip, got, tt.want)
 			}
 		}
 		// Local/tailscale take priority over named CIDRs (they wouldn't overlap in practice).
-		if got := c.CountryCode("127.0.0.1"); got != "local" {
-			t.Errorf("CountryCode(loopback) = %q, want %q", got, "local")
+		if got := originOf(c, "127.0.0.1"); got != "local" {
+			t.Errorf("CheckOrigin(loopback) origin = %q, want %q", got, "local")
 		}
 		// Outside registered ranges returns "".
-		if got := c.CountryCode("8.8.8.8"); got != "" {
-			t.Errorf("CountryCode(unregistered public) = %q, want %q", got, "")
+		if got := originOf(c, "8.8.8.8"); got != "" {
+			t.Errorf("CheckOrigin(unregistered public) origin = %q, want %q", got, "")
 		}
 	})
 	t.Run("multiple named groups", func(t *testing.T) {
 		t.Parallel()
-		c := &Checker{namedCIDRs: []namedPrefix{
-			{name: "github", prefix: netip.MustParsePrefix("192.30.252.0/22")},
-			{name: "myservice", prefix: netip.MustParsePrefix("203.0.113.0/24")},
+		c := &Checker{resolvers: []originResolver{
+			namedPrefix{name: "github", prefix: netip.MustParsePrefix("192.30.252.0/22")},
+			namedPrefix{name: "myservice", prefix: netip.MustParsePrefix("203.0.113.0/24")},
 		}}
-		if got := c.CountryCode("192.30.252.1"); got != "github" {
-			t.Errorf("CountryCode(github ip) = %q, want %q", got, "github")
+		if got := originOf(c, "192.30.252.1"); got != "github" {
+			t.Errorf("CheckOrigin(github ip) origin = %q, want %q", got, "github")
 		}
-		if got := c.CountryCode("203.0.113.5"); got != "myservice" {
-			t.Errorf("CountryCode(myservice ip) = %q, want %q", got, "myservice")
+		if got := originOf(c, "203.0.113.5"); got != "myservice" {
+			t.Errorf("CheckOrigin(myservice ip) origin = %q, want %q", got, "myservice")
+		}
+	})
+	t.Run("returns allowed origin", func(t *testing.T) {
+		t.Parallel()
+		c, err := NewChecker(t.Context(), "local", "", "")
+		if err != nil {
+			t.Fatalf("NewChecker: %v", err)
+		}
+		origin, allowed := c.CheckOrigin("127.0.0.1")
+		if origin != "local" || !allowed {
+			t.Fatalf("CheckOrigin(loopback) = %q, %t; want local, true", origin, allowed)
+		}
+	})
+	t.Run("returns blocked origin", func(t *testing.T) {
+		t.Parallel()
+		c, err := NewChecker(t.Context(), "tailscale", "", "")
+		if err != nil {
+			t.Fatalf("NewChecker: %v", err)
+		}
+		origin, allowed := c.CheckOrigin("127.0.0.1")
+		if origin != "local" || allowed {
+			t.Fatalf("CheckOrigin(loopback) = %q, %t; want local, false", origin, allowed)
+		}
+	})
+	t.Run("resolves origin once", func(t *testing.T) {
+		t.Parallel()
+		resolver := &countingResolver{name: "svc", prefix: netip.MustParsePrefix("203.0.113.0/24")}
+		c := &Checker{
+			resolvers: []originResolver{resolver},
+			allowlist: mustParseAllowlist(t, "svc"),
+		}
+		origin, allowed := c.CheckOrigin("203.0.113.5")
+		if origin != "svc" || !allowed {
+			t.Fatalf("CheckOrigin(service IP) = %q, %t; want svc, true", origin, allowed)
+		}
+		if resolver.calls != 1 {
+			t.Fatalf("resolver calls = %d, want 1", resolver.calls)
+		}
+	})
+	t.Run("nil allowlist allows all", func(t *testing.T) {
+		t.Parallel()
+		c := &Checker{}
+		for _, ip := range []string{"8.8.8.8", "127.0.0.1", "not-an-ip"} {
+			_, allowed := c.CheckOrigin(ip)
+			if !allowed {
+				t.Errorf("CheckOrigin(%q) allowed = false, want true", ip)
+			}
 		}
 	})
 }
@@ -172,8 +243,8 @@ func TestParseAllowlist(t *testing.T) {
 		t.Parallel()
 		a := mustParseAllowlist(t, "0.0.0.0/0,::/0")
 		for _, ip := range []string{"1.2.3.4", "8.8.8.8", "192.168.1.1", "::1", "2001:db8::1"} {
-			if !a.containsIP(ip) {
-				t.Errorf("containsIP(%q) = false, want true", ip)
+			if !a.contains(netip.MustParseAddr(ip)) {
+				t.Errorf("contains(%q) = false, want true", ip)
 			}
 		}
 	})
@@ -183,13 +254,13 @@ func TestParseAllowlist(t *testing.T) {
 		if !a.allowed("CA") {
 			t.Error("CA should be allowed")
 		}
-		if !a.containsIP("34.74.90.65") {
+		if !a.contains(netip.MustParseAddr("34.74.90.65")) {
 			t.Error("34.74.90.65 should be in 34.74.90.64/28")
 		}
-		if !a.containsIP("34.74.226.100") {
+		if !a.contains(netip.MustParseAddr("34.74.226.100")) {
 			t.Error("34.74.226.100 should be in 34.74.226.0/24")
 		}
-		if a.containsIP("8.8.8.8") {
+		if a.contains(netip.MustParseAddr("8.8.8.8")) {
 			t.Error("8.8.8.8 should not be in any CIDR")
 		}
 	})
@@ -199,7 +270,7 @@ func TestParseAllowlist(t *testing.T) {
 		if a.allowed("US") {
 			t.Error("US should not be allowed in CIDR-only list")
 		}
-		if !a.containsIP("34.74.90.70") {
+		if !a.contains(netip.MustParseAddr("34.74.90.70")) {
 			t.Error("34.74.90.70 should be in CIDR")
 		}
 	})
@@ -253,8 +324,8 @@ func TestNewChecker(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewChecker: %v", err)
 		}
-		if got := c.CountryCode("160.79.104.1"); got != "anthropic" {
-			t.Errorf("CountryCode(anthropic ip) = %q, want %q", got, "anthropic")
+		if got := originOf(c, "160.79.104.1"); got != "anthropic" {
+			t.Errorf("CheckOrigin(anthropic ip) origin = %q, want %q", got, "anthropic")
 		}
 	})
 	t.Run("github in allowlist uses cached CIDRs", func(t *testing.T) {
@@ -265,11 +336,11 @@ func TestNewChecker(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewChecker: %v", err)
 		}
-		if got := c.CountryCode("192.30.252.1"); got != "github" {
-			t.Errorf("CountryCode(github ip) = %q, want %q", got, "github")
+		if got := originOf(c, "192.30.252.1"); got != "github" {
+			t.Errorf("CheckOrigin(github ip) origin = %q, want %q", got, "github")
 		}
-		if got := c.CountryCode("8.8.8.8"); got != "" {
-			t.Errorf("CountryCode(unregistered) = %q, want %q", got, "")
+		if got := originOf(c, "8.8.8.8"); got != "" {
+			t.Errorf("CheckOrigin(unregistered) origin = %q, want %q", got, "")
 		}
 	})
 	t.Run("github not in allowlist skips fetch", func(t *testing.T) {
@@ -279,13 +350,13 @@ func TestNewChecker(t *testing.T) {
 			t.Fatalf("NewChecker: %v", err)
 		}
 		// No github CIDRs registered; IP returns "".
-		if got := c.CountryCode("192.30.252.1"); got != "" {
-			t.Errorf("CountryCode(github ip without registration) = %q, want %q", got, "")
+		if got := originOf(c, "192.30.252.1"); got != "" {
+			t.Errorf("CheckOrigin(github ip without registration) origin = %q, want %q", got, "")
 		}
 	})
 	t.Run("fetch failure is non-fatal", func(t *testing.T) {
 		t.Parallel()
-		source := &testOriginSource{name: "github", err: errors.New("offline")}
+		source := &testOriginSource{name: "github", err: errors.New("offline"), cacheable: true}
 		if prefixes := resolveOriginPrefixes(t.Context(), nil, source); len(prefixes) != 0 {
 			t.Errorf("resolveOriginPrefixes returned %v, want none", prefixes)
 		}

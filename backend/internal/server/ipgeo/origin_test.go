@@ -66,11 +66,11 @@ func TestNewCheckerOpenAI(t *testing.T) {
 		t.Fatalf("NewChecker: %v", err)
 	}
 	for _, ip := range []string{"20.0.53.100", "104.211.73.130"} {
-		if got := c.CountryCode(ip); got != "openai" {
-			t.Errorf("CountryCode(%q) = %q, want %q", ip, got, "openai")
+		if got := originOf(c, ip); got != "openai" {
+			t.Errorf("CheckOrigin(%q) origin = %q, want %q", ip, got, "openai")
 		}
 	}
-	if got := c.CountryCode("8.8.8.8"); got != "" {
-		t.Errorf("CountryCode(unregistered) = %q, want %q", got, "")
+	if got := originOf(c, "8.8.8.8"); got != "" {
+		t.Errorf("CheckOrigin(unregistered) origin = %q, want %q", got, "")
 	}
 }

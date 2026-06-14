@@ -1,11 +1,11 @@
-// Package ipgeo provides IP geolocation and country-based allowlist enforcement
-// using MaxMind MMDB files.
+// Package ipgeo provides IP origin and country allowlist enforcement.
 package ipgeo
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/netip"
@@ -45,18 +45,28 @@ func GetClientIP(r *http.Request) string {
 	return addr
 }
 
-// namedPrefix associates a name with an IP prefix for use in CountryCode.
+type originResolver interface {
+	Resolve(addr netip.Addr) string
+}
+
+// namedPrefix resolves addresses contained by a CIDR prefix to a named origin.
 type namedPrefix struct {
 	name   string
 	prefix netip.Prefix
 }
 
+func (p namedPrefix) Resolve(addr netip.Addr) string {
+	if p.prefix.Contains(addr) {
+		return p.name
+	}
+	return ""
+}
+
 // Checker resolves IP addresses to country codes or named origins using a
 // MaxMind MMDB file and optional named CIDR groups, and enforces an allowlist.
 type Checker struct {
-	reader     *maxminddb.Reader
-	namedCIDRs []namedPrefix
-	allowlist  *allowlist
+	resolvers []originResolver
+	allowlist *allowlist
 }
 
 // Open opens an MMDB file for country lookups.
@@ -65,7 +75,21 @@ func Open(dbPath string) (*Checker, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Checker{reader: r}, nil
+	c := &Checker{}
+	for _, source := range defaultOriginSources(defaultGitHubMetaURL) {
+		if source.Cacheable() {
+			continue
+		}
+		prefixes, err := source.Prefixes(context.Background())
+		if err != nil {
+			return nil, fmt.Errorf("origin %s: %w", source.Name(), err)
+		}
+		for _, p := range prefixes {
+			c.resolvers = append(c.resolvers, namedPrefix{name: source.Name(), prefix: p.Masked()})
+		}
+	}
+	c.resolvers = append(c.resolvers, maxMindResolver{reader: r})
+	return c, nil
 }
 
 // NewChecker builds a Checker from a comma-separated allowlist string and an
@@ -83,20 +107,20 @@ func NewChecker(ctx context.Context, allowlistStr, dbPath, cacheDir string) (*Ch
 	}
 	c := &Checker{allowlist: al}
 	if dbPath != "" {
-		c, err = Open(dbPath)
+		r, err := maxminddb.Open(dbPath)
 		if err != nil {
 			return nil, err
 		}
-		c.allowlist = al
+		c.resolvers = append(c.resolvers, maxMindResolver{reader: r})
 	}
 	cache := loadOriginCache(ctx, cacheDir)
 	for _, source := range defaultOriginSources(defaultGitHubMetaURL) {
-		if !al.allowed(source.Name()) {
+		if source.Cacheable() && !al.allowed(source.Name()) {
 			continue
 		}
 		prefixes := resolveOriginPrefixes(ctx, cache, source)
 		for _, p := range prefixes {
-			c.namedCIDRs = append(c.namedCIDRs, namedPrefix{name: source.Name(), prefix: p.Masked()})
+			c.resolvers = append(c.resolvers, namedPrefix{name: source.Name(), prefix: p.Masked()})
 		}
 	}
 	return c, nil
@@ -104,10 +128,20 @@ func NewChecker(ctx context.Context, allowlistStr, dbPath, cacheDir string) (*Ch
 
 // Close releases MMDB reader resources.
 func (c *Checker) Close() error {
-	if c == nil || c.reader == nil {
+	if c == nil {
 		return nil
 	}
-	return c.reader.Close()
+	var errs []error
+	for _, r := range c.resolvers {
+		closer, ok := r.(io.Closer)
+		if !ok {
+			continue
+		}
+		if err := closer.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // countryRecord is the minimal MMDB struct for country lookups.
@@ -117,46 +151,49 @@ type countryRecord struct {
 	} `maxminddb:"country"`
 }
 
-// CountryCode returns the ISO 3166-1 alpha-2 country code or a named origin
-// for the given IP string. Resolution order:
-//  1. "local" for loopback, private, link-local, and unspecified IPs
-//  2. "tailscale" for Tailscale CGNAT IPs (100.64.0.0/10)
-//  3. Named CIDR groups (e.g. "anthropic", "github", or "openai")
-//  4. ISO 3166-1 alpha-2 country code from the MMDB geo database
-//  5. "" on parse error, lookup error, or no DB with a public IP
-func (c *Checker) CountryCode(ipStr string) string {
-	addr, err := netip.ParseAddr(ipStr)
+type maxMindResolver struct {
+	reader *maxminddb.Reader
+}
+
+func (r maxMindResolver) Resolve(addr netip.Addr) string {
+	var rec countryRecord
+	if err := r.reader.Lookup(addr).Decode(&rec); err == nil {
+		return rec.Country.ISOCode
+	}
+	return ""
+}
+
+func (r maxMindResolver) Close() error {
+	return r.reader.Close()
+}
+
+// CheckOrigin resolves the IP origin and reports whether it is allowlisted.
+//
+// It returns the resolved origin even when the allowlist blocks the IP, so
+// callers can use the same lookup result for logging and error messages. It
+// returns "", false for invalid IPs unless no allowlist is configured.
+func (c *Checker) CheckOrigin(clientIP string) (string, bool) {
+	addr, err := netip.ParseAddr(clientIP)
 	if err != nil {
-		return ""
+		return "", c.allowlist == nil
 	}
-	if addr.IsLoopback() || addr.IsPrivate() || addr.IsUnspecified() || addr.IsLinkLocalUnicast() {
-		return "local"
+	origin := c.resolve(addr)
+	if c.allowlist == nil {
+		return origin, true
 	}
-	if tailscalePrefix.Contains(addr) {
-		return "tailscale"
-	}
-	for _, nc := range c.namedCIDRs {
-		if nc.prefix.Contains(addr) {
-			return nc.name
-		}
-	}
-	if c.reader != nil {
-		var rec countryRecord
-		if err := c.reader.Lookup(addr).Decode(&rec); err == nil {
-			return rec.Country.ISOCode
+	return origin, c.allowlist.allowed(origin) || c.allowlist.contains(addr)
+}
+
+func (c *Checker) resolve(addr netip.Addr) string {
+	for _, r := range c.resolvers {
+		if name := r.Resolve(addr); name != "" {
+			return name
 		}
 	}
 	return ""
 }
 
-// IsAllowed reports whether the given IP is permitted by the checker's
-// allowlist. Returns true when no allowlist is configured.
-func (c *Checker) IsAllowed(clientIP string) bool {
-	return c.allowlist.allowed(c.CountryCode(clientIP)) || c.allowlist.containsIP(clientIP)
-}
-
 // allowlist checks whether a country code or IP address is permitted.
-// A nil *allowlist allows everything.
 type allowlist struct {
 	codes    map[string]struct{} // uppercase tokens: country codes and named origins
 	prefixes []netip.Prefix      // CIDR entries from the allowlist
@@ -190,20 +227,16 @@ func parseAllowlist(s string) (*allowlist, error) {
 	return a, nil
 }
 
-// allowed reports whether the given country code or named origin (as returned
-// by CountryCode) is on the allowlist.
+// allowed reports whether the given country code or named origin is on the
+// allowlist.
 func (a *allowlist) allowed(cc string) bool {
 	_, ok := a.codes[strings.ToUpper(cc)]
 	return ok
 }
 
-// containsIP reports whether the given IP string falls within any CIDR prefix
-// in the allowlist. Returns false if the IP is invalid.
-func (a *allowlist) containsIP(ipStr string) bool {
-	addr, err := netip.ParseAddr(ipStr)
-	if err != nil {
-		return false
-	}
+// contains reports whether the given IP falls within any CIDR prefix in the
+// allowlist.
+func (a *allowlist) contains(addr netip.Addr) bool {
 	return slices.ContainsFunc(a.prefixes, func(p netip.Prefix) bool { return p.Contains(addr) })
 }
 
@@ -233,8 +266,7 @@ func loadOriginCache(ctx context.Context, cacheDir string) *originCache {
 }
 
 func resolveOriginPrefixes(ctx context.Context, cache *originCache, source OriginSource) []netip.Prefix {
-	// TODO: Smells bad.
-	if _, ok := source.(*staticOriginSource); ok {
+	if !source.Cacheable() {
 		prefixes, err := source.Prefixes(ctx)
 		if err != nil {
 			slog.WarnContext(ctx, "failed to resolve static IP origin", "origin", source.Name(), "err", err)

@@ -4,6 +4,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"net"
@@ -271,10 +272,10 @@ func (s *Router) buildHandler() (http.Handler, error) {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		clientIP := ipgeo.GetClientIP(r)
-		cc := s.ipgeoChecker.CountryCode(clientIP)
-		if !s.ipgeoChecker.IsAllowed(clientIP) {
-			http.Error(w, "forbidden: country not allowed", http.StatusForbidden)
-			slog.Info("http blocked", "m", r.Method, "p", r.URL.Path, "s", http.StatusForbidden, "ip", clientIP, "cc", cc)
+		origin, allowed := s.ipgeoChecker.CheckOrigin(clientIP)
+		if !allowed {
+			http.Error(w, fmt.Sprintf("forbidden: origin %s (%s) not allowed", clientIP, origin), http.StatusForbidden)
+			slog.Info("http blocked", "m", r.Method, "p", r.URL.Path, "s", http.StatusForbidden, "ip", clientIP, "origin", origin)
 			return
 		}
 		start := time.Now()
@@ -291,7 +292,7 @@ func (s *Router) buildHandler() (http.Handler, error) {
 			"d", roundDuration(time.Since(start)),
 			"b", rw.size,
 			"ip", clientIP,
-			"cc", cc,
+			"origin", origin,
 		)
 	}), nil
 }

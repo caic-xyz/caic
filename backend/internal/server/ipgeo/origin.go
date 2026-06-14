@@ -17,11 +17,13 @@ import (
 // OriginSource provides CIDR prefixes for a named IP origin.
 type OriginSource interface {
 	Name() string
+	Cacheable() bool
 	Prefixes(ctx context.Context) ([]netip.Prefix, error)
 }
 
 type fetchPrefixesFromURL func(ctx context.Context, url string) ([]netip.Prefix, error)
 
+// staticOriginSource returns fixed CIDR prefixes for a named origin.
 type staticOriginSource struct {
 	name     string
 	prefixes []netip.Prefix
@@ -29,10 +31,13 @@ type staticOriginSource struct {
 
 func (s *staticOriginSource) Name() string { return s.name }
 
+func (s *staticOriginSource) Cacheable() bool { return false }
+
 func (s *staticOriginSource) Prefixes(context.Context) ([]netip.Prefix, error) {
 	return s.prefixes, nil
 }
 
+// urlOriginSource fetches CIDR prefixes from one or more remote endpoints.
 type urlOriginSource struct {
 	name  string
 	urls  []string
@@ -40,6 +45,8 @@ type urlOriginSource struct {
 }
 
 func (s *urlOriginSource) Name() string { return s.name }
+
+func (s *urlOriginSource) Cacheable() bool { return true }
 
 func (s *urlOriginSource) Prefixes(ctx context.Context) ([]netip.Prefix, error) {
 	var errs []error
@@ -58,18 +65,30 @@ func (s *urlOriginSource) Prefixes(ctx context.Context) ([]netip.Prefix, error) 
 	return prefixes, nil
 }
 
+// defaultOriginSources returns all built-in named origin sources.
 func defaultOriginSources(githubURL string) []OriginSource {
 	return []OriginSource{
-		&staticOriginSource{name: "anthropic", prefixes: []netip.Prefix{anthropicOutboundPrefix}},
+		// Loopback, private, unspecified, and link-local ranges.
+		&staticOriginSource{name: "local", prefixes: []netip.Prefix{
+			netip.MustParsePrefix("0.0.0.0/32"),
+			netip.MustParsePrefix("10.0.0.0/8"),
+			netip.MustParsePrefix("127.0.0.0/8"),
+			netip.MustParsePrefix("169.254.0.0/16"),
+			netip.MustParsePrefix("172.16.0.0/12"),
+			netip.MustParsePrefix("192.168.0.0/16"),
+			netip.MustParsePrefix("::/128"),
+			netip.MustParsePrefix("::1/128"),
+			netip.MustParsePrefix("fc00::/7"),
+			netip.MustParsePrefix("fe80::/10"),
+		}},
+		// Tailscale CGNAT range.
+		&staticOriginSource{name: "tailscale", prefixes: []netip.Prefix{netip.MustParsePrefix("100.64.0.0/10")}},
+		// Anthropic outbound API range, listed at https://platform.claude.com/docs/en/api/ip-addresses.
+		&staticOriginSource{name: "anthropic", prefixes: []netip.Prefix{netip.MustParsePrefix("160.79.104.0/21")}},
 		&urlOriginSource{name: "github", urls: []string{githubURL}, fetch: fetchGitHubHookCIDRsFrom},
 		&urlOriginSource{name: "openai", urls: openAIIPRangeURLs, fetch: fetchOpenAICIDRsFrom},
 	}
 }
-
-// Anthropic
-
-// anthropicOutboundPrefix is listed at https://platform.claude.com/docs/en/api/ip-addresses
-var anthropicOutboundPrefix = netip.MustParsePrefix("160.79.104.0/21")
 
 // GitHub
 
@@ -195,10 +214,3 @@ func fetchOpenAICIDRsFrom(ctx context.Context, url string) ([]netip.Prefix, erro
 	}
 	return prefixes, nil
 }
-
-// Tailscale
-
-// tailscalePrefix is the Tailscale CGNAT range 100.64.0.0/10.
-//
-// TODO: Move to staticOriginSource.
-var tailscalePrefix = netip.MustParsePrefix("100.64.0.0/10")
