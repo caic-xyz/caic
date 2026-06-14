@@ -1645,6 +1645,42 @@ func TestManager(t *testing.T) {
 				t.Fatalf("err = %v, want KindConflict", err)
 			}
 		})
+		t.Run("valid_after_finished_crash", func(t *testing.T) {
+			t.Parallel()
+			purgeCalled := make(chan struct{}, 1)
+			fake := &tasktest.FakeRuntimeBackend{
+				PurgeFunc: func(context.Context, runtime.InstanceID) error {
+					purgeCalled <- struct{}{}
+					return nil
+				},
+			}
+			m := New(Config{ServerCtx: t.Context(), Backend: fake})
+			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
+			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetState(task.StateCrashed)
+			entry := NewEntry(tk, nil)
+			entry.Finish(&task.Result{State: task.StateCrashed, Err: errors.New("agent crashed")})
+			m.Insert(tk.ID.String(), entry)
+
+			if err := m.Purge(t.Context(), entry); err != nil {
+				t.Fatalf("Purge: %v", err)
+			}
+			select {
+			case <-purgeCalled:
+			case <-time.After(time.Second):
+				t.Fatal("backend Purge was not called")
+			}
+			deadline := time.Now().Add(time.Second)
+			for {
+				if result := entry.Result(); result != nil && result.State == task.StatePurged {
+					return
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("Result = %v, want StatePurged", entry.Result())
+				}
+				time.Sleep(time.Millisecond)
+			}
+		})
 		t.Run("valid_wins_race_with_stop", func(t *testing.T) {
 			t.Parallel()
 			stopStarted := make(chan struct{})

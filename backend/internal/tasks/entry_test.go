@@ -113,6 +113,40 @@ func TestEntry(t *testing.T) {
 		})
 	})
 
+	t.Run("Finish", func(t *testing.T) {
+		t.Parallel()
+		t.Run("valid_closes_and_sets_result", func(t *testing.T) {
+			t.Parallel()
+			e := NewEntry(&task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}, nil)
+			r := &task.Result{State: task.StateFailed}
+			e.Finish(r)
+			select {
+			case <-e.Done():
+			default:
+				t.Error("Done() not closed after Finish")
+			}
+			if e.Result() != r {
+				t.Error("Result() returned wrong pointer after Finish")
+			}
+		})
+		t.Run("valid_after_finished", func(t *testing.T) {
+			t.Parallel()
+			e := NewEntry(&task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}, nil)
+			first := &task.Result{State: task.StateCrashed}
+			second := &task.Result{State: task.StatePurged}
+			e.Finish(first)
+			e.Finish(second)
+			if e.Result() != second {
+				t.Error("Result() should contain the latest result after a second Finish")
+			}
+			select {
+			case <-e.Done():
+			default:
+				t.Error("Done() should stay closed after second Finish")
+			}
+		})
+	})
+
 	t.Run("Cleanup", func(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_exactly_once", func(t *testing.T) {

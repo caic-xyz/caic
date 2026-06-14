@@ -12,9 +12,9 @@ import (
 //
 // Concurrency: the task pointer, loadedTask pointer, cleanupOnce, and
 // loadedTaskOnce are immutable references after construction (the values they
-// point to may mutate, but the pointers themselves don't); result, done, and
-// monitorBranch are guarded by mu and must only be accessed through methods.
-// Code outside this package never touches the fields directly.
+// point to may mutate, but the pointers themselves don't); result, done,
+// doneClosed, and monitorBranch are guarded by mu and must only be accessed
+// through methods. Code outside this package never touches the fields directly.
 type Entry struct {
 	mu sync.Mutex
 
@@ -26,6 +26,7 @@ type Entry struct {
 	// Guarded by mu.
 	result        *task.Result
 	done          chan struct{}
+	doneClosed    bool
 	monitorBranch string
 	cleanupOnce   *sync.Once
 }
@@ -52,6 +53,7 @@ func newPurgedEntry(t *task.Task, r *task.Result, lt *task.LoadedTask) *Entry {
 		loadedTaskOnce: new(sync.Once),
 		result:         r,
 		done:           done,
+		doneClosed:     true,
 		cleanupOnce:    new(sync.Once),
 	}
 }
@@ -100,32 +102,36 @@ func (e *Entry) SetMonitorBranch(b string) {
 	e.mu.Unlock()
 }
 
-// CloseDone closes the done channel. Must be called at most once per
-// incarnation. Failure paths during task creation call this directly; the
-// normal cleanup path goes through Cleanup which handles it idempotently.
+// CloseDone closes the done channel if it is still open. Failure paths during
+// task creation call this directly; the normal cleanup path goes through
+// Cleanup which handles it idempotently.
 //
 // Prefer Finish when a result is being recorded at the same time: it sets the
 // result and closes done under a single lock acquisition, so a goroutine that
 // observes Done() closed is guaranteed to also observe Result().
 func (e *Entry) CloseDone() {
 	e.mu.Lock()
-	ch := e.done
+	if !e.doneClosed {
+		close(e.done)
+		e.doneClosed = true
+	}
 	e.mu.Unlock()
-	close(ch)
 }
 
 // Finish records the completion result and closes the done channel in one
 // step: the result is published before done closes, so any goroutine that
 // observes Done() closed is guaranteed to also observe Result(). This makes the
 // set-result-then-close ordering correct by construction rather than relying on
-// callers sequencing SetResult and CloseDone. Must be called at most once per
-// incarnation.
+// callers sequencing SetResult and CloseDone. If another terminal path already
+// closed done, Finish only refreshes the result.
 func (e *Entry) Finish(r *task.Result) {
 	e.mu.Lock()
 	e.result = r
-	ch := e.done
+	if !e.doneClosed {
+		close(e.done)
+		e.doneClosed = true
+	}
 	e.mu.Unlock()
-	close(ch)
 }
 
 // Cleanup runs fn exactly once per incarnation. Used to guard runner.Cleanup
@@ -143,6 +149,7 @@ func (e *Entry) Cleanup(fn func()) {
 func (e *Entry) Reset() {
 	e.mu.Lock()
 	e.done = make(chan struct{})
+	e.doneClosed = false
 	e.result = nil
 	e.cleanupOnce = new(sync.Once)
 	e.mu.Unlock()
