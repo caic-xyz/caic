@@ -377,6 +377,39 @@ object HarnessSerializer : KSerializer<Harness> {
     }
 }
 
+@Serializable(with = MCPGrantStatusSerializer::class)
+sealed interface MCPGrantStatus {
+    val value: String
+    @Serializable
+    data object Active : MCPGrantStatus {
+        override val value = "active"
+    }
+    @Serializable
+    data object Expired : MCPGrantStatus {
+        override val value = "expired"
+    }
+    @Serializable
+    data object Revoked : MCPGrantStatus {
+        override val value = "revoked"
+    }
+    @Serializable
+    data class Other(override val value: String) : MCPGrantStatus
+}
+
+object MCPGrantStatusSerializer : KSerializer<MCPGrantStatus> {
+    override val descriptor = PrimitiveSerialDescriptor("MCPGrantStatus", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: MCPGrantStatus) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): MCPGrantStatus {
+        val v = decoder.decodeString()
+        return when (v) {
+            "active" -> MCPGrantStatus.Active
+            "expired" -> MCPGrantStatus.Expired
+            "revoked" -> MCPGrantStatus.Revoked
+            else -> MCPGrantStatus.Other(v)
+        }
+    }
+}
+
 @Serializable(with = PlatformSerializer::class)
 sealed interface Platform {
     val value: String
@@ -712,6 +745,29 @@ data class PreferencesResp(
 /** UpdatePreferencesReq is the request body for POST /api/caic/v1/server/preferences. */
 @Serializable
 data class UpdatePreferencesReq(val settings: UserSettings)
+
+/** MCPGrantResp describes one user-authorized remote MCP client grant. */
+@Serializable
+data class MCPGrantResp(
+    val id: String,
+    @SerialName("clientID") val clientID: String,
+    val clientName: String,
+    val scopes: List<String>,
+    val resource: String,
+    val createdAt: Instant,
+    val lastUsedAt: Instant? = null,
+    val expiresAt: Instant,
+    val revokedAt: Instant? = null,
+    val status: MCPGrantStatus,
+)
+
+/** MCPGrantsResp is the response for GET /api/caic/v1/server/mcp-grants. */
+@Serializable
+data class MCPGrantsResp(val grants: List<MCPGrantResp>)
+
+/** RevokeMCPGrantReq is the request for POST /api/caic/v1/server/mcp-grants/{grantID}/revoke. */
+@Serializable
+data class RevokeMCPGrantReq()
 
 /** HarnessInfo is the JSON representation of an available harness. */
 @Serializable

@@ -2,8 +2,8 @@
 // Provided once near the router root and consumed by the shell, layout, and route panes.
 import { createContext, createEffect, createSignal, onCleanup, useContext, type JSX } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
-import type { Config, Harness, HarnessInfo, Repo, Task, UsageResp, ImageData as APIImageData, CacheMappingResp, CacheSize, MountMappingResp, Platform, WellKnownCachesResp, VersionResp } from "@sdk/types.gen";
-import { getConfig, getPreferences, updatePreferences, listHarnesses, listCaches, getCacheSizes, listRepos, createTask, cloneRepo, getUsage, forkTask, stopTask, purgeTask, reviveTask, botFixCI, globalTaskEvents, globalUsageEvents, getVersion, triggerUpdate } from "./api";
+import type { Config, Harness, HarnessInfo, Repo, Task, UsageResp, ImageData as APIImageData, CacheMappingResp, CacheSize, MCPGrantResp, MountMappingResp, Platform, WellKnownCachesResp, VersionResp } from "@sdk/types.gen";
+import { getConfig, getPreferences, updatePreferences, listMCPGrants, revokeMCPGrant, listHarnesses, listCaches, getCacheSizes, listRepos, createTask, cloneRepo, getUsage, forkTask, stopTask, purgeTask, reviveTask, botFixCI, globalTaskEvents, globalUsageEvents, getVersion, triggerUpdate } from "./api";
 import type { RepoEntry } from "./components/RepoChipStrip";
 import { useAuth } from "./AuthContext";
 import { confirmTaskAction } from "./components/TaskCard";
@@ -58,6 +58,9 @@ function createAppStore() {
   const [wellKnownCacheSizes, setWellKnownCacheSizes] = createSignal<Record<string, CacheSize | undefined>>({});
   const [cacheMappings, setCacheMappings] = createSignal<CacheMappingResp[]>([]);
   const [customMounts, setCustomMounts] = createSignal<MountMappingResp[]>([]);
+  const [mcpGrants, setMCPGrants] = createSignal<MCPGrantResp[]>([]);
+  const [mcpGrantError, setMCPGrantError] = createSignal("");
+  const [revokingMCPGrantID, setRevokingMCPGrantID] = createSignal<string | null>(null);
   const [versionInfo, setVersionInfo] = createSignal<VersionResp | null>(null);
   const [versionCheckError, setVersionCheckError] = createSignal("");
   const [updateStatus, setUpdateStatus] = createSignal<string>("");
@@ -189,19 +192,25 @@ function createAppStore() {
     setWellKnownCacheSizes(Object.fromEntries(sizes.map((size) => [size.name, size])));
   };
 
-  // Fetch version and cache size info when the settings page opens.
+  // Fetch version, MCP grant, and cache size info when the settings page opens.
   createEffect(() => {
     if (location.pathname !== "/settings") return;
     void (async () => {
       setCheckingUpdate(true);
       setVersionCheckError("");
+      setMCPGrantError("");
       try {
-        const [v, sizes] = await Promise.all([
+        const [v, sizes, grants] = await Promise.all([
           getVersion(),
           getCacheSizes().catch(() => null),
+          auth.providers().length > 0 ? listMCPGrants().catch((e: unknown) => {
+            setMCPGrantError(e instanceof Error ? e.message : "Could not load MCP clients");
+            return null;
+          }) : Promise.resolve(null),
         ]);
         setVersionInfo(v);
         if (sizes) updateWellKnownCacheSizes(sizes.wellKnown);
+        if (grants) setMCPGrants(grants.grants);
       } catch (e: unknown) {
         setVersionCheckError(e instanceof Error ? e.message : "Version check failed");
       } finally {
@@ -670,6 +679,20 @@ function createAppStore() {
     await updatePreferences(currentSettings(overrides));
   }
 
+  async function revokeMCPClientGrant(grantID: string) {
+    setRevokingMCPGrantID(grantID);
+    setMCPGrantError("");
+    try {
+      await revokeMCPGrant(grantID, {});
+      const grants = await listMCPGrants();
+      setMCPGrants(grants.grants);
+    } catch (e: unknown) {
+      setMCPGrantError(e instanceof Error ? e.message : "Could not revoke MCP client");
+    } finally {
+      setRevokingMCPGrantID(null);
+    }
+  }
+
   async function triggerServerUpdate() {
     setUpdating(true);
     setUpdateStatus("");
@@ -743,6 +766,7 @@ function createAppStore() {
     maxCPUs, setMaxCPUs, wellKnownCaches, setWellKnownCaches,
     wellKnownCachesList, wellKnownCacheSizes, cacheMappings, setCacheMappings, customMounts, setCustomMounts,
     autoFixCI, setAutoFixCI, autoFixPR, setAutoFixPR,
+    mcpGrants, mcpGrantError, revokingMCPGrantID, revokeMCPClientGrant,
     versionInfo, versionCheckError, checkingUpdate, updating, updateStatus, saveSettings, triggerServerUpdate,
     // usage + connection
     usage, connected,

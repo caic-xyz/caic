@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"html/template"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -123,17 +124,18 @@ type mcpOAuthServer struct {
 	codes                 map[string]mcpOAuthCode
 	consents              map[string]mcpOAuthConsent
 	refreshTokens         map[string]mcpOAuthRefreshToken
+	grants                map[string]mcpOAuthGrant
 	refreshTokenStorePath string
 	key                   *rsa.PrivateKey
 	kid                   string
 }
 
 type mcpOAuthClient struct {
-	ID                      string
-	Name                    string
-	RedirectURIs            []string
-	TokenEndpointAuthMethod string
-	CreatedAt               time.Time
+	ID                      string    `json:"id"`
+	Name                    string    `json:"name"`
+	RedirectURIs            []string  `json:"redirectURIs"`
+	TokenEndpointAuthMethod string    `json:"tokenEndpointAuthMethod"`
+	CreatedAt               time.Time `json:"createdAt"`
 }
 
 type mcpOAuthConsent struct {
@@ -153,18 +155,34 @@ type mcpOAuthCode struct {
 }
 
 type mcpOAuthRefreshToken struct {
-	UserID    string
-	ClientID  string
-	Resource  string
-	Scope     string
-	ExpiresAt time.Time
-	UsedAt    time.Time
-	RevokedAt time.Time
+	GrantID   string    `json:"grantID,omitempty"`
+	UserID    string    `json:"userID"`
+	ClientID  string    `json:"clientID"`
+	Resource  string    `json:"resource"`
+	Scope     string    `json:"scope"`
+	ExpiresAt time.Time `json:"expiresAt"`
+	UsedAt    time.Time `json:"usedAt,omitzero"`
+	RevokedAt time.Time `json:"revokedAt,omitzero"`
+}
+
+type mcpOAuthGrant struct {
+	ID         string    `json:"id"`
+	UserID     string    `json:"userID"`
+	ClientID   string    `json:"clientID"`
+	ClientName string    `json:"clientName"`
+	Resource   string    `json:"resource"`
+	Scope      string    `json:"scope"`
+	CreatedAt  time.Time `json:"createdAt"`
+	LastUsedAt time.Time `json:"lastUsedAt,omitzero"`
+	ExpiresAt  time.Time `json:"expiresAt"`
+	RevokedAt  time.Time `json:"revokedAt,omitzero"`
 }
 
 type mcpOAuthRefreshTokenFile struct {
 	Version int                          `json:"version"`
+	Clients []mcpOAuthClient             `json:"clients,omitempty"`
 	Tokens  []mcpOAuthRefreshTokenRecord `json:"tokens"`
+	Grants  []mcpOAuthGrant              `json:"grants,omitempty"`
 }
 
 type mcpOAuthRefreshTokenRecord struct {
@@ -199,11 +217,11 @@ func newMCPOAuthServer(keyPEM []byte, kid, refreshTokenStorePath string) (*mcpOA
 		}
 		kid = generatedKID
 	}
-	refreshTokens, err := loadMCPOAuthRefreshTokens(refreshTokenStorePath)
+	clients, refreshTokens, grants, err := loadMCPOAuthRefreshTokens(refreshTokenStorePath)
 	if err != nil {
 		return nil, err
 	}
-	return &mcpOAuthServer{clients: map[string]mcpOAuthClient{}, codes: map[string]mcpOAuthCode{}, consents: map[string]mcpOAuthConsent{}, refreshTokens: refreshTokens, refreshTokenStorePath: refreshTokenStorePath, key: key, kid: kid}, nil
+	return &mcpOAuthServer{clients: clients, codes: map[string]mcpOAuthCode{}, consents: map[string]mcpOAuthConsent{}, refreshTokens: refreshTokens, grants: grants, refreshTokenStorePath: refreshTokenStorePath, key: key, kid: kid}, nil
 }
 
 func (s *Router) ensureMCPOAuthServer() error {
@@ -292,9 +310,11 @@ func (s *Router) handleMCPOAuthRegister(w http.ResponseWriter, r *http.Request) 
 	}
 	now := time.Now()
 	client := mcpOAuthClient{ID: "caic_" + clientID, Name: req.ClientName, RedirectURIs: req.RedirectURIs, TokenEndpointAuthMethod: method, CreatedAt: now}
-	s.mcpOAuth.mu.Lock()
-	s.mcpOAuth.clients[client.ID] = client
-	s.mcpOAuth.mu.Unlock()
+	if err := s.mcpOAuth.registerClient(&client); err != nil {
+		slog.WarnContext(r.Context(), "save oauth client registration", "err", err)
+		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not register client")
+		return
+	}
 	resp := mcp.OAuthRegisterResponse{ClientID: client.ID, ClientIDIssuedAt: now.Unix(), ClientName: client.Name, RedirectURIs: client.RedirectURIs, TokenEndpointAuthMethod: method}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -493,14 +513,23 @@ func (s *Router) handleMCPOAuthAuthorizationCodeToken(w http.ResponseWriter, r *
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "user no longer exists")
 		return
 	}
-	refreshEntry := mcpOAuthRefreshToken{UserID: entry.UserID, ClientID: entry.ClientID, Resource: entry.Resource, Scope: entry.Scope, ExpiresAt: time.Now().Add(mcpOAuthRefreshTokenTTL)}
-	refreshToken, err := s.mcpOAuth.issueRefreshToken(&refreshEntry)
+	client := s.oauthClient(entry.ClientID)
+	grantID, err := randomToken()
+	if err != nil {
+		slog.WarnContext(r.Context(), "generate mcp oauth grant id", "err", err)
+		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not issue refresh token")
+		return
+	}
+	now := time.Now()
+	grant := mcpOAuthGrant{ID: grantID, UserID: entry.UserID, ClientID: entry.ClientID, ClientName: clientDisplayName(&client), Resource: entry.Resource, Scope: entry.Scope, CreatedAt: now, ExpiresAt: now.Add(mcpOAuthRefreshTokenTTL)}
+	refreshEntry := mcpOAuthRefreshToken{GrantID: grantID, UserID: entry.UserID, ClientID: entry.ClientID, Resource: entry.Resource, Scope: entry.Scope, ExpiresAt: grant.ExpiresAt}
+	refreshToken, err := s.mcpOAuth.issueGrantRefreshToken(&grant, &refreshEntry)
 	if err != nil {
 		slog.WarnContext(r.Context(), "issue mcp oauth refresh token", "err", err)
 		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not issue refresh token")
 		return
 	}
-	s.writeMCPOAuthTokenResponse(w, r, &user, entry.Resource, entry.Scope, refreshToken)
+	s.writeMCPOAuthTokenResponse(w, r, &user, entry.Resource, entry.Scope, grantID, refreshToken)
 }
 
 func (s *Router) handleMCPOAuthRefreshToken(w http.ResponseWriter, r *http.Request) {
@@ -526,11 +555,11 @@ func (s *Router) handleMCPOAuthRefreshToken(w http.ResponseWriter, r *http.Reque
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "invalid refresh token")
 		return
 	}
-	s.writeMCPOAuthTokenResponse(w, r, &user, entry.Resource, entry.Scope, nextRefreshToken)
+	s.writeMCPOAuthTokenResponse(w, r, &user, entry.Resource, entry.Scope, entry.GrantID, nextRefreshToken)
 }
 
-func (s *Router) writeMCPOAuthTokenResponse(w http.ResponseWriter, r *http.Request, user *auth.User, resource, scope, refreshToken string) {
-	accessToken, err := s.mcpOAuth.issueAccessToken(s.externalBaseURL(r), user, resource, scope)
+func (s *Router) writeMCPOAuthTokenResponse(w http.ResponseWriter, r *http.Request, user *auth.User, resource, scope, grantID, refreshToken string) {
+	accessToken, err := s.mcpOAuth.issueAccessToken(s.externalBaseURL(r), user, resource, scope, grantID)
 	if err != nil {
 		slog.WarnContext(r.Context(), "issue mcp oauth token", "err", err)
 		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not issue access token")
@@ -625,13 +654,21 @@ func (s *Router) oauthClient(id string) mcpOAuthClient {
 	return s.mcpOAuth.clients[id]
 }
 
-func (s *mcpOAuthServer) issueRefreshToken(entry *mcpOAuthRefreshToken) (string, error) {
+func (s *mcpOAuthServer) registerClient(client *mcpOAuthClient) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clients[client.ID] = *client
+	return s.saveRefreshTokensLocked()
+}
+
+func (s *mcpOAuthServer) issueGrantRefreshToken(grant *mcpOAuthGrant, entry *mcpOAuthRefreshToken) (string, error) {
 	token, err := randomToken()
 	if err != nil {
 		return "", err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.grants[grant.ID] = *grant
 	s.refreshTokens[mcpOAuthRefreshTokenKey(token)] = *entry
 	if err := s.saveRefreshTokensLocked(); err != nil {
 		return "", err
@@ -645,6 +682,10 @@ func (s *mcpOAuthServer) validRefreshToken(token, clientID string) (mcpOAuthRefr
 	defer s.mu.Unlock()
 	entry, ok := s.refreshTokens[mcpOAuthRefreshTokenKey(token)]
 	if !ok || entry.ClientID != clientID || !entry.UsedAt.IsZero() || !entry.RevokedAt.IsZero() || now.After(entry.ExpiresAt) {
+		return mcpOAuthRefreshToken{}, false
+	}
+	grant, ok := s.grants[entry.GrantID]
+	if !ok || !grant.RevokedAt.IsZero() || now.After(grant.ExpiresAt) {
 		return mcpOAuthRefreshToken{}, false
 	}
 	return entry, true
@@ -664,10 +705,18 @@ func (s *mcpOAuthServer) rotateRefreshToken(token, clientID, userID string) (nex
 	if !ok || entry.ClientID != clientID || entry.UserID != userID || !entry.UsedAt.IsZero() || !entry.RevokedAt.IsZero() || now.After(entry.ExpiresAt) {
 		return "", mcpOAuthRefreshToken{}, false, nil
 	}
+	grant, ok := s.grants[entry.GrantID]
+	if !ok || !grant.RevokedAt.IsZero() || now.After(grant.ExpiresAt) {
+		return "", mcpOAuthRefreshToken{}, false, nil
+	}
 	entry.UsedAt = now
 	s.refreshTokens[tokenHash] = entry
-	next = mcpOAuthRefreshToken{UserID: entry.UserID, ClientID: entry.ClientID, Resource: entry.Resource, Scope: entry.Scope, ExpiresAt: now.Add(mcpOAuthRefreshTokenTTL)}
+	nextExpiry := now.Add(mcpOAuthRefreshTokenTTL)
+	next = mcpOAuthRefreshToken{GrantID: entry.GrantID, UserID: entry.UserID, ClientID: entry.ClientID, Resource: entry.Resource, Scope: entry.Scope, ExpiresAt: nextExpiry}
 	s.refreshTokens[nextTokenHash] = next
+	grant.LastUsedAt = now
+	grant.ExpiresAt = nextExpiry
+	s.grants[grant.ID] = grant
 	if err := s.saveRefreshTokensLocked(); err != nil {
 		return "", mcpOAuthRefreshToken{}, false, err
 	}
@@ -678,12 +727,89 @@ func (s *mcpOAuthServer) revokeRefreshToken(token, clientID string) error {
 	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	entry, ok := s.refreshTokens[mcpOAuthRefreshTokenKey(token)]
+	tokenHash := mcpOAuthRefreshTokenKey(token)
+	entry, ok := s.refreshTokens[tokenHash]
 	if !ok || entry.ClientID != clientID || !entry.RevokedAt.IsZero() {
 		return nil
 	}
 	entry.RevokedAt = now
-	s.refreshTokens[mcpOAuthRefreshTokenKey(token)] = entry
+	s.refreshTokens[tokenHash] = entry
+	if grant, ok := s.grants[entry.GrantID]; ok && grant.RevokedAt.IsZero() {
+		grant.RevokedAt = now
+		s.grants[entry.GrantID] = grant
+		for otherHash := range s.refreshTokens {
+			other := s.refreshTokens[otherHash]
+			if other.GrantID == entry.GrantID && other.RevokedAt.IsZero() {
+				other.RevokedAt = now
+				s.refreshTokens[otherHash] = other
+			}
+		}
+	}
+	return s.saveRefreshTokensLocked()
+}
+
+func (s *mcpOAuthServer) revokeUserGrant(userID, grantID string) bool {
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	grant, ok := s.grants[grantID]
+	if !ok || grant.UserID != userID {
+		return false
+	}
+	if grant.RevokedAt.IsZero() {
+		grant.RevokedAt = now
+		s.grants[grantID] = grant
+		for tokenHash := range s.refreshTokens {
+			entry := s.refreshTokens[tokenHash]
+			if entry.GrantID == grantID && entry.RevokedAt.IsZero() {
+				entry.RevokedAt = now
+				s.refreshTokens[tokenHash] = entry
+			}
+		}
+	}
+	return true
+}
+
+func (s *mcpOAuthServer) listUserGrants(userID string) []mcpOAuthGrant {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	grants := make([]mcpOAuthGrant, 0, len(s.grants))
+	for id := range s.grants {
+		grant := s.grants[id]
+		if grant.UserID == userID {
+			grants = append(grants, grant)
+		}
+	}
+	slices.SortFunc(grants, func(a, b mcpOAuthGrant) int {
+		if cmp := b.CreatedAt.Compare(a.CreatedAt); cmp != 0 {
+			return cmp
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	return grants
+}
+
+func (s *mcpOAuthServer) touchGrant(grantID string, now time.Time) (bool, error) {
+	if grantID == "" {
+		return true, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	grant, ok := s.grants[grantID]
+	if !ok || !grant.RevokedAt.IsZero() || now.After(grant.ExpiresAt) {
+		return false, nil
+	}
+	grant.LastUsedAt = now
+	s.grants[grantID] = grant
+	if err := s.saveRefreshTokensLocked(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *mcpOAuthServer) saveRefreshTokens() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.saveRefreshTokensLocked()
 }
 
@@ -714,26 +840,50 @@ func (s *mcpOAuthServer) saveRefreshTokensLocked() error {
 	slices.SortFunc(records, func(a, b mcpOAuthRefreshTokenRecord) int {
 		return strings.Compare(a.TokenHash, b.TokenHash)
 	})
-	return saveMCPOAuthRefreshTokens(s.refreshTokenStorePath, records)
+	grants := slices.Collect(maps.Values(s.grants))
+	slices.SortFunc(grants, func(a, b mcpOAuthGrant) int {
+		return strings.Compare(a.ID, b.ID)
+	})
+	clients := slices.Collect(maps.Values(s.clients))
+	slices.SortFunc(clients, func(a, b mcpOAuthClient) int {
+		return strings.Compare(a.ID, b.ID)
+	})
+	return saveMCPOAuthRefreshTokens(s.refreshTokenStorePath, clients, records, grants)
 }
 
-func loadMCPOAuthRefreshTokens(path string) (map[string]mcpOAuthRefreshToken, error) {
-	refreshTokens := map[string]mcpOAuthRefreshToken{}
+func loadMCPOAuthRefreshTokens(path string) (clients map[string]mcpOAuthClient, refreshTokens map[string]mcpOAuthRefreshToken, grants map[string]mcpOAuthGrant, err error) {
+	clients = map[string]mcpOAuthClient{}
+	refreshTokens = map[string]mcpOAuthRefreshToken{}
+	grants = map[string]mcpOAuthGrant{}
 	if path == "" {
-		return refreshTokens, nil
+		return clients, refreshTokens, grants, nil
 	}
 	data, err := os.ReadFile(path) //nolint:gosec // path is app-controlled persistent state.
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return refreshTokens, nil
+			return clients, refreshTokens, grants, nil
 		}
-		return nil, fmt.Errorf("read mcp oauth refresh tokens: %w", err)
+		return nil, nil, nil, fmt.Errorf("read mcp oauth refresh tokens: %w", err)
 	}
 	var file mcpOAuthRefreshTokenFile
 	if err := json.Unmarshal(data, &file); err != nil {
-		return nil, fmt.Errorf("parse mcp oauth refresh tokens: %w", err)
+		return nil, nil, nil, fmt.Errorf("parse mcp oauth refresh tokens: %w", err)
 	}
 	now := time.Now()
+	for i := range file.Clients {
+		client := file.Clients[i]
+		if client.ID == "" {
+			continue
+		}
+		clients[client.ID] = client
+	}
+	for i := range file.Grants {
+		grant := file.Grants[i]
+		if grant.ID == "" || now.After(grant.ExpiresAt) {
+			continue
+		}
+		grants[grant.ID] = grant
+	}
 	for i := range file.Tokens {
 		record := &file.Tokens[i]
 		if record.TokenHash == "" || now.After(record.ExpiresAt) {
@@ -741,11 +891,22 @@ func loadMCPOAuthRefreshTokens(path string) (map[string]mcpOAuthRefreshToken, er
 		}
 		refreshTokens[record.TokenHash] = record.mcpOAuthRefreshToken
 	}
-	return refreshTokens, nil
+	for tokenHash := range refreshTokens {
+		token := refreshTokens[tokenHash]
+		if token.GrantID == "" {
+			grantID := "legacy:" + tokenHash
+			token.GrantID = grantID
+			refreshTokens[tokenHash] = token
+			if _, ok := grants[grantID]; !ok {
+				grants[grantID] = mcpOAuthGrant{ID: grantID, UserID: token.UserID, ClientID: token.ClientID, ClientName: token.ClientID, Resource: token.Resource, Scope: token.Scope, CreatedAt: token.ExpiresAt.Add(-mcpOAuthRefreshTokenTTL), ExpiresAt: token.ExpiresAt, RevokedAt: token.RevokedAt}
+			}
+		}
+	}
+	return clients, refreshTokens, grants, nil
 }
 
-func saveMCPOAuthRefreshTokens(path string, records []mcpOAuthRefreshTokenRecord) error {
-	file := mcpOAuthRefreshTokenFile{Version: 1, Tokens: records}
+func saveMCPOAuthRefreshTokens(path string, clients []mcpOAuthClient, records []mcpOAuthRefreshTokenRecord, grants []mcpOAuthGrant) error {
+	file := mcpOAuthRefreshTokenFile{Version: 3, Clients: clients, Tokens: records, Grants: grants}
 	data, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal mcp oauth refresh tokens: %w", err)
@@ -770,7 +931,7 @@ func mcpOAuthRefreshTokenKey(token string) string {
 	return base64.RawURLEncoding.EncodeToString(digest[:])
 }
 
-func (s *mcpOAuthServer) issueAccessToken(issuer string, user *auth.User, audience, scope string) (string, error) {
+func (s *mcpOAuthServer) issueAccessToken(issuer string, user *auth.User, audience, scope, grantID string) (string, error) {
 	now := time.Now()
 	headerJSON, err := json.Marshal(map[string]string{"alg": mcp.JWTAlgRS256, "typ": "JWT", "kid": s.kid})
 	if err != nil {
@@ -782,6 +943,7 @@ func (s *mcpOAuthServer) issueAccessToken(issuer string, user *auth.User, audien
 		"aud":      audience,
 		"username": user.Username,
 		"scope":    scope,
+		"grant_id": grantID,
 		"iat":      now.Unix(),
 		"nbf":      now.Unix(),
 		"exp":      now.Add(mcpOAuthAccessTokenTTL).Unix(),

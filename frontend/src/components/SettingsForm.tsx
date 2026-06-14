@@ -1,6 +1,6 @@
 // SettingsForm renders the application settings controls.
 import { For, Show, type Accessor, type Setter } from "solid-js";
-import type { CacheMappingResp, CacheSize, MountMappingResp, Platform, UpdatePreferencesReq, VersionResp, WellKnownCachesResp } from "@sdk/types.gen";
+import type { CacheMappingResp, CacheSize, MCPGrantResp, MountMappingResp, Platform, UpdatePreferencesReq, VersionResp, WellKnownCachesResp } from "@sdk/types.gen";
 import styles from "./SettingsForm.module.css";
 
 type SettingsOverrides = Partial<UpdatePreferencesReq["settings"]>;
@@ -24,6 +24,11 @@ interface SettingsFormProps {
   setAutoFixCI: Setter<boolean>;
   autoFixPR: Accessor<boolean>;
   setAutoFixPR: Setter<boolean>;
+  authProviders: Accessor<string[]>;
+  mcpGrants: Accessor<MCPGrantResp[]>;
+  mcpGrantError: Accessor<string>;
+  revokingMCPGrantID: Accessor<string | null>;
+  revokeMCPClientGrant: (grantID: string) => Promise<void>;
   versionInfo: Accessor<VersionResp | null>;
   versionCheckError: Accessor<string>;
   checkingUpdate: Accessor<boolean>;
@@ -46,6 +51,12 @@ export default function SettingsForm(props: SettingsFormProps) {
     if (!size) return "pending";
     if (size.error) return "error";
     return formatBytes(size.sizeBytes ?? 0);
+  };
+  const formatDate = (value?: string): string => {
+    if (!value) return "Never";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "Unknown";
+    return date.toLocaleString();
   };
   const updateCacheMapping = (index: number, update: Partial<CacheMappingResp>) => {
     props.setCacheMappings((prev) => prev.map((mapping, i) => (
@@ -272,6 +283,54 @@ export default function SettingsForm(props: SettingsFormProps) {
             + Add mount
           </button>
         </div>
+        <Show when={props.authProviders().length > 0}>
+          <div class={styles.settingsSection}>
+            <h3 class={styles.settingsSectionTitle}>MCP clients</h3>
+            <p class={styles.settingsDescription}>Remote clients authorized to access caic through MCP OAuth.</p>
+            <Show when={!props.mcpGrantError()} fallback={
+              <p class={styles.settingsDescription} style={{ color: "var(--color-error)" }}>{props.mcpGrantError()}</p>
+            }>
+              <Show when={props.mcpGrants().length > 0} fallback={
+                <p class={styles.settingsDescription}>No connected MCP clients.</p>
+              }>
+                <div class={styles.mcpGrantList}>
+                  <For each={props.mcpGrants()}>
+                    {(grant) => (
+                      <div class={styles.mcpGrantCard} data-status={grant.status}>
+                        <div class={styles.mcpGrantHeader}>
+                          <div>
+                            <div class={styles.mcpGrantName}>{grant.clientName || grant.clientID}</div>
+                            <div class={styles.mcpGrantMeta}>{grant.clientID}</div>
+                          </div>
+                          <span class={styles.mcpGrantStatus}>{grant.status}</span>
+                        </div>
+                        <div class={styles.mcpGrantDetails}>
+                          <div>Scopes: {grant.scopes.join(", ")}</div>
+                          <div>Resource: {grant.resource}</div>
+                          <div>Created: {formatDate(grant.createdAt)}</div>
+                          <div>Last used: {formatDate(grant.lastUsedAt)}</div>
+                          <div>Expires: {formatDate(grant.expiresAt)}</div>
+                        </div>
+                        <Show when={grant.status !== "revoked"}>
+                          <button
+                            type="button"
+                            class={styles.settingsButton}
+                            disabled={props.revokingMCPGrantID() === grant.id}
+                            onClick={() => {
+                              void props.revokeMCPClientGrant(grant.id);
+                            }}
+                          >
+                            {props.revokingMCPGrantID() === grant.id ? "Revoking…" : "Revoke access"}
+                          </button>
+                        </Show>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </Show>
+            </Show>
+          </div>
+        </Show>
         <div class={styles.settingsSection}>
           <h3 class={styles.settingsSectionTitle}>Automation</h3>
           <label class={styles.settingsLabel}>

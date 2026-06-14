@@ -216,6 +216,28 @@ public struct Harness: Codable, Equatable, Hashable {
     }
 }
 
+public struct MCPGrantStatus: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let Active = MCPGrantStatus("active")
+    public static let Expired = MCPGrantStatus("expired")
+    public static let Revoked = MCPGrantStatus("revoked")
+
+    public static func other(_ value: String) -> MCPGrantStatus { MCPGrantStatus(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
 public struct Platform: Codable, Equatable, Hashable {
     public let value: String
 
@@ -463,6 +485,29 @@ public struct PreferencesResp: Codable {
 /// UpdatePreferencesReq is the request body for POST /api/caic/v1/server/preferences.
 public struct UpdatePreferencesReq: Codable {
     public let settings: UserSettings
+}
+
+/// MCPGrantResp describes one user-authorized remote MCP client grant.
+public struct MCPGrantResp: Codable {
+    public let id: String
+    public let clientID: String
+    public let clientName: String
+    public let scopes: [String]
+    public let resource: String
+    public let createdAt: ISOTimestamp
+    public let lastUsedAt: ISOTimestamp?
+    public let expiresAt: ISOTimestamp
+    public let revokedAt: ISOTimestamp?
+    public let status: MCPGrantStatus
+}
+
+/// MCPGrantsResp is the response for GET /api/caic/v1/server/mcp-grants.
+public struct MCPGrantsResp: Codable {
+    public let grants: [MCPGrantResp]
+}
+
+/// RevokeMCPGrantReq is the request for POST /api/caic/v1/server/mcp-grants/{grantID}/revoke.
+public struct RevokeMCPGrantReq: Codable {
 }
 
 /// HarnessInfo is the JSON representation of an available harness.

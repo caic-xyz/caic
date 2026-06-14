@@ -138,6 +138,14 @@ public final class ApiClient {
     public func updatePreferences(req: UpdatePreferencesReq) async throws -> PreferencesResp {
         try await request("POST", path: "/api/caic/v1/server/preferences", body: try encoder.encode(req))
     }
+    /// Lists the authenticated user's connected MCP clients.
+    public func listMCPGrants() async throws -> MCPGrantsResp {
+        try await request("GET", path: "/api/caic/v1/server/mcp-grants")
+    }
+    /// Revokes one connected MCP client grant for the authenticated user.
+    public func revokeMCPGrant(grantID: String, req: RevokeMCPGrantReq) async throws -> StatusResp {
+        try await request("POST", path: "/api/caic/v1/server/mcp-grants/\(grantID)/revoke", body: try encoder.encode(req))
+    }
     /// Lists available coding agent harnesses.
     public func listHarnesses() async throws -> [HarnessInfo] {
         try await request("GET", path: "/api/caic/v1/server/harnesses")

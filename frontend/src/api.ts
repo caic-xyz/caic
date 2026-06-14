@@ -15,6 +15,8 @@ export const {
   logout,
   getPreferences,
   updatePreferences,
+  listMCPGrants,
+  revokeMCPGrant,
   listHarnesses,
   listCaches,
   getCacheSizes,

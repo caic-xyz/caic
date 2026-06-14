@@ -15,6 +15,8 @@ Type notation: `JSONValue` means any valid JSON value.
 | POST | `/api/caic/v1/server/update` | Triggers a background server auto-update to the latest release. |  | `UpdateResp` |
 | GET | `/api/caic/v1/server/preferences` | Returns server and per-repository preferences. |  | `PreferencesResp` |
 | POST | `/api/caic/v1/server/preferences` | Updates server settings and preferences. | `UpdatePreferencesReq` | `PreferencesResp` |
+| GET | `/api/caic/v1/server/mcp-grants` | Lists the authenticated user's connected MCP clients. |  | `MCPGrantsResp` |
+| POST | `/api/caic/v1/server/mcp-grants/{grantID}/revoke` | Revokes one connected MCP client grant for the authenticated user. | `RevokeMCPGrantReq` | `StatusResp` |
 | GET | `/api/caic/v1/server/harnesses` | Lists available coding agent harnesses. |  | `HarnessInfo[]` |
 | GET | `/api/caic/v1/server/caches` | Lists well-known cache configurations. |  | `WellKnownCachesResp` |
 | GET | `/api/caic/v1/server/cache-sizes` | Returns the latest size snapshot for well-known caches. |  | `CacheSizesResp` |
@@ -231,6 +233,38 @@ UpdatePreferencesReq is the request body for POST /api/caic/v1/server/preference
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `settings` | `UserSettings` |  | yes |
+
+### MCPGrantResp
+
+MCPGrantResp describes one user-authorized remote MCP client grant.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `id` | `string` |  | yes |
+| `clientID` | `string` |  | yes |
+| `clientName` | `string` |  | yes |
+| `scopes` | `string[]` |  | yes |
+| `resource` | `string` |  | yes |
+| `createdAt` | `ISOTimestamp` |  | yes |
+| `lastUsedAt` | `ISOTimestamp` |  |  |
+| `expiresAt` | `ISOTimestamp` |  | yes |
+| `revokedAt` | `ISOTimestamp` |  |  |
+| `status` | `string` |  | yes |
+
+### MCPGrantsResp
+
+MCPGrantsResp is the response for GET /api/caic/v1/server/mcp-grants.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `grants` | `MCPGrantResp[]` |  | yes |
+
+### RevokeMCPGrantReq
+
+RevokeMCPGrantReq is the request for POST /api/caic/v1/server/mcp-grants/{grantID}/revoke.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
 
 ### HarnessInfo
 

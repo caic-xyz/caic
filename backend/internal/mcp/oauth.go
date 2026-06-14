@@ -116,6 +116,7 @@ type AccessTokenClaims struct {
 	Audience  string `json:"aud"`
 	Username  string `json:"username"`
 	Scope     string `json:"scope"`
+	GrantID   string `json:"grant_id,omitempty"`
 	IssuedAt  int64  `json:"iat"`
 	NotBefore int64  `json:"nbf"`
 	Expiry    int64  `json:"exp"`

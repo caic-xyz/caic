@@ -399,6 +399,17 @@ export const HarnessCodex: Harness = "codex";
 export const HarnessOpenCode: Harness = "opencode";
 export const HarnessPi: Harness = "pi";
 
+export type MCPGrantStatus =
+  | "active"
+  | "expired"
+  | "revoked";
+/**
+ * Supported values.
+ */
+export const MCPGrantStatusActive: MCPGrantStatus = "active";
+export const MCPGrantStatusExpired: MCPGrantStatus = "expired";
+export const MCPGrantStatusRevoked: MCPGrantStatus = "revoked";
+
 export type Platform =
   | ""
   | "linux/arm64"
@@ -597,6 +608,29 @@ export interface PreferencesResp {
 /** UpdatePreferencesReq is the request body for POST /api/caic/v1/server/preferences. */
 export interface UpdatePreferencesReq {
   settings: UserSettings;
+}
+
+/** MCPGrantResp describes one user-authorized remote MCP client grant. */
+export interface MCPGrantResp {
+  id: string;
+  clientID: string;
+  clientName: string;
+  scopes: string[];
+  resource: string;
+  createdAt: ISOTimestamp;
+  lastUsedAt?: ISOTimestamp;
+  expiresAt: ISOTimestamp;
+  revokedAt?: ISOTimestamp;
+  status: MCPGrantStatus;
+}
+
+/** MCPGrantsResp is the response for GET /api/caic/v1/server/mcp-grants. */
+export interface MCPGrantsResp {
+  grants: MCPGrantResp[];
+}
+
+/** RevokeMCPGrantReq is the request for POST /api/caic/v1/server/mcp-grants/{grantID}/revoke. */
+export interface RevokeMCPGrantReq {
 }
 
 /** HarnessInfo is the JSON representation of an available harness. */

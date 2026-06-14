@@ -174,3 +174,56 @@
   border-color: var(--color-primary);
   color: var(--color-primary);
 }
+
+.settingsButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.mcpGrantList {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.mcpGrantCard {
+  padding: 0.75rem;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-input);
+}
+
+.mcpGrantCard[data-status="revoked"],
+.mcpGrantCard[data-status="expired"] {
+  opacity: 0.65;
+}
+
+.mcpGrantHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.mcpGrantName {
+  font-weight: 600;
+}
+
+.mcpGrantMeta,
+.mcpGrantDetails {
+  color: var(--color-text-secondary);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.mcpGrantDetails {
+  display: grid;
+  gap: 0.2rem;
+  margin-bottom: 0.75rem;
+}
+
+.mcpGrantStatus {
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+}

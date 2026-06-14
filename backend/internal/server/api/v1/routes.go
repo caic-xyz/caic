@@ -102,6 +102,21 @@ var Routes = []Route{
 		Resp:   reflect.TypeFor[PreferencesResp](),
 	},
 	{
+		Name:   "listMCPGrants",
+		Doc:    "Lists the authenticated user's connected MCP clients.",
+		Method: "GET",
+		Path:   "/api/caic/v1/server/mcp-grants",
+		Resp:   reflect.TypeFor[MCPGrantsResp](),
+	},
+	{
+		Name:   "revokeMCPGrant",
+		Doc:    "Revokes one connected MCP client grant for the authenticated user.",
+		Method: "POST",
+		Path:   "/api/caic/v1/server/mcp-grants/{grantID}/revoke",
+		Req:    reflect.TypeFor[RevokeMCPGrantReq](),
+		Resp:   reflect.TypeFor[StatusResp](),
+	},
+	{
 		Name:    "listHarnesses",
 		Doc:     "Lists available coding agent harnesses.",
 		Method:  "GET",

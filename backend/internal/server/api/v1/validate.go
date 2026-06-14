@@ -74,6 +74,14 @@ const (
 // pathSegmentRe matches valid path segments: starts with alphanumeric, then alphanumeric, dots, hyphens, or underscores.
 var pathSegmentRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
+// Validate checks that the MCP grant path parameter is present.
+func (r *RevokeMCPGrantReq) Validate() error {
+	if r.GrantID == "" {
+		return api.BadRequest("grantID is required")
+	}
+	return nil
+}
+
 // Validate checks that the clone URL is provided and the optional path is safe.
 func (r *CloneRepoReq) Validate() error {
 	if r.URL == "" {

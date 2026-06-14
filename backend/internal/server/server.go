@@ -160,6 +160,8 @@ func (s *Router) buildHandler() (http.Handler, error) {
 	taskRoutes := s.taskHTTPHandlers
 	apiMux.HandleFunc("GET /api/caic/v1/server/preferences", handle(serverConfig.getPreferences))
 	apiMux.HandleFunc("POST /api/caic/v1/server/preferences", handle(serverConfig.updatePreferences))
+	apiMux.HandleFunc("GET /api/caic/v1/server/mcp-grants", handle(s.listMCPGrants))
+	apiMux.HandleFunc("POST /api/caic/v1/server/mcp-grants/{grantID}/revoke", handle(s.revokeMCPGrant))
 	apiMux.HandleFunc("GET /api/caic/v1/server/harnesses", handle(serverConfig.listHarnesses))
 	apiMux.HandleFunc("GET /api/caic/v1/server/caches", handle(serverConfig.listCaches))
 	apiMux.HandleFunc("GET /api/caic/v1/server/cache-sizes", handle(serverConfig.getCacheSizes))

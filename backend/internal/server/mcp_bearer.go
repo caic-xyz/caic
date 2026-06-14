@@ -116,6 +116,15 @@ func (s *Router) verifyMCPBearer(r *http.Request, token string) (*auth.User, *mc
 	if claims.NotBefore > now || claims.Expiry <= now {
 		return nil, nil, errors.New("token is not valid now")
 	}
+	if claims.GrantID != "" {
+		active, err := s.mcpOAuth.touchGrant(claims.GrantID, time.Now())
+		if err != nil {
+			return nil, nil, fmt.Errorf("touch token grant: %w", err)
+		}
+		if !active {
+			return nil, nil, errors.New("token grant is not active")
+		}
+	}
 	user, ok := s.authStore.FindByID(claims.Subject)
 	if !ok {
 		return nil, nil, errors.New("token subject is unknown")

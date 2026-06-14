@@ -63,6 +63,14 @@ store. The token endpoint rotates refresh tokens on every refresh grant; reused,
 expired, revoked, or unknown-user refresh tokens are rejected. The revocation
 endpoint lets clients revoke refresh tokens.
 
+Dynamic OAuth client registrations are durable, so clients can reuse their
+`client_id` across caic restarts. Each successful authorization-code exchange
+creates a durable user grant record with client identity, scopes, resource,
+creation time, last-used time, expiry, and revocation status. The Settings
+API/UI lists only the authenticated user's MCP client grants and lets the user
+revoke a grant. User revocation blocks future refresh for that grant without
+affecting other grants.
+
 ## Invariants
 
 - Do not accept query-string credentials.
@@ -80,25 +88,7 @@ endpoint lets clients revoke refresh tokens.
 
 ## Work Plan
 
-### 1. Token lifecycle
-
-Add user-owned grant management before relying on long-lived hosted use:
-
-- add a Settings page/API for connected MCP clients.
-- persist explicit grant records for the UX: user ID, client ID/name, scopes,
-  resource, creation time, last-used time, expiry, and revocation status.
-- support user-initiated grant revocation in addition to client-driven token
-  revocation.
-
-Validation:
-
-- grant list shows only the authenticated user's MCP clients.
-- grant details show client identity, scopes, resource, timestamps, expiry, and
-  status.
-- user revocation blocks future access-token refresh for the grant.
-- user revocation does not affect unrelated users or clients.
-
-### 2. Forge authority policy
+### 1. Forge authority policy
 
 Remote MCP forge tools currently require the remote caic user to have linked
 GitHub/GitLab identity. Keep that rule until product policy changes.
@@ -117,7 +107,7 @@ Validation:
 - linked user can perform allowed forge actions.
 - any server-side authority policy has explicit tests.
 
-### 3. Audit and revocation UX
+### 2. Audit persistence
 
 MCP tool/resource calls are audited in memory and logged. Durable audit is
 optional unless product policy requires persistent traceability.
@@ -128,9 +118,6 @@ If implemented:
 - persist auth approvals and token refresh/revocation events.
 - redact arguments and credentials before writing.
 - fail open with a warning unless product policy requires fail-closed audit.
-
-Add UI/API for users to view and revoke MCP client grants. This is required
-because refresh tokens are long-lived and survive server restart.
 
 Validation:
 

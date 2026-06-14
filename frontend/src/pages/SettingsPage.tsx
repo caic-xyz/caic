@@ -26,6 +26,11 @@ export default function SettingsPage() {
         setAutoFixCI={s.setAutoFixCI}
         autoFixPR={s.autoFixPR}
         setAutoFixPR={s.setAutoFixPR}
+        authProviders={s.auth.providers}
+        mcpGrants={s.mcpGrants}
+        mcpGrantError={s.mcpGrantError}
+        revokingMCPGrantID={s.revokingMCPGrantID}
+        revokeMCPClientGrant={s.revokeMCPClientGrant}
         versionInfo={s.versionInfo}
         versionCheckError={s.versionCheckError}
         checkingUpdate={s.checkingUpdate}
