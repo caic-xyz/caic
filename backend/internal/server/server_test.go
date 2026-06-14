@@ -849,7 +849,7 @@ func TestHandleCreateTask(t *testing.T) {
 		})
 		handler := handle(testTaskHandlers(s).service.createTask)
 
-		body := strings.NewReader(`{"initialPrompt":{"text":"no repo task"},"harness":"claude"}`)
+		body := strings.NewReader(`{"initialPrompt":{"text":"no repo task"},"harness":"claude","model":"m1","effort":"high"}`)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
 		w := httptest.NewRecorder()
 		handler(w, req)
@@ -863,6 +863,16 @@ func TestHandleCreateTask(t *testing.T) {
 		}
 		if resp.ID == 0 {
 			t.Error("response has zero 'id' field")
+		}
+		prefs := s.prefs.Get("default")
+		if prefs.Harness != "claude" {
+			t.Errorf("preferences harness = %q, want claude", prefs.Harness)
+		}
+		if prefs.Models["claude"] != "m1" {
+			t.Errorf("preferences models[claude] = %q, want m1", prefs.Models["claude"])
+		}
+		if prefs.Efforts["claude"]["m1"] != "high" {
+			t.Errorf("preferences efforts[claude][m1] = %q, want high", prefs.Efforts["claude"]["m1"])
 		}
 	})
 

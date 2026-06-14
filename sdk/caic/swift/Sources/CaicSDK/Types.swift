@@ -479,6 +479,7 @@ public struct PreferencesResp: Codable {
     public let repositories: [RepoPrefsResp]
     public let harness: String?
     public let models: [String: String]?
+    public let efforts: [String: [String: String]]?
     public let settings: UserSettings
 }
 

@@ -135,8 +135,32 @@ func (s *taskAPIService) createTask(ctx context.Context, req *v1.CreateTaskReq) 
 
 	go s.maybeFakeCI(entry.Task())
 
-	if len(req.Repos) > 0 {
-		if err := s.prefs.Update(userIDFromCtx(ctx), func(p *preferences.Preferences) {
+	if err := s.prefs.Update(userIDFromCtx(ctx), func(p *preferences.Preferences) {
+		p.Harness = string(req.Harness)
+		if req.Model == "" {
+			delete(p.Models, string(req.Harness))
+		} else {
+			if p.Models == nil {
+				p.Models = make(map[string]string)
+			}
+			p.Models[string(req.Harness)] = req.Model
+		}
+		harnessName := string(req.Harness)
+		if req.Effort == "" {
+			delete(p.Efforts[harnessName], req.Model)
+			if len(p.Efforts[harnessName]) == 0 {
+				delete(p.Efforts, harnessName)
+			}
+		} else {
+			if p.Efforts == nil {
+				p.Efforts = make(preferences.EffortPreferences)
+			}
+			if p.Efforts[harnessName] == nil {
+				p.Efforts[harnessName] = make(map[string]string)
+			}
+			p.Efforts[harnessName][req.Model] = req.Effort
+		}
+		if len(req.Repos) > 0 {
 			p.TouchRepo(req.Repos[0].Name, &preferences.RepoPrefs{
 				BaseBranch: req.Repos[0].BaseBranch,
 				Harness:    string(req.Harness),
@@ -148,11 +172,10 @@ func (s *taskAPIService) createTask(ctx context.Context, req *v1.CreateTaskReq) 
 			// non-default model doesn't persist.
 			if req.Model == "" {
 				p.Repositories[0].Model = ""
-				delete(p.Models, string(req.Harness))
 			}
-		}); err != nil {
-			return nil, api.InternalError("save preferences: " + err.Error())
 		}
+	}); err != nil {
+		return nil, api.InternalError("save preferences: " + err.Error())
 	}
 
 	return &v1.CreateTaskResp{Status: "accepted", ID: entry.Task().ID}, nil

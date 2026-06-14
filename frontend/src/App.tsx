@@ -143,13 +143,18 @@ function Shell(props: { children?: JSX.Element }) {
           <div class={styles.forkRow}>
             <Show when={s.harnesses().length > 1}>
               <ControlSelect
+                aria-label="Fork harness"
                 value={s.forkHarness()}
                 onChange={(e) => {
                   const h = e.currentTarget.value;
                   s.setForkHarness(h);
                   const models = s.harnesses().find((x) => x.name === h)?.models ?? [];
-                  s.setForkModel(models.includes(s.forkModel()) ? s.forkModel() : "");
-                  s.setForkEffort("");
+                  const prefModel = s.getPrefModel(h);
+                  const model = prefModel && models.includes(prefModel) ? prefModel : "";
+                  s.setForkModel(model);
+                  const efforts = effortOptions(h as Harness);
+                  const effort = s.getPrefEffort(h, model);
+                  s.setForkEffort(effort && efforts.includes(effort) ? effort : "");
                 }}
               >
                 <For each={s.harnesses()}>
@@ -159,8 +164,16 @@ function Shell(props: { children?: JSX.Element }) {
             </Show>
             <Show when={(s.harnesses().find((h) => h.name === s.forkHarness())?.models ?? []).length > 0}>
               <ControlSelect
+                aria-label="Fork model"
                 value={s.forkModel()}
-                onChange={(e) => s.setForkModel(e.currentTarget.value)}
+                onChange={(e) => {
+                  const model = e.currentTarget.value;
+                  s.setForkModel(model);
+                  s.setPrefModel(s.forkHarness(), model);
+                  const efforts = effortOptions(s.forkHarness() as Harness);
+                  const effort = s.getPrefEffort(s.forkHarness(), model);
+                  s.setForkEffort(effort && efforts.includes(effort) ? effort : "");
+                }}
               >
                 <option value="">Default model</option>
                 <For each={s.harnesses().find((h) => h.name === s.forkHarness())?.models ?? []}>
@@ -170,8 +183,13 @@ function Shell(props: { children?: JSX.Element }) {
             </Show>
             <Show when={effortOptions(s.forkHarness() as Harness).length > 0}>
               <ControlSelect
+                aria-label="Fork effort"
                 value={s.forkEffort()}
-                onChange={(e) => s.setForkEffort(e.currentTarget.value)}
+                onChange={(e) => {
+                  const effort = e.currentTarget.value;
+                  s.setForkEffort(effort);
+                  s.setPrefEffort(s.forkHarness(), s.forkModel(), effort);
+                }}
               >
                 <option value="">Default effort</option>
                 <For each={effortOptions(s.forkHarness() as Harness)}>

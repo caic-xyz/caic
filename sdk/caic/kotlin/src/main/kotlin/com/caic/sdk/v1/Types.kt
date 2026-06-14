@@ -739,6 +739,7 @@ data class PreferencesResp(
     val repositories: List<RepoPrefsResp>,
     val harness: String? = null,
     val models: Map<String, String>? = null,
+    val efforts: Map<String, Map<String, String>>? = null,
     val settings: UserSettings,
 )
 

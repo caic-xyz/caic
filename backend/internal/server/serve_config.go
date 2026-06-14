@@ -162,6 +162,7 @@ func (h *serverConfigHandlers) getPreferences(ctx context.Context, _ *api.EmptyR
 		Repositories: repoPrefs,
 		Harness:      prefs.Harness,
 		Models:       prefs.Models,
+		Efforts:      map[string]map[string]string(prefs.Efforts),
 		Settings: v1.UserSettings{
 			AutoFixOnCIFailure: prefs.Settings.AutoFixOnCIFailure,
 			AutoFixOnPROpen:    prefs.Settings.AutoFixOnPROpen,

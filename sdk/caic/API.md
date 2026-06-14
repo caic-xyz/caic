@@ -224,6 +224,7 @@ PreferencesResp is the response for GET /api/caic/v1/server/preferences.
 | `repositories` | `RepoPrefsResp[]` |  | yes |
 | `harness` | `string` |  |  |
 | `models` | `Record<string, string>` |  |  |
+| `efforts` | `Record<string, Record<string, string>>` |  |  |
 | `settings` | `UserSettings` |  | yes |
 
 ### UpdatePreferencesReq

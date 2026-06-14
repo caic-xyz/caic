@@ -37,15 +37,9 @@ export default function MainLayout(props: { children?: JSX.Element }) {
         />
         <Show when={s.harnesses().length > 1}>
           <ControlSelect
+            aria-label="Harness"
             value={s.selectedHarness()}
-            onChange={(e) => {
-              const h = e.currentTarget.value;
-              s.setSelectedHarness(h);
-              const models = s.harnesses().find((x) => x.name === h)?.models ?? [];
-              const lastModel = s.getPrefModel(h);
-              s.setSelectedModel(lastModel && models.includes(lastModel) ? lastModel : "");
-              s.setSelectedEffort("");
-            }}
+            onChange={(e) => s.setSelectedHarness(e.currentTarget.value)}
           >
             <For each={s.harnesses()}>
               {(h) => <option value={h.name}>{h.name}</option>}
@@ -54,12 +48,9 @@ export default function MainLayout(props: { children?: JSX.Element }) {
         </Show>
         <Show when={(s.harnesses().find((h) => h.name === s.selectedHarness())?.models ?? []).length > 0}>
           <ControlSelect
+            aria-label="Model"
             value={s.selectedModel()}
-            onChange={(e) => {
-              const m = e.currentTarget.value;
-              s.setSelectedModel(m);
-              s.setPrefModel(s.selectedHarness(), m);
-            }}
+            onChange={(e) => s.setSelectedModel(e.currentTarget.value)}
           >
             <option value="">Default model</option>
             <For each={s.harnesses().find((h) => h.name === s.selectedHarness())?.models ?? []}>
@@ -69,6 +60,7 @@ export default function MainLayout(props: { children?: JSX.Element }) {
         </Show>
         <Show when={effortOptions(s.selectedHarness() as Harness).length > 0}>
           <ControlSelect
+            aria-label="Effort"
             value={s.selectedEffort()}
             onChange={(e) => s.setSelectedEffort(e.currentTarget.value)}
           >

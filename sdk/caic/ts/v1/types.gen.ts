@@ -602,6 +602,7 @@ export interface PreferencesResp {
   repositories: RepoPrefsResp[];
   harness?: string;
   models?: { [key: string]: string};
+  efforts?: { [key: string]: { [key: string]: string}};
   settings: UserSettings;
 }
 

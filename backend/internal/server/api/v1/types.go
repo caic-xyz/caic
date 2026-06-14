@@ -594,10 +594,11 @@ type UserSettings struct {
 
 // PreferencesResp is the response for GET /api/caic/v1/server/preferences.
 type PreferencesResp struct {
-	Repositories []RepoPrefsResp   `json:"repositories"`
-	Harness      string            `json:"harness,omitempty"`
-	Models       map[string]string `json:"models,omitempty"`
-	Settings     UserSettings      `json:"settings"`
+	Repositories []RepoPrefsResp              `json:"repositories"`
+	Harness      string                       `json:"harness,omitempty"`
+	Models       map[string]string            `json:"models,omitempty"`
+	Efforts      map[string]map[string]string `json:"efforts,omitempty"`
+	Settings     UserSettings                 `json:"settings"`
 }
 
 // UpdatePreferencesReq is the request body for POST /api/caic/v1/server/preferences.

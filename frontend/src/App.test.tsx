@@ -1,4 +1,4 @@
-// Tests for repo chip selection after clone and task creation.
+// Tests for app-shell task creation, repo selection, and harness preferences.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
@@ -127,6 +127,52 @@ beforeEach(() => {
 });
 
 describe("App repo chips: No repository", () => {
+  it("syncs harness model and effort from per-model preferences", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getPreferences).mockResolvedValue({
+      repositories: [{ path: "repos/a" }],
+      harness: "codex",
+      models: { claude: "sonnet", codex: "gpt-5" },
+      efforts: { claude: { sonnet: "max" }, codex: { "gpt-5": "high", "gpt-5-mini": "minimal" } },
+      settings: { baseImage: "" },
+    } as unknown as PreferencesResp);
+    vi.mocked(api.listHarnesses).mockResolvedValue([
+      { name: "claude", models: ["sonnet"], supportsImages: false, supportsCompact: false },
+      { name: "codex", models: ["gpt-5", "gpt-5-mini"], supportsImages: false, supportsCompact: false },
+    ] as unknown as HarnessInfo[]);
+
+    renderApp();
+
+    const harness = await screen.findByRole("combobox", { name: "Harness" });
+    const model = screen.getByRole("combobox", { name: "Model" });
+    const effort = screen.getByRole("combobox", { name: "Effort" });
+    expect(harness).toHaveValue("codex");
+    expect(model).toHaveValue("gpt-5");
+    expect(effort).toHaveValue("high");
+
+    await user.selectOptions(model, "gpt-5-mini");
+    expect(effort).toHaveValue("minimal");
+
+    await user.selectOptions(effort, "low");
+    await user.selectOptions(model, "gpt-5");
+    expect(effort).toHaveValue("high");
+
+    await user.selectOptions(model, "gpt-5-mini");
+    expect(effort).toHaveValue("low");
+
+    await user.selectOptions(harness, "claude");
+    expect(model).toHaveValue("sonnet");
+    expect(effort).toHaveValue("max");
+
+    await user.selectOptions(harness, "codex");
+    expect(model).toHaveValue("gpt-5-mini");
+    expect(effort).toHaveValue("low");
+
+    await user.selectOptions(harness, "claude");
+    expect(model).toHaveValue("sonnet");
+    expect(effort).toHaveValue("max");
+  });
+
   it("does not mount browser voice in Go Mode host mode", async () => {
     window.goModeHost = {};
 

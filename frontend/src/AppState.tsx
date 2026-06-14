@@ -7,6 +7,7 @@ import { getConfig, getPreferences, updatePreferences, listMCPGrants, revokeMCPG
 import type { RepoEntry } from "./components/RepoChipStrip";
 import { useAuth } from "./AuthContext";
 import { confirmTaskAction } from "./components/TaskCard";
+import { effortOptions } from "./effortOptions";
 import { requestNotificationPermission, notifyWaiting, dismissNotification } from "./notifications";
 import { taskPath, taskIdFromPath } from "./taskPath";
 import { useHostMode } from "./hostMode";
@@ -134,12 +135,52 @@ function createAppStore() {
   };
   const taskById = (id: string): Task | undefined => tasks().find((t) => t.id === id);
 
-  // In-memory per-harness model preferences from the server.
+  type EffortPreferences = Record<string, Record<string, string>>;
+
+  // In-memory per-harness model and per-harness/model effort preferences from the server.
   let prefModels: Record<string, string> = {};
+  let prefEfforts: EffortPreferences = {};
   const getPrefModel = (harness: string): string | undefined => prefModels[harness];
   const setPrefModel = (harness: string, model: string) => {
     if (model) prefModels[harness] = model;
     else delete prefModels[harness];
+  };
+  const getPrefEffort = (harness: string, model: string): string | undefined => prefEfforts[harness]?.[model] ?? prefEfforts[harness]?.[""];
+  const setPrefEffort = (harness: string, model: string, effort: string) => {
+    if (effort) {
+      prefEfforts[harness] = { ...(prefEfforts[harness] ?? {}), [model]: effort };
+      return;
+    }
+    if (!prefEfforts[harness]) return;
+    const next = { ...prefEfforts[harness] };
+    delete next[model];
+    if (Object.keys(next).length > 0) prefEfforts[harness] = next;
+    else delete prefEfforts[harness];
+  };
+  const selectedModelForHarness = (harness: string) => {
+    const models = harnesses().find((x) => x.name === harness)?.models ?? [];
+    const model = getPrefModel(harness);
+    return model && models.includes(model) ? model : "";
+  };
+  const selectedEffortForModel = (harness: string, model: string) => {
+    const options = effortOptions(harness as Harness);
+    const effort = getPrefEffort(harness, model);
+    return effort && options.includes(effort) ? effort : "";
+  };
+  const selectHarness = (harness: string) => {
+    const model = selectedModelForHarness(harness);
+    setSelectedHarness(harness);
+    setSelectedModel(model);
+    setSelectedEffort(selectedEffortForModel(harness, model));
+  };
+  const selectModel = (model: string) => {
+    setSelectedModel(model);
+    setPrefModel(selectedHarness(), model);
+    setSelectedEffort(selectedEffortForModel(selectedHarness(), model));
+  };
+  const selectEffort = (effort: string) => {
+    setSelectedEffort(effort);
+    setPrefEffort(selectedHarness(), selectedModel(), effort);
   };
 
   // Global keyboard shortcuts:
@@ -281,14 +322,12 @@ function createAppStore() {
         {
           setHarnesses(h);
           prefModels = prefs?.models ?? {};
+          prefEfforts = prefs?.efforts ?? {};
           const prefHarness = prefs?.harness ?? "";
           const harness = prefHarness && h.find((x) => x.name === prefHarness)
             ? prefHarness
             : h[0]?.name ?? "";
-          setSelectedHarness(harness);
-          const models = h.find((x) => x.name === harness)?.models ?? [];
-          const lastModel = prefModels[harness];
-          if (lastModel && models.includes(lastModel)) setSelectedModel(lastModel);
+          selectHarness(harness);
         }
         if (prefs?.settings?.baseImage) setSelectedImage(prefs.settings.baseImage);
         if (config) applyServerConfig(config);
@@ -648,6 +687,7 @@ function createAppStore() {
       const repoSpecs = selRepos.length > 0 ? selRepos.map((r) => ({ name: r.path, ...(r.branch ? { baseBranch: r.branch } : {}) })) : undefined;
       const data = await createTask({ initialPrompt: { text: p, ...(imgs.length > 0 ? { images: imgs } : {}) }, repos: repoSpecs, harness: harness as Harness, ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(ts ? { tailscale: true } : {}), ...(usb ? { usb: true } : {}), ...(disp ? { display: true } : {}), ...(sudo ? { sudo: true } : {}), ...(ght ? { gitHubToken: true } : {}) });
       setPrefModel(harness, model);
+      setPrefEffort(harness, model, effort);
       setPrompt("");
       setPendingImages([]);
       navigate(taskPath(data.id, selRepos[0]?.path ?? "", "", p));
@@ -735,10 +775,10 @@ function createAppStore() {
     // task data + selection
     tasks, repos, selectedId, selectedTask, taskById,
     // new-task form
-    prompt, setPrompt, selectedRepos, setSelectedRepos, selectedModel, setSelectedModel,
-    selectedEffort, setSelectedEffort, selectedHarness, setSelectedHarness, harnesses,
+    prompt, setPrompt, selectedRepos, setSelectedRepos, selectedModel, setSelectedModel: selectModel,
+    selectedEffort, setSelectedEffort: selectEffort, selectedHarness, setSelectedHarness: selectHarness, harnesses,
     harnessSupportsImages, pendingImages, setPendingImages, availableRecent, availableRest,
-    getPrefModel, setPrefModel, initializing, submitting, submitTask,
+    getPrefModel, setPrefModel, getPrefEffort, setPrefEffort, initializing, submitting, submitTask,
     // capability toggles
     tailscaleAvailable, tailscaleEnabled, setTailscaleEnabled,
     usbAvailable, usbEnabled, setUSBEnabled,

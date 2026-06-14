@@ -55,6 +55,9 @@ type Preferences struct {
 	Harness string `json:"harness,omitempty"`
 	// Models maps harness name to the last used model for that harness.
 	Models map[string]string `json:"models,omitempty"`
+	// Efforts maps harness name to model name to the last used thinking effort.
+	// The empty model key stores the default-model preference.
+	Efforts EffortPreferences `json:"efforts,omitempty"`
 	// Settings holds user-configurable behavioral settings.
 	Settings Settings `json:"settings"`
 }
@@ -158,9 +161,24 @@ func (p *Preferences) clone() Preferences {
 	c := *p
 	c.Repositories = slices.Clone(p.Repositories)
 	c.Models = maps.Clone(p.Models)
+	c.Efforts = cloneEffortPreferences(p.Efforts)
 	c.Settings.CacheMappings = slices.Clone(p.Settings.CacheMappings)
 	c.Settings.CustomMounts = slices.Clone(p.Settings.CustomMounts)
 	c.Settings.WellKnownCaches = maps.Clone(p.Settings.WellKnownCaches)
+	return c
+}
+
+// EffortPreferences stores thinking-effort preferences by harness and model.
+type EffortPreferences map[string]map[string]string
+
+func cloneEffortPreferences(e EffortPreferences) EffortPreferences {
+	if e == nil {
+		return nil
+	}
+	c := make(EffortPreferences, len(e))
+	for harness, efforts := range e {
+		c[harness] = maps.Clone(efforts)
+	}
 	return c
 }
 

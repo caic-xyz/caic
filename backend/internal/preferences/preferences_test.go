@@ -28,6 +28,7 @@ func TestValidate(t *testing.T) {
 			},
 			Harness: "claude",
 			Models:  map[string]string{"claude": "opus", "codex": "o3"},
+			Efforts: EffortPreferences{"claude": {"opus": "max"}, "codex": {"o3": "high"}},
 			Settings: Settings{
 				BaseImage:         "custom:latest",
 				ContainerPlatform: "linux/amd64",
@@ -226,6 +227,7 @@ func TestUsers(t *testing.T) {
 			},
 			Harness: "claude",
 			Models:  map[string]string{"claude": "opus"},
+			Efforts: EffortPreferences{"claude": {"opus": "max"}},
 			Settings: Settings{
 				BaseImage:         "custom:latest",
 				ContainerPlatform: "linux/amd64",
@@ -266,6 +268,9 @@ func TestUsers(t *testing.T) {
 		}
 		if m := got.Models["claude"]; m != "opus" {
 			t.Errorf("models[claude] = %q, want %q", m, "opus")
+		}
+		if e := got.Efforts["claude"]["opus"]; e != "max" {
+			t.Errorf("efforts[claude][opus] = %q, want %q", e, "max")
 		}
 		if len(got.Settings.WellKnownCaches) != 2 {
 			t.Fatalf("wellKnownCaches len = %d, want 2", len(got.Settings.WellKnownCaches))
@@ -374,6 +379,7 @@ func TestUsers(t *testing.T) {
 		}
 		if err := s.Update("u", func(p *Preferences) {
 			p.TouchRepo("github/foo", &RepoPrefs{Harness: "claude", Model: "opus"})
+			p.Efforts = EffortPreferences{"claude": {"opus": "max"}}
 			p.Settings.WellKnownCaches = map[string]bool{"go-mod": true}
 			p.Settings.CacheMappings = []CacheMapping{{HostPath: "/a", ContainerPath: "/b", Enabled: true}}
 			p.Settings.CustomMounts = []MountMapping{{HostPath: "/c", ContainerPath: "/d", Enabled: true}}
@@ -396,6 +402,11 @@ func TestUsers(t *testing.T) {
 		snapshot.Models["claude"] = "mutated"
 		if got := s.Get("u"); got.Models["claude"] == "mutated" {
 			t.Error("map aliased")
+		}
+
+		snapshot.Efforts["claude"]["opus"] = "mutated"
+		if got := s.Get("u"); got.Efforts["claude"]["opus"] == "mutated" {
+			t.Error("efforts map aliased")
 		}
 
 		snapshot.Settings.WellKnownCaches["go-mod"] = false
