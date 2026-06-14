@@ -718,6 +718,7 @@ data class MountMappingResp(
     val hostPath: String,
     val containerPath: String,
     val enabled: Boolean,
+    val readOnly: Boolean,
 )
 
 /** UserSettings holds user-configurable behavioral settings. */

@@ -36,6 +36,8 @@ type MountMapping struct {
 	ContainerPath string `json:"containerPath"`
 	// Enabled controls whether this mapping is passed to new containers.
 	Enabled bool `json:"enabled"`
+	// ReadOnly controls whether the container sees this mount as read-only.
+	ReadOnly bool `json:"readOnly"`
 }
 
 // ContainerImage identifies a base image and optional platform pair.

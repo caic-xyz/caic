@@ -556,6 +556,7 @@ export interface MountMappingResp {
   hostPath: string;
   containerPath: string;
   enabled: boolean;
+  readOnly: boolean;
 }
 
 /** UserSettings holds user-configurable behavioral settings. */

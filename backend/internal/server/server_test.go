@@ -778,7 +778,7 @@ func TestHandleCreateTask(t *testing.T) {
 				{HostPath: "/host/disabled-cache", ContainerPath: "/home/user/.disabled-cache", Enabled: false},
 			}
 			p.Settings.CustomMounts = []preferences.MountMapping{
-				{HostPath: "/host/work", ContainerPath: "/workspace/external", Enabled: true},
+				{HostPath: "/host/work", ContainerPath: "/workspace/external", Enabled: true, ReadOnly: true},
 				{HostPath: "/host/disabled-work", ContainerPath: "/workspace/disabled", Enabled: false},
 			}
 		}); err != nil {
@@ -816,7 +816,7 @@ func TestHandleCreateTask(t *testing.T) {
 		}
 		gotCustomMount := false
 		for _, m := range entry.Task().Mounts {
-			if m.HostPath == "/host/work" && m.MountPath == "/workspace/external" {
+			if m.HostPath == "/host/work" && m.MountPath == "/workspace/external" && m.ReadOnly {
 				gotCustomMount = true
 			}
 			if m.HostPath == "/host/disabled-work" || m.MountPath == "/workspace/disabled" {

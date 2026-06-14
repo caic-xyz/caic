@@ -192,6 +192,7 @@ MountMappingResp represents a general host-to-runtime directory mount.
 | `hostPath` | `string` |  | yes |
 | `containerPath` | `string` |  | yes |
 | `enabled` | `boolean` |  | yes |
+| `readOnly` | `boolean` |  | yes |
 
 ### UserSettings
 

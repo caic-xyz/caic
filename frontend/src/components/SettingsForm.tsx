@@ -259,6 +259,21 @@ export default function SettingsForm(props: SettingsFormProps) {
                     void props.saveSettings();
                   }}
                 />
+                <label class={styles.mountOptionToggle} title="Mount read-only">
+                  <input
+                    type="checkbox"
+                    checked={mount.readOnly ?? false}
+                    onChange={(e) => {
+                      const readOnly = e.currentTarget.checked;
+                      const newMounts = props.customMounts().map((item, i) => (
+                        i === index() ? { ...item, readOnly } : item
+                      ));
+                      props.setCustomMounts(newMounts);
+                      void props.saveSettings({ customMounts: newMounts });
+                    }}
+                  />
+                  Read only
+                </label>
                 <button
                   type="button"
                   class={styles.cacheMappingRemove}
@@ -277,7 +292,7 @@ export default function SettingsForm(props: SettingsFormProps) {
             type="button"
             class={styles.settingsButton}
             onClick={() => {
-              props.setCustomMounts([...props.customMounts(), { hostPath: "", containerPath: "", enabled: true }]);
+              props.setCustomMounts([...props.customMounts(), { hostPath: "", containerPath: "", enabled: true, readOnly: false }]);
             }}
           >
             + Add mount

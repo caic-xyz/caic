@@ -395,7 +395,7 @@ func TestBackend(t *testing.T) {
 			Harness:           harness.Claude,
 			GitHubToken:       "tok",
 			Caches:            []runtime.CacheMount{{Name: "npm", HostPath: "~/.npm", MountPath: "/home/user/.npm"}},
-			Mounts:            []runtime.Mount{{HostPath: "/host/work", MountPath: "/workspace/external"}},
+			Mounts:            []runtime.Mount{{HostPath: "/host/work", MountPath: "/workspace/external", ReadOnly: true}},
 		})
 		if err != nil {
 			t.Fatalf("mdStartOpts: %v", err)
@@ -433,8 +433,8 @@ func TestBackend(t *testing.T) {
 		if opts.Mounts[0].HostPath != "/home/user/.claude" || opts.Mounts[0].ContainerPath != "/home/user/.claude" {
 			t.Errorf("Mounts[0] = %+v, want agent mount first", opts.Mounts[0])
 		}
-		if opts.Mounts[1].HostPath != "/host/work" || opts.Mounts[1].ContainerPath != "/workspace/external" {
-			t.Errorf("Mounts[1] = %+v, want custom mount passthrough", opts.Mounts[1])
+		if opts.Mounts[1].HostPath != "/host/work" || opts.Mounts[1].ContainerPath != "/workspace/external" || !opts.Mounts[1].ReadOnly {
+			t.Errorf("Mounts[1] = %+v, want read-only custom mount passthrough", opts.Mounts[1])
 		}
 	})
 

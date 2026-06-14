@@ -36,7 +36,7 @@ func TestValidate(t *testing.T) {
 					{HostPath: "/host/cache", ContainerPath: "/container/cache", Enabled: false},
 				},
 				CustomMounts: []MountMapping{
-					{HostPath: "/host/data", ContainerPath: "/container/data", Enabled: false},
+					{HostPath: "/host/data", ContainerPath: "/container/data", Enabled: false, ReadOnly: true},
 				},
 			},
 		}
@@ -236,7 +236,7 @@ func TestUsers(t *testing.T) {
 					{HostPath: "/host/cache", ContainerPath: "/container/cache", Enabled: false},
 				},
 				CustomMounts: []MountMapping{
-					{HostPath: "/host/data", ContainerPath: "/container/data", Enabled: false},
+					{HostPath: "/host/data", ContainerPath: "/container/data", Enabled: false, ReadOnly: true},
 				},
 			},
 		}
@@ -298,6 +298,9 @@ func TestUsers(t *testing.T) {
 		}
 		if got.Settings.CustomMounts[0].Enabled {
 			t.Error("customMounts[0].enabled = true, want false")
+		}
+		if !got.Settings.CustomMounts[0].ReadOnly {
+			t.Error("customMounts[0].readOnly = false, want true")
 		}
 	})
 

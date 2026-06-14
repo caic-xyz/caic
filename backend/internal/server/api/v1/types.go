@@ -563,6 +563,7 @@ type MountMappingResp struct {
 	HostPath      string `json:"hostPath"`
 	ContainerPath string `json:"containerPath"`
 	Enabled       bool   `json:"enabled"`
+	ReadOnly      bool   `json:"readOnly"`
 }
 
 // UserSettings holds user-configurable behavioral settings.

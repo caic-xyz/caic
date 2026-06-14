@@ -156,6 +156,7 @@ func (h *serverConfigHandlers) getPreferences(ctx context.Context, _ *api.EmptyR
 			HostPath:      m.HostPath,
 			ContainerPath: m.ContainerPath,
 			Enabled:       m.Enabled,
+			ReadOnly:      m.ReadOnly,
 		}
 	}
 	return &v1.PreferencesResp{
@@ -201,6 +202,7 @@ func (h *serverConfigHandlers) updatePreferences(ctx context.Context, req *v1.Up
 					HostPath:      m.HostPath,
 					ContainerPath: m.ContainerPath,
 					Enabled:       m.Enabled,
+					ReadOnly:      m.ReadOnly,
 				}
 			}
 		}
@@ -251,6 +253,7 @@ func mountsFromSettings(settings *preferences.Settings) []caicruntime.Mount {
 		mounts = append(mounts, caicruntime.Mount{
 			HostPath:  m.HostPath,
 			MountPath: m.ContainerPath,
+			ReadOnly:  m.ReadOnly,
 		})
 	}
 	return mounts

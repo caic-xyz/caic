@@ -23,6 +23,7 @@ class FakeEventSource {
 vi.mock("./api", () => ({
   listRepos: vi.fn(),
   getPreferences: vi.fn(),
+  updatePreferences: vi.fn(),
   listHarnesses: vi.fn(),
   listCaches: vi.fn(() => Promise.resolve(null)),
   getCacheSizes: vi.fn(() => Promise.resolve(null)),
@@ -105,6 +106,12 @@ beforeEach(() => {
   delete window.goModeHost;
   vi.mocked(api.listRepos).mockResolvedValue([repoA, repoB]);
   vi.mocked(api.getPreferences).mockResolvedValue({
+    repositories: [{ path: "repos/a" }],
+    models: {},
+    harness: "",
+    settings: { baseImage: "" },
+  } as unknown as PreferencesResp);
+  vi.mocked(api.updatePreferences).mockResolvedValue({
     repositories: [{ path: "repos/a" }],
     models: {},
     harness: "",
@@ -274,6 +281,30 @@ describe("App repo chips: No repository", () => {
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await waitFor(() => expect(api.getVersion).toHaveBeenCalledOnce());
+  });
+
+  it("saves read-only custom mounts", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getPreferences).mockResolvedValue({
+      repositories: [{ path: "repos/a" }],
+      models: {},
+      harness: "",
+      settings: {
+        baseImage: "",
+        customMounts: [{ hostPath: "/host/data", containerPath: "/container/data", enabled: true, readOnly: false }],
+      },
+    } as unknown as PreferencesResp);
+
+    renderApp("/settings");
+
+    await screen.findByDisplayValue("/host/data");
+    await user.click(screen.getByRole("checkbox", { name: "Read only" }));
+
+    await waitFor(() => expect(api.updatePreferences).toHaveBeenCalledWith({
+      settings: expect.objectContaining({
+        customMounts: [{ hostPath: "/host/data", containerPath: "/container/data", enabled: true, readOnly: true }],
+      }),
+    }));
   });
 
   it("has no chips after removing the last one", async () => {

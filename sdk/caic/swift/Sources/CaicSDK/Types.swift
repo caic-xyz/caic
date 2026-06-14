@@ -445,6 +445,7 @@ public struct MountMappingResp: Codable {
     public let hostPath: String
     public let containerPath: String
     public let enabled: Bool
+    public let readOnly: Bool
 }
 
 /// UserSettings holds user-configurable behavioral settings.
