@@ -68,6 +68,11 @@ type Router struct {
 	sessionSecret []byte          // nil when auth disabled
 	hostState     *auth.HostState // non-nil when ExternalURL is set (static or auto)
 
+	// mcpDisabled refuses all MCP endpoint requests. Set by Serve when auth is
+	// disabled and the listener binds a non-loopback address, so an exposed
+	// server never serves MCP without authentication.
+	mcpDisabled bool
+
 	// IP geolocation.
 	ipgeoChecker *ipgeo.Checker
 
@@ -87,6 +92,11 @@ func (s *Router) SetFakeCI(f func(context.Context, *task.Task)) {
 // caller detect port conflicts at startup instead of after lengthy
 // initialisation.
 func (s *Router) Serve(ctx context.Context, ln net.Listener) error {
+	if !s.authEnabled() && !hostIsLoopback(hostOnly(ln.Addr().String())) {
+		s.mcpDisabled = true
+		slog.WarnContext(ctx, "MCP endpoint disabled: no OAuth login configured and the server binds a non-loopback address; configure OAuth login or bind to localhost to enable MCP",
+			"addr", ln.Addr())
+	}
 	handler, err := s.buildHandler()
 	if err != nil {
 		return err
@@ -200,11 +210,17 @@ func (s *Router) buildHandler() (http.Handler, error) {
 	mux.HandleFunc("GET "+mcpOAuthAuthorizePath, s.handleMCPOAuthAuthorize)
 	mux.HandleFunc("POST "+mcpOAuthAuthorizePath, s.handleMCPOAuthAuthorize)
 	mux.HandleFunc("POST "+mcpOAuthTokenPath, s.handleMCPOAuthToken)
-	mux.HandleFunc("POST "+goModeMCPEndpoint, s.handleMCPAuthenticated)
-	// Released Streamable HTTP clients (Claude Code, Codex) issue a GET to probe
-	// for a server-initiated SSE stream; the handler answers 405 (caic is
-	// stateless) so they fall back to plain POST request/response.
-	mux.HandleFunc("GET "+goModeMCPEndpoint, s.handleMCPAuthenticated)
+	// The MCP endpoint is left unregistered when auth is disabled on a
+	// non-loopback listener (set by Serve), so an exposed server never serves
+	// MCP without authentication. Unregistered /api/ paths answer 404 via the
+	// static handler rather than falling back to the SPA.
+	if !s.mcpDisabled {
+		mux.HandleFunc("POST "+goModeMCPEndpoint, s.handleMCPAuthenticated)
+		// Released Streamable HTTP clients (Claude Code, Codex) issue a GET to
+		// probe for a server-initiated SSE stream; the handler answers 405 (caic
+		// is stateless) so they fall back to plain POST request/response.
+		mux.HandleFunc("GET "+goModeMCPEndpoint, s.handleMCPAuthenticated)
+	}
 	mux.HandleFunc("GET /api/caic/v1/server/config", handle(serverConfig.getConfig))
 	mux.HandleFunc("GET /api/caic/v1/server/version", handle(serverConfig.getVersion))
 	mux.Handle("/api/gomode/v1/", s.goModeHandler)
@@ -225,6 +241,12 @@ func (s *Router) buildHandler() (http.Handler, error) {
 		return nil, err
 	}
 	mux.Handle("/logos/", http.StripPrefix("/logos/", http.FileServer(http.FS(logosFS))))
+
+	// Unmatched API paths must not fall through to the SPA: this subtree is more
+	// specific than "/", so any /api/ request without a registered route (an
+	// unknown or disabled endpoint) gets 404 instead of index.html. Registered
+	// subtrees like /api/caic/v1/ are more specific still and take precedence.
+	mux.Handle("/api/", http.NotFoundHandler())
 
 	// Serve embedded frontend with SPA fallback and precompressed variants.
 	dist, err := fs.Sub(frontend.Files, "dist")
@@ -272,6 +294,28 @@ func (s *Router) buildHandler() (http.Handler, error) {
 // authEnabled reports whether OAuth authentication is configured.
 func (s *Router) authEnabled() bool {
 	return s.authStore != nil
+}
+
+// hostOnly returns the host portion of a host:port address, or the input when
+// it carries no port.
+func hostOnly(addr string) string {
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		return host
+	}
+	return addr
+}
+
+// hostIsLoopback reports whether host refers to the local machine only. An
+// empty host, "localhost", and any loopback IP are loopback; a routable IP or
+// any other hostname is not.
+func hostIsLoopback(host string) bool {
+	if host == "" || host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 // Dependencies contains already-constructed server dependencies. The caller

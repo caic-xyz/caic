@@ -31,6 +31,10 @@
 [server]
 # HTTP listen address for the web UI. Defaults to localhost only; prefix with
 # "0.0.0.0" to listen on all IPv4 addresses.
+# Safety: the MCP endpoint at /api/caic/v1/mcp is disabled when no OAuth login
+# is configured and the server binds a non-loopback address, so an exposed
+# server never serves MCP without authentication. Configure OAuth login below to
+# enable MCP off-localhost.
 #http = ":2242"
 
 # Public base URL. "auto" locks the hostname from the first FQDN request. Set an

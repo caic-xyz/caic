@@ -81,6 +81,43 @@ func TestMCPHandlers(t *testing.T) {
 		return w, resp
 	}
 
+	t.Run("disabledLeavesEndpointUnregistered", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t)
+		s.mcpDisabled = true
+		h, err := s.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler: %v", err)
+		}
+		for _, method := range []string{http.MethodPost, http.MethodGet} {
+			req := httptest.NewRequestWithContext(t.Context(), method, "/api/caic/v1/mcp", strings.NewReader(mcpRequestJSON("tools/list", `{}`)))
+			req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
+			req.Header.Set("Mcp-Method", "tools/list")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			if w.Code != http.StatusNotFound {
+				t.Fatalf("%s status = %d, want %d", method, w.Code, http.StatusNotFound)
+			}
+		}
+	})
+
+	t.Run("enabledServesWithoutAuth", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t)
+		h, err := s.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler: %v", err)
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(mcpRequestJSON("tools/list", `{}`)))
+		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
+		req.Header.Set("Mcp-Method", "tools/list")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		}
+	})
+
 	t.Run("serverDiscover", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)

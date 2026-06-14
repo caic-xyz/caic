@@ -143,6 +143,29 @@ func TestNew(t *testing.T) {
 	})
 }
 
+func TestHostIsLoopback(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		addr     string
+		loopback bool
+	}{
+		{"127.0.0.1:2242", true},
+		{"[::1]:2242", true},
+		{"localhost:2242", true},
+		{"0.0.0.0:2242", false},
+		{"192.168.1.10:2242", false},
+		{"caic.example.com:2242", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.addr, func(t *testing.T) {
+			t.Parallel()
+			if got := hostIsLoopback(hostOnly(tc.addr)); got != tc.loopback {
+				t.Fatalf("hostIsLoopback(hostOnly(%q)) = %v, want %v", tc.addr, got, tc.loopback)
+			}
+		})
+	}
+}
+
 // insertTestTask registers a task in the test server's manager and returns the
 // entry. It registers the entry under the supplied path id as well as the
 // task's own ID string, so handlers that re-resolve via the Manager by
@@ -1902,6 +1925,24 @@ func TestGoModeSettings(t *testing.T) {
 
 func TestBuildHandler(t *testing.T) {
 	t.Parallel()
+	t.Run("unknown API path returns 404 not SPA", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t)
+		h, err := s.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler() error = %v", err)
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/does/not/exist", http.NoBody)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusNotFound)
+		}
+		if strings.Contains(w.Body.String(), "<html") {
+			t.Fatalf("body = %q, want 404 not SPA HTML", w.Body.String())
+		}
+	})
+
 	t.Run("MCP protected resource metadata is public", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)

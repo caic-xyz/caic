@@ -28,8 +28,9 @@ When caic OAuth login is not configured, `authStore == nil` and the MCP endpoint
 accepts local clients without credentials. This is the intended localhost
 workflow for development and personal use on `127.0.0.1`.
 
-This mode is unsafe for an exposed server. Documentation and startup behavior
-should make that clear.
+This mode is unsafe for an exposed server, so it is confined to loopback: when
+auth is not configured and the listener binds a non-loopback address, the MCP
+endpoint is left unregistered and requests get `404`.
 
 ### caic web session mode
 
@@ -73,30 +74,26 @@ implemented.
 
 ## Work Plan
 
-### 1. Real-client compatibility pass
+### 1. Hosted-client compatibility pass
 
-Test the complete authenticated flow with real clients before adding protocol
-extensions.
+Local clients are verified. The remaining gap is hosted connectors and the
+inspector, which must be exercised manually because they run off-host.
 
 Clients:
 
 - MCP Inspector.
-- Claude Code local HTTP MCP.
-- Codex local Streamable HTTP MCP.
 - Claude hosted custom connector.
 - ChatGPT custom app/connector.
 
-Verify:
+The local flow already proves the generic protocol path (unauthenticated `401`
+with `WWW-Authenticate`, protected-resource and authorization-server metadata
+discovery, DCR, token endpoint form parsing). Per hosted client, additionally
+verify:
 
-- unauthenticated MCP call returns `401` with `WWW-Authenticate`.
-- protected-resource metadata discovery works.
-- authorization-server metadata discovery works.
 - Dynamic Client Registration works with each client.
 - token endpoint form parsing works with each client.
 - Claude hosted redirect URI works:
   `https://claude.ai/api/mcp/auth_callback`.
-- Claude Code loopback redirect works, if Claude Code supports MCP OAuth login.
-- Codex `codex mcp login caic` works.
 - ChatGPT redirect URI from app management works.
 - hosted clients either omit `Origin` or send an origin compatible with caic's
   same-origin check.
@@ -105,51 +102,10 @@ Verify:
 Do not add hosted-client origin allowlists, refresh tokens, or Client ID Metadata
 Document support until this pass proves they are needed.
 
-Validation:
-
-```bash
-go test ./backend/internal/mcp ./backend/internal/server
-go run ./backend/internal/cmd/mcp-auth-smoke --client codex
-go run ./backend/internal/cmd/mcp-auth-smoke --client claude
-```
-
-Next Claude Code local check:
-
-1. add a server-only/manual mode to `mcp-auth-smoke` that starts the auth-enabled
-   caic server, prints the endpoint plus isolated `HOME`, `BROWSER`, and
-   `CAIC_SESSION_COOKIE` exports, then waits.
-2. run Claude Code in a real terminal with those exports.
-3. open `/mcp`.
-4. authenticate the `caic` server.
-5. verify `claude mcp get caic` reports `Status: ✓ Connected`.
-
 Keep manual evidence for each hosted client: client version, configured endpoint,
 observed redirect URI, requested scopes, and final MCP tool-list result.
 
-### 2. Operator setup and safety
-
-Document the supported deployment modes:
-
-- localhost development with MCP auth disabled.
-- remote caic with GitHub OAuth login.
-- remote caic with GitLab OAuth login.
-- Claude Code local setup.
-- Codex local setup.
-- hosted Claude/ChatGPT setup.
-
-Add a clear warning: if caic is reachable by other machines and OAuth login is
-not configured, MCP is unauthenticated.
-
-Decide whether startup should reject or warn on externally reachable MCP without
-auth. A conservative rule would warn when auth is disabled and the server binds
-to a non-loopback address or has a non-local `external_url`.
-
-Validation:
-
-- docs show exact commands for Claude Code and Codex.
-- server tests cover any new startup warning or rejection rule.
-
-### 3. Token lifecycle
+### 2. Token lifecycle
 
 The current one-hour MCP access token may be enough for local clients and short
 hosted sessions. Real-client testing should decide this.
@@ -172,7 +128,7 @@ Validation:
 - revoked-token rejection test.
 - unknown-user rejection test.
 
-### 4. Client metadata compatibility
+### 3. Client metadata compatibility
 
 Dynamic Client Registration is implemented for public clients. If hosted clients
 cannot use DCR reliably, add only the minimum extension needed.
@@ -192,7 +148,7 @@ Validation:
 - compatibility test for the client that needs the extension.
 - regression tests for invalid metadata and invalid redirects.
 
-### 5. Origin policy
+### 4. Origin policy
 
 Current MCP origin validation permits absent `Origin` and requires same-origin
 when `Origin` is present. Keep this until real hosted-client tests show it is too
@@ -208,7 +164,7 @@ Validation:
 - mismatched origin rejected.
 - any new allowed hosted origin is covered by tests.
 
-### 6. Forge authority policy
+### 5. Forge authority policy
 
 Remote MCP forge tools currently require the remote caic user to have linked
 GitHub/GitLab identity. Keep that rule until product policy changes.
@@ -227,7 +183,7 @@ Validation:
 - linked user can perform allowed forge actions.
 - any server-side authority policy has explicit tests.
 
-### 7. Audit and revocation UX
+### 6. Audit and revocation UX
 
 MCP tool/resource calls are audited in memory and logged. Durable audit is
 optional but useful once hosted clients are supported.
