@@ -65,6 +65,7 @@ func (p namedPrefix) Resolve(addr netip.Addr) string {
 // Checker resolves IP addresses to country codes or named origins using a
 // MaxMind MMDB file and optional named CIDR groups, and enforces an allowlist.
 type Checker struct {
+	// resolvers are first-match; named origins must precede country lookups.
 	resolvers []originResolver
 	allowlist *allowlist
 }
@@ -106,12 +107,12 @@ func NewChecker(ctx context.Context, allowlistStr, dbPath, cacheDir string) (*Ch
 		return nil, errors.New("CAIC_IPGEO_DB is required when CAIC_IPGEO_ALLOWLIST contains country codes")
 	}
 	c := &Checker{allowlist: al}
+	var countryReader *maxminddb.Reader
 	if dbPath != "" {
-		r, err := maxminddb.Open(dbPath)
+		countryReader, err = maxminddb.Open(dbPath)
 		if err != nil {
 			return nil, err
 		}
-		c.resolvers = append(c.resolvers, maxMindResolver{reader: r})
 	}
 	cache := loadOriginCache(ctx, cacheDir)
 	for _, source := range defaultOriginSources(defaultGitHubMetaURL) {
@@ -122,6 +123,9 @@ func NewChecker(ctx context.Context, allowlistStr, dbPath, cacheDir string) (*Ch
 		for _, p := range prefixes {
 			c.resolvers = append(c.resolvers, namedPrefix{name: source.Name(), prefix: p.Masked()})
 		}
+	}
+	if countryReader != nil {
+		c.resolvers = append(c.resolvers, maxMindResolver{reader: countryReader})
 	}
 	return c, nil
 }

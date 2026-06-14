@@ -25,6 +25,14 @@ func (r *countingResolver) Resolve(addr netip.Addr) string {
 	return ""
 }
 
+type countryResolver struct {
+	code string
+}
+
+func (r countryResolver) Resolve(netip.Addr) string {
+	return r.code
+}
+
 func originOf(c *Checker, ip string) string {
 	origin, _ := c.CheckOrigin(ip)
 	return origin
@@ -170,6 +178,20 @@ func TestCheckOrigin(t *testing.T) {
 		origin, allowed := c.CheckOrigin("127.0.0.1")
 		if origin != "local" || allowed {
 			t.Fatalf("CheckOrigin(loopback) = %q, %t; want local, false", origin, allowed)
+		}
+	})
+	t.Run("named origin before country", func(t *testing.T) {
+		t.Parallel()
+		c := &Checker{
+			resolvers: []originResolver{
+				namedPrefix{name: "github", prefix: netip.MustParsePrefix("140.82.112.0/20")},
+				countryResolver{code: "US"},
+			},
+			allowlist: mustParseAllowlist(t, "github"),
+		}
+		origin, allowed := c.CheckOrigin("140.82.115.244")
+		if origin != "github" || !allowed {
+			t.Fatalf("CheckOrigin(GitHub IP) = %q, %t; want github, true", origin, allowed)
 		}
 	})
 	t.Run("resolves origin once", func(t *testing.T) {
