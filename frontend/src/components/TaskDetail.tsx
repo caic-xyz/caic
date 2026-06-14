@@ -139,6 +139,8 @@ function ciActionsURL(remoteURL?: string, forge?: string): string | undefined {
   return forge === "gitlab" ? `${remoteURL}/-/pipelines` : `${remoteURL}/actions`;
 }
 
+const liveFlushDelayMs = 100;
+
 function shouldFlushBufferedEvent(ev: EventMessage): boolean {
   return ev.kind === "result"
     || ev.kind === "ask"
@@ -372,12 +374,20 @@ export default function TaskDetail(props: Props) {
     let delay = 500;
     let live = false;
     let replaceOnNextFlush = true;
-    // Keep replay and live deltas off the DOM. Replayed history is rendered once
-    // at ready; live output renders only on structural turn boundaries. This avoids
-    // re-running grouping and DOM reconciliation for every streaming delta.
+    let liveFlushTimer: ReturnType<typeof setTimeout> | null = null;
+    // Keep replay off the DOM until ready. Live deltas are flushed at a short
+    // interval, or immediately on structural boundaries, so initial task output
+    // streams without regrouping the DOM for every token fragment.
     let pendingEvents: EventMessage[] = [];
 
+    function clearLiveFlushTimer() {
+      if (liveFlushTimer === null) return;
+      clearTimeout(liveFlushTimer);
+      liveFlushTimer = null;
+    }
+
     function flushPendingEvents() {
+      clearLiveFlushTimer();
       const evs = pendingEvents;
       pendingEvents = [];
       if (replaceOnNextFlush) {
@@ -389,16 +399,24 @@ export default function TaskDetail(props: Props) {
       setMessages((prev) => [...prev, ...evs]);
     }
 
+    function scheduleLiveFlush() {
+      if (liveFlushTimer !== null) return;
+      liveFlushTimer = setTimeout(flushPendingEvents, liveFlushDelayMs);
+    }
+
     function connect() {
       // Close any stale connection that may exist if connect() is called while
       // a previous EventSource is still open (e.g. from a duplicate timer fire).
       es?.close();
+      clearLiveFlushTimer();
       pendingEvents = [];
       live = false;
       replaceOnNextFlush = true;
       es = taskEventStream(id, (ev) => {
         pendingEvents.push(ev);
-        if (live && shouldFlushBufferedEvent(ev)) flushPendingEvents();
+        if (!live) return;
+        if (shouldFlushBufferedEvent(ev)) flushPendingEvents();
+        else scheduleLiveFlush();
       }, (err) => {
         const msg = err instanceof Error ? err.message : String(err);
         untrack(() => props.onError(`Task event error: ${msg}`));
@@ -414,7 +432,10 @@ export default function TaskDetail(props: Props) {
       });
       es.onerror = () => {
         if (live) flushPendingEvents();
-        else pendingEvents = [];
+        else {
+          clearLiveFlushTimer();
+          pendingEvents = [];
+        }
         es?.close();
         es = null;
         const st = props.taskState;
@@ -435,6 +456,7 @@ export default function TaskDetail(props: Props) {
 
     onCleanup(() => {
       if (live) flushPendingEvents();
+      else clearLiveFlushTimer();
       es?.close();
       if (timer !== null) clearTimeout(timer);
       pendingEvents = [];

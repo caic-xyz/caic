@@ -14,8 +14,9 @@ test("create task, verify streaming text and result, then purge", async ({ page,
   await fillContentEditable(page.getByTestId("prompt-input"), prompt);
   await page.getByTestId("submit-task").click();
 
-  // Click the task card to open TaskDetail (scope to task list, not the prompt input).
-  await page.locator(`div[class*="card"]:has-text("${prompt.replace(/"/g, '\\"')}")`).first().click();
+  // Task creation navigates directly to TaskDetail; the initial event stream
+  // should render there without requiring a task-list click/reopen.
+  await expect(page).toHaveURL(/\/task\//);
 
   // Wait for the assistant message from the fake agent. The fake backend emits
   // streaming text deltas followed by the final assistant message containing a

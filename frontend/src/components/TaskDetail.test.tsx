@@ -287,9 +287,9 @@ describe("SSE connection", () => {
     expect(document.body.textContent).toContain("replayed output");
   });
 
-  it("live textDelta events render at the end of the turn", () => {
-    // Verifies the buffered streaming path: deltas stay off the DOM until a
-    // structural event ends the turn.
+  it("live textDelta events render before the turn ends", () => {
+    // Regression: initial task detail streaming must show output while the
+    // first agent turn is still running, not only after the result event.
     const created: FakeES[] = [];
     const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
     makeSyncReadyMock(created, capturedCb);
@@ -298,12 +298,11 @@ describe("SSE connection", () => {
 
     expect(capturedCb.value).not.toBeNull();
 
-    // Push a textDelta live event (component is in live mode because ready fired).
     if (!capturedCb.value) throw new Error("taskEvents callback not captured");
     capturedCb.value({ kind: "textDelta", ts: 1, textDelta: { text: "agent reply" } });
     expect(document.body.textContent).not.toContain("agent reply");
 
-    capturedCb.value(resultEvent(2));
+    vi.advanceTimersByTime(100);
 
     expect(document.body.textContent).toContain("agent reply");
   });
