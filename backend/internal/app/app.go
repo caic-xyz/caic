@@ -339,7 +339,6 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	for i := range results {
 		repoService.RegisterRunner(&results[i])
 	}
-	repoService.WarnBasenameCollisions()
 
 	repoService.RegisterNoRepoRunner(ctx)
 	taskMgr.Start()

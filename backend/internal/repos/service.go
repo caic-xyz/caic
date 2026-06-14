@@ -215,22 +215,6 @@ func (s *Service) AdoptionRepos() []tasks.AdoptRepo {
 	return adoptRepos
 }
 
-// WarnBasenameCollisions logs repos whose basenames may confuse users.
-func (s *Service) WarnBasenameCollisions() {
-	seen := make(map[string]string)
-	snap := s.registry.Snapshot()
-	for i := range snap {
-		ri := &snap[i]
-		bn := filepath.Base(ri.AbsPath)
-		if first, exists := seen[bn]; exists {
-			slog.Warn("repo basename collision; containers will use qualified names",
-				"a", first, "b", ri.RelPath, "basename", bn)
-		} else {
-			seen[bn] = ri.RelPath
-		}
-	}
-}
-
 // CIStatusFor returns the cached CI status for relPath.
 func (s *Service) CIStatusFor(relPath string) ci.RepoCIState {
 	return s.registry.CIStatusFor(relPath)
