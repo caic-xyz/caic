@@ -148,6 +148,14 @@ function ciActionsURL(remoteURL?: string, forge?: string): string | undefined {
   return forge === "gitlab" ? `${remoteURL}/-/pipelines` : `${remoteURL}/actions`;
 }
 
+function shouldFlushBufferedEvent(ev: EventMessage): boolean {
+  return ev.kind === "result"
+    || ev.kind === "ask"
+    || ev.kind === "userInput"
+    || ev.kind === "error"
+    || isSessionBoundary(ev);
+}
+
 export default function TaskDetail(props: Props) {
   const hostMode = useHostMode();
   const location = useLocation();
@@ -303,9 +311,9 @@ export default function TaskDetail(props: Props) {
   });
 
   // Past session items: stable during streaming (only change on turn completion or expansion toggle).
-  // Memoized separately so MsgItem object references persist across rAF frames — the
+  // Memoized separately so MsgItem object references persist across streaming flushes — the
   // <Match when={..} keyed> pattern uses reference equality as the DOM key, and new
-  // object identities on every frame would cause remounting (flickering + unclickable).
+  // object identities on every flush would cause remounting (flickering + unclickable).
   const pastSessionItems = createMemo(() =>
     buildPastSessionItems(pastSessions(), expandedSessionKeys(), expandedTurnKeys()),
   );
@@ -338,7 +346,7 @@ export default function TaskDetail(props: Props) {
     const boundaryEv = currentSessionBoundaryEvent();
     return boundaryEv ? [{ kind: "sessionBoundary", event: boundaryEv, key: "cur-sess-boundary" }] : [];
   });
-  // Live turn groups: change on every frame. Uses "g" prefix to match Android.
+  // Live turn groups: incomplete turn groups flushed on structural boundaries.
   const liveItems = createMemo((): MsgItem[] => {
     const liveGroups = currentGroups();
     return liveGroups.map((g, j) => ({
@@ -395,16 +403,15 @@ export default function TaskDetail(props: Props) {
     let timer: ReturnType<typeof setTimeout> | null = null;
     let delay = 500;
     let live = false;
-    // rAF batching covers both history replay and live events: it streams large
-    // replays into the UI while still reducing setMessages calls to one per frame.
+    // Keep replay and live deltas off the DOM. Replayed history is rendered once
+    // at ready; live output renders only on structural turn boundaries. This avoids
+    // re-running grouping and DOM reconciliation for every streaming delta.
     let pendingEvents: EventMessage[] = [];
-    let rafId: number | null = null;
     let replaceOnNextFlush = cached === undefined;
     let replayEventCount = 0;
-    const cachedReplayLen = cached?.messages.length ?? 0;
+    let replaySkipLen = cached?.messages.length ?? 0;
 
     function flushPendingEvents() {
-      rafId = null;
       const evs = pendingEvents;
       pendingEvents = [];
       if (evs.length === 0) return;
@@ -416,11 +423,8 @@ export default function TaskDetail(props: Props) {
       } else {
         setMessages((prev) => [...prev, ...evs]);
       }
+      replaySkipLen = untrack(messages).length;
       saveDetailState(id);
-    }
-
-    function scheduleFlush() {
-      if (rafId === null) rafId = requestAnimationFrame(flushPendingEvents);
     }
 
     function connect() {
@@ -433,7 +437,7 @@ export default function TaskDetail(props: Props) {
       replaceOnNextFlush = !hasReplayCache;
       es = taskEventsSkippingReplay(id, (ev) => {
         pendingEvents.push(ev);
-        scheduleFlush();
+        if (live && shouldFlushBufferedEvent(ev)) flushPendingEvents();
       }, (err) => {
         const msg = err instanceof Error ? err.message : String(err);
         untrack(() => props.onError(`Task event error: ${msg}`));
@@ -442,7 +446,7 @@ export default function TaskDetail(props: Props) {
         const eventID = Number.parseInt(ev.lastEventId, 10);
         if (!Number.isNaN(eventID)) {
           replayEventCount = Math.max(replayEventCount, eventID + 1);
-          return eventID < cachedReplayLen;
+          return eventID < replaySkipLen;
         }
         replayEventCount++;
         return false;
@@ -451,26 +455,27 @@ export default function TaskDetail(props: Props) {
         delay = 500;
       });
       // The server sends a "ready" event after replaying full history.
-      // Flush any final replay events before switching reconnect handling to live mode.
+      // Render replayed history in one pass before switching to live turn-boundary flushing.
       es.addEventListener("ready", () => {
-        if (rafId !== null) {
-          cancelAnimationFrame(rafId);
-          flushPendingEvents();
-        }
-        if (replaceOnNextFlush) {
-          setMessages([]);
-          replaceOnNextFlush = false;
-        } else if (replayEventCount < cachedReplayLen) {
+        if (!replaceOnNextFlush && replayEventCount < replaySkipLen) {
+          pendingEvents = [];
           detailStateByTask.delete(id);
           setMessages([]);
           setSplitIdx(0);
           setCompletedMsgs([]);
           resetGroupIncCache();
           hasReplayCache = false;
+          replaySkipLen = 0;
           es?.close();
           es = null;
           connect();
           return;
+        }
+        flushPendingEvents();
+        if (replaceOnNextFlush) {
+          setMessages([]);
+          replaceOnNextFlush = false;
+          replaySkipLen = 0;
         } else {
           saveDetailState(id);
         }
@@ -478,6 +483,7 @@ export default function TaskDetail(props: Props) {
         live = true;
       });
       es.onerror = () => {
+        flushPendingEvents();
         es?.close();
         es = null;
         const st = props.taskState;
@@ -497,10 +503,7 @@ export default function TaskDetail(props: Props) {
     connect();
 
     onCleanup(() => {
-      if (rafId !== null) {
-        cancelAnimationFrame(rafId);
-        flushPendingEvents();
-      }
+      flushPendingEvents();
       saveDetailState(id);
       es?.close();
       if (timer !== null) clearTimeout(timer);

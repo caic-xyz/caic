@@ -182,7 +182,8 @@ func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.
 
 // NewWire implements agent.Backend.
 func (*Backend) NewWire() agent.WireFormat {
-	return &wireFormat{fw: &jsonutil.FieldWarner{}}
+	// Log replay can parse large histories; skip development-only unknown-field scans.
+	return &wireFormat{}
 }
 
 // TODO: Trim caicInit after 2026-08 once legacy caic_init logs are old enough to ignore.

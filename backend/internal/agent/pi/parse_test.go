@@ -11,6 +11,7 @@ import (
 
 func TestBackendNewWire(t *testing.T) {
 	t.Parallel()
+	msgUpdateWithAccumulatedMessage := `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"hello"},"message":{"role":"assistant","content":[{"type":"text","text":"ignored accumulated text"}]}}`
 	// Regression: replay (relay output during adoption, and on-disk logs) uses
 	// NewWire().ParseMessage. It must use the stateful wire format so agent_end
 	// produces a terminal ResultMessage; without it RestoreMessages cannot infer
@@ -30,6 +31,42 @@ func TestBackendNewWire(t *testing.T) {
 		}
 		if !hasResult {
 			t.Fatalf("NewWire().ParseMessage produced no ResultMessage for agent_end: %#v", msgs)
+		}
+	})
+
+	t.Run("message_update ignores accumulated message payload", func(t *testing.T) {
+		t.Parallel()
+		msgs, err := New("", nil).NewWire().ParseMessage([]byte(msgUpdateWithAccumulatedMessage))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		delta, ok := msgs[0].(*agent.TextDeltaMessage)
+		if !ok {
+			t.Fatalf("got %T, want TextDeltaMessage", msgs[0])
+		}
+		if delta.Text != "hello" {
+			t.Errorf("delta = %q, want hello", delta.Text)
+		}
+	})
+
+	t.Run("message_end emits consolidated text", func(t *testing.T) {
+		t.Parallel()
+		msgs, err := New("", nil).NewWire().ParseMessage([]byte(`{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"final text"}],"stopReason":"stop"}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		text, ok := msgs[0].(*agent.TextMessage)
+		if !ok {
+			t.Fatalf("got %T, want TextMessage", msgs[0])
+		}
+		if text.Text != "final text" {
+			t.Errorf("text = %q, want final text", text.Text)
 		}
 	})
 

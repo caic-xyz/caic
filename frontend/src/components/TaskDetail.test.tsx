@@ -82,6 +82,29 @@ function renderTaskDetail(props: Partial<Parameters<typeof TaskDetail>[0]> = {})
   ));
 }
 
+function resultEvent(ts: number): EventMessage {
+  return {
+    kind: "result",
+    ts,
+    result: {
+      subtype: "success",
+      isError: false,
+      result: "done",
+      totalCostUSD: 0,
+      duration: 1,
+      durationAPI: 1,
+      numTurns: 1,
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+        model: "test",
+      },
+    },
+  };
+}
+
 describe("TaskDetail", () => {
 
   afterEach(() => {
@@ -179,8 +202,7 @@ function makeManualReadyMock(
 describe("SSE connection", () => {
   beforeEach(() => {
     resetTaskDetailCachesForTest();
-    // Fake timers so we can control setTimeout (reconnect delays) and
-    // requestAnimationFrame (live-event batching, polyfilled as setTimeout(16)).
+    // Fake timers so we can control setTimeout for reconnect delays.
     vi.useFakeTimers();
   });
 
@@ -238,15 +260,15 @@ describe("SSE connection", () => {
     cb({ kind: "usage", ts: 3, usage: { inputTokens: 10, outputTokens: 5, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, model: "m" } });
     cb({ kind: "thinking", ts: 4, thinking: { text: "planning tool 2" } });
     cb({ kind: "toolUse", ts: 5, toolUse: { toolUseID: "t2", name: "Bash", input: {} } });
-    vi.advanceTimersByTime(20);
+    cb(resultEvent(6));
 
     expect(document.body.textContent).toContain("planning tool 1");
     expect(document.body.textContent).toContain("planning tool 2");
   });
 
-  it("replayed textDelta events appear before the SSE ready marker", () => {
-    // Replayed history can be huge; the UI must render it incrementally instead
-    // of buffering every event until the server sends ready.
+  it("replayed textDelta events render once the SSE ready marker arrives", () => {
+    // Replayed history can be huge; keep it off the DOM until the server sends
+    // ready so grouping and reconciliation run once for the replay.
     const created: FakeES[] = [];
     const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
     const readyHandler = { value: null as (() => void) | null };
@@ -257,11 +279,12 @@ describe("SSE connection", () => {
     if (!capturedCb.value) throw new Error("taskEvents callback not captured");
     capturedCb.value({ kind: "textDelta", ts: 1, textDelta: { text: "replayed output" } });
 
-    // Flush the rAF batch: vi.useFakeTimers() polyfills rAF as setTimeout(fn, 16).
-    vi.advanceTimersByTime(20);
+    expect(document.body.textContent).not.toContain("replayed output");
+    expect(readyHandler.value).not.toBeNull();
+
+    readyHandler.value?.();
 
     expect(document.body.textContent).toContain("replayed output");
-    expect(readyHandler.value).not.toBeNull();
   });
 
   it("restores cached task messages when navigating back before replay completes", async () => {
@@ -314,9 +337,9 @@ describe("SSE connection", () => {
     expect(occurrences).toBe(1);
   });
 
-  it("live textDelta events appear in the message list after SSE fires them", () => {
-    // Verifies the rAF-batched streaming path: events pushed via the SSE
-    // callback surface in the DOM after the animation frame is flushed.
+  it("live textDelta events render at the end of the turn", () => {
+    // Verifies the buffered streaming path: deltas stay off the DOM until a
+    // structural event ends the turn.
     const created: FakeES[] = [];
     const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
     makeSyncReadyMock(created, capturedCb);
@@ -328,11 +351,31 @@ describe("SSE connection", () => {
     // Push a textDelta live event (component is in live mode because ready fired).
     if (!capturedCb.value) throw new Error("taskEvents callback not captured");
     capturedCb.value({ kind: "textDelta", ts: 1, textDelta: { text: "agent reply" } });
+    expect(document.body.textContent).not.toContain("agent reply");
 
-    // Flush the rAF batch: vi.useFakeTimers() polyfills rAF as setTimeout(fn, 16).
-    vi.advanceTimersByTime(20);
+    capturedCb.value(resultEvent(2));
 
     expect(document.body.textContent).toContain("agent reply");
+  });
+
+  it("live ask events render immediately so the user can answer", () => {
+    const created: FakeES[] = [];
+    const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
+    makeSyncReadyMock(created, capturedCb);
+
+    renderTaskDetail({ taskState: "asking" });
+
+    if (!capturedCb.value) throw new Error("taskEvents callback not captured");
+    capturedCb.value({
+      kind: "ask",
+      ts: 1,
+      ask: {
+        toolUseID: "ask_1",
+        questions: [{ question: "Which option?", options: [{ label: "A" }, { label: "B" }] }],
+      },
+    });
+
+    expect(document.body.textContent).toContain("Which option?");
   });
 
   it("context menu button is visible in waiting state and opens menu with actions", async () => {

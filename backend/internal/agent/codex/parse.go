@@ -33,9 +33,11 @@ func unmarshalNotification(data []byte, v any, name string, fw *jsonutil.FieldWa
 	if !ok2 {
 		return fmt.Errorf("notificationKnownFields stored unexpected type %T", val)
 	}
-	var raw map[string]json.RawMessage
-	if json.Unmarshal(data, &raw) == nil {
-		fw.Warn(name, jsonutil.CollectUnknown(raw, known))
+	if fw != nil {
+		var raw map[string]json.RawMessage
+		if json.Unmarshal(data, &raw) == nil {
+			fw.Warn(name, jsonutil.CollectUnknown(raw, known))
+		}
 	}
 	return nil
 }

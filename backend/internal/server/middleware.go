@@ -108,7 +108,6 @@ func (cw *compressWriter) initOnce() {
 		cw.skipCompress = true
 		return
 	}
-
 	// Compressed size differs from original; remove Content-Length.
 	h.Del("Content-Length")
 	h.Set("Content-Encoding", cw.encoding)

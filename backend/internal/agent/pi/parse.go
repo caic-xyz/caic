@@ -4,8 +4,10 @@
 package pi
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/maruel/genai/providers/pi"
@@ -14,9 +16,109 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
-// typeProbe is a minimal routing probe; pi.LineProbe's other fields are unused.
-type typeProbe struct {
-	Type pi.EventType `json:"type"`
+// messageUpdateEvent is the small subset of message_update needed by caic.
+// Pi repeats the full accumulated assistant message on every streaming delta;
+// decoding that payload makes replay cost grow with log size even when the SSE
+// output is tiny.
+type messageUpdateEvent struct {
+	AssistantMessageEvent messageUpdateDelta `json:"assistantMessageEvent"`
+}
+
+type messageUpdateDelta struct {
+	Type     pi.DeltaType           `json:"type"`
+	Delta    string                 `json:"delta"`
+	Reason   pi.StopReason          `json:"reason"`
+	ToolCall *messageUpdateToolCall `json:"toolCall"`
+	Error    *messageUpdateError    `json:"error"`
+}
+
+type messageUpdateToolCall struct {
+	ID        string                     `json:"id"`
+	Name      string                     `json:"name"`
+	Arguments map[string]json.RawMessage `json:"arguments"`
+}
+
+type messageUpdateError struct {
+	ErrorMessage string `json:"errorMessage"`
+}
+
+func decodeEventType(line []byte) (pi.EventType, error) {
+	dec := json.NewDecoder(bytes.NewReader(line))
+	if err := consumeObjectStart(dec); err != nil {
+		return "", err
+	}
+	for dec.More() {
+		key, err := nextObjectKey(dec)
+		if err != nil {
+			return "", err
+		}
+		if key == "type" {
+			var typ pi.EventType
+			if err := dec.Decode(&typ); err != nil {
+				return "", err
+			}
+			return typ, nil
+		}
+		if err := discardValue(dec); err != nil {
+			return "", err
+		}
+	}
+	return "", nil
+}
+
+func decodeMessageUpdateEvent(line []byte) (messageUpdateEvent, error) {
+	var ev messageUpdateEvent
+	dec := json.NewDecoder(bytes.NewReader(line))
+	if err := consumeObjectStart(dec); err != nil {
+		return ev, err
+	}
+	for dec.More() {
+		key, err := nextObjectKey(dec)
+		if err != nil {
+			return ev, err
+		}
+		if key == "assistantMessageEvent" {
+			if err := dec.Decode(&ev.AssistantMessageEvent); err != nil {
+				return ev, err
+			}
+			return ev, nil
+		}
+		if err := discardValue(dec); err != nil {
+			return ev, err
+		}
+	}
+	return ev, nil
+}
+
+func consumeObjectStart(dec *json.Decoder) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
+		return fmt.Errorf("JSON root is %T, want object", tok)
+	}
+	return nil
+}
+
+func nextObjectKey(dec *json.Decoder) (string, error) {
+	tok, err := dec.Token()
+	if err != nil {
+		return "", err
+	}
+	key, ok := tok.(string)
+	if !ok {
+		return "", fmt.Errorf("JSON object key is %T, want string", tok)
+	}
+	return key, nil
+}
+
+func discardValue(dec *json.Decoder) error {
+	var raw json.RawMessage
+	if err := dec.Decode(&raw); err != nil && err != io.EOF {
+		return err
+	}
+	return nil
 }
 
 // parseMessage decodes a single JSONL line from Pi's stdout into one or more
@@ -38,13 +140,13 @@ type typeProbe struct {
 //   - UserInputMessage     — prompt command (stdin logged by relay)
 //   - RawMessage           — unrecognised event types
 func parseMessage(line []byte, _ *jsonutil.FieldWarner) ([]agent.Message, error) {
-	var probe typeProbe
-	if err := json.Unmarshal(line, &probe); err != nil {
+	typ, err := decodeEventType(line)
+	if err != nil {
 		return nil, fmt.Errorf("unmarshal probe: %w", err)
 	}
 
 	// caic-injected lines and stdin commands.
-	switch probe.Type {
+	switch typ {
 	case "caic_model_info":
 		// Handled by wireFormat.ParseMessage; skip in stateless replay.
 		return nil, nil
@@ -113,15 +215,15 @@ func parseMessage(line []byte, _ *jsonutil.FieldWarner) ([]agent.Message, error)
 	case pi.EventAgentEnd, pi.EventTurnEnd:
 		// Handled by wireFormat; if we reach here (stateless replay), pass through.
 		return []agent.Message{&agent.RawMessage{
-			MessageType: string(probe.Type),
+			MessageType: string(typ),
 			Raw:         append([]byte(nil), line...),
 		}}, nil
 	}
 
 	// Unknown event type.
-	if probe.Type != "" {
+	if typ != "" {
 		return []agent.Message{&agent.RawMessage{
-			MessageType: string(probe.Type),
+			MessageType: string(typ),
 			Raw:         append([]byte(nil), line...),
 		}}, nil
 	}
@@ -130,12 +232,15 @@ func parseMessage(line []byte, _ *jsonutil.FieldWarner) ([]agent.Message, error)
 
 // parseMessageUpdate dispatches on the assistantMessageEvent delta type.
 func parseMessageUpdate(line []byte) ([]agent.Message, error) {
-	var ev pi.MessageUpdateEvent
-	if err := json.Unmarshal(line, &ev); err != nil {
+	ev, err := decodeMessageUpdateEvent(line)
+	if err != nil {
 		return nil, fmt.Errorf("unmarshal message_update: %w", err)
 	}
 
-	delta := &ev.AssistantMessageEvent
+	return messagesFromMessageUpdateDelta(&ev.AssistantMessageEvent, line)
+}
+
+func messagesFromMessageUpdateDelta(delta *messageUpdateDelta, line []byte) ([]agent.Message, error) {
 	switch delta.Type {
 	case pi.DeltaTextDelta:
 		return []agent.Message{&agent.TextDeltaMessage{Text: delta.Delta}}, nil

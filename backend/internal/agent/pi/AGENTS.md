@@ -26,6 +26,7 @@ Wire types and protocol documentation live in `github.com/maruel/genai/providers
 | `message_update` (`text_delta`) | TextDeltaMessage |
 | `message_update` (`thinking_delta`) | ThinkingDeltaMessage |
 | `message_update` (`toolcall_start`) | ToolUseMessage |
+| `message_end` | TextMessage / ThinkingMessage consolidated from final assistant content |
 | `tool_execution_start` | ToolUseMessage |
 | `tool_execution_end` | ToolResultMessage |
 | `agent_end` | ResultMessage (with usage, duration, numTurns) |

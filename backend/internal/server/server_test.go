@@ -69,7 +69,7 @@ func (stubBackend) SupportsImages() bool { return false }
 
 func (stubBackend) AgentArgs(agent.HarnessArgs) []string { return nil }
 
-func (stubBackend) NewWire() agent.WireFormat { return claudecode.New() }
+func (stubBackend) NewWire() agent.WireFormat { return claudecode.New().NewWire() }
 
 func (stubBackend) SupportsCompact() bool { return false }
 
@@ -83,7 +83,7 @@ func decodeError(t *testing.T, w *httptest.ResponseRecorder) api.ErrorDetails {
 	return resp.Error
 }
 
-func newTestPrefs(t *testing.T) *preferences.Store {
+func newTestPrefs(t testing.TB) *preferences.Store {
 	path := filepath.Join(t.TempDir(), "preferences.json")
 	store, err := preferences.Open(path)
 	if err != nil {
@@ -105,7 +105,7 @@ type testRouter struct {
 }
 
 // newTestRouter creates a Router for tests.
-func newTestRouter(t *testing.T) *testRouter {
+func newTestRouter(t testing.TB) *testRouter {
 	checker, err := ipgeo.NewChecker(t.Context(), "0.0.0.0/0,::/0", "", "")
 	if err != nil {
 		t.Fatalf("ipgeo.NewChecker: %v", err)
@@ -1625,6 +1625,58 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		}
 		if !strings.Contains(body, "I found the bug") {
 			t.Error("expected text message 'I found the bug' to be replayed for purged task")
+		}
+	})
+
+	t.Run("AdoptedRunningTaskEventsUseInMemoryHistory", func(t *testing.T) {
+		t.Parallel()
+		logDir := t.TempDir()
+		taskID := ksid.NewID()
+
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "fix the bug",
+			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		})
+		diskMsg := mustJSON(t, map[string]any{
+			"type": "assistant",
+			"message": map[string]any{
+				"model":   "claude-opus-4-6",
+				"content": []map[string]any{{"type": "text", "text": "slow disk replay should not be used"}},
+			},
+		})
+		writeLogFile(t, logDir, taskID.String()+".jsonl", meta, diskMsg)
+		logs, err := task.LoadLogs(logDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(logs) != 1 {
+			t.Fatalf("logs len = %d, want 1", len(logs))
+		}
+		logs[0].SetParser(claudecode.New().NewWire().ParseMessage)
+
+		tk := &task.Task{ID: taskID, InitialPrompt: agent.Prompt{Text: "fix the bug"}, Harness: harness.Claude}
+		tk.RestoreMessages([]agent.Message{&agent.TextMessage{Text: "fast in-memory history"}})
+		tk.SetState(task.StateRunning)
+
+		s := newTestRouter(t)
+		s.taskMgr.Insert(taskID.String(), tasks.NewEntry(tk, logs[0]))
+
+		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+		defer cancel()
+		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+		req.SetPathValue("id", taskID.String())
+		w := httptest.NewRecorder()
+		testTaskHandlers(s).handleTaskRawEvents(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		}
+		body := w.Body.String()
+		if !strings.Contains(body, "fast in-memory history") {
+			t.Fatalf("expected in-memory history in SSE body:\n%s", body)
+		}
+		if strings.Contains(body, "slow disk replay should not be used") {
+			t.Fatalf("disk history leaked into running task SSE body:\n%s", body)
 		}
 	})
 

@@ -81,11 +81,13 @@ func unmarshalOutput(data []byte, v any, name string, fw *jsonutil.FieldWarner) 
 			known[k] = struct{}{}
 		}
 	}
-	var raw map[string]json.RawMessage
-	if json.Unmarshal(data, &raw) == nil {
-		fw.Warn(name, jsonutil.CollectUnknown(raw, known))
+	if fw != nil {
+		var raw map[string]json.RawMessage
+		if json.Unmarshal(data, &raw) == nil {
+			fw.Warn(name, jsonutil.CollectUnknown(raw, known))
+		}
+		fw.WarnOverflows(name, v)
 	}
-	fw.WarnOverflows(name, v)
 	return nil
 }
 

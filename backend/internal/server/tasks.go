@@ -111,7 +111,7 @@ func (s *taskHTTPHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Reque
 	}
 
 	now := time.Now()
-	if loadedTask != nil {
+	if shouldReplayHistoryFromDisk(state, loadedTask) {
 		s.streamHistoryFromDiskWithTracker(w, flusher, entry, tracker, &idx)
 	} else {
 		for _, msg := range filterHistoryForReplay(history) {
@@ -172,6 +172,13 @@ func (s *taskHTTPHandlers) streamHistoryFromDisk(w http.ResponseWriter, flusher 
 	s.streamHistoryFromDiskWithTracker(w, flusher, entry, tracker, &idx)
 	_, _ = fmt.Fprint(w, "event: ready\ndata: {}\n\n")
 	flusher.Flush()
+}
+
+func shouldReplayHistoryFromDisk(state task.State, lt *task.LoadedTask) bool {
+	if lt == nil {
+		return false
+	}
+	return state == task.StateStopped
 }
 
 func (s *taskHTTPHandlers) streamHistoryFromDiskWithTracker(w http.ResponseWriter, flusher http.Flusher, entry *tasks.Entry, tracker *v1conv.ToolTimingTracker, idx *int) {

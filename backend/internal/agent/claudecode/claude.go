@@ -151,7 +151,8 @@ func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.
 
 // NewWire implements agent.Backend.
 func (*Backend) NewWire() agent.WireFormat {
-	return New()
+	// Log replay can parse large histories; skip development-only unknown-field scans.
+	return &Backend{widgetTracker: NewWidgetTracker()}
 }
 
 // WriteCompact implements agent.CompactCommand by sending /compact as a user

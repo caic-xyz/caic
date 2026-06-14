@@ -179,7 +179,8 @@ func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.
 
 // NewWire implements agent.Backend.
 func (*Backend) NewWire() agent.WireFormat {
-	return &piWireFormat{fw: &jsonutil.FieldWarner{}}
+	// Log replay can parse large histories; skip development-only unknown-field scans.
+	return &piWireFormat{}
 }
 
 // WritePrePrompt implements agent.PrePromptWriter. It sends a set_model command
@@ -331,8 +332,8 @@ func (w *piWireFormat) WriteCompact(wr io.Writer, instructions string, logW io.W
 //   - agent_end: emits ResultMessage with usage + duration.
 //   - turn_end: emits UsageMessage from turn's assistant message.
 func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
-	var probe pi.LineProbe
-	if err := json.Unmarshal(line, &probe); err != nil {
+	typ, err := decodeEventType(line)
+	if err != nil {
 		return nil, fmt.Errorf("unmarshal probe: %w", err)
 	}
 
@@ -340,7 +341,7 @@ func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	// written during Start. This ensures replay/adoption correctly
 	// reports the model's real context window instead of falling back
 	// to the harness hardcoded default of 200k.
-	if probe.Type == "caic_model_info" {
+	if typ == "caic_model_info" {
 		var info caicModelInfo
 		if err := json.Unmarshal(line, &info); err == nil && info.ContextWindow > 0 {
 			w.modelCtxWindow = info.ContextWindow
@@ -349,38 +350,37 @@ func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	}
 
 	// Intercept agent_end for final usage.
-	if probe.Type == pi.EventAgentEnd {
+	if typ == pi.EventAgentEnd {
 		return w.handleAgentEnd(line)
 	}
 
 	// Intercept turn_end for per-turn usage.
-	if probe.Type == pi.EventTurnEnd {
+	if typ == pi.EventTurnEnd {
 		return w.handleTurnEnd(line)
 	}
 
 	// Intercept message_start to report the model on the first turn.
-	if probe.Type == pi.EventMessageStart {
+	if typ == pi.EventMessageStart {
 		return w.handleMessageStart(line)
 	}
 
-	// Intercept message_end with stopReason=error for error ResultMessage.
-	if probe.Type == pi.EventMessageEnd {
+	// Intercept message_end for consolidated assistant content or errors.
+	if typ == pi.EventMessageEnd {
 		return w.handleMessageEnd(line)
 	}
 
-	// Intercept message_update with done/error delta for ResultMessage.
-	if probe.Type == pi.EventMessageUpdate {
-		var ev pi.MessageUpdateEvent
-		if err := json.Unmarshal(line, &ev); err == nil {
-			switch ev.AssistantMessageEvent.Type {
-			case pi.DeltaDone:
-				return w.handleDone(&ev)
-			case pi.DeltaError:
-				return w.handleError(&ev)
-			default:
-				// Other delta types (text_delta, thinking_delta, etc.)
-				// are handled by the stateless parseMessage below.
-			}
+	if typ == pi.EventMessageUpdate {
+		ev, err := decodeMessageUpdateEvent(line)
+		if err != nil {
+			return nil, fmt.Errorf("unmarshal message_update: %w", err)
+		}
+		switch ev.AssistantMessageEvent.Type {
+		case pi.DeltaDone:
+			return w.handleDone(&ev)
+		case pi.DeltaError:
+			return w.handleError(&ev)
+		default:
+			return messagesFromMessageUpdateDelta(&ev.AssistantMessageEvent, line)
 		}
 	}
 
@@ -424,7 +424,7 @@ func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 // handleDone converts a done delta into a ResultMessage. Pi currently does not
 // emit done deltas, so this path is not exercised in normal operation, but is
 // kept for protocol evolution.
-func (w *piWireFormat) handleDone(ev *pi.MessageUpdateEvent) ([]agent.Message, error) {
+func (w *piWireFormat) handleDone(ev *messageUpdateEvent) ([]agent.Message, error) {
 	rm := &agent.ResultMessage{
 		MessageType: "result",
 		Subtype:     "result",
@@ -435,22 +435,46 @@ func (w *piWireFormat) handleDone(ev *pi.MessageUpdateEvent) ([]agent.Message, e
 	return []agent.Message{rm}, nil
 }
 
-// handleMessageEnd handles a message_end event, emitting an error ResultMessage
-// when stopReason is "error".
+// handleMessageEnd handles a message_end event, emitting the consolidated
+// assistant content. That lets replay collapse prior streaming deltas instead
+// of sending every token fragment back to clients.
 func (w *piWireFormat) handleMessageEnd(line []byte) ([]agent.Message, error) {
 	var ev pi.MessageEndEvent
 	if err := json.Unmarshal(line, &ev); err != nil {
 		return nil, fmt.Errorf("unmarshal message_end: %w", err)
 	}
-	if ev.Message.StopReason != pi.StopReasonError {
-		return nil, nil
+	if ev.Message.StopReason == pi.StopReasonError {
+		return []agent.Message{&agent.ResultMessage{
+			MessageType: "result",
+			Subtype:     "error",
+			IsError:     true,
+			Result:      ev.Message.ErrorMessage,
+		}}, nil
 	}
-	return []agent.Message{&agent.ResultMessage{
-		MessageType: "result",
-		Subtype:     "error",
-		IsError:     true,
-		Result:      ev.Message.ErrorMessage,
-	}}, nil
+	return messagesFromAgentMessage(&ev.Message), nil
+}
+
+func messagesFromAgentMessage(msg *pi.AgentMessage) []agent.Message {
+	if msg == nil || msg.Role != pi.RoleAssistant {
+		return nil
+	}
+	out := make([]agent.Message, 0, len(msg.Content))
+	for i := range msg.Content {
+		block := &msg.Content[i]
+		switch block.Type {
+		case pi.ContentText:
+			if block.Text != "" {
+				out = append(out, &agent.TextMessage{Text: block.Text})
+			}
+		case pi.ContentThinking:
+			if block.Thinking != "" {
+				out = append(out, &agent.ThinkingMessage{Text: block.Thinking})
+			}
+		case pi.ContentToolCall, pi.ContentImage:
+			// Tool calls and images are emitted by their dedicated event paths.
+		}
+	}
+	return out
 }
 
 // handleMessageStart emits a one-shot InitMessage carrying the model name on
@@ -477,7 +501,7 @@ func (w *piWireFormat) handleMessageStart(line []byte) ([]agent.Message, error) 
 }
 
 // handleError converts an error delta into a ResultMessage.
-func (w *piWireFormat) handleError(ev *pi.MessageUpdateEvent) ([]agent.Message, error) {
+func (w *piWireFormat) handleError(ev *messageUpdateEvent) ([]agent.Message, error) {
 	result := ""
 	if ev.AssistantMessageEvent.Error != nil && ev.AssistantMessageEvent.Error.ErrorMessage != "" {
 		result = ev.AssistantMessageEvent.Error.ErrorMessage
