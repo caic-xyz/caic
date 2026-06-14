@@ -383,6 +383,14 @@ type ExitMessage struct {
 // Type implements Message.
 func (m *ExitMessage) Type() string { return "caic_exit" }
 
+// ExitError returns the user-facing diagnostic for a non-zero process exit.
+func (m *ExitMessage) ExitError() string {
+	if m.Error != "" {
+		return m.Error
+	}
+	return fmt.Sprintf("agent subprocess exited with code %d", m.ExitCode)
+}
+
 // MetaRepo describes one repository entry in a MetaMessage.
 type MetaRepo struct {
 	Name        string `json:"name"`

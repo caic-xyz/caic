@@ -40,7 +40,7 @@ vi.mock("./api", () => ({
   globalTaskEvents: vi.fn(() => new FakeEventSource()),
   globalUsageEvents: vi.fn(() => new FakeEventSource()),
   // Used by TaskDetail once a created task navigates into its detail route.
-  taskEvents: vi.fn(() => new FakeEventSource()),
+  taskEventsSkippingReplay: vi.fn(() => new FakeEventSource()),
   sendInput: vi.fn(),
   restartTask: vi.fn(),
   clearContext: vi.fn(() => Promise.resolve({ status: "cleared" })),

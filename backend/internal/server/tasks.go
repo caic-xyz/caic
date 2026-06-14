@@ -78,13 +78,17 @@ func (s *taskHTTPHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Reque
 	// the on-disk log without materializing it into memory. This keeps server
 	// memory O(1) for the very large logs that previously failed to load.
 	state := entry.Task().GetState()
-	if (state == task.StatePurged || state == task.StateCrashed || state == task.StateFailed) && entry.LoadedTask() != nil {
+	terminal := state == task.StatePurged || state == task.StateCrashed || state == task.StateFailed
+	loadedTask := entry.LoadedTask()
+	if terminal && loadedTask != nil {
 		s.streamHistoryFromDisk(w, flusher, entry)
 		return
 	}
 
-	// Lazily load messages for purged tasks on first access.
-	s.taskMgr.LoadMessagesOnDemand(entry)
+	// Lazily load messages for entries that do not have a disk stream path.
+	if loadedTask == nil {
+		s.taskMgr.LoadMessagesOnDemand(entry)
+	}
 
 	history, live, unsub := entry.Task().Subscribe(r.Context())
 	defer unsub()
@@ -107,8 +111,12 @@ func (s *taskHTTPHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Reque
 	}
 
 	now := time.Now()
-	for _, msg := range filterHistoryForReplay(history) {
-		writeEvents(tracker.ConvertMessage(msg, now))
+	if loadedTask != nil {
+		s.streamHistoryFromDiskWithTracker(w, flusher, entry, tracker, &idx)
+	} else {
+		for _, msg := range filterHistoryForReplay(history) {
+			writeEvents(tracker.ConvertMessage(msg, now))
+		}
 	}
 	for i := range statsHistory {
 		ev := v1conv.StatsEvent(&statsHistory[i])
@@ -160,8 +168,18 @@ func (s *taskHTTPHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Reque
 // messages.
 func (s *taskHTTPHandlers) streamHistoryFromDisk(w http.ResponseWriter, flusher http.Flusher, entry *tasks.Entry) {
 	tracker := v1conv.NewToolTimingTracker(entry.Task().Harness, FormatToolOutput)
-	now := time.Now()
 	idx := 0
+	s.streamHistoryFromDiskWithTracker(w, flusher, entry, tracker, &idx)
+	_, _ = fmt.Fprint(w, "event: ready\ndata: {}\n\n")
+	flusher.Flush()
+}
+
+func (s *taskHTTPHandlers) streamHistoryFromDiskWithTracker(w http.ResponseWriter, flusher http.Flusher, entry *tasks.Entry, tracker *v1conv.ToolTimingTracker, idx *int) {
+	lt := entry.LoadedTask()
+	if lt == nil {
+		return
+	}
+	now := time.Now()
 	bytesSinceFlush := 0
 	emit := func(msg agent.Message) {
 		evs := tracker.ConvertMessage(msg, now)
@@ -171,8 +189,8 @@ func (s *taskHTTPHandlers) streamHistoryFromDisk(w http.ResponseWriter, flusher 
 				slog.Warn("marshal SSE event", "err", err)
 				continue
 			}
-			n, _ := fmt.Fprintf(w, "event: message\ndata: %s\nid: %d\n\n", data, idx)
-			idx++
+			n, _ := fmt.Fprintf(w, "event: message\ndata: %s\nid: %d\n\n", data, *idx)
+			(*idx)++
 			bytesSinceFlush += n
 			if bytesSinceFlush >= 65536 {
 				flusher.Flush()
@@ -181,7 +199,7 @@ func (s *taskHTTPHandlers) streamHistoryFromDisk(w http.ResponseWriter, flusher 
 		}
 	}
 	push, flush := newReplayFilter(emit)
-	for msg, err := range entry.LoadedTask().StreamMessages() {
+	for msg, err := range lt.StreamMessages() {
 		if err != nil {
 			slog.Warn("stream history from disk", "task", entry.Task().ID, "err", err)
 			break
@@ -189,8 +207,6 @@ func (s *taskHTTPHandlers) streamHistoryFromDisk(w http.ResponseWriter, flusher 
 		push(msg)
 	}
 	flush()
-	_, _ = fmt.Fprint(w, "event: ready\ndata: {}\n\n")
-	flusher.Flush()
 }
 
 // handleTaskListEvents streams patch events for the task list as SSE. On first

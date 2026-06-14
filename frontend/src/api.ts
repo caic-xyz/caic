@@ -1,5 +1,7 @@
 // Singleton API client for the caic web UI.
 import { createApiClient } from "@sdk/api.gen";
+import type { EventMessage } from "@sdk/types.gen";
+import { validateEventMessage } from "@sdk/validate.gen";
 import * as voicegatewaySDK from "@voicegateway-sdk/api.gen";
 
 export const api = createApiClient();
@@ -49,3 +51,22 @@ export const {
   voiceRTCOffer,
   closeVoiceRTC,
 } = voiceGatewayApi;
+
+export function taskEventsSkippingReplay(
+  id: string,
+  onMessage: (event: EventMessage) => void,
+  onError: (err: unknown) => void,
+  shouldSkipRaw?: (event: MessageEvent<string>) => boolean,
+): EventSource {
+  const es = new EventSource(`/api/caic/v1/tasks/${id}/events`);
+  es.addEventListener("message", (e) => {
+    const ev = e as MessageEvent<string>;
+    if (shouldSkipRaw?.(ev)) return;
+    try {
+      onMessage(validateEventMessage(JSON.parse(ev.data)));
+    } catch (err) {
+      onError(err);
+    }
+  });
+  return es;
+}

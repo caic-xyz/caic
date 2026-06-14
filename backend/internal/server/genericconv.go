@@ -50,12 +50,36 @@ func filterHistoryForReplay(msgs []agent.Message) []agent.Message {
 		}
 	}
 	out := make([]agent.Message, 0, len(msgs))
+	cleanTurnComplete := false
 	for i, msg := range msgs {
-		if !skip[i] {
-			out = append(out, msg)
+		if skip[i] {
+			continue
 		}
+		if exit, ok := msg.(*agent.ExitMessage); ok {
+			if exit.ExitCode != 0 && cleanTurnComplete {
+				continue
+			}
+		} else if replayClearsExit(msg) {
+			cleanTurnComplete = false
+		}
+		if rm, ok := msg.(*agent.ResultMessage); ok {
+			cleanTurnComplete = !rm.IsError
+		}
+		out = append(out, msg)
 	}
 	return out
+}
+
+func replayClearsExit(msg agent.Message) bool {
+	switch m := msg.(type) {
+	case *agent.ExitMessage, *agent.DiffStatMessage, *agent.RawMessage,
+		*agent.ParseErrorMessage, *agent.LogMessage, *agent.StrippedEnvMessage:
+		return false
+	case *agent.ResultMessage:
+		return !m.IsError
+	default:
+		return true
+	}
 }
 
 // replayDeltaKind classifies a streaming-delta message: 1=text, 2=thinking,
@@ -100,6 +124,7 @@ func replayFinalKind(m agent.Message) int {
 // flush must be called once after the last message.
 func newReplayFilter(emit func(agent.Message)) (push func(agent.Message), flush func()) {
 	var pending []agent.Message // contiguous run of one delta kind, not yet emitted
+	cleanTurnComplete := false
 	flush = func() {
 		for _, m := range pending {
 			emit(m)
@@ -107,6 +132,9 @@ func newReplayFilter(emit func(agent.Message)) (push func(agent.Message), flush 
 		pending = pending[:0]
 	}
 	push = func(m agent.Message) {
+		if exit, ok := m.(*agent.ExitMessage); ok && exit.ExitCode != 0 && cleanTurnComplete {
+			return
+		}
 		if k := replayDeltaKind(m); k != 0 {
 			if len(pending) > 0 && replayDeltaKind(pending[0]) != k {
 				flush() // a different delta kind ends the current run
@@ -118,6 +146,12 @@ func newReplayFilter(emit func(agent.Message)) (push func(agent.Message), flush 
 			pending = pending[:0] // consolidated message supersedes its delta run
 		} else {
 			flush()
+		}
+		if replayClearsExit(m) {
+			cleanTurnComplete = false
+		}
+		if rm, ok := m.(*agent.ResultMessage); ok {
+			cleanTurnComplete = !rm.IsError
 		}
 		emit(m)
 	}

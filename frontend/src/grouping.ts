@@ -574,11 +574,15 @@ export function groupTurns(groups: MessageGroup[]): Turn[] {
   return turns;
 }
 
+const groupSessionsCache = new WeakMap<ReadonlyArray<EventMessage>, Session[]>();
+
 // Splits messages into sessions at init (only when sessionID changes) and compact_boundary events.
 // The boundary event starts the new session and is NOT passed to groupMessages.
 // Re-invocations of Claude Code that share the same sessionID are NOT new sessions — they are
 // just new turns within the same session.
 export function groupSessions(msgs: EventMessage[]): Session[] {
+  const cached = groupSessionsCache.get(msgs);
+  if (cached !== undefined) return cached;
   const sessions: Session[] = [];
   let segment: EventMessage[] = [];
   let boundaryEvent: EventMessage | undefined;
@@ -628,6 +632,7 @@ export function groupSessions(msgs: EventMessage[]): Session[] {
   if (segment.length > 0 || boundaryEvent !== undefined) {
     flushSession();
   }
+  groupSessionsCache.set(msgs, sessions);
   return sessions;
 }
 

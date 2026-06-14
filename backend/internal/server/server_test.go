@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/maruel/ksid"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/auth"
@@ -147,7 +149,7 @@ func TestNew(t *testing.T) {
 // entry.Task().ID.String() find the same entry (in production the two always
 // coincide because Insert keys on t.ID.String()).
 func insertTestTask(t *testing.T, s *testRouter, id string, tk *task.Task) *tasks.Entry { //nolint:unparam // id is constant today; keep generic
-	e := tasks.NewEntry(tk)
+	e := tasks.NewEntry(tk, nil)
 	s.taskMgr.Insert(id, e)
 	if taskID := tk.ID.String(); taskID != id {
 		s.taskMgr.Insert(taskID, e)
@@ -1623,6 +1625,69 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		}
 		if !strings.Contains(body, "I found the bug") {
 			t.Error("expected text message 'I found the bug' to be replayed for purged task")
+		}
+	})
+
+	t.Run("AdoptedStoppedTaskEventsUseFullDiskLog", func(t *testing.T) {
+		t.Parallel()
+		logDir := t.TempDir()
+		taskID := ksid.NewID()
+
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "fix the bug",
+			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		})
+		initMsg := mustJSON(t, map[string]any{
+			"type": "system", "subtype": "init", "model": "claude-opus-4-6",
+			"claude_code_version": "2.0", "session_id": "s1",
+		})
+		early := mustJSON(t, map[string]any{
+			"type": "assistant",
+			"message": map[string]any{
+				"model":   "claude-opus-4-6",
+				"content": []map[string]any{{"type": "text", "text": "early full log message"}},
+			},
+		})
+		result := mustJSON(t, agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done"})
+		staleExit := `{"type":"caic_exit","exit_code":2,"error":"stale crash"}`
+		writeLogFile(t, logDir, taskID.String()+".jsonl", meta, initMsg, early, result, staleExit)
+		logs, err := task.LoadLogs(logDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(logs) != 1 {
+			t.Fatalf("logs len = %d, want 1", len(logs))
+		}
+		logs[0].SetParser(claudecode.New().NewWire().ParseMessage)
+
+		tk := &task.Task{
+			ID:            taskID,
+			InitialPrompt: agent.Prompt{Text: "fix the bug"},
+			Repos:         []task.RepoMount{{Name: "r", Branch: "caic-0"}},
+			Harness:       harness.Claude,
+		}
+		tk.RestoreMessages([]agent.Message{&agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done"}})
+		tk.SetState(task.StateStopped)
+
+		s := newTestRouter(t)
+		s.taskMgr.Insert(taskID.String(), tasks.NewEntry(tk, logs[0]))
+
+		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+		defer cancel()
+		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+		req.SetPathValue("id", taskID.String())
+		w := httptest.NewRecorder()
+		testTaskHandlers(s).handleTaskRawEvents(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		}
+		body := w.Body.String()
+		if !strings.Contains(body, "early full log message") {
+			t.Fatalf("expected full disk history in SSE body:\n%s", body)
+		}
+		if strings.Contains(body, "stale crash") {
+			t.Fatalf("stale relay exit leaked into SSE body:\n%s", body)
 		}
 	})
 

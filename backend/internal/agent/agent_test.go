@@ -126,6 +126,24 @@ func (testWire) ParseMessage(line []byte) ([]Message, error) {
 	return testParseFn(line)
 }
 
+func TestExitMessage(t *testing.T) {
+	t.Parallel()
+	t.Run("valid_uses_relay_error", func(t *testing.T) {
+		t.Parallel()
+		exit := &ExitMessage{ExitCode: 2, Error: "Unknown option: --approve"}
+		if got := exit.ExitError(); got != "Unknown option: --approve" {
+			t.Errorf("ExitError = %q, want relay stderr", got)
+		}
+	})
+	t.Run("valid_falls_back_to_exit_code", func(t *testing.T) {
+		t.Parallel()
+		exit := &ExitMessage{ExitCode: 2}
+		if got := exit.ExitError(); got != "agent subprocess exited with code 2" {
+			t.Errorf("ExitError = %q, want exit-code diagnostic", got)
+		}
+	})
+}
+
 func TestSession(t *testing.T) {
 	t.Parallel()
 	t.Run("Lifecycle", func(t *testing.T) {

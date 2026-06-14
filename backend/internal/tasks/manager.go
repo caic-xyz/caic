@@ -318,7 +318,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 	}
 	t.SetTitle(p.Prompt.Text)
 	go t.GenerateTitle(m.serverCtx) //nolint:contextcheck // fire-and-forget; must outlive request
-	entry := NewEntry(t)
+	entry := NewEntry(t, nil)
 
 	m.insertEntry(t.ID.String(), entry)
 
@@ -593,7 +593,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 	}
 	t.SetTitle(p.Prompt.Text)
 	go t.GenerateTitle(m.serverCtx) //nolint:contextcheck // fire-and-forget; must outlive request
-	forkEntry := NewEntry(t)
+	forkEntry := NewEntry(t, nil)
 
 	m.insertEntry(t.ID.String(), forkEntry)
 
@@ -1494,7 +1494,10 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	}
 	applyLoadedSessionMetadata(t, lt)
 	t.SetStateAt(t.GetState(), stateUpdatedAt)
-	if lt != nil && (lt.State == task.StateCrashed || lt.State == task.StateFailed) {
+	if lt != nil && lt.State == task.StateFailed {
+		t.SetStateAt(lt.State, stateUpdatedAt)
+	}
+	if lt != nil && lt.State == task.StateCrashed && t.LastExitError() != "" {
 		t.SetStateAt(lt.State, stateUpdatedAt)
 	}
 
@@ -1542,7 +1545,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		}
 	}
 
-	entry := NewEntry(t)
+	entry := NewEntry(t, lt)
 	if t.GetState() == task.StateCrashed || t.GetState() == task.StateFailed {
 		resultErr := errors.New("agent session failed")
 		if t.GetState() == task.StateCrashed {

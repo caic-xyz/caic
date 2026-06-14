@@ -3,7 +3,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import type { EventMessage } from "@sdk/types.gen";
-import type { JSX } from "solid-js";
+import { createSignal, type JSX } from "solid-js";
 
 const navigateMock = vi.fn();
 
@@ -27,7 +27,7 @@ vi.mock("@solidjs/router", () => ({
 
 // Mock the API module to stub out EventSource (SSE) and other network calls.
 vi.mock("../api", () => ({
-  taskEvents: vi.fn((_id: string, _cb: unknown) => {
+  taskEventsSkippingReplay: vi.fn((_id: string, _cb: unknown) => {
     const fakeES = {
       addEventListener: vi.fn((_event: string, _handler: () => void) => {}),
       close: vi.fn(),
@@ -51,8 +51,8 @@ vi.mock("../api", () => ({
 }));
 
 // Import after mocks are set up.
-import TaskDetail from "./TaskDetail";
-import { taskEvents } from "../api";
+import TaskDetail, { resetTaskDetailCachesForTest } from "./TaskDetail";
+import { taskEventsSkippingReplay } from "../api";
 import { HostModeProvider } from "../hostMode";
 
 const baseProps = {
@@ -86,6 +86,7 @@ describe("TaskDetail", () => {
 
   afterEach(() => {
     navigateMock.mockClear();
+    resetTaskDetailCachesForTest();
   });
 
   it("shows Diff link when diffStat has items", () => {
@@ -142,7 +143,7 @@ function makeSyncReadyMock(
   created: FakeES[],
   capturedCb?: { value: ((ev: EventMessage) => void) | null },
 ) {
-  vi.mocked(taskEvents).mockImplementation((_id, cb) => {
+  vi.mocked(taskEventsSkippingReplay).mockImplementation((_id, cb) => {
     if (capturedCb) capturedCb.value = cb as (ev: EventMessage) => void;
     const fakeES: FakeES = {
       addEventListener: vi.fn((event: string, handler: () => void) => {
@@ -161,7 +162,7 @@ function makeManualReadyMock(
   capturedCb: { value: ((ev: EventMessage) => void) | null },
   readyHandler: { value: (() => void) | null },
 ) {
-  vi.mocked(taskEvents).mockImplementation((_id, cb) => {
+  vi.mocked(taskEventsSkippingReplay).mockImplementation((_id, cb) => {
     capturedCb.value = cb as (ev: EventMessage) => void;
     const fakeES: FakeES = {
       addEventListener: vi.fn((event: string, handler: () => void) => {
@@ -177,12 +178,14 @@ function makeManualReadyMock(
 
 describe("SSE connection", () => {
   beforeEach(() => {
+    resetTaskDetailCachesForTest();
     // Fake timers so we can control setTimeout (reconnect delays) and
     // requestAnimationFrame (live-event batching, polyfilled as setTimeout(16)).
     vi.useFakeTimers();
   });
 
   afterEach(() => {
+    resetTaskDetailCachesForTest();
     vi.useRealTimers();
   });
 
@@ -259,6 +262,56 @@ describe("SSE connection", () => {
 
     expect(document.body.textContent).toContain("replayed output");
     expect(readyHandler.value).not.toBeNull();
+  });
+
+  it("restores cached task messages when navigating back before replay completes", async () => {
+    const callbacks = new Map<string, (ev: EventMessage) => void>();
+    const readyHandlers = new Map<string, () => void>();
+    vi.mocked(taskEventsSkippingReplay).mockImplementation((id, cb, _onError, shouldSkipRaw) => {
+      let nextEventID = 0;
+      callbacks.set(id, (ev: EventMessage) => {
+        const eventID = nextEventID;
+        nextEventID++;
+        if (shouldSkipRaw?.({ lastEventId: String(eventID) } as MessageEvent<string>)) return;
+        (cb as (event: EventMessage) => void)(ev);
+      });
+      const fakeES: FakeES = {
+        addEventListener: vi.fn((event: string, handler: () => void) => {
+          if (event === "ready") readyHandlers.set(id, handler);
+        }),
+        close: vi.fn(),
+        onerror: null,
+      };
+      return fakeES as unknown as EventSource;
+    });
+
+    const [taskId, setTaskId] = createSignal("cached-task-a");
+    render(() => (
+      <HostModeProvider>
+        <TaskDetail {...baseProps} taskId={taskId()} />
+      </HostModeProvider>
+    ));
+
+    callbacks.get("cached-task-a")?.({ kind: "text", ts: 1, text: { text: "cached alpha" } });
+    vi.advanceTimersByTime(20);
+    readyHandlers.get("cached-task-a")?.();
+    expect(document.body.textContent).toContain("cached alpha");
+
+    setTaskId("cached-task-b");
+    await Promise.resolve();
+    callbacks.get("cached-task-b")?.({ kind: "text", ts: 2, text: { text: "cached beta" } });
+    vi.advanceTimersByTime(20);
+    readyHandlers.get("cached-task-b")?.();
+    expect(document.body.textContent).toContain("cached beta");
+
+    setTaskId("cached-task-a");
+    await Promise.resolve();
+    expect(document.body.textContent).toContain("cached alpha");
+
+    callbacks.get("cached-task-a")?.({ kind: "text", ts: 1, text: { text: "cached alpha" } });
+    readyHandlers.get("cached-task-a")?.();
+    const occurrences = document.body.textContent?.match(/cached alpha/g)?.length ?? 0;
+    expect(occurrences).toBe(1);
   });
 
   it("live textDelta events appear in the message list after SSE fires them", () => {

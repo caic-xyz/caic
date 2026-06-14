@@ -116,6 +116,34 @@ func TestTask(t *testing.T) {
 			t.Errorf("LastExitError = %q, want relay stderr", got)
 		}
 	})
+	t.Run("RestoreMessagesClearsStaleExitErrorOnLaterSessionActivity", func(t *testing.T) {
+		t.Parallel()
+		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}
+		tk.RestoreMessages([]agent.Message{
+			&agent.ExitMessage{ExitCode: 2, Error: "stale crash"},
+			&agent.InitMessage{SessionID: "new-session"},
+			&agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done"},
+		})
+		if got := tk.LastExitError(); got != "" {
+			t.Errorf("LastExitError = %q, want stale exit error cleared", got)
+		}
+	})
+	t.Run("RestoreMessagesIgnoresTrailingExitAfterSuccessfulTurn", func(t *testing.T) {
+		t.Parallel()
+		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}
+		tk.SetState(StateRunning)
+		tk.RestoreMessages([]agent.Message{
+			&agent.InitMessage{SessionID: "session"},
+			&agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done"},
+			&agent.ExitMessage{ExitCode: 2, Error: "stale crash"},
+		})
+		if got := tk.LastExitError(); got != "" {
+			t.Errorf("LastExitError = %q, want trailing exit ignored", got)
+		}
+		if got := tk.GetState(); got != StateWaiting {
+			t.Errorf("state = %v, want waiting", got)
+		}
+	})
 	t.Run("RecordSessionFailure", func(t *testing.T) {
 		t.Parallel()
 		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}

@@ -19,7 +19,7 @@ func TestNewEntry(t *testing.T) {
 			ID:            ksid.NewID(),
 			InitialPrompt: agent.Prompt{Text: "test"},
 		}
-		e := NewEntry(tk)
+		e := NewEntry(tk, nil)
 		if e.Task() != tk {
 			t.Fatal("Task() returned wrong pointer")
 		}
@@ -73,7 +73,7 @@ func TestEntry(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
-			e := NewEntry(&task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}})
+			e := NewEntry(&task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}, nil)
 			if e.Result() != nil {
 				t.Error("Result() should be nil initially")
 			}
@@ -89,7 +89,7 @@ func TestEntry(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
-			e := NewEntry(&task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}})
+			e := NewEntry(&task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}, nil)
 			e.CloseDone()
 			select {
 			case <-e.Done():
@@ -99,7 +99,7 @@ func TestEntry(t *testing.T) {
 		})
 		t.Run("reset_reopens", func(t *testing.T) {
 			t.Parallel()
-			e := NewEntry(&task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}})
+			e := NewEntry(&task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}, nil)
 			e.CloseDone()
 			e.Reset()
 			select {
@@ -117,7 +117,7 @@ func TestEntry(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_exactly_once", func(t *testing.T) {
 			t.Parallel()
-			e := NewEntry(&task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}})
+			e := NewEntry(&task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}, nil)
 			var n int
 			e.Cleanup(func() { n++ })
 			e.Cleanup(func() { n++ })
@@ -127,7 +127,7 @@ func TestEntry(t *testing.T) {
 		})
 		t.Run("valid_after_reset", func(t *testing.T) {
 			t.Parallel()
-			e := NewEntry(&task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}})
+			e := NewEntry(&task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}, nil)
 			var n int
 			e.Cleanup(func() { n++ })
 			e.Reset()
@@ -142,7 +142,7 @@ func TestEntry(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
-			e := NewEntry(&task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}})
+			e := NewEntry(&task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}, nil)
 			if e.MonitorBranch() != "" {
 				t.Error("MonitorBranch() should be empty initially")
 			}
@@ -157,7 +157,7 @@ func TestEntry(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_no_loaded_task", func(t *testing.T) {
 			t.Parallel()
-			e := NewEntry(&task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}})
+			e := NewEntry(&task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}, nil)
 			e.LoadMessagesOnce(func() { t.Error("should not be called without LoadedTask") })
 		})
 		t.Run("valid_exactly_once", func(t *testing.T) {

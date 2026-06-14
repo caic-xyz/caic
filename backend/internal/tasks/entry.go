@@ -30,10 +30,11 @@ type Entry struct {
 	cleanupOnce   *sync.Once
 }
 
-// NewEntry creates an Entry for an active task. done is fresh; result is nil.
-func NewEntry(t *task.Task) *Entry {
+// NewEntry creates an Entry. done is fresh; result is nil.
+func NewEntry(t *task.Task, lt *task.LoadedTask) *Entry {
 	return &Entry{
 		task:           t,
+		loadedTask:     lt,
 		done:           make(chan struct{}),
 		cleanupOnce:    new(sync.Once),
 		loadedTaskOnce: new(sync.Once),
@@ -59,8 +60,7 @@ func newPurgedEntry(t *task.Task, r *task.Result, lt *task.LoadedTask) *Entry {
 // concurrency-safe via its own internal locking.
 func (e *Entry) Task() *task.Task { return e.task }
 
-// LoadedTask returns the on-disk log handle for purged tasks, or nil for
-// active tasks.
+// LoadedTask returns the on-disk log handle for tasks restored from disk, or nil.
 func (e *Entry) LoadedTask() *task.LoadedTask { return e.loadedTask }
 
 // Done returns the channel that closes when the task reaches a terminal

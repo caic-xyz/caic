@@ -271,14 +271,16 @@ func syntheticUserInput(p agent.Prompt) *agent.UserInputMessage {
 }
 
 // lastAgentMessage scans backwards through msgs, skipping non-semantic
-// messages (DiffStatMessage, TextDeltaMessage, RawMessage), and returns the
-// trailing ResultMessage if the last semantically meaningful message is a
-// result. Returns nil if it is not a ResultMessage (agent still producing
-// output) or msgs is empty.
+// messages (DiffStatMessage, ExitMessage, TextDeltaMessage, RawMessage), and
+// returns the trailing ResultMessage if the last semantically meaningful
+// message is a result. Returns nil if it is not a ResultMessage (agent still
+// producing output) or msgs is empty.
 func lastAgentMessage(msgs []agent.Message) *agent.ResultMessage {
 	for _, msg := range slices.Backward(msgs) {
 		switch m := msg.(type) {
 		case *agent.DiffStatMessage:
+			continue // Relay metadata; skip.
+		case *agent.ExitMessage:
 			continue // Relay metadata; skip.
 		case *agent.TextDeltaMessage:
 			continue // Streaming delta; skip.
@@ -356,6 +358,18 @@ func fallbackBoundary(msg agent.Message) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func clearsExitError(msg agent.Message) bool {
+	switch m := msg.(type) {
+	case *agent.ExitMessage, *agent.DiffStatMessage, *agent.RawMessage,
+		*agent.ParseErrorMessage, *agent.LogMessage, *agent.StrippedEnvMessage:
+		return false
+	case *agent.ResultMessage:
+		return !m.IsError
+	default:
+		return true
 	}
 }
 
@@ -942,6 +956,7 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 	// ExitPlanMode or a context_cleared is encountered, the previous
 	// ExitPlanMode's PlanContent is erased so only the latest plan is visible.
 	var lastExitPlan *agent.ToolUseMessage
+	cleanTurnComplete := false
 	for _, m := range msgs {
 		if sm, ok := m.(*agent.SystemMessage); ok && sm.Subtype == "context_cleared" {
 			t.inPlanMode = false
@@ -971,15 +986,22 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 				t.reportedContextWindow = u.ContextWindow
 			}
 		}
-		if exit, ok := m.(*agent.ExitMessage); ok && exit.ExitCode != 0 {
-			if exit.Error != "" {
-				t.lastExitError = exit.Error
+		if exit, ok := m.(*agent.ExitMessage); ok {
+			if exit.ExitCode != 0 && !cleanTurnComplete {
+				t.lastExitError = exit.ExitError()
 			} else {
-				t.lastExitError = fmt.Sprintf("agent subprocess exited with code %d", exit.ExitCode)
+				t.lastExitError = ""
 			}
+			continue
 		}
-		if _, ok := m.(*agent.ResultMessage); ok {
+		if clearsExitError(m) {
+			t.lastExitError = ""
+		}
+		if rm, ok := m.(*agent.ResultMessage); ok {
 			t.planDismissed = false
+			cleanTurnComplete = !rm.IsError
+		} else if clearsExitError(m) {
+			cleanTurnComplete = false
 		}
 	}
 	// Restore live diff stat from the last DiffStatMessage or ResultMessage,
@@ -1480,12 +1502,14 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 	if ds, ok := m.(*agent.DiffStatMessage); ok {
 		t.liveDiffStat = ds.DiffStat
 	}
-	if exit, ok := m.(*agent.ExitMessage); ok && exit.ExitCode != 0 {
-		if exit.Error != "" {
-			t.lastExitError = exit.Error
+	if exit, ok := m.(*agent.ExitMessage); ok {
+		if rm := lastAgentMessage(t.msgs); exit.ExitCode != 0 && (rm == nil || rm.IsError) {
+			t.lastExitError = exit.ExitError()
 		} else {
-			t.lastExitError = fmt.Sprintf("agent subprocess exited with code %d", exit.ExitCode)
+			t.lastExitError = ""
 		}
+	} else if clearsExitError(m) {
+		t.lastExitError = ""
 	}
 	// compact_boundary resets TotalCostUSD in Claude Code's subsequent
 	// ResultMessages (same as context_cleared). Snapshot priors so the
