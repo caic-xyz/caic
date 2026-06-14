@@ -104,7 +104,10 @@ type testRouter struct {
 	forge   *forgemanager.Manager
 }
 
-// newTestRouter creates a Router for tests.
+// newTestRouter creates a Router for tests. Tests commonly mutate auth/host
+// fields (authStore, sessionSecret, hostState) on the returned Router and then
+// call buildHandler; buildHandler re-syncs authStore/hostState into the MCP
+// concern, and the authHandlers copies must be synced by the test if exercised.
 func newTestRouter(t testing.TB) *testRouter {
 	checker, err := ipgeo.NewChecker(t.Context(), "0.0.0.0/0,::/0", "", "")
 	if err != nil {
@@ -2247,7 +2250,7 @@ func TestBuildHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
 		}
-		token, err := s.mcpOAuth.issueAccessToken("https://caic.example.com", &user, "https://caic.example.com/api/caic/v1/mcp", mcpScopeTasksRead, "")
+		token, err := s.mcp.oauth.issueAccessToken("https://caic.example.com", &user, "https://caic.example.com/api/caic/v1/mcp", mcpScopeTasksRead, "")
 		if err != nil {
 			t.Fatalf("issue access token: %v", err)
 		}
@@ -2328,7 +2331,7 @@ func TestBuildHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
 		}
-		token, err := s.mcpOAuth.issueAccessToken("https://caic.example.com", &user, "https://caic.example.com/api/wrong", mcpScopeTasksRead, "")
+		token, err := s.mcp.oauth.issueAccessToken("https://caic.example.com", &user, "https://caic.example.com/api/wrong", mcpScopeTasksRead, "")
 		if err != nil {
 			t.Fatalf("issue access token: %v", err)
 		}
@@ -2367,7 +2370,7 @@ func TestBuildHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
 		}
-		token, err := s.mcpOAuth.issueAccessToken("https://caic.example.com", &user, "https://caic.example.com/api/caic/v1/mcp", mcpScopeTasksRead, "")
+		token, err := s.mcp.oauth.issueAccessToken("https://caic.example.com", &user, "https://caic.example.com/api/caic/v1/mcp", mcpScopeTasksRead, "")
 		if err != nil {
 			t.Fatalf("issue access token: %v", err)
 		}
@@ -2385,9 +2388,9 @@ func TestBuildHandler(t *testing.T) {
 	t.Run("MCP tool scope policy covers every advertised tool", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
-		registry, ok := s.mcpHandlers.Registry.(*caicToolRegistry)
+		registry, ok := s.mcp.protocol.Registry.(*caicToolRegistry)
 		if !ok {
-			t.Fatalf("registry type = %T", s.mcpHandlers.Registry)
+			t.Fatalf("registry type = %T", s.mcp.protocol.Registry)
 		}
 		specs, err := registry.specs(t.Context())
 		if err != nil {
@@ -2419,7 +2422,7 @@ func TestBuildHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
 		}
-		token, err := s.mcpOAuth.issueAccessToken("https://caic.example.com", &user, "https://caic.example.com/api/caic/v1/mcp", mcpScopeTasksRead, "")
+		token, err := s.mcp.oauth.issueAccessToken("https://caic.example.com", &user, "https://caic.example.com/api/caic/v1/mcp", mcpScopeTasksRead, "")
 		if err != nil {
 			t.Fatalf("issue access token: %v", err)
 		}
@@ -2442,9 +2445,9 @@ func TestBuildHandler(t *testing.T) {
 		if !ok || result["isError"] != true || result["_meta"] == nil {
 			t.Fatalf("result = %#v", raw["result"])
 		}
-		registry, ok := s.mcpHandlers.Registry.(*caicToolRegistry)
+		registry, ok := s.mcp.protocol.Registry.(*caicToolRegistry)
 		if !ok {
-			t.Fatalf("registry type = %T", s.mcpHandlers.Registry)
+			t.Fatalf("registry type = %T", s.mcp.protocol.Registry)
 		}
 		events := registry.audit.snapshot()
 		if len(events) == 0 || events[len(events)-1].Decision == "allow" {
@@ -2456,7 +2459,7 @@ func TestBuildHandler(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
 		s.hostState = auth.NewHostState("https://caic.example.com")
-		s.mcpRateLimiter = newRateLimiter(1, time.Minute)
+		s.mcp.rateLimiter = newRateLimiter(1, time.Minute)
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)

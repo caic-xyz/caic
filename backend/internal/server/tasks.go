@@ -233,7 +233,7 @@ func (s *taskHTTPHandlers) streamHistoryFromDiskWithTracker(out io.Writer, flush
 			}
 		}
 	}
-	push, flush := newReplayFilter(emit)
+	push, flush := eventreplay.NewFilter(emit)
 	for msg, err := range lt.StreamMessages() {
 		if err != nil {
 			slog.Warn("stream history from disk", "task", entry.Task().ID, "err", err)

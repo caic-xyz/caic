@@ -121,7 +121,7 @@ func TestMCPHandlers(t *testing.T) {
 	t.Run("serverDiscover", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
-		w, resp := postMCP(t, s.mcpHandlers, "server/discover", "", mcpRequestJSON("server/discover", `{}`))
+		w, resp := postMCP(t, s.mcp.protocol, "server/discover", "", mcpRequestJSON("server/discover", `{}`))
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
@@ -160,7 +160,7 @@ func TestMCPHandlers(t *testing.T) {
 		s := newTestRouter(t)
 		id := ksid.NewID()
 		insertTestTask(t, s, id.String(), &task.Task{ID: id, InitialPrompt: agent.Prompt{Text: "ship voice prompt"}, Harness: harness.Claude})
-		_, resp := postMCP(t, s.mcpHandlers, "server/discover", "", mcpRequestJSON("server/discover", `{}`))
+		_, resp := postMCP(t, s.mcp.protocol, "server/discover", "", mcpRequestJSON("server/discover", `{}`))
 		if resp.Error != nil {
 			t.Fatalf("error = %#v", resp.Error)
 		}
@@ -182,7 +182,7 @@ func TestMCPHandlers(t *testing.T) {
 	t.Run("toolsList", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
-		w, resp := postMCP(t, s.mcpHandlers, "tools/list", "", mcpRequestJSON("tools/list", `{}`))
+		w, resp := postMCP(t, s.mcp.protocol, "tools/list", "", mcpRequestJSON("tools/list", `{}`))
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
@@ -234,7 +234,7 @@ func TestMCPHandlers(t *testing.T) {
 	t.Run("resourceTemplatesList", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
-		w, resp := postMCP(t, s.mcpHandlers, "resources/templates/list", "", mcpRequestJSON("resources/templates/list", `{}`))
+		w, resp := postMCP(t, s.mcp.protocol, "resources/templates/list", "", mcpRequestJSON("resources/templates/list", `{}`))
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
@@ -267,7 +267,7 @@ func TestMCPHandlers(t *testing.T) {
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		req.Header.Set("Mcp-Method", "subscriptions/listen")
 		w := httptest.NewRecorder()
-		s.mcpHandlers.HandleMCP(w, req)
+		s.mcp.protocol.HandleMCP(w, req)
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
@@ -291,7 +291,7 @@ func TestMCPHandlers(t *testing.T) {
 
 		body := mcpRequestJSON("tools/call", `"name":"tasks_list","arguments":{},"inputResponses":{},"requestState":"retry-state"`)
 		body = strings.Replace(body, `"io.modelcontextprotocol/clientCapabilities":{}`, `"io.modelcontextprotocol/clientCapabilities":{},"example.com/clientTrace":"trace-1"`, 1)
-		w, resp := postMCP(t, s.mcpHandlers, "tools/call", "tasks_list", body)
+		w, resp := postMCP(t, s.mcp.protocol, "tools/call", "tasks_list", body)
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
@@ -320,7 +320,7 @@ func TestMCPHandlers(t *testing.T) {
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		req.Header.Set("Mcp-Method", "tools/call")
 		w := httptest.NewRecorder()
-		s.mcpHandlers.HandleMCP(w, req)
+		s.mcp.protocol.HandleMCP(w, req)
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
 		}
@@ -337,7 +337,7 @@ func TestMCPHandlers(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
 		body := mcpRequestJSON("tools/call", `"name":"task_get_detail","arguments":{"task_number":1}`)
-		w, resp := postMCP(t, s.mcpHandlers, "tools/call", "task_get_detail", body)
+		w, resp := postMCP(t, s.mcp.protocol, "tools/call", "task_get_detail", body)
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
 		}
@@ -356,7 +356,7 @@ func TestMCPHandlers(t *testing.T) {
 		req.Header.Set("Mcp-Name", "task_get_detail")
 		req.Header.Set("Mcp-Param-Task-Number", "1")
 		w := httptest.NewRecorder()
-		s.mcpHandlers.HandleMCP(w, req)
+		s.mcp.protocol.HandleMCP(w, req)
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
@@ -384,7 +384,7 @@ func TestMCPHandlers(t *testing.T) {
 		req.Header.Set("Mcp-Protocol-Version", "2099-01-01")
 		req.Header.Set("Mcp-Method", "tools/list")
 		w := httptest.NewRecorder()
-		s.mcpHandlers.HandleMCP(w, req)
+		s.mcp.protocol.HandleMCP(w, req)
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
 		}
@@ -402,7 +402,7 @@ func TestMCPHandlers(t *testing.T) {
 	t.Run("initializeRemoved", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
-		w, resp := postMCP(t, s.mcpHandlers, "initialize", "", mcpRequestJSON("initialize", `{}`))
+		w, resp := postMCP(t, s.mcp.protocol, "initialize", "", mcpRequestJSON("initialize", `{}`))
 		if w.Code != http.StatusNotFound {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusNotFound)
 		}

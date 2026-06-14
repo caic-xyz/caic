@@ -1,4 +1,4 @@
-// Tests for generic type conversion utilities used in HTTP handlers.
+// Tests for task SSE history replay filtering.
 
 package server
 
@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	"github.com/caic-xyz/caic/backend/internal/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
@@ -15,8 +16,8 @@ import (
 
 func TestNewReplayFilter(t *testing.T) {
 	t.Parallel()
-	// newReplayFilter is the streaming form of filterHistoryForReplay; it must
-	// produce the same surviving messages, in order, for any sequence.
+	// eventreplay.NewFilter is the streaming form of filterHistoryForReplay; it
+	// must produce the same surviving messages, in order, for any sequence.
 	td := func() agent.Message { return &agent.TextDeltaMessage{} }
 	tf := func() agent.Message { return &agent.TextMessage{} }
 	hd := func() agent.Message { return &agent.ThinkingDeltaMessage{} }
@@ -43,7 +44,7 @@ func TestNewReplayFilter(t *testing.T) {
 			t.Parallel()
 			want := filterHistoryForReplay(in)
 			var got []agent.Message
-			push, flush := newReplayFilter(func(m agent.Message) { got = append(got, m) })
+			push, flush := eventreplay.NewFilter(func(m agent.Message) { got = append(got, m) })
 			for _, m := range in {
 				push(m)
 			}

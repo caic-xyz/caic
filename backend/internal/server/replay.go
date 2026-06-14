@@ -1,10 +1,9 @@
-// Server-local conversion wrappers and replay filtering for task SSE.
+// History replay filtering for task SSE: drops streaming deltas superseded by a final message.
 
 package server
 
 import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 )
 
 // filterHistoryForReplay removes streaming delta messages that have a
@@ -81,16 +80,4 @@ func replayClearsExit(msg agent.Message) bool {
 	default:
 		return true
 	}
-}
-
-// newReplayFilter is the streaming equivalent of filterHistoryForReplay: it
-// collapses a contiguous run of streaming-delta messages when the matching
-// consolidated message immediately follows, emitting surviving messages in
-// order via emit. It buffers at most one contiguous delta run (a single
-// assistant turn), so memory stays bounded regardless of history length.
-//
-// It returns push (feed one message) and flush (emit any buffered tail run);
-// flush must be called once after the last message.
-func newReplayFilter(emit func(agent.Message)) (push func(agent.Message), flush func()) {
-	return eventreplay.NewFilter(emit)
 }

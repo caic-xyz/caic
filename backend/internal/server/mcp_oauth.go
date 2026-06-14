@@ -233,19 +233,19 @@ func newMCPOAuthServer(keyPEM []byte, kid, refreshTokenStorePath string) (*mcpOA
 	return &mcpOAuthServer{clients: clients, codes: map[string]mcpOAuthCode{}, consents: map[string]mcpOAuthConsent{}, refreshTokens: refreshTokens, grants: grants, refreshTokenStorePath: refreshTokenStorePath, key: key, kid: kid}, nil
 }
 
-func (s *Router) ensureMCPOAuthServer() error {
-	if !s.authEnabled() || s.mcpOAuth != nil {
+func (s *mcpServer) ensureMCPOAuthServer() error {
+	if !s.authEnabled() || s.oauth != nil {
 		return nil
 	}
-	oauthServer, err := newMCPOAuthServer(s.mcpOAuthPrivateKeyPEM, s.mcpOAuthKeyID, s.mcpOAuthRefreshTokenStorePath)
+	oauthServer, err := newMCPOAuthServer(s.privateKeyPEM, s.keyID, s.refreshTokenStorePath)
 	if err != nil {
 		return err
 	}
-	s.mcpOAuth = oauthServer
+	s.oauth = oauthServer
 	return nil
 }
 
-func (s *Router) handleMCPOAuthMetadata(w http.ResponseWriter, r *http.Request) {
+func (s *mcpServer) handleMCPOAuthMetadata(w http.ResponseWriter, r *http.Request) {
 	if !s.authEnabled() {
 		http.NotFound(w, r)
 		return
@@ -269,18 +269,18 @@ func (s *Router) handleMCPOAuthMetadata(w http.ResponseWriter, r *http.Request) 
 	writeJSONResponse(w, &metadata, nil)
 }
 
-func (s *Router) handleMCPOAuthJWKS(w http.ResponseWriter, r *http.Request) {
-	if !s.authEnabled() || s.mcpOAuth == nil {
+func (s *mcpServer) handleMCPOAuthJWKS(w http.ResponseWriter, r *http.Request) {
+	if !s.authEnabled() || s.oauth == nil {
 		http.NotFound(w, r)
 		return
 	}
-	pub := s.mcpOAuth.key.PublicKey
-	resp := mcp.JWKSet{Keys: []mcp.JWK{mcp.RSAJWK(s.mcpOAuth.kid, &pub)}}
+	pub := s.oauth.key.PublicKey
+	resp := mcp.JWKSet{Keys: []mcp.JWK{mcp.RSAJWK(s.oauth.kid, &pub)}}
 	writeJSONResponse(w, &resp, nil)
 }
 
-func (s *Router) handleMCPOAuthRegister(w http.ResponseWriter, r *http.Request) {
-	if !s.authEnabled() || s.mcpOAuth == nil {
+func (s *mcpServer) handleMCPOAuthRegister(w http.ResponseWriter, r *http.Request) {
+	if !s.authEnabled() || s.oauth == nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -319,7 +319,7 @@ func (s *Router) handleMCPOAuthRegister(w http.ResponseWriter, r *http.Request) 
 	}
 	now := time.Now()
 	client := mcpOAuthClient{ID: "caic_" + clientID, Name: req.ClientName, RedirectURIs: req.RedirectURIs, TokenEndpointAuthMethod: method, CreatedAt: now}
-	if err := s.mcpOAuth.registerClient(&client); err != nil {
+	if err := s.oauth.registerClient(&client); err != nil {
 		slog.WarnContext(r.Context(), "save oauth client registration", "err", err)
 		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not register client")
 		return
@@ -332,8 +332,8 @@ func (s *Router) handleMCPOAuthRegister(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-func (s *Router) handleMCPOAuthAuthorize(w http.ResponseWriter, r *http.Request) {
-	if !s.authEnabled() || s.mcpOAuth == nil {
+func (s *mcpServer) handleMCPOAuthAuthorize(w http.ResponseWriter, r *http.Request) {
+	if !s.authEnabled() || s.oauth == nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -362,9 +362,9 @@ func (s *Router) handleMCPOAuthAuthorize(w http.ResponseWriter, r *http.Request)
 			writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not start consent")
 			return
 		}
-		s.mcpOAuth.mu.Lock()
-		s.mcpOAuth.consents[consentToken] = mcpOAuthConsent{UserID: user.ID, Values: values, ExpiresAt: time.Now().Add(mcpOAuthAuthCodeTTL)}
-		s.mcpOAuth.mu.Unlock()
+		s.oauth.mu.Lock()
+		s.oauth.consents[consentToken] = mcpOAuthConsent{UserID: user.ID, Values: values, ExpiresAt: time.Now().Add(mcpOAuthAuthCodeTTL)}
+		s.oauth.mu.Unlock()
 		baseURL := s.externalBaseURL(r)
 		writeMCPConsentHeaders(w)
 		data := mcpConsentTemplateData{
@@ -394,12 +394,12 @@ func (s *Router) handleMCPOAuthAuthorize(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	consentToken := r.PostForm.Get("consent_token")
-	s.mcpOAuth.mu.Lock()
-	consent, ok := s.mcpOAuth.consents[consentToken]
+	s.oauth.mu.Lock()
+	consent, ok := s.oauth.consents[consentToken]
 	if ok {
-		delete(s.mcpOAuth.consents, consentToken)
+		delete(s.oauth.consents, consentToken)
 	}
-	s.mcpOAuth.mu.Unlock()
+	s.oauth.mu.Unlock()
 	if !ok || consent.UserID != user.ID || time.Now().After(consent.ExpiresAt) {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "invalid or expired consent")
 		return
@@ -435,9 +435,9 @@ func (s *Router) handleMCPOAuthAuthorize(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	entry := mcpOAuthCode{UserID: user.ID, ClientID: values.Get("client_id"), RedirectURI: values.Get("redirect_uri"), CodeChallenge: values.Get("code_challenge"), Resource: values.Get("resource"), Scope: scope, ExpiresAt: time.Now().Add(mcpOAuthAuthCodeTTL)}
-	s.mcpOAuth.mu.Lock()
-	s.mcpOAuth.codes[code] = entry
-	s.mcpOAuth.mu.Unlock()
+	s.oauth.mu.Lock()
+	s.oauth.codes[code] = entry
+	s.oauth.mu.Unlock()
 	redirectURL, err := url.Parse(entry.RedirectURI)
 	if err != nil {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_redirect_uri", "invalid redirect URI")
@@ -458,7 +458,7 @@ func (s *Router) handleMCPOAuthAuthorize(w http.ResponseWriter, r *http.Request)
 	http.Redirect(w, r, redirectURL.String(), http.StatusSeeOther)
 }
 
-func (s *Router) mcpLoginStartURL(r *http.Request) string {
+func (s *mcpServer) mcpLoginStartURL(r *http.Request) string {
 	if s.authHandlers == nil {
 		return ""
 	}
@@ -475,8 +475,8 @@ func (s *Router) mcpLoginStartURL(r *http.Request) string {
 	return "/api/caic/v1/auth/" + provider + "/start?" + values.Encode()
 }
 
-func (s *Router) handleMCPOAuthToken(w http.ResponseWriter, r *http.Request) {
-	if !s.authEnabled() || s.mcpOAuth == nil {
+func (s *mcpServer) handleMCPOAuthToken(w http.ResponseWriter, r *http.Request) {
+	if !s.authEnabled() || s.oauth == nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -488,7 +488,7 @@ func (s *Router) handleMCPOAuthToken(w http.ResponseWriter, r *http.Request) {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "invalid form")
 		return
 	}
-	if err := s.mcpOAuth.pruneExpiredRefreshTokens(time.Now()); err != nil {
+	if err := s.oauth.pruneExpiredRefreshTokens(time.Now()); err != nil {
 		slog.WarnContext(r.Context(), "prune mcp oauth refresh tokens", "err", err)
 		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not prune refresh tokens")
 		return
@@ -503,14 +503,14 @@ func (s *Router) handleMCPOAuthToken(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Router) handleMCPOAuthAuthorizationCodeToken(w http.ResponseWriter, r *http.Request) {
+func (s *mcpServer) handleMCPOAuthAuthorizationCodeToken(w http.ResponseWriter, r *http.Request) {
 	code := r.PostForm.Get("code")
-	s.mcpOAuth.mu.Lock()
-	entry, ok := s.mcpOAuth.codes[code]
+	s.oauth.mu.Lock()
+	entry, ok := s.oauth.codes[code]
 	if ok {
-		delete(s.mcpOAuth.codes, code)
+		delete(s.oauth.codes, code)
 	}
-	s.mcpOAuth.mu.Unlock()
+	s.oauth.mu.Unlock()
 	if !ok || time.Now().After(entry.ExpiresAt) {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "invalid or expired code")
 		return
@@ -542,7 +542,7 @@ func (s *Router) handleMCPOAuthAuthorizationCodeToken(w http.ResponseWriter, r *
 	now := time.Now()
 	grant := mcpOAuthGrant{ID: grantID, UserID: entry.UserID, ClientID: entry.ClientID, ClientName: clientDisplayName(&client), Resource: entry.Resource, Scope: entry.Scope, CreatedAt: now, ExpiresAt: now.Add(mcpOAuthRefreshTokenTTL)}
 	refreshEntry := mcpOAuthRefreshToken{GrantID: grantID, UserID: entry.UserID, ClientID: entry.ClientID, Resource: entry.Resource, Scope: entry.Scope, ExpiresAt: grant.ExpiresAt}
-	refreshToken, err := s.mcpOAuth.issueGrantRefreshToken(&grant, &refreshEntry)
+	refreshToken, err := s.oauth.issueGrantRefreshToken(&grant, &refreshEntry)
 	if err != nil {
 		slog.WarnContext(r.Context(), "issue mcp oauth refresh token", "err", err)
 		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not issue refresh token")
@@ -556,10 +556,10 @@ func (s *Router) handleMCPOAuthAuthorizationCodeToken(w http.ResponseWriter, r *
 	s.writeMCPOAuthTokenResponse(w, r, &user, entry.Resource, entry.Scope, grantID, refreshToken)
 }
 
-func (s *Router) handleMCPOAuthRefreshToken(w http.ResponseWriter, r *http.Request) {
+func (s *mcpServer) handleMCPOAuthRefreshToken(w http.ResponseWriter, r *http.Request) {
 	refreshToken := r.PostForm.Get("refresh_token")
 	clientID := r.PostForm.Get("client_id")
-	entry, ok := s.mcpOAuth.validRefreshToken(refreshToken, clientID)
+	entry, ok := s.oauth.validRefreshToken(refreshToken, clientID)
 	if !ok {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "invalid refresh token")
 		return
@@ -569,7 +569,7 @@ func (s *Router) handleMCPOAuthRefreshToken(w http.ResponseWriter, r *http.Reque
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "user no longer exists")
 		return
 	}
-	nextRefreshToken, entry, ok, err := s.mcpOAuth.rotateRefreshToken(refreshToken, clientID, entry.UserID)
+	nextRefreshToken, entry, ok, err := s.oauth.rotateRefreshToken(refreshToken, clientID, entry.UserID)
 	if err != nil {
 		slog.WarnContext(r.Context(), "rotate mcp oauth refresh token", "err", err)
 		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not rotate refresh token")
@@ -587,8 +587,8 @@ func (s *Router) handleMCPOAuthRefreshToken(w http.ResponseWriter, r *http.Reque
 	s.writeMCPOAuthTokenResponse(w, r, &user, entry.Resource, entry.Scope, entry.GrantID, nextRefreshToken)
 }
 
-func (s *Router) writeMCPOAuthTokenResponse(w http.ResponseWriter, r *http.Request, user *auth.User, resource, scope, grantID, refreshToken string) {
-	accessToken, err := s.mcpOAuth.issueAccessToken(s.externalBaseURL(r), user, resource, scope, grantID)
+func (s *mcpServer) writeMCPOAuthTokenResponse(w http.ResponseWriter, r *http.Request, user *auth.User, resource, scope, grantID, refreshToken string) {
+	accessToken, err := s.oauth.issueAccessToken(s.externalBaseURL(r), user, resource, scope, grantID)
 	if err != nil {
 		slog.WarnContext(r.Context(), "issue mcp oauth token", "err", err)
 		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not issue access token")
@@ -600,8 +600,8 @@ func (s *Router) writeMCPOAuthTokenResponse(w http.ResponseWriter, r *http.Reque
 	writeJSONResponse(w, &resp, nil)
 }
 
-func (s *Router) handleMCPOAuthRevoke(w http.ResponseWriter, r *http.Request) {
-	if !s.authEnabled() || s.mcpOAuth == nil {
+func (s *mcpServer) handleMCPOAuthRevoke(w http.ResponseWriter, r *http.Request) {
+	if !s.authEnabled() || s.oauth == nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -613,7 +613,7 @@ func (s *Router) handleMCPOAuthRevoke(w http.ResponseWriter, r *http.Request) {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "invalid form")
 		return
 	}
-	userID, err := s.mcpOAuth.revokeRefreshToken(r.PostForm.Get("token"), r.PostForm.Get("client_id"))
+	userID, err := s.oauth.revokeRefreshToken(r.PostForm.Get("token"), r.PostForm.Get("client_id"))
 	if err != nil {
 		slog.WarnContext(r.Context(), "revoke mcp oauth refresh token", "err", err)
 		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not revoke refresh token")
@@ -625,11 +625,11 @@ func (s *Router) handleMCPOAuthRevoke(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (s *Router) recordMCPAuthAudit(r *http.Request, userID, operation, name, decision, status string, args any) {
-	if s.mcpAudit == nil {
+func (s *mcpServer) recordMCPAuthAudit(r *http.Request, userID, operation, name, decision, status string, args any) {
+	if s.audit == nil {
 		return
 	}
-	s.mcpAudit.record(r.Context(), &mcpAuditEvent{
+	s.audit.record(r.Context(), &mcpAuditEvent{
 		UserID:    userID,
 		Operation: operation,
 		Name:      name,
@@ -639,7 +639,7 @@ func (s *Router) recordMCPAuthAudit(r *http.Request, userID, operation, name, de
 	})
 }
 
-func (s *Router) redirectAuthorizeError(w http.ResponseWriter, r *http.Request, values url.Values, code, description string) {
+func (s *mcpServer) redirectAuthorizeError(w http.ResponseWriter, r *http.Request, values url.Values, code, description string) {
 	redirectURL, err := url.Parse(values.Get("redirect_uri"))
 	if err != nil {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_redirect_uri", "invalid redirect URI")
@@ -658,11 +658,11 @@ func (s *Router) redirectAuthorizeError(w http.ResponseWriter, r *http.Request, 
 	http.Redirect(w, r, redirectURL.String(), http.StatusSeeOther)
 }
 
-func (s *Router) validateAuthorizeRequest(r *http.Request) error {
+func (s *mcpServer) validateAuthorizeRequest(r *http.Request) error {
 	return s.validateAuthorizeForm(r, r.URL.Query())
 }
 
-func (s *Router) validateAuthorizeForm(r *http.Request, values url.Values) error {
+func (s *mcpServer) validateAuthorizeForm(r *http.Request, values url.Values) error {
 	if values.Get("response_type") != mcp.OAuthResponseTypeCode {
 		return errors.New("response_type must be code")
 	}
@@ -690,13 +690,13 @@ func (s *Router) validateAuthorizeForm(r *http.Request, values url.Values) error
 	return nil
 }
 
-func (s *Router) oauthClient(id string) mcpOAuthClient {
-	if s.mcpOAuth == nil {
+func (s *mcpServer) oauthClient(id string) mcpOAuthClient {
+	if s.oauth == nil {
 		return mcpOAuthClient{}
 	}
-	s.mcpOAuth.mu.Lock()
-	defer s.mcpOAuth.mu.Unlock()
-	return s.mcpOAuth.clients[id]
+	s.oauth.mu.Lock()
+	defer s.oauth.mu.Unlock()
+	return s.oauth.clients[id]
 }
 
 func (s *mcpOAuthServer) registerClient(client *mcpOAuthClient) error {

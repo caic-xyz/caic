@@ -85,7 +85,7 @@ func TestReplayCache(t *testing.T) {
 		s, taskID := newServer(t, logDir)
 
 		first := serveEvents(t, s, taskID) // miss: renders and populates cache
-		cachePath := replayCachePath(logPath)
+		cachePath := eventreplay.CachePath(logPath)
 		if _, err := os.Stat(cachePath); err != nil {
 			t.Fatalf("cache file not written: %v", err)
 		}
@@ -126,7 +126,7 @@ func TestReplayCache(t *testing.T) {
 		w.WriteMessage(&agent.TextMessage{Text: "final"})
 		w.Commit(logPath)
 
-		contents := readReplayCacheEvents(t, replayCachePath(logPath))
+		contents := readReplayCacheEvents(t, eventreplay.CachePath(logPath))
 		if len(contents.events) != 1 {
 			t.Fatalf("cache event count = %d, want 1: %#v", len(contents.events), contents.events)
 		}
@@ -139,7 +139,7 @@ func TestReplayCache(t *testing.T) {
 		t.Parallel()
 		logDir := t.TempDir()
 		logPath := writePurged(t, logDir, "raw truth")
-		cachePath := replayCachePath(logPath)
+		cachePath := eventreplay.CachePath(logPath)
 		if err := os.WriteFile(cachePath, []byte("not zstd"), 0o600); err != nil {
 			t.Fatal(err)
 		}

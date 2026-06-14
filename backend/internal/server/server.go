@@ -45,22 +45,16 @@ type Router struct {
 	ctx context.Context
 
 	// Route handler concerns.
-	authHandlers                  *authHandlers
-	ciHandlers                    *ciHandlers
-	runtimeProcesses              *RuntimeProcesses
-	goModeHandler                 http.Handler
-	serverConfigHandlers          *serverConfigHandlers
-	taskHTTPHandlers              *taskHTTPHandlers
-	mcpHandlers                   *mcp.Handler
-	mcpOAuth                      *mcpOAuthServer
-	mcpOAuthPrivateKeyPEM         []byte
-	mcpOAuthKeyID                 string
-	mcpOAuthRefreshTokenStorePath string
-	mcpAudit                      *mcpAuditStore
-	mcpRateLimiter                *rateLimiter
-	usageHandlers                 *usageHandlers
-	voiceHandlers                 *voiceHandlers
-	webFetchHandlers              *webFetchHandlers
+	authHandlers         *authHandlers
+	ciHandlers           *ciHandlers
+	runtimeProcesses     *RuntimeProcesses
+	goModeHandler        http.Handler
+	serverConfigHandlers *serverConfigHandlers
+	taskHTTPHandlers     *taskHTTPHandlers
+	mcp                  *mcpServer
+	usageHandlers        *usageHandlers
+	voiceHandlers        *voiceHandlers
+	webFetchHandlers     *webFetchHandlers
 
 	// Forge webhook delivery. Established by New (and the test constructors) and
 	// never nil thereafter; owns the webhook secrets and the App owner allowlist.
@@ -141,7 +135,13 @@ func (s *Router) SetUsageFetchers(fetchers []usage.ProviderFetcher) {
 // route registration can be tested without a listener.
 func (s *Router) buildHandler() (http.Handler, error) {
 	serverConfig := s.serverConfigHandlers
-	if err := s.ensureMCPOAuthServer(); err != nil {
+	// The MCP concern shares the router's auth/host configuration by reference.
+	// New() sets these consistently, so this is a no-op in production; it exists
+	// because tests mutate s.authStore/s.hostState on the constructed Router and
+	// then call buildHandler, and the MCP endpoint must observe those values.
+	s.mcp.authStore = s.authStore
+	s.mcp.hostState = s.hostState
+	if err := s.mcp.ensureMCPOAuthServer(); err != nil {
 		return nil, err
 	}
 
@@ -162,8 +162,8 @@ func (s *Router) buildHandler() (http.Handler, error) {
 	taskRoutes := s.taskHTTPHandlers
 	apiMux.HandleFunc("GET /api/caic/v1/server/preferences", handle(serverConfig.getPreferences))
 	apiMux.HandleFunc("POST /api/caic/v1/server/preferences", handle(serverConfig.updatePreferences))
-	apiMux.HandleFunc("GET /api/caic/v1/server/mcp-grants", handle(s.listMCPGrants))
-	apiMux.HandleFunc("POST /api/caic/v1/server/mcp-grants/{grantID}/revoke", handle(s.revokeMCPGrant))
+	apiMux.HandleFunc("GET /api/caic/v1/server/mcp-grants", handle(s.mcp.listMCPGrants))
+	apiMux.HandleFunc("POST /api/caic/v1/server/mcp-grants/{grantID}/revoke", handle(s.mcp.revokeMCPGrant))
 	apiMux.HandleFunc("GET /api/caic/v1/server/harnesses", handle(serverConfig.listHarnesses))
 	apiMux.HandleFunc("GET /api/caic/v1/server/caches", handle(serverConfig.listCaches))
 	apiMux.HandleFunc("GET /api/caic/v1/server/cache-sizes", handle(serverConfig.getCacheSizes))
@@ -201,31 +201,31 @@ func (s *Router) buildHandler() (http.Handler, error) {
 	// Combine: auth routes first, then protected API routes (gated by RequireUser when auth enabled).
 	var protectedAPI http.Handler = apiMux
 	if s.authEnabled() {
-		protectedAPI = s.requireUser(apiMux)
+		protectedAPI = requireUser(apiMux)
 	}
 
 	mux := http.NewServeMux()
 	mux.Handle("/api/caic/v1/auth/", authMux)
-	mux.HandleFunc("GET "+mcpProtectedResourceMetadataPath, s.handleMCPProtectedResourceMetadata)
-	mux.HandleFunc("GET "+mcpProtectedResourceMetadataPath+"/", s.handleMCPProtectedResourceMetadata)
-	mux.HandleFunc("GET /.well-known/oauth-authorization-server", s.handleMCPOAuthMetadata)
-	mux.HandleFunc("GET /.well-known/openid-configuration", s.handleMCPOAuthMetadata)
-	mux.HandleFunc("GET "+mcpOAuthJWKSPath, s.handleMCPOAuthJWKS)
-	mux.HandleFunc("POST "+mcpOAuthRegisterPath, s.handleMCPOAuthRegister)
-	mux.HandleFunc("GET "+mcpOAuthAuthorizePath, s.handleMCPOAuthAuthorize)
-	mux.HandleFunc("POST "+mcpOAuthAuthorizePath, s.handleMCPOAuthAuthorize)
-	mux.HandleFunc("POST "+mcpOAuthTokenPath, s.handleMCPOAuthToken)
-	mux.HandleFunc("POST "+mcpOAuthRevokePath, s.handleMCPOAuthRevoke)
+	mux.HandleFunc("GET "+mcpProtectedResourceMetadataPath, s.mcp.handleMCPProtectedResourceMetadata)
+	mux.HandleFunc("GET "+mcpProtectedResourceMetadataPath+"/", s.mcp.handleMCPProtectedResourceMetadata)
+	mux.HandleFunc("GET /.well-known/oauth-authorization-server", s.mcp.handleMCPOAuthMetadata)
+	mux.HandleFunc("GET /.well-known/openid-configuration", s.mcp.handleMCPOAuthMetadata)
+	mux.HandleFunc("GET "+mcpOAuthJWKSPath, s.mcp.handleMCPOAuthJWKS)
+	mux.HandleFunc("POST "+mcpOAuthRegisterPath, s.mcp.handleMCPOAuthRegister)
+	mux.HandleFunc("GET "+mcpOAuthAuthorizePath, s.mcp.handleMCPOAuthAuthorize)
+	mux.HandleFunc("POST "+mcpOAuthAuthorizePath, s.mcp.handleMCPOAuthAuthorize)
+	mux.HandleFunc("POST "+mcpOAuthTokenPath, s.mcp.handleMCPOAuthToken)
+	mux.HandleFunc("POST "+mcpOAuthRevokePath, s.mcp.handleMCPOAuthRevoke)
 	// The MCP endpoint is left unregistered when auth is disabled on a
 	// non-loopback listener (set by Serve), so an exposed server never serves
 	// MCP without authentication. Unregistered /api/ paths answer 404 via the
 	// static handler rather than falling back to the SPA.
 	if !s.mcpDisabled {
-		mux.HandleFunc("POST "+goModeMCPEndpoint, s.handleMCPAuthenticated)
+		mux.HandleFunc("POST "+goModeMCPEndpoint, s.mcp.handleMCPAuthenticated)
 		// Released Streamable HTTP clients (Claude Code, Codex) issue a GET to
 		// probe for a server-initiated SSE stream; the handler answers 405 (caic
 		// is stateless) so they fall back to plain POST request/response.
-		mux.HandleFunc("GET "+goModeMCPEndpoint, s.handleMCPAuthenticated)
+		mux.HandleFunc("GET "+goModeMCPEndpoint, s.mcp.handleMCPAuthenticated)
 	}
 	mux.HandleFunc("GET /api/caic/v1/server/config", handle(serverConfig.getConfig))
 	mux.HandleFunc("GET /api/caic/v1/server/version", handle(serverConfig.getVersion))
@@ -300,6 +300,26 @@ func (s *Router) buildHandler() (http.Handler, error) {
 // authEnabled reports whether OAuth authentication is configured.
 func (s *Router) authEnabled() bool {
 	return s.authStore != nil
+}
+
+// requireUser gates the protected API: requests without an authenticated user
+// get a plain 401. The MCP endpoint is registered outside this gate and issues
+// its own bearer challenge (see mcpServer.writeUnauthorized).
+func requireUser(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := auth.UserFromContext(r.Context()); ok {
+			next.ServeHTTP(w, r)
+			return
+		}
+		writeUnauthorizedJSON(w)
+	})
+}
+
+// writeUnauthorizedJSON writes a 401 with the standard structured error body.
+func writeUnauthorizedJSON(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnauthorized)
+	_, _ = w.Write([]byte(`{"error":{"code":"UNAUTHORIZED","message":"authentication required"}}`))
 }
 
 // hostOnly returns the host portion of a host:port address, or the input when
@@ -408,23 +428,28 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 			gitlabOAuth:        d.GitLabOAuth,
 			voiceGateway:       voiceMetadata,
 		},
-		taskHTTPHandlers:              &taskHTTPHandlers{taskMgr: d.TaskManager, repos: d.Repos, forge: d.Forge, ciService: d.CIService, authStore: d.AuthStore, warnings: d.Warnings, service: taskService},
-		usageHandlers:                 &usageHandlers{taskMgr: d.TaskManager, fetchers: d.UsageFetchers},
-		voiceHandlers:                 voice,
-		webFetchHandlers:              webFetch,
-		mcpOAuthPrivateKeyPEM:         d.MCPOAuthPrivateKeyPEM,
-		mcpOAuthKeyID:                 d.MCPOAuthKeyID,
-		mcpOAuthRefreshTokenStorePath: d.MCPOAuthRefreshTokenStorePath,
-		mcpAudit:                      &mcpAuditStore{path: d.MCPAuditLogPath},
-		mcpRateLimiter:                newRateLimiter(120, time.Minute),
-		authStore:                     d.AuthStore,
-		sessionSecret:                 d.SessionSecret,
-		hostState:                     d.HostState,
-		pprof:                         d.Pprof,
-		ipgeoChecker:                  d.IPGeoChecker,
+		taskHTTPHandlers: &taskHTTPHandlers{taskMgr: d.TaskManager, repos: d.Repos, forge: d.Forge, ciService: d.CIService, authStore: d.AuthStore, warnings: d.Warnings, service: taskService},
+		usageHandlers:    &usageHandlers{taskMgr: d.TaskManager, fetchers: d.UsageFetchers},
+		voiceHandlers:    voice,
+		webFetchHandlers: webFetch,
+		authStore:        d.AuthStore,
+		sessionSecret:    d.SessionSecret,
+		hostState:        d.HostState,
+		pprof:            d.Pprof,
+		ipgeoChecker:     d.IPGeoChecker,
 	}
-	mcpRegistry := &caicToolRegistry{serverConfig: s.serverConfigHandlers, tasks: taskService, ci: s.ciHandlers, usage: s.usageHandlers, audit: s.mcpAudit}
-	s.mcpHandlers = &mcp.Handler{
+	s.mcp = &mcpServer{
+		audit:                 &mcpAuditStore{path: d.MCPAuditLogPath},
+		rateLimiter:           newRateLimiter(120, time.Minute),
+		privateKeyPEM:         d.MCPOAuthPrivateKeyPEM,
+		keyID:                 d.MCPOAuthKeyID,
+		refreshTokenStorePath: d.MCPOAuthRefreshTokenStorePath,
+		authStore:             d.AuthStore,
+		hostState:             d.HostState,
+		authHandlers:          s.authHandlers,
+	}
+	mcpRegistry := &caicToolRegistry{serverConfig: s.serverConfigHandlers, tasks: taskService, ci: s.ciHandlers, usage: s.usageHandlers, audit: s.mcp.audit}
+	s.mcp.protocol = &mcp.Handler{
 		Registry:   mcpRegistry,
 		ServerInfo: mcp.Implementation{Name: "caic", Title: "caic", Version: autoupdate.Version},
 	}
