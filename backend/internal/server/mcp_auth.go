@@ -19,6 +19,14 @@ const (
 	mcpAuthDefaultScope              = mcpScopeRead + " " + mcpScopeTasksRead + " " + mcpScopeTasksWrite + " " + mcpScopeTasksAdmin + " " + mcpScopeReposWrite
 )
 
+// handleMCPProtectedResourceMetadata writes caic's MCP protected-resource
+// metadata.
+//
+// MCP auth is caic-scoped: provider tokens may authenticate a caic web user or
+// authorize forge operations, but they are not accepted as MCP bearer tokens and
+// are not forwarded from inbound MCP requests to upstream APIs. The protected
+// resource URL is always the external base URL plus the MCP endpoint, and the
+// authorization server URL is always the external base URL.
 func (s *Router) handleMCPProtectedResourceMetadata(w http.ResponseWriter, r *http.Request) {
 	if !s.authEnabled() || !s.isMCPProtectedResourceMetadataPath(r.URL.Path) {
 		http.NotFound(w, r)

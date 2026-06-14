@@ -118,6 +118,15 @@ func mcpProviderLabel(provider string) string {
 	}
 }
 
+// mcpOAuthServer stores caic's OAuth state for remote MCP clients.
+//
+// Clients use Authorization Code with PKCE S256. Authorization always requires
+// a caic web session, so an unauthenticated browser request is sent through caic
+// login before consent is shown. Access tokens are caic-scoped JWTs. Refresh
+// tokens are caic-scoped opaque tokens, persisted as hashes, and rotated on
+// every refresh grant. Dynamic client registrations and user grants are durable
+// so clients survive restarts and users can revoke individual MCP client grants
+// from settings.
 type mcpOAuthServer struct {
 	mu                    sync.Mutex
 	clients               map[string]mcpOAuthClient
@@ -403,6 +412,11 @@ func (s *Router) handleMCPOAuthAuthorize(w http.ResponseWriter, r *http.Request)
 	switch r.PostForm.Get("decision") {
 	case "approve", "":
 	case "deny":
+		s.recordMCPAuthAudit(r, "", "oauth/authorize", values.Get("client_id"), "deny", "denied", map[string]any{
+			"redirectURI": values.Get("redirect_uri"),
+			"resource":    values.Get("resource"),
+			"scope":       values.Get("scope"),
+		})
 		s.redirectAuthorizeError(w, r, values, "access_denied", "authorization denied")
 		return
 	default:
@@ -436,6 +450,11 @@ func (s *Router) handleMCPOAuthAuthorize(w http.ResponseWriter, r *http.Request)
 	}
 	q.Set("iss", s.externalBaseURL(r))
 	redirectURL.RawQuery = q.Encode()
+	s.recordMCPAuthAudit(r, "", "oauth/authorize", entry.ClientID, "allow", "approved", map[string]any{
+		"redirectURI": entry.RedirectURI,
+		"resource":    entry.Resource,
+		"scope":       entry.Scope,
+	})
 	http.Redirect(w, r, redirectURL.String(), http.StatusSeeOther)
 }
 
@@ -529,6 +548,11 @@ func (s *Router) handleMCPOAuthAuthorizationCodeToken(w http.ResponseWriter, r *
 		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not issue refresh token")
 		return
 	}
+	s.recordMCPAuthAudit(r, entry.UserID, "oauth/token", entry.ClientID, "allow", "issued", map[string]any{
+		"grantID":  grantID,
+		"resource": entry.Resource,
+		"scope":    entry.Scope,
+	})
 	s.writeMCPOAuthTokenResponse(w, r, &user, entry.Resource, entry.Scope, grantID, refreshToken)
 }
 
@@ -555,6 +579,11 @@ func (s *Router) handleMCPOAuthRefreshToken(w http.ResponseWriter, r *http.Reque
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "invalid refresh token")
 		return
 	}
+	s.recordMCPAuthAudit(r, entry.UserID, "oauth/token", clientID, "allow", "refreshed", map[string]any{
+		"grantID":  entry.GrantID,
+		"resource": entry.Resource,
+		"scope":    entry.Scope,
+	})
 	s.writeMCPOAuthTokenResponse(w, r, &user, entry.Resource, entry.Scope, entry.GrantID, nextRefreshToken)
 }
 
@@ -584,14 +613,30 @@ func (s *Router) handleMCPOAuthRevoke(w http.ResponseWriter, r *http.Request) {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "invalid form")
 		return
 	}
-	if err := s.mcpOAuth.revokeRefreshToken(r.PostForm.Get("token"), r.PostForm.Get("client_id")); err != nil {
+	userID, err := s.mcpOAuth.revokeRefreshToken(r.PostForm.Get("token"), r.PostForm.Get("client_id"))
+	if err != nil {
 		slog.WarnContext(r.Context(), "revoke mcp oauth refresh token", "err", err)
 		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not revoke refresh token")
 		return
 	}
+	s.recordMCPAuthAudit(r, userID, "oauth/revoke", r.PostForm.Get("client_id"), "allow", "revoked", nil)
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
 	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Router) recordMCPAuthAudit(r *http.Request, userID, operation, name, decision, status string, args any) {
+	if s.mcpAudit == nil {
+		return
+	}
+	s.mcpAudit.record(r.Context(), &mcpAuditEvent{
+		UserID:    userID,
+		Operation: operation,
+		Name:      name,
+		Args:      auditValueSummary(args),
+		Decision:  decision,
+		Status:    status,
+	})
 }
 
 func (s *Router) redirectAuthorizeError(w http.ResponseWriter, r *http.Request, values url.Values, code, description string) {
@@ -723,14 +768,14 @@ func (s *mcpOAuthServer) rotateRefreshToken(token, clientID, userID string) (nex
 	return nextToken, next, true, nil
 }
 
-func (s *mcpOAuthServer) revokeRefreshToken(token, clientID string) error {
+func (s *mcpOAuthServer) revokeRefreshToken(token, clientID string) (string, error) {
 	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	tokenHash := mcpOAuthRefreshTokenKey(token)
 	entry, ok := s.refreshTokens[tokenHash]
 	if !ok || entry.ClientID != clientID || !entry.RevokedAt.IsZero() {
-		return nil
+		return "", nil
 	}
 	entry.RevokedAt = now
 	s.refreshTokens[tokenHash] = entry
@@ -745,7 +790,7 @@ func (s *mcpOAuthServer) revokeRefreshToken(token, clientID string) error {
 			}
 		}
 	}
-	return s.saveRefreshTokensLocked()
+	return entry.UserID, s.saveRefreshTokensLocked()
 }
 
 func (s *mcpOAuthServer) revokeUserGrant(userID, grantID string) bool {

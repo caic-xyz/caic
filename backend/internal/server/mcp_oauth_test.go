@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -103,6 +105,52 @@ func TestMCPOAuthTokenLifecycle(t *testing.T) {
 		}
 
 		refreshMCPToken(t, h, registered.ClientID, tokenResp.RefreshToken, http.StatusBadRequest)
+	})
+
+	t.Run("approval refresh and revocation are audited", func(t *testing.T) {
+		t.Parallel()
+		s, h, user, registered := newMCPOAuthLifecycleRouter(t)
+		path := filepath.Join(t.TempDir(), "mcp_audit.jsonl")
+		s.mcpAudit.path = path
+
+		tokenResp := authorizeMCPClient(t, h, &user, &registered)
+		rotated := refreshMCPToken(t, h, registered.ClientID, tokenResp.RefreshToken, http.StatusOK)
+		form := url.Values{
+			"client_id":       {registered.ClientID},
+			"token":           {rotated.RefreshToken},
+			"token_type_hint": {"refresh_token"},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, mcpOAuthRevokePath, strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Host = "caic.example.com"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("revoke status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+
+		events := readMCPAuditEvents(t, path)
+		seen := map[string]struct{}{}
+		for _, event := range events {
+			seen[event.Operation+":"+event.Status] = struct{}{}
+			if strings.HasPrefix(event.Operation, "oauth/") && event.UserID != user.ID {
+				t.Fatalf("audit event userID = %q, want %q: %+v", event.UserID, user.ID, event)
+			}
+		}
+		for _, want := range []string{"oauth/authorize:approved", "oauth/token:issued", "oauth/token:refreshed", "oauth/revoke:revoked"} {
+			if _, ok := seen[want]; !ok {
+				t.Fatalf("audit events = %+v, missing %s", events, want)
+			}
+		}
+		data, err := os.ReadFile(path) //nolint:gosec // test path from t.TempDir.
+		if err != nil {
+			t.Fatalf("ReadFile: %v", err)
+		}
+		for _, secret := range []string{tokenResp.AccessToken, tokenResp.RefreshToken, rotated.AccessToken, rotated.RefreshToken} {
+			if secret != "" && strings.Contains(string(data), secret) {
+				t.Fatalf("audit log contains token %q: %s", secret, string(data))
+			}
+		}
 	})
 
 	t.Run("grant list shows authenticated user client details", func(t *testing.T) {

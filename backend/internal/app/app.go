@@ -289,6 +289,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		MCPOAuthPrivateKeyPEM:         []byte(settings.MCPOAuthPrivateKeyPEM),
 		MCPOAuthKeyID:                 settings.MCPOAuthKeyID,
 		MCPOAuthRefreshTokenStorePath: filepath.Join(cfg.Dirs.ConfigDir, "mcp_oauth_refresh_tokens.json"),
+		MCPAuditLogPath:               filepath.Join(cfg.Dirs.CacheDir, "mcp_audit.jsonl"),
 		GitHubOAuth:                   githubOAuth,
 		GitLabOAuth:                   gitlabOAuth,
 		HostState:                     hostState,

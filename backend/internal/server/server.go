@@ -55,6 +55,7 @@ type Router struct {
 	mcpOAuthPrivateKeyPEM         []byte
 	mcpOAuthKeyID                 string
 	mcpOAuthRefreshTokenStorePath string
+	mcpAudit                      *mcpAuditStore
 	mcpRateLimiter                *rateLimiter
 	usageHandlers                 *usageHandlers
 	voiceHandlers                 *voiceHandlers
@@ -334,6 +335,7 @@ type Dependencies struct {
 	MCPOAuthPrivateKeyPEM         []byte
 	MCPOAuthKeyID                 string
 	MCPOAuthRefreshTokenStorePath string
+	MCPAuditLogPath               string
 	GitHubOAuth                   *auth.ProviderConfig
 	GitLabOAuth                   *auth.ProviderConfig
 	HostState                     *auth.HostState
@@ -412,6 +414,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		mcpOAuthPrivateKeyPEM:         d.MCPOAuthPrivateKeyPEM,
 		mcpOAuthKeyID:                 d.MCPOAuthKeyID,
 		mcpOAuthRefreshTokenStorePath: d.MCPOAuthRefreshTokenStorePath,
+		mcpAudit:                      &mcpAuditStore{path: d.MCPAuditLogPath},
 		mcpRateLimiter:                newRateLimiter(120, time.Minute),
 		authStore:                     d.AuthStore,
 		sessionSecret:                 d.SessionSecret,
@@ -419,7 +422,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		pprof:                         d.Pprof,
 		ipgeoChecker:                  d.IPGeoChecker,
 	}
-	mcpRegistry := &caicToolRegistry{serverConfig: s.serverConfigHandlers, tasks: taskService, ci: s.ciHandlers, usage: s.usageHandlers, audit: newMCPAuditStore()}
+	mcpRegistry := &caicToolRegistry{serverConfig: s.serverConfigHandlers, tasks: taskService, ci: s.ciHandlers, usage: s.usageHandlers, audit: s.mcpAudit}
 	s.mcpHandlers = &mcp.Handler{
 		Registry:   mcpRegistry,
 		ServerInfo: mcp.Implementation{Name: "caic", Title: "caic", Version: autoupdate.Version},

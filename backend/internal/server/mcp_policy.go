@@ -35,6 +35,12 @@ var mcpForgeTools = map[string]struct{}{
 	"bot_fix_ci":                 {},
 }
 
+// authorizeTool enforces MCP scope and linked forge authority policy.
+//
+// Remote forge tools require linked forge authority. A GitHub-linked caic user
+// may use user OAuth, server PAT, or GitHub App authority. GitLab-linked remote
+// MCP users require a user token until there is an explicit server-side GitLab
+// authority policy.
 func (c *caicToolRegistry) authorizeTool(ctx context.Context, name string) (string, bool) {
 	required := requiredScopeForTool(name)
 	if required == "" {
@@ -46,8 +52,8 @@ func (c *caicToolRegistry) authorizeTool(ctx context.Context, name string) (stri
 	if !mcpHasScope(ctx, required) {
 		return "missing required MCP scope: " + required, false
 	}
-	if _, needsForge := mcpForgeTools[name]; needsForge && isRemoteMCP(ctx) && !userHasForgeIdentity(ctx) {
-		return "linked GitHub or GitLab identity is required for forge MCP tools", false
+	if _, needsForge := mcpForgeTools[name]; needsForge && isRemoteMCP(ctx) && !userHasForgeAuthority(ctx) {
+		return "linked GitHub identity or GitLab token is required for forge MCP tools", false
 	}
 	return "allow", true
 }
@@ -72,12 +78,15 @@ func isRemoteMCP(ctx context.Context) bool {
 	return ok && p.Remote
 }
 
-func userHasForgeIdentity(ctx context.Context) bool {
+func userHasForgeAuthority(ctx context.Context) bool {
 	u, ok := auth.UserFromContext(ctx)
 	if !ok {
 		return false
 	}
-	return (u.Provider == forge.KindGitHub || u.Provider == forge.KindGitLab) && u.AccessToken != ""
+	if u.Provider == forge.KindGitHub {
+		return true
+	}
+	return u.Provider == forge.KindGitLab && u.AccessToken != ""
 }
 
 func mcpScopeChallenge(scope string) string {
