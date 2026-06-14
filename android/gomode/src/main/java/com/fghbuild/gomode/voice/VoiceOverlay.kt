@@ -84,7 +84,7 @@ fun VoicePanel(
         Column(modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars)) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outline)
             when {
-                !voiceEnabled -> SettingsOnlyPanel(onOpenSettings)
+                !voiceEnabled -> IdlePanel(onConnect, onOpenSettings, voiceEnabled = false)
                 voiceState.error != null -> ErrorPanel(onConnect, onOpenSettings)
                 voiceState.connectStatus != null -> ConnectingPanel(voiceState.connectStatus, onOpenSettings)
                 voiceState.listening || voiceState.speaking -> ActivePanel(
@@ -99,18 +99,6 @@ fun VoicePanel(
                 else -> ConnectingPanel("Starting audio…", onOpenSettings)
             }
         }
-    }
-}
-
-@Composable
-private fun SettingsOnlyPanel(onOpenSettings: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 8.dp),
-        horizontalArrangement = Arrangement.Start,
-    ) {
-        SettingsButton(onOpenSettings)
     }
 }
 
@@ -132,6 +120,7 @@ private fun SettingsButton(onOpenSettings: () -> Unit) {
 private fun IdlePanel(
     onConnect: () -> Unit,
     onOpenSettings: () -> Unit,
+    voiceEnabled: Boolean = true,
 ) {
     Row(
         modifier = Modifier
@@ -141,20 +130,24 @@ private fun IdlePanel(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         SettingsButton(onOpenSettings)
+        val disabledAlpha = 0.38f
+        val iconAlpha = if (voiceEnabled) 1f else disabledAlpha
         IconButton(
             onClick = onConnect,
+            enabled = voiceEnabled,
             modifier = Modifier
                 .size(36.dp)
                 .border(
                     width = 1.dp,
-                    color = MaterialTheme.colorScheme.outline,
+                    color = MaterialTheme.colorScheme.outline.copy(alpha = iconAlpha),
                     shape = CircleShape,
-                ),
+                )
+                .testTag(if (voiceEnabled) "gomode-voice-connect" else "gomode-voice-disabled"),
         ) {
             Icon(
                 Icons.Default.Mic,
-                contentDescription = "Connect voice assistant",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                contentDescription = if (voiceEnabled) "Connect voice assistant" else "Voice unavailable",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = iconAlpha),
                 modifier = Modifier.size(20.dp),
             )
         }

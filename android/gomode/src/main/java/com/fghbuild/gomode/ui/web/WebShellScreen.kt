@@ -33,6 +33,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,12 +53,14 @@ import com.fghbuild.gomode.R
 fun WebShellScreen(
     initialURL: String,
     onOpenSettings: () -> Unit,
+    onHostedPageLoaded: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val hostURL = remember(initialURL) { goModeHostURL(initialURL) }
     var pageFailed by remember(hostURL) { mutableStateOf<String?>(null) }
     var loading by remember(hostURL) { mutableStateOf(true) }
     var fileChooserCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+    val currentOnHostedPageLoaded by rememberUpdatedState(onHostedPageLoaded)
     val fileChooserLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         fileChooserCallback?.onReceiveValue(uris.toTypedArray())
         fileChooserCallback = null
@@ -78,6 +81,7 @@ fun WebShellScreen(
 
                 override fun onPageFinished(view: WebView, url: String?) {
                     loading = false
+                    currentOnHostedPageLoaded()
                 }
 
                 override fun onReceivedError(

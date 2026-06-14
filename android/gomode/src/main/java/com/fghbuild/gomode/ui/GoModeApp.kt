@@ -62,8 +62,8 @@ private enum class NativeScreen {
     Halo,
 }
 
-private sealed interface ServiceBootstrapState {
-    data object Loading : ServiceBootstrapState
+internal sealed interface ServiceBootstrapState {
+    data class Unvalidated(val reason: String? = null) : ServiceBootstrapState
     data class Ready(val settings: ServiceSettings) : ServiceBootstrapState
     data class Error(val message: String) : ServiceBootstrapState
 }
@@ -83,30 +83,13 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
     var activeNativeScreen by remember { mutableStateOf<NativeScreen?>(null) }
     val activeURL = settings.activeServiceURL
     var reloadToken by remember(activeURL) { mutableStateOf(0) }
-    var bootstrapState by remember(activeURL) { mutableStateOf<ServiceBootstrapState>(ServiceBootstrapState.Loading) }
+    var bootstrapState by remember(activeURL) {
+        mutableStateOf<ServiceBootstrapState>(ServiceBootstrapState.Unvalidated())
+    }
 
     LaunchedEffect(activeURL, reloadToken, settingsClient) {
         if (activeURL.isBlank()) return@LaunchedEffect
-        bootstrapState = ServiceBootstrapState.Loading
-        bootstrapState = try {
-            val serviceSettings = settingsClient.fetch(activeURL)
-            val compatibilityError = serviceSettings.compatibilityError()
-            if (compatibilityError == null) {
-                ServiceBootstrapState.Ready(serviceSettings)
-            } else {
-                ServiceBootstrapState.Error(compatibilityError)
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: IllegalArgumentException) {
-            ServiceBootstrapState.Error("Invalid service URL: ${e.message.orEmpty()}")
-        } catch (e: ServiceSettingsException) {
-            ServiceBootstrapState.Error(e.message ?: "Could not fetch service settings.")
-        } catch (e: IOException) {
-            ServiceBootstrapState.Error(e.message ?: "Could not fetch service settings.")
-        } catch (e: SerializationException) {
-            ServiceBootstrapState.Error(e.message ?: "Could not parse service settings.")
-        }
+        bootstrapState = fetchBootstrapState(activeURL, settingsClient)
     }
 
     val voiceSession = remember(settingsRepository) {
@@ -180,6 +163,11 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
                     onSetNativeScreen = { activeNativeScreen = it },
                     activeNativeScreen = activeNativeScreen,
                     onReload = { reloadToken += 1 },
+                    onHostedPageLoaded = {
+                        if (bootstrapState is ServiceBootstrapState.Unvalidated) {
+                            reloadToken += 1
+                        }
+                    },
                 )
             }
             if (!keyboardOpen) {
@@ -210,6 +198,29 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
     }
 }
 
+internal suspend fun fetchBootstrapState(
+    activeURL: String,
+    settingsClient: ServiceSettingsClient,
+): ServiceBootstrapState = try {
+    val serviceSettings = settingsClient.fetch(activeURL)
+    val compatibilityError = serviceSettings.compatibilityError()
+    if (compatibilityError == null) {
+        ServiceBootstrapState.Ready(serviceSettings)
+    } else {
+        ServiceBootstrapState.Error(compatibilityError)
+    }
+} catch (e: CancellationException) {
+    throw e
+} catch (e: SerializationException) {
+    ServiceBootstrapState.Unvalidated(e.message ?: "Could not parse service settings.")
+} catch (e: IllegalArgumentException) {
+    ServiceBootstrapState.Error("Invalid service URL: ${e.message.orEmpty()}")
+} catch (e: ServiceSettingsException) {
+    ServiceBootstrapState.Unvalidated(e.message ?: "Could not fetch service settings.")
+} catch (e: IOException) {
+    ServiceBootstrapState.Unvalidated(e.message ?: "Could not fetch service settings.")
+}
+
 @Composable
 private fun GoModeContent(
     settings: SettingsState,
@@ -220,6 +231,7 @@ private fun GoModeContent(
     activeNativeScreen: NativeScreen?,
     onSetNativeScreen: (NativeScreen?) -> Unit,
     onReload: () -> Unit,
+    onHostedPageLoaded: () -> Unit,
 ) {
     when {
         activeNativeScreen == NativeScreen.Halo -> {
@@ -238,11 +250,11 @@ private fun GoModeContent(
         }
         else -> {
             when (val state = bootstrapState) {
-                ServiceBootstrapState.Loading -> {
-                    ServiceBootstrapPanel(
-                        title = "Checking service",
-                        message = "Loading Go Mode compatibility settings…",
+                is ServiceBootstrapState.Unvalidated -> {
+                    WebShellScreen(
+                        initialURL = activeURL,
                         onOpenSettings = { onSetNativeScreen(NativeScreen.Settings) },
+                        onHostedPageLoaded = onHostedPageLoaded,
                     )
                 }
                 is ServiceBootstrapState.Error -> {
@@ -257,6 +269,7 @@ private fun GoModeContent(
                     WebShellScreen(
                         initialURL = activeURL,
                         onOpenSettings = { onSetNativeScreen(NativeScreen.Settings) },
+                        onHostedPageLoaded = onHostedPageLoaded,
                     )
                 }
             }

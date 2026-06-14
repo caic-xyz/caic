@@ -5,6 +5,8 @@ import com.fghbuild.gomode.sdk.v1.MCPSettings
 import com.fghbuild.gomode.sdk.v1.Settings
 import com.fghbuild.gomode.sdk.v1.VoiceGatewaySettings
 import com.fghbuild.gomode.sdk.v1.WebShellSettings
+import com.fghbuild.gomode.ui.ServiceBootstrapState
+import com.fghbuild.gomode.ui.fetchBootstrapState
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -45,6 +47,55 @@ class ServiceSettingsClientTest {
 
             assertTrue(result.exceptionOrNull() is ServiceSettingsException)
             assertEquals("Service settings request failed: HTTP 500", result.exceptionOrNull()?.message)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun `bootstrap treats auth gated settings as unvalidated`() = runBlocking {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(MockResponse().setResponseCode(401).setBody("sign in"))
+            val state = fetchBootstrapState(server.url("/").toString(), ServiceSettingsClient())
+
+            assertTrue(state is ServiceBootstrapState.Unvalidated)
+            assertEquals("/api/gomode/v1/settings", server.takeRequest().path)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun `bootstrap treats html settings response as unvalidated`() = runBlocking {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(MockResponse().setResponseCode(200).setBody("<html>sign in</html>"))
+            val state = fetchBootstrapState(server.url("/").toString(), ServiceSettingsClient())
+
+            assertTrue(state is ServiceBootstrapState.Unvalidated)
+            assertEquals("/api/gomode/v1/settings", server.takeRequest().path)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun `bootstrap treats fetched incompatible settings as error`() = runBlocking {
+        val server = MockWebServer()
+        server.start()
+        try {
+            val incompatibleSettings = SETTINGS_JSON.replace("\"apiVersion\": 1", "\"apiVersion\": 2")
+            server.enqueue(MockResponse().setResponseCode(200).setBody(incompatibleSettings))
+            val state = fetchBootstrapState(server.url("/").toString(), ServiceSettingsClient())
+
+            assertTrue(state is ServiceBootstrapState.Error)
+            assertEquals(
+                "Unsupported Go Mode service API version 2. This app supports 1.",
+                (state as ServiceBootstrapState.Error).message,
+            )
         } finally {
             server.shutdown()
         }

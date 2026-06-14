@@ -1,164 +1,93 @@
-# Go Mode Service Discovery And MCP Tooling
+# Remaining Go Mode MCP Discovery Work
 
-## Goal
+This document tracks unfinished Go Mode discovery work. Root settings, generated SDKs, the backend MCP endpoint, MCP tools/resources, and native voice tool calls already exist.
 
-Define how Go Mode Android bootstraps a hosted service and then learns service capabilities through MCP.
+MCP is mandatory once service metadata is available. Root settings must advertise `webShell.mcp`; Android may reject authenticated services that omit it.
 
-Go Mode discovery is intentionally small. It answers only: "can this Android shell host this service, and where is the service MCP endpoint?" Service tools, resources, resource subscriptions, and tool calls belong to MCP.
+Go Mode metadata and MCP metadata may be auth-gated. Do not put either on the WebView critical path. If root settings or MCP discovery is unavailable because the user is not signed in, load the hosted frontend in a limited, unvalidated mode so the user can log in. Disable native MCP-backed features until root settings and MCP discovery succeed. Individual MCP capabilities remain optional and must be checked before use.
 
-## Root Service Settings
+## Auth-Gated Bootstrap
 
-Endpoint:
+Android bootstrap should support three states:
 
-```text
-GET /api/gomode/v1/settings
-```
+- **Unvalidated**: the configured URL loads in the WebView, but root settings are not available yet. Native MCP-backed features are disabled.
+- **Compatible**: root settings are available, API/bridge compatibility passes, and `webShell.mcp` is present.
+- **Incompatible**: root settings are available but API/bridge compatibility fails or mandatory MCP metadata is missing.
 
-Purpose:
+Retry root settings after likely auth changes, such as WebView page loads, cookie changes, app resume, or a user action that needs a native MCP-backed feature.
 
-- Identify the service kind and service version.
-- Declare Go Mode shell compatibility.
-- Provide the service MCP endpoint and initial protocol version.
-- Provide the service voice gateway base URL when voice is available.
+## Android MCP Resource Client
 
-Root settings are public. They must not contain secrets, user-specific state, task data, or private configuration. MCP and runtime calls may still require the normal service session.
+Add Android support for service-backed resources beyond voice tools:
 
-The generated Go Mode SDK and API reference define the wire schema in `sdk/gomode/`. Keep this document focused on ownership and flow, not duplicated JSON examples.
+- Call `server/discover` during MCP setup and use its capabilities as the source of truth.
+- Call `resources/list` and `resources/templates/list` when native shell features need service state.
+- Call `resources/read` for selected resource URIs.
+- Support POST-based SSE for `subscriptions/listen`.
+- Treat subscription events as invalidations. On `notifications/resources/updated`, re-read the resource.
+- Skip resource subscriptions unless `capabilities.resources.subscribe == true`.
 
-`webShell.mcp.protocolVersion` is the version Android sends in `Mcp-Protocol-Version` and `_meta.io.modelcontextprotocol/protocolVersion` for initial MCP requests. MCP `server/discover` remains authoritative for supported MCP versions and capabilities.
+## Service Adapters
 
-## Division Of Responsibility
+Add a small adapter layer selected from root settings `service` and `apiVersion`.
 
-Go Mode discovery owns:
+Adapters map discovered MCP resources to neutral Go Mode needs:
 
-- WebView lifecycle compatibility.
-- Android permission and native capability gating.
-- Native bridge version negotiation.
-- Voice gateway selection.
-- Halo/BLE, screenshot, and notification ownership.
+- task or job monitoring
+- attention state
+- notification text
+- voice context
 
-MCP owns:
+Keep parsing narrow:
 
-- Tool descriptors and JSON schemas via `tools/list`.
-- Tool execution via `tools/call`.
-- Resource discovery via `resources/list` and `resources/templates/list`.
-- Resource reads via `resources/read`.
-- Resource/tool invalidation via `subscriptions/listen`.
+- Parse generic JSON first.
+- Map only fields the native shell needs.
+- Do not import product SDK DTOs into Go Mode shell code.
+- Do not hard-code product HTTP routes.
 
-The voice gateway remains transport-only. It must not grow service-specific tool execution.
+For caic, the adapter may recognize `caic://tasks` from `resources/list`, read it through `resources/read`, and subscribe to it through `subscriptions/listen`.
 
-## Superseded Design
+## Shell Monitoring And Notifications
 
-Do not add Go Mode-specific tool manifests or tool-call endpoints:
+Use adapter output to drive native shell behavior:
 
-```text
-GET  /api/gomode/v1/tools/manifest
-POST /api/gomode/v1/tools/call
-GET  /api/gomode/v1/tools/session
-```
+- Track service state that matters while the WebView is backgrounded.
+- Notify when monitored work finishes or needs user input.
+- Feed concise state updates into the voice session context.
+- Show native MCP-backed affordances, such as voice, as disabled rather than hiding them while metadata is unavailable.
+- Treat user-facing MCP text as untrusted.
 
-Android uses the MCP endpoint advertised by root settings instead:
+## Backend Subscription Improvement
 
-```text
-POST {webShell.mcp.endpoint}  server/discover
-POST {webShell.mcp.endpoint}  tools/list
-POST {webShell.mcp.endpoint}  tools/call
-POST {webShell.mcp.endpoint}  resources/list
-POST {webShell.mcp.endpoint}  resources/read
-POST {webShell.mcp.endpoint}  subscriptions/listen
-```
+`subscriptions/listen` currently works by polling resource snapshots. Replace polling with event-driven invalidation where the backend has a change notifier.
 
-## Android Bootstrap Flow
+Expected behavior:
 
-1. User configures a service URL in Go Mode settings.
-2. Android fetches `/api/gomode/v1/settings`.
-3. Android selects a service adapter from `service` and `apiVersion`.
-4. Android validates shell compatibility:
-   - `bridgeVersion` is supported.
-5. Android loads the hosted WebView frontend.
-6. Android uses `webShell.mcp` to call MCP `server/discover`.
-7. Android calls MCP `tools/list` and `resources/list` when native voice, notifications, or monitoring need service-backed context.
-8. Android combines service MCP tools with Android-owned native tools.
-9. Android executes service-backed tools through MCP `tools/call`; native-only tools stay in Android.
+- Resource-list changes emit `notifications/resources/list_changed`.
+- Resource content changes emit `notifications/resources/updated` for subscribed URIs.
+- Streams remain bounded and cancel cleanly when Android disconnects.
 
-Go Mode shell code must not import service product SDK DTOs or hard-code product HTTP routes. Product-specific interpretation belongs in the selected service adapter or in the service MCP implementation.
+## Testing Still Needed
 
-## Learning Resource Subscriptions
+Android unit tests:
 
-Go Mode learns subscribable service state from MCP, not from root settings.
+- `server/discover` capability negotiation.
+- `resources/list` and `resources/read` request envelopes.
+- POST-based SSE parsing for `subscriptions/listen`.
+- Resource update notification triggers a re-read.
+- Missing or unsupported resource capabilities disable monitoring cleanly.
 
-Flow:
+Android/e2e tests:
 
-1. Call `server/discover`.
-2. Confirm `capabilities.resources.subscribe == true` before opening a resource subscription.
-3. Call `resources/list`.
-4. Let the selected service adapter choose the resource URIs it understands.
-5. Read each selected resource with `resources/read`.
-6. Open `subscriptions/listen` for those resource URIs.
-7. Treat subscription notifications as invalidations. On `notifications/resources/updated`, call `resources/read` again.
+- Auth-gated root settings still allow the WebView login flow to load.
+- Missing MCP metadata fails visibly once authenticated root settings are available.
+- Broken MCP disables native MCP-backed features without delaying WebView load.
+- Unsupported compatibility metadata fails visibly once root settings are available.
+- Fake MCP resource listing drives shell monitoring without product route assertions.
+- Fake resource-update notifications update native monitoring state.
+- Voice setup merges service MCP tools with Android-native tools without product SDK imports.
 
-The subscription request is a normal MCP `subscriptions/listen` JSON-RPC request with `resourcesListChanged` and the selected `resourceSubscriptions` URIs. The first event is an acknowledgment. Later `notifications/resources/updated` events identify the changed resource by URI.
+Backend tests:
 
-A coding-service adapter can, for example, look for a task-summary resource in `resources/list`. If that service names the resource `caic://tasks`, the adapter subscribes to `caic://tasks` and re-reads it whenever the MCP stream reports it updated. Other services can expose different URIs without changing Go Mode shell code.
-
-## Voice Gateway Interaction
-
-The discovery contract advertises the voice gateway base URL. Android still talks to the voice gateway API for signaling.
-
-`voiceGateway.url` may be relative to the configured service URL or absolute. A missing URL means voice is unavailable. Android does not need to know whether the gateway is hosted by the same process, the same origin, or another service.
-
-Voice gateway tokens, if needed, remain service-owned and normal-service-authenticated. Tool authorization remains with the service MCP endpoint, not with the voice gateway.
-
-## Security Model
-
-- Root settings are public and non-sensitive.
-- MCP requests use the service's normal API authentication when `authRequired` is true.
-- MCP tool calls are authorized by the service.
-- Tool schemas and resource contents must not expose secrets or private configuration.
-- Android must treat service-provided titles, descriptions, schemas, resources, and tool output as untrusted text.
-- Service tool calls should include enough service-instance context to prevent accidental cross-service execution.
-
-## Implementation Plan
-
-Backend:
-
-- Serve `GET /api/gomode/v1/settings` with `webShell.mcp`.
-- Serve MCP `server/discover`, `tools/list`, `tools/call`, `resources/list`, `resources/read`, and `subscriptions/listen`.
-- Prefer event-driven resource invalidation over polling when the service has an internal change notifier.
-
-Android:
-
-- Add a root settings client and DTOs.
-- Add an MCP JSON-RPC client that supports both normal JSON responses and POST-based SSE for `subscriptions/listen`.
-- Add service adapters that map discovered MCP resources to neutral Go Mode needs such as task monitoring, attention state, or voice context.
-- Keep resource payload parsing narrow. Parse generic JSON first; map only the fields the native shell needs.
-- Skip MCP setup when `webShell.mcp.endpoint` is absent.
-
-## Testing Plan
-
-Backend:
-
-- Root settings JSON contract tests, including `webShell.mcp`.
-- Auth-enabled routing tests proving root settings stays public.
-- MCP JSON-RPC tests for discovery, tools, resources, subscriptions, and protocol/header validation.
-
-Android:
-
-- Settings bootstrap fetches root discovery before WebView load.
-- Unsupported bridge version shows a visible upgrade message.
-- MCP setup is skipped when not advertised.
-- Resource subscriptions trigger re-reads after update notifications.
-- Voice setup merges service MCP tools and Android-native tools without product SDK imports in shell code.
-
-E2E:
-
-- Fake backend serves root settings and a minimal hosted page.
-- Go Mode loads the hosted page after compatibility validation.
-- Unsupported compatibility metadata fails visibly.
-- Fake MCP resource listing and resource-update notifications drive shell-level monitoring without asserting product routes.
-
-## Open Questions
-
-- Should root discovery also be exposed at `/.well-known/gomode.json` for generic service discovery?
-- Should `webShell.mcp.endpoint` allow absolute URLs for delegated MCP services, or remain service-origin-relative?
-- Which Android-native capabilities need small capability documents outside root settings?
+- Event-driven resource invalidation once polling is replaced.
+- Subscription cancellation cleanup.
