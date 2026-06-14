@@ -16,8 +16,6 @@ var mcpToolScopes = map[string]string{
 	"task_get_detail":            mcpScopeTasksRead,
 	"agent_last_message":         mcpScopeTasksRead,
 	"get_usage":                  mcpScopeRead,
-	"web_search":                 mcpScopeRead,
-	"web_fetch":                  mcpScopeRead,
 	"task_send_message":          mcpScopeTasksWrite,
 	"task_answer_question":       mcpScopeTasksWrite,
 	"task_create":                mcpScopeTasksWrite,

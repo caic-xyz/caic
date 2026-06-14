@@ -75,7 +75,6 @@ type caicToolRegistry struct {
 	tasks        *taskAPIService
 	ci           *ciHandlers
 	usage        *usageHandlers
-	webFetch     *webFetchHandlers
 	audit        *mcpAuditStore
 }
 
@@ -261,8 +260,6 @@ func (c *caicToolRegistry) specsForState(s *caicToolCatalogState) []mcp.ToolSpec
 		annotateTool(mcp.NewToolSpec("get_usage", "Get usage", "Check current API quota utilization and limits.", c.handleGetUsage), mcp.ToolAnnotations{Title: "Get usage", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: true}),
 		annotateTool(mcp.NewToolSpec("clone_repo", "Clone repository", "Clone a git repository by URL. Optionally specify a local path.", c.handleCloneRepo), mcp.ToolAnnotations{Title: "Clone repository", DestructiveHint: true, OpenWorldHint: true}),
 		annotateTool(mcp.NewToolSpec("agent_last_message", "Get last agent message", "Get latest agent message, question, or result. Call to check what the agent needs or relay to user.", c.handleAgentLastMessage), mcp.ToolAnnotations{Title: "Get last agent message", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
-		annotateTool(mcp.NewToolSpec("web_search", "Web search", "Search the web for a query and display the results in an embedded browser.", c.handleWebSearch), mcp.ToolAnnotations{Title: "Web search", ReadOnlyHint: true, OpenWorldHint: true}),
-		annotateTool(mcp.NewToolSpec("web_fetch", "Web fetch", "Open a URL in the embedded browser.", c.handleWebFetch), mcp.ToolAnnotations{Title: "Web fetch", ReadOnlyHint: true, OpenWorldHint: true}),
 		annotateTool(mcp.NewToolSpec("task_fix_pr", "Fix task PR", "Inject a fix-PR command into an existing task to fix its failing PR CI in auto mode.", c.handleTaskFixPR), mcp.ToolAnnotations{Title: "Fix task PR", DestructiveHint: true, OpenWorldHint: true}),
 		botFixCISpec,
 	}
@@ -653,33 +650,6 @@ func (c *caicToolRegistry) handleAgentLastMessage(ctx context.Context, args mcpT
 	return mcp.TextToolResult(fmt.Sprintf("No messages from task #%d yet.", num))
 }
 
-type mcpWebFetchOutput struct {
-	Title   string `json:"title"   jsonschema_description:"Fetched page title"`
-	Content string `json:"content" jsonschema_description:"Fetched page content"`
-}
-
-type mcpWebSearchArgs struct {
-	Query string `json:"query" jsonschema_description:"The search query"`
-}
-
-func (c *caicToolRegistry) handleWebSearch(ctx context.Context, args mcpWebSearchArgs) mcp.ToolResult[mcpWebFetchOutput] {
-	if args.Query == "" {
-		return mcp.ToolError[mcpWebFetchOutput]("Missing required parameter: query")
-	}
-	return c.fetchURL(ctx, "https://html.duckduckgo.com/html/?q="+url.QueryEscape(args.Query))
-}
-
-type mcpWebFetchArgs struct {
-	URL string `json:"url" jsonschema_description:"The URL to open"`
-}
-
-func (c *caicToolRegistry) handleWebFetch(ctx context.Context, args mcpWebFetchArgs) mcp.ToolResult[mcpWebFetchOutput] {
-	if args.URL == "" {
-		return mcp.ToolError[mcpWebFetchOutput]("Missing required parameter: url")
-	}
-	return c.fetchURL(ctx, args.URL)
-}
-
 type mcpTaskFixPRArgs struct {
 	TaskNumber int `json:"task_number" jsonschema_description:"The task number whose PR CI should be fixed"`
 }
@@ -734,18 +704,6 @@ func (c *caicToolRegistry) sendTaskInput(ctx context.Context, args mcpTaskInputA
 		return domainToolError[mcp.TextOutput](err)
 	}
 	return mcp.TextToolResult(fmt.Sprintf(format, num))
-}
-
-func (c *caicToolRegistry) fetchURL(ctx context.Context, targetURL string) mcp.ToolResult[mcpWebFetchOutput] {
-	req := &v1.WebFetchReq{URL: targetURL}
-	if err := req.Validate(); err != nil {
-		return domainToolError[mcpWebFetchOutput](err)
-	}
-	resp, err := c.webFetch.webFetch(ctx, req)
-	if err != nil {
-		return domainToolError[mcpWebFetchOutput](err)
-	}
-	return mcp.TypedToolResult(mcpWebFetchOutput{Title: resp.Title, Content: resp.Content})
 }
 
 func (c *caicToolRegistry) taskByNumber(ctx context.Context, num int) (v1.Task, bool) {

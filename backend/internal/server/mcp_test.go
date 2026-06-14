@@ -610,7 +610,7 @@ func TestMCPConsentPage(t *testing.T) {
 		if !strings.Contains(body, "caic:mcp.read") {
 			t.Error("body missing scope caic:mcp.read")
 		}
-		if !strings.Contains(body, "web search/fetch") {
+		if !strings.Contains(body, "Use basic MCP tools including usage and non-task resources") {
 			t.Error("body missing scope description for caic:mcp.read")
 		}
 		if !strings.Contains(body, "caic:tasks.read") {

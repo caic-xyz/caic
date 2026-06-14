@@ -44,7 +44,7 @@ var mcpConsentHTML string
 var (
 	mcpOAuthConsentTemplate = template.Must(template.New("mcp-oauth-consent").Parse(mcpConsentHTML))
 	mcpScopeLabels          = map[string]string{
-		mcpScopeRead:       "Use basic MCP tools including usage, web search/fetch, and non-task resources",
+		mcpScopeRead:       "Use basic MCP tools including usage and non-task resources",
 		mcpScopeTasksRead:  "Read task information",
 		mcpScopeTasksWrite: "Create and manage tasks",
 		mcpScopeTasksAdmin: "Administer tasks (cancel, delete)",

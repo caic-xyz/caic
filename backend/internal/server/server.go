@@ -413,7 +413,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		pprof:                 d.Pprof,
 		ipgeoChecker:          d.IPGeoChecker,
 	}
-	mcpRegistry := &caicToolRegistry{serverConfig: s.serverConfigHandlers, tasks: taskService, ci: s.ciHandlers, usage: s.usageHandlers, webFetch: webFetch, audit: newMCPAuditStore()}
+	mcpRegistry := &caicToolRegistry{serverConfig: s.serverConfigHandlers, tasks: taskService, ci: s.ciHandlers, usage: s.usageHandlers, audit: newMCPAuditStore()}
 	s.mcpHandlers = &mcp.Handler{
 		Registry:   mcpRegistry,
 		ServerInfo: mcp.Implementation{Name: "caic", Title: "caic", Version: autoupdate.Version},
