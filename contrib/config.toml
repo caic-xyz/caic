@@ -142,7 +142,7 @@
 # PEM file path (relative paths resolve against the config directory).
 #app_private_key_pem = ""  # e.g. "private-key.pem"
 # Owners/orgs allowed to install the app (highly recommended).
-#app_allowed_owners = ["my-org", "my-username"]
+# app_allowed_owners = ["my-org", "my-username"]
 
 # HMAC-SHA256 secret for webhook verification.
 # Generate with: openssl rand -hex 32
@@ -162,7 +162,7 @@
 #oauth_client_id = ""
 #oauth_client_secret = ""
 # GitLab users allowed to login. Highly recommended.
-#oauth_allowed_users = ["alice", "bob"]
+# oauth_allowed_users = ["alice", "bob"]
 
 # GitLab instance URL. Empty targets gitlab.com (the REST API always does); set
 # only for self-hosted OAuth login.

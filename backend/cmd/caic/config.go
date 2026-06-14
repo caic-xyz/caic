@@ -99,6 +99,12 @@ func defaultConfig() tomlConfig {
 			ExternalURL:  "auto",
 			AllowOrigins: slices.Clone(defaultAllowOrigins),
 		},
+		Harness: map[string]tomlHarness{
+			"claude":   {},
+			"codex":    {},
+			"opencode": {},
+			"pi":       {},
+		},
 		VoiceGateway: tomlVoiceGateway{
 			Config: embeddedVoiceGatewayConfigDefaults(),
 		},
