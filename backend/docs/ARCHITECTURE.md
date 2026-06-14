@@ -38,6 +38,7 @@ graph TD
   pkg_internal_forge_gitlab["internal/forge/gitlab"]
   pkg_internal_gomode["internal/gomode"]
   pkg_internal_harness["internal/harness"]
+  pkg_internal_httplog["internal/httplog"]
   pkg_internal_jsonutil["internal/jsonutil"]
   pkg_internal_mcp["internal/mcp"]
   pkg_internal_preferences["internal/preferences"]
@@ -160,6 +161,7 @@ graph TD
   pkg_internal_server --> pkg_internal_forge_gitlab
   pkg_internal_server --> pkg_internal_gomode
   pkg_internal_server --> pkg_internal_harness
+  pkg_internal_server --> pkg_internal_httplog
   pkg_internal_server --> pkg_internal_mcp
   pkg_internal_server --> pkg_internal_preferences
   pkg_internal_server --> pkg_internal_repos
@@ -307,6 +309,7 @@ graph TD
     pkg_internal_eventreplay["internal/eventreplay"]
     pkg_internal_gomode["internal/gomode"]
     pkg_internal_harness["internal/harness"]
+    pkg_internal_httplog["internal/httplog"]
     pkg_internal_jsonutil["internal/jsonutil"]
     pkg_internal_mcp["internal/mcp"]
     pkg_internal_preferences["internal/preferences"]
@@ -325,6 +328,7 @@ graph TD
   pkg_cmd_caic --> pkg_internal_forge_github
   pkg_cmd_caic --> pkg_internal_server
   pkg_cmd_caic --> pkg_internal_voicegateway
+  pkg_cmd_voice_gateway --> pkg_internal_httplog
   pkg_cmd_voice_gateway --> pkg_internal_voicegateway
   pkg_cmd_voice_gateway --> pkg_internal_voicegateway_voicertc
   pkg_internal_agent --> pkg_internal_agent_relay
@@ -447,6 +451,7 @@ graph TD
   pkg_internal_server --> pkg_internal_forge_gitlab
   pkg_internal_server --> pkg_internal_gomode
   pkg_internal_server --> pkg_internal_harness
+  pkg_internal_server --> pkg_internal_httplog
   pkg_internal_server --> pkg_internal_mcp
   pkg_internal_server --> pkg_internal_preferences
   pkg_internal_server --> pkg_internal_repos
@@ -500,7 +505,7 @@ graph TD
 | Package | Direct backend dependencies |
 |---|---|
 | `cmd/caic` | `internal/app`, `internal/auth`, `internal/autoupdate`, `internal/forge/github`, `internal/server`, `internal/voicegateway` |
-| `cmd/voice-gateway` | `internal/voicegateway`, `internal/voicegateway/voicertc` |
+| `cmd/voice-gateway` | `internal/httplog`, `internal/voicegateway`, `internal/voicegateway/voicertc` |
 | `frontend` | None |
 | `internal/agent` | `internal/agent/relay`, `internal/harness`, `internal/runtime` |
 | `internal/agent/agenttest` | `internal/agent` |
@@ -528,13 +533,14 @@ graph TD
 | `internal/forge/gitlab` | `internal/forge` |
 | `internal/gomode` | `internal/apisdkgen/apispec` |
 | `internal/harness` | None |
+| `internal/httplog` | None |
 | `internal/jsonutil` | None |
 | `internal/mcp` | `internal/apisdkgen/apispec` |
 | `internal/preferences` | None |
 | `internal/repos` | `internal/agent`, `internal/ci`, `internal/eventreplay`, `internal/forge`, `internal/forge/forgecache`, `internal/harness`, `internal/runtime`, `internal/task`, `internal/tasks` |
 | `internal/runtime` | `internal/harness` |
 | `internal/runtime/mdruntime` | `internal/harness`, `internal/runtime` |
-| `internal/server` | `frontend`, `internal/agent`, `internal/auth`, `internal/autoupdate`, `internal/bot`, `internal/ci`, `internal/eventreplay`, `internal/forge`, `internal/forge/forgecache`, `internal/forge/forgemanager`, `internal/forge/github`, `internal/forge/gitlab`, `internal/gomode`, `internal/harness`, `internal/mcp`, `internal/preferences`, `internal/repos`, `internal/runtime`, `internal/server/api`, `internal/server/api/v1`, `internal/server/api/v1conv`, `internal/server/ipgeo`, `internal/task`, `internal/tasks`, `internal/usage`, `internal/voicegateway`, `internal/voicegateway/api`, `internal/voicegateway/voicertc` |
+| `internal/server` | `frontend`, `internal/agent`, `internal/auth`, `internal/autoupdate`, `internal/bot`, `internal/ci`, `internal/eventreplay`, `internal/forge`, `internal/forge/forgecache`, `internal/forge/forgemanager`, `internal/forge/github`, `internal/forge/gitlab`, `internal/gomode`, `internal/harness`, `internal/httplog`, `internal/mcp`, `internal/preferences`, `internal/repos`, `internal/runtime`, `internal/server/api`, `internal/server/api/v1`, `internal/server/api/v1conv`, `internal/server/ipgeo`, `internal/task`, `internal/tasks`, `internal/usage`, `internal/voicegateway`, `internal/voicegateway/api`, `internal/voicegateway/voicertc` |
 | `internal/server/api` | None |
 | `internal/server/api/v1` | `internal/apisdkgen/apispec`, `internal/server/api` |
 | `internal/server/api/v1conv` | `internal/agent`, `internal/forge`, `internal/harness`, `internal/runtime`, `internal/server/api/v1`, `internal/task`, `internal/tasks`, `internal/usage` |

@@ -21,6 +21,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
 	"github.com/caic-xyz/caic/backend/internal/gomode"
+	"github.com/caic-xyz/caic/backend/internal/httplog"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repos"
@@ -261,7 +262,7 @@ func (s *Router) buildHandler() (http.Handler, error) {
 	}
 	mux.HandleFunc("/", newStaticHandler(dist))
 
-	// Middleware chain: logging → host check → auth → decompress → compress → mux.
+	// Middleware chain: log context → logging → IP origin check → host check → auth → decompress → compress → mux.
 	var inner http.Handler = mux
 	inner = compressMiddleware(inner)
 	inner = decompressMiddleware(inner)
@@ -269,32 +270,59 @@ func (s *Router) buildHandler() (http.Handler, error) {
 	if s.hostState != nil {
 		inner = s.hostState.Middleware(inner)
 	}
+	inner = s.ipgeoMiddleware(inner)
+	inner = httplog.Handler{Handler: inner, Attrs: s.httpLogAttrs}
+	inner = httpLogContextMiddleware(inner)
+	return inner, nil
+}
 
+func (s *Router) ipgeoMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		clientIP := ipgeo.GetClientIP(r)
-		origin, allowed := s.ipgeoChecker.CheckOrigin(clientIP)
-		if !allowed {
-			http.Error(w, fmt.Sprintf("forbidden: origin %s (%s) not allowed", clientIP, origin), http.StatusForbidden)
-			slog.Info("http blocked", "m", r.Method, "p", r.URL.Path, "s", http.StatusForbidden, "ip", clientIP, "origin", origin)
+		if s.ipgeoChecker == nil {
+			next.ServeHTTP(w, r)
 			return
 		}
-		start := time.Now()
-		rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
-		inner.ServeHTTP(rw, r)
-		logFn := slog.InfoContext
-		if rw.status < 300 {
-			logFn = slog.DebugContext
+		logCtx := httpLogContextFromRequest(r)
+		clientIP := logCtx.clientIP
+		origin, allowed := s.ipgeoChecker.CheckOrigin(clientIP)
+		logCtx.origin = origin
+		if !allowed {
+			http.Error(w, fmt.Sprintf("forbidden: origin %s (%s) not allowed", clientIP, origin), http.StatusForbidden)
+			return
 		}
-		logFn(r.Context(), "http",
-			"m", r.Method,
-			"p", r.URL.Path,
-			"s", rw.status,
-			"d", roundDuration(time.Since(start)),
-			"b", rw.size,
-			"ip", clientIP,
-			"origin", origin,
-		)
-	}), nil
+		next.ServeHTTP(w, r)
+	})
+}
+
+func httpLogContextMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logCtx := &httpLogContext{clientIP: ipgeo.GetClientIP(r)}
+		r = r.WithContext(context.WithValue(r.Context(), httpLogContextKey{}, logCtx))
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Router) httpLogAttrs(r *http.Request) []slog.Attr {
+	logCtx := httpLogContextFromRequest(r)
+	return []slog.Attr{
+		slog.String("ip", logCtx.clientIP),
+		slog.String("origin", logCtx.origin),
+	}
+}
+
+func httpLogContextFromRequest(r *http.Request) *httpLogContext {
+	logCtx, _ := r.Context().Value(httpLogContextKey{}).(*httpLogContext)
+	if logCtx == nil {
+		return &httpLogContext{clientIP: ipgeo.GetClientIP(r)}
+	}
+	return logCtx
+}
+
+type httpLogContextKey struct{}
+
+type httpLogContext struct {
+	clientIP string
+	origin   string
 }
 
 // authEnabled reports whether OAuth authentication is configured.

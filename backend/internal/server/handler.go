@@ -14,7 +14,6 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
@@ -268,46 +267,4 @@ func emitTaskListEvent(w http.ResponseWriter, flusher http.Flusher, ev v1.TaskLi
 	_, _ = fmt.Fprintf(w, "event: message\ndata: %s\n\n", data)
 	flusher.Flush()
 	return nil
-}
-
-// roundDuration rounds d to 3 significant digits with minimum 1us precision.
-func roundDuration(d time.Duration) time.Duration {
-	for t := 100 * time.Second; t >= 100*time.Microsecond; t /= 10 {
-		if d >= t {
-			return d.Round(t / 100)
-		}
-	}
-	return d.Round(time.Microsecond)
-}
-
-// responseWriter wraps http.ResponseWriter to capture status code and response size.
-type responseWriter struct {
-	http.ResponseWriter
-
-	status int
-	size   int
-}
-
-func (rw *responseWriter) WriteHeader(code int) {
-	rw.status = code
-	rw.ResponseWriter.WriteHeader(code)
-}
-
-func (rw *responseWriter) Write(b []byte) (int, error) {
-	n, err := rw.ResponseWriter.Write(b)
-	rw.size += n
-	return n, err
-}
-
-// Flush implements http.Flusher so SSE handlers can flush through the wrapper.
-func (rw *responseWriter) Flush() {
-	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
-}
-
-// Unwrap returns the underlying ResponseWriter so http.NewResponseController
-// can discover interfaces like http.Flusher.
-func (rw *responseWriter) Unwrap() http.ResponseWriter {
-	return rw.ResponseWriter
 }
