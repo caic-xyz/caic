@@ -14,16 +14,7 @@ import (
 func TestTaskListEvent(t *testing.T) {
 	t.Parallel()
 
-	t.Run("emptySnapshot", func(t *testing.T) {
-		t.Parallel()
-		// Regression: when there are no tasks, Snapshot is make([]Task, 0)
-		// (non-nil empty slice). omitempty omits empty slices, but
-		// omitzero (Go 1.24+) only omits the zero value (nil for slices),
-		// so the empty array is always marshaled.
-		ev := TaskListEvent{
-			Kind:     "snapshot",
-			Snapshot: make([]Task, 0),
-		}
+	assertEmptyArray := func(t *testing.T, ev TaskListEvent, field string) {
 		data, err := json.Marshal(ev)
 		if err != nil {
 			t.Fatal(err)
@@ -32,35 +23,46 @@ func TestTaskListEvent(t *testing.T) {
 		if err := json.Unmarshal(data, &raw); err != nil {
 			t.Fatal(err)
 		}
-		if _, ok := raw["snapshot"]; !ok {
-			t.Error(`"snapshot" field is missing from JSON (zero-value nil was not used)`)
-		}
-		arr, ok := raw["snapshot"].([]any)
+		arr, ok := raw[field].([]any)
 		if !ok {
-			t.Fatalf(`"snapshot" is not an array, got %T`, raw["snapshot"])
+			t.Fatalf("%q is not an array, got %T", field, raw[field])
 		}
 		if len(arr) != 0 {
-			t.Errorf("snapshot array length = %d, want 0", len(arr))
+			t.Errorf("%s array length = %d, want 0", field, len(arr))
+		}
+	}
+
+	t.Run("emptySnapshot", func(t *testing.T) {
+		t.Parallel()
+		cases := []struct {
+			name string
+			ev   TaskListEvent
+		}{
+			{name: "nil", ev: TaskListEvent{Kind: "snapshot"}},
+			{name: "non_nil", ev: TaskListEvent{Kind: "snapshot", Snapshot: make([]Task, 0)}},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				assertEmptyArray(t, tc.ev, "snapshot")
+			})
 		}
 	})
 
 	t.Run("emptyRepos", func(t *testing.T) {
 		t.Parallel()
-		// Same regression check for the Repos field with omitzero.
-		ev := TaskListEvent{
-			Kind:  "repos",
-			Repos: make([]Repo, 0),
+		cases := []struct {
+			name string
+			ev   TaskListEvent
+		}{
+			{name: "nil", ev: TaskListEvent{Kind: "repos"}},
+			{name: "non_nil", ev: TaskListEvent{Kind: "repos", Repos: make([]Repo, 0)}},
 		}
-		data, err := json.Marshal(ev)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var raw map[string]any
-		if err := json.Unmarshal(data, &raw); err != nil {
-			t.Fatal(err)
-		}
-		if _, ok := raw["repos"]; !ok {
-			t.Error(`"repos" field is missing from JSON (zero-value nil was not used)`)
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				assertEmptyArray(t, tc.ev, "repos")
+			})
 		}
 	})
 

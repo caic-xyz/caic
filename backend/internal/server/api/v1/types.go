@@ -289,6 +289,20 @@ type TaskListEvent struct {
 	Warning  string                     `json:"warning,omitempty"`
 }
 
+// MarshalJSON preserves the discriminated-union contract for empty snapshot
+// and repos events. omitzero keeps nil slices out of unrelated event kinds, but
+// clients expect arrays for kind=="snapshot" and kind=="repos".
+func (e TaskListEvent) MarshalJSON() ([]byte, error) { //nolint:gocritic // json.Marshaler must work for top-level value marshaling.
+	type taskListEvent TaskListEvent
+	if e.Kind == "snapshot" && e.Snapshot == nil {
+		e.Snapshot = []Task{}
+	}
+	if e.Kind == "repos" && e.Repos == nil {
+		e.Repos = []Repo{}
+	}
+	return json.Marshal(taskListEvent(e))
+}
+
 // TaskToolInputResp is the response for GET /api/caic/v1/tasks/{id}/tool/{toolUseID}.
 // It returns the full (untruncated) input for a tool call.
 type TaskToolInputResp struct {
