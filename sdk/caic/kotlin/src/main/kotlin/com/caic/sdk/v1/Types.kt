@@ -767,7 +767,7 @@ data class MCPGrantsResp(val grants: List<MCPGrantResp>)
 
 /** RevokeMCPGrantReq is the request for POST /api/caic/v1/server/mcp-grants/{grantID}/revoke. */
 @Serializable
-data class RevokeMCPGrantReq()
+class RevokeMCPGrantReq
 
 /** HarnessInfo is the JSON representation of an available harness. */
 @Serializable

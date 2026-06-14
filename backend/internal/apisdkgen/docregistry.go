@@ -1230,7 +1230,7 @@ func (d *docRegistry) parseStructFields(t reflect.Type) ([]kotlinField, error) {
 	return fields, nil
 }
 
-// emitKotlinStruct writes a @Serializable data class to b.
+// emitKotlinStruct writes a @Serializable Kotlin DTO class to b.
 func (d *docRegistry) emitKotlinStruct(b *strings.Builder, t reflect.Type) error {
 	if doc := d.typeDoc[t.Name()]; doc != "" {
 		b.WriteString(formatBlockDoc(doc, ""))
@@ -1240,6 +1240,12 @@ func (d *docRegistry) emitKotlinStruct(b *strings.Builder, t reflect.Type) error
 		return err
 	}
 	name := t.Name()
+
+	if len(fields) == 0 {
+		b.WriteString("@Serializable\n")
+		fmt.Fprintf(b, "class %s\n", name)
+		return nil
+	}
 
 	// Compact single-line form for structs with ≤2 fields and no @SerialName.
 	if len(fields) <= 2 && !fieldsNeedAnnotation(fields) {

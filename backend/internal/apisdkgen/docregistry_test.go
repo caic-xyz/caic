@@ -23,6 +23,10 @@ type TestSDKEvent struct {
 	Text string `json:"text,omitempty"`
 }
 
+type TestPathOnlyRequest struct {
+	ID string `json:"-" path:"id"`
+}
+
 func TestGenConfigGoTypeToDoc(t *testing.T) {
 	t.Parallel()
 
@@ -98,6 +102,25 @@ func TestDocRegistryGenerateKotlinMCPClient(t *testing.T) {
 			t.Fatalf("ApiClient.kt does not contain %q:\n%s", want, text)
 		}
 	}
+}
+
+func TestDocRegistryEmitKotlinStruct(t *testing.T) {
+	t.Parallel()
+
+	t.Run("path only request", func(t *testing.T) {
+		t.Parallel()
+
+		docs := &docRegistry{}
+		var b strings.Builder
+		if err := docs.emitKotlinStruct(&b, reflect.TypeFor[TestPathOnlyRequest]()); err != nil {
+			t.Fatal(err)
+		}
+		got := b.String()
+		want := "@Serializable\nclass TestPathOnlyRequest\n"
+		if got != want {
+			t.Fatalf("emitKotlinStruct() = %q, want %q", got, want)
+		}
+	})
 }
 
 func TestDocRegistryGenerateTSValidate(t *testing.T) {
