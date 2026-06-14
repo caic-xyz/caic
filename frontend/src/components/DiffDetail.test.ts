@@ -63,6 +63,27 @@ describe("annotateDiffLines", () => {
     expect(lines.some((line) => line.kind === "movedDeleted" || line.kind === "movedAdded")).toBe(false);
   });
 
+  it("marks paired added and deleted lines that only change whitespace", () => {
+    const diff = [
+      "diff --git a/src/main.ts b/src/main.ts",
+      "--- a/src/main.ts",
+      "+++ b/src/main.ts",
+      "@@ -1,3 +1,3 @@",
+      " const keep = true;",
+      "-const value = alpha + beta;",
+      "+const value = alpha  + beta;",
+      "-const changedText = alpha;",
+      "+const changedText = beta;",
+    ].join("\n");
+
+    const lines = annotateDiffLines(diff);
+
+    expect(lines.find((line) => line.text === "-const value = alpha + beta;")?.whitespaceOnly).toBe(true);
+    expect(lines.find((line) => line.text === "+const value = alpha  + beta;")?.whitespaceOnly).toBe(true);
+    expect(lines.find((line) => line.text === "-const changedText = alpha;")?.whitespaceOnly).toBeUndefined();
+    expect(lines.find((line) => line.text === "+const changedText = beta;")?.whitespaceOnly).toBeUndefined();
+  });
+
   it("alternates moved block variants", () => {
     const diff = [
       "diff --git a/src/main.ts b/src/main.ts",

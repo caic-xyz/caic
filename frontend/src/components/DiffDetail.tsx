@@ -67,9 +67,9 @@ export default function DiffDetail(props: Props) {
   function diffLineClass(line: DiffLine): string {
     switch (line.kind) {
       case "added":
-        return styles.diffLineAdded;
+        return line.whitespaceOnly ? styles.diffLineAddedWhitespace : styles.diffLineAdded;
       case "deleted":
-        return styles.diffLineDeleted;
+        return line.whitespaceOnly ? styles.diffLineDeletedWhitespace : styles.diffLineDeleted;
       case "hunk":
         return styles.diffLineHunk;
       case "header":

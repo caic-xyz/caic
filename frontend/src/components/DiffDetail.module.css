@@ -126,6 +126,8 @@
   --color-diff-code-fg: #d4d4d4;
   --color-diff-added-line: #4ec94e;
   --color-diff-deleted-line: #f44;
+  --color-diff-added-whitespace-line: #6daa6d;
+  --color-diff-deleted-whitespace-line: #d07373;
   --color-diff-moved-added-line: #7dd3fc;
   --color-diff-moved-added-alt-line: #a7f3d0;
   --color-diff-moved-deleted-line: #f0abfc;
@@ -156,6 +158,14 @@
 
 .diffLineDeleted {
   color: var(--color-diff-deleted-line);
+}
+
+.diffLineAddedWhitespace {
+  color: var(--color-diff-added-whitespace-line);
+}
+
+.diffLineDeletedWhitespace {
+  color: var(--color-diff-deleted-whitespace-line);
 }
 
 .diffLineMovedAdded {

@@ -19,6 +19,7 @@ export interface DiffLine {
   text: string;
   kind: DiffLineKind;
   movedVariant?: 0 | 1;
+  whitespaceOnly?: boolean;
 }
 
 interface ChangeLine {
@@ -107,6 +108,8 @@ export function annotateDiffLines(diff: string): DiffLine[] {
     }
   });
 
+  markWhitespaceOnlyChanges(lines);
+
   return lines;
 }
 
@@ -126,6 +129,57 @@ function isAddedLine(line: string): boolean {
 
 function isDeletedLine(line: string): boolean {
   return line.startsWith("-") && !line.startsWith("---");
+}
+
+function markWhitespaceOnlyChanges(lines: DiffLine[]) {
+  let index = 0;
+  while (index < lines.length) {
+    if (!isChangeLine(lines[index])) {
+      index++;
+      continue;
+    }
+
+    const deletedLineIndexes: number[] = [];
+    const addedLineIndexes: number[] = [];
+    while (index < lines.length && isChangeLine(lines[index])) {
+      const line = lines[index];
+      if (line.kind === "deleted") deletedLineIndexes.push(index);
+      else if (line.kind === "added") addedLineIndexes.push(index);
+      index++;
+    }
+
+    markWhitespaceOnlyChangeGroup(lines, deletedLineIndexes, addedLineIndexes);
+  }
+}
+
+function isChangeLine(line: DiffLine): boolean {
+  return line.kind === "added" || line.kind === "deleted";
+}
+
+function markWhitespaceOnlyChangeGroup(
+  lines: DiffLine[],
+  deletedLineIndexes: number[],
+  addedLineIndexes: number[],
+) {
+  const usedAddedLineIndexes = new Set<number>();
+  for (const deletedLineIndex of deletedLineIndexes) {
+    const deletedContent = lines[deletedLineIndex].text.slice(1);
+    const normalizedDeleted = removeWhitespace(deletedContent);
+    const addedLineIndex = addedLineIndexes.find((candidate) => {
+      if (usedAddedLineIndexes.has(candidate)) return false;
+      const addedContent = lines[candidate].text.slice(1);
+      return addedContent !== deletedContent && removeWhitespace(addedContent) === normalizedDeleted;
+    });
+    if (addedLineIndex === undefined) continue;
+
+    usedAddedLineIndexes.add(addedLineIndex);
+    lines[deletedLineIndex].whitespaceOnly = true;
+    lines[addedLineIndex].whitespaceOnly = true;
+  }
+}
+
+function removeWhitespace(text: string): string {
+  return text.replace(/\s/g, "");
 }
 
 function findMovedBlocks(
