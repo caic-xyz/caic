@@ -185,6 +185,25 @@ func TestLoadLogs(t *testing.T) {
 			t.Errorf("Prompt = %q, want compressed", tasks[0].Prompt)
 		}
 	})
+	t.Run("ForTaskIDs", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		wantedMeta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "wanted", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude"})
+		unrelatedMeta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "unrelated", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-1"}}, Harness: "claude"})
+		writeLogFile(t, dir, "live1-repo-branch.jsonl", wantedMeta)
+		writeLogFile(t, dir, "live10-repo-branch.jsonl", unrelatedMeta)
+
+		tasks, err := LoadLogsForTaskIDs(dir, []string{"live1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(tasks) != 1 {
+			t.Fatalf("len = %d, want 1", len(tasks))
+		}
+		if tasks[0].TaskID != "live1" || tasks[0].Prompt != "wanted" {
+			t.Errorf("task = (%q, %q), want (live1, wanted)", tasks[0].TaskID, tasks[0].Prompt)
+		}
+	})
 	t.Run("NotExist", func(t *testing.T) {
 		t.Parallel()
 		tasks, err := LoadLogs(filepath.Join(t.TempDir(), "nope"))

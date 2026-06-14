@@ -970,11 +970,30 @@ func (m *Manager) LoadPurgedTasks(all []*task.LoadedTask) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	existingBranches := make(map[string]struct{})
+	for _, e := range m.tasks {
+		if p := e.task.Primary(); p != nil && p.Branch != "" {
+			existingBranches[p.Name+"\x00"+p.Branch] = struct{}{}
+		}
+	}
+	loaded := 0
 	for _, lt := range purged {
 		taskID := ksid.NewID()
+		parsedID := false
 		if len(lt.TaskID) >= 9 {
 			if parsed, parseErr := ksid.Parse(lt.TaskID); parseErr == nil && parsed != 0 {
 				taskID = parsed
+				parsedID = true
+			}
+		}
+		if parsedID {
+			if _, exists := m.tasks[taskID.String()]; exists {
+				continue
+			}
+		}
+		if p := lt.Primary(); p != nil && p.Branch != "" {
+			if _, exists := existingBranches[p.Name+"\x00"+p.Branch]; exists {
+				continue
 			}
 		}
 		t := &task.Task{
@@ -1011,9 +1030,12 @@ func (m *Manager) LoadPurgedTasks(all []*task.LoadedTask) error {
 		}
 		m.setParser(lt)
 		m.tasks[t.ID.String()] = newPurgedEntry(t, lt.Result, lt)
+		loaded++
 	}
-	m.taskChanged()
-	slog.Info("loaded purged tasks from logs", "n", len(purged))
+	if loaded > 0 {
+		m.taskChanged()
+	}
+	slog.Info("loaded purged tasks from logs", "n", loaded, "candidates", len(purged))
 	return nil
 }
 

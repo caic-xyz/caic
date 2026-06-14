@@ -1521,6 +1521,60 @@ func TestManager(t *testing.T) {
 				t.Errorf("Len() = %d, want 1 (new ksid fallback)", m.Len())
 			}
 		})
+		t.Run("valid_skips_existing_live_tasks", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			now := time.Now().UTC()
+			activeID := ksid.NewID()
+			active := &task.Task{
+				ID:            activeID,
+				InitialPrompt: agent.Prompt{Text: "active"},
+				Repos:         []task.RepoMount{{Name: "repo/a", Branch: "caic-live"}},
+			}
+			active.SetTitle("active")
+			m.Insert(activeID.String(), NewEntry(active, nil))
+			duplicateBranchID := ksid.NewID()
+			keptID := ksid.NewID()
+			all := []*task.LoadedTask{
+				{
+					TaskID:            activeID.String(),
+					Prompt:            "replacement by id",
+					Repos:             []task.RepoMount{{Name: "repo/a", Branch: "caic-old"}},
+					LastStateUpdateAt: now,
+					State:             task.StateStopped,
+				},
+				{
+					TaskID:            duplicateBranchID.String(),
+					Prompt:            "replacement by branch",
+					Repos:             []task.RepoMount{{Name: "repo/a", Branch: "caic-live"}},
+					LastStateUpdateAt: now,
+					State:             task.StateStopped,
+				},
+				{
+					TaskID:            keptID.String(),
+					Prompt:            "kept",
+					Repos:             []task.RepoMount{{Name: "repo/a", Branch: "caic-kept"}},
+					LastStateUpdateAt: now,
+					State:             task.StateStopped,
+				},
+			}
+			if err := m.LoadPurgedTasks(all); err != nil {
+				t.Fatalf("LoadPurgedTasks: %v", err)
+			}
+			if got := m.Len(); got != 2 {
+				t.Fatalf("Len() = %d, want active + kept", got)
+			}
+			if _, ok := m.GetEntry(duplicateBranchID.String()); ok {
+				t.Fatal("duplicate branch task was loaded")
+			}
+			activeEntry, _ := m.GetEntry(activeID.String())
+			if got := activeEntry.Task().Title(); got != "active" {
+				t.Errorf("active title = %q, want active", got)
+			}
+			if _, ok := m.GetEntry(keptID.String()); !ok {
+				t.Fatal("kept task was not loaded")
+			}
+		})
 	})
 	t.Run("Sync", func(t *testing.T) {
 		t.Parallel()

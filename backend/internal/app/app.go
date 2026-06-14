@@ -42,11 +42,15 @@ const repoDiscoveryDepth = 3
 type App struct {
 	Server *server.Router
 
-	voiceBridge *voicertc.Bridge
+	voiceBridge        *voicertc.Bridge
+	backgroundStarters []func()
 }
 
 // Serve starts the HTTP server and closes app-owned resources when serving ends.
 func (a *App) Serve(ctx context.Context, ln net.Listener) error {
+	for _, start := range a.backgroundStarters {
+		go start()
+	}
 	err := a.Server.Serve(ctx, ln)
 	if a.voiceBridge != nil {
 		a.voiceBridge.CloseAll()
@@ -109,17 +113,12 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		paths []string
 		err   error
 	}
-	type logsResult struct {
-		logs []*task.LoadedTask
-		err  error
-	}
 	type instancesResult struct {
 		instances []runtime.Instance
 		err       error
 	}
 
 	repoCh := make(chan reposResult, 1)
-	logCh := make(chan logsResult, 1)
 	instanceCh := make(chan instancesResult, 1)
 
 	go func() {
@@ -128,27 +127,19 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		repoCh <- reposResult{paths, err}
 	}()
 	go func() {
-		defer trace.StartRegion(ctx, "load-logs").End()
-		logs, err := task.LoadLogs(logDir)
-		if err == nil {
-			if compressErr := task.CompressTerminalLogs(logs); compressErr != nil {
-				slog.Warn("compress terminal task logs failed", "err", compressErr)
-			}
-		}
-		logCh <- logsResult{logs, err}
-	}()
-	go func() {
 		defer trace.StartRegion(ctx, "list-runtime-instances").End()
 		instances, err := runtimeInventory.List(ctx)
 		instanceCh <- instancesResult{instances, err}
 	}()
 
 	repoRes := <-repoCh
-	logRes := <-logCh
 	instanceRes := <-instanceCh
 
 	if repoRes.err != nil {
 		return nil, fmt.Errorf("discover repos: %w", repoRes.err)
+	}
+	if instanceRes.err != nil {
+		return nil, fmt.Errorf("list runtime instances: %w", instanceRes.err)
 	}
 
 	settings, err := loadSettings(filepath.Join(cfg.Dirs.ConfigDir, "settings.json"))
@@ -350,40 +341,34 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	repoService.RegisterNoRepoRunner(ctx)
 	taskMgr.Start()
 
-	phase3 := trace.StartRegion(ctx, "load-purged-tasks")
-	if logRes.err != nil {
-		slog.Warn("load logs failed", "err", logRes.err)
-	} else if err := taskMgr.LoadPurgedTasks(logRes.logs); err != nil {
-		phase3.End()
-		return nil, fmt.Errorf("load purged tasks: %w", err)
+	phase3 := trace.StartRegion(ctx, "load-live-task-logs")
+	liveLogs, err := loadRuntimeTaskLogs(ctx, logDir, runtimeInventory, instanceRes.instances)
+	if err != nil {
+		slog.WarnContext(ctx, "load live task logs failed", "err", err)
 	}
 	phase3.End()
 
 	phase4 := trace.StartRegion(ctx, "adopt-runtime-instances")
-	if instanceRes.err != nil {
-		slog.Warn("list failed, skipping adoption", "rt", mdClient.Runtime, "err", instanceRes.err)
-	} else {
-		adopted, err := taskMgr.AdoptInstances(ctx, repoService.AdoptionRepos(), instanceRes.instances, logRes.logs)
-		if err != nil {
-			phase4.End()
-			return nil, fmt.Errorf("adopt runtime instances: %w", err)
+	adopted, err := taskMgr.AdoptInstances(ctx, repoService.AdoptionRepos(), instanceRes.instances, liveLogs)
+	if err != nil {
+		phase4.End()
+		return nil, fmt.Errorf("adopt runtime instances: %w", err)
+	}
+	adoption := &adoptedTaskWiring{
+		ctx:       ctx,
+		authStore: authStore,
+		ciService: ciService,
+		forge:     forgeManager,
+		taskMgr:   taskMgr,
+		repos:     repoService,
+	}
+	for i := range adopted {
+		at := &adopted[i]
+		if at.ForgeOwner != "" && at.Task.GetPR() > 0 && at.ForgeKind != "" {
+			adoption.WireCIMonitoring(ctx, at)
 		}
-		adoption := &adoptedTaskWiring{
-			ctx:       ctx,
-			authStore: authStore,
-			ciService: ciService,
-			forge:     forgeManager,
-			taskMgr:   taskMgr,
-			repos:     repoService,
-		}
-		for i := range adopted {
-			at := &adopted[i]
-			if at.ForgeOwner != "" && at.Task.GetPR() > 0 && at.ForgeKind != "" {
-				adoption.WireCIMonitoring(ctx, at)
-			}
-			if at.Task.ForgeIssue == 0 && at.Task.GetPR() == 0 && at.ForgeOwner != "" && at.Branch != "" && at.ForgeKind != "" {
-				go adoption.LookupExternalPRForTask(at) //nolint:contextcheck // App-lifetime goroutine uses adoption ctx.
-			}
+		if at.Task.ForgeIssue == 0 && at.Task.GetPR() == 0 && at.ForgeOwner != "" && at.Branch != "" && at.ForgeKind != "" {
+			go adoption.LookupExternalPRForTask(at) //nolint:contextcheck // App-lifetime goroutine uses adoption ctx.
 		}
 	}
 	phase4.End()
@@ -414,7 +399,67 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	}()
 	go newRepoWatcher(ctx, absRoot, repoService).Watch()
 
-	return &App{Server: s, voiceBridge: voiceBridge}, nil
+	backgroundStarters := []func(){
+		func() {
+			startupCtx, tk := trace.NewTask(ctx, "load-purged-tasks")
+			defer tk.End()
+			trace.Log(startupCtx, "startup", "load-purged-tasks: begin")
+			logs, err := task.LoadLogs(logDir)
+			if err != nil {
+				slog.WarnContext(startupCtx, "load logs failed", "err", err)
+				return
+			}
+			if err := task.CompressTerminalLogs(logs); err != nil {
+				slog.WarnContext(startupCtx, "compress terminal task logs failed", "err", err)
+			}
+			if err := taskMgr.LoadPurgedTasks(logs); err != nil {
+				slog.ErrorContext(startupCtx, "load purged tasks failed", "err", err)
+			}
+		},
+	}
+
+	return &App{Server: s, voiceBridge: voiceBridge, backgroundStarters: backgroundStarters}, nil
+}
+
+func loadRuntimeTaskLogs(ctx context.Context, logDir string, inventory runtime.Inventory, instances []runtime.Instance) ([]*task.LoadedTask, error) {
+	seen := make(map[string]struct{}, len(instances))
+	ids := make([]string, 0, len(instances))
+	var errs []error
+	for i := range instances {
+		id, err := runtimeTaskID(ctx, inventory, instances[i].ID)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	logs, err := task.LoadLogsForTaskIDs(logDir, ids)
+	if err != nil {
+		errs = append(errs, err)
+	}
+	return logs, errors.Join(errs...)
+}
+
+func runtimeTaskID(ctx context.Context, inventory runtime.Inventory, id runtime.InstanceID) (string, error) {
+	value, err := inventory.Metadata(ctx, id, runtime.MetadataTaskID)
+	if err != nil {
+		return "", fmt.Errorf("metadata %s on %s: %w", runtime.MetadataTaskID, id, err)
+	}
+	if value != "" {
+		return value, nil
+	}
+	value, err = inventory.Metadata(ctx, id, runtime.MetadataLegacyTaskID)
+	if err != nil {
+		return "", fmt.Errorf("metadata %s on %s: %w", runtime.MetadataLegacyTaskID, id, err)
+	}
+	return value, nil
 }
 
 func initProvider(ctx context.Context, cfg *server.Config, backend *mdruntime.Backend) genai.Provider {

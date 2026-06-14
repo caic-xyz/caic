@@ -122,6 +122,34 @@ func (lt *LoadedTask) LogPath() string {
 // Only the header and result trailer are parsed; call LoadMessages for
 // full conversation history. Call SetParser on each task before LoadMessages.
 func LoadLogs(logDir string) ([]*LoadedTask, error) {
+	paths, err := logPaths(logDir, nil)
+	if err != nil {
+		return nil, err
+	}
+	return loadLogsFromPaths(paths), nil
+}
+
+// LoadLogsForTaskIDs loads metadata only for logs whose parsed filename task ID
+// matches one of taskIDs. It avoids parsing unrelated purged task logs during
+// startup adoption of live runtime instances.
+func LoadLogsForTaskIDs(logDir string, taskIDs []string) ([]*LoadedTask, error) {
+	ids := make(map[string]struct{}, len(taskIDs))
+	for _, id := range taskIDs {
+		if id != "" {
+			ids[id] = struct{}{}
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	paths, err := logPaths(logDir, ids)
+	if err != nil {
+		return nil, err
+	}
+	return loadLogsFromPaths(paths), nil
+}
+
+func logPaths(logDir string, taskIDs map[string]struct{}) ([]string, error) {
 	entries, err := os.ReadDir(logDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -138,6 +166,11 @@ func LoadLogs(logDir string) ([]*LoadedTask, error) {
 			continue
 		}
 		base := trimLogExt(e.Name())
+		if taskIDs != nil {
+			if _, ok := taskIDs[taskIDFromLogBase(base)]; !ok {
+				continue
+			}
+		}
 		path := filepath.Join(logDir, e.Name())
 		if prev := pathsByBase[base]; prev == "" || isLogCompressed(path) {
 			pathsByBase[base] = path
@@ -148,7 +181,10 @@ func LoadLogs(logDir string) ([]*LoadedTask, error) {
 		paths = append(paths, p)
 	}
 	slices.Sort(paths)
+	return paths, nil
+}
 
+func loadLogsFromPaths(paths []string) []*LoadedTask {
 	// Parse headers in parallel — each file is independent.
 	type result struct {
 		lt  *LoadedTask
@@ -178,7 +214,14 @@ func LoadLogs(logDir string) ([]*LoadedTask, error) {
 	slices.SortFunc(tasks, func(a, b *LoadedTask) int {
 		return a.StartedAt.Compare(b.StartedAt)
 	})
-	return tasks, nil
+	return tasks
+}
+
+func taskIDFromLogBase(base string) string {
+	if before, _, ok := strings.Cut(base, "-"); ok {
+		return before
+	}
+	return base
 }
 
 // SetParser sets the parse function for lazy message loading.
@@ -628,10 +671,7 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 
 	// Parse task ID from filename: "<taskID>-<safeRepo>-<safeBranch>.jsonl[.zst]".
 	base := trimLogExt(filepath.Base(path))
-	taskIDStr := base
-	if before, _, ok := strings.Cut(base, "-"); ok {
-		taskIDStr = before
-	}
+	taskIDStr := taskIDFromLogBase(base)
 
 	repos := make([]RepoMount, len(meta.Repos))
 	for i, mr := range meta.Repos {
@@ -717,10 +757,7 @@ func loadCompressedLogHeader(path string) (_ *LoadedTask, retErr error) {
 	}
 
 	base := trimLogExt(filepath.Base(path))
-	taskIDStr := base
-	if before, _, ok := strings.Cut(base, "-"); ok {
-		taskIDStr = before
-	}
+	taskIDStr := taskIDFromLogBase(base)
 
 	repos := make([]RepoMount, len(meta.Repos))
 	for i, mr := range meta.Repos {
