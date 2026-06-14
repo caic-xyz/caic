@@ -601,6 +601,22 @@ function createAppStore() {
   const [forkDisplay, setForkDisplay] = createSignal(false);
   const [forkSudo, setForkSudo] = createSignal(false);
   const [forkGitHubToken, setForkGitHubToken] = createSignal(false);
+  // Fork dialog harness/model/effort selection, mirroring selectHarness/selectModel/selectEffort.
+  const selectForkHarness = (harness: string) => {
+    const model = selectedModelForHarness(harness);
+    setForkHarness(harness);
+    setForkModel(model);
+    setForkEffort(selectedEffortForModel(harness, model));
+  };
+  const selectForkModel = (model: string) => {
+    setForkModel(model);
+    setPrefModel(forkHarness(), model);
+    setForkEffort(selectedEffortForModel(forkHarness(), model));
+  };
+  const selectForkEffort = (effort: string) => {
+    setForkEffort(effort);
+    setPrefEffort(forkHarness(), forkModel(), effort);
+  };
 
   // Repos available to add in the fork dialog (exclude already-selected extras and source task repos).
   const forkSourceRepoPaths = () => {
@@ -796,8 +812,8 @@ function createAppStore() {
     // clone dialog
     cloneOpen, setCloneOpen, cloning, cloneError, setCloneError, submitClone,
     // fork dialog
-    forkTaskId, setForkTaskId, forkPrompt, setForkPrompt, forkHarness, setForkHarness,
-    forkModel, setForkModel, forkEffort, setForkEffort, forkExtraRepos, setForkExtraRepos,
+    forkTaskId, setForkTaskId, forkPrompt, setForkPrompt, forkHarness, setForkHarness: selectForkHarness,
+    forkModel, setForkModel: selectForkModel, forkEffort, setForkEffort: selectForkEffort, forkExtraRepos, setForkExtraRepos,
     forkTailscale, setForkTailscale, forkUSB, setForkUSB, forkDisplay, setForkDisplay,
     forkSudo, setForkSudo, forkGitHubToken, setForkGitHubToken,
     forkAvailableRecent, forkAvailableRest, submitFork,

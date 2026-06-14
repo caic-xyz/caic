@@ -1,0 +1,79 @@
+/* Styles for the ForkDialog modal. */
+
+.forkDialog {
+  background: #fff;
+  border-radius: var(--radius-xl);
+  padding: 1.5rem;
+  width: calc(100vw - 2rem);
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  border: none;
+}
+
+.forkDialog::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.forkTitle {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.forkRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.forkRow > select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.forkInput {
+  padding: 0.5rem 0.6rem;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  color: inherit;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 2.5em;
+  max-height: 10rem;
+  overflow-y: auto;
+}
+
+.forkInput:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(74, 144, 217, 0.2);
+}
+
+.forkActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.forkCancel {
+  padding: 0.4rem 0.9rem;
+  font: inherit;
+  font-size: 0.9rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: #fff;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.forkCancel:hover {
+  background: var(--color-bg-input);
+}
