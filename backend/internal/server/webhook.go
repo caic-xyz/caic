@@ -58,14 +58,20 @@ func (h *WebhookHandlers) HandleGitHub(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	event := r.Header.Get("X-Github-Event")
+	delivery := r.Header.Get("X-Github-Delivery")
 	sig := r.Header.Get("X-Hub-Signature-256")
 	if err := github.VerifySignature(h.githubSecret, body, sig); err != nil {
-		slog.Warn("webhook signature mismatch", "err", err)
+		slog.WarnContext(r.Context(), "github webhook signature mismatch",
+			"event", event,
+			"delivery", delivery,
+			"body_bytes", len(body),
+			"signature", signaturePresence(sig),
+			"err", err)
 		http.Error(w, "signature verification failed", http.StatusUnauthorized)
 		return
 	}
-	event := r.Header.Get("X-Github-Event")
-	slog.Info("github webhook", "event", event)
+	slog.InfoContext(r.Context(), "github webhook", "event", event, "delivery", delivery)
 	switch event {
 	case "issues":
 		var ev github.IssuesEvent
@@ -190,6 +196,13 @@ func (h *WebhookHandlers) HandleGitLab(w http.ResponseWriter, r *http.Request) {
 		// Unknown event — silently ignore, return 200.
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func signaturePresence(sig string) string {
+	if sig == "" {
+		return "missing"
+	}
+	return "present"
 }
 
 // webhookOnCI handles a CI completion event from a forge webhook by fetching

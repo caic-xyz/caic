@@ -10,8 +10,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/bot"
@@ -283,6 +285,47 @@ func TestHandleGitHubWebhook(t *testing.T) {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusNoContent)
 		}
 	})
+}
+
+func TestHandleGitHubWebhookLogging(t *testing.T) { //nolint:paralleltest // Mutates the global slog default.
+	var logs bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(old) })
+
+	secret := []byte("test-secret-abc123")
+	s := newTestRouter(t)
+	s.webhooks.githubSecret = secret
+	handler, err := s.buildHandler()
+	if err != nil {
+		t.Fatalf("buildHandler: %v", err)
+	}
+
+	body := []byte(`{}`)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/webhooks/github", bytes.NewReader(body))
+	req.Header.Set("X-Github-Event", "ping")
+	req.Header.Set("X-Github-Delivery", "delivery-123")
+	req.Header.Set("X-Hub-Signature-256", signGitHub(body, []byte("wrong-secret")))
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+	got := logs.String()
+	for _, want := range []string{
+		`"msg":"github webhook signature mismatch"`,
+		`"delivery":"delivery-123"`,
+		`"signature":"present"`,
+		`"msg":"http"`,
+		`"p":"/webhooks/github"`,
+		`"s":401`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("logs missing %s: %s", want, got)
+		}
+	}
 }
 
 func TestHandleGitLabWebhook(t *testing.T) {

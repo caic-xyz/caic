@@ -249,11 +249,13 @@ func (s *Router) buildHandler() (http.Handler, error) {
 	}
 	mux.Handle("/logos/", http.StripPrefix("/logos/", http.FileServer(http.FS(logosFS))))
 
-	// Unmatched API paths must not fall through to the SPA: this subtree is more
-	// specific than "/", so any /api/ request without a registered route (an
-	// unknown or disabled endpoint) gets 404 instead of index.html. Registered
-	// subtrees like /api/caic/v1/ are more specific still and take precedence.
+	// Unmatched API/webhook/static paths must not fall through to the SPA: this subtree is more specific than
+	// "/", so any /api/ request without a registered route (an unknown or disabled endpoint) gets 404 instead
+	// of index.html. Registered subtrees like /api/caic/v1/ are more specific still and take precedence.
+	mux.Handle("/.well-known/", http.NotFoundHandler())
 	mux.Handle("/api/", http.NotFoundHandler())
+	mux.Handle("/static/", http.NotFoundHandler())
+	mux.Handle("/webhooks/", http.NotFoundHandler())
 
 	// Serve embedded frontend with SPA fallback and precompressed variants.
 	dist, err := fs.Sub(frontend.Files, "dist")
