@@ -1,6 +1,6 @@
 // Route definition and generated client method emitters.
 
-package main
+package apisdkgen
 
 import (
 	"fmt"
@@ -9,8 +9,8 @@ import (
 	"strings"
 )
 
-// routeDef describes a single API endpoint for generated clients and docs.
-type routeDef struct {
+// Route describes a single API endpoint for generated clients and docs.
+type Route struct {
 	Name        string
 	Doc         string
 	Method      string
@@ -24,18 +24,18 @@ type routeDef struct {
 	HeadersArg  bool
 }
 
-func (r *routeDef) reqName() string {
+func (r *Route) reqName() string {
 	if r.Req == nil {
 		return ""
 	}
 	return r.Req.Name()
 }
 
-func (r *routeDef) respName() string {
+func (r *Route) respName() string {
 	return r.Resp.Name()
 }
 
-func (r *routeDef) categoryName() string {
+func (r *Route) categoryName() string {
 	if r.Category != "" {
 		return r.Category
 	}
@@ -49,7 +49,7 @@ func (r *routeDef) categoryName() string {
 	return strings.ToUpper(p[:1]) + p[1:]
 }
 
-func (r *routeDef) writeTSJSONMethod(b *strings.Builder, params []string) {
+func (r *Route) writeTSJSONMethod(b *strings.Builder, params []string) {
 	if r.Doc != "" {
 		b.WriteString(formatBlockDoc(r.Doc, "    "))
 	}
@@ -89,7 +89,7 @@ func (r *routeDef) writeTSJSONMethod(b *strings.Builder, params []string) {
 	}
 }
 
-func (r *routeDef) writeTSSSEMethod(b *strings.Builder, params []string) {
+func (r *Route) writeTSSSEMethod(b *strings.Builder, params []string) {
 	if r.Doc != "" {
 		b.WriteString(formatBlockDoc(r.Doc, "    "))
 	}
@@ -114,7 +114,7 @@ func (r *routeDef) writeTSSSEMethod(b *strings.Builder, params []string) {
 	b.WriteString("    },\n")
 }
 
-func (r *routeDef) writeKotlinJSONFunc(b *strings.Builder, params []string) {
+func (r *Route) writeKotlinJSONFunc(b *strings.Builder, params []string) {
 	if r.Doc != "" {
 		b.WriteString(formatBlockDoc(r.Doc, "    "))
 	}
@@ -156,7 +156,7 @@ func (r *routeDef) writeKotlinJSONFunc(b *strings.Builder, params []string) {
 	}
 }
 
-func (r *routeDef) writeKotlinSSEFunc(b *strings.Builder, params []string) {
+func (r *Route) writeKotlinSSEFunc(b *strings.Builder, params []string) {
 	if r.Doc != "" {
 		b.WriteString(formatBlockDoc(r.Doc, "    "))
 	}
@@ -169,7 +169,7 @@ func (r *routeDef) writeKotlinSSEFunc(b *strings.Builder, params []string) {
 	fmt.Fprintf(b, "    fun %s(%s): Flow<%s> = sseFlow<%s>(%s)\n", r.Name, strings.Join(args, ", "), respName, respName, ktPath)
 }
 
-func (r *routeDef) writeKotlinReconnectingFunc(b *strings.Builder, params []string) {
+func (r *Route) writeKotlinReconnectingFunc(b *strings.Builder, params []string) {
 	if r.Doc != "" {
 		b.WriteString(formatBlockDoc(r.Doc, "    "))
 	}
@@ -188,7 +188,7 @@ func (r *routeDef) writeKotlinReconnectingFunc(b *strings.Builder, params []stri
 		reconnectName, strings.Join(args, ", "), r.respName(), r.Name, strings.Join(callArgs, ", "))
 }
 
-func (r *routeDef) writeSwiftJSONFunc(b *strings.Builder, params []string) {
+func (r *Route) writeSwiftJSONFunc(b *strings.Builder, params []string) {
 	if r.Doc != "" {
 		b.WriteString(formatSwiftDoc(r.Doc, "    "))
 	}
@@ -226,7 +226,7 @@ func (r *routeDef) writeSwiftJSONFunc(b *strings.Builder, params []string) {
 	b.WriteString("    }\n")
 }
 
-func (r *routeDef) writeSwiftSSEFunc(b *strings.Builder, params []string) {
+func (r *Route) writeSwiftSSEFunc(b *strings.Builder, params []string) {
 	if r.Doc != "" {
 		b.WriteString(formatSwiftDoc(r.Doc, "    "))
 	}
@@ -241,7 +241,7 @@ func (r *routeDef) writeSwiftSSEFunc(b *strings.Builder, params []string) {
 	b.WriteString("    }\n")
 }
 
-func (r *routeDef) writeSwiftReconnectingFunc(b *strings.Builder, params []string) {
+func (r *Route) writeSwiftReconnectingFunc(b *strings.Builder, params []string) {
 	allParams := slices.Concat(params, r.QueryParams)
 	args := make([]string, 0, len(allParams))
 	callArgs := make([]string, 0, len(allParams))

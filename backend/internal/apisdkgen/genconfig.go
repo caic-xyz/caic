@@ -1,120 +1,120 @@
 // SDK generation configuration and configured type helpers.
 
-package main
+package apisdkgen
 
 import (
 	"fmt"
 	"reflect"
 )
 
-// errorCodeDef describes an API error code for docs and generated constants.
-type errorCodeDef struct {
-	code   string
-	status int
+// ErrorCode describes an API error code for docs and generated constants.
+type ErrorCode struct {
+	Code   string
+	Status int
 }
 
-// genConfig holds configuration for SDK code generation, created once in mainImpl
-// and threaded through docRegistry.
-type genConfig struct {
-	routes             []routeDef
-	sdkPackagePaths    map[string]struct{}
-	extraSeeds         []reflect.Type
-	documentExtraSeeds bool
+// Config holds configuration for SDK code generation.
+type Config struct {
+	Routes             []Route
+	SDKPackagePaths    map[string]struct{}
+	ExtraSeeds         []reflect.Type
+	DocumentExtraSeeds bool
 
-	errorModel         clientErrorModel
-	kotlinPackage      string
-	apiDocTitle        string
-	apiDocIntro        string
-	errorDoc           string
-	mcpProtocolVersion string
-	sectionComments    map[string]string
-	specialTypes       []specialType
-	sseSeeds           []reflect.Type
-	discriminated      []string // Type names using kind-based dispatch in TS validators
-	errorCodes         []errorCodeDef
+	ErrorModel         ClientErrorModel
+	KotlinPackage      string
+	APIDocTitle        string
+	APIDocIntro        string
+	ErrorDoc           string
+	MCPProtocolVersion string
+	SectionComments    map[string]string
+	SpecialTypes       []SpecialType
+	SSESeeds           []reflect.Type
+	Discriminated      []string // Type names using kind-based dispatch in TS validators
+	ErrorCodes         []ErrorCode
 }
 
-// lookupSpecial returns the matching specialType entry for t, or nil.
-func (c *genConfig) lookupSpecial(t reflect.Type) *specialType {
-	for i := range c.specialTypes {
-		if c.specialTypes[i].t == t {
-			return &c.specialTypes[i]
+// lookupSpecial returns the matching SpecialType entry for t, or nil.
+func (c *Config) lookupSpecial(t reflect.Type) *SpecialType {
+	for i := range c.SpecialTypes {
+		if c.SpecialTypes[i].Type == t {
+			return &c.SpecialTypes[i]
 		}
 	}
 	return nil
 }
 
-func (c *genConfig) isSDKPkg(pkgPath string) bool {
-	_, ok := c.sdkPackagePaths[pkgPath]
+func (c *Config) isSDKPkg(pkgPath string) bool {
+	_, ok := c.SDKPackagePaths[pkgPath]
 	return ok
 }
 
-func (c *genConfig) clientErrorModel() clientErrorModel {
-	m := c.errorModel
-	if m.typeName == "" {
-		m.typeName = "ErrorResponse"
+func (c *Config) clientErrorModel() ClientErrorModel {
+	m := c.ErrorModel
+	if m.TypeName == "" {
+		m.TypeName = "ErrorResponse"
 	}
-	if m.tsCodeExpr == "" {
-		m.tsCodeExpr = "err.error.code"
+	if m.TSCodeExpr == "" {
+		m.TSCodeExpr = "err.error.code"
 	}
-	if m.tsMessageExpr == "" {
-		m.tsMessageExpr = "err.error.message"
+	if m.TSMessageExpr == "" {
+		m.TSMessageExpr = "err.error.message"
 	}
-	if m.tsDetailsExpr == "" {
-		m.tsDetailsExpr = "err.details"
+	if m.TSDetailsExpr == "" {
+		m.TSDetailsExpr = "err.details"
 	}
-	if m.ktCodeExpr == "" {
-		m.ktCodeExpr = "err.error.code"
+	if m.KTCodeExpr == "" {
+		m.KTCodeExpr = "err.error.code"
 	}
-	if m.ktMessageExpr == "" {
-		m.ktMessageExpr = "err.error.message"
+	if m.KTMessageExpr == "" {
+		m.KTMessageExpr = "err.error.message"
 	}
-	if m.ktDetailsExpr == "" {
-		m.ktDetailsExpr = "err.details"
+	if m.KTDetailsExpr == "" {
+		m.KTDetailsExpr = "err.details"
 	}
-	if m.swiftCodeExpr == "" {
-		m.swiftCodeExpr = "errResp.error.code"
+	if m.SwiftCodeExpr == "" {
+		m.SwiftCodeExpr = "errResp.error.code"
 	}
-	if m.swiftMessageExpr == "" {
-		m.swiftMessageExpr = "errResp.error.message"
+	if m.SwiftMessageExpr == "" {
+		m.SwiftMessageExpr = "errResp.error.message"
 	}
-	if m.swiftDetailsExpr == "" {
-		m.swiftDetailsExpr = "nil"
+	if m.SwiftDetailsExpr == "" {
+		m.SwiftDetailsExpr = "nil"
 	}
 	return m
 }
 
-type clientErrorModel struct {
-	typeName string
+// ClientErrorModel describes how generated clients extract API error details.
+type ClientErrorModel struct {
+	TypeName string
 
-	tsCodeExpr    string
-	tsMessageExpr string
-	tsDetailsExpr string
+	TSCodeExpr    string
+	TSMessageExpr string
+	TSDetailsExpr string
 
-	ktCodeExpr    string
-	ktMessageExpr string
-	ktDetailsExpr string
+	KTCodeExpr    string
+	KTMessageExpr string
+	KTDetailsExpr string
 
-	swiftCodeExpr    string
-	swiftMessageExpr string
-	swiftDetailsExpr string
+	SwiftCodeExpr    string
+	SwiftMessageExpr string
+	SwiftDetailsExpr string
 }
 
-// specialTypes defines custom mappings for Go types that need non-standard
+// SpecialType defines custom mappings for Go types that need non-standard
 // serialization in the generated SDK clients. Each entry maps a Go reflect.Type
 // to its language-specific representation and optional TS validator template.
-type specialType struct {
-	t          reflect.Type
-	tsType     string // TypeScript type
-	ktType     string // Kotlin type
-	swiftType  string // Swift type
-	docType    string // API doc type
-	tsValidate string // TS validator format string: %[1]s=pathExpr, %[2]q=pathLit
+type SpecialType struct {
+	Type       reflect.Type
+	TSType     string // TypeScript type
+	KTType     string // Kotlin type
+	SwiftType  string // Swift type
+	DocType    string // API doc type
+	TSValidate string // TS validator format string: %[1]s=pathExpr, %[2]q=pathLit
 }
 
 // walkSDKTypes traverses struct types reachable from seeds in post-order
 // (leaves first), returning only configured SDK package struct types.
-func (c *genConfig) walkSDKTypes(seeds []reflect.Type) []reflect.Type {
+func (c *Config) walkSDKTypes(seeds []reflect.Type) []reflect.Type {
 	seen := map[reflect.Type]struct{}{}
 	var order []reflect.Type
 
@@ -152,11 +152,11 @@ func (c *genConfig) walkSDKTypes(seeds []reflect.Type) []reflect.Type {
 
 // collectNamedSlices returns named slice types from SDK packages that appear
 // as fields in the given struct types.
-func (c *genConfig) collectNamedSlices(structs []sdkType) []reflect.Type {
+func (c *Config) collectNamedSlices(structs []sdkType) []reflect.Type {
 	seen := map[reflect.Type]struct{}{}
 	var order []reflect.Type
 	for _, ks := range structs {
-		for f := range ks.t.Fields() {
+		for f := range ks.Type.Fields() {
 			ft := f.Type
 			if ft.Kind() == reflect.Pointer {
 				ft = ft.Elem()
@@ -176,10 +176,10 @@ func (c *genConfig) collectNamedSlices(structs []sdkType) []reflect.Type {
 
 // routeSeedTypes returns the set of request and response types from the
 // route table, used to seed type discovery for SDK generation.
-func (c *genConfig) routeSeedTypes() []reflect.Type {
+func (c *Config) routeSeedTypes() []reflect.Type {
 	var seeds []reflect.Type
-	for i := range c.routes {
-		r := &c.routes[i]
+	for i := range c.Routes {
+		r := &c.Routes[i]
 		if r.Req != nil {
 			seeds = append(seeds, r.Req)
 		}
@@ -188,27 +188,27 @@ func (c *genConfig) routeSeedTypes() []reflect.Type {
 	return seeds
 }
 
-func (c *genConfig) hasSSERoutes() bool {
-	for i := range c.routes {
-		if c.routes[i].IsSSE {
+func (c *Config) hasSSERoutes() bool {
+	for i := range c.Routes {
+		if c.Routes[i].IsSSE {
 			return true
 		}
 	}
 	return false
 }
 
-func (c *genConfig) sdkSeedTypes() []reflect.Type {
+func (c *Config) sdkSeedTypes() []reflect.Type {
 	seeds := c.routeSeedTypes()
-	seeds = append(seeds, c.extraSeeds...)
+	seeds = append(seeds, c.ExtraSeeds...)
 	return seeds
 }
 
 // tsPrimitiveValidator returns the validator expression for a primitive/special type.
 // For special types with a tsValidate template, it formats the expression using
 // pathExpr and pathLit. Otherwise it falls back to kind-based validation.
-func (c *genConfig) tsPrimitiveValidator(t reflect.Type, pathExpr, pathLit string) (string, error) {
-	if m := c.lookupSpecial(t); m != nil && m.tsValidate != "" {
-		return fmt.Sprintf(m.tsValidate, pathExpr, pathLit), nil
+func (c *Config) tsPrimitiveValidator(t reflect.Type, pathExpr, pathLit string) (string, error) {
+	if m := c.lookupSpecial(t); m != nil && m.TSValidate != "" {
+		return fmt.Sprintf(m.TSValidate, pathExpr, pathLit), nil
 	}
 	switch t.Kind() {
 	case reflect.String:
@@ -224,7 +224,7 @@ func (c *genConfig) tsPrimitiveValidator(t reflect.Type, pathExpr, pathLit strin
 
 // tsElemValidatorFunc returns a function expression (v: unknown) => validated
 // for use as the element validator callback in validateArray/validateRecord.
-func (c *genConfig) tsElemValidatorFunc(t reflect.Type, pathLit string) (string, error) {
+func (c *Config) tsElemValidatorFunc(t reflect.Type, pathLit string) (string, error) {
 	if t.Kind() == reflect.Pointer {
 		return c.tsElemValidatorFunc(t.Elem(), pathLit)
 	}
@@ -239,12 +239,12 @@ func (c *genConfig) tsElemValidatorFunc(t reflect.Type, pathLit string) (string,
 }
 
 // goTypeToDoc maps a Go reflect.Type to a TypeScript-style string for docs.
-func (c *genConfig) goTypeToDoc(t reflect.Type) (string, error) {
+func (c *Config) goTypeToDoc(t reflect.Type) (string, error) {
 	if t.Kind() == reflect.Pointer {
 		return c.goTypeToDoc(t.Elem())
 	}
 	if m := c.lookupSpecial(t); m != nil {
-		return m.docType, nil
+		return m.DocType, nil
 	}
 	switch t.Kind() {
 	case reflect.String:

@@ -1,6 +1,6 @@
 // Generic typed SDK and API reference generator helpers.
 
-package main
+package apisdkgen
 
 import (
 	"go/ast"

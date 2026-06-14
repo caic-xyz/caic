@@ -1,6 +1,6 @@
 // Tests for SDK output generation methods.
 
-package main
+package apisdkgen
 
 import (
 	"encoding/json"
@@ -22,31 +22,31 @@ type TestSDKEvent struct {
 func TestGenConfigGoTypeToDoc(t *testing.T) {
 	t.Parallel()
 
-	cfg := &genConfig{
-		specialTypes: []specialType{
-			{t: reflect.TypeFor[json.RawMessage](), docType: "JSONValue"},
-			{t: reflect.TypeFor[any](), docType: "JSONValue"},
+	cfg := &Config{
+		SpecialTypes: []SpecialType{
+			{Type: reflect.TypeFor[json.RawMessage](), DocType: "JSONValue"},
+			{Type: reflect.TypeFor[any](), DocType: "JSONValue"},
 		},
 	}
 	for _, tc := range []struct {
 		name string
-		t    reflect.Type
+		typ  reflect.Type
 		want string
 	}{
-		{name: "string boolean map", t: reflect.TypeFor[map[string]bool](), want: "Record<string, boolean>"},
-		{name: "string value map", t: reflect.TypeFor[map[string]string](), want: "Record<string, string>"},
-		{name: "raw JSON map", t: reflect.TypeFor[map[string]json.RawMessage](), want: "Record<string, JSONValue>"},
-		{name: "any map", t: reflect.TypeFor[map[string]any](), want: "Record<string, JSONValue>"},
+		{name: "string boolean map", typ: reflect.TypeFor[map[string]bool](), want: "Record<string, boolean>"},
+		{name: "string value map", typ: reflect.TypeFor[map[string]string](), want: "Record<string, string>"},
+		{name: "raw JSON map", typ: reflect.TypeFor[map[string]json.RawMessage](), want: "Record<string, JSONValue>"},
+		{name: "any map", typ: reflect.TypeFor[map[string]any](), want: "Record<string, JSONValue>"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := cfg.goTypeToDoc(tc.t)
+			got, err := cfg.goTypeToDoc(tc.typ)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if got != tc.want {
-				t.Fatalf("goTypeToDoc(%s) = %q, want %q", tc.t, got, tc.want)
+				t.Fatalf("goTypeToDoc(%s) = %q, want %q", tc.typ, got, tc.want)
 			}
 		})
 	}
@@ -57,8 +57,8 @@ func TestDocRegistryGenerateKotlinMCPClient(t *testing.T) {
 
 	outDir := t.TempDir()
 	docs := &docRegistry{
-		cfg: &genConfig{
-			routes: []routeDef{
+		cfg: &Config{
+			Routes: []Route{
 				{
 					Name:       "mcp",
 					Method:     "POST",
@@ -68,13 +68,13 @@ func TestDocRegistryGenerateKotlinMCPClient(t *testing.T) {
 					HeadersArg: true,
 				},
 			},
-			kotlinPackage:      "com.example.mcp",
-			mcpProtocolVersion: "2026-07-28",
-			errorModel: clientErrorModel{
-				typeName:      "JSONRPCResponse",
-				ktCodeExpr:    "err.error?.code?.toString() ?: \"UNKNOWN\"",
-				ktMessageExpr: "err.error?.message ?: \"\"",
-				ktDetailsExpr: "null",
+			KotlinPackage:      "com.example.mcp",
+			MCPProtocolVersion: "2026-07-28",
+			ErrorModel: ClientErrorModel{
+				TypeName:      "JSONRPCResponse",
+				KTCodeExpr:    "err.error?.code?.toString() ?: \"UNKNOWN\"",
+				KTMessageExpr: "err.error?.message ?: \"\"",
+				KTDetailsExpr: "null",
 			},
 		},
 	}
@@ -109,13 +109,13 @@ func TestDocRegistryGenerateTSValidate(t *testing.T) {
 		}
 
 		docs := &docRegistry{
-			cfg: &genConfig{},
+			cfg: &Config{},
 		}
 		if err := docs.generateTSValidate(outDir); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := os.Stat(validatePath); !os.IsNotExist(err) {
-			t.Fatalf("validate.gen.ts exists after generation without SSE routes: %v", err)
+			t.Fatalf("validate.gen.ts exists after generation without SSE Routes: %v", err)
 		}
 	})
 
@@ -125,12 +125,12 @@ func TestDocRegistryGenerateTSValidate(t *testing.T) {
 		outDir := t.TempDir()
 		eventType := reflect.TypeFor[TestSDKEvent]()
 		docs := &docRegistry{
-			cfg: &genConfig{
-				routes: []routeDef{{Name: "events", Resp: eventType, IsSSE: true}},
-				sdkPackagePaths: map[string]struct{}{
+			cfg: &Config{
+				Routes: []Route{{Name: "events", Resp: eventType, IsSSE: true}},
+				SDKPackagePaths: map[string]struct{}{
 					eventType.PkgPath(): {},
 				},
-				sseSeeds: []reflect.Type{eventType},
+				SSESeeds: []reflect.Type{eventType},
 			},
 			aliasNames: map[string]struct{}{},
 		}
