@@ -19,6 +19,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
+	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
@@ -112,7 +113,9 @@ func (s *taskHTTPHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Reque
 
 	now := time.Now()
 	if shouldReplayHistoryFromDisk(state, loadedTask) {
-		s.streamHistoryFromDiskWithTracker(w, flusher, entry, tracker, &idx)
+		if !s.streamReplayStore(w, flusher, entry, &idx) {
+			s.streamHistoryFromDiskWithTracker(w, flusher, entry, tracker, &idx)
+		}
 	} else {
 		for _, msg := range filterHistoryForReplay(history) {
 			writeEvents(tracker.ConvertMessage(msg, now))
@@ -160,18 +163,43 @@ func (s *taskHTTPHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-// streamHistoryFromDisk replays a terminal task's conversation directly from
-// its log file, converting and flushing one message at a time so the full
-// history is never materialized in memory. It collapses streaming-delta runs
-// (matching the live path's filterHistoryForReplay) and emits a trailing
-// "ready" event. No subscriber is registered: terminal tasks produce no live
-// messages.
+// streamHistoryFromDisk replays a terminal task without subscribing to live
+// messages. It prefers the EventMessage sidecar: validated zstd JSONL lines are
+// copied straight into SSE frames. Raw-log parsing is only the cold fallback used
+// to regenerate a missing or stale sidecar.
 func (s *taskHTTPHandlers) streamHistoryFromDisk(w http.ResponseWriter, flusher http.Flusher, entry *tasks.Entry) {
-	tracker := v1conv.NewToolTimingTracker(entry.Task().Harness, FormatToolOutput)
 	idx := 0
-	s.streamHistoryFromDiskWithTracker(w, flusher, entry, tracker, &idx)
+	if !s.streamReplayStore(w, flusher, entry, &idx) {
+		tracker := v1conv.NewToolTimingTracker(entry.Task().Harness, FormatToolOutput)
+		s.streamHistoryFromDiskWithTracker(w, flusher, entry, tracker, &idx)
+	}
 	_, _ = fmt.Fprint(w, "event: ready\ndata: {}\n\n")
 	flusher.Flush()
+}
+
+// streamReplayStore serves the rebuildable DTO sidecar, regenerating it from
+// the raw log on a miss. A successful cache hit never invokes a harness parser
+// or DTO converter; it only decompresses lines and frames them as SSE.
+func (s *taskHTTPHandlers) streamReplayStore(w io.Writer, flusher http.Flusher, entry *tasks.Entry, idx *int) bool {
+	lt := entry.LoadedTask()
+	if lt == nil || lt.LogPath() == "" {
+		return false
+	}
+	logPath := lt.LogPath()
+	if replay, ok := eventreplay.OpenReplay(logPath); ok {
+		defer replay.Close()
+		return replay.WriteSSE(w, flusher, idx)
+	}
+	if err := eventreplay.RegenerateReplay(logPath, entry.Task().Harness, lt.StreamMessages()); err != nil {
+		slog.Warn("regenerate replay cache", "task", entry.Task().ID, "err", err)
+		return false
+	}
+	replay, ok := eventreplay.OpenReplay(logPath)
+	if !ok {
+		return false
+	}
+	defer replay.Close()
+	return replay.WriteSSE(w, flusher, idx)
 }
 
 func shouldReplayHistoryFromDisk(state task.State, lt *task.LoadedTask) bool {
@@ -181,7 +209,7 @@ func shouldReplayHistoryFromDisk(state task.State, lt *task.LoadedTask) bool {
 	return state == task.StateStopped
 }
 
-func (s *taskHTTPHandlers) streamHistoryFromDiskWithTracker(w http.ResponseWriter, flusher http.Flusher, entry *tasks.Entry, tracker *v1conv.ToolTimingTracker, idx *int) {
+func (s *taskHTTPHandlers) streamHistoryFromDiskWithTracker(out io.Writer, flusher http.Flusher, entry *tasks.Entry, tracker *v1conv.ToolTimingTracker, idx *int) {
 	lt := entry.LoadedTask()
 	if lt == nil {
 		return
@@ -196,7 +224,7 @@ func (s *taskHTTPHandlers) streamHistoryFromDiskWithTracker(w http.ResponseWrite
 				slog.Warn("marshal SSE event", "err", err)
 				continue
 			}
-			n, _ := fmt.Fprintf(w, "event: message\ndata: %s\nid: %d\n\n", data, *idx)
+			n, _ := fmt.Fprintf(out, "event: message\ndata: %s\nid: %d\n\n", data, *idx)
 			(*idx)++
 			bytesSinceFlush += n
 			if bytesSinceFlush >= 65536 {

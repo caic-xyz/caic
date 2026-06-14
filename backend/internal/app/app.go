@@ -20,6 +20,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/ci"
+	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
@@ -411,6 +412,11 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 			}
 			if err := task.CompressTerminalLogs(logs); err != nil {
 				slog.WarnContext(startupCtx, "compress terminal task logs failed", "err", err)
+			}
+			if removed, err := eventreplay.PruneStaleCaches(logDir); err != nil {
+				slog.WarnContext(startupCtx, "prune stale replay caches failed", "err", err)
+			} else if removed > 0 {
+				slog.InfoContext(startupCtx, "pruned stale replay caches", "n", removed)
 			}
 			if err := taskMgr.LoadPurgedTasks(logs); err != nil {
 				slog.ErrorContext(startupCtx, "load purged tasks failed", "err", err)

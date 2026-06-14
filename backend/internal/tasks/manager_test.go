@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -42,6 +43,29 @@ func (f fakeRelayReader) ReadTail(ctx context.Context, target runtime.Connection
 
 func (f fakeRelayReader) ReadLog(ctx context.Context, target runtime.ConnectionTarget, maxBytes int) string {
 	return f.readLogFn(ctx, target, maxBytes)
+}
+
+func textMessages(msgs []agent.Message) []string {
+	texts := make([]string, 0, len(msgs))
+	for _, msg := range msgs {
+		if text, ok := msg.(*agent.TextMessage); ok {
+			texts = append(texts, text.Text)
+		}
+	}
+	return texts
+}
+
+func TestMergeLogAndRelayMessages(t *testing.T) {
+	t.Parallel()
+	merged := mergeLogAndRelayMessages(
+		[]agent.Message{&agent.TextMessage{Text: "before"}, &agent.TextMessage{Text: "overlap"}},
+		[]agent.Message{&agent.TextMessage{Text: "overlap"}, &agent.TextMessage{Text: "after"}},
+	)
+	texts := textMessages(merged)
+	want := []string{"before", "overlap", "after"}
+	if !slices.Equal(texts, want) {
+		t.Fatalf("merged texts = %#v, want %#v", texts, want)
+	}
 }
 
 func TestNew(t *testing.T) {
@@ -2215,6 +2239,72 @@ func TestManager(t *testing.T) {
 			}
 			if m.Len() != 1 {
 				t.Errorf("manager Len = %d, want 1", m.Len())
+			}
+		})
+		t.Run("valid_merges_local_log_with_relay_tail", func(t *testing.T) {
+			t.Parallel()
+			taskID := ksid.NewID()
+			fake := &fakeMD{metadata: map[string]string{
+				"merge-tail\x00caic.id":      taskID.String(),
+				"merge-tail\x00caic.harness": string(harness.Claude),
+			}}
+			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
+			m.relay = fakeRelayReader{
+				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
+					return true, "alive", nil
+				},
+				readTailFn: func(context.Context, runtime.ConnectionTarget, func([]byte) ([]agent.Message, error), int64) ([]agent.Message, int64, error) {
+					return []agent.Message{&agent.TextMessage{Text: "during restart"}}, 128, nil
+				},
+				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
+			}
+			m.RegisterRunner("caic-xyz/caic", &task.Runner{
+				Dir:      "/home/user/src/caic-xyz/caic",
+				Backends: map[harness.Name]agent.Backend{harness.Claude: &fakeBackend{models: []string{"m1"}}},
+			})
+
+			logDir := t.TempDir()
+			meta, err := json.Marshal(agent.MetaMessage{
+				MessageType: "caic_meta",
+				Version:     1,
+				Prompt:      "merge history",
+				Repos:       []agent.MetaRepo{{Name: "caic-xyz/caic", Branch: "caic-12"}},
+				Harness:     harness.Claude,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			diskMsg := `{"type":"assistant","message":{"model":"m","id":"msg_01","role":"assistant","content":[{"type":"text","text":"before restart"}],"usage":{}},"session_id":"s","uuid":"u1"}`
+			if err := os.WriteFile(filepath.Join(logDir, "merge-tail.jsonl"), []byte(string(meta)+"\n"+diskMsg+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			logs, err := task.LoadLogs(logDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			adopted, err := m.AdoptInstances(t.Context(), []AdoptRepo{
+				{RelPath: "caic-xyz/caic", AbsPath: "/home/user/src/caic-xyz/caic"},
+			}, []runtime.Instance{
+				{
+					ID:    "merge-tail",
+					State: "running",
+					Repos: []runtime.Repo{{
+						HostPath:  "/home/user/src/caic-xyz/caic",
+						Branch:    "caic-12",
+						MountPath: "/home/user/src/caic-xyz/caic",
+					}},
+				},
+			}, logs)
+			if err != nil {
+				t.Fatalf("AdoptInstances: %v", err)
+			}
+			if len(adopted) != 1 {
+				t.Fatalf("adopted len = %d, want 1", len(adopted))
+			}
+			texts := textMessages(adopted[0].Task.Messages())
+			if !slices.Contains(texts, "before restart") || !slices.Contains(texts, "during restart") {
+				t.Fatalf("messages = %#v, want disk history plus relay tail", texts)
 			}
 		})
 		t.Run("valid_dead_relay_exit_error_crashes_adopted_task", func(t *testing.T) {

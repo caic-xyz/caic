@@ -49,6 +49,7 @@ type Runner struct {
 	LogDir              string              // Directory for raw JSONL session logs (required).
 	CacheDir            string              // Cache directory (e.g. ~/.cache/caic) for harness model lists.
 	HarnessEnv          map[string][]string // Per-harness KEY=VALUE env vars for runtime instances.
+	EventReplayFactory  func(logPath string, h harness.Name) EventReplayWriter
 
 	// Runtime provides runtime instance lifecycle operations. Must be set
 	// before calling Start.
@@ -492,6 +493,7 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 			}
 		}
 	}
+	t.CommitEventReplay()
 	tlog.InfoContext(ctx, "cleanup done", "dur", time.Since(start).Round(time.Millisecond),
 		"cost", res.CostUSD, "turns", res.NumTurns, "reason", reason)
 	return res
@@ -557,6 +559,7 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 		if h != nil && h.LogW != nil {
 			_ = h.LogW.Close()
 		}
+		t.CommitEventReplay()
 		tlog.InfoContext(ctx, "stop abandoned", "state", t.GetState())
 		return
 	}
@@ -583,6 +586,7 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 	if logW != nil {
 		_ = logW.Close()
 	}
+	t.CommitEventReplay()
 	tlog.InfoContext(ctx, "stop done", "dur", time.Since(start).Round(time.Millisecond),
 		"cost", res.CostUSD, "turns", res.NumTurns)
 }
@@ -1601,6 +1605,9 @@ func (r *Runner) openLog(t *Task) (io.WriteCloser, error) {
 		return nil, fmt.Errorf("create log file: %w", err)
 	}
 	t.SetLogPath(path)
+	if r.EventReplayFactory != nil {
+		t.StartEventReplay(r.EventReplayFactory(path, t.Harness))
+	}
 	// Write metadata header as the first line.
 	repos := t.ReposSnapshot()
 	metaRepos := make([]agent.MetaRepo, len(repos))
@@ -1656,6 +1663,9 @@ func (r *Runner) reopenLog(t *Task) (io.WriteCloser, error) {
 		return nil, err
 	}
 	t.SetLogPath(path)
+	if r.EventReplayFactory != nil {
+		t.StartEventReplay(r.EventReplayFactory(path, t.Harness))
+	}
 	return w, nil
 }
 

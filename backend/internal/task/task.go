@@ -225,12 +225,13 @@ type Task struct {
 	inPlanMode            bool      // True while the agent is in plan mode (between EnterPlanMode and ExitPlanMode).
 	title                 string    // LLM-generated short title; set via SetTitle.
 	msgs                  []agent.Message
-	subs                  []*sub         // active SSE subscribers
-	handle                *SessionHandle // current active session; nil when no session is attached
-	priorCostUSD          float64        // accumulated cost from all cleared sessions
-	priorNumTurns         int            // accumulated turns from all cleared sessions
-	priorDuration         time.Duration  // accumulated duration from all cleared sessions
-	turnStartedAt         time.Time      // when the current running turn started; zero when not running
+	subs                  []*sub            // active SSE subscribers
+	handle                *SessionHandle    // current active session; nil when no session is attached
+	eventReplay           EventReplayWriter // live DTO replay writer; nil when no log is open
+	priorCostUSD          float64           // accumulated cost from all cleared sessions
+	priorNumTurns         int               // accumulated turns from all cleared sessions
+	priorDuration         time.Duration     // accumulated duration from all cleared sessions
+	turnStartedAt         time.Time         // when the current running turn started; zero when not running
 	liveCostUSD           float64
 	liveNumTurns          int
 	liveDuration          time.Duration
@@ -545,6 +546,43 @@ func (t *Task) SetLogPath(path string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.logPath = path
+}
+
+// LogPath returns the JSONL log path used for metadata appends.
+func (t *Task) LogPath() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.logPath
+}
+
+// EventReplayWriter stores backend-neutral replay events beside the raw task log.
+type EventReplayWriter interface {
+	WriteMessage(msg agent.Message)
+	Commit(logPath string)
+}
+
+// StartEventReplay attaches a live DTO replay writer if one is not already active.
+func (t *Task) StartEventReplay(w EventReplayWriter) {
+	if w == nil {
+		return
+	}
+	t.mu.Lock()
+	if t.eventReplay == nil {
+		t.eventReplay = w
+	}
+	t.mu.Unlock()
+}
+
+// CommitEventReplay finalizes and detaches the live DTO replay writer.
+func (t *Task) CommitEventReplay() {
+	t.mu.Lock()
+	w := t.eventReplay
+	path := t.logPath
+	t.eventReplay = nil
+	t.mu.Unlock()
+	if w != nil {
+		w.Commit(path)
+	}
 }
 
 // SudoLookupState returns the sudo lookup inputs and cached password.
@@ -1558,6 +1596,9 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 		if !skipTitleGen {
 			go t.GenerateTitle(ctx)
 		}
+	}
+	if t.eventReplay != nil {
+		t.eventReplay.WriteMessage(m)
 	}
 	// Fan out to subscribers (non-blocking).
 	for i := 0; i < len(t.subs); i++ {

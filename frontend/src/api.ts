@@ -52,16 +52,14 @@ export const {
   closeVoiceRTC,
 } = voiceGatewayApi;
 
-export function taskEventsSkippingReplay(
+export function taskEventStream(
   id: string,
   onMessage: (event: EventMessage) => void,
   onError: (err: unknown) => void,
-  shouldSkipRaw?: (event: MessageEvent<string>) => boolean,
 ): EventSource {
   const es = new EventSource(`/api/caic/v1/tasks/${id}/events`);
   es.addEventListener("message", (e) => {
     const ev = e as MessageEvent<string>;
-    if (shouldSkipRaw?.(ev)) return;
     try {
       onMessage(validateEventMessage(JSON.parse(ev.data)));
     } catch (err) {

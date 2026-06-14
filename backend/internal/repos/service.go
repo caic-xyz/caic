@@ -17,6 +17,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/ci"
+	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/harness"
@@ -335,7 +336,10 @@ func (s *Service) newRunner(ctx context.Context, info *Info) (*task.Runner, erro
 		CacheDir:   s.cacheDir,
 		Backends:   s.agentBackends,
 		HarnessEnv: s.harnessEnv,
-		Runtime:    s.runtime,
+		EventReplayFactory: func(path string, h harness.Name) task.EventReplayWriter {
+			return eventreplay.NewMessageWriter(path, h)
+		},
+		Runtime: s.runtime,
 	}
 	if info != nil {
 		runner.BaseBranch = info.BaseBranch

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"reflect"
 	"runtime/trace"
 	"slices"
 	"strings"
@@ -1296,6 +1297,36 @@ func applyLoadedSessionMetadata(t *task.Task, lt *task.LoadedTask) {
 	t.SetSessionMetadata(lt.SessionID, lt.Model, lt.AgentVersion)
 }
 
+func mergeLogAndRelayMessages(logMsgs, relayMsgs []agent.Message) []agent.Message {
+	if len(logMsgs) == 0 {
+		return append([]agent.Message(nil), relayMsgs...)
+	}
+	if len(relayMsgs) == 0 {
+		return append([]agent.Message(nil), logMsgs...)
+	}
+	maxOverlap := min(len(logMsgs), len(relayMsgs))
+	for n := maxOverlap; n > 0; n-- {
+		if messagesEqual(logMsgs[len(logMsgs)-n:], relayMsgs[:n]) {
+			merged := append([]agent.Message(nil), logMsgs...)
+			return append(merged, relayMsgs[n:]...)
+		}
+	}
+	merged := append([]agent.Message(nil), logMsgs...)
+	return append(merged, relayMsgs...)
+}
+
+func messagesEqual(a, b []agent.Message) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !reflect.DeepEqual(a[i], b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 // adoptOne investigates a single runtime instance and registers it as a task.
 func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runner, c *runtime.Instance, branch string, branchIDs map[string][]string, allLogs []*task.LoadedTask) (*AdoptedTask, error) { //nolint:gocritic // massive function from existing code; refactor deferred
 	ctx, adoptTask := trace.NewTask(ctx, "adopt-instance")
@@ -1497,22 +1528,29 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		t.SetPR(ri.ForgeOwner, ri.ForgeRepo, 0)
 	}
 
-	// Restore messages from relay or logs.
-	if len(relayMsgs) > 0 {
-		t.RestoreMessages(relayMsgs)
-		applyLoadedSessionMetadata(t, lt)
-		t.SetRelayOffset(relaySize)
-		slog.Debug("relay", "msg", "restored from", "repo", ri.RelPath, "br", branch, "instance", c.ID, "alive", relayAlive, "msgs", len(relayMsgs))
-	} else if lt != nil {
+	// Restore messages from both the local log and the relay tail. The local log
+	// has the full pre-restart history; the relay tail has any output produced
+	// while the server was down. Merge them by overlap so the UI does not collapse
+	// to the bounded relay tail after a server restart.
+	if lt != nil {
 		m.setParser(lt)
 		if err := lt.LoadMessages(); err != nil {
 			slog.Warn("load messages failed", "repo", ri.RelPath, "br", branch, "err", err)
 		}
-		if len(lt.Msgs) > 0 {
-			t.RestoreMessages(lt.Msgs)
-			applyLoadedSessionMetadata(t, lt)
-			slog.Warn("relay", "msg", "restored from log", "repo", ri.RelPath, "br", branch, "instance", c.ID, "msgs", len(lt.Msgs))
+	}
+	if len(relayMsgs) > 0 {
+		msgs := relayMsgs
+		if lt != nil && len(lt.Msgs) > 0 {
+			msgs = mergeLogAndRelayMessages(lt.Msgs, relayMsgs)
 		}
+		t.RestoreMessages(msgs)
+		applyLoadedSessionMetadata(t, lt)
+		t.SetRelayOffset(relaySize)
+		slog.Debug("relay", "msg", "restored from", "repo", ri.RelPath, "br", branch, "instance", c.ID, "alive", relayAlive, "msgs", len(msgs), "relayMsgs", len(relayMsgs))
+	} else if lt != nil && len(lt.Msgs) > 0 {
+		t.RestoreMessages(lt.Msgs)
+		applyLoadedSessionMetadata(t, lt)
+		slog.Warn("relay", "msg", "restored from log", "repo", ri.RelPath, "br", branch, "instance", c.ID, "msgs", len(lt.Msgs))
 	}
 	applyLoadedSessionMetadata(t, lt)
 	t.SetStateAt(t.GetState(), stateUpdatedAt)
@@ -1769,6 +1807,7 @@ func (m *Manager) watchSession(entry *Entry, runner *task.Runner, h *task.Sessio
 					if err := writeTaskResultTrailer(t, result); err != nil {
 						slog.Warn("write crashed task trailer failed", append(attrs, "err", err)...)
 					}
+					t.CommitEventReplay()
 				} else if t.RecordSessionFailure(m.serverCtx, sessionErr) {
 					failureErr := sessionErr
 					if exitErr := t.LastExitError(); exitErr != "" {
@@ -1789,10 +1828,12 @@ func (m *Manager) watchSession(entry *Entry, runner *task.Runner, h *task.Sessio
 					if err := writeTaskResultTrailer(t, result); err != nil {
 						slog.Warn("write failed task trailer failed", append(attrs, "err", err)...)
 					}
+					t.CommitEventReplay()
 				}
 			} else {
 				slog.Info("session exited", attrs...)
 				t.SetStateIf(task.StateRunning, task.StateWaiting)
+				t.CommitEventReplay()
 			}
 			m.NotifyTaskChange()
 		case <-entry.Done():

@@ -1,7 +1,7 @@
 // TaskDetail renders the real-time agent output stream for a single task.
 import { createSignal, createMemo, createEffect, For, Index, Show, onCleanup, onMount, untrack, Switch, Match, type Accessor } from "solid-js";
 import { A, useNavigate, useLocation } from "@solidjs/router";
-import { sendInput as apiSendInput, restartTask as apiRestartTask, clearContext as apiClearContext, compactContext as apiCompactContext, syncTask as apiSyncTask, taskEventsSkippingReplay, getTaskToolInput, botFixPR } from "../api";
+import { sendInput as apiSendInput, restartTask as apiRestartTask, clearContext as apiClearContext, compactContext as apiCompactContext, syncTask as apiSyncTask, taskEventStream, getTaskToolInput, botFixPR } from "../api";
 import type { EventMessage, EventResult, AskQuestion, EventAsk, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, ForgeCheck, EventStats } from "@sdk/types.gen";
 import { groupMessagesInc, resetGroupIncCache, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "../grouping";
 import { formatDuration, formatElapsed, formatTokens, toolCallDetail } from "../formatting";
@@ -49,16 +49,7 @@ export const detailsOpenState = new Map<string, boolean>();
 const expandedTurnsByTask = new Map<string, Set<string>>();
 const expandedSessionsByTask = new Map<string, Set<string>>();
 
-type TaskDetailState = {
-  messages: EventMessage[];
-  splitIdx: number;
-  completedMsgs: EventMessage[];
-};
-
-const detailStateByTask = new Map<string, TaskDetailState>();
-
 export function resetTaskDetailCachesForTest() {
-  detailStateByTask.clear();
   resetGroupIncCache();
 }
 
@@ -238,17 +229,6 @@ export default function TaskDetail(props: Props) {
     });
   }
 
-  let renderedTaskId = "";
-  function saveDetailState(taskId = renderedTaskId) {
-    const currentMessages = untrack(messages);
-    if (currentMessages.length === 0 && !detailStateByTask.has(taskId)) return;
-    detailStateByTask.set(taskId, {
-      messages: currentMessages,
-      splitIdx: untrack(splitIdx),
-      completedMsgs: untrack(completedMsgs),
-    });
-  }
-
   // Incremental grouping: cache completed-turn groups so streaming only reprocesses the current turn.
   // splitIdx is the index into messages() where the current (incomplete) turn starts.
   // It advances only when a "result" event arrives, keeping completedMsgs stable during streaming.
@@ -264,7 +244,6 @@ export default function TaskDetail(props: Props) {
       setSplitIdx(idx);
       setCompletedMsgs(msgs.slice(0, idx));
     }
-    saveDetailState();
   });
 
   // Extract stats events from the full message stream for StatsIcon.
@@ -382,49 +361,32 @@ export default function TaskDetail(props: Props) {
 
   createEffect(() => {
     const id = props.taskId;
-    if (renderedTaskId !== "" && renderedTaskId !== id) saveDetailState(renderedTaskId);
-    renderedTaskId = id;
     userScrolledUp = false;
-
-    const cached = detailStateByTask.get(id);
-    let hasReplayCache = cached !== undefined;
-    if (cached !== undefined) {
-      setMessages(cached.messages);
-      setSplitIdx(cached.splitIdx);
-      setCompletedMsgs(cached.completedMsgs);
-    } else {
-      setMessages([]);
-      setSplitIdx(0);
-      setCompletedMsgs([]);
-    }
+    setMessages([]);
+    setSplitIdx(0);
+    setCompletedMsgs([]);
     resetGroupIncCache();
 
     let es: EventSource | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let delay = 500;
     let live = false;
+    let replaceOnNextFlush = true;
     // Keep replay and live deltas off the DOM. Replayed history is rendered once
     // at ready; live output renders only on structural turn boundaries. This avoids
     // re-running grouping and DOM reconciliation for every streaming delta.
     let pendingEvents: EventMessage[] = [];
-    let replaceOnNextFlush = cached === undefined;
-    let replayEventCount = 0;
-    let replaySkipLen = cached?.messages.length ?? 0;
 
     function flushPendingEvents() {
       const evs = pendingEvents;
       pendingEvents = [];
-      if (evs.length === 0) return;
-      // Each ExitPlanMode event keeps its own planContent snapshot so the evolution
-      // of the plan is visible at each point it was written.
       if (replaceOnNextFlush) {
         setMessages(evs);
         replaceOnNextFlush = false;
-      } else {
-        setMessages((prev) => [...prev, ...evs]);
+        return;
       }
-      replaySkipLen = untrack(messages).length;
-      saveDetailState(id);
+      if (evs.length === 0) return;
+      setMessages((prev) => [...prev, ...evs]);
     }
 
     function connect() {
@@ -432,24 +394,14 @@ export default function TaskDetail(props: Props) {
       // a previous EventSource is still open (e.g. from a duplicate timer fire).
       es?.close();
       pendingEvents = [];
-      replayEventCount = 0;
       live = false;
-      replaceOnNextFlush = !hasReplayCache;
-      es = taskEventsSkippingReplay(id, (ev) => {
+      replaceOnNextFlush = true;
+      es = taskEventStream(id, (ev) => {
         pendingEvents.push(ev);
         if (live && shouldFlushBufferedEvent(ev)) flushPendingEvents();
       }, (err) => {
         const msg = err instanceof Error ? err.message : String(err);
         untrack(() => props.onError(`Task event error: ${msg}`));
-      }, (ev) => {
-        if (live || replaceOnNextFlush) return false;
-        const eventID = Number.parseInt(ev.lastEventId, 10);
-        if (!Number.isNaN(eventID)) {
-          replayEventCount = Math.max(replayEventCount, eventID + 1);
-          return eventID < replaySkipLen;
-        }
-        replayEventCount++;
-        return false;
       });
       es.addEventListener("open", () => {
         delay = 500;
@@ -457,33 +409,12 @@ export default function TaskDetail(props: Props) {
       // The server sends a "ready" event after replaying full history.
       // Render replayed history in one pass before switching to live turn-boundary flushing.
       es.addEventListener("ready", () => {
-        if (!replaceOnNextFlush && replayEventCount < replaySkipLen) {
-          pendingEvents = [];
-          detailStateByTask.delete(id);
-          setMessages([]);
-          setSplitIdx(0);
-          setCompletedMsgs([]);
-          resetGroupIncCache();
-          hasReplayCache = false;
-          replaySkipLen = 0;
-          es?.close();
-          es = null;
-          connect();
-          return;
-        }
         flushPendingEvents();
-        if (replaceOnNextFlush) {
-          setMessages([]);
-          replaceOnNextFlush = false;
-          replaySkipLen = 0;
-        } else {
-          saveDetailState(id);
-        }
-        hasReplayCache = true;
         live = true;
       });
       es.onerror = () => {
-        flushPendingEvents();
+        if (live) flushPendingEvents();
+        else pendingEvents = [];
         es?.close();
         es = null;
         const st = props.taskState;
@@ -503,8 +434,7 @@ export default function TaskDetail(props: Props) {
     connect();
 
     onCleanup(() => {
-      flushPendingEvents();
-      saveDetailState(id);
+      if (live) flushPendingEvents();
       es?.close();
       if (timer !== null) clearTimeout(timer);
       pendingEvents = [];

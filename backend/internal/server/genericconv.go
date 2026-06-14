@@ -4,6 +4,7 @@ package server
 
 import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 )
 
 // filterHistoryForReplay removes streaming delta messages that have a
@@ -82,38 +83,6 @@ func replayClearsExit(msg agent.Message) bool {
 	}
 }
 
-// replayDeltaKind classifies a streaming-delta message: 1=text, 2=thinking,
-// 3=widget, 0=not a delta.
-func replayDeltaKind(m agent.Message) int {
-	switch m.(type) {
-	case *agent.TextDeltaMessage:
-		return 1
-	case *agent.ThinkingDeltaMessage:
-		return 2
-	case *agent.WidgetDeltaMessage:
-		return 3
-	case *agent.ToolOutputDeltaMessage:
-		return 4
-	}
-	return 0
-}
-
-// replayFinalKind classifies a consolidated message that supersedes a delta run
-// of the same kind: 1=text, 2=thinking, 3=widget, 0=neither.
-func replayFinalKind(m agent.Message) int {
-	switch m.(type) {
-	case *agent.TextMessage:
-		return 1
-	case *agent.ThinkingMessage:
-		return 2
-	case *agent.WidgetMessage:
-		return 3
-	case *agent.ToolResultMessage:
-		return 4
-	}
-	return 0
-}
-
 // newReplayFilter is the streaming equivalent of filterHistoryForReplay: it
 // collapses a contiguous run of streaming-delta messages when the matching
 // consolidated message immediately follows, emitting surviving messages in
@@ -123,37 +92,5 @@ func replayFinalKind(m agent.Message) int {
 // It returns push (feed one message) and flush (emit any buffered tail run);
 // flush must be called once after the last message.
 func newReplayFilter(emit func(agent.Message)) (push func(agent.Message), flush func()) {
-	var pending []agent.Message // contiguous run of one delta kind, not yet emitted
-	cleanTurnComplete := false
-	flush = func() {
-		for _, m := range pending {
-			emit(m)
-		}
-		pending = pending[:0]
-	}
-	push = func(m agent.Message) {
-		if exit, ok := m.(*agent.ExitMessage); ok && exit.ExitCode != 0 && cleanTurnComplete {
-			return
-		}
-		if k := replayDeltaKind(m); k != 0 {
-			if len(pending) > 0 && replayDeltaKind(pending[0]) != k {
-				flush() // a different delta kind ends the current run
-			}
-			pending = append(pending, m)
-			return
-		}
-		if replayFinalKind(m) != 0 && len(pending) > 0 && replayDeltaKind(pending[0]) == replayFinalKind(m) {
-			pending = pending[:0] // consolidated message supersedes its delta run
-		} else {
-			flush()
-		}
-		if replayClearsExit(m) {
-			cleanTurnComplete = false
-		}
-		if rm, ok := m.(*agent.ResultMessage); ok {
-			cleanTurnComplete = !rm.IsError
-		}
-		emit(m)
-	}
-	return push, flush
+	return eventreplay.NewFilter(emit)
 }
