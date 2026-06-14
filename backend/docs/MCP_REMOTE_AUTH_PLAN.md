@@ -57,8 +57,11 @@ OAuth endpoints:
 8. Client exchanges the code for a caic MCP access token.
 9. Client sends `Authorization: Bearer <token>` to `/api/caic/v1/mcp`.
 
-Access tokens are RS256 JWTs with a one-hour lifetime. Refresh tokens are not
-implemented.
+Access tokens are RS256 JWTs with a one-hour lifetime. Refresh tokens are
+caic-scoped opaque tokens with a 30-day lifetime and a durable hashed on-disk
+store. The token endpoint rotates refresh tokens on every refresh grant; reused,
+expired, revoked, or unknown-user refresh tokens are rejected. The revocation
+endpoint lets clients revoke refresh tokens.
 
 ## Invariants
 
@@ -79,26 +82,21 @@ implemented.
 
 ### 1. Token lifecycle
 
-The current one-hour MCP access token may be enough for local clients and short
-hosted sessions. Continued hosted-client use should decide this.
+Add user-owned grant management before relying on long-lived hosted use:
 
-If expiry is not acceptable, add refresh tokens:
-
-- authorization-code response returns a refresh token.
-- refresh grant rotates refresh tokens.
-- reused refresh tokens are rejected.
-- refresh tokens are revocable by user/client.
-- logout does not silently revoke unrelated MCP clients unless product policy says
-  it should.
+- add a Settings page/API for connected MCP clients.
+- persist explicit grant records for the UX: user ID, client ID/name, scopes,
+  resource, creation time, last-used time, expiry, and revocation status.
+- support user-initiated grant revocation in addition to client-driven token
+  revocation.
 
 Validation:
 
-- expiry test.
-- refresh success test.
-- refresh rotation test.
-- reuse rejection test.
-- revoked-token rejection test.
-- unknown-user rejection test.
+- grant list shows only the authenticated user's MCP clients.
+- grant details show client identity, scopes, resource, timestamps, expiry, and
+  status.
+- user revocation blocks future access-token refresh for the grant.
+- user revocation does not affect unrelated users or clients.
 
 ### 2. Forge authority policy
 
@@ -131,8 +129,8 @@ If implemented:
 - redact arguments and credentials before writing.
 - fail open with a warning unless product policy requires fail-closed audit.
 
-Add UI/API for users to view and revoke MCP client grants if refresh tokens or
-long-lived grants are added.
+Add UI/API for users to view and revoke MCP client grants. This is required
+because refresh tokens are long-lived and survive server restart.
 
 Validation:
 

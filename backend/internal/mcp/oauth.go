@@ -17,6 +17,8 @@ import (
 const (
 	// OAuthGrantAuthorizationCode is the OAuth authorization-code grant type.
 	OAuthGrantAuthorizationCode = "authorization_code"
+	// OAuthGrantRefreshToken is the OAuth refresh-token grant type.
+	OAuthGrantRefreshToken = "refresh_token"
 	// OAuthCodeChallengeS256 is the PKCE S256 code challenge method.
 	OAuthCodeChallengeS256 = "S256"
 	// OAuthResponseTypeCode is the authorization-code response type.
@@ -44,10 +46,12 @@ type OAuthAuthorizationServerMetadata struct {
 	TokenEndpoint                                 string   `json:"token_endpoint"`
 	JWKSURI                                       string   `json:"jwks_uri"`
 	RegistrationEndpoint                          string   `json:"registration_endpoint"`
+	RevocationEndpoint                            string   `json:"revocation_endpoint,omitempty"`
 	ResponseTypesSupported                        []string `json:"response_types_supported"`
 	GrantTypesSupported                           []string `json:"grant_types_supported"`
 	CodeChallengeMethodsSupported                 []string `json:"code_challenge_methods_supported"`
 	TokenEndpointAuthMethodsSupported             []string `json:"token_endpoint_auth_methods_supported"`
+	RevocationEndpointAuthMethodsSupported        []string `json:"revocation_endpoint_auth_methods_supported,omitempty"`
 	ScopesSupported                               []string `json:"scopes_supported,omitempty"`
 	AuthorizationResponseIssuerParameterSupported bool     `json:"authorization_response_iss_parameter_supported"`
 }
@@ -70,10 +74,11 @@ type OAuthRegisterResponse struct {
 
 // OAuthTokenResponse is an OAuth token endpoint response.
 type OAuthTokenResponse struct {
-	AccessToken string `json:"access_token"`
-	TokenType   string `json:"token_type"`
-	ExpiresIn   int64  `json:"expires_in"`
-	Scope       string `json:"scope,omitempty"`
+	AccessToken  string `json:"access_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int64  `json:"expires_in"`
+	RefreshToken string `json:"refresh_token,omitempty"`
+	Scope        string `json:"scope,omitempty"`
 }
 
 // OAuthErrorResponse is an OAuth error response body.
