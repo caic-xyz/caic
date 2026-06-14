@@ -194,10 +194,6 @@ func (a *kittenTTSAdapter) ensureStartedLocked(ctx context.Context) error {
 	a.processCancel = cancel
 	a.cmd = cmd
 	a.stdout = bufio.NewReader(stdoutPipe)
-	a.wait = make(chan error, 1)
-	go func() {
-		a.wait <- cmd.Wait()
-	}()
 	go logKittenTTSOutput(ctx, "stderr", stderrPipe)
 
 	line, err := a.readLineLocked(ctx, kittenTTSStdoutName)
@@ -220,6 +216,7 @@ func (a *kittenTTSAdapter) ensureStartedLocked(ctx context.Context) error {
 	a.baseURL = strings.TrimRight(ready.URL, "/")
 	slog.InfoContext(ctx, "voicertc: KittenTTS ready", "model", kittenTTSModel, "url", a.baseURL, "voices", ready.Voices)
 	go logKittenTTSOutput(ctx, "stdout", a.stdout)
+	a.beginWaitLocked()
 	return nil
 }
 
@@ -248,9 +245,12 @@ func (a *kittenTTSAdapter) readLineLocked(ctx context.Context, name string) ([]b
 }
 
 func (a *kittenTTSAdapter) processExitErrorLocked(op string) error {
+	a.beginWaitLocked()
 	select {
-	case err := <-a.wait:
-		a.wait = nil
+	case err, ok := <-a.wait:
+		if !ok {
+			return fmt.Errorf("%s: worker exited", op)
+		}
 		if err != nil {
 			return fmt.Errorf("%s: worker exited: %w", op, err)
 		}
@@ -258,6 +258,19 @@ func (a *kittenTTSAdapter) processExitErrorLocked(op string) error {
 	default:
 		return fmt.Errorf("%s: worker closed pipe", op)
 	}
+}
+
+func (a *kittenTTSAdapter) beginWaitLocked() {
+	if a.cmd == nil || a.wait != nil {
+		return
+	}
+	cmd := a.cmd
+	wait := make(chan error, 1)
+	a.wait = wait
+	go func() {
+		wait <- cmd.Wait()
+		close(wait)
+	}()
 }
 
 func (a *kittenTTSAdapter) stop() error {
@@ -273,8 +286,11 @@ func (a *kittenTTSAdapter) stopLocked() error {
 			errs = append(errs, err)
 		}
 	}
+	if a.cmd != nil {
+		a.beginWaitLocked()
+	}
 	if a.wait != nil {
-		if err := <-a.wait; err != nil && !errors.Is(err, context.Canceled) && !strings.Contains(err.Error(), "signal: killed") {
+		if err, ok := <-a.wait; ok && err != nil && !errors.Is(err, context.Canceled) && !strings.Contains(err.Error(), "signal: killed") {
 			errs = append(errs, err)
 		}
 	}
