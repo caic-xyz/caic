@@ -5,16 +5,22 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/auth"
+	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -406,6 +412,528 @@ func TestMCPHandlers(t *testing.T) {
 		_, resp = postMCP(t, notFound, "resources/read", "caic://nope", mcpRequestJSON("resources/read", `"uri":"caic://nope"`))
 		if resp.Error == nil || resp.Error.Code != mcp.InvalidParamsCode {
 			t.Fatalf("error = %#v, want invalid params", resp.Error)
+		}
+	})
+}
+
+func newAuthEnabledRouter(t *testing.T) (*Router, *auth.Store, auth.User) {
+	s := newTestRouter(t)
+	s.hostState = auth.NewHostState("https://caic.example.com")
+	s.sessionSecret = []byte("0123456789abcdef0123456789abcdef")
+	usersPath := filepath.Join(t.TempDir(), "users.json")
+	store, err := auth.Open(usersPath)
+	if err != nil {
+		t.Fatalf("open auth store: %v", err)
+	}
+	user, err := store.UpsertUser(&auth.User{
+		Provider:    forge.KindGitHub,
+		ProviderID:  "1",
+		Username:    "alice",
+		AccessToken: "forge-token",
+		AvatarURL:   "https://github.com/avatar/alice",
+	})
+	if err != nil {
+		t.Fatalf("upsert user: %v", err)
+	}
+	s.authStore = store
+	return s.Router, store, user
+}
+
+func registerTestClient(t *testing.T, h http.Handler, clientName string, redirectURIs []string) mcp.OAuthRegisterResponse {
+	body := strings.NewReader(`{"client_name":"` + clientName + `","redirect_uris":["` + strings.Join(redirectURIs, `","`) + `"],"token_endpoint_auth_method":"none"}`)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, mcpOAuthRegisterPath, body)
+	req.Header.Set("Content-Type", "application/json")
+	req.Host = "caic.example.com"
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("register status = %d, want %d: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+	var resp mcp.OAuthRegisterResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode register response: %v", err)
+	}
+	return resp
+}
+
+func consentTokenFromHTML(t *testing.T, body string) string {
+	_, tokenSuffix, ok := strings.Cut(body, `name="consent_token" value="`)
+	if !ok {
+		t.Fatal("consent token missing")
+	}
+	consentToken, _, ok := strings.Cut(tokenSuffix, `"`)
+	if !ok {
+		t.Fatal("consent token value is not terminated")
+	}
+	return consentToken
+}
+
+func TestMCPConsentPage(t *testing.T) {
+	t.Parallel()
+
+	s, _, user := newAuthEnabledRouter(t)
+	h, err := s.buildHandler()
+	if err != nil {
+		t.Fatalf("buildHandler: %v", err)
+	}
+
+	verifier := "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	digest := sha256.Sum256([]byte(verifier))
+	challenge := base64.RawURLEncoding.EncodeToString(digest[:])
+
+	t.Run("renders consent page with user info and scopes", func(t *testing.T) {
+		t.Parallel()
+		s2, _, user2 := newAuthEnabledRouter(t)
+		h2, err := s2.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler: %v", err)
+		}
+		registered := registerTestClient(t, h2, "Claude Code", []string{"https://claude.ai/api/mcp/auth_callback"})
+
+		form := url.Values{
+			"response_type":         {"code"},
+			"client_id":             {registered.ClientID},
+			"redirect_uri":          {"https://claude.ai/api/mcp/auth_callback"},
+			"code_challenge":        {challenge},
+			"code_challenge_method": {"S256"},
+			"resource":              {"https://caic.example.com/api/caic/v1/mcp"},
+			"scope":                 {"caic:mcp.read caic:tasks.read"},
+		}
+		jwt, err := auth.IssueToken(&user2, []byte("0123456789abcdef0123456789abcdef"), sessionTTL)
+		if err != nil {
+			t.Fatalf("issue token: %v", err)
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, mcpOAuthAuthorizePath+"?"+form.Encode(), http.NoBody)
+		req.Host = "caic.example.com"
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+		w := httptest.NewRecorder()
+		h2.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		body := w.Body.String()
+
+		// Verify client identity is shown as unverified, with redirect URI and client ID.
+		if !strings.Contains(body, "Claude Code") {
+			t.Errorf("body missing client name: %s", body)
+		}
+		if !strings.Contains(body, "self-declared") {
+			t.Errorf("body missing unverified client warning: %s", body)
+		}
+		if !strings.Contains(body, "https://claude.ai/api/mcp/auth_callback") {
+			t.Errorf("body missing redirect URI: %s", body)
+		}
+		if !strings.Contains(body, registered.ClientID) {
+			t.Errorf("body missing client ID: %s", body)
+		}
+
+		// Verify username.
+		if !strings.Contains(body, user2.Username) {
+			t.Errorf("body missing username %q: %s", user2.Username, body)
+		}
+
+		// Verify provider.
+		if !strings.Contains(body, "GitHub") {
+			t.Errorf("body missing provider: %s", body)
+		}
+
+		// Verify the avatar does not load a third-party URL and leak OAuth request details.
+		if user2.AvatarURL != "" && strings.Contains(body, user2.AvatarURL) {
+			t.Errorf("body contains external avatar URL: %s", body)
+		}
+
+		// Verify resource.
+		if !strings.Contains(body, "caic.example.com/api/caic/v1/mcp") {
+			t.Errorf("body missing resource URL: %s", body)
+		}
+
+		// Verify scope descriptions.
+		if !strings.Contains(body, "caic:mcp.read") {
+			t.Error("body missing scope caic:mcp.read")
+		}
+		if !strings.Contains(body, "web search/fetch") {
+			t.Error("body missing scope description for caic:mcp.read")
+		}
+		if !strings.Contains(body, "caic:tasks.read") {
+			t.Error("body missing scope caic:tasks.read")
+		}
+		if !strings.Contains(body, "Read task information") {
+			t.Error("body missing scope description for caic:tasks.read")
+		}
+
+		// Verify security warning.
+		if !strings.Contains(body, "caic MCP only") {
+			t.Error("body missing security warning")
+		}
+		if !strings.Contains(body, "GitHub") && !strings.Contains(body, "GitLab") {
+			t.Error("body missing forge credential disclaimer")
+		}
+
+		// Verify consent token is present.
+		if !strings.Contains(body, `name="consent_token"`) {
+			t.Error("body missing consent_token field")
+		}
+
+		// Verify form action.
+		if !strings.Contains(body, `action="/api/caic/v1/oauth/authorize"`) {
+			t.Error("body missing form action")
+		}
+
+		// Verify Deny and Authorize buttons.
+		if !strings.Contains(body, "Deny") {
+			t.Error("body missing Deny button")
+		}
+		if !strings.Contains(body, "Authorize") {
+			t.Error("body missing Authorize button")
+		}
+		if w.Header().Get("Cache-Control") != "no-store" {
+			t.Errorf("Cache-Control = %q, want no-store", w.Header().Get("Cache-Control"))
+		}
+		if w.Header().Get("Referrer-Policy") != "no-referrer" {
+			t.Errorf("Referrer-Policy = %q, want no-referrer", w.Header().Get("Referrer-Policy"))
+		}
+		if !strings.Contains(w.Header().Get("Content-Security-Policy"), "default-src 'none'") {
+			t.Errorf("Content-Security-Policy = %q, want locked-down default-src", w.Header().Get("Content-Security-Policy"))
+		}
+	})
+
+	t.Run("shows spoofable client name as unverified", func(t *testing.T) {
+		t.Parallel()
+		s2, _, user2 := newAuthEnabledRouter(t)
+		h2, err := s2.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler: %v", err)
+		}
+		registered := registerTestClient(t, h2, "Claude Code", []string{"https://evil.example/callback"})
+		form := url.Values{
+			"response_type":         {"code"},
+			"client_id":             {registered.ClientID},
+			"redirect_uri":          {"https://evil.example/callback"},
+			"code_challenge":        {challenge},
+			"code_challenge_method": {"S256"},
+			"resource":              {"https://caic.example.com/api/caic/v1/mcp"},
+			"scope":                 {"caic:mcp.read"},
+		}
+		jwt, err := auth.IssueToken(&user2, []byte("0123456789abcdef0123456789abcdef"), sessionTTL)
+		if err != nil {
+			t.Fatalf("issue token: %v", err)
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, mcpOAuthAuthorizePath+"?"+form.Encode(), http.NoBody)
+		req.Host = "caic.example.com"
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+		w := httptest.NewRecorder()
+		h2.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		body := w.Body.String()
+		for _, want := range []string{"Claude Code", "self-declared", "https://evil.example/callback", registered.ClientID} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("body missing %q: %s", want, body)
+			}
+		}
+	})
+
+	t.Run("renders with default scope when empty", func(t *testing.T) {
+		t.Parallel()
+		s2, _, user2 := newAuthEnabledRouter(t)
+		h2, err := s2.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler: %v", err)
+		}
+		registered := registerTestClient(t, h2, "Test Client", []string{"http://localhost:9999/callback"})
+
+		form := url.Values{
+			"response_type":         {"code"},
+			"client_id":             {registered.ClientID},
+			"redirect_uri":          {"http://localhost:9999/callback"},
+			"code_challenge":        {challenge},
+			"code_challenge_method": {"S256"},
+			"resource":              {"https://caic.example.com/api/caic/v1/mcp"},
+			"scope":                 {""},
+		}
+		jwt, err := auth.IssueToken(&user2, []byte("0123456789abcdef0123456789abcdef"), sessionTTL)
+		if err != nil {
+			t.Fatalf("issue token: %v", err)
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, mcpOAuthAuthorizePath+"?"+form.Encode(), http.NoBody)
+		req.Host = "caic.example.com"
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+		w := httptest.NewRecorder()
+		h2.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		// Default scope should be shown.
+		if !strings.Contains(w.Body.String(), "caic:mcp.read") {
+			t.Error("body missing default scope caic:mcp.read")
+		}
+	})
+
+	t.Run("rejects unknown client", func(t *testing.T) {
+		t.Parallel()
+		form := url.Values{
+			"response_type":         {"code"},
+			"client_id":             {"unknown_client"},
+			"redirect_uri":          {"https://example.com/callback"},
+			"code_challenge":        {challenge},
+			"code_challenge_method": {"S256"},
+			"resource":              {"https://caic.example.com/api/caic/v1/mcp"},
+			"scope":                 {"caic:mcp.read"},
+		}
+		jwt, err := auth.IssueToken(&user, []byte("0123456789abcdef0123456789abcdef"), sessionTTL)
+		if err != nil {
+			t.Fatalf("issue token: %v", err)
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, mcpOAuthAuthorizePath+"?"+form.Encode(), http.NoBody)
+		req.Host = "caic.example.com"
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("rejects unauthenticated request", func(t *testing.T) {
+		t.Parallel()
+		form := url.Values{
+			"response_type":         {"code"},
+			"client_id":             {"any"},
+			"redirect_uri":          {"https://example.com/callback"},
+			"code_challenge":        {challenge},
+			"code_challenge_method": {"S256"},
+			"resource":              {"https://caic.example.com/api/caic/v1/mcp"},
+			"scope":                 {"caic:mcp.read"},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, mcpOAuthAuthorizePath+"?"+form.Encode(), http.NoBody)
+		req.Host = "caic.example.com"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("status = %d, want %d (login_required)", w.Code, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("rejects invalid redirect URI", func(t *testing.T) {
+		t.Parallel()
+		s2, _, user2 := newAuthEnabledRouter(t)
+		h2, err := s2.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler: %v", err)
+		}
+		registered := registerTestClient(t, h2, "Test Client", []string{"https://example.com/callback"})
+
+		form := url.Values{
+			"response_type":         {"code"},
+			"client_id":             {registered.ClientID},
+			"redirect_uri":          {"https://different.com/callback"},
+			"code_challenge":        {challenge},
+			"code_challenge_method": {"S256"},
+			"resource":              {"https://caic.example.com/api/caic/v1/mcp"},
+			"scope":                 {"caic:mcp.read"},
+		}
+		jwt, err := auth.IssueToken(&user2, []byte("0123456789abcdef0123456789abcdef"), sessionTTL)
+		if err != nil {
+			t.Fatalf("issue token: %v", err)
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, mcpOAuthAuthorizePath+"?"+form.Encode(), http.NoBody)
+		req.Host = "caic.example.com"
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+		w := httptest.NewRecorder()
+		h2.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("POST approves and redirects with authorization code", func(t *testing.T) {
+		t.Parallel()
+		s2, _, user2 := newAuthEnabledRouter(t)
+		h2, err := s2.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler: %v", err)
+		}
+		registered := registerTestClient(t, h2, "Test Client", []string{"https://example.com/callback"})
+		form := url.Values{
+			"response_type":         {"code"},
+			"client_id":             {registered.ClientID},
+			"redirect_uri":          {"https://example.com/callback"},
+			"code_challenge":        {challenge},
+			"code_challenge_method": {"S256"},
+			"resource":              {"https://caic.example.com/api/caic/v1/mcp"},
+			"scope":                 {"caic:mcp.read"},
+			"state":                 {"client-state"},
+		}
+		jwt, err := auth.IssueToken(&user2, []byte("0123456789abcdef0123456789abcdef"), sessionTTL)
+		if err != nil {
+			t.Fatalf("issue token: %v", err)
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, mcpOAuthAuthorizePath+"?"+form.Encode(), http.NoBody)
+		req.Host = "caic.example.com"
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+		w := httptest.NewRecorder()
+		h2.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("consent status = %d, want %d", w.Code, http.StatusOK)
+		}
+		consentForm := url.Values{"consent_token": {consentTokenFromHTML(t, w.Body.String())}, "decision": {"approve"}}
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, mcpOAuthAuthorizePath, strings.NewReader(consentForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Host = "caic.example.com"
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+		w = httptest.NewRecorder()
+		h2.ServeHTTP(w, req)
+		if w.Code != http.StatusSeeOther {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusSeeOther, w.Body.String())
+		}
+		location, err := url.Parse(w.Header().Get("Location"))
+		if err != nil {
+			t.Fatalf("parse Location: %v", err)
+		}
+		if location.Scheme != "https" || location.Host != "example.com" || location.Path != "/callback" {
+			t.Fatalf("Location = %q, want callback redirect", location.String())
+		}
+		if location.Query().Get("code") == "" {
+			t.Fatalf("Location = %q, missing code", location.String())
+		}
+		if location.Query().Get("state") != "client-state" {
+			t.Fatalf("state = %q, want client-state", location.Query().Get("state"))
+		}
+		if location.Query().Get("iss") != "https://caic.example.com" {
+			t.Fatalf("iss = %q, want https://caic.example.com", location.Query().Get("iss"))
+		}
+	})
+
+	t.Run("POST denies and redirects with access_denied", func(t *testing.T) {
+		t.Parallel()
+		s2, _, user2 := newAuthEnabledRouter(t)
+		h2, err := s2.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler: %v", err)
+		}
+		registered := registerTestClient(t, h2, "Test Client", []string{"https://example.com/callback"})
+		form := url.Values{
+			"response_type":         {"code"},
+			"client_id":             {registered.ClientID},
+			"redirect_uri":          {"https://example.com/callback"},
+			"code_challenge":        {challenge},
+			"code_challenge_method": {"S256"},
+			"resource":              {"https://caic.example.com/api/caic/v1/mcp"},
+			"scope":                 {"caic:mcp.read"},
+			"state":                 {"deny-state"},
+		}
+		jwt, err := auth.IssueToken(&user2, []byte("0123456789abcdef0123456789abcdef"), sessionTTL)
+		if err != nil {
+			t.Fatalf("issue token: %v", err)
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, mcpOAuthAuthorizePath+"?"+form.Encode(), http.NoBody)
+		req.Host = "caic.example.com"
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+		w := httptest.NewRecorder()
+		h2.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("consent status = %d, want %d", w.Code, http.StatusOK)
+		}
+		consentForm := url.Values{"consent_token": {consentTokenFromHTML(t, w.Body.String())}, "decision": {"deny"}}
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, mcpOAuthAuthorizePath, strings.NewReader(consentForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Host = "caic.example.com"
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+		w = httptest.NewRecorder()
+		h2.ServeHTTP(w, req)
+		if w.Code != http.StatusSeeOther {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusSeeOther, w.Body.String())
+		}
+		location, err := url.Parse(w.Header().Get("Location"))
+		if err != nil {
+			t.Fatalf("parse Location: %v", err)
+		}
+		if location.Query().Get("error") != "access_denied" {
+			t.Fatalf("error = %q, want access_denied", location.Query().Get("error"))
+		}
+		if location.Query().Get("state") != "deny-state" {
+			t.Fatalf("state = %q, want deny-state", location.Query().Get("state"))
+		}
+		if location.Query().Get("iss") != "https://caic.example.com" {
+			t.Fatalf("iss = %q, want https://caic.example.com", location.Query().Get("iss"))
+		}
+	})
+
+	t.Run("POST rejects invalid consent token", func(t *testing.T) {
+		t.Parallel()
+		form := url.Values{"consent_token": {"invalid-token"}}
+		jwt, err := auth.IssueToken(&user, []byte("0123456789abcdef0123456789abcdef"), sessionTTL)
+		if err != nil {
+			t.Fatalf("issue token: %v", err)
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, mcpOAuthAuthorizePath, strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Host = "caic.example.com"
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("POST rejects wrong user", func(t *testing.T) {
+		t.Parallel()
+		s2, store2, user2 := newAuthEnabledRouter(t)
+		h2, err := s2.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler: %v", err)
+		}
+		registered := registerTestClient(t, h2, "Test Client", []string{"https://example.com/callback"})
+
+		// Create consent as user2.
+		form := url.Values{
+			"response_type":         {"code"},
+			"client_id":             {registered.ClientID},
+			"redirect_uri":          {"https://example.com/callback"},
+			"code_challenge":        {challenge},
+			"code_challenge_method": {"S256"},
+			"resource":              {"https://caic.example.com/api/caic/v1/mcp"},
+			"scope":                 {"caic:mcp.read"},
+		}
+		jwt2, err := auth.IssueToken(&user2, []byte("0123456789abcdef0123456789abcdef"), sessionTTL)
+		if err != nil {
+			t.Fatalf("issue token: %v", err)
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, mcpOAuthAuthorizePath+"?"+form.Encode(), http.NoBody)
+		req.Host = "caic.example.com"
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt2, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+		w := httptest.NewRecorder()
+		h2.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("consent status = %d, want %d", w.Code, http.StatusOK)
+		}
+		consentToken := consentTokenFromHTML(t, w.Body.String())
+
+		// Try to submit consent as a different user.
+		otherUser, err := store2.UpsertUser(&auth.User{
+			Provider:    forge.KindGitLab,
+			ProviderID:  "999",
+			Username:    "bob",
+			AccessToken: "other-token",
+		})
+		if err != nil {
+			t.Fatalf("upsert other user: %v", err)
+		}
+		jwtOther, err := auth.IssueToken(&otherUser, []byte("0123456789abcdef0123456789abcdef"), sessionTTL)
+		if err != nil {
+			t.Fatalf("issue token: %v", err)
+		}
+		consentForm := url.Values{"consent_token": {consentToken}}
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, mcpOAuthAuthorizePath, strings.NewReader(consentForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Host = "caic.example.com"
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwtOther, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+		w = httptest.NewRecorder()
+		h2.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want %d (wrong user)", w.Code, http.StatusBadRequest)
 		}
 	})
 }

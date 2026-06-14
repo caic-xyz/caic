@@ -22,6 +22,8 @@ import (
 	"sync"
 	"time"
 
+	_ "embed"
+
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 )
@@ -36,21 +38,75 @@ const (
 	mcpOAuthAuthCodeTTL    = 10 * time.Minute
 )
 
-var mcpOAuthConsentTemplate = template.Must(template.New("mcp-oauth-consent").Parse(`<!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Authorize caic MCP</title></head>
-<body>
-  <h1>Authorize caic MCP access</h1>
-  <p>Allow <strong>{{.ClientName}}</strong> to access caic MCP as <strong>{{.Username}}</strong>.</p>
-  <p>Resource: <code>{{.Resource}}</code></p>
-  <p>Scopes: <code>{{.Scope}}</code></p>
-  <form method="post" action="{{.Action}}">
-    <input type="hidden" name="consent_token" value="{{.ConsentToken}}">
-    <button type="submit">Authorize</button>
-  </form>
-</body>
-</html>
-`))
+//go:embed mcp_consent.html
+var mcpConsentHTML string
+
+var (
+	mcpOAuthConsentTemplate = template.Must(template.New("mcp-oauth-consent").Parse(mcpConsentHTML))
+	mcpScopeLabels          = map[string]string{
+		mcpScopeRead:       "Use basic MCP tools including usage, web search/fetch, and non-task resources",
+		mcpScopeTasksRead:  "Read task information",
+		mcpScopeTasksWrite: "Create and manage tasks",
+		mcpScopeTasksAdmin: "Administer tasks (cancel, delete)",
+		mcpScopeReposWrite: "Manage repositories",
+	}
+)
+
+// mcpConsentTemplateData is the server-rendered OAuth consent page model.
+type mcpConsentTemplateData struct {
+	Action        string
+	ConsentToken  string
+	ClientName    string
+	ClientID      string
+	RedirectURI   string
+	Username      string
+	UserInitial   string
+	ProviderLabel string
+	Resource      string
+	ScopeItems    []mcpScopeItem
+}
+
+// mcpScopeItem holds a scope identifier and its human-readable label.
+type mcpScopeItem struct {
+	ID    string
+	Label string
+}
+
+func mcpScopeItems(scope string) []mcpScopeItem {
+	parts := strings.Fields(scope)
+	if len(parts) == 0 {
+		parts = []string{mcpScopeRead}
+	}
+	items := make([]mcpScopeItem, 0, len(parts))
+	for _, p := range parts {
+		label := mcpScopeLabels[p]
+		if label == "" {
+			label = p
+		}
+		items = append(items, mcpScopeItem{ID: p, Label: label})
+	}
+	return items
+}
+
+func mcpUserInitial(username string) string {
+	for _, r := range strings.TrimSpace(username) {
+		return strings.ToUpper(string(r))
+	}
+	return "?"
+}
+
+func mcpProviderLabel(provider string) string {
+	switch provider {
+	case "github":
+		return "GitHub"
+	case "gitlab":
+		return "GitLab"
+	case "":
+		return "unknown provider"
+	default:
+		return provider
+	}
+}
 
 type mcpOAuthServer struct {
 	mu       sync.Mutex
@@ -233,8 +289,20 @@ func (s *Router) handleMCPOAuthAuthorize(w http.ResponseWriter, r *http.Request)
 		s.mcpOAuth.mu.Lock()
 		s.mcpOAuth.consents[consentToken] = mcpOAuthConsent{UserID: user.ID, Values: values, ExpiresAt: time.Now().Add(mcpOAuthAuthCodeTTL)}
 		s.mcpOAuth.mu.Unlock()
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := mcpOAuthConsentTemplate.Execute(w, map[string]any{"Action": mcpOAuthAuthorizePath, "ConsentToken": consentToken, "ClientName": clientDisplayName(&client), "Username": user.Username, "Resource": values.Get("resource"), "Scope": scope}); err != nil {
+		writeMCPConsentHeaders(w)
+		data := mcpConsentTemplateData{
+			Action:        mcpOAuthAuthorizePath,
+			ConsentToken:  consentToken,
+			ClientName:    clientDisplayName(&client),
+			ClientID:      client.ID,
+			RedirectURI:   values.Get("redirect_uri"),
+			Username:      user.Username,
+			UserInitial:   mcpUserInitial(user.Username),
+			ProviderLabel: mcpProviderLabel(string(user.Provider)),
+			Resource:      values.Get("resource"),
+			ScopeItems:    mcpScopeItems(scope),
+		}
+		if err := mcpOAuthConsentTemplate.Execute(w, data); err != nil {
 			slog.WarnContext(r.Context(), "render oauth consent", "err", err)
 		}
 		return
@@ -262,6 +330,15 @@ func (s *Router) handleMCPOAuthAuthorize(w http.ResponseWriter, r *http.Request)
 	values := consent.Values
 	if err := s.validateAuthorizeForm(r, values); err != nil {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	switch r.PostForm.Get("decision") {
+	case "approve", "":
+	case "deny":
+		s.redirectAuthorizeError(w, r, values, "access_denied", "authorization denied")
+		return
+	default:
+		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "invalid consent decision")
 		return
 	}
 	code, err := randomToken()
@@ -349,6 +426,25 @@ func (s *Router) handleMCPOAuthToken(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Pragma", "no-cache")
 	resp := mcp.OAuthTokenResponse{AccessToken: accessToken, TokenType: mcp.OAuthTokenTypeBearer, ExpiresIn: int64(mcpOAuthAccessTokenTTL.Seconds()), Scope: entry.Scope}
 	writeJSONResponse(w, &resp, nil)
+}
+
+func (s *Router) redirectAuthorizeError(w http.ResponseWriter, r *http.Request, values url.Values, code, description string) {
+	redirectURL, err := url.Parse(values.Get("redirect_uri"))
+	if err != nil {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_redirect_uri", "invalid redirect URI")
+		return
+	}
+	q := redirectURL.Query()
+	q.Set("error", code)
+	if description != "" {
+		q.Set("error_description", description)
+	}
+	if state := values.Get("state"); state != "" {
+		q.Set("state", state)
+	}
+	q.Set("iss", s.externalBaseURL(r))
+	redirectURL.RawQuery = q.Encode()
+	http.Redirect(w, r, redirectURL.String(), http.StatusSeeOther)
 }
 
 func (s *Router) validateAuthorizeRequest(r *http.Request) error {
@@ -477,6 +573,16 @@ func randomToken() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(raw[:]), nil
+}
+
+func writeMCPConsentHeaders(w http.ResponseWriter) {
+	h := w.Header()
+	h.Set("Cache-Control", "no-store")
+	h.Set("Content-Type", "text/html; charset=utf-8")
+	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+	h.Set("Pragma", "no-cache")
+	h.Set("Referrer-Policy", "no-referrer")
+	h.Set("X-Content-Type-Options", "nosniff")
 }
 
 func writeOAuthError(w http.ResponseWriter, status int, code, description string) {

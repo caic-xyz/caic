@@ -28,11 +28,6 @@ When caic OAuth login is not configured, `authStore == nil` and the MCP endpoint
 accepts local clients without credentials. This is the intended localhost
 workflow for development and personal use on `127.0.0.1`.
 
-Validated local clients:
-
-- Claude Code HTTP MCP connects and lists tools.
-- Codex Streamable HTTP MCP connects and lists tools.
-
 This mode is unsafe for an exposed server. Documentation and startup behavior
 should make that clear.
 
@@ -115,19 +110,8 @@ Validation:
 ```bash
 go test ./backend/internal/mcp ./backend/internal/server
 go run ./backend/internal/cmd/mcp-auth-smoke --client codex
+go run ./backend/internal/cmd/mcp-auth-smoke --client claude
 ```
-
-Codex local OAuth evidence is covered by `mcp-auth-smoke`: it starts a local
-auth-enabled caic server, drives Codex Dynamic Client Registration and PKCE via a
-browser helper, verifies `codex mcp list` reports OAuth, then uses Codex's stored
-access token to call `tools/list`.
-
-Claude Code local CLI evidence: `go run ./backend/internal/cmd/mcp-auth-smoke
---client claude` reaches caic and receives the auth challenge, but Claude Code
-2.1.168 reports `Status: ! Needs authentication` from `claude mcp get` and does
-not start the OAuth flow from that command. This matches Claude Code's MCP docs:
-remote MCP servers that return `401` or `403` are flagged in `/mcp`, and the user
-completes OAuth from the interactive `/mcp` panel.
 
 Next Claude Code local check:
 
@@ -139,13 +123,8 @@ Next Claude Code local check:
 4. authenticate the `caic` server.
 5. verify `claude mcp get caic` reports `Status: ✓ Connected`.
 
-`tmux` is not available in the current container. `script` from util-linux is
-available and can allocate a PTY, but do not add brittle TUI automation until the
-manual `/mcp` path is understood.
-
-Also keep manual evidence for each hosted client: client version, configured
-endpoint, observed redirect URI, requested scopes, and final MCP tool-list
-result.
+Keep manual evidence for each hosted client: client version, configured endpoint,
+observed redirect URI, requested scopes, and final MCP tool-list result.
 
 ### 2. Operator setup and safety
 
@@ -170,27 +149,7 @@ Validation:
 - docs show exact commands for Claude Code and Codex.
 - server tests cover any new startup warning or rejection rule.
 
-### 3. Production MCP consent UX
-
-Replace the minimal HTML consent page with production caic UI.
-
-Requirements:
-
-- show client name.
-- show signed-in caic user.
-- show requested resource.
-- show requested scopes in human-readable form.
-- explain that the client receives caic MCP access, not GitHub/GitLab/OpenAI or
-  Anthropic credentials.
-- preserve existing GET authorize and POST consent semantics.
-- preserve exact redirect URI validation.
-
-Validation:
-
-- browser-flow tests for authorize page, approve, redirect, and error states.
-- `make check`.
-
-### 4. Token lifecycle
+### 3. Token lifecycle
 
 The current one-hour MCP access token may be enough for local clients and short
 hosted sessions. Real-client testing should decide this.
@@ -213,7 +172,7 @@ Validation:
 - revoked-token rejection test.
 - unknown-user rejection test.
 
-### 5. Client metadata compatibility
+### 4. Client metadata compatibility
 
 Dynamic Client Registration is implemented for public clients. If hosted clients
 cannot use DCR reliably, add only the minimum extension needed.
@@ -233,7 +192,7 @@ Validation:
 - compatibility test for the client that needs the extension.
 - regression tests for invalid metadata and invalid redirects.
 
-### 6. Origin policy
+### 5. Origin policy
 
 Current MCP origin validation permits absent `Origin` and requires same-origin
 when `Origin` is present. Keep this until real hosted-client tests show it is too
@@ -249,7 +208,7 @@ Validation:
 - mismatched origin rejected.
 - any new allowed hosted origin is covered by tests.
 
-### 7. Forge authority policy
+### 6. Forge authority policy
 
 Remote MCP forge tools currently require the remote caic user to have linked
 GitHub/GitLab identity. Keep that rule until product policy changes.
@@ -268,7 +227,7 @@ Validation:
 - linked user can perform allowed forge actions.
 - any server-side authority policy has explicit tests.
 
-### 8. Audit and revocation UX
+### 7. Audit and revocation UX
 
 MCP tool/resource calls are audited in memory and logged. Durable audit is
 optional but useful once hosted clients are supported.
