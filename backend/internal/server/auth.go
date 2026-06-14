@@ -3,6 +3,7 @@
 package server
 
 import (
+	"encoding/base64"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -33,7 +34,8 @@ type authHandlers struct {
 }
 
 // handleStart redirects the browser to the OAuth provider's authorization URL.
-// Accepts ?return=app to redirect to caic://auth after callback.
+// Accepts ?return=app to redirect to caic://auth after callback, or ?next=/path
+// to resume a same-origin web flow after callback.
 func (h *authHandlers) handleStart(provider string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg := h.providerConfig(provider)
@@ -42,8 +44,17 @@ func (h *authHandlers) handleStart(provider string) http.HandlerFunc {
 			return
 		}
 		returnMode := r.URL.Query().Get("return")
+		next := r.URL.Query().Get("next")
 		if returnMode != "" && returnMode != "app" {
 			writeError(w, api.BadRequest("return must be empty or \"app\""))
+			return
+		}
+		if returnMode == "app" && next != "" {
+			writeError(w, api.BadRequest("next is only valid for web login"))
+			return
+		}
+		if next != "" && !validWebRedirectPath(next) {
+			writeError(w, api.BadRequest("next must be a same-origin absolute path"))
 			return
 		}
 
@@ -54,11 +65,11 @@ func (h *authHandlers) handleStart(provider string) http.HandlerFunc {
 			return
 		}
 		// Prefix state with redirect target so the callback knows where to go.
-		prefix := "web:"
+		mode := "web"
 		if returnMode == "app" {
-			prefix = "app:"
+			mode = "app"
 		}
-		fullState := prefix + state
+		fullState := buildLoginState(mode, state, next)
 		cookieValue := auth.SignState(fullState, h.sessionSecret)
 
 		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure is set dynamically; all required attributes are present
@@ -70,7 +81,8 @@ func (h *authHandlers) handleStart(provider string) http.HandlerFunc {
 			Secure:   h.useSecureCookies(),
 			Path:     "/",
 		})
-		http.Redirect(w, r, cfg.AuthURL(fullState), http.StatusFound)
+		authURL := cfg.AuthURL(fullState)
+		http.Redirect(w, r, authURL, http.StatusFound) //nolint:gosec // G710: configured OAuth provider; next is same-origin state only.
 	}
 }
 
@@ -107,11 +119,8 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 			return
 		}
 
-		// Extract redirect prefix.
-		redirectMode := "web"
-		if strings.HasPrefix(fullState, "app:") {
-			redirectMode = "app"
-		}
+		// Extract redirect target.
+		redirectMode, next := parseLoginState(fullState)
 
 		// Verify the state query parameter matches the value extracted from the
 		// HMAC-validated cookie. The provider echoes back the raw (unsigned) state
@@ -197,7 +206,11 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 		if redirectMode == "app" {
 			http.Redirect(w, r, "caic://auth?token="+url.QueryEscape(jwt), http.StatusFound)
 		} else {
-			http.Redirect(w, r, "/", http.StatusFound)
+			redirectTarget := "/"
+			if next != "" {
+				redirectTarget = next
+			}
+			http.Redirect(w, r, redirectTarget, http.StatusFound)
 		}
 	}
 }
@@ -257,4 +270,42 @@ func (h *authHandlers) providerConfig(provider string) *auth.ProviderConfig {
 // True when the external URL starts with "https://".
 func (h *authHandlers) useSecureCookies() bool {
 	return h.hostState != nil && strings.HasPrefix(h.hostState.ExternalURL(), "https://")
+}
+
+func buildLoginState(mode, state, next string) string {
+	if mode == "app" {
+		return "app:" + state
+	}
+	if next == "" {
+		return "web:" + state
+	}
+	return "web:" + state + ":" + base64.RawURLEncoding.EncodeToString([]byte(next))
+}
+
+func parseLoginState(fullState string) (mode, next string) {
+	if strings.HasPrefix(fullState, "app:") {
+		return "app", ""
+	}
+	mode = "web"
+	stateBody := strings.TrimPrefix(fullState, "web:")
+	_, encodedNext, ok := strings.Cut(stateBody, ":")
+	if !ok {
+		return mode, ""
+	}
+	decodedNext, err := base64.RawURLEncoding.DecodeString(encodedNext)
+	if err != nil || !validWebRedirectPath(string(decodedNext)) {
+		return mode, ""
+	}
+	return mode, string(decodedNext)
+}
+
+func validWebRedirectPath(raw string) bool {
+	if strings.Contains(raw, `\`) {
+		return false
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "" || u.Host != "" || u.Path == "" || u.Fragment != "" {
+		return false
+	}
+	return strings.HasPrefix(u.Path, "/") && !strings.HasPrefix(raw, "//")
 }

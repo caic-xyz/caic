@@ -2007,7 +2007,7 @@ func TestBuildHandler(t *testing.T) {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusUnauthorized)
 		}
 		got := w.Header().Get("WWW-Authenticate")
-		want := `Bearer resource_metadata="https://caic.example.com/.well-known/oauth-protected-resource/api/caic/v1/mcp", scope="caic:mcp.read"`
+		want := `Bearer resource_metadata="https://caic.example.com/.well-known/oauth-protected-resource/api/caic/v1/mcp", scope="caic:mcp.read caic:tasks.read caic:tasks.write caic:tasks.admin caic:repos.write"`
 		if got != want {
 			t.Fatalf("WWW-Authenticate = %q, want %q", got, want)
 		}
@@ -2133,7 +2133,11 @@ func TestBuildHandler(t *testing.T) {
 			t.Fatalf("invalid consent token in page: %s", w.Body.String())
 		}
 
-		consentForm := url.Values{"consent_token": {consentToken}}
+		consentForm := url.Values{
+			"consent_token": {consentToken},
+			"scope_form":    {"1"},
+			"scope":         {mcpScopeRead, mcpScopeTasksRead},
+		}
 		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, mcpOAuthAuthorizePath, strings.NewReader(consentForm.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Host = "caic.example.com"
@@ -2173,7 +2177,7 @@ func TestBuildHandler(t *testing.T) {
 			t.Fatal(err)
 		}
 		parts := strings.Split(tokenResp.AccessToken, ".")
-		if tokenResp.TokenType != "Bearer" || len(parts) != 3 {
+		if tokenResp.TokenType != "Bearer" || len(parts) != 3 || tokenResp.Scope != mcpScopeRead+" "+mcpScopeTasksRead {
 			t.Fatalf("token response = %+v", tokenResp)
 		}
 		payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
@@ -2831,6 +2835,68 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 		if cbW.Code != http.StatusFound {
 			body, _ := io.ReadAll(cbW.Result().Body)
 			t.Fatalf("callback status = %d, want %d; body = %s", cbW.Code, http.StatusFound, body)
+		}
+	})
+
+	t.Run("rejects cross-origin web next", func(t *testing.T) {
+		t.Parallel()
+		startW := httptest.NewRecorder()
+		startReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/auth/github/start?next="+url.QueryEscape("https://evil.example/callback"), http.NoBody)
+		s.authHandlers.handleStart("github")(startW, startReq)
+		if startW.Code != http.StatusBadRequest {
+			t.Fatalf("start status = %d, want %d", startW.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("rejects backslash web next", func(t *testing.T) {
+		t.Parallel()
+		for _, next := range []string{`/\evil.example/callback`, `/api/caic/v1/oauth/authorize\evil`} {
+			startW := httptest.NewRecorder()
+			startReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/auth/github/start?next="+url.QueryEscape(next), http.NoBody)
+			s.authHandlers.handleStart("github")(startW, startReq)
+			if startW.Code != http.StatusBadRequest {
+				t.Fatalf("next %q start status = %d, want %d", next, startW.Code, http.StatusBadRequest)
+			}
+		}
+	})
+
+	t.Run("web next state redirects back after login", func(t *testing.T) {
+		t.Parallel()
+		next := "/api/caic/v1/oauth/authorize?client_id=caic_test&state=client-state"
+		startW := httptest.NewRecorder()
+		startReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/auth/github/start?next="+url.QueryEscape(next), http.NoBody)
+		s.authHandlers.handleStart("github")(startW, startReq)
+		if startW.Code != http.StatusFound {
+			t.Fatalf("start status = %d, want %d", startW.Code, http.StatusFound)
+		}
+		var stateCookie *http.Cookie
+		for _, c := range startW.Result().Cookies() {
+			if c.Name == auth.StateCookieName {
+				stateCookie = c
+				break
+			}
+		}
+		if stateCookie == nil {
+			t.Fatal("no state cookie set")
+		}
+		loc := startW.Header().Get("Location")
+		redirectURL, err := url.Parse(loc)
+		if err != nil {
+			t.Fatalf("parse redirect URL: %v", err)
+		}
+		rawState := redirectURL.Query().Get("state")
+
+		cbReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+			"/api/caic/v1/auth/github/callback?code=testcode&state="+url.QueryEscape(rawState), http.NoBody)
+		cbReq.AddCookie(stateCookie)
+		cbW := httptest.NewRecorder()
+		s.authHandlers.handleCallback("github")(cbW, cbReq)
+		if cbW.Code != http.StatusFound {
+			body, _ := io.ReadAll(cbW.Result().Body)
+			t.Fatalf("callback status = %d, want %d; body = %s", cbW.Code, http.StatusFound, body)
+		}
+		if cbW.Header().Get("Location") != next {
+			t.Fatalf("Location = %q, want %q", cbW.Header().Get("Location"), next)
 		}
 	})
 }

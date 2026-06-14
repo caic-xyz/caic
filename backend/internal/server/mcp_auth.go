@@ -16,7 +16,7 @@ import (
 
 const (
 	mcpProtectedResourceMetadataPath = "/.well-known/oauth-protected-resource"
-	mcpAuthDefaultScope              = "caic:mcp.read"
+	mcpAuthDefaultScope              = mcpScopeRead + " " + mcpScopeTasksRead + " " + mcpScopeTasksWrite + " " + mcpScopeTasksAdmin + " " + mcpScopeReposWrite
 )
 
 func (s *Router) handleMCPProtectedResourceMetadata(w http.ResponseWriter, r *http.Request) {

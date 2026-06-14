@@ -50,7 +50,9 @@ OAuth endpoints:
 3. Client discovers caic OAuth authorization-server metadata.
 4. Client dynamically registers as a public client.
 5. Client starts Authorization Code + PKCE S256.
-6. User must already have a caic session.
+6. caic requires a web session. If the user is not signed in, the authorize
+   endpoint redirects to caic login and resumes the same authorization request
+   after provider callback.
 7. caic shows consent.
 8. Client exchanges the code for a caic MCP access token.
 9. Client sends `Authorization: Bearer <token>` to `/api/caic/v1/mcp`.
@@ -67,48 +69,18 @@ implemented.
 - Do not pass inbound MCP bearer tokens to upstream APIs.
 - Preserve exact registered redirect URI matching.
 - Preserve Authorization Code + PKCE S256.
-- Require an authenticated caic session before MCP consent.
+- Require an authenticated caic session before MCP consent; redirect browser
+  authorization requests through caic login when no session exists.
 - Keep MCP access tokens scoped to caic.
 - Keep remote MCP forge actions bound to linked user authority unless a product
   decision explicitly allows server-side forge authority.
 
 ## Work Plan
 
-### 1. Hosted-client compatibility pass
-
-Local clients are verified. The remaining gap is hosted connectors and the
-inspector, which must be exercised manually because they run off-host.
-
-Clients:
-
-- MCP Inspector.
-- Claude hosted custom connector.
-- ChatGPT custom app/connector.
-
-The local flow already proves the generic protocol path (unauthenticated `401`
-with `WWW-Authenticate`, protected-resource and authorization-server metadata
-discovery, DCR, token endpoint form parsing). Per hosted client, additionally
-verify:
-
-- Dynamic Client Registration works with each client.
-- token endpoint form parsing works with each client.
-- Claude hosted redirect URI works:
-  `https://claude.ai/api/mcp/auth_callback`.
-- ChatGPT redirect URI from app management works.
-- hosted clients either omit `Origin` or send an origin compatible with caic's
-  same-origin check.
-- one-hour access-token expiry is acceptable, or refresh tokens are required.
-
-Do not add hosted-client origin allowlists, refresh tokens, or Client ID Metadata
-Document support until this pass proves they are needed.
-
-Keep manual evidence for each hosted client: client version, configured endpoint,
-observed redirect URI, requested scopes, and final MCP tool-list result.
-
-### 2. Token lifecycle
+### 1. Token lifecycle
 
 The current one-hour MCP access token may be enough for local clients and short
-hosted sessions. Real-client testing should decide this.
+hosted sessions. Continued hosted-client use should decide this.
 
 If expiry is not acceptable, add refresh tokens:
 
@@ -128,43 +100,7 @@ Validation:
 - revoked-token rejection test.
 - unknown-user rejection test.
 
-### 3. Client metadata compatibility
-
-Dynamic Client Registration is implemented for public clients. If hosted clients
-cannot use DCR reliably, add only the minimum extension needed.
-
-Possible extension:
-
-- Client ID Metadata Document support.
-
-Constraints:
-
-- no static shared client secrets for public hosted clients.
-- no broad redirect URI wildcards.
-- no bypass of exact redirect URI matching.
-
-Validation:
-
-- compatibility test for the client that needs the extension.
-- regression tests for invalid metadata and invalid redirects.
-
-### 4. Origin policy
-
-Current MCP origin validation permits absent `Origin` and requires same-origin
-when `Origin` is present. Keep this until real hosted-client tests show it is too
-strict.
-
-If hosted clients send fixed third-party origins, add explicit allowlist behavior
-only for proven clients and only for the MCP/OAuth endpoints that require it.
-
-Validation:
-
-- absent `Origin` accepted.
-- same-origin accepted.
-- mismatched origin rejected.
-- any new allowed hosted origin is covered by tests.
-
-### 5. Forge authority policy
+### 2. Forge authority policy
 
 Remote MCP forge tools currently require the remote caic user to have linked
 GitHub/GitLab identity. Keep that rule until product policy changes.
@@ -183,10 +119,10 @@ Validation:
 - linked user can perform allowed forge actions.
 - any server-side authority policy has explicit tests.
 
-### 6. Audit and revocation UX
+### 3. Audit and revocation UX
 
 MCP tool/resource calls are audited in memory and logged. Durable audit is
-optional but useful once hosted clients are supported.
+optional unless product policy requires persistent traceability.
 
 If implemented:
 

@@ -486,6 +486,9 @@ func registerTestClient(t *testing.T, h http.Handler, clientName string, redirec
 	if w.Code != http.StatusCreated {
 		t.Fatalf("register status = %d, want %d: %s", w.Code, http.StatusCreated, w.Body.String())
 	}
+	if contentType := w.Header().Get("Content-Type"); contentType != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", contentType)
+	}
 	var resp mcp.OAuthRegisterResponse
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode register response: %v", err)
@@ -503,6 +506,25 @@ func consentTokenFromHTML(t *testing.T, body string) string {
 		t.Fatal("consent token value is not terminated")
 	}
 	return consentToken
+}
+
+func TestApproveMCPScope(t *testing.T) {
+	t.Parallel()
+
+	requested := mcpScopeRead + " " + mcpScopeTasksRead + " " + mcpScopeTasksWrite
+	scope, err := approveMCPScope(requested, url.Values{"scope_form": {"1"}, "scope": {mcpScopeTasksWrite, mcpScopeRead}})
+	if err != nil {
+		t.Fatalf("approveMCPScope: %v", err)
+	}
+	if scope != mcpScopeRead+" "+mcpScopeTasksWrite {
+		t.Fatalf("scope = %q, want selected scopes in canonical order", scope)
+	}
+	if _, err := approveMCPScope(requested, url.Values{"scope_form": {"1"}, "scope": {mcpScopeReposWrite}}); err == nil {
+		t.Fatal("approveMCPScope unrequested scope error = nil")
+	}
+	if _, err := approveMCPScope(requested, url.Values{"scope_form": {"1"}}); err == nil {
+		t.Fatal("approveMCPScope empty selection error = nil")
+	}
 }
 
 func TestMCPConsentPage(t *testing.T) {
@@ -534,7 +556,7 @@ func TestMCPConsentPage(t *testing.T) {
 			"code_challenge":        {challenge},
 			"code_challenge_method": {"S256"},
 			"resource":              {"https://caic.example.com/api/caic/v1/mcp"},
-			"scope":                 {"caic:mcp.read caic:tasks.read"},
+			"scope":                 {mcpAuthDefaultScope},
 		}
 		jwt, err := auth.IssueToken(&user2, []byte("0123456789abcdef0123456789abcdef"), sessionTTL)
 		if err != nil {
@@ -597,6 +619,12 @@ func TestMCPConsentPage(t *testing.T) {
 		if !strings.Contains(body, "Read task information") {
 			t.Error("body missing scope description for caic:tasks.read")
 		}
+		if !strings.Contains(body, `type="checkbox" name="scope" value="caic:tasks.write" form="consent-form"`) {
+			t.Error("body missing selectable write scope attached to consent form")
+		}
+		if !strings.Contains(body, "Manage repositories") {
+			t.Error("body missing repos write scope description")
+		}
 
 		// Verify security warning.
 		if !strings.Contains(body, "caic MCP only") {
@@ -612,8 +640,8 @@ func TestMCPConsentPage(t *testing.T) {
 		}
 
 		// Verify form action.
-		if !strings.Contains(body, `action="/api/caic/v1/oauth/authorize"`) {
-			t.Error("body missing form action")
+		if !strings.Contains(body, `id="consent-form" method="post" action="https://caic.example.com/api/caic/v1/oauth/authorize"`) {
+			t.Error("body missing consent form action")
 		}
 
 		// Verify Deny and Authorize buttons.
@@ -629,8 +657,12 @@ func TestMCPConsentPage(t *testing.T) {
 		if w.Header().Get("Referrer-Policy") != "no-referrer" {
 			t.Errorf("Referrer-Policy = %q, want no-referrer", w.Header().Get("Referrer-Policy"))
 		}
-		if !strings.Contains(w.Header().Get("Content-Security-Policy"), "default-src 'none'") {
-			t.Errorf("Content-Security-Policy = %q, want locked-down default-src", w.Header().Get("Content-Security-Policy"))
+		csp := w.Header().Get("Content-Security-Policy")
+		if !strings.Contains(csp, "default-src 'none'") {
+			t.Errorf("Content-Security-Policy = %q, want locked-down default-src", csp)
+		}
+		if strings.Contains(csp, "form-action") {
+			t.Errorf("Content-Security-Policy = %q, want form-action omitted for hosted OAuth popups", csp)
 		}
 	})
 
@@ -729,6 +761,53 @@ func TestMCPConsentPage(t *testing.T) {
 		h.ServeHTTP(w, req)
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("redirects unauthenticated web authorization to caic login", func(t *testing.T) {
+		t.Parallel()
+		s2, _, _ := newAuthEnabledRouter(t)
+		s2.authHandlers.hostState = s2.hostState
+		s2.authHandlers.githubOAuth = &auth.ProviderConfig{ //nolint:gosec // Test-only OAuth credentials.
+			ClientID:     "github-client",
+			ClientSecret: "github-secret",
+			AuthEndpoint: "https://github.com/login/oauth/authorize",
+			TokenURL:     "https://github.com/login/oauth/access_token",
+			UserInfoURL:  "https://api.github.com/user",
+			Scopes:       []string{"repo"},
+			Provider:     "github",
+			Host:         s2.hostState,
+		}
+		h2, err := s2.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler: %v", err)
+		}
+		form := url.Values{
+			"response_type":         {"code"},
+			"client_id":             {"any"},
+			"redirect_uri":          {"https://example.com/callback"},
+			"code_challenge":        {challenge},
+			"code_challenge_method": {"S256"},
+			"resource":              {"https://caic.example.com/api/caic/v1/mcp"},
+			"scope":                 {"caic:mcp.read"},
+		}
+		authorizePath := mcpOAuthAuthorizePath + "?" + form.Encode()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, authorizePath, http.NoBody)
+		req.Host = "caic.example.com"
+		w := httptest.NewRecorder()
+		h2.ServeHTTP(w, req)
+		if w.Code != http.StatusFound {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusFound, w.Body.String())
+		}
+		location, err := url.Parse(w.Header().Get("Location"))
+		if err != nil {
+			t.Fatalf("parse Location: %v", err)
+		}
+		if location.Path != "/api/caic/v1/auth/github/start" {
+			t.Fatalf("Location path = %q, want GitHub login start", location.Path)
+		}
+		if location.Query().Get("next") != authorizePath {
+			t.Fatalf("next = %q, want %q", location.Query().Get("next"), authorizePath)
 		}
 	})
 

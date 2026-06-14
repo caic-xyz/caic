@@ -68,8 +68,9 @@ type mcpConsentTemplateData struct {
 
 // mcpScopeItem holds a scope identifier and its human-readable label.
 type mcpScopeItem struct {
-	ID    string
-	Label string
+	ID      string
+	Label   string
+	Checked bool
 }
 
 func mcpScopeItems(scope string) []mcpScopeItem {
@@ -83,9 +84,13 @@ func mcpScopeItems(scope string) []mcpScopeItem {
 		if label == "" {
 			label = p
 		}
-		items = append(items, mcpScopeItem{ID: p, Label: label})
+		items = append(items, mcpScopeItem{ID: p, Label: label, Checked: mcpScopeDefaultChecked(p)})
 	}
 	return items
+}
+
+func mcpScopeDefaultChecked(scope string) bool {
+	return scope == mcpScopeRead || scope == mcpScopeTasksRead
 }
 
 func mcpUserInitial(username string) string {
@@ -257,9 +262,12 @@ func (s *Router) handleMCPOAuthRegister(w http.ResponseWriter, r *http.Request) 
 	s.mcpOAuth.mu.Lock()
 	s.mcpOAuth.clients[client.ID] = client
 	s.mcpOAuth.mu.Unlock()
-	w.WriteHeader(http.StatusCreated)
 	resp := mcp.OAuthRegisterResponse{ClientID: client.ID, ClientIDIssuedAt: now.Unix(), ClientName: client.Name, RedirectURIs: client.RedirectURIs, TokenEndpointAuthMethod: method}
-	writeJSONResponse(w, &resp, nil)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(&resp); err != nil {
+		slog.WarnContext(r.Context(), "encode oauth registration response", "err", err)
+	}
 }
 
 func (s *Router) handleMCPOAuthAuthorize(w http.ResponseWriter, r *http.Request) {
@@ -269,6 +277,12 @@ func (s *Router) handleMCPOAuthAuthorize(w http.ResponseWriter, r *http.Request)
 	}
 	user, ok := auth.UserFromContext(r.Context())
 	if !ok {
+		if r.Method == http.MethodGet {
+			if loginURL := s.mcpLoginStartURL(r); loginURL != "" {
+				http.Redirect(w, r, loginURL, http.StatusFound)
+				return
+			}
+		}
 		writeOAuthError(w, http.StatusUnauthorized, "login_required", "log in to caic before authorizing MCP access")
 		return
 	}
@@ -289,9 +303,10 @@ func (s *Router) handleMCPOAuthAuthorize(w http.ResponseWriter, r *http.Request)
 		s.mcpOAuth.mu.Lock()
 		s.mcpOAuth.consents[consentToken] = mcpOAuthConsent{UserID: user.ID, Values: values, ExpiresAt: time.Now().Add(mcpOAuthAuthCodeTTL)}
 		s.mcpOAuth.mu.Unlock()
+		baseURL := s.externalBaseURL(r)
 		writeMCPConsentHeaders(w)
 		data := mcpConsentTemplateData{
-			Action:        mcpOAuthAuthorizePath,
+			Action:        baseURL + mcpOAuthAuthorizePath,
 			ConsentToken:  consentToken,
 			ClientName:    clientDisplayName(&client),
 			ClientID:      client.ID,
@@ -347,7 +362,7 @@ func (s *Router) handleMCPOAuthAuthorize(w http.ResponseWriter, r *http.Request)
 		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not authorize client")
 		return
 	}
-	scope, err := normalizeMCPScope(values.Get("scope"))
+	scope, err := approveMCPScope(values.Get("scope"), r.PostForm)
 	if err != nil {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_scope", err.Error())
 		return
@@ -369,6 +384,23 @@ func (s *Router) handleMCPOAuthAuthorize(w http.ResponseWriter, r *http.Request)
 	q.Set("iss", s.externalBaseURL(r))
 	redirectURL.RawQuery = q.Encode()
 	http.Redirect(w, r, redirectURL.String(), http.StatusSeeOther)
+}
+
+func (s *Router) mcpLoginStartURL(r *http.Request) string {
+	if s.authHandlers == nil {
+		return ""
+	}
+	provider := ""
+	if s.authHandlers.githubOAuth != nil && s.authHandlers.githubOAuth.RedirectURI() != "" {
+		provider = "github"
+	} else if s.authHandlers.gitlabOAuth != nil && s.authHandlers.gitlabOAuth.RedirectURI() != "" {
+		provider = "gitlab"
+	}
+	if provider == "" {
+		return ""
+	}
+	values := url.Values{"next": {r.URL.RequestURI()}}
+	return "/api/caic/v1/auth/" + provider + "/start?" + values.Encode()
 }
 
 func (s *Router) handleMCPOAuthToken(w http.ResponseWriter, r *http.Request) {
@@ -534,6 +566,38 @@ func normalizeMCPScope(scope string) (string, error) {
 	return strings.Join(parts, " "), nil
 }
 
+func approveMCPScope(requested string, form url.Values) (string, error) {
+	normalizedRequested, err := normalizeMCPScope(requested)
+	if err != nil {
+		return "", err
+	}
+	if form.Get("scope_form") == "" {
+		return normalizedRequested, nil
+	}
+	allowed := parseMCPScopeSet(normalizedRequested)
+	selected := make(map[string]struct{}, len(form["scope"]))
+	for _, scope := range form["scope"] {
+		if _, ok := mcpSupportedScopes[scope]; !ok {
+			return "", fmt.Errorf("unsupported scope: %s", scope)
+		}
+		if _, ok := allowed[scope]; !ok {
+			return "", fmt.Errorf("unrequested scope: %s", scope)
+		}
+		selected[scope] = struct{}{}
+	}
+	if len(selected) == 0 {
+		return "", errors.New("select at least one scope")
+	}
+	ordered := supportedMCPOAuthScopes()
+	approved := make([]string, 0, len(selected))
+	for _, scope := range ordered {
+		if _, ok := selected[scope]; ok {
+			approved = append(approved, scope)
+		}
+	}
+	return strings.Join(approved, " "), nil
+}
+
 func cloneURLValues(values url.Values) url.Values {
 	clone := make(url.Values, len(values))
 	for key, entries := range values {
@@ -579,7 +643,7 @@ func writeMCPConsentHeaders(w http.ResponseWriter) {
 	h := w.Header()
 	h.Set("Cache-Control", "no-store")
 	h.Set("Content-Type", "text/html; charset=utf-8")
-	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'")
 	h.Set("Pragma", "no-cache")
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("X-Content-Type-Options", "nosniff")

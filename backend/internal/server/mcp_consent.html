@@ -124,6 +124,15 @@
       padding: 0.35rem 0;
       font-size: 0.9rem;
     }
+    .scope-item label {
+      display: flex;
+      align-items: baseline;
+      gap: 0.5rem;
+      cursor: pointer;
+    }
+    .scope-item input {
+      flex: 0 0 auto;
+    }
     .scope-item code {
       display: inline-block;
       padding: 0.1em 0.4em;
@@ -212,7 +221,12 @@
         <p class="section-label">Permissions</p>
         <ul class="scope-list">
           {{range .ScopeItems}}
-          <li class="scope-item"><code>{{.ID}}</code>{{.Label}}</li>
+          <li class="scope-item">
+            <label>
+              <input type="checkbox" name="scope" value="{{.ID}}" form="consent-form"{{if .Checked}} checked{{end}}>
+              <span><code>{{.ID}}</code>{{.Label}}</span>
+            </label>
+          </li>
           {{end}}
         </ul>
       </div>
@@ -224,8 +238,9 @@
         </p>
       </div>
 
-      <form method="post" action="{{.Action}}" class="actions">
+      <form id="consent-form" method="post" action="{{.Action}}" class="actions">
         <input type="hidden" name="consent_token" value="{{.ConsentToken}}">
+        <input type="hidden" name="scope_form" value="1">
         <button type="submit" name="decision" value="deny" class="btn btn-deny">Deny</button>
         <button type="submit" name="decision" value="approve" class="btn btn-authorize">Authorize</button>
       </form>
