@@ -89,3 +89,13 @@ func (h *usageHandlers) buildResp(ctx context.Context) v1.UsageResp {
 	}
 	return resp
 }
+
+// routes returns the handler for usage quota snapshots and the usage SSE
+// stream. Patterns are relative to the /api/caic/v1 version prefix, stripped at
+// mount time.
+func (h *usageHandlers) routes() http.Handler {
+	m := http.NewServeMux()
+	m.HandleFunc("GET /usage", h.handleGetUsage)
+	m.HandleFunc("GET /usage/events", h.handleEvents)
+	return m
+}

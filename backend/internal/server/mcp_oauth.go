@@ -32,12 +32,6 @@ import (
 )
 
 const (
-	mcpOAuthAuthorizePath = "/api/caic/v1/oauth/authorize"
-	mcpOAuthTokenPath     = "/api/caic/v1/oauth/token" //nolint:gosec // OAuth token endpoint path, not a credential.
-	mcpOAuthRegisterPath  = "/api/caic/v1/oauth/register"
-	mcpOAuthRevokePath    = "/api/caic/v1/oauth/revoke"
-	mcpOAuthJWKSPath      = "/api/caic/v1/oauth/jwks"
-
 	mcpOAuthAccessTokenTTL  = time.Hour
 	mcpOAuthAuthCodeTTL     = 10 * time.Minute
 	mcpOAuthRefreshTokenTTL = 30 * 24 * time.Hour
@@ -253,11 +247,11 @@ func (s *mcpServer) handleMCPOAuthMetadata(w http.ResponseWriter, r *http.Reques
 	issuer := s.externalBaseURL(r)
 	metadata := mcp.OAuthAuthorizationServerMetadata{
 		Issuer:                                 issuer,
-		AuthorizationEndpoint:                  issuer + mcpOAuthAuthorizePath,
-		TokenEndpoint:                          issuer + mcpOAuthTokenPath,
-		JWKSURI:                                issuer + mcpOAuthJWKSPath,
-		RegistrationEndpoint:                   issuer + mcpOAuthRegisterPath,
-		RevocationEndpoint:                     issuer + mcpOAuthRevokePath,
+		AuthorizationEndpoint:                  issuer + "/api/caic/v1/oauth/authorize",
+		TokenEndpoint:                          issuer + "/api/caic/v1/oauth/token",
+		JWKSURI:                                issuer + "/api/caic/v1/oauth/jwks",
+		RegistrationEndpoint:                   issuer + "/api/caic/v1/oauth/register",
+		RevocationEndpoint:                     issuer + "/api/caic/v1/oauth/revoke",
 		ResponseTypesSupported:                 []string{mcp.OAuthResponseTypeCode},
 		GrantTypesSupported:                    []string{mcp.OAuthGrantAuthorizationCode, mcp.OAuthGrantRefreshToken},
 		CodeChallengeMethodsSupported:          []string{mcp.OAuthCodeChallengeS256},
@@ -368,7 +362,7 @@ func (s *mcpServer) handleMCPOAuthAuthorize(w http.ResponseWriter, r *http.Reque
 		baseURL := s.externalBaseURL(r)
 		writeMCPConsentHeaders(w)
 		data := mcpConsentTemplateData{
-			Action:        baseURL + mcpOAuthAuthorizePath,
+			Action:        baseURL + "/api/caic/v1/oauth/authorize",
 			ConsentToken:  consentToken,
 			ClientName:    clientDisplayName(&client),
 			ClientID:      client.ID,

@@ -478,7 +478,7 @@ func newAuthEnabledRouter(t *testing.T) (*Router, *auth.Store, auth.User) {
 
 func registerTestClient(t *testing.T, h http.Handler, clientName string, redirectURIs []string) mcp.OAuthRegisterResponse {
 	body := strings.NewReader(`{"client_name":"` + clientName + `","redirect_uris":["` + strings.Join(redirectURIs, `","`) + `"],"token_endpoint_auth_method":"none"}`)
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, mcpOAuthRegisterPath, body)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/oauth/register", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.Host = "caic.example.com"
 	w := httptest.NewRecorder()
@@ -562,7 +562,7 @@ func TestMCPConsentPage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("issue token: %v", err)
 		}
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, mcpOAuthAuthorizePath+"?"+form.Encode(), http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/oauth/authorize"+"?"+form.Encode(), http.NoBody)
 		req.Host = "caic.example.com"
 		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 		w := httptest.NewRecorder()
@@ -687,7 +687,7 @@ func TestMCPConsentPage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("issue token: %v", err)
 		}
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, mcpOAuthAuthorizePath+"?"+form.Encode(), http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/oauth/authorize"+"?"+form.Encode(), http.NoBody)
 		req.Host = "caic.example.com"
 		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 		w := httptest.NewRecorder()
@@ -725,7 +725,7 @@ func TestMCPConsentPage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("issue token: %v", err)
 		}
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, mcpOAuthAuthorizePath+"?"+form.Encode(), http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/oauth/authorize"+"?"+form.Encode(), http.NoBody)
 		req.Host = "caic.example.com"
 		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 		w := httptest.NewRecorder()
@@ -754,7 +754,7 @@ func TestMCPConsentPage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("issue token: %v", err)
 		}
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, mcpOAuthAuthorizePath+"?"+form.Encode(), http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/oauth/authorize"+"?"+form.Encode(), http.NoBody)
 		req.Host = "caic.example.com"
 		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 		w := httptest.NewRecorder()
@@ -791,7 +791,7 @@ func TestMCPConsentPage(t *testing.T) {
 			"resource":              {"https://caic.example.com/api/caic/v1/mcp"},
 			"scope":                 {"caic:mcp.read"},
 		}
-		authorizePath := mcpOAuthAuthorizePath + "?" + form.Encode()
+		authorizePath := "/api/caic/v1/oauth/authorize" + "?" + form.Encode()
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, authorizePath, http.NoBody)
 		req.Host = "caic.example.com"
 		w := httptest.NewRecorder()
@@ -822,7 +822,7 @@ func TestMCPConsentPage(t *testing.T) {
 			"resource":              {"https://caic.example.com/api/caic/v1/mcp"},
 			"scope":                 {"caic:mcp.read"},
 		}
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, mcpOAuthAuthorizePath+"?"+form.Encode(), http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/oauth/authorize"+"?"+form.Encode(), http.NoBody)
 		req.Host = "caic.example.com"
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -853,7 +853,7 @@ func TestMCPConsentPage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("issue token: %v", err)
 		}
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, mcpOAuthAuthorizePath+"?"+form.Encode(), http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/oauth/authorize"+"?"+form.Encode(), http.NoBody)
 		req.Host = "caic.example.com"
 		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 		w := httptest.NewRecorder()
@@ -885,7 +885,7 @@ func TestMCPConsentPage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("issue token: %v", err)
 		}
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, mcpOAuthAuthorizePath+"?"+form.Encode(), http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/oauth/authorize"+"?"+form.Encode(), http.NoBody)
 		req.Host = "caic.example.com"
 		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 		w := httptest.NewRecorder()
@@ -894,7 +894,7 @@ func TestMCPConsentPage(t *testing.T) {
 			t.Fatalf("consent status = %d, want %d", w.Code, http.StatusOK)
 		}
 		consentForm := url.Values{"consent_token": {consentTokenFromHTML(t, w.Body.String())}, "decision": {"approve"}}
-		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, mcpOAuthAuthorizePath, strings.NewReader(consentForm.Encode()))
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/oauth/authorize", strings.NewReader(consentForm.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Host = "caic.example.com"
 		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
@@ -943,7 +943,7 @@ func TestMCPConsentPage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("issue token: %v", err)
 		}
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, mcpOAuthAuthorizePath+"?"+form.Encode(), http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/oauth/authorize"+"?"+form.Encode(), http.NoBody)
 		req.Host = "caic.example.com"
 		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 		w := httptest.NewRecorder()
@@ -952,7 +952,7 @@ func TestMCPConsentPage(t *testing.T) {
 			t.Fatalf("consent status = %d, want %d", w.Code, http.StatusOK)
 		}
 		consentForm := url.Values{"consent_token": {consentTokenFromHTML(t, w.Body.String())}, "decision": {"deny"}}
-		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, mcpOAuthAuthorizePath, strings.NewReader(consentForm.Encode()))
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/oauth/authorize", strings.NewReader(consentForm.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Host = "caic.example.com"
 		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
@@ -983,7 +983,7 @@ func TestMCPConsentPage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("issue token: %v", err)
 		}
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, mcpOAuthAuthorizePath, strings.NewReader(form.Encode()))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/oauth/authorize", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Host = "caic.example.com"
 		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
@@ -1017,7 +1017,7 @@ func TestMCPConsentPage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("issue token: %v", err)
 		}
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, mcpOAuthAuthorizePath+"?"+form.Encode(), http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/oauth/authorize"+"?"+form.Encode(), http.NoBody)
 		req.Host = "caic.example.com"
 		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt2, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 		w := httptest.NewRecorder()
@@ -1042,7 +1042,7 @@ func TestMCPConsentPage(t *testing.T) {
 			t.Fatalf("issue token: %v", err)
 		}
 		consentForm := url.Values{"consent_token": {consentToken}}
-		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, mcpOAuthAuthorizePath, strings.NewReader(consentForm.Encode()))
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/oauth/authorize", strings.NewReader(consentForm.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Host = "caic.example.com"
 		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwtOther, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})

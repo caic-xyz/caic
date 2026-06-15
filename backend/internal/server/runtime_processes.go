@@ -111,3 +111,13 @@ func (p *RuntimeProcesses) getTask(r *http.Request) (*tasks.Entry, error) {
 	}
 	return entry, nil
 }
+
+// routes returns the handler for task runtime process inspection and signaling.
+// Patterns are relative to the /api/caic/v1 version prefix, stripped at mount
+// time; {id} is the task ID.
+func (p *RuntimeProcesses) routes() http.Handler {
+	m := http.NewServeMux()
+	m.HandleFunc("GET /processes/{id}", p.HandleGetProcesses)
+	m.HandleFunc("POST /processes/{id}/{pid}/signal", p.HandleSignalProcess)
+	return m
+}

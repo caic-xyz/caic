@@ -50,9 +50,9 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     /** Updates server settings and preferences. */
     updatePreferences: (req: UpdatePreferencesReq): Promise<PreferencesResp> => request<PreferencesResp>("POST", "/api/caic/v1/server/preferences", req),
     /** Lists the authenticated user's connected MCP clients. */
-    listMCPGrants: (): Promise<MCPGrantsResp> => request<MCPGrantsResp>("GET", "/api/caic/v1/server/mcp-grants"),
+    listMCPGrants: (): Promise<MCPGrantsResp> => request<MCPGrantsResp>("GET", "/api/caic/v1/mcp-grants"),
     /** Revokes one connected MCP client grant for the authenticated user. */
-    revokeMCPGrant: (grantID: string, req: RevokeMCPGrantReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/server/mcp-grants/${grantID}/revoke`, req),
+    revokeMCPGrant: (grantID: string, req: RevokeMCPGrantReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/mcp-grants/${grantID}/revoke`, req),
     /** Lists available coding agent harnesses. */
     listHarnesses: (): Promise<HarnessInfo[]> => request<HarnessInfo[]>("GET", "/api/caic/v1/server/harnesses"),
     /** Lists well-known cache configurations. */
@@ -66,9 +66,9 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     /** Lists branches for a repository. */
     listRepoBranches: (repo: string): Promise<RepoBranchesResp> => request<RepoBranchesResp>("GET", `/api/caic/v1/server/repos/branches?repo=${encodeURIComponent(repo)}`),
     /** Creates a task to fix a failing CI pipeline. */
-    botFixCI: (req: BotFixCIReq): Promise<CreateTaskResp> => request<CreateTaskResp>("POST", "/api/caic/v1/bot/fix-ci", req),
+    botFixCI: (req: BotFixCIReq): Promise<CreateTaskResp> => request<CreateTaskResp>("POST", "/api/caic/v1/ci/fix-ci", req),
     /** Injects a CI fix command into an existing task's PR. */
-    botFixPR: (req: BotFixPRReq): Promise<StatusResp> => request<StatusResp>("POST", "/api/caic/v1/bot/fix-pr", req),
+    botFixPR: (req: BotFixPRReq): Promise<StatusResp> => request<StatusResp>("POST", "/api/caic/v1/ci/fix-pr", req),
     /** Returns all tasks. */
     listTasks: (): Promise<Task[]> => request<Task[]>("GET", "/api/caic/v1/tasks"),
     /** Creates and starts a new coding agent task. */
@@ -112,7 +112,7 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     /** Reconnects to an orphaned task runtime instance. */
     reviveTask: (id: string): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${id}/revive`),
     /** Returns the log tail of a failed CI check run. */
-    getTaskCILog: (id: string, jobID: string): Promise<CILogResp> => request<CILogResp>("GET", `/api/caic/v1/tasks/${id}/ci-log?jobID=${encodeURIComponent(jobID)}`),
+    getTaskCILog: (id: string, jobID: string): Promise<CILogResp> => request<CILogResp>("GET", `/api/caic/v1/ci/log/${id}?jobID=${encodeURIComponent(jobID)}`),
     /** Pushes task changes to the remote repository. */
     syncTask: (id: string, req: SyncReq): Promise<SyncResp> => request<SyncResp>("POST", `/api/caic/v1/tasks/${id}/sync`, req),
     /** Forks a task by snapshotting its runtime instance and creating a new task on a derived branch. */
@@ -120,14 +120,14 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     /** Returns the unified diff for a task's branch. */
     getTaskDiff: (id: string, path: string): Promise<DiffResp> => request<DiffResp>("GET", `/api/caic/v1/tasks/${id}/diff?path=${encodeURIComponent(path)}`),
     /** Returns the list of running processes inside the task's runtime instance. */
-    getTaskProcesses: (id: string): Promise<ProcessListResp> => request<ProcessListResp>("GET", `/api/caic/v1/tasks/${id}/processes`),
+    getTaskProcesses: (id: string): Promise<ProcessListResp> => request<ProcessListResp>("GET", `/api/caic/v1/processes/${id}`),
     /** Sends SIGTERM or SIGKILL to a process inside the task's runtime instance. */
-    signalProcess: (id: string, pid: string, req: SignalProcessReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${id}/processes/${pid}/signal`, req),
+    signalProcess: (id: string, pid: string, req: SignalProcessReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/processes/${id}/${pid}/signal`, req),
     /** Returns the full (untruncated) input for a tool call. */
     getTaskToolInput: (id: string, toolUseID: string): Promise<TaskToolInputResp> => request<TaskToolInputResp>("GET", `/api/caic/v1/tasks/${id}/tool/${toolUseID}`),
     /** Streams task list updates for all tasks via SSE. */
     globalTaskEvents: (onMessage: (event: TaskListEvent) => void, onError: (err: unknown) => void): EventSource => {
-      const es = new EventSource("/api/caic/v1/server/tasks/events");
+      const es = new EventSource("/api/caic/v1/tasks/events");
       es.addEventListener("message", (e) => {
         try {
           onMessage(validateTaskListEvent(JSON.parse(e.data)));
@@ -139,7 +139,7 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     },
     /** Streams usage quota updates via SSE. */
     globalUsageEvents: (onMessage: (event: UsageResp) => void, onError: (err: unknown) => void): EventSource => {
-      const es = new EventSource("/api/caic/v1/server/usage/events");
+      const es = new EventSource("/api/caic/v1/usage/events");
       es.addEventListener("message", (e) => {
         try {
           onMessage(validateUsageResp(JSON.parse(e.data)));

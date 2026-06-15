@@ -140,11 +140,11 @@ public final class ApiClient {
     }
     /// Lists the authenticated user's connected MCP clients.
     public func listMCPGrants() async throws -> MCPGrantsResp {
-        try await request("GET", path: "/api/caic/v1/server/mcp-grants")
+        try await request("GET", path: "/api/caic/v1/mcp-grants")
     }
     /// Revokes one connected MCP client grant for the authenticated user.
     public func revokeMCPGrant(grantID: String, req: RevokeMCPGrantReq) async throws -> StatusResp {
-        try await request("POST", path: "/api/caic/v1/server/mcp-grants/\(grantID)/revoke", body: try encoder.encode(req))
+        try await request("POST", path: "/api/caic/v1/mcp-grants/\(grantID)/revoke", body: try encoder.encode(req))
     }
     /// Lists available coding agent harnesses.
     public func listHarnesses() async throws -> [HarnessInfo] {
@@ -172,11 +172,11 @@ public final class ApiClient {
     }
     /// Creates a task to fix a failing CI pipeline.
     public func botFixCI(req: BotFixCIReq) async throws -> CreateTaskResp {
-        try await request("POST", path: "/api/caic/v1/bot/fix-ci", body: try encoder.encode(req))
+        try await request("POST", path: "/api/caic/v1/ci/fix-ci", body: try encoder.encode(req))
     }
     /// Injects a CI fix command into an existing task's PR.
     public func botFixPR(req: BotFixPRReq) async throws -> StatusResp {
-        try await request("POST", path: "/api/caic/v1/bot/fix-pr", body: try encoder.encode(req))
+        try await request("POST", path: "/api/caic/v1/ci/fix-pr", body: try encoder.encode(req))
     }
     /// Returns all tasks.
     public func listTasks() async throws -> [Task] {
@@ -216,7 +216,7 @@ public final class ApiClient {
     }
     /// Returns the log tail of a failed CI check run.
     public func getTaskCILog(id: String, jobID: String) async throws -> CILogResp {
-        try await request("GET", path: "/api/caic/v1/tasks/\(id)/ci-log?jobID=\(jobID.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? jobID)")
+        try await request("GET", path: "/api/caic/v1/ci/log/\(id)?jobID=\(jobID.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? jobID)")
     }
     /// Pushes task changes to the remote repository.
     public func syncTask(id: String, req: SyncReq) async throws -> SyncResp {
@@ -232,11 +232,11 @@ public final class ApiClient {
     }
     /// Returns the list of running processes inside the task's runtime instance.
     public func getTaskProcesses(id: String) async throws -> ProcessListResp {
-        try await request("GET", path: "/api/caic/v1/tasks/\(id)/processes")
+        try await request("GET", path: "/api/caic/v1/processes/\(id)")
     }
     /// Sends SIGTERM or SIGKILL to a process inside the task's runtime instance.
     public func signalProcess(id: String, pid: String, req: SignalProcessReq) async throws -> StatusResp {
-        try await request("POST", path: "/api/caic/v1/tasks/\(id)/processes/\(pid)/signal", body: try encoder.encode(req))
+        try await request("POST", path: "/api/caic/v1/processes/\(id)/\(pid)/signal", body: try encoder.encode(req))
     }
     /// Returns the full (untruncated) input for a tool call.
     public func getTaskToolInput(id: String, toolUseID: String) async throws -> TaskToolInputResp {
@@ -262,11 +262,11 @@ public final class ApiClient {
     }
     /// Streams task list updates for all tasks via SSE.
     public func globalTaskEvents() -> AsyncThrowingStream<TaskListEvent, Error> {
-        sseStream(path: "/api/caic/v1/server/tasks/events")
+        sseStream(path: "/api/caic/v1/tasks/events")
     }
     /// Streams usage quota updates via SSE.
     public func globalUsageEvents() -> AsyncThrowingStream<UsageResp, Error> {
-        sseStream(path: "/api/caic/v1/server/usage/events")
+        sseStream(path: "/api/caic/v1/usage/events")
     }
 
     // Reconnecting SSE wrappers with exponential backoff

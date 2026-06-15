@@ -15,7 +15,6 @@ const (
 	goModeTasksGroupDescription   = "caic coding-agent task management: create, monitor, answer, and control tasks."
 	goModeAPIVersion              = 1
 	goModeBridge                  = 1
-	goModeMCPEndpoint             = "/api/caic/v1/mcp"
 	goModeEmbeddedVoiceGatewayURL = "/"
 )
 
@@ -40,7 +39,7 @@ func newGoModeToolGroups(authRequired bool) []gomode.ToolGroup {
 		{
 			Name:            goModeTasksGroupName,
 			Description:     goModeTasksGroupDescription,
-			Endpoint:        goModeMCPEndpoint,
+			Endpoint:        "/api/caic/v1/mcp",
 			ProtocolVersion: mcp.ProtocolVersion,
 			AuthRequired:    authRequired,
 		},

@@ -530,3 +530,28 @@ func taskEntryFromRequest(r *http.Request, taskMgr *tasks.Manager, authStore *au
 	}
 	return entry, nil
 }
+
+// routes returns the handler for the task collection and per-task endpoints,
+// plus the global task-list SSE stream. Patterns are relative to the
+// /api/caic/v1 version prefix, stripped at mount time.
+func (s *taskHTTPHandlers) routes() http.Handler {
+	m := http.NewServeMux()
+	m.HandleFunc("GET /tasks", handle(s.service.listTasks))
+	m.HandleFunc("POST /tasks", handle(s.service.createTask))
+	m.HandleFunc("GET /tasks/events", s.handleTaskListEvents)
+	m.HandleFunc("GET /tasks/{id}/raw_events", s.handleTaskRawEvents)
+	m.HandleFunc("GET /tasks/{id}/events", s.handleTaskEvents)
+	m.HandleFunc("POST /tasks/{id}/input", handleWithTask(s, s.service.sendInput))
+	m.HandleFunc("POST /tasks/{id}/restart", handleWithTask(s, s.service.restartTask))
+	m.HandleFunc("POST /tasks/{id}/clear-context", handleWithTask(s, s.service.clearContext))
+	m.HandleFunc("POST /tasks/{id}/compact", handleWithTask(s, s.service.compactContext))
+	m.HandleFunc("POST /tasks/{id}/fork", handleWithTask(s, s.service.forkTask))
+	m.HandleFunc("POST /tasks/{id}/stop", handleWithTask(s, s.service.stopTask))
+	m.HandleFunc("POST /tasks/{id}/purge", handleWithTask(s, s.service.purgeTask))
+	m.HandleFunc("POST /tasks/{id}/revive", handleWithTask(s, s.service.reviveTask))
+	m.HandleFunc("POST /tasks/{id}/sync", handleWithTask(s, s.service.syncTask))
+	m.HandleFunc("GET /tasks/{id}/diff", s.handleGetDiff)
+	m.HandleFunc("GET /tasks/{id}/vnc/ws", s.handleVNCWebSocket)
+	m.HandleFunc("GET /tasks/{id}/tool/{toolUseID}", s.handleTaskToolInput)
+	return m
+}

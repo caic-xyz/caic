@@ -102,9 +102,9 @@ class ApiClient(
     /** Updates server settings and preferences. */
     suspend fun updatePreferences(req: UpdatePreferencesReq): PreferencesResp = request("POST", "/api/caic/v1/server/preferences", json.encodeToString(req))
     /** Lists the authenticated user's connected MCP clients. */
-    suspend fun listMCPGrants(): MCPGrantsResp = request("GET", "/api/caic/v1/server/mcp-grants")
+    suspend fun listMCPGrants(): MCPGrantsResp = request("GET", "/api/caic/v1/mcp-grants")
     /** Revokes one connected MCP client grant for the authenticated user. */
-    suspend fun revokeMCPGrant(grantID: String, req: RevokeMCPGrantReq): StatusResp = request("POST", "/api/caic/v1/server/mcp-grants/$grantID/revoke", json.encodeToString(req))
+    suspend fun revokeMCPGrant(grantID: String, req: RevokeMCPGrantReq): StatusResp = request("POST", "/api/caic/v1/mcp-grants/$grantID/revoke", json.encodeToString(req))
     /** Lists available coding agent harnesses. */
     suspend fun listHarnesses(): List<HarnessInfo> = request("GET", "/api/caic/v1/server/harnesses")
     /** Lists well-known cache configurations. */
@@ -118,9 +118,9 @@ class ApiClient(
     /** Lists branches for a repository. */
     suspend fun listRepoBranches(repo: String): RepoBranchesResp = request("GET", "/api/caic/v1/server/repos/branches?repo=$repo")
     /** Creates a task to fix a failing CI pipeline. */
-    suspend fun botFixCI(req: BotFixCIReq): CreateTaskResp = request("POST", "/api/caic/v1/bot/fix-ci", json.encodeToString(req))
+    suspend fun botFixCI(req: BotFixCIReq): CreateTaskResp = request("POST", "/api/caic/v1/ci/fix-ci", json.encodeToString(req))
     /** Injects a CI fix command into an existing task's PR. */
-    suspend fun botFixPR(req: BotFixPRReq): StatusResp = request("POST", "/api/caic/v1/bot/fix-pr", json.encodeToString(req))
+    suspend fun botFixPR(req: BotFixPRReq): StatusResp = request("POST", "/api/caic/v1/ci/fix-pr", json.encodeToString(req))
     /** Returns all tasks. */
     suspend fun listTasks(): List<Task> = request("GET", "/api/caic/v1/tasks")
     /** Creates and starts a new coding agent task. */
@@ -140,7 +140,7 @@ class ApiClient(
     /** Reconnects to an orphaned task runtime instance. */
     suspend fun reviveTask(id: String): StatusResp = request("POST", "/api/caic/v1/tasks/$id/revive")
     /** Returns the log tail of a failed CI check run. */
-    suspend fun getTaskCILog(id: String, jobID: String): CILogResp = request("GET", "/api/caic/v1/tasks/$id/ci-log?jobID=$jobID")
+    suspend fun getTaskCILog(id: String, jobID: String): CILogResp = request("GET", "/api/caic/v1/ci/log/$id?jobID=$jobID")
     /** Pushes task changes to the remote repository. */
     suspend fun syncTask(id: String, req: SyncReq): SyncResp = request("POST", "/api/caic/v1/tasks/$id/sync", json.encodeToString(req))
     /** Forks a task by snapshotting its runtime instance and creating a new task on a derived branch. */
@@ -148,9 +148,9 @@ class ApiClient(
     /** Returns the unified diff for a task's branch. */
     suspend fun getTaskDiff(id: String, path: String): DiffResp = request("GET", "/api/caic/v1/tasks/$id/diff?path=$path")
     /** Returns the list of running processes inside the task's runtime instance. */
-    suspend fun getTaskProcesses(id: String): ProcessListResp = request("GET", "/api/caic/v1/tasks/$id/processes")
+    suspend fun getTaskProcesses(id: String): ProcessListResp = request("GET", "/api/caic/v1/processes/$id")
     /** Sends SIGTERM or SIGKILL to a process inside the task's runtime instance. */
-    suspend fun signalProcess(id: String, pid: String, req: SignalProcessReq): StatusResp = request("POST", "/api/caic/v1/tasks/$id/processes/$pid/signal", json.encodeToString(req))
+    suspend fun signalProcess(id: String, pid: String, req: SignalProcessReq): StatusResp = request("POST", "/api/caic/v1/processes/$id/$pid/signal", json.encodeToString(req))
     /** Returns the full (untruncated) input for a tool call. */
     suspend fun getTaskToolInput(id: String, toolUseID: String): TaskToolInputResp = request("GET", "/api/caic/v1/tasks/$id/tool/$toolUseID")
     /** Returns current usage quota statistics. */
@@ -164,9 +164,9 @@ class ApiClient(
     /** Streams backend-neutral task events via SSE. */
     fun taskEvents(id: String): Flow<EventMessage> = sseFlow<EventMessage>("/api/caic/v1/tasks/$id/events")
     /** Streams task list updates for all tasks via SSE. */
-    fun globalTaskEvents(): Flow<TaskListEvent> = sseFlow<TaskListEvent>("/api/caic/v1/server/tasks/events")
+    fun globalTaskEvents(): Flow<TaskListEvent> = sseFlow<TaskListEvent>("/api/caic/v1/tasks/events")
     /** Streams usage quota updates via SSE. */
-    fun globalUsageEvents(): Flow<UsageResp> = sseFlow<UsageResp>("/api/caic/v1/server/usage/events")
+    fun globalUsageEvents(): Flow<UsageResp> = sseFlow<UsageResp>("/api/caic/v1/usage/events")
 
     private inline fun <reified T> sseFlow(path: String): Flow<T> = callbackFlow {
         val request = Request.Builder()

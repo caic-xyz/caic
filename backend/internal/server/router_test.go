@@ -940,7 +940,7 @@ func TestSignalProcess(t *testing.T) {
 		}
 
 		body := strings.NewReader(`{"signal":"SIGTERM","extra":true}`)
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks/t1/processes/123/signal", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/processes/t1/123/signal", body)
 		req.SetPathValue("id", "t1")
 		req.SetPathValue("pid", "123")
 		w := httptest.NewRecorder()
@@ -977,7 +977,7 @@ func TestSignalProcess(t *testing.T) {
 		}
 
 		body := strings.NewReader(`{"signal":"SIGKILL"}`)
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks/t1/processes/123/signal", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/processes/t1/123/signal", body)
 		req.SetPathValue("id", "t1")
 		req.SetPathValue("pid", "123")
 		w := httptest.NewRecorder()
@@ -2079,10 +2079,10 @@ func TestBuildHandler(t *testing.T) {
 		if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 			t.Fatal(err)
 		}
-		if got.Issuer != "https://caic.example.com" || got.AuthorizationEndpoint != "https://caic.example.com"+mcpOAuthAuthorizePath || got.TokenEndpoint != "https://caic.example.com"+mcpOAuthTokenPath {
+		if got.Issuer != "https://caic.example.com" || got.AuthorizationEndpoint != "https://caic.example.com/api/caic/v1/oauth/authorize" || got.TokenEndpoint != "https://caic.example.com/api/caic/v1/oauth/token" {
 			t.Fatalf("metadata = %+v", got)
 		}
-		if got.RegistrationEndpoint != "https://caic.example.com"+mcpOAuthRegisterPath || got.JWKSURI != "https://caic.example.com"+mcpOAuthJWKSPath {
+		if got.RegistrationEndpoint != "https://caic.example.com/api/caic/v1/oauth/register" || got.JWKSURI != "https://caic.example.com/api/caic/v1/oauth/jwks" {
 			t.Fatalf("metadata endpoints = %+v", got)
 		}
 	})
@@ -2109,7 +2109,7 @@ func TestBuildHandler(t *testing.T) {
 		}
 
 		registerBody := `{"client_name":"Claude","redirect_uris":["https://claude.ai/api/mcp/auth_callback"],"token_endpoint_auth_method":"none"}`
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, mcpOAuthRegisterPath, strings.NewReader(registerBody))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/oauth/register", strings.NewReader(registerBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Host = "caic.example.com"
 		w := httptest.NewRecorder()
@@ -2145,7 +2145,7 @@ func TestBuildHandler(t *testing.T) {
 			invalidScopeForm[key] = append([]string(nil), values...)
 		}
 		invalidScopeForm.Set("scope", "caic:tasks.admin unknown:scope")
-		req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, mcpOAuthAuthorizePath+"?"+invalidScopeForm.Encode(), http.NoBody)
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/oauth/authorize"+"?"+invalidScopeForm.Encode(), http.NoBody)
 		req.Host = "caic.example.com"
 		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 		w = httptest.NewRecorder()
@@ -2154,7 +2154,7 @@ func TestBuildHandler(t *testing.T) {
 			t.Fatalf("invalid scope authorize status = %d, want %d", w.Code, http.StatusBadRequest)
 		}
 
-		req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, mcpOAuthAuthorizePath+"?"+form.Encode(), http.NoBody)
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/oauth/authorize"+"?"+form.Encode(), http.NoBody)
 		req.Host = "caic.example.com"
 		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 		w = httptest.NewRecorder()
@@ -2176,7 +2176,7 @@ func TestBuildHandler(t *testing.T) {
 			"scope_form":    {"1"},
 			"scope":         {mcpScopeRead, mcpScopeTasksRead},
 		}
-		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, mcpOAuthAuthorizePath, strings.NewReader(consentForm.Encode()))
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/oauth/authorize", strings.NewReader(consentForm.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Host = "caic.example.com"
 		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
@@ -2202,7 +2202,7 @@ func TestBuildHandler(t *testing.T) {
 			"code_verifier": {verifier},
 			"resource":      {resource},
 		}
-		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, mcpOAuthTokenPath, strings.NewReader(tokenForm.Encode()))
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/oauth/token", strings.NewReader(tokenForm.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Host = "caic.example.com"
 		w = httptest.NewRecorder()

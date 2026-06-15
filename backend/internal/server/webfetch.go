@@ -107,3 +107,11 @@ func extractHTML(data []byte) (title, content string) {
 	}
 	return strings.TrimSpace(titleBuf.String()), content
 }
+
+// routes returns the handler for the server-side URL fetch endpoint. Patterns
+// are relative to the /api/caic/v1 version prefix, stripped at mount time.
+func (h *webFetchHandlers) routes() http.Handler {
+	m := http.NewServeMux()
+	m.HandleFunc("POST /web/fetch", handle(h.webFetch))
+	return m
+}

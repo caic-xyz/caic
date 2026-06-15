@@ -95,7 +95,7 @@ func TestMCPOAuthTokenLifecycle(t *testing.T) {
 			"token":           {tokenResp.RefreshToken},
 			"token_type_hint": {"refresh_token"},
 		}
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, mcpOAuthRevokePath, strings.NewReader(form.Encode()))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/oauth/revoke", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Host = "caic.example.com"
 		w := httptest.NewRecorder()
@@ -120,7 +120,7 @@ func TestMCPOAuthTokenLifecycle(t *testing.T) {
 			"token":           {rotated.RefreshToken},
 			"token_type_hint": {"refresh_token"},
 		}
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, mcpOAuthRevokePath, strings.NewReader(form.Encode()))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/oauth/revoke", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Host = "caic.example.com"
 		w := httptest.NewRecorder()
@@ -281,7 +281,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T) (*testRouter, http.Handler, auth.U
 	}
 
 	registerBody := `{"client_name":"Claude","redirect_uris":["https://claude.ai/api/mcp/auth_callback"],"token_endpoint_auth_method":"none"}`
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, mcpOAuthRegisterPath, strings.NewReader(registerBody))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/oauth/register", strings.NewReader(registerBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Host = "caic.example.com"
 	w := httptest.NewRecorder()
@@ -326,7 +326,7 @@ func authorizeMCPClientWithRedirect(t *testing.T, h http.Handler, user *auth.Use
 	if err != nil {
 		t.Fatalf("issue session token: %v", err)
 	}
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, mcpOAuthAuthorizePath+"?"+form.Encode(), http.NoBody)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/oauth/authorize"+"?"+form.Encode(), http.NoBody)
 	req.Host = "caic.example.com"
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 	w := httptest.NewRecorder()
@@ -348,7 +348,7 @@ func authorizeMCPClientWithRedirect(t *testing.T, h http.Handler, user *auth.Use
 		"scope_form":    {"1"},
 		"scope":         {mcpScopeRead, mcpScopeTasksRead},
 	}
-	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, mcpOAuthAuthorizePath, strings.NewReader(consentForm.Encode()))
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/oauth/authorize", strings.NewReader(consentForm.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Host = "caic.example.com"
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
@@ -374,7 +374,7 @@ func authorizeMCPClientWithRedirect(t *testing.T, h http.Handler, user *auth.Use
 		"code_verifier": {verifier},
 		"resource":      {resource},
 	}
-	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, mcpOAuthTokenPath, strings.NewReader(tokenForm.Encode()))
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/oauth/token", strings.NewReader(tokenForm.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Host = "caic.example.com"
 	w = httptest.NewRecorder()
@@ -390,7 +390,7 @@ func authorizeMCPClientWithRedirect(t *testing.T, h http.Handler, user *auth.Use
 }
 
 func listMCPGrants(t *testing.T, h http.Handler, user *auth.User) v1.MCPGrantsResp {
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/server/mcp-grants", http.NoBody)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/mcp-grants", http.NoBody)
 	req.Host = "caic.example.com"
 	addTestSessionCookie(t, req, user)
 	w := httptest.NewRecorder()
@@ -406,7 +406,7 @@ func listMCPGrants(t *testing.T, h http.Handler, user *auth.User) v1.MCPGrantsRe
 }
 
 func revokeMCPGrant(t *testing.T, h http.Handler, user *auth.User, grantID string, wantStatus int) {
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/server/mcp-grants/"+grantID+"/revoke", http.NoBody)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp-grants/"+grantID+"/revoke", http.NoBody)
 	req.Host = "caic.example.com"
 	addTestSessionCookie(t, req, user)
 	w := httptest.NewRecorder()
@@ -430,7 +430,7 @@ func refreshMCPToken(t *testing.T, h http.Handler, clientID, refreshToken string
 		"client_id":     {clientID},
 		"refresh_token": {refreshToken},
 	}
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, mcpOAuthTokenPath, strings.NewReader(form.Encode()))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/oauth/token", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Host = "caic.example.com"
 	w := httptest.NewRecorder()

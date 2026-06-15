@@ -146,88 +146,54 @@ func (s *Router) buildHandler() (http.Handler, error) {
 		return nil, err
 	}
 
-	// Auth routes (exempt from RequireUser).
-	authMux := http.NewServeMux()
-	authMux.HandleFunc("GET /api/caic/v1/server/config", handle(serverConfig.getConfig))
-	authMux.HandleFunc("GET /api/caic/v1/server/version", handle(serverConfig.getVersion))
-	authMux.HandleFunc("GET /api/caic/v1/auth/github/start", s.authHandlers.handleStart("github"))
-	authMux.HandleFunc("GET /api/caic/v1/auth/github/callback", s.authHandlers.handleCallback("github"))
-	authMux.HandleFunc("GET /api/caic/v1/auth/gitlab/start", s.authHandlers.handleStart("gitlab"))
-	authMux.HandleFunc("GET /api/caic/v1/auth/gitlab/callback", s.authHandlers.handleCallback("gitlab"))
-	authMux.HandleFunc("GET /api/caic/v1/auth/me", s.authHandlers.handleGetMe)
-	authMux.HandleFunc("POST /api/caic/v1/auth/logout", s.authHandlers.handleLogout)
-
-	// Protected routes.
+	// Protected routes: each handler concern owns one /api/caic/v1 subroute and
+	// returns its own handler via routes(). mountAPI handles the version-prefix
+	// strip and the exact+subtree pair (see its doc).
 	apiMux := http.NewServeMux()
-	runtimeProcesses := s.runtimeProcesses
-	taskRoutes := s.taskHTTPHandlers
-	apiMux.HandleFunc("GET /api/caic/v1/server/preferences", handle(serverConfig.getPreferences))
-	apiMux.HandleFunc("POST /api/caic/v1/server/preferences", handle(serverConfig.updatePreferences))
-	apiMux.HandleFunc("GET /api/caic/v1/server/mcp-grants", handle(s.mcp.listMCPGrants))
-	apiMux.HandleFunc("POST /api/caic/v1/server/mcp-grants/{grantID}/revoke", handle(s.mcp.revokeMCPGrant))
-	apiMux.HandleFunc("GET /api/caic/v1/server/harnesses", handle(serverConfig.listHarnesses))
-	apiMux.HandleFunc("GET /api/caic/v1/server/caches", handle(serverConfig.listCaches))
-	apiMux.HandleFunc("GET /api/caic/v1/server/cache-sizes", handle(serverConfig.getCacheSizes))
-	apiMux.HandleFunc("GET /api/caic/v1/server/repos", handle(serverConfig.listRepos))
-	apiMux.HandleFunc("POST /api/caic/v1/server/repos", handle(serverConfig.cloneRepo))
-	apiMux.HandleFunc("POST /api/caic/v1/server/update", handle(serverConfig.triggerUpdate))
-	apiMux.HandleFunc("GET /api/caic/v1/server/repos/branches", serverConfig.handleListRepoBranches)
-	apiMux.HandleFunc("POST /api/caic/v1/bot/fix-ci", handle(s.ciHandlers.fixCI))
-	apiMux.HandleFunc("POST /api/caic/v1/bot/fix-pr", handle(s.ciHandlers.fixPR))
-	apiMux.HandleFunc("GET /api/caic/v1/tasks", handle(taskRoutes.service.listTasks))
-	apiMux.HandleFunc("POST /api/caic/v1/tasks", handle(taskRoutes.service.createTask))
-	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/raw_events", taskRoutes.handleTaskRawEvents)
-	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/events", taskRoutes.handleTaskEvents)
-	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/input", handleWithTask(taskRoutes, taskRoutes.service.sendInput))
-	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/restart", handleWithTask(taskRoutes, taskRoutes.service.restartTask))
-	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/clear-context", handleWithTask(taskRoutes, taskRoutes.service.clearContext))
-	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/compact", handleWithTask(taskRoutes, taskRoutes.service.compactContext))
-	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/fork", handleWithTask(taskRoutes, taskRoutes.service.forkTask))
-	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/stop", handleWithTask(taskRoutes, taskRoutes.service.stopTask))
-	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/purge", handleWithTask(taskRoutes, taskRoutes.service.purgeTask))
-	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/revive", handleWithTask(taskRoutes, taskRoutes.service.reviveTask))
-	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/ci-log", s.ciHandlers.handleGetCILog)
-	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/sync", handleWithTask(taskRoutes, taskRoutes.service.syncTask))
-	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/diff", taskRoutes.handleGetDiff)
-	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/vnc/ws", taskRoutes.handleVNCWebSocket)
-	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/processes", runtimeProcesses.HandleGetProcesses)
-	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/processes/{pid}/signal", runtimeProcesses.HandleSignalProcess)
-	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/tool/{toolUseID}", taskRoutes.handleTaskToolInput)
-	apiMux.HandleFunc("GET /api/caic/v1/usage", s.usageHandlers.handleGetUsage)
+	mountAPI(apiMux, "/api/caic/v1/tasks", s.taskHTTPHandlers.routes())
+	mountAPI(apiMux, "/api/caic/v1/usage", s.usageHandlers.routes())
+	mountAPI(apiMux, "/api/caic/v1/server", s.serverConfigHandlers.routes())
+	mountAPI(apiMux, "/api/caic/v1/processes", s.runtimeProcesses.routes())
+	mountAPI(apiMux, "/api/caic/v1/ci", s.ciHandlers.routes())
+	mountAPI(apiMux, "/api/caic/v1/web", s.webFetchHandlers.routes())
+	// /mcp-grants is a sibling of the MCP JSON-RPC endpoint at /api/caic/v1/mcp,
+	// not a /mcp/ subtree: a subtree would make ServeMux 307-redirect the bare
+	// endpoint path to it when the endpoint is disabled.
+	mountAPI(apiMux, "/api/caic/v1/mcp-grants", s.mcp.grantRoutes())
 	apiMux.Handle("/api/voicegateway/v1/", s.voiceHandlers.handler())
-	apiMux.HandleFunc("POST /api/caic/v1/web/fetch", handle(s.webFetchHandlers.webFetch))
-	apiMux.HandleFunc("GET /api/caic/v1/server/tasks/events", taskRoutes.handleTaskListEvents)
-	apiMux.HandleFunc("GET /api/caic/v1/server/usage/events", s.usageHandlers.handleEvents)
 
-	// Combine: auth routes first, then protected API routes (gated by RequireUser when auth enabled).
+	// Gate the protected API behind RequireUser when auth is enabled.
 	var protectedAPI http.Handler = apiMux
 	if s.authEnabled() {
 		protectedAPI = requireUser(apiMux)
 	}
 
+	// Root mux. It serves the public (unauthenticated) routes directly and mounts
+	// the credentialed API subtree (protectedAPI) under /api/caic/v1/.
+	//
+	// Intended invariant: everything under /api/ requires a credential. Three
+	// groups are public exceptions today because they bootstrap auth and so
+	// cannot require it:
+	//   - /api/caic/v1/auth/*                   the session login flow
+	//   - /api/caic/v1/oauth/*                  the MCP OAuth authorization server
+	//   - /api/caic/v1/server/{config,version}  read pre-login to draw the login page
+	// The MCP JSON-RPC endpoint (/api/caic/v1/mcp) also sits under /api/ but is
+	// authenticated by bearer token, not session. A deferred cleanup could move
+	// auth and oauth to top-level paths (/auth, /oauth) so the invariant holds
+	// structurally and the public exceptions all live outside /api/.
 	mux := http.NewServeMux()
-	mux.Handle("/api/caic/v1/auth/", authMux)
-	mux.HandleFunc("GET "+mcpProtectedResourceMetadataPath, s.mcp.handleMCPProtectedResourceMetadata)
-	mux.HandleFunc("GET "+mcpProtectedResourceMetadataPath+"/", s.mcp.handleMCPProtectedResourceMetadata)
-	mux.HandleFunc("GET /.well-known/oauth-authorization-server", s.mcp.handleMCPOAuthMetadata)
-	mux.HandleFunc("GET /.well-known/openid-configuration", s.mcp.handleMCPOAuthMetadata)
-	mux.HandleFunc("GET "+mcpOAuthJWKSPath, s.mcp.handleMCPOAuthJWKS)
-	mux.HandleFunc("POST "+mcpOAuthRegisterPath, s.mcp.handleMCPOAuthRegister)
-	mux.HandleFunc("GET "+mcpOAuthAuthorizePath, s.mcp.handleMCPOAuthAuthorize)
-	mux.HandleFunc("POST "+mcpOAuthAuthorizePath, s.mcp.handleMCPOAuthAuthorize)
-	mux.HandleFunc("POST "+mcpOAuthTokenPath, s.mcp.handleMCPOAuthToken)
-	mux.HandleFunc("POST "+mcpOAuthRevokePath, s.mcp.handleMCPOAuthRevoke)
-	// The MCP endpoint is left unregistered when auth is disabled on a
-	// non-loopback listener (set by Serve), so an exposed server never serves
-	// MCP without authentication. Unregistered /api/ paths answer 404 via the
-	// static handler rather than falling back to the SPA.
-	if !s.mcpDisabled {
-		mux.HandleFunc("POST "+goModeMCPEndpoint, s.mcp.handleMCPAuthenticated)
-		// Released Streamable HTTP clients (Claude Code, Codex) issue a GET to
-		// probe for a server-initiated SSE stream; the handler answers 405 (caic
-		// is stateless) so they fall back to plain POST request/response.
-		mux.HandleFunc("GET "+goModeMCPEndpoint, s.mcp.handleMCPAuthenticated)
-	}
+
+	// Public: the session login flow (GitHub/GitLab start+callback, me, logout).
+	mountAPI(mux, "/api/caic/v1/auth", s.authHandlers.routes())
+
+	// Public/bearer: MCP discovery metadata, the OAuth authorization server, and
+	// the bearer-authenticated JSON-RPC endpoint. Owned by the mcp concern, which
+	// holds the path constants these share with the metadata documents.
+	s.mcp.registerPublicRoutes(mux, s.mcpDisabled)
+	// Public: read by the frontend before login to discover auth providers and
+	// draw the login page, so they cannot be gated behind RequireUser. These
+	// exact-path registrations take precedence over the protectedAPI /server/
+	// subtree mounted below.
 	mux.HandleFunc("GET /api/caic/v1/server/config", handle(serverConfig.getConfig))
 	mux.HandleFunc("GET /api/caic/v1/server/version", handle(serverConfig.getVersion))
 	// Go Mode bootstrap manifest: a public discovery document under /.well-known/
@@ -236,6 +202,8 @@ func (s *Router) buildHandler() (http.Handler, error) {
 	mux.Handle("/.well-known/gomode.json", s.goModeHandler)
 	mux.HandleFunc("POST /webhooks/github", s.webhooks.HandleGitHub)
 	mux.HandleFunc("POST /webhooks/gitlab", s.webhooks.HandleGitLab)
+	// Credentialed API: every /api/ route not matched by a public exact path
+	// above falls through to here, gated by RequireUser when auth is enabled.
 	mux.Handle("/api/caic/v1/", protectedAPI)
 	mux.Handle("/api/voicegateway/v1/", protectedAPI)
 
@@ -279,6 +247,18 @@ func (s *Router) buildHandler() (http.Handler, error) {
 	inner = httplog.Handler{Handler: inner, Attrs: s.httpLogAttrs}
 	inner = httpLogContextMiddleware(inner)
 	return inner, nil
+}
+
+// mountAPI mounts a concern's handler at prefix on mux. The handler registers
+// patterns relative to the /api/caic/v1 version prefix, which is stripped here.
+// It mounts both the exact path (e.g. /api/caic/v1/tasks, the collection) and
+// the subtree (/api/caic/v1/tasks/...) to the same handler: registering only
+// the subtree would make ServeMux answer the bare collection path with a 301
+// redirect to its slashed form, turning a POST create into a GET.
+func mountAPI(mux *http.ServeMux, prefix string, h http.Handler) {
+	h = http.StripPrefix("/api/caic/v1", h)
+	mux.Handle(prefix, h)
+	mux.Handle(prefix+"/", h)
 }
 
 func (s *Router) ipgeoMiddleware(next http.Handler) http.Handler {

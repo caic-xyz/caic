@@ -50,8 +50,7 @@ func (s *mcpServer) authEnabled() bool {
 }
 
 const (
-	mcpProtectedResourceMetadataPath = "/.well-known/oauth-protected-resource"
-	mcpAuthDefaultScope              = mcpScopeRead + " " + mcpScopeTasksRead + " " + mcpScopeTasksWrite + " " + mcpScopeTasksAdmin + " " + mcpScopeReposWrite
+	mcpAuthDefaultScope = mcpScopeRead + " " + mcpScopeTasksRead + " " + mcpScopeTasksWrite + " " + mcpScopeTasksAdmin + " " + mcpScopeReposWrite
 )
 
 // handleMCPProtectedResourceMetadata writes caic's MCP protected-resource
@@ -63,7 +62,10 @@ const (
 // resource URL is always the external base URL plus the MCP endpoint, and the
 // authorization server URL is always the external base URL.
 func (s *mcpServer) handleMCPProtectedResourceMetadata(w http.ResponseWriter, r *http.Request) {
-	if !s.authEnabled() || !s.isMCPProtectedResourceMetadataPath(r.URL.Path) {
+	// RFC 9728 serves this metadata at the well-known path and a per-resource
+	// variant (.../oauth-protected-resource + the MCP endpoint path).
+	path := r.URL.Path
+	if !s.authEnabled() || (path != "/.well-known/oauth-protected-resource" && path != "/.well-known/oauth-protected-resource/api/caic/v1/mcp") {
 		http.NotFound(w, r)
 		return
 	}
@@ -77,12 +79,8 @@ func (s *mcpServer) handleMCPProtectedResourceMetadata(w http.ResponseWriter, r 
 	}
 }
 
-func (s *mcpServer) isMCPProtectedResourceMetadataPath(path string) bool {
-	return path == mcpProtectedResourceMetadataPath || path == mcpProtectedResourceMetadataPath+goModeMCPEndpoint
-}
-
 func (s *mcpServer) mcpResourceURL(r *http.Request) string {
-	return s.externalBaseURL(r) + goModeMCPEndpoint
+	return s.externalBaseURL(r) + "/api/caic/v1/mcp"
 }
 
 func (s *mcpServer) externalBaseURL(r *http.Request) string {
@@ -105,14 +103,6 @@ func effectiveRequestHostAndScheme(r *http.Request) (authority, scheme string) {
 		scheme = "https"
 	}
 	return authority, scheme
-}
-
-func (s *mcpServer) mcpResourceMetadataURL(r *http.Request) string {
-	return s.externalBaseURL(r) + mcpProtectedResourceMetadataPath + goModeMCPEndpoint
-}
-
-func (s *mcpServer) mcpAuthChallenge(r *http.Request) string {
-	return mcp.BearerChallenge(s.mcpResourceMetadataURL(r), mcpAuthDefaultScope)
 }
 
 func (s *mcpServer) handleMCPAuthenticated(w http.ResponseWriter, r *http.Request) {
@@ -203,8 +193,11 @@ func (s *mcpServer) mcpRateKey(r *http.Request) string {
 // writeUnauthorized answers an unauthenticated MCP request with a 401 carrying
 // the MCP bearer challenge so clients can discover the authorization server.
 func (s *mcpServer) writeUnauthorized(w http.ResponseWriter, r *http.Request) {
-	if s.authEnabled() && r.URL.Path == goModeMCPEndpoint {
-		w.Header().Set("WWW-Authenticate", s.mcpAuthChallenge(r))
+	if s.authEnabled() && r.URL.Path == "/api/caic/v1/mcp" {
+		// Point the client at the protected-resource metadata URL so it can
+		// discover the authorization server.
+		resourceMetadataURL := s.externalBaseURL(r) + "/.well-known/oauth-protected-resource/api/caic/v1/mcp"
+		w.Header().Set("WWW-Authenticate", mcp.BearerChallenge(resourceMetadataURL, mcpAuthDefaultScope))
 	}
 	writeUnauthorizedJSON(w)
 }
@@ -384,4 +377,50 @@ func mcpGrantResponse(grant *mcpOAuthGrant, now time.Time) v1.MCPGrantResp {
 		RevokedAt:  grant.RevokedAt,
 		Status:     status,
 	}
+}
+
+// grantRoutes returns the handler for MCP client grant management. Patterns are
+// relative to the /api/caic/v1 version prefix, stripped at mount time.
+func (s *mcpServer) grantRoutes() http.Handler {
+	m := http.NewServeMux()
+	m.HandleFunc("GET /mcp-grants", handle(s.listMCPGrants))
+	m.HandleFunc("POST /mcp-grants/{grantID}/revoke", handle(s.revokeMCPGrant))
+	return m
+}
+
+// registerPublicRoutes registers the unauthenticated MCP discovery and OAuth
+// authorization-server endpoints on mux, plus the bearer-authenticated JSON-RPC
+// endpoint. These live on the root mux, outside the session-gated API. The
+// endpoint paths are repeated in the metadata documents the server advertises
+// (handleMCPOAuthMetadata and the bearer challenge in writeUnauthorized); keep
+// them in sync.
+//
+// When disabled is true (auth off on a non-loopback listener, set by Serve), the
+// JSON-RPC endpoint is left unregistered so an exposed server never serves MCP
+// without authentication; the unmatched /api/ path then answers 404 rather than
+// falling back to the SPA.
+func (s *mcpServer) registerPublicRoutes(mux *http.ServeMux, disabled bool) {
+	// RFC 9728 protected-resource metadata, at the well-known path and its
+	// per-resource variant.
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource", s.handleMCPProtectedResourceMetadata)
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource/", s.handleMCPProtectedResourceMetadata)
+	// OAuth authorization-server / OpenID discovery metadata.
+	mux.HandleFunc("GET /.well-known/oauth-authorization-server", s.handleMCPOAuthMetadata)
+	mux.HandleFunc("GET /.well-known/openid-configuration", s.handleMCPOAuthMetadata)
+	// OAuth authorization-server endpoints; clients discover these via the
+	// metadata above, so the paths can change without breaking clients.
+	mux.HandleFunc("GET /api/caic/v1/oauth/jwks", s.handleMCPOAuthJWKS)
+	mux.HandleFunc("POST /api/caic/v1/oauth/register", s.handleMCPOAuthRegister)
+	mux.HandleFunc("GET /api/caic/v1/oauth/authorize", s.handleMCPOAuthAuthorize)
+	mux.HandleFunc("POST /api/caic/v1/oauth/authorize", s.handleMCPOAuthAuthorize)
+	mux.HandleFunc("POST /api/caic/v1/oauth/token", s.handleMCPOAuthToken)
+	mux.HandleFunc("POST /api/caic/v1/oauth/revoke", s.handleMCPOAuthRevoke)
+	if disabled {
+		return
+	}
+	// Bearer-authenticated JSON-RPC endpoint. The GET probe answers 405 (caic is
+	// stateless) so released Streamable HTTP clients (Claude Code, Codex) fall
+	// back to plain POST request/response.
+	mux.HandleFunc("POST /api/caic/v1/mcp", s.handleMCPAuthenticated)
+	mux.HandleFunc("GET /api/caic/v1/mcp", s.handleMCPAuthenticated)
 }

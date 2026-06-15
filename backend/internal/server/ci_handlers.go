@@ -209,3 +209,14 @@ func (h *ciHandlers) fixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.Status
 	}
 	return &v1.StatusResp{Status: "ok"}, nil
 }
+
+// routes returns the handler for CI repair triggers and CI log retrieval.
+// Patterns are relative to the /api/caic/v1 version prefix, stripped at mount
+// time; {id} is the task ID.
+func (h *ciHandlers) routes() http.Handler {
+	m := http.NewServeMux()
+	m.HandleFunc("POST /ci/fix-ci", handle(h.fixCI))
+	m.HandleFunc("POST /ci/fix-pr", handle(h.fixPR))
+	m.HandleFunc("GET /ci/log/{id}", h.handleGetCILog)
+	return m
+}

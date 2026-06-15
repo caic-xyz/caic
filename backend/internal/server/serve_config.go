@@ -418,3 +418,23 @@ func repoDTO(status *repos.InfoWithCI) v1.Repo {
 	}
 	return repo
 }
+
+// routes returns the handler for server configuration, preferences, and repo
+// endpoints. Patterns are relative to the /api/caic/v1 version prefix, stripped
+// at mount time. config and version are also registered publicly on the root
+// mux (exempt from RequireUser); that exact-match registration takes precedence.
+func (h *serverConfigHandlers) routes() http.Handler {
+	m := http.NewServeMux()
+	m.HandleFunc("GET /server/config", handle(h.getConfig))
+	m.HandleFunc("GET /server/version", handle(h.getVersion))
+	m.HandleFunc("GET /server/preferences", handle(h.getPreferences))
+	m.HandleFunc("POST /server/preferences", handle(h.updatePreferences))
+	m.HandleFunc("GET /server/harnesses", handle(h.listHarnesses))
+	m.HandleFunc("GET /server/caches", handle(h.listCaches))
+	m.HandleFunc("GET /server/cache-sizes", handle(h.getCacheSizes))
+	m.HandleFunc("GET /server/repos", handle(h.listRepos))
+	m.HandleFunc("POST /server/repos", handle(h.cloneRepo))
+	m.HandleFunc("POST /server/update", handle(h.triggerUpdate))
+	m.HandleFunc("GET /server/repos/branches", h.handleListRepoBranches)
+	return m
+}

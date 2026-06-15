@@ -15,16 +15,12 @@ Type notation: `JSONValue` means any valid JSON value.
 | POST | `/api/caic/v1/server/update` | Triggers a background server auto-update to the latest release. |  | `UpdateResp` |
 | GET | `/api/caic/v1/server/preferences` | Returns server and per-repository preferences. |  | `PreferencesResp` |
 | POST | `/api/caic/v1/server/preferences` | Updates server settings and preferences. | `UpdatePreferencesReq` | `PreferencesResp` |
-| GET | `/api/caic/v1/server/mcp-grants` | Lists the authenticated user's connected MCP clients. |  | `MCPGrantsResp` |
-| POST | `/api/caic/v1/server/mcp-grants/{grantID}/revoke` | Revokes one connected MCP client grant for the authenticated user. | `RevokeMCPGrantReq` | `StatusResp` |
 | GET | `/api/caic/v1/server/harnesses` | Lists available coding agent harnesses. |  | `HarnessInfo[]` |
 | GET | `/api/caic/v1/server/caches` | Lists well-known cache configurations. |  | `WellKnownCachesResp` |
 | GET | `/api/caic/v1/server/cache-sizes` | Returns the latest size snapshot for well-known caches. |  | `CacheSizesResp` |
 | GET | `/api/caic/v1/server/repos` | Lists all discovered repositories. |  | `Repo[]` |
 | POST | `/api/caic/v1/server/repos` | Clones a repository into the server's root directory. | `CloneRepoReq` | `Repo` |
 | GET | `/api/caic/v1/server/repos/branches` | Lists branches for a repository. |  | `RepoBranchesResp` |
-| GET | `/api/caic/v1/server/tasks/events` | Streams task list updates for all tasks via SSE. |  | `TaskListEvent` SSE |
-| GET | `/api/caic/v1/server/usage/events` | Streams usage quota updates via SSE. |  | `UsageResp` SSE |
 
 ## Auth
 
@@ -33,12 +29,20 @@ Type notation: `JSONValue` means any valid JSON value.
 | GET | `/api/caic/v1/auth/me` | Returns the authenticated user's profile. |  | `UserResp` |
 | POST | `/api/caic/v1/auth/logout` | Invalidates the current session. |  | `StatusResp` |
 
-## Bot
+## Mcp-grants
 
 | Method | Path | Description | Request | Response |
 |--------|------|-------------|---------|----------|
-| POST | `/api/caic/v1/bot/fix-ci` | Creates a task to fix a failing CI pipeline. | `BotFixCIReq` | `CreateTaskResp` |
-| POST | `/api/caic/v1/bot/fix-pr` | Injects a CI fix command into an existing task's PR. | `BotFixPRReq` | `StatusResp` |
+| GET | `/api/caic/v1/mcp-grants` | Lists the authenticated user's connected MCP clients. |  | `MCPGrantsResp` |
+| POST | `/api/caic/v1/mcp-grants/{grantID}/revoke` | Revokes one connected MCP client grant for the authenticated user. | `RevokeMCPGrantReq` | `StatusResp` |
+
+## Ci
+
+| Method | Path | Description | Request | Response |
+|--------|------|-------------|---------|----------|
+| POST | `/api/caic/v1/ci/fix-ci` | Creates a task to fix a failing CI pipeline. | `BotFixCIReq` | `CreateTaskResp` |
+| POST | `/api/caic/v1/ci/fix-pr` | Injects a CI fix command into an existing task's PR. | `BotFixPRReq` | `StatusResp` |
+| GET | `/api/caic/v1/ci/log/{id}` | Returns the log tail of a failed CI check run. |  | `CILogResp` |
 
 ## Tasks
 
@@ -55,18 +59,24 @@ Type notation: `JSONValue` means any valid JSON value.
 | POST | `/api/caic/v1/tasks/{id}/stop` | Requests graceful stop of a running task. |  | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/purge` | Permanently deletes a task and its runtime instance. |  | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/revive` | Reconnects to an orphaned task runtime instance. |  | `StatusResp` |
-| GET | `/api/caic/v1/tasks/{id}/ci-log` | Returns the log tail of a failed CI check run. |  | `CILogResp` |
 | POST | `/api/caic/v1/tasks/{id}/sync` | Pushes task changes to the remote repository. | `SyncReq` | `SyncResp` |
 | POST | `/api/caic/v1/tasks/{id}/fork` | Forks a task by snapshotting its runtime instance and creating a new task on a derived branch. | `ForkTaskReq` | `CreateTaskResp` |
 | GET | `/api/caic/v1/tasks/{id}/diff` | Returns the unified diff for a task's branch. |  | `DiffResp` |
-| GET | `/api/caic/v1/tasks/{id}/processes` | Returns the list of running processes inside the task's runtime instance. |  | `ProcessListResp` |
-| POST | `/api/caic/v1/tasks/{id}/processes/{pid}/signal` | Sends SIGTERM or SIGKILL to a process inside the task's runtime instance. | `SignalProcessReq` | `StatusResp` |
 | GET | `/api/caic/v1/tasks/{id}/tool/{toolUseID}` | Returns the full (untruncated) input for a tool call. |  | `TaskToolInputResp` |
+| GET | `/api/caic/v1/tasks/events` | Streams task list updates for all tasks via SSE. |  | `TaskListEvent` SSE |
+
+## Processes
+
+| Method | Path | Description | Request | Response |
+|--------|------|-------------|---------|----------|
+| GET | `/api/caic/v1/processes/{id}` | Returns the list of running processes inside the task's runtime instance. |  | `ProcessListResp` |
+| POST | `/api/caic/v1/processes/{id}/{pid}/signal` | Sends SIGTERM or SIGKILL to a process inside the task's runtime instance. | `SignalProcessReq` | `StatusResp` |
 
 ## Usage
 
 | Method | Path | Description | Request | Response |
 |--------|------|-------------|---------|----------|
+| GET | `/api/caic/v1/usage/events` | Streams usage quota updates via SSE. |  | `UsageResp` SSE |
 | GET | `/api/caic/v1/usage` | Returns current usage quota statistics. |  | `UsageResp` |
 
 ## Web

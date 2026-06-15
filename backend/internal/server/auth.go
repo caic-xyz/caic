@@ -310,3 +310,17 @@ func validWebRedirectPath(raw string) bool {
 	}
 	return strings.HasPrefix(u.Path, "/") && !strings.HasPrefix(raw, "//")
 }
+
+// routes returns the handler for the OAuth login endpoints. Patterns are
+// relative to the /api/caic/v1 version prefix, stripped at mount time. These
+// routes are exempt from RequireUser and mounted on the public root mux.
+func (h *authHandlers) routes() http.Handler {
+	m := http.NewServeMux()
+	m.HandleFunc("GET /auth/github/start", h.handleStart("github"))
+	m.HandleFunc("GET /auth/github/callback", h.handleCallback("github"))
+	m.HandleFunc("GET /auth/gitlab/start", h.handleStart("gitlab"))
+	m.HandleFunc("GET /auth/gitlab/callback", h.handleCallback("gitlab"))
+	m.HandleFunc("GET /auth/me", h.handleGetMe)
+	m.HandleFunc("POST /auth/logout", h.handleLogout)
+	return m
+}
