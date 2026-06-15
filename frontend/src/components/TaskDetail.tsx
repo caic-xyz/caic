@@ -412,24 +412,28 @@ export default function TaskDetail(props: Props) {
       pendingEvents = [];
       live = false;
       replaceOnNextFlush = true;
-      es = taskEventStream(id, (ev) => {
-        pendingEvents.push(ev);
-        if (!live) return;
-        if (shouldFlushBufferedEvent(ev)) flushPendingEvents();
-        else scheduleLiveFlush();
-      }, (err) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        untrack(() => props.onError(`Task event error: ${msg}`));
-      });
-      es.addEventListener("open", () => {
-        delay = 500;
-      });
-      // The server sends a "ready" event after replaying full history.
-      // Render replayed history in one pass before switching to live turn-boundary flushing.
-      es.addEventListener("ready", () => {
-        flushPendingEvents();
-        live = true;
-      });
+      es = taskEventStream(
+        id,
+        (ev) => {
+          pendingEvents.push(ev);
+          if (!live) return;
+          if (shouldFlushBufferedEvent(ev)) flushPendingEvents();
+          else scheduleLiveFlush();
+        },
+        (err) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          untrack(() => props.onError(`Task event error: ${msg}`));
+        },
+        () => {
+          // The server sends a "ready" event after replaying full history.
+          // Render replayed history in one pass before switching to live turn-boundary flushing.
+          flushPendingEvents();
+          live = true;
+        },
+        () => {
+          delay = 500;
+        },
+      );
       es.onerror = () => {
         if (live) flushPendingEvents();
         else {

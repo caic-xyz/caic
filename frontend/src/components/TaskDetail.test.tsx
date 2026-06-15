@@ -27,7 +27,7 @@ vi.mock("@solidjs/router", () => ({
 
 // Mock the API module to stub out EventSource (SSE) and other network calls.
 vi.mock("../api", () => ({
-  taskEventStream: vi.fn((_id: string, _cb: unknown) => {
+  taskEventStream: vi.fn((_id: string, _cb: unknown, _onError: unknown, onReady?: () => void) => {
     const fakeES = {
       addEventListener: vi.fn((_event: string, _handler: () => void) => {}),
       close: vi.fn(),
@@ -35,10 +35,7 @@ vi.mock("../api", () => ({
     };
     // Fire "ready" asynchronously so the component transitions to live mode.
     setTimeout(() => {
-      const readyCb = (fakeES.addEventListener as ReturnType<typeof vi.fn>).mock.calls.find(
-        (c: unknown[]) => c[0] === "ready",
-      );
-      if (readyCb) (readyCb[1] as () => void)();
+      onReady?.();
     }, 0);
     return fakeES;
   }),
@@ -166,16 +163,15 @@ function makeSyncReadyMock(
   created: FakeES[],
   capturedCb?: { value: ((ev: EventMessage) => void) | null },
 ) {
-  vi.mocked(taskEventStream).mockImplementation((_id, cb) => {
+  vi.mocked(taskEventStream).mockImplementation((_id, cb, _onError, onReady) => {
     if (capturedCb) capturedCb.value = cb as (ev: EventMessage) => void;
     const fakeES: FakeES = {
-      addEventListener: vi.fn((event: string, handler: () => void) => {
-        if (event === "ready") handler();
-      }),
+      addEventListener: vi.fn(),
       close: vi.fn(),
       onerror: null,
     };
     created.push(fakeES);
+    onReady?.();
     return fakeES as unknown as EventSource;
   });
 }
@@ -185,12 +181,11 @@ function makeManualReadyMock(
   capturedCb: { value: ((ev: EventMessage) => void) | null },
   readyHandler: { value: (() => void) | null },
 ) {
-  vi.mocked(taskEventStream).mockImplementation((_id, cb) => {
+  vi.mocked(taskEventStream).mockImplementation((_id, cb, _onError, onReady) => {
     capturedCb.value = cb as (ev: EventMessage) => void;
+    readyHandler.value = onReady ?? null;
     const fakeES: FakeES = {
-      addEventListener: vi.fn((event: string, handler: () => void) => {
-        if (event === "ready") readyHandler.value = handler;
-      }),
+      addEventListener: vi.fn(),
       close: vi.fn(),
       onerror: null,
     };
@@ -285,6 +280,30 @@ describe("SSE connection", () => {
     readyHandler.value?.();
 
     expect(document.body.textContent).toContain("replayed output");
+  });
+
+  it("renders fast terminal replay when ready fires before taskEventStream returns", () => {
+    // Regression: TaskDetail used to attach the "ready" listener after
+    // taskEventStream returned. A fast terminal SSE replay could finish before
+    // that listener was registered, so buffered history was dropped and only
+    // the initial prompt remained visible.
+    const created: FakeES[] = [];
+    vi.mocked(taskEventStream).mockImplementation((_id, cb, _onError, onReady) => {
+      (cb as (ev: EventMessage) => void)({ kind: "textDelta", ts: 1, textDelta: { text: "purged history" } });
+      onReady?.();
+      const fakeES: FakeES = {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      };
+      created.push(fakeES);
+      return fakeES as unknown as EventSource;
+    });
+
+    renderTaskDetail({ taskState: "purged", initialPrompt: "initial prompt" });
+
+    expect(document.body.textContent).toContain("purged history");
+    expect(document.body.textContent).not.toContain("initial prompt");
   });
 
   it("live textDelta events render before the turn ends", () => {

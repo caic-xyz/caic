@@ -58,6 +58,8 @@ export function taskEventStream(
   id: string,
   onMessage: (event: EventMessage) => void,
   onError: (err: unknown) => void,
+  onReady?: () => void,
+  onOpen?: () => void,
 ): EventSource {
   const es = new EventSource(`/api/caic/v1/tasks/${id}/events`);
   es.addEventListener("message", (e) => {
@@ -68,5 +70,11 @@ export function taskEventStream(
       onError(err);
     }
   });
+  if (onReady) {
+    es.addEventListener("ready", onReady);
+  }
+  if (onOpen) {
+    es.addEventListener("open", onOpen);
+  }
   return es;
 }
