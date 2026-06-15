@@ -22,24 +22,29 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.util.Base64
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 class HaloEmulatorBridgeClientTest {
     private lateinit var server: MockWebServer
     private lateinit var client: HaloEmulatorBridgeClient
     private lateinit var serverSocket: AtomicReference<WebSocket>
+    private lateinit var serverSocketOpened: CountDownLatch
     private lateinit var lastRequest: AtomicReference<JsonObject>
 
     @Before
     fun setUp() {
         server = MockWebServer()
         serverSocket = AtomicReference()
+        serverSocketOpened = CountDownLatch(1)
         lastRequest = AtomicReference()
         server.enqueue(
             MockResponse().withWebSocketUpgrade(
                 object : WebSocketListener() {
                     override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
                         serverSocket.set(webSocket)
+                        serverSocketOpened.countDown()
                     }
 
                     override fun onMessage(webSocket: WebSocket, text: String) {
@@ -97,7 +102,7 @@ class HaloEmulatorBridgeClientTest {
     @Test
     fun `bluetooth event emits decoded data`() = runBlocking {
         client.connect(server.url("/bridge").toString().replace("http://", "ws://"))
-        serverSocket.get().send(
+        awaitServerSocket().send(
             buildJsonObject {
                 put("event", JsonPrimitive("bluetooth_sent"))
                 put("data", JsonPrimitive(Base64.getEncoder().encodeToString(byteArrayOf(4, 5, 6))))
@@ -107,6 +112,15 @@ class HaloEmulatorBridgeClientTest {
         val event = client.events.first() as HaloEmulatorEvent.BluetoothSent
 
         assertArrayEquals(byteArrayOf(4, 5, 6), event.data)
+    }
+
+    private fun awaitServerSocket(): WebSocket {
+        assertTrue(serverSocketOpened.await(SERVER_SOCKET_TIMEOUT_SECONDS, TimeUnit.SECONDS))
+        return serverSocket.get()
+    }
+
+    private companion object {
+        const val SERVER_SOCKET_TIMEOUT_SECONDS = 5L
     }
 }
 
