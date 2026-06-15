@@ -249,7 +249,7 @@ func (b *Backend) Diff(ctx context.Context, id runtime.InstanceID, repoIdx int, 
 		return "", fmt.Errorf("repo index %d out of range for %d repos", repoIdx, len(repos))
 	}
 	repo := &repos[repoIdx]
-	slog.Info("md diff", "ctr", name, "dir", repo.GitRoot, "br", repo.Branch, "args", args)
+	slog.DebugContext(ctx, "md diff", "ctr", name, "dir", repo.GitRoot, "br", repo.Branch, "args", args)
 	var stdout bytes.Buffer
 	if err := ct.Diff(ctx, &stdout, &SlogWriter{Phase: "diff"}, repoIdx, args); err != nil {
 		return "", err
