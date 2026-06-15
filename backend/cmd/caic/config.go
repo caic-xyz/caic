@@ -65,23 +65,33 @@ type tomlAI struct {
 }
 
 type tomlGitHub struct {
-	Token             string   `toml:"token"`
-	OAuthClientID     string   `toml:"oauth_client_id"`
-	OAuthClientSecret string   `toml:"oauth_client_secret"`
-	OAuthAllowedUsers []string `toml:"oauth_allowed_users"`
-	WebhookSecret     string   `toml:"webhook_secret"`
-	AppID             int64    `toml:"app_id"`
-	AppPrivateKeyPEM  string   `toml:"app_private_key_pem"` // file path, read at load time
-	AppAllowedOwners  []string `toml:"app_allowed_owners"`
+	PAT   tomlPAT       `toml:"pat"`
+	OAuth tomlOAuth     `toml:"oauth"`
+	App   tomlGitHubApp `toml:"app"`
+}
+
+type tomlGitHubApp struct {
+	ID            int64    `toml:"id"`
+	PrivateKeyPEM string   `toml:"private_key_pem"` // file path, read at load time
+	AllowedOwners []string `toml:"allowed_owners"`
+	WebhookSecret string   `toml:"webhook_secret"`
 }
 
 type tomlGitLab struct {
-	Token             string   `toml:"token"`
-	OAuthClientID     string   `toml:"oauth_client_id"`
-	OAuthClientSecret string   `toml:"oauth_client_secret"`
-	OAuthAllowedUsers []string `toml:"oauth_allowed_users"`
-	URL               string   `toml:"url"`
-	WebhookSecret     string   `toml:"webhook_secret"`
+	PAT           tomlPAT   `toml:"pat"`
+	OAuth         tomlOAuth `toml:"oauth"`
+	URL           string    `toml:"url"`
+	WebhookSecret string    `toml:"webhook_secret"`
+}
+
+type tomlPAT struct {
+	Token string `toml:"token"`
+}
+
+type tomlOAuth struct {
+	ClientID     string   `toml:"client_id"`
+	ClientSecret string   `toml:"client_secret"`
+	AllowedUsers []string `toml:"allowed_users"`
 }
 
 type tomlVoiceGateway struct {
@@ -173,14 +183,14 @@ func resolvePath(path, cfgDir string) string {
 // tomlToServerConfig converts a parsed TOML config into a server.Config.
 // cfgDir is used to resolve relative file paths.
 func tomlToServerConfig(ctx context.Context, tc *tomlConfig, cfgDir string) (cfg *server.Config, addr, root, logLevel string, err error) {
-	pem, err := resolveFilePath(tc.GitHub.AppPrivateKeyPEM, cfgDir)
+	pem, err := resolveFilePath(tc.GitHub.App.PrivateKeyPEM, cfgDir)
 	if err != nil {
 		return nil, "", "", "", err
 	}
 	// gh CLI fallback: when no token and no OAuth configured, try gh auth token.
 	// TODO: remove OAuth guard once gh auth token reliably provides a scoped PAT.
-	ghToken := tc.GitHub.Token
-	if ghToken == "" && tc.GitHub.OAuthClientID == "" {
+	ghToken := tc.GitHub.PAT.Token
+	if ghToken == "" && tc.GitHub.OAuth.ClientID == "" {
 		ghToken = resolveGitHubTokenFromGH(ctx)
 	}
 	// Resolve core env vars: explicit config values take precedence over the host environment.
@@ -220,19 +230,19 @@ func tomlToServerConfig(ctx context.Context, tc *tomlConfig, cfgDir string) (cfg
 		},
 		GitHub: server.GitHubConfig{
 			Token:             ghToken,
-			OAuthClientID:     tc.GitHub.OAuthClientID,
-			OAuthClientSecret: tc.GitHub.OAuthClientSecret,
-			OAuthAllowedUsers: strings.Join(tc.GitHub.OAuthAllowedUsers, ","),
-			WebhookSecret:     []byte(tc.GitHub.WebhookSecret),
-			AppID:             tc.GitHub.AppID,
+			OAuthClientID:     tc.GitHub.OAuth.ClientID,
+			OAuthClientSecret: tc.GitHub.OAuth.ClientSecret,
+			OAuthAllowedUsers: strings.Join(tc.GitHub.OAuth.AllowedUsers, ","),
+			WebhookSecret:     []byte(tc.GitHub.App.WebhookSecret),
+			AppID:             tc.GitHub.App.ID,
 			AppPrivateKeyPEM:  pem,
-			AppAllowedOwners:  strings.Join(tc.GitHub.AppAllowedOwners, ","),
+			AppAllowedOwners:  strings.Join(tc.GitHub.App.AllowedOwners, ","),
 		},
 		GitLab: server.GitLabConfig{
-			Token:             tc.GitLab.Token,
-			OAuthClientID:     tc.GitLab.OAuthClientID,
-			OAuthClientSecret: tc.GitLab.OAuthClientSecret,
-			OAuthAllowedUsers: strings.Join(tc.GitLab.OAuthAllowedUsers, ","),
+			Token:             tc.GitLab.PAT.Token,
+			OAuthClientID:     tc.GitLab.OAuth.ClientID,
+			OAuthClientSecret: tc.GitLab.OAuth.ClientSecret,
+			OAuthAllowedUsers: strings.Join(tc.GitLab.OAuth.AllowedUsers, ","),
 			URL:               tc.GitLab.URL,
 			WebhookSecret:     []byte(tc.GitLab.WebhookSecret),
 		},

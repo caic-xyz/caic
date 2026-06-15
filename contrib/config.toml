@@ -129,28 +129,31 @@
 # ── GitHub ───────────────────────────────────────────────────────────────────
 
 [github]
+
 # PAT for server-level API access (forges, container token fallback).
 # https://github.com/settings/personal-access-tokens/new
 # Required permissions: pull_requests:write, checks:read. If empty and the gh
 # CLI is in PATH, caic uses `gh auth token` automatically.
+[github.pat]
 #token = ""  # e.g. "ghp_..."
 
 # OAuth — multi-user login.
 # See https://docs.caic.xyz/caic/github for OAuth app setup instructions.
-#oauth_client_id = ""
-#oauth_client_secret = ""
+[github.oauth]
+#client_id = ""
+#client_secret = ""
 # GitHub users allowed to log in (highly recommended).
-# oauth_allowed_users = ["alice", "bob"]
+# allowed_users = ["alice", "bob"]
 
 # GitHub App — org-wide webhooks and automatic task creation.
 # Layered on top of PAT or OAuth; not mutually exclusive with either.
 # See https://docs.caic.xyz/caic/ for GitHub App setup instructions.
-#app_id = 0  # e.g. 12345
+[github.app]
+#id = 0  # e.g. 12345
 # PEM file path (relative paths resolve against the config directory).
-#app_private_key_pem = ""  # e.g. "private-key.pem"
+#private_key_pem = ""  # e.g. "~/.config/caic/private-key.pem"
 # Owners/orgs allowed to install the app (highly recommended).
-# app_allowed_owners = ["my-org", "my-username"]
-
+# allowed_owners = ["my-org", "my-username"]
 # HMAC-SHA256 secret for webhook verification.
 # Generate with: openssl rand -hex 32
 #webhook_secret = ""
@@ -159,18 +162,6 @@
 # Choose one of PAT (token) or OAuth.
 
 [gitlab]
-# PAT — single-user / headless, mutually exclusive with OAuth. Scope: api.
-# Create at https://gitlab.com/-/user_settings/personal_access_tokens
-# Required scope: api
-#token = ""  # e.g. "glpat-..."
-
-# OAuth multi-user login, mutually exclusive with token.
-# See https://docs.caic.xyz/caic/gitlab for OAuth app setup instructions.
-#oauth_client_id = ""
-#oauth_client_secret = ""
-# GitLab users allowed to login. Highly recommended.
-# oauth_allowed_users = ["alice", "bob"]
-
 # GitLab instance URL. Empty targets gitlab.com (the REST API always does); set
 # only for self-hosted OAuth login.
 #url = ""  # e.g. "https://gitlab.example.com"
@@ -178,6 +169,20 @@
 # Shared secret for webhook verification.
 # Generate with: openssl rand -hex 32
 #webhook_secret = ""
+
+# PAT — single-user / headless, mutually exclusive with OAuth. Scope: api.
+# Create at https://gitlab.com/-/user_settings/personal_access_tokens
+# Required scope: api
+[gitlab.pat]
+#token = ""  # e.g. "glpat-..."
+
+# OAuth multi-user login, mutually exclusive with token.
+# See https://docs.caic.xyz/caic/gitlab for OAuth app setup instructions.
+[gitlab.oauth]
+#client_id = ""
+#client_secret = ""
+# GitLab users allowed to login. Highly recommended.
+# allowed_users = ["alice", "bob"]
 
 # ── Debug ────────────────────────────────────────────────────────────────────
 

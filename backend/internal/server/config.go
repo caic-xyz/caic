@@ -119,10 +119,10 @@ type GitHubConfig struct {
 // Validate returns an error if the GitHub configuration is invalid.
 func (c *GitHubConfig) Validate() error {
 	if (c.OAuthClientID == "") != (c.OAuthClientSecret == "") {
-		return errors.New("github.oauth_client_id and github.oauth_client_secret must both be set or both be unset")
+		return errors.New("github.oauth.client_id and github.oauth.client_secret must both be set or both be unset")
 	}
 	if c.OAuthClientID != "" && c.OAuthAllowedUsers == "" {
-		return errors.New("github.oauth_allowed_users is required when GitHub OAuth login is configured")
+		return errors.New("github.oauth.allowed_users is required when GitHub OAuth login is configured")
 	}
 	return nil
 }
@@ -140,7 +140,7 @@ type GitLabConfig struct {
 // Validate returns an error if the GitLab configuration is invalid.
 func (c *GitLabConfig) Validate() error {
 	if (c.OAuthClientID == "") != (c.OAuthClientSecret == "") {
-		return errors.New("gitlab.oauth_client_id and gitlab.oauth_client_secret must both be set or both be unset")
+		return errors.New("gitlab.oauth.client_id and gitlab.oauth.client_secret must both be set or both be unset")
 	}
 	if c.URL != "" {
 		if err := validateBaseURL("gitlab.url", c.URL); err != nil {
@@ -148,11 +148,11 @@ func (c *GitLabConfig) Validate() error {
 		}
 	}
 	if c.Token != "" && c.OAuthClientID != "" {
-		return errors.New("gitlab.token and gitlab.oauth_client_id are mutually exclusive: " +
+		return errors.New("gitlab.token and gitlab.oauth.client_id are mutually exclusive: " +
 			"remove gitlab.token when using GitLab OAuth login")
 	}
 	if c.OAuthClientID != "" && c.OAuthAllowedUsers == "" {
-		return errors.New("gitlab.oauth_allowed_users is required when GitLab OAuth login is configured")
+		return errors.New("gitlab.oauth.allowed_users is required when GitLab OAuth login is configured")
 	}
 	return nil
 }

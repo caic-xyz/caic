@@ -86,16 +86,31 @@ provider = "anthropic"
 model = "claude-haiku-4-5-20251001"
 
 [github]
+
+[github.pat]
 token = "ghp_test"
-oauth_allowed_users = ["alice", "bob"]
-app_id = 42
-app_allowed_owners = ["org1"]
+
+[github.oauth]
+client_id = "github-client-id"
+client_secret = "github-client-secret"
+allowed_users = ["alice", "bob"]
+
+[github.app]
+id = 42
+allowed_owners = ["org1"]
 webhook_secret = "secret123"
 
 [gitlab]
-token = "glpat_test"
 url = "https://gitlab.example.com"
 webhook_secret = "glsecret"
+
+[gitlab.pat]
+token = "glpat_test"
+
+[gitlab.oauth]
+client_id = "gitlab-client-id"
+client_secret = "gitlab-client-secret"
+allowed_users = ["carol"]
 
 [voice-gateway]
 url = "https://voice.example.com"
@@ -123,14 +138,23 @@ pprof = true
 		if tc.Core.AutoUpdate == nil || *tc.Core.AutoUpdate != "" {
 			t.Errorf("AutoUpdate = %v, want empty string", tc.Core.AutoUpdate)
 		}
-		if tc.GitHub.Token != "ghp_test" {
-			t.Errorf("GitHub.Token = %q", tc.GitHub.Token)
+		if tc.GitHub.PAT.Token != "ghp_test" {
+			t.Errorf("GitHub.PAT.Token = %q", tc.GitHub.PAT.Token)
 		}
-		if len(tc.GitHub.OAuthAllowedUsers) != 2 || tc.GitHub.OAuthAllowedUsers[0] != "alice" {
-			t.Errorf("GitHub.OAuthAllowedUsers = %v", tc.GitHub.OAuthAllowedUsers)
+		if tc.GitHub.OAuth.ClientID != "github-client-id" {
+			t.Errorf("GitHub.OAuth.ClientID = %q", tc.GitHub.OAuth.ClientID)
 		}
-		if tc.GitHub.AppID != 42 {
-			t.Errorf("GitHub.AppID = %d", tc.GitHub.AppID)
+		if len(tc.GitHub.OAuth.AllowedUsers) != 2 || tc.GitHub.OAuth.AllowedUsers[0] != "alice" {
+			t.Errorf("GitHub.OAuth.AllowedUsers = %v", tc.GitHub.OAuth.AllowedUsers)
+		}
+		if tc.GitHub.App.ID != 42 {
+			t.Errorf("GitHub.App.ID = %d", tc.GitHub.App.ID)
+		}
+		if tc.GitLab.PAT.Token != "glpat_test" {
+			t.Errorf("GitLab.PAT.Token = %q", tc.GitLab.PAT.Token)
+		}
+		if tc.GitLab.OAuth.ClientID != "gitlab-client-id" {
+			t.Errorf("GitLab.OAuth.ClientID = %q", tc.GitLab.OAuth.ClientID)
 		}
 		if tc.VoiceGateway.URL != "https://voice.example.com" {
 			t.Errorf("VoiceGateway.URL = %q", tc.VoiceGateway.URL)
@@ -343,6 +367,8 @@ func TestTomlToServerConfig(t *testing.T) {
 		if err := os.WriteFile(pemPath, []byte("PEM-DATA"), 0o600); err != nil {
 			t.Fatal(err)
 		}
+		githubClientSecret := strings.Join([]string{"github", "client", "secret"}, "-")
+		gitlabClientSecret := strings.Join([]string{"gitlab", "client", "secret"}, "-")
 
 		tc := &tomlConfig{
 			Core: tomlCore{
@@ -362,11 +388,27 @@ func TestTomlToServerConfig(t *testing.T) {
 				AllowOrigins: []string{"local", "tailscale"},
 			},
 			GitHub: tomlGitHub{
-				Token:             "ghp_abc",
-				OAuthAllowedUsers: []string{"alice", "bob"},
-				AppPrivateKeyPEM:  "key.pem", // relative path
-				AppAllowedOwners:  []string{"org1", "org2"},
-				WebhookSecret:     "hmac",
+				PAT: tomlPAT{Token: "ghp_abc"},
+				OAuth: tomlOAuth{
+					ClientID:     "github-client-id",
+					ClientSecret: githubClientSecret,
+					AllowedUsers: []string{"alice", "bob"},
+				},
+				App: tomlGitHubApp{
+					PrivateKeyPEM: "key.pem", // relative path
+					AllowedOwners: []string{"org1", "org2"},
+					WebhookSecret: "hmac",
+				},
+			},
+			GitLab: tomlGitLab{
+				PAT: tomlPAT{Token: "glpat_abc"},
+				OAuth: tomlOAuth{
+					ClientID:     "gitlab-client-id",
+					ClientSecret: gitlabClientSecret,
+					AllowedUsers: []string{"carol"},
+				},
+				URL:           "https://gitlab.example.com",
+				WebhookSecret: "glhmac",
 			},
 		}
 
@@ -386,6 +428,12 @@ func TestTomlToServerConfig(t *testing.T) {
 		if cfg.GitHub.Token != "ghp_abc" {
 			t.Errorf("GitHubToken = %q", cfg.GitHub.Token)
 		}
+		if cfg.GitHub.OAuthClientID != "github-client-id" {
+			t.Errorf("GitHubOAuthClientID = %q", cfg.GitHub.OAuthClientID)
+		}
+		if cfg.GitHub.OAuthClientSecret != githubClientSecret {
+			t.Errorf("GitHubOAuthClientSecret = %q", cfg.GitHub.OAuthClientSecret)
+		}
 		if cfg.GitHub.OAuthAllowedUsers != "alice,bob" {
 			t.Errorf("GitHubOAuthAllowedUsers = %q", cfg.GitHub.OAuthAllowedUsers)
 		}
@@ -397,6 +445,24 @@ func TestTomlToServerConfig(t *testing.T) {
 		}
 		if string(cfg.GitHub.WebhookSecret) != "hmac" {
 			t.Errorf("GitHubWebhookSecret = %q", cfg.GitHub.WebhookSecret)
+		}
+		if cfg.GitLab.Token != "glpat_abc" {
+			t.Errorf("GitLabToken = %q", cfg.GitLab.Token)
+		}
+		if cfg.GitLab.OAuthClientID != "gitlab-client-id" {
+			t.Errorf("GitLabOAuthClientID = %q", cfg.GitLab.OAuthClientID)
+		}
+		if cfg.GitLab.OAuthClientSecret != gitlabClientSecret {
+			t.Errorf("GitLabOAuthClientSecret = %q", cfg.GitLab.OAuthClientSecret)
+		}
+		if cfg.GitLab.OAuthAllowedUsers != "carol" {
+			t.Errorf("GitLabOAuthAllowedUsers = %q", cfg.GitLab.OAuthAllowedUsers)
+		}
+		if cfg.GitLab.URL != "https://gitlab.example.com" {
+			t.Errorf("GitLabURL = %q", cfg.GitLab.URL)
+		}
+		if string(cfg.GitLab.WebhookSecret) != "glhmac" {
+			t.Errorf("GitLabWebhookSecret = %q", cfg.GitLab.WebhookSecret)
 		}
 		if cfg.IPGeo.DB != filepath.Join(dir, "geo.mmdb") {
 			t.Errorf("IPGeoDB = %q", cfg.IPGeo.DB)
