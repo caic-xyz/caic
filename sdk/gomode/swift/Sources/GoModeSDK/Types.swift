@@ -40,11 +40,36 @@ public enum JSONValue: Codable, Equatable {
 public enum ErrorCodes {
 }
 
-/// MCPSettings describes the service MCP endpoint Android can use for tools and resources.
-public struct MCPSettings: Codable {
+/// Location is a location triggered by a physical location, SSID or other means.
+public struct Location: Codable {
+    public let latitude: Double?
+    public let longitude: Double?
+    public let ssid: String?
+}
+
+/// ToolGroupActivation carries hints the shell matches against current context to
+/// decide when to load a group's tools. Matching is on-device: the service never
+/// receives the user's context or location.
+public struct ToolGroupActivation: Codable {
+    /// TODO: Will probably remove.
+    public let routes: [String]?
+    public let locationTags: [Location]?
+    public let keywords: [String]?
+}
+
+/// ToolGroup describes one MCP tool group the shell can activate as a skill:
+/// a static set of tools plus instructions behind one endpoint. The shell
+/// discovers every group's name and description up front and loads a group's
+/// tools on demand (progressive disclosure), so the active tool set changes by
+/// activating groups, not by mutating a group's tools.
+public struct ToolGroup: Codable {
+    public let name: String
+    public let description: String?
     public let endpoint: String
+    /// MCP server version, always "2026-07-28". TODO: Is that useful?
     public let protocolVersion: String
     public let authRequired: Bool
+    public let activation: ToolGroupActivation?
 }
 
 /// VoiceGatewaySettings describes the preferred voice gateway for this service.
@@ -58,7 +83,7 @@ public struct VoiceGatewaySettings: Codable {
 /// WebShellSettings describes the hosted frontend's native-shell contract.
 public struct WebShellSettings: Codable {
     public let bridgeVersion: Int
-    public let mcp: MCPSettings
+    public let toolGroups: [ToolGroup]
     public let voiceGateway: VoiceGatewaySettings
 }
 

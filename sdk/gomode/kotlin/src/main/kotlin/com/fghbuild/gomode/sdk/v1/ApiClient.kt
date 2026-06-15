@@ -88,7 +88,7 @@ class ApiClient(
 
     // JSON endpoints
     /** Returns Go Mode service compatibility settings. */
-    suspend fun getSettings(): Settings = request("GET", "/api/gomode/v1/settings")
+    suspend fun getSettings(): Settings = request("GET", "/.well-known/gomode.json")
 
     // SSE endpoints
 

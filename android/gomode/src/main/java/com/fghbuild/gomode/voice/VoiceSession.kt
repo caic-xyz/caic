@@ -155,9 +155,17 @@ class VoiceSession(
                     setError("Voice is not available for this service")
                     return@launch
                 }
-                val mcpEndpointURL = resolveServiceURL(settings.activeServiceURL, serviceSettings.webShell.mcp.endpoint)
+                // Single active tool group today. On-device skill activation across
+                // the toolGroups list (progressive disclosure) is future work; see
+                // android/docs/GOMODE_SERVICE_DISCOVERY.md.
+                val group = serviceSettings.webShell.toolGroups.firstOrNull()
+                if (group == null) {
+                    setError("Voice is not available for this service")
+                    return@launch
+                }
+                val mcpEndpointURL = resolveServiceURL(settings.activeServiceURL, group.endpoint)
                 val voiceGatewayEndpointURL = resolveServiceURL(settings.activeServiceURL, voiceGatewayURL)
-                if (serviceSettings.webShell.mcp.authRequired && cookieFor(mcpEndpointURL).isNullOrBlank()) {
+                if (group.authRequired && cookieFor(mcpEndpointURL).isNullOrBlank()) {
                     setError("Sign in to the hosted service before using voice")
                     return@launch
                 }
@@ -170,7 +178,7 @@ class VoiceSession(
 
                 val client = McpClient(
                     endpointURL = mcpEndpointURL,
-                    protocolVersion = serviceSettings.webShell.mcp.protocolVersion,
+                    protocolVersion = group.protocolVersion,
                     cookieProvider = { cookieFor(mcpEndpointURL) },
                 )
                 mcpClient = client

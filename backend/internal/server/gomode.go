@@ -11,6 +11,8 @@ import (
 
 const (
 	goModeServiceCaic             = "caic"
+	goModeTasksGroupName          = "tasks"
+	goModeTasksGroupDescription   = "caic coding-agent task management: create, monitor, answer, and control tasks."
 	goModeAPIVersion              = 1
 	goModeBridge                  = 1
 	goModeMCPEndpoint             = "/api/caic/v1/mcp"
@@ -24,17 +26,24 @@ func newGoModeSettings(voice v1.VoiceGatewayMetadata, authRequired bool) gomode.
 		APIVersion:     goModeAPIVersion,
 		WebShell: gomode.WebShellSettings{
 			BridgeVersion: goModeBridge,
-			MCP:           newGoModeMCPSettings(authRequired),
+			ToolGroups:    newGoModeToolGroups(authRequired),
 			VoiceGateway:  newGoModeVoiceGatewaySettings(voice),
 		},
 	}
 }
 
-func newGoModeMCPSettings(authRequired bool) gomode.MCPSettings {
-	return gomode.MCPSettings{
-		Endpoint:        goModeMCPEndpoint,
-		ProtocolVersion: mcp.ProtocolVersion,
-		AuthRequired:    authRequired,
+// newGoModeToolGroups returns the MCP tool groups the shell can activate. caic
+// exposes a single group today; the list shape lets the shell host more groups
+// (skills) without a manifest contract change.
+func newGoModeToolGroups(authRequired bool) []gomode.ToolGroup {
+	return []gomode.ToolGroup{
+		{
+			Name:            goModeTasksGroupName,
+			Description:     goModeTasksGroupDescription,
+			Endpoint:        goModeMCPEndpoint,
+			ProtocolVersion: mcp.ProtocolVersion,
+			AuthRequired:    authRequired,
+		},
 	}
 }
 

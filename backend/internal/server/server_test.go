@@ -1920,8 +1920,11 @@ func TestGoModeSettings(t *testing.T) {
 	if got.WebShell.BridgeVersion != 1 {
 		t.Fatalf("WebShell = %+v", got.WebShell)
 	}
-	if got.WebShell.MCP.Endpoint != "/api/caic/v1/mcp" || got.WebShell.MCP.ProtocolVersion != mcp.ProtocolVersion || !got.WebShell.MCP.AuthRequired {
-		t.Fatalf("MCP = %+v", got.WebShell.MCP)
+	if len(got.WebShell.ToolGroups) != 1 {
+		t.Fatalf("ToolGroups = %+v, want 1", got.WebShell.ToolGroups)
+	}
+	if grp := got.WebShell.ToolGroups[0]; grp.Name != "tasks" || grp.Endpoint != "/api/caic/v1/mcp" || grp.ProtocolVersion != mcp.ProtocolVersion || !grp.AuthRequired {
+		t.Fatalf("ToolGroup = %+v", got.WebShell.ToolGroups[0])
 	}
 	if got.WebShell.VoiceGateway.Required {
 		t.Fatal("VoiceGateway.Required = true, want false")
@@ -2510,7 +2513,7 @@ func TestBuildHandler(t *testing.T) {
 			t.Fatalf("buildHandler() error = %v", err)
 		}
 
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/gomode/v1/settings", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/.well-known/gomode.json", http.NoBody)
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
 		if w.Code != http.StatusOK {

@@ -16,7 +16,7 @@ func SDKAPI() apispec.Config {
 				Name:     "getSettings",
 				Doc:      "Returns Go Mode service compatibility settings.",
 				Method:   "GET",
-				Path:     "/api/gomode/v1/settings",
+				Path:     settingsPath,
 				Category: "Settings",
 				Resp:     reflect.TypeFor[Settings](),
 			},
@@ -30,7 +30,7 @@ func SDKAPI() apispec.Config {
 		},
 		KotlinPackage: "com.fghbuild.gomode.sdk.v1",
 		APIDocTitle:   "Go Mode Service Discovery API Reference",
-		APIDocIntro:   "Service-neutral JSON API served at `/api/gomode/v1/` for Go Mode Android bootstrap.",
+		APIDocIntro:   "Service-neutral JSON discovery manifest served publicly at `/.well-known/gomode.json` for Go Mode Android bootstrap.",
 		SpecialTypes: []apispec.SpecialType{
 			{
 				Type:      reflect.TypeFor[map[string]any](),

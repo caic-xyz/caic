@@ -35,6 +35,6 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
   const request = makeRequester(fetchFn);
   return {
     /** Returns Go Mode service compatibility settings. */
-    getSettings: (): Promise<Settings> => request<Settings>("GET", "/api/gomode/v1/settings"),
+    getSettings: (): Promise<Settings> => request<Settings>("GET", "/.well-known/gomode.json"),
   };
 }

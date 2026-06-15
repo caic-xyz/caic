@@ -112,7 +112,7 @@ public final class ApiClient {
     // JSON endpoints
     /// Returns Go Mode service compatibility settings.
     public func getSettings() async throws -> Settings {
-        try await request("GET", path: "/api/gomode/v1/settings")
+        try await request("GET", path: "/.well-known/gomode.json")
     }
 
     // SSE endpoints

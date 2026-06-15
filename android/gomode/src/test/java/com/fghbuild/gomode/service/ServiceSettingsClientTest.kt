@@ -1,8 +1,8 @@
 // Unit tests for Go Mode service settings fetching and compatibility validation.
 package com.fghbuild.gomode.service
 
-import com.fghbuild.gomode.sdk.v1.MCPSettings
 import com.fghbuild.gomode.sdk.v1.Settings
+import com.fghbuild.gomode.sdk.v1.ToolGroup
 import com.fghbuild.gomode.sdk.v1.VoiceGatewaySettings
 import com.fghbuild.gomode.sdk.v1.WebShellSettings
 import com.fghbuild.gomode.ui.ServiceBootstrapState
@@ -25,12 +25,13 @@ class ServiceSettingsClientTest {
             val settings = ServiceSettingsClient().fetch(server.url("/nested/path?ignored=1").toString())
             val request = server.takeRequest()
 
-            assertEquals("/api/gomode/v1/settings", request.path)
+            assertEquals("/.well-known/gomode.json", request.path)
             assertEquals("example-coding-service", settings.service)
             assertEquals(1, settings.apiVersion)
-            assertEquals("/api/service/v1/mcp", settings.webShell.mcp.endpoint)
-            assertEquals("2026-07-28", settings.webShell.mcp.protocolVersion)
-            assertTrue(settings.webShell.mcp.authRequired)
+            assertEquals(1, settings.webShell.toolGroups.size)
+            assertEquals("/api/service/v1/mcp", settings.webShell.toolGroups[0].endpoint)
+            assertEquals("2026-07-28", settings.webShell.toolGroups[0].protocolVersion)
+            assertTrue(settings.webShell.toolGroups[0].authRequired)
             assertEquals("/", settings.webShell.voiceGateway.url)
         } finally {
             server.shutdown()
@@ -61,7 +62,7 @@ class ServiceSettingsClientTest {
             val state = fetchBootstrapState(server.url("/").toString(), ServiceSettingsClient())
 
             assertTrue(state is ServiceBootstrapState.Unvalidated)
-            assertEquals("/api/gomode/v1/settings", server.takeRequest().path)
+            assertEquals("/.well-known/gomode.json", server.takeRequest().path)
         } finally {
             server.shutdown()
         }
@@ -76,7 +77,7 @@ class ServiceSettingsClientTest {
             val state = fetchBootstrapState(server.url("/").toString(), ServiceSettingsClient())
 
             assertTrue(state is ServiceBootstrapState.Unvalidated)
-            assertEquals("/api/gomode/v1/settings", server.takeRequest().path)
+            assertEquals("/.well-known/gomode.json", server.takeRequest().path)
         } finally {
             server.shutdown()
         }
@@ -129,10 +130,13 @@ class ServiceSettingsClientTest {
         apiVersion = apiVersion,
         webShell = WebShellSettings(
             bridgeVersion = bridgeVersion,
-            mcp = MCPSettings(
-                endpoint = "/api/service/v1/mcp",
-                protocolVersion = "2026-07-28",
-                authRequired = true,
+            toolGroups = listOf(
+                ToolGroup(
+                    name = "tasks",
+                    endpoint = "/api/service/v1/mcp",
+                    protocolVersion = "2026-07-28",
+                    authRequired = true,
+                ),
             ),
             voiceGateway = VoiceGatewaySettings(
                 required = false,
@@ -149,11 +153,14 @@ class ServiceSettingsClientTest {
               "apiVersion": 1,
               "webShell": {
                 "bridgeVersion": 1,
-                "mcp": {
-                  "endpoint": "/api/service/v1/mcp",
-                  "protocolVersion": "2026-07-28",
-                  "authRequired": true
-                },
+                "toolGroups": [
+                  {
+                    "name": "tasks",
+                    "endpoint": "/api/service/v1/mcp",
+                    "protocolVersion": "2026-07-28",
+                    "authRequired": true
+                  }
+                ],
                 "voiceGateway": {
                   "required": false,
                   "url": "/",

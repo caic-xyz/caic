@@ -24,12 +24,41 @@ object InstantSerializer : KSerializer<Instant> {
 object ErrorCodes {
 }
 
-/** MCPSettings describes the service MCP endpoint Android can use for tools and resources. */
+/** Location is a location triggered by a physical location, SSID or other means. */
 @Serializable
-data class MCPSettings(
+data class Location(
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val ssid: String? = null,
+)
+
+/**
+ * ToolGroupActivation carries hints the shell matches against current context to
+ * decide when to load a group's tools. Matching is on-device: the service never
+ * receives the user's context or location.
+ */
+@Serializable
+data class ToolGroupActivation(
+    val routes: List<String>? = null,
+    val locationTags: List<Location>? = null,
+    val keywords: List<String>? = null,
+)
+
+/**
+ * ToolGroup describes one MCP tool group the shell can activate as a skill:
+ * a static set of tools plus instructions behind one endpoint. The shell
+ * discovers every group's name and description up front and loads a group's
+ * tools on demand (progressive disclosure), so the active tool set changes by
+ * activating groups, not by mutating a group's tools.
+ */
+@Serializable
+data class ToolGroup(
+    val name: String,
+    val description: String? = null,
     val endpoint: String,
     val protocolVersion: String,
     val authRequired: Boolean,
+    val activation: ToolGroupActivation? = null,
 )
 
 /** VoiceGatewaySettings describes the preferred voice gateway for this service. */
@@ -45,7 +74,7 @@ data class VoiceGatewaySettings(
 @Serializable
 data class WebShellSettings(
     val bridgeVersion: Int,
-    val mcp: MCPSettings,
+    val toolGroups: List<ToolGroup>,
     val voiceGateway: VoiceGatewaySettings,
 )
 
