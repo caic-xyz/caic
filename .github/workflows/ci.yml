@@ -1,15 +1,17 @@
-# CI workflow for pushes to main.
+# CI workflow for pushes to main and pull requests.
 name: CI
 on:
   push:
     branches: [main]
+  pull_request:
+    branches-ignore: [gh-pages]
 permissions:
   contents: read
 env:
   CGO_ENABLED: "0"
 
 jobs:
-  ci:
+  test:
     strategy:
       fail-fast: false
       matrix:
@@ -66,9 +68,9 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Smoke test
-        run: go test -tags="smoke e2e" -run TestSmoke -v -timeout 5m -coverprofile=smoke-coverage.out ./backend/cmd/caic/
+        run: make smoke
       - name: Upload Smoke Coverage
         uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: smoke-coverage.out
+          files: coverage.out

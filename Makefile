@@ -64,7 +64,7 @@ test: $(FRONTEND_STAMP)
 	@find . -name 'test_*.py' -exec python3 {} \;
 
 smoke:
-	@go test -tags="smoke" -run TestSmoke -v -timeout 15m ./backend/cmd/caic/
+	@go test -tags="smoke" -run TestSmoke -v -timeout 15m -coverprofile=coverage.out ./backend/cmd/caic/
 
 smoke-voice:
 	@go test -tags="smoke" -run TestSmokeVoiceRTCLocalAudio -v -timeout 15m ./backend/internal/voicegateway/voicertc/
