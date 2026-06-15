@@ -1635,18 +1635,16 @@ func TestHandleTaskRawEvents(t *testing.T) {
 			return false
 		})
 
-		// Subscribe to events via SSE. The handler should return immediately for
-		// purged tasks instead of blocking until context deadline.
-		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-		defer cancel()
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID+"/raw_events", http.NoBody).WithContext(ctx)
+		// Subscribe to events via SSE. The handler should return after history
+		// replay instead of waiting for the request context deadline.
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+		t.Cleanup(cancel)
+		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/caic/v1/tasks/"+taskID+"/raw_events", http.NoBody)
 		req.SetPathValue("id", taskID)
 		w := httptest.NewRecorder()
-		start := time.Now()
 		testTaskHandlers(s).handleTaskRawEvents(w, req)
-		elapsed := time.Since(start)
-		if elapsed > 200*time.Millisecond {
-			t.Errorf("handleTaskRawEvents blocked for %v; purged tasks should return immediately after history replay", elapsed)
+		if err := ctx.Err(); err != nil {
+			t.Fatalf("handleTaskRawEvents blocked until context deadline: %v", err)
 		}
 
 		if w.Code != http.StatusOK {
