@@ -7,6 +7,7 @@ import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Message
 import android.util.Log
@@ -231,6 +232,12 @@ internal fun openNewWindowInExternalBrowser(
     resultMsg: Message,
     openExternalUri: (Uri) -> Boolean,
 ): Boolean {
+    val hitTestResult = parentView.hitTestResult
+    newWindowRequestUriOrNull(hitTestResult.type, hitTestResult.extra)?.let { uri ->
+        openExternalUri(uri)
+        return false
+    }
+
     val transport = resultMsg.obj as? WebView.WebViewTransport
     if (transport == null) {
         Log.w(TAG, "New window request missing WebView transport.")
@@ -239,9 +246,22 @@ internal fun openNewWindowInExternalBrowser(
 
     val popupView = WebView(parentView.context).apply {
         webViewClient = object : WebViewClient() {
+            private var openedExternalWindow = false
+
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                openOnce(view, request.url)
+                return true
+            }
+
+            override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+                url?.toUri()?.let { openOnce(view, it) }
+            }
+
+            private fun openOnce(view: WebView, uri: Uri) {
+                if (openedExternalWindow) return
+                openedExternalWindow = true
+                openExternalUri(uri)
                 view.destroy()
-                return openExternalUri(request.url)
             }
         }
     }
@@ -249,6 +269,17 @@ internal fun openNewWindowInExternalBrowser(
     transport.webView = popupView
     resultMsg.sendToTarget()
     return true
+}
+
+internal fun newWindowRequestUriOrNull(hitTestType: Int, extra: String?): Uri? {
+    if (hitTestType != WebView.HitTestResult.SRC_ANCHOR_TYPE &&
+        hitTestType != WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE
+    ) {
+        return null
+    }
+    if (extra.isNullOrBlank()) return null
+
+    return extra.toUri().takeIf { !it.scheme.isNullOrBlank() }
 }
 
 internal fun openExternalBrowser(context: Context, uri: Uri): Boolean {
