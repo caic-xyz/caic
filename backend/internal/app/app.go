@@ -75,7 +75,6 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		return nil, errors.New("CacheDir is required")
 	}
 	logDir := filepath.Join(cfg.Dirs.CacheDir, "tasks")
-	migrateTaskLogs(cfg.Dirs.CacheDir, logDir)
 
 	absRoot, err := filepath.Abs(rootDir)
 	if err != nil {
