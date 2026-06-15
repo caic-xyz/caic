@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -141,22 +142,41 @@ def _download_cmdline_tools(sdk_root: str) -> str:
 
 
 def _install_package(sdkmanager: str, sdk_root: str, package: str) -> int:
-    """Install one SDK package."""
+    """Install one SDK package, retrying on transient download failures."""
     env = {**os.environ, "ANDROID_HOME": sdk_root, "ANDROID_SDK_ROOT": sdk_root}
-    result = subprocess.run(
-        [sdkmanager, f"--sdk_root={sdk_root}", "--install", package],
-        env=env,
-        input=YES_INPUT,
-        capture_output=True,
-        check=False,
-    )
-    if result.returncode != 0:
+    max_retries = 3
+    for attempt in range(max_retries):
+        result = subprocess.run(
+            [sdkmanager, f"--sdk_root={sdk_root}", "--install", package],
+            env=env,
+            input=YES_INPUT,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            return 0
         stderr = result.stderr.decode(errors="replace").strip()
         stdout = result.stdout.decode(errors="replace").strip()
         detail = stderr or stdout or "no sdkmanager output"
-        print(f"sdkmanager failed while installing {package}:\n{detail}", file=sys.stderr)
-        return 1
-    return 0
+        if attempt < max_retries - 1:
+            delay = 2**attempt
+            print(
+                f"sdkmanager failed to install {package} (attempt {attempt + 1}/{max_retries}):\n{detail}\n"
+                f"Retrying in {delay}s...",
+                file=sys.stderr,
+            )
+            # Clear the sdkmanager download cache to avoid reusing a corrupt zip.
+            temp_dir = os.path.join(sdk_root, ".temp")
+            if os.path.isdir(temp_dir):
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            time.sleep(delay)
+        else:
+            print(
+                f"sdkmanager failed to install {package} after {max_retries} attempts:\n{detail}",
+                file=sys.stderr,
+            )
+            return 1
+    return 1
 
 
 def _install_missing_packages(sdkmanager: str, sdk_root: str, packages: dict[str, str]) -> int:

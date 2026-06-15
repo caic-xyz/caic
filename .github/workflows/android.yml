@@ -71,6 +71,8 @@ jobs:
   android-e2e:
     name: E2E tests (emulator)
     runs-on: ubuntu-latest
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-java@v4
@@ -79,28 +81,27 @@ jobs:
           java-version: '21'
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
-      - name: Accept Android SDK Licenses
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+      - name: Cache Android SDK packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/local/lib/android/sdk/emulator
+            /usr/local/lib/android/sdk/system-images/android-35
+          key: android-sdk-${{ runner.os }}-api35-v1
+      - name: Install emulator & SDK packages
+        run: python3 scripts/android_sdk.py setup-emulator
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: E2E Test
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 35
-          target: google_apis
-          arch: x86_64
-          profile: pixel_6
-          force-avd-creation: true
-          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -memory 2048 -partition-size 4096
-          cores: 4
-          disable-animations: true
-          emulator-boot-timeout: 600
-          script: |
-            adb shell 'while ! pm list packages > /dev/null 2>&1; do echo "Waiting for package manager..."; sleep 2; done'
-            make android-e2e
+      - name: Start emulator
+        run: python3 scripts/android_start_emulator.py
+      - name: Run E2E tests
+        run: make android-e2e
+      - name: Stop emulator
+        if: always()
+        run: adb emu kill || true
       - name: Upload E2E logs on failure
         if: failure()
         uses: actions/upload-artifact@v7
