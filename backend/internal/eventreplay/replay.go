@@ -58,6 +58,7 @@ func CachePath(logPath string) string {
 }
 
 // PruneStaleCaches removes replay sidecars that no longer match a raw task log.
+// It also removes orphaned temp files left by interrupted cache writes.
 func PruneStaleCaches(logDir string) (int, error) {
 	entries, err := os.ReadDir(logDir)
 	if err != nil {
@@ -69,10 +70,22 @@ func PruneStaleCaches(logDir string) (int, error) {
 	removed := 0
 	var errs []error
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".events.zst") {
+		if e.IsDir() {
 			continue
 		}
-		cachePath := filepath.Join(logDir, e.Name())
+		name := e.Name()
+		if isReplayTempName(name) {
+			if err := removeFile(filepath.Join(logDir, name)); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			removed++
+			continue
+		}
+		if !strings.HasSuffix(name, ".events.zst") {
+			continue
+		}
+		cachePath := filepath.Join(logDir, name)
 		logPath := logPathForCache(cachePath)
 		if logPath != "" {
 			if _, closeFn, ok := openFreshCacheBody(logPath); ok {
@@ -80,7 +93,7 @@ func PruneStaleCaches(logDir string) (int, error) {
 				continue
 			}
 		}
-		if err := os.Remove(filepath.Clean(cachePath)); err != nil && !os.IsNotExist(err) {
+		if err := removeFile(cachePath); err != nil {
 			errs = append(errs, err)
 			continue
 		}
@@ -462,6 +475,17 @@ func NewFilter(emit func(agent.Message)) (push func(agent.Message), flush func()
 
 func cachePathForBase(base string) string {
 	return base + ".events.zst"
+}
+
+func isReplayTempName(name string) bool {
+	return strings.Contains(name, ".events.zst.") && (strings.HasSuffix(name, ".body") || strings.HasSuffix(name, ".tmp"))
+}
+
+func removeFile(path string) error {
+	if err := os.Remove(filepath.Clean(path)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 func trimLogExt(path string) string {

@@ -84,4 +84,35 @@ func TestPruneStaleCaches(t *testing.T) {
 			t.Fatalf("stale cache still exists: %v", err)
 		}
 	})
+
+	t.Run("temp_files_removed", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		paths := []string{
+			filepath.Join(dir, "task.events.zst.123.body"),
+			filepath.Join(dir, "task.events.zst.456.tmp"),
+			filepath.Join(dir, "unrelated.tmp"),
+		}
+		for _, path := range paths {
+			if err := os.WriteFile(path, []byte("temp"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		removed, err := PruneStaleCaches(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if removed != 2 {
+			t.Fatalf("removed = %d, want 2", removed)
+		}
+		for _, path := range paths[:2] {
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Fatalf("temp file still exists: %s: %v", path, err)
+			}
+		}
+		if _, err := os.Stat(paths[2]); err != nil {
+			t.Fatalf("unrelated temp file removed: %v", err)
+		}
+	})
 }
