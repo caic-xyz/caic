@@ -48,12 +48,15 @@
 #geo_db = ""  # e.g. "~/.config/caic/GeoLite2-Country.mmdb"
 
 # Allowed origins; requests from non-matching IPs are rejected with HTTP 403.
-# Named: "local" (loopback/private), "tailscale" (100.64.0.0/10),
-#   "anthropic" (published Anthropic outbound IPs), "github" (GitHub webhook
-#   IPs), "openai" (published ChatGPT integration and Codex cloud IPs). Dynamic
-#   named origins are cached in ~/.cache/caic/ip-origins.json and refreshed after
-#   24h. CIDR: "203.0.113.0/24". Country codes: ISO 3166-1 alpha-2 (e.g. "CA"),
-#   which require geo_db.
+# Named:
+# - "anthropic" (published Anthropic outbound IPs): necessary for Claude MCP.
+# - "github" (GitHub webhook IPs): necessary for GitHub App.
+# - "local" (loopback/private): highly recommended.
+# - "openai" (published ChatGPT integration and Codex cloud IPs): necessary for ChatGPT MCP.
+# - "tailscale" (100.64.0.0/10): very useful if you use tailscale.com.
+# Others:
+# - CIDR: e.g. "203.0.113.0/24"
+# - Country codes: ISO 3166-1 alpha-2 (e.g. "CA"), require geo_db.
 #allow_origins = ["local", "tailscale", "github"]
 
 # ── Voice Gateway ────────────────────────────────────────────────────────────
