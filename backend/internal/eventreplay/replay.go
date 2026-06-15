@@ -138,6 +138,9 @@ func (r *Replay) WriteSSE(w io.Writer, flusher http.Flusher, idx *int) bool {
 			}
 		}
 		if rerr != nil {
+			if errors.Is(rerr, io.EOF) && !wrote {
+				return false
+			}
 			if !errors.Is(rerr, io.EOF) && !wrote {
 				return false
 			}

@@ -187,8 +187,11 @@ func (s *taskHTTPHandlers) streamReplayStore(w io.Writer, flusher http.Flusher, 
 	}
 	logPath := lt.LogPath()
 	if replay, ok := eventreplay.OpenReplay(logPath); ok {
-		defer replay.Close()
-		return replay.WriteSSE(w, flusher, idx)
+		if replay.WriteSSE(w, flusher, idx) {
+			replay.Close()
+			return true
+		}
+		replay.Close()
 	}
 	if err := eventreplay.RegenerateReplay(logPath, entry.Task().Harness, lt.StreamMessages()); err != nil {
 		slog.Warn("regenerate replay cache", "task", entry.Task().ID, "err", err)

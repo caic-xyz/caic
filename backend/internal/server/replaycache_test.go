@@ -155,6 +155,24 @@ func TestReplayCache(t *testing.T) {
 		}
 	})
 
+	t.Run("EmptyCacheRegeneratesFromRaw", func(t *testing.T) {
+		t.Parallel()
+		logDir := t.TempDir()
+		logPath := writePurged(t, logDir, "empty cache raw truth")
+		cache := eventreplay.NewCacheWriter(logPath)
+		cache.Commit(logPath)
+		s, taskID := newServer(t, logDir)
+
+		body := serveEvents(t, s, taskID)
+		if !strings.Contains(body, "empty cache raw truth") {
+			t.Fatalf("body missing regenerated raw content:\n%s", body)
+		}
+		contents := readReplayCacheEvents(t, eventreplay.CachePath(logPath))
+		if !replayCacheHasText(contents.events, "empty cache raw truth") {
+			t.Fatalf("regenerated cache missing raw content: %#v", contents.events)
+		}
+	})
+
 	t.Run("StaleLogInvalidatesCache", func(t *testing.T) {
 		t.Parallel()
 		logDir := t.TempDir()
