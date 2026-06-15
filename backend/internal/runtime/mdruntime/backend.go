@@ -267,7 +267,7 @@ func (b *Backend) Fetch(ctx context.Context, id runtime.InstanceID) error {
 	}
 	repos := ct.Repos()
 	if len(repos) > 0 {
-		slog.Info("md fetch", "ctr", name, "dir", repos[0].GitRoot, "br", repos[0].Branch)
+		slog.DebugContext(ctx, "md fetch", "ctr", name, "dir", repos[0].GitRoot, "br", repos[0].Branch)
 	}
 	for i := range repos {
 		if err := ct.Fetch(ctx, &SlogWriter{Phase: "fetch"}, &SlogWriter{Phase: "fetch"}, i, b.Provider); err != nil {
