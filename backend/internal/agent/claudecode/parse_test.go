@@ -205,7 +205,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("AssistantAskUserQuestion", func(t *testing.T) {
 		t.Parallel()
-		line := `{"type":"assistant","message":{"model":"m","content":[{"type":"tool_use","id":"ask_1","name":"AskUserQuestion","input":{"questions":[{"question":"Which?","header":"Pick","options":[{"label":"A"},{"label":"B"}]}]}}],"usage":{}}}`
+		line := `{"type":"assistant","message":{"model":"m","content":[{"type":"tool_use","id":"ask_1","name":"AskUserQuestion","input":{"questions":[{"question":"Which?","header":"Pick","options":[{"label":"A","description":"First"},{"label":"B"}],"multiSelect":true}]}}],"usage":{}}}`
 		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
@@ -225,6 +225,12 @@ func TestParseMessage(t *testing.T) {
 		}
 		if ask.Questions[0].Question != "Which?" {
 			t.Errorf("question = %q, want %q", ask.Questions[0].Question, "Which?")
+		}
+		if !ask.Questions[0].MultiSelect {
+			t.Error("MultiSelect = false, want true")
+		}
+		if ask.Questions[0].Options[0].Description != "First" {
+			t.Errorf("description = %q, want %q", ask.Questions[0].Options[0].Description, "First")
 		}
 	})
 	t.Run("AssistantTodoWrite", func(t *testing.T) {
@@ -246,6 +252,9 @@ func TestParseMessage(t *testing.T) {
 		}
 		if todo.Todos[0].Content != "Fix bug" {
 			t.Errorf("content = %q, want %q", todo.Todos[0].Content, "Fix bug")
+		}
+		if todo.Todos[0].ActiveForm != "Fixing bug" {
+			t.Errorf("active form = %q, want %q", todo.Todos[0].ActiveForm, "Fixing bug")
 		}
 	})
 	t.Run("AssistantMultiBlock", func(t *testing.T) {
@@ -583,15 +592,8 @@ func TestParseMessage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(msgs) != 1 {
-			t.Fatalf("got %d messages, want 1", len(msgs))
-		}
-		m, ok := msgs[0].(*agent.UsageMessage)
-		if !ok {
-			t.Fatalf("got %T, want *agent.UsageMessage", msgs[0])
-		}
-		if m.Usage.ReasoningOutputTokens != 88 {
-			t.Errorf("ReasoningOutputTokens = %d, want 88", m.Usage.ReasoningOutputTokens)
+		if len(msgs) != 0 {
+			t.Fatalf("got %d messages, want 0", len(msgs))
 		}
 	})
 	t.Run("AssistantThinking", func(t *testing.T) {
@@ -690,6 +692,63 @@ func TestParseMessage(t *testing.T) {
 		}
 		if m.Usage.ReasoningOutputTokens != 49 {
 			t.Errorf("ReasoningOutputTokens = %d, want 49", m.Usage.ReasoningOutputTokens)
+		}
+	})
+	t.Run("ResultUsesPendingReasoningTokens", func(t *testing.T) {
+		t.Parallel()
+		b := New()
+		lines := []string{
+			`{"type":"system","subtype":"thinking_tokens","estimated_tokens":138,"estimated_tokens_delta":88,"uuid":"u1","session_id":"s1"}`,
+			`{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"input_tokens":2,"output_tokens":192,"cache_read_input_tokens":409477,"output_tokens_details":{"thinking_tokens":49}}},"uuid":"u1","session_id":"s1","parent_tool_use_id":null}`,
+			`{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":3,"output_tokens":200,"cache_read_input_tokens":500000,"output_tokens_details":{"thinking_tokens":51}}},"uuid":"u2","session_id":"s1","parent_tool_use_id":null}`,
+		}
+		for _, line := range lines {
+			if _, err := b.ParseMessage([]byte(line)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		resultLine := `{"type":"result","subtype":"success","is_error":false,"duration_ms":1234,"num_turns":3,"result":"done","total_cost_usd":0.05,"usage":{"input_tokens":100,"output_tokens":50}}`
+		msgs, err := b.ParseMessage([]byte(resultLine))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		m, ok := msgs[0].(*agent.ResultMessage)
+		if !ok {
+			t.Fatalf("got %T, want *agent.ResultMessage", msgs[0])
+		}
+		if m.Usage.ReasoningOutputTokens != 100 {
+			t.Errorf("ReasoningOutputTokens = %d, want 100", m.Usage.ReasoningOutputTokens)
+		}
+	})
+	t.Run("ResultUsesEstimatedReasoningTokensWhenActualMissing", func(t *testing.T) {
+		t.Parallel()
+		b := New()
+		lines := []string{
+			`{"type":"system","subtype":"thinking_tokens","estimated_tokens":50,"estimated_tokens_delta":50,"uuid":"u1","session_id":"s1"}`,
+			`{"type":"system","subtype":"thinking_tokens","estimated_tokens":150,"estimated_tokens_delta":100,"uuid":"u2","session_id":"s1"}`,
+		}
+		for _, line := range lines {
+			if _, err := b.ParseMessage([]byte(line)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		resultLine := `{"type":"result","subtype":"success","is_error":false,"duration_ms":1234,"num_turns":1,"result":"done","total_cost_usd":0.05,"usage":{"input_tokens":10,"output_tokens":20}}`
+		msgs, err := b.ParseMessage([]byte(resultLine))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		m, ok := msgs[0].(*agent.ResultMessage)
+		if !ok {
+			t.Fatalf("got %T, want *agent.ResultMessage", msgs[0])
+		}
+		if m.Usage.ReasoningOutputTokens != 150 {
+			t.Errorf("ReasoningOutputTokens = %d, want 150", m.Usage.ReasoningOutputTokens)
 		}
 	})
 	t.Run("StreamEventNoiseDropped", func(t *testing.T) {

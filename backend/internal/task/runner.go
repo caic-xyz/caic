@@ -104,6 +104,7 @@ func writeLogTrailer(w io.Writer, title string, res *Result) error {
 		OutputTokens:             res.Usage.OutputTokens,
 		CacheCreationInputTokens: res.Usage.CacheCreationInputTokens,
 		CacheReadInputTokens:     res.Usage.CacheReadInputTokens,
+		ReasoningOutputTokens:    res.Usage.ReasoningOutputTokens,
 		DiffStat:                 res.DiffStat,
 		AgentResult:              res.AgentResult,
 	}

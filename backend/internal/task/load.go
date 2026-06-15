@@ -66,6 +66,31 @@ type logTailScan struct {
 	lastResultUsage    agent.Usage
 }
 
+func applyMetaResult(lt *LoadedTask, mr *agent.MetaResultMessage) {
+	lt.State = parseState(mr.State)
+	if mr.Title != "" {
+		lt.Title = mr.Title
+	}
+	lt.Result = &Result{
+		State:    lt.State,
+		CostUSD:  mr.CostUSD,
+		Duration: time.Duration(mr.Duration * float64(time.Second)),
+		NumTurns: mr.NumTurns,
+		Usage: agent.Usage{
+			InputTokens:              mr.InputTokens,
+			OutputTokens:             mr.OutputTokens,
+			CacheCreationInputTokens: mr.CacheCreationInputTokens,
+			CacheReadInputTokens:     mr.CacheReadInputTokens,
+			ReasoningOutputTokens:    mr.ReasoningOutputTokens,
+		},
+		DiffStat:    mr.DiffStat,
+		AgentResult: mr.AgentResult,
+	}
+	if mr.Error != "" {
+		lt.Result.Err = errors.New(mr.Error)
+	}
+}
+
 // TODO: Trim legacyCaicInit after 2026-08 once legacy caic_init logs are old enough to ignore.
 // legacyCaicInit is the OpenCode pre-caic_session session metadata record.
 type legacyCaicInit struct {
@@ -540,27 +565,7 @@ func (s *logTailScan) apply(lt *LoadedTask, line []byte) {
 			if s.fw != nil && json.Unmarshal(line, &raw) == nil {
 				s.fw.Warn("caic_result", jsonutil.CollectUnknown(raw, resultKnown))
 			}
-			lt.State = parseState(mr.State)
-			if mr.Title != "" {
-				lt.Title = mr.Title
-			}
-			lt.Result = &Result{
-				State:    lt.State,
-				CostUSD:  mr.CostUSD,
-				Duration: time.Duration(mr.Duration * float64(time.Second)),
-				NumTurns: mr.NumTurns,
-				Usage: agent.Usage{
-					InputTokens:              mr.InputTokens,
-					OutputTokens:             mr.OutputTokens,
-					CacheCreationInputTokens: mr.CacheCreationInputTokens,
-					CacheReadInputTokens:     mr.CacheReadInputTokens,
-				},
-				DiffStat:    mr.DiffStat,
-				AgentResult: mr.AgentResult,
-			}
-			if mr.Error != "" {
-				lt.Result.Err = errors.New(mr.Error)
-			}
+			applyMetaResult(lt, &mr)
 		}
 	case "system":
 		var sm tailInit
@@ -896,27 +901,7 @@ func loadLogFile(path string, parseFn func([]byte) ([]agent.Message, error)) (_ 
 			if err := json.Unmarshal(line, &mr); err != nil {
 				return nil, fmt.Errorf("invalid caic_result: %w", err)
 			}
-			lt.State = parseState(mr.State)
-			if mr.Title != "" {
-				lt.Title = mr.Title
-			}
-			lt.Result = &Result{
-				State:    lt.State,
-				CostUSD:  mr.CostUSD,
-				Duration: time.Duration(mr.Duration * float64(time.Second)),
-				NumTurns: mr.NumTurns,
-				Usage: agent.Usage{
-					InputTokens:              mr.InputTokens,
-					OutputTokens:             mr.OutputTokens,
-					CacheCreationInputTokens: mr.CacheCreationInputTokens,
-					CacheReadInputTokens:     mr.CacheReadInputTokens,
-				},
-				DiffStat:    mr.DiffStat,
-				AgentResult: mr.AgentResult,
-			}
-			if mr.Error != "" {
-				lt.Result.Err = errors.New(mr.Error)
-			}
+			applyMetaResult(lt, &mr)
 
 		default:
 			parsed, err := parseFn(line)
@@ -1030,27 +1015,7 @@ func loadLogFileTail(path string, parseFn func([]byte) ([]agent.Message, error),
 			if err := json.Unmarshal(line, &mr); err != nil {
 				return nil, fmt.Errorf("invalid caic_result: %w", err)
 			}
-			lt.State = parseState(mr.State)
-			if mr.Title != "" {
-				lt.Title = mr.Title
-			}
-			lt.Result = &Result{
-				State:    lt.State,
-				CostUSD:  mr.CostUSD,
-				Duration: time.Duration(mr.Duration * float64(time.Second)),
-				NumTurns: mr.NumTurns,
-				Usage: agent.Usage{
-					InputTokens:              mr.InputTokens,
-					OutputTokens:             mr.OutputTokens,
-					CacheCreationInputTokens: mr.CacheCreationInputTokens,
-					CacheReadInputTokens:     mr.CacheReadInputTokens,
-				},
-				DiffStat:    mr.DiffStat,
-				AgentResult: mr.AgentResult,
-			}
-			if mr.Error != "" {
-				lt.Result.Err = errors.New(mr.Error)
-			}
+			applyMetaResult(lt, &mr)
 		default:
 			parsed, err := parseFn(line)
 			if err != nil {
@@ -1173,27 +1138,7 @@ func applyLoadedLogLine(lt *LoadedTask, line []byte, parseFn func([]byte) ([]age
 		if err := json.Unmarshal(line, &mr); err != nil {
 			return fmt.Errorf("invalid caic_result: %w", err)
 		}
-		lt.State = parseState(mr.State)
-		if mr.Title != "" {
-			lt.Title = mr.Title
-		}
-		lt.Result = &Result{
-			State:    lt.State,
-			CostUSD:  mr.CostUSD,
-			Duration: time.Duration(mr.Duration * float64(time.Second)),
-			NumTurns: mr.NumTurns,
-			Usage: agent.Usage{
-				InputTokens:              mr.InputTokens,
-				OutputTokens:             mr.OutputTokens,
-				CacheCreationInputTokens: mr.CacheCreationInputTokens,
-				CacheReadInputTokens:     mr.CacheReadInputTokens,
-			},
-			DiffStat:    mr.DiffStat,
-			AgentResult: mr.AgentResult,
-		}
-		if mr.Error != "" {
-			lt.Result.Err = errors.New(mr.Error)
-		}
+		applyMetaResult(lt, &mr)
 
 	default:
 		parsed, err := parseFn(line)

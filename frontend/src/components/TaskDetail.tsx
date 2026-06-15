@@ -2,7 +2,7 @@
 import { createSignal, createMemo, createEffect, For, Index, Show, onCleanup, onMount, untrack, Switch, Match, type Accessor } from "solid-js";
 import { A, useNavigate, useLocation } from "@solidjs/router";
 import { sendInput as apiSendInput, restartTask as apiRestartTask, clearContext as apiClearContext, compactContext as apiCompactContext, syncTask as apiSyncTask, taskEventStream, getTaskToolInput, botFixPR } from "../api";
-import type { EventMessage, EventResult, AskQuestion, EventAsk, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, ForgeCheck, EventStats } from "@sdk/types.gen";
+import type { EventMessage, EventResult, AskQuestion, EventAsk, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, ForgeCheck, EventStats, EventUsage } from "@sdk/types.gen";
 import { groupMessagesInc, resetGroupIncCache, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "../grouping";
 import { formatDuration, formatElapsed, formatTokens, toolCallDetail } from "../formatting";
 import type { ToolCall } from "../grouping";
@@ -988,6 +988,22 @@ function RateLimitBanner(props: { ev: EventMessage }) {
   );
 }
 
+function usageMetaParts(u: EventUsage): string[] {
+  const inputTokens = u.inputTokens + u.cacheCreationInputTokens + u.cacheReadInputTokens;
+  const tokenParts: string[] = [];
+  if (inputTokens > 0 || u.outputTokens > 0) {
+    tokenParts.push(`${formatTokens(inputTokens)} in + ${formatTokens(u.outputTokens)} out`);
+  }
+  if ((u.reasoningOutputTokens ?? 0) > 0) {
+    tokenParts.push(`${formatTokens(u.reasoningOutputTokens ?? 0)} thinking`);
+  }
+  if (u.cacheReadInputTokens > 0) {
+    tokenParts.push(`${formatTokens(u.cacheReadInputTokens)} cached`);
+  }
+  if (tokenParts.length === 0) return [];
+  return u.model ? [u.model, ...tokenParts] : tokenParts;
+}
+
 function MessageItem(props: { ev: EventMessage }) {
   return (
     <Switch>
@@ -1023,14 +1039,16 @@ function MessageItem(props: { ev: EventMessage }) {
         )}
       </Match>
       <Match when={props.ev.usage} keyed>
-        {(usage) => (
-          <div class={styles.usageMeta}>
-            {usage.model} &middot; {formatTokens(usage.inputTokens + usage.cacheCreationInputTokens + usage.cacheReadInputTokens)} in + {formatTokens(usage.outputTokens)} out
-            <Show when={usage.cacheReadInputTokens > 0}>
-              {" "}&middot; {formatTokens(usage.cacheReadInputTokens)} cached
+        {(usage) => {
+          const parts = usageMetaParts(usage);
+          return (
+            <Show when={parts.length > 0}>
+              <div class={styles.usageMeta}>
+                {parts.join(" · ")}
+              </div>
             </Show>
-          </div>
-        )}
+          );
+        }}
       </Match>
       <Match when={props.ev.result} keyed>
         {(result) => <ResultCard result={result} />}

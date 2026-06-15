@@ -482,6 +482,7 @@ type MetaResultMessage struct {
 	OutputTokens             int      `json:"output_tokens,omitempty"`
 	CacheCreationInputTokens int      `json:"cache_creation_input_tokens,omitempty"`
 	CacheReadInputTokens     int      `json:"cache_read_input_tokens,omitempty"`
+	ReasoningOutputTokens    int      `json:"reasoning_output_tokens,omitempty"`
 	DiffStat                 DiffStat `json:"diff_stat,omitzero"`
 	Error                    string   `json:"error,omitempty"`
 	AgentResult              string   `json:"agent_result,omitempty"`

@@ -261,6 +261,56 @@ describe("SSE connection", () => {
     expect(document.body.textContent).toContain("planning tool 2");
   });
 
+  it("does not render empty usage metadata", () => {
+    const created: FakeES[] = [];
+    const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
+    makeSyncReadyMock(created, capturedCb);
+
+    renderTaskDetail();
+    if (!capturedCb.value) throw new Error("taskEvents callback not captured");
+
+    const cb = capturedCb.value;
+    cb({
+      kind: "usage",
+      ts: 1,
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+        model: "",
+      },
+    });
+    cb({
+      kind: "usage",
+      ts: 2,
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+        reasoningOutputTokens: 50,
+        model: "",
+      },
+    });
+    cb({
+      kind: "usage",
+      ts: 3,
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+        model: "claude",
+      },
+    });
+    vi.advanceTimersByTime(100);
+
+    expect(document.body.textContent).not.toContain("0t in + 0t out");
+    expect(document.body.textContent).toContain("50t thinking");
+    expect(document.body.textContent).not.toContain("claude");
+  });
+
   it("replayed textDelta events render once the SSE ready marker arrives", () => {
     // Replayed history can be huge; keep it off the DOM until the server sends
     // ready so grouping and reconciliation run once for the replay.

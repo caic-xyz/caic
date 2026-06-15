@@ -35,16 +35,6 @@ func toAgentUsage(u *claudecode.MsgUsage) agent.Usage {
 	return usage
 }
 
-// AskInput is the parsed input for the AskUserQuestion tool.
-type AskInput struct {
-	Questions []agent.AskQuestion `json:"questions"`
-}
-
-// TodoInput is the parsed input for the TodoWrite tool.
-type TodoInput struct {
-	Todos []agent.TodoItem `json:"todos"`
-}
-
 // outputKnownFields caches the known field sets for output wire types,
 // built on first use. Uses sync.Map: few writes (once per type), many reads.
 var outputKnownFields sync.Map
@@ -270,18 +260,7 @@ func parseSystem(line []byte, subtype string, fw *jsonutil.FieldWarner) ([]agent
 		}}, nil
 	}
 	if subtype == "thinking_tokens" {
-		var w thinkingTokensMsg
-		if err := json.Unmarshal(line, &w); err != nil {
-			return nil, err
-		}
-		if w.EstimatedTokensDelta <= 0 {
-			return nil, nil
-		}
-		return []agent.Message{&agent.UsageMessage{
-			Usage: agent.Usage{
-				ReasoningOutputTokens: int(w.EstimatedTokensDelta),
-			},
-		}}, nil
+		return nil, nil
 	}
 	var w claudecode.OutputSystemMsg
 	if err := unmarshalOutput(line, &w, "OutputSystemMsg", fw); err != nil {
@@ -372,20 +351,20 @@ func parseToolUseBlock(b *claudecode.OutputContentBlock) ([]agent.Message, error
 		// context. Suppress it — internal machinery that adds noise.
 		return nil, nil
 	case b.Name == "AskUserQuestion":
-		var input AskInput
+		var input claudecode.AskUserQuestionInput
 		if json.Unmarshal(inputRaw, &input) == nil && len(input.Questions) > 0 {
 			return []agent.Message{&agent.AskMessage{
 				ToolUseID: b.ID,
-				Questions: input.Questions,
+				Questions: askQuestionsFromClaude(input.Questions),
 			}}, nil
 		}
 		// Fall through to generic ToolUseMessage if parse fails.
 	case b.Name == "TodoWrite":
-		var input TodoInput
+		var input claudecode.TodoWriteInput
 		if json.Unmarshal(inputRaw, &input) == nil && len(input.Todos) > 0 {
 			return []agent.Message{&agent.TodoMessage{
 				ToolUseID: b.ID,
-				Todos:     input.Todos,
+				Todos:     todoItemsFromClaude(input.Todos),
 			}}, nil
 		}
 	case func() bool { _, ok := agent.WidgetToolNames[b.Name]; return ok }():
@@ -396,6 +375,37 @@ func parseToolUseBlock(b *claudecode.OutputContentBlock) ([]agent.Message, error
 		Name:      b.Name,
 		Input:     inputRaw,
 	}}, nil
+}
+
+func askQuestionsFromClaude(in []claudecode.AskUserQuestion) []agent.AskQuestion {
+	out := make([]agent.AskQuestion, len(in))
+	for i := range in {
+		out[i] = agent.AskQuestion{
+			Question:    in[i].Question,
+			Header:      in[i].Header,
+			MultiSelect: in[i].MultiSelect,
+			Options:     make([]agent.AskOption, len(in[i].Options)),
+		}
+		for j := range in[i].Options {
+			out[i].Options[j] = agent.AskOption{
+				Label:       in[i].Options[j].Label,
+				Description: in[i].Options[j].Description,
+			}
+		}
+	}
+	return out
+}
+
+func todoItemsFromClaude(in []claudecode.TodoWriteItem) []agent.TodoItem {
+	out := make([]agent.TodoItem, len(in))
+	for i := range in {
+		out[i] = agent.TodoItem{
+			Content:    in[i].Content,
+			Status:     in[i].Status,
+			ActiveForm: in[i].ActiveForm,
+		}
+	}
+	return out
 }
 
 func rawObject(m map[string]json.RawMessage) (json.RawMessage, error) {
@@ -564,11 +574,6 @@ func parseStreamEvent(line []byte, wt *WidgetTracker, fw *jsonutil.FieldWarner) 
 	}
 }
 
-type thinkingTokensMsg struct {
-	EstimatedTokens      int64 `json:"estimated_tokens"`
-	EstimatedTokensDelta int64 `json:"estimated_tokens_delta"`
-}
-
 func assistantThinkingTokens(line []byte) int {
 	var p struct {
 		Message struct {
@@ -589,6 +594,17 @@ func resultThinkingTokens(line []byte) int {
 		return 0
 	}
 	return usageThinkingTokens(p.Usage)
+}
+
+func systemThinkingTokenEstimate(line []byte) (int, bool) {
+	var w claudecode.OutputSystemMsg
+	if json.Unmarshal(line, &w) != nil ||
+		w.Type != claudecode.OutputSystem ||
+		w.Subtype != claudecode.SystemThinkingTokens ||
+		w.EstimatedTokensDelta <= 0 {
+		return 0, false
+	}
+	return int(w.EstimatedTokensDelta), true
 }
 
 func usageThinkingTokens(raw json.RawMessage) int {

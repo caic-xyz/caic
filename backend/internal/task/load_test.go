@@ -135,6 +135,27 @@ func TestLoadLogs(t *testing.T) {
 			t.Errorf("State = %v, want %v", tasks[0].State, StatePurged)
 		}
 	})
+	t.Run("ResultReasoningTokens", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "task1", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude"})
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged", ReasoningOutputTokens: 123})
+		writeLogFile(t, dir, "a.jsonl", meta, trailer)
+
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(tasks) != 1 {
+			t.Fatalf("len = %d, want 1", len(tasks))
+		}
+		if tasks[0].Result == nil {
+			t.Fatal("Result is nil")
+		}
+		if tasks[0].Result.Usage.ReasoningOutputTokens != 123 {
+			t.Errorf("ReasoningOutputTokens = %d, want 123", tasks[0].Result.Usage.ReasoningOutputTokens)
+		}
+	})
 	t.Run("ValidCompressed", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()

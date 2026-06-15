@@ -23,13 +23,40 @@ import (
 type Backend struct {
 	agent.Base
 
-	widgetTracker *WidgetTracker
-	fieldWarner   *jsonutil.FieldWarner
+	widgetTracker                *WidgetTracker
+	fieldWarner                  *jsonutil.FieldWarner
+	pendingReasoningOutputTokens int
+	pendingReasoningEstimate     int
 }
 
 // ParseMessage wraps ParseMessage with widget tracking for streaming deltas.
 func (b *Backend) ParseMessage(line []byte) ([]agent.Message, error) {
-	return parseMessageWithTracker(line, b.widgetTracker, b.fieldWarner)
+	if estimate, ok := systemThinkingTokenEstimate(line); ok {
+		b.pendingReasoningEstimate += estimate
+	}
+	msgs, err := parseMessageWithTracker(line, b.widgetTracker, b.fieldWarner)
+	if err != nil {
+		return nil, err
+	}
+	for _, msg := range msgs {
+		switch m := msg.(type) {
+		case *agent.UsageMessage:
+			b.pendingReasoningOutputTokens += m.Usage.ReasoningOutputTokens
+		case *agent.ResultMessage:
+			// Claude result records can omit output_tokens_details even when
+			// preceding events reported thinking tokens. Prefer actual
+			// message_delta usage over system/thinking_tokens estimates.
+			if m.Usage.ReasoningOutputTokens == 0 {
+				m.Usage.ReasoningOutputTokens = b.pendingReasoningOutputTokens
+				if m.Usage.ReasoningOutputTokens == 0 {
+					m.Usage.ReasoningOutputTokens = b.pendingReasoningEstimate
+				}
+			}
+			b.pendingReasoningOutputTokens = 0
+			b.pendingReasoningEstimate = 0
+		}
+	}
+	return msgs, nil
 }
 
 var _ agent.Backend = (*Backend)(nil)

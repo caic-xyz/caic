@@ -104,6 +104,26 @@ func (w *testWire) ParseMessage(line []byte) ([]agent.Message, error) {
 
 func TestRunner(t *testing.T) {
 	t.Parallel()
+	t.Run("WriteLogTrailerReasoningTokens", func(t *testing.T) {
+		t.Parallel()
+		var b strings.Builder
+		res := &Result{
+			State: StateWaiting,
+			Usage: agent.Usage{
+				ReasoningOutputTokens: 123,
+			},
+		}
+		if err := writeLogTrailer(&b, "title", res); err != nil {
+			t.Fatal(err)
+		}
+		var got agent.MetaResultMessage
+		if err := json.Unmarshal([]byte(b.String()), &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.ReasoningOutputTokens != 123 {
+			t.Errorf("ReasoningOutputTokens = %d, want 123", got.ReasoningOutputTokens)
+		}
+	})
 	t.Run("MakeMetadata", func(t *testing.T) {
 		t.Parallel()
 		t.Run("Basic", func(t *testing.T) {
