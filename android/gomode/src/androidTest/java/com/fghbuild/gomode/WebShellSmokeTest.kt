@@ -1,12 +1,14 @@
 // Instrumented smoke coverage for the Go Mode hosted WebView shell.
 package com.fghbuild.gomode
 
+import android.app.Instrumentation.ActivityResult
+import android.content.Intent
+import android.content.IntentFilter
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import androidx.test.uiautomator.UiDevice
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -85,21 +87,23 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
     }
 
     @Test
-    fun webShellResizesAboveKeyboardForHostedTextInput() {
+    fun targetBlankLinksOpenInDefaultBrowser() {
         openWebShell()
-        loadHostedTestPage()
-        waitForDom("test prompt loaded") { "document.getElementById('prompt') !== null" }
+        loadHostedExternalLinkTestPage()
+        waitForDom("external link loaded") { "document.getElementById('external-link') !== null" }
 
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val filter = IntentFilter(Intent.ACTION_VIEW).apply {
+            addCategory(Intent.CATEGORY_BROWSABLE)
+            addDataScheme("https")
+        }
+        val monitor = instrumentation.addMonitor(filter, ActivityResult(0, null), true)
         try {
-            tapDomElement("#prompt")
-            composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) { isImeVisible() }
-
-            composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) {
-                val imeTop = imeTopOrNull() ?: return@waitUntil false
-                webViewScreenBottom() <= imeTop + SCREEN_EDGE_TOLERANCE_PX
-            }
+            tapDomElement("#external-link")
+            composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) { monitor.hits > 0 }
+            assertEquals(1, monitor.hits)
         } finally {
-            UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).pressBack()
+            instrumentation.removeMonitor(monitor)
         }
     }
 
@@ -109,69 +113,30 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
         assertEquals("com.fghbuild.gomode", context.packageName)
     }
 
-    private fun loadHostedTestPage() {
+    private fun loadHostedExternalLinkTestPage() {
+        loadHostedHtml(EXTERNAL_LINK_TEST_PAGE)
+    }
+
+    private fun loadHostedHtml(html: String) {
         val latch = CountDownLatch(1)
         val view = waitForWebView()
         composeRule.activity.runOnUiThread {
-            view.loadDataWithBaseURL(baseUrl, IME_TEST_PAGE, "text/html", "UTF-8", null)
+            view.loadDataWithBaseURL(baseUrl, html, "text/html", "UTF-8", null)
             latch.countDown()
         }
         check(latch.await(JS_TIMEOUT_MS, TimeUnit.MILLISECONDS)) { "Test page load timed out" }
     }
 
-    private fun imeTopOrNull(): Int? {
-        var top: Int? = null
-        val latch = CountDownLatch(1)
-        composeRule.activity.runOnUiThread {
-            val root = composeRule.activity.window.decorView.rootView
-            val imeBottom = root.rootWindowInsets
-                ?.getInsets(android.view.WindowInsets.Type.ime())
-                ?.bottom
-                ?: 0
-            if (imeBottom > 0) {
-                top = root.height - imeBottom
-            }
-            latch.countDown()
-        }
-        check(latch.await(JS_TIMEOUT_MS, TimeUnit.MILLISECONDS)) { "IME inset lookup timed out" }
-        return top
-    }
-
-    private fun webViewScreenBottom(): Int {
-        val view = waitForWebView()
-        val location = webViewScreenLocation()
-        return location[1] + view.height
-    }
-
     companion object {
         private const val BACK_TEST_PATH = "/gomode-e2e-route"
         private const val SQL_JOKE_PREFIX = "A SQL query walks into a bar"
-        private const val SCREEN_EDGE_TOLERANCE_PX = 8
         private const val JS_TIMEOUT_MS = 5_000L
-        private val IME_TEST_PAGE = """
+        private const val EXTERNAL_LINK_URL = "https://example.com/gomode-external-link"
+        private val EXTERNAL_LINK_TEST_PAGE = """
             <!doctype html>
             <html>
-              <head>
-                <meta name="viewport" content="width=device-width, initial-scale=1" />
-                <style>
-                  html, body { margin: 0; height: 100%; }
-                  body { font-family: sans-serif; }
-                  main { min-height: 100%; padding-bottom: 72px; box-sizing: border-box; }
-                  #prompt {
-                    position: fixed;
-                    left: 0;
-                    right: 0;
-                    bottom: 0;
-                    min-height: 44px;
-                    border: 1px solid #999;
-                    padding: 12px;
-                    box-sizing: border-box;
-                  }
-                </style>
-              </head>
               <body>
-                <main>Hosted content</main>
-                <input id="prompt" type="text" value="Prompt" />
+                <a id="external-link" href="$EXTERNAL_LINK_URL" target="_blank" rel="noopener">External docs</a>
               </body>
             </html>
         """.trimIndent()

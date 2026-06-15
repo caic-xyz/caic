@@ -3,7 +3,12 @@ package com.fghbuild.gomode.ui.web
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
 import android.net.Uri
+import android.os.Message
 import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
@@ -26,7 +31,6 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -72,6 +76,7 @@ fun WebShellScreen(
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
+            settings.setSupportMultipleWindows(true)
             enableWebAuthentication()
             addJavascriptInterface(GoModeHostBridge(), "goModeHost")
             webViewClient = object : WebViewClient() {
@@ -124,6 +129,15 @@ fun WebShellScreen(
                     val mimeTypes = fileChooserParams.acceptTypes.filter { it.isNotBlank() }
                     fileChooserLauncher.launch(mimeTypes.firstOrNull() ?: "*/*")
                     return true
+                }
+
+                override fun onCreateWindow(
+                    view: WebView,
+                    isDialog: Boolean,
+                    isUserGesture: Boolean,
+                    resultMsg: Message,
+                ): Boolean = openNewWindowInExternalBrowser(view, resultMsg) { uri ->
+                    openExternalBrowser(context, uri)
                 }
             }
         }
@@ -209,8 +223,48 @@ private fun WebView.enableWebAuthentication() {
     }
 }
 
-private fun hasPermission(context: android.content.Context, permission: String): Boolean =
+private fun hasPermission(context: Context, permission: String): Boolean =
     ContextCompat.checkSelfPermission(context, permission) == PermissionChecker.PERMISSION_GRANTED
+
+internal fun openNewWindowInExternalBrowser(
+    parentView: WebView,
+    resultMsg: Message,
+    openExternalUri: (Uri) -> Boolean,
+): Boolean {
+    val transport = resultMsg.obj as? WebView.WebViewTransport
+    if (transport == null) {
+        Log.w(TAG, "New window request missing WebView transport.")
+        return false
+    }
+
+    val popupView = WebView(parentView.context).apply {
+        webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                view.destroy()
+                return openExternalUri(request.url)
+            }
+        }
+    }
+
+    transport.webView = popupView
+    resultMsg.sendToTarget()
+    return true
+}
+
+internal fun openExternalBrowser(context: Context, uri: Uri): Boolean {
+    val intent = Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE)
+    if (context !is Activity) {
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+
+    return try {
+        context.startActivity(intent)
+        true
+    } catch (error: ActivityNotFoundException) {
+        Log.w(TAG, "No browser can open URL: $uri", error)
+        false
+    }
+}
 
 private fun goModeHostURL(url: String): String =
     url.toUri()

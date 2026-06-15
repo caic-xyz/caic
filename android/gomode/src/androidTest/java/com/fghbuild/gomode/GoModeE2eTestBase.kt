@@ -25,6 +25,7 @@ abstract class GoModeE2eTestBase {
     val clearSettingsRule = TestRule { base, _ ->
         object : Statement() {
             override fun evaluate() {
+                enableSoftKeyboardWithHardwareKeyboard()
                 val context = InstrumentationRegistry.getInstrumentation().targetContext
                 context.filesDir.resolve("datastore/gomode_settings.preferences_pb").delete()
                 base.evaluate()
@@ -253,6 +254,13 @@ abstract class GoModeE2eTestBase {
         }
         check(latch.await(JS_TIMEOUT_MS, TimeUnit.MILLISECONDS)) { "JavaScript evaluation timed out" }
         return result ?: "null"
+    }
+
+    private fun enableSoftKeyboardWithHardwareKeyboard() {
+        InstrumentationRegistry.getInstrumentation()
+            .uiAutomation
+            .executeShellCommand("settings put secure show_ime_with_hard_keyboard 1")
+            .close()
     }
 
     private fun hasNodeWithTag(tag: String): Boolean =
