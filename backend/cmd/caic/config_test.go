@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -434,10 +435,10 @@ func TestTomlToServerConfig(t *testing.T) {
 		if cfg.GitHub.OAuthClientSecret != githubClientSecret {
 			t.Errorf("GitHubOAuthClientSecret = %q", cfg.GitHub.OAuthClientSecret)
 		}
-		if cfg.GitHub.OAuthAllowedUsers != "alice,bob" {
+		if !slices.Equal(cfg.GitHub.OAuthAllowedUsers, []string{"alice", "bob"}) {
 			t.Errorf("GitHubOAuthAllowedUsers = %q", cfg.GitHub.OAuthAllowedUsers)
 		}
-		if cfg.GitHub.AppAllowedOwners != "org1,org2" {
+		if !slices.Equal(cfg.GitHub.AppAllowedOwners, []string{"org1", "org2"}) {
 			t.Errorf("GitHubAppAllowedOwners = %q", cfg.GitHub.AppAllowedOwners)
 		}
 		if string(cfg.GitHub.AppPrivateKeyPEM) != "PEM-DATA" {
@@ -455,7 +456,7 @@ func TestTomlToServerConfig(t *testing.T) {
 		if cfg.GitLab.OAuthClientSecret != gitlabClientSecret {
 			t.Errorf("GitLabOAuthClientSecret = %q", cfg.GitLab.OAuthClientSecret)
 		}
-		if cfg.GitLab.OAuthAllowedUsers != "carol" {
+		if !slices.Equal(cfg.GitLab.OAuthAllowedUsers, []string{"carol"}) {
 			t.Errorf("GitLabOAuthAllowedUsers = %q", cfg.GitLab.OAuthAllowedUsers)
 		}
 		if cfg.GitLab.URL != "https://gitlab.example.com" {

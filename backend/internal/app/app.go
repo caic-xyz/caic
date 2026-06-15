@@ -3,6 +3,7 @@ package app
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -164,7 +165,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	var gitlabOAuth *auth.ProviderConfig
 	oauthConfigured := cfg.GitHub.OAuthClientID != "" || cfg.GitLab.OAuthClientID != ""
 	if cfg.Auth.ExternalURL != "" && (oauthConfigured || !isAuto) {
-		secret, err := hexDecode(settings.SessionSecret)
+		secret, err := hex.DecodeString(settings.SessionSecret)
 		if err != nil {
 			return nil, fmt.Errorf("decode session secret: %w", err)
 		}
@@ -217,16 +218,12 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	}
 
 	forgeManager := forgemanager.New(cfg.GitHub.Token, cfg.GitLab.Token, nil)
-	githubAppAllowedOwners := map[string]struct{}(nil)
 	if cfg.GitHub.AppID != 0 && len(cfg.GitHub.AppPrivateKeyPEM) > 0 {
 		app, err := github.NewAppClient(cfg.GitHub.AppID, cfg.GitHub.AppPrivateKeyPEM, forgeManager.GitHubAppThrottle())
 		if err != nil {
 			return nil, fmt.Errorf("github app: %w", err)
 		}
 		forgeManager.SetGitHubApp(app)
-		if cfg.GitHub.AppAllowedOwners != "" {
-			githubAppAllowedOwners = parseAllowedUsers(cfg.GitHub.AppAllowedOwners)
-		}
 	}
 
 	provider := initProvider(ctx, cfg, backend)
@@ -306,11 +303,11 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		TaskClient:                    botClient,
 		Warnings:                      warnings,
 		CacheSizes:                    cacheSizes,
-		GitHubAllowedUsers:            parseAllowedUsers(cfg.GitHub.OAuthAllowedUsers),
-		GitLabAllowedUsers:            parseAllowedUsers(cfg.GitLab.OAuthAllowedUsers),
+		GitHubAllowedUsers:            cfg.GitHub.OAuthAllowedUsers,
+		GitLabAllowedUsers:            cfg.GitLab.OAuthAllowedUsers,
 		GitHubWebhookSecret:           cfg.GitHub.WebhookSecret,
 		GitLabWebhookSecret:           cfg.GitLab.WebhookSecret,
-		GitHubAppAllowedOwners:        githubAppAllowedOwners,
+		GitHubAppAllowedOwners:        cfg.GitHub.AppAllowedOwners,
 		Pprof:                         cfg.Debug.Pprof,
 	})
 	if err != nil {

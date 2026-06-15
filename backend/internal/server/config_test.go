@@ -65,7 +65,7 @@ func TestConfigValidate(t *testing.T) {
 	t.Run("OAuth with ExternalURL and allowlist is valid", func(t *testing.T) {
 		t.Parallel()
 		c := &Config{
-			GitHub: GitHubConfig{OAuthClientID: "id", OAuthClientSecret: "sec", OAuthAllowedUsers: "alice,bob"},
+			GitHub: GitHubConfig{OAuthClientID: "id", OAuthClientSecret: "sec", OAuthAllowedUsers: []string{"alice", "bob"}},
 			Auth:   AuthConfig{ExternalURL: "https://caic.example.com"},
 		}
 		if err := c.Validate(); err != nil {
@@ -82,7 +82,7 @@ func TestConfigValidate(t *testing.T) {
 	t.Run("OAuth with ExternalURL auto is valid", func(t *testing.T) {
 		t.Parallel()
 		c := &Config{
-			GitHub: GitHubConfig{OAuthClientID: "id", OAuthClientSecret: "sec", OAuthAllowedUsers: "alice"},
+			GitHub: GitHubConfig{OAuthClientID: "id", OAuthClientSecret: "sec", OAuthAllowedUsers: []string{"alice"}},
 			Auth:   AuthConfig{ExternalURL: "auto"},
 		}
 		if err := c.Validate(); err != nil {
@@ -91,35 +91,35 @@ func TestConfigValidate(t *testing.T) {
 	})
 	t.Run("OAuth without ExternalURL is invalid", func(t *testing.T) {
 		t.Parallel()
-		c := &Config{GitHub: GitHubConfig{OAuthClientID: "id", OAuthClientSecret: "sec", OAuthAllowedUsers: "alice"}}
+		c := &Config{GitHub: GitHubConfig{OAuthClientID: "id", OAuthClientSecret: "sec", OAuthAllowedUsers: []string{"alice"}}}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
-	t.Run("GitHub OAuth without allowlist is invalid", func(t *testing.T) {
+	t.Run("GitHub OAuth without allowlist is valid (allows any user)", func(t *testing.T) {
 		t.Parallel()
 		c := &Config{
 			GitHub: GitHubConfig{OAuthClientID: "id", OAuthClientSecret: "sec"},
 			Auth:   AuthConfig{ExternalURL: "https://caic.example.com"},
 		}
-		if err := c.Validate(); err == nil {
-			t.Fatal("Validate() expected error, got nil")
+		if err := c.Validate(); err != nil {
+			t.Fatalf("Validate() unexpected error: %v", err)
 		}
 	})
-	t.Run("GitLab OAuth without allowlist is invalid", func(t *testing.T) {
+	t.Run("GitLab OAuth without allowlist is valid (allows any user)", func(t *testing.T) {
 		t.Parallel()
 		c := &Config{
 			GitLab: GitLabConfig{OAuthClientID: "id", OAuthClientSecret: "sec"},
 			Auth:   AuthConfig{ExternalURL: "https://caic.example.com"},
 		}
-		if err := c.Validate(); err == nil {
-			t.Fatal("Validate() expected error, got nil")
+		if err := c.Validate(); err != nil {
+			t.Fatalf("Validate() unexpected error: %v", err)
 		}
 	})
 	t.Run("OAuth with http ExternalURL is invalid", func(t *testing.T) {
 		t.Parallel()
 		c := &Config{
-			GitHub: GitHubConfig{OAuthClientID: "id", OAuthClientSecret: "sec", OAuthAllowedUsers: "alice"},
+			GitHub: GitHubConfig{OAuthClientID: "id", OAuthClientSecret: "sec", OAuthAllowedUsers: []string{"alice"}},
 			Auth:   AuthConfig{ExternalURL: "http://caic.example.com"},
 		}
 		if err := c.Validate(); err == nil {
@@ -195,7 +195,7 @@ func TestConfigValidate(t *testing.T) {
 	t.Run("GitHub PAT and OAuth together is valid", func(t *testing.T) {
 		t.Parallel()
 		c := &Config{
-			GitHub: GitHubConfig{Token: "ghp_abc", OAuthClientID: "id", OAuthClientSecret: "sec", OAuthAllowedUsers: "alice"},
+			GitHub: GitHubConfig{Token: "ghp_abc", OAuthClientID: "id", OAuthClientSecret: "sec", OAuthAllowedUsers: []string{"alice"}},
 			Auth:   AuthConfig{ExternalURL: "https://caic.example.com"},
 		}
 		if err := c.Validate(); err != nil {
@@ -205,7 +205,7 @@ func TestConfigValidate(t *testing.T) {
 	t.Run("GitLab PAT and OAuth together is invalid", func(t *testing.T) {
 		t.Parallel()
 		c := &Config{
-			GitLab: GitLabConfig{Token: "glpat-abc", OAuthClientID: "id", OAuthClientSecret: "sec", OAuthAllowedUsers: "alice"},
+			GitLab: GitLabConfig{Token: "glpat-abc", OAuthClientID: "id", OAuthClientSecret: "sec", OAuthAllowedUsers: []string{"alice"}},
 			Auth:   AuthConfig{ExternalURL: "https://caic.example.com"},
 		}
 		if err := c.Validate(); err == nil {

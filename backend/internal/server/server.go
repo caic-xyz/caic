@@ -407,11 +407,11 @@ type Dependencies struct {
 	Warnings   *WarningStore
 	CacheSizes *CacheSizeStore
 
-	GitHubAllowedUsers     map[string]struct{}
-	GitLabAllowedUsers     map[string]struct{}
+	GitHubAllowedUsers     []string
+	GitLabAllowedUsers     []string
 	GitHubWebhookSecret    []byte
 	GitLabWebhookSecret    []byte
-	GitHubAppAllowedOwners map[string]struct{}
+	GitHubAppAllowedOwners []string
 	Pprof                  bool
 }
 

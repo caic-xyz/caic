@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -29,8 +30,8 @@ type authHandlers struct {
 
 	githubOAuth        *auth.ProviderConfig
 	gitlabOAuth        *auth.ProviderConfig
-	githubAllowedUsers map[string]struct{}
-	gitlabAllowedUsers map[string]struct{}
+	githubAllowedUsers []string
+	gitlabAllowedUsers []string
 }
 
 // handleStart redirects the browser to the OAuth provider's authorization URL.
@@ -161,7 +162,7 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 
 		// Check allowlist.
 		if allowed := h.allowedUsersFor(provider); allowed != nil {
-			if _, ok := allowed[strings.ToLower(username)]; !ok {
+			if !slices.Contains(allowed, strings.ToLower(username)) {
 				slog.WarnContext(r.Context(), "user not in allowlist", "provider", provider, "username", username)
 				writeError(w, api.Forbidden("user "+username+" is not in the "+provider+" allowlist"))
 				return
@@ -245,7 +246,7 @@ func (h *authHandlers) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 // allowedUsersFor returns the allowlist for the named provider, or nil.
-func (h *authHandlers) allowedUsersFor(provider string) map[string]struct{} {
+func (h *authHandlers) allowedUsersFor(provider string) []string {
 	switch provider {
 	case "github":
 		return h.githubAllowedUsers

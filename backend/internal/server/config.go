@@ -109,20 +109,17 @@ type GitHubConfig struct {
 	Token             string // PAT for GitHub API access
 	OAuthClientID     string // OAuth app client ID
 	OAuthClientSecret string
-	OAuthAllowedUsers string // comma-separated; required with OAuth
-	WebhookSecret     []byte // HMAC secret; enables POST /webhooks/github
-	AppID             int64  // GitHub App ID; used with AppPrivateKeyPEM
-	AppPrivateKeyPEM  []byte // RSA private key PEM
-	AppAllowedOwners  string // comma-separated; if set, reject installs from other owners
+	OAuthAllowedUsers []string // if set, restricts login to these users; empty allows any
+	WebhookSecret     []byte   // HMAC secret; enables POST /webhooks/github
+	AppID             int64    // GitHub App ID; used with AppPrivateKeyPEM
+	AppPrivateKeyPEM  []byte   // RSA private key PEM
+	AppAllowedOwners  []string // if set, reject installs from other owners
 }
 
 // Validate returns an error if the GitHub configuration is invalid.
 func (c *GitHubConfig) Validate() error {
 	if (c.OAuthClientID == "") != (c.OAuthClientSecret == "") {
 		return errors.New("github.oauth.client_id and github.oauth.client_secret must both be set or both be unset")
-	}
-	if c.OAuthClientID != "" && c.OAuthAllowedUsers == "" {
-		return errors.New("github.oauth.allowed_users is required when GitHub OAuth login is configured")
 	}
 	return nil
 }
@@ -132,9 +129,9 @@ type GitLabConfig struct {
 	Token             string // PAT; mutually exclusive with OAuthClientID
 	OAuthClientID     string // OAuth app client ID; mutually exclusive with Token
 	OAuthClientSecret string
-	OAuthAllowedUsers string // comma-separated; required with OAuth
-	URL               string // default "https://gitlab.com"
-	WebhookSecret     []byte // X-Gitlab-Token secret; enables POST /webhooks/gitlab
+	OAuthAllowedUsers []string // if set, restricts login to these users; empty allows any
+	URL               string   // default "https://gitlab.com"
+	WebhookSecret     []byte   // X-Gitlab-Token secret; enables POST /webhooks/gitlab
 }
 
 // Validate returns an error if the GitLab configuration is invalid.
@@ -150,9 +147,6 @@ func (c *GitLabConfig) Validate() error {
 	if c.Token != "" && c.OAuthClientID != "" {
 		return errors.New("gitlab.token and gitlab.oauth.client_id are mutually exclusive: " +
 			"remove gitlab.token when using GitLab OAuth login")
-	}
-	if c.OAuthClientID != "" && c.OAuthAllowedUsers == "" {
-		return errors.New("gitlab.oauth.allowed_users is required when GitLab OAuth login is configured")
 	}
 	return nil
 }

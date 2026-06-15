@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/caic-xyz/caic/backend/internal/bot"
@@ -32,10 +33,10 @@ const maxWebhookBodyBytes = 10 << 20 // 10 MB
 // GitHub App owner allowlist; the bot and CI service it dispatches to are
 // app-owned automation services injected at construction.
 type WebhookHandlers struct {
-	serverCtx        context.Context     // dispatch context that outlives individual webhook requests
-	githubSecret     []byte              // nil when the GitHub webhook is not configured
-	gitlabSecret     []byte              // nil when the GitLab webhook is not configured
-	appAllowedOwners map[string]struct{} // nil = allow all GitHub App installs
+	serverCtx        context.Context // dispatch context that outlives individual webhook requests
+	githubSecret     []byte          // nil when the GitHub webhook is not configured
+	gitlabSecret     []byte          // nil when the GitLab webhook is not configured
+	appAllowedOwners []string        // nil = allow all GitHub App installs
 
 	bot       *bot.Bot
 	ciService *ci.Service
@@ -452,7 +453,7 @@ func (h *WebhookHandlers) handleInstallationEvent(ctx context.Context, ev *githu
 		h.forge.StoreInstallationID(login, ev.Installation.ID)
 		return
 	}
-	if _, ok := h.appAllowedOwners[strings.ToLower(login)]; ok {
+	if slices.Contains(h.appAllowedOwners, strings.ToLower(login)) {
 		h.forge.StoreInstallationID(login, ev.Installation.ID)
 		return
 	}
