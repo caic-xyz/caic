@@ -29,7 +29,8 @@
             android:exported="true"
             android:configChanges="screenSize|smallestScreenSize|orientation|keyboardHidden"
             android:minWidth="320dp"
-            android:minHeight="480dp">
+            android:minHeight="480dp"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 

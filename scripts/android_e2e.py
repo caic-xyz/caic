@@ -85,7 +85,7 @@ def wait_for_backend(port):
             return True
         except urllib.error.HTTPError:
             return True
-        except urllib.error.URLError:
+        except (TimeoutError, urllib.error.URLError):
             time.sleep(0.5)
     return False
 

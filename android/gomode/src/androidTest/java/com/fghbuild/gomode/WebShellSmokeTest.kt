@@ -92,6 +92,7 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
 
         try {
             tapDomElement("#prompt")
+            composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) { isImeVisible() }
 
             composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) {
                 val imeTop = imeTopOrNull() ?: return@waitUntil false
@@ -154,14 +155,23 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
                 <meta name="viewport" content="width=device-width, initial-scale=1" />
                 <style>
                   html, body { margin: 0; height: 100%; }
-                  body { display: flex; flex-direction: column; font-family: sans-serif; }
-                  main { flex: 1; }
-                  #prompt { min-height: 44px; border: 1px solid #999; padding: 12px; }
+                  body { font-family: sans-serif; }
+                  main { min-height: 100%; padding-bottom: 72px; box-sizing: border-box; }
+                  #prompt {
+                    position: fixed;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    min-height: 44px;
+                    border: 1px solid #999;
+                    padding: 12px;
+                    box-sizing: border-box;
+                  }
                 </style>
               </head>
               <body>
                 <main>Hosted content</main>
-                <div id="prompt" role="textbox" contenteditable="true">Prompt</div>
+                <input id="prompt" type="text" value="Prompt" />
               </body>
             </html>
         """.trimIndent()

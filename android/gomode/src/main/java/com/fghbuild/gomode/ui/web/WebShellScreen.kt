@@ -60,6 +60,7 @@ fun WebShellScreen(
     var pageFailed by remember(hostURL) { mutableStateOf<String?>(null) }
     var loading by remember(hostURL) { mutableStateOf(true) }
     var fileChooserCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+    var loadedHostURL by remember { mutableStateOf<String?>(null) }
     val currentOnHostedPageLoaded by rememberUpdatedState(onHostedPageLoaded)
     val fileChooserLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         fileChooserCallback?.onReceiveValue(uris.toTypedArray())
@@ -168,9 +169,10 @@ fun WebShellScreen(
         AndroidView(
             factory = { webView },
             update = { view ->
-                if (view.url != hostURL && view.originalUrl != hostURL) {
+                if (loadedHostURL != hostURL) {
                     loading = true
                     pageFailed = null
+                    loadedHostURL = hostURL
                     view.loadUrl(hostURL)
                 }
             },
