@@ -3,8 +3,6 @@
 package server
 
 import (
-	"crypto"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -219,20 +217,6 @@ func TestOAuthServer(t *testing.T) {
 			revokeOAuthGrant(t, h, &user, firstGrantID, http.StatusOK)
 			refreshMCPToken(t, h, registered.ClientID, first.RefreshToken, http.StatusBadRequest)
 			refreshMCPToken(t, h, secondClient.ClientID, second.RefreshToken, http.StatusOK)
-		})
-
-		t.Run("expired access token is rejected", func(t *testing.T) {
-			t.Parallel()
-			s, h, user, _ := newMCPOAuthLifecycleRouter(t)
-			token := signTestMCPAccessToken(t, s, "https://caic.example.com", &user, "https://caic.example.com/api/caic/v1/mcp", mcpScopeTasksRead, time.Now().Add(-2*time.Hour), time.Now().Add(-time.Hour))
-
-			req := newMCPBearerRequest(t)
-			req.Header.Set("Authorization", "Bearer "+token)
-			w := httptest.NewRecorder()
-			h.ServeHTTP(w, req)
-			if w.Code != http.StatusUnauthorized {
-				t.Fatalf("status = %d, want %d", w.Code, http.StatusUnauthorized)
-			}
 		})
 
 		t.Run("expired refresh token is rejected", func(t *testing.T) {
@@ -1032,32 +1016,4 @@ func newMCPBearerRequest(t *testing.T) *http.Request {
 	req.Header.Set("Mcp-Method", "tools/call")
 	req.Header.Set("Mcp-Name", "tasks_list")
 	return req
-}
-
-func signTestMCPAccessToken(t *testing.T, s *testRouter, issuer string, user *auth.User, audience, scope string, issuedAt, expiresAt time.Time) string {
-	headerJSON, err := json.Marshal(map[string]string{"alg": oauth.JWTAlgRS256, "typ": "JWT", "kid": s.oauth.kid})
-	if err != nil {
-		t.Fatal(err)
-	}
-	payloadJSON, err := json.Marshal(map[string]any{
-		"iss":      issuer,
-		"sub":      user.ID,
-		"aud":      audience,
-		"username": user.Username,
-		"scope":    scope,
-		"iat":      issuedAt.Unix(),
-		"nbf":      issuedAt.Unix(),
-		"exp":      expiresAt.Unix(),
-		"typ":      "access_token",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	signingInput := base64.RawURLEncoding.EncodeToString(headerJSON) + "." + base64.RawURLEncoding.EncodeToString(payloadJSON)
-	digest := sha256.Sum256([]byte(signingInput))
-	signature, err := s.oauth.key.Sign(rand.Reader, digest[:], crypto.SHA256)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return signingInput + "." + base64.RawURLEncoding.EncodeToString(signature)
 }

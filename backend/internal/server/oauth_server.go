@@ -7,14 +7,9 @@ package server
 
 import (
 	"context"
-	"crypto"
 	"crypto/rand"
-	"crypto/rsa"
-	"crypto/sha256"
-	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"html/template"
@@ -80,8 +75,7 @@ type oauthServer struct {
 	state    *oauth.Store
 	codes    map[string]oauth.Code
 	consents map[string]oauthConsent
-	key      *rsa.PrivateKey
-	kid      string
+	tokens   *oauth.AccessTokenService
 
 	supportedScopes []string // canonical ordered scope list.
 	defaultScopes   []string // pre-checked on the consent form.
@@ -140,30 +134,9 @@ func userInitial(username string) string {
 }
 
 func newOAuthServer(keyPEM []byte, kid, refreshTokenStorePath, resourceURLPath, resourceMetadataURLPath, clientIDPrefix string, supportedScopes, defaultScopes []string, scopeLabels map[string]string, userLookup oauthUserLookup, baseURL oauthBaseURLFunc, currentUser oauthCurrentUserFunc, attachUser oauthAttachUserFunc, login oauthLoginAdapter, audit oauthAuditRecorder, rateLimiter oauthRateLimiter) (*oauthServer, error) {
-	var key *rsa.PrivateKey
-	if len(keyPEM) > 0 {
-		block, _ := pem.Decode(keyPEM)
-		if block == nil {
-			return nil, errors.New("decode oauth signing key PEM")
-		}
-		parsed, err := x509.ParsePKCS1PrivateKey(block.Bytes)
-		if err != nil {
-			return nil, fmt.Errorf("parse oauth signing key: %w", err)
-		}
-		key = parsed
-	} else {
-		generated, err := rsa.GenerateKey(rand.Reader, 2048)
-		if err != nil {
-			return nil, fmt.Errorf("generate oauth signing key: %w", err)
-		}
-		key = generated
-	}
-	if kid == "" {
-		generatedKID, err := randomToken()
-		if err != nil {
-			return nil, fmt.Errorf("generate oauth key id: %w", err)
-		}
-		kid = generatedKID
+	tokens, err := oauth.NewAccessTokenService(keyPEM, kid, oauthAccessTokenTTL)
+	if err != nil {
+		return nil, err
 	}
 	state, err := oauth.LoadStore(refreshTokenStorePath)
 	if err != nil {
@@ -173,8 +146,7 @@ func newOAuthServer(keyPEM []byte, kid, refreshTokenStorePath, resourceURLPath, 
 		state:                   state,
 		codes:                   map[string]oauth.Code{},
 		consents:                map[string]oauthConsent{},
-		key:                     key,
-		kid:                     kid,
+		tokens:                  tokens,
 		supportedScopes:         supportedScopes,
 		defaultScopes:           defaultScopes,
 		userLookup:              userLookup,
@@ -367,8 +339,7 @@ func (s *oauthServer) handleOAuthMetadata(w http.ResponseWriter, r *http.Request
 }
 
 func (s *oauthServer) handleOAuthJWKS(w http.ResponseWriter, r *http.Request) {
-	pub := s.key.PublicKey
-	resp := oauth.JWKSet{Keys: []oauth.JWK{oauth.RSAJWK(s.kid, &pub)}}
+	resp := oauth.JWKSet{Keys: []oauth.JWK{s.tokens.JWK()}}
 	writeJSONResponse(w, &resp, nil)
 }
 
@@ -840,33 +811,7 @@ func (s *oauthServer) pruneExpiredRefreshTokens(now time.Time) error {
 }
 
 func (s *oauthServer) issueAccessToken(issuer string, user *auth.User, audience, scope, grantID string) (string, error) {
-	now := time.Now()
-	headerJSON, err := json.Marshal(map[string]string{"alg": oauth.JWTAlgRS256, "typ": "JWT", "kid": s.kid})
-	if err != nil {
-		return "", err
-	}
-	payloadJSON, err := json.Marshal(map[string]any{
-		"iss":      issuer,
-		"sub":      user.ID,
-		"aud":      audience,
-		"username": user.Username,
-		"scope":    scope,
-		"grant_id": grantID,
-		"iat":      now.Unix(),
-		"nbf":      now.Unix(),
-		"exp":      now.Add(oauthAccessTokenTTL).Unix(),
-		"typ":      "access_token",
-	})
-	if err != nil {
-		return "", err
-	}
-	signingInput := base64.RawURLEncoding.EncodeToString(headerJSON) + "." + base64.RawURLEncoding.EncodeToString(payloadJSON)
-	digest := sha256.Sum256([]byte(signingInput))
-	signature, err := rsa.SignPKCS1v15(rand.Reader, s.key, crypto.SHA256, digest[:])
-	if err != nil {
-		return "", err
-	}
-	return signingInput + "." + base64.RawURLEncoding.EncodeToString(signature), nil
+	return s.tokens.IssueAccessToken(issuer, oauth.User{ID: user.ID, Username: user.Username, Provider: string(user.Provider)}, audience, scope, grantID)
 }
 
 func (s *oauthServer) normalizeScope(scope string) (string, error) {
@@ -951,82 +896,22 @@ func (s *oauthServer) handleProtectedResourceMetadata(w http.ResponseWriter, r *
 	}
 }
 
-// verifyBearer validates a JWT bearer token against oauthServer's key material
+// verifyBearer validates a JWT bearer token against oauthServer's token service
 // and grant store.
 func (s *oauthServer) verifyBearer(r *http.Request, token string) (*bearerClaims, error) {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return nil, errors.New("invalid bearer token format")
-	}
-	headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
-	if err != nil {
-		return nil, fmt.Errorf("decode token header: %w", err)
-	}
-	var header oauth.JWTHeader
-	if err := json.Unmarshal(headerJSON, &header); err != nil {
-		return nil, fmt.Errorf("parse token header: %w", err)
-	}
-	if header.Alg != oauth.JWTAlgRS256 || header.KID != s.kid {
-		return nil, errors.New("unsupported token header")
-	}
-	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
-	if err != nil {
-		return nil, fmt.Errorf("decode token signature: %w", err)
-	}
-	signingInput := parts[0] + "." + parts[1]
-	digest := sha256.Sum256([]byte(signingInput))
-	if err := rsa.VerifyPKCS1v15(&s.key.PublicKey, crypto.SHA256, digest[:], signature); err != nil {
-		return nil, errors.New("invalid token signature")
-	}
-	payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return nil, fmt.Errorf("decode token payload: %w", err)
-	}
-	var claims oauth.AccessTokenClaims
-	if err := json.Unmarshal(payloadJSON, &claims); err != nil {
-		return nil, fmt.Errorf("parse token claims: %w", err)
-	}
-	now := time.Now().Unix()
-	if claims.Issuer != s.externalBaseURL(r) {
-		return nil, errors.New("invalid token issuer")
-	}
-	if claims.Audience != s.externalBaseURL(r)+s.resourceURLPath {
-		return nil, errors.New("invalid token audience")
-	}
-	if claims.Type != "access_token" {
-		return nil, errors.New("invalid token type")
-	}
-	if claims.NotBefore > now || claims.Expiry <= now {
-		return nil, errors.New("token is not valid now")
-	}
-	if claims.GrantID != "" {
-		active, err := s.touchGrant(claims.GrantID, time.Now())
-		if err != nil {
-			return nil, fmt.Errorf("touch token grant: %w", err)
+	var authUser auth.User
+	claims, err := s.tokens.VerifyAccessToken(token, s.externalBaseURL(r), s.externalBaseURL(r)+s.resourceURLPath, time.Now(), s.touchGrant, func(subject string) (oauth.User, bool) {
+		user, ok := s.findUserByID(subject)
+		if !ok {
+			return oauth.User{}, false
 		}
-		if !active {
-			return nil, errors.New("token grant is not active")
-		}
+		authUser = user
+		return oauth.User{ID: user.ID, Username: user.Username, Provider: string(user.Provider)}, true
+	})
+	if err != nil {
+		return nil, err
 	}
-	user, ok := s.findUserByID(claims.Subject)
-	if !ok {
-		return nil, errors.New("token subject is unknown")
-	}
-	return &bearerClaims{
-		BearerClaims: oauth.BearerClaims{
-			User: oauth.User{
-				ID:       user.ID,
-				Username: user.Username,
-				Provider: string(user.Provider),
-			},
-			Subject:  claims.Subject,
-			Username: claims.Username,
-			Issuer:   claims.Issuer,
-			Audience: claims.Audience,
-			Scopes:   parseScopeSet(claims.Scope),
-		},
-		authUser: user,
-	}, nil
+	return &bearerClaims{BearerClaims: *claims, authUser: authUser}, nil
 }
 
 // writeUnauthorized writes a 401 with the bearer challenge so clients can
