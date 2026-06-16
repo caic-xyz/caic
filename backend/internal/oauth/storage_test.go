@@ -103,6 +103,14 @@ func TestStore(t *testing.T) {
 				"expired-grant": {ID: "expired-grant", ExpiresAt: now.Add(-time.Hour)},
 				"active-grant":  {ID: "active-grant", ExpiresAt: now.Add(time.Hour)},
 			},
+			Codes: map[string]Code{
+				"expired-code": {ExpiresAt: now.Add(-time.Hour)},
+				"active-code":  {ExpiresAt: now.Add(time.Hour)},
+			},
+			Consents: map[string]ConsentParams{
+				"expired-consent": {ExpiresAt: now.Add(-time.Hour)},
+				"active-consent":  {ExpiresAt: now.Add(time.Hour)},
+			},
 		}
 		data, err := json.Marshal(file)
 		if err != nil {
@@ -121,8 +129,20 @@ func TestStore(t *testing.T) {
 		if _, ok := store.Grants["expired-grant"]; ok {
 			t.Fatal("expired grant was loaded")
 		}
+		if _, ok := store.Codes["expired-code"]; ok {
+			t.Fatal("expired code was loaded")
+		}
+		if _, ok := store.Consents["expired-consent"]; ok {
+			t.Fatal("expired consent was loaded")
+		}
 		if _, ok := store.RefreshTokens["active"]; !ok {
 			t.Fatal("active refresh token was pruned")
+		}
+		if _, ok := store.Codes["active-code"]; !ok {
+			t.Fatal("active code was pruned")
+		}
+		if _, ok := store.Consents["active-consent"]; !ok {
+			t.Fatal("active consent was pruned")
 		}
 	})
 }

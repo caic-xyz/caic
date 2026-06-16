@@ -214,6 +214,64 @@ func TestServer(t *testing.T) {
 		}
 	})
 
+	t.Run("authorization code survives server restart", func(t *testing.T) {
+		t.Parallel()
+
+		path := t.TempDir() + "/oauth.json"
+		user := testUser()
+		_, h1, _ := newTestFlowServer(t, path, []User{user})
+		registered := registerOAuthTestClient(t, h1, "Test Client", []string{"https://claude.example.com/callback"})
+
+		// Start the authorize flow to get a consent token.
+		form := authorizationCodeForm(registered.ClientID, "https://claude.example.com/callback", "read write")
+		consentToken := startOAuthTestConsent(t, h1, user, form)
+
+		// Create a new server pointing at the same store path.
+		_, h2, _ := newTestFlowServer(t, path, []User{user})
+
+		// Post the consent on the new server to get an authorization code.
+		postForm := url.Values{"consent_token": {consentToken}, "scope_form": {"1"}, "scope": {"read"}}
+		req := newOAuthTestRequest(t, http.MethodPost, "/oauth/authorize", strings.NewReader(postForm.Encode()), user)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h2.ServeHTTP(w, req)
+		if w.Code != http.StatusSeeOther {
+			t.Fatalf("authorize status = %d, want %d: %s", w.Code, http.StatusSeeOther, w.Body.String())
+		}
+		location, err := url.Parse(w.Header().Get("Location"))
+		if err != nil {
+			t.Fatalf("parse Location: %v", err)
+		}
+		code := location.Query().Get("code")
+		if code == "" {
+			t.Fatal("authorization code is empty")
+		}
+
+		// Exchange the code for tokens on the new server.
+		tokenForm := url.Values{
+			"grant_type":    {GrantAuthorizationCode},
+			"code":          {code},
+			"client_id":     {registered.ClientID},
+			"redirect_uri":  {"https://claude.example.com/callback"},
+			"code_verifier": {testVerifier},
+			"resource":      {testResourceURL},
+		}
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(tokenForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w = httptest.NewRecorder()
+		h2.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var tokenResp TokenResponse
+		if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
+			t.Fatalf("decode token response: %v", err)
+		}
+		if tokenResp.AccessToken == "" || tokenResp.RefreshToken == "" {
+			t.Fatalf("token response missing tokens: %+v", tokenResp)
+		}
+	})
+
 	t.Run("revoked refresh token is rejected", func(t *testing.T) {
 		t.Parallel()
 

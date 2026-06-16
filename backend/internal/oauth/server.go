@@ -107,11 +107,9 @@ type ServerConfig struct {
 // JWTs. Refresh tokens are resource-scoped opaque tokens, persisted as hashes,
 // and rotated on every refresh grant.
 type Server struct {
-	mu       sync.Mutex
-	state    *Store
-	codes    map[string]Code
-	consents map[string]consent
-	tokens   *AccessTokenService
+	mu     sync.Mutex
+	state  *Store
+	tokens *AccessTokenService
 
 	supportedScopes []string
 	defaultScopes   []string
@@ -135,12 +133,6 @@ type Server struct {
 	audit       AuditRecorder
 	rateLimiter RateLimiter
 	renderer    ConsentRenderer
-}
-
-type consent struct {
-	UserID    string
-	Values    url.Values
-	ExpiresAt time.Time
 }
 
 // NewServer returns an OAuth authorization server.
@@ -171,8 +163,6 @@ func NewServer(c ServerConfig) (*Server, error) { //nolint:gocritic // ServerCon
 	}
 	return &Server{
 		state:                   state,
-		codes:                   map[string]Code{},
-		consents:                map[string]consent{},
 		tokens:                  tokens,
 		dpopNonces:              NewDPoPNonceManager(dpopNonceTTL),
 		supportedScopes:         c.SupportedScopes,
@@ -435,7 +425,16 @@ func (s *Server) handleOAuthAuthorizeGET(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	s.mu.Lock()
-	s.consents[consentToken] = consent{UserID: user.ID, Values: values, ExpiresAt: time.Now().Add(s.authCodeTTL)}
+	params := make(map[string]string)
+	for k, vals := range values {
+		if len(vals) > 0 {
+			params[k] = vals[0]
+		}
+	}
+	s.state.Consents[consentToken] = ConsentParams{UserID: user.ID, Params: params, ExpiresAt: time.Now().Add(s.authCodeTTL)}
+	if err := s.state.Save(); err != nil {
+		slog.WarnContext(r.Context(), "save oauth consent", "err", err)
+	}
 	s.mu.Unlock()
 	if s.renderer == nil {
 		WriteError(w, http.StatusInternalServerError, "server_error", "consent renderer is not configured")
@@ -471,16 +470,22 @@ func (s *Server) handleOAuthAuthorizePOST(w http.ResponseWriter, r *http.Request
 	}
 	consentToken := r.PostForm.Get("consent_token")
 	s.mu.Lock()
-	consent, ok := s.consents[consentToken]
+	c, ok := s.state.Consents[consentToken]
 	if ok {
-		delete(s.consents, consentToken)
+		delete(s.state.Consents, consentToken)
+		if err := s.state.Save(); err != nil {
+			slog.WarnContext(r.Context(), "save oauth consent deletion", "err", err)
+		}
 	}
 	s.mu.Unlock()
-	if !ok || consent.UserID != user.ID || time.Now().After(consent.ExpiresAt) {
+	if !ok || c.UserID != user.ID || time.Now().After(c.ExpiresAt) {
 		WriteError(w, http.StatusBadRequest, "invalid_request", "invalid or expired consent")
 		return
 	}
-	values := consent.Values
+	values := url.Values{}
+	for k, v := range c.Params {
+		values.Set(k, v)
+	}
 	if err := s.validateAuthorizeForm(r, values); err != nil {
 		WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
@@ -512,7 +517,13 @@ func (s *Server) handleOAuthAuthorizePOST(w http.ResponseWriter, r *http.Request
 	}
 	entry := Code{UserID: user.ID, ClientID: values.Get("client_id"), RedirectURI: values.Get("redirect_uri"), CodeChallenge: values.Get("code_challenge"), Resource: values.Get("resource"), Scope: scope, ExpiresAt: time.Now().Add(s.authCodeTTL)}
 	s.mu.Lock()
-	s.codes[code] = entry
+	s.state.Codes[code] = entry
+	if err := s.state.Save(); err != nil {
+		slog.WarnContext(r.Context(), "save oauth code", "err", err)
+		WriteError(w, http.StatusInternalServerError, "server_error", "could not authorize client")
+		s.mu.Unlock()
+		return
+	}
 	s.mu.Unlock()
 	redirectURL, err := url.Parse(entry.RedirectURI)
 	if err != nil {
@@ -580,9 +591,12 @@ func (s *Server) handleOAuthToken(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r *http.Request, dpopJKT string) {
 	code := r.PostForm.Get("code")
 	s.mu.Lock()
-	entry, ok := s.codes[code]
+	entry, ok := s.state.Codes[code]
 	if ok {
-		delete(s.codes, code)
+		delete(s.state.Codes, code)
+		if err := s.state.Save(); err != nil {
+			slog.WarnContext(r.Context(), "save oauth code deletion", "err", err)
+		}
 	}
 	s.mu.Unlock()
 	if !ok || time.Now().After(entry.ExpiresAt) {

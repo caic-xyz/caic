@@ -26,13 +26,20 @@ type Client struct {
 
 // Code is an issued authorization code with PKCE binding.
 type Code struct {
-	UserID        string
-	ClientID      string
-	RedirectURI   string
-	CodeChallenge string
-	Resource      string
-	Scope         string
-	ExpiresAt     time.Time
+	UserID        string    `json:"userID"`
+	ClientID      string    `json:"clientID"`
+	RedirectURI   string    `json:"redirectURI"`
+	CodeChallenge string    `json:"codeChallenge"`
+	Resource      string    `json:"resource"`
+	Scope         string    `json:"scope"`
+	ExpiresAt     time.Time `json:"expiresAt"`
+}
+
+// ConsentParams holds in-progress OAuth authorization consent state.
+type ConsentParams struct {
+	UserID    string            `json:"userID"`
+	Params    map[string]string `json:"params"`
+	ExpiresAt time.Time         `json:"expiresAt"`
 }
 
 // RefreshToken is an opaque refresh token persisted by hash.
@@ -62,20 +69,24 @@ type Grant struct {
 	RevokedAt  time.Time `json:"revokedAt,omitzero"`
 }
 
-// Store holds durable OAuth clients, refresh tokens, and grants.
+// Store holds durable OAuth clients, refresh tokens, grants, authorization codes, and consents.
 type Store struct {
-	Clients       map[string]Client       `json:"clients,omitempty"`
-	RefreshTokens map[string]RefreshToken `json:"refreshTokens,omitempty"`
-	Grants        map[string]Grant        `json:"grants,omitempty"`
+	Clients       map[string]Client        `json:"clients,omitempty"`
+	RefreshTokens map[string]RefreshToken  `json:"refreshTokens,omitempty"`
+	Grants        map[string]Grant         `json:"grants,omitempty"`
+	Codes         map[string]Code          `json:"codes,omitempty"`
+	Consents      map[string]ConsentParams `json:"consents,omitempty"`
 
 	path string
 }
 
 type storeFile struct {
-	Version       int                     `json:"version"`
-	Clients       map[string]Client       `json:"clients,omitempty"`
-	RefreshTokens map[string]RefreshToken `json:"refreshTokens,omitempty"`
-	Grants        map[string]Grant        `json:"grants,omitempty"`
+	Version       int                      `json:"version"`
+	Clients       map[string]Client        `json:"clients,omitempty"`
+	RefreshTokens map[string]RefreshToken  `json:"refreshTokens,omitempty"`
+	Grants        map[string]Grant         `json:"grants,omitempty"`
+	Codes         map[string]Code          `json:"codes,omitempty"`
+	Consents      map[string]ConsentParams `json:"consents,omitempty"`
 }
 
 // LoadStore loads durable OAuth state from path.
@@ -98,6 +109,8 @@ func LoadStore(path string) (*Store, error) {
 	store.Clients = file.Clients
 	store.RefreshTokens = file.RefreshTokens
 	store.Grants = file.Grants
+	store.Codes = file.Codes
+	store.Consents = file.Consents
 	store.ensureMaps()
 	store.pruneExpired(time.Now())
 	return store, nil
@@ -109,7 +122,7 @@ func (s *Store) Save() error {
 		return nil
 	}
 	s.ensureMaps()
-	file := storeFile{Version: storeVersion, Clients: s.Clients, RefreshTokens: s.RefreshTokens, Grants: s.Grants}
+	file := storeFile{Version: storeVersion, Clients: s.Clients, RefreshTokens: s.RefreshTokens, Grants: s.Grants, Codes: s.Codes, Consents: s.Consents}
 	data, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal oauth state: %w", err)
@@ -193,6 +206,12 @@ func (s *Store) ensureMaps() {
 	if s.Grants == nil {
 		s.Grants = map[string]Grant{}
 	}
+	if s.Codes == nil {
+		s.Codes = map[string]Code{}
+	}
+	if s.Consents == nil {
+		s.Consents = map[string]ConsentParams{}
+	}
 }
 
 func (s *Store) pruneExpired(now time.Time) bool {
@@ -206,6 +225,18 @@ func (s *Store) pruneExpired(now time.Time) bool {
 	for id := range s.Grants {
 		if now.After(s.Grants[id].ExpiresAt) {
 			delete(s.Grants, id)
+			changed = true
+		}
+	}
+	for code := range s.Codes {
+		if now.After(s.Codes[code].ExpiresAt) {
+			delete(s.Codes, code)
+			changed = true
+		}
+	}
+	for consent := range s.Consents {
+		if now.After(s.Consents[consent].ExpiresAt) {
+			delete(s.Consents, consent)
 			changed = true
 		}
 	}
