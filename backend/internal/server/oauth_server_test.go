@@ -114,7 +114,7 @@ func TestOAuthServer(t *testing.T) {
 			t.Parallel()
 			s, h, user, registered := newMCPOAuthLifecycleRouter(t)
 			path := filepath.Join(t.TempDir(), "mcp_audit.jsonl")
-			s.oauth.audit.path = path
+			s.oauth.audit = &auditStore{path: path}
 
 			tokenResp := authorizeMCPClient(t, h, &user, &registered)
 			rotated := refreshMCPToken(t, h, registered.ClientID, tokenResp.RefreshToken, http.StatusOK)

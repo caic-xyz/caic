@@ -98,12 +98,14 @@ type oauthServer struct {
 	resourceMetadataURLPath string
 	clientIDPrefix          string
 
-	// Shared dependencies (not owned).
-	authStore    *auth.Store
-	hostState    *auth.HostState
-	authHandlers *authHandlers
-	audit        *auditStore
-	rateLimiter  *rateLimiter
+	// Shared dependency seams (not owned).
+	userLookup  oauthUserLookup
+	currentUser oauthCurrentUserFunc
+	attachUser  oauthAttachUserFunc
+	baseURL     oauthBaseURLFunc
+	login       oauthLoginAdapter
+	audit       oauthAuditRecorder
+	rateLimiter oauthRateLimiter
 }
 
 // oauthConsent holds an in-progress user consent session.
@@ -165,6 +167,29 @@ type oauthRefreshTokenRecord struct {
 	TokenHash string `json:"tokenHash"`
 }
 
+type oauthBaseURLFunc func(*http.Request) string
+
+type oauthCurrentUserFunc func(context.Context) (*auth.User, bool)
+
+type oauthAttachUserFunc func(context.Context, *auth.User) context.Context
+
+type oauthUserLookup interface {
+	FindByID(id string) (auth.User, bool)
+}
+
+type oauthLoginAdapter interface {
+	LoginStartURL(r *http.Request) string
+	ProviderLabel(provider string) string
+}
+
+type oauthAuditRecorder interface {
+	RecordOAuth(ctx context.Context, userID, operation, name, decision, status string, args any)
+}
+
+type oauthRateLimiter interface {
+	Allow(key string) bool
+}
+
 func userInitial(username string) string {
 	for _, r := range strings.TrimSpace(username) {
 		return strings.ToUpper(string(r))
@@ -172,7 +197,7 @@ func userInitial(username string) string {
 	return "?"
 }
 
-func newOAuthServer(keyPEM []byte, kid, refreshTokenStorePath, resourceURLPath, resourceMetadataURLPath, clientIDPrefix string, supportedScopes, defaultScopes []string, scopeLabels map[string]string, authStore *auth.Store, hostState *auth.HostState, authHandlers *authHandlers, audit *auditStore, rateLimiter *rateLimiter) (*oauthServer, error) {
+func newOAuthServer(keyPEM []byte, kid, refreshTokenStorePath, resourceURLPath, resourceMetadataURLPath, clientIDPrefix string, supportedScopes, defaultScopes []string, scopeLabels map[string]string, userLookup oauthUserLookup, baseURL oauthBaseURLFunc, currentUser oauthCurrentUserFunc, attachUser oauthAttachUserFunc, login oauthLoginAdapter, audit oauthAuditRecorder, rateLimiter oauthRateLimiter) (*oauthServer, error) {
 	var key *rsa.PrivateKey
 	if len(keyPEM) > 0 {
 		block, _ := pem.Decode(keyPEM)
@@ -213,9 +238,11 @@ func newOAuthServer(keyPEM []byte, kid, refreshTokenStorePath, resourceURLPath, 
 		kid:                     kid,
 		supportedScopes:         supportedScopes,
 		defaultScopes:           defaultScopes,
-		authStore:               authStore,
-		hostState:               hostState,
-		authHandlers:            authHandlers,
+		userLookup:              userLookup,
+		currentUser:             currentUser,
+		attachUser:              attachUser,
+		baseURL:                 baseURL,
+		login:                   login,
 		scopeLabels:             scopeLabels,
 		audit:                   audit,
 		rateLimiter:             rateLimiter,
@@ -270,7 +297,7 @@ func (s *oauthServer) BearerAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := oauth.BearerToken(r)
 		if token == "" {
-			if _, ok := auth.UserFromContext(r.Context()); ok {
+			if _, ok := s.currentRequestUser(r.Context()); ok {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -282,10 +309,41 @@ func (s *oauthServer) BearerAuth(next http.Handler) http.Handler {
 			s.writeUnauthorized(w, r)
 			return
 		}
-		ctx := auth.NewContext(r.Context(), &claims.User)
+		ctx := s.newUserContext(r.Context(), &claims.User)
 		ctx = newBearerClaimsContext(ctx, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func (s *oauthServer) currentRequestUser(ctx context.Context) (*auth.User, bool) {
+	if s.currentUser == nil {
+		return nil, false
+	}
+	return s.currentUser(ctx)
+}
+
+func (s *oauthServer) newUserContext(ctx context.Context, u *auth.User) context.Context {
+	if s.attachUser == nil {
+		return ctx
+	}
+	return s.attachUser(ctx, u)
+}
+
+func (s *oauthServer) findUserByID(id string) (auth.User, bool) {
+	if s.userLookup == nil {
+		return auth.User{}, false
+	}
+	return s.userLookup.FindByID(id)
+}
+
+func (s *oauthServer) providerLabel(provider string) string {
+	if s.login != nil {
+		return s.login.ProviderLabel(provider)
+	}
+	if provider == "" {
+		return "unknown provider"
+	}
+	return provider
 }
 
 func (s *oauthServer) scopeItems(scope string) []oauthScopeItem {
@@ -305,10 +363,8 @@ func (s *oauthServer) scopeItems(scope string) []oauthScopeItem {
 }
 
 func (s *oauthServer) externalBaseURL(r *http.Request) string {
-	if s.hostState != nil {
-		if externalURL := s.hostState.ExternalURL(); externalURL != "" {
-			return strings.TrimRight(externalURL, "/")
-		}
+	if s.baseURL != nil {
+		return s.baseURL(r)
 	}
 	authority, scheme := effectiveRequestHostAndScheme(r)
 	return scheme + "://" + authority
@@ -319,7 +375,7 @@ func (s *oauthServer) allowRequest(w http.ResponseWriter, r *http.Request) bool 
 		return true
 	}
 	key := s.rateKey(r)
-	if s.rateLimiter.allow(key) {
+	if s.rateLimiter.Allow(key) {
 		return true
 	}
 	w.Header().Set("Retry-After", "60")
@@ -382,10 +438,10 @@ func (s *oauthServer) handleOAuthJWKS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *oauthServer) handleOAuthAuthorizeGET(w http.ResponseWriter, r *http.Request) {
-	user, ok := auth.UserFromContext(r.Context())
+	user, ok := s.currentRequestUser(r.Context())
 	if !ok {
-		if s.authHandlers != nil {
-			if loginURL := s.authHandlers.loginStartURL(r); loginURL != "" {
+		if s.login != nil {
+			if loginURL := s.login.LoginStartURL(r); loginURL != "" {
 				http.Redirect(w, r, loginURL, http.StatusFound)
 				return
 			}
@@ -425,7 +481,7 @@ func (s *oauthServer) handleOAuthAuthorizeGET(w http.ResponseWriter, r *http.Req
 		RedirectURI:   values.Get("redirect_uri"),
 		Username:      user.Username,
 		UserInitial:   userInitial(user.Username),
-		ProviderLabel: s.authHandlers.providerLabel(string(user.Provider)),
+		ProviderLabel: s.providerLabel(string(user.Provider)),
 		Resource:      values.Get("resource"),
 		ScopeItems:    s.scopeItems(scope),
 	}
@@ -435,7 +491,7 @@ func (s *oauthServer) handleOAuthAuthorizeGET(w http.ResponseWriter, r *http.Req
 }
 
 func (s *oauthServer) handleOAuthAuthorizePOST(w http.ResponseWriter, r *http.Request) {
-	user, ok := auth.UserFromContext(r.Context())
+	user, ok := s.currentRequestUser(r.Context())
 	if !ok {
 		oauth.WriteError(w, http.StatusUnauthorized, "login_required", "log in before authorizing protected resource access")
 		return
@@ -558,7 +614,7 @@ func (s *oauthServer) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r
 		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "PKCE verification failed")
 		return
 	}
-	user, ok := s.authStore.FindByID(entry.UserID)
+	user, ok := s.findUserByID(entry.UserID)
 	if !ok {
 		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "user no longer exists")
 		return
@@ -595,7 +651,7 @@ func (s *oauthServer) handleOAuthRefreshToken(w http.ResponseWriter, r *http.Req
 		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "invalid refresh token")
 		return
 	}
-	user, ok := s.authStore.FindByID(entry.UserID)
+	user, ok := s.findUserByID(entry.UserID)
 	if !ok {
 		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "user no longer exists")
 		return
@@ -656,7 +712,12 @@ func (s *oauthServer) recordAudit(r *http.Request, userID, operation, name, deci
 	if s.audit == nil {
 		return
 	}
-	s.audit.record(r.Context(), &auditEvent{
+	s.audit.RecordOAuth(r.Context(), userID, operation, name, decision, status, args)
+}
+
+// RecordOAuth records an OAuth audit event.
+func (a *auditStore) RecordOAuth(ctx context.Context, userID, operation, name, decision, status string, args any) {
+	a.record(ctx, &auditEvent{
 		UserID:    userID,
 		Operation: operation,
 		Name:      name,
@@ -1156,7 +1217,7 @@ func (s *oauthServer) verifyBearer(r *http.Request, token string) (*bearerClaims
 			return nil, errors.New("token grant is not active")
 		}
 	}
-	user, ok := s.authStore.FindByID(claims.Subject)
+	user, ok := s.findUserByID(claims.Subject)
 	if !ok {
 		return nil, errors.New("token subject is unknown")
 	}

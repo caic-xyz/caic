@@ -34,6 +34,30 @@ type authHandlers struct {
 	gitlabAllowedUsers []string
 }
 
+// LoginStartURL returns the login-start path for the first configured forge
+// provider, with next set to resume r after login. Empty when no provider is
+// configured.
+func (h *authHandlers) LoginStartURL(r *http.Request) string {
+	provider := h.defaultProvider()
+	if provider == "" {
+		return ""
+	}
+	values := url.Values{"next": {r.URL.RequestURI()}}
+	return "/auth/" + provider + "/start?" + values.Encode()
+}
+
+// ProviderLabel returns the human-readable name for a forge provider, falling
+// back to the raw provider name when it is not configured.
+func (h *authHandlers) ProviderLabel(provider string) string {
+	if cfg := h.providerConfig(provider); cfg != nil && cfg.Label != "" {
+		return cfg.Label
+	}
+	if provider == "" {
+		return "unknown provider"
+	}
+	return provider
+}
+
 // handleStart redirects the browser to the OAuth provider's authorization URL.
 // Accepts ?return=app to redirect to caic://auth after callback, or ?next=/path
 // to resume a same-origin web flow after callback.
@@ -267,18 +291,6 @@ func (h *authHandlers) providerConfig(provider string) *auth.ProviderConfig {
 	return nil
 }
 
-// loginStartURL returns the login-start path for the first configured forge
-// provider, with next set to resume r after login. Empty when no provider is
-// configured.
-func (h *authHandlers) loginStartURL(r *http.Request) string {
-	provider := h.defaultProvider()
-	if provider == "" {
-		return ""
-	}
-	values := url.Values{"next": {r.URL.RequestURI()}}
-	return "/auth/" + provider + "/start?" + values.Encode()
-}
-
 // defaultProvider returns the first configured forge login provider, or empty.
 func (h *authHandlers) defaultProvider() string {
 	for _, provider := range []string{"github", "gitlab"} {
@@ -287,20 +299,6 @@ func (h *authHandlers) defaultProvider() string {
 		}
 	}
 	return ""
-}
-
-// providerLabel returns the human-readable name for a forge provider, falling
-// back to the raw provider name when it is not configured.
-func (h *authHandlers) providerLabel(provider string) string {
-	if h != nil {
-		if cfg := h.providerConfig(provider); cfg != nil && cfg.Label != "" {
-			return cfg.Label
-		}
-	}
-	if provider == "" {
-		return "unknown provider"
-	}
-	return provider
 }
 
 // useSecureCookies reports whether to set the Secure flag on cookies.

@@ -23,8 +23,9 @@ func newRateLimiter(limit int, window time.Duration) *rateLimiter {
 	return &rateLimiter{limit: limit, window: window, buckets: map[string]rateBucket{}}
 }
 
-func (l *rateLimiter) allow(key string) bool {
-	if l == nil || l.limit <= 0 || l.window <= 0 {
+// Allow reports whether key is within the fixed-window request limit.
+func (l *rateLimiter) Allow(key string) bool {
+	if l.limit <= 0 || l.window <= 0 {
 		return true
 	}
 	now := time.Now()

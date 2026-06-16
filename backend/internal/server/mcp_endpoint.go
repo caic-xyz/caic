@@ -64,7 +64,7 @@ func (s *mcpServer) allowMCPRequest(w http.ResponseWriter, r *http.Request) bool
 	if s.rateLimiter == nil {
 		return true
 	}
-	if s.rateLimiter.allow(s.mcpRateKey(r)) {
+	if s.rateLimiter.Allow(s.mcpRateKey(r)) {
 		return true
 	}
 	w.Header().Set("Retry-After", "60")
