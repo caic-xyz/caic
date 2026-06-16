@@ -29,9 +29,7 @@ func TestCaicToolRegistryAuthorizeTool(t *testing.T) {
 
 				for name := range mcpForgeTools {
 					ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{
-						Scopes: map[string]struct{}{
-							mcpScopeReposWrite: {},
-						},
+						Scopes: []string{mcpScopeReposWrite},
 						Remote: true,
 					})
 					if tt.user != nil {
@@ -56,9 +54,7 @@ func TestCaicToolRegistryAuthorizeTool(t *testing.T) {
 		c := &caicToolRegistry{}
 		for name := range mcpForgeTools {
 			ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{
-				Scopes: map[string]struct{}{
-					mcpScopeReposWrite: {},
-				},
+				Scopes: []string{mcpScopeReposWrite},
 				Remote: true,
 			})
 			ctx = auth.NewContext(ctx, &auth.User{Provider: forge.KindGitHub, Username: "alice"})
@@ -79,9 +75,7 @@ func TestCaicToolRegistryAuthorizeTool(t *testing.T) {
 		c := &caicToolRegistry{}
 		for name := range mcpForgeTools {
 			ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{
-				Scopes: map[string]struct{}{
-					mcpScopeReposWrite: {},
-				},
+				Scopes: []string{mcpScopeReposWrite},
 				Remote: true,
 			})
 			ctx = auth.NewContext(ctx, &auth.User{Provider: forge.KindGitLab, Username: "alice", AccessToken: "forge-token"})

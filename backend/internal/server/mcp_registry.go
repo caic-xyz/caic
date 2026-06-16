@@ -985,7 +985,7 @@ func mcpScopeChallenge(scope string) string {
 	if scope == "" {
 		scope = mcpScopeRead
 	}
-	return mcp.BearerScopeChallenge(scope)
+	return BearerScopeChallenge(scope)
 }
 
 func redactedResourceJSON(uri string, value any) (mcp.ResourcesReadResult, error) {

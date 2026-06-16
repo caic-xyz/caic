@@ -32,22 +32,8 @@ import (
 	_ "embed"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-)
-
-// MCP OAuth scope constants.
-const (
-	mcpScopeRead       = "caic:mcp.read"
-	mcpScopeTasksRead  = "caic:tasks.read"
-	mcpScopeTasksWrite = "caic:tasks.write"
-	mcpScopeTasksAdmin = "caic:tasks.admin"
-	mcpScopeReposWrite = "caic:repos.write"
-)
-
-const (
-	mcpAuthDefaultScope = mcpScopeRead + " " + mcpScopeTasksRead + " " + mcpScopeTasksWrite + " " + mcpScopeTasksAdmin + " " + mcpScopeReposWrite
 )
 
 const (
@@ -59,16 +45,7 @@ const (
 //go:embed oauth_consent.html
 var oauthConsentHTML string
 
-var (
-	oauthConsentTemplate = template.Must(template.New("oauth-consent").Parse(oauthConsentHTML))
-	oauthScopeLabels     = map[string]string{
-		mcpScopeRead:       "Use basic MCP tools including usage and non-task resources",
-		mcpScopeTasksRead:  "Read task information",
-		mcpScopeTasksWrite: "Create and manage tasks",
-		mcpScopeTasksAdmin: "Administer tasks (cancel, delete)",
-		mcpScopeReposWrite: "Manage repositories",
-	}
-)
+var oauthConsentTemplate = template.Must(template.New("oauth-consent").Parse(oauthConsentHTML))
 
 // oauthConsentTemplateData is the server-rendered OAuth consent page model.
 type oauthConsentTemplateData struct {
@@ -113,6 +90,10 @@ type oauthServer struct {
 
 	supportedScopes []string // canonical ordered scope list.
 	defaultScopes   []string // pre-checked on the consent form.
+
+	scopeLabels map[string]string // human-readable labels for supported scopes.
+
+	resourceURLPath string // e.g. "/api/caic/v1/mcp"
 
 	// Shared dependencies (not owned).
 	authStore    *auth.Store
@@ -210,7 +191,7 @@ func providerLabel(provider string) string {
 	}
 }
 
-func newOAuthServer(keyPEM []byte, kid, refreshTokenStorePath string, supportedScopes, defaultScopes []string, authStore *auth.Store, hostState *auth.HostState, authHandlers *authHandlers, audit *auditStore, rateLimiter *rateLimiter) (*oauthServer, error) {
+func newOAuthServer(keyPEM []byte, kid, refreshTokenStorePath, resourceURLPath string, supportedScopes, defaultScopes []string, scopeLabels map[string]string, authStore *auth.Store, hostState *auth.HostState, authHandlers *authHandlers, audit *auditStore, rateLimiter *rateLimiter) (*oauthServer, error) {
 	var key *rsa.PrivateKey
 	if len(keyPEM) > 0 {
 		block, _ := pem.Decode(keyPEM)
@@ -254,14 +235,12 @@ func newOAuthServer(keyPEM []byte, kid, refreshTokenStorePath string, supportedS
 		authStore:             authStore,
 		hostState:             hostState,
 		authHandlers:          authHandlers,
+		scopeLabels:           scopeLabels,
 		audit:                 audit,
 		rateLimiter:           rateLimiter,
+		resourceURLPath:       resourceURLPath,
 	}, nil
 }
-
-// authEnabled reports whether OAuth authentication is configured.
-
-// mcpResourceURL returns the protected resource URL for the MCP endpoint.
 
 // SetRefreshTokenStorePath updates the path and reloads persisted OAuth state
 // (clients, refresh tokens, grants) from the new location.
@@ -279,17 +258,25 @@ func (s *oauthServer) SetRefreshTokenStorePath(path string) error {
 	return nil
 }
 
-// BearerAuth is an HTTP middleware that verifies MCP bearer tokens. On success
+// bearerClaims holds the verified bearer token claims independent of any
+// protocol-specific principal type. BearerAuth converts these into the
+// MCP-specific mcpPrincipal at the boundary.
+type bearerClaims struct {
+	User     auth.User
+	Subject  string
+	Username string
+	Issuer   string
+	Audience string
+	Scopes   []string
+}
+
+// BearerAuth is an HTTP middleware that verifies OAuth bearer tokens. On success
 // the authenticated user and mcpPrincipal are set in the request context.
 // Requests without a bearer token are rejected with 401 unless the request
 // already carries a session user (allowing caic's own web UI to use MCP).
 func (s *oauthServer) BearerAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.authEnabled() {
-			next.ServeHTTP(w, r)
-			return
-		}
-		token := mcp.BearerToken(r)
+		token := BearerToken(r)
 		if token == "" {
 			if _, ok := auth.UserFromContext(r.Context()); ok {
 				next.ServeHTTP(w, r)
@@ -298,12 +285,20 @@ func (s *oauthServer) BearerAuth(next http.Handler) http.Handler {
 			s.writeUnauthorized(w, r)
 			return
 		}
-		user, principal, err := s.verifyBearer(r, token)
+		claims, err := s.verifyBearer(r, token)
 		if err != nil {
 			s.writeUnauthorized(w, r)
 			return
 		}
-		ctx := auth.NewContext(r.Context(), user)
+		ctx := auth.NewContext(r.Context(), &claims.User)
+		principal := &mcpPrincipal{
+			Subject:  claims.Subject,
+			Username: claims.Username,
+			Issuer:   claims.Issuer,
+			Audience: claims.Audience,
+			Scopes:   claims.Scopes,
+			Remote:   true,
+		}
 		ctx = newMCPPrincipalContext(ctx, principal)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -316,16 +311,13 @@ func (s *oauthServer) scopeItems(scope string) []oauthScopeItem {
 	}
 	items := make([]oauthScopeItem, 0, len(parts))
 	for _, p := range parts {
-		label := oauthScopeLabels[p]
+		label := s.scopeLabels[p]
 		if label == "" {
 			label = p
 		}
 		items = append(items, oauthScopeItem{ID: p, Label: label, Checked: slices.Contains(s.defaultScopes, p)})
 	}
 	return items
-}
-func (s *oauthServer) authEnabled() bool {
-	return s.authStore != nil
 }
 
 func (s *oauthServer) externalBaseURL(r *http.Request) string {
@@ -336,9 +328,6 @@ func (s *oauthServer) externalBaseURL(r *http.Request) string {
 	}
 	authority, scheme := effectiveRequestHostAndScheme(r)
 	return scheme + "://" + authority
-}
-func (s *oauthServer) mcpResourceURL(r *http.Request) string {
-	return s.externalBaseURL(r) + "/api/caic/v1/mcp"
 }
 
 func (s *oauthServer) loginStartURL(r *http.Request) string {
@@ -400,23 +389,19 @@ func (s *oauthServer) routes() http.Handler {
 }
 
 func (s *oauthServer) handleOAuthMetadata(w http.ResponseWriter, r *http.Request) {
-	if !s.authEnabled() {
-		http.NotFound(w, r)
-		return
-	}
 	issuer := s.externalBaseURL(r)
-	metadata := mcp.OAuthAuthorizationServerMetadata{
+	metadata := OAuthAuthorizationServerMetadata{
 		Issuer:                                 issuer,
 		AuthorizationEndpoint:                  issuer + "/oauth/authorize",
 		TokenEndpoint:                          issuer + "/oauth/token",
 		JWKSURI:                                issuer + "/oauth/jwks",
 		RegistrationEndpoint:                   issuer + "/oauth/register",
 		RevocationEndpoint:                     issuer + "/oauth/revoke",
-		ResponseTypesSupported:                 []string{mcp.OAuthResponseTypeCode},
-		GrantTypesSupported:                    []string{mcp.OAuthGrantAuthorizationCode, mcp.OAuthGrantRefreshToken},
-		CodeChallengeMethodsSupported:          []string{mcp.OAuthCodeChallengeS256},
-		TokenEndpointAuthMethodsSupported:      []string{mcp.OAuthTokenEndpointAuthNone},
-		RevocationEndpointAuthMethodsSupported: []string{mcp.OAuthTokenEndpointAuthNone},
+		ResponseTypesSupported:                 []string{OAuthResponseTypeCode},
+		GrantTypesSupported:                    []string{OAuthGrantAuthorizationCode, OAuthGrantRefreshToken},
+		CodeChallengeMethodsSupported:          []string{OAuthCodeChallengeS256},
+		TokenEndpointAuthMethodsSupported:      []string{OAuthTokenEndpointAuthNone},
+		RevocationEndpointAuthMethodsSupported: []string{OAuthTokenEndpointAuthNone},
 		ScopesSupported:                        s.supportedScopes,
 		AuthorizationResponseIssuerParameterSupported: true,
 	}
@@ -424,34 +409,26 @@ func (s *oauthServer) handleOAuthMetadata(w http.ResponseWriter, r *http.Request
 }
 
 func (s *oauthServer) handleOAuthJWKS(w http.ResponseWriter, r *http.Request) {
-	if !s.authEnabled() {
-		http.NotFound(w, r)
-		return
-	}
 	pub := s.key.PublicKey
-	resp := mcp.JWKSet{Keys: []mcp.JWK{mcp.RSAJWK(s.kid, &pub)}}
+	resp := JWKSet{Keys: []JWK{RSAJWK(s.kid, &pub)}}
 	writeJSONResponse(w, &resp, nil)
 }
 
 func (s *oauthServer) handleOAuthRegister(w http.ResponseWriter, r *http.Request) {
-	if !s.authEnabled() {
-		http.NotFound(w, r)
-		return
-	}
 	if !s.allowRequest(w, r) {
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
-	var req mcp.OAuthRegisterRequest
+	var req OAuthRegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_client_metadata", "invalid registration JSON")
 		return
 	}
 	method := req.TokenEndpointAuthMethod
 	if method == "" {
-		method = mcp.OAuthTokenEndpointAuthNone
+		method = OAuthTokenEndpointAuthNone
 	}
-	if method != mcp.OAuthTokenEndpointAuthNone {
+	if method != OAuthTokenEndpointAuthNone {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_client_metadata", "only public clients are supported")
 		return
 	}
@@ -478,7 +455,7 @@ func (s *oauthServer) handleOAuthRegister(w http.ResponseWriter, r *http.Request
 		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not register client")
 		return
 	}
-	resp := mcp.OAuthRegisterResponse{ClientID: client.ID, ClientIDIssuedAt: now.Unix(), ClientName: client.Name, RedirectURIs: client.RedirectURIs, TokenEndpointAuthMethod: method}
+	resp := OAuthRegisterResponse{ClientID: client.ID, ClientIDIssuedAt: now.Unix(), ClientName: client.Name, RedirectURIs: client.RedirectURIs, TokenEndpointAuthMethod: method}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(&resp); err != nil {
@@ -487,10 +464,6 @@ func (s *oauthServer) handleOAuthRegister(w http.ResponseWriter, r *http.Request
 }
 
 func (s *oauthServer) handleOAuthAuthorizeGET(w http.ResponseWriter, r *http.Request) {
-	if !s.authEnabled() {
-		http.NotFound(w, r)
-		return
-	}
 	user, ok := auth.UserFromContext(r.Context())
 	if !ok {
 		if loginURL := s.loginStartURL(r); loginURL != "" {
@@ -517,7 +490,13 @@ func (s *oauthServer) handleOAuthAuthorizeGET(w http.ResponseWriter, r *http.Req
 	s.consents[consentToken] = oauthConsent{UserID: user.ID, Values: values, ExpiresAt: time.Now().Add(oauthAuthCodeTTL)}
 	s.mu.Unlock()
 	baseURL := s.externalBaseURL(r)
-	writeConsentHeaders(w)
+	h := w.Header()
+	h.Set("Cache-Control", "no-store")
+	h.Set("Content-Type", "text/html; charset=utf-8")
+	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'")
+	h.Set("Pragma", "no-cache")
+	h.Set("Referrer-Policy", "no-referrer")
+	h.Set("X-Content-Type-Options", "nosniff")
 	data := oauthConsentTemplateData{
 		Action:        baseURL + "/oauth/authorize",
 		ConsentToken:  consentToken,
@@ -536,10 +515,6 @@ func (s *oauthServer) handleOAuthAuthorizeGET(w http.ResponseWriter, r *http.Req
 }
 
 func (s *oauthServer) handleOAuthAuthorizePOST(w http.ResponseWriter, r *http.Request) {
-	if !s.authEnabled() {
-		http.NotFound(w, r)
-		return
-	}
 	user, ok := auth.UserFromContext(r.Context())
 	if !ok {
 		writeOAuthError(w, http.StatusUnauthorized, "login_required", "log in to caic before authorizing MCP access")
@@ -616,10 +591,6 @@ func (s *oauthServer) handleOAuthAuthorizePOST(w http.ResponseWriter, r *http.Re
 }
 
 func (s *oauthServer) handleOAuthToken(w http.ResponseWriter, r *http.Request) {
-	if !s.authEnabled() {
-		http.NotFound(w, r)
-		return
-	}
 	if !s.allowRequest(w, r) {
 		return
 	}
@@ -634,9 +605,9 @@ func (s *oauthServer) handleOAuthToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch r.PostForm.Get("grant_type") {
-	case mcp.OAuthGrantAuthorizationCode:
+	case OAuthGrantAuthorizationCode:
 		s.handleOAuthAuthorizationCodeToken(w, r)
-	case mcp.OAuthGrantRefreshToken:
+	case OAuthGrantRefreshToken:
 		s.handleOAuthRefreshToken(w, r)
 	default:
 		writeOAuthError(w, http.StatusBadRequest, "unsupported_grant_type", "only authorization_code and refresh_token are supported")
@@ -663,7 +634,7 @@ func (s *oauthServer) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r
 		writeOAuthError(w, http.StatusBadRequest, "invalid_target", "resource mismatch")
 		return
 	}
-	if !mcp.VerifyPKCES256(entry.CodeChallenge, r.PostForm.Get("code_verifier")) {
+	if !VerifyPKCES256(entry.CodeChallenge, r.PostForm.Get("code_verifier")) {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "PKCE verification failed")
 		return
 	}
@@ -736,15 +707,11 @@ func (s *oauthServer) writeTokenResponse(w http.ResponseWriter, r *http.Request,
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
-	resp := mcp.OAuthTokenResponse{AccessToken: accessToken, TokenType: mcp.OAuthTokenTypeBearer, ExpiresIn: int64(oauthAccessTokenTTL.Seconds()), RefreshToken: refreshToken, Scope: scope}
+	resp := OAuthTokenResponse{AccessToken: accessToken, TokenType: OAuthTokenTypeBearer, ExpiresIn: int64(oauthAccessTokenTTL.Seconds()), RefreshToken: refreshToken, Scope: scope}
 	writeJSONResponse(w, &resp, nil)
 }
 
 func (s *oauthServer) handleOAuthRevoke(w http.ResponseWriter, r *http.Request) {
-	if !s.authEnabled() {
-		http.NotFound(w, r)
-		return
-	}
 	if !s.allowRequest(w, r) {
 		return
 	}
@@ -803,7 +770,7 @@ func (s *oauthServer) validateAuthorizeRequest(r *http.Request) error {
 }
 
 func (s *oauthServer) validateAuthorizeForm(r *http.Request, values url.Values) error {
-	if values.Get("response_type") != mcp.OAuthResponseTypeCode {
+	if values.Get("response_type") != OAuthResponseTypeCode {
 		return errors.New("response_type must be code")
 	}
 	client := s.oauthClient(values.Get("client_id"))
@@ -814,14 +781,14 @@ func (s *oauthServer) validateAuthorizeForm(r *http.Request, values url.Values) 
 	if !slices.Contains(client.RedirectURIs, redirectURI) {
 		return errors.New("redirect_uri is not registered")
 	}
-	if values.Get("code_challenge_method") != mcp.OAuthCodeChallengeS256 || values.Get("code_challenge") == "" {
+	if values.Get("code_challenge_method") != OAuthCodeChallengeS256 || values.Get("code_challenge") == "" {
 		return errors.New("S256 PKCE is required")
 	}
 	resource := values.Get("resource")
 	if resource == "" {
 		return errors.New("resource is required")
 	}
-	if resource != s.mcpResourceURL(r) {
+	if resource != s.externalBaseURL(r)+s.resourceURLPath {
 		return errors.New("resource must match the caic MCP endpoint")
 	}
 	if _, err := s.normalizeScope(values.Get("scope")); err != nil {
@@ -1035,7 +1002,7 @@ func (s *oauthServer) saveRefreshTokensLocked() error {
 
 func (s *oauthServer) issueAccessToken(issuer string, user *auth.User, audience, scope, grantID string) (string, error) {
 	now := time.Now()
-	headerJSON, err := json.Marshal(map[string]string{"alg": mcp.JWTAlgRS256, "typ": "JWT", "kid": s.kid})
+	headerJSON, err := json.Marshal(map[string]string{"alg": JWTAlgRS256, "typ": "JWT", "kid": s.kid})
 	if err != nil {
 		return "", err
 	}
@@ -1090,7 +1057,7 @@ func (s *oauthServer) approveScope(requested string, form url.Values) (string, e
 		if !slices.Contains(s.supportedScopes, scope) {
 			return "", fmt.Errorf("unsupported scope: %s", scope)
 		}
-		if _, ok := allowed[scope]; !ok {
+		if !slices.Contains(allowed, scope) {
 			return "", fmt.Errorf("unrequested scope: %s", scope)
 		}
 		selected[scope] = struct{}{}
@@ -1108,13 +1075,8 @@ func (s *oauthServer) approveScope(requested string, form url.Values) (string, e
 	return strings.Join(approved, " "), nil
 }
 
-func parseScopeSet(scope string) map[string]struct{} {
-	parts := strings.Fields(scope)
-	scopes := make(map[string]struct{}, len(parts))
-	for _, part := range parts {
-		scopes[part] = struct{}{}
-	}
-	return scopes
+func parseScopeSet(scope string) []string {
+	return strings.Fields(scope)
 }
 
 func loadOAuthRefreshTokens(path string) (clients map[string]oauthClient, refreshTokens map[string]oauthRefreshToken, grants map[string]oauthGrant, err error) {
@@ -1242,26 +1204,16 @@ func clientDisplayName(client *oauthClient) string {
 	return "remote MCP client"
 }
 
-func writeConsentHeaders(w http.ResponseWriter) {
-	h := w.Header()
-	h.Set("Cache-Control", "no-store")
-	h.Set("Content-Type", "text/html; charset=utf-8")
-	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'")
-	h.Set("Pragma", "no-cache")
-	h.Set("Referrer-Policy", "no-referrer")
-	h.Set("X-Content-Type-Options", "nosniff")
-}
-
 // handleProtectedResourceMetadata writes the MCP protected-resource metadata
 // for the OAuth-protected MCP endpoint (RFC 9728).
 func (s *oauthServer) handleProtectedResourceMetadata(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
-	if !s.authEnabled() || (path != "/.well-known/oauth-protected-resource" && path != "/.well-known/oauth-protected-resource/api/caic/v1/mcp") {
+	if path != "/.well-known/oauth-protected-resource" && path != "/.well-known/oauth-protected-resource/api/caic/v1/mcp" {
 		http.NotFound(w, r)
 		return
 	}
-	metadata := mcp.ProtectedResourceMetadata{
-		Resource:             s.mcpResourceURL(r),
+	metadata := ProtectedResourceMetadata{
+		Resource:             s.externalBaseURL(r) + s.resourceURLPath,
 		AuthorizationServers: []string{s.externalBaseURL(r)},
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -1272,91 +1224,87 @@ func (s *oauthServer) handleProtectedResourceMetadata(w http.ResponseWriter, r *
 
 // verifyBearer validates a JWT bearer token against oauthServer's key material
 // and grant store.
-func (s *oauthServer) verifyBearer(r *http.Request, token string) (*auth.User, *mcpPrincipal, error) {
+func (s *oauthServer) verifyBearer(r *http.Request, token string) (*bearerClaims, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return nil, nil, errors.New("invalid bearer token format")
+		return nil, errors.New("invalid bearer token format")
 	}
 	headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
 	if err != nil {
-		return nil, nil, fmt.Errorf("decode token header: %w", err)
+		return nil, fmt.Errorf("decode token header: %w", err)
 	}
-	var header mcp.JWTHeader
+	var header JWTHeader
 	if err := json.Unmarshal(headerJSON, &header); err != nil {
-		return nil, nil, fmt.Errorf("parse token header: %w", err)
+		return nil, fmt.Errorf("parse token header: %w", err)
 	}
-	if header.Alg != mcp.JWTAlgRS256 || header.KID != s.kid {
-		return nil, nil, errors.New("unsupported token header")
+	if header.Alg != JWTAlgRS256 || header.KID != s.kid {
+		return nil, errors.New("unsupported token header")
 	}
 	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil {
-		return nil, nil, fmt.Errorf("decode token signature: %w", err)
+		return nil, fmt.Errorf("decode token signature: %w", err)
 	}
 	signingInput := parts[0] + "." + parts[1]
 	digest := sha256.Sum256([]byte(signingInput))
 	if err := rsa.VerifyPKCS1v15(&s.key.PublicKey, crypto.SHA256, digest[:], signature); err != nil {
-		return nil, nil, errors.New("invalid token signature")
+		return nil, errors.New("invalid token signature")
 	}
 	payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return nil, nil, fmt.Errorf("decode token payload: %w", err)
+		return nil, fmt.Errorf("decode token payload: %w", err)
 	}
-	var claims mcp.AccessTokenClaims
+	var claims AccessTokenClaims
 	if err := json.Unmarshal(payloadJSON, &claims); err != nil {
-		return nil, nil, fmt.Errorf("parse token claims: %w", err)
+		return nil, fmt.Errorf("parse token claims: %w", err)
 	}
 	now := time.Now().Unix()
 	if claims.Issuer != s.externalBaseURL(r) {
-		return nil, nil, errors.New("invalid token issuer")
+		return nil, errors.New("invalid token issuer")
 	}
-	if claims.Audience != s.mcpResourceURL(r) {
-		return nil, nil, errors.New("invalid token audience")
+	if claims.Audience != s.externalBaseURL(r)+s.resourceURLPath {
+		return nil, errors.New("invalid token audience")
 	}
 	if claims.Type != "access_token" {
-		return nil, nil, errors.New("invalid token type")
+		return nil, errors.New("invalid token type")
 	}
 	if claims.NotBefore > now || claims.Expiry <= now {
-		return nil, nil, errors.New("token is not valid now")
+		return nil, errors.New("token is not valid now")
 	}
 	if claims.GrantID != "" {
 		active, err := s.touchGrant(claims.GrantID, time.Now())
 		if err != nil {
-			return nil, nil, fmt.Errorf("touch token grant: %w", err)
+			return nil, fmt.Errorf("touch token grant: %w", err)
 		}
 		if !active {
-			return nil, nil, errors.New("token grant is not active")
+			return nil, errors.New("token grant is not active")
 		}
 	}
 	user, ok := s.authStore.FindByID(claims.Subject)
 	if !ok {
-		return nil, nil, errors.New("token subject is unknown")
+		return nil, errors.New("token subject is unknown")
 	}
-	principal := &mcpPrincipal{
+	return &bearerClaims{
+		User:     user,
 		Subject:  claims.Subject,
 		Username: claims.Username,
 		Issuer:   claims.Issuer,
 		Audience: claims.Audience,
 		Scopes:   parseScopeSet(claims.Scope),
-		Remote:   true,
-	}
-	return &user, principal, nil
+	}, nil
 }
 
 // writeUnauthorized writes a 401 with the MCP bearer challenge so clients can
 // discover the authorization server.
 func (s *oauthServer) writeUnauthorized(w http.ResponseWriter, r *http.Request) {
-	if s.authEnabled() && r.URL.Path == "/api/caic/v1/mcp" {
+	if r.URL.Path == "/api/caic/v1/mcp" {
 		resourceMetadataURL := s.externalBaseURL(r) + "/.well-known/oauth-protected-resource/api/caic/v1/mcp"
-		w.Header().Set("WWW-Authenticate", mcp.BearerChallenge(resourceMetadataURL, mcpAuthDefaultScope))
+		w.Header().Set("WWW-Authenticate", BearerChallenge(resourceMetadataURL, strings.Join(s.supportedScopes, " ")))
 	}
 	writeUnauthorizedJSON(w)
 }
 
 // listOAuthGrants returns the authenticated user's OAuth client grants.
 func (s *oauthServer) listOAuthGrants(ctx context.Context, _ *api.EmptyReq) (*v1.OAuthGrantsResp, error) {
-	if !s.authEnabled() {
-		return &v1.OAuthGrantsResp{}, nil
-	}
 	now := time.Now()
 	grants := s.listUserGrants(userIDFromCtx(ctx))
 	resp := make([]v1.OAuthGrantResp, len(grants))
@@ -1368,9 +1316,6 @@ func (s *oauthServer) listOAuthGrants(ctx context.Context, _ *api.EmptyReq) (*v1
 
 // revokeOAuthGrant revokes one OAuth client grant for the authenticated user.
 func (s *oauthServer) revokeOAuthGrant(ctx context.Context, req *v1.RevokeOAuthGrantReq) (*v1.StatusResp, error) {
-	if !s.authEnabled() {
-		return nil, api.NotFound("OAuth grant")
-	}
 	if !s.revokeUserGrant(userIDFromCtx(ctx), req.GrantID) {
 		return nil, api.NotFound("OAuth grant")
 	}

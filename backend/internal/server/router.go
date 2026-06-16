@@ -147,7 +147,9 @@ func (s *Router) buildAPIHandler() http.Handler {
 	m("/processes", s.runtimeProcesses.routes())
 	m("/ci", s.ciHandlers.routes())
 	m("/web", s.webFetchHandlers.routes())
-	m("/oauth/grants", s.oauth.grantRoutes())
+	if s.oauth != nil {
+		m("/oauth/grants", s.oauth.grantRoutes())
+	}
 	mountPrefix(apiMux, "", "/api/voicegateway/v1", s.voiceHandlers.handler())
 	apiMux.Handle("/api/", http.NotFoundHandler())
 	apiMux.Handle("/api", http.NotFoundHandler())
@@ -161,13 +163,13 @@ func (s *Router) buildAPIHandler() http.Handler {
 // buildHandler assembles the full HTTP handler. Extracted from Serve so that
 // route registration can be tested without a listener.
 func (s *Router) buildHandler() (http.Handler, error) {
-	// Sync shared references into mcpServer and oauthServer (tests mutate
-	// s.authStore/s.hostState after construction before calling buildHandler).
-	s.mcp.authStore = s.authStore
+	// Sync shared references (tests may mutate after construction).
 	s.mcp.hostState = s.hostState
-	s.oauth.authStore = s.authStore
-	s.oauth.hostState = s.hostState
-	s.oauth.authHandlers = s.authHandlers
+	if s.oauth != nil {
+		s.oauth.authStore = s.authStore
+		s.oauth.hostState = s.hostState
+		s.oauth.authHandlers = s.authHandlers
+	}
 
 	// --- Root mux ---
 	//
@@ -189,12 +191,16 @@ func (s *Router) buildHandler() (http.Handler, error) {
 	// when unauthenticated.
 	mountPrefix(mux, "", "/auth", s.authHandlers.routes())
 
-	// --- Public: MCP / OAuth routes ---
-	s.oauth.registerWellKnownRoutes(mux)
-	mountPrefix(mux, "", "/oauth", s.oauth.routes())
+	// OAuth routes only when auth is configured.
+	if s.oauth != nil {
+		s.oauth.registerWellKnownRoutes(mux)
+		mountPrefix(mux, "", "/oauth", s.oauth.routes())
+	}
 	if !s.mcpDisabled {
 		mcpHandler := s.mcp.endpointRoutes()
-		mcpHandler = s.oauth.BearerAuth(mcpHandler)
+		if s.oauth != nil {
+			mcpHandler = s.oauth.BearerAuth(mcpHandler)
+		}
 		mountPrefix(mux, "", "/api/caic/v1/mcp", mcpHandler)
 	}
 
@@ -468,16 +474,18 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		ipgeoChecker:     d.IPGeoChecker,
 	}
 
-	oauthServer, err := newOAuthServer(d.OAuthPrivateKeyPEM, d.OAuthKeyID, d.OAuthRefreshTokenStorePath, []string{mcpScopeRead, mcpScopeTasksRead, mcpScopeTasksWrite, mcpScopeTasksAdmin, mcpScopeReposWrite}, []string{mcpScopeRead, mcpScopeTasksRead}, d.AuthStore, d.HostState, s.authHandlers, audit, rateLimiter)
-	if err != nil {
-		return nil, err
+	// OAuth server — only when auth is configured. Tests that set authStore
+	// after construction rely on buildHandler to create it lazily.
+	if d.AuthStore != nil {
+		var err error
+		s.oauth, err = newOAuthServer(d.OAuthPrivateKeyPEM, d.OAuthKeyID, d.OAuthRefreshTokenStorePath, "/api/caic/v1/mcp", []string{mcpScopeRead, mcpScopeTasksRead, mcpScopeTasksWrite, mcpScopeTasksAdmin, mcpScopeReposWrite}, []string{mcpScopeRead, mcpScopeTasksRead}, mcpScopeLabels, d.AuthStore, d.HostState, s.authHandlers, audit, rateLimiter)
+		if err != nil {
+			return nil, err
+		}
 	}
-	s.oauth = oauthServer
 
 	s.mcp = &mcpServer{
-		audit:       audit,
 		rateLimiter: rateLimiter,
-		authStore:   d.AuthStore,
 		hostState:   d.HostState,
 	}
 	mcpRegistry := &caicToolRegistry{serverConfig: s.serverConfigHandlers, tasks: taskService, ci: s.ciHandlers, usage: s.usageHandlers, audit: audit}

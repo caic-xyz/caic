@@ -132,6 +132,44 @@ func newTestRouter(t testing.TB) *testRouter {
 	return &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, prefs: prefs, forge: forgeManager}
 }
 
+// newTestRouterWithAuth creates a Router with an auth store, suitable for OAuth
+// tests that need s.oauth to be non-nil at construction time.
+// If refreshTokenPath is non-empty, it is used as the OAuth refresh token store.
+func newTestRouterWithAuth(t testing.TB, authStore *auth.Store, refreshTokenPath string) *testRouter {
+	checker, err := ipgeo.NewChecker(t.Context(), "0.0.0.0/0,::/0", "", "")
+	if err != nil {
+		t.Fatalf("ipgeo.NewChecker: %v", err)
+	}
+	backend := &mdruntime.Backend{}
+	taskMgr := tasks.New(tasks.Config{ServerCtx: t.Context()})
+	repoSvc := repos.NewService("", "", "", nil, repos.NewRegistry(nil), taskMgr, backend, nil)
+	prefs := newTestPrefs(t)
+	forgeManager := forgemanager.New("", "", nil)
+	s, err := New(t.Context(), Dependencies{
+		Repos:                      repoSvc,
+		ProcessBackend:             backend,
+		TaskManager:                taskMgr,
+		Preferences:                prefs,
+		IPGeoChecker:               checker,
+		Forge:                      forgeManager,
+		AuthStore:                  authStore,
+		OAuthRefreshTokenStorePath: refreshTokenPath,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, prefs: prefs, forge: forgeManager}
+}
+
+// newTestOAuthRouter creates a Router configured with OAuth host state and a
+// session secret, suitable for tests that hit OAuth endpoints or issue tokens.
+func newTestOAuthRouter(t testing.TB, authStore *auth.Store) *testRouter {
+	s := newTestRouterWithAuth(t, authStore, "")
+	s.hostState = auth.NewHostState("https://caic.example.com")
+	s.sessionSecret = []byte("0123456789abcdef0123456789abcdef")
+	return s
+}
+
 func testTaskHandlers(s *testRouter) *taskHTTPHandlers {
 	return s.taskHTTPHandlers
 }
@@ -1983,16 +2021,12 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("MCP protected resource metadata is public", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
-		s.hostState = auth.NewHostState("https://caic.example.com")
-		secret := make([]byte, 32)
-		s.sessionSecret = secret
 		usersPath := filepath.Join(t.TempDir(), "users.json")
 		store, err := auth.Open(usersPath)
 		if err != nil {
 			t.Fatalf("open auth store: %v", err)
 		}
-		s.authStore = store
+		s := newTestOAuthRouter(t, store)
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -2005,7 +2039,7 @@ func TestBuildHandler(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
-		var got mcp.ProtectedResourceMetadata
+		var got ProtectedResourceMetadata
 		if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 			t.Fatal(err)
 		}
@@ -2022,16 +2056,12 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("MCP unauthorized challenge advertises metadata", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
-		s.hostState = auth.NewHostState("https://caic.example.com")
-		secret := make([]byte, 32)
-		s.sessionSecret = secret
 		usersPath := filepath.Join(t.TempDir(), "users.json")
 		store, err := auth.Open(usersPath)
 		if err != nil {
 			t.Fatalf("open auth store: %v", err)
 		}
-		s.authStore = store
+		s := newTestOAuthRouter(t, store)
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -2053,16 +2083,12 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("MCP OAuth metadata is public", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
-		s.hostState = auth.NewHostState("https://caic.example.com")
-		secret := make([]byte, 32)
-		s.sessionSecret = secret
 		usersPath := filepath.Join(t.TempDir(), "users.json")
 		store, err := auth.Open(usersPath)
 		if err != nil {
 			t.Fatalf("open auth store: %v", err)
 		}
-		s.authStore = store
+		s := newTestOAuthRouter(t, store)
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -2075,7 +2101,7 @@ func TestBuildHandler(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
-		var got mcp.OAuthAuthorizationServerMetadata
+		var got OAuthAuthorizationServerMetadata
 		if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 			t.Fatal(err)
 		}
@@ -2089,10 +2115,6 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("MCP OAuth authorization code flow issues access token", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
-		s.hostState = auth.NewHostState("https://caic.example.com")
-		secret := []byte("0123456789abcdef0123456789abcdef")
-		s.sessionSecret = secret
 		usersPath := filepath.Join(t.TempDir(), "users.json")
 		store, err := auth.Open(usersPath)
 		if err != nil {
@@ -2102,7 +2124,8 @@ func TestBuildHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("upsert user: %v", err)
 		}
-		s.authStore = store
+		s := newTestOAuthRouter(t, store)
+		secret := s.sessionSecret
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -2117,7 +2140,7 @@ func TestBuildHandler(t *testing.T) {
 		if w.Code != http.StatusCreated {
 			t.Fatalf("register status = %d, want %d: %s", w.Code, http.StatusCreated, w.Body.String())
 		}
-		var registered mcp.OAuthRegisterResponse
+		var registered OAuthRegisterResponse
 		if err := json.NewDecoder(w.Body).Decode(&registered); err != nil {
 			t.Fatal(err)
 		}
@@ -2210,7 +2233,7 @@ func TestBuildHandler(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var tokenResp mcp.OAuthTokenResponse
+		var tokenResp OAuthTokenResponse
 		if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
 			t.Fatal(err)
 		}
@@ -2233,10 +2256,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("MCP accepts caic bearer token", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
-		s.hostState = auth.NewHostState("https://caic.example.com")
 		secret := []byte("0123456789abcdef0123456789abcdef")
-		s.sessionSecret = secret
 		usersPath := filepath.Join(t.TempDir(), "users.json")
 		store, err := auth.Open(usersPath)
 		if err != nil {
@@ -2246,7 +2266,9 @@ func TestBuildHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("upsert user: %v", err)
 		}
-		s.authStore = store
+		s := newTestRouterWithAuth(t, store, "")
+		s.hostState = auth.NewHostState("https://caic.example.com")
+		s.sessionSecret = secret
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -2278,10 +2300,6 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("MCP rejects caic session JWT in authorization header", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
-		s.hostState = auth.NewHostState("https://caic.example.com")
-		secret := []byte("0123456789abcdef0123456789abcdef")
-		s.sessionSecret = secret
 		usersPath := filepath.Join(t.TempDir(), "users.json")
 		store, err := auth.Open(usersPath)
 		if err != nil {
@@ -2291,7 +2309,8 @@ func TestBuildHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("upsert user: %v", err)
 		}
-		s.authStore = store
+		s := newTestOAuthRouter(t, store)
+		secret := s.sessionSecret
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -2315,9 +2334,6 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("MCP rejects wrong bearer audience", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
-		s.hostState = auth.NewHostState("https://caic.example.com")
-		s.sessionSecret = []byte("0123456789abcdef0123456789abcdef")
 		usersPath := filepath.Join(t.TempDir(), "users.json")
 		store, err := auth.Open(usersPath)
 		if err != nil {
@@ -2327,7 +2343,9 @@ func TestBuildHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("upsert user: %v", err)
 		}
-		s.authStore = store
+		s := newTestRouterWithAuth(t, store, "")
+		s.hostState = auth.NewHostState("https://caic.example.com")
+		s.sessionSecret = []byte("0123456789abcdef0123456789abcdef")
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -2354,9 +2372,6 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("MCP rejects invalid origin before handler", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
-		s.hostState = auth.NewHostState("https://caic.example.com")
-		s.sessionSecret = []byte("0123456789abcdef0123456789abcdef")
 		usersPath := filepath.Join(t.TempDir(), "users.json")
 		store, err := auth.Open(usersPath)
 		if err != nil {
@@ -2366,7 +2381,9 @@ func TestBuildHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("upsert user: %v", err)
 		}
-		s.authStore = store
+		s := newTestRouterWithAuth(t, store, "")
+		s.hostState = auth.NewHostState("https://caic.example.com")
+		s.sessionSecret = []byte("0123456789abcdef0123456789abcdef")
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -2406,9 +2423,6 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("MCP scope denial includes auth metadata and audit", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
-		s.hostState = auth.NewHostState("https://caic.example.com")
-		s.sessionSecret = []byte("0123456789abcdef0123456789abcdef")
 		usersPath := filepath.Join(t.TempDir(), "users.json")
 		store, err := auth.Open(usersPath)
 		if err != nil {
@@ -2418,7 +2432,9 @@ func TestBuildHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("upsert user: %v", err)
 		}
-		s.authStore = store
+		s := newTestRouterWithAuth(t, store, "")
+		s.hostState = auth.NewHostState("https://caic.example.com")
+		s.sessionSecret = []byte("0123456789abcdef0123456789abcdef")
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)

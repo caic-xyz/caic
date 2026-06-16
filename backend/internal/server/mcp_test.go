@@ -451,9 +451,6 @@ func TestMCPHandlers(t *testing.T) {
 }
 
 func newAuthEnabledRouter(t *testing.T) (*Router, *auth.Store, auth.User) {
-	s := newTestRouter(t)
-	s.hostState = auth.NewHostState("https://caic.example.com")
-	s.sessionSecret = []byte("0123456789abcdef0123456789abcdef")
 	usersPath := filepath.Join(t.TempDir(), "users.json")
 	store, err := auth.Open(usersPath)
 	if err != nil {
@@ -469,11 +466,11 @@ func newAuthEnabledRouter(t *testing.T) (*Router, *auth.Store, auth.User) {
 	if err != nil {
 		t.Fatalf("upsert user: %v", err)
 	}
-	s.authStore = store
+	s := newTestOAuthRouter(t, store)
 	return s.Router, store, user
 }
 
-func registerTestClient(t *testing.T, h http.Handler, clientName string, redirectURIs []string) mcp.OAuthRegisterResponse {
+func registerTestClient(t *testing.T, h http.Handler, clientName string, redirectURIs []string) OAuthRegisterResponse {
 	body := strings.NewReader(`{"client_name":"` + clientName + `","redirect_uris":["` + strings.Join(redirectURIs, `","`) + `"],"token_endpoint_auth_method":"none"}`)
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/register", body)
 	req.Header.Set("Content-Type", "application/json")
@@ -486,7 +483,7 @@ func registerTestClient(t *testing.T, h http.Handler, clientName string, redirec
 	if contentType := w.Header().Get("Content-Type"); contentType != "application/json" {
 		t.Fatalf("Content-Type = %q, want application/json", contentType)
 	}
-	var resp mcp.OAuthRegisterResponse
+	var resp OAuthRegisterResponse
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode register response: %v", err)
 	}

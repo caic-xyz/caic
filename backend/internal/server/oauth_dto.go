@@ -1,6 +1,6 @@
-// MCP OAuth wire DTOs and protocol helpers without caic authorization policy.
+// OAuth wire DTOs and protocol helpers for MCP client authorization.
 
-package mcp
+package server
 
 import (
 	"crypto/rsa"

@@ -45,11 +45,7 @@ func (s *auditStore) record(ctx context.Context, e *auditEvent) {
 	}
 	if p, ok := mcpPrincipalFromContext(ctx); ok {
 		e.Subject = p.Subject
-		e.Scopes = make([]string, 0, len(p.Scopes))
-		for scope := range p.Scopes {
-			e.Scopes = append(e.Scopes, scope)
-		}
-		slices.Sort(e.Scopes)
+		e.Scopes = slices.Clone(p.Scopes)
 	}
 	s.mu.Lock()
 	s.events = append(s.events, *e)

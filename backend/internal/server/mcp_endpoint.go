@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
@@ -19,11 +20,9 @@ import (
 // peer, which provides a BearerAuth middleware applied by the Router.
 type mcpServer struct {
 	protocol    *mcp.Handler
-	audit       *auditStore
 	rateLimiter *rateLimiter
 
-	// Shared, injected references (not owned).
-	authStore *auth.Store
+	// Shared, injected reference (not owned).
 	hostState *auth.HostState
 }
 
@@ -97,6 +96,25 @@ func (s *mcpServer) endpointRoutes() http.Handler {
 	return m
 }
 
+// MCP OAuth scope constants define the authorization scopes for MCP clients.
+const (
+	mcpScopeRead       = "caic:mcp.read"
+	mcpScopeTasksRead  = "caic:tasks.read"
+	mcpScopeTasksWrite = "caic:tasks.write"
+	mcpScopeTasksAdmin = "caic:tasks.admin"
+	mcpScopeReposWrite = "caic:repos.write"
+)
+
+// mcpScopeLabels maps MCP scope identifiers to human-readable labels
+// shown on the OAuth consent form.
+var mcpScopeLabels = map[string]string{
+	mcpScopeRead:       "Use basic MCP tools including usage and non-task resources",
+	mcpScopeTasksRead:  "Read task information",
+	mcpScopeTasksWrite: "Create and manage tasks",
+	mcpScopeTasksAdmin: "Administer tasks (cancel, delete)",
+	mcpScopeReposWrite: "Manage repositories",
+}
+
 // mcpPrincipal types are MCP protocol concepts shared by oauthServer (which
 // sets the principal in context via the BearerAuth middleware) and
 // caicToolRegistry (which checks scopes on tool/resource access).
@@ -108,7 +126,7 @@ type mcpPrincipal struct {
 	Username string
 	Issuer   string
 	Audience string
-	Scopes   map[string]struct{}
+	Scopes   []string
 	Remote   bool
 }
 
@@ -129,7 +147,7 @@ func mcpHasScope(ctx context.Context, scope string) bool {
 	if !ok || !p.Remote {
 		return true
 	}
-	_, ok = p.Scopes[scope]
+	ok = slices.Contains(p.Scopes, scope)
 	return ok
 }
 
