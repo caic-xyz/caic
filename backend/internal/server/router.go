@@ -190,16 +190,12 @@ func (s *Router) buildHandler() (http.Handler, error) {
 	// when unauthenticated.
 	mountPrefix(mux, "", "/auth", s.authHandlers.routes())
 
-	// --- Public: MCP discovery, OAuth authorization server, and JSON-RPC ---
-	//
-	// /.well-known/oauth-protected-resource, /.well-known/oauth-authorization-server,
-	// /.well-known/openid-configuration, /oauth/jwks, /oauth/register,
-	// /oauth/authorize, /oauth/token, /oauth/revoke, /api/caic/v1/mcp.
-	// OAuth endpoints are at /oauth/ (outside /api/) per the invariant.
-	// The JSON-RPC endpoint stays at /api/caic/v1/mcp; it is bearer-authenticated,
-	// not session-gated, but lives under /api/ because it is a credential-bearing
-	// MCP protocol endpoint with its own auth challenge.
-	s.mcp.registerPublicRoutes(mux, s.mcpDisabled)
+	// --- Public: MCP routes ---
+	s.mcp.registerWellKnownRoutes(mux)
+	mountPrefix(mux, "", "/oauth", s.mcp.oauthRoutes())
+	if !s.mcpDisabled {
+		mountPrefix(mux, "", "/api/caic/v1/mcp", s.mcp.endpointRoutes())
+	}
 
 	// --- Public: server discovery (read before login) ---
 	//

@@ -392,37 +392,38 @@ func (s *mcpServer) grantRoutes() http.Handler {
 // authorization-server endpoints on mux, plus the bearer-authenticated JSON-RPC
 // endpoint. These live on the root mux, outside the session-gated API. The
 // endpoint paths are repeated in the metadata documents the server advertises
-// (handleMCPOAuthMetadata and the bearer challenge in writeUnauthorized); keep
-// them in sync.
-//
-// When disabled is true (auth off on a non-loopback listener, set by Serve), the
-// JSON-RPC endpoint is left unregistered so an exposed server never serves MCP
-// without authentication; the unmatched /api/ path then answers 404 rather than
-// falling back to the SPA.
-func (s *mcpServer) registerPublicRoutes(mux *http.ServeMux, disabled bool) {
-	// RFC 9728 protected-resource metadata, at the well-known path and its
-	// per-resource variant.
+// registerWellKnownRoutes registers MCP discovery and OAuth metadata routes
+// directly on mux. These share the /.well-known/ namespace with other
+// registrations (e.g. Go Mode, a 404 catch-all) so they cannot use a sub-mux
+// subtree.
+func (s *mcpServer) registerWellKnownRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource", s.handleMCPProtectedResourceMetadata)
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource/", s.handleMCPProtectedResourceMetadata)
-	// OAuth authorization-server / OpenID discovery metadata.
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", s.handleMCPOAuthMetadata)
 	mux.HandleFunc("GET /.well-known/openid-configuration", s.handleMCPOAuthMetadata)
-	// OAuth authorization-server endpoints; clients discover these via the
-	// metadata above, so the paths can change without breaking clients.
-	// These live under /oauth/ (outside /api/) per the invariant that every
-	// /api/ route requires a credential.
-	mux.HandleFunc("GET /oauth/jwks", s.handleMCPOAuthJWKS)
-	mux.HandleFunc("POST /oauth/register", s.handleMCPOAuthRegister)
-	mux.HandleFunc("GET /oauth/authorize", s.handleMCPOAuthAuthorize)
-	mux.HandleFunc("POST /oauth/authorize", s.handleMCPOAuthAuthorize)
-	mux.HandleFunc("POST /oauth/token", s.handleMCPOAuthToken)
-	mux.HandleFunc("POST /oauth/revoke", s.handleMCPOAuthRevoke)
-	if disabled {
-		return
-	}
-	// Bearer-authenticated JSON-RPC endpoint. The GET probe answers 405 (caic is
-	// stateless) so released Streamable HTTP clients (Claude Code, Codex) fall
-	// back to plain POST request/response.
-	mux.HandleFunc("POST /api/caic/v1/mcp", s.handleMCPAuthenticated)
-	mux.HandleFunc("GET /api/caic/v1/mcp", s.handleMCPAuthenticated)
+}
+
+// oauthRoutes returns an http.Handler with OAuth authorization-server
+// endpoints under /oauth/. Clients discover these via the metadata served by
+// registerWellKnownRoutes, so the paths can change without breaking clients.
+func (s *mcpServer) oauthRoutes() http.Handler {
+	m := http.NewServeMux()
+	m.HandleFunc("GET /oauth/jwks", s.handleMCPOAuthJWKS)
+	m.HandleFunc("POST /oauth/register", s.handleMCPOAuthRegister)
+	m.HandleFunc("GET /oauth/authorize", s.handleMCPOAuthAuthorize)
+	m.HandleFunc("POST /oauth/authorize", s.handleMCPOAuthAuthorize)
+	m.HandleFunc("POST /oauth/token", s.handleMCPOAuthToken)
+	m.HandleFunc("POST /oauth/revoke", s.handleMCPOAuthRevoke)
+	return m
+}
+
+// endpointRoutes returns an http.Handler with the bearer-authenticated
+// JSON-RPC endpoint at /api/caic/v1/mcp. The GET probe answers 405 (caic is
+// stateless) so released Streamable HTTP clients (Claude Code, Codex) fall
+// back to plain POST request/response.
+func (s *mcpServer) endpointRoutes() http.Handler {
+	m := http.NewServeMux()
+	m.HandleFunc("POST /api/caic/v1/mcp", s.handleMCPAuthenticated)
+	m.HandleFunc("GET /api/caic/v1/mcp", s.handleMCPAuthenticated)
+	return m
 }
