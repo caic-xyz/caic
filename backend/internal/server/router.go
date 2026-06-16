@@ -166,7 +166,7 @@ func (s *Router) buildHandler() (http.Handler, error) {
 	// then call buildHandler, and the MCP endpoint must observe those values.
 	s.mcp.authStore = s.authStore
 	s.mcp.hostState = s.hostState
-	if err := s.mcp.ensureMCPOAuthServer(); err != nil {
+	if err := s.mcp.ensureOAuthServer(); err != nil {
 		return nil, err
 	}
 
@@ -192,7 +192,7 @@ func (s *Router) buildHandler() (http.Handler, error) {
 
 	// --- Public: MCP routes ---
 	s.mcp.registerWellKnownRoutes(mux)
-	mountPrefix(mux, "", "/oauth", s.mcp.oauthRoutes())
+	mountPrefix(mux, "", "/oauth", s.mcp.oauth.routes())
 	if !s.mcpDisabled {
 		mountPrefix(mux, "", "/api/caic/v1/mcp", s.mcp.endpointRoutes())
 	}

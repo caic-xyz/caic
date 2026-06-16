@@ -30,7 +30,7 @@ import (
 // MCP-specific state.
 type mcpServer struct {
 	protocol    *mcp.Handler
-	oauth       *mcpOAuthServer
+	oauth       *oauthServer
 	audit       *mcpAuditStore
 	rateLimiter *rateLimiter
 
@@ -77,6 +77,21 @@ func (s *mcpServer) handleMCPProtectedResourceMetadata(w http.ResponseWriter, r 
 	if err := json.NewEncoder(w).Encode(metadata); err != nil {
 		http.Error(w, "encode metadata", http.StatusInternalServerError)
 	}
+}
+
+// ensureOAuthServer creates the OAuth server lazily. Called from buildHandler
+// after authStore/hostState references are finalized (important for tests that
+// mutate these fields before calling buildHandler).
+func (s *mcpServer) ensureOAuthServer() error {
+	if !s.authEnabled() || s.oauth != nil {
+		return nil
+	}
+	oauthServer, err := newOAuthServer(s.privateKeyPEM, s.keyID, s.refreshTokenStorePath, []string{mcpScopeRead, mcpScopeTasksRead, mcpScopeTasksWrite, mcpScopeTasksAdmin, mcpScopeReposWrite}, []string{mcpScopeRead, mcpScopeTasksRead}, s.authStore, s.hostState, s.authHandlers, s.audit, s.rateLimiter, s.mcpResourceURL)
+	if err != nil {
+		return err
+	}
+	s.oauth = oauthServer
+	return nil
 }
 
 func (s *mcpServer) mcpResourceURL(r *http.Request) string {
@@ -210,14 +225,6 @@ const (
 	mcpScopeReposWrite = "caic:repos.write"
 )
 
-var mcpSupportedScopes = map[string]struct{}{
-	mcpScopeRead:       {},
-	mcpScopeTasksRead:  {},
-	mcpScopeTasksWrite: {},
-	mcpScopeTasksAdmin: {},
-	mcpScopeReposWrite: {},
-}
-
 type mcpPrincipalContextKey struct{}
 
 type mcpPrincipal struct {
@@ -317,19 +324,10 @@ func (s *mcpServer) verifyMCPBearer(r *http.Request, token string) (*auth.User, 
 		Username: claims.Username,
 		Issuer:   claims.Issuer,
 		Audience: claims.Audience,
-		Scopes:   parseMCPScopeSet(claims.Scope),
+		Scopes:   parseScopeSet(claims.Scope),
 		Remote:   true,
 	}
 	return &user, principal, nil
-}
-
-func parseMCPScopeSet(scope string) map[string]struct{} {
-	parts := strings.Fields(scope)
-	scopes := make(map[string]struct{}, len(parts))
-	for _, part := range parts {
-		scopes[part] = struct{}{}
-	}
-	return scopes
 }
 
 func (s *mcpServer) listMCPGrants(ctx context.Context, _ *api.EmptyReq) (*v1.MCPGrantsResp, error) {
@@ -358,7 +356,7 @@ func (s *mcpServer) revokeMCPGrant(ctx context.Context, req *v1.RevokeMCPGrantRe
 	return &v1.StatusResp{Status: "ok"}, nil
 }
 
-func mcpGrantResponse(grant *mcpOAuthGrant, now time.Time) v1.MCPGrantResp {
+func mcpGrantResponse(grant *oauthGrant, now time.Time) v1.MCPGrantResp {
 	status := v1.MCPGrantStatusActive
 	if !grant.RevokedAt.IsZero() {
 		status = v1.MCPGrantStatusRevoked
@@ -392,29 +390,14 @@ func (s *mcpServer) grantRoutes() http.Handler {
 // authorization-server endpoints on mux, plus the bearer-authenticated JSON-RPC
 // endpoint. These live on the root mux, outside the session-gated API. The
 // endpoint paths are repeated in the metadata documents the server advertises
-// registerWellKnownRoutes registers MCP discovery and OAuth metadata routes
-// directly on mux. These share the /.well-known/ namespace with other
-// registrations (e.g. Go Mode, a 404 catch-all) so they cannot use a sub-mux
-// subtree.
+// registerWellKnownRoutes registers MCP protected-resource metadata directly on
+// mux and delegates OAuth authorization-server metadata to s.oauth. These share
+// the /.well-known/ namespace with other registrations (e.g. Go Mode, a 404
+// catch-all) so they cannot use a sub-mux subtree.
 func (s *mcpServer) registerWellKnownRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource", s.handleMCPProtectedResourceMetadata)
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource/", s.handleMCPProtectedResourceMetadata)
-	mux.HandleFunc("GET /.well-known/oauth-authorization-server", s.handleMCPOAuthMetadata)
-	mux.HandleFunc("GET /.well-known/openid-configuration", s.handleMCPOAuthMetadata)
-}
-
-// oauthRoutes returns an http.Handler with OAuth authorization-server
-// endpoints under /oauth/. Clients discover these via the metadata served by
-// registerWellKnownRoutes, so the paths can change without breaking clients.
-func (s *mcpServer) oauthRoutes() http.Handler {
-	m := http.NewServeMux()
-	m.HandleFunc("GET /oauth/jwks", s.handleMCPOAuthJWKS)
-	m.HandleFunc("POST /oauth/register", s.handleMCPOAuthRegister)
-	m.HandleFunc("GET /oauth/authorize", s.handleMCPOAuthAuthorize)
-	m.HandleFunc("POST /oauth/authorize", s.handleMCPOAuthAuthorize)
-	m.HandleFunc("POST /oauth/token", s.handleMCPOAuthToken)
-	m.HandleFunc("POST /oauth/revoke", s.handleMCPOAuthRevoke)
-	return m
+	s.oauth.registerWellKnownRoutes(mux)
 }
 
 // endpointRoutes returns an http.Handler with the bearer-authenticated
