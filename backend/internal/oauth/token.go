@@ -27,6 +27,12 @@ type signingKey struct {
 	alg string // "RS256" or "ES256"
 }
 
+// parsedToken holds the decoded header and payload of a verified JWT.
+type parsedToken struct {
+	header  json.RawMessage
+	payload json.RawMessage
+}
+
 // GrantTouchFunc marks or validates an OAuth grant during bearer-token verification.
 // Returns (active, clientID, error).
 type GrantTouchFunc func(grantID string, now time.Time) (active bool, clientID string, err error)
@@ -244,38 +250,49 @@ func (s *AccessTokenService) issueRegistrationTokenAt(issuer, clientID, audience
 	return signingInput + "." + base64.RawURLEncoding.EncodeToString(signature), nil
 }
 
-func (s *AccessTokenService) verifyClaims(token, issuer, audience string, now time.Time) (*AccessTokenClaims, error) {
-	parts := strings.Split(token, ".")
+// parseAndVerifyJWT splits a JWT, decodes header and payload, verifies the
+// signature against the key identified by KID in the JWT header, and returns
+// the raw header and payload JSON.
+func (s *AccessTokenService) parseAndVerifyJWT(raw string) (parsedToken, error) {
+	parts := strings.Split(raw, ".")
 	if len(parts) != 3 {
-		return nil, errors.New("invalid bearer token format")
+		return parsedToken{}, errors.New("invalid bearer token format")
 	}
 	headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
 	if err != nil {
-		return nil, fmt.Errorf("decode token header: %w", err)
+		return parsedToken{}, fmt.Errorf("decode token header: %w", err)
 	}
 	var header JWTHeader
 	if err := json.Unmarshal(headerJSON, &header); err != nil {
-		return nil, fmt.Errorf("parse token header: %w", err)
+		return parsedToken{}, fmt.Errorf("parse token header: %w", err)
 	}
 	keyInfo, ok := s.keys[header.KID]
 	if !ok || header.Alg != keyInfo.alg {
-		return nil, errors.New("unsupported token header")
+		return parsedToken{}, errors.New("unsupported token header")
 	}
 	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil {
-		return nil, fmt.Errorf("decode token signature: %w", err)
+		return parsedToken{}, fmt.Errorf("decode token signature: %w", err)
 	}
 	signingInput := parts[0] + "." + parts[1]
 	digest := sha256.Sum256([]byte(signingInput))
 	if err := verify(keyInfo.key.Public(), digest[:], signature); err != nil {
-		return nil, errors.New("invalid token signature")
+		return parsedToken{}, errors.New("invalid token signature")
 	}
 	payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return nil, fmt.Errorf("decode token payload: %w", err)
+		return parsedToken{}, fmt.Errorf("decode token payload: %w", err)
+	}
+	return parsedToken{header: headerJSON, payload: payloadJSON}, nil
+}
+
+func (s *AccessTokenService) verifyClaims(token, issuer, audience string, now time.Time) (*AccessTokenClaims, error) {
+	parsed, err := s.parseAndVerifyJWT(token)
+	if err != nil {
+		return nil, err
 	}
 	var claims AccessTokenClaims
-	if err := json.Unmarshal(payloadJSON, &claims); err != nil {
+	if err := json.Unmarshal(parsed.payload, &claims); err != nil {
 		return nil, fmt.Errorf("parse token claims: %w", err)
 	}
 	if claims.Issuer != issuer {
@@ -295,37 +312,12 @@ func (s *AccessTokenService) verifyClaims(token, issuer, audience string, now ti
 }
 
 func (s *AccessTokenService) verifyRegistrationClaims(token, issuer, audience string, now time.Time) (*AccessTokenClaims, error) {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return nil, errors.New("invalid bearer token format")
-	}
-	headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
+	parsed, err := s.parseAndVerifyJWT(token)
 	if err != nil {
-		return nil, fmt.Errorf("decode token header: %w", err)
-	}
-	var header JWTHeader
-	if err := json.Unmarshal(headerJSON, &header); err != nil {
-		return nil, fmt.Errorf("parse token header: %w", err)
-	}
-	keyInfo, ok := s.keys[header.KID]
-	if !ok || header.Alg != keyInfo.alg {
-		return nil, errors.New("unsupported token header")
-	}
-	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
-	if err != nil {
-		return nil, fmt.Errorf("decode token signature: %w", err)
-	}
-	signingInput := parts[0] + "." + parts[1]
-	digest := sha256.Sum256([]byte(signingInput))
-	if err := verify(keyInfo.key.Public(), digest[:], signature); err != nil {
-		return nil, errors.New("invalid token signature")
-	}
-	payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return nil, fmt.Errorf("decode token payload: %w", err)
+		return nil, err
 	}
 	var claims AccessTokenClaims
-	if err := json.Unmarshal(payloadJSON, &claims); err != nil {
+	if err := json.Unmarshal(parsed.payload, &claims); err != nil {
 		return nil, fmt.Errorf("parse token claims: %w", err)
 	}
 	if claims.Issuer != issuer {

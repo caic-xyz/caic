@@ -246,13 +246,10 @@ func verifyJWTSignature(pub crypto.PublicKey, signingInput, signature []byte) er
 			return errors.New("rsa signature too short")
 		}
 		digest := sha256.Sum256(signingInput)
-		return rsa.VerifyPKCS1v15(key, crypto.SHA256, digest[:], signature)
+		return verify(pub, digest[:], signature)
 	case *ecdsa.PublicKey:
 		digest := sha256.Sum256(signingInput)
-		if !ecdsa.VerifyASN1(key, digest[:], signature) {
-			return errors.New("ecdsa signature verification failed")
-		}
-		return nil
+		return verify(pub, digest[:], signature)
 	case ed25519.PublicKey:
 		if !ed25519.Verify(key, signingInput, signature) {
 			return errors.New("ed25519 signature verification failed")
