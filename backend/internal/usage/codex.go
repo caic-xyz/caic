@@ -67,13 +67,13 @@ type CodexFetcher struct {
 func NewCodexFetcher(ctx context.Context) *CodexFetcher {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		slog.Warn("cannot determine home dir; Codex usage disabled", "err", err)
+		slog.WarnContext(ctx, "cannot determine home dir; Codex usage disabled", "err", err)
 		return nil
 	}
 	authPath := filepath.Join(home, ".codex", "auth.json")
 	token, accountID := readCodexAuth(authPath)
 	if token == "" {
-		slog.Info("no Codex OAuth token found; Codex usage disabled (will watch for credentials)")
+		slog.InfoContext(ctx, "no Codex OAuth token found; Codex usage disabled (will watch for credentials)")
 	}
 
 	f := &CodexFetcher{
@@ -84,7 +84,7 @@ func NewCodexFetcher(ctx context.Context) *CodexFetcher {
 	}
 
 	if err := f.startWatcher(ctx); err != nil {
-		slog.Warn("failed to watch Codex auth file", "err", err)
+		slog.WarnContext(ctx, "failed to watch Codex auth file", "err", err)
 	}
 	return f
 }
@@ -210,7 +210,7 @@ func (f *CodexFetcher) watchLoop(ctx context.Context) {
 			if !ok {
 				return
 			}
-			slog.Warn("Codex auth watcher error", "err", err)
+			slog.WarnContext(ctx, "Codex auth watcher error", "err", err)
 		}
 	}
 }

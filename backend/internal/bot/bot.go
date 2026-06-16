@@ -111,10 +111,10 @@ func (b *Bot) ResumePendingComments() {
 	for _, pt := range pending {
 		commenter := b.client.ResolveCommenter(b.ctx, pt.ForgeOwner)
 		if commenter == nil {
-			slog.Warn("bot: no commenter for owner on resume", "owner", pt.ForgeOwner, "task", pt.TaskID)
+			slog.WarnContext(b.ctx, "bot: no commenter for owner on resume", "owner", pt.ForgeOwner, "task", pt.TaskID)
 			continue
 		}
-		slog.Info("bot: resuming comment watcher", "task", pt.TaskID, "issue", pt.IssueNumber)
+		slog.InfoContext(b.ctx, "bot: resuming comment watcher", "task", pt.TaskID, "issue", pt.IssueNumber)
 		go b.watchAndComment(pt.TaskID, commenter, pt.ForgeOwner, pt.ForgeRepo, pt.IssueNumber)
 	}
 }
@@ -128,7 +128,7 @@ func (b *Bot) OnIssueOpened(ctx context.Context, ev *IssueEvent, commenter Comme
 	}
 	repo := b.client.ResolveRepo(ev.ForgeFullName)
 	if repo == nil {
-		slog.Warn("bot: no repo for forge", "full_name", ev.ForgeFullName)
+		slog.WarnContext(ctx, "bot: no repo for forge", "full_name", ev.ForgeFullName)
 		return
 	}
 	prompt := fmt.Sprintf("Fix the following GitHub issue:\n\nTitle: %s\nURL: %s\n\n%s",
@@ -140,7 +140,7 @@ func (b *Bot) OnIssueOpened(ctx context.Context, ev *IssueEvent, commenter Comme
 func (b *Bot) OnPROpened(ctx context.Context, ev *PREvent) {
 	repo := b.client.ResolveRepo(ev.ForgeFullName)
 	if repo == nil {
-		slog.Warn("bot: no repo for forge", "full_name", ev.ForgeFullName)
+		slog.WarnContext(ctx, "bot: no repo for forge", "full_name", ev.ForgeFullName)
 		return
 	}
 	prompt := fmt.Sprintf("Review and fix the following pull request:\n\nTitle: %s\nBranch: %s → %s\nURL: %s\n\n%s",
@@ -156,7 +156,7 @@ func (b *Bot) OnIssueComment(ctx context.Context, ev CommentEvent, commenter Com
 	}
 	repo := b.client.ResolveRepo(ev.ForgeFullName)
 	if repo == nil {
-		slog.Warn("bot: no repo for forge", "full_name", ev.ForgeFullName)
+		slog.WarnContext(ctx, "bot: no repo for forge", "full_name", ev.ForgeFullName)
 		return
 	}
 	prompt := fmt.Sprintf("A user mentioned @caic in a comment on issue #%d:\n\nIssue: %s\nComment URL: %s\n\n%s",
@@ -173,7 +173,7 @@ func postTaskComment(ctx context.Context, commenter Commenter, owner, repo strin
 		body = fmt.Sprintf("caic task completed (state: %s)", state)
 	}
 	if err := commenter.PostComment(ctx, owner, repo, issueNumber, body); err != nil {
-		slog.Warn("bot: post comment failed", "owner", owner, "repo", repo, "issue", issueNumber, "err", err)
+		slog.WarnContext(ctx, "bot: post comment failed", "owner", owner, "repo", repo, "issue", issueNumber, "err", err)
 	}
 }
 
@@ -185,10 +185,10 @@ func (b *Bot) dispatch(ctx context.Context, repo *RepoInfo, prompt string, comme
 		IssueNumber: issueNumber,
 	})
 	if err != nil {
-		slog.Warn("bot: create task failed", "repo", repo.RelPath, "err", err)
+		slog.WarnContext(ctx, "bot: create task failed", "repo", repo.RelPath, "err", err)
 		return
 	}
-	slog.Info("bot: task created", "id", taskID, "repo", repo.RelPath)
+	slog.InfoContext(ctx, "bot: task created", "id", taskID, "repo", repo.RelPath)
 	if commenter != nil && issueNumber > 0 {
 		go b.watchAndComment(taskID, commenter, repo.ForgeOwner, repo.ForgeRepo, issueNumber)
 	}
@@ -198,7 +198,7 @@ func (b *Bot) dispatch(ctx context.Context, repo *RepoInfo, prompt string, comme
 func (b *Bot) watchAndComment(taskID string, commenter Commenter, owner, repo string, issueNumber int) {
 	state, result, err := b.client.WatchTaskCompletion(b.ctx, taskID)
 	if err != nil {
-		slog.Warn("bot: watch task failed", "id", taskID, "err", err)
+		slog.WarnContext(b.ctx, "bot: watch task failed", "id", taskID, "err", err)
 		return
 	}
 	postTaskComment(b.ctx, commenter, owner, repo, issueNumber, state, result)

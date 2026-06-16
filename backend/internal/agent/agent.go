@@ -517,7 +517,7 @@ func PrepareRelay(ctx context.Context, opts *Options, agentArgs []string) (*Rela
 	if err := DeployRelay(ctx, opts.Target); err != nil {
 		return nil, err
 	}
-	slog.Debug("startup", "phase", "deploy_relay", "target", sshHost, "dur", time.Since(tStart))
+	slog.DebugContext(ctx, "startup", "phase", "deploy_relay", "target", sshHost, "dur", time.Since(tStart))
 
 	sshArgs := make([]string, 0, 7+2*len(opts.StripEnv)+len(agentArgs))
 	sshArgs = append(sshArgs, sshHost, "python3", RelayScriptPath, "serve-attach", "--dir", opts.Dir)
@@ -527,7 +527,7 @@ func PrepareRelay(ctx context.Context, opts *Options, agentArgs []string) (*Rela
 	sshArgs = append(sshArgs, "--")
 	sshArgs = append(sshArgs, agentArgs...)
 
-	slog.Debug("relay", "msg", "launch", "target", sshHost, "args", agentArgs)
+	slog.DebugContext(ctx, "relay", "msg", "launch", "target", sshHost, "args", agentArgs)
 	cmd := exec.CommandContext(ctx, "ssh", sshArgs...) //nolint:gosec // args are not user-controlled.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -541,7 +541,7 @@ func PrepareRelay(ctx context.Context, opts *Options, agentArgs []string) (*Rela
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start relay: %w", err)
 	}
-	slog.Info("startup", "phase", "relay_started", "target", sshHost, "dur", time.Since(tStart))
+	slog.InfoContext(ctx, "startup", "phase", "relay_started", "target", sshHost, "dur", time.Since(tStart))
 	return &RelayProcess{Cmd: cmd, Stdin: stdin, Stdout: stdout}, nil
 }
 

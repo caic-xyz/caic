@@ -145,8 +145,8 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		hostState = auth.NewHostState(cfg.Auth.ExternalURL)
 	}
 
-	slog.Info("github", "pat", auth.MaskedToken(cfg.GitHub.Token), "oauth", auth.MaskedToken(cfg.GitHub.OAuthClientID))
-	slog.Info("gitlab", "pat", auth.MaskedToken(cfg.GitLab.Token), "oauth", auth.MaskedToken(cfg.GitLab.OAuthClientID))
+	slog.InfoContext(ctx, "github", "pat", auth.MaskedToken(cfg.GitHub.Token), "oauth", auth.MaskedToken(cfg.GitHub.OAuthClientID))
+	slog.InfoContext(ctx, "gitlab", "pat", auth.MaskedToken(cfg.GitLab.Token), "oauth", auth.MaskedToken(cfg.GitLab.OAuthClientID))
 
 	var authStore *auth.Store
 	var sessionSecret []byte
@@ -185,7 +185,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	}
 	cache, err := forgecache.Open(filepath.Join(cfg.Dirs.CacheDir, "ci_results.json"))
 	if err != nil {
-		slog.Warn("cannot open CI cache; falling back to in-memory", "err", err)
+		slog.WarnContext(ctx, "cannot open CI cache; falling back to in-memory", "err", err)
 		cache, _ = forgecache.Open("")
 	}
 
@@ -197,7 +197,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		switch {
 		case port < 0:
 		case voiceCfg.Backend == voicegateway.BackendGeminiLive && key == "":
-			slog.Info("voice bridge disabled: GEMINI_API_KEY not set")
+			slog.InfoContext(ctx, "voice bridge disabled: GEMINI_API_KEY not set")
 		default:
 			voiceBridge, err = voicertc.NewBridge(ctx, &voiceCfg, key, port)
 			if err != nil {
@@ -262,7 +262,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		return nil, fmt.Errorf("ipgeo: %w", err)
 	}
 	if cfg.IPGeo.DB != "" {
-		slog.Info("ipgeo", "path", cfg.IPGeo.DB, "list", cfg.IPGeo.Allowlist)
+		slog.InfoContext(ctx, "ipgeo", "path", cfg.IPGeo.DB, "list", cfg.IPGeo.Allowlist)
 	}
 
 	s, err := server.New(ctx, server.Dependencies{
@@ -311,14 +311,14 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 			defer trace.StartRegion(ctx, "repo-runner-init").End()
 			result, err := repoService.DiscoverRunner(ctx, abs)
 			if err != nil {
-				slog.Warn("skipping repo", "path", abs, "err", err)
+				slog.WarnContext(ctx, "skipping repo", "path", abs, "err", err)
 				return
 			}
 			if result.InitErr != nil {
-				slog.Warn("runner init failed", "path", abs, "err", result.InitErr)
+				slog.WarnContext(ctx, "runner init failed", "path", abs, "err", result.InitErr)
 			}
 			results[i] = result
-			slog.Debug("discovered repo", "path", result.Info.RelPath, "br", result.Info.BaseBranch)
+			slog.DebugContext(ctx, "discovered repo", "path", result.Info.RelPath, "br", result.Info.BaseBranch)
 		})
 	}
 	wg.Wait()
@@ -460,7 +460,7 @@ func initProvider(ctx context.Context, cfg *server.Config, backend *mdruntime.Ba
 	if !cfg.LLM.Disable && llmProvider == "" {
 		llmProvider = autoDetectLLMProvider(ctx, cfg.Agent.CoreEnv)
 		if llmProvider != "" {
-			slog.Info("auto-detected LLM provider", "prov", llmProvider)
+			slog.InfoContext(ctx, "auto-detected LLM provider", "prov", llmProvider)
 		}
 	}
 
@@ -469,7 +469,7 @@ func initProvider(ctx context.Context, cfg *server.Config, backend *mdruntime.Ba
 	}
 	c, ok := providers.All[llmProvider]
 	if !ok || c.Factory == nil {
-		slog.Warn("unknown LLM provider for title generation", "prov", llmProvider)
+		slog.WarnContext(ctx, "unknown LLM provider for title generation", "prov", llmProvider)
 		return nil
 	}
 	var opts []genai.ProviderOption
@@ -481,10 +481,10 @@ func initProvider(ctx context.Context, cfg *server.Config, backend *mdruntime.Ba
 	opts = appendProviderAPIKey(opts, llmProvider, cfg.Agent.CoreEnv)
 	p, err := c.Factory(ctx, opts...)
 	if err != nil {
-		slog.Warn("LLM provider init failed", "prov", llmProvider, "err", err)
+		slog.WarnContext(ctx, "LLM provider init failed", "prov", llmProvider, "err", err)
 		return nil
 	}
-	slog.Info("title", "prov", p.Name(), "mdl", p.ModelID())
+	slog.InfoContext(ctx, "title", "prov", p.Name(), "mdl", p.ModelID())
 	backend.Provider = p
 	return p
 }

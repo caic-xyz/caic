@@ -161,13 +161,13 @@ func intMatch(vals []int, v int) bool {
 // replaceBinary overwrites the executable; watchExecutable detects the change
 // and triggers a graceful restart. Blocks until ctx is cancelled.
 func Run(ctx context.Context, gh *github.Client, sched *Schedule) {
-	slog.Info("autoupdate enabled", "version", Version)
+	slog.InfoContext(ctx, "autoupdate enabled", "version", Version)
 	for {
 		now := time.Now()
 		target := sched.Next(now)
 		jitter := time.Duration(rand.IntN(int(maxJitter))) //nolint:gosec // G404: jitter does not need crypto/rand
 		delay := target.Sub(now) + jitter
-		slog.Debug("autoupdate: next check", "in", delay.Round(time.Second))
+		slog.DebugContext(ctx, "autoupdate: next check", "in", delay.Round(time.Second))
 		select {
 		case <-ctx.Done():
 			return
@@ -177,7 +177,7 @@ func Run(ctx context.Context, gh *github.Client, sched *Schedule) {
 			if ctx.Err() != nil {
 				return
 			}
-			slog.Warn("autoupdate", "err", err)
+			slog.WarnContext(ctx, "autoupdate", "err", err)
 		}
 	}
 }
@@ -201,10 +201,10 @@ func CheckAndUpdate(ctx context.Context, gh *github.Client) error {
 	latest := strings.TrimPrefix(rel.TagName, "v")
 	current := strings.TrimPrefix(Version, "v")
 	if !IsNewer(latest, current) {
-		slog.Info("autoupdate: up to date", "current", current, "latest", latest)
+		slog.InfoContext(ctx, "autoupdate: up to date", "current", current, "latest", latest)
 		return nil
 	}
-	slog.Info("autoupdate: new version available", "current", current, "latest", latest)
+	slog.InfoContext(ctx, "autoupdate: new version available", "current", current, "latest", latest)
 	return downloadAndInstall(ctx, gh, rel)
 }
 
@@ -282,7 +282,7 @@ func downloadAndInstall(ctx context.Context, gh *github.Client, rel *github.Rele
 		if got != wantSum {
 			return fmt.Errorf("checksum mismatch: expected %s, got %s", wantSum, got)
 		}
-		slog.Info("autoupdate: checksum verified", "asset", archiveAsset.Name)
+		slog.InfoContext(ctx, "autoupdate: checksum verified", "asset", archiveAsset.Name)
 	}
 
 	// Checksum OK — replace the executable.

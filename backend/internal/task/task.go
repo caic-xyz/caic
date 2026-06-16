@@ -1398,16 +1398,16 @@ func (t *Task) GenerateTitle(ctx context.Context) {
 	)
 	d := time.Since(start).Round(time.Millisecond)
 	if err != nil {
-		slog.Warn("title failed", "task", t.ID, "err", err, "d", d)
+		slog.WarnContext(ctx, "title failed", "task", t.ID, "err", err, "d", d)
 		return
 	}
 	// Strip surrounding quotes if the model adds them despite instructions.
 	title := strings.Trim(strings.TrimSpace(res.String()), "\"'`")
 	if title == "" {
-		slog.Warn("title", "task", t.ID, "d", d, "msg", "empty")
+		slog.WarnContext(ctx, "title", "task", t.ID, "d", d, "msg", "empty")
 		return
 	}
-	slog.Info("title", "task", t.ID, "title", title, "d", d)
+	slog.InfoContext(ctx, "title", "task", t.ID, "title", title, "d", d)
 	t.SetTitle(title)
 }
 

@@ -59,7 +59,7 @@ func mainImpl(args []string) error {
 	geminiAPIKey := os.Getenv("GEMINI_API_KEY")
 	var bridge *voicertc.Bridge
 	if cfg.Backend == voicegateway.BackendGeminiLive && geminiAPIKey == "" {
-		slog.Warn("voice media disabled", "reason", "GEMINI_API_KEY is not configured")
+		slog.WarnContext(ctx, "voice media disabled", "reason", "GEMINI_API_KEY is not configured")
 	} else {
 		bridge, err = voicertc.NewBridge(ctx, &cfg, geminiAPIKey, cfg.Server.WebRTCUDPPort)
 		if err != nil {
@@ -86,7 +86,7 @@ func mainImpl(args []string) error {
 		shutCancel()
 	}()
 
-	slog.Info("voice-gateway", "http", cfg.Server.HTTP, "udp", cfg.Server.WebRTCUDPPort, "config", *configPath)
+	slog.InfoContext(ctx, "voice-gateway", "http", cfg.Server.HTTP, "udp", cfg.Server.WebRTCUDPPort, "config", *configPath)
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

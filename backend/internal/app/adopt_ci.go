@@ -44,10 +44,10 @@ func (w *adoptedTaskWiring) WireCIMonitoring(ctx context.Context, at *tasks.Adop
 	if pr > 0 {
 		sha, err := adoptedHeadSHA(ctx, f, at)
 		if err != nil {
-			slog.Info("adopt: skipping CI monitor; PR head SHA unavailable", "task", at.Task.ID, "branch", at.Branch, "repo", at.RelPath, "err", err)
+			slog.InfoContext(ctx, "adopt: skipping CI monitor; PR head SHA unavailable", "task", at.Task.ID, "branch", at.Branch, "repo", at.RelPath, "err", err)
 			return
 		}
-		slog.Info("adopt: starting monitorCI", "task", at.Task.ID, "branch", at.Branch, "sha", sha)
+		slog.InfoContext(ctx, "adopt: starting monitorCI", "task", at.Task.ID, "branch", at.Branch, "sha", sha)
 		w.taskMgr.SetTaskMonitorBranch(at.Entry, at.Branch)
 		go w.ciService.MonitorCI(w.ctx, at.Entry, f, at.ForgeOwner, at.ForgeRepo, sha) //nolint:contextcheck // CI monitoring must outlive startup
 	}
@@ -72,7 +72,7 @@ func (w *adoptedTaskWiring) LookupExternalPRForTask(at *tasks.AdoptedTask) {
 	if err != nil || pr.Number == 0 {
 		return
 	}
-	slog.Info("adopt: found external PR", "repo", at.RelPath, "br", at.Branch, "pr", pr.Number)
+	slog.InfoContext(w.ctx, "adopt: found external PR", "repo", at.RelPath, "br", at.Branch, "pr", pr.Number)
 	at.Task.SetPR(at.ForgeOwner, at.ForgeRepo, pr.Number)
 	w.taskMgr.NotifyTaskChange()
 	sha := pr.HeadSHA
@@ -80,11 +80,11 @@ func (w *adoptedTaskWiring) LookupExternalPRForTask(at *tasks.AdoptedTask) {
 		var err error
 		sha, err = f.GetDefaultBranchSHA(w.ctx, at.ForgeOwner, at.ForgeRepo, at.Branch)
 		if err != nil {
-			slog.Info("adopt: skipping CI monitor; PR head SHA unavailable", "task", at.Task.ID, "branch", at.Branch, "repo", at.RelPath, "err", err)
+			slog.InfoContext(w.ctx, "adopt: skipping CI monitor; PR head SHA unavailable", "task", at.Task.ID, "branch", at.Branch, "repo", at.RelPath, "err", err)
 			return
 		}
 	}
-	slog.Info("adopt: starting monitorCI", "task", at.Task.ID, "branch", at.Branch, "sha", sha)
+	slog.InfoContext(w.ctx, "adopt: starting monitorCI", "task", at.Task.ID, "branch", at.Branch, "sha", sha)
 	w.taskMgr.SetTaskMonitorBranch(at.Entry, at.Branch)
 	w.ciService.MonitorCI(w.ctx, at.Entry, f, at.ForgeOwner, at.ForgeRepo, sha)
 }

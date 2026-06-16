@@ -104,7 +104,7 @@ func (m *Manager) ForgeForInfo(ctx context.Context, info *repos.Info) forge.Forg
 		}
 		client, err := m.githubApp.ForgeClient(ctx, installID)
 		if err != nil {
-			slog.Warn("forgeForInfo: app forge client", "err", err)
+			slog.WarnContext(ctx, "forgeForInfo: app forge client", "err", err)
 			return nil
 		}
 		return client

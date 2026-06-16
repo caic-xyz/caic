@@ -122,9 +122,9 @@ func (h *serverHandlers) triggerUpdate(ctx context.Context, _ *api.EmptyReq) (*v
 		return &v1.UpdateResp{Status: "already_up_to_date"}, nil
 	}
 	go func() {
-		slog.Info("update triggered by user", "current", current, "latest", latest)
+		slog.InfoContext(h.serverCtx, "update triggered by user", "current", current, "latest", latest)
 		if err := autoupdate.CheckAndUpdate(h.serverCtx, gh); err != nil {
-			slog.Warn("background update failed", "err", err)
+			slog.WarnContext(h.serverCtx, "background update failed", "err", err)
 		}
 	}()
 	return &v1.UpdateResp{Status: "started"}, nil

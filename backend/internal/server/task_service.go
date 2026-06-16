@@ -243,7 +243,7 @@ func (s *taskService) sendInput(ctx context.Context, entry *tasks.Entry, req *v1
 	if p := t.Primary(); p != nil {
 		primaryBranchLog = p.Branch
 	}
-	slog.Warn("no active session",
+	slog.WarnContext(ctx, "no active session",
 		"task", t.ID,
 		"br", primaryBranchLog,
 		"instance", instanceID,
@@ -438,15 +438,15 @@ func (s *taskService) syncTask(ctx context.Context, entry *tasks.Entry, req *v1.
 				}
 				prNumber, err := s.ciService.StartPRFlow(ctx, entry, f, &ciInfo, syncPrimaryBranch, s.taskMgr.EffectiveBaseBranch(t))
 				if err != nil {
-					slog.Warn("sync: create PR", "repo", info.ForgeRepo, "branch", syncPrimaryBranch, "err", err)
+					slog.WarnContext(ctx, "sync: create PR", "repo", info.ForgeRepo, "branch", syncPrimaryBranch, "err", err)
 				} else {
 					resp.PRNumber = prNumber
 				}
 			} else {
-				slog.Warn("sync: no forge client available, skipping PR flow", "repo", syncPrimaryName, "forge", info.ForgeKind)
+				slog.WarnContext(ctx, "sync: no forge client available, skipping PR flow", "repo", syncPrimaryName, "forge", info.ForgeKind)
 			}
 		} else {
-			slog.Warn("sync: repo not found in server list, skipping PR flow", "repo", syncPrimaryName)
+			slog.WarnContext(ctx, "sync: repo not found in server list, skipping PR flow", "repo", syncPrimaryName)
 		}
 	}
 	return resp, nil

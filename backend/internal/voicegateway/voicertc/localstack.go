@@ -423,7 +423,7 @@ func (s *localStackSession) isSpeaking() bool {
 }
 
 func (s *localStackSession) warnTurn(stage string, err error) {
-	slog.Warn("voicertc: local stack turn failed", "session", s.id, "stage", stage, "err", err)
+	slog.WarnContext(s.baseCtx, "voicertc: local stack turn failed", "session", s.id, "stage", stage, "err", err)
 }
 
 // sleepCtx sleeps for d, returning false if ctx is cancelled first.

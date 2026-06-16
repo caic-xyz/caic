@@ -91,9 +91,10 @@ func (h *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) 
 		h.taskMgr.LoadMessagesOnDemand(entry)
 	}
 
-	history, live, unsub := entry.Task().Subscribe(r.Context())
+	ctx := r.Context()
+	history, live, unsub := entry.Task().Subscribe(ctx)
 	defer unsub()
-	statsHistory, statsLive, statsUnsub := entry.Task().SubscribeStats(r.Context())
+	statsHistory, statsLive, statsUnsub := entry.Task().SubscribeStats(ctx)
 	defer statsUnsub()
 
 	tracker := v1conv.NewToolTimingTracker(entry.Task().Harness, FormatToolOutput)
@@ -103,7 +104,7 @@ func (h *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) 
 		for i := range events {
 			data, err := v1conv.MarshalEvent(&events[i])
 			if err != nil {
-				slog.Warn("marshal SSE event", "err", err)
+				slog.WarnContext(ctx, "marshal SSE event", "err", err)
 				continue
 			}
 			_, _ = fmt.Fprintf(w, "event: message\ndata: %s\nid: %d\n\n", data, idx)
@@ -301,23 +302,23 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 
 		reposJSON, err := json.Marshal(repoList)
 		if err != nil {
-			slog.Warn("marshal repos", "err", err)
+			slog.WarnContext(ctx, "marshal repos", "err", err)
 			return
 		}
 
 		if first {
 			if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "snapshot", Snapshot: out}); err != nil {
-				slog.Warn("marshal task list snapshot", "err", err)
+				slog.WarnContext(ctx, "marshal task list snapshot", "err", err)
 				return
 			}
 			if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "repos", Repos: *repoList}); err != nil {
-				slog.Warn("marshal repos snapshot", "err", err)
+				slog.WarnContext(ctx, "marshal repos snapshot", "err", err)
 				return
 			}
 			for i := range out {
 				data, err := json.Marshal(&out[i])
 				if err != nil {
-					slog.Warn("marshal task entry", "err", err)
+					slog.WarnContext(ctx, "marshal task entry", "err", err)
 					continue
 				}
 				prevByID[out[i].ID.String()] = data
@@ -332,7 +333,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 				currentIDs[id] = struct{}{}
 				data, err := json.Marshal(&out[i])
 				if err != nil {
-					slog.Warn("marshal task", "id", id, "err", err)
+					slog.WarnContext(ctx, "marshal task", "id", id, "err", err)
 					continue
 				}
 				if !bytes.Equal(data, prevByID[id]) {
@@ -341,18 +342,18 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 					if prev == nil {
 						// New task: emit full object.
 						if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "upsert", Upsert: &out[i]}); err != nil {
-							slog.Warn("marshal task upsert", "id", id, "err", err)
+							slog.WarnContext(ctx, "marshal task upsert", "id", id, "err", err)
 							return
 						}
 					} else {
 						// Existing task changed: emit only the diff.
 						patch, err := computeTaskPatch(prev, data)
 						if err != nil {
-							slog.Warn("compute task patch", "id", id, "err", err)
+							slog.WarnContext(ctx, "compute task patch", "id", id, "err", err)
 							continue
 						}
 						if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "patch", Patch: patch}); err != nil {
-							slog.Warn("marshal task patch", "id", id, "err", err)
+							slog.WarnContext(ctx, "marshal task patch", "id", id, "err", err)
 							return
 						}
 					}
@@ -362,7 +363,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 			for id := range prevByID {
 				if _, ok := currentIDs[id]; !ok {
 					if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "delete", Delete: id}); err != nil {
-						slog.Warn("marshal task delete", "id", id, "err", err)
+						slog.WarnContext(ctx, "marshal task delete", "id", id, "err", err)
 						return
 					}
 					delete(prevByID, id)
@@ -371,7 +372,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 			// Emit any new warnings.
 			for _, warn := range newWarnings {
 				if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "warning", Warning: warn.msg}); err != nil {
-					slog.Warn("marshal warning", "err", err)
+					slog.WarnContext(ctx, "marshal warning", "err", err)
 					return
 				}
 				lastWarnTime = warn.ts
@@ -381,7 +382,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 			if !bytes.Equal(reposJSON, prevReposJSON) {
 				prevReposJSON = reposJSON
 				if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "repos", Repos: *repoList}); err != nil {
-					slog.Warn("marshal repos update", "err", err)
+					slog.WarnContext(ctx, "marshal repos update", "err", err)
 					return
 				}
 			}
@@ -435,14 +436,14 @@ func (h *taskHandlers) handleVNCWebSocket(w http.ResponseWriter, r *http.Request
 		writeError(w, api.BadRequest("task has no VNC display"))
 		return
 	}
-	slog.Info("vnc proxy start", "task", t.ID, "instance", snap.RuntimeInstanceID, "port", snap.VNCPort)
+	slog.InfoContext(r.Context(), "vnc proxy start", "task", t.ID, "instance", snap.RuntimeInstanceID, "port", snap.VNCPort)
 	vncAddr := fmt.Sprintf("127.0.0.1:%d", snap.VNCPort)
 
 	var d net.Dialer
 	d.Timeout = 10 * time.Second
 	vncConn, err := d.DialContext(r.Context(), "tcp", vncAddr)
 	if err != nil {
-		slog.Error("vnc websocket: dial failed", "addr", vncAddr, "err", err)
+		slog.ErrorContext(r.Context(), "vnc websocket: dial failed", "addr", vncAddr, "err", err)
 		writeError(w, api.InternalError("cannot reach instance VNC"))
 		return
 	}
@@ -452,7 +453,7 @@ func (h *taskHandlers) handleVNCWebSocket(w http.ResponseWriter, r *http.Request
 		InsecureSkipVerify: true, // same-origin, no Origin check needed
 	})
 	if err != nil {
-		slog.Warn("vnc websocket: accept failed", "task", t.ID, "err", err)
+		slog.WarnContext(r.Context(), "vnc websocket: accept failed", "task", t.ID, "err", err)
 		return
 	}
 	defer func() { _ = wsConn.Close(websocket.StatusNormalClosure, "") }()
@@ -467,18 +468,18 @@ func (h *taskHandlers) handleVNCWebSocket(w http.ResponseWriter, r *http.Request
 		for {
 			_, buf, err := wsConn.Read(ctx)
 			if err != nil {
-				slog.Debug("vnc ws→tcp done", "task", t.ID, "err", err)
+				slog.DebugContext(ctx, "vnc ws→tcp done", "task", t.ID, "err", err)
 				return
 			}
 			if _, err := vncConn.Write(buf); err != nil {
-				slog.Debug("vnc ws→tcp write failed", "task", t.ID, "err", err)
+				slog.DebugContext(ctx, "vnc ws→tcp write failed", "task", t.ID, "err", err)
 				return
 			}
 		}
 	}()
 	n, cpErr := io.Copy(wsNetConn{wsConn, ctx}, vncConn)
 	written.Store(n)
-	slog.Info("vnc proxy done", "task", t.ID, "vnc→ws_bytes", n, "err", cpErr)
+	slog.InfoContext(ctx, "vnc proxy done", "task", t.ID, "vnc→ws_bytes", n, "err", cpErr)
 }
 
 // wsNetConn adapts a coder/websocket connection to net.Conn for io.Copy.

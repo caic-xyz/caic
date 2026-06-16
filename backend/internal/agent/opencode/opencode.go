@@ -108,7 +108,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	sshArgs = append(sshArgs, sshHost, "python3", agent.RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--no-log-stdin", "--")
 	sshArgs = append(sshArgs, ocArgs...)
 
-	slog.Debug("relay", "msg", "launch", "target", sshHost, "args", ocArgs)
+	slog.DebugContext(ctx, "relay", "msg", "launch", "target", sshHost, "args", ocArgs)
 	cmd := exec.CommandContext(ctx, "ssh", sshArgs...) //nolint:gosec // args are not user-controlled.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -519,7 +519,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 		if err != nil {
 			// Log and continue — model switch is best-effort. The agent
 			// may not support the unstable method yet.
-			slog.Warn("opencode: unstable_setSessionModel failed, using default model", "err", err, "model", opts.Model)
+			slog.WarnContext(ctx, "opencode: unstable_setSessionModel failed, using default model", "err", err, "model", opts.Model)
 		} else {
 			_ = resp // success; model has been switched
 			res.currentModel = opts.Model
@@ -583,7 +583,7 @@ func readJSONRPCResponse(ctx context.Context, r *bufio.Reader) (*opencode.JSONRP
 				return
 			}
 			// Skip notifications during handshake.
-			slog.Debug("opencode handshake: skipping notification", "method", msg.Method)
+			slog.DebugContext(ctx, "opencode handshake: skipping notification", "method", msg.Method)
 		}
 	}()
 	select {

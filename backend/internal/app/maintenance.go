@@ -37,9 +37,9 @@ func warmupImages(ctx context.Context, client *md.Client, prefs *preferences.Sto
 				Quiet:     true,
 			})
 			if err != nil {
-				slog.Warn("warmup", "image", img.BaseImage, "platform", img.Platform, "err", err)
+				slog.WarnContext(ctx, "warmup", "image", img.BaseImage, "platform", img.Platform, "err", err)
 			} else if built {
-				slog.Info("warmup", "image", img.BaseImage, "platform", img.Platform, "built", true)
+				slog.InfoContext(ctx, "warmup", "image", img.BaseImage, "platform", img.Platform, "built", true)
 			}
 		}
 		select {

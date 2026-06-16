@@ -94,7 +94,7 @@ func (c *botClient) CreateTask(ctx context.Context, req bot.TaskRequest) (string
 	if err != nil {
 		return "", err
 	}
-	slog.Info("bot task created", "id", id, "repo", req.Repo, "harness", selectedHarness)
+	slog.InfoContext(ctx, "bot task created", "id", id, "repo", req.Repo, "harness", selectedHarness)
 	return id, nil
 }
 

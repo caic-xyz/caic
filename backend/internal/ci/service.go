@@ -52,7 +52,7 @@ func (svc *Service) StartPRFlow(ctx context.Context, entry TaskEntry, f forge.Fo
 	if err != nil {
 		return 0, err
 	}
-	slog.Info("PR created", "task", t.ID, "forge", f.Name(), "owner", info.ForgeOwner, "repo", info.ForgeRepo, "pr", pr.Number)
+	slog.InfoContext(ctx, "PR created", "task", t.ID, "forge", f.Name(), "owner", info.ForgeOwner, "repo", info.ForgeRepo, "pr", pr.Number)
 	t.SetPR(info.ForgeOwner, info.ForgeRepo, pr.Number)
 	if err := t.WriteToLog(&agent.MetaPRMessage{
 		MessageType: "caic_pr",
@@ -76,11 +76,11 @@ func (svc *Service) StartPRFlow(ctx context.Context, entry TaskEntry, f forge.Fo
 // Without an App, it polls every 15 s.
 func (svc *Service) MonitorCI(ctx context.Context, entry TaskEntry, f forge.Forge, owner, repo, sha string) {
 	t := entry.Task()
-	slog.Info("monitorCI: start", "task", t.ID, "owner", owner, "repo", repo, "sha", sha, "hasApp", svc.backend.GitHubApp() != nil)
+	slog.InfoContext(ctx, "monitorCI: start", "task", t.ID, "owner", owner, "repo", repo, "sha", sha, "hasApp", svc.backend.GitHubApp() != nil)
 
 	// Fast path: result already cached (e.g. after a server restart).
 	if cached, ok := svc.cache.Get(owner, repo, sha); ok {
-		slog.Info("monitorCI: cache hit", "task", t.ID, "status", cached.Status)
+		slog.InfoContext(ctx, "monitorCI: cache hit", "task", t.ID, "status", cached.Status)
 		svc.ApplyMonitorCIResult(ctx, entry, f, owner, repo, sha, cached)
 		return
 	}
@@ -91,25 +91,25 @@ func (svc *Service) MonitorCI(ctx context.Context, entry TaskEntry, f forge.Forg
 		runs, err := f.GetCheckRuns(ctx, owner, repo, sha)
 		if err != nil {
 			if !errors.Is(err, forge.ErrNotFound) {
-				slog.Warn("monitorCI: initial check-runs", "task", t.ID, "err", err)
+				slog.WarnContext(ctx, "monitorCI: initial check-runs", "task", t.ID, "err", err)
 			} else {
-				slog.Info("monitorCI: check-runs not found (404)", "task", t.ID)
+				slog.InfoContext(ctx, "monitorCI: check-runs not found (404)", "task", t.ID)
 			}
 			return // webhook will handle completion
 		}
-		slog.Info("monitorCI: initial check-runs", "task", t.ID, "runs", len(runs))
+		slog.InfoContext(ctx, "monitorCI: initial check-runs", "task", t.ID, "runs", len(runs))
 		if len(runs) > 0 {
 			result, done := bot.EvaluateCheckRuns(owner, repo, runs)
 			if done {
 				if err := svc.cache.Put(owner, repo, sha, result); err != nil {
-					slog.Warn("monitorCI: cache put", "err", err)
+					slog.WarnContext(ctx, "monitorCI: cache put", "err", err)
 				}
-				slog.Info("monitorCI: done (app path)", "task", t.ID, "status", result.Status)
+				slog.InfoContext(ctx, "monitorCI: done (app path)", "task", t.ID, "status", result.Status)
 				svc.ApplyMonitorCIResult(ctx, entry, f, owner, repo, sha, result)
 				return
 			}
 			status := bot.InterimCIStatus(runs)
-			slog.Info("monitorCI: interim status (app path)", "task", t.ID, "status", status, "checks", len(result.Checks))
+			slog.InfoContext(ctx, "monitorCI: interim status (app path)", "task", t.ID, "status", status, "checks", len(result.Checks))
 			t.SetCIStatus(status, result.Checks)
 			svc.backend.NotifyTaskChange()
 		}
@@ -126,7 +126,7 @@ func (svc *Service) MonitorCI(ctx context.Context, entry TaskEntry, f forge.Forg
 			if errors.Is(err, forge.ErrNotFound) {
 				return true
 			}
-			slog.Warn("monitorCI: get check-runs", "task", t.ID, "err", err)
+			slog.WarnContext(ctx, "monitorCI: get check-runs", "task", t.ID, "err", err)
 			return false
 		}
 		if len(runs) == 0 {
@@ -140,7 +140,7 @@ func (svc *Service) MonitorCI(ctx context.Context, entry TaskEntry, f forge.Forg
 			return false
 		}
 		if err := svc.cache.Put(owner, repo, sha, result); err != nil {
-			slog.Warn("monitorCI: cache put", "err", err)
+			slog.WarnContext(ctx, "monitorCI: cache put", "err", err)
 		}
 		svc.ApplyMonitorCIResult(ctx, entry, f, owner, repo, sha, result)
 		return true
@@ -181,7 +181,7 @@ func (svc *Service) ApplyMonitorCIResult(ctx context.Context, entry TaskEntry, f
 
 	// Dedup: skip if we already notified this task for this SHA.
 	if svc.cache.IsNotified(t.ID.String(), sha) {
-		slog.Info("applyMonitorCIResult: already notified, skipping", "task", t.ID, "sha", sha[:min(7, len(sha))])
+		slog.InfoContext(ctx, "applyMonitorCIResult: already notified, skipping", "task", t.ID, "sha", sha[:min(7, len(sha))])
 		t.SetCIStatus(result.Status, result.Checks)
 		svc.backend.NotifyTaskChange()
 		return
@@ -204,10 +204,10 @@ func (svc *Service) ApplyMonitorCIResult(ctx context.Context, entry TaskEntry, f
 			}
 			commitMsg := lastResultText(t)
 			if mergeErr := f.MergePR(ctx, owner, repo, snap.ForgePR, commitTitle, commitMsg); mergeErr != nil {
-				slog.Warn("applyMonitorCIResult: merge PR", "task", t.ID, "pr", snap.ForgePR, "err", mergeErr)
+				slog.WarnContext(ctx, "applyMonitorCIResult: merge PR", "task", t.ID, "pr", snap.ForgePR, "err", mergeErr)
 				summary = fmt.Sprintf("%s CI: all checks passed. Auto-merge of %s failed: %v", f.Name(), f.PRLabel(snap.ForgePR), mergeErr)
 			} else {
-				slog.Info("PR merged", "task", t.ID, "forge", f.Name(), "pr", snap.ForgePR)
+				slog.InfoContext(ctx, "PR merged", "task", t.ID, "forge", f.Name(), "pr", snap.ForgePR)
 				summary = fmt.Sprintf("%s CI: all checks passed. %s merged successfully via squash commit.", f.Name(), f.PRLabel(snap.ForgePR))
 			}
 		} else {
@@ -217,7 +217,7 @@ func (svc *Service) ApplyMonitorCIResult(ctx context.Context, entry TaskEntry, f
 	t.SetCIStatus(ciStatus, result.Checks)
 	svc.backend.NotifyTaskChange()
 	if err := t.SendInput(ctx, agent.Prompt{Text: summary}); err != nil {
-		slog.Warn("monitorCI: send input", "task", t.ID, "err", err)
+		slog.WarnContext(ctx, "monitorCI: send input", "task", t.ID, "err", err)
 		// No active session — attempt auto-fix for CI failures if enabled.
 		if result.Status == forge.CIStatusFailure {
 			snap := t.Snapshot()
@@ -227,7 +227,7 @@ func (svc *Service) ApplyMonitorCIResult(ctx context.Context, entry TaskEntry, f
 		}
 	}
 	if err := svc.cache.MarkNotified(t.ID.String(), sha); err != nil {
-		slog.Warn("applyMonitorCIResult: mark notified", "task", t.ID, "err", err)
+		slog.WarnContext(ctx, "applyMonitorCIResult: mark notified", "task", t.ID, "err", err)
 	}
 	// On CI failure: wait for the agent to finish its fix turn, then
 	// auto-sync the branch and restart CI monitoring.
@@ -307,29 +307,29 @@ func (svc *Service) autoResync(ctx context.Context, entry TaskEntry, f forge.For
 
 	p := t.Primary()
 	if p == nil {
-		slog.Warn("autoResync: no primary repo", "task", t.ID)
+		slog.WarnContext(ctx, "autoResync: no primary repo", "task", t.ID)
 		return
 	}
 	runner, ok := svc.backend.GetRunner(p.Name)
 	if !ok {
-		slog.Warn("autoResync: no runner", "task", t.ID)
+		slog.WarnContext(ctx, "autoResync: no runner", "task", t.ID)
 		return
 	}
 
-	slog.Info("autoResync: syncing branch", "task", t.ID, "br", p.Branch)
+	slog.InfoContext(ctx, "autoResync: syncing branch", "task", t.ID, "br", p.Branch)
 	if _, _, err := runner.SyncToOrigin(ctx, t, false); err != nil {
-		slog.Warn("autoResync: sync failed", "task", t.ID, "err", err)
+		slog.WarnContext(ctx, "autoResync: sync failed", "task", t.ID, "err", err)
 		return
 	}
 
 	// Fetch the new branch HEAD SHA from the forge after the push.
 	newSHA, err := f.GetDefaultBranchSHA(ctx, owner, repo, p.Branch)
 	if err != nil {
-		slog.Warn("autoResync: get SHA", "task", t.ID, "err", err)
+		slog.WarnContext(ctx, "autoResync: get SHA", "task", t.ID, "err", err)
 		return
 	}
 
-	slog.Info("autoResync: restarting CI monitor", "task", t.ID, "sha", newSHA[:min(7, len(newSHA))])
+	slog.InfoContext(ctx, "autoResync: restarting CI monitor", "task", t.ID, "sha", newSHA[:min(7, len(newSHA))])
 	svc.backend.NotifyTaskChange()
 	go svc.MonitorCI(ctx, entry, f, owner, repo, newSHA)
 }
@@ -347,12 +347,12 @@ func (svc *Service) maybeAutoFix(ctx context.Context, t *task.Task, f forge.Forg
 	}
 	primary := t.Primary()
 	if primary == nil {
-		slog.Warn("maybeAutoFix: task has no primary repo")
+		slog.WarnContext(ctx, "maybeAutoFix: task has no primary repo")
 		return
 	}
 	repo := svc.backend.RepoInfoFor(primary.Name)
 	if repo.RelPath == "" {
-		slog.Warn("maybeAutoFix: repo not found", "repo", primary.Name)
+		slog.WarnContext(ctx, "maybeAutoFix: repo not found", "repo", primary.Name)
 		return
 	}
 	snap := t.Snapshot()
@@ -362,9 +362,9 @@ func (svc *Service) maybeAutoFix(ctx context.Context, t *task.Task, f forge.Forg
 		prompt += fmt.Sprintf(" (%s)", prURL)
 	}
 	prompt += fmt.Sprintf(". Please fix the failing CI checks on branch %q and push the fix:\n\n%s", primary.Branch, ciSummary)
-	slog.Info("auto-fix: creating task", "repo", primary.Name, "pr", snap.ForgePR, "branch", primary.Branch)
+	slog.InfoContext(ctx, "auto-fix: creating task", "repo", primary.Name, "pr", snap.ForgePR, "branch", primary.Branch)
 	if _, err := svc.backend.CreateTask(ctx, bot.TaskRequest{Repo: repo.RelPath, Prompt: prompt, OwnerID: t.OwnerID}); err != nil {
-		slog.Warn("maybeAutoFix: create task", "repo", primary.Name, "err", err)
+		slog.WarnContext(ctx, "maybeAutoFix: create task", "repo", primary.Name, "err", err)
 	}
 }
 
@@ -374,7 +374,7 @@ func (svc *Service) pollRepoCIOnce(ctx context.Context, info RepoInfo, f forge.F
 	sha, err := f.GetDefaultBranchSHA(ctx, info.ForgeOwner, info.ForgeRepo, info.BaseBranch)
 	if err != nil {
 		if !errors.Is(err, forge.ErrNotFound) {
-			slog.Warn("pollRepoCIOnce: get SHA", "repo", info.RelPath, "err", err)
+			slog.WarnContext(ctx, "pollRepoCIOnce: get SHA", "repo", info.RelPath, "err", err)
 			svc.backend.EmitWarning(fmt.Sprintf("CI poll failed for %s: %v", info.RelPath, err))
 		}
 		return
@@ -388,7 +388,7 @@ func (svc *Service) pollRepoCIOnce(ctx context.Context, info RepoInfo, f forge.F
 	runs, err := f.GetCheckRuns(ctx, info.ForgeOwner, info.ForgeRepo, sha)
 	if err != nil {
 		if !errors.Is(err, forge.ErrNotFound) {
-			slog.Warn("pollRepoCIOnce: get check-runs", "repo", info.RelPath, "err", err)
+			slog.WarnContext(ctx, "pollRepoCIOnce: get check-runs", "repo", info.RelPath, "err", err)
 			svc.backend.EmitWarning(fmt.Sprintf("CI poll failed for %s: %v", info.RelPath, err))
 		}
 		return
@@ -408,7 +408,7 @@ func (svc *Service) pollRepoCIOnce(ctx context.Context, info RepoInfo, f forge.F
 		return
 	}
 	if err := svc.cache.Put(info.ForgeOwner, info.ForgeRepo, sha, result); err != nil {
-		slog.Warn("pollRepoCIOnce: cache put", "repo", info.RelPath, "err", err)
+		slog.WarnContext(ctx, "pollRepoCIOnce: cache put", "repo", info.RelPath, "err", err)
 	}
 	svc.SetRepoCIStatus(info.RelPath, sha, result)
 }

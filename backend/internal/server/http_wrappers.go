@@ -138,7 +138,7 @@ func readAndDecodeBody[In any](w http.ResponseWriter, r *http.Request, input *In
 	d := json.NewDecoder(bytes.NewReader(body))
 	d.DisallowUnknownFields()
 	if err := d.Decode(input); err != nil {
-		slog.Error("failed to decode request body", "err", err)
+		slog.ErrorContext(r.Context(), "failed to decode request body", "err", err)
 		writeError(w, api.BadRequest("invalid request body"))
 		return false
 	}

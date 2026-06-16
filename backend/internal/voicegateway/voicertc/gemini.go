@@ -248,14 +248,14 @@ func (s *geminiBridgeSession) handleAudioExtraction(ctx context.Context, data []
 		}
 		hadAudio = true
 		if mt := part.InlineData.MimeType; mt != "" && mt != "audio/pcm;rate=24000" {
-			slog.Warn("voicertc: unexpected audio mime type", "session", s.id, "mimeType", mt)
+			slog.WarnContext(ctx, "voicertc: unexpected audio mime type", "session", s.id, "mimeType", mt)
 			s.sink.sendGatewayError("Unexpected audio format from Gemini: " + mt)
 			s.sink.cancelSession()
 			return nil, false
 		}
 		pcmBytes, err := base64.StdEncoding.DecodeString(part.InlineData.Data)
 		if err != nil {
-			slog.Debug("voicertc: base64 decode failed", "session", s.id, "err", err)
+			slog.DebugContext(ctx, "voicertc: base64 decode failed", "session", s.id, "err", err)
 			continue
 		}
 		s.sink.addAssistantPCM(pcmBytes)

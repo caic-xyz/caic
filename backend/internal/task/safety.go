@@ -79,7 +79,7 @@ func CheckSafety(ctx context.Context, dir, branch, baseBranch string, ds agent.D
 
 // gitCatFileSize returns the size of a blob in the given branch.
 func gitCatFileSize(ctx context.Context, dir, branch, path string) (int64, error) {
-	slog.Debug("git cat-file size", "branch", branch, "path", path)
+	slog.DebugContext(ctx, "git cat-file size", "branch", branch, "path", path)
 	cmd := exec.CommandContext(ctx, "git", "cat-file", "-s", branch+":"+path) //nolint:gosec // branch and path are from internal git state, not user input.
 	cmd.Dir = dir
 	out, err := cmd.Output()
@@ -91,7 +91,7 @@ func gitCatFileSize(ctx context.Context, dir, branch, path string) (int64, error
 
 // scanDiffForSecrets runs git diff and scans added lines for secret patterns.
 func scanDiffForSecrets(ctx context.Context, dir, branch, baseBranch string) ([]SafetyIssue, error) {
-	slog.Info("git diff for secrets", "branch", branch, "baseBranch", baseBranch)
+	slog.InfoContext(ctx, "git diff for secrets", "branch", branch, "baseBranch", baseBranch)
 	cmd := exec.CommandContext(ctx, "git", "diff", "origin/"+baseBranch+"..."+branch) //nolint:gosec // branch names are from internal git state.
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
@@ -127,7 +127,7 @@ func scanDiffForSecrets(ctx context.Context, dir, branch, baseBranch string) ([]
 				continue
 			}
 			seen[key] = struct{}{}
-			slog.Warn("secret pattern matched", "file", currentFile, "pattern", sp.desc, "line", added)
+			slog.WarnContext(ctx, "secret pattern matched", "file", currentFile, "pattern", sp.desc, "line", added)
 			issues = append(issues, SafetyIssue{
 				File:   currentFile,
 				Kind:   "secret",

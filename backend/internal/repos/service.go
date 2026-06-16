@@ -283,7 +283,7 @@ func (s *Service) Clone(ctx context.Context, req CloneRequest) (Info, error) {
 	cmd := exec.CommandContext(cloneCtx, "git", args...) //nolint:gosec // args are validated: depth is an int, URL is user-provided input, absTarget is validated above
 	if out, err := cmd.CombinedOutput(); err != nil {
 		_ = os.RemoveAll(absTarget)
-		slog.Warn("git clone failed", "url", req.URL, "err", err, "out", string(out))
+		slog.WarnContext(ctx, "git clone failed", "url", req.URL, "err", err, "out", string(out))
 		return Info{}, repoError(ErrorInternal, "git clone failed: "+err.Error())
 	}
 
@@ -309,7 +309,7 @@ func (s *Service) Clone(ctx context.Context, req CloneRequest) (Info, error) {
 	}
 	s.registry.Add(&info)
 	s.taskMgr.RegisterRunner(targetPath, runner)
-	slog.Info("cloned repo", "url", req.URL, "path", targetPath)
+	slog.InfoContext(ctx, "cloned repo", "url", req.URL, "path", targetPath)
 
 	return info, nil
 }

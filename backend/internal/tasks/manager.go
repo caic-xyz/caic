@@ -1167,7 +1167,7 @@ func (m *Manager) pushStats(ctx context.Context) {
 	}
 	statsMap, err := m.monitor.StatsAll(ctx, ids)
 	if err != nil {
-		slog.Debug("stats poll failed", "err", err)
+		slog.DebugContext(ctx, "stats poll failed", "err", err)
 		return
 	}
 	now := time.Now()
@@ -1201,7 +1201,7 @@ func (m *Manager) watchRuntimeEvents(ctx context.Context) {
 				if ctx.Err() != nil {
 					return
 				}
-				slog.Warn("runtime events failed, retrying in 5s", "err", err)
+				slog.WarnContext(ctx, "runtime events failed, retrying in 5s", "err", err)
 				select {
 				case <-time.After(5 * time.Second):
 					continue
@@ -1215,7 +1215,7 @@ func (m *Manager) watchRuntimeEvents(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			slog.Warn("runtime events stream ended, reconnecting in 5s")
+			slog.WarnContext(ctx, "runtime events stream ended, reconnecting in 5s")
 			select {
 			case <-time.After(5 * time.Second):
 			case <-ctx.Done():
@@ -1343,7 +1343,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		return nil, fmt.Errorf("metadata check for %s: %w", c.ID, err)
 	}
 	if taskIDVal == "" {
-		slog.Info("instance", "msg", "skipping non-caic", "repo", ri.RelPath, "instance", c.ID, "br", branch)
+		slog.InfoContext(ctx, "instance", "msg", "skipping non-caic", "repo", ri.RelPath, "instance", c.ID, "br", branch)
 		return nil, nil //nolint:nilnil // non-caic runtime instances are intentionally skipped
 	}
 	taskID, err := ksid.Parse(taskIDVal)
@@ -1353,7 +1353,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 
 	isExited := c.State == "exited"
 	if isExited {
-		slog.Info("instance", "msg", "adopting exited instance as stopped", "instance", c.ID, "br", branch)
+		slog.InfoContext(ctx, "instance", "msg", "adopting exited instance as stopped", "instance", c.ID, "br", branch)
 	}
 
 	// Find the log file for this task.
@@ -1404,18 +1404,18 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		var relayErr error
 		relayAlive, relayDiag, relayErr = m.relay.Status(ctx, relayTarget)
 		if relayErr != nil {
-			slog.Warn("relay", "msg", "check failed during adopt", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", relayErr, "diag", relayDiag)
+			slog.WarnContext(ctx, "relay", "msg", "check failed during adopt", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", relayErr, "diag", relayDiag)
 		}
 		b, ok := runner.Backends[harnessName]
 		if !ok {
-			slog.Warn("relay", "msg", "no backend for harness", "harness", harnessName, "instance", c.ID)
+			slog.WarnContext(ctx, "relay", "msg", "no backend for harness", "harness", harnessName, "instance", c.ID)
 			relayAlive = false
 		} else {
 			readCtx, readCancel := context.WithTimeout(ctx, 30*time.Second)
 			relayMsgs, relaySize, relayErr = m.relay.ReadTail(readCtx, relayTarget, b.NewWire().ParseMessage, 10<<20) // 10 MiB tail
 			readCancel()
 			if relayErr != nil {
-				slog.Warn("relay", "msg", "read output failed", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", relayErr)
+				slog.WarnContext(ctx, "relay", "msg", "read output failed", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", relayErr)
 				relayAlive = false
 			}
 		}
@@ -1436,7 +1436,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		effort = lt.Effort
 		if harness.RequiresResumeSessionID(harnessName) && lt.SessionID == "" {
 			if err := lt.LoadSessionMetadata(); err != nil {
-				slog.Warn("load session metadata failed", "repo", ri.RelPath, "br", branch, "err", err)
+				slog.WarnContext(ctx, "load session metadata failed", "repo", ri.RelPath, "br", branch, "err", err)
 			}
 		}
 	}
@@ -1535,7 +1535,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	if lt != nil {
 		m.setParser(lt)
 		if err := lt.LoadMessages(); err != nil {
-			slog.Warn("load messages failed", "repo", ri.RelPath, "br", branch, "err", err)
+			slog.WarnContext(ctx, "load messages failed", "repo", ri.RelPath, "br", branch, "err", err)
 		}
 	}
 	if len(relayMsgs) > 0 {
@@ -1546,11 +1546,11 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		t.RestoreMessages(msgs)
 		applyLoadedSessionMetadata(t, lt)
 		t.SetRelayOffset(relaySize)
-		slog.Debug("relay", "msg", "restored from", "repo", ri.RelPath, "br", branch, "instance", c.ID, "alive", relayAlive, "msgs", len(msgs), "relayMsgs", len(relayMsgs))
+		slog.DebugContext(ctx, "relay", "msg", "restored from", "repo", ri.RelPath, "br", branch, "instance", c.ID, "alive", relayAlive, "msgs", len(msgs), "relayMsgs", len(relayMsgs))
 	} else if lt != nil && len(lt.Msgs) > 0 {
 		t.RestoreMessages(lt.Msgs)
 		applyLoadedSessionMetadata(t, lt)
-		slog.Warn("relay", "msg", "restored from log", "repo", ri.RelPath, "br", branch, "instance", c.ID, "msgs", len(lt.Msgs))
+		slog.WarnContext(ctx, "relay", "msg", "restored from log", "repo", ri.RelPath, "br", branch, "instance", c.ID, "msgs", len(lt.Msgs))
 	}
 	applyLoadedSessionMetadata(t, lt)
 	t.SetStateAt(t.GetState(), stateUpdatedAt)
@@ -1587,19 +1587,19 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	} else if !relayAlive {
 		relayLog := m.relay.ReadLog(ctx, relayTarget, 4096)
 		if relayLog != "" {
-			slog.Warn("relay", "msg", "log from dead relay", "instance", c.ID, "br", branch, "diag", relayDiag, "log", relayLog)
+			slog.WarnContext(ctx, "relay", "msg", "log from dead relay", "instance", c.ID, "br", branch, "diag", relayDiag, "log", relayLog)
 		}
 		trace.Logf(ctx, "adopt", "%s: relay-dead", c.ID)
 		if t.LastExitError() != "" {
 			t.RecordSessionCrash(ctx, errors.New("relay exited before adoption"))
 			if runner.Runtime != nil {
 				if err := runner.Runtime.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // adoption must outlive request
-					slog.Error("stop failed after adopted relay crash", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", err)
+					slog.ErrorContext(ctx, "stop failed after adopted relay crash", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", err)
 				}
 			}
 		} else if t.GetState() == task.StateRunning {
 			t.SetStateAt(task.StateWaiting, stateUpdatedAt)
-			slog.Warn("relay", "msg", "dead, marking waiting",
+			slog.WarnContext(ctx, "relay", "msg", "dead, marking waiting",
 				"repo", ri.RelPath, "br", branch, "instance", c.ID,
 				"sess", t.GetSessionID(), "msgs", len(t.Messages()))
 		}
@@ -1627,7 +1627,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		}
 		entry.Finish(result)
 		if err := writeTaskResultTrailer(t, result); err != nil {
-			slog.Warn("write adopted result trailer failed", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", err)
+			slog.WarnContext(ctx, "write adopted result trailer failed", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", err)
 		}
 	}
 
@@ -1642,7 +1642,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	m.taskChanged()
 	m.mu.Unlock()
 
-	slog.Info("instance", "msg", "adopted",
+	slog.InfoContext(ctx, "instance", "msg", "adopted",
 		"repo", ri.RelPath, "instance", c.ID, "br", branch,
 		"relay", relayAlive, "state", t.GetState(), "sess", t.GetSessionID())
 
@@ -1653,7 +1653,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 
 	// Auto-reconnect in background.
 	if t.GetState() != task.StateStopped && relayAlive {
-		slog.Debug("instance", "msg", "auto-reconnect starting", "repo", ri.RelPath, "br", branch, "instance", c.ID)
+		slog.DebugContext(ctx, "instance", "msg", "auto-reconnect starting", "repo", ri.RelPath, "br", branch, "instance", c.ID)
 		go func() {
 			tlog := slog.With("repo", ri.RelPath, "br", branch, "instance", t.RuntimeInstanceID())
 			h, err := runner.Reconnect(m.serverCtx, t, true)
@@ -1676,12 +1676,12 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 			m.watchSession(entry, runner, h)
 		}()
 	} else if !relayAlive && t.GetState() != task.StateStopped && t.GetState() != task.StateCrashed && t.GetState() != task.StateFailed {
-		slog.Error("relay dead, stopping instance",
+		slog.ErrorContext(ctx, "relay dead, stopping instance",
 			"repo", ri.RelPath, "br", branch, "instance", c.ID,
 			"state", t.GetState())
 		t.SetState(task.StateStopping)
 		if err := runner.Runtime.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // adoption must outlive request
-			slog.Error("stop failed", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", err)
+			slog.ErrorContext(ctx, "stop failed", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", err)
 		}
 		t.SetState(task.StateStopped)
 	}
@@ -1785,7 +1785,7 @@ func (m *Manager) watchSession(entry *Entry, runner *task.Runner, h *task.Sessio
 			}
 			attrs := []any{"repo", watchPrimaryName, "br", watchPrimaryBranch, "instance", t.RuntimeInstanceID()}
 			if sessionErr != nil {
-				slog.Warn("session exited with error", append(attrs, "err", sessionErr)...)
+				slog.WarnContext(m.serverCtx, "session exited with error", append(attrs, "err", sessionErr)...)
 				if t.RecordSessionCrash(m.serverCtx, sessionErr) {
 					m.stopFailedSessionInstance(runner, t, attrs)
 					crashErr := sessionErr
@@ -1805,7 +1805,7 @@ func (m *Manager) watchSession(entry *Entry, runner *task.Runner, h *task.Sessio
 					}
 					entry.Finish(result)
 					if err := writeTaskResultTrailer(t, result); err != nil {
-						slog.Warn("write crashed task trailer failed", append(attrs, "err", err)...)
+						slog.WarnContext(m.serverCtx, "write crashed task trailer failed", append(attrs, "err", err)...)
 					}
 					t.CommitEventReplay()
 				} else if t.RecordSessionFailure(m.serverCtx, sessionErr) {
@@ -1826,12 +1826,12 @@ func (m *Manager) watchSession(entry *Entry, runner *task.Runner, h *task.Sessio
 					}
 					entry.Finish(result)
 					if err := writeTaskResultTrailer(t, result); err != nil {
-						slog.Warn("write failed task trailer failed", append(attrs, "err", err)...)
+						slog.WarnContext(m.serverCtx, "write failed task trailer failed", append(attrs, "err", err)...)
 					}
 					t.CommitEventReplay()
 				}
 			} else {
-				slog.Info("session exited", attrs...)
+				slog.InfoContext(m.serverCtx, "session exited", attrs...)
 				t.SetStateIf(task.StateRunning, task.StateWaiting)
 				t.CommitEventReplay()
 			}

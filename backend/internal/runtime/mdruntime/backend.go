@@ -157,9 +157,9 @@ func NewBackend(client *md.Client) *Backend {
 func (b *Backend) Launch(ctx context.Context, repos []runtime.Repo, opts *runtime.StartOptions) (runtime.InstanceID, error) {
 	defer trace.StartRegion(ctx, "container.launch").End()
 	if len(repos) > 0 {
-		slog.Info("md", "phase", "launch", "dir", repos[0].HostPath, "br", repos[0].Branch, "hns", opts.Harness)
+		slog.InfoContext(ctx, "md", "phase", "launch", "dir", repos[0].HostPath, "br", repos[0].Branch, "hns", opts.Harness)
 	} else {
-		slog.Info("md", "phase", "launch", "hns", opts.Harness)
+		slog.InfoContext(ctx, "md", "phase", "launch", "hns", opts.Harness)
 	}
 	rt := b.client.Runtime()
 	slog.DebugContext(ctx, "launch starting", "rt", rt, "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "repos_count", len(repos))
@@ -281,7 +281,7 @@ func (b *Backend) Fetch(ctx context.Context, id runtime.InstanceID) error {
 func (b *Backend) Stop(ctx context.Context, id runtime.InstanceID) error {
 	defer trace.StartRegion(ctx, "instance.stop").End()
 	name := string(id)
-	slog.Info("md stop", "name", name)
+	slog.InfoContext(ctx, "md stop", "name", name)
 	ct, err := b.client.Get(ctx, name)
 	if err != nil {
 		return err
@@ -299,9 +299,9 @@ func (b *Backend) Purge(ctx context.Context, id runtime.InstanceID) error {
 	}
 	ctRepos := ct.Repos()
 	if len(ctRepos) > 0 {
-		slog.Info("md purge", "ctr", name, "dir", ctRepos[0].GitRoot, "br", ctRepos[0].Branch)
+		slog.InfoContext(ctx, "md purge", "ctr", name, "dir", ctRepos[0].GitRoot, "br", ctRepos[0].Branch)
 	} else {
-		slog.Info("md purge", "name", name)
+		slog.InfoContext(ctx, "md purge", "name", name)
 	}
 	return ct.Purge(ctx, &SlogWriter{Phase: "purge"}, &SlogWriter{Phase: "purge"})
 }
@@ -317,9 +317,9 @@ func (b *Backend) Revive(ctx context.Context, id runtime.InstanceID) error {
 	}
 	ctRepos := ct.Repos()
 	if len(ctRepos) > 0 {
-		slog.Info("md revive", "ctr", name, "dir", ctRepos[0].GitRoot, "br", ctRepos[0].Branch)
+		slog.InfoContext(ctx, "md revive", "ctr", name, "dir", ctRepos[0].GitRoot, "br", ctRepos[0].Branch)
 	} else {
-		slog.Info("md revive", "name", name)
+		slog.InfoContext(ctx, "md revive", "name", name)
 	}
 	slog.DebugContext(ctx, "revive starting", "rt", rt, "ctr", name, "repos_count", len(ctRepos))
 	slog.DebugContext(ctx, "calling revive", "rt", rt, "ctr", name)
@@ -340,7 +340,7 @@ func (b *Backend) Fork(ctx context.Context, id runtime.InstanceID, repos []runti
 	defer trace.StartRegion(ctx, "instance.fork").End()
 	name := string(id)
 	if len(repos) > 0 {
-		slog.Info("md", "phase", "fork", "src", name, "dir", repos[0].HostPath, "br", repos[0].Branch)
+		slog.InfoContext(ctx, "md", "phase", "fork", "src", name, "dir", repos[0].HostPath, "br", repos[0].Branch)
 	}
 	rt := b.client.Runtime()
 	// Rootless podman does not support sudo (user namespace stacking prevents nested containers).

@@ -67,7 +67,7 @@ func mainImpl() error {
 	go func() {
 		select {
 		case s := <-sig:
-			slog.Info("shutdown", "signal", s)
+			slog.InfoContext(ctx, "shutdown", "signal", s)
 			cancel()
 		case <-ctx.Done():
 		}
@@ -170,7 +170,7 @@ Flags:
 			return fmt.Errorf("start CPU profile: %w", err)
 		}
 		defer pprof.StopCPUProfile()
-		slog.Info("CPU profiling enabled", "file", tc.Debug.CPUProfile)
+		slog.InfoContext(ctx, "CPU profiling enabled", "file", tc.Debug.CPUProfile)
 	}
 	if tc.Debug.Trace != "" {
 		f, err := os.Create(tc.Debug.Trace)
@@ -183,28 +183,28 @@ Flags:
 		}
 		defer trace.Stop()
 		trace.Log(ctx, "trace", "started")
-		slog.Info("execution trace enabled", "file", tc.Debug.Trace)
+		slog.InfoContext(ctx, "execution trace enabled", "file", tc.Debug.Trace)
 	}
 	if tc.Debug.MemProfile != "" {
 		defer func() {
 			runtime.GC()
 			f, err := os.Create(tc.Debug.MemProfile)
 			if err != nil {
-				slog.Error("create heap profile", "err", err)
+				slog.ErrorContext(ctx, "create heap profile", "err", err)
 				return
 			}
 			if err := pprof.WriteHeapProfile(f); err != nil {
-				slog.Error("write heap profile", "err", err)
+				slog.ErrorContext(ctx, "write heap profile", "err", err)
 			} else {
-				slog.Info("heap profile written", "file", tc.Debug.MemProfile)
+				slog.InfoContext(ctx, "heap profile written", "file", tc.Debug.MemProfile)
 			}
 			_ = f.Close()
 		}()
 	}
 
-	slog.Info("gemini", "apikey", auth.MaskedToken(coreEnvOrDefault(cfg.Agent.CoreEnv, "GEMINI_API_KEY")))
-	slog.Info("tailscale", "apikey", auth.MaskedToken(cfg.Runtime.TailscaleAPIKey))
-	slog.Info("LLM", "provider", cfg.LLM.Provider, "model", cfg.LLM.Model)
+	slog.InfoContext(ctx, "gemini", "apikey", auth.MaskedToken(coreEnvOrDefault(cfg.Agent.CoreEnv, "GEMINI_API_KEY")))
+	slog.InfoContext(ctx, "tailscale", "apikey", auth.MaskedToken(cfg.Runtime.TailscaleAPIKey))
+	slog.InfoContext(ctx, "LLM", "provider", cfg.LLM.Provider, "model", cfg.LLM.Model)
 
 	if err := cfg.Validate(); err != nil {
 		return err
@@ -222,7 +222,7 @@ Flags:
 		return fmt.Errorf("listen %s: %w", addr, err)
 	}
 	defer func() { _ = ln.Close() }()
-	slog.Info("port acquired", "addr", ln.Addr())
+	slog.InfoContext(ctx, "port acquired", "addr", ln.Addr())
 
 	// Exit when executable or config is modified (systemd/launchd restarts the service).
 	if err := watchForRestart(ctx, cancel, cfgDir); err != nil {
@@ -364,7 +364,7 @@ func resolveGitHubTokenFromGH(ctx context.Context) string {
 	}
 	out, err := exec.CommandContext(ctx, ghPath, "auth", "token").Output() //nolint:gosec // ghPath resolved via LookPath
 	if err != nil {
-		slog.Warn("GITHUB_TOKEN", "msg", "gh CLI found but gh auth token failed", "err", err, "out", string(out))
+		slog.WarnContext(ctx, "GITHUB_TOKEN", "msg", "gh CLI found but gh auth token failed", "err", err, "out", string(out))
 		return ""
 	}
 	return strings.TrimSpace(string(out))
@@ -433,14 +433,14 @@ func watchForRestart(ctx context.Context, stop context.CancelFunc, cfgDir string
 				default:
 					continue
 				}
-				slog.Info("shutdown", "reason", reason, "ev", event)
+				slog.InfoContext(ctx, "shutdown", "reason", reason, "ev", event)
 				stop()
 				return
 			case err, ok := <-w.Errors:
 				if !ok {
 					return
 				}
-				slog.Warn("fsnotify", "err", err)
+				slog.WarnContext(ctx, "fsnotify", "err", err)
 			}
 		}
 	}()

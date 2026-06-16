@@ -112,7 +112,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	sshArgs = append(sshArgs, sshHost, "python3", agent.RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--no-log-stdin", "--")
 	sshArgs = append(sshArgs, codexArgs...)
 
-	slog.Debug("relay", "msg", "launch", "target", sshHost, "args", codexArgs)
+	slog.DebugContext(ctx, "relay", "msg", "launch", "target", sshHost, "args", codexArgs)
 	cmd := exec.CommandContext(ctx, "ssh", sshArgs...) //nolint:gosec // args are not user-controlled.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -609,7 +609,7 @@ func readJSONRPCResponse(ctx context.Context, r *bufio.Reader) (*codex.JSONRPCMe
 				return
 			}
 			// Skip notifications during handshake.
-			slog.Debug("codex handshake: skipping notification", "method", msg.Method)
+			slog.DebugContext(ctx, "codex handshake: skipping notification", "method", msg.Method)
 		}
 	}()
 	select {

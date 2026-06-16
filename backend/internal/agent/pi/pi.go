@@ -151,7 +151,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 				fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 				defer cancel()
 				if models, err := FetchModels(fetchCtx, opts.Target, b.EnvVars); err != nil {
-					slog.Warn("pi: background model fetch failed", "err", err)
+					slog.WarnContext(fetchCtx, "pi: background model fetch failed", "err", err)
 				} else {
 					sorted := agent.SortModels(models)
 					b.mu.Lock()

@@ -152,12 +152,12 @@ func setupWorkspace() (string, error) {
 
 // startContainer pulls the image and starts a container.
 func startContainer(ctx context.Context, workDir, apiKeyEnv string) (string, error) {
-	slog.Info("Pulling image", "image", image)
+	slog.InfoContext(ctx, "Pulling image", "image", image)
 	if pullErr := runPodman(ctx, "pull", image); pullErr != nil {
 		return "", fmt.Errorf("pull image: %w", pullErr)
 	}
 
-	slog.Info("Starting container")
+	slog.InfoContext(ctx, "Starting container")
 	args := []string{"podman", "run", "-d", "--rm", "--userns", "keep-id", "--user", "user", "-v", workDir + ":/workspace:rw"}
 	if v := os.Getenv(apiKeyEnv); apiKeyEnv != "" && v != "" {
 		args = append(args, "-e", apiKeyEnv+"="+v)
@@ -194,14 +194,14 @@ set -- /home/user/.nvm/versions/node/v*/bin; test -x "$1/node" && printf ':%s' "
 	}
 	paths := strings.TrimSpace(string(out))
 	if paths != "" {
-		slog.Info("Detected tool paths in container", "paths", paths)
+		slog.InfoContext(ctx, "Detected tool paths in container", "paths", paths)
 	}
 	return paths, nil
 }
 
 // startRelayAgent launches the relay with the agent process inside the container.
 func startRelayAgent(ctx context.Context, ctr string, b agent.Backend, model, binDirs string) (*exec.Cmd, io.WriteCloser, io.Reader, error) {
-	slog.Info("Starting agent via relay", "harness", b.Harness())
+	slog.InfoContext(ctx, "Starting agent via relay", "harness", b.Harness())
 	export := ""
 	if binDirs != "" {
 		export = "export PATH=" + binDirs + ":$PATH && "
@@ -248,12 +248,12 @@ func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, stdin io.WriteCloser, s
 	}
 	agentDone := watchResult(stdout, wire.ParseMessage)
 
-	slog.Info("Waiting for agent to finish")
+	slog.InfoContext(ctx, "Waiting for agent to finish")
 	select {
 	case <-agentDone:
-		slog.Info("Agent completed, stopping relay")
+		slog.InfoContext(ctx, "Agent completed, stopping relay")
 	case <-time.After(120 * time.Second):
-		slog.Warn("Timeout waiting for agent, terminating")
+		slog.WarnContext(ctx, "Timeout waiting for agent, terminating")
 	case <-ctx.Done():
 		_ = cmd.Process.Kill()
 		return ctx.Err()
@@ -291,7 +291,7 @@ func watchResult(stdout io.Reader, parse func([]byte) ([]agent.Message, error)) 
 // writeGoldenFile copies output.jsonl from the container, sanitizes it,
 // writes the JSONL trace, and generates the .golden.md markdown file.
 func writeGoldenFile(ctx context.Context, ctr, workDir string, b agent.Backend, promptText, outputPath string) error {
-	slog.Info("Copying output.jsonl")
+	slog.InfoContext(ctx, "Copying output.jsonl")
 	localOutput := filepath.Join(workDir, "output.jsonl")
 	if err := runPodman(ctx, "cp", ctr+":"+agent.RelayOutputPath, localOutput); err != nil {
 		return fmt.Errorf("copy output: %w", err)
@@ -315,7 +315,7 @@ func writeGoldenFile(ctx context.Context, ctr, workDir string, b agent.Backend, 
 	}
 
 	lines := len(strings.Split(strings.TrimSpace(sanitized), "\n"))
-	slog.Info("Trace saved", "path", outputPath, "lines", lines)
+	slog.InfoContext(ctx, "Trace saved", "path", outputPath, "lines", lines)
 
 	// Generate the golden markdown file.
 	mdPath := strings.TrimSuffix(outputPath, ".jsonl") + ".md"
@@ -326,7 +326,7 @@ func writeGoldenFile(ctx context.Context, ctr, workDir string, b agent.Backend, 
 	if err := os.WriteFile(filepath.Clean(mdPath), []byte(md), 0o600); err != nil { //nolint:gosec // output path is from flag
 		return fmt.Errorf("write golden md: %w", err)
 	}
-	slog.Info("Golden markdown saved", "path", mdPath)
+	slog.InfoContext(ctx, "Golden markdown saved", "path", mdPath)
 	return nil
 }
 
@@ -392,7 +392,7 @@ func setupCodexAuth(ctx context.Context, ctr, apiKeyEnv string) error {
 		"bash", "-c", "codex login --with-api-key")
 	cmd.Stdin = strings.NewReader(apiKey)
 	cmd.Stderr = os.Stderr
-	slog.Info("Setting up codex auth in container")
+	slog.InfoContext(ctx, "Setting up codex auth in container")
 	return cmd.Run()
 }
 

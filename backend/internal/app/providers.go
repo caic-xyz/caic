@@ -77,16 +77,16 @@ func pingProvider(ctx context.Context, name string, coreEnv map[string]string) b
 	opts = appendProviderAPIKey(opts, name, coreEnv)
 	p, err := c.Factory(ctx, opts...)
 	if err != nil {
-		slog.Debug("provider factory failed", "prov", name, "err", err)
+		slog.DebugContext(ctx, "provider factory failed", "prov", name, "err", err)
 		return false
 	}
 	if pinger, ok := p.(genai.ProviderPing); ok {
 		if err := pinger.Ping(ctx); err != nil {
-			slog.Debug("provider ping failed", "prov", name, "err", err)
+			slog.DebugContext(ctx, "provider ping failed", "prov", name, "err", err)
 			return false
 		}
 	}
-	slog.Info("provider detected", "prov", name)
+	slog.InfoContext(ctx, "provider detected", "prov", name)
 	return true
 }
 

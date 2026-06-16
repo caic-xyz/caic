@@ -97,7 +97,7 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config, traceFile s
 		if err := os.Symlink(absTrace, dst); err != nil {
 			return fmt.Errorf("symlink trace file: %w", err)
 		}
-		slog.Info("preloaded trace file", "src", absTrace, "dst", dst)
+		slog.InfoContext(ctx, "preloaded trace file", "src", absTrace, "dst", dst)
 	}
 
 	// Pre-populate the harness model cache so refreshHarnessModels skips

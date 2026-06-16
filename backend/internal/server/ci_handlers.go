@@ -89,7 +89,7 @@ func (h *ciHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 
 	jobLog, logErr := f.GetJobLog(r.Context(), check.Owner, check.Repo, jobID, false)
 	if logErr != nil {
-		slog.Warn("getTaskCILog: fetch job log", "task", t.ID, "jobID", jobID, "err", logErr)
+		slog.WarnContext(r.Context(), "getTaskCILog: fetch job log", "task", t.ID, "jobID", jobID, "err", logErr)
 		jobLog = "(log unavailable: " + logErr.Error() + ")"
 	}
 

@@ -105,13 +105,13 @@ func enrichFailingChecks(ctx context.Context, f forge.Forge, provider genai.Prov
 			if labels, err := f.GetJobLabels(ctx, c.Owner, c.Repo, c.JobID); err == nil {
 				c.Labels = labels
 			} else {
-				slog.Warn("enrichFailingChecks: get labels", "job", c.JobID, "check", c.Name, "err", err)
+				slog.WarnContext(ctx, "enrichFailingChecks: get labels", "job", c.JobID, "check", c.Name, "err", err)
 			}
 		}
 		// Fetch log.
 		logText, err := f.GetJobLog(ctx, c.Owner, c.Repo, c.JobID, true)
 		if err != nil {
-			slog.Warn("enrichFailingChecks: get log", "job", c.JobID, "check", c.Name, "err", err)
+			slog.WarnContext(ctx, "enrichFailingChecks: get log", "job", c.JobID, "check", c.Name, "err", err)
 			continue
 		}
 		// Summarize with LLM when the log is still large.
@@ -143,7 +143,7 @@ func summarizeCILog(ctx context.Context, provider genai.Provider, checkName, log
 		&genai.GenOptionText{SystemPrompt: ciLogSummaryPrompt},
 	)
 	if err != nil {
-		slog.Warn("summarizeCILog: LLM call failed", "check", checkName, "err", err)
+		slog.WarnContext(ctx, "summarizeCILog: LLM call failed", "check", checkName, "err", err)
 		return ""
 	}
 	return res.String()

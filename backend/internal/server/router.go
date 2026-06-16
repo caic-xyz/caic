@@ -108,7 +108,7 @@ func (r *Router) Serve(ctx context.Context, ln net.Listener) error {
 		_ = srv.Shutdown(shutdownCtx)
 		shutdownCancel()
 	}()
-	slog.Info("listening", "addr", ln.Addr())
+	slog.InfoContext(ctx, "listening", "addr", ln.Addr())
 	err = srv.Serve(ln)
 	if errors.Is(err, http.ErrServerClosed) {
 		<-shutdownDone

@@ -56,13 +56,13 @@ type AnthropicFetcher struct {
 func NewAnthropicFetcher(ctx context.Context) *AnthropicFetcher {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		slog.Warn("cannot determine home dir; Anthropic usage disabled", "err", err)
+		slog.WarnContext(ctx, "cannot determine home dir; Anthropic usage disabled", "err", err)
 		return nil
 	}
 	credPath := filepath.Join(home, ".claude", ".credentials.json")
 	token := readAnthropicToken(credPath)
 	if token == "" {
-		slog.Info("no Claude OAuth token found; Anthropic usage disabled (will watch for credentials)")
+		slog.InfoContext(ctx, "no Claude OAuth token found; Anthropic usage disabled (will watch for credentials)")
 	}
 
 	f := &AnthropicFetcher{
@@ -72,7 +72,7 @@ func NewAnthropicFetcher(ctx context.Context) *AnthropicFetcher {
 	}
 
 	if err := f.startWatcher(ctx); err != nil {
-		slog.Warn("failed to watch Anthropic credentials file", "err", err)
+		slog.WarnContext(ctx, "failed to watch Anthropic credentials file", "err", err)
 	}
 	return f
 }
@@ -197,7 +197,7 @@ func (f *AnthropicFetcher) watchLoop(ctx context.Context) {
 			if !ok {
 				return
 			}
-			slog.Warn("credentials watcher error", "err", err)
+			slog.WarnContext(ctx, "credentials watcher error", "err", err)
 		}
 	}
 }

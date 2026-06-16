@@ -70,7 +70,7 @@ func NewBridge(ctx context.Context, cfg *voicegateway.Config, geminiAPIKey strin
 	b, err := newBridgeWithBackend(ctx, backend, udpPort)
 	if err != nil {
 		if cerr := backend.Close(); cerr != nil {
-			slog.Warn("voicertc: close backend", "err", cerr)
+			slog.WarnContext(ctx, "voicertc: close backend", "err", cerr)
 		}
 		return nil, err
 	}
@@ -125,7 +125,7 @@ func newBridgeWithBackend(ctx context.Context, backend backendConnector, udpPort
 		_ = conn.Close()
 		return nil, fmt.Errorf("unexpected local address type: %T", conn.LocalAddr())
 	}
-	slog.Info("voicertc: listening", "udpPort", addr.Port, "hostIP", hostIP)
+	slog.InfoContext(ctx, "voicertc: listening", "udpPort", addr.Port, "hostIP", hostIP)
 	return &Bridge{
 		backend:  backend,
 		api:      api,
@@ -181,7 +181,7 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 		if track.Kind() != webrtc.RTPCodecTypeAudio {
 			return
 		}
-		slog.Info("voicertc: audio track received", "session", sess.id, "codec", track.Codec().MimeType)
+		slog.InfoContext(sessionCtx, "voicertc: audio track received", "session", sess.id, "codec", track.Codec().MimeType)
 		sess.mu.Lock()
 		if sess.backendSetupComplete {
 			sess.mu.Unlock()
@@ -199,7 +199,7 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 	// any client messages that arrived before the dial completed.
 	backendConnected := make(chan struct{})
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
-		slog.Info("voicertc: data channel opened", "label", dc.Label(), "session", sess.id)
+		slog.InfoContext(sessionCtx, "voicertc: data channel opened", "label", dc.Label(), "session", sess.id)
 		sess.mu.Lock()
 		sess.dc = dc
 		sess.mu.Unlock()
@@ -211,7 +211,7 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 			}
 			backendSession, err := connector.connect(sessionCtx, sess.id, sess)
 			if err != nil {
-				slog.Error("voicertc: backend connect failed", "session", sess.id, "err", err)
+				slog.ErrorContext(sessionCtx, "voicertc: backend connect failed", "session", sess.id, "err", err)
 				sess.sendError("Failed to connect voice backend: " + err.Error())
 				cancel()
 				return
@@ -220,7 +220,7 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 			sess.backend = backendSession
 			sess.mu.Unlock()
 			close(backendConnected)
-			slog.Info("voicertc: backend connected", "session", sess.id)
+			slog.InfoContext(sessionCtx, "voicertc: backend connected", "session", sess.id)
 		})
 
 		// Data channel → backend adapter. Blocks until the backend is connected
@@ -243,21 +243,21 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 					cancel()
 					return
 				}
-				slog.Warn("voicertc: gateway client message failed", "session", sess.id, "err", err)
+				slog.WarnContext(sessionCtx, "voicertc: gateway client message failed", "session", sess.id, "err", err)
 				sess.sendError(err.Error())
 				return
 			}
 		})
 
 		dc.OnClose(func() {
-			slog.Info("voicertc: data channel closed", "session", sess.id)
+			slog.InfoContext(sessionCtx, "voicertc: data channel closed", "session", sess.id)
 			cancel()
 		})
 	})
 
 	// Monitor ICE connection state.
 	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
-		slog.Debug("voicertc: ICE state", "session", sess.id, "state", state.String())
+		slog.DebugContext(sessionCtx, "voicertc: ICE state", "session", sess.id, "state", state.String())
 		//exhaustive:ignore
 		switch state {
 		case webrtc.ICEConnectionStateFailed, webrtc.ICEConnectionStateDisconnected, webrtc.ICEConnectionStateClosed:
@@ -312,7 +312,7 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 			delete(b.sessions, sess.id)
 			b.mu.Unlock()
 			sess.close()
-			slog.Info("voicertc: session cleaned up", "session", sess.id)
+			slog.InfoContext(sessionCtx, "voicertc: session cleaned up", "session", sess.id)
 		}()
 
 		idleTimer := time.NewTimer(idleTimeout)
@@ -321,7 +321,7 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 		select {
 		case <-sessionCtx.Done():
 		case <-idleTimer.C:
-			slog.Info("voicertc: idle timeout", "session", sess.id)
+			slog.InfoContext(sessionCtx, "voicertc: idle timeout", "session", sess.id)
 		}
 	}()
 
@@ -459,7 +459,7 @@ func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 		}
 		pcm, decErr := dec.Decode(pkt.Payload)
 		if decErr != nil {
-			slog.Debug("voicertc: opus decode failed", "session", s.id, "err", decErr)
+			slog.DebugContext(ctx, "voicertc: opus decode failed", "session", s.id, "err", decErr)
 			continue
 		}
 		// Convert int16 PCM to little-endian bytes for the backend adapter.
@@ -530,14 +530,14 @@ func (s *session) audioSendLoop(ctx context.Context, enc *opusEncoder) {
 			pcm48 := upsample24to48(frame)
 			opusPkt, err := enc.Encode(pcm48)
 			if err != nil {
-				slog.Debug("voicertc: opus encode failed", "session", s.id, "err", err)
+				slog.DebugContext(ctx, "voicertc: opus encode failed", "session", s.id, "err", err)
 				continue
 			}
 			if err := s.audioTrack.WriteSample(media.Sample{
 				Data:     opusPkt,
 				Duration: frameDuration,
 			}); err != nil {
-				slog.Debug("voicertc: rtp write failed", "session", s.id, "err", err)
+				slog.DebugContext(ctx, "voicertc: rtp write failed", "session", s.id, "err", err)
 				s.cancel()
 				return
 			}
