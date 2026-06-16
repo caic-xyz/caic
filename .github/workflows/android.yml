@@ -79,6 +79,10 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '21'
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache-dependency-path: '**/go.sum'
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
       - name: Add Android SDK tools to PATH
