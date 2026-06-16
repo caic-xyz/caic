@@ -165,11 +165,6 @@ func (s *Router) buildAPIHandler() http.Handler {
 func (s *Router) buildHandler() (http.Handler, error) {
 	// Sync shared references (tests may mutate after construction).
 	s.mcp.hostState = s.hostState
-	if s.oauth != nil {
-		s.oauth.authStore = s.authStore
-		s.oauth.hostState = s.hostState
-		s.oauth.authHandlers = s.authHandlers
-	}
 
 	// --- Root mux ---
 	//
@@ -474,8 +469,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		ipgeoChecker:     d.IPGeoChecker,
 	}
 
-	// OAuth server — only when auth is configured. Tests that set authStore
-	// after construction rely on buildHandler to create it lazily.
+	// OAuth server — only when auth is configured.
 	if d.AuthStore != nil {
 		var err error
 		s.oauth, err = newOAuthServer(d.OAuthPrivateKeyPEM, d.OAuthKeyID, d.OAuthRefreshTokenStorePath, "/api/caic/v1/mcp", []string{mcpScopeRead, mcpScopeTasksRead, mcpScopeTasksWrite, mcpScopeTasksAdmin, mcpScopeReposWrite}, []string{mcpScopeRead, mcpScopeTasksRead}, mcpScopeLabels, d.AuthStore, d.HostState, s.authHandlers, audit, rateLimiter)

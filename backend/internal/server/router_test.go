@@ -106,8 +106,8 @@ type testRouter struct {
 
 // newTestRouter creates a Router for tests. Tests commonly mutate auth/host
 // fields (authStore, sessionSecret, hostState) on the returned Router and then
-// call buildHandler; buildHandler re-syncs authStore/hostState into the MCP
-// concern, and the authHandlers copies must be synced by the test if exercised.
+// call buildHandler; buildHandler re-syncs hostState into the MCP concern, and
+// the authHandlers copies must be synced by the test if exercised.
 func newTestRouter(t testing.TB) *testRouter {
 	checker, err := ipgeo.NewChecker(t.Context(), "0.0.0.0/0,::/0", "", "")
 	if err != nil {
@@ -132,10 +132,10 @@ func newTestRouter(t testing.TB) *testRouter {
 	return &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, prefs: prefs, forge: forgeManager}
 }
 
-// newTestRouterWithAuth creates a Router with an auth store, suitable for OAuth
-// tests that need s.oauth to be non-nil at construction time.
+// newTestRouterWithAuthHost creates a Router with an auth store, suitable for
+// OAuth tests that need s.oauth to be non-nil at construction time.
 // If refreshTokenPath is non-empty, it is used as the OAuth refresh token store.
-func newTestRouterWithAuth(t testing.TB, authStore *auth.Store, refreshTokenPath string) *testRouter {
+func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshTokenPath string, hostState *auth.HostState) *testRouter {
 	checker, err := ipgeo.NewChecker(t.Context(), "0.0.0.0/0,::/0", "", "")
 	if err != nil {
 		t.Fatalf("ipgeo.NewChecker: %v", err)
@@ -154,6 +154,7 @@ func newTestRouterWithAuth(t testing.TB, authStore *auth.Store, refreshTokenPath
 		Forge:                      forgeManager,
 		AuthStore:                  authStore,
 		OAuthRefreshTokenStorePath: refreshTokenPath,
+		HostState:                  hostState,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -164,8 +165,7 @@ func newTestRouterWithAuth(t testing.TB, authStore *auth.Store, refreshTokenPath
 // newTestOAuthRouter creates a Router configured with OAuth host state and a
 // session secret, suitable for tests that hit OAuth endpoints or issue tokens.
 func newTestOAuthRouter(t testing.TB, authStore *auth.Store) *testRouter {
-	s := newTestRouterWithAuth(t, authStore, "")
-	s.hostState = auth.NewHostState("https://caic.example.com")
+	s := newTestRouterWithAuthHost(t, authStore, "", auth.NewHostState("https://caic.example.com"))
 	s.sessionSecret = []byte("0123456789abcdef0123456789abcdef")
 	return s
 }
@@ -2266,8 +2266,7 @@ func TestBuildHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("upsert user: %v", err)
 		}
-		s := newTestRouterWithAuth(t, store, "")
-		s.hostState = auth.NewHostState("https://caic.example.com")
+		s := newTestRouterWithAuthHost(t, store, "", auth.NewHostState("https://caic.example.com"))
 		s.sessionSecret = secret
 		h, err := s.buildHandler()
 		if err != nil {
@@ -2343,8 +2342,7 @@ func TestBuildHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("upsert user: %v", err)
 		}
-		s := newTestRouterWithAuth(t, store, "")
-		s.hostState = auth.NewHostState("https://caic.example.com")
+		s := newTestRouterWithAuthHost(t, store, "", auth.NewHostState("https://caic.example.com"))
 		s.sessionSecret = []byte("0123456789abcdef0123456789abcdef")
 		h, err := s.buildHandler()
 		if err != nil {
@@ -2381,8 +2379,7 @@ func TestBuildHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("upsert user: %v", err)
 		}
-		s := newTestRouterWithAuth(t, store, "")
-		s.hostState = auth.NewHostState("https://caic.example.com")
+		s := newTestRouterWithAuthHost(t, store, "", auth.NewHostState("https://caic.example.com"))
 		s.sessionSecret = []byte("0123456789abcdef0123456789abcdef")
 		h, err := s.buildHandler()
 		if err != nil {
@@ -2432,8 +2429,7 @@ func TestBuildHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("upsert user: %v", err)
 		}
-		s := newTestRouterWithAuth(t, store, "")
-		s.hostState = auth.NewHostState("https://caic.example.com")
+		s := newTestRouterWithAuthHost(t, store, "", auth.NewHostState("https://caic.example.com"))
 		s.sessionSecret = []byte("0123456789abcdef0123456789abcdef")
 		h, err := s.buildHandler()
 		if err != nil {
