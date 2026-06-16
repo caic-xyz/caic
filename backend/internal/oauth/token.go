@@ -290,7 +290,8 @@ func (s *AccessTokenService) verifyClaims(token, issuer, audience string, now ti
 		return nil, errors.New("invalid token type")
 	}
 	nowUnix := now.Unix()
-	if claims.NotBefore > nowUnix || claims.Expiry <= nowUnix {
+	clockSkew := int64(60) // ±1 minute per RFC 9068 §2.1
+	if claims.NotBefore > nowUnix+clockSkew || claims.Expiry <= nowUnix-clockSkew {
 		return nil, errors.New("token is not valid now")
 	}
 	return &claims, nil
@@ -315,7 +316,8 @@ func (s *AccessTokenService) verifyRegistrationClaims(token, issuer, audience st
 		return nil, errors.New("invalid token type")
 	}
 	nowUnix := now.Unix()
-	if claims.NotBefore > nowUnix || claims.Expiry <= nowUnix {
+	clockSkew := int64(60) // ±1 minute per RFC 9068 §2.1
+	if claims.NotBefore > nowUnix+clockSkew || claims.Expiry <= nowUnix-clockSkew {
 		return nil, errors.New("token is not valid now")
 	}
 	return &claims, nil

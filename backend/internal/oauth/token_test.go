@@ -158,6 +158,86 @@ func TestAccessTokenService(t *testing.T) {
 		}
 	})
 
+	t.Run("token 30s in the future is accepted", func(t *testing.T) {
+		t.Parallel()
+		svc := newTestAccessTokenService(t, "kid-future-skew")
+		now := time.Now()
+		token, err := svc.issueAccessTokenAt(&AccessTokenClaims{
+			Issuer:   issuer,
+			Subject:  user.ID,
+			Audience: audience,
+			Username: user.Username,
+			Scope:    scope,
+			Type:     accessTokenType,
+		}, now.Add(30*time.Second), now.Add(30*time.Second).Add(time.Hour))
+		if err != nil {
+			t.Fatalf("issueAccessTokenAt: %v", err)
+		}
+		if _, err := svc.VerifyAccessToken(token, issuer, audience, now, nil, func(string) (User, bool) { return user, true }); err != nil {
+			t.Fatalf("VerifyAccessToken: %v", err)
+		}
+	})
+
+	t.Run("token 2 min in the future is rejected", func(t *testing.T) {
+		t.Parallel()
+		svc := newTestAccessTokenService(t, "kid-future-reject")
+		now := time.Now()
+		token, err := svc.issueAccessTokenAt(&AccessTokenClaims{
+			Issuer:   issuer,
+			Subject:  user.ID,
+			Audience: audience,
+			Username: user.Username,
+			Scope:    scope,
+			Type:     accessTokenType,
+		}, now.Add(2*time.Minute), now.Add(2*time.Minute).Add(time.Hour))
+		if err != nil {
+			t.Fatalf("issueAccessTokenAt: %v", err)
+		}
+		if _, err := svc.VerifyAccessToken(token, issuer, audience, now, nil, func(string) (User, bool) { return user, true }); err == nil || !strings.Contains(err.Error(), "token is not valid now") {
+			t.Fatalf("VerifyAccessToken error = %v, want token is not valid now", err)
+		}
+	})
+
+	t.Run("token expired 30s ago with skew is accepted", func(t *testing.T) {
+		t.Parallel()
+		svc := newTestAccessTokenService(t, "kid-expired-skew")
+		now := time.Now()
+		token, err := svc.issueAccessTokenAt(&AccessTokenClaims{
+			Issuer:   issuer,
+			Subject:  user.ID,
+			Audience: audience,
+			Username: user.Username,
+			Scope:    scope,
+			Type:     accessTokenType,
+		}, now.Add(-time.Hour), now.Add(-30*time.Second))
+		if err != nil {
+			t.Fatalf("issueAccessTokenAt: %v", err)
+		}
+		if _, err := svc.VerifyAccessToken(token, issuer, audience, now, nil, func(string) (User, bool) { return user, true }); err != nil {
+			t.Fatalf("VerifyAccessToken: %v", err)
+		}
+	})
+
+	t.Run("token expired 2 min ago is rejected", func(t *testing.T) {
+		t.Parallel()
+		svc := newTestAccessTokenService(t, "kid-expired-reject")
+		now := time.Now()
+		token, err := svc.issueAccessTokenAt(&AccessTokenClaims{
+			Issuer:   issuer,
+			Subject:  user.ID,
+			Audience: audience,
+			Username: user.Username,
+			Scope:    scope,
+			Type:     accessTokenType,
+		}, now.Add(-time.Hour), now.Add(-2*time.Minute))
+		if err != nil {
+			t.Fatalf("issueAccessTokenAt: %v", err)
+		}
+		if _, err := svc.VerifyAccessToken(token, issuer, audience, now, nil, func(string) (User, bool) { return user, true }); err == nil || !strings.Contains(err.Error(), "token is not valid now") {
+			t.Fatalf("VerifyAccessToken error = %v, want token is not valid now", err)
+		}
+	})
+
 	t.Run("error inactive grant", func(t *testing.T) {
 		t.Parallel()
 		svc := newTestAccessTokenService(t, "kid-inactive-grant")
