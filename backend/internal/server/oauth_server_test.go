@@ -59,7 +59,7 @@ func TestOAuthServer(t *testing.T) {
 			t.Parallel()
 			s, _, user, registered := newMCPOAuthLifecycleRouter(t)
 
-			restarted := newTestRouterWithAuthHost(t, s.authStore, s.oauth.refreshTokenStorePath, auth.NewHostState("https://caic.example.com"))
+			restarted := newTestRouterWithAuthHost(t, s.authStore, s.oauth.state.Path(), auth.NewHostState("https://caic.example.com"))
 			restarted.sessionSecret = []byte("0123456789abcdef0123456789abcdef")
 			h := mustBuildMCPOAuthLifecycleHandler(t, restarted)
 
@@ -74,7 +74,7 @@ func TestOAuthServer(t *testing.T) {
 			s, _, user, registered := newMCPOAuthLifecycleRouter(t)
 			tokenResp := authorizeMCPClient(t, mustBuildMCPOAuthLifecycleHandler(t, s), &user, &registered)
 
-			restarted := newTestRouterWithAuthHost(t, s.authStore, s.oauth.refreshTokenStorePath, auth.NewHostState("https://caic.example.com"))
+			restarted := newTestRouterWithAuthHost(t, s.authStore, s.oauth.state.Path(), auth.NewHostState("https://caic.example.com"))
 			restarted.sessionSecret = []byte("0123456789abcdef0123456789abcdef")
 			h := mustBuildMCPOAuthLifecycleHandler(t, restarted)
 
@@ -243,7 +243,7 @@ func TestOAuthServer(t *testing.T) {
 				t.Fatalf("generate refresh token: %v", err)
 			}
 			s.oauth.mu.Lock()
-			s.oauth.refreshTokens[oauthRefreshTokenKey(opaque)] = oauthRefreshToken{UserID: user.ID, ClientID: registered.ClientID, Resource: "https://caic.example.com/api/caic/v1/mcp", Scope: mcpScopeRead, ExpiresAt: time.Now().Add(-time.Minute)}
+			s.oauth.state.RefreshTokens[oauth.RefreshTokenKey(opaque)] = oauth.RefreshToken{UserID: user.ID, ClientID: registered.ClientID, Resource: "https://caic.example.com/api/caic/v1/mcp", Scope: mcpScopeRead, ExpiresAt: time.Now().Add(-time.Minute)}
 			s.oauth.mu.Unlock()
 
 			refreshMCPToken(t, h, registered.ClientID, opaque, http.StatusBadRequest)
@@ -257,7 +257,7 @@ func TestOAuthServer(t *testing.T) {
 				t.Fatalf("generate refresh token: %v", err)
 			}
 			s.oauth.mu.Lock()
-			s.oauth.refreshTokens[oauthRefreshTokenKey(opaque)] = oauthRefreshToken{UserID: "usr_missing", ClientID: registered.ClientID, Resource: "https://caic.example.com/api/caic/v1/mcp", Scope: mcpScopeRead, ExpiresAt: time.Now().Add(time.Hour)}
+			s.oauth.state.RefreshTokens[oauth.RefreshTokenKey(opaque)] = oauth.RefreshToken{UserID: "usr_missing", ClientID: registered.ClientID, Resource: "https://caic.example.com/api/caic/v1/mcp", Scope: mcpScopeRead, ExpiresAt: time.Now().Add(time.Hour)}
 			s.oauth.mu.Unlock()
 
 			refreshMCPToken(t, h, registered.ClientID, opaque, http.StatusBadRequest)

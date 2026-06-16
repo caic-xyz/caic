@@ -12,15 +12,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/oauth"
 )
 
-// oauthClient is a dynamically-registered OAuth client.
-type oauthClient struct {
-	ID                      string    `json:"id"`
-	Name                    string    `json:"name"`
-	RedirectURIs            []string  `json:"redirectURIs"`
-	TokenEndpointAuthMethod string    `json:"tokenEndpointAuthMethod"`
-	CreatedAt               time.Time `json:"createdAt"`
-}
-
 func (s *oauthServer) handleOAuthRegister(w http.ResponseWriter, r *http.Request) {
 	if !s.allowRequest(w, r) {
 		return
@@ -56,7 +47,7 @@ func (s *oauthServer) handleOAuthRegister(w http.ResponseWriter, r *http.Request
 		return
 	}
 	now := time.Now()
-	client := oauthClient{ID: s.clientIDPrefix + clientID, Name: req.ClientName, RedirectURIs: req.RedirectURIs, TokenEndpointAuthMethod: method, CreatedAt: now}
+	client := oauth.Client{ID: s.clientIDPrefix + clientID, Name: req.ClientName, RedirectURIs: req.RedirectURIs, TokenEndpointAuthMethod: method, CreatedAt: now}
 	if err := s.registerClient(&client); err != nil {
 		slog.WarnContext(r.Context(), "save oauth client registration", "err", err)
 		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not register client")
@@ -70,17 +61,17 @@ func (s *oauthServer) handleOAuthRegister(w http.ResponseWriter, r *http.Request
 	}
 }
 
-func (s *oauthServer) oauthClient(id string) oauthClient {
+func (s *oauthServer) oauthClient(id string) oauth.Client {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.clients[id]
+	return s.state.Clients[id]
 }
 
-func (s *oauthServer) registerClient(client *oauthClient) error {
+func (s *oauthServer) registerClient(client *oauth.Client) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.clients[client.ID] = *client
-	return s.saveRefreshTokensLocked()
+	s.state.Clients[client.ID] = *client
+	return s.state.Save()
 }
 
 func validOAuthRedirectURI(raw string) bool {
@@ -94,7 +85,7 @@ func validOAuthRedirectURI(raw string) bool {
 	return u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1")
 }
 
-func clientDisplayName(client *oauthClient) string {
+func clientDisplayName(client *oauth.Client) string {
 	if client.Name != "" {
 		return client.Name
 	}

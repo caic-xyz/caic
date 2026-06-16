@@ -30,6 +30,23 @@ const (
 	JWTAlgRS256 = "RS256"
 )
 
+// User is the package-neutral OAuth view of an authenticated resource owner.
+type User struct {
+	ID       string
+	Username string
+	Provider string
+}
+
+// BearerClaims holds verified bearer-token identity and authorization claims.
+type BearerClaims struct {
+	User     User
+	Subject  string
+	Username string
+	Issuer   string
+	Audience string
+	Scopes   []string
+}
+
 // ProtectedResourceMetadata is OAuth 2.0 Protected Resource Metadata.
 type ProtectedResourceMetadata struct {
 	Resource              string   `json:"resource"`
@@ -145,6 +162,12 @@ func BearerScopeChallenge(scope string) string {
 func VerifyPKCES256(challenge, verifier string) bool {
 	digest := sha256.Sum256([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(digest[:]) == challenge
+}
+
+// RefreshTokenKey returns the storage key for an opaque refresh token.
+func RefreshTokenKey(token string) string {
+	digest := sha256.Sum256([]byte(token))
+	return base64.RawURLEncoding.EncodeToString(digest[:])
 }
 
 // RSAJWK returns an RSA signing key in JWK form.

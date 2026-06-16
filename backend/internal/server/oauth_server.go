@@ -19,11 +19,8 @@ import (
 	"fmt"
 	"html/template"
 	"log/slog"
-	"maps"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -79,15 +76,12 @@ type oauthScopeItem struct {
 // so clients survive restarts and users can revoke individual client grants
 // from settings.
 type oauthServer struct {
-	mu                    sync.Mutex
-	clients               map[string]oauthClient
-	codes                 map[string]oauthCode
-	consents              map[string]oauthConsent
-	refreshTokens         map[string]oauthRefreshToken
-	grants                map[string]oauthGrant
-	refreshTokenStorePath string
-	key                   *rsa.PrivateKey
-	kid                   string
+	mu       sync.Mutex
+	state    *oauth.Store
+	codes    map[string]oauth.Code
+	consents map[string]oauthConsent
+	key      *rsa.PrivateKey
+	kid      string
 
 	supportedScopes []string // canonical ordered scope list.
 	defaultScopes   []string // pre-checked on the consent form.
@@ -113,58 +107,6 @@ type oauthConsent struct {
 	UserID    string
 	Values    url.Values
 	ExpiresAt time.Time
-}
-
-// oauthCode is an issued authorization code with PKCE binding.
-type oauthCode struct {
-	UserID        string
-	ClientID      string
-	RedirectURI   string
-	CodeChallenge string
-	Resource      string
-	Scope         string
-	ExpiresAt     time.Time
-}
-
-// oauthRefreshToken is an opaque refresh token persisted by hash.
-type oauthRefreshToken struct {
-	GrantID   string    `json:"grantID,omitempty"`
-	UserID    string    `json:"userID"`
-	ClientID  string    `json:"clientID"`
-	Resource  string    `json:"resource"`
-	Scope     string    `json:"scope"`
-	ExpiresAt time.Time `json:"expiresAt"`
-	UsedAt    time.Time `json:"usedAt,omitzero"`
-	RevokedAt time.Time `json:"revokedAt,omitzero"`
-}
-
-// oauthGrant ties a user authorization grant to a client and token.
-type oauthGrant struct {
-	ID         string    `json:"id"`
-	UserID     string    `json:"userID"`
-	ClientID   string    `json:"clientID"`
-	ClientName string    `json:"clientName"`
-	Resource   string    `json:"resource"`
-	Scope      string    `json:"scope"`
-	CreatedAt  time.Time `json:"createdAt"`
-	LastUsedAt time.Time `json:"lastUsedAt,omitzero"`
-	ExpiresAt  time.Time `json:"expiresAt"`
-	RevokedAt  time.Time `json:"revokedAt,omitzero"`
-}
-
-// oauthRefreshTokenFile is the on-disk format for durable OAuth state.
-type oauthRefreshTokenFile struct {
-	Version int                       `json:"version"`
-	Clients []oauthClient             `json:"clients,omitempty"`
-	Tokens  []oauthRefreshTokenRecord `json:"tokens"`
-	Grants  []oauthGrant              `json:"grants,omitempty"`
-}
-
-// oauthRefreshTokenRecord pairs a persisted refresh token with its hash key.
-type oauthRefreshTokenRecord struct {
-	oauthRefreshToken
-
-	TokenHash string `json:"tokenHash"`
 }
 
 type oauthBaseURLFunc func(*http.Request) string
@@ -223,17 +165,14 @@ func newOAuthServer(keyPEM []byte, kid, refreshTokenStorePath, resourceURLPath, 
 		}
 		kid = generatedKID
 	}
-	clients, refreshTokens, grants, err := loadOAuthRefreshTokens(refreshTokenStorePath)
+	state, err := oauth.LoadStore(refreshTokenStorePath)
 	if err != nil {
 		return nil, err
 	}
 	return &oauthServer{
-		clients:                 clients,
-		codes:                   map[string]oauthCode{},
+		state:                   state,
+		codes:                   map[string]oauth.Code{},
 		consents:                map[string]oauthConsent{},
-		refreshTokens:           refreshTokens,
-		grants:                  grants,
-		refreshTokenStorePath:   refreshTokenStorePath,
 		key:                     key,
 		kid:                     kid,
 		supportedScopes:         supportedScopes,
@@ -255,27 +194,22 @@ func newOAuthServer(keyPEM []byte, kid, refreshTokenStorePath, resourceURLPath, 
 // SetRefreshTokenStorePath updates the path and reloads persisted OAuth state
 // (clients, refresh tokens, grants) from the new location.
 func (s *oauthServer) SetRefreshTokenStorePath(path string) error {
-	clients, tokens, grants, err := loadOAuthRefreshTokens(path)
+	state, err := oauth.LoadStore(path)
 	if err != nil {
 		return err
 	}
-	s.refreshTokenStorePath = path
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.clients = clients
-	s.refreshTokens = tokens
-	s.grants = grants
+	s.state = state
 	return nil
 }
 
-// bearerClaims holds the verified bearer token claims.
+// bearerClaims holds the verified bearer token claims and the caic auth user
+// adapted from them for request context propagation.
 type bearerClaims struct {
-	User     auth.User
-	Subject  string
-	Username string
-	Issuer   string
-	Audience string
-	Scopes   []string
+	oauth.BearerClaims
+
+	authUser auth.User
 }
 
 type bearerClaimsContextKey struct{}
@@ -309,7 +243,8 @@ func (s *oauthServer) BearerAuth(next http.Handler) http.Handler {
 			s.writeUnauthorized(w, r)
 			return
 		}
-		ctx := s.newUserContext(r.Context(), &claims.User)
+		authUser := claims.authUser
+		ctx := s.newUserContext(r.Context(), &authUser)
 		ctx = newBearerClaimsContext(ctx, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -542,7 +477,7 @@ func (s *oauthServer) handleOAuthAuthorizePOST(w http.ResponseWriter, r *http.Re
 		oauth.WriteError(w, http.StatusBadRequest, "invalid_scope", err.Error())
 		return
 	}
-	entry := oauthCode{UserID: user.ID, ClientID: values.Get("client_id"), RedirectURI: values.Get("redirect_uri"), CodeChallenge: values.Get("code_challenge"), Resource: values.Get("resource"), Scope: scope, ExpiresAt: time.Now().Add(oauthAuthCodeTTL)}
+	entry := oauth.Code{UserID: user.ID, ClientID: values.Get("client_id"), RedirectURI: values.Get("redirect_uri"), CodeChallenge: values.Get("code_challenge"), Resource: values.Get("resource"), Scope: scope, ExpiresAt: time.Now().Add(oauthAuthCodeTTL)}
 	s.mu.Lock()
 	s.codes[code] = entry
 	s.mu.Unlock()
@@ -627,8 +562,8 @@ func (s *oauthServer) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r
 		return
 	}
 	now := time.Now()
-	grant := oauthGrant{ID: grantID, UserID: entry.UserID, ClientID: entry.ClientID, ClientName: clientDisplayName(&client), Resource: entry.Resource, Scope: entry.Scope, CreatedAt: now, ExpiresAt: now.Add(oauthRefreshTokenTTL)}
-	refreshEntry := oauthRefreshToken{GrantID: grantID, UserID: entry.UserID, ClientID: entry.ClientID, Resource: entry.Resource, Scope: entry.Scope, ExpiresAt: grant.ExpiresAt}
+	grant := oauth.Grant{ID: grantID, UserID: entry.UserID, ClientID: entry.ClientID, ClientName: clientDisplayName(&client), Resource: entry.Resource, Scope: entry.Scope, CreatedAt: now, ExpiresAt: now.Add(oauthRefreshTokenTTL)}
+	refreshEntry := oauth.RefreshToken{GrantID: grantID, UserID: entry.UserID, ClientID: entry.ClientID, Resource: entry.Resource, Scope: entry.Scope, ExpiresAt: grant.ExpiresAt}
 	refreshToken, err := s.issueGrantRefreshToken(&grant, &refreshEntry)
 	if err != nil {
 		slog.WarnContext(r.Context(), "issue oauth refresh token", "err", err)
@@ -778,64 +713,64 @@ func (s *oauthServer) validateAuthorizeForm(r *http.Request, values url.Values) 
 	return nil
 }
 
-func (s *oauthServer) issueGrantRefreshToken(grant *oauthGrant, entry *oauthRefreshToken) (string, error) {
+func (s *oauthServer) issueGrantRefreshToken(grant *oauth.Grant, entry *oauth.RefreshToken) (string, error) {
 	token, err := randomToken()
 	if err != nil {
 		return "", err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.grants[grant.ID] = *grant
-	s.refreshTokens[oauthRefreshTokenKey(token)] = *entry
-	if err := s.saveRefreshTokensLocked(); err != nil {
+	s.state.Grants[grant.ID] = *grant
+	s.state.RefreshTokens[oauth.RefreshTokenKey(token)] = *entry
+	if err := s.state.Save(); err != nil {
 		return "", err
 	}
 	return token, nil
 }
 
-func (s *oauthServer) validRefreshToken(token, clientID string) (oauthRefreshToken, bool) {
+func (s *oauthServer) validRefreshToken(token, clientID string) (oauth.RefreshToken, bool) {
 	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	entry, ok := s.refreshTokens[oauthRefreshTokenKey(token)]
+	entry, ok := s.state.RefreshTokens[oauth.RefreshTokenKey(token)]
 	if !ok || entry.ClientID != clientID || !entry.UsedAt.IsZero() || !entry.RevokedAt.IsZero() || now.After(entry.ExpiresAt) {
-		return oauthRefreshToken{}, false
+		return oauth.RefreshToken{}, false
 	}
-	grant, ok := s.grants[entry.GrantID]
+	grant, ok := s.state.Grants[entry.GrantID]
 	if !ok || !grant.RevokedAt.IsZero() || now.After(grant.ExpiresAt) {
-		return oauthRefreshToken{}, false
+		return oauth.RefreshToken{}, false
 	}
 	return entry, true
 }
 
-func (s *oauthServer) rotateRefreshToken(token, clientID, userID string) (nextToken string, next oauthRefreshToken, ok bool, err error) {
+func (s *oauthServer) rotateRefreshToken(token, clientID, userID string) (nextToken string, next oauth.RefreshToken, ok bool, err error) {
 	nextToken, err = randomToken()
 	if err != nil {
-		return "", oauthRefreshToken{}, false, err
+		return "", oauth.RefreshToken{}, false, err
 	}
 	now := time.Now()
-	tokenHash := oauthRefreshTokenKey(token)
-	nextTokenHash := oauthRefreshTokenKey(nextToken)
+	tokenHash := oauth.RefreshTokenKey(token)
+	nextTokenHash := oauth.RefreshTokenKey(nextToken)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	entry, ok := s.refreshTokens[tokenHash]
+	entry, ok := s.state.RefreshTokens[tokenHash]
 	if !ok || entry.ClientID != clientID || entry.UserID != userID || !entry.UsedAt.IsZero() || !entry.RevokedAt.IsZero() || now.After(entry.ExpiresAt) {
-		return "", oauthRefreshToken{}, false, nil
+		return "", oauth.RefreshToken{}, false, nil
 	}
-	grant, ok := s.grants[entry.GrantID]
+	grant, ok := s.state.Grants[entry.GrantID]
 	if !ok || !grant.RevokedAt.IsZero() || now.After(grant.ExpiresAt) {
-		return "", oauthRefreshToken{}, false, nil
+		return "", oauth.RefreshToken{}, false, nil
 	}
 	entry.UsedAt = now
-	s.refreshTokens[tokenHash] = entry
+	s.state.RefreshTokens[tokenHash] = entry
 	nextExpiry := now.Add(oauthRefreshTokenTTL)
-	next = oauthRefreshToken{GrantID: entry.GrantID, UserID: entry.UserID, ClientID: entry.ClientID, Resource: entry.Resource, Scope: entry.Scope, ExpiresAt: nextExpiry}
-	s.refreshTokens[nextTokenHash] = next
+	next = oauth.RefreshToken{GrantID: entry.GrantID, UserID: entry.UserID, ClientID: entry.ClientID, Resource: entry.Resource, Scope: entry.Scope, ExpiresAt: nextExpiry}
+	s.state.RefreshTokens[nextTokenHash] = next
 	grant.LastUsedAt = now
 	grant.ExpiresAt = nextExpiry
-	s.grants[grant.ID] = grant
-	if err := s.saveRefreshTokensLocked(); err != nil {
-		return "", oauthRefreshToken{}, false, err
+	s.state.Grants[grant.ID] = grant
+	if err := s.state.Save(); err != nil {
+		return "", oauth.RefreshToken{}, false, err
 	}
 	return nextToken, next, true, nil
 }
@@ -844,66 +779,37 @@ func (s *oauthServer) revokeRefreshToken(token, clientID string) (string, error)
 	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	tokenHash := oauthRefreshTokenKey(token)
-	entry, ok := s.refreshTokens[tokenHash]
+	tokenHash := oauth.RefreshTokenKey(token)
+	entry, ok := s.state.RefreshTokens[tokenHash]
 	if !ok || entry.ClientID != clientID || !entry.RevokedAt.IsZero() {
 		return "", nil
 	}
 	entry.RevokedAt = now
-	s.refreshTokens[tokenHash] = entry
-	if grant, ok := s.grants[entry.GrantID]; ok && grant.RevokedAt.IsZero() {
+	s.state.RefreshTokens[tokenHash] = entry
+	if grant, ok := s.state.Grants[entry.GrantID]; ok && grant.RevokedAt.IsZero() {
 		grant.RevokedAt = now
-		s.grants[entry.GrantID] = grant
-		for otherHash := range s.refreshTokens {
-			other := s.refreshTokens[otherHash]
+		s.state.Grants[entry.GrantID] = grant
+		for otherHash := range s.state.RefreshTokens {
+			other := s.state.RefreshTokens[otherHash]
 			if other.GrantID == entry.GrantID && other.RevokedAt.IsZero() {
 				other.RevokedAt = now
-				s.refreshTokens[otherHash] = other
+				s.state.RefreshTokens[otherHash] = other
 			}
 		}
 	}
-	return entry.UserID, s.saveRefreshTokensLocked()
+	return entry.UserID, s.state.Save()
 }
 
 func (s *oauthServer) revokeUserGrant(userID, grantID string) bool {
-	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	grant, ok := s.grants[grantID]
-	if !ok || grant.UserID != userID {
-		return false
-	}
-	if grant.RevokedAt.IsZero() {
-		grant.RevokedAt = now
-		s.grants[grantID] = grant
-		for tokenHash := range s.refreshTokens {
-			entry := s.refreshTokens[tokenHash]
-			if entry.GrantID == grantID && entry.RevokedAt.IsZero() {
-				entry.RevokedAt = now
-				s.refreshTokens[tokenHash] = entry
-			}
-		}
-	}
-	return true
+	return s.state.RevokeUserGrant(userID, grantID, time.Now())
 }
 
-func (s *oauthServer) listUserGrants(userID string) []oauthGrant {
+func (s *oauthServer) listUserGrants(userID string) []oauth.Grant {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	grants := make([]oauthGrant, 0, len(s.grants))
-	for id := range s.grants {
-		grant := s.grants[id]
-		if grant.UserID == userID {
-			grants = append(grants, grant)
-		}
-	}
-	slices.SortFunc(grants, func(a, b oauthGrant) int {
-		if cmp := b.CreatedAt.Compare(a.CreatedAt); cmp != 0 {
-			return cmp
-		}
-		return strings.Compare(a.ID, b.ID)
-	})
-	return grants
+	return s.state.ListUserGrants(userID)
 }
 
 func (s *oauthServer) touchGrant(grantID string, now time.Time) (bool, error) {
@@ -912,60 +818,25 @@ func (s *oauthServer) touchGrant(grantID string, now time.Time) (bool, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	grant, ok := s.grants[grantID]
+	grant, ok := s.state.Grants[grantID]
 	if !ok || !grant.RevokedAt.IsZero() || now.After(grant.ExpiresAt) {
 		return false, nil
 	}
 	grant.LastUsedAt = now
-	s.grants[grantID] = grant
-	if err := s.saveRefreshTokensLocked(); err != nil {
+	s.state.Grants[grantID] = grant
+	if err := s.state.Save(); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-func (s *oauthServer) saveRefreshTokens() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.saveRefreshTokensLocked()
-}
-
 func (s *oauthServer) pruneExpiredRefreshTokens(now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	changed := false
-	for token := range s.refreshTokens {
-		if now.After(s.refreshTokens[token].ExpiresAt) {
-			delete(s.refreshTokens, token)
-			changed = true
-		}
-	}
-	if !changed {
+	if !s.state.PruneExpiredRefreshTokens(now) {
 		return nil
 	}
-	return s.saveRefreshTokensLocked()
-}
-
-func (s *oauthServer) saveRefreshTokensLocked() error {
-	if s.refreshTokenStorePath == "" {
-		return nil
-	}
-	records := make([]oauthRefreshTokenRecord, 0, len(s.refreshTokens))
-	for tokenHash := range s.refreshTokens {
-		records = append(records, oauthRefreshTokenRecord{TokenHash: tokenHash, oauthRefreshToken: s.refreshTokens[tokenHash]})
-	}
-	slices.SortFunc(records, func(a, b oauthRefreshTokenRecord) int {
-		return strings.Compare(a.TokenHash, b.TokenHash)
-	})
-	grants := slices.Collect(maps.Values(s.grants))
-	slices.SortFunc(grants, func(a, b oauthGrant) int {
-		return strings.Compare(a.ID, b.ID)
-	})
-	clients := slices.Collect(maps.Values(s.clients))
-	slices.SortFunc(clients, func(a, b oauthClient) int {
-		return strings.Compare(a.ID, b.ID)
-	})
-	return saveOAuthRefreshTokens(s.refreshTokenStorePath, clients, records, grants)
+	return s.state.Save()
 }
 
 func (s *oauthServer) issueAccessToken(issuer string, user *auth.User, audience, scope, grantID string) (string, error) {
@@ -1045,86 +916,6 @@ func (s *oauthServer) approveScope(requested string, form url.Values) (string, e
 
 func parseScopeSet(scope string) []string {
 	return strings.Fields(scope)
-}
-
-func loadOAuthRefreshTokens(path string) (clients map[string]oauthClient, refreshTokens map[string]oauthRefreshToken, grants map[string]oauthGrant, err error) {
-	clients = map[string]oauthClient{}
-	refreshTokens = map[string]oauthRefreshToken{}
-	grants = map[string]oauthGrant{}
-	if path == "" {
-		return clients, refreshTokens, grants, nil
-	}
-	data, err := os.ReadFile(path) //nolint:gosec // path is app-controlled persistent state.
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return clients, refreshTokens, grants, nil
-		}
-		return nil, nil, nil, fmt.Errorf("read oauth refresh tokens: %w", err)
-	}
-	var file oauthRefreshTokenFile
-	if err := json.Unmarshal(data, &file); err != nil {
-		return nil, nil, nil, fmt.Errorf("parse oauth refresh tokens: %w", err)
-	}
-	now := time.Now()
-	for i := range file.Clients {
-		client := file.Clients[i]
-		if client.ID == "" {
-			continue
-		}
-		clients[client.ID] = client
-	}
-	for i := range file.Grants {
-		grant := file.Grants[i]
-		if grant.ID == "" || now.After(grant.ExpiresAt) {
-			continue
-		}
-		grants[grant.ID] = grant
-	}
-	for i := range file.Tokens {
-		record := &file.Tokens[i]
-		if record.TokenHash == "" || now.After(record.ExpiresAt) {
-			continue
-		}
-		refreshTokens[record.TokenHash] = record.oauthRefreshToken
-	}
-	for tokenHash := range refreshTokens {
-		token := refreshTokens[tokenHash]
-		if token.GrantID == "" {
-			grantID := "legacy:" + tokenHash
-			token.GrantID = grantID
-			refreshTokens[tokenHash] = token
-			if _, ok := grants[grantID]; !ok {
-				grants[grantID] = oauthGrant{ID: grantID, UserID: token.UserID, ClientID: token.ClientID, ClientName: token.ClientID, Resource: token.Resource, Scope: token.Scope, CreatedAt: token.ExpiresAt.Add(-oauthRefreshTokenTTL), ExpiresAt: token.ExpiresAt, RevokedAt: token.RevokedAt}
-			}
-		}
-	}
-	return clients, refreshTokens, grants, nil
-}
-
-func saveOAuthRefreshTokens(path string, clients []oauthClient, records []oauthRefreshTokenRecord, grants []oauthGrant) error {
-	file := oauthRefreshTokenFile{Version: 3, Clients: clients, Tokens: records, Grants: grants}
-	data, err := json.MarshalIndent(file, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal oauth refresh tokens: %w", err)
-	}
-	data = append(data, '\n')
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("create oauth refresh token dir: %w", err)
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return fmt.Errorf("write oauth refresh tokens: %w", err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("rename oauth refresh tokens: %w", err)
-	}
-	return nil
-}
-
-func oauthRefreshTokenKey(token string) string {
-	digest := sha256.Sum256([]byte(token))
-	return base64.RawURLEncoding.EncodeToString(digest[:])
 }
 
 func randomToken() (string, error) {
@@ -1222,12 +1013,19 @@ func (s *oauthServer) verifyBearer(r *http.Request, token string) (*bearerClaims
 		return nil, errors.New("token subject is unknown")
 	}
 	return &bearerClaims{
-		User:     user,
-		Subject:  claims.Subject,
-		Username: claims.Username,
-		Issuer:   claims.Issuer,
-		Audience: claims.Audience,
-		Scopes:   parseScopeSet(claims.Scope),
+		BearerClaims: oauth.BearerClaims{
+			User: oauth.User{
+				ID:       user.ID,
+				Username: user.Username,
+				Provider: string(user.Provider),
+			},
+			Subject:  claims.Subject,
+			Username: claims.Username,
+			Issuer:   claims.Issuer,
+			Audience: claims.Audience,
+			Scopes:   parseScopeSet(claims.Scope),
+		},
+		authUser: user,
 	}, nil
 }
 
@@ -1257,14 +1055,14 @@ func (s *oauthServer) revokeOAuthGrant(ctx context.Context, req *v1.RevokeOAuthG
 	if !s.revokeUserGrant(userIDFromCtx(ctx), req.GrantID) {
 		return nil, api.NotFound("OAuth grant")
 	}
-	if err := s.saveRefreshTokens(); err != nil {
+	if err := s.state.Save(); err != nil {
 		return nil, api.InternalError("save OAuth grant revocation: " + err.Error())
 	}
 	return &v1.StatusResp{Status: "ok"}, nil
 }
 
-// oauthGrantResponse converts an internal oauthGrant to an API response.
-func oauthGrantResponse(grant *oauthGrant, now time.Time) v1.OAuthGrantResp {
+// oauthGrantResponse converts an internal oauth.Grant to an API response.
+func oauthGrantResponse(grant *oauth.Grant, now time.Time) v1.OAuthGrantResp {
 	status := v1.OAuthGrantStatusActive
 	if !grant.RevokedAt.IsZero() {
 		status = v1.OAuthGrantStatusRevoked
