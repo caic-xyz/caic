@@ -247,11 +247,11 @@ func (s *mcpServer) handleMCPOAuthMetadata(w http.ResponseWriter, r *http.Reques
 	issuer := s.externalBaseURL(r)
 	metadata := mcp.OAuthAuthorizationServerMetadata{
 		Issuer:                                 issuer,
-		AuthorizationEndpoint:                  issuer + "/api/caic/v1/oauth/authorize",
-		TokenEndpoint:                          issuer + "/api/caic/v1/oauth/token",
-		JWKSURI:                                issuer + "/api/caic/v1/oauth/jwks",
-		RegistrationEndpoint:                   issuer + "/api/caic/v1/oauth/register",
-		RevocationEndpoint:                     issuer + "/api/caic/v1/oauth/revoke",
+		AuthorizationEndpoint:                  issuer + "/oauth/authorize",
+		TokenEndpoint:                          issuer + "/oauth/token",
+		JWKSURI:                                issuer + "/oauth/jwks",
+		RegistrationEndpoint:                   issuer + "/oauth/register",
+		RevocationEndpoint:                     issuer + "/oauth/revoke",
 		ResponseTypesSupported:                 []string{mcp.OAuthResponseTypeCode},
 		GrantTypesSupported:                    []string{mcp.OAuthGrantAuthorizationCode, mcp.OAuthGrantRefreshToken},
 		CodeChallengeMethodsSupported:          []string{mcp.OAuthCodeChallengeS256},
@@ -362,7 +362,7 @@ func (s *mcpServer) handleMCPOAuthAuthorize(w http.ResponseWriter, r *http.Reque
 		baseURL := s.externalBaseURL(r)
 		writeMCPConsentHeaders(w)
 		data := mcpConsentTemplateData{
-			Action:        baseURL + "/api/caic/v1/oauth/authorize",
+			Action:        baseURL + "/oauth/authorize",
 			ConsentToken:  consentToken,
 			ClientName:    clientDisplayName(&client),
 			ClientID:      client.ID,
@@ -466,7 +466,7 @@ func (s *mcpServer) mcpLoginStartURL(r *http.Request) string {
 		return ""
 	}
 	values := url.Values{"next": {r.URL.RequestURI()}}
-	return "/api/caic/v1/auth/" + provider + "/start?" + values.Encode()
+	return "/auth/" + provider + "/start?" + values.Encode()
 }
 
 func (s *mcpServer) handleMCPOAuthToken(w http.ResponseWriter, r *http.Request) {

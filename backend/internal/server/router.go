@@ -132,10 +132,34 @@ func (s *Router) SetUsageFetchers(fetchers []usage.ProviderFetcher) {
 	s.usageHandlers.fetchers = fetchers
 }
 
+// buildAPIHandler assembles the protected API mux with all route concerns
+// and a 404 catch-all for unmatched /api/ paths. It returns the mux wrapped
+// in RequireUser when auth is enabled.
+func (s *Router) buildAPIHandler() http.Handler {
+	apiMux := http.NewServeMux()
+	m := func(suffix string, h http.Handler) {
+		mountPrefix(apiMux, "/api/caic/v1", "/api/caic/v1"+suffix, h)
+	}
+	m("/tasks", s.taskHTTPHandlers.routes())
+	m("/usage", s.usageHandlers.routes())
+	m("/server", s.serverConfigHandlers.routes())
+	m("/processes", s.runtimeProcesses.routes())
+	m("/ci", s.ciHandlers.routes())
+	m("/web", s.webFetchHandlers.routes())
+	m("/mcp-grants", s.mcp.grantRoutes())
+	mountPrefix(apiMux, "", "/api/voicegateway/v1", s.voiceHandlers.handler())
+	apiMux.Handle("/api/", http.NotFoundHandler())
+	apiMux.Handle("/api", http.NotFoundHandler())
+
+	if s.authEnabled() {
+		return requireUser(apiMux)
+	}
+	return apiMux
+}
+
 // buildHandler assembles the full HTTP handler. Extracted from Serve so that
 // route registration can be tested without a listener.
 func (s *Router) buildHandler() (http.Handler, error) {
-	serverConfig := s.serverConfigHandlers
 	// The MCP concern shares the router's auth/host configuration by reference.
 	// New() sets these consistently, so this is a no-op in production; it exists
 	// because tests mutate s.authStore/s.hostState on the constructed Router and
@@ -146,66 +170,62 @@ func (s *Router) buildHandler() (http.Handler, error) {
 		return nil, err
 	}
 
-	// Protected routes: each handler concern owns one /api/caic/v1 subroute and
-	// returns its own handler via routes(). mountAPI handles the version-prefix
-	// strip and the exact+subtree pair (see its doc).
-	apiMux := http.NewServeMux()
-	mountAPI(apiMux, "/api/caic/v1/tasks", s.taskHTTPHandlers.routes())
-	mountAPI(apiMux, "/api/caic/v1/usage", s.usageHandlers.routes())
-	mountAPI(apiMux, "/api/caic/v1/server", s.serverConfigHandlers.routes())
-	mountAPI(apiMux, "/api/caic/v1/processes", s.runtimeProcesses.routes())
-	mountAPI(apiMux, "/api/caic/v1/ci", s.ciHandlers.routes())
-	mountAPI(apiMux, "/api/caic/v1/web", s.webFetchHandlers.routes())
-	// /mcp-grants is a sibling of the MCP JSON-RPC endpoint at /api/caic/v1/mcp,
-	// not a /mcp/ subtree: a subtree would make ServeMux 307-redirect the bare
-	// endpoint path to it when the endpoint is disabled.
-	mountAPI(apiMux, "/api/caic/v1/mcp-grants", s.mcp.grantRoutes())
-	apiMux.Handle("/api/voicegateway/v1/", s.voiceHandlers.handler())
-
-	// Gate the protected API behind RequireUser when auth is enabled.
-	var protectedAPI http.Handler = apiMux
-	if s.authEnabled() {
-		protectedAPI = requireUser(apiMux)
-	}
-
-	// Root mux. It serves the public (unauthenticated) routes directly and mounts
-	// the credentialed API subtree (protectedAPI) under /api/caic/v1/.
+	// --- Root mux ---
 	//
-	// Intended invariant: everything under /api/ requires a credential. Three
-	// groups are public exceptions today because they bootstrap auth and so
-	// cannot require it:
-	//   - /api/caic/v1/auth/*                   the session login flow
-	//   - /api/caic/v1/oauth/*                  the MCP OAuth authorization server
-	//   - /api/caic/v1/server/{config,version}  read pre-login to draw the login page
-	// The MCP JSON-RPC endpoint (/api/caic/v1/mcp) also sits under /api/ but is
-	// authenticated by bearer token, not session. A deferred cleanup could move
-	// auth and oauth to top-level paths (/auth, /oauth) so the invariant holds
-	// structurally and the public exceptions all live outside /api/.
+	// Public routes (no session required) are registered directly on the root
+	// mux. The protected API subtree is mounted at /api/ and gated by
+	// RequireUser.
+	//
+	// Invariant: every route under /api/ requires a credential.
+	//   - /api/caic/v1/mcp is bearer-authenticated (MCP token), not session.
+	//   - /api/caic/v1/server/{config,version} are mirrored at /server-info/
+	//     for pre-login access; the /api/ variants are session-gated.
 	mux := http.NewServeMux()
 
-	// Public: the session login flow (GitHub/GitLab start+callback, me, logout).
-	mountAPI(mux, "/api/caic/v1/auth", s.authHandlers.routes())
+	// --- Public: OAuth login flow ---
+	//
+	// /auth/github/start, /auth/github/callback, /auth/gitlab/start,
+	// /auth/gitlab/callback, /auth/me, /auth/logout.
+	// handleGetMe and handleLogout check the session internally and return 404
+	// when unauthenticated.
+	mountPrefix(mux, "", "/auth", s.authHandlers.routes())
 
-	// Public/bearer: MCP discovery metadata, the OAuth authorization server, and
-	// the bearer-authenticated JSON-RPC endpoint. Owned by the mcp concern, which
-	// holds the path constants these share with the metadata documents.
+	// --- Public: MCP discovery, OAuth authorization server, and JSON-RPC ---
+	//
+	// /.well-known/oauth-protected-resource, /.well-known/oauth-authorization-server,
+	// /.well-known/openid-configuration, /oauth/jwks, /oauth/register,
+	// /oauth/authorize, /oauth/token, /oauth/revoke, /api/caic/v1/mcp.
+	// OAuth endpoints are at /oauth/ (outside /api/) per the invariant.
+	// The JSON-RPC endpoint stays at /api/caic/v1/mcp; it is bearer-authenticated,
+	// not session-gated, but lives under /api/ because it is a credential-bearing
+	// MCP protocol endpoint with its own auth challenge.
 	s.mcp.registerPublicRoutes(mux, s.mcpDisabled)
-	// Public: read by the frontend before login to discover auth providers and
-	// draw the login page, so they cannot be gated behind RequireUser. These
-	// exact-path registrations take precedence over the protectedAPI /server/
-	// subtree mounted below.
-	mux.HandleFunc("GET /api/caic/v1/server/config", handle(serverConfig.getConfig))
-	mux.HandleFunc("GET /api/caic/v1/server/version", handle(serverConfig.getVersion))
-	// Go Mode bootstrap manifest: a public discovery document under /.well-known/
-	// (RFC 8615), registered before the /.well-known/ catch-all below so its exact
-	// path takes precedence. It is intentionally outside the auth-gated API mux.
+
+	// --- Public: server discovery (read before login) ---
+	//
+	// The /api/caic/v1/server/{config,version} variants are gated by the
+	// protected API subtree below and require a session. /server-info/ provides
+	// the same data without authentication for pre-login bootstrap.
+	mountPrefix(mux, "", "/server-info", s.serverConfigHandlers.discoveryRoutes())
+
+	// --- Public: Go Mode bootstrap manifest ---
+	//
+	// RFC 8615 well-known discovery document, registered before the
+	// /.well-known/ catch-all below so its exact path takes precedence.
 	mux.Handle("/.well-known/gomode.json", s.goModeHandler)
-	mux.HandleFunc("POST /webhooks/github", s.webhooks.HandleGitHub)
-	mux.HandleFunc("POST /webhooks/gitlab", s.webhooks.HandleGitLab)
-	// Credentialed API: every /api/ route not matched by a public exact path
-	// above falls through to here, gated by RequireUser when auth is enabled.
-	mux.Handle("/api/caic/v1/", protectedAPI)
-	mux.Handle("/api/voicegateway/v1/", protectedAPI)
+
+	// --- Public: webhooks (HMAC-authenticated, not session) ---
+	mountPrefix(mux, "", "/webhooks", s.webhooks.routes())
+
+	// --- Protected API subtrees ---
+	//
+	// All /api/ routes go through RequireUser when auth is enabled. Exact-path
+	// registrations (e.g. /api/caic/v1/mcp for MCP bearer auth) are registered
+	// directly on the root mux and take precedence over this subtree mount.
+	//
+	// apiMux owns the route concerns, the version-prefix handling, and the 404
+	// catch-all for unmatched /api/ paths.
+	mux.Handle("/api/", s.buildAPIHandler())
 
 	// Profiling (opt-in via -pprof / CAIC_PPROF).
 	if s.pprof {
@@ -220,13 +240,11 @@ func (s *Router) buildHandler() (http.Handler, error) {
 	}
 	mux.Handle("/logos/", http.StripPrefix("/logos/", http.FileServer(http.FS(logosFS))))
 
-	// Unmatched API/webhook/static paths must not fall through to the SPA: this subtree is more specific than
-	// "/", so any /api/ request without a registered route (an unknown or disabled endpoint) gets 404 instead
-	// of index.html. Registered subtrees like /api/caic/v1/ are more specific still and take precedence.
+	// Unmatched static/well-known paths must not fall through to the SPA.
+	// /api/ is handled inside buildAPIHandler; /webhooks/ is owned by its
+	// sub-mux.
 	mux.Handle("/.well-known/", http.NotFoundHandler())
-	mux.Handle("/api/", http.NotFoundHandler())
 	mux.Handle("/static/", http.NotFoundHandler())
-	mux.Handle("/webhooks/", http.NotFoundHandler())
 
 	// Serve embedded frontend with SPA fallback and precompressed variants.
 	dist, err := fs.Sub(frontend.Files, "dist")
@@ -249,14 +267,12 @@ func (s *Router) buildHandler() (http.Handler, error) {
 	return inner, nil
 }
 
-// mountAPI mounts a concern's handler at prefix on mux. The handler registers
-// patterns relative to the /api/caic/v1 version prefix, which is stripped here.
-// It mounts both the exact path (e.g. /api/caic/v1/tasks, the collection) and
-// the subtree (/api/caic/v1/tasks/...) to the same handler: registering only
-// the subtree would make ServeMux answer the bare collection path with a 301
-// redirect to its slashed form, turning a POST create into a GET.
-func mountAPI(mux *http.ServeMux, prefix string, h http.Handler) {
-	h = http.StripPrefix("/api/caic/v1", h)
+// mountPrefix mounts a handler at prefix on mux, stripping base from the URL
+// path before dispatching. It registers both the exact path and the subtree
+// (prefix + "/") so the bare collection path and its sub-routes both reach
+// the same handler.
+func mountPrefix(mux *http.ServeMux, base, prefix string, h http.Handler) {
+	h = http.StripPrefix(base, h)
 	mux.Handle(prefix, h)
 	mux.Handle(prefix+"/", h)
 }

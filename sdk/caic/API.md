@@ -22,12 +22,12 @@ Type notation: `JSONValue` means any valid JSON value.
 | POST | `/api/caic/v1/server/repos` | Clones a repository into the server's root directory. | `CloneRepoReq` | `Repo` |
 | GET | `/api/caic/v1/server/repos/branches` | Lists branches for a repository. |  | `RepoBranchesResp` |
 
-## Auth
+## Other
 
 | Method | Path | Description | Request | Response |
 |--------|------|-------------|---------|----------|
-| GET | `/api/caic/v1/auth/me` | Returns the authenticated user's profile. |  | `UserResp` |
-| POST | `/api/caic/v1/auth/logout` | Invalidates the current session. |  | `StatusResp` |
+| GET | `/auth/me` | Returns the authenticated user's profile. |  | `UserResp` |
+| POST | `/auth/logout` | Invalidates the current session. |  | `StatusResp` |
 
 ## Mcp-grants
 
@@ -155,7 +155,7 @@ UpdateResp is the response for POST /api/caic/v1/server/update.
 
 ### UserResp
 
-UserResp is returned by GET /api/caic/v1/auth/me.
+UserResp is returned by GET /auth/me.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|

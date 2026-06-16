@@ -124,11 +124,11 @@ public final class ApiClient {
     }
     /// Returns the authenticated user's profile.
     public func getMe() async throws -> UserResp {
-        try await request("GET", path: "/api/caic/v1/auth/me")
+        try await request("GET", path: "/auth/me")
     }
     /// Invalidates the current session.
     public func logout() async throws -> StatusResp {
-        try await request("POST", path: "/api/caic/v1/auth/logout")
+        try await request("POST", path: "/auth/logout")
     }
     /// Returns server and per-repository preferences.
     public func getPreferences() async throws -> PreferencesResp {

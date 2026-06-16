@@ -42,9 +42,9 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     /** Triggers a background server auto-update to the latest release. */
     triggerUpdate: (): Promise<UpdateResp> => request<UpdateResp>("POST", "/api/caic/v1/server/update"),
     /** Returns the authenticated user's profile. */
-    getMe: (): Promise<UserResp> => request<UserResp>("GET", "/api/caic/v1/auth/me"),
+    getMe: (): Promise<UserResp> => request<UserResp>("GET", "/auth/me"),
     /** Invalidates the current session. */
-    logout: (): Promise<StatusResp> => request<StatusResp>("POST", "/api/caic/v1/auth/logout"),
+    logout: (): Promise<StatusResp> => request<StatusResp>("POST", "/auth/logout"),
     /** Returns server and per-repository preferences. */
     getPreferences: (): Promise<PreferencesResp> => request<PreferencesResp>("GET", "/api/caic/v1/server/preferences"),
     /** Updates server settings and preferences. */

@@ -76,14 +76,14 @@ var Routes = []Route{
 		Name:   "getMe",
 		Doc:    "Returns the authenticated user's profile.",
 		Method: "GET",
-		Path:   "/api/caic/v1/auth/me",
+		Path:   "/auth/me",
 		Resp:   reflect.TypeFor[UserResp](),
 	},
 	{
 		Name:   "logout",
 		Doc:    "Invalidates the current session.",
 		Method: "POST",
-		Path:   "/api/caic/v1/auth/logout",
+		Path:   "/auth/logout",
 		Resp:   reflect.TypeFor[StatusResp](),
 	},
 	{

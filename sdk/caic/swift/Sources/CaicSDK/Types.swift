@@ -412,7 +412,7 @@ public struct UpdateResp: Codable {
     public let status: String
 }
 
-/// UserResp is returned by GET /api/caic/v1/auth/me.
+/// UserResp is returned by GET /auth/me.
 public struct UserResp: Codable {
     public let id: String
     public let provider: String

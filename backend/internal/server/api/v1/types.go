@@ -97,7 +97,7 @@ type VoiceGatewayMetadata struct {
 	Capabilities []string         `json:"capabilities,omitempty"`
 }
 
-// UserResp is returned by GET /api/caic/v1/auth/me.
+// UserResp is returned by GET /auth/me.
 type UserResp struct {
 	ID        string `json:"id"`
 	Provider  string `json:"provider"`

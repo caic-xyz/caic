@@ -438,3 +438,15 @@ func (h *serverConfigHandlers) routes() http.Handler {
 	m.HandleFunc("GET /server/repos/branches", h.handleListRepoBranches)
 	return m
 }
+
+// discoveryRoutes returns the public server discovery endpoints, accessible
+// before login for auth provider discovery and frontend bootstrap.
+func (h *serverConfigHandlers) discoveryRoutes() http.Handler {
+	m := http.NewServeMux()
+	m.HandleFunc("GET /server-info/config", handle(h.getConfig))
+	m.HandleFunc("GET /server-info/version", handle(h.getVersion))
+	// Unmatched /server-info/ paths must not fall through to the SPA.
+	m.Handle("/server-info/", http.NotFoundHandler())
+	m.Handle("/server-info", http.NotFoundHandler())
+	return m
+}

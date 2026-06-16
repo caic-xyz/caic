@@ -94,9 +94,9 @@ class ApiClient(
     /** Triggers a background server auto-update to the latest release. */
     suspend fun triggerUpdate(): UpdateResp = request("POST", "/api/caic/v1/server/update")
     /** Returns the authenticated user's profile. */
-    suspend fun getMe(): UserResp = request("GET", "/api/caic/v1/auth/me")
+    suspend fun getMe(): UserResp = request("GET", "/auth/me")
     /** Invalidates the current session. */
-    suspend fun logout(): StatusResp = request("POST", "/api/caic/v1/auth/logout")
+    suspend fun logout(): StatusResp = request("POST", "/auth/logout")
     /** Returns server and per-repository preferences. */
     suspend fun getPreferences(): PreferencesResp = request("GET", "/api/caic/v1/server/preferences")
     /** Updates server settings and preferences. */

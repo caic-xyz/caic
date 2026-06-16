@@ -523,7 +523,7 @@ export interface UpdateResp {
   status: string;
 }
 
-/** UserResp is returned by GET /api/caic/v1/auth/me. */
+/** UserResp is returned by GET /auth/me. */
 export interface UserResp {
   id: string;
   provider: string;

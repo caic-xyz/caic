@@ -27,7 +27,7 @@ export default function LoginPage() {
         <div class="login-buttons">
           <For each={providers()}>
             {(provider) => (
-              <a href={`/api/caic/v1/auth/${provider}/start`} class="login-button">
+              <a href={`/auth/${provider}/start`} class="login-button">
                 {providerIcon(provider)}
                 {providerLabel(provider)}
               </a>

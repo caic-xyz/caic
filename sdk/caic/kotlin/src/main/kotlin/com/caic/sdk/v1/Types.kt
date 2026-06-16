@@ -682,7 +682,7 @@ data class VersionResp(
 @Serializable
 data class UpdateResp(val status: String)
 
-/** UserResp is returned by GET /api/caic/v1/auth/me. */
+/** UserResp is returned by GET /auth/me. */
 @Serializable
 data class UserResp(
     val id: String,

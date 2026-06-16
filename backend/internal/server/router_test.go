@@ -2079,10 +2079,10 @@ func TestBuildHandler(t *testing.T) {
 		if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 			t.Fatal(err)
 		}
-		if got.Issuer != "https://caic.example.com" || got.AuthorizationEndpoint != "https://caic.example.com/api/caic/v1/oauth/authorize" || got.TokenEndpoint != "https://caic.example.com/api/caic/v1/oauth/token" {
+		if got.Issuer != "https://caic.example.com" || got.AuthorizationEndpoint != "https://caic.example.com/oauth/authorize" || got.TokenEndpoint != "https://caic.example.com/oauth/token" {
 			t.Fatalf("metadata = %+v", got)
 		}
-		if got.RegistrationEndpoint != "https://caic.example.com/api/caic/v1/oauth/register" || got.JWKSURI != "https://caic.example.com/api/caic/v1/oauth/jwks" {
+		if got.RegistrationEndpoint != "https://caic.example.com/oauth/register" || got.JWKSURI != "https://caic.example.com/oauth/jwks" {
 			t.Fatalf("metadata endpoints = %+v", got)
 		}
 	})
@@ -2109,7 +2109,7 @@ func TestBuildHandler(t *testing.T) {
 		}
 
 		registerBody := `{"client_name":"Claude","redirect_uris":["https://claude.ai/api/mcp/auth_callback"],"token_endpoint_auth_method":"none"}`
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/oauth/register", strings.NewReader(registerBody))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/register", strings.NewReader(registerBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Host = "caic.example.com"
 		w := httptest.NewRecorder()
@@ -2145,7 +2145,7 @@ func TestBuildHandler(t *testing.T) {
 			invalidScopeForm[key] = append([]string(nil), values...)
 		}
 		invalidScopeForm.Set("scope", "caic:tasks.admin unknown:scope")
-		req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/oauth/authorize"+"?"+invalidScopeForm.Encode(), http.NoBody)
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/oauth/authorize"+"?"+invalidScopeForm.Encode(), http.NoBody)
 		req.Host = "caic.example.com"
 		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 		w = httptest.NewRecorder()
@@ -2154,7 +2154,7 @@ func TestBuildHandler(t *testing.T) {
 			t.Fatalf("invalid scope authorize status = %d, want %d", w.Code, http.StatusBadRequest)
 		}
 
-		req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/oauth/authorize"+"?"+form.Encode(), http.NoBody)
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/oauth/authorize"+"?"+form.Encode(), http.NoBody)
 		req.Host = "caic.example.com"
 		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 		w = httptest.NewRecorder()
@@ -2176,7 +2176,7 @@ func TestBuildHandler(t *testing.T) {
 			"scope_form":    {"1"},
 			"scope":         {mcpScopeRead, mcpScopeTasksRead},
 		}
-		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/oauth/authorize", strings.NewReader(consentForm.Encode()))
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/authorize", strings.NewReader(consentForm.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Host = "caic.example.com"
 		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
@@ -2202,7 +2202,7 @@ func TestBuildHandler(t *testing.T) {
 			"code_verifier": {verifier},
 			"resource":      {resource},
 		}
-		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/oauth/token", strings.NewReader(tokenForm.Encode()))
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(tokenForm.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Host = "caic.example.com"
 		w = httptest.NewRecorder()
@@ -2536,7 +2536,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("auth enabled", func(t *testing.T) {
 		t.Parallel()
-		// Regression: adding /api/caic/v1/auth/ (unqualified) alongside GET / (qualified)
+		// Regression: adding /auth/ (unqualified) alongside GET / (qualified)
 		// caused a pattern conflict panic in Go 1.22+ ServeMux.
 		s := newTestRouter(t)
 		secret := make([]byte, 32)
@@ -2839,7 +2839,7 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 		t.Parallel()
 		// Simulate the start handler to get a valid state cookie.
 		startW := httptest.NewRecorder()
-		startReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/auth/github/start", http.NoBody)
+		startReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/auth/github/start", http.NoBody)
 		s.authHandlers.handleStart("github")(startW, startReq)
 		if startW.Code != http.StatusFound {
 			t.Fatalf("start status = %d, want %d", startW.Code, http.StatusFound)
@@ -2865,7 +2865,7 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 
 		// Build callback request with the state echoed back (as GitHub would).
 		cbReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
-			"/api/caic/v1/auth/github/callback?code=testcode&state="+url.QueryEscape(rawState), http.NoBody)
+			"/auth/github/callback?code=testcode&state="+url.QueryEscape(rawState), http.NoBody)
 		cbReq.AddCookie(stateCookie)
 		cbW := httptest.NewRecorder()
 		s.authHandlers.handleCallback("github")(cbW, cbReq)
@@ -2879,7 +2879,7 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 	t.Run("rejects cross-origin web next", func(t *testing.T) {
 		t.Parallel()
 		startW := httptest.NewRecorder()
-		startReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/auth/github/start?next="+url.QueryEscape("https://evil.example/callback"), http.NoBody)
+		startReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/auth/github/start?next="+url.QueryEscape("https://evil.example/callback"), http.NoBody)
 		s.authHandlers.handleStart("github")(startW, startReq)
 		if startW.Code != http.StatusBadRequest {
 			t.Fatalf("start status = %d, want %d", startW.Code, http.StatusBadRequest)
@@ -2888,9 +2888,9 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 
 	t.Run("rejects backslash web next", func(t *testing.T) {
 		t.Parallel()
-		for _, next := range []string{`/\evil.example/callback`, `/api/caic/v1/oauth/authorize\evil`} {
+		for _, next := range []string{`/\evil.example/callback`, `/oauth/authorize\evil`} {
 			startW := httptest.NewRecorder()
-			startReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/auth/github/start?next="+url.QueryEscape(next), http.NoBody)
+			startReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/auth/github/start?next="+url.QueryEscape(next), http.NoBody)
 			s.authHandlers.handleStart("github")(startW, startReq)
 			if startW.Code != http.StatusBadRequest {
 				t.Fatalf("next %q start status = %d, want %d", next, startW.Code, http.StatusBadRequest)
@@ -2900,9 +2900,9 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 
 	t.Run("web next state redirects back after login", func(t *testing.T) {
 		t.Parallel()
-		next := "/api/caic/v1/oauth/authorize?client_id=caic_test&state=client-state"
+		next := "/oauth/authorize?client_id=caic_test&state=client-state"
 		startW := httptest.NewRecorder()
-		startReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/auth/github/start?next="+url.QueryEscape(next), http.NoBody)
+		startReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/auth/github/start?next="+url.QueryEscape(next), http.NoBody)
 		s.authHandlers.handleStart("github")(startW, startReq)
 		if startW.Code != http.StatusFound {
 			t.Fatalf("start status = %d, want %d", startW.Code, http.StatusFound)
@@ -2925,7 +2925,7 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 		rawState := redirectURL.Query().Get("state")
 
 		cbReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
-			"/api/caic/v1/auth/github/callback?code=testcode&state="+url.QueryEscape(rawState), http.NoBody)
+			"/auth/github/callback?code=testcode&state="+url.QueryEscape(rawState), http.NoBody)
 		cbReq.AddCookie(stateCookie)
 		cbW := httptest.NewRecorder()
 		s.authHandlers.handleCallback("github")(cbW, cbReq)

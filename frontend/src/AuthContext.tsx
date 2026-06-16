@@ -1,7 +1,7 @@
 // Auth context: tracks the current user and auth configuration.
 import { createContext, createSignal, useContext, onMount, type ParentComponent } from "solid-js";
-import type { UserResp } from "@sdk/types.gen";
-import { getConfig, getMe, logout as apiLogout } from "./api";
+import type { Config, UserResp } from "@sdk/types.gen";
+import { getMe, logout as apiLogout } from "./api";
 
 interface AuthState {
   /** True once the initial auth check has completed. */
@@ -25,7 +25,11 @@ export const AuthProvider: ParentComponent = (props) => {
 
   onMount(async () => {
     try {
-      const cfg = await getConfig();
+      // Fetch server config from the public /server-info endpoint (the /api/
+      // variant is session-gated and would 401 before login completes).
+      const res = await fetch("/server-info/config");
+      if (!res.ok) throw new Error(`server-info: ${res.status}`);
+      const cfg: Config = await res.json();
       const authProviders = cfg.authProviders ?? [];
       setProviders(authProviders);
       if (authProviders.length > 0) {

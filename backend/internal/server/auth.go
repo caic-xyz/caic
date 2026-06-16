@@ -216,7 +216,7 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 	}
 }
 
-// handleGetMe handles GET /api/caic/v1/auth/me.
+// handleGetMe handles GET /auth/me.
 func (h *authHandlers) handleGetMe(w http.ResponseWriter, r *http.Request) {
 	u, ok := auth.UserFromContext(r.Context())
 	if !ok {
@@ -231,7 +231,7 @@ func (h *authHandlers) handleGetMe(w http.ResponseWriter, r *http.Request) {
 	}, nil)
 }
 
-// handleLogout handles POST /api/caic/v1/auth/logout.
+// handleLogout handles POST /auth/logout.
 func (h *authHandlers) handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure is set dynamically; all required attributes are present
 		Name:     sessionCookieName,
@@ -311,9 +311,11 @@ func validWebRedirectPath(raw string) bool {
 	return strings.HasPrefix(u.Path, "/") && !strings.HasPrefix(raw, "//")
 }
 
-// routes returns the handler for the OAuth login endpoints. Patterns are
-// relative to the /api/caic/v1 version prefix, stripped at mount time. These
-// routes are exempt from RequireUser and mounted on the public root mux.
+// routes returns the handler for the OAuth login and session endpoints.
+// Patterns use absolute paths (/auth/...) and are mounted at /auth/ on the
+// root mux without prefix stripping. These routes are outside /api/ and
+// thus exempt from RequireUser; handleGetMe and handleLogout check the
+// session internally.
 func (h *authHandlers) routes() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("GET /auth/github/start", h.handleStart("github"))

@@ -409,12 +409,14 @@ func (s *mcpServer) registerPublicRoutes(mux *http.ServeMux, disabled bool) {
 	mux.HandleFunc("GET /.well-known/openid-configuration", s.handleMCPOAuthMetadata)
 	// OAuth authorization-server endpoints; clients discover these via the
 	// metadata above, so the paths can change without breaking clients.
-	mux.HandleFunc("GET /api/caic/v1/oauth/jwks", s.handleMCPOAuthJWKS)
-	mux.HandleFunc("POST /api/caic/v1/oauth/register", s.handleMCPOAuthRegister)
-	mux.HandleFunc("GET /api/caic/v1/oauth/authorize", s.handleMCPOAuthAuthorize)
-	mux.HandleFunc("POST /api/caic/v1/oauth/authorize", s.handleMCPOAuthAuthorize)
-	mux.HandleFunc("POST /api/caic/v1/oauth/token", s.handleMCPOAuthToken)
-	mux.HandleFunc("POST /api/caic/v1/oauth/revoke", s.handleMCPOAuthRevoke)
+	// These live under /oauth/ (outside /api/) per the invariant that every
+	// /api/ route requires a credential.
+	mux.HandleFunc("GET /oauth/jwks", s.handleMCPOAuthJWKS)
+	mux.HandleFunc("POST /oauth/register", s.handleMCPOAuthRegister)
+	mux.HandleFunc("GET /oauth/authorize", s.handleMCPOAuthAuthorize)
+	mux.HandleFunc("POST /oauth/authorize", s.handleMCPOAuthAuthorize)
+	mux.HandleFunc("POST /oauth/token", s.handleMCPOAuthToken)
+	mux.HandleFunc("POST /oauth/revoke", s.handleMCPOAuthRevoke)
 	if disabled {
 		return
 	}

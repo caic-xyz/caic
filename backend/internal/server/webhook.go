@@ -199,6 +199,18 @@ func (h *WebhookHandlers) HandleGitLab(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// routes returns the webhook handler with POST /webhooks/github and
+// POST /webhooks/gitlab registered.
+func (h *WebhookHandlers) routes() http.Handler {
+	m := http.NewServeMux()
+	m.HandleFunc("POST /webhooks/github", h.HandleGitHub)
+	m.HandleFunc("POST /webhooks/gitlab", h.HandleGitLab)
+	// Unmatched webhook paths must not fall through to the SPA.
+	m.Handle("/webhooks/", http.NotFoundHandler())
+	m.Handle("/webhooks", http.NotFoundHandler())
+	return m
+}
+
 func signaturePresence(sig string) string {
 	if sig == "" {
 		return "missing"
