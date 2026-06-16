@@ -20,6 +20,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
+	"github.com/caic-xyz/caic/backend/internal/oauth"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
@@ -470,7 +471,7 @@ func newAuthEnabledRouter(t *testing.T) (*Router, *auth.Store, auth.User) {
 	return s.Router, store, user
 }
 
-func registerTestClient(t *testing.T, h http.Handler, clientName string, redirectURIs []string) OAuthRegisterResponse {
+func registerTestClient(t *testing.T, h http.Handler, clientName string, redirectURIs []string) oauth.RegisterResponse {
 	body := strings.NewReader(`{"client_name":"` + clientName + `","redirect_uris":["` + strings.Join(redirectURIs, `","`) + `"],"token_endpoint_auth_method":"none"}`)
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/register", body)
 	req.Header.Set("Content-Type", "application/json")
@@ -483,7 +484,7 @@ func registerTestClient(t *testing.T, h http.Handler, clientName string, redirec
 	if contentType := w.Header().Get("Content-Type"); contentType != "application/json" {
 		t.Fatalf("Content-Type = %q, want application/json", contentType)
 	}
-	var resp OAuthRegisterResponse
+	var resp oauth.RegisterResponse
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode register response: %v", err)
 	}

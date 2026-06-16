@@ -31,6 +31,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/gomode"
 	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
+	"github.com/caic-xyz/caic/backend/internal/oauth"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -2039,7 +2040,7 @@ func TestBuildHandler(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
-		var got ProtectedResourceMetadata
+		var got oauth.ProtectedResourceMetadata
 		if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 			t.Fatal(err)
 		}
@@ -2101,7 +2102,7 @@ func TestBuildHandler(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
-		var got OAuthAuthorizationServerMetadata
+		var got oauth.AuthorizationServerMetadata
 		if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 			t.Fatal(err)
 		}
@@ -2140,7 +2141,7 @@ func TestBuildHandler(t *testing.T) {
 		if w.Code != http.StatusCreated {
 			t.Fatalf("register status = %d, want %d: %s", w.Code, http.StatusCreated, w.Body.String())
 		}
-		var registered OAuthRegisterResponse
+		var registered oauth.RegisterResponse
 		if err := json.NewDecoder(w.Body).Decode(&registered); err != nil {
 			t.Fatal(err)
 		}
@@ -2233,7 +2234,7 @@ func TestBuildHandler(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var tokenResp OAuthTokenResponse
+		var tokenResp oauth.TokenResponse
 		if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
 			t.Fatal(err)
 		}

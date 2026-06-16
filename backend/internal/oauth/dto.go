@@ -1,6 +1,5 @@
-// OAuth wire DTOs and protocol helpers for MCP client authorization.
-
-package server
+// Package oauth provides generic OAuth protocol DTOs and helpers.
+package oauth
 
 import (
 	"crypto/rsa"
@@ -15,23 +14,23 @@ import (
 )
 
 const (
-	// OAuthGrantAuthorizationCode is the OAuth authorization-code grant type.
-	OAuthGrantAuthorizationCode = "authorization_code"
-	// OAuthGrantRefreshToken is the OAuth refresh-token grant type.
-	OAuthGrantRefreshToken = "refresh_token"
-	// OAuthCodeChallengeS256 is the PKCE S256 code challenge method.
-	OAuthCodeChallengeS256 = "S256"
-	// OAuthResponseTypeCode is the authorization-code response type.
-	OAuthResponseTypeCode = "code"
-	// OAuthTokenTypeBearer is the bearer access token type.
-	OAuthTokenTypeBearer = "Bearer"
-	// OAuthTokenEndpointAuthNone is the public-client token endpoint auth method.
-	OAuthTokenEndpointAuthNone = "none"
+	// GrantAuthorizationCode is the OAuth authorization-code grant type.
+	GrantAuthorizationCode = "authorization_code"
+	// GrantRefreshToken is the OAuth refresh-token grant type.
+	GrantRefreshToken = "refresh_token"
+	// CodeChallengeS256 is the PKCE S256 code challenge method.
+	CodeChallengeS256 = "S256"
+	// ResponseTypeCode is the authorization-code response type.
+	ResponseTypeCode = "code"
+	// TokenTypeBearer is the bearer access token type.
+	TokenTypeBearer = "Bearer"
+	// TokenEndpointAuthNone is the public-client token endpoint auth method.
+	TokenEndpointAuthNone = "none"
 	// JWTAlgRS256 is the RSASSA-PKCS1-v1_5 SHA-256 JWT algorithm.
 	JWTAlgRS256 = "RS256"
 )
 
-// ProtectedResourceMetadata is OAuth 2.0 Protected Resource Metadata for an MCP resource.
+// ProtectedResourceMetadata is OAuth 2.0 Protected Resource Metadata.
 type ProtectedResourceMetadata struct {
 	Resource              string   `json:"resource"`
 	AuthorizationServers  []string `json:"authorization_servers"`
@@ -39,8 +38,8 @@ type ProtectedResourceMetadata struct {
 	ResourceDocumentation string   `json:"resource_documentation,omitempty"`
 }
 
-// OAuthAuthorizationServerMetadata is OAuth/OIDC discovery metadata used by MCP clients.
-type OAuthAuthorizationServerMetadata struct {
+// AuthorizationServerMetadata is OAuth/OIDC discovery metadata.
+type AuthorizationServerMetadata struct {
 	Issuer                                        string   `json:"issuer"`
 	AuthorizationEndpoint                         string   `json:"authorization_endpoint"`
 	TokenEndpoint                                 string   `json:"token_endpoint"`
@@ -56,15 +55,15 @@ type OAuthAuthorizationServerMetadata struct {
 	AuthorizationResponseIssuerParameterSupported bool     `json:"authorization_response_iss_parameter_supported"`
 }
 
-// OAuthRegisterRequest is a dynamic client registration request.
-type OAuthRegisterRequest struct {
+// RegisterRequest is a dynamic client registration request.
+type RegisterRequest struct {
 	ClientName              string   `json:"client_name"`
 	RedirectURIs            []string `json:"redirect_uris"`
 	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
 }
 
-// OAuthRegisterResponse is a dynamic client registration response.
-type OAuthRegisterResponse struct {
+// RegisterResponse is a dynamic client registration response.
+type RegisterResponse struct {
 	ClientID                string   `json:"client_id"`
 	ClientIDIssuedAt        int64    `json:"client_id_issued_at"`
 	ClientName              string   `json:"client_name,omitempty"`
@@ -72,8 +71,8 @@ type OAuthRegisterResponse struct {
 	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
 }
 
-// OAuthTokenResponse is an OAuth token endpoint response.
-type OAuthTokenResponse struct {
+// TokenResponse is an OAuth token endpoint response.
+type TokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	TokenType    string `json:"token_type"`
 	ExpiresIn    int64  `json:"expires_in"`
@@ -81,8 +80,8 @@ type OAuthTokenResponse struct {
 	Scope        string `json:"scope,omitempty"`
 }
 
-// OAuthErrorResponse is an OAuth error response body.
-type OAuthErrorResponse struct {
+// ErrorResponse is an OAuth error response body.
+type ErrorResponse struct {
 	Error            string `json:"error"`
 	ErrorDescription string `json:"error_description,omitempty"`
 }
@@ -109,7 +108,7 @@ type JWTHeader struct {
 	Typ string `json:"typ"`
 }
 
-// AccessTokenClaims are JWT access-token claims used by the MCP resource server.
+// AccessTokenClaims are JWT access-token claims.
 type AccessTokenClaims struct {
 	Issuer    string `json:"iss"`
 	Subject   string `json:"sub"`
@@ -160,11 +159,11 @@ func RSAJWK(kid string, pub *rsa.PublicKey) JWK {
 	}
 }
 
-// WriteOAuthError writes an OAuth JSON error response.
-func WriteOAuthError(w http.ResponseWriter, status int, code, description string) {
+// WriteError writes an OAuth JSON error response.
+func WriteError(w http.ResponseWriter, status int, code, description string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(OAuthErrorResponse{Error: code, ErrorDescription: description}); err != nil {
+	if err := json.NewEncoder(w).Encode(ErrorResponse{Error: code, ErrorDescription: description}); err != nil {
 		slog.Warn("failed to encode OAuth error", "err", err)
 	}
 }

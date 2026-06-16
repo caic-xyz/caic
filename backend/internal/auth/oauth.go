@@ -5,15 +5,15 @@ package auth
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/caic-xyz/caic/backend/internal/oauth"
 )
 
 // ProviderConfig holds the OAuth 2.0 endpoint configuration for one provider.
@@ -79,70 +79,24 @@ func GitLabConfig(clientID, secret, gitlabURL string, host *HostState) ProviderC
 
 // AuthURL returns the provider's authorization URL with the state param.
 func (c *ProviderConfig) AuthURL(state string) string {
-	v := url.Values{}
-	v.Set("client_id", c.ClientID)
-	v.Set("redirect_uri", c.RedirectURI())
-	v.Set("scope", strings.Join(c.Scopes, " "))
-	v.Set("state", state)
-	v.Set("response_type", "code")
-	return c.AuthEndpoint + "?" + v.Encode()
-}
-
-// tokenResponse is the JSON response from the OAuth token endpoint.
-type tokenResponse struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token,omitempty"`
-	ExpiresIn    int    `json:"expires_in,omitempty"`
-	TokenType    string `json:"token_type,omitempty"`
-	Error        string `json:"error,omitempty"`
+	return oauth.AuthorizationURL(c.oauthClientConfig(), state)
 }
 
 // ExchangeCode exchanges an authorization code for tokens.
 // Returns accessToken, refreshToken (may be empty), expiry (may be zero).
 func ExchangeCode(ctx context.Context, cfg *ProviderConfig, code string) (access, refresh string, expiry time.Time, err error) {
-	body := url.Values{}
-	body.Set("grant_type", "authorization_code")
-	body.Set("code", code)
-	body.Set("redirect_uri", cfg.RedirectURI())
-	body.Set("client_id", cfg.ClientID)
-	body.Set("client_secret", cfg.ClientSecret)
+	return oauth.ExchangeCode(ctx, cfg.oauthClientConfig(), code)
+}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.TokenURL, strings.NewReader(body.Encode()))
-	if err != nil {
-		return "", "", time.Time{}, fmt.Errorf("build token request: %w", err)
+func (c *ProviderConfig) oauthClientConfig() *oauth.ClientConfig {
+	return &oauth.ClientConfig{
+		ClientID:     c.ClientID,
+		ClientSecret: c.ClientSecret,
+		AuthEndpoint: c.AuthEndpoint,
+		TokenURL:     c.TokenURL,
+		RedirectURI:  c.RedirectURI(),
+		Scopes:       c.Scopes,
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", "", time.Time{}, fmt.Errorf("token exchange: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", "", time.Time{}, fmt.Errorf("read token response: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", "", time.Time{}, fmt.Errorf("token exchange status %d: %s", resp.StatusCode, data)
-	}
-
-	var tr tokenResponse
-	if err := json.Unmarshal(data, &tr); err != nil {
-		return "", "", time.Time{}, fmt.Errorf("parse token response: %w", err)
-	}
-	if tr.Error != "" {
-		return "", "", time.Time{}, fmt.Errorf("oauth error: %s", tr.Error)
-	}
-	if tr.AccessToken == "" {
-		return "", "", time.Time{}, errors.New("no access_token in response")
-	}
-
-	var exp time.Time
-	if tr.ExpiresIn > 0 {
-		exp = time.Now().Add(time.Duration(tr.ExpiresIn) * time.Second)
-	}
-	return tr.AccessToken, tr.RefreshToken, exp, nil
 }
 
 // githubUserResponse is the JSON response from the GitHub /user endpoint.

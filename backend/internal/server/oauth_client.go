@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/caic-xyz/caic/backend/internal/oauth"
 )
 
 // oauthClient is a dynamically-registered OAuth client.
@@ -24,43 +26,43 @@ func (s *oauthServer) handleOAuthRegister(w http.ResponseWriter, r *http.Request
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
-	var req OAuthRegisterRequest
+	var req oauth.RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeOAuthError(w, http.StatusBadRequest, "invalid_client_metadata", "invalid registration JSON")
+		oauth.WriteError(w, http.StatusBadRequest, "invalid_client_metadata", "invalid registration JSON")
 		return
 	}
 	method := req.TokenEndpointAuthMethod
 	if method == "" {
-		method = OAuthTokenEndpointAuthNone
+		method = oauth.TokenEndpointAuthNone
 	}
-	if method != OAuthTokenEndpointAuthNone {
-		writeOAuthError(w, http.StatusBadRequest, "invalid_client_metadata", "only public clients are supported")
+	if method != oauth.TokenEndpointAuthNone {
+		oauth.WriteError(w, http.StatusBadRequest, "invalid_client_metadata", "only public clients are supported")
 		return
 	}
 	if len(req.RedirectURIs) == 0 {
-		writeOAuthError(w, http.StatusBadRequest, "invalid_redirect_uri", "redirect_uris is required")
+		oauth.WriteError(w, http.StatusBadRequest, "invalid_redirect_uri", "redirect_uris is required")
 		return
 	}
 	for _, redirectURI := range req.RedirectURIs {
 		if !validOAuthRedirectURI(redirectURI) {
-			writeOAuthError(w, http.StatusBadRequest, "invalid_redirect_uri", "redirect URI must be https or localhost http")
+			oauth.WriteError(w, http.StatusBadRequest, "invalid_redirect_uri", "redirect URI must be https or localhost http")
 			return
 		}
 	}
 	clientID, err := randomToken()
 	if err != nil {
 		slog.WarnContext(r.Context(), "generate oauth client id", "err", err)
-		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not register client")
+		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not register client")
 		return
 	}
 	now := time.Now()
 	client := oauthClient{ID: s.clientIDPrefix + clientID, Name: req.ClientName, RedirectURIs: req.RedirectURIs, TokenEndpointAuthMethod: method, CreatedAt: now}
 	if err := s.registerClient(&client); err != nil {
 		slog.WarnContext(r.Context(), "save oauth client registration", "err", err)
-		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not register client")
+		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not register client")
 		return
 	}
-	resp := OAuthRegisterResponse{ClientID: client.ID, ClientIDIssuedAt: now.Unix(), ClientName: client.Name, RedirectURIs: client.RedirectURIs, TokenEndpointAuthMethod: method}
+	resp := oauth.RegisterResponse{ClientID: client.ID, ClientIDIssuedAt: now.Unix(), ClientName: client.Name, RedirectURIs: client.RedirectURIs, TokenEndpointAuthMethod: method}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(&resp); err != nil {

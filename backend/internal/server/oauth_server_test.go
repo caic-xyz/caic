@@ -21,6 +21,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
+	"github.com/caic-xyz/caic/backend/internal/oauth"
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
@@ -45,7 +46,7 @@ func TestOAuthServer(t *testing.T) {
 			if rotated.AccessToken == "" || rotated.RefreshToken == "" || rotated.RefreshToken == tokenResp.RefreshToken {
 				t.Fatalf("rotated token response = %+v", rotated)
 			}
-			if rotated.TokenType != OAuthTokenTypeBearer || rotated.Scope != tokenResp.Scope {
+			if rotated.TokenType != oauth.TokenTypeBearer || rotated.Scope != tokenResp.Scope {
 				t.Fatalf("rotated token metadata = %+v", rotated)
 			}
 			if _, err := s.oauth.verifyBearer(newMCPBearerRequest(t), rotated.AccessToken); err != nil {
@@ -809,7 +810,7 @@ func TestOAuthServer(t *testing.T) {
 	})
 }
 
-func newMCPOAuthLifecycleRouter(t *testing.T) (*testRouter, http.Handler, auth.User, OAuthRegisterResponse) {
+func newMCPOAuthLifecycleRouter(t *testing.T) (*testRouter, http.Handler, auth.User, oauth.RegisterResponse) {
 	store, err := auth.Open(t.TempDir() + "/users.json")
 	if err != nil {
 		t.Fatalf("open auth store: %v", err)
@@ -863,7 +864,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T) (*testRouter, http.Handler, auth.U
 	if w.Code != http.StatusCreated {
 		t.Fatalf("register status = %d, want %d: %s", w.Code, http.StatusCreated, w.Body.String())
 	}
-	var registered OAuthRegisterResponse
+	var registered oauth.RegisterResponse
 	if err := json.NewDecoder(w.Body).Decode(&registered); err != nil {
 		t.Fatal(err)
 	}
@@ -881,11 +882,11 @@ func mustBuildMCPOAuthLifecycleHandler(t *testing.T, s *testRouter) http.Handler
 	return h
 }
 
-func authorizeMCPClient(t *testing.T, h http.Handler, user *auth.User, registered *OAuthRegisterResponse) OAuthTokenResponse {
+func authorizeMCPClient(t *testing.T, h http.Handler, user *auth.User, registered *oauth.RegisterResponse) oauth.TokenResponse {
 	return authorizeMCPClientWithRedirect(t, h, user, registered, "https://claude.ai/api/mcp/auth_callback")
 }
 
-func authorizeMCPClientWithRedirect(t *testing.T, h http.Handler, user *auth.User, registered *OAuthRegisterResponse, redirectURI string) OAuthTokenResponse {
+func authorizeMCPClientWithRedirect(t *testing.T, h http.Handler, user *auth.User, registered *oauth.RegisterResponse, redirectURI string) oauth.TokenResponse {
 	verifier := "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 	digest := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(digest[:])
@@ -944,7 +945,7 @@ func authorizeMCPClientWithRedirect(t *testing.T, h http.Handler, user *auth.Use
 	}
 
 	tokenForm := url.Values{
-		"grant_type":    {OAuthGrantAuthorizationCode},
+		"grant_type":    {oauth.GrantAuthorizationCode},
 		"code":          {code},
 		"client_id":     {registered.ClientID},
 		"redirect_uri":  {redirectURI},
@@ -959,7 +960,7 @@ func authorizeMCPClientWithRedirect(t *testing.T, h http.Handler, user *auth.Use
 	if w.Code != http.StatusOK {
 		t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 	}
-	var tokenResp OAuthTokenResponse
+	var tokenResp oauth.TokenResponse
 	if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
 		t.Fatal(err)
 	}
@@ -1001,9 +1002,9 @@ func addTestSessionCookie(t *testing.T, req *http.Request, user *auth.User) {
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 }
 
-func refreshMCPToken(t *testing.T, h http.Handler, clientID, refreshToken string, wantStatus int) OAuthTokenResponse {
+func refreshMCPToken(t *testing.T, h http.Handler, clientID, refreshToken string, wantStatus int) oauth.TokenResponse {
 	form := url.Values{
-		"grant_type":    {OAuthGrantRefreshToken},
+		"grant_type":    {oauth.GrantRefreshToken},
 		"client_id":     {clientID},
 		"refresh_token": {refreshToken},
 	}
@@ -1015,7 +1016,7 @@ func refreshMCPToken(t *testing.T, h http.Handler, clientID, refreshToken string
 	if w.Code != wantStatus {
 		t.Fatalf("refresh status = %d, want %d: %s", w.Code, wantStatus, w.Body.String())
 	}
-	var tokenResp OAuthTokenResponse
+	var tokenResp oauth.TokenResponse
 	if w.Code == http.StatusOK {
 		if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
 			t.Fatal(err)
@@ -1034,7 +1035,7 @@ func newMCPBearerRequest(t *testing.T) *http.Request {
 }
 
 func signTestMCPAccessToken(t *testing.T, s *testRouter, issuer string, user *auth.User, audience, scope string, issuedAt, expiresAt time.Time) string {
-	headerJSON, err := json.Marshal(map[string]string{"alg": JWTAlgRS256, "typ": "JWT", "kid": s.oauth.kid})
+	headerJSON, err := json.Marshal(map[string]string{"alg": oauth.JWTAlgRS256, "typ": "JWT", "kid": s.oauth.kid})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -19,6 +19,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
+	"github.com/caic-xyz/caic/backend/internal/oauth"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
@@ -985,7 +986,7 @@ func mcpScopeChallenge(scope string) string {
 	if scope == "" {
 		scope = mcpScopeRead
 	}
-	return BearerScopeChallenge(scope)
+	return oauth.BearerScopeChallenge(scope)
 }
 
 func redactedResourceJSON(uri string, value any) (mcp.ResourcesReadResult, error) {
