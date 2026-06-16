@@ -3,7 +3,7 @@
 import { createContext, createEffect, createSignal, onCleanup, useContext, type JSX } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
 import type { Config, Harness, HarnessInfo, Repo, Task, UsageResp, ImageData as APIImageData, CacheMappingResp, CacheSize, OAuthGrantResp, MountMappingResp, Platform, WellKnownCachesResp, VersionResp } from "@sdk/types.gen";
-import { getConfig, getPreferences, updatePreferences, listOAuthGrants, revokeOAuthGrant, listHarnesses, listCaches, getCacheSizes, listRepos, createTask, cloneRepo, getUsage, forkTask, stopTask, purgeTask, reviveTask, botFixCI, globalTaskEvents, globalUsageEvents, getVersion, triggerUpdate } from "./api";
+import { getConfig, getPreferences, updatePreferences, listOAuthGrants, revokeOAuthGrant, listHarnesses, listCaches, getCacheSizes, listRepos, createTask, cloneRepo, getUsage, forkTask, stopTask, purgeTask, reviveTask, botFixCI, getTask, globalTaskEvents, globalUsageEvents, getVersion, triggerUpdate } from "./api";
 import type { RepoEntry } from "./components/RepoChipStrip";
 import { useAuth } from "./AuthContext";
 import { confirmTaskAction } from "./components/TaskCard";
@@ -25,9 +25,6 @@ function createAppStore() {
 
   const [prompt, setPrompt] = createSignal("");
   const [tasks, setTasks] = createSignal<Task[]>([]);
-  // True once the task-list SSE has delivered its initial snapshot, making the
-  // store an authoritative set: a selected task absent from it is genuinely gone.
-  const [snapshotReceived, setSnapshotReceived] = createSignal(false);
   const [submitting, setSubmitting] = createSignal(false);
   const [initializing, setInitializing] = createSignal(true);
   const [repos, setRepos] = createSignal<Repo[]>([]);
@@ -288,15 +285,34 @@ function createAppStore() {
     if (selectedId() === null) setSidebarOpen(true);
   });
 
-  // Redirect to home when a task URL points to a non-existent task.
-  // Only act once the snapshot has loaded (so the store is authoritative) and
-  // while connected (to avoid spurious redirects during reconnection). Tasks the
-  // client just created are seeded into the store via upsertTask before
-  // navigation, so this never races a fresh create/fork.
-  createEffect(() => {
-    if (connected() && snapshotReceived() && selectedId() !== null && selectedTask() === null) {
-      navigate("/", { replace: true });
+  // Ensure the task named by the URL exists and is in the store. When it is not
+  // (deep link, back button, another client), fetch it as a REST resource: a 404
+  // is an authoritative "gone" → home; a 200 seeds the store so the detail view
+  // renders with real state. Tasks this client created are already seeded via
+  // upsertTask before navigation, so this is a no-op for fresh create/fork.
+  // Deletion of the viewed task is handled authoritatively by the SSE "delete"
+  // event above.
+  let ensuringTaskID: string | null = null;
+  const ensureTask = async (id: string) => {
+    if (ensuringTaskID === id) return;
+    ensuringTaskID = id;
+    try {
+      upsertTask(await getTask(id));
+    } catch (e) {
+      // Only a definitive not-found/forbidden is authoritative. Transient errors
+      // (network, timeout, 5xx) keep the route so the SSE stream can still
+      // deliver the task.
+      const status = (e as { status?: number }).status;
+      if ((status === 404 || status === 403) && selectedId() === id) {
+        navigate("/", { replace: true });
+      }
+    } finally {
+      if (ensuringTaskID === id) ensuringTaskID = null;
     }
+  };
+  createEffect(() => {
+    const id = selectedId();
+    if (id !== null && selectedTask() === null) void ensureTask(id);
   });
 
   // Repos available to add (not already selected).
@@ -415,7 +431,6 @@ function createAppStore() {
         if (event.kind === "snapshot" && event.snapshot) {
           prevStates = new Map(event.snapshot.map((t) => [t.id, t.state]));
           setTasks(event.snapshot);
-          setSnapshotReceived(true);
         } else if (event.kind === "upsert" && event.upsert) {
           const t = event.upsert;
           checkAndNotify(t);
@@ -441,6 +456,9 @@ function createAppStore() {
             return next;
           });
         } else if (event.kind === "delete" && event.delete) {
+          // Authoritative removal: if the deleted task is the one being viewed,
+          // leave its now-dead detail route.
+          if (event.delete === selectedId()) navigate("/", { replace: true });
           prevStates.delete(event.delete);
           setTasks((prev) => prev.filter((t) => t.id !== event.delete));
         } else if (event.kind === "repos" && event.repos) {

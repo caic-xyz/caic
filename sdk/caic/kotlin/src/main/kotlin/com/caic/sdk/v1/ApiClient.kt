@@ -123,6 +123,8 @@ class ApiClient(
     suspend fun botFixPR(req: BotFixPRReq): StatusResp = request("POST", "/api/caic/v1/ci/fix-pr", json.encodeToString(req))
     /** Returns all tasks. */
     suspend fun listTasks(): List<Task> = request("GET", "/api/caic/v1/tasks")
+    /** Returns a single task by id (404 if it does not exist). */
+    suspend fun getTask(id: String): Task = request("GET", "/api/caic/v1/tasks/$id")
     /** Creates and starts a new coding agent task. */
     suspend fun createTask(req: CreateTaskReq): Task = request("POST", "/api/caic/v1/tasks", json.encodeToString(req))
     /** Sends user input to a running task. */

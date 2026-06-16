@@ -37,6 +37,7 @@ export const {
   stopTask,
   purgeTask,
   reviveTask,
+  getTask,
   getTaskCILog,
   syncTask,
   getTaskDiff,

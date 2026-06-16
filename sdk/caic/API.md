@@ -49,6 +49,7 @@ Type notation: `JSONValue` means any valid JSON value.
 | Method | Path | Description | Request | Response |
 |--------|------|-------------|---------|----------|
 | GET | `/api/caic/v1/tasks` | Returns all tasks. |  | `Task[]` |
+| GET | `/api/caic/v1/tasks/{id}` | Returns a single task by id (404 if it does not exist). |  | `Task` |
 | POST | `/api/caic/v1/tasks` | Creates and starts a new coding agent task. | `CreateTaskReq` | `Task` |
 | GET | `/api/caic/v1/tasks/{id}/raw_events` | Streams raw backend-specific task events via SSE. |  | `EventMessage` SSE |
 | GET | `/api/caic/v1/tasks/{id}/events` | Streams backend-neutral task events via SSE. |  | `EventMessage` SSE |

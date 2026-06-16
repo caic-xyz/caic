@@ -76,6 +76,15 @@ func (s *taskAPIService) taskListSnapshot(ctx context.Context) []v1.Task {
 	return out
 }
 
+// getTask returns a single task by id. The route resolves the entry (404 for
+// unknown ids, 403 across owners), giving clients an authoritative existence
+// check and initial state without depending on the eventually-consistent task
+// list snapshot.
+func (s *taskAPIService) getTask(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.Task, error) {
+	dto := v1conv.Task(ctx, entry, s.taskResolvers())
+	return &dto, nil
+}
+
 func (s *taskAPIService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Task, error) {
 	var ownerID string
 	if u, ok := auth.UserFromContext(ctx); ok {

@@ -59,6 +59,7 @@ vi.mock("./api", () => ({
   listRepoBranches: vi.fn(),
   cloneRepo: vi.fn(),
   createTask: vi.fn(),
+  getTask: vi.fn(),
   botFixCI: vi.fn(),
   stopTask: vi.fn(),
   purgeTask: vi.fn(),
@@ -156,6 +157,7 @@ beforeEach(() => {
   vi.mocked(api.listRepoBranches).mockResolvedValue({ branches: [{ name: "main" }, { name: "dev", remote: "origin" }] });
   vi.mocked(api.cloneRepo).mockResolvedValue(newRepo);
   vi.mocked(api.createTask).mockResolvedValue(makeTask());
+  vi.mocked(api.getTask).mockResolvedValue(makeTask());
 });
 
 describe("App repo chips: No repository", () => {

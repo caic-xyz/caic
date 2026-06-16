@@ -71,6 +71,8 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     botFixPR: (req: BotFixPRReq): Promise<StatusResp> => request<StatusResp>("POST", "/api/caic/v1/ci/fix-pr", req),
     /** Returns all tasks. */
     listTasks: (): Promise<Task[]> => request<Task[]>("GET", "/api/caic/v1/tasks"),
+    /** Returns a single task by id (404 if it does not exist). */
+    getTask: (id: string): Promise<Task> => request<Task>("GET", `/api/caic/v1/tasks/${id}`),
     /** Creates and starts a new coding agent task. */
     createTask: (req: CreateTaskReq): Promise<Task> => request<Task>("POST", "/api/caic/v1/tasks", req),
     /** Streams raw backend-specific task events via SSE. */

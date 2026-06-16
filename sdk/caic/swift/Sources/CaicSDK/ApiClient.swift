@@ -182,6 +182,10 @@ public final class ApiClient {
     public func listTasks() async throws -> [Task] {
         try await request("GET", path: "/api/caic/v1/tasks")
     }
+    /// Returns a single task by id (404 if it does not exist).
+    public func getTask(id: String) async throws -> Task {
+        try await request("GET", path: "/api/caic/v1/tasks/\(id)")
+    }
     /// Creates and starts a new coding agent task.
     public func createTask(req: CreateTaskReq) async throws -> Task {
         try await request("POST", path: "/api/caic/v1/tasks", body: try encoder.encode(req))

@@ -187,6 +187,13 @@ var Routes = []Route{
 		IsArray: true,
 	},
 	{
+		Name:   "getTask",
+		Doc:    "Returns a single task by id (404 if it does not exist).",
+		Method: "GET",
+		Path:   "/api/caic/v1/tasks/{id}",
+		Resp:   reflect.TypeFor[Task](),
+	},
+	{
 		Name:   "createTask",
 		Doc:    "Creates and starts a new coding agent task.",
 		Method: "POST",

@@ -39,6 +39,17 @@ test("send input to nonexistent task returns 404", async ({ api }) => {
   expect((err as APIError).status).toBe(404);
 });
 
+test("navigating to a nonexistent task redirects home", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
+
+  // The detail route resolves the task as a REST resource; a 404 is
+  // authoritative and sends us home (no dependence on the list snapshot).
+  await page.goto("/task/@nonexistent-id+bogus");
+  await expect(page).toHaveURL(/\/$/, { timeout: 10_000 });
+  await expect(page.getByTestId("prompt-input")).toBeVisible();
+});
+
 test("network failure shows reconnect banner", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
