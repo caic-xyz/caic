@@ -20,7 +20,8 @@ import (
 const accessTokenType = "access_token"
 
 // GrantTouchFunc marks or validates an OAuth grant during bearer-token verification.
-type GrantTouchFunc func(grantID string, now time.Time) (bool, error)
+// Returns (active, clientID, error).
+type GrantTouchFunc func(grantID string, now time.Time) (active bool, clientID string, err error)
 
 // UserLookupFunc returns the resource owner for a bearer-token subject.
 type UserLookupFunc func(subject string) (User, bool)
@@ -69,17 +70,19 @@ func (s *AccessTokenService) VerifyAccessToken(token, issuer, audience string, n
 	if err != nil {
 		return nil, err
 	}
+	var clientID string
 	if claims.GrantID != "" {
 		if touchGrant == nil {
 			return nil, errors.New("grant liveness callback is required")
 		}
-		active, err := touchGrant(claims.GrantID, now)
+		active, cid, err := touchGrant(claims.GrantID, now)
 		if err != nil {
 			return nil, fmt.Errorf("touch token grant: %w", err)
 		}
 		if !active {
 			return nil, errors.New("token grant is not active")
 		}
+		clientID = cid
 	}
 	if findUser == nil {
 		return nil, errors.New("user lookup callback is required")
@@ -95,6 +98,9 @@ func (s *AccessTokenService) VerifyAccessToken(token, issuer, audience string, n
 		Issuer:   claims.Issuer,
 		Audience: claims.Audience,
 		Scopes:   strings.Fields(claims.Scope),
+		Iat:      claims.IssuedAt,
+		Exp:      claims.Expiry,
+		ClientID: clientID,
 	}, nil
 }
 

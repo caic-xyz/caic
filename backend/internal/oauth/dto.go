@@ -45,6 +45,9 @@ type BearerClaims struct {
 	Issuer   string
 	Audience string
 	Scopes   []string
+	Iat      int64
+	Exp      int64
+	ClientID string
 }
 
 // ProtectedResourceMetadata is OAuth 2.0 Protected Resource Metadata.
@@ -60,6 +63,7 @@ type AuthorizationServerMetadata struct {
 	Issuer                                        string   `json:"issuer"`
 	AuthorizationEndpoint                         string   `json:"authorization_endpoint"`
 	TokenEndpoint                                 string   `json:"token_endpoint"`
+	IntrospectionEndpoint                         string   `json:"introspection_endpoint,omitempty"`
 	JWKSURI                                       string   `json:"jwks_uri"`
 	RegistrationEndpoint                          string   `json:"registration_endpoint"`
 	RevocationEndpoint                            string   `json:"revocation_endpoint,omitempty"`
@@ -67,6 +71,7 @@ type AuthorizationServerMetadata struct {
 	GrantTypesSupported                           []string `json:"grant_types_supported"`
 	CodeChallengeMethodsSupported                 []string `json:"code_challenge_methods_supported"`
 	TokenEndpointAuthMethodsSupported             []string `json:"token_endpoint_auth_methods_supported"`
+	IntrospectionEndpointAuthMethodsSupported     []string `json:"introspection_endpoint_auth_methods_supported,omitempty"`
 	RevocationEndpointAuthMethodsSupported        []string `json:"revocation_endpoint_auth_methods_supported,omitempty"`
 	ScopesSupported                               []string `json:"scopes_supported,omitempty"`
 	AuthorizationResponseIssuerParameterSupported bool     `json:"authorization_response_iss_parameter_supported"`
@@ -95,6 +100,26 @@ type TokenResponse struct {
 	ExpiresIn    int64  `json:"expires_in"`
 	RefreshToken string `json:"refresh_token,omitempty"`
 	Scope        string `json:"scope,omitempty"`
+}
+
+// IntrospectionRequest is an RFC 7662 token introspection request body.
+type IntrospectionRequest struct {
+	Token         string `json:"token"`
+	TokenTypeHint string `json:"token_type_hint,omitempty"`
+}
+
+// IntrospectionResponse is an RFC 7662 token introspection response body.
+type IntrospectionResponse struct {
+	Active    bool   `json:"active"`
+	Scope     string `json:"scope,omitempty"`
+	ClientID  string `json:"client_id,omitempty"`
+	TokenType string `json:"token_type,omitempty"`
+	Exp       int64  `json:"exp,omitempty"`
+	Sub       string `json:"sub,omitempty"`
+	Username  string `json:"username,omitempty"`
+	Iss       string `json:"iss,omitempty"`
+	Aud       string `json:"aud,omitempty"`
+	Iat       int64  `json:"iat,omitempty"`
 }
 
 // ErrorResponse is an OAuth error response body.

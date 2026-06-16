@@ -1,0 +1,56 @@
+# OAuth 2.0 Package
+
+Generic OAuth 2.0 authorization server, client helpers, and protocol DTOs.
+Implements a subset of the OAuth 2.0 specifications sufficient for acting
+as an OAuth authorization server and for acting as an OAuth client (e.g.,
+toward external MCP servers).
+
+## RFCs
+
+OAuth 2.0 spans many RFCs. The ones most relevant to this package are
+listed below, followed by the broader ecosystem for context.
+
+### Core & Token Handling
+
+- [RFC 6749](https://www.rfc-editor.org/rfc/rfc6749) — OAuth 2.0 Authorization Framework (2012-10)
+- [RFC 6750](https://www.rfc-editor.org/rfc/rfc6750) — Bearer Token Usage (2012-10)
+- [RFC 7636](https://www.rfc-editor.org/rfc/rfc7636) — PKCE (Proof Key for Code Exchange, 2015-09)
+- [RFC 7009](https://www.rfc-editor.org/rfc/rfc7009) — Token Revocation (2013-08)
+- [RFC 7662](https://www.rfc-editor.org/rfc/rfc7662) — Token Introspection (2015-10)
+- [RFC 8693](https://www.rfc-editor.org/rfc/rfc8693) — Token Exchange (2020-01)
+- [RFC 9068](https://www.rfc-editor.org/rfc/rfc9068) — JWT Profile for OAuth 2.0 Access Tokens (2021-10)
+
+### Discovery & Registration
+
+- [RFC 8414](https://www.rfc-editor.org/rfc/rfc8414) — Authorization Server Metadata (2018-06)
+- [RFC 7591](https://www.rfc-editor.org/rfc/rfc7591) — Dynamic Client Registration (2015-07)
+- [RFC 7592](https://www.rfc-editor.org/rfc/rfc7592) — Dynamic Client Registration Management (2015-07, Experimental)
+
+### Security
+
+- [RFC 9700](https://www.rfc-editor.org/rfc/rfc9700) — OAuth 2.0 Security Best Current Practice (2025-01, BCP 240)
+  - Updates RFC 6749, RFC 6750, RFC 6819
+- [RFC 6819](https://www.rfc-editor.org/rfc/rfc6819) — OAuth 2.0 Threat Model and Security Considerations
+  - Historical; superseded in practice by RFC 9700
+
+### Related Specs (for broader context)
+
+- [RFC 7519](https://www.rfc-editor.org/rfc/rfc7519) — JSON Web Token (JWT)
+- [RFC 7521](https://www.rfc-editor.org/rfc/rfc7521) — Assertion Framework for OAuth 2.0 Client Authentication and Authorization Grants
+- [RFC 7522](https://www.rfc-editor.org/rfc/rfc7522) — SAML 2.0 Profile for OAuth 2.0 Client Authentication and Authorization Grants
+- [RFC 7523](https://www.rfc-editor.org/rfc/rfc7523) — JWT Profile for OAuth 2.0 Client Authentication and Authorization Grants
+- [RFC 8252](https://www.rfc-editor.org/rfc/rfc8252) — OAuth 2.0 for Native Apps (2017-10, BCP 212)
+- [RFC 8628](https://www.rfc-editor.org/rfc/rfc8628) — Device Authorization Grant (2019-08)
+- [RFC 8705](https://www.rfc-editor.org/rfc/rfc8705) — Mutual TLS (2020-02)
+- [RFC 9126](https://www.rfc-editor.org/rfc/rfc9126) — Pushed Authorization Requests (PAR, 2021-09)
+- [RFC 9207](https://www.rfc-editor.org/rfc/rfc9207) — Authorization Server Issuer Identification (2022-03)
+- [RFC 9396](https://www.rfc-editor.org/rfc/rfc9396) — Rich Authorization Requests (RAR, 2023-05)
+- [RFC 9449](https://www.rfc-editor.org/rfc/rfc9449) — DPoP (Demonstration of Proof of Possession, 2024-09)
+- [RFC 9470](https://www.rfc-editor.org/rfc/rfc9470) — Step-up Authentication Challenge (2024-09)
+
+## References
+
+- [OAuth 2.0 — oauth.net](https://oauth.net/2/)
+- [OAuth 2.0 Simplified](https://www.oauth.com/oauth2-servers/map-oauth-2-0-specs/)
+- [IETF OAuth Working Group](https://datatracker.ietf.org/wg/oauth/about/)
+- [OAuth Extension Parameter Registry (IANA)](https://www.iana.org/assignments/oauth-parameters/oauth-parameters.xhtml)

@@ -26,9 +26,9 @@ func TestAccessTokenService(t *testing.T) {
 			t.Fatalf("IssueAccessToken: %v", err)
 		}
 		touched := ""
-		claims, err := svc.VerifyAccessToken(token, issuer, audience, time.Now(), func(grantID string, _ time.Time) (bool, error) {
+		claims, err := svc.VerifyAccessToken(token, issuer, audience, time.Now(), func(grantID string, _ time.Time) (bool, string, error) {
 			touched = grantID
-			return true, nil
+			return true, "test-client-1", nil
 		}, func(subject string) (User, bool) {
 			if subject != user.ID {
 				return User{}, false
@@ -38,7 +38,7 @@ func TestAccessTokenService(t *testing.T) {
 		if err != nil {
 			t.Fatalf("VerifyAccessToken: %v", err)
 		}
-		if touched != "grant-1" || claims.Subject != user.ID || claims.User.Username != user.Username || strings.Join(claims.Scopes, " ") != scope {
+		if touched != "grant-1" || claims.Subject != user.ID || claims.User.Username != user.Username || strings.Join(claims.Scopes, " ") != scope || claims.ClientID != "test-client-1" {
 			t.Fatalf("claims = %+v, touched = %q", claims, touched)
 		}
 	})
@@ -119,7 +119,7 @@ func TestAccessTokenService(t *testing.T) {
 		if err != nil {
 			t.Fatalf("IssueAccessToken: %v", err)
 		}
-		if _, err := svc.VerifyAccessToken(token, issuer, audience, time.Now(), func(string, time.Time) (bool, error) { return false, nil }, func(string) (User, bool) { return user, true }); err == nil || !strings.Contains(err.Error(), "token grant is not active") {
+		if _, err := svc.VerifyAccessToken(token, issuer, audience, time.Now(), func(string, time.Time) (bool, string, error) { return false, "", nil }, func(string) (User, bool) { return user, true }); err == nil || !strings.Contains(err.Error(), "token grant is not active") {
 			t.Fatalf("VerifyAccessToken error = %v, want token grant is not active", err)
 		}
 	})

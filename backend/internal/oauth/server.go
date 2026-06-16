@@ -202,6 +202,7 @@ func (s *Server) Routes() http.Handler {
 	m.HandleFunc("POST /oauth/authorize", s.handleOAuthAuthorizePOST)
 	m.HandleFunc("POST /oauth/token", s.handleOAuthToken)
 	m.HandleFunc("POST /oauth/revoke", s.handleOAuthRevoke)
+	m.HandleFunc("POST /oauth/introspect", s.handleOAuthIntrospect)
 	return m
 }
 
@@ -337,18 +338,20 @@ func (s *Server) rateKey(r *http.Request) string {
 func (s *Server) handleOAuthMetadata(w http.ResponseWriter, r *http.Request) {
 	issuer := s.externalBaseURL(r)
 	metadata := AuthorizationServerMetadata{
-		Issuer:                                 issuer,
-		AuthorizationEndpoint:                  issuer + "/oauth/authorize",
-		TokenEndpoint:                          issuer + "/oauth/token",
-		JWKSURI:                                issuer + "/oauth/jwks",
-		RegistrationEndpoint:                   issuer + "/oauth/register",
-		RevocationEndpoint:                     issuer + "/oauth/revoke",
-		ResponseTypesSupported:                 []string{ResponseTypeCode},
-		GrantTypesSupported:                    []string{GrantAuthorizationCode, GrantRefreshToken},
-		CodeChallengeMethodsSupported:          []string{CodeChallengeS256},
-		TokenEndpointAuthMethodsSupported:      []string{TokenEndpointAuthNone},
-		RevocationEndpointAuthMethodsSupported: []string{TokenEndpointAuthNone},
-		ScopesSupported:                        s.supportedScopes,
+		Issuer:                                        issuer,
+		AuthorizationEndpoint:                         issuer + "/oauth/authorize",
+		TokenEndpoint:                                 issuer + "/oauth/token",
+		JWKSURI:                                       issuer + "/oauth/jwks",
+		RegistrationEndpoint:                          issuer + "/oauth/register",
+		RevocationEndpoint:                            issuer + "/oauth/revoke",
+		ResponseTypesSupported:                        []string{ResponseTypeCode},
+		GrantTypesSupported:                           []string{GrantAuthorizationCode, GrantRefreshToken},
+		CodeChallengeMethodsSupported:                 []string{CodeChallengeS256},
+		TokenEndpointAuthMethodsSupported:             []string{TokenEndpointAuthNone},
+		RevocationEndpointAuthMethodsSupported:        []string{TokenEndpointAuthNone},
+		ScopesSupported:                               s.supportedScopes,
+		IntrospectionEndpoint:                         issuer + "/oauth/introspect",
+		IntrospectionEndpointAuthMethodsSupported:     []string{TokenEndpointAuthNone},
 		AuthorizationResponseIssuerParameterSupported: true,
 	}
 	writeJSONResponse(w, &metadata)
@@ -610,6 +613,41 @@ func (s *Server) writeTokenResponse(w http.ResponseWriter, r *http.Request, user
 	writeJSONResponse(w, &resp)
 }
 
+func (s *Server) handleOAuthIntrospect(w http.ResponseWriter, r *http.Request) {
+	if !s.allowRequest(w, r) {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
+	if err := r.ParseForm(); err != nil {
+		writeJSONResponse(w, IntrospectionResponse{Active: false})
+		return
+	}
+	token := r.PostForm.Get("token")
+	if token == "" {
+		writeJSONResponse(w, IntrospectionResponse{Active: false})
+		return
+	}
+	claims, err := s.tokens.VerifyAccessToken(token, s.externalBaseURL(r), s.externalBaseURL(r)+s.resourceURLPath, time.Now(), s.touchGrant, s.findUserByID)
+	if err != nil {
+		writeJSONResponse(w, IntrospectionResponse{Active: false})
+		return
+	}
+	writeJSONResponse(w, IntrospectionResponse{
+		Active:    true,
+		Scope:     strings.Join(claims.Scopes, " "),
+		ClientID:  claims.ClientID,
+		TokenType: accessTokenType,
+		Iat:       claims.Iat,
+		Exp:       claims.Exp,
+		Sub:       claims.Subject,
+		Username:  claims.Username,
+		Iss:       claims.Issuer,
+		Aud:       claims.Audience,
+	})
+}
+
 func (s *Server) handleOAuthRevoke(w http.ResponseWriter, r *http.Request) {
 	if !s.allowRequest(w, r) {
 		return
@@ -776,22 +814,22 @@ func (s *Server) revokeRefreshToken(token, clientID string) (string, error) {
 	return entry.UserID, s.state.Save()
 }
 
-func (s *Server) touchGrant(grantID string, now time.Time) (bool, error) {
+func (s *Server) touchGrant(grantID string, now time.Time) (active bool, clientID string, err error) {
 	if grantID == "" {
-		return true, nil
+		return true, "", nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	grant, ok := s.state.Grants[grantID]
 	if !ok || !grant.RevokedAt.IsZero() || now.After(grant.ExpiresAt) {
-		return false, nil
+		return false, "", nil
 	}
 	grant.LastUsedAt = now
 	s.state.Grants[grantID] = grant
 	if err := s.state.Save(); err != nil {
-		return false, err
+		return false, "", err
 	}
-	return true, nil
+	return true, grant.ClientID, nil
 }
 
 func (s *Server) pruneExpiredRefreshTokens(now time.Time) error {
