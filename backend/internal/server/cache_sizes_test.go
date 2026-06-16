@@ -72,7 +72,7 @@ func TestRefreshCacheSizes(t *testing.T) {
 				"npm": {Name: "npm", SizeBytes: 12},
 			},
 		}
-		h := &serverConfigHandlers{cacheSizes: store}
+		h := &serverHandlers{cacheSizes: store}
 
 		resp, err := h.getCacheSizes(t.Context(), &api.EmptyReq{})
 		if err != nil {

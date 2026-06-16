@@ -1,4 +1,4 @@
-// Task HTTP route handlers.
+// HTTP handlers for task SSE streams, WebSocket proxying, route-level task lookup, and raw response writing.
 
 package server
 
@@ -29,36 +29,36 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
-// taskHTTPHandlers owns task HTTP protocol concerns.
+// taskHandlers owns task HTTP protocol concerns.
 //
 // It handles SSE streams, WebSocket proxying, route-level task lookup, and
 // raw HTTP response writing. Task command orchestration and DTO assembly belong
-// to taskAPIService.
-type taskHTTPHandlers struct {
+// to taskService.
+type taskHandlers struct {
 	taskMgr   *tasks.Manager
 	repos     *repos.Service
 	forge     *forgemanager.Manager
 	ciService *ci.Service
 	authStore *auth.Store
-	service   *taskAPIService
+	service   *taskService
 
 	warnings *WarningStore
 }
 
-func (h *taskHTTPHandlers) notifyTaskChange() {
+func (h *taskHandlers) notifyTaskChange() {
 	h.taskMgr.NotifyTaskChange()
 }
 
 // handleTaskRawEvents delegates to handleTaskEvents — both endpoints now
 // serve the same backend-neutral EventMessage stream.
-func (s *taskHTTPHandlers) handleTaskRawEvents(w http.ResponseWriter, r *http.Request) {
-	s.handleTaskEvents(w, r)
+func (h *taskHandlers) handleTaskRawEvents(w http.ResponseWriter, r *http.Request) {
+	h.handleTaskEvents(w, r)
 }
 
 // handleTaskEvents streams agent messages as SSE using backend-neutral
 // EventMessage DTOs. All tool invocations are emitted as toolUse events.
-func (s *taskHTTPHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
-	entry, err := s.getTask(r)
+func (h *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
+	entry, err := h.getTask(r)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -82,13 +82,13 @@ func (s *taskHTTPHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Reque
 	terminal := state == task.StatePurged || state == task.StateCrashed || state == task.StateFailed
 	loadedTask := entry.LoadedTask()
 	if terminal && loadedTask != nil {
-		s.streamHistoryFromDisk(w, flusher, entry)
+		h.streamHistoryFromDisk(w, flusher, entry)
 		return
 	}
 
 	// Lazily load messages for entries that do not have a disk stream path.
 	if loadedTask == nil {
-		s.taskMgr.LoadMessagesOnDemand(entry)
+		h.taskMgr.LoadMessagesOnDemand(entry)
 	}
 
 	history, live, unsub := entry.Task().Subscribe(r.Context())
@@ -113,8 +113,8 @@ func (s *taskHTTPHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Reque
 
 	now := time.Now()
 	if shouldReplayHistoryFromDisk(state, loadedTask) {
-		if !s.streamReplayStore(w, flusher, entry, &idx) {
-			s.streamHistoryFromDiskWithTracker(w, flusher, entry, tracker, &idx)
+		if !h.streamReplayStore(w, flusher, entry, &idx) {
+			h.streamHistoryFromDiskWithTracker(w, flusher, entry, tracker, &idx)
 		}
 	} else {
 		for _, msg := range filterHistoryForReplay(history) {
@@ -167,11 +167,11 @@ func (s *taskHTTPHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Reque
 // messages. It prefers the EventMessage sidecar: validated zstd JSONL lines are
 // copied straight into SSE frames. Raw-log parsing is only the cold fallback used
 // to regenerate a missing or stale sidecar.
-func (s *taskHTTPHandlers) streamHistoryFromDisk(w http.ResponseWriter, flusher http.Flusher, entry *tasks.Entry) {
+func (h *taskHandlers) streamHistoryFromDisk(w http.ResponseWriter, flusher http.Flusher, entry *tasks.Entry) {
 	idx := 0
-	if !s.streamReplayStore(w, flusher, entry, &idx) {
+	if !h.streamReplayStore(w, flusher, entry, &idx) {
 		tracker := v1conv.NewToolTimingTracker(entry.Task().Harness, FormatToolOutput)
-		s.streamHistoryFromDiskWithTracker(w, flusher, entry, tracker, &idx)
+		h.streamHistoryFromDiskWithTracker(w, flusher, entry, tracker, &idx)
 	}
 	_, _ = fmt.Fprint(w, "event: ready\ndata: {}\n\n")
 	flusher.Flush()
@@ -180,7 +180,7 @@ func (s *taskHTTPHandlers) streamHistoryFromDisk(w http.ResponseWriter, flusher 
 // streamReplayStore serves the rebuildable DTO sidecar, regenerating it from
 // the raw log on a miss. A successful cache hit never invokes a harness parser
 // or DTO converter; it only decompresses lines and frames them as SSE.
-func (s *taskHTTPHandlers) streamReplayStore(w io.Writer, flusher http.Flusher, entry *tasks.Entry, idx *int) bool {
+func (h *taskHandlers) streamReplayStore(w io.Writer, flusher http.Flusher, entry *tasks.Entry, idx *int) bool {
 	lt := entry.LoadedTask()
 	if lt == nil || lt.LogPath() == "" {
 		return false
@@ -212,7 +212,7 @@ func shouldReplayHistoryFromDisk(state task.State, lt *task.LoadedTask) bool {
 	return state == task.StateStopped
 }
 
-func (s *taskHTTPHandlers) streamHistoryFromDiskWithTracker(out io.Writer, flusher http.Flusher, entry *tasks.Entry, tracker *v1conv.ToolTimingTracker, idx *int) {
+func (h *taskHandlers) streamHistoryFromDiskWithTracker(out io.Writer, flusher http.Flusher, entry *tasks.Entry, tracker *v1conv.ToolTimingTracker, idx *int) {
 	lt := entry.LoadedTask()
 	if lt == nil {
 		return
@@ -252,7 +252,7 @@ func (s *taskHTTPHandlers) streamHistoryFromDiskWithTracker(out io.Writer, flush
 // events for changed or removed tasks. It pushes immediately when a
 // server-handled mutation fires the changed channel, and falls back to a
 // 2-second ticker to catch runner-internal state transitions.
-func (s *taskHTTPHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
+func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeError(w, api.InternalError("streaming not supported"))
@@ -271,7 +271,7 @@ func (s *taskHTTPHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.R
 	// use a nil channel so the ticker case is never selected. With no CI service
 	// wired (e.g. a router built without automation), never poll.
 	var ciTickerC <-chan time.Time
-	if s.ciService != nil && s.forge.GitHubApp() == nil {
+	if h.ciService != nil && h.forge.GitHubApp() == nil {
 		t := time.NewTicker(5 * time.Minute)
 		defer t.Stop()
 		ciTickerC = t.C
@@ -280,8 +280,8 @@ func (s *taskHTTPHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.R
 	// Seed CI status immediately on connect (once); subsequent updates come from
 	// webhooks (App) or the ciTicker (polling).
 	ctx := r.Context()
-	if s.ciService != nil {
-		go s.ciService.PollCIForActiveRepos(context.WithoutCancel(ctx))
+	if h.ciService != nil {
+		go h.ciService.PollCIForActiveRepos(context.WithoutCancel(ctx))
 	}
 
 	// prevByID tracks the last marshalled JSON for each task ID.
@@ -291,12 +291,12 @@ func (s *taskHTTPHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.R
 	first := true
 
 	for {
-		out := s.service.taskListSnapshot(ctx)
-		ch := s.taskMgr.Changed()
-		repoList := repoListFromSnapshot(s.repos.SnapshotWithCI())
+		out := h.service.taskListSnapshot(ctx)
+		ch := h.taskMgr.Changed()
+		repoList := repoListFromSnapshot(h.repos.SnapshotWithCI())
 		var newWarnings []serverWarning
-		if s.warnings != nil {
-			newWarnings = s.warnings.Since(lastWarnTime)
+		if h.warnings != nil {
+			newWarnings = h.warnings.Since(lastWarnTime)
 		}
 
 		reposJSON, err := json.Marshal(repoList)
@@ -393,7 +393,7 @@ func (s *taskHTTPHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.R
 		case <-ch:
 		case <-ticker.C:
 		case <-ciTickerC:
-			go s.ciService.PollCIForActiveRepos(context.WithoutCancel(r.Context()))
+			go h.ciService.PollCIForActiveRepos(context.WithoutCancel(r.Context()))
 		}
 	}
 }
@@ -401,30 +401,30 @@ func (s *taskHTTPHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.R
 // handleTaskToolInput returns the full (untruncated) input for a tool call.
 // It scans the task's message history for the ToolUseMessage with the given
 // toolUseID and returns its Input field.
-func (s *taskHTTPHandlers) handleTaskToolInput(w http.ResponseWriter, r *http.Request) {
-	entry, err := s.getTask(r)
+func (h *taskHandlers) handleTaskToolInput(w http.ResponseWriter, r *http.Request) {
+	entry, err := h.getTask(r)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	resp, err := s.service.taskToolInput(r.Context(), entry, r.PathValue("toolUseID"))
+	resp, err := h.service.taskToolInput(r.Context(), entry, r.PathValue("toolUseID"))
 	writeJSONResponse(w, resp, err)
 }
 
-func (s *taskHTTPHandlers) handleGetDiff(w http.ResponseWriter, r *http.Request) {
-	entry, err := s.getTask(r)
+func (h *taskHandlers) handleGetDiff(w http.ResponseWriter, r *http.Request) {
+	entry, err := h.getTask(r)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	resp, err := s.service.taskDiff(r.Context(), entry, r.URL.Query().Get("path"))
+	resp, err := h.service.taskDiff(r.Context(), entry, r.URL.Query().Get("path"))
 	writeJSONResponse(w, resp, err)
 }
 
 // handleVNCWebSocket proxies a WebSocket connection to the instance's VNC
 // TCP port via the Docker host port mapping. Used by noVNC in the frontend.
-func (s *taskHTTPHandlers) handleVNCWebSocket(w http.ResponseWriter, r *http.Request) {
-	entry, err := s.getTask(r)
+func (h *taskHandlers) handleVNCWebSocket(w http.ResponseWriter, r *http.Request) {
+	entry, err := h.getTask(r)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -509,8 +509,8 @@ func (w wsNetConn) Write(b []byte) (int, error) {
 
 // getTask looks up a task by the {id} path parameter.
 // When auth is enabled, returns 403 if the task belongs to a different user.
-func (s *taskHTTPHandlers) getTask(r *http.Request) (*tasks.Entry, error) {
-	return taskEntryFromRequest(r, s.taskMgr, s.authStore)
+func (h *taskHandlers) getTask(r *http.Request) (*tasks.Entry, error) {
+	return taskEntryFromRequest(r, h.taskMgr, h.authStore)
 }
 
 // taskEntryFromRequest looks up a task by the {id} path parameter.
@@ -534,25 +534,25 @@ func taskEntryFromRequest(r *http.Request, taskMgr *tasks.Manager, authStore *au
 // routes returns the handler for the task collection and per-task endpoints,
 // plus the global task-list SSE stream. Patterns are relative to the
 // /api/caic/v1 version prefix, stripped at mount time.
-func (s *taskHTTPHandlers) routes() http.Handler {
+func (h *taskHandlers) routes() http.Handler {
 	m := http.NewServeMux()
-	m.HandleFunc("GET /tasks", handle(s.service.listTasks))
-	m.HandleFunc("POST /tasks", handle(s.service.createTask))
-	m.HandleFunc("GET /tasks/events", s.handleTaskListEvents)
-	m.HandleFunc("GET /tasks/{id}", handleWithTask(s, s.service.getTask))
-	m.HandleFunc("GET /tasks/{id}/raw_events", s.handleTaskRawEvents)
-	m.HandleFunc("GET /tasks/{id}/events", s.handleTaskEvents)
-	m.HandleFunc("POST /tasks/{id}/input", handleWithTask(s, s.service.sendInput))
-	m.HandleFunc("POST /tasks/{id}/restart", handleWithTask(s, s.service.restartTask))
-	m.HandleFunc("POST /tasks/{id}/clear-context", handleWithTask(s, s.service.clearContext))
-	m.HandleFunc("POST /tasks/{id}/compact", handleWithTask(s, s.service.compactContext))
-	m.HandleFunc("POST /tasks/{id}/fork", handleWithTask(s, s.service.forkTask))
-	m.HandleFunc("POST /tasks/{id}/stop", handleWithTask(s, s.service.stopTask))
-	m.HandleFunc("POST /tasks/{id}/purge", handleWithTask(s, s.service.purgeTask))
-	m.HandleFunc("POST /tasks/{id}/revive", handleWithTask(s, s.service.reviveTask))
-	m.HandleFunc("POST /tasks/{id}/sync", handleWithTask(s, s.service.syncTask))
-	m.HandleFunc("GET /tasks/{id}/diff", s.handleGetDiff)
-	m.HandleFunc("GET /tasks/{id}/vnc/ws", s.handleVNCWebSocket)
-	m.HandleFunc("GET /tasks/{id}/tool/{toolUseID}", s.handleTaskToolInput)
+	m.HandleFunc("GET /tasks", handle(h.service.listTasks))
+	m.HandleFunc("POST /tasks", handle(h.service.createTask))
+	m.HandleFunc("GET /tasks/events", h.handleTaskListEvents)
+	m.HandleFunc("GET /tasks/{id}", handleWithTask(h, h.service.getTask))
+	m.HandleFunc("GET /tasks/{id}/raw_events", h.handleTaskRawEvents)
+	m.HandleFunc("GET /tasks/{id}/events", h.handleTaskEvents)
+	m.HandleFunc("POST /tasks/{id}/input", handleWithTask(h, h.service.sendInput))
+	m.HandleFunc("POST /tasks/{id}/restart", handleWithTask(h, h.service.restartTask))
+	m.HandleFunc("POST /tasks/{id}/clear-context", handleWithTask(h, h.service.clearContext))
+	m.HandleFunc("POST /tasks/{id}/compact", handleWithTask(h, h.service.compactContext))
+	m.HandleFunc("POST /tasks/{id}/fork", handleWithTask(h, h.service.forkTask))
+	m.HandleFunc("POST /tasks/{id}/stop", handleWithTask(h, h.service.stopTask))
+	m.HandleFunc("POST /tasks/{id}/purge", handleWithTask(h, h.service.purgeTask))
+	m.HandleFunc("POST /tasks/{id}/revive", handleWithTask(h, h.service.reviveTask))
+	m.HandleFunc("POST /tasks/{id}/sync", handleWithTask(h, h.service.syncTask))
+	m.HandleFunc("GET /tasks/{id}/diff", h.handleGetDiff)
+	m.HandleFunc("GET /tasks/{id}/vnc/ws", h.handleVNCWebSocket)
+	m.HandleFunc("GET /tasks/{id}/tool/{toolUseID}", h.handleTaskToolInput)
 	return m
 }

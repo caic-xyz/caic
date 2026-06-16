@@ -1,4 +1,4 @@
-// HTTP handlers for server configuration, preferences, repos, and voice token.
+// HTTP handlers for server configuration, preferences, repos, harnesses, caches, and voice token.
 
 package server
 
@@ -38,7 +38,7 @@ type runnerRegistry interface {
 	RegisterRunner(relPath string, r *task.Runner)
 }
 
-type serverConfigHandlers struct {
+type serverHandlers struct {
 	serverCtx          context.Context
 	tailscaleAvailable bool
 	forge              *forgemanager.Manager
@@ -52,7 +52,7 @@ type serverConfigHandlers struct {
 	voiceGateway       v1.VoiceGatewayMetadata
 }
 
-func (h *serverConfigHandlers) getConfig(_ context.Context, _ *api.EmptyReq) (*v1.Config, error) {
+func (h *serverHandlers) getConfig(_ context.Context, _ *api.EmptyReq) (*v1.Config, error) {
 	displayName, err := os.Hostname()
 	if err != nil {
 		slog.Warn("failed to get hostname", "err", err)
@@ -76,7 +76,7 @@ func (h *serverConfigHandlers) getConfig(_ context.Context, _ *api.EmptyReq) (*v
 }
 
 // authProviders returns the list of configured OAuth provider names.
-func (h *serverConfigHandlers) authProviders() []string {
+func (h *serverHandlers) authProviders() []string {
 	var ps []string
 	if h.githubOAuth != nil {
 		ps = append(ps, "github")
@@ -88,7 +88,7 @@ func (h *serverConfigHandlers) authProviders() []string {
 }
 
 // getVersion returns the current server version and checks GitHub for the latest release.
-func (h *serverConfigHandlers) getVersion(ctx context.Context, _ *api.EmptyReq) (*v1.VersionResp, error) {
+func (h *serverHandlers) getVersion(ctx context.Context, _ *api.EmptyReq) (*v1.VersionResp, error) {
 	current := autoupdate.Version
 	gh := h.forge.GitHubClient()
 	resp := &v1.VersionResp{
@@ -108,7 +108,7 @@ func (h *serverConfigHandlers) getVersion(ctx context.Context, _ *api.EmptyReq) 
 }
 
 // triggerUpdate starts a background update check-and-install. Returns immediately.
-func (h *serverConfigHandlers) triggerUpdate(ctx context.Context, _ *api.EmptyReq) (*v1.UpdateResp, error) {
+func (h *serverHandlers) triggerUpdate(ctx context.Context, _ *api.EmptyReq) (*v1.UpdateResp, error) {
 	gh := h.forge.GitHubClient()
 	if gh == nil {
 		return nil, api.InternalError("GitHub token not configured; cannot check for updates")
@@ -130,7 +130,7 @@ func (h *serverConfigHandlers) triggerUpdate(ctx context.Context, _ *api.EmptyRe
 	return &v1.UpdateResp{Status: "started"}, nil
 }
 
-func (h *serverConfigHandlers) getPreferences(ctx context.Context, _ *api.EmptyReq) (*v1.PreferencesResp, error) {
+func (h *serverHandlers) getPreferences(ctx context.Context, _ *api.EmptyReq) (*v1.PreferencesResp, error) {
 	prefs := h.prefs.Get(userIDFromCtx(ctx))
 	recent := prefs.RecentRepos(time.Now())
 	repoPrefs := make([]v1.RepoPrefsResp, len(recent))
@@ -177,7 +177,7 @@ func (h *serverConfigHandlers) getPreferences(ctx context.Context, _ *api.EmptyR
 	}, nil
 }
 
-func (h *serverConfigHandlers) updatePreferences(ctx context.Context, req *v1.UpdatePreferencesReq) (*v1.PreferencesResp, error) {
+func (h *serverHandlers) updatePreferences(ctx context.Context, req *v1.UpdatePreferencesReq) (*v1.PreferencesResp, error) {
 	if err := h.prefs.Update(userIDFromCtx(ctx), func(p *preferences.Preferences) {
 		p.Settings.AutoFixOnCIFailure = req.Settings.AutoFixOnCIFailure
 		p.Settings.AutoFixOnPROpen = req.Settings.AutoFixOnPROpen
@@ -259,7 +259,7 @@ func mountsFromSettings(settings *preferences.Settings) []caicruntime.Mount {
 	return mounts
 }
 
-func (h *serverConfigHandlers) listHarnesses(_ context.Context, _ *api.EmptyReq) (*[]v1.HarnessInfo, error) {
+func (h *serverHandlers) listHarnesses(_ context.Context, _ *api.EmptyReq) (*[]v1.HarnessInfo, error) {
 	// Collect unique harness backends from all runners.
 	seen := make(map[harness.Name]agent.Backend)
 	h.taskMgr.RangeRunners(func(_ string, r *task.Runner) bool {
@@ -276,7 +276,7 @@ func (h *serverConfigHandlers) listHarnesses(_ context.Context, _ *api.EmptyReq)
 	return &out, nil
 }
 
-func (h *serverConfigHandlers) listCaches(_ context.Context, _ *api.EmptyReq) (*v1.WellKnownCachesResp, error) {
+func (h *serverHandlers) listCaches(_ context.Context, _ *api.EmptyReq) (*v1.WellKnownCachesResp, error) {
 	harnessMounts := make([]string, 0, len(md.HarnessMounts))
 	for _, hp := range md.HarnessMounts {
 		for _, p := range hp.HomePaths {
@@ -308,18 +308,18 @@ func (h *serverConfigHandlers) listCaches(_ context.Context, _ *api.EmptyReq) (*
 	}, nil
 }
 
-func (h *serverConfigHandlers) getCacheSizes(_ context.Context, _ *api.EmptyReq) (*v1.CacheSizesResp, error) {
+func (h *serverHandlers) getCacheSizes(_ context.Context, _ *api.EmptyReq) (*v1.CacheSizesResp, error) {
 	if h.cacheSizes == nil {
 		return &v1.CacheSizesResp{}, nil
 	}
 	return &v1.CacheSizesResp{WellKnown: h.cacheSizes.Snapshot()}, nil
 }
 
-func (h *serverConfigHandlers) listRepos(_ context.Context, _ *api.EmptyReq) (*[]v1.Repo, error) {
+func (h *serverHandlers) listRepos(_ context.Context, _ *api.EmptyReq) (*[]v1.Repo, error) {
 	return repoListFromSnapshot(h.repos.SnapshotWithCI()), nil
 }
 
-func (h *serverConfigHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.Request) {
+func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.Request) {
 	repo := r.URL.Query().Get("repo")
 	if repo == "" {
 		writeError(w, api.BadRequest("repo is required"))
@@ -367,7 +367,7 @@ func (h *serverConfigHandlers) handleListRepoBranches(w http.ResponseWriter, r *
 	writeJSONResponse(w, &v1.RepoBranchesResp{Branches: branches}, nil)
 }
 
-func (h *serverConfigHandlers) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo, error) {
+func (h *serverHandlers) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo, error) {
 	info, err := h.repos.Clone(ctx, repos.CloneRequest{URL: req.URL, Path: req.Path, Depth: req.Depth})
 	if err != nil {
 		var repoErr *repos.Error
@@ -423,7 +423,7 @@ func repoDTO(status *repos.InfoWithCI) v1.Repo {
 // endpoints. Patterns are relative to the /api/caic/v1 version prefix, stripped
 // at mount time. config and version are also registered publicly on the root
 // mux (exempt from RequireUser); that exact-match registration takes precedence.
-func (h *serverConfigHandlers) routes() http.Handler {
+func (h *serverHandlers) routes() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("GET /server/config", handle(h.getConfig))
 	m.HandleFunc("GET /server/version", handle(h.getVersion))
@@ -441,7 +441,7 @@ func (h *serverConfigHandlers) routes() http.Handler {
 
 // discoveryRoutes returns the public server discovery endpoints, accessible
 // before login for auth provider discovery and frontend bootstrap.
-func (h *serverConfigHandlers) discoveryRoutes() http.Handler {
+func (h *serverHandlers) discoveryRoutes() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("GET /server-info/config", handle(h.getConfig))
 	m.HandleFunc("GET /server-info/version", handle(h.getVersion))

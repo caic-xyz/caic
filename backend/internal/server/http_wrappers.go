@@ -1,4 +1,4 @@
-// Generic HTTP handler wrappers that decode requests, validate, call a typed handler function, and encode JSON responses or structured errors.
+// Generic HTTP handler wrappers: decode JSON bodies, validate typed inputs, and encode JSON responses or structured errors.
 
 package server
 

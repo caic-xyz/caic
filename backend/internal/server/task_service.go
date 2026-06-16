@@ -1,4 +1,4 @@
-// Task API service for task command and DTO assembly behavior.
+// Task command orchestration and API DTO assembly.
 
 package server
 
@@ -31,11 +31,11 @@ import (
 // TODO: Cleaner interface.
 type FakeCIHook func(ctx context.Context, t *task.Task)
 
-// taskAPIService owns task command orchestration and API DTO assembly.
+// taskService owns task command orchestration and API DTO assembly.
 //
 // HTTP handlers use it after route-level request decoding and task lookup, so
 // server route code stays focused on protocol concerns.
-type taskAPIService struct {
+type taskService struct {
 	ctx       context.Context
 	taskMgr   *tasks.Manager
 	prefs     *preferences.Store
@@ -46,23 +46,23 @@ type taskAPIService struct {
 	fakeCI    FakeCIHook
 }
 
-func (s *taskAPIService) authEnabled() bool {
+func (s *taskService) authEnabled() bool {
 	return s.authStore != nil
 }
 
-func (s *taskAPIService) maybeFakeCI(t *task.Task) {
+func (s *taskService) maybeFakeCI(t *task.Task) {
 	if s.fakeCI == nil {
 		return
 	}
 	s.fakeCI(s.ctx, t)
 }
 
-func (s *taskAPIService) listTasks(ctx context.Context, _ *api.EmptyReq) (*[]v1.Task, error) {
+func (s *taskService) listTasks(ctx context.Context, _ *api.EmptyReq) (*[]v1.Task, error) {
 	out := s.taskListSnapshot(ctx)
 	return &out, nil
 }
 
-func (s *taskAPIService) taskListSnapshot(ctx context.Context) []v1.Task {
+func (s *taskService) taskListSnapshot(ctx context.Context) []v1.Task {
 	var ownerID string
 	if s.authEnabled() {
 		if u, ok := auth.UserFromContext(ctx); ok {
@@ -85,12 +85,12 @@ func (s *taskAPIService) taskListSnapshot(ctx context.Context) []v1.Task {
 // unknown ids, 403 across owners), giving clients an authoritative existence
 // check and initial state without depending on the eventually-consistent task
 // list snapshot.
-func (s *taskAPIService) getTask(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.Task, error) {
+func (s *taskService) getTask(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.Task, error) {
 	dto := v1conv.Task(ctx, entry, s.taskResolvers())
 	return &dto, nil
 }
 
-func (s *taskAPIService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Task, error) {
+func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Task, error) {
 	var ownerID string
 	if u, ok := auth.UserFromContext(ctx); ok {
 		ownerID = u.ID
@@ -211,7 +211,7 @@ const (
 // The relay probe uses the server context (not the request context) because the
 // SSH round-trip may outlive a cancelled HTTP request, and we want the log line
 // regardless.
-func (s *taskAPIService) sendInput(ctx context.Context, entry *tasks.Entry, req *v1.InputReq) (*v1.StatusResp, error) {
+func (s *taskService) sendInput(ctx context.Context, entry *tasks.Entry, req *v1.InputReq) (*v1.StatusResp, error) {
 	err := s.taskMgr.SendInput(ctx, entry, v1conv.PromptToAgent(req.Prompt))
 	if err == nil {
 		return &v1.StatusResp{Status: "sent"}, nil
@@ -255,49 +255,49 @@ func (s *taskAPIService) sendInput(ctx context.Context, entry *tasks.Entry, req 
 		WithDetail("relay", string(rs))
 }
 
-func (s *taskAPIService) restartTask(ctx context.Context, entry *tasks.Entry, req *v1.RestartReq) (*v1.StatusResp, error) {
+func (s *taskService) restartTask(ctx context.Context, entry *tasks.Entry, req *v1.RestartReq) (*v1.StatusResp, error) {
 	if err := s.taskMgr.Restart(ctx, entry, v1conv.PromptToAgent(req.Prompt)); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "restarted"}, nil
 }
 
-func (s *taskAPIService) clearContext(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
+func (s *taskService) clearContext(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
 	if err := s.taskMgr.ClearContext(ctx, entry); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "cleared"}, nil
 }
 
-func (s *taskAPIService) compactContext(ctx context.Context, entry *tasks.Entry, req *v1.CompactReq) (*v1.StatusResp, error) {
+func (s *taskService) compactContext(ctx context.Context, entry *tasks.Entry, req *v1.CompactReq) (*v1.StatusResp, error) {
 	if err := s.taskMgr.Compact(ctx, entry, req.Instructions); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "compacting"}, nil
 }
 
-func (s *taskAPIService) stopTask(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
+func (s *taskService) stopTask(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
 	if err := s.taskMgr.Stop(ctx, entry); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "stopping"}, nil
 }
 
-func (s *taskAPIService) purgeTask(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
+func (s *taskService) purgeTask(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
 	if err := s.taskMgr.Purge(ctx, entry); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "purging"}, nil
 }
 
-func (s *taskAPIService) reviveTask(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
+func (s *taskService) reviveTask(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
 	if err := s.taskMgr.Revive(ctx, entry); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "provisioning"}, nil
 }
 
-func (s *taskAPIService) forkTask(ctx context.Context, entry *tasks.Entry, req *v1.ForkTaskReq) (*v1.Task, error) {
+func (s *taskService) forkTask(ctx context.Context, entry *tasks.Entry, req *v1.ForkTaskReq) (*v1.Task, error) {
 	source := entry.Task()
 
 	var ownerID string
@@ -363,7 +363,7 @@ func (s *taskAPIService) forkTask(ctx context.Context, entry *tasks.Entry, req *
 	return &dto, nil
 }
 
-func (s *taskAPIService) taskToolInput(ctx context.Context, entry *tasks.Entry, toolUseID string) (*v1.TaskToolInputResp, error) {
+func (s *taskService) taskToolInput(ctx context.Context, entry *tasks.Entry, toolUseID string) (*v1.TaskToolInputResp, error) {
 	if toolUseID == "" {
 		return nil, api.BadRequest("toolUseID required")
 	}
@@ -378,7 +378,7 @@ func (s *taskAPIService) taskToolInput(ctx context.Context, entry *tasks.Entry, 
 	return nil, api.NotFound("tool use")
 }
 
-func (s *taskAPIService) taskDiff(ctx context.Context, entry *tasks.Entry, path string) (*v1.DiffResp, error) {
+func (s *taskService) taskDiff(ctx context.Context, entry *tasks.Entry, path string) (*v1.DiffResp, error) {
 	t := entry.Task()
 	if t.RuntimeInstanceID() == "" {
 		return nil, api.Conflict("task has no instance")
@@ -398,7 +398,7 @@ func (s *taskAPIService) taskDiff(ctx context.Context, entry *tasks.Entry, path 
 	return &v1.DiffResp{Diff: diff}, nil
 }
 
-func (s *taskAPIService) syncTask(ctx context.Context, entry *tasks.Entry, req *v1.SyncReq) (*v1.SyncResp, error) {
+func (s *taskService) syncTask(ctx context.Context, entry *tasks.Entry, req *v1.SyncReq) (*v1.SyncResp, error) {
 	t := entry.Task()
 	target := tasks.SyncTargetOrigin
 	if req.Target == v1.SyncTargetDefault {
@@ -454,7 +454,7 @@ func (s *taskAPIService) syncTask(ctx context.Context, entry *tasks.Entry, req *
 
 // resolveGitHubContainerToken returns the GitHub token to inject into a
 // runtime instance when enabled is true, otherwise returns empty.
-func (s *taskAPIService) resolveGitHubContainerToken(ctx context.Context, enabled bool) string {
+func (s *taskService) resolveGitHubContainerToken(ctx context.Context, enabled bool) string {
 	if !enabled {
 		return ""
 	}
@@ -469,7 +469,7 @@ func (s *taskAPIService) resolveGitHubContainerToken(ctx context.Context, enable
 	return ""
 }
 
-func (s *taskAPIService) taskResolvers() v1conv.TaskResolvers {
+func (s *taskService) taskResolvers() v1conv.TaskResolvers {
 	return newTaskResolvers(s.taskMgr, s.repos, s.authStore)
 }
 

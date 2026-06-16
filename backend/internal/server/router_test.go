@@ -169,8 +169,8 @@ func newTestOAuthRouter(t testing.TB, authStore *auth.Store) *testRouter {
 	return s
 }
 
-func testTaskHandlers(s *testRouter) *taskHTTPHandlers {
-	return s.taskHTTPHandlers
+func testTaskHandlers(s *testRouter) *taskHandlers {
+	return s.taskHandlers
 }
 
 func TestNew(t *testing.T) {
@@ -353,7 +353,7 @@ func TestCloneRepo(t *testing.T) {
 		fixture := newRunnerConstructionTestServer(t, root)
 		s := fixture.server
 
-		repo, err := s.serverConfigHandlers.cloneRepo(t.Context(), &v1.CloneRepoReq{URL: source, Path: "./cloned"})
+		repo, err := s.serverHandlers.cloneRepo(t.Context(), &v1.CloneRepoReq{URL: source, Path: "./cloned"})
 		if err != nil {
 			t.Fatalf("cloneRepo: %v", err)
 		}
@@ -408,7 +408,7 @@ func TestCloneRepo(t *testing.T) {
 		}
 		s := newRunnerConstructionTestServer(t, root).server
 
-		if _, err := s.serverConfigHandlers.cloneRepo(t.Context(), &v1.CloneRepoReq{URL: parent, Path: "broken"}); err == nil {
+		if _, err := s.serverHandlers.cloneRepo(t.Context(), &v1.CloneRepoReq{URL: parent, Path: "broken"}); err == nil {
 			t.Fatal("cloneRepo succeeded, want submodule clone failure")
 		}
 		if _, err := os.Stat(filepath.Join(root, "broken")); !os.IsNotExist(err) {
@@ -969,7 +969,7 @@ func TestSignalProcess(t *testing.T) {
 				return nil
 			},
 		}
-		processes := &RuntimeProcesses{
+		processes := &runtimeProcessHandlers{
 			taskMgr:      s.taskMgr,
 			backend:      backend,
 			authEnabled:  s.authEnabled,
@@ -1006,7 +1006,7 @@ func TestSignalProcess(t *testing.T) {
 				return nil
 			},
 		}
-		processes := &RuntimeProcesses{
+		processes := &runtimeProcessHandlers{
 			taskMgr:      s.taskMgr,
 			backend:      backend,
 			authEnabled:  s.authEnabled,
@@ -1039,11 +1039,11 @@ func TestHandleListRepos(t *testing.T) {
 		{RelPath: "org/repoA", AbsPath: "/src/org/repoA", BaseBranch: "main"},
 		{RelPath: "repoB", AbsPath: "/src/repoB", BaseBranch: "develop"},
 	}), s.taskMgr, nil, nil)
-	s.serverConfigHandlers.repos = s.repos
+	s.serverHandlers.repos = s.repos
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/server/repos", http.NoBody)
 	w := httptest.NewRecorder()
-	handle(s.serverConfigHandlers.listRepos)(w, req)
+	handle(s.serverHandlers.listRepos)(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -2096,9 +2096,9 @@ func TestBuildHandler(t *testing.T) {
 	t.Run("MCP tool scope policy covers every advertised tool", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
-		registry, ok := s.mcp.protocol.Registry.(*caicToolRegistry)
+		registry, ok := s.mcpHandlers.protocol.Registry.(*mcpRegistry)
 		if !ok {
-			t.Fatalf("registry type = %T", s.mcp.protocol.Registry)
+			t.Fatalf("registry type = %T", s.mcpHandlers.protocol.Registry)
 		}
 		specs, err := registry.specs(t.Context())
 		if err != nil {
@@ -2135,9 +2135,9 @@ func TestBuildHandler(t *testing.T) {
 		if !ok || result["isError"] != true || result["_meta"] == nil {
 			t.Fatalf("result = %#v", raw["result"])
 		}
-		registry, ok := s.mcp.protocol.Registry.(*caicToolRegistry)
+		registry, ok := s.mcpHandlers.protocol.Registry.(*mcpRegistry)
 		if !ok {
-			t.Fatalf("registry type = %T", s.mcp.protocol.Registry)
+			t.Fatalf("registry type = %T", s.mcpHandlers.protocol.Registry)
 		}
 		events := registry.audit.snapshot()
 		if len(events) == 0 || events[len(events)-1].Decision == "allow" {
@@ -2149,7 +2149,7 @@ func TestBuildHandler(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
 		s.hostState = auth.NewHostState("https://caic.example.com")
-		s.mcp.rateLimiter = newRateLimiter(1, time.Minute)
+		s.mcpHandlers.rateLimiter = newRateLimiter(1, time.Minute)
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)

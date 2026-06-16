@@ -40,37 +40,37 @@ func NewWarningStore(taskMgr *tasks.Manager) *WarningStore {
 }
 
 // Emit delivers a CI warning to connected SSE clients.
-func (s *WarningStore) Emit(msg string) {
-	s.mu.Lock()
+func (w *WarningStore) Emit(msg string) {
+	w.mu.Lock()
 	now := time.Now()
 	// Deduplicate: skip if the same message was emitted recently.
-	for _, w := range slices.Backward(s.warnings) {
-		if now.Sub(w.ts) > warningDedup {
+	for _, item := range slices.Backward(w.warnings) {
+		if now.Sub(item.ts) > warningDedup {
 			break
 		}
-		if w.msg == msg {
-			s.mu.Unlock()
+		if item.msg == msg {
+			w.mu.Unlock()
 			return
 		}
 	}
-	s.warnings = append(s.warnings, serverWarning{msg: msg, ts: now})
-	if len(s.warnings) > maxWarnings {
-		s.warnings = s.warnings[len(s.warnings)-maxWarnings:]
+	w.warnings = append(w.warnings, serverWarning{msg: msg, ts: now})
+	if len(w.warnings) > maxWarnings {
+		w.warnings = w.warnings[len(w.warnings)-maxWarnings:]
 	}
-	s.mu.Unlock()
-	if s.taskMgr != nil {
-		s.taskMgr.NotifyTaskChange()
+	w.mu.Unlock()
+	if w.taskMgr != nil {
+		w.taskMgr.NotifyTaskChange()
 	}
 }
 
 // Since returns all warnings with a timestamp after t.
-func (s *WarningStore) Since(t time.Time) []serverWarning {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (w *WarningStore) Since(t time.Time) []serverWarning {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	var out []serverWarning
-	for _, w := range s.warnings {
-		if w.ts.After(t) {
-			out = append(out, w)
+	for _, item := range w.warnings {
+		if item.ts.After(t) {
+			out = append(out, item)
 		}
 	}
 	return out

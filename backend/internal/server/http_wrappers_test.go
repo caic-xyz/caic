@@ -1,4 +1,4 @@
-// Tests for generic HTTP handler helpers, including error mapping.
+// Tests for generic HTTP handler wrappers, including error mapping.
 
 package server
 

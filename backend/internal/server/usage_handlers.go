@@ -1,4 +1,4 @@
-// Usage snapshot and SSE event handlers backed by per-provider quota fetchers.
+// HTTP handlers for usage snapshot and SSE event stream.
 
 package server
 

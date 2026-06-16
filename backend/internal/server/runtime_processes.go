@@ -21,8 +21,8 @@ type runtimeProcessBackend interface {
 	Signal(ctx context.Context, id runtime.InstanceID, pid int, sig string) error
 }
 
-// RuntimeProcesses handles task runtime process routes.
-type RuntimeProcesses struct {
+// runtimeProcessHandlers handles task runtime process routes.
+type runtimeProcessHandlers struct {
 	taskMgr      *tasks.Manager
 	backend      runtimeProcessBackend
 	authEnabled  func() bool
@@ -30,8 +30,8 @@ type RuntimeProcesses struct {
 }
 
 // HandleGetProcesses returns the list of running processes inside a task runtime instance.
-func (p *RuntimeProcesses) HandleGetProcesses(w http.ResponseWriter, r *http.Request) {
-	entry, err := p.getTask(r)
+func (h *runtimeProcessHandlers) HandleGetProcesses(w http.ResponseWriter, r *http.Request) {
+	entry, err := h.getTask(r)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -42,11 +42,11 @@ func (p *RuntimeProcesses) HandleGetProcesses(w http.ResponseWriter, r *http.Req
 		writeError(w, api.Conflict("task has no instance"))
 		return
 	}
-	if p.backend == nil {
+	if h.backend == nil {
 		writeError(w, api.InternalError("runtime backend not configured"))
 		return
 	}
-	procs, err := p.backend.Processes(r.Context(), instanceID)
+	procs, err := h.backend.Processes(r.Context(), instanceID)
 	if err != nil {
 		writeError(w, api.InternalError(err.Error()))
 		return
@@ -58,8 +58,8 @@ func (p *RuntimeProcesses) HandleGetProcesses(w http.ResponseWriter, r *http.Req
 }
 
 // HandleSignalProcess sends a signal to a process inside a task runtime instance.
-func (p *RuntimeProcesses) HandleSignalProcess(w http.ResponseWriter, r *http.Request) {
-	entry, err := p.getTask(r)
+func (h *runtimeProcessHandlers) HandleSignalProcess(w http.ResponseWriter, r *http.Request) {
+	entry, err := h.getTask(r)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -73,36 +73,36 @@ func (p *RuntimeProcesses) HandleSignalProcess(w http.ResponseWriter, r *http.Re
 		writeError(w, err)
 		return
 	}
-	resp, err := p.signalProcess(r.Context(), entry, req)
-	if err == nil && p.notifyChange != nil {
-		p.notifyChange()
+	resp, err := h.signalProcess(r.Context(), entry, req)
+	if err == nil && h.notifyChange != nil {
+		h.notifyChange()
 	}
 	writeJSONResponse(w, resp, err)
 }
 
-func (p *RuntimeProcesses) signalProcess(ctx context.Context, entry *tasks.Entry, req *v1.SignalProcessReq) (*v1.StatusResp, error) {
+func (h *runtimeProcessHandlers) signalProcess(ctx context.Context, entry *tasks.Entry, req *v1.SignalProcessReq) (*v1.StatusResp, error) {
 	t := entry.Task()
 	instanceID := t.RuntimeInstanceID()
 	if instanceID == "" {
 		return nil, api.Conflict("task has no instance")
 	}
-	if p.backend == nil {
+	if h.backend == nil {
 		return nil, api.InternalError("runtime backend not configured")
 	}
-	if err := p.backend.Signal(ctx, instanceID, req.PID, req.Signal); err != nil {
+	if err := h.backend.Signal(ctx, instanceID, req.PID, req.Signal); err != nil {
 		return nil, api.InternalError(err.Error())
 	}
 	slog.InfoContext(ctx, "signal sent", "task", t.ID, "instance", instanceID, "pid", req.PID, "signal", req.Signal)
 	return &v1.StatusResp{Status: "signalled"}, nil
 }
 
-func (p *RuntimeProcesses) getTask(r *http.Request) (*tasks.Entry, error) {
+func (h *runtimeProcessHandlers) getTask(r *http.Request) (*tasks.Entry, error) {
 	id := r.PathValue("id")
-	entry, ok := p.taskMgr.GetEntry(id)
+	entry, ok := h.taskMgr.GetEntry(id)
 	if !ok {
 		return nil, api.NotFound("task")
 	}
-	if p.authEnabled != nil && p.authEnabled() {
+	if h.authEnabled != nil && h.authEnabled() {
 		if u, ok := auth.UserFromContext(r.Context()); ok {
 			if owner := entry.Task().OwnerID; owner != "" && owner != u.ID {
 				return nil, api.Forbidden("task")
@@ -115,9 +115,9 @@ func (p *RuntimeProcesses) getTask(r *http.Request) (*tasks.Entry, error) {
 // routes returns the handler for task runtime process inspection and signaling.
 // Patterns are relative to the /api/caic/v1 version prefix, stripped at mount
 // time; {id} is the task ID.
-func (p *RuntimeProcesses) routes() http.Handler {
+func (h *runtimeProcessHandlers) routes() http.Handler {
 	m := http.NewServeMux()
-	m.HandleFunc("GET /processes/{id}", p.HandleGetProcesses)
-	m.HandleFunc("POST /processes/{id}/{pid}/signal", p.HandleSignalProcess)
+	m.HandleFunc("GET /processes/{id}", h.HandleGetProcesses)
+	m.HandleFunc("POST /processes/{id}/{pid}/signal", h.HandleSignalProcess)
 	return m
 }

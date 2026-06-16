@@ -15,7 +15,7 @@ func TestCaicToolRegistryAuthorizeTool(t *testing.T) {
 	t.Run("remote forge tools require linked forge identity", func(t *testing.T) {
 		t.Parallel()
 
-		c := &caicToolRegistry{}
+		c := &mcpRegistry{}
 		tests := []struct {
 			name string
 			user *auth.User
@@ -51,7 +51,7 @@ func TestCaicToolRegistryAuthorizeTool(t *testing.T) {
 	t.Run("remote forge tools allow linked GitHub server authority", func(t *testing.T) {
 		t.Parallel()
 
-		c := &caicToolRegistry{}
+		c := &mcpRegistry{}
 		for name := range mcpForgeTools {
 			ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{
 				Scopes: []string{mcpScopeReposWrite},
@@ -72,7 +72,7 @@ func TestCaicToolRegistryAuthorizeTool(t *testing.T) {
 	t.Run("remote forge tools allow linked user authority", func(t *testing.T) {
 		t.Parallel()
 
-		c := &caicToolRegistry{}
+		c := &mcpRegistry{}
 		for name := range mcpForgeTools {
 			ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{
 				Scopes: []string{mcpScopeReposWrite},

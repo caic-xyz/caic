@@ -44,17 +44,17 @@ type Router struct {
 	ctx context.Context
 
 	// Route handler concerns.
-	authHandlers         *authHandlers
-	ciHandlers           *ciHandlers
-	runtimeProcesses     *RuntimeProcesses
-	goModeHandler        http.Handler
-	serverConfigHandlers *serverConfigHandlers
-	taskHTTPHandlers     *taskHTTPHandlers
-	mcp                  *mcpServer
-	oauthServer          *oauth.Server
-	usageHandlers        *usageHandlers
-	voiceHandlers        *voiceHandlers
-	webFetchHandlers     *webFetchHandlers
+	authHandlers     *authHandlers
+	ciHandlers       *ciHandlers
+	runtimeProcesses *runtimeProcessHandlers
+	goModeHandler    http.Handler
+	serverHandlers   *serverHandlers
+	taskHandlers     *taskHandlers
+	mcpHandlers      *mcpHandlers
+	oauthServer      *oauth.Server
+	usageHandlers    *usageHandlers
+	voiceHandlers    *voiceHandlers
+	webFetchHandlers *webFetchHandlers
 
 	// Forge webhook delivery. Established by New (and the test constructors) and
 	// never nil thereafter; owns the webhook secrets and the App owner allowlist.
@@ -78,9 +78,9 @@ type Router struct {
 }
 
 // SetFakeCI injects a fake CI simulation hook for smoke and e2e tests.
-func (s *Router) SetFakeCI(f FakeCIHook) {
-	if s.taskHTTPHandlers != nil && s.taskHTTPHandlers.service != nil {
-		s.taskHTTPHandlers.service.fakeCI = f
+func (r *Router) SetFakeCI(f FakeCIHook) {
+	if r.taskHandlers != nil && r.taskHandlers.service != nil {
+		r.taskHandlers.service.fakeCI = f
 	}
 }
 
@@ -88,13 +88,13 @@ func (s *Router) SetFakeCI(f FakeCIHook) {
 // ctx is cancelled. Opening the listener early (before calling New) lets the
 // caller detect port conflicts at startup instead of after lengthy
 // initialisation.
-func (s *Router) Serve(ctx context.Context, ln net.Listener) error {
-	if !s.authEnabled() && !hostIsLoopback(hostOnly(ln.Addr().String())) {
-		s.mcpDisabled = true
+func (r *Router) Serve(ctx context.Context, ln net.Listener) error {
+	if !r.authEnabled() && !hostIsLoopback(hostOnly(ln.Addr().String())) {
+		r.mcpDisabled = true
 		slog.WarnContext(ctx, "MCP endpoint disabled: no OAuth login configured and the server binds a non-loopback address; configure OAuth login or bind to localhost to enable MCP",
 			"addr", ln.Addr())
 	}
-	handler, err := s.buildHandler()
+	handler, err := r.buildHandler()
 	if err != nil {
 		return err
 	}
@@ -127,32 +127,32 @@ func (s *Router) Serve(ctx context.Context, ln net.Listener) error {
 // SetUsageFetchers replaces the provider usage fetchers used by the usage
 // endpoints. Intended for e2e tests to inject fake fetchers that return
 // canned data without real API credentials.
-func (s *Router) SetUsageFetchers(fetchers []usage.ProviderFetcher) {
-	s.usageHandlers.fetchers = fetchers
+func (r *Router) SetUsageFetchers(fetchers []usage.ProviderFetcher) {
+	r.usageHandlers.fetchers = fetchers
 }
 
 // buildAPIHandler assembles the protected API mux with all route concerns
 // and a 404 catch-all for unmatched /api/ paths. It returns the mux wrapped
 // in RequireUser when auth is enabled.
-func (s *Router) buildAPIHandler() http.Handler {
+func (r *Router) buildAPIHandler() http.Handler {
 	apiMux := http.NewServeMux()
 	m := func(suffix string, h http.Handler) {
 		mountPrefix(apiMux, "/api/caic/v1", "/api/caic/v1"+suffix, h)
 	}
-	m("/tasks", s.taskHTTPHandlers.routes())
-	m("/usage", s.usageHandlers.routes())
-	m("/server", s.serverConfigHandlers.routes())
-	m("/processes", s.runtimeProcesses.routes())
-	m("/ci", s.ciHandlers.routes())
-	m("/web", s.webFetchHandlers.routes())
-	if s.oauthServer != nil {
-		m("/oauth/grants", oauthGrantRoutes(s.oauthServer))
+	m("/tasks", r.taskHandlers.routes())
+	m("/usage", r.usageHandlers.routes())
+	m("/server", r.serverHandlers.routes())
+	m("/processes", r.runtimeProcesses.routes())
+	m("/ci", r.ciHandlers.routes())
+	m("/web", r.webFetchHandlers.routes())
+	if r.oauthServer != nil {
+		m("/oauth/grants", oauthGrantRoutes(r.oauthServer))
 	}
-	mountPrefix(apiMux, "", "/api/voicegateway/v1", s.voiceHandlers.handler())
+	mountPrefix(apiMux, "", "/api/voicegateway/v1", r.voiceHandlers.handler())
 	apiMux.Handle("/api/", http.NotFoundHandler())
 	apiMux.Handle("/api", http.NotFoundHandler())
 
-	if s.authEnabled() {
+	if r.authEnabled() {
 		return auth.RequireUser(apiMux)
 	}
 	return apiMux
@@ -160,9 +160,9 @@ func (s *Router) buildAPIHandler() http.Handler {
 
 // buildHandler assembles the full HTTP handler. Extracted from Serve so that
 // route registration can be tested without a listener.
-func (s *Router) buildHandler() (http.Handler, error) {
+func (r *Router) buildHandler() (http.Handler, error) {
 	// Sync shared references (tests may mutate after construction).
-	s.mcp.hostState = s.hostState
+	r.mcpHandlers.hostState = r.hostState
 
 	// --- Root mux ---
 	//
@@ -182,17 +182,17 @@ func (s *Router) buildHandler() (http.Handler, error) {
 	// /auth/gitlab/callback, /auth/me, /auth/logout.
 	// handleGetMe and handleLogout check the session internally and return 404
 	// when unauthenticated.
-	mountPrefix(mux, "", "/auth", s.authHandlers.routes())
+	mountPrefix(mux, "", "/auth", r.authHandlers.routes())
 
 	// OAuth routes only when auth is configured.
-	if s.oauthServer != nil {
-		s.oauthServer.RegisterWellKnownRoutes(mux)
-		mountPrefix(mux, "", "/oauth", s.oauthServer.Routes())
+	if r.oauthServer != nil {
+		r.oauthServer.RegisterWellKnownRoutes(mux)
+		mountPrefix(mux, "", "/oauth", r.oauthServer.Routes())
 	}
-	if !s.mcpDisabled {
-		mcpHandler := s.mcp.endpointRoutes()
-		if s.oauthServer != nil {
-			mcpHandler = s.oauthServer.BearerAuth(mcpHandler)
+	if !r.mcpDisabled {
+		mcpHandler := r.mcpHandlers.endpointRoutes()
+		if r.oauthServer != nil {
+			mcpHandler = r.oauthServer.BearerAuth(mcpHandler)
 		}
 		mountPrefix(mux, "", "/api/caic/v1/mcp", mcpHandler)
 	}
@@ -202,16 +202,16 @@ func (s *Router) buildHandler() (http.Handler, error) {
 	// The /api/caic/v1/server/{config,version} variants are gated by the
 	// protected API subtree below and require a session. /server-info/ provides
 	// the same data without authentication for pre-login bootstrap.
-	mountPrefix(mux, "", "/server-info", s.serverConfigHandlers.discoveryRoutes())
+	mountPrefix(mux, "", "/server-info", r.serverHandlers.discoveryRoutes())
 
 	// --- Public: Go Mode bootstrap manifest ---
 	//
 	// RFC 8615 well-known discovery document, registered before the
 	// /.well-known/ catch-all below so its exact path takes precedence.
-	mux.Handle("/.well-known/gomode.json", s.goModeHandler)
+	mux.Handle("/.well-known/gomode.json", r.goModeHandler)
 
 	// --- Public: webhooks (HMAC-authenticated, not session) ---
-	mountPrefix(mux, "", "/webhooks", s.webhooks.routes())
+	mountPrefix(mux, "", "/webhooks", r.webhooks.routes())
 
 	// --- Protected API subtrees ---
 	//
@@ -221,10 +221,10 @@ func (s *Router) buildHandler() (http.Handler, error) {
 	//
 	// apiMux owns the route concerns, the version-prefix handling, and the 404
 	// catch-all for unmatched /api/ paths.
-	mux.Handle("/api/", s.buildAPIHandler())
+	mux.Handle("/api/", r.buildAPIHandler())
 
 	// Profiling (opt-in via -pprof / CAIC_PPROF).
-	if s.pprof {
+	if r.pprof {
 		registerPprof(mux)
 		slog.Info("pprof enabled", "url", "/debug/pprof/")
 	}
@@ -253,12 +253,12 @@ func (s *Router) buildHandler() (http.Handler, error) {
 	var inner http.Handler = mux
 	inner = compressMiddleware(inner)
 	inner = decompressMiddleware(inner)
-	inner = auth.Middleware(s.authStore, s.sessionSecret)(inner)
-	if s.hostState != nil {
-		inner = s.hostState.Middleware(inner)
+	inner = auth.Middleware(r.authStore, r.sessionSecret)(inner)
+	if r.hostState != nil {
+		inner = r.hostState.Middleware(inner)
 	}
-	inner = s.ipgeoMiddleware(inner)
-	inner = httplog.Handler{Handler: inner, Attrs: s.httpLogAttrs}
+	inner = r.ipgeoMiddleware(inner)
+	inner = httplog.Handler{Handler: inner, Attrs: r.httpLogAttrs}
 	inner = httpLogContextMiddleware(inner)
 	return inner, nil
 }
@@ -273,21 +273,21 @@ func mountPrefix(mux *http.ServeMux, base, prefix string, h http.Handler) {
 	mux.Handle(prefix+"/", h)
 }
 
-func (s *Router) ipgeoMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.ipgeoChecker == nil {
-			next.ServeHTTP(w, r)
+func (r *Router) ipgeoMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if r.ipgeoChecker == nil {
+			next.ServeHTTP(w, req)
 			return
 		}
-		logCtx := httpLogContextFromRequest(r)
+		logCtx := httpLogContextFromRequest(req)
 		clientIP := logCtx.clientIP
-		origin, allowed := s.ipgeoChecker.CheckOrigin(clientIP)
+		origin, allowed := r.ipgeoChecker.CheckOrigin(clientIP)
 		logCtx.origin = origin
 		if !allowed {
 			http.Error(w, fmt.Sprintf("forbidden: origin %s (%s) not allowed", clientIP, origin), http.StatusForbidden)
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, req)
 	})
 }
 
@@ -299,8 +299,8 @@ func httpLogContextMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func (s *Router) httpLogAttrs(r *http.Request) []slog.Attr {
-	logCtx := httpLogContextFromRequest(r)
+func (r *Router) httpLogAttrs(req *http.Request) []slog.Attr {
+	logCtx := httpLogContextFromRequest(req)
 	return []slog.Attr{
 		slog.String("ip", logCtx.clientIP),
 		slog.String("origin", logCtx.origin),
@@ -323,8 +323,8 @@ type httpLogContext struct {
 }
 
 // authEnabled reports whether OAuth authentication is configured.
-func (s *Router) authEnabled() bool {
-	return s.authStore != nil
+func (r *Router) authEnabled() bool {
+	return r.authStore != nil
 }
 
 // hostOnly returns the host portion of a host:port address, or the input when
@@ -405,7 +405,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		return nil, err
 	}
 	webFetch := &webFetchHandlers{}
-	taskService := &taskAPIService{
+	svc := &taskService{
 		ctx:       ctx,
 		taskMgr:   d.TaskManager,
 		prefs:     d.Preferences,
@@ -422,8 +422,8 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		authHandlers:     &authHandlers{store: d.AuthStore, sessionSecret: d.SessionSecret, hostState: d.HostState, githubOAuth: d.GitHubOAuth, gitlabOAuth: d.GitLabOAuth, githubAllowedUsers: d.GitHubAllowedUsers, gitlabAllowedUsers: d.GitLabAllowedUsers},
 		ciHandlers:       &ciHandlers{taskMgr: d.TaskManager, repos: d.Repos, forge: d.Forge, provider: d.Provider, taskClient: d.TaskClient, authStore: d.AuthStore},
 		goModeHandler:    goModeHandler,
-		runtimeProcesses: &RuntimeProcesses{taskMgr: d.TaskManager, backend: d.ProcessBackend, notifyChange: notifyChangeFn(d.TaskManager)},
-		serverConfigHandlers: &serverConfigHandlers{
+		runtimeProcesses: &runtimeProcessHandlers{taskMgr: d.TaskManager, backend: d.ProcessBackend, notifyChange: notifyChangeFn(d.TaskManager)},
+		serverHandlers: &serverHandlers{
 			serverCtx:          ctx,
 			tailscaleAvailable: d.Tailscale,
 			forge:              d.Forge,
@@ -436,7 +436,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 			gitlabOAuth:        d.GitLabOAuth,
 			voiceGateway:       voiceMetadata,
 		},
-		taskHTTPHandlers: &taskHTTPHandlers{taskMgr: d.TaskManager, repos: d.Repos, forge: d.Forge, ciService: d.CIService, authStore: d.AuthStore, warnings: d.Warnings, service: taskService},
+		taskHandlers:     &taskHandlers{taskMgr: d.TaskManager, repos: d.Repos, forge: d.Forge, ciService: d.CIService, authStore: d.AuthStore, warnings: d.Warnings, service: svc},
 		usageHandlers:    &usageHandlers{taskMgr: d.TaskManager, fetchers: d.UsageFetchers},
 		voiceHandlers:    voice,
 		webFetchHandlers: webFetch,
@@ -477,13 +477,13 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		}
 	}
 
-	s.mcp = &mcpServer{
+	s.mcpHandlers = &mcpHandlers{
 		rateLimiter: rateLimiter,
 		hostState:   d.HostState,
 	}
-	mcpRegistry := &caicToolRegistry{serverConfig: s.serverConfigHandlers, tasks: taskService, ci: s.ciHandlers, usage: s.usageHandlers, audit: audit}
-	s.mcp.protocol = &mcp.Handler{
-		Registry:   mcpRegistry,
+	registry := &mcpRegistry{serverConfig: s.serverHandlers, tasks: svc, ci: s.ciHandlers, usage: s.usageHandlers, audit: audit}
+	s.mcpHandlers.protocol = &mcp.Handler{
+		Registry:   registry,
 		ServerInfo: mcp.Implementation{Name: "caic", Title: "caic", Version: autoupdate.Version},
 	}
 	s.runtimeProcesses.authEnabled = s.authEnabled

@@ -24,22 +24,22 @@ func newRateLimiter(limit int, window time.Duration) *rateLimiter {
 }
 
 // Allow reports whether key is within the fixed-window request limit.
-func (l *rateLimiter) Allow(key string) bool {
-	if l.limit <= 0 || l.window <= 0 {
+func (r *rateLimiter) Allow(key string) bool {
+	if r.limit <= 0 || r.window <= 0 {
 		return true
 	}
 	now := time.Now()
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	bucket := l.buckets[key]
-	if bucket.Start.IsZero() || now.Sub(bucket.Start) >= l.window {
-		l.buckets[key] = rateBucket{Start: now, Count: 1}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	bucket := r.buckets[key]
+	if bucket.Start.IsZero() || now.Sub(bucket.Start) >= r.window {
+		r.buckets[key] = rateBucket{Start: now, Count: 1}
 		return true
 	}
-	if bucket.Count >= l.limit {
+	if bucket.Count >= r.limit {
 		return false
 	}
 	bucket.Count++
-	l.buckets[key] = bucket
+	r.buckets[key] = bucket
 	return true
 }

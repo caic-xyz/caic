@@ -35,8 +35,8 @@ type auditEvent struct {
 	Status    string    `json:"status,omitempty"`
 }
 
-func (s *auditStore) record(ctx context.Context, e *auditEvent) {
-	if s == nil || e == nil {
+func (a *auditStore) record(ctx context.Context, e *auditEvent) {
+	if a == nil || e == nil {
 		return
 	}
 	e.Time = time.Now().UTC()
@@ -47,23 +47,23 @@ func (s *auditStore) record(ctx context.Context, e *auditEvent) {
 		e.Subject = p.Subject
 		e.Scopes = slices.Clone(p.Scopes)
 	}
-	s.mu.Lock()
-	s.events = append(s.events, *e)
-	if err := s.persistLocked(e); err != nil {
+	a.mu.Lock()
+	a.events = append(a.events, *e)
+	if err := a.persistLocked(e); err != nil {
 		slog.WarnContext(ctx, "persist audit", "err", err)
 	}
-	s.mu.Unlock()
+	a.mu.Unlock()
 	slog.InfoContext(ctx, "audit", "operation", e.Operation, "name", e.Name, "decision", e.Decision, "status", e.Status, "userID", e.UserID)
 }
 
-func (s *auditStore) snapshot() []auditEvent {
-	if s == nil {
+func (a *auditStore) snapshot() []auditEvent {
+	if a == nil {
 		return nil
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]auditEvent, len(s.events))
-	copy(out, s.events)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]auditEvent, len(a.events))
+	copy(out, a.events)
 	return out
 }
 
@@ -93,14 +93,14 @@ func auditValueSummary(v any) string {
 	return auditArgsSummary(data)
 }
 
-func (s *auditStore) persistLocked(e *auditEvent) error {
-	if s.path == "" {
+func (a *auditStore) persistLocked(e *auditEvent) error {
+	if a.path == "" {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(a.path), 0o700); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(filepath.Clean(s.path), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(filepath.Clean(a.path), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}

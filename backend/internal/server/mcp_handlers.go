@@ -1,4 +1,4 @@
-// MCP HTTP endpoint: protocol dispatch, origin validation, and rate limiting.
+// MCP HTTP handlers: protocol dispatch, origin validation, and rate limiting.
 
 package server
 
@@ -16,10 +16,10 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/oauth"
 )
 
-// mcpServer owns the MCP HTTP endpoint: protocol dispatch, rate limiting, and
+// mcpHandlers owns the MCP HTTP endpoint: protocol dispatch, rate limiting, and
 // origin validation. OAuth authorization is handled by the separate oauth.Server
 // peer, which provides a BearerAuth middleware applied by the Router.
-type mcpServer struct {
+type mcpHandlers struct {
 	protocol    *mcp.Handler
 	rateLimiter *rateLimiter
 
@@ -30,16 +30,16 @@ type mcpServer struct {
 // handleMCP is the MCP endpoint handler. Origin validation and rate limiting
 // are applied here; bearer authentication is applied upstream by the Router via
 // oauth.Server.BearerAuth middleware.
-func (s *mcpServer) handleMCP(w http.ResponseWriter, r *http.Request) {
+func (h *mcpHandlers) handleMCP(w http.ResponseWriter, r *http.Request) {
 	r = requestWithMCPPrincipal(r)
-	if err := s.validateMCPOrigin(r); err != nil {
+	if err := h.validateMCPOrigin(r); err != nil {
 		http.Error(w, "forbidden: invalid origin", http.StatusForbidden)
 		return
 	}
-	if !s.allowMCPRequest(w, r) {
+	if !h.allowMCPRequest(w, r) {
 		return
 	}
-	s.protocol.HandleMCP(w, r)
+	h.protocol.HandleMCP(w, r)
 }
 
 func requestWithMCPPrincipal(r *http.Request) *http.Request {
@@ -61,11 +61,11 @@ func requestWithMCPPrincipal(r *http.Request) *http.Request {
 	return r.WithContext(newMCPPrincipalContext(r.Context(), principal))
 }
 
-func (s *mcpServer) allowMCPRequest(w http.ResponseWriter, r *http.Request) bool {
-	if s.rateLimiter == nil {
+func (h *mcpHandlers) allowMCPRequest(w http.ResponseWriter, r *http.Request) bool {
+	if h.rateLimiter == nil {
 		return true
 	}
-	if s.rateLimiter.Allow(s.mcpRateKey(r)) {
+	if h.rateLimiter.Allow(h.mcpRateKey(r)) {
 		return true
 	}
 	w.Header().Set("Retry-After", "60")
@@ -73,7 +73,7 @@ func (s *mcpServer) allowMCPRequest(w http.ResponseWriter, r *http.Request) bool
 	return false
 }
 
-func (s *mcpServer) validateMCPOrigin(r *http.Request) error {
+func (h *mcpHandlers) validateMCPOrigin(r *http.Request) error {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		return nil
@@ -82,7 +82,7 @@ func (s *mcpServer) validateMCPOrigin(r *http.Request) error {
 	if err != nil || originURL.Scheme == "" || originURL.Host == "" || originURL.Path != "" {
 		return errors.New("invalid origin")
 	}
-	baseURL, err := url.Parse(externalBaseURL(s.hostState, r))
+	baseURL, err := url.Parse(externalBaseURL(h.hostState, r))
 	if err != nil || baseURL.Scheme == "" || baseURL.Host == "" {
 		return errors.New("invalid server origin")
 	}
@@ -92,7 +92,7 @@ func (s *mcpServer) validateMCPOrigin(r *http.Request) error {
 	return nil
 }
 
-func (s *mcpServer) mcpRateKey(r *http.Request) string {
+func (h *mcpHandlers) mcpRateKey(r *http.Request) string {
 	if p, ok := mcpPrincipalFromContext(r.Context()); ok && p.Subject != "" {
 		return "sub:" + p.Subject
 	}
@@ -110,10 +110,10 @@ func (s *mcpServer) mcpRateKey(r *http.Request) string {
 // /api/caic/v1/mcp. Bearer authentication is applied by the Router via
 // oauth.Server.BearerAuth middleware; when auth is disabled the handler is
 // mounted directly.
-func (s *mcpServer) endpointRoutes() http.Handler {
+func (h *mcpHandlers) endpointRoutes() http.Handler {
 	m := http.NewServeMux()
-	m.HandleFunc("POST /api/caic/v1/mcp", s.handleMCP)
-	m.HandleFunc("GET /api/caic/v1/mcp", s.handleMCP)
+	m.HandleFunc("POST /api/caic/v1/mcp", h.handleMCP)
+	m.HandleFunc("GET /api/caic/v1/mcp", h.handleMCP)
 	return m
 }
 
@@ -137,7 +137,7 @@ var mcpScopeLabels = map[string]string{
 }
 
 // mcpPrincipal types are MCP protocol concepts shared by the endpoint (which
-// adapts OAuth bearer claims) and caicToolRegistry (which checks scopes on
+// adapts OAuth bearer claims) and mcpRegistry (which checks scopes on
 // tool/resource access).
 
 type mcpPrincipalContextKey struct{}
@@ -173,7 +173,7 @@ func mcpHasScope(ctx context.Context, scope string) bool {
 }
 
 // externalBaseURL constructs the server's external base URL from hostState or
-// the request. Used by both mcpServer (origin validation) and oauth.Server
+// the request. Used by both mcpHandlers (origin validation) and oauth.Server
 // (metadata, challenge, bearer verification).
 func externalBaseURL(hostState *auth.HostState, r *http.Request) string {
 	if hostState != nil {

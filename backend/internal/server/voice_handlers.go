@@ -1,4 +1,4 @@
-// WebRTC voice bridge HTTP handlers.
+// HTTP handlers for the embedded WebRTC voice bridge.
 
 package server
 

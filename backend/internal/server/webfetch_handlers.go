@@ -1,4 +1,4 @@
-// HTTP handler for POST /api/caic/v1/web/fetch: fetches a URL and extracts text content.
+// HTTP handlers for server-side URL fetch and HTML content extraction.
 
 package server
 
@@ -25,8 +25,8 @@ const (
 
 type webFetchHandlers struct{}
 
-func (*webFetchHandlers) webFetch(ctx context.Context, req *v1.WebFetchReq) (*v1.WebFetchResp, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, req.URL, http.NoBody)
+func (h *webFetchHandlers) webFetch(ctx context.Context, r *v1.WebFetchReq) (*v1.WebFetchResp, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, r.URL, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -40,7 +40,7 @@ func (*webFetchHandlers) webFetch(ctx context.Context, req *v1.WebFetchReq) (*v1
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, req.URL)
+		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, r.URL)
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, webFetchMaxBody))

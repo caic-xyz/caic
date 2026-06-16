@@ -1,4 +1,4 @@
-// caic-specific MCP tool registry, schemas, and resource catalog.
+// MCP tool registry, schemas, and resource catalog.
 
 package server
 
@@ -73,22 +73,22 @@ type caicToolCatalogState struct {
 	Caps           v1.Config
 }
 
-type caicToolRegistry struct {
-	serverConfig *serverConfigHandlers
-	tasks        *taskAPIService
+type mcpRegistry struct {
+	serverConfig *serverHandlers
+	tasks        *taskService
 	ci           *ciHandlers
 	usage        *usageHandlers
 	audit        *auditStore
 }
 
-func (c *caicToolRegistry) Instructions(ctx context.Context) (string, error) {
+func (m *mcpRegistry) Instructions(ctx context.Context) (string, error) {
 	parts := make([]string, 0, 2)
-	parts = append(parts, caicVoiceSystemInstruction, c.voiceSessionContext(ctx))
+	parts = append(parts, caicVoiceSystemInstruction, m.voiceSessionContext(ctx))
 	return strings.Join(parts, "\n\n"), nil
 }
 
-func (c *caicToolRegistry) Tools(ctx context.Context) ([]mcp.ToolDescriptor, error) {
-	specs, err := c.specs(ctx)
+func (m *mcpRegistry) Tools(ctx context.Context) ([]mcp.ToolDescriptor, error) {
+	specs, err := m.specs(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -99,8 +99,8 @@ func (c *caicToolRegistry) Tools(ctx context.Context) ([]mcp.ToolDescriptor, err
 	return tools, nil
 }
 
-func (c *caicToolRegistry) CallTool(ctx context.Context, name string, argsJSON json.RawMessage) (mcp.RawToolResult, error) {
-	specs, err := c.specs(ctx)
+func (m *mcpRegistry) CallTool(ctx context.Context, name string, argsJSON json.RawMessage) (mcp.RawToolResult, error) {
+	specs, err := m.specs(ctx)
 	if err != nil {
 		return mcp.RawToolResult{}, err
 	}
@@ -108,8 +108,8 @@ func (c *caicToolRegistry) CallTool(ctx context.Context, name string, argsJSON j
 		if s.Name != name {
 			continue
 		}
-		if authResult, ok := c.authorizeTool(ctx, name); !ok {
-			c.audit.record(ctx, &auditEvent{Operation: "tools/call", Name: name, Args: auditArgsSummary(argsJSON), Decision: authResult})
+		if authResult, ok := m.authorizeTool(ctx, name); !ok {
+			m.audit.record(ctx, &auditEvent{Operation: "tools/call", Name: name, Args: auditArgsSummary(argsJSON), Decision: authResult})
 			return mcp.RawToolResult{Meta: mcp.MetaObject{"mcp/www_authenticate": []string{mcpScopeChallenge(requiredScopeForTool(name))}}, Structured: mcp.ErrorOutput{Error: authResult}, IsError: true}, nil
 		}
 		res, err := s.Handler(ctx, argsJSON)
@@ -120,14 +120,14 @@ func (c *caicToolRegistry) CallTool(ctx context.Context, name string, argsJSON j
 			status = "tool_error"
 		}
 		res.Structured = redactForJSON(res.Structured)
-		c.audit.record(ctx, &auditEvent{Operation: "tools/call", Name: name, Args: auditArgsSummary(argsJSON), Decision: "allow", Status: status})
+		m.audit.record(ctx, &auditEvent{Operation: "tools/call", Name: name, Args: auditArgsSummary(argsJSON), Decision: "allow", Status: status})
 		return res, err
 	}
 	return mcp.RawToolResult{}, mcp.ErrInvalidParams("unknown tool: %s", name)
 }
 
-func (c *caicToolRegistry) ListResources(ctx context.Context) mcp.ResourcesListResult {
-	taskList, repos := c.currentTasksAndRepos(ctx)
+func (m *mcpRegistry) ListResources(ctx context.Context) mcp.ResourcesListResult {
+	taskList, repos := m.currentTasksAndRepos(ctx)
 	resources := make([]mcp.ResourceDescriptor, 0, 3+len(repos)+len(taskList))
 	resources = append(resources,
 		mcp.ResourceDescriptor{URI: "caic://repos", Name: "repos", Title: "Repositories", Description: "Managed repository summary", MimeType: "application/json"},
@@ -146,22 +146,22 @@ func (c *caicToolRegistry) ListResources(ctx context.Context) mcp.ResourcesListR
 	return mcp.ResourcesListResult{ResultType: mcp.ResultTypeComplete, Resources: resources, TTLMS: mcp.DefaultTTLMS, CacheScope: mcp.CacheScopePrivate}
 }
 
-func (c *caicToolRegistry) ReadResource(ctx context.Context, uri string) (mcp.ResourcesReadResult, error) {
+func (m *mcpRegistry) ReadResource(ctx context.Context, uri string) (mcp.ResourcesReadResult, error) {
 	if authResult, ok := authorizeResource(ctx, uri); !ok {
-		c.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: authResult})
+		m.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: authResult})
 		return mcp.ResourcesReadResult{}, mcp.ErrInvalidParams("%s", authResult)
 	}
-	taskList, repos := c.currentTasksAndRepos(ctx)
+	taskList, repos := m.currentTasksAndRepos(ctx)
 	switch {
 	case uri == "caic://repos":
-		c.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
+		m.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
 		return redactedResourceJSON(uri, repos)
 	case uri == "caic://tasks":
-		c.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
+		m.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
 		return redactedResourceJSON(uri, taskList)
 	case uri == "caic://usage":
-		usage := c.usage.buildResp(ctx)
-		c.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
+		usage := m.usage.buildResp(ctx)
+		m.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
 		return redactedResourceJSON(uri, usage)
 	case strings.HasPrefix(uri, "caic://repos/"):
 		name, err := url.PathUnescape(strings.TrimPrefix(uri, "caic://repos/"))
@@ -170,7 +170,7 @@ func (c *caicToolRegistry) ReadResource(ctx context.Context, uri string) (mcp.Re
 		}
 		for i := range repos {
 			if repos[i].Path == name {
-				c.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
+				m.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
 				return redactedResourceJSON(uri, repos[i])
 			}
 		}
@@ -179,7 +179,7 @@ func (c *caicToolRegistry) ReadResource(ctx context.Context, uri string) (mcp.Re
 		id := strings.TrimPrefix(uri, "caic://tasks/")
 		for i := range taskList {
 			if taskList[i].ID.String() == id {
-				c.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
+				m.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
 				return redactedResourceJSON(uri, taskList[i])
 			}
 		}
@@ -189,10 +189,10 @@ func (c *caicToolRegistry) ReadResource(ctx context.Context, uri string) (mcp.Re
 	}
 }
 
-func (c *caicToolRegistry) voiceSessionContext(ctx context.Context) string {
+func (m *mcpRegistry) voiceSessionContext(ctx context.Context) string {
 	parts := make([]string, 0, 4)
-	if c.serverConfig.prefs != nil {
-		prefs := c.serverConfig.prefs.Get(userIDFromCtx(ctx))
+	if m.serverConfig.prefs != nil {
+		prefs := m.serverConfig.prefs.Get(userIDFromCtx(ctx))
 		if len(prefs.Repositories) > 0 {
 			parts = append(parts, "[Default repo: "+prefs.Repositories[0].Path+"]")
 		}
@@ -203,7 +203,7 @@ func (c *caicToolRegistry) voiceSessionContext(ctx context.Context) string {
 			}
 		}
 	}
-	taskList := c.tasks.taskListSnapshot(ctx)
+	taskList := m.tasks.taskListSnapshot(ctx)
 	if len(taskList) == 0 {
 		if len(parts) == 0 {
 			return "[No active tasks]"
@@ -227,43 +227,43 @@ func (c *caicToolRegistry) voiceSessionContext(ctx context.Context) string {
 	return strings.Join(parts, "\n")
 }
 
-func (c *caicToolRegistry) specs(ctx context.Context) ([]mcp.ToolSpec, error) {
+func (m *mcpRegistry) specs(ctx context.Context) ([]mcp.ToolSpec, error) {
 	// TODO: This is inefficient.
-	state, err := c.catalogState(ctx)
+	state, err := m.catalogState(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return c.specsForState(&state), nil
+	return m.specsForState(&state), nil
 }
 
-func (c *caicToolRegistry) specsForState(s *caicToolCatalogState) []mcp.ToolSpec {
-	createSpec := mcp.NewToolSpec("task_create", "Create task", "Create a new coding task. Confirm repo and prompt with the user before calling.", c.handleTaskCreate(s.DefaultHarness, s.DefaultModel))
+func (m *mcpRegistry) specsForState(s *caicToolCatalogState) []mcp.ToolSpec {
+	createSpec := mcp.NewToolSpec("task_create", "Create task", "Create a new coding task. Confirm repo and prompt with the user before calling.", m.handleTaskCreate(s.DefaultHarness, s.DefaultModel))
 	createSpec.InputSchema = buildTaskCreateSchema(s)
 	createSpec.Annotations = &mcp.ToolAnnotations{Title: "Create task", DestructiveHint: true, OpenWorldHint: false}
 
-	forkSpec := mcp.NewToolSpec("task_fork", "Fork task", "Fork a running or waiting task, creating a snapshot of its container on a new branch. The prompt describes what the forked task should do. Optionally override the harness and model.", c.handleTaskFork)
+	forkSpec := mcp.NewToolSpec("task_fork", "Fork task", "Fork a running or waiting task, creating a snapshot of its container on a new branch. The prompt describes what the forked task should do. Optionally override the harness and model.", m.handleTaskFork)
 	forkSpec.InputSchema = buildTaskForkSchema(s)
 	forkSpec.Annotations = &mcp.ToolAnnotations{Title: "Fork task", DestructiveHint: true, OpenWorldHint: false}
 
-	botFixCISpec := mcp.NewToolSpec("bot_fix_ci", "Fix repository CI", "Create a task to investigate and fix a failing CI on a repository's default branch.", c.handleBotFixCI)
+	botFixCISpec := mcp.NewToolSpec("bot_fix_ci", "Fix repository CI", "Create a task to investigate and fix a failing CI on a repository's default branch.", m.handleBotFixCI)
 	botFixCISpec.InputSchema = buildBotFixCISchema(s)
 	botFixCISpec.Annotations = &mcp.ToolAnnotations{Title: "Fix repository CI", DestructiveHint: true, OpenWorldHint: false}
 
 	return []mcp.ToolSpec{
-		annotateTool(mcp.NewToolSpec("tasks_list", "List tasks", "List all current coding tasks with their status, cost, and duration.", c.handleTasksList), mcp.ToolAnnotations{Title: "List tasks", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
+		annotateTool(mcp.NewToolSpec("tasks_list", "List tasks", "List all current coding tasks with their status, cost, and duration.", m.handleTasksList), mcp.ToolAnnotations{Title: "List tasks", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		createSpec,
-		annotateTool(mcp.NewToolSpec("task_get_detail", "Get task detail", "Get recent activity and status details for a task by its number.", c.handleTaskGetDetail), mcp.ToolAnnotations{Title: "Get task detail", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
-		annotateTool(mcp.NewToolSpec("task_send_message", "Send task message", "Send a text message to a waiting or asking agent by task number.", c.handleTaskSendMessage), mcp.ToolAnnotations{Title: "Send task message", DestructiveHint: false, OpenWorldHint: false}),
-		annotateTool(mcp.NewToolSpec("task_answer_question", "Answer task question", "Answer an agent's question by task number. The agent is in 'asking' state.", c.handleTaskAnswerQuestion), mcp.ToolAnnotations{Title: "Answer task question", DestructiveHint: false, OpenWorldHint: false}),
-		annotateTool(mcp.NewToolSpec("task_push_branch_to_remote", "Push task branch", "Sync or push a task's changes to GitHub. Push to task branch (default) or squash-push to main.", c.handleTaskPushBranchToRemote), mcp.ToolAnnotations{Title: "Push task branch", DestructiveHint: true, OpenWorldHint: true}),
-		annotateTool(mcp.NewToolSpec("task_stop", "Stop task", "Stop a running or waiting task. The container is preserved and can be revived later.", c.handleTaskStop), mcp.ToolAnnotations{Title: "Stop task", DestructiveHint: true, OpenWorldHint: false}),
-		annotateTool(mcp.NewToolSpec("task_purge", "Purge task", "Permanently delete a stopped or crashed task's container. Cannot be undone.", c.handleTaskPurge), mcp.ToolAnnotations{Title: "Purge task", DestructiveHint: true, OpenWorldHint: false}),
-		annotateTool(mcp.NewToolSpec("task_revive", "Revive task", "Revive a stopped or crashed task, restarting its container and agent session.", c.handleTaskRevive), mcp.ToolAnnotations{Title: "Revive task", DestructiveHint: false, OpenWorldHint: false}),
+		annotateTool(mcp.NewToolSpec("task_get_detail", "Get task detail", "Get recent activity and status details for a task by its number.", m.handleTaskGetDetail), mcp.ToolAnnotations{Title: "Get task detail", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
+		annotateTool(mcp.NewToolSpec("task_send_message", "Send task message", "Send a text message to a waiting or asking agent by task number.", m.handleTaskSendMessage), mcp.ToolAnnotations{Title: "Send task message", DestructiveHint: false, OpenWorldHint: false}),
+		annotateTool(mcp.NewToolSpec("task_answer_question", "Answer task question", "Answer an agent's question by task number. The agent is in 'asking' state.", m.handleTaskAnswerQuestion), mcp.ToolAnnotations{Title: "Answer task question", DestructiveHint: false, OpenWorldHint: false}),
+		annotateTool(mcp.NewToolSpec("task_push_branch_to_remote", "Push task branch", "Sync or push a task's changes to GitHub. Push to task branch (default) or squash-push to main.", m.handleTaskPushBranchToRemote), mcp.ToolAnnotations{Title: "Push task branch", DestructiveHint: true, OpenWorldHint: true}),
+		annotateTool(mcp.NewToolSpec("task_stop", "Stop task", "Stop a running or waiting task. The container is preserved and can be revived later.", m.handleTaskStop), mcp.ToolAnnotations{Title: "Stop task", DestructiveHint: true, OpenWorldHint: false}),
+		annotateTool(mcp.NewToolSpec("task_purge", "Purge task", "Permanently delete a stopped or crashed task's container. Cannot be undone.", m.handleTaskPurge), mcp.ToolAnnotations{Title: "Purge task", DestructiveHint: true, OpenWorldHint: false}),
+		annotateTool(mcp.NewToolSpec("task_revive", "Revive task", "Revive a stopped or crashed task, restarting its container and agent session.", m.handleTaskRevive), mcp.ToolAnnotations{Title: "Revive task", DestructiveHint: false, OpenWorldHint: false}),
 		forkSpec,
-		annotateTool(mcp.NewToolSpec("get_usage", "Get usage", "Check current API quota utilization and limits.", c.handleGetUsage), mcp.ToolAnnotations{Title: "Get usage", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: true}),
-		annotateTool(mcp.NewToolSpec("clone_repo", "Clone repository", "Clone a git repository by URL. Optionally specify a local path.", c.handleCloneRepo), mcp.ToolAnnotations{Title: "Clone repository", DestructiveHint: true, OpenWorldHint: true}),
-		annotateTool(mcp.NewToolSpec("agent_last_message", "Get last agent message", "Get latest agent message, question, or result. Call to check what the agent needs or relay to user.", c.handleAgentLastMessage), mcp.ToolAnnotations{Title: "Get last agent message", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
-		annotateTool(mcp.NewToolSpec("task_fix_pr", "Fix task PR", "Inject a fix-PR command into an existing task to fix its failing PR CI in auto mode.", c.handleTaskFixPR), mcp.ToolAnnotations{Title: "Fix task PR", DestructiveHint: true, OpenWorldHint: true}),
+		annotateTool(mcp.NewToolSpec("get_usage", "Get usage", "Check current API quota utilization and limits.", m.handleGetUsage), mcp.ToolAnnotations{Title: "Get usage", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: true}),
+		annotateTool(mcp.NewToolSpec("clone_repo", "Clone repository", "Clone a git repository by URL. Optionally specify a local path.", m.handleCloneRepo), mcp.ToolAnnotations{Title: "Clone repository", DestructiveHint: true, OpenWorldHint: true}),
+		annotateTool(mcp.NewToolSpec("agent_last_message", "Get last agent message", "Get latest agent message, question, or result. Call to check what the agent needs or relay to user.", m.handleAgentLastMessage), mcp.ToolAnnotations{Title: "Get last agent message", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
+		annotateTool(mcp.NewToolSpec("task_fix_pr", "Fix task PR", "Inject a fix-PR command into an existing task to fix its failing PR CI in auto mode.", m.handleTaskFixPR), mcp.ToolAnnotations{Title: "Fix task PR", DestructiveHint: true, OpenWorldHint: true}),
 		botFixCISpec,
 	}
 }
@@ -273,16 +273,16 @@ func annotateTool(spec mcp.ToolSpec, annotations mcp.ToolAnnotations) mcp.ToolSp
 	return spec
 }
 
-func (c *caicToolRegistry) catalogState(ctx context.Context) (caicToolCatalogState, error) {
-	repos, err := c.serverConfig.listRepos(ctx, nil)
+func (m *mcpRegistry) catalogState(ctx context.Context) (caicToolCatalogState, error) {
+	repos, err := m.serverConfig.listRepos(ctx, nil)
 	if err != nil {
 		return caicToolCatalogState{}, err
 	}
-	harnesses, err := c.serverConfig.listHarnesses(ctx, nil)
+	harnesses, err := m.serverConfig.listHarnesses(ctx, nil)
 	if err != nil {
 		return caicToolCatalogState{}, err
 	}
-	cfg, err := c.serverConfig.getConfig(ctx, nil)
+	cfg, err := m.serverConfig.getConfig(ctx, nil)
 	if err != nil {
 		return caicToolCatalogState{}, err
 	}
@@ -295,8 +295,8 @@ func (c *caicToolRegistry) catalogState(ctx context.Context) (caicToolCatalogSta
 	for i := range *harnesses {
 		state.Harnesses[i] = (*harnesses)[i].Name
 	}
-	if c.serverConfig.prefs != nil {
-		prefs := c.serverConfig.prefs.Get(userIDFromCtx(ctx))
+	if m.serverConfig.prefs != nil {
+		prefs := m.serverConfig.prefs.Get(userIDFromCtx(ctx))
 		state.DefaultHarness = prefs.Harness
 		if state.DefaultHarness != "" {
 			state.DefaultModel = prefs.Models[state.DefaultHarness]
@@ -308,14 +308,14 @@ func (c *caicToolRegistry) catalogState(ctx context.Context) (caicToolCatalogSta
 	return state, nil
 }
 
-func (c *caicToolRegistry) currentTasksAndRepos(ctx context.Context) ([]v1.Task, []v1.Repo) {
-	taskList := c.tasks.taskListSnapshot(ctx)
-	repos := repoListFromSnapshot(c.serverConfig.repos.SnapshotWithCI())
+func (m *mcpRegistry) currentTasksAndRepos(ctx context.Context) ([]v1.Task, []v1.Repo) {
+	taskList := m.tasks.taskListSnapshot(ctx)
+	repos := repoListFromSnapshot(m.serverConfig.repos.SnapshotWithCI())
 	return taskList, *repos
 }
 
-func (c *caicToolRegistry) handleTasksList(ctx context.Context, _ struct{}) mcp.ToolResult[mcp.TextOutput] {
-	taskList := c.tasks.taskListSnapshot(ctx)
+func (m *mcpRegistry) handleTasksList(ctx context.Context, _ struct{}) mcp.ToolResult[mcp.TextOutput] {
+	taskList := m.tasks.taskListSnapshot(ctx)
 	if len(taskList) == 0 {
 		return mcp.TextToolResult("No tasks running.")
 	}
@@ -354,7 +354,7 @@ type mcpTaskCreateArgs struct {
 	GitHubToken bool     `json:"gitHubToken,omitempty" jsonschema_description:"Enable GitHub token injection for this task"`
 }
 
-func (c *caicToolRegistry) handleTaskCreate(defaultHarness, defaultModel string) func(context.Context, mcpTaskCreateArgs) mcp.ToolResult[mcpTaskCreatedOutput] {
+func (m *mcpRegistry) handleTaskCreate(defaultHarness, defaultModel string) func(context.Context, mcpTaskCreateArgs) mcp.ToolResult[mcpTaskCreatedOutput] {
 	return func(ctx context.Context, args mcpTaskCreateArgs) mcp.ToolResult[mcpTaskCreatedOutput] {
 		if args.Prompt == "" {
 			return mcp.ToolError[mcpTaskCreatedOutput]("Missing required parameter: prompt")
@@ -387,11 +387,11 @@ func (c *caicToolRegistry) handleTaskCreate(defaultHarness, defaultModel string)
 		if err := req.Validate(); err != nil {
 			return domainToolError[mcpTaskCreatedOutput](err)
 		}
-		resp, err := c.tasks.createTask(ctx, req)
+		resp, err := m.tasks.createTask(ctx, req)
 		if err != nil {
 			return domainToolError[mcpTaskCreatedOutput](err)
 		}
-		taskList := c.tasks.taskListSnapshot(ctx)
+		taskList := m.tasks.taskListSnapshot(ctx)
 		num := taskNumberForID(taskList, resp.ID.String())
 		title := resp.ID.String()
 		for i := range taskList {
@@ -411,11 +411,11 @@ type mcpTaskNumberArgs struct {
 	TaskNumber int `json:"task_number" jsonschema_description:"The task number, e.g. 1 for task #1"`
 }
 
-func (c *caicToolRegistry) handleTaskGetDetail(ctx context.Context, args mcpTaskNumberArgs) mcp.ToolResult[mcp.TextOutput] {
+func (m *mcpRegistry) handleTaskGetDetail(ctx context.Context, args mcpTaskNumberArgs) mcp.ToolResult[mcp.TextOutput] {
 	if args.TaskNumber == 0 {
 		return mcp.ToolError[mcp.TextOutput]("Missing required integer: task_number")
 	}
-	t, ok := c.taskByNumber(ctx, args.TaskNumber)
+	t, ok := m.taskByNumber(ctx, args.TaskNumber)
 	if !ok {
 		return mcp.ToolError[mcp.TextOutput]("Unknown task number")
 	}
@@ -451,8 +451,8 @@ type mcpTaskSendMessageArgs struct {
 	Message    string `json:"message"     jsonschema_description:"The message to send to the agent"`
 }
 
-func (c *caicToolRegistry) handleTaskSendMessage(ctx context.Context, args mcpTaskSendMessageArgs) mcp.ToolResult[mcp.TextOutput] {
-	return c.sendTaskInput(ctx, mcpTaskInputArgs(args), "message", "Sent message to task #%d.")
+func (m *mcpRegistry) handleTaskSendMessage(ctx context.Context, args mcpTaskSendMessageArgs) mcp.ToolResult[mcp.TextOutput] {
+	return m.sendTaskInput(ctx, mcpTaskInputArgs(args), "message", "Sent message to task #%d.")
 }
 
 type mcpTaskAnswerQuestionArgs struct {
@@ -460,8 +460,8 @@ type mcpTaskAnswerQuestionArgs struct {
 	Answer     string `json:"answer"      jsonschema_description:"The answer to the agent's question"`
 }
 
-func (c *caicToolRegistry) handleTaskAnswerQuestion(ctx context.Context, args mcpTaskAnswerQuestionArgs) mcp.ToolResult[mcp.TextOutput] {
-	return c.sendTaskInput(ctx, mcpTaskInputArgs{TaskNumber: args.TaskNumber, Message: args.Answer}, "answer", "Answered task #%d.")
+func (m *mcpRegistry) handleTaskAnswerQuestion(ctx context.Context, args mcpTaskAnswerQuestionArgs) mcp.ToolResult[mcp.TextOutput] {
+	return m.sendTaskInput(ctx, mcpTaskInputArgs{TaskNumber: args.TaskNumber, Message: args.Answer}, "answer", "Answered task #%d.")
 }
 
 type mcpTaskPushBranchArgs struct {
@@ -470,8 +470,8 @@ type mcpTaskPushBranchArgs struct {
 	Target     string `json:"target,omitempty" jsonschema:"enum=branch,enum=default,enum=main,enum=master"  jsonschema_description:"Where to push: branch (default) or main"`
 }
 
-func (c *caicToolRegistry) handleTaskPushBranchToRemote(ctx context.Context, args mcpTaskPushBranchArgs) mcp.ToolResult[mcp.TextOutput] {
-	num, entry, ok := c.entryByNumber(ctx, args.TaskNumber)
+func (m *mcpRegistry) handleTaskPushBranchToRemote(ctx context.Context, args mcpTaskPushBranchArgs) mcp.ToolResult[mcp.TextOutput] {
+	num, entry, ok := m.entryByNumber(ctx, args.TaskNumber)
 	if !ok {
 		return mcp.ToolError[mcp.TextOutput]("Unknown task number")
 	}
@@ -483,7 +483,7 @@ func (c *caicToolRegistry) handleTaskPushBranchToRemote(ctx context.Context, arg
 	if err := req.Validate(); err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
-	resp, err := c.tasks.syncTask(ctx, entry, req)
+	resp, err := m.tasks.syncTask(ctx, entry, req)
 	if err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
@@ -501,36 +501,36 @@ func (c *caicToolRegistry) handleTaskPushBranchToRemote(ctx context.Context, arg
 	return mcp.TextToolResult(verb + " with safety issues:\n" + strings.Join(issueLines, "\n"))
 }
 
-func (c *caicToolRegistry) handleTaskStop(ctx context.Context, args mcpTaskNumberArgs) mcp.ToolResult[mcp.TextOutput] {
-	num, entry, ok := c.entryByNumber(ctx, args.TaskNumber)
+func (m *mcpRegistry) handleTaskStop(ctx context.Context, args mcpTaskNumberArgs) mcp.ToolResult[mcp.TextOutput] {
+	num, entry, ok := m.entryByNumber(ctx, args.TaskNumber)
 	if !ok {
 		return mcp.ToolError[mcp.TextOutput]("Unknown task number")
 	}
-	_, err := c.tasks.stopTask(ctx, entry, &api.EmptyReq{})
+	_, err := m.tasks.stopTask(ctx, entry, &api.EmptyReq{})
 	if err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
 	return mcp.TextToolResult(fmt.Sprintf("Stopping task #%d.", num))
 }
 
-func (c *caicToolRegistry) handleTaskPurge(ctx context.Context, args mcpTaskNumberArgs) mcp.ToolResult[mcp.TextOutput] {
-	num, entry, ok := c.entryByNumber(ctx, args.TaskNumber)
+func (m *mcpRegistry) handleTaskPurge(ctx context.Context, args mcpTaskNumberArgs) mcp.ToolResult[mcp.TextOutput] {
+	num, entry, ok := m.entryByNumber(ctx, args.TaskNumber)
 	if !ok {
 		return mcp.ToolError[mcp.TextOutput]("Unknown task number")
 	}
-	_, err := c.tasks.purgeTask(ctx, entry, &api.EmptyReq{})
+	_, err := m.tasks.purgeTask(ctx, entry, &api.EmptyReq{})
 	if err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
 	return mcp.TextToolResult(fmt.Sprintf("Purged task #%d.", num))
 }
 
-func (c *caicToolRegistry) handleTaskRevive(ctx context.Context, args mcpTaskNumberArgs) mcp.ToolResult[mcp.TextOutput] {
-	num, entry, ok := c.entryByNumber(ctx, args.TaskNumber)
+func (m *mcpRegistry) handleTaskRevive(ctx context.Context, args mcpTaskNumberArgs) mcp.ToolResult[mcp.TextOutput] {
+	num, entry, ok := m.entryByNumber(ctx, args.TaskNumber)
 	if !ok {
 		return mcp.ToolError[mcp.TextOutput]("Unknown task number")
 	}
-	_, err := c.tasks.reviveTask(ctx, entry, &api.EmptyReq{})
+	_, err := m.tasks.reviveTask(ctx, entry, &api.EmptyReq{})
 	if err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
@@ -549,8 +549,8 @@ type mcpTaskForkArgs struct {
 	Model      string `json:"model,omitempty"   jsonschema_description:"Override model (optional, inherits from source if omitted)"`
 }
 
-func (c *caicToolRegistry) handleTaskFork(ctx context.Context, args mcpTaskForkArgs) mcp.ToolResult[mcpTaskForkOutput] {
-	num, entry, ok := c.entryByNumber(ctx, args.TaskNumber)
+func (m *mcpRegistry) handleTaskFork(ctx context.Context, args mcpTaskForkArgs) mcp.ToolResult[mcpTaskForkOutput] {
+	num, entry, ok := m.entryByNumber(ctx, args.TaskNumber)
 	if !ok {
 		return mcp.ToolError[mcpTaskForkOutput]("Unknown task number")
 	}
@@ -561,15 +561,15 @@ func (c *caicToolRegistry) handleTaskFork(ctx context.Context, args mcpTaskForkA
 	if err := req.Validate(); err != nil {
 		return domainToolError[mcpTaskForkOutput](err)
 	}
-	resp, err := c.tasks.forkTask(ctx, entry, req)
+	resp, err := m.tasks.forkTask(ctx, entry, req)
 	if err != nil {
 		return domainToolError[mcpTaskForkOutput](err)
 	}
 	return mcp.TypedToolResult(mcpTaskForkOutput{Result: fmt.Sprintf("Forked task #%d. New task ID: %s", num, resp.ID.String()), TaskID: resp.ID.String()})
 }
 
-func (c *caicToolRegistry) handleGetUsage(ctx context.Context, _ struct{}) mcp.ToolResult[mcp.TextOutput] {
-	usage := c.usage.buildResp(ctx)
+func (m *mcpRegistry) handleGetUsage(ctx context.Context, _ struct{}) mcp.ToolResult[mcp.TextOutput] {
+	usage := m.usage.buildResp(ctx)
 	var lines []string
 	for _, w := range usage.Local.Windows {
 		lines = append(lines, fmt.Sprintf("%s cost: %s (%d tokens)", w.Duration, formatUSD(w.CostUSD), w.InputTokens+w.OutputTokens))
@@ -598,7 +598,7 @@ type mcpCloneRepoArgs struct {
 	Path string `json:"path,omitempty" jsonschema_description:"Local directory name (optional, derived from URL if omitted)"`
 }
 
-func (c *caicToolRegistry) handleCloneRepo(ctx context.Context, args mcpCloneRepoArgs) mcp.ToolResult[mcp.TextOutput] {
+func (m *mcpRegistry) handleCloneRepo(ctx context.Context, args mcpCloneRepoArgs) mcp.ToolResult[mcp.TextOutput] {
 	if args.URL == "" {
 		return mcp.ToolError[mcp.TextOutput]("Missing required parameter: url")
 	}
@@ -606,7 +606,7 @@ func (c *caicToolRegistry) handleCloneRepo(ctx context.Context, args mcpCloneRep
 	if err := req.Validate(); err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
-	repo, err := c.serverConfig.cloneRepo(ctx, req)
+	repo, err := m.serverConfig.cloneRepo(ctx, req)
 	if err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
@@ -617,12 +617,12 @@ func (c *caicToolRegistry) handleCloneRepo(ctx context.Context, args mcpCloneRep
 	return mcp.TextToolResult(fmt.Sprintf("Cloned **%s** (base: %s).", repo.Path, base))
 }
 
-func (c *caicToolRegistry) handleAgentLastMessage(ctx context.Context, args mcpTaskNumberArgs) mcp.ToolResult[mcp.TextOutput] {
-	num, entry, ok := c.entryByNumber(ctx, args.TaskNumber)
+func (m *mcpRegistry) handleAgentLastMessage(ctx context.Context, args mcpTaskNumberArgs) mcp.ToolResult[mcp.TextOutput] {
+	num, entry, ok := m.entryByNumber(ctx, args.TaskNumber)
 	if !ok {
 		return mcp.ToolError[mcp.TextOutput]("Unknown task number")
 	}
-	c.tasks.taskMgr.LoadMessagesOnDemand(entry)
+	m.tasks.taskMgr.LoadMessagesOnDemand(entry)
 	history, _, unsub := entry.Task().Subscribe(ctx)
 	unsub()
 	for _, msg := range slices.Backward(history) {
@@ -657,12 +657,12 @@ type mcpTaskFixPRArgs struct {
 	TaskNumber int `json:"task_number" jsonschema_description:"The task number whose PR CI should be fixed"`
 }
 
-func (c *caicToolRegistry) handleTaskFixPR(ctx context.Context, args mcpTaskFixPRArgs) mcp.ToolResult[mcp.TextOutput] {
-	num, entry, ok := c.entryByNumber(ctx, args.TaskNumber)
+func (m *mcpRegistry) handleTaskFixPR(ctx context.Context, args mcpTaskFixPRArgs) mcp.ToolResult[mcp.TextOutput] {
+	num, entry, ok := m.entryByNumber(ctx, args.TaskNumber)
 	if !ok {
 		return mcp.ToolError[mcp.TextOutput]("Unknown task number")
 	}
-	_, err := c.ci.fixPR(ctx, &v1.BotFixPRReq{TaskID: entry.Task().ID.String()})
+	_, err := m.ci.fixPR(ctx, &v1.BotFixPRReq{TaskID: entry.Task().ID.String()})
 	if err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
@@ -673,15 +673,15 @@ type mcpBotFixCIArgs struct {
 	Repo string `json:"repo" jsonschema_description:"Repository to fix CI for"`
 }
 
-func (c *caicToolRegistry) handleBotFixCI(ctx context.Context, args mcpBotFixCIArgs) mcp.ToolResult[mcpTaskCreatedOutput] {
+func (m *mcpRegistry) handleBotFixCI(ctx context.Context, args mcpBotFixCIArgs) mcp.ToolResult[mcpTaskCreatedOutput] {
 	if args.Repo == "" {
 		return mcp.ToolError[mcpTaskCreatedOutput]("Missing required parameter: repo")
 	}
-	resp, err := c.ci.fixCI(ctx, &v1.BotFixCIReq{Repo: args.Repo})
+	resp, err := m.ci.fixCI(ctx, &v1.BotFixCIReq{Repo: args.Repo})
 	if err != nil {
 		return domainToolError[mcpTaskCreatedOutput](err)
 	}
-	taskList := c.tasks.taskListSnapshot(ctx)
+	taskList := m.tasks.taskListSnapshot(ctx)
 	num := taskNumberForID(taskList, resp.ID.String())
 	if num > 0 {
 		return mcp.TypedToolResult(mcpTaskCreatedOutput{Result: fmt.Sprintf("Created fix-CI task #%d for %s.", num, args.Repo), TaskNumber: num, TaskID: resp.ID.String()})
@@ -694,38 +694,38 @@ type mcpTaskInputArgs struct {
 	Message    string
 }
 
-func (c *caicToolRegistry) sendTaskInput(ctx context.Context, args mcpTaskInputArgs, field, format string) mcp.ToolResult[mcp.TextOutput] {
-	num, entry, ok := c.entryByNumber(ctx, args.TaskNumber)
+func (m *mcpRegistry) sendTaskInput(ctx context.Context, args mcpTaskInputArgs, field, format string) mcp.ToolResult[mcp.TextOutput] {
+	num, entry, ok := m.entryByNumber(ctx, args.TaskNumber)
 	if !ok {
 		return mcp.ToolError[mcp.TextOutput]("Unknown task number")
 	}
 	if args.Message == "" {
 		return mcp.ToolError[mcp.TextOutput]("Missing required parameter: " + field)
 	}
-	_, err := c.tasks.sendInput(ctx, entry, &v1.InputReq{Prompt: v1.Prompt{Text: args.Message}})
+	_, err := m.tasks.sendInput(ctx, entry, &v1.InputReq{Prompt: v1.Prompt{Text: args.Message}})
 	if err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
 	return mcp.TextToolResult(fmt.Sprintf(format, num))
 }
 
-func (c *caicToolRegistry) taskByNumber(ctx context.Context, num int) (v1.Task, bool) {
-	taskList := c.tasks.taskListSnapshot(ctx)
+func (m *mcpRegistry) taskByNumber(ctx context.Context, num int) (v1.Task, bool) {
+	taskList := m.tasks.taskListSnapshot(ctx)
 	if num < 1 || num > len(taskList) {
 		return v1.Task{}, false
 	}
 	return taskList[num-1], true
 }
 
-func (c *caicToolRegistry) entryByNumber(ctx context.Context, num int) (int, *tasks.Entry, bool) {
+func (m *mcpRegistry) entryByNumber(ctx context.Context, num int) (int, *tasks.Entry, bool) {
 	if num == 0 {
 		return 0, nil, false
 	}
-	t, ok := c.taskByNumber(ctx, num)
+	t, ok := m.taskByNumber(ctx, num)
 	if !ok {
 		return num, nil, false
 	}
-	entry, ok := c.tasks.taskMgr.GetEntry(t.ID.String())
+	entry, ok := m.tasks.taskMgr.GetEntry(t.ID.String())
 	return num, entry, ok
 }
 
@@ -934,7 +934,7 @@ var mcpForgeTools = map[string]struct{}{
 // may use user OAuth, server PAT, or GitHub App authority. GitLab-linked remote
 // MCP users require a user token until there is an explicit server-side GitLab
 // authority policy.
-func (c *caicToolRegistry) authorizeTool(ctx context.Context, name string) (string, bool) {
+func (m *mcpRegistry) authorizeTool(ctx context.Context, name string) (string, bool) {
 	required := requiredScopeForTool(name)
 	if required == "" {
 		if isRemoteMCP(ctx) {
