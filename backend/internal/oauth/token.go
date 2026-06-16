@@ -61,7 +61,13 @@ func (s *AccessTokenService) JWK() JWK {
 // IssueAccessToken signs a JWT access token for user.
 func (s *AccessTokenService) IssueAccessToken(issuer string, user User, audience, scope, grantID string) (string, error) {
 	now := time.Now()
-	return s.issueAccessTokenAt(issuer, user, audience, scope, grantID, now, now.Add(s.ttl))
+	return s.issueAccessTokenAt(issuer, user, audience, scope, grantID, now, now.Add(s.ttl), nil)
+}
+
+// IssueDPoPAccessToken signs a DPoP-bound JWT access token with cnf.jkt.
+func (s *AccessTokenService) IssueDPoPAccessToken(issuer string, user User, audience, scope, grantID, dpopJKT string) (string, error) {
+	now := time.Now()
+	return s.issueAccessTokenAt(issuer, user, audience, scope, grantID, now, now.Add(s.ttl), &TokenConfirmation{JKT: dpopJKT})
 }
 
 // VerifyAccessToken validates token and returns its bearer claims.
@@ -92,34 +98,36 @@ func (s *AccessTokenService) VerifyAccessToken(token, issuer, audience string, n
 		return nil, errors.New("token subject is unknown")
 	}
 	return &BearerClaims{
-		User:     user,
-		Subject:  claims.Subject,
-		Username: claims.Username,
-		Issuer:   claims.Issuer,
-		Audience: claims.Audience,
-		Scopes:   strings.Fields(claims.Scope),
-		Iat:      claims.IssuedAt,
-		Exp:      claims.Expiry,
-		ClientID: clientID,
+		User:         user,
+		Subject:      claims.Subject,
+		Username:     claims.Username,
+		Issuer:       claims.Issuer,
+		Audience:     claims.Audience,
+		Scopes:       strings.Fields(claims.Scope),
+		Iat:          claims.IssuedAt,
+		Exp:          claims.Expiry,
+		ClientID:     clientID,
+		Confirmation: claims.Confirmation,
 	}, nil
 }
 
-func (s *AccessTokenService) issueAccessTokenAt(issuer string, user User, audience, scope, grantID string, issuedAt, expiresAt time.Time) (string, error) {
+func (s *AccessTokenService) issueAccessTokenAt(issuer string, user User, audience, scope, grantID string, issuedAt, expiresAt time.Time, confirmation *TokenConfirmation) (string, error) {
 	headerJSON, err := json.Marshal(JWTHeader{Alg: JWTAlgRS256, Typ: "JWT", KID: s.kid})
 	if err != nil {
 		return "", err
 	}
 	payloadJSON, err := json.Marshal(AccessTokenClaims{
-		Issuer:    issuer,
-		Subject:   user.ID,
-		Audience:  audience,
-		Username:  user.Username,
-		Scope:     scope,
-		GrantID:   grantID,
-		IssuedAt:  issuedAt.Unix(),
-		NotBefore: issuedAt.Unix(),
-		Expiry:    expiresAt.Unix(),
-		Type:      accessTokenType,
+		Issuer:       issuer,
+		Subject:      user.ID,
+		Audience:     audience,
+		Username:     user.Username,
+		Scope:        scope,
+		GrantID:      grantID,
+		IssuedAt:     issuedAt.Unix(),
+		NotBefore:    issuedAt.Unix(),
+		Expiry:       expiresAt.Unix(),
+		Type:         accessTokenType,
+		Confirmation: confirmation,
 	})
 	if err != nil {
 		return "", err

@@ -4,10 +4,14 @@ package oauth
 
 import (
 	"context"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -512,7 +516,7 @@ func TestServer(t *testing.T) {
 		// Issue a short-lived token directly via the token service.
 		pastAud := testResourceURL
 		now := time.Now()
-		token, err := s.tokens.issueAccessTokenAt(testBaseURL, user, pastAud, "read", "", now.Add(-2*time.Hour), now.Add(-time.Hour))
+		token, err := s.tokens.issueAccessTokenAt(testBaseURL, user, pastAud, "read", "", now.Add(-2*time.Hour), now.Add(-time.Hour), nil)
 		if err != nil {
 			t.Fatalf("issueAccessTokenAt: %v", err)
 		}
@@ -533,6 +537,533 @@ func TestServer(t *testing.T) {
 			t.Fatalf("introspection active = true with expired token, want false: %+v", resp)
 		}
 	})
+}
+
+func TestDPoP(t *testing.T) {
+	t.Parallel()
+
+	t.Run("token endpoint with dpop proof gets dpop-bound token", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
+		code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
+
+		tokenURL := testBaseURL + "/oauth/token"
+		dpopProof := makeDPoPProof(t, dpopKey, dpopJWKObj, "POST", tokenURL, time.Now(), "", "")
+
+		form := url.Values{
+			"grant_type":    {GrantAuthorizationCode},
+			"code":          {code},
+			"client_id":     {registered.ClientID},
+			"redirect_uri":  {"https://claude.example.com/callback"},
+			"code_verifier": {testVerifier},
+			"resource":      {testResourceURL},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("DPoP", dpopProof)
+		addForwardedHeaders(req)
+		addForwardedHeaders(req)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var tokenResp TokenResponse
+		if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
+			t.Fatalf("decode token response: %v", err)
+		}
+		if tokenResp.TokenType != DPoPTokenType {
+			t.Fatalf("token_type = %q, want %q", tokenResp.TokenType, DPoPTokenType)
+		}
+		if !strings.HasPrefix(tokenResp.AccessToken, "eyJ") {
+			t.Fatalf("access token doesn't look like a JWT: %s", tokenResp.AccessToken)
+		}
+		// Verify the token contains cnf.jkt.
+		claims, err := s.tokens.VerifyAccessToken(tokenResp.AccessToken, testBaseURL, testResourceURL, time.Now(), s.touchGrant, s.findUserByID)
+		if err != nil {
+			t.Fatalf("verify access token: %v", err)
+		}
+		if claims.Confirmation == nil || claims.Confirmation.JKT == "" {
+			t.Fatal("access token claims missing cnf.jkt")
+		}
+		// Verify cnf.jkt matches the dpop proof key.
+		expectedJKT, err := JWKThumbprint(dpopJWKObj)
+		if err != nil {
+			t.Fatalf("JWKThumbprint: %v", err)
+		}
+		if claims.Confirmation.JKT != expectedJKT {
+			t.Fatalf("cnf.jkt = %q, want %q", claims.Confirmation.JKT, expectedJKT)
+		}
+	})
+
+	t.Run("dpop-bound access token accepted by bearer auth", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
+		code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
+		tokenURL := testBaseURL + "/oauth/token"
+
+		// Get dpop-bound token.
+		dpopProof := makeDPoPProof(t, dpopKey, dpopJWKObj, "POST", tokenURL, time.Now(), "", "")
+		form := url.Values{
+			"grant_type":    {GrantAuthorizationCode},
+			"code":          {code},
+			"client_id":     {registered.ClientID},
+			"redirect_uri":  {"https://claude.example.com/callback"},
+			"code_verifier": {testVerifier},
+			"resource":      {testResourceURL},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("DPoP", dpopProof)
+		addForwardedHeaders(req)
+		addForwardedHeaders(req)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var tokenResp TokenResponse
+		if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
+			t.Fatalf("decode token response: %v", err)
+		}
+
+		// Use dpop-bound token with BearerAuth middleware.
+		protected := s.BearerAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims, ok := BearerClaimsFromContext(r.Context())
+			if !ok || claims.Subject != user.ID {
+				t.Fatalf("claims = %+v, ok = %v", claims, ok)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}))
+
+		resourceProof := makeDPoPProof(t, dpopKey, dpopJWKObj, "POST", testResourceURL, time.Now(), tokenResp.AccessToken, "")
+		resReq := newTestResourceRequest(t)
+		resReq.Header.Set("Authorization", "DPoP "+tokenResp.AccessToken)
+		resReq.Header.Set("DPoP", resourceProof)
+		addForwardedHeaders(resReq)
+		addForwardedHeaders(resReq)
+		w = httptest.NewRecorder()
+		protected.ServeHTTP(w, resReq)
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusNoContent, w.Body.String())
+		}
+	})
+
+	t.Run("dpop proof with wrong htm rejected", func(t *testing.T) {
+		t.Parallel()
+
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{testUser()})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
+
+		tokenURL := testBaseURL + "/oauth/token"
+		// htm should be POST for the token endpoint, but we use GET.
+		dpopProof := makeDPoPProof(t, dpopKey, dpopJWKObj, "GET", tokenURL, time.Now(), "", "")
+
+		code := authorizeOAuthTestCode(t, h, testUser(), &registered, "https://claude.example.com/callback", []string{"read"}, "")
+
+		form := url.Values{
+			"grant_type":    {GrantAuthorizationCode},
+			"code":          {code},
+			"client_id":     {registered.ClientID},
+			"redirect_uri":  {"https://claude.example.com/callback"},
+			"code_verifier": {testVerifier},
+			"resource":      {testResourceURL},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("DPoP", dpopProof)
+		addForwardedHeaders(req)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
+		}
+		var errResp ErrorResponse
+		if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
+			t.Fatalf("decode error: %v", err)
+		}
+		if !strings.Contains(errResp.Error, "invalid_dpop_proof") {
+			t.Fatalf("error = %q, want invalid_dpop_proof", errResp.Error)
+		}
+	})
+
+	t.Run("dpop proof with wrong htu rejected", func(t *testing.T) {
+		t.Parallel()
+
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{testUser()})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
+
+		wrongURL := "https://evil.example.com/oauth/token"
+		dpopProof := makeDPoPProof(t, dpopKey, dpopJWKObj, "POST", wrongURL, time.Now(), "", "")
+
+		code := authorizeOAuthTestCode(t, h, testUser(), &registered, "https://claude.example.com/callback", []string{"read"}, "")
+
+		form := url.Values{
+			"grant_type":    {GrantAuthorizationCode},
+			"code":          {code},
+			"client_id":     {registered.ClientID},
+			"redirect_uri":  {"https://claude.example.com/callback"},
+			"code_verifier": {testVerifier},
+			"resource":      {testResourceURL},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("DPoP", dpopProof)
+		addForwardedHeaders(req)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
+		}
+	})
+
+	t.Run("dpop proof expired iat rejected", func(t *testing.T) {
+		t.Parallel()
+
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{testUser()})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
+
+		tokenURL := testBaseURL + "/oauth/token"
+		oldTime := time.Now().Add(-10 * time.Minute)
+		dpopProof := makeDPoPProof(t, dpopKey, dpopJWKObj, "POST", tokenURL, oldTime, "", "")
+
+		code := authorizeOAuthTestCode(t, h, testUser(), &registered, "https://claude.example.com/callback", []string{"read"}, "")
+
+		form := url.Values{
+			"grant_type":    {GrantAuthorizationCode},
+			"code":          {code},
+			"client_id":     {registered.ClientID},
+			"redirect_uri":  {"https://claude.example.com/callback"},
+			"code_verifier": {testVerifier},
+			"resource":      {testResourceURL},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("DPoP", dpopProof)
+		addForwardedHeaders(req)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
+		}
+	})
+
+	t.Run("dpop proof with invalid ath rejected", func(t *testing.T) {
+		t.Parallel()
+
+		testCases := []struct {
+			name        string
+			accessToken string // used for ath computation in proof
+		}{
+			{"missing ath", ""},
+			{"mismatched ath", "wrong-access-token"},
+		}
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				res := setupDPoPBoundToken(t)
+
+				protected := res.server.BearerAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusNoContent)
+				}))
+				resourceProof := makeDPoPProof(t, res.dpopKey, res.dpopJWK, "POST", testResourceURL, time.Now(), tc.accessToken, "")
+				resReq := newTestResourceRequest(t)
+				resReq.Header.Set("Authorization", "DPoP "+res.token.AccessToken)
+				resReq.Header.Set("DPoP", resourceProof)
+				addForwardedHeaders(resReq)
+				w := httptest.NewRecorder()
+				protected.ServeHTTP(w, resReq)
+				if w.Code != http.StatusUnauthorized {
+					t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusUnauthorized, w.Body.String())
+				}
+			})
+		}
+	})
+
+	t.Run("dpop proof with wrong key cnf.jkt mismatch rejected", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
+		code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
+		tokenURL := testBaseURL + "/oauth/token"
+
+		dpopProof := makeDPoPProof(t, dpopKey, dpopJWKObj, "POST", tokenURL, time.Now(), "", "")
+		form := url.Values{
+			"grant_type":    {GrantAuthorizationCode},
+			"code":          {code},
+			"client_id":     {registered.ClientID},
+			"redirect_uri":  {"https://claude.example.com/callback"},
+			"code_verifier": {testVerifier},
+			"resource":      {testResourceURL},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("DPoP", dpopProof)
+		addForwardedHeaders(req)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var tokenResp TokenResponse
+		if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
+			t.Fatalf("decode token response: %v", err)
+		}
+
+		// Make another key pair and use it to prove possession of the dpop-bound token.
+		wrongKey, wrongJWKObj := testDPoPRSAKeyPair(t)
+		protected := s.BearerAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		resourceProof := makeDPoPProof(t, wrongKey, wrongJWKObj, "POST", testResourceURL, time.Now(), tokenResp.AccessToken, "")
+		resReq := newTestResourceRequest(t)
+		resReq.Header.Set("Authorization", "DPoP "+tokenResp.AccessToken)
+		resReq.Header.Set("DPoP", resourceProof)
+		addForwardedHeaders(resReq)
+		w = httptest.NewRecorder()
+		protected.ServeHTTP(w, resReq)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusUnauthorized, w.Body.String())
+		}
+	})
+
+	t.Run("introspection returns cnf.jkt for dpop-bound tokens", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
+		code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
+		tokenURL := testBaseURL + "/oauth/token"
+
+		dpopProof := makeDPoPProof(t, dpopKey, dpopJWKObj, "POST", tokenURL, time.Now(), "", "")
+		form := url.Values{
+			"grant_type":    {GrantAuthorizationCode},
+			"code":          {code},
+			"client_id":     {registered.ClientID},
+			"redirect_uri":  {"https://claude.example.com/callback"},
+			"code_verifier": {testVerifier},
+			"resource":      {testResourceURL},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("DPoP", dpopProof)
+		addForwardedHeaders(req)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var tokenResp TokenResponse
+		if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
+			t.Fatalf("decode token response: %v", err)
+		}
+
+		// Introspect the dpop-bound token.
+		introForm := url.Values{"token": {tokenResp.AccessToken}}
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/introspect", strings.NewReader(introForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("introspect status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var introResp IntrospectionResponse
+		if err := json.NewDecoder(w.Body).Decode(&introResp); err != nil {
+			t.Fatalf("decode introspection response: %v", err)
+		}
+		if !introResp.Active {
+			t.Fatal("introspection response not active")
+		}
+		if introResp.Confirmation == nil || introResp.Confirmation.JKT == "" {
+			t.Fatal("introspection response missing cnf.jkt")
+		}
+		expectedJKT, err := JWKThumbprint(dpopJWKObj)
+		if err != nil {
+			t.Fatalf("JWKThumbprint: %v", err)
+		}
+		if introResp.Confirmation.JKT != expectedJKT {
+			t.Fatalf("cnf.jkt = %q, want %q", introResp.Confirmation.JKT, expectedJKT)
+		}
+	})
+
+	t.Run("nonce lifecycle request without nonce gets nonce retry succeeds", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
+		code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
+		tokenURL := testBaseURL + "/oauth/token"
+
+		// First request: proof without nonce.
+		dpopProof1 := makeDPoPProof(t, dpopKey, dpopJWKObj, "POST", tokenURL, time.Now(), "", "")
+		form := url.Values{
+			"grant_type":    {GrantAuthorizationCode},
+			"code":          {code},
+			"client_id":     {registered.ClientID},
+			"redirect_uri":  {"https://claude.example.com/callback"},
+			"code_verifier": {testVerifier},
+			"resource":      {testResourceURL},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("DPoP", dpopProof1)
+		addForwardedHeaders(req)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		// The first request should succeed (nonce validation is optional per RFC 9449).
+		if w.Code != http.StatusOK {
+			t.Fatalf("first request status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+
+		// Issue a nonce and then use it in a subsequent proof.
+		nonce := s.dpopNonces.Issue()
+
+		// Get a new code and make a second request with the nonce.
+		code2 := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
+		dpopProof2 := makeDPoPProof(t, dpopKey, dpopJWKObj, "POST", tokenURL, time.Now(), "", nonce)
+		form2 := url.Values{
+			"grant_type":    {GrantAuthorizationCode},
+			"code":          {code2},
+			"client_id":     {registered.ClientID},
+			"redirect_uri":  {"https://claude.example.com/callback"},
+			"code_verifier": {testVerifier},
+			"resource":      {testResourceURL},
+		}
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form2.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("DPoP", dpopProof2)
+		addForwardedHeaders(req)
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("second request with nonce status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+	})
+}
+
+// testDPoPRSAKeyPair generates an RSA key pair for DPoP proof tests.
+func testDPoPRSAKeyPair(t *testing.T) (*rsa.PrivateKey, *JWK) {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate rsa key: %v", err)
+	}
+	pub := &key.PublicKey
+	jwk := JWK{
+		Kty: "RSA",
+		N:   base64.RawURLEncoding.EncodeToString(pub.N.Bytes()),
+		E:   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pub.E)).Bytes()),
+	}
+	return key, &jwk
+}
+
+// makeDPoPProof creates a valid DPoP proof JWT signed with the given RSA key.
+func makeDPoPProof(t *testing.T, key *rsa.PrivateKey, jwk *JWK, htm, htu string, iat time.Time, accessToken, nonce string) string {
+	t.Helper()
+	header := DPoPHeader{Typ: "dpop+jwt", Alg: "RS256", JWK: *jwk}
+	headerJSON, err := json.Marshal(header)
+	if err != nil {
+		t.Fatalf("marshal dpop header: %v", err)
+	}
+
+	jti, err := randomToken()
+	if err != nil {
+		t.Fatalf("generate jti: %v", err)
+	}
+
+	claims := DPoPClaims{
+		JTI:   jti,
+		HTM:   htm,
+		HTU:   htu,
+		IAT:   iat.Unix(),
+		Nonce: nonce,
+	}
+	if accessToken != "" {
+		claims.ATH = DPoPAccessTokenHash(accessToken)
+	}
+	claimsJSON, err := json.Marshal(claims)
+	if err != nil {
+		t.Fatalf("marshal dpop claims: %v", err)
+	}
+
+	parts := base64.RawURLEncoding.EncodeToString(headerJSON) + "." + base64.RawURLEncoding.EncodeToString(claimsJSON)
+	digest := sha256.Sum256([]byte(parts))
+	signature, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, digest[:])
+	if err != nil {
+		t.Fatalf("sign dpop proof: %v", err)
+	}
+	return parts + "." + base64.RawURLEncoding.EncodeToString(signature)
+}
+
+// addForwardedHeaders sets X-Forwarded headers on a test request so that
+// effectiveRequestHostAndScheme returns https://caic.example.com.
+func addForwardedHeaders(r *http.Request) {
+	r.Header.Set("X-Forwarded-Host", "caic.example.com")
+	r.Header.Set("X-Forwarded-Proto", "https")
+}
+
+// dpopTestResources holds the pieces needed for DPoP resource tests.
+type dpopTestResources struct {
+	server     *Server
+	handler    http.Handler
+	dpopKey    *rsa.PrivateKey
+	dpopJWK    *JWK
+	registered RegisterResponse
+	token      TokenResponse
+}
+
+// setupDPoPBoundToken creates a server, registers a client, authorizes a code,
+// obtains a DPoP-bound token, and returns the pieces needed for resource tests.
+func setupDPoPBoundToken(t *testing.T) dpopTestResources {
+	t.Helper()
+	user := testUser()
+	s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+	registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+	dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
+	code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
+	tokenURL := testBaseURL + "/oauth/token"
+
+	dpopProof := makeDPoPProof(t, dpopKey, dpopJWKObj, "POST", tokenURL, time.Now(), "", "")
+	form := url.Values{
+		"grant_type":    {GrantAuthorizationCode},
+		"code":          {code},
+		"client_id":     {registered.ClientID},
+		"redirect_uri":  {"https://claude.example.com/callback"},
+		"code_verifier": {testVerifier},
+		"resource":      {testResourceURL},
+	}
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("DPoP", dpopProof)
+	addForwardedHeaders(req)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+	var tokenResp TokenResponse
+	if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
+		t.Fatalf("decode token response: %v", err)
+	}
+	return dpopTestResources{server: s, handler: h, dpopKey: dpopKey, dpopJWK: dpopJWKObj, registered: registered, token: tokenResp}
 }
 
 type testUserContextKey struct{}

@@ -42,6 +42,7 @@ type RefreshToken struct {
 	ClientID  string    `json:"clientID"`
 	Resource  string    `json:"resource"`
 	Scope     string    `json:"scope"`
+	DPoPJKT   string    `json:"dpopJKT,omitempty"`
 	ExpiresAt time.Time `json:"expiresAt"`
 	UsedAt    time.Time `json:"usedAt,omitzero"`
 	RevokedAt time.Time `json:"revokedAt,omitzero"`

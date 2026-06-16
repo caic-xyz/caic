@@ -4,6 +4,7 @@ package oauth
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -78,6 +79,7 @@ type ServerConfig struct {
 	AccessTokenTTL        time.Duration
 	AuthCodeTTL           time.Duration
 	RefreshTokenTTL       time.Duration
+	DPoPNonceTTL          time.Duration
 	RefreshTokenStorePath string
 
 	ResourceURLPath         string
@@ -118,9 +120,12 @@ type Server struct {
 	accessTokenTTL          time.Duration
 	authCodeTTL             time.Duration
 	refreshTokenTTL         time.Duration
+	dpopNonceTTL            time.Duration
 	resourceURLPath         string
 	resourceMetadataURLPath string
 	clientIDPrefix          string
+
+	dpopNonces *DPoPNonceManager
 
 	baseURL     BaseURLFunc
 	currentUser CurrentUserFunc
@@ -152,6 +157,10 @@ func NewServer(c ServerConfig) (*Server, error) { //nolint:gocritic // ServerCon
 	if refreshTokenTTL == 0 {
 		refreshTokenTTL = 30 * 24 * time.Hour
 	}
+	dpopNonceTTL := c.DPoPNonceTTL
+	if dpopNonceTTL == 0 {
+		dpopNonceTTL = defaultDPoPNonceTTL
+	}
 	tokens, err := NewAccessTokenService(c.KeyPEM, c.KeyID, accessTokenTTL)
 	if err != nil {
 		return nil, err
@@ -165,12 +174,14 @@ func NewServer(c ServerConfig) (*Server, error) { //nolint:gocritic // ServerCon
 		codes:                   map[string]Code{},
 		consents:                map[string]consent{},
 		tokens:                  tokens,
+		dpopNonces:              NewDPoPNonceManager(dpopNonceTTL),
 		supportedScopes:         c.SupportedScopes,
 		defaultScopes:           c.DefaultScopes,
 		scopeLabels:             c.ScopeLabels,
 		accessTokenTTL:          accessTokenTTL,
 		authCodeTTL:             authCodeTTL,
 		refreshTokenTTL:         refreshTokenTTL,
+		dpopNonceTTL:            dpopNonceTTL,
 		resourceURLPath:         c.ResourceURLPath,
 		resourceMetadataURLPath: c.ResourceMetadataURLPath,
 		clientIDPrefix:          c.ClientIDPrefix,
@@ -223,7 +234,7 @@ func BearerClaimsFromContext(ctx context.Context) (*BearerClaims, bool) {
 // verified user are set in the request context using the configured callbacks.
 func (s *Server) BearerAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := BearerToken(r)
+		token, scheme := s.extractAuthToken(r)
 		if token == "" {
 			if _, ok := s.currentRequestUser(r.Context()); ok {
 				next.ServeHTTP(w, r)
@@ -237,6 +248,33 @@ func (s *Server) BearerAuth(next http.Handler) http.Handler {
 			s.writeUnauthorized(w, r)
 			return
 		}
+
+		// DPoP scheme: proof validation and key confirmation.
+		if scheme == DPoPTokenType {
+			if claims.Confirmation == nil || claims.Confirmation.JKT == "" {
+				s.writeUnauthorizedDPoP(w, r, "access token not bound to a dpop key")
+				return
+			}
+			proofHeader, proofClaims, err := DPoPProof(r)
+			if err != nil {
+				s.writeUnauthorizedDPoP(w, r, "missing or invalid dpop proof")
+				return
+			}
+			if err := VerifyDPoPProof(r, proofHeader, proofClaims, defaultDPoPMaxAge, token, s.dpopNonces.Validate); err != nil {
+				s.writeUnauthorizedDPoP(w, r, err.Error())
+				return
+			}
+			proofJKT, err := JWKThumbprint(&proofHeader.JWK)
+			if err != nil {
+				s.writeUnauthorizedDPoP(w, r, "invalid dpop proof key")
+				return
+			}
+			if subtle.ConstantTimeCompare([]byte(proofJKT), []byte(claims.Confirmation.JKT)) != 1 {
+				s.writeUnauthorizedDPoP(w, r, "dpop proof key does not match token binding")
+				return
+			}
+		}
+
 		ctx := s.newUserContext(r.Context(), claims.User)
 		ctx = NewBearerClaimsContext(ctx, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
@@ -352,6 +390,7 @@ func (s *Server) handleOAuthMetadata(w http.ResponseWriter, r *http.Request) {
 		ScopesSupported:                               s.supportedScopes,
 		IntrospectionEndpoint:                         issuer + "/oauth/introspect",
 		IntrospectionEndpointAuthMethodsSupported:     []string{TokenEndpointAuthNone},
+		DPoPSigningAlgValuesSupported:                 []string{"RS256", "ES256", "EdDSA"},
 		AuthorizationResponseIssuerParameterSupported: true,
 	}
 	writeJSONResponse(w, &metadata)
@@ -506,17 +545,36 @@ func (s *Server) handleOAuthToken(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, "server_error", "could not prune refresh tokens")
 		return
 	}
+
+	// Extract and validate DPoP proof if present.
+	dpopJKT := ""
+	if proofHeader, proofClaims, err := DPoPProof(r); err == nil {
+		jkt, err := JWKThumbprint(&proofHeader.JWK)
+		if err != nil {
+			slog.WarnContext(r.Context(), "dpop proof thumbprint", "err", err)
+			WriteError(w, http.StatusBadRequest, "invalid_dpop_proof", "invalid dpop proof key")
+			return
+		}
+		if err := VerifyDPoPProofTokenEndpoint(r, proofHeader, proofClaims, defaultDPoPMaxAge, s.dpopNonces.Validate); err != nil {
+			slog.WarnContext(r.Context(), "dpop proof validation", "err", err)
+			w.Header().Set("DPoP-Nonce", s.dpopNonces.Issue())
+			WriteError(w, http.StatusBadRequest, "invalid_dpop_proof", err.Error())
+			return
+		}
+		dpopJKT = jkt
+	}
+
 	switch r.PostForm.Get("grant_type") {
 	case GrantAuthorizationCode:
-		s.handleOAuthAuthorizationCodeToken(w, r)
+		s.handleOAuthAuthorizationCodeToken(w, r, dpopJKT)
 	case GrantRefreshToken:
-		s.handleOAuthRefreshToken(w, r)
+		s.handleOAuthRefreshToken(w, r, dpopJKT)
 	default:
 		WriteError(w, http.StatusBadRequest, "unsupported_grant_type", "only authorization_code and refresh_token are supported")
 	}
 }
 
-func (s *Server) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r *http.Request, dpopJKT string) {
 	code := r.PostForm.Get("code")
 	s.mu.Lock()
 	entry, ok := s.codes[code]
@@ -566,10 +624,10 @@ func (s *Server) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r *htt
 		"resource": entry.Resource,
 		"scope":    entry.Scope,
 	})
-	s.writeTokenResponse(w, r, user, entry.Resource, entry.Scope, grantID, refreshToken)
+	s.writeTokenResponse(w, r, user, entry.Resource, entry.Scope, grantID, refreshToken, dpopJKT)
 }
 
-func (s *Server) handleOAuthRefreshToken(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleOAuthRefreshToken(w http.ResponseWriter, r *http.Request, dpopJKT string) {
 	refreshToken := r.PostForm.Get("refresh_token")
 	clientID := r.PostForm.Get("client_id")
 	entry, ok := s.validRefreshToken(refreshToken, clientID)
@@ -597,19 +655,31 @@ func (s *Server) handleOAuthRefreshToken(w http.ResponseWriter, r *http.Request)
 		"resource": entry.Resource,
 		"scope":    entry.Scope,
 	})
-	s.writeTokenResponse(w, r, user, entry.Resource, entry.Scope, entry.GrantID, nextRefreshToken)
+	s.writeTokenResponse(w, r, user, entry.Resource, entry.Scope, entry.GrantID, nextRefreshToken, dpopJKT)
 }
 
-func (s *Server) writeTokenResponse(w http.ResponseWriter, r *http.Request, user User, resource, scope, grantID, refreshToken string) {
-	accessToken, err := s.tokens.IssueAccessToken(s.externalBaseURL(r), user, resource, scope, grantID)
+func (s *Server) writeTokenResponse(w http.ResponseWriter, r *http.Request, user User, resource, scope, grantID, refreshToken, dpopJKT string) {
+	var accessToken string
+	var err error
+	if dpopJKT != "" {
+		accessToken, err = s.tokens.IssueDPoPAccessToken(s.externalBaseURL(r), user, resource, scope, grantID, dpopJKT)
+	} else {
+		accessToken, err = s.tokens.IssueAccessToken(s.externalBaseURL(r), user, resource, scope, grantID)
+	}
 	if err != nil {
 		slog.WarnContext(r.Context(), "issue oauth token", "err", err)
 		WriteError(w, http.StatusInternalServerError, "server_error", "could not issue access token")
 		return
 	}
+	tokenType := TokenTypeBearer
+	if dpopJKT != "" {
+		tokenType = DPoPTokenType
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
-	resp := TokenResponse{AccessToken: accessToken, TokenType: TokenTypeBearer, ExpiresIn: int64(s.accessTokenTTL.Seconds()), RefreshToken: refreshToken, Scope: scope}
+	nonce := s.dpopNonces.Issue()
+	w.Header().Set("DPoP-Nonce", nonce)
+	resp := TokenResponse{AccessToken: accessToken, TokenType: tokenType, ExpiresIn: int64(s.accessTokenTTL.Seconds()), RefreshToken: refreshToken, Scope: scope}
 	writeJSONResponse(w, &resp)
 }
 
@@ -635,16 +705,17 @@ func (s *Server) handleOAuthIntrospect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSONResponse(w, IntrospectionResponse{
-		Active:    true,
-		Scope:     strings.Join(claims.Scopes, " "),
-		ClientID:  claims.ClientID,
-		TokenType: accessTokenType,
-		Iat:       claims.Iat,
-		Exp:       claims.Exp,
-		Sub:       claims.Subject,
-		Username:  claims.Username,
-		Iss:       claims.Issuer,
-		Aud:       claims.Audience,
+		Active:       true,
+		Scope:        strings.Join(claims.Scopes, " "),
+		ClientID:     claims.ClientID,
+		TokenType:    accessTokenType,
+		Iat:          claims.Iat,
+		Exp:          claims.Exp,
+		Sub:          claims.Subject,
+		Username:     claims.Username,
+		Iss:          claims.Issuer,
+		Aud:          claims.Audience,
+		Confirmation: claims.Confirmation,
 	})
 }
 
@@ -778,7 +849,7 @@ func (s *Server) rotateRefreshToken(token, clientID, userID string) (nextToken s
 	entry.UsedAt = now
 	s.state.RefreshTokens[tokenHash] = entry
 	nextExpiry := now.Add(s.refreshTokenTTL)
-	next = RefreshToken{GrantID: entry.GrantID, UserID: entry.UserID, ClientID: entry.ClientID, Resource: entry.Resource, Scope: entry.Scope, ExpiresAt: nextExpiry}
+	next = RefreshToken{GrantID: entry.GrantID, UserID: entry.UserID, ClientID: entry.ClientID, Resource: entry.Resource, Scope: entry.Scope, DPoPJKT: entry.DPoPJKT, ExpiresAt: nextExpiry}
 	s.state.RefreshTokens[nextTokenHash] = next
 	grant.LastUsedAt = now
 	grant.ExpiresAt = nextExpiry
@@ -1011,6 +1082,28 @@ func (s *Server) handleProtectedResourceMetadata(w http.ResponseWriter, r *http.
 
 func (s *Server) verifyBearer(r *http.Request, token string) (*BearerClaims, error) {
 	return s.tokens.VerifyAccessToken(token, s.externalBaseURL(r), s.externalBaseURL(r)+s.resourceURLPath, time.Now(), s.touchGrant, s.findUserByID)
+}
+
+// extractAuthToken extracts the access token from an Authorization header,
+// supporting both "Bearer" and "DPoP" schemes. Returns the token and scheme.
+func (s *Server) extractAuthToken(r *http.Request) (token, scheme string) {
+	header := r.Header.Get("Authorization")
+	switch {
+	case strings.HasPrefix(header, "DPoP "):
+		return strings.TrimSpace(strings.TrimPrefix(header, "DPoP ")), DPoPTokenType
+	case strings.HasPrefix(header, "Bearer "):
+		return BearerToken(r), TokenTypeBearer
+	default:
+		return "", ""
+	}
+}
+
+func (s *Server) writeUnauthorizedDPoP(w http.ResponseWriter, _ *http.Request, description string) {
+	nonce := s.dpopNonces.Issue()
+	w.Header().Set("DPoP-Nonce", nonce)
+	// Per RFC 9449 §9.3, include error and error_description with DPoP scheme.
+	w.Header().Set("WWW-Authenticate", fmt.Sprintf(`DPoP error="invalid_token", error_description=%q`, description))
+	writeUnauthorizedJSON(w)
 }
 
 func (s *Server) writeUnauthorized(w http.ResponseWriter, r *http.Request) {

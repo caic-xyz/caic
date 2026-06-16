@@ -39,15 +39,16 @@ type User struct {
 
 // BearerClaims holds verified bearer-token identity and authorization claims.
 type BearerClaims struct {
-	User     User
-	Subject  string
-	Username string
-	Issuer   string
-	Audience string
-	Scopes   []string
-	Iat      int64
-	Exp      int64
-	ClientID string
+	User         User
+	Subject      string
+	Username     string
+	Issuer       string
+	Audience     string
+	Scopes       []string
+	Iat          int64
+	Exp          int64
+	ClientID     string
+	Confirmation *TokenConfirmation
 }
 
 // ProtectedResourceMetadata is OAuth 2.0 Protected Resource Metadata.
@@ -74,6 +75,7 @@ type AuthorizationServerMetadata struct {
 	IntrospectionEndpointAuthMethodsSupported     []string `json:"introspection_endpoint_auth_methods_supported,omitempty"`
 	RevocationEndpointAuthMethodsSupported        []string `json:"revocation_endpoint_auth_methods_supported,omitempty"`
 	ScopesSupported                               []string `json:"scopes_supported,omitempty"`
+	DPoPSigningAlgValuesSupported                 []string `json:"dpop_signing_alg_values_supported,omitempty"`
 	AuthorizationResponseIssuerParameterSupported bool     `json:"authorization_response_iss_parameter_supported"`
 }
 
@@ -110,16 +112,17 @@ type IntrospectionRequest struct {
 
 // IntrospectionResponse is an RFC 7662 token introspection response body.
 type IntrospectionResponse struct {
-	Active    bool   `json:"active"`
-	Scope     string `json:"scope,omitempty"`
-	ClientID  string `json:"client_id,omitempty"`
-	TokenType string `json:"token_type,omitempty"`
-	Exp       int64  `json:"exp,omitempty"`
-	Sub       string `json:"sub,omitempty"`
-	Username  string `json:"username,omitempty"`
-	Iss       string `json:"iss,omitempty"`
-	Aud       string `json:"aud,omitempty"`
-	Iat       int64  `json:"iat,omitempty"`
+	Active       bool               `json:"active"`
+	Scope        string             `json:"scope,omitempty"`
+	ClientID     string             `json:"client_id,omitempty"`
+	TokenType    string             `json:"token_type,omitempty"`
+	Exp          int64              `json:"exp,omitempty"`
+	Sub          string             `json:"sub,omitempty"`
+	Username     string             `json:"username,omitempty"`
+	Iss          string             `json:"iss,omitempty"`
+	Aud          string             `json:"aud,omitempty"`
+	Iat          int64              `json:"iat,omitempty"`
+	Confirmation *TokenConfirmation `json:"cnf,omitempty"`
 }
 
 // ErrorResponse is an OAuth error response body.
@@ -133,14 +136,18 @@ type JWKSet struct {
 	Keys []JWK `json:"keys"`
 }
 
-// JWK is an RSA JSON Web Key used for JWT signature verification.
+// JWK is a JSON Web Key.  For server keys (RSA), only kty/n/e/kid/use/alg
+// are populated.  For client DPoP keys, crv/x/y may also be set.
 type JWK struct {
 	Kty string `json:"kty"`
 	Use string `json:"use,omitempty"`
 	Alg string `json:"alg,omitempty"`
 	Kid string `json:"kid,omitempty"`
-	N   string `json:"n"`
-	E   string `json:"e"`
+	N   string `json:"n,omitempty"`
+	E   string `json:"e,omitempty"`
+	Crv string `json:"crv,omitempty"`
+	X   string `json:"x,omitempty"`
+	Y   string `json:"y,omitempty"`
 }
 
 // JWTHeader is the JOSE header for a JWT access token.
@@ -152,16 +159,17 @@ type JWTHeader struct {
 
 // AccessTokenClaims are JWT access-token claims.
 type AccessTokenClaims struct {
-	Issuer    string `json:"iss"`
-	Subject   string `json:"sub"`
-	Audience  string `json:"aud"`
-	Username  string `json:"username"`
-	Scope     string `json:"scope"`
-	GrantID   string `json:"grant_id,omitempty"`
-	IssuedAt  int64  `json:"iat"`
-	NotBefore int64  `json:"nbf"`
-	Expiry    int64  `json:"exp"`
-	Type      string `json:"typ"`
+	Issuer       string             `json:"iss"`
+	Subject      string             `json:"sub"`
+	Audience     string             `json:"aud"`
+	Username     string             `json:"username"`
+	Scope        string             `json:"scope"`
+	GrantID      string             `json:"grant_id,omitempty"`
+	IssuedAt     int64              `json:"iat"`
+	NotBefore    int64              `json:"nbf"`
+	Expiry       int64              `json:"exp"`
+	Type         string             `json:"typ"`
+	Confirmation *TokenConfirmation `json:"cnf,omitempty"`
 }
 
 // BearerToken extracts an OAuth bearer token from the Authorization header.
