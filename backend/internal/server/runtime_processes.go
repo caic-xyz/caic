@@ -25,7 +25,7 @@ type runtimeProcessBackend interface {
 type runtimeProcessHandlers struct {
 	taskMgr     *tasks.Manager
 	backend     runtimeProcessBackend
-	authEnabled func() bool
+	authEnabled bool
 }
 
 // HandleGetProcesses returns the list of running processes inside a task runtime instance.
@@ -101,7 +101,7 @@ func (h *runtimeProcessHandlers) getTask(r *http.Request) (*tasks.Entry, error) 
 	if !ok {
 		return nil, api.NotFound("task")
 	}
-	if h.authEnabled != nil && h.authEnabled() {
+	if h.authEnabled {
 		if u, ok := auth.UserFromContext(r.Context()); ok {
 			if owner := entry.Task().OwnerID; owner != "" && owner != u.ID {
 				return nil, api.Forbidden("task")

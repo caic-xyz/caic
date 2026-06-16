@@ -46,10 +46,6 @@ type taskService struct {
 	fakeCI    FakeCIHook
 }
 
-func (s *taskService) authEnabled() bool {
-	return s.authStore != nil
-}
-
 func (s *taskService) maybeFakeCI(t *task.Task) {
 	if s.fakeCI == nil {
 		return
@@ -64,7 +60,7 @@ func (s *taskService) listTasks(ctx context.Context, _ *api.EmptyReq) (*[]v1.Tas
 
 func (s *taskService) taskListSnapshot(ctx context.Context) []v1.Task {
 	var ownerID string
-	if s.authEnabled() {
+	if s.authStore != nil {
 		if u, ok := auth.UserFromContext(ctx); ok {
 			ownerID = u.ID
 		}

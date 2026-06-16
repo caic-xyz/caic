@@ -972,7 +972,7 @@ func TestSignalProcess(t *testing.T) {
 		processes := &runtimeProcessHandlers{
 			taskMgr:     s.taskMgr,
 			backend:     backend,
-			authEnabled: s.authEnabled,
+			authEnabled: false,
 		}
 
 		body := strings.NewReader(`{"signal":"SIGTERM","extra":true}`)
@@ -1008,7 +1008,7 @@ func TestSignalProcess(t *testing.T) {
 		processes := &runtimeProcessHandlers{
 			taskMgr:     s.taskMgr,
 			backend:     backend,
-			authEnabled: s.authEnabled,
+			authEnabled: false,
 		}
 
 		body := strings.NewReader(`{"signal":"SIGKILL"}`)

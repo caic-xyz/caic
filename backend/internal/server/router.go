@@ -82,7 +82,7 @@ type Router struct {
 // caller detect port conflicts at startup instead of after lengthy
 // initialisation.
 func (r *Router) Serve(ctx context.Context, ln net.Listener) error {
-	if !r.authEnabled() && !hostIsLoopback(hostOnly(ln.Addr().String())) {
+	if r.authStore == nil && !hostIsLoopback(hostOnly(ln.Addr().String())) {
 		r.mcpDisabled = true
 		slog.WarnContext(ctx, "MCP endpoint disabled: no OAuth login configured and the server binds a non-loopback address; configure OAuth login or bind to localhost to enable MCP",
 			"addr", ln.Addr())
@@ -138,7 +138,7 @@ func (r *Router) buildAPIHandler() http.Handler {
 	apiMux.Handle("/api/", http.NotFoundHandler())
 	apiMux.Handle("/api", http.NotFoundHandler())
 
-	if r.authEnabled() {
+	if r.authStore != nil {
 		return auth.RequireUser(apiMux)
 	}
 	return apiMux
@@ -308,11 +308,6 @@ type httpLogContext struct {
 	origin   string
 }
 
-// authEnabled reports whether OAuth authentication is configured.
-func (r *Router) authEnabled() bool {
-	return r.authStore != nil
-}
-
 // hostOnly returns the host portion of a host:port address, or the input when
 // it carries no port.
 func hostOnly(addr string) string {
@@ -429,8 +424,9 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		},
 		goModeHandler: goModeHandler,
 		runtimeProcesses: &runtimeProcessHandlers{
-			taskMgr: d.TaskManager,
-			backend: d.ProcessBackend,
+			taskMgr:     d.TaskManager,
+			backend:     d.ProcessBackend,
+			authEnabled: d.AuthStore != nil,
 		},
 		serverHandlers: &serverHandlers{
 			serverCtx:          ctx,
@@ -503,7 +499,6 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		Registry:   registry,
 		ServerInfo: mcp.Implementation{Name: "caic", Title: "caic", Version: autoupdate.Version},
 	}
-	s.runtimeProcesses.authEnabled = s.authEnabled
 	// The webhook concern owns the forge webhook secrets and the GitHub App
 	// owner allowlist, and dispatches to the app-owned bot and CI service.
 	s.webhooks = &WebhookHandlers{
