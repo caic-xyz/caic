@@ -231,14 +231,7 @@ def _ensure_java() -> None:
 
 
 def _create_avd(sdkmanager: str, sdk_root: str) -> int:
-    """Create the caic test AVD at a well-known path.
-
-    avdmanager create avd --path creates the data directory (.avd/) at the
-    given path, but the companion .ini file is written to $ANDROID_AVD_HOME.
-    If that directory does not exist on disk, avdmanager silently skips the
-    .ini and the emulator will report "Unknown AVD".  We guarantee the
-    directory and write the .ini ourselves as a fallback.
-    """
+    """Create the caic test AVD.  Writes the .ini ourselves if avdmanager doesn't."""
     avdmanager = os.path.join(os.path.dirname(sdkmanager), "avdmanager")
     if not os.path.isfile(avdmanager):
         print(f"avdmanager not found next to {sdkmanager}", file=sys.stderr)
@@ -278,16 +271,12 @@ def _create_avd(sdkmanager: str, sdk_root: str) -> int:
 
     ini_path = os.path.join(avd_home, f"{AVD_NAME}.ini")
     if not os.path.isfile(ini_path):
-        # avdmanager did not write the .ini — write it ourselves.
-        # The .ini is a Java properties file pointing to the AVD data path.
         parts = _system_image().split(";")
-        target = parts[1] if len(parts) > 1 else "android-35"  # "android-35"
+        target = parts[1] if len(parts) > 1 else "android-35"
         with open(ini_path, "w") as f:
             f.write(f"path={avd_path}\n")
             f.write(f"target={target}\n")
-        print(f"avdmanager did not write .ini — created {ini_path}", file=sys.stderr)
-    else:
-        print(f"AVD created: {ini_path}", file=sys.stderr)
+        print(f"Wrote {ini_path}", file=sys.stderr)
 
     return 0
 

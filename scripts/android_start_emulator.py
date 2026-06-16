@@ -29,7 +29,6 @@ EMULATOR_ARGS = [
     "2048",
     "-partition-size",
     "4096",
-    "-verbose",
 ]
 
 
@@ -74,17 +73,11 @@ def _find_tool(name: str, sdk_root: str) -> str | None:
     return None
 
 
-def _emulator_exited(proc: subprocess.Popen, log_path: str, log_file) -> str | None:
+def _emulator_exited(proc: subprocess.Popen, log_path: str) -> str | None:
     """Return an error message if the emulator process exited, or None."""
     rc = proc.poll()
     if rc is None:
         return None
-
-    # Flush write handle so on-disk content is up to date.
-    try:
-        log_file.flush()
-    except OSError:
-        pass
 
     log_tail = ""
     try:
@@ -93,13 +86,12 @@ def _emulator_exited(proc: subprocess.Popen, log_path: str, log_file) -> str | N
             if lines:
                 log_tail = "\n" + "".join(lines[-40:])
     except OSError:
-        log_tail = "\n(log file not readable)"
-    if not log_tail:
-        log_tail = "\n(emulator log empty)"
+        pass
+
     return f"Emulator exited with code {rc} before adb could connect.{log_tail}"
 
 
-def _wait_for_device(adb: str, emulator_proc: subprocess.Popen, log_path: str, log_file, timeout: int = 180) -> int:
+def _wait_for_device(adb: str, emulator_proc: subprocess.Popen, log_path: str, timeout: int = 180) -> int:
     """Wait for an adb device to become ready and finish booting.
 
     Also monitors the emulator process so we can fail fast if it exits
@@ -108,7 +100,7 @@ def _wait_for_device(adb: str, emulator_proc: subprocess.Popen, log_path: str, l
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         # Check if the emulator died.
-        msg = _emulator_exited(emulator_proc, log_path, log_file)
+        msg = _emulator_exited(emulator_proc, log_path)
         if msg:
             print(msg, file=sys.stderr)
             return 1
@@ -121,7 +113,7 @@ def _wait_for_device(adb: str, emulator_proc: subprocess.Popen, log_path: str, l
                 timeout=min(5, deadline - time.monotonic()),
             )
             # Connected — now wait for boot.
-            return _wait_for_boot(adb, emulator_proc, log_path, log_file, deadline)
+            return _wait_for_boot(adb, emulator_proc, log_path, deadline)
         except subprocess.TimeoutExpired:
             continue
 
@@ -129,10 +121,10 @@ def _wait_for_device(adb: str, emulator_proc: subprocess.Popen, log_path: str, l
     return 1
 
 
-def _wait_for_boot(adb: str, emulator_proc: subprocess.Popen, log_path: str, log_file, deadline: float) -> int:
+def _wait_for_boot(adb: str, emulator_proc: subprocess.Popen, log_path: str, deadline: float) -> int:
     """Wait until the device's boot animation completes."""
     while time.monotonic() < deadline:
-        msg = _emulator_exited(emulator_proc, log_path, log_file)
+        msg = _emulator_exited(emulator_proc, log_path)
         if msg:
             print(msg, file=sys.stderr)
             return 1
@@ -184,24 +176,16 @@ def main() -> int:
     log = open(log_path, "w")  # noqa: SIM115
 
     print(f"Starting emulator '{AVD_NAME}'...", file=sys.stderr)
-    # Log where the emulator will look for AVDs.
-    avd_home = os.environ.get("ANDROID_AVD_HOME") or os.path.join(
-        os.environ.get("ANDROID_SDK_HOME", os.path.expanduser("~/.android")), "avd"
-    )
-    ini_path = os.path.join(avd_home, f"{AVD_NAME}.ini")
-    exists = os.path.isfile(ini_path)
-    print(f"Expecting AVD at {ini_path} (exists: {exists})", file=sys.stderr)
-
     proc = subprocess.Popen(
         [emulator, "-avd", AVD_NAME, *EMULATOR_ARGS],
-        stdout=log,
+        stdout=subprocess.DEVNULL,
         stderr=log,
         start_new_session=True,
     )
 
     print("Waiting for device...", file=sys.stderr)
     try:
-        wait_status = _wait_for_device(adb, proc, log_path, log)
+        wait_status = _wait_for_device(adb, proc, log_path)
         if wait_status != 0:
             proc.kill()
             proc.wait()
