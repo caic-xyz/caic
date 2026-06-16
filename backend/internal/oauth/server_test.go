@@ -1925,6 +1925,204 @@ func TestRegistrationManagement(t *testing.T) {
 	})
 }
 
+func TestEndSession(t *testing.T) {
+	t.Parallel()
+
+	t.Run("logout revokes all grants and refresh tokens", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+
+		// Authorize two clients to create 2 grants + 2 refresh tokens.
+		clientA := registerOAuthTestClient(t, h, "Client A", []string{"https://claude.example.com/callback"})
+		clientB := registerOAuthTestClient(t, h, "Client B", []string{"https://claude.example.com/callback"})
+		tokenA := authorizeOAuthTestClient(t, h, user, &clientA, []string{"read"})
+		tokenB := authorizeOAuthTestClient(t, h, user, &clientB, []string{"write"})
+
+		// Verify grants exist.
+		if len(s.ListUserGrants(user.ID)) != 2 {
+			t.Fatalf("expected 2 grants, got %d", len(s.ListUserGrants(user.ID)))
+		}
+
+		// Call end-session as the user.
+		req := newOAuthTestRequest(t, http.MethodGet, "/oauth/end-session", http.NoBody, user)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("end-session status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "logged out") {
+			t.Fatalf("end-session body missing confirmation: %s", w.Body.String())
+		}
+
+		// Verify both refresh tokens are revoked.
+		refreshOAuthTestToken(t, h, clientA.ClientID, tokenA.RefreshToken, http.StatusBadRequest)
+		refreshOAuthTestToken(t, h, clientB.ClientID, tokenB.RefreshToken, http.StatusBadRequest)
+	})
+
+	t.Run("logout redirects to post_logout_redirect_uri with state", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/logout", "https://example.com/callback"})
+
+		req := newOAuthTestRequest(t, http.MethodGet,
+			"/oauth/end-session?client_id="+registered.ClientID+"&post_logout_redirect_uri="+url.QueryEscape("https://example.com/logout")+"&state=abc123",
+			http.NoBody, user)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusFound {
+			t.Fatalf("end-session status = %d, want %d: %s", w.Code, http.StatusFound, w.Body.String())
+		}
+		location := w.Header().Get("Location")
+		if !strings.HasPrefix(location, "https://example.com/logout") {
+			t.Fatalf("Location = %q, want https://example.com/logout...", location)
+		}
+		if !strings.Contains(location, "state=abc123") {
+			t.Fatalf("Location = %q, want state=abc123", location)
+		}
+	})
+
+	t.Run("logout rejects unregistered post_logout_redirect_uri", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
+
+		req := newOAuthTestRequest(t, http.MethodGet,
+			"/oauth/end-session?client_id="+registered.ClientID+"&post_logout_redirect_uri="+url.QueryEscape("https://attacker.example.com/evil"),
+			http.NoBody, user)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		// Should fall back to confirmation page, not redirect to attacker.
+		if w.Code != http.StatusOK {
+			t.Fatalf("end-session status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		location := w.Header().Get("Location")
+		if location != "" {
+			t.Fatalf("Location = %q, want empty (should not redirect to unregistered URI)", location)
+		}
+		if !strings.Contains(w.Body.String(), "logged out") {
+			t.Fatalf("end-session body missing confirmation: %s", w.Body.String())
+		}
+	})
+
+	t.Run("unauthenticated request returns login redirect or page", func(t *testing.T) {
+		t.Parallel()
+
+		// Without a login adapter, should return HTML page.
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{testUser()})
+
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/oauth/end-session", http.NoBody)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("end-session status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "not logged in") {
+			t.Fatalf("end-session body missing not-logged-in message: %s", w.Body.String())
+		}
+	})
+
+	t.Run("unauthenticated with login adapter redirects to login", func(t *testing.T) {
+		t.Parallel()
+
+		path := t.TempDir() + "/oauth.json"
+		cfg := testFlowServerConfig(path, []User{testUser()})
+		cfg.Login = testLoginAdapter{loginURL: "/auth/login"}
+		s, err := NewServer(cfg)
+		if err != nil {
+			t.Fatalf("NewServer: %v", err)
+		}
+		h := newTestServerHandler(s)
+
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/oauth/end-session", http.NoBody)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusFound {
+			t.Fatalf("end-session status = %d, want %d: %s", w.Code, http.StatusFound, w.Body.String())
+		}
+		if got := w.Header().Get("Location"); got != "/auth/login" {
+			t.Fatalf("Location = %q, want /auth/login", got)
+		}
+	})
+
+	t.Run("end_session callback takes priority over post_logout_redirect_uri", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		path := t.TempDir() + "/oauth.json"
+		cfg := testFlowServerConfig(path, []User{user})
+		cfg.EndSession = func(ctx context.Context, r *http.Request, u User) string {
+			return "https://custom.example.com/goodbye"
+		}
+		s, err := NewServer(cfg)
+		if err != nil {
+			t.Fatalf("NewServer: %v", err)
+		}
+		h := newTestServerHandler(s)
+		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://claude.example.com/callback", "https://example.com/logout"})
+
+		req := newOAuthTestRequest(t, http.MethodGet,
+			"/oauth/end-session?client_id="+registered.ClientID+"&post_logout_redirect_uri="+url.QueryEscape("https://example.com/logout"),
+			http.NoBody, user)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusFound {
+			t.Fatalf("end-session status = %d, want %d: %s", w.Code, http.StatusFound, w.Body.String())
+		}
+		location := w.Header().Get("Location")
+		if location != "https://custom.example.com/goodbye" {
+			t.Fatalf("Location = %q, want https://custom.example.com/goodbye", location)
+		}
+
+		// Authorize to get a refresh token we can verify is revoked.
+		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
+
+		// Call end-session.
+		req = newOAuthTestRequest(t, http.MethodGet,
+			"/oauth/end-session?client_id="+registered.ClientID+"&post_logout_redirect_uri="+url.QueryEscape("https://example.com/logout"),
+			http.NoBody, user)
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusFound {
+			t.Fatalf("end-session status = %d, want %d: %s", w.Code, http.StatusFound, w.Body.String())
+		}
+		location = w.Header().Get("Location")
+		if location != "https://custom.example.com/goodbye" {
+			t.Fatalf("Location = %q, want https://custom.example.com/goodbye", location)
+		}
+
+		// Verify grants were revoked (refresh token rejected).
+		refreshOAuthTestToken(t, h, registered.ClientID, tokenResp.RefreshToken, http.StatusBadRequest)
+	})
+
+	t.Run("end_session_endpoint in discovery metadata", func(t *testing.T) {
+		t.Parallel()
+
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{testUser()})
+
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/.well-known/oauth-authorization-server", http.NoBody)
+		addForwardedHeaders(req)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("metadata status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var metadata AuthorizationServerMetadata
+		if err := json.NewDecoder(w.Body).Decode(&metadata); err != nil {
+			t.Fatalf("decode metadata: %v", err)
+		}
+		want := testBaseURL + "/oauth/end-session"
+		if metadata.EndSessionEndpoint != want {
+			t.Fatalf("end_session_endpoint = %q, want %q", metadata.EndSessionEndpoint, want)
+		}
+	})
+}
+
 // newTestServerHandlerOnly creates a server and handler for management tests.
 func newTestServerHandlerOnly(t *testing.T) http.Handler {
 	t.Helper()

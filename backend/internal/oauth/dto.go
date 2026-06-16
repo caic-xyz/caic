@@ -69,6 +69,7 @@ type AuthorizationServerMetadata struct {
 	JWKSURI                                       string   `json:"jwks_uri"`
 	RegistrationEndpoint                          string   `json:"registration_endpoint"`
 	RevocationEndpoint                            string   `json:"revocation_endpoint,omitempty"`
+	EndSessionEndpoint                            string   `json:"end_session_endpoint,omitempty"`
 	ResponseTypesSupported                        []string `json:"response_types_supported"`
 	GrantTypesSupported                           []string `json:"grant_types_supported"`
 	CodeChallengeMethodsSupported                 []string `json:"code_challenge_methods_supported"`

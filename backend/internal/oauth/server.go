@@ -47,6 +47,11 @@ type RateLimiter interface {
 	Allow(key string) bool
 }
 
+// EndSessionFunc tears down the caller's session for a user.
+// Called by the end-session endpoint after grants are revoked.
+// Returns a post-logout URL to redirect to, or empty string for a default page.
+type EndSessionFunc func(ctx context.Context, r *http.Request, user User) (redirectURL string)
+
 // ConsentRenderer renders an OAuth consent page.
 type ConsentRenderer interface {
 	RenderOAuthConsent(w http.ResponseWriter, data *ConsentPageData) error
@@ -102,6 +107,7 @@ type ServerConfig struct {
 	Audit       AuditRecorder
 	RateLimiter RateLimiter
 	Renderer    ConsentRenderer
+	EndSession  EndSessionFunc
 }
 
 // Server stores OAuth state for remote clients.
@@ -138,6 +144,7 @@ type Server struct {
 	audit       AuditRecorder
 	rateLimiter RateLimiter
 	renderer    ConsentRenderer
+	endSession  EndSessionFunc
 }
 
 // NewServer returns an OAuth authorization server.
@@ -188,6 +195,7 @@ func NewServer(c ServerConfig) (*Server, error) { //nolint:gocritic // ServerCon
 		audit:                   c.Audit,
 		rateLimiter:             c.RateLimiter,
 		renderer:                c.Renderer,
+		endSession:              c.EndSession,
 	}, nil
 }
 
@@ -212,6 +220,7 @@ func (s *Server) Routes() http.Handler {
 	m.HandleFunc("POST /oauth/token", s.handleOAuthToken)
 	m.HandleFunc("POST /oauth/revoke", s.handleOAuthRevoke)
 	m.HandleFunc("POST /oauth/introspect", s.handleOAuthIntrospect)
+	m.HandleFunc("GET /oauth/end-session", s.handleOAuthEndSession)
 	return m
 }
 
@@ -297,6 +306,16 @@ func (s *Server) RevokeUserGrant(userID, grantID string) (bool, error) {
 		return true, err
 	}
 	return true, nil
+}
+
+// RevokeAllUserGrants revokes all grants and refresh tokens for a user, then saves durable state.
+func (s *Server) RevokeAllUserGrants(userID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.state.RevokeAllUserGrants(userID, time.Now()) {
+		return nil
+	}
+	return s.state.Save()
 }
 
 func (s *Server) currentRequestUser(ctx context.Context) (User, bool) {
@@ -400,6 +419,7 @@ func (s *Server) handleOAuthMetadata(w http.ResponseWriter, r *http.Request) {
 		IntrospectionEndpoint:                         issuer + "/oauth/introspect",
 		IntrospectionEndpointAuthMethodsSupported:     []string{TokenEndpointAuthNone},
 		DPoPSigningAlgValuesSupported:                 []string{"RS256", "ES256", "EdDSA"},
+		EndSessionEndpoint:                            issuer + "/oauth/end-session",
 		AuthorizationResponseIssuerParameterSupported: true,
 	}
 	writeJSONResponse(w, &metadata)
@@ -1385,6 +1405,61 @@ func (s *Server) writeUnauthorized(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("WWW-Authenticate", BearerChallenge(resourceMetadataURL, strings.Join(s.supportedScopes, " ")))
 	}
 	writeUnauthorizedJSON(w)
+}
+
+func (s *Server) handleOAuthEndSession(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.currentRequestUser(r.Context())
+	if !ok {
+		if s.login != nil {
+			if loginURL := s.login.LoginStartURL(r); loginURL != "" {
+				http.Redirect(w, r, loginURL, http.StatusFound) //nolint:gosec // loginURL produced by the caller's LoginAdapter
+				return
+			}
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<html><body><p>You are not logged in.</p></body></html>`))
+		return
+	}
+
+	if err := s.RevokeAllUserGrants(user.ID); err != nil {
+		slog.WarnContext(r.Context(), "revoke all user grants on logout", "err", err)
+	}
+
+	postLogoutRedirectURI := r.URL.Query().Get("post_logout_redirect_uri")
+	clientID := r.URL.Query().Get("client_id")
+	if postLogoutRedirectURI != "" && clientID != "" {
+		client := s.oauthClient(clientID)
+		if client.ID != "" && slices.Contains(client.RedirectURIs, postLogoutRedirectURI) {
+			// Valid — will redirect after session teardown.
+		} else {
+			postLogoutRedirectURI = ""
+		}
+	}
+
+	callerRedirect := ""
+	if s.endSession != nil {
+		callerRedirect = s.endSession(r.Context(), r, user)
+	}
+
+	redirectTo := callerRedirect
+	if redirectTo == "" {
+		redirectTo = postLogoutRedirectURI
+	}
+	if redirectTo != "" {
+		q := ""
+		if state := r.URL.Query().Get("state"); state != "" {
+			separator := "?"
+			if strings.Contains(redirectTo, "?") {
+				separator = "&"
+			}
+			q = separator + "state=" + url.QueryEscape(state)
+		}
+		http.Redirect(w, r, redirectTo+q, http.StatusFound) //nolint:gosec // redirectTo is validated against client registration
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(`<html><body><p>You have been logged out.</p></body></html>`))
 }
 
 func writeUnauthorizedJSON(w http.ResponseWriter) {

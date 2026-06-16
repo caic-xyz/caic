@@ -185,6 +185,48 @@ func (s *Store) RevokeUserGrant(userID, grantID string, now time.Time) bool {
 	return true
 }
 
+// RevokeAllUserGrants revokes all grants and refresh tokens for a user.
+// Returns true if any grants were revoked.
+func (s *Store) RevokeAllUserGrants(userID string, now time.Time) bool {
+	changed := false
+	for id := range s.Grants {
+		if s.Grants[id].UserID == userID && s.Grants[id].RevokedAt.IsZero() {
+			s.Grants[id] = Grant{
+				ID:         s.Grants[id].ID,
+				UserID:     s.Grants[id].UserID,
+				ClientID:   s.Grants[id].ClientID,
+				ClientName: s.Grants[id].ClientName,
+				Resource:   s.Grants[id].Resource,
+				Scope:      s.Grants[id].Scope,
+				CreatedAt:  s.Grants[id].CreatedAt,
+				LastUsedAt: s.Grants[id].LastUsedAt,
+				ExpiresAt:  s.Grants[id].ExpiresAt,
+				RevokedAt:  now,
+			}
+			changed = true
+		}
+	}
+	if !changed {
+		return false
+	}
+	for tokenHash := range s.RefreshTokens {
+		if s.RefreshTokens[tokenHash].UserID == userID && s.RefreshTokens[tokenHash].RevokedAt.IsZero() {
+			s.RefreshTokens[tokenHash] = RefreshToken{
+				GrantID:   s.RefreshTokens[tokenHash].GrantID,
+				UserID:    s.RefreshTokens[tokenHash].UserID,
+				ClientID:  s.RefreshTokens[tokenHash].ClientID,
+				Resource:  s.RefreshTokens[tokenHash].Resource,
+				Scope:     s.RefreshTokens[tokenHash].Scope,
+				DPoPJKT:   s.RefreshTokens[tokenHash].DPoPJKT,
+				ExpiresAt: s.RefreshTokens[tokenHash].ExpiresAt,
+				UsedAt:    s.RefreshTokens[tokenHash].UsedAt,
+				RevokedAt: now,
+			}
+		}
+	}
+	return true
+}
+
 // PruneExpiredRefreshTokens removes expired refresh tokens.
 func (s *Store) PruneExpiredRefreshTokens(now time.Time) bool {
 	return s.pruneExpired(now)
