@@ -576,7 +576,14 @@ func TestServer(t *testing.T) {
 		// Issue a short-lived token directly via the token service.
 		pastAud := testResourceURL
 		now := time.Now()
-		token, err := s.tokens.issueAccessTokenAt(testBaseURL, user, pastAud, "read", "", now.Add(-2*time.Hour), now.Add(-time.Hour), nil)
+		token, err := s.tokens.issueAccessTokenAt(&AccessTokenClaims{
+			Issuer:   testBaseURL,
+			Subject:  user.ID,
+			Audience: pastAud,
+			Username: user.Username,
+			Scope:    "read",
+			Type:     accessTokenType,
+		}, now.Add(-2*time.Hour), now.Add(-time.Hour))
 		if err != nil {
 			t.Fatalf("issueAccessTokenAt: %v", err)
 		}

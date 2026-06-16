@@ -123,20 +123,43 @@ func (s *AccessTokenService) RotateKeyWithAlg(alg string) (string, error) {
 // IssueAccessToken signs a JWT access token for user.
 func (s *AccessTokenService) IssueAccessToken(issuer string, user User, audience, scope, grantID string) (string, error) {
 	now := time.Now()
-	return s.issueAccessTokenAt(issuer, user, audience, scope, grantID, now, now.Add(s.ttl), nil)
+	return s.issueAccessTokenAt(&AccessTokenClaims{
+		Issuer:   issuer,
+		Subject:  user.ID,
+		Audience: audience,
+		Username: user.Username,
+		Scope:    scope,
+		GrantID:  grantID,
+		Type:     accessTokenType,
+	}, now, now.Add(s.ttl))
 }
 
 // IssueDPoPAccessToken signs a DPoP-bound JWT access token with cnf.jkt.
 func (s *AccessTokenService) IssueDPoPAccessToken(issuer string, user User, audience, scope, grantID, dpopJKT string) (string, error) {
 	now := time.Now()
-	return s.issueAccessTokenAt(issuer, user, audience, scope, grantID, now, now.Add(s.ttl), &TokenConfirmation{JKT: dpopJKT})
+	return s.issueAccessTokenAt(&AccessTokenClaims{
+		Issuer:       issuer,
+		Subject:      user.ID,
+		Audience:     audience,
+		Username:     user.Username,
+		Scope:        scope,
+		GrantID:      grantID,
+		Type:         accessTokenType,
+		Confirmation: &TokenConfirmation{JKT: dpopJKT},
+	}, now, now.Add(s.ttl))
 }
 
 // IssueRegistrationAccessToken issues a short-lived JWT for client registration management (RFC 7592).
 // The subject is the client ID and the audience scopes it to the registration endpoint.
 func (s *AccessTokenService) IssueRegistrationAccessToken(issuer, clientID string) (string, error) {
 	now := time.Now()
-	return s.issueRegistrationTokenAt(issuer, clientID, issuer+"/oauth/register", "client:manage", now, now.Add(time.Hour))
+	return s.issueAccessTokenAt(&AccessTokenClaims{
+		Issuer:   issuer,
+		Subject:  clientID,
+		Audience: issuer + "/oauth/register",
+		Scope:    "client:manage",
+		Type:     "registration_access_token",
+	}, now, now.Add(time.Hour))
 }
 
 // VerifyRegistrationAccessToken validates a registration access token and returns the client ID from the subject claim.
@@ -189,54 +212,16 @@ func (s *AccessTokenService) VerifyAccessToken(token, issuer, audience string, n
 	}, nil
 }
 
-func (s *AccessTokenService) issueAccessTokenAt(issuer string, user User, audience, scope, grantID string, issuedAt, expiresAt time.Time, confirmation *TokenConfirmation) (string, error) {
+func (s *AccessTokenService) issueAccessTokenAt(claims *AccessTokenClaims, issuedAt, expiresAt time.Time) (string, error) {
 	alg := s.keys[s.currentKID].alg
 	headerJSON, err := json.Marshal(JWTHeader{Alg: alg, Typ: "JWT", KID: s.currentKID})
 	if err != nil {
 		return "", err
 	}
-	payloadJSON, err := json.Marshal(AccessTokenClaims{
-		Issuer:       issuer,
-		Subject:      user.ID,
-		Audience:     audience,
-		Username:     user.Username,
-		Scope:        scope,
-		GrantID:      grantID,
-		IssuedAt:     issuedAt.Unix(),
-		NotBefore:    issuedAt.Unix(),
-		Expiry:       expiresAt.Unix(),
-		Type:         accessTokenType,
-		Confirmation: confirmation,
-	})
-	if err != nil {
-		return "", err
-	}
-	signingInput := base64.RawURLEncoding.EncodeToString(headerJSON) + "." + base64.RawURLEncoding.EncodeToString(payloadJSON)
-	digest := sha256.Sum256([]byte(signingInput))
-	sk := s.keys[s.currentKID]
-	signature, err := sign(sk.key, digest[:])
-	if err != nil {
-		return "", err
-	}
-	return signingInput + "." + base64.RawURLEncoding.EncodeToString(signature), nil
-}
-
-func (s *AccessTokenService) issueRegistrationTokenAt(issuer, clientID, audience, scope string, issuedAt, expiresAt time.Time) (string, error) {
-	alg := s.keys[s.currentKID].alg
-	headerJSON, err := json.Marshal(JWTHeader{Alg: alg, Typ: "JWT", KID: s.currentKID})
-	if err != nil {
-		return "", err
-	}
-	payloadJSON, err := json.Marshal(AccessTokenClaims{
-		Issuer:    issuer,
-		Subject:   clientID,
-		Audience:  audience,
-		Scope:     scope,
-		IssuedAt:  issuedAt.Unix(),
-		NotBefore: issuedAt.Unix(),
-		Expiry:    expiresAt.Unix(),
-		Type:      "registration_access_token",
-	})
+	claims.IssuedAt = issuedAt.Unix()
+	claims.NotBefore = issuedAt.Unix()
+	claims.Expiry = expiresAt.Unix()
+	payloadJSON, err := json.Marshal(*claims)
 	if err != nil {
 		return "", err
 	}

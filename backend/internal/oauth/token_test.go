@@ -142,7 +142,14 @@ func TestAccessTokenService(t *testing.T) {
 		t.Parallel()
 		svc := newTestAccessTokenService(t, "kid-expired")
 		now := time.Now()
-		token, err := svc.issueAccessTokenAt(issuer, user, audience, scope, "", now.Add(-2*time.Hour), now.Add(-time.Hour), nil)
+		token, err := svc.issueAccessTokenAt(&AccessTokenClaims{
+			Issuer:   issuer,
+			Subject:  user.ID,
+			Audience: audience,
+			Username: user.Username,
+			Scope:    scope,
+			Type:     accessTokenType,
+		}, now.Add(-2*time.Hour), now.Add(-time.Hour))
 		if err != nil {
 			t.Fatalf("issueAccessTokenAt: %v", err)
 		}
