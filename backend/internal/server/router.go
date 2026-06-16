@@ -53,6 +53,7 @@ type Router struct {
 	serverConfigHandlers *serverConfigHandlers
 	taskHTTPHandlers     *taskHTTPHandlers
 	mcp                  *mcpServer
+	oauth                *oauthServer
 	usageHandlers        *usageHandlers
 	voiceHandlers        *voiceHandlers
 	webFetchHandlers     *webFetchHandlers
@@ -146,7 +147,7 @@ func (s *Router) buildAPIHandler() http.Handler {
 	m("/processes", s.runtimeProcesses.routes())
 	m("/ci", s.ciHandlers.routes())
 	m("/web", s.webFetchHandlers.routes())
-	m("/mcp-grants", s.mcp.grantRoutes())
+	m("/oauth/grants", s.oauth.grantRoutes())
 	mountPrefix(apiMux, "", "/api/voicegateway/v1", s.voiceHandlers.handler())
 	apiMux.Handle("/api/", http.NotFoundHandler())
 	apiMux.Handle("/api", http.NotFoundHandler())
@@ -160,15 +161,13 @@ func (s *Router) buildAPIHandler() http.Handler {
 // buildHandler assembles the full HTTP handler. Extracted from Serve so that
 // route registration can be tested without a listener.
 func (s *Router) buildHandler() (http.Handler, error) {
-	// The MCP concern shares the router's auth/host configuration by reference.
-	// New() sets these consistently, so this is a no-op in production; it exists
-	// because tests mutate s.authStore/s.hostState on the constructed Router and
-	// then call buildHandler, and the MCP endpoint must observe those values.
+	// Sync shared references into mcpServer and oauthServer (tests mutate
+	// s.authStore/s.hostState after construction before calling buildHandler).
 	s.mcp.authStore = s.authStore
 	s.mcp.hostState = s.hostState
-	if err := s.mcp.ensureOAuthServer(); err != nil {
-		return nil, err
-	}
+	s.oauth.authStore = s.authStore
+	s.oauth.hostState = s.hostState
+	s.oauth.authHandlers = s.authHandlers
 
 	// --- Root mux ---
 	//
@@ -190,11 +189,13 @@ func (s *Router) buildHandler() (http.Handler, error) {
 	// when unauthenticated.
 	mountPrefix(mux, "", "/auth", s.authHandlers.routes())
 
-	// --- Public: MCP routes ---
-	s.mcp.registerWellKnownRoutes(mux)
-	mountPrefix(mux, "", "/oauth", s.mcp.oauth.routes())
+	// --- Public: MCP / OAuth routes ---
+	s.oauth.registerWellKnownRoutes(mux)
+	mountPrefix(mux, "", "/oauth", s.oauth.routes())
 	if !s.mcpDisabled {
-		mountPrefix(mux, "", "/api/caic/v1/mcp", s.mcp.endpointRoutes())
+		mcpHandler := s.mcp.endpointRoutes()
+		mcpHandler = s.oauth.BearerAuth(mcpHandler)
+		mountPrefix(mux, "", "/api/caic/v1/mcp", mcpHandler)
 	}
 
 	// --- Public: server discovery (read before login) ---
@@ -373,27 +374,27 @@ func hostIsLoopback(host string) bool {
 // (internal/app) owns the lifetime of the long-lived automation services
 // (Bot, CIService, and their adapters); the router only routes requests to them.
 type Dependencies struct {
-	Repos                         *repos.Service
-	Tailscale                     bool
-	Preferences                   *preferences.Store
-	AuthStore                     *auth.Store
-	SessionSecret                 []byte
-	MCPOAuthPrivateKeyPEM         []byte
-	MCPOAuthKeyID                 string
-	MCPOAuthRefreshTokenStorePath string
-	MCPAuditLogPath               string
-	GitHubOAuth                   *auth.ProviderConfig
-	GitLabOAuth                   *auth.ProviderConfig
-	HostState                     *auth.HostState
-	UsageFetchers                 []usage.ProviderFetcher
-	VoiceBridge                   *voicertc.Bridge
-	VoiceGateway                  VoiceGatewayConfig
-	Forge                         *forgemanager.Manager
-	CICache                       *forgecache.Cache
-	ProcessBackend                runtime.Backend
-	TaskManager                   *tasks.Manager
-	Provider                      genai.Provider
-	IPGeoChecker                  *ipgeo.Checker
+	Repos                      *repos.Service
+	Tailscale                  bool
+	Preferences                *preferences.Store
+	AuthStore                  *auth.Store
+	SessionSecret              []byte
+	OAuthPrivateKeyPEM         []byte
+	OAuthKeyID                 string
+	OAuthRefreshTokenStorePath string
+	AuditLogPath               string
+	GitHubOAuth                *auth.ProviderConfig
+	GitLabOAuth                *auth.ProviderConfig
+	HostState                  *auth.HostState
+	UsageFetchers              []usage.ProviderFetcher
+	VoiceBridge                *voicertc.Bridge
+	VoiceGateway               VoiceGatewayConfig
+	Forge                      *forgemanager.Manager
+	CICache                    *forgecache.Cache
+	ProcessBackend             runtime.Backend
+	TaskManager                *tasks.Manager
+	Provider                   genai.Provider
+	IPGeoChecker               *ipgeo.Checker
 
 	// App-owned automation services, routed to by HTTP handlers and webhooks.
 	Bot        *bot.Bot
@@ -434,6 +435,9 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		ciService: d.CIService,
 		authStore: d.AuthStore,
 	}
+	audit := &auditStore{path: d.AuditLogPath}
+	rateLimiter := newRateLimiter(120, time.Minute)
+
 	s := &Router{
 		ctx:              ctx,
 		authHandlers:     &authHandlers{store: d.AuthStore, sessionSecret: d.SessionSecret, hostState: d.HostState, githubOAuth: d.GitHubOAuth, gitlabOAuth: d.GitLabOAuth, githubAllowedUsers: d.GitHubAllowedUsers, gitlabAllowedUsers: d.GitLabAllowedUsers},
@@ -463,17 +467,20 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		pprof:            d.Pprof,
 		ipgeoChecker:     d.IPGeoChecker,
 	}
-	s.mcp = &mcpServer{
-		audit:                 &mcpAuditStore{path: d.MCPAuditLogPath},
-		rateLimiter:           newRateLimiter(120, time.Minute),
-		privateKeyPEM:         d.MCPOAuthPrivateKeyPEM,
-		keyID:                 d.MCPOAuthKeyID,
-		refreshTokenStorePath: d.MCPOAuthRefreshTokenStorePath,
-		authStore:             d.AuthStore,
-		hostState:             d.HostState,
-		authHandlers:          s.authHandlers,
+
+	oauthServer, err := newOAuthServer(d.OAuthPrivateKeyPEM, d.OAuthKeyID, d.OAuthRefreshTokenStorePath, []string{mcpScopeRead, mcpScopeTasksRead, mcpScopeTasksWrite, mcpScopeTasksAdmin, mcpScopeReposWrite}, []string{mcpScopeRead, mcpScopeTasksRead}, d.AuthStore, d.HostState, s.authHandlers, audit, rateLimiter)
+	if err != nil {
+		return nil, err
 	}
-	mcpRegistry := &caicToolRegistry{serverConfig: s.serverConfigHandlers, tasks: taskService, ci: s.ciHandlers, usage: s.usageHandlers, audit: s.mcp.audit}
+	s.oauth = oauthServer
+
+	s.mcp = &mcpServer{
+		audit:       audit,
+		rateLimiter: rateLimiter,
+		authStore:   d.AuthStore,
+		hostState:   d.HostState,
+	}
+	mcpRegistry := &caicToolRegistry{serverConfig: s.serverConfigHandlers, tasks: taskService, ci: s.ciHandlers, usage: s.usageHandlers, audit: audit}
 	s.mcp.protocol = &mcp.Handler{
 		Registry:   mcpRegistry,
 		ServerInfo: mcp.Implementation{Name: "caic", Title: "caic", Version: autoupdate.Version},

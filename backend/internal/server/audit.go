@@ -1,4 +1,4 @@
-// MCP audit event recording.
+// Audit event recording for OAuth authorization and MCP tool operations.
 
 package server
 
@@ -16,14 +16,14 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 )
 
-type mcpAuditStore struct {
+type auditStore struct {
 	path string
 
 	mu     sync.Mutex
-	events []mcpAuditEvent
+	events []auditEvent
 }
 
-type mcpAuditEvent struct {
+type auditEvent struct {
 	Time      time.Time `json:"time"`
 	UserID    string    `json:"userID,omitempty"`
 	Subject   string    `json:"subject,omitempty"`
@@ -35,7 +35,7 @@ type mcpAuditEvent struct {
 	Status    string    `json:"status,omitempty"`
 }
 
-func (s *mcpAuditStore) record(ctx context.Context, e *mcpAuditEvent) {
+func (s *auditStore) record(ctx context.Context, e *auditEvent) {
 	if s == nil || e == nil {
 		return
 	}
@@ -54,19 +54,19 @@ func (s *mcpAuditStore) record(ctx context.Context, e *mcpAuditEvent) {
 	s.mu.Lock()
 	s.events = append(s.events, *e)
 	if err := s.persistLocked(e); err != nil {
-		slog.WarnContext(ctx, "persist mcp audit", "err", err)
+		slog.WarnContext(ctx, "persist audit", "err", err)
 	}
 	s.mu.Unlock()
-	slog.InfoContext(ctx, "mcp audit", "operation", e.Operation, "name", e.Name, "decision", e.Decision, "status", e.Status, "userID", e.UserID)
+	slog.InfoContext(ctx, "audit", "operation", e.Operation, "name", e.Name, "decision", e.Decision, "status", e.Status, "userID", e.UserID)
 }
 
-func (s *mcpAuditStore) snapshot() []mcpAuditEvent {
+func (s *auditStore) snapshot() []auditEvent {
 	if s == nil {
 		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]mcpAuditEvent, len(s.events))
+	out := make([]auditEvent, len(s.events))
 	copy(out, s.events)
 	return out
 }
@@ -97,7 +97,7 @@ func auditValueSummary(v any) string {
 	return auditArgsSummary(data)
 }
 
-func (s *mcpAuditStore) persistLocked(e *mcpAuditEvent) error {
+func (s *auditStore) persistLocked(e *auditEvent) error {
 	if s.path == "" {
 		return nil
 	}

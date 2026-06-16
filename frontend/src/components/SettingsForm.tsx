@@ -1,6 +1,6 @@
 // SettingsForm renders the application settings controls.
 import { For, Show, type Accessor, type Setter } from "solid-js";
-import type { CacheMappingResp, CacheSize, MCPGrantResp, MountMappingResp, Platform, UpdatePreferencesReq, VersionResp, WellKnownCachesResp } from "@sdk/types.gen";
+import type { CacheMappingResp, CacheSize, OAuthGrantResp, MountMappingResp, Platform, UpdatePreferencesReq, VersionResp, WellKnownCachesResp } from "@sdk/types.gen";
 import styles from "./SettingsForm.module.css";
 
 type SettingsOverrides = Partial<UpdatePreferencesReq["settings"]>;
@@ -25,10 +25,10 @@ interface SettingsFormProps {
   autoFixPR: Accessor<boolean>;
   setAutoFixPR: Setter<boolean>;
   authProviders: Accessor<string[]>;
-  mcpGrants: Accessor<MCPGrantResp[]>;
-  mcpGrantError: Accessor<string>;
-  revokingMCPGrantID: Accessor<string | null>;
-  revokeMCPClientGrant: (grantID: string) => Promise<void>;
+  oauthGrants: Accessor<OAuthGrantResp[]>;
+  oauthGrantError: Accessor<string>;
+  revokingOAuthGrantID: Accessor<string | null>;
+  revokeOAuthClientGrant: (grantID: string) => Promise<void>;
   versionInfo: Accessor<VersionResp | null>;
   versionCheckError: Accessor<string>;
   checkingUpdate: Accessor<boolean>;
@@ -302,24 +302,24 @@ export default function SettingsForm(props: SettingsFormProps) {
           <div class={styles.settingsSection}>
             <h3 class={styles.settingsSectionTitle}>MCP clients</h3>
             <p class={styles.settingsDescription}>Remote clients authorized to access caic through MCP OAuth.</p>
-            <Show when={!props.mcpGrantError()} fallback={
-              <p class={styles.settingsDescription} style={{ color: "var(--color-error)" }}>{props.mcpGrantError()}</p>
+            <Show when={!props.oauthGrantError()} fallback={
+              <p class={styles.settingsDescription} style={{ color: "var(--color-error)" }}>{props.oauthGrantError()}</p>
             }>
-              <Show when={props.mcpGrants().length > 0} fallback={
+              <Show when={props.oauthGrants().length > 0} fallback={
                 <p class={styles.settingsDescription}>No connected MCP clients.</p>
               }>
-                <div class={styles.mcpGrantList}>
-                  <For each={props.mcpGrants()}>
+                <div class={styles.oauthGrantList}>
+                  <For each={props.oauthGrants()}>
                     {(grant) => (
-                      <div class={styles.mcpGrantCard} data-status={grant.status}>
-                        <div class={styles.mcpGrantHeader}>
+                      <div class={styles.oauthGrantCard} data-status={grant.status}>
+                        <div class={styles.oauthGrantHeader}>
                           <div>
-                            <div class={styles.mcpGrantName}>{grant.clientName || grant.clientID}</div>
-                            <div class={styles.mcpGrantMeta}>{grant.clientID}</div>
+                            <div class={styles.oauthGrantName}>{grant.clientName || grant.clientID}</div>
+                            <div class={styles.oauthGrantMeta}>{grant.clientID}</div>
                           </div>
-                          <span class={styles.mcpGrantStatus}>{grant.status}</span>
+                          <span class={styles.oauthGrantStatus}>{grant.status}</span>
                         </div>
-                        <div class={styles.mcpGrantDetails}>
+                        <div class={styles.oauthGrantDetails}>
                           <div>Scopes: {grant.scopes.join(", ")}</div>
                           <div>Resource: {grant.resource}</div>
                           <div>Created: {formatDate(grant.createdAt)}</div>
@@ -330,12 +330,12 @@ export default function SettingsForm(props: SettingsFormProps) {
                           <button
                             type="button"
                             class={styles.settingsButton}
-                            disabled={props.revokingMCPGrantID() === grant.id}
+                            disabled={props.revokingOAuthGrantID() === grant.id}
                             onClick={() => {
-                              void props.revokeMCPClientGrant(grant.id);
+                              void props.revokeOAuthClientGrant(grant.id);
                             }}
                           >
-                            {props.revokingMCPGrantID() === grant.id ? "Revoking…" : "Revoke access"}
+                            {props.revokingOAuthGrantID() === grant.id ? "Revoking…" : "Revoke access"}
                           </button>
                         </Show>
                       </div>

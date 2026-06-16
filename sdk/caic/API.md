@@ -29,12 +29,12 @@ Type notation: `JSONValue` means any valid JSON value.
 | GET | `/auth/me` | Returns the authenticated user's profile. |  | `UserResp` |
 | POST | `/auth/logout` | Invalidates the current session. |  | `StatusResp` |
 
-## Mcp-grants
+## Oauth
 
 | Method | Path | Description | Request | Response |
 |--------|------|-------------|---------|----------|
-| GET | `/api/caic/v1/mcp-grants` | Lists the authenticated user's connected MCP clients. |  | `MCPGrantsResp` |
-| POST | `/api/caic/v1/mcp-grants/{grantID}/revoke` | Revokes one connected MCP client grant for the authenticated user. | `RevokeMCPGrantReq` | `StatusResp` |
+| GET | `/api/caic/v1/oauth/grants` | Lists the authenticated user's connected OAuth clients. |  | `OAuthGrantsResp` |
+| POST | `/api/caic/v1/oauth/grants/{grantID}/revoke` | Revokes one connected OAuth client grant for the authenticated user. | `RevokeOAuthGrantReq` | `StatusResp` |
 
 ## Ci
 
@@ -246,9 +246,9 @@ UpdatePreferencesReq is the request body for POST /api/caic/v1/server/preference
 |-------|------|-------------|----------|
 | `settings` | `UserSettings` |  | yes |
 
-### MCPGrantResp
+### OAuthGrantResp
 
-MCPGrantResp describes one user-authorized remote MCP client grant.
+OAuthGrantResp describes one user-authorized remote MCP client grant.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
@@ -263,17 +263,17 @@ MCPGrantResp describes one user-authorized remote MCP client grant.
 | `revokedAt` | `ISOTimestamp` |  |  |
 | `status` | `string` |  | yes |
 
-### MCPGrantsResp
+### OAuthGrantsResp
 
-MCPGrantsResp is the response for GET /api/caic/v1/server/mcp-grants.
+OAuthGrantsResp is the response for GET /api/caic/v1/oauth/grants.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `grants` | `MCPGrantResp[]` |  | yes |
+| `grants` | `OAuthGrantResp[]` |  | yes |
 
-### RevokeMCPGrantReq
+### RevokeOAuthGrantReq
 
-RevokeMCPGrantReq is the request for POST /api/caic/v1/server/mcp-grants/{grantID}/revoke.
+RevokeOAuthGrantReq is the request for POST /api/caic/v1/oauth/grants/{grantID}/revoke.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|

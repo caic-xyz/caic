@@ -1,163 +1,44 @@
-// MCP HTTP endpoint: protected-resource metadata, bearer verification, and client grant management.
+// MCP HTTP endpoint: protocol dispatch, origin validation, and rate limiting.
 
 package server
 
 import (
 	"context"
-	"crypto"
-	"crypto/rsa"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
-	"github.com/caic-xyz/caic/backend/internal/server/api"
-	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 )
 
-// mcpServer owns the MCP HTTP endpoint: protocol dispatch, the caic OAuth
-// authorization server, bearer verification, rate limiting, and audit. It is
-// the Router's MCP route-handler concern. The auth/host references are shared
-// with the rest of the router (referenced, not owned); everything else is
-// MCP-specific state.
+// mcpServer owns the MCP HTTP endpoint: protocol dispatch, rate limiting, and
+// origin validation. OAuth authorization is handled by the separate oauthServer
+// peer, which provides a BearerAuth middleware applied by the Router.
 type mcpServer struct {
 	protocol    *mcp.Handler
-	oauth       *oauthServer
-	audit       *mcpAuditStore
+	audit       *auditStore
 	rateLimiter *rateLimiter
 
-	privateKeyPEM         []byte
-	keyID                 string
-	refreshTokenStorePath string
-
 	// Shared, injected references (not owned).
-	authStore    *auth.Store
-	hostState    *auth.HostState
-	authHandlers *authHandlers
+	authStore *auth.Store
+	hostState *auth.HostState
 }
 
-// authEnabled reports whether OAuth authentication is configured.
-func (s *mcpServer) authEnabled() bool {
-	return s.authStore != nil
-}
-
-const (
-	mcpAuthDefaultScope = mcpScopeRead + " " + mcpScopeTasksRead + " " + mcpScopeTasksWrite + " " + mcpScopeTasksAdmin + " " + mcpScopeReposWrite
-)
-
-// handleMCPProtectedResourceMetadata writes caic's MCP protected-resource
-// metadata.
-//
-// MCP auth is caic-scoped: provider tokens may authenticate a caic web user or
-// authorize forge operations, but they are not accepted as MCP bearer tokens and
-// are not forwarded from inbound MCP requests to upstream APIs. The protected
-// resource URL is always the external base URL plus the MCP endpoint, and the
-// authorization server URL is always the external base URL.
-func (s *mcpServer) handleMCPProtectedResourceMetadata(w http.ResponseWriter, r *http.Request) {
-	// RFC 9728 serves this metadata at the well-known path and a per-resource
-	// variant (.../oauth-protected-resource + the MCP endpoint path).
-	path := r.URL.Path
-	if !s.authEnabled() || (path != "/.well-known/oauth-protected-resource" && path != "/.well-known/oauth-protected-resource/api/caic/v1/mcp") {
-		http.NotFound(w, r)
-		return
-	}
-	metadata := mcp.ProtectedResourceMetadata{
-		Resource:             s.mcpResourceURL(r),
-		AuthorizationServers: []string{s.externalBaseURL(r)},
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(metadata); err != nil {
-		http.Error(w, "encode metadata", http.StatusInternalServerError)
-	}
-}
-
-// ensureOAuthServer creates the OAuth server lazily. Called from buildHandler
-// after authStore/hostState references are finalized (important for tests that
-// mutate these fields before calling buildHandler).
-func (s *mcpServer) ensureOAuthServer() error {
-	if !s.authEnabled() || s.oauth != nil {
-		return nil
-	}
-	oauthServer, err := newOAuthServer(s.privateKeyPEM, s.keyID, s.refreshTokenStorePath, []string{mcpScopeRead, mcpScopeTasksRead, mcpScopeTasksWrite, mcpScopeTasksAdmin, mcpScopeReposWrite}, []string{mcpScopeRead, mcpScopeTasksRead}, s.authStore, s.hostState, s.authHandlers, s.audit, s.rateLimiter, s.mcpResourceURL)
-	if err != nil {
-		return err
-	}
-	s.oauth = oauthServer
-	return nil
-}
-
-func (s *mcpServer) mcpResourceURL(r *http.Request) string {
-	return s.externalBaseURL(r) + "/api/caic/v1/mcp"
-}
-
-func (s *mcpServer) externalBaseURL(r *http.Request) string {
-	if s.hostState != nil {
-		if externalURL := s.hostState.ExternalURL(); externalURL != "" {
-			return strings.TrimRight(externalURL, "/")
-		}
-	}
-	authority, scheme := effectiveRequestHostAndScheme(r)
-	return scheme + "://" + authority
-}
-
-func effectiveRequestHostAndScheme(r *http.Request) (authority, scheme string) {
-	authority = r.Host
-	if forwardedHost := r.Header.Get("X-Forwarded-Host"); forwardedHost != "" {
-		authority = forwardedHost
-	}
-	scheme = "http"
-	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
-		scheme = "https"
-	}
-	return authority, scheme
-}
-
-func (s *mcpServer) handleMCPAuthenticated(w http.ResponseWriter, r *http.Request) {
+// handleMCP is the MCP endpoint handler. Origin validation and rate limiting
+// are applied here; bearer authentication is applied upstream by the Router via
+// oauthServer.BearerAuth middleware.
+func (s *mcpServer) handleMCP(w http.ResponseWriter, r *http.Request) {
 	if err := s.validateMCPOrigin(r); err != nil {
 		http.Error(w, "forbidden: invalid origin", http.StatusForbidden)
-		return
-	}
-	if !s.authEnabled() {
-		if !s.allowMCPRequest(w, r) {
-			return
-		}
-		s.protocol.HandleMCP(w, r)
-		return
-	}
-	if token := mcp.BearerToken(r); token != "" {
-		user, principal, err := s.verifyMCPBearer(r, token)
-		if err == nil {
-			ctx := auth.NewContext(r.Context(), user)
-			ctx = newMCPPrincipalContext(ctx, principal)
-			authenticatedRequest := r.WithContext(ctx)
-			if !s.allowMCPRequest(w, authenticatedRequest) {
-				return
-			}
-			s.protocol.HandleMCP(w, authenticatedRequest)
-			return
-		}
-		s.writeUnauthorized(w, r)
-		return
-	}
-	if _, ok := auth.UserFromContext(r.Context()); ok {
-		if !s.allowMCPRequest(w, r) {
-			return
-		}
-		s.protocol.HandleMCP(w, r)
 		return
 	}
 	if !s.allowMCPRequest(w, r) {
 		return
 	}
-	s.writeUnauthorized(w, r)
+	s.protocol.HandleMCP(w, r)
 }
 
 func (s *mcpServer) allowMCPRequest(w http.ResponseWriter, r *http.Request) bool {
@@ -181,7 +62,7 @@ func (s *mcpServer) validateMCPOrigin(r *http.Request) error {
 	if err != nil || originURL.Scheme == "" || originURL.Host == "" || originURL.Path != "" {
 		return errors.New("invalid origin")
 	}
-	baseURL, err := url.Parse(s.externalBaseURL(r))
+	baseURL, err := url.Parse(externalBaseURL(s.hostState, r))
 	if err != nil || baseURL.Scheme == "" || baseURL.Host == "" {
 		return errors.New("invalid server origin")
 	}
@@ -205,25 +86,20 @@ func (s *mcpServer) mcpRateKey(r *http.Request) string {
 	return "ip:" + r.RemoteAddr
 }
 
-// writeUnauthorized answers an unauthenticated MCP request with a 401 carrying
-// the MCP bearer challenge so clients can discover the authorization server.
-func (s *mcpServer) writeUnauthorized(w http.ResponseWriter, r *http.Request) {
-	if s.authEnabled() && r.URL.Path == "/api/caic/v1/mcp" {
-		// Point the client at the protected-resource metadata URL so it can
-		// discover the authorization server.
-		resourceMetadataURL := s.externalBaseURL(r) + "/.well-known/oauth-protected-resource/api/caic/v1/mcp"
-		w.Header().Set("WWW-Authenticate", mcp.BearerChallenge(resourceMetadataURL, mcpAuthDefaultScope))
-	}
-	writeUnauthorizedJSON(w)
+// endpointRoutes returns an http.Handler with the JSON-RPC endpoint at
+// /api/caic/v1/mcp. Bearer authentication is applied by the Router via
+// oauthServer.BearerAuth middleware; when auth is disabled the handler is
+// mounted directly.
+func (s *mcpServer) endpointRoutes() http.Handler {
+	m := http.NewServeMux()
+	m.HandleFunc("POST /api/caic/v1/mcp", s.handleMCP)
+	m.HandleFunc("GET /api/caic/v1/mcp", s.handleMCP)
+	return m
 }
 
-const (
-	mcpScopeRead       = "caic:mcp.read"
-	mcpScopeTasksRead  = "caic:tasks.read"
-	mcpScopeTasksWrite = "caic:tasks.write"
-	mcpScopeTasksAdmin = "caic:tasks.admin"
-	mcpScopeReposWrite = "caic:repos.write"
-)
+// mcpPrincipal types are MCP protocol concepts shared by oauthServer (which
+// sets the principal in context via the BearerAuth middleware) and
+// caicToolRegistry (which checks scopes on tool/resource access).
 
 type mcpPrincipalContextKey struct{}
 
@@ -257,156 +133,27 @@ func mcpHasScope(ctx context.Context, scope string) bool {
 	return ok
 }
 
-func (s *mcpServer) verifyMCPBearer(r *http.Request, token string) (*auth.User, *mcpPrincipal, error) {
-	if s.oauth == nil {
-		return nil, nil, errors.New("MCP OAuth server is not initialized")
-	}
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return nil, nil, errors.New("invalid bearer token format")
-	}
-	headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
-	if err != nil {
-		return nil, nil, fmt.Errorf("decode token header: %w", err)
-	}
-	var header mcp.JWTHeader
-	if err := json.Unmarshal(headerJSON, &header); err != nil {
-		return nil, nil, fmt.Errorf("parse token header: %w", err)
-	}
-	if header.Alg != mcp.JWTAlgRS256 || header.KID != s.oauth.kid {
-		return nil, nil, errors.New("unsupported token header")
-	}
-	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
-	if err != nil {
-		return nil, nil, fmt.Errorf("decode token signature: %w", err)
-	}
-	signingInput := parts[0] + "." + parts[1]
-	digest := sha256.Sum256([]byte(signingInput))
-	if err := rsa.VerifyPKCS1v15(&s.oauth.key.PublicKey, crypto.SHA256, digest[:], signature); err != nil {
-		return nil, nil, errors.New("invalid token signature")
-	}
-	payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return nil, nil, fmt.Errorf("decode token payload: %w", err)
-	}
-	var claims mcp.AccessTokenClaims
-	if err := json.Unmarshal(payloadJSON, &claims); err != nil {
-		return nil, nil, fmt.Errorf("parse token claims: %w", err)
-	}
-	now := time.Now().Unix()
-	if claims.Issuer != s.externalBaseURL(r) {
-		return nil, nil, errors.New("invalid token issuer")
-	}
-	if claims.Audience != s.mcpResourceURL(r) {
-		return nil, nil, errors.New("invalid token audience")
-	}
-	if claims.Type != "access_token" {
-		return nil, nil, errors.New("invalid token type")
-	}
-	if claims.NotBefore > now || claims.Expiry <= now {
-		return nil, nil, errors.New("token is not valid now")
-	}
-	if claims.GrantID != "" {
-		active, err := s.oauth.touchGrant(claims.GrantID, time.Now())
-		if err != nil {
-			return nil, nil, fmt.Errorf("touch token grant: %w", err)
-		}
-		if !active {
-			return nil, nil, errors.New("token grant is not active")
+// externalBaseURL constructs the server's external base URL from hostState or
+// the request. Used by both mcpServer (origin validation) and oauthServer
+// (metadata, challenge, bearer verification).
+func externalBaseURL(hostState *auth.HostState, r *http.Request) string {
+	if hostState != nil {
+		if externalURL := hostState.ExternalURL(); externalURL != "" {
+			return strings.TrimRight(externalURL, "/")
 		}
 	}
-	user, ok := s.authStore.FindByID(claims.Subject)
-	if !ok {
-		return nil, nil, errors.New("token subject is unknown")
-	}
-	principal := &mcpPrincipal{
-		Subject:  claims.Subject,
-		Username: claims.Username,
-		Issuer:   claims.Issuer,
-		Audience: claims.Audience,
-		Scopes:   parseScopeSet(claims.Scope),
-		Remote:   true,
-	}
-	return &user, principal, nil
+	authority, scheme := effectiveRequestHostAndScheme(r)
+	return scheme + "://" + authority
 }
 
-func (s *mcpServer) listMCPGrants(ctx context.Context, _ *api.EmptyReq) (*v1.MCPGrantsResp, error) {
-	if !s.authEnabled() || s.oauth == nil {
-		return &v1.MCPGrantsResp{}, nil
+func effectiveRequestHostAndScheme(r *http.Request) (authority, scheme string) {
+	authority = r.Host
+	if forwardedHost := r.Header.Get("X-Forwarded-Host"); forwardedHost != "" {
+		authority = forwardedHost
 	}
-	now := time.Now()
-	grants := s.oauth.listUserGrants(userIDFromCtx(ctx))
-	resp := make([]v1.MCPGrantResp, len(grants))
-	for i := range grants {
-		resp[i] = mcpGrantResponse(&grants[i], now)
+	scheme = "http"
+	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		scheme = "https"
 	}
-	return &v1.MCPGrantsResp{Grants: resp}, nil
-}
-
-func (s *mcpServer) revokeMCPGrant(ctx context.Context, req *v1.RevokeMCPGrantReq) (*v1.StatusResp, error) {
-	if !s.authEnabled() || s.oauth == nil {
-		return nil, api.NotFound("MCP grant")
-	}
-	if !s.oauth.revokeUserGrant(userIDFromCtx(ctx), req.GrantID) {
-		return nil, api.NotFound("MCP grant")
-	}
-	if err := s.oauth.saveRefreshTokens(); err != nil {
-		return nil, api.InternalError("save MCP grant revocation: " + err.Error())
-	}
-	return &v1.StatusResp{Status: "ok"}, nil
-}
-
-func mcpGrantResponse(grant *oauthGrant, now time.Time) v1.MCPGrantResp {
-	status := v1.MCPGrantStatusActive
-	if !grant.RevokedAt.IsZero() {
-		status = v1.MCPGrantStatusRevoked
-	} else if now.After(grant.ExpiresAt) {
-		status = v1.MCPGrantStatusExpired
-	}
-	return v1.MCPGrantResp{
-		ID:         grant.ID,
-		ClientID:   grant.ClientID,
-		ClientName: grant.ClientName,
-		Scopes:     strings.Fields(grant.Scope),
-		Resource:   grant.Resource,
-		CreatedAt:  grant.CreatedAt,
-		LastUsedAt: grant.LastUsedAt,
-		ExpiresAt:  grant.ExpiresAt,
-		RevokedAt:  grant.RevokedAt,
-		Status:     status,
-	}
-}
-
-// grantRoutes returns the handler for MCP client grant management. Patterns are
-// relative to the /api/caic/v1 version prefix, stripped at mount time.
-func (s *mcpServer) grantRoutes() http.Handler {
-	m := http.NewServeMux()
-	m.HandleFunc("GET /mcp-grants", handle(s.listMCPGrants))
-	m.HandleFunc("POST /mcp-grants/{grantID}/revoke", handle(s.revokeMCPGrant))
-	return m
-}
-
-// registerPublicRoutes registers the unauthenticated MCP discovery and OAuth
-// authorization-server endpoints on mux, plus the bearer-authenticated JSON-RPC
-// endpoint. These live on the root mux, outside the session-gated API. The
-// endpoint paths are repeated in the metadata documents the server advertises
-// registerWellKnownRoutes registers MCP protected-resource metadata directly on
-// mux and delegates OAuth authorization-server metadata to s.oauth. These share
-// the /.well-known/ namespace with other registrations (e.g. Go Mode, a 404
-// catch-all) so they cannot use a sub-mux subtree.
-func (s *mcpServer) registerWellKnownRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /.well-known/oauth-protected-resource", s.handleMCPProtectedResourceMetadata)
-	mux.HandleFunc("GET /.well-known/oauth-protected-resource/", s.handleMCPProtectedResourceMetadata)
-	s.oauth.registerWellKnownRoutes(mux)
-}
-
-// endpointRoutes returns an http.Handler with the bearer-authenticated
-// JSON-RPC endpoint at /api/caic/v1/mcp. The GET probe answers 405 (caic is
-// stateless) so released Streamable HTTP clients (Claude Code, Codex) fall
-// back to plain POST request/response.
-func (s *mcpServer) endpointRoutes() http.Handler {
-	m := http.NewServeMux()
-	m.HandleFunc("POST /api/caic/v1/mcp", s.handleMCPAuthenticated)
-	m.HandleFunc("GET /api/caic/v1/mcp", s.handleMCPAuthenticated)
-	return m
+	return authority, scheme
 }

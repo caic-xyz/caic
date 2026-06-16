@@ -101,10 +101,10 @@ class ApiClient(
     suspend fun getPreferences(): PreferencesResp = request("GET", "/api/caic/v1/server/preferences")
     /** Updates server settings and preferences. */
     suspend fun updatePreferences(req: UpdatePreferencesReq): PreferencesResp = request("POST", "/api/caic/v1/server/preferences", json.encodeToString(req))
-    /** Lists the authenticated user's connected MCP clients. */
-    suspend fun listMCPGrants(): MCPGrantsResp = request("GET", "/api/caic/v1/mcp-grants")
-    /** Revokes one connected MCP client grant for the authenticated user. */
-    suspend fun revokeMCPGrant(grantID: String, req: RevokeMCPGrantReq): StatusResp = request("POST", "/api/caic/v1/mcp-grants/$grantID/revoke", json.encodeToString(req))
+    /** Lists the authenticated user's connected OAuth clients. */
+    suspend fun listOAuthGrants(): OAuthGrantsResp = request("GET", "/api/caic/v1/oauth/grants")
+    /** Revokes one connected OAuth client grant for the authenticated user. */
+    suspend fun revokeOAuthGrant(grantID: String, req: RevokeOAuthGrantReq): StatusResp = request("POST", "/api/caic/v1/oauth/grants/$grantID/revoke", json.encodeToString(req))
     /** Lists available coding agent harnesses. */
     suspend fun listHarnesses(): List<HarnessInfo> = request("GET", "/api/caic/v1/server/harnesses")
     /** Lists well-known cache configurations. */

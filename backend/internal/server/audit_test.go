@@ -1,4 +1,4 @@
-// Tests for MCP audit event recording.
+// Tests for audit event recording.
 
 package server
 
@@ -12,17 +12,17 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 )
 
-func TestMCPAuditStore(t *testing.T) {
+func TestAuditStore(t *testing.T) {
 	t.Parallel()
 
 	t.Run("persistence success", func(t *testing.T) {
 		t.Parallel()
 
 		path := filepath.Join(t.TempDir(), "mcp_audit.jsonl")
-		store := &mcpAuditStore{path: path}
-		store.record(t.Context(), &mcpAuditEvent{Operation: "tools/call", Name: "tasks_list", Decision: "allow", Status: "ok"})
+		store := &auditStore{path: path}
+		store.record(t.Context(), &auditEvent{Operation: "tools/call", Name: "tasks_list", Decision: "allow", Status: "ok"})
 
-		events := readMCPAuditEvents(t, path)
+		events := readAuditEvents(t, path)
 		if len(events) != 1 {
 			t.Fatalf("events = %+v, want one", events)
 		}
@@ -52,10 +52,10 @@ func TestMCPAuditStore(t *testing.T) {
 		t.Parallel()
 
 		path := filepath.Join(t.TempDir(), "mcp_audit.jsonl")
-		store := &mcpAuditStore{path: path}
-		store.record(t.Context(), &mcpAuditEvent{Operation: "tools/call", Name: "task_create", Args: auditArgsSummary(json.RawMessage(`{"prompt":"TOKEN=secret"}`)), Decision: "missing required MCP scope: caic:tasks.write", Status: "blocked"})
+		store := &auditStore{path: path}
+		store.record(t.Context(), &auditEvent{Operation: "tools/call", Name: "task_create", Args: auditArgsSummary(json.RawMessage(`{"prompt":"TOKEN=secret"}`)), Decision: "missing required MCP scope: caic:tasks.write", Status: "blocked"})
 
-		events := readMCPAuditEvents(t, path)
+		events := readAuditEvents(t, path)
 		if len(events) != 1 {
 			t.Fatalf("events = %+v, want one", events)
 		}
@@ -74,9 +74,9 @@ func TestMCPAuditStore(t *testing.T) {
 		if err := os.Mkdir(path, 0o700); err != nil {
 			t.Fatalf("Mkdir: %v", err)
 		}
-		store := &mcpAuditStore{path: path}
+		store := &auditStore{path: path}
 		user := &auth.User{ID: "usr_1", Username: "alice"}
-		store.record(auth.NewContext(t.Context(), user), &mcpAuditEvent{Operation: "resources/read", Name: "caic://tasks", Decision: "allow", Status: "ok"})
+		store.record(auth.NewContext(t.Context(), user), &auditEvent{Operation: "resources/read", Name: "caic://tasks", Decision: "allow", Status: "ok"})
 
 		events := store.snapshot()
 		if len(events) != 1 {
@@ -88,13 +88,13 @@ func TestMCPAuditStore(t *testing.T) {
 	})
 }
 
-func readMCPAuditEvents(t *testing.T, path string) []mcpAuditEvent {
+func readAuditEvents(t *testing.T, path string) []auditEvent {
 	data, err := os.ReadFile(path) //nolint:gosec // test path from t.TempDir.
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	events := make([]mcpAuditEvent, len(lines))
+	events := make([]auditEvent, len(lines))
 	for i, line := range lines {
 		if err := json.Unmarshal([]byte(line), &events[i]); err != nil {
 			t.Fatalf("Unmarshal line %d: %v", i+1, err)

@@ -315,37 +315,37 @@ type StatusResp struct {
 	Status string `json:"status"`
 }
 
-// MCPGrantStatus is the user-visible state of a connected MCP client grant.
-type MCPGrantStatus string
+// OAuthGrantStatus is the user-visible state of a connected OAuth client grant.
+type OAuthGrantStatus string
 
-// MCP grant status values.
+// OAuth grant status values.
 const (
-	MCPGrantStatusActive  MCPGrantStatus = "active"
-	MCPGrantStatusExpired MCPGrantStatus = "expired"
-	MCPGrantStatusRevoked MCPGrantStatus = "revoked"
+	OAuthGrantStatusActive  OAuthGrantStatus = "active"
+	OAuthGrantStatusExpired OAuthGrantStatus = "expired"
+	OAuthGrantStatusRevoked OAuthGrantStatus = "revoked"
 )
 
-// MCPGrantResp describes one user-authorized remote MCP client grant.
-type MCPGrantResp struct {
-	ID         string         `json:"id"`
-	ClientID   string         `json:"clientID"`
-	ClientName string         `json:"clientName"`
-	Scopes     []string       `json:"scopes"`
-	Resource   string         `json:"resource"`
-	CreatedAt  time.Time      `json:"createdAt"`
-	LastUsedAt time.Time      `json:"lastUsedAt,omitzero"`
-	ExpiresAt  time.Time      `json:"expiresAt"`
-	RevokedAt  time.Time      `json:"revokedAt,omitzero"`
-	Status     MCPGrantStatus `json:"status"`
+// OAuthGrantResp describes one user-authorized remote MCP client grant.
+type OAuthGrantResp struct {
+	ID         string           `json:"id"`
+	ClientID   string           `json:"clientID"`
+	ClientName string           `json:"clientName"`
+	Scopes     []string         `json:"scopes"`
+	Resource   string           `json:"resource"`
+	CreatedAt  time.Time        `json:"createdAt"`
+	LastUsedAt time.Time        `json:"lastUsedAt,omitzero"`
+	ExpiresAt  time.Time        `json:"expiresAt"`
+	RevokedAt  time.Time        `json:"revokedAt,omitzero"`
+	Status     OAuthGrantStatus `json:"status"`
 }
 
-// MCPGrantsResp is the response for GET /api/caic/v1/server/mcp-grants.
-type MCPGrantsResp struct {
-	Grants []MCPGrantResp `json:"grants"`
+// OAuthGrantsResp is the response for GET /api/caic/v1/oauth/grants.
+type OAuthGrantsResp struct {
+	Grants []OAuthGrantResp `json:"grants"`
 }
 
-// RevokeMCPGrantReq is the request for POST /api/caic/v1/server/mcp-grants/{grantID}/revoke.
-type RevokeMCPGrantReq struct {
+// RevokeOAuthGrantReq is the request for POST /api/caic/v1/oauth/grants/{grantID}/revoke.
+type RevokeOAuthGrantReq struct {
 	GrantID string `json:"-" path:"grantID"`
 }
 

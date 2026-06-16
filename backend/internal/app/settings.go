@@ -15,9 +15,10 @@ import (
 )
 
 type settings struct {
-	SessionSecret         string `json:"sessionSecret,omitempty"`
-	MCPOAuthPrivateKeyPEM string `json:"mcpOAuthPrivateKeyPEM,omitempty"`
-	MCPOAuthKeyID         string `json:"mcpOAuthKeyID,omitempty"`
+	SessionSecret string `json:"sessionSecret,omitempty"`
+	// TODO: Migrate to a oauth section.
+	OAuthPrivateKeyPEM string `json:"mcpOAuthPrivateKeyPEM,omitempty"`
+	OAuthKeyID         string `json:"mcpOAuthKeyID,omitempty"`
 }
 
 func loadSettings(path string) (*settings, error) {
@@ -37,13 +38,13 @@ func loadSettings(path string) (*settings, error) {
 		s.SessionSecret = hex.EncodeToString(raw[:])
 		dirty = true
 	}
-	if s.MCPOAuthPrivateKeyPEM == "" || s.MCPOAuthKeyID == "" {
+	if s.OAuthPrivateKeyPEM == "" || s.OAuthKeyID == "" {
 		keyPEM, keyID, err := newMCPOAuthSigningKey()
 		if err != nil {
 			return nil, err
 		}
-		s.MCPOAuthPrivateKeyPEM = keyPEM
-		s.MCPOAuthKeyID = keyID
+		s.OAuthPrivateKeyPEM = keyPEM
+		s.OAuthKeyID = keyID
 		dirty = true
 	}
 

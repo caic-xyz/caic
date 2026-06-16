@@ -377,35 +377,35 @@ object HarnessSerializer : KSerializer<Harness> {
     }
 }
 
-@Serializable(with = MCPGrantStatusSerializer::class)
-sealed interface MCPGrantStatus {
+@Serializable(with = OAuthGrantStatusSerializer::class)
+sealed interface OAuthGrantStatus {
     val value: String
     @Serializable
-    data object Active : MCPGrantStatus {
+    data object Active : OAuthGrantStatus {
         override val value = "active"
     }
     @Serializable
-    data object Expired : MCPGrantStatus {
+    data object Expired : OAuthGrantStatus {
         override val value = "expired"
     }
     @Serializable
-    data object Revoked : MCPGrantStatus {
+    data object Revoked : OAuthGrantStatus {
         override val value = "revoked"
     }
     @Serializable
-    data class Other(override val value: String) : MCPGrantStatus
+    data class Other(override val value: String) : OAuthGrantStatus
 }
 
-object MCPGrantStatusSerializer : KSerializer<MCPGrantStatus> {
-    override val descriptor = PrimitiveSerialDescriptor("MCPGrantStatus", PrimitiveKind.STRING)
-    override fun serialize(encoder: Encoder, value: MCPGrantStatus) = encoder.encodeString(value.value)
-    override fun deserialize(decoder: Decoder): MCPGrantStatus {
+object OAuthGrantStatusSerializer : KSerializer<OAuthGrantStatus> {
+    override val descriptor = PrimitiveSerialDescriptor("OAuthGrantStatus", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: OAuthGrantStatus) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): OAuthGrantStatus {
         val v = decoder.decodeString()
         return when (v) {
-            "active" -> MCPGrantStatus.Active
-            "expired" -> MCPGrantStatus.Expired
-            "revoked" -> MCPGrantStatus.Revoked
-            else -> MCPGrantStatus.Other(v)
+            "active" -> OAuthGrantStatus.Active
+            "expired" -> OAuthGrantStatus.Expired
+            "revoked" -> OAuthGrantStatus.Revoked
+            else -> OAuthGrantStatus.Other(v)
         }
     }
 }
@@ -748,9 +748,9 @@ data class PreferencesResp(
 @Serializable
 data class UpdatePreferencesReq(val settings: UserSettings)
 
-/** MCPGrantResp describes one user-authorized remote MCP client grant. */
+/** OAuthGrantResp describes one user-authorized remote MCP client grant. */
 @Serializable
-data class MCPGrantResp(
+data class OAuthGrantResp(
     val id: String,
     @SerialName("clientID") val clientID: String,
     val clientName: String,
@@ -760,16 +760,16 @@ data class MCPGrantResp(
     val lastUsedAt: Instant? = null,
     val expiresAt: Instant,
     val revokedAt: Instant? = null,
-    val status: MCPGrantStatus,
+    val status: OAuthGrantStatus,
 )
 
-/** MCPGrantsResp is the response for GET /api/caic/v1/server/mcp-grants. */
+/** OAuthGrantsResp is the response for GET /api/caic/v1/oauth/grants. */
 @Serializable
-data class MCPGrantsResp(val grants: List<MCPGrantResp>)
+data class OAuthGrantsResp(val grants: List<OAuthGrantResp>)
 
-/** RevokeMCPGrantReq is the request for POST /api/caic/v1/server/mcp-grants/{grantID}/revoke. */
+/** RevokeOAuthGrantReq is the request for POST /api/caic/v1/oauth/grants/{grantID}/revoke. */
 @Serializable
-class RevokeMCPGrantReq
+class RevokeOAuthGrantReq
 
 /** HarnessInfo is the JSON representation of an available harness. */
 @Serializable

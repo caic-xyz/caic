@@ -2251,7 +2251,7 @@ func TestBuildHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
 		}
-		token, err := s.mcp.oauth.issueAccessToken("https://caic.example.com", &user, "https://caic.example.com/api/caic/v1/mcp", mcpScopeTasksRead, "")
+		token, err := s.oauth.issueAccessToken("https://caic.example.com", &user, "https://caic.example.com/api/caic/v1/mcp", mcpScopeTasksRead, "")
 		if err != nil {
 			t.Fatalf("issue access token: %v", err)
 		}
@@ -2332,7 +2332,7 @@ func TestBuildHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
 		}
-		token, err := s.mcp.oauth.issueAccessToken("https://caic.example.com", &user, "https://caic.example.com/api/wrong", mcpScopeTasksRead, "")
+		token, err := s.oauth.issueAccessToken("https://caic.example.com", &user, "https://caic.example.com/api/wrong", mcpScopeTasksRead, "")
 		if err != nil {
 			t.Fatalf("issue access token: %v", err)
 		}
@@ -2371,7 +2371,7 @@ func TestBuildHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
 		}
-		token, err := s.mcp.oauth.issueAccessToken("https://caic.example.com", &user, "https://caic.example.com/api/caic/v1/mcp", mcpScopeTasksRead, "")
+		token, err := s.oauth.issueAccessToken("https://caic.example.com", &user, "https://caic.example.com/api/caic/v1/mcp", mcpScopeTasksRead, "")
 		if err != nil {
 			t.Fatalf("issue access token: %v", err)
 		}
@@ -2423,7 +2423,7 @@ func TestBuildHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
 		}
-		token, err := s.mcp.oauth.issueAccessToken("https://caic.example.com", &user, "https://caic.example.com/api/caic/v1/mcp", mcpScopeTasksRead, "")
+		token, err := s.oauth.issueAccessToken("https://caic.example.com", &user, "https://caic.example.com/api/caic/v1/mcp", mcpScopeTasksRead, "")
 		if err != nil {
 			t.Fatalf("issue access token: %v", err)
 		}

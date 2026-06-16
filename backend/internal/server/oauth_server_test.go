@@ -41,7 +41,7 @@ func TestOAuthServer(t *testing.T) {
 			if rotated.TokenType != mcp.OAuthTokenTypeBearer || rotated.Scope != tokenResp.Scope {
 				t.Fatalf("rotated token metadata = %+v", rotated)
 			}
-			if _, _, err := s.mcp.verifyMCPBearer(newMCPBearerRequest(t), rotated.AccessToken); err != nil {
+			if _, _, err := s.oauth.verifyBearer(newMCPBearerRequest(t), rotated.AccessToken); err != nil {
 				t.Fatalf("verify rotated access token: %v", err)
 			}
 			refreshMCPToken(t, h, registered.ClientID, tokenResp.RefreshToken, http.StatusBadRequest)
@@ -55,7 +55,9 @@ func TestOAuthServer(t *testing.T) {
 			restarted.hostState = auth.NewHostState("https://caic.example.com")
 			restarted.sessionSecret = []byte("0123456789abcdef0123456789abcdef")
 			restarted.authStore = s.authStore
-			restarted.mcp.refreshTokenStorePath = s.mcp.refreshTokenStorePath
+			if err := restarted.oauth.SetRefreshTokenStorePath(s.oauth.refreshTokenStorePath); err != nil {
+				t.Fatalf("SetRefreshTokenStorePath: %v", err)
+			}
 			h := mustBuildMCPOAuthLifecycleHandler(t, restarted)
 
 			tokenResp := authorizeMCPClient(t, h, &user, &registered)
@@ -73,10 +75,12 @@ func TestOAuthServer(t *testing.T) {
 			restarted.hostState = auth.NewHostState("https://caic.example.com")
 			restarted.sessionSecret = []byte("0123456789abcdef0123456789abcdef")
 			restarted.authStore = s.authStore
-			restarted.mcp.refreshTokenStorePath = s.mcp.refreshTokenStorePath
+			if err := restarted.oauth.SetRefreshTokenStorePath(s.oauth.refreshTokenStorePath); err != nil {
+				t.Fatalf("SetRefreshTokenStorePath: %v", err)
+			}
 			h := mustBuildMCPOAuthLifecycleHandler(t, restarted)
 
-			grants := listMCPGrants(t, h, &user)
+			grants := listOAuthGrants(t, h, &user)
 			if len(grants.Grants) != 1 || grants.Grants[0].ClientName != "Claude" || grants.Grants[0].ClientID != registered.ClientID {
 				t.Fatalf("grants after restart = %+v", grants.Grants)
 			}
@@ -130,7 +134,7 @@ func TestOAuthServer(t *testing.T) {
 				t.Fatalf("revoke status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 			}
 
-			events := readMCPAuditEvents(t, path)
+			events := readAuditEvents(t, path)
 			seen := map[string]struct{}{}
 			for _, event := range events {
 				seen[event.Operation+":"+event.Status] = struct{}{}
@@ -159,7 +163,7 @@ func TestOAuthServer(t *testing.T) {
 			s, h, user, registered := newMCPOAuthLifecycleRouter(t)
 			authorizeMCPClient(t, h, &user, &registered)
 
-			grants := listMCPGrants(t, h, &user)
+			grants := listOAuthGrants(t, h, &user)
 			if len(grants.Grants) != 1 {
 				t.Fatalf("grants = %+v, want one", grants.Grants)
 			}
@@ -173,7 +177,7 @@ func TestOAuthServer(t *testing.T) {
 			if strings.Join(grant.Scopes, " ") != mcpScopeRead+" "+mcpScopeTasksRead {
 				t.Fatalf("grant scopes = %#v", grant.Scopes)
 			}
-			if grant.CreatedAt.IsZero() || grant.ExpiresAt.IsZero() || grant.Status != v1.MCPGrantStatusActive {
+			if grant.CreatedAt.IsZero() || grant.ExpiresAt.IsZero() || grant.Status != v1.OAuthGrantStatusActive {
 				t.Fatalf("grant timestamps/status = %+v", grant)
 			}
 
@@ -181,7 +185,7 @@ func TestOAuthServer(t *testing.T) {
 			if err != nil {
 				t.Fatalf("upsert bob: %v", err)
 			}
-			bobGrants := listMCPGrants(t, h, &bob)
+			bobGrants := listOAuthGrants(t, h, &bob)
 			if len(bobGrants.Grants) != 0 {
 				t.Fatalf("bob grants = %+v, want none", bobGrants.Grants)
 			}
@@ -194,7 +198,7 @@ func TestOAuthServer(t *testing.T) {
 			secondClient := registerTestClient(t, h, "Codex", []string{"https://codex.example.com/auth/callback"})
 			second := authorizeMCPClientWithRedirect(t, h, &user, &secondClient, "https://codex.example.com/auth/callback")
 
-			grants := listMCPGrants(t, h, &user)
+			grants := listOAuthGrants(t, h, &user)
 			if len(grants.Grants) != 2 {
 				t.Fatalf("grants = %+v, want two", grants.Grants)
 			}
@@ -211,10 +215,10 @@ func TestOAuthServer(t *testing.T) {
 			if err != nil {
 				t.Fatalf("upsert bob: %v", err)
 			}
-			revokeMCPGrant(t, h, &bob, firstGrantID, http.StatusNotFound)
+			revokeOAuthGrant(t, h, &bob, firstGrantID, http.StatusNotFound)
 			first = refreshMCPToken(t, h, registered.ClientID, first.RefreshToken, http.StatusOK)
 
-			revokeMCPGrant(t, h, &user, firstGrantID, http.StatusOK)
+			revokeOAuthGrant(t, h, &user, firstGrantID, http.StatusOK)
 			refreshMCPToken(t, h, registered.ClientID, first.RefreshToken, http.StatusBadRequest)
 			refreshMCPToken(t, h, secondClient.ClientID, second.RefreshToken, http.StatusOK)
 		})
@@ -240,9 +244,9 @@ func TestOAuthServer(t *testing.T) {
 			if err != nil {
 				t.Fatalf("generate refresh token: %v", err)
 			}
-			s.mcp.oauth.mu.Lock()
-			s.mcp.oauth.refreshTokens[oauthRefreshTokenKey(opaque)] = oauthRefreshToken{UserID: user.ID, ClientID: registered.ClientID, Resource: "https://caic.example.com/api/caic/v1/mcp", Scope: mcpScopeRead, ExpiresAt: time.Now().Add(-time.Minute)}
-			s.mcp.oauth.mu.Unlock()
+			s.oauth.mu.Lock()
+			s.oauth.refreshTokens[oauthRefreshTokenKey(opaque)] = oauthRefreshToken{UserID: user.ID, ClientID: registered.ClientID, Resource: "https://caic.example.com/api/caic/v1/mcp", Scope: mcpScopeRead, ExpiresAt: time.Now().Add(-time.Minute)}
+			s.oauth.mu.Unlock()
 
 			refreshMCPToken(t, h, registered.ClientID, opaque, http.StatusBadRequest)
 		})
@@ -254,9 +258,9 @@ func TestOAuthServer(t *testing.T) {
 			if err != nil {
 				t.Fatalf("generate refresh token: %v", err)
 			}
-			s.mcp.oauth.mu.Lock()
-			s.mcp.oauth.refreshTokens[oauthRefreshTokenKey(opaque)] = oauthRefreshToken{UserID: "usr_missing", ClientID: registered.ClientID, Resource: "https://caic.example.com/api/caic/v1/mcp", Scope: mcpScopeRead, ExpiresAt: time.Now().Add(time.Hour)}
-			s.mcp.oauth.mu.Unlock()
+			s.oauth.mu.Lock()
+			s.oauth.refreshTokens[oauthRefreshTokenKey(opaque)] = oauthRefreshToken{UserID: "usr_missing", ClientID: registered.ClientID, Resource: "https://caic.example.com/api/caic/v1/mcp", Scope: mcpScopeRead, ExpiresAt: time.Now().Add(time.Hour)}
+			s.oauth.mu.Unlock()
 
 			refreshMCPToken(t, h, registered.ClientID, opaque, http.StatusBadRequest)
 		})
@@ -821,7 +825,9 @@ func newMCPOAuthLifecycleRouter(t *testing.T) (*testRouter, http.Handler, auth.U
 		t.Fatalf("upsert user: %v", err)
 	}
 	s.authStore = store
-	s.mcp.refreshTokenStorePath = t.TempDir() + "/mcp_oauth_refresh_tokens.json"
+	if err := s.oauth.SetRefreshTokenStorePath(t.TempDir() + "/mcp_oauth_refresh_tokens.json"); err != nil {
+		t.Fatalf("SetRefreshTokenStorePath: %v", err)
+	}
 	h, err := s.buildHandler()
 	if err != nil {
 		t.Fatalf("buildHandler() error = %v", err)
@@ -936,8 +942,8 @@ func authorizeMCPClientWithRedirect(t *testing.T, h http.Handler, user *auth.Use
 	return tokenResp
 }
 
-func listMCPGrants(t *testing.T, h http.Handler, user *auth.User) v1.MCPGrantsResp {
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/mcp-grants", http.NoBody)
+func listOAuthGrants(t *testing.T, h http.Handler, user *auth.User) v1.OAuthGrantsResp {
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/oauth/grants", http.NoBody)
 	req.Host = "caic.example.com"
 	addTestSessionCookie(t, req, user)
 	w := httptest.NewRecorder()
@@ -945,15 +951,15 @@ func listMCPGrants(t *testing.T, h http.Handler, user *auth.User) v1.MCPGrantsRe
 	if w.Code != http.StatusOK {
 		t.Fatalf("list MCP grants status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 	}
-	var grants v1.MCPGrantsResp
+	var grants v1.OAuthGrantsResp
 	if err := json.NewDecoder(w.Body).Decode(&grants); err != nil {
 		t.Fatal(err)
 	}
 	return grants
 }
 
-func revokeMCPGrant(t *testing.T, h http.Handler, user *auth.User, grantID string, wantStatus int) {
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp-grants/"+grantID+"/revoke", http.NoBody)
+func revokeOAuthGrant(t *testing.T, h http.Handler, user *auth.User, grantID string, wantStatus int) {
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/oauth/grants/"+grantID+"/revoke", http.NoBody)
 	req.Host = "caic.example.com"
 	addTestSessionCookie(t, req, user)
 	w := httptest.NewRecorder()
@@ -1004,7 +1010,7 @@ func newMCPBearerRequest(t *testing.T) *http.Request {
 }
 
 func signTestMCPAccessToken(t *testing.T, s *testRouter, issuer string, user *auth.User, audience, scope string, issuedAt, expiresAt time.Time) string {
-	headerJSON, err := json.Marshal(map[string]string{"alg": mcp.JWTAlgRS256, "typ": "JWT", "kid": s.mcp.oauth.kid})
+	headerJSON, err := json.Marshal(map[string]string{"alg": mcp.JWTAlgRS256, "typ": "JWT", "kid": s.oauth.kid})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1024,7 +1030,7 @@ func signTestMCPAccessToken(t *testing.T, s *testRouter, issuer string, user *au
 	}
 	signingInput := base64.RawURLEncoding.EncodeToString(headerJSON) + "." + base64.RawURLEncoding.EncodeToString(payloadJSON)
 	digest := sha256.Sum256([]byte(signingInput))
-	signature, err := s.mcp.oauth.key.Sign(rand.Reader, digest[:], crypto.SHA256)
+	signature, err := s.oauth.key.Sign(rand.Reader, digest[:], crypto.SHA256)
 	if err != nil {
 		t.Fatal(err)
 	}

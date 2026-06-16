@@ -74,8 +74,8 @@ const (
 // pathSegmentRe matches valid path segments: starts with alphanumeric, then alphanumeric, dots, hyphens, or underscores.
 var pathSegmentRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
-// Validate checks that the MCP grant path parameter is present.
-func (r *RevokeMCPGrantReq) Validate() error {
+// Validate checks that the OAuth grant path parameter is present.
+func (r *RevokeOAuthGrantReq) Validate() error {
 	if r.GrantID == "" {
 		return api.BadRequest("grantID is required")
 	}

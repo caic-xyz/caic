@@ -77,7 +77,7 @@ type caicToolRegistry struct {
 	tasks        *taskAPIService
 	ci           *ciHandlers
 	usage        *usageHandlers
-	audit        *mcpAuditStore
+	audit        *auditStore
 }
 
 func (c *caicToolRegistry) Instructions(ctx context.Context) (string, error) {
@@ -108,7 +108,7 @@ func (c *caicToolRegistry) CallTool(ctx context.Context, name string, argsJSON j
 			continue
 		}
 		if authResult, ok := c.authorizeTool(ctx, name); !ok {
-			c.audit.record(ctx, &mcpAuditEvent{Operation: "tools/call", Name: name, Args: auditArgsSummary(argsJSON), Decision: authResult})
+			c.audit.record(ctx, &auditEvent{Operation: "tools/call", Name: name, Args: auditArgsSummary(argsJSON), Decision: authResult})
 			return mcp.RawToolResult{Meta: mcp.MetaObject{"mcp/www_authenticate": []string{mcpScopeChallenge(requiredScopeForTool(name))}}, Structured: mcp.ErrorOutput{Error: authResult}, IsError: true}, nil
 		}
 		res, err := s.Handler(ctx, argsJSON)
@@ -119,7 +119,7 @@ func (c *caicToolRegistry) CallTool(ctx context.Context, name string, argsJSON j
 			status = "tool_error"
 		}
 		res.Structured = redactForJSON(res.Structured)
-		c.audit.record(ctx, &mcpAuditEvent{Operation: "tools/call", Name: name, Args: auditArgsSummary(argsJSON), Decision: "allow", Status: status})
+		c.audit.record(ctx, &auditEvent{Operation: "tools/call", Name: name, Args: auditArgsSummary(argsJSON), Decision: "allow", Status: status})
 		return res, err
 	}
 	return mcp.RawToolResult{}, mcp.ErrInvalidParams("unknown tool: %s", name)
@@ -147,20 +147,20 @@ func (c *caicToolRegistry) ListResources(ctx context.Context) mcp.ResourcesListR
 
 func (c *caicToolRegistry) ReadResource(ctx context.Context, uri string) (mcp.ResourcesReadResult, error) {
 	if authResult, ok := authorizeResource(ctx, uri); !ok {
-		c.audit.record(ctx, &mcpAuditEvent{Operation: "resources/read", Name: uri, Decision: authResult})
+		c.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: authResult})
 		return mcp.ResourcesReadResult{}, mcp.ErrInvalidParams("%s", authResult)
 	}
 	taskList, repos := c.currentTasksAndRepos(ctx)
 	switch {
 	case uri == "caic://repos":
-		c.audit.record(ctx, &mcpAuditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
+		c.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
 		return redactedResourceJSON(uri, repos)
 	case uri == "caic://tasks":
-		c.audit.record(ctx, &mcpAuditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
+		c.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
 		return redactedResourceJSON(uri, taskList)
 	case uri == "caic://usage":
 		usage := c.usage.buildResp(ctx)
-		c.audit.record(ctx, &mcpAuditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
+		c.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
 		return redactedResourceJSON(uri, usage)
 	case strings.HasPrefix(uri, "caic://repos/"):
 		name, err := url.PathUnescape(strings.TrimPrefix(uri, "caic://repos/"))
@@ -169,7 +169,7 @@ func (c *caicToolRegistry) ReadResource(ctx context.Context, uri string) (mcp.Re
 		}
 		for i := range repos {
 			if repos[i].Path == name {
-				c.audit.record(ctx, &mcpAuditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
+				c.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
 				return redactedResourceJSON(uri, repos[i])
 			}
 		}
@@ -178,7 +178,7 @@ func (c *caicToolRegistry) ReadResource(ctx context.Context, uri string) (mcp.Re
 		id := strings.TrimPrefix(uri, "caic://tasks/")
 		for i := range taskList {
 			if taskList[i].ID.String() == id {
-				c.audit.record(ctx, &mcpAuditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
+				c.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
 				return redactedResourceJSON(uri, taskList[i])
 			}
 		}

@@ -216,16 +216,16 @@ public struct Harness: Codable, Equatable, Hashable {
     }
 }
 
-public struct MCPGrantStatus: Codable, Equatable, Hashable {
+public struct OAuthGrantStatus: Codable, Equatable, Hashable {
     public let value: String
 
     public init(_ value: String) { self.value = value }
 
-    public static let Active = MCPGrantStatus("active")
-    public static let Expired = MCPGrantStatus("expired")
-    public static let Revoked = MCPGrantStatus("revoked")
+    public static let Active = OAuthGrantStatus("active")
+    public static let Expired = OAuthGrantStatus("expired")
+    public static let Revoked = OAuthGrantStatus("revoked")
 
-    public static func other(_ value: String) -> MCPGrantStatus { MCPGrantStatus(value) }
+    public static func other(_ value: String) -> OAuthGrantStatus { OAuthGrantStatus(value) }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.singleValueContainer()
@@ -489,8 +489,8 @@ public struct UpdatePreferencesReq: Codable {
     public let settings: UserSettings
 }
 
-/// MCPGrantResp describes one user-authorized remote MCP client grant.
-public struct MCPGrantResp: Codable {
+/// OAuthGrantResp describes one user-authorized remote MCP client grant.
+public struct OAuthGrantResp: Codable {
     public let id: String
     public let clientID: String
     public let clientName: String
@@ -500,16 +500,16 @@ public struct MCPGrantResp: Codable {
     public let lastUsedAt: ISOTimestamp?
     public let expiresAt: ISOTimestamp
     public let revokedAt: ISOTimestamp?
-    public let status: MCPGrantStatus
+    public let status: OAuthGrantStatus
 }
 
-/// MCPGrantsResp is the response for GET /api/caic/v1/server/mcp-grants.
-public struct MCPGrantsResp: Codable {
-    public let grants: [MCPGrantResp]
+/// OAuthGrantsResp is the response for GET /api/caic/v1/oauth/grants.
+public struct OAuthGrantsResp: Codable {
+    public let grants: [OAuthGrantResp]
 }
 
-/// RevokeMCPGrantReq is the request for POST /api/caic/v1/server/mcp-grants/{grantID}/revoke.
-public struct RevokeMCPGrantReq: Codable {
+/// RevokeOAuthGrantReq is the request for POST /api/caic/v1/oauth/grants/{grantID}/revoke.
+public struct RevokeOAuthGrantReq: Codable {
 }
 
 /// HarnessInfo is the JSON representation of an available harness.
