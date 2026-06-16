@@ -867,6 +867,9 @@ func newMCPOAuthLifecycleRouter(t *testing.T) (*testRouter, http.Handler, auth.U
 	if err := json.NewDecoder(w.Body).Decode(&registered); err != nil {
 		t.Fatal(err)
 	}
+	if !strings.HasPrefix(registered.ClientID, "caic_") {
+		t.Fatalf("registered.ClientID = %q, want caic_ prefix", registered.ClientID)
+	}
 	return tr, h, user, registered
 }
 

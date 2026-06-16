@@ -472,7 +472,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 	// OAuth server — only when auth is configured.
 	if d.AuthStore != nil {
 		var err error
-		s.oauth, err = newOAuthServer(d.OAuthPrivateKeyPEM, d.OAuthKeyID, d.OAuthRefreshTokenStorePath, "/api/caic/v1/mcp", []string{mcpScopeRead, mcpScopeTasksRead, mcpScopeTasksWrite, mcpScopeTasksAdmin, mcpScopeReposWrite}, []string{mcpScopeRead, mcpScopeTasksRead}, mcpScopeLabels, d.AuthStore, d.HostState, s.authHandlers, audit, rateLimiter)
+		s.oauth, err = newOAuthServer(d.OAuthPrivateKeyPEM, d.OAuthKeyID, d.OAuthRefreshTokenStorePath, "/api/caic/v1/mcp", "/.well-known/oauth-protected-resource/api/caic/v1/mcp", "caic_", []string{mcpScopeRead, mcpScopeTasksRead, mcpScopeTasksWrite, mcpScopeTasksAdmin, mcpScopeReposWrite}, []string{mcpScopeRead, mcpScopeTasksRead}, mcpScopeLabels, d.AuthStore, d.HostState, s.authHandlers, audit, rateLimiter)
 		if err != nil {
 			return nil, err
 		}

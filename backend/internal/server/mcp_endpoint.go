@@ -30,6 +30,7 @@ type mcpServer struct {
 // are applied here; bearer authentication is applied upstream by the Router via
 // oauthServer.BearerAuth middleware.
 func (s *mcpServer) handleMCP(w http.ResponseWriter, r *http.Request) {
+	r = requestWithMCPPrincipal(r)
 	if err := s.validateMCPOrigin(r); err != nil {
 		http.Error(w, "forbidden: invalid origin", http.StatusForbidden)
 		return
@@ -38,6 +39,25 @@ func (s *mcpServer) handleMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.protocol.HandleMCP(w, r)
+}
+
+func requestWithMCPPrincipal(r *http.Request) *http.Request {
+	if _, ok := mcpPrincipalFromContext(r.Context()); ok {
+		return r
+	}
+	claims, ok := bearerClaimsFromContext(r.Context())
+	if !ok {
+		return r
+	}
+	principal := &mcpPrincipal{
+		Subject:  claims.Subject,
+		Username: claims.Username,
+		Issuer:   claims.Issuer,
+		Audience: claims.Audience,
+		Scopes:   claims.Scopes,
+		Remote:   true,
+	}
+	return r.WithContext(newMCPPrincipalContext(r.Context(), principal))
 }
 
 func (s *mcpServer) allowMCPRequest(w http.ResponseWriter, r *http.Request) bool {
@@ -115,9 +135,9 @@ var mcpScopeLabels = map[string]string{
 	mcpScopeReposWrite: "Manage repositories",
 }
 
-// mcpPrincipal types are MCP protocol concepts shared by oauthServer (which
-// sets the principal in context via the BearerAuth middleware) and
-// caicToolRegistry (which checks scopes on tool/resource access).
+// mcpPrincipal types are MCP protocol concepts shared by the endpoint (which
+// adapts OAuth bearer claims) and caicToolRegistry (which checks scopes on
+// tool/resource access).
 
 type mcpPrincipalContextKey struct{}
 

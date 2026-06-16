@@ -1,4 +1,4 @@
-// caic OAuth authorization server: authorization code grant with PKCE (RFC 7636),
+// OAuth authorization server: authorization code grant with PKCE (RFC 7636),
 // authorization server metadata (RFC 8414), protected resource metadata
 // (RFC 9728), JWKS (RFC 7517), dynamic client registration (RFC 7591), token
 // revocation (RFC 7009), OpenID Connect Discovery, and a consent page.
@@ -68,14 +68,14 @@ type oauthScopeItem struct {
 	Checked bool
 }
 
-// oauthServer stores caic's OAuth state for remote MCP clients.
+// oauthServer stores OAuth state for remote clients.
 //
 // Clients use Authorization Code with PKCE S256. Authorization always requires
-// a caic web session, so an unauthenticated browser request is sent through caic
-// login before consent is shown. Access tokens are caic-scoped JWTs. Refresh
-// tokens are caic-scoped opaque tokens, persisted as hashes, and rotated on
+// a web session, so an unauthenticated browser request is sent through login
+// before consent is shown. Access tokens are resource-scoped JWTs. Refresh
+// tokens are resource-scoped opaque tokens, persisted as hashes, and rotated on
 // every refresh grant. Dynamic client registrations and user grants are durable
-// so clients survive restarts and users can revoke individual MCP client grants
+// so clients survive restarts and users can revoke individual client grants
 // from settings.
 type oauthServer struct {
 	mu                    sync.Mutex
@@ -93,7 +93,9 @@ type oauthServer struct {
 
 	scopeLabels map[string]string // human-readable labels for supported scopes.
 
-	resourceURLPath string // e.g. "/api/caic/v1/mcp"
+	resourceURLPath         string
+	resourceMetadataURLPath string
+	clientIDPrefix          string
 
 	// Shared dependencies (not owned).
 	authStore    *auth.Store
@@ -191,7 +193,7 @@ func providerLabel(provider string) string {
 	}
 }
 
-func newOAuthServer(keyPEM []byte, kid, refreshTokenStorePath, resourceURLPath string, supportedScopes, defaultScopes []string, scopeLabels map[string]string, authStore *auth.Store, hostState *auth.HostState, authHandlers *authHandlers, audit *auditStore, rateLimiter *rateLimiter) (*oauthServer, error) {
+func newOAuthServer(keyPEM []byte, kid, refreshTokenStorePath, resourceURLPath, resourceMetadataURLPath, clientIDPrefix string, supportedScopes, defaultScopes []string, scopeLabels map[string]string, authStore *auth.Store, hostState *auth.HostState, authHandlers *authHandlers, audit *auditStore, rateLimiter *rateLimiter) (*oauthServer, error) {
 	var key *rsa.PrivateKey
 	if len(keyPEM) > 0 {
 		block, _ := pem.Decode(keyPEM)
@@ -222,23 +224,25 @@ func newOAuthServer(keyPEM []byte, kid, refreshTokenStorePath, resourceURLPath s
 		return nil, err
 	}
 	return &oauthServer{
-		clients:               clients,
-		codes:                 map[string]oauthCode{},
-		consents:              map[string]oauthConsent{},
-		refreshTokens:         refreshTokens,
-		grants:                grants,
-		refreshTokenStorePath: refreshTokenStorePath,
-		key:                   key,
-		kid:                   kid,
-		supportedScopes:       supportedScopes,
-		defaultScopes:         defaultScopes,
-		authStore:             authStore,
-		hostState:             hostState,
-		authHandlers:          authHandlers,
-		scopeLabels:           scopeLabels,
-		audit:                 audit,
-		rateLimiter:           rateLimiter,
-		resourceURLPath:       resourceURLPath,
+		clients:                 clients,
+		codes:                   map[string]oauthCode{},
+		consents:                map[string]oauthConsent{},
+		refreshTokens:           refreshTokens,
+		grants:                  grants,
+		refreshTokenStorePath:   refreshTokenStorePath,
+		key:                     key,
+		kid:                     kid,
+		supportedScopes:         supportedScopes,
+		defaultScopes:           defaultScopes,
+		authStore:               authStore,
+		hostState:               hostState,
+		authHandlers:            authHandlers,
+		scopeLabels:             scopeLabels,
+		audit:                   audit,
+		rateLimiter:             rateLimiter,
+		resourceURLPath:         resourceURLPath,
+		resourceMetadataURLPath: resourceMetadataURLPath,
+		clientIDPrefix:          clientIDPrefix,
 	}, nil
 }
 
@@ -258,9 +262,7 @@ func (s *oauthServer) SetRefreshTokenStorePath(path string) error {
 	return nil
 }
 
-// bearerClaims holds the verified bearer token claims independent of any
-// protocol-specific principal type. BearerAuth converts these into the
-// MCP-specific mcpPrincipal at the boundary.
+// bearerClaims holds the verified bearer token claims.
 type bearerClaims struct {
 	User     auth.User
 	Subject  string
@@ -270,10 +272,21 @@ type bearerClaims struct {
 	Scopes   []string
 }
 
+type bearerClaimsContextKey struct{}
+
+func newBearerClaimsContext(ctx context.Context, claims *bearerClaims) context.Context {
+	return context.WithValue(ctx, bearerClaimsContextKey{}, claims)
+}
+
+func bearerClaimsFromContext(ctx context.Context) (*bearerClaims, bool) {
+	claims, ok := ctx.Value(bearerClaimsContextKey{}).(*bearerClaims)
+	return claims, ok && claims != nil
+}
+
 // BearerAuth is an HTTP middleware that verifies OAuth bearer tokens. On success
-// the authenticated user and mcpPrincipal are set in the request context.
+// the authenticated user and bearer claims are set in the request context.
 // Requests without a bearer token are rejected with 401 unless the request
-// already carries a session user (allowing caic's own web UI to use MCP).
+// already carries a session user.
 func (s *oauthServer) BearerAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := BearerToken(r)
@@ -291,15 +304,7 @@ func (s *oauthServer) BearerAuth(next http.Handler) http.Handler {
 			return
 		}
 		ctx := auth.NewContext(r.Context(), &claims.User)
-		principal := &mcpPrincipal{
-			Subject:  claims.Subject,
-			Username: claims.Username,
-			Issuer:   claims.Issuer,
-			Audience: claims.Audience,
-			Scopes:   claims.Scopes,
-			Remote:   true,
-		}
-		ctx = newMCPPrincipalContext(ctx, principal)
+		ctx = newBearerClaimsContext(ctx, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -449,7 +454,7 @@ func (s *oauthServer) handleOAuthRegister(w http.ResponseWriter, r *http.Request
 		return
 	}
 	now := time.Now()
-	client := oauthClient{ID: "caic_" + clientID, Name: req.ClientName, RedirectURIs: req.RedirectURIs, TokenEndpointAuthMethod: method, CreatedAt: now}
+	client := oauthClient{ID: s.clientIDPrefix + clientID, Name: req.ClientName, RedirectURIs: req.RedirectURIs, TokenEndpointAuthMethod: method, CreatedAt: now}
 	if err := s.registerClient(&client); err != nil {
 		slog.WarnContext(r.Context(), "save oauth client registration", "err", err)
 		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not register client")
@@ -470,7 +475,7 @@ func (s *oauthServer) handleOAuthAuthorizeGET(w http.ResponseWriter, r *http.Req
 			http.Redirect(w, r, loginURL, http.StatusFound)
 			return
 		}
-		writeOAuthError(w, http.StatusUnauthorized, "login_required", "log in to caic before authorizing MCP access")
+		writeOAuthError(w, http.StatusUnauthorized, "login_required", "log in before authorizing protected resource access")
 		return
 	}
 	if err := s.validateAuthorizeRequest(r); err != nil {
@@ -517,7 +522,7 @@ func (s *oauthServer) handleOAuthAuthorizeGET(w http.ResponseWriter, r *http.Req
 func (s *oauthServer) handleOAuthAuthorizePOST(w http.ResponseWriter, r *http.Request) {
 	user, ok := auth.UserFromContext(r.Context())
 	if !ok {
-		writeOAuthError(w, http.StatusUnauthorized, "login_required", "log in to caic before authorizing MCP access")
+		writeOAuthError(w, http.StatusUnauthorized, "login_required", "log in before authorizing protected resource access")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
@@ -789,7 +794,7 @@ func (s *oauthServer) validateAuthorizeForm(r *http.Request, values url.Values) 
 		return errors.New("resource is required")
 	}
 	if resource != s.externalBaseURL(r)+s.resourceURLPath {
-		return errors.New("resource must match the caic MCP endpoint")
+		return errors.New("resource must match the protected resource")
 	}
 	if _, err := s.normalizeScope(values.Get("scope")); err != nil {
 		return err
@@ -1201,14 +1206,13 @@ func clientDisplayName(client *oauthClient) string {
 	if client.ID != "" {
 		return client.ID
 	}
-	return "remote MCP client"
+	return "remote OAuth client"
 }
 
-// handleProtectedResourceMetadata writes the MCP protected-resource metadata
-// for the OAuth-protected MCP endpoint (RFC 9728).
+// handleProtectedResourceMetadata writes protected-resource metadata (RFC 9728).
 func (s *oauthServer) handleProtectedResourceMetadata(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
-	if path != "/.well-known/oauth-protected-resource" && path != "/.well-known/oauth-protected-resource/api/caic/v1/mcp" {
+	if path != "/.well-known/oauth-protected-resource" && path != s.resourceMetadataURLPath {
 		http.NotFound(w, r)
 		return
 	}
@@ -1293,11 +1297,11 @@ func (s *oauthServer) verifyBearer(r *http.Request, token string) (*bearerClaims
 	}, nil
 }
 
-// writeUnauthorized writes a 401 with the MCP bearer challenge so clients can
+// writeUnauthorized writes a 401 with the bearer challenge so clients can
 // discover the authorization server.
 func (s *oauthServer) writeUnauthorized(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/api/caic/v1/mcp" {
-		resourceMetadataURL := s.externalBaseURL(r) + "/.well-known/oauth-protected-resource/api/caic/v1/mcp"
+	if r.URL.Path == s.resourceURLPath && s.resourceMetadataURLPath != "" {
+		resourceMetadataURL := s.externalBaseURL(r) + s.resourceMetadataURLPath
 		w.Header().Set("WWW-Authenticate", BearerChallenge(resourceMetadataURL, strings.Join(s.supportedScopes, " ")))
 	}
 	writeUnauthorizedJSON(w)
@@ -1348,7 +1352,7 @@ func oauthGrantResponse(grant *oauthGrant, now time.Time) v1.OAuthGrantResp {
 }
 
 // grantRoutes returns the handler for OAuth client grant management. Patterns
-// are relative to the /api/caic/v1 version prefix, stripped at mount time.
+// are relative to the API version prefix, stripped at mount time.
 func (s *oauthServer) grantRoutes() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("GET /oauth/grants", handle(s.listOAuthGrants))
