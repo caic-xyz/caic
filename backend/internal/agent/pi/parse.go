@@ -309,11 +309,25 @@ func parseToolExecStart(line []byte) ([]agent.Message, error) {
 	if _, ok := agent.WidgetToolNames[name]; ok {
 		return []agent.Message{agent.NewWidgetMessage(ev.ToolCallID, input)}, nil
 	}
-	return []agent.Message{&agent.ToolUseMessage{
+	use := &agent.ToolUseMessage{
 		ToolUseID: ev.ToolCallID,
 		Name:      name,
 		Input:     input,
-	}}, nil
+	}
+	// Spawning subagents emits a SubagentStartMessage so the live progress panel
+	// surfaces the orchestration; introspection calls (list/status) spawn none.
+	if strings.EqualFold(ev.ToolName, subagentToolName) {
+		if info := parseSubagentArgs(input); len(info.Spawns) > 0 {
+			return []agent.Message{
+				&agent.SubagentStartMessage{
+					TaskID:      ev.ToolCallID,
+					Description: subagentDescription(info.Kind, info.Spawns),
+				},
+				use,
+			}, nil
+		}
+	}
+	return []agent.Message{use}, nil
 }
 
 // parseToolExecUpdate converts a tool_execution_update event to a streaming delta.
@@ -323,7 +337,7 @@ func parseToolExecUpdate(line []byte) ([]agent.Message, error) {
 		return nil, fmt.Errorf("unmarshal tool_execution_update: %w", err)
 	}
 	s := ev.PartialResult.Text()
-	if s == "" {
+	if s == "" || s == runningPlaceholder {
 		return nil, nil
 	}
 	return []agent.Message{&agent.ToolOutputDeltaMessage{
@@ -332,22 +346,38 @@ func parseToolExecUpdate(line []byte) ([]agent.Message, error) {
 	}}, nil
 }
 
-// parseToolExecEnd converts a tool_execution_end event.
+// parseToolExecEnd converts a tool_execution_end event. Subagent tool calls also
+// emit a SubagentEndMessage to close out the progress panel, and surface their
+// aggregated result text as tool output so the orchestration outcome is visible.
 func parseToolExecEnd(line []byte) ([]agent.Message, error) {
 	var ev pi.ToolExecEndEvent
 	if err := json.Unmarshal(line, &ev); err != nil {
 		return nil, fmt.Errorf("unmarshal tool_execution_end: %w", err)
 	}
-	msg := &agent.ToolResultMessage{ToolUseID: ev.ToolCallID}
+	resultText := ev.Result.Text()
+	res := &agent.ToolResultMessage{ToolUseID: ev.ToolCallID}
 	if ev.IsError {
-		// Try to extract error string from result.
-		if s := ev.Result.Text(); s != "" {
-			msg.Error = s
+		if resultText != "" {
+			res.Error = resultText
 		} else {
-			msg.Error = "tool execution failed"
+			res.Error = "tool execution failed"
 		}
 	}
-	return []agent.Message{msg}, nil
+	if !strings.EqualFold(ev.ToolName, subagentToolName) {
+		return []agent.Message{res}, nil
+	}
+	msgs := []agent.Message{&agent.SubagentEndMessage{
+		TaskID: ev.ToolCallID,
+		Status: subagentStatus(ev.IsError, resultText),
+	}}
+	// On success the result body (review findings, plan, etc.) is the subagent's
+	// output; surface it in the tool card. Failures already render via res.Error.
+	// Relies on running-placeholder updates being suppressed so the output-length
+	// accounting in piWireFormat starts at zero for this tool call.
+	if !ev.IsError && resultText != "" {
+		msgs = append(msgs, &agent.ToolOutputDeltaMessage{ToolUseID: ev.ToolCallID, Delta: resultText})
+	}
+	return append(msgs, res), nil
 }
 
 // parseResponse handles response envelopes. A failed prompt is terminal since
@@ -398,7 +428,7 @@ func normalizeToolName(name string) string {
 		return "WebSearch"
 	case "todowrite", "todo_write":
 		return "TodoWrite"
-	case "task", "agent":
+	case "task", "agent", "subagent":
 		return "Agent"
 	case "patch":
 		return "Edit"

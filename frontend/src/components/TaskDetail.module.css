@@ -779,6 +779,45 @@ a.ciStatus:hover {
   word-break: break-word;
 }
 
+.subagentList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0.2rem 0;
+  font-size: 0.75rem;
+}
+
+.subagentRow {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding-left: 0.5rem;
+  border-left: 2px solid var(--color-border);
+}
+
+.subagentHead {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.subagentAgent {
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.subagentPhase {
+  color: var(--color-text-tertiary);
+}
+
+.subagentTask {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--color-text-secondary);
+}
+
 .elidedTurn {
   display: block;
   width: 100%;

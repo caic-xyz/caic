@@ -4,7 +4,7 @@ import { A, useNavigate, useLocation } from "@solidjs/router";
 import { sendInput as apiSendInput, restartTask as apiRestartTask, clearContext as apiClearContext, compactContext as apiCompactContext, syncTask as apiSyncTask, taskEventStream, getTaskToolInput, botFixPR } from "../api";
 import type { EventMessage, EventResult, AskQuestion, EventAsk, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, ForgeCheck, EventStats, EventUsage } from "@sdk/types.gen";
 import { groupMessagesInc, resetGroupIncCache, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "../grouping";
-import { formatDuration, formatElapsed, formatTokens, toolCallDetail } from "../formatting";
+import { formatDuration, formatElapsed, formatTokens, toolCallDetail, parseSubagentInput } from "../formatting";
 import type { ToolCall } from "../grouping";
 import { SyncTargetDefault } from "@sdk/types.gen";
 import { Marked } from "marked";
@@ -1309,6 +1309,37 @@ function ToolCallInput(props: { input: Record<string, unknown> }) {
   );
 }
 
+// Renders the subagents a Pi `subagent` tool call spawns: one row per agent
+// with its type, optional phase/label, and task prompt.
+function SubagentSpawns(props: { input: Record<string, unknown> }) {
+  const spawns = () => parseSubagentInput(props.input).spawns;
+  return (
+    <div class={styles.subagentList}>
+      <For each={spawns()}>
+        {(s) => (
+          <div class={styles.subagentRow}>
+            <div class={styles.subagentHead}>
+              <span class={styles.subagentAgent}>{s.agent}</span>
+              <Show when={s.phase || s.label}>
+                <span class={styles.subagentPhase}>{[s.phase, s.label].filter(Boolean).join(" · ")}</span>
+              </Show>
+            </div>
+            <Show when={s.task}>
+              <pre class={styles.subagentTask}>{s.task}</pre>
+            </Show>
+          </div>
+        )}
+      </For>
+    </div>
+  );
+}
+
+// Returns true when an Agent/subagent tool input carries parseable spawns.
+function hasSubagentSpawns(name: string, input: Record<string, unknown>): boolean {
+  const n = name.toLowerCase();
+  return (n === "agent" || n === "subagent") && parseSubagentInput(input).spawns.length > 0;
+}
+
 function ToolCallCard(props: { call: ToolCall; taskId: string; open: boolean; onToggle: (open: boolean) => void; thinkingEvents?: EventMessage[]; outputDeltaEvents?: EventMessage[]; onClearAndExecutePlan?: () => void; pendingAction?: () => string | null; suppressPlanContent?: boolean }) {
   const [loadedInput, setLoadedInput] = createSignal<Record<string, unknown> | null>(null);
   const [loading, setLoading] = createSignal(false);
@@ -1356,7 +1387,12 @@ function ToolCallCard(props: { call: ToolCall; taskId: string; open: boolean; on
         <Show when={(props.thinkingEvents?.length ?? 0) > 0}>
           <ThinkingCard events={props.thinkingEvents ?? []} />
         </Show>
-        <Show when={showLoadBtn()} fallback={<ToolCallInput input={effectiveInput()} />}>
+        <Show when={showLoadBtn()} fallback={
+          <Show when={hasSubagentSpawns(props.call.use.name, effectiveInput())}
+            fallback={<ToolCallInput input={effectiveInput()} />}>
+            <SubagentSpawns input={effectiveInput()} />
+          </Show>
+        }>
           <button class={styles.loadInputBtn} onClick={loadInput} disabled={loading()}>
             {loading() ? "Loading…" : "Load input"}
           </button>

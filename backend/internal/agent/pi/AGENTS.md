@@ -27,8 +27,8 @@ Wire types and protocol documentation live in `github.com/maruel/genai/providers
 | `message_update` (`thinking_delta`) | ThinkingDeltaMessage |
 | `message_update` (`toolcall_start`) | ToolUseMessage |
 | `message_end` | TextMessage / ThinkingMessage consolidated from final assistant content |
-| `tool_execution_start` | ToolUseMessage |
-| `tool_execution_end` | ToolResultMessage |
+| `tool_execution_start` | ToolUseMessage (+ SubagentStartMessage for subagent spawns) |
+| `tool_execution_end` | ToolResultMessage (+ SubagentEndMessage and result output for subagents) |
 | `agent_end` | ResultMessage (with usage, duration, numTurns) |
 | `turn_end` | UsageMessage (also increments turn counter) |
 | `extension_ui_request` | (auto-respond on stdin) |
@@ -36,6 +36,17 @@ Wire types and protocol documentation live in `github.com/maruel/genai/providers
 ## Tool Name Normalization
 
 Pi tool names need normalization to caic canonical names (similar to OpenCode).
+
+## Subagents
+
+Pi's `subagent` tool (normalized to `Agent`) spawns subagents singly, as a
+parallel batch (`tasks[]`), or as a phased chain (`chain[]`); introspection
+calls (`action: list`/`status`) spawn none. `subagent.go` parses these shapes.
+A spawning call emits a `SubagentStartMessage` (driving the frontend progress
+panel, like Claude Code) alongside the tool-use, and `tool_execution_end` emits
+a `SubagentEndMessage` plus the aggregated result text as tool output. The
+`(running...)` progress placeholder is suppressed so the success result is
+surfaced whole.
 
 ## Upstream Source
 
