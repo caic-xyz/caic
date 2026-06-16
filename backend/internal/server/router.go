@@ -406,11 +406,30 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 	rateLimiter := newRateLimiter(120, time.Minute)
 
 	s := &Router{
-		ctx:              ctx,
-		authHandlers:     &authHandlers{store: d.AuthStore, sessionSecret: d.SessionSecret, hostState: d.HostState, githubOAuth: d.GitHubOAuth, gitlabOAuth: d.GitLabOAuth, githubAllowedUsers: d.GitHubAllowedUsers, gitlabAllowedUsers: d.GitLabAllowedUsers},
-		ciHandlers:       &ciHandlers{taskMgr: d.TaskManager, repos: d.Repos, forge: d.Forge, provider: d.Provider, taskClient: d.TaskClient, authStore: d.AuthStore},
-		goModeHandler:    goModeHandler,
-		runtimeProcesses: &runtimeProcessHandlers{taskMgr: d.TaskManager, backend: d.ProcessBackend, notifyChange: notifyChangeFn(d.TaskManager)},
+		ctx: ctx,
+		authHandlers: &authHandlers{
+			store:              d.AuthStore,
+			sessionSecret:      d.SessionSecret,
+			hostState:          d.HostState,
+			githubOAuth:        d.GitHubOAuth,
+			gitlabOAuth:        d.GitLabOAuth,
+			githubAllowedUsers: d.GitHubAllowedUsers,
+			gitlabAllowedUsers: d.GitLabAllowedUsers,
+		},
+		ciHandlers: &ciHandlers{
+			taskMgr:    d.TaskManager,
+			repos:      d.Repos,
+			forge:      d.Forge,
+			provider:   d.Provider,
+			taskClient: d.TaskClient,
+			authStore:  d.AuthStore,
+		},
+		goModeHandler: goModeHandler,
+		runtimeProcesses: &runtimeProcessHandlers{
+			taskMgr:      d.TaskManager,
+			backend:      d.ProcessBackend,
+			notifyChange: notifyChangeFn(d.TaskManager),
+		},
 		serverHandlers: &serverHandlers{
 			serverCtx:          ctx,
 			tailscaleAvailable: d.Tailscale,
@@ -424,7 +443,15 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 			gitlabOAuth:        d.GitLabOAuth,
 			voiceGateway:       voiceMetadata,
 		},
-		taskHandlers:     &taskHandlers{taskMgr: d.TaskManager, repos: d.Repos, forge: d.Forge, ciService: d.CIService, authStore: d.AuthStore, warnings: d.Warnings, service: svc},
+		taskHandlers: &taskHandlers{
+			taskMgr:   d.TaskManager,
+			repos:     d.Repos,
+			forge:     d.Forge,
+			ciService: d.CIService,
+			authStore: d.AuthStore,
+			warnings:  d.Warnings,
+			service:   svc,
+		},
 		usageHandlers:    &usageHandlers{taskMgr: d.TaskManager, fetchers: d.UsageFetchers},
 		voiceHandlers:    voice,
 		webFetchHandlers: webFetch,
