@@ -77,13 +77,6 @@ type Router struct {
 	pprof bool
 }
 
-// SetFakeCI injects a fake CI simulation hook for smoke and e2e tests.
-func (r *Router) SetFakeCI(f FakeCIHook) {
-	if r.taskHandlers != nil && r.taskHandlers.service != nil {
-		r.taskHandlers.service.fakeCI = f
-	}
-}
-
 // Serve starts the HTTP server on an already-open listener and blocks until
 // ctx is cancelled. Opening the listener early (before calling New) lets the
 // caller detect port conflicts at startup instead of after lengthy
@@ -122,13 +115,6 @@ func (r *Router) Serve(ctx context.Context, ln net.Listener) error {
 		return nil
 	}
 	return err
-}
-
-// SetUsageFetchers replaces the provider usage fetchers used by the usage
-// endpoints. Intended for e2e tests to inject fake fetchers that return
-// canned data without real API credentials.
-func (r *Router) SetUsageFetchers(fetchers []usage.ProviderFetcher) {
-	r.usageHandlers.fetchers = fetchers
 }
 
 // buildAPIHandler assembles the protected API mux with all route concerns
@@ -381,6 +367,7 @@ type Dependencies struct {
 	TaskClient bot.Client // creates bot-driven tasks for manual CI repair
 	Warnings   *WarningStore
 	CacheSizes *CacheSizeStore
+	FakeCI     FakeCIHook // optional fake CI simulation hook for smoke/e2e tests
 
 	GitHubAllowedUsers     []string
 	GitLabAllowedUsers     []string
@@ -413,6 +400,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		forge:     d.Forge,
 		ciService: d.CIService,
 		authStore: d.AuthStore,
+		fakeCI:    d.FakeCI,
 	}
 	audit := &auditStore{path: d.AuditLogPath}
 	rateLimiter := newRateLimiter(120, time.Minute)

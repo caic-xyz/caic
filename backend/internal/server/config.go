@@ -11,6 +11,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/backend/internal/voicegateway"
 )
 
@@ -27,6 +28,12 @@ type Config struct {
 	Voice   VoiceConfig
 	Debug   DebugConfig
 	IPGeo   IPGeoConfig
+
+	FakeCI FakeCIHook // optional fake CI simulation hook for smoke/e2e tests
+
+	// UsageFetchers replaces auto-detected provider usage fetchers.
+	// When non-nil, provider auto-detection is skipped entirely.
+	UsageFetchers []usage.ProviderFetcher
 }
 
 // Validate returns an error if the configuration is invalid.

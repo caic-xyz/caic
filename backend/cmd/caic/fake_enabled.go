@@ -106,6 +106,8 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config, traceFile s
 		return fmt.Errorf("init fake harness cache: %w", err)
 	}
 	cfg.Runtime.SkipWarmup = true
+	cfg.FakeCI = smoketest.SimulateCI
+	cfg.UsageFetchers = smoketest.UsageFetchers()
 
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", addr)
@@ -118,9 +120,6 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config, traceFile s
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}
-
-	srv.SetUsageFetchers(smoketest.UsageFetchers())
-	srv.SetFakeCI(smoketest.SimulateCI)
 
 	return srv.Serve(ctx, ln)
 }

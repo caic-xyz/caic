@@ -11,8 +11,18 @@ import (
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers"
 
+	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
+
+// usageFetchers returns cfg.UsageFetchers when non-nil (fake/e2e), otherwise
+// auto-detects providers from the environment.
+func usageFetchers(cfg *server.Config, ctx context.Context) []usage.ProviderFetcher {
+	if cfg.UsageFetchers != nil {
+		return cfg.UsageFetchers
+	}
+	return detectProviders(ctx, cfg.Agent.CoreEnv, cfg.Agent.HarnessEnv)
+}
 
 func detectProviders(ctx context.Context, coreEnv map[string]string, harnessEnv map[string][]string) []usage.ProviderFetcher {
 	var fetchers []usage.ProviderFetcher

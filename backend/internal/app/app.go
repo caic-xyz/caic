@@ -33,7 +33,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
-	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/backend/internal/voicegateway"
 	"github.com/caic-xyz/caic/backend/internal/voicegateway/voicertc"
 )
@@ -58,16 +57,6 @@ func (a *App) Serve(ctx context.Context, ln net.Listener) error {
 		a.voiceBridge.CloseAll()
 	}
 	return err
-}
-
-// SetUsageFetchers replaces provider usage fetchers for smoke and e2e tests.
-func (a *App) SetUsageFetchers(fetchers []usage.ProviderFetcher) {
-	a.Server.SetUsageFetchers(fetchers)
-}
-
-// SetFakeCI injects a fake CI simulation hook for smoke and e2e tests.
-func (a *App) SetFakeCI(f server.FakeCIHook) {
-	a.Server.SetFakeCI(f)
 }
 
 // New creates the caic backend server application.
@@ -289,7 +278,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		GitHubOAuth:                githubOAuth,
 		GitLabOAuth:                gitlabOAuth,
 		HostState:                  hostState,
-		UsageFetchers:              detectProviders(ctx, cfg.Agent.CoreEnv, cfg.Agent.HarnessEnv),
+		UsageFetchers:              usageFetchers(cfg, ctx),
 		VoiceBridge:                voiceBridge,
 		VoiceGateway:               cfg.Voice.Gateway,
 		Forge:                      forgeManager,
@@ -309,6 +298,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		GitLabWebhookSecret:        cfg.GitLab.WebhookSecret,
 		GitHubAppAllowedOwners:     cfg.GitHub.AppAllowedOwners,
 		Pprof:                      cfg.Debug.Pprof,
+		FakeCI:                     cfg.FakeCI,
 	})
 	if err != nil {
 		return nil, err
