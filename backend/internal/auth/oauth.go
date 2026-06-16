@@ -25,6 +25,7 @@ type ProviderConfig struct {
 	UserInfoURL  string // e.g. "https://api.github.com/user"
 	Scopes       []string
 	Provider     string // "github" or "gitlab"
+	Label        string // human-readable provider name, e.g. "GitHub"
 	Host         *HostState
 }
 
@@ -50,6 +51,7 @@ func GitHubConfig(clientID, secret string, host *HostState) ProviderConfig {
 		UserInfoURL:  "https://api.github.com/user",
 		Scopes:       []string{"repo", "read:user"},
 		Provider:     "github",
+		Label:        "GitHub",
 		Host:         host,
 	}
 }
@@ -70,6 +72,7 @@ func GitLabConfig(clientID, secret, gitlabURL string, host *HostState) ProviderC
 		UserInfoURL:  gitlabURL + "/api/v4/user",
 		Scopes:       []string{"api", "read_user"},
 		Provider:     "gitlab",
+		Label:        "GitLab",
 		Host:         host,
 	}
 }

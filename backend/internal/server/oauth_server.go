@@ -105,15 +105,6 @@ type oauthServer struct {
 	rateLimiter  *rateLimiter
 }
 
-// oauthClient is a dynamically-registered OAuth client.
-type oauthClient struct {
-	ID                      string    `json:"id"`
-	Name                    string    `json:"name"`
-	RedirectURIs            []string  `json:"redirectURIs"`
-	TokenEndpointAuthMethod string    `json:"tokenEndpointAuthMethod"`
-	CreatedAt               time.Time `json:"createdAt"`
-}
-
 // oauthConsent holds an in-progress user consent session.
 type oauthConsent struct {
 	UserID    string
@@ -178,19 +169,6 @@ func userInitial(username string) string {
 		return strings.ToUpper(string(r))
 	}
 	return "?"
-}
-
-func providerLabel(provider string) string {
-	switch provider {
-	case "github":
-		return "GitHub"
-	case "gitlab":
-		return "GitLab"
-	case "":
-		return "unknown provider"
-	default:
-		return provider
-	}
 }
 
 func newOAuthServer(keyPEM []byte, kid, refreshTokenStorePath, resourceURLPath, resourceMetadataURLPath, clientIDPrefix string, supportedScopes, defaultScopes []string, scopeLabels map[string]string, authStore *auth.Store, hostState *auth.HostState, authHandlers *authHandlers, audit *auditStore, rateLimiter *rateLimiter) (*oauthServer, error) {
@@ -335,23 +313,6 @@ func (s *oauthServer) externalBaseURL(r *http.Request) string {
 	return scheme + "://" + authority
 }
 
-func (s *oauthServer) loginStartURL(r *http.Request) string {
-	if s.authHandlers == nil {
-		return ""
-	}
-	provider := ""
-	if s.authHandlers.githubOAuth != nil && s.authHandlers.githubOAuth.RedirectURI() != "" {
-		provider = "github"
-	} else if s.authHandlers.gitlabOAuth != nil && s.authHandlers.gitlabOAuth.RedirectURI() != "" {
-		provider = "gitlab"
-	}
-	if provider == "" {
-		return ""
-	}
-	values := url.Values{"next": {r.URL.RequestURI()}}
-	return "/auth/" + provider + "/start?" + values.Encode()
-}
-
 func (s *oauthServer) allowRequest(w http.ResponseWriter, r *http.Request) bool {
 	if s.rateLimiter == nil {
 		return true
@@ -419,61 +380,14 @@ func (s *oauthServer) handleOAuthJWKS(w http.ResponseWriter, r *http.Request) {
 	writeJSONResponse(w, &resp, nil)
 }
 
-func (s *oauthServer) handleOAuthRegister(w http.ResponseWriter, r *http.Request) {
-	if !s.allowRequest(w, r) {
-		return
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
-	var req OAuthRegisterRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeOAuthError(w, http.StatusBadRequest, "invalid_client_metadata", "invalid registration JSON")
-		return
-	}
-	method := req.TokenEndpointAuthMethod
-	if method == "" {
-		method = OAuthTokenEndpointAuthNone
-	}
-	if method != OAuthTokenEndpointAuthNone {
-		writeOAuthError(w, http.StatusBadRequest, "invalid_client_metadata", "only public clients are supported")
-		return
-	}
-	if len(req.RedirectURIs) == 0 {
-		writeOAuthError(w, http.StatusBadRequest, "invalid_redirect_uri", "redirect_uris is required")
-		return
-	}
-	for _, redirectURI := range req.RedirectURIs {
-		if !validOAuthRedirectURI(redirectURI) {
-			writeOAuthError(w, http.StatusBadRequest, "invalid_redirect_uri", "redirect URI must be https or localhost http")
-			return
-		}
-	}
-	clientID, err := randomToken()
-	if err != nil {
-		slog.WarnContext(r.Context(), "generate oauth client id", "err", err)
-		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not register client")
-		return
-	}
-	now := time.Now()
-	client := oauthClient{ID: s.clientIDPrefix + clientID, Name: req.ClientName, RedirectURIs: req.RedirectURIs, TokenEndpointAuthMethod: method, CreatedAt: now}
-	if err := s.registerClient(&client); err != nil {
-		slog.WarnContext(r.Context(), "save oauth client registration", "err", err)
-		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not register client")
-		return
-	}
-	resp := OAuthRegisterResponse{ClientID: client.ID, ClientIDIssuedAt: now.Unix(), ClientName: client.Name, RedirectURIs: client.RedirectURIs, TokenEndpointAuthMethod: method}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	if err := json.NewEncoder(w).Encode(&resp); err != nil {
-		slog.WarnContext(r.Context(), "encode oauth registration response", "err", err)
-	}
-}
-
 func (s *oauthServer) handleOAuthAuthorizeGET(w http.ResponseWriter, r *http.Request) {
 	user, ok := auth.UserFromContext(r.Context())
 	if !ok {
-		if loginURL := s.loginStartURL(r); loginURL != "" {
-			http.Redirect(w, r, loginURL, http.StatusFound)
-			return
+		if s.authHandlers != nil {
+			if loginURL := s.authHandlers.loginStartURL(r); loginURL != "" {
+				http.Redirect(w, r, loginURL, http.StatusFound)
+				return
+			}
 		}
 		writeOAuthError(w, http.StatusUnauthorized, "login_required", "log in before authorizing protected resource access")
 		return
@@ -510,7 +424,7 @@ func (s *oauthServer) handleOAuthAuthorizeGET(w http.ResponseWriter, r *http.Req
 		RedirectURI:   values.Get("redirect_uri"),
 		Username:      user.Username,
 		UserInitial:   userInitial(user.Username),
-		ProviderLabel: providerLabel(string(user.Provider)),
+		ProviderLabel: s.authHandlers.providerLabel(string(user.Provider)),
 		Resource:      values.Get("resource"),
 		ScopeItems:    s.scopeItems(scope),
 	}
@@ -800,19 +714,6 @@ func (s *oauthServer) validateAuthorizeForm(r *http.Request, values url.Values) 
 		return err
 	}
 	return nil
-}
-
-func (s *oauthServer) oauthClient(id string) oauthClient {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.clients[id]
-}
-
-func (s *oauthServer) registerClient(client *oauthClient) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.clients[client.ID] = *client
-	return s.saveRefreshTokensLocked()
 }
 
 func (s *oauthServer) issueGrantRefreshToken(grant *oauthGrant, entry *oauthRefreshToken) (string, error) {
@@ -1180,33 +1081,12 @@ func cloneURLValues(values url.Values) url.Values {
 	return clone
 }
 
-func validOAuthRedirectURI(raw string) bool {
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" || u.Fragment != "" {
-		return false
-	}
-	if u.Scheme == "https" {
-		return true
-	}
-	return u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1")
-}
-
 func writeOAuthError(w http.ResponseWriter, status int, code, description string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(map[string]string{"error": code, "error_description": description}); err != nil {
 		slog.Warn("failed to encode OAuth error", "err", err)
 	}
-}
-
-func clientDisplayName(client *oauthClient) string {
-	if client.Name != "" {
-		return client.Name
-	}
-	if client.ID != "" {
-		return client.ID
-	}
-	return "remote OAuth client"
 }
 
 // handleProtectedResourceMetadata writes protected-resource metadata (RFC 9728).

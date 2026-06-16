@@ -267,6 +267,42 @@ func (h *authHandlers) providerConfig(provider string) *auth.ProviderConfig {
 	return nil
 }
 
+// loginStartURL returns the login-start path for the first configured forge
+// provider, with next set to resume r after login. Empty when no provider is
+// configured.
+func (h *authHandlers) loginStartURL(r *http.Request) string {
+	provider := h.defaultProvider()
+	if provider == "" {
+		return ""
+	}
+	values := url.Values{"next": {r.URL.RequestURI()}}
+	return "/auth/" + provider + "/start?" + values.Encode()
+}
+
+// defaultProvider returns the first configured forge login provider, or empty.
+func (h *authHandlers) defaultProvider() string {
+	for _, provider := range []string{"github", "gitlab"} {
+		if cfg := h.providerConfig(provider); cfg != nil && cfg.RedirectURI() != "" {
+			return provider
+		}
+	}
+	return ""
+}
+
+// providerLabel returns the human-readable name for a forge provider, falling
+// back to the raw provider name when it is not configured.
+func (h *authHandlers) providerLabel(provider string) string {
+	if h != nil {
+		if cfg := h.providerConfig(provider); cfg != nil && cfg.Label != "" {
+			return cfg.Label
+		}
+	}
+	if provider == "" {
+		return "unknown provider"
+	}
+	return provider
+}
+
 // useSecureCookies reports whether to set the Secure flag on cookies.
 // True when the external URL starts with "https://".
 func (h *authHandlers) useSecureCookies() bool {
