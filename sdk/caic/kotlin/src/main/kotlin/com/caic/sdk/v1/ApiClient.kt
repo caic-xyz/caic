@@ -118,13 +118,13 @@ class ApiClient(
     /** Lists branches for a repository. */
     suspend fun listRepoBranches(repo: String): RepoBranchesResp = request("GET", "/api/caic/v1/server/repos/branches?repo=$repo")
     /** Creates a task to fix a failing CI pipeline. */
-    suspend fun botFixCI(req: BotFixCIReq): CreateTaskResp = request("POST", "/api/caic/v1/ci/fix-ci", json.encodeToString(req))
+    suspend fun botFixCI(req: BotFixCIReq): Task = request("POST", "/api/caic/v1/ci/fix-ci", json.encodeToString(req))
     /** Injects a CI fix command into an existing task's PR. */
     suspend fun botFixPR(req: BotFixPRReq): StatusResp = request("POST", "/api/caic/v1/ci/fix-pr", json.encodeToString(req))
     /** Returns all tasks. */
     suspend fun listTasks(): List<Task> = request("GET", "/api/caic/v1/tasks")
     /** Creates and starts a new coding agent task. */
-    suspend fun createTask(req: CreateTaskReq): CreateTaskResp = request("POST", "/api/caic/v1/tasks", json.encodeToString(req))
+    suspend fun createTask(req: CreateTaskReq): Task = request("POST", "/api/caic/v1/tasks", json.encodeToString(req))
     /** Sends user input to a running task. */
     suspend fun sendInput(id: String, req: InputReq): StatusResp = request("POST", "/api/caic/v1/tasks/$id/input", json.encodeToString(req))
     /** Restarts a completed or errored task with a new prompt. */
@@ -144,7 +144,7 @@ class ApiClient(
     /** Pushes task changes to the remote repository. */
     suspend fun syncTask(id: String, req: SyncReq): SyncResp = request("POST", "/api/caic/v1/tasks/$id/sync", json.encodeToString(req))
     /** Forks a task by snapshotting its runtime instance and creating a new task on a derived branch. */
-    suspend fun forkTask(id: String, req: ForkTaskReq): CreateTaskResp = request("POST", "/api/caic/v1/tasks/$id/fork", json.encodeToString(req))
+    suspend fun forkTask(id: String, req: ForkTaskReq): Task = request("POST", "/api/caic/v1/tasks/$id/fork", json.encodeToString(req))
     /** Returns the unified diff for a task's branch. */
     suspend fun getTaskDiff(id: String, path: String): DiffResp = request("GET", "/api/caic/v1/tasks/$id/diff?path=$path")
     /** Returns the list of running processes inside the task's runtime instance. */

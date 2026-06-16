@@ -9,7 +9,6 @@ import (
 	"net/http"
 
 	"github.com/maruel/genai"
-	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
@@ -20,6 +19,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
@@ -104,7 +104,7 @@ func (h *ciHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 // fixCI creates a task to fix failing CI on a repo's default branch.
 // It fetches CI logs via the forge, builds a rich prompt using bot.FailureSummary,
 // and creates a new agent task — the same path as the automated maybeAutoFix.
-func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.CreateTaskResp, error) {
+func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Task, error) {
 	info, ok := h.repos.InfoFor(req.Repo)
 	if !ok {
 		return nil, api.BadRequest("repo not found")
@@ -148,11 +148,12 @@ func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Create
 	if err != nil {
 		return nil, fmt.Errorf("create task: %w", err)
 	}
-	taskID, err := ksid.Parse(taskIDStr)
-	if err != nil {
-		return nil, fmt.Errorf("parse task id: %w", err)
+	entry, ok := h.taskMgr.GetEntry(taskIDStr)
+	if !ok {
+		return nil, api.InternalError("created task not found")
 	}
-	return &v1.CreateTaskResp{ID: taskID}, nil
+	dto := v1conv.Task(ctx, entry, newTaskResolvers(h.taskMgr, h.repos, h.authStore))
+	return &dto, nil
 }
 
 // fixPR injects a fix-PR command into an existing task's agent session.

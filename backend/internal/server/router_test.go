@@ -592,7 +592,7 @@ func TestHandleCreateTask(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
-		var resp v1.CreateTaskResp
+		var resp v1.Task
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatal(err)
 		}
@@ -707,7 +707,7 @@ func TestHandleCreateTask(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
-		var resp v1.CreateTaskResp
+		var resp v1.Task
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatal(err)
 		}
@@ -742,7 +742,7 @@ func TestHandleCreateTask(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
-		var resp v1.CreateTaskResp
+		var resp v1.Task
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatal(err)
 		}
@@ -793,7 +793,7 @@ func TestHandleCreateTask(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
-		var resp v1.CreateTaskResp
+		var resp v1.Task
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatal(err)
 		}
@@ -860,7 +860,7 @@ func TestHandleCreateTask(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var resp v1.CreateTaskResp
+		var resp v1.Task
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatal(err)
 		}

@@ -105,7 +105,7 @@ func TestSmoke(t *testing.T) {
 			Repos:         []v1.RepoSpec{{Name: repos[0].Path}},
 			Harness:       v1.Harness(harnesses[0].Name),
 		}
-		var createResp v1.CreateTaskResp
+		var createResp v1.Task
 		postJSON(t, baseURL, "/api/caic/v1/tasks", createReq, &createResp)
 		taskID := createResp.ID.String()
 		if taskID == "" {

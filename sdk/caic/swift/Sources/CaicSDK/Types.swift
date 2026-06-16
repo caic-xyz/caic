@@ -608,18 +608,6 @@ public struct BotFixCIReq: Codable {
     public let repo: String
 }
 
-/// CreateTaskResp is the response for POST /api/caic/v1/tasks.
-public struct CreateTaskResp: Codable {
-    public let status: String
-    public let id: String
-}
-
-/// BotFixPRReq is the request body for POST /api/caic/v1/bot/fix-pr.
-/// The server fetches CI logs for the task's PR and injects a fix command.
-public struct BotFixPRReq: Codable {
-    public let taskId: String
-}
-
 /// TaskRepo describes a repository associated with a task in the API response.
 public struct TaskRepo: Codable {
     public let name: String
@@ -707,6 +695,12 @@ public struct Task: Codable {
     public let runtime: RuntimeInstance
     /// Per-task feature flags.
     public let gitHubToken: Bool?
+}
+
+/// BotFixPRReq is the request body for POST /api/caic/v1/bot/fix-pr.
+/// The server fetches CI logs for the task's PR and injects a fix command.
+public struct BotFixPRReq: Codable {
+    public let taskId: String
 }
 
 /// ImageData carries a single base64-encoded image.

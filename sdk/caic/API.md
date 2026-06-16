@@ -40,7 +40,7 @@ Type notation: `JSONValue` means any valid JSON value.
 
 | Method | Path | Description | Request | Response |
 |--------|------|-------------|---------|----------|
-| POST | `/api/caic/v1/ci/fix-ci` | Creates a task to fix a failing CI pipeline. | `BotFixCIReq` | `CreateTaskResp` |
+| POST | `/api/caic/v1/ci/fix-ci` | Creates a task to fix a failing CI pipeline. | `BotFixCIReq` | `Task` |
 | POST | `/api/caic/v1/ci/fix-pr` | Injects a CI fix command into an existing task's PR. | `BotFixPRReq` | `StatusResp` |
 | GET | `/api/caic/v1/ci/log/{id}` | Returns the log tail of a failed CI check run. |  | `CILogResp` |
 
@@ -49,7 +49,7 @@ Type notation: `JSONValue` means any valid JSON value.
 | Method | Path | Description | Request | Response |
 |--------|------|-------------|---------|----------|
 | GET | `/api/caic/v1/tasks` | Returns all tasks. |  | `Task[]` |
-| POST | `/api/caic/v1/tasks` | Creates and starts a new coding agent task. | `CreateTaskReq` | `CreateTaskResp` |
+| POST | `/api/caic/v1/tasks` | Creates and starts a new coding agent task. | `CreateTaskReq` | `Task` |
 | GET | `/api/caic/v1/tasks/{id}/raw_events` | Streams raw backend-specific task events via SSE. |  | `EventMessage` SSE |
 | GET | `/api/caic/v1/tasks/{id}/events` | Streams backend-neutral task events via SSE. |  | `EventMessage` SSE |
 | POST | `/api/caic/v1/tasks/{id}/input` | Sends user input to a running task. | `InputReq` | `StatusResp` |
@@ -60,7 +60,7 @@ Type notation: `JSONValue` means any valid JSON value.
 | POST | `/api/caic/v1/tasks/{id}/purge` | Permanently deletes a task and its runtime instance. |  | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/revive` | Reconnects to an orphaned task runtime instance. |  | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/sync` | Pushes task changes to the remote repository. | `SyncReq` | `SyncResp` |
-| POST | `/api/caic/v1/tasks/{id}/fork` | Forks a task by snapshotting its runtime instance and creating a new task on a derived branch. | `ForkTaskReq` | `CreateTaskResp` |
+| POST | `/api/caic/v1/tasks/{id}/fork` | Forks a task by snapshotting its runtime instance and creating a new task on a derived branch. | `ForkTaskReq` | `Task` |
 | GET | `/api/caic/v1/tasks/{id}/diff` | Returns the unified diff for a task's branch. |  | `DiffResp` |
 | GET | `/api/caic/v1/tasks/{id}/tool/{toolUseID}` | Returns the full (untruncated) input for a tool call. |  | `TaskToolInputResp` |
 | GET | `/api/caic/v1/tasks/events` | Streams task list updates for all tasks via SSE. |  | `TaskListEvent` SSE |
@@ -395,24 +395,6 @@ The server fetches CI logs, builds a prompt, and creates a fix task.
 |-------|------|-------------|----------|
 | `repo` | `string` |  | yes |
 
-### CreateTaskResp
-
-CreateTaskResp is the response for POST /api/caic/v1/tasks.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `status` | `string` |  | yes |
-| `id` | `string` |  | yes |
-
-### BotFixPRReq
-
-BotFixPRReq is the request body for POST /api/caic/v1/bot/fix-pr.
-The server fetches CI logs for the task's PR and injects a fix command.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `taskId` | `string` |  | yes |
-
 ### TaskRepo
 
 TaskRepo describes a repository associated with a task in the API response.
@@ -496,6 +478,15 @@ Task is the JSON representation sent to the frontend.
 | `planContent` | `string` |  |  |
 | `runtime` | `RuntimeInstance` |  | yes |
 | `gitHubToken` | `boolean` | Per-task feature flags. |  |
+
+### BotFixPRReq
+
+BotFixPRReq is the request body for POST /api/caic/v1/bot/fix-pr.
+The server fetches CI logs for the task's PR and injects a fix command.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `taskId` | `string` |  | yes |
 
 ### ImageData
 

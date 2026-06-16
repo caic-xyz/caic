@@ -168,7 +168,7 @@ var Routes = []Route{
 		Method: "POST",
 		Path:   "/api/caic/v1/ci/fix-ci",
 		Req:    reflect.TypeFor[BotFixCIReq](),
-		Resp:   reflect.TypeFor[CreateTaskResp](),
+		Resp:   reflect.TypeFor[Task](),
 	},
 	{
 		Name:   "botFixPR",
@@ -192,7 +192,7 @@ var Routes = []Route{
 		Method: "POST",
 		Path:   "/api/caic/v1/tasks",
 		Req:    reflect.TypeFor[CreateTaskReq](),
-		Resp:   reflect.TypeFor[CreateTaskResp](),
+		Resp:   reflect.TypeFor[Task](),
 	},
 	{
 		Name:   "taskRawEvents",
@@ -284,7 +284,7 @@ var Routes = []Route{
 		Method: "POST",
 		Path:   "/api/caic/v1/tasks/{id}/fork",
 		Req:    reflect.TypeFor[ForkTaskReq](),
-		Resp:   reflect.TypeFor[CreateTaskResp](),
+		Resp:   reflect.TypeFor[Task](),
 	},
 	{
 		Name:        "getTaskDiff",

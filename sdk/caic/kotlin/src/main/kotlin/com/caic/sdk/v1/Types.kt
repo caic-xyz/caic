@@ -856,17 +856,6 @@ data class RepoBranchesResp(val branches: List<BranchInfo>)
 @Serializable
 data class BotFixCIReq(val repo: String)
 
-/** CreateTaskResp is the response for POST /api/caic/v1/tasks. */
-@Serializable
-data class CreateTaskResp(val status: String, val id: String)
-
-/**
- * BotFixPRReq is the request body for POST /api/caic/v1/bot/fix-pr.
- * The server fetches CI logs for the task's PR and injects a fix command.
- */
-@Serializable
-data class BotFixPRReq(val taskId: String)
-
 /** TaskRepo describes a repository associated with a task in the API response. */
 @Serializable
 data class TaskRepo(
@@ -942,6 +931,13 @@ data class Task(
     val runtime: RuntimeInstance,
     val gitHubToken: Boolean? = null,
 )
+
+/**
+ * BotFixPRReq is the request body for POST /api/caic/v1/bot/fix-pr.
+ * The server fetches CI logs for the task's PR and injects a fix command.
+ */
+@Serializable
+data class BotFixPRReq(val taskId: String)
 
 /** ImageData carries a single base64-encoded image. */
 @Serializable

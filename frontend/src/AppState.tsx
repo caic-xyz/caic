@@ -25,6 +25,9 @@ function createAppStore() {
 
   const [prompt, setPrompt] = createSignal("");
   const [tasks, setTasks] = createSignal<Task[]>([]);
+  // True once the task-list SSE has delivered its initial snapshot, making the
+  // store an authoritative set: a selected task absent from it is genuinely gone.
+  const [snapshotReceived, setSnapshotReceived] = createSignal(false);
   const [submitting, setSubmitting] = createSignal(false);
   const [initializing, setInitializing] = createSignal(true);
   const [repos, setRepos] = createSignal<Repo[]>([]);
@@ -134,6 +137,19 @@ function createAppStore() {
     return id !== null ? (tasks().find((t) => t.id === id) ?? null) : null;
   };
   const taskById = (id: string): Task | undefined => tasks().find((t) => t.id === id);
+
+  // Insert or replace a task in the store by id, keeping the id-sorted order.
+  // Used both by the SSE upsert handler and to seed a task the client just
+  // created, so its detail view renders without waiting for the SSE round-trip.
+  const upsertTask = (t: Task) => setTasks((prev) => {
+    const idx = prev.findIndex((p) => p.id === t.id);
+    if (idx >= 0) {
+      const next = [...prev];
+      next[idx] = t;
+      return next;
+    }
+    return [...prev, t].sort((a, b) => (a.id < b.id ? -1 : 1));
+  });
 
   type EffortPreferences = Record<string, Record<string, string>>;
 
@@ -273,9 +289,12 @@ function createAppStore() {
   });
 
   // Redirect to home when a task URL points to a non-existent task.
-  // Guard on connected() to avoid spurious redirects during reconnection.
+  // Only act once the snapshot has loaded (so the store is authoritative) and
+  // while connected (to avoid spurious redirects during reconnection). Tasks the
+  // client just created are seeded into the store via upsertTask before
+  // navigation, so this never races a fresh create/fork.
   createEffect(() => {
-    if (connected() && selectedId() !== null && tasks().length > 0 && selectedTask() === null) {
+    if (connected() && snapshotReceived() && selectedId() !== null && selectedTask() === null) {
       navigate("/", { replace: true });
     }
   });
@@ -396,19 +415,12 @@ function createAppStore() {
         if (event.kind === "snapshot" && event.snapshot) {
           prevStates = new Map(event.snapshot.map((t) => [t.id, t.state]));
           setTasks(event.snapshot);
+          setSnapshotReceived(true);
         } else if (event.kind === "upsert" && event.upsert) {
           const t = event.upsert;
           checkAndNotify(t);
           prevStates.set(t.id, t.state);
-          setTasks((prev) => {
-            const idx = prev.findIndex((p) => p.id === t.id);
-            if (idx >= 0) {
-              const next = [...prev];
-              next[idx] = t;
-              return next;
-            }
-            return [...prev, t].sort((a, b) => (a.id < b.id ? -1 : 1));
-          });
+          upsertTask(t);
         } else if (event.kind === "patch" && event.patch) {
           const patch = event.patch as Record<string, unknown>;
           const id = patch["id"] as string;
@@ -666,6 +678,7 @@ function createAppStore() {
         sudo: forkSudo(),
         gitHubToken: forkGitHubToken(),
       });
+      upsertTask(resp);
       navigate(`/task/${resp.id}`);
     } catch {
       // Fork failed — no state to clean up.
@@ -706,6 +719,7 @@ function createAppStore() {
       setPrefEffort(harness, model, effort);
       setPrompt("");
       setPendingImages([]);
+      upsertTask(data);
       navigate(taskPath(data.id, selRepos[0]?.path ?? "", "", p));
     } finally {
       setSubmitting(false);
@@ -775,6 +789,7 @@ function createAppStore() {
   };
   const fixCI = (repoPath: string) => {
     void botFixCI({ repo: repoPath }).then((data) => {
+      upsertTask(data);
       navigate(taskPath(data.id, repoPath, "", `Fix CI: ${repoPath}`));
     });
   };

@@ -2,7 +2,32 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
-import type { Repo, PreferencesResp, HarnessInfo } from "@sdk/types.gen";
+import type { Repo, PreferencesResp, HarnessInfo, Task } from "@sdk/types.gen";
+
+// Minimal complete Task, matching what the backend now returns from createTask
+// so the app can seed its store and render the detail view immediately.
+function makeTask(overrides: Partial<Task> = {}): Task {
+  return {
+    id: "task1",
+    initialPrompt: "do something",
+    title: "do something",
+    state: "branching",
+    stateUpdatedAt: "2026-01-01T00:00:00Z",
+    costUSD: 0,
+    duration: 0,
+    numTurns: 0,
+    cumulativeInputTokens: 0,
+    cumulativeOutputTokens: 0,
+    cumulativeCacheCreationInputTokens: 0,
+    cumulativeCacheReadInputTokens: 0,
+    activeInputTokens: 0,
+    activeCacheReadTokens: 0,
+    contextWindowLimit: 0,
+    harness: "claude",
+    runtime: { id: "rt1" },
+    ...overrides,
+  };
+}
 
 // Stub EventSource to prevent real SSE connections.
 // FakeEventSource captures message listeners so tests can push SSE events.
@@ -130,7 +155,7 @@ beforeEach(() => {
   vi.mocked(api.getUsage).mockRejectedValue(new Error("no usage"));
   vi.mocked(api.listRepoBranches).mockResolvedValue({ branches: [{ name: "main" }, { name: "dev", remote: "origin" }] });
   vi.mocked(api.cloneRepo).mockResolvedValue(newRepo);
-  vi.mocked(api.createTask).mockResolvedValue({ id: "task1", status: "accepted" });
+  vi.mocked(api.createTask).mockResolvedValue(makeTask());
 });
 
 describe("App repo chips: No repository", () => {

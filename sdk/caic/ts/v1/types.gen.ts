@@ -733,20 +733,6 @@ export interface BotFixCIReq {
   repo: string;
 }
 
-/** CreateTaskResp is the response for POST /api/caic/v1/tasks. */
-export interface CreateTaskResp {
-  status: string;
-  id: string;
-}
-
-/**
- * BotFixPRReq is the request body for POST /api/caic/v1/bot/fix-pr.
- * The server fetches CI logs for the task's PR and injects a fix command.
- */
-export interface BotFixPRReq {
-  taskId: string;
-}
-
 /** TaskRepo describes a repository associated with a task in the API response. */
 export interface TaskRepo {
   name: string;
@@ -834,6 +820,14 @@ export interface Task {
   runtime: RuntimeInstance;
   /** Per-task feature flags. */
   gitHubToken?: boolean;
+}
+
+/**
+ * BotFixPRReq is the request body for POST /api/caic/v1/bot/fix-pr.
+ * The server fetches CI logs for the task's PR and injects a fix command.
+ */
+export interface BotFixPRReq {
+  taskId: string;
 }
 
 /** ImageData carries a single base64-encoded image. */

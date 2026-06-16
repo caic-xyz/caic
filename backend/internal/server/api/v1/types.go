@@ -349,12 +349,6 @@ type RevokeOAuthGrantReq struct {
 	GrantID string `json:"-" path:"grantID"`
 }
 
-// CreateTaskResp is the response for POST /api/caic/v1/tasks.
-type CreateTaskResp struct {
-	Status string  `json:"status"`
-	ID     ksid.ID `json:"id"`
-}
-
 // CILogResp is the response for GET /api/caic/v1/tasks/{id}/ci-log.
 // It contains the name of the first failed CI step and its log tail.
 type CILogResp struct {

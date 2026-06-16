@@ -171,7 +171,7 @@ public final class ApiClient {
         try await request("GET", path: "/api/caic/v1/server/repos/branches?repo=\(repo.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? repo)")
     }
     /// Creates a task to fix a failing CI pipeline.
-    public func botFixCI(req: BotFixCIReq) async throws -> CreateTaskResp {
+    public func botFixCI(req: BotFixCIReq) async throws -> Task {
         try await request("POST", path: "/api/caic/v1/ci/fix-ci", body: try encoder.encode(req))
     }
     /// Injects a CI fix command into an existing task's PR.
@@ -183,7 +183,7 @@ public final class ApiClient {
         try await request("GET", path: "/api/caic/v1/tasks")
     }
     /// Creates and starts a new coding agent task.
-    public func createTask(req: CreateTaskReq) async throws -> CreateTaskResp {
+    public func createTask(req: CreateTaskReq) async throws -> Task {
         try await request("POST", path: "/api/caic/v1/tasks", body: try encoder.encode(req))
     }
     /// Sends user input to a running task.
@@ -223,7 +223,7 @@ public final class ApiClient {
         try await request("POST", path: "/api/caic/v1/tasks/\(id)/sync", body: try encoder.encode(req))
     }
     /// Forks a task by snapshotting its runtime instance and creating a new task on a derived branch.
-    public func forkTask(id: String, req: ForkTaskReq) async throws -> CreateTaskResp {
+    public func forkTask(id: String, req: ForkTaskReq) async throws -> Task {
         try await request("POST", path: "/api/caic/v1/tasks/\(id)/fork", body: try encoder.encode(req))
     }
     /// Returns the unified diff for a task's branch.

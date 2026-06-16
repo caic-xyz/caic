@@ -52,20 +52,6 @@ func (s *taskAPIService) maybeFakeCI(t *task.Task) {
 	s.fakeCI(s.ctx, t)
 }
 
-func (s *taskAPIService) repoURL(rel string) string {
-	if info, ok := s.repos.InfoFor(rel); ok {
-		return gitutil.RemoteToHTTPS(info.Remote)
-	}
-	return ""
-}
-
-func (s *taskAPIService) repoForge(rel string) v1.Forge {
-	if info, ok := s.repos.InfoFor(rel); ok {
-		return v1.Forge(info.ForgeKind)
-	}
-	return ""
-}
-
 func (s *taskAPIService) listTasks(ctx context.Context, _ *api.EmptyReq) (*[]v1.Task, error) {
 	out := s.taskListSnapshot(ctx)
 	return &out, nil
@@ -90,7 +76,7 @@ func (s *taskAPIService) taskListSnapshot(ctx context.Context) []v1.Task {
 	return out
 }
 
-func (s *taskAPIService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.CreateTaskResp, error) {
+func (s *taskAPIService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Task, error) {
 	var ownerID string
 	if u, ok := auth.UserFromContext(ctx); ok {
 		ownerID = u.ID
@@ -178,7 +164,10 @@ func (s *taskAPIService) createTask(ctx context.Context, req *v1.CreateTaskReq) 
 		return nil, api.InternalError("save preferences: " + err.Error())
 	}
 
-	return &v1.CreateTaskResp{Status: "accepted", ID: entry.Task().ID}, nil
+	// Return the full task so clients can seed their store and render the detail
+	// view immediately, without waiting for the SSE upsert to deliver it.
+	dto := v1conv.Task(ctx, entry, s.taskResolvers())
+	return &dto, nil
 }
 
 // relayStatus describes the state of the runtime-instance relay daemon, probed
@@ -294,7 +283,7 @@ func (s *taskAPIService) reviveTask(ctx context.Context, entry *tasks.Entry, _ *
 	return &v1.StatusResp{Status: "provisioning"}, nil
 }
 
-func (s *taskAPIService) forkTask(ctx context.Context, entry *tasks.Entry, req *v1.ForkTaskReq) (*v1.CreateTaskResp, error) {
+func (s *taskAPIService) forkTask(ctx context.Context, entry *tasks.Entry, req *v1.ForkTaskReq) (*v1.Task, error) {
 	source := entry.Task()
 
 	var ownerID string
@@ -356,7 +345,8 @@ func (s *taskAPIService) forkTask(ctx context.Context, entry *tasks.Entry, req *
 	if !ok {
 		return nil, api.InternalError("forked task not found")
 	}
-	return &v1.CreateTaskResp{Status: "accepted", ID: forkEntry.Task().ID}, nil
+	dto := v1conv.Task(ctx, forkEntry, s.taskResolvers())
+	return &dto, nil
 }
 
 func (s *taskAPIService) taskToolInput(ctx context.Context, entry *tasks.Entry, toolUseID string) (*v1.TaskToolInputResp, error) {
@@ -466,25 +456,43 @@ func (s *taskAPIService) resolveGitHubContainerToken(ctx context.Context, enable
 }
 
 func (s *taskAPIService) taskResolvers() v1conv.TaskResolvers {
+	return newTaskResolvers(s.taskMgr, s.repos, s.authStore)
+}
+
+// newTaskResolvers builds the resolver set used to convert task entries into API
+// DTOs. It is a free function so any HTTP concern object that creates a task
+// (task and CI handlers) can assemble the full Task DTO it returns to clients
+// from the same shared dependencies.
+func newTaskResolvers(taskMgr *tasks.Manager, repoSvc *repos.Service, authStore *auth.Store) v1conv.TaskResolvers {
 	return v1conv.TaskResolvers{
-		RepoURL:      s.repoURL,
-		RepoForge:    s.repoForge,
-		SudoPassword: s.taskMgr.SudoPassword,
+		RepoURL: func(rel string) string {
+			if info, ok := repoSvc.InfoFor(rel); ok {
+				return gitutil.RemoteToHTTPS(info.Remote)
+			}
+			return ""
+		},
+		RepoForge: func(rel string) v1.Forge {
+			if info, ok := repoSvc.InfoFor(rel); ok {
+				return v1.Forge(info.ForgeKind)
+			}
+			return ""
+		},
+		SudoPassword: taskMgr.SudoPassword,
 		OwnerName: func(ownerID string) string {
-			if s.authStore == nil || ownerID == "" {
+			if authStore == nil || ownerID == "" {
 				return ""
 			}
-			if u, ok := s.authStore.FindByID(ownerID); ok {
+			if u, ok := authStore.FindByID(ownerID); ok {
 				return u.Username
 			}
 			return ""
 		},
-		ContextWindowLimit: func(repo string, harness harness.Name, model string) int {
-			r, ok := s.taskMgr.Runner(repo)
+		ContextWindowLimit: func(repo string, harnessName harness.Name, model string) int {
+			r, ok := taskMgr.Runner(repo)
 			if !ok {
 				return 0
 			}
-			b := r.Backends[harness]
+			b := r.Backends[harnessName]
 			if b == nil {
 				return 0
 			}
