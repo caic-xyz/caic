@@ -99,9 +99,6 @@ jobs:
         run: python3 scripts/android_start_emulator.py
       - name: Run E2E tests
         run: make android-e2e
-      - name: Stop emulator
-        if: always()
-        run: adb emu kill || true
       - name: Upload E2E logs on failure
         if: failure()
         uses: actions/upload-artifact@v7
