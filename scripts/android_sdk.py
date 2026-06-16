@@ -231,11 +231,21 @@ def _ensure_java() -> None:
 
 
 def _create_avd(sdkmanager: str, sdk_root: str) -> int:
-    """Create the caic test AVD."""
+    """Create the caic test AVD at a well-known path."""
     avdmanager = os.path.join(os.path.dirname(sdkmanager), "avdmanager")
     if not os.path.isfile(avdmanager):
         print(f"avdmanager not found next to {sdkmanager}", file=sys.stderr)
         return 1
+
+    # Resolve the AVD home directory explicitly — avdmanager does not reliably
+    # respect ANDROID_AVD_HOME on all versions.
+    avd_home = os.environ.get(
+        "ANDROID_AVD_HOME",
+        os.path.join(os.environ.get("ANDROID_SDK_HOME", os.path.expanduser("~/.android")), "avd"),
+    )
+    avd_path = os.path.join(avd_home, f"{AVD_NAME}.avd")
+
+    env = {**os.environ, "ANDROID_HOME": sdk_root, "ANDROID_SDK_ROOT": sdk_root, "ANDROID_AVD_HOME": avd_home}
     result = subprocess.run(
         [
             avdmanager,
@@ -247,16 +257,26 @@ def _create_avd(sdkmanager: str, sdk_root: str) -> int:
             _system_image(),
             "-d",
             DEVICE_PROFILE,
+            "--path",
+            avd_path,
             "--force",
         ],
         input=b"no\n",
-        env={**os.environ, "ANDROID_HOME": sdk_root, "ANDROID_SDK_ROOT": sdk_root},
+        env=env,
         capture_output=True,
         check=False,
     )
     if result.returncode != 0:
         print(f"avdmanager failed (exit {result.returncode}):\n{result.stderr.decode()}", file=sys.stderr)
         return 1
+
+    # Verify the AVD ini file exists where the emulator will look.
+    ini_path = os.path.join(avd_home, f"{AVD_NAME}.ini")
+    if not os.path.isfile(ini_path):
+        print(f"avdmanager succeeded but {ini_path} was not created.", file=sys.stderr)
+        return 1
+
+    print(f"AVD created: {ini_path}", file=sys.stderr)
     return 0
 
 

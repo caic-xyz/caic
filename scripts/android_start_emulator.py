@@ -184,6 +184,14 @@ def main() -> int:
     log = open(log_path, "w")  # noqa: SIM115
 
     print(f"Starting emulator '{AVD_NAME}'...", file=sys.stderr)
+    # Log where the emulator will look for AVDs.
+    avd_home = os.environ.get("ANDROID_AVD_HOME") or os.path.join(
+        os.environ.get("ANDROID_SDK_HOME", os.path.expanduser("~/.android")), "avd"
+    )
+    ini_path = os.path.join(avd_home, f"{AVD_NAME}.ini")
+    exists = os.path.isfile(ini_path)
+    print(f"Expecting AVD at {ini_path} (exists: {exists})", file=sys.stderr)
+
     proc = subprocess.Popen(
         [emulator, "-avd", AVD_NAME, *EMULATOR_ARGS],
         stdout=log,
