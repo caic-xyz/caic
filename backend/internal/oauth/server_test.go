@@ -15,7 +15,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -1684,4 +1686,354 @@ func revokeOAuthTestToken(t *testing.T, h http.Handler, clientID, refreshToken s
 	if w.Code != wantStatus {
 		t.Fatalf("revoke status = %d, want %d: %s", w.Code, wantStatus, w.Body.String())
 	}
+}
+
+func TestRateLimiting(t *testing.T) {
+	t.Parallel()
+
+	t.Run("no rate limiter allows all requests", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+
+		// Token endpoint works without rate limiter.
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
+		if tokenResp.AccessToken == "" {
+			t.Fatal("access token is empty")
+		}
+	})
+
+	t.Run("token endpoint uses per-client rate limit key", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		lim := &inspectRateLimiter{}
+		path := t.TempDir() + "/oauth.json"
+		cfg := testFlowServerConfig(path, []User{user})
+		cfg.RateLimiter = lim
+		s, err := NewServer(cfg)
+		if err != nil {
+			t.Fatalf("NewServer: %v", err)
+		}
+		h := newTestServerHandler(s)
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+
+		// Token request should use "client:<client_id>" key.
+		code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
+		form := url.Values{
+			"grant_type":    {GrantAuthorizationCode},
+			"code":          {code},
+			"client_id":     {registered.ClientID},
+			"redirect_uri":  {"https://claude.example.com/callback"},
+			"code_verifier": {testVerifier},
+			"resource":      {testResourceURL},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		if !lim.sawKey("client:" + registered.ClientID) {
+			t.Fatalf("rate limiter did not see per-client key: keys=%v", lim.keys)
+		}
+	})
+
+	t.Run("token endpoint falls back to per-IP when client_id missing", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		lim := &inspectRateLimiter{}
+		path := t.TempDir() + "/oauth.json"
+		cfg := testFlowServerConfig(path, []User{user})
+		cfg.RateLimiter = lim
+		s, err := NewServer(cfg)
+		if err != nil {
+			t.Fatalf("NewServer: %v", err)
+		}
+		h := newTestServerHandler(s)
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+
+		// Submit a token request without client_id in the form.
+		code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
+		form := url.Values{
+			// No client_id key at all
+			"grant_type":    {GrantAuthorizationCode},
+			"code":          {code},
+			"redirect_uri":  {"https://claude.example.com/callback"},
+			"code_verifier": {testVerifier},
+			"resource":      {testResourceURL},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.RemoteAddr = "10.0.0.1:12345"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		// Should still succeed (rate limiter allows everything).
+		if w.Code != http.StatusBadRequest {
+			// Expect bad request because client_id is missing from form (required for code validation).
+			// But the rate limiter should have been asked for an IP key.
+			_ = w.Code
+		}
+		if !lim.sawKey("ip:10.0.0.1:12345") {
+			t.Fatalf("rate limiter did not see per-IP fallback key: keys=%v", lim.keys)
+		}
+	})
+
+	t.Run("register endpoint uses per-IP rate limit key", func(t *testing.T) {
+		t.Parallel()
+
+		lim := &inspectRateLimiter{}
+		cfg := testFlowServerConfig(t.TempDir()+"/oauth.json", []User{testUser()})
+		cfg.RateLimiter = lim
+		s, err := NewServer(cfg)
+		if err != nil {
+			t.Fatalf("NewServer: %v", err)
+		}
+		h := newTestServerHandler(s)
+
+		body, err := json.Marshal(RegisterRequest{ClientName: "Test", RedirectURIs: []string{"https://example.com/callback"}, TokenEndpointAuthMethod: TokenEndpointAuthNone})
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/register", strings.NewReader(string(body)))
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = "10.0.0.5:9999"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("register status = %d, want %d: %s", w.Code, http.StatusCreated, w.Body.String())
+		}
+		if !lim.sawKey("ip:10.0.0.5:9999") {
+			t.Fatalf("rate limiter did not see per-IP key: keys=%v", lim.keys)
+		}
+	})
+
+	t.Run("introspect endpoint uses per-IP rate limit key", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		lim := &inspectRateLimiter{}
+		path := t.TempDir() + "/oauth.json"
+		cfg := testFlowServerConfig(path, []User{user})
+		cfg.RateLimiter = lim
+		s, err := NewServer(cfg)
+		if err != nil {
+			t.Fatalf("NewServer: %v", err)
+		}
+		h := newTestServerHandler(s)
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
+
+		form := url.Values{"token": {tokenResp.AccessToken}}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/introspect", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.RemoteAddr = "10.0.0.7:7777"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("introspect status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		if !lim.sawKey("ip:10.0.0.7:7777") {
+			t.Fatalf("rate limiter did not see per-IP key: keys=%v", lim.keys)
+		}
+	})
+
+	t.Run("revoke endpoint uses per-client rate limit key", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		lim := &inspectRateLimiter{}
+		path := t.TempDir() + "/oauth.json"
+		cfg := testFlowServerConfig(path, []User{user})
+		cfg.RateLimiter = lim
+		s, err := NewServer(cfg)
+		if err != nil {
+			t.Fatalf("NewServer: %v", err)
+		}
+		h := newTestServerHandler(s)
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
+
+		form := url.Values{
+			"client_id":       {registered.ClientID},
+			"token":           {tokenResp.RefreshToken},
+			"token_type_hint": {"refresh_token"},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/revoke", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("revoke status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		if !lim.sawKey("client:" + registered.ClientID) {
+			t.Fatalf("rate limiter did not see per-client key: keys=%v", lim.keys)
+		}
+	})
+
+	t.Run("rate limiter rejection returns 429", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		path := t.TempDir() + "/oauth.json"
+
+		// First, register a client and authorize a code with a permissive server.
+		_, h, _ := newTestFlowServer(t, path, []User{user})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+		code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
+
+		// Then create a new server from the same store but with a deny limiter.
+		cfg := testFlowServerConfig(path, []User{user})
+		cfg.RateLimiter = &denyRateLimiter{}
+		s, err := NewServer(cfg)
+		if err != nil {
+			t.Fatalf("NewServer: %v", err)
+		}
+		denyHandler := newTestServerHandler(s)
+
+		// Token endpoint should be rejected.
+		form := url.Values{
+			"grant_type":    {GrantAuthorizationCode},
+			"code":          {code},
+			"client_id":     {registered.ClientID},
+			"redirect_uri":  {"https://claude.example.com/callback"},
+			"code_verifier": {testVerifier},
+			"resource":      {testResourceURL},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		denyHandler.ServeHTTP(w, req)
+		if w.Code != http.StatusTooManyRequests {
+			t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusTooManyRequests, w.Body.String())
+		}
+		if got := w.Header().Get("Retry-After"); got != "60" {
+			t.Fatalf("Retry-After = %q, want 60", got)
+		}
+	})
+
+	t.Run("client a hits limit client b still succeeds", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		path := t.TempDir() + "/oauth.json"
+
+		// Register clients and authorize codes with a permissive server.
+		_, permissiveH, _ := newTestFlowServer(t, path, []User{user})
+		clientA := registerOAuthTestClient(t, permissiveH, "Client A", []string{"https://a.example.com/callback"})
+		clientB := registerOAuthTestClient(t, permissiveH, "Client B", []string{"https://b.example.com/callback"})
+		codeA := authorizeOAuthTestCode(t, permissiveH, user, &clientA, "https://a.example.com/callback", []string{"read"}, "")
+		codeA2 := authorizeOAuthTestCode(t, permissiveH, user, &clientA, "https://a.example.com/callback", []string{"read"}, "")
+		codeB := authorizeOAuthTestCode(t, permissiveH, user, &clientB, "https://b.example.com/callback", []string{"read"}, "")
+
+		// Create a limited server from the same store: allow only 1 token request per client.
+		lim := &countRateLimiter{max: 1}
+		cfg := testFlowServerConfig(path, []User{user})
+		cfg.RateLimiter = lim
+		s, err := NewServer(cfg)
+		if err != nil {
+			t.Fatalf("NewServer: %v", err)
+		}
+		h := newTestServerHandler(s)
+
+		exchange := func(cid, code, redirectURI string) int {
+			form := url.Values{
+				"grant_type":    {GrantAuthorizationCode},
+				"code":          {code},
+				"client_id":     {cid},
+				"redirect_uri":  {redirectURI},
+				"code_verifier": {testVerifier},
+				"resource":      {testResourceURL},
+			}
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			return w.Code
+		}
+
+		// First request from client A: succeeds.
+		if got := exchange(clientA.ClientID, codeA, "https://a.example.com/callback"); got != http.StatusOK {
+			t.Fatalf("client A first request = %d, want %d", got, http.StatusOK)
+		}
+
+		// Second request from client A: denied (max=1 per client).
+		if got := exchange(clientA.ClientID, codeA2, "https://a.example.com/callback"); got != http.StatusTooManyRequests {
+			t.Fatalf("client A second request = %d, want %d", got, http.StatusTooManyRequests)
+		}
+
+		// Client B still succeeds (different key, fresh count).
+		if got := exchange(clientB.ClientID, codeB, "https://b.example.com/callback"); got != http.StatusOK {
+			t.Fatalf("client B request = %d, want %d", got, http.StatusOK)
+		}
+	})
+}
+
+// inspectRateLimiter records every key passed to Allow and always allows.
+type inspectRateLimiter struct {
+	keys []string
+}
+
+func (l *inspectRateLimiter) Allow(key string) bool {
+	l.keys = append(l.keys, key)
+	return true
+}
+
+func (l *inspectRateLimiter) sawKey(key string) bool {
+	return slices.Contains(l.keys, key)
+}
+
+// denyRateLimiter always denies requests.
+type denyRateLimiter struct{}
+
+func (denyRateLimiter) Allow(key string) bool { return false }
+
+// countRateLimiter allows up to max requests per key.
+type countRateLimiter struct {
+	mu     sync.Mutex
+	max    int
+	counts map[string]int
+}
+
+func (l *countRateLimiter) Allow(key string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.counts == nil {
+		l.counts = map[string]int{}
+	}
+	l.counts[key]++
+	return l.counts[key] <= l.max
+}
+
+// testFlowServerConfig returns a ServerConfig pre-populated with test defaults,
+// user flow callbacks, and a consent renderer.
+func testFlowServerConfig(path string, users []User) ServerConfig {
+	usersByID := make(map[string]User, len(users))
+	for _, user := range users {
+		usersByID[user.ID] = user
+	}
+	cfg := ServerConfig{
+		RefreshTokenStorePath:   path,
+		KeyID:                   "test-key",
+		ResourceURLPath:         "/resource",
+		ResourceMetadataURLPath: "/.well-known/oauth-protected-resource/resource",
+		ClientIDPrefix:          "test_",
+		SupportedScopes:         []string{"read", "write", "admin", "repos"},
+		DefaultScopes:           []string{"read", "write"},
+		BaseURL:                 func(*http.Request) string { return testBaseURL },
+		Renderer:                &captureConsentRenderer{},
+		CurrentUser: func(ctx context.Context) (User, bool) {
+			user, ok := ctx.Value(testUserContextKey{}).(User)
+			return user, ok
+		},
+		UserLookup: func(id string) (User, bool) {
+			user, ok := usersByID[id]
+			return user, ok
+		},
+	}
+	return cfg
 }

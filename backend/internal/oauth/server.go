@@ -38,6 +38,11 @@ type AuditRecorder interface {
 }
 
 // RateLimiter allows or rejects a rate-limit key.
+//
+// Keys are opaque strings built by the oauth package: "ip:<addr>" for
+// per-IP limits (register, introspect) and "client:<client_id>" for
+// per-client limits (token, revoke). The implementation chooses the window
+// size and request budget per key.
 type RateLimiter interface {
 	Allow(key string) bool
 }
@@ -349,11 +354,12 @@ func (s *Server) externalBaseURL(r *http.Request) string {
 	return scheme + "://" + authority
 }
 
-func (s *Server) allowRequest(w http.ResponseWriter, r *http.Request) bool {
+// rateLimit rejects the request with 429 if the limiter is configured and
+// the key is disallowed. Returns true when allowed (or no limiter).
+func (s *Server) rateLimit(w http.ResponseWriter, key string) bool {
 	if s.rateLimiter == nil {
 		return true
 	}
-	key := s.rateKey(r)
 	if s.rateLimiter.Allow(key) {
 		return true
 	}
@@ -362,8 +368,18 @@ func (s *Server) allowRequest(w http.ResponseWriter, r *http.Request) bool {
 	return false
 }
 
-func (s *Server) rateKey(r *http.Request) string {
-	return "ip:" + r.RemoteAddr
+// rateLimitIP rate-limits the request by remote IP.
+func (s *Server) rateLimitIP(w http.ResponseWriter, r *http.Request) bool {
+	return s.rateLimit(w, "ip:"+r.RemoteAddr)
+}
+
+// rateLimitClient rate-limits the request by client_id, falling back to
+// remote IP when clientID is empty.
+func (s *Server) rateLimitClient(w http.ResponseWriter, r *http.Request, clientID string) bool {
+	if clientID != "" {
+		return s.rateLimit(w, "client:"+clientID)
+	}
+	return s.rateLimitIP(w, r)
 }
 
 func (s *Server) handleOAuthMetadata(w http.ResponseWriter, r *http.Request) {
@@ -546,12 +562,12 @@ func (s *Server) handleOAuthAuthorizePOST(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleOAuthToken(w http.ResponseWriter, r *http.Request) {
-	if !s.allowRequest(w, r) {
-		return
-	}
 	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
 	if err := r.ParseForm(); err != nil {
 		WriteError(w, http.StatusBadRequest, "invalid_request", "invalid form")
+		return
+	}
+	if !s.rateLimitClient(w, r, r.PostForm.Get("client_id")) {
 		return
 	}
 	if err := s.pruneExpiredRefreshTokens(time.Now()); err != nil {
@@ -701,7 +717,7 @@ func (s *Server) writeTokenResponse(w http.ResponseWriter, r *http.Request, user
 }
 
 func (s *Server) handleOAuthIntrospect(w http.ResponseWriter, r *http.Request) {
-	if !s.allowRequest(w, r) {
+	if !s.rateLimitIP(w, r) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
@@ -737,12 +753,12 @@ func (s *Server) handleOAuthIntrospect(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleOAuthRevoke(w http.ResponseWriter, r *http.Request) {
-	if !s.allowRequest(w, r) {
-		return
-	}
 	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
 	if err := r.ParseForm(); err != nil {
 		WriteError(w, http.StatusBadRequest, "invalid_request", "invalid form")
+		return
+	}
+	if !s.rateLimitClient(w, r, r.PostForm.Get("client_id")) {
 		return
 	}
 	userID, err := s.revokeRefreshToken(r.PostForm.Get("token"), r.PostForm.Get("client_id"))
@@ -990,7 +1006,7 @@ func (s *Server) registerClient(client *Client) error {
 }
 
 func (s *Server) handleOAuthRegister(w http.ResponseWriter, r *http.Request) {
-	if !s.allowRequest(w, r) {
+	if !s.rateLimitIP(w, r) {
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
