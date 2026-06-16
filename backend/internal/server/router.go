@@ -27,13 +27,10 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
-	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/backend/internal/voicegateway/voicertc"
 )
-
-type fakeCIHook func(ctx context.Context, t *task.Task)
 
 // Router is the HTTP router for the caic web UI. It owns HTTP routing,
 // middleware, and route handler concerns only. Application services and
@@ -80,7 +77,7 @@ type Router struct {
 }
 
 // SetFakeCI injects a fake CI simulation hook for smoke and e2e tests.
-func (s *Router) SetFakeCI(f func(context.Context, *task.Task)) {
+func (s *Router) SetFakeCI(f FakeCIHook) {
 	if s.taskHTTPHandlers != nil && s.taskHTTPHandlers.service != nil {
 		s.taskHTTPHandlers.service.fakeCI = f
 	}

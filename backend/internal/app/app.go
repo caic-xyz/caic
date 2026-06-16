@@ -66,7 +66,7 @@ func (a *App) SetUsageFetchers(fetchers []usage.ProviderFetcher) {
 }
 
 // SetFakeCI injects a fake CI simulation hook for smoke and e2e tests.
-func (a *App) SetFakeCI(f func(context.Context, *task.Task)) {
+func (a *App) SetFakeCI(f server.FakeCIHook) {
 	a.Server.SetFakeCI(f)
 }
 

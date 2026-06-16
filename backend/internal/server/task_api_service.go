@@ -26,6 +26,11 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
+// FakeCIHook generate fake tasks.
+//
+// TODO: Cleaner interface.
+type FakeCIHook func(ctx context.Context, t *task.Task)
+
 // taskAPIService owns task command orchestration and API DTO assembly.
 //
 // HTTP handlers use it after route-level request decoding and task lookup, so
@@ -38,7 +43,7 @@ type taskAPIService struct {
 	forge     *forgemanager.Manager
 	ciService *ci.Service
 	authStore *auth.Store
-	fakeCI    fakeCIHook
+	fakeCI    FakeCIHook
 }
 
 func (s *taskAPIService) authEnabled() bool {
