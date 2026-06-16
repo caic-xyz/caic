@@ -246,13 +246,12 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	cacheSizes := server.NewCacheSizeStore()
 	botClient := &botClient{repos: repoService, taskMgr: taskMgr, forge: forgeManager}
 	ciAdapter := &ciAdapter{
-		repos:        repoService,
-		taskMgr:      taskMgr,
-		forge:        forgeManager,
-		prefs:        prefsStore,
-		warnings:     warnings,
-		taskCreator:  botClient,
-		notifyChange: taskMgr.NotifyTaskChange,
+		repos:       repoService,
+		taskMgr:     taskMgr,
+		forge:       forgeManager,
+		prefs:       prefsStore,
+		warnings:    warnings,
+		taskCreator: botClient,
 	}
 	ciService := ci.NewService(cache, provider, ciAdapter)
 	botService := bot.New(ctx, botClient)

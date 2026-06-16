@@ -970,10 +970,9 @@ func TestSignalProcess(t *testing.T) {
 			},
 		}
 		processes := &runtimeProcessHandlers{
-			taskMgr:      s.taskMgr,
-			backend:      backend,
-			authEnabled:  s.authEnabled,
-			notifyChange: s.taskMgr.NotifyTaskChange,
+			taskMgr:     s.taskMgr,
+			backend:     backend,
+			authEnabled: s.authEnabled,
 		}
 
 		body := strings.NewReader(`{"signal":"SIGTERM","extra":true}`)
@@ -1007,10 +1006,9 @@ func TestSignalProcess(t *testing.T) {
 			},
 		}
 		processes := &runtimeProcessHandlers{
-			taskMgr:      s.taskMgr,
-			backend:      backend,
-			authEnabled:  s.authEnabled,
-			notifyChange: s.taskMgr.NotifyTaskChange,
+			taskMgr:     s.taskMgr,
+			backend:     backend,
+			authEnabled: s.authEnabled,
 		}
 
 		body := strings.NewReader(`{"signal":"SIGKILL"}`)

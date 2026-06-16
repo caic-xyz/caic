@@ -384,6 +384,9 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 	if d.ProcessBackend == nil {
 		return nil, errors.New("process backend is required")
 	}
+	if d.TaskManager == nil {
+		return nil, errors.New("task manager is required")
+	}
 	voice := &voiceHandlers{bridge: d.VoiceBridge, gateway: d.VoiceGateway}
 	voiceMetadata := voice.metadata()
 	goModeSettings := newGoModeSettings(voiceMetadata, d.AuthStore != nil)
@@ -426,9 +429,8 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		},
 		goModeHandler: goModeHandler,
 		runtimeProcesses: &runtimeProcessHandlers{
-			taskMgr:      d.TaskManager,
-			backend:      d.ProcessBackend,
-			notifyChange: notifyChangeFn(d.TaskManager),
+			taskMgr: d.TaskManager,
+			backend: d.ProcessBackend,
 		},
 		serverHandlers: &serverHandlers{
 			serverCtx:          ctx,
@@ -518,12 +520,4 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		prefs:            d.Preferences,
 	}
 	return s, nil
-}
-
-// notifyChangeFn returns the task-change notifier for taskMgr, or nil.
-func notifyChangeFn(taskMgr *tasks.Manager) func() {
-	if taskMgr == nil {
-		return nil
-	}
-	return taskMgr.NotifyTaskChange
 }

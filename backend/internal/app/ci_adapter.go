@@ -23,20 +23,17 @@ type ciTaskCreator interface {
 
 // ciAdapter adapts caic stores and managers to ci.Backend.
 type ciAdapter struct {
-	repos        *repos.Service
-	taskMgr      *tasks.Manager
-	forge        *forgemanager.Manager
-	prefs        *preferences.Store
-	warnings     *server.WarningStore
-	taskCreator  ciTaskCreator
-	notifyChange func()
+	repos       *repos.Service
+	taskMgr     *tasks.Manager
+	forge       *forgemanager.Manager
+	prefs       *preferences.Store
+	warnings    *server.WarningStore
+	taskCreator ciTaskCreator
 }
 
 // NotifyTaskChange wakes SSE subscribers after a task state change.
 func (a *ciAdapter) NotifyTaskChange() {
-	if a.notifyChange != nil {
-		a.notifyChange()
-	}
+	a.taskMgr.NotifyTaskChange()
 }
 
 // EmitWarning delivers a CI warning to connected SSE clients.

@@ -23,10 +23,9 @@ type runtimeProcessBackend interface {
 
 // runtimeProcessHandlers handles task runtime process routes.
 type runtimeProcessHandlers struct {
-	taskMgr      *tasks.Manager
-	backend      runtimeProcessBackend
-	authEnabled  func() bool
-	notifyChange func()
+	taskMgr     *tasks.Manager
+	backend     runtimeProcessBackend
+	authEnabled func() bool
 }
 
 // HandleGetProcesses returns the list of running processes inside a task runtime instance.
@@ -74,8 +73,8 @@ func (h *runtimeProcessHandlers) HandleSignalProcess(w http.ResponseWriter, r *h
 		return
 	}
 	resp, err := h.signalProcess(r.Context(), entry, req)
-	if err == nil && h.notifyChange != nil {
-		h.notifyChange()
+	if err == nil {
+		h.taskMgr.NotifyTaskChange()
 	}
 	writeJSONResponse(w, resp, err)
 }
