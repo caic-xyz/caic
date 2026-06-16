@@ -13,10 +13,11 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
+	"github.com/caic-xyz/caic/backend/internal/oauth"
 )
 
 // mcpServer owns the MCP HTTP endpoint: protocol dispatch, rate limiting, and
-// origin validation. OAuth authorization is handled by the separate oauthServer
+// origin validation. OAuth authorization is handled by the separate oauth.Server
 // peer, which provides a BearerAuth middleware applied by the Router.
 type mcpServer struct {
 	protocol    *mcp.Handler
@@ -28,7 +29,7 @@ type mcpServer struct {
 
 // handleMCP is the MCP endpoint handler. Origin validation and rate limiting
 // are applied here; bearer authentication is applied upstream by the Router via
-// oauthServer.BearerAuth middleware.
+// oauth.Server.BearerAuth middleware.
 func (s *mcpServer) handleMCP(w http.ResponseWriter, r *http.Request) {
 	r = requestWithMCPPrincipal(r)
 	if err := s.validateMCPOrigin(r); err != nil {
@@ -45,7 +46,7 @@ func requestWithMCPPrincipal(r *http.Request) *http.Request {
 	if _, ok := mcpPrincipalFromContext(r.Context()); ok {
 		return r
 	}
-	claims, ok := bearerClaimsFromContext(r.Context())
+	claims, ok := oauth.BearerClaimsFromContext(r.Context())
 	if !ok {
 		return r
 	}
@@ -107,7 +108,7 @@ func (s *mcpServer) mcpRateKey(r *http.Request) string {
 
 // endpointRoutes returns an http.Handler with the JSON-RPC endpoint at
 // /api/caic/v1/mcp. Bearer authentication is applied by the Router via
-// oauthServer.BearerAuth middleware; when auth is disabled the handler is
+// oauth.Server.BearerAuth middleware; when auth is disabled the handler is
 // mounted directly.
 func (s *mcpServer) endpointRoutes() http.Handler {
 	m := http.NewServeMux()
@@ -172,7 +173,7 @@ func mcpHasScope(ctx context.Context, scope string) bool {
 }
 
 // externalBaseURL constructs the server's external base URL from hostState or
-// the request. Used by both mcpServer (origin validation) and oauthServer
+// the request. Used by both mcpServer (origin validation) and oauth.Server
 // (metadata, challenge, bearer verification).
 func externalBaseURL(hostState *auth.HostState, r *http.Request) string {
 	if hostState != nil {

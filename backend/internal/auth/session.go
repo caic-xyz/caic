@@ -1,5 +1,6 @@
 // JWT session management: issue and validate HS256 tokens using stdlib only.
 
+// Package auth manages caic user sessions and forge OAuth login identity.
 package auth
 
 import (
@@ -14,6 +15,9 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/forge"
 )
+
+// StateCookieName is the name of the CSRF state cookie.
+const StateCookieName = "caic_oauth_state"
 
 // jwtHeader is the fixed base64url-encoded JWT header for HS256.
 var jwtHeader = base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))
@@ -47,8 +51,8 @@ func IssueToken(u *User, secret []byte, ttl time.Duration) (string, error) {
 	return sigInput + "." + sig, nil
 }
 
-// ValidateToken parses and verifies a JWT. Returns Claims or an error.
-func ValidateToken(token string, secret []byte) (*Claims, error) {
+// validateToken parses and verifies a JWT. Returns Claims or an error.
+func validateToken(token string, secret []byte) (*claims, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
 		return nil, errors.New("invalid jwt format")
@@ -69,7 +73,7 @@ func ValidateToken(token string, secret []byte) (*Claims, error) {
 	if time.Now().Unix() > payload.Expiry {
 		return nil, errors.New("jwt expired")
 	}
-	return &Claims{
+	return &claims{
 		UserID:   payload.UserID,
 		Provider: forge.Kind(payload.Provider),
 		Username: payload.Username,
@@ -82,4 +86,27 @@ func hmacSHA256(secret []byte, data string) string {
 	mac := hmac.New(sha256.New, secret)
 	_, _ = mac.Write([]byte(data))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// User represents an authenticated caic user.
+type User struct {
+	ID           string     // "usr_<ksid>"
+	Provider     forge.Kind // "github" | "gitlab"
+	ProviderID   string     // provider's numeric user ID as string
+	Username     string
+	AvatarURL    string
+	AccessToken  string    // OAuth access token for forge API calls
+	RefreshToken string    // empty for GitHub; may be set for GitLab
+	TokenExpiry  time.Time // zero value means no expiry
+	CreatedAt    time.Time
+	LastSeenAt   time.Time
+}
+
+// claims are the fields embedded in the JWT payload.
+type claims struct {
+	UserID   string
+	Provider forge.Kind
+	Username string
+	IssuedAt time.Time
+	Expiry   time.Time
 }

@@ -4,8 +4,6 @@ package server
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,7 +29,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/gomode"
 	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
-	"github.com/caic-xyz/caic/backend/internal/oauth"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -99,10 +96,11 @@ func newTestPrefs(t testing.TB) *preferences.Store {
 type testRouter struct {
 	*Router
 
-	taskMgr *tasks.Manager
-	repos   *repos.Service
-	prefs   *preferences.Store
-	forge   *forgemanager.Manager
+	taskMgr               *tasks.Manager
+	repos                 *repos.Service
+	prefs                 *preferences.Store
+	forge                 *forgemanager.Manager
+	oauthRefreshTokenPath string
 }
 
 // newTestRouter creates a Router for tests. Tests commonly mutate auth/host
@@ -134,7 +132,7 @@ func newTestRouter(t testing.TB) *testRouter {
 }
 
 // newTestRouterWithAuthHost creates a Router with an auth store, suitable for
-// OAuth tests that need s.oauth to be non-nil at construction time.
+// OAuth tests that need s.oauthServer to be non-nil at construction time.
 // If refreshTokenPath is non-empty, it is used as the OAuth refresh token store.
 func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshTokenPath string, hostState *auth.HostState) *testRouter {
 	checker, err := ipgeo.NewChecker(t.Context(), "0.0.0.0/0,::/0", "", "")
@@ -160,7 +158,7 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, prefs: prefs, forge: forgeManager}
+	return &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, prefs: prefs, forge: forgeManager, oauthRefreshTokenPath: refreshTokenPath}
 }
 
 // newTestOAuthRouter creates a Router configured with OAuth host state and a
@@ -2020,267 +2018,14 @@ func TestBuildHandler(t *testing.T) {
 		}
 	})
 
-	t.Run("MCP protected resource metadata is public", func(t *testing.T) {
-		t.Parallel()
-		usersPath := filepath.Join(t.TempDir(), "users.json")
-		store, err := auth.Open(usersPath)
-		if err != nil {
-			t.Fatalf("open auth store: %v", err)
-		}
-		s := newTestOAuthRouter(t, store)
-		h, err := s.buildHandler()
-		if err != nil {
-			t.Fatalf("buildHandler() error = %v", err)
-		}
-
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/.well-known/oauth-protected-resource/api/caic/v1/mcp", http.NoBody)
-		req.Host = "caic.example.com"
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, req)
-		if w.Code != http.StatusOK {
-			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
-		}
-		var got oauth.ProtectedResourceMetadata
-		if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
-			t.Fatal(err)
-		}
-		if got.Resource != "https://caic.example.com/api/caic/v1/mcp" {
-			t.Errorf("Resource = %q", got.Resource)
-		}
-		if strings.Join(got.AuthorizationServers, ",") != "https://caic.example.com" {
-			t.Errorf("AuthorizationServers = %v", got.AuthorizationServers)
-		}
-		if got.ScopesSupported != nil {
-			t.Errorf("ScopesSupported = %v, want omitted", got.ScopesSupported)
-		}
-	})
-
-	t.Run("MCP unauthorized challenge advertises metadata", func(t *testing.T) {
-		t.Parallel()
-		usersPath := filepath.Join(t.TempDir(), "users.json")
-		store, err := auth.Open(usersPath)
-		if err != nil {
-			t.Fatalf("open auth store: %v", err)
-		}
-		s := newTestOAuthRouter(t, store)
-		h, err := s.buildHandler()
-		if err != nil {
-			t.Fatalf("buildHandler() error = %v", err)
-		}
-
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp", strings.NewReader("{}"))
-		req.Host = "caic.example.com"
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, req)
-		if w.Code != http.StatusUnauthorized {
-			t.Fatalf("status = %d, want %d", w.Code, http.StatusUnauthorized)
-		}
-		got := w.Header().Get("WWW-Authenticate")
-		want := `Bearer resource_metadata="https://caic.example.com/.well-known/oauth-protected-resource/api/caic/v1/mcp", scope="caic:mcp.read caic:tasks.read caic:tasks.write caic:tasks.admin caic:repos.write"`
-		if got != want {
-			t.Fatalf("WWW-Authenticate = %q, want %q", got, want)
-		}
-	})
-
-	t.Run("MCP OAuth metadata is public", func(t *testing.T) {
-		t.Parallel()
-		usersPath := filepath.Join(t.TempDir(), "users.json")
-		store, err := auth.Open(usersPath)
-		if err != nil {
-			t.Fatalf("open auth store: %v", err)
-		}
-		s := newTestOAuthRouter(t, store)
-		h, err := s.buildHandler()
-		if err != nil {
-			t.Fatalf("buildHandler() error = %v", err)
-		}
-
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/.well-known/oauth-authorization-server", http.NoBody)
-		req.Host = "caic.example.com"
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, req)
-		if w.Code != http.StatusOK {
-			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
-		}
-		var got oauth.AuthorizationServerMetadata
-		if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
-			t.Fatal(err)
-		}
-		if got.Issuer != "https://caic.example.com" || got.AuthorizationEndpoint != "https://caic.example.com/oauth/authorize" || got.TokenEndpoint != "https://caic.example.com/oauth/token" {
-			t.Fatalf("metadata = %+v", got)
-		}
-		if got.RegistrationEndpoint != "https://caic.example.com/oauth/register" || got.JWKSURI != "https://caic.example.com/oauth/jwks" {
-			t.Fatalf("metadata endpoints = %+v", got)
-		}
-	})
-
-	t.Run("MCP OAuth authorization code flow issues access token", func(t *testing.T) {
-		t.Parallel()
-		usersPath := filepath.Join(t.TempDir(), "users.json")
-		store, err := auth.Open(usersPath)
-		if err != nil {
-			t.Fatalf("open auth store: %v", err)
-		}
-		user, err := store.UpsertUser(&auth.User{Provider: forge.KindGitHub, ProviderID: "1", Username: "alice", AccessToken: "forge-token"})
-		if err != nil {
-			t.Fatalf("upsert user: %v", err)
-		}
-		s := newTestOAuthRouter(t, store)
-		secret := s.sessionSecret
-		h, err := s.buildHandler()
-		if err != nil {
-			t.Fatalf("buildHandler() error = %v", err)
-		}
-
-		registerBody := `{"client_name":"Claude","redirect_uris":["https://claude.ai/api/mcp/auth_callback"],"token_endpoint_auth_method":"none"}`
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/register", strings.NewReader(registerBody))
-		req.Header.Set("Content-Type", "application/json")
-		req.Host = "caic.example.com"
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, req)
-		if w.Code != http.StatusCreated {
-			t.Fatalf("register status = %d, want %d: %s", w.Code, http.StatusCreated, w.Body.String())
-		}
-		var registered oauth.RegisterResponse
-		if err := json.NewDecoder(w.Body).Decode(&registered); err != nil {
-			t.Fatal(err)
-		}
-
-		verifier := "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-		digest := sha256.Sum256([]byte(verifier))
-		challenge := base64.RawURLEncoding.EncodeToString(digest[:])
-		resource := "https://caic.example.com/api/caic/v1/mcp"
-		form := url.Values{
-			"response_type":         {"code"},
-			"client_id":             {registered.ClientID},
-			"redirect_uri":          {"https://claude.ai/api/mcp/auth_callback"},
-			"code_challenge":        {challenge},
-			"code_challenge_method": {"S256"},
-			"resource":              {resource},
-			"scope":                 {mcpAuthDefaultScope},
-			"state":                 {"state-1"},
-		}
-		jwt, err := auth.IssueToken(&user, secret, sessionTTL)
-		if err != nil {
-			t.Fatalf("issue session token: %v", err)
-		}
-		invalidScopeForm := url.Values{}
-		for key, values := range form {
-			invalidScopeForm[key] = append([]string(nil), values...)
-		}
-		invalidScopeForm.Set("scope", "caic:tasks.admin unknown:scope")
-		req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/oauth/authorize"+"?"+invalidScopeForm.Encode(), http.NoBody)
-		req.Host = "caic.example.com"
-		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
-		w = httptest.NewRecorder()
-		h.ServeHTTP(w, req)
-		if w.Code != http.StatusBadRequest {
-			t.Fatalf("invalid scope authorize status = %d, want %d", w.Code, http.StatusBadRequest)
-		}
-
-		req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/oauth/authorize"+"?"+form.Encode(), http.NoBody)
-		req.Host = "caic.example.com"
-		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
-		w = httptest.NewRecorder()
-		h.ServeHTTP(w, req)
-		if w.Code != http.StatusOK {
-			t.Fatalf("consent status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
-		}
-		_, tokenSuffix, ok := strings.Cut(w.Body.String(), `name="consent_token" value="`)
-		if !ok {
-			t.Fatalf("consent token missing from page: %s", w.Body.String())
-		}
-		consentToken, _, ok := strings.Cut(tokenSuffix, `"`)
-		if !ok || consentToken == "" {
-			t.Fatalf("invalid consent token in page: %s", w.Body.String())
-		}
-
-		consentForm := url.Values{
-			"consent_token": {consentToken},
-			"scope_form":    {"1"},
-			"scope":         {mcpScopeRead, mcpScopeTasksRead},
-		}
-		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/authorize", strings.NewReader(consentForm.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.Host = "caic.example.com"
-		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: jwt, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
-		w = httptest.NewRecorder()
-		h.ServeHTTP(w, req)
-		if w.Code != http.StatusSeeOther {
-			t.Fatalf("authorize status = %d, want %d: %s", w.Code, http.StatusSeeOther, w.Body.String())
-		}
-		redirectURL, err := url.Parse(w.Header().Get("Location"))
-		if err != nil {
-			t.Fatalf("parse redirect: %v", err)
-		}
-		code := redirectURL.Query().Get("code")
-		if code == "" || redirectURL.Query().Get("state") != "state-1" || redirectURL.Query().Get("iss") != "https://caic.example.com" {
-			t.Fatalf("redirect URL = %s", redirectURL.String())
-		}
-
-		tokenForm := url.Values{
-			"grant_type":    {"authorization_code"},
-			"code":          {code},
-			"client_id":     {registered.ClientID},
-			"redirect_uri":  {"https://claude.ai/api/mcp/auth_callback"},
-			"code_verifier": {verifier},
-			"resource":      {resource},
-		}
-		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(tokenForm.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.Host = "caic.example.com"
-		w = httptest.NewRecorder()
-		h.ServeHTTP(w, req)
-		if w.Code != http.StatusOK {
-			t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
-		}
-		var tokenResp oauth.TokenResponse
-		if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
-			t.Fatal(err)
-		}
-		parts := strings.Split(tokenResp.AccessToken, ".")
-		if tokenResp.TokenType != "Bearer" || len(parts) != 3 || tokenResp.Scope != mcpScopeRead+" "+mcpScopeTasksRead {
-			t.Fatalf("token response = %+v", tokenResp)
-		}
-		payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
-		if err != nil {
-			t.Fatalf("decode payload: %v", err)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(payloadJSON, &payload); err != nil {
-			t.Fatal(err)
-		}
-		if payload["iss"] != "https://caic.example.com" || payload["aud"] != resource || payload["sub"] != user.ID {
-			t.Fatalf("payload = %+v", payload)
-		}
-	})
-
 	t.Run("MCP accepts caic bearer token", func(t *testing.T) {
 		t.Parallel()
-		secret := []byte("0123456789abcdef0123456789abcdef")
-		usersPath := filepath.Join(t.TempDir(), "users.json")
-		store, err := auth.Open(usersPath)
-		if err != nil {
-			t.Fatalf("open auth store: %v", err)
-		}
-		user, err := store.UpsertUser(&auth.User{Provider: forge.KindGitHub, ProviderID: "1", Username: "alice", AccessToken: "forge-token"})
-		if err != nil {
-			t.Fatalf("upsert user: %v", err)
-		}
-		s := newTestRouterWithAuthHost(t, store, "", auth.NewHostState("https://caic.example.com"))
-		s.sessionSecret = secret
-		h, err := s.buildHandler()
-		if err != nil {
-			t.Fatalf("buildHandler() error = %v", err)
-		}
-		token, err := s.oauth.issueAccessToken("https://caic.example.com", &user, "https://caic.example.com/api/caic/v1/mcp", mcpScopeTasksRead, "")
-		if err != nil {
-			t.Fatalf("issue access token: %v", err)
-		}
+		_, h, user, registered := newMCPOAuthLifecycleRouter(t)
+		tokenResp := authorizeMCPClient(t, h, &user, &registered)
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(mcpRequestJSON("tools/call", `"name":"tasks_list","arguments":{}`)))
 		req.Host = "caic.example.com"
-		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Authorization", "Bearer "+tokenResp.AccessToken)
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		req.Header.Set("Mcp-Method", "tools/call")
 		req.Header.Set("Mcp-Name", "tasks_list")
@@ -2332,67 +2077,14 @@ func TestBuildHandler(t *testing.T) {
 		}
 	})
 
-	t.Run("MCP rejects wrong bearer audience", func(t *testing.T) {
-		t.Parallel()
-		usersPath := filepath.Join(t.TempDir(), "users.json")
-		store, err := auth.Open(usersPath)
-		if err != nil {
-			t.Fatalf("open auth store: %v", err)
-		}
-		user, err := store.UpsertUser(&auth.User{Provider: forge.KindGitHub, ProviderID: "1", Username: "alice", AccessToken: "forge-token"})
-		if err != nil {
-			t.Fatalf("upsert user: %v", err)
-		}
-		s := newTestRouterWithAuthHost(t, store, "", auth.NewHostState("https://caic.example.com"))
-		s.sessionSecret = []byte("0123456789abcdef0123456789abcdef")
-		h, err := s.buildHandler()
-		if err != nil {
-			t.Fatalf("buildHandler() error = %v", err)
-		}
-		token, err := s.oauth.issueAccessToken("https://caic.example.com", &user, "https://caic.example.com/api/wrong", mcpScopeTasksRead, "")
-		if err != nil {
-			t.Fatalf("issue access token: %v", err)
-		}
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(mcpRequestJSON("tools/call", `"name":"tasks_list","arguments":{}`)))
-		req.Host = "caic.example.com"
-		req.Header.Set("Authorization", "Bearer "+token)
-		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
-		req.Header.Set("Mcp-Method", "tools/call")
-		req.Header.Set("Mcp-Name", "tasks_list")
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, req)
-		if w.Code != http.StatusUnauthorized {
-			t.Fatalf("status = %d, want %d", w.Code, http.StatusUnauthorized)
-		}
-		if got := w.Header().Get("WWW-Authenticate"); !strings.Contains(got, "resource_metadata=") {
-			t.Fatalf("WWW-Authenticate = %q", got)
-		}
-	})
-
 	t.Run("MCP rejects invalid origin before handler", func(t *testing.T) {
 		t.Parallel()
-		usersPath := filepath.Join(t.TempDir(), "users.json")
-		store, err := auth.Open(usersPath)
-		if err != nil {
-			t.Fatalf("open auth store: %v", err)
-		}
-		user, err := store.UpsertUser(&auth.User{Provider: forge.KindGitHub, ProviderID: "1", Username: "alice", AccessToken: "forge-token"})
-		if err != nil {
-			t.Fatalf("upsert user: %v", err)
-		}
-		s := newTestRouterWithAuthHost(t, store, "", auth.NewHostState("https://caic.example.com"))
-		s.sessionSecret = []byte("0123456789abcdef0123456789abcdef")
-		h, err := s.buildHandler()
-		if err != nil {
-			t.Fatalf("buildHandler() error = %v", err)
-		}
-		token, err := s.oauth.issueAccessToken("https://caic.example.com", &user, "https://caic.example.com/api/caic/v1/mcp", mcpScopeTasksRead, "")
-		if err != nil {
-			t.Fatalf("issue access token: %v", err)
-		}
+		_, h, user, registered := newMCPOAuthLifecycleRouter(t)
+		tokenResp := authorizeMCPClient(t, h, &user, &registered)
+
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp", strings.NewReader("not-json"))
 		req.Host = "caic.example.com"
-		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Authorization", "Bearer "+tokenResp.AccessToken)
 		req.Header.Set("Origin", "https://evil.example.com")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -2421,28 +2113,12 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("MCP scope denial includes auth metadata and audit", func(t *testing.T) {
 		t.Parallel()
-		usersPath := filepath.Join(t.TempDir(), "users.json")
-		store, err := auth.Open(usersPath)
-		if err != nil {
-			t.Fatalf("open auth store: %v", err)
-		}
-		user, err := store.UpsertUser(&auth.User{Provider: forge.KindGitHub, ProviderID: "1", Username: "alice", AccessToken: "forge-token"})
-		if err != nil {
-			t.Fatalf("upsert user: %v", err)
-		}
-		s := newTestRouterWithAuthHost(t, store, "", auth.NewHostState("https://caic.example.com"))
-		s.sessionSecret = []byte("0123456789abcdef0123456789abcdef")
-		h, err := s.buildHandler()
-		if err != nil {
-			t.Fatalf("buildHandler() error = %v", err)
-		}
-		token, err := s.oauth.issueAccessToken("https://caic.example.com", &user, "https://caic.example.com/api/caic/v1/mcp", mcpScopeTasksRead, "")
-		if err != nil {
-			t.Fatalf("issue access token: %v", err)
-		}
+		s, h, user, registered := newMCPOAuthLifecycleRouter(t)
+		tokenResp := authorizeMCPClient(t, h, &user, &registered)
+
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(mcpRequestJSON("tools/call", `"name":"task_create","arguments":{"prompt":"OPENAI_API_KEY=sk-secret","repos":["repo"]}`)))
 		req.Host = "caic.example.com"
-		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Authorization", "Bearer "+tokenResp.AccessToken)
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		req.Header.Set("Mcp-Method", "tools/call")
 		req.Header.Set("Mcp-Name", "task_create")

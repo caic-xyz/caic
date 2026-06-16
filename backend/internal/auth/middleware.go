@@ -22,7 +22,7 @@ func Middleware(store *Store, secret []byte) func(http.Handler) http.Handler {
 			}
 			token := tokenFromRequest(r)
 			if token != "" {
-				if claims, err := ValidateToken(token, secret); err == nil {
+				if claims, err := validateToken(token, secret); err == nil {
 					if user, ok := store.FindByID(claims.UserID); ok {
 						r = r.WithContext(context.WithValue(r.Context(), contextKey{}, &user))
 					}

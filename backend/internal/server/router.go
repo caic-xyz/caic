@@ -23,6 +23,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/gomode"
 	"github.com/caic-xyz/caic/backend/internal/httplog"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
+	"github.com/caic-xyz/caic/backend/internal/oauth"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -50,7 +51,7 @@ type Router struct {
 	serverConfigHandlers *serverConfigHandlers
 	taskHTTPHandlers     *taskHTTPHandlers
 	mcp                  *mcpServer
-	oauth                *oauthServer
+	oauthServer          *oauth.Server
 	usageHandlers        *usageHandlers
 	voiceHandlers        *voiceHandlers
 	webFetchHandlers     *webFetchHandlers
@@ -144,15 +145,15 @@ func (s *Router) buildAPIHandler() http.Handler {
 	m("/processes", s.runtimeProcesses.routes())
 	m("/ci", s.ciHandlers.routes())
 	m("/web", s.webFetchHandlers.routes())
-	if s.oauth != nil {
-		m("/oauth/grants", s.oauth.grantRoutes())
+	if s.oauthServer != nil {
+		m("/oauth/grants", oauthGrantRoutes(s.oauthServer))
 	}
 	mountPrefix(apiMux, "", "/api/voicegateway/v1", s.voiceHandlers.handler())
 	apiMux.Handle("/api/", http.NotFoundHandler())
 	apiMux.Handle("/api", http.NotFoundHandler())
 
 	if s.authEnabled() {
-		return requireUser(apiMux)
+		return auth.RequireUser(apiMux)
 	}
 	return apiMux
 }
@@ -184,14 +185,14 @@ func (s *Router) buildHandler() (http.Handler, error) {
 	mountPrefix(mux, "", "/auth", s.authHandlers.routes())
 
 	// OAuth routes only when auth is configured.
-	if s.oauth != nil {
-		s.oauth.registerWellKnownRoutes(mux)
-		mountPrefix(mux, "", "/oauth", s.oauth.routes())
+	if s.oauthServer != nil {
+		s.oauthServer.RegisterWellKnownRoutes(mux)
+		mountPrefix(mux, "", "/oauth", s.oauthServer.Routes())
 	}
 	if !s.mcpDisabled {
 		mcpHandler := s.mcp.endpointRoutes()
-		if s.oauth != nil {
-			mcpHandler = s.oauth.BearerAuth(mcpHandler)
+		if s.oauthServer != nil {
+			mcpHandler = s.oauthServer.BearerAuth(mcpHandler)
 		}
 		mountPrefix(mux, "", "/api/caic/v1/mcp", mcpHandler)
 	}
@@ -326,26 +327,6 @@ func (s *Router) authEnabled() bool {
 	return s.authStore != nil
 }
 
-// requireUser gates the protected API: requests without an authenticated user
-// get a plain 401. The MCP endpoint is registered outside this gate and issues
-// its own bearer challenge (see mcpServer.writeUnauthorized).
-func requireUser(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := auth.UserFromContext(r.Context()); ok {
-			next.ServeHTTP(w, r)
-			return
-		}
-		writeUnauthorizedJSON(w)
-	})
-}
-
-// writeUnauthorizedJSON writes a 401 with the standard structured error body.
-func writeUnauthorizedJSON(w http.ResponseWriter) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusUnauthorized)
-	_, _ = w.Write([]byte(`{"error":{"code":"UNAUTHORIZED","message":"authentication required"}}`))
-}
-
 // hostOnly returns the host portion of a host:port address, or the input when
 // it carries no port.
 func hostOnly(addr string) string {
@@ -469,7 +450,28 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 	// OAuth server — only when auth is configured.
 	if d.AuthStore != nil {
 		var err error
-		s.oauth, err = newOAuthServer(d.OAuthPrivateKeyPEM, d.OAuthKeyID, d.OAuthRefreshTokenStorePath, "/api/caic/v1/mcp", "/.well-known/oauth-protected-resource/api/caic/v1/mcp", "caic_", []string{mcpScopeRead, mcpScopeTasksRead, mcpScopeTasksWrite, mcpScopeTasksAdmin, mcpScopeReposWrite}, []string{mcpScopeRead, mcpScopeTasksRead}, mcpScopeLabels, d.AuthStore, func(r *http.Request) string { return externalBaseURL(s.hostState, r) }, auth.UserFromContext, auth.NewContext, s.authHandlers, audit, rateLimiter)
+		s.oauthServer, err = oauth.NewServer(oauth.ServerConfig{
+			KeyPEM:                  d.OAuthPrivateKeyPEM,
+			KeyID:                   d.OAuthKeyID,
+			AccessTokenTTL:          time.Hour,
+			AuthCodeTTL:             10 * time.Minute,
+			RefreshTokenTTL:         30 * 24 * time.Hour,
+			RefreshTokenStorePath:   d.OAuthRefreshTokenStorePath,
+			ResourceURLPath:         "/api/caic/v1/mcp",
+			ResourceMetadataURLPath: "/.well-known/oauth-protected-resource/api/caic/v1/mcp",
+			ClientIDPrefix:          "caic_",
+			SupportedScopes:         []string{mcpScopeRead, mcpScopeTasksRead, mcpScopeTasksWrite, mcpScopeTasksAdmin, mcpScopeReposWrite},
+			DefaultScopes:           []string{mcpScopeRead, mcpScopeTasksRead},
+			ScopeLabels:             mcpScopeLabels,
+			BaseURL:                 func(r *http.Request) string { return externalBaseURL(s.hostState, r) },
+			CurrentUser:             oauthCurrentUser,
+			AttachUser:              oauthAttachUser(d.AuthStore),
+			UserLookup:              oauthUserLookup(d.AuthStore),
+			Login:                   s.authHandlers,
+			Audit:                   audit,
+			RateLimiter:             rateLimiter,
+			Renderer:                oauthConsentRenderer{},
+		})
 		if err != nil {
 			return nil, err
 		}

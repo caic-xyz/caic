@@ -13,6 +13,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/forge"
+	"github.com/caic-xyz/caic/backend/internal/oauth"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 )
@@ -83,7 +84,7 @@ func (h *authHandlers) handleStart(provider string) http.HandlerFunc {
 			return
 		}
 
-		state, err := auth.GenerateState()
+		state, err := oauth.GenerateState()
 		if err != nil {
 			slog.WarnContext(r.Context(), "generate oauth state", "err", err)
 			writeError(w, api.InternalError("generate state"))
@@ -95,7 +96,7 @@ func (h *authHandlers) handleStart(provider string) http.HandlerFunc {
 			mode = "app"
 		}
 		fullState := buildLoginState(mode, state, next)
-		cookieValue := auth.SignState(fullState, h.sessionSecret)
+		cookieValue := oauth.SignState(fullState, h.sessionSecret)
 
 		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure is set dynamically; all required attributes are present
 			Name:     auth.StateCookieName,
@@ -138,7 +139,7 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 			writeError(w, api.BadRequest("missing state cookie"))
 			return
 		}
-		fullState, ok := auth.ValidateState(stateCookie.Value, h.sessionSecret)
+		fullState, ok := oauth.ValidateState(stateCookie.Value, h.sessionSecret)
 		if !ok {
 			writeError(w, api.BadRequest("invalid state"))
 			return
@@ -169,7 +170,7 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 		}
 
 		// Exchange code for tokens.
-		accessToken, refreshToken, tokenExpiry, err := auth.ExchangeCode(r.Context(), cfg, code)
+		accessToken, refreshToken, tokenExpiry, err := oauth.ExchangeCode(r.Context(), cfg.OAuthClientConfig(), code)
 		if err != nil {
 			slog.WarnContext(r.Context(), "oauth exchange", "provider", provider, "err", err)
 			writeError(w, api.InternalError("token exchange failed"))

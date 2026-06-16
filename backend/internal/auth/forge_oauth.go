@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/oauth"
 )
@@ -79,23 +78,16 @@ func GitLabConfig(clientID, secret, gitlabURL string, host *HostState) ProviderC
 
 // AuthURL returns the provider's authorization URL with the state param.
 func (c *ProviderConfig) AuthURL(state string) string {
-	return oauth.AuthorizationURL(c.oauthClientConfig(), state)
+	return oauth.AuthorizationURL(c.AuthEndpoint, c.ClientID, c.RedirectURI(), c.Scopes, state)
 }
 
-// ExchangeCode exchanges an authorization code for tokens.
-// Returns accessToken, refreshToken (may be empty), expiry (may be zero).
-func ExchangeCode(ctx context.Context, cfg *ProviderConfig, code string) (access, refresh string, expiry time.Time, err error) {
-	return oauth.ExchangeCode(ctx, cfg.oauthClientConfig(), code)
-}
-
-func (c *ProviderConfig) oauthClientConfig() *oauth.ClientConfig {
-	return &oauth.ClientConfig{
+// OAuthClientConfig returns the generic OAuth client settings for this provider.
+func (c *ProviderConfig) OAuthClientConfig() oauth.ClientConfig {
+	return oauth.ClientConfig{
 		ClientID:     c.ClientID,
 		ClientSecret: c.ClientSecret,
-		AuthEndpoint: c.AuthEndpoint,
 		TokenURL:     c.TokenURL,
 		RedirectURI:  c.RedirectURI(),
-		Scopes:       c.Scopes,
 	}
 }
 

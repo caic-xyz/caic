@@ -451,7 +451,7 @@ func TestMCPHandlers(t *testing.T) {
 	})
 }
 
-func newAuthEnabledRouter(t *testing.T) (*Router, *auth.Store, auth.User) {
+func newAuthEnabledRouter(t *testing.T) (*Router, auth.User) {
 	usersPath := filepath.Join(t.TempDir(), "users.json")
 	store, err := auth.Open(usersPath)
 	if err != nil {
@@ -468,7 +468,7 @@ func newAuthEnabledRouter(t *testing.T) (*Router, *auth.Store, auth.User) {
 		t.Fatalf("upsert user: %v", err)
 	}
 	s := newTestOAuthRouter(t, store)
-	return s.Router, store, user
+	return s.Router, user
 }
 
 func registerTestClient(t *testing.T, h http.Handler, clientName string, redirectURIs []string) oauth.RegisterResponse {
@@ -489,16 +489,4 @@ func registerTestClient(t *testing.T, h http.Handler, clientName string, redirec
 		t.Fatalf("decode register response: %v", err)
 	}
 	return resp
-}
-
-func consentTokenFromHTML(t *testing.T, body string) string {
-	_, tokenSuffix, ok := strings.Cut(body, `name="consent_token" value="`)
-	if !ok {
-		t.Fatal("consent token missing")
-	}
-	consentToken, _, ok := strings.Cut(tokenSuffix, `"`)
-	if !ok {
-		t.Fatal("consent token value is not terminated")
-	}
-	return consentToken
 }

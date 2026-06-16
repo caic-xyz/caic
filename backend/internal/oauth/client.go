@@ -1,4 +1,7 @@
 // OAuth authorization-code client helpers.
+//
+// This file stops at generic protocol work: authorization URLs and token
+// exchange. Provider-specific userinfo parsing belongs in the caller.
 
 package oauth
 
@@ -14,31 +17,29 @@ import (
 	"time"
 )
 
-// ClientConfig holds OAuth 2.0 endpoint configuration for one client.
+// ClientConfig holds OAuth 2.0 token endpoint configuration for one authorization-code client.
 type ClientConfig struct {
 	ClientID     string
 	ClientSecret string
-	AuthEndpoint string
 	TokenURL     string
 	RedirectURI  string
-	Scopes       []string
 }
 
 // AuthorizationURL returns the provider authorization URL with the state param.
-func AuthorizationURL(c *ClientConfig, state string) string {
+func AuthorizationURL(authEndpoint, clientID, redirectURI string, scopes []string, state string) string {
 	v := url.Values{}
-	v.Set("client_id", c.ClientID)
-	v.Set("redirect_uri", c.RedirectURI)
-	v.Set("scope", strings.Join(c.Scopes, " "))
+	v.Set("client_id", clientID)
+	v.Set("redirect_uri", redirectURI)
+	v.Set("scope", strings.Join(scopes, " "))
 	v.Set("state", state)
 	v.Set("response_type", ResponseTypeCode)
-	return c.AuthEndpoint + "?" + v.Encode()
+	return authEndpoint + "?" + v.Encode()
 }
 
 // ExchangeCode exchanges an authorization code for tokens.
 //
 // It returns an access token, an optional refresh token, and an optional expiry.
-func ExchangeCode(ctx context.Context, c *ClientConfig, code string) (access, refresh string, expiry time.Time, err error) {
+func ExchangeCode(ctx context.Context, c ClientConfig, code string) (access, refresh string, expiry time.Time, err error) {
 	body := url.Values{}
 	body.Set("grant_type", GrantAuthorizationCode)
 	body.Set("code", code)
