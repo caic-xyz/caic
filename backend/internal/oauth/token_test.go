@@ -70,8 +70,8 @@ func TestAccessTokenService(t *testing.T) {
 		if err != nil {
 			t.Fatalf("IssueAccessToken: %v", err)
 		}
-		if _, err := verifierSvc.VerifyAccessToken(token, issuer, audience, time.Now(), nil, func(string) (User, bool) { return user, true }); err == nil || !strings.Contains(err.Error(), "unsupported token header") {
-			t.Fatalf("VerifyAccessToken error = %v, want unsupported token header", err)
+		if _, err := verifierSvc.VerifyAccessToken(token, issuer, audience, time.Now(), nil, func(string) (User, bool) { return user, true }); err == nil || !strings.Contains(err.Error(), "unknown token key id") {
+			t.Fatalf("VerifyAccessToken error = %v, want unknown token key id", err)
 		}
 	})
 
@@ -121,6 +121,105 @@ func TestAccessTokenService(t *testing.T) {
 		}
 		if _, err := svc.VerifyAccessToken(token, issuer, audience, time.Now(), func(string, time.Time) (bool, string, error) { return false, "", nil }, func(string) (User, bool) { return user, true }); err == nil || !strings.Contains(err.Error(), "token grant is not active") {
 			t.Fatalf("VerifyAccessToken error = %v, want token grant is not active", err)
+		}
+	})
+
+	t.Run("key rotation", func(t *testing.T) {
+		t.Parallel()
+
+		svc := newTestAccessTokenService(t, "")
+		oldKID := svc.currentKID
+
+		// Issue token with the initial key.
+		tokenOld, err := svc.IssueAccessToken(issuer, user, audience, scope, "grant-1")
+		if err != nil {
+			t.Fatalf("IssueAccessToken (old): %v", err)
+		}
+		if _, err := svc.VerifyAccessToken(tokenOld, issuer, audience, time.Now(),
+			func(grantID string, _ time.Time) (bool, string, error) {
+				return true, "test-client-1", nil
+			},
+			func(subject string) (User, bool) {
+				if subject != user.ID {
+					return User{}, false
+				}
+				return user, true
+			}); err != nil {
+			t.Fatalf("VerifyAccessToken (old key): %v", err)
+		}
+
+		// Rotate the key.
+		newKID, err := svc.RotateKey()
+		if err != nil {
+			t.Fatalf("RotateKey: %v", err)
+		}
+		if newKID == oldKID {
+			t.Fatal("RotateKey returned same KID")
+		}
+		if svc.currentKID != newKID {
+			t.Fatalf("currentKID = %q, want %q", svc.currentKID, newKID)
+		}
+		if _, ok := svc.keys[oldKID]; !ok {
+			t.Fatal("old key was removed from active set")
+		}
+		if _, ok := svc.keys[newKID]; !ok {
+			t.Fatal("new key was not added to active set")
+		}
+		if len(svc.keys) != 2 {
+			t.Fatalf("keys count = %d, want 2", len(svc.keys))
+		}
+
+		// Old token should still verify (old key still in map).
+		if _, err := svc.VerifyAccessToken(tokenOld, issuer, audience, time.Now(),
+			func(grantID string, _ time.Time) (bool, string, error) {
+				return true, "test-client-1", nil
+			},
+			func(subject string) (User, bool) {
+				if subject != user.ID {
+					return User{}, false
+				}
+				return user, true
+			}); err != nil {
+			t.Fatalf("VerifyAccessToken (old token after rotate): %v", err)
+		}
+
+		// New token should use the rotated key.
+		tokenNew, err := svc.IssueAccessToken(issuer, user, audience, scope, "grant-2")
+		if err != nil {
+			t.Fatalf("IssueAccessToken (new): %v", err)
+		}
+		if _, err := svc.VerifyAccessToken(tokenNew, issuer, audience, time.Now(),
+			func(grantID string, _ time.Time) (bool, string, error) {
+				return true, "test-client-1", nil
+			},
+			func(subject string) (User, bool) {
+				if subject != user.ID {
+					return User{}, false
+				}
+				return user, true
+			}); err != nil {
+			t.Fatalf("VerifyAccessToken (new key): %v", err)
+		}
+
+		// Rotate again. Oldest key should still be valid.
+		_, err = svc.RotateKey()
+		if err != nil {
+			t.Fatalf("RotateKey (second): %v", err)
+		}
+		if len(svc.keys) != 3 {
+			t.Fatalf("keys count after second rotate = %d, want 3", len(svc.keys))
+		}
+		if _, err := svc.VerifyAccessToken(tokenOld, issuer, audience, time.Now(),
+			func(grantID string, _ time.Time) (bool, string, error) {
+				return true, "test-client-1", nil
+			},
+			func(subject string) (User, bool) {
+				if subject != user.ID {
+					return User{}, false
+				}
+				return user, true
+			}); err != nil {
+			t.Fatalf("VerifyAccessToken (old token after second rotate): %v", err)
 		}
 	})
 }

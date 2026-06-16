@@ -597,6 +597,58 @@ func TestServer(t *testing.T) {
 			t.Fatalf("introspection active = true with expired token, want false: %+v", resp)
 		}
 	})
+
+	t.Run("token signed before rotate works after rotate and new token uses new key", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+
+		// Issue a token with the initial key.
+		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
+		if _, err := s.verifyBearer(newTestResourceRequest(t), tokenResp.AccessToken); err != nil {
+			t.Fatalf("verifyBearer before rotate: %v", err)
+		}
+
+		// Rotate the signing key.
+		newKID, err := s.tokens.RotateKey()
+		if err != nil {
+			t.Fatalf("RotateKey: %v", err)
+		}
+		if newKID == "" {
+			t.Fatal("RotateKey returned empty KID")
+		}
+
+		// Old token should still verify (old key still active).
+		if _, err := s.verifyBearer(newTestResourceRequest(t), tokenResp.AccessToken); err != nil {
+			t.Fatalf("verifyBearer after rotate: %v", err)
+		}
+
+		// New token should be signed with the rotated key.
+		tokenResp2 := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
+		if _, err := s.verifyBearer(newTestResourceRequest(t), tokenResp2.AccessToken); err != nil {
+			t.Fatalf("verifyBearer new token after rotate: %v", err)
+		}
+
+		// JWKS endpoint should return both keys.
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/oauth/jwks", http.NoBody)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("jwks status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var jwks JWKSet
+		if err := json.NewDecoder(w.Body).Decode(&jwks); err != nil {
+			t.Fatalf("decode jwks: %v", err)
+		}
+		if len(jwks.Keys) != 2 {
+			t.Fatalf("jwks keys count = %d, want 2: %+v", len(jwks.Keys), jwks)
+		}
+		if jwks.Keys[0].Kid == "" || jwks.Keys[1].Kid == "" {
+			t.Fatal("jwks kids are empty")
+		}
+	})
 }
 
 func TestDPoP(t *testing.T) {

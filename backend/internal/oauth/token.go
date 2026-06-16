@@ -28,9 +28,9 @@ type UserLookupFunc func(subject string) (User, bool)
 
 // AccessTokenService signs and verifies OAuth JWT access tokens.
 type AccessTokenService struct {
-	key *rsa.PrivateKey
-	kid string
-	ttl time.Duration
+	keys       map[string]*rsa.PrivateKey // active signing keys, keyed by KID
+	currentKID string                     // KID of the key used for new tokens
+	ttl        time.Duration
 }
 
 // NewAccessTokenService returns an access-token service from configured key material.
@@ -49,13 +49,36 @@ func NewAccessTokenService(keyPEM []byte, kid string, ttl time.Duration) (*Acces
 		}
 		kid = generatedKID
 	}
-	return &AccessTokenService{key: key, kid: kid, ttl: ttl}, nil
+	return &AccessTokenService{
+		keys:       map[string]*rsa.PrivateKey{kid: key},
+		currentKID: kid,
+		ttl:        ttl,
+	}, nil
 }
 
-// JWK returns the public signing key as an RSA JWK.
-func (s *AccessTokenService) JWK() JWK {
-	pub := s.key.PublicKey
-	return RSAJWK(s.kid, &pub)
+// JWK returns all active public signing keys as RSA JWKs.
+func (s *AccessTokenService) JWK() []JWK {
+	jwks := make([]JWK, 0, len(s.keys))
+	for kid, key := range s.keys {
+		jwks = append(jwks, RSAJWK(kid, &key.PublicKey))
+	}
+	return jwks
+}
+
+// RotateKey generates a new RSA key with a new KID, adds it to the active set,
+// and makes it the current signing key. Returns the new KID.
+func (s *AccessTokenService) RotateKey() (string, error) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return "", fmt.Errorf("generate oauth rotate key: %w", err)
+	}
+	kid, err := randomToken()
+	if err != nil {
+		return "", fmt.Errorf("generate oauth rotate key id: %w", err)
+	}
+	s.keys[kid] = key
+	s.currentKID = kid
+	return kid, nil
 }
 
 // IssueAccessToken signs a JWT access token for user.
@@ -128,7 +151,7 @@ func (s *AccessTokenService) VerifyAccessToken(token, issuer, audience string, n
 }
 
 func (s *AccessTokenService) issueAccessTokenAt(issuer string, user User, audience, scope, grantID string, issuedAt, expiresAt time.Time, confirmation *TokenConfirmation) (string, error) {
-	headerJSON, err := json.Marshal(JWTHeader{Alg: JWTAlgRS256, Typ: "JWT", KID: s.kid})
+	headerJSON, err := json.Marshal(JWTHeader{Alg: JWTAlgRS256, Typ: "JWT", KID: s.currentKID})
 	if err != nil {
 		return "", err
 	}
@@ -150,7 +173,7 @@ func (s *AccessTokenService) issueAccessTokenAt(issuer string, user User, audien
 	}
 	signingInput := base64.RawURLEncoding.EncodeToString(headerJSON) + "." + base64.RawURLEncoding.EncodeToString(payloadJSON)
 	digest := sha256.Sum256([]byte(signingInput))
-	signature, err := rsa.SignPKCS1v15(rand.Reader, s.key, crypto.SHA256, digest[:])
+	signature, err := rsa.SignPKCS1v15(rand.Reader, s.keys[s.currentKID], crypto.SHA256, digest[:])
 	if err != nil {
 		return "", err
 	}
@@ -189,8 +212,12 @@ func (s *AccessTokenService) verifyClaims(token, issuer, audience string, now ti
 	if err := json.Unmarshal(headerJSON, &header); err != nil {
 		return nil, fmt.Errorf("parse token header: %w", err)
 	}
-	if header.Alg != JWTAlgRS256 || header.KID != s.kid {
+	if header.Alg != JWTAlgRS256 {
 		return nil, errors.New("unsupported token header")
+	}
+	key, ok := s.keys[header.KID]
+	if !ok {
+		return nil, errors.New("unknown token key id")
 	}
 	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil {
@@ -198,7 +225,7 @@ func (s *AccessTokenService) verifyClaims(token, issuer, audience string, now ti
 	}
 	signingInput := parts[0] + "." + parts[1]
 	digest := sha256.Sum256([]byte(signingInput))
-	if err := rsa.VerifyPKCS1v15(&s.key.PublicKey, crypto.SHA256, digest[:], signature); err != nil {
+	if err := rsa.VerifyPKCS1v15(&key.PublicKey, crypto.SHA256, digest[:], signature); err != nil {
 		return nil, errors.New("invalid token signature")
 	}
 	payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
@@ -226,7 +253,7 @@ func (s *AccessTokenService) verifyClaims(token, issuer, audience string, now ti
 }
 
 func (s *AccessTokenService) issueRegistrationTokenAt(issuer, clientID, audience, scope string, issuedAt, expiresAt time.Time) (string, error) {
-	headerJSON, err := json.Marshal(JWTHeader{Alg: JWTAlgRS256, Typ: "JWT", KID: s.kid})
+	headerJSON, err := json.Marshal(JWTHeader{Alg: JWTAlgRS256, Typ: "JWT", KID: s.currentKID})
 	if err != nil {
 		return "", err
 	}
@@ -245,7 +272,7 @@ func (s *AccessTokenService) issueRegistrationTokenAt(issuer, clientID, audience
 	}
 	signingInput := base64.RawURLEncoding.EncodeToString(headerJSON) + "." + base64.RawURLEncoding.EncodeToString(payloadJSON)
 	digest := sha256.Sum256([]byte(signingInput))
-	signature, err := rsa.SignPKCS1v15(rand.Reader, s.key, crypto.SHA256, digest[:])
+	signature, err := rsa.SignPKCS1v15(rand.Reader, s.keys[s.currentKID], crypto.SHA256, digest[:])
 	if err != nil {
 		return "", err
 	}
@@ -265,8 +292,12 @@ func (s *AccessTokenService) verifyRegistrationClaims(token, issuer, audience st
 	if err := json.Unmarshal(headerJSON, &header); err != nil {
 		return nil, fmt.Errorf("parse token header: %w", err)
 	}
-	if header.Alg != JWTAlgRS256 || header.KID != s.kid {
+	if header.Alg != JWTAlgRS256 {
 		return nil, errors.New("unsupported token header")
+	}
+	key, ok := s.keys[header.KID]
+	if !ok {
+		return nil, errors.New("unknown token key id")
 	}
 	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil {
@@ -274,7 +305,7 @@ func (s *AccessTokenService) verifyRegistrationClaims(token, issuer, audience st
 	}
 	signingInput := parts[0] + "." + parts[1]
 	digest := sha256.Sum256([]byte(signingInput))
-	if err := rsa.VerifyPKCS1v15(&s.key.PublicKey, crypto.SHA256, digest[:], signature); err != nil {
+	if err := rsa.VerifyPKCS1v15(&key.PublicKey, crypto.SHA256, digest[:], signature); err != nil {
 		return nil, errors.New("invalid token signature")
 	}
 	payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[1])

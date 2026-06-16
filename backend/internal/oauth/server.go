@@ -406,7 +406,7 @@ func (s *Server) handleOAuthMetadata(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleOAuthJWKS(w http.ResponseWriter, r *http.Request) {
-	resp := JWKSet{Keys: []JWK{s.tokens.JWK()}}
+	resp := JWKSet{Keys: s.tokens.JWK()}
 	writeJSONResponse(w, &resp)
 }
 
