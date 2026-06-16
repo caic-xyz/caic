@@ -3,6 +3,13 @@
 package oauth
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/pem"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +32,17 @@ func TestAccessTokenService(t *testing.T) {
 		if err != nil {
 			t.Fatalf("IssueAccessToken: %v", err)
 		}
+
+		// Verify the header alg is ES256 (default key type).
+		parts := strings.Split(token, ".")
+		headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
+		if err != nil {
+			t.Fatalf("decode header: %v", err)
+		}
+		if !strings.Contains(string(headerJSON), "\"ES256\"") {
+			t.Fatalf("header alg is not ES256: %s", string(headerJSON))
+		}
+
 		touched := ""
 		claims, err := svc.VerifyAccessToken(token, issuer, audience, time.Now(), func(grantID string, _ time.Time) (bool, string, error) {
 			touched = grantID
@@ -70,8 +88,29 @@ func TestAccessTokenService(t *testing.T) {
 		if err != nil {
 			t.Fatalf("IssueAccessToken: %v", err)
 		}
-		if _, err := verifierSvc.VerifyAccessToken(token, issuer, audience, time.Now(), nil, func(string) (User, bool) { return user, true }); err == nil || !strings.Contains(err.Error(), "unknown token key id") {
-			t.Fatalf("VerifyAccessToken error = %v, want unknown token key id", err)
+		if _, err := verifierSvc.VerifyAccessToken(token, issuer, audience, time.Now(), nil, func(string) (User, bool) { return user, true }); err == nil || !strings.Contains(err.Error(), "unsupported token header") {
+			t.Fatalf("VerifyAccessToken error = %v, want unsupported token header", err)
+		}
+	})
+
+	t.Run("error wrong alg in header", func(t *testing.T) {
+		t.Parallel()
+		svc := newTestAccessTokenService(t, "kid-wrong-alg")
+		token, err := svc.IssueAccessToken(issuer, user, audience, scope, "")
+		if err != nil {
+			t.Fatalf("IssueAccessToken: %v", err)
+		}
+		// Replace the alg in the header from ES256 to RS256.
+		parts := strings.Split(token, ".")
+		headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
+		if err != nil {
+			t.Fatalf("decode header: %v", err)
+		}
+		tamperedHeader := strings.Replace(string(headerJSON), "\"ES256\"", "\"RS256\"", 1)
+		parts[0] = base64.RawURLEncoding.EncodeToString([]byte(tamperedHeader))
+		token = strings.Join(parts, ".")
+		if _, err := svc.VerifyAccessToken(token, issuer, audience, time.Now(), nil, func(string) (User, bool) { return user, true }); err == nil || !strings.Contains(err.Error(), "unsupported token header") {
+			t.Fatalf("VerifyAccessToken error = %v, want unsupported token header", err)
 		}
 	})
 
@@ -168,6 +207,26 @@ func TestAccessTokenService(t *testing.T) {
 		if len(svc.keys) != 2 {
 			t.Fatalf("keys count = %d, want 2", len(svc.keys))
 		}
+		// Verify the new key is ES256.
+		if svc.keys[newKID].alg != "ES256" {
+			t.Fatalf("new key alg = %q, want ES256", svc.keys[newKID].alg)
+		}
+		if _, ok := svc.keys[newKID].key.(*ecdsa.PrivateKey); !ok {
+			t.Fatal("new key is not ECDSA")
+		}
+
+		// Verify JWK for the new key is EC.
+		jwks := svc.JWK()
+		for _, jwk := range jwks {
+			if jwk.Kid == newKID {
+				if jwk.Kty != "EC" {
+					t.Fatalf("new key JWK kty = %q, want EC", jwk.Kty)
+				}
+				if jwk.Crv != "P-256" {
+					t.Fatalf("new key JWK crv = %q, want P-256", jwk.Crv)
+				}
+			}
+		}
 
 		// Old token should still verify (old key still in map).
 		if _, err := svc.VerifyAccessToken(tokenOld, issuer, audience, time.Now(),
@@ -183,7 +242,7 @@ func TestAccessTokenService(t *testing.T) {
 			t.Fatalf("VerifyAccessToken (old token after rotate): %v", err)
 		}
 
-		// New token should use the rotated key.
+		// New token should use the rotated key (ES256).
 		tokenNew, err := svc.IssueAccessToken(issuer, user, audience, scope, "grant-2")
 		if err != nil {
 			t.Fatalf("IssueAccessToken (new): %v", err)
@@ -220,6 +279,181 @@ func TestAccessTokenService(t *testing.T) {
 				return user, true
 			}); err != nil {
 			t.Fatalf("VerifyAccessToken (old token after second rotate): %v", err)
+		}
+	})
+
+	t.Run("RotateKeyWithAlg RS256", func(t *testing.T) {
+		t.Parallel()
+
+		svc := newTestAccessTokenService(t, "")
+		// Default is ES256.
+		if svc.keys[svc.currentKID].alg != "ES256" {
+			t.Fatalf("default key alg = %q, want ES256", svc.keys[svc.currentKID].alg)
+		}
+
+		// Add an RSA key via RotateKeyWithAlg.
+		rsaKID, err := svc.RotateKeyWithAlg("RS256")
+		if err != nil {
+			t.Fatalf("RotateKeyWithAlg(RS256): %v", err)
+		}
+		if svc.keys[rsaKID].alg != "RS256" {
+			t.Fatalf("RS256 key alg = %q, want RS256", svc.keys[rsaKID].alg)
+		}
+		if _, ok := svc.keys[rsaKID].key.(*rsa.PrivateKey); !ok {
+			t.Fatal("RotateKeyWithAlg(RS256) did not produce RSA key")
+		}
+
+		// Issue and verify with the RSA key.
+		token, err := svc.IssueAccessToken(issuer, user, audience, scope, "grant-rsa")
+		if err != nil {
+			t.Fatalf("IssueAccessToken (RSA): %v", err)
+		}
+		if _, err := svc.VerifyAccessToken(token, issuer, audience, time.Now(),
+			func(grantID string, _ time.Time) (bool, string, error) {
+				return true, "test-client-1", nil
+			},
+			func(subject string) (User, bool) {
+				if subject != user.ID {
+					return User{}, false
+				}
+				return user, true
+			}); err != nil {
+			t.Fatalf("VerifyAccessToken (RSA key): %v", err)
+		}
+
+		// Verify RSA header alg.
+		parts := strings.Split(token, ".")
+		headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
+		if err != nil {
+			t.Fatalf("decode header: %v", err)
+		}
+		if !strings.Contains(string(headerJSON), "\"RS256\"") {
+			t.Fatalf("RSA header alg is not RS256: %s", string(headerJSON))
+		}
+
+		// RotateKeyWithAlg with unknown alg.
+		if _, err := svc.RotateKeyWithAlg("BOGUS256"); err == nil {
+			t.Fatal("RotateKeyWithAlg(BOGUS256) error = nil")
+		}
+	})
+
+	t.Run("mixed RSA and EC JWKS", func(t *testing.T) {
+		t.Parallel()
+
+		svc := newTestAccessTokenService(t, "")
+		// Add an RSA key.
+		_, err := svc.RotateKeyWithAlg("RS256")
+		if err != nil {
+			t.Fatalf("RotateKeyWithAlg(RS256): %v", err)
+		}
+		// Add another EC key.
+		_, err = svc.RotateKeyWithAlg("ES256")
+		if err != nil {
+			t.Fatalf("RotateKeyWithAlg(ES256): %v", err)
+		}
+
+		jwks := svc.JWK()
+		if len(jwks) != 3 {
+			t.Fatalf("jwks count = %d, want 3", len(jwks))
+		}
+		var rsaCount, ecCount int
+		for _, jwk := range jwks {
+			switch jwk.Kty {
+			case "RSA":
+				rsaCount++
+				if jwk.N == "" || jwk.E == "" {
+					t.Fatalf("RSA JWK missing n or e: %+v", jwk)
+				}
+				if jwk.Crv != "" || jwk.X != "" || jwk.Y != "" {
+					t.Fatalf("RSA JWK has EC fields: %+v", jwk)
+				}
+			case "EC":
+				ecCount++
+				if jwk.Crv != "P-256" || jwk.X == "" || jwk.Y == "" {
+					t.Fatalf("EC JWK missing crv/x/y: %+v", jwk)
+				}
+				if jwk.N != "" || jwk.E != "" {
+					t.Fatalf("EC JWK has RSA fields: %+v", jwk)
+				}
+			default:
+				t.Fatalf("unexpected kty: %s", jwk.Kty)
+			}
+		}
+		if rsaCount != 1 {
+			t.Fatalf("RSA jwk count = %d, want 1", rsaCount)
+		}
+		if ecCount != 2 {
+			t.Fatalf("EC jwk count = %d, want 2", ecCount)
+		}
+	})
+
+	t.Run("EC key from PEM", func(t *testing.T) {
+		t.Parallel()
+
+		// Generate an EC P-256 key and marshal to PKCS8 PEM.
+		ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			t.Fatalf("generate ec key: %v", err)
+		}
+		pkcs8DER, err := x509.MarshalPKCS8PrivateKey(ecKey)
+		if err != nil {
+			t.Fatalf("marshal pkcs8: %v", err)
+		}
+		keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: pkcs8DER})
+
+		svc, err := NewAccessTokenService(keyPEM, "pem-ec-kid", time.Hour)
+		if err != nil {
+			t.Fatalf("NewAccessTokenService (EC PEM): %v", err)
+		}
+		if svc.keys["pem-ec-kid"].alg != "ES256" {
+			t.Fatalf("EC PEM key alg = %q, want ES256", svc.keys["pem-ec-kid"].alg)
+		}
+
+		token, err := svc.IssueAccessToken(issuer, user, audience, scope, "grant-ec-pem")
+		if err != nil {
+			t.Fatalf("IssueAccessToken (EC PEM): %v", err)
+		}
+		if _, err := svc.VerifyAccessToken(token, issuer, audience, time.Now(),
+			func(grantID string, _ time.Time) (bool, string, error) {
+				return true, "test-client-1", nil
+			},
+			func(subject string) (User, bool) {
+				return user, true
+			}); err != nil {
+			t.Fatalf("VerifyAccessToken (EC PEM key): %v", err)
+		}
+	})
+
+	t.Run("RSA key from PEM", func(t *testing.T) {
+		t.Parallel()
+
+		// Generate an RSA key and marshal to PKCS1 PEM.
+		rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			t.Fatalf("generate rsa key: %v", err)
+		}
+		keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(rsaKey)})
+
+		svc, err := NewAccessTokenService(keyPEM, "pem-rsa-kid", time.Hour)
+		if err != nil {
+			t.Fatalf("NewAccessTokenService (RSA PEM): %v", err)
+		}
+		if svc.keys["pem-rsa-kid"].alg != "RS256" {
+			t.Fatalf("RSA PEM key alg = %q, want RS256", svc.keys["pem-rsa-kid"].alg)
+		}
+
+		token, err := svc.IssueAccessToken(issuer, user, audience, scope, "grant-rsa-pem")
+		if err != nil {
+			t.Fatalf("IssueAccessToken (RSA PEM): %v", err)
+		}
+		if _, err := svc.VerifyAccessToken(token, issuer, audience, time.Now(),
+			func(grantID string, _ time.Time) (bool, string, error) {
+				return true, "test-client-1", nil
+			},
+			func(subject string) (User, bool) {
+				return user, true
+			}); err != nil {
+			t.Fatalf("VerifyAccessToken (RSA PEM key): %v", err)
 		}
 	})
 }

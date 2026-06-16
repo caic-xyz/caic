@@ -2,6 +2,7 @@
 package oauth
 
 import (
+	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
@@ -222,6 +223,21 @@ func RSAJWK(kid string, pub *rsa.PublicKey) JWK {
 		Kid: kid,
 		N:   base64.RawURLEncoding.EncodeToString(pub.N.Bytes()),
 		E:   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pub.E)).Bytes()),
+	}
+}
+
+// ECJWK returns an ECDSA P-256 signing key in JWK form.
+func ECJWK(kid string, pub *ecdsa.PublicKey) JWK {
+	raw, _ := pub.Bytes()
+	keySize := (len(raw) - 1) / 2
+	return JWK{
+		Kty: "EC",
+		Use: "sig",
+		Alg: "ES256",
+		Kid: kid,
+		Crv: "P-256",
+		X:   base64.RawURLEncoding.EncodeToString(raw[1 : 1+keySize]),
+		Y:   base64.RawURLEncoding.EncodeToString(raw[1+keySize:]),
 	}
 }
 

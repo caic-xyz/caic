@@ -4,6 +4,8 @@ package oauth
 
 import (
 	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -19,6 +21,12 @@ import (
 
 const accessTokenType = "access_token"
 
+// signingKey holds a private key and its JWS algorithm identifier.
+type signingKey struct {
+	key crypto.Signer
+	alg string // "RS256" or "ES256"
+}
+
 // GrantTouchFunc marks or validates an OAuth grant during bearer-token verification.
 // Returns (active, clientID, error).
 type GrantTouchFunc func(grantID string, now time.Time) (active bool, clientID string, err error)
@@ -28,17 +36,17 @@ type UserLookupFunc func(subject string) (User, bool)
 
 // AccessTokenService signs and verifies OAuth JWT access tokens.
 type AccessTokenService struct {
-	keys       map[string]*rsa.PrivateKey // active signing keys, keyed by KID
-	currentKID string                     // KID of the key used for new tokens
+	keys       map[string]signingKey // active signing keys, keyed by KID
+	currentKID string                // KID of the key used for new tokens
 	ttl        time.Duration
 }
 
 // NewAccessTokenService returns an access-token service from configured key material.
 //
-// If keyPEM is empty, NewAccessTokenService generates a new RSA key. If kid is
-// empty, it generates a random key ID.
+// If keyPEM is empty, NewAccessTokenService generates a new ECDSA P-256 key.
+// If kid is empty, it generates a random key ID.
 func NewAccessTokenService(keyPEM []byte, kid string, ttl time.Duration) (*AccessTokenService, error) {
-	key, err := accessTokenKey(keyPEM)
+	key, alg, err := accessTokenKey(keyPEM)
 	if err != nil {
 		return nil, err
 	}
@@ -50,33 +58,58 @@ func NewAccessTokenService(keyPEM []byte, kid string, ttl time.Duration) (*Acces
 		kid = generatedKID
 	}
 	return &AccessTokenService{
-		keys:       map[string]*rsa.PrivateKey{kid: key},
+		keys:       map[string]signingKey{kid: {key: key, alg: alg}},
 		currentKID: kid,
 		ttl:        ttl,
 	}, nil
 }
 
-// JWK returns all active public signing keys as RSA JWKs.
+// JWK returns all active public signing keys as JWKs.
 func (s *AccessTokenService) JWK() []JWK {
 	jwks := make([]JWK, 0, len(s.keys))
-	for kid, key := range s.keys {
-		jwks = append(jwks, RSAJWK(kid, &key.PublicKey))
+	for kid, sk := range s.keys {
+		switch pub := sk.key.Public().(type) {
+		case *rsa.PublicKey:
+			jwks = append(jwks, RSAJWK(kid, pub))
+		case *ecdsa.PublicKey:
+			jwks = append(jwks, ECJWK(kid, pub))
+		}
 	}
 	return jwks
 }
 
-// RotateKey generates a new RSA key with a new KID, adds it to the active set,
-// and makes it the current signing key. Returns the new KID.
+// RotateKey generates a new ECDSA P-256 key with a new KID, adds it to the
+// active set, and makes it the current signing key. Returns the new KID.
 func (s *AccessTokenService) RotateKey() (string, error) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		return "", fmt.Errorf("generate oauth rotate key: %w", err)
+	return s.RotateKeyWithAlg("ES256")
+}
+
+// RotateKeyWithAlg generates a new key of the specified algorithm ("RS256" or
+// "ES256") in the active set and makes it the current signing key.
+// Returns the new KID.
+func (s *AccessTokenService) RotateKeyWithAlg(alg string) (string, error) {
+	var sk signingKey
+	switch alg {
+	case "RS256":
+		rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			return "", fmt.Errorf("generate oauth rotate rsa key: %w", err)
+		}
+		sk = signingKey{key: rsaKey, alg: "RS256"}
+	case "ES256":
+		ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			return "", fmt.Errorf("generate oauth rotate ec key: %w", err)
+		}
+		sk = signingKey{key: ecKey, alg: "ES256"}
+	default:
+		return "", fmt.Errorf("unsupported key algorithm: %q", alg)
 	}
 	kid, err := randomToken()
 	if err != nil {
 		return "", fmt.Errorf("generate oauth rotate key id: %w", err)
 	}
-	s.keys[kid] = key
+	s.keys[kid] = sk
 	s.currentKID = kid
 	return kid, nil
 }
@@ -151,7 +184,8 @@ func (s *AccessTokenService) VerifyAccessToken(token, issuer, audience string, n
 }
 
 func (s *AccessTokenService) issueAccessTokenAt(issuer string, user User, audience, scope, grantID string, issuedAt, expiresAt time.Time, confirmation *TokenConfirmation) (string, error) {
-	headerJSON, err := json.Marshal(JWTHeader{Alg: JWTAlgRS256, Typ: "JWT", KID: s.currentKID})
+	alg := s.keys[s.currentKID].alg
+	headerJSON, err := json.Marshal(JWTHeader{Alg: alg, Typ: "JWT", KID: s.currentKID})
 	if err != nil {
 		return "", err
 	}
@@ -173,30 +207,41 @@ func (s *AccessTokenService) issueAccessTokenAt(issuer string, user User, audien
 	}
 	signingInput := base64.RawURLEncoding.EncodeToString(headerJSON) + "." + base64.RawURLEncoding.EncodeToString(payloadJSON)
 	digest := sha256.Sum256([]byte(signingInput))
-	signature, err := rsa.SignPKCS1v15(rand.Reader, s.keys[s.currentKID], crypto.SHA256, digest[:])
+	sk := s.keys[s.currentKID]
+	signature, err := sign(sk.key, digest[:])
 	if err != nil {
 		return "", err
 	}
 	return signingInput + "." + base64.RawURLEncoding.EncodeToString(signature), nil
 }
 
-func accessTokenKey(keyPEM []byte) (*rsa.PrivateKey, error) {
-	if len(keyPEM) == 0 {
-		generated, err := rsa.GenerateKey(rand.Reader, 2048)
-		if err != nil {
-			return nil, fmt.Errorf("generate oauth signing key: %w", err)
-		}
-		return generated, nil
-	}
-	block, _ := pem.Decode(keyPEM)
-	if block == nil {
-		return nil, errors.New("decode oauth signing key PEM")
-	}
-	key, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+func (s *AccessTokenService) issueRegistrationTokenAt(issuer, clientID, audience, scope string, issuedAt, expiresAt time.Time) (string, error) {
+	alg := s.keys[s.currentKID].alg
+	headerJSON, err := json.Marshal(JWTHeader{Alg: alg, Typ: "JWT", KID: s.currentKID})
 	if err != nil {
-		return nil, fmt.Errorf("parse oauth signing key: %w", err)
+		return "", err
 	}
-	return key, nil
+	payloadJSON, err := json.Marshal(AccessTokenClaims{
+		Issuer:    issuer,
+		Subject:   clientID,
+		Audience:  audience,
+		Scope:     scope,
+		IssuedAt:  issuedAt.Unix(),
+		NotBefore: issuedAt.Unix(),
+		Expiry:    expiresAt.Unix(),
+		Type:      "registration_access_token",
+	})
+	if err != nil {
+		return "", err
+	}
+	signingInput := base64.RawURLEncoding.EncodeToString(headerJSON) + "." + base64.RawURLEncoding.EncodeToString(payloadJSON)
+	digest := sha256.Sum256([]byte(signingInput))
+	sk := s.keys[s.currentKID]
+	signature, err := sign(sk.key, digest[:])
+	if err != nil {
+		return "", err
+	}
+	return signingInput + "." + base64.RawURLEncoding.EncodeToString(signature), nil
 }
 
 func (s *AccessTokenService) verifyClaims(token, issuer, audience string, now time.Time) (*AccessTokenClaims, error) {
@@ -212,12 +257,9 @@ func (s *AccessTokenService) verifyClaims(token, issuer, audience string, now ti
 	if err := json.Unmarshal(headerJSON, &header); err != nil {
 		return nil, fmt.Errorf("parse token header: %w", err)
 	}
-	if header.Alg != JWTAlgRS256 {
+	keyInfo, ok := s.keys[header.KID]
+	if !ok || header.Alg != keyInfo.alg {
 		return nil, errors.New("unsupported token header")
-	}
-	key, ok := s.keys[header.KID]
-	if !ok {
-		return nil, errors.New("unknown token key id")
 	}
 	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil {
@@ -225,7 +267,7 @@ func (s *AccessTokenService) verifyClaims(token, issuer, audience string, now ti
 	}
 	signingInput := parts[0] + "." + parts[1]
 	digest := sha256.Sum256([]byte(signingInput))
-	if err := rsa.VerifyPKCS1v15(&key.PublicKey, crypto.SHA256, digest[:], signature); err != nil {
+	if err := verify(keyInfo.key.Public(), digest[:], signature); err != nil {
 		return nil, errors.New("invalid token signature")
 	}
 	payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
@@ -252,33 +294,6 @@ func (s *AccessTokenService) verifyClaims(token, issuer, audience string, now ti
 	return &claims, nil
 }
 
-func (s *AccessTokenService) issueRegistrationTokenAt(issuer, clientID, audience, scope string, issuedAt, expiresAt time.Time) (string, error) {
-	headerJSON, err := json.Marshal(JWTHeader{Alg: JWTAlgRS256, Typ: "JWT", KID: s.currentKID})
-	if err != nil {
-		return "", err
-	}
-	payloadJSON, err := json.Marshal(AccessTokenClaims{
-		Issuer:    issuer,
-		Subject:   clientID,
-		Audience:  audience,
-		Scope:     scope,
-		IssuedAt:  issuedAt.Unix(),
-		NotBefore: issuedAt.Unix(),
-		Expiry:    expiresAt.Unix(),
-		Type:      "registration_access_token",
-	})
-	if err != nil {
-		return "", err
-	}
-	signingInput := base64.RawURLEncoding.EncodeToString(headerJSON) + "." + base64.RawURLEncoding.EncodeToString(payloadJSON)
-	digest := sha256.Sum256([]byte(signingInput))
-	signature, err := rsa.SignPKCS1v15(rand.Reader, s.keys[s.currentKID], crypto.SHA256, digest[:])
-	if err != nil {
-		return "", err
-	}
-	return signingInput + "." + base64.RawURLEncoding.EncodeToString(signature), nil
-}
-
 func (s *AccessTokenService) verifyRegistrationClaims(token, issuer, audience string, now time.Time) (*AccessTokenClaims, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
@@ -292,12 +307,9 @@ func (s *AccessTokenService) verifyRegistrationClaims(token, issuer, audience st
 	if err := json.Unmarshal(headerJSON, &header); err != nil {
 		return nil, fmt.Errorf("parse token header: %w", err)
 	}
-	if header.Alg != JWTAlgRS256 {
+	keyInfo, ok := s.keys[header.KID]
+	if !ok || header.Alg != keyInfo.alg {
 		return nil, errors.New("unsupported token header")
-	}
-	key, ok := s.keys[header.KID]
-	if !ok {
-		return nil, errors.New("unknown token key id")
 	}
 	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil {
@@ -305,7 +317,7 @@ func (s *AccessTokenService) verifyRegistrationClaims(token, issuer, audience st
 	}
 	signingInput := parts[0] + "." + parts[1]
 	digest := sha256.Sum256([]byte(signingInput))
-	if err := rsa.VerifyPKCS1v15(&key.PublicKey, crypto.SHA256, digest[:], signature); err != nil {
+	if err := verify(keyInfo.key.Public(), digest[:], signature); err != nil {
 		return nil, errors.New("invalid token signature")
 	}
 	payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
@@ -338,4 +350,75 @@ func randomToken() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(raw[:]), nil
+}
+
+// sign signs a digest with the given key. The algorithm is implied by the key
+// type: RSA uses PKCS1v15 SHA-256, ECDSA uses ASN.1.
+func sign(pub crypto.Signer, digest []byte) ([]byte, error) {
+	switch key := pub.(type) {
+	case *rsa.PrivateKey:
+		return rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, digest)
+	case *ecdsa.PrivateKey:
+		return ecdsa.SignASN1(rand.Reader, key, digest)
+	default:
+		return nil, fmt.Errorf("unsupported signing key type: %T", pub)
+	}
+}
+
+// verify verifies a signature against a public key. The algorithm is implied
+// by the key type: RSA uses PKCS1v15 SHA-256, ECDSA uses ASN.1.
+func verify(pub crypto.PublicKey, digest, signature []byte) error {
+	switch key := pub.(type) {
+	case *rsa.PublicKey:
+		return rsa.VerifyPKCS1v15(key, crypto.SHA256, digest, signature)
+	case *ecdsa.PublicKey:
+		if !ecdsa.VerifyASN1(key, digest, signature) {
+			return errors.New("ecdsa signature verification failed")
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported public key type: %T", pub)
+	}
+}
+
+// accessTokenKey parses a PEM-encoded key and returns it as a crypto.Signer
+// with its JWS algorithm. If keyPEM is empty, generates a new ECDSA P-256 key.
+func accessTokenKey(keyPEM []byte) (crypto.Signer, string, error) {
+	if len(keyPEM) == 0 {
+		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			return nil, "", fmt.Errorf("generate oauth signing key: %w", err)
+		}
+		return key, "ES256", nil
+	}
+	block, _ := pem.Decode(keyPEM)
+	if block == nil {
+		return nil, "", errors.New("decode oauth signing key PEM")
+	}
+	// Try PKCS8 first (supports both RSA and EC).
+	if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+		signer, ok := key.(crypto.Signer)
+		if !ok {
+			return nil, "", fmt.Errorf("key type %T does not implement crypto.Signer", key)
+		}
+		return signer, keyAlg(key), nil
+	}
+	// Fall back to PKCS1 RSA.
+	key, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, "", fmt.Errorf("parse oauth signing key: %w", err)
+	}
+	return key, "RS256", nil
+}
+
+// keyAlg returns the JWS algorithm name for a key.
+func keyAlg(key any) string {
+	switch key.(type) {
+	case *rsa.PrivateKey, *rsa.PublicKey:
+		return "RS256"
+	case *ecdsa.PrivateKey, *ecdsa.PublicKey:
+		return "ES256"
+	default:
+		return ""
+	}
 }
