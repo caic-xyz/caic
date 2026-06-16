@@ -605,6 +605,234 @@ func TestServer(t *testing.T) {
 		}
 	})
 
+	t.Run("introspect refresh_token", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://claude.example.com/callback"})
+		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
+
+		// Introspect the refresh token with hint.
+		form := url.Values{
+			"token":           {tokenResp.RefreshToken},
+			"token_type_hint": {"refresh_token"},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/introspect", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("introspect status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var resp IntrospectionResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode introspection response: %v", err)
+		}
+		if !resp.Active {
+			t.Fatalf("introspection active = false, want true: %+v", resp)
+		}
+		if resp.TokenType != "refresh_token" || resp.ClientID != registered.ClientID || resp.Sub != user.ID || resp.Scope == "" {
+			t.Fatalf("introspection response = %+v", resp)
+		}
+	})
+
+	t.Run("introspect revoked refresh_token", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://claude.example.com/callback"})
+		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
+		revokeOAuthTestToken(t, h, registered.ClientID, tokenResp.RefreshToken, http.StatusOK)
+
+		form := url.Values{
+			"token":           {tokenResp.RefreshToken},
+			"token_type_hint": {"refresh_token"},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/introspect", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("introspect status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var resp IntrospectionResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode introspection response: %v", err)
+		}
+		if resp.Active {
+			t.Fatalf("introspection active = true after revoke, want false: %+v", resp)
+		}
+	})
+
+	t.Run("introspect access_token hint", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://claude.example.com/callback"})
+		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
+
+		form := url.Values{
+			"token":           {tokenResp.AccessToken},
+			"token_type_hint": {"access_token"},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/introspect", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("introspect status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var resp IntrospectionResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode introspection response: %v", err)
+		}
+		if !resp.Active {
+			t.Fatalf("introspection active = false, want true: %+v", resp)
+		}
+		if resp.TokenType != "access_token" {
+			t.Fatalf("token_type = %q, want access_token: %+v", resp.TokenType, resp)
+		}
+	})
+
+	t.Run("introspect garbage refresh_token hint", func(t *testing.T) {
+		t.Parallel()
+
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{testUser()})
+
+		form := url.Values{
+			"token":           {"garbage-refresh-token"},
+			"token_type_hint": {"refresh_token"},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/introspect", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("introspect status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var resp IntrospectionResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode introspection response: %v", err)
+		}
+		if resp.Active {
+			t.Fatalf("introspection active = true with garbage refresh token, want false: %+v", resp)
+		}
+	})
+
+	t.Run("revoke access_token hint", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://claude.example.com/callback"})
+		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
+
+		// Revoke via access_token hint.
+		form := url.Values{
+			"client_id":       {registered.ClientID},
+			"token":           {tokenResp.AccessToken},
+			"token_type_hint": {"access_token"},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/revoke", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("revoke status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+
+		// Introspect should now return inactive.
+		introForm := url.Values{"token": {tokenResp.AccessToken}}
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/introspect", strings.NewReader(introForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("introspect status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var introResp IntrospectionResponse
+		if err := json.NewDecoder(w.Body).Decode(&introResp); err != nil {
+			t.Fatalf("decode introspection response: %v", err)
+		}
+		if introResp.Active {
+			t.Fatalf("introspection active = true after access_token revoke, want false: %+v", introResp)
+		}
+
+		// Access token verification should fail via BearerAuth.
+		if _, err := s.verifyBearer(newTestResourceRequest(t), tokenResp.AccessToken); err == nil {
+			t.Fatal("verifyBearer succeeded after access_token revoke, want error")
+		}
+	})
+
+	t.Run("revoke no hint with access token only", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://claude.example.com/callback"})
+		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
+
+		// Revoke with no hint — should fall through to access token check.
+		form := url.Values{
+			"client_id": {registered.ClientID},
+			"token":     {tokenResp.AccessToken},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/revoke", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("revoke status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+
+		// Access token should be inactive.
+		if _, err := s.verifyBearer(newTestResourceRequest(t), tokenResp.AccessToken); err == nil {
+			t.Fatal("verifyBearer succeeded after revoke, want error")
+		}
+	})
+
+	t.Run("revoke garbage token returns 200", func(t *testing.T) {
+		t.Parallel()
+
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{testUser()})
+		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
+
+		form := url.Values{
+			"client_id": {registered.ClientID},
+			"token":     {"garbage.not.a.real.token"},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/revoke", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("revoke status = %d, want %d (RFC 7009 always 200): %s", w.Code, http.StatusOK, w.Body.String())
+		}
+	})
+
+	t.Run("revoke access_token hint garbage token returns 200", func(t *testing.T) {
+		t.Parallel()
+
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{testUser()})
+		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
+
+		form := url.Values{
+			"client_id":       {registered.ClientID},
+			"token":           {"not.a.jwt.token"},
+			"token_type_hint": {"access_token"},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/revoke", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("revoke status = %d, want %d (RFC 7009 always 200): %s", w.Code, http.StatusOK, w.Body.String())
+		}
+	})
+
 	t.Run("token signed before rotate works after rotate and new token uses new key", func(t *testing.T) {
 		t.Parallel()
 

@@ -728,10 +728,22 @@ func (s *Server) handleOAuthIntrospect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token := r.PostForm.Get("token")
+	hint := r.PostForm.Get("token_type_hint")
 	if token == "" {
 		writeJSONResponse(w, IntrospectionResponse{Active: false})
 		return
 	}
+
+	switch hint {
+	case "refresh_token":
+		s.introspectRefreshToken(w, token)
+	default:
+		s.introspectAccessToken(w, r, token)
+	}
+}
+
+// introspectAccessToken introspects a JWT access token.
+func (s *Server) introspectAccessToken(w http.ResponseWriter, r *http.Request, token string) {
 	claims, err := s.tokens.VerifyAccessToken(token, s.externalBaseURL(r), s.externalBaseURL(r)+s.resourceURLPath, time.Now(), s.touchGrant, s.findUserByID)
 	if err != nil {
 		writeJSONResponse(w, IntrospectionResponse{Active: false})
@@ -752,6 +764,35 @@ func (s *Server) handleOAuthIntrospect(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// introspectRefreshToken introspects a refresh token by looking it up
+// in the store and returning grant-level information.
+func (s *Server) introspectRefreshToken(w http.ResponseWriter, token string) {
+	now := time.Now()
+	tokenHash := RefreshTokenKey(token)
+	s.mu.Lock()
+	entry, ok := s.state.RefreshTokens[tokenHash]
+	if !ok || !entry.RevokedAt.IsZero() || !entry.UsedAt.IsZero() || now.After(entry.ExpiresAt) {
+		s.mu.Unlock()
+		writeJSONResponse(w, IntrospectionResponse{Active: false})
+		return
+	}
+	grant, grantOK := s.state.Grants[entry.GrantID]
+	s.mu.Unlock()
+	if !grantOK || !grant.RevokedAt.IsZero() || now.After(grant.ExpiresAt) {
+		writeJSONResponse(w, IntrospectionResponse{Active: false})
+		return
+	}
+	writeJSONResponse(w, IntrospectionResponse{
+		Active:    true,
+		Scope:     grant.Scope,
+		ClientID:  grant.ClientID,
+		TokenType: "refresh_token",
+		Exp:       grant.ExpiresAt.Unix(),
+		Sub:       grant.UserID,
+		Iat:       grant.CreatedAt.Unix(),
+	})
+}
+
 func (s *Server) handleOAuthRevoke(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
 	if err := r.ParseForm(); err != nil {
@@ -761,16 +802,64 @@ func (s *Server) handleOAuthRevoke(w http.ResponseWriter, r *http.Request) {
 	if !s.rateLimitClient(w, r, r.PostForm.Get("client_id")) {
 		return
 	}
-	userID, err := s.revokeRefreshToken(r.PostForm.Get("token"), r.PostForm.Get("client_id"))
+	token := r.PostForm.Get("token")
+	clientID := r.PostForm.Get("client_id")
+	hint := r.PostForm.Get("token_type_hint")
+
+	var userID string
+	var err error
+
+	switch hint {
+	case "refresh_token":
+		userID, err = s.revokeRefreshToken(token, clientID)
+	case "access_token":
+		userID = s.revokeAccessToken(token, r)
+	default:
+		userID, err = s.revokeRefreshToken(token, clientID)
+		if userID == "" {
+			userID = s.revokeAccessToken(token, r)
+		}
+	}
 	if err != nil {
-		slog.WarnContext(r.Context(), "revoke oauth refresh token", "err", err)
-		WriteError(w, http.StatusInternalServerError, "server_error", "could not revoke refresh token")
+		slog.WarnContext(r.Context(), "revoke oauth token", "err", err)
+		WriteError(w, http.StatusInternalServerError, "server_error", "could not revoke token")
 		return
 	}
-	s.recordAudit(r, userID, "oauth/revoke", r.PostForm.Get("client_id"), "allow", "revoked", nil)
+	s.recordAudit(r, userID, "oauth/revoke", clientID, "allow", "revoked", nil)
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
 	w.WriteHeader(http.StatusOK)
+}
+
+// revokeAccessToken verifies a JWT access token and revokes its grant.
+// Always returns an empty userID on verification failure to avoid leaking
+// token validity — per RFC 7009 the revoke endpoint must always return 200.
+func (s *Server) revokeAccessToken(token string, r *http.Request) (userID string) {
+	claims, verr := s.tokens.verifyClaims(token, s.externalBaseURL(r), s.externalBaseURL(r)+s.resourceURLPath, time.Now())
+	if verr != nil {
+		return "" // token invalid, but don't leak that
+	}
+	if claims.GrantID == "" {
+		return claims.Subject // no grant to revoke
+	}
+	now := time.Now()
+	s.mu.Lock()
+	grant, ok := s.state.Grants[claims.GrantID]
+	if ok && grant.RevokedAt.IsZero() {
+		grant.RevokedAt = now
+		s.state.Grants[claims.GrantID] = grant
+		// Also revoke all refresh tokens for this grant.
+		for tokenHash := range s.state.RefreshTokens {
+			entry := s.state.RefreshTokens[tokenHash]
+			if entry.GrantID == claims.GrantID && entry.RevokedAt.IsZero() {
+				entry.RevokedAt = now
+				s.state.RefreshTokens[tokenHash] = entry
+			}
+		}
+		_ = s.state.Save()
+	}
+	s.mu.Unlock()
+	return claims.Subject
 }
 
 func (s *Server) recordAudit(r *http.Request, userID, operation, name, decision, status string, args any) {
