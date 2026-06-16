@@ -231,18 +231,24 @@ def _ensure_java() -> None:
 
 
 def _create_avd(sdkmanager: str, sdk_root: str) -> int:
-    """Create the caic test AVD at a well-known path."""
+    """Create the caic test AVD at a well-known path.
+
+    avdmanager create avd --path creates the data directory (.avd/) at the
+    given path, but the companion .ini file is written to $ANDROID_AVD_HOME.
+    If that directory does not exist on disk, avdmanager silently skips the
+    .ini and the emulator will report "Unknown AVD".  We guarantee the
+    directory and write the .ini ourselves as a fallback.
+    """
     avdmanager = os.path.join(os.path.dirname(sdkmanager), "avdmanager")
     if not os.path.isfile(avdmanager):
         print(f"avdmanager not found next to {sdkmanager}", file=sys.stderr)
         return 1
 
-    # Resolve the AVD home directory explicitly — avdmanager does not reliably
-    # respect ANDROID_AVD_HOME on all versions.
     avd_home = os.environ.get(
         "ANDROID_AVD_HOME",
         os.path.join(os.environ.get("ANDROID_SDK_HOME", os.path.expanduser("~/.android")), "avd"),
     )
+    os.makedirs(avd_home, exist_ok=True)
     avd_path = os.path.join(avd_home, f"{AVD_NAME}.avd")
 
     env = {**os.environ, "ANDROID_HOME": sdk_root, "ANDROID_SDK_ROOT": sdk_root, "ANDROID_AVD_HOME": avd_home}
@@ -270,13 +276,19 @@ def _create_avd(sdkmanager: str, sdk_root: str) -> int:
         print(f"avdmanager failed (exit {result.returncode}):\n{result.stderr.decode()}", file=sys.stderr)
         return 1
 
-    # Verify the AVD ini file exists where the emulator will look.
     ini_path = os.path.join(avd_home, f"{AVD_NAME}.ini")
     if not os.path.isfile(ini_path):
-        print(f"avdmanager succeeded but {ini_path} was not created.", file=sys.stderr)
-        return 1
+        # avdmanager did not write the .ini — write it ourselves.
+        # The .ini is a Java properties file pointing to the AVD data path.
+        parts = _system_image().split(";")
+        target = parts[1] if len(parts) > 1 else "android-35"  # "android-35"
+        with open(ini_path, "w") as f:
+            f.write(f"path={avd_path}\n")
+            f.write(f"target={target}\n")
+        print(f"avdmanager did not write .ini — created {ini_path}", file=sys.stderr)
+    else:
+        print(f"AVD created: {ini_path}", file=sys.stderr)
 
-    print(f"AVD created: {ini_path}", file=sys.stderr)
     return 0
 
 
