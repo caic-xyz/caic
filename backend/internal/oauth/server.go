@@ -209,6 +209,9 @@ func (s *Server) Routes() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("GET /oauth/jwks", s.handleOAuthJWKS)
 	m.HandleFunc("POST /oauth/register", s.handleOAuthRegister)
+	m.HandleFunc("GET /oauth/register/{clientID}", s.handleOAuthRegisterRead)
+	m.HandleFunc("PUT /oauth/register/{clientID}", s.handleOAuthRegisterUpdate)
+	m.HandleFunc("DELETE /oauth/register/{clientID}", s.handleOAuthRegisterDelete)
 	m.HandleFunc("GET /oauth/authorize", s.handleOAuthAuthorizeGET)
 	m.HandleFunc("POST /oauth/authorize", s.handleOAuthAuthorizePOST)
 	m.HandleFunc("POST /oauth/token", s.handleOAuthToken)
@@ -1013,12 +1016,163 @@ func (s *Server) handleOAuthRegister(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, "server_error", "could not register client")
 		return
 	}
-	resp := RegisterResponse{ClientID: client.ID, ClientIDIssuedAt: now.Unix(), ClientName: client.Name, RedirectURIs: client.RedirectURIs, TokenEndpointAuthMethod: method}
+	issuer := s.externalBaseURL(r)
+	regToken, err := s.tokens.IssueRegistrationAccessToken(issuer, client.ID)
+	if err != nil {
+		slog.WarnContext(r.Context(), "issue registration access token", "err", err)
+		WriteError(w, http.StatusInternalServerError, "server_error", "could not issue registration access token")
+		return
+	}
+	resp := RegisterResponse{
+		ClientID:                client.ID,
+		ClientIDIssuedAt:        now.Unix(),
+		ClientName:              client.Name,
+		RedirectURIs:            client.RedirectURIs,
+		TokenEndpointAuthMethod: method,
+		RegistrationAccessToken: regToken,
+		RegistrationClientURI:   issuer + "/oauth/register/" + client.ID,
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(&resp); err != nil {
 		slog.WarnContext(r.Context(), "encode oauth registration response", "err", err)
 	}
+}
+
+// verifyRegistrationAccessToken extracts and validates a registration access token from the request.
+// Returns nil if the token is valid and its subject matches clientID.
+func (s *Server) verifyRegistrationAccessToken(r *http.Request, clientID string) error {
+	token := BearerToken(r)
+	if token == "" {
+		return errors.New("missing registration access token")
+	}
+	audience := s.externalBaseURL(r) + "/oauth/register"
+	tokenClientID, err := s.tokens.VerifyRegistrationAccessToken(token, s.externalBaseURL(r), audience, time.Now())
+	if err != nil {
+		return fmt.Errorf("invalid registration access token: %w", err)
+	}
+	if tokenClientID != clientID {
+		return errors.New("registration access token does not match client")
+	}
+	return nil
+}
+
+// handleOAuthRegisterRead returns client registration metadata (RFC 7592 §2.1).
+func (s *Server) handleOAuthRegisterRead(w http.ResponseWriter, r *http.Request) {
+	clientID := r.PathValue("clientID")
+	client := s.oauthClient(clientID)
+	if client.ID == "" {
+		WriteError(w, http.StatusNotFound, "invalid_client", "client not found")
+		return
+	}
+	if err := s.verifyRegistrationAccessToken(r, clientID); err != nil {
+		WriteError(w, http.StatusUnauthorized, "invalid_token", err.Error())
+		return
+	}
+	resp := RegisterResponse{
+		ClientID:                client.ID,
+		ClientIDIssuedAt:        client.CreatedAt.Unix(),
+		ClientName:              client.Name,
+		RedirectURIs:            client.RedirectURIs,
+		TokenEndpointAuthMethod: client.TokenEndpointAuthMethod,
+	}
+	writeJSONResponse(w, &resp)
+}
+
+// handleOAuthRegisterUpdate updates client registration metadata (RFC 7592 §2.2).
+func (s *Server) handleOAuthRegisterUpdate(w http.ResponseWriter, r *http.Request) {
+	clientID := r.PathValue("clientID")
+	if err := s.verifyRegistrationAccessToken(r, clientID); err != nil {
+		WriteError(w, http.StatusUnauthorized, "invalid_token", err.Error())
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
+	var req UpdateClientRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, http.StatusBadRequest, "invalid_client_metadata", "invalid registration JSON")
+		return
+	}
+	s.mu.Lock()
+	client, ok := s.state.Clients[clientID]
+	if !ok {
+		s.mu.Unlock()
+		WriteError(w, http.StatusNotFound, "invalid_client", "client not found")
+		return
+	}
+	if req.ClientName != nil {
+		client.Name = *req.ClientName
+	}
+	if req.RedirectURIs != nil {
+		for _, uri := range *req.RedirectURIs {
+			if !validRedirectURI(uri) {
+				s.mu.Unlock()
+				WriteError(w, http.StatusBadRequest, "invalid_redirect_uri", "redirect URI must be https or localhost http")
+				return
+			}
+		}
+		client.RedirectURIs = *req.RedirectURIs
+	}
+	if req.TokenEndpointAuthMethod != nil {
+		method := *req.TokenEndpointAuthMethod
+		if method != TokenEndpointAuthNone {
+			s.mu.Unlock()
+			WriteError(w, http.StatusBadRequest, "invalid_client_metadata", "only public clients are supported")
+			return
+		}
+		client.TokenEndpointAuthMethod = method
+	}
+	s.state.Clients[clientID] = client
+	if err := s.state.Save(); err != nil {
+		s.mu.Unlock()
+		slog.WarnContext(r.Context(), "save oauth client update", "err", err)
+		WriteError(w, http.StatusInternalServerError, "server_error", "could not update client")
+		return
+	}
+	s.mu.Unlock()
+
+	issuer := s.externalBaseURL(r)
+	regToken, err := s.tokens.IssueRegistrationAccessToken(issuer, clientID)
+	if err != nil {
+		slog.WarnContext(r.Context(), "issue registration access token", "err", err)
+		WriteError(w, http.StatusInternalServerError, "server_error", "could not issue registration access token")
+		return
+	}
+	resp := RegisterResponse{
+		ClientID:                client.ID,
+		ClientIDIssuedAt:        client.CreatedAt.Unix(),
+		ClientName:              client.Name,
+		RedirectURIs:            client.RedirectURIs,
+		TokenEndpointAuthMethod: client.TokenEndpointAuthMethod,
+		RegistrationAccessToken: regToken,
+		RegistrationClientURI:   issuer + "/oauth/register/" + clientID,
+	}
+	writeJSONResponse(w, &resp)
+}
+
+// handleOAuthRegisterDelete deletes a client registration (RFC 7592 §2.3).
+func (s *Server) handleOAuthRegisterDelete(w http.ResponseWriter, r *http.Request) {
+	clientID := r.PathValue("clientID")
+	client := s.oauthClient(clientID)
+	if client.ID == "" {
+		// RFC 7592 §2.3: respond with errors as in §2.2.
+		WriteError(w, http.StatusUnauthorized, "invalid_client", "client not found")
+		return
+	}
+	if err := s.verifyRegistrationAccessToken(r, clientID); err != nil {
+		WriteError(w, http.StatusUnauthorized, "invalid_token", err.Error())
+		return
+	}
+	s.mu.Lock()
+	delete(s.state.Clients, clientID)
+	err := s.state.Save()
+	s.mu.Unlock()
+	if err != nil {
+		slog.WarnContext(r.Context(), "save oauth client delete", "err", err)
+		WriteError(w, http.StatusInternalServerError, "server_error", "could not delete client")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func validRedirectURI(raw string) bool {

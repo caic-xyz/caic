@@ -1319,6 +1319,300 @@ func refreshOAuthTestToken(t *testing.T, h http.Handler, clientID, refreshToken 
 	return tokenResp
 }
 
+func TestRegistrationManagement(t *testing.T) {
+	t.Parallel()
+
+	t.Run("register response includes management token and URI", func(t *testing.T) {
+		t.Parallel()
+
+		h := newTestServerHandlerOnly(t)
+		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
+		if registered.RegistrationAccessToken == "" {
+			t.Fatal("registration_access_token is empty")
+		}
+		if registered.RegistrationClientURI == "" {
+			t.Fatal("registration_client_uri is empty")
+		}
+		want := testBaseURL + "/oauth/register/" + registered.ClientID
+		if registered.RegistrationClientURI != want {
+			t.Fatalf("registration_client_uri = %q, want %q", registered.RegistrationClientURI, want)
+		}
+	})
+
+	t.Run("read client info with valid token", func(t *testing.T) {
+		t.Parallel()
+
+		h := newTestServerHandlerOnly(t)
+		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
+
+		info := readOAuthTestClient(t, h, registered.RegistrationAccessToken, registered.ClientID, http.StatusOK)
+		if info.ClientID != registered.ClientID || info.ClientName != "Test Client" {
+			t.Fatalf("read client info = %+v", info)
+		}
+		if len(info.RedirectURIs) != 1 || info.RedirectURIs[0] != "https://example.com/callback" {
+			t.Fatalf("redirect_uris = %+v", info.RedirectURIs)
+		}
+	})
+
+	t.Run("read with missing token returns 401", func(t *testing.T) {
+		t.Parallel()
+
+		h := newTestServerHandlerOnly(t)
+		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
+
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/oauth/register/"+registered.ClientID, http.NoBody)
+		addForwardedHeaders(req)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusUnauthorized, w.Body.String())
+		}
+	})
+
+	t.Run("read with wrong token returns 401", func(t *testing.T) {
+		t.Parallel()
+
+		h := newTestServerHandlerOnly(t)
+		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
+
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/oauth/register/"+registered.ClientID, http.NoBody)
+		req.Header.Set("Authorization", "Bearer wrong-token")
+		addForwardedHeaders(req)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusUnauthorized, w.Body.String())
+		}
+	})
+
+	t.Run("read with token for different client returns 401", func(t *testing.T) {
+		t.Parallel()
+
+		h := newTestServerHandlerOnly(t)
+		registered1 := registerOAuthTestClient(t, h, "Client A", []string{"https://a.example.com/callback"})
+		registered2 := registerOAuthTestClient(t, h, "Client B", []string{"https://b.example.com/callback"})
+
+		// Try to read client B with client A's token.
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/oauth/register/"+registered2.ClientID, http.NoBody)
+		req.Header.Set("Authorization", "Bearer "+registered1.RegistrationAccessToken)
+		addForwardedHeaders(req)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusUnauthorized, w.Body.String())
+		}
+	})
+
+	t.Run("read non-existent client returns 404", func(t *testing.T) {
+		t.Parallel()
+
+		h := newTestServerHandlerOnly(t)
+		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
+
+		// Use a valid token but for a non-existent client ID.
+		nonExistentID := "test_nonexistent"
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/oauth/register/"+nonExistentID, http.NoBody)
+		req.Header.Set("Authorization", "Bearer "+registered.RegistrationAccessToken)
+		addForwardedHeaders(req)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusNotFound, w.Body.String())
+		}
+	})
+
+	t.Run("update client name", func(t *testing.T) {
+		t.Parallel()
+
+		h := newTestServerHandlerOnly(t)
+		registered := registerOAuthTestClient(t, h, "Original Name", []string{"https://example.com/callback"})
+
+		newName := "Updated Name"
+		updateReq := UpdateClientRequest{ClientName: &newName}
+		body, err := json.Marshal(updateReq)
+		if err != nil {
+			t.Fatalf("marshal update: %v", err)
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/oauth/register/"+registered.ClientID, strings.NewReader(string(body)))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+registered.RegistrationAccessToken)
+		addForwardedHeaders(req)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("update status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var updated RegisterResponse
+		if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+			t.Fatalf("decode update response: %v", err)
+		}
+		if updated.ClientName != newName {
+			t.Fatalf("client_name = %q, want %q", updated.ClientName, newName)
+		}
+		if updated.RegistrationAccessToken == "" {
+			t.Fatal("update response missing registration_access_token")
+		}
+		// Verify the update persisted.
+		info := readOAuthTestClient(t, h, updated.RegistrationAccessToken, registered.ClientID, http.StatusOK)
+		if info.ClientName != newName {
+			t.Fatalf("read back client_name = %q, want %q", info.ClientName, newName)
+		}
+	})
+
+	t.Run("update redirect URIs", func(t *testing.T) {
+		t.Parallel()
+
+		h := newTestServerHandlerOnly(t)
+		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
+
+		newURIs := []string{"https://new.example.com/callback"}
+		updateReq := UpdateClientRequest{RedirectURIs: &newURIs}
+		body, err := json.Marshal(updateReq)
+		if err != nil {
+			t.Fatalf("marshal update: %v", err)
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/oauth/register/"+registered.ClientID, strings.NewReader(string(body)))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+registered.RegistrationAccessToken)
+		addForwardedHeaders(req)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("update status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var updated RegisterResponse
+		if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+			t.Fatalf("decode update response: %v", err)
+		}
+		if len(updated.RedirectURIs) != 1 || updated.RedirectURIs[0] != newURIs[0] {
+			t.Fatalf("redirect_uris = %+v, want %+v", updated.RedirectURIs, newURIs)
+		}
+		// Verify persisted.
+		info := readOAuthTestClient(t, h, updated.RegistrationAccessToken, registered.ClientID, http.StatusOK)
+		if len(info.RedirectURIs) != 1 || info.RedirectURIs[0] != newURIs[0] {
+			t.Fatalf("read back redirect_uris = %+v", info.RedirectURIs)
+		}
+	})
+
+	t.Run("delete client returns 204 and subsequent read returns 404", func(t *testing.T) {
+		t.Parallel()
+
+		h := newTestServerHandlerOnly(t)
+		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
+
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/oauth/register/"+registered.ClientID, http.NoBody)
+		req.Header.Set("Authorization", "Bearer "+registered.RegistrationAccessToken)
+		addForwardedHeaders(req)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("delete status = %d, want %d: %s", w.Code, http.StatusNoContent, w.Body.String())
+		}
+
+		// Subsequent read should fail.
+		readOAuthTestClient(t, h, registered.RegistrationAccessToken, registered.ClientID, http.StatusNotFound)
+	})
+
+	t.Run("delete with wrong token returns 401", func(t *testing.T) {
+		t.Parallel()
+
+		h := newTestServerHandlerOnly(t)
+		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
+
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/oauth/register/"+registered.ClientID, http.NoBody)
+		req.Header.Set("Authorization", "Bearer wrong-token")
+		addForwardedHeaders(req)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusUnauthorized, w.Body.String())
+		}
+	})
+
+	t.Run("register delete re-register", func(t *testing.T) {
+		t.Parallel()
+
+		h := newTestServerHandlerOnly(t)
+		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
+
+		// Delete.
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/oauth/register/"+registered.ClientID, http.NoBody)
+		req.Header.Set("Authorization", "Bearer "+registered.RegistrationAccessToken)
+		addForwardedHeaders(req)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("delete status = %d, want %d", w.Code, http.StatusNoContent)
+		}
+
+		// Re-register with same name succeeds.
+		reRegistered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
+		if reRegistered.ClientID == "" || reRegistered.ClientID == registered.ClientID {
+			t.Fatalf("re-registered client_id = %q (should be different from %q)", reRegistered.ClientID, registered.ClientID)
+		}
+		if reRegistered.RegistrationAccessToken == "" {
+			t.Fatal("re-registered registration_access_token is empty")
+		}
+	})
+
+	t.Run("update with missing token returns 401", func(t *testing.T) {
+		t.Parallel()
+
+		h := newTestServerHandlerOnly(t)
+		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
+
+		newName := "Updated"
+		updateReq := UpdateClientRequest{ClientName: &newName}
+		body, err := json.Marshal(updateReq)
+		if err != nil {
+			t.Fatalf("marshal update: %v", err)
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/oauth/register/"+registered.ClientID, strings.NewReader(string(body)))
+		req.Header.Set("Content-Type", "application/json")
+		addForwardedHeaders(req)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusUnauthorized, w.Body.String())
+		}
+	})
+}
+
+// newTestServerHandlerOnly creates a server and handler for management tests.
+func newTestServerHandlerOnly(t *testing.T) http.Handler {
+	t.Helper()
+	path := t.TempDir() + "/oauth.json"
+	cfg := &ServerConfig{
+		RefreshTokenStorePath: path,
+	}
+	applyTestServerDefaults(t, cfg)
+	s, err := NewServer(*cfg)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	return newTestServerHandler(s)
+}
+
+// readOAuthTestClient reads client registration via GET.
+func readOAuthTestClient(t *testing.T, h http.Handler, token, clientID string, wantStatus int) RegisterResponse {
+	t.Helper()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/oauth/register/"+clientID, http.NoBody)
+	req.Header.Set("Authorization", "Bearer "+token)
+	addForwardedHeaders(req)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != wantStatus {
+		t.Fatalf("read client status = %d, want %d: %s", w.Code, wantStatus, w.Body.String())
+	}
+	var resp RegisterResponse
+	if w.Code == http.StatusOK {
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode read response: %v", err)
+		}
+	}
+	return resp
+}
+
 func revokeOAuthTestToken(t *testing.T, h http.Handler, clientID, refreshToken string, wantStatus int) {
 	form := url.Values{
 		"client_id":       {clientID},

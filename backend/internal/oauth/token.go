@@ -70,6 +70,22 @@ func (s *AccessTokenService) IssueDPoPAccessToken(issuer string, user User, audi
 	return s.issueAccessTokenAt(issuer, user, audience, scope, grantID, now, now.Add(s.ttl), &TokenConfirmation{JKT: dpopJKT})
 }
 
+// IssueRegistrationAccessToken issues a short-lived JWT for client registration management (RFC 7592).
+// The subject is the client ID and the audience scopes it to the registration endpoint.
+func (s *AccessTokenService) IssueRegistrationAccessToken(issuer, clientID string) (string, error) {
+	now := time.Now()
+	return s.issueRegistrationTokenAt(issuer, clientID, issuer+"/oauth/register", "client:manage", now, now.Add(time.Hour))
+}
+
+// VerifyRegistrationAccessToken validates a registration access token and returns the client ID from the subject claim.
+func (s *AccessTokenService) VerifyRegistrationAccessToken(token, issuer, audience string, now time.Time) (clientID string, err error) {
+	claims, err := s.verifyRegistrationClaims(token, issuer, audience, now)
+	if err != nil {
+		return "", err
+	}
+	return claims.Subject, nil
+}
+
 // VerifyAccessToken validates token and returns its bearer claims.
 func (s *AccessTokenService) VerifyAccessToken(token, issuer, audience string, now time.Time, touchGrant GrantTouchFunc, findUser UserLookupFunc) (*BearerClaims, error) {
 	claims, err := s.verifyClaims(token, issuer, audience, now)
@@ -200,6 +216,82 @@ func (s *AccessTokenService) verifyClaims(token, issuer, audience string, now ti
 		return nil, errors.New("invalid token audience")
 	}
 	if claims.Type != accessTokenType {
+		return nil, errors.New("invalid token type")
+	}
+	nowUnix := now.Unix()
+	if claims.NotBefore > nowUnix || claims.Expiry <= nowUnix {
+		return nil, errors.New("token is not valid now")
+	}
+	return &claims, nil
+}
+
+func (s *AccessTokenService) issueRegistrationTokenAt(issuer, clientID, audience, scope string, issuedAt, expiresAt time.Time) (string, error) {
+	headerJSON, err := json.Marshal(JWTHeader{Alg: JWTAlgRS256, Typ: "JWT", KID: s.kid})
+	if err != nil {
+		return "", err
+	}
+	payloadJSON, err := json.Marshal(AccessTokenClaims{
+		Issuer:    issuer,
+		Subject:   clientID,
+		Audience:  audience,
+		Scope:     scope,
+		IssuedAt:  issuedAt.Unix(),
+		NotBefore: issuedAt.Unix(),
+		Expiry:    expiresAt.Unix(),
+		Type:      "registration_access_token",
+	})
+	if err != nil {
+		return "", err
+	}
+	signingInput := base64.RawURLEncoding.EncodeToString(headerJSON) + "." + base64.RawURLEncoding.EncodeToString(payloadJSON)
+	digest := sha256.Sum256([]byte(signingInput))
+	signature, err := rsa.SignPKCS1v15(rand.Reader, s.key, crypto.SHA256, digest[:])
+	if err != nil {
+		return "", err
+	}
+	return signingInput + "." + base64.RawURLEncoding.EncodeToString(signature), nil
+}
+
+func (s *AccessTokenService) verifyRegistrationClaims(token, issuer, audience string, now time.Time) (*AccessTokenClaims, error) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return nil, errors.New("invalid bearer token format")
+	}
+	headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return nil, fmt.Errorf("decode token header: %w", err)
+	}
+	var header JWTHeader
+	if err := json.Unmarshal(headerJSON, &header); err != nil {
+		return nil, fmt.Errorf("parse token header: %w", err)
+	}
+	if header.Alg != JWTAlgRS256 || header.KID != s.kid {
+		return nil, errors.New("unsupported token header")
+	}
+	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		return nil, fmt.Errorf("decode token signature: %w", err)
+	}
+	signingInput := parts[0] + "." + parts[1]
+	digest := sha256.Sum256([]byte(signingInput))
+	if err := rsa.VerifyPKCS1v15(&s.key.PublicKey, crypto.SHA256, digest[:], signature); err != nil {
+		return nil, errors.New("invalid token signature")
+	}
+	payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil, fmt.Errorf("decode token payload: %w", err)
+	}
+	var claims AccessTokenClaims
+	if err := json.Unmarshal(payloadJSON, &claims); err != nil {
+		return nil, fmt.Errorf("parse token claims: %w", err)
+	}
+	if claims.Issuer != issuer {
+		return nil, errors.New("invalid token issuer")
+	}
+	if claims.Audience != audience {
+		return nil, errors.New("invalid token audience")
+	}
+	if claims.Type != "registration_access_token" {
 		return nil, errors.New("invalid token type")
 	}
 	nowUnix := now.Unix()

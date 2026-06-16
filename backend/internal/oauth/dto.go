@@ -86,13 +86,23 @@ type RegisterRequest struct {
 	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
 }
 
-// RegisterResponse is a dynamic client registration response.
+// RegisterResponse is a dynamic client registration response (RFC 7592).
 type RegisterResponse struct {
 	ClientID                string   `json:"client_id"`
 	ClientIDIssuedAt        int64    `json:"client_id_issued_at"`
 	ClientName              string   `json:"client_name,omitempty"`
 	RedirectURIs            []string `json:"redirect_uris"`
 	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
+	RegistrationAccessToken string   `json:"registration_access_token,omitempty"`
+	RegistrationClientURI   string   `json:"registration_client_uri,omitempty"`
+}
+
+// UpdateClientRequest is an RFC 7592 client update request body.
+// Nil pointer fields leave the corresponding client field unchanged.
+type UpdateClientRequest struct {
+	ClientName              *string   `json:"client_name,omitempty"`
+	RedirectURIs            *[]string `json:"redirect_uris,omitempty"`
+	TokenEndpointAuthMethod *string   `json:"token_endpoint_auth_method,omitempty"`
 }
 
 // TokenResponse is an OAuth token endpoint response.
