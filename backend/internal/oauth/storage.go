@@ -55,6 +55,18 @@ type RefreshToken struct {
 	RevokedAt time.Time `json:"revokedAt,omitzero"`
 }
 
+// DeviceCode holds an in-progress device authorization flow (RFC 8628).
+type DeviceCode struct {
+	DeviceCode string    `json:"-"`
+	UserCode   string    `json:"userCode"`
+	ClientID   string    `json:"clientID"`
+	Scope      string    `json:"scope"`
+	UserID     string    `json:"userID,omitempty"`
+	Status     string    `json:"status"`
+	ExpiresAt  time.Time `json:"expiresAt"`
+	IssuedAt   time.Time `json:"issuedAt"`
+}
+
 // Grant ties a user authorization grant to a client and token.
 type Grant struct {
 	ID         string    `json:"id"`
@@ -76,6 +88,7 @@ type Store struct {
 	Grants        map[string]Grant         `json:"grants,omitempty"`
 	Codes         map[string]Code          `json:"codes,omitempty"`
 	Consents      map[string]ConsentParams `json:"consents,omitempty"`
+	DeviceCodes   map[string]*DeviceCode   `json:"deviceCodes,omitempty"`
 
 	path string
 }
@@ -87,6 +100,7 @@ type storeFile struct {
 	Grants        map[string]Grant         `json:"grants,omitempty"`
 	Codes         map[string]Code          `json:"codes,omitempty"`
 	Consents      map[string]ConsentParams `json:"consents,omitempty"`
+	DeviceCodes   map[string]*DeviceCode   `json:"deviceCodes,omitempty"`
 }
 
 // LoadStore loads durable OAuth state from path.
@@ -111,6 +125,7 @@ func LoadStore(path string) (*Store, error) {
 	store.Grants = file.Grants
 	store.Codes = file.Codes
 	store.Consents = file.Consents
+	store.DeviceCodes = file.DeviceCodes
 	store.ensureMaps()
 	store.pruneExpired(time.Now())
 	return store, nil
@@ -122,7 +137,7 @@ func (s *Store) Save() error {
 		return nil
 	}
 	s.ensureMaps()
-	file := storeFile{Version: storeVersion, Clients: s.Clients, RefreshTokens: s.RefreshTokens, Grants: s.Grants, Codes: s.Codes, Consents: s.Consents}
+	file := storeFile{Version: storeVersion, Clients: s.Clients, RefreshTokens: s.RefreshTokens, Grants: s.Grants, Codes: s.Codes, Consents: s.Consents, DeviceCodes: s.DeviceCodes}
 	data, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal oauth state: %w", err)
@@ -254,6 +269,9 @@ func (s *Store) ensureMaps() {
 	if s.Consents == nil {
 		s.Consents = map[string]ConsentParams{}
 	}
+	if s.DeviceCodes == nil {
+		s.DeviceCodes = map[string]*DeviceCode{}
+	}
 }
 
 func (s *Store) pruneExpired(now time.Time) bool {
@@ -279,6 +297,12 @@ func (s *Store) pruneExpired(now time.Time) bool {
 	for consent := range s.Consents {
 		if now.After(s.Consents[consent].ExpiresAt) {
 			delete(s.Consents, consent)
+			changed = true
+		}
+	}
+	for code := range s.DeviceCodes {
+		if now.After(s.DeviceCodes[code].ExpiresAt) {
+			delete(s.DeviceCodes, code)
 			changed = true
 		}
 	}

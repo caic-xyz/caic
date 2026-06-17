@@ -4,11 +4,14 @@ package oauth
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"log/slog"
+	"math/big"
 	"net/http"
 	"net/url"
 	"slices"
@@ -212,6 +215,9 @@ func (s *Server) Routes() http.Handler {
 	m.HandleFunc("POST /oauth/revoke", s.handleOAuthRevoke)
 	m.HandleFunc("POST /oauth/introspect", s.handleOAuthIntrospect)
 	m.HandleFunc("GET /oauth/end-session", s.handleOAuthEndSession)
+	m.HandleFunc("POST /oauth/device_authorization", s.handleOAuthDeviceAuthorization)
+	m.HandleFunc("GET /oauth/device", s.handleOAuthDevicePage)
+	m.HandleFunc("POST /oauth/device", s.handleOAuthDeviceApprove)
 	return m
 }
 
@@ -387,7 +393,7 @@ func (s *Server) handleOAuthMetadata(w http.ResponseWriter, r *http.Request) {
 		RegistrationEndpoint:                          issuer + "/oauth/register",
 		RevocationEndpoint:                            issuer + "/oauth/revoke",
 		ResponseTypesSupported:                        []string{ResponseTypeCode},
-		GrantTypesSupported:                           []string{GrantAuthorizationCode, GrantRefreshToken},
+		GrantTypesSupported:                           []string{GrantAuthorizationCode, GrantRefreshToken, "urn:ietf:params:oauth:grant-type:device_code"},
 		CodeChallengeMethodsSupported:                 []string{CodeChallengeS256},
 		TokenEndpointAuthMethodsSupported:             []string{TokenEndpointAuthNone},
 		RevocationEndpointAuthMethodsSupported:        []string{TokenEndpointAuthNone},
@@ -631,6 +637,14 @@ func (s *Server) handleOAuthToken(w http.ResponseWriter, r *http.Request) {
 	if !s.rateLimitClient(w, r, r.PostForm.Get("client_id")) {
 		return
 	}
+
+	// RFC 8628 device_code grant: handle before pruning so expired entries
+	// are correctly reported as expired_token rather than invalid_grant.
+	if r.PostForm.Get("grant_type") == "urn:ietf:params:oauth:grant-type:device_code" {
+		s.handleOAuthDeviceCodeToken(w, r)
+		return
+	}
+
 	if err := s.pruneExpiredRefreshTokens(time.Now()); err != nil {
 		slog.WarnContext(r.Context(), "prune oauth refresh tokens", "err", err)
 		WriteError(w, http.StatusInternalServerError, "server_error", "could not prune refresh tokens")
@@ -1501,6 +1515,206 @@ func (s *Server) handleOAuthEndSession(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(`<html><body><p>You have been logged out.</p></body></html>`))
+}
+
+func (s *Server) handleOAuthDeviceAuthorization(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
+	if err := r.ParseForm(); err != nil {
+		WriteError(w, http.StatusBadRequest, "invalid_request", "invalid form")
+		return
+	}
+	clientID := r.PostForm.Get("client_id")
+	if clientID == "" {
+		WriteError(w, http.StatusBadRequest, "invalid_request", "missing client_id")
+		return
+	}
+	client := s.oauthClient(clientID)
+	if client.ID == "" {
+		WriteError(w, http.StatusBadRequest, "invalid_client", "unknown client")
+		return
+	}
+	scope, err := s.normalizeScope(r.PostForm.Get("scope"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "invalid_scope", err.Error())
+		return
+	}
+	deviceCode, err := randomToken()
+	if err != nil {
+		slog.WarnContext(r.Context(), "generate device code", "err", err)
+		WriteError(w, http.StatusInternalServerError, "server_error", "could not generate device code")
+		return
+	}
+	userCode := generateUserCode()
+	now := time.Now()
+	expiresAt := now.Add(10 * time.Minute)
+
+	dc := &DeviceCode{
+		DeviceCode: deviceCode,
+		UserCode:   userCode,
+		ClientID:   clientID,
+		Scope:      scope,
+		Status:     "pending",
+		ExpiresAt:  expiresAt,
+		IssuedAt:   now,
+	}
+	s.mu.Lock()
+	s.state.DeviceCodes[RefreshTokenKey(deviceCode)] = dc
+	if err := s.state.Save(); err != nil {
+		s.mu.Unlock()
+		slog.WarnContext(r.Context(), "save device code", "err", err)
+		WriteError(w, http.StatusInternalServerError, "server_error", "could not save device code")
+		return
+	}
+	s.mu.Unlock()
+
+	issuer := s.externalBaseURL(r)
+	resp := DeviceAuthorizationResponse{
+		DeviceCode:              deviceCode,
+		UserCode:                userCode,
+		VerificationURI:         issuer + "/oauth/device",
+		VerificationURIComplete: issuer + "/oauth/device?user_code=" + userCode,
+		ExpiresIn:               600,
+		Interval:                5,
+	}
+	writeJSONResponse(w, &resp)
+}
+
+func (s *Server) handleOAuthDevicePage(w http.ResponseWriter, r *http.Request) {
+	userCode := r.URL.Query().Get("user_code")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// Simple inline HTML; user_code is strictly uppercase alphanumeric.
+	escaped := html.EscapeString(userCode)
+	_, _ = w.Write([]byte(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Device Authorization</title></head><body>
+		<h1>Device Authorization</h1>
+		<form method="post" action="/oauth/device">
+			<label for="user_code">Enter the code shown on your device:</label>
+			<input type="text" name="user_code" id="user_code" autocomplete="off" value="` + escaped + `" maxlength="8" pattern="[A-Z0-9]{8}" required>
+			<button type="submit">Authorize</button>
+		</form>
+	</body></html>`))
+}
+
+func (s *Server) handleOAuthDeviceApprove(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.currentRequestUser(r.Context())
+	if !ok {
+		if loginURL := s.ui.LoginStartURL(r); loginURL != "" {
+			http.Redirect(w, r, loginURL, http.StatusFound) //nolint:gosec // loginURL produced by the caller's AuthorizationUI
+			return
+		}
+		WriteError(w, http.StatusUnauthorized, "login_required", "log in before authorizing device")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
+	if err := r.ParseForm(); err != nil {
+		WriteError(w, http.StatusBadRequest, "invalid_request", "invalid form")
+		return
+	}
+	userCode := r.PostForm.Get("user_code")
+	if userCode == "" {
+		WriteError(w, http.StatusBadRequest, "invalid_request", "missing user_code")
+		return
+	}
+	s.mu.Lock()
+	var dc *DeviceCode
+	for _, d := range s.state.DeviceCodes {
+		if d.UserCode == userCode && d.Status == "pending" && time.Now().Before(d.ExpiresAt) {
+			dc = d
+			d.Status = "approved"
+			d.UserID = user.ID
+			break
+		}
+	}
+	if dc == nil {
+		s.mu.Unlock()
+		WriteError(w, http.StatusBadRequest, "invalid_request", "invalid or expired user code")
+		return
+	}
+	if err := s.state.Save(); err != nil {
+		s.mu.Unlock()
+		slog.WarnContext(r.Context(), "save device approval", "err", err)
+		WriteError(w, http.StatusInternalServerError, "server_error", "could not approve device")
+		return
+	}
+	s.mu.Unlock()
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(`<html><body><p>Device authorized. You may close this page.</p></body></html>`))
+}
+
+func (s *Server) handleOAuthDeviceCodeToken(w http.ResponseWriter, r *http.Request) {
+	deviceCode := r.PostForm.Get("device_code")
+	clientID := r.PostForm.Get("client_id")
+	if deviceCode == "" || clientID == "" {
+		WriteError(w, http.StatusBadRequest, "invalid_request", "missing device_code or client_id")
+		return
+	}
+	codeHash := RefreshTokenKey(deviceCode)
+	s.mu.Lock()
+	dc, ok := s.state.DeviceCodes[codeHash]
+	if !ok || dc.ClientID != clientID {
+		s.mu.Unlock()
+		WriteError(w, http.StatusBadRequest, "invalid_grant", "invalid device_code")
+		return
+	}
+	if time.Now().After(dc.ExpiresAt) {
+		delete(s.state.DeviceCodes, codeHash)
+		_ = s.state.Save()
+		s.mu.Unlock()
+		WriteError(w, http.StatusBadRequest, "expired_token", "device_code expired")
+		return
+	}
+	switch dc.Status {
+	case "pending":
+		s.mu.Unlock()
+		WriteError(w, http.StatusBadRequest, "authorization_pending", "user has not yet authorized the device")
+		return
+	case "denied":
+		delete(s.state.DeviceCodes, codeHash)
+		_ = s.state.Save()
+		s.mu.Unlock()
+		WriteError(w, http.StatusBadRequest, "access_denied", "user denied the authorization request")
+		return
+	case "approved":
+		delete(s.state.DeviceCodes, codeHash)
+		_ = s.state.Save()
+		s.mu.Unlock()
+	default:
+		s.mu.Unlock()
+		WriteError(w, http.StatusBadRequest, "invalid_grant", "unknown device code status")
+		return
+	}
+
+	user, ok := s.findUserByID(dc.UserID)
+	if !ok {
+		WriteError(w, http.StatusBadRequest, "invalid_grant", "user no longer exists")
+		return
+	}
+	grantID, err := randomToken()
+	if err != nil {
+		slog.WarnContext(r.Context(), "generate device grant id", "err", err)
+		WriteError(w, http.StatusInternalServerError, "server_error", "could not issue token")
+		return
+	}
+	now := time.Now()
+	grant := Grant{ID: grantID, UserID: dc.UserID, ClientID: dc.ClientID, ClientName: clientDisplayName(&Client{ID: dc.ClientID}), Resource: s.externalBaseURL(r) + s.resourceURLPath, Scope: dc.Scope, CreatedAt: now, ExpiresAt: now.Add(s.refreshTokenTTL)}
+	refreshEntry := RefreshToken{GrantID: grantID, UserID: dc.UserID, ClientID: dc.ClientID, Resource: s.externalBaseURL(r) + s.resourceURLPath, Scope: dc.Scope, ExpiresAt: grant.ExpiresAt}
+	refreshToken, err := s.issueGrantRefreshToken(&grant, &refreshEntry)
+	if err != nil {
+		slog.WarnContext(r.Context(), "issue device refresh token", "err", err)
+		WriteError(w, http.StatusInternalServerError, "server_error", "could not issue refresh token")
+		return
+	}
+	s.writeTokenResponse(w, r, user, s.externalBaseURL(r)+s.resourceURLPath, dc.Scope, grantID, refreshToken, "")
+}
+
+func generateUserCode() string {
+	const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+	var code [8]byte
+	for i := range code {
+		n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(chars))))
+		code[i] = chars[n.Int64()]
+	}
+	return string(code[:])
 }
 
 func writeUnauthorizedJSON(w http.ResponseWriter) {

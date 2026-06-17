@@ -1168,6 +1168,358 @@ func TestPAR(t *testing.T) {
 	})
 }
 
+func TestDeviceAuthorization(t *testing.T) {
+	t.Parallel()
+
+	t.Run("successful device flow", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+
+		// Step 1: Request device authorization.
+		devForm := url.Values{
+			"client_id": {registered.ClientID},
+			"scope":     {"read"},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/device_authorization", strings.NewReader(devForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("device_authorization status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var devResp DeviceAuthorizationResponse
+		if err := json.NewDecoder(w.Body).Decode(&devResp); err != nil {
+			t.Fatalf("decode device_authorization response: %v", err)
+		}
+		if devResp.DeviceCode == "" || devResp.UserCode == "" {
+			t.Fatalf("device_authorization response missing codes: %+v", devResp)
+		}
+		if devResp.VerificationURI != testBaseURL+"/oauth/device" {
+			t.Fatalf("verification_uri = %q, want %s", devResp.VerificationURI, testBaseURL+"/oauth/device")
+		}
+		if devResp.ExpiresIn != 600 {
+			t.Fatalf("expires_in = %d, want 600", devResp.ExpiresIn)
+		}
+		if devResp.Interval != 5 {
+			t.Fatalf("interval = %d, want 5", devResp.Interval)
+		}
+		// user_code should be 8 uppercase alphanumeric chars.
+		if len(devResp.UserCode) != 8 {
+			t.Fatalf("user_code length = %d, want 8", len(devResp.UserCode))
+		}
+
+		// Step 2: Approve the device as authenticated user.
+		approveForm := url.Values{"user_code": {devResp.UserCode}}
+		req = newOAuthTestRequest(t, http.MethodPost, "/oauth/device", strings.NewReader(approveForm.Encode()), user)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("device approve status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "Device authorized") {
+			t.Fatalf("device approve body missing confirmation: %s", w.Body.String())
+		}
+
+		// Step 3: Poll for token.
+		tokenForm := url.Values{
+			"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
+			"device_code": {devResp.DeviceCode},
+			"client_id":   {registered.ClientID},
+		}
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(tokenForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("device token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var tokenResp TokenResponse
+		if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
+			t.Fatalf("decode token response: %v", err)
+		}
+		if tokenResp.AccessToken == "" || tokenResp.RefreshToken == "" {
+			t.Fatal("token response missing tokens")
+		}
+		// Verify the access token.
+		if _, err := s.verifyBearer(newTestResourceRequest(t), tokenResp.AccessToken); err != nil {
+			t.Fatalf("verify access token: %v", err)
+		}
+	})
+
+	t.Run("polling authorization_pending", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+
+		// Request device authorization.
+		devForm := url.Values{
+			"client_id": {registered.ClientID},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/device_authorization", strings.NewReader(devForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("device_authorization status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var devResp DeviceAuthorizationResponse
+		if err := json.NewDecoder(w.Body).Decode(&devResp); err != nil {
+			t.Fatalf("decode device_authorization response: %v", err)
+		}
+
+		// Poll without approving — should get authorization_pending.
+		tokenForm := url.Values{
+			"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
+			"device_code": {devResp.DeviceCode},
+			"client_id":   {registered.ClientID},
+		}
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(tokenForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("pending token status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
+		}
+		var errResp ErrorResponse
+		if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
+			t.Fatalf("decode error response: %v", err)
+		}
+		if errResp.Error != "authorization_pending" {
+			t.Fatalf("error = %q, want authorization_pending", errResp.Error)
+		}
+	})
+
+	t.Run("expired device_code", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+
+		// Request device authorization.
+		devForm := url.Values{
+			"client_id": {registered.ClientID},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/device_authorization", strings.NewReader(devForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("device_authorization status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var devResp DeviceAuthorizationResponse
+		if err := json.NewDecoder(w.Body).Decode(&devResp); err != nil {
+			t.Fatalf("decode device_authorization response: %v", err)
+		}
+
+		// Manually expire the device code.
+		s.mu.Lock()
+		codeHash := RefreshTokenKey(devResp.DeviceCode)
+		dc := s.state.DeviceCodes[codeHash]
+		dc.ExpiresAt = time.Now().Add(-time.Minute)
+		s.state.DeviceCodes[codeHash] = dc
+		s.mu.Unlock()
+
+		// Poll for token — should get expired_token.
+		tokenForm := url.Values{
+			"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
+			"device_code": {devResp.DeviceCode},
+			"client_id":   {registered.ClientID},
+		}
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(tokenForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expired token status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
+		}
+		var errResp ErrorResponse
+		if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
+			t.Fatalf("decode error response: %v", err)
+		}
+		if errResp.Error != "expired_token" {
+			t.Fatalf("error = %q, want expired_token", errResp.Error)
+		}
+	})
+
+	t.Run("device page shows form", func(t *testing.T) {
+		t.Parallel()
+
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{testUser()})
+
+		// GET /oauth/device — show empty form.
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/oauth/device", http.NoBody)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("device page status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		body := w.Body.String()
+		if !strings.Contains(body, `<form method="post" action="/oauth/device"`) {
+			t.Fatalf("device page missing form: %s", body)
+		}
+		if !strings.Contains(body, `name="user_code"`) {
+			t.Fatalf("device page missing user_code input: %s", body)
+		}
+
+		// GET /oauth/device?user_code=ABC — pre-filled form.
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/oauth/device?user_code=AB12EF34", http.NoBody)
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("device page with user_code status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		body2 := w.Body.String()
+		if !strings.Contains(body2, `value="AB12EF34"`) {
+			t.Fatalf("device page form not pre-filled: %s", body2)
+		}
+	})
+
+	t.Run("device approval redirects unauthenticated", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+
+		// POST /oauth/device without authenticated user.
+		form := url.Values{"user_code": {"ABCDEFGH"}}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/device", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		// Without a login adapter, should return Unauthorized.
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("device approve unauthenticated status = %d, want %d: %s", w.Code, http.StatusUnauthorized, w.Body.String())
+		}
+	})
+
+	t.Run("device approval with login redirect", func(t *testing.T) {
+		t.Parallel()
+
+		path := t.TempDir() + "/oauth.json"
+		cfg := testFlowServerConfig(path, []User{testUser()})
+		cfg.UI = &testAuthorizationUI{loginURL: "/auth/login"}
+		s, err := NewServer(cfg)
+		if err != nil {
+			t.Fatalf("NewServer: %v", err)
+		}
+		h := newTestServerHandler(s)
+
+		form := url.Values{"user_code": {"ABCDEFGH"}}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/device", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusFound {
+			t.Fatalf("device approve status = %d, want %d: %s", w.Code, http.StatusFound, w.Body.String())
+		}
+		if got := w.Header().Get("Location"); got != "/auth/login" {
+			t.Fatalf("Location = %q, want /auth/login", got)
+		}
+	})
+
+	t.Run("device approval with invalid user_code", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+
+		// POST /oauth/device with a bogus user_code.
+		form := url.Values{"user_code": {"ZZZZZZZZ"}}
+		req := newOAuthTestRequest(t, http.MethodPost, "/oauth/device", strings.NewReader(form.Encode()), user)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("device approve invalid code status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
+		}
+		var errResp ErrorResponse
+		if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
+			t.Fatalf("decode error response: %v", err)
+		}
+		if errResp.Error != "invalid_request" {
+			t.Fatalf("error = %q, want invalid_request", errResp.Error)
+		}
+	})
+
+	t.Run("device_code survives server restart", func(t *testing.T) {
+		t.Parallel()
+
+		path := t.TempDir() + "/oauth.json"
+		user := testUser()
+		_, h1, _ := newTestFlowServer(t, path, []User{user})
+		registered := registerOAuthTestClient(t, h1, "Claude", []string{"https://claude.example.com/callback"})
+
+		// Request device authorization on first server.
+		devForm := url.Values{
+			"client_id": {registered.ClientID},
+			"scope":     {"read"},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/device_authorization", strings.NewReader(devForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h1.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("device_authorization status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var devResp DeviceAuthorizationResponse
+		if err := json.NewDecoder(w.Body).Decode(&devResp); err != nil {
+			t.Fatalf("decode device_authorization response: %v", err)
+		}
+
+		// Restart server.
+		_, h2, _ := newTestFlowServer(t, path, []User{user})
+
+		// Poll without approving on the new server.
+		tokenForm := url.Values{
+			"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
+			"device_code": {devResp.DeviceCode},
+			"client_id":   {registered.ClientID},
+		}
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(tokenForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w = httptest.NewRecorder()
+		h2.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("token status after restart = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
+		}
+		var errResp ErrorResponse
+		if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
+			t.Fatalf("decode error response: %v", err)
+		}
+		if errResp.Error != "authorization_pending" {
+			t.Fatalf("error = %q, want authorization_pending", errResp.Error)
+		}
+	})
+
+	t.Run("device_authorization metadata includes device_code grant", func(t *testing.T) {
+		t.Parallel()
+
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{testUser()})
+
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/.well-known/oauth-authorization-server", http.NoBody)
+		addForwardedHeaders(req)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("metadata status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var metadata AuthorizationServerMetadata
+		if err := json.NewDecoder(w.Body).Decode(&metadata); err != nil {
+			t.Fatalf("decode metadata: %v", err)
+		}
+		if !slices.Contains(metadata.GrantTypesSupported, "urn:ietf:params:oauth:grant-type:device_code") {
+			t.Fatalf("grant_types_supported missing device_code: %v", metadata.GrantTypesSupported)
+		}
+	})
+}
+
 func TestDPoP(t *testing.T) {
 	t.Parallel()
 

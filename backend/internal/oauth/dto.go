@@ -107,6 +107,22 @@ type PARResponse struct {
 	ExpiresIn  int64  `json:"expires_in"`
 }
 
+// DeviceAuthorizationRequest is an RFC 8628 device authorization request body.
+type DeviceAuthorizationRequest struct {
+	ClientID string `json:"client_id"`
+	Scope    string `json:"scope,omitempty"`
+}
+
+// DeviceAuthorizationResponse is an RFC 8628 device authorization response body.
+type DeviceAuthorizationResponse struct {
+	DeviceCode              string `json:"device_code"`
+	UserCode                string `json:"user_code"`
+	VerificationURI         string `json:"verification_uri"`
+	VerificationURIComplete string `json:"verification_uri_complete,omitempty"`
+	ExpiresIn               int64  `json:"expires_in"`
+	Interval                int64  `json:"interval,omitempty"`
+}
+
 // UpdateClientRequest is an RFC 7592 client update request body.
 // Nil pointer fields leave the corresponding client field unchanged.
 type UpdateClientRequest struct {
