@@ -1,6 +1,6 @@
 // Tests for DPoP nonce management.
 
-package oauth
+package oauthserver
 
 import (
 	"errors"

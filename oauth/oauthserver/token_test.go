@@ -1,6 +1,6 @@
 // Tests for OAuth access-token signing and verification.
 
-package oauth
+package oauthserver
 
 import (
 	"context"
@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/caic-xyz/caic/oauth"
 )
 
 func TestAccessTokenService(t *testing.T) {
@@ -25,7 +27,7 @@ func TestAccessTokenService(t *testing.T) {
 		audience = "https://caic.example.com/api/caic/v1/mcp"
 		scope    = "caic:mcp.read caic:tasks.read"
 	)
-	user := User{ID: "usr_1", Username: "alice", Provider: "github"}
+	user := oauth.User{ID: "usr_1", Username: "alice", Provider: "github"}
 
 	t.Run("valid issue and verify", func(t *testing.T) {
 		t.Parallel()
@@ -139,7 +141,7 @@ func TestAccessTokenService(t *testing.T) {
 		t.Parallel()
 		svc := newTestAccessTokenService(t, "kid-expired")
 		now := time.Now()
-		token, err := svc.issueAccessTokenAt(&AccessTokenClaims{
+		token, err := svc.issueAccessTokenAt(&oauth.AccessTokenClaims{
 			Issuer:   issuer,
 			Subject:  user.ID,
 			Audience: audience,
@@ -159,7 +161,7 @@ func TestAccessTokenService(t *testing.T) {
 		t.Parallel()
 		svc := newTestAccessTokenService(t, "kid-future-skew")
 		now := time.Now()
-		token, err := svc.issueAccessTokenAt(&AccessTokenClaims{
+		token, err := svc.issueAccessTokenAt(&oauth.AccessTokenClaims{
 			Issuer:   issuer,
 			Subject:  user.ID,
 			Audience: audience,
@@ -179,7 +181,7 @@ func TestAccessTokenService(t *testing.T) {
 		t.Parallel()
 		svc := newTestAccessTokenService(t, "kid-future-reject")
 		now := time.Now()
-		token, err := svc.issueAccessTokenAt(&AccessTokenClaims{
+		token, err := svc.issueAccessTokenAt(&oauth.AccessTokenClaims{
 			Issuer:   issuer,
 			Subject:  user.ID,
 			Audience: audience,
@@ -199,7 +201,7 @@ func TestAccessTokenService(t *testing.T) {
 		t.Parallel()
 		svc := newTestAccessTokenService(t, "kid-expired-skew")
 		now := time.Now()
-		token, err := svc.issueAccessTokenAt(&AccessTokenClaims{
+		token, err := svc.issueAccessTokenAt(&oauth.AccessTokenClaims{
 			Issuer:   issuer,
 			Subject:  user.ID,
 			Audience: audience,
@@ -219,7 +221,7 @@ func TestAccessTokenService(t *testing.T) {
 		t.Parallel()
 		svc := newTestAccessTokenService(t, "kid-expired-reject")
 		now := time.Now()
-		token, err := svc.issueAccessTokenAt(&AccessTokenClaims{
+		token, err := svc.issueAccessTokenAt(&oauth.AccessTokenClaims{
 			Issuer:   issuer,
 			Subject:  user.ID,
 			Audience: audience,
@@ -294,15 +296,15 @@ func TestAccessTokenService(t *testing.T) {
 			t.Fatal("new key is not ECDSA")
 		}
 
-		// Verify JWK for the new key is EC.
+		// Verify oauth.JWK for the new key is EC.
 		jwks := svc.JWK()
 		for _, jwk := range jwks {
 			if jwk.Kid == newKID {
 				if jwk.Kty != "EC" {
-					t.Fatalf("new key JWK kty = %q, want EC", jwk.Kty)
+					t.Fatalf("new key oauth.JWK kty = %q, want EC", jwk.Kty)
 				}
 				if jwk.Crv != "P-256" {
-					t.Fatalf("new key JWK crv = %q, want P-256", jwk.Crv)
+					t.Fatalf("new key oauth.JWK crv = %q, want P-256", jwk.Crv)
 				}
 			}
 		}
@@ -421,18 +423,18 @@ func TestAccessTokenService(t *testing.T) {
 			case "RSA":
 				rsaCount++
 				if jwk.N == "" || jwk.E == "" {
-					t.Fatalf("RSA JWK missing n or e: %+v", jwk)
+					t.Fatalf("RSA oauth.JWK missing n or e: %+v", jwk)
 				}
 				if jwk.Crv != "" || jwk.X != "" || jwk.Y != "" {
-					t.Fatalf("RSA JWK has EC fields: %+v", jwk)
+					t.Fatalf("RSA oauth.JWK has EC fields: %+v", jwk)
 				}
 			case "EC":
 				ecCount++
 				if jwk.Crv != "P-256" || jwk.X == "" || jwk.Y == "" {
-					t.Fatalf("EC JWK missing crv/x/y: %+v", jwk)
+					t.Fatalf("EC oauth.JWK missing crv/x/y: %+v", jwk)
 				}
 				if jwk.N != "" || jwk.E != "" {
-					t.Fatalf("EC JWK has RSA fields: %+v", jwk)
+					t.Fatalf("EC oauth.JWK has RSA fields: %+v", jwk)
 				}
 			default:
 				t.Fatalf("unexpected kty: %s", jwk.Kty)
@@ -524,25 +526,25 @@ func TestAccessTokenService(t *testing.T) {
 // tokenTestSession is a minimal SessionManager for token tests.
 // FindUser returns the hardcoded user; other methods panic if called.
 type tokenTestSession struct {
-	user User
+	user oauth.User
 }
 
-func (s *tokenTestSession) CurrentUser(ctx context.Context) (User, bool) {
+func (s *tokenTestSession) CurrentUser(ctx context.Context) (oauth.User, bool) {
 	return s.user, true
 }
 
-func (s *tokenTestSession) AttachUser(ctx context.Context, u User) context.Context {
+func (s *tokenTestSession) AttachUser(ctx context.Context, u oauth.User) context.Context {
 	return ctx
 }
 
-func (s *tokenTestSession) FindUser(id string) (User, bool) {
+func (s *tokenTestSession) FindUser(id string) (oauth.User, bool) {
 	if id == s.user.ID {
 		return s.user, true
 	}
-	return User{}, false
+	return oauth.User{}, false
 }
 
-func (s *tokenTestSession) EndSession(ctx context.Context, r *http.Request, u User) (redirectURL string) {
+func (s *tokenTestSession) EndSession(ctx context.Context, r *http.Request, u oauth.User) (redirectURL string) {
 	return ""
 }
 

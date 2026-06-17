@@ -15,6 +15,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/oauth"
+	"github.com/caic-xyz/caic/oauth/oauthserver"
 )
 
 //go:embed oauth_consent.html
@@ -26,7 +27,7 @@ var oauthConsentTemplate = template.Must(template.New("oauth-consent").Parse(oau
 // Keep auth.Store lookups, consent HTML, API DTOs, and audit formatting here so
 // internal/oauth remains reusable and unaware of caic packages.
 
-// caicSessionManager implements oauth.SessionManager backed by auth.Store.
+// caicSessionManager implements oauthserver.SessionManager backed by auth.Store.
 type caicSessionManager struct {
 	store *auth.Store
 }
@@ -60,7 +61,7 @@ func (m *caicSessionManager) EndSession(ctx context.Context, r *http.Request, u 
 	return ""
 }
 
-// caicAuthorizationUI implements oauth.AuthorizationUI.
+// caicAuthorizationUI implements oauthserver.AuthorizationUI.
 type caicAuthorizationUI struct {
 	login *authHandlers
 }
@@ -74,7 +75,7 @@ func (u caicAuthorizationUI) ProviderLabel(p string) string {
 }
 
 // RenderOAuthConsent renders the caic OAuth consent page.
-func (caicAuthorizationUI) RenderOAuthConsent(w http.ResponseWriter, data *oauth.ConsentPageData) error {
+func (caicAuthorizationUI) RenderOAuthConsent(w http.ResponseWriter, data *oauthserver.ConsentPageData) error {
 	h := w.Header()
 	h.Set("Cache-Control", "no-store")
 	h.Set("Content-Type", "text/html; charset=utf-8")
@@ -98,7 +99,7 @@ func (a *auditStore) RecordOAuth(ctx context.Context, userID, operation, name, d
 }
 
 type oauthGrantHandlers struct {
-	oauthServer *oauth.Server
+	oauthServer *oauthserver.Server
 }
 
 // listOAuthGrants returns the authenticated user's OAuth client grants.
@@ -124,8 +125,8 @@ func (h *oauthGrantHandlers) revokeOAuthGrant(ctx context.Context, req *v1.Revok
 	return &v1.StatusResp{Status: "ok"}, nil
 }
 
-// oauthGrantResponse converts an internal oauth.Grant to an API response.
-func oauthGrantResponse(grant *oauth.Grant, now time.Time) v1.OAuthGrantResp {
+// oauthGrantResponse converts an internal oauthserver.Grant to an API response.
+func oauthGrantResponse(grant *oauthserver.Grant, now time.Time) v1.OAuthGrantResp {
 	status := v1.OAuthGrantStatusActive
 	if !grant.RevokedAt.IsZero() {
 		status = v1.OAuthGrantStatusRevoked
@@ -148,7 +149,7 @@ func oauthGrantResponse(grant *oauth.Grant, now time.Time) v1.OAuthGrantResp {
 
 // oauthGrantRoutes returns the handler for OAuth client grant management.
 // Patterns are relative to the API version prefix, stripped at mount time.
-func oauthGrantRoutes(s *oauth.Server) http.Handler {
+func oauthGrantRoutes(s *oauthserver.Server) http.Handler {
 	h := &oauthGrantHandlers{oauthServer: s}
 	m := http.NewServeMux()
 	m.HandleFunc("GET /oauth/grants", handle(h.listOAuthGrants))

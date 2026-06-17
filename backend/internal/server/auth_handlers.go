@@ -16,6 +16,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/oauth"
+	"github.com/caic-xyz/caic/oauth/oauthclient"
+	"github.com/caic-xyz/caic/oauth/oauthserver"
 )
 
 const (
@@ -24,13 +26,20 @@ const (
 	sessionMaxAge     = 30 * 24 * 60 * 60 // 30 days in seconds
 )
 
+// forgeProvider is the common interface between GitHub and GitLab OAuth configs.
+type forgeProvider interface {
+	RedirectURI() string
+	AuthURL(state string) string
+	OAuthClientConfig() oauth.ClientConfig
+}
+
 type authHandlers struct {
 	store         *auth.Store
 	sessionSecret []byte
 	hostState     *auth.HostState
 
-	githubOAuth        *auth.ProviderConfig
-	gitlabOAuth        *auth.ProviderConfig
+	githubOAuth        *oauthclient.GitHubConfig
+	gitlabOAuth        *oauthclient.GitLabConfig
 	githubAllowedUsers []string
 	gitlabAllowedUsers []string
 }
@@ -50,8 +59,15 @@ func (h *authHandlers) LoginStartURL(r *http.Request) string {
 // ProviderLabel returns the human-readable name for a forge provider, falling
 // back to the raw provider name when it is not configured.
 func (h *authHandlers) ProviderLabel(provider string) string {
-	if cfg := h.providerConfig(provider); cfg != nil && cfg.Label != "" {
-		return cfg.Label
+	switch provider {
+	case "github":
+		if h.githubOAuth != nil {
+			return "GitHub"
+		}
+	case "gitlab":
+		if h.gitlabOAuth != nil {
+			return "GitLab"
+		}
 	}
 	if provider == "" {
 		return "unknown provider"
@@ -84,7 +100,7 @@ func (h *authHandlers) handleStart(provider string) http.HandlerFunc {
 			return
 		}
 
-		state, err := oauth.GenerateState()
+		state, err := oauthserver.GenerateState()
 		if err != nil {
 			slog.WarnContext(r.Context(), "generate oauth state", "err", err)
 			writeError(w, api.InternalError("generate state"))
@@ -96,7 +112,7 @@ func (h *authHandlers) handleStart(provider string) http.HandlerFunc {
 			mode = "app"
 		}
 		fullState := buildLoginState(mode, state, next)
-		cookieValue := oauth.SignState(fullState, h.sessionSecret)
+		cookieValue := oauthserver.SignState(fullState, h.sessionSecret)
 
 		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure is set dynamically; all required attributes are present
 			Name:     auth.StateCookieName,
@@ -139,7 +155,7 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 			writeError(w, api.BadRequest("missing state cookie"))
 			return
 		}
-		fullState, ok := oauth.ValidateState(stateCookie.Value, h.sessionSecret)
+		fullState, ok := oauthserver.ValidateState(stateCookie.Value, h.sessionSecret)
 		if !ok {
 			writeError(w, api.BadRequest("invalid state"))
 			return
@@ -171,16 +187,27 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 
 		// Exchange code for tokens.
 		// PKCE is off; all forge providers are confidential clients with
-		// HMAC-signed state (see ProviderConfig.AuthURL).
-		accessToken, refreshToken, tokenExpiry, err := oauth.ExchangeCode(r.Context(), cfg.OAuthClientConfig(), code, "")
+		// HMAC-signed state.
+		accessToken, refreshToken, tokenExpiry, err := oauthclient.ExchangeCode(r.Context(), cfg.OAuthClientConfig(), code, "")
 		if err != nil {
 			slog.WarnContext(r.Context(), "oauth exchange", "provider", provider, "err", err)
 			writeError(w, api.InternalError("token exchange failed"))
 			return
 		}
 
-		// Fetch user identity.
-		providerID, username, avatarURL, err := auth.FetchUserInfo(r.Context(), cfg, accessToken)
+		// Fetch user identity (provider-specific dispatch).
+		var providerID, username, avatarURL string
+		switch provider {
+		case "github":
+			githubCfg := h.githubOAuth
+			providerID, username, avatarURL, err = oauthclient.FetchGitHubUser(r.Context(), *githubCfg, accessToken)
+		case "gitlab":
+			gitlabCfg := h.gitlabOAuth
+			providerID, username, avatarURL, err = oauthclient.FetchGitLabUser(r.Context(), *gitlabCfg, accessToken)
+		default:
+			writeError(w, api.NotFound("provider"))
+			return
+		}
 		if err != nil {
 			slog.WarnContext(r.Context(), "oauth userinfo", "provider", provider, "err", err)
 			writeError(w, api.InternalError("userinfo failed"))
@@ -283,12 +310,18 @@ func (h *authHandlers) allowedUsersFor(provider string) []string {
 	return nil
 }
 
-// providerConfig returns the ProviderConfig for the named provider, or nil.
-func (h *authHandlers) providerConfig(provider string) *auth.ProviderConfig {
+// providerConfig returns the forge provider config for the named provider, or nil.
+func (h *authHandlers) providerConfig(provider string) forgeProvider {
 	switch provider {
 	case "github":
+		if h.githubOAuth == nil {
+			return nil
+		}
 		return h.githubOAuth
 	case "gitlab":
+		if h.gitlabOAuth == nil {
+			return nil
+		}
 		return h.gitlabOAuth
 	}
 	return nil

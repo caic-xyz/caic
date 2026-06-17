@@ -1,6 +1,6 @@
 // DPoP proof replay prevention via a bounded jti seen-set (RFC 9449 §11.1).
 
-package oauth
+package oauthserver
 
 import (
 	"sync"

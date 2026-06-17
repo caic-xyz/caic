@@ -1,9 +1,6 @@
-// OAuth authorization-code client helpers.
-//
-// This file stops at generic protocol work: authorization URLs and token
-// exchange. Provider-specific userinfo parsing belongs in the caller.
+// Authorization-code client helpers and forge provider configurations.
 
-package oauth
+package oauthclient
 
 import (
 	"context"
@@ -19,20 +16,14 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/caic-xyz/caic/oauth"
 )
 
 // exchangeTimeout bounds a single token-exchange request so a hung provider
 // cannot pin a goroutine indefinitely. It is applied via the request context,
 // so a shorter deadline already on the caller's context still wins.
 const exchangeTimeout = 30 * time.Second
-
-// ClientConfig holds OAuth 2.0 token endpoint configuration for one authorization-code client.
-type ClientConfig struct {
-	ClientID     string
-	ClientSecret string
-	TokenURL     string
-	RedirectURI  string
-}
 
 // PKCEChallenge holds an S256 PKCE verifier and its derived code challenge (RFC 7636).
 type PKCEChallenge struct {
@@ -68,7 +59,7 @@ func AuthorizationURL(authEndpoint, clientID, redirectURI string, scopes []strin
 	v.Set("redirect_uri", redirectURI)
 	v.Set("scope", strings.Join(scopes, " "))
 	v.Set("state", state)
-	v.Set("response_type", ResponseTypeCode)
+	v.Set("response_type", oauth.ResponseTypeCode)
 	if codeChallenge != "" {
 		v.Set("code_challenge", codeChallenge)
 		v.Set("code_challenge_method", "S256")
@@ -81,12 +72,12 @@ func AuthorizationURL(authEndpoint, clientID, redirectURI string, scopes []strin
 // It returns an access token, an optional refresh token, and an optional
 // expiry. When codeVerifier is non-empty it is sent as the PKCE code_verifier;
 // when empty the request body is identical to a flow without PKCE.
-func ExchangeCode(ctx context.Context, c ClientConfig, code, codeVerifier string) (access, refresh string, expiry time.Time, err error) {
+func ExchangeCode(ctx context.Context, c oauth.ClientConfig, code, codeVerifier string) (access, refresh string, expiry time.Time, err error) {
 	ctx, cancel := context.WithTimeout(ctx, exchangeTimeout)
 	defer cancel()
 
 	body := url.Values{}
-	body.Set("grant_type", GrantAuthorizationCode)
+	body.Set("grant_type", oauth.GrantAuthorizationCode)
 	body.Set("code", code)
 	body.Set("redirect_uri", c.RedirectURI)
 	body.Set("client_id", c.ClientID)

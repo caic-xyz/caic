@@ -30,6 +30,7 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/oauth/oauthclient"
 )
 
 type runnerRegistry interface {
@@ -47,8 +48,8 @@ type serverHandlers struct {
 	taskMgr            runnerRegistry
 	cacheSizes         *CacheSizeStore
 	authStore          *auth.Store
-	githubOAuth        *auth.ProviderConfig
-	gitlabOAuth        *auth.ProviderConfig
+	githubOAuth        *oauthclient.GitHubConfig
+	gitlabOAuth        *oauthclient.GitLabConfig
 	voiceGateway       v1.VoiceGatewayMetadata
 }
 

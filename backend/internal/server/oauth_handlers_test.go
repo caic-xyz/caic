@@ -28,6 +28,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 	"github.com/caic-xyz/caic/oauth"
+	"github.com/caic-xyz/caic/oauth/oauthclient"
 )
 
 const mcpAuthDefaultScope = mcpScopeRead + " " + mcpScopeTasksRead + " " + mcpScopeTasksWrite + " " + mcpScopeTasksAdmin + " " + mcpScopeReposWrite
@@ -354,16 +355,8 @@ func TestOAuthServer(t *testing.T) {
 			t.Parallel()
 			s2, _ := newAuthEnabledRouter(t)
 			s2.authHandlers.hostState = s2.hostState
-			s2.authHandlers.githubOAuth = &auth.ProviderConfig{ //nolint:gosec // Test-only OAuth credentials.
-				ClientID:     "github-client",
-				ClientSecret: "github-secret",
-				AuthEndpoint: "https://github.com/login/oauth/authorize",
-				TokenURL:     "https://github.com/login/oauth/access_token",
-				UserInfoURL:  "https://api.github.com/user",
-				Scopes:       []string{"repo"},
-				Provider:     "github",
-				Host:         s2.hostState,
-			}
+			cfg := oauthclient.NewGitHubConfig("github-client", "github-secret", "https://localhost/api/caic/v1/auth/github/callback")
+			s2.authHandlers.githubOAuth = &cfg
 			h2, err := s2.buildHandler()
 			if err != nil {
 				t.Fatalf("buildHandler: %v", err)

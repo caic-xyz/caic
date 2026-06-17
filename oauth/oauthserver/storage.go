@@ -1,6 +1,6 @@
 // OAuth durable authorization state storage.
 
-package oauth
+package oauthserver
 
 import (
 	"encoding/json"

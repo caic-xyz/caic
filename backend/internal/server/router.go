@@ -30,7 +30,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/backend/internal/voicegateway/voicertc"
-	"github.com/caic-xyz/caic/oauth"
+	"github.com/caic-xyz/caic/oauth/oauthclient"
+	"github.com/caic-xyz/caic/oauth/oauthserver"
 )
 
 // Router is the HTTP router for the caic web UI. It owns HTTP routing,
@@ -51,7 +52,7 @@ type Router struct {
 	serverHandlers   *serverHandlers
 	taskHandlers     *taskHandlers
 	mcpHandlers      *mcpHandlers
-	oauthServer      *oauth.Server
+	oauthServer      *oauthserver.Server
 	usageHandlers    *usageHandlers
 	voiceHandlers    *voiceHandlers
 	webFetchHandlers *webFetchHandlers
@@ -343,8 +344,8 @@ type Dependencies struct {
 	OAuthKeyID                 string
 	OAuthRefreshTokenStorePath string
 	AuditLogPath               string
-	GitHubOAuth                *auth.ProviderConfig
-	GitLabOAuth                *auth.ProviderConfig
+	GitHubOAuth                *oauthclient.GitHubConfig
+	GitLabOAuth                *oauthclient.GitLabConfig
 	HostState                  *auth.HostState
 	UsageFetchers              []usage.ProviderFetcher
 	VoiceBridge                *voicertc.Bridge
@@ -463,7 +464,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 	// OAuth server — only when auth is configured.
 	if d.AuthStore != nil {
 		var err error
-		s.oauthServer, err = oauth.NewServer(oauth.ServerConfig{
+		s.oauthServer, err = oauthserver.NewServer(oauthserver.ServerConfig{
 			KeyPEM:                  d.OAuthPrivateKeyPEM,
 			KeyID:                   d.OAuthKeyID,
 			AccessTokenTTL:          time.Hour,

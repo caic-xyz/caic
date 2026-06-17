@@ -1,6 +1,6 @@
 // OAuth access-token signing and verification.
 
-package oauth
+package oauthserver
 
 import (
 	"crypto"
@@ -17,6 +17,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/caic-xyz/caic/oauth"
 )
 
 const accessTokenType = "access_token"
@@ -77,14 +79,14 @@ func newAccessTokenService(key crypto.Signer, alg, kid string, ttl time.Duration
 }
 
 // JWK returns all active public signing keys as JWKs.
-func (s *AccessTokenService) JWK() []JWK {
-	jwks := make([]JWK, 0, len(s.keys))
+func (s *AccessTokenService) JWK() []oauth.JWK {
+	jwks := make([]oauth.JWK, 0, len(s.keys))
 	for kid, sk := range s.keys {
 		switch pub := sk.key.Public().(type) {
 		case *rsa.PublicKey:
-			jwks = append(jwks, RSAJWK(kid, pub))
+			jwks = append(jwks, oauth.RSAJWK(kid, pub))
 		case *ecdsa.PublicKey:
-			jwks = append(jwks, ECJWK(kid, pub))
+			jwks = append(jwks, oauth.ECJWK(kid, pub))
 		}
 	}
 	return jwks
@@ -127,9 +129,9 @@ func (s *AccessTokenService) RotateKeyWithAlg(alg string) (string, error) {
 }
 
 // IssueAccessToken signs a JWT access token for user.
-func (s *AccessTokenService) IssueAccessToken(issuer string, user User, audience, scope, grantID string) (string, error) {
+func (s *AccessTokenService) IssueAccessToken(issuer string, user oauth.User, audience, scope, grantID string) (string, error) {
 	now := time.Now()
-	return s.issueAccessTokenAt(&AccessTokenClaims{
+	return s.issueAccessTokenAt(&oauth.AccessTokenClaims{
 		Issuer:   issuer,
 		Subject:  user.ID,
 		Audience: audience,
@@ -141,9 +143,9 @@ func (s *AccessTokenService) IssueAccessToken(issuer string, user User, audience
 }
 
 // IssueDPoPAccessToken signs a DPoP-bound JWT access token with cnf.jkt.
-func (s *AccessTokenService) IssueDPoPAccessToken(issuer string, user User, audience, scope, grantID, dpopJKT string) (string, error) {
+func (s *AccessTokenService) IssueDPoPAccessToken(issuer string, user oauth.User, audience, scope, grantID, dpopJKT string) (string, error) {
 	now := time.Now()
-	return s.issueAccessTokenAt(&AccessTokenClaims{
+	return s.issueAccessTokenAt(&oauth.AccessTokenClaims{
 		Issuer:       issuer,
 		Subject:      user.ID,
 		Audience:     audience,
@@ -151,7 +153,7 @@ func (s *AccessTokenService) IssueDPoPAccessToken(issuer string, user User, audi
 		Scope:        scope,
 		GrantID:      grantID,
 		Type:         accessTokenType,
-		Confirmation: &TokenConfirmation{JKT: dpopJKT},
+		Confirmation: &oauth.TokenConfirmation{JKT: dpopJKT},
 	}, now, now.Add(s.ttl))
 }
 
@@ -159,7 +161,7 @@ func (s *AccessTokenService) IssueDPoPAccessToken(issuer string, user User, audi
 // The subject is the client ID and the audience scopes it to the registration endpoint.
 func (s *AccessTokenService) IssueRegistrationAccessToken(issuer, clientID string) (string, error) {
 	now := time.Now()
-	return s.issueAccessTokenAt(&AccessTokenClaims{
+	return s.issueAccessTokenAt(&oauth.AccessTokenClaims{
 		Issuer:   issuer,
 		Subject:  clientID,
 		Audience: issuer + "/oauth/register",
@@ -178,7 +180,7 @@ func (s *AccessTokenService) VerifyRegistrationAccessToken(token, issuer, audien
 }
 
 // VerifyAccessToken validates token and returns its bearer claims.
-func (s *AccessTokenService) VerifyAccessToken(token, issuer, audience string, now time.Time, touchGrant GrantTouchFunc, session SessionManager) (*BearerClaims, error) {
+func (s *AccessTokenService) VerifyAccessToken(token, issuer, audience string, now time.Time, touchGrant GrantTouchFunc, session SessionManager) (*oauth.BearerClaims, error) {
 	claims, err := s.verifyClaims(token, issuer, audience, now)
 	if err != nil {
 		return nil, err
@@ -204,7 +206,7 @@ func (s *AccessTokenService) VerifyAccessToken(token, issuer, audience string, n
 	if !ok {
 		return nil, errors.New("token subject is unknown")
 	}
-	return &BearerClaims{
+	return &oauth.BearerClaims{
 		User:         user,
 		Subject:      claims.Subject,
 		Username:     claims.Username,
@@ -218,9 +220,9 @@ func (s *AccessTokenService) VerifyAccessToken(token, issuer, audience string, n
 	}, nil
 }
 
-func (s *AccessTokenService) issueAccessTokenAt(claims *AccessTokenClaims, issuedAt, expiresAt time.Time) (string, error) {
+func (s *AccessTokenService) issueAccessTokenAt(claims *oauth.AccessTokenClaims, issuedAt, expiresAt time.Time) (string, error) {
 	alg := s.keys[s.currentKID].alg
-	headerJSON, err := json.Marshal(JWTHeader{Alg: alg, Typ: "JWT", KID: s.currentKID})
+	headerJSON, err := json.Marshal(oauth.JWTHeader{Alg: alg, Typ: "JWT", KID: s.currentKID})
 	if err != nil {
 		return "", err
 	}
@@ -253,7 +255,7 @@ func (s *AccessTokenService) parseAndVerifyJWT(raw string) (parsedToken, error) 
 	if err != nil {
 		return parsedToken{}, fmt.Errorf("decode token header: %w", err)
 	}
-	var header JWTHeader
+	var header oauth.JWTHeader
 	if err := json.Unmarshal(headerJSON, &header); err != nil {
 		return parsedToken{}, fmt.Errorf("parse token header: %w", err)
 	}
@@ -277,12 +279,12 @@ func (s *AccessTokenService) parseAndVerifyJWT(raw string) (parsedToken, error) 
 	return parsedToken{header: headerJSON, payload: payloadJSON}, nil
 }
 
-func (s *AccessTokenService) verifyClaims(token, issuer, audience string, now time.Time) (*AccessTokenClaims, error) {
+func (s *AccessTokenService) verifyClaims(token, issuer, audience string, now time.Time) (*oauth.AccessTokenClaims, error) {
 	parsed, err := s.parseAndVerifyJWT(token)
 	if err != nil {
 		return nil, err
 	}
-	var claims AccessTokenClaims
+	var claims oauth.AccessTokenClaims
 	if err := json.Unmarshal(parsed.payload, &claims); err != nil {
 		return nil, fmt.Errorf("parse token claims: %w", err)
 	}
@@ -303,12 +305,12 @@ func (s *AccessTokenService) verifyClaims(token, issuer, audience string, now ti
 	return &claims, nil
 }
 
-func (s *AccessTokenService) verifyRegistrationClaims(token, issuer, audience string, now time.Time) (*AccessTokenClaims, error) {
+func (s *AccessTokenService) verifyRegistrationClaims(token, issuer, audience string, now time.Time) (*oauth.AccessTokenClaims, error) {
 	parsed, err := s.parseAndVerifyJWT(token)
 	if err != nil {
 		return nil, err
 	}
-	var claims AccessTokenClaims
+	var claims oauth.AccessTokenClaims
 	if err := json.Unmarshal(parsed.payload, &claims); err != nil {
 		return nil, fmt.Errorf("parse token claims: %w", err)
 	}

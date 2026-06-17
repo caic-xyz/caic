@@ -35,6 +35,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 	"github.com/caic-xyz/caic/backend/internal/voicegateway"
 	"github.com/caic-xyz/caic/backend/internal/voicegateway/voicertc"
+	"github.com/caic-xyz/caic/oauth/oauthclient"
 )
 
 const repoDiscoveryDepth = 3
@@ -150,8 +151,8 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 
 	var authStore *auth.Store
 	var sessionSecret []byte
-	var githubOAuth *auth.ProviderConfig
-	var gitlabOAuth *auth.ProviderConfig
+	var githubOAuth *oauthclient.GitHubConfig
+	var gitlabOAuth *oauthclient.GitLabConfig
 	oauthConfigured := cfg.GitHub.OAuthClientID != "" || cfg.GitLab.OAuthClientID != ""
 	if cfg.Auth.ExternalURL != "" && (oauthConfigured || !isAuto) {
 		secret, err := hex.DecodeString(settings.SessionSecret)
@@ -165,12 +166,18 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		}
 		authStore = store
 		if cfg.GitHub.OAuthClientID != "" && cfg.GitHub.OAuthClientSecret != "" {
-			c := auth.GitHubConfig(cfg.GitHub.OAuthClientID, cfg.GitHub.OAuthClientSecret, hostState)
-			githubOAuth = &c
+			c, err := auth.NewGitHubProvider(cfg.GitHub.OAuthClientID, cfg.GitHub.OAuthClientSecret, hostState)
+			if err != nil {
+				return nil, fmt.Errorf("github oauth provider: %w", err)
+			}
+			githubOAuth = c
 		}
 		if cfg.GitLab.OAuthClientID != "" && cfg.GitLab.OAuthClientSecret != "" {
-			c := auth.GitLabConfig(cfg.GitLab.OAuthClientID, cfg.GitLab.OAuthClientSecret, cfg.GitLab.URL, hostState)
-			gitlabOAuth = &c
+			c, err := auth.NewGitLabProvider(cfg.GitLab.OAuthClientID, cfg.GitLab.OAuthClientSecret, cfg.GitLab.URL, hostState)
+			if err != nil {
+				return nil, fmt.Errorf("gitlab oauth provider: %w", err)
+			}
+			gitlabOAuth = c
 		}
 	}
 

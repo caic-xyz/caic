@@ -1,6 +1,6 @@
 // Tests for generic OAuth authorization-server HTTP handlers.
 
-package oauth
+package oauthserver
 
 import (
 	"context"
@@ -24,6 +24,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/caic-xyz/caic/oauth"
 )
 
 const (
@@ -47,7 +49,7 @@ func TestServer(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("metadata status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var metadata AuthorizationServerMetadata
+		var metadata oauth.AuthorizationServerMetadata
 		if err := json.NewDecoder(w.Body).Decode(&metadata); err != nil {
 			t.Fatalf("decode metadata: %v", err)
 		}
@@ -56,7 +58,7 @@ func TestServer(t *testing.T) {
 		}
 
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
-		if !strings.HasPrefix(registered.ClientID, "test_") || registered.ClientName != "Claude" || registered.TokenEndpointAuthMethod != TokenEndpointAuthNone {
+		if !strings.HasPrefix(registered.ClientID, "test_") || registered.ClientName != "Claude" || registered.TokenEndpointAuthMethod != oauth.TokenEndpointAuthNone {
 			t.Fatalf("registered = %+v", registered)
 		}
 
@@ -66,7 +68,7 @@ func TestServer(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("jwks status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var jwks JWKSet
+		var jwks oauth.JWKSet
 		if err := json.NewDecoder(w.Body).Decode(&jwks); err != nil {
 			t.Fatalf("decode jwks: %v", err)
 		}
@@ -80,7 +82,7 @@ func TestServer(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("protected resource status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var resource ProtectedResourceMetadata
+		var resource oauth.ProtectedResourceMetadata
 		if err := json.NewDecoder(w.Body).Decode(&resource); err != nil {
 			t.Fatalf("decode protected resource metadata: %v", err)
 		}
@@ -130,7 +132,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read", "write"})
 		if tokenResp.RefreshToken == "" {
@@ -141,7 +143,7 @@ func TestServer(t *testing.T) {
 		if rotated.AccessToken == "" || rotated.RefreshToken == "" || rotated.RefreshToken == tokenResp.RefreshToken {
 			t.Fatalf("rotated token response = %+v", rotated)
 		}
-		if rotated.TokenType != TokenTypeBearer || rotated.Scope != tokenResp.Scope {
+		if rotated.TokenType != oauth.TokenTypeBearer || rotated.Scope != tokenResp.Scope {
 			t.Fatalf("rotated token metadata = %+v", rotated)
 		}
 		if _, err := s.verifyBearer(newTestResourceRequest(t), rotated.AccessToken); err != nil {
@@ -154,7 +156,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
 		protected := s.BearerAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -190,10 +192,10 @@ func TestServer(t *testing.T) {
 
 		path := t.TempDir() + "/oauth.json"
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, path, []User{user})
+		_, h, _ := newTestFlowServer(t, path, []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 
-		_, restartedHandler, _ := newTestFlowServer(t, path, []User{user})
+		_, restartedHandler, _ := newTestFlowServer(t, path, []oauth.User{user})
 		tokenResp := authorizeOAuthTestClient(t, restartedHandler, user, &registered, []string{"read"})
 		if tokenResp.RefreshToken == "" {
 			t.Fatal("refresh token is empty after client reload")
@@ -205,11 +207,11 @@ func TestServer(t *testing.T) {
 
 		path := t.TempDir() + "/oauth.json"
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, path, []User{user})
+		_, h, _ := newTestFlowServer(t, path, []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
 
-		restarted, restartedHandler, _ := newTestFlowServer(t, path, []User{user})
+		restarted, restartedHandler, _ := newTestFlowServer(t, path, []oauth.User{user})
 		grants := restarted.ListUserGrants(user.ID)
 		if len(grants) != 1 || grants[0].ClientID != registered.ClientID || grants[0].ClientName != "Claude" {
 			t.Fatalf("grants after restart = %+v", grants)
@@ -225,7 +227,7 @@ func TestServer(t *testing.T) {
 
 		path := t.TempDir() + "/oauth.json"
 		user := testUser()
-		_, h1, _ := newTestFlowServer(t, path, []User{user})
+		_, h1, _ := newTestFlowServer(t, path, []oauth.User{user})
 		registered := registerOAuthTestClient(t, h1, "Test Client", []string{"https://claude.example.com/callback"})
 
 		// Start the authorize flow to get a consent token.
@@ -233,7 +235,7 @@ func TestServer(t *testing.T) {
 		consentToken := startOAuthTestConsent(t, h1, user, form)
 
 		// Create a new server pointing at the same store path.
-		_, h2, _ := newTestFlowServer(t, path, []User{user})
+		_, h2, _ := newTestFlowServer(t, path, []oauth.User{user})
 
 		// Post the consent on the new server to get an authorization code.
 		postForm := url.Values{"consent_token": {consentToken}, "scope_form": {"1"}, "scope": {"read"}}
@@ -255,7 +257,7 @@ func TestServer(t *testing.T) {
 
 		// Exchange the code for tokens on the new server.
 		tokenForm := url.Values{
-			"grant_type":    {GrantAuthorizationCode},
+			"grant_type":    {oauth.GrantAuthorizationCode},
 			"code":          {code},
 			"client_id":     {registered.ClientID},
 			"redirect_uri":  {"https://claude.example.com/callback"},
@@ -269,7 +271,7 @@ func TestServer(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var tokenResp TokenResponse
+		var tokenResp oauth.TokenResponse
 		if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
 			t.Fatalf("decode token response: %v", err)
 		}
@@ -283,7 +285,7 @@ func TestServer(t *testing.T) {
 
 		path := t.TempDir() + "/oauth.json"
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, path, []User{user})
+		_, h, _ := newTestFlowServer(t, path, []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 
 		// Start consent: the raw consent_token must not be on disk, but its hash key must.
@@ -293,7 +295,7 @@ func TestServer(t *testing.T) {
 		if strings.Contains(onDisk, consentToken) {
 			t.Fatalf("raw consent token present in state file")
 		}
-		if !strings.Contains(onDisk, RefreshTokenKey(consentToken)) {
+		if !strings.Contains(onDisk, oauth.RefreshTokenKey(consentToken)) {
 			t.Fatalf("hashed consent token key missing from state file")
 		}
 
@@ -318,13 +320,13 @@ func TestServer(t *testing.T) {
 		if strings.Contains(onDisk, code) {
 			t.Fatalf("raw authorization code present in state file")
 		}
-		if !strings.Contains(onDisk, RefreshTokenKey(code)) {
+		if !strings.Contains(onDisk, oauth.RefreshTokenKey(code)) {
 			t.Fatalf("hashed authorization code key missing from state file")
 		}
 
 		// The code still redeems for tokens.
 		tokenForm := url.Values{
-			"grant_type":    {GrantAuthorizationCode},
+			"grant_type":    {oauth.GrantAuthorizationCode},
 			"code":          {code},
 			"client_id":     {registered.ClientID},
 			"redirect_uri":  {"https://claude.example.com/callback"},
@@ -344,7 +346,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
 
@@ -357,19 +359,19 @@ func TestServer(t *testing.T) {
 
 		path := t.TempDir() + "/oauth.json"
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, path, []User{user})
+		_, h, _ := newTestFlowServer(t, path, []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		opaque := "expired-refresh-token"
 		store, err := LoadStore(path)
 		if err != nil {
 			t.Fatalf("LoadStore: %v", err)
 		}
-		store.RefreshTokens[RefreshTokenKey(opaque)] = RefreshToken{UserID: user.ID, ClientID: registered.ClientID, Resource: testResourceURL, Scope: "read", ExpiresAt: time.Now().Add(-time.Minute)}
+		store.RefreshTokens[oauth.RefreshTokenKey(opaque)] = RefreshToken{UserID: user.ID, ClientID: registered.ClientID, Resource: testResourceURL, Scope: "read", ExpiresAt: time.Now().Add(-time.Minute)}
 		if err := store.Save(); err != nil {
 			t.Fatalf("Save: %v", err)
 		}
 
-		_, restartedHandler, _ := newTestFlowServer(t, path, []User{user})
+		_, restartedHandler, _ := newTestFlowServer(t, path, []oauth.User{user})
 		refreshOAuthTestToken(t, restartedHandler, registered.ClientID, opaque, http.StatusBadRequest)
 	})
 
@@ -378,7 +380,7 @@ func TestServer(t *testing.T) {
 
 		path := t.TempDir() + "/oauth.json"
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, path, []User{user})
+		_, h, _ := newTestFlowServer(t, path, []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		opaque := "missing-user-refresh-token"
 		grantID := "grant-missing-user"
@@ -388,12 +390,12 @@ func TestServer(t *testing.T) {
 		}
 		expiresAt := time.Now().Add(time.Hour)
 		store.Grants[grantID] = Grant{ID: grantID, UserID: "usr_missing", ClientID: registered.ClientID, ClientName: "Claude", Resource: testResourceURL, Scope: "read", CreatedAt: time.Now(), ExpiresAt: expiresAt}
-		store.RefreshTokens[RefreshTokenKey(opaque)] = RefreshToken{GrantID: grantID, UserID: "usr_missing", ClientID: registered.ClientID, Resource: testResourceURL, Scope: "read", ExpiresAt: expiresAt}
+		store.RefreshTokens[oauth.RefreshTokenKey(opaque)] = RefreshToken{GrantID: grantID, UserID: "usr_missing", ClientID: registered.ClientID, Resource: testResourceURL, Scope: "read", ExpiresAt: expiresAt}
 		if err := store.Save(); err != nil {
 			t.Fatalf("Save: %v", err)
 		}
 
-		_, restartedHandler, _ := newTestFlowServer(t, path, []User{user})
+		_, restartedHandler, _ := newTestFlowServer(t, path, []oauth.User{user})
 		refreshOAuthTestToken(t, restartedHandler, registered.ClientID, opaque, http.StatusBadRequest)
 	})
 
@@ -401,14 +403,14 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		challenge := testCodeChallenge()
 		form := url.Values{
-			"response_type":         {ResponseTypeCode},
+			"response_type":         {oauth.ResponseTypeCode},
 			"client_id":             {"unknown_client"},
 			"redirect_uri":          {"https://example.com/callback"},
 			"code_challenge":        {challenge},
-			"code_challenge_method": {CodeChallengeS256},
+			"code_challenge_method": {oauth.CodeChallengeS256},
 			"resource":              {testResourceURL},
 			"scope":                 {"read"},
 		}
@@ -433,7 +435,7 @@ func TestServer(t *testing.T) {
 	t.Run("authorize without user is rejected", func(t *testing.T) {
 		t.Parallel()
 
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{testUser()})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
 		form := authorizationCodeForm("client", "https://example.com/callback", "read")
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/oauth/authorize"+"?"+form.Encode(), http.NoBody)
 		w := httptest.NewRecorder()
@@ -447,7 +449,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, ui := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		_, h, ui := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"http://localhost:9999/callback"})
 		form := authorizationCodeForm(registered.ClientID, "http://localhost:9999/callback", "")
 		req := newOAuthTestRequest(t, http.MethodGet, "/oauth/authorize"+"?"+form.Encode(), http.NoBody, user)
@@ -465,7 +467,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
 		code := authorizeOAuthTestCode(t, h, user, &registered, "https://example.com/callback", []string{"read"}, "client-state")
 		if code == "" {
@@ -477,7 +479,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
 		form := authorizationCodeForm(registered.ClientID, "https://example.com/callback", "read")
 		form.Set("state", "deny-state")
@@ -503,7 +505,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		form := url.Values{"consent_token": {"invalid-token"}}
 		req := newOAuthTestRequest(t, http.MethodPost, "/oauth/authorize", strings.NewReader(form.Encode()), user)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -518,8 +520,8 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		alice := testUser()
-		bob := User{ID: "usr_bob", Username: "bob", Provider: "gitlab"}
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{alice, bob})
+		bob := oauth.User{ID: "usr_bob", Username: "bob", Provider: "gitlab"}
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{alice, bob})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
 		consentToken := startOAuthTestConsent(t, h, alice, authorizationCodeForm(registered.ClientID, "https://example.com/callback", "read"))
 
@@ -537,7 +539,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read", "write"})
 
@@ -549,7 +551,7 @@ func TestServer(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("introspect status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var resp IntrospectionResponse
+		var resp oauth.IntrospectionResponse
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatalf("decode introspection response: %v", err)
 		}
@@ -565,7 +567,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
 		revokeOAuthTestToken(t, h, registered.ClientID, tokenResp.RefreshToken, http.StatusOK)
@@ -578,7 +580,7 @@ func TestServer(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("introspect status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var resp IntrospectionResponse
+		var resp oauth.IntrospectionResponse
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatalf("decode introspection response: %v", err)
 		}
@@ -591,7 +593,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 
 		form := url.Values{}
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/introspect", strings.NewReader(form.Encode()))
@@ -601,7 +603,7 @@ func TestServer(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("introspect status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var resp IntrospectionResponse
+		var resp oauth.IntrospectionResponse
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatalf("decode introspection response: %v", err)
 		}
@@ -614,7 +616,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 
 		form := url.Values{"token": {"not.a.valid.jwt"}}
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/introspect", strings.NewReader(form.Encode()))
@@ -624,7 +626,7 @@ func TestServer(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("introspect status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var resp IntrospectionResponse
+		var resp oauth.IntrospectionResponse
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatalf("decode introspection response: %v", err)
 		}
@@ -637,12 +639,12 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 
 		// Issue a short-lived token directly via the token service.
 		pastAud := testResourceURL
 		now := time.Now()
-		token, err := s.tokens.issueAccessTokenAt(&AccessTokenClaims{
+		token, err := s.tokens.issueAccessTokenAt(&oauth.AccessTokenClaims{
 			Issuer:   testBaseURL,
 			Subject:  user.ID,
 			Audience: pastAud,
@@ -662,7 +664,7 @@ func TestServer(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("introspect status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var resp IntrospectionResponse
+		var resp oauth.IntrospectionResponse
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatalf("decode introspection response: %v", err)
 		}
@@ -675,7 +677,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
 
@@ -691,7 +693,7 @@ func TestServer(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("introspect status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var resp IntrospectionResponse
+		var resp oauth.IntrospectionResponse
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatalf("decode introspection response: %v", err)
 		}
@@ -707,7 +709,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
 		revokeOAuthTestToken(t, h, registered.ClientID, tokenResp.RefreshToken, http.StatusOK)
@@ -723,7 +725,7 @@ func TestServer(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("introspect status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var resp IntrospectionResponse
+		var resp oauth.IntrospectionResponse
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatalf("decode introspection response: %v", err)
 		}
@@ -736,7 +738,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
 
@@ -751,7 +753,7 @@ func TestServer(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("introspect status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var resp IntrospectionResponse
+		var resp oauth.IntrospectionResponse
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatalf("decode introspection response: %v", err)
 		}
@@ -766,7 +768,7 @@ func TestServer(t *testing.T) {
 	t.Run("introspect garbage refresh_token hint", func(t *testing.T) {
 		t.Parallel()
 
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{testUser()})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
 
 		form := url.Values{
 			"token":           {"garbage-refresh-token"},
@@ -779,7 +781,7 @@ func TestServer(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("introspect status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var resp IntrospectionResponse
+		var resp oauth.IntrospectionResponse
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatalf("decode introspection response: %v", err)
 		}
@@ -792,7 +794,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
 
@@ -819,7 +821,7 @@ func TestServer(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("introspect status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var introResp IntrospectionResponse
+		var introResp oauth.IntrospectionResponse
 		if err := json.NewDecoder(w.Body).Decode(&introResp); err != nil {
 			t.Fatalf("decode introspection response: %v", err)
 		}
@@ -837,7 +839,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
 
@@ -863,7 +865,7 @@ func TestServer(t *testing.T) {
 	t.Run("revoke garbage token returns 200", func(t *testing.T) {
 		t.Parallel()
 
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{testUser()})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
 
 		form := url.Values{
@@ -882,7 +884,7 @@ func TestServer(t *testing.T) {
 	t.Run("revoke access_token hint garbage token returns 200", func(t *testing.T) {
 		t.Parallel()
 
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{testUser()})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
 
 		form := url.Values{
@@ -903,7 +905,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 
 		// Issue a token with the initial key.
@@ -939,7 +941,7 @@ func TestServer(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("jwks status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var jwks JWKSet
+		var jwks oauth.JWKSet
 		if err := json.NewDecoder(w.Body).Decode(&jwks); err != nil {
 			t.Fatalf("decode jwks: %v", err)
 		}
@@ -955,7 +957,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read", "write"})
 
@@ -985,7 +987,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
 
@@ -1008,7 +1010,7 @@ func TestServer(t *testing.T) {
 
 		user := testUser()
 		audit := &recordingAuditRecorder{}
-		_, h, _ := newTestFlowServerWithAudit(t, t.TempDir()+"/oauth.json", []User{user}, audit)
+		_, h, _ := newTestFlowServerWithAudit(t, t.TempDir()+"/oauth.json", []oauth.User{user}, audit)
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
 
@@ -1028,7 +1030,7 @@ func TestPAR(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 
 		// Push authorization request parameters.
@@ -1040,7 +1042,7 @@ func TestPAR(t *testing.T) {
 		if w.Code != http.StatusCreated {
 			t.Fatalf("par status = %d, want %d: %s", w.Code, http.StatusCreated, w.Body.String())
 		}
-		var parResp PARResponse
+		var parResp oauth.PARResponse
 		if err := json.NewDecoder(w.Body).Decode(&parResp); err != nil {
 			t.Fatalf("decode par response: %v", err)
 		}
@@ -1084,7 +1086,7 @@ func TestPAR(t *testing.T) {
 
 		// Exchange code for tokens.
 		tokenForm := url.Values{
-			"grant_type":    {GrantAuthorizationCode},
+			"grant_type":    {oauth.GrantAuthorizationCode},
 			"code":          {code},
 			"client_id":     {registered.ClientID},
 			"redirect_uri":  {"https://claude.example.com/callback"},
@@ -1098,7 +1100,7 @@ func TestPAR(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var tokenResp TokenResponse
+		var tokenResp oauth.TokenResponse
 		if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
 			t.Fatalf("decode token response: %v", err)
 		}
@@ -1115,7 +1117,7 @@ func TestPAR(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 
 		// Push PAR.
@@ -1127,7 +1129,7 @@ func TestPAR(t *testing.T) {
 		if w.Code != http.StatusCreated {
 			t.Fatalf("par status = %d, want %d: %s", w.Code, http.StatusCreated, w.Body.String())
 		}
-		var parResp PARResponse
+		var parResp oauth.PARResponse
 		if err := json.NewDecoder(w.Body).Decode(&parResp); err != nil {
 			t.Fatalf("decode par response: %v", err)
 		}
@@ -1149,7 +1151,7 @@ func TestPAR(t *testing.T) {
 			t.Fatalf("second authorize status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
 		}
 		// Verify error response body.
-		var errResp ErrorResponse
+		var errResp oauth.ErrorResponse
 		if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
 			t.Fatalf("decode error response: %v", err)
 		}
@@ -1162,7 +1164,7 @@ func TestPAR(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 
 		// Push PAR.
@@ -1174,7 +1176,7 @@ func TestPAR(t *testing.T) {
 		if w.Code != http.StatusCreated {
 			t.Fatalf("par status = %d, want %d: %s", w.Code, http.StatusCreated, w.Body.String())
 		}
-		var parResp PARResponse
+		var parResp oauth.PARResponse
 		if err := json.NewDecoder(w.Body).Decode(&parResp); err != nil {
 			t.Fatalf("decode par response: %v", err)
 		}
@@ -1194,7 +1196,7 @@ func TestPAR(t *testing.T) {
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("authorize status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
 		}
-		var errResp ErrorResponse
+		var errResp oauth.ErrorResponse
 		if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
 			t.Fatalf("decode error response: %v", err)
 		}
@@ -1206,7 +1208,7 @@ func TestPAR(t *testing.T) {
 	t.Run("PAR with missing client_id returns invalid_request", func(t *testing.T) {
 		t.Parallel()
 
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{testUser()})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
 
 		parForm := authorizationCodeForm("", "https://example.com/callback", "read")
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/par", strings.NewReader(parForm.Encode()))
@@ -1216,7 +1218,7 @@ func TestPAR(t *testing.T) {
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("par status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
 		}
-		var errResp ErrorResponse
+		var errResp oauth.ErrorResponse
 		if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
 			t.Fatalf("decode error response: %v", err)
 		}
@@ -1229,7 +1231,7 @@ func TestPAR(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, ui := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		_, h, ui := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"http://localhost:9999/callback"})
 
 		// Push PAR with scope=read.
@@ -1241,7 +1243,7 @@ func TestPAR(t *testing.T) {
 		if w.Code != http.StatusCreated {
 			t.Fatalf("par status = %d, want %d: %s", w.Code, http.StatusCreated, w.Body.String())
 		}
-		var parResp PARResponse
+		var parResp oauth.PARResponse
 		if err := json.NewDecoder(w.Body).Decode(&parResp); err != nil {
 			t.Fatalf("decode par response: %v", err)
 		}
@@ -1279,7 +1281,7 @@ func TestPAR(t *testing.T) {
 		}
 		code := location.Query().Get("code")
 		tokenForm := url.Values{
-			"grant_type":    {GrantAuthorizationCode},
+			"grant_type":    {oauth.GrantAuthorizationCode},
 			"code":          {code},
 			"client_id":     {registered.ClientID},
 			"redirect_uri":  {"http://localhost:9999/callback"},
@@ -1293,7 +1295,7 @@ func TestPAR(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var tokenResp TokenResponse
+		var tokenResp oauth.TokenResponse
 		if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
 			t.Fatalf("decode token response: %v", err)
 		}
@@ -1310,7 +1312,7 @@ func TestDeviceAuthorization(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 
 		// Step 1: Request device authorization.
@@ -1325,7 +1327,7 @@ func TestDeviceAuthorization(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("device_authorization status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var devResp DeviceAuthorizationResponse
+		var devResp oauth.DeviceAuthorizationResponse
 		if err := json.NewDecoder(w.Body).Decode(&devResp); err != nil {
 			t.Fatalf("decode device_authorization response: %v", err)
 		}
@@ -1372,7 +1374,7 @@ func TestDeviceAuthorization(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("device token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var tokenResp TokenResponse
+		var tokenResp oauth.TokenResponse
 		if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
 			t.Fatalf("decode token response: %v", err)
 		}
@@ -1389,7 +1391,7 @@ func TestDeviceAuthorization(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 
 		// Request device authorization.
@@ -1403,7 +1405,7 @@ func TestDeviceAuthorization(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("device_authorization status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var devResp DeviceAuthorizationResponse
+		var devResp oauth.DeviceAuthorizationResponse
 		if err := json.NewDecoder(w.Body).Decode(&devResp); err != nil {
 			t.Fatalf("decode device_authorization response: %v", err)
 		}
@@ -1421,7 +1423,7 @@ func TestDeviceAuthorization(t *testing.T) {
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("pending token status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
 		}
-		var errResp ErrorResponse
+		var errResp oauth.ErrorResponse
 		if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
 			t.Fatalf("decode error response: %v", err)
 		}
@@ -1434,7 +1436,7 @@ func TestDeviceAuthorization(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 
 		// Request device authorization.
@@ -1448,14 +1450,14 @@ func TestDeviceAuthorization(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("device_authorization status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var devResp DeviceAuthorizationResponse
+		var devResp oauth.DeviceAuthorizationResponse
 		if err := json.NewDecoder(w.Body).Decode(&devResp); err != nil {
 			t.Fatalf("decode device_authorization response: %v", err)
 		}
 
 		// Manually expire the device code.
 		s.mu.Lock()
-		codeHash := RefreshTokenKey(devResp.DeviceCode)
+		codeHash := oauth.RefreshTokenKey(devResp.DeviceCode)
 		dc := s.state.DeviceCodes[codeHash]
 		dc.ExpiresAt = time.Now().Add(-time.Minute)
 		s.state.DeviceCodes[codeHash] = dc
@@ -1474,7 +1476,7 @@ func TestDeviceAuthorization(t *testing.T) {
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("expired token status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
 		}
-		var errResp ErrorResponse
+		var errResp oauth.ErrorResponse
 		if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
 			t.Fatalf("decode error response: %v", err)
 		}
@@ -1486,7 +1488,7 @@ func TestDeviceAuthorization(t *testing.T) {
 	t.Run("device page shows form", func(t *testing.T) {
 		t.Parallel()
 
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{testUser()})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
 
 		// GET /oauth/device — show empty form.
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/oauth/device", http.NoBody)
@@ -1520,7 +1522,7 @@ func TestDeviceAuthorization(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 
 		// POST /oauth/device without authenticated user.
 		form := url.Values{"user_code": {"ABCDEFGH"}}
@@ -1538,7 +1540,7 @@ func TestDeviceAuthorization(t *testing.T) {
 		t.Parallel()
 
 		path := t.TempDir() + "/oauth.json"
-		cfg := testFlowServerConfig(path, []User{testUser()})
+		cfg := testFlowServerConfig(path, []oauth.User{testUser()})
 		cfg.UI = &testAuthorizationUI{loginURL: "/auth/login"}
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -1563,7 +1565,7 @@ func TestDeviceAuthorization(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 
 		// POST /oauth/device with a bogus user_code.
 		form := url.Values{"user_code": {"ZZZZZZZZ"}}
@@ -1574,7 +1576,7 @@ func TestDeviceAuthorization(t *testing.T) {
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("device approve invalid code status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
 		}
-		var errResp ErrorResponse
+		var errResp oauth.ErrorResponse
 		if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
 			t.Fatalf("decode error response: %v", err)
 		}
@@ -1588,7 +1590,7 @@ func TestDeviceAuthorization(t *testing.T) {
 
 		path := t.TempDir() + "/oauth.json"
 		user := testUser()
-		_, h1, _ := newTestFlowServer(t, path, []User{user})
+		_, h1, _ := newTestFlowServer(t, path, []oauth.User{user})
 		registered := registerOAuthTestClient(t, h1, "Claude", []string{"https://claude.example.com/callback"})
 
 		// Request device authorization on first server.
@@ -1603,13 +1605,13 @@ func TestDeviceAuthorization(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("device_authorization status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var devResp DeviceAuthorizationResponse
+		var devResp oauth.DeviceAuthorizationResponse
 		if err := json.NewDecoder(w.Body).Decode(&devResp); err != nil {
 			t.Fatalf("decode device_authorization response: %v", err)
 		}
 
 		// Restart server.
-		_, h2, _ := newTestFlowServer(t, path, []User{user})
+		_, h2, _ := newTestFlowServer(t, path, []oauth.User{user})
 
 		// Poll without approving on the new server.
 		tokenForm := url.Values{
@@ -1624,7 +1626,7 @@ func TestDeviceAuthorization(t *testing.T) {
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("token status after restart = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
 		}
-		var errResp ErrorResponse
+		var errResp oauth.ErrorResponse
 		if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
 			t.Fatalf("decode error response: %v", err)
 		}
@@ -1636,7 +1638,7 @@ func TestDeviceAuthorization(t *testing.T) {
 	t.Run("device_authorization metadata includes device_code grant", func(t *testing.T) {
 		t.Parallel()
 
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{testUser()})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/.well-known/oauth-authorization-server", http.NoBody)
 		addForwardedHeaders(req)
@@ -1645,7 +1647,7 @@ func TestDeviceAuthorization(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("metadata status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var metadata AuthorizationServerMetadata
+		var metadata oauth.AuthorizationServerMetadata
 		if err := json.NewDecoder(w.Body).Decode(&metadata); err != nil {
 			t.Fatalf("decode metadata: %v", err)
 		}
@@ -1662,7 +1664,7 @@ func TestDPoP(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
 		code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
@@ -1671,7 +1673,7 @@ func TestDPoP(t *testing.T) {
 		dpopProof := makeDPoPProof(t, dpopKey, dpopJWKObj, "POST", tokenURL, time.Now(), "", "")
 
 		form := url.Values{
-			"grant_type":    {GrantAuthorizationCode},
+			"grant_type":    {oauth.GrantAuthorizationCode},
 			"code":          {code},
 			"client_id":     {registered.ClientID},
 			"redirect_uri":  {"https://claude.example.com/callback"},
@@ -1688,7 +1690,7 @@ func TestDPoP(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var tokenResp TokenResponse
+		var tokenResp oauth.TokenResponse
 		if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
 			t.Fatalf("decode token response: %v", err)
 		}
@@ -1720,7 +1722,7 @@ func TestDPoP(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
 		code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
@@ -1729,7 +1731,7 @@ func TestDPoP(t *testing.T) {
 		// Get dpop-bound token.
 		dpopProof := makeDPoPProof(t, dpopKey, dpopJWKObj, "POST", tokenURL, time.Now(), "", "")
 		form := url.Values{
-			"grant_type":    {GrantAuthorizationCode},
+			"grant_type":    {oauth.GrantAuthorizationCode},
 			"code":          {code},
 			"client_id":     {registered.ClientID},
 			"redirect_uri":  {"https://claude.example.com/callback"},
@@ -1746,7 +1748,7 @@ func TestDPoP(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var tokenResp TokenResponse
+		var tokenResp oauth.TokenResponse
 		if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
 			t.Fatalf("decode token response: %v", err)
 		}
@@ -1776,7 +1778,7 @@ func TestDPoP(t *testing.T) {
 	t.Run("dpop proof with wrong htm rejected", func(t *testing.T) {
 		t.Parallel()
 
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{testUser()})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
 
@@ -1787,7 +1789,7 @@ func TestDPoP(t *testing.T) {
 		code := authorizeOAuthTestCode(t, h, testUser(), &registered, "https://claude.example.com/callback", []string{"read"}, "")
 
 		form := url.Values{
-			"grant_type":    {GrantAuthorizationCode},
+			"grant_type":    {oauth.GrantAuthorizationCode},
 			"code":          {code},
 			"client_id":     {registered.ClientID},
 			"redirect_uri":  {"https://claude.example.com/callback"},
@@ -1803,7 +1805,7 @@ func TestDPoP(t *testing.T) {
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
 		}
-		var errResp ErrorResponse
+		var errResp oauth.ErrorResponse
 		if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
 			t.Fatalf("decode error: %v", err)
 		}
@@ -1815,7 +1817,7 @@ func TestDPoP(t *testing.T) {
 	t.Run("dpop proof with wrong htu rejected", func(t *testing.T) {
 		t.Parallel()
 
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{testUser()})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
 
@@ -1825,7 +1827,7 @@ func TestDPoP(t *testing.T) {
 		code := authorizeOAuthTestCode(t, h, testUser(), &registered, "https://claude.example.com/callback", []string{"read"}, "")
 
 		form := url.Values{
-			"grant_type":    {GrantAuthorizationCode},
+			"grant_type":    {oauth.GrantAuthorizationCode},
 			"code":          {code},
 			"client_id":     {registered.ClientID},
 			"redirect_uri":  {"https://claude.example.com/callback"},
@@ -1846,7 +1848,7 @@ func TestDPoP(t *testing.T) {
 	t.Run("dpop proof expired iat rejected", func(t *testing.T) {
 		t.Parallel()
 
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{testUser()})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
 
@@ -1857,7 +1859,7 @@ func TestDPoP(t *testing.T) {
 		code := authorizeOAuthTestCode(t, h, testUser(), &registered, "https://claude.example.com/callback", []string{"read"}, "")
 
 		form := url.Values{
-			"grant_type":    {GrantAuthorizationCode},
+			"grant_type":    {oauth.GrantAuthorizationCode},
 			"code":          {code},
 			"client_id":     {registered.ClientID},
 			"redirect_uri":  {"https://claude.example.com/callback"},
@@ -1911,7 +1913,7 @@ func TestDPoP(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
 		code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
@@ -1919,7 +1921,7 @@ func TestDPoP(t *testing.T) {
 
 		dpopProof := makeDPoPProof(t, dpopKey, dpopJWKObj, "POST", tokenURL, time.Now(), "", "")
 		form := url.Values{
-			"grant_type":    {GrantAuthorizationCode},
+			"grant_type":    {oauth.GrantAuthorizationCode},
 			"code":          {code},
 			"client_id":     {registered.ClientID},
 			"redirect_uri":  {"https://claude.example.com/callback"},
@@ -1935,7 +1937,7 @@ func TestDPoP(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var tokenResp TokenResponse
+		var tokenResp oauth.TokenResponse
 		if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
 			t.Fatalf("decode token response: %v", err)
 		}
@@ -1961,7 +1963,7 @@ func TestDPoP(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
 		code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
@@ -1969,7 +1971,7 @@ func TestDPoP(t *testing.T) {
 
 		dpopProof := makeDPoPProof(t, dpopKey, dpopJWKObj, "POST", tokenURL, time.Now(), "", "")
 		form := url.Values{
-			"grant_type":    {GrantAuthorizationCode},
+			"grant_type":    {oauth.GrantAuthorizationCode},
 			"code":          {code},
 			"client_id":     {registered.ClientID},
 			"redirect_uri":  {"https://claude.example.com/callback"},
@@ -1985,7 +1987,7 @@ func TestDPoP(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var tokenResp TokenResponse
+		var tokenResp oauth.TokenResponse
 		if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
 			t.Fatalf("decode token response: %v", err)
 		}
@@ -1999,7 +2001,7 @@ func TestDPoP(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("introspect status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var introResp IntrospectionResponse
+		var introResp oauth.IntrospectionResponse
 		if err := json.NewDecoder(w.Body).Decode(&introResp); err != nil {
 			t.Fatalf("decode introspection response: %v", err)
 		}
@@ -2022,7 +2024,7 @@ func TestDPoP(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
 		code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
@@ -2031,7 +2033,7 @@ func TestDPoP(t *testing.T) {
 		// First request: proof without nonce.
 		dpopProof1 := makeDPoPProof(t, dpopKey, dpopJWKObj, "POST", tokenURL, time.Now(), "", "")
 		form := url.Values{
-			"grant_type":    {GrantAuthorizationCode},
+			"grant_type":    {oauth.GrantAuthorizationCode},
 			"code":          {code},
 			"client_id":     {registered.ClientID},
 			"redirect_uri":  {"https://claude.example.com/callback"},
@@ -2059,7 +2061,7 @@ func TestDPoP(t *testing.T) {
 		code2 := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
 		dpopProof2 := makeDPoPProof(t, dpopKey, dpopJWKObj, "POST", tokenURL, time.Now(), "", nonce)
 		form2 := url.Values{
-			"grant_type":    {GrantAuthorizationCode},
+			"grant_type":    {oauth.GrantAuthorizationCode},
 			"code":          {code2},
 			"client_id":     {registered.ClientID},
 			"redirect_uri":  {"https://claude.example.com/callback"},
@@ -2155,7 +2157,7 @@ func TestDPoP(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
 		tokenURL := testBaseURL + "/oauth/token"
@@ -2170,7 +2172,7 @@ func TestDPoP(t *testing.T) {
 			code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
 			proof := makeDPoPProofWithJTI(t, dpopKey, dpopJWKObj, "POST", tokenURL, time.Now(), "", "", jti)
 			form := url.Values{
-				"grant_type":    {GrantAuthorizationCode},
+				"grant_type":    {oauth.GrantAuthorizationCode},
 				"code":          {code},
 				"client_id":     {registered.ClientID},
 				"redirect_uri":  {"https://claude.example.com/callback"},
@@ -2211,11 +2213,11 @@ func TestDPoP(t *testing.T) {
 		t.Parallel()
 
 		// jwkPublicKey enforces the modulus bound before verifying the
-		// signature, so a crafted-but-unsigned JWK is enough to exercise it.
+		// signature, so a crafted-but-unsigned oauth.JWK is enough to exercise it.
 		// (crypto/rsa refuses to generate keys this small.)
-		makeRSAJWK := func(modulusBits uint) *JWK {
+		makeRSAJWK := func(modulusBits uint) *oauth.JWK {
 			n := new(big.Int).Lsh(big.NewInt(1), modulusBits-1)
-			return &JWK{
+			return &oauth.JWK{
 				Kty: "RSA",
 				N:   base64.RawURLEncoding.EncodeToString(n.Bytes()),
 				E:   base64.RawURLEncoding.EncodeToString(big.NewInt(65537).Bytes()),
@@ -2243,7 +2245,7 @@ func TestDPoP(t *testing.T) {
 		if err != nil {
 			t.Fatalf("generate ed25519 key: %v", err)
 		}
-		edJWK := &JWK{Kty: "OKP", Crv: "Ed25519", X: base64.RawURLEncoding.EncodeToString(edPub)}
+		edJWK := &oauth.JWK{Kty: "OKP", Crv: "Ed25519", X: base64.RawURLEncoding.EncodeToString(edPub)}
 		proof = makeDPoPProofSigned(t, "EdDSA", edPriv, edJWK)
 		if _, _, err := DPoPProof(httpDPoPRequest(t, proof)); err != nil {
 			t.Fatalf("Ed25519/EdDSA: %v", err)
@@ -2252,14 +2254,14 @@ func TestDPoP(t *testing.T) {
 }
 
 // testDPoPRSAKeyPair generates an RSA key pair for DPoP proof tests.
-func testDPoPRSAKeyPair(t *testing.T) (*rsa.PrivateKey, *JWK) {
+func testDPoPRSAKeyPair(t *testing.T) (*rsa.PrivateKey, *oauth.JWK) {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("generate rsa key: %v", err)
 	}
 	pub := &key.PublicKey
-	jwk := JWK{
+	jwk := oauth.JWK{
 		Kty: "RSA",
 		N:   base64.RawURLEncoding.EncodeToString(pub.N.Bytes()),
 		E:   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pub.E)).Bytes()),
@@ -2269,7 +2271,7 @@ func testDPoPRSAKeyPair(t *testing.T) (*rsa.PrivateKey, *JWK) {
 
 // makeDPoPProof creates a valid DPoP proof JWT signed with the given RSA key
 // using a fresh random jti.
-func makeDPoPProof(t *testing.T, key *rsa.PrivateKey, jwk *JWK, htm, htu string, iat time.Time, accessToken, nonce string) string {
+func makeDPoPProof(t *testing.T, key *rsa.PrivateKey, jwk *oauth.JWK, htm, htu string, iat time.Time, accessToken, nonce string) string {
 	t.Helper()
 	jti, err := randomToken()
 	if err != nil {
@@ -2280,7 +2282,7 @@ func makeDPoPProof(t *testing.T, key *rsa.PrivateKey, jwk *JWK, htm, htu string,
 
 // makeDPoPProofWithJTI creates a DPoP proof JWT with an explicit jti (which may
 // be empty to exercise the missing-jti rejection path).
-func makeDPoPProofWithJTI(t *testing.T, key *rsa.PrivateKey, jwk *JWK, htm, htu string, iat time.Time, accessToken, nonce, jti string) string {
+func makeDPoPProofWithJTI(t *testing.T, key *rsa.PrivateKey, jwk *oauth.JWK, htm, htu string, iat time.Time, accessToken, nonce, jti string) string {
 	t.Helper()
 	header := DPoPHeader{Typ: "dpop+jwt", Alg: "RS256", JWK: *jwk}
 	headerJSON, err := json.Marshal(header)
@@ -2312,8 +2314,8 @@ func makeDPoPProofWithJTI(t *testing.T, key *rsa.PrivateKey, jwk *JWK, htm, htu 
 	return parts + "." + base64.RawURLEncoding.EncodeToString(signature)
 }
 
-// testDPoPECKeyPair generates an EC key pair and its JWK for DPoP proof tests.
-func testDPoPECKeyPair(t *testing.T, curve elliptic.Curve, crv string) (*ecdsa.PrivateKey, *JWK) {
+// testDPoPECKeyPair generates an EC key pair and its oauth.JWK for DPoP proof tests.
+func testDPoPECKeyPair(t *testing.T, curve elliptic.Curve, crv string) (*ecdsa.PrivateKey, *oauth.JWK) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(curve, rand.Reader)
 	if err != nil {
@@ -2326,7 +2328,7 @@ func testDPoPECKeyPair(t *testing.T, curve elliptic.Curve, crv string) (*ecdsa.P
 		t.Fatalf("encode ec public key: %v", err)
 	}
 	size := (curve.Params().BitSize + 7) / 8
-	jwk := &JWK{
+	jwk := &oauth.JWK{
 		Kty: "EC",
 		Crv: crv,
 		X:   base64.RawURLEncoding.EncodeToString(point[1 : 1+size]),
@@ -2340,7 +2342,7 @@ const dpopTokenURL = testBaseURL + "/oauth/token"
 
 // makeUnsignedDPoPProof builds a DPoP proof with a bogus signature, for cases
 // rejected before signature verification (e.g. RSA modulus bounds).
-func makeUnsignedDPoPProof(t *testing.T, alg string, jwk *JWK) string {
+func makeUnsignedDPoPProof(t *testing.T, alg string, jwk *oauth.JWK) string {
 	t.Helper()
 	header := DPoPHeader{Typ: "dpop+jwt", Alg: alg, JWK: *jwk}
 	headerJSON, err := json.Marshal(header)
@@ -2367,7 +2369,7 @@ func httpDPoPRequest(t *testing.T, proof string) *http.Request {
 
 // makeDPoPProofSigned builds a valid DPoP proof with a chosen header alg, signed
 // by signer. RSA and ECDSA sign the SHA-256 digest; Ed25519 signs the raw input.
-func makeDPoPProofSigned(t *testing.T, alg string, signer crypto.Signer, jwk *JWK) string {
+func makeDPoPProofSigned(t *testing.T, alg string, signer crypto.Signer, jwk *oauth.JWK) string {
 	t.Helper()
 	jti, err := randomToken()
 	if err != nil {
@@ -2411,9 +2413,9 @@ type dpopTestResources struct {
 	server     *Server
 	handler    http.Handler
 	dpopKey    *rsa.PrivateKey
-	dpopJWK    *JWK
-	registered RegisterResponse
-	token      TokenResponse
+	dpopJWK    *oauth.JWK
+	registered oauth.RegisterResponse
+	token      oauth.TokenResponse
 }
 
 // setupDPoPBoundToken creates a server, registers a client, authorizes a code,
@@ -2421,7 +2423,7 @@ type dpopTestResources struct {
 func setupDPoPBoundToken(t *testing.T) dpopTestResources {
 	t.Helper()
 	user := testUser()
-	s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+	s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 	registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 	dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
 	code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
@@ -2429,7 +2431,7 @@ func setupDPoPBoundToken(t *testing.T) dpopTestResources {
 
 	dpopProof := makeDPoPProof(t, dpopKey, dpopJWKObj, "POST", tokenURL, time.Now(), "", "")
 	form := url.Values{
-		"grant_type":    {GrantAuthorizationCode},
+		"grant_type":    {oauth.GrantAuthorizationCode},
 		"code":          {code},
 		"client_id":     {registered.ClientID},
 		"redirect_uri":  {"https://claude.example.com/callback"},
@@ -2445,7 +2447,7 @@ func setupDPoPBoundToken(t *testing.T) dpopTestResources {
 	if w.Code != http.StatusOK {
 		t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 	}
-	var tokenResp TokenResponse
+	var tokenResp oauth.TokenResponse
 	if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
 		t.Fatalf("decode token response: %v", err)
 	}
@@ -2496,30 +2498,30 @@ func (u *testAuthorizationUI) RenderOAuthConsent(w http.ResponseWriter, data *Co
 }
 
 type testSessionManager struct {
-	users       map[string]User
+	users       map[string]oauth.User
 	endRedirect string
 }
 
-func (m *testSessionManager) CurrentUser(ctx context.Context) (User, bool) {
-	user, ok := ctx.Value(testUserContextKey{}).(User)
+func (m *testSessionManager) CurrentUser(ctx context.Context) (oauth.User, bool) {
+	user, ok := ctx.Value(testUserContextKey{}).(oauth.User)
 	return user, ok
 }
 
-func (m *testSessionManager) AttachUser(ctx context.Context, u User) context.Context {
+func (m *testSessionManager) AttachUser(ctx context.Context, u oauth.User) context.Context {
 	return ctx
 }
 
-func (m *testSessionManager) FindUser(id string) (User, bool) {
+func (m *testSessionManager) FindUser(id string) (oauth.User, bool) {
 	user, ok := m.users[id]
 	return user, ok
 }
 
-func (m *testSessionManager) EndSession(ctx context.Context, r *http.Request, u User) (redirectURL string) {
+func (m *testSessionManager) EndSession(ctx context.Context, r *http.Request, u oauth.User) (redirectURL string) {
 	return m.endRedirect
 }
 
-func testUser() User {
-	return User{ID: "usr_alice", Username: "alice", Provider: "github"}
+func testUser() oauth.User {
+	return oauth.User{ID: "usr_alice", Username: "alice", Provider: "github"}
 }
 
 func newTestServer(t *testing.T, cfgs ...*ServerConfig) *Server {
@@ -2535,12 +2537,12 @@ func newTestServer(t *testing.T, cfgs ...*ServerConfig) *Server {
 	return s
 }
 
-func newTestFlowServer(t *testing.T, path string, users []User) (*Server, http.Handler, *captureAuthorizationUI) {
+func newTestFlowServer(t *testing.T, path string, users []oauth.User) (*Server, http.Handler, *captureAuthorizationUI) {
 	return newTestFlowServerWithAudit(t, path, users, nil)
 }
 
-func newTestFlowServerWithAudit(t *testing.T, path string, users []User, audit AuditRecorder) (*Server, http.Handler, *captureAuthorizationUI) {
-	usersByID := make(map[string]User, len(users))
+func newTestFlowServerWithAudit(t *testing.T, path string, users []oauth.User, audit AuditRecorder) (*Server, http.Handler, *captureAuthorizationUI) {
+	usersByID := make(map[string]oauth.User, len(users))
 	for _, user := range users {
 		usersByID[user.ID] = user
 	}
@@ -2637,10 +2639,10 @@ func newTestServerHandler(s *Server) http.Handler {
 	return mux
 }
 
-func registerOAuthTestClient(t *testing.T, h http.Handler, clientName string, redirectURIs []string) RegisterResponse {
-	body, err := json.Marshal(RegisterRequest{ClientName: clientName, RedirectURIs: redirectURIs, TokenEndpointAuthMethod: TokenEndpointAuthNone})
+func registerOAuthTestClient(t *testing.T, h http.Handler, clientName string, redirectURIs []string) oauth.RegisterResponse {
+	body, err := json.Marshal(oauth.RegisterRequest{ClientName: clientName, RedirectURIs: redirectURIs, TokenEndpointAuthMethod: oauth.TokenEndpointAuthNone})
 	if err != nil {
-		t.Fatalf("Marshal RegisterRequest: %v", err)
+		t.Fatalf("Marshal oauth.RegisterRequest: %v", err)
 	}
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/register", strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")
@@ -2649,18 +2651,18 @@ func registerOAuthTestClient(t *testing.T, h http.Handler, clientName string, re
 	if w.Code != http.StatusCreated {
 		t.Fatalf("register status = %d, want %d: %s", w.Code, http.StatusCreated, w.Body.String())
 	}
-	var registered RegisterResponse
+	var registered oauth.RegisterResponse
 	if err := json.NewDecoder(w.Body).Decode(&registered); err != nil {
 		t.Fatalf("decode register response: %v", err)
 	}
 	return registered
 }
 
-func authorizeOAuthTestClient(t *testing.T, h http.Handler, user User, registered *RegisterResponse, selectedScopes []string) TokenResponse {
+func authorizeOAuthTestClient(t *testing.T, h http.Handler, user oauth.User, registered *oauth.RegisterResponse, selectedScopes []string) oauth.TokenResponse {
 	redirectURI := "https://claude.example.com/callback"
 	code := authorizeOAuthTestCode(t, h, user, registered, redirectURI, selectedScopes, "")
 	form := url.Values{
-		"grant_type":    {GrantAuthorizationCode},
+		"grant_type":    {oauth.GrantAuthorizationCode},
 		"code":          {code},
 		"client_id":     {registered.ClientID},
 		"redirect_uri":  {redirectURI},
@@ -2674,14 +2676,14 @@ func authorizeOAuthTestClient(t *testing.T, h http.Handler, user User, registere
 	if w.Code != http.StatusOK {
 		t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 	}
-	var tokenResp TokenResponse
+	var tokenResp oauth.TokenResponse
 	if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
 		t.Fatalf("decode token response: %v", err)
 	}
 	return tokenResp
 }
 
-func authorizeOAuthTestCode(t *testing.T, h http.Handler, user User, registered *RegisterResponse, redirectURI string, selectedScopes []string, state string) string {
+func authorizeOAuthTestCode(t *testing.T, h http.Handler, user oauth.User, registered *oauth.RegisterResponse, redirectURI string, selectedScopes []string, state string) string {
 	form := authorizationCodeForm(registered.ClientID, redirectURI, "read write admin")
 	if state != "" {
 		form.Set("state", state)
@@ -2718,7 +2720,7 @@ func authorizeOAuthTestCode(t *testing.T, h http.Handler, user User, registered 
 	return location.Query().Get("code")
 }
 
-func startOAuthTestConsent(t *testing.T, h http.Handler, user User, form url.Values) string {
+func startOAuthTestConsent(t *testing.T, h http.Handler, user oauth.User, form url.Values) string {
 	req := newOAuthTestRequest(t, http.MethodGet, "/oauth/authorize"+"?"+form.Encode(), http.NoBody, user)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -2730,11 +2732,11 @@ func startOAuthTestConsent(t *testing.T, h http.Handler, user User, form url.Val
 
 func authorizationCodeForm(clientID, redirectURI, scope string) url.Values {
 	return url.Values{
-		"response_type":         {ResponseTypeCode},
+		"response_type":         {oauth.ResponseTypeCode},
 		"client_id":             {clientID},
 		"redirect_uri":          {redirectURI},
 		"code_challenge":        {testCodeChallenge()},
-		"code_challenge_method": {CodeChallengeS256},
+		"code_challenge_method": {oauth.CodeChallengeS256},
 		"resource":              {testResourceURL},
 		"scope":                 {scope},
 	}
@@ -2745,7 +2747,7 @@ func testCodeChallenge() string {
 	return base64.RawURLEncoding.EncodeToString(digest[:])
 }
 
-func newOAuthTestRequest(t *testing.T, method, path string, body io.Reader, user User) *http.Request {
+func newOAuthTestRequest(t *testing.T, method, path string, body io.Reader, user oauth.User) *http.Request {
 	ctx := context.WithValue(t.Context(), testUserContextKey{}, user)
 	return httptest.NewRequestWithContext(ctx, method, path, body)
 }
@@ -2776,9 +2778,9 @@ func consentTokenFromOAuthTestHTML(t *testing.T, body string) string {
 	return consentToken
 }
 
-func refreshOAuthTestToken(t *testing.T, h http.Handler, clientID, refreshToken string, wantStatus int) TokenResponse {
+func refreshOAuthTestToken(t *testing.T, h http.Handler, clientID, refreshToken string, wantStatus int) oauth.TokenResponse {
 	form := url.Values{
-		"grant_type":    {GrantRefreshToken},
+		"grant_type":    {oauth.GrantRefreshToken},
 		"client_id":     {clientID},
 		"refresh_token": {refreshToken},
 	}
@@ -2789,7 +2791,7 @@ func refreshOAuthTestToken(t *testing.T, h http.Handler, clientID, refreshToken 
 	if w.Code != wantStatus {
 		t.Fatalf("refresh status = %d, want %d: %s", w.Code, wantStatus, w.Body.String())
 	}
-	var tokenResp TokenResponse
+	var tokenResp oauth.TokenResponse
 	if w.Code == http.StatusOK {
 		if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
 			t.Fatalf("decode refresh response: %v", err)
@@ -2907,7 +2909,7 @@ func TestRegistrationManagement(t *testing.T) {
 		registered := registerOAuthTestClient(t, h, "Original Name", []string{"https://example.com/callback"})
 
 		newName := "Updated Name"
-		updateReq := UpdateClientRequest{ClientName: &newName}
+		updateReq := oauth.UpdateClientRequest{ClientName: &newName}
 		body, err := json.Marshal(updateReq)
 		if err != nil {
 			t.Fatalf("marshal update: %v", err)
@@ -2921,7 +2923,7 @@ func TestRegistrationManagement(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("update status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var updated RegisterResponse
+		var updated oauth.RegisterResponse
 		if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
 			t.Fatalf("decode update response: %v", err)
 		}
@@ -2945,7 +2947,7 @@ func TestRegistrationManagement(t *testing.T) {
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
 
 		newURIs := []string{"https://new.example.com/callback"}
-		updateReq := UpdateClientRequest{RedirectURIs: &newURIs}
+		updateReq := oauth.UpdateClientRequest{RedirectURIs: &newURIs}
 		body, err := json.Marshal(updateReq)
 		if err != nil {
 			t.Fatalf("marshal update: %v", err)
@@ -2959,7 +2961,7 @@ func TestRegistrationManagement(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("update status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var updated RegisterResponse
+		var updated oauth.RegisterResponse
 		if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
 			t.Fatalf("decode update response: %v", err)
 		}
@@ -3041,7 +3043,7 @@ func TestRegistrationManagement(t *testing.T) {
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
 
 		newName := "Updated"
-		updateReq := UpdateClientRequest{ClientName: &newName}
+		updateReq := oauth.UpdateClientRequest{ClientName: &newName}
 		body, err := json.Marshal(updateReq)
 		if err != nil {
 			t.Fatalf("marshal update: %v", err)
@@ -3064,7 +3066,7 @@ func TestEndSession(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 
 		// Authorize two clients to create 2 grants + 2 refresh tokens.
 		clientA := registerOAuthTestClient(t, h, "Client A", []string{"https://claude.example.com/callback"})
@@ -3097,7 +3099,7 @@ func TestEndSession(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/logout", "https://example.com/callback"})
 
 		req := newOAuthTestRequest(t, http.MethodGet,
@@ -3121,7 +3123,7 @@ func TestEndSession(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
 
 		req := newOAuthTestRequest(t, http.MethodGet,
@@ -3146,7 +3148,7 @@ func TestEndSession(t *testing.T) {
 		t.Parallel()
 
 		// Without a login adapter, should return HTML page.
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{testUser()})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/oauth/end-session", http.NoBody)
 		w := httptest.NewRecorder()
@@ -3163,7 +3165,7 @@ func TestEndSession(t *testing.T) {
 		t.Parallel()
 
 		path := t.TempDir() + "/oauth.json"
-		cfg := testFlowServerConfig(path, []User{testUser()})
+		cfg := testFlowServerConfig(path, []oauth.User{testUser()})
 		cfg.UI = &testAuthorizationUI{loginURL: "/auth/login"}
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -3187,9 +3189,9 @@ func TestEndSession(t *testing.T) {
 
 		user := testUser()
 		path := t.TempDir() + "/oauth.json"
-		cfg := testFlowServerConfig(path, []User{user})
+		cfg := testFlowServerConfig(path, []oauth.User{user})
 		cfg.Session = &testSessionManager{
-			users:       map[string]User{user.ID: user},
+			users:       map[string]oauth.User{user.ID: user},
 			endRedirect: "https://custom.example.com/goodbye",
 		}
 		s, err := NewServer(cfg)
@@ -3236,7 +3238,7 @@ func TestEndSession(t *testing.T) {
 	t.Run("end_session_endpoint in discovery metadata", func(t *testing.T) {
 		t.Parallel()
 
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{testUser()})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/.well-known/oauth-authorization-server", http.NoBody)
 		addForwardedHeaders(req)
@@ -3245,7 +3247,7 @@ func TestEndSession(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("metadata status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		var metadata AuthorizationServerMetadata
+		var metadata oauth.AuthorizationServerMetadata
 		if err := json.NewDecoder(w.Body).Decode(&metadata); err != nil {
 			t.Fatalf("decode metadata: %v", err)
 		}
@@ -3272,7 +3274,7 @@ func newTestServerHandlerOnly(t *testing.T) http.Handler {
 }
 
 // readOAuthTestClient reads client registration via GET.
-func readOAuthTestClient(t *testing.T, h http.Handler, token, clientID string, wantStatus int) RegisterResponse {
+func readOAuthTestClient(t *testing.T, h http.Handler, token, clientID string, wantStatus int) oauth.RegisterResponse {
 	t.Helper()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/oauth/register/"+clientID, http.NoBody)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -3282,7 +3284,7 @@ func readOAuthTestClient(t *testing.T, h http.Handler, token, clientID string, w
 	if w.Code != wantStatus {
 		t.Fatalf("read client status = %d, want %d: %s", w.Code, wantStatus, w.Body.String())
 	}
-	var resp RegisterResponse
+	var resp oauth.RegisterResponse
 	if w.Code == http.StatusOK {
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatalf("decode read response: %v", err)
@@ -3313,7 +3315,7 @@ func TestRateLimiting(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 
 		// Token endpoint works without rate limiter.
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
@@ -3329,7 +3331,7 @@ func TestRateLimiting(t *testing.T) {
 		user := testUser()
 		lim := &inspectRateLimiter{}
 		path := t.TempDir() + "/oauth.json"
-		cfg := testFlowServerConfig(path, []User{user})
+		cfg := testFlowServerConfig(path, []oauth.User{user})
 		cfg.RateLimiter = lim
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -3341,7 +3343,7 @@ func TestRateLimiting(t *testing.T) {
 		// Token request should use "client:<client_id>" key.
 		code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
 		form := url.Values{
-			"grant_type":    {GrantAuthorizationCode},
+			"grant_type":    {oauth.GrantAuthorizationCode},
 			"code":          {code},
 			"client_id":     {registered.ClientID},
 			"redirect_uri":  {"https://claude.example.com/callback"},
@@ -3366,7 +3368,7 @@ func TestRateLimiting(t *testing.T) {
 		user := testUser()
 		lim := &inspectRateLimiter{}
 		path := t.TempDir() + "/oauth.json"
-		cfg := testFlowServerConfig(path, []User{user})
+		cfg := testFlowServerConfig(path, []oauth.User{user})
 		cfg.RateLimiter = lim
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -3379,7 +3381,7 @@ func TestRateLimiting(t *testing.T) {
 		code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
 		form := url.Values{
 			// No client_id key at all
-			"grant_type":    {GrantAuthorizationCode},
+			"grant_type":    {oauth.GrantAuthorizationCode},
 			"code":          {code},
 			"redirect_uri":  {"https://claude.example.com/callback"},
 			"code_verifier": {testVerifier},
@@ -3405,7 +3407,7 @@ func TestRateLimiting(t *testing.T) {
 		t.Parallel()
 
 		lim := &inspectRateLimiter{}
-		cfg := testFlowServerConfig(t.TempDir()+"/oauth.json", []User{testUser()})
+		cfg := testFlowServerConfig(t.TempDir()+"/oauth.json", []oauth.User{testUser()})
 		cfg.RateLimiter = lim
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -3413,7 +3415,7 @@ func TestRateLimiting(t *testing.T) {
 		}
 		h := newTestServerHandler(s)
 
-		body, err := json.Marshal(RegisterRequest{ClientName: "Test", RedirectURIs: []string{"https://example.com/callback"}, TokenEndpointAuthMethod: TokenEndpointAuthNone})
+		body, err := json.Marshal(oauth.RegisterRequest{ClientName: "Test", RedirectURIs: []string{"https://example.com/callback"}, TokenEndpointAuthMethod: oauth.TokenEndpointAuthNone})
 		if err != nil {
 			t.Fatalf("marshal: %v", err)
 		}
@@ -3436,7 +3438,7 @@ func TestRateLimiting(t *testing.T) {
 		user := testUser()
 		lim := &inspectRateLimiter{}
 		path := t.TempDir() + "/oauth.json"
-		cfg := testFlowServerConfig(path, []User{user})
+		cfg := testFlowServerConfig(path, []oauth.User{user})
 		cfg.RateLimiter = lim
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -3466,7 +3468,7 @@ func TestRateLimiting(t *testing.T) {
 		user := testUser()
 		lim := &inspectRateLimiter{}
 		path := t.TempDir() + "/oauth.json"
-		cfg := testFlowServerConfig(path, []User{user})
+		cfg := testFlowServerConfig(path, []oauth.User{user})
 		cfg.RateLimiter = lim
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -3500,12 +3502,12 @@ func TestRateLimiting(t *testing.T) {
 		path := t.TempDir() + "/oauth.json"
 
 		// First, register a client and authorize a code with a permissive server.
-		_, h, _ := newTestFlowServer(t, path, []User{user})
+		_, h, _ := newTestFlowServer(t, path, []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
 
 		// Then create a new server from the same store but with a deny limiter.
-		cfg := testFlowServerConfig(path, []User{user})
+		cfg := testFlowServerConfig(path, []oauth.User{user})
 		cfg.RateLimiter = &denyRateLimiter{}
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -3515,7 +3517,7 @@ func TestRateLimiting(t *testing.T) {
 
 		// Token endpoint should be rejected.
 		form := url.Values{
-			"grant_type":    {GrantAuthorizationCode},
+			"grant_type":    {oauth.GrantAuthorizationCode},
 			"code":          {code},
 			"client_id":     {registered.ClientID},
 			"redirect_uri":  {"https://claude.example.com/callback"},
@@ -3541,7 +3543,7 @@ func TestRateLimiting(t *testing.T) {
 		path := t.TempDir() + "/oauth.json"
 
 		// Register clients and authorize codes with a permissive server.
-		_, permissiveH, _ := newTestFlowServer(t, path, []User{user})
+		_, permissiveH, _ := newTestFlowServer(t, path, []oauth.User{user})
 		clientA := registerOAuthTestClient(t, permissiveH, "Client A", []string{"https://a.example.com/callback"})
 		clientB := registerOAuthTestClient(t, permissiveH, "Client B", []string{"https://b.example.com/callback"})
 		codeA := authorizeOAuthTestCode(t, permissiveH, user, &clientA, "https://a.example.com/callback", []string{"read"}, "")
@@ -3550,7 +3552,7 @@ func TestRateLimiting(t *testing.T) {
 
 		// Create a limited server from the same store: allow only 1 token request per client.
 		lim := &countRateLimiter{max: 1}
-		cfg := testFlowServerConfig(path, []User{user})
+		cfg := testFlowServerConfig(path, []oauth.User{user})
 		cfg.RateLimiter = lim
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -3560,7 +3562,7 @@ func TestRateLimiting(t *testing.T) {
 
 		exchange := func(cid, code, redirectURI string) int {
 			form := url.Values{
-				"grant_type":    {GrantAuthorizationCode},
+				"grant_type":    {oauth.GrantAuthorizationCode},
 				"code":          {code},
 				"client_id":     {cid},
 				"redirect_uri":  {redirectURI},
@@ -3629,8 +3631,8 @@ func (l *countRateLimiter) Allow(key string) bool {
 
 // testFlowServerConfig returns a ServerConfig pre-populated with test defaults,
 // user flow callbacks, and a consent renderer.
-func testFlowServerConfig(path string, users []User) ServerConfig {
-	usersByID := make(map[string]User, len(users))
+func testFlowServerConfig(path string, users []oauth.User) ServerConfig {
+	usersByID := make(map[string]oauth.User, len(users))
 	for _, user := range users {
 		usersByID[user.ID] = user
 	}

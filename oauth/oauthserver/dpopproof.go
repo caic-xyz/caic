@@ -1,6 +1,6 @@
 // DPoP sender-constrained token proof-of-possession (RFC 9449).
 
-package oauth
+package oauthserver
 
 import (
 	"crypto"
@@ -18,6 +18,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/caic-xyz/caic/oauth"
 )
 
 // DPoPTokenType is the "token_type" value returned for DPoP-bound access tokens.
@@ -28,9 +30,9 @@ const defaultDPoPMaxAge = 5 * time.Minute
 
 // DPoPHeader is the JOSE header of a DPoP proof JWT.
 type DPoPHeader struct {
-	Typ string `json:"typ"`
-	Alg string `json:"alg"`
-	JWK JWK    `json:"jwk"`
+	Typ string    `json:"typ"`
+	Alg string    `json:"alg"`
+	JWK oauth.JWK `json:"jwk"`
 }
 
 // DPoPClaims are the claims in a DPoP proof JWT payload.
@@ -43,15 +45,12 @@ type DPoPClaims struct {
 	Nonce string `json:"nonce,omitempty"`
 }
 
-// TokenConfirmation holds key confirmation claims per RFC 9449 §6.1.
-type TokenConfirmation struct {
-	JKT string `json:"jkt"`
-}
+// TokenConfirmation is defined in oauth root package (oauth.TokenConfirmation).
 
-// JWKThumbprint returns the base64url-encoded SHA-256 thumbprint of a JWK per RFC 7638.
+// JWKThumbprint returns the base64url-encoded SHA-256 thumbprint of a oauth.JWK per RFC 7638.
 //
 // Supported key types: RSA, EC (P-256/P-384/P-521), OKP (Ed25519).
-func JWKThumbprint(jwk *JWK) (string, error) {
+func JWKThumbprint(jwk *oauth.JWK) (string, error) {
 	required, err := jwkThumbprintRequired(jwk)
 	if err != nil {
 		return "", err
@@ -67,7 +66,7 @@ func JWKThumbprint(jwk *JWK) (string, error) {
 // DPoPProof extracts and parses the DPoP proof from the request's DPoP header.
 // Returns the parsed header, claims, and nil error on success.
 func DPoPProof(r *http.Request) (*DPoPHeader, *DPoPClaims, error) {
-	dpop := strings.TrimSpace(r.Header.Get("DPoP"))
+	dpop := strings.TrimSpace(r.Header.Get(DPoPTokenType))
 	if dpop == "" {
 		return nil, nil, errors.New("missing DPOP header")
 	}
@@ -94,7 +93,7 @@ func DPoPProof(r *http.Request) (*DPoPHeader, *DPoPClaims, error) {
 		return nil, nil, fmt.Errorf("parse dpop proof claims: %w", err)
 	}
 
-	// Verify the JWT signature using the embedded JWK.
+	// Verify the JWT signature using the embedded oauth.JWK.
 	signingInput := parts[0] + "." + parts[1]
 	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil {
@@ -194,11 +193,11 @@ const (
 	maxRSAModulusBits = 8192
 )
 
-// jwkPublicKey converts a JWK to a Go public key and hash algorithm.
+// jwkPublicKey converts a oauth.JWK to a Go public key and hash algorithm.
 //
-// alg is the JOSE "alg" from the proof header; it must agree with the JWK key
+// alg is the JOSE "alg" from the proof header; it must agree with the oauth.JWK key
 // type per RFC 9449 §4.3, otherwise the proof is rejected.
-func jwkPublicKey(jwk *JWK, alg string) (crypto.PublicKey, crypto.Hash, error) {
+func jwkPublicKey(jwk *oauth.JWK, alg string) (crypto.PublicKey, crypto.Hash, error) {
 	if err := checkAlgKeyType(alg, jwk); err != nil {
 		return nil, 0, err
 	}
@@ -270,9 +269,9 @@ func jwkPublicKey(jwk *JWK, alg string) (crypto.PublicKey, crypto.Hash, error) {
 	}
 }
 
-// checkAlgKeyType asserts the proof's JOSE alg agrees with the JWK key type
+// checkAlgKeyType asserts the proof's JOSE alg agrees with the oauth.JWK key type
 // per RFC 9449 §4.3 (EC curves bind to ES*, RSA to RS*/PS*, Ed25519 to EdDSA).
-func checkAlgKeyType(alg string, jwk *JWK) error {
+func checkAlgKeyType(alg string, jwk *oauth.JWK) error {
 	switch jwk.Kty {
 	case "RSA":
 		switch alg {
@@ -329,8 +328,8 @@ func isAsymmetricAlg(alg string) bool {
 	return false
 }
 
-// jwkThumbprintRequired builds the sorted JSON object of required JWK members per RFC 7638.
-func jwkThumbprintRequired(jwk *JWK) (map[string]string, error) {
+// jwkThumbprintRequired builds the sorted JSON object of required oauth.JWK members per RFC 7638.
+func jwkThumbprintRequired(jwk *oauth.JWK) (map[string]string, error) {
 	switch jwk.Kty {
 	case "RSA":
 		if jwk.N == "" || jwk.E == "" {

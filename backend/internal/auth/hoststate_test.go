@@ -50,15 +50,15 @@ func TestHostState(t *testing.T) {
 	t.Run("RedirectURI resolves after lock", func(t *testing.T) {
 		t.Parallel()
 		host := &auth.HostState{}
-		ghOAuth := auth.GitHubConfig("id", "sec", host)
-		glOAuth := auth.GitLabConfig("id", "sec", "", host)
 
-		// Before lock, RedirectURI returns "".
-		if got := ghOAuth.RedirectURI(); got != "" {
-			t.Fatalf("GitHub RedirectURI before lock = %q, want empty", got)
+		// Before lock, provider creation fails because the external URL is empty.
+		_, err := auth.NewGitHubProvider("id", "sec", host)
+		if err == nil {
+			t.Fatal("NewGitHubProvider before lock = nil error, want error")
 		}
-		if got := glOAuth.RedirectURI(); got != "" {
-			t.Fatalf("GitLab RedirectURI before lock = %q, want empty", got)
+		_, err = auth.NewGitLabProvider("id", "sec", "", host)
+		if err == nil {
+			t.Fatal("NewGitLabProvider before lock = nil error, want error")
 		}
 
 		// Lock via a request through the middleware.
@@ -68,9 +68,17 @@ func TestHostState(t *testing.T) {
 		r.Header.Set("X-Forwarded-Proto", "https")
 		h.ServeHTTP(httptest.NewRecorder(), r)
 
-		// After lock, RedirectURI returns the full URI.
+		// After lock, provider creation succeeds with the full redirect URI.
+		ghOAuth, err := auth.NewGitHubProvider("id", "sec", host)
+		if err != nil {
+			t.Fatalf("NewGitHubProvider: %v", err)
+		}
 		if want := "https://caic.example.com/api/caic/v1/auth/github/callback"; ghOAuth.RedirectURI() != want {
 			t.Errorf("GitHub RedirectURI = %q, want %q", ghOAuth.RedirectURI(), want)
+		}
+		glOAuth, err := auth.NewGitLabProvider("id", "sec", "", host)
+		if err != nil {
+			t.Fatalf("NewGitLabProvider: %v", err)
 		}
 		if want := "https://caic.example.com/api/caic/v1/auth/gitlab/callback"; glOAuth.RedirectURI() != want {
 			t.Errorf("GitLab RedirectURI = %q, want %q", glOAuth.RedirectURI(), want)
@@ -83,7 +91,10 @@ func TestHostState(t *testing.T) {
 		if got := host.ExternalURL(); got != "https://caic.example.com:8443" {
 			t.Errorf("ExternalURL = %q, want %q", got, "https://caic.example.com:8443")
 		}
-		c := auth.GitHubConfig("id", "sec", host)
+		c, err := auth.NewGitHubProvider("id", "sec", host)
+		if err != nil {
+			t.Fatalf("NewGitHubProvider: %v", err)
+		}
 		if want := "https://caic.example.com:8443/api/caic/v1/auth/github/callback"; c.RedirectURI() != want {
 			t.Errorf("RedirectURI = %q, want %q", c.RedirectURI(), want)
 		}

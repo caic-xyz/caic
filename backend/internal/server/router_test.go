@@ -41,6 +41,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task/tasktest"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 	"github.com/caic-xyz/caic/backend/internal/voicegateway/voicertc"
+	"github.com/caic-xyz/caic/oauth/oauthclient"
 )
 
 // stubBackend implements agent.Backend for test map-membership checks.
@@ -2508,16 +2509,11 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 	s.sessionSecret = secret
 	s.authStore = store
 	s.hostState = host
-	githubOAuth := &auth.ProviderConfig{
-		ClientID:     "cid",
-		ClientSecret: "csec",
-		AuthEndpoint: "https://github.com/login/oauth/authorize",
-		TokenURL:     tokenServer.URL,
-		UserInfoURL:  userServer.URL,
-		Scopes:       []string{"repo"},
-		Provider:     "github",
-		Host:         host,
-	}
+	githubCfg := oauthclient.NewGitHubConfig("cid", "csec", "http://localhost/api/caic/v1/auth/github/callback")
+	githubCfg.TokenURL = tokenServer.URL
+	githubCfg.UserInfoURL = userServer.URL
+	githubCfg.Scopes = []string{"repo"}
+	githubOAuth := &githubCfg
 	s.authHandlers.store = s.authStore
 	s.authHandlers.sessionSecret = s.sessionSecret
 	s.authHandlers.hostState = s.hostState

@@ -1,6 +1,6 @@
 // DPoP nonce management per RFC 9449 §8.
 
-package oauth
+package oauthserver
 
 import (
 	"crypto/rand"

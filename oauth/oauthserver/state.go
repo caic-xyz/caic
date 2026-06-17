@@ -1,6 +1,6 @@
 // OAuth CSRF state helpers.
 
-package oauth
+package oauthserver
 
 import (
 	"crypto/hmac"

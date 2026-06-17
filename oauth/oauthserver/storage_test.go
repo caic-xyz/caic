@@ -1,6 +1,6 @@
 // Tests for OAuth durable authorization state storage.
 
-package oauth
+package oauthserver
 
 import (
 	"encoding/json"
@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/caic-xyz/caic/oauth"
 )
 
 func TestStore(t *testing.T) {
@@ -20,7 +22,7 @@ func TestStore(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LoadStore: %v", err)
 		}
-		store.Clients["client-1"] = Client{ID: "client-1", Name: "Claude", RedirectURIs: []string{"https://example.com/callback"}, TokenEndpointAuthMethod: TokenEndpointAuthNone, CreatedAt: now}
+		store.Clients["client-1"] = Client{ID: "client-1", Name: "Claude", RedirectURIs: []string{"https://example.com/callback"}, TokenEndpointAuthMethod: oauth.TokenEndpointAuthNone, CreatedAt: now}
 		store.RefreshTokens["refresh-hash"] = RefreshToken{GrantID: "grant-1", UserID: "usr_1", ClientID: "client-1", Resource: "https://caic.example.com/mcp", Scope: "caic:mcp.read", ExpiresAt: now.Add(time.Hour)}
 		store.Grants["grant-1"] = Grant{ID: "grant-1", UserID: "usr_1", ClientID: "client-1", ClientName: "Claude", Resource: "https://caic.example.com/mcp", Scope: "caic:mcp.read", CreatedAt: now, ExpiresAt: now.Add(time.Hour)}
 		if err := store.Save(); err != nil {

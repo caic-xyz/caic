@@ -1,6 +1,6 @@
 // Tests for OAuth authorization-code client helpers.
 
-package oauth
+package oauthclient
 
 import (
 	"context"
@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/caic-xyz/caic/oauth"
 )
 
 func TestNewPKCEChallenge(t *testing.T) {
@@ -52,7 +54,7 @@ func TestAuthorizationURL(t *testing.T) {
 		if q.Has("code_challenge") || q.Has("code_challenge_method") {
 			t.Fatalf("PKCE params present without challenge: %s", got)
 		}
-		if q.Get("response_type") != ResponseTypeCode {
+		if q.Get("response_type") != oauth.ResponseTypeCode {
 			t.Fatalf("response_type = %q", q.Get("response_type"))
 		}
 	})
@@ -88,7 +90,7 @@ func TestExchangeCode(t *testing.T) {
 		}))
 		t.Cleanup(srv.Close)
 
-		cfg := ClientConfig{ClientID: "c", ClientSecret: "s", TokenURL: srv.URL, RedirectURI: "https://app/cb"}
+		cfg := oauth.ClientConfig{ClientID: "c", ClientSecret: "s", TokenURL: srv.URL, RedirectURI: "https://app/cb"}
 		access, refresh, expiry, err := ExchangeCode(t.Context(), cfg, "code-1", "")
 		if err != nil {
 			t.Fatalf("ExchangeCode: %v", err)
@@ -115,7 +117,7 @@ func TestExchangeCode(t *testing.T) {
 		}))
 		t.Cleanup(srv.Close)
 
-		cfg := ClientConfig{ClientID: "c", ClientSecret: "s", TokenURL: srv.URL, RedirectURI: "https://app/cb"}
+		cfg := oauth.ClientConfig{ClientID: "c", ClientSecret: "s", TokenURL: srv.URL, RedirectURI: "https://app/cb"}
 		if _, _, _, err := ExchangeCode(t.Context(), cfg, "code-1", "verifier-abc"); err != nil {
 			t.Fatalf("ExchangeCode: %v", err)
 		}
@@ -133,7 +135,7 @@ func TestExchangeCode(t *testing.T) {
 		}))
 		t.Cleanup(srv.Close)
 
-		cfg := ClientConfig{ClientID: "c", ClientSecret: "s", TokenURL: srv.URL, RedirectURI: "https://app/cb"}
+		cfg := oauth.ClientConfig{ClientID: "c", ClientSecret: "s", TokenURL: srv.URL, RedirectURI: "https://app/cb"}
 		_, _, _, err := ExchangeCode(t.Context(), cfg, "code-1", "")
 		if err == nil {
 			t.Fatal("ExchangeCode on 400 = nil error, want error")
@@ -165,7 +167,7 @@ func TestExchangeTimeout(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
 		start := time.Now()
-		_, _, _, err := ExchangeCode(ctx, ClientConfig{TokenURL: srv.URL}, "code", "")
+		_, _, _, err := ExchangeCode(ctx, oauth.ClientConfig{TokenURL: srv.URL}, "code", "")
 		if err == nil {
 			t.Fatal("ExchangeCode succeeded against a hung provider, want timeout error")
 		}
