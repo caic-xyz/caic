@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -98,6 +99,29 @@ func RefreshAccessToken(ctx context.Context, c oauth.ClientConfig, refreshToken 
 	return doTokenExchange(ctx, c, body)
 }
 
+// RetrieveError is returned when the token endpoint responds with a
+// non-2xx status or includes an RFC 6749 error parameter.
+type RetrieveError struct {
+	StatusCode       int    // HTTP status code from the token endpoint
+	ErrorCode        string // RFC 6749 "error"
+	ErrorDescription string // RFC 6749 "error_description"
+	ErrorURI         string // RFC 6749 "error_uri"
+	Body             []byte // raw response body for programmatic inspection
+}
+
+// Error formats the error for logging. It includes StatusCode, ErrorCode,
+// and ErrorDescription but not the raw body.
+func (e *RetrieveError) Error() string {
+	msg := fmt.Sprintf("oauth2: token endpoint error (status %d)", e.StatusCode)
+	if e.ErrorCode != "" {
+		msg += ": " + e.ErrorCode
+	}
+	if e.ErrorDescription != "" {
+		msg += ": " + e.ErrorDescription
+	}
+	return msg
+}
+
 // doTokenExchange sends a token request and parses the response into a Token.
 func doTokenExchange(ctx context.Context, c oauth.ClientConfig, body url.Values) (*oauth.Token, error) {
 	ctx, cancel := context.WithTimeout(ctx, exchangeTimeout)
@@ -119,43 +143,106 @@ func doTokenExchange(ctx context.Context, c oauth.ClientConfig, body url.Values)
 	if err != nil {
 		return nil, fmt.Errorf("read token response: %w", err)
 	}
-	if resp.StatusCode != http.StatusOK {
-		// Keep the raw provider body out of the returned (potentially
-		// user-visible / info-logged) error; send it to a debug log only.
-		slog.DebugContext(ctx, "oauth token exchange non-200", "status", resp.StatusCode, "body", string(data))
-		return nil, fmt.Errorf("token exchange failed with status %d", resp.StatusCode)
-	}
 
+	// Parse JSON response first (the common case).
 	var tr codeTokenResponse
-	if err := json.Unmarshal(data, &tr); err != nil {
-		return nil, fmt.Errorf("parse token response: %w", err)
-	}
-	if tr.Error != "" {
-		return nil, fmt.Errorf("oauth error: %s", tr.Error)
-	}
-	if tr.AccessToken == "" {
-		return nil, errors.New("no access_token in response")
-	}
-	if tr.TokenType == "" {
-		tr.TokenType = "Bearer"
+	jsonErr := json.Unmarshal(data, &tr)
+
+	if resp.StatusCode != http.StatusOK || (jsonErr == nil && tr.Error != "") {
+		errResp := buildRetrieveError(resp.StatusCode, data, jsonErr == nil, &tr)
+		slog.DebugContext(ctx, "oauth token exchange error", "status", resp.StatusCode, "body", string(data))
+		return nil, errResp
 	}
 
+	// JSON unmarshal succeeded and no error field: use parsed response.
+	if jsonErr == nil {
+		if tr.AccessToken == "" {
+			return nil, errors.New("no access_token in response")
+		}
+		return tokenFromCodeResponse(&tr), nil
+	}
+
+	// JSON unmarshal failed: fall back to form-urlencoded parsing.
+	slog.DebugContext(ctx, "oauth token json parse failed, trying form-encoded fallback", "err", jsonErr)
+	return parseFormEncodedToken(data)
+}
+
+// buildRetrieveError constructs a RetrieveError from a token endpoint response.
+func buildRetrieveError(statusCode int, data []byte, jsonOK bool, tr *codeTokenResponse) *RetrieveError {
+	errResp := &RetrieveError{
+		StatusCode: statusCode,
+		Body:       data,
+	}
+	if jsonOK && tr.Error != "" {
+		errResp.ErrorCode = tr.Error
+		errResp.ErrorDescription = tr.ErrorDescription
+		errResp.ErrorURI = tr.ErrorURI
+	}
+	return errResp
+}
+
+// parseFormEncodedToken attempts to parse a form-encoded token response
+// (application/x-www-form-urlencoded). Returns an error if the parse fails.
+func parseFormEncodedToken(data []byte) (*oauth.Token, error) {
+	vals, err := url.ParseQuery(string(data))
+	if err != nil {
+		return nil, fmt.Errorf("parse token response (form): %w", err)
+	}
+	if errorCode := vals.Get("error"); errorCode != "" {
+		return nil, &RetrieveError{
+			StatusCode:       http.StatusOK,
+			ErrorCode:        errorCode,
+			ErrorDescription: vals.Get("error_description"),
+			ErrorURI:         vals.Get("error_uri"),
+			Body:             data,
+		}
+	}
+	accessToken := vals.Get("access_token")
+	if accessToken == "" {
+		return nil, errors.New("no access_token in form-encoded response")
+	}
+	tokenType := vals.Get("token_type")
+	if tokenType == "" {
+		tokenType = "Bearer"
+	}
+	var exp time.Time
+	if expiresIn := vals.Get("expires_in"); expiresIn != "" {
+		if sec, convErr := strconv.Atoi(expiresIn); convErr == nil && sec > 0 {
+			exp = time.Now().Add(time.Duration(sec) * time.Second)
+		}
+	}
+	return &oauth.Token{
+		AccessToken:  accessToken,
+		TokenType:    tokenType,
+		RefreshToken: vals.Get("refresh_token"),
+		Expiry:       exp,
+	}, nil
+}
+
+// tokenFromCodeResponse extracts a Token from the parsed JSON response.
+func tokenFromCodeResponse(tr *codeTokenResponse) *oauth.Token {
+	tokenType := tr.TokenType
+	if tokenType == "" {
+		tokenType = "Bearer"
+	}
 	var exp time.Time
 	if tr.ExpiresIn > 0 {
 		exp = time.Now().Add(time.Duration(tr.ExpiresIn) * time.Second)
 	}
 	return &oauth.Token{
 		AccessToken:  tr.AccessToken,
-		TokenType:    tr.TokenType,
+		TokenType:    tokenType,
 		RefreshToken: tr.RefreshToken,
 		Expiry:       exp,
-	}, nil
+	}
 }
 
 type codeTokenResponse struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token,omitempty"`
-	ExpiresIn    int    `json:"expires_in,omitempty"`
-	TokenType    string `json:"token_type,omitempty"`
-	Error        string `json:"error,omitempty"`
+	AccessToken      string `json:"access_token"`
+	RefreshToken     string `json:"refresh_token,omitempty"`
+	ExpiresIn        int    `json:"expires_in,omitempty"`
+	TokenType        string `json:"token_type,omitempty"`
+	Error            string `json:"error,omitempty"`
+	ErrorDescription string `json:"error_description,omitempty"`
+	ErrorURI         string `json:"error_uri,omitempty"`
 }

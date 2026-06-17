@@ -240,7 +240,7 @@ func (r *Router) buildHandler() (http.Handler, error) {
 	var inner http.Handler = mux
 	inner = compressMiddleware(inner)
 	inner = decompressMiddleware(inner)
-	inner = auth.Middleware(r.authStore, r.sessionSecret)(inner)
+	inner = auth.Middleware(r.authStore, r.sessionSecret, r.authHandlers.refreshTokenRefresher())(inner)
 	if r.hostState != nil {
 		inner = r.hostState.Middleware(inner)
 	}

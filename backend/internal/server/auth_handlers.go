@@ -3,6 +3,7 @@
 package server
 
 import (
+	"context"
 	"encoding/base64"
 	"log/slog"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/oauth"
 	"github.com/caic-xyz/caic/oauth/oauthclient"
 	"github.com/caic-xyz/caic/oauth/oauthserver"
 )
@@ -275,6 +277,48 @@ func (h *authHandlers) handleGetMe(w http.ResponseWriter, r *http.Request) {
 		Username:  u.Username,
 		AvatarURL: u.AvatarURL,
 	}, nil)
+}
+
+// refreshTokenRefresher returns a TokenRefresher that renews forge access
+// tokens using the configured OAuth providers. The returned function is safe
+// for concurrent use.
+func (h *authHandlers) refreshTokenRefresher() auth.TokenRefresher {
+	return func(ctx context.Context, u *auth.User) *auth.User {
+		var cfg *oauthclient.ForgeConfig
+		switch u.Provider {
+		case forge.KindGitHub:
+			cfg = h.githubOAuth
+		case forge.KindGitLab:
+			cfg = h.gitlabOAuth
+		default:
+			return nil
+		}
+		if cfg == nil {
+			return nil
+		}
+		// RedirectURI is not needed for refresh; use a zero-value ClientConfig.
+		ocfg := oauth.ClientConfig{
+			ClientID:     cfg.ClientID,
+			ClientSecret: cfg.ClientSecret,
+			TokenURL:     cfg.TokenURL,
+		}
+		token, err := oauthclient.RefreshAccessToken(ctx, ocfg, u.RefreshToken)
+		if err != nil {
+			slog.WarnContext(ctx, "token refresh failed", "provider", u.Provider, "user", u.ID, "err", err)
+			return nil
+		}
+		u.AccessToken = token.AccessToken
+		u.TokenExpiry = token.Expiry
+		if token.RefreshToken != "" {
+			u.RefreshToken = token.RefreshToken
+		}
+		if updated, err := h.store.UpsertUser(u); err != nil {
+			slog.WarnContext(ctx, "token refresh upsert failed", "user", u.ID, "err", err)
+			return nil
+		} else {
+			return &updated
+		}
+	}
 }
 
 // handleLogout handles POST /auth/logout.

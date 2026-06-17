@@ -107,6 +107,18 @@ public struct UpdateClientRequest: Codable {
     public let token_endpoint_auth_method: String?
 }
 
+// OAuth 2.0 client-side access token (RFC 6749)
+
+/// Token holds an OAuth 2.0 access token and associated metadata.
+public struct Token: Codable {
+    public let AccessToken: String
+    /// e.g., "Bearer"; always set by the constructor
+    public let TokenType: String
+    public let RefreshToken: String
+    /// zero means no expiry
+    public let Expiry: Time
+}
+
 // OAuth 2.0 token endpoint response (RFC 6749)
 
 /// TokenResponse is an OAuth token endpoint response.

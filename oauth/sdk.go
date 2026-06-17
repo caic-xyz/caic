@@ -26,6 +26,8 @@ func SDKAPI() apispec.Config {
 			reflect.TypeFor[RegisterRequest](),
 			reflect.TypeFor[RegisterResponse](),
 			reflect.TypeFor[UpdateClientRequest](),
+			// Client-side token
+			reflect.TypeFor[Token](),
 			// Token
 			reflect.TypeFor[TokenResponse](),
 			// Introspection
@@ -66,6 +68,7 @@ func SDKAPI() apispec.Config {
 			"RegisterRequest":             "OAuth 2.0 Dynamic Client Registration request (RFC 7591)",
 			"RegisterResponse":            "OAuth 2.0 Dynamic Client Registration response (RFC 7591, 7592)",
 			"UpdateClientRequest":         "OAuth 2.0 Dynamic Client Registration update (RFC 7592)",
+			"Token":                       "OAuth 2.0 client-side access token (RFC 6749)",
 			"TokenResponse":               "OAuth 2.0 token endpoint response (RFC 6749)",
 			"IntrospectionRequest":        "OAuth 2.0 Token Introspection request (RFC 7662)",
 			"IntrospectionResponse":       "OAuth 2.0 Token Introspection response (RFC 7662)",

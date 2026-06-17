@@ -19,3 +19,15 @@ type Token struct {
 	RefreshToken string
 	Expiry       time.Time // zero means no expiry
 }
+
+// expiryDelta is the early-expiry buffer applied by Token.Expired.
+// A token is treated as expired this long before its actual Expiry to
+// avoid failures from clock skew or in-flight requests.
+const expiryDelta = 10 * time.Second
+
+// Expired reports whether t is expired, with a built-in early-expiry buffer
+// (10s). A zero Expiry means the token never expires.
+// Callers that need exact expiry can compare time.Now().After(t.Expiry).
+func (t *Token) Expired() bool {
+	return !t.Expiry.IsZero() && time.Now().After(t.Expiry.Add(-expiryDelta))
+}

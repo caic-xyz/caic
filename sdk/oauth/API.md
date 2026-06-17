@@ -94,6 +94,17 @@ Nil pointer fields leave the corresponding client field unchanged.
 | `redirect_uris` | `string[]` |  |  |
 | `token_endpoint_auth_method` | `string` |  |  |
 
+### Token
+
+Token holds an OAuth 2.0 access token and associated metadata.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `AccessToken` | `string` |  | yes |
+| `TokenType` | `string` | e.g., "Bearer"; always set by the constructor | yes |
+| `RefreshToken` | `string` |  | yes |
+| `Expiry` | `Time` | zero means no expiry | yes |
+
 ### TokenResponse
 
 TokenResponse is an OAuth token endpoint response.

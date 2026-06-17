@@ -98,6 +98,17 @@ data class UpdateClientRequest(
     val token_endpoint_auth_method: String? = null,
 )
 
+// OAuth 2.0 client-side access token (RFC 6749)
+
+/** Token holds an OAuth 2.0 access token and associated metadata. */
+@Serializable
+data class Token(
+    val AccessToken: String,
+    val TokenType: String,
+    val RefreshToken: String,
+    val Expiry: Time,
+)
+
 // OAuth 2.0 token endpoint response (RFC 6749)
 
 /** TokenResponse is an OAuth token endpoint response. */

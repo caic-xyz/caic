@@ -6,14 +6,24 @@ import (
 	"context"
 	"net/http"
 	"strings"
+
+	"github.com/caic-xyz/caic/oauth"
 )
 
 type contextKey struct{}
 
+// TokenRefresher is called after loading a user whose access token has expired
+// but still holds a refresh token. On success it returns an updated *User; on
+// failure it returns nil and the middleware uses the original (possibly stale)
+// user for this request.
+type TokenRefresher func(ctx context.Context, u *User) *User
+
 // Middleware validates the caic_session cookie (or Authorization: Bearer header
 // as a fallback for Android/API clients). Injects *User into context.
 // When secret is nil (auth disabled), passes through unconditionally.
-func Middleware(store *Store, secret []byte) func(http.Handler) http.Handler {
+// When refresh is non-nil, expired tokens with a refresh token are renewed
+// before the user is injected into the context.
+func Middleware(store *Store, secret []byte, refresh TokenRefresher) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if secret == nil {
@@ -24,6 +34,13 @@ func Middleware(store *Store, secret []byte) func(http.Handler) http.Handler {
 			if token != "" {
 				if claims, err := validateToken(token, secret); err == nil {
 					if user, ok := store.FindByID(claims.UserID); ok {
+						// Refresh expired tokens before they are used.
+						tok := oauth.Token{RefreshToken: user.RefreshToken, Expiry: user.TokenExpiry}
+						if refresh != nil && tok.Expired() && tok.RefreshToken != "" {
+							if updated := refresh(r.Context(), &user); updated != nil {
+								user = *updated
+							}
+						}
 						r = r.WithContext(context.WithValue(r.Context(), contextKey{}, &user))
 					}
 				}

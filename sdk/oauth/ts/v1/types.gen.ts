@@ -65,6 +65,16 @@ export interface UpdateClientRequest {
   token_endpoint_auth_method?: string;
 }
 
+/** Token holds an OAuth 2.0 access token and associated metadata. */
+export interface Token {
+  AccessToken: string;
+  /** e.g., "Bearer"; always set by the constructor */
+  TokenType: string;
+  RefreshToken: string;
+  /** zero means no expiry */
+  Expiry: Time;
+}
+
 /** TokenResponse is an OAuth token endpoint response. */
 export interface TokenResponse {
   access_token: string;
