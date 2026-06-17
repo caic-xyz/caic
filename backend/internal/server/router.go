@@ -23,7 +23,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/gomode"
 	"github.com/caic-xyz/caic/backend/internal/httplog"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
-	"github.com/caic-xyz/caic/backend/internal/oauth"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -31,6 +30,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/backend/internal/voicegateway/voicertc"
+	"github.com/caic-xyz/caic/oauth"
 )
 
 // Router is the HTTP router for the caic web UI. It owns HTTP routing,

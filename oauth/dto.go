@@ -1,4 +1,15 @@
-// Package oauth provides generic OAuth protocol DTOs and helpers.
+// Package oauth is an OAuth 2.0 authorization server and client library.
+//
+// It implements RFC 6749 (Authorization Framework), RFC 6750 (Bearer Token Usage),
+// RFC 7636 (PKCE), RFC 7009 (Token Revocation), RFC 7662 (Token Introspection),
+// RFC 8693 (Token Exchange), RFC 9068 (JWT Profile for Access Tokens),
+// RFC 8414 (Authorization Server Metadata), RFC 7591 (Dynamic Client Registration),
+// RFC 7592 (Client Registration Management), RFC 8628 (Device Authorization Grant),
+// RFC 9126 (Pushed Authorization Requests), RFC 9207 (Issuer Identification),
+// RFC 9449 (DPoP), and RFC 9700 (OAuth Security BCP).
+//
+// Importers implement the SessionManager and AuthorizationUI interfaces
+// to inject product-specific user management and consent UI.
 package oauth
 
 import (

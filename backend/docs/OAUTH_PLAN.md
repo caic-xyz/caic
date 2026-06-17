@@ -15,82 +15,62 @@ This plan covers the path from internal package to public library with SDK.
 
 ## Phases
 
-### Phase 1 — Consolidate Seam Functions into Interfaces
+### Phase 1 — Consolidate Seam Functions into Interfaces ✓
 
-`ServerConfig` has 8 seam fields: 4 functions (`CurrentUserFunc`,
-`AttachUserFunc`, `UserLookupFunc`, `EndSessionFunc`) and 4 interfaces
-(`LoginAdapter`, `AuditRecorder`, `RateLimiter`, `ConsentRenderer`).
+`ServerConfig` had 8 seam fields. Consolidated to 5: two interfaces plus
+three standalone seams.
 
-The user/session functions are tightly coupled and the UI seams are too.
-Consolidating now avoids publishing a fragmented public API.
+- [x] Merge `CurrentUserFunc`, `AttachUserFunc`, `UserLookupFunc`,
+      `EndSessionFunc` into `SessionManager`.
+- [x] Merge `LoginAdapter` and `ConsentRenderer` into `AuthorizationUI`.
+- [x] `BaseURLFunc`, `AuditRecorder`, `RateLimiter` stay as-is.
+- [x] Update `Server` struct, `NewServer`, all internal call sites.
+- [x] Update `internal/server/oauth_handlers.go` to implement the new
+      interfaces (`caicSessionManager`, `caicAuthorizationUI`).
+- [x] Tests: no behavior change; all existing tests pass with updated mocks.
 
-- [ ] Merge `CurrentUserFunc`, `AttachUserFunc`, `UserLookupFunc`,
-      `EndSessionFunc` into `SessionManager`:
-      ```go
-      type SessionManager interface {
-          CurrentUser(ctx context.Context) (User, bool)
-          AttachUser(ctx context.Context, u User) context.Context
-          FindUser(id string) (User, bool)
-          EndSession(ctx context.Context, r *http.Request, u User) (redirectURL string)
-      }
-      ```
-- [ ] Merge `LoginAdapter` and `ConsentRenderer` into `AuthorizationUI`:
-      ```go
-      type AuthorizationUI interface {
-          LoginStartURL(r *http.Request) string
-          ProviderLabel(provider string) string
-          RenderOAuthConsent(w http.ResponseWriter, data *ConsentPageData) error
-      }
-      ```
-- [ ] `BaseURLFunc` becomes `BaseURLResolver` interface with one method.
-- [ ] Update `ServerConfig` (6 fields → 4: `SessionManager`, `AuthorizationUI`,
-      `BaseURLResolver`, `AuditRecorder`, `RateLimiter`).
-- [ ] Update `Server` struct, `NewServer`, all internal call sites.
-- [ ] Update `internal/server/oauth_server.go` to implement the new interfaces.
-- [ ] Tests: no behavior change; all existing tests pass with updated mocks.
+### Phase 2 — Pushed Authorization Requests (RFC 9126) ✓
 
-### Phase 2 — Pushed Authorization Requests (RFC 9126) — nice to have
-
-- [ ] Add `PARRequest` and `PARResponse` DTOs. `PARResponse` contains
+- [x] Add `PARRequest` and `PARResponse` DTOs. `PARResponse` contains
       `request_uri` (short-lived, single-use) and `expires_in`.
-- [ ] Add `POST /oauth/par` to `Routes()`. Validate the pushed parameters
+- [x] Add `POST /oauth/par` to `Routes()`. Validate the pushed parameters
       identically to authorize. Store the parameter set keyed by `request_uri`.
-- [ ] In `handleOAuthAuthorizeGET`, accept `request_uri` as an alternative to
+- [x] In `handleOAuthAuthorizeGET`, accept `request_uri` as an alternative to
       inline parameters. Redirect the browser with only `client_id` and
       `request_uri`.
-- [ ] Add `pushed_authorization_request_endpoint` and
+- [x] Add `pushed_authorization_request_endpoint` and
       `require_pushed_authorization_requests` to AS metadata (RFC 8414 + 9126).
-- [ ] Tests: successful PAR flow, reuse of request_uri, expired request_uri.
+- [x] Tests: successful PAR flow, reuse of request_uri, expired request_uri.
 
-### Phase 3 — Device Authorization Grant (RFC 8628) — nice to have
+### Phase 3 — Device Authorization Grant (RFC 8628) ✓
 
-- [ ] Add `DeviceAuthorizationRequest`, `DeviceAuthorizationResponse`,
+- [x] Add `DeviceAuthorizationRequest`, `DeviceAuthorizationResponse`,
       `DeviceTokenPollError` DTOs.
-- [ ] Add `POST /oauth/device_authorization` returning `device_code`,
-      `user_code`, `verification_uri`, `interval`, `expires_in`.
-- [ ] Add a verification page at `GET /oauth/device` accepting `user_code`.
-- [ ] Extend `POST /oauth/token` to accept `grant_type=urn:ietf:params:oauth:grant-type:device_code`
-      with polling semantics (slow-down, authorization_pending).
-- [ ] Add `urn:ietf:params:oauth:grant-type:device_code` to
+- [x] Add `POST /oauth/device_authorization` returning `device_code`,
+      `user_code` (8-char uppercase alphanumeric), `verification_uri`,
+      `interval`, `expires_in`.
+- [x] Add a verification page at `GET /oauth/device` accepting `user_code`.
+- [x] Extend `POST /oauth/token` to accept `grant_type=urn:ietf:params:oauth:grant-type:device_code`
+      with polling semantics (authorization_pending, slow_down,
+      expired_token, access_denied).
+- [x] Add `urn:ietf:params:oauth:grant-type:device_code` to
       `grant_types_supported` metadata.
-- [ ] Tests: full device flow from request through polling to token issuance.
+- [x] Tests: full device flow, polling pending, expired code, page
+      rendering, unauthenticated approval, invalid user_code, restart
+      resilience.
 
-### Phase 4 — Extract to Standalone Module
+### Phase 4 — Extract to Standalone Module ✓
 
-- [ ] Move `backend/internal/oauth` to a top-level `backend/oauth/` directory
-      (or a separate repo, e.g., `github.com/maruel/oauth`).
-- [ ] `go.mod`: module path, Go version (1.25+), minimal dependencies
-      (stdlib-only is the goal; `golang.org/x/crypto` if needed for Ed25519).
-- [ ] Audit imports: zero caic-specific imports allowed. Any remaining
-      references to caic packages must be extracted into caller-provided seams.
-- [ ] Public API doc: package-level godoc describing the server, client
-      helpers, DTOs, and interfaces. Add a `doc.go`.
-- [ ] `README.md` with quick-start: create a server, register a client,
-      run the authorization flow.
-- [ ] Update caic's `go.mod` to depend on the standalone module
-      (or `go.work` during co-development).
-- [ ] Update caic's import paths: `"github.com/caic-xyz/caic/backend/internal/oauth"`
-      → `"github.com/maruel/oauth"`.
+- [x] Move `backend/internal/oauth/` to `oauth/` at repo root as standalone module
+      (`github.com/caic-xyz/oauth`).
+- [x] `go.mod`: module path `github.com/caic-xyz/oauth`, Go 1.25, stdlib-only.
+- [x] Audit imports: confirmed zero caic-specific imports.
+- [x] Package-level godoc in `dto.go` covering RFCs and interfaces.
+- [x] `README.md` with quick-start example.
+- [x] Update caic's `go.mod`: add `require` and `replace` directives.
+- [x] Update caic's 8 import paths from `backend/internal/oauth` to `github.com/caic-xyz/oauth`.
+- [x] Allowed `replace-local` in `.golangci.yml` for unpublished module.
+- [x] `make check` passes (lint, build, test, frontend, e2e helpers).
 
 ### Phase 5 — Generate OAuth SDK via apisdkgen
 

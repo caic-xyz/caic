@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/caic-xyz/caic/backend/internal/oauth"
+	"github.com/caic-xyz/caic/oauth"
 )
 
 // ProviderConfig holds the OAuth 2.0 endpoint configuration for one provider.

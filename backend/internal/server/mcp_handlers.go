@@ -13,7 +13,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
-	"github.com/caic-xyz/caic/backend/internal/oauth"
+	"github.com/caic-xyz/caic/oauth"
 )
 
 // mcpHandlers owns the MCP HTTP endpoint: protocol dispatch, rate limiting, and

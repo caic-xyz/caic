@@ -20,8 +20,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
-	"github.com/caic-xyz/caic/backend/internal/oauth"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/oauth"
 )
 
 // fakeMCPRegistry is a minimal mcpRegistry that surfaces canned errors so the
