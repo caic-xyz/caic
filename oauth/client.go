@@ -42,9 +42,9 @@ type PKCEChallenge struct {
 
 // NewPKCEChallenge generates a random S256 PKCE verifier and challenge.
 //
-// PKCE is optional for confidential clients: GitHub's OAuth web flow does not
-// support it, GitLab does. Callers that opt in pass the Challenge to
-// AuthorizationURL and the Verifier to ExchangeCode.
+// PKCE is recommended for all OAuth flows (GitHub supports it since 2025-07,
+// GitLab has supported it for years). Callers that opt in pass the Challenge
+// to AuthorizationURL and the Verifier to ExchangeCode.
 func NewPKCEChallenge() (PKCEChallenge, error) {
 	var raw [32]byte
 	if _, err := rand.Read(raw[:]); err != nil {

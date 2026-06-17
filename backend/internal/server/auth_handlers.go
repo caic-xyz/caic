@@ -170,8 +170,8 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 		}
 
 		// Exchange code for tokens.
-		// PKCE is off for the confidential forge flow (see ProviderConfig.AuthURL);
-		// pass an empty code_verifier so the request matches the authorize call.
+		// PKCE is off; all forge providers are confidential clients with
+		// HMAC-signed state (see ProviderConfig.AuthURL).
 		accessToken, refreshToken, tokenExpiry, err := oauth.ExchangeCode(r.Context(), cfg.OAuthClientConfig(), code, "")
 		if err != nil {
 			slog.WarnContext(r.Context(), "oauth exchange", "provider", provider, "err", err)
