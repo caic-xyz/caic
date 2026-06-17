@@ -25,7 +25,13 @@ var oauthConsentTemplate = template.Must(template.New("oauth-consent").Parse(oau
 // OAuth adapters are the boundary between generic protocol code and caic state.
 // Keep auth.Store lookups, consent HTML, API DTOs, and audit formatting here so
 // internal/oauth remains reusable and unaware of caic packages.
-func oauthCurrentUser(ctx context.Context) (oauth.User, bool) {
+
+// caicSessionManager implements oauth.SessionManager backed by auth.Store.
+type caicSessionManager struct {
+	store *auth.Store
+}
+
+func (m *caicSessionManager) CurrentUser(ctx context.Context) (oauth.User, bool) {
 	u, ok := auth.UserFromContext(ctx)
 	if !ok {
 		return oauth.User{}, false
@@ -33,30 +39,42 @@ func oauthCurrentUser(ctx context.Context) (oauth.User, bool) {
 	return oauth.User{ID: u.ID, Username: u.Username, Provider: string(u.Provider)}, true
 }
 
-func oauthAttachUser(store *auth.Store) oauth.AttachUserFunc {
-	return func(ctx context.Context, u oauth.User) context.Context {
-		user, ok := store.FindByID(u.ID)
-		if !ok {
-			return ctx
-		}
-		return auth.NewContext(ctx, &user)
+func (m *caicSessionManager) AttachUser(ctx context.Context, u oauth.User) context.Context {
+	user, ok := m.store.FindByID(u.ID)
+	if !ok {
+		return ctx
 	}
+	return auth.NewContext(ctx, &user)
 }
 
-func oauthUserLookup(store *auth.Store) oauth.UserLookupFunc {
-	return func(id string) (oauth.User, bool) {
-		user, ok := store.FindByID(id)
-		if !ok {
-			return oauth.User{}, false
-		}
-		return oauth.User{ID: user.ID, Username: user.Username, Provider: string(user.Provider)}, true
+func (m *caicSessionManager) FindUser(id string) (oauth.User, bool) {
+	user, ok := m.store.FindByID(id)
+	if !ok {
+		return oauth.User{}, false
 	}
+	return oauth.User{ID: user.ID, Username: user.Username, Provider: string(user.Provider)}, true
 }
 
-type oauthConsentRenderer struct{}
+// EndSession clears cookies for the user. The browser redirects to "/" after logout.
+func (m *caicSessionManager) EndSession(ctx context.Context, r *http.Request, u oauth.User) (redirectURL string) {
+	return ""
+}
+
+// caicAuthorizationUI implements oauth.AuthorizationUI.
+type caicAuthorizationUI struct {
+	login *authHandlers
+}
+
+func (u caicAuthorizationUI) LoginStartURL(r *http.Request) string {
+	return u.login.LoginStartURL(r)
+}
+
+func (u caicAuthorizationUI) ProviderLabel(p string) string {
+	return u.login.ProviderLabel(p)
+}
 
 // RenderOAuthConsent renders the caic OAuth consent page.
-func (oauthConsentRenderer) RenderOAuthConsent(w http.ResponseWriter, data *oauth.ConsentPageData) error {
+func (caicAuthorizationUI) RenderOAuthConsent(w http.ResponseWriter, data *oauth.ConsentPageData) error {
 	h := w.Header()
 	h.Set("Cache-Control", "no-store")
 	h.Set("Content-Type", "text/html; charset=utf-8")

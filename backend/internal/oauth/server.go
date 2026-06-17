@@ -20,16 +20,20 @@ import (
 // BaseURLFunc returns the request's external base URL.
 type BaseURLFunc func(*http.Request) string
 
-// CurrentUserFunc returns the authenticated resource owner from ctx.
-type CurrentUserFunc func(context.Context) (User, bool)
+// SessionManager manages user sessions for the authorization server.
+// The caller implements browser login, user lookup, and session teardown.
+type SessionManager interface {
+	CurrentUser(ctx context.Context) (User, bool)
+	AttachUser(ctx context.Context, u User) context.Context
+	FindUser(id string) (User, bool)
+	EndSession(ctx context.Context, r *http.Request, u User) (redirectURL string)
+}
 
-// AttachUserFunc returns a context with user attached for downstream handlers.
-type AttachUserFunc func(context.Context, User) context.Context
-
-// LoginAdapter supplies product login URLs and provider display labels.
-type LoginAdapter interface {
+// AuthorizationUI renders the OAuth authorization user interface.
+type AuthorizationUI interface {
 	LoginStartURL(r *http.Request) string
 	ProviderLabel(provider string) string
+	RenderOAuthConsent(w http.ResponseWriter, data *ConsentPageData) error
 }
 
 // AuditRecorder records OAuth authorization-server decisions.
@@ -45,16 +49,6 @@ type AuditRecorder interface {
 // size and request budget per key.
 type RateLimiter interface {
 	Allow(key string) bool
-}
-
-// EndSessionFunc tears down the caller's session for a user.
-// Called by the end-session endpoint after grants are revoked.
-// Returns a post-logout URL to redirect to, or empty string for a default page.
-type EndSessionFunc func(ctx context.Context, r *http.Request, user User) (redirectURL string)
-
-// ConsentRenderer renders an OAuth consent page.
-type ConsentRenderer interface {
-	RenderOAuthConsent(w http.ResponseWriter, data *ConsentPageData) error
 }
 
 // ConsentPageData is the server-rendered OAuth consent page model.
@@ -100,14 +94,10 @@ type ServerConfig struct {
 	ScopeLabels             map[string]string
 
 	BaseURL     BaseURLFunc
-	CurrentUser CurrentUserFunc
-	AttachUser  AttachUserFunc
-	UserLookup  UserLookupFunc
-	Login       LoginAdapter
+	Session     SessionManager
+	UI          AuthorizationUI
 	Audit       AuditRecorder
 	RateLimiter RateLimiter
-	Renderer    ConsentRenderer
-	EndSession  EndSessionFunc
 }
 
 // Server stores OAuth state for remote clients.
@@ -137,14 +127,10 @@ type Server struct {
 	dpopNonces *DPoPNonceManager
 
 	baseURL     BaseURLFunc
-	currentUser CurrentUserFunc
-	attachUser  AttachUserFunc
-	userLookup  UserLookupFunc
-	login       LoginAdapter
+	session     SessionManager
+	ui          AuthorizationUI
 	audit       AuditRecorder
 	rateLimiter RateLimiter
-	renderer    ConsentRenderer
-	endSession  EndSessionFunc
 }
 
 // NewServer returns an OAuth authorization server.
@@ -169,6 +155,12 @@ func NewServer(c ServerConfig) (*Server, error) { //nolint:gocritic // ServerCon
 	if err != nil {
 		return nil, err
 	}
+	if c.Session == nil {
+		return nil, errors.New("oauth: Session is required")
+	}
+	if c.UI == nil {
+		return nil, errors.New("oauth: UI is required")
+	}
 	state, err := LoadStore(c.RefreshTokenStorePath)
 	if err != nil {
 		return nil, err
@@ -188,14 +180,10 @@ func NewServer(c ServerConfig) (*Server, error) { //nolint:gocritic // ServerCon
 		resourceMetadataURLPath: c.ResourceMetadataURLPath,
 		clientIDPrefix:          c.ClientIDPrefix,
 		baseURL:                 c.BaseURL,
-		currentUser:             c.CurrentUser,
-		attachUser:              c.AttachUser,
-		userLookup:              c.UserLookup,
-		login:                   c.Login,
+		session:                 c.Session,
+		ui:                      c.UI,
 		audit:                   c.Audit,
 		rateLimiter:             c.RateLimiter,
-		renderer:                c.Renderer,
-		endSession:              c.EndSession,
 	}, nil
 }
 
@@ -319,34 +307,19 @@ func (s *Server) RevokeAllUserGrants(userID string) error {
 }
 
 func (s *Server) currentRequestUser(ctx context.Context) (User, bool) {
-	if s.currentUser == nil {
-		return User{}, false
-	}
-	return s.currentUser(ctx)
+	return s.session.CurrentUser(ctx)
 }
 
 func (s *Server) newUserContext(ctx context.Context, u User) context.Context {
-	if s.attachUser == nil {
-		return ctx
-	}
-	return s.attachUser(ctx, u)
+	return s.session.AttachUser(ctx, u)
 }
 
 func (s *Server) findUserByID(id string) (User, bool) {
-	if s.userLookup == nil {
-		return User{}, false
-	}
-	return s.userLookup(id)
+	return s.session.FindUser(id)
 }
 
 func (s *Server) providerLabel(provider string) string {
-	if s.login != nil {
-		return s.login.ProviderLabel(provider)
-	}
-	if provider == "" {
-		return "unknown provider"
-	}
-	return provider
+	return s.ui.ProviderLabel(provider)
 }
 
 func (s *Server) scopeItems(scope string) []ScopeItem {
@@ -433,16 +406,14 @@ func (s *Server) handleOAuthJWKS(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleOAuthAuthorizeGET(w http.ResponseWriter, r *http.Request) {
 	user, ok := s.currentRequestUser(r.Context())
 	if !ok {
-		if s.login != nil {
-			if loginURL := s.login.LoginStartURL(r); loginURL != "" {
-				if !strings.HasPrefix(loginURL, "/") || strings.HasPrefix(loginURL, "//") {
-					http.Error(w, "oauth login unavailable", http.StatusInternalServerError)
-					return
-				}
-				w.Header().Set("Location", loginURL)
-				w.WriteHeader(http.StatusFound)
+		if loginURL := s.ui.LoginStartURL(r); loginURL != "" {
+			if !strings.HasPrefix(loginURL, "/") || strings.HasPrefix(loginURL, "//") {
+				http.Error(w, "oauth login unavailable", http.StatusInternalServerError)
 				return
 			}
+			w.Header().Set("Location", loginURL)
+			w.WriteHeader(http.StatusFound)
+			return
 		}
 		WriteError(w, http.StatusUnauthorized, "login_required", "log in before authorizing protected resource access")
 		return
@@ -472,10 +443,6 @@ func (s *Server) handleOAuthAuthorizeGET(w http.ResponseWriter, r *http.Request)
 		slog.WarnContext(r.Context(), "save oauth consent", "err", err)
 	}
 	s.mu.Unlock()
-	if s.renderer == nil {
-		WriteError(w, http.StatusInternalServerError, "server_error", "consent renderer is not configured")
-		return
-	}
 	data := ConsentPageData{
 		Action:        s.externalBaseURL(r) + "/oauth/authorize",
 		ConsentToken:  consentToken,
@@ -488,7 +455,7 @@ func (s *Server) handleOAuthAuthorizeGET(w http.ResponseWriter, r *http.Request)
 		Resource:      values.Get("resource"),
 		ScopeItems:    s.scopeItems(scope),
 	}
-	if err := s.renderer.RenderOAuthConsent(w, &data); err != nil {
+	if err := s.ui.RenderOAuthConsent(w, &data); err != nil {
 		slog.WarnContext(r.Context(), "render oauth consent", "err", err)
 	}
 }
@@ -764,7 +731,7 @@ func (s *Server) handleOAuthIntrospect(w http.ResponseWriter, r *http.Request) {
 
 // introspectAccessToken introspects a JWT access token.
 func (s *Server) introspectAccessToken(w http.ResponseWriter, r *http.Request, token string) {
-	claims, err := s.tokens.VerifyAccessToken(token, s.externalBaseURL(r), s.externalBaseURL(r)+s.resourceURLPath, time.Now(), s.touchGrant, s.findUserByID)
+	claims, err := s.tokens.VerifyAccessToken(token, s.externalBaseURL(r), s.externalBaseURL(r)+s.resourceURLPath, time.Now(), s.touchGrant, s.session)
 	if err != nil {
 		writeJSONResponse(w, IntrospectionResponse{Active: false})
 		return
@@ -912,6 +879,11 @@ func (s *Server) validateAuthorizeRequest(r *http.Request) error {
 	return s.validateAuthorizeForm(r, r.URL.Query())
 }
 
+// validateAuthorizeForm validates OAuth authorization request parameters.
+//
+// redirect_uri validation uses exact string match per RFC 6819 §4.1.2 and
+// RFC 9700 §4.1.2: redirect URIs must be compared using simple string
+// comparison as defined in [RFC3986] Section 6.2.1.
 func (s *Server) validateAuthorizeForm(r *http.Request, values url.Values) error {
 	if values.Get("response_type") != ResponseTypeCode {
 		return errors.New("response_type must be code")
@@ -1374,7 +1346,7 @@ func (s *Server) handleProtectedResourceMetadata(w http.ResponseWriter, r *http.
 }
 
 func (s *Server) verifyBearer(r *http.Request, token string) (*BearerClaims, error) {
-	return s.tokens.VerifyAccessToken(token, s.externalBaseURL(r), s.externalBaseURL(r)+s.resourceURLPath, time.Now(), s.touchGrant, s.findUserByID)
+	return s.tokens.VerifyAccessToken(token, s.externalBaseURL(r), s.externalBaseURL(r)+s.resourceURLPath, time.Now(), s.touchGrant, s.session)
 }
 
 // extractAuthToken extracts the access token from an Authorization header,
@@ -1410,11 +1382,9 @@ func (s *Server) writeUnauthorized(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleOAuthEndSession(w http.ResponseWriter, r *http.Request) {
 	user, ok := s.currentRequestUser(r.Context())
 	if !ok {
-		if s.login != nil {
-			if loginURL := s.login.LoginStartURL(r); loginURL != "" {
-				http.Redirect(w, r, loginURL, http.StatusFound) //nolint:gosec // loginURL produced by the caller's LoginAdapter
-				return
-			}
+		if loginURL := s.ui.LoginStartURL(r); loginURL != "" {
+			http.Redirect(w, r, loginURL, http.StatusFound) //nolint:gosec // loginURL produced by the caller's AuthorizationUI
+			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(`<html><body><p>You are not logged in.</p></body></html>`))
@@ -1436,10 +1406,7 @@ func (s *Server) handleOAuthEndSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	callerRedirect := ""
-	if s.endSession != nil {
-		callerRedirect = s.endSession(r.Context(), r, user)
-	}
+	callerRedirect := s.session.EndSession(r.Context(), r, user)
 
 	redirectTo := callerRedirect
 	if redirectTo == "" {

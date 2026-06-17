@@ -3,6 +3,7 @@
 package oauth
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -10,6 +11,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -47,12 +49,7 @@ func TestAccessTokenService(t *testing.T) {
 		claims, err := svc.VerifyAccessToken(token, issuer, audience, time.Now(), func(grantID string, _ time.Time) (bool, string, error) {
 			touched = grantID
 			return true, "test-client-1", nil
-		}, func(subject string) (User, bool) {
-			if subject != user.ID {
-				return User{}, false
-			}
-			return user, true
-		})
+		}, &tokenTestSession{user: user})
 		if err != nil {
 			t.Fatalf("VerifyAccessToken: %v", err)
 		}
@@ -75,7 +72,7 @@ func TestAccessTokenService(t *testing.T) {
 			parts[2] = "A" + parts[2][1:]
 		}
 		token = strings.Join(parts, ".")
-		if _, err := svc.VerifyAccessToken(token, issuer, audience, time.Now(), nil, func(string) (User, bool) { return user, true }); err == nil || !strings.Contains(err.Error(), "invalid token signature") {
+		if _, err := svc.VerifyAccessToken(token, issuer, audience, time.Now(), nil, &tokenTestSession{user: user}); err == nil || !strings.Contains(err.Error(), "invalid token signature") {
 			t.Fatalf("VerifyAccessToken error = %v, want invalid token signature", err)
 		}
 	})
@@ -88,7 +85,7 @@ func TestAccessTokenService(t *testing.T) {
 		if err != nil {
 			t.Fatalf("IssueAccessToken: %v", err)
 		}
-		if _, err := verifierSvc.VerifyAccessToken(token, issuer, audience, time.Now(), nil, func(string) (User, bool) { return user, true }); err == nil || !strings.Contains(err.Error(), "unsupported token header") {
+		if _, err := verifierSvc.VerifyAccessToken(token, issuer, audience, time.Now(), nil, &tokenTestSession{user: user}); err == nil || !strings.Contains(err.Error(), "unsupported token header") {
 			t.Fatalf("VerifyAccessToken error = %v, want unsupported token header", err)
 		}
 	})
@@ -109,7 +106,7 @@ func TestAccessTokenService(t *testing.T) {
 		tamperedHeader := strings.Replace(string(headerJSON), "\"ES256\"", "\"RS256\"", 1)
 		parts[0] = base64.RawURLEncoding.EncodeToString([]byte(tamperedHeader))
 		token = strings.Join(parts, ".")
-		if _, err := svc.VerifyAccessToken(token, issuer, audience, time.Now(), nil, func(string) (User, bool) { return user, true }); err == nil || !strings.Contains(err.Error(), "unsupported token header") {
+		if _, err := svc.VerifyAccessToken(token, issuer, audience, time.Now(), nil, &tokenTestSession{user: user}); err == nil || !strings.Contains(err.Error(), "unsupported token header") {
 			t.Fatalf("VerifyAccessToken error = %v, want unsupported token header", err)
 		}
 	})
@@ -121,7 +118,7 @@ func TestAccessTokenService(t *testing.T) {
 		if err != nil {
 			t.Fatalf("IssueAccessToken: %v", err)
 		}
-		if _, err := svc.VerifyAccessToken(token, "https://wrong.example.com", audience, time.Now(), nil, func(string) (User, bool) { return user, true }); err == nil || !strings.Contains(err.Error(), "invalid token issuer") {
+		if _, err := svc.VerifyAccessToken(token, "https://wrong.example.com", audience, time.Now(), nil, &tokenTestSession{user: user}); err == nil || !strings.Contains(err.Error(), "invalid token issuer") {
 			t.Fatalf("VerifyAccessToken error = %v, want invalid token issuer", err)
 		}
 	})
@@ -133,7 +130,7 @@ func TestAccessTokenService(t *testing.T) {
 		if err != nil {
 			t.Fatalf("IssueAccessToken: %v", err)
 		}
-		if _, err := svc.VerifyAccessToken(token, issuer, "https://caic.example.com/api/wrong", time.Now(), nil, func(string) (User, bool) { return user, true }); err == nil || !strings.Contains(err.Error(), "invalid token audience") {
+		if _, err := svc.VerifyAccessToken(token, issuer, "https://caic.example.com/api/wrong", time.Now(), nil, &tokenTestSession{user: user}); err == nil || !strings.Contains(err.Error(), "invalid token audience") {
 			t.Fatalf("VerifyAccessToken error = %v, want invalid token audience", err)
 		}
 	})
@@ -153,7 +150,7 @@ func TestAccessTokenService(t *testing.T) {
 		if err != nil {
 			t.Fatalf("issueAccessTokenAt: %v", err)
 		}
-		if _, err := svc.VerifyAccessToken(token, issuer, audience, now, nil, func(string) (User, bool) { return user, true }); err == nil || !strings.Contains(err.Error(), "token is not valid now") {
+		if _, err := svc.VerifyAccessToken(token, issuer, audience, now, nil, &tokenTestSession{user: user}); err == nil || !strings.Contains(err.Error(), "token is not valid now") {
 			t.Fatalf("VerifyAccessToken error = %v, want token is not valid now", err)
 		}
 	})
@@ -173,7 +170,7 @@ func TestAccessTokenService(t *testing.T) {
 		if err != nil {
 			t.Fatalf("issueAccessTokenAt: %v", err)
 		}
-		if _, err := svc.VerifyAccessToken(token, issuer, audience, now, nil, func(string) (User, bool) { return user, true }); err != nil {
+		if _, err := svc.VerifyAccessToken(token, issuer, audience, now, nil, &tokenTestSession{user: user}); err != nil {
 			t.Fatalf("VerifyAccessToken: %v", err)
 		}
 	})
@@ -193,7 +190,7 @@ func TestAccessTokenService(t *testing.T) {
 		if err != nil {
 			t.Fatalf("issueAccessTokenAt: %v", err)
 		}
-		if _, err := svc.VerifyAccessToken(token, issuer, audience, now, nil, func(string) (User, bool) { return user, true }); err == nil || !strings.Contains(err.Error(), "token is not valid now") {
+		if _, err := svc.VerifyAccessToken(token, issuer, audience, now, nil, &tokenTestSession{user: user}); err == nil || !strings.Contains(err.Error(), "token is not valid now") {
 			t.Fatalf("VerifyAccessToken error = %v, want token is not valid now", err)
 		}
 	})
@@ -213,7 +210,7 @@ func TestAccessTokenService(t *testing.T) {
 		if err != nil {
 			t.Fatalf("issueAccessTokenAt: %v", err)
 		}
-		if _, err := svc.VerifyAccessToken(token, issuer, audience, now, nil, func(string) (User, bool) { return user, true }); err != nil {
+		if _, err := svc.VerifyAccessToken(token, issuer, audience, now, nil, &tokenTestSession{user: user}); err != nil {
 			t.Fatalf("VerifyAccessToken: %v", err)
 		}
 	})
@@ -233,7 +230,7 @@ func TestAccessTokenService(t *testing.T) {
 		if err != nil {
 			t.Fatalf("issueAccessTokenAt: %v", err)
 		}
-		if _, err := svc.VerifyAccessToken(token, issuer, audience, now, nil, func(string) (User, bool) { return user, true }); err == nil || !strings.Contains(err.Error(), "token is not valid now") {
+		if _, err := svc.VerifyAccessToken(token, issuer, audience, now, nil, &tokenTestSession{user: user}); err == nil || !strings.Contains(err.Error(), "token is not valid now") {
 			t.Fatalf("VerifyAccessToken error = %v, want token is not valid now", err)
 		}
 	})
@@ -245,7 +242,7 @@ func TestAccessTokenService(t *testing.T) {
 		if err != nil {
 			t.Fatalf("IssueAccessToken: %v", err)
 		}
-		if _, err := svc.VerifyAccessToken(token, issuer, audience, time.Now(), func(string, time.Time) (bool, string, error) { return false, "", nil }, func(string) (User, bool) { return user, true }); err == nil || !strings.Contains(err.Error(), "token grant is not active") {
+		if _, err := svc.VerifyAccessToken(token, issuer, audience, time.Now(), func(string, time.Time) (bool, string, error) { return false, "", nil }, &tokenTestSession{user: user}); err == nil || !strings.Contains(err.Error(), "token grant is not active") {
 			t.Fatalf("VerifyAccessToken error = %v, want token grant is not active", err)
 		}
 	})
@@ -265,12 +262,7 @@ func TestAccessTokenService(t *testing.T) {
 			func(grantID string, _ time.Time) (bool, string, error) {
 				return true, "test-client-1", nil
 			},
-			func(subject string) (User, bool) {
-				if subject != user.ID {
-					return User{}, false
-				}
-				return user, true
-			}); err != nil {
+			&tokenTestSession{user: user}); err != nil {
 			t.Fatalf("VerifyAccessToken (old key): %v", err)
 		}
 
@@ -320,12 +312,7 @@ func TestAccessTokenService(t *testing.T) {
 			func(grantID string, _ time.Time) (bool, string, error) {
 				return true, "test-client-1", nil
 			},
-			func(subject string) (User, bool) {
-				if subject != user.ID {
-					return User{}, false
-				}
-				return user, true
-			}); err != nil {
+			&tokenTestSession{user: user}); err != nil {
 			t.Fatalf("VerifyAccessToken (old token after rotate): %v", err)
 		}
 
@@ -338,12 +325,7 @@ func TestAccessTokenService(t *testing.T) {
 			func(grantID string, _ time.Time) (bool, string, error) {
 				return true, "test-client-1", nil
 			},
-			func(subject string) (User, bool) {
-				if subject != user.ID {
-					return User{}, false
-				}
-				return user, true
-			}); err != nil {
+			&tokenTestSession{user: user}); err != nil {
 			t.Fatalf("VerifyAccessToken (new key): %v", err)
 		}
 
@@ -359,12 +341,7 @@ func TestAccessTokenService(t *testing.T) {
 			func(grantID string, _ time.Time) (bool, string, error) {
 				return true, "test-client-1", nil
 			},
-			func(subject string) (User, bool) {
-				if subject != user.ID {
-					return User{}, false
-				}
-				return user, true
-			}); err != nil {
+			&tokenTestSession{user: user}); err != nil {
 			t.Fatalf("VerifyAccessToken (old token after second rotate): %v", err)
 		}
 	})
@@ -399,12 +376,7 @@ func TestAccessTokenService(t *testing.T) {
 			func(grantID string, _ time.Time) (bool, string, error) {
 				return true, "test-client-1", nil
 			},
-			func(subject string) (User, bool) {
-				if subject != user.ID {
-					return User{}, false
-				}
-				return user, true
-			}); err != nil {
+			&tokenTestSession{user: user}); err != nil {
 			t.Fatalf("VerifyAccessToken (RSA key): %v", err)
 		}
 
@@ -504,9 +476,7 @@ func TestAccessTokenService(t *testing.T) {
 			func(grantID string, _ time.Time) (bool, string, error) {
 				return true, "test-client-1", nil
 			},
-			func(subject string) (User, bool) {
-				return user, true
-			}); err != nil {
+			&tokenTestSession{user: user}); err != nil {
 			t.Fatalf("VerifyAccessToken (EC PEM key): %v", err)
 		}
 	})
@@ -537,12 +507,35 @@ func TestAccessTokenService(t *testing.T) {
 			func(grantID string, _ time.Time) (bool, string, error) {
 				return true, "test-client-1", nil
 			},
-			func(subject string) (User, bool) {
-				return user, true
-			}); err != nil {
+			&tokenTestSession{user: user}); err != nil {
 			t.Fatalf("VerifyAccessToken (RSA PEM key): %v", err)
 		}
 	})
+}
+
+// tokenTestSession is a minimal SessionManager for token tests.
+// FindUser returns the hardcoded user; other methods panic if called.
+type tokenTestSession struct {
+	user User
+}
+
+func (s *tokenTestSession) CurrentUser(ctx context.Context) (User, bool) {
+	return s.user, true
+}
+
+func (s *tokenTestSession) AttachUser(ctx context.Context, u User) context.Context {
+	return ctx
+}
+
+func (s *tokenTestSession) FindUser(id string) (User, bool) {
+	if id == s.user.ID {
+		return s.user, true
+	}
+	return User{}, false
+}
+
+func (s *tokenTestSession) EndSession(ctx context.Context, r *http.Request, u User) (redirectURL string) {
+	return ""
 }
 
 func newTestAccessTokenService(t *testing.T, kid string) *AccessTokenService {

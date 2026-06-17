@@ -477,13 +477,10 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 			DefaultScopes:           []string{mcpScopeRead, mcpScopeTasksRead},
 			ScopeLabels:             mcpScopeLabels,
 			BaseURL:                 func(r *http.Request) string { return externalBaseURL(s.hostState, r) },
-			CurrentUser:             oauthCurrentUser,
-			AttachUser:              oauthAttachUser(d.AuthStore),
-			UserLookup:              oauthUserLookup(d.AuthStore),
-			Login:                   s.authHandlers,
+			Session:                 &caicSessionManager{store: d.AuthStore},
+			UI:                      &caicAuthorizationUI{login: s.authHandlers},
 			Audit:                   audit,
 			RateLimiter:             rateLimiter,
-			Renderer:                oauthConsentRenderer{},
 		})
 		if err != nil {
 			return nil, err

@@ -37,9 +37,6 @@ type parsedToken struct {
 // Returns (active, clientID, error).
 type GrantTouchFunc func(grantID string, now time.Time) (active bool, clientID string, err error)
 
-// UserLookupFunc returns the resource owner for a bearer-token subject.
-type UserLookupFunc func(subject string) (User, bool)
-
 // AccessTokenService signs and verifies OAuth JWT access tokens.
 type AccessTokenService struct {
 	keys       map[string]signingKey // active signing keys, keyed by KID
@@ -172,7 +169,7 @@ func (s *AccessTokenService) VerifyRegistrationAccessToken(token, issuer, audien
 }
 
 // VerifyAccessToken validates token and returns its bearer claims.
-func (s *AccessTokenService) VerifyAccessToken(token, issuer, audience string, now time.Time, touchGrant GrantTouchFunc, findUser UserLookupFunc) (*BearerClaims, error) {
+func (s *AccessTokenService) VerifyAccessToken(token, issuer, audience string, now time.Time, touchGrant GrantTouchFunc, session SessionManager) (*BearerClaims, error) {
 	claims, err := s.verifyClaims(token, issuer, audience, now)
 	if err != nil {
 		return nil, err
@@ -191,10 +188,10 @@ func (s *AccessTokenService) VerifyAccessToken(token, issuer, audience string, n
 		}
 		clientID = cid
 	}
-	if findUser == nil {
+	if session == nil {
 		return nil, errors.New("user lookup callback is required")
 	}
-	user, ok := findUser(claims.Subject)
+	user, ok := session.FindUser(claims.Subject)
 	if !ok {
 		return nil, errors.New("token subject is unknown")
 	}

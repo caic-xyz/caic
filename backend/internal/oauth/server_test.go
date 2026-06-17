@@ -88,7 +88,7 @@ func TestServer(t *testing.T) {
 	t.Run("login adapter redirects unauthenticated authorize request", func(t *testing.T) {
 		t.Parallel()
 
-		s := newTestServer(t, &ServerConfig{Login: testLoginAdapter{loginURL: "/auth/github/start?next=%2Foauth%2Fauthorize%3Fclient_id%3Dabc"}})
+		s := newTestServer(t, &ServerConfig{UI: &testAuthorizationUI{loginURL: "/auth/github/start?next=%2Foauth%2Fauthorize%3Fclient_id%3Dabc"}})
 		h := newTestServerHandler(s)
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/oauth/authorize?client_id=abc", http.NoBody)
@@ -381,7 +381,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, renderer := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		_, h, ui := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"http://localhost:9999/callback"})
 		form := authorizationCodeForm(registered.ClientID, "http://localhost:9999/callback", "")
 		req := newOAuthTestRequest(t, http.MethodGet, "/oauth/authorize"+"?"+form.Encode(), http.NoBody, user)
@@ -390,8 +390,8 @@ func TestServer(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		if len(renderer.last.ScopeItems) != 1 || renderer.last.ScopeItems[0].ID != "read" {
-			t.Fatalf("scope items = %+v, want default read scope", renderer.last.ScopeItems)
+		if len(ui.last.ScopeItems) != 1 || ui.last.ScopeItems[0].ID != "read" {
+			t.Fatalf("scope items = %+v, want default read scope", ui.last.ScopeItems)
 		}
 	})
 
@@ -930,7 +930,7 @@ func TestDPoP(t *testing.T) {
 			t.Fatalf("access token doesn't look like a JWT: %s", tokenResp.AccessToken)
 		}
 		// Verify the token contains cnf.jkt.
-		claims, err := s.tokens.VerifyAccessToken(tokenResp.AccessToken, testBaseURL, testResourceURL, time.Now(), s.touchGrant, s.findUserByID)
+		claims, err := s.tokens.VerifyAccessToken(tokenResp.AccessToken, testBaseURL, testResourceURL, time.Now(), s.touchGrant, s.session)
 		if err != nil {
 			t.Fatalf("verify access token: %v", err)
 		}
@@ -1415,27 +1415,68 @@ func setupDPoPBoundToken(t *testing.T) dpopTestResources {
 
 type testUserContextKey struct{}
 
-type captureConsentRenderer struct {
-	last ConsentPageData
+// captureAuthorizationUI captures consent page data and provides a basic auth UI for tests.
+type captureAuthorizationUI struct {
+	last     ConsentPageData
+	loginURL string
 }
 
-func (r *captureConsentRenderer) RenderOAuthConsent(w http.ResponseWriter, data *ConsentPageData) error {
+func (r *captureAuthorizationUI) LoginStartURL(*http.Request) string {
+	return r.loginURL
+}
+
+func (r *captureAuthorizationUI) ProviderLabel(provider string) string {
+	return provider
+}
+
+func (r *captureAuthorizationUI) RenderOAuthConsent(w http.ResponseWriter, data *ConsentPageData) error {
 	r.last = *data
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, err := w.Write([]byte(`<input type="hidden" name="consent_token" value="` + data.ConsentToken + `">`))
 	return err
 }
 
-type testLoginAdapter struct {
+type testAuthorizationUI struct {
 	loginURL string
+	last     ConsentPageData
 }
 
-func (a testLoginAdapter) LoginStartURL(*http.Request) string {
-	return a.loginURL
+func (u *testAuthorizationUI) LoginStartURL(*http.Request) string {
+	return u.loginURL
 }
 
-func (testLoginAdapter) ProviderLabel(provider string) string {
+func (u *testAuthorizationUI) ProviderLabel(provider string) string {
 	return provider
+}
+
+func (u *testAuthorizationUI) RenderOAuthConsent(w http.ResponseWriter, data *ConsentPageData) error {
+	u.last = *data
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, err := w.Write([]byte(`<input type="hidden" name="consent_token" value="` + data.ConsentToken + `">`))
+	return err
+}
+
+type testSessionManager struct {
+	users       map[string]User
+	endRedirect string
+}
+
+func (m *testSessionManager) CurrentUser(ctx context.Context) (User, bool) {
+	user, ok := ctx.Value(testUserContextKey{}).(User)
+	return user, ok
+}
+
+func (m *testSessionManager) AttachUser(ctx context.Context, u User) context.Context {
+	return ctx
+}
+
+func (m *testSessionManager) FindUser(id string) (User, bool) {
+	user, ok := m.users[id]
+	return user, ok
+}
+
+func (m *testSessionManager) EndSession(ctx context.Context, r *http.Request, u User) (redirectURL string) {
+	return m.endRedirect
 }
 
 func testUser() User {
@@ -1455,30 +1496,24 @@ func newTestServer(t *testing.T, cfgs ...*ServerConfig) *Server {
 	return s
 }
 
-func newTestFlowServer(t *testing.T, path string, users []User) (*Server, http.Handler, *captureConsentRenderer) {
-	renderer := &captureConsentRenderer{}
+func newTestFlowServer(t *testing.T, path string, users []User) (*Server, http.Handler, *captureAuthorizationUI) {
 	usersByID := make(map[string]User, len(users))
 	for _, user := range users {
 		usersByID[user.ID] = user
 	}
+	session := &testSessionManager{users: usersByID}
+	ui := &captureAuthorizationUI{}
 	cfg := &ServerConfig{
 		RefreshTokenStorePath: path,
-		CurrentUser: func(ctx context.Context) (User, bool) {
-			user, ok := ctx.Value(testUserContextKey{}).(User)
-			return user, ok
-		},
-		UserLookup: func(id string) (User, bool) {
-			user, ok := usersByID[id]
-			return user, ok
-		},
-		Renderer: renderer,
+		Session:               session,
+		UI:                    ui,
 	}
 	applyTestServerDefaults(t, cfg)
 	s, err := NewServer(*cfg)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
-	return s, newTestServerHandler(s), renderer
+	return s, newTestServerHandler(s), ui
 }
 
 func applyTestServerDefaults(t *testing.T, cfg *ServerConfig) {
@@ -1505,6 +1540,12 @@ func applyTestServerDefaults(t *testing.T, cfg *ServerConfig) {
 	}
 	if cfg.BaseURL == nil {
 		cfg.BaseURL = func(*http.Request) string { return testBaseURL }
+	}
+	if cfg.Session == nil {
+		cfg.Session = &testSessionManager{}
+	}
+	if cfg.UI == nil {
+		cfg.UI = &testAuthorizationUI{}
 	}
 }
 
@@ -2032,7 +2073,7 @@ func TestEndSession(t *testing.T) {
 
 		path := t.TempDir() + "/oauth.json"
 		cfg := testFlowServerConfig(path, []User{testUser()})
-		cfg.Login = testLoginAdapter{loginURL: "/auth/login"}
+		cfg.UI = &testAuthorizationUI{loginURL: "/auth/login"}
 		s, err := NewServer(cfg)
 		if err != nil {
 			t.Fatalf("NewServer: %v", err)
@@ -2056,8 +2097,9 @@ func TestEndSession(t *testing.T) {
 		user := testUser()
 		path := t.TempDir() + "/oauth.json"
 		cfg := testFlowServerConfig(path, []User{user})
-		cfg.EndSession = func(ctx context.Context, r *http.Request, u User) string {
-			return "https://custom.example.com/goodbye"
+		cfg.Session = &testSessionManager{
+			users:       map[string]User{user.ID: user},
+			endRedirect: "https://custom.example.com/goodbye",
 		}
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -2510,15 +2552,8 @@ func testFlowServerConfig(path string, users []User) ServerConfig {
 		SupportedScopes:         []string{"read", "write", "admin", "repos"},
 		DefaultScopes:           []string{"read", "write"},
 		BaseURL:                 func(*http.Request) string { return testBaseURL },
-		Renderer:                &captureConsentRenderer{},
-		CurrentUser: func(ctx context.Context) (User, bool) {
-			user, ok := ctx.Value(testUserContextKey{}).(User)
-			return user, ok
-		},
-		UserLookup: func(id string) (User, bool) {
-			user, ok := usersByID[id]
-			return user, ok
-		},
+		Session:                 &testSessionManager{users: usersByID},
+		UI:                      &captureAuthorizationUI{},
 	}
 	return cfg
 }
