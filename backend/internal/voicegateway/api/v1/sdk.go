@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"slices"
 
-	"github.com/caic-xyz/caic/backend/internal/apisdkgen/apispec"
+	"github.com/caic-xyz/caic/apisdkgen/apispec"
 	voiceapi "github.com/caic-xyz/caic/backend/internal/voicegateway/api"
 )
 

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caic-xyz/caic/backend/internal/apisdkgen/apispec"
+	"github.com/caic-xyz/caic/apisdkgen/apispec"
 )
 
 type TestJSONRPCRequest struct{}

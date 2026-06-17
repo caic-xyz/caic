@@ -10,7 +10,7 @@ import (
 
 	"github.com/maruel/ksid"
 
-	"github.com/caic-xyz/caic/backend/internal/apisdkgen/apispec"
+	"github.com/caic-xyz/caic/apisdkgen/apispec"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 )
 

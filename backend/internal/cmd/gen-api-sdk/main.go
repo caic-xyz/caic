@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/caic-xyz/caic/backend/internal/apisdkgen"
+	"github.com/caic-xyz/caic/apisdkgen"
 	"github.com/caic-xyz/caic/backend/internal/gomode"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"

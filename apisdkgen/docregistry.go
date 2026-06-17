@@ -13,7 +13,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/caic-xyz/caic/backend/internal/apisdkgen/apispec"
+	"github.com/caic-xyz/caic/apisdkgen/apispec"
 )
 
 // docRegistry holds parsed documentation extracted from Go source files.

@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/caic-xyz/caic/backend/internal/apisdkgen/apispec"
+	"github.com/caic-xyz/caic/apisdkgen/apispec"
 )
 
 func routeReqName(r *apispec.Route) string {

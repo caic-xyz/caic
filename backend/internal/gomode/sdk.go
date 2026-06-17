@@ -5,7 +5,7 @@ package gomode
 import (
 	"reflect"
 
-	"github.com/caic-xyz/caic/backend/internal/apisdkgen/apispec"
+	"github.com/caic-xyz/caic/apisdkgen/apispec"
 )
 
 // SDKAPI returns the SDK generation specification for the Go Mode service discovery API.
