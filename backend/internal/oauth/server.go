@@ -108,9 +108,10 @@ type ServerConfig struct {
 // JWTs. Refresh tokens are resource-scoped opaque tokens, persisted as hashes,
 // and rotated on every refresh grant.
 type Server struct {
-	mu     sync.Mutex
-	state  *Store
-	tokens *AccessTokenService
+	mu          sync.Mutex
+	state       *Store
+	parRequests map[string]ConsentParams // short-lived pushed authorization requests (RFC 9126)
+	tokens      *AccessTokenService
 
 	supportedScopes []string
 	defaultScopes   []string
@@ -167,6 +168,7 @@ func NewServer(c ServerConfig) (*Server, error) { //nolint:gocritic // ServerCon
 	}
 	return &Server{
 		state:                   state,
+		parRequests:             map[string]ConsentParams{},
 		tokens:                  tokens,
 		dpopNonces:              NewDPoPNonceManager(dpopNonceTTL),
 		supportedScopes:         c.SupportedScopes,
@@ -203,6 +205,7 @@ func (s *Server) Routes() http.Handler {
 	m.HandleFunc("GET /oauth/register/{clientID}", s.handleOAuthRegisterRead)
 	m.HandleFunc("PUT /oauth/register/{clientID}", s.handleOAuthRegisterUpdate)
 	m.HandleFunc("DELETE /oauth/register/{clientID}", s.handleOAuthRegisterDelete)
+	m.HandleFunc("POST /oauth/par", s.handleOAuthPAR)
 	m.HandleFunc("GET /oauth/authorize", s.handleOAuthAuthorizeGET)
 	m.HandleFunc("POST /oauth/authorize", s.handleOAuthAuthorizePOST)
 	m.HandleFunc("POST /oauth/token", s.handleOAuthToken)
@@ -394,6 +397,8 @@ func (s *Server) handleOAuthMetadata(w http.ResponseWriter, r *http.Request) {
 		DPoPSigningAlgValuesSupported:                 []string{"RS256", "ES256", "EdDSA"},
 		EndSessionEndpoint:                            issuer + "/oauth/end-session",
 		AuthorizationResponseIssuerParameterSupported: true,
+		PushedAuthorizationRequestEndpoint:            issuer + "/oauth/par",
+		RequirePushedAuthorizationRequests:            false,
 	}
 	writeJSONResponse(w, &metadata)
 }
@@ -418,11 +423,38 @@ func (s *Server) handleOAuthAuthorizeGET(w http.ResponseWriter, r *http.Request)
 		WriteError(w, http.StatusUnauthorized, "login_required", "log in before authorizing protected resource access")
 		return
 	}
+	// Check for RFC 9126 pushed authorization request.
+	if requestURI := r.URL.Query().Get("request_uri"); requestURI != "" {
+		s.mu.Lock()
+		par, ok := s.parRequests[requestURI]
+		if ok {
+			delete(s.parRequests, requestURI)
+		}
+		s.mu.Unlock()
+		if !ok || time.Now().After(par.ExpiresAt) {
+			WriteError(w, http.StatusBadRequest, "invalid_request_uri", "invalid or expired request_uri")
+			return
+		}
+		values := url.Values{}
+		for k, v := range par.Params {
+			values.Set(k, v)
+		}
+		if err := s.validateAuthorizeForm(r, values); err != nil {
+			WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+		s.renderConsent(w, r, user, values)
+		return
+	}
 	if err := s.validateAuthorizeRequest(r); err != nil {
 		WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
-	values := cloneURLValues(r.URL.Query())
+	s.renderConsent(w, r, user, cloneURLValues(r.URL.Query()))
+}
+
+// renderConsent stores consent parameters and renders the consent page.
+func (s *Server) renderConsent(w http.ResponseWriter, r *http.Request, user User, values url.Values) {
 	client := s.oauthClient(values.Get("client_id"))
 	scope, _ := s.normalizeScope(values.Get("scope"))
 	consentToken, err := randomToken()
@@ -457,6 +489,48 @@ func (s *Server) handleOAuthAuthorizeGET(w http.ResponseWriter, r *http.Request)
 	}
 	if err := s.ui.RenderOAuthConsent(w, &data); err != nil {
 		slog.WarnContext(r.Context(), "render oauth consent", "err", err)
+	}
+}
+
+// handleOAuthPAR handles RFC 9126 pushed authorization requests.
+func (s *Server) handleOAuthPAR(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
+	if err := r.ParseForm(); err != nil {
+		WriteError(w, http.StatusBadRequest, "invalid_request", "invalid form")
+		return
+	}
+	values := r.PostForm
+	if err := s.validateAuthorizeForm(r, values); err != nil {
+		WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	requestURI, err := randomToken()
+	if err != nil {
+		slog.WarnContext(r.Context(), "generate par request_uri", "err", err)
+		WriteError(w, http.StatusInternalServerError, "server_error", "could not generate request_uri")
+		return
+	}
+	requestURI = "urn:ietf:params:oauth:request_uri:" + requestURI
+	params := make(map[string]string)
+	for k, vals := range values {
+		if len(vals) > 0 {
+			params[k] = vals[0]
+		}
+	}
+	s.mu.Lock()
+	s.parRequests[requestURI] = ConsentParams{
+		Params:    params,
+		ExpiresAt: time.Now().Add(90 * time.Second),
+	}
+	s.mu.Unlock()
+	resp := PARResponse{
+		RequestURI: requestURI,
+		ExpiresIn:  90,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		slog.WarnContext(r.Context(), "encode par response", "err", err)
 	}
 }
 

@@ -79,6 +79,8 @@ type AuthorizationServerMetadata struct {
 	ScopesSupported                               []string `json:"scopes_supported,omitempty"`
 	DPoPSigningAlgValuesSupported                 []string `json:"dpop_signing_alg_values_supported,omitempty"`
 	AuthorizationResponseIssuerParameterSupported bool     `json:"authorization_response_iss_parameter_supported"`
+	PushedAuthorizationRequestEndpoint            string   `json:"pushed_authorization_request_endpoint,omitempty"`
+	RequirePushedAuthorizationRequests            bool     `json:"require_pushed_authorization_requests"`
 }
 
 // RegisterRequest is a dynamic client registration request.
@@ -97,6 +99,12 @@ type RegisterResponse struct {
 	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
 	RegistrationAccessToken string   `json:"registration_access_token,omitempty"`
 	RegistrationClientURI   string   `json:"registration_client_uri,omitempty"`
+}
+
+// PARResponse is an RFC 9126 pushed authorization request response.
+type PARResponse struct {
+	RequestURI string `json:"request_uri"`
+	ExpiresIn  int64  `json:"expires_in"`
 }
 
 // UpdateClientRequest is an RFC 7592 client update request body.

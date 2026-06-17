@@ -886,6 +886,288 @@ func TestServer(t *testing.T) {
 	})
 }
 
+func TestPAR(t *testing.T) {
+	t.Parallel()
+
+	t.Run("successful PAR flow", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+
+		// Push authorization request parameters.
+		parForm := authorizationCodeForm(registered.ClientID, "https://claude.example.com/callback", "read write")
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/par", strings.NewReader(parForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("par status = %d, want %d: %s", w.Code, http.StatusCreated, w.Body.String())
+		}
+		var parResp PARResponse
+		if err := json.NewDecoder(w.Body).Decode(&parResp); err != nil {
+			t.Fatalf("decode par response: %v", err)
+		}
+		if parResp.RequestURI == "" {
+			t.Fatal("request_uri is empty")
+		}
+		if !strings.HasPrefix(parResp.RequestURI, "urn:ietf:params:oauth:request_uri:") {
+			t.Fatalf("request_uri = %q, want urn:ietf:params:oauth:request_uri: prefix", parResp.RequestURI)
+		}
+		if parResp.ExpiresIn != 90 {
+			t.Fatalf("expires_in = %d, want 90", parResp.ExpiresIn)
+		}
+
+		// Authorize using the request_uri.
+		authURL := "/oauth/authorize?client_id=" + registered.ClientID + "&request_uri=" + url.QueryEscape(parResp.RequestURI)
+		req = newOAuthTestRequest(t, http.MethodGet, authURL, http.NoBody, user)
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("authorize status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		consentToken := consentTokenFromOAuthTestHTML(t, w.Body.String())
+
+		// Post consent.
+		postForm := url.Values{"consent_token": {consentToken}, "scope_form": {"1"}, "scope": {"read"}}
+		req = newOAuthTestRequest(t, http.MethodPost, "/oauth/authorize", strings.NewReader(postForm.Encode()), user)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusSeeOther {
+			t.Fatalf("authorize POST status = %d, want %d: %s", w.Code, http.StatusSeeOther, w.Body.String())
+		}
+		location, err := url.Parse(w.Header().Get("Location"))
+		if err != nil {
+			t.Fatalf("parse Location: %v", err)
+		}
+		code := location.Query().Get("code")
+		if code == "" {
+			t.Fatal("authorization code is empty")
+		}
+
+		// Exchange code for tokens.
+		tokenForm := url.Values{
+			"grant_type":    {GrantAuthorizationCode},
+			"code":          {code},
+			"client_id":     {registered.ClientID},
+			"redirect_uri":  {"https://claude.example.com/callback"},
+			"code_verifier": {testVerifier},
+			"resource":      {testResourceURL},
+		}
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(tokenForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var tokenResp TokenResponse
+		if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
+			t.Fatalf("decode token response: %v", err)
+		}
+		if tokenResp.AccessToken == "" || tokenResp.RefreshToken == "" {
+			t.Fatal("token response missing tokens")
+		}
+		// Verify the access token.
+		if _, err := s.verifyBearer(newTestResourceRequest(t), tokenResp.AccessToken); err != nil {
+			t.Fatalf("verify access token: %v", err)
+		}
+	})
+
+	t.Run("reuse of request_uri fails", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+
+		// Push PAR.
+		parForm := authorizationCodeForm(registered.ClientID, "https://claude.example.com/callback", "read")
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/par", strings.NewReader(parForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("par status = %d, want %d: %s", w.Code, http.StatusCreated, w.Body.String())
+		}
+		var parResp PARResponse
+		if err := json.NewDecoder(w.Body).Decode(&parResp); err != nil {
+			t.Fatalf("decode par response: %v", err)
+		}
+
+		// First use succeeds.
+		authURL := "/oauth/authorize?client_id=" + registered.ClientID + "&request_uri=" + url.QueryEscape(parResp.RequestURI)
+		req = newOAuthTestRequest(t, http.MethodGet, authURL, http.NoBody, user)
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("first authorize status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+
+		// Second use of the same request_uri fails.
+		req = newOAuthTestRequest(t, http.MethodGet, authURL, http.NoBody, user)
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("second authorize status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
+		}
+		// Verify error response body.
+		var errResp ErrorResponse
+		if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
+			t.Fatalf("decode error response: %v", err)
+		}
+		if errResp.Error != "invalid_request_uri" {
+			t.Fatalf("error = %q, want invalid_request_uri", errResp.Error)
+		}
+	})
+
+	t.Run("expired request_uri is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+
+		// Push PAR.
+		parForm := authorizationCodeForm(registered.ClientID, "https://claude.example.com/callback", "read")
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/par", strings.NewReader(parForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("par status = %d, want %d: %s", w.Code, http.StatusCreated, w.Body.String())
+		}
+		var parResp PARResponse
+		if err := json.NewDecoder(w.Body).Decode(&parResp); err != nil {
+			t.Fatalf("decode par response: %v", err)
+		}
+
+		// Manually expire the request_uri.
+		s.mu.Lock()
+		entry := s.parRequests[parResp.RequestURI]
+		entry.ExpiresAt = time.Now().Add(-time.Minute)
+		s.parRequests[parResp.RequestURI] = entry
+		s.mu.Unlock()
+
+		// Authorize with the expired request_uri.
+		authURL := "/oauth/authorize?client_id=" + registered.ClientID + "&request_uri=" + url.QueryEscape(parResp.RequestURI)
+		req = newOAuthTestRequest(t, http.MethodGet, authURL, http.NoBody, user)
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("authorize status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
+		}
+		var errResp ErrorResponse
+		if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
+			t.Fatalf("decode error response: %v", err)
+		}
+		if errResp.Error != "invalid_request_uri" {
+			t.Fatalf("error = %q, want invalid_request_uri", errResp.Error)
+		}
+	})
+
+	t.Run("PAR with missing client_id returns invalid_request", func(t *testing.T) {
+		t.Parallel()
+
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{testUser()})
+
+		parForm := authorizationCodeForm("", "https://example.com/callback", "read")
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/par", strings.NewReader(parForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("par status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
+		}
+		var errResp ErrorResponse
+		if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
+			t.Fatalf("decode error response: %v", err)
+		}
+		if errResp.Error != "invalid_request" {
+			t.Fatalf("error = %q, want invalid_request", errResp.Error)
+		}
+	})
+
+	t.Run("authorize with request_uri ignores inline query params", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		_, h, ui := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"http://localhost:9999/callback"})
+
+		// Push PAR with scope=read.
+		parForm := authorizationCodeForm(registered.ClientID, "http://localhost:9999/callback", "read")
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/par", strings.NewReader(parForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("par status = %d, want %d: %s", w.Code, http.StatusCreated, w.Body.String())
+		}
+		var parResp PARResponse
+		if err := json.NewDecoder(w.Body).Decode(&parResp); err != nil {
+			t.Fatalf("decode par response: %v", err)
+		}
+
+		// Authorize with request_uri and inline scope=write (should be ignored).
+		authURL := "/oauth/authorize?client_id=" + registered.ClientID +
+			"&request_uri=" + url.QueryEscape(parResp.RequestURI) +
+			"&scope=write"
+		req = newOAuthTestRequest(t, http.MethodGet, authURL, http.NoBody, user)
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("authorize status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+
+		// The consent page should show scope=read from PAR, not scope=write from query.
+		if len(ui.last.ScopeItems) != 1 || ui.last.ScopeItems[0].ID != "read" {
+			t.Fatalf("scope items = %+v, want [read] (inline params ignored)", ui.last.ScopeItems)
+		}
+
+		consentToken := consentTokenFromOAuthTestHTML(t, w.Body.String())
+		postForm := url.Values{"consent_token": {consentToken}, "scope_form": {"1"}, "scope": {"read"}}
+		req = newOAuthTestRequest(t, http.MethodPost, "/oauth/authorize", strings.NewReader(postForm.Encode()), user)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusSeeOther {
+			t.Fatalf("authorize POST status = %d, want %d: %s", w.Code, http.StatusSeeOther, w.Body.String())
+		}
+
+		// Exchange code for tokens — should get scope=read.
+		location, err := url.Parse(w.Header().Get("Location"))
+		if err != nil {
+			t.Fatalf("parse Location: %v", err)
+		}
+		code := location.Query().Get("code")
+		tokenForm := url.Values{
+			"grant_type":    {GrantAuthorizationCode},
+			"code":          {code},
+			"client_id":     {registered.ClientID},
+			"redirect_uri":  {"http://localhost:9999/callback"},
+			"code_verifier": {testVerifier},
+			"resource":      {testResourceURL},
+		}
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(tokenForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var tokenResp TokenResponse
+		if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
+			t.Fatalf("decode token response: %v", err)
+		}
+		if tokenResp.Scope != "read" {
+			t.Fatalf("token scope = %q, want read", tokenResp.Scope)
+		}
+	})
+}
+
 func TestDPoP(t *testing.T) {
 	t.Parallel()
 
