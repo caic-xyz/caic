@@ -77,8 +77,13 @@ func GitLabConfig(clientID, secret, gitlabURL string, host *HostState) ProviderC
 }
 
 // AuthURL returns the provider's authorization URL with the state param.
+//
+// PKCE is left off: GitHub's OAuth web flow does not support it and the
+// confidential client uses HMAC-signed state for CSRF. The oauth package
+// accepts an optional S256 code_challenge here, which a future GitLab-only
+// opt-in can supply once the verifier is carried across the redirect.
 func (c *ProviderConfig) AuthURL(state string) string {
-	return oauth.AuthorizationURL(c.AuthEndpoint, c.ClientID, c.RedirectURI(), c.Scopes, state)
+	return oauth.AuthorizationURL(c.AuthEndpoint, c.ClientID, c.RedirectURI(), c.Scopes, state, "")
 }
 
 // OAuthClientConfig returns the generic OAuth client settings for this provider.

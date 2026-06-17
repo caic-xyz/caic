@@ -170,7 +170,9 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 		}
 
 		// Exchange code for tokens.
-		accessToken, refreshToken, tokenExpiry, err := oauth.ExchangeCode(r.Context(), cfg.OAuthClientConfig(), code)
+		// PKCE is off for the confidential forge flow (see ProviderConfig.AuthURL);
+		// pass an empty code_verifier so the request matches the authorize call.
+		accessToken, refreshToken, tokenExpiry, err := oauth.ExchangeCode(r.Context(), cfg.OAuthClientConfig(), code, "")
 		if err != nil {
 			slog.WarnContext(r.Context(), "oauth exchange", "provider", provider, "err", err)
 			writeError(w, api.InternalError("token exchange failed"))

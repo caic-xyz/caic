@@ -46,13 +46,22 @@ type AccessTokenService struct {
 
 // NewAccessTokenService returns an access-token service from configured key material.
 //
-// If keyPEM is empty, NewAccessTokenService generates a new ECDSA P-256 key.
-// If kid is empty, it generates a random key ID.
+// keyPEM must hold a PEM-encoded RSA or EC private key; NewAccessTokenService
+// errors if it is empty. Persistent key material keeps issued tokens valid
+// across restarts and keeps JWKS consumers stable (RFC 9068). If kid is empty, a
+// random key ID is generated.
 func NewAccessTokenService(keyPEM []byte, kid string, ttl time.Duration) (*AccessTokenService, error) {
+	if len(keyPEM) == 0 {
+		return nil, errors.New("oauth: signing key PEM is required")
+	}
 	key, alg, err := accessTokenKey(keyPEM)
 	if err != nil {
 		return nil, err
 	}
+	return newAccessTokenService(key, alg, kid, ttl)
+}
+
+func newAccessTokenService(key crypto.Signer, alg, kid string, ttl time.Duration) (*AccessTokenService, error) {
 	if kid == "" {
 		generatedKID, err := randomToken()
 		if err != nil {
@@ -358,15 +367,8 @@ func verify(pub crypto.PublicKey, digest, signature []byte) error {
 }
 
 // accessTokenKey parses a PEM-encoded key and returns it as a crypto.Signer
-// with its JWS algorithm. If keyPEM is empty, generates a new ECDSA P-256 key.
+// with its JWS algorithm.
 func accessTokenKey(keyPEM []byte) (crypto.Signer, string, error) {
-	if len(keyPEM) == 0 {
-		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-		if err != nil {
-			return nil, "", fmt.Errorf("generate oauth signing key: %w", err)
-		}
-		return key, "ES256", nil
-	}
 	block, _ := pem.Decode(keyPEM)
 	if block == nil {
 		return nil, "", errors.New("decode oauth signing key PEM")

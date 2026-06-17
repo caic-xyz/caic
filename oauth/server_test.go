@@ -2050,7 +2050,10 @@ func TestDPoP(t *testing.T) {
 		}
 
 		// Issue a nonce and then use it in a subsequent proof.
-		nonce := s.dpopNonces.Issue()
+		nonce, err := s.dpopNonces.Issue()
+		if err != nil {
+			t.Fatalf("Issue nonce: %v", err)
+		}
 
 		// Get a new code and make a second request with the nonce.
 		code2 := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
@@ -2597,6 +2600,9 @@ func applyTestServerDefaults(t *testing.T, cfg *ServerConfig) {
 	}
 	if cfg.KeyID == "" {
 		cfg.KeyID = "test-key"
+	}
+	if cfg.KeyPEM == nil {
+		cfg.KeyPEM = testSigningKeyPEM
 	}
 	if cfg.ResourceURLPath == "" {
 		cfg.ResourceURLPath = "/resource"
@@ -3631,6 +3637,7 @@ func testFlowServerConfig(path string, users []User) ServerConfig {
 	cfg := ServerConfig{
 		RefreshTokenStorePath:   path,
 		KeyID:                   "test-key",
+		KeyPEM:                  testSigningKeyPEM,
 		ResourceURLPath:         "/resource",
 		ResourceMetadataURLPath: "/.well-known/oauth-protected-resource/resource",
 		ClientIDPrefix:          "test_",

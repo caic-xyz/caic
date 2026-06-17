@@ -665,7 +665,12 @@ func (s *Server) handleOAuthToken(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := VerifyDPoPProofTokenEndpoint(r, proofHeader, proofClaims, defaultDPoPMaxAge, s.dpopNonces.Validate); err != nil {
 			slog.WarnContext(r.Context(), "dpop proof validation", "err", err)
-			w.Header().Set("DPoP-Nonce", s.dpopNonces.Issue())
+			// Omit the DPoP-Nonce header on RNG failure rather than emit a weak one.
+			if nonce, nonceErr := s.dpopNonces.Issue(); nonceErr != nil {
+				slog.ErrorContext(r.Context(), "issue dpop nonce", "err", nonceErr)
+			} else {
+				w.Header().Set("DPoP-Nonce", nonce)
+			}
 			WriteError(w, http.StatusBadRequest, "invalid_dpop_proof", err.Error())
 			return
 		}
@@ -798,9 +803,14 @@ func (s *Server) writeTokenResponse(w http.ResponseWriter, r *http.Request, user
 	if dpopJKT != "" {
 		tokenType = DPoPTokenType
 	}
+	nonce, err := s.dpopNonces.Issue()
+	if err != nil {
+		slog.ErrorContext(r.Context(), "issue dpop nonce", "err", err)
+		WriteError(w, http.StatusInternalServerError, "server_error", "could not issue dpop nonce")
+		return
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
-	nonce := s.dpopNonces.Issue()
 	w.Header().Set("DPoP-Nonce", nonce)
 	resp := TokenResponse{AccessToken: accessToken, TokenType: tokenType, ExpiresIn: int64(s.accessTokenTTL.Seconds()), RefreshToken: refreshToken, Scope: scope}
 	writeJSONResponse(w, &resp)
@@ -1487,9 +1497,13 @@ func (s *Server) extractAuthToken(r *http.Request) (token, scheme string) {
 	}
 }
 
-func (s *Server) writeUnauthorizedDPoP(w http.ResponseWriter, _ *http.Request, description string) {
-	nonce := s.dpopNonces.Issue()
-	w.Header().Set("DPoP-Nonce", nonce)
+func (s *Server) writeUnauthorizedDPoP(w http.ResponseWriter, r *http.Request, description string) {
+	// Omit the DPoP-Nonce header on RNG failure rather than emit a weak one.
+	if nonce, err := s.dpopNonces.Issue(); err != nil {
+		slog.ErrorContext(r.Context(), "issue dpop nonce", "err", err)
+	} else {
+		w.Header().Set("DPoP-Nonce", nonce)
+	}
 	// Per RFC 9449 §9.3, include error and error_description with DPoP scheme.
 	w.Header().Set("WWW-Authenticate", fmt.Sprintf(`DPoP error="invalid_token", error_description=%q`, description))
 	writeUnauthorizedJSON(w)

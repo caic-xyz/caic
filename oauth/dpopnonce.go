@@ -33,18 +33,21 @@ func NewDPoPNonceManager(ttl time.Duration) *DPoPNonceManager {
 }
 
 // Issue returns a fresh nonce stored with expiration.
-func (m *DPoPNonceManager) Issue() string {
+//
+// It fails closed (RFC 9449 §8): if the system RNG fails, it returns an error
+// rather than a guessable fallback value. Callers must surface the failure
+// (HTTP 500 on the token path, or omit the DPoP-Nonce header on challenge
+// paths) and never emit a weak nonce.
+func (m *DPoPNonceManager) Issue() (string, error) {
 	nonce, err := newDPoPNonce()
 	if err != nil {
-		// crypto/rand errors are effectively impossible on a healthy system.
-		// Fall back to a timestamp-based value as a last resort.
-		nonce = fallbackNonce()
+		return "", err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.pruneLocked()
 	m.nonces[nonce] = time.Now().Add(m.ttl)
-	return nonce
+	return nonce, nil
 }
 
 // Validate checks a nonce and removes it (one-time use).
@@ -85,25 +88,14 @@ func (m *DPoPNonceManager) pruneLocked() {
 	}
 }
 
+// randRead is the entropy source for nonce generation, overridable in tests.
+var randRead = rand.Read
+
 // newDPoPNonce generates a 128-bit random base64url nonce.
 func newDPoPNonce() (string, error) {
 	var raw [16]byte
-	if _, err := rand.Read(raw[:]); err != nil {
+	if _, err := randRead(raw[:]); err != nil {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(raw[:]), nil
-}
-
-// fallbackNonce returns a time-based nonce for when crypto/rand fails.
-func fallbackNonce() string {
-	now := time.Now().UnixNano()
-	var raw [16]byte
-	for i := range 8 {
-		raw[i] = byte(now >> (i * 8)) //nolint:gosec // intentional byte extraction from int64
-	}
-	// mix in a fixed pattern for the upper bytes
-	for i := 8; i < 16; i++ {
-		raw[i] = byte(0xAA)
-	}
-	return base64.RawURLEncoding.EncodeToString(raw[:])
 }

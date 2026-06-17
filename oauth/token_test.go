@@ -511,6 +511,14 @@ func TestAccessTokenService(t *testing.T) {
 			t.Fatalf("VerifyAccessToken (RSA PEM key): %v", err)
 		}
 	})
+
+	t.Run("error empty PEM", func(t *testing.T) {
+		t.Parallel()
+
+		if _, err := NewAccessTokenService(nil, "kid-empty", time.Hour); err == nil {
+			t.Fatal("NewAccessTokenService(nil) = nil error, want error")
+		}
+	})
 }
 
 // tokenTestSession is a minimal SessionManager for token tests.
@@ -538,8 +546,22 @@ func (s *tokenTestSession) EndSession(ctx context.Context, r *http.Request, u Us
 	return ""
 }
 
+// testSigningKeyPEM is one ephemeral EC P-256 signing key, PEM-encoded, shared
+// across tests. Tests only read it, so a single key is safe under parallelism.
+var testSigningKeyPEM = func() []byte {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		panic("generate test signing key: " + err.Error())
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		panic("marshal test signing key: " + err.Error())
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
+}()
+
 func newTestAccessTokenService(t *testing.T, kid string) *AccessTokenService {
-	svc, err := NewAccessTokenService(nil, kid, time.Hour)
+	svc, err := NewAccessTokenService(testSigningKeyPEM, kid, time.Hour)
 	if err != nil {
 		t.Fatalf("NewAccessTokenService: %v", err)
 	}

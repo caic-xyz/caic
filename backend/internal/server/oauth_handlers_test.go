@@ -3,9 +3,14 @@
 package server
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -26,6 +31,22 @@ import (
 )
 
 const mcpAuthDefaultScope = mcpScopeRead + " " + mcpScopeTasksRead + " " + mcpScopeTasksWrite + " " + mcpScopeTasksAdmin + " " + mcpScopeReposWrite
+
+// testMCPOAuthSigningKeyPEM returns a fresh EC P-256 signing key, PEM-encoded,
+// for routers that build the OAuth server. Production supplies this from
+// persisted settings; the OAuth server requires a key and no longer defaults one.
+func testMCPOAuthSigningKeyPEM(t testing.TB) []byte {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate test oauth signing key: %v", err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatalf("marshal test oauth signing key: %v", err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
+}
 
 func TestOAuthServer(t *testing.T) {
 	t.Parallel()
@@ -414,6 +435,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 		AuthStore:                  store,
 		SessionSecret:              []byte("0123456789abcdef0123456789abcdef"),
 		HostState:                  auth.NewHostState("https://caic.example.com"),
+		OAuthPrivateKeyPEM:         testMCPOAuthSigningKeyPEM(t),
 		OAuthRefreshTokenStorePath: refreshTokenPath,
 		AuditLogPath:               auditPath,
 	})

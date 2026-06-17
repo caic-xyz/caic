@@ -152,6 +152,7 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 		IPGeoChecker:               checker,
 		Forge:                      forgeManager,
 		AuthStore:                  authStore,
+		OAuthPrivateKeyPEM:         testMCPOAuthSigningKeyPEM(t),
 		OAuthRefreshTokenStorePath: refreshTokenPath,
 		HostState:                  hostState,
 	})
