@@ -32,8 +32,8 @@ type authHandlers struct {
 	sessionSecret []byte
 	hostState     *auth.HostState
 
-	githubOAuth        *oauthclient.ForgeConfig
-	gitlabOAuth        *oauthclient.ForgeConfig
+	githubOAuth        *oauthclient.ProviderConfig
+	gitlabOAuth        *oauthclient.ProviderConfig
 	githubAllowedUsers []string
 	gitlabAllowedUsers []string
 }
@@ -284,7 +284,7 @@ func (h *authHandlers) handleGetMe(w http.ResponseWriter, r *http.Request) {
 // for concurrent use.
 func (h *authHandlers) refreshTokenRefresher() auth.TokenRefresher {
 	return func(ctx context.Context, u *auth.User) *auth.User {
-		var cfg *oauthclient.ForgeConfig
+		var cfg *oauthclient.ProviderConfig
 		switch u.Provider {
 		case forge.KindGitHub:
 			cfg = h.githubOAuth

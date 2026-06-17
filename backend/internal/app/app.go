@@ -152,8 +152,8 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 
 	var authStore *auth.Store
 	var sessionSecret []byte
-	var githubOAuth *oauthclient.ForgeConfig
-	var gitlabOAuth *oauthclient.ForgeConfig
+	var githubOAuth *oauthclient.ProviderConfig
+	var gitlabOAuth *oauthclient.ProviderConfig
 	oauthConfigured := cfg.GitHub.OAuthClientID != "" || cfg.GitLab.OAuthClientID != ""
 	if oauthConfigured {
 		secret, err := hex.DecodeString(settings.SessionSecret)

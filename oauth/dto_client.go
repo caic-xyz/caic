@@ -1,4 +1,5 @@
-// Client-side OAuth 2.0 DTOs.
+// Client-side OAuth 2.0 DTOs: types consumed by the oauthclient package.
+// Pure data — no HTTP, no I/O, no behavior beyond Token.Expired().
 
 package oauth
 

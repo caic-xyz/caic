@@ -1,4 +1,5 @@
-// Package oauthclient is an OAuth 2.0 authorization-code client library with (GitHub/GitLab) provider configurations.
+// Provider (GitHub, GitLab) configurations with userinfo fetching.
+
 package oauthclient
 
 import (
@@ -18,15 +19,15 @@ import (
 // per call. Mirrors the oauthserver.BaseURLFunc late-binding pattern.
 type RedirectURIFunc func(r *http.Request) string
 
-// Provider is the common interface for forge OAuth client configs.
+// Provider is the common interface for OAuth provider client configs.
 type Provider interface {
 	RedirectURI(r *http.Request) string
 	AuthURL(r *http.Request, state string) string
 	OAuthClientConfig(r *http.Request) oauth.ClientConfig
 }
 
-// ForgeConfig is the OAuth client configuration for a forge provider.
-type ForgeConfig struct {
+// ProviderConfig is the OAuth client configuration for a provider.
+type ProviderConfig struct {
 	ClientID        string
 	ClientSecret    string
 	RedirectURIFunc RedirectURIFunc
@@ -37,12 +38,12 @@ type ForgeConfig struct {
 	ParseUser       func(data []byte) (providerID, username, avatarURL string, err error)
 }
 
-// NewGitHubConfig returns a ForgeConfig for github.com
+// NewGitHubConfig returns a ProviderConfig for github.com
 // with scopes ["repo", "read:user"].
 //
 //nolint:gosec // ClientSecret is a function parameter, not a hardcoded credential
-func NewGitHubConfig(clientID, clientSecret string, redirectURI RedirectURIFunc) *ForgeConfig {
-	return &ForgeConfig{
+func NewGitHubConfig(clientID, clientSecret string, redirectURI RedirectURIFunc) *ProviderConfig {
+	return &ProviderConfig{
 		ClientID:        clientID,
 		ClientSecret:    clientSecret,
 		RedirectURIFunc: redirectURI,
@@ -54,14 +55,14 @@ func NewGitHubConfig(clientID, clientSecret string, redirectURI RedirectURIFunc)
 	}
 }
 
-// NewGitLabConfig returns a ForgeConfig for a GitLab instance
+// NewGitLabConfig returns a ProviderConfig for a GitLab instance
 // with scopes ["api", "read_user"]. gitlabURL defaults to "https://gitlab.com".
-func NewGitLabConfig(clientID, clientSecret, gitlabURL string, redirectURI RedirectURIFunc) *ForgeConfig {
+func NewGitLabConfig(clientID, clientSecret, gitlabURL string, redirectURI RedirectURIFunc) *ProviderConfig {
 	if gitlabURL == "" {
 		gitlabURL = "https://gitlab.com"
 	}
 	gitlabURL = strings.TrimRight(gitlabURL, "/")
-	return &ForgeConfig{
+	return &ProviderConfig{
 		ClientID:        clientID,
 		ClientSecret:    clientSecret,
 		RedirectURIFunc: redirectURI,
@@ -74,17 +75,17 @@ func NewGitLabConfig(clientID, clientSecret, gitlabURL string, redirectURI Redir
 }
 
 // RedirectURI returns the redirect URI for a request.
-func (c *ForgeConfig) RedirectURI(r *http.Request) string { //nolint:gocritic
+func (c *ProviderConfig) RedirectURI(r *http.Request) string { //nolint:gocritic
 	return c.RedirectURIFunc(r)
 }
 
 // AuthURL returns the provider's authorization URL with the state param.
-func (c *ForgeConfig) AuthURL(r *http.Request, state string) string { //nolint:gocritic
+func (c *ProviderConfig) AuthURL(r *http.Request, state string) string { //nolint:gocritic
 	return AuthorizationURL(c.AuthEndpoint, c.ClientID, c.RedirectURI(r), c.Scopes, state, "")
 }
 
 // OAuthClientConfig returns the generic OAuth client settings.
-func (c *ForgeConfig) OAuthClientConfig(r *http.Request) oauth.ClientConfig { //nolint:gocritic
+func (c *ProviderConfig) OAuthClientConfig(r *http.Request) oauth.ClientConfig { //nolint:gocritic
 	return oauth.ClientConfig{
 		ClientID:     c.ClientID,
 		ClientSecret: c.ClientSecret,
@@ -93,8 +94,8 @@ func (c *ForgeConfig) OAuthClientConfig(r *http.Request) oauth.ClientConfig { //
 	}
 }
 
-// FetchUser fetches the authenticated user from the forge's userinfo endpoint.
-func (c *ForgeConfig) FetchUser(ctx context.Context, accessToken string) (providerID, username, avatarURL string, err error) {
+// FetchUser fetches the authenticated user from the provider's userinfo endpoint.
+func (c *ProviderConfig) FetchUser(ctx context.Context, accessToken string) (providerID, username, avatarURL string, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.UserInfoURL, http.NoBody)
 	if err != nil {
 		return "", "", "", fmt.Errorf("build userinfo request: %w", err)

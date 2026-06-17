@@ -344,8 +344,8 @@ type Dependencies struct {
 	OAuthKeyID                 string
 	OAuthRefreshTokenStorePath string
 	AuditLogPath               string
-	GitHubOAuth                *oauthclient.ForgeConfig
-	GitLabOAuth                *oauthclient.ForgeConfig
+	GitHubOAuth                *oauthclient.ProviderConfig
+	GitLabOAuth                *oauthclient.ProviderConfig
 	HostState                  *auth.HostState
 	UsageFetchers              []usage.ProviderFetcher
 	VoiceBridge                *voicertc.Bridge

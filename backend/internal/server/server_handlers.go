@@ -48,8 +48,8 @@ type serverHandlers struct {
 	taskMgr            runnerRegistry
 	cacheSizes         *CacheSizeStore
 	authStore          *auth.Store
-	githubOAuth        *oauthclient.ForgeConfig
-	gitlabOAuth        *oauthclient.ForgeConfig
+	githubOAuth        *oauthclient.ProviderConfig
+	gitlabOAuth        *oauthclient.ProviderConfig
 	voiceGateway       v1.VoiceGatewayMetadata
 }
 

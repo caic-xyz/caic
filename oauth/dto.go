@@ -1,21 +1,26 @@
 // Package oauth is an OAuth 2.0 authorization server and client library.
 //
+// This package will be split into a standalone Go module (stdlib only).
+// No caic-internal types or backend dependencies may leak in.
+//
 // Subpackages:
 //
-//	oauth/oauthclient - Authorization-code client helpers and forge (GitHub/GitLab) providers.
-//	oauth/oauthserver - OAuth authorization server HTTP handlers and token management.
+//	oauth/oauthclient - Authorization-code client helpers and provider
+//	    (GitHub/GitLab) configurations.
+//	oauth/oauthserver - OAuth authorization server HTTP handlers and
+//	    token management.
 //
-// This root package holds shared constants and protocol-level DTOs used by
-// both subpackages. Server-side types and helpers live in dto_server.go;
+// This root package holds shared constants and protocol-level DTOs used
+// by both subpackages. Server-side types live in dto_server.go;
 // client-side types live in dto_client.go.
 //
-// Implemented RFCs: 6749 (Authorization Framework), 6750 (Bearer Token Usage),
-// 7636 (PKCE), 7009 (Token Revocation), 7662 (Token Introspection),
-// 8693 (Token Exchange), 9068 (JWT Profile for Access Tokens),
-// 8414 (Authorization Server Metadata), 7591 (Dynamic Client Registration),
-// 7592 (Client Registration Management), 8628 (Device Authorization Grant),
-// 9126 (Pushed Authorization Requests), 9207 (Issuer Identification),
-// 9449 (DPoP), and 9700 (OAuth Security BCP).
+// Implemented RFCs: 6749 (Authorization Framework), 6750 (Bearer Token
+// Usage), 7636 (PKCE), 7009 (Token Revocation), 7662 (Token
+// Introspection), 8693 (Token Exchange), 9068 (JWT Profile for Access
+// Tokens), 8414 (Authorization Server Metadata), 7591 (Dynamic Client
+// Registration), 7592 (Client Registration Management), 8628 (Device
+// Authorization Grant), 9126 (Pushed Authorization Requests), 9207
+// (Issuer Identification), 9449 (DPoP), and 9700 (OAuth Security BCP).
 package oauth
 
 const (

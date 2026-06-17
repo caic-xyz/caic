@@ -1,5 +1,10 @@
 // OAuth authorization-server HTTP handlers.
 
+// Package oauthserver is a generic OAuth 2.0 authorization server.
+//
+// The caller plugs in session management, consent UI rendering, and
+// token storage via interfaces (SessionManager, AuthorizationUI,
+// Storage). Dependency-free.
 package oauthserver
 
 import (

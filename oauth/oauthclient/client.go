@@ -1,5 +1,7 @@
-// Authorization-code client helpers and forge provider configurations.
+// Authorization-code client helpers and provider configurations.
 
+// Package oauthclient provides an OAuth 2.0 authorization-code client
+// for third-party providers. It is dependency-free.
 package oauthclient
 
 import (
