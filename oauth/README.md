@@ -4,10 +4,13 @@ Standalone Go OAuth 2.0 authorization server and client library.
 
 Implements: RFC 6749 (Authorization Framework), 6750 (Bearer Token Usage),
 7636 (PKCE), 7009 (Token Revocation), 7662 (Token Introspection),
-8693 (Token Exchange), 9068 (JWT Profile), 8414 (AS Metadata),
+9068 (JWT Profile), 8414 (AS Metadata),
 7591/7592 (Dynamic Client Registration), 8628 (Device Authorization),
 9126 (Pushed Authorization Requests), 9207 (Issuer Identification),
 9449 (DPoP), 9700 (Security BCP).
+
+Not implemented: RFC 8693 (Token Exchange). Mint audience-scoped tokens at
+the authorization endpoint via the `resource` parameter (RFC 8707) instead.
 
 Zero external dependencies — stdlib only.
 

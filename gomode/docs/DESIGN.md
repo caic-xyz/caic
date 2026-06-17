@@ -94,7 +94,78 @@ Deferred from the initial move to keep that step a pure path relocation.
 3. **Scoped token** — short-lived ed25519-signed claim (`serviceKind`,
    `serviceInstanceID`, `backendOrigin`, `sub`, `capabilities`, `aud`, `exp`).
    Host signs; gateway verifies against trusted issuers. Already generic — config
-   already names `"caic" or "mddb"` as issuer kinds.
+   already names `"caic" or "mddb"` as issuer kinds. See [Auth Model](#auth-model)
+   for the planned migration to oauth-issued JWTs.
+
+## Auth Model
+
+Three roles, deliberately separated:
+
+- **Host = authorization server**: owns user identity, login, sessions. It
+  authenticates the user and *mints* the voice token. caic/mddb use `oauth/`.
+- **gomode = token contract**: the claim shape and audience (`voice-gateway`).
+  It does not authenticate users and is not an auth server.
+- **Gateway = resource server**: holds no credentials, runs no login. It only
+  *verifies* tokens and brokers media. This verify-only posture is a security
+  feature — a compromised gateway leaks no long-lived secrets.
+
+### A shared gateway needs federation, not SSO
+
+The goal "people use a shared voice gateway" (one gateway serving caic, mddb,
+others) is an **issuer-federation** problem: the gateway must verify tokens from
+many hosts. It is *not* SSO. The gateway has no login screen and never sees a
+user authenticate, so single-sign-on (one user identity across products) is an
+orthogonal, host-level concern. You can run a fully shared gateway with zero SSO.
+
+"SSO between the host and the gateway", in the useful sense, just means the
+gateway is another resource server protected by the host's AS: one login at the
+host yields a token whose `aud` includes `voice-gateway`. That is the RFC 8707
+audience pattern, which `oauth/` already supports.
+
+Pursue user-SSO (a central IdP, hosts as OIDC relying parties) only if "one
+identity across caic + mddb" is a product goal. If so it is an `oauth/`
+initiative, not a gateway or gomode one.
+
+### Two deployment modes
+
+- **Embedded** (gateway in the host process, e.g. caic today): the RTC routes
+  ride the host's own session auth (`AuthRequired:false`, no token). De-facto
+  single-auth already; nothing to build.
+- **External shared** (one gateway, many hosts): the only place federation
+  applies. Host mints a JWT; gateway verifies it (below).
+
+### Token format: bespoke ed25519 → oauth JWT
+
+Today the scoped token is a custom ed25519 envelope verified against a static
+per-host key list (`TrustedIssuers`). That does not scale to an open set of
+hosts. Target:
+
+- Host mints an **oauth-issued JWT** (`aud=voice-gateway`, short `exp`,
+  capabilities as `scope`) using its `oauth/` `AccessTokenService`.
+- Gateway resolves the token's `iss` → fetches the issuer's
+  `/.well-known/oauth-authorization-server` → `jwks_uri` → caches keys →
+  verifies locally. Trust is gated by an **allowlist of issuer origins** (the
+  operator's knob), replacing the static *key* list with a static *origin* list;
+  keys then auto-resolve and rotate via JWKS.
+
+### `oauth/` readiness
+
+The issuer side is ~80% done in `oauth/` (stdlib-only): JWT access tokens
+(RS256/ES256, RFC 9068), JWKS at `/oauth/jwks` with rotation, AS metadata at
+`/.well-known/oauth-authorization-server`, and Bearer/local JWT verification a
+resource server can reuse. Two gaps, neither blocking:
+
+- **RFC 8693 token exchange is not implemented** (the package docs over-claimed
+  it; corrected). Not needed — the host backend already knows the user from the
+  session and mints the voice JWT *at source* with the right `aud`.
+- **No multi-issuer verifier** in `oauth/`: resolve-issuer-by-`iss` + JWKS cache
+  + origin allowlist is the one genuinely new component, and it lives on the
+  gateway. Modest and self-contained.
+
+The bespoke `scoped_token` is then retired (or kept only for a fully-offline
+embedded case). Until that migration lands, moving `scoped_token` to the gomode
+root (migration step 3) still holds: it keeps host signing decoupled from the
+WebRTC transport regardless of the eventual format.
 
 ## Staging (oauth precedent)
 

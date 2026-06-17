@@ -16,11 +16,14 @@
 //
 // Implemented RFCs: 6749 (Authorization Framework), 6750 (Bearer Token
 // Usage), 7636 (PKCE), 7009 (Token Revocation), 7662 (Token
-// Introspection), 8693 (Token Exchange), 9068 (JWT Profile for Access
-// Tokens), 8414 (Authorization Server Metadata), 7591 (Dynamic Client
-// Registration), 7592 (Client Registration Management), 8628 (Device
-// Authorization Grant), 9126 (Pushed Authorization Requests), 9207
-// (Issuer Identification), 9449 (DPoP), and 9700 (OAuth Security BCP).
+// Introspection), 9068 (JWT Profile for Access Tokens), 8414
+// (Authorization Server Metadata), 7591 (Dynamic Client Registration),
+// 7592 (Client Registration Management), 8628 (Device Authorization
+// Grant), 9126 (Pushed Authorization Requests), 9207 (Issuer
+// Identification), 9449 (DPoP), and 9700 (OAuth Security BCP).
+//
+// Not implemented: 8693 (Token Exchange). Issue audience-scoped tokens at
+// the authorization endpoint via the resource parameter (RFC 8707) instead.
 package oauth
 
 const (
