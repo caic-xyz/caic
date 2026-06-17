@@ -1,4 +1,9 @@
-// Package apisdkgen generates typed API SDKs and API reference documents.
+// Package apisdkgen generates typed SDKs (TypeScript, Kotlin, Swift) and API
+// reference documents from Go DTO types and route definitions.
+//
+// SDK specifications are defined by each package in an exported SDKAPI()
+// function returning an apispec.Config. The gen-api-sdk command discovers
+// these specs and produces output in sdk/<pkg>/<lang>/.
 package apisdkgen
 
 import (
