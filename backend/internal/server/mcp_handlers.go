@@ -177,7 +177,7 @@ func mcpHasScope(ctx context.Context, scope string) bool {
 // (metadata, challenge, bearer verification).
 func externalBaseURL(hostState *auth.HostState, r *http.Request) string {
 	if hostState != nil {
-		if externalURL := hostState.ExternalURL(); externalURL != "" {
+		if externalURL := hostState.ExternalURL(r); externalURL != "" {
 			return strings.TrimRight(externalURL, "/")
 		}
 	}

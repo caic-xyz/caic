@@ -8,15 +8,30 @@ import (
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
+	"github.com/caic-xyz/caic/oauth/oauthclient"
 )
+
+// dummyReq returns a request with the given Host and optional X-Forwarded headers.
+func dummyReq(t *testing.T, host, xfh, xfp string) *http.Request {
+	t.Helper()
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
+	r.Host = host
+	if xfh != "" {
+		r.Header.Set("X-Forwarded-Host", xfh)
+	}
+	if xfp != "" {
+		r.Header.Set("X-Forwarded-Proto", xfp)
+	}
+	return r
+}
 
 func TestHostState(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		host string
-		xfh  string // X-Forwarded-Host
-		xfp  string // X-Forwarded-Proto
+		xfh  string
+		xfp  string
 		want string
 	}{
 		{"non-default HTTP port", "caic.example.com:8080", "", "", "http://caic.example.com:8080"},
@@ -31,72 +46,66 @@ func TestHostState(t *testing.T) {
 		t.Run("lock "+tc.name, func(t *testing.T) {
 			t.Parallel()
 			state := &auth.HostState{}
-			h := state.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-			r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
-			r.Host = tc.host
-			if tc.xfh != "" {
-				r.Header.Set("X-Forwarded-Host", tc.xfh)
-			}
-			if tc.xfp != "" {
-				r.Header.Set("X-Forwarded-Proto", tc.xfp)
-			}
-			h.ServeHTTP(httptest.NewRecorder(), r)
-			if got := state.ExternalURL(); got != tc.want {
+			r := dummyReq(t, tc.host, tc.xfh, tc.xfp)
+			if got := state.ExternalURL(r); got != tc.want {
 				t.Errorf("ExternalURL = %q, want %q", got, tc.want)
 			}
 		})
 	}
 
-	t.Run("RedirectURI resolves after lock", func(t *testing.T) {
+	t.Run("RedirectURI resolves lazily", func(t *testing.T) {
 		t.Parallel()
 		host := &auth.HostState{}
 
-		// Before lock, provider creation fails because the external URL is empty.
-		_, err := auth.NewGitHubProvider("id", "sec", host)
-		if err == nil {
-			t.Fatal("NewGitHubProvider before lock = nil error, want error")
-		}
-		_, err = auth.NewGitLabProvider("id", "sec", "", host)
-		if err == nil {
-			t.Fatal("NewGitLabProvider before lock = nil error, want error")
+		// Before lock, non-FQDN request: ExternalURL returns "".
+		ipReq := dummyReq(t, "127.0.0.1:8080", "", "")
+		gh := oauthclient.NewGitHubConfig("id", "sec", func(r *http.Request) string {
+			u := host.ExternalURL(r)
+			if u == "" {
+				return ""
+			}
+			return u + "/api/caic/v1/auth/github/callback"
+		})
+		if got := gh.RedirectURI(ipReq); got != "" {
+			t.Errorf("RedirectURI before lock = %q, want empty", got)
 		}
 
-		// Lock via a request through the middleware.
-		h := host.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
-		r.Host = "caic.example.com"
-		r.Header.Set("X-Forwarded-Proto", "https")
-		h.ServeHTTP(httptest.NewRecorder(), r)
+		// Lock via a request through ExternalURL.
+		fqdnReq := dummyReq(t, "caic.example.com", "", "https")
+		_ = host.ExternalURL(fqdnReq)
 
-		// After lock, provider creation succeeds with the full redirect URI.
-		ghOAuth, err := auth.NewGitHubProvider("id", "sec", host)
-		if err != nil {
-			t.Fatalf("NewGitHubProvider: %v", err)
+		// After lock, RedirectURI resolves from the locked external URL.
+		if want := "https://caic.example.com/api/caic/v1/auth/github/callback"; gh.RedirectURI(fqdnReq) != want {
+			t.Errorf("GitHub RedirectURI = %q, want %q", gh.RedirectURI(fqdnReq), want)
 		}
-		if want := "https://caic.example.com/api/caic/v1/auth/github/callback"; ghOAuth.RedirectURI() != want {
-			t.Errorf("GitHub RedirectURI = %q, want %q", ghOAuth.RedirectURI(), want)
-		}
-		glOAuth, err := auth.NewGitLabProvider("id", "sec", "", host)
-		if err != nil {
-			t.Fatalf("NewGitLabProvider: %v", err)
-		}
-		if want := "https://caic.example.com/api/caic/v1/auth/gitlab/callback"; glOAuth.RedirectURI() != want {
-			t.Errorf("GitLab RedirectURI = %q, want %q", glOAuth.RedirectURI(), want)
+		gl := oauthclient.NewGitLabConfig("id", "sec", "", func(r *http.Request) string {
+			u := host.ExternalURL(r)
+			if u == "" {
+				return ""
+			}
+			return u + "/api/caic/v1/auth/gitlab/callback"
+		})
+		if want := "https://caic.example.com/api/caic/v1/auth/gitlab/callback"; gl.RedirectURI(fqdnReq) != want {
+			t.Errorf("GitLab RedirectURI = %q, want %q", gl.RedirectURI(fqdnReq), want)
 		}
 	})
 
 	t.Run("static host state", func(t *testing.T) {
 		t.Parallel()
 		host := auth.NewHostState("https://caic.example.com:8443")
-		if got := host.ExternalURL(); got != "https://caic.example.com:8443" {
+		r := dummyReq(t, "caic.example.com:8443", "", "https")
+		if got := host.ExternalURL(r); got != "https://caic.example.com:8443" {
 			t.Errorf("ExternalURL = %q, want %q", got, "https://caic.example.com:8443")
 		}
-		c, err := auth.NewGitHubProvider("id", "sec", host)
-		if err != nil {
-			t.Fatalf("NewGitHubProvider: %v", err)
-		}
-		if want := "https://caic.example.com:8443/api/caic/v1/auth/github/callback"; c.RedirectURI() != want {
-			t.Errorf("RedirectURI = %q, want %q", c.RedirectURI(), want)
+		c := oauthclient.NewGitHubConfig("id", "sec", func(r *http.Request) string {
+			u := host.ExternalURL(r)
+			if u == "" {
+				return ""
+			}
+			return u + "/api/caic/v1/auth/github/callback"
+		})
+		if want := "https://caic.example.com:8443/api/caic/v1/auth/github/callback"; c.RedirectURI(r) != want {
+			t.Errorf("RedirectURI = %q, want %q", c.RedirectURI(r), want)
 		}
 	})
 
@@ -105,13 +114,12 @@ func TestHostState(t *testing.T) {
 		state := &auth.HostState{}
 		called := false
 		h := state.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
-		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
-		r.Host = "192.168.1.1:8080"
+		r := dummyReq(t, "192.168.1.1:8080", "", "")
 		h.ServeHTTP(httptest.NewRecorder(), r)
 		if !called {
 			t.Error("IP request should pass through")
 		}
-		if got := state.ExternalURL(); got != "" {
+		if got := state.ExternalURL(r); got != "" {
 			t.Errorf("ExternalURL should be empty for IP, got %q", got)
 		}
 	})
@@ -122,13 +130,11 @@ func TestHostState(t *testing.T) {
 		h := state.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 
 		// Lock with first request.
-		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
-		r.Host = "caic.example.com"
+		r := dummyReq(t, "caic.example.com", "", "")
 		h.ServeHTTP(httptest.NewRecorder(), r)
 
 		// Different FQDN is rejected.
-		r = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
-		r.Host = "evil.example.com"
+		r = dummyReq(t, "evil.example.com", "", "")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		if w.Code != http.StatusForbidden {
@@ -142,13 +148,11 @@ func TestHostState(t *testing.T) {
 		h := state.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 
 		// Lock on port 8080.
-		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
-		r.Host = "caic.example.com:8080"
+		r := dummyReq(t, "caic.example.com:8080", "", "")
 		h.ServeHTTP(httptest.NewRecorder(), r)
 
 		// Same host, different port is rejected.
-		r = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
-		r.Host = "caic.example.com:9090"
+		r = dummyReq(t, "caic.example.com:9090", "", "")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		if w.Code != http.StatusForbidden {

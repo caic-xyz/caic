@@ -30,44 +30,23 @@ func NewHostState(externalURL string) *HostState {
 	return &HostState{lockedHost: host, externalURL: externalURL}
 }
 
-// ExternalURL returns the locked external URL, or "" if not yet locked.
-func (s *HostState) ExternalURL() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.externalURL
-}
-
-// Middleware locks on the first FQDN request and rejects different FQDNs
-// afterward. Non-FQDN hosts (bare IPs, localhost) pass through unchecked.
-//
-// Behind a reverse proxy, X-Forwarded-Host and X-Forwarded-Proto are used
-// to determine the client-facing authority and scheme.
-func (s *HostState) Middleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authority, scheme := effectiveHostAndScheme(r)
-		if !isFQDN(extractHost(authority)) {
-			next.ServeHTTP(w, r)
-			return
-		}
-		if locked := s.lock(authority, scheme); !strings.EqualFold(authority, locked) {
-			http.Error(w, "forbidden: invalid host", http.StatusForbidden)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// lock locks the host authority from the request. The caller must ensure the
-// host is a valid FQDN. If already locked, returns the existing value.
-func (s *HostState) lock(authority, scheme string) string {
+// ExternalURL returns the external URL from a request for use in OAuth redirect
+// URI construction. On the first FQDN request it auto-locks the host authority;
+// subsequent calls return the locked URL regardless of the request.
+func (s *HostState) ExternalURL(r *http.Request) string {
+	authority, scheme := effectiveHostAndScheme(r)
+	if !isFQDN(extractHost(authority)) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.externalURL
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.lockedHost != "" {
-		return s.lockedHost
+		return s.externalURL
 	}
 	s.lockedHost = strings.ToLower(authority)
 	hostname := extractHost(s.lockedHost)
-	// Preserve non-default port in the external URL.
 	hostport := hostname
 	if _, port, err := net.SplitHostPort(s.lockedHost); err == nil {
 		if (scheme == "https" && port != "443") || (scheme == "http" && port != "80") {
@@ -76,7 +55,32 @@ func (s *HostState) lock(authority, scheme string) string {
 	}
 	s.externalURL = scheme + "://" + hostport
 	slog.Info("auto-locked external URL", "url", s.externalURL)
-	return s.lockedHost
+	return s.externalURL
+}
+
+// Middleware rejects requests with a different FQDN after the host is locked.
+// Non-FQDN hosts (bare IPs, localhost) pass through unchecked.
+//
+// Behind a reverse proxy, X-Forwarded-Host and X-Forwarded-Proto are used
+// to determine the client-facing authority and scheme.
+func (s *HostState) Middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authority, _ := effectiveHostAndScheme(r)
+		if !isFQDN(extractHost(authority)) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		s.mu.Lock()
+		locked := s.lockedHost
+		s.mu.Unlock()
+		if locked != "" && !strings.EqualFold(authority, locked) {
+			http.Error(w, "forbidden: invalid host", http.StatusForbidden)
+			return
+		}
+		// Auto-lock via ExternalURL side-effect on first FQDN.
+		_ = s.ExternalURL(r)
+		next.ServeHTTP(w, r)
+	})
 }
 
 // effectiveHostAndScheme returns the client-facing authority and scheme.

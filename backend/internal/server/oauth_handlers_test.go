@@ -355,8 +355,7 @@ func TestOAuthServer(t *testing.T) {
 			t.Parallel()
 			s2, _ := newAuthEnabledRouter(t)
 			s2.authHandlers.hostState = s2.hostState
-			cfg := oauthclient.NewGitHubConfig("github-client", "github-secret", "https://localhost/api/caic/v1/auth/github/callback")
-			s2.authHandlers.githubOAuth = &cfg
+			s2.authHandlers.githubOAuth = oauthclient.NewGitHubConfig("github-client", "github-secret", func(_ *http.Request) string { return "https://localhost/api/caic/v1/auth/github/callback" })
 			h2, err := s2.buildHandler()
 			if err != nil {
 				t.Fatalf("buildHandler: %v", err)

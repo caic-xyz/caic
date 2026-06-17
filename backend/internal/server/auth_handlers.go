@@ -15,7 +15,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/oauth"
 	"github.com/caic-xyz/caic/oauth/oauthclient"
 	"github.com/caic-xyz/caic/oauth/oauthserver"
 )
@@ -26,20 +25,13 @@ const (
 	sessionMaxAge     = 30 * 24 * 60 * 60 // 30 days in seconds
 )
 
-// forgeProvider is the common interface between GitHub and GitLab OAuth configs.
-type forgeProvider interface {
-	RedirectURI() string
-	AuthURL(state string) string
-	OAuthClientConfig() oauth.ClientConfig
-}
-
 type authHandlers struct {
 	store         *auth.Store
 	sessionSecret []byte
 	hostState     *auth.HostState
 
-	githubOAuth        *oauthclient.GitHubConfig
-	gitlabOAuth        *oauthclient.GitLabConfig
+	githubOAuth        *oauthclient.ForgeConfig
+	gitlabOAuth        *oauthclient.ForgeConfig
 	githubAllowedUsers []string
 	gitlabAllowedUsers []string
 }
@@ -48,7 +40,7 @@ type authHandlers struct {
 // provider, with next set to resume r after login. Empty when no provider is
 // configured.
 func (h *authHandlers) LoginStartURL(r *http.Request) string {
-	provider := h.defaultProvider()
+	provider := h.defaultProvider(r)
 	if provider == "" {
 		return ""
 	}
@@ -81,7 +73,7 @@ func (h *authHandlers) ProviderLabel(provider string) string {
 func (h *authHandlers) handleStart(provider string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg := h.providerConfig(provider)
-		if cfg == nil || cfg.RedirectURI() == "" {
+		if cfg == nil || cfg.RedirectURI(r) == "" {
 			writeError(w, api.NotFound("provider"))
 			return
 		}
@@ -120,10 +112,10 @@ func (h *authHandlers) handleStart(provider string) http.HandlerFunc {
 			MaxAge:   600,
 			HttpOnly: true,
 			SameSite: http.SameSiteLaxMode,
-			Secure:   h.useSecureCookies(),
+			Secure:   h.useSecureCookies(r),
 			Path:     "/",
 		})
-		authURL := cfg.AuthURL(fullState)
+		authURL := cfg.AuthURL(r, fullState)
 		http.Redirect(w, r, authURL, http.StatusFound) //nolint:gosec // G710: configured OAuth provider; next is same-origin state only.
 	}
 }
@@ -133,7 +125,7 @@ func (h *authHandlers) handleStart(provider string) http.HandlerFunc {
 func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg := h.providerConfig(provider)
-		if cfg == nil || cfg.RedirectURI() == "" {
+		if cfg == nil || cfg.RedirectURI(r) == "" {
 			writeError(w, api.NotFound("provider"))
 			return
 		}
@@ -145,7 +137,7 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 			MaxAge:   -1,
 			HttpOnly: true,
 			SameSite: http.SameSiteLaxMode,
-			Secure:   h.useSecureCookies(),
+			Secure:   h.useSecureCookies(r),
 			Path:     "/",
 		})
 
@@ -188,7 +180,7 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 		// Exchange code for tokens.
 		// PKCE is off; all forge providers are confidential clients with
 		// HMAC-signed state.
-		accessToken, refreshToken, tokenExpiry, err := oauthclient.ExchangeCode(r.Context(), cfg.OAuthClientConfig(), code, "")
+		accessToken, refreshToken, tokenExpiry, err := oauthclient.ExchangeCode(r.Context(), cfg.OAuthClientConfig(r), code, "")
 		if err != nil {
 			slog.WarnContext(r.Context(), "oauth exchange", "provider", provider, "err", err)
 			writeError(w, api.InternalError("token exchange failed"))
@@ -200,10 +192,10 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 		switch provider {
 		case "github":
 			githubCfg := h.githubOAuth
-			providerID, username, avatarURL, err = oauthclient.FetchGitHubUser(r.Context(), *githubCfg, accessToken)
+			providerID, username, avatarURL, err = githubCfg.FetchUser(r.Context(), accessToken)
 		case "gitlab":
 			gitlabCfg := h.gitlabOAuth
-			providerID, username, avatarURL, err = oauthclient.FetchGitLabUser(r.Context(), *gitlabCfg, accessToken)
+			providerID, username, avatarURL, err = gitlabCfg.FetchUser(r.Context(), accessToken)
 		default:
 			writeError(w, api.NotFound("provider"))
 			return
@@ -254,7 +246,7 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 			MaxAge:   sessionMaxAge,
 			HttpOnly: true,
 			SameSite: http.SameSiteLaxMode,
-			Secure:   h.useSecureCookies(),
+			Secure:   h.useSecureCookies(r),
 			Path:     "/",
 		})
 
@@ -293,7 +285,7 @@ func (h *authHandlers) handleLogout(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   h.useSecureCookies(),
+		Secure:   h.useSecureCookies(r),
 		Path:     "/",
 	})
 	writeJSONResponse(w, &v1.StatusResp{Status: "ok"}, nil)
@@ -311,7 +303,7 @@ func (h *authHandlers) allowedUsersFor(provider string) []string {
 }
 
 // providerConfig returns the forge provider config for the named provider, or nil.
-func (h *authHandlers) providerConfig(provider string) forgeProvider {
+func (h *authHandlers) providerConfig(provider string) oauthclient.Provider {
 	switch provider {
 	case "github":
 		if h.githubOAuth == nil {
@@ -328,9 +320,9 @@ func (h *authHandlers) providerConfig(provider string) forgeProvider {
 }
 
 // defaultProvider returns the first configured forge login provider, or empty.
-func (h *authHandlers) defaultProvider() string {
+func (h *authHandlers) defaultProvider(r *http.Request) string {
 	for _, provider := range []string{"github", "gitlab"} {
-		if cfg := h.providerConfig(provider); cfg != nil && cfg.RedirectURI() != "" {
+		if cfg := h.providerConfig(provider); cfg != nil && cfg.RedirectURI(r) != "" {
 			return provider
 		}
 	}
@@ -339,8 +331,8 @@ func (h *authHandlers) defaultProvider() string {
 
 // useSecureCookies reports whether to set the Secure flag on cookies.
 // True when the external URL starts with "https://".
-func (h *authHandlers) useSecureCookies() bool {
-	return h.hostState != nil && strings.HasPrefix(h.hostState.ExternalURL(), "https://")
+func (h *authHandlers) useSecureCookies(r *http.Request) bool {
+	return h.hostState != nil && strings.HasPrefix(h.hostState.ExternalURL(r), "https://")
 }
 
 func buildLoginState(mode, state, next string) string {

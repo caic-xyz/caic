@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"path/filepath"
 	"runtime/trace"
 	"strings"
@@ -151,10 +152,10 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 
 	var authStore *auth.Store
 	var sessionSecret []byte
-	var githubOAuth *oauthclient.GitHubConfig
-	var gitlabOAuth *oauthclient.GitLabConfig
+	var githubOAuth *oauthclient.ForgeConfig
+	var gitlabOAuth *oauthclient.ForgeConfig
 	oauthConfigured := cfg.GitHub.OAuthClientID != "" || cfg.GitLab.OAuthClientID != ""
-	if cfg.Auth.ExternalURL != "" && (oauthConfigured || !isAuto) {
+	if oauthConfigured {
 		secret, err := hex.DecodeString(settings.SessionSecret)
 		if err != nil {
 			return nil, fmt.Errorf("decode session secret: %w", err)
@@ -166,18 +167,28 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		}
 		authStore = store
 		if cfg.GitHub.OAuthClientID != "" && cfg.GitHub.OAuthClientSecret != "" {
-			c, err := auth.NewGitHubProvider(cfg.GitHub.OAuthClientID, cfg.GitHub.OAuthClientSecret, hostState)
-			if err != nil {
-				return nil, fmt.Errorf("github oauth provider: %w", err)
-			}
-			githubOAuth = c
+			githubOAuth = oauthclient.NewGitHubConfig(
+				cfg.GitHub.OAuthClientID, cfg.GitHub.OAuthClientSecret,
+				func(r *http.Request) string {
+					u := hostState.ExternalURL(r)
+					if u == "" {
+						return ""
+					}
+					return u + "/api/caic/v1/auth/github/callback"
+				},
+			)
 		}
 		if cfg.GitLab.OAuthClientID != "" && cfg.GitLab.OAuthClientSecret != "" {
-			c, err := auth.NewGitLabProvider(cfg.GitLab.OAuthClientID, cfg.GitLab.OAuthClientSecret, cfg.GitLab.URL, hostState)
-			if err != nil {
-				return nil, fmt.Errorf("gitlab oauth provider: %w", err)
-			}
-			gitlabOAuth = c
+			gitlabOAuth = oauthclient.NewGitLabConfig(
+				cfg.GitLab.OAuthClientID, cfg.GitLab.OAuthClientSecret, cfg.GitLab.URL,
+				func(r *http.Request) string {
+					u := hostState.ExternalURL(r)
+					if u == "" {
+						return ""
+					}
+					return u + "/api/caic/v1/auth/gitlab/callback"
+				},
+			)
 		}
 	}
 

@@ -2509,15 +2509,14 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 	s.sessionSecret = secret
 	s.authStore = store
 	s.hostState = host
-	githubCfg := oauthclient.NewGitHubConfig("cid", "csec", "http://localhost/api/caic/v1/auth/github/callback")
+	githubCfg := oauthclient.NewGitHubConfig("cid", "csec", func(_ *http.Request) string { return "http://localhost/api/caic/v1/auth/github/callback" })
 	githubCfg.TokenURL = tokenServer.URL
 	githubCfg.UserInfoURL = userServer.URL
 	githubCfg.Scopes = []string{"repo"}
-	githubOAuth := &githubCfg
 	s.authHandlers.store = s.authStore
 	s.authHandlers.sessionSecret = s.sessionSecret
 	s.authHandlers.hostState = s.hostState
-	s.authHandlers.githubOAuth = githubOAuth
+	s.authHandlers.githubOAuth = githubCfg
 
 	t.Run("valid state round-trip succeeds", func(t *testing.T) {
 		t.Parallel()
