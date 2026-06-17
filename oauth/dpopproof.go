@@ -100,7 +100,7 @@ func DPoPProof(r *http.Request) (*DPoPHeader, *DPoPClaims, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("decode dpop proof signature: %w", err)
 	}
-	pub, _, err := jwkPublicKey(&header.JWK)
+	pub, _, err := jwkPublicKey(&header.JWK, header.Alg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse dpop proof jwk: %w", err)
 	}
@@ -185,8 +185,23 @@ func DPoPAccessTokenHash(accessToken string) string {
 	return base64.RawURLEncoding.EncodeToString(digest[:])
 }
 
-// jwtPublicKey converts a JWK to a Go public key and hash algorithm.
-func jwkPublicKey(jwk *JWK) (crypto.PublicKey, crypto.Hash, error) {
+// minRSAModulusBits and maxRSAModulusBits bound a DPoP proof's RSA key.
+//
+// The floor (2048) rejects keys too weak to meaningfully bind the token; the
+// ceiling (8192) caps the CPU a single verify can burn (RFC 9449 §4.3).
+const (
+	minRSAModulusBits = 2048
+	maxRSAModulusBits = 8192
+)
+
+// jwkPublicKey converts a JWK to a Go public key and hash algorithm.
+//
+// alg is the JOSE "alg" from the proof header; it must agree with the JWK key
+// type per RFC 9449 §4.3, otherwise the proof is rejected.
+func jwkPublicKey(jwk *JWK, alg string) (crypto.PublicKey, crypto.Hash, error) {
+	if err := checkAlgKeyType(alg, jwk); err != nil {
+		return nil, 0, err
+	}
 	switch jwk.Kty {
 	case "RSA":
 		n, err := base64.RawURLEncoding.DecodeString(jwk.N)
@@ -197,8 +212,12 @@ func jwkPublicKey(jwk *JWK) (crypto.PublicKey, crypto.Hash, error) {
 		if err != nil {
 			return nil, 0, fmt.Errorf("decode rsa e: %w", err)
 		}
+		modulus := new(big.Int).SetBytes(n)
+		if bits := modulus.BitLen(); bits < minRSAModulusBits || bits > maxRSAModulusBits {
+			return nil, 0, fmt.Errorf("rsa modulus %d bits is outside allowed range [%d, %d]", bits, minRSAModulusBits, maxRSAModulusBits)
+		}
 		pub := &rsa.PublicKey{
-			N: new(big.Int).SetBytes(n),
+			N: modulus,
 			E: int(new(big.Int).SetBytes(e).Int64()),
 		}
 		return pub, crypto.SHA256, nil
@@ -249,6 +268,30 @@ func jwkPublicKey(jwk *JWK) (crypto.PublicKey, crypto.Hash, error) {
 	default:
 		return nil, 0, fmt.Errorf("unsupported jwk key type: %s", jwk.Kty)
 	}
+}
+
+// checkAlgKeyType asserts the proof's JOSE alg agrees with the JWK key type
+// per RFC 9449 §4.3 (EC curves bind to ES*, RSA to RS*/PS*, Ed25519 to EdDSA).
+func checkAlgKeyType(alg string, jwk *JWK) error {
+	switch jwk.Kty {
+	case "RSA":
+		switch alg {
+		case "RS256", "RS384", "RS512", "PS256", "PS384", "PS512":
+			return nil
+		}
+	case "EC":
+		want := map[string]string{"P-256": "ES256", "P-384": "ES384", "P-521": "ES512"}[jwk.Crv]
+		if want != "" && alg == want {
+			return nil
+		}
+	case "OKP":
+		if jwk.Crv == "Ed25519" && alg == "EdDSA" {
+			return nil
+		}
+	default:
+		return fmt.Errorf("unsupported jwk key type: %s", jwk.Kty)
+	}
+	return fmt.Errorf("dpop proof alg %q does not match jwk key type %q/%q", alg, jwk.Kty, jwk.Crv)
 }
 
 // verifyJWTSignature verifies a JWT signature against a public key.

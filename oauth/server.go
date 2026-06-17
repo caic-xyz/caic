@@ -478,7 +478,7 @@ func (s *Server) renderConsent(w http.ResponseWriter, r *http.Request, user User
 			params[k] = vals[0]
 		}
 	}
-	s.state.Consents[consentToken] = ConsentParams{UserID: user.ID, Params: params, ExpiresAt: time.Now().Add(s.authCodeTTL)}
+	s.state.Consents[RefreshTokenKey(consentToken)] = ConsentParams{UserID: user.ID, Params: params, ExpiresAt: time.Now().Add(s.authCodeTTL)}
 	if err := s.state.Save(); err != nil {
 		slog.WarnContext(r.Context(), "save oauth consent", "err", err)
 	}
@@ -554,10 +554,11 @@ func (s *Server) handleOAuthAuthorizePOST(w http.ResponseWriter, r *http.Request
 		return
 	}
 	consentToken := r.PostForm.Get("consent_token")
+	consentHash := RefreshTokenKey(consentToken)
 	s.mu.Lock()
-	c, ok := s.state.Consents[consentToken]
+	c, ok := s.state.Consents[consentHash]
 	if ok {
-		delete(s.state.Consents, consentToken)
+		delete(s.state.Consents, consentHash)
 		if err := s.state.Save(); err != nil {
 			slog.WarnContext(r.Context(), "save oauth consent deletion", "err", err)
 		}
@@ -602,7 +603,7 @@ func (s *Server) handleOAuthAuthorizePOST(w http.ResponseWriter, r *http.Request
 	}
 	entry := Code{UserID: user.ID, ClientID: values.Get("client_id"), RedirectURI: values.Get("redirect_uri"), CodeChallenge: values.Get("code_challenge"), Resource: values.Get("resource"), Scope: scope, ExpiresAt: time.Now().Add(s.authCodeTTL)}
 	s.mu.Lock()
-	s.state.Codes[code] = entry
+	s.state.Codes[RefreshTokenKey(code)] = entry
 	if err := s.state.Save(); err != nil {
 		slog.WarnContext(r.Context(), "save oauth code", "err", err)
 		WriteError(w, http.StatusInternalServerError, "server_error", "could not authorize client")
@@ -683,10 +684,11 @@ func (s *Server) handleOAuthToken(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r *http.Request, dpopJKT string) {
 	code := r.PostForm.Get("code")
+	codeHash := RefreshTokenKey(code)
 	s.mu.Lock()
-	entry, ok := s.state.Codes[code]
+	entry, ok := s.state.Codes[codeHash]
 	if ok {
-		delete(s.state.Codes, code)
+		delete(s.state.Codes, codeHash)
 		if err := s.state.Save(); err != nil {
 			slog.WarnContext(r.Context(), "save oauth code deletion", "err", err)
 		}

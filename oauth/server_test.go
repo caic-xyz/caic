@@ -5,6 +5,9 @@ package oauth
 import (
 	"context"
 	"crypto"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -15,6 +18,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -271,6 +275,68 @@ func TestServer(t *testing.T) {
 		}
 		if tokenResp.AccessToken == "" || tokenResp.RefreshToken == "" {
 			t.Fatalf("token response missing tokens: %+v", tokenResp)
+		}
+	})
+
+	t.Run("codes and consents are hashed at rest", func(t *testing.T) {
+		t.Parallel()
+
+		path := t.TempDir() + "/oauth.json"
+		user := testUser()
+		_, h, _ := newTestFlowServer(t, path, []User{user})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+
+		// Start consent: the raw consent_token must not be on disk, but its hash key must.
+		form := authorizationCodeForm(registered.ClientID, "https://claude.example.com/callback", "read")
+		consentToken := startOAuthTestConsent(t, h, user, form)
+		onDisk := readOAuthStateFile(t, path)
+		if strings.Contains(onDisk, consentToken) {
+			t.Fatalf("raw consent token present in state file")
+		}
+		if !strings.Contains(onDisk, RefreshTokenKey(consentToken)) {
+			t.Fatalf("hashed consent token key missing from state file")
+		}
+
+		// Approve consent to mint an authorization code.
+		postForm := url.Values{"consent_token": {consentToken}, "scope_form": {"1"}, "scope": {"read"}}
+		req := newOAuthTestRequest(t, http.MethodPost, "/oauth/authorize", strings.NewReader(postForm.Encode()), user)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusSeeOther {
+			t.Fatalf("authorize status = %d, want %d: %s", w.Code, http.StatusSeeOther, w.Body.String())
+		}
+		location, err := url.Parse(w.Header().Get("Location"))
+		if err != nil {
+			t.Fatalf("parse Location: %v", err)
+		}
+		code := location.Query().Get("code")
+		if code == "" {
+			t.Fatal("authorization code is empty")
+		}
+		onDisk = readOAuthStateFile(t, path)
+		if strings.Contains(onDisk, code) {
+			t.Fatalf("raw authorization code present in state file")
+		}
+		if !strings.Contains(onDisk, RefreshTokenKey(code)) {
+			t.Fatalf("hashed authorization code key missing from state file")
+		}
+
+		// The code still redeems for tokens.
+		tokenForm := url.Values{
+			"grant_type":    {GrantAuthorizationCode},
+			"code":          {code},
+			"client_id":     {registered.ClientID},
+			"redirect_uri":  {"https://claude.example.com/callback"},
+			"code_verifier": {testVerifier},
+			"resource":      {testResourceURL},
+		}
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(tokenForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
 	})
 
@@ -2119,6 +2185,67 @@ func TestDPoP(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("alg does not match jwk key type is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		ecKey, ecJWK := testDPoPECKeyPair(t, elliptic.P256(), "P-256")
+		rsaKey, rsaJWK := testDPoPRSAKeyPair(t)
+
+		// alg=ES256 with an RSA jwk.
+		proof := makeDPoPProofSigned(t, "ES256", ecKey, rsaJWK)
+		if _, _, err := DPoPProof(httpDPoPRequest(t, proof)); err == nil {
+			t.Fatal("ES256 header with RSA jwk: want error, got nil")
+		}
+		// alg=RS256 with an EC jwk.
+		proof = makeDPoPProofSigned(t, "RS256", rsaKey, ecJWK)
+		if _, _, err := DPoPProof(httpDPoPRequest(t, proof)); err == nil {
+			t.Fatal("RS256 header with EC jwk: want error, got nil")
+		}
+	})
+
+	t.Run("rsa modulus out of bounds is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		// jwkPublicKey enforces the modulus bound before verifying the
+		// signature, so a crafted-but-unsigned JWK is enough to exercise it.
+		// (crypto/rsa refuses to generate keys this small.)
+		makeRSAJWK := func(modulusBits uint) *JWK {
+			n := new(big.Int).Lsh(big.NewInt(1), modulusBits-1)
+			return &JWK{
+				Kty: "RSA",
+				N:   base64.RawURLEncoding.EncodeToString(n.Bytes()),
+				E:   base64.RawURLEncoding.EncodeToString(big.NewInt(65537).Bytes()),
+			}
+		}
+		proof := makeUnsignedDPoPProof(t, "RS256", makeRSAJWK(512))
+		if _, _, err := DPoPProof(httpDPoPRequest(t, proof)); err == nil {
+			t.Fatal("512-bit rsa modulus: want error, got nil")
+		}
+		proof = makeUnsignedDPoPProof(t, "RS256", makeRSAJWK(16385))
+		if _, _, err := DPoPProof(httpDPoPRequest(t, proof)); err == nil {
+			t.Fatal("oversized rsa modulus: want error, got nil")
+		}
+	})
+
+	t.Run("valid asymmetric key types are accepted", func(t *testing.T) {
+		t.Parallel()
+
+		ecKey, ecJWK := testDPoPECKeyPair(t, elliptic.P256(), "P-256")
+		proof := makeDPoPProofSigned(t, "ES256", ecKey, ecJWK)
+		if _, _, err := DPoPProof(httpDPoPRequest(t, proof)); err != nil {
+			t.Fatalf("P-256/ES256: %v", err)
+		}
+		edPub, edPriv, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatalf("generate ed25519 key: %v", err)
+		}
+		edJWK := &JWK{Kty: "OKP", Crv: "Ed25519", X: base64.RawURLEncoding.EncodeToString(edPub)}
+		proof = makeDPoPProofSigned(t, "EdDSA", edPriv, edJWK)
+		if _, _, err := DPoPProof(httpDPoPRequest(t, proof)); err != nil {
+			t.Fatalf("Ed25519/EdDSA: %v", err)
+		}
+	})
 }
 
 // testDPoPRSAKeyPair generates an RSA key pair for DPoP proof tests.
@@ -2178,6 +2305,93 @@ func makeDPoPProofWithJTI(t *testing.T, key *rsa.PrivateKey, jwk *JWK, htm, htu 
 	signature, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, digest[:])
 	if err != nil {
 		t.Fatalf("sign dpop proof: %v", err)
+	}
+	return parts + "." + base64.RawURLEncoding.EncodeToString(signature)
+}
+
+// testDPoPECKeyPair generates an EC key pair and its JWK for DPoP proof tests.
+func testDPoPECKeyPair(t *testing.T, curve elliptic.Curve, crv string) (*ecdsa.PrivateKey, *JWK) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(curve, rand.Reader)
+	if err != nil {
+		t.Fatalf("generate ec key: %v", err)
+	}
+	// PublicKey.Bytes returns the uncompressed point 0x04 || X || Y with each
+	// coordinate left-padded to the curve's fixed byte width.
+	point, err := key.PublicKey.Bytes()
+	if err != nil {
+		t.Fatalf("encode ec public key: %v", err)
+	}
+	size := (curve.Params().BitSize + 7) / 8
+	jwk := &JWK{
+		Kty: "EC",
+		Crv: crv,
+		X:   base64.RawURLEncoding.EncodeToString(point[1 : 1+size]),
+		Y:   base64.RawURLEncoding.EncodeToString(point[1+size:]),
+	}
+	return key, jwk
+}
+
+// dpopTokenURL is the htu used by the DPoP proof test helpers.
+const dpopTokenURL = testBaseURL + "/oauth/token"
+
+// makeUnsignedDPoPProof builds a DPoP proof with a bogus signature, for cases
+// rejected before signature verification (e.g. RSA modulus bounds).
+func makeUnsignedDPoPProof(t *testing.T, alg string, jwk *JWK) string {
+	t.Helper()
+	header := DPoPHeader{Typ: "dpop+jwt", Alg: alg, JWK: *jwk}
+	headerJSON, err := json.Marshal(header)
+	if err != nil {
+		t.Fatalf("marshal dpop header: %v", err)
+	}
+	claims := DPoPClaims{JTI: "x", HTM: http.MethodPost, HTU: dpopTokenURL, IAT: time.Now().Unix()}
+	claimsJSON, err := json.Marshal(claims)
+	if err != nil {
+		t.Fatalf("marshal dpop claims: %v", err)
+	}
+	parts := base64.RawURLEncoding.EncodeToString(headerJSON) + "." + base64.RawURLEncoding.EncodeToString(claimsJSON)
+	return parts + "." + base64.RawURLEncoding.EncodeToString([]byte("bogus"))
+}
+
+// httpDPoPRequest wraps a proof string in a request carrying the DPoP header.
+func httpDPoPRequest(t *testing.T, proof string) *http.Request {
+	t.Helper()
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, dpopTokenURL, http.NoBody)
+	r.Header.Set("DPoP", proof)
+	addForwardedHeaders(r)
+	return r
+}
+
+// makeDPoPProofSigned builds a valid DPoP proof with a chosen header alg, signed
+// by signer. RSA and ECDSA sign the SHA-256 digest; Ed25519 signs the raw input.
+func makeDPoPProofSigned(t *testing.T, alg string, signer crypto.Signer, jwk *JWK) string {
+	t.Helper()
+	jti, err := randomToken()
+	if err != nil {
+		t.Fatalf("generate jti: %v", err)
+	}
+	header := DPoPHeader{Typ: "dpop+jwt", Alg: alg, JWK: *jwk}
+	headerJSON, err := json.Marshal(header)
+	if err != nil {
+		t.Fatalf("marshal dpop header: %v", err)
+	}
+	claims := DPoPClaims{JTI: jti, HTM: http.MethodPost, HTU: dpopTokenURL, IAT: time.Now().Unix()}
+	claimsJSON, err := json.Marshal(claims)
+	if err != nil {
+		t.Fatalf("marshal dpop claims: %v", err)
+	}
+	parts := base64.RawURLEncoding.EncodeToString(headerJSON) + "." + base64.RawURLEncoding.EncodeToString(claimsJSON)
+
+	var signature []byte
+	switch key := signer.(type) {
+	case ed25519.PrivateKey:
+		signature = ed25519.Sign(key, []byte(parts))
+	default:
+		digest := sha256.Sum256([]byte(parts))
+		signature, err = sign(signer, digest[:])
+		if err != nil {
+			t.Fatalf("sign dpop proof: %v", err)
+		}
 	}
 	return parts + "." + base64.RawURLEncoding.EncodeToString(signature)
 }
@@ -2532,6 +2746,16 @@ func newOAuthTestRequest(t *testing.T, method, path string, body io.Reader, user
 
 func newTestResourceRequest(t *testing.T) *http.Request {
 	return httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/resource", http.NoBody)
+}
+
+// readOAuthStateFile returns the raw on-disk OAuth state JSON.
+func readOAuthStateFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path) //nolint:gosec // test-controlled temp path.
+	if err != nil {
+		t.Fatalf("read oauth state file: %v", err)
+	}
+	return string(data)
 }
 
 func consentTokenFromOAuthTestHTML(t *testing.T, body string) string {

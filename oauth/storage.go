@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+// storeVersion is the on-disk schema version. Codes and Consents are keyed by
+// RefreshTokenKey(secret) so the live code/consent token never lands on disk.
 const storeVersion = 1
 
 // Client is a dynamically-registered OAuth client.
