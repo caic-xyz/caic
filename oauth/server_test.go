@@ -884,6 +884,75 @@ func TestServer(t *testing.T) {
 			t.Fatal("jwks kids are empty")
 		}
 	})
+
+	t.Run("refresh token reuse revokes the grant family", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read", "write"})
+
+		// Rotate once: original becomes used, successor is live.
+		rotated := refreshOAuthTestToken(t, h, registered.ClientID, tokenResp.RefreshToken, http.StatusOK)
+		if rotated.RefreshToken == "" {
+			t.Fatal("rotated refresh token is empty")
+		}
+
+		// Replay the now-used original: rejected and the family is revoked.
+		refreshOAuthTestToken(t, h, registered.ClientID, tokenResp.RefreshToken, http.StatusBadRequest)
+
+		// The rotated successor is now dead too.
+		refreshOAuthTestToken(t, h, registered.ClientID, rotated.RefreshToken, http.StatusBadRequest)
+
+		// The grant itself is revoked.
+		grants := s.ListUserGrants(user.ID)
+		if len(grants) != 1 {
+			t.Fatalf("grants = %+v, want exactly one", grants)
+		}
+		if grants[0].RevokedAt.IsZero() {
+			t.Fatalf("grant not revoked after reuse: %+v", grants[0])
+		}
+	})
+
+	t.Run("unknown refresh token does not revoke other grants", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
+
+		// Submit a never-issued refresh token.
+		refreshOAuthTestToken(t, h, registered.ClientID, "rt_never_issued", http.StatusBadRequest)
+
+		// The live grant is untouched: its refresh token still rotates.
+		rotated := refreshOAuthTestToken(t, h, registered.ClientID, tokenResp.RefreshToken, http.StatusOK)
+		if rotated.RefreshToken == "" {
+			t.Fatal("rotated refresh token is empty after unknown-token submission")
+		}
+		grants := s.ListUserGrants(user.ID)
+		if len(grants) != 1 || !grants[0].RevokedAt.IsZero() {
+			t.Fatalf("grants = %+v, want one live grant", grants)
+		}
+	})
+
+	t.Run("refresh token reuse records an audit event", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		audit := &recordingAuditRecorder{}
+		_, h, _ := newTestFlowServerWithAudit(t, t.TempDir()+"/oauth.json", []User{user}, audit)
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
+
+		refreshOAuthTestToken(t, h, registered.ClientID, tokenResp.RefreshToken, http.StatusOK)
+		refreshOAuthTestToken(t, h, registered.ClientID, tokenResp.RefreshToken, http.StatusBadRequest)
+
+		if !audit.has("deny", "reuse_detected") {
+			t.Fatalf("no reuse_detected audit event recorded: %+v", audit.events())
+		}
+	})
 }
 
 func TestPAR(t *testing.T) {
@@ -1938,6 +2007,118 @@ func TestDPoP(t *testing.T) {
 			t.Fatalf("second request with nonce status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
 	})
+
+	t.Run("replayed resource proof with same jti rejected", func(t *testing.T) {
+		t.Parallel()
+
+		res := setupDPoPBoundToken(t)
+		protected := res.server.BearerAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		}))
+
+		// Build a single proof and reuse the exact bytes (same jti) twice.
+		resourceProof := makeDPoPProof(t, res.dpopKey, res.dpopJWK, "POST", testResourceURL, time.Now(), res.token.AccessToken, "")
+
+		first := httptest.NewRecorder()
+		req1 := newTestResourceRequest(t)
+		req1.Header.Set("Authorization", "DPoP "+res.token.AccessToken)
+		req1.Header.Set("DPoP", resourceProof)
+		addForwardedHeaders(req1)
+		protected.ServeHTTP(first, req1)
+		if first.Code != http.StatusNoContent {
+			t.Fatalf("first request status = %d, want %d: %s", first.Code, http.StatusNoContent, first.Body.String())
+		}
+
+		second := httptest.NewRecorder()
+		req2 := newTestResourceRequest(t)
+		req2.Header.Set("Authorization", "DPoP "+res.token.AccessToken)
+		req2.Header.Set("DPoP", resourceProof)
+		addForwardedHeaders(req2)
+		protected.ServeHTTP(second, req2)
+		if second.Code != http.StatusUnauthorized {
+			t.Fatalf("replay status = %d, want %d: %s", second.Code, http.StatusUnauthorized, second.Body.String())
+		}
+	})
+
+	t.Run("fresh resource proof per request accepted", func(t *testing.T) {
+		t.Parallel()
+
+		res := setupDPoPBoundToken(t)
+		protected := res.server.BearerAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		}))
+
+		for i := range 3 {
+			proof := makeDPoPProof(t, res.dpopKey, res.dpopJWK, "POST", testResourceURL, time.Now(), res.token.AccessToken, "")
+			req := newTestResourceRequest(t)
+			req.Header.Set("Authorization", "DPoP "+res.token.AccessToken)
+			req.Header.Set("DPoP", proof)
+			addForwardedHeaders(req)
+			w := httptest.NewRecorder()
+			protected.ServeHTTP(w, req)
+			if w.Code != http.StatusNoContent {
+				t.Fatalf("request %d status = %d, want %d: %s", i, w.Code, http.StatusNoContent, w.Body.String())
+			}
+		}
+	})
+
+	t.Run("resource proof missing jti rejected", func(t *testing.T) {
+		t.Parallel()
+
+		res := setupDPoPBoundToken(t)
+		protected := res.server.BearerAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		}))
+
+		proof := makeDPoPProofWithJTI(t, res.dpopKey, res.dpopJWK, "POST", testResourceURL, time.Now(), res.token.AccessToken, "", "")
+		req := newTestResourceRequest(t)
+		req.Header.Set("Authorization", "DPoP "+res.token.AccessToken)
+		req.Header.Set("DPoP", proof)
+		addForwardedHeaders(req)
+		w := httptest.NewRecorder()
+		protected.ServeHTTP(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusUnauthorized, w.Body.String())
+		}
+	})
+
+	t.Run("token endpoint unaffected by jti tracking", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []User{user})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
+		tokenURL := testBaseURL + "/oauth/token"
+
+		// Two distinct token exchanges that reuse the same jti must both succeed:
+		// the token endpoint does not track jti (single-use codes bound it).
+		jti, err := randomToken()
+		if err != nil {
+			t.Fatalf("generate jti: %v", err)
+		}
+		for i := range 2 {
+			code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
+			proof := makeDPoPProofWithJTI(t, dpopKey, dpopJWKObj, "POST", tokenURL, time.Now(), "", "", jti)
+			form := url.Values{
+				"grant_type":    {GrantAuthorizationCode},
+				"code":          {code},
+				"client_id":     {registered.ClientID},
+				"redirect_uri":  {"https://claude.example.com/callback"},
+				"code_verifier": {testVerifier},
+				"resource":      {testResourceURL},
+			}
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.Header.Set("DPoP", proof)
+			addForwardedHeaders(req)
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("token exchange %d status = %d, want %d: %s", i, w.Code, http.StatusOK, w.Body.String())
+			}
+		}
+	})
 }
 
 // testDPoPRSAKeyPair generates an RSA key pair for DPoP proof tests.
@@ -1956,18 +2137,25 @@ func testDPoPRSAKeyPair(t *testing.T) (*rsa.PrivateKey, *JWK) {
 	return key, &jwk
 }
 
-// makeDPoPProof creates a valid DPoP proof JWT signed with the given RSA key.
+// makeDPoPProof creates a valid DPoP proof JWT signed with the given RSA key
+// using a fresh random jti.
 func makeDPoPProof(t *testing.T, key *rsa.PrivateKey, jwk *JWK, htm, htu string, iat time.Time, accessToken, nonce string) string {
+	t.Helper()
+	jti, err := randomToken()
+	if err != nil {
+		t.Fatalf("generate jti: %v", err)
+	}
+	return makeDPoPProofWithJTI(t, key, jwk, htm, htu, iat, accessToken, nonce, jti)
+}
+
+// makeDPoPProofWithJTI creates a DPoP proof JWT with an explicit jti (which may
+// be empty to exercise the missing-jti rejection path).
+func makeDPoPProofWithJTI(t *testing.T, key *rsa.PrivateKey, jwk *JWK, htm, htu string, iat time.Time, accessToken, nonce, jti string) string {
 	t.Helper()
 	header := DPoPHeader{Typ: "dpop+jwt", Alg: "RS256", JWK: *jwk}
 	headerJSON, err := json.Marshal(header)
 	if err != nil {
 		t.Fatalf("marshal dpop header: %v", err)
-	}
-
-	jti, err := randomToken()
-	if err != nil {
-		t.Fatalf("generate jti: %v", err)
 	}
 
 	claims := DPoPClaims{
@@ -2131,6 +2319,10 @@ func newTestServer(t *testing.T, cfgs ...*ServerConfig) *Server {
 }
 
 func newTestFlowServer(t *testing.T, path string, users []User) (*Server, http.Handler, *captureAuthorizationUI) {
+	return newTestFlowServerWithAudit(t, path, users, nil)
+}
+
+func newTestFlowServerWithAudit(t *testing.T, path string, users []User, audit AuditRecorder) (*Server, http.Handler, *captureAuthorizationUI) {
 	usersByID := make(map[string]User, len(users))
 	for _, user := range users {
 		usersByID[user.ID] = user
@@ -2141,6 +2333,7 @@ func newTestFlowServer(t *testing.T, path string, users []User) (*Server, http.H
 		RefreshTokenStorePath: path,
 		Session:               session,
 		UI:                    ui,
+		Audit:                 audit,
 	}
 	applyTestServerDefaults(t, cfg)
 	s, err := NewServer(*cfg)
@@ -2148,6 +2341,40 @@ func newTestFlowServer(t *testing.T, path string, users []User) (*Server, http.H
 		t.Fatalf("NewServer: %v", err)
 	}
 	return s, newTestServerHandler(s), ui
+}
+
+// recordingAuditRecorder captures OAuth audit events for assertions.
+type recordingAuditRecorder struct {
+	mu      sync.Mutex
+	records []auditRecord
+}
+
+type auditRecord struct {
+	decision string
+	status   string
+}
+
+func (a *recordingAuditRecorder) RecordOAuth(_ context.Context, _, _, _, decision, status string, _ any) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.records = append(a.records, auditRecord{decision: decision, status: status})
+}
+
+func (a *recordingAuditRecorder) has(decision, status string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, rec := range a.records {
+		if rec.decision == decision && rec.status == status {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *recordingAuditRecorder) events() []auditRecord {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return slices.Clone(a.records)
 }
 
 func applyTestServerDefaults(t *testing.T, cfg *ServerConfig) {

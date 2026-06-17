@@ -115,8 +115,10 @@ func DPoPProof(r *http.Request) (*DPoPHeader, *DPoPClaims, error) {
 //
 // accessToken is the bound access token (needed for ath validation).
 // nonceCheck is called when a nonce is required; it returns true if the nonce is valid.
-// This function is called for resource-server side proof validation.
-func VerifyDPoPProof(r *http.Request, header *DPoPHeader, claims *DPoPClaims, maxAgeDur time.Duration, accessToken string, nonceCheck func(string) bool) error {
+// jtiCheck, when non-nil, records the proof's jti and returns false on a replay;
+// it is supplied only on the resource-server path, where a non-empty jti is also
+// required. This function is called for resource-server side proof validation.
+func VerifyDPoPProof(r *http.Request, header *DPoPHeader, claims *DPoPClaims, maxAgeDur time.Duration, accessToken string, nonceCheck, jtiCheck func(string) bool) error {
 	if header.Typ != "dpop+jwt" {
 		return errors.New("dpop proof typ must be dpop+jwt")
 	}
@@ -143,6 +145,17 @@ func VerifyDPoPProof(r *http.Request, header *DPoPHeader, claims *DPoPClaims, ma
 		return errors.New("dpop proof nonce is invalid or expired")
 	}
 
+	// Resource-server replay prevention (RFC 9449 §11.1): require a jti and
+	// reject one already seen within the proof's max-age window.
+	if jtiCheck != nil {
+		if claims.JTI == "" {
+			return errors.New("dpop proof missing required jti claim")
+		}
+		if !jtiCheck(claims.JTI) {
+			return errors.New("dpop proof jti has already been used")
+		}
+	}
+
 	if accessToken != "" {
 		if claims.ATH == "" {
 			return errors.New("dpop proof missing required ath claim")
@@ -160,8 +173,10 @@ func VerifyDPoPProof(r *http.Request, header *DPoPHeader, claims *DPoPClaims, ma
 //
 // For the token endpoint, ath validation is typically not performed (the token
 // is being created), and nonce is validated if a nonce manager is available.
+// jti replay tracking is deliberately omitted: single-use codes and refresh
+// tokens already bound the token endpoint against replay.
 func VerifyDPoPProofTokenEndpoint(r *http.Request, header *DPoPHeader, claims *DPoPClaims, maxAgeDur time.Duration, nonceCheck func(string) bool) error {
-	return VerifyDPoPProof(r, header, claims, maxAgeDur, "", nonceCheck)
+	return VerifyDPoPProof(r, header, claims, maxAgeDur, "", nonceCheck, nil)
 }
 
 // DPoPAccessTokenHash computes the DPoP ath claim (SHA-256 hash of access token base64url).

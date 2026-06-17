@@ -129,6 +129,7 @@ type Server struct {
 	clientIDPrefix          string
 
 	dpopNonces *DPoPNonceManager
+	dpopJTIs   *DPoPJTICache
 
 	baseURL     BaseURLFunc
 	session     SessionManager
@@ -174,6 +175,7 @@ func NewServer(c ServerConfig) (*Server, error) { //nolint:gocritic // ServerCon
 		parRequests:             map[string]ConsentParams{},
 		tokens:                  tokens,
 		dpopNonces:              NewDPoPNonceManager(dpopNonceTTL),
+		dpopJTIs:                NewDPoPJTICache(defaultDPoPMaxAge),
 		supportedScopes:         c.SupportedScopes,
 		defaultScopes:           c.DefaultScopes,
 		scopeLabels:             c.ScopeLabels,
@@ -264,7 +266,7 @@ func (s *Server) BearerAuth(next http.Handler) http.Handler {
 				s.writeUnauthorizedDPoP(w, r, "missing or invalid dpop proof")
 				return
 			}
-			if err := VerifyDPoPProof(r, proofHeader, proofClaims, defaultDPoPMaxAge, token, s.dpopNonces.Validate); err != nil {
+			if err := VerifyDPoPProof(r, proofHeader, proofClaims, defaultDPoPMaxAge, token, s.dpopNonces.Validate, s.dpopJTIs.CheckAndStore); err != nil {
 				s.writeUnauthorizedDPoP(w, r, err.Error())
 				return
 			}
@@ -740,6 +742,17 @@ func (s *Server) handleOAuthRefreshToken(w http.ResponseWriter, r *http.Request,
 	clientID := r.PostForm.Get("client_id")
 	entry, ok := s.validRefreshToken(refreshToken, clientID)
 	if !ok {
+		// RFC 9700 §4.14.2: reuse of an already-rotated or revoked refresh token
+		// is a breach signal. Revoke the whole grant family so both the attacker
+		// and the legitimate client racing it lose access. A token whose hash is
+		// not in the store is simply unknown and triggers no collateral action.
+		if reused, userID, grantID, err := s.detectRefreshTokenReuse(refreshToken); err != nil {
+			slog.WarnContext(r.Context(), "revoke reused oauth refresh token grant", "err", err)
+		} else if reused {
+			s.recordAudit(r, userID, "oauth/token", clientID, "deny", "reuse_detected", map[string]any{
+				"grantID": grantID,
+			})
+		}
 		WriteError(w, http.StatusBadRequest, "invalid_grant", "invalid refresh token")
 		return
 	}
@@ -1028,6 +1041,27 @@ func (s *Server) validRefreshToken(token, clientID string) (RefreshToken, bool) 
 		return RefreshToken{}, false
 	}
 	return entry, true
+}
+
+// detectRefreshTokenReuse reports whether token's hash is present in the store
+// but already used or revoked, and if so revokes its entire grant family.
+//
+// A token whose hash is absent is unknown, not a reuse: reused is false and no
+// grant is touched. On a detected reuse it returns the owning user and grant.
+func (s *Server) detectRefreshTokenReuse(token string) (reused bool, userID, grantID string, err error) {
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry, ok := s.state.RefreshTokens[RefreshTokenKey(token)]
+	if !ok || (entry.UsedAt.IsZero() && entry.RevokedAt.IsZero()) {
+		return false, "", "", nil
+	}
+	if s.state.RevokeUserGrant(entry.UserID, entry.GrantID, now) {
+		if err := s.state.Save(); err != nil {
+			return true, entry.UserID, entry.GrantID, err
+		}
+	}
+	return true, entry.UserID, entry.GrantID, nil
 }
 
 func (s *Server) rotateRefreshToken(token, clientID, userID string) (nextToken string, next RefreshToken, ok bool, err error) {
