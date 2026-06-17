@@ -10,6 +10,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	voicev1 "github.com/caic-xyz/caic/backend/internal/voicegateway/api/v1"
+	"github.com/caic-xyz/caic/oauth"
 )
 
 func main() {
@@ -56,6 +57,15 @@ func mainImpl() error {
 				"../../../../../sdk/gomode/swift/Sources/GoModeSDK",
 			),
 			Config: gomode.SDKAPI(),
+		},
+		{
+			SourceDir: "../../../../../oauth",
+			Output: outputConfig(
+				"../../../../../sdk/oauth",
+				"../../../../../sdk/oauth/kotlin/src/main/kotlin/com/caic/oauth/sdk/v1",
+				"../../../../../sdk/oauth/swift/Sources/OAuthSDK",
+			),
+			Config: oauth.SDKAPI(),
 		},
 	}
 	for i := range apis {

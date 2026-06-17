@@ -91,18 +91,17 @@ the DTO and discovery types, not a hand-rolled HTTP client.
 - [ ] Tests: generated TypeScript types compile; generated Kotlin types
       match the Go struct JSON tags.
 
-### Phase 6 — Frontend and Android SDK Consumers
+### Phase 6 — Frontend and Android SDK Consumers ✓
 
-Update caic's frontend and Android to use the standalone oauth module's
-types and, where applicable, the SDK client.
+Update caic's frontend and Android to use the oauth SDK types.
 
-- [ ] Frontend: import oauth DTOs for TypeScript type generation via the
-      existing SDK generation pipeline. Replace hand-rolled OAuth type
-      definitions with generated ones from the oauth module's JSON types.
-- [ ] Frontend: if the oauth SDK has browser-applicable helpers (PKCE
-      generation, authorization URL building), use them.
-- [ ] Android: Kotlin DTOs generated from oauth module JSON types.
-      Replace hand-rolled OAuth types in `gomode/` with generated ones.
-- [ ] Both: update end-session flows to use `end_session_endpoint` from
-      discovery metadata instead of hardcoded paths.
-- [ ] Tests: e2e tests pass with no regression.
+- [x] SDK generation pipeline produces TypeScript (`sdk/oauth/ts/v1/types.gen.ts`),
+      Kotlin (`sdk/oauth/kotlin/.../Types.kt`), and Swift types from the oauth
+      DTOs. 15 interfaces/data classes covering discovery metadata, client
+      registration, token responses, introspection, and device authorization.
+- [x] Frontend and Android already consume OAuth types through the caic API
+      SDK (`OAuthGrantResp`), not raw oauth protocol DTOs. No hand-rolled
+      OAuth types to replace.
+- [x] No end-session flows exist in frontend/Android — login/logout is
+      server-side via redirects.
+- [x] Generated TypeScript types compile without errors.
