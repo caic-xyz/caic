@@ -180,7 +180,7 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 		// Exchange code for tokens.
 		// PKCE is off; all forge providers are confidential clients with
 		// HMAC-signed state.
-		accessToken, refreshToken, tokenExpiry, err := oauthclient.ExchangeCode(r.Context(), cfg.OAuthClientConfig(r), code, "")
+		token, err := oauthclient.ExchangeCode(r.Context(), cfg.OAuthClientConfig(r), code, "")
 		if err != nil {
 			slog.WarnContext(r.Context(), "oauth exchange", "provider", provider, "err", err)
 			writeError(w, api.InternalError("token exchange failed"))
@@ -192,10 +192,10 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 		switch provider {
 		case "github":
 			githubCfg := h.githubOAuth
-			providerID, username, avatarURL, err = githubCfg.FetchUser(r.Context(), accessToken)
+			providerID, username, avatarURL, err = githubCfg.FetchUser(r.Context(), token.AccessToken)
 		case "gitlab":
 			gitlabCfg := h.gitlabOAuth
-			providerID, username, avatarURL, err = gitlabCfg.FetchUser(r.Context(), accessToken)
+			providerID, username, avatarURL, err = gitlabCfg.FetchUser(r.Context(), token.AccessToken)
 		default:
 			writeError(w, api.NotFound("provider"))
 			return
@@ -221,9 +221,9 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 			ProviderID:   providerID,
 			Username:     username,
 			AvatarURL:    avatarURL,
-			AccessToken:  accessToken,
-			RefreshToken: refreshToken,
-			TokenExpiry:  tokenExpiry,
+			AccessToken:  token.AccessToken,
+			RefreshToken: token.RefreshToken,
+			TokenExpiry:  token.Expiry,
 		})
 		if err != nil {
 			slog.WarnContext(r.Context(), "upsert user", "err", err)

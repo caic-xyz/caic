@@ -91,15 +91,18 @@ func TestExchangeCode(t *testing.T) {
 		t.Cleanup(srv.Close)
 
 		cfg := oauth.ClientConfig{ClientID: "c", ClientSecret: "s", TokenURL: srv.URL, RedirectURI: "https://app/cb"}
-		access, refresh, expiry, err := ExchangeCode(t.Context(), cfg, "code-1", "")
+		tok, err := ExchangeCode(t.Context(), cfg, "code-1", "")
 		if err != nil {
 			t.Fatalf("ExchangeCode: %v", err)
 		}
-		if access != "at" || refresh != "rt" {
-			t.Fatalf("tokens = %q/%q", access, refresh)
+		if tok.AccessToken != "at" || tok.RefreshToken != "rt" {
+			t.Fatalf("tokens = %q/%q", tok.AccessToken, tok.RefreshToken)
 		}
-		if expiry.IsZero() {
+		if tok.Expiry.IsZero() {
 			t.Fatal("expiry is zero")
+		}
+		if tok.TokenType != "Bearer" {
+			t.Fatalf("TokenType = %q, want Bearer", tok.TokenType)
 		}
 		if hadVerifier {
 			t.Fatalf("code_verifier sent without PKCE: %q", gotVerifier)
@@ -118,7 +121,7 @@ func TestExchangeCode(t *testing.T) {
 		t.Cleanup(srv.Close)
 
 		cfg := oauth.ClientConfig{ClientID: "c", ClientSecret: "s", TokenURL: srv.URL, RedirectURI: "https://app/cb"}
-		if _, _, _, err := ExchangeCode(t.Context(), cfg, "code-1", "verifier-abc"); err != nil {
+		if _, err := ExchangeCode(t.Context(), cfg, "code-1", "verifier-abc"); err != nil {
 			t.Fatalf("ExchangeCode: %v", err)
 		}
 		if gotVerifier != "verifier-abc" {
@@ -136,7 +139,7 @@ func TestExchangeCode(t *testing.T) {
 		t.Cleanup(srv.Close)
 
 		cfg := oauth.ClientConfig{ClientID: "c", ClientSecret: "s", TokenURL: srv.URL, RedirectURI: "https://app/cb"}
-		_, _, _, err := ExchangeCode(t.Context(), cfg, "code-1", "")
+		_, err := ExchangeCode(t.Context(), cfg, "code-1", "")
 		if err == nil {
 			t.Fatal("ExchangeCode on 400 = nil error, want error")
 		}
@@ -164,10 +167,10 @@ func TestExchangeTimeout(t *testing.T) {
 		defer srv.Close()
 		defer close(done)
 
-		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 		defer cancel()
 		start := time.Now()
-		_, _, _, err := ExchangeCode(ctx, oauth.ClientConfig{TokenURL: srv.URL}, "code", "")
+		_, err := ExchangeCode(ctx, oauth.ClientConfig{TokenURL: srv.URL}, "code", "")
 		if err == nil {
 			t.Fatal("ExchangeCode succeeded against a hung provider, want timeout error")
 		}
