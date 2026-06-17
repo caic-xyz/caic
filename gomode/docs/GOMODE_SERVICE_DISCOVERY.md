@@ -1,5 +1,11 @@
 # Remaining Go Mode MCP Discovery Work
 
+> **Superseded for architecture/ownership by `gomode/docs/DESIGN.md`.** That doc
+> defines the Go Mode server library boundary (contract owned by Go Mode, hosts
+> are consumers) and the staged extraction. The items below remain valid as
+> consumer-side work and will be reassigned by owner (library / caic adapter /
+> Android shell) once the extraction lands.
+
 This document tracks unfinished Go Mode discovery work. Root settings, generated SDKs, the backend MCP endpoint, MCP tools/resources, and native voice tool calls already exist.
 
 MCP is mandatory once service metadata is available. Root settings must advertise `webShell.mcp`; Android may reject authenticated services that omit it.

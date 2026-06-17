@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	voicev1 "github.com/caic-xyz/caic/backend/internal/voicegateway/api/v1"
+	voicev1 "github.com/caic-xyz/caic/gomode/voicegateway/api/v1"
 )
 
 // Local stack tuning. These bound the placeholder VAD/segmentation and TTS

@@ -19,7 +19,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
-	voiceapi "github.com/caic-xyz/caic/backend/internal/voicegateway/api"
+	voiceapi "github.com/caic-xyz/caic/gomode/voicegateway/api"
 )
 
 type validatable interface {

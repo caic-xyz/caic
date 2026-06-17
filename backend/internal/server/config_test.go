@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caic-xyz/caic/backend/internal/voicegateway"
+	"github.com/caic-xyz/caic/gomode/voicegateway"
 )
 
 func TestVoiceGatewayConfig(t *testing.T) {

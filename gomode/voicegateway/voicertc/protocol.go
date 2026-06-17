@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 
-	voicev1 "github.com/caic-xyz/caic/backend/internal/voicegateway/api/v1"
+	voicev1 "github.com/caic-xyz/caic/gomode/voicegateway/api/v1"
 )
 
 var errSessionClosed = errors.New("session closed")

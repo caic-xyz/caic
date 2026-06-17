@@ -23,8 +23,8 @@ import (
 	"github.com/maruel/genai/providers/llamacpp"
 	"github.com/maruel/genai/providers/llamacpp/llamacppsrv"
 
-	"github.com/caic-xyz/caic/backend/internal/voicegateway"
-	voicev1 "github.com/caic-xyz/caic/backend/internal/voicegateway/api/v1"
+	"github.com/caic-xyz/caic/gomode/voicegateway"
+	voicev1 "github.com/caic-xyz/caic/gomode/voicegateway/api/v1"
 )
 
 func localStackBackendForConfig(ctx context.Context, cfg *voicegateway.LocalStackConfig) (*localStackBackend, error) {

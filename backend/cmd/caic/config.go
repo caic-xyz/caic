@@ -14,7 +14,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/server"
-	"github.com/caic-xyz/caic/backend/internal/voicegateway"
+	"github.com/caic-xyz/caic/gomode/voicegateway"
 )
 
 // tomlConfig mirrors the TOML file layout at ~/.config/caic/config.toml.

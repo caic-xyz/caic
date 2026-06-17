@@ -12,7 +12,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/usage"
-	"github.com/caic-xyz/caic/backend/internal/voicegateway"
+	"github.com/caic-xyz/caic/gomode/voicegateway"
 )
 
 // Config bundles values read once at startup from config.toml, environment

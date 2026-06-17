@@ -20,8 +20,8 @@ import (
 	"github.com/maruel/genai/base"
 	"github.com/maruel/genai/scoreboard"
 
-	"github.com/caic-xyz/caic/backend/internal/voicegateway"
-	voicev1 "github.com/caic-xyz/caic/backend/internal/voicegateway/api/v1"
+	"github.com/caic-xyz/caic/gomode/voicegateway"
+	voicev1 "github.com/caic-xyz/caic/gomode/voicegateway/api/v1"
 )
 
 func TestEnergyVAD(t *testing.T) {

@@ -4,9 +4,9 @@ package server
 
 import (
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
-	"github.com/caic-xyz/caic/backend/internal/gomode"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/gomode"
 )
 
 const (

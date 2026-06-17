@@ -3,7 +3,7 @@
 package v1
 
 import (
-	"github.com/caic-xyz/caic/backend/internal/voicegateway/api"
+	"github.com/caic-xyz/caic/gomode/voicegateway/api"
 )
 
 // Validate checks that the SDP offer is provided.

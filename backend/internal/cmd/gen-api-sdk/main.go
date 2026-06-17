@@ -6,10 +6,10 @@ import (
 	"os"
 
 	"github.com/caic-xyz/caic/apisdkgen"
-	"github.com/caic-xyz/caic/backend/internal/gomode"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	voicev1 "github.com/caic-xyz/caic/backend/internal/voicegateway/api/v1"
+	"github.com/caic-xyz/caic/gomode"
+	voicev1 "github.com/caic-xyz/caic/gomode/voicegateway/api/v1"
 	"github.com/caic-xyz/caic/oauth"
 )
 
@@ -32,7 +32,7 @@ func mainImpl() error {
 			Config: v1.SDKAPI(),
 		},
 		{
-			SourceDir: "../../../voicegateway/api/v1",
+			SourceDir: "../../../../../gomode/voicegateway/api/v1",
 			Output: outputConfig(
 				"../../../../../sdk/voicegateway",
 				"../../../../../sdk/voicegateway/kotlin/src/main/kotlin/com/caic/voicegateway/sdk/v1",
@@ -50,7 +50,7 @@ func mainImpl() error {
 			Config: mcp.SDKAPI(),
 		},
 		{
-			SourceDir: "../../../gomode",
+			SourceDir: "../../../../../gomode",
 			Output: outputConfig(
 				"../../../../../sdk/gomode",
 				"../../../../../sdk/gomode/kotlin/src/main/kotlin/com/fghbuild/gomode/sdk/v1",

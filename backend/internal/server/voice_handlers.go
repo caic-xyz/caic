@@ -6,8 +6,8 @@ import (
 	"net/http"
 
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/voicegateway"
-	"github.com/caic-xyz/caic/backend/internal/voicegateway/voicertc"
+	"github.com/caic-xyz/caic/gomode/voicegateway"
+	"github.com/caic-xyz/caic/gomode/voicegateway/voicertc"
 )
 
 // voiceHandlers owns the embedded voice gateway HTTP adapter.

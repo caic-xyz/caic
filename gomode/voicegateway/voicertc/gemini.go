@@ -14,8 +14,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/caic-xyz/caic/backend/internal/jsonutil"
-	voicev1 "github.com/caic-xyz/caic/backend/internal/voicegateway/api/v1"
+	voicev1 "github.com/caic-xyz/caic/gomode/voicegateway/api/v1"
 )
 
 const (
@@ -42,7 +41,7 @@ const (
 //    LiveSendToolResponseParameters, then confirm MLDev placement in
 //    live_converters.go.
 // 5. Keep only provider wire DTOs here. Gateway protocol changes belong in
-//    backend/internal/voicegateway/api/v1 and must be translated explicitly in
+//    gomode/voicegateway/api/v1 and must be translated explicitly in
 //    protocol.go.
 // 6. After edits, run the focused voicertc tests and make lint-fix.
 
@@ -306,11 +305,9 @@ func geminiCloseReason(err error) string {
 
 // geminiBidiMessage is a top-level Gemini BidiGenerateContent message.
 //
-// Known Live fields are typed for translation and payload construction;
-// jsonutil.Overflow preserves unknown fields while stripping audio parts.
+// Known Live fields are typed for translation and payload construction.
+// Unknown fields are dropped on the audio-stripping round-trip.
 type geminiBidiMessage struct {
-	jsonutil.Overflow
-
 	SetupComplete                *geminiSetupComplete           `json:"setupComplete,omitempty"`
 	ServerContent                *serverContent                 `json:"serverContent,omitempty"`
 	ToolCall                     *geminiToolCall                `json:"toolCall,omitempty"`
@@ -505,8 +502,6 @@ type geminiCustomizedAvatar struct {
 
 // serverContent is Gemini's incremental model update for the current turn.
 type serverContent struct {
-	jsonutil.Overflow
-
 	// ModelTurn contains generated content for the current conversation.
 	ModelTurn modelTurn `json:"modelTurn,omitzero"`
 	// TurnComplete means Gemini is done generating until more client input arrives.

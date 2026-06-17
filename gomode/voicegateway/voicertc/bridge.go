@@ -20,8 +20,8 @@ import (
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 
-	"github.com/caic-xyz/caic/backend/internal/voicegateway"
-	voicev1 "github.com/caic-xyz/caic/backend/internal/voicegateway/api/v1"
+	"github.com/caic-xyz/caic/gomode/voicegateway"
+	voicev1 "github.com/caic-xyz/caic/gomode/voicegateway/api/v1"
 )
 
 const (

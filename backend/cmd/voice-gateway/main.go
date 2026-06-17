@@ -19,8 +19,8 @@ import (
 	"github.com/mattn/go-isatty"
 
 	"github.com/caic-xyz/caic/backend/internal/httplog"
-	"github.com/caic-xyz/caic/backend/internal/voicegateway"
-	"github.com/caic-xyz/caic/backend/internal/voicegateway/voicertc"
+	"github.com/caic-xyz/caic/gomode/voicegateway"
+	"github.com/caic-xyz/caic/gomode/voicegateway/voicertc"
 )
 
 func mainImpl(args []string) error {
