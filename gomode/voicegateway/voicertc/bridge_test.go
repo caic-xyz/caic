@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"math"
+	"net"
 	"testing"
 
 	"github.com/maruel/gopus"
@@ -333,6 +334,57 @@ func TestNewBridge(t *testing.T) {
 		}
 		if err := pc.SetLocalDescription(offer); err != nil {
 			t.Fatal("set local description:", err)
+		}
+	})
+}
+
+func TestDefaultIPv4(t *testing.T) {
+	t.Parallel()
+	t.Run("prefers non link local", func(t *testing.T) {
+		t.Parallel()
+		got, ok := bestIPv4Candidate([]net.IP{
+			net.ParseIP("127.0.0.1"),
+			net.ParseIP("169.254.10.20"),
+			net.ParseIP("192.168.1.10"),
+		})
+		if !ok {
+			t.Fatal("expected candidate")
+		}
+		if !got.Equal(net.ParseIP("192.168.1.10")) {
+			t.Fatalf("candidate = %s, want 192.168.1.10", got)
+		}
+	})
+
+	t.Run("uses link local offline address", func(t *testing.T) {
+		t.Parallel()
+		got, ok := bestIPv4Candidate([]net.IP{
+			net.ParseIP("127.0.0.1"),
+			net.ParseIP("169.254.10.20"),
+		})
+		if !ok {
+			t.Fatal("expected candidate")
+		}
+		if !got.Equal(net.ParseIP("169.254.10.20")) {
+			t.Fatalf("candidate = %s, want 169.254.10.20", got)
+		}
+	})
+
+	t.Run("uses loopback when only local use is available", func(t *testing.T) {
+		t.Parallel()
+		got, ok := bestIPv4Candidate([]net.IP{net.ParseIP("127.0.0.1")})
+		if !ok {
+			t.Fatal("expected candidate")
+		}
+		if !got.Equal(net.ParseIP("127.0.0.1")) {
+			t.Fatalf("candidate = %s, want 127.0.0.1", got)
+		}
+	})
+
+	t.Run("rejects empty candidates", func(t *testing.T) {
+		t.Parallel()
+		_, ok := bestIPv4Candidate(nil)
+		if ok {
+			t.Fatal("unexpected candidate")
 		}
 	})
 }

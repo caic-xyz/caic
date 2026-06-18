@@ -1,10 +1,10 @@
-// IPv4-only transport.Net implementation that avoids pion/stdnet's anet
-// package, which uses netlinkrib and fails on hosts without IPv6 support.
+// IPv4-only transport.Net implementation and offline-safe host address discovery.
 
 package voicertc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 
@@ -18,10 +18,26 @@ type ipv4Net struct {
 	interfaces []*transport.Interface
 }
 
-// defaultIPv4 discovers the host's default IPv4 address by dialing a UDP
-// socket. No data is sent; the OS routing table selects the source address.
-// This avoids netlink calls that fail on hosts without IPv6.
+// defaultIPv4 discovers the host's default IPv4 address without requiring
+// Internet reachability. It first asks the routing table for the preferred
+// source address. If the host is offline, it falls back to local interface
+// addresses and finally loopback so the bridge can still start for local use.
 func defaultIPv4(ctx context.Context) (net.IP, error) {
+	ip, err := defaultRouteIPv4(ctx)
+	if err == nil {
+		return ip, nil
+	}
+	fallback, fallbackErr := interfaceIPv4()
+	if fallbackErr != nil {
+		return nil, errors.Join(err, fallbackErr)
+	}
+	return fallback, nil
+}
+
+// defaultRouteIPv4 discovers the preferred routed IPv4 source address by
+// dialing a UDP socket. No data is sent; the OS routing table selects the
+// source address.
+func defaultRouteIPv4(ctx context.Context) (net.IP, error) {
 	var d net.Dialer
 	c, err := d.DialContext(ctx, "udp4", "8.8.8.8:80")
 	if err != nil {
@@ -30,9 +46,73 @@ func defaultIPv4(ctx context.Context) (net.IP, error) {
 	defer func() { _ = c.Close() }()
 	addr, ok := c.LocalAddr().(*net.UDPAddr)
 	if !ok {
-		return nil, fmt.Errorf("defaultIPv4: unexpected address type: %T", c.LocalAddr())
+		return nil, fmt.Errorf("defaultRouteIPv4: unexpected address type: %T", c.LocalAddr())
 	}
 	return addr.IP, nil
+}
+
+func interfaceIPv4() (net.IP, error) {
+	ifcs, err := net.Interfaces()
+	if err != nil {
+		return nil, fmt.Errorf("list interfaces: %w", err)
+	}
+	candidates := make([]net.IP, 0)
+	for _, ifc := range ifcs {
+		if ifc.Flags&net.FlagUp == 0 {
+			continue
+		}
+		addrs, err := ifc.Addrs()
+		if err != nil {
+			return nil, fmt.Errorf("list addresses for %s: %w", ifc.Name, err)
+		}
+		for _, addr := range addrs {
+			ip := addrIPv4(addr)
+			if ip == nil {
+				continue
+			}
+			candidates = append(candidates, ip)
+		}
+	}
+	if ip, ok := bestIPv4Candidate(candidates); ok {
+		return ip, nil
+	}
+	return net.IPv4(127, 0, 0, 1), nil
+}
+
+func addrIPv4(addr net.Addr) net.IP {
+	var ip net.IP
+	switch v := addr.(type) {
+	case *net.IPNet:
+		ip = v.IP
+	case *net.IPAddr:
+		ip = v.IP
+	default:
+		return nil
+	}
+	v4 := ip.To4()
+	if v4 == nil {
+		return nil
+	}
+	return append(net.IP(nil), v4...)
+}
+
+func bestIPv4Candidate(candidates []net.IP) (net.IP, bool) {
+	for _, ip := range candidates {
+		if ip.IsGlobalUnicast() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() {
+			return ip, true
+		}
+	}
+	for _, ip := range candidates {
+		if !ip.IsLoopback() && ip.IsLinkLocalUnicast() {
+			return ip, true
+		}
+	}
+	for _, ip := range candidates {
+		if ip.IsLoopback() {
+			return ip, true
+		}
+	}
+	return nil, false
 }
 
 // newIPv4Net returns an ipv4Net with a synthetic interface carrying hostIP.
