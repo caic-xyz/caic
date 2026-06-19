@@ -193,7 +193,8 @@ ASR backend candidates:
 - `parakeet-onnx`: investigate community or export path for CPU/CoreML/Metal
   feasibility.
 - `whisper-cpp`: fallback baseline for macOS latency and audio pipeline
-  testing, not the target stack.
+  testing. Since `ggml-org/whisper.cpp` v1.9.0 includes Parakeet support and
+  `examples/parakeet-cli`, also evaluate it as a C++ Parakeet runtime path.
 - Linux CUDA deployments may use the same ASR adapter contract with
   CUDA-oriented Parakeet/NeMo serving.
 
