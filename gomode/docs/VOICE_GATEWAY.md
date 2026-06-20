@@ -34,14 +34,14 @@ The client owns:
 
 - microphone permission and capture
 - audio output routing
-- local service tool execution
+- local service tool execution for active SKILL.md skills
 - returning tool results over the data channel
 - session close and user cancellation intent
 
 The host owns:
 
 - product auth
-- tool manifests
+- SKILL.md files and MCP tool manifests
 - product APIs
 - hosted frontend content
 - voice token issuance policy
@@ -116,6 +116,11 @@ Gateway to client:
 {"kind":"interrupted","source":"user"}
 {"kind":"error","message":"...","recoverable":true}
 ```
+
+The client builds `tools` from active SKILL.md frontmatter: each active skill
+selects one or more MCP servers and an explicit tool allowlist. The gateway sees
+only provider-neutral tool declarations and tool results; it does not fetch skill
+files or call service MCP endpoints.
 
 Provider-specific messages stay inside gateway adapters.
 

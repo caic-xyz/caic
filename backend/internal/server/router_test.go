@@ -1967,10 +1967,16 @@ func TestGoModeSettings(t *testing.T) {
 	if got.WebShell.VoiceGateway.URL != "https://voice.example.com" || !got.WebShell.VoiceGateway.AuthRequired {
 		t.Fatalf("VoiceGateway = %+v", got.WebShell.VoiceGateway)
 	}
+	if err := got.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
 
 	embedded := newGoModeSettings(v1.VoiceGatewayMetadata{Mode: v1.VoiceGatewayModeEmbedded}, false)
 	if embedded.WebShell.VoiceGateway.URL != "/" || embedded.WebShell.VoiceGateway.AuthRequired {
 		t.Fatalf("Embedded VoiceGateway = %+v", embedded.WebShell.VoiceGateway)
+	}
+	if err := embedded.Validate(); err != nil {
+		t.Fatalf("Embedded Validate() error = %v", err)
 	}
 }
 
@@ -2212,6 +2218,9 @@ func TestBuildHandler(t *testing.T) {
 		}
 		if resp.Service != "caic" || resp.APIVersion != 1 {
 			t.Fatalf("settings = %+v", resp)
+		}
+		if err := resp.Validate(); err != nil {
+			t.Fatalf("settings validation error = %v", err)
 		}
 	})
 

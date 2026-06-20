@@ -27,10 +27,13 @@ func SDKAPI() apispec.Config {
 		},
 		ExtraSeeds: []reflect.Type{
 			reflect.TypeFor[ErrorResponse](),
+			reflect.TypeFor[SkillFrontmatter](),
 		},
-		KotlinPackage: "com.fghbuild.gomode.sdk.v1",
-		APIDocTitle:   "Go Mode Service Discovery API Reference",
-		APIDocIntro:   "Service-neutral JSON discovery manifest served publicly at `/.well-known/gomode.json` for Go Mode Android bootstrap.",
+		DocumentExtraSeeds: true,
+		KotlinPackage:      "com.fghbuild.gomode.sdk.v1",
+		APIDocTitle:        "Go Mode Service Discovery API Reference",
+		APIDocIntro: "Service-neutral JSON discovery manifest served publicly at `/.well-known/gomode.json` for Go Mode Android bootstrap. " +
+			"Clients must only accept `apiVersion` values they explicitly support and must require `webShell.bridgeVersion` to match the native bridge they implement.",
 		SpecialTypes: []apispec.SpecialType{
 			{
 				Type:      reflect.TypeFor[map[string]any](),

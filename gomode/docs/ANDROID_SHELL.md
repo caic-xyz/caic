@@ -18,7 +18,7 @@ Android owns:
 - WebRTC client setup
 - local service tool execution during voice sessions
 - notification and background monitoring behavior
-- local tool-group activation policy
+- local SKILL.md activation policy
 
 The host owns product auth, hosted UI, MCP endpoints, and product resource
 semantics.
@@ -37,29 +37,40 @@ States:
 - **Unvalidated**: manifest is unavailable or not decoded yet. WebView can load;
   native MCP-backed features are disabled.
 - **Compatible**: manifest is available, API/bridge versions pass, and the
-  tool-group catalog and voice gateway metadata decode.
+  skill catalog and voice gateway metadata decode.
 - **Incompatible**: manifest is available but required fields or versions are
   unsupported.
 
-## Tool Groups As Skills
+## Skills
 
-`webShell.toolGroups` is the MCP endpoint catalog. Each group is a skill: a
-static tool set plus instructions behind one endpoint.
+`webShell.toolGroups` is the bootstrap skill catalog. The canonical skill is a
+`SKILL.md` file. The Markdown body is context for the voice/model session; the
+frontmatter is the machine-readable contract:
+
+- `name` and `description`
+- `gomode.activation`: local `locations[]` hints with either `wifi.ssids` or
+  `physicalPosition`; more activation signals can be added later
+- `gomode.mcpServers[]`: MCP endpoint, protocol version, auth policy, and tool
+  allowlist
+
+See `../examples/tasks/SKILL.md` for a complete example with location-triggered
+activation and multiple-MCP data.
 
 Shell behavior:
 
-- Load every group's `name` and `description` from the manifest at bootstrap.
-- Activate groups locally from supported hints such as route, location tag, or
-  keyword.
-- On activation, connect to the group's MCP endpoint, read
-  `serverInstructions`, and register `tools/list` output into the voice session.
-- Deactivate groups when context no longer matches.
-- Cap concurrently active groups.
+- Load every skill's `name` and `description` from the manifest at bootstrap.
+- Fetch the skill `SKILL.md` from `skillUrl` when available.
+- Treat `gomode.activation` as local-only state; do not report considered
+  locations to the service.
+- On activation, connect to the skill's MCP endpoint, read `serverInstructions`,
+  call `tools/list`, and register only tools in `gomode.mcpServers[].tools`.
+- Deactivate skills when context no longer matches.
+- Cap concurrently active skills.
 - Namespace or reject colliding tool names.
-- Surface active groups and tools, especially for screen-off voice.
+- Surface active skills and tools, especially for screen-off voice.
 
-caic currently exposes one `tasks` group. The shell should still use the catalog
-path so more groups can be added without a manifest contract change.
+caic currently exposes one `tasks` skill. The shell should still use the catalog
+path so more skills can be added without a manifest contract change.
 
 ## MCP Client
 
@@ -111,7 +122,7 @@ Voice setup uses the manifest, not product constants:
 3. Open the voice gateway signaling route.
 4. Attach the `voice-gateway` data channel.
 5. Merge active service MCP tools with Android-native tools.
-6. Execute service tool calls locally through the active MCP group endpoint.
+6. Execute service tool calls locally through the active skill MCP endpoint.
 
 The shell must not branch on Gemini, local stack, Parakeet, Qwen, Gemma, or any
 other provider/runtime.
@@ -122,7 +133,7 @@ Unit tests:
 
 - unavailable manifest leaves shell unvalidated
 - incompatible versions disable native features
-- missing tool groups disable MCP-backed features
+- missing skills disable MCP-backed features
 - `server/discover` capability negotiation
 - `resources/list` and `resources/read` request envelopes
 - POST-based SSE parsing for `subscriptions/listen`
@@ -136,5 +147,5 @@ Android/e2e tests:
 - fake MCP resource listing drives monitoring without product REST routes
 - fake resource update changes native monitoring state
 - voice setup merges service MCP tools with Android-native tools
-- multi-group activation and deactivation change the active tool set
-- untrusted group instructions and tool descriptions are handled as data
+- multi-skill activation and deactivation change the active tool set
+- untrusted skill instructions and tool descriptions are handled as data

@@ -84,6 +84,22 @@ class ServiceSettingsClientTest {
     }
 
     @Test
+    fun `bootstrap treats missing required settings field as unvalidated`() = runBlocking {
+        val server = MockWebServer()
+        server.start()
+        try {
+            val missingService = SETTINGS_JSON.replace("              \"service\": \"example-coding-service\",\n", "")
+            server.enqueue(MockResponse().setResponseCode(200).setBody(missingService))
+            val state = fetchBootstrapState(server.url("/").toString(), ServiceSettingsClient())
+
+            assertTrue(state is ServiceBootstrapState.Unvalidated)
+            assertEquals("/.well-known/gomode.json", server.takeRequest().path)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
     fun `bootstrap treats fetched incompatible settings as error`() = runBlocking {
         val server = MockWebServer()
         server.start()
@@ -119,6 +135,50 @@ class ServiceSettingsClientTest {
         val message = settings(bridgeVersion = 2).compatibilityError()
 
         assertEquals("Service requires bridge version 2. This app provides 1.", message)
+    }
+
+    @Test
+    fun `compatibility rejects malformed required fields`() {
+        assertEquals(
+            "Service settings field service is required.",
+            settings().copy(service = " ").compatibilityError(),
+        )
+
+        val settings = settings()
+        val group = settings.webShell.toolGroups[0]
+        val badEndpoint = settings.copy(
+            webShell = settings.webShell.copy(toolGroups = listOf(group.copy(endpoint = "api/service/v1/mcp"))),
+        )
+        assertEquals(
+            "Service settings field webShell.toolGroups[0].endpoint must be an absolute URL or absolute path.",
+            badEndpoint.compatibilityError(),
+        )
+
+        val missingProtocolVersion = settings.copy(
+            webShell = settings.webShell.copy(toolGroups = listOf(group.copy(protocolVersion = ""))),
+        )
+        assertEquals(
+            "Service settings field webShell.toolGroups[0].protocolVersion is required.",
+            missingProtocolVersion.compatibilityError(),
+        )
+
+        val badSkillURL = settings.copy(
+            webShell = settings.webShell.copy(toolGroups = listOf(group.copy(skillUrl = "skills/tasks/SKILL.md"))),
+        )
+        assertEquals(
+            "Service settings field webShell.toolGroups[0].skillUrl must be an absolute URL or absolute path.",
+            badSkillURL.compatibilityError(),
+        )
+
+        val missingVoiceURL = settings.copy(
+            webShell = settings.webShell.copy(
+                voiceGateway = VoiceGatewaySettings(required = true),
+            ),
+        )
+        assertEquals(
+            "Service settings field webShell.voiceGateway.url is required when voice is required.",
+            missingVoiceURL.compatibilityError(),
+        )
     }
 
     private fun settings(

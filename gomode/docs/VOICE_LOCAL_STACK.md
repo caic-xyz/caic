@@ -11,13 +11,14 @@ Support voice sessions through one gateway protocol that can be used by both
 Android and browser clients while hiding backend implementation details:
 
 - Android owns microphone permission, audio routing, foreground service
-  lifecycle, WebRTC client setup, local tool execution, and service HTTP calls.
-- The browser frontend owns browser media APIs, WebRTC client setup, local tool
-  execution, and service HTTP calls.
+  lifecycle, WebRTC client setup, active-skill tool execution, and service HTTP
+  calls.
+- The browser frontend owns browser media APIs, WebRTC client setup,
+  active-skill tool execution, and service HTTP calls.
 - The gateway owns media conversion, model/provider transport, ASR/LLM/TTS
   orchestration, turn state, and interruption handling.
 - Service backends own product APIs, auth, hosted frontend content, service
-  context, and tool manifests.
+  context, SKILL.md files, and MCP tool manifests.
 
 The client-visible contract is a voice-gateway session. It is not Gemini Live,
 Gemini Bidi, local stack, Parakeet, Gemma, Qwen, or any other
@@ -33,7 +34,8 @@ provider/runtime.
 - `sdk/voicegateway/API.md` is the client contract. The gateway is the
   abstraction boundary between clients and model providers.
 - Service-specific tool execution stays out of the gateway. Android or the
-  frontend executes tool calls and returns tool results.
+  frontend activates SKILL.md files, executes allowed MCP tool calls, and returns
+  tool results.
 - Provider names and provider message schemas stay out of Android and frontend
   public types, data-channel messages, and UI state.
 - `/api/voicegateway/v1/...` remains the only advertised voice gateway contract
@@ -70,7 +72,7 @@ Go Mode Android / Hosted web frontend
       -> media endpoint
       -> WebRTC transport
       -> URL-selected gateway protocol
-      -> service tool registry
+      -> active SKILL.md tool registry
       -> active service API client
 
 voice-gateway (one instance == one backend)
@@ -82,7 +84,7 @@ voice-gateway (one instance == one backend)
            gemini-live (full duplex) OR local-stack (half duplex)
 
 Active service backend
-  -> hosted web frontend, service auth, token issuer, product API, tool manifest
+  -> hosted web frontend, service auth, token issuer, product API, SKILL.md files
   -> lists the available gateway URLs (one per backend/profile)
 ```
 
@@ -325,8 +327,9 @@ Acceptance:
 - Whether KittenTTS quality and latency are acceptable on macOS, and whether
   its streaming API is reliable enough to use before Phase 6.
 - Whether Qwen3-TTS remains worth testing locally if KittenTTS is acceptable.
-- Whether Android and frontend consume a generated service tool manifest or
-  maintain separate schema builders tested against the same golden manifest.
+- Whether Android and frontend share one SKILL.md frontmatter parser and tool
+  declaration builder, or maintain separate implementations tested against the
+  same golden skill files.
 - Whether browser voice remains a product feature once Go Mode owns native
   voice, or becomes only a development/debug path.
 - How the active service backend advertises and selects among multiple gateway

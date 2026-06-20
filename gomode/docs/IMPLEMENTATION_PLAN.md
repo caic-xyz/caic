@@ -11,19 +11,20 @@ This plan converges the codebase on the specific documents:
 
 Tasks:
 
-1. Decide whether `ToolGroup.protocolVersion` belongs in the manifest. Keep it
-   with clear docs, or remove it and regenerate SDKs.
-2. Decide whether `ToolGroupActivation.routes` belongs in v1. Keep it only if
-   Android will use it for first activation policy.
-3. Add validation helpers for `Settings`, `ToolGroup`, and
+1. Keep `ToolGroup.protocolVersion` in the manifest as the bootstrap MCP
+   compatibility value for the group endpoint.
+2. Move activation policy into SKILL.md frontmatter and expose
+   `SkillFrontmatter` in the Go Mode SDK.
+3. Add validation helpers for `Settings`, `ToolGroup`, `SkillFrontmatter`, and
    `VoiceGatewaySettings`.
-4. Document `apiVersion` and `bridgeVersion` compatibility rules in SDK docs.
+4. Document `apiVersion`, `bridgeVersion`, and SKILL.md frontmatter
+   compatibility rules in SDK docs.
 
 Acceptance:
 
 - No TODO comments leak into generated Go Mode SDK docs.
 - caic serves a valid manifest at `/.well-known/gomode.json`.
-- Android tests reject malformed required fields.
+- Android tests reject malformed required manifest fields.
 - `make refresh-generated` and `make lint-fix` pass.
 
 ## Phase 2: External Gateway Token Flow
@@ -78,7 +79,7 @@ Acceptance:
 
 - WebView load does not depend on MCP discovery.
 - Missing or malformed manifest disables native features instead of crashing.
-- Voice setup uses the manifest gateway URL and selected tool-group endpoint.
+- Voice setup uses the manifest gateway URL and selected skill endpoint.
 
 ## Phase 5: Android MCP Resources And Monitoring
 
@@ -123,17 +124,18 @@ Acceptance:
 
 Tasks:
 
-1. Load all group names and descriptions at bootstrap.
-2. Implement local activation scoring from supported hints.
-3. Cap concurrently active groups.
-4. Namespace or reject colliding tool names.
-5. Show active groups and tools in native voice state.
-6. Deactivate groups when context no longer matches.
+1. Load all skill names and descriptions at bootstrap.
+2. Fetch SKILL.md files and parse `gomode.activation` and `gomode.mcpServers`.
+3. Implement local activation scoring from supported location hints.
+4. Cap concurrently active skills.
+5. Namespace or reject colliding tool names.
+6. Show active skills and tools in native voice state.
+7. Deactivate skills when context no longer matches.
 
 Acceptance:
 
-- Single caic group still activates by default.
-- Fake multi-group manifests activate only matching groups.
+- Single caic skill still activates by default.
+- Fake multi-skill manifests activate only matching skills.
 - Deactivation removes tools from the voice session.
 
 ## Phase 8: Local Voice Stack

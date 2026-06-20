@@ -40,36 +40,24 @@ public enum JSONValue: Codable, Equatable {
 public enum ErrorCodes {
 }
 
-/// Location is a location triggered by a physical location, SSID or other means.
-public struct Location: Codable {
-    public let latitude: Double?
-    public let longitude: Double?
-    public let ssid: String?
-}
-
-/// ToolGroupActivation carries hints the shell matches against current context to
-/// decide when to load a group's tools. Matching is on-device: the service never
-/// receives the user's context or location.
-public struct ToolGroupActivation: Codable {
-    /// TODO: Will probably remove.
-    public let routes: [String]?
-    public let locationTags: [Location]?
-    public let keywords: [String]?
-}
-
-/// ToolGroup describes one MCP tool group the shell can activate as a skill:
-/// a static set of tools plus instructions behind one endpoint. The shell
-/// discovers every group's name and description up front and loads a group's
-/// tools on demand (progressive disclosure), so the active tool set changes by
-/// activating groups, not by mutating a group's tools.
+/// ToolGroup describes a bootstrap MCP tool group advertised by the manifest.
+///
+/// A tool group is the compatibility manifest's compact view of a Go Mode skill.
+/// The authoritative context, activation hints, and tool subset live in the
+/// skill's SKILL.md frontmatter; the manifest stays small so clients can decide
+/// whether native features are compatible before loading skill files.
 public struct ToolGroup: Codable {
     public let name: String
     public let description: String?
     public let endpoint: String
-    /// MCP server version, always "2026-07-28". TODO: Is that useful?
+    /// ProtocolVersion is the MCP protocol version spoken by this group endpoint.
+    /// The shell sends it on MCP requests so each group can be checked and
+    /// upgraded independently during protocol migrations.
     public let protocolVersion: String
     public let authRequired: Bool
-    public let activation: ToolGroupActivation?
+    /// SkillURL points to the SKILL.md file whose frontmatter defines activation,
+    /// instructions, and the MCP tool subset for this skill.
+    public let skillUrl: String?
 }
 
 /// VoiceGatewaySettings describes the preferred voice gateway for this service.
@@ -82,15 +70,22 @@ public struct VoiceGatewaySettings: Codable {
 
 /// WebShellSettings describes the hosted frontend's native-shell contract.
 public struct WebShellSettings: Codable {
+    /// BridgeVersion is the hosted-frontend/native bridge contract version. A
+    /// shell must reject manifests whose bridge version differs from the bridge
+    /// version implemented by that shell.
     public let bridgeVersion: Int
     public let toolGroups: [ToolGroup]
     public let voiceGateway: VoiceGatewaySettings
 }
 
-/// Settings is the service compatibility document consumed by Go Mode Android.
+/// Settings is the service compatibility document consumed by Go Mode clients.
 public struct Settings: Codable {
     public let service: String
+    /// ServiceVersion is the host product version. It is informational and does
+    /// not participate in Go Mode compatibility checks.
     public let serviceVersion: String?
+    /// APIVersion is the Go Mode discovery schema version. A client must reject
+    /// manifests with an API version it does not explicitly support.
     public let apiVersion: Int
     public let webShell: WebShellSettings
 }
@@ -105,5 +100,64 @@ public struct ErrorBody: Codable {
 public struct ErrorResponse: Codable {
     public let error: ErrorBody
     public let details: [String: JSONValue]?
+}
+
+/// LocationWiFi matches any one of the configured Wi-Fi SSIDs.
+public struct LocationWiFi: Codable {
+    /// SSIDs are Wi-Fi network names that can activate the skill.
+    public let ssids: [String]?
+}
+
+/// PhysicalPosition matches a named latitude and longitude within RadiusMeters.
+public struct PhysicalPosition: Codable {
+    /// Name is a user-facing label for this physical position.
+    public let name: String
+    public let latitude: Double
+    public let longitude: Double
+    /// RadiusMeters is the activation radius around the latitude and longitude.
+    public let radiusMeters: Double
+}
+
+/// LocationActivation groups one location-based activation signal for a skill.
+public struct LocationActivation: Codable {
+    public let wifi: LocationWiFi?
+    public let physicalPosition: PhysicalPosition?
+}
+
+/// SkillActivation carries hints the shell matches against current context to
+/// decide when to load a skill. Matching is on-device: the service never receives
+/// the user's context or location just because a skill was considered.
+public struct SkillActivation: Codable {
+    /// Locations are local physical-location and Wi-Fi hints that make this skill
+    /// an activation candidate.
+    public let locations: [LocationActivation]?
+}
+
+/// SkillMCPServer declares which tools from an MCP endpoint belong to one skill.
+public struct SkillMCPServer: Codable {
+    public let name: String
+    public let endpoint: String
+    /// ProtocolVersion is the MCP protocol version spoken by this endpoint.
+    public let protocolVersion: String
+    public let authRequired: Bool
+    /// Tools is the explicit allowlist of MCP tool names activated by the skill.
+    public let tools: [String]
+}
+
+/// SkillGoMode contains Go Mode-specific SKILL.md frontmatter fields.
+public struct SkillGoMode: Codable {
+    public let activation: SkillActivation?
+    public let mcpServers: [SkillMCPServer]
+}
+
+/// SkillFrontmatter is the YAML frontmatter schema for a Go Mode SKILL.md file.
+///
+/// The Markdown body carries human and model instructions. The frontmatter carries
+/// machine-readable activation hints and the MCP tool allowlist that the native
+/// shell can register when the skill becomes active.
+public struct SkillFrontmatter: Codable {
+    public let name: String
+    public let description: String
+    public let gomode: SkillGoMode
 }
 

@@ -24,43 +24,31 @@ object InstantSerializer : KSerializer<Instant> {
 object ErrorCodes {
 }
 
-/** Location is a location triggered by a physical location, SSID or other means. */
-@Serializable
-data class Location(
-    val latitude: Double? = null,
-    val longitude: Double? = null,
-    val ssid: String? = null,
-)
-
 /**
- * ToolGroupActivation carries hints the shell matches against current context to
- * decide when to load a group's tools. Matching is on-device: the service never
- * receives the user's context or location.
- */
-@Serializable
-data class ToolGroupActivation(
-    /** TODO: Will probably remove. */
-    val routes: List<String>? = null,
-    val locationTags: List<Location>? = null,
-    val keywords: List<String>? = null,
-)
-
-/**
- * ToolGroup describes one MCP tool group the shell can activate as a skill:
- * a static set of tools plus instructions behind one endpoint. The shell
- * discovers every group's name and description up front and loads a group's
- * tools on demand (progressive disclosure), so the active tool set changes by
- * activating groups, not by mutating a group's tools.
+ * ToolGroup describes a bootstrap MCP tool group advertised by the manifest.
+ *
+ * A tool group is the compatibility manifest's compact view of a Go Mode skill.
+ * The authoritative context, activation hints, and tool subset live in the
+ * skill's SKILL.md frontmatter; the manifest stays small so clients can decide
+ * whether native features are compatible before loading skill files.
  */
 @Serializable
 data class ToolGroup(
     val name: String,
     val description: String? = null,
     val endpoint: String,
-    /** MCP server version, always "2026-07-28". TODO: Is that useful? */
+    /**
+     * ProtocolVersion is the MCP protocol version spoken by this group endpoint.
+     * The shell sends it on MCP requests so each group can be checked and
+     * upgraded independently during protocol migrations.
+     */
     val protocolVersion: String,
     val authRequired: Boolean,
-    val activation: ToolGroupActivation? = null,
+    /**
+     * SkillURL points to the SKILL.md file whose frontmatter defines activation,
+     * instructions, and the MCP tool subset for this skill.
+     */
+    val skillUrl: String? = null,
 )
 
 /** VoiceGatewaySettings describes the preferred voice gateway for this service. */
@@ -75,16 +63,29 @@ data class VoiceGatewaySettings(
 /** WebShellSettings describes the hosted frontend's native-shell contract. */
 @Serializable
 data class WebShellSettings(
+    /**
+     * BridgeVersion is the hosted-frontend/native bridge contract version. A
+     * shell must reject manifests whose bridge version differs from the bridge
+     * version implemented by that shell.
+     */
     val bridgeVersion: Int,
     val toolGroups: List<ToolGroup>,
     val voiceGateway: VoiceGatewaySettings,
 )
 
-/** Settings is the service compatibility document consumed by Go Mode Android. */
+/** Settings is the service compatibility document consumed by Go Mode clients. */
 @Serializable
 data class Settings(
     val service: String,
+    /**
+     * ServiceVersion is the host product version. It is informational and does
+     * not participate in Go Mode compatibility checks.
+     */
     val serviceVersion: String? = null,
+    /**
+     * APIVersion is the Go Mode discovery schema version. A client must reject
+     * manifests with an API version it does not explicitly support.
+     */
     val apiVersion: Int,
     val webShell: WebShellSettings,
 )
@@ -96,4 +97,70 @@ data class ErrorBody(val code: String, val message: String)
 /** ErrorResponse is the standard JSON error envelope for Go Mode SDK clients. */
 @Serializable
 data class ErrorResponse(val error: ErrorBody, val details: Map<String, JsonElement>? = null)
+
+/** LocationWiFi matches any one of the configured Wi-Fi SSIDs. */
+@Serializable
+data class LocationWiFi(
+    /** SSIDs are Wi-Fi network names that can activate the skill. */
+    val ssids: List<String>? = null,
+)
+
+/** PhysicalPosition matches a named latitude and longitude within RadiusMeters. */
+@Serializable
+data class PhysicalPosition(
+    /** Name is a user-facing label for this physical position. */
+    val name: String,
+    val latitude: Double,
+    val longitude: Double,
+    /** RadiusMeters is the activation radius around the latitude and longitude. */
+    val radiusMeters: Double,
+)
+
+/** LocationActivation groups one location-based activation signal for a skill. */
+@Serializable
+data class LocationActivation(val wifi: LocationWiFi? = null, val physicalPosition: PhysicalPosition? = null)
+
+/**
+ * SkillActivation carries hints the shell matches against current context to
+ * decide when to load a skill. Matching is on-device: the service never receives
+ * the user's context or location just because a skill was considered.
+ */
+@Serializable
+data class SkillActivation(
+    /**
+     * Locations are local physical-location and Wi-Fi hints that make this skill
+     * an activation candidate.
+     */
+    val locations: List<LocationActivation>? = null,
+)
+
+/** SkillMCPServer declares which tools from an MCP endpoint belong to one skill. */
+@Serializable
+data class SkillMCPServer(
+    val name: String,
+    val endpoint: String,
+    /** ProtocolVersion is the MCP protocol version spoken by this endpoint. */
+    val protocolVersion: String,
+    val authRequired: Boolean,
+    /** Tools is the explicit allowlist of MCP tool names activated by the skill. */
+    val tools: List<String>,
+)
+
+/** SkillGoMode contains Go Mode-specific SKILL.md frontmatter fields. */
+@Serializable
+data class SkillGoMode(val activation: SkillActivation? = null, val mcpServers: List<SkillMCPServer>)
+
+/**
+ * SkillFrontmatter is the YAML frontmatter schema for a Go Mode SKILL.md file.
+ *
+ * The Markdown body carries human and model instructions. The frontmatter carries
+ * machine-readable activation hints and the MCP tool allowlist that the native
+ * shell can register when the skill becomes active.
+ */
+@Serializable
+data class SkillFrontmatter(
+    val name: String,
+    val description: String,
+    val gomode: SkillGoMode,
+)
 

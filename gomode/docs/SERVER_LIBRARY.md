@@ -44,13 +44,13 @@ A host backend owns:
 - hosted frontend content
 - product APIs
 - MCP tool/resource endpoints
-- which tool groups are advertised
+- which Go Mode skills are advertised
 - voice gateway deployment mode and URL
 - token issuance policy for external gateway mode
 
 The host adapter should be thin. For caic, it builds `gomode.Settings`, exposes
-the `tasks` MCP group at `/api/caic/v1/mcp`, and mounts the embedded gateway when
-configured.
+the `tasks` skill through `/api/caic/v1/mcp`, and mounts the embedded gateway
+when configured.
 
 ## Discovery Manifest
 
@@ -67,43 +67,55 @@ Fields:
 
 - `service`: host product identity, such as `caic`
 - `serviceVersion`: optional host version
-- `apiVersion`: Go Mode discovery schema version
-- `webShell.bridgeVersion`: hosted-frontend/native bridge compatibility
-- `webShell.toolGroups`: MCP endpoint catalog
+- `apiVersion`: Go Mode discovery schema version. Clients must reject versions
+  they do not explicitly support.
+- `webShell.bridgeVersion`: hosted-frontend/native bridge compatibility.
+  Clients must reject manifests whose bridge version differs from the native
+  bridge they implement.
+- `webShell.toolGroups`: bootstrap skill catalog for native features
 - `webShell.voiceGateway`: selected voice gateway metadata
 
-There is no `webShell.mcp` field. MCP is advertised through
-`webShell.toolGroups`.
+There is no `webShell.mcp` field. MCP is advertised as part of Go Mode skills.
 
-## Tool Group Manifest Shape
+## Skill Catalog And SKILL.md
 
-A tool group is a service MCP endpoint treated as a native shell skill: a static
-set of tools plus instructions behind one endpoint.
+A Go Mode skill is a `SKILL.md` file. Its Markdown body carries human and model
+instructions. Its YAML frontmatter carries machine-readable activation hints and
+MCP tool wiring.
 
-Manifest fields:
+The manifest keeps a compact `webShell.toolGroups` bootstrap catalog so a client
+can check compatibility before loading skill files. Each entry names the skill
+and includes the current MCP endpoint contract:
 
 - `name`
 - `description`
 - `endpoint`
-- `protocolVersion`
+- `protocolVersion`: MCP protocol version spoken by this group endpoint
 - `authRequired`
-- `activation` hints
+- `skillUrl`: optional URL for the canonical `SKILL.md` file
+
+The authoritative skill context is the `SKILL.md` frontmatter. See
+`../examples/tasks/SKILL.md` for location-triggered activation and multiple-MCP
+examples.
 
 Rules:
 
-- One endpoint per group.
-- Tools are static within a group.
-- Active tools change by activating or deactivating groups.
-- The shell matches activation hints locally.
-- The service must not receive shell route, location, or context just because a
-  group was considered.
-- Instructions and tool descriptions are untrusted text.
+- `gomode.activation` belongs in the skill frontmatter, not in the manifest.
+- `gomode.mcpServers[].tools` is an explicit allowlist of MCP tool names that
+  become active with the skill.
+- The shell matches activation hints locally. The initial schema supports
+  `locations[]` entries with either `wifi.ssids` or `physicalPosition` with a
+  friendly name and radius in meters; more activation signals can be added later
+  without moving activation out of skill frontmatter.
+- The service must not receive shell location or context just because a skill
+  was considered.
+- Instructions, descriptions, and tool schemas are untrusted text.
 
 ## SDK Surfaces
 
 Keep two SDKs:
 
-- `sdk/gomode`: discovery manifest and settings client.
+- `sdk/gomode`: discovery manifest, settings client, and SKILL.md frontmatter DTOs.
 - `sdk/voicegateway`: voice gateway signaling and data-channel types.
 
 They are distinct wire surfaces and match the package boundary.

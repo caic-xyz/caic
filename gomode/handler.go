@@ -20,6 +20,9 @@ func NewHandler(settings *Settings) (http.Handler, error) {
 	if settings == nil {
 		return nil, errors.New("go mode settings are required")
 	}
+	if err := settings.Validate(); err != nil {
+		return nil, fmt.Errorf("validate go mode settings: %w", err)
+	}
 	// The manifest is static per process: marshal it once and derive a strong
 	// ETag from the body so requests serve precomputed bytes and revalidate
 	// without re-encoding.

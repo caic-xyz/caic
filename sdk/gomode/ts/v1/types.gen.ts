@@ -6,40 +6,30 @@ export type ISOTimestamp = string & { readonly __brand: "ISOTimestamp" };
 //////////
 // source: types.go
 
-/** Location is a location triggered by a physical location, SSID or other means. */
-export interface Location {
-  latitude?: number /* float64 */;
-  longitude?: number /* float64 */;
-  ssid?: string;
-}
-
 /**
- * ToolGroupActivation carries hints the shell matches against current context to
- * decide when to load a group's tools. Matching is on-device: the service never
- * receives the user's context or location.
- */
-export interface ToolGroupActivation {
-  /** TODO: Will probably remove. */
-  routes?: string[];
-  locationTags?: Location[];
-  keywords?: string[];
-}
-
-/**
- * ToolGroup describes one MCP tool group the shell can activate as a skill:
- * a static set of tools plus instructions behind one endpoint. The shell
- * discovers every group's name and description up front and loads a group's
- * tools on demand (progressive disclosure), so the active tool set changes by
- * activating groups, not by mutating a group's tools.
+ * ToolGroup describes a bootstrap MCP tool group advertised by the manifest.
+ *
+ * A tool group is the compatibility manifest's compact view of a Go Mode skill.
+ * The authoritative context, activation hints, and tool subset live in the
+ * skill's SKILL.md frontmatter; the manifest stays small so clients can decide
+ * whether native features are compatible before loading skill files.
  */
 export interface ToolGroup {
   name: string;
   description?: string;
   endpoint: string;
-  /** MCP server version, always "2026-07-28". TODO: Is that useful? */
+  /**
+   * ProtocolVersion is the MCP protocol version spoken by this group endpoint.
+   * The shell sends it on MCP requests so each group can be checked and
+   * upgraded independently during protocol migrations.
+   */
   protocolVersion: string;
   authRequired: boolean;
-  activation?: ToolGroupActivation;
+  /**
+   * SkillURL points to the SKILL.md file whose frontmatter defines activation,
+   * instructions, and the MCP tool subset for this skill.
+   */
+  skillUrl?: string;
 }
 
 /** VoiceGatewaySettings describes the preferred voice gateway for this service. */
@@ -52,15 +42,28 @@ export interface VoiceGatewaySettings {
 
 /** WebShellSettings describes the hosted frontend's native-shell contract. */
 export interface WebShellSettings {
+  /**
+   * BridgeVersion is the hosted-frontend/native bridge contract version. A
+   * shell must reject manifests whose bridge version differs from the bridge
+   * version implemented by that shell.
+   */
   bridgeVersion: number /* int */;
   toolGroups: ToolGroup[];
   voiceGateway: VoiceGatewaySettings;
 }
 
-/** Settings is the service compatibility document consumed by Go Mode Android. */
+/** Settings is the service compatibility document consumed by Go Mode clients. */
 export interface Settings {
   service: string;
+  /**
+   * ServiceVersion is the host product version. It is informational and does
+   * not participate in Go Mode compatibility checks.
+   */
   serviceVersion?: string;
+  /**
+   * APIVersion is the Go Mode discovery schema version. A client must reject
+   * manifests with an API version it does not explicitly support.
+   */
   apiVersion: number /* int */;
   webShell: WebShellSettings;
 }
@@ -75,5 +78,70 @@ export interface ErrorBody {
 export interface ErrorResponse {
   error: ErrorBody;
   details?: { [key: string]: any /* json.RawMessage */};
+}
+
+/** LocationWiFi matches any one of the configured Wi-Fi SSIDs. */
+export interface LocationWiFi {
+  /** SSIDs are Wi-Fi network names that can activate the skill. */
+  ssids?: string[];
+}
+
+/** PhysicalPosition matches a named latitude and longitude within RadiusMeters. */
+export interface PhysicalPosition {
+  /** Name is a user-facing label for this physical position. */
+  name: string;
+  latitude: number /* float64 */;
+  longitude: number /* float64 */;
+  /** RadiusMeters is the activation radius around the latitude and longitude. */
+  radiusMeters: number /* float64 */;
+}
+
+/** LocationActivation groups one location-based activation signal for a skill. */
+export interface LocationActivation {
+  wifi?: LocationWiFi;
+  physicalPosition?: PhysicalPosition;
+}
+
+/**
+ * SkillActivation carries hints the shell matches against current context to
+ * decide when to load a skill. Matching is on-device: the service never receives
+ * the user's context or location just because a skill was considered.
+ */
+export interface SkillActivation {
+  /**
+   * Locations are local physical-location and Wi-Fi hints that make this skill
+   * an activation candidate.
+   */
+  locations?: LocationActivation[];
+}
+
+/** SkillMCPServer declares which tools from an MCP endpoint belong to one skill. */
+export interface SkillMCPServer {
+  name: string;
+  endpoint: string;
+  /** ProtocolVersion is the MCP protocol version spoken by this endpoint. */
+  protocolVersion: string;
+  authRequired: boolean;
+  /** Tools is the explicit allowlist of MCP tool names activated by the skill. */
+  tools: string[];
+}
+
+/** SkillGoMode contains Go Mode-specific SKILL.md frontmatter fields. */
+export interface SkillGoMode {
+  activation?: SkillActivation;
+  mcpServers: SkillMCPServer[];
+}
+
+/**
+ * SkillFrontmatter is the YAML frontmatter schema for a Go Mode SKILL.md file.
+ *
+ * The Markdown body carries human and model instructions. The frontmatter carries
+ * machine-readable activation hints and the MCP tool allowlist that the native
+ * shell can register when the skill becomes active.
+ */
+export interface SkillFrontmatter {
+  name: string;
+  description: string;
+  gomode: SkillGoMode;
 }
 
