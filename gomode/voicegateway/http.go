@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
+
+	"github.com/caic-xyz/caic/gomode"
 )
 
 // MediaBridge is the WebRTC media transport used by the voice gateway API.
@@ -184,11 +186,11 @@ func verifyServiceToken(cfg *Config, s ServiceAuthorization) error {
 		if issuer.Service != s.Kind || strings.TrimRight(issuer.Issuer, "/") != strings.TrimRight(s.BaseURL, "/") {
 			continue
 		}
-		publicKey, err := ParseServiceSigningPublicKey(issuer.PublicKey)
+		publicKey, err := gomode.ParseServiceSigningPublicKey(issuer.PublicKey)
 		if err != nil {
 			return err
 		}
-		claims, err := VerifyServiceScopedToken(s.Token, publicKey, ScopedTokenAudience)
+		claims, err := gomode.VerifyServiceScopedToken(s.Token, publicKey, gomode.ScopedTokenAudience)
 		if err != nil {
 			return err
 		}

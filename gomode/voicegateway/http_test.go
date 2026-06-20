@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/caic-xyz/caic/gomode"
 )
 
 // fakeMediaBridge is a MediaBridge stub for handler tests.
@@ -79,19 +81,19 @@ func TestNewHandler(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		token, err := IssueServiceScopedToken(&ScopedTokenClaims{
+		token, err := gomode.IssueServiceScopedToken(&gomode.ScopedTokenClaims{
 			ServiceKind:       "caic",
 			ServiceInstanceID: "home",
 			BackendOrigin:     "https://caic.example.com",
 			Subject:           "user-1",
 			Capabilities:      []string{"voice.session"},
-			Audience:          ScopedTokenAudience,
+			Audience:          gomode.ScopedTokenAudience,
 			Expiry:            time.Now().Add(time.Hour),
 		}, privateKey)
 		if err != nil {
 			t.Fatal(err)
 		}
-		encodedPublicKey, err := EncodeServiceSigningPublicKey(publicKey)
+		encodedPublicKey, err := gomode.EncodeServiceSigningPublicKey(publicKey)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -200,24 +202,23 @@ func TestNewEmbeddedHandler(t *testing.T) {
 // testServiceAuth returns a config with a trusted issuer and a matching service
 // authorization JSON fragment for offer requests.
 func testServiceAuth(t *testing.T) (cfg Config, service string) {
-	t.Helper()
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := IssueServiceScopedToken(&ScopedTokenClaims{
+	token, err := gomode.IssueServiceScopedToken(&gomode.ScopedTokenClaims{
 		ServiceKind:       "caic",
 		ServiceInstanceID: "home",
 		BackendOrigin:     "https://caic.example.com",
 		Subject:           "user-1",
 		Capabilities:      []string{"voice.session"},
-		Audience:          ScopedTokenAudience,
+		Audience:          gomode.ScopedTokenAudience,
 		Expiry:            time.Now().Add(time.Hour),
 	}, privateKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	encodedPublicKey, err := EncodeServiceSigningPublicKey(publicKey)
+	encodedPublicKey, err := gomode.EncodeServiceSigningPublicKey(publicKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +253,7 @@ func newTestPublicKey(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	encoded, err := EncodeServiceSigningPublicKey(publicKey)
+	encoded, err := gomode.EncodeServiceSigningPublicKey(publicKey)
 	if err != nil {
 		t.Fatal(err)
 	}

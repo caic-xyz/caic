@@ -17,7 +17,6 @@ Tasks:
    - `handler.go` for HTTP serving, cache headers, and ETag handling
 3. Move `voicegateway/scoped_token.go` and tests to the `gomode` root.
 4. Update `voicegateway` to import `gomode` for token verification.
-5. Keep `gomode` root stdlib-only.
 
 Acceptance:
 

@@ -1,6 +1,6 @@
-// Scoped service tokens accepted by the voice gateway.
+// Voice token contract for Go Mode hosts and voice gateways.
 
-package voicegateway
+package gomode
 
 import (
 	"crypto/ed25519"
@@ -50,6 +50,9 @@ func ParseServiceSigningPublicKey(s string) (ed25519.PublicKey, error) {
 
 // IssueServiceScopedToken signs a short-lived service-scoped gateway token.
 func IssueServiceScopedToken(c *ScopedTokenClaims, k ed25519.PrivateKey) (string, error) {
+	if c == nil {
+		return "", errors.New("scoped token claims are required")
+	}
 	if len(k) != ed25519.PrivateKeySize {
 		return "", fmt.Errorf("ed25519 private key must be %d bytes", ed25519.PrivateKeySize)
 	}

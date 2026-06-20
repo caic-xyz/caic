@@ -1,6 +1,6 @@
 // Tests for voice gateway scoped service tokens.
 
-package voicegateway
+package gomode
 
 import (
 	"bytes"
@@ -47,6 +47,9 @@ func TestServiceScopedToken(t *testing.T) {
 		expired.Expiry = time.Now().Add(-time.Minute)
 		if _, err := IssueServiceScopedToken(&expired, privateKey); err == nil {
 			t.Fatal("expected expired token error")
+		}
+		if _, err := IssueServiceScopedToken(nil, privateKey); err == nil {
+			t.Fatal("expected nil claims error")
 		}
 	})
 }

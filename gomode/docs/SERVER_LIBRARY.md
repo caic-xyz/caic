@@ -11,7 +11,7 @@ Go Mode.
 ## Package Boundary
 
 ```text
-gomode/                    stdlib-only service discovery and token contract
+gomode/                    service discovery, token contract, and SDK spec
   discovery.go             manifest types and validation
   handler.go               /.well-known/gomode.json handler
   token.go                 voice token claims, issue, verify helpers
@@ -22,13 +22,8 @@ gomode/voicegateway/       voice gateway HTTP server and config
   voicertc/                WebRTC bridge and backend adapters
 ```
 
-Current code still has some of these names collapsed into `http.go` and keeps
-the token contract under `voicegateway/`; the target boundary above is the shape
-to converge on.
-
 ## Dependency Rules
 
-- `gomode` root stays stdlib-only.
 - `gomode` root must not import `gomode/voicegateway`.
 - `gomode/voicegateway` may import `gomode` for token verification.
 - Go Mode packages must not import `backend/internal/*`.

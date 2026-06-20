@@ -12,6 +12,8 @@ import (
 
 	"github.com/maruel/genai/providers"
 	"github.com/pelletier/go-toml/v2"
+
+	"github.com/caic-xyz/caic/gomode"
 )
 
 // Internal backend IDs. A gateway instance serves exactly one of these. They are
@@ -78,7 +80,7 @@ type TrustedIssuerConfig struct {
 	Issuer string `toml:"issuer"`
 	// PublicKey is the imported Ed25519 public key used to verify tokens from issuer.
 	//
-	// The expected format is the value returned by EncodeServiceSigningPublicKey.
+	// The expected format is the value returned by gomode.EncodeServiceSigningPublicKey.
 	PublicKey string `toml:"public_key"`
 }
 
@@ -200,7 +202,7 @@ func validateTrustedIssuer(i int, issuer TrustedIssuerConfig) error {
 	}
 	if issuer.PublicKey == "" {
 		errs = append(errs, fmt.Errorf("%s.public_key is required", prefix))
-	} else if _, err := ParseServiceSigningPublicKey(issuer.PublicKey); err != nil {
+	} else if _, err := gomode.ParseServiceSigningPublicKey(issuer.PublicKey); err != nil {
 		errs = append(errs, fmt.Errorf("%s.public_key: %w", prefix, err))
 	}
 	return errors.Join(errs...)
