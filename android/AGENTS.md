@@ -64,7 +64,9 @@ make android-start-emulator
 make android-stop-emulator
 ```
 
-`make android-start-emulator` runs setup first.
+`make android-start-emulator` runs setup first. Starting the headless emulator is
+cheap; for Android E2E work, start it and run the focused test instead of
+skipping local validation.
 
 The emulator reaches the host at `10.0.2.2`. For a fake caic backend:
 
