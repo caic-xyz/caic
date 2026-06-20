@@ -157,7 +157,7 @@ class VoiceSession(
                 }
                 // Single active tool group today. On-device skill activation across
                 // the toolGroups list (progressive disclosure) is future work; see
-                // android/docs/GOMODE_SERVICE_DISCOVERY.md.
+                // gomode/docs/ANDROID_SHELL.md.
                 val group = serviceSettings.webShell.toolGroups.firstOrNull()
                 if (group == null) {
                     setError("Voice is not available for this service")

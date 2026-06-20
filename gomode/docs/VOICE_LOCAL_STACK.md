@@ -1,4 +1,4 @@
-# Local Voice Stack Plan
+# Go Mode Local Voice Stack
 
 This plan defines the remaining gateway-side work to add a local speech stack
 behind the voice gateway contract. Android and the hosted web frontend should
