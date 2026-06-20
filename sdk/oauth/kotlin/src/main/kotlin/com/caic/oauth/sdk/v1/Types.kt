@@ -104,8 +104,10 @@ data class UpdateClientRequest(
 @Serializable
 data class Token(
     val AccessToken: String,
+    /** e.g., "Bearer"; always set by the constructor */
     val TokenType: String,
     val RefreshToken: String,
+    /** zero means no expiry */
     val Expiry: Time,
 )
 

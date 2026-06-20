@@ -1219,12 +1219,18 @@ func (d *docRegistry) parseStructFields(t reflect.Type) ([]kotlinField, error) {
 			sn = jsonName
 		}
 
+		doc := ""
+		if fdocs, ok := d.fieldDoc[t.Name()]; ok {
+			doc = fdocs[sf.Name]
+		}
+
 		fields = append(fields, kotlinField{
 			jsonName:   jsonName,
 			ktName:     ktName,
 			ktType:     ktType,
 			nullable:   nullable,
 			serialName: sn,
+			doc:        doc,
 		})
 	}
 	return fields, nil
@@ -1247,8 +1253,8 @@ func (d *docRegistry) emitKotlinStruct(b *strings.Builder, t reflect.Type) error
 		return nil
 	}
 
-	// Compact single-line form for structs with ≤2 fields and no @SerialName.
-	if len(fields) <= 2 && !fieldsNeedAnnotation(fields) {
+	// Compact single-line form for structs with ≤2 fields and no field metadata.
+	if len(fields) <= 2 && !fieldsNeedBlock(fields) {
 		b.WriteString("@Serializable\n")
 		fmt.Fprintf(b, "data class %s(", name)
 		for i := range fields {
@@ -1265,6 +1271,9 @@ func (d *docRegistry) emitKotlinStruct(b *strings.Builder, t reflect.Type) error
 	fmt.Fprintf(b, "data class %s(\n", name)
 	for i := range fields {
 		f := &fields[i]
+		if f.doc != "" {
+			b.WriteString(formatBlockDoc(f.doc, "    "))
+		}
 		b.WriteString("    ")
 		if f.serialName != "" {
 			fmt.Fprintf(b, "@SerialName(%q) ", f.serialName)
@@ -1775,10 +1784,10 @@ func writeFieldDecl(b *strings.Builder, f *kotlinField) {
 	}
 }
 
-// fieldsNeedAnnotation returns true if any field requires @SerialName.
-func fieldsNeedAnnotation(fields []kotlinField) bool {
+// fieldsNeedBlock returns true if any field requires its own line.
+func fieldsNeedBlock(fields []kotlinField) bool {
 	for _, f := range fields {
-		if f.serialName != "" {
+		if f.serialName != "" || f.doc != "" {
 			return true
 		}
 	}
@@ -1867,6 +1876,7 @@ type kotlinField struct {
 	ktType     string // Kotlin type (e.g. "String", "List<Foo>").
 	nullable   bool   // Whether the field is T? = null.
 	serialName string // Non-empty when @SerialName annotation is needed.
+	doc        string // Go field documentation comment.
 }
 
 type docRouteGroup struct {

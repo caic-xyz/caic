@@ -665,6 +665,7 @@ data class Config(
     val gitHubTokenAvailable: Boolean,
     val voiceGateway: VoiceGatewayMetadata,
     val gitHubAppEnabled: Boolean? = null,
+    /** e.g. ["github","gitlab"] */
     val authProviders: List<String>? = null,
 )
 
@@ -672,15 +673,22 @@ data class Config(
 @Serializable
 data class VersionResp(
     val current: String,
+    /** empty when check failed */
     val latest: String? = null,
+    /** true when Latest > Current */
     val updateAvailable: Boolean,
+    /** non-empty when the GitHub check failed */
     val checkError: String? = null,
+    /** true when autoupdate schedule is configured */
     val autoUpdateEnabled: Boolean,
 )
 
 /** UpdateResp is the response for POST /api/caic/v1/server/update. */
 @Serializable
-data class UpdateResp(val status: String)
+data class UpdateResp(
+    /** "started" or "already_up_to_date" */
+    val status: String,
+)
 
 /** UserResp is returned by GET /auth/me. */
 @Serializable
@@ -724,13 +732,40 @@ data class MountMappingResp(
 /** UserSettings holds user-configurable behavioral settings. */
 @Serializable
 data class UserSettings(
+    /**
+     * AutoFixOnCIFailure automatically starts a new task to fix CI when a
+     * task's PR CI fails and the original task can no longer receive input.
+     * Only effective when the GitHub App is configured.
+     */
     @SerialName("autoFixOnCIFailure") val autoFixOnCIFailure: Boolean,
+    /**
+     * AutoFixOnPROpen automatically creates a task to review and fix a pull
+     * request when it is opened or reopened via a forge webhook.
+     */
     @SerialName("autoFixOnPROpen") val autoFixOnPROpen: Boolean,
+    /**
+     * BaseImage overrides the default runtime base image. Empty means use
+     * the default.
+     */
     val baseImage: String? = null,
+    /**
+     * ContainerPlatform selects the runtime CPU architecture. Empty means use
+     * the host's native platform. Valid values are linux/amd64 and linux/arm64.
+     */
     val containerPlatform: Platform? = null,
+    /**
+     * MaxCPUs limits the number of CPU cores the runtime instance may use.
+     * Zero means use the system default (max(2, NumCPU-2)).
+     */
     @SerialName("maxCPUs") val maxCPUs: Int? = null,
+    /**
+     * WellKnownCaches maps cache name to enabled state. Absent or false means
+     * disabled, true means enabled. Caches are opt-in.
+     */
     val wellKnownCaches: Map<String, Boolean>? = null,
+    /** CacheMappings are custom host-to-runtime directory mappings. */
     val cacheMappings: List<CacheMappingResp>? = null,
+    /** CustomMounts are custom non-cache host-to-runtime directory mappings. */
     val customMounts: List<MountMappingResp>? = null,
 )
 
@@ -785,12 +820,17 @@ data class HarnessInfo(
 data class WellKnownCache(
     val name: String,
     val description: String,
+    /** List of runtime mount paths */
     val mounts: List<String>,
 )
 
 /** WellKnownCachesResp is the response for GET /api/caic/v1/server/caches. */
 @Serializable
-data class WellKnownCachesResp(val harnessMounts: List<String>, val wellKnown: List<WellKnownCache>)
+data class WellKnownCachesResp(
+    /** e.g. "~/.claude", "~/.codex" */
+    val harnessMounts: List<String>,
+    val wellKnown: List<WellKnownCache>,
+)
 
 /** CacheSize describes the most recent size snapshot for a well-known cache. */
 @Serializable
@@ -815,12 +855,19 @@ data class ForgeCheck(
     val name: String,
     val owner: String,
     val repo: String,
+    /** Pipeline/workflow run ID. */
     @SerialName("runID") val runID: Long,
+    /** Check run / job ID. */
     @SerialName("jobID") val jobID: Long,
+    /** queued, in_progress, completed. */
     val status: CheckStatus,
+    /** Empty when not completed. */
     val conclusion: CheckConclusion,
+    /** When the check was created/queued. */
     val queuedAt: Instant? = null,
+    /** When execution began. */
     val startedAt: Instant? = null,
+    /** When execution finished. */
     val completedAt: Instant? = null,
 )
 
@@ -831,6 +878,7 @@ data class Repo(
     val branch: String,
     val baseBranch: BranchInfo,
     @SerialName("remoteURL") val remoteURL: String? = null,
+    /** "github", "gitlab", or empty if unknown. */
     val forge: Forge? = null,
     val ci: CIStatus? = null,
     val ciChecks: List<ForgeCheck>? = null,
@@ -840,7 +888,9 @@ data class Repo(
 /** CloneRepoReq is the request body for POST /api/caic/v1/server/repos. */
 @Serializable
 data class CloneRepoReq(
+    /** Git clone URL (HTTPS or SSH). */
     val url: String,
+    /** Target subdirectory under rootDir; defaults to repo basename. */
     val path: String? = null,
     val depth: Int? = null,
 )
@@ -863,6 +913,7 @@ data class TaskRepo(
     val baseBranch: String? = null,
     val branch: String,
     @SerialName("remoteURL") val remoteURL: String? = null,
+    /** "github", "gitlab", or empty if unknown. */
     val forge: Forge? = null,
 )
 
@@ -878,11 +929,14 @@ data class DiffFileStat(
 /** RuntimeInstance holds per-task runtime metadata. */
 @Serializable
 data class RuntimeInstance(
+    /** Runtime instance ID. */
     val id: String,
+    /** Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown. */
     val tailscale: String? = null,
     val usb: Boolean? = null,
     val display: Boolean? = null,
     val sudo: Boolean? = null,
+    /** SudoPassword is the random sudo password, only populated when Sudo is true. */
     val sudoPassword: String? = null,
     val vncPort: Int? = null,
 )
@@ -895,19 +949,26 @@ data class Task(
     val title: String,
     val repos: List<TaskRepo>? = null,
     val state: TaskState,
+    /** When the task state last changed. */
     val stateUpdatedAt: Instant,
     val diffStat: DiffStat? = null,
     @SerialName("costUSD") val costUSD: Double,
+    /** Seconds. */
     val duration: Double,
     val numTurns: Int,
     val cumulativeInputTokens: Int,
     val cumulativeOutputTokens: Int,
     val cumulativeCacheCreationInputTokens: Int,
     val cumulativeCacheReadInputTokens: Int,
+    /** Last turn's non-cached input tokens (including cache creation). */
     val activeInputTokens: Int,
+    /** Last turn's cache-read input tokens. */
     val activeCacheReadTokens: Int,
+    /** Effective cache TTL from last API call (seconds); 0 = unknown. */
     @SerialName("cacheTTLSeconds") val cacheTTLSeconds: Int? = null,
+    /** When the prompt cache expires. */
     val cacheExpiresAt: Instant? = null,
+    /** Model context window limit (tokens). */
     val contextWindowLimit: Int,
     val error: String? = null,
     val result: String? = null,
@@ -918,17 +979,23 @@ data class Task(
     val forgeIssue: Int? = null,
     val ciStatus: CIStatus? = null,
     val ciChecks: List<ForgeCheck>? = null,
+    /** username of creator; omitted in no-auth mode */
     val owner: String? = null,
+    /** Per-task harness/agent metadata. */
     val harness: Harness,
     val model: String? = null,
+    /** Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default. */
     val effort: String? = null,
     val agentVersion: String? = null,
     @SerialName("sessionID") val sessionID: String? = null,
+    /** When the task was created. */
     val startedAt: Instant? = null,
+    /** When the current turn started; zero when not running. */
     val turnStartedAt: Instant? = null,
     val inPlanMode: Boolean? = null,
     val planContent: String? = null,
     val runtime: RuntimeInstance,
+    /** Per-task feature flags. */
     val gitHubToken: Boolean? = null,
 )
 
@@ -941,7 +1008,12 @@ data class BotFixPRReq(val taskId: String)
 
 /** ImageData carries a single base64-encoded image. */
 @Serializable
-data class ImageData(val mediaType: String, val data: String)
+data class ImageData(
+    /** e.g. "image/png", "image/jpeg" */
+    val mediaType: String,
+    /** base64-encoded */
+    val data: String,
+)
 
 /** Prompt bundles user text with optional images. */
 @Serializable
@@ -957,6 +1029,7 @@ data class CreateTaskReq(
     val initialPrompt: Prompt,
     val repos: List<RepoSpec>? = null,
     val model: String? = null,
+    /** Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default. */
     val effort: String? = null,
     val harness: Harness,
     val tailscale: Boolean? = null,
@@ -973,6 +1046,7 @@ data class CreateTaskReq(
 @Serializable
 data class EventInit(
     val model: String,
+    /** Thinking effort (e.g. "low", "medium", "high", "max"). Empty when not supported. */
     val effort: String? = null,
     val agentVersion: String,
     @SerialName("sessionID") val sessionID: String,
@@ -995,8 +1069,11 @@ data class EventToolUse(
     @SerialName("toolUseID") val toolUseID: String,
     val name: String,
     val input: JsonElement,
+    /** Snapshot of plan content for ExitPlanMode events. */
     val planContent: String? = null,
+    /** True when Input was omitted due to size; fetch via GET /api/caic/v1/tasks/{id}/tool/{toolUseID}. */
     val inputTruncated: Boolean? = null,
+    /** True when the tool runs in the background (Bash/Agent run_in_background). */
     val background: Boolean? = null,
 )
 
@@ -1004,6 +1081,7 @@ data class EventToolUse(
 @Serializable
 data class EventToolResult(
     @SerialName("toolUseID") val toolUseID: String,
+    /** Seconds; server-computed; 0 if unknown. */
     val duration: Double,
     val error: String? = null,
 )
@@ -1051,7 +1129,9 @@ data class EventResult(
     val result: String,
     val diffStat: DiffStat? = null,
     @SerialName("totalCostUSD") val totalCostUSD: Double,
+    /** Seconds. */
     val duration: Double,
+    /** Seconds. */
     @SerialName("durationAPI") val durationAPI: Double,
     val numTurns: Int,
     val usage: EventUsage,
@@ -1059,7 +1139,11 @@ data class EventResult(
 
 /** EventSystem is a system event (status, compact_boundary, etc.). */
 @Serializable
-data class EventSystem(val subtype: String, val detail: String? = null)
+data class EventSystem(
+    val subtype: String,
+    /** Optional human-readable detail (e.g. model names for model_rerouted). */
+    val detail: String? = null,
+)
 
 /** EventUserInput is emitted when a user sends a text message to the agent. */
 @Serializable
@@ -1069,6 +1153,7 @@ data class EventUserInput(val text: String, val images: List<ImageData>? = null)
 @Serializable
 data class TodoItem(
     val content: String,
+    /** "pending", "in_progress", "completed". */
     val status: String,
     val activeForm: String? = null,
 )
@@ -1107,6 +1192,7 @@ data class EventSubagentStart(
 @Serializable
 data class EventSubagentEnd(
     @SerialName("taskID") val taskID: String,
+    /** "completed", "failed", "stopped" */
     val status: String,
 )
 
@@ -1124,6 +1210,7 @@ data class EventToolOutputDelta(
     @SerialName("toolUseID") val toolUseID: String,
     val delta: String,
     val contentType: ToolOutputContentType? = null,
+    /** Pretty-printed JSON or other transformation. */
     val formatted: String? = null,
 )
 
@@ -1145,11 +1232,17 @@ data class EventWidgetDelta(
 /** EventRateLimit is emitted when the agent's rate limit status changes. */
 @Serializable
 data class EventRateLimit(
+    /** "allowed", "allowed_warning", "rejected". */
     val status: String,
+    /** When the limit resets; zero if unknown. */
     val resetsAt: Instant? = null,
+    /** "five_hour", "seven_day", etc. */
     val rateLimitType: String,
+    /** 0.0–1.0. */
     val utilization: Double,
+    /** True when extra/overage usage is active. */
     val isUsingOverage: Boolean? = null,
+    /** When overage resets; zero if not using overage. */
     val overageResetsAt: Instant? = null,
 )
 
@@ -1230,32 +1323,46 @@ data class SyncReq(val force: Boolean? = null, val target: SyncTarget? = null)
 @Serializable
 data class SafetyIssue(
     val file: String,
+    /** "large_binary" or "secret" */
     val kind: String,
+    /** Human-readable description. */
     val detail: String,
 )
 
 /** SyncResp is the response for POST /api/caic/v1/tasks/{id}/sync. */
 @Serializable
 data class SyncResp(
+    /** "synced", "blocked", or "empty" */
     val status: String,
     val branch: String? = null,
     val diffStat: DiffStat? = null,
     val safetyIssues: List<SafetyIssue>? = null,
+    /** non-zero if a PR/MR was created */
     val prNumber: Int? = null,
 )
 
 /** ForkTaskReq is the request body for POST /api/caic/v1/tasks/{id}/fork. */
 @Serializable
 data class ForkTaskReq(
+    /** Initial prompt for the forked task. */
     val prompt: Prompt,
+    /** Override harness; empty means inherit from source. */
     val harness: Harness? = null,
+    /** Override model; empty means inherit from source. */
     val model: String? = null,
+    /** Override thinking effort; empty means inherit from source. */
     val effort: String? = null,
+    /** Additional repos to map into the fork. */
     val extraRepos: List<RepoSpec>? = null,
+    /** Override Tailscale; nil means inherit from source. */
     val tailscale: Boolean? = null,
+    /** Override USB; nil means inherit from source. */
     val usb: Boolean? = null,
+    /** Override virtual display; nil means inherit from source. */
     val display: Boolean? = null,
+    /** Override sudo; nil means inherit from source. */
     val sudo: Boolean? = null,
+    /** Override gitHubToken; nil means inherit from source. */
     val gitHubToken: Boolean? = null,
 )
 
@@ -1269,10 +1376,13 @@ data class ProcessInfo(
     val pid: Int,
     val ppid: Int,
     val user: String,
+    /** Single-character state: R, S, D, Z, T, etc. */
     val state: String,
     val cpu: Double,
     val mem: Double,
+    /** Cumulative CPU time. */
     val time: String,
+    /** Full command line. */
     val command: String,
 )
 
@@ -1282,7 +1392,10 @@ data class ProcessListResp(val processes: List<ProcessInfo>)
 
 /** SignalProcessReq is the request body for POST /api/caic/v1/tasks/{id}/processes/{pid}/signal. */
 @Serializable
-data class SignalProcessReq(val signal: String)
+data class SignalProcessReq(
+    /** "SIGTERM" or "SIGKILL" */
+    val signal: String,
+)
 
 /**
  * TaskToolInputResp is the response for GET /api/caic/v1/tasks/{id}/tool/{toolUseID}.
@@ -1317,23 +1430,31 @@ data class TaskListEvent(
 /** QuotaRateLimit is a single rate-limit window snapshot from any provider. */
 @Serializable
 data class QuotaRateLimit(
+    /** "5h", "7d", "primary", "secondary", "rpm", "tpd", … */
     val window: String,
+    /** 0–100 */
     val usedPct: Double,
+    /** zero when unknown */
     val resetsAt: Instant? = null,
 )
 
 /** QuotaBalance is a balance/credit snapshot from any provider. */
 @Serializable
 data class QuotaBalance(
+    /** "USD", "CNY", "credits", … */
     val currency: String,
+    /** total available balance */
     val total: Double,
+    /** unexpired promotional/grant balance */
     val granted: Double? = null,
+    /** self-funded recharge balance */
     val toppedUp: Double? = null,
 )
 
 /** QuotaExtraUsage is pay-as-you-go usage info (Anthropic-style extra credits). */
 @Serializable
 data class QuotaExtraUsage(
+    /** "USD", "CNY", … */
     val currency: String,
     val isEnabled: Boolean,
     val usedCredits: Double,
@@ -1344,10 +1465,15 @@ data class QuotaExtraUsage(
 /** ProviderQuota is the quota data for one provider. */
 @Serializable
 data class ProviderQuota(
+    /** "anthropic", "deepseek", "gemini", "openai", "codex", "openrouter", … */
     val provider: String,
+    /** human-readable: "Anthropic", "DeepSeek", … */
     val label: String,
+    /** absolute URL path to provider SVG, e.g. "/logos/anthropic.svg" */
     val logoUrl: String,
+    /** "oauth" or "apikey" */
     val authKind: String,
+    /** link to provider's usage/billing page */
     val usageUrl: String,
     val rateLimits: List<QuotaRateLimit>? = null,
     val balance: QuotaBalance? = null,
@@ -1357,6 +1483,7 @@ data class ProviderQuota(
 /** LocalWindow is the aggregated local cost for a rolling time window. */
 @Serializable
 data class LocalWindow(
+    /** "1h", "6h", "24h" */
     val duration: String,
     @SerialName("costUSD") val costUSD: Double,
     val inputTokens: Int,

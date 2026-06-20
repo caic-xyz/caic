@@ -39,6 +39,7 @@ data class Location(
  */
 @Serializable
 data class ToolGroupActivation(
+    /** TODO: Will probably remove. */
     val routes: List<String>? = null,
     val locationTags: List<Location>? = null,
     val keywords: List<String>? = null,
@@ -56,6 +57,7 @@ data class ToolGroup(
     val name: String,
     val description: String? = null,
     val endpoint: String,
+    /** MCP server version, always "2026-07-28". TODO: Is that useful? */
     val protocolVersion: String,
     val authRequired: Boolean,
     val activation: ToolGroupActivation? = null,

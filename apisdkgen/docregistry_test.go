@@ -27,6 +27,11 @@ type TestPathOnlyRequest struct {
 	ID string `json:"-" path:"id"`
 }
 
+type TestKotlinDocumentedFields struct {
+	Name string `json:"name"`
+	ID   string `json:"id,omitempty"`
+}
+
 func TestGenConfigGoTypeToDoc(t *testing.T) {
 	t.Parallel()
 
@@ -119,6 +124,33 @@ func TestDocRegistryEmitKotlinStruct(t *testing.T) {
 		want := "@Serializable\nclass TestPathOnlyRequest\n"
 		if got != want {
 			t.Fatalf("emitKotlinStruct() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("field docs", func(t *testing.T) {
+		t.Parallel()
+
+		docs := &docRegistry{
+			cfg: &apispec.Config{},
+			fieldDoc: map[string]map[string]string{
+				"TestKotlinDocumentedFields": {
+					"Name": "Name is the display name.",
+					"ID":   "ID is optional.",
+				},
+			},
+		}
+		var b strings.Builder
+		if err := docs.emitKotlinStruct(&b, reflect.TypeFor[TestKotlinDocumentedFields]()); err != nil {
+			t.Fatal(err)
+		}
+		got := b.String()
+		for _, want := range []string{
+			"    /** Name is the display name. */\n    val name: String,",
+			"    /** ID is optional. */\n    val id: String? = null,",
+		} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("emitKotlinStruct() does not contain %q:\n%s", want, got)
+			}
 		}
 	})
 }

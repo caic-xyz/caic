@@ -211,8 +211,11 @@ data class JSONRPCRequest(
 /** JSONRPCError is a JSON-RPC error object. */
 @Serializable
 data class JSONRPCError(
+    /** Code identifies the error type. */
     val code: Int,
+    /** Message is a concise single-sentence description of the error. */
     val message: String,
+    /** Data carries sender-defined additional error information. */
     val data: JsonElement? = null,
 )
 
@@ -227,45 +230,79 @@ data class JSONRPCResponse(
 
 /** PromptsCapability describes prompt support advertised by the server. */
 @Serializable
-data class PromptsCapability(val listChanged: Boolean? = null)
+data class PromptsCapability(
+    /** ListChanged indicates support for prompt list change notifications. */
+    val listChanged: Boolean? = null,
+)
 
 /** ResourcesCapability describes resource support advertised by the server. */
 @Serializable
-data class ResourcesCapability(val subscribe: Boolean? = null, val listChanged: Boolean? = null)
+data class ResourcesCapability(
+    /** Subscribe indicates support for subscribing to individual resource updates. */
+    val subscribe: Boolean? = null,
+    /** ListChanged indicates support for resource list change notifications. */
+    val listChanged: Boolean? = null,
+)
 
 /** ToolsCapability describes tool support advertised by the server. */
 @Serializable
-data class ToolsCapability(val listChanged: Boolean? = null)
+data class ToolsCapability(
+    /** ListChanged indicates support for tool list change notifications. */
+    val listChanged: Boolean? = null,
+)
 
 /** Capabilities describes server-supported MCP features. */
 @Serializable
 data class Capabilities(
+    /** Experimental contains non-standard capabilities supported by the server. */
     val experimental: Map<String, JsonElement>? = null,
+    /**
+     * DeprecatedLogging is present if the server supports sending log messages to the client.
+     *
+     * Deprecated as of protocol version 2026-07-28, but still present in that
+     * schema. This is native 2026-07-28 compatibility, not released-version
+     * compat.go support; remove it only after the upstream 2026+ schema drops it.
+     */
     val logging: Map<String, JsonElement>? = null,
+    /** Completions is present if the server supports argument completion suggestions. */
     val completions: Map<String, JsonElement>? = null,
+    /** Prompts is present if the server offers prompt templates. */
     val prompts: PromptsCapability? = null,
+    /** Resources is present if the server offers resources to read. */
     val resources: ResourcesCapability? = null,
+    /** Tools is present if the server offers tools to call. */
     val tools: ToolsCapability? = null,
+    /** Extensions contains optional MCP extensions supported by the server. */
     val extensions: Map<String, JsonElement>? = null,
 )
 
 /** Icon describes an optionally-sized icon for UI display. */
 @Serializable
 data class Icon(
+    /** Src is an icon URI, such as an HTTPS URL or data URI. */
     val src: String,
+    /** MimeType overrides a missing or generic source MIME type. */
     val mimeType: String? = null,
+    /** Sizes lists supported dimensions, such as "48x48" or "any". */
     val sizes: List<String>? = null,
+    /** Theme indicates whether the icon targets a light or dark background. */
     val theme: String? = null,
 )
 
 /** Implementation describes an MCP client or server implementation. */
 @Serializable
 data class Implementation(
+    /** Icons contains optional sized icons for UI display. */
     val icons: List<Icon>? = null,
+    /** Name is the programmatic implementation identifier. */
     val name: String,
+    /** Title is a human-readable display name. */
     val title: String? = null,
+    /** Version is the implementation version. */
     val version: String,
+    /** Description explains what this implementation does. */
     val description: String? = null,
+    /** WebsiteURL is an optional website for this implementation. */
     val websiteUrl: String? = null,
 )
 
@@ -273,53 +310,115 @@ data class Implementation(
 @Serializable
 data class ServerDiscoverResult(
     val resultType: ResultType,
+    /** SupportedVersions lists MCP protocol versions supported by this server. */
     val supportedVersions: List<String>,
+    /** Capabilities advertises server features. */
     val capabilities: Capabilities,
+    /** ServerInfo describes the server software implementation. */
     val serverInfo: Implementation,
+    /**
+     * Instructions gives natural-language guidance for using the server effectively.
+     *
+     * Clients may include it in an LLM system prompt. It should not duplicate tool
+     * descriptions.
+     */
     val instructions: String? = null,
+    /** TTLMS hints how long clients may cache this response in milliseconds. */
     val ttlMs: Int,
+    /** CacheScope indicates whether the response may be cached publicly or privately. */
     val cacheScope: CacheScope,
 )
 
 /** SamplingCapability describes deprecated client sampling support. */
 @Serializable
-data class SamplingCapability(val context: Map<String, JsonElement>? = null, val tools: Map<String, JsonElement>? = null)
+data class SamplingCapability(
+    /** Context declares context inclusion support. */
+    val context: Map<String, JsonElement>? = null,
+    /** Tools declares tool-use support. */
+    val tools: Map<String, JsonElement>? = null,
+)
 
 /** ElicitationCapability describes client elicitation support. */
 @Serializable
-data class ElicitationCapability(val form: Map<String, JsonElement>? = null, val url: Map<String, JsonElement>? = null)
+data class ElicitationCapability(
+    /** Form declares support for form-mode elicitation. */
+    val form: Map<String, JsonElement>? = null,
+    /** URL declares support for URL-mode elicitation. */
+    val url: Map<String, JsonElement>? = null,
+)
 
 /** ClientCapabilities describes capabilities the client supports for a request. */
 @Serializable
 data class ClientCapabilities(
+    /** Experimental contains non-standard capabilities supported by the client. */
     val experimental: Map<String, JsonElement>? = null,
+    /**
+     * DeprecatedRoots is present if the client supports listing roots.
+     *
+     * Deprecated as of protocol version 2026-07-28, but still present in that
+     * schema. This is native 2026-07-28 compatibility, not released-version
+     * compat.go support; remove it only after the upstream 2026+ schema drops it.
+     */
     val roots: Map<String, JsonElement>? = null,
+    /**
+     * DeprecatedSampling is present if the client supports server-initiated LLM sampling.
+     *
+     * Deprecated as of protocol version 2026-07-28, but still present in that
+     * schema. This is native 2026-07-28 compatibility, not released-version
+     * compat.go support; remove it only after the upstream 2026+ schema drops it.
+     */
     val sampling: SamplingCapability? = null,
+    /** Elicitation is present if the client supports server-initiated user elicitation. */
     val elicitation: ElicitationCapability? = null,
+    /** Extensions contains optional MCP extensions supported by the client. */
     val extensions: Map<String, JsonElement>? = null,
 )
 
 /** RequestMeta is the metadata object required in MCP request params. */
 @Serializable
 data class RequestMeta(
+    /**
+     * ProtocolVersion is the MCP protocol version used for this request.
+     *
+     * For HTTP, it must match the MCP-Protocol-Version header.
+     */
     @SerialName("io.modelcontextprotocol/protocolVersion") val protocolVersion: String,
+    /** ClientInfo identifies the client software making the request. */
     @SerialName("io.modelcontextprotocol/clientInfo") val clientInfo: Implementation,
+    /** ClientCapabilities declares client capabilities for this request. */
     @SerialName("io.modelcontextprotocol/clientCapabilities") val clientCapabilities: ClientCapabilities,
+    /** ProgressToken requests out-of-band progress notifications for this request. */
     val progressToken: JsonElement? = null,
+    /**
+     * DeprecatedLogLevel requests server log message notifications for this request.
+     *
+     * Deprecated as of protocol version 2026-07-28, but still present in that
+     * schema. This is native 2026-07-28 compatibility, not released-version
+     * compat.go support; remove it only after the upstream 2026+ schema drops it.
+     */
     @SerialName("io.modelcontextprotocol/logLevel") val deprecatedLogLevel: String? = null,
 )
 
 /** PaginatedRequestParams contains common request metadata and an optional cursor. */
 @Serializable
-data class PaginatedRequestParams(val _meta: RequestMeta, val cursor: String? = null)
+data class PaginatedRequestParams(
+    val _meta: RequestMeta,
+    /** Cursor is an opaque pagination token. */
+    val cursor: String? = null,
+)
 
 /** ToolAnnotations describe MCP tool behavior hints. */
 @Serializable
 data class ToolAnnotations(
+    /** Title is a human-readable title for the tool. */
     val title: String? = null,
+    /** ReadOnlyHint indicates the tool does not modify its environment. */
     val readOnlyHint: Boolean? = null,
+    /** DestructiveHint indicates the tool may perform destructive updates. */
     val destructiveHint: Boolean? = null,
+    /** IdempotentHint indicates repeated calls with the same arguments have no additional effect. */
     val idempotentHint: Boolean? = null,
+    /** OpenWorldHint indicates the tool may interact with external entities. */
     val openWorldHint: Boolean? = null,
 )
 
@@ -328,11 +427,17 @@ data class ToolAnnotations(
 data class ToolDescriptor(
     val _meta: Map<String, JsonElement>? = null,
     val icons: List<Icon>? = null,
+    /** Name is the programmatic tool identifier. */
     val name: String,
+    /** Title is a human-readable display name. */
     val title: String? = null,
+    /** Description helps clients and LLMs understand the tool. */
     val description: String? = null,
+    /** InputSchema defines the expected JSON object arguments for the tool. */
     val inputSchema: JsonElement? = null,
+    /** OutputSchema defines the structuredContent shape for successful results. */
     val outputSchema: JsonElement? = null,
+    /** Annotations contains optional tool behavior hints. */
     val annotations: ToolAnnotations? = null,
 )
 
@@ -351,9 +456,13 @@ data class ToolsListResult(
 @Serializable
 data class ToolsCallParams(
     val _meta: RequestMeta,
+    /** InputResponses carries responses to server-initiated requests from a prior input_required result. */
     val inputResponses: JsonElement? = null,
+    /** RequestState carries opaque state from a prior input_required result. */
     val requestState: String? = null,
+    /** Name identifies the tool to invoke. */
     val name: String,
+    /** Arguments contains tool arguments as a JSON object. */
     val arguments: JsonElement? = null,
 )
 
@@ -361,17 +470,24 @@ data class ToolsCallParams(
 @Serializable
 data class ResourceContent(
     val _meta: Map<String, JsonElement>? = null,
+    /** URI identifies this resource. */
     val uri: String,
+    /** MimeType is the resource MIME type, if known. */
     val mimeType: String? = null,
+    /** Text contains textual resource contents. */
     val text: String? = null,
+    /** Blob contains base64-encoded binary resource contents. */
     val blob: String? = null,
 )
 
 /** Annotations provide optional metadata for MCP resources and content. */
 @Serializable
 data class Annotations(
+    /** Audience describes who the data is intended for. */
     val audience: List<Role>? = null,
+    /** Priority describes importance from 0 to 1, with 1 most important. */
     val priority: Int? = null,
+    /** LastModified is an ISO 8601 timestamp for the last modification time. */
     val lastModified: String? = null,
 )
 
@@ -385,16 +501,27 @@ data class Annotations(
 data class ContentBlock(
     val _meta: Map<String, JsonElement>? = null,
     val icons: List<Icon>? = null,
+    /** Type identifies the content variant. */
     val type: ContentType,
+    /** Name is used by resource_link content. */
     val name: String? = null,
+    /** Title is a human-readable display name. */
     val title: String? = null,
+    /** Text is the text content for text blocks. */
     val text: String? = null,
+    /** Data is base64-encoded data for image and audio blocks. */
     val data: String? = null,
+    /** URI identifies resource_link content. */
     val uri: String? = null,
+    /** Description helps clients and LLMs understand linked resources. */
     val description: String? = null,
+    /** MimeType is required for image and audio content and optional for resources. */
     val mimeType: String? = null,
+    /** Size is the raw resource size in bytes, if known. */
     val size: Long? = null,
+    /** Resource contains embedded resource contents for resource blocks. */
     val resource: ResourceContent? = null,
+    /** Annotations provide optional client metadata. */
     val annotations: Annotations? = null,
 )
 
@@ -403,8 +530,11 @@ data class ContentBlock(
 data class ToolCallResult(
     val _meta: Map<String, JsonElement>? = null,
     val resultType: ResultType,
+    /** Content is the unstructured result of the tool call. */
     val content: List<ContentBlock>,
+    /** StructuredContent is optional JSON matching the tool output schema on success. */
     val structuredContent: JsonElement? = null,
+    /** IsError indicates the tool call ended in an error visible to the model. */
     val isError: Boolean? = null,
 )
 
@@ -413,12 +543,19 @@ data class ToolCallResult(
 data class ResourceDescriptor(
     val _meta: Map<String, JsonElement>? = null,
     val icons: List<Icon>? = null,
+    /** URI identifies this resource. */
     val uri: String,
+    /** Name is the programmatic resource identifier. */
     val name: String,
+    /** Title is a human-readable display name. */
     val title: String? = null,
+    /** Description helps clients and LLMs understand the resource. */
     val description: String? = null,
+    /** MimeType is the resource MIME type, if known. */
     val mimeType: String? = null,
+    /** Annotations provide optional client metadata. */
     val annotations: Annotations? = null,
+    /** Size is the raw resource size in bytes, if known. */
     val size: Long? = null,
 )
 
@@ -438,11 +575,17 @@ data class ResourcesListResult(
 data class ResourceTemplateDescriptor(
     val _meta: Map<String, JsonElement>? = null,
     val icons: List<Icon>? = null,
+    /** Name is the programmatic template identifier. */
     val name: String,
+    /** Title is a human-readable display name. */
     val title: String? = null,
+    /** URITemplate is an RFC 6570 URI template for constructing resource URIs. */
     val uriTemplate: String,
+    /** Description helps clients and LLMs understand the template. */
     val description: String? = null,
+    /** MimeType is the MIME type for matching resources, if uniform. */
     val mimeType: String? = null,
+    /** Annotations provide optional client metadata. */
     val annotations: Annotations? = null,
 )
 
@@ -461,8 +604,11 @@ data class ResourceTemplatesListResult(
 @Serializable
 data class ResourcesReadParams(
     val _meta: RequestMeta,
+    /** InputResponses carries responses to server-initiated requests from a prior input_required result. */
     val inputResponses: JsonElement? = null,
+    /** RequestState carries opaque state from a prior input_required result. */
     val requestState: String? = null,
+    /** URI identifies the resource to read. */
     val uri: String,
 )
 
@@ -471,23 +617,34 @@ data class ResourcesReadParams(
 data class ResourcesReadResult(
     val _meta: Map<String, JsonElement>? = null,
     val resultType: ResultType,
+    /** Contents contains text or blob resource contents. */
     val contents: List<ResourceContent>,
+    /** TTLMS hints how long clients may cache this response in milliseconds. */
     val ttlMs: Int,
+    /** CacheScope indicates whether the response may be cached publicly or privately. */
     val cacheScope: CacheScope,
 )
 
 /** SubscriptionFilter describes MCP subscription notifications requested by a client. */
 @Serializable
 data class SubscriptionFilter(
+    /** ToolsListChanged requests tool list change notifications. */
     val toolsListChanged: Boolean? = null,
+    /** PromptsListChanged requests prompt list change notifications. */
     val promptsListChanged: Boolean? = null,
+    /** ResourcesListChanged requests resource list change notifications. */
     val resourcesListChanged: Boolean? = null,
+    /** ResourceSubscriptions requests updates for individual resource URIs. */
     val resourceSubscriptions: List<String>? = null,
 )
 
 /** SubscriptionsListenParams is the request params payload for subscriptions/listen. */
 @Serializable
-data class SubscriptionsListenParams(val _meta: RequestMeta, val notifications: SubscriptionFilter)
+data class SubscriptionsListenParams(
+    val _meta: RequestMeta,
+    /** Notifications declares notification types the client opts in to. */
+    val notifications: SubscriptionFilter,
+)
 
 /** JSONRPCNotification is a JSON-RPC notification that does not expect a response. */
 @Serializable
@@ -501,7 +658,9 @@ data class JSONRPCNotification(
 @Serializable
 data class SubscriptionNotificationParams(
     val _meta: Map<String, JsonElement>? = null,
+    /** Notifications is the subset of requested notification types the server accepted. */
     val notifications: SubscriptionFilter? = null,
+    /** URI identifies an updated resource. */
     val uri: String? = null,
 )
 
