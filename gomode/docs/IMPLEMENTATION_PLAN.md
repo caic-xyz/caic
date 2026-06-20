@@ -7,25 +7,7 @@ This plan converges the codebase on the specific documents:
 - `gomode/docs/VOICE_GATEWAY.md`
 - `gomode/docs/VOICE_LOCAL_STACK.md`
 
-## Phase 1: Server Library Boundary
-
-Tasks:
-
-1. Add `gomode/README.md` with package responsibilities and host adapter rules.
-2. Split `gomode/http.go` into:
-   - `discovery.go` for manifest types and validation
-   - `handler.go` for HTTP serving, cache headers, and ETag handling
-3. Move `voicegateway/scoped_token.go` and tests to the `gomode` root.
-4. Update `voicegateway` to import `gomode` for token verification.
-
-Acceptance:
-
-- `go list ./gomode ./gomode/voicegateway/...` succeeds.
-- `gomode` imports no `voicegateway`, pion, opus, genai, or
-  `backend/internal/*`.
-- Discovery and voice gateway tests pass.
-
-## Phase 2: Discovery Contract Cleanup
+## Phase 1: Discovery Contract Cleanup
 
 Tasks:
 
@@ -44,7 +26,7 @@ Acceptance:
 - Android tests reject malformed required fields.
 - `make refresh-generated` and `make lint-fix` pass.
 
-## Phase 3: External Gateway Token Flow
+## Phase 2: External Gateway Token Flow
 
 Tasks:
 
@@ -52,7 +34,6 @@ Tasks:
 2. Populate `webShell.voiceGateway.tokenEndpoint` for external gateway auth.
 3. Make Android request the token before opening an external gateway session.
 4. Keep embedded gateway mode token-free.
-5. Hide the transitional ed25519 format behind root `gomode` token APIs.
 
 Acceptance:
 
@@ -62,7 +43,7 @@ Acceptance:
   expiry, and capabilities.
 - Reject logs do not leak token contents.
 
-## Phase 4: OAuth JWT Federation
+## Phase 3: OAuth JWT Federation
 
 Tasks:
 
@@ -84,7 +65,7 @@ Acceptance:
 - Rotated JWKS keys are accepted after cache refresh.
 - Expired, wrong-audience, and insufficient-scope tokens are rejected.
 
-## Phase 5: Android Bootstrap Robustness
+## Phase 4: Android Bootstrap Robustness
 
 Tasks:
 
@@ -99,7 +80,7 @@ Acceptance:
 - Missing or malformed manifest disables native features instead of crashing.
 - Voice setup uses the manifest gateway URL and selected tool-group endpoint.
 
-## Phase 6: Android MCP Resources And Monitoring
+## Phase 5: Android MCP Resources And Monitoring
 
 Tasks:
 
@@ -120,7 +101,7 @@ Acceptance:
 - Resource update events trigger re-read and update native monitoring state.
 - Unsupported resources disable monitoring cleanly.
 
-## Phase 7: Backend Subscription Invalidation
+## Phase 6: Backend Subscription Invalidation
 
 Tasks:
 
@@ -138,7 +119,7 @@ Acceptance:
 - Canceled Android connections release resources.
 - Events are delivered without unbounded queue growth.
 
-## Phase 8: Progressive Tool-Group Activation
+## Phase 7: Progressive Tool-Group Activation
 
 Tasks:
 
@@ -155,7 +136,7 @@ Acceptance:
 - Fake multi-group manifests activate only matching groups.
 - Deactivation removes tools from the voice session.
 
-## Phase 9: Local Voice Stack
+## Phase 8: Local Voice Stack
 
 Tasks:
 
@@ -173,7 +154,7 @@ Acceptance:
 - Local backend calls client tools and continues after tool results.
 - User interruption stops TTS and cancels pending model work.
 
-## Phase 10: Repository Split
+## Phase 9: Repository Split
 
 Tasks:
 
