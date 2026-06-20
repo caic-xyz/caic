@@ -501,12 +501,20 @@ export default function TaskDetail(props: Props) {
     }
   }
 
-  const isActive = () => {
-    const s = props.taskState;
-    return s === "running" || s === "branching" || s === "provisioning" || s === "starting" || s === "waiting" || s === "asking" || s === "has_plan" || s === "purging";
+  const hasUnansweredAsk = () => {
+    const group = lastAskGroup();
+    return group !== null && group.answerText === undefined;
   };
 
-  const isWaiting = () => props.taskState === "waiting" || props.taskState === "asking" || props.taskState === "has_plan";
+  // Detail SSE can show an ask before the task-list SSE patches the task state.
+  const isPendingAsk = () => props.taskState === "pending" && hasUnansweredAsk();
+
+  const isActive = () => {
+    const s = props.taskState;
+    return s === "running" || s === "branching" || s === "provisioning" || s === "starting" || s === "waiting" || s === "asking" || s === "has_plan" || s === "purging" || isPendingAsk();
+  };
+
+  const isWaiting = () => props.taskState === "waiting" || props.taskState === "asking" || props.taskState === "has_plan" || isPendingAsk();
   const isRecoverable = () => props.taskState === "stopped" || props.taskState === "crashed";
   const canSendInput = () => isActive() && props.taskState !== "purging";
   const prURL = () => {

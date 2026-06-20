@@ -381,7 +381,7 @@ describe("SSE connection", () => {
     const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
     makeSyncReadyMock(created, capturedCb);
 
-    renderTaskDetail({ taskState: "asking" });
+    const { getByTestId } = renderTaskDetail({ taskState: "pending" });
 
     if (!capturedCb.value) throw new Error("taskEvents callback not captured");
     capturedCb.value({
@@ -394,6 +394,8 @@ describe("SSE connection", () => {
     });
 
     expect(document.body.textContent).toContain("Which option?");
+    expect(getByTestId("ask-option-A")).toBeEnabled();
+    expect(getByTestId("task-detail-form")).toBeInTheDocument();
   });
 
   it("context menu button is visible in waiting state and opens menu with actions", async () => {
