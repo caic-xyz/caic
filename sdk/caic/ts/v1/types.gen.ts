@@ -59,6 +59,15 @@ export const EventKindWidgetDelta: EventKind = "widgetDelta";
 export const EventKindRateLimit: EventKind = "rateLimit";
 export const EventKindStats: EventKind = "stats";
 
+export type EventToolInputKind =
+  | "edit"
+  | "subagents";
+/**
+ * Supported values.
+ */
+export const EventToolInputEdit: EventToolInputKind = "edit";
+export const EventToolInputSubagents: EventToolInputKind = "subagents";
+
 export type ToolOutputContentType =
   | "text"
   | "json"
@@ -95,11 +104,45 @@ export interface EventTextDelta {
   text: string;
 }
 
+/** EventEditReplacement is one exact text replacement in an edit tool call. */
+export interface EventEditReplacement {
+  oldText: string;
+  newText: string;
+}
+
+/** EventEditToolInput is the normalized view of an exact-replacement edit tool. */
+export interface EventEditToolInput {
+  path: string;
+  edits: EventEditReplacement[];
+}
+
+/** EventSubagentSpawn is one backend-normalized subagent invocation. */
+export interface EventSubagentSpawn {
+  agent: string;
+  task: string;
+  label?: string;
+  phase?: string;
+}
+
+/**
+ * EventToolInputView is a backend-normalized rendering model for known tool
+ * inputs. It keeps harness-specific tool schemas out of clients.
+ */
+export interface EventToolInputView {
+  kind: EventToolInputKind;
+  edit?: EventEditToolInput;
+  subagents?: EventSubagentSpawn[];
+}
+
 /** EventToolUse is emitted when the assistant invokes a tool. */
 export interface EventToolUse {
   toolUseID: string;
   name: string;
   input: any /* json.RawMessage */;
+  /** Backend-normalized short display detail for tool headers. */
+  detail?: string;
+  /** Backend-normalized structured input for tool-card rendering. */
+  inputView?: EventToolInputView;
   /** Snapshot of plan content for ExitPlanMode events. */
   planContent?: string;
   /** True when Input was omitted due to size; fetch via GET /api/caic/v1/tasks/{id}/tool/{toolUseID}. */

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
@@ -964,4 +965,36 @@ func TestWireFormat(t *testing.T) {
 			t.Errorf("totalUsage not reset after ResultMessage: %+v", reset)
 		}
 	})
+}
+
+func TestReadEditBashFixtureFileChangeHasDetail(t *testing.T) {
+	t.Parallel()
+
+	msgs := agenttest.ParseJSONL(t, "testdata/read-edit-bash.jsonl", New("", nil).NewWire().ParseMessage)
+	for _, msg := range msgs {
+		use, ok := msg.(*agent.ToolUseMessage)
+		if !ok || use.Name != "Edit" {
+			continue
+		}
+		if use.Detail != "main.go" {
+			t.Fatalf("detail = %q, want main.go", use.Detail)
+		}
+		// Codex fileChange carries a unified diff, not exact old/new replacement
+		// strings, so it can set a header detail but not ToolInputEdit.
+		if use.InputView.Kind != "" {
+			t.Fatalf("input view = %#v, want zero value for Codex fileChange diff", use.InputView)
+		}
+		var changes []struct {
+			Path string `json:"path"`
+			Diff string `json:"diff"`
+		}
+		if err := json.Unmarshal(use.Input, &changes); err != nil {
+			t.Fatalf("unmarshal fileChange input: %v", err)
+		}
+		if len(changes) != 1 || changes[0].Path != "/workspace/main.go" || !strings.Contains(changes[0].Diff, "Hi, World!") {
+			t.Fatalf("changes = %#v", changes)
+		}
+		return
+	}
+	t.Fatal("no Codex Edit fileChange tool use found")
 }

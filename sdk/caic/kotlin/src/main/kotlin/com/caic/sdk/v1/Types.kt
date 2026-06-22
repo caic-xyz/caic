@@ -278,6 +278,34 @@ object EventKindSerializer : KSerializer<EventKind> {
     }
 }
 
+@Serializable(with = EventToolInputKindSerializer::class)
+sealed interface EventToolInputKind {
+    val value: String
+    @Serializable
+    data object EventToolInputEdit : EventToolInputKind {
+        override val value = "edit"
+    }
+    @Serializable
+    data object EventToolInputSubagents : EventToolInputKind {
+        override val value = "subagents"
+    }
+    @Serializable
+    data class Other(override val value: String) : EventToolInputKind
+}
+
+object EventToolInputKindSerializer : KSerializer<EventToolInputKind> {
+    override val descriptor = PrimitiveSerialDescriptor("EventToolInputKind", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: EventToolInputKind) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): EventToolInputKind {
+        val v = decoder.decodeString()
+        return when (v) {
+            "edit" -> EventToolInputKind.EventToolInputEdit
+            "subagents" -> EventToolInputKind.EventToolInputSubagents
+            else -> EventToolInputKind.Other(v)
+        }
+    }
+}
+
 @Serializable(with = ForgeSerializer::class)
 sealed interface Forge {
     val value: String
@@ -1063,12 +1091,44 @@ data class EventText(val text: String)
 @Serializable
 data class EventTextDelta(val text: String)
 
+/** EventEditReplacement is one exact text replacement in an edit tool call. */
+@Serializable
+data class EventEditReplacement(val oldText: String, val newText: String)
+
+/** EventEditToolInput is the normalized view of an exact-replacement edit tool. */
+@Serializable
+data class EventEditToolInput(val path: String, val edits: List<EventEditReplacement>)
+
+/** EventSubagentSpawn is one backend-normalized subagent invocation. */
+@Serializable
+data class EventSubagentSpawn(
+    val agent: String,
+    val task: String,
+    val label: String? = null,
+    val phase: String? = null,
+)
+
+/**
+ * EventToolInputView is a backend-normalized rendering model for known tool
+ * inputs. It keeps harness-specific tool schemas out of clients.
+ */
+@Serializable
+data class EventToolInputView(
+    val kind: EventToolInputKind,
+    val edit: EventEditToolInput? = null,
+    val subagents: List<EventSubagentSpawn>? = null,
+)
+
 /** EventToolUse is emitted when the assistant invokes a tool. */
 @Serializable
 data class EventToolUse(
     @SerialName("toolUseID") val toolUseID: String,
     val name: String,
     val input: JsonElement,
+    /** Backend-normalized short display detail for tool headers. */
+    val detail: String? = null,
+    /** Backend-normalized structured input for tool-card rendering. */
+    val inputView: EventToolInputView? = null,
     /** Snapshot of plan content for ExitPlanMode events. */
     val planContent: String? = null,
     /** True when Input was omitted due to size; fetch via GET /api/caic/v1/tasks/{id}/tool/{toolUseID}. */

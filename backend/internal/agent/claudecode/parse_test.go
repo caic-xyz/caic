@@ -10,6 +10,7 @@ import (
 	genclaudecode "github.com/maruel/genai/providers/claudecode"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
@@ -1078,5 +1079,82 @@ func TestParseMessage(t *testing.T) {
 		if m.Model != "m" {
 			t.Errorf("model = %q, want %q", m.Model, "m")
 		}
+	})
+}
+
+func TestNew(t *testing.T) {
+	t.Parallel()
+	t.Run("edit tool display", func(t *testing.T) {
+		t.Parallel()
+
+		use := &agent.ToolUseMessage{
+			Name:  "Edit",
+			Input: json.RawMessage(`{"file_path":"src/main.ts","old_string":"before","new_string":"after"}`),
+		}
+		addEditInputView(use)
+		if use.Detail != "main.ts" {
+			t.Fatalf("detail = %q", use.Detail)
+		}
+		if use.InputView.Kind != agent.ToolInputEdit || use.InputView.Edit.Path != "src/main.ts" || len(use.InputView.Edit.Edits) != 1 {
+			t.Fatalf("input view = %#v", use.InputView)
+		}
+	})
+	t.Run("read edit bash fixture normalizes edit", func(t *testing.T) {
+		t.Parallel()
+
+		msgs := agenttest.ParseJSONL(t, "testdata/read-edit-bash.jsonl", New().NewWire().ParseMessage)
+		var use *agent.ToolUseMessage
+		for _, msg := range msgs {
+			candidate, ok := msg.(*agent.ToolUseMessage)
+			if ok && candidate.Name == "Edit" && candidate.InputView.Kind == agent.ToolInputEdit {
+				use = candidate
+				break
+			}
+		}
+		if use == nil {
+			t.Fatal("no normalized Edit tool use found")
+		}
+		if use.Detail != "main.go" {
+			t.Fatalf("detail = %q, want main.go", use.Detail)
+		}
+		edit := use.InputView.Edit
+		if edit.Path != "/workspace/main.go" || len(edit.Edits) != 1 {
+			t.Fatalf("edit view = %#v", edit)
+		}
+		if edit.Edits[0].OldText != "\tfmt.Println(\"Hello, World!\")" || edit.Edits[0].NewText != "\tfmt.Println(\"Hi, World!\")" {
+			t.Fatalf("edit replacement = %#v", edit.Edits[0])
+		}
+	})
+	t.Run("edit input", func(t *testing.T) {
+		t.Parallel()
+
+		t.Run("valid", func(t *testing.T) {
+			t.Parallel()
+			edit, ok := parseEditInput(json.RawMessage(`{"file_path":"src/main.ts","old_string":"before","new_string":"after"}`))
+			if !ok {
+				t.Fatal("parseEditInput returned false")
+			}
+			if edit.Path != "src/main.ts" || len(edit.Edits) != 1 || edit.Edits[0].OldText != "before" || edit.Edits[0].NewText != "after" {
+				t.Fatalf("edit = %+v", edit)
+			}
+		})
+
+		t.Run("multi edit", func(t *testing.T) {
+			t.Parallel()
+			edit, ok := parseEditInput(json.RawMessage(`{"file_path":"src/main.ts","edits":[{"old_string":"a","new_string":"b"},{"old_string":"c","new_string":"d"}]}`))
+			if !ok {
+				t.Fatal("parseEditInput returned false")
+			}
+			if len(edit.Edits) != 2 {
+				t.Fatalf("got %d edits, want 2", len(edit.Edits))
+			}
+		})
+
+		t.Run("error", func(t *testing.T) {
+			t.Parallel()
+			if _, ok := parseEditInput(json.RawMessage(`{"file_path":"src/main.ts","new_string":"after"}`)); ok {
+				t.Fatal("parseEditInput accepted missing old string")
+			}
+		})
 	})
 }

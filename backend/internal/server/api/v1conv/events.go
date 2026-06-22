@@ -75,6 +75,10 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 		return nil
 	case *agent.ToolUseMessage:
 		tt.pending[m.ToolUseID] = now
+		detail, inputView := ToolUseDisplay(m.Name, m.Input, &m.InputView)
+		if m.Detail != "" {
+			detail = m.Detail
+		}
 		input := m.Input
 		truncated := false
 		if len(input) > InputTruncateThreshold {
@@ -95,6 +99,8 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 				ToolUseID:      m.ToolUseID,
 				Name:           m.Name,
 				Input:          input,
+				Detail:         detail,
+				InputView:      inputView,
 				PlanContent:    m.PlanContent,
 				InputTruncated: truncated,
 				Background:     bg,

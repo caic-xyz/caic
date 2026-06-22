@@ -40,7 +40,7 @@ import (
 // CacheVersion is the schema version of the cached EventMessage JSONL.
 // Bump it whenever event conversion or DTO semantics change so stale caches are
 // ignored rather than served.
-const CacheVersion = 2
+const CacheVersion = 3
 
 // CacheHeader is the first JSONL record of a replay cache. It binds the cache
 // to a specific raw log file so a changed or replaced log invalidates it.

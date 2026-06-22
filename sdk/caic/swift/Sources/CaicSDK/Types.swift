@@ -150,6 +150,27 @@ public struct EventKind: Codable, Equatable, Hashable {
     }
 }
 
+public struct EventToolInputKind: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let EventToolInputEdit = EventToolInputKind("edit")
+    public static let EventToolInputSubagents = EventToolInputKind("subagents")
+
+    public static func other(_ value: String) -> EventToolInputKind { EventToolInputKind(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
 public struct Forge: Codable, Equatable, Hashable {
     public let value: String
 
@@ -761,11 +782,43 @@ public struct EventTextDelta: Codable {
     public let text: String
 }
 
+/// EventEditReplacement is one exact text replacement in an edit tool call.
+public struct EventEditReplacement: Codable {
+    public let oldText: String
+    public let newText: String
+}
+
+/// EventEditToolInput is the normalized view of an exact-replacement edit tool.
+public struct EventEditToolInput: Codable {
+    public let path: String
+    public let edits: [EventEditReplacement]
+}
+
+/// EventSubagentSpawn is one backend-normalized subagent invocation.
+public struct EventSubagentSpawn: Codable {
+    public let agent: String
+    public let task: String
+    public let label: String?
+    public let phase: String?
+}
+
+/// EventToolInputView is a backend-normalized rendering model for known tool
+/// inputs. It keeps harness-specific tool schemas out of clients.
+public struct EventToolInputView: Codable {
+    public let kind: EventToolInputKind
+    public let edit: EventEditToolInput?
+    public let subagents: [EventSubagentSpawn]?
+}
+
 /// EventToolUse is emitted when the assistant invokes a tool.
 public struct EventToolUse: Codable {
     public let toolUseID: String
     public let name: String
     public let input: JSONValue
+    /// Backend-normalized short display detail for tool headers.
+    public let detail: String?
+    /// Backend-normalized structured input for tool-card rendering.
+    public let inputView: EventToolInputView?
     /// Snapshot of plan content for ExitPlanMode events.
     public let planContent: String?
     /// True when Input was omitted due to size; fetch via GET /api/caic/v1/tasks/{id}/tool/{toolUseID}.

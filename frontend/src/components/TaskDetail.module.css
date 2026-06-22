@@ -779,6 +779,50 @@ a.ciStatus:hover {
   word-break: break-word;
 }
 
+.editInput {
+  font-size: 0.75rem;
+  margin: 0.15rem 0;
+  line-height: 1.35;
+}
+
+.editReplacement {
+  margin-top: 0.35rem;
+  padding-left: 0.5rem;
+  border-left: 2px solid var(--color-border);
+}
+
+.editReplacementTitle {
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  margin-bottom: 0.15rem;
+}
+
+.editColumnTitle {
+  color: var(--color-text-tertiary);
+  font-weight: 500;
+  margin-top: 0.2rem;
+}
+
+.editTextBlock {
+  margin: 0.1rem 0 0;
+  padding: 0.35rem 0.5rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-radius: var(--radius-sm);
+  max-height: 14rem;
+  overflow: auto;
+}
+
+.editTextRemoved {
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+}
+
+.editTextAdded {
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+}
+
 .subagentList {
   display: flex;
   flex-direction: column;

@@ -5,6 +5,7 @@ package claudecode
 import (
 	"encoding/json"
 	"fmt"
+	"path"
 	"reflect"
 	"strings"
 	"sync"
@@ -370,11 +371,65 @@ func parseToolUseBlock(b *claudecode.OutputContentBlock) ([]agent.Message, error
 	case func() bool { _, ok := agent.WidgetToolNames[b.Name]; return ok }():
 		return []agent.Message{agent.NewWidgetMessage(b.ID, inputRaw)}, nil
 	}
-	return []agent.Message{&agent.ToolUseMessage{
+	use := &agent.ToolUseMessage{
 		ToolUseID: b.ID,
 		Name:      b.Name,
 		Input:     inputRaw,
-	}}, nil
+	}
+	addEditInputView(use)
+	return []agent.Message{use}, nil
+}
+
+type editInput struct {
+	FilePath  string            `json:"file_path"`
+	OldString string            `json:"old_string"`
+	NewString string            `json:"new_string"`
+	Edits     []editReplacement `json:"edits"`
+}
+
+type editReplacement struct {
+	OldString string `json:"old_string"`
+	NewString string `json:"new_string"`
+}
+
+func addEditInputView(use *agent.ToolUseMessage) {
+	if use == nil {
+		return
+	}
+	name := strings.ToLower(use.Name)
+	if name != "edit" && name != "multiedit" {
+		return
+	}
+	edit, ok := parseEditInput(use.Input)
+	if !ok {
+		return
+	}
+	use.Detail = path.Base(edit.Path)
+	use.InputView = agent.ToolInputView{Kind: agent.ToolInputEdit, Edit: edit}
+}
+
+func parseEditInput(raw json.RawMessage) (agent.EditToolInput, bool) {
+	var input editInput
+	if len(raw) == 0 || json.Unmarshal(raw, &input) != nil || input.FilePath == "" {
+		return agent.EditToolInput{}, false
+	}
+	edits := make([]agent.EditReplacement, 0, len(input.Edits)+1)
+	for _, edit := range input.Edits {
+		if edit.OldString == "" {
+			return agent.EditToolInput{}, false
+		}
+		edits = append(edits, agent.EditReplacement{OldText: edit.OldString, NewText: edit.NewString})
+	}
+	if input.OldString != "" || input.NewString != "" {
+		if input.OldString == "" {
+			return agent.EditToolInput{}, false
+		}
+		edits = append(edits, agent.EditReplacement{OldText: input.OldString, NewText: input.NewString})
+	}
+	if len(edits) == 0 {
+		return agent.EditToolInput{}, false
+	}
+	return agent.EditToolInput{Path: input.FilePath, Edits: edits}, true
 }
 
 func askQuestionsFromClaude(in []claudecode.AskUserQuestion) []agent.AskQuestion {

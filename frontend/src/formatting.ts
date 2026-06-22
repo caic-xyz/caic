@@ -100,13 +100,22 @@ export function staleStateColor(state: TaskState): string {
   return blendHex(stateColor(state), "#dc3545", 0.25);
 }
 
+function pathFromInput(input: Record<string, unknown>): string {
+  const path = input.file_path ?? input.path;
+  return typeof path === "string" ? path : "";
+}
+
+function basename(path: string): string {
+  return path.replace(/^.*\//, "");
+}
+
 export function toolCallDetail(name: string, input: Record<string, unknown>): string {
   switch (name.toLowerCase()) {
     case "read":
     case "write":
-      return typeof input.file_path === "string" ? input.file_path.replace(/^.*\//, "") : "";
+      return basename(pathFromInput(input));
     case "edit":
-      return typeof input.file_path === "string" ? input.file_path.replace(/^.*\//, "") : "";
+      return basename(pathFromInput(input));
     case "bash":
       return typeof input.command === "string" ? input.command.trimStart() : "";
     case "grep":
@@ -117,7 +126,7 @@ export function toolCallDetail(name: string, input: Record<string, unknown>): st
       return typeof input.description === "string" ? input.description : "";
     case "agent":
     case "subagent":
-      return subagentDetail(input);
+      return typeof input.description === "string" ? input.description : "";
     case "webfetch":
       return typeof input.url === "string" ? input.url : "";
     case "websearch":
@@ -129,91 +138,3 @@ export function toolCallDetail(name: string, input: Record<string, unknown>): st
   }
 }
 
-// One subagent invocation parsed from a Pi `subagent` tool call's arguments.
-export interface SubagentSpawn {
-  agent: string;
-  task: string;
-  label?: string;
-  phase?: string;
-}
-
-// Structured view of a `subagent` tool call: the orchestration kind and the
-// subagents it spawns. Mirrors the backend parse in backend/internal/agent/pi.
-export interface SubagentInfo {
-  kind: "single" | "parallel" | "chain" | "action" | "";
-  action?: string;
-  spawns: SubagentSpawn[];
-}
-
-interface SubagentStep {
-  agent?: unknown;
-  task?: unknown;
-  label?: unknown;
-  phase?: unknown;
-}
-
-function toStep(s: SubagentStep): SubagentSpawn | null {
-  if (typeof s.agent !== "string" || !s.agent) return null;
-  return {
-    agent: s.agent,
-    task: typeof s.task === "string" ? s.task : "",
-    label: typeof s.label === "string" ? s.label : undefined,
-    phase: typeof s.phase === "string" ? s.phase : undefined,
-  };
-}
-
-// parseSubagentInput decodes a `subagent` tool call's input into an ordered list
-// of spawned subagents. Handles single, parallel-batch (tasks[]), and chain
-// (chain[].parallel[]) shapes; introspection calls (list/status) spawn none.
-export function parseSubagentInput(input: Record<string, unknown>): SubagentInfo {
-  const spawns: SubagentSpawn[] = [];
-  const push = (s: SubagentStep | undefined) => {
-    if (!s) return;
-    const spawn = toStep(s);
-    if (spawn) spawns.push(spawn);
-  };
-
-  const chain = input.chain;
-  const tasks = input.tasks;
-  if (Array.isArray(chain)) {
-    for (const step of chain as Array<Record<string, unknown>>) {
-      if (Array.isArray(step?.parallel)) {
-        for (const s of step.parallel as SubagentStep[]) push(s);
-      } else {
-        push(step as SubagentStep);
-      }
-    }
-    return { kind: spawns.length ? "chain" : "", spawns };
-  }
-  if (Array.isArray(tasks)) {
-    for (const s of tasks as SubagentStep[]) push(s);
-    return { kind: spawns.length ? "parallel" : "", spawns };
-  }
-  push(input as SubagentStep);
-  if (spawns.length) return { kind: "single", spawns };
-  const action = typeof input.action === "string" ? input.action : undefined;
-  return { kind: action ? "action" : "", action, spawns };
-}
-
-// subagentDetail summarises a subagent tool call for the tool-card header,
-// e.g. "reviewer — Review the last commit" or "chain · reviewer ×3, worker".
-export function subagentDetail(input: Record<string, unknown>): string {
-  const { kind, action, spawns } = parseSubagentInput(input);
-  if (spawns.length === 0) return action ?? "";
-  if (spawns.length === 1) {
-    const s = spawns[0];
-    const detail = s.label || s.task.split("\n").map((l) => l.trim()).find((l) => l) || "";
-    return detail ? `${s.agent} — ${detail}` : s.agent;
-  }
-  const order: string[] = [];
-  const counts = new Map<string, number>();
-  for (const s of spawns) {
-    if (!counts.has(s.agent)) order.push(s.agent);
-    counts.set(s.agent, (counts.get(s.agent) ?? 0) + 1);
-  }
-  const parts = order.map((a) => {
-    const n = counts.get(a) ?? 0;
-    return n > 1 ? `${a} ×${n}` : a;
-  });
-  return `${kind} · ${parts.join(", ")}`;
-}

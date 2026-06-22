@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventDiffStat, EventError, EventInit, EventKind, EventLog, EventMessage, EventRateLimit, EventResult, EventStats, EventSubagentEnd, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderQuota, QuotaBalance, QuotaExtraUsage, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskListEvent, TaskRepo, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
+import type { AskOption, AskQuestion, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventDiffStat, EventEditReplacement, EventEditToolInput, EventError, EventInit, EventKind, EventLog, EventMessage, EventRateLimit, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderQuota, QuotaBalance, QuotaExtraUsage, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskListEvent, TaskRepo, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
 
 // ---- helpers ----
 
@@ -85,12 +85,49 @@ export function validateEventTextDelta(raw: ValidatorInput): EventTextDelta {
   };
 }
 
+export function validateEventEditReplacement(raw: ValidatorInput): EventEditReplacement {
+  const obj = asObject(raw, "EventEditReplacement");
+  return {
+    oldText: asString(obj["oldText"], "EventEditReplacement.oldText"),
+    newText: asString(obj["newText"], "EventEditReplacement.newText"),
+  };
+}
+
+export function validateEventEditToolInput(raw: ValidatorInput): EventEditToolInput {
+  const obj = asObject(raw, "EventEditToolInput");
+  return {
+    path: asString(obj["path"], "EventEditToolInput.path"),
+    edits: validateArray(obj["edits"], "EventEditToolInput.edits", validateEventEditReplacement) as EventEditReplacement[],
+  };
+}
+
+export function validateEventSubagentSpawn(raw: ValidatorInput): EventSubagentSpawn {
+  const obj = asObject(raw, "EventSubagentSpawn");
+  return {
+    agent: asString(obj["agent"], "EventSubagentSpawn.agent"),
+    task: asString(obj["task"], "EventSubagentSpawn.task"),
+    label: (obj["label"] === undefined || obj["label"] === null ? undefined : asString(obj["label"], "EventSubagentSpawn.label")),
+    phase: (obj["phase"] === undefined || obj["phase"] === null ? undefined : asString(obj["phase"], "EventSubagentSpawn.phase")),
+  };
+}
+
+export function validateEventToolInputView(raw: ValidatorInput): EventToolInputView {
+  const obj = asObject(raw, "EventToolInputView");
+  return {
+    kind: (asString(obj["kind"], "EventToolInputView.kind") as EventToolInputKind),
+    edit: (obj["edit"] === undefined || obj["edit"] === null ? undefined : validateEventEditToolInput(obj["edit"])),
+    subagents: (obj["subagents"] === undefined || obj["subagents"] === null ? undefined : validateArray(obj["subagents"], "EventToolInputView.subagents", validateEventSubagentSpawn) as EventSubagentSpawn[]),
+  };
+}
+
 export function validateEventToolUse(raw: ValidatorInput): EventToolUse {
   const obj = asObject(raw, "EventToolUse");
   return {
     toolUseID: asString(obj["toolUseID"], "EventToolUse.toolUseID"),
     name: asString(obj["name"], "EventToolUse.name"),
     input: obj["input"],
+    detail: (obj["detail"] === undefined || obj["detail"] === null ? undefined : asString(obj["detail"], "EventToolUse.detail")),
+    inputView: (obj["inputView"] === undefined || obj["inputView"] === null ? undefined : validateEventToolInputView(obj["inputView"])),
     planContent: (obj["planContent"] === undefined || obj["planContent"] === null ? undefined : asString(obj["planContent"], "EventToolUse.planContent")),
     inputTruncated: (obj["inputTruncated"] === undefined || obj["inputTruncated"] === null ? undefined : asBoolean(obj["inputTruncated"], "EventToolUse.inputTruncated")),
     background: (obj["background"] === undefined || obj["background"] === null ? undefined : asBoolean(obj["background"], "EventToolUse.background")),

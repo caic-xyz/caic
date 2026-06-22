@@ -2,9 +2,9 @@
 import { createSignal, createMemo, createEffect, For, Index, Show, onCleanup, onMount, untrack, Switch, Match, type Accessor } from "solid-js";
 import { A, useNavigate, useLocation } from "@solidjs/router";
 import { sendInput as apiSendInput, restartTask as apiRestartTask, clearContext as apiClearContext, compactContext as apiCompactContext, syncTask as apiSyncTask, taskEventStream, getTaskToolInput, botFixPR } from "../api";
-import type { EventMessage, EventResult, AskQuestion, EventAsk, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, ForgeCheck, EventStats, EventUsage } from "@sdk/types.gen";
+import type { EventMessage, EventResult, AskQuestion, EventAsk, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, ForgeCheck, EventStats, EventUsage, EventToolInputView, EventSubagentSpawn } from "@sdk/types.gen";
 import { groupMessagesInc, resetGroupIncCache, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "../grouping";
-import { formatDuration, formatElapsed, formatTokens, toolCallDetail, parseSubagentInput } from "../formatting";
+import { formatDuration, formatElapsed, formatTokens, toolCallDetail } from "../formatting";
 import type { ToolCall } from "../grouping";
 import { SyncTargetDefault } from "@sdk/types.gen";
 import { Marked } from "marked";
@@ -1289,7 +1289,7 @@ function fmtValue(v: unknown): string {
   return JSON.stringify(v);
 }
 
-function ToolCallInput(props: { input: Record<string, unknown> }) {
+function GenericToolCallInput(props: { input: Record<string, unknown> }) {
   const flat = () => isFlat(props.input);
   return (
     <Show
@@ -1317,13 +1317,54 @@ function ToolCallInput(props: { input: Record<string, unknown> }) {
   );
 }
 
-// Renders the subagents a Pi `subagent` tool call spawns: one row per agent
-// with its type, optional phase/label, and task prompt.
-function SubagentSpawns(props: { input: Record<string, unknown> }) {
-  const spawns = () => parseSubagentInput(props.input).spawns;
+function EditToolInputView(props: { input: NonNullable<EventToolInputView["edit"]> }) {
+  return (
+    <div class={styles.editInput}>
+      <div class={styles.toolInputRow}>
+        <span class={styles.toolInputKey}>path:</span> {props.input.path}
+      </div>
+      <For each={props.input.edits}>
+        {(edit, index) => (
+          <div class={styles.editReplacement}>
+            <div class={styles.editReplacementTitle}>edit {index() + 1}</div>
+            <div class={styles.editColumnTitle}>oldText</div>
+            <pre class={`${styles.editTextBlock} ${styles.editTextRemoved}`}>{edit.oldText}</pre>
+            <div class={styles.editColumnTitle}>newText</div>
+            <pre class={`${styles.editTextBlock} ${styles.editTextAdded}`}>{edit.newText}</pre>
+          </div>
+        )}
+      </For>
+    </div>
+  );
+}
+
+function ToolInputView(props: { view: EventToolInputView }) {
+  return (
+    <Switch>
+      <Match when={props.view.kind === "edit" && props.view.edit} keyed>
+        {(edit) => <EditToolInputView input={edit} />}
+      </Match>
+      <Match when={props.view.kind === "subagents" && props.view.subagents} keyed>
+        {(spawns) => <SubagentSpawns spawns={spawns} />}
+      </Match>
+    </Switch>
+  );
+}
+
+function ToolCallInput(props: { input: Record<string, unknown>; inputView?: EventToolInputView }) {
+  return (
+    <Show when={props.inputView} keyed fallback={<GenericToolCallInput input={props.input} />}>
+      {(view) => <ToolInputView view={view} />}
+    </Show>
+  );
+}
+
+// Renders subagents: one row per agent with its type, optional phase/label,
+// and task prompt.
+function SubagentSpawns(props: { spawns: EventSubagentSpawn[] }) {
   return (
     <div class={styles.subagentList}>
-      <For each={spawns()}>
+      <For each={props.spawns}>
         {(s) => (
           <div class={styles.subagentRow}>
             <div class={styles.subagentHead}>
@@ -1342,12 +1383,6 @@ function SubagentSpawns(props: { input: Record<string, unknown> }) {
   );
 }
 
-// Returns true when an Agent/subagent tool input carries parseable spawns.
-function hasSubagentSpawns(name: string, input: Record<string, unknown>): boolean {
-  const n = name.toLowerCase();
-  return (n === "agent" || n === "subagent") && parseSubagentInput(input).spawns.length > 0;
-}
-
 function ToolCallCard(props: { call: ToolCall; taskId: string; open: boolean; onToggle: (open: boolean) => void; thinkingEvents?: EventMessage[]; outputDeltaEvents?: EventMessage[]; onClearAndExecutePlan?: () => void; pendingAction?: () => string | null; suppressPlanContent?: boolean }) {
   const [loadedInput, setLoadedInput] = createSignal<Record<string, unknown> | null>(null);
   const [loading, setLoading] = createSignal(false);
@@ -1356,7 +1391,7 @@ function ToolCallCard(props: { call: ToolCall; taskId: string; open: boolean; on
   const error = () => props.call.result?.error ?? "";
   const effectiveInput = (): Record<string, unknown> =>
     (loadedInput() ?? props.call.use.input ?? {}) as Record<string, unknown>;
-  const detail = () => toolCallDetail(props.call.use.name, effectiveInput());
+  const detail = () => props.call.use.detail || toolCallDetail(props.call.use.name, effectiveInput());
   const showLoadBtn = () => props.call.use.inputTruncated && !loadedInput();
 
   async function loadInput() {
@@ -1395,12 +1430,7 @@ function ToolCallCard(props: { call: ToolCall; taskId: string; open: boolean; on
         <Show when={(props.thinkingEvents?.length ?? 0) > 0}>
           <ThinkingCard events={props.thinkingEvents ?? []} />
         </Show>
-        <Show when={showLoadBtn()} fallback={
-          <Show when={hasSubagentSpawns(props.call.use.name, effectiveInput())}
-            fallback={<ToolCallInput input={effectiveInput()} />}>
-            <SubagentSpawns input={effectiveInput()} />
-          </Show>
-        }>
+        <Show when={showLoadBtn()} fallback={<ToolCallInput input={effectiveInput()} inputView={props.call.use.inputView} />}>
           <button class={styles.loadInputBtn} onClick={loadInput} disabled={loading()}>
             {loading() ? "Loading…" : "Load input"}
           </button>

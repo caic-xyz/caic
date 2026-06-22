@@ -93,6 +93,43 @@ func TestTaskListEvent(t *testing.T) {
 	})
 }
 
+func TestEventToolUse(t *testing.T) {
+	t.Parallel()
+
+	t.Run("zero input view omitted", func(t *testing.T) {
+		t.Parallel()
+		data, err := json.Marshal(EventToolUse{ToolUseID: "t1", Name: "Read"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := raw["inputView"]; ok {
+			t.Fatalf("inputView should be omitted: %s", data)
+		}
+	})
+
+	t.Run("zero edit omitted", func(t *testing.T) {
+		t.Parallel()
+		data, err := json.Marshal(EventToolInputView{
+			Kind:      EventToolInputSubagents,
+			Subagents: []EventSubagentSpawn{{Agent: "reviewer", Task: "Review"}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := raw["edit"]; ok {
+			t.Fatalf("edit should be omitted: %s", data)
+		}
+	})
+}
+
 func TestUserSettings(t *testing.T) {
 	t.Parallel()
 

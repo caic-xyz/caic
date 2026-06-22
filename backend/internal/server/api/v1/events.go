@@ -97,12 +97,52 @@ type EventTextDelta struct {
 
 // EventToolUse is emitted when the assistant invokes a tool.
 type EventToolUse struct {
-	ToolUseID      string          `json:"toolUseID"`
-	Name           string          `json:"name"`
-	Input          json.RawMessage `json:"input"`
-	PlanContent    string          `json:"planContent,omitempty"`    // Snapshot of plan content for ExitPlanMode events.
-	InputTruncated bool            `json:"inputTruncated,omitempty"` // True when Input was omitted due to size; fetch via GET /api/caic/v1/tasks/{id}/tool/{toolUseID}.
-	Background     bool            `json:"background,omitempty"`     // True when the tool runs in the background (Bash/Agent run_in_background).
+	ToolUseID      string             `json:"toolUseID"`
+	Name           string             `json:"name"`
+	Input          json.RawMessage    `json:"input"`
+	Detail         string             `json:"detail,omitempty"`         // Backend-normalized short display detail for tool headers.
+	InputView      EventToolInputView `json:"inputView,omitzero"`       // Backend-normalized structured input for tool-card rendering.
+	PlanContent    string             `json:"planContent,omitempty"`    // Snapshot of plan content for ExitPlanMode events.
+	InputTruncated bool               `json:"inputTruncated,omitempty"` // True when Input was omitted due to size; fetch via GET /api/caic/v1/tasks/{id}/tool/{toolUseID}.
+	Background     bool               `json:"background,omitempty"`     // True when the tool runs in the background (Bash/Agent run_in_background).
+}
+
+// EventToolInputKind identifies a normalized tool input view.
+type EventToolInputKind string
+
+const (
+	// EventToolInputEdit renders exact text replacements.
+	EventToolInputEdit EventToolInputKind = "edit"
+	// EventToolInputSubagents renders one or more spawned subagents.
+	EventToolInputSubagents EventToolInputKind = "subagents"
+)
+
+// EventToolInputView is a backend-normalized rendering model for known tool
+// inputs. It keeps harness-specific tool schemas out of clients.
+type EventToolInputView struct {
+	Kind      EventToolInputKind   `json:"kind"`
+	Edit      EventEditToolInput   `json:"edit,omitzero"`
+	Subagents []EventSubagentSpawn `json:"subagents,omitzero"`
+}
+
+// EventEditToolInput is the normalized view of an exact-replacement edit tool.
+type EventEditToolInput struct {
+	Path  string                 `json:"path"`
+	Edits []EventEditReplacement `json:"edits"`
+}
+
+// EventEditReplacement is one exact text replacement in an edit tool call.
+type EventEditReplacement struct {
+	OldText string `json:"oldText"`
+	NewText string `json:"newText"`
+}
+
+// EventSubagentSpawn is one backend-normalized subagent invocation.
+type EventSubagentSpawn struct {
+	Agent string `json:"agent"`
+	Task  string `json:"task"`
+	Label string `json:"label,omitempty"`
+	Phase string `json:"phase,omitempty"`
 }
 
 // EventToolResult is emitted when a tool call completes.

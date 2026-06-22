@@ -2,6 +2,7 @@
 package agenttest
 
 import (
+	"bufio"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,38 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
+
+// ParseJSONL parses every non-empty line in a JSONL fixture with parser.
+func ParseJSONL(t testing.TB, path string, parser func([]byte) ([]agent.Message, error)) []agent.Message {
+	file, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := file.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+
+	var out []agent.Message
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
+	for line := 1; scanner.Scan(); line++ {
+		data := scanner.Bytes()
+		if strings.TrimSpace(string(data)) == "" {
+			continue
+		}
+		msgs, err := parser(data)
+		if err != nil {
+			t.Fatalf("parse %s:%d: %v", path, line, err)
+		}
+		out = append(out, msgs...)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan %s: %v", path, err)
+	}
+	return out
+}
 
 // RunExportDiscussionGolden runs golden-file tests for ExportDiscussion
 // against all .jsonl files in testdata/. The parser is typically

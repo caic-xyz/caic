@@ -5,6 +5,7 @@ package codex
 import (
 	"encoding/json"
 	"fmt"
+	"path"
 	"reflect"
 	"strings"
 	"sync"
@@ -276,6 +277,7 @@ func parseItemStarted(msg *codex.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]ag
 			ToolUseID: item.ID,
 			Name:      toolNameForChanges(item.Changes),
 			Input:     input,
+			Detail:    fileChangeDetail(item.Changes),
 		}}, nil
 
 	case codex.ItemTypeMCPToolCall:
@@ -481,4 +483,14 @@ func toolNameForChanges(changes []codex.FileUpdateChange) string {
 		}
 	}
 	return "Edit"
+}
+
+func fileChangeDetail(changes []codex.FileUpdateChange) string {
+	if len(changes) == 0 {
+		return ""
+	}
+	if len(changes) > 1 {
+		return fmt.Sprintf("%d files", len(changes))
+	}
+	return path.Base(changes[0].Path)
 }

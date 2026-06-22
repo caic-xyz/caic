@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path"
+	"strconv"
 	"strings"
 
 	"github.com/maruel/genai/providers/pi"
@@ -267,11 +269,7 @@ func messagesFromMessageUpdateDelta(delta *messageUpdateDelta, line []byte) ([]a
 		if _, ok := agent.WidgetToolNames[name]; ok {
 			return []agent.Message{agent.NewWidgetMessage(delta.ToolCall.ID, input)}, nil
 		}
-		return []agent.Message{&agent.ToolUseMessage{
-			ToolUseID: delta.ToolCall.ID,
-			Name:      name,
-			Input:     input,
-		}}, nil
+		return []agent.Message{newToolUseMessage(delta.ToolCall.ID, delta.ToolCall.Name, name, input)}, nil
 
 	case pi.DeltaTextStart, pi.DeltaTextEnd, pi.DeltaThinkStart, pi.DeltaThinkEnd,
 		pi.DeltaToolDelta, pi.DeltaToolEnd, pi.DeltaStart:
@@ -309,11 +307,7 @@ func parseToolExecStart(line []byte) ([]agent.Message, error) {
 	if _, ok := agent.WidgetToolNames[name]; ok {
 		return []agent.Message{agent.NewWidgetMessage(ev.ToolCallID, input)}, nil
 	}
-	use := &agent.ToolUseMessage{
-		ToolUseID: ev.ToolCallID,
-		Name:      name,
-		Input:     input,
-	}
+	use := newToolUseMessage(ev.ToolCallID, ev.ToolName, name, input)
 	// Spawning subagents emits a SubagentStartMessage so the live progress panel
 	// surfaces the orchestration; introspection calls (list/status) spawn none.
 	if strings.EqualFold(ev.ToolName, subagentToolName) {
@@ -402,6 +396,226 @@ func parseResponse(line []byte) ([]agent.Message, error) {
 		}}, nil
 	}
 	return nil, nil
+}
+
+func newToolUseMessage(id, rawName, name string, input json.RawMessage) *agent.ToolUseMessage {
+	use := &agent.ToolUseMessage{
+		ToolUseID: id,
+		Name:      name,
+		Input:     input,
+	}
+	if strings.EqualFold(name, "Edit") {
+		if edit, ok := parseEditArgs(input); ok {
+			use.Detail = path.Base(edit.Path)
+			use.InputView = agent.ToolInputView{Kind: agent.ToolInputEdit, Edit: edit}
+		}
+		return use
+	}
+	if !strings.EqualFold(rawName, subagentToolName) {
+		return use
+	}
+	info := parseSubagentArgs(input)
+	if len(info.Spawns) > 0 {
+		use.Detail = subagentDescription(info.Kind, info.Spawns)
+		use.InputView = agent.ToolInputView{
+			Kind:      agent.ToolInputSubagents,
+			Subagents: info.Spawns,
+		}
+		return use
+	}
+	use.Detail = info.Action
+	return use
+}
+
+type editArgs struct {
+	Path    string        `json:"path"`
+	OldText string        `json:"oldText"`
+	NewText string        `json:"newText"`
+	Edits   []replaceEdit `json:"edits"`
+}
+
+type replaceEdit struct {
+	OldText string `json:"oldText"`
+	NewText string `json:"newText"`
+}
+
+func parseEditArgs(raw json.RawMessage) (agent.EditToolInput, bool) {
+	var args editArgs
+	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil || args.Path == "" {
+		return agent.EditToolInput{}, false
+	}
+	edits := make([]agent.EditReplacement, 0, len(args.Edits)+1)
+	for _, edit := range args.Edits {
+		if edit.OldText == "" {
+			return agent.EditToolInput{}, false
+		}
+		edits = append(edits, agent.EditReplacement{OldText: edit.OldText, NewText: edit.NewText})
+	}
+	if args.OldText != "" || args.NewText != "" {
+		if args.OldText == "" {
+			return agent.EditToolInput{}, false
+		}
+		edits = append(edits, agent.EditReplacement{OldText: args.OldText, NewText: args.NewText})
+	}
+	if len(edits) == 0 {
+		return agent.EditToolInput{}, false
+	}
+	return agent.EditToolInput{Path: args.Path, Edits: edits}, true
+}
+
+// subagentToolName is Pi's raw tool name for spawning and orchestrating
+// subagents. It is normalized to the canonical "Agent" name for display (see
+// normalizeToolName) but matched on the raw name to detect spawns.
+const subagentToolName = "subagent"
+
+// runningPlaceholder is Pi's sentinel progress text for a tool that is executing
+// but has produced no output yet (notably the subagent tool). It carries no
+// information and is suppressed from the tool-output stream.
+const runningPlaceholder = "(running...)"
+
+// subagentInfo is the parsed view of a subagent tool call's arguments.
+type subagentInfo struct {
+	Kind   string
+	Action string
+	Spawns []agent.SubagentSpawn
+}
+
+// subagentArgs mirrors the JSON shapes Pi's subagent tool accepts: a single
+// spawn, a parallel batch (tasks[]), a phased chain (chain[]), or an
+// introspection action (list/status).
+type subagentArgs struct {
+	subagentStep
+
+	Action string              `json:"action"`
+	Tasks  []subagentStep      `json:"tasks"`
+	Chain  []subagentChainStep `json:"chain"`
+}
+
+type subagentStep struct {
+	Agent string `json:"agent"`
+	Label string `json:"label"`
+	Phase string `json:"phase"`
+	Task  string `json:"task"`
+}
+
+type subagentChainStep struct {
+	subagentStep
+
+	Parallel []subagentStep `json:"parallel"`
+}
+
+// parseSubagentArgs decodes a subagent tool call's arguments into a structured
+// view. It recognises the single, parallel-batch, and chain orchestration
+// shapes, and the action-based introspection calls (list/status) which spawn
+// no subagents.
+func parseSubagentArgs(raw json.RawMessage) subagentInfo {
+	var args subagentArgs
+	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil {
+		return subagentInfo{}
+	}
+	spawns := args.spawns()
+	switch {
+	case len(args.Chain) > 0 && len(spawns) > 0:
+		return subagentInfo{Kind: "chain", Spawns: spawns}
+	case len(args.Tasks) > 0 && len(spawns) > 0:
+		return subagentInfo{Kind: "parallel", Spawns: spawns}
+	case len(spawns) > 0:
+		return subagentInfo{Kind: "single", Spawns: spawns}
+	case args.Action != "":
+		return subagentInfo{Kind: "action", Action: args.Action}
+	default:
+		return subagentInfo{}
+	}
+}
+
+// spawns flattens the orchestration shapes into an ordered list of subagent
+// invocations. Steps with no agent (e.g. the introspection action) are dropped.
+func (a *subagentArgs) spawns() []agent.SubagentSpawn {
+	var out []agent.SubagentSpawn
+	add := func(s subagentStep) {
+		if s.Agent == "" {
+			return
+		}
+		out = append(out, agent.SubagentSpawn{
+			Agent: s.Agent,
+			Task:  s.Task,
+			Label: s.Label,
+			Phase: s.Phase,
+		})
+	}
+	switch {
+	case len(a.Chain) > 0:
+		for _, step := range a.Chain {
+			if len(step.Parallel) > 0 {
+				for _, s := range step.Parallel {
+					add(s)
+				}
+				continue
+			}
+			add(step.subagentStep)
+		}
+	case len(a.Tasks) > 0:
+		for _, s := range a.Tasks {
+			add(s)
+		}
+	default:
+		add(a.subagentStep)
+	}
+	return out
+}
+
+// subagentDescription summarises a subagent spawn for the live progress panel,
+// e.g. "reviewer — Review the last commit" for a single spawn or
+// "chain · reviewer ×3, worker" for an orchestration.
+func subagentDescription(kind string, spawns []agent.SubagentSpawn) string {
+	if len(spawns) == 1 {
+		s := spawns[0]
+		detail := s.Label
+		if detail == "" {
+			detail = firstLine(s.Task)
+		}
+		if detail == "" {
+			return s.Agent
+		}
+		return s.Agent + " — " + detail
+	}
+
+	order := make([]string, 0, len(spawns))
+	counts := make(map[string]int, len(spawns))
+	for _, s := range spawns {
+		if _, ok := counts[s.Agent]; !ok {
+			order = append(order, s.Agent)
+		}
+		counts[s.Agent]++
+	}
+	parts := make([]string, 0, len(order))
+	for _, a := range order {
+		if n := counts[a]; n > 1 {
+			parts = append(parts, a+" ×"+strconv.Itoa(n))
+		} else {
+			parts = append(parts, a)
+		}
+	}
+	return kind + " · " + strings.Join(parts, ", ")
+}
+
+// subagentStatus derives a terminal status ("completed"/"failed") from a
+// subagent tool result, matching the SubagentEndMessage status vocabulary.
+func subagentStatus(isError bool, resultText string) string {
+	if isError || strings.HasPrefix(strings.TrimSpace(resultText), "❌") {
+		return "failed"
+	}
+	return "completed"
+}
+
+// firstLine returns the first non-empty line of s, trimmed.
+func firstLine(s string) string {
+	for line := range strings.SplitSeq(s, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			return line
+		}
+	}
+	return ""
 }
 
 // normalizeToolName maps Pi tool names to caic canonical names.

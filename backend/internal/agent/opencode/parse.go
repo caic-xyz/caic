@@ -5,6 +5,7 @@ package opencode
 import (
 	"encoding/json"
 	"fmt"
+	"path"
 	"reflect"
 	"strings"
 	"sync"
@@ -224,11 +225,13 @@ func parseToolCall(data json.RawMessage, fw *jsonutil.FieldWarner) ([]agent.Mess
 		return []agent.Message{agent.NewWidgetMessage(u.ToolCallID, u.RawInput)}, nil
 	}
 
-	return []agent.Message{&agent.ToolUseMessage{
+	use := &agent.ToolUseMessage{
 		ToolUseID: u.ToolCallID,
 		Name:      normalizeToolName(u.Title, u.Kind),
 		Input:     u.RawInput,
-	}}, nil
+	}
+	addEditInputView(use)
+	return []agent.Message{use}, nil
 }
 
 // parseToolCallUpdate handles tool_call_update session updates (progress/completion).
@@ -253,11 +256,13 @@ func parseToolCallUpdate(data json.RawMessage, fw *jsonutil.FieldWarner) ([]agen
 		var msgs []agent.Message
 		// Emit a ToolUseMessage with the real input when available.
 		if len(u.RawInput) > 2 {
-			msgs = append(msgs, &agent.ToolUseMessage{
+			use := &agent.ToolUseMessage{
 				ToolUseID: u.ToolCallID,
 				Name:      normalizeToolName(u.Title, u.Kind),
 				Input:     u.RawInput,
-			})
+			}
+			addEditInputView(use)
+			msgs = append(msgs, use)
 		}
 		// Also emit output delta if content is available.
 		if delta := extractToolOutputDelta(&u); delta != "" {
@@ -270,6 +275,38 @@ func parseToolCallUpdate(data json.RawMessage, fw *jsonutil.FieldWarner) ([]agen
 	default:
 		return nil, nil
 	}
+}
+
+type editInput struct {
+	FilePath  string `json:"filePath"`
+	OldString string `json:"oldString"`
+	NewString string `json:"newString"`
+}
+
+func addEditInputView(use *agent.ToolUseMessage) {
+	if use == nil || !strings.EqualFold(use.Name, "Edit") {
+		return
+	}
+	edit, ok := parseEditInput(use.Input)
+	if !ok {
+		return
+	}
+	use.Detail = path.Base(edit.Path)
+	use.InputView = agent.ToolInputView{Kind: agent.ToolInputEdit, Edit: edit}
+}
+
+func parseEditInput(raw json.RawMessage) (agent.EditToolInput, bool) {
+	var input editInput
+	if len(raw) == 0 || json.Unmarshal(raw, &input) != nil || input.FilePath == "" || input.OldString == "" {
+		return agent.EditToolInput{}, false
+	}
+	return agent.EditToolInput{
+		Path: input.FilePath,
+		Edits: []agent.EditReplacement{{
+			OldText: input.OldString,
+			NewText: input.NewString,
+		}},
+	}, true
 }
 
 // extractToolError extracts the error message from a failed tool call update.

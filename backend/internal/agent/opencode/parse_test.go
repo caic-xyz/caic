@@ -9,6 +9,7 @@ import (
 	"github.com/maruel/genai/providers/opencode"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
@@ -880,7 +881,6 @@ func TestWireFormatPromptResponse(t *testing.T) {
 
 // mustJSON marshals v to []byte, failing the test on error.
 func mustJSON(t *testing.T, v any) []byte {
-	t.Helper()
 	data, err := json.Marshal(v)
 	if err != nil {
 		t.Fatal(err)
@@ -909,4 +909,59 @@ func assertInitMessage(t *testing.T, input []byte, wantSessionID, wantModel, wan
 	if init.Version != wantVersion {
 		t.Errorf("Version = %q, want %q", init.Version, wantVersion)
 	}
+}
+
+func TestNew(t *testing.T) {
+	t.Parallel()
+	t.Run("edit tool display", func(t *testing.T) {
+		t.Parallel()
+
+		use := &agent.ToolUseMessage{
+			Name:  "Edit",
+			Input: json.RawMessage(`{"filePath":"src/main.ts","oldString":"before","newString":"after"}`),
+		}
+		addEditInputView(use)
+		if use.Detail != "main.ts" {
+			t.Fatalf("detail = %q, want main.ts", use.Detail)
+		}
+		if use.InputView.Kind != agent.ToolInputEdit {
+			t.Fatalf("input view kind = %q, want edit", use.InputView.Kind)
+		}
+		edit := use.InputView.Edit
+		if edit.Path != "src/main.ts" || len(edit.Edits) != 1 {
+			t.Fatalf("edit view = %#v", edit)
+		}
+		if edit.Edits[0].OldText != "before" || edit.Edits[0].NewText != "after" {
+			t.Fatalf("edit replacement = %#v, want before -> after", edit.Edits[0])
+		}
+	})
+	t.Run("read edit bash fixture normalizes edit", func(t *testing.T) {
+		t.Parallel()
+
+		msgs := agenttest.ParseJSONL(t, "testdata/read-edit-bash.jsonl", New("", nil).NewWire().ParseMessage)
+		var use *agent.ToolUseMessage
+		for _, msg := range msgs {
+			candidate, ok := msg.(*agent.ToolUseMessage)
+			if ok && candidate.Name == "Edit" && candidate.InputView.Kind == agent.ToolInputEdit {
+				use = candidate
+				break
+			}
+		}
+		if use == nil {
+			t.Fatal("no normalized Edit tool use found")
+		}
+		if use.Detail != "main.go" {
+			t.Fatalf("detail = %q, want main.go", use.Detail)
+		}
+		if use.InputView.Kind != agent.ToolInputEdit {
+			t.Fatalf("input view kind = %q, want edit", use.InputView.Kind)
+		}
+		edit := use.InputView.Edit
+		if edit.Path != "/workspace/main.go" || len(edit.Edits) != 1 {
+			t.Fatalf("edit view = %#v", edit)
+		}
+		if edit.Edits[0].OldText != "Hello" || edit.Edits[0].NewText != "Hi" {
+			t.Fatalf("edit replacement = %#v, want Hello -> Hi", edit.Edits[0])
+		}
+	})
 }

@@ -564,6 +564,46 @@ EventTextDelta is a streaming text fragment from --include-partial-messages.
 |-------|------|-------------|----------|
 | `text` | `string` |  | yes |
 
+### EventEditReplacement
+
+EventEditReplacement is one exact text replacement in an edit tool call.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `oldText` | `string` |  | yes |
+| `newText` | `string` |  | yes |
+
+### EventEditToolInput
+
+EventEditToolInput is the normalized view of an exact-replacement edit tool.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `path` | `string` |  | yes |
+| `edits` | `EventEditReplacement[]` |  | yes |
+
+### EventSubagentSpawn
+
+EventSubagentSpawn is one backend-normalized subagent invocation.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `agent` | `string` |  | yes |
+| `task` | `string` |  | yes |
+| `label` | `string` |  |  |
+| `phase` | `string` |  |  |
+
+### EventToolInputView
+
+EventToolInputView is a backend-normalized rendering model for known tool
+inputs. It keeps harness-specific tool schemas out of clients.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `kind` | `string` |  | yes |
+| `edit` | `EventEditToolInput` |  |  |
+| `subagents` | `EventSubagentSpawn[]` |  |  |
+
 ### EventToolUse
 
 EventToolUse is emitted when the assistant invokes a tool.
@@ -573,6 +613,8 @@ EventToolUse is emitted when the assistant invokes a tool.
 | `toolUseID` | `string` |  | yes |
 | `name` | `string` |  | yes |
 | `input` | `JSONValue` |  | yes |
+| `detail` | `string` | Backend-normalized short display detail for tool headers. |  |
+| `inputView` | `EventToolInputView` | Backend-normalized structured input for tool-card rendering. |  |
 | `planContent` | `string` | Snapshot of plan content for ExitPlanMode events. |  |
 | `inputTruncated` | `boolean` | True when Input was omitted due to size; fetch via GET /api/caic/v1/tasks/{id}/tool/{toolUseID}. |  |
 | `background` | `boolean` | True when the tool runs in the background (Bash/Agent run_in_background). |  |

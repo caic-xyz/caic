@@ -70,7 +70,46 @@ type ToolUseMessage struct {
 	ToolUseID   string          `json:"id"`
 	Name        string          `json:"name"`
 	Input       json.RawMessage `json:"input,omitempty"`
+	Detail      string          `json:"detail,omitempty"` // Backend-normalized short display detail for tool headers.
+	InputView   ToolInputView   `json:"input_view,omitzero"`
 	PlanContent string          `json:"-"` // Snapshot of plan content; set by task on ExitPlanMode.
+}
+
+// ToolInputViewKind identifies a normalized tool input view.
+type ToolInputViewKind string
+
+const (
+	// ToolInputEdit renders exact text replacements.
+	ToolInputEdit ToolInputViewKind = "edit"
+	// ToolInputSubagents renders one or more spawned subagents.
+	ToolInputSubagents ToolInputViewKind = "subagents"
+)
+
+// ToolInputView is a backend-normalized rendering model for known tool inputs.
+type ToolInputView struct {
+	Kind      ToolInputViewKind `json:"kind"`
+	Edit      EditToolInput     `json:"edit,omitzero"`
+	Subagents []SubagentSpawn   `json:"subagents,omitzero"`
+}
+
+// EditToolInput is the normalized view of an exact-replacement edit tool.
+type EditToolInput struct {
+	Path  string            `json:"path"`
+	Edits []EditReplacement `json:"edits"`
+}
+
+// EditReplacement is one exact text replacement in an edit tool call.
+type EditReplacement struct {
+	OldText string `json:"oldText"`
+	NewText string `json:"newText"`
+}
+
+// SubagentSpawn is one backend-normalized subagent invocation.
+type SubagentSpawn struct {
+	Agent string `json:"agent"`
+	Task  string `json:"task"`
+	Label string `json:"label,omitempty"`
+	Phase string `json:"phase,omitempty"`
 }
 
 // Type implements Message.
