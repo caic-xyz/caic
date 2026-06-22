@@ -277,12 +277,6 @@ func parseToolCallUpdate(data json.RawMessage, fw *jsonutil.FieldWarner) ([]agen
 	}
 }
 
-type editInput struct {
-	FilePath  string `json:"filePath"`
-	OldString string `json:"oldString"`
-	NewString string `json:"newString"`
-}
-
 func addEditInputView(use *agent.ToolUseMessage) {
 	if use == nil || !strings.EqualFold(use.Name, "Edit") {
 		return
@@ -296,7 +290,7 @@ func addEditInputView(use *agent.ToolUseMessage) {
 }
 
 func parseEditInput(raw json.RawMessage) (agent.EditToolInput, bool) {
-	var input editInput
+	var input opencode.EditInput
 	if len(raw) == 0 || json.Unmarshal(raw, &input) != nil || input.FilePath == "" || input.OldString == "" {
 		return agent.EditToolInput{}, false
 	}

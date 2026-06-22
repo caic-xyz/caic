@@ -380,18 +380,6 @@ func parseToolUseBlock(b *claudecode.OutputContentBlock) ([]agent.Message, error
 	return []agent.Message{use}, nil
 }
 
-type editInput struct {
-	FilePath  string            `json:"file_path"`
-	OldString string            `json:"old_string"`
-	NewString string            `json:"new_string"`
-	Edits     []editReplacement `json:"edits"`
-}
-
-type editReplacement struct {
-	OldString string `json:"old_string"`
-	NewString string `json:"new_string"`
-}
-
 func addEditInputView(use *agent.ToolUseMessage) {
 	if use == nil {
 		return
@@ -409,27 +397,31 @@ func addEditInputView(use *agent.ToolUseMessage) {
 }
 
 func parseEditInput(raw json.RawMessage) (agent.EditToolInput, bool) {
-	var input editInput
-	if len(raw) == 0 || json.Unmarshal(raw, &input) != nil || input.FilePath == "" {
+	if len(raw) == 0 {
 		return agent.EditToolInput{}, false
 	}
-	edits := make([]agent.EditReplacement, 0, len(input.Edits)+1)
-	for _, edit := range input.Edits {
-		if edit.OldString == "" {
-			return agent.EditToolInput{}, false
+	var multi claudecode.MultiEditInput
+	if json.Unmarshal(raw, &multi) == nil && multi.FilePath != "" && len(multi.Edits) > 0 {
+		edits := make([]agent.EditReplacement, 0, len(multi.Edits))
+		for _, edit := range multi.Edits {
+			if edit.OldString == "" {
+				return agent.EditToolInput{}, false
+			}
+			edits = append(edits, agent.EditReplacement{OldText: edit.OldString, NewText: edit.NewString})
 		}
-		edits = append(edits, agent.EditReplacement{OldText: edit.OldString, NewText: edit.NewString})
+		return agent.EditToolInput{Path: multi.FilePath, Edits: edits}, true
 	}
-	if input.OldString != "" || input.NewString != "" {
-		if input.OldString == "" {
-			return agent.EditToolInput{}, false
-		}
-		edits = append(edits, agent.EditReplacement{OldText: input.OldString, NewText: input.NewString})
-	}
-	if len(edits) == 0 {
+	var input claudecode.EditInput
+	if json.Unmarshal(raw, &input) != nil || input.FilePath == "" || input.OldString == "" {
 		return agent.EditToolInput{}, false
 	}
-	return agent.EditToolInput{Path: input.FilePath, Edits: edits}, true
+	return agent.EditToolInput{
+		Path: input.FilePath,
+		Edits: []agent.EditReplacement{{
+			OldText: input.OldString,
+			NewText: input.NewString,
+		}},
+	}, true
 }
 
 func askQuestionsFromClaude(in []claudecode.AskUserQuestion) []agent.AskQuestion {

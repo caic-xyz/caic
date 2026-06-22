@@ -18,32 +18,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
-// messageUpdateEvent is the small subset of message_update needed by caic.
-// Pi repeats the full accumulated assistant message on every streaming delta;
-// decoding that payload makes replay cost grow with log size even when the SSE
-// output is tiny.
-type messageUpdateEvent struct {
-	AssistantMessageEvent messageUpdateDelta `json:"assistantMessageEvent"`
-}
-
-type messageUpdateDelta struct {
-	Type     pi.DeltaType           `json:"type"`
-	Delta    string                 `json:"delta"`
-	Reason   pi.StopReason          `json:"reason"`
-	ToolCall *messageUpdateToolCall `json:"toolCall"`
-	Error    *messageUpdateError    `json:"error"`
-}
-
-type messageUpdateToolCall struct {
-	ID        string                     `json:"id"`
-	Name      string                     `json:"name"`
-	Arguments map[string]json.RawMessage `json:"arguments"`
-}
-
-type messageUpdateError struct {
-	ErrorMessage string `json:"errorMessage"`
-}
-
 func decodeEventType(line []byte) (pi.EventType, error) {
 	dec := json.NewDecoder(bytes.NewReader(line))
 	if err := consumeObjectStart(dec); err != nil {
@@ -68,8 +42,8 @@ func decodeEventType(line []byte) (pi.EventType, error) {
 	return "", nil
 }
 
-func decodeMessageUpdateEvent(line []byte) (messageUpdateEvent, error) {
-	var ev messageUpdateEvent
+func decodeMessageUpdateEvent(line []byte) (pi.MessageUpdateDeltaEvent, error) {
+	var ev pi.MessageUpdateDeltaEvent
 	dec := json.NewDecoder(bytes.NewReader(line))
 	if err := consumeObjectStart(dec); err != nil {
 		return ev, err
@@ -242,7 +216,7 @@ func parseMessageUpdate(line []byte) ([]agent.Message, error) {
 	return messagesFromMessageUpdateDelta(&ev.AssistantMessageEvent, line)
 }
 
-func messagesFromMessageUpdateDelta(delta *messageUpdateDelta, line []byte) ([]agent.Message, error) {
+func messagesFromMessageUpdateDelta(delta *pi.MessageUpdateDelta, line []byte) ([]agent.Message, error) {
 	switch delta.Type {
 	case pi.DeltaTextDelta:
 		return []agent.Message{&agent.TextDeltaMessage{Text: delta.Delta}}, nil
@@ -427,20 +401,8 @@ func newToolUseMessage(id, rawName, name string, input json.RawMessage) *agent.T
 	return use
 }
 
-type editArgs struct {
-	Path    string        `json:"path"`
-	OldText string        `json:"oldText"`
-	NewText string        `json:"newText"`
-	Edits   []replaceEdit `json:"edits"`
-}
-
-type replaceEdit struct {
-	OldText string `json:"oldText"`
-	NewText string `json:"newText"`
-}
-
 func parseEditArgs(raw json.RawMessage) (agent.EditToolInput, bool) {
-	var args editArgs
+	var args pi.EditToolArgs
 	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil || args.Path == "" {
 		return agent.EditToolInput{}, false
 	}
@@ -480,40 +442,16 @@ type subagentInfo struct {
 	Spawns []agent.SubagentSpawn
 }
 
-// subagentArgs mirrors the JSON shapes Pi's subagent tool accepts: a single
-// spawn, a parallel batch (tasks[]), a phased chain (chain[]), or an
-// introspection action (list/status).
-type subagentArgs struct {
-	subagentStep
-
-	Action string              `json:"action"`
-	Tasks  []subagentStep      `json:"tasks"`
-	Chain  []subagentChainStep `json:"chain"`
-}
-
-type subagentStep struct {
-	Agent string `json:"agent"`
-	Label string `json:"label"`
-	Phase string `json:"phase"`
-	Task  string `json:"task"`
-}
-
-type subagentChainStep struct {
-	subagentStep
-
-	Parallel []subagentStep `json:"parallel"`
-}
-
 // parseSubagentArgs decodes a subagent tool call's arguments into a structured
 // view. It recognises the single, parallel-batch, and chain orchestration
 // shapes, and the action-based introspection calls (list/status) which spawn
 // no subagents.
 func parseSubagentArgs(raw json.RawMessage) subagentInfo {
-	var args subagentArgs
+	var args pi.SubagentToolArgs
 	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil {
 		return subagentInfo{}
 	}
-	spawns := args.spawns()
+	spawns := subagentSpawns(&args)
 	switch {
 	case len(args.Chain) > 0 && len(spawns) > 0:
 		return subagentInfo{Kind: "chain", Spawns: spawns}
@@ -528,11 +466,12 @@ func parseSubagentArgs(raw json.RawMessage) subagentInfo {
 	}
 }
 
-// spawns flattens the orchestration shapes into an ordered list of subagent
-// invocations. Steps with no agent (e.g. the introspection action) are dropped.
-func (a *subagentArgs) spawns() []agent.SubagentSpawn {
+// subagentSpawns flattens the orchestration shapes into an ordered list of
+// subagent invocations. Steps with no agent (e.g. the introspection action) are
+// dropped.
+func subagentSpawns(a *pi.SubagentToolArgs) []agent.SubagentSpawn {
 	var out []agent.SubagentSpawn
-	add := func(s subagentStep) {
+	add := func(s pi.SubagentToolStep) {
 		if s.Agent == "" {
 			return
 		}
@@ -552,14 +491,14 @@ func (a *subagentArgs) spawns() []agent.SubagentSpawn {
 				}
 				continue
 			}
-			add(step.subagentStep)
+			add(step.SubagentToolStep)
 		}
 	case len(a.Tasks) > 0:
 		for _, s := range a.Tasks {
 			add(s)
 		}
 	default:
-		add(a.subagentStep)
+		add(a.SubagentToolStep)
 	}
 	return out
 }

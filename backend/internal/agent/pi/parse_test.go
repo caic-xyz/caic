@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/maruel/genai/providers/pi"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 )
@@ -340,11 +342,11 @@ func TestNew(t *testing.T) {
 			`{"tasks":[{"agent":"a","task":"t"}]}`,
 			`{"chain":[{"parallel":[{"agent":"a","task":"t"}]}]}`,
 		} {
-			var args subagentArgs
+			var args pi.SubagentToolArgs
 			if err := json.Unmarshal([]byte(raw), &args); err != nil {
 				t.Fatalf("unmarshal %s: %v", raw, err)
 			}
-			if len(args.spawns()) == 0 {
+			if len(subagentSpawns(&args)) == 0 {
 				t.Fatalf("no spawns for %s", raw)
 			}
 		}

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	genaipi "github.com/maruel/genai/providers/pi"
+	"github.com/maruel/genai/providers/pi"
 )
 
 func BenchmarkParseMessageUpdateWithAccumulatedMessage(b *testing.B) {
@@ -39,20 +39,20 @@ func benchmarkMessageUpdateLine(b *testing.B, accumulatedBytes int) []byte {
 		Content []contentBlock `json:"content"`
 	}
 	line := struct {
-		Type                  genaipi.EventType `json:"type"`
+		Type                  pi.EventType `json:"type"`
 		AssistantMessageEvent struct {
-			Type  genaipi.DeltaType `json:"type"`
-			Delta string            `json:"delta"`
+			Type  pi.DeltaType `json:"type"`
+			Delta string       `json:"delta"`
 		} `json:"assistantMessageEvent"`
 		Message agentMessage `json:"message"`
 	}{
-		Type: genaipi.EventMessageUpdate,
+		Type: pi.EventMessageUpdate,
 		Message: agentMessage{
 			Role:    "assistant",
 			Content: []contentBlock{{Type: "text", Text: strings.Repeat("x", accumulatedBytes)}},
 		},
 	}
-	line.AssistantMessageEvent.Type = genaipi.DeltaTextDelta
+	line.AssistantMessageEvent.Type = pi.DeltaTextDelta
 	line.AssistantMessageEvent.Delta = "x"
 	data, err := json.Marshal(line)
 	if err != nil {
