@@ -681,6 +681,14 @@ func (m *Manager) SudoPassword(ctx context.Context, t *task.Task) string {
 	return pw
 }
 
+// InspectRuntime returns observed runtime configuration for an instance.
+func (m *Manager) InspectRuntime(ctx context.Context, id runtime.InstanceID) (*runtime.InstanceInspect, error) {
+	if m.inventory == nil {
+		return nil, errors.New("runtime inventory is not configured")
+	}
+	return m.inventory.Inspect(ctx, id)
+}
+
 // SetTaskMonitorBranch sets the CI monitor branch on a task entry.
 // Equivalent to entry.SetMonitorBranch; kept for backend.Backend interface symmetry.
 func (m *Manager) SetTaskMonitorBranch(entry *Entry, branch string) {
@@ -998,18 +1006,23 @@ func (m *Manager) LoadPurgedTasks(all []*task.LoadedTask) error {
 			}
 		}
 		t := &task.Task{
-			ID:            taskID,
-			InitialPrompt: agent.Prompt{Text: lt.Prompt},
-			Model:         lt.Model,
-			Effort:        lt.Effort,
-			Repos:         lt.Repos,
-			Harness:       lt.Harness,
-			StartedAt:     lt.StartedAt,
-			Tailscale:     lt.Tailscale,
-			USB:           lt.USB,
-			Display:       lt.Display,
-			Sudo:          lt.Sudo,
-			GitHubToken:   lt.GitHubToken,
+			ID:                taskID,
+			InitialPrompt:     agent.Prompt{Text: lt.Prompt},
+			Model:             lt.Model,
+			Effort:            lt.Effort,
+			Repos:             lt.Repos,
+			Harness:           lt.Harness,
+			BaseImage:         lt.BaseImage,
+			ContainerPlatform: lt.ContainerPlatform,
+			MaxCPUs:           lt.MaxCPUs,
+			CacheMounts:       slices.Clone(lt.CacheMounts),
+			Mounts:            slices.Clone(lt.Mounts),
+			StartedAt:         lt.StartedAt,
+			Tailscale:         lt.Tailscale,
+			USB:               lt.USB,
+			Display:           lt.Display,
+			Sudo:              lt.Sudo,
+			GitHubToken:       lt.GitHubToken,
 		}
 		t.SetStateAt(lt.State, lt.LastStateUpdateAt)
 		if lt.AgentVersion != "" {
@@ -1477,26 +1490,41 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	}
 
 	var forgeIssue int
+	var baseImage string
+	var containerPlatform string
+	var maxCPUs int
+	var cacheMounts []runtime.CacheMount
+	var mounts []runtime.Mount
 	if lt != nil {
 		forgeIssue = lt.ForgeIssue
+		baseImage = lt.BaseImage
+		containerPlatform = lt.ContainerPlatform
+		maxCPUs = lt.MaxCPUs
+		cacheMounts = slices.Clone(lt.CacheMounts)
+		mounts = slices.Clone(lt.Mounts)
 	}
 
 	t := &task.Task{
-		ID:            taskID,
-		InitialPrompt: agent.Prompt{Text: prompt},
-		Repos:         adoptRepos,
-		Harness:       harnessName,
-		Model:         model,
-		Effort:        effort,
-		StartedAt:     startedAt,
-		Tailscale:     c.Tailscale,
-		TailscaleFQDN: c.TailscaleFQDN,
-		USB:           c.USB,
-		Display:       c.Display,
-		Sudo:          c.Sudo,
-		VNCPort:       c.VNCPort,
-		Provider:      m.provider,
-		ForgeIssue:    forgeIssue,
+		ID:                taskID,
+		InitialPrompt:     agent.Prompt{Text: prompt},
+		Repos:             adoptRepos,
+		Harness:           harnessName,
+		Model:             model,
+		Effort:            effort,
+		BaseImage:         baseImage,
+		ContainerPlatform: containerPlatform,
+		MaxCPUs:           maxCPUs,
+		CacheMounts:       cacheMounts,
+		Mounts:            mounts,
+		StartedAt:         startedAt,
+		Tailscale:         c.Tailscale,
+		TailscaleFQDN:     c.TailscaleFQDN,
+		USB:               c.USB,
+		Display:           c.Display,
+		Sudo:              c.Sudo,
+		VNCPort:           c.VNCPort,
+		Provider:          m.provider,
+		ForgeIssue:        forgeIssue,
 	}
 	t.SetRuntimeConnectionInfo(c.ID, c.AgentTarget, c.TailscaleFQDN, "", c.VNCPort)
 	// Restore GitHub token flag from log trailer (primary) or runtime metadata (fallback).

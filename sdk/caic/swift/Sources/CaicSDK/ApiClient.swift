@@ -186,6 +186,10 @@ public final class ApiClient {
     public func getTask(id: String) async throws -> Task {
         try await request("GET", path: "/api/caic/v1/tasks/\(id)")
     }
+    /// Returns recorded and observed runtime metadata for a task.
+    public func getTaskInfo(id: String) async throws -> TaskInfo {
+        try await request("GET", path: "/api/caic/v1/tasks/\(id)/info")
+    }
     /// Creates and starts a new coding agent task.
     public func createTask(req: CreateTaskReq) async throws -> Task {
         try await request("POST", path: "/api/caic/v1/tasks", body: try encoder.encode(req))

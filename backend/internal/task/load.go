@@ -21,6 +21,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
 // errNotLogFile is returned when a file doesn't contain a valid caic_meta header.
@@ -118,6 +119,11 @@ type LoadedTask struct {
 	Display           bool
 	Sudo              bool
 	GitHubToken       bool
+	BaseImage         string
+	ContainerPlatform string
+	MaxCPUs           int
+	CacheMounts       []runtime.CacheMount
+	Mounts            []runtime.Mount
 	Model             string
 	Effort            string
 	SessionID         string // Backend-native session/thread ID required to resume stateful harnesses.
@@ -141,6 +147,38 @@ func (lt *LoadedTask) Primary() *RepoMount {
 // LogPath returns the absolute task log path used to load the task.
 func (lt *LoadedTask) LogPath() string {
 	return lt.path
+}
+
+func loadedTaskFromMeta(path, taskID string, meta *agent.MetaMessage, modified time.Time, size int64) *LoadedTask {
+	repos := make([]RepoMount, len(meta.Repos))
+	for i, mr := range meta.Repos {
+		repos[i] = RepoMountFromMeta(mr, "")
+	}
+	return &LoadedTask{
+		path:              path,
+		TaskID:            taskID,
+		Prompt:            meta.Prompt,
+		Title:             meta.Title,
+		Repos:             repos,
+		Harness:           meta.Harness,
+		Model:             meta.Model,
+		Effort:            meta.Effort,
+		StartedAt:         meta.StartedAt,
+		LastStateUpdateAt: modified,
+		State:             StateRunning,
+		ForgeIssue:        meta.ForgeIssue,
+		Tailscale:         meta.Tailscale,
+		USB:               meta.USB,
+		Display:           meta.Display,
+		Sudo:              meta.Sudo,
+		GitHubToken:       meta.GitHubToken,
+		BaseImage:         meta.BaseImage,
+		ContainerPlatform: meta.ContainerPlatform,
+		MaxCPUs:           meta.MaxCPUs,
+		CacheMounts:       runtimeCacheMountsFromMeta(meta.CacheMounts),
+		Mounts:            runtimeMountsFromMeta(meta.Mounts),
+		LogSize:           size,
+	}
 }
 
 // LoadLogs scans logDir for task log files and loads task metadata.
@@ -678,30 +716,7 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 	base := trimLogExt(filepath.Base(path))
 	taskIDStr := taskIDFromLogBase(base)
 
-	repos := make([]RepoMount, len(meta.Repos))
-	for i, mr := range meta.Repos {
-		repos[i] = RepoMountFromMeta(mr, "")
-	}
-	lt := &LoadedTask{
-		path:              path,
-		TaskID:            taskIDStr,
-		Prompt:            meta.Prompt,
-		Title:             meta.Title,
-		Repos:             repos,
-		Harness:           meta.Harness,
-		Model:             meta.Model,
-		Effort:            meta.Effort,
-		StartedAt:         meta.StartedAt,
-		LastStateUpdateAt: info.ModTime().UTC(),
-		State:             StateRunning, // sentinel: overridden by caic_result trailer or loadPurgedTasksFrom
-		ForgeIssue:        meta.ForgeIssue,
-		Tailscale:         meta.Tailscale,
-		USB:               meta.USB,
-		Display:           meta.Display,
-		Sudo:              meta.Sudo,
-		GitHubToken:       meta.GitHubToken,
-		LogSize:           info.Size(),
-	}
+	lt := loadedTaskFromMeta(path, taskIDStr, &meta, info.ModTime().UTC(), info.Size())
 
 	// Read the tail of the file to find caic_pr, caic_result, and
 	// caic_diff_stat records. The latest caic_diff_stat "ts" field provides
@@ -764,30 +779,7 @@ func loadCompressedLogHeader(path string) (_ *LoadedTask, retErr error) {
 	base := trimLogExt(filepath.Base(path))
 	taskIDStr := taskIDFromLogBase(base)
 
-	repos := make([]RepoMount, len(meta.Repos))
-	for i, mr := range meta.Repos {
-		repos[i] = RepoMountFromMeta(mr, "")
-	}
-	lt := &LoadedTask{
-		path:              path,
-		TaskID:            taskIDStr,
-		Prompt:            meta.Prompt,
-		Title:             meta.Title,
-		Repos:             repos,
-		Harness:           meta.Harness,
-		Model:             meta.Model,
-		Effort:            meta.Effort,
-		StartedAt:         meta.StartedAt,
-		LastStateUpdateAt: info.ModTime().UTC(),
-		State:             StateRunning,
-		ForgeIssue:        meta.ForgeIssue,
-		Tailscale:         meta.Tailscale,
-		USB:               meta.USB,
-		Display:           meta.Display,
-		Sudo:              meta.Sudo,
-		GitHubToken:       meta.GitHubToken,
-		LogSize:           info.Size(),
-	}
+	lt := loadedTaskFromMeta(path, taskIDStr, &meta, info.ModTime().UTC(), info.Size())
 
 	scan := logTailScan{fw: fw}
 	for scanner.Scan() {
@@ -838,31 +830,13 @@ func loadLogFile(path string, parseFn func([]byte) ([]agent.Message, error)) (_ 
 	// Use the file modification time as a best-effort approximation of the
 	// last state change (the file is written to as messages arrive).
 	var mtime time.Time
+	var size int64
 	if info, err := os.Stat(filepath.Clean(path)); err == nil {
 		mtime = info.ModTime().UTC()
+		size = info.Size()
 	}
 
-	repos := make([]RepoMount, len(meta.Repos))
-	for i, mr := range meta.Repos {
-		repos[i] = RepoMountFromMeta(mr, "")
-	}
-	lt := &LoadedTask{
-		Prompt:            meta.Prompt,
-		Title:             meta.Title,
-		Repos:             repos,
-		Harness:           meta.Harness,
-		Model:             meta.Model,
-		Effort:            meta.Effort,
-		StartedAt:         meta.StartedAt,
-		LastStateUpdateAt: mtime,
-		State:             StateRunning, // sentinel: overridden by caic_result trailer or loadPurgedTasksFrom
-		ForgeIssue:        meta.ForgeIssue,
-		Tailscale:         meta.Tailscale,
-		USB:               meta.USB,
-		Display:           meta.Display,
-		Sudo:              meta.Sudo,
-		GitHubToken:       meta.GitHubToken,
-	}
+	lt := loadedTaskFromMeta(path, "", &meta, mtime, size)
 
 	// Parse remaining lines as agent messages or the result trailer.
 	for scanner.Scan() {
@@ -953,20 +927,7 @@ func loadLogFileTail(path string, parseFn func([]byte) ([]agent.Message, error),
 		return nil, err
 	}
 
-	repos := make([]RepoMount, len(meta.Repos))
-	for i, mr := range meta.Repos {
-		repos[i] = RepoMountFromMeta(mr, "")
-	}
-	lt := &LoadedTask{
-		Prompt:            meta.Prompt,
-		Title:             meta.Title,
-		Repos:             repos,
-		Harness:           meta.Harness,
-		StartedAt:         meta.StartedAt,
-		LastStateUpdateAt: info.ModTime().UTC(),
-		State:             StateRunning,
-		ForgeIssue:        meta.ForgeIssue,
-	}
+	lt := loadedTaskFromMeta(path, "", &meta, info.ModTime().UTC(), info.Size())
 
 	// Seek to the tail of the file.
 	offset := max(int64(0), info.Size()-tailBytes)
@@ -1058,28 +1019,7 @@ func loadCompressedLogFileTail(path string, parseFn func([]byte) ([]agent.Messag
 		return nil, err
 	}
 
-	repos := make([]RepoMount, len(meta.Repos))
-	for i, mr := range meta.Repos {
-		repos[i] = RepoMountFromMeta(mr, "")
-	}
-	lt := &LoadedTask{
-		Prompt:            meta.Prompt,
-		Title:             meta.Title,
-		Repos:             repos,
-		Harness:           meta.Harness,
-		Model:             meta.Model,
-		Effort:            meta.Effort,
-		StartedAt:         meta.StartedAt,
-		LastStateUpdateAt: info.ModTime().UTC(),
-		State:             StateRunning,
-		ForgeIssue:        meta.ForgeIssue,
-		Tailscale:         meta.Tailscale,
-		USB:               meta.USB,
-		Display:           meta.Display,
-		Sudo:              meta.Sudo,
-		GitHubToken:       meta.GitHubToken,
-		LogSize:           info.Size(),
-	}
+	lt := loadedTaskFromMeta(path, "", &meta, info.ModTime().UTC(), info.Size())
 
 	var lines [][]byte
 	var total int64

@@ -38,6 +38,7 @@ export const {
   purgeTask,
   reviveTask,
   getTask,
+  getTaskInfo,
   getTaskCILog,
   syncTask,
   getTaskDiff,

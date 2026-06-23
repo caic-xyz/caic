@@ -7,6 +7,7 @@ import EmptyPage from "./pages/EmptyPage";
 import TaskDetailPage from "./pages/TaskDetailPage";
 import DiffPage from "./pages/DiffPage";
 import ProcessesPage from "./pages/ProcessesPage";
+import TaskInfoPage from "./pages/TaskInfoPage";
 import VncPage from "./pages/VncPage";
 import SettingsPage from "./pages/SettingsPage";
 
@@ -23,6 +24,7 @@ export function appRoutes(): JSX.Element {
         <Route path="/task/:taskId" component={TaskDetailPage} />
         <Route path="/task/:taskId/diff" component={DiffPage} />
         <Route path="/task/:taskId/processes" component={ProcessesPage} />
+        <Route path="/task/:taskId/info" component={TaskInfoPage} />
         <Route path="/task/:taskId/vnc" component={VncPage} />
       </Route>
       <Route path="/settings" component={SettingsPage} />

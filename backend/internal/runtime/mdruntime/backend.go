@@ -410,6 +410,43 @@ func (b *Backend) VNCPort(ctx context.Context, id runtime.InstanceID) int {
 	return 0
 }
 
+// Processes runs ps -eo pid,ppid,user,stat,%cpu,%mem,time,args --no-headers
+// inside the named container via SSH and returns the parsed process list.
+func (b *Backend) Processes(ctx context.Context, id runtime.InstanceID) ([]runtime.ProcessInfo, error) {
+	containerName := string(id)
+	ct, err := b.client.Get(ctx, containerName)
+	if err != nil {
+		return nil, fmt.Errorf("get container %s: %w", containerName, err)
+	}
+	cmd := "ps -eo pid,ppid,user,stat,%cpu,%mem,time,args --no-headers"
+	sshArgs := ct.SSHCommand(nil, cmd)
+
+	c := exec.CommandContext(ctx, sshArgs[0], sshArgs[1:]...) //nolint:gosec // containerName is internally-assigned; cmd is a constant literal
+	out, err := c.Output()
+	if err != nil {
+		return nil, fmt.Errorf("ps in container %s: %w", containerName, err)
+	}
+	return parsePSOutput(string(out))
+}
+
+// Signal sends a signal (e.g. SIGTERM, SIGKILL) to a process inside the
+// named container via SSH using kill.
+func (b *Backend) Signal(ctx context.Context, id runtime.InstanceID, pid int, sig string) error {
+	containerName := string(id)
+	ct, err := b.client.Get(ctx, containerName)
+	if err != nil {
+		return fmt.Errorf("get container %s: %w", containerName, err)
+	}
+	cmd := fmt.Sprintf("kill -s %s %d", sig, pid)
+	sshArgs := ct.SSHCommand(nil, cmd)
+	c := exec.CommandContext(ctx, sshArgs[0], sshArgs[1:]...) //nolint:gosec // containerName is internally-assigned; cmd uses fmt.Sprintf
+	out, err := c.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("signal %s pid %d in container %s: %w (output: %s)", sig, pid, containerName, err, string(out))
+	}
+	return nil
+}
+
 // harnessMap maps caic harnesses to their md equivalents.
 var harnessMap = map[harness.Name]md.Harness{
 	harness.Claude:   md.HarnessClaude,

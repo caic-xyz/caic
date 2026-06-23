@@ -272,6 +272,84 @@ type Task struct {
 	GitHubToken bool `json:"gitHubToken,omitempty"`
 }
 
+// TaskInfo is the detailed metadata response for a task.
+type TaskInfo struct {
+	ID       ksid.ID                 `json:"id"`
+	Recorded TaskInfoRecorded        `json:"recorded"`
+	Observed TaskInfoObservedRuntime `json:"observed,omitzero"`
+	Warnings []string                `json:"warnings,omitempty"`
+}
+
+// TaskInfoRecorded holds caic-recorded task launch configuration and metadata.
+type TaskInfoRecorded struct {
+	State             TaskState            `json:"state"`
+	StartedAt         time.Time            `json:"startedAt,omitzero"`
+	StateUpdatedAt    time.Time            `json:"stateUpdatedAt,omitzero"`
+	Harness           Harness              `json:"harness"`
+	Model             string               `json:"model,omitempty"`
+	Effort            string               `json:"effort,omitempty"`
+	AgentVersion      string               `json:"agentVersion,omitempty"`
+	SessionID         string               `json:"sessionID,omitempty"`
+	BaseImage         string               `json:"baseImage,omitempty"`
+	ContainerPlatform string               `json:"containerPlatform,omitempty"`
+	MaxCPUs           int                  `json:"maxCPUs,omitempty"`
+	Capabilities      TaskInfoCapability   `json:"capabilities"`
+	Runtime           RuntimeInstance      `json:"runtime"`
+	Repos             []TaskInfoRepo       `json:"repos,omitempty"`
+	Caches            []TaskInfoCacheMount `json:"caches,omitempty"`
+	Mounts            []TaskInfoMount      `json:"mounts,omitempty"`
+}
+
+// TaskInfoCapability describes recorded runtime capabilities and injected-token presence.
+type TaskInfoCapability struct {
+	Tailscale   bool `json:"tailscale,omitempty"`
+	USB         bool `json:"usb,omitempty"`
+	Display     bool `json:"display,omitempty"`
+	Sudo        bool `json:"sudo,omitempty"`
+	GitHubToken bool `json:"gitHubToken,omitempty"`
+}
+
+// TaskInfoRepo describes a repository mounted into a task runtime.
+type TaskInfoRepo struct {
+	Name        string `json:"name"`
+	BaseBranch  string `json:"baseBranch,omitempty"`
+	Branch      string `json:"branch,omitempty"`
+	HostPath    string `json:"hostPath,omitempty"`
+	MountedPath string `json:"mountedPath,omitempty"`
+	RemoteURL   string `json:"remoteURL,omitempty"`
+	Forge       Forge  `json:"forge,omitempty"`
+}
+
+// TaskInfoCacheMount describes a recorded cache mount.
+type TaskInfoCacheMount struct {
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	HostPath    string `json:"hostPath,omitempty"`
+	MountPath   string `json:"mountPath,omitempty"`
+	ReadOnly    bool   `json:"readOnly,omitempty"`
+	Shallow     bool   `json:"shallow,omitempty"`
+}
+
+// TaskInfoMount describes a recorded or observed bind mount.
+type TaskInfoMount struct {
+	HostPath  string `json:"hostPath,omitempty"`
+	MountPath string `json:"mountPath,omitempty"`
+	ReadOnly  bool   `json:"readOnly,omitempty"`
+}
+
+// TaskInfoObservedRuntime describes runtime-observed instance details from the runtime adapter.
+type TaskInfoObservedRuntime struct {
+	Runtime  string               `json:"runtime,omitempty"`
+	ID       string               `json:"id,omitempty"`
+	State    string               `json:"state,omitempty"`
+	ImageRef string               `json:"imageRef,omitempty"`
+	ImageID  string               `json:"imageID,omitempty"`
+	Platform string               `json:"platform,omitempty"`
+	CPULimit int                  `json:"cpuLimit,omitempty"`
+	Mounts   []TaskInfoMount      `json:"mounts,omitempty"`
+	Caches   []TaskInfoCacheMount `json:"caches,omitempty"`
+}
+
 // TaskListEvent is a discriminated-union event for the task list SSE stream.
 // kind=="snapshot": Tasks holds the full list on initial connect.
 // kind=="upsert":   Task holds a newly created task.

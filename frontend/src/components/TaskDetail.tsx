@@ -672,6 +672,7 @@ export default function TaskDetail(props: Props) {
             })()}
           </Show>
         </span>
+        <A class={styles.diffLink} href={`${location.pathname}/info`}>Info</A>
         <Show when={(props.diffStat?.length ?? 0) > 0}>
           <A class={styles.diffLink} href={`${location.pathname}/diff`}>Diff</A>
         </Show>

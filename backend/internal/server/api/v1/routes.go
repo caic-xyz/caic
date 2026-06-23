@@ -194,6 +194,13 @@ var Routes = []Route{
 		Resp:   reflect.TypeFor[Task](),
 	},
 	{
+		Name:   "getTaskInfo",
+		Doc:    "Returns recorded and observed runtime metadata for a task.",
+		Method: "GET",
+		Path:   "/api/caic/v1/tasks/{id}/info",
+		Resp:   reflect.TypeFor[TaskInfo](),
+	},
+	{
 		Name:   "createTask",
 		Doc:    "Creates and starts a new coding agent task.",
 		Method: "POST",

@@ -438,24 +438,46 @@ type MetaRepo struct {
 	MountedPath string `json:"mounted_path,omitempty"`
 }
 
+// MetaCacheMount describes one cache mount in a MetaMessage.
+type MetaCacheMount struct {
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	HostPath    string `json:"hostPath,omitempty"`
+	MountPath   string `json:"mountPath,omitempty"`
+	ReadOnly    bool   `json:"readOnly,omitempty"`
+	Shallow     bool   `json:"shallow,omitempty"`
+}
+
+// MetaMount describes one custom bind mount in a MetaMessage.
+type MetaMount struct {
+	HostPath  string `json:"hostPath,omitempty"`
+	MountPath string `json:"mountPath,omitempty"`
+	ReadOnly  bool   `json:"readOnly,omitempty"`
+}
+
 // MetaMessage is written as the first line of a JSONL log file. It captures
 // task-level metadata so logs can be reloaded on restart.
 type MetaMessage struct {
-	MessageType string       `json:"type"`
-	Version     int          `json:"version"`
-	Prompt      string       `json:"prompt"`
-	Title       string       `json:"title,omitempty"`
-	Repos       []MetaRepo   `json:"repos"`
-	Harness     harness.Name `json:"harness"`
-	Model       string       `json:"model,omitempty"`
-	Effort      string       `json:"effort,omitempty"`
-	StartedAt   time.Time    `json:"started_at"`
-	ForgeIssue  int          `json:"forge_issue,omitempty"` // Originating issue/PR number for bot comment callbacks.
-	Tailscale   bool         `json:"tailscale,omitempty"`
-	USB         bool         `json:"usb,omitempty"`
-	Display     bool         `json:"display,omitempty"`
-	Sudo        bool         `json:"sudo,omitempty"`
-	GitHubToken bool         `json:"gitHubToken,omitempty"`
+	MessageType       string           `json:"type"`
+	Version           int              `json:"version"`
+	Prompt            string           `json:"prompt"`
+	Title             string           `json:"title,omitempty"`
+	Repos             []MetaRepo       `json:"repos"`
+	Harness           harness.Name     `json:"harness"`
+	Model             string           `json:"model,omitempty"`
+	Effort            string           `json:"effort,omitempty"`
+	StartedAt         time.Time        `json:"started_at"`
+	ForgeIssue        int              `json:"forge_issue,omitempty"` // Originating issue/PR number for bot comment callbacks.
+	Tailscale         bool             `json:"tailscale,omitempty"`
+	USB               bool             `json:"usb,omitempty"`
+	Display           bool             `json:"display,omitempty"`
+	Sudo              bool             `json:"sudo,omitempty"`
+	GitHubToken       bool             `json:"gitHubToken,omitempty"`
+	BaseImage         string           `json:"baseImage,omitempty"`
+	ContainerPlatform string           `json:"containerPlatform,omitempty"`
+	MaxCPUs           int              `json:"maxCPUs,omitempty"`
+	CacheMounts       []MetaCacheMount `json:"cacheMounts,omitempty"`
+	Mounts            []MetaMount      `json:"mounts,omitempty"`
 }
 
 // Type implements Message.

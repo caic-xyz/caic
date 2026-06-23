@@ -135,6 +135,41 @@ func TestLoadLogs(t *testing.T) {
 			t.Errorf("State = %v, want %v", tasks[0].State, StatePurged)
 		}
 	})
+	t.Run("LaunchConfigMetadata", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType:       "caic_meta",
+			Version:           1,
+			Prompt:            "task1",
+			Repos:             []agent.MetaRepo{{Name: "r", Branch: "caic-0"}},
+			Harness:           "claude",
+			BaseImage:         "ghcr.io/caic/base:v1",
+			ContainerPlatform: "linux/amd64",
+			MaxCPUs:           6,
+			CacheMounts:       []agent.MetaCacheMount{{Name: "npm", Description: "Node", HostPath: "~/.npm", MountPath: "/home/user/.npm", ReadOnly: true, Shallow: true}},
+			Mounts:            []agent.MetaMount{{HostPath: "/host/work", MountPath: "/workspace/work", ReadOnly: true}},
+		})
+		writeLogFile(t, dir, "a.jsonl", meta)
+
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(tasks) != 1 {
+			t.Fatalf("len = %d, want 1", len(tasks))
+		}
+		lt := tasks[0]
+		if lt.BaseImage != "ghcr.io/caic/base:v1" || lt.ContainerPlatform != "linux/amd64" || lt.MaxCPUs != 6 {
+			t.Fatalf("launch config = image %q platform %q cpus %d", lt.BaseImage, lt.ContainerPlatform, lt.MaxCPUs)
+		}
+		if len(lt.CacheMounts) != 1 || lt.CacheMounts[0].Name != "npm" || !lt.CacheMounts[0].ReadOnly || !lt.CacheMounts[0].Shallow {
+			t.Errorf("CacheMounts = %+v", lt.CacheMounts)
+		}
+		if len(lt.Mounts) != 1 || lt.Mounts[0].HostPath != "/host/work" || !lt.Mounts[0].ReadOnly {
+			t.Errorf("Mounts = %+v", lt.Mounts)
+		}
+	})
 	t.Run("ResultReasoningTokens", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()

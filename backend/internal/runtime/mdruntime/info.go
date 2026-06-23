@@ -35,6 +35,44 @@ func (b RuntimeInfoBackend) List(ctx context.Context) ([]runtime.Instance, error
 	return InstancesFromMD(ctx, containers), nil
 }
 
+// Inspect returns observed runtime configuration for a runtime instance.
+func (b RuntimeInfoBackend) Inspect(ctx context.Context, id runtime.InstanceID) (*runtime.InstanceInspect, error) {
+	info, err := (&md.Container{Client: b.c, Name: string(id)}).Inspect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	mounts := make([]runtime.Mount, len(info.Mounts))
+	for i, m := range info.Mounts {
+		mounts[i] = runtime.Mount{HostPath: m.HostPath, MountPath: m.ContainerPath, ReadOnly: m.ReadOnly}
+	}
+	caches := make([]runtime.CacheMount, len(info.Caches))
+	for i, c := range info.Caches {
+		caches[i] = runtime.CacheMount{
+			Name:        c.Name,
+			Description: c.Description,
+			HostPath:    c.HostPath,
+			MountPath:   c.ContainerPath,
+			ReadOnly:    c.ReadOnly,
+			Shallow:     c.Shallow,
+		}
+	}
+	inspectID := runtime.InstanceID(info.ID)
+	if inspectID == "" {
+		inspectID = id
+	}
+	return &runtime.InstanceInspect{
+		Runtime:  info.Runtime,
+		ID:       inspectID,
+		State:    info.State,
+		ImageRef: info.ImageRef,
+		ImageID:  info.ImageID,
+		Platform: info.Platform,
+		CPULimit: info.CPULimit,
+		Mounts:   mounts,
+		Caches:   caches,
+	}, nil
+}
+
 // StatsAll returns resource stats for the named runtime instances.
 func (b RuntimeInfoBackend) StatsAll(ctx context.Context, ids []runtime.InstanceID) (map[runtime.InstanceID]*runtime.Stats, error) {
 	names := make([]string, len(ids))

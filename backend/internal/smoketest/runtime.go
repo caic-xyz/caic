@@ -113,6 +113,11 @@ func (*RuntimeBackend) Metadata(context.Context, runtime.InstanceID, runtime.Met
 	return "", nil
 }
 
+// Inspect implements runtime.Inventory.
+func (*RuntimeBackend) Inspect(context.Context, runtime.InstanceID) (*runtime.InstanceInspect, error) {
+	return &runtime.InstanceInspect{}, nil
+}
+
 // StatsAll implements runtime.Monitor.
 func (*RuntimeBackend) StatsAll(_ context.Context, ids []runtime.InstanceID) (map[runtime.InstanceID]*runtime.Stats, error) {
 	stats := make(map[runtime.InstanceID]*runtime.Stats, len(ids))

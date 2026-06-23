@@ -1,0 +1,150 @@
+/* Styles for the full-page TaskInfo component with launch config and runtime metadata. */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.backBtn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-md);
+  padding: 4px;
+  display: flex;
+  align-items: center;
+}
+
+.backBtn:hover {
+  background: var(--color-bg-hover);
+}
+
+.headerMeta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.headerRepo {
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.headerBranch {
+  font-family: monospace;
+  background: var(--color-bg-hover);
+  border-radius: var(--radius-sm);
+  padding: 0 0.35rem;
+}
+
+.content {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.loading,
+.error,
+.empty {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  padding: 1rem 0;
+}
+
+.error {
+  color: var(--color-danger);
+}
+
+.section {
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  padding: 0.75rem;
+  background: var(--color-bg-surface);
+}
+
+.sectionTitle {
+  margin: 0 0 0.6rem 0;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+}
+
+.label {
+  color: var(--color-text-tertiary);
+  font-weight: 600;
+}
+
+.value,
+.code {
+  color: var(--color-text-secondary);
+  min-width: 0;
+}
+
+.code {
+  font-family: monospace;
+  word-break: break-all;
+}
+
+.tableWrap {
+  overflow: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.th {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-tertiary);
+  text-align: left;
+  padding: 0.3rem 0.4rem;
+  border-bottom: 1px solid var(--color-border-light);
+  white-space: nowrap;
+}
+
+.td {
+  padding: 0.25rem 0.4rem;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  vertical-align: baseline;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.pathCell {
+  font-family: monospace;
+  word-break: break-all;
+  white-space: normal;
+  min-width: 160px;
+}
+
+.warningList {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--color-warning-text);
+  font-size: 0.8rem;
+}

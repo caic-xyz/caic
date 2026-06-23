@@ -86,6 +86,19 @@ type Instance struct {
 	VNCPort       int
 }
 
+// InstanceInspect describes observed runtime configuration for an instance.
+type InstanceInspect struct {
+	Runtime  string
+	ID       InstanceID
+	State    string
+	ImageRef string
+	ImageID  string
+	Platform string
+	CPULimit int
+	Mounts   []Mount
+	Caches   []CacheMount
+}
+
 // ProcessInfo describes a single process running inside a runtime instance.
 type ProcessInfo struct {
 	PID     int
@@ -191,10 +204,11 @@ type Monitor interface {
 	WatchEvents(ctx context.Context, filter EventFilter) (<-chan Event, error)
 }
 
-// Inventory lists runtime instances and their metadata.
+// Inventory lists runtime instances and their observed metadata.
 type Inventory interface {
 	List(ctx context.Context) ([]Instance, error)
 	Metadata(ctx context.Context, id InstanceID, key MetadataKey) (string, error)
+	Inspect(ctx context.Context, id InstanceID) (*InstanceInspect, error)
 }
 
 // PrivilegeInfo reads privileged runtime instance credentials.

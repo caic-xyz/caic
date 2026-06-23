@@ -541,6 +541,7 @@ func (h *taskHandlers) routes() http.Handler {
 	m.HandleFunc("POST /tasks", handle(h.service.createTask))
 	m.HandleFunc("GET /tasks/events", h.handleTaskListEvents)
 	m.HandleFunc("GET /tasks/{id}", handleWithTask(h, h.service.getTask))
+	m.HandleFunc("GET /tasks/{id}/info", handleWithTask(h, h.service.getTaskInfo))
 	m.HandleFunc("GET /tasks/{id}/raw_events", h.handleTaskRawEvents)
 	m.HandleFunc("GET /tasks/{id}/events", h.handleTaskEvents)
 	m.HandleFunc("POST /tasks/{id}/input", handleWithTask(h, h.service.sendInput))

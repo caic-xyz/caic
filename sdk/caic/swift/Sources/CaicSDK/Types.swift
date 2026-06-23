@@ -724,6 +724,84 @@ public struct BotFixPRReq: Codable {
     public let taskId: String
 }
 
+/// TaskInfoCapability describes recorded runtime capabilities and injected-token presence.
+public struct TaskInfoCapability: Codable {
+    public let tailscale: Bool?
+    public let usb: Bool?
+    public let display: Bool?
+    public let sudo: Bool?
+    public let gitHubToken: Bool?
+}
+
+/// TaskInfoRepo describes a repository mounted into a task runtime.
+public struct TaskInfoRepo: Codable {
+    public let name: String
+    public let baseBranch: String?
+    public let branch: String?
+    public let hostPath: String?
+    public let mountedPath: String?
+    public let remoteURL: String?
+    public let forge: Forge?
+}
+
+/// TaskInfoCacheMount describes a recorded cache mount.
+public struct TaskInfoCacheMount: Codable {
+    public let name: String?
+    public let description: String?
+    public let hostPath: String?
+    public let mountPath: String?
+    public let readOnly: Bool?
+    public let shallow: Bool?
+}
+
+/// TaskInfoMount describes a recorded or observed bind mount.
+public struct TaskInfoMount: Codable {
+    public let hostPath: String?
+    public let mountPath: String?
+    public let readOnly: Bool?
+}
+
+/// TaskInfoRecorded holds caic-recorded task launch configuration and metadata.
+public struct TaskInfoRecorded: Codable {
+    public let state: TaskState
+    public let startedAt: ISOTimestamp?
+    public let stateUpdatedAt: ISOTimestamp?
+    public let harness: Harness
+    public let model: String?
+    public let effort: String?
+    public let agentVersion: String?
+    public let sessionID: String?
+    public let baseImage: String?
+    public let containerPlatform: String?
+    public let maxCPUs: Int?
+    public let capabilities: TaskInfoCapability
+    public let runtime: RuntimeInstance
+    public let repos: [TaskInfoRepo]?
+    public let caches: [TaskInfoCacheMount]?
+    public let mounts: [TaskInfoMount]?
+}
+
+/// TaskInfoObservedRuntime describes runtime-observed instance details from the runtime adapter.
+public struct TaskInfoObservedRuntime: Codable {
+    public let runtime: String?
+    public let id: String?
+    public let state: String?
+    public let imageRef: String?
+    public let imageID: String?
+    public let platform: String?
+    public let cpuLimit: Int?
+    public let mounts: [TaskInfoMount]?
+    public let caches: [TaskInfoCacheMount]?
+}
+
+/// TaskInfo is the detailed metadata response for a task.
+public struct TaskInfo: Codable {
+    public let id: String
+    public let recorded: TaskInfoRecorded
+    public let observed: TaskInfoObservedRuntime?
+    public let warnings: [String]?
+}
+
 /// ImageData carries a single base64-encoded image.
 public struct ImageData: Codable {
     /// e.g. "image/png", "image/jpeg"

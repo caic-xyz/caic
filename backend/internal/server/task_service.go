@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sort"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repos"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
@@ -84,6 +86,156 @@ func (s *taskService) taskListSnapshot(ctx context.Context) []v1.Task {
 func (s *taskService) getTask(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.Task, error) {
 	dto := v1conv.Task(ctx, entry, s.taskResolvers())
 	return &dto, nil
+}
+
+// getTaskInfo returns detailed recorded task metadata and optional runtime-observed facts.
+func (s *taskService) getTaskInfo(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.TaskInfo, error) {
+	t := entry.Task()
+	snap := t.Snapshot()
+	resolvers := s.taskResolvers()
+
+	taskRepos := make([]v1.TaskInfoRepo, 0, len(snap.Repos))
+	for _, repo := range snap.Repos {
+		taskRepos = append(taskRepos, v1.TaskInfoRepo{
+			Name:        repo.Name,
+			BaseBranch:  repo.BaseBranch,
+			Branch:      repo.Branch,
+			HostPath:    repo.GitRoot,
+			MountedPath: repo.MountedPath,
+			RemoteURL:   resolvers.RepoURL(repo.Name),
+			Forge:       resolvers.RepoForge(repo.Name),
+		})
+	}
+
+	info := &v1.TaskInfo{
+		ID: t.ID,
+		Recorded: v1.TaskInfoRecorded{
+			State:             v1conv.TaskState(ctx, snap.State),
+			StartedAt:         t.StartedAt,
+			StateUpdatedAt:    snap.StateUpdatedAt,
+			Harness:           v1conv.Harness(t.Harness),
+			Model:             snap.Model,
+			Effort:            t.Effort,
+			AgentVersion:      snap.AgentVersion,
+			SessionID:         snap.SessionID,
+			BaseImage:         t.BaseImage,
+			ContainerPlatform: t.ContainerPlatform,
+			MaxCPUs:           t.MaxCPUs,
+			Capabilities: v1.TaskInfoCapability{
+				Tailscale:   snap.Tailscale,
+				USB:         snap.USB,
+				Display:     snap.Display,
+				Sudo:        snap.Sudo,
+				GitHubToken: snap.GitHubToken,
+			},
+			Runtime: v1.RuntimeInstance{
+				ID:        string(snap.RuntimeInstanceID),
+				Tailscale: taskInfoTailscaleURL(&snap),
+				USB:       snap.USB,
+				Display:   snap.Display,
+				Sudo:      snap.Sudo,
+				VNCPort:   snap.VNCPort,
+			},
+			Repos:  taskRepos,
+			Caches: taskInfoCaches(t.CacheMounts),
+			Mounts: taskInfoMounts(t.Mounts),
+		},
+	}
+
+	if snap.RuntimeInstanceID != "" {
+		observed, err := s.taskMgr.InspectRuntime(ctx, snap.RuntimeInstanceID)
+		if err != nil {
+			info.Warnings = append(info.Warnings, "runtime inspect unavailable: "+err.Error())
+		} else if observed != nil {
+			info.Observed = taskInfoObserved(observed)
+			info.Warnings = append(info.Warnings, taskInfoCompareWarnings(&info.Recorded, &info.Observed)...)
+		}
+	}
+	return info, nil
+}
+
+func taskInfoCaches(in []runtime.CacheMount) []v1.TaskInfoCacheMount {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]v1.TaskInfoCacheMount, len(in))
+	for i, m := range in {
+		out[i] = v1.TaskInfoCacheMount{
+			Name:        m.Name,
+			Description: m.Description,
+			HostPath:    m.HostPath,
+			MountPath:   m.MountPath,
+			ReadOnly:    m.ReadOnly,
+			Shallow:     m.Shallow,
+		}
+	}
+	return out
+}
+
+func taskInfoMounts(in []runtime.Mount) []v1.TaskInfoMount {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]v1.TaskInfoMount, len(in))
+	for i, m := range in {
+		out[i] = v1.TaskInfoMount{HostPath: m.HostPath, MountPath: m.MountPath, ReadOnly: m.ReadOnly}
+	}
+	return out
+}
+
+func taskInfoObserved(in *runtime.InstanceInspect) v1.TaskInfoObservedRuntime {
+	return v1.TaskInfoObservedRuntime{
+		Runtime:  in.Runtime,
+		ID:       string(in.ID),
+		State:    in.State,
+		ImageRef: in.ImageRef,
+		ImageID:  in.ImageID,
+		Platform: in.Platform,
+		CPULimit: in.CPULimit,
+		Mounts:   taskInfoMounts(in.Mounts),
+		Caches:   taskInfoCaches(in.Caches),
+	}
+}
+
+func taskInfoCompareWarnings(recorded *v1.TaskInfoRecorded, observed *v1.TaskInfoObservedRuntime) []string {
+	var warnings []string
+	if recorded.BaseImage != "" && observed.ImageRef != "" && recorded.BaseImage != observed.ImageRef {
+		warnings = append(warnings, fmt.Sprintf("observed image %q differs from recorded image %q", observed.ImageRef, recorded.BaseImage))
+	}
+	if recorded.ContainerPlatform != "" && observed.Platform != "" && recorded.ContainerPlatform != observed.Platform {
+		warnings = append(warnings, fmt.Sprintf("observed platform %q differs from recorded platform %q", observed.Platform, recorded.ContainerPlatform))
+	}
+	if recorded.MaxCPUs > 0 && observed.CPULimit > 0 && recorded.MaxCPUs != observed.CPULimit {
+		warnings = append(warnings, fmt.Sprintf("observed CPU limit %d differs from recorded max CPUs %d", observed.CPULimit, recorded.MaxCPUs))
+	}
+	for _, recordedMount := range recorded.Mounts {
+		if !taskInfoMountsContain(observed.Mounts, recordedMount) {
+			warnings = append(warnings, fmt.Sprintf("observed mounts do not include recorded mount %s -> %s", recordedMount.HostPath, recordedMount.MountPath))
+		}
+	}
+	return warnings
+}
+
+func taskInfoMountsContain(mounts []v1.TaskInfoMount, target v1.TaskInfoMount) bool {
+	for _, mount := range mounts {
+		if mount.HostPath == target.HostPath && mount.MountPath == target.MountPath && mount.ReadOnly == target.ReadOnly {
+			return true
+		}
+	}
+	return false
+}
+
+func taskInfoTailscaleURL(s *task.Snapshot) string {
+	if s.TailscaleFQDN != "" {
+		return "https://" + s.TailscaleFQDN
+	}
+	if s.TailscaleAuthURL != "" {
+		return s.TailscaleAuthURL
+	}
+	if s.Tailscale {
+		return "true"
+	}
+	return ""
 }
 
 func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Task, error) {

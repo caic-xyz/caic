@@ -19,11 +19,11 @@ export function taskPath(id: string, repo: string, branch: string, query: string
   return `/task/@${id}+${slug}`;
 }
 
-/** Extract the task ID from a /task/@{id}+{slug}[/diff|/processes|/vnc] pathname, or null. */
+/** Extract the task ID from a /task/@{id}+{slug}[/diff|/processes|/vnc|/info] pathname, or null. */
 export function taskIdFromPath(pathname: string): string | null {
   const prefix = "/task/@";
   if (!pathname.startsWith(prefix)) return null;
-  const rest = pathname.slice(prefix.length).replace(/\/(diff|processes|vnc)$/, "");
+  const rest = pathname.slice(prefix.length).replace(/\/(diff|processes|vnc|info)$/, "");
   const plus = rest.indexOf("+");
   return plus === -1 ? rest : rest.slice(0, plus);
 }

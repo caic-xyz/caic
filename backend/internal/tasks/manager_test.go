@@ -1406,6 +1406,11 @@ func TestManager(t *testing.T) {
 					Display:           true,
 					Sudo:              true,
 					GitHubToken:       true,
+					BaseImage:         "ghcr.io/caic/base:v1",
+					ContainerPlatform: "linux/amd64",
+					MaxCPUs:           4,
+					CacheMounts:       []runtime.CacheMount{{Name: "npm", HostPath: "~/.npm", MountPath: "/home/user/.npm", ReadOnly: true}},
+					Mounts:            []runtime.Mount{{HostPath: "/host/work", MountPath: "/workspace/work", ReadOnly: true}},
 					Model:             "model-1",
 					Effort:            "high",
 					AgentVersion:      "1.2.3",
@@ -1435,6 +1440,15 @@ func TestManager(t *testing.T) {
 			}
 			if tk.Model != "model-1" || tk.Effort != "high" {
 				t.Errorf("model/effort = %q/%q, want model-1/high", tk.Model, tk.Effort)
+			}
+			if tk.BaseImage != "ghcr.io/caic/base:v1" || tk.ContainerPlatform != "linux/amd64" || tk.MaxCPUs != 4 {
+				t.Errorf("launch config = image %q platform %q cpus %d", tk.BaseImage, tk.ContainerPlatform, tk.MaxCPUs)
+			}
+			if len(tk.CacheMounts) != 1 || tk.CacheMounts[0].Name != "npm" || !tk.CacheMounts[0].ReadOnly {
+				t.Errorf("CacheMounts = %+v", tk.CacheMounts)
+			}
+			if len(tk.Mounts) != 1 || tk.Mounts[0].HostPath != "/host/work" || !tk.Mounts[0].ReadOnly {
+				t.Errorf("Mounts = %+v", tk.Mounts)
 			}
 			if tk.Title() != "Test Title" {
 				t.Errorf("Title = %q, want \"Test Title\"", tk.Title())
@@ -2239,6 +2253,63 @@ func TestManager(t *testing.T) {
 			}
 			if m.Len() != 1 {
 				t.Errorf("manager Len = %d, want 1", m.Len())
+			}
+		})
+		t.Run("valid_restores_launch_config_from_log", func(t *testing.T) {
+			t.Parallel()
+			taskID := ksid.NewID()
+			fake := &fakeMD{metadata: map[string]string{
+				"restore-config\x00caic.id":      taskID.String(),
+				"restore-config\x00caic.harness": string(harness.Claude),
+			}}
+			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
+			m.RegisterRunner("repo/a", &task.Runner{
+				Dir:      "/home/user/src/repo/a",
+				Backends: map[harness.Name]agent.Backend{harness.Claude: &fakeBackend{models: []string{"m1"}}},
+			})
+
+			logDir := t.TempDir()
+			meta, err := json.Marshal(agent.MetaMessage{
+				MessageType:       "caic_meta",
+				Version:           1,
+				Prompt:            "restore config",
+				Repos:             []agent.MetaRepo{{Name: "repo/a", Branch: "caic-9"}},
+				Harness:           harness.Claude,
+				BaseImage:         "ghcr.io/caic/base:v1",
+				ContainerPlatform: "linux/amd64",
+				MaxCPUs:           5,
+				CacheMounts:       []agent.MetaCacheMount{{Name: "npm", HostPath: "~/.npm", MountPath: "/home/user/.npm", ReadOnly: true}},
+				Mounts:            []agent.MetaMount{{HostPath: "/host/work", MountPath: "/workspace/work", ReadOnly: true}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(logDir, taskID.String()+"-repo-a-caic-9.jsonl"), append(meta, '\n'), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			logs, err := task.LoadLogs(logDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			adopted, err := m.AdoptInstances(t.Context(), []AdoptRepo{{RelPath: "repo/a", AbsPath: "/home/user/src/repo/a"}}, []runtime.Instance{
+				{ID: "restore-config", State: "exited", Repos: []runtime.Repo{{HostPath: "/home/user/src/repo/a", Branch: "caic-9", MountPath: "/home/user/src/repo/a"}}},
+			}, logs)
+			if err != nil {
+				t.Fatalf("AdoptInstances: %v", err)
+			}
+			if len(adopted) != 1 {
+				t.Fatalf("adopted len = %d, want 1", len(adopted))
+			}
+			got := adopted[0].Task
+			if got.BaseImage != "ghcr.io/caic/base:v1" || got.ContainerPlatform != "linux/amd64" || got.MaxCPUs != 5 {
+				t.Fatalf("launch config = image %q platform %q cpus %d", got.BaseImage, got.ContainerPlatform, got.MaxCPUs)
+			}
+			if len(got.CacheMounts) != 1 || got.CacheMounts[0].Name != "npm" || !got.CacheMounts[0].ReadOnly {
+				t.Errorf("CacheMounts = %+v", got.CacheMounts)
+			}
+			if len(got.Mounts) != 1 || got.Mounts[0].HostPath != "/host/work" || !got.Mounts[0].ReadOnly {
+				t.Errorf("Mounts = %+v", got.Mounts)
 			}
 		})
 		t.Run("valid_merges_local_log_with_relay_tail", func(t *testing.T) {

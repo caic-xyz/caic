@@ -881,6 +881,62 @@ func TestHandleCreateTask(t *testing.T) {
 		}
 	})
 
+	t.Run("TaskInfo", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t)
+		registerTestRunner(s, "myrepo", &task.Runner{
+			BaseBranch: "main",
+			Dir:        t.TempDir(),
+			Backends:   map[harness.Name]agent.Backend{harness.Claude: stubBackend{}},
+		})
+		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
+			p.Settings.BaseImage = "ghcr.io/my/image:v1"
+			p.Settings.ContainerPlatform = "linux/amd64"
+			p.Settings.MaxCPUs = 4
+			p.Settings.CacheMappings = []preferences.CacheMapping{{HostPath: "/host/cache", ContainerPath: "/home/user/.cache", Enabled: true}}
+			p.Settings.CustomMounts = []preferences.MountMapping{{HostPath: "/host/work", ContainerPath: "/workspace/work", Enabled: true, ReadOnly: true}}
+		}); err != nil {
+			t.Fatal(err)
+		}
+		createReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"claude","gitHubToken":true}`))
+		createW := httptest.NewRecorder()
+		handle(testTaskHandlers(s).service.createTask)(createW, createReq)
+		if createW.Code != http.StatusOK {
+			t.Fatalf("create status = %d, want %d: %s", createW.Code, http.StatusOK, createW.Body.String())
+		}
+		var taskResp v1.Task
+		if err := json.NewDecoder(createW.Body).Decode(&taskResp); err != nil {
+			t.Fatal(err)
+		}
+
+		infoReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskResp.ID.String()+"/info", http.NoBody)
+		infoReq.SetPathValue("id", taskResp.ID.String())
+		infoW := httptest.NewRecorder()
+		handleWithTask(testTaskHandlers(s), testTaskHandlers(s).service.getTaskInfo)(infoW, infoReq)
+		if infoW.Code != http.StatusOK {
+			t.Fatalf("info status = %d, want %d: %s", infoW.Code, http.StatusOK, infoW.Body.String())
+		}
+		var info v1.TaskInfo
+		if err := json.NewDecoder(infoW.Body).Decode(&info); err != nil {
+			t.Fatal(err)
+		}
+		if info.Recorded.BaseImage != "ghcr.io/my/image:v1" || info.Recorded.ContainerPlatform != "linux/amd64" || info.Recorded.MaxCPUs != 4 {
+			t.Fatalf("recorded config = image %q platform %q cpus %d", info.Recorded.BaseImage, info.Recorded.ContainerPlatform, info.Recorded.MaxCPUs)
+		}
+		if !info.Recorded.Capabilities.GitHubToken {
+			t.Error("GitHubToken = false, want true")
+		}
+		if len(info.Recorded.Repos) != 1 || info.Recorded.Repos[0].Name != "myrepo" || info.Recorded.Repos[0].HostPath == "" {
+			t.Errorf("Repos = %+v", info.Recorded.Repos)
+		}
+		if len(info.Recorded.Caches) != 1 || info.Recorded.Caches[0].HostPath != "/host/cache" {
+			t.Errorf("Caches = %+v", info.Recorded.Caches)
+		}
+		if len(info.Recorded.Mounts) != 1 || info.Recorded.Mounts[0].HostPath != "/host/work" || !info.Recorded.Mounts[0].ReadOnly {
+			t.Errorf("Mounts = %+v", info.Recorded.Mounts)
+		}
+	})
+
 	t.Run("NoRepoTask", func(t *testing.T) {
 		t.Parallel()
 		// Regression: creating a task with no repos panicked with

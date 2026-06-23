@@ -50,6 +50,7 @@ Type notation: `JSONValue` means any valid JSON value.
 |--------|------|-------------|---------|----------|
 | GET | `/api/caic/v1/tasks` | Returns all tasks. |  | `Task[]` |
 | GET | `/api/caic/v1/tasks/{id}` | Returns a single task by id (404 if it does not exist). |  | `Task` |
+| GET | `/api/caic/v1/tasks/{id}/info` | Returns recorded and observed runtime metadata for a task. |  | `TaskInfo` |
 | POST | `/api/caic/v1/tasks` | Creates and starts a new coding agent task. | `CreateTaskReq` | `Task` |
 | GET | `/api/caic/v1/tasks/{id}/raw_events` | Streams raw backend-specific task events via SSE. |  | `EventMessage` SSE |
 | GET | `/api/caic/v1/tasks/{id}/events` | Streams backend-neutral task events via SSE. |  | `EventMessage` SSE |
@@ -488,6 +489,105 @@ The server fetches CI logs for the task's PR and injects a fix command.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `taskId` | `string` |  | yes |
+
+### TaskInfoCapability
+
+TaskInfoCapability describes recorded runtime capabilities and injected-token presence.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `tailscale` | `boolean` |  |  |
+| `usb` | `boolean` |  |  |
+| `display` | `boolean` |  |  |
+| `sudo` | `boolean` |  |  |
+| `gitHubToken` | `boolean` |  |  |
+
+### TaskInfoRepo
+
+TaskInfoRepo describes a repository mounted into a task runtime.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `name` | `string` |  | yes |
+| `baseBranch` | `string` |  |  |
+| `branch` | `string` |  |  |
+| `hostPath` | `string` |  |  |
+| `mountedPath` | `string` |  |  |
+| `remoteURL` | `string` |  |  |
+| `forge` | `string` |  |  |
+
+### TaskInfoCacheMount
+
+TaskInfoCacheMount describes a recorded cache mount.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `name` | `string` |  |  |
+| `description` | `string` |  |  |
+| `hostPath` | `string` |  |  |
+| `mountPath` | `string` |  |  |
+| `readOnly` | `boolean` |  |  |
+| `shallow` | `boolean` |  |  |
+
+### TaskInfoMount
+
+TaskInfoMount describes a recorded or observed bind mount.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `hostPath` | `string` |  |  |
+| `mountPath` | `string` |  |  |
+| `readOnly` | `boolean` |  |  |
+
+### TaskInfoRecorded
+
+TaskInfoRecorded holds caic-recorded task launch configuration and metadata.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `state` | `string` |  | yes |
+| `startedAt` | `ISOTimestamp` |  |  |
+| `stateUpdatedAt` | `ISOTimestamp` |  |  |
+| `harness` | `string` |  | yes |
+| `model` | `string` |  |  |
+| `effort` | `string` |  |  |
+| `agentVersion` | `string` |  |  |
+| `sessionID` | `string` |  |  |
+| `baseImage` | `string` |  |  |
+| `containerPlatform` | `string` |  |  |
+| `maxCPUs` | `int` |  |  |
+| `capabilities` | `TaskInfoCapability` |  | yes |
+| `runtime` | `RuntimeInstance` |  | yes |
+| `repos` | `TaskInfoRepo[]` |  |  |
+| `caches` | `TaskInfoCacheMount[]` |  |  |
+| `mounts` | `TaskInfoMount[]` |  |  |
+
+### TaskInfoObservedRuntime
+
+TaskInfoObservedRuntime describes runtime-observed instance details from the runtime adapter.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `runtime` | `string` |  |  |
+| `id` | `string` |  |  |
+| `state` | `string` |  |  |
+| `imageRef` | `string` |  |  |
+| `imageID` | `string` |  |  |
+| `platform` | `string` |  |  |
+| `cpuLimit` | `int` |  |  |
+| `mounts` | `TaskInfoMount[]` |  |  |
+| `caches` | `TaskInfoCacheMount[]` |  |  |
+
+### TaskInfo
+
+TaskInfo is the detailed metadata response for a task.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `id` | `string` |  | yes |
+| `recorded` | `TaskInfoRecorded` |  | yes |
+| `observed` | `TaskInfoObservedRuntime` |  |  |
+| `warnings` | `string[]` |  |  |
 
 ### ImageData
 

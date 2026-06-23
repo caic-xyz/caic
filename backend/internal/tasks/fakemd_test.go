@@ -57,6 +57,10 @@ func (f *fakeMD) Metadata(_ context.Context, id runtime.InstanceID, key runtime.
 	return f.metadata[string(id)+"\x00"+string(key)], nil
 }
 
+func (f *fakeMD) Inspect(context.Context, runtime.InstanceID) (*runtime.InstanceInspect, error) {
+	return &runtime.InstanceInspect{}, nil
+}
+
 func (f *fakeMD) WatchEvents(_ context.Context, _ runtime.EventFilter) (<-chan runtime.Event, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

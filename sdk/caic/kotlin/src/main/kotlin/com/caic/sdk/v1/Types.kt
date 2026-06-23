@@ -1034,6 +1034,91 @@ data class Task(
 @Serializable
 data class BotFixPRReq(val taskId: String)
 
+/** TaskInfoCapability describes recorded runtime capabilities and injected-token presence. */
+@Serializable
+data class TaskInfoCapability(
+    val tailscale: Boolean? = null,
+    val usb: Boolean? = null,
+    val display: Boolean? = null,
+    val sudo: Boolean? = null,
+    val gitHubToken: Boolean? = null,
+)
+
+/** TaskInfoRepo describes a repository mounted into a task runtime. */
+@Serializable
+data class TaskInfoRepo(
+    val name: String,
+    val baseBranch: String? = null,
+    val branch: String? = null,
+    val hostPath: String? = null,
+    val mountedPath: String? = null,
+    @SerialName("remoteURL") val remoteURL: String? = null,
+    val forge: Forge? = null,
+)
+
+/** TaskInfoCacheMount describes a recorded cache mount. */
+@Serializable
+data class TaskInfoCacheMount(
+    val name: String? = null,
+    val description: String? = null,
+    val hostPath: String? = null,
+    val mountPath: String? = null,
+    val readOnly: Boolean? = null,
+    val shallow: Boolean? = null,
+)
+
+/** TaskInfoMount describes a recorded or observed bind mount. */
+@Serializable
+data class TaskInfoMount(
+    val hostPath: String? = null,
+    val mountPath: String? = null,
+    val readOnly: Boolean? = null,
+)
+
+/** TaskInfoRecorded holds caic-recorded task launch configuration and metadata. */
+@Serializable
+data class TaskInfoRecorded(
+    val state: TaskState,
+    val startedAt: Instant? = null,
+    val stateUpdatedAt: Instant? = null,
+    val harness: Harness,
+    val model: String? = null,
+    val effort: String? = null,
+    val agentVersion: String? = null,
+    @SerialName("sessionID") val sessionID: String? = null,
+    val baseImage: String? = null,
+    val containerPlatform: String? = null,
+    @SerialName("maxCPUs") val maxCPUs: Int? = null,
+    val capabilities: TaskInfoCapability,
+    val runtime: RuntimeInstance,
+    val repos: List<TaskInfoRepo>? = null,
+    val caches: List<TaskInfoCacheMount>? = null,
+    val mounts: List<TaskInfoMount>? = null,
+)
+
+/** TaskInfoObservedRuntime describes runtime-observed instance details from the runtime adapter. */
+@Serializable
+data class TaskInfoObservedRuntime(
+    val runtime: String? = null,
+    val id: String? = null,
+    val state: String? = null,
+    val imageRef: String? = null,
+    @SerialName("imageID") val imageID: String? = null,
+    val platform: String? = null,
+    val cpuLimit: Int? = null,
+    val mounts: List<TaskInfoMount>? = null,
+    val caches: List<TaskInfoCacheMount>? = null,
+)
+
+/** TaskInfo is the detailed metadata response for a task. */
+@Serializable
+data class TaskInfo(
+    val id: String,
+    val recorded: TaskInfoRecorded,
+    val observed: TaskInfoObservedRuntime? = null,
+    val warnings: List<String>? = null,
+)
+
 /** ImageData carries a single base64-encoded image. */
 @Serializable
 data class ImageData(

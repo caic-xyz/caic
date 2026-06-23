@@ -873,6 +873,84 @@ export interface BotFixPRReq {
   taskId: string;
 }
 
+/** TaskInfoCapability describes recorded runtime capabilities and injected-token presence. */
+export interface TaskInfoCapability {
+  tailscale?: boolean;
+  usb?: boolean;
+  display?: boolean;
+  sudo?: boolean;
+  gitHubToken?: boolean;
+}
+
+/** TaskInfoRepo describes a repository mounted into a task runtime. */
+export interface TaskInfoRepo {
+  name: string;
+  baseBranch?: string;
+  branch?: string;
+  hostPath?: string;
+  mountedPath?: string;
+  remoteURL?: string;
+  forge?: Forge;
+}
+
+/** TaskInfoCacheMount describes a recorded cache mount. */
+export interface TaskInfoCacheMount {
+  name?: string;
+  description?: string;
+  hostPath?: string;
+  mountPath?: string;
+  readOnly?: boolean;
+  shallow?: boolean;
+}
+
+/** TaskInfoMount describes a recorded or observed bind mount. */
+export interface TaskInfoMount {
+  hostPath?: string;
+  mountPath?: string;
+  readOnly?: boolean;
+}
+
+/** TaskInfoRecorded holds caic-recorded task launch configuration and metadata. */
+export interface TaskInfoRecorded {
+  state: TaskState;
+  startedAt?: ISOTimestamp;
+  stateUpdatedAt?: ISOTimestamp;
+  harness: Harness;
+  model?: string;
+  effort?: string;
+  agentVersion?: string;
+  sessionID?: string;
+  baseImage?: string;
+  containerPlatform?: string;
+  maxCPUs?: number /* int */;
+  capabilities: TaskInfoCapability;
+  runtime: RuntimeInstance;
+  repos?: TaskInfoRepo[];
+  caches?: TaskInfoCacheMount[];
+  mounts?: TaskInfoMount[];
+}
+
+/** TaskInfoObservedRuntime describes runtime-observed instance details from the runtime adapter. */
+export interface TaskInfoObservedRuntime {
+  runtime?: string;
+  id?: string;
+  state?: string;
+  imageRef?: string;
+  imageID?: string;
+  platform?: string;
+  cpuLimit?: number /* int */;
+  mounts?: TaskInfoMount[];
+  caches?: TaskInfoCacheMount[];
+}
+
+/** TaskInfo is the detailed metadata response for a task. */
+export interface TaskInfo {
+  id: string;
+  recorded: TaskInfoRecorded;
+  observed?: TaskInfoObservedRuntime;
+  warnings?: string[];
+}
+
 /** ImageData carries a single base64-encoded image. */
 export interface ImageData {
   /** e.g. "image/png", "image/jpeg" */

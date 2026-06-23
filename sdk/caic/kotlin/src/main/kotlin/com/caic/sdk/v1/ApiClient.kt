@@ -125,6 +125,8 @@ class ApiClient(
     suspend fun listTasks(): List<Task> = request("GET", "/api/caic/v1/tasks")
     /** Returns a single task by id (404 if it does not exist). */
     suspend fun getTask(id: String): Task = request("GET", "/api/caic/v1/tasks/$id")
+    /** Returns recorded and observed runtime metadata for a task. */
+    suspend fun getTaskInfo(id: String): TaskInfo = request("GET", "/api/caic/v1/tasks/$id/info")
     /** Creates and starts a new coding agent task. */
     suspend fun createTask(req: CreateTaskReq): Task = request("POST", "/api/caic/v1/tasks", json.encodeToString(req))
     /** Sends user input to a running task. */
