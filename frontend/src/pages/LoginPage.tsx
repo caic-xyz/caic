@@ -3,16 +3,19 @@ import { For } from "solid-js";
 import { useAuth } from "../AuthContext";
 import GitHubIcon from "../components/github.svg?solid";
 import GitLabIcon from "../components/gitlab.svg?solid";
+import GoogleIcon from "../components/google.svg?solid";
 
 function providerIcon(provider: string) {
   if (provider === "github") return <GitHubIcon width="1.4em" height="1.4em" />;
   if (provider === "gitlab") return <GitLabIcon width="1.4em" height="1.4em" />;
+  if (provider === "google") return <GoogleIcon width="1.4em" height="1.4em" />;
   return null;
 }
 
 function providerLabel(provider: string): string {
   if (provider === "github") return "Sign in with GitHub";
   if (provider === "gitlab") return "Sign in with GitLab";
+  if (provider === "google") return "Sign in with Google";
   return `Sign in with ${provider}`;
 }
 

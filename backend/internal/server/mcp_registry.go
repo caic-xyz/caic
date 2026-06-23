@@ -18,7 +18,6 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
@@ -1076,10 +1075,10 @@ func userHasForgeAuthority(ctx context.Context) bool {
 	if !ok {
 		return false
 	}
-	if u.Provider == forge.KindGitHub {
+	if u.Provider == auth.ProviderGitHub {
 		return true
 	}
-	return u.Provider == forge.KindGitLab && u.AccessToken != ""
+	return u.Provider == auth.ProviderGitLab && u.AccessToken != ""
 }
 
 func mcpScopeChallenge(scope string) string {

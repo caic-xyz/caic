@@ -33,7 +33,7 @@ func (w *adoptedTaskWiring) WireCIMonitoring(ctx context.Context, at *tasks.Adop
 	}
 	f := w.forge.ForgeForInfo(ctx, &ri)
 	if f == nil && w.authStore != nil {
-		if u, ok := w.authStore.FindByProvider(forge.Kind(at.ForgeKind)); ok {
+		if u, ok := w.authStore.FindByProvider(auth.Provider(at.ForgeKind)); ok {
 			f = w.forge.ForgeFor(auth.NewContext(ctx, &u), forge.Kind(at.ForgeKind))
 		}
 	}
@@ -61,7 +61,7 @@ func (w *adoptedTaskWiring) LookupExternalPRForTask(at *tasks.AdoptedTask) {
 	}
 	f := w.forge.ForgeForInfo(w.ctx, &ri)
 	if f == nil && w.authStore != nil {
-		if u, ok := w.authStore.FindByProvider(forge.Kind(at.ForgeKind)); ok {
+		if u, ok := w.authStore.FindByProvider(auth.Provider(at.ForgeKind)); ok {
 			f = w.forge.ForgeFor(auth.NewContext(w.ctx, &u), forge.Kind(at.ForgeKind))
 		}
 	}

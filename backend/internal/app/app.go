@@ -149,12 +149,14 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 
 	slog.InfoContext(ctx, "github", "pat", auth.MaskedToken(cfg.GitHub.Token), "oauth", auth.MaskedToken(cfg.GitHub.OAuthClientID))
 	slog.InfoContext(ctx, "gitlab", "pat", auth.MaskedToken(cfg.GitLab.Token), "oauth", auth.MaskedToken(cfg.GitLab.OAuthClientID))
+	slog.InfoContext(ctx, "google", "oauth", auth.MaskedToken(cfg.Google.OAuthClientID))
 
 	var authStore *auth.Store
 	var sessionSecret []byte
 	var githubOAuth *oauthclient.ProviderConfig
 	var gitlabOAuth *oauthclient.ProviderConfig
-	oauthConfigured := cfg.GitHub.OAuthClientID != "" || cfg.GitLab.OAuthClientID != ""
+	var googleOAuth *oauthclient.ProviderConfig
+	oauthConfigured := cfg.GitHub.OAuthClientID != "" || cfg.GitLab.OAuthClientID != "" || cfg.Google.OAuthClientID != ""
 	if oauthConfigured {
 		secret, err := hex.DecodeString(settings.SessionSecret)
 		if err != nil {
@@ -187,6 +189,18 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 						return ""
 					}
 					return u + "/api/caic/v1/auth/gitlab/callback"
+				},
+			)
+		}
+		if cfg.Google.OAuthClientID != "" && cfg.Google.OAuthClientSecret != "" {
+			googleOAuth = oauthclient.NewGoogleConfig(
+				cfg.Google.OAuthClientID, cfg.Google.OAuthClientSecret,
+				func(r *http.Request) string {
+					u := hostState.ExternalURL(r)
+					if u == "" {
+						return ""
+					}
+					return u + "/api/caic/v1/auth/google/callback"
 				},
 			)
 		}
@@ -294,6 +308,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		AuditLogPath:               filepath.Join(cfg.Dirs.CacheDir, "oauth_audit.jsonl"),
 		GitHubOAuth:                githubOAuth,
 		GitLabOAuth:                gitlabOAuth,
+		GoogleOAuth:                googleOAuth,
 		HostState:                  hostState,
 		UsageFetchers:              usageFetchers(cfg, ctx),
 		VoiceBridge:                voiceBridge,
@@ -311,6 +326,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		CacheSizes:                 cacheSizes,
 		GitHubAllowedUsers:         cfg.GitHub.OAuthAllowedUsers,
 		GitLabAllowedUsers:         cfg.GitLab.OAuthAllowedUsers,
+		GoogleAllowedUsers:         cfg.Google.OAuthAllowedUsers,
 		GitHubWebhookSecret:        cfg.GitHub.WebhookSecret,
 		GitLabWebhookSecret:        cfg.GitLab.WebhookSecret,
 		GitHubAppAllowedOwners:     cfg.GitHub.AppAllowedOwners,

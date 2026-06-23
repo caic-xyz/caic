@@ -20,7 +20,6 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -544,7 +543,7 @@ func newAuthEnabledRouter(t *testing.T) (*Router, auth.User) {
 		t.Fatalf("open auth store: %v", err)
 	}
 	user, err := store.UpsertUser(&auth.User{
-		Provider:    forge.KindGitHub,
+		Provider:    auth.ProviderGitHub,
 		ProviderID:  "1",
 		Username:    "alice",
 		AccessToken: "forge-token",

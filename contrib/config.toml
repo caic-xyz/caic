@@ -184,6 +184,17 @@
 # GitLab users allowed to login. Highly recommended.
 # allowed_users = ["alice", "bob"]
 
+# ── Google ───────────────────────────────────────────────────────────────────
+
+# Google Sign-In is identity-only: it authenticates users for dashboard access
+# but provides no forge integration. Configure github/gitlab above for repo,
+# CI, and PR operations. Requires server.external_url (https).
+[google.oauth]
+#client_id = ""
+#client_secret = ""
+# Google account emails allowed to login. Highly recommended.
+# allowed_users = ["alice@example.com", "bob@example.com"]
+
 # ── Debug ────────────────────────────────────────────────────────────────────
 
 [debug]

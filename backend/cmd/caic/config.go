@@ -28,6 +28,7 @@ type tomlConfig struct {
 	Harness      map[string]tomlHarness `toml:"harness"`
 	GitHub       tomlGitHub             `toml:"github"`
 	GitLab       tomlGitLab             `toml:"gitlab"`
+	Google       tomlGoogle             `toml:"google"`
 	VoiceGateway tomlVoiceGateway       `toml:"voice-gateway"`
 	Debug        tomlDebug              `toml:"debug"`
 }
@@ -86,6 +87,10 @@ type tomlGitLab struct {
 
 type tomlPAT struct {
 	Token string `toml:"token"`
+}
+
+type tomlGoogle struct {
+	OAuth tomlOAuth `toml:"oauth"`
 }
 
 type tomlOAuth struct {
@@ -245,6 +250,11 @@ func tomlToServerConfig(ctx context.Context, tc *tomlConfig, cfgDir string) (cfg
 			OAuthAllowedUsers: tc.GitLab.OAuth.AllowedUsers,
 			URL:               tc.GitLab.URL,
 			WebhookSecret:     []byte(tc.GitLab.WebhookSecret),
+		},
+		Google: server.GoogleConfig{
+			OAuthClientID:     tc.Google.OAuth.ClientID,
+			OAuthClientSecret: tc.Google.OAuth.ClientSecret,
+			OAuthAllowedUsers: tc.Google.OAuth.AllowedUsers,
 		},
 		Auth: server.AuthConfig{
 			ExternalURL: tc.Server.ExternalURL,

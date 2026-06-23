@@ -24,6 +24,7 @@ type Config struct {
 	LLM     LLMConfig
 	GitHub  GitHubConfig
 	GitLab  GitLabConfig
+	Google  GoogleConfig
 	Auth    AuthConfig
 	Voice   VoiceConfig
 	Debug   DebugConfig
@@ -47,6 +48,9 @@ func (c *Config) Validate() error {
 	if err := c.GitLab.Validate(); err != nil {
 		return err
 	}
+	if err := c.Google.Validate(); err != nil {
+		return err
+	}
 	if err := c.Auth.Validate(); err != nil {
 		return err
 	}
@@ -67,7 +71,7 @@ func (c *Config) Validate() error {
 }
 
 func (c *Config) oauthConfigured() bool {
-	return c.GitHub.OAuthClientID != "" || c.GitLab.OAuthClientID != ""
+	return c.GitHub.OAuthClientID != "" || c.GitLab.OAuthClientID != "" || c.Google.OAuthClientID != ""
 }
 
 // DirsConfig contains filesystem paths for persistent server state.
@@ -154,6 +158,22 @@ func (c *GitLabConfig) Validate() error {
 	if c.Token != "" && c.OAuthClientID != "" {
 		return errors.New("gitlab.token and gitlab.oauth.client_id are mutually exclusive: " +
 			"remove gitlab.token when using GitLab OAuth login")
+	}
+	return nil
+}
+
+// GoogleConfig configures Google Sign-In, an identity-only login provider with
+// no forge backing.
+type GoogleConfig struct {
+	OAuthClientID     string   // OAuth client ID
+	OAuthClientSecret string   // OAuth client secret
+	OAuthAllowedUsers []string // if set, restricts login to these emails; empty allows any
+}
+
+// Validate returns an error if the Google configuration is invalid.
+func (c *GoogleConfig) Validate() error {
+	if (c.OAuthClientID == "") != (c.OAuthClientSecret == "") {
+		return errors.New("google.oauth.client_id and google.oauth.client_secret must both be set or both be unset")
 	}
 	return nil
 }

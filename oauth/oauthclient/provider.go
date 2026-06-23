@@ -1,4 +1,4 @@
-// Provider (GitHub, GitLab) configurations with userinfo fetching.
+// Provider (GitHub, GitLab, Google) configurations with userinfo fetching.
 
 package oauthclient
 
@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -35,7 +36,11 @@ type ProviderConfig struct {
 	TokenURL        string
 	UserInfoURL     string
 	Scopes          []string
-	ParseUser       func(data []byte) (providerID, username, avatarURL string, err error)
+	// AuthParams are extra authorization-URL parameters merged into every
+	// AuthURL call (e.g. access_type=offline for Google offline access). Nil
+	// for providers that need none.
+	AuthParams url.Values
+	ParseUser  func(data []byte) (providerID, username, avatarURL string, err error)
 }
 
 // NewGitHubConfig returns a ProviderConfig for github.com
@@ -74,6 +79,28 @@ func NewGitLabConfig(clientID, clientSecret, gitlabURL string, redirectURI Redir
 	}
 }
 
+// NewGoogleConfig returns a ProviderConfig for Google Sign-In (OpenID Connect)
+// with scopes ["openid", "email", "profile"].
+//
+// Google issues a refresh token only when the authorization request carries
+// access_type=offline; prompt=consent forces re-issue on repeat logins. These
+// are set as AuthParams so refresh works through the standard token lifecycle.
+//
+//nolint:gosec // ClientSecret is a function parameter, not a hardcoded credential
+func NewGoogleConfig(clientID, clientSecret string, redirectURI RedirectURIFunc) *ProviderConfig {
+	return &ProviderConfig{
+		ClientID:        clientID,
+		ClientSecret:    clientSecret,
+		RedirectURIFunc: redirectURI,
+		AuthEndpoint:    "https://accounts.google.com/o/oauth2/v2/auth",
+		TokenURL:        "https://oauth2.googleapis.com/token",
+		UserInfoURL:     "https://openidconnect.googleapis.com/v1/userinfo",
+		Scopes:          []string{"openid", "email", "profile"},
+		AuthParams:      url.Values{"access_type": {"offline"}, "prompt": {"consent"}},
+		ParseUser:       ParseGoogleUser,
+	}
+}
+
 // RedirectURI returns the redirect URI for a request.
 func (c *ProviderConfig) RedirectURI(r *http.Request) string { //nolint:gocritic
 	return c.RedirectURIFunc(r)
@@ -81,7 +108,7 @@ func (c *ProviderConfig) RedirectURI(r *http.Request) string { //nolint:gocritic
 
 // AuthURL returns the provider's authorization URL with the state param.
 func (c *ProviderConfig) AuthURL(r *http.Request, state string) string { //nolint:gocritic
-	return AuthorizationURL(c.AuthEndpoint, c.ClientID, c.RedirectURI(r), c.Scopes, state, "")
+	return AuthorizationURL(c.AuthEndpoint, c.ClientID, c.RedirectURI(r), c.Scopes, state, "", c.AuthParams)
 }
 
 // OAuthClientConfig returns the generic OAuth client settings.
@@ -154,4 +181,30 @@ func ParseGitLabUser(data []byte) (providerID, username, avatarURL string, err e
 		return "", "", "", errors.New("empty userinfo from GitLab")
 	}
 	return strconv.FormatInt(u.ID, 10), u.Username, u.AvatarURL, nil
+}
+
+// googleUser is the OpenID Connect userinfo response from Google.
+type googleUser struct {
+	Sub           string `json:"sub"`            // stable unique account identifier
+	Email         string `json:"email"`          // used as the username
+	EmailVerified bool   `json:"email_verified"` // must be true to trust the email
+	Picture       string `json:"picture"`
+}
+
+// ParseGoogleUser parses the Google OpenID Connect userinfo response.
+//
+// It uses the immutable "sub" claim as the provider ID and the email as the
+// username. An unverified email is rejected, since the allowlist matches on it.
+func ParseGoogleUser(data []byte) (providerID, username, avatarURL string, err error) {
+	var u googleUser
+	if err := json.Unmarshal(data, &u); err != nil {
+		return "", "", "", fmt.Errorf("parse userinfo: %w", err)
+	}
+	if u.Sub == "" || u.Email == "" {
+		return "", "", "", errors.New("empty userinfo from Google")
+	}
+	if !u.EmailVerified {
+		return "", "", "", fmt.Errorf("google email %q is not verified", u.Email)
+	}
+	return u.Sub, u.Email, u.Picture, nil
 }

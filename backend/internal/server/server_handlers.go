@@ -50,6 +50,7 @@ type serverHandlers struct {
 	authStore          *auth.Store
 	githubOAuth        *oauthclient.ProviderConfig
 	gitlabOAuth        *oauthclient.ProviderConfig
+	googleOAuth        *oauthclient.ProviderConfig
 	voiceGateway       v1.VoiceGatewayMetadata
 }
 
@@ -84,6 +85,9 @@ func (h *serverHandlers) authProviders() []string {
 	}
 	if h.gitlabOAuth != nil {
 		ps = append(ps, "gitlab")
+	}
+	if h.googleOAuth != nil {
+		ps = append(ps, "google")
 	}
 	return ps
 }

@@ -346,6 +346,7 @@ type Dependencies struct {
 	AuditLogPath               string
 	GitHubOAuth                *oauthclient.ProviderConfig
 	GitLabOAuth                *oauthclient.ProviderConfig
+	GoogleOAuth                *oauthclient.ProviderConfig
 	HostState                  *auth.HostState
 	UsageFetchers              []usage.ProviderFetcher
 	VoiceBridge                *voicertc.Bridge
@@ -367,6 +368,7 @@ type Dependencies struct {
 
 	GitHubAllowedUsers     []string
 	GitLabAllowedUsers     []string
+	GoogleAllowedUsers     []string
 	GitHubWebhookSecret    []byte
 	GitLabWebhookSecret    []byte
 	GitHubAppAllowedOwners []string
@@ -412,8 +414,10 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 			hostState:          d.HostState,
 			githubOAuth:        d.GitHubOAuth,
 			gitlabOAuth:        d.GitLabOAuth,
+			googleOAuth:        d.GoogleOAuth,
 			githubAllowedUsers: d.GitHubAllowedUsers,
 			gitlabAllowedUsers: d.GitLabAllowedUsers,
+			googleAllowedUsers: d.GoogleAllowedUsers,
 		},
 		ciHandlers: &ciHandlers{
 			taskMgr:    d.TaskManager,
@@ -440,6 +444,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 			authStore:          d.AuthStore,
 			githubOAuth:        d.GitHubOAuth,
 			gitlabOAuth:        d.GitLabOAuth,
+			googleOAuth:        d.GoogleOAuth,
 			voiceGateway:       voiceMetadata,
 		},
 		taskHandlers: &taskHandlers{

@@ -1,6 +1,6 @@
 // JWT session management: issue and validate HS256 tokens using stdlib only.
 
-// Package auth manages caic user sessions and forge OAuth login identity.
+// Package auth manages caic user sessions and OAuth login identity.
 package auth
 
 import (
@@ -12,8 +12,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/caic-xyz/caic/backend/internal/forge"
 )
 
 // StateCookieName is the name of the CSRF state cookie.
@@ -75,7 +73,7 @@ func validateToken(token string, secret []byte) (*claims, error) {
 	}
 	return &claims{
 		UserID:   payload.UserID,
-		Provider: forge.Kind(payload.Provider),
+		Provider: Provider(payload.Provider),
 		Username: payload.Username,
 		IssuedAt: time.Unix(payload.IssuedAt, 0),
 		Expiry:   time.Unix(payload.Expiry, 0),
@@ -90,13 +88,13 @@ func hmacSHA256(secret []byte, data string) string {
 
 // User represents an authenticated caic user.
 type User struct {
-	ID           string     // "usr_<ksid>"
-	Provider     forge.Kind // "github" | "gitlab"
-	ProviderID   string     // provider's numeric user ID as string
+	ID           string   // "usr_<ksid>"
+	Provider     Provider // "github" | "gitlab" | "google"
+	ProviderID   string   // provider's stable user ID as string
 	Username     string
 	AvatarURL    string
-	AccessToken  string    // OAuth access token for forge API calls
-	RefreshToken string    // empty for GitHub; may be set for GitLab
+	AccessToken  string    // OAuth access token for provider/forge API calls
+	RefreshToken string    // empty for GitHub; set for GitLab and Google
 	TokenExpiry  time.Time // zero value means no expiry
 	CreatedAt    time.Time
 	LastSeenAt   time.Time
@@ -105,7 +103,7 @@ type User struct {
 // claims are the fields embedded in the JWT payload.
 type claims struct {
 	UserID   string
-	Provider forge.Kind
+	Provider Provider
 	Username string
 	IssuedAt time.Time
 	Expiry   time.Time

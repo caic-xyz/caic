@@ -118,12 +118,14 @@ func (m *Manager) ForgeForInfo(ctx context.Context, info *repos.Info) forge.Forg
 // Config.Validate ensures these two modes are never mixed.
 // Returns nil if no token is available.
 func (m *Manager) ForgeFor(ctx context.Context, kind forge.Kind) forge.Forge {
-	if u, ok := auth.UserFromContext(ctx); ok && u.Provider == kind && u.AccessToken != "" {
-		switch kind {
-		case forge.KindGitHub:
-			return github.NewClient(u.AccessToken, m.githubOAuthThrottle(u.ID))
-		case forge.KindGitLab:
-			return gitlab.NewClient(u.AccessToken, m.gitlabOAuthThrottle(u.ID))
+	if u, ok := auth.UserFromContext(ctx); ok && u.AccessToken != "" {
+		if fk, isForge := u.Provider.Forge(); isForge && fk == kind {
+			switch kind {
+			case forge.KindGitHub:
+				return github.NewClient(u.AccessToken, m.githubOAuthThrottle(u.ID))
+			case forge.KindGitLab:
+				return gitlab.NewClient(u.AccessToken, m.gitlabOAuthThrottle(u.ID))
+			}
 		}
 	}
 	switch kind {

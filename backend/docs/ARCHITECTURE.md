@@ -358,7 +358,6 @@ graph TD
   pkg_internal_cmd_gen_api_sdk --> pkg_internal_mcp
   pkg_internal_cmd_gen_api_sdk --> pkg_internal_server_api_v1
   pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_auth
-  pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_forge
   pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_forge_forgemanager
   pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_preferences
   pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_repos
@@ -472,7 +471,7 @@ graph TD
 | `internal/bot` | `internal/forge`, `internal/forge/forgecache` |
 | `internal/ci` | `internal/agent`, `internal/bot`, `internal/forge`, `internal/forge/forgecache`, `internal/preferences`, `internal/task` |
 | `internal/cmd/gen-api-sdk` | `internal/mcp`, `internal/server/api/v1` |
-| `internal/cmd/mcp-auth-smoke` | `internal/auth`, `internal/forge`, `internal/forge/forgemanager`, `internal/preferences`, `internal/repos`, `internal/runtime/mdruntime`, `internal/server`, `internal/server/ipgeo`, `internal/tasks` |
+| `internal/cmd/mcp-auth-smoke` | `internal/auth`, `internal/forge/forgemanager`, `internal/preferences`, `internal/repos`, `internal/runtime/mdruntime`, `internal/server`, `internal/server/ipgeo`, `internal/tasks` |
 | `internal/cmd/record-trace` | `internal/agent`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/agent/opencode`, `internal/agent/pi`, `internal/agent/relay`, `internal/harness` |
 | `internal/eventreplay` | `internal/agent`, `internal/harness`, `internal/server/api/v1`, `internal/server/api/v1conv` |
 | `internal/forge` | None |

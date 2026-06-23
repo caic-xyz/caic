@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/oauth"
@@ -34,9 +33,15 @@ type authHandlers struct {
 
 	githubOAuth        *oauthclient.ProviderConfig
 	gitlabOAuth        *oauthclient.ProviderConfig
+	googleOAuth        *oauthclient.ProviderConfig
 	githubAllowedUsers []string
 	gitlabAllowedUsers []string
+	googleAllowedUsers []string
 }
+
+// loginProviders is the fixed dispatch order for login providers: the default
+// provider is the first one configured.
+var loginProviders = []string{"github", "gitlab", "google"}
 
 // LoginStartURL returns the login-start path for the first configured forge
 // provider, with next set to resume r after login. Empty when no provider is
@@ -50,21 +55,14 @@ func (h *authHandlers) LoginStartURL(r *http.Request) string {
 	return "/auth/" + provider + "/start?" + values.Encode()
 }
 
-// ProviderLabel returns the human-readable name for a forge provider, falling
+// ProviderLabel returns the human-readable name for a login provider, falling
 // back to the raw provider name when it is not configured.
 func (h *authHandlers) ProviderLabel(provider string) string {
-	switch provider {
-	case "github":
-		if h.githubOAuth != nil {
-			return "GitHub"
-		}
-	case "gitlab":
-		if h.gitlabOAuth != nil {
-			return "GitLab"
-		}
-	}
 	if provider == "" {
 		return "unknown provider"
+	}
+	if h.oauthFor(provider) != nil {
+		return auth.Provider(provider).Label()
 	}
 	return provider
 }
@@ -74,7 +72,7 @@ func (h *authHandlers) ProviderLabel(provider string) string {
 // to resume a same-origin web flow after callback.
 func (h *authHandlers) handleStart(provider string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		cfg := h.providerConfig(provider)
+		cfg := h.oauthFor(provider)
 		if cfg == nil || cfg.RedirectURI(r) == "" {
 			writeError(w, api.NotFound("provider"))
 			return
@@ -126,7 +124,7 @@ func (h *authHandlers) handleStart(provider string) http.HandlerFunc {
 // fetches user info, upserts the user, issues a JWT, and redirects.
 func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		cfg := h.providerConfig(provider)
+		cfg := h.oauthFor(provider)
 		if cfg == nil || cfg.RedirectURI(r) == "" {
 			writeError(w, api.NotFound("provider"))
 			return
@@ -189,19 +187,8 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 			return
 		}
 
-		// Fetch user identity (provider-specific dispatch).
-		var providerID, username, avatarURL string
-		switch provider {
-		case "github":
-			githubCfg := h.githubOAuth
-			providerID, username, avatarURL, err = githubCfg.FetchUser(r.Context(), token.AccessToken)
-		case "gitlab":
-			gitlabCfg := h.gitlabOAuth
-			providerID, username, avatarURL, err = gitlabCfg.FetchUser(r.Context(), token.AccessToken)
-		default:
-			writeError(w, api.NotFound("provider"))
-			return
-		}
+		// Fetch user identity from the provider's userinfo endpoint.
+		providerID, username, avatarURL, err := cfg.FetchUser(r.Context(), token.AccessToken)
 		if err != nil {
 			slog.WarnContext(r.Context(), "oauth userinfo", "provider", provider, "err", err)
 			writeError(w, api.InternalError("userinfo failed"))
@@ -219,7 +206,7 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 
 		// Upsert user in store.
 		u, err := h.store.UpsertUser(&auth.User{
-			Provider:     forge.Kind(provider),
+			Provider:     auth.Provider(provider),
 			ProviderID:   providerID,
 			Username:     username,
 			AvatarURL:    avatarURL,
@@ -284,15 +271,7 @@ func (h *authHandlers) handleGetMe(w http.ResponseWriter, r *http.Request) {
 // for concurrent use.
 func (h *authHandlers) refreshTokenRefresher() auth.TokenRefresher {
 	return func(ctx context.Context, u *auth.User) *auth.User {
-		var cfg *oauthclient.ProviderConfig
-		switch u.Provider {
-		case forge.KindGitHub:
-			cfg = h.githubOAuth
-		case forge.KindGitLab:
-			cfg = h.gitlabOAuth
-		default:
-			return nil
-		}
+		cfg := h.oauthFor(string(u.Provider))
 		if cfg == nil {
 			return nil
 		}
@@ -337,36 +316,35 @@ func (h *authHandlers) handleLogout(w http.ResponseWriter, r *http.Request) {
 
 // allowedUsersFor returns the allowlist for the named provider, or nil.
 func (h *authHandlers) allowedUsersFor(provider string) []string {
-	switch provider {
-	case "github":
+	switch auth.Provider(provider) {
+	case auth.ProviderGitHub:
 		return h.githubAllowedUsers
-	case "gitlab":
+	case auth.ProviderGitLab:
 		return h.gitlabAllowedUsers
+	case auth.ProviderGoogle:
+		return h.googleAllowedUsers
 	}
 	return nil
 }
 
-// providerConfig returns the forge provider config for the named provider, or nil.
-func (h *authHandlers) providerConfig(provider string) oauthclient.Provider {
-	switch provider {
-	case "github":
-		if h.githubOAuth == nil {
-			return nil
-		}
+// oauthFor returns the OAuth client config for the named login provider, or nil
+// when the provider is unknown or not configured.
+func (h *authHandlers) oauthFor(provider string) *oauthclient.ProviderConfig {
+	switch auth.Provider(provider) {
+	case auth.ProviderGitHub:
 		return h.githubOAuth
-	case "gitlab":
-		if h.gitlabOAuth == nil {
-			return nil
-		}
+	case auth.ProviderGitLab:
 		return h.gitlabOAuth
+	case auth.ProviderGoogle:
+		return h.googleOAuth
 	}
 	return nil
 }
 
-// defaultProvider returns the first configured forge login provider, or empty.
+// defaultProvider returns the first configured login provider, or empty.
 func (h *authHandlers) defaultProvider(r *http.Request) string {
-	for _, provider := range []string{"github", "gitlab"} {
-		if cfg := h.providerConfig(provider); cfg != nil && cfg.RedirectURI(r) != "" {
+	for _, provider := range loginProviders {
+		if cfg := h.oauthFor(provider); cfg != nil && cfg.RedirectURI(r) != "" {
 			return provider
 		}
 	}
@@ -428,6 +406,8 @@ func (h *authHandlers) routes() http.Handler {
 	m.HandleFunc("GET /auth/github/callback", h.handleCallback("github"))
 	m.HandleFunc("GET /auth/gitlab/start", h.handleStart("gitlab"))
 	m.HandleFunc("GET /auth/gitlab/callback", h.handleCallback("gitlab"))
+	m.HandleFunc("GET /auth/google/start", h.handleStart("google"))
+	m.HandleFunc("GET /auth/google/callback", h.handleCallback("google"))
 	m.HandleFunc("GET /auth/me", h.handleGetMe)
 	m.HandleFunc("POST /auth/logout", h.handleLogout)
 	return m

@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/forge"
 )
 
 func TestCaicToolRegistryAuthorizeTool(t *testing.T) {
@@ -21,7 +20,7 @@ func TestCaicToolRegistryAuthorizeTool(t *testing.T) {
 			user *auth.User
 		}{
 			{name: "no user"},
-			{name: "GitLab without token", user: &auth.User{Provider: forge.KindGitLab, Username: "alice"}},
+			{name: "GitLab without token", user: &auth.User{Provider: auth.ProviderGitLab, Username: "alice"}},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
@@ -57,7 +56,7 @@ func TestCaicToolRegistryAuthorizeTool(t *testing.T) {
 				Scopes: []string{mcpScopeReposWrite},
 				Remote: true,
 			})
-			ctx = auth.NewContext(ctx, &auth.User{Provider: forge.KindGitHub, Username: "alice"})
+			ctx = auth.NewContext(ctx, &auth.User{Provider: auth.ProviderGitHub, Username: "alice"})
 
 			reason, ok := c.authorizeTool(ctx, name)
 			if !ok {
@@ -78,7 +77,7 @@ func TestCaicToolRegistryAuthorizeTool(t *testing.T) {
 				Scopes: []string{mcpScopeReposWrite},
 				Remote: true,
 			})
-			ctx = auth.NewContext(ctx, &auth.User{Provider: forge.KindGitLab, Username: "alice", AccessToken: "forge-token"})
+			ctx = auth.NewContext(ctx, &auth.User{Provider: auth.ProviderGitLab, Username: "alice", AccessToken: "forge-token"})
 
 			reason, ok := c.authorizeTool(ctx, name)
 			if !ok {

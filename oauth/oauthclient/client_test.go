@@ -47,7 +47,7 @@ func TestAuthorizationURL(t *testing.T) {
 
 	t.Run("no pkce", func(t *testing.T) {
 		t.Parallel()
-		got := AuthorizationURL(endpoint, "client-1", "https://app/cb", []string{"a", "b"}, "state-1", "")
+		got := AuthorizationURL(endpoint, "client-1", "https://app/cb", []string{"a", "b"}, "state-1", "", nil)
 		u, err := url.Parse(got)
 		if err != nil {
 			t.Fatalf("parse url: %v", err)
@@ -63,7 +63,7 @@ func TestAuthorizationURL(t *testing.T) {
 
 	t.Run("with pkce", func(t *testing.T) {
 		t.Parallel()
-		got := AuthorizationURL(endpoint, "client-1", "https://app/cb", []string{"a"}, "state-1", "chal-xyz")
+		got := AuthorizationURL(endpoint, "client-1", "https://app/cb", []string{"a"}, "state-1", "chal-xyz", nil)
 		u, err := url.Parse(got)
 		if err != nil {
 			t.Fatalf("parse url: %v", err)
@@ -74,6 +74,26 @@ func TestAuthorizationURL(t *testing.T) {
 		}
 		if q.Get("code_challenge_method") != "S256" {
 			t.Fatalf("code_challenge_method = %q, want S256", q.Get("code_challenge_method"))
+		}
+	})
+
+	t.Run("extra params", func(t *testing.T) {
+		t.Parallel()
+		extra := url.Values{"access_type": {"offline"}, "prompt": {"consent"}}
+		got := AuthorizationURL(endpoint, "client-1", "https://app/cb", []string{"a"}, "state-1", "", extra)
+		u, err := url.Parse(got)
+		if err != nil {
+			t.Fatalf("parse url: %v", err)
+		}
+		q := u.Query()
+		if q.Get("access_type") != "offline" {
+			t.Fatalf("access_type = %q, want offline", q.Get("access_type"))
+		}
+		if q.Get("prompt") != "consent" {
+			t.Fatalf("prompt = %q, want consent", q.Get("prompt"))
+		}
+		if q.Get("client_id") != "client-1" {
+			t.Fatalf("client_id = %q, want client-1", q.Get("client_id"))
 		}
 	})
 }

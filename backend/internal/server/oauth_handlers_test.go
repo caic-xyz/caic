@@ -20,7 +20,6 @@ import (
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
@@ -139,7 +138,7 @@ func TestOAuthServer(t *testing.T) {
 				t.Fatalf("grant timestamps/status = %+v", grant)
 			}
 
-			bob, err := s.authStore.UpsertUser(&auth.User{Provider: forge.KindGitHub, ProviderID: "2", Username: "bob", AccessToken: "forge-token"})
+			bob, err := s.authStore.UpsertUser(&auth.User{Provider: auth.ProviderGitHub, ProviderID: "2", Username: "bob", AccessToken: "forge-token"})
 			if err != nil {
 				t.Fatalf("upsert bob: %v", err)
 			}
@@ -169,7 +168,7 @@ func TestOAuthServer(t *testing.T) {
 			if firstGrantID == "" {
 				t.Fatalf("first grant missing: %+v", grants.Grants)
 			}
-			bob, err := s.authStore.UpsertUser(&auth.User{Provider: forge.KindGitHub, ProviderID: "2", Username: "bob", AccessToken: "forge-token"})
+			bob, err := s.authStore.UpsertUser(&auth.User{Provider: auth.ProviderGitHub, ProviderID: "2", Username: "bob", AccessToken: "forge-token"})
 			if err != nil {
 				t.Fatalf("upsert bob: %v", err)
 			}
@@ -396,7 +395,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 	if err != nil {
 		t.Fatalf("open auth store: %v", err)
 	}
-	user, err := store.UpsertUser(&auth.User{Provider: forge.KindGitHub, ProviderID: "1", Username: "alice", AccessToken: "forge-token"})
+	user, err := store.UpsertUser(&auth.User{Provider: auth.ProviderGitHub, ProviderID: "1", Username: "alice", AccessToken: "forge-token"})
 	if err != nil {
 		t.Fatalf("upsert user: %v", err)
 	}

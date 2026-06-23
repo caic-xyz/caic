@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -55,8 +56,11 @@ func NewPKCEChallenge() (PKCEChallenge, error) {
 // AuthorizationURL returns the provider authorization URL with the state param.
 //
 // When codeChallenge is non-empty, S256 PKCE parameters are added; when empty,
-// the emitted URL is byte-for-byte identical to a flow without PKCE.
-func AuthorizationURL(authEndpoint, clientID, redirectURI string, scopes []string, state, codeChallenge string) string {
+// the emitted URL omits them. The extra parameters (e.g. access_type=offline
+// and prompt=consent, which Google requires to issue a refresh token) are
+// merged last and override the core parameters on key conflict; a nil or empty
+// extra yields a URL identical to a flow without it.
+func AuthorizationURL(authEndpoint, clientID, redirectURI string, scopes []string, state, codeChallenge string, extra url.Values) string {
 	v := url.Values{}
 	v.Set("client_id", clientID)
 	v.Set("redirect_uri", redirectURI)
@@ -67,6 +71,7 @@ func AuthorizationURL(authEndpoint, clientID, redirectURI string, scopes []strin
 		v.Set("code_challenge", codeChallenge)
 		v.Set("code_challenge_method", "S256")
 	}
+	maps.Copy(v, extra)
 	return authEndpoint + "?" + v.Encode()
 }
 

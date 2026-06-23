@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/maruel/ksid"
 )
 
@@ -19,16 +18,16 @@ const storeVersion = 1
 
 // userRecord is the on-disk JSON representation of a user.
 type userRecord struct {
-	ID           string     `json:"id"`
-	Provider     forge.Kind `json:"provider"`
-	ProviderID   string     `json:"providerID"`
-	Username     string     `json:"username"`
-	AvatarURL    string     `json:"avatarURL,omitempty"`
-	AccessToken  string     `json:"accessToken"`
-	RefreshToken string     `json:"refreshToken,omitempty"`
-	TokenExpiry  time.Time  `json:"tokenExpiry"`
-	CreatedAt    time.Time  `json:"createdAt"`
-	LastSeenAt   time.Time  `json:"lastSeenAt"`
+	ID           string    `json:"id"`
+	Provider     Provider  `json:"provider"`
+	ProviderID   string    `json:"providerID"`
+	Username     string    `json:"username"`
+	AvatarURL    string    `json:"avatarURL,omitempty"`
+	AccessToken  string    `json:"accessToken"`
+	RefreshToken string    `json:"refreshToken,omitempty"`
+	TokenExpiry  time.Time `json:"tokenExpiry"`
+	CreatedAt    time.Time `json:"createdAt"`
+	LastSeenAt   time.Time `json:"lastSeenAt"`
 }
 
 // usersFile is the on-disk JSON structure.
@@ -106,7 +105,7 @@ func (s *Store) UpsertUser(u *User) (User, error) {
 }
 
 // FindByProviderID returns the user with the given provider+ID pair, or false.
-func (s *Store) FindByProviderID(provider forge.Kind, providerID string) (User, bool) {
+func (s *Store) FindByProviderID(provider Provider, providerID string) (User, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := range s.file.Users {
@@ -118,7 +117,7 @@ func (s *Store) FindByProviderID(provider forge.Kind, providerID string) (User, 
 }
 
 // FindByProvider returns the most recently seen user for the given provider, or false.
-func (s *Store) FindByProvider(provider forge.Kind) (User, bool) {
+func (s *Store) FindByProvider(provider Provider) (User, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	best := -1
