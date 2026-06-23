@@ -1,18 +1,34 @@
-// MCP client for Go Mode service tools exposed to the native voice session.
+// MCP client for Go Mode service tools and resources exposed to the native shell.
 package com.fghbuild.gomode.voice
 
 import android.util.Base64
 import com.fghbuild.mcp.sdk.v1.ApiClient
 import com.fghbuild.mcp.sdk.v1.ClientCapabilities
 import com.fghbuild.mcp.sdk.v1.Implementation
+import com.fghbuild.mcp.sdk.v1.JSONRPCNotification
 import com.fghbuild.mcp.sdk.v1.JSONRPCRequest
 import com.fghbuild.mcp.sdk.v1.Method
 import com.fghbuild.mcp.sdk.v1.PaginatedRequestParams
 import com.fghbuild.mcp.sdk.v1.RequestMeta
+import com.fghbuild.mcp.sdk.v1.ResourceDescriptor
+import com.fghbuild.mcp.sdk.v1.ResourceTemplateDescriptor
+import com.fghbuild.mcp.sdk.v1.ResourceTemplatesListResult
+import com.fghbuild.mcp.sdk.v1.ResourcesListResult
+import com.fghbuild.mcp.sdk.v1.ResourcesReadParams
+import com.fghbuild.mcp.sdk.v1.ResourcesReadResult
+import com.fghbuild.mcp.sdk.v1.ServerDiscoverResult
+import com.fghbuild.mcp.sdk.v1.SubscriptionFilter
+import com.fghbuild.mcp.sdk.v1.SubscriptionsListenParams
 import com.fghbuild.mcp.sdk.v1.ToolCallResult
 import com.fghbuild.mcp.sdk.v1.ToolDescriptor
 import com.fghbuild.mcp.sdk.v1.ToolsCallParams
 import com.fghbuild.mcp.sdk.v1.ToolsListResult
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.launch
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -24,9 +40,15 @@ import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.IOException
 import java.util.concurrent.atomic.AtomicInteger
 
 private val idCounter = AtomicInteger(0)
+private val jsonMediaType = "application/json".toMediaType()
 
 data class McpToolResult(
     val structuredContent: JsonObject,
@@ -38,7 +60,9 @@ class McpClient(
     private val protocolVersion: String,
     private val cookieProvider: () -> String?,
 ) {
-    private val api = ApiClient(endpointURL)
+    private val endpointURL = endpointURL.trimEnd('/')
+    private val api = ApiClient(this.endpointURL)
+    private val httpClient = OkHttpClient()
     private val json = Json { ignoreUnknownKeys = true }
     private var toolsByName: Map<String, ToolDescriptor> = emptyMap()
 
@@ -58,13 +82,7 @@ class McpClient(
         name: String? = null,
         paramHeaders: Map<String, String> = emptyMap(),
     ): T {
-        val headers = buildMap {
-            putAll(cookieHeaders())
-            put("Mcp-Protocol-Version", protocolVersion)
-            put("Mcp-Method", method.value)
-            if (name != null) put("Mcp-Name", name)
-            putAll(paramHeaders)
-        }
+        val headers = mcpHeaders(method, name, paramHeaders)
         val response = api.mcp(
             req = JSONRPCRequest(
                 jsonrpc = "2.0",
@@ -80,7 +98,12 @@ class McpClient(
         return json.decodeFromJsonElement(result)
     }
 
-    suspend fun serverInstructions(): String = api.serverInstructions(headers = cookieHeaders())
+    suspend fun serverDiscover(): ServerDiscoverResult = request(
+        method = Method.ServerDiscover,
+        params = buildJsonObject { put("_meta", json.encodeToJsonElement(requestMeta)) },
+    )
+
+    suspend fun serverInstructions(): String = serverDiscover().instructions.orEmpty()
 
     suspend fun listTools(): List<ToolDescriptor> {
         val tools = mutableListOf<ToolDescriptor>()
@@ -121,6 +144,143 @@ class McpClient(
             isError = result.isError ?: false,
         )
     }
+
+    suspend fun listResources(): List<ResourceDescriptor> {
+        val resources = mutableListOf<ResourceDescriptor>()
+        var cursor: String? = null
+        do {
+            val result = request<ResourcesListResult>(
+                method = Method.ResourcesList,
+                params = json.encodeToJsonElement(
+                    PaginatedRequestParams(
+                        _meta = requestMeta,
+                        cursor = cursor,
+                    )
+                ),
+            )
+            resources += result.resources
+            cursor = result.nextCursor
+        } while (!cursor.isNullOrEmpty())
+        return resources
+    }
+
+    suspend fun listResourceTemplates(): List<ResourceTemplateDescriptor> {
+        val templates = mutableListOf<ResourceTemplateDescriptor>()
+        var cursor: String? = null
+        do {
+            val result = request<ResourceTemplatesListResult>(
+                method = Method.ResourceTemplatesList,
+                params = json.encodeToJsonElement(
+                    PaginatedRequestParams(
+                        _meta = requestMeta,
+                        cursor = cursor,
+                    )
+                ),
+            )
+            templates += result.resourceTemplates
+            cursor = result.nextCursor
+        } while (!cursor.isNullOrEmpty())
+        return templates
+    }
+
+    suspend fun readResource(uri: String): ResourcesReadResult = request(
+        method = Method.ResourcesRead,
+        params = json.encodeToJsonElement(
+            ResourcesReadParams(
+                _meta = requestMeta,
+                uri = uri,
+            )
+        ),
+    )
+
+    fun listenSubscriptions(notifications: SubscriptionFilter): Flow<JSONRPCNotification> = callbackFlow {
+        val body = json.encodeToString(
+            JSONRPCRequest.serializer(),
+            JSONRPCRequest(
+                jsonrpc = "2.0",
+                id = JsonPrimitive(idCounter.incrementAndGet()),
+                method = Method.SubscriptionsListen,
+                params = json.encodeToJsonElement(
+                    SubscriptionsListenParams(
+                        _meta = requestMeta,
+                        notifications = notifications,
+                    )
+                ),
+            ),
+        )
+        val request = Request.Builder()
+            .url(endpointURL)
+            .post(body.toRequestBody(jsonMediaType))
+            .header("Accept", "text/event-stream")
+            .apply { mcpHeaders(Method.SubscriptionsListen).forEach { (name, value) -> header(name, value) } }
+            .build()
+        val call = httpClient.newCall(request)
+        val readerJob = launch(Dispatchers.IO) {
+            try {
+                call.execute().use { response ->
+                    if (!response.isSuccessful) {
+                        close(IOException("MCP subscription request failed: HTTP ${response.code}"))
+                        return@launch
+                    }
+                    val responseBody = response.body ?: run {
+                        close(IOException("MCP subscription response is missing a body"))
+                        return@launch
+                    }
+                    responseBody.charStream().buffered().use { reader ->
+                        val dataLines = mutableListOf<String>()
+                        while (true) {
+                            val line = reader.readLine() ?: break
+                            val eventData = collectSSEData(line, dataLines) ?: continue
+                            val notification = json.decodeFromString(JSONRPCNotification.serializer(), eventData)
+                            if (trySend(notification).isFailure) return@launch
+                        }
+                        flushSSEData(dataLines)?.let { eventData ->
+                            val notification = json.decodeFromString(JSONRPCNotification.serializer(), eventData)
+                            if (trySend(notification).isFailure) return@launch
+                        }
+                    }
+                }
+                close()
+            } catch (e: IOException) {
+                if (call.isCanceled()) {
+                    close()
+                } else {
+                    close(e)
+                }
+            }
+        }
+        awaitClose {
+            call.cancel()
+            readerJob.cancel()
+        }
+    }
+
+    private fun mcpHeaders(
+        method: Method,
+        name: String? = null,
+        paramHeaders: Map<String, String> = emptyMap(),
+    ): Map<String, String> = buildMap {
+        putAll(cookieHeaders())
+        put("Mcp-Protocol-Version", protocolVersion)
+        put("Mcp-Method", method.value)
+        if (name != null) put("Mcp-Name", name)
+        putAll(paramHeaders)
+    }
+}
+
+private fun collectSSEData(line: String, dataLines: MutableList<String>): String? {
+    if (line.isEmpty()) return flushSSEData(dataLines)
+    if (line.startsWith("data:")) {
+        dataLines += line.removePrefix("data:").trimStart()
+    }
+    return null
+}
+
+private fun flushSSEData(dataLines: MutableList<String>): String? {
+    if (dataLines.isEmpty()) return null
+    val data = dataLines.joinToString("\n")
+    dataLines.clear()
+    return data
 }
 
 private fun textContentAsStructuredError(result: ToolCallResult): JsonObject {

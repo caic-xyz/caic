@@ -16,7 +16,12 @@ This plan tracks remaining work to converge the codebase on:
 - Android bootstrap has unvalidated, ready, and error states. WebView loading is
   separate from native feature compatibility.
 - Android voice can use the first advertised tool group for MCP
-  `serverInstructions`, `tools/list`, and `tools/call`.
+  `server/discover`, `tools/list`, and `tools/call`.
+- Android `McpClient` supports `resources/list`, `resources/templates/list`,
+  `resources/read`, and POST-based SSE `subscriptions/listen`.
+- Android has a service-resource adapter registry keyed by manifest `service`
+  and `apiVersion`, with caic `caic://tasks` mapping into neutral monitoring
+  snapshots.
 - Backend MCP supports `server/discover`, resources, resource templates, and
   POST-based SSE `subscriptions/listen`.
 - Backend resource subscriptions validate filters, stream task/repo
@@ -31,16 +36,8 @@ This plan tracks remaining work to converge the codebase on:
 
 Tasks:
 
-1. Extend Android `McpClient` with:
-   - `resources/list`
-   - `resources/templates/list`
-   - `resources/read`
-   - POST-based SSE `subscriptions/listen`
-2. Add a shell-side service adapter interface keyed by manifest `service` and
-   `apiVersion`.
-3. Add caic adapter support for `caic://tasks`.
-4. Feed adapter output into notifications, attention state, and voice context.
-5. Treat subscription notifications as invalidations and re-read resources.
+1. Feed adapter output into notifications, attention state, and voice context.
+2. Treat subscription notifications as invalidations and re-read resources.
 
 Acceptance:
 
