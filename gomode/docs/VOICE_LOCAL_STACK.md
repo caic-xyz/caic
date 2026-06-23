@@ -1,9 +1,10 @@
 # Go Mode Local Voice Stack
 
-This plan defines the remaining gateway-side work to add a local speech stack
-behind the voice gateway contract. Android and the hosted web frontend should
-keep talking to the generated `sdk/voicegateway` API and data-channel message
-types; they should not know which gateway backend serves a session.
+This plan defines the remaining gateway-side work to validate and harden the
+local speech stack behind the voice gateway contract. Android and the hosted web
+frontend should keep talking to the generated `sdk/voicegateway` API and
+data-channel message types; they should not know which gateway backend serves a
+session.
 
 ## Goal
 
@@ -52,17 +53,18 @@ at different URLs. Selection happens by URL, not by a per-request profile.
 
 `local-stack` is half-duplex. It segments decoded mic PCM with energy VAD,
 uses managed llama.cpp-backed ASR/LLM by default, normalizes tool calls and tool
-results over the provider-neutral data channel, and cancels the active turn on
-barge-in. TTS is still a deterministic placeholder in the gateway. KittenTTS is
-the current TTS candidate for the next adapter smoke because it produces 24 kHz
-mono audio, matching the gateway's assistant PCM rate without resampling.
+results over the provider-neutral data channel, cancels the active turn on
+barge-in, and synthesizes assistant speech through a KittenTTS Python worker
+behind the `ttsAdapter` seam. KittenTTS returns 24 kHz mono S16LE PCM, matching
+the gateway's assistant PCM rate without resampling.
 
 ASR and LLM each default to their own gateway-managed llama.cpp server: ASR
 runs the dedicated `ggml-org/Qwen3-ASR-0.6B-GGUF:Q8_0` speech-to-text model and
 LLM runs `unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL`; the gateway owns both server
 lifetimes independently. Operators that need custom llama.cpp process settings
 should start their own server(s) and set `local_stack.asr.remote` and/or
-`local_stack.llm.remote`.
+`local_stack.llm.remote`. TTS currently has no config table; the gateway starts
+a fixed KittenTTS worker with `uv`, Python 3.12, and a pinned Git revision.
 
 ## Target Architecture
 
@@ -169,6 +171,10 @@ backend = "gemini-live"
 # model = "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL"
 ```
 
+KittenTTS is started automatically for `local-stack`. It requires `uv` and a
+Python 3.12 runtime; model and package caches live under the user cache
+directory.
+
 v1 has no capability negotiation: all instances share the same baseline protocol
 and `session.ready` is a bare readiness signal. If public feature discovery is
 needed later, add it under a future API version.
@@ -213,13 +219,12 @@ LLM backend candidates:
 - Linux deployments may use the same `openai-compatible` adapter with vLLM,
   SGLang, llama.cpp, or another local server.
 
-TTS backend candidates:
+TTS backend paths:
 
-- `kitten-tts-python`: current candidate. `KittenML/kitten-tts-mini-0.8`
-  generates 24 kHz mono audio through ONNX on CPU, which matches
-  `backendOutputSampleRate`. Run it as a process adapter first, likely through
-  a pinned `uv` environment, so Python packaging and model cache behavior stay
-  outside the Go session loop.
+- `kitten-tts-python`: wired path. `KittenML/kitten-tts-mini-0.8` generates
+  24 kHz mono audio through ONNX on CPU, matching `backendOutputSampleRate`.
+  The gateway runs it as an external `uv`/Python worker so Python packaging and
+  model cache behavior stay outside the Go session loop.
 - `qwen-tts-python`: previous target path. Keep as a comparison candidate if
   KittenTTS quality, latency, packaging, or streaming behavior is not
   acceptable on the target Mac.
@@ -234,27 +239,27 @@ KittenTTS sandbox findings:
 - The GitHub checkout accepted `KittenTTS("KittenML/kitten-tts-mini-0.8",
   backend="cpu")` and generated a playable S16LE WAV at 24 kHz.
 - The published `kittentts-0.8.1` wheel did not accept the `backend` parameter
-  in the smoke environment, while the GitHub checkout did. Pin a known working
-  source revision or wheel before wiring this into the gateway.
+  in the smoke environment, while the GitHub checkout did. The gateway pins a
+  known working Git revision through `uv --with`.
 - `uv run --isolated` selected Python 3.13 by default in the development
   container, which failed while building `curated-tokenizers` due to missing
-  Python headers. A `uv`-managed Python 3.12 sandbox completed the smoke.
+  Python headers. The gateway now requests Python 3.12 explicitly.
 - The package dependency graph can pull large Python ML dependencies. The
   gateway should treat KittenTTS as an external runtime process with explicit
   setup and cache paths, not import or vendor Python dependencies into Go.
 
 ## Remaining Phases
 
-The placeholder TTS adapter in the `local-stack` backend
-(`backend/internal/voicegateway/voicertc/localstack.go`) is the seam the next
-phases replace. The dedicated Qwen3-ASR runtime may still be replaced by
-Parakeet or whisper.cpp if target-Mac measurements show unacceptable latency or
-quality.
+The local-stack implementation now has real ASR, LLM, and TTS adapter paths.
+The remaining work is target-Mac validation, measurement, documentation of
+runtime requirements, and latency/streaming hardening. The dedicated Qwen3-ASR
+runtime may still be replaced by Parakeet or whisper.cpp if target-Mac
+measurements show unacceptable latency or quality.
 
 ### Phase 4: Run First-Platform Model Smoke Tests
 
-- Build command-line smoke tests for the managed llama.cpp ASR/LLM path and
-  candidate TTS adapters.
+- Run the `smoke`-tagged local audio test for the managed llama.cpp ASR/LLM path
+  and the KittenTTS adapter on the first target Mac.
 - Measure first-token or first-audio latency, total turn latency, CPU/GPU
   usage, memory, and failure modes on the first target Mac.
 - Validate whether managed Qwen3-ASR and KittenTTS can run acceptably without
@@ -275,13 +280,12 @@ Acceptance:
 
 ### Phase 5: Wire The Local Model Stack
 
-- Replace the placeholder TTS adapter with the selected first-platform adapter
-  behind the existing `ttsAdapter` seam.
-- Feed ASR final text from the managed Qwen3-ASR path into Gemma conversation
-  state.
+- Keep ASR final text from the managed Qwen3-ASR path flowing into Gemma
+  conversation state.
 - Keep llama.cpp/Gemma tool-call output normalized as `tool.call`.
-- Chunk assistant text into TTS-safe segments.
-- Stream TTS output over RTP.
+- Chunk assistant text into TTS-safe segments when latency or model limits make
+  whole-reply synthesis unacceptable.
+- Preserve RTP audio output from KittenTTS-generated PCM.
 
 Acceptance:
 
@@ -337,15 +341,15 @@ Acceptance:
 
 ## Next Step
 
-Start runtime smoke on the target Mac:
+Run runtime smoke on the target Mac:
 
 - Configure `backend = "local-stack"` and omit `[local_stack.asr]` and
   `[local_stack.llm]` for the managed defaults.
+- Run `go test -tags="smoke" -run TestSmokeVoiceRTCLocalAudio -v -timeout 15m
+  ./gomode/voicegateway/voicertc/`.
 - Measure managed llama.cpp startup time, ASR latency, LLM turn latency, memory,
   and tool-call behavior through the gateway.
-- Build a KittenTTS command-line smoke path with a pinned `uv` Python
-  environment and cache directory.
 - Measure KittenTTS startup time, synthesis latency, memory, audio quality, and
   packaging behavior on the target Mac.
-- If acceptable, wire KittenTTS behind `ttsAdapter` as an external process that
-  returns S16LE mono PCM at 24 kHz.
+- If acceptable, document the target-Mac runtime requirements and keep KittenTTS
+  as the initial TTS implementation.

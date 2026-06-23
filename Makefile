@@ -67,7 +67,7 @@ smoke:
 	@go test -tags="smoke" -run TestSmoke -v -timeout 15m -coverprofile=coverage.out ./backend/cmd/caic/
 
 smoke-voice:
-	@go test -tags="smoke" -run TestSmokeVoiceRTCLocalAudio -v -timeout 15m ./backend/internal/voicegateway/voicertc/
+	@go test -tags="smoke" -run TestSmokeVoiceRTCLocalAudio -v -timeout 15m ./gomode/voicegateway/voicertc/
 
 coverage: $(FRONTEND_STAMP)
 	@go test -coverprofile=coverage.out ./...

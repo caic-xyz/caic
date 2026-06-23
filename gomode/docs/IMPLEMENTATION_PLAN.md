@@ -142,11 +142,12 @@ Acceptance:
 
 Tasks:
 
-1. Run target-Mac smoke tests for managed llama.cpp ASR/LLM and candidate TTS.
+1. Run target-Mac smoke tests for managed llama.cpp ASR/LLM and KittenTTS.
 2. Compare Qwen3-ASR and whisper.cpp Parakeet support for ASR latency and
    quality.
-3. Wire the selected TTS adapter behind `ttsAdapter`.
-4. Stream assistant audio over RTP.
+3. Document macOS runtime requirements for managed llama.cpp and KittenTTS.
+4. Improve TTS chunking and streaming latency after half-duplex correctness is
+   validated.
 5. Preserve interruption and tool-call behavior across local and Gemini
    backends.
 
