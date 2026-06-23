@@ -1890,6 +1890,46 @@ func TestTask(t *testing.T) {
 		})
 	})
 
+	t.Run("AgentVersion", func(t *testing.T) {
+		t.Parallel()
+		t.Run("AddMessageRecordsVersionWithoutSession", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{}
+			tk.addMessage(t.Context(), &agent.InitMessage{Version: "1.2.3"}, false)
+			if snap := tk.Snapshot(); snap.AgentVersion != "1.2.3" {
+				t.Errorf("AgentVersion = %q, want 1.2.3", snap.AgentVersion)
+			}
+		})
+		t.Run("RestoreMessagesRecordsVersionWithoutSession", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{}
+			tk.RestoreMessages([]agent.Message{&agent.InitMessage{Version: "1.2.3"}})
+			if snap := tk.Snapshot(); snap.AgentVersion != "1.2.3" {
+				t.Errorf("AgentVersion = %q, want 1.2.3", snap.AgentVersion)
+			}
+		})
+		t.Run("EmptyInitDoesNotClearVersion", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{}
+			tk.addMessage(t.Context(), &agent.InitMessage{Version: "1.2.3"}, false)
+			tk.addMessage(t.Context(), &agent.InitMessage{SessionID: "s1"}, false)
+			if snap := tk.Snapshot(); snap.AgentVersion != "1.2.3" {
+				t.Errorf("AgentVersion = %q, want 1.2.3", snap.AgentVersion)
+			}
+		})
+		t.Run("MetaSessionRecordsVersionWithoutConversationMessage", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{}
+			tk.addMessage(t.Context(), &agent.MetaSessionMessage{MessageType: "caic_session", AgentVersion: "1.2.3"}, false)
+			if snap := tk.Snapshot(); snap.AgentVersion != "1.2.3" {
+				t.Errorf("AgentVersion = %q, want 1.2.3", snap.AgentVersion)
+			}
+			if got := len(tk.Messages()); got != 0 {
+				t.Errorf("Messages length = %d, want 0", got)
+			}
+		})
+	})
+
 	t.Run("SetPR", func(t *testing.T) {
 		t.Parallel()
 		tk := &Task{}

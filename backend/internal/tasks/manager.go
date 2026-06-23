@@ -1005,6 +1005,12 @@ func (m *Manager) LoadPurgedTasks(all []*task.LoadedTask) error {
 				continue
 			}
 		}
+		m.setParser(lt)
+		if lt.SessionID == "" || lt.AgentVersion == "" {
+			if err := lt.LoadSessionMetadata(); err != nil {
+				slog.Warn("load session metadata failed", "task", lt.TaskID, "err", err)
+			}
+		}
 		t := &task.Task{
 			ID:                taskID,
 			InitialPrompt:     agent.Prompt{Text: lt.Prompt},
@@ -1025,8 +1031,8 @@ func (m *Manager) LoadPurgedTasks(all []*task.LoadedTask) error {
 			GitHubToken:       lt.GitHubToken,
 		}
 		t.SetStateAt(lt.State, lt.LastStateUpdateAt)
-		if lt.AgentVersion != "" {
-			t.SetAgentVersion(lt.AgentVersion)
+		if lt.SessionID != "" || lt.AgentVersion != "" {
+			t.SetSessionMetadata(lt.SessionID, "", lt.AgentVersion)
 		}
 		if lt.LogPath() != "" {
 			t.SetLogPath(lt.LogPath())
@@ -1042,7 +1048,6 @@ func (m *Manager) LoadPurgedTasks(all []*task.LoadedTask) error {
 		if lt.ForgePR > 0 {
 			t.SetPR(lt.ForgeOwner, lt.ForgeRepo, lt.ForgePR)
 		}
-		m.setParser(lt)
 		m.tasks[t.ID.String()] = newPurgedEntry(t, lt.Result, lt)
 		loaded++
 	}
@@ -1304,10 +1309,14 @@ func (m *Manager) resolveRunner(t *task.Task) *task.Runner {
 }
 
 func applyLoadedSessionMetadata(t *task.Task, lt *task.LoadedTask) {
-	if lt == nil || t.GetSessionID() != "" {
+	if lt == nil {
 		return
 	}
-	t.SetSessionMetadata(lt.SessionID, lt.Model, lt.AgentVersion)
+	sessionID := lt.SessionID
+	if t.GetSessionID() != "" {
+		sessionID = ""
+	}
+	t.SetSessionMetadata(sessionID, lt.Model, lt.AgentVersion)
 }
 
 func mergeLogAndRelayMessages(logMsgs, relayMsgs []agent.Message) []agent.Message {
@@ -1447,7 +1456,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	if lt != nil {
 		model = lt.Model
 		effort = lt.Effort
-		if harness.RequiresResumeSessionID(harnessName) && lt.SessionID == "" {
+		if lt.SessionID == "" || lt.AgentVersion == "" {
 			if err := lt.LoadSessionMetadata(); err != nil {
 				slog.WarnContext(ctx, "load session metadata failed", "repo", ri.RelPath, "br", branch, "err", err)
 			}

@@ -142,7 +142,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		b.setDiscoveredModels(models)
 	}
 	wire.suppressUserInput = true
-	initMsg := &agent.InitMessage{SessionID: wire.threadID, Model: opts.Model}
+	initMsg := &agent.InitMessage{SessionID: wire.threadID, Model: opts.Model, Version: wire.agentVersion}
 	opts.MsgCh <- initMsg
 	if err := agent.WriteMetaSession(opts.LogW, initMsg); err != nil {
 		_ = cmd.Process.Kill()
@@ -275,6 +275,7 @@ type wireFormat struct {
 	suppressUserInput bool
 	nextID            atomic.Int64
 	mu                sync.Mutex
+	agentVersion      string
 	totalUsage        agent.Usage // accumulated per-turn from thread/tokenUsage/updated
 	fw                *jsonutil.FieldWarner
 }
@@ -469,6 +470,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 		return nil, nil, errors.New("thread/start response missing thread.id")
 	}
 	w.threadID = result.Thread.ID
+	w.agentVersion = result.Thread.CLIVersion
 	return w, models, nil
 }
 

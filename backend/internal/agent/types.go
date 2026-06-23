@@ -512,9 +512,9 @@ type MetaSessionMessage struct {
 // Type implements Message.
 func (m *MetaSessionMessage) Type() string { return "caic_session" }
 
-// WriteMetaSession writes a caic_session control record for init to w.
+// WriteMetaSession writes a caic_session control record for init metadata to w.
 func WriteMetaSession(w io.Writer, init *InitMessage) error {
-	if w == nil || init == nil || init.SessionID == "" {
+	if w == nil || init == nil || (init.SessionID == "" && init.Model == "" && init.Version == "") {
 		return nil
 	}
 	data, err := json.Marshal(&MetaSessionMessage{

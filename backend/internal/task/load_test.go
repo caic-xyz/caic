@@ -457,6 +457,28 @@ func TestLoadLogs(t *testing.T) {
 			t.Errorf("AgentVersion = %q, want 1.2.3", lt.AgentVersion)
 		}
 	})
+	t.Run("AgentVersionMetadataWithoutSession", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "pi task",
+			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Pi,
+		})
+		session := mustJSON(t, agent.MetaSessionMessage{MessageType: "caic_session", AgentVersion: "pi 1.2.3"})
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "stopped"})
+		writeLogFile(t, dir, "pi.jsonl", meta, session, trailer)
+
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(tasks) != 1 {
+			t.Fatalf("len = %d, want 1", len(tasks))
+		}
+		if tasks[0].AgentVersion != "pi 1.2.3" {
+			t.Errorf("AgentVersion = %q, want pi 1.2.3", tasks[0].AgentVersion)
+		}
+	})
 	t.Run("LoadSessionMetadataScansBeyondTail", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()

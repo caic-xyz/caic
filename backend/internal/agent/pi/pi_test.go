@@ -28,6 +28,28 @@ func TestWaitForResponse(t *testing.T) {
 	})
 }
 
+func TestPiWireFormat(t *testing.T) {
+	t.Parallel()
+	t.Run("MessageStartIncludesSessionMetadata", func(t *testing.T) {
+		t.Parallel()
+		w := &piWireFormat{sessionID: "ses-1", agentVersion: "pi 1.2.3"}
+		msgs, err := w.ParseMessage([]byte(`{"type":"message_start","message":{"role":"assistant","provider":"openai","model":"gpt-5"}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("len(msgs) = %d, want 1", len(msgs))
+		}
+		init, ok := msgs[0].(*agent.InitMessage)
+		if !ok {
+			t.Fatalf("message type = %T, want *agent.InitMessage", msgs[0])
+		}
+		if init.SessionID != "ses-1" || init.Model != "openai/gpt-5" || init.Version != "pi 1.2.3" {
+			t.Fatalf("InitMessage = %+v", init)
+		}
+	})
+}
+
 func TestAgentArgs(t *testing.T) {
 	t.Parallel()
 

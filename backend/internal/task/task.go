@@ -215,9 +215,9 @@ type Task struct {
 	statsSubs             []*statsSub
 	state                 State
 	stateUpdatedAt        time.Time // UTC timestamp of the last state transition.
-	sessionID             string    // Agent session ID, captured from SystemInitMessage.
-	reportedModel         string    // Model reported by SystemInitMessage (may differ from Model).
-	agentVersion          string    // Agent version, captured from SystemInitMessage.
+	sessionID             string    // Agent session ID, captured from InitMessage.
+	reportedModel         string    // Model reported by InitMessage (may differ from Model).
+	agentVersion          string    // Agent version, captured from InitMessage.
 	reportedContextWindow int       // Context window size reported by the agent (0 = unknown).
 	planFile              string    // Path to plan file inside instance, captured from Write tool_use.
 	planContent           string    // Content of the plan file, captured from Write tool_use input.
@@ -951,7 +951,7 @@ func (t *Task) Messages() []agent.Message {
 }
 
 // RestoreMessages sets the initial message history from previously saved logs.
-// It also extracts metadata from the last SystemInitMessage, if any, and
+// It also extracts metadata from the last InitMessage, if any, and
 // infers the task state from the trailing messages: a trailing ResultMessage
 // means the agent completed its turn (StateWaiting or StateAsking).
 // Metadata-only messages (DiffStatMessage, RawMessage) after the
@@ -972,9 +972,22 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 	t.msgs = msgs
 	// Scan forward so later entries (model_rerouted) override earlier ones.
 	for _, m := range msgs {
+		if meta, ok := m.(*agent.MetaSessionMessage); ok {
+			if meta.SessionID != "" {
+				t.sessionID = meta.SessionID
+			}
+			if meta.AgentVersion != "" {
+				t.agentVersion = meta.AgentVersion
+			}
+			if meta.Model != "" && t.reportedModel == "" {
+				t.reportedModel = meta.Model
+			}
+		}
 		if init, ok := m.(*agent.InitMessage); ok {
 			if init.SessionID != "" {
 				t.sessionID = init.SessionID
+			}
+			if init.Version != "" {
 				t.agentVersion = init.Version
 			}
 			if init.Model != "" {
@@ -1469,12 +1482,25 @@ func (t *Task) recordStartupFailure(ctx context.Context, err error) {
 	t.addMessage(ctx, &agent.LogMessage{Line: "Task startup failed: " + err.Error()}, false)
 }
 
-// addMessage appends a message to the task's message list under the mutex and
-// fans it out to subscribers. It also tracks metadata, updates state
-// transitions, and handles cost/duration accumulation.
+// addMessage records a message under the mutex and fans conversation events out
+// to subscribers. Metadata-only messages update task fields without entering the
+// visible message history. Conversation messages also update state transitions
+// and cost/duration accumulation.
 func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if meta, ok := m.(*agent.MetaSessionMessage); ok {
+		if meta.SessionID != "" {
+			t.sessionID = meta.SessionID
+		}
+		if meta.AgentVersion != "" {
+			t.agentVersion = meta.AgentVersion
+		}
+		if meta.Model != "" && t.reportedModel == "" {
+			t.reportedModel = meta.Model
+		}
+		return
+	}
 	t.msgs = append(t.msgs, m)
 	if rm, ok := m.(*agent.ResultMessage); ok && rm.Result == "" {
 		rm.Result = fallbackResultText(t.msgs)
@@ -1483,6 +1509,8 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 	if init, ok := m.(*agent.InitMessage); ok {
 		if init.SessionID != "" {
 			t.sessionID = init.SessionID
+		}
+		if init.Version != "" {
 			t.agentVersion = init.Version
 		}
 		if init.Model != "" {

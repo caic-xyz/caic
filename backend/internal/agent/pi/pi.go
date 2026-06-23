@@ -84,10 +84,36 @@ func (b *Backend) SetModels(models []string) {
 	b.ModelList = agent.SortModels(models)
 }
 
+func readAgentVersion(ctx context.Context, target runtime.ConnectionTarget) (string, error) {
+	if target.SSHHost == "" {
+		return "", errors.New("agent connection target missing SSH host")
+	}
+	versionCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(versionCtx, "ssh", target.SSHHost, "pi", "--version") //nolint:gosec // target is not user-controlled.
+	out, err := cmd.CombinedOutput()
+	version := strings.TrimSpace(string(out))
+	if err != nil {
+		if version != "" {
+			return "", fmt.Errorf("pi --version: %w: %s", err, version)
+		}
+		return "", fmt.Errorf("pi --version: %w", err)
+	}
+	if version == "" {
+		return "", errors.New("pi --version returned empty output")
+	}
+	return version, nil
+}
+
 // Start launches a Pi RPC process via the relay daemon. It sends optional
 // set_model commands before the initial prompt.
 func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	wire := &piWireFormat{fw: &jsonutil.FieldWarner{}}
+
+	agentVersion, err := readAgentVersion(ctx, opts.Target)
+	if err != nil {
+		slog.WarnContext(ctx, "pi: agent version unavailable", "err", err)
+	}
 
 	rp, err := agent.PrepareRelay(ctx, opts, b.AgentArgs(agent.HarnessArgs{Model: opts.Model}))
 	if err != nil {
@@ -135,6 +161,46 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 			return nil, fmt.Errorf("pi: set_thinking_level %s: %w", opts.Effort, err)
 		}
 		rp.Stdout = br
+	}
+
+	sessionID := ""
+	if err := writeGetState(rp.Stdin, opts.LogW); err != nil {
+		slog.WarnContext(ctx, "pi: write get_state failed", "err", err)
+	} else {
+		if br == nil {
+			br = bufio.NewReaderSize(rp.Stdout, 1<<20)
+		}
+		stateCtx, stateCancel := context.WithTimeout(ctx, 10*time.Second)
+		resp, err := waitForResponseContext(stateCtx, br, pi.CmdGetState, opts.LogW, func() {
+			_ = rp.Cmd.Process.Kill()
+		})
+		stateCancel()
+		if err != nil {
+			if errors.Is(err, errResponseTimeout) {
+				_ = rp.Cmd.Wait()
+				return nil, fmt.Errorf("pi: get_state: %w", err)
+			}
+			slog.WarnContext(ctx, "pi: get_state failed", "err", err)
+		} else {
+			var state pi.StateData
+			if err := json.Unmarshal(resp.Data, &state); err != nil {
+				slog.WarnContext(ctx, "pi: parse get_state failed", "err", err)
+			} else {
+				sessionID = state.SessionID
+			}
+		}
+		rp.Stdout = br
+	}
+	wire.sessionID = sessionID
+	wire.agentVersion = agentVersion
+
+	if sessionID != "" || agentVersion != "" {
+		opts.MsgCh <- &agent.MetaSessionMessage{MessageType: "caic_session", SessionID: sessionID, AgentVersion: agentVersion}
+		if err := agent.WriteMetaSession(opts.LogW, &agent.InitMessage{SessionID: sessionID, Version: agentVersion}); err != nil {
+			_ = rp.Cmd.Process.Kill()
+			_ = rp.Cmd.Wait()
+			return nil, fmt.Errorf("write session metadata: %w", err)
+		}
 	}
 
 	c := newPiConn(rp.Stdin, opts.LogW, wire)
@@ -279,10 +345,12 @@ func handleExtensionUI(conn agent.Conn, raw []byte) error {
 // type-dispatched JSONL protocol. It holds per-session state: a start time for
 // duration tracking and a turn counter incremented by handleTurnEnd.
 type piWireFormat struct {
-	mu        sync.Mutex
-	initSent  bool
-	startTime time.Time // When the prompt was written.
-	numTurns  int       // Incremented by handleTurnEnd; consumed by handleAgentEnd.
+	mu           sync.Mutex
+	initSent     bool
+	sessionID    string
+	agentVersion string
+	startTime    time.Time // When the prompt was written.
+	numTurns     int       // Incremented by handleTurnEnd; consumed by handleAgentEnd.
 
 	modelCtxWindow int64 // Model's context window from set_model response; 0 if unknown.
 
@@ -497,7 +565,7 @@ func (w *piWireFormat) handleMessageStart(line []byte) ([]agent.Message, error) 
 	if ev.Message.Provider != "" {
 		model = ev.Message.Provider + "/" + model
 	}
-	return []agent.Message{&agent.InitMessage{Model: model}}, nil
+	return []agent.Message{&agent.InitMessage{SessionID: w.sessionID, Model: model, Version: w.agentVersion}}, nil
 }
 
 // handleError converts an error delta into a ResultMessage.
@@ -581,6 +649,8 @@ func (w *piWireFormat) handleTurnEnd(line []byte) ([]agent.Message, error) {
 	return nil, nil
 }
 
+var errResponseTimeout = errors.New("pi response wait timed out")
+
 // waitForResponse reads JSONL lines from r until a response for the given
 // command is found. Returns the full response envelope. Lines are logged to
 // logW. Non-response events are discarded (Pi should not emit any before the
@@ -621,6 +691,28 @@ func waitForResponse(r *bufio.Reader, cmd pi.CommandType, logW io.Writer) (pi.Re
 	}
 }
 
+func waitForResponseContext(ctx context.Context, r *bufio.Reader, cmd pi.CommandType, logW io.Writer, onTimeout func()) (pi.Response, error) {
+	type result struct {
+		resp pi.Response
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		resp, err := waitForResponse(r, cmd, logW)
+		ch <- result{resp: resp, err: err}
+	}()
+	select {
+	case res := <-ch:
+		return res.resp, res.err
+	case <-ctx.Done():
+		if onTimeout != nil {
+			onTimeout()
+		}
+		res := <-ch
+		return pi.Response{}, errors.Join(fmt.Errorf("%w for %s: %w", errResponseTimeout, cmd, ctx.Err()), res.err)
+	}
+}
+
 // parseModelContextWindow extracts the context window from a set_model response.
 func parseModelContextWindow(resp *pi.Response) int64 {
 	if resp.Command != pi.CmdSetModel {
@@ -655,6 +747,10 @@ func writeSetThinking(w io.Writer, level string, logW io.Writer) error {
 		Level: pi.ThinkingLevel(level),
 	}
 	return writeJSONLine(w, cmd, logW)
+}
+
+func writeGetState(w, logW io.Writer) error {
+	return writeJSONLine(w, pi.GetStateCmd{Type: pi.CmdGetState}, logW)
 }
 
 // FetchModels implements agent.ModelFetcher.

@@ -146,7 +146,7 @@ func TestHandshake(t *testing.T) {
 		t.Parallel()
 		const responses = `{"id":1,"result":{"userAgent":"caic/0.1"}}
 {"id":2,"result":{"data":[{"id":"gpt-5.4"},{"id":"gpt-5.3-codex"}],"nextCursor":null}}
-{"id":3,"result":{"thread":{"id":"thread_1"}}}
+{"id":3,"result":{"thread":{"id":"thread_1","cliVersion":"0.133.0"}}}
 `
 		var stdin bytes.Buffer
 		w, models, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(responses)), &agent.Options{Dir: "/repo", Model: "gpt-5.4"})
@@ -155,6 +155,9 @@ func TestHandshake(t *testing.T) {
 		}
 		if w.threadID != "thread_1" {
 			t.Errorf("threadID = %q, want thread_1", w.threadID)
+		}
+		if w.agentVersion != "0.133.0" {
+			t.Errorf("agentVersion = %q, want 0.133.0", w.agentVersion)
 		}
 		wantModels := []string{"gpt-5.4", "gpt-5.3-codex"}
 		if !slices.Equal(models, wantModels) {

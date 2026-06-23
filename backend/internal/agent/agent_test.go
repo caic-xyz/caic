@@ -321,6 +321,36 @@ func TestSession(t *testing.T) {
 	})
 }
 
+func TestWriteMetaSession(t *testing.T) {
+	t.Parallel()
+
+	t.Run("VersionWithoutSession", func(t *testing.T) {
+		t.Parallel()
+		var buf bytes.Buffer
+		if err := WriteMetaSession(&buf, &InitMessage{Model: "m", Version: "1.2.3"}); err != nil {
+			t.Fatal(err)
+		}
+		var got MetaSessionMessage
+		if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.MessageType != "caic_session" || got.SessionID != "" || got.Model != "m" || got.AgentVersion != "1.2.3" {
+			t.Fatalf("MetaSessionMessage = %+v", got)
+		}
+	})
+
+	t.Run("EmptyIgnored", func(t *testing.T) {
+		t.Parallel()
+		var buf bytes.Buffer
+		if err := WriteMetaSession(&buf, &InitMessage{}); err != nil {
+			t.Fatal(err)
+		}
+		if buf.Len() != 0 {
+			t.Fatalf("buffer length = %d, want 0", buf.Len())
+		}
+	})
+}
+
 func TestReadMessages(t *testing.T) {
 	t.Parallel()
 	t.Run("FullStream", func(t *testing.T) {

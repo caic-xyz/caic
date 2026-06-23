@@ -1460,6 +1460,54 @@ func TestManager(t *testing.T) {
 				t.Errorf("Result = %v, want StateStopped", e.Result())
 			}
 		})
+		t.Run("valid_loads_session_metadata_beyond_tail", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			dir := t.TempDir()
+			id := ksid.NewID()
+			marshal := func(v any) string {
+				b, err := json.Marshal(v)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return string(b)
+			}
+			lines := []string{
+				marshal(agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "pi task", Harness: harness.Pi, StartedAt: time.Now().UTC()}),
+				marshal(agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "ses-1", AgentVersion: "pi 1.2.3"}),
+				`{"type":"text","text":"` + strings.Repeat("x", 70<<10) + `"}`,
+				marshal(agent.MetaResultMessage{MessageType: "caic_result", State: task.StateStopped.String()}),
+			}
+			path := filepath.Join(dir, id.String()+"--.jsonl")
+			if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			logs, err := task.LoadLogs(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(logs) != 1 {
+				t.Fatalf("len(logs) = %d, want 1", len(logs))
+			}
+			if logs[0].SessionID != "" || logs[0].AgentVersion != "" {
+				t.Fatalf("preloaded metadata = %q/%q, want empty before full metadata scan", logs[0].SessionID, logs[0].AgentVersion)
+			}
+
+			if err := m.LoadPurgedTasks(logs); err != nil {
+				t.Fatalf("LoadPurgedTasks: %v", err)
+			}
+			e, ok := m.GetEntry(id.String())
+			if !ok {
+				t.Fatal("entry not found")
+			}
+			snap := e.Task().Snapshot()
+			if snap.SessionID != "ses-1" {
+				t.Errorf("SessionID = %q, want ses-1", snap.SessionID)
+			}
+			if snap.AgentVersion != "pi 1.2.3" {
+				t.Errorf("AgentVersion = %q, want pi 1.2.3", snap.AgentVersion)
+			}
+		})
 		t.Run("valid_running_becomes_failed", func(t *testing.T) {
 			t.Parallel()
 			m := New(Config{ServerCtx: t.Context()})

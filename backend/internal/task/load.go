@@ -318,7 +318,7 @@ func (lt *LoadedTask) LoadMessages() error {
 
 // LoadSessionMetadata scans the log for backend-neutral session metadata.
 func (lt *LoadedTask) LoadSessionMetadata() error {
-	if lt.SessionID != "" || lt.path == "" {
+	if lt.path == "" || (lt.SessionID != "" && lt.AgentVersion != "") {
 		return nil
 	}
 	full, err := loadLogSessionMetadata(lt.path, lt.parseFn)
@@ -523,7 +523,7 @@ func applySessionMetadataLine(lt *LoadedTask, typ string, line []byte) bool {
 		if m.AgentVersion != "" {
 			lt.AgentVersion = m.AgentVersion
 		}
-		return m.SessionID != ""
+		return m.SessionID != "" || m.AgentVersion != ""
 	case "caic_init":
 		var m legacyCaicInit
 		if json.Unmarshal(line, &m) != nil {
@@ -538,7 +538,7 @@ func applySessionMetadataLine(lt *LoadedTask, typ string, line []byte) bool {
 		if m.Version != "" {
 			lt.AgentVersion = m.Version
 		}
-		return m.SessionID != ""
+		return m.SessionID != "" || m.Version != ""
 	default:
 		return false
 	}
@@ -559,7 +559,7 @@ func applySessionMetadataMessages(lt *LoadedTask, msgs []agent.Message) bool {
 		if init.Version != "" {
 			lt.AgentVersion = init.Version
 		}
-		return init.SessionID != ""
+		return init.SessionID != "" || init.Version != ""
 	}
 	return false
 }

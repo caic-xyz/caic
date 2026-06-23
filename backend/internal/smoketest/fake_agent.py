@@ -511,6 +511,7 @@ def main() -> None:
             "session_id": "test-session",
             "cwd": "/workspace",
             "model": "fake-model",
+            "claude_code_version": "fake",
         }
     )
 
