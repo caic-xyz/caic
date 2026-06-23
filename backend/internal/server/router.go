@@ -195,7 +195,7 @@ func (r *Router) buildHandler() (http.Handler, error) {
 	//
 	// RFC 8615 well-known discovery document, registered before the
 	// /.well-known/ catch-all below so its exact path takes precedence.
-	mux.Handle("/.well-known/gomode.json", r.goModeHandler)
+	mux.Handle("GET /.well-known/gomode.json", r.goModeHandler)
 
 	// --- Public: webhooks (HMAC-authenticated, not session) ---
 	mountPrefix(mux, "", "/webhooks", r.webhooks.routes())
@@ -221,20 +221,34 @@ func (r *Router) buildHandler() (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	mux.Handle("/logos/", http.StripPrefix("/logos/", http.FileServer(http.FS(logosFS))))
+	mux.Handle("GET /logos/", http.StripPrefix("/logos/", http.FileServer(http.FS(logosFS))))
 
 	// Unmatched static/well-known paths must not fall through to the SPA.
 	// /api/ is handled inside buildAPIHandler; /webhooks/ is owned by its
 	// sub-mux.
-	mux.Handle("/.well-known/", http.NotFoundHandler())
-	mux.Handle("/static/", http.NotFoundHandler())
+	mux.Handle("GET /.well-known/", http.NotFoundHandler())
+	mux.Handle("GET /static/", http.NotFoundHandler())
 
-	// Serve embedded frontend with SPA fallback and precompressed variants.
+	// Serve the embedded frontend. Precompressed static assets and the
+	// personalized SPA document are split across two handlers: /assets/ and each
+	// root-level file route to the asset handler; "/" is the SPA catch-all.
+	// The catch-all is registered without a method qualifier so path-specific
+	// public routes remain strictly more specific for ServeMux conflict checks;
+	// spaHandler still rejects non-GET/HEAD requests.
 	dist, err := fs.Sub(frontend.Files, "dist")
 	if err != nil {
 		return nil, err
 	}
-	mux.HandleFunc("/", newStaticHandler(dist))
+	assets := &assetHandler{dist: dist}
+	mux.Handle("GET /assets/", assets)
+	rootFiles, err := rootAssetNames(dist)
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range rootFiles {
+		mux.Handle("GET /"+name, assets)
+	}
+	mux.Handle("/", &spaHandler{dist: dist, authProviders: r.serverHandlers.authProviders()})
 
 	// Middleware chain: log context → logging → IP origin check → host check → auth → decompress → compress → mux.
 	var inner http.Handler = mux

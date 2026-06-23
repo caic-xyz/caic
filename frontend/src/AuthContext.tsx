@@ -1,6 +1,6 @@
 // Auth context: tracks the current user and auth configuration.
 import { createContext, createSignal, useContext, onMount, type ParentComponent } from "solid-js";
-import type { Config, UserResp } from "@sdk/types.gen";
+import type { AuthBootstrapResp, Config, UserResp } from "@sdk/types.gen";
 import { getMe, logout as apiLogout } from "./api";
 
 interface AuthState {
@@ -16,6 +16,13 @@ interface AuthState {
   clearUser: () => void;
 }
 
+declare global {
+  interface Window {
+    /** Auth state injected into the SPA document by the backend. */
+    __CAIC_BOOTSTRAP__?: AuthBootstrapResp;
+  }
+}
+
 const AuthContext = createContext<AuthState>();
 
 export const AuthProvider: ParentComponent = (props) => {
@@ -24,9 +31,19 @@ export const AuthProvider: ParentComponent = (props) => {
   const [user, setUser] = createSignal<UserResp | null>(null);
 
   onMount(async () => {
+    // The backend injects auth state into the served document so the logged-in
+    // user is hydrated without a round-trip and the login page never flashes.
+    const boot = window.__CAIC_BOOTSTRAP__;
+    if (boot) {
+      setProviders(boot.authProviders ?? []);
+      setUser(boot.user ?? null);
+      setReady(true);
+      return;
+    }
+    // Fallback for documents served without injection (e.g. the Vite dev
+    // server): fetch config from the public /server-info endpoint (the /api/
+    // variant is session-gated and would 401 before login completes).
     try {
-      // Fetch server config from the public /server-info endpoint (the /api/
-      // variant is session-gated and would 401 before login completes).
       const res = await fetch("/server-info/config");
       if (!res.ok) throw new Error(`server-info: ${res.status}`);
       const cfg: Config = await res.json();

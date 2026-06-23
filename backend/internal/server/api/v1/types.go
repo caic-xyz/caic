@@ -105,6 +105,14 @@ type UserResp struct {
 	AvatarURL string `json:"avatarURL,omitempty"`
 }
 
+// AuthBootstrapResp is injected into the SPA document before the frontend
+// hydrates. It mirrors the auth-related fields otherwise fetched from
+// /server-info/config and /auth/me.
+type AuthBootstrapResp struct {
+	AuthProviders []string  `json:"authProviders"`
+	User          *UserResp `json:"user,omitempty"`
+}
+
 // CIStatus is the CI check state for a task or repo default branch.
 type CIStatus string
 

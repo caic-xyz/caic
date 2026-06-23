@@ -1323,3 +1323,11 @@ public struct ErrorResponse: Codable {
     public let details: [String: JSONValue]?
 }
 
+/// AuthBootstrapResp is injected into the SPA document before the frontend
+/// hydrates. It mirrors the auth-related fields otherwise fetched from
+/// /server-info/config and /auth/me.
+public struct AuthBootstrapResp: Codable {
+    public let authProviders: [String]
+    public let user: UserResp?
+}
+

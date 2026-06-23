@@ -4,6 +4,7 @@ package server
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -18,6 +19,9 @@ import (
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/gzip"
 	"github.com/klauspost/compress/zstd"
+
+	"github.com/caic-xyz/caic/backend/internal/auth"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 )
 
 // transcodeEntry holds a lazily-computed transcoded variant.
@@ -27,69 +31,145 @@ type transcodeEntry struct {
 	err  error
 }
 
-// newStaticHandler returns an http.HandlerFunc that serves precompressed
-// static files from dist with SPA fallback to index.html.
+// assetHandler serves the embedded frontend's precompressed static assets:
+// hashed bundles under /assets/ and the root-level files (favicon, manifest,
+// service worker, icons).
 //
-// Only .br files exist on disk. The handler serves brotli directly when
-// accepted, and lazily transcodes to zstd/gzip/identity otherwise.
-func newStaticHandler(dist fs.FS) http.HandlerFunc {
-	// cache maps "path\x00encoding" → *transcodeEntry.
-	var cache sync.Map
+// Files exist on disk only as .br; the handler serves brotli directly when
+// accepted and lazily transcodes to zstd/gzip/identity otherwise. A request for
+// a file that does not exist is a 404 — unlike the SPA document, assets never
+// fall back to index.html.
+type assetHandler struct {
+	dist fs.FS
 
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		p := r.URL.Path
-		if p == "/" {
-			p = "/index.html"
-		}
-		clean := strings.TrimPrefix(path.Clean(p), "/")
+	// cache maps "path\x00encoding" → *transcodeEntry for transcoded assets.
+	cache sync.Map
+}
 
-		// SPA fallback: if the .br file doesn't exist, serve index.html.
-		if _, err := fs.Stat(dist, clean+".br"); err != nil {
-			clean = "index.html"
-		}
-
-		ct := mime.TypeByExtension(filepath.Ext(clean))
-		if ct == "" {
-			ct = "application/octet-stream"
-		}
-
-		accepted := parseAcceptEncoding(r.Header.Get("Accept-Encoding"))
-
-		// Fast path: serve .br directly.
-		if _, ok := accepted["br"]; ok {
-			serveBrotli(w, r, dist, clean, ct)
-			return
-		}
-
-		// Pick best accepted encoding, falling back to identity.
-		enc := "identity"
-		for _, candidate := range []string{"zstd", "gzip"} {
-			if _, ok := accepted[candidate]; ok {
-				enc = candidate
-				break
-			}
-		}
-
-		data, err := transcode(&cache, dist, clean, enc)
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-
-		w.Header().Set("Content-Type", ct)
-		if enc != "identity" {
-			w.Header().Set("Content-Encoding", enc)
-		}
-		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
-		w.Header().Set("Vary", "Accept-Encoding")
-		setStaticCacheControl(w, clean)
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(data) //nolint:gosec // data from embedded FS, not user input
+func (s *assetHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
 	}
+	clean := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+	if _, err := fs.Stat(s.dist, clean+".br"); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	ct := mime.TypeByExtension(filepath.Ext(clean))
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+
+	accepted := parseAcceptEncoding(r.Header.Get("Accept-Encoding"))
+
+	// Fast path: serve .br directly.
+	if _, ok := accepted["br"]; ok {
+		serveBrotli(w, r, s.dist, clean, ct)
+		return
+	}
+
+	// Pick best accepted encoding, falling back to identity.
+	enc := "identity"
+	for _, candidate := range []string{"zstd", "gzip"} {
+		if _, ok := accepted[candidate]; ok {
+			enc = candidate
+			break
+		}
+	}
+
+	data, err := transcode(&s.cache, s.dist, clean, enc)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	w.Header().Set("Content-Type", ct)
+	if enc != "identity" {
+		w.Header().Set("Content-Encoding", enc)
+	}
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	w.Header().Set("Vary", "Accept-Encoding")
+	setStaticCacheControl(w, clean)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data) //nolint:gosec // data from embedded FS, not user input
+}
+
+// rootAssetNames returns the names of the precompressed root-level files in
+// dist (favicon, manifest, service worker, icons), with the .br suffix
+// stripped. index.html is excluded: it is owned by spaHandler. The caller
+// registers each name as an exact route so ServeMux dispatches it to the asset
+// handler, leaving "/" purely for the SPA document.
+func rootAssetNames(dist fs.FS) ([]string, error) {
+	entries, err := fs.ReadDir(dist, ".")
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, e := range entries {
+		name, ok := strings.CutSuffix(e.Name(), ".br")
+		if e.IsDir() || !ok || name == "index.html" {
+			continue
+		}
+		names = append(names, name)
+	}
+	return names, nil
+}
+
+// spaHandler serves the single-page-app document. Every route it receives
+// resolves to index.html, served decompressed with the auth bootstrap injected
+// into <head> so the frontend hydrates the logged-in user without a round-trip
+// and never flashes the login page. Because the document varies per user it
+// bypasses the precompressed fast path and stays no-cache.
+type spaHandler struct {
+	dist fs.FS
+
+	// authProviders is the configured OAuth provider list, fixed at startup. It
+	// is the only auth-config input to the bootstrap; the user varies per
+	// request and comes from the request context.
+	authProviders []string
+
+	// cache holds the decompressed index document.
+	cache sync.Map
+}
+
+func (s *spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	// The response is identity-encoded; compressMiddleware compresses it on the
+	// way out.
+	serveIndexWithBootstrap(w, &s.cache, s.dist, s.bootstrapSnippet(r))
+}
+
+// bootstrapSnippet builds the <script> element that seeds
+// window.__CAIC_BOOTSTRAP__ for the current request. The user, if any, is read
+// from the request context populated by the auth middleware. json.Marshal
+// escapes <, > and & so the payload cannot terminate the script element early.
+func (s *spaHandler) bootstrapSnippet(r *http.Request) []byte {
+	data := v1.AuthBootstrapResp{AuthProviders: s.authProviders}
+	if data.AuthProviders == nil {
+		data.AuthProviders = []string{}
+	}
+	if u, ok := auth.UserFromContext(r.Context()); ok {
+		data.User = &v1.UserResp{
+			ID:        u.ID,
+			Provider:  string(u.Provider),
+			Username:  u.Username,
+			AvatarURL: u.AvatarURL,
+		}
+	}
+	payload, err := json.Marshal(data)
+	if err != nil {
+		return nil
+	}
+	snippet := make([]byte, 0, len(payload)+40)
+	snippet = append(snippet, "<script>window.__CAIC_BOOTSTRAP__="...)
+	snippet = append(snippet, payload...)
+	snippet = append(snippet, ";</script>"...)
+	return snippet
 }
 
 // serveBrotli serves a .br file directly from the embedded FS.
@@ -118,6 +198,39 @@ func serveBrotli(w http.ResponseWriter, r *http.Request, dist fs.FS, clean, ct s
 		return
 	}
 	http.ServeContent(w, r, clean, stat.ModTime(), rs)
+}
+
+// serveIndexWithBootstrap serves index.html decompressed with snippet injected
+// into <head>. It omits Content-Encoding so compressMiddleware compresses the
+// personalized body, and keeps the no-cache header so it is never shared.
+func serveIndexWithBootstrap(w http.ResponseWriter, cache *sync.Map, dist fs.FS, snippet []byte) {
+	html, err := transcode(cache, dist, "index.html", "identity")
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	body := injectIntoHead(html, snippet)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Vary", "Accept-Encoding")
+	setStaticCacheControl(w, "index.html")
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+}
+
+// injectIntoHead returns html with snippet inserted immediately before the
+// closing </head> tag, falling back to a prefix when no head is present. The
+// returned slice never aliases html, which transcode caches and shares.
+func injectIntoHead(html, snippet []byte) []byte {
+	if len(snippet) == 0 {
+		return html
+	}
+	idx := max(bytes.Index(html, []byte("</head>")), 0)
+	out := make([]byte, 0, len(html)+len(snippet))
+	out = append(out, html[:idx]...)
+	out = append(out, snippet...)
+	out = append(out, html[idx:]...)
+	return out
 }
 
 // transcode decompresses the .br file and re-compresses to the target

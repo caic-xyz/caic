@@ -1203,3 +1203,13 @@ export interface ErrorResponse {
   details?: { [key: string]: any /* json.RawMessage */};
 }
 
+/**
+ * AuthBootstrapResp is injected into the SPA document before the frontend
+ * hydrates. It mirrors the auth-related fields otherwise fetched from
+ * /server-info/config and /auth/me.
+ */
+export interface AuthBootstrapResp {
+  authProviders: string[];
+  user?: UserResp;
+}
+

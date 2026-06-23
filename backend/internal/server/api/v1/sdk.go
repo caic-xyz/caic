@@ -24,6 +24,7 @@ func SDKAPI() apispec.Config {
 		},
 		ExtraSeeds: []reflect.Type{
 			reflect.TypeFor[api.ErrorResponse](),
+			reflect.TypeFor[AuthBootstrapResp](),
 		},
 		KotlinPackage: "com.caic.sdk.v1",
 		APIDocTitle:   "caic API Reference",

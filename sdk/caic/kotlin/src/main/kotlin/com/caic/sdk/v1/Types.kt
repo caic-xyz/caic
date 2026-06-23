@@ -1653,3 +1653,11 @@ data class ErrorDetails(val code: String, val message: String)
 @Serializable
 data class ErrorResponse(val error: ErrorDetails, val details: Map<String, JsonElement>? = null)
 
+/**
+ * AuthBootstrapResp is injected into the SPA document before the frontend
+ * hydrates. It mirrors the auth-related fields otherwise fetched from
+ * /server-info/config and /auth/me.
+ */
+@Serializable
+data class AuthBootstrapResp(val authProviders: List<String>, val user: UserResp? = null)
+
