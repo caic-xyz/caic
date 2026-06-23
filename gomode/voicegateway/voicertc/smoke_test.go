@@ -136,18 +136,30 @@ func TestSmokeVoiceRTCLocalAudio(t *testing.T) {
 			nil,
 		)
 		firstReply := time.Now()
-		reply, err := conv.user(t.Context(), "Reply with the word banana.")
+		step, err := conv.user(t.Context(), "Reply with the word banana.")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var text strings.Builder
+		for delta := range step.text {
+			text.WriteString(delta)
+		}
+		reply, err := step.finish()
 		t.Logf("Gemma first text reply latency: %s", smokeElapsed(firstReply))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.TrimSpace(reply.text) == "" {
+		if text.Len() == 0 {
+			text.WriteString(reply.text)
+		}
+		replyText := strings.TrimSpace(text.String())
+		if replyText == "" {
 			t.Fatal("llama.cpp query returned empty text")
 		}
-		if !strings.Contains(strings.ToLower(reply.text), "banana") {
-			t.Fatalf("llama.cpp reply = %q, want banana", reply.text)
+		if !strings.Contains(strings.ToLower(replyText), "banana") {
+			t.Fatalf("llama.cpp reply = %q, want banana", replyText)
 		}
-		t.Logf("llama.cpp reply: %s", strings.TrimSpace(reply.text))
+		t.Logf("llama.cpp reply: %s", replyText)
 
 		verifyManagedLLMToolCall(t, endpoint.provider)
 
@@ -230,6 +242,13 @@ func smokeElapsed(start time.Time) time.Duration {
 	return time.Since(start).Round(time.Millisecond)
 }
 
+func genStreamResult(ctx context.Context, provider genai.Provider, messages genai.Messages, options ...genai.GenOption) (genai.Result, error) {
+	fragments, finish := provider.GenStream(ctx, messages, options...)
+	for range fragments {
+	}
+	return finish()
+}
+
 func verifyManagedLLMToolCall(t *testing.T, provider genai.Provider) {
 	t.Run("ToolCall", func(t *testing.T) {
 		tools, err := genaiToolDefs([]voicev1.ToolDeclaration{{
@@ -249,7 +268,7 @@ func verifyManagedLLMToolCall(t *testing.T, provider genai.Provider) {
 		messages := genai.Messages{genai.NewTextMessage("Call tasks_list now with limit 1.")}
 
 		toolCall := time.Now()
-		res, err := provider.GenSync(t.Context(), messages, options...)
+		res, err := genStreamResult(t.Context(), provider, messages, options...)
 		t.Logf("Gemma forced tool-call latency: %s", smokeElapsed(toolCall))
 		if err != nil {
 			t.Fatal(err)
@@ -281,9 +300,9 @@ func verifyManagedLLMToolCall(t *testing.T, provider genai.Provider) {
 			Name:   call.Name,
 			Result: `{"tasks":[{"id":"smoke","title":"smoke task"}]}`,
 		}}})
-		toolOptions.Force = genai.ToolCallNone
+		toolOptions.Force = genai.ToolCallAny
 		toolResult := time.Now()
-		followup, err := provider.GenSync(t.Context(), messages, options...)
+		followup, err := genStreamResult(t.Context(), provider, messages, options...)
 		t.Logf("Gemma after tool-result latency: %s", smokeElapsed(toolResult))
 		if err != nil {
 			t.Fatal(err)

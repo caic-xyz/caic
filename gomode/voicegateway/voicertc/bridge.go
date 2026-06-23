@@ -383,8 +383,10 @@ type session struct {
 	audioOutputStarted   bool
 	cancel               context.CancelFunc
 
-	audioMu  sync.Mutex
-	audioBuf []byte // pending backend PCM bytes, drained by audioSendLoop
+	audioMu             sync.Mutex
+	audioBuf            []byte // pending backend PCM bytes, drained by audioSendLoop
+	audioBufStartedAt   time.Time
+	audioFirstRTPLogged bool
 }
 
 func (s *session) cancelSession() {
@@ -428,14 +430,25 @@ func (s *session) sendGatewayError(message string) {
 }
 
 func (s *session) addAssistantPCM(pcmBytes []byte) {
+	if len(pcmBytes) == 0 {
+		return
+	}
 	s.audioMu.Lock()
+	if len(s.audioBuf) == 0 {
+		s.audioBufStartedAt = time.Now()
+		s.audioFirstRTPLogged = false
+	}
 	s.audioBuf = append(s.audioBuf, pcmBytes...)
+	buffered := assistantPCMDuration(len(s.audioBuf))
 	s.audioMu.Unlock()
+	slog.Debug("voicertc: assistant pcm buffered", "session", s.id, "buffered", buffered, "bytes", len(pcmBytes))
 }
 
 func (s *session) clearAssistantAudio() {
 	s.audioMu.Lock()
 	s.audioBuf = nil
+	s.audioBufStartedAt = time.Time{}
+	s.audioFirstRTPLogged = false
 	s.audioMu.Unlock()
 }
 
@@ -525,7 +538,20 @@ func (s *session) audioSendLoop(ctx context.Context, enc *opusEncoder) {
 			frame := make([]byte, backendOutputFrameBytes)
 			copy(frame, s.audioBuf[:backendOutputFrameBytes])
 			s.audioBuf = s.audioBuf[backendOutputFrameBytes:]
+			queuedAt := s.audioBufStartedAt
+			logFirstRTP := !s.audioFirstRTPLogged && !queuedAt.IsZero()
+			if logFirstRTP {
+				s.audioFirstRTPLogged = true
+			}
+			buffered := assistantPCMDuration(len(s.audioBuf))
+			if len(s.audioBuf) == 0 {
+				s.audioBufStartedAt = time.Time{}
+				s.audioFirstRTPLogged = false
+			}
 			s.audioMu.Unlock()
+			if logFirstRTP {
+				slog.InfoContext(ctx, "voicertc: assistant first rtp", "session", s.id, "latency", time.Since(queuedAt), "buffered", buffered)
+			}
 
 			pcm48 := upsample24to48(frame)
 			opusPkt, err := enc.Encode(pcm48)
@@ -559,6 +585,13 @@ func (s *session) sendError(msg string) {
 		Recoverable: false,
 	})
 	_ = dc.SendText(string(data))
+}
+
+func assistantPCMDuration(bytes int) time.Duration {
+	if bytes <= 0 {
+		return 0
+	}
+	return time.Duration(bytes/2) * time.Second / time.Duration(backendOutputSampleRate)
 }
 
 // upsample24to48 converts PCM from 24kHz S16LE to 48kHz using linear

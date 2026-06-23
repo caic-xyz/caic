@@ -11,6 +11,7 @@ import (
 	"iter"
 	"log/slog"
 	"math"
+	"slices"
 	"sync"
 	"time"
 
@@ -56,10 +57,28 @@ type llmReply struct {
 	toolCall *llmToolCall
 }
 
+// llmStep is one streamed LLM generation.
+//
+// Callers must drain text, then call finish exactly once. finish returns the
+// final message used for conversation history and tool-call handling.
+type llmStep struct {
+	text   iter.Seq[string]
+	finish func() (llmReply, error)
+}
+
+func newLLMStep(text []string, reply llmReply, err error) llmStep {
+	return llmStep{
+		text: slices.Values(text),
+		finish: func() (llmReply, error) {
+			return reply, err
+		},
+	}
+}
+
 // llmConversation is a stateful conversation with the local LLM.
 type llmConversation interface {
-	user(ctx context.Context, text string) (llmReply, error)
-	toolResult(ctx context.Context, id, name string, result json.RawMessage) (llmReply, error)
+	user(ctx context.Context, text string) (llmStep, error)
+	toolResult(ctx context.Context, id, name string, result json.RawMessage) (llmStep, error)
 	addContext(text string)
 }
 
@@ -240,12 +259,7 @@ func (s *localStackSession) startUserMessage(ctx context.Context, text string) {
 	}
 	go func() {
 		defer s.clearTurnCancel(generation)
-		reply, err := conv.user(turnCtx, text)
-		if err != nil {
-			s.warnTurn("llm", err)
-			return
-		}
-		s.handleReply(turnCtx, conv, reply)
+		s.handleUserText(turnCtx, conv, text)
 	}()
 }
 
@@ -285,48 +299,137 @@ func (s *localStackSession) runTurn(ctx context.Context, conv llmConversation, u
 		return
 	}
 	s.emit(&voicev1.TranscriptDelta{Kind: voicev1.MessageKindTranscriptDelta, Speaker: voicev1.SpeakerUser, Text: text})
-	reply, err := conv.user(ctx, text)
+	s.handleUserText(ctx, conv, text)
+}
+
+func (s *localStackSession) handleUserText(ctx context.Context, conv llmConversation, text string) {
+	step, err := conv.user(ctx, text)
 	if err != nil {
 		s.warnTurn("llm", err)
 		return
 	}
-	s.handleReply(ctx, conv, reply)
+	s.handleLLMStep(ctx, conv, step)
 }
 
-func (s *localStackSession) handleReply(ctx context.Context, conv llmConversation, reply llmReply) {
+func (s *localStackSession) handleLLMStep(ctx context.Context, conv llmConversation, step llmStep) {
+	speech := s.startSpeechQueue(ctx)
+	defer speech.close(ctx)
 	for {
 		if ctx.Err() != nil {
 			return
 		}
-		if reply.toolCall != nil {
-			s.emit(&voicev1.ToolCall{
-				Kind: voicev1.MessageKindToolCall,
-				ID:   reply.toolCall.id,
-				Name: reply.toolCall.name,
-				Args: reply.toolCall.args,
-			})
-			res, ok := s.waitToolResult(ctx)
-			if !ok {
-				return
-			}
-			next, err := conv.toolResult(ctx, res.id, res.name, res.result)
-			if err != nil {
-				s.warnTurn("llm", err)
-				return
-			}
-			reply = next
-			continue
+		reply, err := s.forwardLLMText(ctx, speech, step)
+		if err != nil {
+			s.warnTurn("llm", err)
+			return
 		}
-		s.speak(ctx, reply.text)
-		return
+		if reply.toolCall == nil {
+			return
+		}
+		s.emit(&voicev1.ToolCall{
+			Kind: voicev1.MessageKindToolCall,
+			ID:   reply.toolCall.id,
+			Name: reply.toolCall.name,
+			Args: reply.toolCall.args,
+		})
+		res, ok := s.waitToolResult(ctx)
+		if !ok {
+			return
+		}
+		step, err = conv.toolResult(ctx, res.id, res.name, res.result)
+		if err != nil {
+			s.warnTurn("llm", err)
+			return
+		}
 	}
+}
+
+func (s *localStackSession) forwardLLMText(ctx context.Context, speech *assistantSpeechQueue, step llmStep) (llmReply, error) {
+	fragmenter := newSentenceFragmenter(defaultSentenceFragmentMaxRunes)
+	sending := true
+	streamed := false
+	sendFragment := func(fragment string) {
+		if !sending || fragment == "" {
+			return
+		}
+		if !speech.send(ctx, fragment) {
+			sending = false
+			return
+		}
+		streamed = true
+	}
+	for delta := range step.text {
+		for _, fragment := range fragmenter.push(delta) {
+			sendFragment(fragment)
+		}
+	}
+	reply, err := step.finish()
+	if err != nil {
+		return llmReply{}, err
+	}
+	for _, fragment := range fragmenter.flush() {
+		sendFragment(fragment)
+	}
+	if !streamed && reply.text != "" {
+		fallback := newSentenceFragmenter(defaultSentenceFragmentMaxRunes)
+		for _, fragment := range append(fallback.push(reply.text), fallback.flush()...) {
+			sendFragment(fragment)
+		}
+	}
+	return reply, nil
 }
 
 func (s *localStackSession) speak(ctx context.Context, text string) {
 	if text == "" {
 		return
 	}
+	fragmenter := newSentenceFragmenter(defaultSentenceFragmentMaxRunes)
+	fragments := append(fragmenter.push(text), fragmenter.flush()...)
+	s.speakFragments(ctx, slices.Values(fragments))
+}
+
+type assistantSpeechQueue struct {
+	textCh chan string
+	done   chan struct{}
+}
+
+func (s *localStackSession) startSpeechQueue(ctx context.Context) *assistantSpeechQueue {
+	q := &assistantSpeechQueue{
+		textCh: make(chan string, 4),
+		done:   make(chan struct{}),
+	}
+	go func() {
+		s.speakFragments(ctx, channelTextFragments(q.textCh))
+		close(q.done)
+	}()
+	return q
+}
+
+func (q *assistantSpeechQueue) send(ctx context.Context, text string) bool {
+	if text == "" {
+		return true
+	}
+	select {
+	case q.textCh <- text:
+		return true
+	case <-q.done:
+		return false
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func (q *assistantSpeechQueue) close(ctx context.Context) {
+	close(q.textCh)
+	select {
+	case <-q.done:
+	case <-ctx.Done():
+	}
+}
+
+func (s *localStackSession) speakFragments(ctx context.Context, fragments iter.Seq[string]) {
 	var started bool
+	var audioStartedAt time.Time
 	var audioBytes int
 	defer func() {
 		if started {
@@ -334,48 +437,73 @@ func (s *localStackSession) speak(ctx context.Context, text string) {
 		}
 	}()
 
-	for pcm, err := range s.tts.synthesize(ctx, text) {
-		if err != nil {
-			if ctx.Err() == nil {
-				s.warnTurn("tts", err)
-				if started {
-					s.emit(&voicev1.SpeechEnded{Kind: voicev1.MessageKindSpeechEnded, Speaker: voicev1.SpeakerAssistant})
-				}
-			}
-			return
-		}
-		if len(pcm) == 0 {
+	fragmentIndex := 0
+	for text := range fragments {
+		if text == "" {
 			continue
 		}
-		if ctx.Err() != nil {
-			return
-		}
-		if !started {
-			started = true
-			s.setSpeaking(true)
-			s.emit(&voicev1.SpeechStarted{Kind: voicev1.MessageKindSpeechStarted, Speaker: voicev1.SpeakerAssistant})
-			s.emit(&voicev1.TranscriptDelta{Kind: voicev1.MessageKindTranscriptDelta, Speaker: voicev1.SpeakerAssistant, Text: text})
-			s.emit(&voicev1.AssistantTextDelta{Kind: voicev1.MessageKindAssistantTextDelta, Text: text})
-		}
-		for off := 0; off < len(pcm); off += ttsChunkBytes {
+		fragmentIndex++
+		ttsStart := time.Now()
+		textEmitted := false
+		for pcm, err := range s.tts.synthesize(ctx, text) {
+			if err != nil {
+				if ctx.Err() == nil {
+					s.warnTurn("tts", err)
+					if started {
+						s.emit(&voicev1.SpeechEnded{Kind: voicev1.MessageKindSpeechEnded, Speaker: voicev1.SpeakerAssistant})
+					}
+				}
+				return
+			}
+			if len(pcm) == 0 {
+				continue
+			}
 			if ctx.Err() != nil {
 				return
 			}
-			end := min(off+ttsChunkBytes, len(pcm))
-			s.sink.addAssistantPCM(pcm[off:end])
-			audioBytes += end - off
+			if !textEmitted {
+				slog.InfoContext(ctx, "voicertc: local stack tts first audio", "session", s.id, "fragment", fragmentIndex, "latency", time.Since(ttsStart), "chars", len([]rune(text)))
+				if !started {
+					started = true
+					audioStartedAt = time.Now()
+					s.setSpeaking(true)
+					s.emit(&voicev1.SpeechStarted{Kind: voicev1.MessageKindSpeechStarted, Speaker: voicev1.SpeakerAssistant})
+				}
+				s.emit(&voicev1.TranscriptDelta{Kind: voicev1.MessageKindTranscriptDelta, Speaker: voicev1.SpeakerAssistant, Text: text})
+				s.emit(&voicev1.AssistantTextDelta{Kind: voicev1.MessageKindAssistantTextDelta, Text: text})
+				textEmitted = true
+			}
+			for off := 0; off < len(pcm); off += ttsChunkBytes {
+				if ctx.Err() != nil {
+					return
+				}
+				end := min(off+ttsChunkBytes, len(pcm))
+				s.sink.addAssistantPCM(pcm[off:end])
+				audioBytes += end - off
+			}
 		}
 	}
 	if !started {
 		return
 	}
-	// Hold the speaking state for the audio's duration so barge-in remains
-	// meaningful while the bridge drains the buffer at realtime.
+	// Hold the speaking state until queued audio should have drained, so
+	// barge-in remains meaningful while the bridge sends RTP at realtime.
 	audioDur := time.Duration(audioBytes/2) * time.Second / time.Duration(backendOutputSampleRate)
-	if !sleepCtx(ctx, audioDur) {
+	remaining := audioDur - time.Since(audioStartedAt)
+	if !sleepCtx(ctx, remaining) {
 		return
 	}
 	s.emit(&voicev1.SpeechEnded{Kind: voicev1.MessageKindSpeechEnded, Speaker: voicev1.SpeakerAssistant})
+}
+
+func channelTextFragments(ch <-chan string) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		for fragment := range ch {
+			if !yield(fragment) {
+				return
+			}
+		}
+	}
 }
 
 func (s *localStackSession) bargeIn(source voicev1.InterruptSource, message string) {
@@ -524,20 +652,20 @@ type placeholderConversation struct {
 	calledTool bool
 }
 
-func (c *placeholderConversation) user(_ context.Context, text string) (llmReply, error) {
+func (c *placeholderConversation) user(_ context.Context, text string) (llmStep, error) {
 	if len(c.tools) > 0 && !c.calledTool {
 		c.calledTool = true
-		return llmReply{toolCall: &llmToolCall{
+		return newLLMStep(nil, llmReply{toolCall: &llmToolCall{
 			id:   "local-call-1",
 			name: c.tools[0].Name,
 			args: json.RawMessage(`{}`),
-		}}, nil
+		}}, nil), nil
 	}
-	return llmReply{text: "You said: " + text}, nil
+	return newLLMStep([]string{"You said: " + text}, llmReply{text: "You said: " + text}, nil), nil
 }
 
-func (c *placeholderConversation) toolResult(_ context.Context, _, _ string, _ json.RawMessage) (llmReply, error) {
-	return llmReply{text: "Done."}, nil
+func (c *placeholderConversation) toolResult(context.Context, string, string, json.RawMessage) (llmStep, error) {
+	return newLLMStep([]string{"Done."}, llmReply{text: "Done."}, nil), nil
 }
 
 func (c *placeholderConversation) addContext(_ string) {}

@@ -163,6 +163,126 @@ func TestLocalStackUserMessage(t *testing.T) {
 	}
 }
 
+func TestLocalStackToolInitialTurnSpeaksStreamedTextBeforeToolCall(t *testing.T) {
+	t.Parallel()
+	conv := &fakeConversation{
+		userStep: fakeLLMStep{
+			deltas: []string{"Let me check. "},
+			reply: llmReply{toolCall: &llmToolCall{
+				id:   "call-1",
+				name: "tasks_list",
+				args: json.RawMessage(`{}`),
+			}},
+		},
+	}
+	tts := &recordingTTS{}
+	backend := newLocalStackBackend(
+		func() vadSegmenter { return &energyVAD{} },
+		placeholderASR{}, fixedConversationLLM{conv: conv}, tts,
+	)
+	sink := &captureSink{}
+	sess, err := backend.connect(t.Context(), "tool-stream", sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.close() })
+
+	setup := mustJSON(t, voicev1.SessionSetup{
+		Kind:  voicev1.MessageKindSessionSetup,
+		Tools: []voicev1.ToolDeclaration{{Name: "tasks_list", Parameters: json.RawMessage(`{}`)}},
+	})
+	if err := sess.acceptClientMessage(t.Context(), setup); err != nil {
+		t.Fatal(err)
+	}
+	msg := mustJSON(t, voicev1.UserMessage{Kind: voicev1.MessageKindUserMessage, Text: "List tasks"})
+	if err := sess.acceptClientMessage(t.Context(), msg); err != nil {
+		t.Fatal(err)
+	}
+
+	waitForKind(t, sink, voicev1.MessageKindToolCall)
+	if conv.userCalls() != 1 {
+		t.Fatalf("user calls = %d, want 1", conv.userCalls())
+	}
+	if got, want := tts.textsSnapshot(), []string{"Let me check. "}; !slices.Equal(got, want) {
+		t.Fatalf("tts texts before tool result = %#v, want %#v", got, want)
+	}
+	if got := sink.assistantText(); got != "Let me check. " {
+		t.Fatalf("assistant text before tool result = %q, want streamed pre-tool text", got)
+	}
+}
+
+func TestLocalStackChainsToolCallsWithStreamedText(t *testing.T) {
+	t.Parallel()
+	conv := &fakeConversation{
+		userStep: fakeLLMStep{
+			deltas: []string{"Looking. "},
+			reply: llmReply{toolCall: &llmToolCall{
+				id:   "call-1",
+				name: "tasks_list",
+				args: json.RawMessage(`{}`),
+			}},
+		},
+		toolResultSteps: []fakeLLMStep{
+			{
+				deltas: []string{"Checking details. "},
+				reply:  llmReply{toolCall: &llmToolCall{id: "call-2", name: "tasks_get", args: json.RawMessage(`{}`)}},
+			},
+			{deltas: []string{"Done. Next"}, reply: llmReply{text: "Done. Next"}},
+		},
+	}
+	tts := &recordingTTS{}
+	backend := newLocalStackBackend(
+		func() vadSegmenter { return &energyVAD{} },
+		placeholderASR{}, fixedConversationLLM{conv: conv}, tts,
+	)
+	sink := &captureSink{}
+	sess, err := backend.connect(t.Context(), "tool-chain", sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.close() })
+
+	setup := mustJSON(t, voicev1.SessionSetup{
+		Kind: voicev1.MessageKindSessionSetup,
+		Tools: []voicev1.ToolDeclaration{
+			{Name: "tasks_list", Parameters: json.RawMessage(`{}`)},
+			{Name: "tasks_get", Parameters: json.RawMessage(`{}`)},
+		},
+	})
+	if err := sess.acceptClientMessage(t.Context(), setup); err != nil {
+		t.Fatal(err)
+	}
+	msg := mustJSON(t, voicev1.UserMessage{Kind: voicev1.MessageKindUserMessage, Text: "List tasks"})
+	if err := sess.acceptClientMessage(t.Context(), msg); err != nil {
+		t.Fatal(err)
+	}
+	waitForKindCount(t, sink, voicev1.MessageKindToolCall, 1)
+	result := mustJSON(t, voicev1.ToolResult{
+		Kind: voicev1.MessageKindToolResult, ID: "call-1", Name: "tasks_list", Result: json.RawMessage(`{"tasks":[]}`),
+	})
+	if err := sess.acceptClientMessage(t.Context(), result); err != nil {
+		t.Fatal(err)
+	}
+	waitForKindCount(t, sink, voicev1.MessageKindToolCall, 2)
+
+	result = mustJSON(t, voicev1.ToolResult{
+		Kind: voicev1.MessageKindToolResult, ID: "call-2", Name: "tasks_get", Result: json.RawMessage(`{"task":null}`),
+	})
+	if err := sess.acceptClientMessage(t.Context(), result); err != nil {
+		t.Fatal(err)
+	}
+	waitForKind(t, sink, voicev1.MessageKindSpeechEnded)
+	if conv.toolResultCalls() != 2 {
+		t.Fatalf("tool result calls = %d, want 2", conv.toolResultCalls())
+	}
+	if got, want := tts.textsSnapshot(), []string{"Looking. ", "Checking details. ", "Done. ", "Next"}; !slices.Equal(got, want) {
+		t.Fatalf("tts texts = %#v, want %#v", got, want)
+	}
+	if got := sink.assistantText(); got != "Looking. Checking details. Done. Next" {
+		t.Fatalf("assistant text = %q, want streamed chained text", got)
+	}
+}
+
 func TestLocalStackSessionSpeak(t *testing.T) {
 	t.Parallel()
 
@@ -320,9 +440,13 @@ func TestGenaiConversation(t *testing.T) {
 	}})
 	conv.addContext("Project: caic")
 
-	reply, err := conv.user(t.Context(), "What is next?")
+	step, err := conv.user(t.Context(), "What is next?")
 	if err != nil {
 		t.Fatal(err)
+	}
+	reply, deltas := finishLLMStep(t, step)
+	if len(deltas) != 0 {
+		t.Fatalf("initial text deltas = %#v, want none before tool call", deltas)
 	}
 	if reply.toolCall == nil {
 		t.Fatal("toolCall = nil, want tool call")
@@ -338,9 +462,13 @@ func TestGenaiConversation(t *testing.T) {
 	}
 	callID := reply.toolCall.id
 
-	reply, err = conv.toolResult(t.Context(), reply.toolCall.id, reply.toolCall.name, json.RawMessage(`{"tasks":[]}`))
+	step, err = conv.toolResult(t.Context(), reply.toolCall.id, reply.toolCall.name, json.RawMessage(`{"tasks":[]}`))
 	if err != nil {
 		t.Fatal(err)
+	}
+	reply, deltas = finishLLMStep(t, step)
+	if want := []string{"Done."}; !slices.Equal(deltas, want) {
+		t.Fatalf("post-tool text deltas = %#v, want %#v", deltas, want)
 	}
 	if reply.text != "Done." {
 		t.Errorf("reply.text = %q, want Done.", reply.text)
@@ -371,6 +499,18 @@ func TestGenaiConversation(t *testing.T) {
 	if !calls[0].hasTools() {
 		t.Fatal("missing tools option")
 	}
+	if !calls[1].hasTools() {
+		t.Fatal("post-tool generation omitted tools")
+	}
+}
+
+func finishLLMStep(t *testing.T, step llmStep) (reply llmReply, deltas []string) {
+	deltas = slices.Collect(step.text)
+	reply, err := step.finish()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return reply, deltas
 }
 
 func TestLocalStackModelsForConfig(t *testing.T) {
@@ -535,6 +675,7 @@ func (c *captureSink) kinds() []voicev1.MessageKind {
 func (c *captureSink) assistantText() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	var out strings.Builder
 	for _, m := range c.msgs {
 		var env voicev1.MessageEnvelope
 		if json.Unmarshal(m, &env) != nil || env.Kind != voicev1.MessageKindAssistantTextDelta {
@@ -542,10 +683,10 @@ func (c *captureSink) assistantText() string {
 		}
 		var msg voicev1.AssistantTextDelta
 		if json.Unmarshal(m, &msg) == nil {
-			return msg.Text
+			out.WriteString(msg.Text)
 		}
 	}
-	return ""
+	return out.String()
 }
 
 func decodeToolCall(t *testing.T, sink *captureSink) voicev1.ToolCall {
@@ -577,6 +718,27 @@ func waitForKind(t *testing.T, sink *captureSink, kind voicev1.MessageKind) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %s; got %v", kind, sink.kinds())
+}
+
+func waitForKindCount(t *testing.T, sink *captureSink, kind voicev1.MessageKind, count int) {
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := kindCount(sink.kinds(), kind); got >= count {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d %s messages; got %v", count, kind, sink.kinds())
+}
+
+func kindCount(kinds []voicev1.MessageKind, want voicev1.MessageKind) int {
+	count := 0
+	for _, kind := range kinds {
+		if kind == want {
+			count++
+		}
+	}
+	return count
 }
 
 func mustAcceptMic(t *testing.T, sess backendSession, pcm []byte) {
@@ -615,12 +777,12 @@ func (echoLLM) newConversation(string, []voicev1.ToolDeclaration) llmConversatio
 
 type echoConv struct{}
 
-func (echoConv) user(_ context.Context, text string) (llmReply, error) {
-	return llmReply{text: "echo: " + text}, nil
+func (echoConv) user(_ context.Context, text string) (llmStep, error) {
+	return newLLMStep([]string{"echo: " + text}, llmReply{text: "echo: " + text}, nil), nil
 }
 
-func (echoConv) toolResult(context.Context, string, string, json.RawMessage) (llmReply, error) {
-	return llmReply{text: "done"}, nil
+func (echoConv) toolResult(context.Context, string, string, json.RawMessage) (llmStep, error) {
+	return newLLMStep([]string{"done"}, llmReply{text: "done"}, nil), nil
 }
 
 func (echoConv) addContext(string) {}
@@ -658,6 +820,81 @@ func (t blockingTTS) synthesize(context.Context, string) iter.Seq2[[]byte, error
 		<-t.releaseSecondChunk
 		yield([]byte{3, 4}, nil)
 	}
+}
+
+type recordingTTS struct {
+	mu    sync.Mutex
+	texts []string
+}
+
+func (t *recordingTTS) synthesize(_ context.Context, text string) iter.Seq2[[]byte, error] {
+	return func(yield func([]byte, error) bool) {
+		t.mu.Lock()
+		t.texts = append(t.texts, text)
+		t.mu.Unlock()
+		yield([]byte{1, 2}, nil)
+	}
+}
+
+func (t *recordingTTS) textsSnapshot() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]string(nil), t.texts...)
+}
+
+type fixedConversationLLM struct{ conv llmConversation }
+
+func (l fixedConversationLLM) newConversation(string, []voicev1.ToolDeclaration) llmConversation {
+	return l.conv
+}
+
+type fakeLLMStep struct {
+	deltas []string
+	reply  llmReply
+	err    error
+}
+
+type fakeConversation struct {
+	mu sync.Mutex
+
+	userStep        fakeLLMStep
+	toolResultStep  fakeLLMStep
+	toolResultSteps []fakeLLMStep
+
+	userCount       int
+	toolResultCount int
+}
+
+func (c *fakeConversation) user(context.Context, string) (llmStep, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.userCount++
+	return newLLMStep(c.userStep.deltas, c.userStep.reply, c.userStep.err), nil
+}
+
+func (c *fakeConversation) toolResult(context.Context, string, string, json.RawMessage) (llmStep, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.toolResultCount++
+	if c.toolResultCount <= len(c.toolResultSteps) {
+		step := c.toolResultSteps[c.toolResultCount-1]
+		return newLLMStep(step.deltas, step.reply, step.err), nil
+	}
+	return newLLMStep(c.toolResultStep.deltas, c.toolResultStep.reply, c.toolResultStep.err), nil
+}
+
+func (c *fakeConversation) addContext(string) {}
+
+func (c *fakeConversation) userCalls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.userCount
+}
+
+func (c *fakeConversation) toolResultCalls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.toolResultCount
 }
 
 type fixedASR struct{ text string }
@@ -710,7 +947,7 @@ func (p *fakeGenAIProvider) Scoreboard() scoreboard.Score { return scoreboard.Sc
 
 func (p *fakeGenAIProvider) HTTPClient() *http.Client { return nil }
 
-func (p *fakeGenAIProvider) GenSync(_ context.Context, msgs genai.Messages, opts ...genai.GenOption) (genai.Result, error) {
+func (p *fakeGenAIProvider) GenStream(_ context.Context, msgs genai.Messages, opts ...genai.GenOption) (fragmentsSeq iter.Seq[genai.Reply], finish func() (genai.Result, error)) {
 	p.mu.Lock()
 	p.calls = append(p.calls, fakeGenAICall{
 		messages: append(genai.Messages(nil), msgs...),
@@ -719,12 +956,22 @@ func (p *fakeGenAIProvider) GenSync(_ context.Context, msgs genai.Messages, opts
 	callCount := len(p.calls)
 	p.mu.Unlock()
 
+	var replies []genai.Reply
 	if callCount == 1 {
-		return genai.Result{Message: genai.Message{Replies: []genai.Reply{{
-			ToolCall: genai.ToolCall{Name: "tasks_list", Arguments: `{"limit":1}`},
-		}}}}, nil
+		replies = []genai.Reply{{ToolCall: genai.ToolCall{Name: "tasks_list", Arguments: `{"limit":1}`}}}
+	} else {
+		replies = []genai.Reply{{Text: "Done."}}
 	}
-	return genai.Result{Message: genai.Message{Replies: []genai.Reply{{Text: "Done."}}}}, nil
+	fragments := append([]genai.Reply(nil), replies...)
+	return func(yield func(genai.Reply) bool) {
+			for i := range fragments {
+				if !yield(fragments[i]) {
+					return
+				}
+			}
+		}, func() (genai.Result, error) {
+			return genai.Result{Message: genai.Message{Replies: replies}}, nil
+		}
 }
 
 func (p *fakeGenAIProvider) callsSnapshot() []fakeGenAICall {

@@ -305,12 +305,12 @@ type smokeLLMConversation struct {
 	text string
 }
 
-func (c smokeLLMConversation) user(context.Context, string) (llmReply, error) {
-	return llmReply{text: c.text}, nil
+func (c smokeLLMConversation) user(context.Context, string) (llmStep, error) {
+	return newLLMStep([]string{c.text}, llmReply{text: c.text}, nil), nil
 }
 
-func (c smokeLLMConversation) toolResult(context.Context, string, string, json.RawMessage) (llmReply, error) {
-	return llmReply{text: c.text}, nil
+func (c smokeLLMConversation) toolResult(context.Context, string, string, json.RawMessage) (llmStep, error) {
+	return newLLMStep([]string{c.text}, llmReply{text: c.text}, nil), nil
 }
 
 func (c smokeLLMConversation) addContext(string) {}

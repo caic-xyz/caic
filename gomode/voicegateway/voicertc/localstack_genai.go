@@ -249,11 +249,11 @@ func localStackLlamaHostPort(ctx context.Context) (string, error) {
 }
 
 func localStackLlamaCacheDir(build int) (string, error) {
-	base, err := os.UserCacheDir()
+	cacheBase, err := os.UserCacheDir()
 	if err != nil {
 		return "", fmt.Errorf("get user cache dir: %w", err)
 	}
-	return filepath.Join(base, "caic", "llama-server", strconv.Itoa(build)), nil
+	return filepath.Join(cacheBase, "caic", "llama-server", strconv.Itoa(build)), nil
 }
 
 const (
@@ -326,21 +326,21 @@ type genaiConversation struct {
 	nextToolID        int
 }
 
-func (c *genaiConversation) user(ctx context.Context, text string) (llmReply, error) {
+func (c *genaiConversation) user(ctx context.Context, text string) (llmStep, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.initErr != nil {
-		return llmReply{}, c.initErr
+		c.mu.Unlock()
+		return llmStep{}, c.initErr
 	}
 	c.messages = append(c.messages, genai.NewTextMessage(c.userText(text)))
-	return c.generateLocked(ctx)
+	return c.startGenerationLocked(ctx, true), nil
 }
 
-func (c *genaiConversation) toolResult(ctx context.Context, id, name string, result json.RawMessage) (llmReply, error) {
+func (c *genaiConversation) toolResult(ctx context.Context, id, name string, result json.RawMessage) (llmStep, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.initErr != nil {
-		return llmReply{}, c.initErr
+		c.mu.Unlock()
+		return llmStep{}, c.initErr
 	}
 	resultText := string(result)
 	if resultText == "" {
@@ -351,7 +351,7 @@ func (c *genaiConversation) toolResult(ctx context.Context, id, name string, res
 		Name:   name,
 		Result: resultText,
 	}}})
-	return c.generateLocked(ctx)
+	return c.startGenerationLocked(ctx, true), nil
 }
 
 func (c *genaiConversation) addContext(text string) {
@@ -367,21 +367,41 @@ func (c *genaiConversation) addContext(text string) {
 	c.contextText += "\n\n" + text
 }
 
-func (c *genaiConversation) generateLocked(ctx context.Context) (llmReply, error) {
+func (c *genaiConversation) startGenerationLocked(ctx context.Context, allowTools bool) llmStep {
+	fragments, finish := c.provider.GenStream(ctx, c.messages, c.genOptions(allowTools)...)
+	return llmStep{
+		text: func(yield func(string) bool) {
+			for fragment := range fragments {
+				if fragment.Text == "" {
+					continue
+				}
+				if !yield(fragment.Text) {
+					return
+				}
+			}
+		},
+		finish: func() (llmReply, error) {
+			defer c.mu.Unlock()
+			res, err := finish()
+			if err != nil {
+				return llmReply{}, err
+			}
+			reply := c.toReplyLocked(&res.Message)
+			c.messages = append(c.messages, res.Message)
+			return reply, nil
+		},
+	}
+}
+
+func (c *genaiConversation) genOptions(allowTools bool) []genai.GenOption {
 	opts := []genai.GenOption{
 		&genai.GenOptionText{SystemPrompt: c.systemInstruction},
 		&llamacpp.GenOption{},
 	}
-	if len(c.tools) != 0 {
+	if allowTools && len(c.tools) != 0 {
 		opts = append(opts, &genai.GenOptionTools{Tools: c.tools})
 	}
-	res, err := c.provider.GenSync(ctx, c.messages, opts...)
-	if err != nil {
-		return llmReply{}, err
-	}
-	reply := c.toReplyLocked(&res.Message)
-	c.messages = append(c.messages, res.Message)
-	return reply, nil
+	return opts
 }
 
 func (c *genaiConversation) toReplyLocked(msg *genai.Message) llmReply {
