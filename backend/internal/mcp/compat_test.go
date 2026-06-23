@@ -5,6 +5,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"iter"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -43,6 +44,10 @@ func (fakeRegistry) ListResources(context.Context) ResourcesListResult {
 
 func (fakeRegistry) ReadResource(_ context.Context, uri string) (ResourcesReadResult, error) {
 	return ResourceJSON(uri, map[string]any{"ok": true})
+}
+
+func (fakeRegistry) SubscribeResourceUpdates(context.Context, SubscriptionFilter) (iter.Seq2[ResourceUpdate, error], error) {
+	return func(func(ResourceUpdate, error) bool) {}, nil
 }
 
 // compatTestHandler returns a Handler backed by the package's fake registry.

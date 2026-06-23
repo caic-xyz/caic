@@ -93,7 +93,7 @@ compat.go support; remove it only after the upstream 2026+ schema drops it. |  |
 | `completions` | `Record<string, JSONValue>` | Completions is present if the server supports argument completion suggestions. |  |
 | `prompts` | `PromptsCapability` | Prompts is present if the server offers prompt templates. |  |
 | `resources` | `ResourcesCapability` | Resources is present if the server offers resources to read. |  |
-| `tools` | `ToolsCapability` | Tools is present if the server offers tools to call. |  |
+| `tools` | `ToolsCapability` | Tools is present if the server offers tools to call. | yes |
 | `extensions` | `Record<string, JSONValue>` | Extensions contains optional MCP extensions supported by the server. |  |
 
 ### Icon
@@ -397,8 +397,6 @@ SubscriptionFilter describes MCP subscription notifications requested by a clien
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `toolsListChanged` | `boolean` | ToolsListChanged requests tool list change notifications. |  |
-| `promptsListChanged` | `boolean` | PromptsListChanged requests prompt list change notifications. |  |
 | `resourcesListChanged` | `boolean` | ResourcesListChanged requests resource list change notifications. |  |
 | `resourceSubscriptions` | `string[]` | ResourceSubscriptions requests updates for individual resource URIs. |  |
 

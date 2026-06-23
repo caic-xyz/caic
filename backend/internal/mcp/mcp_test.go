@@ -3,13 +3,18 @@
 package mcp
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
+	"iter"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // TestHandlerHandleMCP swaps the process-global slog default to capture
@@ -54,6 +59,137 @@ func TestHandlerHandleMCP(t *testing.T) {
 			t.Fatalf("err = %v, want Invalid Request", got["err"])
 		}
 	})
+
+	t.Run("subscription resource update uses notifier", func(t *testing.T) {
+		registry := newSubscriptionTestRegistry()
+		h := &Handler{Registry: registry, ServerInfo: Implementation{Name: "test", Version: "1.0.0"}}
+		server := httptest.NewServer(http.HandlerFunc(h.HandleMCP))
+		t.Cleanup(server.Close)
+
+		ctx, cancel := context.WithTimeout(t.Context(), 1500*time.Millisecond)
+		t.Cleanup(cancel)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL, strings.NewReader(nativeMCPRequestJSON("subscriptions/listen", `"notifications":{"resourceSubscriptions":["test://resource"]}`)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Mcp-Protocol-Version", ProtocolVersion)
+		req.Header.Set("Mcp-Method", string(MethodSubscriptionsListen))
+		resp, err := server.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := resp.Body.Close(); err != nil {
+				t.Fatal(err)
+			}
+		})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+		r := bufio.NewReader(resp.Body)
+		ack := readSSEMessage(t, r)
+		if ack.Method != "notifications/subscriptions/acknowledged" {
+			t.Fatalf("first notification = %q, want acknowledgment", ack.Method)
+		}
+
+		registry.setResource("changed")
+		got := readSSEMessage(t, r)
+		if got.Method != "notifications/resources/updated" {
+			t.Fatalf("notification = %q, want resource update", got.Method)
+		}
+		params, ok := got.Params.(map[string]any)
+		if !ok {
+			t.Fatalf("params = %#v, want object", got.Params)
+		}
+		if params["uri"] != "test://resource" {
+			t.Fatalf("uri = %#v, want test://resource", params["uri"])
+		}
+	})
+}
+
+type subscriptionTestRegistry struct {
+	mu       sync.Mutex
+	resource string
+	changes  chan struct{}
+}
+
+func newSubscriptionTestRegistry() *subscriptionTestRegistry {
+	return &subscriptionTestRegistry{resource: "initial", changes: make(chan struct{}, 1)}
+}
+
+func (r *subscriptionTestRegistry) Instructions(context.Context) (string, error) {
+	return "", nil
+}
+
+func (r *subscriptionTestRegistry) Tools(context.Context) ([]ToolDescriptor, error) {
+	return nil, nil
+}
+
+func (r *subscriptionTestRegistry) CallTool(context.Context, string, json.RawMessage) (RawToolResult, error) {
+	return RawToolResult{}, nil
+}
+
+func (r *subscriptionTestRegistry) ListResources(context.Context) ResourcesListResult {
+	return ResourcesListResult{ResultType: ResultTypeComplete, Resources: []ResourceDescriptor{{URI: "test://resource", Name: "resource", MimeType: "application/json"}}}
+}
+
+func (r *subscriptionTestRegistry) ReadResource(context.Context, string) (ResourcesReadResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return ResourcesReadResult{ResultType: ResultTypeComplete, Contents: []ResourceContent{{URI: "test://resource", MimeType: "application/json", Text: r.resource}}}, nil
+}
+
+func (r *subscriptionTestRegistry) SubscribeResourceUpdates(ctx context.Context, filter SubscriptionFilter) (iter.Seq2[ResourceUpdate, error], error) {
+	return func(yield func(ResourceUpdate, error) bool) {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-r.changes:
+				if !yield(ResourceUpdate{ResourceURIs: filter.ResourceSubscriptions}, nil) {
+					return
+				}
+			}
+		}
+	}, nil
+}
+
+func (r *subscriptionTestRegistry) setResource(value string) {
+	r.mu.Lock()
+	r.resource = value
+	r.mu.Unlock()
+	select {
+	case r.changes <- struct{}{}:
+	default:
+	}
+}
+
+func nativeMCPRequestJSON(method, paramsFields string) string {
+	if paramsFields == "{}" || paramsFields == "" {
+		paramsFields = ""
+	} else {
+		paramsFields += ","
+	}
+	return `{"jsonrpc":"2.0","id":"test","method":"` + method + `","params":{` + paramsFields + `"_meta":{"io.modelcontextprotocol/protocolVersion":"` + ProtocolVersion + `","io.modelcontextprotocol/clientInfo":{"name":"caic-test","version":"1.0.0"},"io.modelcontextprotocol/clientCapabilities":{}}}}`
+}
+
+func readSSEMessage(t *testing.T, r *bufio.Reader) JSONRPCNotification {
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read SSE: %v", err)
+		}
+		line = strings.TrimSpace(line)
+		data, ok := strings.CutPrefix(line, "data: ")
+		if !ok {
+			continue
+		}
+		var msg JSONRPCNotification
+		if err := json.Unmarshal([]byte(data), &msg); err != nil {
+			t.Fatalf("decode SSE data: %v", err)
+		}
+		return msg
+	}
 }
 
 func TestContentBlockValidate(t *testing.T) {

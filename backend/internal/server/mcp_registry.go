@@ -1,4 +1,4 @@
-// MCP tool registry, schemas, and resource catalog.
+// MCP tool registry, schemas, resource catalog, and subscription invalidation.
 
 package server
 
@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"net/url"
 	"slices"
 	"strings"
@@ -189,6 +190,61 @@ func (m *mcpRegistry) ReadResource(ctx context.Context, uri string) (mcp.Resourc
 	}
 }
 
+func (m *mcpRegistry) SubscribeResourceUpdates(ctx context.Context, filter mcp.SubscriptionFilter) (iter.Seq2[mcp.ResourceUpdate, error], error) {
+	sources, err := m.subscriptionSources(filter)
+	if err != nil {
+		return nil, err
+	}
+	taskC := sources.taskC
+	repoC := sources.repoC
+	return func(yield func(mcp.ResourceUpdate, error) bool) {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-taskC:
+				if !yield(sources.taskUpdate(), nil) {
+					return
+				}
+				if m.tasks != nil && m.tasks.taskMgr != nil {
+					taskC = m.tasks.taskMgr.Changed()
+				} else {
+					taskC = nil
+				}
+			case <-repoC:
+				if !yield(sources.repoUpdate(), nil) {
+					return
+				}
+				if m.serverConfig != nil && m.serverConfig.repos != nil {
+					repoC = m.serverConfig.repos.Changed()
+				} else {
+					repoC = nil
+				}
+			}
+			if taskC == nil && repoC == nil {
+				return
+			}
+		}
+	}, nil
+}
+
+type subscriptionSources struct {
+	taskC <-chan struct{}
+	repoC <-chan struct{}
+
+	resourcesListChanged bool
+	taskResourceURIs     []string
+	repoResourceURIs     []string
+}
+
+func (s subscriptionSources) taskUpdate() mcp.ResourceUpdate {
+	return mcp.ResourceUpdate{ResourcesListChanged: s.resourcesListChanged, ResourceURIs: s.taskResourceURIs}
+}
+
+func (s subscriptionSources) repoUpdate() mcp.ResourceUpdate {
+	return mcp.ResourceUpdate{ResourcesListChanged: s.resourcesListChanged, ResourceURIs: s.repoResourceURIs}
+}
+
 func (m *mcpRegistry) voiceSessionContext(ctx context.Context) string {
 	parts := make([]string, 0, 4)
 	if m.serverConfig.prefs != nil {
@@ -312,6 +368,50 @@ func (m *mcpRegistry) currentTasksAndRepos(ctx context.Context) ([]v1.Task, []v1
 	taskList := m.tasks.taskListSnapshot(ctx)
 	repos := repoListFromSnapshot(m.serverConfig.repos.SnapshotWithCI())
 	return taskList, *repos
+}
+
+func (m *mcpRegistry) subscriptionSources(filter mcp.SubscriptionFilter) (subscriptionSources, error) {
+	var sources subscriptionSources
+	hasFilter := false
+	for _, uri := range filter.ResourceSubscriptions {
+		hasFilter = true
+		switch {
+		case uri == "caic://tasks" || strings.HasPrefix(uri, "caic://tasks/"):
+			if m.tasks != nil && m.tasks.taskMgr != nil {
+				sources.taskC = m.tasks.taskMgr.Changed()
+				sources.taskResourceURIs = append(sources.taskResourceURIs, uri)
+			} else {
+				return subscriptionSources{}, errors.New("task subscription notifier unavailable")
+			}
+		case uri == "caic://repos" || strings.HasPrefix(uri, "caic://repos/"):
+			if m.serverConfig != nil && m.serverConfig.repos != nil {
+				sources.repoC = m.serverConfig.repos.Changed()
+				sources.repoResourceURIs = append(sources.repoResourceURIs, uri)
+			} else {
+				return subscriptionSources{}, errors.New("repo subscription notifier unavailable")
+			}
+		default:
+			return subscriptionSources{}, mcp.ErrInvalidParams("unsupported resource subscription: %s", uri)
+		}
+	}
+	if filter.ResourcesListChanged {
+		hasFilter = true
+		if m.tasks != nil && m.tasks.taskMgr != nil {
+			sources.taskC = m.tasks.taskMgr.Changed()
+		} else {
+			return subscriptionSources{}, errors.New("task subscription notifier unavailable")
+		}
+		if m.serverConfig != nil && m.serverConfig.repos != nil {
+			sources.repoC = m.serverConfig.repos.Changed()
+		} else {
+			return subscriptionSources{}, errors.New("repo subscription notifier unavailable")
+		}
+		sources.resourcesListChanged = true
+	}
+	if !hasFilter {
+		return subscriptionSources{}, mcp.ErrInvalidParams("subscription filter is empty")
+	}
+	return sources, nil
 }
 
 func (m *mcpRegistry) handleTasksList(ctx context.Context, _ struct{}) mcp.ToolResult[mcp.TextOutput] {

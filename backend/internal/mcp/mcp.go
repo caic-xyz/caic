@@ -9,13 +9,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"log/slog"
 	"maps"
 	"net/http"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/invopop/jsonschema"
 )
@@ -99,13 +100,14 @@ type Handler struct {
 	ServerInfo Implementation
 }
 
-// Registry supplies MCP tools, resources, and instructions to Handler.
+// Registry supplies MCP tools, resources, instructions, and subscription invalidations to Handler.
 type Registry interface {
 	Instructions(ctx context.Context) (string, error)
 	Tools(ctx context.Context) ([]ToolDescriptor, error)
 	CallTool(ctx context.Context, name string, args json.RawMessage) (RawToolResult, error)
 	ListResources(ctx context.Context) ResourcesListResult
 	ReadResource(ctx context.Context, uri string) (ResourcesReadResult, error)
+	SubscribeResourceUpdates(ctx context.Context, filter SubscriptionFilter) (iter.Seq2[ResourceUpdate, error], error)
 }
 
 // RawToolResult is the transport-neutral output from a tool handler.
@@ -113,6 +115,14 @@ type RawToolResult struct {
 	Meta       MetaObject
 	Structured any
 	IsError    bool
+}
+
+// ResourceUpdate describes a signal-backed resource update candidate.
+type ResourceUpdate struct {
+	// ResourcesListChanged indicates the resource list may have changed.
+	ResourcesListChanged bool
+	// ResourceURIs are subscribed resource URIs whose contents may have changed.
+	ResourceURIs []string
 }
 
 // JSONRPCRequest is a JSON-RPC request that expects a response.
@@ -316,7 +326,7 @@ type Capabilities struct {
 	// Resources is present if the server offers resources to read.
 	Resources ResourcesCapability `json:"resources,omitzero"`
 	// Tools is present if the server offers tools to call.
-	Tools ToolsCapability `json:"tools,omitzero"`
+	Tools ToolsCapability `json:"tools"`
 	// Extensions contains optional MCP extensions supported by the server.
 	Extensions Extensions `json:"extensions,omitempty"`
 }
@@ -703,10 +713,6 @@ type SubscriptionsListenParams struct {
 
 // SubscriptionFilter describes MCP subscription notifications requested by a client.
 type SubscriptionFilter struct {
-	// ToolsListChanged requests tool list change notifications.
-	ToolsListChanged bool `json:"toolsListChanged,omitempty"`
-	// PromptsListChanged requests prompt list change notifications.
-	PromptsListChanged bool `json:"promptsListChanged,omitempty"`
 	// ResourcesListChanged requests resource list change notifications.
 	ResourcesListChanged bool `json:"resourcesListChanged,omitempty"`
 	// ResourceSubscriptions requests updates for individual resource URIs.
@@ -835,7 +841,7 @@ func (h *Handler) dispatch(ctx context.Context, method Method, params json.RawMe
 		t := ServerDiscoverResult{
 			ResultType:        ResultTypeComplete,
 			SupportedVersions: []string{ProtocolVersion},
-			Capabilities:      Capabilities{Tools: ToolsCapability{ListChanged: true}, Resources: ResourcesCapability{Subscribe: true, ListChanged: true}},
+			Capabilities:      Capabilities{Tools: ToolsCapability{}, Resources: ResourcesCapability{Subscribe: true, ListChanged: true}},
 			ServerInfo:        h.serverInfo(),
 			Instructions:      instructions,
 			TTLMS:             DefaultTTLMS,
@@ -962,83 +968,87 @@ func (h *Handler) handleSubscription(ctx context.Context, w http.ResponseWriter,
 	if err := decodeParams(params, &p); err != nil {
 		return rpcError(InvalidParamsCode, "Invalid params")
 	}
-	flusher, ok := w.(http.Flusher)
+	stream, ok := w.(subscriptionStreamWriter)
 	if !ok {
 		return rpcError(InternalErrorCode, "streaming unavailable")
 	}
 	subID := mcpSubscriptionID(id)
-	accepted := SubscriptionFilter{
-		ToolsListChanged:      p.Notifications.ToolsListChanged,
-		ResourcesListChanged:  p.Notifications.ResourcesListChanged,
-		ResourceSubscriptions: p.Notifications.ResourceSubscriptions,
+	changes, err := h.Registry.SubscribeResourceUpdates(ctx, p.Notifications)
+	if err != nil {
+		return registryError(err)
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
-	if err := writeMCPNotification(w, flusher, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: "notifications/subscriptions/acknowledged", Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), Notifications: &accepted}}); err != nil {
+	if err := writeMCPNotification(stream, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: "notifications/subscriptions/acknowledged", Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), Notifications: &p.Notifications}}); err != nil {
 		slog.WarnContext(ctx, "write mcp subscription acknowledgment", "err", err)
 		return nil
 	}
-	h.streamSubscriptionNotifications(ctx, w, flusher, subID, accepted)
+	h.streamSubscriptionNotifications(ctx, stream, subID, p.Notifications, changes)
 	return nil
 }
 
-func (h *Handler) streamSubscriptionNotifications(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, subID string, filter SubscriptionFilter) {
-	lastTools, lastResources, lastResourceContents := h.subscriptionSnapshot(ctx, filter)
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
+type subscriptionStreamWriter interface {
+	http.ResponseWriter
+	http.Flusher
+}
+
+func (h *Handler) streamSubscriptionNotifications(ctx context.Context, w subscriptionStreamWriter, subID string, filter SubscriptionFilter, changes iter.Seq2[ResourceUpdate, error]) {
+	lastResources, lastResourceContents := h.subscriptionSnapshot(ctx, filter)
+	for update, err := range changes {
+		if err != nil {
+			slog.WarnContext(ctx, "mcp resource update stream stopped", "err", err)
 			return
-		case <-ticker.C:
 		}
-		tools, resources, contents := h.subscriptionSnapshot(ctx, filter)
-		if filter.ToolsListChanged && tools != lastTools {
-			if err := writeMCPNotification(w, flusher, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: "notifications/tools/list_changed", Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID)}}); err != nil {
-				slog.WarnContext(ctx, "write mcp tools notification", "err", err)
-				return
+		if update.ResourcesListChanged && filter.ResourcesListChanged {
+			resources := h.subscriptionResourcesHash(ctx)
+			if resources != lastResources {
+				if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: "notifications/resources/list_changed", Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID)}}); err != nil {
+					slog.WarnContext(ctx, "write mcp resources notification", "err", err)
+					return
+				}
+				lastResources = resources
 			}
 		}
-		if filter.ResourcesListChanged && resources != lastResources {
-			if err := writeMCPNotification(w, flusher, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: "notifications/resources/list_changed", Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID)}}); err != nil {
-				slog.WarnContext(ctx, "write mcp resources notification", "err", err)
-				return
+		for _, uri := range update.ResourceURIs {
+			if !slices.Contains(filter.ResourceSubscriptions, uri) {
+				continue
 			}
-		}
-		for uri, content := range contents {
+			content := h.subscriptionResourceContentHash(ctx, uri)
 			if content == lastResourceContents[uri] {
 				continue
 			}
-			if err := writeMCPNotification(w, flusher, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: "notifications/resources/updated", Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), URI: uri}}); err != nil {
+			if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: "notifications/resources/updated", Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), URI: uri}}); err != nil {
 				slog.WarnContext(ctx, "write mcp resource update notification", "err", err)
 				return
 			}
+			lastResourceContents[uri] = content
 		}
-		lastTools, lastResources, lastResourceContents = tools, resources, contents
 	}
 }
 
-func (h *Handler) subscriptionSnapshot(ctx context.Context, filter SubscriptionFilter) (toolsHash, resourcesHash string, contents map[string]string) {
-	if filter.ToolsListChanged {
-		if items, err := h.Registry.Tools(ctx); err == nil {
-			toolsHash = stableJSON(items)
-		}
-	}
+func (h *Handler) subscriptionSnapshot(ctx context.Context, filter SubscriptionFilter) (resourcesHash string, contents map[string]string) {
 	if filter.ResourcesListChanged {
-		resourcesHash = stableJSON(h.Registry.ListResources(ctx).Resources)
+		resourcesHash = h.subscriptionResourcesHash(ctx)
 	}
 	contents = make(map[string]string, len(filter.ResourceSubscriptions))
 	for _, uri := range filter.ResourceSubscriptions {
-		res, err := h.Registry.ReadResource(ctx, uri)
-		if err != nil {
-			contents[uri] = err.Error()
-			continue
-		}
-		contents[uri] = stableJSON(res.Contents)
+		contents[uri] = h.subscriptionResourceContentHash(ctx, uri)
 	}
-	return toolsHash, resourcesHash, contents
+	return resourcesHash, contents
+}
+
+func (h *Handler) subscriptionResourcesHash(ctx context.Context) string {
+	return stableJSON(h.Registry.ListResources(ctx).Resources)
+}
+
+func (h *Handler) subscriptionResourceContentHash(ctx context.Context, uri string) string {
+	res, err := h.Registry.ReadResource(ctx, uri)
+	if err != nil {
+		return err.Error()
+	}
+	return stableJSON(res.Contents)
 }
 
 func mcpSubscriptionID(id json.RawMessage) string {
@@ -1079,7 +1089,7 @@ func logMCPFailure(r *http.Request, status int, req *JSONRPCRequest, rpcErr *JSO
 	slog.ErrorContext(r.Context(), "mcp request failed", attrs...)
 }
 
-func writeMCPNotification(w http.ResponseWriter, flusher http.Flusher, msg JSONRPCNotification) error {
+func writeMCPNotification(w subscriptionStreamWriter, msg JSONRPCNotification) error {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return err
@@ -1087,7 +1097,7 @@ func writeMCPNotification(w http.ResponseWriter, flusher http.Flusher, msg JSONR
 	if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
 		return err
 	}
-	flusher.Flush()
+	w.Flush()
 	return nil
 }
 

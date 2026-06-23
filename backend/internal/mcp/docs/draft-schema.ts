@@ -1183,14 +1183,6 @@ export interface ResourceListChangedNotification extends JSONRPCNotification {
  */
 export interface SubscriptionFilter {
   /**
-   * If true, receive {@link ToolListChangedNotification | notifications/tools/list_changed}.
-   */
-  toolsListChanged?: boolean;
-  /**
-   * If true, receive {@link PromptListChangedNotification | notifications/prompts/list_changed}.
-   */
-  promptsListChanged?: boolean;
-  /**
    * If true, receive {@link ResourceListChangedNotification | notifications/resources/list_changed}.
    */
   resourcesListChanged?: boolean;
@@ -1237,10 +1229,9 @@ export interface SubscriptionsListenRequest extends JSONRPCRequest {
  */
 export interface SubscriptionsAcknowledgedNotificationParams extends NotificationParams {
   /**
-   * The subset of requested notification types the server agreed to honor.
-   * Only includes notification types the server actually supports; if the
-   * client requested an unsupported type (e.g., `promptsListChanged` when
-   * the server has no prompts), it is omitted from this set.
+   * The requested notification types the server agreed to honor.
+   * Unsupported fields are rejected by {@link SubscriptionsListenRequest | subscriptions/listen}
+   * instead of being omitted from this set.
    */
   notifications: SubscriptionFilter;
 }

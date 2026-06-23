@@ -215,7 +215,7 @@ public struct Capabilities: Codable {
     /// Resources is present if the server offers resources to read.
     public let resources: ResourcesCapability?
     /// Tools is present if the server offers tools to call.
-    public let tools: ToolsCapability?
+    public let tools: ToolsCapability
     /// Extensions contains optional MCP extensions supported by the server.
     public let extensions: [String: JSONValue]?
 }
@@ -545,10 +545,6 @@ public struct ResourcesReadResult: Codable {
 
 /// SubscriptionFilter describes MCP subscription notifications requested by a client.
 public struct SubscriptionFilter: Codable {
-    /// ToolsListChanged requests tool list change notifications.
-    public let toolsListChanged: Bool?
-    /// PromptsListChanged requests prompt list change notifications.
-    public let promptsListChanged: Bool?
     /// ResourcesListChanged requests resource list change notifications.
     public let resourcesListChanged: Bool?
     /// ResourceSubscriptions requests updates for individual resource URIs.

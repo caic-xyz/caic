@@ -130,7 +130,7 @@ export interface Capabilities {
   /** Resources is present if the server offers resources to read. */
   resources?: ResourcesCapability;
   /** Tools is present if the server offers tools to call. */
-  tools?: ToolsCapability;
+  tools: ToolsCapability;
   /** Extensions contains optional MCP extensions supported by the server. */
   extensions?: { [key: string]: unknown /* json.RawMessage */};
 }
@@ -464,10 +464,6 @@ export interface ResourcesReadResult {
 
 /** SubscriptionFilter describes MCP subscription notifications requested by a client. */
 export interface SubscriptionFilter {
-  /** ToolsListChanged requests tool list change notifications. */
-  toolsListChanged?: boolean;
-  /** PromptsListChanged requests prompt list change notifications. */
-  promptsListChanged?: boolean;
   /** ResourcesListChanged requests resource list change notifications. */
   resourcesListChanged?: boolean;
   /** ResourceSubscriptions requests updates for individual resource URIs. */

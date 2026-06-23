@@ -271,7 +271,7 @@ data class Capabilities(
     /** Resources is present if the server offers resources to read. */
     val resources: ResourcesCapability? = null,
     /** Tools is present if the server offers tools to call. */
-    val tools: ToolsCapability? = null,
+    val tools: ToolsCapability,
     /** Extensions contains optional MCP extensions supported by the server. */
     val extensions: Map<String, JsonElement>? = null,
 )
@@ -628,10 +628,6 @@ data class ResourcesReadResult(
 /** SubscriptionFilter describes MCP subscription notifications requested by a client. */
 @Serializable
 data class SubscriptionFilter(
-    /** ToolsListChanged requests tool list change notifications. */
-    val toolsListChanged: Boolean? = null,
-    /** PromptsListChanged requests prompt list change notifications. */
-    val promptsListChanged: Boolean? = null,
     /** ResourcesListChanged requests resource list change notifications. */
     val resourcesListChanged: Boolean? = null,
     /** ResourceSubscriptions requests updates for individual resource URIs. */

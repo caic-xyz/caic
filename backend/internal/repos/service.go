@@ -1,4 +1,4 @@
-// Service manages repository metadata and task-runner registration.
+// Service manages repository metadata, task-runner registration, and change notifications.
 
 package repos
 
@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/caic-xyz/md/gitutil"
@@ -71,6 +72,9 @@ type Service struct {
 	taskMgr       *tasks.Manager
 	runtime       runtime.Backend
 	agentBackends map[harness.Name]agent.Backend
+
+	mu      sync.Mutex
+	changed chan struct{}
 }
 
 // NewService creates a repository service.
@@ -96,12 +100,20 @@ func NewService(
 		taskMgr:       taskMgr,
 		runtime:       runtimeBackend,
 		agentBackends: agentBackends,
+		changed:       make(chan struct{}),
 	}
 }
 
 // Registry returns the service repository registry.
 func (s *Service) Registry() *Registry {
 	return s.registry
+}
+
+// Changed returns a channel that is closed when repository metadata or CI state changes.
+func (s *Service) Changed() <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.changed
 }
 
 // DiscoverRunner discovers repo metadata and initializes its task runner.
@@ -154,6 +166,7 @@ func (s *Service) RegisterRunner(r *InitResult) {
 	}
 	s.registry.Add(&r.Info)
 	s.taskMgr.RegisterRunner(r.Info.RelPath, r.Runner)
+	s.notifyChanged()
 }
 
 // DeregisterRunner removes a repo and unregisters its runner.
@@ -163,6 +176,9 @@ func (s *Service) DeregisterRunner(relPath string) {
 	})
 	for _, rel := range removed {
 		s.taskMgr.UnregisterRunner(rel)
+	}
+	if len(removed) > 0 {
+		s.notifyChanged()
 	}
 }
 
@@ -230,7 +246,11 @@ func (s *Service) SetCIStatusIfChanged(relPath, sha string, result forgecache.Re
 	checks := make([]forge.Check, len(result.Checks))
 	copy(checks, result.Checks)
 	next := ci.RepoCIState{Status: result.Status, Checks: checks, HeadSHA: sha}
-	return s.registry.SetCIStatusIfChanged(relPath, next)
+	changed := s.registry.SetCIStatusIfChanged(relPath, next)
+	if changed {
+		s.notifyChanged()
+	}
+	return changed
 }
 
 // Clone clones a repository, registers its metadata, and wires its runner.
@@ -309,9 +329,17 @@ func (s *Service) Clone(ctx context.Context, req CloneRequest) (Info, error) {
 	}
 	s.registry.Add(&info)
 	s.taskMgr.RegisterRunner(targetPath, runner)
+	s.notifyChanged()
 	slog.InfoContext(ctx, "cloned repo", "url", req.URL, "path", targetPath)
 
 	return info, nil
+}
+
+func (s *Service) notifyChanged() {
+	s.mu.Lock()
+	close(s.changed)
+	s.changed = make(chan struct{})
+	s.mu.Unlock()
 }
 
 func (s *Service) newRunner(ctx context.Context, info *Info) (*task.Runner, error) {

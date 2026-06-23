@@ -1,50 +1,73 @@
 # Go Mode Implementation Plan
 
-This plan converges the codebase on the specific documents:
+This plan tracks remaining work to converge the codebase on:
 
 - `gomode/docs/SERVER_LIBRARY.md`
 - `gomode/docs/ANDROID_SHELL.md`
 - `gomode/docs/VOICE_GATEWAY.md`
 - `gomode/docs/VOICE_LOCAL_STACK.md`
 
-## Phase 1: Discovery Contract Cleanup
+## Current Baseline
+
+- The discovery manifest has `ToolGroup.protocolVersion`,
+  `SkillFrontmatter`, and validation for `Settings`, `ToolGroup`,
+  `SkillFrontmatter`, and `VoiceGatewaySettings`.
+- caic serves a single `tasks` tool group at `/.well-known/gomode.json`.
+- Android bootstrap has unvalidated, ready, and error states. WebView loading is
+  separate from native feature compatibility.
+- Android voice can use the first advertised tool group for MCP
+  `serverInstructions`, `tools/list`, and `tools/call`.
+- Backend MCP supports `server/discover`, resources, resource templates, and
+  POST-based SSE `subscriptions/listen`.
+- Backend resource subscriptions validate filters, stream task/repo
+  invalidations, emit resource-list and resource-content notifications, and stop
+  on context cancellation.
+- The voice gateway supports embedded and external modes. The standalone gateway
+  verifies transitional ed25519 scoped tokens from configured trusted issuers.
+- The local voice stack has managed llama.cpp ASR/LLM adapters, a KittenTTS
+  adapter, and smoke coverage for managed local-stack turns.
+
+## Android MCP Resources And Monitoring
 
 Tasks:
 
-1. Keep `ToolGroup.protocolVersion` in the manifest as the bootstrap MCP
-   compatibility value for the group endpoint.
-2. Move activation policy into SKILL.md frontmatter and expose
-   `SkillFrontmatter` in the Go Mode SDK.
-3. Add validation helpers for `Settings`, `ToolGroup`, `SkillFrontmatter`, and
-   `VoiceGatewaySettings`.
-4. Document `apiVersion`, `bridgeVersion`, and SKILL.md frontmatter
-   compatibility rules in SDK docs.
+1. Extend Android `McpClient` with:
+   - `resources/list`
+   - `resources/templates/list`
+   - `resources/read`
+   - POST-based SSE `subscriptions/listen`
+2. Add a shell-side service adapter interface keyed by manifest `service` and
+   `apiVersion`.
+3. Add caic adapter support for `caic://tasks`.
+4. Feed adapter output into notifications, attention state, and voice context.
+5. Treat subscription notifications as invalidations and re-read resources.
 
 Acceptance:
 
-- No TODO comments leak into generated Go Mode SDK docs.
-- caic serves a valid manifest at `/.well-known/gomode.json`.
-- Android tests reject malformed required manifest fields.
-- `make refresh-generated` and `make lint-fix` pass.
+- Android reads fake task resources without caic REST DTO imports.
+- Resource update events trigger re-read and update native monitoring state.
+- Unsupported resources disable monitoring cleanly.
+- Canceled Android connections release subscription resources.
 
-## Phase 2: External Gateway Token Flow
+## External Gateway Token Issuance
 
 Tasks:
 
 1. Add a caic voice-token endpoint under caic session auth.
-2. Populate `webShell.voiceGateway.tokenEndpoint` for external gateway auth.
-3. Make Android request the token before opening an external gateway session.
-4. Keep embedded gateway mode token-free.
+2. Configure caic signing keys for transitional ed25519 scoped voice tokens.
+3. Populate `webShell.voiceGateway.tokenEndpoint` for external gateway auth.
+4. Make Android request the token before opening an external gateway session.
+5. Keep embedded gateway mode token-free.
 
 Acceptance:
 
 - Embedded sessions work without a voice token.
 - External sessions fail without a token and succeed with a valid token.
 - Token claims bind service kind, service instance, backend origin, audience,
-  expiry, and capabilities.
+  expiry, subject, and capabilities.
 - Reject logs do not leak token contents.
 
-## Phase 3: OAuth JWT Federation
+## OAuth JWT Federation
 
 Tasks:
 
@@ -57,7 +80,7 @@ Tasks:
 2. Teach caic to mint OAuth access tokens with `aud=voice-gateway` and narrow
    voice scopes.
 3. Support key rotation through JWKS cache refresh.
-4. Keep ed25519 only as a compatibility or offline fallback.
+4. Keep ed25519 scoped tokens only as a compatibility or offline fallback.
 
 Acceptance:
 
@@ -66,98 +89,46 @@ Acceptance:
 - Rotated JWKS keys are accepted after cache refresh.
 - Expired, wrong-audience, and insufficient-scope tokens are rejected.
 
-## Phase 4: Android Bootstrap Robustness
+## Progressive Skill Activation
 
 Tasks:
 
-1. Implement explicit unvalidated, compatible, and incompatible states.
-2. Let WebView load in limited mode when manifest fetch or decode fails.
-3. Disable native MCP-backed features until manifest compatibility passes.
-4. Surface clear disabled or incompatible states for voice and monitoring.
-
-Acceptance:
-
-- WebView load does not depend on MCP discovery.
-- Missing or malformed manifest disables native features instead of crashing.
-- Voice setup uses the manifest gateway URL and selected skill endpoint.
-
-## Phase 5: Android MCP Resources And Monitoring
-
-Tasks:
-
-1. Extend Android MCP client with:
-   - `server/discover`
-   - `resources/list`
-   - `resources/templates/list`
-   - `resources/read`
-   - POST-based SSE `subscriptions/listen`
-2. Add service adapter interface keyed by `service` and `apiVersion`.
-3. Add caic adapter support for `caic://tasks`.
-4. Feed adapter output into notifications, attention state, and voice context.
-5. Treat subscription notifications as invalidations and re-read resources.
-
-Acceptance:
-
-- Android reads fake task resources without caic REST DTO imports.
-- Resource update events trigger re-read and update native monitoring state.
-- Unsupported resources disable monitoring cleanly.
-
-## Phase 6: Backend Subscription Invalidation
-
-Tasks:
-
-1. Add an internal change-notifier interface at the MCP registry or handler
-   boundary.
-2. Emit `notifications/resources/list_changed` when resource lists change.
-3. Emit `notifications/resources/updated` for subscribed URIs when content
-   changes.
-4. Keep polling only as a safe fallback where no notifier exists.
-5. Bound stream lifetime, memory, and goroutines.
-
-Acceptance:
-
-- Subscription tests do not wait on arbitrary polling intervals.
-- Canceled Android connections release resources.
-- Events are delivered without unbounded queue growth.
-
-## Phase 7: Progressive Tool-Group Activation
-
-Tasks:
-
-1. Load all skill names and descriptions at bootstrap.
-2. Fetch SKILL.md files and parse `gomode.activation` and `gomode.mcpServers`.
-3. Implement local activation scoring from supported location hints.
-4. Cap concurrently active skills.
-5. Namespace or reject colliding tool names.
-6. Show active skills and tools in native voice state.
-7. Deactivate skills when context no longer matches.
+1. Publish a canonical `SKILL.md` URL for the caic `tasks` tool group.
+2. Load all skill names and descriptions at bootstrap.
+3. Fetch `SKILL.md` files and parse `gomode.activation` and
+   `gomode.mcpServers`.
+4. Implement local activation scoring from supported location hints.
+5. Cap concurrently active skills.
+6. Namespace or reject colliding tool names.
+7. Show active skills and tools in native voice state.
+8. Deactivate skills when context no longer matches.
 
 Acceptance:
 
 - Single caic skill still activates by default.
 - Fake multi-skill manifests activate only matching skills.
 - Deactivation removes tools from the voice session.
+- Tool-name collisions are deterministic: either namespaced or rejected.
 
-## Phase 8: Local Voice Stack
+## Local Voice Stack Hardening
 
 Tasks:
 
 1. Run target-Mac smoke tests for managed llama.cpp ASR/LLM and KittenTTS.
-2. Compare Qwen3-ASR and whisper.cpp Parakeet support for ASR latency and
-   quality.
-3. Document macOS runtime requirements for managed llama.cpp and KittenTTS.
-4. Improve TTS chunking and streaming latency after half-duplex correctness is
-   validated.
+2. Compare Qwen3-ASR and Parakeet runtime paths for ASR latency and quality.
+3. Keep macOS runtime requirements current for managed llama.cpp and KittenTTS.
+4. Improve TTS chunking, backpressure, and perceived latency.
 5. Preserve interruption and tool-call behavior across local and Gemini
    backends.
 
 Acceptance:
 
-- Local backend completes a voice turn without Gemini Live.
+- Local backend completes a voice turn without Gemini Live on the target Mac.
 - Local backend calls client tools and continues after tool results.
 - User interruption stops TTS and cancels pending model work.
+- Setup and first-turn latency are measured and recorded in smoke-test output.
 
-## Phase 9: Repository Split
+## Repository Split
 
 Tasks:
 
