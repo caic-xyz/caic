@@ -16,35 +16,49 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/maruel/genai"
+	"github.com/maruel/genai/providers/llamacpp"
+	"github.com/pion/webrtc/v4"
+	"github.com/pion/webrtc/v4/pkg/media"
 
 	voicev1 "github.com/caic-xyz/caic/gomode/voicegateway/api/v1"
 )
 
 // TestSmokeVoiceRTCLocalAudio verifies the managed local-stack ASR, LLM, and
-// TTS paths with direct queries plus one WebRTC turn for the LLM.
+// TTS paths with direct queries, managed tool calls, and WebRTC turns.
 func TestSmokeVoiceRTCLocalAudio(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	runtimeCtx, runtimeCancel := context.WithCancel(context.WithoutCancel(t.Context()))
+	t.Cleanup(runtimeCancel)
+	root := t
+
+	var spokenPCM24 []byte
+	var tts *kittenTTSAdapter
+	var asr *genaiASRAdapter
+	var llm *genaiLLMAdapter
 
 	t.Run("Audio", func(t *testing.T) {
-		t.Parallel()
-
-		var spokenPCM24 []byte
 
 		t.Run("TTS", func(t *testing.T) {
-			runtimeCtx, runtimeCancel := context.WithCancel(context.WithoutCancel(t.Context()))
-			t.Cleanup(runtimeCancel)
-			tts, err := newKittenTTSAdapter(runtimeCtx)
+			startup := time.Now()
+			adapter, err := newKittenTTSAdapter(runtimeCtx)
+			t.Logf("KittenTTS startup setup time, excluded from latency measurements: %s", smokeElapsed(startup))
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(func() {
-				if err := tts.Close(); err != nil {
-					t.Fatal(err)
+			tts = adapter
+			root.Cleanup(func() {
+				if err := adapter.Close(); err != nil {
+					root.Fatal(err)
 				}
 			})
 
 			const smokeSentence = "I love bananas"
-			chunks, err := collectTTSChunks(t.Context(), tts, smokeSentence)
+			chunks, firstAudioLatency, synthesisLatency, err := collectTimedTTSChunks(t.Context(), adapter, smokeSentence)
+			t.Logf("KittenTTS first-audio latency: %s", firstAudioLatency)
+			t.Logf("KittenTTS synthesis latency: %s", synthesisLatency)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -62,19 +76,24 @@ func TestSmokeVoiceRTCLocalAudio(t *testing.T) {
 			if len(spokenPCM24) == 0 {
 				t.Fatal("TTS did not produce ASR input")
 			}
-			runtimeCtx, runtimeCancel := context.WithCancel(context.WithoutCancel(t.Context()))
-			t.Cleanup(runtimeCancel)
+			startup := time.Now()
 			endpoint, err := localStackLlamaEndpoint(runtimeCtx, "", "", defaultLocalStackASRModel, startManagedLlamaServer)
+			t.Logf("managed Qwen3-ASR startup setup time, excluded from latency measurements: %s", smokeElapsed(startup))
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(func() {
-				if err := endpoint.runtime.Close(); err != nil {
-					t.Fatal(err)
-				}
-			})
+			if endpoint.runtime != nil {
+				root.Cleanup(func() {
+					if err := endpoint.runtime.Close(); err != nil {
+						root.Fatal(err)
+					}
+				})
+			}
+			asr = &genaiASRAdapter{provider: endpoint.provider}
 
-			text, err := (&genaiASRAdapter{provider: endpoint.provider}).transcribe(t.Context(), downsample24to16(spokenPCM24))
+			transcription := time.Now()
+			text, err := asr.transcribe(t.Context(), downsample24to16(spokenPCM24))
+			t.Logf("Qwen3-ASR transcription latency: %s", smokeElapsed(transcription))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -97,25 +116,28 @@ func TestSmokeVoiceRTCLocalAudio(t *testing.T) {
 	})
 
 	t.Run("LLM", func(t *testing.T) {
-		t.Parallel()
-
-		runtimeCtx, runtimeCancel := context.WithCancel(context.WithoutCancel(t.Context()))
-		t.Cleanup(runtimeCancel)
+		startup := time.Now()
 		endpoint, err := localStackLlamaEndpoint(runtimeCtx, "", "", defaultLocalStackLLMModel, startManagedLlamaServer)
+		t.Logf("managed Gemma startup setup time, excluded from latency measurements: %s", smokeElapsed(startup))
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() {
-			if err := endpoint.runtime.Close(); err != nil {
-				t.Fatal(err)
-			}
-		})
+		if endpoint.runtime != nil {
+			root.Cleanup(func() {
+				if err := endpoint.runtime.Close(); err != nil {
+					root.Fatal(err)
+				}
+			})
+		}
+		llm = &genaiLLMAdapter{provider: endpoint.provider}
 
-		conv := (&genaiLLMAdapter{provider: endpoint.provider}).newConversation(
+		conv := llm.newConversation(
 			"Answer with a short plain text sentence.",
 			nil,
 		)
+		firstReply := time.Now()
 		reply, err := conv.user(t.Context(), "Reply with the word banana.")
+		t.Logf("Gemma first text reply latency: %s", smokeElapsed(firstReply))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -127,12 +149,16 @@ func TestSmokeVoiceRTCLocalAudio(t *testing.T) {
 		}
 		t.Logf("llama.cpp reply: %s", strings.TrimSpace(reply.text))
 
+		verifyManagedLLMToolCall(t, endpoint.provider)
+
 		s := newVoiceRTCTestSession(t.Context(), t, newLocalStackBackend(
 			func() vadSegmenter { return &energyVAD{} },
-			fixedASR{text: "hello"}, &genaiLLMAdapter{provider: endpoint.provider}, placeholderTTS{},
+			fixedASR{text: "hello"}, llm, placeholderTTS{},
 		))
+		turn := time.Now()
 		writeLocalMicAudio(t.Context(), t, s.micTrack)
 		data := waitForVoiceRTCMessage(t.Context(), t, s.messages, s.signalErrs, voicev1.MessageKindAssistantTextDelta)
+		t.Logf("WebRTC local turn to assistant text latency: %s", smokeElapsed(turn))
 		var msg voicev1.AssistantTextDelta
 		if err := json.Unmarshal(data, &msg); err != nil {
 			t.Fatal(err)
@@ -141,17 +167,203 @@ func TestSmokeVoiceRTCLocalAudio(t *testing.T) {
 			t.Fatal("assistant text is empty")
 		}
 	})
+
+	t.Run("FullWebRTC", func(t *testing.T) {
+		if len(spokenPCM24) == 0 {
+			t.Fatal("missing TTS-generated microphone input")
+		}
+		if asr == nil {
+			t.Fatal("missing managed ASR adapter")
+		}
+		if llm == nil {
+			t.Fatal("missing managed LLM adapter")
+		}
+		if tts == nil {
+			t.Fatal("missing KittenTTS adapter")
+		}
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+		t.Cleanup(cancel)
+		s := newVoiceRTCTestSession(ctx, t, newLocalStackBackend(
+			func() vadSegmenter { return &energyVAD{} },
+			asr, llm, tts,
+		))
+		turn := time.Now()
+		writePCM24MicAudio(ctx, t, s.micTrack, spokenPCM24)
+		data := waitForVoiceRTCMessage(ctx, t, s.messages, s.signalErrs, voicev1.MessageKindTranscriptDelta)
+		var transcript voicev1.TranscriptDelta
+		if err := json.Unmarshal(data, &transcript); err != nil {
+			t.Fatal(err)
+		}
+		if transcript.Speaker != voicev1.SpeakerUser || strings.TrimSpace(transcript.Text) == "" {
+			t.Fatalf("user transcript = %+v, want non-empty user transcript", transcript)
+		}
+		t.Logf("full WebRTC user transcript: %s", strings.TrimSpace(transcript.Text))
+
+		data = waitForVoiceRTCMessage(ctx, t, s.messages, s.signalErrs, voicev1.MessageKindAssistantTextDelta)
+		var assistant voicev1.AssistantTextDelta
+		if err := json.Unmarshal(data, &assistant); err != nil {
+			t.Fatal(err)
+		}
+		if strings.TrimSpace(assistant.Text) == "" {
+			t.Fatal("full WebRTC assistant text is empty")
+		}
+		t.Logf("full WebRTC assistant text: %s", strings.TrimSpace(assistant.Text))
+
+		select {
+		case energy := <-s.remoteAudioEnergy:
+			if energy < 1_000 {
+				t.Fatalf("full WebRTC assistant RTP audio energy = %.0f, want audible signal", energy)
+			}
+			t.Logf("full WebRTC assistant RTP audio energy: %.0f", energy)
+		case err := <-s.mediaErrs:
+			t.Fatal(err)
+		case err := <-s.signalErrs:
+			t.Fatal(err)
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		t.Logf("full WebRTC turn to audible RTP latency: %s", smokeElapsed(turn))
+	})
 }
 
-func collectTTSChunks(ctx context.Context, tts *kittenTTSAdapter, text string) ([][]byte, error) {
+func smokeElapsed(start time.Time) time.Duration {
+	return time.Since(start).Round(time.Millisecond)
+}
+
+func verifyManagedLLMToolCall(t *testing.T, provider genai.Provider) {
+	t.Run("ToolCall", func(t *testing.T) {
+		tools, err := genaiToolDefs([]voicev1.ToolDeclaration{{
+			Name:        "tasks_list",
+			Description: "List current tasks.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":5}},"required":["limit"],"additionalProperties":false}`),
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		toolOptions := &genai.GenOptionTools{Tools: tools, Force: genai.ToolCallRequired}
+		options := []genai.GenOption{
+			&genai.GenOptionText{SystemPrompt: "Use tools when required, then answer briefly after tool results."},
+			&llamacpp.GenOption{},
+			toolOptions,
+		}
+		messages := genai.Messages{genai.NewTextMessage("Call tasks_list now with limit 1.")}
+
+		toolCall := time.Now()
+		res, err := provider.GenSync(t.Context(), messages, options...)
+		t.Logf("Gemma forced tool-call latency: %s", smokeElapsed(toolCall))
+		if err != nil {
+			t.Fatal(err)
+		}
+		call, ok := firstGenAIToolCall(&res.Message)
+		if !ok {
+			t.Fatalf("Gemma response = %#v, want tool call", res.Message)
+		}
+		if call.Name != "tasks_list" {
+			t.Fatalf("tool call name = %q, want tasks_list", call.Name)
+		}
+		if call.ID == "" {
+			call.ID = "smoke-tool-call-1"
+		}
+		if call.Arguments == "" {
+			call.Arguments = "{}"
+		}
+		var args map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(call.Arguments), &args); err != nil {
+			t.Fatalf("tool call arguments = %q: %v", call.Arguments, err)
+		}
+		if _, ok := args["limit"]; !ok {
+			t.Fatalf("tool call arguments = %s, want limit", call.Arguments)
+		}
+		t.Logf("Gemma tool call: name=%s args=%s", call.Name, call.Arguments)
+
+		messages = append(messages, res.Message, genai.Message{ToolCallResults: []genai.ToolCallResult{{
+			ID:     call.ID,
+			Name:   call.Name,
+			Result: `{"tasks":[{"id":"smoke","title":"smoke task"}]}`,
+		}}})
+		toolOptions.Force = genai.ToolCallNone
+		toolResult := time.Now()
+		followup, err := provider.GenSync(t.Context(), messages, options...)
+		t.Logf("Gemma after tool-result latency: %s", smokeElapsed(toolResult))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if call, ok := firstGenAIToolCall(&followup.Message); ok {
+			t.Fatalf("follow-up tool call = %+v, want text", call)
+		}
+		text := strings.TrimSpace(genAIText(&followup.Message))
+		if text == "" {
+			t.Fatalf("follow-up response = %#v, want text", followup.Message)
+		}
+		t.Logf("Gemma tool result reply: %s", text)
+	})
+}
+
+func firstGenAIToolCall(msg *genai.Message) (*genai.ToolCall, bool) {
+	for i := range msg.Replies {
+		if !msg.Replies[i].ToolCall.IsZero() {
+			return &msg.Replies[i].ToolCall, true
+		}
+	}
+	return nil, false
+}
+
+func genAIText(msg *genai.Message) string {
+	text := strings.Builder{}
+	for i := range msg.Replies {
+		text.WriteString(msg.Replies[i].Text)
+	}
+	return text.String()
+}
+
+func collectTimedTTSChunks(ctx context.Context, tts *kittenTTSAdapter, text string) ([][]byte, time.Duration, time.Duration, error) {
+	start := time.Now()
+	var firstChunkLatency time.Duration
 	var chunks [][]byte
 	for pcm, err := range tts.synthesize(ctx, text) {
 		if err != nil {
-			return nil, err
+			return nil, firstChunkLatency, time.Since(start).Round(time.Millisecond), err
+		}
+		if len(chunks) == 0 {
+			firstChunkLatency = time.Since(start).Round(time.Millisecond)
 		}
 		chunks = append(chunks, pcm)
 	}
-	return chunks, nil
+	return chunks, firstChunkLatency, time.Since(start).Round(time.Millisecond), nil
+}
+
+func writePCM24MicAudio(ctx context.Context, t *testing.T, track *webrtc.TrackLocalStaticSample, pcm []byte) {
+	enc, err := newEncoder()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pcm48 := upsample24PCMTo48Samples(pcm, vadSilenceHangoverMS+200)
+	for off := 0; off < len(pcm48); off += encoderFrameSamples {
+		frame := make([]int16, encoderFrameSamples)
+		copy(frame, pcm48[off:min(off+encoderFrameSamples, len(pcm48))])
+		pkt, err := enc.Encode(frame)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := track.WriteSample(media.Sample{Data: pkt, Duration: frameDuration}); err != nil {
+			t.Fatal(err)
+		}
+		if !sleepCtx(ctx, frameDuration) {
+			t.Fatal(ctx.Err())
+		}
+	}
+}
+
+func upsample24PCMTo48Samples(pcm []byte, trailingSilenceMS int) []int16 {
+	samples24 := len(pcm) / 2
+	trailingSilenceSamples := encoderSampleRate * trailingSilenceMS / 1000
+	out := make([]int16, samples24*2+trailingSilenceSamples)
+	for i := range samples24 {
+		sample := int16(binary.LittleEndian.Uint16(pcm[i*2:])) //nolint:gosec // PCM uint16 to int16 reinterpret
+		out[i*2] = sample
+		out[i*2+1] = sample
+	}
+	return out
 }
 
 func downsample24to16(pcm []byte) []byte {
