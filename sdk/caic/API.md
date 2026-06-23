@@ -664,23 +664,14 @@ EventTextDelta is a streaming text fragment from --include-partial-messages.
 |-------|------|-------------|----------|
 | `text` | `string` |  | yes |
 
-### EventEditReplacement
+### EventFileChange
 
-EventEditReplacement is one exact text replacement in an edit tool call.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `oldText` | `string` |  | yes |
-| `newText` | `string` |  | yes |
-
-### EventEditToolInput
-
-EventEditToolInput is the normalized view of an exact-replacement edit tool.
+EventFileChange is one changed file rendered from a unified patch.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `path` | `string` |  | yes |
-| `edits` | `EventEditReplacement[]` |  | yes |
+| `patch` | `string` |  | yes |
 
 ### EventSubagentSpawn
 
@@ -701,7 +692,7 @@ inputs. It keeps harness-specific tool schemas out of clients.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `kind` | `string` |  | yes |
-| `edit` | `EventEditToolInput` |  |  |
+| `files` | `EventFileChange[]` |  |  |
 | `subagents` | `EventSubagentSpawn[]` |  |  |
 
 ### EventToolUse

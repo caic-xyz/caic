@@ -111,8 +111,8 @@ type EventToolUse struct {
 type EventToolInputKind string
 
 const (
-	// EventToolInputEdit renders exact text replacements.
-	EventToolInputEdit EventToolInputKind = "edit"
+	// EventToolInputFileChanges renders changed files as unified patches.
+	EventToolInputFileChanges EventToolInputKind = "fileChanges"
 	// EventToolInputSubagents renders one or more spawned subagents.
 	EventToolInputSubagents EventToolInputKind = "subagents"
 )
@@ -121,20 +121,14 @@ const (
 // inputs. It keeps harness-specific tool schemas out of clients.
 type EventToolInputView struct {
 	Kind      EventToolInputKind   `json:"kind"`
-	Edit      EventEditToolInput   `json:"edit,omitzero"`
+	Files     []EventFileChange    `json:"files,omitzero"`
 	Subagents []EventSubagentSpawn `json:"subagents,omitzero"`
 }
 
-// EventEditToolInput is the normalized view of an exact-replacement edit tool.
-type EventEditToolInput struct {
-	Path  string                 `json:"path"`
-	Edits []EventEditReplacement `json:"edits"`
-}
-
-// EventEditReplacement is one exact text replacement in an edit tool call.
-type EventEditReplacement struct {
-	OldText string `json:"oldText"`
-	NewText string `json:"newText"`
+// EventFileChange is one changed file rendered from a unified patch.
+type EventFileChange struct {
+	Path  string `json:"path"`
+	Patch string `json:"patch"`
 }
 
 // EventSubagentSpawn is one backend-normalized subagent invocation.

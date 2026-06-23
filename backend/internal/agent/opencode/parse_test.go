@@ -4,6 +4,7 @@ package opencode
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/maruel/genai/providers/opencode"
@@ -924,15 +925,15 @@ func TestNew(t *testing.T) {
 		if use.Detail != "main.ts" {
 			t.Fatalf("detail = %q, want main.ts", use.Detail)
 		}
-		if use.InputView.Kind != agent.ToolInputEdit {
-			t.Fatalf("input view kind = %q, want edit", use.InputView.Kind)
+		if use.InputView.Kind != agent.ToolInputFileChanges {
+			t.Fatalf("input view kind = %q, want fileChanges", use.InputView.Kind)
 		}
-		edit := use.InputView.Edit
-		if edit.Path != "src/main.ts" || len(edit.Edits) != 1 {
-			t.Fatalf("edit view = %#v", edit)
+		if len(use.InputView.Files) != 1 {
+			t.Fatalf("files = %#v, want one file", use.InputView.Files)
 		}
-		if edit.Edits[0].OldText != "before" || edit.Edits[0].NewText != "after" {
-			t.Fatalf("edit replacement = %#v, want before -> after", edit.Edits[0])
+		file := use.InputView.Files[0]
+		if file.Path != "src/main.ts" || !strings.Contains(file.Patch, "-before\n+after\n") {
+			t.Fatalf("file change = %#v", file)
 		}
 	})
 	t.Run("read edit bash fixture normalizes edit", func(t *testing.T) {
@@ -942,7 +943,7 @@ func TestNew(t *testing.T) {
 		var use *agent.ToolUseMessage
 		for _, msg := range msgs {
 			candidate, ok := msg.(*agent.ToolUseMessage)
-			if ok && candidate.Name == "Edit" && candidate.InputView.Kind == agent.ToolInputEdit {
+			if ok && candidate.Name == "Edit" && candidate.InputView.Kind == agent.ToolInputFileChanges {
 				use = candidate
 				break
 			}
@@ -953,15 +954,15 @@ func TestNew(t *testing.T) {
 		if use.Detail != "main.go" {
 			t.Fatalf("detail = %q, want main.go", use.Detail)
 		}
-		if use.InputView.Kind != agent.ToolInputEdit {
-			t.Fatalf("input view kind = %q, want edit", use.InputView.Kind)
+		if use.InputView.Kind != agent.ToolInputFileChanges {
+			t.Fatalf("input view kind = %q, want fileChanges", use.InputView.Kind)
 		}
-		edit := use.InputView.Edit
-		if edit.Path != "/workspace/main.go" || len(edit.Edits) != 1 {
-			t.Fatalf("edit view = %#v", edit)
+		if len(use.InputView.Files) != 1 {
+			t.Fatalf("files = %#v, want one file", use.InputView.Files)
 		}
-		if edit.Edits[0].OldText != "Hello" || edit.Edits[0].NewText != "Hi" {
-			t.Fatalf("edit replacement = %#v, want Hello -> Hi", edit.Edits[0])
+		file := use.InputView.Files[0]
+		if file.Path != "/workspace/main.go" || !strings.Contains(file.Patch, "-Hello") || !strings.Contains(file.Patch, "+Hi") {
+			t.Fatalf("file change = %#v", file)
 		}
 	})
 }

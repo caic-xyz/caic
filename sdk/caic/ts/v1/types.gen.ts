@@ -60,12 +60,12 @@ export const EventKindRateLimit: EventKind = "rateLimit";
 export const EventKindStats: EventKind = "stats";
 
 export type EventToolInputKind =
-  | "edit"
+  | "fileChanges"
   | "subagents";
 /**
  * Supported values.
  */
-export const EventToolInputEdit: EventToolInputKind = "edit";
+export const EventToolInputFileChanges: EventToolInputKind = "fileChanges";
 export const EventToolInputSubagents: EventToolInputKind = "subagents";
 
 export type ToolOutputContentType =
@@ -104,16 +104,10 @@ export interface EventTextDelta {
   text: string;
 }
 
-/** EventEditReplacement is one exact text replacement in an edit tool call. */
-export interface EventEditReplacement {
-  oldText: string;
-  newText: string;
-}
-
-/** EventEditToolInput is the normalized view of an exact-replacement edit tool. */
-export interface EventEditToolInput {
+/** EventFileChange is one changed file rendered from a unified patch. */
+export interface EventFileChange {
   path: string;
-  edits: EventEditReplacement[];
+  patch: string;
 }
 
 /** EventSubagentSpawn is one backend-normalized subagent invocation. */
@@ -130,7 +124,7 @@ export interface EventSubagentSpawn {
  */
 export interface EventToolInputView {
   kind: EventToolInputKind;
-  edit?: EventEditToolInput;
+  files?: EventFileChange[];
   subagents?: EventSubagentSpawn[];
 }
 

@@ -379,9 +379,9 @@ func newToolUseMessage(id, rawName, name string, input json.RawMessage) *agent.T
 		Input:     input,
 	}
 	if strings.EqualFold(name, "Edit") {
-		if edit, ok := parseEditArgs(input); ok {
-			use.Detail = path.Base(edit.Path)
-			use.InputView = agent.ToolInputView{Kind: agent.ToolInputEdit, Edit: edit}
+		if p, replacements, ok := parseEditArgs(input); ok {
+			use.Detail = path.Base(p)
+			use.InputView = agent.FileChangesInputViewFromReplacements(p, replacements)
 		}
 		return use
 	}
@@ -401,28 +401,28 @@ func newToolUseMessage(id, rawName, name string, input json.RawMessage) *agent.T
 	return use
 }
 
-func parseEditArgs(raw json.RawMessage) (agent.EditToolInput, bool) {
+func parseEditArgs(raw json.RawMessage) (string, []agent.TextReplacement, bool) {
 	var args pi.EditToolArgs
 	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil || args.Path == "" {
-		return agent.EditToolInput{}, false
+		return "", nil, false
 	}
-	edits := make([]agent.EditReplacement, 0, len(args.Edits)+1)
+	replacements := make([]agent.TextReplacement, 0, len(args.Edits)+1)
 	for _, edit := range args.Edits {
 		if edit.OldText == "" {
-			return agent.EditToolInput{}, false
+			return "", nil, false
 		}
-		edits = append(edits, agent.EditReplacement{OldText: edit.OldText, NewText: edit.NewText})
+		replacements = append(replacements, agent.TextReplacement{OldText: edit.OldText, NewText: edit.NewText})
 	}
 	if args.OldText != "" || args.NewText != "" {
 		if args.OldText == "" {
-			return agent.EditToolInput{}, false
+			return "", nil, false
 		}
-		edits = append(edits, agent.EditReplacement{OldText: args.OldText, NewText: args.NewText})
+		replacements = append(replacements, agent.TextReplacement{OldText: args.OldText, NewText: args.NewText})
 	}
-	if len(edits) == 0 {
-		return agent.EditToolInput{}, false
+	if len(replacements) == 0 {
+		return "", nil, false
 	}
-	return agent.EditToolInput{Path: args.Path, Edits: edits}, true
+	return args.Path, replacements, true
 }
 
 // subagentToolName is Pi's raw tool name for spawning and orchestrating

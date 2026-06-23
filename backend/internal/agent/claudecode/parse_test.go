@@ -5,6 +5,7 @@ package claudecode
 import (
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 
 	genclaudecode "github.com/maruel/genai/providers/claudecode"
@@ -1095,8 +1096,12 @@ func TestNew(t *testing.T) {
 		if use.Detail != "main.ts" {
 			t.Fatalf("detail = %q", use.Detail)
 		}
-		if use.InputView.Kind != agent.ToolInputEdit || use.InputView.Edit.Path != "src/main.ts" || len(use.InputView.Edit.Edits) != 1 {
+		if use.InputView.Kind != agent.ToolInputFileChanges || len(use.InputView.Files) != 1 {
 			t.Fatalf("input view = %#v", use.InputView)
+		}
+		file := use.InputView.Files[0]
+		if file.Path != "src/main.ts" || !strings.Contains(file.Patch, "-before\n+after\n") {
+			t.Fatalf("file change = %#v", file)
 		}
 	})
 	t.Run("read edit bash fixture normalizes edit", func(t *testing.T) {
@@ -1106,7 +1111,7 @@ func TestNew(t *testing.T) {
 		var use *agent.ToolUseMessage
 		for _, msg := range msgs {
 			candidate, ok := msg.(*agent.ToolUseMessage)
-			if ok && candidate.Name == "Edit" && candidate.InputView.Kind == agent.ToolInputEdit {
+			if ok && candidate.Name == "Edit" && candidate.InputView.Kind == agent.ToolInputFileChanges {
 				use = candidate
 				break
 			}
@@ -1117,12 +1122,12 @@ func TestNew(t *testing.T) {
 		if use.Detail != "main.go" {
 			t.Fatalf("detail = %q, want main.go", use.Detail)
 		}
-		edit := use.InputView.Edit
-		if edit.Path != "/workspace/main.go" || len(edit.Edits) != 1 {
-			t.Fatalf("edit view = %#v", edit)
+		if len(use.InputView.Files) != 1 {
+			t.Fatalf("files = %#v, want one file", use.InputView.Files)
 		}
-		if edit.Edits[0].OldText != "\tfmt.Println(\"Hello, World!\")" || edit.Edits[0].NewText != "\tfmt.Println(\"Hi, World!\")" {
-			t.Fatalf("edit replacement = %#v", edit.Edits[0])
+		file := use.InputView.Files[0]
+		if file.Path != "/workspace/main.go" || !strings.Contains(file.Patch, "-\tfmt.Println(\"Hello, World!\")") || !strings.Contains(file.Patch, "+\tfmt.Println(\"Hi, World!\")") {
+			t.Fatalf("file change = %#v", file)
 		}
 	})
 	t.Run("edit input", func(t *testing.T) {
@@ -1130,29 +1135,29 @@ func TestNew(t *testing.T) {
 
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
-			edit, ok := parseEditInput(json.RawMessage(`{"file_path":"src/main.ts","old_string":"before","new_string":"after"}`))
+			p, replacements, ok := parseEditInput(json.RawMessage(`{"file_path":"src/main.ts","old_string":"before","new_string":"after"}`))
 			if !ok {
 				t.Fatal("parseEditInput returned false")
 			}
-			if edit.Path != "src/main.ts" || len(edit.Edits) != 1 || edit.Edits[0].OldText != "before" || edit.Edits[0].NewText != "after" {
-				t.Fatalf("edit = %+v", edit)
+			if p != "src/main.ts" || len(replacements) != 1 || replacements[0].OldText != "before" || replacements[0].NewText != "after" {
+				t.Fatalf("path/replacements = %q/%+v", p, replacements)
 			}
 		})
 
 		t.Run("multi edit", func(t *testing.T) {
 			t.Parallel()
-			edit, ok := parseEditInput(json.RawMessage(`{"file_path":"src/main.ts","edits":[{"old_string":"a","new_string":"b"},{"old_string":"c","new_string":"d"}]}`))
+			_, replacements, ok := parseEditInput(json.RawMessage(`{"file_path":"src/main.ts","edits":[{"old_string":"a","new_string":"b"},{"old_string":"c","new_string":"d"}]}`))
 			if !ok {
 				t.Fatal("parseEditInput returned false")
 			}
-			if len(edit.Edits) != 2 {
-				t.Fatalf("got %d edits, want 2", len(edit.Edits))
+			if len(replacements) != 2 {
+				t.Fatalf("got %d replacements, want 2", len(replacements))
 			}
 		})
 
 		t.Run("error", func(t *testing.T) {
 			t.Parallel()
-			if _, ok := parseEditInput(json.RawMessage(`{"file_path":"src/main.ts","new_string":"after"}`)); ok {
+			if _, _, ok := parseEditInput(json.RawMessage(`{"file_path":"src/main.ts","new_string":"after"}`)); ok {
 				t.Fatal("parseEditInput accepted missing old string")
 			}
 		})

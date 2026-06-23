@@ -45,13 +45,10 @@ func EventToolInputView(view *agent.ToolInputView) v1.EventToolInputView {
 		return v1.EventToolInputView{}
 	}
 	out := v1.EventToolInputView{Kind: v1.EventToolInputKind(view.Kind)}
-	if view.Edit.Path != "" || len(view.Edit.Edits) > 0 {
-		out.Edit = v1.EventEditToolInput{
-			Path:  view.Edit.Path,
-			Edits: make([]v1.EventEditReplacement, len(view.Edit.Edits)),
-		}
-		for i, edit := range view.Edit.Edits {
-			out.Edit.Edits[i] = v1.EventEditReplacement{OldText: edit.OldText, NewText: edit.NewText}
+	if len(view.Files) > 0 {
+		out.Files = make([]v1.EventFileChange, len(view.Files))
+		for i, file := range view.Files {
+			out.Files[i] = v1.EventFileChange{Path: file.Path, Patch: file.Patch}
 		}
 	}
 	if len(view.Subagents) > 0 {

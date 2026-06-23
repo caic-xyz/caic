@@ -1,9 +1,6 @@
 /* Compact summary card for a single task. */
 
 .card {
-  --color-diff-added: #22863a;
-  --color-diff-deleted: #cb2431;
-
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   padding: 0.75rem;

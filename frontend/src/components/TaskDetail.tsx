@@ -11,6 +11,7 @@ import { Marked } from "marked";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import PromptInput from "./PromptInput";
 import Button from "./Button";
+import UnifiedDiffBlock from "./UnifiedDiffBlock";
 import { requestNotificationPermission } from "../notifications";
 import { useHostMode } from "../hostMode";
 import ProgressPanel from "./ProgressPanel";
@@ -1318,20 +1319,14 @@ function GenericToolCallInput(props: { input: Record<string, unknown> }) {
   );
 }
 
-function EditToolInputView(props: { input: NonNullable<EventToolInputView["edit"]> }) {
+function FileChangesInputView(props: { files: NonNullable<EventToolInputView["files"]> }) {
   return (
-    <div class={styles.editInput}>
-      <div class={styles.toolInputRow}>
-        <span class={styles.toolInputKey}>path:</span> {props.input.path}
-      </div>
-      <For each={props.input.edits}>
-        {(edit, index) => (
-          <div class={styles.editReplacement}>
-            <div class={styles.editReplacementTitle}>edit {index() + 1}</div>
-            <div class={styles.editColumnTitle}>oldText</div>
-            <pre class={`${styles.editTextBlock} ${styles.editTextRemoved}`}>{edit.oldText}</pre>
-            <div class={styles.editColumnTitle}>newText</div>
-            <pre class={`${styles.editTextBlock} ${styles.editTextAdded}`}>{edit.newText}</pre>
+    <div class={styles.fileChangesInput}>
+      <For each={props.files}>
+        {(file) => (
+          <div class={styles.toolPatchFile}>
+            <div class={styles.toolPatchPath}>{file.path}</div>
+            <UnifiedDiffBlock diff={file.patch} compact />
           </div>
         )}
       </For>
@@ -1342,8 +1337,8 @@ function EditToolInputView(props: { input: NonNullable<EventToolInputView["edit"
 function ToolInputView(props: { view: EventToolInputView }) {
   return (
     <Switch>
-      <Match when={props.view.kind === "edit" && props.view.edit} keyed>
-        {(edit) => <EditToolInputView input={edit} />}
+      <Match when={props.view.kind === "fileChanges" && props.view.files} keyed>
+        {(files) => <FileChangesInputView files={files} />}
       </Match>
       <Match when={props.view.kind === "subagents" && props.view.subagents} keyed>
         {(spawns) => <SubagentSpawns spawns={spawns} />}

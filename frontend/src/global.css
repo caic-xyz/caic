@@ -81,6 +81,11 @@
   --color-widget-border: var(--color-border-medium);
   --color-widget-bg: var(--color-bg-surface);
 
+  /* Diff summary counts */
+  --color-diff-added: #22863a;
+  --color-diff-deleted: #cb2431;
+  --color-diff-binary: #6a737d;
+
   /* Border radii */
   --radius-sm: 4px;
   --radius-md: 8px;

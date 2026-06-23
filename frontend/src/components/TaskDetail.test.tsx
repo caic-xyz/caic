@@ -137,6 +137,50 @@ describe("TaskDetail", () => {
     expect(navigateMock).toHaveBeenCalledWith("/task/@abc+test-task/diff");
   });
 
+  it("renders Codex file-change diffs with colored lines", () => {
+    vi.mocked(taskEventStream).mockImplementationOnce((_id, cb, _onError, onReady) => {
+      const events: EventMessage[] = [
+        {
+          kind: "toolUse",
+          ts: 1,
+          toolUse: {
+            toolUseID: "edit-1",
+            name: "Edit",
+            detail: "main.go",
+            input: [{ path: "/workspace/main.go", diff: "@@ -5,3 +5,3 @@\n func main() {\n-\tfmt.Println(\"Hello, World!\")\n+\tfmt.Println(\"Hi, World!\")\n }\n" }],
+            inputView: {
+              kind: "fileChanges",
+              files: [{
+                path: "/workspace/main.go",
+                patch: "@@ -5,3 +5,3 @@\n func main() {\n-\tfmt.Println(\"Hello, World!\")\n+\tfmt.Println(\"Hi, World!\")\n }\n",
+              }],
+            },
+          },
+        },
+        {
+          kind: "toolResult",
+          ts: 2,
+          toolResult: { toolUseID: "edit-1", duration: 0.1 },
+        },
+      ];
+      for (const event of events) cb(event);
+      onReady?.();
+      return {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      } as unknown as EventSource;
+    });
+
+    const { getByText } = renderTaskDetail({ harness: "codex" });
+
+    expect(getByText("/workspace/main.go")).toBeInTheDocument();
+    const added = getByText((_, element) => element?.textContent === "+\tfmt.Println(\"Hi, World!\")");
+    const deleted = getByText((_, element) => element?.textContent === "-\tfmt.Println(\"Hello, World!\")");
+    expect(added.className).toMatch(/lineAdded/);
+    expect(deleted.className).toMatch(/lineDeleted/);
+  });
+
   it("shows recover actions for crashed tasks", async () => {
     const user = userEvent.setup();
     const onRevive = vi.fn();

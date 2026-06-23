@@ -1,10 +1,6 @@
 /* Styles for the full-page DiffView component. */
 
 .container {
-  --color-diff-added: #22863a;
-  --color-diff-deleted: #cb2431;
-  --color-diff-binary: #6a737d;
-
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -119,81 +115,6 @@
   color: var(--color-diff-binary);
   font-style: italic;
   flex-shrink: 0;
-}
-
-.diffContent {
-  --color-diff-code-bg: #1e1e1e;
-  --color-diff-code-fg: #d4d4d4;
-  --color-diff-added-line: #4ec94e;
-  --color-diff-deleted-line: #f44;
-  --color-diff-added-whitespace-line: #6daa6d;
-  --color-diff-deleted-whitespace-line: #d07373;
-  --color-diff-moved-added-line: #7dd3fc;
-  --color-diff-moved-added-alt-line: #a7f3d0;
-  --color-diff-moved-deleted-line: #f0abfc;
-  --color-diff-moved-deleted-alt-line: #fcd34d;
-  --color-diff-moved-added-bg: #102f3d;
-  --color-diff-moved-added-alt-bg: #123226;
-  --color-diff-moved-deleted-bg: #351836;
-  --color-diff-moved-deleted-alt-bg: #3b2b0b;
-  --color-diff-hunk: #b48ead;
-
-  margin: 0.25rem 0;
-  padding: 0.5rem;
-  background: var(--color-diff-code-bg);
-  color: var(--color-diff-code-fg);
-  font-size: 0.75rem;
-  line-height: 1.4;
-  border-radius: var(--radius-md);
-  overflow-x: auto;
-}
-
-.diffContent div {
-  white-space: pre;
-}
-
-.diffLineAdded {
-  color: var(--color-diff-added-line);
-}
-
-.diffLineDeleted {
-  color: var(--color-diff-deleted-line);
-}
-
-.diffLineAddedWhitespace {
-  color: var(--color-diff-added-whitespace-line);
-}
-
-.diffLineDeletedWhitespace {
-  color: var(--color-diff-deleted-whitespace-line);
-}
-
-.diffLineMovedAdded {
-  color: var(--color-diff-moved-added-line);
-  background: var(--color-diff-moved-added-bg);
-}
-
-.diffLineMovedAddedAlt {
-  color: var(--color-diff-moved-added-alt-line);
-  background: var(--color-diff-moved-added-alt-bg);
-}
-
-.diffLineMovedDeleted {
-  color: var(--color-diff-moved-deleted-line);
-  background: var(--color-diff-moved-deleted-bg);
-}
-
-.diffLineMovedDeletedAlt {
-  color: var(--color-diff-moved-deleted-alt-line);
-  background: var(--color-diff-moved-deleted-alt-bg);
-}
-
-.diffLineHunk {
-  color: var(--color-diff-hunk);
-}
-
-.diffLineHeader {
-  color: var(--color-text-muted);
 }
 
 .diffLoading {

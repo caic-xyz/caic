@@ -4,6 +4,7 @@ package pi
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,8 +23,12 @@ func TestNew(t *testing.T) {
 		if use.Detail != "SERVER_LIBRARY.md" {
 			t.Fatalf("detail = %q", use.Detail)
 		}
-		if use.InputView.Kind != "edit" || use.InputView.Edit.Path != "gomode/docs/SERVER_LIBRARY.md" || len(use.InputView.Edit.Edits) != 1 {
+		if use.InputView.Kind != agent.ToolInputFileChanges || len(use.InputView.Files) != 1 {
 			t.Fatalf("input view = %#v", use.InputView)
+		}
+		file := use.InputView.Files[0]
+		if file.Path != "gomode/docs/SERVER_LIBRARY.md" || !strings.Contains(file.Patch, "-before\n+after\n") {
+			t.Fatalf("file change = %#v", file)
 		}
 	})
 	t.Run("read edit bash fixture normalizes edit", func(t *testing.T) {
@@ -33,7 +38,7 @@ func TestNew(t *testing.T) {
 		var use *agent.ToolUseMessage
 		for _, msg := range msgs {
 			candidate, ok := msg.(*agent.ToolUseMessage)
-			if ok && candidate.Name == "Edit" && candidate.InputView.Kind == agent.ToolInputEdit {
+			if ok && candidate.Name == "Edit" && candidate.InputView.Kind == agent.ToolInputFileChanges {
 				use = candidate
 				break
 			}
@@ -44,30 +49,30 @@ func TestNew(t *testing.T) {
 		if use.Detail != "main.go" {
 			t.Fatalf("detail = %q, want main.go", use.Detail)
 		}
-		edit := use.InputView.Edit
-		if edit.Path != "/workspace/main.go" || len(edit.Edits) != 1 {
-			t.Fatalf("edit view = %#v", edit)
+		if len(use.InputView.Files) != 1 {
+			t.Fatalf("files = %#v, want one file", use.InputView.Files)
 		}
-		if edit.Edits[0].OldText != `fmt.Println("Hello, World!")` || edit.Edits[0].NewText != `fmt.Println("Hi, World!")` {
-			t.Fatalf("edit replacement = %#v", edit.Edits[0])
+		file := use.InputView.Files[0]
+		if file.Path != "/workspace/main.go" || !strings.Contains(file.Patch, `-fmt.Println("Hello, World!")`) || !strings.Contains(file.Patch, `+fmt.Println("Hi, World!")`) {
+			t.Fatalf("file change = %#v", file)
 		}
 	})
 	t.Run("edit args", func(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
-			edit, ok := parseEditArgs(json.RawMessage(`{"path":"gomode/docs/SERVER_LIBRARY.md","edits":[{"oldText":"before","newText":"after"}]}`))
+			p, replacements, ok := parseEditArgs(json.RawMessage(`{"path":"gomode/docs/SERVER_LIBRARY.md","edits":[{"oldText":"before","newText":"after"}]}`))
 			if !ok {
 				t.Fatal("parseEditArgs returned false")
 			}
-			if edit.Path != "gomode/docs/SERVER_LIBRARY.md" || len(edit.Edits) != 1 || edit.Edits[0].OldText != "before" || edit.Edits[0].NewText != "after" {
-				t.Fatalf("edit = %+v", edit)
+			if p != "gomode/docs/SERVER_LIBRARY.md" || len(replacements) != 1 || replacements[0].OldText != "before" || replacements[0].NewText != "after" {
+				t.Fatalf("path/replacements = %q/%+v", p, replacements)
 			}
 		})
 
 		t.Run("error", func(t *testing.T) {
 			t.Parallel()
-			if _, ok := parseEditArgs(json.RawMessage(`{"path":"x","edits":[{"newText":"after"}]}`)); !ok {
+			if _, _, ok := parseEditArgs(json.RawMessage(`{"path":"x","edits":[{"newText":"after"}]}`)); !ok {
 				return
 			}
 			t.Fatal("parseEditArgs accepted malformed edit")

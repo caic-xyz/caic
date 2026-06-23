@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/harness"
@@ -79,8 +81,8 @@ type ToolUseMessage struct {
 type ToolInputViewKind string
 
 const (
-	// ToolInputEdit renders exact text replacements.
-	ToolInputEdit ToolInputViewKind = "edit"
+	// ToolInputFileChanges renders changed files as unified patches.
+	ToolInputFileChanges ToolInputViewKind = "fileChanges"
 	// ToolInputSubagents renders one or more spawned subagents.
 	ToolInputSubagents ToolInputViewKind = "subagents"
 )
@@ -88,20 +90,20 @@ const (
 // ToolInputView is a backend-normalized rendering model for known tool inputs.
 type ToolInputView struct {
 	Kind      ToolInputViewKind `json:"kind"`
-	Edit      EditToolInput     `json:"edit,omitzero"`
+	Files     []FileChange      `json:"files,omitzero"`
 	Subagents []SubagentSpawn   `json:"subagents,omitzero"`
 }
 
-// EditToolInput is the normalized view of an exact-replacement edit tool.
-type EditToolInput struct {
-	Path  string            `json:"path"`
-	Edits []EditReplacement `json:"edits"`
+// FileChange is one changed file rendered from a unified patch.
+type FileChange struct {
+	Path  string `json:"path"`
+	Patch string `json:"patch"`
 }
 
-// EditReplacement is one exact text replacement in an edit tool call.
-type EditReplacement struct {
-	OldText string `json:"oldText"`
-	NewText string `json:"newText"`
+// TextReplacement is one exact text replacement reported by an edit tool.
+type TextReplacement struct {
+	OldText string
+	NewText string
 }
 
 // SubagentSpawn is one backend-normalized subagent invocation.
@@ -110,6 +112,58 @@ type SubagentSpawn struct {
 	Task  string `json:"task"`
 	Label string `json:"label,omitempty"`
 	Phase string `json:"phase,omitempty"`
+}
+
+// FileChangesInputView returns a normalized file-change rendering model.
+func FileChangesInputView(files []FileChange) ToolInputView {
+	if len(files) == 0 {
+		return ToolInputView{}
+	}
+	return ToolInputView{
+		Kind:  ToolInputFileChanges,
+		Files: files,
+	}
+}
+
+// FileChangesInputViewFromReplacements converts exact replacements to a
+// synthetic unified patch so every edit-like tool uses the same display model.
+func FileChangesInputViewFromReplacements(path string, replacements []TextReplacement) ToolInputView {
+	if path == "" || len(replacements) == 0 {
+		return ToolInputView{}
+	}
+	return FileChangesInputView([]FileChange{{
+		Path:  path,
+		Patch: textReplacementsPatch(path, replacements),
+	}})
+}
+
+func textReplacementsPatch(path string, replacements []TextReplacement) string {
+	var b strings.Builder
+	b.WriteString("--- ")
+	b.WriteString(path)
+	b.WriteByte('\n')
+	b.WriteString("+++ ")
+	b.WriteString(path)
+	b.WriteByte('\n')
+	for i, r := range replacements {
+		b.WriteString("@@ replacement ")
+		b.WriteString(strconv.Itoa(i + 1))
+		b.WriteString(" @@\n")
+		writePatchLines(&b, '-', r.OldText)
+		writePatchLines(&b, '+', r.NewText)
+	}
+	return b.String()
+}
+
+func writePatchLines(b *strings.Builder, prefix byte, text string) {
+	if text == "" {
+		return
+	}
+	for line := range strings.Lines(text) {
+		b.WriteByte(prefix)
+		b.WriteString(strings.TrimSuffix(line, "\n"))
+		b.WriteByte('\n')
+	}
 }
 
 // Type implements Message.

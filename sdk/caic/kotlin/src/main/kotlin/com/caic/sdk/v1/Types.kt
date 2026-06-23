@@ -282,8 +282,8 @@ object EventKindSerializer : KSerializer<EventKind> {
 sealed interface EventToolInputKind {
     val value: String
     @Serializable
-    data object EventToolInputEdit : EventToolInputKind {
-        override val value = "edit"
+    data object EventToolInputFileChanges : EventToolInputKind {
+        override val value = "fileChanges"
     }
     @Serializable
     data object EventToolInputSubagents : EventToolInputKind {
@@ -299,7 +299,7 @@ object EventToolInputKindSerializer : KSerializer<EventToolInputKind> {
     override fun deserialize(decoder: Decoder): EventToolInputKind {
         val v = decoder.decodeString()
         return when (v) {
-            "edit" -> EventToolInputKind.EventToolInputEdit
+            "fileChanges" -> EventToolInputKind.EventToolInputFileChanges
             "subagents" -> EventToolInputKind.EventToolInputSubagents
             else -> EventToolInputKind.Other(v)
         }
@@ -1176,13 +1176,9 @@ data class EventText(val text: String)
 @Serializable
 data class EventTextDelta(val text: String)
 
-/** EventEditReplacement is one exact text replacement in an edit tool call. */
+/** EventFileChange is one changed file rendered from a unified patch. */
 @Serializable
-data class EventEditReplacement(val oldText: String, val newText: String)
-
-/** EventEditToolInput is the normalized view of an exact-replacement edit tool. */
-@Serializable
-data class EventEditToolInput(val path: String, val edits: List<EventEditReplacement>)
+data class EventFileChange(val path: String, val patch: String)
 
 /** EventSubagentSpawn is one backend-normalized subagent invocation. */
 @Serializable
@@ -1200,7 +1196,7 @@ data class EventSubagentSpawn(
 @Serializable
 data class EventToolInputView(
     val kind: EventToolInputKind,
-    val edit: EventEditToolInput? = null,
+    val files: List<EventFileChange>? = null,
     val subagents: List<EventSubagentSpawn>? = null,
 )
 

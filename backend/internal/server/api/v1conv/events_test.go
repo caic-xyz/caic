@@ -14,7 +14,7 @@ import (
 func TestToolTimingTrackerConvertMessage(t *testing.T) {
 	t.Parallel()
 
-	t.Run("tool use includes normalized edit display", func(t *testing.T) {
+	t.Run("tool use includes replacement file changes display", func(t *testing.T) {
 		t.Parallel()
 		tracker := NewToolTimingTracker(harness.Pi, nil)
 		events := tracker.ConvertMessage(&agent.ToolUseMessage{
@@ -22,15 +22,10 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 			Name:      "Edit",
 			Detail:    "SERVER_LIBRARY.md",
 			Input:     []byte(`{"path":"gomode/docs/SERVER_LIBRARY.md","edits":[{"oldText":"before","newText":"after"}]}`),
-			InputView: agent.ToolInputView{
-				Kind: agent.ToolInputEdit,
-				Edit: agent.EditToolInput{
-					Path: "gomode/docs/SERVER_LIBRARY.md",
-					Edits: []agent.EditReplacement{
-						{OldText: "before", NewText: "after"},
-					},
-				},
-			},
+			InputView: agent.FileChangesInputViewFromReplacements(
+				"gomode/docs/SERVER_LIBRARY.md",
+				[]agent.TextReplacement{{OldText: "before", NewText: "after"}},
+			),
 		}, time.Unix(1, 0))
 		if len(events) != 1 {
 			t.Fatalf("got %d events, want 1", len(events))
@@ -42,11 +37,15 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 		if use.Detail != "SERVER_LIBRARY.md" {
 			t.Fatalf("detail = %q, want file basename", use.Detail)
 		}
-		if use.InputView.Kind != v1.EventToolInputEdit {
-			t.Fatalf("input view = %#v, want edit view", use.InputView)
+		if use.InputView.Kind != v1.EventToolInputFileChanges {
+			t.Fatalf("input view = %#v, want file changes view", use.InputView)
 		}
-		if use.InputView.Edit.Path != "gomode/docs/SERVER_LIBRARY.md" || len(use.InputView.Edit.Edits) != 1 {
-			t.Fatalf("edit view = %#v", use.InputView.Edit)
+		if len(use.InputView.Files) != 1 {
+			t.Fatalf("files = %#v, want one file", use.InputView.Files)
+		}
+		file := use.InputView.Files[0]
+		if file.Path != "gomode/docs/SERVER_LIBRARY.md" || file.Patch == "" {
+			t.Fatalf("file change = %#v", file)
 		}
 	})
 
@@ -78,6 +77,36 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 		}
 		if use.InputView.Kind != v1.EventToolInputSubagents || len(use.InputView.Subagents) != 3 {
 			t.Fatalf("input view = %#v, want subagent view", use.InputView)
+		}
+	})
+
+	t.Run("tool use includes patch file changes display", func(t *testing.T) {
+		t.Parallel()
+		tracker := NewToolTimingTracker(harness.Codex, nil)
+		events := tracker.ConvertMessage(&agent.ToolUseMessage{
+			ToolUseID: "edit-1",
+			Name:      "Edit",
+			Detail:    "main.go",
+			InputView: agent.FileChangesInputView([]agent.FileChange{{
+				Path:  "/workspace/main.go",
+				Patch: "@@ -1 +1 @@\n-old\n+new\n",
+			}}),
+		}, time.Unix(1, 0))
+		if len(events) != 1 {
+			t.Fatalf("got %d events, want 1", len(events))
+		}
+		use := events[0].ToolUse
+		if use == nil {
+			t.Fatalf("tool use is nil")
+		}
+		if use.InputView.Kind != v1.EventToolInputFileChanges {
+			t.Fatalf("input view = %#v, want file changes view", use.InputView)
+		}
+		if len(use.InputView.Files) != 1 {
+			t.Fatalf("files = %#v, want one file", use.InputView.Files)
+		}
+		if use.InputView.Files[0].Path != "/workspace/main.go" || use.InputView.Files[0].Patch == "" {
+			t.Fatalf("file change = %#v", use.InputView.Files[0])
 		}
 	})
 

@@ -270,8 +270,8 @@ a.headerPR:hover {
 }
 
 .markdown {
-  --color-diff-code-bg: #1e1e1e;
-  --color-diff-code-fg: #d4d4d4;
+  --markdown-code-block-bg: #1e1e1e;
+  --markdown-code-block-fg: #d4d4d4;
 
   margin-bottom: 0.25rem;
   line-height: 1.5;
@@ -316,8 +316,8 @@ a.headerPR:hover {
 }
 
 .markdown pre {
-  background: var(--color-diff-code-bg);
-  color: var(--color-diff-code-fg);
+  background: var(--markdown-code-block-bg);
+  color: var(--markdown-code-block-fg);
   padding: 0.75em;
   border-radius: var(--radius-md);
   overflow-x: auto;
@@ -626,10 +626,6 @@ a.ciStatus:hover {
 }
 
 .resultDiffStat {
-  --color-diff-added: #22863a;
-  --color-diff-deleted: #cb2431;
-  --color-diff-binary: #6a737d;
-
   margin: 0.25rem 0 0;
   padding: 0.4rem 0.6rem;
   background: rgba(0, 0, 0, 0.05);
@@ -779,48 +775,23 @@ a.ciStatus:hover {
   word-break: break-word;
 }
 
-.editInput {
+.fileChangesInput {
   font-size: 0.75rem;
   margin: 0.15rem 0;
   line-height: 1.35;
 }
 
-.editReplacement {
+.toolPatchFile {
   margin-top: 0.35rem;
   padding-left: 0.5rem;
   border-left: 2px solid var(--color-border);
 }
 
-.editReplacementTitle {
+.toolPatchPath {
   color: var(--color-text-secondary);
   font-weight: 600;
   margin-bottom: 0.15rem;
-}
-
-.editColumnTitle {
-  color: var(--color-text-tertiary);
-  font-weight: 500;
-  margin-top: 0.2rem;
-}
-
-.editTextBlock {
-  margin: 0.1rem 0 0;
-  padding: 0.35rem 0.5rem;
-  white-space: pre-wrap;
   word-break: break-word;
-  border-radius: var(--radius-sm);
-  max-height: 14rem;
-  overflow: auto;
-}
-
-.editTextRemoved {
-  background: var(--color-danger-bg);
-  color: var(--color-danger-text);
-}
-
-.editTextAdded {
-  background: var(--color-success-bg);
-  color: var(--color-success-text);
 }
 
 .subagentList {

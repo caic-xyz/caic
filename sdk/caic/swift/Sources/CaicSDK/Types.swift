@@ -155,7 +155,7 @@ public struct EventToolInputKind: Codable, Equatable, Hashable {
 
     public init(_ value: String) { self.value = value }
 
-    public static let EventToolInputEdit = EventToolInputKind("edit")
+    public static let EventToolInputFileChanges = EventToolInputKind("fileChanges")
     public static let EventToolInputSubagents = EventToolInputKind("subagents")
 
     public static func other(_ value: String) -> EventToolInputKind { EventToolInputKind(value) }
@@ -860,16 +860,10 @@ public struct EventTextDelta: Codable {
     public let text: String
 }
 
-/// EventEditReplacement is one exact text replacement in an edit tool call.
-public struct EventEditReplacement: Codable {
-    public let oldText: String
-    public let newText: String
-}
-
-/// EventEditToolInput is the normalized view of an exact-replacement edit tool.
-public struct EventEditToolInput: Codable {
+/// EventFileChange is one changed file rendered from a unified patch.
+public struct EventFileChange: Codable {
     public let path: String
-    public let edits: [EventEditReplacement]
+    public let patch: String
 }
 
 /// EventSubagentSpawn is one backend-normalized subagent invocation.
@@ -884,7 +878,7 @@ public struct EventSubagentSpawn: Codable {
 /// inputs. It keeps harness-specific tool schemas out of clients.
 public struct EventToolInputView: Codable {
     public let kind: EventToolInputKind
-    public let edit: EventEditToolInput?
+    public let files: [EventFileChange]?
     public let subagents: [EventSubagentSpawn]?
 }
 

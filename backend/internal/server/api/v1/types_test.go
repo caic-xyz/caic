@@ -111,7 +111,7 @@ func TestEventToolUse(t *testing.T) {
 		}
 	})
 
-	t.Run("zero edit omitted", func(t *testing.T) {
+	t.Run("zero files omitted", func(t *testing.T) {
 		t.Parallel()
 		data, err := json.Marshal(EventToolInputView{
 			Kind:      EventToolInputSubagents,
@@ -124,8 +124,8 @@ func TestEventToolUse(t *testing.T) {
 		if err := json.Unmarshal(data, &raw); err != nil {
 			t.Fatal(err)
 		}
-		if _, ok := raw["edit"]; ok {
-			t.Fatalf("edit should be omitted: %s", data)
+		if _, ok := raw["files"]; ok {
+			t.Fatalf("files should be omitted: %s", data)
 		}
 	})
 }

@@ -3,7 +3,8 @@ import { createSignal, createEffect, createMemo, For, Show, onMount, onCleanup }
 import { useNavigate } from "@solidjs/router";
 import type { DiffFileStat } from "@sdk/types.gen";
 import { getTaskDiff } from "../api";
-import { splitDiff, type DiffLine } from "./diffLines";
+import { splitDiff } from "./diffLines";
+import UnifiedDiffBlock from "./UnifiedDiffBlock";
 import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
 import styles from "./DiffDetail.module.css";
 
@@ -64,25 +65,6 @@ export default function DiffDetail(props: Props) {
     });
   }
 
-  function diffLineClass(line: DiffLine): string {
-    switch (line.kind) {
-      case "added":
-        return line.whitespaceOnly ? styles.diffLineAddedWhitespace : styles.diffLineAdded;
-      case "deleted":
-        return line.whitespaceOnly ? styles.diffLineDeletedWhitespace : styles.diffLineDeleted;
-      case "hunk":
-        return styles.diffLineHunk;
-      case "header":
-        return styles.diffLineHeader;
-      case "movedAdded":
-        return line.movedVariant === 1 ? styles.diffLineMovedAddedAlt : styles.diffLineMovedAdded;
-      case "movedDeleted":
-        return line.movedVariant === 1 ? styles.diffLineMovedDeletedAlt : styles.diffLineMovedDeleted;
-      case "context":
-        return "";
-    }
-  }
-
   return (
     <div class={styles.container}>
       <div class={styles.header}>
@@ -128,11 +110,7 @@ export default function DiffDetail(props: Props) {
                     </Show>
                   </div>
                   <Show when={!collapsed()}>
-                    <pre class={styles.diffContent}>
-                      <For each={fd.lines}>
-                        {(line) => <div class={diffLineClass(line)}>{line.text}</div>}
-                      </For>
-                    </pre>
+                    <UnifiedDiffBlock lines={fd.lines} />
                   </Show>
                 </>
               );

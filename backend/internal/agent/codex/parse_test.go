@@ -979,10 +979,15 @@ func TestReadEditBashFixtureFileChangeHasDetail(t *testing.T) {
 		if use.Detail != "main.go" {
 			t.Fatalf("detail = %q, want main.go", use.Detail)
 		}
-		// Codex fileChange carries a unified diff, not exact old/new replacement
-		// strings, so it can set a header detail but not ToolInputEdit.
-		if use.InputView.Kind != "" {
-			t.Fatalf("input view = %#v, want zero value for Codex fileChange diff", use.InputView)
+		if use.InputView.Kind != agent.ToolInputFileChanges {
+			t.Fatalf("input view kind = %q, want fileChanges", use.InputView.Kind)
+		}
+		if len(use.InputView.Files) != 1 {
+			t.Fatalf("files = %#v, want one file", use.InputView.Files)
+		}
+		file := use.InputView.Files[0]
+		if file.Path != "/workspace/main.go" || !strings.Contains(file.Patch, "Hi, World!") {
+			t.Fatalf("file change = %#v", file)
 		}
 		var changes []struct {
 			Path string `json:"path"`

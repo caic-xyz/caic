@@ -388,40 +388,37 @@ func addEditInputView(use *agent.ToolUseMessage) {
 	if name != "edit" && name != "multiedit" {
 		return
 	}
-	edit, ok := parseEditInput(use.Input)
+	p, replacements, ok := parseEditInput(use.Input)
 	if !ok {
 		return
 	}
-	use.Detail = path.Base(edit.Path)
-	use.InputView = agent.ToolInputView{Kind: agent.ToolInputEdit, Edit: edit}
+	use.Detail = path.Base(p)
+	use.InputView = agent.FileChangesInputViewFromReplacements(p, replacements)
 }
 
-func parseEditInput(raw json.RawMessage) (agent.EditToolInput, bool) {
+func parseEditInput(raw json.RawMessage) (string, []agent.TextReplacement, bool) {
 	if len(raw) == 0 {
-		return agent.EditToolInput{}, false
+		return "", nil, false
 	}
 	var multi claudecode.MultiEditInput
 	if json.Unmarshal(raw, &multi) == nil && multi.FilePath != "" && len(multi.Edits) > 0 {
-		edits := make([]agent.EditReplacement, 0, len(multi.Edits))
+		replacements := make([]agent.TextReplacement, 0, len(multi.Edits))
 		for _, edit := range multi.Edits {
 			if edit.OldString == "" {
-				return agent.EditToolInput{}, false
+				return "", nil, false
 			}
-			edits = append(edits, agent.EditReplacement{OldText: edit.OldString, NewText: edit.NewString})
+			replacements = append(replacements, agent.TextReplacement{OldText: edit.OldString, NewText: edit.NewString})
 		}
-		return agent.EditToolInput{Path: multi.FilePath, Edits: edits}, true
+		return multi.FilePath, replacements, true
 	}
 	var input claudecode.EditInput
 	if json.Unmarshal(raw, &input) != nil || input.FilePath == "" || input.OldString == "" {
-		return agent.EditToolInput{}, false
+		return "", nil, false
 	}
-	return agent.EditToolInput{
-		Path: input.FilePath,
-		Edits: []agent.EditReplacement{{
-			OldText: input.OldString,
-			NewText: input.NewString,
-		}},
-	}, true
+	return input.FilePath, []agent.TextReplacement{{
+		OldText: input.OldString,
+		NewText: input.NewString,
+	}}, true
 }
 
 func askQuestionsFromClaude(in []claudecode.AskUserQuestion) []agent.AskQuestion {

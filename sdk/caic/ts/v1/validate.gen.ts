@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventDiffStat, EventEditReplacement, EventEditToolInput, EventError, EventInit, EventKind, EventLog, EventMessage, EventRateLimit, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderQuota, QuotaBalance, QuotaExtraUsage, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskListEvent, TaskRepo, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
+import type { AskOption, AskQuestion, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventRateLimit, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderQuota, QuotaBalance, QuotaExtraUsage, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskListEvent, TaskRepo, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
 
 // ---- helpers ----
 
@@ -85,19 +85,11 @@ export function validateEventTextDelta(raw: ValidatorInput): EventTextDelta {
   };
 }
 
-export function validateEventEditReplacement(raw: ValidatorInput): EventEditReplacement {
-  const obj = asObject(raw, "EventEditReplacement");
+export function validateEventFileChange(raw: ValidatorInput): EventFileChange {
+  const obj = asObject(raw, "EventFileChange");
   return {
-    oldText: asString(obj["oldText"], "EventEditReplacement.oldText"),
-    newText: asString(obj["newText"], "EventEditReplacement.newText"),
-  };
-}
-
-export function validateEventEditToolInput(raw: ValidatorInput): EventEditToolInput {
-  const obj = asObject(raw, "EventEditToolInput");
-  return {
-    path: asString(obj["path"], "EventEditToolInput.path"),
-    edits: validateArray(obj["edits"], "EventEditToolInput.edits", validateEventEditReplacement) as EventEditReplacement[],
+    path: asString(obj["path"], "EventFileChange.path"),
+    patch: asString(obj["patch"], "EventFileChange.patch"),
   };
 }
 
@@ -115,7 +107,7 @@ export function validateEventToolInputView(raw: ValidatorInput): EventToolInputV
   const obj = asObject(raw, "EventToolInputView");
   return {
     kind: (asString(obj["kind"], "EventToolInputView.kind") as EventToolInputKind),
-    edit: (obj["edit"] === undefined || obj["edit"] === null ? undefined : validateEventEditToolInput(obj["edit"])),
+    files: (obj["files"] === undefined || obj["files"] === null ? undefined : validateArray(obj["files"], "EventToolInputView.files", validateEventFileChange) as EventFileChange[]),
     subagents: (obj["subagents"] === undefined || obj["subagents"] === null ? undefined : validateArray(obj["subagents"], "EventToolInputView.subagents", validateEventSubagentSpawn) as EventSubagentSpawn[]),
   };
 }

@@ -281,26 +281,23 @@ func addEditInputView(use *agent.ToolUseMessage) {
 	if use == nil || !strings.EqualFold(use.Name, "Edit") {
 		return
 	}
-	edit, ok := parseEditInput(use.Input)
+	p, replacements, ok := parseEditInput(use.Input)
 	if !ok {
 		return
 	}
-	use.Detail = path.Base(edit.Path)
-	use.InputView = agent.ToolInputView{Kind: agent.ToolInputEdit, Edit: edit}
+	use.Detail = path.Base(p)
+	use.InputView = agent.FileChangesInputViewFromReplacements(p, replacements)
 }
 
-func parseEditInput(raw json.RawMessage) (agent.EditToolInput, bool) {
+func parseEditInput(raw json.RawMessage) (string, []agent.TextReplacement, bool) {
 	var input opencode.EditInput
 	if len(raw) == 0 || json.Unmarshal(raw, &input) != nil || input.FilePath == "" || input.OldString == "" {
-		return agent.EditToolInput{}, false
+		return "", nil, false
 	}
-	return agent.EditToolInput{
-		Path: input.FilePath,
-		Edits: []agent.EditReplacement{{
-			OldText: input.OldString,
-			NewText: input.NewString,
-		}},
-	}, true
+	return input.FilePath, []agent.TextReplacement{{
+		OldText: input.OldString,
+		NewText: input.NewString,
+	}}, true
 }
 
 // extractToolError extracts the error message from a failed tool call update.

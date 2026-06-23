@@ -278,6 +278,7 @@ func parseItemStarted(msg *codex.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]ag
 			Name:      toolNameForChanges(item.Changes),
 			Input:     input,
 			Detail:    fileChangeDetail(item.Changes),
+			InputView: fileChangeInputView(item.Changes),
 		}}, nil
 
 	case codex.ItemTypeMCPToolCall:
@@ -493,4 +494,15 @@ func fileChangeDetail(changes []codex.FileUpdateChange) string {
 		return fmt.Sprintf("%d files", len(changes))
 	}
 	return path.Base(changes[0].Path)
+}
+
+func fileChangeInputView(changes []codex.FileUpdateChange) agent.ToolInputView {
+	files := make([]agent.FileChange, 0, len(changes))
+	for _, c := range changes {
+		if c.Diff == "" {
+			continue
+		}
+		files = append(files, agent.FileChange{Path: c.Path, Patch: c.Diff})
+	}
+	return agent.FileChangesInputView(files)
 }
