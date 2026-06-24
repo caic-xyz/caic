@@ -1,15 +1,17 @@
-// Instrumented smoke coverage for the Go Mode hosted WebView shell.
+// Instrumented smoke coverage for the Go Mode WebView shell and native service monitoring.
 package com.fghbuild.gomode
 
 import android.app.Instrumentation.ActivityResult
 import android.content.Intent
 import android.content.IntentFilter
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.concurrent.CountDownLatch
@@ -28,13 +30,13 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
         executeDom("push SPA route") {
             """
             (() => {
-              window.history.pushState(null, "", "$BACK_TEST_PATH");
+              window.history.pushState(null, "", "$SPA_BACK_TEST_PATH");
               window.dispatchEvent(new PopStateEvent("popstate"));
               return true;
             })()
             """.trimIndent()
         }
-        waitForDom("pushed SPA route") { "location.pathname === '$BACK_TEST_PATH'" }
+        waitForDom("pushed SPA route") { "location.pathname === '$SPA_BACK_TEST_PATH'" }
 
         pressActivityBack()
         waitForDom("SPA back returned home") { "location.pathname === '/'" }
@@ -54,6 +56,21 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
         composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) {
             composeRule.onAllNodesWithTag("gomode-web-shell").fetchSemanticsNodes().isNotEmpty()
         }
+    }
+
+    @Test
+    fun nativeServiceAttentionFollowsMcpResourceUpdates() {
+        openWebShell()
+        waitForHostedCaicFrontend()
+
+        val initialAttentionText = serviceAttentionText()
+        submitAttentionUpdateTask(promptSuffix = "alpha")
+        submitAttentionUpdateTask(promptSuffix = "beta")
+
+        composeRule.waitUntil(GOMODE_LOAD_TIMEOUT_MS) {
+            serviceAttentionShowsCountChangedFrom(initialAttentionText)
+        }
+        assertTrue(serviceAttentionShowsCountChangedFrom(initialAttentionText))
     }
 
     @Test
@@ -113,6 +130,25 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
         assertEquals("com.fghbuild.gomode", context.packageName)
     }
 
+    private fun submitAttentionUpdateTask(promptSuffix: String) {
+        val prompt = "FAKE_ATTENTION_UPDATE gomode e2e $promptSuffix"
+        submitPromptThroughHostedUi(prompt)
+        waitForText(ATTENTION_RUNNING_TEXT, GOMODE_LOAD_TIMEOUT_MS)
+        waitForText(ATTENTION_RESULT_TEXT, GOMODE_LOAD_TIMEOUT_MS)
+    }
+
+    private fun serviceAttentionShowsCountChangedFrom(initialText: String?): Boolean {
+        val text = serviceAttentionText()
+        return !text.isNullOrBlank() && text != initialText && ATTENTION_COUNT_NUMBER_PATTERN.containsMatchIn(text)
+    }
+
+    private fun serviceAttentionText(): String? = composeRule.onAllNodesWithTag("gomode-service-attention")
+        .fetchSemanticsNodes()
+        .firstOrNull()
+        ?.config
+        ?.get(SemanticsProperties.Text)
+        ?.joinToString(separator = "") { it.text }
+
     private fun loadHostedExternalLinkTestPage() {
         loadHostedHtml(EXTERNAL_LINK_TEST_PAGE)
     }
@@ -128,9 +164,12 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
     }
 
     companion object {
-        private const val BACK_TEST_PATH = "/gomode-e2e-route"
+        private const val SPA_BACK_TEST_PATH = "/gomode-e2e-route"
         private const val SQL_JOKE_PREFIX = "A SQL query walks into a bar"
+        private const val ATTENTION_RUNNING_TEXT = "Monitoring update is running before attention is required."
+        private const val ATTENTION_RESULT_TEXT = "Monitoring update requires attention now"
         private const val JS_TIMEOUT_MS = 5_000L
+        private val ATTENTION_COUNT_NUMBER_PATTERN = Regex("""\d+""")
         private const val EXTERNAL_LINK_URL = "https://example.com/gomode-external-link"
         private val EXTERNAL_LINK_TEST_PAGE = """
             <!doctype html>

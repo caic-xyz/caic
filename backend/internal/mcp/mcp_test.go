@@ -88,13 +88,13 @@ func TestHandlerHandleMCP(t *testing.T) {
 		}
 		r := bufio.NewReader(resp.Body)
 		ack := readSSEMessage(t, r)
-		if ack.Method != "notifications/subscriptions/acknowledged" {
+		if ack.Method != NotificationMethodSubscriptionsAcknowledged {
 			t.Fatalf("first notification = %q, want acknowledgment", ack.Method)
 		}
 
 		registry.setResource("changed")
 		got := readSSEMessage(t, r)
-		if got.Method != "notifications/resources/updated" {
+		if got.Method != NotificationMethodResourcesUpdated {
 			t.Fatalf("notification = %q, want resource update", got.Method)
 		}
 		params, ok := got.Params.(map[string]any)

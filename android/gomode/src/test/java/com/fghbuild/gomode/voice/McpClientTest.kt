@@ -1,6 +1,7 @@
 // Unit tests for Go Mode MCP client request envelopes.
 package com.fghbuild.gomode.voice
 
+import com.fghbuild.mcp.sdk.v1.NotificationMethod
 import com.fghbuild.mcp.sdk.v1.SubscriptionFilter
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
@@ -117,6 +118,7 @@ class McpClientTest {
             val request = server.takeRequest()
             val body = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
             assertEquals("resources/read", request.getHeader("Mcp-Method"))
+            assertEquals("caic://tasks", request.getHeader("Mcp-Name"))
             assertEquals("resources/read", body["method"]?.jsonPrimitive?.content)
             assertEquals("caic://tasks", body["params"]?.jsonObject?.get("uri")?.jsonPrimitive?.content)
         } finally {
@@ -145,8 +147,8 @@ class McpClientTest {
                 SubscriptionFilter(resourceSubscriptions = listOf("caic://tasks")),
             ).take(2).toList()
 
-            assertEquals("notifications/subscriptions/acknowledged", events[0].method)
-            assertEquals("notifications/resources/updated", events[1].method)
+            assertEquals(NotificationMethod.SubscriptionsAcknowledged, events[0].method)
+            assertEquals(NotificationMethod.ResourcesUpdated, events[1].method)
             val request = server.takeRequest()
             val body = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
             val params = body["params"]?.jsonObject

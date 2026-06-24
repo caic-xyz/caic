@@ -22,6 +22,10 @@ This plan tracks remaining work to converge the codebase on:
 - Android has a service-resource adapter registry keyed by manifest `service`
   and `apiVersion`, with caic `caic://tasks` mapping into neutral monitoring
   snapshots.
+- Android service monitoring feeds caic task-resource snapshots into native
+  attention text, voice session context, and the foreground voice notification;
+  subscription invalidations trigger resource re-reads and monitoring state
+  updates.
 - Backend MCP supports `server/discover`, resources, resource templates, and
   POST-based SSE `subscriptions/listen`.
 - Backend resource subscriptions validate filters, stream task/repo
@@ -31,20 +35,6 @@ This plan tracks remaining work to converge the codebase on:
   verifies transitional ed25519 scoped tokens from configured trusted issuers.
 - The local voice stack has managed llama.cpp ASR/LLM adapters, a KittenTTS
   adapter, and smoke coverage for managed local-stack turns.
-
-## Android MCP Resources And Monitoring
-
-Tasks:
-
-1. Feed adapter output into notifications, attention state, and voice context.
-2. Treat subscription notifications as invalidations and re-read resources.
-
-Acceptance:
-
-- Android reads fake task resources without caic REST DTO imports.
-- Resource update events trigger re-read and update native monitoring state.
-- Unsupported resources disable monitoring cleanly.
-- Canceled Android connections release subscription resources.
 
 ## External Gateway Token Issuance
 

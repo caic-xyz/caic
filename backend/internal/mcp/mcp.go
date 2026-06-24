@@ -65,6 +65,16 @@ const (
 	MethodSubscriptionsListen   Method = "subscriptions/listen"
 )
 
+// NotificationMethod is an MCP JSON-RPC notification method name.
+type NotificationMethod string
+
+// MCP notification method names sent by the handler.
+const (
+	NotificationMethodSubscriptionsAcknowledged NotificationMethod = "notifications/subscriptions/acknowledged"
+	NotificationMethodResourcesListChanged      NotificationMethod = "notifications/resources/list_changed"
+	NotificationMethodResourcesUpdated          NotificationMethod = "notifications/resources/updated"
+)
+
 // ResultType describes whether an MCP result is complete or partial.
 type ResultType string
 
@@ -721,9 +731,9 @@ type SubscriptionFilter struct {
 
 // JSONRPCNotification is a JSON-RPC notification that does not expect a response.
 type JSONRPCNotification struct {
-	JSONRPC string `json:"jsonrpc"`
-	Method  string `json:"method"`
-	Params  any    `json:"params,omitempty"`
+	JSONRPC string             `json:"jsonrpc"`
+	Method  NotificationMethod `json:"method"`
+	Params  any                `json:"params,omitempty"`
 }
 
 // SubscriptionNotificationParams is the payload for subscription notifications.
@@ -981,7 +991,7 @@ func (h *Handler) handleSubscription(ctx context.Context, w http.ResponseWriter,
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
-	if err := writeMCPNotification(stream, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: "notifications/subscriptions/acknowledged", Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), Notifications: &p.Notifications}}); err != nil {
+	if err := writeMCPNotification(stream, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodSubscriptionsAcknowledged, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), Notifications: &p.Notifications}}); err != nil {
 		slog.WarnContext(ctx, "write mcp subscription acknowledgment", "err", err)
 		return nil
 	}
@@ -1004,7 +1014,7 @@ func (h *Handler) streamSubscriptionNotifications(ctx context.Context, w subscri
 		if update.ResourcesListChanged && filter.ResourcesListChanged {
 			resources := h.subscriptionResourcesHash(ctx)
 			if resources != lastResources {
-				if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: "notifications/resources/list_changed", Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID)}}); err != nil {
+				if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesListChanged, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID)}}); err != nil {
 					slog.WarnContext(ctx, "write mcp resources notification", "err", err)
 					return
 				}
@@ -1019,7 +1029,7 @@ func (h *Handler) streamSubscriptionNotifications(ctx context.Context, w subscri
 			if content == lastResourceContents[uri] {
 				continue
 			}
-			if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: "notifications/resources/updated", Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), URI: uri}}); err != nil {
+			if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesUpdated, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), URI: uri}}); err != nil {
 				slog.WarnContext(ctx, "write mcp resource update notification", "err", err)
 				return
 			}

@@ -108,6 +108,28 @@ public struct Method: Codable, Equatable, Hashable {
     }
 }
 
+public struct NotificationMethod: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let SubscriptionsAcknowledged = NotificationMethod("notifications/subscriptions/acknowledged")
+    public static let ResourcesListChanged = NotificationMethod("notifications/resources/list_changed")
+    public static let ResourcesUpdated = NotificationMethod("notifications/resources/updated")
+
+    public static func other(_ value: String) -> NotificationMethod { NotificationMethod(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
 public struct ResultType: Codable, Equatable, Hashable {
     public let value: String
 
@@ -561,7 +583,7 @@ public struct SubscriptionsListenParams: Codable {
 /// JSONRPCNotification is a JSON-RPC notification that does not expect a response.
 public struct JSONRPCNotification: Codable {
     public let jsonrpc: String
-    public let method: String
+    public let method: NotificationMethod
     public let params: JSONValue?
 }
 

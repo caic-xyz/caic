@@ -29,7 +29,6 @@ import com.caic.voicegateway.sdk.v1.VoiceConfig
 import com.caic.voicegateway.sdk.v1.VoiceRTCOfferReq
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.service.ServiceSettingsClient
-import com.fghbuild.gomode.service.serviceOrigin
 import com.fghbuild.mcp.sdk.v1.ToolDescriptor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -56,7 +55,6 @@ import org.webrtc.PeerConnectionFactory
 import org.webrtc.RtpReceiver
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
-import java.net.URI
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import kotlin.math.sqrt
@@ -103,6 +101,8 @@ class VoiceSession(
 
     /** Text notifications buffered while the model is speaking; flushed on turn end. */
     private val pendingNotifications = ArrayList<String>()
+
+    private var serviceContextText: String? = null
 
     fun setError(message: String) {
         Log.e(TAG, "setError: $message")
@@ -428,6 +428,15 @@ class VoiceSession(
         _state.update { it.copy(transcript = emptyList()) }
     }
 
+    fun setServiceContext(text: String?) {
+        val nextText = text?.takeIf { it.isNotBlank() }
+        if (serviceContextText == nextText) return
+        serviceContextText = nextText
+        if (nextText != null && dataChannel?.state() == DataChannel.State.OPEN) {
+            injectText(nextText)
+        }
+    }
+
     fun injectText(text: String) {
         if (speakerActive) {
             pendingNotifications.add(text)
@@ -600,7 +609,10 @@ class VoiceSession(
             language = "en",
         ),
         tools = tools,
-        context = com.caic.voicegateway.sdk.v1.Context(systemInstruction = systemInstruction),
+        context = com.caic.voicegateway.sdk.v1.Context(
+            systemInstruction = systemInstruction,
+            text = serviceContextText,
+        ),
     )
 
     private fun gatewayToolResult(id: String, name: String, result: JsonElement) = ToolResult(
@@ -750,10 +762,8 @@ class VoiceSession(
             "You are a concise voice assistant for a Go Mode service running in an Android shell. " +
                 "Use the service MCP tools whenever they are useful. Always speak fast and keep answers short."
 
-        fun resolveServiceURL(baseURL: String, advertisedURL: String): String {
-            val baseOrigin = URI(serviceOrigin(baseURL).trimEnd('/') + "/")
-            return baseOrigin.resolve(advertisedURL).toString().trimEnd('/')
-        }
+        fun resolveServiceURL(baseURL: String, advertisedURL: String): String =
+            com.fghbuild.gomode.service.resolveServiceURL(baseURL, advertisedURL)
     }
 }
 

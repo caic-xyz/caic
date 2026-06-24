@@ -3,6 +3,7 @@ package com.fghbuild.gomode.ui
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.webkit.CookieManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -44,13 +45,16 @@ import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SettingsState
 import com.fghbuild.gomode.halo.HaloController
 import com.fghbuild.gomode.sdk.v1.Settings as ServiceSettings
+import com.fghbuild.gomode.service.ServiceMonitor
 import com.fghbuild.gomode.service.ServiceSettingsClient
 import com.fghbuild.gomode.service.ServiceSettingsException
 import com.fghbuild.gomode.service.compatibilityError
 import com.fghbuild.gomode.ui.halo.HaloScreen
 import com.fghbuild.gomode.ui.settings.SettingsScreen
 import com.fghbuild.gomode.ui.web.WebShellScreen
+import com.fghbuild.gomode.voice.McpClient
 import com.fghbuild.gomode.voice.VoicePanel
+import com.fghbuild.gomode.voice.VoiceService
 import com.fghbuild.gomode.voice.VoiceSession
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -92,6 +96,8 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
         bootstrapState = fetchBootstrapState(activeURL, settingsClient)
     }
 
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
     val voiceSession = remember(settingsRepository) {
         VoiceSession(context.applicationContext, settingsRepository, settingsClient)
     }
@@ -99,8 +105,19 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
         onDispose { voiceSession.disconnect() }
     }
     val voiceState by voiceSession.state.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
+    val serviceMonitor = remember(scope) {
+        ServiceMonitor(scope = scope) { endpointURL, protocolVersion ->
+            McpClient(
+                endpointURL = endpointURL,
+                protocolVersion = protocolVersion,
+                cookieProvider = { CookieManager.getInstance().getCookie(endpointURL) },
+            )
+        }
+    }
+    DisposableEffect(serviceMonitor) {
+        onDispose { serviceMonitor.stop() }
+    }
+    val serviceMonitorState by serviceMonitor.state.collectAsStateWithLifecycle()
     var onMicGranted by remember { mutableStateOf<(() -> Unit)?>(null) }
     val micPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -122,6 +139,28 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
         ?.isNotBlank() == true
     val density = LocalDensity.current
     val keyboardOpen = WindowInsets.ime.getBottom(density) > 0
+
+    LaunchedEffect(activeURL, bootstrapState, serviceMonitor) {
+        val ready = bootstrapState as? ServiceBootstrapState.Ready
+        if (activeURL.isBlank() || ready == null) {
+            serviceMonitor.stop()
+            return@LaunchedEffect
+        }
+        serviceMonitor.start(activeURL, ready.settings)
+    }
+
+    LaunchedEffect(serviceMonitorState.voiceContext, voiceSession) {
+        voiceSession.setServiceContext(serviceMonitorState.voiceContext)
+    }
+
+    LaunchedEffect(serviceMonitorState.notificationText) {
+        VoiceService.setServiceNotificationText(serviceMonitorState.notificationText)
+    }
+
+    LaunchedEffect(serviceMonitorState.error) {
+        val error = serviceMonitorState.error ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(error)
+    }
 
     LaunchedEffect(voiceState.errorId) {
         val error = voiceState.error ?: return@LaunchedEffect
@@ -191,6 +230,7 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
                     onSelectDevice = { voiceSession.selectAudioDevice(it) },
                     onClearTranscript = { voiceSession.clearTranscript() },
                     onOpenSettings = { activeNativeScreen = NativeScreen.Settings },
+                    serviceAttentionText = serviceMonitorState.notificationText,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }

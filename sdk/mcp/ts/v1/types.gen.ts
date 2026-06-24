@@ -49,6 +49,17 @@ export const MethodResourcesRead: Method = "resources/read";
 export const MethodResourceTemplatesList: Method = "resources/templates/list";
 export const MethodSubscriptionsListen: Method = "subscriptions/listen";
 
+export type NotificationMethod =
+  | "notifications/subscriptions/acknowledged"
+  | "notifications/resources/list_changed"
+  | "notifications/resources/updated";
+/**
+ * Supported values.
+ */
+export const NotificationMethodSubscriptionsAcknowledged: NotificationMethod = "notifications/subscriptions/acknowledged";
+export const NotificationMethodResourcesListChanged: NotificationMethod = "notifications/resources/list_changed";
+export const NotificationMethodResourcesUpdated: NotificationMethod = "notifications/resources/updated";
+
 export type ResultType =
   | "complete";
 /**
@@ -480,7 +491,7 @@ export interface SubscriptionsListenParams {
 /** JSONRPCNotification is a JSON-RPC notification that does not expect a response. */
 export interface JSONRPCNotification {
   jsonrpc: string;
-  method: string;
+  method: NotificationMethod;
   params?: unknown;
 }
 

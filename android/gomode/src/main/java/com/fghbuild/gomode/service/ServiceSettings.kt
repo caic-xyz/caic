@@ -1,4 +1,4 @@
-// Service discovery client and compatibility helpers for the Go Mode root settings document.
+// Service discovery client, URL helpers, and compatibility checks for the Go Mode root settings document.
 package com.fghbuild.gomode.service
 
 import com.fghbuild.gomode.sdk.v1.ApiClient
@@ -25,6 +25,11 @@ fun serviceOrigin(url: String): String {
     require(!uri.scheme.isNullOrBlank()) { "Service URL must include a scheme" }
     require(!uri.rawAuthority.isNullOrBlank()) { "Service URL must include a host" }
     return "${uri.scheme}://${uri.rawAuthority}"
+}
+
+fun resolveServiceURL(baseURL: String, advertisedURL: String): String {
+    val baseOrigin = URI(serviceOrigin(baseURL).trimEnd('/') + "/")
+    return baseOrigin.resolve(advertisedURL).toString().trimEnd('/')
 }
 
 data class ShellCompatibility(

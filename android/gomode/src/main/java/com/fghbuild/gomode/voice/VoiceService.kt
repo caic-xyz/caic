@@ -1,4 +1,4 @@
-// Foreground service that keeps the Go Mode voice session alive while using the microphone.
+// Foreground service that keeps voice active and surfaces service attention while using the microphone.
 package com.fghbuild.gomode.voice
 
 import android.app.Notification
@@ -12,17 +12,28 @@ import android.content.pm.ServiceInfo
 import android.os.IBinder
 import com.fghbuild.gomode.MainActivity
 import com.fghbuild.gomode.R
+import java.lang.ref.WeakReference
 
 class VoiceService : Service() {
 
+    override fun onCreate() {
+        super.onCreate()
+        activeService = WeakReference(this)
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        ensureChannel()
-        val notification = buildNotification()
-        startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+        refreshNotification()
         return START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onDestroy() {
+        if (activeService?.get() === this) {
+            activeService = null
+        }
+        super.onDestroy()
+    }
 
     private fun ensureChannel() {
         val nm = getSystemService(NotificationManager::class.java)
@@ -36,6 +47,12 @@ class VoiceService : Service() {
         nm.createNotificationChannel(channel)
     }
 
+    private fun refreshNotification() {
+        ensureChannel()
+        val notification = buildNotification()
+        startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+    }
+
     private fun buildNotification(): Notification {
         val tapIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -46,7 +63,7 @@ class VoiceService : Service() {
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_mic)
             .setContentTitle(getString(R.string.voice_notification_title))
-            .setContentText(getString(R.string.voice_notification_text))
+            .setContentText(serviceNotificationText ?: getString(R.string.voice_notification_text))
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .build()
@@ -55,6 +72,17 @@ class VoiceService : Service() {
     companion object {
         private const val CHANNEL_ID = "gomode_voice_session"
         private const val NOTIFICATION_ID = 21
+
+        @Volatile
+        private var activeService: WeakReference<VoiceService>? = null
+
+        @Volatile
+        private var serviceNotificationText: String? = null
+
+        fun setServiceNotificationText(text: String?) {
+            serviceNotificationText = text
+            activeService?.get()?.refreshNotification()
+        }
 
         fun start(context: Context) {
             context.startForegroundService(Intent(context, VoiceService::class.java))

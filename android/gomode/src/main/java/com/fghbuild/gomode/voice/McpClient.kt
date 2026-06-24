@@ -2,6 +2,7 @@
 package com.fghbuild.gomode.voice
 
 import android.util.Base64
+import com.fghbuild.gomode.service.ServiceResourceClient
 import com.fghbuild.mcp.sdk.v1.ApiClient
 import com.fghbuild.mcp.sdk.v1.ClientCapabilities
 import com.fghbuild.mcp.sdk.v1.Implementation
@@ -59,7 +60,7 @@ class McpClient(
     endpointURL: String,
     private val protocolVersion: String,
     private val cookieProvider: () -> String?,
-) {
+) : ServiceResourceClient {
     private val endpointURL = endpointURL.trimEnd('/')
     private val api = ApiClient(this.endpointURL)
     private val httpClient = OkHttpClient()
@@ -145,7 +146,7 @@ class McpClient(
         )
     }
 
-    suspend fun listResources(): List<ResourceDescriptor> {
+    override suspend fun listResources(): List<ResourceDescriptor> {
         val resources = mutableListOf<ResourceDescriptor>()
         var cursor: String? = null
         do {
@@ -183,7 +184,7 @@ class McpClient(
         return templates
     }
 
-    suspend fun readResource(uri: String): ResourcesReadResult = request(
+    override suspend fun readResource(uri: String): ResourcesReadResult = request(
         method = Method.ResourcesRead,
         params = json.encodeToJsonElement(
             ResourcesReadParams(
@@ -191,9 +192,10 @@ class McpClient(
                 uri = uri,
             )
         ),
+        name = uri,
     )
 
-    fun listenSubscriptions(notifications: SubscriptionFilter): Flow<JSONRPCNotification> = callbackFlow {
+    override fun listenSubscriptions(notifications: SubscriptionFilter): Flow<JSONRPCNotification> = callbackFlow {
         val body = json.encodeToString(
             JSONRPCRequest.serializer(),
             JSONRPCRequest(

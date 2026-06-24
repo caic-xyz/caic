@@ -145,6 +145,39 @@ object MethodSerializer : KSerializer<Method> {
     }
 }
 
+@Serializable(with = NotificationMethodSerializer::class)
+sealed interface NotificationMethod {
+    val value: String
+    @Serializable
+    data object SubscriptionsAcknowledged : NotificationMethod {
+        override val value = "notifications/subscriptions/acknowledged"
+    }
+    @Serializable
+    data object ResourcesListChanged : NotificationMethod {
+        override val value = "notifications/resources/list_changed"
+    }
+    @Serializable
+    data object ResourcesUpdated : NotificationMethod {
+        override val value = "notifications/resources/updated"
+    }
+    @Serializable
+    data class Other(override val value: String) : NotificationMethod
+}
+
+object NotificationMethodSerializer : KSerializer<NotificationMethod> {
+    override val descriptor = PrimitiveSerialDescriptor("NotificationMethod", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: NotificationMethod) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): NotificationMethod {
+        val v = decoder.decodeString()
+        return when (v) {
+            "notifications/subscriptions/acknowledged" -> NotificationMethod.SubscriptionsAcknowledged
+            "notifications/resources/list_changed" -> NotificationMethod.ResourcesListChanged
+            "notifications/resources/updated" -> NotificationMethod.ResourcesUpdated
+            else -> NotificationMethod.Other(v)
+        }
+    }
+}
+
 @Serializable(with = ResultTypeSerializer::class)
 sealed interface ResultType {
     val value: String
@@ -646,7 +679,7 @@ data class SubscriptionsListenParams(
 @Serializable
 data class JSONRPCNotification(
     val jsonrpc: String,
-    val method: String,
+    val method: NotificationMethod,
     val params: JsonElement? = null,
 )
 

@@ -1,4 +1,4 @@
-# Fake agent that cycles through jokes, emitting flat NDJSON messages.
+# Fake agent that emits deterministic e2e scenarios as flat NDJSON messages.
 #
 # Each output line is a JSON object whose "type" field maps directly to an
 # agent.Message type (init, text, text_delta, tool_use, ask, widget,
@@ -490,6 +490,13 @@ def emit_ask_turn(turns: int) -> None:
     emit_result(turns, "Asking user")
 
 
+def emit_attention_update_turn(turns: int) -> None:
+    """Stay running long enough for monitoring to observe an update."""
+    emit_text("Monitoring update is running before attention is required.")
+    time.sleep(2.0)
+    emit_result(turns, "Monitoring update requires attention now", duration=2500)
+
+
 def emit_demo_turn(turns: int) -> None:
     """Emit a realistic multi-tool scenario."""
     scenario = DEMO_SCENARIOS[(turns - 1) % len(DEMO_SCENARIOS)]
@@ -533,6 +540,9 @@ def main() -> None:
             continue
         if "FAKE_ASK" in line:
             emit_ask_turn(turns)
+            continue
+        if "FAKE_ATTENTION_UPDATE" in line:
+            emit_attention_update_turn(turns)
             continue
         if "FAKE_DEMO" in line:
             emit_demo_turn(turns)
