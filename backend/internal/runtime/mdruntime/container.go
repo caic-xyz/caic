@@ -3,14 +3,9 @@
 package mdruntime
 
 import (
-	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
 	"log/slog"
-	"os/exec"
-	"strings"
 
 	"github.com/caic-xyz/md"
 
@@ -77,70 +72,4 @@ func (w *SlogWriter) Write(p []byte) (int, error) {
 		}
 	}
 	return len(p), nil
-}
-
-// labelValue returns the value of a container label on a running container.
-//
-// Returns empty string if the label is not set.
-func labelValue(ctx context.Context, runtimeName, containerName, label string) (string, error) {
-	format := fmt.Sprintf("{{index .Config.Labels %q}}", label)
-	cmd := exec.CommandContext(ctx, runtimeName, "inspect", containerName, "--format", format) //nolint:gosec // containerName and format are not user-controlled.
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("%s inspect label %q on %s: %w", runtimeName, label, containerName, err)
-	}
-	v := strings.TrimSpace(string(out))
-	if v == "<no value>" {
-		return "", nil
-	}
-	return v, nil
-}
-
-// containerEvent is the JSON structure emitted by `<runtime> events --format '{{json .}}'`.
-type containerEvent struct {
-	Actor struct {
-		Attributes map[string]string `json:"Attributes"`
-	} `json:"Actor"`
-}
-
-// WatchEvents monitors container die events filtered by runtime metadata.
-// It runs `<runtime> events --filter event=die --filter label=<metadata key>`
-// and sends an Event for each death. The caller handles reconnection
-// on stream errors. The channel is closed when the context is cancelled or
-// the events process exits.
-func WatchEvents(ctx context.Context, containerRuntime string, filter runtime.EventFilter) (<-chan runtime.Event, error) {
-	cmd := exec.CommandContext(ctx, containerRuntime, "events", //nolint:gosec // filter is built from caic-owned constants
-		"--filter", "event=die",
-		"--filter", "label="+string(filter.MetadataKey),
-		"--format", "{{json .}}",
-	)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("%s events stdout: %w", containerRuntime, err)
-	}
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("%s events start: %w", containerRuntime, err)
-	}
-	ch := make(chan runtime.Event, 16)
-	go func() {
-		defer close(ch)
-		defer func() { _ = cmd.Wait() }()
-		scanner := bufio.NewScanner(stdout)
-		for scanner.Scan() {
-			var ev containerEvent
-			if json.Unmarshal(scanner.Bytes(), &ev) != nil {
-				continue
-			}
-			name := ev.Actor.Attributes["name"]
-			if name == "" {
-				continue
-			}
-			select {
-			case ch <- runtime.Event{InstanceID: runtime.InstanceID(name)}:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	return ch, nil
 }

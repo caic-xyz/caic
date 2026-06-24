@@ -5,16 +5,11 @@ package mdruntime
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
-	"os/exec"
 	"runtime/trace"
 	"slices"
-	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/caic-xyz/md"
@@ -43,7 +38,6 @@ type mdContainer interface {
 	VNCPort() int32
 	Repos() []md.Repo
 	AgentMounts(paths ...md.AgentPaths) ([]md.Mount, error)
-	SSHCommand(opts []string, cmd string) []string
 	Launch(ctx context.Context, stdout, stderr io.Writer, opts *md.StartOpts) error
 	Connect(ctx context.Context, stdout, stderr io.Writer, opts *md.StartOpts) (*md.StartResult, error)
 	Diff(ctx context.Context, stdout, stderr io.Writer, repoIdx int, extraArgs []string) error
@@ -52,6 +46,8 @@ type mdContainer interface {
 	Purge(ctx context.Context, stdout, stderr io.Writer) error
 	Revive(ctx context.Context, stdout, stderr io.Writer) error
 	Fork(ctx context.Context, stdout, stderr io.Writer, opts *md.ForkOpts) (mdContainer, error)
+	Processes(ctx context.Context) ([]md.ProcessInfo, error)
+	Signal(ctx context.Context, pid int, sig string) error
 }
 
 var (
@@ -96,10 +92,6 @@ func (a mdContainerAdapter) AgentMounts(paths ...md.AgentPaths) ([]md.Mount, err
 	return a.c.AgentMounts(paths...)
 }
 
-func (a mdContainerAdapter) SSHCommand(opts []string, cmd string) []string {
-	return a.c.SSHCommand(opts, cmd)
-}
-
 func (a mdContainerAdapter) Launch(ctx context.Context, stdout, stderr io.Writer, opts *md.StartOpts) error {
 	return a.c.Launch(ctx, stdout, stderr, opts)
 }
@@ -134,6 +126,14 @@ func (a mdContainerAdapter) Fork(ctx context.Context, stdout, stderr io.Writer, 
 	return mdContainerAdapter{f}, nil
 }
 
+func (a mdContainerAdapter) Processes(ctx context.Context) ([]md.ProcessInfo, error) {
+	return a.c.Processes(ctx)
+}
+
+func (a mdContainerAdapter) Signal(ctx context.Context, pid int, sig string) error {
+	return a.c.Signal(ctx, pid, sig)
+}
+
 // Backend adapts *md.Client to runtime.Backend.
 type Backend struct {
 	client     mdClient
@@ -141,6 +141,7 @@ type Backend struct {
 	HarnessEnv map[string][]string // per-harness KEY=VALUE env vars from config
 
 	mu                sync.Mutex
+	containers        map[string]mdContainer // keyed by runtime instance name
 	pendingContainers map[string]mdContainer // keyed by runtime instance name
 	vncPorts          map[string]int32       // runtime instance name to host VNC port
 }
@@ -148,8 +149,9 @@ type Backend struct {
 // NewBackend creates a Backend wrapping the given md client.
 func NewBackend(client *md.Client) *Backend {
 	return &Backend{
-		client:   mdClientAdapter{client},
-		vncPorts: make(map[string]int32),
+		client:     mdClientAdapter{client},
+		containers: make(map[string]mdContainer),
+		vncPorts:   make(map[string]int32),
 	}
 }
 
@@ -165,10 +167,6 @@ func (b *Backend) Launch(ctx context.Context, repos []runtime.Repo, opts *runtim
 	slog.DebugContext(ctx, "launch starting", "rt", rt, "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "repos_count", len(repos))
 	if _, ok := harnessMap[opts.Harness]; !ok {
 		return "", fmt.Errorf("unknown harness %q", opts.Harness)
-	}
-	// Rootless podman does not support sudo (user namespace stacking prevents nested containers).
-	if opts.Sudo && rt == "podman" && os.Getuid() != 0 {
-		return "", errors.New("sudo is not supported with rootless podman; use docker instead")
 	}
 	slog.DebugContext(ctx, "harness verified", "rt", rt, "harness", opts.Harness)
 	slog.DebugContext(ctx, "creating container", "rt", rt, "repos_count", len(repos))
@@ -193,8 +191,17 @@ func (b *Backend) Launch(ctx context.Context, repos []runtime.Repo, opts *runtim
 	if b.pendingContainers == nil {
 		b.pendingContainers = make(map[string]mdContainer)
 	}
+	if b.containers == nil {
+		b.containers = make(map[string]mdContainer)
+	}
+	if b.vncPorts == nil {
+		b.vncPorts = make(map[string]int32)
+	}
 	b.pendingContainers[name] = c
-	b.vncPorts[name] = c.VNCPort()
+	b.containers[name] = c
+	if port := c.VNCPort(); port != 0 {
+		b.vncPorts[name] = port
+	}
 	b.mu.Unlock()
 	slog.DebugContext(ctx, "launch returning", "rt", rt, "ctr", name)
 	return runtime.InstanceID(name), nil
@@ -240,7 +247,7 @@ func (b *Backend) Connect(ctx context.Context, id runtime.InstanceID, opts *runt
 func (b *Backend) Diff(ctx context.Context, id runtime.InstanceID, repoIdx int, args ...string) (string, error) {
 	defer trace.StartRegion(ctx, "instance.diff").End()
 	name := string(id)
-	ct, err := b.client.Get(ctx, name)
+	ct, err := b.container(ctx, name)
 	if err != nil {
 		return "", err
 	}
@@ -261,7 +268,7 @@ func (b *Backend) Diff(ctx context.Context, id runtime.InstanceID, repoIdx int, 
 func (b *Backend) Fetch(ctx context.Context, id runtime.InstanceID) error {
 	defer trace.StartRegion(ctx, "instance.fetch").End()
 	name := string(id)
-	ct, err := b.client.Get(ctx, name)
+	ct, err := b.container(ctx, name)
 	if err != nil {
 		return err
 	}
@@ -282,7 +289,7 @@ func (b *Backend) Stop(ctx context.Context, id runtime.InstanceID) error {
 	defer trace.StartRegion(ctx, "instance.stop").End()
 	name := string(id)
 	slog.InfoContext(ctx, "md stop", "name", name)
-	ct, err := b.client.Get(ctx, name)
+	ct, err := b.container(ctx, name)
 	if err != nil {
 		return err
 	}
@@ -293,7 +300,7 @@ func (b *Backend) Stop(ctx context.Context, id runtime.InstanceID) error {
 func (b *Backend) Purge(ctx context.Context, id runtime.InstanceID) error {
 	defer trace.StartRegion(ctx, "instance.purge").End()
 	name := string(id)
-	ct, err := b.client.Get(ctx, name)
+	ct, err := b.container(ctx, name)
 	if err != nil {
 		return err
 	}
@@ -303,7 +310,11 @@ func (b *Backend) Purge(ctx context.Context, id runtime.InstanceID) error {
 	} else {
 		slog.InfoContext(ctx, "md purge", "name", name)
 	}
-	return ct.Purge(ctx, &SlogWriter{Phase: "purge"}, &SlogWriter{Phase: "purge"})
+	if err := ct.Purge(ctx, &SlogWriter{Phase: "purge"}, &SlogWriter{Phase: "purge"}); err != nil {
+		return err
+	}
+	b.forgetContainer(name)
+	return nil
 }
 
 // Revive implements runtime.Backend.
@@ -311,7 +322,7 @@ func (b *Backend) Revive(ctx context.Context, id runtime.InstanceID) error {
 	defer trace.StartRegion(ctx, "instance.revive").End()
 	name := string(id)
 	rt := b.client.Runtime()
-	ct, err := b.client.Get(ctx, name)
+	ct, err := b.container(ctx, name)
 	if err != nil {
 		return err
 	}
@@ -343,15 +354,11 @@ func (b *Backend) Fork(ctx context.Context, id runtime.InstanceID, repos []runti
 		slog.InfoContext(ctx, "md", "phase", "fork", "src", name, "dir", repos[0].HostPath, "br", repos[0].Branch)
 	}
 	rt := b.client.Runtime()
-	// Rootless podman does not support sudo (user namespace stacking prevents nested containers).
-	if opts.Sudo && rt == "podman" && os.Getuid() != 0 {
-		return "", runtime.ConnectionInfo{}, nil, errors.New("sudo is not supported with rootless podman; use docker instead")
-	}
 	slog.DebugContext(ctx, "fork starting", "rt", rt, "source", name, "repos_count", len(repos))
 
 	// Look up the source instance so Fork inherits Display, Tailscale,
 	// USB, and Sudo from the source unless explicitly overridden by opts.
-	ct, err := b.client.Get(ctx, name)
+	ct, err := b.container(ctx, name)
 	if err != nil {
 		return "", runtime.ConnectionInfo{}, nil, fmt.Errorf("source instance %s: %w", name, err)
 	}
@@ -381,9 +388,7 @@ func (b *Backend) Fork(ctx context.Context, id runtime.InstanceID, repos []runti
 	}
 	forkName := forked.Name()
 	slog.DebugContext(ctx, "fork succeeded", "rt", rt, "source", name, "fork", forkName)
-	b.mu.Lock()
-	b.vncPorts[forkName] = forked.VNCPort()
-	b.mu.Unlock()
+	b.rememberContainer(forkName, forked)
 	return runtime.InstanceID(forkName), runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: forkName}}, fromMDRepos(forked.Repos()), nil
 }
 
@@ -396,55 +401,94 @@ func (b *Backend) VNCPort(ctx context.Context, id runtime.InstanceID) int {
 	if port != 0 {
 		return port
 	}
-	// Fallback: query instance label. Handles server
-	// restarts where the in-memory map is empty but the instance
-	// is still running with a display.
-	if v, err := labelValue(ctx, b.client.Runtime(), instanceID, string(runtime.MetadataDisplayCapability)); err == nil && v == "1" {
-		if hp, err := b.hostPort(ctx, instanceID, "5901/tcp"); err == nil {
-			b.mu.Lock()
-			b.vncPorts[instanceID] = int32(hp) //nolint:gosec // port numbers are 1-65535, safe for int32
-			b.mu.Unlock()
-			return hp
-		}
+	// Fallback: resolve a proper md container. Handles server restarts where the
+	// in-memory map is empty but the instance is still running with a display.
+	ct, err := b.container(ctx, instanceID)
+	if err != nil {
+		return 0
 	}
-	return 0
+	port = int(ct.VNCPort())
+	if port != 0 {
+		b.mu.Lock()
+		b.vncPorts[instanceID] = int32(port) //nolint:gosec // port numbers are 1-65535, safe for int32
+		b.mu.Unlock()
+	}
+	return port
 }
 
-// Processes runs ps -eo pid,ppid,user,stat,%cpu,%mem,time,args --no-headers
-// inside the named container via SSH and returns the parsed process list.
+// Processes returns the process list inside the runtime instance.
 func (b *Backend) Processes(ctx context.Context, id runtime.InstanceID) ([]runtime.ProcessInfo, error) {
-	containerName := string(id)
-	ct, err := b.client.Get(ctx, containerName)
+	ct, err := b.container(ctx, string(id))
 	if err != nil {
-		return nil, fmt.Errorf("get container %s: %w", containerName, err)
+		return nil, err
 	}
-	cmd := "ps -eo pid,ppid,user,stat,%cpu,%mem,time,args --no-headers"
-	sshArgs := ct.SSHCommand(nil, cmd)
-
-	c := exec.CommandContext(ctx, sshArgs[0], sshArgs[1:]...) //nolint:gosec // containerName is internally-assigned; cmd is a constant literal
-	out, err := c.Output()
+	procs, err := ct.Processes(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("ps in container %s: %w", containerName, err)
+		return nil, err
 	}
-	return parsePSOutput(string(out))
+	return fromMDProcessInfos(procs), nil
 }
 
-// Signal sends a signal (e.g. SIGTERM, SIGKILL) to a process inside the
-// named container via SSH using kill.
+// Signal sends a signal to a process inside the runtime instance.
 func (b *Backend) Signal(ctx context.Context, id runtime.InstanceID, pid int, sig string) error {
-	containerName := string(id)
-	ct, err := b.client.Get(ctx, containerName)
+	ct, err := b.container(ctx, string(id))
 	if err != nil {
-		return fmt.Errorf("get container %s: %w", containerName, err)
+		return err
 	}
-	cmd := fmt.Sprintf("kill -s %s %d", sig, pid)
-	sshArgs := ct.SSHCommand(nil, cmd)
-	c := exec.CommandContext(ctx, sshArgs[0], sshArgs[1:]...) //nolint:gosec // containerName is internally-assigned; cmd uses fmt.Sprintf
-	out, err := c.CombinedOutput()
+	return ct.Signal(ctx, pid, sig)
+}
+
+func (b *Backend) container(ctx context.Context, name string) (mdContainer, error) {
+	b.mu.Lock()
+	c := b.containers[name]
+	b.mu.Unlock()
+	if c != nil {
+		return c, nil
+	}
+	c, err := b.client.Get(ctx, name)
 	if err != nil {
-		return fmt.Errorf("signal %s pid %d in container %s: %w (output: %s)", sig, pid, containerName, err, string(out))
+		return nil, err
 	}
-	return nil
+	b.rememberContainer(name, c)
+	return c, nil
+}
+
+func (b *Backend) rememberContainer(name string, c mdContainer) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.rememberContainerLocked(name, c)
+}
+
+func (b *Backend) rememberMDContainers(containers []*md.Container) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, c := range containers {
+		if c.Name == "" {
+			continue
+		}
+		b.rememberContainerLocked(c.Name, mdContainerAdapter{c})
+	}
+}
+
+func (b *Backend) rememberContainerLocked(name string, c mdContainer) {
+	if b.containers == nil {
+		b.containers = make(map[string]mdContainer)
+	}
+	b.containers[name] = c
+	if b.vncPorts == nil {
+		b.vncPorts = make(map[string]int32)
+	}
+	if port := c.VNCPort(); port != 0 {
+		b.vncPorts[name] = port
+	}
+}
+
+func (b *Backend) forgetContainer(name string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.containers, name)
+	delete(b.pendingContainers, name)
+	delete(b.vncPorts, name)
 }
 
 // harnessMap maps caic harnesses to their md equivalents.
@@ -534,6 +578,26 @@ func fromMDRepos(repos []md.Repo) []runtime.Repo {
 	return out
 }
 
+func fromMDProcessInfos(procs []md.ProcessInfo) []runtime.ProcessInfo {
+	if len(procs) == 0 {
+		return nil
+	}
+	out := make([]runtime.ProcessInfo, len(procs))
+	for i, p := range procs {
+		out[i] = runtime.ProcessInfo{
+			PID:     p.PID,
+			PPID:    p.PPID,
+			User:    p.User,
+			State:   p.State,
+			CPU:     p.CPU,
+			Mem:     p.Mem,
+			Time:    p.Time,
+			Command: p.Command,
+		}
+	}
+	return out
+}
+
 func toMDCacheMounts(caches []runtime.CacheMount) []md.CacheMount {
 	if len(caches) == 0 {
 		return nil
@@ -577,26 +641,6 @@ func metadataLabels(metadata runtime.Metadata) []string {
 	}
 	slices.Sort(labels)
 	return labels
-}
-
-// hostPort reads the instance host port mapping for the given instance port.
-func (b *Backend) hostPort(ctx context.Context, instanceID, containerPort string) (int, error) {
-	cmd := exec.CommandContext(ctx, b.client.Runtime(), "port", instanceID, containerPort) //nolint:gosec // instanceID is internally-assigned
-	out, err := cmd.Output()
-	if err != nil {
-		return 0, err
-	}
-	return parseHostPort(string(out))
-}
-
-// parseHostPort extracts the host port from `docker port` output, e.g.
-// "0.0.0.0:32768" or "127.0.0.1:32768".
-func parseHostPort(out string) (int, error) {
-	parts := strings.SplitN(strings.TrimSpace(out), ":", 2)
-	if len(parts) != 2 {
-		return 0, fmt.Errorf("unexpected port output: %q", out)
-	}
-	return strconv.Atoi(parts[1])
 }
 
 // logWriters returns stdout and stderr writers for md task operations.

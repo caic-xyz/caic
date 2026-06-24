@@ -33,9 +33,16 @@ type fakeMDContainer struct {
 	forkErr     error
 	agentMounts []md.Mount
 	agentErr    error
+	processes   []md.ProcessInfo
+	processErr  error
+	signalErr   error
 
-	calls      []string
-	agentPaths []md.AgentPaths
+	calls        []string
+	agentPaths   []md.AgentPaths
+	processCalls int
+	signalCalls  int
+	signalPID    int
+	signalSig    string
 }
 
 func (f *fakeMDContainer) Name() string      { return f.name }
@@ -50,11 +57,6 @@ func (f *fakeMDContainer) AgentMounts(paths ...md.AgentPaths) ([]md.Mount, error
 		return nil, f.agentErr
 	}
 	return slices.Clone(f.agentMounts), nil
-}
-
-func (f *fakeMDContainer) SSHCommand(_ []string, cmd string) []string {
-	f.calls = append(f.calls, "SSHCommand")
-	return []string{"ssh", cmd}
 }
 
 func (f *fakeMDContainer) Launch(_ context.Context, _, _ io.Writer, _ *md.StartOpts) error {
@@ -107,6 +109,21 @@ func (f *fakeMDContainer) Fork(_ context.Context, _, _ io.Writer, _ *md.ForkOpts
 	return f.forkResult, nil
 }
 
+func (f *fakeMDContainer) Processes(context.Context) ([]md.ProcessInfo, error) {
+	f.processCalls++
+	if f.processErr != nil {
+		return nil, f.processErr
+	}
+	return slices.Clone(f.processes), nil
+}
+
+func (f *fakeMDContainer) Signal(_ context.Context, pid int, sig string) error {
+	f.signalCalls++
+	f.signalPID = pid
+	f.signalSig = sig
+	return f.signalErr
+}
+
 // fakeMDClient is a fake mdClient handing out preconfigured containers.
 type fakeMDClient struct {
 	runtime      string
@@ -153,7 +170,7 @@ func (f *fakeMDClient) Get(_ context.Context, name string) (mdContainer, error) 
 }
 
 func newTestBackend(c mdClient) *Backend {
-	return &Backend{client: c, vncPorts: make(map[string]int32)}
+	return &Backend{client: c, containers: make(map[string]mdContainer), vncPorts: make(map[string]int32)}
 }
 
 func TestBackend(t *testing.T) {
@@ -374,11 +391,56 @@ func TestBackend(t *testing.T) {
 	})
 
 	t.Run("VNCPort", func(t *testing.T) {
+		t.Run("valid cached", func(t *testing.T) {
+			t.Parallel()
+			b := newTestBackend(&fakeMDClient{})
+			b.vncPorts["c"] = 4242
+			if got := b.VNCPort(t.Context(), "c"); got != 4242 {
+				t.Errorf("VNCPort = %d, want 4242 (in-memory hit)", got)
+			}
+		})
+		t.Run("valid inspect fallback", func(t *testing.T) {
+			t.Parallel()
+			fc := &fakeMDClient{getResult: &fakeMDContainer{vncPort: 5901}}
+			b := newTestBackend(fc)
+			if got := b.VNCPort(t.Context(), "c"); got != 5901 {
+				t.Errorf("VNCPort = %d, want 5901", got)
+			}
+			if fc.getCalls != 1 || fc.getName != "c" {
+				t.Errorf("Get calls = %d name = %q, want 1 c", fc.getCalls, fc.getName)
+			}
+		})
+	})
+
+	t.Run("Processes", func(t *testing.T) {
 		t.Parallel()
-		b := newTestBackend(&fakeMDClient{})
-		b.vncPorts["c"] = 4242
-		if got := b.VNCPort(t.Context(), "c"); got != 4242 {
-			t.Errorf("VNCPort = %d, want 4242 (in-memory hit)", got)
+		ctr := &fakeMDContainer{processes: []md.ProcessInfo{{PID: 7, Command: "agent"}}}
+		fc := &fakeMDClient{}
+		b := newTestBackend(fc)
+		b.containers["ctr"] = ctr
+		procs, err := b.Processes(t.Context(), "ctr")
+		if err != nil {
+			t.Fatalf("Processes: %v", err)
+		}
+		if len(procs) != 1 || procs[0].PID != 7 || procs[0].Command != "agent" {
+			t.Fatalf("Processes = %+v, want agent process", procs)
+		}
+		if ctr.processCalls != 1 || fc.getCalls != 0 {
+			t.Fatalf("process calls = %d getCalls = %d, want cached container and no Get", ctr.processCalls, fc.getCalls)
+		}
+	})
+
+	t.Run("Signal", func(t *testing.T) {
+		t.Parallel()
+		ctr := &fakeMDContainer{}
+		fc := &fakeMDClient{}
+		b := newTestBackend(fc)
+		b.containers["ctr"] = ctr
+		if err := b.Signal(t.Context(), "ctr", 123, "SIGTERM"); err != nil {
+			t.Fatalf("Signal: %v", err)
+		}
+		if ctr.signalCalls != 1 || ctr.signalPID != 123 || ctr.signalSig != "SIGTERM" || fc.getCalls != 0 {
+			t.Fatalf("signal = calls %d pid %d sig %q getCalls %d", ctr.signalCalls, ctr.signalPID, ctr.signalSig, fc.getCalls)
 		}
 	})
 
@@ -446,24 +508,5 @@ func TestBackend(t *testing.T) {
 		if got := maxCPUsOrDefault(0); got <= 0 {
 			t.Errorf("maxCPUsOrDefault(0) = %d, want positive default", got)
 		}
-	})
-
-	t.Run("parseHostPort", func(t *testing.T) {
-		t.Run("valid", func(t *testing.T) {
-			t.Parallel()
-			got, err := parseHostPort("0.0.0.0:32768\n")
-			if err != nil {
-				t.Fatalf("parseHostPort: %v", err)
-			}
-			if got != 32768 {
-				t.Errorf("port = %d, want 32768", got)
-			}
-		})
-		t.Run("error", func(t *testing.T) {
-			t.Parallel()
-			if _, err := parseHostPort("garbage"); err == nil {
-				t.Error("want error for malformed output")
-			}
-		})
 	})
 }

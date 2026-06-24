@@ -82,9 +82,9 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		return nil, fmt.Errorf("init md runtime adapter: %w", err)
 	}
 	mdClient.DigestCacheTTL = warmupInterval
-	runtimeInfo := mdruntime.NewRuntimeInfoBackend(mdClient)
 	backend := mdruntime.NewBackend(mdClient)
 	backend.HarnessEnv = cfg.Agent.HarnessEnv
+	runtimeInfo := mdruntime.NewRuntimeInfoBackend(mdClient, backend)
 	runtimeBackend := runtime.Backend(backend)
 	if cfg.Runtime.Backend != nil {
 		runtimeBackend = cfg.Runtime.Backend
