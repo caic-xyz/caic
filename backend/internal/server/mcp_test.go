@@ -289,6 +289,17 @@ func TestMCPHandlers(t *testing.T) {
 		if !strings.Contains(data, `"resourceSubscriptions":["caic://tasks"]`) {
 			t.Fatalf("subscription response = %s, want supported task resource acknowledged", data)
 		}
+		// The acknowledgment is followed by an initial state burst that forces
+		// the client to re-read each subscribed target through the authorized
+		// resources/read path, closing the read-then-subscribe staleness gap.
+		// The context is pre-cancelled, so the change loop adds nothing and the
+		// body is exactly the ack plus this deterministic burst.
+		if !strings.Contains(data, `"method":"notifications/resources/list_changed"`) {
+			t.Fatalf("subscription response = %s, want initial resources list_changed", data)
+		}
+		if !strings.Contains(data, `"method":"notifications/resources/updated"`) || !strings.Contains(data, `"uri":"caic://tasks"`) {
+			t.Fatalf("subscription response = %s, want initial caic://tasks update", data)
+		}
 	})
 
 	t.Run("subscriptionsListenRejectsUnsupportedResource", func(t *testing.T) {

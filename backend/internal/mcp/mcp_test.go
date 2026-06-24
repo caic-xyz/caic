@@ -92,17 +92,26 @@ func TestHandlerHandleMCP(t *testing.T) {
 			t.Fatalf("first notification = %q, want acknowledgment", ack.Method)
 		}
 
+		// An initial resource update arrives before any mutation, forcing the
+		// client to re-read and closing the read-then-subscribe staleness gap.
+		initial := readSSEMessage(t, r)
+		if initial.Method != NotificationMethodResourcesUpdated {
+			t.Fatalf("initial notification = %q, want resource update", initial.Method)
+		}
+		if uri := resourceUpdateURI(t, initial); uri != "test://resource" {
+			t.Fatalf("initial uri = %q, want test://resource", uri)
+		}
+
+		// A subsequent change still produces exactly one update; the initial
+		// burst left the dedup baseline untouched, so the change is not
+		// swallowed and not duplicated.
 		registry.setResource("changed")
 		got := readSSEMessage(t, r)
 		if got.Method != NotificationMethodResourcesUpdated {
 			t.Fatalf("notification = %q, want resource update", got.Method)
 		}
-		params, ok := got.Params.(map[string]any)
-		if !ok {
-			t.Fatalf("params = %#v, want object", got.Params)
-		}
-		if params["uri"] != "test://resource" {
-			t.Fatalf("uri = %#v, want test://resource", params["uri"])
+		if uri := resourceUpdateURI(t, got); uri != "test://resource" {
+			t.Fatalf("uri = %q, want test://resource", uri)
 		}
 	})
 }
@@ -190,6 +199,16 @@ func readSSEMessage(t *testing.T, r *bufio.Reader) JSONRPCNotification {
 		}
 		return msg
 	}
+}
+
+func resourceUpdateURI(t *testing.T, msg JSONRPCNotification) string {
+	t.Helper()
+	params, ok := msg.Params.(map[string]any)
+	if !ok {
+		t.Fatalf("params = %#v, want object", msg.Params)
+	}
+	uri, _ := params["uri"].(string)
+	return uri
 }
 
 func TestContentBlockValidate(t *testing.T) {

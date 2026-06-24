@@ -1000,8 +1000,43 @@ func (h *Handler) handleSubscription(ctx context.Context, w http.ResponseWriter,
 		slog.WarnContext(ctx, "write mcp subscription acknowledgment", "err", err)
 		return nil
 	}
+	if !h.writeInitialSubscriptionState(ctx, stream, subID, p.Notifications) {
+		return nil
+	}
 	h.streamSubscriptionNotifications(ctx, stream, subID, p.Notifications, changes, lastResources, lastResourceContents)
 	return nil
+}
+
+// writeInitialSubscriptionState emits one notification per subscribed target
+// right after the acknowledgment, forcing the client to re-read through the
+// normal resources/read path.
+//
+// This closes the read-then-subscribe staleness gap: a change that lands between
+// the client's initial resources/read and the server's subscription baseline is
+// never classified as "after subscribe", so the change loop would never report
+// it and the client would hold stale state until an unrelated change. The forced
+// post-subscribe re-read observes that change. The baseline (lastResources /
+// lastResourceContents) is left untouched, so the first real post-subscribe
+// change still deduplicates correctly and produces exactly one update.
+//
+// The draft schema's acknowledged and resources/updated notifications carry no
+// content, so re-read — not an embedded baseline payload — is the spec-conformant
+// way to deliver initial state. Re-reading also keeps redaction and authorization
+// on the normal ReadResource path rather than a divergent snapshot.
+func (h *Handler) writeInitialSubscriptionState(ctx context.Context, w subscriptionStreamWriter, subID string, filter SubscriptionFilter) bool {
+	if filter.ResourcesListChanged {
+		if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesListChanged, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID)}}); err != nil {
+			slog.WarnContext(ctx, "write mcp initial resources list notification", "err", err)
+			return false
+		}
+	}
+	for _, uri := range filter.ResourceSubscriptions {
+		if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesUpdated, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), URI: uri}}); err != nil {
+			slog.WarnContext(ctx, "write mcp initial resource update notification", "err", err)
+			return false
+		}
+	}
+	return true
 }
 
 type subscriptionStreamWriter interface {
