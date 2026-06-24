@@ -24,6 +24,9 @@ type Backend interface {
 	// output.jsonl to replay from (use 0 for full replay).
 	// opts.ResumeSessionID is the known agent session ID, used by stateful
 	// wire formats (e.g. codex) that need it before the first replay message.
+	// opts.PendingUserActions contains user-facing actions restored before
+	// reconnect, such as unanswered AskUserQuestion requests. It excludes
+	// backend-only control protocol state.
 	AttachRelay(ctx context.Context, opts *Options) (*Session, error)
 
 	// Harness returns the harness identifier ("claude", "codex", etc.)

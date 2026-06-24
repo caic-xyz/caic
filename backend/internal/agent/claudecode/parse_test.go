@@ -477,6 +477,39 @@ func TestParseMessage(t *testing.T) {
 			t.Fatalf("ts = %f, want 1719500000.123", m.Ts)
 		}
 	})
+	t.Run("PendingAskUserAction", func(t *testing.T) {
+		t.Parallel()
+		line := `{"type":"control_request","request_id":"req-1","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[{"question":"Which login boundary should Google use in caic?","header":"Login","options":[{"label":"Identity only","description":"Use identity-only login boundary"},{"label":"Forge-coupled","description":"Use forge-coupled login boundary"}],"multiSelect":false}]},"tool_use_id":"toolu-1"}}`
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		m, ok := msgs[0].(*agent.PendingUserActionMessage)
+		if !ok {
+			t.Fatalf("got %T, want *agent.PendingUserActionMessage", msgs[0])
+		}
+		if m.Action.Kind != agent.PendingUserActionAskUserQuestion {
+			t.Errorf("Kind = %q, want %q", m.Action.Kind, agent.PendingUserActionAskUserQuestion)
+		}
+		if m.Action.RequestID != "req-1" {
+			t.Errorf("RequestID = %q, want req-1", m.Action.RequestID)
+		}
+		if m.Action.ToolUseID != "toolu-1" {
+			t.Errorf("ToolUseID = %q, want toolu-1", m.Action.ToolUseID)
+		}
+		if len(m.Action.Ask.Questions) != 1 {
+			t.Fatalf("Questions len = %d, want 1", len(m.Action.Ask.Questions))
+		}
+		if len(m.Action.Ask.Questions[0].Options) != 2 {
+			t.Fatalf("Options len = %d, want 2", len(m.Action.Ask.Questions[0].Options))
+		}
+		if m.Action.Ask.Questions[0].Options[1].Label != "Forge-coupled" {
+			t.Errorf("option = %q, want Forge-coupled", m.Action.Ask.Questions[0].Options[1].Label)
+		}
+	})
 	t.Run("RawFallback", func(t *testing.T) {
 		t.Parallel()
 		line := `{"type":"tool_progress","data":"some progress"}`

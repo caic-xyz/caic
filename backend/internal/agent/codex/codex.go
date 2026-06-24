@@ -231,7 +231,7 @@ func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.
 	// immediately. wireFormat.process() will update it again if thread/started
 	// appears in the replayed output.
 	wire := &wireFormat{threadID: opts.ResumeSessionID, effort: opts.Effort, suppressUserInput: true, fw: &jsonutil.FieldWarner{}}
-	return agent.AttachRelaySession(ctx, opts, wire)
+	return agent.AttachRelaySession(ctx, opts, wire, nil)
 }
 
 // NewWire implements agent.Backend.

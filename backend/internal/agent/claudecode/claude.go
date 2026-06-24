@@ -108,7 +108,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if err != nil {
 		return nil, err
 	}
-	c := agent.NewConn(rp.Stdin, opts.LogW, b)
+	var c agent.Conn = &controlConn{Conn: agent.NewConn(rp.Stdin, opts.LogW, b)}
 	if stripAndInject {
 		c = &envInjectorConn{Conn: c}
 	}
@@ -155,7 +155,8 @@ func (*Backend) AgentArgs(a agent.HarnessArgs) []string {
 		"--input-format", "stream-json",
 		"--output-format", "stream-json",
 		"--verbose",
-		"--dangerously-skip-permissions",
+		"--permission-mode", "acceptEdits",
+		"--permission-prompt-tool", "stdio",
 		"--include-partial-messages",
 		"--plugin-dir", agent.WidgetPluginDir,
 	}
@@ -173,7 +174,13 @@ func (*Backend) AgentArgs(a agent.HarnessArgs) []string {
 
 // AttachRelay implements agent.Backend.
 func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	return agent.AttachRelaySession(ctx, opts, b)
+	return agent.AttachRelaySession(ctx, opts, b, func(c agent.Conn) (agent.Conn, error) {
+		cc := &controlConn{Conn: c}
+		if err := cc.restorePendingActions(opts.PendingUserActions); err != nil {
+			return nil, err
+		}
+		return cc, nil
+	})
 }
 
 // NewWire implements agent.Backend.

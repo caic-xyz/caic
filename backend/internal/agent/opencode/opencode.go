@@ -177,7 +177,7 @@ func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.
 		return nil, errors.New("opencode: missing session ID for relay attach")
 	}
 	wire := &wireFormat{sessionID: opts.ResumeSessionID, fw: &jsonutil.FieldWarner{}}
-	return agent.AttachRelaySession(ctx, opts, wire)
+	return agent.AttachRelaySession(ctx, opts, wire, nil)
 }
 
 // NewWire implements agent.Backend.

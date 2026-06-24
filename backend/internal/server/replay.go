@@ -73,7 +73,8 @@ func filterHistoryForReplay(msgs []agent.Message) []agent.Message {
 func replayClearsExit(msg agent.Message) bool {
 	switch m := msg.(type) {
 	case *agent.ExitMessage, *agent.DiffStatMessage, *agent.RawMessage,
-		*agent.ParseErrorMessage, *agent.LogMessage, *agent.StrippedEnvMessage:
+		*agent.PendingUserActionMessage, *agent.ParseErrorMessage,
+		*agent.LogMessage, *agent.StrippedEnvMessage:
 		return false
 	case *agent.ResultMessage:
 		return !m.IsError

@@ -79,10 +79,15 @@ type Options struct {
 	Effort          string // Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default.
 	InitialPrompt   Prompt // Initial prompt; never mutated after creation.
 	ResumeSessionID string
-	RelayOffset     int64          // Byte offset into relay output.jsonl for AttachRelay.
-	MsgCh           chan<- Message // Receives parsed messages from the agent.
-	LogW            io.Writer      // Raw wire-format log; use io.Discard if unused.
-	StripEnv        []string       // Env var names for relay to strip from subprocess and emit as caic_stripped_env.
+	RelayOffset     int64 // Byte offset into relay output.jsonl for AttachRelay.
+	// PendingUserActions is the restored user-facing work that still needs
+	// input after AttachRelay reconnects. It must not contain backend-only
+	// protocol state such as keepalive, auto-allow, or environment control
+	// messages.
+	PendingUserActions []PendingUserAction
+	MsgCh              chan<- Message // Receives parsed messages from the agent.
+	LogW               io.Writer      // Raw wire-format log; use io.Discard if unused.
+	StripEnv           []string       // Env var names for relay to strip from subprocess and emit as caic_stripped_env.
 }
 
 // WireFormat defines the wire protocol for a backend's stdin/stdout
@@ -717,7 +722,9 @@ func yieldMessages(r io.Reader, parseFn func([]byte) ([]Message, error), skipFir
 // and returns a new Session. It waits briefly for the attach process to
 // confirm connectivity; if the process exits immediately (e.g. relay socket
 // is stale), an error is returned so the caller can fall back to --resume.
-func AttachRelaySession(ctx context.Context, opts *Options, wire WireFormat) (*Session, error) {
+// Backends may pass wrap to intercept the default Conn before message reading
+// starts.
+func AttachRelaySession(ctx context.Context, opts *Options, wire WireFormat, wrap func(Conn) (Conn, error)) (*Session, error) {
 	sshHost := opts.Target.SSHHost
 	if sshHost == "" {
 		return nil, errors.New("agent connection target missing SSH host")
@@ -735,13 +742,20 @@ func AttachRelaySession(ctx context.Context, opts *Options, wire WireFormat) (*S
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
+	c := NewConn(stdin, opts.LogW, wire)
+	if wrap != nil {
+		c, err = wrap(c)
+		if err != nil {
+			return nil, err
+		}
+	}
 	cmd.Stderr = &SlogWriter{Prefix: "relay attach", Container: sshHost}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("attach relay: %w", err)
 	}
 
 	log := slog.With("target", sshHost)
-	return NewSession(cmd, NewConn(stdin, opts.LogW, wire), stdout, opts.MsgCh, log), nil
+	return NewSession(cmd, c, stdout, opts.MsgCh, log), nil
 }
 
 // PlainTextWritePrompt writes a user prompt as a plain text line on stdin

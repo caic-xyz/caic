@@ -600,7 +600,36 @@ func TestTask(t *testing.T) {
 				ToolUseID: "ask1",
 				Questions: []agent.AskQuestion{{Question: "which?"}},
 			}, false)
-			// Now add a result message — should transition to StateAsking.
+			if tk.GetState() != StateAsking {
+				t.Errorf("state = %v, want %v", tk.GetState(), StateAsking)
+			}
+		})
+		t.Run("AnsweredAskTransitionsToWaiting", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
+			tk.addMessage(t.Context(), &agent.AskMessage{
+				ToolUseID: "ask1",
+				Questions: []agent.AskQuestion{{Question: "which?"}},
+			}, false)
+			tk.addMessage(t.Context(), &agent.ToolResultMessage{ToolUseID: "ask1"}, false)
+			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
+			if tk.GetState() != StateWaiting {
+				t.Errorf("state = %v, want %v", tk.GetState(), StateWaiting)
+			}
+		})
+		t.Run("ErroredAskResultStaysAsking", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
+			tk.addMessage(t.Context(), &agent.AskMessage{
+				ToolUseID: "ask1",
+				Questions: []agent.AskQuestion{{Question: "which?"}},
+			}, false)
+			tk.addMessage(t.Context(), &agent.ToolResultMessage{
+				ToolUseID: "ask1",
+				Error:     "permission denied",
+			}, false)
 			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
 			if tk.GetState() != StateAsking {
 				t.Errorf("state = %v, want %v", tk.GetState(), StateAsking)
@@ -619,6 +648,10 @@ func TestTask(t *testing.T) {
 				ToolUseID: "ask1",
 				Questions: []agent.AskQuestion{{Question: "which?"}},
 			}, false)
+			if tk.GetState() != StateAsking {
+				t.Fatalf("state = %v, want %v before result", tk.GetState(), StateAsking)
+			}
+			tk.SetState(StateRunning)
 			// Final partial snapshot: text-only, no tool_use.
 			tk.addMessage(t.Context(), &agent.TextMessage{Text: "I need to ask you something."}, false)
 			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
@@ -1487,6 +1520,56 @@ func TestTask(t *testing.T) {
 				t.Errorf("state = %v, want %v (should infer asking from AskMessage + ResultMessage)", tk.GetState(), StateAsking)
 			}
 		})
+		t.Run("InfersAskingWithoutResult", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
+			msgs := []agent.Message{
+				&agent.InitMessage{SessionID: "s1"},
+				&agent.AskMessage{
+					ToolUseID: "ask1",
+					Questions: []agent.AskQuestion{{Question: "which?"}},
+				},
+			}
+			tk.RestoreMessages(msgs)
+			if tk.GetState() != StateAsking {
+				t.Errorf("state = %v, want %v (should infer asking from trailing AskMessage)", tk.GetState(), StateAsking)
+			}
+		})
+		t.Run("AnsweredAskInfersWaiting", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
+			msgs := []agent.Message{
+				&agent.AskMessage{
+					ToolUseID: "ask1",
+					Questions: []agent.AskQuestion{{Question: "which?"}},
+				},
+				&agent.ToolResultMessage{ToolUseID: "ask1"},
+				&agent.ResultMessage{MessageType: "result"},
+			}
+			tk.RestoreMessages(msgs)
+			if tk.GetState() != StateWaiting {
+				t.Errorf("state = %v, want %v (answered AskUserQuestion should not remain asking)", tk.GetState(), StateWaiting)
+			}
+		})
+		t.Run("ErroredAskInfersAsking", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
+			msgs := []agent.Message{
+				&agent.AskMessage{
+					ToolUseID: "ask1",
+					Questions: []agent.AskQuestion{{Question: "which?"}},
+				},
+				&agent.ToolResultMessage{ToolUseID: "ask1", Error: "permission denied"},
+				&agent.ResultMessage{MessageType: "result"},
+			}
+			tk.RestoreMessages(msgs)
+			if tk.GetState() != StateAsking {
+				t.Errorf("state = %v, want %v (errored AskUserQuestion result should remain asking)", tk.GetState(), StateAsking)
+			}
+		})
 		t.Run("InfersHasPlan", func(t *testing.T) {
 			t.Parallel()
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
@@ -2021,6 +2104,149 @@ func TestTask(t *testing.T) {
 		if snap.AgentVersion != "2.0.0" {
 			t.Errorf("AgentVersion = %q, want 2.0.0", snap.AgentVersion)
 		}
+	})
+
+	t.Run("PendingUserActions", func(t *testing.T) {
+		t.Parallel()
+		t.Run("RestoresCurrentAsk", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{}
+			tk.RestoreMessages([]agent.Message{
+				&agent.AskMessage{
+					ToolUseID: "toolu-1",
+					Questions: []agent.AskQuestion{{Question: "Which?"}},
+				},
+				&agent.PendingUserActionMessage{
+					MessageType: agent.PendingUserActionMessageType,
+					Action: agent.PendingUserAction{
+						Kind:      agent.PendingUserActionAskUserQuestion,
+						RequestID: "req-1",
+						ToolUseID: "toolu-1",
+						Ask: agent.PendingAskAction{
+							Questions: []agent.AskQuestion{{Question: "Which?"}},
+						},
+					},
+				},
+				&agent.ResultMessage{MessageType: "result"},
+			})
+
+			got := tk.PendingUserActions()
+			if len(got) != 1 {
+				t.Fatalf("PendingUserActions len = %d, want 1", len(got))
+			}
+			if got[0].Kind != agent.PendingUserActionAskUserQuestion {
+				t.Errorf("Kind = %q, want %q", got[0].Kind, agent.PendingUserActionAskUserQuestion)
+			}
+			if got[0].RequestID != "req-1" {
+				t.Errorf("RequestID = %q, want req-1", got[0].RequestID)
+			}
+			if len(got[0].Ask.Questions) != 1 {
+				t.Fatalf("Questions len = %d, want 1", len(got[0].Ask.Questions))
+			}
+			if got[0].Ask.Questions[0].Question != "Which?" {
+				t.Errorf("question = %q, want Which?", got[0].Ask.Questions[0].Question)
+			}
+		})
+		t.Run("RestoresMultipleCurrentAsks", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{}
+			tk.RestoreMessages([]agent.Message{
+				&agent.AskMessage{
+					ToolUseID: "toolu-1",
+					Questions: []agent.AskQuestion{{Question: "First?"}},
+				},
+				&agent.PendingUserActionMessage{
+					MessageType: agent.PendingUserActionMessageType,
+					Action: agent.PendingUserAction{
+						Kind:      agent.PendingUserActionAskUserQuestion,
+						RequestID: "req-1",
+						ToolUseID: "toolu-1",
+						Ask: agent.PendingAskAction{
+							Questions: []agent.AskQuestion{{Question: "First?"}},
+						},
+					},
+				},
+				&agent.AskMessage{
+					ToolUseID: "toolu-2",
+					Questions: []agent.AskQuestion{{Question: "Second?"}},
+				},
+				&agent.PendingUserActionMessage{
+					MessageType: agent.PendingUserActionMessageType,
+					Action: agent.PendingUserAction{
+						Kind:      agent.PendingUserActionAskUserQuestion,
+						RequestID: "req-2",
+						ToolUseID: "toolu-2",
+						Ask: agent.PendingAskAction{
+							Questions: []agent.AskQuestion{{Question: "Second?"}},
+						},
+					},
+				},
+				&agent.ResultMessage{MessageType: "result"},
+			})
+
+			got := tk.PendingUserActions()
+			if len(got) != 2 {
+				t.Fatalf("PendingUserActions len = %d, want 2", len(got))
+			}
+			if got[0].RequestID != "req-1" || got[1].RequestID != "req-2" {
+				t.Fatalf("RequestIDs = %q, %q; want req-1, req-2", got[0].RequestID, got[1].RequestID)
+			}
+		})
+		t.Run("AnsweredAskIsClosed", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{}
+			tk.RestoreMessages([]agent.Message{
+				&agent.AskMessage{
+					ToolUseID: "toolu-1",
+					Questions: []agent.AskQuestion{{Question: "Which?"}},
+				},
+				&agent.PendingUserActionMessage{
+					MessageType: agent.PendingUserActionMessageType,
+					Action: agent.PendingUserAction{
+						Kind:      agent.PendingUserActionAskUserQuestion,
+						RequestID: "req-1",
+						ToolUseID: "toolu-1",
+						Ask: agent.PendingAskAction{
+							Questions: []agent.AskQuestion{{Question: "Which?"}},
+						},
+					},
+				},
+				&agent.ToolResultMessage{ToolUseID: "toolu-1"},
+				&agent.ResultMessage{MessageType: "result"},
+			})
+
+			if got := tk.PendingUserActions(); len(got) != 0 {
+				t.Fatalf("PendingUserActions = %#v, want none", got)
+			}
+		})
+		t.Run("PreviousTurnAskIsIgnored", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{}
+			tk.RestoreMessages([]agent.Message{
+				&agent.AskMessage{
+					ToolUseID: "toolu-1",
+					Questions: []agent.AskQuestion{{Question: "Which?"}},
+				},
+				&agent.PendingUserActionMessage{
+					MessageType: agent.PendingUserActionMessageType,
+					Action: agent.PendingUserAction{
+						Kind:      agent.PendingUserActionAskUserQuestion,
+						RequestID: "req-1",
+						ToolUseID: "toolu-1",
+						Ask: agent.PendingAskAction{
+							Questions: []agent.AskQuestion{{Question: "Which?"}},
+						},
+					},
+				},
+				&agent.ResultMessage{MessageType: "result"},
+				&agent.TextMessage{Text: "new turn"},
+				&agent.ResultMessage{MessageType: "result"},
+			})
+
+			if got := tk.PendingUserActions(); len(got) != 0 {
+				t.Fatalf("PendingUserActions = %#v, want none", got)
+			}
+		})
 	})
 
 	t.Run("WriteToLog", func(t *testing.T) {

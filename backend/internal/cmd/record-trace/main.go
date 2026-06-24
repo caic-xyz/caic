@@ -26,6 +26,8 @@ import (
 	"strings"
 	"time"
 
+	claudedto "github.com/maruel/genai/providers/claudecode"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
@@ -45,9 +47,22 @@ var backends = map[string]agent.Backend{
 	string(harness.OpenCode): opencode.New("", nil),
 }
 
-var scenarios = map[string]string{
-	"read-edit-bash": `Read main.go, edit the greeting on line 3 from "Hello" to "Hi", then run cat main.go.`,
-	"tool-error":     "Read the file nonexistent_file.txt",
+type scenario struct {
+	prompt    string
+	askAnswer string
+}
+
+var scenarios = map[string]scenario{
+	"ask-user-question": {
+		prompt:    `Before editing any files, call AskUserQuestion with one question. The header must be "Greeting", the question must be "Which greeting should main.go print?", and the options must be "Hello" and "Hi". After I answer, update main.go to print that greeting, then run cat main.go.`,
+		askAnswer: "Hi",
+	},
+	"read-edit-bash": {
+		prompt: `Read main.go, edit the greeting on line 3 from "Hello" to "Hi", then run cat main.go.`,
+	},
+	"tool-error": {
+		prompt: "Read the file nonexistent_file.txt",
+	},
 }
 
 var credentialMounts = map[harness.Name][]credentialMount{
@@ -89,7 +104,7 @@ func mainImpl() error {
 	if *scenarioFlag == "" {
 		return errors.New("--scenario is required")
 	}
-	promptText, ok := scenarios[*scenarioFlag]
+	sc, ok := scenarios[*scenarioFlag]
 	if !ok {
 		return fmt.Errorf("unknown scenario: %s", *scenarioFlag)
 	}
@@ -101,10 +116,10 @@ func mainImpl() error {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
-	return recordTrace(ctx, b, *apiKeyEnv, promptText, outputPath, *modelFlag)
+	return recordTrace(ctx, b, *apiKeyEnv, sc, outputPath, *modelFlag)
 }
 
-func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv, promptText, outputPath, model string) error {
+func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv string, sc scenario, outputPath, model string) error {
 	workDir, err := setupWorkspace()
 	if err != nil {
 		return err
@@ -149,14 +164,14 @@ func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv, promptText, ou
 			return err
 		}
 	}
-	if err := sendCommands(stdin, b, model, promptText, wire); err != nil {
+	if err := sendCommands(stdin, b, model, sc.prompt, wire); err != nil {
 		_ = cmd.Process.Kill()
 		return err
 	}
-	if err := waitAndShutdown(ctx, cmd, stdin, stdout, b, ctr, wire); err != nil {
+	if err := waitAndShutdown(ctx, cmd, stdin, stdout, b, ctr, wire, sc.askAnswer); err != nil {
 		return err
 	}
-	return writeGoldenFile(ctx, ctr, workDir, b, promptText, outputPath)
+	return writeGoldenFile(ctx, ctr, workDir, b, sc.prompt, outputPath)
 }
 
 // setupWorkspace creates a temp directory with a sample main.go for the agent.
@@ -302,15 +317,19 @@ func sendCommands(stdin io.WriteCloser, b agent.Backend, model, promptText strin
 }
 
 // waitAndShutdown watches for a ResultMessage, then sends the null-byte sentinel and waits.
-func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, b agent.Backend, ctr string, wire agent.WireFormat) error {
+func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, b agent.Backend, ctr string, wire agent.WireFormat, askAnswer string) error {
 	if wire == nil {
 		wire = b.NewWire()
 	}
-	agentDone := watchResult(stdout, wire.ParseMessage)
+	agentDone := watchAgent(stdout, stdin, wire.ParseMessage, askAnswer)
 
 	slog.InfoContext(ctx, "Waiting for agent to finish")
 	select {
-	case <-agentDone:
+	case err := <-agentDone:
+		if err != nil {
+			_ = cmd.Process.Kill()
+			return err
+		}
 		slog.InfoContext(ctx, "Agent completed, stopping relay")
 	case <-time.After(120 * time.Second):
 		slog.WarnContext(ctx, "Timeout waiting for agent, terminating")
@@ -326,26 +345,113 @@ func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, stdin io.WriteCloser, s
 	return waitForFile(ctx, ctr, agent.RelayOutputPath, 20*time.Second)
 }
 
-// watchResult reads NDJSON from stdout and signals when a ResultMessage is parsed.
-func watchResult(stdout io.Reader, parse func([]byte) ([]agent.Message, error)) <-chan struct{} {
-	done := make(chan struct{})
+// watchAgent reads NDJSON from stdout, answers Claude control requests, and
+// signals when a ResultMessage is parsed.
+func watchAgent(stdout io.Reader, stdin io.Writer, parse func([]byte) ([]agent.Message, error), askAnswer string) <-chan error {
+	done := make(chan error, 1)
 	go func() {
 		defer close(done)
 		scanner := bufio.NewScanner(stdout)
 		scanner.Buffer(make([]byte, 1<<20), 32<<20)
 		for scanner.Scan() {
-			msgs, err := parse(scanner.Bytes())
+			line := append([]byte(nil), scanner.Bytes()...)
+			if err := answerClaudeControlRequest(stdin, line, askAnswer); err != nil {
+				done <- err
+				return
+			}
+			msgs, err := parse(line)
 			if err != nil {
 				continue
 			}
 			for _, m := range msgs {
 				if _, ok := m.(*agent.ResultMessage); ok {
+					done <- nil
 					return
 				}
 			}
 		}
+		if err := scanner.Err(); err != nil {
+			done <- err
+		}
 	}()
 	return done
+}
+
+func answerClaudeControlRequest(w io.Writer, line []byte, askAnswer string) error {
+	if !isClaudeControlRequest(line) {
+		return nil
+	}
+	var msg claudedto.OutputControlRequestMsg
+	if err := json.Unmarshal(line, &msg); err != nil {
+		return fmt.Errorf("unmarshal control request: %w", err)
+	}
+	can, err := msg.DecodeCanUseTool()
+	if err != nil {
+		return fmt.Errorf("decode can_use_tool request: %w", err)
+	}
+	if can.Subtype != claudedto.ControlCanUseTool {
+		return fmt.Errorf("unsupported control request subtype %q", can.Subtype)
+	}
+
+	res := claudedto.InputControlResponseMsg{
+		Type: claudedto.InputControlResponse,
+		Response: claudedto.ControlResponse{
+			Subtype:   claudedto.ControlResponseSuccess,
+			RequestID: msg.RequestID,
+			Response: claudedto.ControlResponsePayload{
+				Behavior: claudedto.ControlCanUseToolBehaviorAllow,
+			},
+		},
+	}
+	if can.ToolName == "AskUserQuestion" {
+		if askAnswer == "" {
+			return errors.New("AskUserQuestion control request needs a scenario ask answer")
+		}
+		updatedInput, err := askUserQuestionUpdatedInput(can.Input, askAnswer)
+		if err != nil {
+			return err
+		}
+		res.Response.Response.UpdatedInput = updatedInput
+	}
+	data, err := json.Marshal(res)
+	if err != nil {
+		return fmt.Errorf("marshal control response: %w", err)
+	}
+	_, err = fmt.Fprintf(w, "%s\n", data)
+	return err
+}
+
+func isClaudeControlRequest(line []byte) bool {
+	var probe struct {
+		Type claudedto.OutputType `json:"type"`
+	}
+	return json.Unmarshal(line, &probe) == nil && probe.Type == claudedto.OutputControlRequest
+}
+
+func askUserQuestionUpdatedInput(raw map[string]json.RawMessage, answer string) (json.RawMessage, error) {
+	inputRaw, err := json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("marshal AskUserQuestion input: %w", err)
+	}
+	var input claudedto.AskUserQuestionInput
+	if err := json.Unmarshal(inputRaw, &input); err != nil {
+		return nil, fmt.Errorf("unmarshal AskUserQuestion input: %w", err)
+	}
+	if len(input.Questions) == 0 {
+		return nil, errors.New("AskUserQuestion input has no questions")
+	}
+	answers := make(map[string]string, len(input.Questions))
+	for _, q := range input.Questions {
+		answers[q.Question] = answer
+	}
+	updatedInput, err := json.Marshal(claudedto.AskUserQuestionUpdatedInput{
+		Questions: input.Questions,
+		Answers:   answers,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal AskUserQuestion updated input: %w", err)
+	}
+	return updatedInput, nil
 }
 
 // writeGoldenFile copies output.jsonl from the container, sanitizes it,

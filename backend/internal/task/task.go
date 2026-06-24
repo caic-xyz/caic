@@ -272,10 +272,10 @@ func syntheticUserInput(p agent.Prompt) *agent.UserInputMessage {
 }
 
 // lastAgentMessage scans backwards through msgs, skipping non-semantic
-// messages (DiffStatMessage, ExitMessage, TextDeltaMessage, RawMessage), and
-// returns the trailing ResultMessage if the last semantically meaningful
-// message is a result. Returns nil if it is not a ResultMessage (agent still
-// producing output) or msgs is empty.
+// messages (DiffStatMessage, ExitMessage, PendingUserActionMessage,
+// TextDeltaMessage, RawMessage), and returns the trailing ResultMessage if the
+// last semantically meaningful message is a result. Returns nil if it is not a
+// ResultMessage (agent still producing output) or msgs is empty.
 func lastAgentMessage(msgs []agent.Message) *agent.ResultMessage {
 	for _, msg := range slices.Backward(msgs) {
 		switch m := msg.(type) {
@@ -283,6 +283,8 @@ func lastAgentMessage(msgs []agent.Message) *agent.ResultMessage {
 			continue // Relay metadata; skip.
 		case *agent.ExitMessage:
 			continue // Relay metadata; skip.
+		case *agent.PendingUserActionMessage:
+			continue // Reconnect metadata; skip.
 		case *agent.TextDeltaMessage:
 			continue // Streaming delta; skip.
 		case *agent.RawMessage:
@@ -365,7 +367,8 @@ func fallbackBoundary(msg agent.Message) bool {
 func clearsExitError(msg agent.Message) bool {
 	switch m := msg.(type) {
 	case *agent.ExitMessage, *agent.DiffStatMessage, *agent.RawMessage,
-		*agent.ParseErrorMessage, *agent.LogMessage, *agent.StrippedEnvMessage:
+		*agent.PendingUserActionMessage, *agent.ParseErrorMessage,
+		*agent.LogMessage, *agent.StrippedEnvMessage:
 		return false
 	case *agent.ResultMessage:
 		return !m.IsError
@@ -374,30 +377,90 @@ func clearsExitError(msg agent.Message) bool {
 	}
 }
 
-// lastTurnHasAsk reports whether the current turn contains an AskMessage.
-// It scans backwards from the end until it hits a previous turn's
-// ResultMessage boundary. The caller may include the current turn's
-// ResultMessage in the slice (it's the trigger for this check), so we skip
-// the first ResultMessage we encounter.
-func lastTurnHasAsk(msgs []agent.Message) bool {
-	skippedResult := false
+// lastTurnHasUnansweredAsk reports whether the current turn contains an
+// AskMessage that has not been followed by a successful ToolResultMessage.
+// It scans backwards from the end until it hits the previous turn's
+// ResultMessage boundary. If the current turn's ResultMessage is present, it is
+// skipped as a boundary first.
+func lastTurnHasUnansweredAsk(msgs []agent.Message) bool {
+	skipTrailingResult := lastAgentMessage(msgs) != nil
+	answered := map[string]struct{}{}
 	for _, msg := range slices.Backward(msgs) {
-		switch msg.(type) {
+		switch m := msg.(type) {
 		case *agent.AskMessage:
-			return true
+			if m.ToolUseID == "" {
+				return true
+			}
+			if _, ok := answered[m.ToolUseID]; !ok {
+				return true
+			}
+		case *agent.ToolResultMessage:
+			if m.ToolUseID != "" && m.Error == "" {
+				answered[m.ToolUseID] = struct{}{}
+			}
 		case *agent.ResultMessage:
-			if skippedResult {
+			if skipTrailingResult {
+				skipTrailingResult = false
+			} else {
 				return false
 			}
-			skippedResult = true
 		}
 	}
 	return false
 }
 
+// pendingUserActionsFromMessages derives reconnect state from the current turn.
+// Today AskUserQuestion is the only pending action kind; adding a new kind
+// should add its close condition here instead of preserving provider-specific
+// control messages directly.
+func pendingUserActionsFromMessages(msgs []agent.Message) []agent.PendingUserAction {
+	skipTrailingResult := lastAgentMessage(msgs) != nil
+	answered := map[string]struct{}{}
+	pending := map[string]agent.PendingUserAction{}
+	var actions []agent.PendingUserAction
+	for _, msg := range slices.Backward(msgs) {
+		switch m := msg.(type) {
+		case *agent.AskMessage:
+			if m.ToolUseID == "" {
+				continue
+			}
+			if _, ok := answered[m.ToolUseID]; ok {
+				continue
+			}
+			action, ok := pending[m.ToolUseID]
+			if ok {
+				actions = append(actions, agent.ClonePendingUserAction(action))
+				delete(pending, m.ToolUseID)
+			}
+		case *agent.PendingUserActionMessage:
+			switch m.Action.Kind {
+			case agent.PendingUserActionAskUserQuestion:
+			default:
+				continue
+			}
+			if m.Action.ToolUseID != "" {
+				pending[m.Action.ToolUseID] = m.Action
+			}
+		case *agent.ToolResultMessage:
+			if m.ToolUseID != "" && m.Error == "" {
+				answered[m.ToolUseID] = struct{}{}
+			}
+		case *agent.ResultMessage:
+			if skipTrailingResult {
+				skipTrailingResult = false
+			} else {
+				slices.Reverse(actions)
+				return actions
+			}
+		}
+	}
+	slices.Reverse(actions)
+	return actions
+}
+
 // lastTurnHasExitPlan reports whether the current turn contains an ExitPlanMode
 // tool call. It scans backwards from the end until it hits a previous turn's
-// ResultMessage boundary, mirroring lastTurnHasAsk.
+// ResultMessage boundary.
 func lastTurnHasExitPlan(msgs []agent.Message) bool {
 	skippedResult := false
 	for _, msg := range slices.Backward(msgs) {
@@ -950,15 +1013,23 @@ func (t *Task) Messages() []agent.Message {
 	return append([]agent.Message(nil), t.msgs...)
 }
 
+// PendingUserActions returns current user-facing actions that still need input.
+func (t *Task) PendingUserActions() []agent.PendingUserAction {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return pendingUserActionsFromMessages(t.msgs)
+}
+
 // RestoreMessages sets the initial message history from previously saved logs.
 // It also extracts metadata from the last InitMessage, if any, and
-// infers the task state from the trailing messages: a trailing ResultMessage
-// means the agent completed its turn (StateWaiting or StateAsking).
-// Metadata-only messages (DiffStatMessage, RawMessage) after the
+// infers the task state from the trailing messages: a trailing unanswered
+// AskMessage means the agent needs input; a trailing ResultMessage means the
+// agent completed its turn (StateWaiting, StateAsking, or StateHasPlan).
+// Metadata-only messages (DiffStatMessage, PendingUserActionMessage, RawMessage) after the
 // ResultMessage are skipped during inference.
 //
 // State inference rules (applied only for non-terminal states):
-//   - Trailing ResultMessage + last assistant has AskUserQuestion → StateAsking
+//   - Current turn has unanswered AskUserQuestion → StateAsking
 //   - Trailing ResultMessage (no ask) → StateWaiting
 //   - No trailing ResultMessage → state unchanged (agent was mid-output)
 //
@@ -1105,13 +1176,15 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 	if len(msgs) > 0 && t.state != StatePurged && t.state != StateCrashed && t.state != StateFailed && t.state != StatePurging {
 		if lastAgentMessage(msgs) != nil {
 			switch {
-			case lastTurnHasAsk(msgs):
+			case lastTurnHasUnansweredAsk(msgs):
 				t.setState(StateAsking)
 			case lastTurnHasExitPlan(msgs) && t.planContent != "":
 				t.setState(StateHasPlan)
 			default:
 				t.setState(StateWaiting)
 			}
+		} else if lastTurnHasUnansweredAsk(msgs) {
+			t.setState(StateAsking)
 		}
 	}
 }
@@ -1559,8 +1632,15 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 	//     sets StateRunning (race between backend subprocess and
 	//     SetState on the main goroutine).
 	switch m.(type) {
-	case *agent.TextMessage, *agent.ToolUseMessage, *agent.AskMessage, *agent.TodoMessage:
+	case *agent.AskMessage:
+		if t.state == StateStarting || t.state == StateRunning || t.state == StateWaiting || t.state == StateHasPlan {
+			t.setState(StateAsking)
+		}
+	case *agent.TextMessage, *agent.ToolUseMessage, *agent.TodoMessage:
 		if t.state == StateStarting || t.state == StateWaiting || t.state == StateAsking || t.state == StateHasPlan {
+			if t.state == StateAsking && lastTurnHasUnansweredAsk(t.msgs) {
+				break
+			}
 			t.setState(StateRunning)
 		}
 	}
@@ -1611,9 +1691,9 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 		// we still need to distinguish Waiting from Asking/HasPlan.
 		// StateStarting is also handled: the agent subprocess may
 		// produce a result before Runner.Start calls SetState(Running).
-		if t.state == StateRunning || t.state == StateStarting || t.state == StateWaiting {
+		if t.state == StateRunning || t.state == StateStarting || t.state == StateWaiting || t.state == StateAsking {
 			switch {
-			case lastTurnHasAsk(t.msgs):
+			case lastTurnHasUnansweredAsk(t.msgs):
 				t.setState(StateAsking)
 			case lastTurnHasExitPlan(t.msgs) && t.planContent != "":
 				t.setState(StateHasPlan)

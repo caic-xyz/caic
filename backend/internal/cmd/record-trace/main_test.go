@@ -3,6 +3,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,26 +12,10 @@ import (
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/harness"
+	claudedto "github.com/maruel/genai/providers/claudecode"
 )
 
 func TestBuildPodmanRunArgs(t *testing.T) {
-	t.Run("valid_without_api_key_or_login", func(t *testing.T) {
-		home := t.TempDir()
-		t.Setenv("HOME", home)
-		workDir := filepath.Join(t.TempDir(), "work")
-
-		args, err := buildPodmanRunArgs(workDir, harness.Claude, "ANTHROPIC_API_KEY")
-		if err != nil {
-			t.Fatalf("buildPodmanRunArgs: %v", err)
-		}
-		if slices.Contains(args, "-e") {
-			t.Fatalf("args contain API-key env injection: %v", args)
-		}
-		if slices.Contains(args, "--mount") {
-			t.Fatalf("args contain credential mount for missing login: %v", args)
-		}
-	})
-
 	t.Run("valid_mounts_logged_in_account", func(t *testing.T) {
 		home := t.TempDir()
 		t.Setenv("HOME", home)
@@ -99,6 +85,63 @@ func TestSetupCodexAuth(t *testing.T) {
 		t.Parallel()
 		if err := setupCodexAuth(t.Context(), "unused", ""); err != nil {
 			t.Fatalf("setupCodexAuth: %v", err)
+		}
+	})
+}
+
+func TestAnswerClaudeControlRequest(t *testing.T) {
+	t.Parallel()
+	t.Run("AskUserQuestion", func(t *testing.T) {
+		t.Parallel()
+		line := []byte(`{"type":"control_request","request_id":"req-1","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[{"question":"Which greeting should main.go print?","header":"Greeting","options":[{"label":"Hello"},{"label":"Hi"}],"multiSelect":false}]},"tool_use_id":"toolu-1"}}`)
+		var out bytes.Buffer
+		if err := answerClaudeControlRequest(&out, line, "Hi"); err != nil {
+			t.Fatal(err)
+		}
+
+		var got claudedto.InputControlResponseMsg
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.Type != claudedto.InputControlResponse {
+			t.Fatalf("Type = %q, want %q", got.Type, claudedto.InputControlResponse)
+		}
+		if got.Response.RequestID != "req-1" {
+			t.Fatalf("RequestID = %q, want req-1", got.Response.RequestID)
+		}
+		if got.Response.Response.Behavior != claudedto.ControlCanUseToolBehaviorAllow {
+			t.Fatalf("Behavior = %q, want %q", got.Response.Response.Behavior, claudedto.ControlCanUseToolBehaviorAllow)
+		}
+
+		var updated claudedto.AskUserQuestionUpdatedInput
+		if err := json.Unmarshal(got.Response.Response.UpdatedInput, &updated); err != nil {
+			t.Fatal(err)
+		}
+		if len(updated.Questions) != 1 {
+			t.Fatalf("Questions len = %d, want 1", len(updated.Questions))
+		}
+		const question = "Which greeting should main.go print?"
+		if updated.Answers[question] != "Hi" {
+			t.Fatalf("answer = %q, want Hi", updated.Answers[question])
+		}
+	})
+	t.Run("OtherTool", func(t *testing.T) {
+		t.Parallel()
+		line := []byte(`{"type":"control_request","request_id":"req-2","request":{"subtype":"can_use_tool","tool_name":"Read","input":{"file_path":"main.go"},"tool_use_id":"toolu-2"}}`)
+		var out bytes.Buffer
+		if err := answerClaudeControlRequest(&out, line, ""); err != nil {
+			t.Fatal(err)
+		}
+
+		var got claudedto.InputControlResponseMsg
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.Response.RequestID != "req-2" {
+			t.Fatalf("RequestID = %q, want req-2", got.Response.RequestID)
+		}
+		if len(got.Response.Response.UpdatedInput) != 0 {
+			t.Fatalf("UpdatedInput = %s, want empty", got.Response.Response.UpdatedInput)
 		}
 	})
 }

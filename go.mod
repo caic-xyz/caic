@@ -10,7 +10,7 @@ require (
 	github.com/invopop/jsonschema v0.14.0
 	github.com/klauspost/compress v1.18.6
 	github.com/lmittmann/tint v1.1.3
-	github.com/maruel/genai v0.6.3-0.20260623184127-95a270a5525e
+	github.com/maruel/genai v0.6.3-0.20260624202447-c599a1ff44db
 	github.com/maruel/gopus v0.0.0-20260506115108-4c6355c2de38
 	github.com/maruel/ksid v0.1.1
 	github.com/maruel/roundtrippers v0.5.0

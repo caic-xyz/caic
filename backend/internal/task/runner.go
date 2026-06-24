@@ -261,12 +261,13 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (
 	}
 	target := t.RuntimeConnectionTarget()
 	session, err := r.backend(t.Harness).AttachRelay(ctx, &agent.Options{
-		Target:          target,
-		RelayOffset:     t.RelayOffsetValue(),
-		ResumeSessionID: sessionID,
-		Effort:          t.Effort,
-		MsgCh:           msgCh,
-		LogW:            logW,
+		Target:             target,
+		RelayOffset:        t.RelayOffsetValue(),
+		ResumeSessionID:    sessionID,
+		Effort:             t.Effort,
+		PendingUserActions: t.PendingUserActions(),
+		MsgCh:              msgCh,
+		LogW:               logW,
 	})
 	if err != nil {
 		_ = logW.Close()

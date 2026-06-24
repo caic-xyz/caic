@@ -179,6 +179,71 @@ type AskMessage struct {
 // Type implements Message.
 func (m *AskMessage) Type() string { return "ask" }
 
+// PendingUserActionMessageType identifies a persisted pending user action.
+const PendingUserActionMessageType = "caic_pending_user_action"
+
+// PendingUserActionKind identifies the user action caic is waiting for.
+type PendingUserActionKind string
+
+const (
+	// PendingUserActionAskUserQuestion means the agent invoked AskUserQuestion
+	// and caic still needs the user's answer.
+	PendingUserActionAskUserQuestion PendingUserActionKind = "ask_user_question"
+)
+
+// PendingUserAction records one user-facing action that must be completed
+// before the agent can continue after a reconnect.
+//
+// This is intentionally user-facing state, not a generic backend control
+// protocol bucket. Permission auto-allow, keepalive, environment updates, and
+// other backend-only control messages should not be represented here.
+type PendingUserAction struct {
+	Kind PendingUserActionKind `json:"kind"`
+
+	// RequestID is the backend request ID needed to complete the action.
+	RequestID string `json:"request_id,omitempty"`
+
+	// ToolUseID is the user-visible tool call that created the action.
+	ToolUseID string `json:"tool_use_id,omitempty"`
+
+	Ask PendingAskAction `json:"ask,omitzero"`
+}
+
+// PendingAskAction is the payload for PendingUserActionAskUserQuestion. It
+// stores the rendered questions so reconnect can answer the original backend
+// control request without replaying provider-specific raw JSON.
+type PendingAskAction struct {
+	Questions []AskQuestion `json:"questions,omitzero"`
+}
+
+// PendingUserActionMessage persists a PendingUserAction in task history. It is
+// metadata for reconnect and should not be rendered as a chat message.
+type PendingUserActionMessage struct {
+	MessageType string            `json:"type"`
+	Action      PendingUserAction `json:"action"`
+}
+
+// Type implements Message.
+func (m *PendingUserActionMessage) Type() string { return PendingUserActionMessageType }
+
+// ClonePendingUserAction returns a deep copy of a.
+func ClonePendingUserAction(a PendingUserAction) PendingUserAction {
+	a.Ask.Questions = cloneAskQuestions(a.Ask.Questions)
+	return a
+}
+
+// ClonePendingUserActions returns a deep copy of actions.
+func ClonePendingUserActions(actions []PendingUserAction) []PendingUserAction {
+	if len(actions) == 0 {
+		return nil
+	}
+	out := make([]PendingUserAction, len(actions))
+	for i := range actions {
+		out[i] = ClonePendingUserAction(actions[i])
+	}
+	return out
+}
+
 // TodoMessage is emitted when the agent updates its todo list via the
 // TodoWrite tool.
 type TodoMessage struct {
@@ -229,6 +294,18 @@ type AskQuestion struct {
 	Header      string      `json:"header,omitempty"`
 	Options     []AskOption `json:"options"`
 	MultiSelect bool        `json:"multiSelect,omitempty"`
+}
+
+func cloneAskQuestions(qs []AskQuestion) []AskQuestion {
+	if len(qs) == 0 {
+		return nil
+	}
+	out := make([]AskQuestion, len(qs))
+	for i := range qs {
+		out[i] = qs[i]
+		out[i].Options = append([]AskOption(nil), qs[i].Options...)
+	}
+	return out
 }
 
 // TodoItem is a single todo entry from a TodoWrite tool call.

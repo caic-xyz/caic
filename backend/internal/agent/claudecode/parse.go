@@ -158,6 +158,7 @@ func (wt *WidgetTracker) handleStreamEvent(w *claudecode.OutputStreamEventMsg) (
 //   - ThinkingDeltaMessage — stream_event content_block_delta/thinking_delta
 //   - ToolUseMessage       — assistant tool_use blocks (generic tools)
 //   - AskMessage           — AskUserQuestion tool_use block
+//   - PendingUserActionMessage — user-facing control_request records
 //   - TodoMessage          — TodoWrite tool_use block
 //   - ToolResultMessage    — user message with parent_tool_use_id
 //   - UserInputMessage     — user message without parent_tool_use_id
@@ -223,6 +224,14 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker, fw *jsonutil.FieldW
 			IsUsingOverage:  w.RateLimitInfo.IsUsingOverage,
 			OverageResetsAt: w.RateLimitInfo.OverageResetsAt,
 		}}, nil
+	case claudecode.OutputControlRequest:
+		return parseControlRequest(line, fw)
+	case agent.PendingUserActionMessageType:
+		var m agent.PendingUserActionMessage
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, err
+		}
+		return []agent.Message{&m}, nil
 	case "caic_diff_stat":
 		var m agent.DiffStatMessage
 		if err := json.Unmarshal(line, &m); err != nil {
@@ -244,6 +253,47 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker, fw *jsonutil.FieldW
 	default:
 		return []agent.Message{&agent.RawMessage{MessageType: string(env.Type), Raw: append([]byte(nil), line...)}}, nil
 	}
+}
+
+func parseControlRequest(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
+	var w claudecode.OutputControlRequestMsg
+	if err := unmarshalOutput(line, &w, "OutputControlRequestMsg", fw); err != nil {
+		return nil, err
+	}
+	can, ok := decodeCanUseTool(w)
+	if !ok || can.Subtype != claudecode.ControlCanUseTool || can.ToolName != "AskUserQuestion" {
+		return []agent.Message{&agent.RawMessage{MessageType: string(w.Type), Raw: append([]byte(nil), line...)}}, nil
+	}
+	inputRaw, err := rawObject(can.Input)
+	if err != nil {
+		return nil, fmt.Errorf("marshal AskUserQuestion input: %w", err)
+	}
+	input, ok := decodeAskUserQuestionInput(inputRaw)
+	if !ok || len(input.Questions) == 0 {
+		return []agent.Message{&agent.RawMessage{MessageType: string(w.Type), Raw: append([]byte(nil), line...)}}, nil
+	}
+	return []agent.Message{&agent.PendingUserActionMessage{
+		MessageType: agent.PendingUserActionMessageType,
+		Action: agent.PendingUserAction{
+			Kind:      agent.PendingUserActionAskUserQuestion,
+			RequestID: w.RequestID,
+			ToolUseID: can.ToolUseID,
+			Ask: agent.PendingAskAction{
+				Questions: askQuestionsFromClaude(input.Questions),
+			},
+		},
+	}}, nil
+}
+
+func decodeCanUseTool(m claudecode.OutputControlRequestMsg) (claudecode.ControlReqCanUseTool, bool) {
+	can, err := m.DecodeCanUseTool()
+	return can, err == nil
+}
+
+func decodeAskUserQuestionInput(raw json.RawMessage) (claudecode.AskUserQuestionInput, bool) {
+	var input claudecode.AskUserQuestionInput
+	err := json.Unmarshal(raw, &input)
+	return input, err == nil
 }
 
 func parseSystem(line []byte, subtype string, fw *jsonutil.FieldWarner) ([]agent.Message, error) {

@@ -62,7 +62,7 @@ func (b *SmokeBackend) Start(ctx context.Context, opts *agent.Options) (*agent.S
 
 // AttachRelay implements agent.Backend.
 func (b *SmokeBackend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	return agent.AttachRelaySession(ctx, opts, b)
+	return agent.AttachRelaySession(ctx, opts, b, nil)
 }
 
 // AgentArgs implements agent.Backend.

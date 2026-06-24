@@ -69,6 +69,29 @@ func (b *testBackend) SupportsCompact() bool { return false }
 
 func (b *testBackend) ContextWindowLimit(string) int { return 180_000 }
 
+type attachCaptureBackend struct {
+	testBackend
+
+	capturedAttachOpts agent.Options
+}
+
+func (b *attachCaptureBackend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	b.capturedAttachOpts = *opts
+	cmd := exec.CommandContext(ctx, "python3", "-c", "import sys; sys.stdin.buffer.read()")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	return agent.NewSession(cmd, agent.NewConn(stdin, opts.LogW, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, opts.MsgCh, nil), nil
+}
+
 // testWire implements agent.WireFormat for testing.
 type testWire struct {
 	parse func([]byte) ([]agent.Message, error)
@@ -641,6 +664,64 @@ func TestRunner(t *testing.T) {
 						t.Fatalf("err = %v, want missing session ID", err)
 					}
 				})
+			}
+		})
+		t.Run("passes_history_to_attach_backend", func(t *testing.T) {
+			t.Parallel()
+			backend := &attachCaptureBackend{}
+			r := &Runner{
+				LogDir:   filepath.Join(t.TempDir(), "logs"),
+				Backends: map[harness.Name]agent.Backend{"test": backend},
+			}
+			tk := &Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "test"},
+				Harness:       "test",
+			}
+			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetState(StateRunning)
+			tk.RestoreMessages([]agent.Message{
+				&agent.AskMessage{
+					ToolUseID: "toolu-1",
+					Questions: []agent.AskQuestion{{Question: "Which?"}},
+				},
+				&agent.PendingUserActionMessage{
+					MessageType: agent.PendingUserActionMessageType,
+					Action: agent.PendingUserAction{
+						Kind:      agent.PendingUserActionAskUserQuestion,
+						RequestID: "req-1",
+						ToolUseID: "toolu-1",
+						Ask: agent.PendingAskAction{
+							Questions: []agent.AskQuestion{{Question: "Which?"}},
+						},
+					},
+				},
+			})
+
+			h, err := r.Reconnect(t.Context(), tk, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				_ = h.GracefulStop(t.Context(), time.Second)
+				h.Drain()
+			})
+
+			pending := backend.capturedAttachOpts.PendingUserActions
+			if len(pending) != 1 {
+				t.Fatalf("PendingUserActions len = %d, want 1", len(pending))
+			}
+			if pending[0].Kind != agent.PendingUserActionAskUserQuestion {
+				t.Errorf("Kind = %q, want %q", pending[0].Kind, agent.PendingUserActionAskUserQuestion)
+			}
+			if pending[0].RequestID != "req-1" {
+				t.Errorf("RequestID = %q, want req-1", pending[0].RequestID)
+			}
+			if len(pending[0].Ask.Questions) != 1 {
+				t.Fatalf("Questions len = %d, want 1", len(pending[0].Ask.Questions))
+			}
+			if pending[0].Ask.Questions[0].Question != "Which?" {
+				t.Errorf("question = %q, want Which?", pending[0].Ask.Questions[0].Question)
 			}
 		})
 	})

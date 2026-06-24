@@ -240,7 +240,7 @@ func (*Backend) AgentArgs(_ agent.HarnessArgs) []string {
 // AttachRelay connects to an already-running relay in the container.
 func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	wire := &piWireFormat{fw: &jsonutil.FieldWarner{}}
-	return agent.AttachRelaySession(ctx, opts, wire)
+	return agent.AttachRelaySession(ctx, opts, wire, nil)
 }
 
 // NewWire implements agent.Backend.

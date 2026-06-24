@@ -422,7 +422,7 @@ func (lt *LoadedTask) replayParser() func([]byte) ([]agent.Message, error) {
 			return nil, nil //nolint:nilerr // malformed/non-object lines are skipped, matching loadLogFile.
 		}
 		switch env.Type {
-		case "caic_meta", "caic_pr", "caic_result", "caic_diff_stat", "caic_session", "caic_init":
+		case "caic_meta", "caic_pr", "caic_result", "caic_diff_stat", "caic_session", "caic_init", agent.PendingUserActionMessageType:
 			return nil, nil
 		default:
 			return lt.parseFn(line)

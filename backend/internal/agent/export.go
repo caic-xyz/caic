@@ -62,7 +62,7 @@ func ExportDiscussion(r io.Reader, src string, parseFn func([]byte) ([]Message, 
 				pr = &m
 			}
 
-		case "caic_diff_stat", "caic_exit", "caic_model_info", "caic_stripped_env", "caic_session", "caic_init":
+		case "caic_diff_stat", "caic_exit", "caic_model_info", "caic_stripped_env", "caic_session", "caic_init", PendingUserActionMessageType:
 			// Skip internal control records.
 
 		default:
@@ -243,8 +243,9 @@ func renderMsg(b *strings.Builder, msg Message) {
 
 	case *ResultMessage, *UsageMessage, *TextDeltaMessage, *ThinkingDeltaMessage,
 		*ToolOutputDeltaMessage, *WidgetDeltaMessage, *WidgetMessage,
-		*RateLimitMessage, *RawMessage, *ParseErrorMessage, *LogMessage,
-		*DiffStatMessage, *ExitMessage, *AskMessage, *TodoMessage:
+		*RateLimitMessage, *RawMessage, *PendingUserActionMessage,
+		*ParseErrorMessage, *LogMessage, *DiffStatMessage, *ExitMessage,
+		*AskMessage, *TodoMessage:
 		// Skip: already captured in metadata, streaming deltas, or not
 		// useful for the exported discussion.
 	}
