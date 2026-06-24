@@ -44,4 +44,24 @@ describe("TaskInfo", () => {
     expect(await findByText("CPU architecture")).toBeInTheDocument();
     expect(await findByText("amd64")).toBeInTheDocument();
   });
+
+  it("does not label standard cache snapshots as read-write", async () => {
+    getTaskInfoMock.mockResolvedValueOnce({
+      id: "task-1",
+      recorded: {
+        state: "running",
+        harness: "claude",
+        capabilities: {},
+        runtime: { id: "md-test" },
+        caches: [{ name: "npm", hostPath: "~/.npm", mountPath: "/home/user/.npm" }],
+      },
+    });
+
+    const { findByText, queryByText } = render(() => (
+      <TaskInfo taskId="task-1" repo="repo" branch="branch" taskPath="/task/task-1" />
+    ));
+
+    expect(await findByText("npm")).toBeInTheDocument();
+    expect(queryByText("read-write")).not.toBeInTheDocument();
+  });
 });

@@ -7,6 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	pathpkg "path"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -210,6 +213,10 @@ func taskInfoOSArch(platform string) (osName, cpuArchitecture string) {
 
 func taskInfoCompareWarnings(recorded *v1.TaskInfoRecorded, observed *v1.TaskInfoObservedRuntime) []string {
 	var warnings []string
+	hostHome, homeErr := os.UserHomeDir()
+	if homeErr != nil && len(recorded.Mounts) > 0 {
+		warnings = append(warnings, "host home unavailable for mount diagnostics: "+homeErr.Error())
+	}
 	if recorded.BaseImage != "" && observed.ImageRef != "" && recorded.BaseImage != observed.ImageRef {
 		warnings = append(warnings, fmt.Sprintf("observed image %q differs from recorded image %q", observed.ImageRef, recorded.BaseImage))
 	}
@@ -223,20 +230,69 @@ func taskInfoCompareWarnings(recorded *v1.TaskInfoRecorded, observed *v1.TaskInf
 		warnings = append(warnings, fmt.Sprintf("observed CPU limit %d differs from recorded max CPUs %d", observed.CPULimit, recorded.MaxCPUs))
 	}
 	for _, recordedMount := range recorded.Mounts {
-		if !taskInfoMountsContain(observed.Mounts, recordedMount) {
+		if !taskInfoMountsContain(hostHome, observed.Mounts, recordedMount) {
 			warnings = append(warnings, fmt.Sprintf("observed mounts do not include recorded mount %s -> %s", recordedMount.HostPath, recordedMount.MountPath))
 		}
 	}
 	return warnings
 }
 
-func taskInfoMountsContain(mounts []v1.TaskInfoMount, target v1.TaskInfoMount) bool {
+func taskInfoMountsContain(hostHome string, mounts []v1.TaskInfoMount, target v1.TaskInfoMount) bool {
+	normalizedTarget := taskInfoNormalizeMount(target, hostHome)
 	for _, mount := range mounts {
-		if mount.HostPath == target.HostPath && mount.MountPath == target.MountPath && mount.ReadOnly == target.ReadOnly {
+		if taskInfoNormalizeMount(mount, hostHome) == normalizedTarget {
 			return true
 		}
 	}
 	return false
+}
+
+func taskInfoNormalizeMount(m v1.TaskInfoMount, hostHome string) v1.TaskInfoMount {
+	return v1.TaskInfoMount{
+		HostPath:  taskInfoNormalizeHostPath(m.HostPath, hostHome),
+		MountPath: taskInfoNormalizeContainerPath(m.MountPath),
+		ReadOnly:  m.ReadOnly,
+	}
+}
+
+func taskInfoNormalizeHostPath(p, home string) string {
+	if p == "" {
+		return ""
+	}
+	if home != "" {
+		suffix, ok := taskInfoHomePathSuffix(p, true)
+		if ok {
+			return filepath.ToSlash(filepath.Clean(filepath.Join(home, suffix)))
+		}
+	}
+	return filepath.ToSlash(filepath.Clean(p))
+}
+
+func taskInfoNormalizeContainerPath(p string) string {
+	if p == "" {
+		return ""
+	}
+	suffix, ok := taskInfoHomePathSuffix(p, false)
+	if ok {
+		if suffix == "" {
+			return "/home/user"
+		}
+		return pathpkg.Join("/home/user", suffix)
+	}
+	return pathpkg.Clean(p)
+}
+
+func taskInfoHomePathSuffix(p string, windowsBackslash bool) (string, bool) {
+	if p == "~" {
+		return "", true
+	}
+	if strings.HasPrefix(p, "~/") {
+		return p[2:], true
+	}
+	if windowsBackslash && strings.HasPrefix(p, `~\`) {
+		return p[2:], true
+	}
+	return "", false
 }
 
 func taskInfoTailscaleURL(s *task.Snapshot) string {

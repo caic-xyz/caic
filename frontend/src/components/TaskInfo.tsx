@@ -119,7 +119,7 @@ function CacheTable(props: { caches?: TaskInfoCacheMount[] }) {
           <tbody>
             <For each={sortedCaches(props.caches)}>
               {(c) => {
-                const flags = () => [c.readOnly ? "read-only" : "read-write", c.shallow ? "shallow" : "full"].join(", ");
+                const flags = () => [c.readOnly ? "read-only snapshot" : "", c.shallow ? "shallow copy" : ""].filter(Boolean).join(", ") || "—";
                 return (
                   <tr>
                     <td class={styles.td}>{c.name || "—"}</td>
