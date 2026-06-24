@@ -202,6 +202,9 @@ func CompressTerminalLogs(logs []*LoadedTask) error {
 		if info, statErr := os.Stat(compressed); statErr == nil {
 			lt.LogSize = info.Size()
 		}
+		if err := storeLogSummary(lt); err != nil {
+			errs = append(errs, fmt.Errorf("write task log summary: %w", err))
+		}
 	}
 	return errors.Join(errs...)
 }

@@ -747,6 +747,10 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 // and caic_diff_stat records. Zstd logs do not support that random access in
 // this format, so compressed headers use one streaming pass instead.
 func loadCompressedLogHeader(path string) (_ *LoadedTask, retErr error) {
+	if lt, ok := loadLogSummary(path); ok {
+		return lt, nil
+	}
+
 	f, err := openLogReader(path)
 	if err != nil {
 		return nil, err
@@ -790,7 +794,13 @@ func loadCompressedLogHeader(path string) (_ *LoadedTask, retErr error) {
 		scan.apply(lt, line)
 	}
 	scan.finish(lt)
-	return lt, scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	if err := storeLogSummary(lt); err != nil {
+		slog.Warn("task log summary: write failed", "path", path, "err", err)
+	}
+	return lt, nil
 }
 
 // loadLogFile parses a single task log file and requires a message parser.
@@ -1102,12 +1112,36 @@ func tsToTime(ts float64) time.Time {
 // parseState converts a state string back to a State value.
 func parseState(s string) State {
 	switch s {
-	case "failed":
-		return StateFailed
-	case "crashed":
-		return StateCrashed
+	case "pending":
+		return StatePending
+	case "branching":
+		return StateBranching
+	case "provisioning":
+		return StateProvisioning
+	case "starting":
+		return StateStarting
+	case "running":
+		return StateRunning
+	case "waiting":
+		return StateWaiting
+	case "asking":
+		return StateAsking
+	case "has_plan":
+		return StateHasPlan
+	case "pulling":
+		return StatePulling
+	case "pushing":
+		return StatePushing
+	case "stopping":
+		return StateStopping
 	case "stopped":
 		return StateStopped
+	case "purging":
+		return StatePurging
+	case "crashed":
+		return StateCrashed
+	case "failed":
+		return StateFailed
 	case "purged", "terminated": // "terminated" is for backward compat with pre-rename logs; remove once old logs age out
 		return StatePurged
 	default:

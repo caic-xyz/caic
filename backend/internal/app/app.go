@@ -13,6 +13,7 @@ import (
 	"runtime/trace"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/caic-xyz/md/gitutil"
 	"github.com/maruel/genai"
@@ -425,21 +426,29 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 			startupCtx, tk := trace.NewTask(ctx, "load-purged-tasks")
 			defer tk.End()
 			trace.Log(startupCtx, "startup", "load-purged-tasks: begin")
+			start := time.Now()
 			logs, err := task.LoadLogs(logDir)
 			if err != nil {
 				slog.WarnContext(startupCtx, "load logs failed", "err", err)
 				return
 			}
+			slog.InfoContext(startupCtx, "loaded task log headers", "n", len(logs), "dur", time.Since(start))
+			start = time.Now()
+			if err := taskMgr.LoadPurgedTasks(logs); err != nil {
+				slog.ErrorContext(startupCtx, "load purged tasks failed", "err", err)
+			} else {
+				slog.InfoContext(startupCtx, "loaded purged task entries", "dur", time.Since(start))
+			}
+			start = time.Now()
 			if err := task.CompressTerminalLogs(logs); err != nil {
 				slog.WarnContext(startupCtx, "compress terminal task logs failed", "err", err)
+			} else {
+				slog.InfoContext(startupCtx, "compressed terminal task logs", "dur", time.Since(start))
 			}
 			if removed, err := eventreplay.PruneStaleCaches(logDir); err != nil {
 				slog.WarnContext(startupCtx, "prune stale replay caches failed", "err", err)
 			} else if removed > 0 {
 				slog.InfoContext(startupCtx, "pruned stale replay caches", "n", removed)
-			}
-			if err := taskMgr.LoadPurgedTasks(logs); err != nil {
-				slog.ErrorContext(startupCtx, "load purged tasks failed", "err", err)
 			}
 		},
 	}

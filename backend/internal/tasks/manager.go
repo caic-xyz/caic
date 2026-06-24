@@ -977,6 +977,8 @@ func (m *Manager) LoadPurgedTasks(all []*task.LoadedTask) error {
 		slog.Info("no purged tasks to load", "candidates", len(all))
 		return nil
 	}
+	// Do not scan full logs here. Some compressed histories are multi-GB, and
+	// historical session metadata must not block the task list becoming usable.
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	existingBranches := make(map[string]struct{})
@@ -1005,12 +1007,7 @@ func (m *Manager) LoadPurgedTasks(all []*task.LoadedTask) error {
 				continue
 			}
 		}
-		m.setParser(lt)
-		if lt.SessionID == "" || lt.AgentVersion == "" {
-			if err := lt.LoadSessionMetadata(); err != nil {
-				slog.Warn("load session metadata failed", "task", lt.TaskID, "err", err)
-			}
-		}
+		m.setParserLocked(lt)
 		t := &task.Task{
 			ID:                taskID,
 			InitialPrompt:     agent.Prompt{Text: lt.Prompt},
@@ -1770,7 +1767,12 @@ func refreshAdoptedDiffStat(ctx context.Context, runner *task.Runner, t *task.Ta
 // setParser sets the parse function on a LoadedTask from the first runner
 // that has a backend for the task's harness.
 func (m *Manager) setParser(lt *task.LoadedTask) {
-	// Called from LoadPurgedTasks which already holds m.mu.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.setParserLocked(lt)
+}
+
+func (m *Manager) setParserLocked(lt *task.LoadedTask) {
 	for _, r := range m.runners {
 		if b := r.Backends[lt.Harness]; b != nil {
 			lt.SetParser(b.NewWire().ParseMessage)

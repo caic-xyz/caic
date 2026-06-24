@@ -221,6 +221,49 @@ func TestLoadLogs(t *testing.T) {
 			t.Errorf("LogPath = %q, want compressed path", lt.LogPath())
 		}
 	})
+	t.Run("CompressedSummaryCache", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "a.jsonl.zst")
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "cached", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude"})
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		writeCompressedLogFile(t, dir, "a.jsonl.zst", seqOf(meta, trailer))
+
+		first, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(first) != 1 {
+			t.Fatalf("len(first) = %d, want 1", len(first))
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(logSummaryPath(path)); err != nil {
+			t.Fatalf("summary cache was not written: %v", err)
+		}
+
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Truncate(path, info.Size()); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+			t.Fatal(err)
+		}
+		second, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(second) != 1 {
+			t.Fatalf("len(second) = %d, want 1", len(second))
+		}
+		if second[0].Prompt != "cached" || second[0].State != StatePurged {
+			t.Fatalf("cached task = prompt %q state %v, want cached/purged", second[0].Prompt, second[0].State)
+		}
+	})
 	t.Run("PreferCompressedDuplicate", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
@@ -716,8 +759,12 @@ func TestCompressTerminalLogs(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "t.jsonl")); !os.IsNotExist(err) {
 		t.Fatalf("plain log stat err = %v, want os.ErrNotExist", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "t.jsonl.zst")); err != nil {
+	compressedPath := filepath.Join(dir, "t.jsonl.zst")
+	if _, err := os.Stat(compressedPath); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Stat(logSummaryPath(compressedPath)); err != nil {
+		t.Fatalf("summary cache stat: %v", err)
 	}
 	if !isLogCompressed(tasks[0].LogPath()) {
 		t.Fatalf("LogPath = %q, want compressed path", tasks[0].LogPath())

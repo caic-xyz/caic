@@ -1460,7 +1460,7 @@ func TestManager(t *testing.T) {
 				t.Errorf("Result = %v, want StateStopped", e.Result())
 			}
 		})
-		t.Run("valid_loads_session_metadata_beyond_tail", func(t *testing.T) {
+		t.Run("valid_keeps_session_metadata_lazy", func(t *testing.T) {
 			t.Parallel()
 			m := New(Config{ServerCtx: t.Context()})
 			dir := t.TempDir()
@@ -1501,11 +1501,11 @@ func TestManager(t *testing.T) {
 				t.Fatal("entry not found")
 			}
 			snap := e.Task().Snapshot()
-			if snap.SessionID != "ses-1" {
-				t.Errorf("SessionID = %q, want ses-1", snap.SessionID)
+			if snap.SessionID != "" {
+				t.Errorf("SessionID = %q, want empty without startup metadata scan", snap.SessionID)
 			}
-			if snap.AgentVersion != "pi 1.2.3" {
-				t.Errorf("AgentVersion = %q, want pi 1.2.3", snap.AgentVersion)
+			if snap.AgentVersion != "" {
+				t.Errorf("AgentVersion = %q, want empty without startup metadata scan", snap.AgentVersion)
 			}
 		})
 		t.Run("valid_running_becomes_failed", func(t *testing.T) {
