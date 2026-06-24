@@ -290,22 +290,23 @@ type TaskInfo struct {
 
 // TaskInfoRecorded holds caic-recorded task launch configuration and metadata.
 type TaskInfoRecorded struct {
-	State             TaskState            `json:"state"`
-	StartedAt         time.Time            `json:"startedAt,omitzero"`
-	StateUpdatedAt    time.Time            `json:"stateUpdatedAt,omitzero"`
-	Harness           Harness              `json:"harness"`
-	Model             string               `json:"model,omitempty"`
-	Effort            string               `json:"effort,omitempty"`
-	AgentVersion      string               `json:"agentVersion,omitempty"`
-	SessionID         string               `json:"sessionID,omitempty"`
-	BaseImage         string               `json:"baseImage,omitempty"`
-	ContainerPlatform string               `json:"containerPlatform,omitempty"`
-	MaxCPUs           int                  `json:"maxCPUs,omitempty"`
-	Capabilities      TaskInfoCapability   `json:"capabilities"`
-	Runtime           RuntimeInstance      `json:"runtime"`
-	Repos             []TaskInfoRepo       `json:"repos,omitempty"`
-	Caches            []TaskInfoCacheMount `json:"caches,omitempty"`
-	Mounts            []TaskInfoMount      `json:"mounts,omitempty"`
+	State                    TaskState            `json:"state"`
+	StartedAt                time.Time            `json:"startedAt,omitzero"`
+	StateUpdatedAt           time.Time            `json:"stateUpdatedAt,omitzero"`
+	Harness                  Harness              `json:"harness"`
+	Model                    string               `json:"model,omitempty"`
+	Effort                   string               `json:"effort,omitempty"`
+	AgentVersion             string               `json:"agentVersion,omitempty"`
+	SessionID                string               `json:"sessionID,omitempty"`
+	BaseImage                string               `json:"baseImage,omitempty"`
+	ContainerOS              string               `json:"containerOS,omitempty"`
+	ContainerCPUArchitecture string               `json:"containerCPUArchitecture,omitempty"`
+	MaxCPUs                  int                  `json:"maxCPUs,omitempty"`
+	Capabilities             TaskInfoCapability   `json:"capabilities"`
+	Runtime                  RuntimeInstance      `json:"runtime"`
+	Repos                    []TaskInfoRepo       `json:"repos,omitempty"`
+	Caches                   []TaskInfoCacheMount `json:"caches,omitempty"`
+	Mounts                   []TaskInfoMount      `json:"mounts,omitempty"`
 }
 
 // TaskInfoCapability describes recorded runtime capabilities and injected-token presence.
@@ -347,15 +348,16 @@ type TaskInfoMount struct {
 
 // TaskInfoObservedRuntime describes runtime-observed instance details from the runtime adapter.
 type TaskInfoObservedRuntime struct {
-	Runtime  string               `json:"runtime,omitempty"`
-	ID       string               `json:"id,omitempty"`
-	State    string               `json:"state,omitempty"`
-	ImageRef string               `json:"imageRef,omitempty"`
-	ImageID  string               `json:"imageID,omitempty"`
-	Platform string               `json:"platform,omitempty"`
-	CPULimit int                  `json:"cpuLimit,omitempty"`
-	Mounts   []TaskInfoMount      `json:"mounts,omitempty"`
-	Caches   []TaskInfoCacheMount `json:"caches,omitempty"`
+	Runtime         string               `json:"runtime,omitempty"`
+	ID              string               `json:"id,omitempty"`
+	State           string               `json:"state,omitempty"`
+	ImageRef        string               `json:"imageRef,omitempty"`
+	ImageID         string               `json:"imageID,omitempty"`
+	OS              string               `json:"os,omitempty"`
+	CPUArchitecture string               `json:"cpuArchitecture,omitempty"`
+	CPULimit        int                  `json:"cpuLimit,omitempty"`
+	Mounts          []TaskInfoMount      `json:"mounts,omitempty"`
+	Caches          []TaskInfoCacheMount `json:"caches,omitempty"`
 }
 
 // TaskListEvent is a discriminated-union event for the task list SSE stream.

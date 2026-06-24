@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/caic-xyz/md/gitutil"
@@ -106,20 +107,22 @@ func (s *taskService) getTaskInfo(ctx context.Context, entry *tasks.Entry, _ *ap
 		})
 	}
 
+	containerOS, containerCPUArchitecture := taskInfoOSArch(t.ContainerPlatform)
 	info := &v1.TaskInfo{
 		ID: t.ID,
 		Recorded: v1.TaskInfoRecorded{
-			State:             v1conv.TaskState(ctx, snap.State),
-			StartedAt:         t.StartedAt,
-			StateUpdatedAt:    snap.StateUpdatedAt,
-			Harness:           v1conv.Harness(t.Harness),
-			Model:             snap.Model,
-			Effort:            t.Effort,
-			AgentVersion:      snap.AgentVersion,
-			SessionID:         snap.SessionID,
-			BaseImage:         t.BaseImage,
-			ContainerPlatform: t.ContainerPlatform,
-			MaxCPUs:           t.MaxCPUs,
+			State:                    v1conv.TaskState(ctx, snap.State),
+			StartedAt:                t.StartedAt,
+			StateUpdatedAt:           snap.StateUpdatedAt,
+			Harness:                  v1conv.Harness(t.Harness),
+			Model:                    snap.Model,
+			Effort:                   t.Effort,
+			AgentVersion:             snap.AgentVersion,
+			SessionID:                snap.SessionID,
+			BaseImage:                t.BaseImage,
+			ContainerOS:              containerOS,
+			ContainerCPUArchitecture: containerCPUArchitecture,
+			MaxCPUs:                  t.MaxCPUs,
 			Capabilities: v1.TaskInfoCapability{
 				Tailscale:   snap.Tailscale,
 				USB:         snap.USB,
@@ -184,16 +187,25 @@ func taskInfoMounts(in []runtime.Mount) []v1.TaskInfoMount {
 
 func taskInfoObserved(in *runtime.InstanceInspect) v1.TaskInfoObservedRuntime {
 	return v1.TaskInfoObservedRuntime{
-		Runtime:  in.Runtime,
-		ID:       string(in.ID),
-		State:    in.State,
-		ImageRef: in.ImageRef,
-		ImageID:  in.ImageID,
-		Platform: in.Platform,
-		CPULimit: in.CPULimit,
-		Mounts:   taskInfoMounts(in.Mounts),
-		Caches:   taskInfoCaches(in.Caches),
+		Runtime:         in.Runtime,
+		ID:              string(in.ID),
+		State:           in.State,
+		ImageRef:        in.ImageRef,
+		ImageID:         in.ImageID,
+		OS:              in.OS,
+		CPUArchitecture: in.CPUArchitecture,
+		CPULimit:        in.CPULimit,
+		Mounts:          taskInfoMounts(in.Mounts),
+		Caches:          taskInfoCaches(in.Caches),
 	}
+}
+
+func taskInfoOSArch(platform string) (osName, cpuArchitecture string) {
+	osName, cpuArchitecture, ok := strings.Cut(platform, "/")
+	if !ok {
+		return platform, ""
+	}
+	return osName, cpuArchitecture
 }
 
 func taskInfoCompareWarnings(recorded *v1.TaskInfoRecorded, observed *v1.TaskInfoObservedRuntime) []string {
@@ -201,8 +213,11 @@ func taskInfoCompareWarnings(recorded *v1.TaskInfoRecorded, observed *v1.TaskInf
 	if recorded.BaseImage != "" && observed.ImageRef != "" && recorded.BaseImage != observed.ImageRef {
 		warnings = append(warnings, fmt.Sprintf("observed image %q differs from recorded image %q", observed.ImageRef, recorded.BaseImage))
 	}
-	if recorded.ContainerPlatform != "" && observed.Platform != "" && recorded.ContainerPlatform != observed.Platform {
-		warnings = append(warnings, fmt.Sprintf("observed platform %q differs from recorded platform %q", observed.Platform, recorded.ContainerPlatform))
+	if recorded.ContainerOS != "" && observed.OS != "" && recorded.ContainerOS != observed.OS {
+		warnings = append(warnings, fmt.Sprintf("observed OS %q differs from recorded OS %q", observed.OS, recorded.ContainerOS))
+	}
+	if recorded.ContainerCPUArchitecture != "" && observed.CPUArchitecture != "" && recorded.ContainerCPUArchitecture != observed.CPUArchitecture {
+		warnings = append(warnings, fmt.Sprintf("observed CPU architecture %q differs from recorded CPU architecture %q", observed.CPUArchitecture, recorded.ContainerCPUArchitecture))
 	}
 	if recorded.MaxCPUs > 0 && observed.CPULimit > 0 && recorded.MaxCPUs != observed.CPULimit {
 		warnings = append(warnings, fmt.Sprintf("observed CPU limit %d differs from recorded max CPUs %d", observed.CPULimit, recorded.MaxCPUs))

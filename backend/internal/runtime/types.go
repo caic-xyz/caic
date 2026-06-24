@@ -96,15 +96,16 @@ type Instance struct {
 
 // InstanceInspect describes observed runtime configuration for an instance.
 type InstanceInspect struct {
-	Runtime  string
-	ID       InstanceID
-	State    string
-	ImageRef string
-	ImageID  string
-	Platform string
-	CPULimit int
-	Mounts   []Mount
-	Caches   []CacheMount
+	Runtime         string
+	ID              InstanceID
+	State           string
+	ImageRef        string
+	ImageID         string
+	OS              string
+	CPUArchitecture string
+	CPULimit        int
+	Mounts          []Mount
+	Caches          []CacheMount
 }
 
 // ProcessInfo describes a single process running inside a runtime instance.

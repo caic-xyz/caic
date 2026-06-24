@@ -50,7 +50,7 @@ function sortedCaches(caches?: TaskInfoCacheMount[]): TaskInfoCacheMount[] | und
   return caches?.slice().sort((a, b) => compareText(a.name, b.name) || compareText(a.mountPath, b.mountPath));
 }
 
-function platformText(recorded?: string, observed?: string): string {
+function runtimeText(recorded?: string, observed?: string): string {
   if (recorded && observed && recorded !== observed) return `${recorded} requested, ${observed} running`;
   return observed || recorded || "";
 }
@@ -230,7 +230,8 @@ export default function TaskInfo(props: Props) {
                   <Field label="State" value={data.observed?.state || data.recorded.state} />
                   <Field label="Image" value={imageText(data.recorded.baseImage, data.observed?.imageRef)} code />
                   <Field label="Image ID" value={data.observed?.imageID} code />
-                  <Field label="Platform" value={platformText(data.recorded.containerPlatform, data.observed?.platform)} code />
+                  <Field label="OS" value={runtimeText(data.recorded.containerOS, data.observed?.os)} code />
+                  <Field label="CPU architecture" value={runtimeText(data.recorded.containerCPUArchitecture, data.observed?.cpuArchitecture)} code />
                   <Field label="CPUs" value={cpuText(data.recorded.maxCPUs, data.observed?.cpuLimit)} />
                   <Field label="Tailscale" value={boolText(data.recorded.capabilities.tailscale)} />
                   <Field label="USB" value={boolText(data.recorded.capabilities.usb)} />

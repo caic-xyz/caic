@@ -772,7 +772,8 @@ public struct TaskInfoRecorded: Codable {
     public let agentVersion: String?
     public let sessionID: String?
     public let baseImage: String?
-    public let containerPlatform: String?
+    public let containerOS: String?
+    public let containerCPUArchitecture: String?
     public let maxCPUs: Int?
     public let capabilities: TaskInfoCapability
     public let runtime: RuntimeInstance
@@ -788,7 +789,8 @@ public struct TaskInfoObservedRuntime: Codable {
     public let state: String?
     public let imageRef: String?
     public let imageID: String?
-    public let platform: String?
+    public let os: String?
+    public let cpuArchitecture: String?
     public let cpuLimit: Int?
     public let mounts: [TaskInfoMount]?
     public let caches: [TaskInfoCacheMount]?

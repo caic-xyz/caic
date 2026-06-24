@@ -915,7 +915,8 @@ export interface TaskInfoRecorded {
   agentVersion?: string;
   sessionID?: string;
   baseImage?: string;
-  containerPlatform?: string;
+  containerOS?: string;
+  containerCPUArchitecture?: string;
   maxCPUs?: number /* int */;
   capabilities: TaskInfoCapability;
   runtime: RuntimeInstance;
@@ -931,7 +932,8 @@ export interface TaskInfoObservedRuntime {
   state?: string;
   imageRef?: string;
   imageID?: string;
-  platform?: string;
+  os?: string;
+  cpuArchitecture?: string;
   cpuLimit?: number /* int */;
   mounts?: TaskInfoMount[];
   caches?: TaskInfoCacheMount[];

@@ -4,6 +4,8 @@ package mdruntime
 
 import (
 	"context"
+	"os/exec"
+	"strings"
 
 	"github.com/caic-xyz/md"
 
@@ -60,17 +62,78 @@ func (b RuntimeInfoBackend) Inspect(ctx context.Context, id runtime.InstanceID) 
 	if inspectID == "" {
 		inspectID = id
 	}
+	osName, cpuArchitecture := inspectOSArch(ctx, b.c.Runtime, string(id), info.ImageID, info.ImageRef, info.Platform)
 	return &runtime.InstanceInspect{
-		Runtime:  info.Runtime,
-		ID:       inspectID,
-		State:    info.State,
-		ImageRef: info.ImageRef,
-		ImageID:  info.ImageID,
-		Platform: info.Platform,
-		CPULimit: info.CPULimit,
-		Mounts:   mounts,
-		Caches:   caches,
+		Runtime:         info.Runtime,
+		ID:              inspectID,
+		State:           info.State,
+		ImageRef:        info.ImageRef,
+		ImageID:         info.ImageID,
+		OS:              osName,
+		CPUArchitecture: cpuArchitecture,
+		CPULimit:        info.CPULimit,
+		Mounts:          mounts,
+		Caches:          caches,
 	}, nil
+}
+
+func inspectOSArch(ctx context.Context, runtimeName, containerName, imageID, imageRef, platform string) (osName, cpuArchitecture string) {
+	if osName, cpuArchitecture, ok := splitOSArch(platform, ""); ok {
+		return osName, cpuArchitecture
+	}
+	osName = cleanInspectValue(platform)
+	if runtimeName == "" || containerName == "" {
+		return osName, ""
+	}
+	if observedOS, observedCPUArchitecture, ok := inspectTargetOSArch(ctx, runtimeName, []string{"inspect", containerName, "--format", "{{.Os}}/{{.Architecture}}"}, osName); ok {
+		return observedOS, observedCPUArchitecture
+	}
+	for _, image := range []string{imageID, imageRef} {
+		if image == "" {
+			continue
+		}
+		observedOS, observedCPUArchitecture, ok := inspectTargetOSArch(ctx, runtimeName, []string{"image", "inspect", image, "--format", "{{.Os}}/{{.Architecture}}"}, osName)
+		if ok {
+			return observedOS, observedCPUArchitecture
+		}
+	}
+	return osName, ""
+}
+
+func inspectTargetOSArch(ctx context.Context, runtimeName string, args []string, fallbackOS string) (osName, cpuArchitecture string, ok bool) {
+	out, err := exec.CommandContext(ctx, runtimeName, args...).Output() //nolint:gosec // runtime command and inspect targets are internal adapter values.
+	if err != nil {
+		return "", "", false
+	}
+	osName, cpuArchitecture, ok = splitOSArch(strings.TrimSpace(string(out)), fallbackOS)
+	if !ok || fallbackOS != "" && osName != fallbackOS {
+		return "", "", false
+	}
+	return osName, cpuArchitecture, true
+}
+
+func splitOSArch(platform, fallbackOS string) (osName, cpuArchitecture string, ok bool) {
+	osName, cpuArchitecture, ok = strings.Cut(platform, "/")
+	if !ok {
+		return "", "", false
+	}
+	osName = cleanInspectValue(osName)
+	if osName == "" {
+		osName = fallbackOS
+	}
+	cpuArchitecture = cleanInspectValue(cpuArchitecture)
+	if osName == "" || cpuArchitecture == "" {
+		return "", "", false
+	}
+	return osName, cpuArchitecture, true
+}
+
+func cleanInspectValue(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "<no value>" {
+		return ""
+	}
+	return v
 }
 
 // StatsAll returns resource stats for the named runtime instances.

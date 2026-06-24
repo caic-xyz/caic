@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	stdruntime "runtime"
 	"strings"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -114,8 +115,8 @@ func (*RuntimeBackend) Metadata(context.Context, runtime.InstanceID, runtime.Met
 }
 
 // Inspect implements runtime.Inventory.
-func (*RuntimeBackend) Inspect(context.Context, runtime.InstanceID) (*runtime.InstanceInspect, error) {
-	return &runtime.InstanceInspect{}, nil
+func (*RuntimeBackend) Inspect(_ context.Context, id runtime.InstanceID) (*runtime.InstanceInspect, error) {
+	return &runtime.InstanceInspect{Runtime: "fake", ID: id, State: "running", OS: "linux", CPUArchitecture: stdruntime.GOARCH}, nil
 }
 
 // StatsAll implements runtime.Monitor.

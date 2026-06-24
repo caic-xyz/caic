@@ -554,7 +554,8 @@ TaskInfoRecorded holds caic-recorded task launch configuration and metadata.
 | `agentVersion` | `string` |  |  |
 | `sessionID` | `string` |  |  |
 | `baseImage` | `string` |  |  |
-| `containerPlatform` | `string` |  |  |
+| `containerOS` | `string` |  |  |
+| `containerCPUArchitecture` | `string` |  |  |
 | `maxCPUs` | `int` |  |  |
 | `capabilities` | `TaskInfoCapability` |  | yes |
 | `runtime` | `RuntimeInstance` |  | yes |
@@ -573,7 +574,8 @@ TaskInfoObservedRuntime describes runtime-observed instance details from the run
 | `state` | `string` |  |  |
 | `imageRef` | `string` |  |  |
 | `imageID` | `string` |  |  |
-| `platform` | `string` |  |  |
+| `os` | `string` |  |  |
+| `cpuArchitecture` | `string` |  |  |
 | `cpuLimit` | `int` |  |  |
 | `mounts` | `TaskInfoMount[]` |  |  |
 | `caches` | `TaskInfoCacheMount[]` |  |  |

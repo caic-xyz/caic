@@ -919,8 +919,8 @@ func TestHandleCreateTask(t *testing.T) {
 		if err := json.NewDecoder(infoW.Body).Decode(&info); err != nil {
 			t.Fatal(err)
 		}
-		if info.Recorded.BaseImage != "ghcr.io/my/image:v1" || info.Recorded.ContainerPlatform != "linux/amd64" || info.Recorded.MaxCPUs != 4 {
-			t.Fatalf("recorded config = image %q platform %q cpus %d", info.Recorded.BaseImage, info.Recorded.ContainerPlatform, info.Recorded.MaxCPUs)
+		if info.Recorded.BaseImage != "ghcr.io/my/image:v1" || info.Recorded.ContainerOS != "linux" || info.Recorded.ContainerCPUArchitecture != "amd64" || info.Recorded.MaxCPUs != 4 {
+			t.Fatalf("recorded config = image %q os %q cpu architecture %q cpus %d", info.Recorded.BaseImage, info.Recorded.ContainerOS, info.Recorded.ContainerCPUArchitecture, info.Recorded.MaxCPUs)
 		}
 		if !info.Recorded.Capabilities.GitHubToken {
 			t.Error("GitHubToken = false, want true")
