@@ -133,28 +133,11 @@ Client rules (still binding):
 
 ## Provider-Neutral Data Channel
 
-Client to gateway:
-
-```json
-{"kind":"session.setup","voice":{"name":"...","language":"en"},"tools":[...],"context":{...}}
-{"kind":"context.update","context":{...}}
-{"kind":"tool.result","id":"call-id","name":"tasks_list","result":{}}
-{"kind":"turn.cancel","reason":"user_interruption"}
-{"kind":"session.close"}
-```
-
-Gateway to client:
-
-```json
-{"kind":"session.ready"}
-{"kind":"transcript.delta","speaker":"user","text":"..."}
-{"kind":"assistant.text.delta","text":"..."}
-{"kind":"speech.started","speaker":"assistant"}
-{"kind":"speech.ended","speaker":"assistant"}
-{"kind":"tool.call","id":"call-id","name":"tasks_list","args":{}}
-{"kind":"interrupted","source":"user"}
-{"kind":"error","message":"...","recoverable":true}
-```
+[`VOICE_GATEWAY.md`](VOICE_GATEWAY.md) is canonical for the public data-channel
+messages. The local stack must implement that contract unchanged. This document
+only adds local-runtime behavior: half-duplex ASR/LLM/TTS orchestration,
+`session.ready` after gateway setup, tool continuation after client results, and
+barge-in cancellation.
 
 ## Gateway Config
 
