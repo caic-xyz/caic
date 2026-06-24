@@ -24,6 +24,9 @@ const (
 )
 
 // Metadata stores runtime-neutral metadata for an instance.
+//
+// Runtime adapters choose the backing store. mdruntime uses container labels;
+// other adapters can use disk metadata, cloud tags, or a local registry.
 type Metadata map[MetadataKey]string
 
 // EventFilter selects runtime lifecycle events.
@@ -35,6 +38,11 @@ type EventFilter struct {
 type InstanceID string
 
 // ConnectionTarget describes how agent relay operations reach a runtime.
+//
+// It is currently SSH-shaped because mdruntime is the only production adapter.
+// Non-SSH adapters should replace direct agent SSH/file-copy operations with a
+// runtime-owned execution and transfer contract instead of leaking adapter
+// details into task orchestration.
 type ConnectionTarget struct {
 	SSHHost string
 }
