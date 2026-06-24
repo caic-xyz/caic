@@ -250,13 +250,6 @@ private fun GoModeContent(
         }
         else -> {
             when (val state = bootstrapState) {
-                is ServiceBootstrapState.Unvalidated -> {
-                    WebShellScreen(
-                        initialURL = activeURL,
-                        onOpenSettings = { onSetNativeScreen(NativeScreen.Settings) },
-                        onHostedPageLoaded = onHostedPageLoaded,
-                    )
-                }
                 is ServiceBootstrapState.Error -> {
                     ServiceBootstrapPanel(
                         title = "Could not use service",
@@ -265,7 +258,10 @@ private fun GoModeContent(
                         onOpenSettings = { onSetNativeScreen(NativeScreen.Settings) },
                     )
                 }
+                is ServiceBootstrapState.Unvalidated,
                 is ServiceBootstrapState.Ready -> {
+                    // Keep non-error states in one Compose branch. Otherwise the WebView is disposed
+                    // when bootstrap validation completes, which can strand in-flight JavaScript callbacks.
                     WebShellScreen(
                         initialURL = activeURL,
                         onOpenSettings = { onSetNativeScreen(NativeScreen.Settings) },
