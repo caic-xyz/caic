@@ -987,6 +987,11 @@ func (h *Handler) handleSubscription(ctx context.Context, w http.ResponseWriter,
 	if err != nil {
 		return registryError(err)
 	}
+	// Snapshot the current resource state before acknowledging. The client may
+	// mutate resources as soon as it sees the ack; taking the baseline first
+	// establishes a happens-before edge so those mutations are detected as
+	// changes instead of being deduplicated against a post-mutation snapshot.
+	lastResources, lastResourceContents := h.subscriptionSnapshot(ctx, p.Notifications)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
@@ -995,7 +1000,7 @@ func (h *Handler) handleSubscription(ctx context.Context, w http.ResponseWriter,
 		slog.WarnContext(ctx, "write mcp subscription acknowledgment", "err", err)
 		return nil
 	}
-	h.streamSubscriptionNotifications(ctx, stream, subID, p.Notifications, changes)
+	h.streamSubscriptionNotifications(ctx, stream, subID, p.Notifications, changes, lastResources, lastResourceContents)
 	return nil
 }
 
@@ -1004,8 +1009,7 @@ type subscriptionStreamWriter interface {
 	http.Flusher
 }
 
-func (h *Handler) streamSubscriptionNotifications(ctx context.Context, w subscriptionStreamWriter, subID string, filter SubscriptionFilter, changes iter.Seq2[ResourceUpdate, error]) {
-	lastResources, lastResourceContents := h.subscriptionSnapshot(ctx, filter)
+func (h *Handler) streamSubscriptionNotifications(ctx context.Context, w subscriptionStreamWriter, subID string, filter SubscriptionFilter, changes iter.Seq2[ResourceUpdate, error], lastResources string, lastResourceContents map[string]string) {
 	for update, err := range changes {
 		if err != nil {
 			slog.WarnContext(ctx, "mcp resource update stream stopped", "err", err)
