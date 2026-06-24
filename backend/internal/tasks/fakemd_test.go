@@ -4,6 +4,7 @@ package tasks
 
 import (
 	"context"
+	"iter"
 	"sync"
 
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -15,25 +16,27 @@ import (
 type fakeMD struct {
 	mu sync.Mutex
 
-	statsAllFn func(ctx context.Context, ids []runtime.InstanceID) (map[runtime.InstanceID]*runtime.Stats, error)
-	sudoFn     func(ctx context.Context, id runtime.InstanceID) (string, error)
-	metadata   map[string]string // key: name + "\x00" + metadata key
-	events     <-chan runtime.Event
-	watchErr   error
+	watchStatsFn func(ctx context.Context, ids []runtime.InstanceID) (iter.Seq2[runtime.StatsSample, error], error)
+	sudoFn       func(ctx context.Context, id runtime.InstanceID) (string, error)
+	metadata     map[string]string // key: name + "\x00" + metadata key
+	events       <-chan runtime.Event
+	watchErr     error
 
-	statsAllCalls int
-	sudoCalls     int
+	watchStatsCalls int
+	sudoCalls       int
 }
 
-func (f *fakeMD) StatsAll(ctx context.Context, ids []runtime.InstanceID) (map[runtime.InstanceID]*runtime.Stats, error) {
+func (f *fakeMD) WatchStats(ctx context.Context, ids []runtime.InstanceID) (iter.Seq2[runtime.StatsSample, error], error) {
 	f.mu.Lock()
-	f.statsAllCalls++
-	fn := f.statsAllFn
+	f.watchStatsCalls++
+	fn := f.watchStatsFn
 	f.mu.Unlock()
 	if fn != nil {
 		return fn(ctx, ids)
 	}
-	return map[runtime.InstanceID]*runtime.Stats{}, nil
+	return func(func(runtime.StatsSample, error) bool) {
+		<-ctx.Done()
+	}, nil
 }
 
 func (f *fakeMD) SudoPassword(ctx context.Context, id runtime.InstanceID) (string, error) {

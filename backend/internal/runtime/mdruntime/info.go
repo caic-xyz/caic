@@ -4,6 +4,7 @@ package mdruntime
 
 import (
 	"context"
+	"iter"
 	"log/slog"
 	"maps"
 	"sync"
@@ -85,31 +86,41 @@ func (b *RuntimeInfoBackend) Inspect(ctx context.Context, id runtime.InstanceID)
 	}, nil
 }
 
-// StatsAll returns resource stats for the named runtime instances.
-func (b *RuntimeInfoBackend) StatsAll(ctx context.Context, ids []runtime.InstanceID) (map[runtime.InstanceID]*runtime.Stats, error) {
+// WatchStats streams resource stats for the named runtime instances.
+func (b *RuntimeInfoBackend) WatchStats(ctx context.Context, ids []runtime.InstanceID) (iter.Seq2[runtime.StatsSample, error], error) {
 	names := make([]string, len(ids))
 	for i, id := range ids {
 		names[i] = string(id)
 	}
-	stats, err := b.c.StatsAll(ctx, names)
+	stats, err := b.c.WatchStats(ctx, names)
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[runtime.InstanceID]*runtime.Stats, len(stats))
-	for name, s := range stats {
-		out[runtime.InstanceID(name)] = &runtime.Stats{
-			CPUPerc:    s.CPUPerc,
-			MemUsed:    s.MemUsed,
-			MemLimit:   s.MemLimit,
-			MemPerc:    s.MemPerc,
-			NetRx:      s.NetRx,
-			NetTx:      s.NetTx,
-			BlockRead:  s.BlockRead,
-			BlockWrite: s.BlockWrite,
-			DiskUsed:   s.DiskUsed,
+	return func(yield func(runtime.StatsSample, error) bool) {
+		for sample, err := range stats {
+			if err != nil {
+				_ = yield(runtime.StatsSample{}, err)
+				return
+			}
+			out := runtime.StatsSample{
+				InstanceID: runtime.InstanceID(sample.Name),
+				Stats: runtime.Stats{
+					CPUPerc:    sample.Stats.CPUPerc,
+					MemUsed:    sample.Stats.MemUsed,
+					MemLimit:   sample.Stats.MemLimit,
+					MemPerc:    sample.Stats.MemPerc,
+					NetRx:      sample.Stats.NetRx,
+					NetTx:      sample.Stats.NetTx,
+					BlockRead:  sample.Stats.BlockRead,
+					BlockWrite: sample.Stats.BlockWrite,
+					DiskUsed:   sample.Stats.DiskUsed,
+				},
+			}
+			if !yield(out, nil) {
+				return
+			}
 		}
-	}
-	return out, nil
+	}, nil
 }
 
 // SudoPassword fetches the sudo password for a runtime instance over SSH.

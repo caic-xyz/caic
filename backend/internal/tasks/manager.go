@@ -1,5 +1,5 @@
 // Package tasks orchestrates task lifecycle management: creation, execution,
-// session watching, stats polling, and instance adoption.
+// session watching, stats streaming, and instance adoption.
 //
 // It sits between the HTTP adapter (internal/server) and the domain layer
 // (internal/task). The one-letter difference from the singular "task" package
@@ -89,7 +89,7 @@ type Config struct {
 }
 
 // Manager owns the task and runner registries, instance adoption, session
-// watching, and stats polling.
+// watching, and stats streaming.
 type Manager struct {
 	// Immutable after construction.
 	serverCtx  context.Context // lifetime of the Manager; for goroutines that outlive requests
@@ -142,11 +142,11 @@ func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passe
 	return m
 }
 
-// Start launches background goroutines: instance event watching and stats polling.
+// Start launches background goroutines: instance event watching and stats streaming.
 // Must be called once after New, after runners have been registered.
 func (m *Manager) Start() {
 	go m.watchRuntimeEvents(m.serverCtx)
-	go m.pollStats(m.serverCtx)
+	go m.watchStats(m.serverCtx)
 }
 
 // RegisterRunner registers a task runner keyed by relPath.
@@ -1138,71 +1138,122 @@ func (m *Manager) repoBasenameCollides(relPath string) bool {
 	return collides
 }
 
-// pollStats polls runtime resource stats every 5 seconds for all active tasks.
-func (m *Manager) pollStats(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
+// watchStats streams runtime resource stats for the current active task set.
+func (m *Manager) watchStats(ctx context.Context) {
+	const retryDelay = 5 * time.Second
 	for {
-		select {
-		case <-ctx.Done():
+		ids, changed := m.activeStatsIDs()
+		if len(ids) == 0 {
+			if !waitStatsChange(ctx, changed) {
+				return
+			}
+			continue
+		}
+
+		streamCtx, cancel := context.WithCancel(ctx)
+		changedDone := make(chan struct{})
+		go func() {
+			defer close(changedDone)
+			select {
+			case <-changed:
+				cancel()
+			case <-ctx.Done():
+				cancel()
+			case <-streamCtx.Done():
+			}
+		}()
+
+		stats, err := m.monitor.WatchStats(streamCtx, ids)
+		if err != nil {
+			cancel()
+			<-changedDone
+			slog.DebugContext(ctx, "stats stream failed", "err", err)
+			if !waitStatsRetry(ctx, changed, retryDelay) {
+				return
+			}
+			continue
+		}
+		for sample, err := range stats {
+			if err != nil {
+				if streamCtx.Err() == nil {
+					slog.DebugContext(ctx, "stats stream failed", "err", err)
+				}
+				break
+			}
+			m.pushStatsSample(&sample)
+		}
+		cancel()
+		<-changedDone
+		if ctx.Err() != nil {
 			return
-		case <-ticker.C:
-			m.pushStats(ctx)
+		}
+		if streamCtx.Err() == nil && !waitStatsRetry(ctx, changed, retryDelay) {
+			return
 		}
 	}
 }
 
-func (m *Manager) pushStats(ctx context.Context) {
-	defer trace.StartRegion(ctx, "poll-stats").End()
+func (m *Manager) activeStatsIDs() (ids []runtime.InstanceID, changed <-chan struct{}) {
 	m.mu.Lock()
-	type entry struct {
-		task *task.Task
-		name runtime.InstanceID
-	}
-	var active []entry
+	defer m.mu.Unlock()
+	ids = make([]runtime.InstanceID, 0, len(m.tasks))
 	for _, e := range m.tasks {
-		t := e.task
-		name := t.RuntimeInstanceID()
-		if name == "" {
+		name := e.task.RuntimeInstanceID()
+		if name == "" || !statsStateActive(e.task.GetState()) {
 			continue
 		}
-		st := t.GetState()
-		if st == task.StatePurged || st == task.StateFailed || st == task.StateCrashed || st == task.StateStopped || st == task.StateStopping {
+		ids = append(ids, name)
+	}
+	return ids, m.changed
+}
+
+func waitStatsChange(ctx context.Context, changed <-chan struct{}) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-changed:
+		return true
+	}
+}
+
+func waitStatsRetry(ctx context.Context, changed <-chan struct{}, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-changed:
+		return true
+	case <-timer.C:
+		return true
+	}
+}
+
+func (m *Manager) pushStatsSample(sample *runtime.StatsSample) {
+	m.mu.Lock()
+	var target *task.Task
+	for _, e := range m.tasks {
+		if e.task.RuntimeInstanceID() != sample.InstanceID {
 			continue
 		}
-		active = append(active, entry{task: t, name: name})
+		target = e.task
+		break
 	}
 	m.mu.Unlock()
-	if len(active) == 0 {
+	if target == nil || !statsStateActive(target.GetState()) {
 		return
 	}
-	ids := make([]runtime.InstanceID, len(active))
-	for i, e := range active {
-		ids[i] = e.name
-	}
-	statsMap, err := m.monitor.StatsAll(ctx, ids)
-	if err != nil {
-		slog.DebugContext(ctx, "stats poll failed", "err", err)
-		return
-	}
-	now := time.Now()
-	for _, e := range active {
-		cs, ok := statsMap[e.name]
-		if !ok {
-			continue
-		}
-		e.task.PushStats(&runtime.Stats{
-			Ts:         now,
-			CPUPerc:    cs.CPUPerc,
-			MemUsed:    cs.MemUsed,
-			MemLimit:   cs.MemLimit,
-			MemPerc:    cs.MemPerc,
-			NetRx:      cs.NetRx,
-			NetTx:      cs.NetTx,
-			BlockRead:  cs.BlockRead,
-			BlockWrite: cs.BlockWrite,
-			DiskUsed:   cs.DiskUsed,
-		})
+	s := sample.Stats
+	s.Ts = time.Now()
+	target.PushStats(&s)
+}
+
+func statsStateActive(st task.State) bool {
+	switch st {
+	case task.StatePurged, task.StateFailed, task.StateCrashed, task.StateStopped, task.StateStopping:
+		return false
+	default:
+		return true
 	}
 }
 

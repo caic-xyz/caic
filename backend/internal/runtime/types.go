@@ -4,6 +4,7 @@ package runtime
 import (
 	"context"
 	"io"
+	"iter"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/harness"
@@ -134,6 +135,12 @@ type Stats struct {
 	DiskUsed   int64
 }
 
+// StatsSample is a streamed runtime resource usage snapshot for one instance.
+type StatsSample struct {
+	InstanceID InstanceID
+	Stats      Stats
+}
+
 // Event describes a runtime lifecycle event.
 type Event struct {
 	InstanceID InstanceID
@@ -209,7 +216,7 @@ type Backend interface {
 
 // Monitor reads resource usage and lifecycle events.
 type Monitor interface {
-	StatsAll(ctx context.Context, ids []InstanceID) (map[InstanceID]*Stats, error)
+	WatchStats(ctx context.Context, ids []InstanceID) (iter.Seq2[StatsSample, error], error)
 	WatchEvents(ctx context.Context, filter EventFilter) (<-chan Event, error)
 }
 

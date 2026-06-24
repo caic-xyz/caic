@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -119,13 +120,11 @@ func (*RuntimeBackend) Inspect(_ context.Context, id runtime.InstanceID) (*runti
 	return &runtime.InstanceInspect{Runtime: "fake", ID: id, State: "running", OS: "linux", CPUArchitecture: stdruntime.GOARCH}, nil
 }
 
-// StatsAll implements runtime.Monitor.
-func (*RuntimeBackend) StatsAll(_ context.Context, ids []runtime.InstanceID) (map[runtime.InstanceID]*runtime.Stats, error) {
-	stats := make(map[runtime.InstanceID]*runtime.Stats, len(ids))
-	for _, id := range ids {
-		stats[id] = &runtime.Stats{}
-	}
-	return stats, nil
+// WatchStats implements runtime.Monitor.
+func (*RuntimeBackend) WatchStats(ctx context.Context, _ []runtime.InstanceID) (iter.Seq2[runtime.StatsSample, error], error) {
+	return func(func(runtime.StatsSample, error) bool) {
+		<-ctx.Done()
+	}, nil
 }
 
 // WatchEvents implements runtime.Monitor.

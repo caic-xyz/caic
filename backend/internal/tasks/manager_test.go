@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"iter"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -2721,61 +2722,59 @@ func TestManager(t *testing.T) {
 		})
 	})
 
-	t.Run("pushStats", func(t *testing.T) {
+	t.Run("watchStats", func(t *testing.T) {
 		t.Parallel()
-		t.Run("valid_pushes_to_active_tasks", func(t *testing.T) {
-			t.Parallel()
-			fake := &fakeMD{
-				statsAllFn: func(_ context.Context, ids []runtime.InstanceID) (map[runtime.InstanceID]*runtime.Stats, error) {
-					out := make(map[runtime.InstanceID]*runtime.Stats, len(ids))
-					for _, id := range ids {
-						out[id] = &runtime.Stats{CPUPerc: 0.5, MemUsed: 100}
+		ctx, cancel := context.WithCancel(t.Context())
+		t.Cleanup(cancel)
+		started := make(chan []runtime.InstanceID, 1)
+		fake := &fakeMD{
+			watchStatsFn: func(ctx context.Context, ids []runtime.InstanceID) (iter.Seq2[runtime.StatsSample, error], error) {
+				started <- slices.Clone(ids)
+				return func(yield func(runtime.StatsSample, error) bool) {
+					if !yield(runtime.StatsSample{InstanceID: "ctr-1", Stats: runtime.Stats{CPUPerc: 2.5, MemUsed: 200, DiskUsed: -1}}, nil) {
+						return
 					}
-					return out, nil
-				},
-			}
-			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
-			tk := &task.Task{
-				ID:            ksid.NewID(),
-				InitialPrompt: agent.Prompt{Text: "x"},
-			}
-			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(task.StateRunning)
-			m.Insert(tk.ID.String(), NewEntry(tk, nil))
+					<-ctx.Done()
+				}, nil
+			},
+		}
+		m := New(Config{ServerCtx: ctx, Monitor: fake, Inventory: fake, Privilege: fake})
+		tk := &task.Task{
+			ID:            ksid.NewID(),
+			InitialPrompt: agent.Prompt{Text: "x"},
+		}
+		tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+		tk.SetState(task.StateRunning)
+		m.Insert(tk.ID.String(), NewEntry(tk, nil))
 
-			m.pushStats(t.Context())
+		go m.watchStats(ctx)
+		select {
+		case ids := <-started:
+			if !slices.Equal(ids, []runtime.InstanceID{"ctr-1"}) {
+				t.Fatalf("watch ids = %v, want [ctr-1]", ids)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for stats stream")
+		}
 
-			// Assert the snapshot actually landed on the task's stats ring.
+		deadline := time.After(2 * time.Second)
+		ticker := time.NewTicker(10 * time.Millisecond)
+		t.Cleanup(ticker.Stop)
+		for {
 			history, _, unsub := tk.SubscribeStats(t.Context())
 			unsub()
-			if len(history) != 1 {
-				t.Fatalf("stats history len = %d, want 1", len(history))
+			if len(history) > 0 {
+				if history[0].CPUPerc != 2.5 || history[0].MemUsed != 200 || history[0].DiskUsed != -1 {
+					t.Fatalf("streamed stats = %+v", history[0])
+				}
+				return
 			}
-			if history[0].CPUPerc != 0.5 || history[0].MemUsed != 100 {
-				t.Errorf("pushed stats = %+v, want CPUPerc=0.5 MemUsed=100", history[0])
+			select {
+			case <-deadline:
+				t.Fatal("timed out waiting for stats push")
+			case <-ticker.C:
 			}
-			if fake.statsAllCalls != 1 {
-				t.Errorf("statsAllCalls = %d, want 1", fake.statsAllCalls)
-			}
-		})
-		t.Run("valid_skips_inactive_states", func(t *testing.T) {
-			t.Parallel()
-			fake := &fakeMD{}
-			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
-			tk := &task.Task{
-				ID:            ksid.NewID(),
-				InitialPrompt: agent.Prompt{Text: "x"},
-			}
-			tk.SetRuntimeConnectionInfo("ctr-dead", runtime.ConnectionTarget{SSHHost: "ctr-dead"}, "", "", 0)
-			tk.SetState(task.StatePurged)
-			m.Insert(tk.ID.String(), NewEntry(tk, nil))
-
-			m.pushStats(t.Context())
-
-			if fake.statsAllCalls != 0 {
-				t.Errorf("statsAllCalls = %d for purged task, want 0", fake.statsAllCalls)
-			}
-		})
+		}
 	})
 
 	t.Run("watchRuntimeEvents", func(t *testing.T) {
