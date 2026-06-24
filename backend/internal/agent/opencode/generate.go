@@ -4,7 +4,7 @@
 // whose golden file is missing. To regenerate all traces from scratch,
 // remove the testdata/ directory first.
 //
-// Requires: podman.
+// Requires: podman. Uses OpenCode's free model.
 
 package opencode
 

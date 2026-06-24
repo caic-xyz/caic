@@ -4,9 +4,9 @@
 // whose golden file is missing. To regenerate all traces from scratch,
 // remove the testdata/ directory first.
 //
-// Requires: podman, ANTHROPIC_API_KEY env var.
+// Requires: podman and a Claude Code login.
 
 package claudecode
 
-//go:generate go run ../../cmd/record-trace --harness claude --scenario read-edit-bash --model haiku --api-key-env ANTHROPIC_API_KEY
-//go:generate go run ../../cmd/record-trace --harness claude --scenario tool-error --model haiku --api-key-env ANTHROPIC_API_KEY
+//go:generate go run ../../cmd/record-trace --harness claude --scenario read-edit-bash --model haiku
+//go:generate go run ../../cmd/record-trace --harness claude --scenario tool-error --model haiku

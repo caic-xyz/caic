@@ -4,9 +4,9 @@
 // whose golden file is missing. To regenerate all traces from scratch,
 // remove the testdata/ directory first.
 //
-// Requires: podman, OPENAI_API_KEY env var.
+// Requires: podman and a Codex login.
 
 package codex
 
-//go:generate go run ../../cmd/record-trace --harness codex --scenario read-edit-bash --model gpt-5.4-mini --api-key-env OPENAI_API_KEY
-//go:generate go run ../../cmd/record-trace --harness codex --scenario tool-error --model gpt-5.4-mini --api-key-env OPENAI_API_KEY
+//go:generate go run ../../cmd/record-trace --harness codex --scenario read-edit-bash --model gpt-5.4-mini
+//go:generate go run ../../cmd/record-trace --harness codex --scenario tool-error --model gpt-5.4-mini

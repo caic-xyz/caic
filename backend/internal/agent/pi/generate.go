@@ -4,9 +4,9 @@
 // whose golden file is missing. To regenerate all traces from scratch,
 // remove the testdata/ directory first.
 //
-// Requires: podman, XIAOMI_API_KEY env var.
+// Requires: podman and a Pi login.
 
 package pi
 
-//go:generate go run ../../cmd/record-trace --harness pi --scenario read-edit-bash --model xiaomi/mimo-v2.5 --api-key-env XIAOMI_API_KEY
-//go:generate go run ../../cmd/record-trace --harness pi --scenario tool-error --model xiaomi/mimo-v2.5 --api-key-env XIAOMI_API_KEY
+//go:generate go run ../../cmd/record-trace --harness pi --scenario read-edit-bash --model xiaomi/mimo-v2.5
+//go:generate go run ../../cmd/record-trace --harness pi --scenario tool-error --model xiaomi/mimo-v2.5

@@ -4,7 +4,8 @@
 //
 //	record-trace --harness pi --scenario read-edit-bash
 //
-// Requires: podman, env var (override with --api-key-env).
+// Requires: podman. It mounts logged-in harness credentials when available;
+// --api-key-env is optional for API-key based recording.
 package main
 
 import (
@@ -49,11 +50,33 @@ var scenarios = map[string]string{
 	"tool-error":     "Read the file nonexistent_file.txt",
 }
 
+var credentialMounts = map[harness.Name][]credentialMount{
+	harness.Claude: {
+		{homeRelPath: ".claude", containerPath: "/home/user/.claude"},
+	},
+	harness.Codex: {
+		{homeRelPath: ".codex", containerPath: "/home/user/.codex"},
+	},
+	harness.OpenCode: {
+		{homeRelPath: ".opencode", containerPath: "/home/user/.opencode"},
+		{homeRelPath: ".local/share/opencode", containerPath: "/home/user/.local/share/opencode"},
+		{homeRelPath: ".local/state/opencode", containerPath: "/home/user/.local/state/opencode"},
+	},
+	harness.Pi: {
+		{homeRelPath: ".pi", containerPath: "/home/user/.pi"},
+	},
+}
+
+type credentialMount struct {
+	homeRelPath   string
+	containerPath string
+}
+
 func mainImpl() error {
 	harnessFlag := flag.String("harness", "", "harness to record (pi, claude, codex, opencode)")
 	scenarioFlag := flag.String("scenario", "", "predefined scenario name")
 	modelFlag := flag.String("model", "", "model to use (e.g. xiaomi/mimo-v2.5)")
-	apiKeyEnv := flag.String("api-key-env", "", "env var name for API key")
+	apiKeyEnv := flag.String("api-key-env", "", "env var name for optional API key")
 	flag.Parse()
 
 	if *harnessFlag == "" {
@@ -88,7 +111,7 @@ func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv, promptText, ou
 	}
 	defer func() { _ = os.RemoveAll(workDir) }()
 
-	ctr, err := startContainer(ctx, workDir, apiKeyEnv)
+	ctr, err := startContainer(ctx, workDir, b.Harness(), apiKeyEnv)
 	if err != nil {
 		return err
 	}
@@ -103,8 +126,8 @@ func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv, promptText, ou
 	if err := runPodman(ctx, "exec", ctr, "mkdir", "-p", agent.WidgetPluginDir); err != nil {
 		return fmt.Errorf("create widget plugin dir: %w", err)
 	}
-	// Codex needs stored credentials for WebSocket auth; the env var
-	// alone is not enough. Pipe the API key through codex login.
+	// Codex needs stored credentials for WebSocket auth. Use mounted
+	// ~/.codex credentials, or create them from the optional API key.
 	if b.Harness() == harness.Codex {
 		if err := setupCodexAuth(ctx, ctr, apiKeyEnv); err != nil {
 			return fmt.Errorf("codex auth setup: %w", err)
@@ -151,23 +174,60 @@ func setupWorkspace() (string, error) {
 }
 
 // startContainer pulls the image and starts a container.
-func startContainer(ctx context.Context, workDir, apiKeyEnv string) (string, error) {
+func startContainer(ctx context.Context, workDir string, h harness.Name, apiKeyEnv string) (string, error) {
 	slog.InfoContext(ctx, "Pulling image", "image", image)
 	if pullErr := runPodman(ctx, "pull", image); pullErr != nil {
 		return "", fmt.Errorf("pull image: %w", pullErr)
 	}
 
 	slog.InfoContext(ctx, "Starting container")
-	args := []string{"podman", "run", "-d", "--rm", "--userns", "keep-id", "--user", "user", "-v", workDir + ":/workspace:rw"}
-	if v := os.Getenv(apiKeyEnv); apiKeyEnv != "" && v != "" {
-		args = append(args, "-e", apiKeyEnv+"="+v)
+	args, err := buildPodmanRunArgs(workDir, h, apiKeyEnv)
+	if err != nil {
+		return "", err
 	}
-	args = append(args, image, "sleep", "300")
 	ctrBytes, runErr := exec.CommandContext(ctx, args[0], args[1:]...).Output() //nolint:gosec // podman args are safe
 	if runErr != nil {
 		return "", fmt.Errorf("start container: %w", runErr)
 	}
 	return strings.TrimSpace(string(ctrBytes)), nil
+}
+
+func buildPodmanRunArgs(workDir string, h harness.Name, apiKeyEnv string) ([]string, error) {
+	args := []string{"podman", "run", "-d", "--rm", "--userns", "keep-id", "--user", "user", "-v", workDir + ":/workspace:rw"}
+	mounts, err := credentialMountArgs(h)
+	if err != nil {
+		return nil, err
+	}
+	args = append(args, mounts...)
+	if v := os.Getenv(apiKeyEnv); apiKeyEnv != "" && v != "" {
+		args = append(args, "-e", apiKeyEnv+"="+v)
+	}
+	args = append(args, image, "sleep", "300")
+	return args, nil
+}
+
+func credentialMountArgs(h harness.Name) ([]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("user home: %w", err)
+	}
+	mounts := credentialMounts[h]
+	args := make([]string, 0, len(mounts)*2)
+	for _, mount := range mounts {
+		hostPath := filepath.Join(home, mount.homeRelPath)
+		st, err := os.Stat(hostPath)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("stat credential path %s: %w", hostPath, err)
+		}
+		if !st.IsDir() {
+			return nil, fmt.Errorf("credential path %s is not a directory", hostPath)
+		}
+		args = append(args, "--mount", "type=bind,source="+hostPath+",target="+mount.containerPath)
+	}
+	return args, nil
 }
 
 // deployRelay pipes the embedded relay script into the container.
@@ -381,12 +441,13 @@ func runPodman(ctx context.Context, args ...string) error {
 }
 
 // setupCodexAuth pipes the API key through codex login inside the container.
-// Codex requires credentials in its auth store for WebSocket transport;
-// the OPENAI_API_KEY env var alone is not sufficient.
+// When no API key env var is configured or populated, Codex uses the mounted
+// logged-in account from ~/.codex when available.
 func setupCodexAuth(ctx context.Context, ctr, apiKeyEnv string) error {
 	apiKey := os.Getenv(apiKeyEnv)
-	if apiKey == "" {
-		return fmt.Errorf("%s is empty", apiKeyEnv)
+	if apiKeyEnv == "" || apiKey == "" {
+		slog.InfoContext(ctx, "Skipping codex API-key auth setup; using mounted login when available")
+		return nil
 	}
 	cmd := exec.CommandContext(ctx, "podman", "exec", "-i", ctr, //nolint:gosec // podman args are safe
 		"bash", "-c", "codex login --with-api-key")
