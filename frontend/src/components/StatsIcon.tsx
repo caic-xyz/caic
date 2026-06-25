@@ -1,7 +1,10 @@
 // StatsIcon renders a 2×2 bar-chart icon in the task header that opens a popup
 // showing container resource history (CPU, MEM, NET, DISK) and per-turn perf data.
+
 import { createSignal, For, Show } from "solid-js";
+
 import type { EventStats } from "@sdk/types.gen";
+
 import type { Session } from "../grouping";
 import { formatDuration, formatTokens } from "../formatting";
 import styles from "./StatsIcon.module.css";

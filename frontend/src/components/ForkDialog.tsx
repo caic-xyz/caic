@@ -1,13 +1,15 @@
 // Fork-task modal dialog: prompt, extra repos, harness/model/effort, runtime toggles.
+
 import { Show } from "solid-js";
+import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
+import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
+import SudoIcon from "@material-symbols/svg-400/outlined/shield_person.svg?solid";
+
 import { useAppState } from "../AppState";
 import RepoChipStrip from "./RepoChipStrip";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import Button from "./Button";
 import { HarnessControls, ToggleChip } from "./FormControls";
-import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
-import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
-import SudoIcon from "@material-symbols/svg-400/outlined/shield_person.svg?solid";
 import TokenIcon from "./github.svg?solid";
 import TailscaleIcon from "./tailscale.svg?solid";
 import styles from "./ForkDialog.module.css";

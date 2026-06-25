@@ -1,4 +1,5 @@
 // Helpers for converting image files to base64 ImageData payloads.
+
 import type { ImageData as APIImageData } from "@sdk/types.gen";
 
 const ALLOWED_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);

@@ -1,15 +1,18 @@
 // Reusable prompt input with image support: paste, drag & drop, attach button, and preview strip.
+
 import { createSignal, For, Show, type JSX } from "solid-js";
+import AttachIcon from "@material-symbols/svg-400/outlined/attach_file.svg?solid";
+import CameraIcon from "@material-symbols/svg-400/outlined/photo_camera.svg?solid";
+import ImageIcon from "@material-symbols/svg-400/outlined/image.svg?solid";
+import ScreenshotIcon from "@material-symbols/svg-400/outlined/screenshot_monitor.svg?solid";
+
 import type { ImageData as APIImageData } from "@sdk/types.gen";
+
 import { captureScreen, fileToImageData, imagesFromClipboard } from "../images";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import Button from "./Button";
 import CameraCapture from "./CameraCapture";
 import Dropdown from "./Dropdown";
-import AttachIcon from "@material-symbols/svg-400/outlined/attach_file.svg?solid";
-import CameraIcon from "@material-symbols/svg-400/outlined/photo_camera.svg?solid";
-import ImageIcon from "@material-symbols/svg-400/outlined/image.svg?solid";
-import ScreenshotIcon from "@material-symbols/svg-400/outlined/screenshot_monitor.svg?solid";
 import styles from "./PromptInput.module.css";
 
 interface Props {

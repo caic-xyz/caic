@@ -1,6 +1,8 @@
 // Toast notification stack rendered via a portal at the bottom of the viewport.
+
 import { For } from "solid-js";
 import { Portal } from "solid-js/web";
+
 import { useAppState } from "../AppState";
 import styles from "./Toasts.module.css";
 

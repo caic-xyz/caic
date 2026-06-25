@@ -1,6 +1,9 @@
 // ProgressPanel renders active todos and subagent count from the agent event stream.
+
 import { For, Show, createEffect, createMemo } from "solid-js";
+
 import type { EventMessage } from "@sdk/types.gen";
+
 import { detailsOpenState } from "./TaskDetail";
 import styles from "./ProgressPanel.module.css";
 

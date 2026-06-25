@@ -1,6 +1,9 @@
 // SettingsForm renders the application settings controls.
+
 import { For, Show, type Accessor, type Setter } from "solid-js";
+
 import type { CacheMappingResp, CacheSize, OAuthGrantResp, MountMappingResp, Platform, UpdatePreferencesReq, VersionResp, WellKnownCachesResp } from "@sdk/types.gen";
+
 import styles from "./SettingsForm.module.css";
 
 type SettingsOverrides = Partial<UpdatePreferencesReq["settings"]>;

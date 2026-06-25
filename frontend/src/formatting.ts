@@ -1,6 +1,5 @@
 // Shared formatting utilities for caic web UI values.
-// Note: formatElapsed takes milliseconds (JS timestamps). Call
-// formatElapsed(seconds * 1000) for API durations.
+
 import type { TaskState } from "@sdk/types.gen";
 
 /** Returns the currency symbol for a currency code. Unknown codes return "??". */
@@ -31,6 +30,8 @@ export function formatDuration(seconds: number): string {
 }
 
 // Formats an elapsed duration given in milliseconds.
+//
+// Call formatElapsed(seconds * 1000) for API durations.
 export function formatElapsed(ms: number): string {
   const s = Math.floor(ms / 1000);
   if (s < 60) return `${s}s`;

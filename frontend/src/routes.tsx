@@ -1,6 +1,8 @@
 // Route tree shared by the app entry point and tests: nested layout routes under the shell.
+
 import { Route } from "@solidjs/router";
 import type { JSX } from "solid-js";
+
 import App from "./App";
 import MainLayout from "./components/MainLayout";
 import EmptyPage from "./pages/EmptyPage";

@@ -1,14 +1,11 @@
 // Core voice gateway session manager for the web frontend via WebRTC.
+
 import { createStore, produce } from "solid-js/store";
-import { voiceRTCOffer } from "./api";
+
+// TODO: Remove references to "Task".
 import type { Task } from "@sdk/types.gen";
-import { TaskNumberMap } from "./TaskNumberMap";
-import {
-  mcpListTools,
-  mcpCallTool,
-  mcpServerInstructions,
-  type McpToolDescriptor,
-} from "./McpClient";
+// TODO: Cleanup imports.
+import * as voicegatewaySDK from "@voicegateway-sdk/api.gen";
 import {
   type Error,
   type ContextUpdate,
@@ -31,10 +28,26 @@ import {
   MessageKindTranscriptDelta,
 } from "@voicegateway-sdk/types.gen";
 
+import { voiceRTCOffer } from "../api";
+import { TaskNumberMap } from "./TaskNumberMap";
+import {
+  mcpListTools,
+  mcpCallTool,
+  mcpServerInstructions,
+  type McpToolDescriptor,
+} from "./McpClient";
+
 // Constants
 
 /** Max time (ms) to wait for session.ready before timing out. */
 const SETUP_TIMEOUT_MS = 15000;
+
+export const voiceGatewayApi = voicegatewaySDK.createApiClient();
+
+export const {
+  voiceRTCOffer,
+  closeVoiceRTC,
+} = voiceGatewayApi;
 
 // State types
 

@@ -1,4 +1,5 @@
 // Valid thinking-effort levels per harness, shared by the new-task form and fork dialog.
+
 import type { Harness } from "@sdk/types.gen";
 
 /**

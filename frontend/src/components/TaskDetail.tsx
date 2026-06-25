@@ -1,21 +1,7 @@
 // TaskDetail renders the real-time agent output stream for a single task.
+
 import { createSignal, createMemo, createEffect, For, Index, Show, onCleanup, onMount, untrack, Switch, Match, type Accessor } from "solid-js";
 import { A, useNavigate, useLocation } from "@solidjs/router";
-import { sendInput as apiSendInput, restartTask as apiRestartTask, clearContext as apiClearContext, compactContext as apiCompactContext, syncTask as apiSyncTask, taskEventStream, getTaskToolInput, botFixPR } from "../api";
-import type { EventMessage, EventResult, AskQuestion, EventAsk, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, ForgeCheck, EventStats, EventUsage, EventToolInputView, EventSubagentSpawn } from "@sdk/types.gen";
-import { groupMessagesInc, resetGroupIncCache, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "../grouping";
-import { formatDuration, formatElapsed, formatTokens, toolCallDetail } from "../formatting";
-import type { ToolCall } from "../grouping";
-import { SyncTargetDefault } from "@sdk/types.gen";
-import { Marked } from "marked";
-import AutoResizeTextarea from "./AutoResizeTextarea";
-import PromptInput from "./PromptInput";
-import Button from "./Button";
-import UnifiedDiffBlock from "./UnifiedDiffBlock";
-import { requestNotificationPermission } from "../notifications";
-import { useHostMode } from "../hostMode";
-import ProgressPanel from "./ProgressPanel";
-import StatsIcon from "./StatsIcon";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 import CopyIcon from "@material-symbols/svg-400/outlined/content_copy.svg?solid";
 import CheckIcon from "@material-symbols/svg-400/outlined/check.svg?solid";
@@ -27,6 +13,24 @@ import RestartIcon from "@material-symbols/svg-400/outlined/restart_alt.svg?soli
 import BlockIcon from "@material-symbols/svg-400/outlined/block.svg?solid";
 import CompressIcon from "@material-symbols/svg-400/outlined/compress.svg?solid";
 import ForkIcon from "@material-symbols/svg-400/outlined/fork_right.svg?solid";
+
+import type { EventMessage, EventResult, AskQuestion, EventAsk, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, ForgeCheck, EventStats, EventUsage, EventToolInputView, EventSubagentSpawn } from "@sdk/types.gen";
+import { SyncTargetDefault } from "@sdk/types.gen";
+
+import { useHostMode } from "../gomode/HostMode";
+import { requestNotificationPermission } from "../gomode/notifications";
+
+import { sendInput as apiSendInput, restartTask as apiRestartTask, clearContext as apiClearContext, compactContext as apiCompactContext, syncTask as apiSyncTask, taskEventStream, getTaskToolInput, botFixPR } from "../api";
+import { groupMessagesInc, resetGroupIncCache, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "../grouping";
+import { formatDuration, formatElapsed, formatTokens, toolCallDetail } from "../formatting";
+import type { ToolCall } from "../grouping";
+import { Marked } from "marked";
+import AutoResizeTextarea from "./AutoResizeTextarea";
+import PromptInput from "./PromptInput";
+import Button from "./Button";
+import UnifiedDiffBlock from "./UnifiedDiffBlock";
+import ProgressPanel from "./ProgressPanel";
+import StatsIcon from "./StatsIcon";
 import GitHubIcon from "./github.svg?solid";
 import GitLabIcon from "./gitlab.svg?solid";
 import WidgetCard from "./WidgetCard";

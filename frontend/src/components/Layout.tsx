@@ -1,5 +1,7 @@
 // Shared route layout wrappers for split panes and detail-pane slots.
+
 import type { JSX } from "solid-js";
+
 import styles from "./Layout.module.css";
 
 export function Layout(props: { children?: JSX.Element }) {

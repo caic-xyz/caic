@@ -1,7 +1,9 @@
 // Tests for app-shell task creation, repo selection, and harness preferences.
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
+
 import type { Repo, PreferencesResp, HarnessInfo, Task } from "@sdk/types.gen";
 
 // Minimal complete Task, matching what the backend now returns from createTask
@@ -90,7 +92,7 @@ vi.mock("./AuthContext", () => ({
 vi.stubGlobal("EventSource", FakeEventSource);
 
 // Stub VoiceOverlay to avoid WebRTC/WebSocket connections in tests.
-vi.mock("./components/VoiceOverlay", () => ({ default: () => <div data-testid="voice-overlay" /> }));
+vi.mock("./gomode/VoiceOverlay", () => ({ default: () => <div data-testid="voice-overlay" /> }));
 
 function dispatchSSE(data: unknown) {
   const payload = { data: JSON.stringify(data) };

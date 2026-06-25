@@ -1,6 +1,8 @@
 // Sandboxed iframe widget card for agent-generated HTML widgets.
+
 import { createSignal, createEffect, onCleanup, on, Show } from "solid-js";
 import { Portal } from "solid-js/web";
+
 import type { MessageGroup } from "../grouping";
 import styles from "./WidgetCard.module.css";
 

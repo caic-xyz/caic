@@ -1,6 +1,8 @@
 // DiffPage is the /task/:taskId/diff route for a task's file changes.
+
 import { Show } from "solid-js";
 import { useParams } from "@solidjs/router";
+
 import DiffDetail from "../components/DiffDetail";
 import { useAppState } from "../AppState";
 import { taskIdFromParam, taskPath } from "../taskPath";

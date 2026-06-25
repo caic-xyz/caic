@@ -1,6 +1,9 @@
 // Auth context: tracks the current user and auth configuration.
+
 import { createContext, createSignal, useContext, onMount, type ParentComponent } from "solid-js";
+
 import type { AuthBootstrapResp, Config, UserResp } from "@sdk/types.gen";
+
 import { getMe, logout as apiLogout } from "./api";
 
 interface AuthState {

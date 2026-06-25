@@ -1,10 +1,12 @@
 // noVNC-based desktop viewer for a task's container display.
+
 import { createSignal, onMount, onCleanup, Show } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import RFB from "@novnc/novnc";
 import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
 import FullscreenIcon from "@material-symbols/svg-400/outlined/fullscreen.svg?solid";
 import FullscreenExitIcon from "@material-symbols/svg-400/outlined/fullscreen_exit.svg?solid";
+
 import styles from "./VncViewer.module.css";
 
 interface Props {

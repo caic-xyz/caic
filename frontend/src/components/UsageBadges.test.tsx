@@ -1,10 +1,13 @@
 // Tests for UsageBadges component.
+
 import { describe, it, expect } from "vitest";
 import { render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
+
+import type { UsageResp, ProviderQuota, ISOTimestamp } from "@sdk/types.gen";
+
 import UsageBadges from "./UsageBadges";
 import styles from "./UsageBadges.module.css";
-import type { UsageResp, ProviderQuota, ISOTimestamp } from "@sdk/types.gen";
 
 const [now] = createSignal(Date.now());
 

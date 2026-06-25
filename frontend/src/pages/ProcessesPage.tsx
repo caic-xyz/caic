@@ -1,6 +1,8 @@
 // ProcessesPage is the /task/:taskId/processes route for a task's process tree.
+
 import { Show } from "solid-js";
 import { useParams } from "@solidjs/router";
+
 import ProcessDetail from "../components/ProcessDetail";
 import { useAppState } from "../AppState";
 import { taskIdFromParam, taskPath } from "../taskPath";

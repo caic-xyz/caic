@@ -1,7 +1,9 @@
 // Tooltip: hover on desktop, tap-to-toggle on mobile.
 // Uses a Portal so the popup is never clipped by overflow: hidden ancestors.
+
 import { createSignal, createEffect, Show, onCleanup, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
+
 import styles from "./Tooltip.module.css";
 
 interface Props {

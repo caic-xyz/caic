@@ -1,6 +1,13 @@
 // Compact card for a single task, used in the sidebar task list.
+
 import { For, Show, createSignal, onMount, onCleanup } from "solid-js";
 import type { Accessor } from "solid-js";
+import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
+import SudoIcon from "@material-symbols/svg-400/outlined/shield_person.svg?solid";
+import DeleteIcon from "@material-symbols/svg-400/outlined/delete.svg?solid";
+import RestoreIcon from "@material-symbols/svg-400/outlined/restart_alt.svg?solid";
+import TimerIcon from "@material-symbols/svg-400/outlined/timer.svg?solid";
+
 import type {
   DiffStat,
   CIStatus,
@@ -9,15 +16,11 @@ import type {
   TaskRepo,
   TaskState,
 } from "@sdk/types.gen";
+
 import CIDot from "./CIDot";
 import Tooltip from "./Tooltip";
 import TailscaleIcon from "./tailscale.svg?solid";
-import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
-import SudoIcon from "@material-symbols/svg-400/outlined/shield_person.svg?solid";
 import TokenIcon from "./github.svg?solid";
-import DeleteIcon from "@material-symbols/svg-400/outlined/delete.svg?solid";
-import RestoreIcon from "@material-symbols/svg-400/outlined/restart_alt.svg?solid";
-import TimerIcon from "@material-symbols/svg-400/outlined/timer.svg?solid";
 import styles from "./TaskCard.module.css";
 import {
   formatElapsed,

@@ -2,7 +2,9 @@
 // Uses contenteditable with an optional CSS ::before float spacer so text wraps
 // around absolutely positioned trailing buttons.
 // Enter submits (via onSubmit), Shift+Enter inserts a newline.
+
 import { createEffect } from "solid-js";
+
 import styles from "./AutoResizeTextarea.module.css";
 
 const emptyClass = styles.empty;

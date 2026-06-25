@@ -1,9 +1,12 @@
 // Full-page task metadata viewer for launch config and runtime facts.
+
 import { For, Show, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { useNavigate } from "@solidjs/router";
-import type { TaskInfo as TaskInfoData, TaskInfoCacheMount, TaskInfoMount, TaskInfoRepo } from "@sdk/types.gen";
-import { getTaskInfo } from "../api";
 import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
+
+import type { TaskInfo as TaskInfoData, TaskInfoCacheMount, TaskInfoMount, TaskInfoRepo } from "@sdk/types.gen";
+
+import { getTaskInfo } from "../api";
 import styles from "./TaskInfo.module.css";
 
 interface Props {

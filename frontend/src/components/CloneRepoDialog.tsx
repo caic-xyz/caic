@@ -1,6 +1,8 @@
 // Modal dialog for cloning a git repository by URL.
 // Uses native <dialog> for built-in Escape handling, focus trapping, and backdrop.
+
 import { createSignal, Show, onMount } from "solid-js";
+
 import Button from "./Button";
 import styles from "./CloneRepoDialog.module.css";
 

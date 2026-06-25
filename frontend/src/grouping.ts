@@ -1,5 +1,7 @@
 // Pure grouping and turn-splitting logic for agent event streams.
+
 import type { EventMessage, EventToolUse, EventToolResult, EventAsk, EventResult } from "@sdk/types.gen";
+
 import { formatElapsed } from "./formatting";
 
 export interface MessageGroup {

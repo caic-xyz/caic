@@ -1,4 +1,5 @@
 // Go Mode host-mode context: exposes native host capabilities from router state and native bridge.
+
 import { createContext, useContext, type Accessor, type JSX } from "solid-js";
 import { useLocation, type SearchParams } from "@solidjs/router";
 

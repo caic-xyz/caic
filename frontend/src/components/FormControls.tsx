@@ -1,6 +1,9 @@
 // Shared form control components for task harness selects and capability toggles.
+
 import { For, Show, splitProps, type JSX } from "solid-js";
+
 import type { Harness, HarnessInfo } from "@sdk/types.gen";
+
 import { effortOptions } from "../effortOptions";
 import styles from "./FormControls.module.css";
 

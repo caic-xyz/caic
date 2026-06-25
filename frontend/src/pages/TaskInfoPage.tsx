@@ -1,6 +1,8 @@
 // TaskInfoPage is the /task/:taskId/info route for recorded and observed task metadata.
+
 import { Show } from "solid-js";
 import { useParams } from "@solidjs/router";
+
 import TaskInfo from "../components/TaskInfo";
 import { useAppState } from "../AppState";
 import { taskIdFromParam, taskPath } from "../taskPath";

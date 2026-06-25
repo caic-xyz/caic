@@ -1,5 +1,7 @@
 // LoginPage shows OAuth provider buttons when auth is enabled and user is not logged in.
+
 import { For } from "solid-js";
+
 import { useAuth } from "../AuthContext";
 import GitHubIcon from "../components/github.svg?solid";
 import GitLabIcon from "../components/gitlab.svg?solid";

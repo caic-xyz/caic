@@ -1,14 +1,17 @@
 // Sidebar task list with collapsible panel, grouped by repo for active tasks.
+
 import { For, Index, Show, createEffect, createSignal } from "solid-js";
 import type { Accessor } from "solid-js";
-import type { CIStatus, Repo, Task } from "@sdk/types.gen";
-import TaskCard from "./TaskCard";
-import CIDot from "./CIDot";
-import styles from "./TaskList.module.css";
 import LeftPanelClose from "@material-symbols/svg-400/outlined/left_panel_close.svg?solid";
 import LeftPanelOpen from "@material-symbols/svg-400/outlined/left_panel_open.svg?solid";
 import ArrowRight from "@material-symbols/svg-400/outlined/arrow_right.svg?solid";
 import ArrowDropDown from "@material-symbols/svg-400/outlined/arrow_drop_down.svg?solid";
+
+import type { CIStatus, Repo, Task } from "@sdk/types.gen";
+
+import TaskCard from "./TaskCard";
+import CIDot from "./CIDot";
+import styles from "./TaskList.module.css";
 
 export interface TaskListProps {
   tasks: Accessor<Task[]>;

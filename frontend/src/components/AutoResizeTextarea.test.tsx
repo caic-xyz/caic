@@ -1,7 +1,9 @@
 // Tests for the AutoResizeTextarea component.
+
 import { describe, it, expect, vi } from "vitest";
 import { render } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
+
 import AutoResizeTextarea from "./AutoResizeTextarea";
 
 describe("AutoResizeTextarea", () => {

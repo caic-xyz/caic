@@ -1,9 +1,11 @@
 // Tests for the TaskDetail diff link navigation and SSE connection behaviour.
+
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
-import type { EventMessage } from "@sdk/types.gen";
 import { type JSX } from "solid-js";
+
+import type { EventMessage } from "@sdk/types.gen";
 
 const navigateMock = vi.fn();
 
@@ -50,7 +52,7 @@ vi.mock("../api", () => ({
 // Import after mocks are set up.
 import TaskDetail, { resetTaskDetailCachesForTest } from "./TaskDetail";
 import { taskEventStream } from "../api";
-import { HostModeProvider } from "../hostMode";
+import { HostModeProvider } from "../gomode/HostMode";
 
 const baseProps = {
   taskId: "abc",

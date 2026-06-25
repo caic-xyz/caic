@@ -1,5 +1,7 @@
 // Tests for shared formatting utilities.
+
 import { describe, expect, it } from "vitest";
+
 import { stateColor, toolCallDetail } from "./formatting";
 
 describe("stateColor", () => {

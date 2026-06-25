@@ -1,7 +1,10 @@
 // Usage badges: per-provider grouped pills with color-coded thresholds.
+
 import { Show, For, Switch, Match } from "solid-js";
 import type { Accessor } from "solid-js";
+
 import type { ProviderQuota, QuotaRateLimit, QuotaBalance, QuotaExtraUsage, UsageResp } from "@sdk/types.gen";
+
 import Tooltip from "./Tooltip";
 import { currencySign, formatBalance } from "../formatting";
 import styles from "./UsageBadges.module.css";

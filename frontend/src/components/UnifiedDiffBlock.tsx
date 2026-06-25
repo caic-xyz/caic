@@ -1,5 +1,7 @@
 // UnifiedDiffBlock renders annotated unified diffs with shared line coloring.
+
 import { createMemo, For } from "solid-js";
+
 import { annotateDiffLines, type DiffLine } from "./diffLines";
 import styles from "./UnifiedDiffBlock.module.css";
 

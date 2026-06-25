@@ -1,6 +1,9 @@
 // Shared CI status dot used in TaskCard and TaskList repo headers.
+
 import { Show } from "solid-js";
+
 import type { CIStatus, ForgeCheck } from "@sdk/types.gen";
+
 import Tooltip from "./Tooltip";
 import styles from "./CIDot.module.css";
 

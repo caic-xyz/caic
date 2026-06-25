@@ -1,5 +1,7 @@
 // Tests for DiffDetail diff parsing utilities.
+
 import { describe, it, expect } from "vitest";
+
 import { annotateDiffLines, extractDiffPath, splitDiff } from "./diffLines";
 
 describe("extractDiffPath", () => {

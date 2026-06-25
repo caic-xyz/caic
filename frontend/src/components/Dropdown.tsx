@@ -1,4 +1,5 @@
 // Reusable dropdown menu with click-outside dismissal.
+
 import { createEffect, onCleanup, Show, type JSX } from "solid-js";
 
 interface DropdownProps {

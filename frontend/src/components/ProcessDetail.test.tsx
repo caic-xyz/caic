@@ -1,8 +1,11 @@
 // Tests for the process tree builder used by ProcessDetail.
+
 import { describe, it, expect } from "vitest";
+
+import type { ProcessInfo } from "@sdk/types.gen";
+
 import { buildTree } from "./ProcessDetail";
 import type { ProcessNode } from "./ProcessDetail";
-import type { ProcessInfo } from "@sdk/types.gen";
 
 function p(pid: number, ppid: number, command: string): ProcessInfo {
   return { pid, ppid, user: "user", state: "S", cpu: 0, mem: 0, time: "0:00", command };

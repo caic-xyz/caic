@@ -1,11 +1,14 @@
 // Full-page diff viewer for a task's file changes.
+
 import { createSignal, createEffect, createMemo, For, Show, onMount, onCleanup } from "solid-js";
 import { useNavigate } from "@solidjs/router";
+import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
+
 import type { DiffFileStat } from "@sdk/types.gen";
+
 import { getTaskDiff } from "../api";
 import { splitDiff } from "./diffLines";
 import UnifiedDiffBlock from "./UnifiedDiffBlock";
-import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
 import styles from "./DiffDetail.module.css";
 
 interface Props {

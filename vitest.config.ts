@@ -9,6 +9,7 @@ export default defineConfig({
   plugins: [solidPlugin(), solidSVG()],
   resolve: {
     alias: {
+      "@mcp-sdk": resolve(__dirname, "sdk/mcp/ts/v1"),
       "@sdk": resolve(__dirname, "sdk/caic/ts/v1"),
       "@voicegateway-sdk": resolve(__dirname, "sdk/voicegateway/ts/v1"),
     },
@@ -23,13 +24,13 @@ export default defineConfig({
       reporter: ["text", "html", "lcov"],
       include: ["frontend/src/**"],
       exclude: [
-        "frontend/src/test-setup.ts",
+        "frontend/src/**/*.module.css",
+        "frontend/src/**/*.svg",
         "frontend/src/**/*.test.ts",
         "frontend/src/**/*.test.tsx",
         "frontend/src/css.d.ts",
         "frontend/src/novnc.d.ts",
-        "frontend/src/**/*.svg",
-        "frontend/src/**/*.module.css",
+        "frontend/src/test-setup.ts",
       ],
       thresholds: {
         // Informational only — not enforced.

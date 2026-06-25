@@ -1,8 +1,11 @@
 // Camera capture dialog: opens webcam, lets user take a photo, returns base64 ImageData.
 // Uses native <dialog> for built-in Escape handling, focus trapping, and backdrop.
+
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
-import type { ImageData as APIImageData } from "@sdk/types.gen";
 import SwitchCameraIcon from "@material-symbols/svg-400/outlined/cameraswitch.svg?solid";
+
+import type { ImageData as APIImageData } from "@sdk/types.gen";
+
 import styles from "./CameraCapture.module.css";
 
 interface Props {

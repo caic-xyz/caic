@@ -1,7 +1,9 @@
 // Application entry point — mounts the router and top-level providers.
-import "./global.css";
+
 import { render } from "solid-js/web";
 import { Router } from "@solidjs/router";
+
+import "./global.css";
 import { AuthProvider } from "./AuthContext";
 import { appRoutes } from "./routes";
 

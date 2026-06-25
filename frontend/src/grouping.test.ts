@@ -1,7 +1,10 @@
 // Tests for groupMessages and groupTurns logic.
+
 import { describe, it, expect } from "vitest";
-import { groupMessages, groupMessagesInc, groupTurns, groupSessions, resetGroupIncCache, turnSummary, buildTurnItems, buildPastSessionItems } from "./grouping";
+
 import type { EventMessage, ISOTimestamp } from "@sdk/types.gen";
+
+import { groupMessages, groupMessagesInc, groupTurns, groupSessions, resetGroupIncCache, turnSummary, buildTurnItems, buildPastSessionItems } from "./grouping";
 
 function toolUseEvent(id: string, name: string): EventMessage {
   return { kind: "toolUse", ts: 0, toolUse: { toolUseID: id, name, input: {} } };

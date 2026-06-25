@@ -1,8 +1,11 @@
 // Tests for the PromptInput component.
+
 import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
+
 import type { ImageData as APIImageData } from "@sdk/types.gen";
+
 import PromptInput from "./PromptInput";
 
 const fakeImage: APIImageData = { mediaType: "image/png", data: "iVBOR" };

@@ -1,16 +1,20 @@
 // Application state store: owns task data, settings, SSE wiring, and task actions.
 // Provided once near the router root and consumed by the shell, layout, and route panes.
+
 import { createContext, createEffect, createSignal, onCleanup, useContext, type JSX } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
+
 import type { Config, Harness, HarnessInfo, Repo, Task, UsageResp, ImageData as APIImageData, CacheMappingResp, CacheSize, OAuthGrantResp, MountMappingResp, Platform, WellKnownCachesResp, VersionResp } from "@sdk/types.gen";
+
+import { useHostMode } from "./gomode/HostMode";
+
 import { getConfig, getPreferences, updatePreferences, listOAuthGrants, revokeOAuthGrant, listHarnesses, listCaches, getCacheSizes, listRepos, createTask, cloneRepo, getUsage, forkTask, stopTask, purgeTask, reviveTask, botFixCI, getTask, globalTaskEvents, globalUsageEvents, getVersion, triggerUpdate } from "./api";
 import type { RepoEntry } from "./components/RepoChipStrip";
 import { useAuth } from "./AuthContext";
 import { confirmTaskAction } from "./components/TaskCard";
 import { effortOptions } from "./effortOptions";
-import { requestNotificationPermission, notifyWaiting, dismissNotification } from "./notifications";
+import { requestNotificationPermission, notifyWaiting, dismissNotification } from "./gomode/notifications";
 import { taskPath, taskIdFromPath } from "./taskPath";
-import { useHostMode } from "./hostMode";
 
 /** Add ±25% jitter to a delay to avoid thundering herd on server restart. */
 function jitteredDelay(base: number): number {

@@ -1,13 +1,16 @@
 // Full-page process tree viewer for a task's container.
 // Processes are displayed as a tree grouped by parent/child PID relationships.
 // Exports buildTree and ProcessNode for unit testing.
+
 import { createSignal, createEffect, createMemo, For, Show, onMount, onCleanup } from "solid-js";
 import { useNavigate } from "@solidjs/router";
-import type { ProcessInfo } from "@sdk/types.gen";
-import { getTaskProcesses, signalProcess } from "../api";
 import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
 import ChevronRightIcon from "@material-symbols/svg-400/outlined/chevron_right.svg?solid";
 import ExpandIcon from "@material-symbols/svg-400/outlined/expand.svg?solid";
+
+import type { ProcessInfo } from "@sdk/types.gen";
+
+import { getTaskProcesses, signalProcess } from "../api";
 import styles from "./ProcessDetail.module.css";
 
 // ProcessNode extends ProcessInfo with a children list for tree rendering.

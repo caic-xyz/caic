@@ -1,9 +1,11 @@
 // Navbar account menu: avatar button with a dropdown for settings and sign-out.
+
 import { createSignal, Show } from "solid-js";
-import { useAppState } from "../AppState";
-import Dropdown from "./Dropdown";
 import PersonIcon from "@material-symbols/svg-400/outlined/person.svg?solid";
 import SettingsIcon from "@material-symbols/svg-400/outlined/settings.svg?solid";
+
+import { useAppState } from "../AppState";
+import Dropdown from "./Dropdown";
 import styles from "./AccountMenu.module.css";
 
 export default function AccountMenu() {

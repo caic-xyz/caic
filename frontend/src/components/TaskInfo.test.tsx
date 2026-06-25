@@ -1,6 +1,8 @@
 // Tests for TaskInfo runtime metadata rendering.
+
 import { render } from "@solidjs/testing-library";
 import { describe, expect, it, vi } from "vitest";
+
 import type { TaskInfo as TaskInfoData } from "@sdk/types.gen";
 
 const { navigateMock, getTaskInfoMock } = vi.hoisted(() => ({
