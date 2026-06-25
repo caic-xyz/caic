@@ -16,6 +16,9 @@ when frontend or generated TypeScript changes affect the bundle hash.
 - ESLint with solid plugin
 - Vitest + @solidjs/testing-library for unit tests
 
+For up-to-date SolidJS information, `git clone https://github.com/solidjs/solid-docs`
+rather than relying on potentially stale knowledge.
+
 ## Testing
 
 Unit tests use Vitest with jsdom and `@solidjs/testing-library`. Test files

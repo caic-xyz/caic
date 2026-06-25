@@ -1,8 +1,9 @@
 // Application shell: top-level chrome (navbar, dialogs, voice, toasts) wrapping the routed panes.
-import { Show, type JSX } from "solid-js";
+import { ErrorBoundary, Show, type JSX } from "solid-js";
 import { AppStateProvider, useAppState } from "./AppState";
 import LoginPage from "./pages/LoginPage";
 import AccountMenu from "./components/AccountMenu";
+import Button from "./components/Button";
 import ForkDialog from "./components/ForkDialog";
 import Toasts from "./components/Toasts";
 import UsageBadges from "./components/UsageBadges";
@@ -10,6 +11,18 @@ import VoiceOverlay from "./components/VoiceOverlay";
 import CloneRepoDialog from "./components/CloneRepoDialog";
 import { HostModeProvider, useHostMode } from "./hostMode";
 import styles from "./App.module.css";
+
+/** Fallback UI shown when an ErrorBoundary catches a render error. */
+function ErrorFallback(props: { error: unknown; reset: () => void }) {
+  const message = () => (props.error instanceof Error ? props.error.message : String(props.error));
+  return (
+    <div class={styles.errorFallback} role="alert" data-testid="error-fallback">
+      <p class={styles.errorTitle}>Something went wrong.</p>
+      <pre class={styles.errorMessage}>{message()}</pre>
+      <Button variant="gray" onClick={props.reset}>Try again</Button>
+    </div>
+  );
+}
 
 function ConnectionDot(props: { connected: boolean }) {
   return (
@@ -40,7 +53,9 @@ function Shell(props: { children?: JSX.Element }) {
         <AccountMenu />
       </div>
 
-      {props.children}
+      <ErrorBoundary fallback={(error, reset) => <ErrorFallback error={error} reset={reset} />}>
+        {props.children}
+      </ErrorBoundary>
 
       <Show when={s.cloneOpen()}>
         <CloneRepoDialog
@@ -70,10 +85,12 @@ function Shell(props: { children?: JSX.Element }) {
 /** Router layout for "/": provides the app store and renders the shell around routed panes. */
 export default function App(props: { children?: JSX.Element }) {
   return (
-    <HostModeProvider>
-      <AppStateProvider>
-        <Shell>{props.children}</Shell>
-      </AppStateProvider>
-    </HostModeProvider>
+    <ErrorBoundary fallback={(error, reset) => <ErrorFallback error={error} reset={reset} />}>
+      <HostModeProvider>
+        <AppStateProvider>
+          <Shell>{props.children}</Shell>
+        </AppStateProvider>
+      </HostModeProvider>
+    </ErrorBoundary>
   );
 }
