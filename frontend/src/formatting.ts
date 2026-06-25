@@ -54,6 +54,9 @@ export function stateColor(state: TaskState): string {
     case "branching":
     case "provisioning":
     case "starting":
+    case "pending":
+    case "pulling":
+    case "pushing":
       return "#d4edda";
     case "asking":
       return "#cce5ff";
@@ -70,10 +73,7 @@ export function stateColor(state: TaskState): string {
       return "#e2e3e5";
     case "stopped":
       return "#c8daf0";
-    case "pending":
     case "waiting":
-    case "pulling":
-    case "pushing":
       return "#fff3cd";
   }
 }
