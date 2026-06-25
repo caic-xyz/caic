@@ -697,7 +697,12 @@ function createAppStore() {
         gitHubToken: forkGitHubToken(),
       });
       upsertTask(resp);
-      navigate(`/task/${resp.id}`);
+      navigate(taskPath(
+        resp.id,
+        resp.repos?.[0]?.name ?? sourceTask?.repos?.[0]?.name ?? "",
+        resp.repos?.[0]?.branch ?? "",
+        text,
+      ));
     } catch {
       // Fork failed — no state to clean up.
     }

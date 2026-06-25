@@ -27,6 +27,7 @@ export default function ForkDialog() {
           queueMicrotask(() => el.showModal());
         }}
         class={styles.forkDialog}
+        data-testid="fork-dialog"
         onClick={(e) => { if (e.target === e.currentTarget) s.setForkTaskId(null); }}
       >
         <h2 class={styles.forkTitle}>Fork task</h2>
@@ -37,6 +38,7 @@ export default function ForkDialog() {
           placeholder="Prompt for forked task"
           class={styles.forkInput}
           tabIndex={0}
+          data-testid="fork-prompt-input"
         />
         <Show when={s.forkAvailableRecent().length > 0 || s.forkAvailableRest().length > 0 || s.forkExtraRepos().length > 0}>
           <RepoChipStrip
@@ -91,7 +93,7 @@ export default function ForkDialog() {
         </div>
         <div class={styles.forkActions}>
           <button type="button" class={styles.forkCancel} onClick={() => s.setForkTaskId(null)}>Cancel</button>
-          <Button type="button" onClick={s.submitFork} disabled={!s.forkPrompt().trim()}>Fork</Button>
+          <Button type="button" onClick={s.submitFork} disabled={!s.forkPrompt().trim()} data-testid="fork-submit">Fork</Button>
         </div>
       </dialog>
     </Show>
