@@ -399,6 +399,9 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 	if d.TaskManager == nil {
 		return nil, errors.New("task manager is required")
 	}
+	if d.Preferences == nil {
+		return nil, errors.New("preferences store is required")
+	}
 	voice := &voiceHandlers{bridge: d.VoiceBridge, gateway: d.VoiceGateway}
 	voiceMetadata := voice.metadata()
 	goModeSettings := newGoModeSettings(voiceMetadata, d.AuthStore != nil)

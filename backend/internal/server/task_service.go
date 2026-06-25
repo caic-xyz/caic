@@ -354,30 +354,19 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v
 	go s.maybeFakeCI(entry.Task())
 
 	if err := s.prefs.Update(userIDFromCtx(ctx), func(p *preferences.Preferences) {
-		p.Harness = string(req.Harness)
-		if req.Model == "" {
-			delete(p.Models, string(req.Harness))
-		} else {
-			if p.Models == nil {
-				p.Models = make(map[string]string)
-			}
-			p.Models[string(req.Harness)] = req.Model
-		}
 		harnessName := string(req.Harness)
-		if req.Effort == "" {
-			delete(p.Efforts[harnessName], req.Model)
-			if len(p.Efforts[harnessName]) == 0 {
-				delete(p.Efforts, harnessName)
-			}
-		} else {
-			if p.Efforts == nil {
-				p.Efforts = make(preferences.EffortPreferences)
-			}
-			if p.Efforts[harnessName] == nil {
-				p.Efforts[harnessName] = make(map[string]string)
-			}
-			p.Efforts[harnessName][req.Model] = req.Effort
+		p.Harness = harnessName
+		if p.Models == nil {
+			p.Models = make(map[string]string)
 		}
+		p.Models[harnessName] = req.Model
+		if p.Efforts == nil {
+			p.Efforts = make(preferences.EffortPreferences)
+		}
+		if p.Efforts[harnessName] == nil {
+			p.Efforts[harnessName] = make(map[string]string)
+		}
+		p.Efforts[harnessName][req.Model] = req.Effort
 		if len(req.Repos) > 0 {
 			p.TouchRepo(req.Repos[0].Name, &preferences.RepoPrefs{
 				BaseBranch: req.Repos[0].BaseBranch,

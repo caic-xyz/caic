@@ -482,11 +482,13 @@ func minimalRouter(t *testing.T) *testRouter {
 	taskMgr := tasks.New(tasks.Config{ServerCtx: ctx})
 	repoSvc := repos.NewService("", "", "", nil, repos.NewRegistry(nil), taskMgr, nil, nil)
 	fm := forgemanager.New("", "", nil)
-	ciService := ci.NewService(cache, nil, &testCIBackend{repos: repoSvc, taskMgr: taskMgr, forge: fm, prefs: newTestPrefs(t)})
+	prefs := newTestPrefs(t)
+	ciService := ci.NewService(cache, nil, &testCIBackend{repos: repoSvc, taskMgr: taskMgr, forge: fm, prefs: prefs})
 	s, err := New(ctx, Dependencies{
 		Repos:          repoSvc,
 		ProcessBackend: backend,
 		TaskManager:    taskMgr,
+		Preferences:    prefs,
 		CICache:        cache,
 		Forge:          fm,
 		CIService:      ciService,
@@ -494,5 +496,5 @@ func minimalRouter(t *testing.T) *testRouter {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, forge: fm}
+	return &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, prefs: prefs, forge: fm}
 }

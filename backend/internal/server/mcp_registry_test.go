@@ -3,10 +3,197 @@
 package server
 
 import (
+	"encoding/json"
 	"testing"
 
+	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
+	"github.com/caic-xyz/caic/backend/internal/harness"
+	"github.com/caic-xyz/caic/backend/internal/preferences"
+	"github.com/caic-xyz/caic/backend/internal/task"
 )
+
+// modelListBackend is a stub backend with caller-specified model support.
+type modelListBackend struct {
+	stubBackend
+
+	models []string
+}
+
+func (b modelListBackend) Models() []string { return b.models }
+
+func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
+	t.Parallel()
+
+	t.Run("non default harness leaves omitted model and effort unset", func(t *testing.T) {
+		t.Parallel()
+
+		s := newMCPTaskCreateTestRouter(t)
+		if err := s.prefs.Update(userIDFromCtx(t.Context()), func(p *preferences.Preferences) {
+			p.Harness = string(harness.Claude)
+			p.Models = map[string]string{
+				string(harness.Claude): "claude-default",
+				string(harness.Pi):     "pi-default",
+			}
+			p.Efforts = preferences.EffortPreferences{
+				string(harness.Claude): {"claude-default": "max"},
+				string(harness.Pi):     {"pi-default": "high"},
+			}
+		}); err != nil {
+			t.Fatalf("Update preferences: %v", err)
+		}
+		c := &mcpRegistry{serverConfig: s.serverHandlers, tasks: testTaskHandlers(s).service}
+
+		result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{
+			Prompt:  "do the task",
+			Repos:   []string{"myrepo"},
+			Harness: string(harness.Pi),
+		})
+		if result.IsError {
+			t.Fatalf("handleTaskCreate() returned tool error: %+v", result.Structured)
+		}
+
+		created := singleCreatedTask(t, s)
+		if created.Harness != harness.Pi {
+			t.Fatalf("created harness = %q, want %q", created.Harness, harness.Pi)
+		}
+		if got := created.GetModel(); got != "" {
+			t.Fatalf("created model = %q, want empty", got)
+		}
+		if created.Effort != "" {
+			t.Fatalf("created effort = %q, want empty", created.Effort)
+		}
+		prefs := s.prefs.Get(userIDFromCtx(t.Context()))
+		if model, ok := prefs.Models[string(harness.Pi)]; !ok || model != "" {
+			t.Fatalf("preferences model = %q, present = %v, want empty and present", model, ok)
+		}
+		if effort, ok := prefs.Efforts[string(harness.Pi)][""]; !ok || effort != "" {
+			t.Fatalf("preferences effort = %q, present = %v, want empty and present", effort, ok)
+		}
+	})
+
+	t.Run("omitted harness uses default preferences", func(t *testing.T) {
+		t.Parallel()
+
+		s := newMCPTaskCreateTestRouter(t)
+		if err := s.prefs.Update(userIDFromCtx(t.Context()), func(p *preferences.Preferences) {
+			p.Harness = string(harness.Pi)
+			p.Models = map[string]string{string(harness.Pi): "pi-default"}
+			p.Efforts = preferences.EffortPreferences{string(harness.Pi): {"pi-default": "high"}}
+		}); err != nil {
+			t.Fatalf("Update preferences: %v", err)
+		}
+		c := &mcpRegistry{serverConfig: s.serverHandlers, tasks: testTaskHandlers(s).service}
+
+		result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{
+			Prompt: "do the task",
+			Repos:  []string{"myrepo"},
+		})
+		if result.IsError {
+			t.Fatalf("handleTaskCreate() returned tool error: %+v", result.Structured)
+		}
+
+		created := singleCreatedTask(t, s)
+		if created.Harness != harness.Pi {
+			t.Fatalf("created harness = %q, want %q", created.Harness, harness.Pi)
+		}
+		if got := created.GetModel(); got != "" {
+			t.Fatalf("created model = %q, want empty", got)
+		}
+		if created.Effort != "" {
+			t.Fatalf("created effort = %q, want empty", created.Effort)
+		}
+	})
+
+	t.Run("tool handler reads preferences at call time", func(t *testing.T) {
+		t.Parallel()
+
+		s := newMCPTaskCreateTestRouter(t)
+		c := &mcpRegistry{serverConfig: s.serverHandlers, tasks: testTaskHandlers(s).service}
+		createSpec := c.specs()[1]
+		if err := s.prefs.Update(userIDFromCtx(t.Context()), func(p *preferences.Preferences) {
+			p.Harness = string(harness.Pi)
+			p.Models = map[string]string{string(harness.Pi): "pi-default"}
+			p.Efforts = preferences.EffortPreferences{string(harness.Pi): {"pi-default": "high"}}
+		}); err != nil {
+			t.Fatalf("Update preferences: %v", err)
+		}
+
+		raw, err := createSpec.Handler(t.Context(), json.RawMessage(`{"prompt":"do the task","repos":["myrepo"]}`))
+		if err != nil {
+			t.Fatalf("task_create handler returned error: %v", err)
+		}
+		if raw.IsError {
+			t.Fatalf("task_create returned tool error: %+v", raw.Structured)
+		}
+
+		created := singleCreatedTask(t, s)
+		if created.Harness != harness.Pi {
+			t.Fatalf("created harness = %q, want %q", created.Harness, harness.Pi)
+		}
+		if got := created.GetModel(); got != "" {
+			t.Fatalf("created model = %q, want empty", got)
+		}
+		if created.Effort != "" {
+			t.Fatalf("created effort = %q, want empty", created.Effort)
+		}
+	})
+
+	t.Run("non default harness without preference omits default harness model and effort", func(t *testing.T) {
+		t.Parallel()
+
+		s := newMCPTaskCreateTestRouter(t)
+		if err := s.prefs.Update(userIDFromCtx(t.Context()), func(p *preferences.Preferences) {
+			p.Harness = string(harness.Claude)
+			p.Models = map[string]string{string(harness.Claude): "claude-default"}
+			p.Efforts = preferences.EffortPreferences{string(harness.Claude): {"claude-default": "max"}}
+		}); err != nil {
+			t.Fatalf("Update preferences: %v", err)
+		}
+		c := &mcpRegistry{serverConfig: s.serverHandlers, tasks: testTaskHandlers(s).service}
+
+		result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{
+			Prompt:  "do the task",
+			Repos:   []string{"myrepo"},
+			Harness: string(harness.Pi),
+		})
+		if result.IsError {
+			t.Fatalf("handleTaskCreate() returned tool error: %+v", result.Structured)
+		}
+
+		created := singleCreatedTask(t, s)
+		if created.Harness != harness.Pi {
+			t.Fatalf("created harness = %q, want %q", created.Harness, harness.Pi)
+		}
+		if got := created.GetModel(); got != "" {
+			t.Fatalf("created model = %q, want empty", got)
+		}
+		if created.Effort != "" {
+			t.Fatalf("created effort = %q, want empty", created.Effort)
+		}
+	})
+}
+
+func newMCPTaskCreateTestRouter(t *testing.T) *testRouter {
+	s := newTestRouter(t)
+	registerTestRunner(s, "myrepo", &task.Runner{
+		BaseBranch: "main",
+		Dir:        t.TempDir(),
+		Backends: map[harness.Name]agent.Backend{
+			harness.Claude: modelListBackend{models: []string{"claude-default"}},
+			harness.Pi:     modelListBackend{models: []string{"pi-default"}},
+		},
+	})
+	return s
+}
+
+func singleCreatedTask(t *testing.T, s *testRouter) *task.Task {
+	entries := testEntries(s)
+	if len(entries) != 1 {
+		t.Fatalf("created tasks = %d, want 1", len(entries))
+	}
+	return entries[0].Task()
+}
 
 func TestCaicToolRegistryAuthorizeTool(t *testing.T) {
 	t.Parallel()

@@ -269,17 +269,19 @@ func newRunnerConstructionTestServer(t *testing.T, root string) runnerConstructi
 		HarnessEnv: harnessEnv,
 	})
 	repoSvc := repos.NewService(root, logDir, cacheDir, harnessEnv, repos.NewRegistry(nil), taskMgr, backend, backends)
+	prefs := newTestPrefs(t)
 	s, err := New(t.Context(), Dependencies{
 		Repos:          repoSvc,
 		ProcessBackend: backend,
 		TaskManager:    taskMgr,
+		Preferences:    prefs,
 		Forge:          forgemanager.New("", "", nil),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	return runnerConstructionTestFixture{
-		server:   &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc},
+		server:   &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, prefs: prefs},
 		logDir:   logDir,
 		cacheDir: cacheDir,
 		backend:  backend,
@@ -2161,11 +2163,7 @@ func TestBuildHandler(t *testing.T) {
 		if !ok {
 			t.Fatalf("registry type = %T", s.mcpHandlers.protocol.Registry)
 		}
-		specs, err := registry.specs(t.Context())
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, spec := range specs {
+		for _, spec := range registry.specs() {
 			if _, ok := mcpToolScopes[spec.Name]; !ok {
 				t.Fatalf("tool %q has no MCP scope policy", spec.Name)
 			}

@@ -518,14 +518,14 @@ func TestTouchRepo(t *testing.T) {
 			},
 		}
 		p.TouchRepo("github/a", &RepoPrefs{Harness: "claude"})
-		// Caller clears model explicitly (mirrors server.go logic).
+		// Caller clears model explicitly.
 		p.Repositories[0].Model = ""
-		delete(p.Models, "claude")
+		p.Models["claude"] = ""
 		if p.Repositories[0].Model != "" {
 			t.Errorf("repo model = %q, want empty", p.Repositories[0].Model)
 		}
-		if _, ok := p.Models["claude"]; ok {
-			t.Errorf("global models[claude] should be deleted")
+		if p.Models["claude"] != "" {
+			t.Errorf("global models[claude] = %q, want empty", p.Models["claude"])
 		}
 	})
 	t.Run("empty_overrides_preserve_all", func(t *testing.T) {

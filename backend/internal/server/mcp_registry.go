@@ -58,20 +58,12 @@ At session start this prompt includes a snapshot of all current tasks. Use it to
 - Be concise. The user is often away from the screen.
 - Summarize task status: state and what the agent is doing. Only mention elapsed time or cost when the user specifically asks.
 - When an agent is asking, read the question and options clearly, wait for the verbal answer, then call task_answer_question.
-- When creating a task, use the default repo, harness, and model from the session context unless the user specifies otherwise. Confirm repo and prompt before creating.
+- When creating a task, omit harness, model, and effort unless the user explicitly asks for an override. caic fills an omitted harness from saved preferences; omitted model and effort use the selected harness defaults. Never pair one harness's model or effort with another harness. Confirm repo and prompt before creating.
 - Refer to tasks by title.
 - Proactively notify the user when tasks finish or need input.
 - Free tools: agent_last_message, tasks_list, task_get_detail, get_usage. Call them whenever useful without asking.
 - When the user asks for a status update, call agent_last_message for each waiting/asking task to get latest output.
 - For safety issues during sync, describe each issue and ask whether to force.`
-
-type caicToolCatalogState struct {
-	Harnesses      []string
-	Repos          []string
-	DefaultHarness string
-	DefaultModel   string
-	Caps           v1.Config
-}
 
 type mcpRegistry struct {
 	serverConfig *serverHandlers
@@ -87,11 +79,8 @@ func (m *mcpRegistry) Instructions(ctx context.Context) (string, error) {
 	return strings.Join(parts, "\n\n"), nil
 }
 
-func (m *mcpRegistry) Tools(ctx context.Context) ([]mcp.ToolDescriptor, error) {
-	specs, err := m.specs(ctx)
-	if err != nil {
-		return nil, err
-	}
+func (m *mcpRegistry) Tools(context.Context) ([]mcp.ToolDescriptor, error) {
+	specs := m.specs()
 	tools := make([]mcp.ToolDescriptor, len(specs))
 	for i, s := range specs {
 		tools[i] = mcp.ToolDescriptor{Name: s.Name, Title: s.Title, Description: s.Description, InputSchema: s.InputSchema, OutputSchema: s.OutputSchema, Annotations: s.Annotations}
@@ -100,11 +89,7 @@ func (m *mcpRegistry) Tools(ctx context.Context) ([]mcp.ToolDescriptor, error) {
 }
 
 func (m *mcpRegistry) CallTool(ctx context.Context, name string, argsJSON json.RawMessage) (mcp.RawToolResult, error) {
-	specs, err := m.specs(ctx)
-	if err != nil {
-		return mcp.RawToolResult{}, err
-	}
-	for _, s := range specs {
+	for _, s := range m.specs() {
 		if s.Name != name {
 			continue
 		}
@@ -245,18 +230,13 @@ func (s subscriptionSources) repoUpdate() mcp.ResourceUpdate {
 }
 
 func (m *mcpRegistry) voiceSessionContext(ctx context.Context) string {
-	parts := make([]string, 0, 4)
-	if m.serverConfig.prefs != nil {
-		prefs := m.serverConfig.prefs.Get(userIDFromCtx(ctx))
-		if len(prefs.Repositories) > 0 {
-			parts = append(parts, "[Default repo: "+prefs.Repositories[0].Path+"]")
-		}
-		if prefs.Harness != "" {
-			parts = append(parts, "[Default harness: "+prefs.Harness+"]")
-			if prefs.Models != nil && prefs.Models[prefs.Harness] != "" {
-				parts = append(parts, "[Default model: "+prefs.Models[prefs.Harness]+"]")
-			}
-		}
+	parts := make([]string, 0, 3)
+	prefs := m.serverConfig.prefs.Get(userIDFromCtx(ctx))
+	if len(prefs.Repositories) > 0 {
+		parts = append(parts, "[Default repo: "+prefs.Repositories[0].Path+"]")
+	}
+	if prefs.Harness != "" {
+		parts = append(parts, "[Default harness: "+prefs.Harness+"]")
 	}
 	taskList := m.tasks.taskListSnapshot(ctx)
 	if len(taskList) == 0 {
@@ -282,26 +262,17 @@ func (m *mcpRegistry) voiceSessionContext(ctx context.Context) string {
 	return strings.Join(parts, "\n")
 }
 
-func (m *mcpRegistry) specs(ctx context.Context) ([]mcp.ToolSpec, error) {
-	// TODO: This is inefficient.
-	state, err := m.catalogState(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return m.specsForState(&state), nil
-}
-
-func (m *mcpRegistry) specsForState(s *caicToolCatalogState) []mcp.ToolSpec {
-	createSpec := mcp.NewToolSpec("task_create", "Create task", "Create a new coding task. Confirm repo and prompt with the user before calling.", m.handleTaskCreate(s.DefaultHarness, s.DefaultModel))
-	createSpec.InputSchema = buildTaskCreateSchema(s)
+func (m *mcpRegistry) specs() []mcp.ToolSpec {
+	createSpec := mcp.NewToolSpec("task_create", "Create task", "Create a new coding task. Confirm repo and prompt with the user before calling. Omit harness, model, and effort unless the user explicitly asks for an override; caic resolves an omitted harness from saved preferences and leaves omitted model/effort to harness defaults.", m.handleTaskCreate)
+	createSpec.InputSchema = buildTaskCreateSchema()
 	createSpec.Annotations = &mcp.ToolAnnotations{Title: "Create task", DestructiveHint: true, OpenWorldHint: false}
 
 	forkSpec := mcp.NewToolSpec("task_fork", "Fork task", "Fork a running or waiting task, creating a snapshot of its container on a new branch. The prompt describes what the forked task should do. Optionally override the harness and model.", m.handleTaskFork)
-	forkSpec.InputSchema = buildTaskForkSchema(s)
+	forkSpec.InputSchema = buildTaskForkSchema()
 	forkSpec.Annotations = &mcp.ToolAnnotations{Title: "Fork task", DestructiveHint: true, OpenWorldHint: false}
 
 	botFixCISpec := mcp.NewToolSpec("bot_fix_ci", "Fix repository CI", "Create a task to investigate and fix a failing CI on a repository's default branch.", m.handleBotFixCI)
-	botFixCISpec.InputSchema = buildBotFixCISchema(s)
+	botFixCISpec.InputSchema = buildBotFixCISchema()
 	botFixCISpec.Annotations = &mcp.ToolAnnotations{Title: "Fix repository CI", DestructiveHint: true, OpenWorldHint: false}
 
 	return []mcp.ToolSpec{
@@ -326,41 +297,6 @@ func (m *mcpRegistry) specsForState(s *caicToolCatalogState) []mcp.ToolSpec {
 func annotateTool(spec mcp.ToolSpec, annotations mcp.ToolAnnotations) mcp.ToolSpec { //nolint:gocritic // Tool specs are immutable catalog entries; value style keeps call sites simple.
 	spec.Annotations = &annotations
 	return spec
-}
-
-func (m *mcpRegistry) catalogState(ctx context.Context) (caicToolCatalogState, error) {
-	repos, err := m.serverConfig.listRepos(ctx, nil)
-	if err != nil {
-		return caicToolCatalogState{}, err
-	}
-	harnesses, err := m.serverConfig.listHarnesses(ctx, nil)
-	if err != nil {
-		return caicToolCatalogState{}, err
-	}
-	cfg, err := m.serverConfig.getConfig(ctx, nil)
-	if err != nil {
-		return caicToolCatalogState{}, err
-	}
-	state := caicToolCatalogState{Caps: *cfg}
-	state.Repos = make([]string, len(*repos))
-	for i := range *repos {
-		state.Repos[i] = (*repos)[i].Path
-	}
-	state.Harnesses = make([]string, len(*harnesses))
-	for i := range *harnesses {
-		state.Harnesses[i] = (*harnesses)[i].Name
-	}
-	if m.serverConfig.prefs != nil {
-		prefs := m.serverConfig.prefs.Get(userIDFromCtx(ctx))
-		state.DefaultHarness = prefs.Harness
-		if state.DefaultHarness != "" {
-			state.DefaultModel = prefs.Models[state.DefaultHarness]
-		}
-	}
-	if state.DefaultHarness == "" && len(state.Harnesses) > 0 {
-		state.DefaultHarness = state.Harnesses[0]
-	}
-	return state, nil
 }
 
 func (m *mcpRegistry) currentTasksAndRepos(ctx context.Context) ([]v1.Task, []v1.Repo) {
@@ -444,8 +380,9 @@ type mcpTaskCreatedOutput struct {
 type mcpTaskCreateArgs struct {
 	Prompt      string   `json:"prompt"                jsonschema_description:"The task description/prompt for the coding agent"`
 	Repos       []string `json:"repos"                 jsonschema:"minItems=1"                                                     jsonschema_description:"Repositories to work in (one or more)"`
-	Model       string   `json:"model,omitempty"       jsonschema_description:"Model to use (optional)"`
 	Harness     string   `json:"harness,omitempty"     jsonschema_description:"Agent harness to use (optional)"`
+	Model       string   `json:"model,omitempty"       jsonschema_description:"Model to use (optional)"`
+	Effort      string   `json:"effort,omitempty"      jsonschema_description:"Thinking effort to use (optional)"`
 	Display     bool     `json:"display,omitempty"     jsonschema_description:"Enable virtual display (VNC) for this task"`
 	Tailscale   bool     `json:"tailscale,omitempty"   jsonschema_description:"Enable Tailscale networking for this task"`
 	USB         bool     `json:"usb,omitempty"         jsonschema_description:"Enable USB passthrough for this task"`
@@ -453,57 +390,68 @@ type mcpTaskCreateArgs struct {
 	GitHubToken bool     `json:"gitHubToken,omitempty" jsonschema_description:"Enable GitHub token injection for this task"`
 }
 
-func (m *mcpRegistry) handleTaskCreate(defaultHarness, defaultModel string) func(context.Context, mcpTaskCreateArgs) mcp.ToolResult[mcpTaskCreatedOutput] {
-	return func(ctx context.Context, args mcpTaskCreateArgs) mcp.ToolResult[mcpTaskCreatedOutput] {
-		if args.Prompt == "" {
-			return mcp.ToolError[mcpTaskCreatedOutput]("Missing required parameter: prompt")
-		}
-		if len(args.Repos) == 0 {
-			return mcp.ToolError[mcpTaskCreatedOutput]("Missing required parameter: repos")
-		}
-		harness := args.Harness
-		if harness == "" {
-			harness = defaultHarness
-		}
-		model := args.Model
-		if model == "" {
-			model = defaultModel
-		}
-		req := &v1.CreateTaskReq{
-			InitialPrompt: v1.Prompt{Text: args.Prompt},
-			Repos:         make([]v1.RepoSpec, len(args.Repos)),
-			Harness:       v1.Harness(harness),
-			Model:         model,
-			Display:       args.Display,
-			Tailscale:     args.Tailscale,
-			USB:           args.USB,
-			Sudo:          args.Sudo,
-			GitHubToken:   args.GitHubToken,
-		}
-		for i, repo := range args.Repos {
-			req.Repos[i] = v1.RepoSpec{Name: repo}
-		}
-		if err := req.Validate(); err != nil {
-			return domainToolError[mcpTaskCreatedOutput](err)
-		}
-		resp, err := m.tasks.createTask(ctx, req)
-		if err != nil {
-			return domainToolError[mcpTaskCreatedOutput](err)
-		}
-		taskList := m.tasks.taskListSnapshot(ctx)
-		num := taskNumberForID(taskList, resp.ID.String())
-		title := resp.ID.String()
-		for i := range taskList {
-			if taskList[i].ID == resp.ID {
-				title = taskTitle(&taskList[i])
-				break
-			}
-		}
-		if num > 0 {
-			return mcp.TypedToolResult(mcpTaskCreatedOutput{Result: fmt.Sprintf("Created task #%d: %s", num, title), TaskNumber: num, TaskID: resp.ID.String()})
-		}
-		return mcp.TypedToolResult(mcpTaskCreatedOutput{Result: "Created task: " + title, TaskID: resp.ID.String()})
+func (m *mcpRegistry) handleTaskCreate(ctx context.Context, args mcpTaskCreateArgs) mcp.ToolResult[mcpTaskCreatedOutput] { //nolint:gocritic // MCP tool handlers receive decoded argument values by API contract.
+	if args.Prompt == "" {
+		return mcp.ToolError[mcpTaskCreatedOutput]("Missing required parameter: prompt")
 	}
+	if len(args.Repos) == 0 {
+		return mcp.ToolError[mcpTaskCreatedOutput]("Missing required parameter: repos")
+	}
+	harness := m.resolveTaskCreateHarness(ctx, args.Harness)
+	req := &v1.CreateTaskReq{
+		InitialPrompt: v1.Prompt{Text: args.Prompt},
+		Repos:         make([]v1.RepoSpec, len(args.Repos)),
+		Harness:       v1.Harness(harness),
+		Model:         args.Model,
+		Effort:        args.Effort,
+		Display:       args.Display,
+		Tailscale:     args.Tailscale,
+		USB:           args.USB,
+		Sudo:          args.Sudo,
+		GitHubToken:   args.GitHubToken,
+	}
+	for i, repo := range args.Repos {
+		req.Repos[i] = v1.RepoSpec{Name: repo}
+	}
+	if err := req.Validate(); err != nil {
+		return domainToolError[mcpTaskCreatedOutput](err)
+	}
+	resp, err := m.tasks.createTask(ctx, req)
+	if err != nil {
+		return domainToolError[mcpTaskCreatedOutput](err)
+	}
+	taskList := m.tasks.taskListSnapshot(ctx)
+	num := taskNumberForID(taskList, resp.ID.String())
+	title := resp.ID.String()
+	for i := range taskList {
+		if taskList[i].ID == resp.ID {
+			title = taskTitle(&taskList[i])
+			break
+		}
+	}
+	if num > 0 {
+		return mcp.TypedToolResult(mcpTaskCreatedOutput{Result: fmt.Sprintf("Created task #%d: %s", num, title), TaskNumber: num, TaskID: resp.ID.String()})
+	}
+	return mcp.TypedToolResult(mcpTaskCreatedOutput{Result: "Created task: " + title, TaskID: resp.ID.String()})
+}
+
+func (m *mcpRegistry) resolveTaskCreateHarness(ctx context.Context, harness string) string {
+	if harness != "" {
+		return harness
+	}
+	prefs := m.serverConfig.prefs.Get(userIDFromCtx(ctx))
+	if prefs.Harness != "" {
+		return prefs.Harness
+	}
+	return m.firstHarness(ctx)
+}
+
+func (m *mcpRegistry) firstHarness(ctx context.Context) string {
+	harnesses, err := m.serverConfig.listHarnesses(ctx, nil)
+	if err != nil || harnesses == nil || len(*harnesses) == 0 {
+		return ""
+	}
+	return (*harnesses)[0].Name
 }
 
 type mcpTaskNumberArgs struct {
@@ -828,76 +776,42 @@ func (m *mcpRegistry) entryByNumber(ctx context.Context, num int) (int, *tasks.E
 	return num, entry, ok
 }
 
-// Dynamic schema builders
+// Static schema builders. Dynamic repos, harnesses, and preferences are read on
+// demand by resources and tool handlers instead of embedded in tool schemas.
 
-func buildTaskCreateSchema(s *caicToolCatalogState) *jsonschema.Schema {
-	harnessDesc := "Agent harness to use (optional)"
-	if s.DefaultHarness != "" {
-		harnessDesc = "Agent harness (default: " + s.DefaultHarness + ")"
-	}
+func buildTaskCreateSchema() *jsonschema.Schema {
 	minOne := uint64(1)
 	props := orderedmap.New[string, *jsonschema.Schema]()
 	props.Set("prompt", &jsonschema.Schema{Type: "string", Description: "The task description/prompt for the coding agent"})
-	props.Set("repos", &jsonschema.Schema{Type: "array", Description: "Repositories to work in (one or more)", Items: stringSchemaWithEnum(s.Repos), MinItems: &minOne})
-	props.Set("model", &jsonschema.Schema{Type: "string", Description: "Model to use (optional)"})
-	props.Set("harness", stringSchemaWithEnumDesc(s.Harnesses, harnessDesc))
-	props.Set("display", &jsonschema.Schema{Type: "boolean", Description: capDesc(s.Caps.DisplayAvailable, "Enable virtual display (VNC) for this task")})
-	props.Set("tailscale", &jsonschema.Schema{Type: "boolean", Description: capDesc(s.Caps.TailscaleAvailable, "Enable Tailscale networking for this task")})
-	props.Set("usb", &jsonschema.Schema{Type: "boolean", Description: capDesc(s.Caps.USBAvailable, "Enable USB passthrough for this task")})
-	props.Set("sudo", &jsonschema.Schema{Type: "boolean", Description: capDesc(s.Caps.SudoAvailable, "Enable root access via sudo with a random password")})
-	props.Set("gitHubToken", &jsonschema.Schema{Type: "boolean", Description: capDesc(s.Caps.GitHubTokenAvailable, "Enable GitHub token injection for this task")})
+	props.Set("repos", &jsonschema.Schema{Type: "array", Description: "Repositories to work in (one or more). Read caic://repos first if you need the current repository list.", Items: &jsonschema.Schema{Type: "string"}, MinItems: &minOne})
+	props.Set("model", &jsonschema.Schema{Type: "string", Description: "Model override (optional). Omit unless the user explicitly requested a model; omitted means the selected harness default."})
+	props.Set("effort", &jsonschema.Schema{Type: "string", Description: "Thinking effort override (optional). Omit unless the user explicitly requested effort; omitted means the selected harness default."})
+	props.Set("harness", &jsonschema.Schema{Type: "string", Description: "Agent harness override (optional). Omit to use the saved default harness."})
+	props.Set("display", &jsonschema.Schema{Type: "boolean", Description: "Enable virtual display (VNC) for this task"})
+	props.Set("tailscale", &jsonschema.Schema{Type: "boolean", Description: "Enable Tailscale networking for this task"})
+	props.Set("usb", &jsonschema.Schema{Type: "boolean", Description: "Enable USB passthrough for this task"})
+	props.Set("sudo", &jsonschema.Schema{Type: "boolean", Description: "Enable root access via sudo with a random password"})
+	props.Set("gitHubToken", &jsonschema.Schema{Type: "boolean", Description: "Enable GitHub token injection for this task"})
 	return &jsonschema.Schema{Type: "object", Properties: props, Required: []string{"prompt", "repos"}}
 }
 
-func buildTaskForkSchema(s *caicToolCatalogState) *jsonschema.Schema {
+func buildTaskForkSchema() *jsonschema.Schema {
 	props := orderedmap.New[string, *jsonschema.Schema]()
 	props.Set("task_number", &jsonschema.Schema{Type: "integer", Description: "The task number to fork, e.g. 1 for task #1"})
 	props.Set("prompt", &jsonschema.Schema{Type: "string", Description: "The initial prompt for the forked task"})
-	props.Set("harness", stringSchemaWithEnumDesc(s.Harnesses, "Override harness (optional, inherits from source if omitted)"))
+	props.Set("harness", &jsonschema.Schema{Type: "string", Description: "Override harness (optional, inherits from source if omitted)"})
 	props.Set("model", &jsonschema.Schema{Type: "string", Description: "Override model (optional, inherits from source if omitted)"})
 	schema := &jsonschema.Schema{Type: "object", Properties: props, Required: []string{"task_number", "prompt"}}
 	mcp.AddHeaderToProperty(schema, "task_number", "Task-Number")
 	return schema
 }
 
-func buildBotFixCISchema(s *caicToolCatalogState) *jsonschema.Schema {
-	desc := "Repository to fix CI for"
-	if len(s.Repos) == 0 {
-		desc = "Repository path to fix CI for"
-	}
+func buildBotFixCISchema() *jsonschema.Schema {
 	props := orderedmap.New[string, *jsonschema.Schema]()
-	props.Set("repo", stringSchemaWithEnumDesc(s.Repos, desc))
+	props.Set("repo", &jsonschema.Schema{Type: "string", Description: "Repository path to fix CI for. Read caic://repos first if you need the current repository list."})
 	schema := &jsonschema.Schema{Type: "object", Properties: props, Required: []string{"repo"}}
 	mcp.AddHeaderToProperty(schema, "repo", "Repo")
 	return schema
-}
-
-func stringSchemaWithEnum(values []string) *jsonschema.Schema {
-	if len(values) == 0 {
-		return &jsonschema.Schema{Type: "string"}
-	}
-	return &jsonschema.Schema{Type: "string", Enum: stringsToAny(values)}
-}
-
-func stringSchemaWithEnumDesc(values []string, desc string) *jsonschema.Schema {
-	s := stringSchemaWithEnum(values)
-	s.Description = desc
-	return s
-}
-
-func capDesc(available bool, desc string) string {
-	if available {
-		return desc
-	}
-	return desc + " (not available on this server)"
-}
-
-func stringsToAny(ss []string) []any {
-	out := make([]any, len(ss))
-	for i, s := range ss {
-		out[i] = s
-	}
-	return out
 }
 
 // Support code
