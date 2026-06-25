@@ -17,7 +17,7 @@ test.describe.configure({ mode: "serial" });
 
 test("generate documentation screenshots", async ({ page, api }) => {
   // AVIF encoding via ffmpeg is slow; the default 60s is too tight.
-  test.setTimeout(90_000);
+  test.setTimeout(120_000);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/");
 
@@ -244,6 +244,73 @@ test("generate documentation screenshots", async ({ page, api }) => {
   });
   // Restore desktop viewport.
   await page.setViewportSize({ width: 1280, height: 800 });
+
+  // Screenshot 8: Scrolled task list — bottom alpha fade cues more cards.
+  const scrollTaskIds: string[] = [];
+  for (let i = 1; i <= 8; i++) {
+    const id = await createTaskAPI(
+      api,
+      `Scroll gradient demo task ${String(i).padStart(2, "0")}`,
+    );
+    scrollTaskIds.push(id);
+  }
+  await Promise.all(
+    scrollTaskIds.map((id) => waitForTaskState(api, id, "waiting", 30_000)),
+  );
+
+  await page.goto("/");
+  await expect(
+    page
+      .getByTestId("repo-chips")
+      .locator("[data-testid^='chip-label-']")
+      .first(),
+  ).toBeVisible();
+  await expect(page.locator("[data-task-id]").first()).toBeVisible({
+    timeout: 10_000,
+  });
+  const taskList = page.getByTestId("task-list");
+  await expect.poll(async () =>
+    taskList.evaluate((el) => el.scrollHeight - el.clientHeight),
+  ).toBeGreaterThan(0);
+  await taskList.evaluate((el) => {
+    el.scrollTop = Math.min(260, el.scrollHeight - el.clientHeight);
+    el.dispatchEvent(new Event("scroll", { bubbles: true }));
+  });
+  await expect.poll(async () =>
+    taskList.evaluate((el) => el.scrollTop),
+  ).toBeGreaterThan(0);
+  await expect.poll(async () =>
+    taskList.evaluate((el) => getComputedStyle(el, "::before").opacity),
+  ).toBe("1");
+  await page.screenshot({
+    path: path.join(screenshotDir, "task-list-scrolled.png"),
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await expect(
+    page
+      .getByTestId("repo-chips")
+      .locator("[data-testid^='chip-label-']")
+      .first(),
+  ).toBeVisible();
+  const mobileTaskList = page.getByTestId("task-list");
+  await expect.poll(async () =>
+    mobileTaskList.evaluate((el) => el.scrollHeight - el.clientHeight),
+  ).toBeGreaterThan(0);
+  await mobileTaskList.evaluate((el) => {
+    el.scrollTop = Math.min(280, el.scrollHeight - el.clientHeight);
+    el.dispatchEvent(new Event("scroll", { bubbles: true }));
+  });
+  await expect.poll(async () =>
+    mobileTaskList.evaluate((el) => el.scrollTop),
+  ).toBeGreaterThan(0);
+  await expect.poll(async () =>
+    mobileTaskList.evaluate((el) => getComputedStyle(el, "::before").opacity),
+  ).toBe("1");
+  await page.screenshot({
+    path: path.join(screenshotDir, "task-list-scrolled-mobile.png"),
+  });
 
   await convertPngsToWebp(screenshotDir);
 });

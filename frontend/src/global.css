@@ -60,6 +60,8 @@
   --color-text-faint: #999;
 
   /* Surface backgrounds */
+  /* RGB triplet for gradients that need alpha stops. */
+  --color-bg-app-rgb: 255 255 255;
   --color-bg-input: #f0f0f0;
   --color-bg-input-hover: #e4e4e4;
   --color-bg-hover: #eee;
@@ -95,6 +97,7 @@
 
 body {
   margin: 0;
+  background: rgb(var(--color-bg-app-rgb));
 }
 
 /* Login page */

@@ -1,13 +1,43 @@
 /* Sidebar task list panel. */
 
 .list {
+  /* Bottom fade height. Matching padding keeps the last card readable above the fade. */
+  --task-list-bottom-fade: 2.5rem;
+  /* Top fade is intentionally thin; the prompt form already adds a 1rem gap above the list. */
+  --task-list-top-fade: 1.5rem;
+
+  position: relative;
   flex: 1;
   overflow-y: auto;
   scrollbar-gutter: stable;
   padding-right: 0.25rem;
+  padding-bottom: var(--task-list-bottom-fade);
   min-height: 0;
   opacity: 1;
+  /* Fade only the bottom edge of the scroll viewport. */
+  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - var(--task-list-bottom-fade)), transparent);
+  mask-image: linear-gradient(to bottom, black calc(100% - var(--task-list-bottom-fade)), transparent);
   transition: width 150ms ease-out, opacity 150ms ease-out;
+}
+
+.list::before {
+  content: "";
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: block;
+  height: var(--task-list-top-fade);
+  /* Do not reserve layout space; this veil should only overlay scrolled cards. */
+  margin-bottom: calc(-1 * var(--task-list-top-fade));
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgb(var(--color-bg-app-rgb) / 0.9), rgb(var(--color-bg-app-rgb) / 0));
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+.scrolledFromTop::before {
+  /* JS toggles this only after the task list has been scrolled down. */
+  opacity: 1;
 }
 
 .narrow {

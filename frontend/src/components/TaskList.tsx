@@ -83,7 +83,13 @@ function ciDotURL(repo: Repo): string | undefined {
 
 
 export default function TaskList(props: TaskListProps) {
+  let listRef: HTMLDivElement | undefined;
   const [expanded, setExpanded] = createSignal<Set<string>>(new Set());
+  const [scrolledFromTop, setScrolledFromTop] = createSignal(false);
+
+  const updateScrollFade = () => {
+    setScrolledFromTop((listRef?.scrollTop ?? 0) > 0);
+  };
 
   const toggleExpanded = (id: string) => {
     const next = new Set(expanded());
@@ -174,6 +180,13 @@ export default function TaskList(props: TaskListProps) {
     }
   });
 
+  createEffect(() => {
+    void props.tasks().length;
+    void props.selectedId;
+    void props.sidebarOpen();
+    requestAnimationFrame(updateScrollFade);
+  });
+
   const renderTask = (t: () => Task) => (
     <TaskCard
       id={t().id}
@@ -220,7 +233,12 @@ export default function TaskList(props: TaskListProps) {
 
   return (
     <>
-      <div class={`${styles.list} ${props.selectedId !== null ? styles.narrow : ""} ${props.sidebarOpen() ? "" : styles.hidden}`} data-testid="task-list">
+      <div
+        ref={(el) => { listRef = el; }}
+        class={`${styles.list} ${props.selectedId !== null ? styles.narrow : ""} ${props.sidebarOpen() ? "" : styles.hidden} ${scrolledFromTop() ? styles.scrolledFromTop : ""}`}
+        data-testid="task-list"
+        onScroll={updateScrollFade}
+      >
         <div class={styles.header}>
           <h2>Tasks</h2>
           <Show when={props.selectedId !== null}>
