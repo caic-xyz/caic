@@ -20,13 +20,54 @@ describe("extractDiffPath", () => {
     expect(extractDiffPath(section)).toBe("img.png");
   });
 
+  it("returns canonical multi-repo path from no-prefix binary diff headers", () => {
+    const section = `diff --git caic/img file.png caic/img file.png\nBinary files caic/img file.png and caic/img file.png differ\n`;
+    expect(extractDiffPath(section)).toBe("caic/img file.png");
+  });
+
   it("returns destination path for renamed file", () => {
     const section = `diff --git a/old/name#suffix b/new/name/suffix\nsimilarity index 100%\nrename from old/name#suffix\nrename to new/name/suffix\n`;
     expect(extractDiffPath(section)).toBe("new/name/suffix");
   });
+
+  it("returns canonical multi-repo paths for pure renames", () => {
+    const section = `diff --git a/caic/old.txt b/caic/new.txt\nsimilarity index 100%\nrename from old.txt\nrename to new.txt\n`;
+    expect(extractDiffPath(section)).toBe("caic/new.txt");
+  });
+
+  it("returns canonical multi-repo paths", () => {
+    const section = `diff --git a/caic/main.go b/caic/main.go\nindex abc..def 100644\n--- a/caic/main.go\n+++ b/caic/main.go\n@@ -1 +1 @@\n-old\n+new\n`;
+    expect(extractDiffPath(section)).toBe("caic/main.go");
+  });
+
+  it("keeps no-prefix paths that start with b", () => {
+    const section = `diff --git b/main.go b/main.go\nindex abc..def 100644\n--- b/main.go\n+++ b/main.go\n@@ -1 +1 @@\n-old\n+new\n`;
+    expect(extractDiffPath(section)).toBe("b/main.go");
+  });
+
+  it("removes git's trailing tab marker from no-prefix paths", () => {
+    const section = `diff --git path with space.txt path with space.txt\nindex abc..def 100644\n--- path with space.txt\t\n+++ path with space.txt\t\n@@ -1 +1 @@\n-old\n+new\n`;
+    expect(extractDiffPath(section)).toBe("path with space.txt");
+  });
 });
 
 describe("annotateDiffLines", () => {
+  it("treats hunk content lines starting with file-header markers as changes", () => {
+    const diff = [
+      "diff --git a/README.md b/README.md",
+      "--- a/README.md",
+      "+++ b/README.md",
+      "@@ -1,2 +1,2 @@",
+      "--- old heading",
+      "+++ new heading",
+    ].join("\n");
+
+    const lines = annotateDiffLines(diff);
+
+    expect(lines.find((line) => line.text === "--- old heading")?.kind).toBe("deleted");
+    expect(lines.find((line) => line.text === "+++ new heading")?.kind).toBe("added");
+  });
+
   it("marks matching added and deleted blocks as moved", () => {
     const diff = [
       "diff --git a/src/main.ts b/src/main.ts",

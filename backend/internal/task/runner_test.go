@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1219,8 +1220,8 @@ func TestRunner(t *testing.T) {
 		if sc.diffIdxs[0] != 0 || sc.diffIdxs[1] != 1 {
 			t.Errorf("diff indexes = %v, want [0 1]", sc.diffIdxs)
 		}
-		if ds[1].Path != "/home/user/src/genai/main.go" {
-			t.Errorf("second path = %q, want /home/user/src/genai/main.go", ds[1].Path)
+		if ds[1].Path != "genai/main.go" {
+			t.Errorf("second path = %q, want genai/main.go", ds[1].Path)
 		}
 	})
 	t.Run("BranchDiffStatNoContainer", func(t *testing.T) {
@@ -1321,43 +1322,73 @@ func TestExtractRepoDS(t *testing.T) {
 	})
 }
 
-func TestPrependRepoToDiff(t *testing.T) {
+func TestDiffContentArgs(t *testing.T) {
 	t.Parallel()
-	diff := `diff --git a/main.go b/main.go
-index 123..456 100644
---- a/main.go
-+++ b/main.go
-@@ -1,3 +1,3 @@
- package main
-
-rename from old.go
-rename to new.go
-`
-	got := prependRepoToDiff(diff, "myrepo")
-	want := `diff --git a/myrepo/main.go b/myrepo/main.go
-index 123..456 100644
---- myrepo/a/main.go
-+++ myrepo/b/main.go
-@@ -1,3 +1,3 @@
- package main
-
-rename from myrepo/old.go
-rename to myrepo/new.go
-`
-	if got != want {
-		t.Errorf("prependRepoToDiff =\n%s\nwant:\n%s", got, want)
+	cases := map[string]struct {
+		path  string
+		repo  runtime.Repo
+		multi bool
+		want  []string
+	}{
+		"single repo full diff": {
+			want: []string{"--src-prefix=", "--dst-prefix="},
+		},
+		"single repo path": {
+			path: "main.go",
+			want: []string{"--src-prefix=", "--dst-prefix=", "--", "main.go"},
+		},
+		"multi repo full diff": {
+			repo:  runtime.Repo{MountPath: "~/src/caic"},
+			multi: true,
+			want:  []string{"--src-prefix=a/caic/", "--dst-prefix=b/caic/"},
+		},
+		"multi repo path": {
+			path:  "b/main.go",
+			repo:  runtime.Repo{MountPath: "~/src/caic-xyz/caic"},
+			multi: true,
+			want:  []string{"--src-prefix=a/caic-xyz/caic/", "--dst-prefix=b/caic-xyz/caic/", "--", "b/main.go"},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if got := diffContentArgs(tc.path, &tc.repo, tc.multi); !slices.Equal(got, tc.want) {
+				t.Errorf("diffContentArgs() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
-func TestPrependRepoToDiffDevNull(t *testing.T) {
+func TestDiffRepoPrefix(t *testing.T) {
 	t.Parallel()
-	// /dev/null paths must not get the prefix.
-	diff := `--- /dev/null
-+++ /dev/null
-`
-	got := prependRepoToDiff(diff, "myrepo")
-	if got != diff {
-		t.Errorf("prependRepoToDiff with /dev/null =\n%s\nwant unchanged:\n%s", got, diff)
+	cases := map[string]struct {
+		repo runtime.Repo
+		want string
+	}{
+		"tilde source mount": {
+			repo: runtime.Repo{MountPath: "~/src/caic"},
+			want: "caic",
+		},
+		"tilde collision mount": {
+			repo: runtime.Repo{MountPath: "~/src/caic-xyz/caic"},
+			want: "caic-xyz/caic",
+		},
+		"home source mount": {
+			repo: runtime.Repo{MountPath: "/home/user/src/caic-xyz/caic"},
+			want: "caic-xyz/caic",
+		},
+		"host fallback": {
+			repo: runtime.Repo{HostPath: "/home/user/src/caic"},
+			want: "caic",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if got := diffRepoPrefix(&tc.repo); got != tc.want {
+				t.Errorf("diffRepoPrefix() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

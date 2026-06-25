@@ -37,18 +37,86 @@ const minMovedBlockAlnumChars = 20;
 /** Extract the file path from a single diff section. */
 export function extractDiffPath(section: string): string {
   // Prefer +++ line: "+++ b/path" or "+++ path" (most reliable).
-  const plus = section.match(/^\+\+\+ (?:[a-z]\/)?(.+)/m);
-  if (plus && plus[1] !== "/dev/null") return plus[1];
+  const plus = section.match(/^\+\+\+ (.+)/m);
+  if (plus) {
+    const path = normalizeDiffPath(plus[1], "b", section);
+    if (path !== "/dev/null") return path;
+  }
   // Deleted files: use --- line.
-  const minus = section.match(/^--- (?:[a-z]\/)?(.+)/m);
-  if (minus && minus[1] !== "/dev/null") return minus[1];
+  const minus = section.match(/^--- (.+)/m);
+  if (minus) {
+    const path = normalizeDiffPath(minus[1], "a", section);
+    if (path !== "/dev/null") return path;
+  }
   // Renames: "rename to <path>" gives the destination path.
   const renameTo = section.match(/^rename to (.+)/m);
-  if (renameTo) return renameTo[1];
+  if (renameTo) return normalizeDiffPath(renameTo[1], "b", section);
+  // Binary lines carry paths even when no text hunk exists.
+  const binary = section.match(/^Binary files (.+) and (.+) differ$/m);
+  if (binary) {
+    const newPath = normalizeDiffPath(binary[2], "b", section);
+    if (newPath !== "/dev/null") return newPath;
+    return normalizeDiffPath(binary[1], "a", section);
+  }
   // Last resort: diff --git header (binary/empty files). Handles both "a/b/" prefixed and no-prefix formats.
-  const git = section.match(/^diff --git (?:[a-z]\/)?(.+?) (?:[a-z]\/)?(.+)$/m);
-  if (git && git[1] === git[2]) return git[1];
+  const git = section.match(/^diff --git (.+)$/m);
+  const gitPaths = git ? splitDiffGitPaths(git[1]) : null;
+  if (gitPaths) {
+    const oldPath = normalizeDiffPath(gitPaths[0], "a", section);
+    const newPath = normalizeDiffPath(gitPaths[1], "b", section);
+    if (oldPath === newPath) return newPath;
+  }
   return "unknown";
+}
+
+function normalizeDiffPath(raw: string, side: "a" | "b", section: string): string {
+  const path = stripGitHeaderTab(raw);
+  const usesSidePrefixes = diffHeaderUsesSidePrefixes(section);
+  const sidePrefix = `${side}/`;
+  if (path.startsWith(sidePrefix) && usesSidePrefixes) {
+    return path.slice(sidePrefix.length);
+  }
+  const headerPath = diffGitSidePath(section, side, usesSidePrefixes);
+  if (headerPath && headerPath !== path && headerPath.endsWith(`/${path}`)) {
+    return headerPath;
+  }
+  return path;
+}
+
+function stripGitHeaderTab(path: string): string {
+  const tab = path.indexOf("\t");
+  return tab === -1 ? path : path.slice(0, tab);
+}
+
+function diffGitSidePath(section: string, side: "a" | "b", usesSidePrefixes: boolean): string | null {
+  const git = section.match(/^diff --git (.+)$/m);
+  const paths = git ? splitDiffGitPaths(git[1]) : null;
+  if (!paths) return null;
+  const path = stripGitHeaderTab(side === "a" ? paths[0] : paths[1]);
+  const sidePrefix = `${side}/`;
+  if (usesSidePrefixes && path.startsWith(sidePrefix)) return path.slice(sidePrefix.length);
+  return path;
+}
+
+function splitDiffGitPaths(body: string): [string, string] | null {
+  if (body.startsWith("a/")) {
+    const sideSeparator = body.indexOf(" b/");
+    if (sideSeparator !== -1) return [body.slice(0, sideSeparator), body.slice(sideSeparator + 1)];
+  }
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] === " " && body.slice(0, i) === body.slice(i + 1)) {
+      return [body.slice(0, i), body.slice(i + 1)];
+    }
+  }
+  const separator = body.indexOf(" ");
+  if (separator === -1) return null;
+  return [body.slice(0, separator), body.slice(separator + 1)];
+}
+
+function diffHeaderUsesSidePrefixes(section: string): boolean {
+  const git = section.match(/^diff --git .+$/m);
+  if (!git) return true;
+  return git[0].startsWith("diff --git a/") && git[0].includes(" b/");
 }
 
 /** Split and annotate a unified diff into per-file sections. */
@@ -79,21 +147,27 @@ export function splitDiff(raw: string): FileDiff[] {
 /** Annotate diff lines, including zebra-style moved block classification. */
 export function annotateDiffLines(diff: string): DiffLine[] {
   const rawLines = diff.split("\n");
-  const lines: DiffLine[] = rawLines.map((text) => ({ text, kind: lineKind(text) }));
+  let inHunk = false;
+  const lines: DiffLine[] = rawLines.map((text) => {
+    if (text.startsWith("diff --git ")) inHunk = false;
+    const kind = lineKind(text, inHunk);
+    if (kind === "hunk") inHunk = true;
+    return { text, kind };
+  });
   const addedByLineIndex = new Map<number, ChangeLine>();
   const deletedByLineIndex = new Map<number, ChangeLine>();
   const addedLineIndexesByContent = new Map<string, number[]>();
 
-  for (let i = 0; i < rawLines.length; i++) {
-    const text = rawLines[i];
-    if (isAddedLine(text)) {
-      const change = { lineIndex: i, content: text.slice(1) };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.kind === "added") {
+      const change = { lineIndex: i, content: line.text.slice(1) };
       addedByLineIndex.set(i, change);
       const indexes = addedLineIndexesByContent.get(change.content) ?? [];
       indexes.push(i);
       addedLineIndexesByContent.set(change.content, indexes);
-    } else if (isDeletedLine(text)) {
-      deletedByLineIndex.set(i, { lineIndex: i, content: text.slice(1) });
+    } else if (line.kind === "deleted") {
+      deletedByLineIndex.set(i, { lineIndex: i, content: line.text.slice(1) });
     }
   }
 
@@ -113,22 +187,13 @@ export function annotateDiffLines(diff: string): DiffLine[] {
   return lines;
 }
 
-function lineKind(line: string): DiffLineKind {
+function lineKind(line: string, inHunk: boolean): DiffLineKind {
   if (line.startsWith("@@")) return "hunk";
-  if (line.startsWith("diff ") || line.startsWith("index ") || line.startsWith("---") || line.startsWith("+++")) {
-    return "header";
-  }
+  const isFileHeader = !inHunk && (line.startsWith("index ") || line.startsWith("--- ") || line.startsWith("+++ "));
+  if (line.startsWith("diff --git ") || isFileHeader) return "header";
   if (line.startsWith("+")) return "added";
   if (line.startsWith("-")) return "deleted";
   return "context";
-}
-
-function isAddedLine(line: string): boolean {
-  return line.startsWith("+") && !line.startsWith("+++");
-}
-
-function isDeletedLine(line: string): boolean {
-  return line.startsWith("-") && !line.startsWith("---");
 }
 
 function markWhitespaceOnlyChanges(lines: DiffLine[]) {

@@ -874,7 +874,7 @@ func (r *Runner) SyncToOrigin(ctx context.Context, t *Task, force bool) (agent.D
 	for _, repo := range repos {
 		branch := repo.Branch
 		ref := "refs/remotes/" + string(id) + "/" + branch
-		repoDS := extractRepoDS(ds, repo.MountPath, multi)
+		repoDS := extractRepoDS(ds, diffRepoPrefix(&repo), multi)
 		safetyCtx, safetyCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
 		issues, err := CheckSafety(safetyCtx, repo.HostPath, ref, r.BaseBranch, repoDS)
 		safetyCancel()
@@ -952,7 +952,7 @@ func (r *Runner) SyncToDefault(ctx context.Context, t *Task, message string) (ag
 	for _, repo := range repos {
 		branch := repo.Branch
 		ref := "refs/remotes/" + string(id) + "/" + branch
-		repoDS := extractRepoDS(ds, repo.MountPath, multi)
+		repoDS := extractRepoDS(ds, diffRepoPrefix(&repo), multi)
 		safetyCtx, safetyCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
 		issues, err := CheckSafety(safetyCtx, repo.HostPath, ref, r.BaseBranch, repoDS)
 		safetyCancel()
@@ -1155,10 +1155,7 @@ func (r *Runner) DiffContent(ctx context.Context, t *Task, path string) (string,
 	var buf strings.Builder
 	for i := range repos {
 		repo := &repos[i]
-		args := []string{}
-		if path != "" {
-			args = append(args, "--", path)
-		}
+		args := diffContentArgs(path, repo, len(repos) > 1)
 		diff, err := r.Runtime.Diff(ctx, id, i, args...)
 		if err != nil {
 			r.log.Warn("diff failed", "repo", repo.MountPath, "br", repo.Branch, "err", err)
@@ -1167,37 +1164,50 @@ func (r *Runner) DiffContent(ctx context.Context, t *Task, path string) (string,
 		if diff == "" {
 			continue
 		}
-		if len(repos) > 1 {
-			diff = prependRepoToDiff(diff, repo.MountPath)
-		}
 		buf.WriteString(diff)
 	}
 	return buf.String(), nil
 }
 
-// prependRepoToDiff prepends `<repoName>/` to file paths in a unified diff so
-// that files from different repos are distinguishable when concatenated.
-func prependRepoToDiff(diff, repoName string) string {
-	lines := strings.Split(diff, "\n")
-	for i, line := range lines {
-		switch {
-		case strings.HasPrefix(line, "diff --git "):
-			line = strings.Replace(line, " a/", " a/"+repoName+"/", 1)
-			line = strings.Replace(line, " b/", " b/"+repoName+"/", 1)
-			lines[i] = line
-		case strings.HasPrefix(line, "--- ") && !strings.HasPrefix(line, "--- /dev/null"):
-			idx := strings.IndexByte(line, ' ') + 1
-			lines[i] = line[:idx] + repoName + "/" + line[idx:]
-		case strings.HasPrefix(line, "+++ ") && !strings.HasPrefix(line, "+++ /dev/null"):
-			idx := strings.IndexByte(line, ' ') + 1
-			lines[i] = line[:idx] + repoName + "/" + line[idx:]
-		case strings.HasPrefix(line, "rename from "):
-			lines[i] = "rename from " + repoName + "/" + line[12:]
-		case strings.HasPrefix(line, "rename to "):
-			lines[i] = "rename to " + repoName + "/" + line[10:]
+func diffContentArgs(path string, repo *runtime.Repo, multi bool) []string {
+	var args []string
+	if multi {
+		prefix := diffRepoPrefix(repo)
+		args = append(args, "--src-prefix=a/"+prefix+"/", "--dst-prefix=b/"+prefix+"/")
+	} else {
+		args = append(args, "--src-prefix=", "--dst-prefix=")
+	}
+	if path != "" {
+		args = append(args, "--", path)
+	}
+	return args
+}
+
+func diffRepoPrefix(repo *runtime.Repo) string {
+	if repo == nil {
+		return "repo"
+	}
+	for _, raw := range []string{repo.MountPath, repo.HostPath} {
+		prefix := cleanDiffRepoPrefix(raw)
+		if prefix != "" {
+			return prefix
 		}
 	}
-	return strings.Join(lines, "\n")
+	return "repo"
+}
+
+func cleanDiffRepoPrefix(raw string) string {
+	path := filepath.ToSlash(strings.TrimSpace(raw))
+	path = strings.TrimRight(path, "/")
+	for _, prefix := range []string{"~/src/", "/home/user/src/", "~/"} {
+		path = strings.TrimPrefix(path, prefix)
+	}
+	path = strings.TrimLeft(path, "/")
+	path = strings.TrimPrefix(path, "./")
+	if path == "." {
+		return ""
+	}
+	return path
 }
 
 // mutatingTools lists tool names whose execution may change files in the
@@ -1579,8 +1589,9 @@ func (r *Runner) diffStat(ctx context.Context, id runtime.InstanceID, repos []ru
 		}
 		ds := ParseDiffNumstat(numstat)
 		if len(repos) > 1 {
+			prefix := diffRepoPrefix(repo)
 			for i := range ds {
-				ds[i].Path = repo.MountPath + "/" + ds[i].Path
+				ds[i].Path = prefix + "/" + ds[i].Path
 			}
 		}
 		result = append(result, ds...)
