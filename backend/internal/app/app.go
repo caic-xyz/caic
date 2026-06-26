@@ -177,7 +177,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 					if u == "" {
 						return ""
 					}
-					return u + "/api/caic/v1/auth/github/callback"
+					return u + "/auth/github/callback"
 				},
 			)
 		}
@@ -189,7 +189,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 					if u == "" {
 						return ""
 					}
-					return u + "/api/caic/v1/auth/gitlab/callback"
+					return u + "/auth/gitlab/callback"
 				},
 			)
 		}
@@ -201,7 +201,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 					if u == "" {
 						return ""
 					}
-					return u + "/api/caic/v1/auth/google/callback"
+					return u + "/auth/google/callback"
 				},
 			)
 		}

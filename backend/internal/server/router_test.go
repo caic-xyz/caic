@@ -207,6 +207,60 @@ func TestHostIsLoopback(t *testing.T) {
 	}
 }
 
+// TestLoginCallbackPublic verifies OAuth login callbacks bypass RequireUser.
+// The provider redirects the browser to the callback before the user holds a
+// session, so the callback must live outside the session-gated /api/ subtree.
+// Regression: the OAuth redirect URI once pointed at /api/caic/v1/auth/*, which
+// RequireUser rejected with 401, silently breaking login.
+func TestLoginCallbackPublic(t *testing.T) {
+	t.Parallel()
+	store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"))
+	if err != nil {
+		t.Fatalf("open auth store: %v", err)
+	}
+	s := newTestOAuthRouter(t, store)
+	redirect := func(*http.Request) string { return "https://caic.example.com/auth/github/callback" }
+	s.authHandlers.githubOAuth = oauthclient.NewGitHubConfig("client-id", "client-secret", redirect)
+	s.authHandlers.gitlabOAuth = oauthclient.NewGitLabConfig("client-id", "client-secret", "https://gitlab.com", redirect)
+	s.authHandlers.googleOAuth = oauthclient.NewGoogleConfig("client-id", "client-secret", redirect)
+	h, err := s.buildHandler()
+	if err != nil {
+		t.Fatalf("buildHandler() error = %v", err)
+	}
+
+	// Sanity: the /api/ subtree is session-gated. This makes the callback checks
+	// below meaningful — they pass only because the callback is reachable without
+	// a session, not because auth is disabled.
+	t.Run("api subtree gated", func(t *testing.T) {
+		t.Parallel()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks", nil)
+		req.Host = "caic.example.com"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+		}
+	})
+
+	for _, provider := range []string{"github", "gitlab", "google"} {
+		t.Run(provider, func(t *testing.T) {
+			t.Parallel()
+			// No state cookie: the handler runs and rejects with 400, proving it is
+			// reachable pre-login. A 401 would mean RequireUser blocked the callback.
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/auth/"+provider+"/callback?code=x&state=y", nil)
+			req.Host = "caic.example.com"
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			if w.Code == http.StatusUnauthorized {
+				t.Fatalf("callback returned 401; login callback must bypass RequireUser")
+			}
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d (missing state cookie)", w.Code, http.StatusBadRequest)
+			}
+		})
+	}
+}
+
 // insertTestTask registers a task in the test server's manager and returns the
 // entry. It registers the entry under the supplied path id as well as the
 // task's own ID string, so handlers that re-resolve via the Manager by
