@@ -504,22 +504,22 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	if opts.Model != "" {
 		params, err := marshalParams(opencode.SetSessionModelParams{SessionID: w.sessionID, ModelID: opts.Model})
 		if err != nil {
-			return nil, fmt.Errorf("marshal unstable_setSessionModel params: %w", err)
+			return nil, fmt.Errorf("marshal session/set_model params: %w", err)
 		}
 		setModelReq := opencode.JSONRPCRequest{
 			JSONRPC: "2.0",
 			ID:      w.allocIDLocked(),
-			Method:  opencode.MethodUnstableSetSessionModel,
+			Method:  opencode.MethodSessionSetModel,
 			Params:  params,
 		}
 		if err := writeJSON(stdin, setModelReq); err != nil {
-			return nil, fmt.Errorf("write unstable_setSessionModel: %w", err)
+			return nil, fmt.Errorf("write session/set_model: %w", err)
 		}
 		resp, err := readJSONRPCResponse(ctx, stdout)
 		if err != nil {
-			// Log and continue — model switch is best-effort. The agent
-			// may not support the unstable method yet.
-			slog.WarnContext(ctx, "opencode: unstable_setSessionModel failed, using default model", "err", err, "model", opts.Model)
+			// Log and continue — model switch is best-effort. Older agents
+			// may not support session/set_model.
+			slog.WarnContext(ctx, "opencode: session/set_model failed, using default model", "err", err, "model", opts.Model)
 		} else {
 			_ = resp // success; model has been switched
 			res.currentModel = opts.Model
