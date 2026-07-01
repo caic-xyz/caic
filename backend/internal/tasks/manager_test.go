@@ -58,15 +58,112 @@ func textMessages(msgs []agent.Message) []string {
 
 func TestMergeLogAndRelayMessages(t *testing.T) {
 	t.Parallel()
-	merged := mergeLogAndRelayMessages(
-		[]agent.Message{&agent.TextMessage{Text: "before"}, &agent.TextMessage{Text: "overlap"}},
-		[]agent.Message{&agent.TextMessage{Text: "overlap"}, &agent.TextMessage{Text: "after"}},
-	)
-	texts := textMessages(merged)
-	want := []string{"before", "overlap", "after"}
-	if !slices.Equal(texts, want) {
-		t.Fatalf("merged texts = %#v, want %#v", texts, want)
-	}
+	t.Run("valid_exact_overlap", func(t *testing.T) {
+		t.Parallel()
+		merged := mergeLogAndRelayMessages(
+			[]agent.Message{&agent.TextMessage{Text: "before"}, &agent.TextMessage{Text: "overlap"}},
+			[]agent.Message{&agent.TextMessage{Text: "overlap"}, &agent.TextMessage{Text: "after"}},
+		)
+		texts := textMessages(merged)
+		want := []string{"before", "overlap", "after"}
+		if !slices.Equal(texts, want) {
+			t.Fatalf("merged texts = %#v, want %#v", texts, want)
+		}
+	})
+	t.Run("valid_usage_context_window_mismatch", func(t *testing.T) {
+		t.Parallel()
+		merged := mergeLogAndRelayMessages(
+			[]agent.Message{
+				&agent.TextMessage{Text: "before"},
+				&agent.UsageMessage{Usage: agent.Usage{InputTokens: 1}, ContextWindow: 272000},
+				&agent.TextMessage{Text: "overlap"},
+			},
+			[]agent.Message{
+				&agent.UsageMessage{Usage: agent.Usage{InputTokens: 1}},
+				&agent.TextMessage{Text: "overlap"},
+				&agent.TextMessage{Text: "after"},
+			},
+		)
+		texts := textMessages(merged)
+		want := []string{"before", "overlap", "after"}
+		if !slices.Equal(texts, want) {
+			t.Fatalf("merged texts = %#v, want %#v", texts, want)
+		}
+		usage, ok := merged[1].(*agent.UsageMessage)
+		if !ok || usage.ContextWindow != 272000 {
+			t.Fatalf("merged[1] = %#v, want log usage with context window", merged[1])
+		}
+	})
+	t.Run("valid_result_turn_count_mismatch", func(t *testing.T) {
+		t.Parallel()
+		merged := mergeLogAndRelayMessages(
+			[]agent.Message{
+				&agent.TextMessage{Text: "before"},
+				&agent.ResultMessage{MessageType: "result", Subtype: "result", NumTurns: 16, Usage: agent.Usage{InputTokens: 1}},
+			},
+			[]agent.Message{
+				&agent.ResultMessage{MessageType: "result", Subtype: "result", NumTurns: 1, Usage: agent.Usage{InputTokens: 1}},
+				&agent.TextMessage{Text: "after"},
+			},
+		)
+		resultCount := 0
+		for _, msg := range merged {
+			if _, ok := msg.(*agent.ResultMessage); ok {
+				resultCount++
+			}
+		}
+		if resultCount != 1 {
+			t.Fatalf("merged result count = %d, want 1; merged = %#v", resultCount, merged)
+		}
+		texts := textMessages(merged)
+		want := []string{"before", "after"}
+		if !slices.Equal(texts, want) {
+			t.Fatalf("merged texts = %#v, want %#v", texts, want)
+		}
+	})
+	t.Run("valid_ignores_relay_diff_stat", func(t *testing.T) {
+		t.Parallel()
+		merged := mergeLogAndRelayMessages(
+			[]agent.Message{&agent.TextMessage{Text: "before"}, &agent.TextMessage{Text: "overlap"}},
+			[]agent.Message{&agent.DiffStatMessage{MessageType: "caic_diff_stat"}, &agent.TextMessage{Text: "overlap"}, &agent.TextMessage{Text: "after"}},
+		)
+		texts := textMessages(merged)
+		want := []string{"before", "overlap", "after"}
+		if !slices.Equal(texts, want) {
+			t.Fatalf("merged texts = %#v, want %#v", texts, want)
+		}
+	})
+	t.Run("valid_ignores_artificial_relay_init", func(t *testing.T) {
+		t.Parallel()
+		merged := mergeLogAndRelayMessages(
+			[]agent.Message{
+				&agent.InitMessage{Model: "openai-codex/gpt-5.5"},
+				&agent.TextMessage{Text: "before"},
+				&agent.UsageMessage{Usage: agent.Usage{InputTokens: 1}, ContextWindow: 272000},
+				&agent.ThinkingDeltaMessage{Text: "overlap"},
+			},
+			[]agent.Message{
+				&agent.UsageMessage{Usage: agent.Usage{InputTokens: 1}},
+				&agent.InitMessage{Model: "openai-codex/gpt-5.5"},
+				&agent.ThinkingDeltaMessage{Text: "overlap"},
+				&agent.TextMessage{Text: "after"},
+			},
+		)
+		texts := textMessages(merged)
+		want := []string{"before", "after"}
+		if !slices.Equal(texts, want) {
+			t.Fatalf("merged texts = %#v, want %#v", texts, want)
+		}
+		initCount := 0
+		for _, msg := range merged {
+			if _, ok := msg.(*agent.InitMessage); ok {
+				initCount++
+			}
+		}
+		if initCount != 1 {
+			t.Fatalf("merged init count = %d, want 1; merged = %#v", initCount, merged)
+		}
+	})
 }
 
 func TestNew(t *testing.T) {
