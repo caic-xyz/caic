@@ -4,8 +4,8 @@ github.com/bahlo/generic-list-go v0.2.0 h1:5sz/EEAK+ls5wF+NeqDpk5+iNdMDXrh3z3nPn
 github.com/bahlo/generic-list-go v0.2.0/go.mod h1:2KvAjgMlE5NNynlg/5iLrrCCZ2+5xWbdbCW3pNTGyYg=
 github.com/buger/jsonparser v1.2.0 h1:4EFcvK1kD4jyj6YqNK6skK6w+y7FHHBR+XBCtxwu/6g=
 github.com/buger/jsonparser v1.2.0/go.mod h1:6RYKKt7H4d4+iWqouImQ9R2FZql3VbhNgx27UK13J/0=
-github.com/caic-xyz/md v0.14.3-0.20260701234534-52f412668100 h1:yExVHV74razXj3BDBYoLfuZWD0rfK1ElMJhcfZBxIRg=
-github.com/caic-xyz/md v0.14.3-0.20260701234534-52f412668100/go.mod h1:zT/6xtzmuI+Kc38aBdKTyRQ7Pam90B99Yx3N2tOoyJ8=
+github.com/caic-xyz/md v0.14.3-0.20260702172123-676a0118d899 h1:xSHKiSUYEb9/8WFBVB96GYFozp8jsVsHRWE0HzwYP7s=
+github.com/caic-xyz/md v0.14.3-0.20260702172123-676a0118d899/go.mod h1:zT/6xtzmuI+Kc38aBdKTyRQ7Pam90B99Yx3N2tOoyJ8=
 github.com/coder/websocket v1.8.14 h1:9L0p0iKiNOibykf283eHkKUHHrpG7f65OE3BhhO7v9g=
 github.com/coder/websocket v1.8.14/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6pumgx0mVg=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=

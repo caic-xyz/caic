@@ -39,6 +39,7 @@ type fakeMDContainer struct {
 
 	calls        []string
 	agentPaths   []md.AgentPaths
+	forkOpts     *md.ForkOpts
 	processCalls int
 	signalCalls  int
 	signalPID    int
@@ -101,8 +102,9 @@ func (f *fakeMDContainer) Revive(_ context.Context, _, _ io.Writer) error {
 	return nil
 }
 
-func (f *fakeMDContainer) Fork(_ context.Context, _, _ io.Writer, _ *md.ForkOpts) (mdContainer, error) {
+func (f *fakeMDContainer) Fork(_ context.Context, _, _ io.Writer, opts *md.ForkOpts) (mdContainer, error) {
 	f.calls = append(f.calls, "Fork")
+	f.forkOpts = opts
 	if f.forkErr != nil {
 		return nil, f.forkErr
 	}
@@ -387,6 +389,12 @@ func TestBackend(t *testing.T) {
 		}
 		if b.vncPorts["fork-1"] != 5902 {
 			t.Errorf("fork vncPort = %d, want 5902", b.vncPorts["fork-1"])
+		}
+		if src.forkOpts == nil {
+			t.Fatal("Fork options not recorded")
+		}
+		if src.forkOpts.Sudo {
+			t.Error("Fork Sudo = true, want explicit disabled value")
 		}
 	})
 

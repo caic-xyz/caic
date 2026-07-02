@@ -115,38 +115,71 @@ func TestSmoke(t *testing.T) {
 
 		// Poll until the task reaches "waiting" after the in-container smoke
 		// agent responds through the relay.
-		var task v1.Task
-		waitForState := func(want string) {
+		waitForTaskState := func(id, want string) v1.Task {
 			deadline := time.After(10 * time.Minute)
+			var task v1.Task
 			for {
 				var tasks []v1.Task
 				getJSON(t, baseURL, "/api/caic/v1/tasks", &tasks)
 				for _, tk := range tasks {
-					if tk.ID.String() == taskID {
+					if tk.ID.String() == id {
 						task = tk
 						break
 					}
 				}
 				if string(task.State) == want {
-					return
+					return task
 				}
 				select {
 				case <-deadline:
-					t.Fatalf("task %s: timed out waiting for state %q, current: %q", taskID, want, task.State)
+					t.Fatalf("task %s: timed out waiting for state %q, current: %q", id, want, task.State)
 				case <-time.After(500 * time.Millisecond):
 				}
 			}
 		}
 
-		waitForState("waiting")
+		task := waitForTaskState(taskID, "waiting")
 		if task.NumTurns != 1 {
 			t.Fatalf("task %s: NumTurns = %d, want 1; error=%q", taskID, task.NumTurns, task.Error)
 		}
 		t.Logf("task %s reached 'waiting'", taskID)
 
+		disableSudo := false
+		forkReq := v1.ForkTaskReq{
+			Prompt: v1.Prompt{Text: "fork smoke test " + fmt.Sprint(time.Now().UnixNano())},
+			Sudo:   &disableSudo,
+		}
+		var forkResp v1.Task
+		postJSON(t, baseURL, "/api/caic/v1/tasks/"+taskID+"/fork", forkReq, &forkResp)
+		forkID := forkResp.ID.String()
+		if forkID == "" {
+			t.Fatal("fork response has empty task ID")
+		}
+		forkTask := waitForTaskState(forkID, "waiting")
+		if forkTask.NumTurns != 1 {
+			t.Fatalf("fork task %s: NumTurns = %d, want 1; error=%q", forkID, forkTask.NumTurns, forkTask.Error)
+		}
+		t.Logf("fork task %s reached 'waiting'", forkID)
+
+		forkContainerName := forkTask.Runtime.ID
+		if forkContainerName == "" {
+			t.Fatalf("fork task %s has no runtime ID before purge", forkID)
+		}
+		postJSON(t, baseURL, "/api/caic/v1/tasks/"+forkID+"/stop", nil, nil)
+		waitForTaskState(forkID, "stopped")
+		postJSON(t, baseURL, "/api/caic/v1/tasks/"+forkID+"/purge", nil, nil)
+		waitForTaskState(forkID, "purged")
+		forkPurgeCtx, forkPurgeCancel := context.WithTimeout(t.Context(), 2*time.Minute)
+		if err := smoketest.WaitForRuntimeGone(forkPurgeCtx, smoketest.SmokeRuntime(), forkContainerName); err != nil {
+			forkPurgeCancel()
+			t.Fatal(err)
+		}
+		forkPurgeCancel()
+		t.Logf("fork task %s reached 'purged'", forkID)
+
 		// Stop the task.
 		postJSON(t, baseURL, "/api/caic/v1/tasks/"+taskID+"/stop", nil, nil)
-		waitForState("stopped")
+		task = waitForTaskState(taskID, "stopped")
 		t.Logf("task %s reached 'stopped'", taskID)
 
 		// Purge the task.
@@ -155,7 +188,7 @@ func TestSmoke(t *testing.T) {
 			t.Fatalf("task %s has no runtime ID before purge", taskID)
 		}
 		postJSON(t, baseURL, "/api/caic/v1/tasks/"+taskID+"/purge", nil, nil)
-		waitForState("purged")
+		waitForTaskState(taskID, "purged")
 		purgeCtx, purgeCancel := context.WithTimeout(t.Context(), 2*time.Minute)
 		if err := smoketest.WaitForRuntimeGone(purgeCtx, smoketest.SmokeRuntime(), containerName); err != nil {
 			purgeCancel()
