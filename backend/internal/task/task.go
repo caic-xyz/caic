@@ -34,6 +34,30 @@ type statsSub struct {
 func (s *statsSub) close() { s.once.Do(func() { close(s.ch) }) }
 
 // State represents the lifecycle state of a task.
+//
+// Transitions are written from three places, each owning a distinct class of
+// transition:
+//
+//  1. Message-driven — Task.addMessage. Running→Waiting/Asking/HasPlan when a
+//     ResultMessage or AskMessage arrives, and the reverse (Waiting/Asking/
+//     HasPlan→Running) when the agent starts producing output again. This is
+//     the only writer that reacts to conversation content.
+//  2. Lifecycle — RepoExecutor and Manager, driven by provisioning and explicit user
+//     commands (Start, Stop, Purge, Revive, Restart, ClearContext, fork).
+//     These transitions (Pending→Branching→Provisioning→Starting→Running,
+//     Stopping/Stopped, Purging/Purged) follow instance/session setup and
+//     teardown, not message content.
+//  3. Recovery — Task.RecordSessionCrash/RecordSessionFailure and the
+//     adoption-time state inference in RestoreMessages and Manager's adopt
+//     path. These run when a session dies unexpectedly or when state must be
+//     inferred from a log/relay tail rather than observed live.
+//
+// A few transitions are legitimately reachable from more than one category
+// (e.g. Running→Waiting from both message-driven addMessage and lifecycle
+// watchSession — see the comment at the addMessage ResultMessage handling and
+// at Manager.watchSession); those keep a CAS (SetStateIf/SetStateIfAny/
+// SetStateUnless) to make the race safe rather than trying to eliminate the
+// second writer.
 type State int
 
 // Task lifecycle states.
@@ -113,6 +137,13 @@ func (h *SessionHandle) CloseMsgCh() {
 	h.closeMsgCh.Do(func() { close(h.MsgCh) })
 }
 
+// Done returns the channel that closes when the session's underlying process
+// exits. Exposed so callers outside this file can watch for session death
+// without reaching into Session directly.
+func (h *SessionHandle) Done() <-chan struct{} {
+	return h.Session.Done()
+}
+
 // GracefulStop sends the shutdown sentinel and waits for the agent to exit
 // (up to timeout). Returns nil on success or the context error on timeout.
 //
@@ -131,11 +162,13 @@ func (h *SessionHandle) GracefulStop(ctx context.Context, timeout time.Duration)
 
 // Drain waits for the session read loop to finish (useful after a timeout
 // where the instance was killed externally), then closes the message channel
-// and waits for the dispatch goroutine to complete.
-func (h *SessionHandle) Drain() {
-	_ = h.Session.Wait()
+// and waits for the dispatch goroutine to complete. Returns the session's
+// exit error, if any.
+func (h *SessionHandle) Drain() error {
+	err := h.Session.Wait()
 	h.CloseMsgCh()
 	<-h.DispatchDone
+	return err
 }
 
 // RepoMount describes one repository in a task.
@@ -1231,6 +1264,21 @@ func (t *Task) CloseAndDetachSession(ctx context.Context) *SessionHandle {
 	return h
 }
 
+// GracefulStopSession detaches the currently attached session (if any) and
+// sends the relay's shutdown sentinel, waiting up to timeout for the agent to
+// exit gracefully. Returns the detached handle (nil if no session was
+// attached) and any error from the graceful stop, e.g. a timeout. Used by
+// callers (Cleanup, StopTask) that need the handle afterward to reuse its
+// LogW for a trailer, or to Drain it once other teardown steps complete.
+func (t *Task) GracefulStopSession(ctx context.Context, timeout time.Duration) (*SessionHandle, error) {
+	h := t.DetachSession()
+	if h == nil {
+		return nil, nil //nolint:nilnil // no session attached is not an error
+	}
+	err := h.GracefulStop(ctx, timeout)
+	return h, err
+}
+
 // ClearMessages injects a context_cleared boundary marker into the message
 // stream and resets live stats. Message history is preserved so that SSE
 // subscribers (including reconnecting clients) can see the full timeline.
@@ -1344,8 +1392,8 @@ func (t *Task) SubscribeStats(ctx context.Context) (history []runtime.Stats, liv
 //
 // Session lifecycle:
 //   - A session wraps an SSH process bridging the server to the in-instance
-//     relay daemon. It is set by Runner.Start, Runner.Reconnect, or
-//     Runner.RestartSession.
+//     relay daemon. It is set by RepoExecutor.Start, RepoExecutor.Reconnect, or
+//     RepoExecutor.RestartSession.
 //   - The session is cleared by CloseSession (during restart), Kill (during
 //     purge), or lazily by SendInput when it detects the SSH process
 //     already exited (Done channel closed).
@@ -1628,7 +1676,7 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 	//   - Normal turn: awaiting user input (Waiting/Asking/HasPlan).
 	//   - Server restart: RestoreMessages inferred a waiting state,
 	//     but the relay already started a new turn before reattach.
-	//   - First turn: the agent may produce output before Runner.Start
+	//   - First turn: the agent may produce output before RepoExecutor.Start
 	//     sets StateRunning (race between backend subprocess and
 	//     SetState on the main goroutine).
 	switch m.(type) {
@@ -1690,7 +1738,7 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 		// ResultMessage (it does a blocking Fetch first). In that case
 		// we still need to distinguish Waiting from Asking/HasPlan.
 		// StateStarting is also handled: the agent subprocess may
-		// produce a result before Runner.Start calls SetState(Running).
+		// produce a result before RepoExecutor.Start calls SetState(Running).
 		if t.state == StateRunning || t.state == StateStarting || t.state == StateWaiting || t.state == StateAsking {
 			switch {
 			case lastTurnHasUnansweredAsk(t.msgs):

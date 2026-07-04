@@ -56,7 +56,7 @@ type Backend interface {
 
 	// Tasks.
 	CreateTask(ctx context.Context, req bot.TaskRequest) (string, error)
-	GetRunner(relPath string) (*task.Runner, bool)
+	GetExecutor(relPath string) (*task.RepoExecutor, bool)
 	SetTaskMonitorBranch(entry TaskEntry, branch string)
 
 	// Repos.

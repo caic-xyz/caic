@@ -47,7 +47,7 @@ func (c *botClient) ResolveRepo(forgeFullName string) *bot.RepoInfo {
 
 // CreateTask creates and starts a task for bot-driven automation.
 func (c *botClient) CreateTask(ctx context.Context, req bot.TaskRequest) (string, error) {
-	runner, ok := c.taskMgr.Runner(req.Repo)
+	runner, ok := c.taskMgr.Executor(req.Repo)
 	if !ok {
 		return "", fmt.Errorf("runner not found for repo %s", req.Repo)
 	}

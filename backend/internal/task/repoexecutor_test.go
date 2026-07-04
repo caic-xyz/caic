@@ -1,4 +1,4 @@
-// Tests for task execution and agent orchestration.
+// Tests for the RepoExecutor: task execution and agent orchestration.
 
 package task
 
@@ -126,7 +126,7 @@ func (w *testWire) ParseMessage(line []byte) ([]agent.Message, error) {
 	return w.parse(line)
 }
 
-func TestRunner(t *testing.T) {
+func TestRepoExecutor(t *testing.T) {
 	t.Parallel()
 	t.Run("WriteLogTrailerReasoningTokens", func(t *testing.T) {
 		t.Parallel()
@@ -245,7 +245,7 @@ func TestRunner(t *testing.T) {
 	t.Run("StartPassesModelAndEffort", func(t *testing.T) {
 		t.Parallel()
 		backend := &testBackend{}
-		r := &Runner{
+		r := &RepoExecutor{
 			LogDir:   t.TempDir(),
 			Runtime:  &stubContainer{},
 			Backends: map[harness.Name]agent.Backend{"test": backend},
@@ -279,7 +279,7 @@ func TestRunner(t *testing.T) {
 	t.Run("StartSurfacesSetupFailure", func(t *testing.T) {
 		t.Parallel()
 		launchErr := errors.New("invalid context name cache-custom-mount:~/.cache/caic: invalid reference format")
-		r := &Runner{
+		r := &RepoExecutor{
 			Runtime: &stubContainer{launchErr: launchErr},
 		}
 		tk := &Task{
@@ -311,7 +311,7 @@ func TestRunner(t *testing.T) {
 		t.Run("Basic", func(t *testing.T) {
 			t.Parallel()
 			clone := initTestRepo(t, "main")
-			r := &Runner{
+			r := &RepoExecutor{
 				BaseBranch: "main",
 				Dir:        clone,
 			}
@@ -331,7 +331,7 @@ func TestRunner(t *testing.T) {
 			runGit(t, clone, "branch", "caic-3")
 			runGit(t, clone, "push", "origin", "caic-3")
 
-			r := &Runner{
+			r := &RepoExecutor{
 				BaseBranch: "main",
 				Dir:        clone,
 			}
@@ -351,7 +351,7 @@ func TestRunner(t *testing.T) {
 			// Do NOT push — simulates a stopped task whose branch was
 			// never synced to origin.
 
-			r := &Runner{
+			r := &RepoExecutor{
 				BaseBranch: "main",
 				Dir:        clone,
 			}
@@ -369,7 +369,7 @@ func TestRunner(t *testing.T) {
 			runGit(t, clone, "branch", "foo-caic-9")
 			runGit(t, clone, "branch", "caic-2")
 
-			r := &Runner{
+			r := &RepoExecutor{
 				BaseBranch: "main",
 				Dir:        clone,
 			}
@@ -401,7 +401,7 @@ func TestRunner(t *testing.T) {
 
 			logDir := t.TempDir()
 			stub := &stubContainer{}
-			r := &Runner{
+			r := &RepoExecutor{
 				BaseBranch: "main",
 				Dir:        clone,
 				LogDir:     logDir,
@@ -446,7 +446,7 @@ func TestRunner(t *testing.T) {
 
 			logDir := t.TempDir()
 			stub := &stubContainer{}
-			r := &Runner{
+			r := &RepoExecutor{
 				BaseBranch: "main",
 				Dir:        clone,
 				LogDir:     logDir,
@@ -485,7 +485,7 @@ func TestRunner(t *testing.T) {
 			// live stats were restored from log messages. Cleanup should fall back to
 			// LiveStats for the result cost.
 			clone := initTestRepo(t, "main")
-			r := &Runner{
+			r := &RepoExecutor{
 				BaseBranch: "main",
 				Dir:        clone,
 			}
@@ -529,7 +529,7 @@ func TestRunner(t *testing.T) {
 			// task loads as "purged" (not "failed") on the next server restart.
 			logDir := t.TempDir()
 			clone := initTestRepo(t, "main")
-			r := &Runner{
+			r := &RepoExecutor{
 				BaseBranch: "main",
 				Dir:        clone,
 				LogDir:     logDir,
@@ -583,7 +583,7 @@ func TestRunner(t *testing.T) {
 		t.Run("UsesLiveDiffStat", func(t *testing.T) {
 			t.Parallel()
 			clone := initTestRepo(t, "main")
-			r := &Runner{
+			r := &RepoExecutor{
 				BaseBranch: "main",
 				Dir:        clone,
 			}
@@ -622,7 +622,7 @@ func TestRunner(t *testing.T) {
 			t.Run(state.String(), func(t *testing.T) {
 				t.Parallel()
 				stub := &stubContainer{}
-				r := &Runner{Runtime: stub}
+				r := &RepoExecutor{Runtime: stub}
 				tk := &Task{
 					ID:            ksid.NewID(),
 					InitialPrompt: agent.Prompt{Text: "test"},
@@ -649,7 +649,7 @@ func TestRunner(t *testing.T) {
 			for _, harness := range []harness.Name{harness.Codex, harness.OpenCode} {
 				t.Run(string(harness), func(t *testing.T) {
 					t.Parallel()
-					r := &Runner{}
+					r := &RepoExecutor{}
 					tk := &Task{
 						ID:            ksid.NewID(),
 						InitialPrompt: agent.Prompt{Text: "test"},
@@ -670,7 +670,7 @@ func TestRunner(t *testing.T) {
 		t.Run("passes_history_to_attach_backend", func(t *testing.T) {
 			t.Parallel()
 			backend := &attachCaptureBackend{}
-			r := &Runner{
+			r := &RepoExecutor{
 				LogDir:   filepath.Join(t.TempDir(), "logs"),
 				Backends: map[harness.Name]agent.Backend{"test": backend},
 			}
@@ -705,7 +705,7 @@ func TestRunner(t *testing.T) {
 			}
 			t.Cleanup(func() {
 				_ = h.GracefulStop(t.Context(), time.Second)
-				h.Drain()
+				_ = h.Drain()
 			})
 
 			pending := backend.capturedAttachOpts.PendingUserActions
@@ -733,7 +733,7 @@ func TestRunner(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
 			logDir := filepath.Join(dir, "logs")
-			r := &Runner{LogDir: logDir}
+			r := &RepoExecutor{LogDir: logDir}
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -783,7 +783,7 @@ func TestRunner(t *testing.T) {
 			// caic_meta header. Otherwise every server restart that re-adopts
 			// a running instance duplicates the header.
 			logDir := filepath.Join(t.TempDir(), "logs")
-			r := &Runner{LogDir: logDir}
+			r := &RepoExecutor{LogDir: logDir}
 			tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Name: "org/repo", Branch: "caic-0"}}}
 
 			// Initial Start writes the header.
@@ -816,7 +816,7 @@ func TestRunner(t *testing.T) {
 			t.Parallel()
 			// reopenLog must report os.ErrNotExist when no log exists yet so
 			// Reconnect can fall back to openLog (which writes the header).
-			r := &Runner{LogDir: filepath.Join(t.TempDir(), "logs")}
+			r := &RepoExecutor{LogDir: filepath.Join(t.TempDir(), "logs")}
 			tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Name: "org/repo", Branch: "caic-0"}}}
 			if _, err := r.reopenLog(tk); !errors.Is(err, os.ErrNotExist) {
 				t.Errorf("reopenLog err = %v, want os.ErrNotExist", err)
@@ -837,7 +837,7 @@ func TestRunner(t *testing.T) {
 			{dir: "/opt/repos/foo", want: "/home/user/src/foo"},
 		}
 		for _, tc := range tests {
-			r := &Runner{Dir: tc.dir}
+			r := &RepoExecutor{Dir: tc.dir}
 			tk := tc.task
 			if tk == nil {
 				tk = &Task{}
@@ -854,7 +854,7 @@ func TestRunner(t *testing.T) {
 		t.Run("ResultMessage", func(t *testing.T) {
 			t.Parallel()
 			stub := &stubContainer{}
-			r := &Runner{Runtime: stub, Dir: "/repo"}
+			r := &RepoExecutor{Runtime: stub, Dir: "/repo"}
 			r.initDefaults()
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
@@ -893,7 +893,7 @@ func TestRunner(t *testing.T) {
 				t.Run(tool, func(t *testing.T) {
 					t.Parallel()
 					stub := &stubContainer{}
-					r := &Runner{Runtime: stub, Dir: "/repo"}
+					r := &RepoExecutor{Runtime: stub, Dir: "/repo"}
 					r.initDefaults()
 
 					tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
@@ -941,7 +941,7 @@ func TestRunner(t *testing.T) {
 		t.Run("NonMutatingToolNoDiffStat", func(t *testing.T) {
 			t.Parallel()
 			stub := &stubContainer{}
-			r := &Runner{Runtime: stub}
+			r := &RepoExecutor{Runtime: stub}
 			r.initDefaults()
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
@@ -976,7 +976,7 @@ func TestRunner(t *testing.T) {
 		t.Run("SkipSideEffects", func(t *testing.T) {
 			t.Parallel()
 			stub := &stubContainer{}
-			r := &Runner{Runtime: stub, Dir: "/repo"}
+			r := &RepoExecutor{Runtime: stub, Dir: "/repo"}
 			r.initDefaults()
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
@@ -1004,7 +1004,7 @@ func TestRunner(t *testing.T) {
 
 		t.Run("DispatchDrainBeforeClose", func(t *testing.T) {
 			t.Parallel()
-			r := &Runner{}
+			r := &RepoExecutor{}
 			r.initDefaults()
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
@@ -1049,7 +1049,7 @@ func TestRunner(t *testing.T) {
 				logDir := t.TempDir()
 				backend := &testBackend{}
 
-				r := &Runner{
+				r := &RepoExecutor{
 					LogDir:   logDir,
 					Runtime:  &stubContainer{},
 					Backends: map[harness.Name]agent.Backend{"test": backend},
@@ -1106,7 +1106,7 @@ func TestRunner(t *testing.T) {
 		logDir := t.TempDir()
 		backend := &testBackend{}
 
-		r := &Runner{
+		r := &RepoExecutor{
 			LogDir:   logDir,
 			Runtime:  &stubContainer{},
 			Backends: map[harness.Name]agent.Backend{"test": backend},
@@ -1121,7 +1121,7 @@ func TestRunner(t *testing.T) {
 		tk.SetRuntimeConnectionInfo("fake-instance", runtime.ConnectionTarget{SSHHost: "fake-instance"}, "", "", 0)
 
 		// Create an initial session with a log writer by using the backend
-		// directly (Runner.Start needs a instance backend).
+		// directly (RepoExecutor.Start needs a instance backend).
 		logW, err := r.openLog(tk)
 		if err != nil {
 			t.Fatal(err)
@@ -1178,7 +1178,7 @@ func TestRunner(t *testing.T) {
 	t.Run("BranchDiffStat", func(t *testing.T) {
 		t.Parallel()
 		sc := &stubContainer{}
-		r := &Runner{Runtime: sc, Dir: "/repo"}
+		r := &RepoExecutor{Runtime: sc, Dir: "/repo"}
 		tk := &Task{Repos: []RepoMount{{GitRoot: "/repo", Branch: "feature"}}}
 		tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 		ds := r.BranchDiffStat(t.Context(), tk)
@@ -1195,7 +1195,7 @@ func TestRunner(t *testing.T) {
 	t.Run("BranchDiffStatMultiRepoUsesInstanceID", func(t *testing.T) {
 		t.Parallel()
 		sc := &stubContainer{}
-		r := &Runner{Runtime: sc, Dir: "/home/user/src/caic"}
+		r := &RepoExecutor{Runtime: sc, Dir: "/home/user/src/caic"}
 		tk := &Task{
 			Repos: []RepoMount{
 				{GitRoot: "/home/user/src/caic", Branch: "caic-7", MountedPath: "/home/user/src/caic"},
@@ -1226,14 +1226,14 @@ func TestRunner(t *testing.T) {
 	})
 	t.Run("BranchDiffStatNoContainer", func(t *testing.T) {
 		t.Parallel()
-		r := &Runner{}
+		r := &RepoExecutor{}
 		if ds := r.BranchDiffStat(t.Context(), &Task{}); ds != nil {
 			t.Errorf("BranchDiffStat with no instance = %+v, want nil", ds)
 		}
 	})
 	t.Run("BranchDiffStatNoDir", func(t *testing.T) {
 		t.Parallel()
-		r := &Runner{Runtime: &stubContainer{}, Dir: ""}
+		r := &RepoExecutor{Runtime: &stubContainer{}, Dir: ""}
 		if ds := r.BranchDiffStat(t.Context(), &Task{}); ds != nil {
 			t.Errorf("BranchDiffStat with no dir = %+v, want nil", ds)
 		}
@@ -1244,7 +1244,7 @@ func TestRunnerTaskRuntime(t *testing.T) {
 	t.Parallel()
 	t.Run("valid_preserves_mounted_path", func(t *testing.T) {
 		t.Parallel()
-		r := &Runner{Dir: "/home/user/src/caic-xyz/caic"}
+		r := &RepoExecutor{Dir: "/home/user/src/caic-xyz/caic"}
 		tk := &Task{
 			Repos: []RepoMount{
 				{Name: "caic-xyz/caic", Branch: "caic-7", MountedPath: "/home/user/src/caic-xyz/caic"},
@@ -1275,7 +1275,7 @@ func TestRunnerTaskRuntime(t *testing.T) {
 	})
 	t.Run("valid_no_repos", func(t *testing.T) {
 		t.Parallel()
-		r := &Runner{Dir: "/repo"}
+		r := &RepoExecutor{Dir: "/repo"}
 		tk := &Task{}
 		tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 		id, repos, err := r.taskRuntime(tk)
@@ -1291,7 +1291,7 @@ func TestRunnerTaskRuntime(t *testing.T) {
 	})
 	t.Run("error_no_instance", func(t *testing.T) {
 		t.Parallel()
-		if _, _, err := (&Runner{}).taskRuntime(&Task{}); err == nil {
+		if _, _, err := (&RepoExecutor{}).taskRuntime(&Task{}); err == nil {
 			t.Fatal("want error")
 		}
 	})

@@ -47,8 +47,8 @@ func (b *testCIBackend) ForgeForInfo(ctx context.Context, info *ci.RepoInfo) for
 
 func (b *testCIBackend) CreateTask(context.Context, bot.TaskRequest) (string, error) { return "", nil }
 
-func (b *testCIBackend) GetRunner(relPath string) (*task.Runner, bool) {
-	return b.taskMgr.Runner(relPath)
+func (b *testCIBackend) GetExecutor(relPath string) (*task.RepoExecutor, bool) {
+	return b.taskMgr.Executor(relPath)
 }
 
 func (b *testCIBackend) SetTaskMonitorBranch(entry ci.TaskEntry, branch string) {

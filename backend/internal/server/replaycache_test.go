@@ -66,7 +66,7 @@ func TestReplayCache(t *testing.T) {
 	newServer := func(t *testing.T, logDir string) (*testRouter, string) {
 		t.Helper()
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}

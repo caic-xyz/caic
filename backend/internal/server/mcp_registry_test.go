@@ -176,7 +176,7 @@ func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 
 func newMCPTaskCreateTestRouter(t *testing.T) *testRouter {
 	s := newTestRouter(t)
-	registerTestRunner(s, "myrepo", &task.Runner{
+	s.taskMgr.RegisterExecutor("myrepo", &task.RepoExecutor{
 		BaseBranch: "main",
 		Dir:        t.TempDir(),
 		Backends: map[harness.Name]agent.Backend{

@@ -34,9 +34,9 @@ import (
 )
 
 type runnerRegistry interface {
-	RangeRunners(fn func(relPath string, r *task.Runner) bool)
-	Runner(relPath string) (*task.Runner, bool)
-	RegisterRunner(relPath string, r *task.Runner)
+	RangeExecutors(fn func(relPath string, r *task.RepoExecutor) bool)
+	Executor(relPath string) (*task.RepoExecutor, bool)
+	RegisterExecutor(relPath string, r *task.RepoExecutor)
 }
 
 type serverHandlers struct {
@@ -267,7 +267,7 @@ func mountsFromSettings(settings *preferences.Settings) []caicruntime.Mount {
 func (h *serverHandlers) listHarnesses(_ context.Context, _ *api.EmptyReq) (*[]v1.HarnessInfo, error) {
 	// Collect unique harness backends from all runners.
 	seen := make(map[harness.Name]agent.Backend)
-	h.taskMgr.RangeRunners(func(_ string, r *task.Runner) bool {
+	h.taskMgr.RangeExecutors(func(_ string, r *task.RepoExecutor) bool {
 		maps.Copy(seen, r.Backends)
 		return true
 	})

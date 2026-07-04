@@ -360,7 +360,9 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		repoService.RegisterRunner(&results[i])
 	}
 
-	repoService.RegisterNoRepoRunner(ctx)
+	if err := repoService.RegisterNoRepoRunner(ctx); err != nil {
+		return nil, fmt.Errorf("register no-repo executor: %w", err)
+	}
 	taskMgr.Start()
 
 	phase3 := trace.StartRegion(ctx, "load-live-task-logs")

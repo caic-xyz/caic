@@ -61,9 +61,9 @@ func (a *ciAdapter) CreateTask(ctx context.Context, req bot.TaskRequest) (string
 	return a.taskCreator.CreateTask(ctx, req)
 }
 
-// GetRunner returns the task runner for relPath.
-func (a *ciAdapter) GetRunner(relPath string) (*task.Runner, bool) {
-	return a.taskMgr.Runner(relPath)
+// GetExecutor returns the task executor for relPath.
+func (a *ciAdapter) GetExecutor(relPath string) (*task.RepoExecutor, bool) {
+	return a.taskMgr.Executor(relPath)
 }
 
 // SetTaskMonitorBranch sets the CI monitor branch on a task entry.

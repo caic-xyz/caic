@@ -28,7 +28,7 @@ func IsLogName(name string) bool {
 }
 
 // taskLogWriter is needed for now because task log ownership is currently
-// split across several components: agent.Conn writes raw harness output, Runner
+// split across several components: agent.Conn writes raw harness output, RepoExecutor
 // writes lifecycle metadata, Task.WriteToLog writes task metadata, harnesses
 // write synthetic records through opts.LogW, and adoption restores enough state
 // to write metadata again later.

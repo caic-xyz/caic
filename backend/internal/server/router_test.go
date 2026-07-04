@@ -275,12 +275,6 @@ func insertTestTask(t *testing.T, s *testRouter, id string, tk *task.Task) *task
 	return e
 }
 
-// registerTestRunner registers a runner under relPath in the task Manager's
-// registry, the single owner of the runner set.
-func registerTestRunner(s *testRouter, relPath string, r *task.Runner) {
-	s.taskMgr.RegisterRunner(relPath, r)
-}
-
 // testEntries returns a snapshot of every registered task entry (test-only).
 func testEntries(s *testRouter) []*tasks.Entry {
 	var out []*tasks.Entry
@@ -417,7 +411,7 @@ func TestCloneRepo(t *testing.T) {
 		if repo.Path != "cloned" {
 			t.Fatalf("repo path = %q, want cloned", repo.Path)
 		}
-		runner, ok := s.taskMgr.Runner("cloned")
+		runner, ok := s.taskMgr.Executor("cloned")
 		if !ok {
 			t.Fatal("cloned runner not registered")
 		}
@@ -444,7 +438,7 @@ func TestCloneRepo(t *testing.T) {
 		if got := s.repos.Snapshot(); len(got) != 1 || got[0].RelPath != "cloned" {
 			t.Fatalf("repo registry after watcher sync = %+v, want one cloned repo", got)
 		}
-		after, ok := s.taskMgr.Runner("cloned")
+		after, ok := s.taskMgr.Executor("cloned")
 		if !ok {
 			t.Fatal("runner disappeared after watcher sync")
 		}
@@ -474,7 +468,7 @@ func TestCloneRepo(t *testing.T) {
 		if got := s.repos.Snapshot(); len(got) != 0 {
 			t.Fatalf("repo registry = %+v, want empty after failed clone", got)
 		}
-		if _, ok := s.taskMgr.Runner("broken"); ok {
+		if _, ok := s.taskMgr.Executor("broken"); ok {
 			t.Fatal("failed clone registered a runner")
 		}
 	})
@@ -620,7 +614,7 @@ func TestHandlePurge(t *testing.T) {
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
 		tk.SetState(task.StateWaiting)
 		s := newTestRouter(t)
-		registerTestRunner(s, "r", &task.Runner{BaseBranch: "main", Dir: t.TempDir()})
+		s.taskMgr.RegisterExecutor("r", &task.RepoExecutor{BaseBranch: "main", Dir: t.TempDir()})
 		insertTestTask(t, s, "t1", tk)
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks/t1/purge", http.NoBody)
@@ -648,7 +642,7 @@ func TestHandlePurge(t *testing.T) {
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
 		tk.SetState(task.StateRunning)
 		s := newTestRouter(t)
-		registerTestRunner(s, "r", &task.Runner{BaseBranch: "main", Dir: t.TempDir()})
+		s.taskMgr.RegisterExecutor("r", &task.RepoExecutor{BaseBranch: "main", Dir: t.TempDir()})
 		insertTestTask(t, s, "t1", tk)
 
 		// Use an already-cancelled context to simulate shutdown scenario
@@ -671,7 +665,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("ReturnsID", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
-		registerTestRunner(s, "myrepo", &task.Runner{
+		s.taskMgr.RegisterExecutor("myrepo", &task.RepoExecutor{
 			BaseBranch: "main",
 			Dir:        t.TempDir(),
 			Backends:   map[harness.Name]agent.Backend{harness.Claude: stubBackend{}},
@@ -736,7 +730,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("UnknownHarness", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
-		registerTestRunner(s, "myrepo", &task.Runner{BaseBranch: "main", Dir: t.TempDir()})
+		s.taskMgr.RegisterExecutor("myrepo", &task.RepoExecutor{BaseBranch: "main", Dir: t.TempDir()})
 		handler := handle(testTaskHandlers(s).service.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"nonexistent"}`)
@@ -759,7 +753,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("InvalidModel", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
-		registerTestRunner(s, "myrepo", &task.Runner{
+		s.taskMgr.RegisterExecutor("myrepo", &task.RepoExecutor{
 			BaseBranch: "main",
 			Dir:        t.TempDir(),
 			Backends:   map[harness.Name]agent.Backend{"stub": stubBackend{}},
@@ -786,7 +780,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("ValidModel", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
-		registerTestRunner(s, "myrepo", &task.Runner{
+		s.taskMgr.RegisterExecutor("myrepo", &task.RepoExecutor{
 			BaseBranch: "main",
 			Dir:        t.TempDir(),
 			Backends:   map[harness.Name]agent.Backend{"stub": stubBackend{}},
@@ -813,7 +807,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("WithImage", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
-		registerTestRunner(s, "myrepo", &task.Runner{
+		s.taskMgr.RegisterExecutor("myrepo", &task.RepoExecutor{
 			BaseBranch: "main",
 			Dir:        t.TempDir(),
 			Backends:   map[harness.Name]agent.Backend{harness.Claude: stubBackend{}},
@@ -860,7 +854,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("WithCachePreferences", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
-		registerTestRunner(s, "myrepo", &task.Runner{
+		s.taskMgr.RegisterExecutor("myrepo", &task.RepoExecutor{
 			BaseBranch: "main",
 			Dir:        t.TempDir(),
 			Backends:   map[harness.Name]agent.Backend{harness.Claude: stubBackend{}},
@@ -939,7 +933,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("TaskInfo", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
-		registerTestRunner(s, "myrepo", &task.Runner{
+		s.taskMgr.RegisterExecutor("myrepo", &task.RepoExecutor{
 			BaseBranch: "main",
 			Dir:        t.TempDir(),
 			Backends:   map[harness.Name]agent.Backend{harness.Claude: stubBackend{}},
@@ -997,7 +991,7 @@ func TestHandleCreateTask(t *testing.T) {
 		// Regression: creating a task with no repos panicked with
 		// "makeslice: cap out of range" because len(req.Repos)-1 == -1.
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{
+		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{
 			Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}},
 		})
 		handler := handle(testTaskHandlers(s).service.createTask)
@@ -1034,7 +1028,7 @@ func TestHandleCreateTask(t *testing.T) {
 		// Creating a no-repo task with no registered harness backends returns
 		// a clear 400 instead of panicking.
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{}})
+		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{}})
 		handler := handle(testTaskHandlers(s).service.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"no repo task"},"harness":"claude"}`)
@@ -1209,7 +1203,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1273,7 +1267,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1312,7 +1306,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1361,7 +1355,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, result, trailer)
 
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1415,7 +1409,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, result, trailer)
 
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1469,7 +1463,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "b.jsonl", metaB, trailerB)
 
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1518,7 +1512,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		t.Parallel()
 		logDir := t.TempDir()
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1560,7 +1554,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", lines...)
 
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1616,7 +1610,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1672,7 +1666,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "purged.jsonl", meta("purged task"), trailer)
 
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1709,7 +1703,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "feat.jsonl", meta, trailer)
 
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1768,7 +1762,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, assistant, result, trailer)
 
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1963,7 +1957,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, msgStart, delta1, delta2, assistant, result, trailer)
 
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}

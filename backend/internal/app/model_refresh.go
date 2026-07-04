@@ -23,7 +23,7 @@ func refreshHarnessModels(ctx context.Context, cacheDir string, backend runtime.
 	cache := agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
 
 	fetchers := map[harness.Name]agent.ModelFetcher{}
-	taskMgr.RangeRunners(func(_ string, r *task.Runner) bool {
+	taskMgr.RangeExecutors(func(_ string, r *task.RepoExecutor) bool {
 		for h, b := range r.Backends {
 			if f, ok := b.(agent.ModelFetcher); ok {
 				fetchers[h] = f
@@ -86,7 +86,7 @@ func refreshOneHarness(
 	cache.SetModels(h, models, agent.APIKeyHash(env))
 	slog.InfoContext(ctx, "model cache refreshed", "harness", h, "count", len(models))
 
-	taskMgr.RangeRunners(func(_ string, r *task.Runner) bool {
+	taskMgr.RangeExecutors(func(_ string, r *task.RepoExecutor) bool {
 		if b, ok := r.Backends[h]; ok {
 			b.SetModels(models)
 		}

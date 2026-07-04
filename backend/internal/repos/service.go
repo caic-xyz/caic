@@ -58,7 +58,7 @@ type CloneRequest struct {
 // repository.
 type InitResult struct {
 	Info    Info
-	Runner  *task.Runner
+	Runner  *task.RepoExecutor
 	InitErr error
 }
 
@@ -144,8 +144,8 @@ func (s *Service) DiscoverRunner(ctx context.Context, abs string) (InitResult, e
 		ForgeOwner:       forgeOwner,
 		ForgeRepo:        forgeRepo,
 	}
-	runner, initErr := s.newRunner(ctx, &info)
-	return InitResult{Info: info, Runner: runner, InitErr: initErr}, nil
+	executor, initErr := s.newExecutor(ctx, &info)
+	return InitResult{Info: info, Runner: executor, InitErr: initErr}, nil
 }
 
 // RelPath returns abs as a path relative to the repository root.
@@ -166,7 +166,7 @@ func (s *Service) RegisterRunner(r *InitResult) {
 		return
 	}
 	s.registry.Add(&r.Info)
-	s.taskMgr.RegisterRunner(r.Info.RelPath, r.Runner)
+	s.taskMgr.RegisterExecutor(r.Info.RelPath, r.Runner)
 	s.notifyChanged()
 }
 
@@ -176,7 +176,7 @@ func (s *Service) DeregisterRunner(relPath string) {
 		return r.RelPath == relPath
 	})
 	for _, rel := range removed {
-		s.taskMgr.UnregisterRunner(rel)
+		s.taskMgr.UnregisterExecutor(rel)
 	}
 	if len(removed) > 0 {
 		s.notifyChanged()
@@ -205,14 +205,18 @@ func (s *Service) ByForge(owner, repo string) (Info, bool) {
 
 // RunnerRegistered reports whether a runner is registered for relPath.
 func (s *Service) RunnerRegistered(relPath string) bool {
-	_, ok := s.taskMgr.Runner(relPath)
+	_, ok := s.taskMgr.Executor(relPath)
 	return ok
 }
 
-// RegisterNoRepoRunner initializes and registers the no-repo runner.
-func (s *Service) RegisterNoRepoRunner(ctx context.Context) {
-	noRepoRunner, _ := s.newRunner(ctx, nil)
-	s.taskMgr.RegisterRunner("", noRepoRunner)
+// RegisterNoRepoRunner initializes and registers the no-repo executor.
+func (s *Service) RegisterNoRepoRunner(ctx context.Context) error {
+	noRepoExecutor, err := s.newExecutor(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("init no-repo executor: %w", err)
+	}
+	s.taskMgr.RegisterExecutor("", noRepoExecutor)
+	return nil
 }
 
 // AdoptionRepos returns repo metadata in the shape expected by tasks.Manager.
@@ -276,13 +280,13 @@ func (s *Service) Clone(ctx context.Context, req CloneRequest) (Info, error) {
 	if _, err := os.Stat(absTarget); err == nil {
 		return Info{}, repoError(ErrorConflict, "directory already exists: "+targetPath)
 	}
-	if _, ok := s.taskMgr.Runner(targetPath); ok {
+	if _, ok := s.taskMgr.Executor(targetPath); ok {
 		return Info{}, repoError(ErrorConflict, "repo already registered: "+targetPath)
 	}
 
 	bn := filepath.Base(targetPath)
 	var basenameConflict string
-	s.taskMgr.RangeRunners(func(rel string, _ *task.Runner) bool {
+	s.taskMgr.RangeExecutors(func(rel string, _ *task.RepoExecutor) bool {
 		if rel != "" && filepath.Base(rel) == bn && rel != targetPath {
 			basenameConflict = rel
 			return false
@@ -321,16 +325,16 @@ func (s *Service) Clone(ctx context.Context, req CloneRequest) (Info, error) {
 	}
 	remote := checkout.RemoteOriginURL(ctx)
 	info := Info{RelPath: targetPath, AbsPath: absTarget, BaseBranch: branch, BaseBranchRemote: remoteName, Remote: remote}
-	runner, err := s.newRunner(ctx, &info)
+	executor, err := s.newExecutor(ctx, &info)
 	if err != nil {
 		_ = os.RemoveAll(absTarget)
-		return Info{}, repoError(ErrorInternal, "failed to init runner: "+err.Error())
+		return Info{}, repoError(ErrorInternal, "failed to init executor: "+err.Error())
 	}
 	if rawURL, err := forge.RemoteURL(ctx, absTarget); err == nil {
 		info.ForgeKind, info.ForgeOwner, info.ForgeRepo, _ = forge.ParseRemoteURL(rawURL)
 	}
 	s.registry.Add(&info)
-	s.taskMgr.RegisterRunner(targetPath, runner)
+	s.taskMgr.RegisterExecutor(targetPath, executor)
 	s.notifyChanged()
 	slog.InfoContext(ctx, "cloned repo", "url", req.URL, "path", targetPath)
 
@@ -344,8 +348,8 @@ func (s *Service) notifyChanged() {
 	s.mu.Unlock()
 }
 
-func (s *Service) newRunner(ctx context.Context, info *Info) (*task.Runner, error) {
-	runner := &task.Runner{
+func (s *Service) newExecutor(ctx context.Context, info *Info) (*task.RepoExecutor, error) {
+	executor := &task.RepoExecutor{
 		LogDir:     s.logDir,
 		CacheDir:   s.cacheDir,
 		Backends:   s.agentBackends,
@@ -356,12 +360,12 @@ func (s *Service) newRunner(ctx context.Context, info *Info) (*task.Runner, erro
 		Runtime: s.runtime,
 	}
 	if info != nil {
-		runner.BaseBranch = info.BaseBranch
-		runner.Dir = info.AbsPath
-		runner.RepoName = info.RelPath
+		executor.BaseBranch = info.BaseBranch
+		executor.Dir = info.AbsPath
+		executor.RepoName = info.RelPath
 	}
-	err := runner.Init(ctx)
-	return runner, err
+	err := executor.Init(ctx)
+	return executor, err
 }
 
 func repoError(k ErrorKind, msg string) error {

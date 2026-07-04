@@ -1,4 +1,6 @@
-// Executes tasks by orchestrating agent runs and recording their results.
+// RepoExecutor is the per-repo executor that runs tasks: it orchestrates
+// branch/instance setup, agent session lifecycle, git sync, and log I/O for
+// every task backed by that repo.
 
 package task
 
@@ -39,11 +41,13 @@ type Result struct {
 	Err         error
 }
 
-// Runner manages the serialization of setup and push operations.
-type Runner struct {
+// RepoExecutor holds one repo's config and serializes setup/push operations
+// (branchMu/nextID) across every task backed by that repo. It carries no
+// per-task state: every task-facing method takes the *Task explicitly.
+type RepoExecutor struct {
 	BaseBranch          string
 	Dir                 string              // Absolute path to the git repository.
-	RepoName            string              // Relative repo path (e.g. "github/caic"); empty for no-repo runners.
+	RepoName            string              // Relative repo path (e.g. "github/caic"); empty for no-repo executors.
 	GitTimeout          time.Duration       // Timeout for git/instance ops; defaults to 1 minute.
 	RuntimeStartTimeout time.Duration       // Timeout for instance start (image pull); defaults to 1 hour.
 	LogDir              string              // Directory for raw JSONL session logs (required).
@@ -174,7 +178,7 @@ func maxBranchSeqNum(ctx context.Context, dir string) (int, error) {
 
 // Init sets nextID past any existing caic-* branches so that restarts don't
 // waste attempts on branches that already exist. No-op for no-repo runners.
-func (r *Runner) Init(ctx context.Context) error {
+func (r *RepoExecutor) Init(ctx context.Context) error {
 	r.initDefaults()
 	if r.Dir == "" {
 		return nil
@@ -211,7 +215,7 @@ func (r *Runner) Init(ctx context.Context) error {
 //   - --resume fallback: always transitions to StateRunning since a new agent
 //     process is started.
 //   - All-fail: reverts to StateWaiting.
-func (r *Runner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (*SessionHandle, error) {
+func (r *RepoExecutor) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (*SessionHandle, error) {
 	r.initDefaults()
 	ctx, task := trace.NewTask(ctx, "task.reconnect:"+t.ID.String())
 	defer task.End()
@@ -296,7 +300,7 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (
 //  4. Send the initial prompt to the agent.
 //
 // The session is left open for follow-up messages via SendInput.
-func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string) (*SessionHandle, error) {
+func (r *RepoExecutor) Start(ctx context.Context, t *Task, resolvedGitHubToken string) (*SessionHandle, error) {
 	r.initDefaults()
 	ctx, task := trace.NewTask(ctx, "task.start:"+t.ID.String())
 	defer task.End()
@@ -396,7 +400,7 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 //  5. If graceful wait timed out, drain session now (runtime connection severed).
 //  6. Close msgCh and logW, write log trailer.
 //  7. Build and return Result.
-func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
+func (r *RepoExecutor) Cleanup(ctx context.Context, t *Task, reason State) Result {
 	r.initDefaults()
 	ctx, task := trace.NewTask(ctx, "task.cleanup:"+t.ID.String())
 	defer task.End()
@@ -410,15 +414,13 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 	tlog := r.log.With("br", primaryBranch, "instance", name)
 	tlog.InfoContext(ctx, "cleanup starting", "reason", reason, "state", t.GetState(), "has_session", t.HasSession())
 
-	h := t.DetachSession()
-
 	// Graceful shutdown: send stop sentinel so the relay sends SIGINT.
 	// Stats come from live accumulators updated by startMessageDispatch.
+	gStart := time.Now()
+	h, gsErr := t.GracefulStopSession(ctx, 20*time.Second)
 	if h != nil {
-		tlog.DebugContext(ctx, "cleanup: sending graceful stop")
-		gStart := time.Now()
-		if err := h.GracefulStop(ctx, 20*time.Second); err != nil {
-			tlog.WarnContext(ctx, "graceful stop timed out", "err", err, "dur", time.Since(gStart).Round(time.Millisecond))
+		if gsErr != nil {
+			tlog.WarnContext(ctx, "graceful stop timed out", "err", gsErr, "dur", time.Since(gStart).Round(time.Millisecond))
 			r.logRelayDiag(ctx, tlog, t.RuntimeConnectionTarget())
 		} else {
 			tlog.DebugContext(ctx, "cleanup: graceful stop succeeded", "dur", time.Since(gStart).Round(time.Millisecond))
@@ -446,7 +448,9 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 	// above severed the runtime connection so this unblocks.
 	if h != nil {
 		dStart := time.Now()
-		h.Drain()
+		if err := h.Drain(); err != nil {
+			tlog.DebugContext(ctx, "cleanup: session drain returned error", "err", err)
+		}
 		tlog.DebugContext(ctx, "cleanup: session drained", "dur", time.Since(dStart).Round(time.Millisecond))
 	}
 
@@ -504,7 +508,7 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 // StopTask gracefully shuts down the agent session and stops the instance
 // without removing it. The instance can be revived later. Unlike Cleanup,
 // this preserves git remotes and runtime config.
-func (r *Runner) StopTask(ctx context.Context, t *Task) {
+func (r *RepoExecutor) StopTask(ctx context.Context, t *Task) {
 	r.initDefaults()
 	ctx, task := trace.NewTask(ctx, "task.stop:"+t.ID.String())
 	defer task.End()
@@ -522,14 +526,12 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 		return
 	}
 
-	h := t.DetachSession()
-
 	// Graceful shutdown: send stop sentinel so the relay sends SIGINT.
+	gStart := time.Now()
+	h, gsErr := t.GracefulStopSession(ctx, 20*time.Second)
 	if h != nil {
-		tlog.DebugContext(ctx, "stop: sending graceful stop")
-		gStart := time.Now()
-		if err := h.GracefulStop(ctx, 20*time.Second); err != nil {
-			tlog.WarnContext(ctx, "graceful stop timed out", "err", err, "dur", time.Since(gStart).Round(time.Millisecond))
+		if gsErr != nil {
+			tlog.WarnContext(ctx, "graceful stop timed out", "err", gsErr, "dur", time.Since(gStart).Round(time.Millisecond))
 			r.logRelayDiag(ctx, tlog, t.RuntimeConnectionTarget())
 		} else {
 			tlog.DebugContext(ctx, "stop: graceful stop succeeded", "dur", time.Since(gStart).Round(time.Millisecond))
@@ -553,7 +555,9 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 	// is complete before the state transitions to StateStopped.
 	if h != nil {
 		dStart := time.Now()
-		h.Drain()
+		if err := h.Drain(); err != nil {
+			tlog.DebugContext(ctx, "stop: session drain returned error", "err", err)
+		}
 		tlog.DebugContext(ctx, "stop: session drained", "dur", time.Since(dStart).Round(time.Millisecond))
 	}
 
@@ -595,7 +599,7 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 
 // ReviveTask restarts a stopped or crashed instance and resumes the agent session.
 // The instance's filesystem is preserved from the previous run.
-func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error) {
+func (r *RepoExecutor) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error) {
 	r.initDefaults()
 	ctx, task := trace.NewTask(ctx, "task.revive:"+t.ID.String())
 	defer task.End()
@@ -684,14 +688,12 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 // EnsureSession waits briefly for h to confirm it's alive. If the session
 // exits within 10 seconds (agent had already finished), it detaches and
 // starts a fresh idle relay so the task can accept new prompts.
-func (r *Runner) EnsureSession(ctx context.Context, t *Task, h *SessionHandle, tlog *slog.Logger) (*SessionHandle, error) {
+func (r *RepoExecutor) EnsureSession(ctx context.Context, t *Task, h *SessionHandle, tlog *slog.Logger) (*SessionHandle, error) {
 	select {
-	case <-h.Session.Done():
+	case <-h.Done():
 		// Session exited immediately (agent was already done).
 		t.DetachSession()
-		err := h.Session.Wait()
-		h.CloseMsgCh()
-		<-h.DispatchDone
+		err := h.Drain()
 		_ = h.LogW.Close()
 		tlog.Info("attached session exited, starting idle relay", "err", err)
 		if s := t.GetState(); s == StateStopping || s == StateStopped || s == StatePurged {
@@ -711,7 +713,7 @@ func (r *Runner) EnsureSession(ctx context.Context, t *Task, h *SessionHandle, t
 // If prompt is non-empty, it is sent as the initial input and the task
 // transitions to StateRunning. If prompt is empty, the agent starts idle
 // and the task stays in its current state (typically StateWaiting).
-func (r *Runner) StartSession(ctx context.Context, t *Task, prompt agent.Prompt) (*SessionHandle, error) {
+func (r *RepoExecutor) StartSession(ctx context.Context, t *Task, prompt agent.Prompt) (*SessionHandle, error) {
 	r.initDefaults()
 	ctx, task := trace.NewTask(ctx, "task.start-session:"+t.ID.String())
 	defer task.End()
@@ -766,7 +768,7 @@ func (r *Runner) StartSession(ctx context.Context, t *Task, prompt agent.Prompt)
 // session in the forked instance. The new task must already have its ID,
 // Harness, Model, and other immutable fields set. The method fills in
 // Runtime, Repos[*].Branch, and starts the session.
-func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *runtime.ForkOptions, resolvedGitHubToken string) (*SessionHandle, error) {
+func (r *RepoExecutor) ForkTask(ctx context.Context, source, fork *Task, forkOpts *runtime.ForkOptions, resolvedGitHubToken string) (*SessionHandle, error) {
 	r.initDefaults()
 	ctx, task := trace.NewTask(ctx, "task.fork:"+source.ID.String()+"->"+fork.ID.String())
 	defer task.End()
@@ -835,7 +837,7 @@ type setupResult struct {
 // AllocateBranch allocates a caic-N branch for this runner's repo using the
 // runner's base branch. Used by the server to allocate branches for extra repos
 // before starting a instance.
-func (r *Runner) AllocateBranch(ctx context.Context) (string, error) {
+func (r *RepoExecutor) AllocateBranch(ctx context.Context) (string, error) {
 	r.initDefaults()
 	r.branchMu.Lock()
 	defer r.branchMu.Unlock()
@@ -845,7 +847,7 @@ func (r *Runner) AllocateBranch(ctx context.Context) (string, error) {
 // SyncToOrigin pushes each repo's task branch to origin and returns the
 // combined diff stat across all repos and any safety issues found. Safety is
 // checked per-repo; when force is false, issues in any repo block the push.
-func (r *Runner) SyncToOrigin(ctx context.Context, t *Task, force bool) (agent.DiffStat, []SafetyIssue, error) {
+func (r *RepoExecutor) SyncToOrigin(ctx context.Context, t *Task, force bool) (agent.DiffStat, []SafetyIssue, error) {
 	r.initDefaults()
 	if r.Dir == "" {
 		return nil, nil, errors.New("sync is not supported for no-repo tasks")
@@ -864,7 +866,7 @@ func (r *Runner) SyncToOrigin(ctx context.Context, t *Task, force bool) (agent.D
 		region.End()
 		return nil, nil, err
 	}
-	ds := r.diffStat(fetchCtx, id, repos)
+	ds := diffStat(fetchCtx, r.Dir, r.Runtime, r.log, id, repos)
 	r.branchMu.Unlock()
 	region.End()
 
@@ -924,7 +926,7 @@ func extractRepoDS(ds agent.DiffStat, repoName string, multi bool) agent.DiffSta
 // and squash-pushes each repo's task branch onto its default branch. Safety
 // issues always block (no force override). The commit message is built from the
 // task title.
-func (r *Runner) SyncToDefault(ctx context.Context, t *Task, message string) (agent.DiffStat, []SafetyIssue, error) {
+func (r *RepoExecutor) SyncToDefault(ctx context.Context, t *Task, message string) (agent.DiffStat, []SafetyIssue, error) {
 	r.initDefaults()
 	if r.Dir == "" {
 		return nil, nil, errors.New("sync is not supported for no-repo tasks")
@@ -943,7 +945,7 @@ func (r *Runner) SyncToDefault(ctx context.Context, t *Task, message string) (ag
 		region.End()
 		return nil, nil, err
 	}
-	ds := r.diffStat(fetchCtx, id, repos)
+	ds := diffStat(fetchCtx, r.Dir, r.Runtime, r.log, id, repos)
 	r.branchMu.Unlock()
 	region.End()
 
@@ -984,7 +986,7 @@ func (r *Runner) SyncToDefault(ctx context.Context, t *Task, message string) (ag
 // RestartSession closes the current agent session and starts a fresh one in
 // the same instance with a new prompt. Returns the new SessionHandle so the
 // caller can start a session watcher.
-func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Prompt) (*SessionHandle, error) {
+func (r *RepoExecutor) RestartSession(ctx context.Context, t *Task, prompt agent.Prompt) (*SessionHandle, error) {
 	r.initDefaults()
 	ctx, task := trace.NewTask(ctx, "task.restart:"+t.ID.String())
 	defer task.End()
@@ -1065,7 +1067,7 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Promp
 // ClearContextSession closes the current agent session and starts a fresh one
 // in the same instance without a prompt. The task transitions to StateWaiting
 // so the user can send a new message when ready.
-func (r *Runner) ClearContextSession(ctx context.Context, t *Task) (*SessionHandle, error) {
+func (r *RepoExecutor) ClearContextSession(ctx context.Context, t *Task) (*SessionHandle, error) {
 	r.initDefaults()
 	ctx, task := trace.NewTask(ctx, "task.clear-context:"+t.ID.String())
 	defer task.End()
@@ -1141,7 +1143,7 @@ func (r *Runner) ClearContextSession(ctx context.Context, t *Task) (*SessionHand
 // to a single file path. When there are multiple repos, file paths are prefixed
 // with `<repoName>/` so the frontend can distinguish changes from different
 // repos. Holds branchMu during fetch+diff.
-func (r *Runner) DiffContent(ctx context.Context, t *Task, path string) (string, error) {
+func (r *RepoExecutor) DiffContent(ctx context.Context, t *Task, path string) (string, error) {
 	r.initDefaults()
 	if r.Dir == "" {
 		return "", errors.New("diff is not supported for no-repo tasks")
@@ -1225,7 +1227,7 @@ var mutatingTools = map[string]struct{}{
 // stat (md diff --numstat). Unlike the relay's diff_watcher which only tracks
 // uncommitted changes, this captures the full branch diff relative to the base.
 // Used by adoptOne to restore the diff stat after server restart.
-func (r *Runner) BranchDiffStat(ctx context.Context, t *Task) agent.DiffStat {
+func (r *RepoExecutor) BranchDiffStat(ctx context.Context, t *Task) agent.DiffStat {
 	r.initDefaults()
 	if r.Runtime == nil || r.Dir == "" {
 		return nil
@@ -1243,10 +1245,10 @@ func (r *Runner) BranchDiffStat(ctx context.Context, t *Task) agent.DiffStat {
 		r.log.Warn("fetch for branch diff stat failed", "err", err)
 		return nil
 	}
-	return r.diffStat(fetchCtx, id, repos)
+	return diffStat(fetchCtx, r.Dir, r.Runtime, r.log, id, repos)
 }
 
-func (r *Runner) taskRuntime(t *Task) (runtime.InstanceID, []runtime.Repo, error) {
+func (r *RepoExecutor) taskRuntime(t *Task) (runtime.InstanceID, []runtime.Repo, error) {
 	if t == nil {
 		return "", nil, errors.New("task is nil")
 	}
@@ -1266,7 +1268,7 @@ func (r *Runner) taskRuntime(t *Task) (runtime.InstanceID, []runtime.Repo, error
 
 // initDefaults populates timeout values and the logger.
 // Safe to call multiple times (sync.Once).
-func (r *Runner) initDefaults() {
+func (r *RepoExecutor) initDefaults() {
 	r.initOnce.Do(func() {
 		if r.Backends == nil {
 			r.Backends = map[harness.Name]agent.Backend{}
@@ -1286,7 +1288,7 @@ func (r *Runner) initDefaults() {
 }
 
 // backend returns the Backend for the given agent name.
-func (r *Runner) backend(name harness.Name) agent.Backend {
+func (r *RepoExecutor) backend(name harness.Name) agent.Backend {
 	return r.Backends[name]
 }
 
@@ -1297,7 +1299,7 @@ func (r *Runner) backend(name harness.Name) agent.Backend {
 //
 // TODO(2026-07-01): remove the filepath.Base fallback once all pre-MountedPath
 // runtime instances have cycled out.
-func (r *Runner) runtimeDir(t *Task) string {
+func (r *RepoExecutor) runtimeDir(t *Task) string {
 	if p := t.Primary(); p != nil && p.MountedPath != "" {
 		return strings.Replace(p.MountedPath, "~/", "/home/user/", 1)
 	}
@@ -1309,7 +1311,7 @@ func (r *Runner) runtimeDir(t *Task) string {
 
 // allocateBranchLocked fetches origin, resolves the start point, and creates
 // the task branch. Must be called under branchMu.
-func (r *Runner) allocateBranchLocked(ctx context.Context, t *Task) (string, error) {
+func (r *RepoExecutor) allocateBranchLocked(ctx context.Context, t *Task) (string, error) {
 	detached := context.WithoutCancel(ctx)
 	gitCtx, gitCancel := context.WithTimeout(detached, r.GitTimeout)
 	defer gitCancel()
@@ -1353,7 +1355,7 @@ func (r *Runner) allocateBranchLocked(ctx context.Context, t *Task) (string, err
 // fetchAndCreateBranch fetches origin and creates the given branch from the
 // resolved base. Acquires branchMu to serialize git operations across concurrent
 // task setups on the same repo.
-func (r *Runner) fetchAndCreateBranch(ctx context.Context, t *Task, branch string) error {
+func (r *RepoExecutor) fetchAndCreateBranch(ctx context.Context, t *Task, branch string) error {
 	r.branchMu.Lock()
 	defer r.branchMu.Unlock()
 	gitCtx, gitCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
@@ -1398,7 +1400,7 @@ func MakeMetadata(t *Task) runtime.Metadata {
 // git branch concurrently, then completes instance startup (Phase B).
 // Phase A (runtime launch) and git fetch+branch-create overlap, cutting the
 // branch-allocation time off the critical path.
-func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, resolvedGitHubToken string) (setupResult, error) {
+func (r *RepoExecutor) setup(ctx context.Context, t *Task, metadata runtime.Metadata, resolvedGitHubToken string) (setupResult, error) {
 	// Reserve the branch ID instantly (under lock, ~µs). The branch itself is
 	// created concurrently with runtime launch in Phase A.
 	if r.Dir != "" {
@@ -1493,7 +1495,7 @@ func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, 
 
 // logRelayDiag reads the relay daemon's relay.log from the instance and logs
 // its tail. Called when GracefulStop times out to capture relay-side diagnostics.
-func (r *Runner) logRelayDiag(ctx context.Context, tlog *slog.Logger, target runtime.ConnectionTarget) {
+func (r *RepoExecutor) logRelayDiag(ctx context.Context, tlog *slog.Logger, target runtime.ConnectionTarget) {
 	if target.SSHHost == "" {
 		tlog.Warn("relay target unavailable")
 		return
@@ -1514,7 +1516,7 @@ func (r *Runner) logRelayDiag(ctx context.Context, tlog *slog.Logger, target run
 // are suppressed (used during adoption where these are handled once at the end).
 // Returns the message channel and a done channel that closes when the goroutine
 // exits (after msgCh is fully drained).
-func (r *Runner) startMessageDispatch(ctx context.Context, t *Task, skipSideEffects bool) (msgCh chan agent.Message, dispatchDone <-chan struct{}) {
+func (r *RepoExecutor) startMessageDispatch(ctx context.Context, t *Task, skipSideEffects bool) (msgCh chan agent.Message, dispatchDone <-chan struct{}) {
 	// Capture all repos outside the goroutine to avoid races.
 	allRepos := t.RuntimeRepos()
 	instanceID := t.RuntimeInstanceID()
@@ -1544,7 +1546,7 @@ func (r *Runner) startMessageDispatch(ctx context.Context, t *Task, skipSideEffe
 					if err := r.Runtime.Fetch(fetchCtx, instanceID); err != nil {
 						r.log.Warn("fetch on result failed", "err", err)
 					}
-					msg.DiffStat = r.diffStat(fetchCtx, instanceID, allRepos)
+					msg.DiffStat = diffStat(fetchCtx, r.Dir, r.Runtime, r.log, instanceID, allRepos)
 					r.branchMu.Unlock()
 					fetchCancel()
 				}
@@ -1561,11 +1563,11 @@ func (r *Runner) startMessageDispatch(ctx context.Context, t *Task, skipSideEffe
 // emitDiffStatBranch emits a DiffStatMessage from the current instance diff
 // without fetching from the instance. This keeps live UI diff stats fresh during
 // a running turn without triggering md fetch side effects.
-func (r *Runner) emitDiffStatBranch(ctx context.Context, t *Task, id runtime.InstanceID, repos []runtime.Repo) {
+func (r *RepoExecutor) emitDiffStatBranch(ctx context.Context, t *Task, id runtime.InstanceID, repos []runtime.Repo) {
 	diffCtx, diffCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
 	defer diffCancel()
 	r.branchMu.Lock()
-	ds := r.diffStat(diffCtx, id, repos)
+	ds := diffStat(diffCtx, r.Dir, r.Runtime, r.log, id, repos)
 	r.branchMu.Unlock()
 	if len(ds) == 0 {
 		return
@@ -1578,17 +1580,22 @@ func (r *Runner) emitDiffStatBranch(ctx context.Context, t *Task, id runtime.Ins
 
 // diffStat runs Diff("--numstat") on each repo and returns the combined diff
 // stat. File paths are prefixed with `<repoName>/` when there are multiple repos
-// so the frontend can distinguish changes per repo.
-func (r *Runner) diffStat(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo) agent.DiffStat {
-	if r.Dir == "" {
+// so the frontend can distinguish changes per repo. Returns nil for no-repo
+// executors (dir == "").
+//
+// A free function rather than a RepoExecutor method: it carries no executor
+// state of its own, only the config fields (dir, rt, log) its caller already
+// holds.
+func diffStat(ctx context.Context, dir string, rt runtime.Backend, log *slog.Logger, id runtime.InstanceID, repos []runtime.Repo) agent.DiffStat {
+	if dir == "" {
 		return nil
 	}
 	var result agent.DiffStat
 	for i := range repos {
 		repo := &repos[i]
-		numstat, err := r.Runtime.Diff(ctx, id, i, "--numstat")
+		numstat, err := rt.Diff(ctx, id, i, "--numstat")
 		if err != nil {
-			r.log.Warn("diff numstat failed", "repo", repo.MountPath, "br", repo.Branch, "err", err)
+			log.Warn("diff numstat failed", "repo", repo.MountPath, "br", repo.Branch, "err", err)
 			continue
 		}
 		ds := ParseDiffNumstat(numstat)
@@ -1605,7 +1612,7 @@ func (r *Runner) diffStat(ctx context.Context, id runtime.InstanceID, repos []ru
 
 // openLog creates a JSONL log file in LogDir and writes a metadata header as
 // the first line.
-func (r *Runner) openLog(t *Task) (io.WriteCloser, error) {
+func (r *RepoExecutor) openLog(t *Task) (io.WriteCloser, error) {
 	if err := os.MkdirAll(r.LogDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create log dir: %w", err)
 	}
@@ -1668,7 +1675,7 @@ func (r *Runner) openLog(t *Task) (io.WriteCloser, error) {
 // reopenLog opens an existing log file for appending without writing a new
 // metadata header. Used by Cleanup to write the caic_result trailer for
 // stopped tasks whose session handle has already been released.
-func (r *Runner) reopenLog(t *Task) (io.WriteCloser, error) {
+func (r *RepoExecutor) reopenLog(t *Task) (io.WriteCloser, error) {
 	if r.LogDir == "" {
 		return nil, errors.New("no log dir")
 	}

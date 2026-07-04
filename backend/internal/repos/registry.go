@@ -17,7 +17,7 @@ import (
 // interior pointer.
 //
 // Ordering invariant with the Manager runner registry: a repo and its
-// task.Runner live in two separate lock domains (this registry and the
+// task.RepoExecutor live in two separate lock domains (this registry and the
 // Manager's). Callers that add a repo register its runner *after* add(); callers
 // that remove a repo unregister its runner *after* the remove. This leaves a
 // brief, benign window where a repo is listed without a runner (just added) or a
@@ -119,7 +119,7 @@ func (r *Registry) ForgePathsAtSHA(owner, repo, sha string) []string {
 
 // Add inserts or replaces a copy of info. RelPath and AbsPath are both stable
 // identities for a repo, so adding either identity twice is idempotent. The
-// caller registers the task.Runner afterwards (see the ordering invariant on
+// caller registers the task.RepoExecutor afterwards (see the ordering invariant on
 // Registry).
 func (r *Registry) Add(info *Info) {
 	r.mu.Lock()

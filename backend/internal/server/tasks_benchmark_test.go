@@ -125,7 +125,7 @@ func benchmarkPurgedTaskEventServer(b *testing.B, deltaCount int) (string, *test
 	}
 
 	s := newTestRouter(b)
-	registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+	s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 	if err := loadPurgedTasksForTest(s, logDir); err != nil {
 		b.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func benchmarkPurgedPiTaskEventServer(b *testing.B, deltaCount int) (string, *te
 	}
 
 	s := newTestRouter(b)
-	registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Pi: capipi.New("", nil)}})
+	s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Pi: capipi.New("", nil)}})
 	if err := loadPurgedTasksForTest(s, logDir); err != nil {
 		b.Fatal(err)
 	}

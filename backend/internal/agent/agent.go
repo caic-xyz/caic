@@ -22,7 +22,7 @@
 //
 // Flow 1 — One task is purged (user action or container death):
 //
-//	Server calls Runner.Cleanup → Session.Stop writes \x00\n then closes
+//	Server calls RepoExecutor.Cleanup → Session.Stop writes \x00\n then closes
 //	stdin → attach_client forwards sentinel through Unix socket, sees stdin
 //	EOF, exits → _client_reader sets shutdown_event → _shutdown_watchdog
 //	closes proc.stdin, sends SIGINT, escalates to SIGTERM/SIGKILL →

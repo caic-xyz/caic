@@ -810,7 +810,7 @@ func TestTask(t *testing.T) {
 		t.Run("TextMessageTransitionsStartingToRunning", func(t *testing.T) {
 			t.Parallel()
 			// When the agent subprocess produces output before
-			// Runner.Start calls SetState(Running), StateStarting
+			// RepoExecutor.Start calls SetState(Running), StateStarting
 			// must transition to Running so the subsequent
 			// ResultMessage can transition further.
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
@@ -2485,7 +2485,7 @@ func TestSessionHandle(t *testing.T) {
 		}()
 		h := &SessionHandle{Session: s, MsgCh: ch, DispatchDone: done}
 		_ = stdin.Close()
-		h.Drain()
+		_ = h.Drain()
 		select {
 		case <-done:
 		default:
