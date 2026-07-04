@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/md"
-	"github.com/caic-xyz/md/gitutil"
+	"github.com/caic-xyz/md/git"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
@@ -337,8 +337,9 @@ func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.R
 	}
 	absPath := info.AbsPath
 	ctx := r.Context()
+	checkout := &git.Checkout{Root: absPath, Logger: slog.Default()}
 	// Fetch local branches.
-	localPairs, err := gitutil.ListBranches(ctx, absPath, "")
+	localPairs, err := checkout.ListBranches(ctx, "")
 	if err != nil {
 		slog.WarnContext(ctx, "list local branches failed", "repo", repo, "err", err)
 	}
@@ -349,7 +350,7 @@ func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.R
 		branches = append(branches, v1.BranchInfo{Name: p[0]})
 	}
 	// Fetch remote branches from all remotes.
-	remoteList, err := gitutil.RunGit(ctx, absPath, "remote")
+	remoteList, err := checkout.RunGit(ctx, "remote")
 	if err != nil {
 		slog.WarnContext(ctx, "list remotes failed", "repo", repo, "err", err)
 	}
@@ -357,7 +358,7 @@ func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.R
 		if remote == "" {
 			continue
 		}
-		remotePairs, err := gitutil.ListBranches(ctx, absPath, remote)
+		remotePairs, err := checkout.ListBranches(ctx, remote)
 		if err != nil {
 			slog.WarnContext(ctx, "list remote branches failed", "repo", repo, "remote", remote, "err", err)
 			continue
@@ -392,7 +393,7 @@ func (h *serverHandlers) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*
 		Path:       info.RelPath,
 		Branch:     info.BaseBranch,
 		BaseBranch: v1.BranchInfo{Name: info.BaseBranch, Remote: info.BaseBranchRemote},
-		RemoteURL:  gitutil.RemoteToHTTPS(info.Remote),
+		RemoteURL:  git.RemoteToHTTPS(info.Remote),
 		Forge:      v1.Forge(info.ForgeKind),
 	}, nil
 }
@@ -411,7 +412,7 @@ func repoDTO(status *repos.InfoWithCI) v1.Repo {
 		Path:       info.RelPath,
 		Branch:     info.BaseBranch,
 		BaseBranch: v1.BranchInfo{Name: info.BaseBranch, Remote: info.BaseBranchRemote},
-		RemoteURL:  gitutil.RemoteToHTTPS(info.Remote),
+		RemoteURL:  git.RemoteToHTTPS(info.Remote),
 		Forge:      v1.Forge(info.ForgeKind),
 	}
 	if status.HasCI {

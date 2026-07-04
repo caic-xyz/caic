@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caic-xyz/md/gitutil"
+	"github.com/caic-xyz/md/git"
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers"
 
@@ -116,7 +116,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 
 	go func() {
 		defer trace.StartRegion(ctx, "discover-repos").End()
-		paths, err := gitutil.DiscoverRepos(rootDir, repoDiscoveryDepth)
+		paths, err := git.DiscoverCheckouts(rootDir, repoDiscoveryDepth)
 		repoCh <- reposResult{paths, err}
 	}()
 	go func() {

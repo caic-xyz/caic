@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caic-xyz/md/gitutil"
+	"github.com/caic-xyz/md/git"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/ci"
@@ -119,15 +119,16 @@ func (s *Service) Changed() <-chan struct{} {
 // DiscoverRunner discovers repo metadata and initializes its task runner.
 func (s *Service) DiscoverRunner(ctx context.Context, abs string) (InitResult, error) {
 	rel := s.RelPath(abs)
-	remoteName, err := gitutil.DefaultRemote(ctx, abs)
+	checkout := &git.Checkout{Root: abs, Logger: slog.Default()}
+	remoteName, err := checkout.DefaultRemote(ctx)
 	if err != nil {
 		return InitResult{}, fmt.Errorf("cannot determine default remote: %w", err)
 	}
-	branch, err := gitutil.DefaultBranch(ctx, abs, remoteName)
+	branch, err := checkout.DefaultBranch(ctx, remoteName)
 	if err != nil {
 		return InitResult{}, fmt.Errorf("cannot determine default branch: %w", err)
 	}
-	remote := gitutil.RemoteOriginURL(ctx, abs)
+	remote := checkout.RemoteOriginURL(ctx)
 	var forgeKind forge.Kind
 	var forgeOwner, forgeRepo string
 	if rawURL, err := forge.RemoteURL(ctx, abs); err == nil {
@@ -307,17 +308,18 @@ func (s *Service) Clone(ctx context.Context, req CloneRequest) (Info, error) {
 		return Info{}, repoError(ErrorInternal, "git clone failed: "+err.Error())
 	}
 
-	remoteName, err := gitutil.DefaultRemote(ctx, absTarget)
+	checkout := &git.Checkout{Root: absTarget, Logger: slog.Default()}
+	remoteName, err := checkout.DefaultRemote(ctx)
 	if err != nil {
 		_ = os.RemoveAll(absTarget)
 		return Info{}, repoError(ErrorInternal, "cannot determine default remote: "+err.Error())
 	}
-	branch, err := gitutil.DefaultBranch(ctx, absTarget, remoteName)
+	branch, err := checkout.DefaultBranch(ctx, remoteName)
 	if err != nil {
 		_ = os.RemoveAll(absTarget)
 		return Info{}, repoError(ErrorInternal, "cannot determine default branch: "+err.Error())
 	}
-	remote := gitutil.RemoteOriginURL(ctx, absTarget)
+	remote := checkout.RemoteOriginURL(ctx)
 	info := Info{RelPath: targetPath, AbsPath: absTarget, BaseBranch: branch, BaseBranchRemote: remoteName, Remote: remote}
 	runner, err := s.newRunner(ctx, &info)
 	if err != nil {

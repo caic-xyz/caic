@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caic-xyz/md/gitutil"
+	"github.com/caic-xyz/md/git"
 )
 
 // DiscoveryDepth is the maximum directory levels below AbsRoot that
-// DiscoverRepos scans for git repositories, both at startup and during
+// DiscoverCheckouts scans for git repositories, both at startup and during
 // background polling.
 const DiscoveryDepth = 3
 
@@ -98,7 +98,7 @@ func (w *Watcher) Watch() {
 // SyncReposInDir discovers repositories at depth 1 within dir and reconciles
 // the registered set.
 func (w *Watcher) SyncReposInDir(ctx context.Context, dir string) {
-	paths, err := gitutil.DiscoverRepos(dir, 1)
+	paths, err := git.DiscoverCheckouts(dir, 1)
 	if err != nil {
 		slog.WarnContext(ctx, "discover repos: scan failed", "dir", dir, "err", err)
 		return

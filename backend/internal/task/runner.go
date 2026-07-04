@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caic-xyz/md/gitutil"
+	"github.com/caic-xyz/md/git"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -892,7 +892,8 @@ func (r *Runner) SyncToOrigin(ctx context.Context, t *Task, force bool) (agent.D
 		branch := repo.Branch
 		ref := "refs/remotes/" + string(id) + "/" + branch
 		pushCtx, pushCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
-		if err := gitutil.PushRef(pushCtx, repo.HostPath, ref, branch, true); err != nil {
+		checkout := &git.Checkout{Root: repo.HostPath, Logger: r.log}
+		if err := checkout.PushRef(pushCtx, ref, branch, true); err != nil {
 			pushCancel()
 			return ds, allIssues, fmt.Errorf("push %s to origin: %w", repo.MountPath, err)
 		}
@@ -970,7 +971,8 @@ func (r *Runner) SyncToDefault(ctx context.Context, t *Task, message string) (ag
 		branch := repo.Branch
 		ref := "refs/remotes/" + string(id) + "/" + branch
 		squashCtx, squashCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
-		if err := gitutil.SquashOnto(squashCtx, repo.HostPath, ref, r.BaseBranch, message); err != nil {
+		checkout := &git.Checkout{Root: repo.HostPath, Logger: r.log}
+		if err := checkout.SquashOnto(squashCtx, ref, r.BaseBranch, message); err != nil {
 			squashCancel()
 			return ds, allIssues, fmt.Errorf("squash %s onto %s: %w", repo.MountPath, r.BaseBranch, err)
 		}
@@ -1311,8 +1313,9 @@ func (r *Runner) allocateBranchLocked(ctx context.Context, t *Task) (string, err
 	detached := context.WithoutCancel(ctx)
 	gitCtx, gitCancel := context.WithTimeout(detached, r.GitTimeout)
 	defer gitCancel()
+	checkout := &git.Checkout{Root: r.Dir, Logger: r.log}
 	// Fetch so that origin/<base> is up to date.
-	if err := gitutil.Fetch(gitCtx, r.Dir); err != nil {
+	if err := checkout.Fetch(gitCtx); err != nil {
 		return "", fmt.Errorf("fetch: %w", err)
 	}
 	// Resolve effective base branch: use task override if provided.
@@ -1323,7 +1326,7 @@ func (r *Runner) allocateBranchLocked(ctx context.Context, t *Task) (string, err
 	// Prefer the remote tracking ref, but fall back to the local branch when
 	// the base branch only exists locally (not yet pushed to origin).
 	startPoint := "origin/" + effectiveBase
-	if _, err := gitutil.RevParse(gitCtx, r.Dir, startPoint); err != nil {
+	if _, err := checkout.RevParse(gitCtx, startPoint); err != nil {
 		startPoint = effectiveBase
 	}
 	// Assign a sequential branch name, skipping existing ones.
@@ -1336,7 +1339,7 @@ func (r *Runner) allocateBranchLocked(ctx context.Context, t *Task) (string, err
 		branch = fmt.Sprintf("caic-%d", r.nextID)
 		r.nextID++
 		r.log.Info("creating branch", "br", branch, "base", effectiveBase)
-		err = gitutil.CreateBranch(gitCtx, r.Dir, branch, startPoint)
+		err = checkout.CreateBranch(gitCtx, branch, startPoint)
 		if err == nil {
 			break
 		}
@@ -1355,7 +1358,8 @@ func (r *Runner) fetchAndCreateBranch(ctx context.Context, t *Task, branch strin
 	defer r.branchMu.Unlock()
 	gitCtx, gitCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
 	defer gitCancel()
-	if err := gitutil.Fetch(gitCtx, r.Dir); err != nil {
+	checkout := &git.Checkout{Root: r.Dir, Logger: r.log}
+	if err := checkout.Fetch(gitCtx); err != nil {
 		return fmt.Errorf("fetch: %w", err)
 	}
 	effectiveBase := r.BaseBranch
@@ -1363,11 +1367,11 @@ func (r *Runner) fetchAndCreateBranch(ctx context.Context, t *Task, branch strin
 		effectiveBase = p.BaseBranch
 	}
 	startPoint := "origin/" + effectiveBase
-	if _, err := gitutil.RevParse(gitCtx, r.Dir, startPoint); err != nil {
+	if _, err := checkout.RevParse(gitCtx, startPoint); err != nil {
 		startPoint = effectiveBase
 	}
 	r.log.Info("creating branch", "br", branch, "base", effectiveBase)
-	if err := gitutil.CreateBranch(gitCtx, r.Dir, branch, startPoint); err != nil {
+	if err := checkout.CreateBranch(gitCtx, branch, startPoint); err != nil {
 		return fmt.Errorf("create branch: %w", err)
 	}
 	return nil

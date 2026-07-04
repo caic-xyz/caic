@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caic-xyz/md/gitutil"
+	"github.com/caic-xyz/md/git"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
@@ -688,7 +688,7 @@ func newTaskResolvers(taskMgr *tasks.Manager, repoSvc *repos.Service, authStore 
 	return v1conv.TaskResolvers{
 		RepoURL: func(rel string) string {
 			if info, ok := repoSvc.InfoFor(rel); ok {
-				return gitutil.RemoteToHTTPS(info.Remote)
+				return git.RemoteToHTTPS(info.Remote)
 			}
 			return ""
 		},
