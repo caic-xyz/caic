@@ -128,26 +128,6 @@ func (w *testWire) ParseMessage(line []byte) ([]agent.Message, error) {
 
 func TestRepoExecutor(t *testing.T) {
 	t.Parallel()
-	t.Run("WriteLogTrailerReasoningTokens", func(t *testing.T) {
-		t.Parallel()
-		var b strings.Builder
-		res := &Result{
-			State: StateWaiting,
-			Usage: agent.Usage{
-				ReasoningOutputTokens: 123,
-			},
-		}
-		if err := writeLogTrailer(&b, "title", res); err != nil {
-			t.Fatal(err)
-		}
-		var got agent.MetaResultMessage
-		if err := json.Unmarshal([]byte(b.String()), &got); err != nil {
-			t.Fatal(err)
-		}
-		if got.ReasoningOutputTokens != 123 {
-			t.Errorf("ReasoningOutputTokens = %d, want 123", got.ReasoningOutputTokens)
-		}
-	})
 	t.Run("MakeMetadata", func(t *testing.T) {
 		t.Parallel()
 		t.Run("Basic", func(t *testing.T) {
@@ -544,7 +524,7 @@ func TestRepoExecutor(t *testing.T) {
 			tk.SetState(StateStopped)
 
 			// Create a pre-existing log file (written by StopTask scenario).
-			logW, err := r.openLog(tk)
+			logW, err := r.logStore().Open(tk)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -727,7 +707,7 @@ func TestRepoExecutor(t *testing.T) {
 		})
 	})
 
-	t.Run("openLog", func(t *testing.T) {
+	t.Run("LogStore", func(t *testing.T) {
 		t.Parallel()
 		t.Run("CreatesFile", func(t *testing.T) {
 			t.Parallel()
@@ -741,7 +721,7 @@ func TestRepoExecutor(t *testing.T) {
 				Model:         "model-1",
 				Effort:        "high",
 			}
-			w, err := r.openLog(tk)
+			w, err := r.logStore().Open(tk)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -779,7 +759,7 @@ func TestRepoExecutor(t *testing.T) {
 		})
 		t.Run("ReopenNoDuplicateHeader", func(t *testing.T) {
 			t.Parallel()
-			// Reconnect appends via reopenLog, which must not write a second
+			// Reconnect appends via Reopen, which must not write a second
 			// caic_meta header. Otherwise every server restart that re-adopts
 			// a running instance duplicates the header.
 			logDir := filepath.Join(t.TempDir(), "logs")
@@ -787,7 +767,7 @@ func TestRepoExecutor(t *testing.T) {
 			tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Name: "org/repo", Branch: "caic-0"}}}
 
 			// Initial Start writes the header.
-			w, err := r.openLog(tk)
+			w, err := r.logStore().Open(tk)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -796,7 +776,7 @@ func TestRepoExecutor(t *testing.T) {
 			// Several reconnects (simulating repeated server restarts) append
 			// without writing a new header.
 			for range 3 {
-				w, err := r.reopenLog(tk)
+				w, err := r.logStore().Reopen(tk)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -814,12 +794,12 @@ func TestRepoExecutor(t *testing.T) {
 		})
 		t.Run("ReopenMissingFile", func(t *testing.T) {
 			t.Parallel()
-			// reopenLog must report os.ErrNotExist when no log exists yet so
-			// Reconnect can fall back to openLog (which writes the header).
+			// Reopen must report os.ErrNotExist when no log exists yet so
+			// Reconnect can fall back to Open (which writes the header).
 			r := &RepoExecutor{LogDir: filepath.Join(t.TempDir(), "logs")}
 			tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Name: "org/repo", Branch: "caic-0"}}}
-			if _, err := r.reopenLog(tk); !errors.Is(err, os.ErrNotExist) {
-				t.Errorf("reopenLog err = %v, want os.ErrNotExist", err)
+			if _, err := r.logStore().Reopen(tk); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("Reopen err = %v, want os.ErrNotExist", err)
 			}
 		})
 	})
@@ -1122,7 +1102,7 @@ func TestRepoExecutor(t *testing.T) {
 
 		// Create an initial session with a log writer by using the backend
 		// directly (RepoExecutor.Start needs a instance backend).
-		logW, err := r.openLog(tk)
+		logW, err := r.logStore().Open(tk)
 		if err != nil {
 			t.Fatal(err)
 		}

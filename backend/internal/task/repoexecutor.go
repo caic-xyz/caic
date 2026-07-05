@@ -1,13 +1,12 @@
 // RepoExecutor is the per-repo executor that runs tasks: it orchestrates
-// branch/instance setup, agent session lifecycle, git sync, and log I/O for
-// every task backed by that repo.
+// branch/instance setup, agent session lifecycle, and git sync for every task
+// backed by that repo.
 
 package task
 
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -90,53 +89,6 @@ func (w *provisioningWriter) Write(p []byte) (int, error) {
 		}
 	}
 	return len(p), nil
-}
-
-// writeLogTrailer appends a MetaResultMessage to the log file.
-func writeLogTrailer(w io.Writer, title string, res *Result) error {
-	if w == nil {
-		return ErrNoLog
-	}
-	mr := agent.MetaResultMessage{
-		MessageType:              "caic_result",
-		State:                    res.State.String(),
-		Title:                    title,
-		CostUSD:                  res.CostUSD,
-		Duration:                 res.Duration.Seconds(),
-		NumTurns:                 res.NumTurns,
-		InputTokens:              res.Usage.InputTokens,
-		OutputTokens:             res.Usage.OutputTokens,
-		CacheCreationInputTokens: res.Usage.CacheCreationInputTokens,
-		CacheReadInputTokens:     res.Usage.CacheReadInputTokens,
-		ReasoningOutputTokens:    res.Usage.ReasoningOutputTokens,
-		DiffStat:                 res.DiffStat,
-		AgentResult:              res.AgentResult,
-	}
-	if res.Err != nil {
-		mr.Error = res.Err.Error()
-	}
-	data, err := json.Marshal(mr)
-	if err != nil {
-		return err
-	}
-	_, err = w.Write(append(data, '\n'))
-	return err
-}
-
-// writeContextCleared appends a context_cleared system message to the log.
-// Called before closing the old log writer in RestartSession so that
-// RestoreMessages can reset plan state on server restart.
-func writeContextCleared(w io.Writer) error {
-	if w == nil {
-		return ErrNoLog
-	}
-	msg := syntheticContextCleared()
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return err
-	}
-	_, err = w.Write(append(data, '\n'))
-	return err
 }
 
 // maxBranchSeqNum finds the highest sequence number N among all branches
@@ -240,10 +192,10 @@ func (r *RepoExecutor) Reconnect(ctx context.Context, t *Task, skipSideEffects b
 	// Reconnect resumes an existing session, so append to its log without
 	// writing a new caic_meta header — otherwise every server restart that
 	// re-adopts a running instance would append a duplicate header. Fall
-	// back to openLog (which writes the header) only if the log is missing.
-	logW, err := r.reopenLog(t)
+	// back to Open (which writes the header) only if the log is missing.
+	logW, err := r.logStore().Reopen(t)
 	if errors.Is(err, os.ErrNotExist) {
-		logW, err = r.openLog(t)
+		logW, err = r.logStore().Open(t)
 	}
 	if err != nil {
 		close(msgCh)
@@ -337,7 +289,7 @@ func (r *RepoExecutor) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 	{
 		region := trace.StartRegion(ctx, "dispatch-init")
 		msgCh, dispatchDone = r.startMessageDispatch(ctx, t, false)
-		logW, err = r.openLog(t)
+		logW, err = r.logStore().Open(t)
 		region.End()
 	}
 	if err != nil {
@@ -477,12 +429,12 @@ func (r *RepoExecutor) Cleanup(ctx context.Context, t *Task, reason State) Resul
 		// on the next server restart instead of "purged".
 		tlog.DebugContext(ctx, "cleanup: no session handle, reopening log for trailer")
 		var reopenErr error
-		logW, reopenErr = r.reopenLog(t)
+		logW, reopenErr = r.logStore().Reopen(t)
 		if reopenErr != nil {
 			tlog.WarnContext(ctx, "reopen log for trailer failed", "err", reopenErr)
 		}
 	}
-	trailerErr := writeLogTrailer(logW, t.Title(), &res)
+	trailerErr := r.logStore().WriteResultTrailer(logW, t.Title(), &res)
 	if trailerErr != nil {
 		tlog.WarnContext(ctx, "write log trailer failed", "err", trailerErr)
 	}
@@ -586,7 +538,7 @@ func (r *RepoExecutor) StopTask(ctx context.Context, t *Task) {
 	if h != nil {
 		logW = h.LogW
 	}
-	if err := writeLogTrailer(logW, t.Title(), &res); err != nil {
+	if err := r.logStore().WriteResultTrailer(logW, t.Title(), &res); err != nil {
 		tlog.WarnContext(ctx, "write log trailer failed", "err", err)
 	}
 	if logW != nil {
@@ -639,7 +591,7 @@ func (r *RepoExecutor) ReviveTask(ctx context.Context, t *Task) (*SessionHandle,
 	tlog.Info("resuming session after revive", "sess", t.GetSessionID())
 
 	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, true)
-	logW, err := r.openLog(t)
+	logW, err := r.logStore().Open(t)
 	if err != nil {
 		close(msgCh)
 		<-dispatchDone
@@ -729,7 +681,7 @@ func (r *RepoExecutor) StartSession(ctx context.Context, t *Task, prompt agent.P
 	tlog := r.log.With("br", primaryBranch, "instance", instanceID)
 
 	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false)
-	logW, err := r.openLog(t)
+	logW, err := r.logStore().Open(t)
 	if err != nil {
 		close(msgCh)
 		<-dispatchDone
@@ -1004,7 +956,7 @@ func (r *RepoExecutor) RestartSession(ctx context.Context, t *Task, prompt agent
 		oldH.CloseMsgCh()
 		<-oldH.DispatchDone
 		if oldH.LogW != nil {
-			err := writeContextCleared(oldH.LogW)
+			err := r.logStore().WriteContextCleared(oldH.LogW)
 			err = errors.Join(err, oldH.LogW.Close())
 			if err != nil {
 				t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
@@ -1017,7 +969,7 @@ func (r *RepoExecutor) RestartSession(ctx context.Context, t *Task, prompt agent
 	t.ClearMessages(ctx)
 
 	// 3. Open new log segment.
-	logW, err := r.openLog(t)
+	logW, err := r.logStore().Open(t)
 	if err != nil {
 		t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
 		return nil, fmt.Errorf("open log: %w", err)
@@ -1083,7 +1035,7 @@ func (r *RepoExecutor) ClearContextSession(ctx context.Context, t *Task) (*Sessi
 		oldH.CloseMsgCh()
 		<-oldH.DispatchDone
 		if oldH.LogW != nil {
-			err := writeContextCleared(oldH.LogW)
+			err := r.logStore().WriteContextCleared(oldH.LogW)
 			err = errors.Join(err, oldH.LogW.Close())
 			if err != nil {
 				t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
@@ -1096,7 +1048,7 @@ func (r *RepoExecutor) ClearContextSession(ctx context.Context, t *Task) (*Sessi
 	t.ClearMessages(ctx)
 
 	// 3. Open new log segment.
-	logW, err := r.openLog(t)
+	logW, err := r.logStore().Open(t)
 	if err != nil {
 		t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
 		return nil, fmt.Errorf("open log: %w", err)
@@ -1610,90 +1562,6 @@ func diffStat(ctx context.Context, dir string, rt runtime.Backend, log *slog.Log
 	return result
 }
 
-// openLog creates a JSONL log file in LogDir and writes a metadata header as
-// the first line.
-func (r *RepoExecutor) openLog(t *Task) (io.WriteCloser, error) {
-	if err := os.MkdirAll(r.LogDir, 0o750); err != nil {
-		return nil, fmt.Errorf("create log dir: %w", err)
-	}
-	safeRepo := ""
-	safeBranch := ""
-	if p := t.Primary(); p != nil {
-		safeRepo = strings.ReplaceAll(p.Name, "/", "-")
-		safeBranch = strings.ReplaceAll(p.Branch, "/", "-")
-	}
-	name := t.ID.String() + "-" + safeRepo + "-" + safeBranch + ".jsonl"
-	path := filepath.Join(r.LogDir, name)
-	f, err := newTaskLogWriter(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND)
-	if err != nil {
-		return nil, fmt.Errorf("create log file: %w", err)
-	}
-	t.SetLogPath(path)
-	if r.EventReplayFactory != nil {
-		t.StartEventReplay(r.EventReplayFactory(path, t.Harness))
-	}
-	// Write metadata header as the first line.
-	repos := t.ReposSnapshot()
-	metaRepos := make([]agent.MetaRepo, len(repos))
-	for i, r := range repos {
-		metaRepos[i] = agent.MetaRepo{Name: r.Name, BaseBranch: r.BaseBranch, Branch: r.Branch, MountedPath: r.MountedPath}
-	}
-	meta := agent.MetaMessage{
-		MessageType:       "caic_meta",
-		Version:           1,
-		Prompt:            t.InitialPrompt.Text,
-		Title:             t.Title(),
-		Repos:             metaRepos,
-		Harness:           t.Harness,
-		Model:             t.Model,
-		Effort:            t.Effort,
-		StartedAt:         t.StartedAt,
-		ForgeIssue:        t.ForgeIssue,
-		Tailscale:         t.Tailscale,
-		USB:               t.USB,
-		Display:           t.Display,
-		Sudo:              t.Sudo,
-		GitHubToken:       t.GitHubTokenEnabled(),
-		BaseImage:         t.BaseImage,
-		ContainerPlatform: t.ContainerPlatform,
-		MaxCPUs:           t.MaxCPUs,
-		CacheMounts:       metaCacheMountsFromRuntime(t.CacheMounts),
-		Mounts:            metaMountsFromRuntime(t.Mounts),
-	}
-	data, err := json.Marshal(meta)
-	if err != nil {
-		_ = f.Close()
-		return nil, fmt.Errorf("marshal log metadata: %w", err)
-	}
-	if _, err := f.Write(append(data, '\n')); err != nil {
-		_ = f.Close()
-		return nil, fmt.Errorf("write log metadata: %w", err)
-	}
-	return f, nil
-}
-
-// reopenLog opens an existing log file for appending without writing a new
-// metadata header. Used by Cleanup to write the caic_result trailer for
-// stopped tasks whose session handle has already been released.
-func (r *RepoExecutor) reopenLog(t *Task) (io.WriteCloser, error) {
-	if r.LogDir == "" {
-		return nil, errors.New("no log dir")
-	}
-	safeRepo := ""
-	safeBranch := ""
-	if p := t.Primary(); p != nil {
-		safeRepo = strings.ReplaceAll(p.Name, "/", "-")
-		safeBranch = strings.ReplaceAll(p.Branch, "/", "-")
-	}
-	name := t.ID.String() + "-" + safeRepo + "-" + safeBranch + ".jsonl"
-	path := filepath.Join(r.LogDir, name)
-	w, err := newTaskLogWriter(path, os.O_WRONLY|os.O_APPEND)
-	if err != nil {
-		return nil, err
-	}
-	t.SetLogPath(path)
-	if r.EventReplayFactory != nil {
-		t.StartEventReplay(r.EventReplayFactory(path, t.Harness))
-	}
-	return w, nil
+func (r *RepoExecutor) logStore() *LogStore {
+	return &LogStore{LogDir: r.LogDir, EventReplayFactory: r.EventReplayFactory}
 }
