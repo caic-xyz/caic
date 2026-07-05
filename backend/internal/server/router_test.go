@@ -114,7 +114,7 @@ func newTestRouter(t testing.TB) *testRouter {
 	}
 	backend := &mdruntime.Backend{}
 	taskMgr := tasks.New(tasks.Config{ServerCtx: t.Context()})
-	repoSvc := repos.NewService("", "", "", nil, repos.NewRegistry(nil), taskMgr, backend, nil)
+	repoSvc := repos.NewService("", repos.NewRegistry(nil), taskMgr)
 	prefs := newTestPrefs(t)
 	forgeManager := forgemanager.New("", "", nil)
 	s, err := New(t.Context(), Dependencies{
@@ -141,7 +141,7 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 	}
 	backend := &mdruntime.Backend{}
 	taskMgr := tasks.New(tasks.Config{ServerCtx: t.Context()})
-	repoSvc := repos.NewService("", "", "", nil, repos.NewRegistry(nil), taskMgr, backend, nil)
+	repoSvc := repos.NewService("", repos.NewRegistry(nil), taskMgr)
 	prefs := newTestPrefs(t)
 	forgeManager := forgemanager.New("", "", nil)
 	s, err := New(t.Context(), Dependencies{
@@ -295,14 +295,14 @@ func loadPurgedTasksForTest(s *testRouter, logDir string) error {
 	return s.taskMgr.LoadPurgedTasks(logs)
 }
 
-type executorConstructionTestFixture struct {
+type workspaceConstructionTestFixture struct {
 	server   *testRouter
 	logDir   string
 	cacheDir string
 	backend  *mdruntime.Backend
 }
 
-func newExecutorConstructionTestServer(t *testing.T, root string) executorConstructionTestFixture {
+func newWorkspaceConstructionTestServer(t *testing.T, root string) workspaceConstructionTestFixture {
 	harnessEnv := map[string][]string{string(harness.Codex): {"CODEX_HOME=/tmp/codex"}}
 	backend := &mdruntime.Backend{HarnessEnv: harnessEnv}
 	backends := map[harness.Name]agent.Backend{harness.Codex: stubBackend{}}
@@ -316,7 +316,7 @@ func newExecutorConstructionTestServer(t *testing.T, root string) executorConstr
 		Backends:   backends,
 		HarnessEnv: harnessEnv,
 	})
-	repoSvc := repos.NewService(root, logDir, cacheDir, harnessEnv, repos.NewRegistry(nil), taskMgr, backend, backends)
+	repoSvc := repos.NewService(root, repos.NewRegistry(nil), taskMgr)
 	prefs := newTestPrefs(t)
 	s, err := New(t.Context(), Dependencies{
 		Repos:          repoSvc,
@@ -328,7 +328,7 @@ func newExecutorConstructionTestServer(t *testing.T, root string) executorConstr
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return executorConstructionTestFixture{
+	return workspaceConstructionTestFixture{
 		server:   &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, prefs: prefs},
 		logDir:   logDir,
 		cacheDir: cacheDir,
@@ -338,23 +338,23 @@ func newExecutorConstructionTestServer(t *testing.T, root string) executorConstr
 
 func newTestRepoWatcher(t *testing.T, root string, s *testRouter) *repos.Watcher {
 	return repos.NewWatcher(&repos.WatcherConfig{
-		Ctx:            t.Context(),
-		AbsRoot:        root,
-		Repos:          func() []repos.Info { return testWatchedRepos(s.repos) },
-		RelPath:        s.repos.RelPath,
-		ExecutorExists: s.repos.ExecutorRegistered,
+		Ctx:             t.Context(),
+		AbsRoot:         root,
+		Repos:           func() []repos.Info { return testWatchedRepos(s.repos) },
+		RelPath:         s.repos.RelPath,
+		WorkspaceExists: s.repos.WorkspaceRegistered,
 		OnDiscovered: func(ctx context.Context, abs string) {
-			result, err := s.repos.DiscoverExecutor(ctx, abs)
+			result, err := s.repos.DiscoverWorkspace(ctx, abs)
 			if err != nil {
-				t.Errorf("DiscoverExecutor(%q): %v", abs, err)
+				t.Errorf("DiscoverWorkspace(%q): %v", abs, err)
 				return
 			}
-			if s.repos.ExecutorRegistered(result.Info.RelPath) {
+			if s.repos.WorkspaceRegistered(result.Info.RelPath) {
 				return
 			}
-			s.repos.RegisterExecutor(&result)
+			s.repos.RegisterWorkspace(&result)
 		},
-		OnRemoved: s.repos.DeregisterExecutor,
+		OnRemoved: s.repos.DeregisterWorkspace,
 	})
 }
 
@@ -397,11 +397,11 @@ func runServerGit(t *testing.T, dir string, args ...string) {
 func TestCloneRepo(t *testing.T) {
 	t.Parallel()
 
-	t.Run("valid executor construction and watcher overlap", func(t *testing.T) {
+	t.Run("valid workspace construction and watcher overlap", func(t *testing.T) {
 		t.Parallel()
 		root := t.TempDir()
 		source := initCloneSourceRepo(t)
-		fixture := newExecutorConstructionTestServer(t, root)
+		fixture := newWorkspaceConstructionTestServer(t, root)
 		s := fixture.server
 
 		repo, err := s.serverHandlers.cloneRepo(t.Context(), &v1.CloneRepoReq{URL: source, Path: "./cloned"})
@@ -411,39 +411,33 @@ func TestCloneRepo(t *testing.T) {
 		if repo.Path != "cloned" {
 			t.Fatalf("repo path = %q, want cloned", repo.Path)
 		}
-		executor, ok := s.taskMgr.Executor("cloned")
+		workspace, ok := s.taskMgr.Workspace("cloned")
 		if !ok {
-			t.Fatal("cloned executor not registered")
+			t.Fatal("cloned workspace not registered")
 		}
-		if executor.RepoName != "cloned" {
-			t.Fatalf("RepoName = %q, want cloned", executor.RepoName)
+		if workspace.RepoName != "cloned" {
+			t.Fatalf("RepoName = %q, want cloned", workspace.RepoName)
 		}
-		if executor.Dir != filepath.Join(root, "cloned") {
-			t.Fatalf("Dir = %q, want cloned path", executor.Dir)
+		if workspace.Dir != filepath.Join(root, "cloned") {
+			t.Fatalf("Dir = %q, want cloned path", workspace.Dir)
 		}
-		if executor.LogDir != fixture.logDir || executor.CacheDir != fixture.cacheDir {
-			t.Fatalf("executor dirs = log %q cache %q, want log %q cache %q", executor.LogDir, executor.CacheDir, fixture.logDir, fixture.cacheDir)
+		if workspace.Runtime != fixture.backend {
+			t.Fatal("workspace instance backend was not wired")
 		}
-		if executor.Runtime != fixture.backend {
-			t.Fatal("executor instance backend was not wired")
-		}
-		if len(executor.HarnessEnv[string(harness.Codex)]) != 1 || executor.HarnessEnv[string(harness.Codex)][0] != "CODEX_HOME=/tmp/codex" {
-			t.Fatalf("HarnessEnv = %#v, want configured codex env", executor.HarnessEnv)
-		}
-		if len(executor.Backends) == 0 {
-			t.Fatal("executor backends were not initialized")
+		if len(s.taskMgr.Backends()) == 0 {
+			t.Fatal("manager backends were not initialized")
 		}
 
 		newTestRepoWatcher(t, root, s).SyncReposInDir(t.Context(), root)
 		if got := s.repos.Snapshot(); len(got) != 1 || got[0].RelPath != "cloned" {
 			t.Fatalf("repo registry after watcher sync = %+v, want one cloned repo", got)
 		}
-		after, ok := s.taskMgr.Executor("cloned")
+		after, ok := s.taskMgr.Workspace("cloned")
 		if !ok {
-			t.Fatal("executor disappeared after watcher sync")
+			t.Fatal("workspace disappeared after watcher sync")
 		}
-		if after != executor {
-			t.Fatal("watcher replaced an already registered clone executor")
+		if after != workspace {
+			t.Fatal("watcher replaced an already registered clone workspace")
 		}
 	})
 
@@ -457,7 +451,7 @@ func TestCloneRepo(t *testing.T) {
 		if err := os.RemoveAll(submodule); err != nil {
 			t.Fatalf("remove submodule source: %v", err)
 		}
-		s := newExecutorConstructionTestServer(t, root).server
+		s := newWorkspaceConstructionTestServer(t, root).server
 
 		if _, err := s.serverHandlers.cloneRepo(t.Context(), &v1.CloneRepoReq{URL: parent, Path: "broken"}); err == nil {
 			t.Fatal("cloneRepo succeeded, want submodule clone failure")
@@ -468,8 +462,8 @@ func TestCloneRepo(t *testing.T) {
 		if got := s.repos.Snapshot(); len(got) != 0 {
 			t.Fatalf("repo registry = %+v, want empty after failed clone", got)
 		}
-		if _, ok := s.taskMgr.Executor("broken"); ok {
-			t.Fatal("failed clone registered an executor")
+		if _, ok := s.taskMgr.Workspace("broken"); ok {
+			t.Fatal("failed clone registered an workspace")
 		}
 	})
 }
@@ -614,11 +608,9 @@ func TestHandlePurge(t *testing.T) {
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
 		tk.SetState(task.StateWaiting)
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("r", &task.RepoExecutor{
-			RepoWorkspace: task.RepoWorkspace{
-				BaseBranch: "main",
-				Dir:        t.TempDir(),
-			},
+		s.taskMgr.RegisterWorkspace("r", &task.RepoWorkspace{
+			BaseBranch: "main",
+			Dir:        t.TempDir(),
 		})
 		insertTestTask(t, s, "t1", tk)
 
@@ -647,11 +639,9 @@ func TestHandlePurge(t *testing.T) {
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
 		tk.SetState(task.StateRunning)
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("r", &task.RepoExecutor{
-			RepoWorkspace: task.RepoWorkspace{
-				BaseBranch: "main",
-				Dir:        t.TempDir(),
-			},
+		s.taskMgr.RegisterWorkspace("r", &task.RepoWorkspace{
+			BaseBranch: "main",
+			Dir:        t.TempDir(),
 		})
 		insertTestTask(t, s, "t1", tk)
 
@@ -675,12 +665,10 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("ReturnsID", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("myrepo", &task.RepoExecutor{
-			RepoWorkspace: task.RepoWorkspace{
-				BaseBranch: "main",
-				Dir:        t.TempDir(),
-			},
-			Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}},
+		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: stubBackend{}})
+		s.taskMgr.RegisterWorkspace("myrepo", &task.RepoWorkspace{
+			BaseBranch: "main",
+			Dir:        t.TempDir(),
 		})
 		handler := handle(testTaskHandlers(s).service.createTask)
 
@@ -742,11 +730,9 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("UnknownHarness", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("myrepo", &task.RepoExecutor{
-			RepoWorkspace: task.RepoWorkspace{
-				BaseBranch: "main",
-				Dir:        t.TempDir(),
-			},
+		s.taskMgr.RegisterWorkspace("myrepo", &task.RepoWorkspace{
+			BaseBranch: "main",
+			Dir:        t.TempDir(),
 		})
 		handler := handle(testTaskHandlers(s).service.createTask)
 
@@ -770,12 +756,10 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("InvalidModel", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("myrepo", &task.RepoExecutor{
-			RepoWorkspace: task.RepoWorkspace{
-				BaseBranch: "main",
-				Dir:        t.TempDir(),
-			},
-			Backends: map[harness.Name]agent.Backend{"stub": stubBackend{}},
+		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{"stub": stubBackend{}})
+		s.taskMgr.RegisterWorkspace("myrepo", &task.RepoWorkspace{
+			BaseBranch: "main",
+			Dir:        t.TempDir(),
 		})
 		handler := handle(testTaskHandlers(s).service.createTask)
 
@@ -799,12 +783,10 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("ValidModel", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("myrepo", &task.RepoExecutor{
-			RepoWorkspace: task.RepoWorkspace{
-				BaseBranch: "main",
-				Dir:        t.TempDir(),
-			},
-			Backends: map[harness.Name]agent.Backend{"stub": stubBackend{}},
+		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{"stub": stubBackend{}})
+		s.taskMgr.RegisterWorkspace("myrepo", &task.RepoWorkspace{
+			BaseBranch: "main",
+			Dir:        t.TempDir(),
 		})
 		handler := handle(testTaskHandlers(s).service.createTask)
 
@@ -828,12 +810,10 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("WithImage", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("myrepo", &task.RepoExecutor{
-			RepoWorkspace: task.RepoWorkspace{
-				BaseBranch: "main",
-				Dir:        t.TempDir(),
-			},
-			Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}},
+		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: stubBackend{}})
+		s.taskMgr.RegisterWorkspace("myrepo", &task.RepoWorkspace{
+			BaseBranch: "main",
+			Dir:        t.TempDir(),
 		})
 		handler := handle(testTaskHandlers(s).service.createTask)
 
@@ -877,12 +857,10 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("WithCachePreferences", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("myrepo", &task.RepoExecutor{
-			RepoWorkspace: task.RepoWorkspace{
-				BaseBranch: "main",
-				Dir:        t.TempDir(),
-			},
-			Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}},
+		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: stubBackend{}})
+		s.taskMgr.RegisterWorkspace("myrepo", &task.RepoWorkspace{
+			BaseBranch: "main",
+			Dir:        t.TempDir(),
 		})
 		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
 			p.Settings.WellKnownCaches = map[string]bool{"go-mod": false, "npm": true}
@@ -958,12 +936,10 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("TaskInfo", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("myrepo", &task.RepoExecutor{
-			RepoWorkspace: task.RepoWorkspace{
-				BaseBranch: "main",
-				Dir:        t.TempDir(),
-			},
-			Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}},
+		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: stubBackend{}})
+		s.taskMgr.RegisterWorkspace("myrepo", &task.RepoWorkspace{
+			BaseBranch: "main",
+			Dir:        t.TempDir(),
 		})
 		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
 			p.Settings.BaseImage = "ghcr.io/my/image:v1"
@@ -1018,9 +994,8 @@ func TestHandleCreateTask(t *testing.T) {
 		// Regression: creating a task with no repos panicked with
 		// "makeslice: cap out of range" because len(req.Repos)-1 == -1.
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{
-			Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}},
-		})
+		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: stubBackend{}})
+		s.taskMgr.RegisterWorkspace("", &task.RepoWorkspace{})
 		handler := handle(testTaskHandlers(s).service.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"no repo task"},"harness":"claude","model":"m1","effort":"high"}`)
@@ -1050,12 +1025,12 @@ func TestHandleCreateTask(t *testing.T) {
 		}
 	})
 
-	t.Run("NoRepoExecutorNoBackend", func(t *testing.T) {
+	t.Run("NoRepoWorkspaceNoBackend", func(t *testing.T) {
 		t.Parallel()
 		// Creating a no-repo task with no registered harness backends returns
 		// a clear 400 instead of panicking.
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{}})
+		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{})
 		handler := handle(testTaskHandlers(s).service.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"no repo task"},"harness":"claude"}`)
@@ -1167,10 +1142,10 @@ func TestSignalProcess(t *testing.T) {
 func TestHandleListRepos(t *testing.T) {
 	t.Parallel()
 	s := newTestRouter(t)
-	s.repos = repos.NewService("", "", "", nil, repos.NewRegistry([]repos.Info{
+	s.repos = repos.NewService("", repos.NewRegistry([]repos.Info{
 		{RelPath: "org/repoA", AbsPath: "/src/org/repoA", BaseBranch: "main"},
 		{RelPath: "repoB", AbsPath: "/src/repoB", BaseBranch: "develop"},
-	}), s.taskMgr, nil, nil)
+	}), s.taskMgr)
 	s.serverHandlers.repos = s.repos
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/server/repos", http.NoBody)
@@ -1230,7 +1205,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: stubBackend{}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1294,7 +1269,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: stubBackend{}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1333,7 +1308,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: stubBackend{}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1382,7 +1357,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, result, trailer)
 
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: stubBackend{}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1436,7 +1411,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, result, trailer)
 
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: stubBackend{}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1490,7 +1465,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "b.jsonl", metaB, trailerB)
 
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: stubBackend{}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1539,7 +1514,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		t.Parallel()
 		logDir := t.TempDir()
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: stubBackend{}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1581,7 +1556,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", lines...)
 
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: stubBackend{}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1637,7 +1612,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: stubBackend{}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1693,7 +1668,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "purged.jsonl", meta("purged task"), trailer)
 
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: stubBackend{}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1730,7 +1705,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "feat.jsonl", meta, trailer)
 
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: stubBackend{}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1789,7 +1764,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, assistant, result, trailer)
 
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: stubBackend{}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1984,7 +1959,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, msgStart, delta1, delta2, assistant, result, trailer)
 
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: stubBackend{}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}

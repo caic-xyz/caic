@@ -61,9 +61,9 @@ func (a *ciAdapter) CreateTask(ctx context.Context, req bot.TaskRequest) (string
 	return a.taskCreator.CreateTask(ctx, req)
 }
 
-// GetExecutor returns the task executor for relPath.
-func (a *ciAdapter) GetExecutor(relPath string) (*task.RepoExecutor, bool) {
-	return a.taskMgr.Executor(relPath)
+// GetWorkspace returns the task workspace for relPath.
+func (a *ciAdapter) GetWorkspace(relPath string) (*task.RepoWorkspace, bool) {
+	return a.taskMgr.Workspace(relPath)
 }
 
 // SetTaskMonitorBranch sets the CI monitor branch on a task entry.

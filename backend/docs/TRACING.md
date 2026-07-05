@@ -78,7 +78,7 @@ format (Go 1.26 limitation). Only `trace.Log` / `trace.Logf` calls appear as
 | `POST /tasks/{id}/fork` goroutine | `trace.NewTask` | `task.fork:{src}->{dst}` |
 | `watchSession` goroutine | `trace.NewTask` | `session.watch:{id}` |
 
-### Repo executor operations (`backend/internal/task/repoexecutor.go`)
+### Task runner and workspace operations (`backend/internal/task/runner.go`, `backend/internal/task/repo_workspace.go`)
 
 | Method | Type | Name |
 |---|---|---|
@@ -166,7 +166,7 @@ context carrying the trace task down to callees so their `StartRegion`
 calls nest correctly:
 
 ```go
-func (r *RepoExecutor) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
+func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
     ctx, task := trace.NewTask(ctx, "task.start:"+t.ID.String())
     defer task.End()
     // Pass ctx to setup() so its regions nest under task.start.

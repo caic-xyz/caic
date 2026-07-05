@@ -19,7 +19,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	"github.com/caic-xyz/caic/backend/internal/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
@@ -66,7 +65,7 @@ func TestReplayCache(t *testing.T) {
 	newServer := func(t *testing.T, logDir string) (*testRouter, string) {
 		t.Helper()
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: stubBackend{}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}

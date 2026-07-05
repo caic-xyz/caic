@@ -19,7 +19,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	capipi "github.com/caic-xyz/caic/backend/internal/agent/pi"
 	"github.com/caic-xyz/caic/backend/internal/harness"
-	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
 func BenchmarkHandleTaskRawEventsPurgedReplay(b *testing.B) {
@@ -125,7 +124,7 @@ func benchmarkPurgedTaskEventServer(b *testing.B, deltaCount int) (string, *test
 	}
 
 	s := newTestRouter(b)
-	s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
+	s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: stubBackend{}})
 	if err := loadPurgedTasksForTest(s, logDir); err != nil {
 		b.Fatal(err)
 	}
@@ -174,7 +173,7 @@ func benchmarkPurgedPiTaskEventServer(b *testing.B, deltaCount int) (string, *te
 	}
 
 	s := newTestRouter(b)
-	s.taskMgr.RegisterExecutor("", &task.RepoExecutor{Backends: map[harness.Name]agent.Backend{harness.Pi: capipi.New("", nil)}})
+	s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Pi: capipi.New("", nil)})
 	if err := loadPurgedTasksForTest(s, logDir); err != nil {
 		b.Fatal(err)
 	}

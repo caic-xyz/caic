@@ -27,6 +27,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -251,28 +252,22 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	provider := initProvider(ctx, cfg, backend)
 
 	taskMgr := tasks.New(tasks.Config{
-		ServerCtx:  ctx,
-		LogDir:     logDir,
-		CacheDir:   cfg.Dirs.CacheDir,
-		Backend:    runtimeBackend,
-		Monitor:    runtimeMonitor,
-		Inventory:  runtimeInventory,
-		Privilege:  runtimePrivilege,
-		Backends:   agentBackends,
+		ServerCtx: ctx,
+		LogDir:    logDir,
+		CacheDir:  cfg.Dirs.CacheDir,
+		Backend:   runtimeBackend,
+		Monitor:   runtimeMonitor,
+		Inventory: runtimeInventory,
+		Privilege: runtimePrivilege,
+		Backends:  agentBackends,
+		EventReplayFactory: func(path string, h harness.Name) task.EventReplayWriter {
+			return eventreplay.NewMessageWriter(path, h)
+		},
 		HarnessEnv: cfg.Agent.HarnessEnv,
 		Prefs:      prefsStore,
 		Provider:   provider,
 	})
-	repoService := repos.NewService(
-		absRoot,
-		logDir,
-		cfg.Dirs.CacheDir,
-		cfg.Agent.HarnessEnv,
-		repos.NewRegistry(nil),
-		taskMgr,
-		runtimeBackend,
-		agentBackends,
-	)
+	repoService := repos.NewService(absRoot, repos.NewRegistry(nil), taskMgr)
 
 	// Long-lived forge automation, owned by app and routed to by the HTTP layer.
 	warnings := server.NewWarningStore(taskMgr)
@@ -342,14 +337,11 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	var wg sync.WaitGroup
 	for i, abs := range repoRes.paths {
 		wg.Go(func() {
-			defer trace.StartRegion(ctx, "repo-executor-init").End()
-			result, err := repoService.DiscoverExecutor(ctx, abs)
+			defer trace.StartRegion(ctx, "repo-workspace-init").End()
+			result, err := repoService.DiscoverWorkspace(ctx, abs)
 			if err != nil {
 				slog.WarnContext(ctx, "skipping repo", "path", abs, "err", err)
 				return
-			}
-			if result.InitErr != nil {
-				slog.WarnContext(ctx, "executor init failed", "path", abs, "err", result.InitErr)
 			}
 			results[i] = result
 			slog.DebugContext(ctx, "discovered repo", "path", result.Info.RelPath, "br", result.Info.BaseBranch)
@@ -357,12 +349,9 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	}
 	wg.Wait()
 	for i := range results {
-		repoService.RegisterExecutor(&results[i])
+		repoService.RegisterWorkspace(&results[i])
 	}
 
-	if err := repoService.RegisterNoRepoExecutor(ctx); err != nil {
-		return nil, fmt.Errorf("register no-repo executor: %w", err)
-	}
 	taskMgr.Start()
 
 	phase3 := trace.StartRegion(ctx, "load-live-task-logs")

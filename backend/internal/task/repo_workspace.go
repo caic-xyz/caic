@@ -25,7 +25,7 @@ import (
 type RepoWorkspace struct {
 	BaseBranch string
 	Dir        string          // Absolute path to the git repository.
-	RepoName   string          // Relative repo path (e.g. "github/caic"); empty for no-repo executors.
+	RepoName   string          // Relative repo path (e.g. "github/caic"); empty for no-repo workspaces.
 	GitTimeout time.Duration   // Timeout for git/instance ops; defaults to 1 minute.
 	Runtime    runtime.Backend // Runtime provides runtime instance and repo diff/sync operations.
 
@@ -36,7 +36,7 @@ type RepoWorkspace struct {
 }
 
 // Init sets nextID past any existing caic-* branches so that restarts don't
-// waste attempts on branches that already exist. No-op for no-repo executors.
+// waste attempts on branches that already exist. No-op for no-repo workspaces.
 func (w *RepoWorkspace) Init(ctx context.Context) error {
 	w.initDefaults()
 	if w.Dir == "" {

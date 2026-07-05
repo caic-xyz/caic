@@ -47,8 +47,8 @@ func (b *testCIBackend) ForgeForInfo(ctx context.Context, info *ci.RepoInfo) for
 
 func (b *testCIBackend) CreateTask(context.Context, bot.TaskRequest) (string, error) { return "", nil }
 
-func (b *testCIBackend) GetExecutor(relPath string) (*task.RepoExecutor, bool) {
-	return b.taskMgr.Executor(relPath)
+func (b *testCIBackend) GetWorkspace(relPath string) (*task.RepoWorkspace, bool) {
+	return b.taskMgr.Workspace(relPath)
 }
 
 func (b *testCIBackend) SetTaskMonitorBranch(entry ci.TaskEntry, branch string) {
@@ -480,7 +480,7 @@ func minimalRouter(t *testing.T) *testRouter {
 	ctx := t.Context()
 	backend := &mdruntime.Backend{}
 	taskMgr := tasks.New(tasks.Config{ServerCtx: ctx})
-	repoSvc := repos.NewService("", "", "", nil, repos.NewRegistry(nil), taskMgr, nil, nil)
+	repoSvc := repos.NewService("", repos.NewRegistry(nil), taskMgr)
 	fm := forgemanager.New("", "", nil)
 	prefs := newTestPrefs(t)
 	ciService := ci.NewService(cache, nil, &testCIBackend{repos: repoSvc, taskMgr: taskMgr, forge: fm, prefs: prefs})

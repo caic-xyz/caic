@@ -1,4 +1,4 @@
-// Service manages repository metadata, task executor registration, and change notifications.
+// Service manages repository metadata, workspace registration, and change notifications.
 
 package repos
 
@@ -16,13 +16,9 @@ import (
 
 	"github.com/caic-xyz/md/git"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/ci"
-	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
-	"github.com/caic-xyz/caic/backend/internal/harness"
-	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
@@ -57,50 +53,30 @@ type CloneRequest struct {
 // InitResult holds the outcome of initialising a single newly-discovered
 // repository.
 type InitResult struct {
-	Info     Info
-	Executor *task.RepoExecutor
-	InitErr  error
+	Info      Info
+	Workspace *task.RepoWorkspace
 }
 
-// Service owns managed repository metadata and task executor wiring.
+// Service owns managed repository metadata and workspace registration.
 type Service struct {
-	absRoot       string
-	logDir        string
-	cacheDir      string
-	harnessEnv    map[string][]string
-	registry      *Registry
-	taskMgr       *tasks.Manager
-	runtime       runtime.Backend
-	agentBackends map[harness.Name]agent.Backend
+	absRoot  string
+	registry *Registry
+	taskMgr  *tasks.Manager
 
 	mu      sync.Mutex
 	changed chan struct{}
 }
 
 // NewService creates a repository service.
-func NewService(
-	absRoot string,
-	logDir string,
-	cacheDir string,
-	harnessEnv map[string][]string,
-	registry *Registry,
-	taskMgr *tasks.Manager,
-	runtimeBackend runtime.Backend,
-	agentBackends map[harness.Name]agent.Backend,
-) *Service {
+func NewService(absRoot string, registry *Registry, taskMgr *tasks.Manager) *Service {
 	if registry == nil {
 		registry = NewRegistry(nil)
 	}
 	return &Service{
-		absRoot:       absRoot,
-		logDir:        logDir,
-		cacheDir:      cacheDir,
-		harnessEnv:    harnessEnv,
-		registry:      registry,
-		taskMgr:       taskMgr,
-		runtime:       runtimeBackend,
-		agentBackends: agentBackends,
-		changed:       make(chan struct{}),
+		absRoot:  absRoot,
+		registry: registry,
+		taskMgr:  taskMgr,
+		changed:  make(chan struct{}),
 	}
 }
 
@@ -116,8 +92,8 @@ func (s *Service) Changed() <-chan struct{} {
 	return s.changed
 }
 
-// DiscoverExecutor discovers repo metadata and initializes its task executor.
-func (s *Service) DiscoverExecutor(ctx context.Context, abs string) (InitResult, error) {
+// DiscoverWorkspace discovers repo metadata and creates its task workspace.
+func (s *Service) DiscoverWorkspace(ctx context.Context, abs string) (InitResult, error) {
 	rel := s.RelPath(abs)
 	checkout := &git.Checkout{Root: abs, Logger: slog.Default()}
 	remoteName, err := checkout.DefaultRemote(ctx)
@@ -140,8 +116,7 @@ func (s *Service) DiscoverExecutor(ctx context.Context, abs string) (InitResult,
 		ForgeOwner:       forgeOwner,
 		ForgeRepo:        forgeRepo,
 	}
-	executor, initErr := s.newExecutor(ctx, &info)
-	return InitResult{Info: info, Executor: executor, InitErr: initErr}, nil
+	return InitResult{Info: info, Workspace: newWorkspace(&info)}, nil
 }
 
 // RelPath returns abs as a path relative to the repository root.
@@ -156,23 +131,23 @@ func (s *Service) RelPath(abs string) string {
 	return rel
 }
 
-// RegisterExecutor adds a discovered repo and registers its executor.
-func (s *Service) RegisterExecutor(r *InitResult) {
-	if r == nil || r.Executor == nil {
+// RegisterWorkspace adds a discovered repo and registers its workspace.
+func (s *Service) RegisterWorkspace(r *InitResult) {
+	if r == nil || r.Workspace == nil {
 		return
 	}
 	s.registry.Add(&r.Info)
-	s.taskMgr.RegisterExecutor(r.Info.RelPath, r.Executor)
+	s.taskMgr.RegisterWorkspace(r.Info.RelPath, r.Workspace)
 	s.notifyChanged()
 }
 
-// DeregisterExecutor removes a repo and unregisters its executor.
-func (s *Service) DeregisterExecutor(relPath string) {
+// DeregisterWorkspace removes a repo and unregisters its workspace.
+func (s *Service) DeregisterWorkspace(relPath string) {
 	removed := s.registry.RemoveMatching(func(r Info) bool {
 		return r.RelPath == relPath
 	})
 	for _, rel := range removed {
-		s.taskMgr.UnregisterExecutor(rel)
+		s.taskMgr.UnregisterWorkspace(rel)
 	}
 	if len(removed) > 0 {
 		s.notifyChanged()
@@ -199,20 +174,10 @@ func (s *Service) ByForge(owner, repo string) (Info, bool) {
 	return s.registry.ByForge(owner, repo)
 }
 
-// ExecutorRegistered reports whether an executor is registered for relPath.
-func (s *Service) ExecutorRegistered(relPath string) bool {
-	_, ok := s.taskMgr.Executor(relPath)
+// WorkspaceRegistered reports whether a workspace is registered for relPath.
+func (s *Service) WorkspaceRegistered(relPath string) bool {
+	_, ok := s.taskMgr.Workspace(relPath)
 	return ok
-}
-
-// RegisterNoRepoExecutor initializes and registers the no-repo executor.
-func (s *Service) RegisterNoRepoExecutor(ctx context.Context) error {
-	noRepoExecutor, err := s.newExecutor(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("init no-repo executor: %w", err)
-	}
-	s.taskMgr.RegisterExecutor("", noRepoExecutor)
-	return nil
 }
 
 // AdoptionRepos returns repo metadata in the shape expected by tasks.Manager.
@@ -254,7 +219,7 @@ func (s *Service) SetCIStatusIfChanged(relPath, sha string, result forgecache.Re
 	return changed
 }
 
-// Clone clones a repository, registers its metadata, and wires its executor.
+// Clone clones a repository, registers its metadata, and wires its workspace.
 func (s *Service) Clone(ctx context.Context, req CloneRequest) (Info, error) {
 	targetPath := req.Path
 	if targetPath == "" {
@@ -276,13 +241,13 @@ func (s *Service) Clone(ctx context.Context, req CloneRequest) (Info, error) {
 	if _, err := os.Stat(absTarget); err == nil {
 		return Info{}, repoError(ErrorConflict, "directory already exists: "+targetPath)
 	}
-	if _, ok := s.taskMgr.Executor(targetPath); ok {
+	if _, ok := s.taskMgr.Workspace(targetPath); ok {
 		return Info{}, repoError(ErrorConflict, "repo already registered: "+targetPath)
 	}
 
 	bn := filepath.Base(targetPath)
 	var basenameConflict string
-	s.taskMgr.RangeExecutors(func(rel string, _ *task.RepoExecutor) bool {
+	s.taskMgr.RangeWorkspaces(func(rel string, _ *task.RepoWorkspace) bool {
 		if rel != "" && filepath.Base(rel) == bn && rel != targetPath {
 			basenameConflict = rel
 			return false
@@ -321,14 +286,10 @@ func (s *Service) Clone(ctx context.Context, req CloneRequest) (Info, error) {
 	}
 	remote := checkout.RemoteOriginURL(ctx)
 	info := Info{RelPath: targetPath, AbsPath: absTarget, BaseBranch: branch, BaseBranchRemote: remoteName, Remote: remote}
-	executor, err := s.newExecutor(ctx, &info)
-	if err != nil {
-		_ = os.RemoveAll(absTarget)
-		return Info{}, repoError(ErrorInternal, "failed to init executor: "+err.Error())
-	}
+	workspace := newWorkspace(&info)
 	info.ForgeKind, info.ForgeOwner, info.ForgeRepo = parseForgeRemote(ctx, remote)
 	s.registry.Add(&info)
-	s.taskMgr.RegisterExecutor(targetPath, executor)
+	s.taskMgr.RegisterWorkspace(targetPath, workspace)
 	s.notifyChanged()
 	slog.InfoContext(ctx, "cloned repo", "url", req.URL, "path", targetPath)
 
@@ -342,26 +303,12 @@ func (s *Service) notifyChanged() {
 	s.mu.Unlock()
 }
 
-func (s *Service) newExecutor(ctx context.Context, info *Info) (*task.RepoExecutor, error) {
-	executor := &task.RepoExecutor{
-		RepoWorkspace: task.RepoWorkspace{
-			Runtime: s.runtime,
-		},
-		LogDir:     s.logDir,
-		CacheDir:   s.cacheDir,
-		Backends:   s.agentBackends,
-		HarnessEnv: s.harnessEnv,
-		EventReplayFactory: func(path string, h harness.Name) task.EventReplayWriter {
-			return eventreplay.NewMessageWriter(path, h)
-		},
+func newWorkspace(info *Info) *task.RepoWorkspace {
+	return &task.RepoWorkspace{
+		BaseBranch: info.BaseBranch,
+		Dir:        info.AbsPath,
+		RepoName:   info.RelPath,
 	}
-	if info != nil {
-		executor.BaseBranch = info.BaseBranch
-		executor.Dir = info.AbsPath
-		executor.RepoName = info.RelPath
-	}
-	err := executor.Init(ctx)
-	return executor, err
 }
 
 func parseForgeRemote(ctx context.Context, remote string) (kind forge.Kind, owner, repo string) {

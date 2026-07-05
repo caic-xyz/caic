@@ -1,4 +1,4 @@
-// Package repos manages discovered git repositories and their task executors.
+// Package repos manages discovered git repositories and their task workspaces.
 package repos
 
 import (
@@ -20,28 +20,28 @@ const DiscoveryDepth = 3
 
 // WatcherConfig contains watcher dependencies.
 type WatcherConfig struct {
-	Ctx            context.Context
-	AbsRoot        string
-	Repos          func() []Info
-	RelPath        func(string) string
-	ExecutorExists func(string) bool
-	OnDiscovered   func(context.Context, string)
-	OnRemoved      func(string)
-	Interval       time.Duration
-	MaxDepth       int
+	Ctx             context.Context
+	AbsRoot         string
+	Repos           func() []Info
+	RelPath         func(string) string
+	WorkspaceExists func(string) bool
+	OnDiscovered    func(context.Context, string)
+	OnRemoved       func(string)
+	Interval        time.Duration
+	MaxDepth        int
 }
 
-// Watcher polls the repository root and reconciles the executor registry.
+// Watcher polls the repository root and reconciles the workspace registry.
 type Watcher struct {
-	ctx            context.Context
-	absRoot        string
-	repos          func() []Info
-	relPath        func(string) string
-	executorExists func(string) bool
-	onDiscovered   func(context.Context, string)
-	onRemoved      func(string)
-	interval       time.Duration
-	maxDepth       int
+	ctx             context.Context
+	absRoot         string
+	repos           func() []Info
+	relPath         func(string) string
+	workspaceExists func(string) bool
+	onDiscovered    func(context.Context, string)
+	onRemoved       func(string)
+	interval        time.Duration
+	maxDepth        int
 }
 
 // NewWatcher creates a repository watcher.
@@ -54,9 +54,9 @@ func NewWatcher(c *WatcherConfig) *Watcher {
 	if maxDepth == 0 {
 		maxDepth = DiscoveryDepth
 	}
-	executorExists := c.ExecutorExists
-	if executorExists == nil {
-		executorExists = func(string) bool { return false }
+	workspaceExists := c.WorkspaceExists
+	if workspaceExists == nil {
+		workspaceExists = func(string) bool { return false }
 	}
 	onDiscovered := c.OnDiscovered
 	if onDiscovered == nil {
@@ -67,15 +67,15 @@ func NewWatcher(c *WatcherConfig) *Watcher {
 		onRemoved = func(string) {}
 	}
 	return &Watcher{
-		ctx:            c.Ctx,
-		absRoot:        c.AbsRoot,
-		repos:          c.Repos,
-		relPath:        c.RelPath,
-		executorExists: executorExists,
-		onDiscovered:   onDiscovered,
-		onRemoved:      onRemoved,
-		interval:       interval,
-		maxDepth:       maxDepth,
+		ctx:             c.Ctx,
+		absRoot:         c.AbsRoot,
+		repos:           c.Repos,
+		relPath:         c.RelPath,
+		workspaceExists: workspaceExists,
+		onDiscovered:    onDiscovered,
+		onRemoved:       onRemoved,
+		interval:        interval,
+		maxDepth:        maxDepth,
 	}
 }
 
@@ -136,7 +136,7 @@ func (w *Watcher) SyncReposInDir(ctx context.Context, dir string) {
 	for _, abs := range newPaths {
 		wg.Go(func() {
 			rel := w.relPath(abs)
-			if w.executorExists(rel) {
+			if w.workspaceExists(rel) {
 				return
 			}
 			w.onDiscovered(ctx, abs)

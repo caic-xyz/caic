@@ -16,13 +16,13 @@ import (
 // so a concurrent add/remove can never tear a reader or leave a dangling
 // interior pointer.
 //
-// Ordering invariant with the Manager executor registry: a repo and its
-// task.RepoExecutor live in two separate lock domains (this registry and the
-// Manager's). Callers that add a repo register its executor *after* add(); callers
-// that remove a repo unregister its executor *after* the remove. This leaves a
-// brief, benign window where a repo is listed without an executor (just added) or an
-// executor outlives its repo entry (just removed): in-flight tasks resolve their
-// executor regardless, and newly-listed repos are not user-visible until the
+// Ordering invariant with the Manager workspace registry: a repo and its
+// task.RepoWorkspace live in two separate lock domains (this registry and the
+// Manager's). Callers that add a repo register its workspace *after* add(); callers
+// that remove a repo unregister its workspace *after* the remove. This leaves a
+// brief, benign window where a repo is listed without an workspace (just added) or an
+// workspace outlives its repo entry (just removed): in-flight tasks resolve their
+// workspace regardless, and newly-listed repos are not user-visible until the
 // enclosing operation returns.
 type Registry struct {
 	mu       sync.Mutex
@@ -119,7 +119,7 @@ func (r *Registry) ForgePathsAtSHA(owner, repo, sha string) []string {
 
 // Add inserts or replaces a copy of info. RelPath and AbsPath are both stable
 // identities for a repo, so adding either identity twice is idempotent. The
-// caller registers the task.RepoExecutor afterwards (see the ordering invariant on
+// caller registers the task.RepoWorkspace afterwards (see the ordering invariant on
 // Registry).
 func (r *Registry) Add(info *Info) {
 	r.mu.Lock()
@@ -143,7 +143,7 @@ func (r *Registry) Add(info *Info) {
 }
 
 // RemoveMatching removes every repo for which pred reports true and returns
-// their RelPaths. The caller unregisters the corresponding executors afterwards.
+// their RelPaths. The caller unregisters the corresponding workspaces afterwards.
 func (r *Registry) RemoveMatching(pred func(Info) bool) []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()

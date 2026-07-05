@@ -124,13 +124,9 @@ graph TD
   pkg_internal_forge_forgemanager --> pkg_internal_repos
   pkg_internal_forge_github --> pkg_internal_forge
   pkg_internal_forge_gitlab --> pkg_internal_forge
-  pkg_internal_repos --> pkg_internal_agent
   pkg_internal_repos --> pkg_internal_ci
-  pkg_internal_repos --> pkg_internal_eventreplay
   pkg_internal_repos --> pkg_internal_forge
   pkg_internal_repos --> pkg_internal_forge_forgecache
-  pkg_internal_repos --> pkg_internal_harness
-  pkg_internal_repos --> pkg_internal_runtime
   pkg_internal_repos --> pkg_internal_task
   pkg_internal_repos --> pkg_internal_tasks
   pkg_internal_runtime --> pkg_internal_harness
@@ -385,13 +381,9 @@ graph TD
   pkg_internal_forge_forgemanager --> pkg_internal_repos
   pkg_internal_forge_github --> pkg_internal_forge
   pkg_internal_forge_gitlab --> pkg_internal_forge
-  pkg_internal_repos --> pkg_internal_agent
   pkg_internal_repos --> pkg_internal_ci
-  pkg_internal_repos --> pkg_internal_eventreplay
   pkg_internal_repos --> pkg_internal_forge
   pkg_internal_repos --> pkg_internal_forge_forgecache
-  pkg_internal_repos --> pkg_internal_harness
-  pkg_internal_repos --> pkg_internal_runtime
   pkg_internal_repos --> pkg_internal_task
   pkg_internal_repos --> pkg_internal_tasks
   pkg_internal_runtime --> pkg_internal_harness
@@ -484,7 +476,7 @@ graph TD
 | `internal/jsonutil` | None |
 | `internal/mcp` | None |
 | `internal/preferences` | None |
-| `internal/repos` | `internal/agent`, `internal/ci`, `internal/eventreplay`, `internal/forge`, `internal/forge/forgecache`, `internal/harness`, `internal/runtime`, `internal/task`, `internal/tasks` |
+| `internal/repos` | `internal/ci`, `internal/forge`, `internal/forge/forgecache`, `internal/task`, `internal/tasks` |
 | `internal/runtime` | `internal/harness` |
 | `internal/runtime/mdruntime` | `internal/harness`, `internal/runtime` |
 | `internal/server` | `frontend`, `internal/agent`, `internal/auth`, `internal/autoupdate`, `internal/bot`, `internal/ci`, `internal/eventreplay`, `internal/forge`, `internal/forge/forgecache`, `internal/forge/forgemanager`, `internal/forge/github`, `internal/forge/gitlab`, `internal/harness`, `internal/httplog`, `internal/mcp`, `internal/preferences`, `internal/repos`, `internal/runtime`, `internal/server/api`, `internal/server/api/v1`, `internal/server/api/v1conv`, `internal/server/ipgeo`, `internal/task`, `internal/tasks`, `internal/usage` |

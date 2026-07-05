@@ -13,7 +13,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
-	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
@@ -23,14 +22,11 @@ func refreshHarnessModels(ctx context.Context, cacheDir string, backend runtime.
 	cache := agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
 
 	fetchers := map[harness.Name]agent.ModelFetcher{}
-	taskMgr.RangeExecutors(func(_ string, r *task.RepoExecutor) bool {
-		for h, b := range r.Backends {
-			if f, ok := b.(agent.ModelFetcher); ok {
-				fetchers[h] = f
-			}
+	for h, b := range taskMgr.Backends() {
+		if f, ok := b.(agent.ModelFetcher); ok {
+			fetchers[h] = f
 		}
-		return true
-	})
+	}
 	for _, h := range slices.Sorted(maps.Keys(fetchers)) {
 		env := harnessEnv[string(h)]
 		if _, fresh := cache.Models(h, agent.APIKeyHash(env)); fresh {
@@ -41,7 +37,7 @@ func refreshHarnessModels(ctx context.Context, cacheDir string, backend runtime.
 }
 
 // refreshOneHarness launches a temporary runtime instance, fetches models, and
-// updates the cache and all executor backends.
+// updates the cache and all workspace backends.
 func refreshOneHarness(
 	ctx context.Context,
 	cache *agent.HarnessCache,
@@ -86,12 +82,9 @@ func refreshOneHarness(
 	cache.SetModels(h, models, agent.APIKeyHash(env))
 	slog.InfoContext(ctx, "model cache refreshed", "harness", h, "count", len(models))
 
-	taskMgr.RangeExecutors(func(_ string, r *task.RepoExecutor) bool {
-		if b, ok := r.Backends[h]; ok {
-			b.SetModels(models)
-		}
-		return true
-	})
+	if b, ok := taskMgr.Backends()[h]; ok {
+		b.SetModels(models)
+	}
 }
 
 type phaseLogWriter struct {

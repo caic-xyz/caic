@@ -406,7 +406,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 	}
 	backend := &mdruntime.Backend{}
 	taskMgr := tasks.New(tasks.Config{ServerCtx: t.Context()})
-	repoSvc := repos.NewService("", "", "", nil, repos.NewRegistry(nil), taskMgr, backend, nil)
+	repoSvc := repos.NewService("", repos.NewRegistry(nil), taskMgr)
 	prefs := newTestPrefs(t)
 	forgeManager := forgemanager.New("", "", nil)
 

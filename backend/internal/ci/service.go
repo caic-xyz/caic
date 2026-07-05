@@ -310,14 +310,14 @@ func (svc *Service) autoResync(ctx context.Context, entry TaskEntry, f forge.For
 		slog.WarnContext(ctx, "autoResync: no primary repo", "task", t.ID)
 		return
 	}
-	executor, ok := svc.backend.GetExecutor(p.Name)
+	workspace, ok := svc.backend.GetWorkspace(p.Name)
 	if !ok {
-		slog.WarnContext(ctx, "autoResync: no executor", "task", t.ID)
+		slog.WarnContext(ctx, "autoResync: no workspace", "task", t.ID)
 		return
 	}
 
 	slog.InfoContext(ctx, "autoResync: syncing branch", "task", t.ID, "br", p.Branch)
-	if _, _, err := executor.SyncToOrigin(ctx, t, false); err != nil {
+	if _, _, err := workspace.SyncToOrigin(ctx, t, false); err != nil {
 		slog.WarnContext(ctx, "autoResync: sync failed", "task", t.ID, "err", err)
 		return
 	}

@@ -409,8 +409,8 @@ func (r *SessionRunner) log() *slog.Logger {
 
 // runtimeDir returns the working directory path inside a runtime instance.
 // Uses the task's primary repo MountedPath when available; otherwise falls back
-// to computing it from the executor's Dir basename (legacy). Returns /home/user
-// for no-repo executors.
+// to computing it from the workspace's Dir basename (legacy). Returns /home/user
+// for no-repo workspaces.
 //
 // TODO(2026-07-01): remove the filepath.Base fallback once all pre-MountedPath
 // runtime instances have cycled out.

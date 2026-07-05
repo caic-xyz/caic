@@ -42,7 +42,7 @@ func (s *statsSub) close() { s.once.Do(func() { close(s.ch) }) }
 //     ResultMessage or AskMessage arrives, and the reverse (Waiting/Asking/
 //     HasPlan→Running) when the agent starts producing output again. This is
 //     the only writer that reacts to conversation content.
-//  2. Lifecycle — RepoExecutor and Manager, driven by provisioning and explicit user
+//  2. Lifecycle — RepoWorkspace and Manager, driven by provisioning and explicit user
 //     commands (Start, Stop, Purge, Revive, Restart, ClearContext, fork).
 //     These transitions (Pending→Branching→Provisioning→Starting→Running,
 //     Stopping/Stopped, Purging/Purged) follow instance/session setup and
@@ -175,7 +175,7 @@ func (h *SessionHandle) Drain() error {
 // Repos[0] is primary; empty slice means no-repo task.
 type RepoMount struct {
 	Name        string // relative path, e.g. "github/caic"
-	BaseBranch  string // branch to fork from; empty = executor default
+	BaseBranch  string // branch to fork from; empty = workspace default
 	Branch      string // allocated branch, e.g. "caic-0"
 	GitRoot     string // absolute host path; empty in purged-task entries
 	MountedPath string // mount path inside the runtime instance
@@ -1392,8 +1392,8 @@ func (t *Task) SubscribeStats(ctx context.Context) (history []runtime.Stats, liv
 //
 // Session lifecycle:
 //   - A session wraps an SSH process bridging the server to the in-instance
-//     relay daemon. It is set by RepoExecutor.Start, RepoExecutor.Reconnect, or
-//     RepoExecutor.RestartSession.
+//     relay daemon. It is set by RepoWorkspace.Start, RepoWorkspace.Reconnect, or
+//     RepoWorkspace.RestartSession.
 //   - The session is cleared by CloseSession (during restart), Kill (during
 //     purge), or lazily by SendInput when it detects the SSH process
 //     already exited (Done channel closed).
@@ -1676,7 +1676,7 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 	//   - Normal turn: awaiting user input (Waiting/Asking/HasPlan).
 	//   - Server restart: RestoreMessages inferred a waiting state,
 	//     but the relay already started a new turn before reattach.
-	//   - First turn: the agent may produce output before RepoExecutor.Start
+	//   - First turn: the agent may produce output before RepoWorkspace.Start
 	//     sets StateRunning (race between backend subprocess and
 	//     SetState on the main goroutine).
 	switch m.(type) {
@@ -1738,7 +1738,7 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 		// ResultMessage (it does a blocking Fetch first). In that case
 		// we still need to distinguish Waiting from Asking/HasPlan.
 		// StateStarting is also handled: the agent subprocess may
-		// produce a result before RepoExecutor.Start calls SetState(Running).
+		// produce a result before RepoWorkspace.Start calls SetState(Running).
 		if t.state == StateRunning || t.state == StateStarting || t.state == StateWaiting || t.state == StateAsking {
 			switch {
 			case lastTurnHasUnansweredAsk(t.msgs):

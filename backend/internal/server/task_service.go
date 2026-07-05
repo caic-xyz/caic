@@ -594,11 +594,11 @@ func (s *taskService) taskDiff(ctx context.Context, entry *tasks.Entry, path str
 	if p := t.Primary(); p != nil {
 		diffPrimaryName = p.Name
 	}
-	executor, ok := s.taskMgr.Executor(diffPrimaryName)
+	workspace, ok := s.taskMgr.Workspace(diffPrimaryName)
 	if !ok {
 		return nil, api.InternalError("unknown repo")
 	}
-	diff, err := executor.DiffContent(ctx, t, path)
+	diff, err := workspace.DiffContent(ctx, t, path)
 	if err != nil {
 		return nil, api.InternalError(err.Error())
 	}
@@ -709,11 +709,10 @@ func newTaskResolvers(taskMgr *tasks.Manager, repoSvc *repos.Service, authStore 
 			return ""
 		},
 		ContextWindowLimit: func(repo string, harnessName harness.Name, model string) int {
-			r, ok := taskMgr.Executor(repo)
-			if !ok {
+			if _, ok := taskMgr.Workspace(repo); !ok {
 				return 0
 			}
-			b := r.Backends[harnessName]
+			b := taskMgr.Backends()[harnessName]
 			if b == nil {
 				return 0
 			}

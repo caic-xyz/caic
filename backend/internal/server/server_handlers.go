@@ -33,10 +33,11 @@ import (
 	"github.com/caic-xyz/caic/oauth/oauthclient"
 )
 
-type executorRegistry interface {
-	RangeExecutors(fn func(relPath string, r *task.RepoExecutor) bool)
-	Executor(relPath string) (*task.RepoExecutor, bool)
-	RegisterExecutor(relPath string, r *task.RepoExecutor)
+type workspaceRegistry interface {
+	Backends() map[harness.Name]agent.Backend
+	RangeWorkspaces(fn func(relPath string, r *task.RepoWorkspace) bool)
+	Workspace(relPath string) (*task.RepoWorkspace, bool)
+	RegisterWorkspace(relPath string, r *task.RepoWorkspace)
 }
 
 type serverHandlers struct {
@@ -45,7 +46,7 @@ type serverHandlers struct {
 	forge              *forgemanager.Manager
 	prefs              *preferences.Store
 	repos              *repos.Service
-	taskMgr            executorRegistry
+	taskMgr            workspaceRegistry
 	cacheSizes         *CacheSizeStore
 	authStore          *auth.Store
 	githubOAuth        *oauthclient.ProviderConfig
@@ -265,14 +266,9 @@ func mountsFromSettings(settings *preferences.Settings) []caicruntime.Mount {
 }
 
 func (h *serverHandlers) listHarnesses(_ context.Context, _ *api.EmptyReq) (*[]v1.HarnessInfo, error) {
-	// Collect unique harness backends from all executors.
-	seen := make(map[harness.Name]agent.Backend)
-	h.taskMgr.RangeExecutors(func(_ string, r *task.RepoExecutor) bool {
-		maps.Copy(seen, r.Backends)
-		return true
-	})
-	out := make([]v1.HarnessInfo, 0, len(seen))
-	for h, b := range seen {
+	backends := h.taskMgr.Backends()
+	out := make([]v1.HarnessInfo, 0, len(backends))
+	for h, b := range backends {
 		out = append(out, v1.HarnessInfo{Name: string(h), Models: b.Models(), SupportsImages: b.SupportsImages(), SupportsCompact: b.SupportsCompact()})
 	}
 	slices.SortFunc(out, func(a, b v1.HarnessInfo) int {

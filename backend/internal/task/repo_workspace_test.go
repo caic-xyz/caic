@@ -1,4 +1,4 @@
-// Tests for the RepoExecutor: task execution and agent orchestration.
+// Tests for the RepoWorkspace: task execution and agent orchestration.
 
 package task
 
@@ -126,18 +126,23 @@ func (w *testWire) ParseMessage(line []byte) ([]agent.Message, error) {
 	return w.parse(line)
 }
 
-func TestRepoExecutor(t *testing.T) {
+func newTestSessionRunner(workspace *RepoWorkspace, logDir string, backends map[harness.Name]agent.Backend) *SessionRunner {
+	if workspace == nil {
+		workspace = &RepoWorkspace{}
+	}
+	return &SessionRunner{Backends: backends, Workspace: workspace, Logs: &LogStore{LogDir: logDir}}
+}
+
+func TestRepoWorkspace(t *testing.T) {
 	t.Parallel()
 	t.Run("Init", func(t *testing.T) {
 		t.Parallel()
 		t.Run("Basic", func(t *testing.T) {
 			t.Parallel()
 			clone := initTestRepo(t, "main")
-			r := &RepoExecutor{
-				RepoWorkspace: RepoWorkspace{
-					BaseBranch: "main",
-					Dir:        clone,
-				},
+			r := &RepoWorkspace{
+				BaseBranch: "main",
+				Dir:        clone,
 			}
 			if err := r.Init(t.Context()); err != nil {
 				t.Fatal(err)
@@ -155,11 +160,9 @@ func TestRepoExecutor(t *testing.T) {
 			runGit(t, clone, "branch", "caic-3")
 			runGit(t, clone, "push", "origin", "caic-3")
 
-			r := &RepoExecutor{
-				RepoWorkspace: RepoWorkspace{
-					BaseBranch: "main",
-					Dir:        clone,
-				},
+			r := &RepoWorkspace{
+				BaseBranch: "main",
+				Dir:        clone,
 			}
 			if err := r.Init(t.Context()); err != nil {
 				t.Fatal(err)
@@ -177,11 +180,9 @@ func TestRepoExecutor(t *testing.T) {
 			// Do NOT push — simulates a stopped task whose branch was
 			// never synced to origin.
 
-			r := &RepoExecutor{
-				RepoWorkspace: RepoWorkspace{
-					BaseBranch: "main",
-					Dir:        clone,
-				},
+			r := &RepoWorkspace{
+				BaseBranch: "main",
+				Dir:        clone,
 			}
 			if err := r.Init(t.Context()); err != nil {
 				t.Fatal(err)
@@ -197,11 +198,9 @@ func TestRepoExecutor(t *testing.T) {
 			runGit(t, clone, "branch", "foo-caic-9")
 			runGit(t, clone, "branch", "caic-2")
 
-			r := &RepoExecutor{
-				RepoWorkspace: RepoWorkspace{
-					BaseBranch: "main",
-					Dir:        clone,
-				},
+			r := &RepoWorkspace{
+				BaseBranch: "main",
+				Dir:        clone,
 			}
 			if err := r.Init(t.Context()); err != nil {
 				t.Fatal(err)
@@ -219,7 +218,7 @@ func TestRepoExecutor(t *testing.T) {
 			for _, harness := range []harness.Name{harness.Codex, harness.OpenCode} {
 				t.Run(string(harness), func(t *testing.T) {
 					t.Parallel()
-					r := &RepoExecutor{}
+					r := newTestSessionRunner(nil, "", nil)
 					tk := &Task{
 						ID:            ksid.NewID(),
 						InitialPrompt: agent.Prompt{Text: "test"},
@@ -240,10 +239,7 @@ func TestRepoExecutor(t *testing.T) {
 		t.Run("passes_history_to_attach_backend", func(t *testing.T) {
 			t.Parallel()
 			backend := &attachCaptureBackend{}
-			r := &RepoExecutor{
-				LogDir:   filepath.Join(t.TempDir(), "logs"),
-				Backends: map[harness.Name]agent.Backend{"test": backend},
-			}
+			r := newTestSessionRunner(nil, filepath.Join(t.TempDir(), "logs"), map[harness.Name]agent.Backend{"test": backend})
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -303,7 +299,7 @@ func TestRepoExecutor(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
 			logDir := filepath.Join(dir, "logs")
-			r := &RepoExecutor{LogDir: logDir}
+			store := &LogStore{LogDir: logDir}
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -311,7 +307,7 @@ func TestRepoExecutor(t *testing.T) {
 				Model:         "model-1",
 				Effort:        "high",
 			}
-			w, err := r.logStore().Open(tk)
+			w, err := store.Open(tk)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -353,11 +349,11 @@ func TestRepoExecutor(t *testing.T) {
 			// caic_meta header. Otherwise every server restart that re-adopts
 			// a running instance duplicates the header.
 			logDir := filepath.Join(t.TempDir(), "logs")
-			r := &RepoExecutor{LogDir: logDir}
+			store := &LogStore{LogDir: logDir}
 			tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Name: "org/repo", Branch: "caic-0"}}}
 
 			// Initial Start writes the header.
-			w, err := r.logStore().Open(tk)
+			w, err := store.Open(tk)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -366,7 +362,7 @@ func TestRepoExecutor(t *testing.T) {
 			// Several reconnects (simulating repeated server restarts) append
 			// without writing a new header.
 			for range 3 {
-				w, err := r.logStore().Reopen(tk)
+				w, err := store.Reopen(tk)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -386,9 +382,9 @@ func TestRepoExecutor(t *testing.T) {
 			t.Parallel()
 			// Reopen must report os.ErrNotExist when no log exists yet so
 			// Reconnect can fall back to Open (which writes the header).
-			r := &RepoExecutor{LogDir: filepath.Join(t.TempDir(), "logs")}
+			store := &LogStore{LogDir: filepath.Join(t.TempDir(), "logs")}
 			tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Name: "org/repo", Branch: "caic-0"}}}
-			if _, err := r.logStore().Reopen(tk); !errors.Is(err, os.ErrNotExist) {
+			if _, err := store.Reopen(tk); !errors.Is(err, os.ErrNotExist) {
 				t.Errorf("Reopen err = %v, want os.ErrNotExist", err)
 			}
 		})
@@ -407,16 +403,12 @@ func TestRepoExecutor(t *testing.T) {
 			{dir: "/opt/repos/foo", want: "/home/user/src/foo"},
 		}
 		for _, tc := range tests {
-			r := &RepoExecutor{
-				RepoWorkspace: RepoWorkspace{
-					Dir: tc.dir,
-				},
-			}
+			r := newTestSessionRunner(&RepoWorkspace{Dir: tc.dir}, "", nil)
 			tk := tc.task
 			if tk == nil {
 				tk = &Task{}
 			}
-			got := r.sessionRunner().runtimeDir(tk)
+			got := r.runtimeDir(tk)
 			if got != tc.want {
 				t.Errorf("runtimeDir(%q) = %q, want %q", tc.dir, got, tc.want)
 			}
@@ -428,20 +420,14 @@ func TestRepoExecutor(t *testing.T) {
 		t.Run("ResultMessage", func(t *testing.T) {
 			t.Parallel()
 			stub := &stubContainer{}
-			r := &RepoExecutor{
-				RepoWorkspace: RepoWorkspace{
-					Runtime: stub,
-					Dir:     "/repo",
-				},
-			}
-			r.initDefaults()
+			r := newTestSessionRunner(&RepoWorkspace{Runtime: stub, Dir: "/repo"}, "", nil)
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
 			tk.SetState(StateRunning)
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 
-			msgCh, _ := r.sessionRunner().startMessageDispatch(t.Context(), tk, false)
+			msgCh, _ := r.startMessageDispatch(t.Context(), tk, false)
 
 			rm := &agent.ResultMessage{MessageType: "result"}
 			msgCh <- rm
@@ -472,20 +458,14 @@ func TestRepoExecutor(t *testing.T) {
 				t.Run(tool, func(t *testing.T) {
 					t.Parallel()
 					stub := &stubContainer{}
-					r := &RepoExecutor{
-						RepoWorkspace: RepoWorkspace{
-							Runtime: stub,
-							Dir:     "/repo",
-						},
-					}
-					r.initDefaults()
+					r := newTestSessionRunner(&RepoWorkspace{Runtime: stub, Dir: "/repo"}, "", nil)
 
 					tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
 					tk.SetState(StateRunning)
 					_, ch, unsub := tk.Subscribe(t.Context())
 					defer unsub()
 
-					msgCh, _ := r.sessionRunner().startMessageDispatch(t.Context(), tk, false)
+					msgCh, _ := r.startMessageDispatch(t.Context(), tk, false)
 
 					// Send a ToolUseMessage with a mutating tool.
 					toolID := "tool_edit_1"
@@ -525,19 +505,14 @@ func TestRepoExecutor(t *testing.T) {
 		t.Run("NonMutatingToolNoDiffStat", func(t *testing.T) {
 			t.Parallel()
 			stub := &stubContainer{}
-			r := &RepoExecutor{
-				RepoWorkspace: RepoWorkspace{
-					Runtime: stub,
-				},
-			}
-			r.initDefaults()
+			r := newTestSessionRunner(&RepoWorkspace{Runtime: stub}, "", nil)
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
 			tk.SetState(StateRunning)
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 
-			msgCh, _ := r.sessionRunner().startMessageDispatch(t.Context(), tk, false)
+			msgCh, _ := r.startMessageDispatch(t.Context(), tk, false)
 
 			toolID := "tool_read_1"
 			msgCh <- &agent.ToolUseMessage{
@@ -564,20 +539,14 @@ func TestRepoExecutor(t *testing.T) {
 		t.Run("SkipSideEffects", func(t *testing.T) {
 			t.Parallel()
 			stub := &stubContainer{}
-			r := &RepoExecutor{
-				RepoWorkspace: RepoWorkspace{
-					Runtime: stub,
-					Dir:     "/repo",
-				},
-			}
-			r.initDefaults()
+			r := newTestSessionRunner(&RepoWorkspace{Runtime: stub, Dir: "/repo"}, "", nil)
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
 			tk.SetState(StateRunning)
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 
-			msgCh, done := r.sessionRunner().startMessageDispatch(t.Context(), tk, true)
+			msgCh, done := r.startMessageDispatch(t.Context(), tk, true)
 
 			// Send a mutating tool use + result and a ResultMessage.
 			toolID := "tool_edit_1"
@@ -597,13 +566,12 @@ func TestRepoExecutor(t *testing.T) {
 
 		t.Run("DispatchDrainBeforeClose", func(t *testing.T) {
 			t.Parallel()
-			r := &RepoExecutor{}
-			r.initDefaults()
+			r := newTestSessionRunner(nil, "", nil)
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateRunning)
 
-			msgCh, done := r.sessionRunner().startMessageDispatch(t.Context(), tk, false)
+			msgCh, done := r.startMessageDispatch(t.Context(), tk, false)
 
 			// Buffer several messages, then close without draining.
 			msgs := []*agent.TextMessage{
@@ -642,13 +610,7 @@ func TestRepoExecutor(t *testing.T) {
 				logDir := t.TempDir()
 				backend := &testBackend{}
 
-				r := &RepoExecutor{
-					RepoWorkspace: RepoWorkspace{
-						Runtime: &stubContainer{},
-					},
-					LogDir:   logDir,
-					Backends: map[harness.Name]agent.Backend{"test": backend},
-				}
+				r := newTestSessionRunner(&RepoWorkspace{Runtime: &stubContainer{}}, logDir, map[harness.Name]agent.Backend{"test": backend})
 
 				tk := &Task{
 					ID:            ksid.NewID(),
@@ -701,13 +663,7 @@ func TestRepoExecutor(t *testing.T) {
 		logDir := t.TempDir()
 		backend := &testBackend{}
 
-		r := &RepoExecutor{
-			RepoWorkspace: RepoWorkspace{
-				Runtime: &stubContainer{},
-			},
-			LogDir:   logDir,
-			Backends: map[harness.Name]agent.Backend{"test": backend},
-		}
+		r := newTestSessionRunner(&RepoWorkspace{Runtime: &stubContainer{}}, logDir, map[harness.Name]agent.Backend{"test": backend})
 
 		tk := &Task{
 			ID:            ksid.NewID(),
@@ -718,8 +674,8 @@ func TestRepoExecutor(t *testing.T) {
 		tk.SetRuntimeConnectionInfo("fake-instance", runtime.ConnectionTarget{SSHHost: "fake-instance"}, "", "", 0)
 
 		// Create an initial session with a log writer by using the backend
-		// directly (RepoExecutor.Start needs a instance backend).
-		logW, err := r.logStore().Open(tk)
+		// directly (RepoWorkspace.Start needs a instance backend).
+		logW, err := (&LogStore{LogDir: logDir}).Open(tk)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -775,11 +731,9 @@ func TestRepoExecutor(t *testing.T) {
 	t.Run("BranchDiffStat", func(t *testing.T) {
 		t.Parallel()
 		sc := &stubContainer{}
-		r := &RepoExecutor{
-			RepoWorkspace: RepoWorkspace{
-				Runtime: sc,
-				Dir:     "/repo",
-			},
+		r := &RepoWorkspace{
+			Runtime: sc,
+			Dir:     "/repo",
 		}
 		tk := &Task{Repos: []RepoMount{{GitRoot: "/repo", Branch: "feature"}}}
 		tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
@@ -797,11 +751,9 @@ func TestRepoExecutor(t *testing.T) {
 	t.Run("BranchDiffStatMultiRepoUsesInstanceID", func(t *testing.T) {
 		t.Parallel()
 		sc := &stubContainer{}
-		r := &RepoExecutor{
-			RepoWorkspace: RepoWorkspace{
-				Runtime: sc,
-				Dir:     "/home/user/src/caic",
-			},
+		r := &RepoWorkspace{
+			Runtime: sc,
+			Dir:     "/home/user/src/caic",
 		}
 		tk := &Task{
 			Repos: []RepoMount{
@@ -833,18 +785,16 @@ func TestRepoExecutor(t *testing.T) {
 	})
 	t.Run("BranchDiffStatNoContainer", func(t *testing.T) {
 		t.Parallel()
-		r := &RepoExecutor{}
+		r := &RepoWorkspace{}
 		if ds := r.BranchDiffStat(t.Context(), &Task{}); ds != nil {
 			t.Errorf("BranchDiffStat with no instance = %+v, want nil", ds)
 		}
 	})
 	t.Run("BranchDiffStatNoDir", func(t *testing.T) {
 		t.Parallel()
-		r := &RepoExecutor{
-			RepoWorkspace: RepoWorkspace{
-				Runtime: &stubContainer{},
-				Dir:     "",
-			},
+		r := &RepoWorkspace{
+			Runtime: &stubContainer{},
+			Dir:     "",
 		}
 		if ds := r.BranchDiffStat(t.Context(), &Task{}); ds != nil {
 			t.Errorf("BranchDiffStat with no dir = %+v, want nil", ds)
@@ -856,10 +806,8 @@ func TestTaskRuntime(t *testing.T) {
 	t.Parallel()
 	t.Run("valid_preserves_mounted_path", func(t *testing.T) {
 		t.Parallel()
-		r := &RepoExecutor{
-			RepoWorkspace: RepoWorkspace{
-				Dir: "/home/user/src/caic-xyz/caic",
-			},
+		r := &RepoWorkspace{
+			Dir: "/home/user/src/caic-xyz/caic",
 		}
 		tk := &Task{
 			Repos: []RepoMount{
@@ -880,7 +828,7 @@ func TestTaskRuntime(t *testing.T) {
 			t.Fatalf("repos len = %d, want 2", len(repos))
 		}
 		if repos[0].HostPath != "/home/user/src/caic-xyz/caic" {
-			t.Errorf("primary HostPath = %q, want executor dir", repos[0].HostPath)
+			t.Errorf("primary HostPath = %q, want workspace dir", repos[0].HostPath)
 		}
 		if repos[0].MountPath != "/home/user/src/caic-xyz/caic" {
 			t.Errorf("primary MountPath = %q, want qualified mount", repos[0].MountPath)
@@ -891,10 +839,8 @@ func TestTaskRuntime(t *testing.T) {
 	})
 	t.Run("valid_no_repos", func(t *testing.T) {
 		t.Parallel()
-		r := &RepoExecutor{
-			RepoWorkspace: RepoWorkspace{
-				Dir: "/repo",
-			},
+		r := &RepoWorkspace{
+			Dir: "/repo",
 		}
 		tk := &Task{}
 		tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
@@ -911,7 +857,7 @@ func TestTaskRuntime(t *testing.T) {
 	})
 	t.Run("error_no_instance", func(t *testing.T) {
 		t.Parallel()
-		if _, _, err := (&RepoExecutor{}).taskRuntime(&Task{}); err == nil {
+		if _, _, err := (&RepoWorkspace{}).taskRuntime(&Task{}); err == nil {
 			t.Fatal("want error")
 		}
 	})
