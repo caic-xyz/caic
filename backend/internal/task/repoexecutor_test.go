@@ -852,7 +852,7 @@ func TestRepoExecutor(t *testing.T) {
 			if tk == nil {
 				tk = &Task{}
 			}
-			got := r.runtimeDir(tk)
+			got := r.sessionRunner().runtimeDir(tk)
 			if got != tc.want {
 				t.Errorf("runtimeDir(%q) = %q, want %q", tc.dir, got, tc.want)
 			}
@@ -877,7 +877,7 @@ func TestRepoExecutor(t *testing.T) {
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 
-			msgCh, _ := r.startMessageDispatch(t.Context(), tk, false)
+			msgCh, _ := r.sessionRunner().startMessageDispatch(t.Context(), tk, false)
 
 			rm := &agent.ResultMessage{MessageType: "result"}
 			msgCh <- rm
@@ -921,7 +921,7 @@ func TestRepoExecutor(t *testing.T) {
 					_, ch, unsub := tk.Subscribe(t.Context())
 					defer unsub()
 
-					msgCh, _ := r.startMessageDispatch(t.Context(), tk, false)
+					msgCh, _ := r.sessionRunner().startMessageDispatch(t.Context(), tk, false)
 
 					// Send a ToolUseMessage with a mutating tool.
 					toolID := "tool_edit_1"
@@ -973,7 +973,7 @@ func TestRepoExecutor(t *testing.T) {
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 
-			msgCh, _ := r.startMessageDispatch(t.Context(), tk, false)
+			msgCh, _ := r.sessionRunner().startMessageDispatch(t.Context(), tk, false)
 
 			toolID := "tool_read_1"
 			msgCh <- &agent.ToolUseMessage{
@@ -1013,7 +1013,7 @@ func TestRepoExecutor(t *testing.T) {
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 
-			msgCh, done := r.startMessageDispatch(t.Context(), tk, true)
+			msgCh, done := r.sessionRunner().startMessageDispatch(t.Context(), tk, true)
 
 			// Send a mutating tool use + result and a ResultMessage.
 			toolID := "tool_edit_1"
@@ -1039,7 +1039,7 @@ func TestRepoExecutor(t *testing.T) {
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateRunning)
 
-			msgCh, done := r.startMessageDispatch(t.Context(), tk, false)
+			msgCh, done := r.sessionRunner().startMessageDispatch(t.Context(), tk, false)
 
 			// Buffer several messages, then close without draining.
 			msgs := []*agent.TextMessage{

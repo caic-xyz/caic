@@ -10,8 +10,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"runtime/trace"
 	"strings"
 	"sync"
@@ -78,96 +76,6 @@ func (w *provisioningWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// Reconnect reattaches to a running relay, or starts a new agent session
-// resuming the previous conversation if no relay is available. Returns the
-// SessionHandle so the caller can start a session watcher.
-//
-// Strategy:
-//  1. Check if the relay daemon is alive (Unix socket exists in instance).
-//  2. If alive, attach to the relay. This is the preferred path because it
-//     reconnects to the still-running agent process with zero message loss.
-//  3. If attaching fails (relay died between check and attach), fall back to
-//     starting a new agent session with --resume to continue the conversation.
-//  4. If both fail, revert to StateWaiting so the user can retry or purge.
-//
-// State transitions:
-//   - Relay attach: keeps StateWaiting/StateAsking if agent already finished its
-//     turn; transitions to StateRunning only if the agent was mid-output.
-//   - --resume fallback: always transitions to StateRunning since a new agent
-//     process is started.
-//   - All-fail: reverts to StateWaiting.
-func (r *RepoExecutor) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (*SessionHandle, error) {
-	r.initDefaults()
-	ctx, task := trace.NewTask(ctx, "task.reconnect:"+t.ID.String())
-	defer task.End()
-
-	if t.HasSession() {
-		return nil, errors.New("session already active")
-	}
-	instanceID := t.RuntimeInstanceID()
-	if instanceID == "" {
-		return nil, errors.New("no instance to reconnect to")
-	}
-	sessionID := t.GetSessionID()
-	if harness.RequiresResumeSessionID(t.Harness) && sessionID == "" {
-		return nil, fmt.Errorf("%s session ID missing; cannot reconnect", t.Harness)
-	}
-	// Remember the state inferred from restored messages so we don't
-	// blindly override it to StateRunning for an idle relay.
-	prevState := t.GetState()
-
-	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, skipSideEffects)
-
-	// Reconnect resumes an existing session, so append to its log without
-	// writing a new caic_meta header — otherwise every server restart that
-	// re-adopts a running instance would append a duplicate header. Fall
-	// back to Open (which writes the header) only if the log is missing.
-	logW, err := r.logStore().Reopen(t)
-	if errors.Is(err, os.ErrNotExist) {
-		logW, err = r.logStore().Open(t)
-	}
-	if err != nil {
-		close(msgCh)
-		<-dispatchDone
-		return nil, err
-	}
-
-	// Attach to the live relay. If the relay is dead, the session is lost.
-	var primaryBranch string
-	if p := t.Primary(); p != nil {
-		primaryBranch = p.Branch
-	}
-	// Only transition to StateRunning if the restored messages indicate
-	// the agent was still producing output (no trailing ResultMessage).
-	// If the agent had already completed its turn, keep the inferred
-	// StateWaiting/StateAsking so the UI shows the correct status.
-	if prevState != StateWaiting && prevState != StateAsking {
-		t.SetState(StateRunning)
-	}
-	target := t.RuntimeConnectionTarget()
-	session, err := r.backend(t.Harness).AttachRelay(ctx, &agent.Options{
-		Target:             target,
-		RelayOffset:        t.RelayOffsetValue(),
-		ResumeSessionID:    sessionID,
-		Effort:             t.Effort,
-		PendingUserActions: t.PendingUserActions(),
-		MsgCh:              msgCh,
-		LogW:               logW,
-	})
-	if err != nil {
-		_ = logW.Close()
-		close(msgCh)
-		<-dispatchDone
-		t.SetState(StateWaiting)
-		r.log.Error("attach relay failed", "br", primaryBranch, "instance", instanceID, "err", err)
-		return nil, fmt.Errorf("reconnect: %w", err)
-	}
-
-	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, LogW: logW}
-	t.AttachSession(h)
-	return h, nil
-}
-
 // Start performs branch/instance setup, starts the agent session, and sends
 // the initial prompt. Returns the SessionHandle so the caller can start a
 // session watcher.
@@ -212,12 +120,13 @@ func (r *RepoExecutor) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 
 	// 2. Start the agent session.
 	t.SetState(StateStarting)
+	sessions := r.sessionRunner()
 	var msgCh chan agent.Message
 	var dispatchDone <-chan struct{}
 	var logW io.WriteCloser
 	{
 		region := trace.StartRegion(ctx, "dispatch-init")
-		msgCh, dispatchDone = r.startMessageDispatch(ctx, t, false)
+		msgCh, dispatchDone = sessions.startMessageDispatch(ctx, t, false)
 		logW, err = r.logStore().Open(t)
 		region.End()
 	}
@@ -233,9 +142,9 @@ func (r *RepoExecutor) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 	tlog.Info("starting session", "hns", t.Harness)
 	region = trace.StartRegion(ctx, "agent-session")
 	target := sr.AgentTarget
-	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
+	session, err := sessions.backend(t.Harness).Start(ctx, &agent.Options{
 		Target:        target,
-		Dir:           r.runtimeDir(t),
+		Dir:           sessions.runtimeDir(t),
 		Model:         t.Model,
 		Effort:        t.Effort,
 		InitialPrompt: t.InitialPrompt,
@@ -519,7 +428,8 @@ func (r *RepoExecutor) ReviveTask(ctx context.Context, t *Task) (*SessionHandle,
 	t.SetState(StateStarting)
 	tlog.Info("resuming session after revive", "sess", t.GetSessionID())
 
-	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, true)
+	sessions := r.sessionRunner()
+	msgCh, dispatchDone := sessions.startMessageDispatch(ctx, t, true)
 	logW, err := r.logStore().Open(t)
 	if err != nil {
 		close(msgCh)
@@ -530,9 +440,9 @@ func (r *RepoExecutor) ReviveTask(ctx context.Context, t *Task) (*SessionHandle,
 
 	t.SetState(StateRunning)
 	target := t.RuntimeConnectionTarget()
-	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
+	session, err := sessions.backend(t.Harness).Start(ctx, &agent.Options{
 		Target:          target,
-		Dir:             r.runtimeDir(t),
+		Dir:             sessions.runtimeDir(t),
 		Model:           t.Model,
 		Effort:          t.Effort,
 		ResumeSessionID: t.GetSessionID(),
@@ -563,85 +473,6 @@ func (r *RepoExecutor) ReviveTask(ctx context.Context, t *Task) (*SessionHandle,
 		t.SetLiveDiffStat(ds)
 	}
 	tlog.Info("agent ready after revive", "state", t.GetState())
-	return h, nil
-}
-
-// EnsureSession waits briefly for h to confirm it's alive. If the session
-// exits within 10 seconds (agent had already finished), it detaches and
-// starts a fresh idle relay so the task can accept new prompts.
-func (r *RepoExecutor) EnsureSession(ctx context.Context, t *Task, h *SessionHandle, tlog *slog.Logger) (*SessionHandle, error) {
-	select {
-	case <-h.Done():
-		// Session exited immediately (agent was already done).
-		t.DetachSession()
-		err := h.Drain()
-		_ = h.LogW.Close()
-		tlog.Info("attached session exited, starting idle relay", "err", err)
-		if s := t.GetState(); s == StateStopping || s == StateStopped || s == StatePurged {
-			return nil, fmt.Errorf("task is %s", s)
-		}
-		t.SetState(StateWaiting)
-		return r.StartSession(ctx, t, agent.Prompt{})
-	case <-time.After(10 * time.Second):
-		// Session is alive — all good.
-		return h, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-}
-
-// StartSession starts a fresh relay+agent session on an existing instance.
-// If prompt is non-empty, it is sent as the initial input and the task
-// transitions to StateRunning. If prompt is empty, the agent starts idle
-// and the task stays in its current state (typically StateWaiting).
-func (r *RepoExecutor) StartSession(ctx context.Context, t *Task, prompt agent.Prompt) (*SessionHandle, error) {
-	r.initDefaults()
-	ctx, task := trace.NewTask(ctx, "task.start-session:"+t.ID.String())
-	defer task.End()
-
-	instanceID := t.RuntimeInstanceID()
-	if instanceID == "" {
-		return nil, errors.New("no instance")
-	}
-	var primaryBranch string
-	if p := t.Primary(); p != nil {
-		primaryBranch = p.Branch
-	}
-	tlog := r.log.With("br", primaryBranch, "instance", instanceID)
-
-	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false)
-	logW, err := r.logStore().Open(t)
-	if err != nil {
-		close(msgCh)
-		<-dispatchDone
-		return nil, err
-	}
-
-	tlog.Info("starting session", "hns", t.Harness)
-	target := t.RuntimeConnectionTarget()
-	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
-		Target:        target,
-		Dir:           r.runtimeDir(t),
-		Model:         t.Model,
-		Effort:        t.Effort,
-		InitialPrompt: prompt,
-		MsgCh:         msgCh,
-		LogW:          logW,
-	})
-	if err != nil {
-		_ = logW.Close()
-		close(msgCh)
-		<-dispatchDone
-		tlog.Error("session start failed", "err", err)
-		return nil, err
-	}
-
-	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, LogW: logW}
-	t.AttachSession(h)
-	if prompt.Text != "" || len(prompt.Images) > 0 {
-		t.addMessage(ctx, syntheticUserInput(prompt), false)
-		t.SetState(StateRunning)
-	}
 	return h, nil
 }
 
@@ -733,160 +564,34 @@ func (r *RepoExecutor) SyncToDefault(ctx context.Context, t *Task, message strin
 	return r.RepoWorkspace.SyncToDefault(ctx, t, message)
 }
 
-// RestartSession closes the current agent session and starts a fresh one in
-// the same instance with a new prompt. Returns the new SessionHandle so the
-// caller can start a session watcher.
-func (r *RepoExecutor) RestartSession(ctx context.Context, t *Task, prompt agent.Prompt) (*SessionHandle, error) {
+// Reconnect delegates agent relay reconnection to SessionRunner.
+func (r *RepoExecutor) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (*SessionHandle, error) {
 	r.initDefaults()
-	ctx, task := trace.NewTask(ctx, "task.restart:"+t.ID.String())
-	defer task.End()
-
-	state := t.GetState()
-	if state != StateWaiting && state != StateAsking && state != StateHasPlan && state != StateStarting {
-		return nil, fmt.Errorf("cannot restart in state %s", state)
-	}
-
-	// 1. Close current session gracefully and persist a context_cleared
-	// marker to the log so that RestoreMessages can reset plan state on
-	// server restart. The marker must be written before closing the log.
-	oldH := t.CloseAndDetachSession(ctx)
-	if oldH != nil {
-		oldH.CloseMsgCh()
-		<-oldH.DispatchDone
-		if oldH.LogW != nil {
-			err := r.logStore().WriteContextCleared(oldH.LogW)
-			err = errors.Join(err, oldH.LogW.Close())
-			if err != nil {
-				t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
-				return nil, fmt.Errorf("write context cleared: %w", err)
-			}
-		}
-	}
-
-	// 2. Clear in-memory messages (sends context_cleared to subscribers).
-	t.ClearMessages(ctx)
-
-	// 3. Open new log segment.
-	logW, err := r.logStore().Open(t)
-	if err != nil {
-		t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
-		return nil, fmt.Errorf("open log: %w", err)
-	}
-
-	// 4. Start new session.
-	t.SetState(StateStarting)
-
-	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false)
-
-	var restartBranch string
-	if p := t.Primary(); p != nil {
-		restartBranch = p.Branch
-	}
-	instanceID := t.RuntimeInstanceID()
-	tlog := r.log.With("br", restartBranch, "instance", instanceID)
-	tlog.Info("restarting session", "hns", t.Harness)
-	target := t.RuntimeConnectionTarget()
-	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
-		Target:        target,
-		Dir:           r.runtimeDir(t),
-		Model:         t.Model,
-		Effort:        t.Effort,
-		InitialPrompt: prompt,
-		MsgCh:         msgCh,
-		LogW:          logW,
-	})
-	if err != nil {
-		_ = logW.Close()
-		close(msgCh)
-		<-dispatchDone
-		t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
-		return nil, fmt.Errorf("start session: %w", err)
-	}
-
-	// 5. Store new handle.
-	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, LogW: logW}
-	t.AttachSession(h)
-
-	t.addMessage(ctx, syntheticUserInput(prompt), false)
-
-	t.SetState(StateRunning)
-	tlog.Info("session restarted")
-	return h, nil
+	return r.sessionRunner().Reconnect(ctx, t, skipSideEffects)
 }
 
-// ClearContextSession closes the current agent session and starts a fresh one
-// in the same instance without a prompt. The task transitions to StateWaiting
-// so the user can send a new message when ready.
+// EnsureSession delegates live-session confirmation to SessionRunner.
+func (r *RepoExecutor) EnsureSession(ctx context.Context, t *Task, h *SessionHandle, tlog *slog.Logger) (*SessionHandle, error) {
+	r.initDefaults()
+	return r.sessionRunner().EnsureSession(ctx, t, h, tlog)
+}
+
+// StartSession delegates existing-instance session start to SessionRunner.
+func (r *RepoExecutor) StartSession(ctx context.Context, t *Task, prompt agent.Prompt) (*SessionHandle, error) {
+	r.initDefaults()
+	return r.sessionRunner().StartSession(ctx, t, prompt)
+}
+
+// RestartSession delegates context replacement to SessionRunner.
+func (r *RepoExecutor) RestartSession(ctx context.Context, t *Task, prompt agent.Prompt) (*SessionHandle, error) {
+	r.initDefaults()
+	return r.sessionRunner().RestartSession(ctx, t, prompt)
+}
+
+// ClearContextSession delegates context clearing to SessionRunner.
 func (r *RepoExecutor) ClearContextSession(ctx context.Context, t *Task) (*SessionHandle, error) {
 	r.initDefaults()
-	ctx, task := trace.NewTask(ctx, "task.clear-context:"+t.ID.String())
-	defer task.End()
-
-	state := t.GetState()
-	if state != StateWaiting && state != StateAsking && state != StateHasPlan && state != StateStarting {
-		return nil, fmt.Errorf("cannot clear context in state %s", state)
-	}
-
-	// 1. Close current session and persist context_cleared marker.
-	oldH := t.CloseAndDetachSession(ctx)
-	if oldH != nil {
-		oldH.CloseMsgCh()
-		<-oldH.DispatchDone
-		if oldH.LogW != nil {
-			err := r.logStore().WriteContextCleared(oldH.LogW)
-			err = errors.Join(err, oldH.LogW.Close())
-			if err != nil {
-				t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
-				return nil, fmt.Errorf("write context cleared: %w", err)
-			}
-		}
-	}
-
-	// 2. Clear in-memory messages.
-	t.ClearMessages(ctx)
-
-	// 3. Open new log segment.
-	logW, err := r.logStore().Open(t)
-	if err != nil {
-		t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
-		return nil, fmt.Errorf("open log: %w", err)
-	}
-
-	// 4. Start new session with no initial prompt.
-	t.SetState(StateStarting)
-
-	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false)
-
-	var clearBranch string
-	if p := t.Primary(); p != nil {
-		clearBranch = p.Branch
-	}
-	instanceID := t.RuntimeInstanceID()
-	tlog := r.log.With("br", clearBranch, "instance", instanceID)
-	tlog.Info("clearing context", "hns", t.Harness)
-	target := t.RuntimeConnectionTarget()
-	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
-		Target: target,
-		Dir:    r.runtimeDir(t),
-		Model:  t.Model,
-		Effort: t.Effort,
-		MsgCh:  msgCh,
-		LogW:   logW,
-	})
-	if err != nil {
-		_ = logW.Close()
-		close(msgCh)
-		<-dispatchDone
-		t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
-		return nil, fmt.Errorf("start session: %w", err)
-	}
-
-	// 5. Store new handle. Task goes to Waiting (no prompt to run).
-	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, LogW: logW}
-	t.AttachSession(h)
-	t.SetState(StateWaiting)
-	tlog.Info("context cleared")
-	return h, nil
+	return r.sessionRunner().ClearContextSession(ctx, t)
 }
 
 // DiffContent delegates repo diff rendering to the workspace.
@@ -906,16 +611,7 @@ func (r *RepoExecutor) taskRuntime(t *Task) (runtime.InstanceID, []runtime.Repo,
 	return r.RepoWorkspace.taskRuntime(t)
 }
 
-// mutatingTools lists tool names whose execution may change files in the
-// instance, warranting a diff stat refresh after their result arrives.
-var mutatingTools = map[string]struct{}{
-	"Bash":         {},
-	"Edit":         {},
-	"Write":        {},
-	"NotebookEdit": {},
-}
-
-// initDefaults populates timeout values and the logger.
+// initDefaults populates timeout values and harness backend maps.
 // Safe to call multiple times (sync.Once).
 func (r *RepoExecutor) initDefaults() {
 	r.RepoWorkspace.initDefaults()
@@ -927,28 +623,6 @@ func (r *RepoExecutor) initDefaults() {
 			r.RuntimeStartTimeout = time.Hour
 		}
 	})
-}
-
-// backend returns the Backend for the given agent name.
-func (r *RepoExecutor) backend(name harness.Name) agent.Backend {
-	return r.Backends[name]
-}
-
-// runtimeDir returns the working directory path inside a runtime instance.
-// Uses the task's primary repo MountedPath when available; otherwise falls back
-// to computing it from the executor's Dir basename (legacy). Returns /home/user
-// for no-repo executors.
-//
-// TODO(2026-07-01): remove the filepath.Base fallback once all pre-MountedPath
-// runtime instances have cycled out.
-func (r *RepoExecutor) runtimeDir(t *Task) string {
-	if p := t.Primary(); p != nil && p.MountedPath != "" {
-		return strings.Replace(p.MountedPath, "~/", "/home/user/", 1)
-	}
-	if r.Dir == "" {
-		return "/home/user"
-	}
-	return "/home/user/src/" + filepath.Base(r.Dir)
 }
 
 // MakeMetadata builds runtime metadata for a task instance.
@@ -1075,65 +749,12 @@ func (r *RepoExecutor) logRelayDiag(ctx context.Context, tlog *slog.Logger, targ
 	tlog.Warn("relay.log tail on shutdown timeout", "log", tail)
 }
 
-// startMessageDispatch starts a goroutine that reads from msgCh and dispatches
-// to t.addMessage. For ResultMessages, it fetches from the instance first and
-// attaches the diff stat. For tool results following a mutating tool (Edit,
-// Bash, Write, NotebookEdit), it emits a DiffStatMessage without fetching from
-// the instance. When skipSideEffects is true, fetch+diff and title generation
-// are suppressed (used during adoption where these are handled once at the end).
-// Returns the message channel and a done channel that closes when the goroutine
-// exits (after msgCh is fully drained).
-func (r *RepoExecutor) startMessageDispatch(ctx context.Context, t *Task, skipSideEffects bool) (msgCh chan agent.Message, dispatchDone <-chan struct{}) {
-	// Capture all repos outside the goroutine to avoid races.
-	allRepos := t.RuntimeRepos()
-	instanceID := t.RuntimeInstanceID()
-	workspace := &r.RepoWorkspace
-	msgCh = make(chan agent.Message, 256)
-	done := make(chan struct{})
-	dispatchDone = done
-	go func() {
-		defer close(done)
-		// Track tool_use IDs from ToolUseMessage that may mutate files.
-		pendingMutating := make(map[string]struct{})
-		for m := range msgCh {
-			emitToolDiff := false
-			switch msg := m.(type) {
-			case *agent.ToolUseMessage:
-				if _, ok := mutatingTools[msg.Name]; ok {
-					pendingMutating[msg.ToolUseID] = struct{}{}
-				}
-			case *agent.ToolResultMessage:
-				if _, ok := pendingMutating[msg.ToolUseID]; ok {
-					delete(pendingMutating, msg.ToolUseID)
-					emitToolDiff = !skipSideEffects && r.Runtime != nil && r.Dir != ""
-				}
-			case *agent.ResultMessage:
-				if !skipSideEffects && r.Runtime != nil && r.Dir != "" {
-					ds, _ := workspace.diffStat(ctx, instanceID, allRepos, diffFetchBestEffort, "")
-					msg.DiffStat = ds
-				}
-			}
-			t.addMessage(ctx, m, skipSideEffects)
-			if emitToolDiff {
-				r.emitDiffStatBranch(ctx, t, instanceID, allRepos)
-			}
-		}
-	}()
-	return msgCh, dispatchDone
-}
-
-// emitDiffStatBranch emits a DiffStatMessage from the current instance diff
-// without fetching from the instance. This keeps live UI diff stats fresh during
-// a running turn without triggering md fetch side effects.
-func (r *RepoExecutor) emitDiffStatBranch(ctx context.Context, t *Task, id runtime.InstanceID, repos []runtime.Repo) {
-	ds, _ := r.diffStat(ctx, id, repos, diffWithoutFetch, "")
-	if len(ds) == 0 {
-		return
+func (r *RepoExecutor) sessionRunner() *SessionRunner {
+	return &SessionRunner{
+		Backends:  r.Backends,
+		Workspace: &r.RepoWorkspace,
+		Logs:      r.logStore(),
 	}
-	t.addMessage(ctx, &agent.DiffStatMessage{
-		MessageType: "caic_diff_stat",
-		DiffStat:    ds,
-	}, false)
 }
 
 func (r *RepoExecutor) logStore() *LogStore {
