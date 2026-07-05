@@ -177,8 +177,10 @@ func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 func newMCPTaskCreateTestRouter(t *testing.T) *testRouter {
 	s := newTestRouter(t)
 	s.taskMgr.RegisterExecutor("myrepo", &task.RepoExecutor{
-		BaseBranch: "main",
-		Dir:        t.TempDir(),
+		RepoWorkspace: task.RepoWorkspace{
+			BaseBranch: "main",
+			Dir:        t.TempDir(),
+		},
 		Backends: map[harness.Name]agent.Backend{
 			harness.Claude: modelListBackend{models: []string{"claude-default"}},
 			harness.Pi:     modelListBackend{models: []string{"pi-default"}},

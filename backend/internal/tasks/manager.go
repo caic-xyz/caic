@@ -131,10 +131,12 @@ func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passe
 		changed:    make(chan struct{}),
 	}
 	noRepoExecutor := &task.RepoExecutor{
+		RepoWorkspace: task.RepoWorkspace{
+			Runtime: cfg.Backend,
+		},
 		LogDir:     cfg.LogDir,
 		CacheDir:   cfg.CacheDir,
 		HarnessEnv: cfg.HarnessEnv,
-		Runtime:    cfg.Backend,
 		Backends:   cfg.Backends,
 	}
 	_ = noRepoExecutor.Init(cfg.ServerCtx)

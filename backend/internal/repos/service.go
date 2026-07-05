@@ -350,6 +350,9 @@ func (s *Service) notifyChanged() {
 
 func (s *Service) newExecutor(ctx context.Context, info *Info) (*task.RepoExecutor, error) {
 	executor := &task.RepoExecutor{
+		RepoWorkspace: task.RepoWorkspace{
+			Runtime: s.runtime,
+		},
 		LogDir:     s.logDir,
 		CacheDir:   s.cacheDir,
 		Backends:   s.agentBackends,
@@ -357,7 +360,6 @@ func (s *Service) newExecutor(ctx context.Context, info *Info) (*task.RepoExecut
 		EventReplayFactory: func(path string, h harness.Name) task.EventReplayWriter {
 			return eventreplay.NewMessageWriter(path, h)
 		},
-		Runtime: s.runtime,
 	}
 	if info != nil {
 		executor.BaseBranch = info.BaseBranch

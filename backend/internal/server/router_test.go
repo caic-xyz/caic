@@ -614,7 +614,12 @@ func TestHandlePurge(t *testing.T) {
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
 		tk.SetState(task.StateWaiting)
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("r", &task.RepoExecutor{BaseBranch: "main", Dir: t.TempDir()})
+		s.taskMgr.RegisterExecutor("r", &task.RepoExecutor{
+			RepoWorkspace: task.RepoWorkspace{
+				BaseBranch: "main",
+				Dir:        t.TempDir(),
+			},
+		})
 		insertTestTask(t, s, "t1", tk)
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks/t1/purge", http.NoBody)
@@ -642,7 +647,12 @@ func TestHandlePurge(t *testing.T) {
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
 		tk.SetState(task.StateRunning)
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("r", &task.RepoExecutor{BaseBranch: "main", Dir: t.TempDir()})
+		s.taskMgr.RegisterExecutor("r", &task.RepoExecutor{
+			RepoWorkspace: task.RepoWorkspace{
+				BaseBranch: "main",
+				Dir:        t.TempDir(),
+			},
+		})
 		insertTestTask(t, s, "t1", tk)
 
 		// Use an already-cancelled context to simulate shutdown scenario
@@ -666,9 +676,11 @@ func TestHandleCreateTask(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
 		s.taskMgr.RegisterExecutor("myrepo", &task.RepoExecutor{
-			BaseBranch: "main",
-			Dir:        t.TempDir(),
-			Backends:   map[harness.Name]agent.Backend{harness.Claude: stubBackend{}},
+			RepoWorkspace: task.RepoWorkspace{
+				BaseBranch: "main",
+				Dir:        t.TempDir(),
+			},
+			Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}},
 		})
 		handler := handle(testTaskHandlers(s).service.createTask)
 
@@ -730,7 +742,12 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("UnknownHarness", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
-		s.taskMgr.RegisterExecutor("myrepo", &task.RepoExecutor{BaseBranch: "main", Dir: t.TempDir()})
+		s.taskMgr.RegisterExecutor("myrepo", &task.RepoExecutor{
+			RepoWorkspace: task.RepoWorkspace{
+				BaseBranch: "main",
+				Dir:        t.TempDir(),
+			},
+		})
 		handler := handle(testTaskHandlers(s).service.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"nonexistent"}`)
@@ -754,9 +771,11 @@ func TestHandleCreateTask(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
 		s.taskMgr.RegisterExecutor("myrepo", &task.RepoExecutor{
-			BaseBranch: "main",
-			Dir:        t.TempDir(),
-			Backends:   map[harness.Name]agent.Backend{"stub": stubBackend{}},
+			RepoWorkspace: task.RepoWorkspace{
+				BaseBranch: "main",
+				Dir:        t.TempDir(),
+			},
+			Backends: map[harness.Name]agent.Backend{"stub": stubBackend{}},
 		})
 		handler := handle(testTaskHandlers(s).service.createTask)
 
@@ -781,9 +800,11 @@ func TestHandleCreateTask(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
 		s.taskMgr.RegisterExecutor("myrepo", &task.RepoExecutor{
-			BaseBranch: "main",
-			Dir:        t.TempDir(),
-			Backends:   map[harness.Name]agent.Backend{"stub": stubBackend{}},
+			RepoWorkspace: task.RepoWorkspace{
+				BaseBranch: "main",
+				Dir:        t.TempDir(),
+			},
+			Backends: map[harness.Name]agent.Backend{"stub": stubBackend{}},
 		})
 		handler := handle(testTaskHandlers(s).service.createTask)
 
@@ -808,9 +829,11 @@ func TestHandleCreateTask(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
 		s.taskMgr.RegisterExecutor("myrepo", &task.RepoExecutor{
-			BaseBranch: "main",
-			Dir:        t.TempDir(),
-			Backends:   map[harness.Name]agent.Backend{harness.Claude: stubBackend{}},
+			RepoWorkspace: task.RepoWorkspace{
+				BaseBranch: "main",
+				Dir:        t.TempDir(),
+			},
+			Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}},
 		})
 		handler := handle(testTaskHandlers(s).service.createTask)
 
@@ -855,9 +878,11 @@ func TestHandleCreateTask(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
 		s.taskMgr.RegisterExecutor("myrepo", &task.RepoExecutor{
-			BaseBranch: "main",
-			Dir:        t.TempDir(),
-			Backends:   map[harness.Name]agent.Backend{harness.Claude: stubBackend{}},
+			RepoWorkspace: task.RepoWorkspace{
+				BaseBranch: "main",
+				Dir:        t.TempDir(),
+			},
+			Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}},
 		})
 		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
 			p.Settings.WellKnownCaches = map[string]bool{"go-mod": false, "npm": true}
@@ -934,9 +959,11 @@ func TestHandleCreateTask(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
 		s.taskMgr.RegisterExecutor("myrepo", &task.RepoExecutor{
-			BaseBranch: "main",
-			Dir:        t.TempDir(),
-			Backends:   map[harness.Name]agent.Backend{harness.Claude: stubBackend{}},
+			RepoWorkspace: task.RepoWorkspace{
+				BaseBranch: "main",
+				Dir:        t.TempDir(),
+			},
+			Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}},
 		})
 		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
 			p.Settings.BaseImage = "ghcr.io/my/image:v1"

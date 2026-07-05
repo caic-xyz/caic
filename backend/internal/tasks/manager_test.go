@@ -229,7 +229,11 @@ func TestManager(t *testing.T) {
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
 			m := New(Config{ServerCtx: t.Context()})
-			r := &task.RepoExecutor{Dir: "/tmp/test"}
+			r := &task.RepoExecutor{
+				RepoWorkspace: task.RepoWorkspace{
+					Dir: "/tmp/test",
+				},
+			}
 			m.RegisterExecutor("my/repo", r)
 			got, ok := m.Executor("my/repo")
 			if !ok || got != r {
@@ -243,7 +247,11 @@ func TestManager(t *testing.T) {
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
 			m := New(Config{ServerCtx: t.Context()})
-			r := &task.RepoExecutor{Dir: "/tmp/test"}
+			r := &task.RepoExecutor{
+				RepoWorkspace: task.RepoWorkspace{
+					Dir: "/tmp/test",
+				},
+			}
 			m.RegisterExecutor("my/repo", r)
 			m.UnregisterExecutor("my/repo")
 			if _, ok := m.Executor("my/repo"); ok {
@@ -253,8 +261,16 @@ func TestManager(t *testing.T) {
 		t.Run("valid_removes_only_matching", func(t *testing.T) {
 			t.Parallel()
 			m := New(Config{ServerCtx: t.Context()})
-			r1 := &task.RepoExecutor{Dir: "/tmp/a"}
-			r2 := &task.RepoExecutor{Dir: "/tmp/b"}
+			r1 := &task.RepoExecutor{
+				RepoWorkspace: task.RepoWorkspace{
+					Dir: "/tmp/a",
+				},
+			}
+			r2 := &task.RepoExecutor{
+				RepoWorkspace: task.RepoWorkspace{
+					Dir: "/tmp/b",
+				},
+			}
 			m.RegisterExecutor("a", r1)
 			m.RegisterExecutor("b", r2)
 			m.UnregisterExecutor("a")
@@ -563,7 +579,11 @@ func TestManager(t *testing.T) {
 		t.Run("valid_with_repo", func(t *testing.T) {
 			t.Parallel()
 			m := New(Config{ServerCtx: t.Context()})
-			r := &task.RepoExecutor{Dir: "/tmp/test"}
+			r := &task.RepoExecutor{
+				RepoWorkspace: task.RepoWorkspace{
+					Dir: "/tmp/test",
+				},
+			}
 			m.RegisterExecutor("my/repo", r)
 			tk := &task.Task{
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -619,7 +639,11 @@ func TestManager(t *testing.T) {
 		t.Run("valid_explicit", func(t *testing.T) {
 			t.Parallel()
 			m := New(Config{ServerCtx: t.Context()})
-			m.RegisterExecutor("my/repo", &task.RepoExecutor{BaseBranch: "develop"})
+			m.RegisterExecutor("my/repo", &task.RepoExecutor{
+				RepoWorkspace: task.RepoWorkspace{
+					BaseBranch: "develop",
+				},
+			})
 			tk := &task.Task{
 				Repos: []task.RepoMount{{Name: "my/repo", BaseBranch: "main"}},
 			}
@@ -630,7 +654,11 @@ func TestManager(t *testing.T) {
 		t.Run("valid_executor_default", func(t *testing.T) {
 			t.Parallel()
 			m := New(Config{ServerCtx: t.Context()})
-			m.RegisterExecutor("my/repo", &task.RepoExecutor{BaseBranch: "develop"})
+			m.RegisterExecutor("my/repo", &task.RepoExecutor{
+				RepoWorkspace: task.RepoWorkspace{
+					BaseBranch: "develop",
+				},
+			})
 			tk := &task.Task{
 				Repos: []task.RepoMount{{Name: "my/repo"}},
 			}
@@ -799,7 +827,9 @@ func TestManager(t *testing.T) {
 		newManagerWithRepo := func(t *testing.T) *Manager {
 			m := New(Config{ServerCtx: t.Context()})
 			m.RegisterExecutor("my/repo", &task.RepoExecutor{
-				Dir:      "/tmp/my-repo",
+				RepoWorkspace: task.RepoWorkspace{
+					Dir: "/tmp/my-repo",
+				},
 				Backends: map[harness.Name]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}},
 			})
 			return m
@@ -836,7 +866,9 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newManagerWithRepo(t)
 			m.RegisterExecutor("other/repo", &task.RepoExecutor{
-				Dir:      "/tmp/other-repo",
+				RepoWorkspace: task.RepoWorkspace{
+					Dir: "/tmp/other-repo",
+				},
 				Backends: map[harness.Name]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}},
 			})
 			id, err := m.Create(t.Context(), CreateParams{
@@ -959,7 +991,9 @@ func TestManager(t *testing.T) {
 		newForkManager := func(t *testing.T) (*Manager, *Entry) {
 			m := New(Config{ServerCtx: t.Context()})
 			m.RegisterExecutor("my/repo", &task.RepoExecutor{
-				Dir:      "/tmp/my-repo",
+				RepoWorkspace: task.RepoWorkspace{
+					Dir: "/tmp/my-repo",
+				},
 				Backends: map[harness.Name]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}},
 			})
 			src := &task.Task{
@@ -2100,7 +2134,9 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := New(Config{ServerCtx: t.Context()})
 			m.RegisterExecutor("repo/a", &task.RepoExecutor{
-				Dir:      "/tmp/repo",
+				RepoWorkspace: task.RepoWorkspace{
+					Dir: "/tmp/repo",
+				},
 				Backends: map[harness.Name]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}},
 			})
 			tk := &task.Task{
@@ -2147,7 +2183,11 @@ func TestManager(t *testing.T) {
 			runtimeBackend := &tasktest.FakeRuntimeBackend{}
 			m := New(Config{ServerCtx: t.Context()})
 
-			m.watchSession(entry, &task.RepoExecutor{Runtime: runtimeBackend}, h)
+			m.watchSession(entry, &task.RepoExecutor{
+				RepoWorkspace: task.RepoWorkspace{
+					Runtime: runtimeBackend,
+				},
+			}, h)
 
 			select {
 			case <-entry.Done():
@@ -2208,8 +2248,11 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := New(Config{ServerCtx: t.Context()})
 			m.RegisterExecutor("repo/a", &task.RepoExecutor{
-				Dir:      "/tmp/repo",
-				Backends: map[harness.Name]agent.Backend{}, // no backends
+				RepoWorkspace: task.RepoWorkspace{
+					Dir: "/tmp/repo",
+				},
+				Backends: map[harness.Name]agent.Backend{},
+				// no backends,
 			})
 			_, err := m.Create(t.Context(), CreateParams{
 				Prompt:  agent.Prompt{Text: "hi"},
@@ -2225,7 +2268,9 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := New(Config{ServerCtx: t.Context()})
 			m.RegisterExecutor("repo/a", &task.RepoExecutor{
-				Dir:      "/tmp/repo",
+				RepoWorkspace: task.RepoWorkspace{
+					Dir: "/tmp/repo",
+				},
 				Backends: map[harness.Name]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}},
 			})
 			_, err := m.Create(t.Context(), CreateParams{
@@ -2243,7 +2288,9 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := New(Config{ServerCtx: t.Context()})
 			m.RegisterExecutor("repo/a", &task.RepoExecutor{
-				Dir:      "/tmp/repo",
+				RepoWorkspace: task.RepoWorkspace{
+					Dir: "/tmp/repo",
+				},
 				Backends: map[harness.Name]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}},
 			})
 			_, err := m.Create(t.Context(), CreateParams{
@@ -2264,7 +2311,12 @@ func TestManager(t *testing.T) {
 		// task in StateWaiting. Returns the Manager and the source Entry.
 		forkSetup := func(t *testing.T, sourceHarness harness.Name, backends map[harness.Name]agent.Backend) (*Manager, *Entry) {
 			m := New(Config{ServerCtx: t.Context()})
-			r := &task.RepoExecutor{Dir: "/tmp/repo", Backends: backends}
+			r := &task.RepoExecutor{
+				RepoWorkspace: task.RepoWorkspace{
+					Dir: "/tmp/repo",
+				},
+				Backends: backends,
+			}
 			m.RegisterExecutor("repo/a", r)
 			src := &task.Task{
 				ID:            ksid.NewID(),
@@ -2364,11 +2416,15 @@ func TestManager(t *testing.T) {
 			}}
 			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
 			m.RegisterExecutor("caic-xyz/caic", &task.RepoExecutor{
-				Dir:      "/home/user/src/caic-xyz/caic",
+				RepoWorkspace: task.RepoWorkspace{
+					Dir: "/home/user/src/caic-xyz/caic",
+				},
 				Backends: map[harness.Name]agent.Backend{harness.Claude: &fakeBackend{models: []string{"m1"}}},
 			})
 			m.RegisterExecutor("caic-xyz/md", &task.RepoExecutor{
-				Dir:      "/home/user/src/caic-xyz/md",
+				RepoWorkspace: task.RepoWorkspace{
+					Dir: "/home/user/src/caic-xyz/md",
+				},
 				Backends: map[harness.Name]agent.Backend{harness.Claude: &fakeBackend{models: []string{"m1"}}},
 			})
 
@@ -2410,7 +2466,9 @@ func TestManager(t *testing.T) {
 			}}
 			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
 			m.RegisterExecutor("repo/a", &task.RepoExecutor{
-				Dir:      "/home/user/src/repo/a",
+				RepoWorkspace: task.RepoWorkspace{
+					Dir: "/home/user/src/repo/a",
+				},
 				Backends: map[harness.Name]agent.Backend{harness.Claude: &fakeBackend{models: []string{"m1"}}},
 			})
 
@@ -2476,7 +2534,9 @@ func TestManager(t *testing.T) {
 				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
 			}
 			m.RegisterExecutor("caic-xyz/caic", &task.RepoExecutor{
-				Dir:      "/home/user/src/caic-xyz/caic",
+				RepoWorkspace: task.RepoWorkspace{
+					Dir: "/home/user/src/caic-xyz/caic",
+				},
 				Backends: map[harness.Name]agent.Backend{harness.Claude: &fakeBackend{models: []string{"m1"}}},
 			})
 
@@ -2535,7 +2595,9 @@ func TestManager(t *testing.T) {
 			}}
 			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
 			m.RegisterExecutor("caic-xyz/caic", &task.RepoExecutor{
-				Dir:      "/home/user/src/caic-xyz/caic",
+				RepoWorkspace: task.RepoWorkspace{
+					Dir: "/home/user/src/caic-xyz/caic",
+				},
 				Backends: map[harness.Name]agent.Backend{harness.Claude: &fakeBackend{models: []string{"m1"}}},
 			})
 
@@ -2614,7 +2676,9 @@ func TestManager(t *testing.T) {
 				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "relay exited" },
 			}
 			m.RegisterExecutor("caic-xyz/caic", &task.RepoExecutor{
-				Dir:      "/home/user/src/caic-xyz/caic",
+				RepoWorkspace: task.RepoWorkspace{
+					Dir: "/home/user/src/caic-xyz/caic",
+				},
 				Backends: map[harness.Name]agent.Backend{harness.Claude: &fakeBackend{models: []string{"m1"}}},
 			})
 
@@ -2667,8 +2731,10 @@ func TestManager(t *testing.T) {
 				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "relay exited" },
 			}
 			m.RegisterExecutor("caic-xyz/caic", &task.RepoExecutor{
-				Dir:      "/home/user/src/caic-xyz/caic",
-				Runtime:  runtimeBackend,
+				RepoWorkspace: task.RepoWorkspace{
+					Dir:     "/home/user/src/caic-xyz/caic",
+					Runtime: runtimeBackend,
+				},
 				Backends: map[harness.Name]agent.Backend{harness.Claude: &fakeBackend{models: []string{"m1"}}},
 			})
 
@@ -2710,7 +2776,9 @@ func TestManager(t *testing.T) {
 			}}
 			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
 			m.RegisterExecutor("caic-xyz/caic", &task.RepoExecutor{
-				Dir:      "/home/user/src/caic-xyz/caic",
+				RepoWorkspace: task.RepoWorkspace{
+					Dir: "/home/user/src/caic-xyz/caic",
+				},
 				Backends: map[harness.Name]agent.Backend{harness.Claude: &fakeBackend{models: []string{"m1"}}},
 			})
 
@@ -2772,7 +2840,9 @@ func TestManager(t *testing.T) {
 			}}
 			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
 			m.RegisterExecutor("caic-xyz/caic", &task.RepoExecutor{
-				Dir:      "/home/user/src/caic-xyz/caic",
+				RepoWorkspace: task.RepoWorkspace{
+					Dir: "/home/user/src/caic-xyz/caic",
+				},
 				Backends: map[harness.Name]agent.Backend{harness.Codex: codex.New("", nil)},
 			})
 
@@ -3028,7 +3098,12 @@ func TestRefreshAdoptedDiffStat(t *testing.T) {
 				return "5\t1\tmain.go\n", nil
 			},
 		}
-		executor := &task.RepoExecutor{Runtime: fake, Dir: "/repo"}
+		executor := &task.RepoExecutor{
+			RepoWorkspace: task.RepoWorkspace{
+				Runtime: fake,
+				Dir:     "/repo",
+			},
+		}
 		tk := &task.Task{Repos: []task.RepoMount{{GitRoot: "/repo", Branch: "caic-0"}}}
 		tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 		tk.SetState(task.StateWaiting)
@@ -3053,7 +3128,12 @@ func TestRefreshAdoptedDiffStat(t *testing.T) {
 				return "5\t1\tmain.go\n", nil
 			},
 		}
-		executor := &task.RepoExecutor{Runtime: fake, Dir: "/repo"}
+		executor := &task.RepoExecutor{
+			RepoWorkspace: task.RepoWorkspace{
+				Runtime: fake,
+				Dir:     "/repo",
+			},
+		}
 		tk := &task.Task{Repos: []task.RepoMount{{GitRoot: "/repo", Branch: "caic-0"}}}
 		tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 		tk.SetState(task.StateRunning)

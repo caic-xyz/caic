@@ -226,8 +226,10 @@ func TestRepoExecutor(t *testing.T) {
 		t.Parallel()
 		backend := &testBackend{}
 		r := &RepoExecutor{
+			RepoWorkspace: RepoWorkspace{
+				Runtime: &stubContainer{},
+			},
 			LogDir:   t.TempDir(),
-			Runtime:  &stubContainer{},
 			Backends: map[harness.Name]agent.Backend{"test": backend},
 		}
 		tk := &Task{
@@ -260,7 +262,9 @@ func TestRepoExecutor(t *testing.T) {
 		t.Parallel()
 		launchErr := errors.New("invalid context name cache-custom-mount:~/.cache/caic: invalid reference format")
 		r := &RepoExecutor{
-			Runtime: &stubContainer{launchErr: launchErr},
+			RepoWorkspace: RepoWorkspace{
+				Runtime: &stubContainer{launchErr: launchErr},
+			},
 		}
 		tk := &Task{
 			ID:            ksid.NewID(),
@@ -292,8 +296,10 @@ func TestRepoExecutor(t *testing.T) {
 			t.Parallel()
 			clone := initTestRepo(t, "main")
 			r := &RepoExecutor{
-				BaseBranch: "main",
-				Dir:        clone,
+				RepoWorkspace: RepoWorkspace{
+					BaseBranch: "main",
+					Dir:        clone,
+				},
 			}
 			if err := r.Init(t.Context()); err != nil {
 				t.Fatal(err)
@@ -312,8 +318,10 @@ func TestRepoExecutor(t *testing.T) {
 			runGit(t, clone, "push", "origin", "caic-3")
 
 			r := &RepoExecutor{
-				BaseBranch: "main",
-				Dir:        clone,
+				RepoWorkspace: RepoWorkspace{
+					BaseBranch: "main",
+					Dir:        clone,
+				},
 			}
 			if err := r.Init(t.Context()); err != nil {
 				t.Fatal(err)
@@ -332,8 +340,10 @@ func TestRepoExecutor(t *testing.T) {
 			// never synced to origin.
 
 			r := &RepoExecutor{
-				BaseBranch: "main",
-				Dir:        clone,
+				RepoWorkspace: RepoWorkspace{
+					BaseBranch: "main",
+					Dir:        clone,
+				},
 			}
 			if err := r.Init(t.Context()); err != nil {
 				t.Fatal(err)
@@ -350,8 +360,10 @@ func TestRepoExecutor(t *testing.T) {
 			runGit(t, clone, "branch", "caic-2")
 
 			r := &RepoExecutor{
-				BaseBranch: "main",
-				Dir:        clone,
+				RepoWorkspace: RepoWorkspace{
+					BaseBranch: "main",
+					Dir:        clone,
+				},
 			}
 			if err := r.Init(t.Context()); err != nil {
 				t.Fatal(err)
@@ -382,10 +394,12 @@ func TestRepoExecutor(t *testing.T) {
 			logDir := t.TempDir()
 			stub := &stubContainer{}
 			r := &RepoExecutor{
-				BaseBranch: "main",
-				Dir:        clone,
-				LogDir:     logDir,
-				Runtime:    stub,
+				RepoWorkspace: RepoWorkspace{
+					BaseBranch: "main",
+					Dir:        clone,
+					Runtime:    stub,
+				},
+				LogDir: logDir,
 			}
 			r.initDefaults()
 
@@ -427,10 +441,12 @@ func TestRepoExecutor(t *testing.T) {
 			logDir := t.TempDir()
 			stub := &stubContainer{}
 			r := &RepoExecutor{
-				BaseBranch: "main",
-				Dir:        clone,
-				LogDir:     logDir,
-				Runtime:    stub,
+				RepoWorkspace: RepoWorkspace{
+					BaseBranch: "main",
+					Dir:        clone,
+					Runtime:    stub,
+				},
+				LogDir: logDir,
 			}
 			r.initDefaults()
 
@@ -466,8 +482,10 @@ func TestRepoExecutor(t *testing.T) {
 			// LiveStats for the result cost.
 			clone := initTestRepo(t, "main")
 			r := &RepoExecutor{
-				BaseBranch: "main",
-				Dir:        clone,
+				RepoWorkspace: RepoWorkspace{
+					BaseBranch: "main",
+					Dir:        clone,
+				},
 			}
 
 			tk := &Task{
@@ -510,9 +528,11 @@ func TestRepoExecutor(t *testing.T) {
 			logDir := t.TempDir()
 			clone := initTestRepo(t, "main")
 			r := &RepoExecutor{
-				BaseBranch: "main",
-				Dir:        clone,
-				LogDir:     logDir,
+				RepoWorkspace: RepoWorkspace{
+					BaseBranch: "main",
+					Dir:        clone,
+				},
+				LogDir: logDir,
 			}
 
 			tk := &Task{
@@ -564,8 +584,10 @@ func TestRepoExecutor(t *testing.T) {
 			t.Parallel()
 			clone := initTestRepo(t, "main")
 			r := &RepoExecutor{
-				BaseBranch: "main",
-				Dir:        clone,
+				RepoWorkspace: RepoWorkspace{
+					BaseBranch: "main",
+					Dir:        clone,
+				},
 			}
 
 			tk := &Task{
@@ -602,7 +624,11 @@ func TestRepoExecutor(t *testing.T) {
 			t.Run(state.String(), func(t *testing.T) {
 				t.Parallel()
 				stub := &stubContainer{}
-				r := &RepoExecutor{Runtime: stub}
+				r := &RepoExecutor{
+					RepoWorkspace: RepoWorkspace{
+						Runtime: stub,
+					},
+				}
 				tk := &Task{
 					ID:            ksid.NewID(),
 					InitialPrompt: agent.Prompt{Text: "test"},
@@ -817,7 +843,11 @@ func TestRepoExecutor(t *testing.T) {
 			{dir: "/opt/repos/foo", want: "/home/user/src/foo"},
 		}
 		for _, tc := range tests {
-			r := &RepoExecutor{Dir: tc.dir}
+			r := &RepoExecutor{
+				RepoWorkspace: RepoWorkspace{
+					Dir: tc.dir,
+				},
+			}
 			tk := tc.task
 			if tk == nil {
 				tk = &Task{}
@@ -834,7 +864,12 @@ func TestRepoExecutor(t *testing.T) {
 		t.Run("ResultMessage", func(t *testing.T) {
 			t.Parallel()
 			stub := &stubContainer{}
-			r := &RepoExecutor{Runtime: stub, Dir: "/repo"}
+			r := &RepoExecutor{
+				RepoWorkspace: RepoWorkspace{
+					Runtime: stub,
+					Dir:     "/repo",
+				},
+			}
 			r.initDefaults()
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
@@ -873,7 +908,12 @@ func TestRepoExecutor(t *testing.T) {
 				t.Run(tool, func(t *testing.T) {
 					t.Parallel()
 					stub := &stubContainer{}
-					r := &RepoExecutor{Runtime: stub, Dir: "/repo"}
+					r := &RepoExecutor{
+						RepoWorkspace: RepoWorkspace{
+							Runtime: stub,
+							Dir:     "/repo",
+						},
+					}
 					r.initDefaults()
 
 					tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
@@ -921,7 +961,11 @@ func TestRepoExecutor(t *testing.T) {
 		t.Run("NonMutatingToolNoDiffStat", func(t *testing.T) {
 			t.Parallel()
 			stub := &stubContainer{}
-			r := &RepoExecutor{Runtime: stub}
+			r := &RepoExecutor{
+				RepoWorkspace: RepoWorkspace{
+					Runtime: stub,
+				},
+			}
 			r.initDefaults()
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
@@ -956,7 +1000,12 @@ func TestRepoExecutor(t *testing.T) {
 		t.Run("SkipSideEffects", func(t *testing.T) {
 			t.Parallel()
 			stub := &stubContainer{}
-			r := &RepoExecutor{Runtime: stub, Dir: "/repo"}
+			r := &RepoExecutor{
+				RepoWorkspace: RepoWorkspace{
+					Runtime: stub,
+					Dir:     "/repo",
+				},
+			}
 			r.initDefaults()
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
@@ -1030,8 +1079,10 @@ func TestRepoExecutor(t *testing.T) {
 				backend := &testBackend{}
 
 				r := &RepoExecutor{
+					RepoWorkspace: RepoWorkspace{
+						Runtime: &stubContainer{},
+					},
 					LogDir:   logDir,
-					Runtime:  &stubContainer{},
 					Backends: map[harness.Name]agent.Backend{"test": backend},
 				}
 
@@ -1087,8 +1138,10 @@ func TestRepoExecutor(t *testing.T) {
 		backend := &testBackend{}
 
 		r := &RepoExecutor{
+			RepoWorkspace: RepoWorkspace{
+				Runtime: &stubContainer{},
+			},
 			LogDir:   logDir,
-			Runtime:  &stubContainer{},
 			Backends: map[harness.Name]agent.Backend{"test": backend},
 		}
 
@@ -1158,7 +1211,12 @@ func TestRepoExecutor(t *testing.T) {
 	t.Run("BranchDiffStat", func(t *testing.T) {
 		t.Parallel()
 		sc := &stubContainer{}
-		r := &RepoExecutor{Runtime: sc, Dir: "/repo"}
+		r := &RepoExecutor{
+			RepoWorkspace: RepoWorkspace{
+				Runtime: sc,
+				Dir:     "/repo",
+			},
+		}
 		tk := &Task{Repos: []RepoMount{{GitRoot: "/repo", Branch: "feature"}}}
 		tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 		ds := r.BranchDiffStat(t.Context(), tk)
@@ -1175,7 +1233,12 @@ func TestRepoExecutor(t *testing.T) {
 	t.Run("BranchDiffStatMultiRepoUsesInstanceID", func(t *testing.T) {
 		t.Parallel()
 		sc := &stubContainer{}
-		r := &RepoExecutor{Runtime: sc, Dir: "/home/user/src/caic"}
+		r := &RepoExecutor{
+			RepoWorkspace: RepoWorkspace{
+				Runtime: sc,
+				Dir:     "/home/user/src/caic",
+			},
+		}
 		tk := &Task{
 			Repos: []RepoMount{
 				{GitRoot: "/home/user/src/caic", Branch: "caic-7", MountedPath: "/home/user/src/caic"},
@@ -1213,7 +1276,12 @@ func TestRepoExecutor(t *testing.T) {
 	})
 	t.Run("BranchDiffStatNoDir", func(t *testing.T) {
 		t.Parallel()
-		r := &RepoExecutor{Runtime: &stubContainer{}, Dir: ""}
+		r := &RepoExecutor{
+			RepoWorkspace: RepoWorkspace{
+				Runtime: &stubContainer{},
+				Dir:     "",
+			},
+		}
 		if ds := r.BranchDiffStat(t.Context(), &Task{}); ds != nil {
 			t.Errorf("BranchDiffStat with no dir = %+v, want nil", ds)
 		}
@@ -1224,7 +1292,11 @@ func TestTaskRuntime(t *testing.T) {
 	t.Parallel()
 	t.Run("valid_preserves_mounted_path", func(t *testing.T) {
 		t.Parallel()
-		r := &RepoExecutor{Dir: "/home/user/src/caic-xyz/caic"}
+		r := &RepoExecutor{
+			RepoWorkspace: RepoWorkspace{
+				Dir: "/home/user/src/caic-xyz/caic",
+			},
+		}
 		tk := &Task{
 			Repos: []RepoMount{
 				{Name: "caic-xyz/caic", Branch: "caic-7", MountedPath: "/home/user/src/caic-xyz/caic"},
@@ -1255,7 +1327,11 @@ func TestTaskRuntime(t *testing.T) {
 	})
 	t.Run("valid_no_repos", func(t *testing.T) {
 		t.Parallel()
-		r := &RepoExecutor{Dir: "/repo"}
+		r := &RepoExecutor{
+			RepoWorkspace: RepoWorkspace{
+				Dir: "/repo",
+			},
+		}
 		tk := &Task{}
 		tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 		id, repos, err := r.taskRuntime(tk)
