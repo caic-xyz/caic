@@ -8,6 +8,7 @@ import (
 	"log/slog"
 
 	"github.com/caic-xyz/md"
+	"github.com/caic-xyz/md/containers"
 
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
@@ -15,12 +16,18 @@ import (
 // New creates an md.Client for the md runtime adapter.
 // runtimeName selects the container runtime ("docker" or "podman"); empty means auto-detect.
 func New(tailscaleAPIKey, githubToken, runtimeName string) (*md.Client, error) {
-	c, err := md.New(&SlogWriter{Phase: "init"})
+	logger := slog.Default()
+	var containerRuntime containers.Runtime
+	if runtimeName != "" {
+		var err error
+		containerRuntime, err = containers.New(runtimeName, logger, nil)
+		if err != nil {
+			return nil, err
+		}
+	}
+	c, err := md.New(logger, containerRuntime, &SlogWriter{Phase: "init"})
 	if err != nil {
 		return nil, err
-	}
-	if runtimeName != "" {
-		c.Runtime = runtimeName
 	}
 	c.TailscaleAPIKey = tailscaleAPIKey
 	c.GithubToken = githubToken
@@ -28,12 +35,12 @@ func New(tailscaleAPIKey, githubToken, runtimeName string) (*md.Client, error) {
 }
 
 // InstancesFromMD converts md container handles to runtime-neutral instances.
-func InstancesFromMD(ctx context.Context, containers []*md.Container) []runtime.Instance {
-	if len(containers) == 0 {
+func InstancesFromMD(ctx context.Context, mdContainers []*md.Container) []runtime.Instance {
+	if len(mdContainers) == 0 {
 		return nil
 	}
-	out := make([]runtime.Instance, len(containers))
-	for i, c := range containers {
+	out := make([]runtime.Instance, len(mdContainers))
+	for i, c := range mdContainers {
 		out[i] = runtime.Instance{
 			ID:            runtime.InstanceID(c.Name),
 			AgentTarget:   runtime.ConnectionTarget{SSHHost: c.Name},

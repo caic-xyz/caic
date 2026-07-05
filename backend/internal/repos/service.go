@@ -129,11 +129,7 @@ func (s *Service) DiscoverExecutor(ctx context.Context, abs string) (InitResult,
 		return InitResult{}, fmt.Errorf("cannot determine default branch: %w", err)
 	}
 	remote := checkout.RemoteOriginURL(ctx)
-	var forgeKind forge.Kind
-	var forgeOwner, forgeRepo string
-	if rawURL, err := forge.RemoteURL(ctx, abs); err == nil {
-		forgeKind, forgeOwner, forgeRepo, _ = forge.ParseRemoteURL(rawURL)
-	}
+	forgeKind, forgeOwner, forgeRepo := parseForgeRemote(ctx, remote)
 	info := Info{
 		RelPath:          rel,
 		AbsPath:          abs,
@@ -330,9 +326,7 @@ func (s *Service) Clone(ctx context.Context, req CloneRequest) (Info, error) {
 		_ = os.RemoveAll(absTarget)
 		return Info{}, repoError(ErrorInternal, "failed to init executor: "+err.Error())
 	}
-	if rawURL, err := forge.RemoteURL(ctx, absTarget); err == nil {
-		info.ForgeKind, info.ForgeOwner, info.ForgeRepo, _ = forge.ParseRemoteURL(rawURL)
-	}
+	info.ForgeKind, info.ForgeOwner, info.ForgeRepo = parseForgeRemote(ctx, remote)
 	s.registry.Add(&info)
 	s.taskMgr.RegisterExecutor(targetPath, executor)
 	s.notifyChanged()
@@ -368,6 +362,18 @@ func (s *Service) newExecutor(ctx context.Context, info *Info) (*task.RepoExecut
 	}
 	err := executor.Init(ctx)
 	return executor, err
+}
+
+func parseForgeRemote(ctx context.Context, remote string) (kind forge.Kind, owner, repo string) {
+	if remote == "" {
+		return "", "", ""
+	}
+	kind, owner, repo, err := forge.ParseRemoteURL(remote)
+	if err != nil {
+		slog.DebugContext(ctx, "unsupported forge remote", "remote", remote, "err", err)
+		return "", "", ""
+	}
+	return kind, owner, repo
 }
 
 func repoError(k ErrorKind, msg string) error {

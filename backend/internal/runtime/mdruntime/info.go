@@ -92,7 +92,7 @@ func (b *RuntimeInfoBackend) WatchStats(ctx context.Context, ids []runtime.Insta
 	for i, id := range ids {
 		names[i] = string(id)
 	}
-	stats, err := b.c.WatchStats(ctx, names)
+	stats, err := b.c.Runtime.WatchStats(ctx, names)
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +143,7 @@ func (b *RuntimeInfoBackend) Metadata(ctx context.Context, id runtime.InstanceID
 
 // WatchEvents streams lifecycle events for instances matching filter.
 func (b *RuntimeInfoBackend) WatchEvents(ctx context.Context, filter runtime.EventFilter) (<-chan runtime.Event, error) {
-	events, err := b.c.WatchDieEvents(ctx, string(filter.MetadataKey))
+	events, err := b.c.Runtime.WatchDieEvents(ctx, string(filter.MetadataKey))
 	if err != nil {
 		return nil, err
 	}

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os/exec"
 	"regexp"
 	"strings"
 	"time"
@@ -215,13 +214,4 @@ func ReadLog(r io.Reader) (string, error) {
 		return "", err
 	}
 	return ansiEscape.ReplaceAllString(string(data), ""), nil
-}
-
-// RemoteURL returns the URL of the "origin" remote for the git repository at dir.
-func RemoteURL(ctx context.Context, dir string) (string, error) {
-	out, err := exec.CommandContext(ctx, "git", "-C", dir, "remote", "get-url", "origin").Output() //nolint:gosec // dir is a trusted repo path
-	if err != nil {
-		return "", fmt.Errorf("git remote get-url origin: %w", err)
-	}
-	return strings.TrimSpace(string(out)), nil
 }

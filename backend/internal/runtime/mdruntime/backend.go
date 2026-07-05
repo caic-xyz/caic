@@ -60,7 +60,7 @@ var (
 type mdClientAdapter struct{ c *md.Client }
 
 // Runtime returns the underlying container runtime name ("docker" or "podman").
-func (a mdClientAdapter) Runtime() string { return a.c.Runtime }
+func (a mdClientAdapter) Runtime() string { return a.c.Runtime.Name() }
 
 // Container constructs a container handle for the given repos.
 func (a mdClientAdapter) Container(repos ...md.Repo) (mdContainer, error) {
