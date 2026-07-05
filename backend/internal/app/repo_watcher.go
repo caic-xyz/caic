@@ -11,15 +11,15 @@ import (
 
 func newRepoWatcher(ctx context.Context, absRoot string, repoService *repos.Service) *repos.Watcher {
 	return repos.NewWatcher(&repos.WatcherConfig{
-		Ctx:          ctx,
-		AbsRoot:      absRoot,
-		Repos:        func() []repos.Info { return watchedRepos(repoService) },
-		RelPath:      repoService.RelPath,
-		RunnerExists: repoService.RunnerRegistered,
+		Ctx:            ctx,
+		AbsRoot:        absRoot,
+		Repos:          func() []repos.Info { return watchedRepos(repoService) },
+		RelPath:        repoService.RelPath,
+		ExecutorExists: repoService.ExecutorRegistered,
 		OnDiscovered: func(ctx context.Context, abs string) {
 			registerDiscoveredRepo(ctx, repoService, abs)
 		},
-		OnRemoved: repoService.DeregisterRunner,
+		OnRemoved: repoService.DeregisterExecutor,
 	})
 }
 
@@ -37,17 +37,17 @@ func watchedRepos(repoService *repos.Service) []repos.Info {
 }
 
 func registerDiscoveredRepo(ctx context.Context, repoService *repos.Service, abs string) {
-	result, err := repoService.DiscoverRunner(ctx, abs)
+	result, err := repoService.DiscoverExecutor(ctx, abs)
 	if err != nil {
 		slog.WarnContext(ctx, "new repo: discovery failed", "path", abs, "err", err)
 		return
 	}
 	if result.InitErr != nil {
-		slog.WarnContext(ctx, "new repo: runner init failed", "path", abs, "err", result.InitErr)
+		slog.WarnContext(ctx, "new repo: executor init failed", "path", abs, "err", result.InitErr)
 	}
-	if repoService.RunnerRegistered(result.Info.RelPath) {
+	if repoService.ExecutorRegistered(result.Info.RelPath) {
 		return
 	}
-	repoService.RegisterRunner(&result)
+	repoService.RegisterExecutor(&result)
 	slog.InfoContext(ctx, "discovered new repo", "path", result.Info.RelPath, "br", result.Info.BaseBranch)
 }

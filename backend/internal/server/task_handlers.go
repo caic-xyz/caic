@@ -252,7 +252,7 @@ func (h *taskHandlers) streamHistoryFromDiskWithTracker(out io.Writer, flusher h
 // iteration it sends a full snapshot; thereafter it sends only upsert/delete
 // events for changed or removed tasks. It pushes immediately when a
 // server-handled mutation fires the changed channel, and falls back to a
-// 2-second ticker to catch runner-internal state transitions.
+// 2-second ticker to catch executor-internal state transitions.
 func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {

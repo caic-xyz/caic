@@ -323,7 +323,7 @@ func (c *Client) MergePR(ctx context.Context, owner, repo string, prNumber int, 
 }
 
 // GetJobLabels returns nil for GitLab; the commit statuses API does not
-// expose runner labels.
+// expose job labels.
 func (c *Client) GetJobLabels(_ context.Context, _, _ string, _ int64) ([]string, error) {
 	return nil, nil
 }

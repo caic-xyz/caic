@@ -31,7 +31,7 @@ type CreateParams struct {
 	Mounts            []runtime.Mount      // resolved runtime bind mounts
 
 	// ResolvedGitHubToken is the actual token string, resolved by the caller in
-	// the request ctx; passed to runner.Start. The caller resolves it (preferring
+	// the request ctx; passed to executor.Start. The caller resolves it (preferring
 	// the logged-in user's OAuth token) because the Manager's serverCtx carries
 	// no user identity.
 	ResolvedGitHubToken string
@@ -47,7 +47,7 @@ type CreateParams struct {
 // CreateRepo describes a repo to mount in the new task.
 type CreateRepo struct {
 	Name       string // relative path
-	BaseBranch string // empty = runner default
+	BaseBranch string // empty = executor default
 }
 
 // ForkParams bundles fork task creation parameters.
@@ -69,7 +69,7 @@ type ForkParams struct {
 	Sudo        bool // resolved override
 
 	// ResolvedGitHubToken is the actual token string, resolved by the caller in
-	// the request ctx; passed to runner.ForkTask. The caller resolves it
+	// the request ctx; passed to executor.ForkTask. The caller resolves it
 	// (preferring the logged-in user's OAuth token) because the Manager's
 	// serverCtx carries no user identity.
 	ResolvedGitHubToken string

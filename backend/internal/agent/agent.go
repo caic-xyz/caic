@@ -4,7 +4,7 @@
 // # Message dispatch
 //
 // Conn.ReadMessages reads agent stdout and forwards parsed messages to
-// Options.MsgCh. The task runner drains this channel in a separate
+// Options.MsgCh. The task executor drains this channel in a separate
 // goroutine (startMessageDispatch) that performs blocking side-effects: git
 // fetch, diff stat, branch locking. The channel decouples the fast reader
 // from these slow operations — without it, a blocked git fetch would

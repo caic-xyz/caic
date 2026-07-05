@@ -342,14 +342,14 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	var wg sync.WaitGroup
 	for i, abs := range repoRes.paths {
 		wg.Go(func() {
-			defer trace.StartRegion(ctx, "repo-runner-init").End()
-			result, err := repoService.DiscoverRunner(ctx, abs)
+			defer trace.StartRegion(ctx, "repo-executor-init").End()
+			result, err := repoService.DiscoverExecutor(ctx, abs)
 			if err != nil {
 				slog.WarnContext(ctx, "skipping repo", "path", abs, "err", err)
 				return
 			}
 			if result.InitErr != nil {
-				slog.WarnContext(ctx, "runner init failed", "path", abs, "err", result.InitErr)
+				slog.WarnContext(ctx, "executor init failed", "path", abs, "err", result.InitErr)
 			}
 			results[i] = result
 			slog.DebugContext(ctx, "discovered repo", "path", result.Info.RelPath, "br", result.Info.BaseBranch)
@@ -357,10 +357,10 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	}
 	wg.Wait()
 	for i := range results {
-		repoService.RegisterRunner(&results[i])
+		repoService.RegisterExecutor(&results[i])
 	}
 
-	if err := repoService.RegisterNoRepoRunner(ctx); err != nil {
+	if err := repoService.RegisterNoRepoExecutor(ctx); err != nil {
 		return nil, fmt.Errorf("register no-repo executor: %w", err)
 	}
 	taskMgr.Start()

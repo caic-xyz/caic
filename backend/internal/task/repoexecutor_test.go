@@ -387,7 +387,7 @@ func TestRepoExecutor(t *testing.T) {
 		t.Run("CustomBaseBranch", func(t *testing.T) {
 			t.Parallel()
 			// Verify that setup creates the task branch from t.BaseBranch
-			// when it differs from the runner's default BaseBranch.
+			// when it differs from the executor's default BaseBranch.
 			clone := initTestRepo(t, "main")
 			// Create a feature branch on origin with a distinct commit.
 			runGit(t, clone, "checkout", "-b", "feature")
@@ -1240,7 +1240,7 @@ func TestRepoExecutor(t *testing.T) {
 	})
 }
 
-func TestRunnerTaskRuntime(t *testing.T) {
+func TestTaskRuntime(t *testing.T) {
 	t.Parallel()
 	t.Run("valid_preserves_mounted_path", func(t *testing.T) {
 		t.Parallel()
@@ -1264,7 +1264,7 @@ func TestRunnerTaskRuntime(t *testing.T) {
 			t.Fatalf("repos len = %d, want 2", len(repos))
 		}
 		if repos[0].HostPath != "/home/user/src/caic-xyz/caic" {
-			t.Errorf("primary HostPath = %q, want runner dir", repos[0].HostPath)
+			t.Errorf("primary HostPath = %q, want executor dir", repos[0].HostPath)
 		}
 		if repos[0].MountPath != "/home/user/src/caic-xyz/caic" {
 			t.Errorf("primary MountPath = %q, want qualified mount", repos[0].MountPath)

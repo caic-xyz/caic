@@ -41,7 +41,7 @@ func refreshHarnessModels(ctx context.Context, cacheDir string, backend runtime.
 }
 
 // refreshOneHarness launches a temporary runtime instance, fetches models, and
-// updates the cache and all runner backends.
+// updates the cache and all executor backends.
 func refreshOneHarness(
 	ctx context.Context,
 	cache *agent.HarnessCache,

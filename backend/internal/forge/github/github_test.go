@@ -59,7 +59,7 @@ func TestExtractGitHubSteps(t *testing.T) {
 		t.Parallel()
 		log := strings.Join([]string{
 			"2024-01-01T00:00:00.1234567Z ##[group]Set up job",
-			"2024-01-01T00:00:01.0000000Z Preparing runner",
+			"2024-01-01T00:00:01.0000000Z Preparing environment",
 			"2024-01-01T00:00:02.0000000Z ##[endgroup]",
 			"2024-01-01T00:00:03.0000000Z ##[group]Run tests",
 			"2024-01-01T00:00:04.0000000Z go test ./...",

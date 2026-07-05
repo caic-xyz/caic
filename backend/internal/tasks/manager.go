@@ -88,7 +88,7 @@ type Config struct {
 	Provider   genai.Provider // nil-safe
 }
 
-// Manager owns the task and runner registries, instance adoption, session
+// Manager owns the task and executor registries, instance adoption, session
 // watching, and stats streaming.
 type Manager struct {
 	// Immutable after construction.
@@ -105,13 +105,13 @@ type Manager struct {
 	relay      relayReader
 
 	// Guarded by mu.
-	mu      sync.Mutex
-	tasks   map[string]*Entry
-	runners map[string]*task.RepoExecutor
-	changed chan struct{} // closed on mutation, replaced under mu
+	mu        sync.Mutex
+	tasks     map[string]*Entry
+	executors map[string]*task.RepoExecutor
+	changed   chan struct{} // closed on mutation, replaced under mu
 }
 
-// New creates a Manager. A no-repo runner is always registered.
+// New creates a Manager. A no-repo executor is always registered.
 // Call RegisterExecutor for each repo, then Start.
 func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passed once at construction
 	m := &Manager{
@@ -127,33 +127,33 @@ func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passe
 		provider:   cfg.Provider,
 		relay:      agentRelayReader{},
 		tasks:      make(map[string]*Entry),
-		runners:    make(map[string]*task.RepoExecutor),
+		executors:  make(map[string]*task.RepoExecutor),
 		changed:    make(chan struct{}),
 	}
-	noRepoRunner := &task.RepoExecutor{
+	noRepoExecutor := &task.RepoExecutor{
 		LogDir:     cfg.LogDir,
 		CacheDir:   cfg.CacheDir,
 		HarnessEnv: cfg.HarnessEnv,
 		Runtime:    cfg.Backend,
 		Backends:   cfg.Backends,
 	}
-	_ = noRepoRunner.Init(cfg.ServerCtx)
-	m.runners[""] = noRepoRunner
+	_ = noRepoExecutor.Init(cfg.ServerCtx)
+	m.executors[""] = noRepoExecutor
 	return m
 }
 
 // Start launches background goroutines: instance event watching and stats streaming.
-// Must be called once after New, after runners have been registered.
+// Must be called once after New, after executors have been registered.
 func (m *Manager) Start() {
 	go m.watchRuntimeEvents(m.serverCtx)
 	go m.watchStats(m.serverCtx)
 }
 
 // RegisterExecutor registers a task repo executor keyed by relPath.
-// "" registers the no-repo runner.
+// "" registers the no-repo executor.
 func (m *Manager) RegisterExecutor(relPath string, r *task.RepoExecutor) {
 	m.mu.Lock()
-	m.runners[relPath] = r
+	m.executors[relPath] = r
 	m.mu.Unlock()
 }
 
@@ -161,13 +161,13 @@ func (m *Manager) RegisterExecutor(relPath string, r *task.RepoExecutor) {
 func (m *Manager) Executor(relPath string) (*task.RepoExecutor, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	r, ok := m.runners[relPath]
+	r, ok := m.executors[relPath]
 	return r, ok
 }
 
 // RangeExecutors iterates over every registered repo executor. It snapshots the registry
 // under m.mu and invokes fn unlocked, so fn may safely call back into the
-// Manager. The runner set is a point-in-time snapshot. Stops iteration if fn
+// Manager. The executor set is a point-in-time snapshot. Stops iteration if fn
 // returns false.
 func (m *Manager) RangeExecutors(fn func(relPath string, r *task.RepoExecutor) bool) {
 	m.mu.Lock()
@@ -175,8 +175,8 @@ func (m *Manager) RangeExecutors(fn func(relPath string, r *task.RepoExecutor) b
 		relPath string
 		r       *task.RepoExecutor
 	}
-	snap := make([]kv, 0, len(m.runners))
-	for relPath, r := range m.runners {
+	snap := make([]kv, 0, len(m.executors))
+	for relPath, r := range m.executors {
 		snap = append(snap, kv{relPath, r})
 	}
 	m.mu.Unlock()
@@ -190,13 +190,13 @@ func (m *Manager) RangeExecutors(fn func(relPath string, r *task.RepoExecutor) b
 // UnregisterExecutor removes the repo executor registered for relPath.
 func (m *Manager) UnregisterExecutor(relPath string) {
 	m.mu.Lock()
-	delete(m.runners, relPath)
+	delete(m.executors, relPath)
 	m.mu.Unlock()
 }
 
 // Insert registers a pre-built entry. Production task creation goes through
 // Create/Fork; Insert is retained for tests (in internal/tasks and
-// internal/server) that seed the registry without a real runner.
+// internal/server) that seed the registry without a real executor.
 func (m *Manager) Insert(id string, entry *Entry) {
 	m.insertEntry(id, entry)
 }
@@ -246,30 +246,30 @@ func (m *Manager) Changed() <-chan struct{} {
 
 // Create handles the HTTP task creation path.
 func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { //nolint:gocritic // CreateParams is a request-shaped value bag
-	// Resolve primary runner.
-	var primaryRunner *task.RepoExecutor
+	// Resolve primary executor.
+	var primaryExecutor *task.RepoExecutor
 	if len(p.Repos) > 0 {
 		r, ok := m.Executor(p.Repos[0].Name)
 		if !ok {
 			return "", badRequestf("unknown repo: %s", p.Repos[0].Name)
 		}
-		primaryRunner = r
+		primaryExecutor = r
 	} else {
-		// New() always registers the no-repo "" runner, so this never fails.
-		primaryRunner, _ = m.Executor("")
+		// New() always registers the no-repo "" executor, so this never fails.
+		primaryExecutor, _ = m.Executor("")
 	}
 
-	// Validate and resolve extra repo runners.
-	extraRunners := make([]*task.RepoExecutor, 0, max(0, len(p.Repos)-1))
+	// Validate and resolve extra repo executors.
+	extraExecutors := make([]*task.RepoExecutor, 0, max(0, len(p.Repos)-1))
 	for _, rs := range p.Repos[min(1, len(p.Repos)):] {
 		er, ok := m.Executor(rs.Name)
 		if !ok {
 			return "", badRequestf("unknown extra repo: %s", rs.Name)
 		}
-		extraRunners = append(extraRunners, er)
+		extraExecutors = append(extraExecutors, er)
 	}
 
-	backend, ok := primaryRunner.Backends[p.Harness]
+	backend, ok := primaryExecutor.Backends[p.Harness]
 	if !ok {
 		return "", badRequestf("unknown harness: %s", string(p.Harness))
 	}
@@ -325,7 +325,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 
 	// Run in background using server context.
 	go func() {
-		for i, er := range extraRunners {
+		for i, er := range extraExecutors {
 			branch, err := er.AllocateBranch(m.serverCtx)
 			if err != nil {
 				entry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "allocate branch for extra repo")})
@@ -337,7 +337,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 
 		ghToken := p.ResolvedGitHubToken
 
-		h, err := primaryRunner.Start(m.serverCtx, t, ghToken)
+		h, err := primaryExecutor.Start(m.serverCtx, t, ghToken)
 		if err != nil {
 			entry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "start task")})
 			m.NotifyTaskChange()
@@ -347,7 +347,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 			t.SetSudoPassword(m.SudoPassword(m.serverCtx, t))
 		}
 		m.NotifyTaskChange()
-		m.watchSession(entry, primaryRunner, h)
+		m.watchSession(entry, primaryExecutor, h)
 	}()
 	return t.ID.String(), nil
 }
@@ -361,10 +361,10 @@ func (m *Manager) Purge(ctx context.Context, entry *Entry) error {
 		return conflict("task is not running, waiting, stopped, or crashed")
 	}
 	m.NotifyTaskChange()
-	runner := m.resolveExecutor(entry.task)
+	executor := m.resolveExecutor(entry.task)
 	slog.InfoContext(ctx, "purge requested", "task", entry.task.ID, "instance", entry.task.RuntimeInstanceID(), "state", state)
 	go func() {
-		m.cleanupTask(entry, runner, task.StatePurged)
+		m.cleanupTask(entry, executor, task.StatePurged)
 		slog.InfoContext(m.serverCtx, "purge completed", "task", entry.task.ID, "final_state", entry.task.GetState())
 	}()
 	return nil
@@ -378,10 +378,10 @@ func (m *Manager) Stop(ctx context.Context, entry *Entry) error {
 		return conflict("task is not running or waiting")
 	}
 	m.NotifyTaskChange()
-	runner := m.resolveExecutor(entry.task)
+	executor := m.resolveExecutor(entry.task)
 	slog.InfoContext(ctx, "stop requested", "task", entry.task.ID, "instance", entry.task.RuntimeInstanceID(), "state", state)
 	go func() {
-		runner.StopTask(m.serverCtx, entry.task)
+		executor.StopTask(m.serverCtx, entry.task)
 		slog.InfoContext(m.serverCtx, "stop completed", "task", entry.task.ID, "instance", entry.task.RuntimeInstanceID(), "final_state", entry.task.GetState())
 		m.NotifyTaskChange()
 	}()
@@ -393,13 +393,13 @@ func (m *Manager) Revive(ctx context.Context, entry *Entry) error {
 	if _, changed := entry.task.SetStateIfAny(task.StateProvisioning, task.StateStopped, task.StateCrashed); !changed {
 		return conflict("task is not stopped or crashed")
 	}
-	runner := m.resolveExecutor(entry.task)
+	executor := m.resolveExecutor(entry.task)
 	entry.Reset()
 	m.NotifyTaskChange()
 	go func() { //nolint:contextcheck // background goroutine roots its own trace task on serverCtx
 		ctx, tk := trace.NewTask(m.serverCtx, "task.revive:"+entry.task.ID.String())
 		defer tk.End()
-		h, err := runner.ReviveTask(ctx, entry.task)
+		h, err := executor.ReviveTask(ctx, entry.task)
 		if err != nil {
 			slog.WarnContext(ctx, "revive failed", "task", entry.task.ID, "err", err)
 			entry.task.SetState(task.StateFailed)
@@ -408,7 +408,7 @@ func (m *Manager) Revive(ctx context.Context, entry *Entry) error {
 			return
 		}
 		m.NotifyTaskChange()
-		m.watchSession(entry, runner, h)
+		m.watchSession(entry, executor, h)
 	}()
 	return nil
 }
@@ -437,12 +437,12 @@ func (m *Manager) Restart(ctx context.Context, entry *Entry, prompt agent.Prompt
 			return &Error{Kind: KindBadRequest, Msg: "no prompt provided and failed to read plan from instance", Err: err}
 		}
 	}
-	runner := m.resolveExecutor(t)
-	h, err := runner.RestartSession(m.serverCtx, t, prompt) //nolint:contextcheck // intentionally using server context
+	executor := m.resolveExecutor(t)
+	h, err := executor.RestartSession(m.serverCtx, t, prompt) //nolint:contextcheck // intentionally using server context
 	if err != nil {
 		return internalErr(err, "restart session")
 	}
-	m.watchSession(entry, runner, h)
+	m.watchSession(entry, executor, h)
 	m.NotifyTaskChange()
 	return nil
 }
@@ -453,12 +453,12 @@ func (m *Manager) ClearContext(ctx context.Context, entry *Entry) error {
 	if _, changed := t.SetStateIfAny(task.StateStarting, task.StateWaiting, task.StateAsking, task.StateHasPlan); !changed {
 		return conflict("task is not waiting or asking")
 	}
-	runner := m.resolveExecutor(t)
-	h, err := runner.ClearContextSession(m.serverCtx, t) //nolint:contextcheck // intentionally using server context
+	executor := m.resolveExecutor(t)
+	h, err := executor.ClearContextSession(m.serverCtx, t) //nolint:contextcheck // intentionally using server context
 	if err != nil {
 		return internalErr(err, "clear context")
 	}
-	m.watchSession(entry, runner, h)
+	m.watchSession(entry, executor, h)
 	m.NotifyTaskChange()
 	return nil
 }
@@ -477,8 +477,8 @@ func (m *Manager) Compact(ctx context.Context, entry *Entry, instructions string
 func (m *Manager) SendInput(ctx context.Context, entry *Entry, prompt agent.Prompt) error {
 	// Validate image support.
 	if len(prompt.Images) > 0 {
-		runner := m.resolveExecutor(entry.task)
-		if b := runner.Backends[entry.task.Harness]; b != nil && !b.SupportsImages() {
+		executor := m.resolveExecutor(entry.task)
+		if b := executor.Backends[entry.task.Harness]; b != nil && !b.SupportsImages() {
 			return badRequestf("%s does not support images", string(entry.task.Harness))
 		}
 	}
@@ -518,7 +518,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 		return "", badRequestf("cannot fork a no-repo task")
 	}
 
-	runner := m.resolveExecutor(source)
+	executor := m.resolveExecutor(source)
 
 	// Resolve harness and model.
 	forkHarness := source.Harness
@@ -526,7 +526,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 	forkEffort := source.Effort
 	if p.Harness != "" {
 		forkHarness = p.Harness
-		backend, ok := runner.Backends[forkHarness]
+		backend, ok := executor.Backends[forkHarness]
 		if !ok {
 			return "", badRequestf("unknown harness: %s", string(p.Harness))
 		}
@@ -536,7 +536,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 		forkModel = p.Model
 		forkEffort = p.Effort
 	} else if p.Model != "" {
-		backend, ok := runner.Backends[forkHarness]
+		backend, ok := executor.Backends[forkHarness]
 		if !ok {
 			return "", badRequestf("unknown harness: %s", string(source.Harness))
 		}
@@ -620,7 +620,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 			Mounts:     slices.Clone(source.Mounts),
 			MaxCPUs:    source.MaxCPUs,
 		}
-		h, err := runner.ForkTask(ctx, source, t, forkOpts, ghToken)
+		h, err := executor.ForkTask(ctx, source, t, forkOpts, ghToken)
 		if err != nil {
 			forkEntry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "fork task")})
 			m.NotifyTaskChange()
@@ -630,7 +630,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 			t.SetSudoPassword(m.SudoPassword(m.serverCtx, t))
 		}
 		m.NotifyTaskChange()
-		m.watchSession(forkEntry, runner, h)
+		m.watchSession(forkEntry, executor, h)
 	}()
 	return t.ID.String(), nil
 }
@@ -652,8 +652,8 @@ func (m *Manager) EffectiveBaseBranch(t *task.Task) string {
 	if p.BaseBranch != "" {
 		return p.BaseBranch
 	}
-	if runner, ok := m.Executor(p.Name); ok {
-		return runner.BaseBranch
+	if executor, ok := m.Executor(p.Name); ok {
+		return executor.BaseBranch
 	}
 	return ""
 }
@@ -721,8 +721,8 @@ func (m *Manager) AdoptInstances(ctx context.Context, repos []AdoptRepo, instanc
 
 	for i := range repos {
 		ri := &repos[i]
-		runner, _ := m.Executor(ri.RelPath)
-		if runner == nil {
+		executor, _ := m.Executor(ri.RelPath)
+		if executor == nil {
 			continue
 		}
 		for i := range instances {
@@ -736,7 +736,7 @@ func (m *Manager) AdoptInstances(ctx context.Context, repos []AdoptRepo, instanc
 			}
 			claimed[c.ID] = true
 			wg.Go(func() {
-				at, err := m.adoptOne(ctx, *ri, runner, c, branch, branchIDs, allLogs)
+				at, err := m.adoptOne(ctx, *ri, executor, c, branch, branchIDs, allLogs)
 				if err != nil {
 					mu.Lock()
 					errs = append(errs, err)
@@ -753,14 +753,14 @@ func (m *Manager) AdoptInstances(ctx context.Context, repos []AdoptRepo, instanc
 	wg.Wait()
 
 	// Adopt no-repo runtime instances.
-	if noRepoRunner, ok := m.Executor(""); ok {
+	if noRepoExecutor, ok := m.Executor(""); ok {
 		for i := range instances {
 			c := &instances[i]
 			if claimed[c.ID] || !strings.HasPrefix(string(c.ID), "md-agent-") {
 				continue
 			}
 			wg.Go(func() {
-				at, err := m.adoptOne(ctx, AdoptRepo{}, noRepoRunner, c, "", branchIDs, allLogs)
+				at, err := m.adoptOne(ctx, AdoptRepo{}, noRepoExecutor, c, "", branchIDs, allLogs)
 				if err != nil {
 					mu.Lock()
 					errs = append(errs, err)
@@ -1056,8 +1056,8 @@ func (m *Manager) LoadPurgedTasks(all []*task.LoadedTask) error {
 }
 
 // Cleanup is the exported variant of cleanupTask, idempotent per incarnation.
-func (m *Manager) Cleanup(entry *Entry, runner *task.RepoExecutor, reason task.State) {
-	m.cleanupTask(entry, runner, reason)
+func (m *Manager) Cleanup(entry *Entry, executor *task.RepoExecutor, reason task.State) {
+	m.cleanupTask(entry, executor, reason)
 }
 
 // LoadMessagesOnDemand triggers lazy message loading for purged tasks.
@@ -1075,7 +1075,7 @@ func (m *Manager) Sync(ctx context.Context, entry *Entry, target SyncTarget, for
 		return nil, conflict("task is in a terminal state")
 	}
 
-	runner := m.resolveExecutor(t)
+	executor := m.resolveExecutor(t)
 	syncPrimaryBranch := ""
 	if p := t.Primary(); p != nil {
 		syncPrimaryBranch = p.Branch
@@ -1085,12 +1085,12 @@ func (m *Manager) Sync(ctx context.Context, entry *Entry, target SyncTarget, for
 		if force {
 			return nil, badRequestf("force is not supported for default-branch sync")
 		}
-		baseBranch := runner.BaseBranch
+		baseBranch := executor.BaseBranch
 		message := t.Title()
 		if message == "" {
 			message = t.InitialPrompt.Text
 		}
-		ds, issues, err := runner.SyncToDefault(ctx, t, message)
+		ds, issues, err := executor.SyncToDefault(ctx, t, message)
 		if err != nil {
 			return nil, internalErr(err, "sync to default")
 		}
@@ -1104,7 +1104,7 @@ func (m *Manager) Sync(ctx context.Context, entry *Entry, target SyncTarget, for
 	}
 
 	// Default: push to the task's own branch.
-	ds, issues, err := runner.SyncToOrigin(ctx, t, force)
+	ds, issues, err := executor.SyncToOrigin(ctx, t, force)
 	if err != nil {
 		return nil, internalErr(err, "sync to origin")
 	}
@@ -1499,7 +1499,7 @@ func messagesContainInit(msgs []agent.Message) bool {
 }
 
 // adoptOne investigates a single runtime instance and registers it as a task.
-func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.RepoExecutor, c *runtime.Instance, branch string, branchIDs map[string][]string, allLogs []*task.LoadedTask) (*AdoptedTask, error) { //nolint:gocritic // massive function from existing code; refactor deferred
+func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, executor *task.RepoExecutor, c *runtime.Instance, branch string, branchIDs map[string][]string, allLogs []*task.LoadedTask) (*AdoptedTask, error) { //nolint:gocritic // massive function from existing code; refactor deferred
 	ctx, adoptTask := trace.NewTask(ctx, "adopt-instance")
 	defer adoptTask.End()
 	trace.Logf(ctx, "instance", "%s repo=%s branch=%s", c.ID, ri.RelPath, branch)
@@ -1577,7 +1577,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.RepoE
 		if relayErr != nil {
 			slog.WarnContext(ctx, "relay", "msg", "check failed during adopt", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", relayErr, "diag", relayDiag)
 		}
-		b, ok := runner.Backends[harnessName]
+		b, ok := executor.Backends[harnessName]
 		if !ok {
 			slog.WarnContext(ctx, "relay", "msg", "no backend for harness", "harness", harnessName, "instance", c.ID)
 			relayAlive = false
@@ -1778,8 +1778,8 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.RepoE
 		trace.Logf(ctx, "adopt", "%s: relay-dead", c.ID)
 		if t.LastExitError() != "" {
 			t.RecordSessionCrash(ctx, errors.New("relay exited before adoption"))
-			if runner.Runtime != nil {
-				if err := runner.Runtime.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // adoption must outlive request
+			if executor.Runtime != nil {
+				if err := executor.Runtime.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // adoption must outlive request
 					slog.ErrorContext(ctx, "stop failed after adopted relay crash", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", err)
 				}
 			}
@@ -1842,13 +1842,13 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.RepoE
 		slog.DebugContext(ctx, "instance", "msg", "auto-reconnect starting", "repo", ri.RelPath, "br", branch, "instance", c.ID)
 		go func() {
 			tlog := slog.With("repo", ri.RelPath, "br", branch, "instance", t.RuntimeInstanceID())
-			h, err := runner.Reconnect(m.serverCtx, t, true)
+			h, err := executor.Reconnect(m.serverCtx, t, true)
 			if err != nil {
 				tlog.Warn("auto-reconnect failed", "err", err)
 				m.NotifyTaskChange()
 				return
 			}
-			h, err = runner.EnsureSession(m.serverCtx, t, h, tlog)
+			h, err = executor.EnsureSession(m.serverCtx, t, h, tlog)
 			if err != nil {
 				tlog.Warn("ensure session failed", "err", err)
 				t.SetState(task.StateWaiting)
@@ -1856,17 +1856,17 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.RepoE
 				return
 			}
 			tlog.Debug("auto-reconnect succeeded")
-			t.SetVNCPort(runner.Runtime.VNCPort(m.serverCtx, t.RuntimeInstanceID()))
-			refreshAdoptedDiffStat(m.serverCtx, runner, t)
+			t.SetVNCPort(executor.Runtime.VNCPort(m.serverCtx, t.RuntimeInstanceID()))
+			refreshAdoptedDiffStat(m.serverCtx, executor, t)
 			m.NotifyTaskChange()
-			m.watchSession(entry, runner, h)
+			m.watchSession(entry, executor, h)
 		}()
 	} else if !relayAlive && t.GetState() != task.StateStopped && t.GetState() != task.StateCrashed && t.GetState() != task.StateFailed {
 		slog.ErrorContext(ctx, "relay dead, stopping instance",
 			"repo", ri.RelPath, "br", branch, "instance", c.ID,
 			"state", t.GetState())
 		t.SetState(task.StateStopping)
-		if err := runner.Runtime.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // adoption must outlive request
+		if err := executor.Runtime.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // adoption must outlive request
 			slog.ErrorContext(ctx, "stop failed", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", err)
 		}
 		t.SetState(task.StateStopped)
@@ -1905,18 +1905,18 @@ func writeTaskResultTrailer(t *task.Task, r *task.Result) error {
 	return t.WriteToLog(msg)
 }
 
-func refreshAdoptedDiffStat(ctx context.Context, runner *task.RepoExecutor, t *task.Task) {
+func refreshAdoptedDiffStat(ctx context.Context, executor *task.RepoExecutor, t *task.Task) {
 	switch t.GetState() {
 	case task.StateWaiting, task.StateAsking, task.StateHasPlan:
 	default:
 		return
 	}
-	if ds := runner.BranchDiffStat(ctx, t); len(ds) > 0 {
+	if ds := executor.BranchDiffStat(ctx, t); len(ds) > 0 {
 		t.SetLiveDiffStat(ds)
 	}
 }
 
-// setParser sets the parse function on a LoadedTask from the first runner
+// setParser sets the parse function on a LoadedTask from the first executor
 // that has a backend for the task's harness.
 func (m *Manager) setParser(lt *task.LoadedTask) {
 	m.mu.Lock()
@@ -1925,7 +1925,7 @@ func (m *Manager) setParser(lt *task.LoadedTask) {
 }
 
 func (m *Manager) setParserLocked(lt *task.LoadedTask) {
-	for _, r := range m.runners {
+	for _, r := range m.executors {
 		if b := r.Backends[lt.Harness]; b != nil {
 			lt.SetParser(b.NewWire().ParseMessage)
 			return
@@ -1947,7 +1947,7 @@ func (m *Manager) loadTaskMessagesOnDemand(entry *Entry) {
 
 // watchSession monitors a single active session. Clean session exits move the
 // task to StateWaiting; SSH/session errors fail the task and stop the instance.
-func (m *Manager) watchSession(entry *Entry, runner *task.RepoExecutor, h *task.SessionHandle) {
+func (m *Manager) watchSession(entry *Entry, executor *task.RepoExecutor, h *task.SessionHandle) {
 	go func() {
 		t := entry.Task()
 		traceCtx, tk := trace.NewTask(m.serverCtx, "session.watch:"+t.ID.String())
@@ -1978,7 +1978,7 @@ func (m *Manager) watchSession(entry *Entry, runner *task.RepoExecutor, h *task.
 			if sessionErr != nil {
 				slog.WarnContext(m.serverCtx, "session exited with error", append(attrs, "err", sessionErr)...)
 				if t.RecordSessionCrash(m.serverCtx, sessionErr) {
-					m.stopFailedSessionInstance(runner, t, attrs)
+					m.stopFailedSessionInstance(executor, t, attrs)
 					crashErr := sessionErr
 					if exitErr := t.LastExitError(); exitErr != "" {
 						crashErr = errors.New(exitErr)
@@ -2038,25 +2038,25 @@ func (m *Manager) watchSession(entry *Entry, runner *task.RepoExecutor, h *task.
 	}()
 }
 
-func (m *Manager) stopFailedSessionInstance(runner *task.RepoExecutor, t *task.Task, attrs []any) {
-	if runner == nil || runner.Runtime == nil {
+func (m *Manager) stopFailedSessionInstance(executor *task.RepoExecutor, t *task.Task, attrs []any) {
+	if executor == nil || executor.Runtime == nil {
 		return
 	}
 	id := t.RuntimeInstanceID()
 	if id == "" {
 		return
 	}
-	if err := runner.Runtime.Stop(m.serverCtx, id); err != nil {
+	if err := executor.Runtime.Stop(m.serverCtx, id); err != nil {
 		slog.ErrorContext(m.serverCtx, "stop failed after session error", append(attrs, "err", err)...)
 	}
 }
 
-// cleanupTask runs runner.Cleanup exactly once per task.
-func (m *Manager) cleanupTask(entry *Entry, runner *task.RepoExecutor, reason task.State) {
+// cleanupTask runs executor.Cleanup exactly once per task.
+func (m *Manager) cleanupTask(entry *Entry, executor *task.RepoExecutor, reason task.State) {
 	entry.Cleanup(func() {
 		start := time.Now()
 		t := entry.Task()
-		result := runner.Cleanup(m.serverCtx, t, reason)
+		result := executor.Cleanup(m.serverCtx, t, reason)
 		elapsed := time.Since(start).Round(time.Millisecond)
 		if result.Err != nil {
 			slog.ErrorContext(m.serverCtx, "cleanup failed", "task", t.ID, "reason", reason, "dur", elapsed, "err", result.Err)

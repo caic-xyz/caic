@@ -70,7 +70,7 @@ func FailureSummary(ctx context.Context, f forge.Forge, provider genai.Provider,
 		if !c.Conclusion.IsFailed() {
 			continue
 		}
-		// Header: job name, conclusion, optional runner labels, optional URL.
+		// Header: job name, conclusion, optional job labels, optional URL.
 		header := fmt.Sprintf("- %s (%s)", c.Name, c.Conclusion)
 		if len(c.Labels) > 0 {
 			header += fmt.Sprintf(" [%s]", strings.Join(c.Labels, ", "))
@@ -87,7 +87,7 @@ func FailureSummary(ctx context.Context, f forge.Forge, provider genai.Provider,
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-// enrichFailingChecks fetches the log and runner labels for each failing
+// enrichFailingChecks fetches the log and job labels for each failing
 // check. Labels are stored on the Check (mutating the slice in place); logs
 // are returned keyed by JobID. The LLM provider (may be nil) is used to
 // summarise logs that exceed 16 KB.
@@ -100,7 +100,7 @@ func enrichFailingChecks(ctx context.Context, f forge.Forge, provider genai.Prov
 		if !c.Conclusion.IsFailed() || c.JobID == 0 {
 			continue
 		}
-		// Fetch runner labels (best-effort).
+		// Fetch job labels (best-effort).
 		if len(c.Labels) == 0 {
 			if labels, err := f.GetJobLabels(ctx, c.Owner, c.Repo, c.JobID); err == nil {
 				c.Labels = labels

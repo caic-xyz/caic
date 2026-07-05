@@ -180,10 +180,10 @@ func TestNew(t *testing.T) {
 		}
 		r, ok := m.Executor("")
 		if !ok {
-			t.Fatal("no-repo runner not registered")
+			t.Fatal("no-repo executor not registered")
 		}
 		if r == nil {
-			t.Fatal("no-repo runner is nil")
+			t.Fatal("no-repo executor is nil")
 		}
 		select {
 		case <-m.Changed():
@@ -191,7 +191,7 @@ func TestNew(t *testing.T) {
 		default:
 		}
 	})
-	t.Run("no-repo runner is fully constructed", func(t *testing.T) {
+	t.Run("no-repo executor is fully constructed", func(t *testing.T) {
 		t.Parallel()
 		cfg := Config{
 			ServerCtx:  t.Context(),
@@ -204,19 +204,19 @@ func TestNew(t *testing.T) {
 		m := New(cfg)
 		r, ok := m.Executor("")
 		if !ok {
-			t.Fatal("no-repo runner not registered")
+			t.Fatal("no-repo executor not registered")
 		}
 		if r.LogDir != cfg.LogDir || r.CacheDir != cfg.CacheDir {
-			t.Fatalf("runner dirs = log %q cache %q, want log %q cache %q", r.LogDir, r.CacheDir, cfg.LogDir, cfg.CacheDir)
+			t.Fatalf("executor dirs = log %q cache %q, want log %q cache %q", r.LogDir, r.CacheDir, cfg.LogDir, cfg.CacheDir)
 		}
 		if r.Runtime != cfg.Backend {
-			t.Fatal("runner instance backend was not wired")
+			t.Fatal("executor instance backend was not wired")
 		}
 		if len(r.HarnessEnv[string(harness.Codex)]) != 1 || r.HarnessEnv[string(harness.Codex)][0] != "CODEX_HOME=/tmp/codex" {
 			t.Fatalf("HarnessEnv = %#v, want configured codex env", r.HarnessEnv)
 		}
 		if len(r.Backends) == 0 {
-			t.Fatal("runner backends were not initialized")
+			t.Fatal("executor backends were not initialized")
 		}
 	})
 }
@@ -224,7 +224,7 @@ func TestNew(t *testing.T) {
 func TestManager(t *testing.T) {
 	t.Parallel()
 
-	t.Run("RegisterRunner", func(t *testing.T) {
+	t.Run("RegisterExecutor", func(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
@@ -558,7 +558,7 @@ func TestManager(t *testing.T) {
 		})
 	})
 
-	t.Run("resolveRunner", func(t *testing.T) {
+	t.Run("resolveExecutor", func(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_with_repo", func(t *testing.T) {
 			t.Parallel()
@@ -571,7 +571,7 @@ func TestManager(t *testing.T) {
 			}
 			got := m.resolveExecutor(tk)
 			if got != r {
-				t.Error("resolveRunner returned wrong runner")
+				t.Error("resolveExecutor returned wrong executor")
 			}
 		})
 		t.Run("valid_no_repo_fallback", func(t *testing.T) {
@@ -580,7 +580,7 @@ func TestManager(t *testing.T) {
 			tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			got := m.resolveExecutor(tk)
 			if got == nil {
-				t.Fatal("resolveRunner returned nil for no-repo task")
+				t.Fatal("resolveExecutor returned nil for no-repo task")
 			}
 		})
 	})
@@ -627,7 +627,7 @@ func TestManager(t *testing.T) {
 				t.Errorf("EffectiveBaseBranch = %q, want %q", got, "main")
 			}
 		})
-		t.Run("valid_runner_default", func(t *testing.T) {
+		t.Run("valid_executor_default", func(t *testing.T) {
 			t.Parallel()
 			m := New(Config{ServerCtx: t.Context()})
 			m.RegisterExecutor("my/repo", &task.RepoExecutor{BaseBranch: "develop"})
@@ -794,7 +794,7 @@ func TestManager(t *testing.T) {
 
 	t.Run("Create", func(t *testing.T) {
 		t.Parallel()
-		// newManagerWithRepo returns a Manager with one repo runner that has a
+		// newManagerWithRepo returns a Manager with one repo executor that has a
 		// fake backend for harness "fake".
 		newManagerWithRepo := func(t *testing.T) *Manager {
 			m := New(Config{ServerCtx: t.Context()})
@@ -955,7 +955,7 @@ func TestManager(t *testing.T) {
 	t.Run("Fork", func(t *testing.T) {
 		t.Parallel()
 		// newForkManager returns a Manager with a source task that has a
-		// instance, plus a runner with a fake backend.
+		// instance, plus an executor with a fake backend.
 		newForkManager := func(t *testing.T) (*Manager, *Entry) {
 			m := New(Config{ServerCtx: t.Context()})
 			m.RegisterExecutor("my/repo", &task.RepoExecutor{
@@ -1212,7 +1212,7 @@ func TestManager(t *testing.T) {
 				t.Fatalf("err = %v, want KindConflict", err)
 			}
 		})
-		t.Run("error_no_runner_backend", func(t *testing.T) {
+		t.Run("error_no_executor_backend", func(t *testing.T) {
 			t.Parallel()
 			m := New(Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
@@ -1788,7 +1788,7 @@ func TestManager(t *testing.T) {
 				t.Fatalf("err = %v, want KindConflict", err)
 			}
 		})
-		t.Run("error_provisioning_no_runner", func(t *testing.T) {
+		t.Run("error_provisioning_no_executor", func(t *testing.T) {
 			t.Parallel()
 			m := New(Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
@@ -2260,7 +2260,7 @@ func TestManager(t *testing.T) {
 	t.Run("Fork_Errors", func(t *testing.T) {
 		t.Parallel()
 
-		// forkSetup creates a Manager with a runner for "repo/a" and a source
+		// forkSetup creates a Manager with an executor for "repo/a" and a source
 		// task in StateWaiting. Returns the Manager and the source Entry.
 		forkSetup := func(t *testing.T, sourceHarness harness.Name, backends map[harness.Name]agent.Backend) (*Manager, *Entry) {
 			m := New(Config{ServerCtx: t.Context()})
@@ -3028,12 +3028,12 @@ func TestRefreshAdoptedDiffStat(t *testing.T) {
 				return "5\t1\tmain.go\n", nil
 			},
 		}
-		runner := &task.RepoExecutor{Runtime: fake, Dir: "/repo"}
+		executor := &task.RepoExecutor{Runtime: fake, Dir: "/repo"}
 		tk := &task.Task{Repos: []task.RepoMount{{GitRoot: "/repo", Branch: "caic-0"}}}
 		tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 		tk.SetState(task.StateWaiting)
 
-		refreshAdoptedDiffStat(t.Context(), runner, tk)
+		refreshAdoptedDiffStat(t.Context(), executor, tk)
 
 		if got := fake.Count("Fetch"); got != 1 {
 			t.Errorf("Fetch count = %d, want 1", got)
@@ -3053,12 +3053,12 @@ func TestRefreshAdoptedDiffStat(t *testing.T) {
 				return "5\t1\tmain.go\n", nil
 			},
 		}
-		runner := &task.RepoExecutor{Runtime: fake, Dir: "/repo"}
+		executor := &task.RepoExecutor{Runtime: fake, Dir: "/repo"}
 		tk := &task.Task{Repos: []task.RepoMount{{GitRoot: "/repo", Branch: "caic-0"}}}
 		tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 		tk.SetState(task.StateRunning)
 
-		refreshAdoptedDiffStat(t.Context(), runner, tk)
+		refreshAdoptedDiffStat(t.Context(), executor, tk)
 
 		if got := fake.Count("Fetch"); got != 0 {
 			t.Errorf("Fetch count = %d, want 0", got)

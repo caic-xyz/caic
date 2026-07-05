@@ -47,17 +47,17 @@ func (c *botClient) ResolveRepo(forgeFullName string) *bot.RepoInfo {
 
 // CreateTask creates and starts a task for bot-driven automation.
 func (c *botClient) CreateTask(ctx context.Context, req bot.TaskRequest) (string, error) {
-	runner, ok := c.taskMgr.Executor(req.Repo)
+	executor, ok := c.taskMgr.Executor(req.Repo)
 	if !ok {
-		return "", fmt.Errorf("runner not found for repo %s", req.Repo)
+		return "", fmt.Errorf("executor not found for repo %s", req.Repo)
 	}
 	// Pick harness: prefer Claude if available, otherwise the
 	// lexicographically first available harness. Sorting keeps the choice
 	// deterministic regardless of map iteration order.
 	var selectedHarness harness.Name
-	if _, ok := runner.Backends[harness.Claude]; ok {
+	if _, ok := executor.Backends[harness.Claude]; ok {
 		selectedHarness = harness.Claude
-	} else if avail := slices.Sorted(maps.Keys(runner.Backends)); len(avail) > 0 {
+	} else if avail := slices.Sorted(maps.Keys(executor.Backends)); len(avail) > 0 {
 		selectedHarness = avail[0]
 	}
 	if selectedHarness == "" {

@@ -33,7 +33,7 @@ import (
 	"github.com/caic-xyz/caic/oauth/oauthclient"
 )
 
-type runnerRegistry interface {
+type executorRegistry interface {
 	RangeExecutors(fn func(relPath string, r *task.RepoExecutor) bool)
 	Executor(relPath string) (*task.RepoExecutor, bool)
 	RegisterExecutor(relPath string, r *task.RepoExecutor)
@@ -45,7 +45,7 @@ type serverHandlers struct {
 	forge              *forgemanager.Manager
 	prefs              *preferences.Store
 	repos              *repos.Service
-	taskMgr            runnerRegistry
+	taskMgr            executorRegistry
 	cacheSizes         *CacheSizeStore
 	authStore          *auth.Store
 	githubOAuth        *oauthclient.ProviderConfig
@@ -265,7 +265,7 @@ func mountsFromSettings(settings *preferences.Settings) []caicruntime.Mount {
 }
 
 func (h *serverHandlers) listHarnesses(_ context.Context, _ *api.EmptyReq) (*[]v1.HarnessInfo, error) {
-	// Collect unique harness backends from all runners.
+	// Collect unique harness backends from all executors.
 	seen := make(map[harness.Name]agent.Backend)
 	h.taskMgr.RangeExecutors(func(_ string, r *task.RepoExecutor) bool {
 		maps.Copy(seen, r.Backends)

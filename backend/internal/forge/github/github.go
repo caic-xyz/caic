@@ -307,8 +307,8 @@ func (c *Client) GetJobLog(ctx context.Context, owner, repo string, jobID int64,
 	return log, nil
 }
 
-// GetJobLabels returns the runner labels for a GitHub Actions job by fetching
-// the job details endpoint. Labels typically include the runner OS (e.g.
+// GetJobLabels returns the job labels for a GitHub Actions job by fetching
+// the job details endpoint. Labels typically include the job OS (e.g.
 // "ubuntu-latest").
 func (c *Client) GetJobLabels(ctx context.Context, owner, repo string, jobID int64) ([]string, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/jobs/%d", owner, repo, jobID)

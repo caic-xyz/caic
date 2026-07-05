@@ -594,11 +594,11 @@ func (s *taskService) taskDiff(ctx context.Context, entry *tasks.Entry, path str
 	if p := t.Primary(); p != nil {
 		diffPrimaryName = p.Name
 	}
-	runner, ok := s.taskMgr.Executor(diffPrimaryName)
+	executor, ok := s.taskMgr.Executor(diffPrimaryName)
 	if !ok {
 		return nil, api.InternalError("unknown repo")
 	}
-	diff, err := runner.DiffContent(ctx, t, path)
+	diff, err := executor.DiffContent(ctx, t, path)
 	if err != nil {
 		return nil, api.InternalError(err.Error())
 	}

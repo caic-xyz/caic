@@ -74,7 +74,7 @@ type CheckRun struct {
 	Name        string
 	Status      CheckRunStatus
 	Conclusion  CheckRunConclusion
-	Labels      []string  // Runner labels (e.g. ["ubuntu-latest"]); nil until fetched.
+	Labels      []string  // Job labels (e.g. ["ubuntu-latest"]); nil until fetched.
 	QueuedAt    time.Time // When the check was created/queued. Zero if unavailable.
 	StartedAt   time.Time // When execution began. Zero if not yet started.
 	CompletedAt time.Time // When execution finished. Zero if still running.
@@ -164,9 +164,9 @@ type Forge interface {
 	// the failing step(s) if the forge's log format supports step-level
 	// markers; otherwise the full log is returned.
 	GetJobLog(ctx context.Context, owner, repo string, jobID int64, failingOnly bool) (string, error)
-	// GetJobLabels returns the runner labels for a CI job (e.g.
+	// GetJobLabels returns the job labels for a CI job (e.g.
 	// ["ubuntu-latest"]). Returns nil without error when the forge does
-	// not expose runner metadata.
+	// not expose job execution metadata.
 	GetJobLabels(ctx context.Context, owner, repo string, jobID int64) ([]string, error)
 	// MergePR squash-merges a pull/merge request with the given commit title
 	// and message. Returns an error if the merge cannot be completed (e.g.

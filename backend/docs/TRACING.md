@@ -58,7 +58,7 @@ format (Go 1.26 limitation). Only `trace.Log` / `trace.Logf` calls appear as
 | Phase 1 — repo discovery | `trace.StartRegion` | `discover-repos` |
 | Phase 1 — log loading | `trace.StartRegion` | `load-logs` |
 | Phase 1 — container listing | `trace.StartRegion` | `list-containers` |
-| Phase 2 — per-repo init | `trace.StartRegion` | `repo-runner-init` |
+| Phase 2 — per-repo init | `trace.StartRegion` | `repo-executor-init` |
 | Phase 3 — load purged tasks | `trace.StartRegion` | `load-purged-tasks` |
 | Phase 4 — adopt containers | `trace.StartRegion` | `adopt-containers` |
 | Per-container adoption | `trace.NewTask` | `adopt-container` |
@@ -78,7 +78,7 @@ format (Go 1.26 limitation). Only `trace.Log` / `trace.Logf` calls appear as
 | `POST /tasks/{id}/fork` goroutine | `trace.NewTask` | `task.fork:{src}->{dst}` |
 | `watchSession` goroutine | `trace.NewTask` | `session.watch:{id}` |
 
-### Runner operations (`backend/internal/task/runner.go`)
+### Repo executor operations (`backend/internal/task/repoexecutor.go`)
 
 | Method | Type | Name |
 |---|---|---|
@@ -166,7 +166,7 @@ context carrying the trace task down to callees so their `StartRegion`
 calls nest correctly:
 
 ```go
-func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
+func (r *RepoExecutor) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
     ctx, task := trace.NewTask(ctx, "task.start:"+t.ID.String())
     defer task.End()
     // Pass ctx to setup() so its regions nest under task.start.

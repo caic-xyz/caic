@@ -175,7 +175,7 @@ func (h *SessionHandle) Drain() error {
 // Repos[0] is primary; empty slice means no-repo task.
 type RepoMount struct {
 	Name        string // relative path, e.g. "github/caic"
-	BaseBranch  string // branch to fork from; empty = runner default
+	BaseBranch  string // branch to fork from; empty = executor default
 	Branch      string // allocated branch, e.g. "caic-0"
 	GitRoot     string // absolute host path; empty in purged-task entries
 	MountedPath string // mount path inside the runtime instance

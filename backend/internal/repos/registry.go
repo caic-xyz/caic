@@ -16,13 +16,13 @@ import (
 // so a concurrent add/remove can never tear a reader or leave a dangling
 // interior pointer.
 //
-// Ordering invariant with the Manager runner registry: a repo and its
+// Ordering invariant with the Manager executor registry: a repo and its
 // task.RepoExecutor live in two separate lock domains (this registry and the
-// Manager's). Callers that add a repo register its runner *after* add(); callers
-// that remove a repo unregister its runner *after* the remove. This leaves a
-// brief, benign window where a repo is listed without a runner (just added) or a
-// runner outlives its repo entry (just removed): in-flight tasks resolve their
-// runner regardless, and newly-listed repos are not user-visible until the
+// Manager's). Callers that add a repo register its executor *after* add(); callers
+// that remove a repo unregister its executor *after* the remove. This leaves a
+// brief, benign window where a repo is listed without an executor (just added) or an
+// executor outlives its repo entry (just removed): in-flight tasks resolve their
+// executor regardless, and newly-listed repos are not user-visible until the
 // enclosing operation returns.
 type Registry struct {
 	mu       sync.Mutex
@@ -143,7 +143,7 @@ func (r *Registry) Add(info *Info) {
 }
 
 // RemoveMatching removes every repo for which pred reports true and returns
-// their RelPaths. The caller unregisters the corresponding runners afterwards.
+// their RelPaths. The caller unregisters the corresponding executors afterwards.
 func (r *Registry) RemoveMatching(pred func(Info) bool) []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()

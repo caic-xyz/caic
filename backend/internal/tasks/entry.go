@@ -134,7 +134,7 @@ func (e *Entry) Finish(r *task.Result) {
 	e.mu.Unlock()
 }
 
-// Cleanup runs fn exactly once per incarnation. Used to guard runner.Cleanup
+// Cleanup runs fn exactly once per incarnation. Used to guard executor.Cleanup
 // against racing Stop/Purge calls.
 func (e *Entry) Cleanup(fn func()) {
 	e.mu.Lock()

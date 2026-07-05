@@ -36,7 +36,7 @@ type Backend interface {
 	Models() []string
 
 	// SetModels replaces the model list. Used by the server to push
-	// dynamically-fetched models into all runners.
+	// dynamically-fetched models into all executors.
 	SetModels(models []string)
 
 	// SupportsImages reports whether this backend accepts image content blocks.

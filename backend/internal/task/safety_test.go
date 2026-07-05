@@ -245,4 +245,4 @@ func TestScanDiffForSecrets_Deduplication(t *testing.T) {
 	}
 }
 
-// initTestRepo and runGit are defined in runner_test.go (same package).
+// initTestRepo and runGit are defined in repoexecutor_test.go (same package).

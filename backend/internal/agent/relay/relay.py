@@ -23,7 +23,7 @@
 #   distinguishes the two flows below.
 #
 # Flow 1 — One task is purged (user clicks "purge"):
-#   1. Server calls Runner.Cleanup → Session.Stop writes \x00\n
+#   1. Server calls RepoExecutor.Cleanup → Session.Stop writes \x00\n
 #   2. attach_client forwards \x00\n through the socket
 #   3. _client_reader detects sentinel, sets shutdown_event
 #   4. _shutdown_watchdog closes proc.stdin, sends SIGINT; if subprocess

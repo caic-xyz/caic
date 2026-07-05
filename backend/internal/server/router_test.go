@@ -295,14 +295,14 @@ func loadPurgedTasksForTest(s *testRouter, logDir string) error {
 	return s.taskMgr.LoadPurgedTasks(logs)
 }
 
-type runnerConstructionTestFixture struct {
+type executorConstructionTestFixture struct {
 	server   *testRouter
 	logDir   string
 	cacheDir string
 	backend  *mdruntime.Backend
 }
 
-func newRunnerConstructionTestServer(t *testing.T, root string) runnerConstructionTestFixture {
+func newExecutorConstructionTestServer(t *testing.T, root string) executorConstructionTestFixture {
 	harnessEnv := map[string][]string{string(harness.Codex): {"CODEX_HOME=/tmp/codex"}}
 	backend := &mdruntime.Backend{HarnessEnv: harnessEnv}
 	backends := map[harness.Name]agent.Backend{harness.Codex: stubBackend{}}
@@ -328,7 +328,7 @@ func newRunnerConstructionTestServer(t *testing.T, root string) runnerConstructi
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return runnerConstructionTestFixture{
+	return executorConstructionTestFixture{
 		server:   &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, prefs: prefs},
 		logDir:   logDir,
 		cacheDir: cacheDir,
@@ -338,23 +338,23 @@ func newRunnerConstructionTestServer(t *testing.T, root string) runnerConstructi
 
 func newTestRepoWatcher(t *testing.T, root string, s *testRouter) *repos.Watcher {
 	return repos.NewWatcher(&repos.WatcherConfig{
-		Ctx:          t.Context(),
-		AbsRoot:      root,
-		Repos:        func() []repos.Info { return testWatchedRepos(s.repos) },
-		RelPath:      s.repos.RelPath,
-		RunnerExists: s.repos.RunnerRegistered,
+		Ctx:            t.Context(),
+		AbsRoot:        root,
+		Repos:          func() []repos.Info { return testWatchedRepos(s.repos) },
+		RelPath:        s.repos.RelPath,
+		ExecutorExists: s.repos.ExecutorRegistered,
 		OnDiscovered: func(ctx context.Context, abs string) {
-			result, err := s.repos.DiscoverRunner(ctx, abs)
+			result, err := s.repos.DiscoverExecutor(ctx, abs)
 			if err != nil {
-				t.Errorf("DiscoverRunner(%q): %v", abs, err)
+				t.Errorf("DiscoverExecutor(%q): %v", abs, err)
 				return
 			}
-			if s.repos.RunnerRegistered(result.Info.RelPath) {
+			if s.repos.ExecutorRegistered(result.Info.RelPath) {
 				return
 			}
-			s.repos.RegisterRunner(&result)
+			s.repos.RegisterExecutor(&result)
 		},
-		OnRemoved: s.repos.DeregisterRunner,
+		OnRemoved: s.repos.DeregisterExecutor,
 	})
 }
 
@@ -397,11 +397,11 @@ func runServerGit(t *testing.T, dir string, args ...string) {
 func TestCloneRepo(t *testing.T) {
 	t.Parallel()
 
-	t.Run("valid runner construction and watcher overlap", func(t *testing.T) {
+	t.Run("valid executor construction and watcher overlap", func(t *testing.T) {
 		t.Parallel()
 		root := t.TempDir()
 		source := initCloneSourceRepo(t)
-		fixture := newRunnerConstructionTestServer(t, root)
+		fixture := newExecutorConstructionTestServer(t, root)
 		s := fixture.server
 
 		repo, err := s.serverHandlers.cloneRepo(t.Context(), &v1.CloneRepoReq{URL: source, Path: "./cloned"})
@@ -411,27 +411,27 @@ func TestCloneRepo(t *testing.T) {
 		if repo.Path != "cloned" {
 			t.Fatalf("repo path = %q, want cloned", repo.Path)
 		}
-		runner, ok := s.taskMgr.Executor("cloned")
+		executor, ok := s.taskMgr.Executor("cloned")
 		if !ok {
-			t.Fatal("cloned runner not registered")
+			t.Fatal("cloned executor not registered")
 		}
-		if runner.RepoName != "cloned" {
-			t.Fatalf("RepoName = %q, want cloned", runner.RepoName)
+		if executor.RepoName != "cloned" {
+			t.Fatalf("RepoName = %q, want cloned", executor.RepoName)
 		}
-		if runner.Dir != filepath.Join(root, "cloned") {
-			t.Fatalf("Dir = %q, want cloned path", runner.Dir)
+		if executor.Dir != filepath.Join(root, "cloned") {
+			t.Fatalf("Dir = %q, want cloned path", executor.Dir)
 		}
-		if runner.LogDir != fixture.logDir || runner.CacheDir != fixture.cacheDir {
-			t.Fatalf("runner dirs = log %q cache %q, want log %q cache %q", runner.LogDir, runner.CacheDir, fixture.logDir, fixture.cacheDir)
+		if executor.LogDir != fixture.logDir || executor.CacheDir != fixture.cacheDir {
+			t.Fatalf("executor dirs = log %q cache %q, want log %q cache %q", executor.LogDir, executor.CacheDir, fixture.logDir, fixture.cacheDir)
 		}
-		if runner.Runtime != fixture.backend {
-			t.Fatal("runner instance backend was not wired")
+		if executor.Runtime != fixture.backend {
+			t.Fatal("executor instance backend was not wired")
 		}
-		if len(runner.HarnessEnv[string(harness.Codex)]) != 1 || runner.HarnessEnv[string(harness.Codex)][0] != "CODEX_HOME=/tmp/codex" {
-			t.Fatalf("HarnessEnv = %#v, want configured codex env", runner.HarnessEnv)
+		if len(executor.HarnessEnv[string(harness.Codex)]) != 1 || executor.HarnessEnv[string(harness.Codex)][0] != "CODEX_HOME=/tmp/codex" {
+			t.Fatalf("HarnessEnv = %#v, want configured codex env", executor.HarnessEnv)
 		}
-		if len(runner.Backends) == 0 {
-			t.Fatal("runner backends were not initialized")
+		if len(executor.Backends) == 0 {
+			t.Fatal("executor backends were not initialized")
 		}
 
 		newTestRepoWatcher(t, root, s).SyncReposInDir(t.Context(), root)
@@ -440,10 +440,10 @@ func TestCloneRepo(t *testing.T) {
 		}
 		after, ok := s.taskMgr.Executor("cloned")
 		if !ok {
-			t.Fatal("runner disappeared after watcher sync")
+			t.Fatal("executor disappeared after watcher sync")
 		}
-		if after != runner {
-			t.Fatal("watcher replaced an already registered clone runner")
+		if after != executor {
+			t.Fatal("watcher replaced an already registered clone executor")
 		}
 	})
 
@@ -457,7 +457,7 @@ func TestCloneRepo(t *testing.T) {
 		if err := os.RemoveAll(submodule); err != nil {
 			t.Fatalf("remove submodule source: %v", err)
 		}
-		s := newRunnerConstructionTestServer(t, root).server
+		s := newExecutorConstructionTestServer(t, root).server
 
 		if _, err := s.serverHandlers.cloneRepo(t.Context(), &v1.CloneRepoReq{URL: parent, Path: "broken"}); err == nil {
 			t.Fatal("cloneRepo succeeded, want submodule clone failure")
@@ -469,7 +469,7 @@ func TestCloneRepo(t *testing.T) {
 			t.Fatalf("repo registry = %+v, want empty after failed clone", got)
 		}
 		if _, ok := s.taskMgr.Executor("broken"); ok {
-			t.Fatal("failed clone registered a runner")
+			t.Fatal("failed clone registered an executor")
 		}
 	})
 }
@@ -1023,7 +1023,7 @@ func TestHandleCreateTask(t *testing.T) {
 		}
 	})
 
-	t.Run("NoRepoRunnerNoBackend", func(t *testing.T) {
+	t.Run("NoRepoExecutorNoBackend", func(t *testing.T) {
 		t.Parallel()
 		// Creating a no-repo task with no registered harness backends returns
 		// a clear 400 instead of panicking.

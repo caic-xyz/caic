@@ -1,4 +1,4 @@
-// Service manages repository metadata, task-runner registration, and change notifications.
+// Service manages repository metadata, task executor registration, and change notifications.
 
 package repos
 
@@ -57,12 +57,12 @@ type CloneRequest struct {
 // InitResult holds the outcome of initialising a single newly-discovered
 // repository.
 type InitResult struct {
-	Info    Info
-	Runner  *task.RepoExecutor
-	InitErr error
+	Info     Info
+	Executor *task.RepoExecutor
+	InitErr  error
 }
 
-// Service owns managed repository metadata and task-runner wiring.
+// Service owns managed repository metadata and task executor wiring.
 type Service struct {
 	absRoot       string
 	logDir        string
@@ -116,8 +116,8 @@ func (s *Service) Changed() <-chan struct{} {
 	return s.changed
 }
 
-// DiscoverRunner discovers repo metadata and initializes its task runner.
-func (s *Service) DiscoverRunner(ctx context.Context, abs string) (InitResult, error) {
+// DiscoverExecutor discovers repo metadata and initializes its task executor.
+func (s *Service) DiscoverExecutor(ctx context.Context, abs string) (InitResult, error) {
 	rel := s.RelPath(abs)
 	checkout := &git.Checkout{Root: abs, Logger: slog.Default()}
 	remoteName, err := checkout.DefaultRemote(ctx)
@@ -145,7 +145,7 @@ func (s *Service) DiscoverRunner(ctx context.Context, abs string) (InitResult, e
 		ForgeRepo:        forgeRepo,
 	}
 	executor, initErr := s.newExecutor(ctx, &info)
-	return InitResult{Info: info, Runner: executor, InitErr: initErr}, nil
+	return InitResult{Info: info, Executor: executor, InitErr: initErr}, nil
 }
 
 // RelPath returns abs as a path relative to the repository root.
@@ -160,18 +160,18 @@ func (s *Service) RelPath(abs string) string {
 	return rel
 }
 
-// RegisterRunner adds a discovered repo and registers its runner.
-func (s *Service) RegisterRunner(r *InitResult) {
-	if r == nil || r.Runner == nil {
+// RegisterExecutor adds a discovered repo and registers its executor.
+func (s *Service) RegisterExecutor(r *InitResult) {
+	if r == nil || r.Executor == nil {
 		return
 	}
 	s.registry.Add(&r.Info)
-	s.taskMgr.RegisterExecutor(r.Info.RelPath, r.Runner)
+	s.taskMgr.RegisterExecutor(r.Info.RelPath, r.Executor)
 	s.notifyChanged()
 }
 
-// DeregisterRunner removes a repo and unregisters its runner.
-func (s *Service) DeregisterRunner(relPath string) {
+// DeregisterExecutor removes a repo and unregisters its executor.
+func (s *Service) DeregisterExecutor(relPath string) {
 	removed := s.registry.RemoveMatching(func(r Info) bool {
 		return r.RelPath == relPath
 	})
@@ -203,14 +203,14 @@ func (s *Service) ByForge(owner, repo string) (Info, bool) {
 	return s.registry.ByForge(owner, repo)
 }
 
-// RunnerRegistered reports whether a runner is registered for relPath.
-func (s *Service) RunnerRegistered(relPath string) bool {
+// ExecutorRegistered reports whether an executor is registered for relPath.
+func (s *Service) ExecutorRegistered(relPath string) bool {
 	_, ok := s.taskMgr.Executor(relPath)
 	return ok
 }
 
-// RegisterNoRepoRunner initializes and registers the no-repo executor.
-func (s *Service) RegisterNoRepoRunner(ctx context.Context) error {
+// RegisterNoRepoExecutor initializes and registers the no-repo executor.
+func (s *Service) RegisterNoRepoExecutor(ctx context.Context) error {
 	noRepoExecutor, err := s.newExecutor(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("init no-repo executor: %w", err)
@@ -258,7 +258,7 @@ func (s *Service) SetCIStatusIfChanged(relPath, sha string, result forgecache.Re
 	return changed
 }
 
-// Clone clones a repository, registers its metadata, and wires its runner.
+// Clone clones a repository, registers its metadata, and wires its executor.
 func (s *Service) Clone(ctx context.Context, req CloneRequest) (Info, error) {
 	targetPath := req.Path
 	if targetPath == "" {
