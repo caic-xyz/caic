@@ -15,7 +15,7 @@ func TestServiceChanged(t *testing.T) {
 	t.Run("setCIStatusIfChanged", func(t *testing.T) {
 		t.Parallel()
 
-		s := NewService("", NewRegistry(nil), nil)
+		s := NewService(t.Context(), "", NewRegistry(nil), nil)
 		ch := s.Changed()
 		if !s.SetCIStatusIfChanged("repo", "sha", forgecache.Result{Status: forge.CIStatusSuccess}) {
 			t.Fatal("SetCIStatusIfChanged() = false, want true")

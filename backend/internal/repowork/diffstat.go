@@ -1,6 +1,6 @@
 // Parses git diff --numstat output into structured diff statistics.
 
-package task
+package repowork
 
 import (
 	"strconv"

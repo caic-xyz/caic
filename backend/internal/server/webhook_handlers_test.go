@@ -25,8 +25,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/gitlab"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repos"
+	"github.com/caic-xyz/caic/backend/internal/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
-	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
@@ -47,7 +47,7 @@ func (b *testCIBackend) ForgeForInfo(ctx context.Context, info *ci.RepoInfo) for
 
 func (b *testCIBackend) CreateTask(context.Context, bot.TaskRequest) (string, error) { return "", nil }
 
-func (b *testCIBackend) GetWorkspace(relPath string) (*task.RepoWorkspace, bool) {
+func (b *testCIBackend) GetWorkspace(relPath string) (*repowork.RepoWorkspace, bool) {
 	return b.taskMgr.Workspace(relPath)
 }
 
@@ -479,8 +479,9 @@ func minimalRouter(t *testing.T) *testRouter {
 	}
 	ctx := t.Context()
 	backend := &mdruntime.Backend{}
-	taskMgr := tasks.New(tasks.Config{ServerCtx: ctx})
-	repoSvc := repos.NewService("", repos.NewRegistry(nil), taskMgr)
+	workspaceRegistry := repos.NewWorkspaceRegistry(ctx, nil)
+	taskMgr := tasks.New(tasks.Config{ServerCtx: ctx, WorkspaceRegistry: workspaceRegistry})
+	repoSvc := repos.NewService(t.Context(), "", repos.NewRegistry(nil), workspaceRegistry)
 	fm := forgemanager.New("", "", nil)
 	prefs := newTestPrefs(t)
 	ciService := ci.NewService(cache, nil, &testCIBackend{repos: repoSvc, taskMgr: taskMgr, forge: fm, prefs: prefs})

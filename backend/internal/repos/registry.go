@@ -1,4 +1,4 @@
-// Registry owns the set of managed repositories and their cached CI status.
+// Registry owns managed repository identity and cached CI status.
 
 package repos
 
@@ -16,14 +16,14 @@ import (
 // so a concurrent add/remove can never tear a reader or leave a dangling
 // interior pointer.
 //
-// Ordering invariant with the Manager workspace registry: a repo and its
-// task.RepoWorkspace live in two separate lock domains (this registry and the
-// Manager's). Callers that add a repo register its workspace *after* add(); callers
-// that remove a repo unregister its workspace *after* the remove. This leaves a
-// brief, benign window where a repo is listed without an workspace (just added) or an
-// workspace outlives its repo entry (just removed): in-flight tasks resolve their
-// workspace regardless, and newly-listed repos are not user-visible until the
-// enclosing operation returns.
+// Ordering invariant with WorkspaceRegistry: a repo and its
+// repowork.RepoWorkspace live in two separate lock domains (this registry and
+// the WorkspaceRegistry). Callers that add a repo register its workspace *after*
+// add(); callers that remove a repo unregister its workspace *after* the
+// remove. This leaves a brief, benign window where a repo is listed without a
+// workspace (just added) or a workspace outlives its repo entry (just removed):
+// in-flight tasks resolve their workspace regardless, and newly-listed repos are
+// not user-visible until the enclosing operation returns.
 type Registry struct {
 	mu       sync.Mutex
 	repos    []Info
@@ -119,8 +119,8 @@ func (r *Registry) ForgePathsAtSHA(owner, repo, sha string) []string {
 
 // Add inserts or replaces a copy of info. RelPath and AbsPath are both stable
 // identities for a repo, so adding either identity twice is idempotent. The
-// caller registers the task.RepoWorkspace afterwards (see the ordering invariant on
-// Registry).
+// caller registers the repowork.RepoWorkspace afterwards (see the ordering
+// invariant on Registry).
 func (r *Registry) Add(info *Info) {
 	r.mu.Lock()
 	for i := range r.repos {

@@ -1,6 +1,6 @@
 // Tests for task safety validation checks.
 
-package task
+package repowork
 
 import (
 	"os"
@@ -245,4 +245,4 @@ func TestScanDiffForSecrets_Deduplication(t *testing.T) {
 	}
 }
 
-// initTestRepo and runGit are defined in repoworkspace_test.go (same package).
+// initTestRepo and runGit are defined in repo_workspace_test.go (same package).

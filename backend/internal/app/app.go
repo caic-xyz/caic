@@ -251,15 +251,17 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 
 	provider := initProvider(ctx, cfg, backend)
 
+	workspaceRegistry := repos.NewWorkspaceRegistry(ctx, runtimeBackend)
 	taskMgr := tasks.New(tasks.Config{
-		ServerCtx: ctx,
-		LogDir:    logDir,
-		CacheDir:  cfg.Dirs.CacheDir,
-		Backend:   runtimeBackend,
-		Monitor:   runtimeMonitor,
-		Inventory: runtimeInventory,
-		Privilege: runtimePrivilege,
-		Backends:  agentBackends,
+		ServerCtx:         ctx,
+		LogDir:            logDir,
+		CacheDir:          cfg.Dirs.CacheDir,
+		Backend:           runtimeBackend,
+		WorkspaceRegistry: workspaceRegistry,
+		Monitor:           runtimeMonitor,
+		Inventory:         runtimeInventory,
+		Privilege:         runtimePrivilege,
+		Backends:          agentBackends,
 		EventReplayFactory: func(path string, h harness.Name) task.EventReplayWriter {
 			return eventreplay.NewMessageWriter(path, h)
 		},
@@ -267,7 +269,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		Prefs:      prefsStore,
 		Provider:   provider,
 	})
-	repoService := repos.NewService(absRoot, repos.NewRegistry(nil), taskMgr)
+	repoService := repos.NewService(ctx, absRoot, repos.NewRegistry(nil), workspaceRegistry)
 
 	// Long-lived forge automation, owned by app and routed to by the HTTP layer.
 	warnings := server.NewWarningStore(taskMgr)
@@ -362,7 +364,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	phase3.End()
 
 	phase4 := trace.StartRegion(ctx, "adopt-runtime-instances")
-	adopted, err := taskMgr.AdoptInstances(ctx, repoService.AdoptionRepos(), instanceRes.instances, liveLogs)
+	adopted, err := taskMgr.AdoptInstances(ctx, adoptionRepos(repoService.Snapshot()), instanceRes.instances, liveLogs)
 	if err != nil {
 		phase4.End()
 		return nil, fmt.Errorf("adopt runtime instances: %w", err)
@@ -445,6 +447,21 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	}
 
 	return &App{Server: s, voiceBridge: voiceBridge, backgroundStarters: backgroundStarters}, nil
+}
+
+func adoptionRepos(in []repos.Info) []tasks.AdoptRepo {
+	out := make([]tasks.AdoptRepo, len(in))
+	for i := range in {
+		r := &in[i]
+		out[i] = tasks.AdoptRepo{
+			RelPath:    r.RelPath,
+			AbsPath:    r.AbsPath,
+			ForgeKind:  string(r.ForgeKind),
+			ForgeOwner: r.ForgeOwner,
+			ForgeRepo:  r.ForgeRepo,
+		}
+	}
+	return out
 }
 
 func loadRuntimeTaskLogs(ctx context.Context, logDir string, inventory runtime.Inventory, instances []runtime.Instance) ([]*task.LoadedTask, error) {

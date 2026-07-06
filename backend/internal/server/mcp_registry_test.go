@@ -180,10 +180,7 @@ func newMCPTaskCreateTestRouter(t *testing.T) *testRouter {
 		harness.Claude: modelListBackend{models: []string{"claude-default"}},
 		harness.Pi:     modelListBackend{models: []string{"pi-default"}},
 	})
-	s.taskMgr.RegisterWorkspace("myrepo", &task.RepoWorkspace{
-		BaseBranch: "main",
-		Dir:        t.TempDir(),
-	})
+	s.taskMgr.RegisterWorkspace("myrepo", newRouterTestWorkspace(t, "main", t.TempDir()))
 	return s
 }
 

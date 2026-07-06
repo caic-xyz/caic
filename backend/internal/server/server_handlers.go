@@ -25,19 +25,19 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repos"
+	"github.com/caic-xyz/caic/backend/internal/repowork"
 	caicruntime "github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
-	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/oauth/oauthclient"
 )
 
 type workspaceRegistry interface {
 	Backends() map[harness.Name]agent.Backend
-	RangeWorkspaces(fn func(relPath string, r *task.RepoWorkspace) bool)
-	Workspace(relPath string) (*task.RepoWorkspace, bool)
-	RegisterWorkspace(relPath string, r *task.RepoWorkspace)
+	RangeWorkspaces(fn func(relPath string, r *repowork.RepoWorkspace) bool)
+	Workspace(relPath string) (*repowork.RepoWorkspace, bool)
+	RegisterWorkspace(relPath string, r *repowork.RepoWorkspace)
 }
 
 type serverHandlers struct {

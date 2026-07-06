@@ -12,8 +12,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repos"
+	"github.com/caic-xyz/caic/backend/internal/repowork"
 	"github.com/caic-xyz/caic/backend/internal/server"
-	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
@@ -62,7 +62,7 @@ func (a *ciAdapter) CreateTask(ctx context.Context, req bot.TaskRequest) (string
 }
 
 // GetWorkspace returns the task workspace for relPath.
-func (a *ciAdapter) GetWorkspace(relPath string) (*task.RepoWorkspace, bool) {
+func (a *ciAdapter) GetWorkspace(relPath string) (*repowork.RepoWorkspace, bool) {
 	return a.taskMgr.Workspace(relPath)
 }
 

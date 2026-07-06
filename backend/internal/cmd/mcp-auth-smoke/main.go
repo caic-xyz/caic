@@ -167,8 +167,9 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 		return "", "", nil, err
 	}
 	backend := &mdruntime.Backend{}
-	taskMgr := tasks.New(tasks.Config{ServerCtx: ctx})
-	repoSvc := repos.NewService("", repos.NewRegistry(nil), taskMgr)
+	workspaceRegistry := repos.NewWorkspaceRegistry(ctx, nil)
+	taskMgr := tasks.New(tasks.Config{ServerCtx: ctx, WorkspaceRegistry: workspaceRegistry})
+	repoSvc := repos.NewService(ctx, "", repos.NewRegistry(nil), workspaceRegistry)
 	prefs, err := preferences.Open(filepath.Join(stateDir, "preferences.json"))
 	if err != nil {
 		return "", "", nil, err

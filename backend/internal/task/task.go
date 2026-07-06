@@ -557,6 +557,14 @@ func (t *Task) Primary() *RepoMount {
 	return &p
 }
 
+// PrimaryBaseBranch returns the primary repo's base-branch override, or "".
+func (t *Task) PrimaryBaseBranch() string {
+	if p := t.Primary(); p != nil {
+		return p.BaseBranch
+	}
+	return ""
+}
+
 // RuntimeRepos returns all repos for use with the runtime backend.
 func (t *Task) RuntimeRepos() []runtime.Repo {
 	t.mu.Lock()

@@ -3,7 +3,7 @@
 //
 // It sits between the HTTP adapter (internal/server) and the domain layer
 // (internal/task). The one-letter difference from the singular "task" package
-// is deliberate: task.Task / task.RepoWorkspace are domain types, while
+// is deliberate: task.Task / repowork.RepoWorkspace are domain types, while
 // tasks.Manager is the orchestration layer.
 //
 // Two contexts coexist here. Methods accept a request-scoped ctx that is
@@ -33,6 +33,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
+	"github.com/caic-xyz/caic/backend/internal/repos"
+	"github.com/caic-xyz/caic/backend/internal/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
@@ -89,10 +91,11 @@ type Config struct {
 	RuntimeStartTimeout time.Duration
 	Prefs               *preferences.Store
 	Provider            genai.Provider // nil-safe
+	WorkspaceRegistry   *repos.WorkspaceRegistry
 }
 
-// Manager owns the task and workspace registries, instance adoption, session
-// watching, and stats streaming.
+// Manager owns task lifecycle state, instance adoption, session watching, and
+// stats streaming.
 type Manager struct {
 	// Immutable after construction.
 	serverCtx           context.Context // lifetime of the Manager; for goroutines that outlive requests
@@ -108,18 +111,22 @@ type Manager struct {
 	runtimeStartTimeout time.Duration
 	prefs               *preferences.Store
 	provider            genai.Provider
+	workspaceRegistry   *repos.WorkspaceRegistry
 	relay               relayReader
 
 	// Guarded by mu.
-	mu         sync.Mutex
-	tasks      map[string]*Entry
-	workspaces map[string]*task.RepoWorkspace
-	changed    chan struct{} // closed on mutation, replaced under mu
+	mu      sync.Mutex
+	tasks   map[string]*Entry
+	changed chan struct{} // closed on mutation, replaced under mu
 }
 
 // New creates a Manager. A no-repo workspace is always registered.
-// Call RegisterWorkspace for each repo, then Start.
+// Register each repo workspace in the configured WorkspaceRegistry, then Start.
 func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passed once at construction
+	workspaceRegistry := cfg.WorkspaceRegistry
+	if workspaceRegistry == nil {
+		workspaceRegistry = repos.NewWorkspaceRegistry(cfg.ServerCtx, cfg.Backend)
+	}
 	m := &Manager{
 		serverCtx:           cfg.ServerCtx,
 		logDir:              cfg.LogDir,
@@ -134,13 +141,18 @@ func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passe
 		runtimeStartTimeout: cfg.RuntimeStartTimeout,
 		prefs:               cfg.Prefs,
 		provider:            cfg.Provider,
+		workspaceRegistry:   workspaceRegistry,
 		relay:               agentRelayReader{},
 		tasks:               make(map[string]*Entry),
-		workspaces:          make(map[string]*task.RepoWorkspace),
 		changed:             make(chan struct{}),
 	}
-	noRepoWorkspace := &task.RepoWorkspace{Runtime: cfg.Backend}
-	m.workspaces[""] = noRepoWorkspace
+	if _, ok := workspaceRegistry.Workspace(""); !ok {
+		noRepoWorkspace, err := repowork.NewRepoWorkspace("", "", "", time.Minute, cfg.Backend, slog.With("repo", "(none)"))
+		if err != nil {
+			panic(err)
+		}
+		workspaceRegistry.RegisterWorkspace("", noRepoWorkspace)
+	}
 	return m
 }
 
@@ -153,51 +165,26 @@ func (m *Manager) Start() {
 
 // RegisterWorkspace registers a task repo workspace keyed by relPath.
 // "" registers the no-repo workspace.
-func (m *Manager) RegisterWorkspace(relPath string, r *task.RepoWorkspace) {
-	r.Runtime = m.backend
-	if err := r.Init(m.serverCtx); err != nil {
-		slog.WarnContext(m.serverCtx, "repo workspace init failed", "repo", relPath, "err", err)
-	}
-	m.mu.Lock()
-	m.workspaces[relPath] = r
-	m.mu.Unlock()
+func (m *Manager) RegisterWorkspace(relPath string, r *repowork.RepoWorkspace) {
+	m.workspaceRegistry.RegisterWorkspace(relPath, r)
 }
 
 // Workspace returns the repo workspace for relPath, or nil.
-func (m *Manager) Workspace(relPath string) (*task.RepoWorkspace, bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	r, ok := m.workspaces[relPath]
-	return r, ok
+func (m *Manager) Workspace(relPath string) (*repowork.RepoWorkspace, bool) {
+	return m.workspaceRegistry.Workspace(relPath)
 }
 
-// RangeWorkspaces iterates over every registered repo workspace. It snapshots the registry
-// under m.mu and invokes fn unlocked, so fn may safely call back into the
+// RangeWorkspaces iterates over every registered repo workspace. It snapshots
+// the registry and invokes fn unlocked, so fn may safely call back into the
 // Manager. The workspace set is a point-in-time snapshot. Stops iteration if fn
 // returns false.
-func (m *Manager) RangeWorkspaces(fn func(relPath string, r *task.RepoWorkspace) bool) {
-	m.mu.Lock()
-	type kv struct {
-		relPath string
-		r       *task.RepoWorkspace
-	}
-	snap := make([]kv, 0, len(m.workspaces))
-	for relPath, r := range m.workspaces {
-		snap = append(snap, kv{relPath, r})
-	}
-	m.mu.Unlock()
-	for _, it := range snap {
-		if !fn(it.relPath, it.r) {
-			return
-		}
-	}
+func (m *Manager) RangeWorkspaces(fn func(relPath string, r *repowork.RepoWorkspace) bool) {
+	m.workspaceRegistry.RangeWorkspaces(fn)
 }
 
 // UnregisterWorkspace removes the repo workspace registered for relPath.
 func (m *Manager) UnregisterWorkspace(relPath string) {
-	m.mu.Lock()
-	delete(m.workspaces, relPath)
-	m.mu.Unlock()
+	m.workspaceRegistry.UnregisterWorkspace(relPath)
 }
 
 // Backends returns a copy of the configured agent backend map.
@@ -266,7 +253,7 @@ func (m *Manager) Changed() <-chan struct{} {
 // Create handles the HTTP task creation path.
 func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { //nolint:gocritic // CreateParams is a request-shaped value bag
 	// Resolve primary workspace.
-	var primaryWorkspace *task.RepoWorkspace
+	var primaryWorkspace *repowork.RepoWorkspace
 	if len(p.Repos) > 0 {
 		r, ok := m.Workspace(p.Repos[0].Name)
 		if !ok {
@@ -279,7 +266,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 	}
 
 	// Validate and resolve extra repo workspaces.
-	extraWorkspaces := make([]*task.RepoWorkspace, 0, max(0, len(p.Repos)-1))
+	extraWorkspaces := make([]*repowork.RepoWorkspace, 0, max(0, len(p.Repos)-1))
 	for _, rs := range p.Repos[min(1, len(p.Repos)):] {
 		er, ok := m.Workspace(rs.Name)
 		if !ok {
@@ -716,7 +703,7 @@ func (m *Manager) SetTaskMonitorBranch(entry *Entry, branch string) {
 // AdoptInstances discovers preexisting runtime instances and creates task entries
 // for them. Returns the list of adopted tasks so the caller (Server) can wire
 // up forge/CI post-adoption.
-func (m *Manager) AdoptInstances(ctx context.Context, repos []AdoptRepo, instances []runtime.Instance, allLogs []*task.LoadedTask) ([]AdoptedTask, error) {
+func (m *Manager) AdoptInstances(ctx context.Context, adoptRepos []AdoptRepo, instances []runtime.Instance, allLogs []*task.LoadedTask) ([]AdoptedTask, error) {
 	if instances == nil {
 		return nil, nil
 	}
@@ -737,8 +724,8 @@ func (m *Manager) AdoptInstances(ctx context.Context, repos []AdoptRepo, instanc
 	var adopted []AdoptedTask
 	claimed := make(map[runtime.InstanceID]bool, len(instances))
 
-	for i := range repos {
-		ri := &repos[i]
+	for i := range adoptRepos {
+		ri := &adoptRepos[i]
 		workspace, _ := m.Workspace(ri.RelPath)
 		if workspace == nil {
 			continue
@@ -1074,7 +1061,7 @@ func (m *Manager) LoadPurgedTasks(all []*task.LoadedTask) error {
 }
 
 // Cleanup is the exported variant of cleanupTask, idempotent per incarnation.
-func (m *Manager) Cleanup(entry *Entry, workspace *task.RepoWorkspace, reason task.State) {
+func (m *Manager) Cleanup(entry *Entry, workspace *repowork.RepoWorkspace, reason task.State) {
 	m.cleanupTask(entry, workspace, reason)
 }
 
@@ -1139,11 +1126,11 @@ func (m *Manager) logStore() *task.LogStore {
 	return &task.LogStore{LogDir: m.logDir, EventReplayFactory: m.eventReplayFactory}
 }
 
-func (m *Manager) sessions(r *task.RepoWorkspace) *task.SessionRunner {
+func (m *Manager) sessions(r *repowork.RepoWorkspace) *task.SessionRunner {
 	return &task.SessionRunner{Backends: m.backends, Workspace: r, Logs: m.logStore()}
 }
 
-func (m *Manager) runner(r *task.RepoWorkspace) *task.Runner {
+func (m *Manager) runner(r *repowork.RepoWorkspace) *task.Runner {
 	return &task.Runner{Workspace: r, Sessions: m.sessions(r), RuntimeStartTimeout: m.runtimeStartTimeout}
 }
 
@@ -1158,7 +1145,7 @@ func (m *Manager) mountPathForRepo(relPath string) string {
 func (m *Manager) repoBasenameCollides(relPath string) bool {
 	base := filepath.Base(relPath)
 	collides := false
-	m.RangeWorkspaces(func(other string, _ *task.RepoWorkspace) bool {
+	m.RangeWorkspaces(func(other string, _ *repowork.RepoWorkspace) bool {
 		if other != "" && other != relPath && filepath.Base(other) == base {
 			collides = true
 			return false
@@ -1377,7 +1364,7 @@ func (m *Manager) taskChanged() {
 // resolveWorkspace returns the repo workspace for a task's primary repo, or the
 // always-present no-repo workspace. Both are guaranteed non-nil: New()
 // registers "", and callers must register repo-specific workspaces.
-func (m *Manager) resolveWorkspace(t *task.Task) *task.RepoWorkspace {
+func (m *Manager) resolveWorkspace(t *task.Task) *repowork.RepoWorkspace {
 	key := ""
 	if p := t.Primary(); p != nil {
 		key = p.Name
@@ -1529,7 +1516,7 @@ func messagesContainInit(msgs []agent.Message) bool {
 }
 
 // adoptOne investigates a single runtime instance and registers it as a task.
-func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *task.RepoWorkspace, c *runtime.Instance, branch string, branchIDs map[string][]string, allLogs []*task.LoadedTask) (*AdoptedTask, error) { //nolint:gocritic // massive function from existing code; refactor deferred
+func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowork.RepoWorkspace, c *runtime.Instance, branch string, branchIDs map[string][]string, allLogs []*task.LoadedTask) (*AdoptedTask, error) { //nolint:gocritic // massive function from existing code; refactor deferred
 	ctx, adoptTask := trace.NewTask(ctx, "adopt-instance")
 	defer adoptTask.End()
 	trace.Logf(ctx, "instance", "%s repo=%s branch=%s", c.ID, ri.RelPath, branch)
@@ -1939,7 +1926,7 @@ func writeTaskResultTrailer(t *task.Task, r *task.Result) error {
 	return t.WriteToLog(msg)
 }
 
-func refreshAdoptedDiffStat(ctx context.Context, workspace *task.RepoWorkspace, t *task.Task) {
+func refreshAdoptedDiffStat(ctx context.Context, workspace *repowork.RepoWorkspace, t *task.Task) {
 	switch t.GetState() {
 	case task.StateWaiting, task.StateAsking, task.StateHasPlan:
 	default:
@@ -1978,7 +1965,7 @@ func (m *Manager) loadTaskMessagesOnDemand(entry *Entry) {
 
 // watchSession monitors a single active session. Clean session exits move the
 // task to StateWaiting; SSH/session errors fail the task and stop the instance.
-func (m *Manager) watchSession(entry *Entry, workspace *task.RepoWorkspace, h *task.SessionHandle) {
+func (m *Manager) watchSession(entry *Entry, workspace *repowork.RepoWorkspace, h *task.SessionHandle) {
 	go func() {
 		t := entry.Task()
 		traceCtx, tk := trace.NewTask(m.serverCtx, "session.watch:"+t.ID.String())
@@ -2069,7 +2056,7 @@ func (m *Manager) watchSession(entry *Entry, workspace *task.RepoWorkspace, h *t
 	}()
 }
 
-func (m *Manager) stopFailedSessionInstance(_ *task.RepoWorkspace, t *task.Task, attrs []any) {
+func (m *Manager) stopFailedSessionInstance(_ *repowork.RepoWorkspace, t *task.Task, attrs []any) {
 	if m.backend == nil {
 		return
 	}
@@ -2083,7 +2070,7 @@ func (m *Manager) stopFailedSessionInstance(_ *task.RepoWorkspace, t *task.Task,
 }
 
 // cleanupTask runs workspace.Cleanup exactly once per task.
-func (m *Manager) cleanupTask(entry *Entry, workspace *task.RepoWorkspace, reason task.State) {
+func (m *Manager) cleanupTask(entry *Entry, workspace *repowork.RepoWorkspace, reason task.State) {
 	entry.Cleanup(func() {
 		start := time.Now()
 		t := entry.Task()

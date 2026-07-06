@@ -9,6 +9,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/harness"
+	"github.com/caic-xyz/caic/backend/internal/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -93,7 +94,7 @@ func ForgePRState(s forge.PRState) v1.ForgePRState {
 }
 
 // SafetyIssues converts task safety issues to API DTOs.
-func SafetyIssues(issues []task.SafetyIssue) []v1.SafetyIssue {
+func SafetyIssues(issues []repowork.SafetyIssue) []v1.SafetyIssue {
 	if len(issues) == 0 {
 		return nil
 	}

@@ -1,6 +1,6 @@
 // Tests for diff numstat parsing logic.
 
-package task
+package repowork
 
 import (
 	"testing"

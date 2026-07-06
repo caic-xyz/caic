@@ -15,13 +15,14 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/harness"
+	"github.com/caic-xyz/caic/backend/internal/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
 // SessionRunner manages agent sessions and dispatches backend messages into tasks.
 type SessionRunner struct {
 	Backends  map[harness.Name]agent.Backend
-	Workspace *RepoWorkspace
+	Workspace *repowork.RepoWorkspace
 	Logs      *LogStore
 }
 
@@ -347,7 +348,7 @@ func (r *SessionRunner) startMessageDispatch(ctx context.Context, t *Task, skipS
 				}
 			case *agent.ResultMessage:
 				if !skipSideEffects && r.Workspace.Runtime != nil && r.Workspace.Dir != "" {
-					ds, _ := r.Workspace.diffStat(ctx, instanceID, allRepos, diffFetchBestEffort, "")
+					ds, _ := r.Workspace.DiffStat(ctx, instanceID, allRepos, repowork.DiffFetchBestEffort, "")
 					msg.DiffStat = ds
 				}
 			}
@@ -373,7 +374,7 @@ var mutatingTools = map[string]struct{}{
 // without fetching from the instance. This keeps live UI diff stats fresh during
 // a running turn without triggering md fetch side effects.
 func (r *SessionRunner) emitDiffStatBranch(ctx context.Context, t *Task, id runtime.InstanceID, repos []runtime.Repo) {
-	ds, _ := r.Workspace.diffStat(ctx, id, repos, diffWithoutFetch, "")
+	ds, _ := r.Workspace.DiffStat(ctx, id, repos, repowork.DiffWithoutFetch, "")
 	if len(ds) == 0 {
 		return
 	}
@@ -385,9 +386,12 @@ func (r *SessionRunner) emitDiffStatBranch(ctx context.Context, t *Task, id runt
 
 func (r *SessionRunner) initDefaults() {
 	if r.Workspace == nil {
-		r.Workspace = &RepoWorkspace{}
+		workspace, err := repowork.NewRepoWorkspace("", "", "", time.Minute, nil, slog.With("repo", "(none)"))
+		if err != nil {
+			panic(err)
+		}
+		r.Workspace = workspace
 	}
-	r.Workspace.initDefaults()
 	if r.Logs == nil {
 		r.Logs = &LogStore{}
 	}
@@ -401,10 +405,10 @@ func (r *SessionRunner) backend(name harness.Name) agent.Backend {
 }
 
 func (r *SessionRunner) log() *slog.Logger {
-	if r.Workspace == nil || r.Workspace.log == nil {
+	if r.Workspace == nil {
 		return slog.Default()
 	}
-	return r.Workspace.log
+	return r.Workspace.Log
 }
 
 // runtimeDir returns the working directory path inside a runtime instance.

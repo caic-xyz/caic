@@ -405,8 +405,9 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 		t.Fatalf("ipgeo.NewChecker: %v", err)
 	}
 	backend := &mdruntime.Backend{}
-	taskMgr := tasks.New(tasks.Config{ServerCtx: t.Context()})
-	repoSvc := repos.NewService("", repos.NewRegistry(nil), taskMgr)
+	workspaceRegistry := repos.NewWorkspaceRegistry(t.Context(), nil)
+	taskMgr := tasks.New(tasks.Config{ServerCtx: t.Context(), WorkspaceRegistry: workspaceRegistry})
+	repoSvc := repos.NewService(t.Context(), "", repos.NewRegistry(nil), workspaceRegistry)
 	prefs := newTestPrefs(t)
 	forgeManager := forgemanager.New("", "", nil)
 

@@ -19,8 +19,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
-	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/caic-xyz/caic/backend/internal/tasks"
+	"github.com/caic-xyz/caic/backend/internal/repowork"
 )
 
 // ErrorKind classifies repository service errors for API adapters.
@@ -54,29 +53,32 @@ type CloneRequest struct {
 // repository.
 type InitResult struct {
 	Info      Info
-	Workspace *task.RepoWorkspace
+	Workspace *repowork.RepoWorkspace
 }
 
 // Service owns managed repository metadata and workspace registration.
 type Service struct {
-	absRoot  string
-	registry *Registry
-	taskMgr  *tasks.Manager
+	absRoot    string
+	registry   *Registry
+	workspaces *WorkspaceRegistry
 
 	mu      sync.Mutex
 	changed chan struct{}
 }
 
 // NewService creates a repository service.
-func NewService(absRoot string, registry *Registry, taskMgr *tasks.Manager) *Service {
+func NewService(ctx context.Context, absRoot string, registry *Registry, workspaces *WorkspaceRegistry) *Service {
 	if registry == nil {
 		registry = NewRegistry(nil)
 	}
+	if workspaces == nil {
+		workspaces = NewWorkspaceRegistry(ctx, nil)
+	}
 	return &Service{
-		absRoot:  absRoot,
-		registry: registry,
-		taskMgr:  taskMgr,
-		changed:  make(chan struct{}),
+		absRoot:    absRoot,
+		registry:   registry,
+		workspaces: workspaces,
+		changed:    make(chan struct{}),
 	}
 }
 
@@ -116,7 +118,11 @@ func (s *Service) DiscoverWorkspace(ctx context.Context, abs string) (InitResult
 		ForgeOwner:       forgeOwner,
 		ForgeRepo:        forgeRepo,
 	}
-	return InitResult{Info: info, Workspace: newWorkspace(&info)}, nil
+	workspace, err := repowork.NewRepoWorkspace(info.BaseBranch, info.AbsPath, info.RelPath, time.Minute, nil, slog.With("repo", filepath.Base(info.AbsPath)))
+	if err != nil {
+		return InitResult{}, fmt.Errorf("create repo workspace: %w", err)
+	}
+	return InitResult{Info: info, Workspace: workspace}, nil
 }
 
 // RelPath returns abs as a path relative to the repository root.
@@ -137,7 +143,7 @@ func (s *Service) RegisterWorkspace(r *InitResult) {
 		return
 	}
 	s.registry.Add(&r.Info)
-	s.taskMgr.RegisterWorkspace(r.Info.RelPath, r.Workspace)
+	s.workspaces.RegisterWorkspace(r.Info.RelPath, r.Workspace)
 	s.notifyChanged()
 }
 
@@ -147,7 +153,7 @@ func (s *Service) DeregisterWorkspace(relPath string) {
 		return r.RelPath == relPath
 	})
 	for _, rel := range removed {
-		s.taskMgr.UnregisterWorkspace(rel)
+		s.workspaces.UnregisterWorkspace(rel)
 	}
 	if len(removed) > 0 {
 		s.notifyChanged()
@@ -176,25 +182,8 @@ func (s *Service) ByForge(owner, repo string) (Info, bool) {
 
 // WorkspaceRegistered reports whether a workspace is registered for relPath.
 func (s *Service) WorkspaceRegistered(relPath string) bool {
-	_, ok := s.taskMgr.Workspace(relPath)
+	_, ok := s.workspaces.Workspace(relPath)
 	return ok
-}
-
-// AdoptionRepos returns repo metadata in the shape expected by tasks.Manager.
-func (s *Service) AdoptionRepos() []tasks.AdoptRepo {
-	snap := s.registry.Snapshot()
-	adoptRepos := make([]tasks.AdoptRepo, len(snap))
-	for i := range snap {
-		r := &snap[i]
-		adoptRepos[i] = tasks.AdoptRepo{
-			RelPath:    r.RelPath,
-			AbsPath:    r.AbsPath,
-			ForgeKind:  string(r.ForgeKind),
-			ForgeOwner: r.ForgeOwner,
-			ForgeRepo:  r.ForgeRepo,
-		}
-	}
-	return adoptRepos
 }
 
 // CIStatusFor returns the cached CI status for relPath.
@@ -241,13 +230,13 @@ func (s *Service) Clone(ctx context.Context, req CloneRequest) (Info, error) {
 	if _, err := os.Stat(absTarget); err == nil {
 		return Info{}, repoError(ErrorConflict, "directory already exists: "+targetPath)
 	}
-	if _, ok := s.taskMgr.Workspace(targetPath); ok {
+	if _, ok := s.workspaces.Workspace(targetPath); ok {
 		return Info{}, repoError(ErrorConflict, "repo already registered: "+targetPath)
 	}
 
 	bn := filepath.Base(targetPath)
 	var basenameConflict string
-	s.taskMgr.RangeWorkspaces(func(rel string, _ *task.RepoWorkspace) bool {
+	s.workspaces.RangeWorkspaces(func(rel string, _ *repowork.RepoWorkspace) bool {
 		if rel != "" && filepath.Base(rel) == bn && rel != targetPath {
 			basenameConflict = rel
 			return false
@@ -286,10 +275,14 @@ func (s *Service) Clone(ctx context.Context, req CloneRequest) (Info, error) {
 	}
 	remote := checkout.RemoteOriginURL(ctx)
 	info := Info{RelPath: targetPath, AbsPath: absTarget, BaseBranch: branch, BaseBranchRemote: remoteName, Remote: remote}
-	workspace := newWorkspace(&info)
+	workspace, err := repowork.NewRepoWorkspace(info.BaseBranch, info.AbsPath, info.RelPath, time.Minute, nil, slog.With("repo", filepath.Base(info.AbsPath)))
+	if err != nil {
+		_ = os.RemoveAll(absTarget)
+		return Info{}, repoError(ErrorInternal, "create repo workspace: "+err.Error())
+	}
 	info.ForgeKind, info.ForgeOwner, info.ForgeRepo = parseForgeRemote(ctx, remote)
 	s.registry.Add(&info)
-	s.taskMgr.RegisterWorkspace(targetPath, workspace)
+	s.workspaces.RegisterWorkspace(targetPath, workspace)
 	s.notifyChanged()
 	slog.InfoContext(ctx, "cloned repo", "url", req.URL, "path", targetPath)
 
@@ -301,14 +294,6 @@ func (s *Service) notifyChanged() {
 	close(s.changed)
 	s.changed = make(chan struct{})
 	s.mu.Unlock()
-}
-
-func newWorkspace(info *Info) *task.RepoWorkspace {
-	return &task.RepoWorkspace{
-		BaseBranch: info.BaseBranch,
-		Dir:        info.AbsPath,
-		RepoName:   info.RelPath,
-	}
 }
 
 func parseForgeRemote(ctx context.Context, remote string) (kind forge.Kind, owner, repo string) {

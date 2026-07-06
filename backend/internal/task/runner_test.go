@@ -6,6 +6,7 @@ package task
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/harness"
+	"github.com/caic-xyz/caic/backend/internal/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
@@ -26,6 +28,14 @@ import (
 // already-done branch don't have to wait out its 10-second liveness timer.
 type instantExitBackend struct {
 	testBackend
+}
+
+func newTestRepoWorkspace(baseBranch, dir string, backend runtime.Backend) *repowork.RepoWorkspace {
+	workspace, err := repowork.NewRepoWorkspace(baseBranch, dir, filepath.Base(dir), time.Minute, backend, slog.With("repo", "test"))
+	if err != nil {
+		panic(err)
+	}
+	return workspace
 }
 
 func (b *instantExitBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
@@ -144,9 +154,7 @@ func TestRunner(t *testing.T) {
 			t.Parallel()
 			backend := &testBackend{}
 			r := &Runner{
-				Workspace: &RepoWorkspace{
-					Runtime: &stubContainer{},
-				},
+				Workspace: newTestRepoWorkspace("", "", &stubContainer{}),
 				Sessions: &SessionRunner{
 					Backends: map[harness.Name]agent.Backend{"test": backend},
 					Logs:     &LogStore{LogDir: t.TempDir()},
@@ -182,10 +190,8 @@ func TestRunner(t *testing.T) {
 			t.Parallel()
 			launchErr := errors.New("invalid context name cache-custom-mount:~/.cache/caic: invalid reference format")
 			r := &Runner{
-				Workspace: &RepoWorkspace{
-					Runtime: &stubContainer{launchErr: launchErr},
-				},
-				Sessions: &SessionRunner{},
+				Workspace: newTestRepoWorkspace("", "", &stubContainer{launchErr: launchErr}),
+				Sessions:  &SessionRunner{},
 			}
 			tk := &Task{
 				ID:            ksid.NewID(),
@@ -233,12 +239,8 @@ func TestRunner(t *testing.T) {
 			logDir := t.TempDir()
 			stub := &stubContainer{}
 			r := &Runner{
-				Workspace: &RepoWorkspace{
-					BaseBranch: "main",
-					Dir:        clone,
-					Runtime:    stub,
-				},
-				Sessions: &SessionRunner{Logs: &LogStore{LogDir: logDir}},
+				Workspace: newTestRepoWorkspace("main", clone, stub),
+				Sessions:  &SessionRunner{Logs: &LogStore{LogDir: logDir}},
 			}
 			r.initDefaults()
 
@@ -280,12 +282,8 @@ func TestRunner(t *testing.T) {
 			logDir := t.TempDir()
 			stub := &stubContainer{}
 			r := &Runner{
-				Workspace: &RepoWorkspace{
-					BaseBranch: "main",
-					Dir:        clone,
-					Runtime:    stub,
-				},
-				Sessions: &SessionRunner{Logs: &LogStore{LogDir: logDir}},
+				Workspace: newTestRepoWorkspace("main", clone, stub),
+				Sessions:  &SessionRunner{Logs: &LogStore{LogDir: logDir}},
 			}
 			r.initDefaults()
 
@@ -321,11 +319,8 @@ func TestRunner(t *testing.T) {
 			// LiveStats for the result cost.
 			clone := initTestRepo(t, "main")
 			r := &Runner{
-				Workspace: &RepoWorkspace{
-					BaseBranch: "main",
-					Dir:        clone,
-				},
-				Sessions: &SessionRunner{},
+				Workspace: newTestRepoWorkspace("main", clone, nil),
+				Sessions:  &SessionRunner{},
 			}
 
 			tk := &Task{
@@ -368,11 +363,8 @@ func TestRunner(t *testing.T) {
 			logDir := t.TempDir()
 			clone := initTestRepo(t, "main")
 			r := &Runner{
-				Workspace: &RepoWorkspace{
-					BaseBranch: "main",
-					Dir:        clone,
-				},
-				Sessions: &SessionRunner{Logs: &LogStore{LogDir: logDir}},
+				Workspace: newTestRepoWorkspace("main", clone, nil),
+				Sessions:  &SessionRunner{Logs: &LogStore{LogDir: logDir}},
 			}
 
 			tk := &Task{
@@ -424,11 +416,8 @@ func TestRunner(t *testing.T) {
 			t.Parallel()
 			clone := initTestRepo(t, "main")
 			r := &Runner{
-				Workspace: &RepoWorkspace{
-					BaseBranch: "main",
-					Dir:        clone,
-				},
-				Sessions: &SessionRunner{},
+				Workspace: newTestRepoWorkspace("main", clone, nil),
+				Sessions:  &SessionRunner{},
 			}
 
 			tk := &Task{
@@ -466,10 +455,8 @@ func TestRunner(t *testing.T) {
 				t.Parallel()
 				stub := &stubContainer{}
 				r := &Runner{
-					Workspace: &RepoWorkspace{
-						Runtime: stub,
-					},
-					Sessions: &SessionRunner{},
+					Workspace: newTestRepoWorkspace("", "", stub),
+					Sessions:  &SessionRunner{},
 				}
 				tk := &Task{
 					ID:            ksid.NewID(),
@@ -496,7 +483,7 @@ func TestRunner(t *testing.T) {
 			t.Parallel()
 			t.Run("no_runtime", func(t *testing.T) {
 				t.Parallel()
-				r := &Runner{Workspace: &RepoWorkspace{}, Sessions: &SessionRunner{}}
+				r := &Runner{Workspace: newTestRepoWorkspace("", "", nil), Sessions: &SessionRunner{}}
 				tk := &Task{ID: ksid.NewID()}
 				if _, err := r.ReviveTask(t.Context(), tk); err == nil {
 					t.Fatal("want error")
@@ -504,7 +491,7 @@ func TestRunner(t *testing.T) {
 			})
 			t.Run("no_instance", func(t *testing.T) {
 				t.Parallel()
-				r := &Runner{Workspace: &RepoWorkspace{Runtime: &stubContainer{}}, Sessions: &SessionRunner{}}
+				r := &Runner{Workspace: newTestRepoWorkspace("", "", &stubContainer{}), Sessions: &SessionRunner{}}
 				tk := &Task{ID: ksid.NewID()}
 				if _, err := r.ReviveTask(t.Context(), tk); err == nil {
 					t.Fatal("want error")
@@ -512,7 +499,7 @@ func TestRunner(t *testing.T) {
 			})
 			t.Run("wrong_state", func(t *testing.T) {
 				t.Parallel()
-				r := &Runner{Workspace: &RepoWorkspace{Runtime: &stubContainer{}}, Sessions: &SessionRunner{}}
+				r := &Runner{Workspace: newTestRepoWorkspace("", "", &stubContainer{}), Sessions: &SessionRunner{}}
 				tk := &Task{ID: ksid.NewID()}
 				tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 				tk.SetState(StateRunning)
@@ -523,7 +510,7 @@ func TestRunner(t *testing.T) {
 		})
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
-			ws := &RepoWorkspace{Runtime: &stubContainer{}}
+			ws := newTestRepoWorkspace("", "", &stubContainer{})
 			backend := &instantExitBackend{}
 			r := &Runner{
 				Workspace: ws,
@@ -563,7 +550,7 @@ func TestRunner(t *testing.T) {
 			t.Parallel()
 			t.Run("no_runtime", func(t *testing.T) {
 				t.Parallel()
-				r := &Runner{Workspace: &RepoWorkspace{}, Sessions: &SessionRunner{}}
+				r := &Runner{Workspace: newTestRepoWorkspace("", "", nil), Sessions: &SessionRunner{}}
 				source := &Task{ID: ksid.NewID()}
 				fork := &Task{ID: ksid.NewID()}
 				if _, err := r.ForkTask(t.Context(), source, fork, &runtime.ForkOptions{}, ""); err == nil {
@@ -572,7 +559,7 @@ func TestRunner(t *testing.T) {
 			})
 			t.Run("no_source_instance", func(t *testing.T) {
 				t.Parallel()
-				r := &Runner{Workspace: &RepoWorkspace{Runtime: &stubContainer{}}, Sessions: &SessionRunner{}}
+				r := &Runner{Workspace: newTestRepoWorkspace("", "", &stubContainer{}), Sessions: &SessionRunner{}}
 				source := &Task{ID: ksid.NewID()}
 				fork := &Task{ID: ksid.NewID()}
 				if _, err := r.ForkTask(t.Context(), source, fork, &runtime.ForkOptions{}, ""); err == nil {
@@ -582,7 +569,7 @@ func TestRunner(t *testing.T) {
 		})
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
-			ws := &RepoWorkspace{Runtime: &stubContainer{}}
+			ws := newTestRepoWorkspace("", "", &stubContainer{})
 			backend := &instantExitBackend{}
 			r := &Runner{
 				Workspace: ws,

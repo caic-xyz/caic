@@ -5,6 +5,7 @@ package tasks
 import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/harness"
+	"github.com/caic-xyz/caic/backend/internal/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
@@ -125,5 +126,5 @@ type SyncResult struct {
 	Status       string // "synced", "empty", "blocked"
 	Branch       string
 	DiffStat     agent.DiffStat
-	SafetyIssues []task.SafetyIssue
+	SafetyIssues []repowork.SafetyIssue
 }
