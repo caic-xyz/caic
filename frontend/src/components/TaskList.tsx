@@ -38,9 +38,9 @@ const naturalCompare = (a: string, b: string) =>
 
 /** Sort tasks according to sidebar grouping: active by ID desc, stopped/purged by last state change desc. */
 export function sortTasks(tasks: Task[]): Task[] {
-  const active = tasks.filter((t) => t.state !== "stopped" && t.state !== "crashed" && t.state !== "purged" && t.state !== "failed");
-  const stopped = tasks.filter((t) => t.state === "stopped" || t.state === "crashed");
-  const purged = tasks.filter((t) => t.state === "purged" || t.state === "failed");
+  const stopped = tasks.filter((t) => t.state === "stopped" || t.state === "crashed" || t.state === "stopping");
+  const purged = tasks.filter((t) => t.state === "purged" || t.state === "failed" || t.state === "purging");
+  const active = tasks.filter((t) => !stopped.includes(t) && !purged.includes(t));
 
   // Sort by length first (longer = larger numeric value), then lexicographically.
   // Plain lexicographic comparison fails across different lengths: "B" > "1A" in
@@ -110,9 +110,9 @@ export default function TaskList(props: TaskListProps) {
           groups[repoName] = { repo: repoName, active: [], stopped: [], purged: [] };
         }
         const g = groups[repoName];
-        if (t.state === "purged" || t.state === "failed") {
+        if (t.state === "purged" || t.state === "failed" || t.state === "purging") {
           g.purged.push(t);
-        } else if (t.state === "stopped" || t.state === "crashed") {
+        } else if (t.state === "stopped" || t.state === "crashed" || t.state === "stopping") {
           g.stopped.push(t);
         } else {
           g.active.push(t);
@@ -123,9 +123,9 @@ export default function TaskList(props: TaskListProps) {
     const other: RepoGroup = { repo: "", active: [], stopped: [], purged: [] };
     for (const t of all) {
       if (!t.repos?.[0]?.name) {
-        if (t.state === "purged" || t.state === "failed") {
+        if (t.state === "purged" || t.state === "failed" || t.state === "purging") {
           other.purged.push(t);
-        } else if (t.state === "stopped" || t.state === "crashed") {
+        } else if (t.state === "stopped" || t.state === "crashed" || t.state === "stopping") {
           other.stopped.push(t);
         } else {
           other.active.push(t);
