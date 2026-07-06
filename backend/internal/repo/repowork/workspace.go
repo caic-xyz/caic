@@ -280,6 +280,41 @@ func (w *Workspace) BranchDiffStat(ctx context.Context, t TaskView) agent.DiffSt
 	return ds
 }
 
+// DeleteUnmodifiedTaskBranches deletes generated task branches that never diverged from their base.
+func (w *Workspace) DeleteUnmodifiedTaskBranches(ctx context.Context, t TaskView) {
+	repos := t.RuntimeRepos()
+	if len(repos) == 0 || w.Dir == "" {
+		return
+	}
+	gitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
+	defer cancel()
+	w.branchMu.Lock()
+	defer w.branchMu.Unlock()
+	for i := range repos {
+		repo := &repos[i]
+		dir := repo.HostPath
+		if dir == "" && i == 0 {
+			dir = w.Dir
+		}
+		if dir == "" {
+			continue
+		}
+		baseBranch := w.BaseBranch
+		if repo.BaseBranch != "" {
+			baseBranch = repo.BaseBranch
+		}
+		checkout := &git.Checkout{Root: dir, Logger: w.Log}
+		deleted, err := deleteLocalBranchIfUnmodified(gitCtx, checkout, repo.Branch, baseBranch)
+		if err != nil {
+			w.Log.WarnContext(ctx, "delete empty task branch skipped", "br", repo.Branch, "err", err)
+			continue
+		}
+		if deleted {
+			w.Log.InfoContext(ctx, "deleted empty task branch", "br", repo.Branch)
+		}
+	}
+}
+
 // ReserveBranch instantly reserves the next branch name (under lock, ~µs). The
 // branch itself is created concurrently with runtime launch by
 // FetchAndCreateBranch.
@@ -501,6 +536,62 @@ func caicBranchNumber(name string) (int, bool) {
 		return 0, false
 	}
 	return n, true
+}
+
+func branchNameExists(branches [][2]string, name string) bool {
+	for _, branch := range branches {
+		if branch[0] == name {
+			return true
+		}
+	}
+	return false
+}
+
+func deleteLocalBranchIfUnmodified(ctx context.Context, checkout *git.Checkout, branch, baseBranch string) (bool, error) {
+	if branch == "" || baseBranch == "" {
+		return false, nil
+	}
+	localBranches, err := checkout.ListBranches(ctx, "")
+	if err != nil {
+		return false, err
+	}
+	if !branchNameExists(localBranches, branch) {
+		return false, nil
+	}
+	branchRef := "refs/heads/" + branch
+	current, err := checkout.RunGit(ctx, "branch", "--show-current")
+	if err != nil {
+		return false, err
+	}
+	if current == branch {
+		return false, fmt.Errorf("branch %q is currently checked out", branch)
+	}
+	baseRef := "refs/remotes/origin/" + baseBranch
+	remoteBranches, remoteErr := checkout.ListBranches(ctx, "origin")
+	if !branchNameExists(remoteBranches, baseBranch) {
+		baseRef = "refs/heads/" + baseBranch
+		if !branchNameExists(localBranches, baseBranch) {
+			if remoteErr != nil {
+				return false, fmt.Errorf("list origin branches: %w", remoteErr)
+			}
+			return false, fmt.Errorf("base branch %q not found", baseBranch)
+		}
+	}
+	out, err := checkout.RunGit(ctx, "rev-list", "--count", branchRef, "--not", baseRef)
+	if err != nil {
+		return false, err
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return false, fmt.Errorf("parse unique commit count: %w", err)
+	}
+	if count != 0 {
+		return false, nil
+	}
+	if _, err := checkout.RunGit(ctx, "branch", "-D", "--", branch); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // extractRepoDS filters the combined diff stat to entries belonging to repoName,

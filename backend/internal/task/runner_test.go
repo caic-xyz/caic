@@ -50,6 +50,31 @@ func (b *instantExitBackend) Start(ctx context.Context, opts *agent.Options) (*a
 	return agent.NewSession(cmd, agent.NewConn(stdin, opts.LogW, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, opts.MsgCh, nil), nil
 }
 
+type emptyDiffContainer struct {
+	stubContainer
+}
+
+func (s *emptyDiffContainer) Diff(_ context.Context, id runtime.InstanceID, repoIdx int, _ ...string) (string, error) {
+	s.diffIDs = append(s.diffIDs, id)
+	s.diffIdxs = append(s.diffIdxs, repoIdx)
+	return "", nil
+}
+
+func caic0BranchExists(t *testing.T, dir string) bool {
+	cmd := exec.CommandContext(t.Context(), "git", "rev-parse", "--verify", "--quiet", "refs/heads/caic-0")
+	cmd.Dir = dir
+	err := cmd.Run()
+	if err == nil {
+		return true
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false
+	}
+	t.Fatalf("git rev-parse caic-0: %v", err)
+	return false
+}
+
 func TestRunner(t *testing.T) {
 	t.Parallel()
 
@@ -444,6 +469,96 @@ func TestRunner(t *testing.T) {
 			}
 			if result.DiffStat[0].Path != "a.go" || result.DiffStat[0].Added != 10 {
 				t.Errorf("DiffStat[0] = %+v, want {a.go 10 3}", result.DiffStat[0])
+			}
+		})
+
+		t.Run("DeletesUnmodifiedEmptyBranch", func(t *testing.T) {
+			t.Parallel()
+			clone := initTestRepo(t, "main")
+			runGit(t, clone, "branch", "caic-0", "origin/main")
+			r := &Runner{Workspace: newTestRepoWorkspace("main", clone, &emptyDiffContainer{}), Sessions: &SessionRunner{}}
+			tk := &Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "test"},
+				Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0", GitRoot: clone}},
+			}
+			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetState(StateStopped)
+
+			r.Cleanup(t.Context(), tk, StatePurged)
+
+			if caic0BranchExists(t, clone) {
+				t.Fatal("caic-0 still exists, want deleted")
+			}
+		})
+
+		t.Run("KeepsBranchWhenRuntimeReportsDiffAtPurge", func(t *testing.T) {
+			t.Parallel()
+			clone := initTestRepo(t, "main")
+			runGit(t, clone, "branch", "caic-0", "origin/main")
+			r := &Runner{Workspace: newTestRepoWorkspace("main", clone, &stubContainer{}), Sessions: &SessionRunner{}}
+			tk := &Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "test"},
+				Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0", GitRoot: clone}},
+			}
+			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetState(StateStopped)
+
+			r.Cleanup(t.Context(), tk, StatePurged)
+
+			if !caic0BranchExists(t, clone) {
+				t.Fatal("caic-0 was deleted, want preserved")
+			}
+		})
+
+		t.Run("KeepsBranchWhenDiffWasEverCreated", func(t *testing.T) {
+			t.Parallel()
+			clone := initTestRepo(t, "main")
+			runGit(t, clone, "branch", "caic-0", "origin/main")
+			r := &Runner{Workspace: newTestRepoWorkspace("main", clone, &emptyDiffContainer{}), Sessions: &SessionRunner{}}
+			tk := &Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "test"},
+				Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0", GitRoot: clone}},
+			}
+			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetState(StateStopped)
+			tk.RestoreMessages([]agent.Message{
+				&agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: agent.DiffStat{{Path: "main.go", Added: 1}}},
+				&agent.DiffStatMessage{MessageType: "caic_diff_stat"},
+			})
+
+			r.Cleanup(t.Context(), tk, StatePurged)
+
+			if !caic0BranchExists(t, clone) {
+				t.Fatal("caic-0 was deleted, want preserved")
+			}
+		})
+
+		t.Run("KeepsBranchModifiedOnHost", func(t *testing.T) {
+			t.Parallel()
+			clone := initTestRepo(t, "main")
+			runGit(t, clone, "checkout", "-b", "caic-0", "origin/main")
+			if err := os.WriteFile(filepath.Join(clone, "host.txt"), []byte("host\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, clone, "add", ".")
+			runGit(t, clone, "commit", "-m", "host change")
+			runGit(t, clone, "checkout", "main")
+			r := &Runner{Workspace: newTestRepoWorkspace("main", clone, &emptyDiffContainer{}), Sessions: &SessionRunner{}}
+			tk := &Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "test"},
+				Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0", GitRoot: clone}},
+			}
+			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetState(StateStopped)
+
+			r.Cleanup(t.Context(), tk, StatePurged)
+
+			if !caic0BranchExists(t, clone) {
+				t.Fatal("caic-0 was deleted, want preserved")
 			}
 		})
 	})

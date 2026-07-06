@@ -273,6 +273,7 @@ type Task struct {
 	lastAPIUsage          agent.Usage    // Most recent per-API-call usage from AssistantMessage (context window fill).
 	cacheExpiresAt        time.Time      // When the prompt cache from the last API call expires.
 	liveDiffStat          agent.DiffStat // Updated by DiffStatMessage from relay.
+	diffCreated           bool           // True after any non-empty diff was reported for the task.
 	lastExitError         string         // Most recent non-zero relay exit diagnostic.
 	forgeOwner            string
 	forgeRepo             string
@@ -878,6 +879,13 @@ func (t *Task) LiveDiffStat() agent.DiffStat {
 	return t.liveDiffStat
 }
 
+// DiffCreated reports whether any non-empty diff was observed for the task.
+func (t *Task) DiffCreated() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.diffCreated
+}
+
 // SetLiveDiffStat overwrites the live diff stat. Used by adoptOne to set
 // the host-side branch diff after RestoreMessages, because the relay's
 // diff_watcher only tracks uncommitted changes (git diff HEAD) which
@@ -885,7 +893,7 @@ func (t *Task) LiveDiffStat() agent.DiffStat {
 func (t *Task) SetLiveDiffStat(ds agent.DiffStat) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.liveDiffStat = ds
+	t.setLiveDiffStatLocked(ds)
 }
 
 // SetPR stores the forge owner, repo, and PR/MR number. Does not change task state.
@@ -1170,6 +1178,19 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 	// Restore live diff stat from the last DiffStatMessage or ResultMessage,
 	// whichever appears later. ResultMessage carries the authoritative
 	// host-side diff stat but a DiffStatMessage from the relay may follow it.
+	t.diffCreated = false
+	for _, msg := range msgs {
+		switch m := msg.(type) {
+		case *agent.DiffStatMessage:
+			if len(m.DiffStat) > 0 {
+				t.diffCreated = true
+			}
+		case *agent.ResultMessage:
+			if len(m.DiffStat) > 0 {
+				t.diffCreated = true
+			}
+		}
+	}
 	for _, msg := range slices.Backward(msgs) {
 		if ds, ok := msg.(*agent.DiffStatMessage); ok {
 			t.liveDiffStat = ds.DiffStat
@@ -1593,6 +1614,13 @@ func (t *Task) RecordSessionFailure(ctx context.Context, err error) bool {
 	return true
 }
 
+func (t *Task) setLiveDiffStatLocked(ds agent.DiffStat) {
+	t.liveDiffStat = ds
+	if len(ds) > 0 {
+		t.diffCreated = true
+	}
+}
+
 // setState updates the state and records the transition time. The caller must
 // hold t.mu when called from a locked context, or ensure exclusive access.
 func (t *Task) setState(s State) {
@@ -1702,7 +1730,7 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 	}
 	// Update live diff stat from relay polling.
 	if ds, ok := m.(*agent.DiffStatMessage); ok {
-		t.liveDiffStat = ds.DiffStat
+		t.setLiveDiffStatLocked(ds.DiffStat)
 	}
 	if exit, ok := m.(*agent.ExitMessage); ok {
 		if rm := lastAgentMessage(t.msgs); exit.ExitCode != 0 && (rm == nil || rm.IsError) {
@@ -1726,7 +1754,7 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 	// Transition to waiting/asking when a result arrives.
 	if rm, ok := m.(*agent.ResultMessage); ok {
 		if len(rm.DiffStat) > 0 {
-			t.liveDiffStat = rm.DiffStat
+			t.setLiveDiffStatLocked(rm.DiffStat)
 		}
 		t.liveUsage.InputTokens += rm.Usage.InputTokens
 		t.liveUsage.OutputTokens += rm.Usage.OutputTokens

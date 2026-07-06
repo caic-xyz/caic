@@ -209,8 +209,23 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 		}
 	}
 
+	emptyBranchVerified := true
+	if reason == StatePurged && !t.DiffCreated() && name != "" && r.runtime() != nil && r.Workspace.Dir != "" {
+		emptyBranchVerified = false
+		ds, err := r.branchDiffStat(ctx, t)
+		if err != nil {
+			tlog.WarnContext(ctx, "verify empty task branch failed", "err", err)
+		} else {
+			emptyBranchVerified = true
+			if len(ds) > 0 {
+				t.SetLiveDiffStat(ds)
+			}
+		}
+	}
+
 	t.SetState(reason)
 
+	runtimeRemovedOrAbsent := name == ""
 	if name != "" && r.runtime() != nil {
 		tlog.InfoContext(ctx, "cleanup: purging instance")
 		pStart := time.Now()
@@ -220,6 +235,7 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 		if err != nil {
 			tlog.WarnContext(ctx, "purge instance failed", "err", err, "dur", time.Since(pStart).Round(time.Millisecond))
 		} else {
+			runtimeRemovedOrAbsent = true
 			tlog.DebugContext(ctx, "cleanup: instance purged", "dur", time.Since(pStart).Round(time.Millisecond))
 		}
 	} else {
@@ -248,6 +264,9 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 	}
 	if ds := t.LiveDiffStat(); len(ds) > 0 {
 		res.DiffStat = ds
+	}
+	if reason == StatePurged && runtimeRemovedOrAbsent && emptyBranchVerified && !t.DiffCreated() {
+		r.Workspace.DeleteUnmodifiedTaskBranches(ctx, t)
 	}
 	var logW io.WriteCloser
 	if h != nil {
@@ -526,6 +545,21 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *run
 	}
 	tlog.Info("fork session running", "instance", forkName)
 	return h, nil
+}
+
+func (r *Runner) branchDiffStat(ctx context.Context, t *Task) (agent.DiffStat, error) {
+	if r.runtime() == nil || r.Workspace.Dir == "" {
+		return nil, nil
+	}
+	id := t.RuntimeInstanceID()
+	if id == "" {
+		return nil, errors.New("task has no runtime instance")
+	}
+	repos := t.RuntimeRepos()
+	if len(repos) > 0 && repos[0].HostPath == "" {
+		repos[0].HostPath = r.Workspace.Dir
+	}
+	return r.Workspace.DiffStat(ctx, id, repos, repowork.DiffFetchRequired, "fetch for branch diff stat")
 }
 
 // setup reserves a branch name, starts the instance (Phase A) and creates the
