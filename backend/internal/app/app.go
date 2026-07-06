@@ -29,7 +29,9 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
+	"github.com/caic-xyz/caic/backend/internal/reporeg"
 	"github.com/caic-xyz/caic/backend/internal/repos"
+	"github.com/caic-xyz/caic/backend/internal/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/server"
@@ -251,7 +253,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 
 	provider := initProvider(ctx, cfg, backend)
 
-	workspaceRegistry := repos.NewWorkspaceRegistry(ctx, runtimeBackend)
+	workspaceRegistry := repowork.NewWorkspaceRegistry(ctx, runtimeBackend)
 	taskMgr := tasks.New(tasks.Config{
 		ServerCtx:         ctx,
 		LogDir:            logDir,
@@ -269,7 +271,8 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		Prefs:      prefsStore,
 		Provider:   provider,
 	})
-	repoService := repos.NewService(ctx, absRoot, repos.NewRegistry(nil), workspaceRegistry)
+	repoService := repos.NewService(ctx, absRoot, reporeg.New(nil), workspaceRegistry)
+	repoStatus := ci.NewRepoStatusStore()
 
 	// Long-lived forge automation, owned by app and routed to by the HTTP layer.
 	warnings := server.NewWarningStore(taskMgr)
@@ -277,6 +280,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	botClient := &botClient{repos: repoService, taskMgr: taskMgr, forge: forgeManager}
 	ciAdapter := &ciAdapter{
 		repos:       repoService,
+		repoStatus:  repoStatus,
 		taskMgr:     taskMgr,
 		forge:       forgeManager,
 		prefs:       prefsStore,
@@ -296,6 +300,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 
 	s, err := server.New(ctx, server.Dependencies{
 		Repos:                      repoService,
+		RepoStatus:                 repoStatus,
 		Tailscale:                  cfg.Runtime.TailscaleAPIKey != "",
 		Preferences:                prefsStore,
 		AuthStore:                  authStore,
@@ -351,7 +356,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	}
 	wg.Wait()
 	for i := range results {
-		repoService.RegisterWorkspace(&results[i])
+		repoService.RegisterWorkspace(&results[i], moveRepoStatus(repoStatus))
 	}
 
 	taskMgr.Start()
@@ -412,7 +417,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		trace.Log(ctx, "startup", "refresh-cache-sizes: begin")
 		cacheSizes.RefreshLoop(ctx)
 	}()
-	go newRepoWatcher(ctx, absRoot, repoService).Watch()
+	go newRepoWatcher(ctx, absRoot, repoService, repoStatus).Watch()
 
 	backgroundStarters := []func(){
 		func() {
@@ -449,7 +454,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	return &App{Server: s, voiceBridge: voiceBridge, backgroundStarters: backgroundStarters}, nil
 }
 
-func adoptionRepos(in []repos.Info) []tasks.AdoptRepo {
+func adoptionRepos(in []reporeg.Info) []tasks.AdoptRepo {
 	out := make([]tasks.AdoptRepo, len(in))
 	for i := range in {
 		r := &in[i]

@@ -22,7 +22,9 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
+	"github.com/caic-xyz/caic/backend/internal/reporeg"
 	"github.com/caic-xyz/caic/backend/internal/repos"
+	"github.com/caic-xyz/caic/backend/internal/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
@@ -167,9 +169,9 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 		return "", "", nil, err
 	}
 	backend := &mdruntime.Backend{}
-	workspaceRegistry := repos.NewWorkspaceRegistry(ctx, nil)
+	workspaceRegistry := repowork.NewWorkspaceRegistry(ctx, nil)
 	taskMgr := tasks.New(tasks.Config{ServerCtx: ctx, WorkspaceRegistry: workspaceRegistry})
-	repoSvc := repos.NewService(ctx, "", repos.NewRegistry(nil), workspaceRegistry)
+	repoSvc := repos.NewService(ctx, "", reporeg.New(nil), workspaceRegistry)
 	prefs, err := preferences.Open(filepath.Join(stateDir, "preferences.json"))
 	if err != nil {
 		return "", "", nil, err

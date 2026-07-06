@@ -66,7 +66,7 @@ At session start this prompt includes a snapshot of all current tasks. Use it to
 - For safety issues during sync, describe each issue and ask whether to force.`
 
 type mcpRegistry struct {
-	serverConfig *serverHandlers
+	serverConfig *serverHandlers // required
 	tasks        *taskService
 	ci           *ciHandlers
 	usage        *usageHandlers
@@ -112,15 +112,15 @@ func (m *mcpRegistry) CallTool(ctx context.Context, name string, argsJSON json.R
 }
 
 func (m *mcpRegistry) ListResources(ctx context.Context) mcp.ResourcesListResult {
-	taskList, repos := m.currentTasksAndRepos(ctx)
-	resources := make([]mcp.ResourceDescriptor, 0, 3+len(repos)+len(taskList))
+	taskList, repoList := m.currentTasksAndRepos(ctx)
+	resources := make([]mcp.ResourceDescriptor, 0, 3+len(repoList)+len(taskList))
 	resources = append(resources,
 		mcp.ResourceDescriptor{URI: "caic://repos", Name: "repos", Title: "Repositories", Description: "Managed repository summary", MimeType: "application/json"},
 		mcp.ResourceDescriptor{URI: "caic://tasks", Name: "tasks", Title: "Tasks", Description: "Coding task summary", MimeType: "application/json"},
 		mcp.ResourceDescriptor{URI: "caic://usage", Name: "usage", Title: "Usage", Description: "Local and provider usage", MimeType: "application/json"},
 	)
-	for i := range repos {
-		repo := &repos[i]
+	for i := range repoList {
+		repo := &repoList[i]
 		resources = append(resources, mcp.ResourceDescriptor{URI: "caic://repos/" + url.PathEscape(repo.Path), Name: "repo " + repo.Path, Title: repo.Path, MimeType: "application/json"})
 	}
 	for i := range taskList {
@@ -136,11 +136,11 @@ func (m *mcpRegistry) ReadResource(ctx context.Context, uri string) (mcp.Resourc
 		m.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: authResult})
 		return mcp.ResourcesReadResult{}, mcp.ErrInvalidParams("%s", authResult)
 	}
-	taskList, repos := m.currentTasksAndRepos(ctx)
+	taskList, repoList := m.currentTasksAndRepos(ctx)
 	switch {
 	case uri == "caic://repos":
 		m.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
-		return redactedResourceJSON(uri, repos)
+		return redactedResourceJSON(uri, repoList)
 	case uri == "caic://tasks":
 		m.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
 		return redactedResourceJSON(uri, taskList)
@@ -153,10 +153,10 @@ func (m *mcpRegistry) ReadResource(ctx context.Context, uri string) (mcp.Resourc
 		if err != nil {
 			return mcp.ResourcesReadResult{}, mcp.ErrInvalidParams("invalid repo uri: %w", err)
 		}
-		for i := range repos {
-			if repos[i].Path == name {
+		for i := range repoList {
+			if repoList[i].Path == name {
 				m.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
-				return redactedResourceJSON(uri, repos[i])
+				return redactedResourceJSON(uri, repoList[i])
 			}
 		}
 		return mcp.ResourcesReadResult{}, mcp.ErrInvalidParams("repo not found: %s", name)
@@ -181,6 +181,7 @@ func (m *mcpRegistry) SubscribeResourceUpdates(ctx context.Context, filter mcp.S
 	}
 	taskC := sources.taskC
 	repoC := sources.repoC
+	repoStatusC := sources.repoStatusC
 	return func(yield func(mcp.ResourceUpdate, error) bool) {
 		for {
 			select {
@@ -199,13 +200,14 @@ func (m *mcpRegistry) SubscribeResourceUpdates(ctx context.Context, filter mcp.S
 				if !yield(sources.repoUpdate(), nil) {
 					return
 				}
-				if m.serverConfig != nil && m.serverConfig.repos != nil {
-					repoC = m.serverConfig.repos.Changed()
-				} else {
-					repoC = nil
+				repoC = m.serverConfig.repos.Changed()
+			case <-repoStatusC:
+				if !yield(sources.repoUpdate(), nil) {
+					return
 				}
+				repoStatusC = m.serverConfig.repoStatus.Changed()
 			}
-			if taskC == nil && repoC == nil {
+			if taskC == nil && repoC == nil && repoStatusC == nil {
 				return
 			}
 		}
@@ -213,19 +215,20 @@ func (m *mcpRegistry) SubscribeResourceUpdates(ctx context.Context, filter mcp.S
 }
 
 type subscriptionSources struct {
-	taskC <-chan struct{}
-	repoC <-chan struct{}
+	taskC       <-chan struct{}
+	repoC       <-chan struct{}
+	repoStatusC <-chan struct{}
 
 	resourcesListChanged bool
 	taskResourceURIs     []string
 	repoResourceURIs     []string
 }
 
-func (s subscriptionSources) taskUpdate() mcp.ResourceUpdate {
+func (s *subscriptionSources) taskUpdate() mcp.ResourceUpdate {
 	return mcp.ResourceUpdate{ResourcesListChanged: s.resourcesListChanged, ResourceURIs: s.taskResourceURIs}
 }
 
-func (s subscriptionSources) repoUpdate() mcp.ResourceUpdate {
+func (s *subscriptionSources) repoUpdate() mcp.ResourceUpdate {
 	return mcp.ResourceUpdate{ResourcesListChanged: s.resourcesListChanged, ResourceURIs: s.repoResourceURIs}
 }
 
@@ -301,8 +304,8 @@ func annotateTool(spec mcp.ToolSpec, annotations mcp.ToolAnnotations) mcp.ToolSp
 
 func (m *mcpRegistry) currentTasksAndRepos(ctx context.Context) ([]v1.Task, []v1.Repo) {
 	taskList := m.tasks.taskListSnapshot(ctx)
-	repos := repoListFromSnapshot(m.serverConfig.repos.SnapshotWithCI())
-	return taskList, *repos
+	repoList := repoListFromSnapshot(m.serverConfig.repos.Snapshot(), m.serverConfig.repoStatus)
+	return taskList, *repoList
 }
 
 func (m *mcpRegistry) subscriptionSources(filter mcp.SubscriptionFilter) (subscriptionSources, error) {
@@ -319,12 +322,9 @@ func (m *mcpRegistry) subscriptionSources(filter mcp.SubscriptionFilter) (subscr
 				return subscriptionSources{}, errors.New("task subscription notifier unavailable")
 			}
 		case uri == "caic://repos" || strings.HasPrefix(uri, "caic://repos/"):
-			if m.serverConfig != nil && m.serverConfig.repos != nil {
-				sources.repoC = m.serverConfig.repos.Changed()
-				sources.repoResourceURIs = append(sources.repoResourceURIs, uri)
-			} else {
-				return subscriptionSources{}, errors.New("repo subscription notifier unavailable")
-			}
+			sources.repoC = m.serverConfig.repos.Changed()
+			sources.repoStatusC = m.serverConfig.repoStatus.Changed()
+			sources.repoResourceURIs = append(sources.repoResourceURIs, uri)
 		default:
 			return subscriptionSources{}, mcp.ErrInvalidParams("unsupported resource subscription: %s", uri)
 		}
@@ -336,11 +336,8 @@ func (m *mcpRegistry) subscriptionSources(filter mcp.SubscriptionFilter) (subscr
 		} else {
 			return subscriptionSources{}, errors.New("task subscription notifier unavailable")
 		}
-		if m.serverConfig != nil && m.serverConfig.repos != nil {
-			sources.repoC = m.serverConfig.repos.Changed()
-		} else {
-			return subscriptionSources{}, errors.New("repo subscription notifier unavailable")
-		}
+		sources.repoC = m.serverConfig.repos.Changed()
+		sources.repoStatusC = m.serverConfig.repoStatus.Changed()
 		sources.resourcesListChanged = true
 	}
 	if !hasFilter {

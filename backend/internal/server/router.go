@@ -350,6 +350,7 @@ func hostIsLoopback(host string) bool {
 // (Bot, CIService, and their adapters); the router only routes requests to them.
 type Dependencies struct {
 	Repos                      *repos.Service
+	RepoStatus                 *ci.RepoStatusStore
 	Tailscale                  bool
 	Preferences                *preferences.Store
 	AuthStore                  *auth.Store
@@ -399,8 +400,14 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 	if d.TaskManager == nil {
 		return nil, errors.New("task manager is required")
 	}
+	if d.Repos == nil {
+		return nil, errors.New("repos service is required")
+	}
 	if d.Preferences == nil {
 		return nil, errors.New("preferences store is required")
+	}
+	if d.RepoStatus == nil {
+		return nil, errors.New("repo status store is required")
 	}
 	voice := &voiceHandlers{bridge: d.VoiceBridge, gateway: d.VoiceGateway}
 	voiceMetadata := voice.metadata()
@@ -439,6 +446,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		ciHandlers: &ciHandlers{
 			taskMgr:    d.TaskManager,
 			repos:      d.Repos,
+			repoStatus: d.RepoStatus,
 			forge:      d.Forge,
 			provider:   d.Provider,
 			taskClient: d.TaskClient,
@@ -456,6 +464,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 			forge:              d.Forge,
 			prefs:              d.Preferences,
 			repos:              d.Repos,
+			repoStatus:         d.RepoStatus,
 			taskMgr:            d.TaskManager,
 			cacheSizes:         d.CacheSizes,
 			authStore:          d.AuthStore,
@@ -465,13 +474,14 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 			voiceGateway:       voiceMetadata,
 		},
 		taskHandlers: &taskHandlers{
-			taskMgr:   d.TaskManager,
-			repos:     d.Repos,
-			forge:     d.Forge,
-			ciService: d.CIService,
-			authStore: d.AuthStore,
-			warnings:  d.Warnings,
-			service:   svc,
+			taskMgr:    d.TaskManager,
+			repos:      d.Repos,
+			repoStatus: d.RepoStatus,
+			forge:      d.Forge,
+			ciService:  d.CIService,
+			authStore:  d.AuthStore,
+			warnings:   d.Warnings,
+			service:    svc,
 		},
 		usageHandlers:    &usageHandlers{taskMgr: d.TaskManager, fetchers: d.UsageFetchers},
 		voiceHandlers:    voice,
@@ -532,6 +542,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		forge:            d.Forge,
 		taskMgr:          d.TaskManager,
 		repos:            d.Repos,
+		repoStatus:       d.RepoStatus,
 		prefs:            d.Preferences,
 	}
 	return s, nil

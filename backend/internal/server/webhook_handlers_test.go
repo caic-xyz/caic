@@ -24,6 +24,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/forge/gitlab"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
+	"github.com/caic-xyz/caic/backend/internal/reporeg"
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
@@ -33,16 +34,17 @@ import (
 // testCIBackend is a minimal ci.Backend wired to a repo/task store, sufficient
 // for webhook handler tests that drive CI status updates through ci.Service.
 type testCIBackend struct {
-	repos   *repos.Service
-	taskMgr *tasks.Manager
-	forge   *forgemanager.Manager
-	prefs   *preferences.Store
+	repos      *repos.Service
+	repoStatus *ci.RepoStatusStore
+	taskMgr    *tasks.Manager
+	forge      *forgemanager.Manager
+	prefs      *preferences.Store
 }
 
 func (b *testCIBackend) GitHubApp() ci.GitHubAppClient { return b.forge.GitHubApp() }
 
 func (b *testCIBackend) ForgeForInfo(ctx context.Context, info *ci.RepoInfo) forge.Forge {
-	return b.forge.ForgeForInfo(ctx, &repos.Info{ForgeKind: info.ForgeKind, ForgeOwner: info.ForgeOwner, ForgeRepo: info.ForgeRepo})
+	return b.forge.ForgeForInfo(ctx, &reporeg.Info{ForgeKind: info.ForgeKind, ForgeOwner: info.ForgeOwner, ForgeRepo: info.ForgeRepo})
 }
 
 func (b *testCIBackend) CreateTask(context.Context, bot.TaskRequest) (string, error) { return "", nil }
@@ -66,7 +68,7 @@ func (b *testCIBackend) RepoInfoFor(relPath string) ci.RepoInfo {
 func (b *testCIBackend) ListActiveRepos() []ci.RepoInfo { return nil }
 
 func (b *testCIBackend) SetRepoCIStatusIfChanged(relPath, sha string, result forgecache.Result) bool {
-	return b.repos.SetCIStatusIfChanged(relPath, sha, result)
+	return b.repoStatus.SetResultIfChanged(relPath, sha, result)
 }
 
 func (b *testCIBackend) NotifyTaskChange()         { b.taskMgr.NotifyTaskChange() }
@@ -86,6 +88,7 @@ func (s *stubAppClient) DeleteInstallation(_ context.Context, _ int64) error { r
 func (s *stubAppClient) RepoInstallation(_ context.Context, _, _ string) (int64, error) {
 	return 0, nil
 }
+
 func (s *stubAppClient) PostComment(_ context.Context, _ int64, _, _ string, _ int, _ string) error {
 	return nil
 }
@@ -108,12 +111,15 @@ func (f *stubForge) GetDefaultBranchSHA(_ context.Context, _, _, _ string) (stri
 	}
 	return f.headSHA, nil
 }
+
 func (f *stubForge) GetCheckRuns(_ context.Context, _, _, _ string) ([]forge.CheckRun, error) {
 	return f.checkRuns, nil
 }
+
 func (f *stubForge) CreatePR(_ context.Context, _, _, _, _, _, _ string) (forge.PR, error) {
 	return forge.PR{}, nil
 }
+
 func (f *stubForge) FindPRByBranch(_ context.Context, _, _, _ string) (forge.PR, error) {
 	f.findPRCalls++
 	if f.findErr != nil {
@@ -133,9 +139,11 @@ func (f *stubForge) Name() string                            { return "stub" }
 func (f *stubForge) GetJobLog(_ context.Context, _, _ string, _ int64, _ bool) (string, error) {
 	return "", nil
 }
+
 func (f *stubForge) GetJobLabels(_ context.Context, _, _ string, _ int64) ([]string, error) {
 	return nil, nil
 }
+
 func (f *stubForge) MergePR(_ context.Context, _, _ string, _ int, _, _ string) error {
 	return nil
 }
@@ -159,7 +167,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 	t.Run("updates CI status when SHA matches HEAD", func(t *testing.T) {
 		t.Parallel()
 		s := minimalRouter(t)
-		s.repos.Registry().Add(&repos.Info{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"})
+		s.repos.Registry().Add(&reporeg.Info{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"})
 		s.forge.SetGitHubApp(&stubAppClient{forgeClient: &stubForge{headSHA: "abc123", checkRuns: successRuns}})
 
 		s.webhooks.handleCheckSuiteEvent(t.Context(), &github.CheckSuiteEvent{
@@ -173,16 +181,16 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 			Installation: github.WebhookInstallation{ID: 1},
 		})
 
-		got := s.repos.CIStatusFor("org/repo").Status
-		if got != forge.CIStatusSuccess {
-			t.Errorf("repoCIStatus = %q, want %q", got, forge.CIStatusSuccess)
+		got, _ := s.repoStatus.StatusFor("org/repo")
+		if got.Status != forge.CIStatusSuccess {
+			t.Errorf("repoCIStatus = %q, want %q", got.Status, forge.CIStatusSuccess)
 		}
 	})
 
 	t.Run("ignores out-of-order delivery when SHA is not HEAD", func(t *testing.T) {
 		t.Parallel()
 		s := minimalRouter(t)
-		s.repos.Registry().Add(&repos.Info{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"})
+		s.repos.Registry().Add(&reporeg.Info{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"})
 		// HEAD is now "newsha"; the webhook carries "oldsha".
 		s.forge.SetGitHubApp(&stubAppClient{forgeClient: &stubForge{headSHA: "newsha", checkRuns: failureRuns}})
 
@@ -197,9 +205,9 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 			Installation: github.WebhookInstallation{ID: 1},
 		})
 
-		got := s.repos.CIStatusFor("org/repo").Status
-		if got != "" {
-			t.Errorf("repoCIStatus = %q, want empty (stale event should be ignored)", got)
+		got, ok := s.repoStatus.StatusFor("org/repo")
+		if ok || got.Status != "" {
+			t.Errorf("repoCIStatus = %q, ok=%v, want empty (stale event should be ignored)", got.Status, ok)
 		}
 	})
 }
@@ -479,14 +487,16 @@ func minimalRouter(t *testing.T) *testRouter {
 	}
 	ctx := t.Context()
 	backend := &mdruntime.Backend{}
-	workspaceRegistry := repos.NewWorkspaceRegistry(ctx, nil)
+	workspaceRegistry := repowork.NewWorkspaceRegistry(ctx, nil)
 	taskMgr := tasks.New(tasks.Config{ServerCtx: ctx, WorkspaceRegistry: workspaceRegistry})
-	repoSvc := repos.NewService(t.Context(), "", repos.NewRegistry(nil), workspaceRegistry)
+	repoSvc := repos.NewService(t.Context(), "", reporeg.New(nil), workspaceRegistry)
+	repoStatus := ci.NewRepoStatusStore()
 	fm := forgemanager.New("", "", nil)
 	prefs := newTestPrefs(t)
-	ciService := ci.NewService(cache, nil, &testCIBackend{repos: repoSvc, taskMgr: taskMgr, forge: fm, prefs: prefs})
+	ciService := ci.NewService(cache, nil, &testCIBackend{repos: repoSvc, repoStatus: repoStatus, taskMgr: taskMgr, forge: fm, prefs: prefs})
 	s, err := New(ctx, Dependencies{
 		Repos:          repoSvc,
+		RepoStatus:     repoStatus,
 		ProcessBackend: backend,
 		TaskManager:    taskMgr,
 		Preferences:    prefs,
@@ -497,5 +507,5 @@ func minimalRouter(t *testing.T) *testRouter {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, prefs: prefs, forge: fm}
+	return &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, repoStatus: repoStatus, prefs: prefs, forge: fm}
 }

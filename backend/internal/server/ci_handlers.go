@@ -13,6 +13,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/bot"
+	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
@@ -31,6 +32,7 @@ import (
 type ciHandlers struct {
 	taskMgr    *tasks.Manager
 	repos      *repos.Service
+	repoStatus *ci.RepoStatusStore
 	forge      *forgemanager.Manager
 	provider   genai.Provider
 	taskClient bot.Client
@@ -114,9 +116,8 @@ func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Task, 
 		return nil, api.BadRequest("no forge token configured for this repo")
 	}
 
-	state := h.repos.CIStatusFor(req.Repo)
-
-	if state.Status != forge.CIStatusFailure {
+	state, ok := h.repoStatus.StatusFor(req.Repo)
+	if !ok || state.Status != forge.CIStatusFailure {
 		return nil, api.BadRequest("no CI failure on default branch")
 	}
 

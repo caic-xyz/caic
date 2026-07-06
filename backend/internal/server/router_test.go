@@ -25,10 +25,12 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/auth"
+	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
 	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
+	"github.com/caic-xyz/caic/backend/internal/reporeg"
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -108,6 +110,7 @@ type testRouter struct {
 
 	taskMgr               *tasks.Manager
 	repos                 *repos.Service
+	repoStatus            *ci.RepoStatusStore
 	prefs                 *preferences.Store
 	forge                 *forgemanager.Manager
 	oauthRefreshTokenPath string
@@ -123,13 +126,15 @@ func newTestRouter(t testing.TB) *testRouter {
 		t.Fatalf("ipgeo.NewChecker: %v", err)
 	}
 	backend := &mdruntime.Backend{}
-	workspaceRegistry := repos.NewWorkspaceRegistry(t.Context(), nil)
+	workspaceRegistry := repowork.NewWorkspaceRegistry(t.Context(), nil)
 	taskMgr := tasks.New(tasks.Config{ServerCtx: t.Context(), WorkspaceRegistry: workspaceRegistry})
-	repoSvc := repos.NewService(t.Context(), "", repos.NewRegistry(nil), workspaceRegistry)
+	repoSvc := repos.NewService(t.Context(), "", reporeg.New(nil), workspaceRegistry)
+	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
 	forgeManager := forgemanager.New("", "", nil)
 	s, err := New(t.Context(), Dependencies{
 		Repos:          repoSvc,
+		RepoStatus:     repoStatus,
 		ProcessBackend: backend,
 		TaskManager:    taskMgr,
 		Preferences:    prefs,
@@ -139,7 +144,7 @@ func newTestRouter(t testing.TB) *testRouter {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, prefs: prefs, forge: forgeManager}
+	return &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, repoStatus: repoStatus, prefs: prefs, forge: forgeManager}
 }
 
 // newTestRouterWithAuthHost creates a Router with an auth store, suitable for
@@ -151,13 +156,15 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 		t.Fatalf("ipgeo.NewChecker: %v", err)
 	}
 	backend := &mdruntime.Backend{}
-	workspaceRegistry := repos.NewWorkspaceRegistry(t.Context(), nil)
+	workspaceRegistry := repowork.NewWorkspaceRegistry(t.Context(), nil)
 	taskMgr := tasks.New(tasks.Config{ServerCtx: t.Context(), WorkspaceRegistry: workspaceRegistry})
-	repoSvc := repos.NewService(t.Context(), "", repos.NewRegistry(nil), workspaceRegistry)
+	repoSvc := repos.NewService(t.Context(), "", reporeg.New(nil), workspaceRegistry)
+	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
 	forgeManager := forgemanager.New("", "", nil)
 	s, err := New(t.Context(), Dependencies{
 		Repos:                      repoSvc,
+		RepoStatus:                 repoStatus,
 		ProcessBackend:             backend,
 		TaskManager:                taskMgr,
 		Preferences:                prefs,
@@ -171,7 +178,7 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, prefs: prefs, forge: forgeManager, oauthRefreshTokenPath: refreshTokenPath}
+	return &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, repoStatus: repoStatus, prefs: prefs, forge: forgeManager, oauthRefreshTokenPath: refreshTokenPath}
 }
 
 // newTestOAuthRouter creates a Router configured with OAuth host state and a
@@ -188,10 +195,39 @@ func testTaskHandlers(s *testRouter) *taskHandlers {
 
 func TestNew(t *testing.T) {
 	t.Parallel()
-	t.Run("error", func(t *testing.T) {
+
+	t.Run("missing process backend", func(t *testing.T) {
 		t.Parallel()
 		if _, err := New(t.Context(), Dependencies{}); err == nil {
 			t.Fatal("New() error = nil, want process backend required")
+		}
+	})
+
+	t.Run("missing repos", func(t *testing.T) {
+		t.Parallel()
+		workspaceRegistry := repowork.NewWorkspaceRegistry(t.Context(), nil)
+		_, err := New(t.Context(), Dependencies{
+			ProcessBackend: &mdruntime.Backend{},
+			TaskManager:    tasks.New(tasks.Config{ServerCtx: t.Context(), WorkspaceRegistry: workspaceRegistry}),
+			Preferences:    newTestPrefs(t),
+			RepoStatus:     ci.NewRepoStatusStore(),
+		})
+		if err == nil || err.Error() != "repos service is required" {
+			t.Fatalf("New() error = %v, want repos service required", err)
+		}
+	})
+
+	t.Run("missing repo status", func(t *testing.T) {
+		t.Parallel()
+		workspaceRegistry := repowork.NewWorkspaceRegistry(t.Context(), nil)
+		_, err := New(t.Context(), Dependencies{
+			Repos:          repos.NewService(t.Context(), "", reporeg.New(nil), workspaceRegistry),
+			ProcessBackend: &mdruntime.Backend{},
+			TaskManager:    tasks.New(tasks.Config{ServerCtx: t.Context(), WorkspaceRegistry: workspaceRegistry}),
+			Preferences:    newTestPrefs(t),
+		})
+		if err == nil || err.Error() != "repo status store is required" {
+			t.Fatalf("New() error = %v, want repo status store required", err)
 		}
 	})
 }
@@ -320,7 +356,7 @@ func newWorkspaceConstructionTestServer(t *testing.T, root string) workspaceCons
 	backends := map[harness.Name]agent.Backend{harness.Codex: stubBackend{}}
 	logDir := filepath.Join(t.TempDir(), "logs")
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	workspaceRegistry := repos.NewWorkspaceRegistry(t.Context(), backend)
+	workspaceRegistry := repowork.NewWorkspaceRegistry(t.Context(), backend)
 	taskMgr := tasks.New(tasks.Config{
 		ServerCtx:         t.Context(),
 		LogDir:            logDir,
@@ -330,10 +366,12 @@ func newWorkspaceConstructionTestServer(t *testing.T, root string) workspaceCons
 		HarnessEnv:        harnessEnv,
 		WorkspaceRegistry: workspaceRegistry,
 	})
-	repoSvc := repos.NewService(t.Context(), root, repos.NewRegistry(nil), workspaceRegistry)
+	repoSvc := repos.NewService(t.Context(), root, reporeg.New(nil), workspaceRegistry)
+	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
 	s, err := New(t.Context(), Dependencies{
 		Repos:          repoSvc,
+		RepoStatus:     repoStatus,
 		ProcessBackend: backend,
 		TaskManager:    taskMgr,
 		Preferences:    prefs,
@@ -343,7 +381,7 @@ func newWorkspaceConstructionTestServer(t *testing.T, root string) workspaceCons
 		t.Fatalf("New: %v", err)
 	}
 	return workspaceConstructionTestFixture{
-		server:   &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, prefs: prefs},
+		server:   &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, repoStatus: repoStatus, prefs: prefs},
 		logDir:   logDir,
 		cacheDir: cacheDir,
 		backend:  backend,
@@ -354,7 +392,7 @@ func newTestRepoWatcher(t *testing.T, root string, s *testRouter) *repos.Watcher
 	return repos.NewWatcher(&repos.WatcherConfig{
 		Ctx:             t.Context(),
 		AbsRoot:         root,
-		Repos:           func() []repos.Info { return testWatchedRepos(s.repos) },
+		Repos:           func() []reporeg.Info { return testWatchedRepos(s.repos) },
 		RelPath:         s.repos.RelPath,
 		WorkspaceExists: s.repos.WorkspaceRegistered,
 		OnDiscovered: func(ctx context.Context, abs string) {
@@ -366,17 +404,17 @@ func newTestRepoWatcher(t *testing.T, root string, s *testRouter) *repos.Watcher
 			if s.repos.WorkspaceRegistered(result.Info.RelPath) {
 				return
 			}
-			s.repos.RegisterWorkspace(&result)
+			s.repos.RegisterWorkspace(&result, nil)
 		},
 		OnRemoved: s.repos.DeregisterWorkspace,
 	})
 }
 
-func testWatchedRepos(repoService *repos.Service) []repos.Info {
+func testWatchedRepos(repoService *repos.Service) []reporeg.Info {
 	snap := repoService.Snapshot()
-	out := make([]repos.Info, len(snap))
+	out := make([]reporeg.Info, len(snap))
 	for i := range snap {
-		out[i] = repos.Info{
+		out[i] = reporeg.Info{
 			RelPath:    snap[i].RelPath,
 			AbsPath:    snap[i].AbsPath,
 			BaseBranch: snap[i].BaseBranch,
@@ -386,17 +424,17 @@ func testWatchedRepos(repoService *repos.Service) []repos.Info {
 }
 
 func initCloneSourceRepo(t *testing.T) string {
-	repo := filepath.Join(t.TempDir(), "source")
-	runServerGit(t, "", "init", repo)
-	runServerGit(t, repo, "config", "user.email", "test@example.com")
-	runServerGit(t, repo, "config", "user.name", "Test User")
-	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("hello\n"), 0o600); err != nil {
+	repoPath := filepath.Join(t.TempDir(), "source")
+	runServerGit(t, "", "init", repoPath)
+	runServerGit(t, repoPath, "config", "user.email", "test@example.com")
+	runServerGit(t, repoPath, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repoPath, "README.md"), []byte("hello\n"), 0o600); err != nil {
 		t.Fatalf("write README: %v", err)
 	}
-	runServerGit(t, repo, "add", "README.md")
-	runServerGit(t, repo, "commit", "-m", "init")
-	runServerGit(t, repo, "branch", "-M", "main")
-	return repo
+	runServerGit(t, repoPath, "add", "README.md")
+	runServerGit(t, repoPath, "commit", "-m", "init")
+	runServerGit(t, repoPath, "branch", "-M", "main")
+	return repoPath
 }
 
 func runServerGit(t *testing.T, dir string, args ...string) {
@@ -418,12 +456,12 @@ func TestCloneRepo(t *testing.T) {
 		fixture := newWorkspaceConstructionTestServer(t, root)
 		s := fixture.server
 
-		repo, err := s.serverHandlers.cloneRepo(t.Context(), &v1.CloneRepoReq{URL: source, Path: "./cloned"})
+		clonedRepo, err := s.serverHandlers.cloneRepo(t.Context(), &v1.CloneRepoReq{URL: source, Path: "./cloned"})
 		if err != nil {
 			t.Fatalf("cloneRepo: %v", err)
 		}
-		if repo.Path != "cloned" {
-			t.Fatalf("repo path = %q, want cloned", repo.Path)
+		if clonedRepo.Path != "cloned" {
+			t.Fatalf("repo path = %q, want cloned", clonedRepo.Path)
 		}
 		workspace, ok := s.taskMgr.Workspace("cloned")
 		if !ok {
@@ -1129,7 +1167,7 @@ func TestSignalProcess(t *testing.T) {
 func TestHandleListRepos(t *testing.T) {
 	t.Parallel()
 	s := newTestRouter(t)
-	s.repos = repos.NewService(t.Context(), "", repos.NewRegistry([]repos.Info{
+	s.repos = repos.NewService(t.Context(), "", reporeg.New([]reporeg.Info{
 		{RelPath: "org/repoA", AbsPath: "/src/org/repoA", BaseBranch: "main"},
 		{RelPath: "repoB", AbsPath: "/src/repoB", BaseBranch: "develop"},
 	}), nil)
@@ -1304,11 +1342,11 @@ func TestLoadPurgedTasks(t *testing.T) {
 		// Count tasks per repo.
 		counts := map[string]int{}
 		for _, e := range entries {
-			repo := ""
+			repoName := ""
 			if p := e.Task().Primary(); p != nil {
-				repo = p.Name
+				repoName = p.Name
 			}
-			counts[repo]++
+			counts[repoName]++
 		}
 		if counts["a"] != 5 {
 			t.Errorf("repo a: got %d tasks, want 5", counts["a"])

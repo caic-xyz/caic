@@ -16,9 +16,8 @@ import (
 
 	"github.com/caic-xyz/md/git"
 
-	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
-	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
+	"github.com/caic-xyz/caic/backend/internal/reporeg"
 	"github.com/caic-xyz/caic/backend/internal/repowork"
 )
 
@@ -52,27 +51,27 @@ type CloneRequest struct {
 // InitResult holds the outcome of initialising a single newly-discovered
 // repository.
 type InitResult struct {
-	Info      Info
+	Info      reporeg.Info
 	Workspace *repowork.RepoWorkspace
 }
 
 // Service owns managed repository metadata and workspace registration.
 type Service struct {
 	absRoot    string
-	registry   *Registry
-	workspaces *WorkspaceRegistry
+	registry   *reporeg.Registry
+	workspaces *repowork.WorkspaceRegistry
 
 	mu      sync.Mutex
 	changed chan struct{}
 }
 
 // NewService creates a repository service.
-func NewService(ctx context.Context, absRoot string, registry *Registry, workspaces *WorkspaceRegistry) *Service {
+func NewService(ctx context.Context, absRoot string, registry *reporeg.Registry, workspaces *repowork.WorkspaceRegistry) *Service {
 	if registry == nil {
-		registry = NewRegistry(nil)
+		registry = reporeg.New(nil)
 	}
 	if workspaces == nil {
-		workspaces = NewWorkspaceRegistry(ctx, nil)
+		workspaces = repowork.NewWorkspaceRegistry(ctx, nil)
 	}
 	return &Service{
 		absRoot:    absRoot,
@@ -83,11 +82,11 @@ func NewService(ctx context.Context, absRoot string, registry *Registry, workspa
 }
 
 // Registry returns the service repository registry.
-func (s *Service) Registry() *Registry {
+func (s *Service) Registry() *reporeg.Registry {
 	return s.registry
 }
 
-// Changed returns a channel that is closed when repository metadata or CI state changes.
+// Changed returns a channel that is closed when repository metadata changes.
 func (s *Service) Changed() <-chan struct{} {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -108,7 +107,7 @@ func (s *Service) DiscoverWorkspace(ctx context.Context, abs string) (InitResult
 	}
 	remote := checkout.RemoteOriginURL(ctx)
 	forgeKind, forgeOwner, forgeRepo := parseForgeRemote(ctx, remote)
-	info := Info{
+	info := reporeg.Info{
 		RelPath:          rel,
 		AbsPath:          abs,
 		BaseBranch:       branch,
@@ -138,18 +137,22 @@ func (s *Service) RelPath(abs string) string {
 }
 
 // RegisterWorkspace adds a discovered repo and registers its workspace.
-func (s *Service) RegisterWorkspace(r *InitResult) {
+func (s *Service) RegisterWorkspace(r *InitResult, onMove func(reporeg.RelPathMove)) reporeg.RelPathMove {
 	if r == nil || r.Workspace == nil {
-		return
+		return reporeg.RelPathMove{}
 	}
-	s.registry.Add(&r.Info)
+	move := s.registry.Add(&r.Info)
 	s.workspaces.RegisterWorkspace(r.Info.RelPath, r.Workspace)
+	if move.Moved() && onMove != nil {
+		onMove(move)
+	}
 	s.notifyChanged()
+	return move
 }
 
 // DeregisterWorkspace removes a repo and unregisters its workspace.
 func (s *Service) DeregisterWorkspace(relPath string) {
-	removed := s.registry.RemoveMatching(func(r Info) bool {
+	removed := s.registry.RemoveMatching(func(r reporeg.Info) bool {
 		return r.RelPath == relPath
 	})
 	for _, rel := range removed {
@@ -161,23 +164,18 @@ func (s *Service) DeregisterWorkspace(relPath string) {
 }
 
 // Snapshot returns the current managed repository snapshot.
-func (s *Service) Snapshot() []Info {
+func (s *Service) Snapshot() []reporeg.Info {
 	return s.registry.Snapshot()
 }
 
-// SnapshotWithCI returns the current managed repository and CI snapshot.
-func (s *Service) SnapshotWithCI() []InfoWithCI {
-	return s.registry.SnapshotWithCI()
-}
-
 // InfoFor returns the current managed repository for relPath.
-func (s *Service) InfoFor(relPath string) (Info, bool) {
+func (s *Service) InfoFor(relPath string) (reporeg.Info, bool) {
 	return s.registry.InfoFor(relPath)
 }
 
 // ByForge returns the current managed repository for a forge owner/repo pair.
-func (s *Service) ByForge(owner, repo string) (Info, bool) {
-	return s.registry.ByForge(owner, repo)
+func (s *Service) ByForge(owner, repoName string) (reporeg.Info, bool) {
+	return s.registry.ByForge(owner, repoName)
 }
 
 // WorkspaceRegistered reports whether a workspace is registered for relPath.
@@ -186,52 +184,30 @@ func (s *Service) WorkspaceRegistered(relPath string) bool {
 	return ok
 }
 
-// CIStatusFor returns the cached CI status for relPath.
-func (s *Service) CIStatusFor(relPath string) ci.RepoCIState {
-	return s.registry.CIStatusFor(relPath)
-}
-
-// ForgePathsAtSHA returns repository paths with matching forge coordinates and CI SHA.
-func (s *Service) ForgePathsAtSHA(owner, repo, sha string) []string {
-	return s.registry.ForgePathsAtSHA(owner, repo, sha)
-}
-
-// SetCIStatusIfChanged stores the CI status for relPath and reports status changes.
-func (s *Service) SetCIStatusIfChanged(relPath, sha string, result forgecache.Result) bool {
-	checks := make([]forge.Check, len(result.Checks))
-	copy(checks, result.Checks)
-	next := ci.RepoCIState{Status: result.Status, Checks: checks, HeadSHA: sha}
-	changed := s.registry.SetCIStatusIfChanged(relPath, next)
-	if changed {
-		s.notifyChanged()
-	}
-	return changed
-}
-
 // Clone clones a repository, registers its metadata, and wires its workspace.
-func (s *Service) Clone(ctx context.Context, req CloneRequest) (Info, error) {
+func (s *Service) Clone(ctx context.Context, req CloneRequest) (reporeg.Info, error) {
 	targetPath := req.Path
 	if targetPath == "" {
 		base := filepath.Base(req.URL)
 		base = strings.TrimSuffix(base, ".git")
 		if base == "" || base == "." || base == "/" {
-			return Info{}, repoError(ErrorBadRequest, "cannot derive repo name from URL; specify path explicitly")
+			return reporeg.Info{}, repoError(ErrorBadRequest, "cannot derive repo name from URL; specify path explicitly")
 		}
 		targetPath = base
 	}
 
 	absTarget := filepath.Join(s.absRoot, targetPath)
 	if rel, err := filepath.Rel(s.absRoot, absTarget); err != nil || strings.HasPrefix(rel, "..") {
-		return Info{}, repoError(ErrorBadRequest, "path escapes root directory")
+		return reporeg.Info{}, repoError(ErrorBadRequest, "path escapes root directory")
 	} else {
 		targetPath = rel
 	}
 
 	if _, err := os.Stat(absTarget); err == nil {
-		return Info{}, repoError(ErrorConflict, "directory already exists: "+targetPath)
+		return reporeg.Info{}, repoError(ErrorConflict, "directory already exists: "+targetPath)
 	}
 	if _, ok := s.workspaces.Workspace(targetPath); ok {
-		return Info{}, repoError(ErrorConflict, "repo already registered: "+targetPath)
+		return reporeg.Info{}, repoError(ErrorConflict, "repo already registered: "+targetPath)
 	}
 
 	bn := filepath.Base(targetPath)
@@ -244,7 +220,7 @@ func (s *Service) Clone(ctx context.Context, req CloneRequest) (Info, error) {
 		return true
 	})
 	if basenameConflict != "" {
-		return Info{}, repoError(ErrorConflict, "repo basename conflicts with existing: "+basenameConflict)
+		return reporeg.Info{}, repoError(ErrorConflict, "repo basename conflicts with existing: "+basenameConflict)
 	}
 
 	depth := req.Depth
@@ -259,26 +235,26 @@ func (s *Service) Clone(ctx context.Context, req CloneRequest) (Info, error) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		_ = os.RemoveAll(absTarget)
 		slog.WarnContext(ctx, "git clone failed", "url", req.URL, "err", err, "out", string(out))
-		return Info{}, repoError(ErrorInternal, "git clone failed: "+err.Error())
+		return reporeg.Info{}, repoError(ErrorInternal, "git clone failed: "+err.Error())
 	}
 
 	checkout := &git.Checkout{Root: absTarget, Logger: slog.Default()}
 	remoteName, err := checkout.DefaultRemote(ctx)
 	if err != nil {
 		_ = os.RemoveAll(absTarget)
-		return Info{}, repoError(ErrorInternal, "cannot determine default remote: "+err.Error())
+		return reporeg.Info{}, repoError(ErrorInternal, "cannot determine default remote: "+err.Error())
 	}
 	branch, err := checkout.DefaultBranch(ctx, remoteName)
 	if err != nil {
 		_ = os.RemoveAll(absTarget)
-		return Info{}, repoError(ErrorInternal, "cannot determine default branch: "+err.Error())
+		return reporeg.Info{}, repoError(ErrorInternal, "cannot determine default branch: "+err.Error())
 	}
 	remote := checkout.RemoteOriginURL(ctx)
-	info := Info{RelPath: targetPath, AbsPath: absTarget, BaseBranch: branch, BaseBranchRemote: remoteName, Remote: remote}
+	info := reporeg.Info{RelPath: targetPath, AbsPath: absTarget, BaseBranch: branch, BaseBranchRemote: remoteName, Remote: remote}
 	workspace, err := repowork.NewRepoWorkspace(info.BaseBranch, info.AbsPath, info.RelPath, time.Minute, nil, slog.With("repo", filepath.Base(info.AbsPath)))
 	if err != nil {
 		_ = os.RemoveAll(absTarget)
-		return Info{}, repoError(ErrorInternal, "create repo workspace: "+err.Error())
+		return reporeg.Info{}, repoError(ErrorInternal, "create repo workspace: "+err.Error())
 	}
 	info.ForgeKind, info.ForgeOwner, info.ForgeRepo = parseForgeRemote(ctx, remote)
 	s.registry.Add(&info)
@@ -296,16 +272,16 @@ func (s *Service) notifyChanged() {
 	s.mu.Unlock()
 }
 
-func parseForgeRemote(ctx context.Context, remote string) (kind forge.Kind, owner, repo string) {
+func parseForgeRemote(ctx context.Context, remote string) (kind forge.Kind, owner, repoName string) {
 	if remote == "" {
 		return "", "", ""
 	}
-	kind, owner, repo, err := forge.ParseRemoteURL(remote)
+	kind, owner, repoName, err := forge.ParseRemoteURL(remote)
 	if err != nil {
 		slog.DebugContext(ctx, "unsupported forge remote", "remote", remote, "err", err)
 		return "", "", ""
 	}
-	return kind, owner, repo
+	return kind, owner, repoName
 }
 
 func repoError(k ErrorKind, msg string) error {

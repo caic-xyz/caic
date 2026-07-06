@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/caic-xyz/md/git"
+
+	"github.com/caic-xyz/caic/backend/internal/reporeg"
 )
 
 // DiscoveryDepth is the maximum directory levels below AbsRoot that
@@ -22,7 +24,7 @@ const DiscoveryDepth = 3
 type WatcherConfig struct {
 	Ctx             context.Context
 	AbsRoot         string
-	Repos           func() []Info
+	Repos           func() []reporeg.Info
 	RelPath         func(string) string
 	WorkspaceExists func(string) bool
 	OnDiscovered    func(context.Context, string)
@@ -35,7 +37,7 @@ type WatcherConfig struct {
 type Watcher struct {
 	ctx             context.Context
 	absRoot         string
-	repos           func() []Info
+	repos           func() []reporeg.Info
 	relPath         func(string) string
 	workspaceExists func(string) bool
 	onDiscovered    func(context.Context, string)

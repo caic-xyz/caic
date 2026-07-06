@@ -20,8 +20,11 @@ import (
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
+	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
+	"github.com/caic-xyz/caic/backend/internal/reporeg"
 	"github.com/caic-xyz/caic/backend/internal/repos"
+	"github.com/caic-xyz/caic/backend/internal/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
@@ -405,9 +408,10 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 		t.Fatalf("ipgeo.NewChecker: %v", err)
 	}
 	backend := &mdruntime.Backend{}
-	workspaceRegistry := repos.NewWorkspaceRegistry(t.Context(), nil)
+	workspaceRegistry := repowork.NewWorkspaceRegistry(t.Context(), nil)
 	taskMgr := tasks.New(tasks.Config{ServerCtx: t.Context(), WorkspaceRegistry: workspaceRegistry})
-	repoSvc := repos.NewService(t.Context(), "", repos.NewRegistry(nil), workspaceRegistry)
+	repoSvc := repos.NewService(t.Context(), "", reporeg.New(nil), workspaceRegistry)
+	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
 	forgeManager := forgemanager.New("", "", nil)
 
@@ -419,6 +423,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 	refreshTokenPath := t.TempDir() + "/mcp_oauth_refresh_tokens.json"
 	s, err := New(t.Context(), Dependencies{
 		Repos:                      repoSvc,
+		RepoStatus:                 repoStatus,
 		ProcessBackend:             backend,
 		TaskManager:                taskMgr,
 		Preferences:                prefs,
@@ -434,7 +439,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	tr := &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, prefs: prefs, forge: forgeManager, oauthRefreshTokenPath: refreshTokenPath}
+	tr := &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, repoStatus: repoStatus, prefs: prefs, forge: forgeManager, oauthRefreshTokenPath: refreshTokenPath}
 
 	// Re-export authStore for restart tests that need to share refresh tokens.
 	tr.authStore = store

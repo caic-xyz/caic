@@ -35,12 +35,13 @@ import (
 // raw HTTP response writing. Task command orchestration and DTO assembly belong
 // to taskService.
 type taskHandlers struct {
-	taskMgr   *tasks.Manager
-	repos     *repos.Service
-	forge     *forgemanager.Manager
-	ciService *ci.Service
-	authStore *auth.Store
-	service   *taskService
+	taskMgr    *tasks.Manager
+	repos      *repos.Service
+	repoStatus *ci.RepoStatusStore
+	forge      *forgemanager.Manager
+	ciService  *ci.Service
+	authStore  *auth.Store
+	service    *taskService
 
 	warnings *WarningStore
 }
@@ -294,7 +295,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 	for {
 		out := h.service.taskListSnapshot(ctx)
 		ch := h.taskMgr.Changed()
-		repoList := repoListFromSnapshot(h.repos.SnapshotWithCI())
+		repoList := repoListFromSnapshot(h.repos.Snapshot(), h.repoStatus)
 		var newWarnings []serverWarning
 		if h.warnings != nil {
 			newWarnings = h.warnings.Since(lastWarnTime)

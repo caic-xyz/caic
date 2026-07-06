@@ -11,6 +11,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
+	"github.com/caic-xyz/caic/backend/internal/reporeg"
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/repowork"
 	"github.com/caic-xyz/caic/backend/internal/server"
@@ -24,6 +25,7 @@ type ciTaskCreator interface {
 // ciAdapter adapts caic stores and managers to ci.Backend.
 type ciAdapter struct {
 	repos       *repos.Service
+	repoStatus  *ci.RepoStatusStore
 	taskMgr     *tasks.Manager
 	forge       *forgemanager.Manager
 	prefs       *preferences.Store
@@ -48,7 +50,7 @@ func (a *ciAdapter) GitHubApp() ci.GitHubAppClient { return a.forge.GitHubApp() 
 
 // ForgeForInfo returns a forge client for the given RepoInfo.
 func (a *ciAdapter) ForgeForInfo(ctx context.Context, info *ci.RepoInfo) forge.Forge {
-	r := &repos.Info{
+	r := &reporeg.Info{
 		ForgeKind:  info.ForgeKind,
 		ForgeOwner: info.ForgeOwner,
 		ForgeRepo:  info.ForgeRepo,
@@ -122,7 +124,7 @@ func (a *ciAdapter) ListActiveRepos() []ci.RepoInfo {
 // SetRepoCIStatusIfChanged updates the cached CI status for relPath.
 // Returns true if the CI status changed (SSE subscribers should be notified).
 func (a *ciAdapter) SetRepoCIStatusIfChanged(relPath, sha string, result forgecache.Result) bool {
-	return a.repos.SetCIStatusIfChanged(relPath, sha, result)
+	return a.repoStatus.SetResultIfChanged(relPath, sha, result)
 }
 
 // Prefs returns the user preferences store.

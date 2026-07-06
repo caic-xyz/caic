@@ -21,9 +21,11 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
+	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
 	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
+	"github.com/caic-xyz/caic/backend/internal/reporeg"
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/repowork"
 	caicruntime "github.com/caic-xyz/caic/backend/internal/runtime"
@@ -46,6 +48,7 @@ type serverHandlers struct {
 	forge              *forgemanager.Manager
 	prefs              *preferences.Store
 	repos              *repos.Service
+	repoStatus         *ci.RepoStatusStore
 	taskMgr            workspaceRegistry
 	cacheSizes         *CacheSizeStore
 	authStore          *auth.Store
@@ -317,16 +320,16 @@ func (h *serverHandlers) getCacheSizes(_ context.Context, _ *api.EmptyReq) (*v1.
 }
 
 func (h *serverHandlers) listRepos(_ context.Context, _ *api.EmptyReq) (*[]v1.Repo, error) {
-	return repoListFromSnapshot(h.repos.SnapshotWithCI()), nil
+	return repoListFromSnapshot(h.repos.Snapshot(), h.repoStatus), nil
 }
 
 func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.Request) {
-	repo := r.URL.Query().Get("repo")
-	if repo == "" {
+	repoPath := r.URL.Query().Get("repo")
+	if repoPath == "" {
 		writeError(w, api.BadRequest("repo is required"))
 		return
 	}
-	info, ok := h.repos.InfoFor(repo)
+	info, ok := h.repos.InfoFor(repoPath)
 	if !ok {
 		writeError(w, api.NotFound("repo not found"))
 		return
@@ -337,7 +340,7 @@ func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.R
 	// Fetch local branches.
 	localPairs, err := checkout.ListBranches(ctx, "")
 	if err != nil {
-		slog.WarnContext(ctx, "list local branches failed", "repo", repo, "err", err)
+		slog.WarnContext(ctx, "list local branches failed", "repo", repoPath, "err", err)
 	}
 	seen := make(map[string]struct{}, len(localPairs))
 	branches := make([]v1.BranchInfo, 0, len(localPairs))
@@ -348,7 +351,7 @@ func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.R
 	// Fetch remote branches from all remotes.
 	remoteList, err := checkout.RunGit(ctx, "remote")
 	if err != nil {
-		slog.WarnContext(ctx, "list remotes failed", "repo", repo, "err", err)
+		slog.WarnContext(ctx, "list remotes failed", "repo", repoPath, "err", err)
 	}
 	for remote := range strings.SplitSeq(remoteList, "\n") {
 		if remote == "" {
@@ -356,7 +359,7 @@ func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.R
 		}
 		remotePairs, err := checkout.ListBranches(ctx, remote)
 		if err != nil {
-			slog.WarnContext(ctx, "list remote branches failed", "repo", repo, "remote", remote, "err", err)
+			slog.WarnContext(ctx, "list remote branches failed", "repo", repoPath, "remote", remote, "err", err)
 			continue
 		}
 		for _, p := range remotePairs {
@@ -394,31 +397,32 @@ func (h *serverHandlers) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*
 	}, nil
 }
 
-func repoListFromSnapshot(snap []repos.InfoWithCI) *[]v1.Repo {
+func repoListFromSnapshot(snap []reporeg.Info, repoStatus *ci.RepoStatusStore) *[]v1.Repo {
 	out := make([]v1.Repo, len(snap))
 	for i := range snap {
-		out[i] = repoDTO(&snap[i])
+		out[i] = repoDTO(&snap[i], repoStatus)
 	}
 	return &out
 }
 
-func repoDTO(status *repos.InfoWithCI) v1.Repo {
-	info := &status.Info
-	repo := v1.Repo{
+func repoDTO(info *reporeg.Info, repoStatus *ci.RepoStatusStore) v1.Repo {
+	dto := v1.Repo{
 		Path:       info.RelPath,
 		Branch:     info.BaseBranch,
 		BaseBranch: v1.BranchInfo{Name: info.BaseBranch, Remote: info.BaseBranchRemote},
 		RemoteURL:  git.RemoteToHTTPS(info.Remote),
 		Forge:      v1.Forge(info.ForgeKind),
 	}
-	if status.HasCI {
-		repo.CI = v1.CIStatus(status.CI.Status)
-		repo.CIChecks = make([]v1.ForgeCheck, len(status.CI.Checks))
-		for i := range status.CI.Checks {
-			repo.CIChecks[i] = v1conv.ForgeCheck(&status.CI.Checks[i])
+	if repoStatus != nil {
+		if status, ok := repoStatus.StatusFor(info.RelPath); ok {
+			dto.CI = v1.CIStatus(status.Status)
+			dto.CIChecks = make([]v1.ForgeCheck, len(status.Checks))
+			for i := range status.Checks {
+				dto.CIChecks[i] = v1conv.ForgeCheck(&status.Checks[i])
+			}
 		}
 	}
-	return repo
+	return dto
 }
 
 // routes returns the handler for server configuration, preferences, and repo

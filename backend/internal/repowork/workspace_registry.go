@@ -1,13 +1,12 @@
 // WorkspaceRegistry owns registered repo workspaces independently from repo identity.
 
-package repos
+package repowork
 
 import (
 	"context"
 	"log/slog"
 	"sync"
 
-	"github.com/caic-xyz/caic/backend/internal/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
@@ -21,7 +20,7 @@ type WorkspaceRegistry struct {
 	backend   runtime.Backend
 
 	mu         sync.Mutex
-	workspaces map[string]*repowork.RepoWorkspace
+	workspaces map[string]*RepoWorkspace
 }
 
 // NewWorkspaceRegistry creates an empty workspace registry.
@@ -29,13 +28,13 @@ func NewWorkspaceRegistry(ctx context.Context, backend runtime.Backend) *Workspa
 	return &WorkspaceRegistry{
 		serverCtx:  ctx,
 		backend:    backend,
-		workspaces: make(map[string]*repowork.RepoWorkspace),
+		workspaces: make(map[string]*RepoWorkspace),
 	}
 }
 
 // RegisterWorkspace registers a task repo workspace keyed by relPath.
 // "" registers the no-repo workspace.
-func (r *WorkspaceRegistry) RegisterWorkspace(relPath string, w *repowork.RepoWorkspace) {
+func (r *WorkspaceRegistry) RegisterWorkspace(relPath string, w *RepoWorkspace) {
 	w.Runtime = r.backend
 	if err := w.Init(r.serverCtx); err != nil {
 		slog.WarnContext(r.serverCtx, "repo workspace init failed", "repo", relPath, "err", err)
@@ -46,7 +45,7 @@ func (r *WorkspaceRegistry) RegisterWorkspace(relPath string, w *repowork.RepoWo
 }
 
 // Workspace returns the repo workspace for relPath, or nil.
-func (r *WorkspaceRegistry) Workspace(relPath string) (*repowork.RepoWorkspace, bool) {
+func (r *WorkspaceRegistry) Workspace(relPath string) (*RepoWorkspace, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	w, ok := r.workspaces[relPath]
@@ -57,11 +56,11 @@ func (r *WorkspaceRegistry) Workspace(relPath string) (*repowork.RepoWorkspace, 
 // the registry under lock and invokes fn unlocked, so callbacks may safely call
 // back into code that also needs the workspace registry. The workspace set is a
 // point-in-time snapshot. Stops iteration if fn returns false.
-func (r *WorkspaceRegistry) RangeWorkspaces(fn func(relPath string, w *repowork.RepoWorkspace) bool) {
+func (r *WorkspaceRegistry) RangeWorkspaces(fn func(relPath string, w *RepoWorkspace) bool) {
 	r.mu.Lock()
 	type kv struct {
 		relPath string
-		w       *repowork.RepoWorkspace
+		w       *RepoWorkspace
 	}
 	snap := make([]kv, 0, len(r.workspaces))
 	for relPath, w := range r.workspaces {

@@ -33,7 +33,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
-	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -91,7 +90,7 @@ type Config struct {
 	RuntimeStartTimeout time.Duration
 	Prefs               *preferences.Store
 	Provider            genai.Provider // nil-safe
-	WorkspaceRegistry   *repos.WorkspaceRegistry
+	WorkspaceRegistry   *repowork.WorkspaceRegistry
 }
 
 // Manager owns task lifecycle state, instance adoption, session watching, and
@@ -111,7 +110,7 @@ type Manager struct {
 	runtimeStartTimeout time.Duration
 	prefs               *preferences.Store
 	provider            genai.Provider
-	workspaceRegistry   *repos.WorkspaceRegistry
+	workspaceRegistry   *repowork.WorkspaceRegistry
 	relay               relayReader
 
 	// Guarded by mu.
@@ -125,7 +124,7 @@ type Manager struct {
 func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passed once at construction
 	workspaceRegistry := cfg.WorkspaceRegistry
 	if workspaceRegistry == nil {
-		workspaceRegistry = repos.NewWorkspaceRegistry(cfg.ServerCtx, cfg.Backend)
+		workspaceRegistry = repowork.NewWorkspaceRegistry(cfg.ServerCtx, cfg.Backend)
 	}
 	m := &Manager{
 		serverCtx:           cfg.ServerCtx,

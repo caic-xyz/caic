@@ -16,7 +16,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/forge/gitlab"
-	"github.com/caic-xyz/caic/backend/internal/repos"
+	"github.com/caic-xyz/caic/backend/internal/reporeg"
 )
 
 // GitHubAppClient is the GitHub App surface the manager depends on. Abstracted
@@ -83,7 +83,7 @@ func (m *Manager) GitHubAppThrottle() http.RoundTripper {
 // ForgeForInfo returns the appropriate forge.Forge for the repo's remote, using
 // the configured tokens. Falls back to a GitHub App installation token when no
 // user OAuth token or PAT is available. Returns nil if no token is available.
-func (m *Manager) ForgeForInfo(ctx context.Context, info *repos.Info) forge.Forge {
+func (m *Manager) ForgeForInfo(ctx context.Context, info *reporeg.Info) forge.Forge {
 	if f := m.ForgeFor(ctx, info.ForgeKind); f != nil {
 		return f
 	}
@@ -181,8 +181,8 @@ type appInstallCommenter struct {
 	installationID int64
 }
 
-func (c *appInstallCommenter) PostComment(ctx context.Context, owner, repo string, issueNumber int, body string) error {
-	return c.app.PostComment(ctx, c.installationID, owner, repo, issueNumber, body)
+func (c *appInstallCommenter) PostComment(ctx context.Context, owner, repoName string, issueNumber int, body string) error {
+	return c.app.PostComment(ctx, c.installationID, owner, repoName, issueNumber, body)
 }
 
 // newThrottle returns a Throttle transport at 1 QPS backed by http.DefaultTransport.

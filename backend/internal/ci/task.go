@@ -42,13 +42,6 @@ type TaskEntry interface {
 	CloseDone()
 }
 
-// RepoCIState is an in-memory CI status snapshot for a repository's default branch.
-type RepoCIState struct {
-	Status  forge.CIStatus
-	Checks  []forge.Check
-	HeadSHA string
-}
-
 // Backend is the single dependency the CI service needs from the server.
 type Backend interface {
 	// Forge.
