@@ -11,6 +11,7 @@ Type notation: `JSONValue` means any valid JSON value.
 | Method | Path | Description | Request | Response |
 |--------|------|-------------|---------|----------|
 | POST | `/api/voicegateway/v1/voice/rtc/offer` | Exchanges a WebRTC SDP offer for an answer, opening a voice gateway session. | `VoiceRTCOfferReq` | `VoiceRTCAnswerResp` |
+| POST | `/api/voicegateway/v1/voice/rtc/{sessionID}/diagnostics` | Returns structured WebRTC connectivity diagnostics for a voice bridge session. | `VoiceRTCDiagnosticsReq` | `VoiceRTCDiagnosticsResp` |
 | POST | `/api/voicegateway/v1/voice/rtc/{sessionID}` | Closes a WebRTC voice bridge session. |  | `StatusResp` |
 
 ## Errors
@@ -48,6 +49,59 @@ VoiceRTCAnswerResp is the response for POST /api/voicegateway/v1/voice/rtc/offer
 |-------|------|-------------|----------|
 | `sdp` | `string` |  | yes |
 | `sessionID` | `string` |  | yes |
+
+### VoiceRTCClientDiagnostics
+
+VoiceRTCClientDiagnostics reports client-observed WebRTC state for diagnosis.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `iceConnectionState` | `string` |  |  |
+| `iceGatheringState` | `string` |  |  |
+| `connectionState` | `string` |  |  |
+| `signalingState` | `string` |  |  |
+| `dataChannelState` | `string` |  |  |
+
+### VoiceRTCDiagnosticsReq
+
+VoiceRTCDiagnosticsReq is the request body for POST /api/voicegateway/v1/voice/rtc/{sessionID}/diagnostics.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `client` | `VoiceRTCClientDiagnostics` |  |  |
+
+### VoiceRTCServerDiagnostics
+
+VoiceRTCServerDiagnostics reports server-observed WebRTC state for diagnosis.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `sessionFound` | `boolean` |  | yes |
+| `udpHost` | `string` |  |  |
+| `udpPort` | `int` |  |  |
+| `iceConnectionState` | `string` |  |  |
+| `iceGatheringState` | `string` |  |  |
+| `connectionState` | `string` |  |  |
+| `signalingState` | `string` |  |  |
+| `dataChannelState` | `string` |  |  |
+| `dataChannelOpened` | `boolean` |  |  |
+| `audioTrackReceived` | `boolean` |  |  |
+| `backendConnected` | `boolean` |  |  |
+| `sessionReadySent` | `boolean` |  |  |
+| `lastError` | `string` |  |  |
+
+### VoiceRTCDiagnosticsResp
+
+VoiceRTCDiagnosticsResp reports structured WebRTC connectivity diagnostics.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `sessionID` | `string` |  | yes |
+| `issue` | `string` |  | yes |
+| `side` | `string` |  | yes |
+| `message` | `string` |  | yes |
+| `server` | `VoiceRTCServerDiagnostics` |  | yes |
+| `client` | `VoiceRTCClientDiagnostics` |  |  |
 
 ### StatusResp
 

@@ -9,6 +9,23 @@ import (
 func TestRoutes(t *testing.T) {
 	t.Parallel()
 
+	t.Run("diagnoseVoiceRTCDeclared", func(t *testing.T) {
+		t.Parallel()
+		r := routeByName(t, "diagnoseVoiceRTC")
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %q, want POST", r.Method)
+		}
+		if r.Path != "/api/voicegateway/v1/voice/rtc/{sessionID}/diagnostics" {
+			t.Fatalf("path = %q, want voice RTC diagnostics path", r.Path)
+		}
+		if r.ReqName() != "VoiceRTCDiagnosticsReq" {
+			t.Fatalf("request = %q, want VoiceRTCDiagnosticsReq", r.ReqName())
+		}
+		if r.RespName() != "VoiceRTCDiagnosticsResp" {
+			t.Fatalf("response = %q, want VoiceRTCDiagnosticsResp", r.RespName())
+		}
+	})
+
 	t.Run("closeVoiceRTCDeclared", func(t *testing.T) {
 		t.Parallel()
 		r := routeByName(t, "closeVoiceRTC")

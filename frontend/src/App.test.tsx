@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 
-import type { Repo, PreferencesResp, HarnessInfo, Task } from "@sdk/types.gen";
+import type { Repo, PreferencesResp, HarnessInfo, Task, ISOTimestamp } from "@sdk/types.gen";
 
 // Minimal complete Task, matching what the backend now returns from createTask
 // so the app can seed its store and render the detail view immediately.
@@ -14,7 +14,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     initialPrompt: "do something",
     title: "do something",
     state: "branching",
-    stateUpdatedAt: "2026-01-01T00:00:00Z",
+    stateUpdatedAt: "2026-01-01T00:00:00Z" as ISOTimestamp,
     costUSD: 0,
     duration: 0,
     numTurns: 0,

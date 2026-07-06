@@ -53,6 +53,8 @@ type Bridge struct {
 	backend  backendConnector
 	api      *webrtc.API
 	udpMux   ice.UDPMux
+	hostIP   net.IP
+	udpPort  int
 	mu       sync.Mutex
 	sessions map[string]*session
 }
@@ -130,6 +132,8 @@ func newBridgeWithBackend(ctx context.Context, backend backendConnector, udpPort
 		backend:  backend,
 		api:      api,
 		udpMux:   mux,
+		hostIP:   append(net.IP(nil), hostIP...),
+		udpPort:  addr.Port,
 		sessions: make(map[string]*session),
 	}, nil
 }
@@ -153,10 +157,15 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 
 	sessionCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	sess := &session{
-		id:      generateSessionID(),
-		pc:      pc,
-		backend: nil,
-		cancel:  cancel,
+		id:                  generateSessionID(),
+		pc:                  pc,
+		backend:             nil,
+		iceConnectionState:  voicev1.VoiceRTCICEConnectionState(pc.ICEConnectionState().String()),
+		iceGatheringState:   voicev1.VoiceRTCICEGatheringState(pc.ICEGatheringState().String()),
+		signalingState:      voicev1.VoiceRTCSignalingState(pc.SignalingState().String()),
+		peerConnectionState: voicev1.VoiceRTCConnectionState(pc.ConnectionState().String()),
+		dataChannelState:    voicev1.VoiceRTCDataChannelStateNew,
+		cancel:              cancel,
 	}
 
 	// Set up RTP audio track (server → client).
@@ -182,6 +191,7 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 			return
 		}
 		slog.InfoContext(sessionCtx, "voicertc: audio track received", "session", sess.id, "codec", track.Codec().MimeType)
+		sess.markAudioTrackReceived()
 		sess.mu.Lock()
 		if sess.backendSetupComplete {
 			sess.mu.Unlock()
@@ -202,9 +212,11 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 		slog.InfoContext(sessionCtx, "voicertc: data channel opened", "label", dc.Label(), "session", sess.id)
 		sess.mu.Lock()
 		sess.dc = dc
+		sess.dataChannelState = voicev1.VoiceRTCDataChannelState(dc.ReadyState().String())
 		sess.mu.Unlock()
 
 		dc.OnOpen(func() {
+			sess.setDataChannelState(dc.ReadyState().String())
 			if err := sess.startAudioOutput(sessionCtx); err != nil {
 				slog.WarnContext(sessionCtx, "voicertc: encoder init failed", "session", sess.id, "err", err)
 				sess.sendError("Voice audio unavailable: codec failed to initialise")
@@ -218,6 +230,7 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 			}
 			sess.mu.Lock()
 			sess.backend = backendSession
+			sess.backendConnected = true
 			sess.mu.Unlock()
 			close(backendConnected)
 			slog.InfoContext(sessionCtx, "voicertc: backend connected", "session", sess.id)
@@ -251,6 +264,7 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 
 		dc.OnClose(func() {
 			slog.InfoContext(sessionCtx, "voicertc: data channel closed", "session", sess.id)
+			sess.setDataChannelState(dc.ReadyState().String())
 			cancel()
 		})
 	})
@@ -258,12 +272,22 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 	// Monitor ICE connection state.
 	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		slog.DebugContext(sessionCtx, "voicertc: ICE state", "session", sess.id, "state", state.String())
+		sess.setICEConnectionState(state.String())
 		//exhaustive:ignore
 		switch state {
 		case webrtc.ICEConnectionStateFailed, webrtc.ICEConnectionStateDisconnected, webrtc.ICEConnectionStateClosed:
 			cancel()
 		default:
 		}
+	})
+	pc.OnICEGatheringStateChange(func(state webrtc.ICEGatheringState) {
+		sess.setICEGatheringState(state.String())
+	})
+	pc.OnSignalingStateChange(func(state webrtc.SignalingState) {
+		sess.setSignalingState(state.String())
+	})
+	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		sess.setPeerConnectionState(state.String())
 	})
 
 	// Set remote description (the offer).
@@ -334,6 +358,23 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 	return localDesc.SDP, sess.id, nil
 }
 
+// DiagnoseVoiceRTC returns structured connectivity diagnostics for a session.
+func (b *Bridge) DiagnoseVoiceRTC(_ context.Context, sessionID string, client *voicev1.VoiceRTCClientDiagnostics) voicev1.VoiceRTCDiagnosticsResp {
+	b.mu.Lock()
+	sess := b.sessions[sessionID]
+	b.mu.Unlock()
+	if sess == nil {
+		server := voicev1.VoiceRTCServerDiagnostics{
+			SessionFound: false,
+			UDPHost:      b.hostIP.String(),
+			UDPPort:      b.udpPort,
+		}
+		return buildVoiceRTCDiagnostics(sessionID, &server, client)
+	}
+	server := sess.diagnostics(b.hostIP.String(), b.udpPort)
+	return buildVoiceRTCDiagnostics(sessionID, &server, client)
+}
+
 // Close tears down a session by ID. No-op if not found.
 func (b *Bridge) Close(sessionID string) {
 	b.mu.Lock()
@@ -382,6 +423,16 @@ type session struct {
 	backendSetupComplete bool
 	audioOutputStarted   bool
 	cancel               context.CancelFunc
+	iceConnectionState   voicev1.VoiceRTCICEConnectionState
+	iceGatheringState    voicev1.VoiceRTCICEGatheringState
+	peerConnectionState  voicev1.VoiceRTCConnectionState
+	signalingState       voicev1.VoiceRTCSignalingState
+	dataChannelState     voicev1.VoiceRTCDataChannelState
+	dataChannelOpened    bool
+	audioTrackReceived   bool
+	backendConnected     bool
+	sessionReadySent     bool
+	lastError            string
 
 	audioMu             sync.Mutex
 	audioBuf            []byte // pending backend PCM bytes, drained by audioSendLoop
@@ -391,6 +442,65 @@ type session struct {
 
 func (s *session) cancelSession() {
 	s.cancel()
+}
+
+func (s *session) setICEConnectionState(state string) {
+	s.mu.Lock()
+	s.iceConnectionState = voicev1.VoiceRTCICEConnectionState(state)
+	s.mu.Unlock()
+}
+
+func (s *session) setICEGatheringState(state string) {
+	s.mu.Lock()
+	s.iceGatheringState = voicev1.VoiceRTCICEGatheringState(state)
+	s.mu.Unlock()
+}
+
+func (s *session) setPeerConnectionState(state string) {
+	s.mu.Lock()
+	s.peerConnectionState = voicev1.VoiceRTCConnectionState(state)
+	s.mu.Unlock()
+}
+
+func (s *session) setSignalingState(state string) {
+	s.mu.Lock()
+	s.signalingState = voicev1.VoiceRTCSignalingState(state)
+	s.mu.Unlock()
+}
+
+func (s *session) setDataChannelState(state string) {
+	s.mu.Lock()
+	s.dataChannelState = voicev1.VoiceRTCDataChannelState(state)
+	if strings.EqualFold(state, "open") {
+		s.dataChannelOpened = true
+	}
+	s.mu.Unlock()
+}
+
+func (s *session) markAudioTrackReceived() {
+	s.mu.Lock()
+	s.audioTrackReceived = true
+	s.mu.Unlock()
+}
+
+func (s *session) diagnostics(udpHost string, udpPort int) voicev1.VoiceRTCServerDiagnostics {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return voicev1.VoiceRTCServerDiagnostics{
+		SessionFound:       true,
+		UDPHost:            udpHost,
+		UDPPort:            udpPort,
+		ICEConnectionState: s.iceConnectionState,
+		ICEGatheringState:  s.iceGatheringState,
+		ConnectionState:    s.peerConnectionState,
+		SignalingState:     s.signalingState,
+		DataChannelState:   s.dataChannelState,
+		DataChannelOpened:  s.dataChannelOpened,
+		AudioTrackReceived: s.audioTrackReceived,
+		BackendConnected:   s.backendConnected,
+		SessionReadySent:   s.sessionReadySent,
+		LastError:          s.lastError,
+	}
 }
 
 func (s *session) backendReady(ctx context.Context) {
@@ -405,6 +515,9 @@ func (s *session) backendReady(ctx context.Context) {
 	s.mu.Unlock()
 
 	// The gateway core owns session.ready, a provider-neutral readiness signal.
+	s.mu.Lock()
+	s.sessionReadySent = true
+	s.mu.Unlock()
 	if err := s.sendGatewayMessage(ctx, gatewaySessionReady()); err != nil {
 		slog.WarnContext(ctx, "voicertc: session.ready send failed", "session", s.id, "err", err)
 	}
@@ -574,6 +687,7 @@ func (s *session) audioSendLoop(ctx context.Context, enc *opusEncoder) {
 // sendError delivers a normalized error message to the client via the data channel.
 func (s *session) sendError(msg string) {
 	s.mu.Lock()
+	s.lastError = msg
 	dc := s.dc
 	s.mu.Unlock()
 	if dc == nil {
@@ -585,6 +699,65 @@ func (s *session) sendError(msg string) {
 		Recoverable: false,
 	})
 	_ = dc.SendText(string(data))
+}
+
+func buildVoiceRTCDiagnostics(sessionID string, server *voicev1.VoiceRTCServerDiagnostics, client *voicev1.VoiceRTCClientDiagnostics) voicev1.VoiceRTCDiagnosticsResp {
+	if client == nil {
+		client = &voicev1.VoiceRTCClientDiagnostics{}
+	}
+	issue, side, message := classifyVoiceRTCConnectivity(server, client)
+	return voicev1.VoiceRTCDiagnosticsResp{
+		SessionID: sessionID,
+		Issue:     issue,
+		Side:      side,
+		Message:   message,
+		Server:    *server,
+		Client:    *client,
+	}
+}
+
+func classifyVoiceRTCConnectivity(server *voicev1.VoiceRTCServerDiagnostics, client *voicev1.VoiceRTCClientDiagnostics) (voicev1.VoiceRTCConnectivityIssue, voicev1.VoiceRTCConnectivitySide, string) {
+	if !server.SessionFound {
+		return voicev1.VoiceRTCConnectivityIssueServerSessionMissing,
+			voicev1.VoiceRTCConnectivitySideServer,
+			"server no longer has this voice RTC session"
+	}
+	serverICE := strings.ToLower(string(server.ICEConnectionState))
+	clientICE := strings.ToLower(string(client.ICEConnectionState))
+	clientConn := strings.ToLower(string(client.ConnectionState))
+	if serverICE == "failed" || serverICE == "disconnected" || serverICE == "closed" {
+		return voicev1.VoiceRTCConnectivityIssueServerICEFailed,
+			voicev1.VoiceRTCConnectivitySideNetwork,
+			"server ICE failed; UDP packets are not flowing reliably between client and server"
+	}
+	if !server.DataChannelOpened {
+		if clientICE == "failed" || clientICE == "disconnected" || clientICE == "closed" || clientConn == "failed" || clientConn == "closed" {
+			return voicev1.VoiceRTCConnectivityIssueUDPUnreachable,
+				voicev1.VoiceRTCConnectivitySideNetwork,
+				fmt.Sprintf("client could not establish ICE with server UDP candidate %s:%d", server.UDPHost, server.UDPPort)
+		}
+		if clientICE == "connected" || clientICE == "completed" || clientConn == "connected" {
+			return voicev1.VoiceRTCConnectivityIssueDataChannelNotOpen,
+				voicev1.VoiceRTCConnectivitySideClient,
+				"client ICE connected, but the voice data channel did not open"
+		}
+		return voicev1.VoiceRTCConnectivityIssueUDPUnreachable,
+			voicev1.VoiceRTCConnectivitySideNetwork,
+			fmt.Sprintf("server is waiting for a WebRTC data channel on UDP %s:%d", server.UDPHost, server.UDPPort)
+	}
+	if !server.BackendConnected {
+		return voicev1.VoiceRTCConnectivityIssueVoiceBackendConnecting,
+			voicev1.VoiceRTCConnectivitySideServer,
+			"WebRTC connected, but the server voice backend has not connected yet"
+	}
+	if !server.SessionReadySent {
+		return voicev1.VoiceRTCConnectivityIssueVoiceBackendConnecting,
+			voicev1.VoiceRTCConnectivitySideServer,
+			"server voice backend connected but has not reported session readiness"
+	}
+	return voicev1.VoiceRTCConnectivityIssueSessionReadyNotDelivered,
+		voicev1.VoiceRTCConnectivitySideClient,
+		"server sent session.ready; the client did not receive or process it before timeout"
 }
 
 func assistantPCMDuration(bytes int) time.Duration {

@@ -114,6 +114,10 @@ public final class ApiClient {
     public func voiceRTCOffer(req: VoiceRTCOfferReq, headers: [String: String] = [:]) async throws -> VoiceRTCAnswerResp {
         try await request("POST", path: "/api/voicegateway/v1/voice/rtc/offer", body: try encoder.encode(req), headers: headers)
     }
+    /// Returns structured WebRTC connectivity diagnostics for a voice bridge session.
+    public func diagnoseVoiceRTC(sessionID: String, req: VoiceRTCDiagnosticsReq, headers: [String: String] = [:]) async throws -> VoiceRTCDiagnosticsResp {
+        try await request("POST", path: "/api/voicegateway/v1/voice/rtc/\(sessionID)/diagnostics", body: try encoder.encode(req), headers: headers)
+    }
     /// Closes a WebRTC voice bridge session.
     public func closeVoiceRTC(sessionID: String, headers: [String: String] = [:]) async throws -> StatusResp {
         try await request("POST", path: "/api/voicegateway/v1/voice/rtc/\(sessionID)", headers: headers)

@@ -57,6 +57,123 @@ export type Speaker =
 export const SpeakerUser: Speaker = "user";
 export const SpeakerAssistant: Speaker = "assistant";
 
+export type VoiceRTCConnectionState =
+  | "new"
+  | "connecting"
+  | "connected"
+  | "disconnected"
+  | "failed"
+  | "closed";
+/**
+ * Supported values.
+ */
+export const VoiceRTCConnectionStateNew: VoiceRTCConnectionState = "new";
+export const VoiceRTCConnectionStateConnecting: VoiceRTCConnectionState = "connecting";
+export const VoiceRTCConnectionStateConnected: VoiceRTCConnectionState = "connected";
+export const VoiceRTCConnectionStateDisconnected: VoiceRTCConnectionState = "disconnected";
+export const VoiceRTCConnectionStateFailed: VoiceRTCConnectionState = "failed";
+export const VoiceRTCConnectionStateClosed: VoiceRTCConnectionState = "closed";
+
+export type VoiceRTCConnectivityIssue =
+  | "none"
+  | "voice_bridge_unavailable"
+  | "server_session_missing"
+  | "server_ice_failed"
+  | "udp_unreachable"
+  | "data_channel_not_open"
+  | "voice_backend_connecting"
+  | "session_ready_not_delivered"
+  | "unknown_timeout";
+/**
+ * Supported values.
+ */
+export const VoiceRTCConnectivityIssueNone: VoiceRTCConnectivityIssue = "none";
+export const VoiceRTCConnectivityIssueVoiceBridgeUnavailable: VoiceRTCConnectivityIssue = "voice_bridge_unavailable";
+export const VoiceRTCConnectivityIssueServerSessionMissing: VoiceRTCConnectivityIssue = "server_session_missing";
+export const VoiceRTCConnectivityIssueServerICEFailed: VoiceRTCConnectivityIssue = "server_ice_failed";
+export const VoiceRTCConnectivityIssueUDPUnreachable: VoiceRTCConnectivityIssue = "udp_unreachable";
+export const VoiceRTCConnectivityIssueDataChannelNotOpen: VoiceRTCConnectivityIssue = "data_channel_not_open";
+export const VoiceRTCConnectivityIssueVoiceBackendConnecting: VoiceRTCConnectivityIssue = "voice_backend_connecting";
+export const VoiceRTCConnectivityIssueSessionReadyNotDelivered: VoiceRTCConnectivityIssue = "session_ready_not_delivered";
+export const VoiceRTCConnectivityIssueUnknownTimeout: VoiceRTCConnectivityIssue = "unknown_timeout";
+
+export type VoiceRTCConnectivitySide =
+  | "none"
+  | "server"
+  | "client"
+  | "network"
+  | "unknown";
+/**
+ * Supported values.
+ */
+export const VoiceRTCConnectivitySideNone: VoiceRTCConnectivitySide = "none";
+export const VoiceRTCConnectivitySideServer: VoiceRTCConnectivitySide = "server";
+export const VoiceRTCConnectivitySideClient: VoiceRTCConnectivitySide = "client";
+export const VoiceRTCConnectivitySideNetwork: VoiceRTCConnectivitySide = "network";
+export const VoiceRTCConnectivitySideUnknown: VoiceRTCConnectivitySide = "unknown";
+
+export type VoiceRTCDataChannelState =
+  | "new"
+  | "connecting"
+  | "open"
+  | "closing"
+  | "closed";
+/**
+ * Supported values.
+ */
+export const VoiceRTCDataChannelStateNew: VoiceRTCDataChannelState = "new";
+export const VoiceRTCDataChannelStateConnecting: VoiceRTCDataChannelState = "connecting";
+export const VoiceRTCDataChannelStateOpen: VoiceRTCDataChannelState = "open";
+export const VoiceRTCDataChannelStateClosing: VoiceRTCDataChannelState = "closing";
+export const VoiceRTCDataChannelStateClosed: VoiceRTCDataChannelState = "closed";
+
+export type VoiceRTCICEConnectionState =
+  | "new"
+  | "checking"
+  | "connected"
+  | "completed"
+  | "disconnected"
+  | "failed"
+  | "closed";
+/**
+ * Supported values.
+ */
+export const VoiceRTCICEConnectionStateNew: VoiceRTCICEConnectionState = "new";
+export const VoiceRTCICEConnectionStateChecking: VoiceRTCICEConnectionState = "checking";
+export const VoiceRTCICEConnectionStateConnected: VoiceRTCICEConnectionState = "connected";
+export const VoiceRTCICEConnectionStateCompleted: VoiceRTCICEConnectionState = "completed";
+export const VoiceRTCICEConnectionStateDisconnected: VoiceRTCICEConnectionState = "disconnected";
+export const VoiceRTCICEConnectionStateFailed: VoiceRTCICEConnectionState = "failed";
+export const VoiceRTCICEConnectionStateClosed: VoiceRTCICEConnectionState = "closed";
+
+export type VoiceRTCICEGatheringState =
+  | "new"
+  | "gathering"
+  | "complete";
+/**
+ * Supported values.
+ */
+export const VoiceRTCICEGatheringStateNew: VoiceRTCICEGatheringState = "new";
+export const VoiceRTCICEGatheringStateGathering: VoiceRTCICEGatheringState = "gathering";
+export const VoiceRTCICEGatheringStateComplete: VoiceRTCICEGatheringState = "complete";
+
+export type VoiceRTCSignalingState =
+  | "stable"
+  | "have-local-offer"
+  | "have-remote-offer"
+  | "have-local-pranswer"
+  | "have-remote-pranswer"
+  | "closed";
+/**
+ * Supported values.
+ */
+export const VoiceRTCSignalingStateStable: VoiceRTCSignalingState = "stable";
+export const VoiceRTCSignalingStateHaveLocalOffer: VoiceRTCSignalingState = "have-local-offer";
+export const VoiceRTCSignalingStateHaveRemoteOffer: VoiceRTCSignalingState = "have-remote-offer";
+export const VoiceRTCSignalingStateHaveLocalPranswer: VoiceRTCSignalingState = "have-local-pranswer";
+export const VoiceRTCSignalingStateHaveRemotePranswer: VoiceRTCSignalingState = "have-remote-pranswer";
+export const VoiceRTCSignalingStateClosed: VoiceRTCSignalingState = "closed";
+
 /** VoiceRTCOfferReq is the request body for POST /api/voicegateway/v1/voice/rtc/offer. */
 export interface VoiceRTCOfferReq {
   sdp: string;
@@ -66,6 +183,47 @@ export interface VoiceRTCOfferReq {
 export interface VoiceRTCAnswerResp {
   sdp: string;
   sessionID: string;
+}
+
+/** VoiceRTCClientDiagnostics reports client-observed WebRTC state for diagnosis. */
+export interface VoiceRTCClientDiagnostics {
+  iceConnectionState?: VoiceRTCICEConnectionState;
+  iceGatheringState?: VoiceRTCICEGatheringState;
+  connectionState?: VoiceRTCConnectionState;
+  signalingState?: VoiceRTCSignalingState;
+  dataChannelState?: VoiceRTCDataChannelState;
+}
+
+/** VoiceRTCDiagnosticsReq is the request body for POST /api/voicegateway/v1/voice/rtc/{sessionID}/diagnostics. */
+export interface VoiceRTCDiagnosticsReq {
+  client?: VoiceRTCClientDiagnostics;
+}
+
+/** VoiceRTCServerDiagnostics reports server-observed WebRTC state for diagnosis. */
+export interface VoiceRTCServerDiagnostics {
+  sessionFound: boolean;
+  udpHost?: string;
+  udpPort?: number /* int */;
+  iceConnectionState?: VoiceRTCICEConnectionState;
+  iceGatheringState?: VoiceRTCICEGatheringState;
+  connectionState?: VoiceRTCConnectionState;
+  signalingState?: VoiceRTCSignalingState;
+  dataChannelState?: VoiceRTCDataChannelState;
+  dataChannelOpened?: boolean;
+  audioTrackReceived?: boolean;
+  backendConnected?: boolean;
+  sessionReadySent?: boolean;
+  lastError?: string;
+}
+
+/** VoiceRTCDiagnosticsResp reports structured WebRTC connectivity diagnostics. */
+export interface VoiceRTCDiagnosticsResp {
+  sessionID: string;
+  issue: VoiceRTCConnectivityIssue;
+  side: VoiceRTCConnectivitySide;
+  message: string;
+  server: VoiceRTCServerDiagnostics;
+  client?: VoiceRTCClientDiagnostics;
 }
 
 /** StatusResp is a common response for mutation endpoints. */

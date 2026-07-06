@@ -112,6 +112,180 @@ public struct Speaker: Codable, Equatable, Hashable {
     }
 }
 
+public struct VoiceRTCConnectionState: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let New = VoiceRTCConnectionState("new")
+    public static let Connecting = VoiceRTCConnectionState("connecting")
+    public static let Connected = VoiceRTCConnectionState("connected")
+    public static let Disconnected = VoiceRTCConnectionState("disconnected")
+    public static let Failed = VoiceRTCConnectionState("failed")
+    public static let Closed = VoiceRTCConnectionState("closed")
+
+    public static func other(_ value: String) -> VoiceRTCConnectionState { VoiceRTCConnectionState(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
+public struct VoiceRTCConnectivityIssue: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let None = VoiceRTCConnectivityIssue("none")
+    public static let VoiceBridgeUnavailable = VoiceRTCConnectivityIssue("voice_bridge_unavailable")
+    public static let ServerSessionMissing = VoiceRTCConnectivityIssue("server_session_missing")
+    public static let ServerICEFailed = VoiceRTCConnectivityIssue("server_ice_failed")
+    public static let UDPUnreachable = VoiceRTCConnectivityIssue("udp_unreachable")
+    public static let DataChannelNotOpen = VoiceRTCConnectivityIssue("data_channel_not_open")
+    public static let VoiceBackendConnecting = VoiceRTCConnectivityIssue("voice_backend_connecting")
+    public static let SessionReadyNotDelivered = VoiceRTCConnectivityIssue("session_ready_not_delivered")
+    public static let UnknownTimeout = VoiceRTCConnectivityIssue("unknown_timeout")
+
+    public static func other(_ value: String) -> VoiceRTCConnectivityIssue { VoiceRTCConnectivityIssue(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
+public struct VoiceRTCConnectivitySide: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let None = VoiceRTCConnectivitySide("none")
+    public static let Server = VoiceRTCConnectivitySide("server")
+    public static let Client = VoiceRTCConnectivitySide("client")
+    public static let Network = VoiceRTCConnectivitySide("network")
+    public static let Unknown = VoiceRTCConnectivitySide("unknown")
+
+    public static func other(_ value: String) -> VoiceRTCConnectivitySide { VoiceRTCConnectivitySide(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
+public struct VoiceRTCDataChannelState: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let New = VoiceRTCDataChannelState("new")
+    public static let Connecting = VoiceRTCDataChannelState("connecting")
+    public static let Open = VoiceRTCDataChannelState("open")
+    public static let Closing = VoiceRTCDataChannelState("closing")
+    public static let Closed = VoiceRTCDataChannelState("closed")
+
+    public static func other(_ value: String) -> VoiceRTCDataChannelState { VoiceRTCDataChannelState(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
+public struct VoiceRTCICEConnectionState: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let New = VoiceRTCICEConnectionState("new")
+    public static let Checking = VoiceRTCICEConnectionState("checking")
+    public static let Connected = VoiceRTCICEConnectionState("connected")
+    public static let Completed = VoiceRTCICEConnectionState("completed")
+    public static let Disconnected = VoiceRTCICEConnectionState("disconnected")
+    public static let Failed = VoiceRTCICEConnectionState("failed")
+    public static let Closed = VoiceRTCICEConnectionState("closed")
+
+    public static func other(_ value: String) -> VoiceRTCICEConnectionState { VoiceRTCICEConnectionState(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
+public struct VoiceRTCICEGatheringState: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let New = VoiceRTCICEGatheringState("new")
+    public static let Gathering = VoiceRTCICEGatheringState("gathering")
+    public static let Complete = VoiceRTCICEGatheringState("complete")
+
+    public static func other(_ value: String) -> VoiceRTCICEGatheringState { VoiceRTCICEGatheringState(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
+public struct VoiceRTCSignalingState: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let Stable = VoiceRTCSignalingState("stable")
+    public static let HaveLocalOffer = VoiceRTCSignalingState("have-local-offer")
+    public static let HaveRemoteOffer = VoiceRTCSignalingState("have-remote-offer")
+    public static let HaveLocalPranswer = VoiceRTCSignalingState("have-local-pranswer")
+    public static let HaveRemotePranswer = VoiceRTCSignalingState("have-remote-pranswer")
+    public static let Closed = VoiceRTCSignalingState("closed")
+
+    public static func other(_ value: String) -> VoiceRTCSignalingState { VoiceRTCSignalingState(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
 public enum ErrorCodes {
     public static let badRequest = "BAD_REQUEST"
     public static let unauthorized = "UNAUTHORIZED"
@@ -127,6 +301,47 @@ public struct VoiceRTCOfferReq: Codable {
 public struct VoiceRTCAnswerResp: Codable {
     public let sdp: String
     public let sessionID: String
+}
+
+/// VoiceRTCClientDiagnostics reports client-observed WebRTC state for diagnosis.
+public struct VoiceRTCClientDiagnostics: Codable {
+    public let iceConnectionState: VoiceRTCICEConnectionState?
+    public let iceGatheringState: VoiceRTCICEGatheringState?
+    public let connectionState: VoiceRTCConnectionState?
+    public let signalingState: VoiceRTCSignalingState?
+    public let dataChannelState: VoiceRTCDataChannelState?
+}
+
+/// VoiceRTCDiagnosticsReq is the request body for POST /api/voicegateway/v1/voice/rtc/{sessionID}/diagnostics.
+public struct VoiceRTCDiagnosticsReq: Codable {
+    public let client: VoiceRTCClientDiagnostics?
+}
+
+/// VoiceRTCServerDiagnostics reports server-observed WebRTC state for diagnosis.
+public struct VoiceRTCServerDiagnostics: Codable {
+    public let sessionFound: Bool
+    public let udpHost: String?
+    public let udpPort: Int?
+    public let iceConnectionState: VoiceRTCICEConnectionState?
+    public let iceGatheringState: VoiceRTCICEGatheringState?
+    public let connectionState: VoiceRTCConnectionState?
+    public let signalingState: VoiceRTCSignalingState?
+    public let dataChannelState: VoiceRTCDataChannelState?
+    public let dataChannelOpened: Bool?
+    public let audioTrackReceived: Bool?
+    public let backendConnected: Bool?
+    public let sessionReadySent: Bool?
+    public let lastError: String?
+}
+
+/// VoiceRTCDiagnosticsResp reports structured WebRTC connectivity diagnostics.
+public struct VoiceRTCDiagnosticsResp: Codable {
+    public let sessionID: String
+    public let issue: VoiceRTCConnectivityIssue
+    public let side: VoiceRTCConnectivitySide
+    public let message: String
+    public let server: VoiceRTCServerDiagnostics
+    public let client: VoiceRTCClientDiagnostics?
 }
 
 /// StatusResp is a common response for mutation endpoints.

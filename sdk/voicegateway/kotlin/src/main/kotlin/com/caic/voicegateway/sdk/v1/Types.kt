@@ -165,6 +165,337 @@ object SpeakerSerializer : KSerializer<Speaker> {
     }
 }
 
+@Serializable(with = VoiceRTCConnectionStateSerializer::class)
+sealed interface VoiceRTCConnectionState {
+    val value: String
+    @Serializable
+    data object New : VoiceRTCConnectionState {
+        override val value = "new"
+    }
+    @Serializable
+    data object Connecting : VoiceRTCConnectionState {
+        override val value = "connecting"
+    }
+    @Serializable
+    data object Connected : VoiceRTCConnectionState {
+        override val value = "connected"
+    }
+    @Serializable
+    data object Disconnected : VoiceRTCConnectionState {
+        override val value = "disconnected"
+    }
+    @Serializable
+    data object Failed : VoiceRTCConnectionState {
+        override val value = "failed"
+    }
+    @Serializable
+    data object Closed : VoiceRTCConnectionState {
+        override val value = "closed"
+    }
+    @Serializable
+    data class Other(override val value: String) : VoiceRTCConnectionState
+}
+
+object VoiceRTCConnectionStateSerializer : KSerializer<VoiceRTCConnectionState> {
+    override val descriptor = PrimitiveSerialDescriptor("VoiceRTCConnectionState", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: VoiceRTCConnectionState) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): VoiceRTCConnectionState {
+        val v = decoder.decodeString()
+        return when (v) {
+            "new" -> VoiceRTCConnectionState.New
+            "connecting" -> VoiceRTCConnectionState.Connecting
+            "connected" -> VoiceRTCConnectionState.Connected
+            "disconnected" -> VoiceRTCConnectionState.Disconnected
+            "failed" -> VoiceRTCConnectionState.Failed
+            "closed" -> VoiceRTCConnectionState.Closed
+            else -> VoiceRTCConnectionState.Other(v)
+        }
+    }
+}
+
+@Serializable(with = VoiceRTCConnectivityIssueSerializer::class)
+sealed interface VoiceRTCConnectivityIssue {
+    val value: String
+    @Serializable
+    data object None : VoiceRTCConnectivityIssue {
+        override val value = "none"
+    }
+    @Serializable
+    data object VoiceBridgeUnavailable : VoiceRTCConnectivityIssue {
+        override val value = "voice_bridge_unavailable"
+    }
+    @Serializable
+    data object ServerSessionMissing : VoiceRTCConnectivityIssue {
+        override val value = "server_session_missing"
+    }
+    @Serializable
+    data object ServerICEFailed : VoiceRTCConnectivityIssue {
+        override val value = "server_ice_failed"
+    }
+    @Serializable
+    data object UDPUnreachable : VoiceRTCConnectivityIssue {
+        override val value = "udp_unreachable"
+    }
+    @Serializable
+    data object DataChannelNotOpen : VoiceRTCConnectivityIssue {
+        override val value = "data_channel_not_open"
+    }
+    @Serializable
+    data object VoiceBackendConnecting : VoiceRTCConnectivityIssue {
+        override val value = "voice_backend_connecting"
+    }
+    @Serializable
+    data object SessionReadyNotDelivered : VoiceRTCConnectivityIssue {
+        override val value = "session_ready_not_delivered"
+    }
+    @Serializable
+    data object UnknownTimeout : VoiceRTCConnectivityIssue {
+        override val value = "unknown_timeout"
+    }
+    @Serializable
+    data class Other(override val value: String) : VoiceRTCConnectivityIssue
+}
+
+object VoiceRTCConnectivityIssueSerializer : KSerializer<VoiceRTCConnectivityIssue> {
+    override val descriptor = PrimitiveSerialDescriptor("VoiceRTCConnectivityIssue", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: VoiceRTCConnectivityIssue) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): VoiceRTCConnectivityIssue {
+        val v = decoder.decodeString()
+        return when (v) {
+            "none" -> VoiceRTCConnectivityIssue.None
+            "voice_bridge_unavailable" -> VoiceRTCConnectivityIssue.VoiceBridgeUnavailable
+            "server_session_missing" -> VoiceRTCConnectivityIssue.ServerSessionMissing
+            "server_ice_failed" -> VoiceRTCConnectivityIssue.ServerICEFailed
+            "udp_unreachable" -> VoiceRTCConnectivityIssue.UDPUnreachable
+            "data_channel_not_open" -> VoiceRTCConnectivityIssue.DataChannelNotOpen
+            "voice_backend_connecting" -> VoiceRTCConnectivityIssue.VoiceBackendConnecting
+            "session_ready_not_delivered" -> VoiceRTCConnectivityIssue.SessionReadyNotDelivered
+            "unknown_timeout" -> VoiceRTCConnectivityIssue.UnknownTimeout
+            else -> VoiceRTCConnectivityIssue.Other(v)
+        }
+    }
+}
+
+@Serializable(with = VoiceRTCConnectivitySideSerializer::class)
+sealed interface VoiceRTCConnectivitySide {
+    val value: String
+    @Serializable
+    data object None : VoiceRTCConnectivitySide {
+        override val value = "none"
+    }
+    @Serializable
+    data object Server : VoiceRTCConnectivitySide {
+        override val value = "server"
+    }
+    @Serializable
+    data object Client : VoiceRTCConnectivitySide {
+        override val value = "client"
+    }
+    @Serializable
+    data object Network : VoiceRTCConnectivitySide {
+        override val value = "network"
+    }
+    @Serializable
+    data object Unknown : VoiceRTCConnectivitySide {
+        override val value = "unknown"
+    }
+    @Serializable
+    data class Other(override val value: String) : VoiceRTCConnectivitySide
+}
+
+object VoiceRTCConnectivitySideSerializer : KSerializer<VoiceRTCConnectivitySide> {
+    override val descriptor = PrimitiveSerialDescriptor("VoiceRTCConnectivitySide", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: VoiceRTCConnectivitySide) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): VoiceRTCConnectivitySide {
+        val v = decoder.decodeString()
+        return when (v) {
+            "none" -> VoiceRTCConnectivitySide.None
+            "server" -> VoiceRTCConnectivitySide.Server
+            "client" -> VoiceRTCConnectivitySide.Client
+            "network" -> VoiceRTCConnectivitySide.Network
+            "unknown" -> VoiceRTCConnectivitySide.Unknown
+            else -> VoiceRTCConnectivitySide.Other(v)
+        }
+    }
+}
+
+@Serializable(with = VoiceRTCDataChannelStateSerializer::class)
+sealed interface VoiceRTCDataChannelState {
+    val value: String
+    @Serializable
+    data object New : VoiceRTCDataChannelState {
+        override val value = "new"
+    }
+    @Serializable
+    data object Connecting : VoiceRTCDataChannelState {
+        override val value = "connecting"
+    }
+    @Serializable
+    data object Open : VoiceRTCDataChannelState {
+        override val value = "open"
+    }
+    @Serializable
+    data object Closing : VoiceRTCDataChannelState {
+        override val value = "closing"
+    }
+    @Serializable
+    data object Closed : VoiceRTCDataChannelState {
+        override val value = "closed"
+    }
+    @Serializable
+    data class Other(override val value: String) : VoiceRTCDataChannelState
+}
+
+object VoiceRTCDataChannelStateSerializer : KSerializer<VoiceRTCDataChannelState> {
+    override val descriptor = PrimitiveSerialDescriptor("VoiceRTCDataChannelState", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: VoiceRTCDataChannelState) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): VoiceRTCDataChannelState {
+        val v = decoder.decodeString()
+        return when (v) {
+            "new" -> VoiceRTCDataChannelState.New
+            "connecting" -> VoiceRTCDataChannelState.Connecting
+            "open" -> VoiceRTCDataChannelState.Open
+            "closing" -> VoiceRTCDataChannelState.Closing
+            "closed" -> VoiceRTCDataChannelState.Closed
+            else -> VoiceRTCDataChannelState.Other(v)
+        }
+    }
+}
+
+@Serializable(with = VoiceRTCICEConnectionStateSerializer::class)
+sealed interface VoiceRTCICEConnectionState {
+    val value: String
+    @Serializable
+    data object New : VoiceRTCICEConnectionState {
+        override val value = "new"
+    }
+    @Serializable
+    data object Checking : VoiceRTCICEConnectionState {
+        override val value = "checking"
+    }
+    @Serializable
+    data object Connected : VoiceRTCICEConnectionState {
+        override val value = "connected"
+    }
+    @Serializable
+    data object Completed : VoiceRTCICEConnectionState {
+        override val value = "completed"
+    }
+    @Serializable
+    data object Disconnected : VoiceRTCICEConnectionState {
+        override val value = "disconnected"
+    }
+    @Serializable
+    data object Failed : VoiceRTCICEConnectionState {
+        override val value = "failed"
+    }
+    @Serializable
+    data object Closed : VoiceRTCICEConnectionState {
+        override val value = "closed"
+    }
+    @Serializable
+    data class Other(override val value: String) : VoiceRTCICEConnectionState
+}
+
+object VoiceRTCICEConnectionStateSerializer : KSerializer<VoiceRTCICEConnectionState> {
+    override val descriptor = PrimitiveSerialDescriptor("VoiceRTCICEConnectionState", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: VoiceRTCICEConnectionState) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): VoiceRTCICEConnectionState {
+        val v = decoder.decodeString()
+        return when (v) {
+            "new" -> VoiceRTCICEConnectionState.New
+            "checking" -> VoiceRTCICEConnectionState.Checking
+            "connected" -> VoiceRTCICEConnectionState.Connected
+            "completed" -> VoiceRTCICEConnectionState.Completed
+            "disconnected" -> VoiceRTCICEConnectionState.Disconnected
+            "failed" -> VoiceRTCICEConnectionState.Failed
+            "closed" -> VoiceRTCICEConnectionState.Closed
+            else -> VoiceRTCICEConnectionState.Other(v)
+        }
+    }
+}
+
+@Serializable(with = VoiceRTCICEGatheringStateSerializer::class)
+sealed interface VoiceRTCICEGatheringState {
+    val value: String
+    @Serializable
+    data object New : VoiceRTCICEGatheringState {
+        override val value = "new"
+    }
+    @Serializable
+    data object Gathering : VoiceRTCICEGatheringState {
+        override val value = "gathering"
+    }
+    @Serializable
+    data object Complete : VoiceRTCICEGatheringState {
+        override val value = "complete"
+    }
+    @Serializable
+    data class Other(override val value: String) : VoiceRTCICEGatheringState
+}
+
+object VoiceRTCICEGatheringStateSerializer : KSerializer<VoiceRTCICEGatheringState> {
+    override val descriptor = PrimitiveSerialDescriptor("VoiceRTCICEGatheringState", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: VoiceRTCICEGatheringState) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): VoiceRTCICEGatheringState {
+        val v = decoder.decodeString()
+        return when (v) {
+            "new" -> VoiceRTCICEGatheringState.New
+            "gathering" -> VoiceRTCICEGatheringState.Gathering
+            "complete" -> VoiceRTCICEGatheringState.Complete
+            else -> VoiceRTCICEGatheringState.Other(v)
+        }
+    }
+}
+
+@Serializable(with = VoiceRTCSignalingStateSerializer::class)
+sealed interface VoiceRTCSignalingState {
+    val value: String
+    @Serializable
+    data object Stable : VoiceRTCSignalingState {
+        override val value = "stable"
+    }
+    @Serializable
+    data object HaveLocalOffer : VoiceRTCSignalingState {
+        override val value = "have-local-offer"
+    }
+    @Serializable
+    data object HaveRemoteOffer : VoiceRTCSignalingState {
+        override val value = "have-remote-offer"
+    }
+    @Serializable
+    data object HaveLocalPranswer : VoiceRTCSignalingState {
+        override val value = "have-local-pranswer"
+    }
+    @Serializable
+    data object HaveRemotePranswer : VoiceRTCSignalingState {
+        override val value = "have-remote-pranswer"
+    }
+    @Serializable
+    data object Closed : VoiceRTCSignalingState {
+        override val value = "closed"
+    }
+    @Serializable
+    data class Other(override val value: String) : VoiceRTCSignalingState
+}
+
+object VoiceRTCSignalingStateSerializer : KSerializer<VoiceRTCSignalingState> {
+    override val descriptor = PrimitiveSerialDescriptor("VoiceRTCSignalingState", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: VoiceRTCSignalingState) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): VoiceRTCSignalingState {
+        val v = decoder.decodeString()
+        return when (v) {
+            "stable" -> VoiceRTCSignalingState.Stable
+            "have-local-offer" -> VoiceRTCSignalingState.HaveLocalOffer
+            "have-remote-offer" -> VoiceRTCSignalingState.HaveRemoteOffer
+            "have-local-pranswer" -> VoiceRTCSignalingState.HaveLocalPranswer
+            "have-remote-pranswer" -> VoiceRTCSignalingState.HaveRemotePranswer
+            "closed" -> VoiceRTCSignalingState.Closed
+            else -> VoiceRTCSignalingState.Other(v)
+        }
+    }
+}
+
 object ErrorCodes {
     const val BadRequest = "BAD_REQUEST"
     const val Unauthorized = "UNAUTHORIZED"
@@ -180,6 +511,49 @@ data class VoiceRTCOfferReq(val sdp: String)
 data class VoiceRTCAnswerResp(
     val sdp: String,
     @SerialName("sessionID") val sessionID: String,
+)
+
+/** VoiceRTCClientDiagnostics reports client-observed WebRTC state for diagnosis. */
+@Serializable
+data class VoiceRTCClientDiagnostics(
+    val iceConnectionState: VoiceRTCICEConnectionState? = null,
+    val iceGatheringState: VoiceRTCICEGatheringState? = null,
+    val connectionState: VoiceRTCConnectionState? = null,
+    val signalingState: VoiceRTCSignalingState? = null,
+    val dataChannelState: VoiceRTCDataChannelState? = null,
+)
+
+/** VoiceRTCDiagnosticsReq is the request body for POST /api/voicegateway/v1/voice/rtc/{sessionID}/diagnostics. */
+@Serializable
+data class VoiceRTCDiagnosticsReq(val client: VoiceRTCClientDiagnostics? = null)
+
+/** VoiceRTCServerDiagnostics reports server-observed WebRTC state for diagnosis. */
+@Serializable
+data class VoiceRTCServerDiagnostics(
+    val sessionFound: Boolean,
+    val udpHost: String? = null,
+    val udpPort: Int? = null,
+    val iceConnectionState: VoiceRTCICEConnectionState? = null,
+    val iceGatheringState: VoiceRTCICEGatheringState? = null,
+    val connectionState: VoiceRTCConnectionState? = null,
+    val signalingState: VoiceRTCSignalingState? = null,
+    val dataChannelState: VoiceRTCDataChannelState? = null,
+    val dataChannelOpened: Boolean? = null,
+    val audioTrackReceived: Boolean? = null,
+    val backendConnected: Boolean? = null,
+    val sessionReadySent: Boolean? = null,
+    val lastError: String? = null,
+)
+
+/** VoiceRTCDiagnosticsResp reports structured WebRTC connectivity diagnostics. */
+@Serializable
+data class VoiceRTCDiagnosticsResp(
+    @SerialName("sessionID") val sessionID: String,
+    val issue: VoiceRTCConnectivityIssue,
+    val side: VoiceRTCConnectivitySide,
+    val message: String,
+    val server: VoiceRTCServerDiagnostics,
+    val client: VoiceRTCClientDiagnostics? = null,
 )
 
 /** StatusResp is a common response for mutation endpoints. */

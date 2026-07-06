@@ -19,6 +19,62 @@ import (
 	voicev1 "github.com/caic-xyz/caic/gomode/voicegateway/api/v1"
 )
 
+func TestClassifyVoiceRTCConnectivity(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		server     voicev1.VoiceRTCServerDiagnostics
+		client     voicev1.VoiceRTCClientDiagnostics
+		wantIssue  voicev1.VoiceRTCConnectivityIssue
+		wantSide   voicev1.VoiceRTCConnectivitySide
+		wantReason string
+	}{
+		{
+			name:       "server session missing",
+			server:     voicev1.VoiceRTCServerDiagnostics{SessionFound: false},
+			wantIssue:  voicev1.VoiceRTCConnectivityIssueServerSessionMissing,
+			wantSide:   voicev1.VoiceRTCConnectivitySideServer,
+			wantReason: "server no longer has this voice RTC session",
+		},
+		{
+			name:       "udp unreachable",
+			server:     voicev1.VoiceRTCServerDiagnostics{SessionFound: true, UDPHost: "192.0.2.10", UDPPort: 3478},
+			client:     voicev1.VoiceRTCClientDiagnostics{ICEConnectionState: "failed"},
+			wantIssue:  voicev1.VoiceRTCConnectivityIssueUDPUnreachable,
+			wantSide:   voicev1.VoiceRTCConnectivitySideNetwork,
+			wantReason: "client could not establish ICE with server UDP candidate 192.0.2.10:3478",
+		},
+		{
+			name:       "backend connecting",
+			server:     voicev1.VoiceRTCServerDiagnostics{SessionFound: true, DataChannelOpened: true},
+			wantIssue:  voicev1.VoiceRTCConnectivityIssueVoiceBackendConnecting,
+			wantSide:   voicev1.VoiceRTCConnectivitySideServer,
+			wantReason: "WebRTC connected, but the server voice backend has not connected yet",
+		},
+		{
+			name: "ready not delivered",
+			server: voicev1.VoiceRTCServerDiagnostics{
+				SessionFound:      true,
+				DataChannelOpened: true,
+				BackendConnected:  true,
+				SessionReadySent:  true,
+			},
+			wantIssue:  voicev1.VoiceRTCConnectivityIssueSessionReadyNotDelivered,
+			wantSide:   voicev1.VoiceRTCConnectivitySideClient,
+			wantReason: "server sent session.ready; the client did not receive or process it before timeout",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			gotIssue, gotSide, gotReason := classifyVoiceRTCConnectivity(&tc.server, &tc.client)
+			if gotIssue != tc.wantIssue || gotSide != tc.wantSide || gotReason != tc.wantReason {
+				t.Fatalf("diagnosis = (%q, %q, %q), want (%q, %q, %q)", gotIssue, gotSide, gotReason, tc.wantIssue, tc.wantSide, tc.wantReason)
+			}
+		})
+	}
+}
+
 func TestTranslateGatewayClientMessage(t *testing.T) {
 	t.Parallel()
 	t.Run("setup", func(t *testing.T) {

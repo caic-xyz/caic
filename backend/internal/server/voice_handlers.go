@@ -41,14 +41,14 @@ func (h *voiceHandlers) metadata() v1.VoiceGatewayMetadata {
 		return v1.VoiceGatewayMetadata{
 			Mode:         v1.VoiceGatewayModeEmbedded,
 			AuthRequired: false,
-			Capabilities: []string{"voice.gatewayGeminiLive"},
+			Capabilities: []string{"voice.gatewayGeminiLive", "voice.rtcDiagnostics"},
 		}
 	case VoiceGatewayModeExternal:
 		return v1.VoiceGatewayMetadata{
 			Mode:         v1.VoiceGatewayModeExternal,
 			URL:          cfg.URL,
 			AuthRequired: true,
-			Capabilities: []string{"voice.gatewayGeminiLive"},
+			Capabilities: []string{"voice.gatewayGeminiLive", "voice.rtcDiagnostics"},
 		}
 	default:
 		return v1.VoiceGatewayMetadata{Mode: v1.VoiceGatewayModeDisabled}

@@ -57,6 +57,14 @@ var Routes = []Route{
 		Resp:   reflect.TypeFor[VoiceRTCAnswerResp](),
 	},
 	{
+		Name:   "diagnoseVoiceRTC",
+		Doc:    "Returns structured WebRTC connectivity diagnostics for a voice bridge session.",
+		Method: "POST",
+		Path:   "/api/voicegateway/v1/voice/rtc/{sessionID}/diagnostics",
+		Req:    reflect.TypeFor[VoiceRTCDiagnosticsReq](),
+		Resp:   reflect.TypeFor[VoiceRTCDiagnosticsResp](),
+	},
+	{
 		Name:   "closeVoiceRTC",
 		Doc:    "Closes a WebRTC voice bridge session.",
 		Method: "POST",

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/gomode"
+	voicev1 "github.com/caic-xyz/caic/gomode/voicegateway/api/v1"
 )
 
 // fakeMediaBridge is a MediaBridge stub for handler tests.
@@ -24,6 +25,21 @@ func (f *fakeMediaBridge) HandleOffer(context.Context, string) (sdpAnswer, sessi
 }
 
 func (f *fakeMediaBridge) Close(string) {}
+
+func (f *fakeMediaBridge) DiagnoseVoiceRTC(_ context.Context, sessionID string, client *voicev1.VoiceRTCClientDiagnostics) voicev1.VoiceRTCDiagnosticsResp {
+	return voicev1.VoiceRTCDiagnosticsResp{
+		SessionID: sessionID,
+		Issue:     voicev1.VoiceRTCConnectivityIssueUDPUnreachable,
+		Side:      voicev1.VoiceRTCConnectivitySideNetwork,
+		Message:   "server is waiting for a WebRTC data channel on UDP 192.0.2.10:3478",
+		Server: voicev1.VoiceRTCServerDiagnostics{
+			SessionFound: true,
+			UDPHost:      "192.0.2.10",
+			UDPPort:      3478,
+		},
+		Client: *client,
+	}
+}
 
 func TestNewHandler(t *testing.T) {
 	t.Parallel()
@@ -184,6 +200,45 @@ func TestNewEmbeddedHandler(t *testing.T) {
 		}
 		if resp.SDP != "answer-sdp" || resp.SessionID != "session-1" {
 			t.Fatalf("resp = %+v, want answer-sdp/session-1", resp)
+		}
+	})
+
+	t.Run("diagnostics returns structured issue", func(t *testing.T) {
+		t.Parallel()
+		handler := NewEmbeddedHandler(func() MediaBridge { return &fakeMediaBridge{} })
+		w := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/voicegateway/v1/voice/rtc/session-1/diagnostics", strings.NewReader(`{"client":{"iceConnectionState":"failed"}}`))
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", w.Code)
+		}
+		var resp voicev1.VoiceRTCDiagnosticsResp
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatal(err)
+		}
+		if resp.SessionID != "session-1" || resp.Issue != voicev1.VoiceRTCConnectivityIssueUDPUnreachable {
+			t.Fatalf("resp = %+v, want session-1 UDP issue", resp)
+		}
+		if resp.Client.ICEConnectionState != "failed" {
+			t.Fatalf("client diagnostics = %+v, want ICE failed", resp.Client)
+		}
+	})
+
+	t.Run("diagnostics reports unavailable bridge", func(t *testing.T) {
+		t.Parallel()
+		handler := NewEmbeddedHandler(func() MediaBridge { return nil })
+		w := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/voicegateway/v1/voice/rtc/session-1/diagnostics", strings.NewReader(`{}`))
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", w.Code)
+		}
+		var resp voicev1.VoiceRTCDiagnosticsResp
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatal(err)
+		}
+		if resp.Issue != voicev1.VoiceRTCConnectivityIssueVoiceBridgeUnavailable || resp.Side != voicev1.VoiceRTCConnectivitySideServer {
+			t.Fatalf("resp = %+v, want unavailable bridge", resp)
 		}
 	})
 

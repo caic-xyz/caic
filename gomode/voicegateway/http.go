@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/caic-xyz/caic/gomode"
+	voicev1 "github.com/caic-xyz/caic/gomode/voicegateway/api/v1"
 )
 
 // MediaBridge is the WebRTC media transport used by the voice gateway API.
@@ -23,6 +24,11 @@ type MediaBridge interface {
 
 // MediaBridgeProvider returns the current WebRTC media transport.
 type MediaBridgeProvider func() MediaBridge
+
+// DiagnosticMediaBridge returns structured WebRTC connectivity diagnostics.
+type DiagnosticMediaBridge interface {
+	DiagnoseVoiceRTC(ctx context.Context, sessionID string, client *voicev1.VoiceRTCClientDiagnostics) voicev1.VoiceRTCDiagnosticsResp
+}
 
 // NewHandler returns a reusable voice gateway HTTP handler.
 func NewHandler(
@@ -52,6 +58,7 @@ func newHandler(cfg *Config, bridge MediaBridgeProvider, requireServiceAuth, inc
 		mux.HandleFunc("GET /api/voicegateway/v1/voice/health", h.handleHealth)
 	}
 	mux.HandleFunc("POST /api/voicegateway/v1/voice/rtc/offer", h.handleOffer)
+	mux.HandleFunc("POST /api/voicegateway/v1/voice/rtc/{sessionID}/diagnostics", h.handleDiagnostics)
 	mux.HandleFunc("POST /api/voicegateway/v1/voice/rtc/{sessionID}", h.handleClose)
 	return mux
 }
@@ -142,6 +149,26 @@ func (h *handler) handleOffer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, OfferResp{SDP: sdpAnswer, SessionID: sessionID})
 }
 
+func (h *handler) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("sessionID")
+	if sessionID == "" {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "sessionID is required")
+		return
+	}
+	var req voicev1.VoiceRTCDiagnosticsReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+		return
+	}
+	bridge := h.mediaBridge()
+	diagnosticBridge, ok := bridge.(DiagnosticMediaBridge)
+	if bridge == nil || !ok {
+		writeJSON(w, http.StatusOK, unavailableVoiceRTCDiagnostics(sessionID, &req.Client))
+		return
+	}
+	writeJSON(w, http.StatusOK, diagnosticBridge.DiagnoseVoiceRTC(r.Context(), sessionID, &req.Client))
+}
+
 func (h *handler) handleClose(w http.ResponseWriter, r *http.Request) {
 	bridge := h.mediaBridge()
 	if bridge == nil {
@@ -155,6 +182,19 @@ func (h *handler) handleClose(w http.ResponseWriter, r *http.Request) {
 	}
 	bridge.Close(sessionID)
 	writeJSON(w, http.StatusOK, CloseSessionResp{Status: "closed"})
+}
+
+func unavailableVoiceRTCDiagnostics(sessionID string, client *voicev1.VoiceRTCClientDiagnostics) voicev1.VoiceRTCDiagnosticsResp {
+	return voicev1.VoiceRTCDiagnosticsResp{
+		SessionID: sessionID,
+		Issue:     voicev1.VoiceRTCConnectivityIssueVoiceBridgeUnavailable,
+		Side:      voicev1.VoiceRTCConnectivitySideServer,
+		Message:   "voice bridge is unavailable on this server",
+		Server: voicev1.VoiceRTCServerDiagnostics{
+			SessionFound: false,
+		},
+		Client: *client,
+	}
 }
 
 func (h *handler) mediaBridge() MediaBridge {

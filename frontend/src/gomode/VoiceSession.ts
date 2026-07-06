@@ -15,6 +15,8 @@ import {
   type ToolResult,
   type ToolCall,
   type TranscriptDelta,
+  type VoiceRTCClientDiagnostics,
+  type VoiceRTCDiagnosticsResp,
   MessageKindContextUpdate,
   MessageKindUserMessage,
   MessageKindError,
@@ -28,7 +30,6 @@ import {
   MessageKindTranscriptDelta,
 } from "@voicegateway-sdk/types.gen";
 
-import { voiceRTCOffer } from "../api";
 import { TaskNumberMap } from "./TaskNumberMap";
 import {
   mcpListTools,
@@ -46,6 +47,7 @@ export const voiceGatewayApi = voicegatewaySDK.createApiClient();
 
 export const {
   voiceRTCOffer,
+  diagnoseVoiceRTC,
   closeVoiceRTC,
 } = voiceGatewayApi;
 
@@ -390,7 +392,7 @@ export class VoiceSession {
       if (this._setupTimer !== null) clearTimeout(this._setupTimer);
       this._setupTimer = setTimeout(() => {
         if (this._pc === pc && !this.state.connected && !this.state.error) {
-          this._setError("Connection timed out — server did not respond");
+          void this._setConnectionTimeoutError(pc);
         }
       }, SETUP_TIMEOUT_MS);
 
@@ -489,6 +491,41 @@ export class VoiceSession {
       s.connectStatus = status;
       s.error = null;
     });
+  }
+
+  private async _setConnectionTimeoutError(
+    pc: RTCPeerConnection,
+  ): Promise<void> {
+    const fallback = "Connection timed out — server did not respond";
+    const sessionID = this._rtcSessionID;
+    if (!sessionID) {
+      this._setError(fallback);
+      return;
+    }
+    try {
+      const diagnostics = await diagnoseVoiceRTC(sessionID, {
+        client: this._clientDiagnostics(pc),
+      });
+      if (this._pc === pc && !this.state.connected && !this.state.error) {
+        this._setError(formatVoiceRTCDiagnostics(diagnostics));
+      }
+    } catch {
+      if (this._pc === pc && !this.state.connected && !this.state.error) {
+        this._setError(fallback);
+      }
+    }
+  }
+
+  private _clientDiagnostics(
+    pc: RTCPeerConnection,
+  ): VoiceRTCClientDiagnostics {
+    return {
+      iceConnectionState: pc.iceConnectionState,
+      iceGatheringState: pc.iceGatheringState,
+      connectionState: pc.connectionState,
+      signalingState: pc.signalingState,
+      dataChannelState: this._dc?.readyState,
+    };
   }
 
   private _setError(message: string): void {
@@ -692,6 +729,13 @@ export class VoiceSession {
     this._speakerActive = false;
     this._pendingNotifications = [];
   }
+}
+
+function formatVoiceRTCDiagnostics(
+  diagnostics: VoiceRTCDiagnosticsResp,
+): string {
+  const side = diagnostics.side === "none" ? "unknown" : diagnostics.side;
+  return `Voice connection timed out (${side}: ${diagnostics.issue}) — ${diagnostics.message}`;
 }
 
 function gatewayContextUpdate(text: string): ContextUpdate {
