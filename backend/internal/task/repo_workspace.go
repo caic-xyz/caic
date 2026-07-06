@@ -299,7 +299,7 @@ func (w *RepoWorkspace) allocateBranchLocked(ctx context.Context, t *Task) (stri
 		branch = fmt.Sprintf("caic-%d", w.nextID)
 		w.nextID++
 		w.log.Info("creating branch", "br", branch, "base", effectiveBase)
-		err = checkout.CreateBranch(gitCtx, branch, startPoint)
+		err = checkout.CreateBranch(gitCtx, branch, startPoint, true)
 		if err == nil {
 			break
 		}
@@ -328,7 +328,7 @@ func (w *RepoWorkspace) fetchAndCreateBranch(ctx context.Context, t *Task, branc
 		startPoint = effectiveBase
 	}
 	w.log.Info("creating branch", "br", branch, "base", effectiveBase)
-	if err := checkout.CreateBranch(gitCtx, branch, startPoint); err != nil {
+	if err := checkout.CreateBranch(gitCtx, branch, startPoint, true); err != nil {
 		return fmt.Errorf("create branch: %w", err)
 	}
 	return nil

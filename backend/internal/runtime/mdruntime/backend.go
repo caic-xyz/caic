@@ -256,7 +256,7 @@ func (b *Backend) Diff(ctx context.Context, id runtime.InstanceID, repoIdx int, 
 		return "", fmt.Errorf("repo index %d out of range for %d repos", repoIdx, len(repos))
 	}
 	repo := &repos[repoIdx]
-	slog.DebugContext(ctx, "md diff", "ctr", name, "dir", repo.GitRoot, "br", repo.Branch, "args", args)
+	slog.DebugContext(ctx, "md diff", "ctr", name, "dir", repo.GitRoot, "br", primaryBranch(repo), "args", args)
 	var stdout bytes.Buffer
 	if err := ct.Diff(ctx, &stdout, &SlogWriter{Phase: "diff"}, repoIdx, args); err != nil {
 		return "", err
@@ -274,7 +274,7 @@ func (b *Backend) Fetch(ctx context.Context, id runtime.InstanceID) error {
 	}
 	repos := ct.Repos()
 	if len(repos) > 0 {
-		slog.DebugContext(ctx, "md fetch", "ctr", name, "dir", repos[0].GitRoot, "br", repos[0].Branch)
+		slog.DebugContext(ctx, "md fetch", "ctr", name, "dir", repos[0].GitRoot, "br", primaryBranch(&repos[0]))
 	}
 	for i := range repos {
 		if err := ct.Fetch(ctx, &SlogWriter{Phase: "fetch"}, &SlogWriter{Phase: "fetch"}, i, b.Provider); err != nil {
@@ -306,7 +306,7 @@ func (b *Backend) Purge(ctx context.Context, id runtime.InstanceID) error {
 	}
 	ctRepos := ct.Repos()
 	if len(ctRepos) > 0 {
-		slog.InfoContext(ctx, "md purge", "ctr", name, "dir", ctRepos[0].GitRoot, "br", ctRepos[0].Branch)
+		slog.InfoContext(ctx, "md purge", "ctr", name, "dir", ctRepos[0].GitRoot, "br", primaryBranch(&ctRepos[0]))
 	} else {
 		slog.InfoContext(ctx, "md purge", "name", name)
 	}
@@ -328,7 +328,7 @@ func (b *Backend) Revive(ctx context.Context, id runtime.InstanceID) error {
 	}
 	ctRepos := ct.Repos()
 	if len(ctRepos) > 0 {
-		slog.InfoContext(ctx, "md revive", "ctr", name, "dir", ctRepos[0].GitRoot, "br", ctRepos[0].Branch)
+		slog.InfoContext(ctx, "md revive", "ctr", name, "dir", ctRepos[0].GitRoot, "br", primaryBranch(&ctRepos[0]))
 	} else {
 		slog.InfoContext(ctx, "md revive", "name", name)
 	}
@@ -550,15 +550,27 @@ func toMDRepos(repos []runtime.Repo) []md.Repo {
 	}
 	out := make([]md.Repo, len(repos))
 	for i, r := range repos {
+		var branches []string
+		if r.Branch != "" {
+			branches = []string{r.Branch}
+		}
 		out[i] = md.Repo{
 			GitRoot:       r.HostPath,
-			Branch:        r.Branch,
+			Branches:      branches,
 			MountedPath:   r.MountPath,
 			DefaultRemote: r.Remote,
 			DefaultBranch: r.BaseBranch,
 		}
 	}
 	return out
+}
+
+// primaryBranch returns the primary branch of an md repo, or "" if it has none.
+func primaryBranch(r *md.Repo) string {
+	if len(r.Branches) == 0 {
+		return ""
+	}
+	return r.Branches[0]
 }
 
 func fromMDRepos(repos []md.Repo) []runtime.Repo {
@@ -570,7 +582,7 @@ func fromMDRepos(repos []md.Repo) []runtime.Repo {
 		out[i] = runtime.Repo{
 			HostPath:   r.GitRoot,
 			MountPath:  r.MountedPath,
-			Branch:     r.Branch,
+			Branch:     primaryBranch(&r),
 			BaseBranch: r.DefaultBranch,
 			Remote:     r.DefaultRemote,
 		}

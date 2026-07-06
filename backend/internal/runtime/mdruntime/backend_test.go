@@ -231,8 +231,8 @@ func TestBackend(t *testing.T) {
 	t.Run("Diff", func(t *testing.T) {
 		t.Parallel()
 		ctr := &fakeMDContainer{repos: []md.Repo{
-			{GitRoot: "/home/user/src/caic", Branch: "caic-7", MountedPath: "/home/user/src/caic"},
-			{GitRoot: "/home/user/src/genai", Branch: "caic-0", MountedPath: "/home/user/src/genai"},
+			{GitRoot: "/home/user/src/caic", Branches: []string{"caic-7"}, MountedPath: "/home/user/src/caic"},
+			{GitRoot: "/home/user/src/genai", Branches: []string{"caic-0"}, MountedPath: "/home/user/src/genai"},
 		}}
 		fc := &fakeMDClient{getResult: ctr}
 		b := newTestBackend(fc)
@@ -253,8 +253,8 @@ func TestBackend(t *testing.T) {
 	t.Run("Fetch", func(t *testing.T) {
 		t.Parallel()
 		ctr := &fakeMDContainer{repos: []md.Repo{
-			{GitRoot: "/home/user/src/caic", Branch: "caic-7", MountedPath: "/home/user/src/caic"},
-			{GitRoot: "/home/user/src/genai", Branch: "caic-0", MountedPath: "/home/user/src/genai"},
+			{GitRoot: "/home/user/src/caic", Branches: []string{"caic-7"}, MountedPath: "/home/user/src/caic"},
+			{GitRoot: "/home/user/src/genai", Branches: []string{"caic-0"}, MountedPath: "/home/user/src/genai"},
 		}}
 		fc := &fakeMDClient{getResult: ctr}
 		b := newTestBackend(fc)
@@ -328,7 +328,7 @@ func TestBackend(t *testing.T) {
 
 	t.Run("Purge", func(t *testing.T) {
 		t.Parallel()
-		ctr := &fakeMDContainer{name: "ctr-1", repos: []md.Repo{{GitRoot: "/repo", Branch: "caic-0", MountedPath: "/repo"}}}
+		ctr := &fakeMDContainer{name: "ctr-1", repos: []md.Repo{{GitRoot: "/repo", Branches: []string{"caic-0"}, MountedPath: "/repo"}}}
 		fc := &fakeMDClient{getResult: ctr}
 		b := newTestBackend(fc)
 		if err := b.Purge(t.Context(), "ctr-1"); err != nil {
@@ -347,7 +347,7 @@ func TestBackend(t *testing.T) {
 
 	t.Run("Revive", func(t *testing.T) {
 		t.Parallel()
-		ctr := &fakeMDContainer{name: "ctr-1", vncPort: 5903, repos: []md.Repo{{GitRoot: "/repo", Branch: "caic-0", MountedPath: "/repo"}}}
+		ctr := &fakeMDContainer{name: "ctr-1", vncPort: 5903, repos: []md.Repo{{GitRoot: "/repo", Branches: []string{"caic-0"}, MountedPath: "/repo"}}}
 		fc := &fakeMDClient{getResult: ctr}
 		b := newTestBackend(fc)
 		if err := b.Revive(t.Context(), "ctr-1"); err != nil {
@@ -369,7 +369,7 @@ func TestBackend(t *testing.T) {
 
 	t.Run("Fork", func(t *testing.T) {
 		t.Parallel()
-		src := &fakeMDContainer{forkResult: &fakeMDContainer{name: "fork-1", vncPort: 5902, repos: []md.Repo{{Branch: "caic-2"}}}}
+		src := &fakeMDContainer{forkResult: &fakeMDContainer{name: "fork-1", vncPort: 5902, repos: []md.Repo{{Branches: []string{"caic-2"}}}}}
 		b := newTestBackend(&fakeMDClient{getResult: src})
 		name, conn, repos, err := b.Fork(t.Context(), "src", nil, &runtime.ForkOptions{Harness: harness.Claude})
 		if err != nil {
