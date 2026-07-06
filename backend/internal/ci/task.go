@@ -11,7 +11,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
-	"github.com/caic-xyz/caic/backend/internal/repowork"
+	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
@@ -50,7 +50,7 @@ type Backend interface {
 
 	// Tasks.
 	CreateTask(ctx context.Context, req bot.TaskRequest) (string, error)
-	GetWorkspace(relPath string) (*repowork.RepoWorkspace, bool)
+	GetWorkspace(relPath string) (*repowork.Workspace, bool)
 	SetTaskMonitorBranch(entry TaskEntry, branch string)
 
 	// Repos.

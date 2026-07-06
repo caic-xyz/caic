@@ -1,6 +1,6 @@
 // In-package fake runtime inventory, monitor, and privilege info for Manager tests.
 
-package tasks
+package taskmgr
 
 import (
 	"context"

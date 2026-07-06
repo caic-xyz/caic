@@ -18,7 +18,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/tasks"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	voiceapi "github.com/caic-xyz/caic/gomode/voicegateway/api"
 )
 
@@ -49,16 +49,16 @@ func handle[In any, PtrIn interface {
 }
 
 type taskEntryResolver interface {
-	getTask(r *http.Request) (*tasks.Entry, error)
+	getTask(r *http.Request) (*taskmgr.Entry, error)
 	notifyTaskChange()
 }
 
-// handleWithTask wraps a typed handler that also needs the resolved *tasks.Entry.
+// handleWithTask wraps a typed handler that also needs the resolved *taskmgr.Entry.
 // It parses {id}, looks up the task via resolver.getTask, then proceeds like handle.
 func handleWithTask[In any, PtrIn interface {
 	*In
 	validatable
-}, Out any](resolver taskEntryResolver, fn func(context.Context, *tasks.Entry, PtrIn) (*Out, error)) http.HandlerFunc {
+}, Out any](resolver taskEntryResolver, fn func(context.Context, *taskmgr.Entry, PtrIn) (*Out, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		entry, err := resolver.getTask(r)
 		if err != nil {
@@ -82,7 +82,7 @@ func handleWithTask[In any, PtrIn interface {
 	}
 }
 
-// toDTO maps a tasks.Error to the matching API error so the HTTP layer can
+// toDTO maps a taskmgr.Error to the matching API error so the HTTP layer can
 // emit the correct status code. A nil error returns nil. An error that is
 // already an API error (ErrorWithStatus) is returned unchanged. Any other error
 // falls back to a 500.
@@ -90,21 +90,21 @@ func toDTO(err error) error {
 	if err == nil {
 		return nil
 	}
-	var te *tasks.Error
+	var te *taskmgr.Error
 	if errors.As(err, &te) {
 		// Map every kind via te.Error() so a wrapped cause (e.g. the plan-read
 		// failure on restart, or the compact no-session error) is preserved in
 		// the message. Error() == Msg when there is no wrapped error.
 		switch te.Kind {
-		case tasks.KindNotFound:
+		case taskmgr.KindNotFound:
 			// api.NotFound appends " not found"; trim it from the manager's
 			// message (e.g. "task X not found") to avoid a doubled suffix.
 			return api.NotFound(strings.TrimSuffix(te.Error(), " not found"))
-		case tasks.KindConflict:
+		case taskmgr.KindConflict:
 			return api.Conflict(te.Error())
-		case tasks.KindBadRequest:
+		case taskmgr.KindBadRequest:
 			return api.BadRequest(te.Error())
-		case tasks.KindInternal:
+		case taskmgr.KindInternal:
 			return api.InternalError(te.Error())
 		default:
 			return api.InternalError(te.Error())

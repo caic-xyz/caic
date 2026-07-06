@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/forge"
-	"github.com/caic-xyz/caic/backend/internal/harness"
 )
 
 func TestTaskListEvent(t *testing.T) {

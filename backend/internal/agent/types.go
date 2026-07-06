@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/harness"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
 // DiffFileStat describes changes to a single file.

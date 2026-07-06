@@ -7,7 +7,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/tasks"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
 // localUsageWindows defines the rolling time windows for local cost aggregation.
@@ -24,14 +24,14 @@ var localUsageWindows = []struct {
 // across all tasks.
 //
 // For running tasks without a final result, the current live stats are used.
-func LocalUsage(mgr *tasks.Manager, now time.Time) v1.LocalUsage {
+func LocalUsage(mgr *taskmgr.Manager, now time.Time) v1.LocalUsage {
 	out := v1.LocalUsage{
 		Windows: make([]v1.LocalWindow, len(localUsageWindows)),
 	}
 	for i, w := range localUsageWindows {
 		out.Windows[i] = v1.LocalWindow{Duration: w.label}
 	}
-	mgr.Range(func(_ string, e *tasks.Entry) bool {
+	mgr.Range(func(_ string, e *taskmgr.Entry) bool {
 		t := e.Task()
 		if t.StartedAt.IsZero() {
 			return true

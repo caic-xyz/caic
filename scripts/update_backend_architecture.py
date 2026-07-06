@@ -47,9 +47,10 @@ GROUP_RULES = (
     ),
     GroupRule(
         "Task Runtime",
-        exact=("internal/runtime", "internal/runtime/mdruntime", "internal/task", "internal/tasks"),
-        prefixes=("internal/runtime/", "internal/task/", "internal/tasks/"),
+        exact=("internal/runtime", "internal/runtime/mdruntime", "internal/task"),
+        prefixes=("internal/runtime/", "internal/task/"),
     ),
+    GroupRule("Repo", exact=("internal/repo",), prefixes=("internal/repo/",)),
     GroupRule("Support", prefixes=("internal/",)),
 )
 REQUIRED_PACKAGE_PATHS = frozenset(path for rule in GROUP_RULES for path in rule.exact)

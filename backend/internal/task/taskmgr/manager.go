@@ -1,17 +1,16 @@
-// Package tasks orchestrates task lifecycle management: creation, execution,
+// Package taskmgr orchestrates task lifecycle management: creation, execution,
 // session watching, stats streaming, and instance adoption.
 //
 // It sits between the HTTP adapter (internal/server) and the domain layer
-// (internal/task). The one-letter difference from the singular "task" package
-// is deliberate: task.Task / repowork.RepoWorkspace are domain types, while
-// tasks.Manager is the orchestration layer.
+// (internal/task): task.Task / repowork.Workspace are domain types, while
+// taskmgr.Manager is the orchestration layer built on top of them.
 //
 // Two contexts coexist here. Methods accept a request-scoped ctx that is
 // honored for synchronous work (state checks, logging). Background goroutines
 // that must outlive any single request (session watchers, stats poller, fire-
 // and-forget title generation) use serverCtx instead — it tracks the lifetime
 // of the Manager itself.
-package tasks
+package taskmgr
 
 import (
 	"context"
@@ -31,9 +30,9 @@ import (
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/harness"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
-	"github.com/caic-xyz/caic/backend/internal/repowork"
+	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
@@ -90,7 +89,7 @@ type Config struct {
 	RuntimeStartTimeout time.Duration
 	Prefs               *preferences.Store
 	Provider            genai.Provider // nil-safe
-	WorkspaceRegistry   *repowork.WorkspaceRegistry
+	WorkspaceRegistry   *repowork.Registry
 }
 
 // Manager owns task lifecycle state, instance adoption, session watching, and
@@ -110,7 +109,7 @@ type Manager struct {
 	runtimeStartTimeout time.Duration
 	prefs               *preferences.Store
 	provider            genai.Provider
-	workspaceRegistry   *repowork.WorkspaceRegistry
+	workspaceRegistry   *repowork.Registry
 	relay               relayReader
 
 	// Guarded by mu.
@@ -124,7 +123,7 @@ type Manager struct {
 func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passed once at construction
 	workspaceRegistry := cfg.WorkspaceRegistry
 	if workspaceRegistry == nil {
-		workspaceRegistry = repowork.NewWorkspaceRegistry(cfg.ServerCtx, cfg.Backend)
+		workspaceRegistry = repowork.NewRegistry(cfg.ServerCtx, cfg.Backend)
 	}
 	m := &Manager{
 		serverCtx:           cfg.ServerCtx,
@@ -146,7 +145,7 @@ func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passe
 		changed:             make(chan struct{}),
 	}
 	if _, ok := workspaceRegistry.Workspace(""); !ok {
-		noRepoWorkspace, err := repowork.NewRepoWorkspace("", "", "", time.Minute, cfg.Backend, slog.With("repo", "(none)"))
+		noRepoWorkspace, err := repowork.NewWorkspace("", "", "", time.Minute, cfg.Backend, slog.With("repo", "(none)"))
 		if err != nil {
 			panic(err)
 		}
@@ -164,12 +163,12 @@ func (m *Manager) Start() {
 
 // RegisterWorkspace registers a task repo workspace keyed by relPath.
 // "" registers the no-repo workspace.
-func (m *Manager) RegisterWorkspace(relPath string, r *repowork.RepoWorkspace) {
+func (m *Manager) RegisterWorkspace(relPath string, r *repowork.Workspace) {
 	m.workspaceRegistry.RegisterWorkspace(relPath, r)
 }
 
 // Workspace returns the repo workspace for relPath, or nil.
-func (m *Manager) Workspace(relPath string) (*repowork.RepoWorkspace, bool) {
+func (m *Manager) Workspace(relPath string) (*repowork.Workspace, bool) {
 	return m.workspaceRegistry.Workspace(relPath)
 }
 
@@ -177,7 +176,7 @@ func (m *Manager) Workspace(relPath string) (*repowork.RepoWorkspace, bool) {
 // the registry and invokes fn unlocked, so fn may safely call back into the
 // Manager. The workspace set is a point-in-time snapshot. Stops iteration if fn
 // returns false.
-func (m *Manager) RangeWorkspaces(fn func(relPath string, r *repowork.RepoWorkspace) bool) {
+func (m *Manager) RangeWorkspaces(fn func(relPath string, r *repowork.Workspace) bool) {
 	m.workspaceRegistry.RangeWorkspaces(fn)
 }
 
@@ -252,7 +251,7 @@ func (m *Manager) Changed() <-chan struct{} {
 // Create handles the HTTP task creation path.
 func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { //nolint:gocritic // CreateParams is a request-shaped value bag
 	// Resolve primary workspace.
-	var primaryWorkspace *repowork.RepoWorkspace
+	var primaryWorkspace *repowork.Workspace
 	if len(p.Repos) > 0 {
 		r, ok := m.Workspace(p.Repos[0].Name)
 		if !ok {
@@ -265,7 +264,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 	}
 
 	// Validate and resolve extra repo workspaces.
-	extraWorkspaces := make([]*repowork.RepoWorkspace, 0, max(0, len(p.Repos)-1))
+	extraWorkspaces := make([]*repowork.Workspace, 0, max(0, len(p.Repos)-1))
 	for _, rs := range p.Repos[min(1, len(p.Repos)):] {
 		er, ok := m.Workspace(rs.Name)
 		if !ok {
@@ -1060,7 +1059,7 @@ func (m *Manager) LoadPurgedTasks(all []*task.LoadedTask) error {
 }
 
 // Cleanup is the exported variant of cleanupTask, idempotent per incarnation.
-func (m *Manager) Cleanup(entry *Entry, workspace *repowork.RepoWorkspace, reason task.State) {
+func (m *Manager) Cleanup(entry *Entry, workspace *repowork.Workspace, reason task.State) {
 	m.cleanupTask(entry, workspace, reason)
 }
 
@@ -1125,11 +1124,11 @@ func (m *Manager) logStore() *task.LogStore {
 	return &task.LogStore{LogDir: m.logDir, EventReplayFactory: m.eventReplayFactory}
 }
 
-func (m *Manager) sessions(r *repowork.RepoWorkspace) *task.SessionRunner {
+func (m *Manager) sessions(r *repowork.Workspace) *task.SessionRunner {
 	return &task.SessionRunner{Backends: m.backends, Workspace: r, Logs: m.logStore()}
 }
 
-func (m *Manager) runner(r *repowork.RepoWorkspace) *task.Runner {
+func (m *Manager) runner(r *repowork.Workspace) *task.Runner {
 	return &task.Runner{Workspace: r, Sessions: m.sessions(r), RuntimeStartTimeout: m.runtimeStartTimeout}
 }
 
@@ -1144,7 +1143,7 @@ func (m *Manager) mountPathForRepo(relPath string) string {
 func (m *Manager) repoBasenameCollides(relPath string) bool {
 	base := filepath.Base(relPath)
 	collides := false
-	m.RangeWorkspaces(func(other string, _ *repowork.RepoWorkspace) bool {
+	m.RangeWorkspaces(func(other string, _ *repowork.Workspace) bool {
 		if other != "" && other != relPath && filepath.Base(other) == base {
 			collides = true
 			return false
@@ -1363,7 +1362,7 @@ func (m *Manager) taskChanged() {
 // resolveWorkspace returns the repo workspace for a task's primary repo, or the
 // always-present no-repo workspace. Both are guaranteed non-nil: New()
 // registers "", and callers must register repo-specific workspaces.
-func (m *Manager) resolveWorkspace(t *task.Task) *repowork.RepoWorkspace {
+func (m *Manager) resolveWorkspace(t *task.Task) *repowork.Workspace {
 	key := ""
 	if p := t.Primary(); p != nil {
 		key = p.Name
@@ -1515,7 +1514,7 @@ func messagesContainInit(msgs []agent.Message) bool {
 }
 
 // adoptOne investigates a single runtime instance and registers it as a task.
-func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowork.RepoWorkspace, c *runtime.Instance, branch string, branchIDs map[string][]string, allLogs []*task.LoadedTask) (*AdoptedTask, error) { //nolint:gocritic // massive function from existing code; refactor deferred
+func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowork.Workspace, c *runtime.Instance, branch string, branchIDs map[string][]string, allLogs []*task.LoadedTask) (*AdoptedTask, error) { //nolint:gocritic // massive function from existing code; refactor deferred
 	ctx, adoptTask := trace.NewTask(ctx, "adopt-instance")
 	defer adoptTask.End()
 	trace.Logf(ctx, "instance", "%s repo=%s branch=%s", c.ID, ri.RelPath, branch)
@@ -1925,7 +1924,7 @@ func writeTaskResultTrailer(t *task.Task, r *task.Result) error {
 	return t.WriteToLog(msg)
 }
 
-func refreshAdoptedDiffStat(ctx context.Context, workspace *repowork.RepoWorkspace, t *task.Task) {
+func refreshAdoptedDiffStat(ctx context.Context, workspace *repowork.Workspace, t *task.Task) {
 	switch t.GetState() {
 	case task.StateWaiting, task.StateAsking, task.StateHasPlan:
 	default:
@@ -1964,7 +1963,7 @@ func (m *Manager) loadTaskMessagesOnDemand(entry *Entry) {
 
 // watchSession monitors a single active session. Clean session exits move the
 // task to StateWaiting; SSH/session errors fail the task and stop the instance.
-func (m *Manager) watchSession(entry *Entry, workspace *repowork.RepoWorkspace, h *task.SessionHandle) {
+func (m *Manager) watchSession(entry *Entry, workspace *repowork.Workspace, h *task.SessionHandle) {
 	go func() {
 		t := entry.Task()
 		traceCtx, tk := trace.NewTask(m.serverCtx, "session.watch:"+t.ID.String())
@@ -2055,7 +2054,7 @@ func (m *Manager) watchSession(entry *Entry, workspace *repowork.RepoWorkspace, 
 	}()
 }
 
-func (m *Manager) stopFailedSessionInstance(_ *repowork.RepoWorkspace, t *task.Task, attrs []any) {
+func (m *Manager) stopFailedSessionInstance(_ *repowork.Workspace, t *task.Task, attrs []any) {
 	if m.backend == nil {
 		return
 	}
@@ -2069,7 +2068,7 @@ func (m *Manager) stopFailedSessionInstance(_ *repowork.RepoWorkspace, t *task.T
 }
 
 // cleanupTask runs workspace.Cleanup exactly once per task.
-func (m *Manager) cleanupTask(entry *Entry, workspace *repowork.RepoWorkspace, reason task.State) {
+func (m *Manager) cleanupTask(entry *Entry, workspace *repowork.Workspace, reason task.State) {
 	entry.Cleanup(func() {
 		start := time.Now()
 		t := entry.Task()

@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/harness"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
 const cacheMaxAge = 24 * time.Hour

@@ -7,15 +7,15 @@ import (
 	"log/slog"
 
 	"github.com/caic-xyz/caic/backend/internal/ci"
-	"github.com/caic-xyz/caic/backend/internal/reporeg"
-	"github.com/caic-xyz/caic/backend/internal/repos"
+	"github.com/caic-xyz/caic/backend/internal/repo"
+	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
 )
 
-func newRepoWatcher(ctx context.Context, absRoot string, repoService *repos.Service, repoStatus *ci.RepoStatusStore) *repos.Watcher {
-	return repos.NewWatcher(&repos.WatcherConfig{
+func newRepoWatcher(ctx context.Context, absRoot string, repoService *repomgr.Service, repoStatus *ci.RepoStatusStore) *repomgr.Watcher {
+	return repomgr.NewWatcher(&repomgr.WatcherConfig{
 		Ctx:             ctx,
 		AbsRoot:         absRoot,
-		Repos:           func() []reporeg.Info { return watchedRepos(repoService) },
+		Repos:           func() []repo.Info { return watchedRepos(repoService) },
 		RelPath:         repoService.RelPath,
 		WorkspaceExists: repoService.WorkspaceRegistered,
 		OnDiscovered: func(ctx context.Context, abs string) {
@@ -25,11 +25,11 @@ func newRepoWatcher(ctx context.Context, absRoot string, repoService *repos.Serv
 	})
 }
 
-func watchedRepos(repoService *repos.Service) []reporeg.Info {
+func watchedRepos(repoService *repomgr.Service) []repo.Info {
 	snap := repoService.Snapshot()
-	out := make([]reporeg.Info, len(snap))
+	out := make([]repo.Info, len(snap))
 	for i := range snap {
-		out[i] = reporeg.Info{
+		out[i] = repo.Info{
 			RelPath:    snap[i].RelPath,
 			AbsPath:    snap[i].AbsPath,
 			BaseBranch: snap[i].BaseBranch,
@@ -38,7 +38,7 @@ func watchedRepos(repoService *repos.Service) []reporeg.Info {
 	return out
 }
 
-func registerDiscoveredRepo(ctx context.Context, repoService *repos.Service, repoStatus *ci.RepoStatusStore, abs string) {
+func registerDiscoveredRepo(ctx context.Context, repoService *repomgr.Service, repoStatus *ci.RepoStatusStore, abs string) {
 	result, err := repoService.DiscoverWorkspace(ctx, abs)
 	if err != nil {
 		slog.WarnContext(ctx, "new repo: discovery failed", "path", abs, "err", err)
@@ -51,8 +51,8 @@ func registerDiscoveredRepo(ctx context.Context, repoService *repos.Service, rep
 	slog.InfoContext(ctx, "discovered new repo", "path", result.Info.RelPath, "br", result.Info.BaseBranch)
 }
 
-func moveRepoStatus(repoStatus *ci.RepoStatusStore) func(reporeg.RelPathMove) {
-	return func(move reporeg.RelPathMove) {
+func moveRepoStatus(repoStatus *ci.RepoStatusStore) func(repo.Move) {
+	return func(move repo.Move) {
 		repoStatus.Move(move.OldRel, move.NewRel)
 	}
 }

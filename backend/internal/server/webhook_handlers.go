@@ -16,13 +16,13 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
-	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/forge/gitlab"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
-	"github.com/caic-xyz/caic/backend/internal/reporeg"
-	"github.com/caic-xyz/caic/backend/internal/repos"
-	"github.com/caic-xyz/caic/backend/internal/tasks"
+	"github.com/caic-xyz/caic/backend/internal/repo"
+	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
 const maxWebhookBodyBytes = 10 << 20 // 10 MB
@@ -42,9 +42,9 @@ type WebhookHandlers struct {
 	bot        *bot.Bot
 	ciService  *ci.Service
 	ciCache    *forgecache.Cache
-	forge      *forgemanager.Manager
-	taskMgr    *tasks.Manager
-	repos      *repos.Service
+	forgeMgr   *forgemgr.Manager
+	taskMgr    *taskmgr.Manager
+	repoSvc    *repomgr.Service
 	repoStatus *ci.RepoStatusStore
 	prefs      *preferences.Store
 }
@@ -223,13 +223,13 @@ func signaturePresence(sig string) string {
 // webhookOnCI handles a CI completion event from a forge webhook by fetching
 // the current check-run state and updating affected tasks and repos.
 func (h *WebhookHandlers) webhookOnCI(ctx context.Context, kind forge.Kind, owner, repoName, sha string) {
-	f := h.forge.ForgeFor(ctx, kind)
+	f := h.forgeMgr.ForgeFor(ctx, kind)
 	if f == nil {
 		return
 	}
 
 	affected := h.taskMgr.FindTasksMonitoringBranch(owner, repoName)
-	affectedRepoPaths := h.repoStatus.PathsAtSHA(repoRefs(h.repos.Snapshot()), owner, repoName, sha)
+	affectedRepoPaths := h.repoStatus.PathsAtSHA(repoRefs(h.repoSvc.Snapshot()), owner, repoName, sha)
 
 	if len(affected) == 0 && len(affectedRepoPaths) == 0 {
 		return
@@ -298,7 +298,7 @@ func (h *WebhookHandlers) handleIssuesEvent(ctx context.Context, ev *github.Issu
 		Body:          ev.Issue.Body,
 		HTMLURL:       ev.Issue.HTMLURL,
 		Labels:        labels,
-	}, h.forge.CommenterFor(ev.Installation.ID))
+	}, h.forgeMgr.CommenterFor(ev.Installation.ID))
 }
 
 // handlePullRequestEvent creates a task when a PR is opened or reopened,
@@ -361,7 +361,7 @@ func (h *WebhookHandlers) handlePRForExistingTask(ctx context.Context, ev *githu
 			entry.Task().SetPR(owner, repoName, prNumber)
 			// Start CI monitoring.
 			if ri, ok := h.repoByForge(owner + "/" + repoName); ok {
-				f := h.forge.ForgeFor(ctx, ri.ForgeKind)
+				f := h.forgeMgr.ForgeFor(ctx, ri.ForgeKind)
 				if f != nil {
 					entry.SetMonitorBranch(branch)
 					go h.ciService.MonitorCI(ctx, entry, f, owner, repoName, sha)
@@ -372,7 +372,7 @@ func (h *WebhookHandlers) handlePRForExistingTask(ctx context.Context, ev *githu
 			slog.InfoContext(ctx, "webhook: restarting CI monitor for PR",
 				"task", entry.Task().ID, "repo", owner+"/"+repoName, "br", branch, "pr", prNumber, "sha", sha[:min(7, len(sha))])
 			if ri, ok := h.repoByForge(owner + "/" + repoName); ok {
-				go h.ciService.MonitorCI(ctx, entry, h.forge.ForgeFor(ctx, ri.ForgeKind), owner, repoName, sha)
+				go h.ciService.MonitorCI(ctx, entry, h.forgeMgr.ForgeFor(ctx, ri.ForgeKind), owner, repoName, sha)
 			}
 		}
 	}
@@ -452,7 +452,7 @@ func (h *WebhookHandlers) handleIssueCommentEvent(ctx context.Context, ev *githu
 		IssueTitle:    ev.Issue.Title,
 		CommentBody:   ev.Comment.Body,
 		CommentURL:    ev.Comment.HTMLURL,
-	}, h.forge.CommenterFor(ev.Installation.ID))
+	}, h.forgeMgr.CommenterFor(ev.Installation.ID))
 }
 
 // handleInstallationEvent enforces the owner allowlist on new installs.
@@ -464,15 +464,15 @@ func (h *WebhookHandlers) handleInstallationEvent(ctx context.Context, ev *githu
 	}
 	login := ev.Installation.Account.Login
 	if h.appAllowedOwners == nil {
-		h.forge.StoreInstallationID(login, ev.Installation.ID)
+		h.forgeMgr.StoreInstallationID(login, ev.Installation.ID)
 		return
 	}
 	if slices.Contains(h.appAllowedOwners, strings.ToLower(login)) {
-		h.forge.StoreInstallationID(login, ev.Installation.ID)
+		h.forgeMgr.StoreInstallationID(login, ev.Installation.ID)
 		return
 	}
 	slog.WarnContext(ctx, "github app: rejecting installation from non-allowed owner", "owner", login, "installation_id", ev.Installation.ID)
-	if err := h.forge.GitHubApp().DeleteInstallation(ctx, ev.Installation.ID); err != nil {
+	if err := h.forgeMgr.GitHubApp().DeleteInstallation(ctx, ev.Installation.ID); err != nil {
 		slog.WarnContext(ctx, "github app: delete installation failed", "owner", login, "err", err)
 	}
 }
@@ -491,7 +491,7 @@ func (h *WebhookHandlers) handleCheckSuiteEvent(ctx context.Context, ev *github.
 	h.storeInstallationIDFromFullName(ev.Repository.FullName, ev.Installation.ID)
 
 	sha := ev.CheckSuite.HeadSHA
-	client, err := h.forge.GitHubApp().ForgeClient(ctx, ev.Installation.ID)
+	client, err := h.forgeMgr.GitHubApp().ForgeClient(ctx, ev.Installation.ID)
 	if err != nil {
 		slog.WarnContext(ctx, "handleCheckSuiteEvent: forge client", "err", err)
 		return
@@ -538,20 +538,20 @@ func (h *WebhookHandlers) handleCheckSuiteEvent(ctx context.Context, ev *github.
 func (h *WebhookHandlers) storeInstallationIDFromFullName(fullName string, id int64) {
 	owner, _, ok := strings.Cut(fullName, "/")
 	if ok {
-		h.forge.StoreInstallationID(owner, id)
+		h.forgeMgr.StoreInstallationID(owner, id)
 	}
 }
 
 // repoByForge returns a copy of the RepoInfo whose forge matches "owner/repo".
-func (h *WebhookHandlers) repoByForge(fullName string) (reporeg.Info, bool) {
+func (h *WebhookHandlers) repoByForge(fullName string) (repo.Info, bool) {
 	owner, repoName, ok := strings.Cut(fullName, "/")
 	if !ok {
-		return reporeg.Info{}, false
+		return repo.Info{}, false
 	}
-	return h.repos.ByForge(owner, repoName)
+	return h.repoSvc.ByForge(owner, repoName)
 }
 
-func repoRefs(snap []reporeg.Info) []ci.RepoRef {
+func repoRefs(snap []repo.Info) []ci.RepoRef {
 	refs := make([]ci.RepoRef, len(snap))
 	for i := range snap {
 		refs[i] = ci.RepoRef{RelPath: snap[i].RelPath, ForgeOwner: snap[i].ForgeOwner, ForgeRepo: snap[i].ForgeRepo}

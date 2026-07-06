@@ -1,4 +1,4 @@
-// Tests for RepoWorkspace: branch allocation, git sync, and diff operations.
+// Tests for Workspace: branch allocation, git sync, and diff operations.
 
 package repowork
 
@@ -23,17 +23,17 @@ import (
 // cycle.
 type fakeTaskView struct {
 	instanceID runtime.InstanceID
-	repos      []runtime.Repo
+	repo       []runtime.Repo
 	baseBranch string
 }
 
 func (f *fakeTaskView) RuntimeInstanceID() runtime.InstanceID { return f.instanceID }
-func (f *fakeTaskView) RuntimeRepos() []runtime.Repo          { return f.repos }
-func (f *fakeTaskView) SetRepoBranch(i int, branch string)    { f.repos[i].Branch = branch }
+func (f *fakeTaskView) RuntimeRepos() []runtime.Repo          { return f.repo }
+func (f *fakeTaskView) SetRepoBranch(i int, branch string)    { f.repo[i].Branch = branch }
 func (f *fakeTaskView) PrimaryBaseBranch() string             { return f.baseBranch }
 
-func newTestRepoWorkspace(baseBranch, dir string, backend runtime.Backend) *RepoWorkspace {
-	workspace, err := NewRepoWorkspace(baseBranch, dir, filepath.Base(dir), time.Minute, backend, slog.With("repo", "test"))
+func newTestRepoWorkspace(baseBranch, dir string, backend runtime.Backend) *Workspace {
+	workspace, err := NewWorkspace(baseBranch, dir, filepath.Base(dir), time.Minute, backend, slog.With("repo", "test"))
 	if err != nil {
 		panic(err)
 	}
@@ -110,7 +110,7 @@ func TestRepoWorkspace(t *testing.T) {
 		t.Parallel()
 		sc := &stubContainer{}
 		r := newTestRepoWorkspace("", "/repo", sc)
-		tv := &fakeTaskView{instanceID: "ctr-1", repos: []runtime.Repo{{HostPath: "/repo", Branch: "feature"}}}
+		tv := &fakeTaskView{instanceID: "ctr-1", repo: []runtime.Repo{{HostPath: "/repo", Branch: "feature"}}}
 		ds := r.BranchDiffStat(t.Context(), tv)
 		if !sc.fetched {
 			t.Error("BranchDiffStat did not call Fetch")
@@ -126,7 +126,7 @@ func TestRepoWorkspace(t *testing.T) {
 		t.Parallel()
 		sc := &stubContainer{}
 		r := newTestRepoWorkspace("", "/home/user/src/caic", sc)
-		tv := &fakeTaskView{instanceID: "ctr-2", repos: []runtime.Repo{
+		tv := &fakeTaskView{instanceID: "ctr-2", repo: []runtime.Repo{
 			{HostPath: "/home/user/src/caic", Branch: "caic-7", MountPath: "/home/user/src/caic"},
 			{HostPath: "/home/user/src/genai", Branch: "caic-0", MountPath: "/home/user/src/genai"},
 		}}
@@ -172,7 +172,7 @@ func TestTaskRuntime(t *testing.T) {
 	t.Run("valid_preserves_mounted_path", func(t *testing.T) {
 		t.Parallel()
 		r := newTestRepoWorkspace("", "/home/user/src/caic-xyz/caic", nil)
-		tv := &fakeTaskView{instanceID: "ctr-1", repos: []runtime.Repo{
+		tv := &fakeTaskView{instanceID: "ctr-1", repo: []runtime.Repo{
 			{Branch: "caic-7", MountPath: "/home/user/src/caic-xyz/caic"},
 			{Branch: "caic-0", HostPath: "/home/user/src/caic-xyz/md", MountPath: "/home/user/src/caic-xyz/md"},
 		}}

@@ -1,6 +1,6 @@
 // Tests for the background repo watcher's directory-collection helper.
 
-package repos
+package repomgr
 
 import (
 	"os"

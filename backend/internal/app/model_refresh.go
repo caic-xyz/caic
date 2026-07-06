@@ -11,14 +11,14 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/harness"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
-	"github.com/caic-xyz/caic/backend/internal/tasks"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
 // refreshHarnessModels checks if any harness caches are stale and refreshes
 // them by launching a temporary runtime instance.
-func refreshHarnessModels(ctx context.Context, cacheDir string, backend runtime.Backend, taskMgr *tasks.Manager, harnessEnv map[string][]string) {
+func refreshHarnessModels(ctx context.Context, cacheDir string, backend runtime.Backend, taskMgr *taskmgr.Manager, harnessEnv map[string][]string) {
 	cache := agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
 
 	fetchers := map[harness.Name]agent.ModelFetcher{}
@@ -42,7 +42,7 @@ func refreshOneHarness(
 	ctx context.Context,
 	cache *agent.HarnessCache,
 	backend runtime.Backend,
-	taskMgr *tasks.Manager,
+	taskMgr *taskmgr.Manager,
 	h harness.Name,
 	fetcher agent.ModelFetcher,
 	env []string,

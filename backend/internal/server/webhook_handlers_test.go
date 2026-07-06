@@ -20,36 +20,36 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
-	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/forge/gitlab"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
-	"github.com/caic-xyz/caic/backend/internal/reporeg"
-	"github.com/caic-xyz/caic/backend/internal/repos"
-	"github.com/caic-xyz/caic/backend/internal/repowork"
+	"github.com/caic-xyz/caic/backend/internal/repo"
+	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
+	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
-	"github.com/caic-xyz/caic/backend/internal/tasks"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
 // testCIBackend is a minimal ci.Backend wired to a repo/task store, sufficient
 // for webhook handler tests that drive CI status updates through ci.Service.
 type testCIBackend struct {
-	repos      *repos.Service
+	repoSvc    *repomgr.Service
 	repoStatus *ci.RepoStatusStore
-	taskMgr    *tasks.Manager
-	forge      *forgemanager.Manager
+	taskMgr    *taskmgr.Manager
+	forgeMgr   *forgemgr.Manager
 	prefs      *preferences.Store
 }
 
-func (b *testCIBackend) GitHubApp() ci.GitHubAppClient { return b.forge.GitHubApp() }
+func (b *testCIBackend) GitHubApp() ci.GitHubAppClient { return b.forgeMgr.GitHubApp() }
 
 func (b *testCIBackend) ForgeForInfo(ctx context.Context, info *ci.RepoInfo) forge.Forge {
-	return b.forge.ForgeForInfo(ctx, &reporeg.Info{ForgeKind: info.ForgeKind, ForgeOwner: info.ForgeOwner, ForgeRepo: info.ForgeRepo})
+	return b.forgeMgr.ForgeForInfo(ctx, &repo.Info{ForgeKind: info.ForgeKind, ForgeOwner: info.ForgeOwner, ForgeRepo: info.ForgeRepo})
 }
 
 func (b *testCIBackend) CreateTask(context.Context, bot.TaskRequest) (string, error) { return "", nil }
 
-func (b *testCIBackend) GetWorkspace(relPath string) (*repowork.RepoWorkspace, bool) {
+func (b *testCIBackend) GetWorkspace(relPath string) (*repowork.Workspace, bool) {
 	return b.taskMgr.Workspace(relPath)
 }
 
@@ -58,7 +58,7 @@ func (b *testCIBackend) SetTaskMonitorBranch(entry ci.TaskEntry, branch string) 
 }
 
 func (b *testCIBackend) RepoInfoFor(relPath string) ci.RepoInfo {
-	r, ok := b.repos.InfoFor(relPath)
+	r, ok := b.repoSvc.InfoFor(relPath)
 	if !ok {
 		return ci.RepoInfo{}
 	}
@@ -167,8 +167,8 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 	t.Run("updates CI status when SHA matches HEAD", func(t *testing.T) {
 		t.Parallel()
 		s := minimalRouter(t)
-		s.repos.Registry().Add(&reporeg.Info{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"})
-		s.forge.SetGitHubApp(&stubAppClient{forgeClient: &stubForge{headSHA: "abc123", checkRuns: successRuns}})
+		s.repoSvc.Registry().Add(&repo.Info{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"})
+		s.forgeMgr.SetGitHubApp(&stubAppClient{forgeClient: &stubForge{headSHA: "abc123", checkRuns: successRuns}})
 
 		s.webhooks.handleCheckSuiteEvent(t.Context(), &github.CheckSuiteEvent{
 			Action: "completed",
@@ -190,9 +190,9 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 	t.Run("ignores out-of-order delivery when SHA is not HEAD", func(t *testing.T) {
 		t.Parallel()
 		s := minimalRouter(t)
-		s.repos.Registry().Add(&reporeg.Info{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"})
+		s.repoSvc.Registry().Add(&repo.Info{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"})
 		// HEAD is now "newsha"; the webhook carries "oldsha".
-		s.forge.SetGitHubApp(&stubAppClient{forgeClient: &stubForge{headSHA: "newsha", checkRuns: failureRuns}})
+		s.forgeMgr.SetGitHubApp(&stubAppClient{forgeClient: &stubForge{headSHA: "newsha", checkRuns: failureRuns}})
 
 		s.webhooks.handleCheckSuiteEvent(t.Context(), &github.CheckSuiteEvent{
 			Action: "completed",
@@ -487,25 +487,25 @@ func minimalRouter(t *testing.T) *testRouter {
 	}
 	ctx := t.Context()
 	backend := &mdruntime.Backend{}
-	workspaceRegistry := repowork.NewWorkspaceRegistry(ctx, nil)
-	taskMgr := tasks.New(tasks.Config{ServerCtx: ctx, WorkspaceRegistry: workspaceRegistry})
-	repoSvc := repos.NewService(t.Context(), "", reporeg.New(nil), workspaceRegistry)
+	workspaceRegistry := repowork.NewRegistry(ctx, nil)
+	taskMgr := taskmgr.New(taskmgr.Config{ServerCtx: ctx, WorkspaceRegistry: workspaceRegistry})
+	repoSvc := repomgr.NewService(t.Context(), "", repo.New(nil), workspaceRegistry)
 	repoStatus := ci.NewRepoStatusStore()
-	fm := forgemanager.New("", "", nil)
+	fm := forgemgr.New("", "", nil)
 	prefs := newTestPrefs(t)
-	ciService := ci.NewService(cache, nil, &testCIBackend{repos: repoSvc, repoStatus: repoStatus, taskMgr: taskMgr, forge: fm, prefs: prefs})
+	ciService := ci.NewService(cache, nil, &testCIBackend{repoSvc: repoSvc, repoStatus: repoStatus, taskMgr: taskMgr, forgeMgr: fm, prefs: prefs})
 	s, err := New(ctx, Dependencies{
-		Repos:          repoSvc,
+		RepoSvc:        repoSvc,
 		RepoStatus:     repoStatus,
 		ProcessBackend: backend,
-		TaskManager:    taskMgr,
+		TaskMgr:        taskMgr,
 		Preferences:    prefs,
 		CICache:        cache,
-		Forge:          fm,
+		ForgeMgr:       fm,
 		CIService:      ciService,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, repoStatus: repoStatus, prefs: prefs, forge: fm}
+	return &testRouter{Router: s, taskMgr: taskMgr, repoSvc: repoSvc, repoStatus: repoStatus, prefs: prefs, forgeMgr: fm}
 }

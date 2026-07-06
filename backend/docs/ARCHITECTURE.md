@@ -18,11 +18,12 @@ graph TD
   pkg_cmd_caic["cmd/caic"]
   pkg_frontend["frontend"]
   pkg_internal_agent["internal/agent"]
+  pkg_internal_agent_backends["internal/agent/backends"]
   pkg_internal_agent_claudecode["internal/agent/claudecode"]
   pkg_internal_agent_codex["internal/agent/codex"]
+  pkg_internal_agent_harness["internal/agent/harness"]
   pkg_internal_agent_opencode["internal/agent/opencode"]
   pkg_internal_agent_pi["internal/agent/pi"]
-  pkg_internal_agent_registry["internal/agent/registry"]
   pkg_internal_agent_relay["internal/agent/relay"]
   pkg_internal_app["internal/app"]
   pkg_internal_auth["internal/auth"]
@@ -32,17 +33,16 @@ graph TD
   pkg_internal_eventreplay["internal/eventreplay"]
   pkg_internal_forge["internal/forge"]
   pkg_internal_forge_forgecache["internal/forge/forgecache"]
-  pkg_internal_forge_forgemanager["internal/forge/forgemanager"]
+  pkg_internal_forge_forgemgr["internal/forge/forgemgr"]
   pkg_internal_forge_github["internal/forge/github"]
   pkg_internal_forge_gitlab["internal/forge/gitlab"]
-  pkg_internal_harness["internal/harness"]
   pkg_internal_httplog["internal/httplog"]
   pkg_internal_jsonutil["internal/jsonutil"]
   pkg_internal_mcp["internal/mcp"]
   pkg_internal_preferences["internal/preferences"]
-  pkg_internal_reporeg["internal/reporeg"]
-  pkg_internal_repos["internal/repos"]
-  pkg_internal_repowork["internal/repowork"]
+  pkg_internal_repo["internal/repo"]
+  pkg_internal_repo_repomgr["internal/repo/repomgr"]
+  pkg_internal_repo_repowork["internal/repo/repowork"]
   pkg_internal_runtime["internal/runtime"]
   pkg_internal_runtime_mdruntime["internal/runtime/mdruntime"]
   pkg_internal_server["internal/server"]
@@ -51,7 +51,7 @@ graph TD
   pkg_internal_server_api_v1conv["internal/server/api/v1conv"]
   pkg_internal_server_ipgeo["internal/server/ipgeo"]
   pkg_internal_task["internal/task"]
-  pkg_internal_tasks["internal/tasks"]
+  pkg_internal_task_taskmgr["internal/task/taskmgr"]
   pkg_internal_usage["internal/usage"]
 
   pkg_cmd_caic --> pkg_internal_app
@@ -59,51 +59,51 @@ graph TD
   pkg_cmd_caic --> pkg_internal_autoupdate
   pkg_cmd_caic --> pkg_internal_forge_github
   pkg_cmd_caic --> pkg_internal_server
+  pkg_internal_agent --> pkg_internal_agent_harness
   pkg_internal_agent --> pkg_internal_agent_relay
-  pkg_internal_agent --> pkg_internal_harness
   pkg_internal_agent --> pkg_internal_runtime
+  pkg_internal_agent_backends --> pkg_internal_agent
+  pkg_internal_agent_backends --> pkg_internal_agent_claudecode
+  pkg_internal_agent_backends --> pkg_internal_agent_codex
+  pkg_internal_agent_backends --> pkg_internal_agent_harness
+  pkg_internal_agent_backends --> pkg_internal_agent_opencode
+  pkg_internal_agent_backends --> pkg_internal_agent_pi
   pkg_internal_agent_claudecode --> pkg_internal_agent
-  pkg_internal_agent_claudecode --> pkg_internal_harness
+  pkg_internal_agent_claudecode --> pkg_internal_agent_harness
   pkg_internal_agent_claudecode --> pkg_internal_jsonutil
   pkg_internal_agent_codex --> pkg_internal_agent
-  pkg_internal_agent_codex --> pkg_internal_harness
+  pkg_internal_agent_codex --> pkg_internal_agent_harness
   pkg_internal_agent_codex --> pkg_internal_jsonutil
   pkg_internal_agent_codex --> pkg_internal_runtime
   pkg_internal_agent_opencode --> pkg_internal_agent
-  pkg_internal_agent_opencode --> pkg_internal_harness
+  pkg_internal_agent_opencode --> pkg_internal_agent_harness
   pkg_internal_agent_opencode --> pkg_internal_jsonutil
   pkg_internal_agent_opencode --> pkg_internal_runtime
   pkg_internal_agent_pi --> pkg_internal_agent
-  pkg_internal_agent_pi --> pkg_internal_harness
+  pkg_internal_agent_pi --> pkg_internal_agent_harness
   pkg_internal_agent_pi --> pkg_internal_jsonutil
   pkg_internal_agent_pi --> pkg_internal_runtime
-  pkg_internal_agent_registry --> pkg_internal_agent
-  pkg_internal_agent_registry --> pkg_internal_agent_claudecode
-  pkg_internal_agent_registry --> pkg_internal_agent_codex
-  pkg_internal_agent_registry --> pkg_internal_agent_opencode
-  pkg_internal_agent_registry --> pkg_internal_agent_pi
-  pkg_internal_agent_registry --> pkg_internal_harness
   pkg_internal_app --> pkg_internal_agent
-  pkg_internal_app --> pkg_internal_agent_registry
+  pkg_internal_app --> pkg_internal_agent_backends
+  pkg_internal_app --> pkg_internal_agent_harness
   pkg_internal_app --> pkg_internal_auth
   pkg_internal_app --> pkg_internal_bot
   pkg_internal_app --> pkg_internal_ci
   pkg_internal_app --> pkg_internal_eventreplay
   pkg_internal_app --> pkg_internal_forge
   pkg_internal_app --> pkg_internal_forge_forgecache
-  pkg_internal_app --> pkg_internal_forge_forgemanager
+  pkg_internal_app --> pkg_internal_forge_forgemgr
   pkg_internal_app --> pkg_internal_forge_github
-  pkg_internal_app --> pkg_internal_harness
   pkg_internal_app --> pkg_internal_preferences
-  pkg_internal_app --> pkg_internal_reporeg
-  pkg_internal_app --> pkg_internal_repos
-  pkg_internal_app --> pkg_internal_repowork
+  pkg_internal_app --> pkg_internal_repo
+  pkg_internal_app --> pkg_internal_repo_repomgr
+  pkg_internal_app --> pkg_internal_repo_repowork
   pkg_internal_app --> pkg_internal_runtime
   pkg_internal_app --> pkg_internal_runtime_mdruntime
   pkg_internal_app --> pkg_internal_server
   pkg_internal_app --> pkg_internal_server_ipgeo
   pkg_internal_app --> pkg_internal_task
-  pkg_internal_app --> pkg_internal_tasks
+  pkg_internal_app --> pkg_internal_task_taskmgr
   pkg_internal_app --> pkg_internal_usage
   pkg_internal_auth --> pkg_internal_forge
   pkg_internal_autoupdate --> pkg_internal_forge_github
@@ -114,32 +114,33 @@ graph TD
   pkg_internal_ci --> pkg_internal_forge
   pkg_internal_ci --> pkg_internal_forge_forgecache
   pkg_internal_ci --> pkg_internal_preferences
-  pkg_internal_ci --> pkg_internal_repowork
+  pkg_internal_ci --> pkg_internal_repo_repowork
   pkg_internal_ci --> pkg_internal_task
   pkg_internal_eventreplay --> pkg_internal_agent
-  pkg_internal_eventreplay --> pkg_internal_harness
+  pkg_internal_eventreplay --> pkg_internal_agent_harness
   pkg_internal_eventreplay --> pkg_internal_server_api_v1
   pkg_internal_eventreplay --> pkg_internal_server_api_v1conv
   pkg_internal_forge_forgecache --> pkg_internal_forge
-  pkg_internal_forge_forgemanager --> pkg_internal_auth
-  pkg_internal_forge_forgemanager --> pkg_internal_bot
-  pkg_internal_forge_forgemanager --> pkg_internal_forge
-  pkg_internal_forge_forgemanager --> pkg_internal_forge_github
-  pkg_internal_forge_forgemanager --> pkg_internal_forge_gitlab
-  pkg_internal_forge_forgemanager --> pkg_internal_reporeg
+  pkg_internal_forge_forgemgr --> pkg_internal_auth
+  pkg_internal_forge_forgemgr --> pkg_internal_bot
+  pkg_internal_forge_forgemgr --> pkg_internal_forge
+  pkg_internal_forge_forgemgr --> pkg_internal_forge_github
+  pkg_internal_forge_forgemgr --> pkg_internal_forge_gitlab
+  pkg_internal_forge_forgemgr --> pkg_internal_repo
   pkg_internal_forge_github --> pkg_internal_forge
   pkg_internal_forge_gitlab --> pkg_internal_forge
-  pkg_internal_reporeg --> pkg_internal_forge
-  pkg_internal_repos --> pkg_internal_forge
-  pkg_internal_repos --> pkg_internal_reporeg
-  pkg_internal_repos --> pkg_internal_repowork
-  pkg_internal_repowork --> pkg_internal_agent
-  pkg_internal_repowork --> pkg_internal_runtime
-  pkg_internal_runtime --> pkg_internal_harness
-  pkg_internal_runtime_mdruntime --> pkg_internal_harness
+  pkg_internal_repo --> pkg_internal_forge
+  pkg_internal_repo_repomgr --> pkg_internal_forge
+  pkg_internal_repo_repomgr --> pkg_internal_repo
+  pkg_internal_repo_repomgr --> pkg_internal_repo_repowork
+  pkg_internal_repo_repowork --> pkg_internal_agent
+  pkg_internal_repo_repowork --> pkg_internal_runtime
+  pkg_internal_runtime --> pkg_internal_agent_harness
+  pkg_internal_runtime_mdruntime --> pkg_internal_agent_harness
   pkg_internal_runtime_mdruntime --> pkg_internal_runtime
   pkg_internal_server --> pkg_frontend
   pkg_internal_server --> pkg_internal_agent
+  pkg_internal_server --> pkg_internal_agent_harness
   pkg_internal_server --> pkg_internal_auth
   pkg_internal_server --> pkg_internal_autoupdate
   pkg_internal_server --> pkg_internal_bot
@@ -147,46 +148,45 @@ graph TD
   pkg_internal_server --> pkg_internal_eventreplay
   pkg_internal_server --> pkg_internal_forge
   pkg_internal_server --> pkg_internal_forge_forgecache
-  pkg_internal_server --> pkg_internal_forge_forgemanager
+  pkg_internal_server --> pkg_internal_forge_forgemgr
   pkg_internal_server --> pkg_internal_forge_github
   pkg_internal_server --> pkg_internal_forge_gitlab
-  pkg_internal_server --> pkg_internal_harness
   pkg_internal_server --> pkg_internal_httplog
   pkg_internal_server --> pkg_internal_mcp
   pkg_internal_server --> pkg_internal_preferences
-  pkg_internal_server --> pkg_internal_reporeg
-  pkg_internal_server --> pkg_internal_repos
-  pkg_internal_server --> pkg_internal_repowork
+  pkg_internal_server --> pkg_internal_repo
+  pkg_internal_server --> pkg_internal_repo_repomgr
+  pkg_internal_server --> pkg_internal_repo_repowork
   pkg_internal_server --> pkg_internal_runtime
   pkg_internal_server --> pkg_internal_server_api
   pkg_internal_server --> pkg_internal_server_api_v1
   pkg_internal_server --> pkg_internal_server_api_v1conv
   pkg_internal_server --> pkg_internal_server_ipgeo
   pkg_internal_server --> pkg_internal_task
-  pkg_internal_server --> pkg_internal_tasks
+  pkg_internal_server --> pkg_internal_task_taskmgr
   pkg_internal_server --> pkg_internal_usage
   pkg_internal_server_api_v1 --> pkg_internal_server_api
   pkg_internal_server_api_v1conv --> pkg_internal_agent
+  pkg_internal_server_api_v1conv --> pkg_internal_agent_harness
   pkg_internal_server_api_v1conv --> pkg_internal_forge
-  pkg_internal_server_api_v1conv --> pkg_internal_harness
-  pkg_internal_server_api_v1conv --> pkg_internal_repowork
+  pkg_internal_server_api_v1conv --> pkg_internal_repo_repowork
   pkg_internal_server_api_v1conv --> pkg_internal_runtime
   pkg_internal_server_api_v1conv --> pkg_internal_server_api_v1
   pkg_internal_server_api_v1conv --> pkg_internal_task
-  pkg_internal_server_api_v1conv --> pkg_internal_tasks
+  pkg_internal_server_api_v1conv --> pkg_internal_task_taskmgr
   pkg_internal_server_api_v1conv --> pkg_internal_usage
   pkg_internal_task --> pkg_internal_agent
+  pkg_internal_task --> pkg_internal_agent_harness
   pkg_internal_task --> pkg_internal_forge
-  pkg_internal_task --> pkg_internal_harness
   pkg_internal_task --> pkg_internal_jsonutil
-  pkg_internal_task --> pkg_internal_repowork
+  pkg_internal_task --> pkg_internal_repo_repowork
   pkg_internal_task --> pkg_internal_runtime
-  pkg_internal_tasks --> pkg_internal_agent
-  pkg_internal_tasks --> pkg_internal_harness
-  pkg_internal_tasks --> pkg_internal_preferences
-  pkg_internal_tasks --> pkg_internal_repowork
-  pkg_internal_tasks --> pkg_internal_runtime
-  pkg_internal_tasks --> pkg_internal_task
+  pkg_internal_task_taskmgr --> pkg_internal_agent
+  pkg_internal_task_taskmgr --> pkg_internal_agent_harness
+  pkg_internal_task_taskmgr --> pkg_internal_preferences
+  pkg_internal_task_taskmgr --> pkg_internal_repo_repowork
+  pkg_internal_task_taskmgr --> pkg_internal_runtime
+  pkg_internal_task_taskmgr --> pkg_internal_task
 ```
 
 ## Agent Backends
@@ -195,42 +195,42 @@ graph TD
 graph TD
   pkg_internal_agent["internal/agent"]
   pkg_internal_agent_agenttest["internal/agent/agenttest"]
+  pkg_internal_agent_backends["internal/agent/backends"]
   pkg_internal_agent_claudecode["internal/agent/claudecode"]
   pkg_internal_agent_codex["internal/agent/codex"]
+  pkg_internal_agent_harness["internal/agent/harness"]
   pkg_internal_agent_opencode["internal/agent/opencode"]
   pkg_internal_agent_pi["internal/agent/pi"]
-  pkg_internal_agent_registry["internal/agent/registry"]
   pkg_internal_agent_relay["internal/agent/relay"]
-  pkg_internal_harness["internal/harness"]
   pkg_internal_jsonutil["internal/jsonutil"]
   pkg_internal_runtime["internal/runtime"]
 
+  pkg_internal_agent --> pkg_internal_agent_harness
   pkg_internal_agent --> pkg_internal_agent_relay
-  pkg_internal_agent --> pkg_internal_harness
   pkg_internal_agent --> pkg_internal_runtime
   pkg_internal_agent_agenttest --> pkg_internal_agent
+  pkg_internal_agent_backends --> pkg_internal_agent
+  pkg_internal_agent_backends --> pkg_internal_agent_claudecode
+  pkg_internal_agent_backends --> pkg_internal_agent_codex
+  pkg_internal_agent_backends --> pkg_internal_agent_harness
+  pkg_internal_agent_backends --> pkg_internal_agent_opencode
+  pkg_internal_agent_backends --> pkg_internal_agent_pi
   pkg_internal_agent_claudecode --> pkg_internal_agent
-  pkg_internal_agent_claudecode --> pkg_internal_harness
+  pkg_internal_agent_claudecode --> pkg_internal_agent_harness
   pkg_internal_agent_claudecode --> pkg_internal_jsonutil
   pkg_internal_agent_codex --> pkg_internal_agent
-  pkg_internal_agent_codex --> pkg_internal_harness
+  pkg_internal_agent_codex --> pkg_internal_agent_harness
   pkg_internal_agent_codex --> pkg_internal_jsonutil
   pkg_internal_agent_codex --> pkg_internal_runtime
   pkg_internal_agent_opencode --> pkg_internal_agent
-  pkg_internal_agent_opencode --> pkg_internal_harness
+  pkg_internal_agent_opencode --> pkg_internal_agent_harness
   pkg_internal_agent_opencode --> pkg_internal_jsonutil
   pkg_internal_agent_opencode --> pkg_internal_runtime
   pkg_internal_agent_pi --> pkg_internal_agent
-  pkg_internal_agent_pi --> pkg_internal_harness
+  pkg_internal_agent_pi --> pkg_internal_agent_harness
   pkg_internal_agent_pi --> pkg_internal_jsonutil
   pkg_internal_agent_pi --> pkg_internal_runtime
-  pkg_internal_agent_registry --> pkg_internal_agent
-  pkg_internal_agent_registry --> pkg_internal_agent_claudecode
-  pkg_internal_agent_registry --> pkg_internal_agent_codex
-  pkg_internal_agent_registry --> pkg_internal_agent_opencode
-  pkg_internal_agent_registry --> pkg_internal_agent_pi
-  pkg_internal_agent_registry --> pkg_internal_harness
-  pkg_internal_runtime --> pkg_internal_harness
+  pkg_internal_runtime --> pkg_internal_agent_harness
 ```
 
 ## Complete Package Import Graph
@@ -252,18 +252,19 @@ graph TD
   subgraph Agent["Agent"]
     pkg_internal_agent["internal/agent"]
     pkg_internal_agent_agenttest["internal/agent/agenttest"]
+    pkg_internal_agent_backends["internal/agent/backends"]
     pkg_internal_agent_claudecode["internal/agent/claudecode"]
     pkg_internal_agent_codex["internal/agent/codex"]
+    pkg_internal_agent_harness["internal/agent/harness"]
     pkg_internal_agent_opencode["internal/agent/opencode"]
     pkg_internal_agent_pi["internal/agent/pi"]
-    pkg_internal_agent_registry["internal/agent/registry"]
     pkg_internal_agent_relay["internal/agent/relay"]
   end
 
   subgraph Forge["Forge"]
     pkg_internal_forge["internal/forge"]
     pkg_internal_forge_forgecache["internal/forge/forgecache"]
-    pkg_internal_forge_forgemanager["internal/forge/forgemanager"]
+    pkg_internal_forge_forgemgr["internal/forge/forgemgr"]
     pkg_internal_forge_github["internal/forge/github"]
     pkg_internal_forge_gitlab["internal/forge/gitlab"]
   end
@@ -280,8 +281,14 @@ graph TD
     pkg_internal_runtime["internal/runtime"]
     pkg_internal_runtime_mdruntime["internal/runtime/mdruntime"]
     pkg_internal_task["internal/task"]
+    pkg_internal_task_taskmgr["internal/task/taskmgr"]
     pkg_internal_task_tasktest["internal/task/tasktest"]
-    pkg_internal_tasks["internal/tasks"]
+  end
+
+  subgraph Repo["Repo"]
+    pkg_internal_repo["internal/repo"]
+    pkg_internal_repo_repomgr["internal/repo/repomgr"]
+    pkg_internal_repo_repowork["internal/repo/repowork"]
   end
 
   subgraph Support["Support"]
@@ -291,14 +298,10 @@ graph TD
     pkg_internal_bot["internal/bot"]
     pkg_internal_ci["internal/ci"]
     pkg_internal_eventreplay["internal/eventreplay"]
-    pkg_internal_harness["internal/harness"]
     pkg_internal_httplog["internal/httplog"]
     pkg_internal_jsonutil["internal/jsonutil"]
     pkg_internal_mcp["internal/mcp"]
     pkg_internal_preferences["internal/preferences"]
-    pkg_internal_reporeg["internal/reporeg"]
-    pkg_internal_repos["internal/repos"]
-    pkg_internal_repowork["internal/repowork"]
     pkg_internal_smoketest["internal/smoketest"]
     pkg_internal_usage["internal/usage"]
   end
@@ -309,52 +312,52 @@ graph TD
   pkg_cmd_caic --> pkg_internal_forge_github
   pkg_cmd_caic --> pkg_internal_server
   pkg_cmd_voice_gateway --> pkg_internal_httplog
+  pkg_internal_agent --> pkg_internal_agent_harness
   pkg_internal_agent --> pkg_internal_agent_relay
-  pkg_internal_agent --> pkg_internal_harness
   pkg_internal_agent --> pkg_internal_runtime
   pkg_internal_agent_agenttest --> pkg_internal_agent
+  pkg_internal_agent_backends --> pkg_internal_agent
+  pkg_internal_agent_backends --> pkg_internal_agent_claudecode
+  pkg_internal_agent_backends --> pkg_internal_agent_codex
+  pkg_internal_agent_backends --> pkg_internal_agent_harness
+  pkg_internal_agent_backends --> pkg_internal_agent_opencode
+  pkg_internal_agent_backends --> pkg_internal_agent_pi
   pkg_internal_agent_claudecode --> pkg_internal_agent
-  pkg_internal_agent_claudecode --> pkg_internal_harness
+  pkg_internal_agent_claudecode --> pkg_internal_agent_harness
   pkg_internal_agent_claudecode --> pkg_internal_jsonutil
   pkg_internal_agent_codex --> pkg_internal_agent
-  pkg_internal_agent_codex --> pkg_internal_harness
+  pkg_internal_agent_codex --> pkg_internal_agent_harness
   pkg_internal_agent_codex --> pkg_internal_jsonutil
   pkg_internal_agent_codex --> pkg_internal_runtime
   pkg_internal_agent_opencode --> pkg_internal_agent
-  pkg_internal_agent_opencode --> pkg_internal_harness
+  pkg_internal_agent_opencode --> pkg_internal_agent_harness
   pkg_internal_agent_opencode --> pkg_internal_jsonutil
   pkg_internal_agent_opencode --> pkg_internal_runtime
   pkg_internal_agent_pi --> pkg_internal_agent
-  pkg_internal_agent_pi --> pkg_internal_harness
+  pkg_internal_agent_pi --> pkg_internal_agent_harness
   pkg_internal_agent_pi --> pkg_internal_jsonutil
   pkg_internal_agent_pi --> pkg_internal_runtime
-  pkg_internal_agent_registry --> pkg_internal_agent
-  pkg_internal_agent_registry --> pkg_internal_agent_claudecode
-  pkg_internal_agent_registry --> pkg_internal_agent_codex
-  pkg_internal_agent_registry --> pkg_internal_agent_opencode
-  pkg_internal_agent_registry --> pkg_internal_agent_pi
-  pkg_internal_agent_registry --> pkg_internal_harness
   pkg_internal_app --> pkg_internal_agent
-  pkg_internal_app --> pkg_internal_agent_registry
+  pkg_internal_app --> pkg_internal_agent_backends
+  pkg_internal_app --> pkg_internal_agent_harness
   pkg_internal_app --> pkg_internal_auth
   pkg_internal_app --> pkg_internal_bot
   pkg_internal_app --> pkg_internal_ci
   pkg_internal_app --> pkg_internal_eventreplay
   pkg_internal_app --> pkg_internal_forge
   pkg_internal_app --> pkg_internal_forge_forgecache
-  pkg_internal_app --> pkg_internal_forge_forgemanager
+  pkg_internal_app --> pkg_internal_forge_forgemgr
   pkg_internal_app --> pkg_internal_forge_github
-  pkg_internal_app --> pkg_internal_harness
   pkg_internal_app --> pkg_internal_preferences
-  pkg_internal_app --> pkg_internal_reporeg
-  pkg_internal_app --> pkg_internal_repos
-  pkg_internal_app --> pkg_internal_repowork
+  pkg_internal_app --> pkg_internal_repo
+  pkg_internal_app --> pkg_internal_repo_repomgr
+  pkg_internal_app --> pkg_internal_repo_repowork
   pkg_internal_app --> pkg_internal_runtime
   pkg_internal_app --> pkg_internal_runtime_mdruntime
   pkg_internal_app --> pkg_internal_server
   pkg_internal_app --> pkg_internal_server_ipgeo
   pkg_internal_app --> pkg_internal_task
-  pkg_internal_app --> pkg_internal_tasks
+  pkg_internal_app --> pkg_internal_task_taskmgr
   pkg_internal_app --> pkg_internal_usage
   pkg_internal_auth --> pkg_internal_forge
   pkg_internal_autoupdate --> pkg_internal_forge_github
@@ -365,51 +368,52 @@ graph TD
   pkg_internal_ci --> pkg_internal_forge
   pkg_internal_ci --> pkg_internal_forge_forgecache
   pkg_internal_ci --> pkg_internal_preferences
-  pkg_internal_ci --> pkg_internal_repowork
+  pkg_internal_ci --> pkg_internal_repo_repowork
   pkg_internal_ci --> pkg_internal_task
   pkg_internal_cmd_gen_api_sdk --> pkg_internal_mcp
   pkg_internal_cmd_gen_api_sdk --> pkg_internal_server_api_v1
   pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_auth
-  pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_forge_forgemanager
+  pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_forge_forgemgr
   pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_preferences
-  pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_reporeg
-  pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_repos
-  pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_repowork
+  pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_repo
+  pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_repo_repomgr
+  pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_repo_repowork
   pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_runtime_mdruntime
   pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_server
   pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_server_ipgeo
-  pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_tasks
+  pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_task_taskmgr
   pkg_internal_cmd_record_trace --> pkg_internal_agent
   pkg_internal_cmd_record_trace --> pkg_internal_agent_claudecode
   pkg_internal_cmd_record_trace --> pkg_internal_agent_codex
+  pkg_internal_cmd_record_trace --> pkg_internal_agent_harness
   pkg_internal_cmd_record_trace --> pkg_internal_agent_opencode
   pkg_internal_cmd_record_trace --> pkg_internal_agent_pi
   pkg_internal_cmd_record_trace --> pkg_internal_agent_relay
-  pkg_internal_cmd_record_trace --> pkg_internal_harness
   pkg_internal_eventreplay --> pkg_internal_agent
-  pkg_internal_eventreplay --> pkg_internal_harness
+  pkg_internal_eventreplay --> pkg_internal_agent_harness
   pkg_internal_eventreplay --> pkg_internal_server_api_v1
   pkg_internal_eventreplay --> pkg_internal_server_api_v1conv
   pkg_internal_forge_forgecache --> pkg_internal_forge
-  pkg_internal_forge_forgemanager --> pkg_internal_auth
-  pkg_internal_forge_forgemanager --> pkg_internal_bot
-  pkg_internal_forge_forgemanager --> pkg_internal_forge
-  pkg_internal_forge_forgemanager --> pkg_internal_forge_github
-  pkg_internal_forge_forgemanager --> pkg_internal_forge_gitlab
-  pkg_internal_forge_forgemanager --> pkg_internal_reporeg
+  pkg_internal_forge_forgemgr --> pkg_internal_auth
+  pkg_internal_forge_forgemgr --> pkg_internal_bot
+  pkg_internal_forge_forgemgr --> pkg_internal_forge
+  pkg_internal_forge_forgemgr --> pkg_internal_forge_github
+  pkg_internal_forge_forgemgr --> pkg_internal_forge_gitlab
+  pkg_internal_forge_forgemgr --> pkg_internal_repo
   pkg_internal_forge_github --> pkg_internal_forge
   pkg_internal_forge_gitlab --> pkg_internal_forge
-  pkg_internal_reporeg --> pkg_internal_forge
-  pkg_internal_repos --> pkg_internal_forge
-  pkg_internal_repos --> pkg_internal_reporeg
-  pkg_internal_repos --> pkg_internal_repowork
-  pkg_internal_repowork --> pkg_internal_agent
-  pkg_internal_repowork --> pkg_internal_runtime
-  pkg_internal_runtime --> pkg_internal_harness
-  pkg_internal_runtime_mdruntime --> pkg_internal_harness
+  pkg_internal_repo --> pkg_internal_forge
+  pkg_internal_repo_repomgr --> pkg_internal_forge
+  pkg_internal_repo_repomgr --> pkg_internal_repo
+  pkg_internal_repo_repomgr --> pkg_internal_repo_repowork
+  pkg_internal_repo_repowork --> pkg_internal_agent
+  pkg_internal_repo_repowork --> pkg_internal_runtime
+  pkg_internal_runtime --> pkg_internal_agent_harness
+  pkg_internal_runtime_mdruntime --> pkg_internal_agent_harness
   pkg_internal_runtime_mdruntime --> pkg_internal_runtime
   pkg_internal_server --> pkg_frontend
   pkg_internal_server --> pkg_internal_agent
+  pkg_internal_server --> pkg_internal_agent_harness
   pkg_internal_server --> pkg_internal_auth
   pkg_internal_server --> pkg_internal_autoupdate
   pkg_internal_server --> pkg_internal_bot
@@ -417,53 +421,52 @@ graph TD
   pkg_internal_server --> pkg_internal_eventreplay
   pkg_internal_server --> pkg_internal_forge
   pkg_internal_server --> pkg_internal_forge_forgecache
-  pkg_internal_server --> pkg_internal_forge_forgemanager
+  pkg_internal_server --> pkg_internal_forge_forgemgr
   pkg_internal_server --> pkg_internal_forge_github
   pkg_internal_server --> pkg_internal_forge_gitlab
-  pkg_internal_server --> pkg_internal_harness
   pkg_internal_server --> pkg_internal_httplog
   pkg_internal_server --> pkg_internal_mcp
   pkg_internal_server --> pkg_internal_preferences
-  pkg_internal_server --> pkg_internal_reporeg
-  pkg_internal_server --> pkg_internal_repos
-  pkg_internal_server --> pkg_internal_repowork
+  pkg_internal_server --> pkg_internal_repo
+  pkg_internal_server --> pkg_internal_repo_repomgr
+  pkg_internal_server --> pkg_internal_repo_repowork
   pkg_internal_server --> pkg_internal_runtime
   pkg_internal_server --> pkg_internal_server_api
   pkg_internal_server --> pkg_internal_server_api_v1
   pkg_internal_server --> pkg_internal_server_api_v1conv
   pkg_internal_server --> pkg_internal_server_ipgeo
   pkg_internal_server --> pkg_internal_task
-  pkg_internal_server --> pkg_internal_tasks
+  pkg_internal_server --> pkg_internal_task_taskmgr
   pkg_internal_server --> pkg_internal_usage
   pkg_internal_server_api_v1 --> pkg_internal_server_api
   pkg_internal_server_api_v1conv --> pkg_internal_agent
+  pkg_internal_server_api_v1conv --> pkg_internal_agent_harness
   pkg_internal_server_api_v1conv --> pkg_internal_forge
-  pkg_internal_server_api_v1conv --> pkg_internal_harness
-  pkg_internal_server_api_v1conv --> pkg_internal_repowork
+  pkg_internal_server_api_v1conv --> pkg_internal_repo_repowork
   pkg_internal_server_api_v1conv --> pkg_internal_runtime
   pkg_internal_server_api_v1conv --> pkg_internal_server_api_v1
   pkg_internal_server_api_v1conv --> pkg_internal_task
-  pkg_internal_server_api_v1conv --> pkg_internal_tasks
+  pkg_internal_server_api_v1conv --> pkg_internal_task_taskmgr
   pkg_internal_server_api_v1conv --> pkg_internal_usage
   pkg_internal_smoketest --> pkg_internal_agent
+  pkg_internal_smoketest --> pkg_internal_agent_harness
   pkg_internal_smoketest --> pkg_internal_forge
-  pkg_internal_smoketest --> pkg_internal_harness
   pkg_internal_smoketest --> pkg_internal_runtime
   pkg_internal_smoketest --> pkg_internal_task
   pkg_internal_smoketest --> pkg_internal_usage
   pkg_internal_task --> pkg_internal_agent
+  pkg_internal_task --> pkg_internal_agent_harness
   pkg_internal_task --> pkg_internal_forge
-  pkg_internal_task --> pkg_internal_harness
   pkg_internal_task --> pkg_internal_jsonutil
-  pkg_internal_task --> pkg_internal_repowork
+  pkg_internal_task --> pkg_internal_repo_repowork
   pkg_internal_task --> pkg_internal_runtime
+  pkg_internal_task_taskmgr --> pkg_internal_agent
+  pkg_internal_task_taskmgr --> pkg_internal_agent_harness
+  pkg_internal_task_taskmgr --> pkg_internal_preferences
+  pkg_internal_task_taskmgr --> pkg_internal_repo_repowork
+  pkg_internal_task_taskmgr --> pkg_internal_runtime
+  pkg_internal_task_taskmgr --> pkg_internal_task
   pkg_internal_task_tasktest --> pkg_internal_runtime
-  pkg_internal_tasks --> pkg_internal_agent
-  pkg_internal_tasks --> pkg_internal_harness
-  pkg_internal_tasks --> pkg_internal_preferences
-  pkg_internal_tasks --> pkg_internal_repowork
-  pkg_internal_tasks --> pkg_internal_runtime
-  pkg_internal_tasks --> pkg_internal_task
 ```
 
 ## Package Dependencies
@@ -473,47 +476,47 @@ graph TD
 | `cmd/caic` | `internal/app`, `internal/auth`, `internal/autoupdate`, `internal/forge/github`, `internal/server` |
 | `cmd/voice-gateway` | `internal/httplog` |
 | `frontend` | None |
-| `internal/agent` | `internal/agent/relay`, `internal/harness`, `internal/runtime` |
+| `internal/agent` | `internal/agent/harness`, `internal/agent/relay`, `internal/runtime` |
 | `internal/agent/agenttest` | `internal/agent` |
-| `internal/agent/claudecode` | `internal/agent`, `internal/harness`, `internal/jsonutil` |
-| `internal/agent/codex` | `internal/agent`, `internal/harness`, `internal/jsonutil`, `internal/runtime` |
-| `internal/agent/opencode` | `internal/agent`, `internal/harness`, `internal/jsonutil`, `internal/runtime` |
-| `internal/agent/pi` | `internal/agent`, `internal/harness`, `internal/jsonutil`, `internal/runtime` |
-| `internal/agent/registry` | `internal/agent`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/agent/opencode`, `internal/agent/pi`, `internal/harness` |
+| `internal/agent/backends` | `internal/agent`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/agent/harness`, `internal/agent/opencode`, `internal/agent/pi` |
+| `internal/agent/claudecode` | `internal/agent`, `internal/agent/harness`, `internal/jsonutil` |
+| `internal/agent/codex` | `internal/agent`, `internal/agent/harness`, `internal/jsonutil`, `internal/runtime` |
+| `internal/agent/harness` | None |
+| `internal/agent/opencode` | `internal/agent`, `internal/agent/harness`, `internal/jsonutil`, `internal/runtime` |
+| `internal/agent/pi` | `internal/agent`, `internal/agent/harness`, `internal/jsonutil`, `internal/runtime` |
 | `internal/agent/relay` | None |
-| `internal/app` | `internal/agent`, `internal/agent/registry`, `internal/auth`, `internal/bot`, `internal/ci`, `internal/eventreplay`, `internal/forge`, `internal/forge/forgecache`, `internal/forge/forgemanager`, `internal/forge/github`, `internal/harness`, `internal/preferences`, `internal/reporeg`, `internal/repos`, `internal/repowork`, `internal/runtime`, `internal/runtime/mdruntime`, `internal/server`, `internal/server/ipgeo`, `internal/task`, `internal/tasks`, `internal/usage` |
+| `internal/app` | `internal/agent`, `internal/agent/backends`, `internal/agent/harness`, `internal/auth`, `internal/bot`, `internal/ci`, `internal/eventreplay`, `internal/forge`, `internal/forge/forgecache`, `internal/forge/forgemgr`, `internal/forge/github`, `internal/preferences`, `internal/repo`, `internal/repo/repomgr`, `internal/repo/repowork`, `internal/runtime`, `internal/runtime/mdruntime`, `internal/server`, `internal/server/ipgeo`, `internal/task`, `internal/task/taskmgr`, `internal/usage` |
 | `internal/auth` | `internal/forge` |
 | `internal/autoupdate` | `internal/forge/github` |
 | `internal/bot` | `internal/forge`, `internal/forge/forgecache` |
-| `internal/ci` | `internal/agent`, `internal/bot`, `internal/forge`, `internal/forge/forgecache`, `internal/preferences`, `internal/repowork`, `internal/task` |
+| `internal/ci` | `internal/agent`, `internal/bot`, `internal/forge`, `internal/forge/forgecache`, `internal/preferences`, `internal/repo/repowork`, `internal/task` |
 | `internal/cmd/gen-api-sdk` | `internal/mcp`, `internal/server/api/v1` |
-| `internal/cmd/mcp-auth-smoke` | `internal/auth`, `internal/forge/forgemanager`, `internal/preferences`, `internal/reporeg`, `internal/repos`, `internal/repowork`, `internal/runtime/mdruntime`, `internal/server`, `internal/server/ipgeo`, `internal/tasks` |
-| `internal/cmd/record-trace` | `internal/agent`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/agent/opencode`, `internal/agent/pi`, `internal/agent/relay`, `internal/harness` |
-| `internal/eventreplay` | `internal/agent`, `internal/harness`, `internal/server/api/v1`, `internal/server/api/v1conv` |
+| `internal/cmd/mcp-auth-smoke` | `internal/auth`, `internal/forge/forgemgr`, `internal/preferences`, `internal/repo`, `internal/repo/repomgr`, `internal/repo/repowork`, `internal/runtime/mdruntime`, `internal/server`, `internal/server/ipgeo`, `internal/task/taskmgr` |
+| `internal/cmd/record-trace` | `internal/agent`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/agent/harness`, `internal/agent/opencode`, `internal/agent/pi`, `internal/agent/relay` |
+| `internal/eventreplay` | `internal/agent`, `internal/agent/harness`, `internal/server/api/v1`, `internal/server/api/v1conv` |
 | `internal/forge` | None |
 | `internal/forge/forgecache` | `internal/forge` |
-| `internal/forge/forgemanager` | `internal/auth`, `internal/bot`, `internal/forge`, `internal/forge/github`, `internal/forge/gitlab`, `internal/reporeg` |
+| `internal/forge/forgemgr` | `internal/auth`, `internal/bot`, `internal/forge`, `internal/forge/github`, `internal/forge/gitlab`, `internal/repo` |
 | `internal/forge/github` | `internal/forge` |
 | `internal/forge/gitlab` | `internal/forge` |
-| `internal/harness` | None |
 | `internal/httplog` | None |
 | `internal/jsonutil` | None |
 | `internal/mcp` | None |
 | `internal/preferences` | None |
-| `internal/reporeg` | `internal/forge` |
-| `internal/repos` | `internal/forge`, `internal/reporeg`, `internal/repowork` |
-| `internal/repowork` | `internal/agent`, `internal/runtime` |
-| `internal/runtime` | `internal/harness` |
-| `internal/runtime/mdruntime` | `internal/harness`, `internal/runtime` |
-| `internal/server` | `frontend`, `internal/agent`, `internal/auth`, `internal/autoupdate`, `internal/bot`, `internal/ci`, `internal/eventreplay`, `internal/forge`, `internal/forge/forgecache`, `internal/forge/forgemanager`, `internal/forge/github`, `internal/forge/gitlab`, `internal/harness`, `internal/httplog`, `internal/mcp`, `internal/preferences`, `internal/reporeg`, `internal/repos`, `internal/repowork`, `internal/runtime`, `internal/server/api`, `internal/server/api/v1`, `internal/server/api/v1conv`, `internal/server/ipgeo`, `internal/task`, `internal/tasks`, `internal/usage` |
+| `internal/repo` | `internal/forge` |
+| `internal/repo/repomgr` | `internal/forge`, `internal/repo`, `internal/repo/repowork` |
+| `internal/repo/repowork` | `internal/agent`, `internal/runtime` |
+| `internal/runtime` | `internal/agent/harness` |
+| `internal/runtime/mdruntime` | `internal/agent/harness`, `internal/runtime` |
+| `internal/server` | `frontend`, `internal/agent`, `internal/agent/harness`, `internal/auth`, `internal/autoupdate`, `internal/bot`, `internal/ci`, `internal/eventreplay`, `internal/forge`, `internal/forge/forgecache`, `internal/forge/forgemgr`, `internal/forge/github`, `internal/forge/gitlab`, `internal/httplog`, `internal/mcp`, `internal/preferences`, `internal/repo`, `internal/repo/repomgr`, `internal/repo/repowork`, `internal/runtime`, `internal/server/api`, `internal/server/api/v1`, `internal/server/api/v1conv`, `internal/server/ipgeo`, `internal/task`, `internal/task/taskmgr`, `internal/usage` |
 | `internal/server/api` | None |
 | `internal/server/api/v1` | `internal/server/api` |
-| `internal/server/api/v1conv` | `internal/agent`, `internal/forge`, `internal/harness`, `internal/repowork`, `internal/runtime`, `internal/server/api/v1`, `internal/task`, `internal/tasks`, `internal/usage` |
+| `internal/server/api/v1conv` | `internal/agent`, `internal/agent/harness`, `internal/forge`, `internal/repo/repowork`, `internal/runtime`, `internal/server/api/v1`, `internal/task`, `internal/task/taskmgr`, `internal/usage` |
 | `internal/server/ipgeo` | None |
-| `internal/smoketest` | `internal/agent`, `internal/forge`, `internal/harness`, `internal/runtime`, `internal/task`, `internal/usage` |
-| `internal/task` | `internal/agent`, `internal/forge`, `internal/harness`, `internal/jsonutil`, `internal/repowork`, `internal/runtime` |
+| `internal/smoketest` | `internal/agent`, `internal/agent/harness`, `internal/forge`, `internal/runtime`, `internal/task`, `internal/usage` |
+| `internal/task` | `internal/agent`, `internal/agent/harness`, `internal/forge`, `internal/jsonutil`, `internal/repo/repowork`, `internal/runtime` |
+| `internal/task/taskmgr` | `internal/agent`, `internal/agent/harness`, `internal/preferences`, `internal/repo/repowork`, `internal/runtime`, `internal/task` |
 | `internal/task/tasktest` | `internal/runtime` |
-| `internal/tasks` | `internal/agent`, `internal/harness`, `internal/preferences`, `internal/repowork`, `internal/runtime`, `internal/task` |
 | `internal/usage` | None |
 <!-- END GENERATED PACKAGE DEPENDENCIES -->
 
@@ -521,7 +524,7 @@ graph TD
 
 - `internal/server` is the composition root for HTTP, frontend assets, API DTOs,
   auth, task lifecycle, CI, forge integrations, usage, and voice endpoints.
-- `internal/tasks` manages task lifecycle state and delegates single-run
+- `internal/task/taskmgr` manages task lifecycle state and delegates single-run
   execution to `internal/task`.
 - `internal/task` owns one task run and imports the concrete agent backends it can
   launch.

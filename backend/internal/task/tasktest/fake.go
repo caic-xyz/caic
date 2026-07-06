@@ -1,5 +1,5 @@
 // Package tasktest provides shared test doubles for the task package's
-// infrastructure seams, reusable across internal/task and internal/tasks.
+// infrastructure seams, reusable across internal/task and internal/task/taskmgr.
 package tasktest
 
 import (

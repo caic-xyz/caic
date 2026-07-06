@@ -16,10 +16,10 @@ import (
 	"github.com/klauspost/compress/zstd"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/eventreplay"
-	"github.com/caic-xyz/caic/backend/internal/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/tasks"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
 func TestReplayCache(t *testing.T) {
@@ -70,7 +70,7 @@ func TestReplayCache(t *testing.T) {
 			t.Fatal(err)
 		}
 		var taskID string
-		s.taskMgr.Range(func(id string, _ *tasks.Entry) bool { taskID = id; return false })
+		s.taskMgr.Range(func(id string, _ *taskmgr.Entry) bool { taskID = id; return false })
 		if taskID == "" {
 			t.Fatal("no task registered")
 		}

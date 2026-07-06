@@ -1,6 +1,6 @@
-// Tests for the tasks package typed errors.
+// Tests for the taskmgr package typed errors.
 
-package tasks
+package taskmgr
 
 import (
 	"errors"

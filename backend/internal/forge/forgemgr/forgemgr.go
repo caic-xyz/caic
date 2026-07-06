@@ -1,6 +1,6 @@
-// Package forgemanager resolves forge clients for repos, manages per-user
+// Package forgemgr resolves forge clients for repos, manages per-user
 // rate-limit throttles, and caches GitHub App installation IDs.
-package forgemanager
+package forgemgr
 
 import (
 	"context"
@@ -16,7 +16,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/forge/gitlab"
-	"github.com/caic-xyz/caic/backend/internal/reporeg"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 )
 
 // GitHubAppClient is the GitHub App surface the manager depends on. Abstracted
@@ -83,7 +83,7 @@ func (m *Manager) GitHubAppThrottle() http.RoundTripper {
 // ForgeForInfo returns the appropriate forge.Forge for the repo's remote, using
 // the configured tokens. Falls back to a GitHub App installation token when no
 // user OAuth token or PAT is available. Returns nil if no token is available.
-func (m *Manager) ForgeForInfo(ctx context.Context, info *reporeg.Info) forge.Forge {
+func (m *Manager) ForgeForInfo(ctx context.Context, info *repo.Info) forge.Forge {
 	if f := m.ForgeFor(ctx, info.ForgeKind); f != nil {
 		return f
 	}

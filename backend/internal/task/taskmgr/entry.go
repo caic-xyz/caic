@@ -1,6 +1,6 @@
 // Entry wraps a task and its result for the Manager registry.
 
-package tasks
+package taskmgr
 
 import (
 	"sync"

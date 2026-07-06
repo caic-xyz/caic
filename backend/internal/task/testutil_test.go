@@ -18,8 +18,8 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
-	"github.com/caic-xyz/caic/backend/internal/harness"
-	"github.com/caic-xyz/caic/backend/internal/repowork"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
@@ -125,7 +125,7 @@ func (w *testWire) ParseMessage(line []byte) ([]agent.Message, error) {
 	return w.parse(line)
 }
 
-func newTestSessionRunner(workspace *repowork.RepoWorkspace, logDir string, backends map[harness.Name]agent.Backend) *SessionRunner {
+func newTestSessionRunner(workspace *repowork.Workspace, logDir string, backends map[harness.Name]agent.Backend) *SessionRunner {
 	return &SessionRunner{Backends: backends, Workspace: workspace, Logs: &LogStore{LogDir: logDir}}
 }
 

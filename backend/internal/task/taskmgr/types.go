@@ -1,11 +1,11 @@
 // Exported parameter and result types for the Manager API.
 
-package tasks
+package taskmgr
 
 import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/harness"
-	"github.com/caic-xyz/caic/backend/internal/repowork"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )

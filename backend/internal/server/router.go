@@ -19,14 +19,14 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
-	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/httplog"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
-	"github.com/caic-xyz/caic/backend/internal/repos"
+	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
-	"github.com/caic-xyz/caic/backend/internal/tasks"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/gomode"
 	"github.com/caic-xyz/caic/gomode/voicegateway/voicertc"
@@ -349,7 +349,7 @@ func hostIsLoopback(host string) bool {
 // (internal/app) owns the lifetime of the long-lived automation services
 // (Bot, CIService, and their adapters); the router only routes requests to them.
 type Dependencies struct {
-	Repos                      *repos.Service
+	RepoSvc                    *repomgr.Service
 	RepoStatus                 *ci.RepoStatusStore
 	Tailscale                  bool
 	Preferences                *preferences.Store
@@ -366,10 +366,10 @@ type Dependencies struct {
 	UsageFetchers              []usage.ProviderFetcher
 	VoiceBridge                *voicertc.Bridge
 	VoiceGateway               VoiceGatewayConfig
-	Forge                      *forgemanager.Manager
+	ForgeMgr                   *forgemgr.Manager
 	CICache                    *forgecache.Cache
 	ProcessBackend             runtime.Backend
-	TaskManager                *tasks.Manager
+	TaskMgr                    *taskmgr.Manager
 	Provider                   genai.Provider
 	IPGeoChecker               *ipgeo.Checker
 
@@ -397,10 +397,10 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 	if d.ProcessBackend == nil {
 		return nil, errors.New("process backend is required")
 	}
-	if d.TaskManager == nil {
+	if d.TaskMgr == nil {
 		return nil, errors.New("task manager is required")
 	}
-	if d.Repos == nil {
+	if d.RepoSvc == nil {
 		return nil, errors.New("repos service is required")
 	}
 	if d.Preferences == nil {
@@ -419,11 +419,11 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 	webFetch := &webFetchHandlers{}
 	svc := &taskService{
 		ctx:       ctx,
-		taskMgr:   d.TaskManager,
+		taskMgr:   d.TaskMgr,
 		prefs:     d.Preferences,
-		repos:     d.Repos,
-		forge:     d.Forge,
-		ciService: d.CIService,
+		repoMgr:   d.RepoSvc,
+		forgeMgr:  d.ForgeMgr,
+		ciSvc:     d.CIService,
 		authStore: d.AuthStore,
 		fakeCI:    d.FakeCI,
 	}
@@ -444,28 +444,28 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 			googleAllowedUsers: d.GoogleAllowedUsers,
 		},
 		ciHandlers: &ciHandlers{
-			taskMgr:    d.TaskManager,
-			repos:      d.Repos,
+			taskMgr:    d.TaskMgr,
+			repoSvc:    d.RepoSvc,
 			repoStatus: d.RepoStatus,
-			forge:      d.Forge,
+			forgeMgr:   d.ForgeMgr,
 			provider:   d.Provider,
 			taskClient: d.TaskClient,
 			authStore:  d.AuthStore,
 		},
 		goModeHandler: goModeHandler,
 		runtimeProcesses: &runtimeProcessHandlers{
-			taskMgr:     d.TaskManager,
+			taskMgr:     d.TaskMgr,
 			backend:     d.ProcessBackend,
 			authEnabled: d.AuthStore != nil,
 		},
 		serverHandlers: &serverHandlers{
 			serverCtx:          ctx,
 			tailscaleAvailable: d.Tailscale,
-			forge:              d.Forge,
+			forgeMgr:           d.ForgeMgr,
 			prefs:              d.Preferences,
-			repos:              d.Repos,
+			repoSvc:            d.RepoSvc,
 			repoStatus:         d.RepoStatus,
-			taskMgr:            d.TaskManager,
+			taskMgr:            d.TaskMgr,
 			cacheSizes:         d.CacheSizes,
 			authStore:          d.AuthStore,
 			githubOAuth:        d.GitHubOAuth,
@@ -474,16 +474,16 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 			voiceGateway:       voiceMetadata,
 		},
 		taskHandlers: &taskHandlers{
-			taskMgr:    d.TaskManager,
-			repos:      d.Repos,
+			taskMgr:    d.TaskMgr,
+			repoSvc:    d.RepoSvc,
 			repoStatus: d.RepoStatus,
-			forge:      d.Forge,
-			ciService:  d.CIService,
+			forgeMgr:   d.ForgeMgr,
+			ciSvc:      d.CIService,
 			authStore:  d.AuthStore,
 			warnings:   d.Warnings,
-			service:    svc,
+			taskSvc:    svc,
 		},
-		usageHandlers:    &usageHandlers{taskMgr: d.TaskManager, fetchers: d.UsageFetchers},
+		usageHandlers:    &usageHandlers{taskMgr: d.TaskMgr, fetchers: d.UsageFetchers},
 		voiceHandlers:    voice,
 		webFetchHandlers: webFetch,
 		authStore:        d.AuthStore,
@@ -524,7 +524,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		rateLimiter: rateLimiter,
 		hostState:   d.HostState,
 	}
-	registry := &mcpRegistry{serverConfig: s.serverHandlers, tasks: svc, ci: s.ciHandlers, usage: s.usageHandlers, audit: audit}
+	registry := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: svc, ci: s.ciHandlers, usage: s.usageHandlers, audit: audit}
 	s.mcpHandlers.protocol = &mcp.Handler{
 		Registry:   registry,
 		ServerInfo: mcp.Implementation{Name: "caic", Title: "caic", Version: autoupdate.Version},
@@ -539,9 +539,9 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		bot:              d.Bot,
 		ciService:        d.CIService,
 		ciCache:          d.CICache,
-		forge:            d.Forge,
-		taskMgr:          d.TaskManager,
-		repos:            d.Repos,
+		forgeMgr:         d.ForgeMgr,
+		taskMgr:          d.TaskMgr,
+		repoSvc:          d.RepoSvc,
 		repoStatus:       d.RepoStatus,
 		prefs:            d.Preferences,
 	}

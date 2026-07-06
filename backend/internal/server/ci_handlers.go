@@ -16,12 +16,12 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
-	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
-	"github.com/caic-xyz/caic/backend/internal/repos"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
+	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
-	"github.com/caic-xyz/caic/backend/internal/tasks"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
 // ciHandlers owns HTTP routes for manual CI repair actions and CI log access.
@@ -30,10 +30,10 @@ import (
 // forge, bot task, and agent-session operations without retaining a back-reference
 // to Router.
 type ciHandlers struct {
-	taskMgr    *tasks.Manager
-	repos      *repos.Service
+	taskMgr    *taskmgr.Manager
+	repoSvc    *repomgr.Service
 	repoStatus *ci.RepoStatusStore
-	forge      *forgemanager.Manager
+	forgeMgr   *forgemgr.Manager
 	provider   genai.Provider
 	taskClient bot.Client
 	authStore  *auth.Store
@@ -54,12 +54,12 @@ func (h *ciHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 	if p := t.Primary(); p != nil {
 		ciPrimaryName = p.Name
 	}
-	info, ok := h.repos.InfoFor(ciPrimaryName)
+	info, ok := h.repoSvc.InfoFor(ciPrimaryName)
 	if !ok {
 		writeError(w, api.BadRequest("no repo info found"))
 		return
 	}
-	f := h.forge.ForgeForInfo(r.Context(), &info)
+	f := h.forgeMgr.ForgeForInfo(r.Context(), &info)
 	if f == nil {
 		writeError(w, api.BadRequest("no forge token configured for this repo"))
 		return
@@ -107,11 +107,11 @@ func (h *ciHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 // It fetches CI logs via the forge, builds a rich prompt using bot.FailureSummary,
 // and creates a new agent task — the same path as the automated maybeAutoFix.
 func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Task, error) {
-	info, ok := h.repos.InfoFor(req.Repo)
+	info, ok := h.repoSvc.InfoFor(req.Repo)
 	if !ok {
 		return nil, api.BadRequest("repo not found")
 	}
-	f := h.forge.ForgeForInfo(ctx, &info)
+	f := h.forgeMgr.ForgeForInfo(ctx, &info)
 	if f == nil {
 		return nil, api.BadRequest("no forge token configured for this repo")
 	}
@@ -153,7 +153,7 @@ func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Task, 
 	if !ok {
 		return nil, api.InternalError("created task not found")
 	}
-	dto := v1conv.Task(ctx, entry, newTaskResolvers(h.taskMgr, h.repos, h.authStore))
+	dto := v1conv.Task(ctx, entry, newTaskResolvers(h.taskMgr, h.repoSvc, h.authStore))
 	return &dto, nil
 }
 
@@ -174,11 +174,11 @@ func (h *ciHandlers) fixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.Status
 	if primary == nil {
 		return nil, api.BadRequest("task has no primary repo")
 	}
-	info, ok := h.repos.InfoFor(primary.Name)
+	info, ok := h.repoSvc.InfoFor(primary.Name)
 	if !ok {
 		return nil, api.BadRequest("repo not found")
 	}
-	f := h.forge.ForgeForInfo(ctx, &info)
+	f := h.forgeMgr.ForgeForInfo(ctx, &info)
 	if f == nil {
 		return nil, api.BadRequest("no forge token configured for this repo")
 	}

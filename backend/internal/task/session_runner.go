@@ -14,15 +14,15 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/harness"
-	"github.com/caic-xyz/caic/backend/internal/repowork"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
 // SessionRunner manages agent sessions and dispatches backend messages into tasks.
 type SessionRunner struct {
 	Backends  map[harness.Name]agent.Backend
-	Workspace *repowork.RepoWorkspace
+	Workspace *repowork.Workspace
 	Logs      *LogStore
 }
 
@@ -386,7 +386,7 @@ func (r *SessionRunner) emitDiffStatBranch(ctx context.Context, t *Task, id runt
 
 func (r *SessionRunner) initDefaults() {
 	if r.Workspace == nil {
-		workspace, err := repowork.NewRepoWorkspace("", "", "", time.Minute, nil, slog.With("repo", "(none)"))
+		workspace, err := repowork.NewWorkspace("", "", "", time.Minute, nil, slog.With("repo", "(none)"))
 		if err != nil {
 			panic(err)
 		}

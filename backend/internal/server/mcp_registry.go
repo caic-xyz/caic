@@ -21,7 +21,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/tasks"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/oauth"
 )
 
@@ -67,7 +67,7 @@ At session start this prompt includes a snapshot of all current tasks. Use it to
 
 type mcpRegistry struct {
 	serverConfig *serverHandlers // required
-	tasks        *taskService
+	taskSvc      *taskService
 	ci           *ciHandlers
 	usage        *usageHandlers
 	audit        *auditStore
@@ -191,8 +191,8 @@ func (m *mcpRegistry) SubscribeResourceUpdates(ctx context.Context, filter mcp.S
 				if !yield(sources.taskUpdate(), nil) {
 					return
 				}
-				if m.tasks != nil && m.tasks.taskMgr != nil {
-					taskC = m.tasks.taskMgr.Changed()
+				if m.taskSvc != nil && m.taskSvc.taskMgr != nil {
+					taskC = m.taskSvc.taskMgr.Changed()
 				} else {
 					taskC = nil
 				}
@@ -200,7 +200,7 @@ func (m *mcpRegistry) SubscribeResourceUpdates(ctx context.Context, filter mcp.S
 				if !yield(sources.repoUpdate(), nil) {
 					return
 				}
-				repoC = m.serverConfig.repos.Changed()
+				repoC = m.serverConfig.repoSvc.Changed()
 			case <-repoStatusC:
 				if !yield(sources.repoUpdate(), nil) {
 					return
@@ -241,7 +241,7 @@ func (m *mcpRegistry) voiceSessionContext(ctx context.Context) string {
 	if prefs.Harness != "" {
 		parts = append(parts, "[Default harness: "+prefs.Harness+"]")
 	}
-	taskList := m.tasks.taskListSnapshot(ctx)
+	taskList := m.taskSvc.taskListSnapshot(ctx)
 	if len(taskList) == 0 {
 		if len(parts) == 0 {
 			return "[No active tasks]"
@@ -303,8 +303,8 @@ func annotateTool(spec mcp.ToolSpec, annotations mcp.ToolAnnotations) mcp.ToolSp
 }
 
 func (m *mcpRegistry) currentTasksAndRepos(ctx context.Context) ([]v1.Task, []v1.Repo) {
-	taskList := m.tasks.taskListSnapshot(ctx)
-	repoList := repoListFromSnapshot(m.serverConfig.repos.Snapshot(), m.serverConfig.repoStatus)
+	taskList := m.taskSvc.taskListSnapshot(ctx)
+	repoList := repoListFromSnapshot(m.serverConfig.repoSvc.Snapshot(), m.serverConfig.repoStatus)
 	return taskList, *repoList
 }
 
@@ -315,14 +315,14 @@ func (m *mcpRegistry) subscriptionSources(filter mcp.SubscriptionFilter) (subscr
 		hasFilter = true
 		switch {
 		case uri == "caic://tasks" || strings.HasPrefix(uri, "caic://tasks/"):
-			if m.tasks != nil && m.tasks.taskMgr != nil {
-				sources.taskC = m.tasks.taskMgr.Changed()
+			if m.taskSvc != nil && m.taskSvc.taskMgr != nil {
+				sources.taskC = m.taskSvc.taskMgr.Changed()
 				sources.taskResourceURIs = append(sources.taskResourceURIs, uri)
 			} else {
 				return subscriptionSources{}, errors.New("task subscription notifier unavailable")
 			}
 		case uri == "caic://repos" || strings.HasPrefix(uri, "caic://repos/"):
-			sources.repoC = m.serverConfig.repos.Changed()
+			sources.repoC = m.serverConfig.repoSvc.Changed()
 			sources.repoStatusC = m.serverConfig.repoStatus.Changed()
 			sources.repoResourceURIs = append(sources.repoResourceURIs, uri)
 		default:
@@ -331,12 +331,12 @@ func (m *mcpRegistry) subscriptionSources(filter mcp.SubscriptionFilter) (subscr
 	}
 	if filter.ResourcesListChanged {
 		hasFilter = true
-		if m.tasks != nil && m.tasks.taskMgr != nil {
-			sources.taskC = m.tasks.taskMgr.Changed()
+		if m.taskSvc != nil && m.taskSvc.taskMgr != nil {
+			sources.taskC = m.taskSvc.taskMgr.Changed()
 		} else {
 			return subscriptionSources{}, errors.New("task subscription notifier unavailable")
 		}
-		sources.repoC = m.serverConfig.repos.Changed()
+		sources.repoC = m.serverConfig.repoSvc.Changed()
 		sources.repoStatusC = m.serverConfig.repoStatus.Changed()
 		sources.resourcesListChanged = true
 	}
@@ -347,7 +347,7 @@ func (m *mcpRegistry) subscriptionSources(filter mcp.SubscriptionFilter) (subscr
 }
 
 func (m *mcpRegistry) handleTasksList(ctx context.Context, _ struct{}) mcp.ToolResult[mcp.TextOutput] {
-	taskList := m.tasks.taskListSnapshot(ctx)
+	taskList := m.taskSvc.taskListSnapshot(ctx)
 	if len(taskList) == 0 {
 		return mcp.TextToolResult("No tasks running.")
 	}
@@ -413,11 +413,11 @@ func (m *mcpRegistry) handleTaskCreate(ctx context.Context, args mcpTaskCreateAr
 	if err := req.Validate(); err != nil {
 		return domainToolError[mcpTaskCreatedOutput](err)
 	}
-	resp, err := m.tasks.createTask(ctx, req)
+	resp, err := m.taskSvc.createTask(ctx, req)
 	if err != nil {
 		return domainToolError[mcpTaskCreatedOutput](err)
 	}
-	taskList := m.tasks.taskListSnapshot(ctx)
+	taskList := m.taskSvc.taskListSnapshot(ctx)
 	num := taskNumberForID(taskList, resp.ID.String())
 	title := resp.ID.String()
 	for i := range taskList {
@@ -527,7 +527,7 @@ func (m *mcpRegistry) handleTaskPushBranchToRemote(ctx context.Context, args mcp
 	if err := req.Validate(); err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
-	resp, err := m.tasks.syncTask(ctx, entry, req)
+	resp, err := m.taskSvc.syncTask(ctx, entry, req)
 	if err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
@@ -550,7 +550,7 @@ func (m *mcpRegistry) handleTaskStop(ctx context.Context, args mcpTaskNumberArgs
 	if !ok {
 		return mcp.ToolError[mcp.TextOutput]("Unknown task number")
 	}
-	_, err := m.tasks.stopTask(ctx, entry, &api.EmptyReq{})
+	_, err := m.taskSvc.stopTask(ctx, entry, &api.EmptyReq{})
 	if err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
@@ -562,7 +562,7 @@ func (m *mcpRegistry) handleTaskPurge(ctx context.Context, args mcpTaskNumberArg
 	if !ok {
 		return mcp.ToolError[mcp.TextOutput]("Unknown task number")
 	}
-	_, err := m.tasks.purgeTask(ctx, entry, &api.EmptyReq{})
+	_, err := m.taskSvc.purgeTask(ctx, entry, &api.EmptyReq{})
 	if err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
@@ -574,7 +574,7 @@ func (m *mcpRegistry) handleTaskRevive(ctx context.Context, args mcpTaskNumberAr
 	if !ok {
 		return mcp.ToolError[mcp.TextOutput]("Unknown task number")
 	}
-	_, err := m.tasks.reviveTask(ctx, entry, &api.EmptyReq{})
+	_, err := m.taskSvc.reviveTask(ctx, entry, &api.EmptyReq{})
 	if err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
@@ -605,7 +605,7 @@ func (m *mcpRegistry) handleTaskFork(ctx context.Context, args mcpTaskForkArgs) 
 	if err := req.Validate(); err != nil {
 		return domainToolError[mcpTaskForkOutput](err)
 	}
-	resp, err := m.tasks.forkTask(ctx, entry, req)
+	resp, err := m.taskSvc.forkTask(ctx, entry, req)
 	if err != nil {
 		return domainToolError[mcpTaskForkOutput](err)
 	}
@@ -666,7 +666,7 @@ func (m *mcpRegistry) handleAgentLastMessage(ctx context.Context, args mcpTaskNu
 	if !ok {
 		return mcp.ToolError[mcp.TextOutput]("Unknown task number")
 	}
-	m.tasks.taskMgr.LoadMessagesOnDemand(entry)
+	m.taskSvc.taskMgr.LoadMessagesOnDemand(entry)
 	history, _, unsub := entry.Task().Subscribe(ctx)
 	unsub()
 	for _, msg := range slices.Backward(history) {
@@ -725,7 +725,7 @@ func (m *mcpRegistry) handleBotFixCI(ctx context.Context, args mcpBotFixCIArgs) 
 	if err != nil {
 		return domainToolError[mcpTaskCreatedOutput](err)
 	}
-	taskList := m.tasks.taskListSnapshot(ctx)
+	taskList := m.taskSvc.taskListSnapshot(ctx)
 	num := taskNumberForID(taskList, resp.ID.String())
 	if num > 0 {
 		return mcp.TypedToolResult(mcpTaskCreatedOutput{Result: fmt.Sprintf("Created fix-CI task #%d for %s.", num, args.Repo), TaskNumber: num, TaskID: resp.ID.String()})
@@ -746,7 +746,7 @@ func (m *mcpRegistry) sendTaskInput(ctx context.Context, args mcpTaskInputArgs, 
 	if args.Message == "" {
 		return mcp.ToolError[mcp.TextOutput]("Missing required parameter: " + field)
 	}
-	_, err := m.tasks.sendInput(ctx, entry, &v1.InputReq{Prompt: v1.Prompt{Text: args.Message}})
+	_, err := m.taskSvc.sendInput(ctx, entry, &v1.InputReq{Prompt: v1.Prompt{Text: args.Message}})
 	if err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
@@ -754,14 +754,14 @@ func (m *mcpRegistry) sendTaskInput(ctx context.Context, args mcpTaskInputArgs, 
 }
 
 func (m *mcpRegistry) taskByNumber(ctx context.Context, num int) (v1.Task, bool) {
-	taskList := m.tasks.taskListSnapshot(ctx)
+	taskList := m.taskSvc.taskListSnapshot(ctx)
 	if num < 1 || num > len(taskList) {
 		return v1.Task{}, false
 	}
 	return taskList[num-1], true
 }
 
-func (m *mcpRegistry) entryByNumber(ctx context.Context, num int) (int, *tasks.Entry, bool) {
+func (m *mcpRegistry) entryByNumber(ctx context.Context, num int) (int, *taskmgr.Entry, bool) {
 	if num == 0 {
 		return 0, nil, false
 	}
@@ -769,7 +769,7 @@ func (m *mcpRegistry) entryByNumber(ctx context.Context, num int) (int, *tasks.E
 	if !ok {
 		return num, nil, false
 	}
-	entry, ok := m.tasks.taskMgr.GetEntry(t.ID.String())
+	entry, ok := m.taskSvc.taskMgr.GetEntry(t.ID.String())
 	return num, entry, ok
 }
 

@@ -19,25 +19,25 @@ import (
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers"
 
-	"github.com/caic-xyz/caic/backend/internal/agent/registry"
+	"github.com/caic-xyz/caic/backend/internal/agent/backends"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
-	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
-	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
-	"github.com/caic-xyz/caic/backend/internal/reporeg"
-	"github.com/caic-xyz/caic/backend/internal/repos"
-	"github.com/caic-xyz/caic/backend/internal/repowork"
+	"github.com/caic-xyz/caic/backend/internal/repo"
+	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
+	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/caic-xyz/caic/backend/internal/tasks"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/gomode/voicegateway"
 	"github.com/caic-xyz/caic/gomode/voicegateway/voicertc"
 	"github.com/caic-xyz/caic/oauth/oauthclient"
@@ -215,7 +215,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		return nil, fmt.Errorf("open preferences: %w", err)
 	}
 
-	agentBackends := registry.DefaultBackends(cfg.Dirs.CacheDir, cfg.Agent.HarnessEnv)
+	agentBackends := backends.Default(cfg.Dirs.CacheDir, cfg.Agent.HarnessEnv)
 	if cfg.Agent.Backends != nil {
 		agentBackends = cfg.Agent.Backends
 	}
@@ -242,7 +242,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		}
 	}
 
-	forgeManager := forgemanager.New(cfg.GitHub.Token, cfg.GitLab.Token, nil)
+	forgeManager := forgemgr.New(cfg.GitHub.Token, cfg.GitLab.Token, nil)
 	if cfg.GitHub.AppID != 0 && len(cfg.GitHub.AppPrivateKeyPEM) > 0 {
 		app, err := github.NewAppClient(cfg.GitHub.AppID, cfg.GitHub.AppPrivateKeyPEM, forgeManager.GitHubAppThrottle())
 		if err != nil {
@@ -253,8 +253,8 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 
 	provider := initProvider(ctx, cfg, backend)
 
-	workspaceRegistry := repowork.NewWorkspaceRegistry(ctx, runtimeBackend)
-	taskMgr := tasks.New(tasks.Config{
+	workspaceRegistry := repowork.NewRegistry(ctx, runtimeBackend)
+	taskMgr := taskmgr.New(taskmgr.Config{
 		ServerCtx:         ctx,
 		LogDir:            logDir,
 		CacheDir:          cfg.Dirs.CacheDir,
@@ -271,18 +271,18 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		Prefs:      prefsStore,
 		Provider:   provider,
 	})
-	repoService := repos.NewService(ctx, absRoot, reporeg.New(nil), workspaceRegistry)
+	repoService := repomgr.NewService(ctx, absRoot, repo.New(nil), workspaceRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 
 	// Long-lived forge automation, owned by app and routed to by the HTTP layer.
 	warnings := server.NewWarningStore(taskMgr)
 	cacheSizes := server.NewCacheSizeStore()
-	botClient := &botClient{repos: repoService, taskMgr: taskMgr, forge: forgeManager}
+	botClient := &botClient{repoSvc: repoService, taskMgr: taskMgr, forgeMgr: forgeManager}
 	ciAdapter := &ciAdapter{
-		repos:       repoService,
+		repoMgr:     repoService,
 		repoStatus:  repoStatus,
 		taskMgr:     taskMgr,
-		forge:       forgeManager,
+		forgeMgr:    forgeManager,
 		prefs:       prefsStore,
 		warnings:    warnings,
 		taskCreator: botClient,
@@ -299,7 +299,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	}
 
 	s, err := server.New(ctx, server.Dependencies{
-		Repos:                      repoService,
+		RepoSvc:                    repoService,
 		RepoStatus:                 repoStatus,
 		Tailscale:                  cfg.Runtime.TailscaleAPIKey != "",
 		Preferences:                prefsStore,
@@ -316,10 +316,10 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		UsageFetchers:              usageFetchers(cfg, ctx),
 		VoiceBridge:                voiceBridge,
 		VoiceGateway:               cfg.Voice.Gateway,
-		Forge:                      forgeManager,
+		ForgeMgr:                   forgeManager,
 		CICache:                    cache,
 		ProcessBackend:             runtimeBackend,
-		TaskManager:                taskMgr,
+		TaskMgr:                    taskMgr,
 		Provider:                   provider,
 		IPGeoChecker:               ipgeoChecker,
 		Bot:                        botService,
@@ -340,7 +340,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		return nil, err
 	}
 
-	results := make([]repos.InitResult, len(repoRes.paths))
+	results := make([]repomgr.InitResult, len(repoRes.paths))
 	var wg sync.WaitGroup
 	for i, abs := range repoRes.paths {
 		wg.Go(func() {
@@ -378,9 +378,9 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		ctx:       ctx,
 		authStore: authStore,
 		ciService: ciService,
-		forge:     forgeManager,
+		forgeMgr:  forgeManager,
 		taskMgr:   taskMgr,
-		repos:     repoService,
+		repoSvc:   repoService,
 	}
 	for i := range adopted {
 		at := &adopted[i]
@@ -454,11 +454,11 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	return &App{Server: s, voiceBridge: voiceBridge, backgroundStarters: backgroundStarters}, nil
 }
 
-func adoptionRepos(in []reporeg.Info) []tasks.AdoptRepo {
-	out := make([]tasks.AdoptRepo, len(in))
+func adoptionRepos(in []repo.Info) []taskmgr.AdoptRepo {
+	out := make([]taskmgr.AdoptRepo, len(in))
 	for i := range in {
 		r := &in[i]
-		out[i] = tasks.AdoptRepo{
+		out[i] = taskmgr.AdoptRepo{
 			RelPath:    r.RelPath,
 			AbsPath:    r.AbsPath,
 			ForgeKind:  string(r.ForgeKind),

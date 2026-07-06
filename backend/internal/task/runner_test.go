@@ -18,8 +18,8 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
-	"github.com/caic-xyz/caic/backend/internal/harness"
-	"github.com/caic-xyz/caic/backend/internal/repowork"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
@@ -30,8 +30,8 @@ type instantExitBackend struct {
 	testBackend
 }
 
-func newTestRepoWorkspace(baseBranch, dir string, backend runtime.Backend) *repowork.RepoWorkspace {
-	workspace, err := repowork.NewRepoWorkspace(baseBranch, dir, filepath.Base(dir), time.Minute, backend, slog.With("repo", "test"))
+func newTestRepoWorkspace(baseBranch, dir string, backend runtime.Backend) *repowork.Workspace {
+	workspace, err := repowork.NewWorkspace(baseBranch, dir, filepath.Base(dir), time.Minute, backend, slog.With("repo", "test"))
 	if err != nil {
 		panic(err)
 	}

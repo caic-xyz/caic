@@ -11,19 +11,19 @@ import (
 	"strings"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/bot"
-	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
-	"github.com/caic-xyz/caic/backend/internal/harness"
-	"github.com/caic-xyz/caic/backend/internal/repos"
-	"github.com/caic-xyz/caic/backend/internal/tasks"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
+	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
 // botClient adapts task and forge stores to bot.Client.
 type botClient struct {
-	repos   *repos.Service
-	taskMgr *tasks.Manager
-	forge   *forgemanager.Manager
+	repoSvc  *repomgr.Service
+	taskMgr  *taskmgr.Manager
+	forgeMgr *forgemgr.Manager
 }
 
 // ResolveRepo maps a forge full name ("owner/repo") to repo info.
@@ -33,7 +33,7 @@ func (c *botClient) ResolveRepo(forgeFullName string) *bot.RepoInfo {
 	if !ok {
 		return nil
 	}
-	info, found := c.repos.ByForge(owner, repo)
+	info, found := c.repoSvc.ByForge(owner, repo)
 	if !found {
 		return nil
 	}
@@ -68,7 +68,7 @@ func (c *botClient) CreateTask(ctx context.Context, req bot.TaskRequest) (string
 	// commenter. Only relevant for issue-triggered tasks.
 	var ownerResolved, repoResolved string
 	if req.IssueNumber > 0 {
-		if info, ok := c.repos.InfoFor(req.Repo); ok && info.ForgeOwner != "" {
+		if info, ok := c.repoSvc.InfoFor(req.Repo); ok && info.ForgeOwner != "" {
 			ownerResolved = info.ForgeOwner
 			repoResolved = info.ForgeRepo
 		}
@@ -79,10 +79,10 @@ func (c *botClient) CreateTask(ctx context.Context, req bot.TaskRequest) (string
 	// caller's OAuth token rather than the server PAT.
 	ghToken := c.resolveGitHubContainerToken(ctx, true)
 
-	id, err := c.taskMgr.Create(ctx, tasks.CreateParams{
+	id, err := c.taskMgr.Create(ctx, taskmgr.CreateParams{
 		OwnerID:             req.OwnerID,
 		Prompt:              agent.Prompt{Text: req.Prompt},
-		Repos:               []tasks.CreateRepo{{Name: req.Repo}},
+		Repos:               []taskmgr.CreateRepo{{Name: req.Repo}},
 		Harness:             selectedHarness,
 		GitHubToken:         true,
 		ResolvedGitHubToken: ghToken,
@@ -119,16 +119,16 @@ func (c *botClient) ListPendingBotTasks() []bot.PendingBotTask {
 
 // ResolveCommenter returns a forge commenter for an owner.
 func (c *botClient) ResolveCommenter(ctx context.Context, owner string) bot.Commenter {
-	installID := c.forge.InstallationID(owner)
-	if installID == 0 && c.forge.GitHubApp() != nil {
+	installID := c.forgeMgr.InstallationID(owner)
+	if installID == 0 && c.forgeMgr.GitHubApp() != nil {
 		// Try to discover the installation ID via the API.
-		id, err := c.forge.GitHubApp().RepoInstallation(ctx, owner, "")
+		id, err := c.forgeMgr.GitHubApp().RepoInstallation(ctx, owner, "")
 		if err == nil && id > 0 {
-			c.forge.StoreInstallationID(owner, id)
+			c.forgeMgr.StoreInstallationID(owner, id)
 			installID = id
 		}
 	}
-	return c.forge.CommenterFor(installID)
+	return c.forgeMgr.CommenterFor(installID)
 }
 
 func (c *botClient) resolveGitHubContainerToken(ctx context.Context, enabled bool) string {
@@ -138,8 +138,8 @@ func (c *botClient) resolveGitHubContainerToken(ctx context.Context, enabled boo
 	if u, ok := auth.UserFromContext(ctx); ok && u.Provider == auth.ProviderGitHub && u.AccessToken != "" {
 		return u.AccessToken
 	}
-	if c.forge != nil {
-		return c.forge.GitHubToken()
+	if c.forgeMgr != nil {
+		return c.forgeMgr.GitHubToken()
 	}
 	return ""
 }

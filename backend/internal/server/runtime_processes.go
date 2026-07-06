@@ -13,7 +13,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
-	"github.com/caic-xyz/caic/backend/internal/tasks"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
 type runtimeProcessBackend interface {
@@ -23,7 +23,7 @@ type runtimeProcessBackend interface {
 
 // runtimeProcessHandlers handles task runtime process routes.
 type runtimeProcessHandlers struct {
-	taskMgr     *tasks.Manager
+	taskMgr     *taskmgr.Manager
 	backend     runtimeProcessBackend
 	authEnabled bool
 }
@@ -79,7 +79,7 @@ func (h *runtimeProcessHandlers) HandleSignalProcess(w http.ResponseWriter, r *h
 	writeJSONResponse(w, resp, err)
 }
 
-func (h *runtimeProcessHandlers) signalProcess(ctx context.Context, entry *tasks.Entry, req *v1.SignalProcessReq) (*v1.StatusResp, error) {
+func (h *runtimeProcessHandlers) signalProcess(ctx context.Context, entry *taskmgr.Entry, req *v1.SignalProcessReq) (*v1.StatusResp, error) {
 	t := entry.Task()
 	instanceID := t.RuntimeInstanceID()
 	if instanceID == "" {
@@ -95,7 +95,7 @@ func (h *runtimeProcessHandlers) signalProcess(ctx context.Context, entry *tasks
 	return &v1.StatusResp{Status: "signalled"}, nil
 }
 
-func (h *runtimeProcessHandlers) getTask(r *http.Request) (*tasks.Entry, error) {
+func (h *runtimeProcessHandlers) getTask(r *http.Request) (*taskmgr.Entry, error) {
 	id := r.PathValue("id")
 	entry, ok := h.taskMgr.GetEntry(id)
 	if !ok {

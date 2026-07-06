@@ -11,7 +11,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/caic-xyz/caic/backend/internal/harness"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	claudedto "github.com/maruel/genai/providers/claudecode"
 )
 

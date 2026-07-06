@@ -24,15 +24,15 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
-	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
-	"github.com/caic-xyz/caic/backend/internal/harness"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
-	"github.com/caic-xyz/caic/backend/internal/reporeg"
-	"github.com/caic-xyz/caic/backend/internal/repos"
-	"github.com/caic-xyz/caic/backend/internal/repowork"
+	"github.com/caic-xyz/caic/backend/internal/repo"
+	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
+	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
@@ -40,8 +40,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/task/tasktest"
-	"github.com/caic-xyz/caic/backend/internal/tasks"
 	"github.com/caic-xyz/caic/gomode"
 	"github.com/caic-xyz/caic/gomode/voicegateway/voicertc"
 	"github.com/caic-xyz/caic/oauth/oauthclient"
@@ -97,8 +97,8 @@ func newTestPrefs(t testing.TB) *preferences.Store {
 // testRouter bundles a Router with the dependencies tests poke directly. The
 // production Router exposes these only through handler concerns; the wrapper
 // keeps test access ergonomic without re-adding fields to Router.
-func newRouterTestWorkspace(t testing.TB, baseBranch, dir string) *repowork.RepoWorkspace {
-	workspace, err := repowork.NewRepoWorkspace(baseBranch, dir, filepath.Base(dir), time.Minute, nil, slog.With("repo", "test"))
+func newRouterTestWorkspace(t testing.TB, baseBranch, dir string) *repowork.Workspace {
+	workspace, err := repowork.NewWorkspace(baseBranch, dir, filepath.Base(dir), time.Minute, nil, slog.With("repo", "test"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,11 +108,11 @@ func newRouterTestWorkspace(t testing.TB, baseBranch, dir string) *repowork.Repo
 type testRouter struct {
 	*Router
 
-	taskMgr               *tasks.Manager
-	repos                 *repos.Service
+	taskMgr               *taskmgr.Manager
+	repoSvc               *repomgr.Service
 	repoStatus            *ci.RepoStatusStore
 	prefs                 *preferences.Store
-	forge                 *forgemanager.Manager
+	forgeMgr              *forgemgr.Manager
 	oauthRefreshTokenPath string
 }
 
@@ -126,25 +126,25 @@ func newTestRouter(t testing.TB) *testRouter {
 		t.Fatalf("ipgeo.NewChecker: %v", err)
 	}
 	backend := &mdruntime.Backend{}
-	workspaceRegistry := repowork.NewWorkspaceRegistry(t.Context(), nil)
-	taskMgr := tasks.New(tasks.Config{ServerCtx: t.Context(), WorkspaceRegistry: workspaceRegistry})
-	repoSvc := repos.NewService(t.Context(), "", reporeg.New(nil), workspaceRegistry)
+	workspaceRegistry := repowork.NewRegistry(t.Context(), nil)
+	taskMgr := taskmgr.New(taskmgr.Config{ServerCtx: t.Context(), WorkspaceRegistry: workspaceRegistry})
+	repoSvc := repomgr.NewService(t.Context(), "", repo.New(nil), workspaceRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
-	forgeManager := forgemanager.New("", "", nil)
+	forgeManager := forgemgr.New("", "", nil)
 	s, err := New(t.Context(), Dependencies{
-		Repos:          repoSvc,
+		RepoSvc:        repoSvc,
 		RepoStatus:     repoStatus,
 		ProcessBackend: backend,
-		TaskManager:    taskMgr,
+		TaskMgr:        taskMgr,
 		Preferences:    prefs,
 		IPGeoChecker:   checker,
-		Forge:          forgeManager,
+		ForgeMgr:       forgeManager,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, repoStatus: repoStatus, prefs: prefs, forge: forgeManager}
+	return &testRouter{Router: s, taskMgr: taskMgr, repoSvc: repoSvc, repoStatus: repoStatus, prefs: prefs, forgeMgr: forgeManager}
 }
 
 // newTestRouterWithAuthHost creates a Router with an auth store, suitable for
@@ -156,20 +156,20 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 		t.Fatalf("ipgeo.NewChecker: %v", err)
 	}
 	backend := &mdruntime.Backend{}
-	workspaceRegistry := repowork.NewWorkspaceRegistry(t.Context(), nil)
-	taskMgr := tasks.New(tasks.Config{ServerCtx: t.Context(), WorkspaceRegistry: workspaceRegistry})
-	repoSvc := repos.NewService(t.Context(), "", reporeg.New(nil), workspaceRegistry)
+	workspaceRegistry := repowork.NewRegistry(t.Context(), nil)
+	taskMgr := taskmgr.New(taskmgr.Config{ServerCtx: t.Context(), WorkspaceRegistry: workspaceRegistry})
+	repoSvc := repomgr.NewService(t.Context(), "", repo.New(nil), workspaceRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
-	forgeManager := forgemanager.New("", "", nil)
+	forgeManager := forgemgr.New("", "", nil)
 	s, err := New(t.Context(), Dependencies{
-		Repos:                      repoSvc,
+		RepoSvc:                    repoSvc,
 		RepoStatus:                 repoStatus,
 		ProcessBackend:             backend,
-		TaskManager:                taskMgr,
+		TaskMgr:                    taskMgr,
 		Preferences:                prefs,
 		IPGeoChecker:               checker,
-		Forge:                      forgeManager,
+		ForgeMgr:                   forgeManager,
 		AuthStore:                  authStore,
 		OAuthPrivateKeyPEM:         testMCPOAuthSigningKeyPEM(t),
 		OAuthRefreshTokenStorePath: refreshTokenPath,
@@ -178,7 +178,7 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, repoStatus: repoStatus, prefs: prefs, forge: forgeManager, oauthRefreshTokenPath: refreshTokenPath}
+	return &testRouter{Router: s, taskMgr: taskMgr, repoSvc: repoSvc, repoStatus: repoStatus, prefs: prefs, forgeMgr: forgeManager, oauthRefreshTokenPath: refreshTokenPath}
 }
 
 // newTestOAuthRouter creates a Router configured with OAuth host state and a
@@ -205,10 +205,10 @@ func TestNew(t *testing.T) {
 
 	t.Run("missing repos", func(t *testing.T) {
 		t.Parallel()
-		workspaceRegistry := repowork.NewWorkspaceRegistry(t.Context(), nil)
+		workspaceRegistry := repowork.NewRegistry(t.Context(), nil)
 		_, err := New(t.Context(), Dependencies{
 			ProcessBackend: &mdruntime.Backend{},
-			TaskManager:    tasks.New(tasks.Config{ServerCtx: t.Context(), WorkspaceRegistry: workspaceRegistry}),
+			TaskMgr:        taskmgr.New(taskmgr.Config{ServerCtx: t.Context(), WorkspaceRegistry: workspaceRegistry}),
 			Preferences:    newTestPrefs(t),
 			RepoStatus:     ci.NewRepoStatusStore(),
 		})
@@ -219,11 +219,11 @@ func TestNew(t *testing.T) {
 
 	t.Run("missing repo status", func(t *testing.T) {
 		t.Parallel()
-		workspaceRegistry := repowork.NewWorkspaceRegistry(t.Context(), nil)
+		workspaceRegistry := repowork.NewRegistry(t.Context(), nil)
 		_, err := New(t.Context(), Dependencies{
-			Repos:          repos.NewService(t.Context(), "", reporeg.New(nil), workspaceRegistry),
+			RepoSvc:        repomgr.NewService(t.Context(), "", repo.New(nil), workspaceRegistry),
 			ProcessBackend: &mdruntime.Backend{},
-			TaskManager:    tasks.New(tasks.Config{ServerCtx: t.Context(), WorkspaceRegistry: workspaceRegistry}),
+			TaskMgr:        taskmgr.New(taskmgr.Config{ServerCtx: t.Context(), WorkspaceRegistry: workspaceRegistry}),
 			Preferences:    newTestPrefs(t),
 		})
 		if err == nil || err.Error() != "repo status store is required" {
@@ -314,8 +314,8 @@ func TestLoginCallbackPublic(t *testing.T) {
 // task's own ID string, so handlers that re-resolve via the Manager by
 // entry.Task().ID.String() find the same entry (in production the two always
 // coincide because Insert keys on t.ID.String()).
-func insertTestTask(t *testing.T, s *testRouter, id string, tk *task.Task) *tasks.Entry { //nolint:unparam // id is constant today; keep generic
-	e := tasks.NewEntry(tk, nil)
+func insertTestTask(t *testing.T, s *testRouter, id string, tk *task.Task) *taskmgr.Entry { //nolint:unparam // id is constant today; keep generic
+	e := taskmgr.NewEntry(tk, nil)
 	s.taskMgr.Insert(id, e)
 	if taskID := tk.ID.String(); taskID != id {
 		s.taskMgr.Insert(taskID, e)
@@ -324,9 +324,9 @@ func insertTestTask(t *testing.T, s *testRouter, id string, tk *task.Task) *task
 }
 
 // testEntries returns a snapshot of every registered task entry (test-only).
-func testEntries(s *testRouter) []*tasks.Entry {
-	var out []*tasks.Entry
-	s.taskMgr.Range(func(_ string, e *tasks.Entry) bool {
+func testEntries(s *testRouter) []*taskmgr.Entry {
+	var out []*taskmgr.Entry
+	s.taskMgr.Range(func(_ string, e *taskmgr.Entry) bool {
 		out = append(out, e)
 		return true
 	})
@@ -356,8 +356,8 @@ func newWorkspaceConstructionTestServer(t *testing.T, root string) workspaceCons
 	backends := map[harness.Name]agent.Backend{harness.Codex: stubBackend{}}
 	logDir := filepath.Join(t.TempDir(), "logs")
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	workspaceRegistry := repowork.NewWorkspaceRegistry(t.Context(), backend)
-	taskMgr := tasks.New(tasks.Config{
+	workspaceRegistry := repowork.NewRegistry(t.Context(), backend)
+	taskMgr := taskmgr.New(taskmgr.Config{
 		ServerCtx:         t.Context(),
 		LogDir:            logDir,
 		CacheDir:          cacheDir,
@@ -366,55 +366,55 @@ func newWorkspaceConstructionTestServer(t *testing.T, root string) workspaceCons
 		HarnessEnv:        harnessEnv,
 		WorkspaceRegistry: workspaceRegistry,
 	})
-	repoSvc := repos.NewService(t.Context(), root, reporeg.New(nil), workspaceRegistry)
+	repoSvc := repomgr.NewService(t.Context(), root, repo.New(nil), workspaceRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
 	s, err := New(t.Context(), Dependencies{
-		Repos:          repoSvc,
+		RepoSvc:        repoSvc,
 		RepoStatus:     repoStatus,
 		ProcessBackend: backend,
-		TaskManager:    taskMgr,
+		TaskMgr:        taskMgr,
 		Preferences:    prefs,
-		Forge:          forgemanager.New("", "", nil),
+		ForgeMgr:       forgemgr.New("", "", nil),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	return workspaceConstructionTestFixture{
-		server:   &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, repoStatus: repoStatus, prefs: prefs},
+		server:   &testRouter{Router: s, taskMgr: taskMgr, repoSvc: repoSvc, repoStatus: repoStatus, prefs: prefs},
 		logDir:   logDir,
 		cacheDir: cacheDir,
 		backend:  backend,
 	}
 }
 
-func newTestRepoWatcher(t *testing.T, root string, s *testRouter) *repos.Watcher {
-	return repos.NewWatcher(&repos.WatcherConfig{
+func newTestRepoWatcher(t *testing.T, root string, s *testRouter) *repomgr.Watcher {
+	return repomgr.NewWatcher(&repomgr.WatcherConfig{
 		Ctx:             t.Context(),
 		AbsRoot:         root,
-		Repos:           func() []reporeg.Info { return testWatchedRepos(s.repos) },
-		RelPath:         s.repos.RelPath,
-		WorkspaceExists: s.repos.WorkspaceRegistered,
+		Repos:           func() []repo.Info { return testWatchedRepos(s.repoSvc) },
+		RelPath:         s.repoSvc.RelPath,
+		WorkspaceExists: s.repoSvc.WorkspaceRegistered,
 		OnDiscovered: func(ctx context.Context, abs string) {
-			result, err := s.repos.DiscoverWorkspace(ctx, abs)
+			result, err := s.repoSvc.DiscoverWorkspace(ctx, abs)
 			if err != nil {
 				t.Errorf("DiscoverWorkspace(%q): %v", abs, err)
 				return
 			}
-			if s.repos.WorkspaceRegistered(result.Info.RelPath) {
+			if s.repoSvc.WorkspaceRegistered(result.Info.RelPath) {
 				return
 			}
-			s.repos.RegisterWorkspace(&result, nil)
+			s.repoSvc.RegisterWorkspace(&result, nil)
 		},
-		OnRemoved: s.repos.DeregisterWorkspace,
+		OnRemoved: s.repoSvc.DeregisterWorkspace,
 	})
 }
 
-func testWatchedRepos(repoService *repos.Service) []reporeg.Info {
+func testWatchedRepos(repoService *repomgr.Service) []repo.Info {
 	snap := repoService.Snapshot()
-	out := make([]reporeg.Info, len(snap))
+	out := make([]repo.Info, len(snap))
 	for i := range snap {
-		out[i] = reporeg.Info{
+		out[i] = repo.Info{
 			RelPath:    snap[i].RelPath,
 			AbsPath:    snap[i].AbsPath,
 			BaseBranch: snap[i].BaseBranch,
@@ -481,7 +481,7 @@ func TestCloneRepo(t *testing.T) {
 		}
 
 		newTestRepoWatcher(t, root, s).SyncReposInDir(t.Context(), root)
-		if got := s.repos.Snapshot(); len(got) != 1 || got[0].RelPath != "cloned" {
+		if got := s.repoSvc.Snapshot(); len(got) != 1 || got[0].RelPath != "cloned" {
 			t.Fatalf("repo registry after watcher sync = %+v, want one cloned repo", got)
 		}
 		after, ok := s.taskMgr.Workspace("cloned")
@@ -511,7 +511,7 @@ func TestCloneRepo(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(root, "broken")); !os.IsNotExist(err) {
 			t.Fatalf("partial clone path still exists: %v", err)
 		}
-		if got := s.repos.Snapshot(); len(got) != 0 {
+		if got := s.repoSvc.Snapshot(); len(got) != 0 {
 			t.Fatalf("repo registry = %+v, want empty after failed clone", got)
 		}
 		if _, ok := s.taskMgr.Workspace("broken"); ok {
@@ -587,7 +587,7 @@ func TestHandleTaskInput(t *testing.T) {
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks/t1/input", body)
 			req.SetPathValue("id", "t1")
 			w := httptest.NewRecorder()
-			handleWithTask(testTaskHandlers(s), testTaskHandlers(s).service.sendInput)(w, req)
+			handleWithTask(testTaskHandlers(s), testTaskHandlers(s).taskSvc.sendInput)(w, req)
 			if w.Code != tt.wantStatus {
 				t.Errorf("status = %d, want %d", w.Code, tt.wantStatus)
 			}
@@ -610,7 +610,7 @@ func testRestart(t *testing.T, state task.State, bodyJSON string, wantStatus int
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks/t1/restart", body)
 	req.SetPathValue("id", "t1")
 	w := httptest.NewRecorder()
-	handleWithTask(testTaskHandlers(s), testTaskHandlers(s).service.restartTask)(w, req)
+	handleWithTask(testTaskHandlers(s), testTaskHandlers(s).taskSvc.restartTask)(w, req)
 	if w.Code != wantStatus {
 		t.Errorf("status = %d, want %d", w.Code, wantStatus)
 	}
@@ -645,7 +645,7 @@ func TestHandlePurge(t *testing.T) {
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks/t1/purge", http.NoBody)
 		req.SetPathValue("id", "t1")
 		w := httptest.NewRecorder()
-		handleWithTask(testTaskHandlers(s), testTaskHandlers(s).service.purgeTask)(w, req)
+		handleWithTask(testTaskHandlers(s), testTaskHandlers(s).taskSvc.purgeTask)(w, req)
 		if w.Code != http.StatusConflict {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusConflict)
 		}
@@ -666,7 +666,7 @@ func TestHandlePurge(t *testing.T) {
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks/t1/purge", http.NoBody)
 		req.SetPathValue("id", "t1")
 		w := httptest.NewRecorder()
-		handleWithTask(testTaskHandlers(s), testTaskHandlers(s).service.purgeTask)(w, req)
+		handleWithTask(testTaskHandlers(s), testTaskHandlers(s).taskSvc.purgeTask)(w, req)
 		if w.Code != http.StatusOK {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 		}
@@ -699,7 +699,7 @@ func TestHandlePurge(t *testing.T) {
 		req = req.WithContext(ctx)
 		req.SetPathValue("id", "t1")
 		w := httptest.NewRecorder()
-		handleWithTask(testTaskHandlers(s), testTaskHandlers(s).service.purgeTask)(w, req)
+		handleWithTask(testTaskHandlers(s), testTaskHandlers(s).taskSvc.purgeTask)(w, req)
 		if w.Code != http.StatusOK {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 		}
@@ -713,7 +713,7 @@ func TestHandleCreateTask(t *testing.T) {
 		s := newTestRouter(t)
 		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: stubBackend{}})
 		s.taskMgr.RegisterWorkspace("myrepo", newRouterTestWorkspace(t, "main", t.TempDir()))
-		handler := handle(testTaskHandlers(s).service.createTask)
+		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test task"},"repos":[{"name":"myrepo"}],"harness":"claude"}`)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
@@ -735,7 +735,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("MissingRepo", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
-		handler := handle(testTaskHandlers(s).service.createTask)
+		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test task"}}`)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
@@ -754,7 +754,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("UnknownRepo", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
-		handler := handle(testTaskHandlers(s).service.createTask)
+		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"nonexistent"}],"harness":"claude"}`)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
@@ -774,7 +774,7 @@ func TestHandleCreateTask(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
 		s.taskMgr.RegisterWorkspace("myrepo", newRouterTestWorkspace(t, "main", t.TempDir()))
-		handler := handle(testTaskHandlers(s).service.createTask)
+		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"nonexistent"}`)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
@@ -798,7 +798,7 @@ func TestHandleCreateTask(t *testing.T) {
 		s := newTestRouter(t)
 		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{"stub": stubBackend{}})
 		s.taskMgr.RegisterWorkspace("myrepo", newRouterTestWorkspace(t, "main", t.TempDir()))
-		handler := handle(testTaskHandlers(s).service.createTask)
+		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"stub","model":"nonexistent"}`)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
@@ -822,7 +822,7 @@ func TestHandleCreateTask(t *testing.T) {
 		s := newTestRouter(t)
 		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{"stub": stubBackend{}})
 		s.taskMgr.RegisterWorkspace("myrepo", newRouterTestWorkspace(t, "main", t.TempDir()))
-		handler := handle(testTaskHandlers(s).service.createTask)
+		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"stub","model":"m1"}`)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
@@ -846,7 +846,7 @@ func TestHandleCreateTask(t *testing.T) {
 		s := newTestRouter(t)
 		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: stubBackend{}})
 		s.taskMgr.RegisterWorkspace("myrepo", newRouterTestWorkspace(t, "main", t.TempDir()))
-		handler := handle(testTaskHandlers(s).service.createTask)
+		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
 		// Set docker image in user preferences.
 		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
@@ -907,7 +907,7 @@ func TestHandleCreateTask(t *testing.T) {
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"claude"}`)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
 		w := httptest.NewRecorder()
-		handle(testTaskHandlers(s).service.createTask)(w, req)
+		handle(testTaskHandlers(s).taskSvc.createTask)(w, req)
 
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -977,7 +977,7 @@ func TestHandleCreateTask(t *testing.T) {
 		}
 		createReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"claude","gitHubToken":true}`))
 		createW := httptest.NewRecorder()
-		handle(testTaskHandlers(s).service.createTask)(createW, createReq)
+		handle(testTaskHandlers(s).taskSvc.createTask)(createW, createReq)
 		if createW.Code != http.StatusOK {
 			t.Fatalf("create status = %d, want %d: %s", createW.Code, http.StatusOK, createW.Body.String())
 		}
@@ -989,7 +989,7 @@ func TestHandleCreateTask(t *testing.T) {
 		infoReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskResp.ID.String()+"/info", http.NoBody)
 		infoReq.SetPathValue("id", taskResp.ID.String())
 		infoW := httptest.NewRecorder()
-		handleWithTask(testTaskHandlers(s), testTaskHandlers(s).service.getTaskInfo)(infoW, infoReq)
+		handleWithTask(testTaskHandlers(s), testTaskHandlers(s).taskSvc.getTaskInfo)(infoW, infoReq)
 		if infoW.Code != http.StatusOK {
 			t.Fatalf("info status = %d, want %d: %s", infoW.Code, http.StatusOK, infoW.Body.String())
 		}
@@ -1021,7 +1021,7 @@ func TestHandleCreateTask(t *testing.T) {
 		s := newTestRouter(t)
 		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: stubBackend{}})
 		s.taskMgr.RegisterWorkspace("", newRouterTestWorkspace(t, "", ""))
-		handler := handle(testTaskHandlers(s).service.createTask)
+		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"no repo task"},"harness":"claude","model":"m1","effort":"high"}`)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
@@ -1056,7 +1056,7 @@ func TestHandleCreateTask(t *testing.T) {
 		// a clear 400 instead of panicking.
 		s := newTestRouter(t)
 		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{})
-		handler := handle(testTaskHandlers(s).service.createTask)
+		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"no repo task"},"harness":"claude"}`)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
@@ -1071,7 +1071,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("UnknownField", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
-		handler := handle(testTaskHandlers(s).service.createTask)
+		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repo":"r","harness":"claude","bogus":true}`)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
@@ -1167,11 +1167,11 @@ func TestSignalProcess(t *testing.T) {
 func TestHandleListRepos(t *testing.T) {
 	t.Parallel()
 	s := newTestRouter(t)
-	s.repos = repos.NewService(t.Context(), "", reporeg.New([]reporeg.Info{
+	s.repoSvc = repomgr.NewService(t.Context(), "", repo.New([]repo.Info{
 		{RelPath: "org/repoA", AbsPath: "/src/org/repoA", BaseBranch: "main"},
 		{RelPath: "repoB", AbsPath: "/src/repoB", BaseBranch: "develop"},
 	}), nil)
-	s.serverHandlers.repos = s.repos
+	s.serverHandlers.repoSvc = s.repoSvc
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/server/repos", http.NoBody)
 	w := httptest.NewRecorder()
@@ -1242,7 +1242,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 
 		// Collect prompts sorted by ksid (time-sortable) to verify all loaded.
 		prompts := make([]string, 0, len(entries))
-		var anyEntry *tasks.Entry
+		var anyEntry *taskmgr.Entry
 		for _, e := range entries {
 			prompts = append(prompts, e.Task().InitialPrompt.Text)
 			if anyEntry == nil {
@@ -1392,7 +1392,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 			t.Fatalf("len(entries) = %d, want 1", len(entries))
 		}
 		for _, e := range entries {
-			j := v1conv.Task(t.Context(), e, testTaskHandlers(s).service.taskResolvers())
+			j := v1conv.Task(t.Context(), e, testTaskHandlers(s).taskSvc.taskResolvers())
 			if j.CostUSD != 1.23 {
 				t.Errorf("CostUSD = %f, want 1.23", j.CostUSD)
 			}
@@ -1446,7 +1446,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 			t.Fatalf("len(entries) = %d, want 1", len(entries))
 		}
 		for _, e := range entries {
-			j := v1conv.Task(t.Context(), e, testTaskHandlers(s).service.taskResolvers())
+			j := v1conv.Task(t.Context(), e, testTaskHandlers(s).taskSvc.taskResolvers())
 			if j.CostUSD != 0.42 {
 				t.Errorf("CostUSD = %f, want 0.42 (should be backfilled from ResultMessage)", j.CostUSD)
 			}
@@ -1523,7 +1523,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		// Verify that branchIDs scoped by repo does not lose either entry.
 		// This mirrors the branchIDs construction in adoptContainers.
 		branchIDs := make(map[string][]string)
-		s.taskMgr.Range(func(id string, e *tasks.Entry) bool {
+		s.taskMgr.Range(func(id string, e *taskmgr.Entry) bool {
 			if p := e.Task().Primary(); p != nil && p.Branch != "" {
 				key := p.Name + "\x00" + p.Branch
 				branchIDs[key] = append(branchIDs[key], id)
@@ -1799,7 +1799,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 			t.Fatalf("len(entries) = %d, want 1", len(entries))
 		}
 		var taskID string
-		s.taskMgr.Range(func(id string, _ *tasks.Entry) bool {
+		s.taskMgr.Range(func(id string, _ *taskmgr.Entry) bool {
 			taskID = id
 			return false
 		})
@@ -1862,7 +1862,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		tk.SetState(task.StateRunning)
 
 		s := newTestRouter(t)
-		s.taskMgr.Insert(taskID.String(), tasks.NewEntry(tk, logs[0]))
+		s.taskMgr.Insert(taskID.String(), taskmgr.NewEntry(tk, logs[0]))
 
 		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 		defer cancel()
@@ -1925,7 +1925,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		tk.SetState(task.StateStopped)
 
 		s := newTestRouter(t)
-		s.taskMgr.Insert(taskID.String(), tasks.NewEntry(tk, logs[0]))
+		s.taskMgr.Insert(taskID.String(), taskmgr.NewEntry(tk, logs[0]))
 
 		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 		defer cancel()
@@ -1994,7 +1994,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 			t.Fatalf("len(entries) = %d, want 1", len(entries))
 		}
 		var taskID string
-		s.taskMgr.Range(func(id string, _ *tasks.Entry) bool {
+		s.taskMgr.Range(func(id string, _ *taskmgr.Entry) bool {
 			taskID = id
 			return false
 		})

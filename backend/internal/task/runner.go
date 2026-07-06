@@ -19,7 +19,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/repowork"
+	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
@@ -64,7 +64,7 @@ type Runner struct {
 	// per-task list. Extra repos' branches are allocated by the Manager on their
 	// own workspaces before Start; multi-repo diff/sync then fans out from
 	// t.RuntimeRepos() through the runtime backend, keyed by repo index.
-	Workspace           *repowork.RepoWorkspace
+	Workspace           *repowork.Workspace
 	Sessions            *SessionRunner
 	RuntimeStartTimeout time.Duration // Timeout for instance start (image pull); defaults to 1 hour.
 }
@@ -640,7 +640,7 @@ func (r *Runner) logRelayDiag(ctx context.Context, tlog *slog.Logger, target run
 // are typically constructed fresh per call, so no sync.Once is needed here.
 func (r *Runner) initDefaults() {
 	if r.Workspace == nil {
-		workspace, err := repowork.NewRepoWorkspace("", "", "", time.Minute, nil, slog.With("repo", "(none)"))
+		workspace, err := repowork.NewWorkspace("", "", "", time.Minute, nil, slog.With("repo", "(none)"))
 		if err != nil {
 			panic(err)
 		}

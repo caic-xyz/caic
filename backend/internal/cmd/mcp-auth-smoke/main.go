@@ -20,15 +20,15 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
-	"github.com/caic-xyz/caic/backend/internal/reporeg"
-	"github.com/caic-xyz/caic/backend/internal/repos"
-	"github.com/caic-xyz/caic/backend/internal/repowork"
+	"github.com/caic-xyz/caic/backend/internal/repo"
+	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
+	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
-	"github.com/caic-xyz/caic/backend/internal/tasks"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
 const smokeSessionTTL = 30 * 24 * time.Hour
@@ -169,9 +169,9 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 		return "", "", nil, err
 	}
 	backend := &mdruntime.Backend{}
-	workspaceRegistry := repowork.NewWorkspaceRegistry(ctx, nil)
-	taskMgr := tasks.New(tasks.Config{ServerCtx: ctx, WorkspaceRegistry: workspaceRegistry})
-	repoSvc := repos.NewService(ctx, "", reporeg.New(nil), workspaceRegistry)
+	workspaceRegistry := repowork.NewRegistry(ctx, nil)
+	taskMgr := taskmgr.New(taskmgr.Config{ServerCtx: ctx, WorkspaceRegistry: workspaceRegistry})
+	repoSvc := repomgr.NewService(ctx, "", repo.New(nil), workspaceRegistry)
 	prefs, err := preferences.Open(filepath.Join(stateDir, "preferences.json"))
 	if err != nil {
 		return "", "", nil, err
@@ -190,12 +190,12 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 		return "", "", nil, err
 	}
 	router, err := server.New(ctx, server.Dependencies{
-		Repos:          repoSvc,
+		RepoSvc:        repoSvc,
 		ProcessBackend: backend,
-		TaskManager:    taskMgr,
+		TaskMgr:        taskMgr,
 		Preferences:    prefs,
 		IPGeoChecker:   checker,
-		Forge:          forgemanager.New("", "", nil),
+		ForgeMgr:       forgemgr.New("", "", nil),
 		AuthStore:      store,
 		SessionSecret:  secret,
 	})

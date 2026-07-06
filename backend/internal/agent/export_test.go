@@ -15,7 +15,7 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
-	"github.com/caic-xyz/caic/backend/internal/harness"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
 type errorReader struct{}

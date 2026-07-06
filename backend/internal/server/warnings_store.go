@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/tasks"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
 // serverWarning is a timestamped warning message stored for SSE clients.
@@ -27,7 +27,7 @@ const (
 // clients. CI automation (owned by internal/app) writes to it; the task-list SSE
 // handler reads from it.
 type WarningStore struct {
-	taskMgr *tasks.Manager
+	taskMgr *taskmgr.Manager
 
 	mu       sync.Mutex
 	warnings []serverWarning
@@ -35,7 +35,7 @@ type WarningStore struct {
 
 // NewWarningStore creates a warning store that notifies taskMgr subscribers on
 // each new warning.
-func NewWarningStore(taskMgr *tasks.Manager) *WarningStore {
+func NewWarningStore(taskMgr *taskmgr.Manager) *WarningStore {
 	return &WarningStore{taskMgr: taskMgr}
 }
 

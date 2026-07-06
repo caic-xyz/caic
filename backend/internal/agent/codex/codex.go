@@ -20,7 +20,7 @@ import (
 	"github.com/maruel/genai/providers/codex"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/harness"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )

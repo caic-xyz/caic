@@ -17,8 +17,8 @@ import (
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	capipi "github.com/caic-xyz/caic/backend/internal/agent/pi"
-	"github.com/caic-xyz/caic/backend/internal/harness"
 )
 
 func BenchmarkHandleTaskRawEventsPurgedReplay(b *testing.B) {

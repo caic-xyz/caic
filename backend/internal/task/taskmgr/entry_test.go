@@ -1,6 +1,6 @@
 // Tests for Entry.
 
-package tasks
+package taskmgr
 
 import (
 	"testing"

@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/harness"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
 func TestInitHarnessCache(t *testing.T) {

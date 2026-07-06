@@ -21,14 +21,14 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
-	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
-	"github.com/caic-xyz/caic/backend/internal/reporeg"
-	"github.com/caic-xyz/caic/backend/internal/repos"
-	"github.com/caic-xyz/caic/backend/internal/repowork"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
+	"github.com/caic-xyz/caic/backend/internal/repo"
+	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
+	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
-	"github.com/caic-xyz/caic/backend/internal/tasks"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/oauth"
 	"github.com/caic-xyz/caic/oauth/oauthclient"
 )
@@ -408,12 +408,12 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 		t.Fatalf("ipgeo.NewChecker: %v", err)
 	}
 	backend := &mdruntime.Backend{}
-	workspaceRegistry := repowork.NewWorkspaceRegistry(t.Context(), nil)
-	taskMgr := tasks.New(tasks.Config{ServerCtx: t.Context(), WorkspaceRegistry: workspaceRegistry})
-	repoSvc := repos.NewService(t.Context(), "", reporeg.New(nil), workspaceRegistry)
+	workspaceRegistry := repowork.NewRegistry(t.Context(), nil)
+	taskMgr := taskmgr.New(taskmgr.Config{ServerCtx: t.Context(), WorkspaceRegistry: workspaceRegistry})
+	repoSvc := repomgr.NewService(t.Context(), "", repo.New(nil), workspaceRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
-	forgeManager := forgemanager.New("", "", nil)
+	forgeManager := forgemgr.New("", "", nil)
 
 	auditPath := ""
 	if len(auditLogPath) > 0 {
@@ -422,13 +422,13 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 
 	refreshTokenPath := t.TempDir() + "/mcp_oauth_refresh_tokens.json"
 	s, err := New(t.Context(), Dependencies{
-		Repos:                      repoSvc,
+		RepoSvc:                    repoSvc,
 		RepoStatus:                 repoStatus,
 		ProcessBackend:             backend,
-		TaskManager:                taskMgr,
+		TaskMgr:                    taskMgr,
 		Preferences:                prefs,
 		IPGeoChecker:               checker,
-		Forge:                      forgeManager,
+		ForgeMgr:                   forgeManager,
 		AuthStore:                  store,
 		SessionSecret:              []byte("0123456789abcdef0123456789abcdef"),
 		HostState:                  auth.NewHostState("https://caic.example.com"),
@@ -439,7 +439,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	tr := &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, repoStatus: repoStatus, prefs: prefs, forge: forgeManager, oauthRefreshTokenPath: refreshTokenPath}
+	tr := &testRouter{Router: s, taskMgr: taskMgr, repoSvc: repoSvc, repoStatus: repoStatus, prefs: prefs, forgeMgr: forgeManager, oauthRefreshTokenPath: refreshTokenPath}
 
 	// Re-export authStore for restart tests that need to share refresh tokens.
 	tr.authStore = store

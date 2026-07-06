@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/server/api"
-	"github.com/caic-xyz/caic/backend/internal/tasks"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
 func TestToDTO(t *testing.T) {
@@ -25,19 +25,19 @@ func TestToDTO(t *testing.T) {
 		t.Parallel()
 		cases := []struct {
 			name       string
-			kind       tasks.ErrorKind
+			kind       taskmgr.ErrorKind
 			wantStatus int
 			wantCode   api.ErrorCode
 		}{
-			{"not_found", tasks.KindNotFound, http.StatusNotFound, api.CodeNotFound},
-			{"conflict", tasks.KindConflict, http.StatusConflict, api.CodeConflict},
-			{"bad_request", tasks.KindBadRequest, http.StatusBadRequest, api.CodeBadRequest},
-			{"internal", tasks.KindInternal, http.StatusInternalServerError, api.CodeInternalError},
+			{"not_found", taskmgr.KindNotFound, http.StatusNotFound, api.CodeNotFound},
+			{"conflict", taskmgr.KindConflict, http.StatusConflict, api.CodeConflict},
+			{"bad_request", taskmgr.KindBadRequest, http.StatusBadRequest, api.CodeBadRequest},
+			{"internal", taskmgr.KindInternal, http.StatusInternalServerError, api.CodeInternalError},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				got := toDTO(&tasks.Error{Kind: tc.kind, Msg: "boom"})
+				got := toDTO(&taskmgr.Error{Kind: tc.kind, Msg: "boom"})
 				var ews api.ErrorWithStatus
 				if !errors.As(got, &ews) {
 					t.Fatalf("toDTO returned %T, want api.ErrorWithStatus", got)
@@ -54,7 +54,7 @@ func TestToDTO(t *testing.T) {
 
 	t.Run("not_found_trims_suffix", func(t *testing.T) {
 		t.Parallel()
-		got := toDTO(&tasks.Error{Kind: tasks.KindNotFound, Msg: "task 42 not found"})
+		got := toDTO(&taskmgr.Error{Kind: taskmgr.KindNotFound, Msg: "task 42 not found"})
 		if got.Error() != "task 42 not found" {
 			t.Errorf("Error() = %q, want %q", got.Error(), "task 42 not found")
 		}
@@ -63,7 +63,7 @@ func TestToDTO(t *testing.T) {
 	t.Run("internal_preserves_wrapped", func(t *testing.T) {
 		t.Parallel()
 		inner := errors.New("connection refused")
-		got := toDTO(&tasks.Error{Kind: tasks.KindInternal, Msg: "sync to default", Err: inner})
+		got := toDTO(&taskmgr.Error{Kind: taskmgr.KindInternal, Msg: "sync to default", Err: inner})
 		if got.Error() != "sync to default: connection refused" {
 			t.Errorf("Error() = %q, want it to include the wrapped error", got.Error())
 		}

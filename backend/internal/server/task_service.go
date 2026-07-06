@@ -17,18 +17,18 @@ import (
 	"github.com/caic-xyz/md/git"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
-	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
-	"github.com/caic-xyz/caic/backend/internal/harness"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
-	"github.com/caic-xyz/caic/backend/internal/repos"
+	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/caic-xyz/caic/backend/internal/tasks"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
 // FakeCIHook generate fake tasks.
@@ -42,11 +42,11 @@ type FakeCIHook func(ctx context.Context, t *task.Task)
 // server route code stays focused on protocol concerns.
 type taskService struct {
 	ctx       context.Context
-	taskMgr   *tasks.Manager
+	taskMgr   *taskmgr.Manager
 	prefs     *preferences.Store
-	repos     *repos.Service
-	forge     *forgemanager.Manager
-	ciService *ci.Service
+	repoMgr   *repomgr.Service
+	forgeMgr  *forgemgr.Manager
+	ciSvc     *ci.Service
 	authStore *auth.Store
 	fakeCI    FakeCIHook
 }
@@ -71,7 +71,7 @@ func (s *taskService) taskListSnapshot(ctx context.Context) []v1.Task {
 		}
 	}
 	var out []v1.Task
-	s.taskMgr.Range(func(_ string, e *tasks.Entry) bool {
+	s.taskMgr.Range(func(_ string, e *taskmgr.Entry) bool {
 		if ownerID != "" && e.Task().OwnerID != "" && e.Task().OwnerID != ownerID {
 			return true
 		}
@@ -86,13 +86,13 @@ func (s *taskService) taskListSnapshot(ctx context.Context) []v1.Task {
 // unknown ids, 403 across owners), giving clients an authoritative existence
 // check and initial state without depending on the eventually-consistent task
 // list snapshot.
-func (s *taskService) getTask(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.Task, error) {
+func (s *taskService) getTask(ctx context.Context, entry *taskmgr.Entry, _ *api.EmptyReq) (*v1.Task, error) {
 	dto := v1conv.Task(ctx, entry, s.taskResolvers())
 	return &dto, nil
 }
 
 // getTaskInfo returns detailed recorded task metadata and optional runtime-observed facts.
-func (s *taskService) getTaskInfo(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.TaskInfo, error) {
+func (s *taskService) getTaskInfo(ctx context.Context, entry *taskmgr.Entry, _ *api.EmptyReq) (*v1.TaskInfo, error) {
 	t := entry.Task()
 	snap := t.Snapshot()
 	resolvers := s.taskResolvers()
@@ -318,12 +318,12 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v
 	// validation (unknown repo/harness/model/images) lives in Manager.Create.
 	prefs := s.prefs.Get(userIDFromCtx(ctx))
 
-	taskRepos := make([]tasks.CreateRepo, len(req.Repos))
+	taskRepos := make([]taskmgr.CreateRepo, len(req.Repos))
 	for i, r := range req.Repos {
-		taskRepos[i] = tasks.CreateRepo{Name: r.Name, BaseBranch: r.BaseBranch}
+		taskRepos[i] = taskmgr.CreateRepo{Name: r.Name, BaseBranch: r.BaseBranch}
 	}
 
-	id, err := s.taskMgr.Create(ctx, tasks.CreateParams{
+	id, err := s.taskMgr.Create(ctx, taskmgr.CreateParams{
 		OwnerID:             ownerID,
 		Prompt:              v1conv.PromptToAgent(req.InitialPrompt),
 		Repos:               taskRepos,
@@ -418,12 +418,12 @@ const (
 // The relay probe uses the server context (not the request context) because the
 // SSH round-trip may outlive a cancelled HTTP request, and we want the log line
 // regardless.
-func (s *taskService) sendInput(ctx context.Context, entry *tasks.Entry, req *v1.InputReq) (*v1.StatusResp, error) {
+func (s *taskService) sendInput(ctx context.Context, entry *taskmgr.Entry, req *v1.InputReq) (*v1.StatusResp, error) {
 	err := s.taskMgr.SendInput(ctx, entry, v1conv.PromptToAgent(req.Prompt))
 	if err == nil {
 		return &v1.StatusResp{Status: "sent"}, nil
 	}
-	if !errors.Is(err, tasks.ErrNoSession) {
+	if !errors.Is(err, taskmgr.ErrNoSession) {
 		return nil, toDTO(err)
 	}
 	// No active session: probe the relay daemon's liveness over SSH and return
@@ -462,49 +462,49 @@ func (s *taskService) sendInput(ctx context.Context, entry *tasks.Entry, req *v1
 		WithDetail("relay", string(rs))
 }
 
-func (s *taskService) restartTask(ctx context.Context, entry *tasks.Entry, req *v1.RestartReq) (*v1.StatusResp, error) {
+func (s *taskService) restartTask(ctx context.Context, entry *taskmgr.Entry, req *v1.RestartReq) (*v1.StatusResp, error) {
 	if err := s.taskMgr.Restart(ctx, entry, v1conv.PromptToAgent(req.Prompt)); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "restarted"}, nil
 }
 
-func (s *taskService) clearContext(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
+func (s *taskService) clearContext(ctx context.Context, entry *taskmgr.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
 	if err := s.taskMgr.ClearContext(ctx, entry); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "cleared"}, nil
 }
 
-func (s *taskService) compactContext(ctx context.Context, entry *tasks.Entry, req *v1.CompactReq) (*v1.StatusResp, error) {
+func (s *taskService) compactContext(ctx context.Context, entry *taskmgr.Entry, req *v1.CompactReq) (*v1.StatusResp, error) {
 	if err := s.taskMgr.Compact(ctx, entry, req.Instructions); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "compacting"}, nil
 }
 
-func (s *taskService) stopTask(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
+func (s *taskService) stopTask(ctx context.Context, entry *taskmgr.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
 	if err := s.taskMgr.Stop(ctx, entry); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "stopping"}, nil
 }
 
-func (s *taskService) purgeTask(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
+func (s *taskService) purgeTask(ctx context.Context, entry *taskmgr.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
 	if err := s.taskMgr.Purge(ctx, entry); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "purging"}, nil
 }
 
-func (s *taskService) reviveTask(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
+func (s *taskService) reviveTask(ctx context.Context, entry *taskmgr.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
 	if err := s.taskMgr.Revive(ctx, entry); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "provisioning"}, nil
 }
 
-func (s *taskService) forkTask(ctx context.Context, entry *tasks.Entry, req *v1.ForkTaskReq) (*v1.Task, error) {
+func (s *taskService) forkTask(ctx context.Context, entry *taskmgr.Entry, req *v1.ForkTaskReq) (*v1.Task, error) {
 	source := entry.Task()
 
 	var ownerID string
@@ -517,9 +517,9 @@ func (s *taskService) forkTask(ctx context.Context, entry *tasks.Entry, req *v1.
 		selectedHarness = v1conv.AgentHarness(req.Harness)
 	}
 
-	extraRepos := make([]tasks.ForkRepo, len(req.ExtraRepos))
+	extraRepos := make([]taskmgr.ForkRepo, len(req.ExtraRepos))
 	for i, rs := range req.ExtraRepos {
-		extraRepos[i] = tasks.ForkRepo{Name: rs.Name, BaseBranch: rs.BaseBranch}
+		extraRepos[i] = taskmgr.ForkRepo{Name: rs.Name, BaseBranch: rs.BaseBranch}
 	}
 
 	// Deref the *bool overrides, defaulting to the source task's values.
@@ -544,7 +544,7 @@ func (s *taskService) forkTask(ctx context.Context, entry *tasks.Entry, req *v1.
 		sudo = *req.Sudo
 	}
 
-	newID, err := s.taskMgr.Fork(ctx, entry, tasks.ForkParams{
+	newID, err := s.taskMgr.Fork(ctx, entry, taskmgr.ForkParams{
 		OwnerID:             ownerID,
 		Prompt:              v1conv.PromptToAgent(req.Prompt),
 		Harness:             selectedHarness,
@@ -570,7 +570,7 @@ func (s *taskService) forkTask(ctx context.Context, entry *tasks.Entry, req *v1.
 	return &dto, nil
 }
 
-func (s *taskService) taskToolInput(ctx context.Context, entry *tasks.Entry, toolUseID string) (*v1.TaskToolInputResp, error) {
+func (s *taskService) taskToolInput(ctx context.Context, entry *taskmgr.Entry, toolUseID string) (*v1.TaskToolInputResp, error) {
 	if toolUseID == "" {
 		return nil, api.BadRequest("toolUseID required")
 	}
@@ -585,7 +585,7 @@ func (s *taskService) taskToolInput(ctx context.Context, entry *tasks.Entry, too
 	return nil, api.NotFound("tool use")
 }
 
-func (s *taskService) taskDiff(ctx context.Context, entry *tasks.Entry, path string) (*v1.DiffResp, error) {
+func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, path string) (*v1.DiffResp, error) {
 	t := entry.Task()
 	if t.RuntimeInstanceID() == "" {
 		return nil, api.Conflict("task has no instance")
@@ -605,11 +605,11 @@ func (s *taskService) taskDiff(ctx context.Context, entry *tasks.Entry, path str
 	return &v1.DiffResp{Diff: diff}, nil
 }
 
-func (s *taskService) syncTask(ctx context.Context, entry *tasks.Entry, req *v1.SyncReq) (*v1.SyncResp, error) {
+func (s *taskService) syncTask(ctx context.Context, entry *taskmgr.Entry, req *v1.SyncReq) (*v1.SyncResp, error) {
 	t := entry.Task()
-	target := tasks.SyncTargetOrigin
+	target := taskmgr.SyncTargetOrigin
 	if req.Target == v1.SyncTargetDefault {
-		target = tasks.SyncTargetDefault
+		target = taskmgr.SyncTargetDefault
 	}
 	res, err := s.taskMgr.Sync(ctx, entry, target, req.Force)
 	if err != nil {
@@ -634,8 +634,8 @@ func (s *taskService) syncTask(ctx context.Context, entry *tasks.Entry, req *v1.
 		syncPrimaryBranch = p.Branch
 	}
 	if resp.Status != "blocked" {
-		if info, ok := s.repos.InfoFor(syncPrimaryName); ok {
-			if f := s.forge.ForgeForInfo(ctx, &info); f != nil {
+		if info, ok := s.repoMgr.InfoFor(syncPrimaryName); ok {
+			if f := s.forgeMgr.ForgeForInfo(ctx, &info); f != nil {
 				ciInfo := ci.RepoInfo{
 					RelPath:    info.RelPath,
 					BaseBranch: info.BaseBranch,
@@ -643,7 +643,7 @@ func (s *taskService) syncTask(ctx context.Context, entry *tasks.Entry, req *v1.
 					ForgeOwner: info.ForgeOwner,
 					ForgeRepo:  info.ForgeRepo,
 				}
-				prNumber, err := s.ciService.StartPRFlow(ctx, entry, f, &ciInfo, syncPrimaryBranch, s.taskMgr.EffectiveBaseBranch(t))
+				prNumber, err := s.ciSvc.StartPRFlow(ctx, entry, f, &ciInfo, syncPrimaryBranch, s.taskMgr.EffectiveBaseBranch(t))
 				if err != nil {
 					slog.WarnContext(ctx, "sync: create PR", "repo", info.ForgeRepo, "branch", syncPrimaryBranch, "err", err)
 				} else {
@@ -670,21 +670,21 @@ func (s *taskService) resolveGitHubContainerToken(ctx context.Context, enabled b
 	if u, ok := auth.UserFromContext(ctx); ok && u.Provider == auth.ProviderGitHub && u.AccessToken != "" {
 		return u.AccessToken
 	}
-	if s.forge != nil {
-		return s.forge.GitHubToken()
+	if s.forgeMgr != nil {
+		return s.forgeMgr.GitHubToken()
 	}
 	return ""
 }
 
 func (s *taskService) taskResolvers() v1conv.TaskResolvers {
-	return newTaskResolvers(s.taskMgr, s.repos, s.authStore)
+	return newTaskResolvers(s.taskMgr, s.repoMgr, s.authStore)
 }
 
 // newTaskResolvers builds the resolver set used to convert task entries into API
 // DTOs. It is a free function so any HTTP concern object that creates a task
 // (task and CI handlers) can assemble the full Task DTO it returns to clients
 // from the same shared dependencies.
-func newTaskResolvers(taskMgr *tasks.Manager, repoSvc *repos.Service, authStore *auth.Store) v1conv.TaskResolvers {
+func newTaskResolvers(taskMgr *taskmgr.Manager, repoSvc *repomgr.Service, authStore *auth.Store) v1conv.TaskResolvers {
 	return v1conv.TaskResolvers{
 		RepoURL: func(rel string) string {
 			if info, ok := repoSvc.InfoFor(rel); ok {

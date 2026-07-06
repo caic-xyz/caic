@@ -6,10 +6,10 @@ import (
 	"context"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/harness"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/caic-xyz/caic/backend/internal/tasks"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
 // TaskResolvers supplies server-owned lookups needed to convert a task entry.
@@ -22,7 +22,7 @@ type TaskResolvers struct {
 }
 
 // Task converts a task entry to its API DTO.
-func Task(ctx context.Context, e *tasks.Entry, r TaskResolvers) v1.Task {
+func Task(ctx context.Context, e *taskmgr.Entry, r TaskResolvers) v1.Task {
 	t := e.Task()
 	// Read all volatile fields in a single locked snapshot to avoid data races
 	// with addMessage/RestoreMessages.

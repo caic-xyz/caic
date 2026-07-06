@@ -1,5 +1,5 @@
-// Package repos manages discovered git repositories and their task workspaces.
-package repos
+// Package repomgr manages discovered git repositories and their task workspaces.
+package repomgr
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 
 	"github.com/caic-xyz/md/git"
 
-	"github.com/caic-xyz/caic/backend/internal/reporeg"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 )
 
 // DiscoveryDepth is the maximum directory levels below AbsRoot that
@@ -22,9 +22,10 @@ const DiscoveryDepth = 3
 
 // WatcherConfig contains watcher dependencies.
 type WatcherConfig struct {
-	Ctx             context.Context
-	AbsRoot         string
-	Repos           func() []reporeg.Info
+	Ctx     context.Context
+	AbsRoot string
+	// TODO: I'm unhappy with this design.
+	Repos           func() []repo.Info
 	RelPath         func(string) string
 	WorkspaceExists func(string) bool
 	OnDiscovered    func(context.Context, string)
@@ -35,9 +36,10 @@ type WatcherConfig struct {
 
 // Watcher polls the repository root and reconciles the workspace registry.
 type Watcher struct {
-	ctx             context.Context
-	absRoot         string
-	repos           func() []reporeg.Info
+	ctx     context.Context
+	absRoot string
+	// TODO: I'm unhappy with this design.
+	repos           func() []repo.Info
 	relPath         func(string) string
 	workspaceExists func(string) bool
 	onDiscovered    func(context.Context, string)

@@ -7,7 +7,7 @@ import (
 	"iter"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/harness"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
 // MetadataKey identifies a caic runtime metadata field.

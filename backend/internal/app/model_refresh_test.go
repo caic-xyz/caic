@@ -10,9 +10,9 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
-	"github.com/caic-xyz/caic/backend/internal/harness"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
-	"github.com/caic-xyz/caic/backend/internal/tasks"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
 func TestRefreshHarnessModels(t *testing.T) {
@@ -76,8 +76,8 @@ func TestRefreshHarnessModels(t *testing.T) {
 	})
 }
 
-func newModelRefreshTestManager(ctx context.Context, runtimeBackend runtime.Backend, backends map[harness.Name]agent.Backend) *tasks.Manager {
-	return tasks.New(tasks.Config{
+func newModelRefreshTestManager(ctx context.Context, runtimeBackend runtime.Backend, backends map[harness.Name]agent.Backend) *taskmgr.Manager {
+	return taskmgr.New(taskmgr.Config{
 		ServerCtx: ctx,
 		Backend:   runtimeBackend,
 		Backends:  backends,

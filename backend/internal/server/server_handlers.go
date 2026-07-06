@@ -19,15 +19,15 @@ import (
 	"github.com/caic-xyz/md/git"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/ci"
-	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
-	"github.com/caic-xyz/caic/backend/internal/harness"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
-	"github.com/caic-xyz/caic/backend/internal/reporeg"
-	"github.com/caic-xyz/caic/backend/internal/repos"
-	"github.com/caic-xyz/caic/backend/internal/repowork"
+	"github.com/caic-xyz/caic/backend/internal/repo"
+	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
+	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	caicruntime "github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
@@ -37,17 +37,17 @@ import (
 
 type workspaceRegistry interface {
 	Backends() map[harness.Name]agent.Backend
-	RangeWorkspaces(fn func(relPath string, r *repowork.RepoWorkspace) bool)
-	Workspace(relPath string) (*repowork.RepoWorkspace, bool)
-	RegisterWorkspace(relPath string, r *repowork.RepoWorkspace)
+	RangeWorkspaces(fn func(relPath string, r *repowork.Workspace) bool)
+	Workspace(relPath string) (*repowork.Workspace, bool)
+	RegisterWorkspace(relPath string, r *repowork.Workspace)
 }
 
 type serverHandlers struct {
 	serverCtx          context.Context
 	tailscaleAvailable bool
-	forge              *forgemanager.Manager
+	forgeMgr           *forgemgr.Manager
 	prefs              *preferences.Store
-	repos              *repos.Service
+	repoSvc            *repomgr.Service
 	repoStatus         *ci.RepoStatusStore
 	taskMgr            workspaceRegistry
 	cacheSizes         *CacheSizeStore
@@ -71,9 +71,9 @@ func (h *serverHandlers) getConfig(_ context.Context, _ *api.EmptyReq) (*v1.Conf
 		USBAvailable:         runtime.GOOS == "linux",
 		DisplayAvailable:     true,
 		SudoAvailable:        true,
-		GitHubTokenAvailable: h.forge.GitHubToken() != "" || h.githubOAuth != nil,
+		GitHubTokenAvailable: h.forgeMgr.GitHubToken() != "" || h.githubOAuth != nil,
 		VoiceGateway:         h.voiceGateway,
-		GitHubAppEnabled:     h.forge.GitHubApp() != nil,
+		GitHubAppEnabled:     h.forgeMgr.GitHubApp() != nil,
 	}
 	if h.authStore != nil {
 		cfg.AuthProviders = h.authProviders()
@@ -99,7 +99,7 @@ func (h *serverHandlers) authProviders() []string {
 // getVersion returns the current server version and checks GitHub for the latest release.
 func (h *serverHandlers) getVersion(ctx context.Context, _ *api.EmptyReq) (*v1.VersionResp, error) {
 	current := autoupdate.Version
-	gh := h.forge.GitHubClient()
+	gh := h.forgeMgr.GitHubClient()
 	resp := &v1.VersionResp{
 		Current:      current,
 		AutoUpdateOn: gh != nil && current != "" && !strings.HasPrefix(current, "devel-"),
@@ -118,7 +118,7 @@ func (h *serverHandlers) getVersion(ctx context.Context, _ *api.EmptyReq) (*v1.V
 
 // triggerUpdate starts a background update check-and-install. Returns immediately.
 func (h *serverHandlers) triggerUpdate(ctx context.Context, _ *api.EmptyReq) (*v1.UpdateResp, error) {
-	gh := h.forge.GitHubClient()
+	gh := h.forgeMgr.GitHubClient()
 	if gh == nil {
 		return nil, api.InternalError("GitHub token not configured; cannot check for updates")
 	}
@@ -320,7 +320,7 @@ func (h *serverHandlers) getCacheSizes(_ context.Context, _ *api.EmptyReq) (*v1.
 }
 
 func (h *serverHandlers) listRepos(_ context.Context, _ *api.EmptyReq) (*[]v1.Repo, error) {
-	return repoListFromSnapshot(h.repos.Snapshot(), h.repoStatus), nil
+	return repoListFromSnapshot(h.repoSvc.Snapshot(), h.repoStatus), nil
 }
 
 func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.Request) {
@@ -329,7 +329,7 @@ func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.R
 		writeError(w, api.BadRequest("repo is required"))
 		return
 	}
-	info, ok := h.repos.InfoFor(repoPath)
+	info, ok := h.repoSvc.InfoFor(repoPath)
 	if !ok {
 		writeError(w, api.NotFound("repo not found"))
 		return
@@ -373,16 +373,16 @@ func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.R
 }
 
 func (h *serverHandlers) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo, error) {
-	info, err := h.repos.Clone(ctx, repos.CloneRequest{URL: req.URL, Path: req.Path, Depth: req.Depth})
+	info, err := h.repoSvc.Clone(ctx, repomgr.CloneRequest{URL: req.URL, Path: req.Path, Depth: req.Depth})
 	if err != nil {
-		var repoErr *repos.Error
+		var repoErr *repomgr.Error
 		if !errors.As(err, &repoErr) {
 			return nil, api.InternalError(err.Error())
 		}
 		switch repoErr.Kind {
-		case repos.ErrorBadRequest:
+		case repomgr.ErrorBadRequest:
 			return nil, api.BadRequest(repoErr.Message)
-		case repos.ErrorConflict:
+		case repomgr.ErrorConflict:
 			return nil, api.Conflict(repoErr.Message)
 		default:
 			return nil, api.InternalError(repoErr.Message)
@@ -397,7 +397,7 @@ func (h *serverHandlers) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*
 	}, nil
 }
 
-func repoListFromSnapshot(snap []reporeg.Info, repoStatus *ci.RepoStatusStore) *[]v1.Repo {
+func repoListFromSnapshot(snap []repo.Info, repoStatus *ci.RepoStatusStore) *[]v1.Repo {
 	out := make([]v1.Repo, len(snap))
 	for i := range snap {
 		out[i] = repoDTO(&snap[i], repoStatus)
@@ -405,7 +405,7 @@ func repoListFromSnapshot(snap []reporeg.Info, repoStatus *ci.RepoStatusStore) *
 	return &out
 }
 
-func repoDTO(info *reporeg.Info, repoStatus *ci.RepoStatusStore) v1.Repo {
+func repoDTO(info *repo.Info, repoStatus *ci.RepoStatusStore) v1.Repo {
 	dto := v1.Repo{
 		Path:       info.RelPath,
 		Branch:     info.BaseBranch,

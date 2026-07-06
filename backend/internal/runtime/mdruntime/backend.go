@@ -15,7 +15,7 @@ import (
 	"github.com/caic-xyz/md"
 	"github.com/maruel/genai"
 
-	"github.com/caic-xyz/caic/backend/internal/harness"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 

@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
@@ -42,7 +42,7 @@ func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("Update preferences: %v", err)
 		}
-		c := &mcpRegistry{serverConfig: s.serverHandlers, tasks: testTaskHandlers(s).service}
+		c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
 
 		result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{
 			Prompt:  "do the task",
@@ -83,7 +83,7 @@ func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("Update preferences: %v", err)
 		}
-		c := &mcpRegistry{serverConfig: s.serverHandlers, tasks: testTaskHandlers(s).service}
+		c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
 
 		result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{
 			Prompt: "do the task",
@@ -109,7 +109,7 @@ func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 		t.Parallel()
 
 		s := newMCPTaskCreateTestRouter(t)
-		c := &mcpRegistry{serverConfig: s.serverHandlers, tasks: testTaskHandlers(s).service}
+		c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
 		createSpec := c.specs()[1]
 		if err := s.prefs.Update(userIDFromCtx(t.Context()), func(p *preferences.Preferences) {
 			p.Harness = string(harness.Pi)
@@ -150,7 +150,7 @@ func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("Update preferences: %v", err)
 		}
-		c := &mcpRegistry{serverConfig: s.serverHandlers, tasks: testTaskHandlers(s).service}
+		c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
 
 		result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{
 			Prompt:  "do the task",

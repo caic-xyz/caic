@@ -1,6 +1,6 @@
-// Typed errors for the tasks package, mapped to HTTP status codes by the server.
+// Typed errors for the taskmgr package, mapped to HTTP status codes by the server.
 
-package tasks
+package taskmgr
 
 import (
 	"errors"
@@ -40,7 +40,7 @@ func (e *NoSessionError) Is(target error) bool {
 	return target == ErrNoSession
 }
 
-// ErrorKind classifies a tasks.Error so the HTTP layer can map it to a status
+// ErrorKind classifies a taskmgr.Error so the HTTP layer can map it to a status
 // code without inspecting the message string.
 type ErrorKind int
 

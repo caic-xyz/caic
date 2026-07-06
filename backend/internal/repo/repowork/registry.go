@@ -1,4 +1,4 @@
-// WorkspaceRegistry owns registered repo workspaces independently from repo identity.
+// Registry owns registered repo workspaces independently from repo identity.
 
 package repowork
 
@@ -10,31 +10,31 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
-// WorkspaceRegistry maps repository relative paths to task workspaces.
+// Registry maps repository relative paths to task workspaces.
 //
-// It is deliberately separate from Registry: repo identity and workspace
+// It is deliberately separate from repo.Registry: repo identity and workspace
 // lifetimes are coordinated by callers using the ordering documented on
-// Registry, but each registry keeps its own lock domain.
-type WorkspaceRegistry struct {
+// repo.Registry, but each registry keeps its own lock domain.
+type Registry struct {
 	serverCtx context.Context
 	backend   runtime.Backend
 
 	mu         sync.Mutex
-	workspaces map[string]*RepoWorkspace
+	workspaces map[string]*Workspace
 }
 
-// NewWorkspaceRegistry creates an empty workspace registry.
-func NewWorkspaceRegistry(ctx context.Context, backend runtime.Backend) *WorkspaceRegistry {
-	return &WorkspaceRegistry{
+// NewRegistry creates an empty workspace registry.
+func NewRegistry(ctx context.Context, backend runtime.Backend) *Registry {
+	return &Registry{
 		serverCtx:  ctx,
 		backend:    backend,
-		workspaces: make(map[string]*RepoWorkspace),
+		workspaces: make(map[string]*Workspace),
 	}
 }
 
 // RegisterWorkspace registers a task repo workspace keyed by relPath.
 // "" registers the no-repo workspace.
-func (r *WorkspaceRegistry) RegisterWorkspace(relPath string, w *RepoWorkspace) {
+func (r *Registry) RegisterWorkspace(relPath string, w *Workspace) {
 	w.Runtime = r.backend
 	if err := w.Init(r.serverCtx); err != nil {
 		slog.WarnContext(r.serverCtx, "repo workspace init failed", "repo", relPath, "err", err)
@@ -45,7 +45,7 @@ func (r *WorkspaceRegistry) RegisterWorkspace(relPath string, w *RepoWorkspace) 
 }
 
 // Workspace returns the repo workspace for relPath, or nil.
-func (r *WorkspaceRegistry) Workspace(relPath string) (*RepoWorkspace, bool) {
+func (r *Registry) Workspace(relPath string) (*Workspace, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	w, ok := r.workspaces[relPath]
@@ -56,11 +56,11 @@ func (r *WorkspaceRegistry) Workspace(relPath string) (*RepoWorkspace, bool) {
 // the registry under lock and invokes fn unlocked, so callbacks may safely call
 // back into code that also needs the workspace registry. The workspace set is a
 // point-in-time snapshot. Stops iteration if fn returns false.
-func (r *WorkspaceRegistry) RangeWorkspaces(fn func(relPath string, w *RepoWorkspace) bool) {
+func (r *Registry) RangeWorkspaces(fn func(relPath string, w *Workspace) bool) {
 	r.mu.Lock()
 	type kv struct {
 		relPath string
-		w       *RepoWorkspace
+		w       *Workspace
 	}
 	snap := make([]kv, 0, len(r.workspaces))
 	for relPath, w := range r.workspaces {
@@ -75,7 +75,7 @@ func (r *WorkspaceRegistry) RangeWorkspaces(fn func(relPath string, w *RepoWorks
 }
 
 // UnregisterWorkspace removes the repo workspace registered for relPath.
-func (r *WorkspaceRegistry) UnregisterWorkspace(relPath string) {
+func (r *Registry) UnregisterWorkspace(relPath string) {
 	r.mu.Lock()
 	delete(r.workspaces, relPath)
 	r.mu.Unlock()

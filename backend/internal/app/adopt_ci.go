@@ -9,9 +9,9 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
-	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
-	"github.com/caic-xyz/caic/backend/internal/repos"
-	"github.com/caic-xyz/caic/backend/internal/tasks"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
+	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
 // adoptedTaskWiring connects adopted tasks back to forge and CI automation. It
@@ -20,21 +20,21 @@ type adoptedTaskWiring struct {
 	ctx       context.Context
 	authStore *auth.Store
 	ciService *ci.Service
-	forge     *forgemanager.Manager
-	taskMgr   *tasks.Manager
-	repos     *repos.Service
+	forgeMgr  *forgemgr.Manager
+	taskMgr   *taskmgr.Manager
+	repoSvc   *repomgr.Service
 }
 
 // WireCIMonitoring sets up CI monitoring for an adopted task that has a PR.
-func (w *adoptedTaskWiring) WireCIMonitoring(ctx context.Context, at *tasks.AdoptedTask) {
-	ri, ok := w.repos.InfoFor(at.RelPath)
+func (w *adoptedTaskWiring) WireCIMonitoring(ctx context.Context, at *taskmgr.AdoptedTask) {
+	ri, ok := w.repoSvc.InfoFor(at.RelPath)
 	if !ok {
 		return
 	}
-	f := w.forge.ForgeForInfo(ctx, &ri)
+	f := w.forgeMgr.ForgeForInfo(ctx, &ri)
 	if f == nil && w.authStore != nil {
 		if u, ok := w.authStore.FindByProvider(auth.Provider(at.ForgeKind)); ok {
-			f = w.forge.ForgeFor(auth.NewContext(ctx, &u), forge.Kind(at.ForgeKind))
+			f = w.forgeMgr.ForgeFor(auth.NewContext(ctx, &u), forge.Kind(at.ForgeKind))
 		}
 	}
 	if f == nil {
@@ -54,15 +54,15 @@ func (w *adoptedTaskWiring) WireCIMonitoring(ctx context.Context, at *tasks.Adop
 }
 
 // LookupExternalPRForTask queries the forge for a PR matching the task's branch.
-func (w *adoptedTaskWiring) LookupExternalPRForTask(at *tasks.AdoptedTask) {
-	ri, ok := w.repos.InfoFor(at.RelPath)
+func (w *adoptedTaskWiring) LookupExternalPRForTask(at *taskmgr.AdoptedTask) {
+	ri, ok := w.repoSvc.InfoFor(at.RelPath)
 	if !ok {
 		return
 	}
-	f := w.forge.ForgeForInfo(w.ctx, &ri)
+	f := w.forgeMgr.ForgeForInfo(w.ctx, &ri)
 	if f == nil && w.authStore != nil {
 		if u, ok := w.authStore.FindByProvider(auth.Provider(at.ForgeKind)); ok {
-			f = w.forge.ForgeFor(auth.NewContext(w.ctx, &u), forge.Kind(at.ForgeKind))
+			f = w.forgeMgr.ForgeFor(auth.NewContext(w.ctx, &u), forge.Kind(at.ForgeKind))
 		}
 	}
 	if f == nil {
@@ -89,7 +89,7 @@ func (w *adoptedTaskWiring) LookupExternalPRForTask(at *tasks.AdoptedTask) {
 	w.ciService.MonitorCI(w.ctx, at.Entry, f, at.ForgeOwner, at.ForgeRepo, sha)
 }
 
-func adoptedHeadSHA(ctx context.Context, f forge.Forge, at *tasks.AdoptedTask) (string, error) {
+func adoptedHeadSHA(ctx context.Context, f forge.Forge, at *taskmgr.AdoptedTask) (string, error) {
 	pr, err := f.FindPRByBranch(ctx, at.ForgeOwner, at.ForgeRepo, at.Branch)
 	if err == nil && pr.HeadSHA != "" {
 		if at.Task != nil && pr.Number > 0 {

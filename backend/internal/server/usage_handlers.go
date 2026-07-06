@@ -14,12 +14,12 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
-	"github.com/caic-xyz/caic/backend/internal/tasks"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
 
 type usageHandlers struct {
-	taskMgr  *tasks.Manager
+	taskMgr  *taskmgr.Manager
 	fetchers []usage.ProviderFetcher
 }
 

@@ -1,6 +1,6 @@
 // Tests for the Registry concurrency-safe repository identity store.
 
-package reporeg
+package repo
 
 import (
 	"fmt"
