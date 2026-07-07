@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"slices"
 	"time"
@@ -19,7 +20,7 @@ import (
 // reuse the cached digest instead of hitting the registry.
 const warmupInterval = 6 * time.Hour
 
-func warmupImages(ctx context.Context, client *md.Client, prefs *preferences.Store) {
+func warmupImages(ctx context.Context, client *md.Client, prefs *preferences.Store) error {
 	ticker := time.NewTicker(warmupInterval)
 	defer ticker.Stop()
 	for {
@@ -37,7 +38,10 @@ func warmupImages(ctx context.Context, client *md.Client, prefs *preferences.Sto
 				Quiet:     true,
 			})
 			if err != nil {
-				slog.WarnContext(ctx, "warmup", "image", img.BaseImage, "platform", img.Platform, "err", err)
+				if ctx.Err() != nil {
+					return nil
+				}
+				return fmt.Errorf("warmup image %s platform %s: %w", img.BaseImage, img.Platform, err)
 			} else if built {
 				slog.InfoContext(ctx, "warmup", "image", img.BaseImage, "platform", img.Platform, "built", true)
 			}
@@ -45,7 +49,7 @@ func warmupImages(ctx context.Context, client *md.Client, prefs *preferences.Sto
 		select {
 		case <-ticker.C:
 		case <-ctx.Done():
-			return
+			return nil
 		}
 	}
 }

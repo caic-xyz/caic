@@ -18,6 +18,7 @@ import (
 	"github.com/caic-xyz/md/git"
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
@@ -49,20 +50,36 @@ const repoDiscoveryDepth = 3
 type App struct {
 	Server *server.Router
 
-	voiceBridge        *voicertc.Bridge
-	backgroundStarters []func()
+	voiceBridge     *voicertc.Bridge
+	backgroundTasks []backgroundTask
 }
+
+type backgroundTask func(context.Context) error
 
 // Serve starts the HTTP server and closes app-owned resources when serving ends.
 func (a *App) Serve(ctx context.Context, ln net.Listener) error {
-	for _, start := range a.backgroundStarters {
-		go start()
+	runCtx, cancel := context.WithCancel(ctx)
+	group, bgCtx := errgroup.WithContext(runCtx)
+	for _, task := range a.backgroundTasks {
+		group.Go(func() error { return task(bgCtx) })
 	}
-	err := a.Server.Serve(ctx, ln)
+	serverErr := a.Server.Serve(runCtx, ln)
+	cancel()
 	if a.voiceBridge != nil {
 		a.voiceBridge.CloseAll()
 	}
-	return err
+	bgErrCh := make(chan error, 1)
+	go func() { bgErrCh <- group.Wait() }()
+	select {
+	case bgErr := <-bgErrCh:
+		if serverErr != nil {
+			return serverErr
+		}
+		return bgErr
+	case <-time.After(10 * time.Second):
+		slog.WarnContext(context.WithoutCancel(ctx), "background shutdown timed out")
+		return serverErr
+	}
 }
 
 // New creates the caic backend server application.
@@ -374,8 +391,8 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		phase4.End()
 		return nil, fmt.Errorf("adopt runtime instances: %w", err)
 	}
+	backgroundTasks := []backgroundTask{}
 	adoption := &adoptedTaskWiring{
-		ctx:       ctx,
 		authStore: authStore,
 		ciService: ciService,
 		forgeMgr:  forgeManager,
@@ -385,10 +402,16 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	for i := range adopted {
 		at := &adopted[i]
 		if at.ForgeOwner != "" && at.Task.GetPR() > 0 && at.ForgeKind != "" {
-			adoption.WireCIMonitoring(ctx, at)
+			backgroundTasks = append(backgroundTasks, func(ctx context.Context) error {
+				adoption.WireCIMonitoring(ctx, at)
+				return nil
+			})
 		}
 		if at.Task.ForgeIssue == 0 && at.Task.GetPR() == 0 && at.ForgeOwner != "" && at.Branch != "" && at.ForgeKind != "" {
-			go adoption.LookupExternalPRForTask(at) //nolint:contextcheck // App-lifetime goroutine uses adoption ctx.
+			backgroundTasks = append(backgroundTasks, func(ctx context.Context) error {
+				adoption.LookupExternalPRForTask(ctx, at)
+				return nil
+			})
 		}
 	}
 	phase4.End()
@@ -398,37 +421,40 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	region.End()
 
 	if !cfg.Runtime.SkipWarmup {
-		go func() {
+		backgroundTasks = append(backgroundTasks, func(ctx context.Context) error {
 			_, tk := trace.NewTask(ctx, "warmup-images")
 			defer tk.End()
 			trace.Log(ctx, "startup", "warmup-images: begin")
-			warmupImages(ctx, mdClient, prefsStore)
-		}()
+			return warmupImages(ctx, mdClient, prefsStore)
+		})
 	}
-	go func() {
-		_, tk := trace.NewTask(ctx, "refresh-harness-models")
-		defer tk.End()
-		trace.Log(ctx, "startup", "refresh-harness-models: begin")
-		refreshHarnessModels(ctx, cfg.Dirs.CacheDir, runtimeBackend, taskMgr, cfg.Agent.HarnessEnv)
-	}()
-	go func() {
-		_, tk := trace.NewTask(ctx, "refresh-cache-sizes")
-		defer tk.End()
-		trace.Log(ctx, "startup", "refresh-cache-sizes: begin")
-		cacheSizes.RefreshLoop(ctx)
-	}()
-	go newRepoWatcher(ctx, absRoot, repoService, repoStatus).Watch()
-
-	backgroundStarters := []func(){
-		func() {
+	backgroundTasks = append(backgroundTasks,
+		func(ctx context.Context) error {
+			_, tk := trace.NewTask(ctx, "refresh-harness-models")
+			defer tk.End()
+			trace.Log(ctx, "startup", "refresh-harness-models: begin")
+			refreshHarnessModels(ctx, cfg.Dirs.CacheDir, runtimeBackend, runtimeInventory, taskMgr, cfg.Agent.HarnessEnv)
+			return nil
+		},
+		func(ctx context.Context) error {
+			_, tk := trace.NewTask(ctx, "refresh-cache-sizes")
+			defer tk.End()
+			trace.Log(ctx, "startup", "refresh-cache-sizes: begin")
+			cacheSizes.RefreshLoop(ctx)
+			return nil
+		},
+		func(ctx context.Context) error {
+			newRepoWatcher(ctx, absRoot, repoService, repoStatus).Watch()
+			return nil
+		},
+		func(ctx context.Context) error {
 			startupCtx, tk := trace.NewTask(ctx, "load-purged-tasks")
 			defer tk.End()
 			trace.Log(startupCtx, "startup", "load-purged-tasks: begin")
 			start := time.Now()
 			logs, err := task.LoadLogs(logDir)
 			if err != nil {
-				slog.WarnContext(startupCtx, "load logs failed", "err", err)
-				return
+				return fmt.Errorf("load logs: %w", err)
 			}
 			slog.InfoContext(startupCtx, "loaded task log headers", "n", len(logs), "dur", time.Since(start))
 			start = time.Now()
@@ -448,10 +474,11 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 			} else if removed > 0 {
 				slog.InfoContext(startupCtx, "pruned stale replay caches", "n", removed)
 			}
+			return nil
 		},
-	}
+	)
 
-	return &App{Server: s, voiceBridge: voiceBridge, backgroundStarters: backgroundStarters}, nil
+	return &App{Server: s, voiceBridge: voiceBridge, backgroundTasks: backgroundTasks}, nil
 }
 
 func adoptionRepos(in []repo.Info) []taskmgr.AdoptRepo {

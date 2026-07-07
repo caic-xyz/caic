@@ -24,13 +24,14 @@ func TestRefreshHarnessModels(t *testing.T) {
 		fetchHarness := harness.Name("fetch")
 		env := map[string][]string{string(fetchHarness): {"FETCH_API_KEY=secret"}}
 		runtimeBackend := &modelRefreshRuntime{}
+		inventory := &modelRefreshInventory{}
 		fetcher := &modelFetchBackend{harness: fetchHarness, models: []string{"z-model", "a-model"}}
 		taskMgr := newModelRefreshTestManager(t.Context(), runtimeBackend, map[harness.Name]agent.Backend{
 			fetchHarness: fetcher,
 			"plain":      stubBackend{},
 		})
 
-		refreshHarnessModels(t.Context(), cacheDir, runtimeBackend, taskMgr, env)
+		refreshHarnessModels(t.Context(), cacheDir, runtimeBackend, inventory, taskMgr, env)
 
 		if runtimeBackend.launches != 1 || runtimeBackend.connects != 1 || runtimeBackend.purges != 1 {
 			t.Fatalf("runtime calls = launch %d connect %d purge %d, want 1 each", runtimeBackend.launches, runtimeBackend.connects, runtimeBackend.purges)
@@ -60,18 +61,51 @@ func TestRefreshHarnessModels(t *testing.T) {
 		cache := agent.OpenHarnessCache(cacheDir + "/harnesses.json")
 		cache.SetModels(fetchHarness, []string{"cached-model"}, "")
 		runtimeBackend := &modelRefreshRuntime{}
+		inventory := &modelRefreshInventory{}
 		fetcher := &modelFetchBackend{harness: fetchHarness, models: []string{"new-model"}}
 		taskMgr := newModelRefreshTestManager(t.Context(), runtimeBackend, map[harness.Name]agent.Backend{
 			fetchHarness: fetcher,
 		})
 
-		refreshHarnessModels(t.Context(), cacheDir, runtimeBackend, taskMgr, nil)
+		refreshHarnessModels(t.Context(), cacheDir, runtimeBackend, inventory, taskMgr, nil)
 
 		if runtimeBackend.launches != 0 {
 			t.Fatalf("launches = %d, want 0 for fresh cache", runtimeBackend.launches)
 		}
 		if fetcher.target.SSHHost != "" {
 			t.Fatalf("fetch target = %q, want no fetch", fetcher.target.SSHHost)
+		}
+	})
+
+	t.Run("valid_purges_stale_model_refresh_instances", func(t *testing.T) {
+		t.Parallel()
+		cacheDir := t.TempDir()
+		fetchHarness := harness.Name("fetch")
+		cache := agent.OpenHarnessCache(cacheDir + "/harnesses.json")
+		cache.SetModels(fetchHarness, []string{"cached-model"}, "")
+		runtimeBackend := &modelRefreshRuntime{}
+		inventory := &modelRefreshInventory{
+			instances: []runtime.Instance{
+				{ID: "stale-refresh"},
+				{ID: "regular-task"},
+			},
+			metadata: map[runtime.InstanceID]map[runtime.MetadataKey]string{
+				"stale-refresh": {runtime.MetadataModelRefresh: "true"},
+				"regular-task":  {runtime.MetadataTaskID: "task-id"},
+			},
+		}
+		fetcher := &modelFetchBackend{harness: fetchHarness, models: []string{"new-model"}}
+		taskMgr := newModelRefreshTestManager(t.Context(), runtimeBackend, map[harness.Name]agent.Backend{
+			fetchHarness: fetcher,
+		})
+
+		refreshHarnessModels(t.Context(), cacheDir, runtimeBackend, inventory, taskMgr, nil)
+
+		if !slices.Equal(runtimeBackend.purgedIDs, []runtime.InstanceID{"stale-refresh"}) {
+			t.Fatalf("purged IDs = %v, want stale-refresh", runtimeBackend.purgedIDs)
+		}
+		if runtimeBackend.launches != 0 {
+			t.Fatalf("launches = %d, want 0 for fresh cache", runtimeBackend.launches)
 		}
 	})
 }
@@ -133,10 +167,11 @@ func (b *modelFetchBackend) SetModels(models []string) {
 }
 
 type modelRefreshRuntime struct {
-	launches int
-	connects int
-	purges   int
-	harness  harness.Name
+	launches  int
+	connects  int
+	purges    int
+	harness   harness.Name
+	purgedIDs []runtime.InstanceID
 }
 
 var _ runtime.Backend = (*modelRefreshRuntime)(nil)
@@ -160,8 +195,9 @@ func (*modelRefreshRuntime) Fetch(_ context.Context, _ runtime.InstanceID) error
 
 func (*modelRefreshRuntime) Stop(_ context.Context, _ runtime.InstanceID) error { return nil }
 
-func (r *modelRefreshRuntime) Purge(_ context.Context, _ runtime.InstanceID) error {
+func (r *modelRefreshRuntime) Purge(_ context.Context, id runtime.InstanceID) error {
 	r.purges++
+	r.purgedIDs = append(r.purgedIDs, id)
 	return nil
 }
 
@@ -179,4 +215,23 @@ func (*modelRefreshRuntime) Processes(_ context.Context, _ runtime.InstanceID) (
 
 func (*modelRefreshRuntime) Signal(_ context.Context, _ runtime.InstanceID, _ int, _ string) error {
 	return nil
+}
+
+type modelRefreshInventory struct {
+	instances []runtime.Instance
+	metadata  map[runtime.InstanceID]map[runtime.MetadataKey]string
+}
+
+var _ runtime.Inventory = (*modelRefreshInventory)(nil)
+
+func (i *modelRefreshInventory) List(context.Context) ([]runtime.Instance, error) {
+	return append([]runtime.Instance(nil), i.instances...), nil
+}
+
+func (i *modelRefreshInventory) Metadata(_ context.Context, id runtime.InstanceID, key runtime.MetadataKey) (string, error) {
+	return i.metadata[id][key], nil
+}
+
+func (*modelRefreshInventory) Inspect(context.Context, runtime.InstanceID) (*runtime.InstanceInspect, error) {
+	return nil, errors.New("inspect not implemented")
 }

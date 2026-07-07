@@ -17,7 +17,6 @@ import (
 // adoptedTaskWiring connects adopted tasks back to forge and CI automation. It
 // is an app-lifetime concern, driven during startup adoption.
 type adoptedTaskWiring struct {
-	ctx       context.Context
 	authStore *auth.Store
 	ciService *ci.Service
 	forgeMgr  *forgemgr.Manager
@@ -49,44 +48,44 @@ func (w *adoptedTaskWiring) WireCIMonitoring(ctx context.Context, at *taskmgr.Ad
 		}
 		slog.InfoContext(ctx, "adopt: starting monitorCI", "task", at.Task.ID, "branch", at.Branch, "sha", sha)
 		w.taskMgr.SetTaskMonitorBranch(at.Entry, at.Branch)
-		go w.ciService.MonitorCI(w.ctx, at.Entry, f, at.ForgeOwner, at.ForgeRepo, sha) //nolint:contextcheck // CI monitoring must outlive startup
+		w.ciService.MonitorCI(ctx, at.Entry, f, at.ForgeOwner, at.ForgeRepo, sha)
 	}
 }
 
 // LookupExternalPRForTask queries the forge for a PR matching the task's branch.
-func (w *adoptedTaskWiring) LookupExternalPRForTask(at *taskmgr.AdoptedTask) {
+func (w *adoptedTaskWiring) LookupExternalPRForTask(ctx context.Context, at *taskmgr.AdoptedTask) {
 	ri, ok := w.repoSvc.InfoFor(at.RelPath)
 	if !ok {
 		return
 	}
-	f := w.forgeMgr.ForgeForInfo(w.ctx, &ri)
+	f := w.forgeMgr.ForgeForInfo(ctx, &ri)
 	if f == nil && w.authStore != nil {
 		if u, ok := w.authStore.FindByProvider(auth.Provider(at.ForgeKind)); ok {
-			f = w.forgeMgr.ForgeFor(auth.NewContext(w.ctx, &u), forge.Kind(at.ForgeKind))
+			f = w.forgeMgr.ForgeFor(auth.NewContext(ctx, &u), forge.Kind(at.ForgeKind))
 		}
 	}
 	if f == nil {
 		return
 	}
-	pr, err := f.FindPRByBranch(w.ctx, at.ForgeOwner, at.ForgeRepo, at.Branch)
+	pr, err := f.FindPRByBranch(ctx, at.ForgeOwner, at.ForgeRepo, at.Branch)
 	if err != nil || pr.Number == 0 {
 		return
 	}
-	slog.InfoContext(w.ctx, "adopt: found external PR", "repo", at.RelPath, "br", at.Branch, "pr", pr.Number)
+	slog.InfoContext(ctx, "adopt: found external PR", "repo", at.RelPath, "br", at.Branch, "pr", pr.Number)
 	at.Task.SetPR(at.ForgeOwner, at.ForgeRepo, pr.Number)
 	w.taskMgr.NotifyTaskChange()
 	sha := pr.HeadSHA
 	if sha == "" {
 		var err error
-		sha, err = f.GetDefaultBranchSHA(w.ctx, at.ForgeOwner, at.ForgeRepo, at.Branch)
+		sha, err = f.GetDefaultBranchSHA(ctx, at.ForgeOwner, at.ForgeRepo, at.Branch)
 		if err != nil {
-			slog.InfoContext(w.ctx, "adopt: skipping CI monitor; PR head SHA unavailable", "task", at.Task.ID, "branch", at.Branch, "repo", at.RelPath, "err", err)
+			slog.InfoContext(ctx, "adopt: skipping CI monitor; PR head SHA unavailable", "task", at.Task.ID, "branch", at.Branch, "repo", at.RelPath, "err", err)
 			return
 		}
 	}
-	slog.InfoContext(w.ctx, "adopt: starting monitorCI", "task", at.Task.ID, "branch", at.Branch, "sha", sha)
+	slog.InfoContext(ctx, "adopt: starting monitorCI", "task", at.Task.ID, "branch", at.Branch, "sha", sha)
 	w.taskMgr.SetTaskMonitorBranch(at.Entry, at.Branch)
-	w.ciService.MonitorCI(w.ctx, at.Entry, f, at.ForgeOwner, at.ForgeRepo, sha)
+	w.ciService.MonitorCI(ctx, at.Entry, f, at.ForgeOwner, at.ForgeRepo, sha)
 }
 
 func adoptedHeadSHA(ctx context.Context, f forge.Forge, at *taskmgr.AdoptedTask) (string, error) {

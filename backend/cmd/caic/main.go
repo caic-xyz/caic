@@ -18,6 +18,7 @@ import (
 	"runtime/pprof"
 	"runtime/trace"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -63,7 +64,7 @@ func mainImpl() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		select {
 		case s := <-sig:

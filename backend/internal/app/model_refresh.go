@@ -18,7 +18,8 @@ import (
 
 // refreshHarnessModels checks if any harness caches are stale and refreshes
 // them by launching a temporary runtime instance.
-func refreshHarnessModels(ctx context.Context, cacheDir string, backend runtime.Backend, taskMgr *taskmgr.Manager, harnessEnv map[string][]string) {
+func refreshHarnessModels(ctx context.Context, cacheDir string, backend runtime.Backend, inventory runtime.Inventory, taskMgr *taskmgr.Manager, harnessEnv map[string][]string) {
+	purgeStaleModelRefreshInstances(ctx, backend, inventory)
 	cache := agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
 
 	fetchers := map[harness.Name]agent.ModelFetcher{}
@@ -33,6 +34,37 @@ func refreshHarnessModels(ctx context.Context, cacheDir string, backend runtime.
 			continue
 		}
 		refreshOneHarness(ctx, cache, backend, taskMgr, h, fetchers[h], env)
+	}
+}
+
+// purgeStaleModelRefreshInstances removes temporary model-refresh runtimes left
+// behind by a previous server exit.
+func purgeStaleModelRefreshInstances(ctx context.Context, backend runtime.Backend, inventory runtime.Inventory) {
+	if backend == nil || inventory == nil {
+		return
+	}
+	instances, err := inventory.List(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "model refresh: stale instance scan failed", "err", err)
+		return
+	}
+	for _, instance := range instances {
+		value, err := inventory.Metadata(ctx, instance.ID, runtime.MetadataModelRefresh)
+		if err != nil {
+			slog.WarnContext(ctx, "model refresh: metadata read failed", "instance", instance.ID, "err", err)
+			continue
+		}
+		if value != "true" {
+			continue
+		}
+		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		err = backend.Purge(purgeCtx, instance.ID)
+		cancel()
+		if err != nil {
+			slog.WarnContext(ctx, "model refresh: stale instance purge failed", "instance", instance.ID, "err", err)
+			continue
+		}
+		slog.InfoContext(ctx, "model refresh: purged stale instance", "instance", instance.ID)
 	}
 }
 
