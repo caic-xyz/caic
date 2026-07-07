@@ -1,8 +1,6 @@
-// Reusable searchable select (combobox) with keyboard navigation. Used for the
-// model picker and the branch picker. ArrowUp/Down move the highlight, Enter
-// selects, Escape closes, and typing filters the options.
+// Reusable searchable select (combobox) with keyboard navigation and optional grouped options.
 
-import { createEffect, createSignal, For, Show, onCleanup, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show, onCleanup, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 
 import KeyboardArrowDown from "@material-symbols/svg-400/outlined/keyboard_arrow_down.svg?solid";
@@ -14,6 +12,8 @@ export interface SearchableOption {
   label: JSX.Element;
   /** Lowercased text used for filtering; defaults to the string-cast label. */
   search?: string;
+  /** Optional group label rendered before the first matching option in a group. */
+  group?: string;
 }
 
 interface Props {
@@ -26,12 +26,16 @@ interface Props {
   emptyOption?: SearchableOption;
   /** Overrides the trigger text; defaults to the selected option's label. */
   triggerLabel?: JSX.Element;
+  hideCaret?: boolean;
+  noOptionsLabel?: JSX.Element;
   disabled?: boolean;
+  title?: string;
   class?: string;
   menuClass?: string;
   /** Fired when the popup opens, e.g. to lazily load options. */
   onOpen?: () => void;
   "data-testid"?: string;
+  menuTestId?: string;
 }
 
 let idSeq = 0;
@@ -47,14 +51,14 @@ export default function SearchableSelect(props: Props) {
   let menuRef: HTMLDivElement | undefined;
   const optionRefs: (HTMLButtonElement | undefined)[] = [];
 
-  const visible = () => {
+  const visibleOptions = createMemo(() => {
     const f = filter().toLowerCase();
     const opts = f
       ? props.options().filter((o) => (o.search ?? String(o.label)).toLowerCase().includes(f))
       : props.options();
     const base = (!f && props.emptyOption) ? [props.emptyOption] : [];
     return [...base, ...opts];
-  };
+  });
 
   const selectedLabel = () => {
     if (props.value === "" && props.emptyOption) return props.emptyOption.label;
@@ -65,7 +69,7 @@ export default function SearchableSelect(props: Props) {
   function openMenu() {
     if (props.disabled) return;
     setFilter("");
-    const vis = visible();
+    const vis = visibleOptions();
     const idx = vis.findIndex((o) => o.value === props.value);
     setActive(idx >= 0 ? idx : 0);
     setOpen(true);
@@ -84,7 +88,7 @@ export default function SearchableSelect(props: Props) {
   }
 
   function move(delta: number) {
-    const len = visible().length;
+    const len = visibleOptions().length;
     if (len === 0) return;
     setActive((i) => Math.min(len - 1, Math.max(0, i + delta)));
   }
@@ -136,10 +140,10 @@ export default function SearchableSelect(props: Props) {
     if (e.key === "ArrowDown") { e.preventDefault(); move(1); }
     else if (e.key === "ArrowUp") { e.preventDefault(); move(-1); }
     else if (e.key === "Home") { e.preventDefault(); setActive(0); }
-    else if (e.key === "End") { e.preventDefault(); setActive(Math.max(0, visible().length - 1)); }
+    else if (e.key === "End") { e.preventDefault(); setActive(Math.max(0, visibleOptions().length - 1)); }
     else if (e.key === "Enter") {
       e.preventDefault();
-      const v = visible()[active()];
+      const v = visibleOptions()[active()];
       if (v) commit(v.value);
     } else if (e.key === "Escape") {
       e.preventDefault();
@@ -159,12 +163,15 @@ export default function SearchableSelect(props: Props) {
         aria-expanded={open()}
         aria-label={props.ariaLabel}
         disabled={props.disabled}
+        title={props.title}
         data-testid={props["data-testid"]}
         onClick={() => (open() ? closeMenu(false) : openMenu())}
         onKeyDown={onTriggerKeyDown}
       >
         <span class={styles.triggerLabel}>{props.triggerLabel ?? selectedLabel()}</span>
-        <KeyboardArrowDown class={styles.caret} aria-hidden="true" />
+        <Show when={!props.hideCaret}>
+          <KeyboardArrowDown class={styles.caret} aria-hidden="true" />
+        </Show>
       </button>
       <Show when={open()}>
         <Portal>
@@ -172,7 +179,9 @@ export default function SearchableSelect(props: Props) {
             ref={(el) => { menuRef = el; }}
             class={`${styles.menu} ${props.menuClass ?? ""}`}
             role="listbox"
+            aria-label={props.ariaLabel}
             id={listboxId}
+            data-testid={props.menuTestId}
           >
             <input
               ref={(el) => { inputRef = el; }}
@@ -184,26 +193,34 @@ export default function SearchableSelect(props: Props) {
               role="combobox"
               aria-expanded={open()}
               aria-controls={listboxId}
-              aria-activedescendant={visible()[active()] ? `${listboxId}-opt-${active()}` : undefined}
+              aria-activedescendant={visibleOptions()[active()] ? `${listboxId}-opt-${active()}` : undefined}
               onInput={(e) => { setFilter(e.currentTarget.value); setActive(0); }}
               onKeyDown={onInputKeyDown}
             />
-            <For each={visible()}>
+            <For each={visibleOptions()}>
               {(opt, i) => (
-                <button
-                  ref={(el) => { optionRefs[i()] = el; }}
-                  type="button"
-                  id={`${listboxId}-opt-${i()}`}
-                  class={`${styles.option}${i() === active() ? ` ${styles.optionActive}` : ""}${opt.value === props.value ? ` ${styles.optionSelected}` : ""}`}
-                  role="option"
-                  aria-selected={opt.value === props.value}
-                  onMouseEnter={() => setActive(i())}
-                  onClick={() => commit(opt.value)}
-                >
-                  {opt.label}
-                </button>
+                <>
+                  <Show when={opt.group && opt.group !== visibleOptions()[i() - 1]?.group}>
+                    <div class={styles.groupLabel}>{opt.group}</div>
+                  </Show>
+                  <button
+                    ref={(el) => { optionRefs[i()] = el; }}
+                    type="button"
+                    id={`${listboxId}-opt-${i()}`}
+                    class={`${styles.option}${i() === active() ? ` ${styles.optionActive}` : ""}${opt.value === props.value ? ` ${styles.optionSelected}` : ""}`}
+                    role="option"
+                    aria-selected={opt.value === props.value}
+                    onMouseEnter={() => setActive(i())}
+                    onClick={() => commit(opt.value)}
+                  >
+                    {opt.label}
+                  </button>
+                </>
               )}
             </For>
+            <Show when={visibleOptions().length === 0 && props.noOptionsLabel}>
+              <div class={styles.groupLabel}>{props.noOptionsLabel}</div>
+            </Show>
           </div>
         </Portal>
       </Show>

@@ -440,7 +440,7 @@ describe("App repo chip ordering", () => {
     const dropdown = screen.getByTestId("add-repo-dropdown");
 
     // repos/new must appear in "All repositories" section (no Recent label next to it).
-    const groupLabels = Array.from(dropdown.querySelectorAll("[class*='dropdownGroupLabel']")).map(
+    const groupLabels = Array.from(dropdown.children).filter((el) => el.tagName === "DIV").map(
       (el) => el.textContent,
     );
     const options = Array.from(dropdown.querySelectorAll("button")).map((b) => b.textContent);
@@ -480,7 +480,7 @@ describe("App repo chip ordering", () => {
     const dropdown = screen.getByTestId("add-repo-dropdown");
 
     // After first task, repos/new is promoted to Recent.
-    const groupLabels = Array.from(dropdown.querySelectorAll("[class*='dropdownGroupLabel']")).map(
+    const groupLabels = Array.from(dropdown.children).filter((el) => el.tagName === "DIV").map(
       (el) => el.textContent,
     );
     expect(groupLabels).toContain("Recent");

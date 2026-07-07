@@ -87,6 +87,15 @@
   background: var(--color-bg-hover);
 }
 
+.groupLabel {
+  padding: 0.25rem 0.75rem 0.15rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .optionActive {
   background: var(--color-bg-input-hover);
 }
