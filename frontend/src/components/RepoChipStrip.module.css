@@ -31,10 +31,6 @@
   background: var(--color-bg-input-hover);
 }
 
-.chipLabelActive {
-  background: var(--color-bg-input-hover);
-}
-
 .chipBranch {
   color: var(--color-text-secondary);
 }
@@ -146,14 +142,6 @@
 
 .branchInput:focus {
   border-color: var(--color-primary);
-}
-
-.dropdownOptionMuted {
-  color: var(--color-text-muted);
-}
-
-.dropdownOptionActive {
-  font-weight: 600;
 }
 
 .cloneButton {

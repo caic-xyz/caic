@@ -1,0 +1,100 @@
+/* Reusable searchable select (combobox) component styles. */
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  min-width: 0;
+  white-space: nowrap;
+  padding: 0;
+}
+
+.trigger:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-primary-ring);
+}
+
+.trigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.triggerLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.caret {
+  width: 1.1rem;
+  height: 1.1rem;
+  flex: none;
+  color: var(--color-text-muted);
+}
+
+.menu {
+  position: fixed;
+  width: max-content;
+  min-width: 10rem;
+  max-width: 24rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0.25rem 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  z-index: 1100;
+}
+
+.input {
+  display: block;
+  width: calc(100% - 1rem);
+  margin: 0.25rem 0.5rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 0.85rem;
+  outline: none;
+}
+
+.input:focus {
+  border-color: var(--color-primary);
+}
+
+.option {
+  display: block;
+  width: 100%;
+  padding: 0.35rem 0.75rem;
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.option:hover {
+  background: var(--color-bg-hover);
+}
+
+.optionActive {
+  background: var(--color-bg-input-hover);
+}
+
+.optionSelected {
+  font-weight: 600;
+}
+
+.optionMuted {
+  color: var(--color-text-muted);
+}

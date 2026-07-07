@@ -1,7 +1,17 @@
 /* Shared form control component styles for selects and capability toggle chips. */
 
+.selectWrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.selectWrap > select {
+  width: 100%;
+}
+
 .select {
-  padding: 0.35rem 0.5rem;
+  padding: 0.35rem 1.8rem 0.35rem 0.5rem;
   font: inherit;
   font-size: 0.9rem;
   line-height: 1.4;
@@ -11,6 +21,9 @@
   color: inherit;
   cursor: pointer;
   min-width: 0;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
 }
 
 .select:hover:not(:disabled) {
@@ -25,6 +38,46 @@
 .select:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Trigger variant for SearchableSelect so it matches the native selects. */
+.selectTrigger {
+  padding: 0.35rem 0.5rem;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-input);
+  color: inherit;
+  cursor: pointer;
+  min-width: 0;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+}
+
+.selectTrigger:hover:not(:disabled) {
+  background: var(--color-bg-input-hover);
+}
+
+.selectTrigger:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-primary-ring);
+}
+
+.selectTrigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.selectCaret {
+  position: absolute;
+  right: 0.45rem;
+  width: 1.1rem;
+  height: 1.1rem;
+  color: var(--color-text-muted);
+  pointer-events: none;
 }
 
 .toggleChip {
@@ -58,7 +111,7 @@
 
 /* Mobile: <=768px */
 @media (max-width: 768px) {
-  .select {
+  .selectWrap {
     box-sizing: border-box;
     flex: 1 1 auto;
     min-width: 0;
