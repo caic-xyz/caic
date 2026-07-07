@@ -352,6 +352,12 @@ function createAppStore() {
     if (selectedId() === null) setSidebarOpen(true);
   });
 
+  function dismissSelectedTaskOnNotFound(id: string, err: unknown): boolean {
+    if ((err as { status?: number }).status !== 404) return false;
+    if (selectedId() === id) navigate("/", { replace: true });
+    return true;
+  }
+
   // Ensure the task named by the URL exists and is in the store. When it is not
   // (deep link, back button, another client), fetch it as a REST resource: a 404
   // is an authoritative "gone" → home; a 200 seeds the store so the detail view
@@ -366,13 +372,9 @@ function createAppStore() {
     try {
       upsertTask(await getTask(id));
     } catch (e) {
-      // Only a definitive not-found/forbidden is authoritative. Transient errors
-      // (network, timeout, 5xx) keep the route so the SSE stream can still
-      // deliver the task.
-      const status = (e as { status?: number }).status;
-      if ((status === 404 || status === 403) && selectedId() === id) {
-        navigate("/", { replace: true });
-      }
+      // Only a definitive not-found is authoritative. Transient errors, 403s,
+      // and 5xx responses keep the route so auth and server state can recover.
+      dismissSelectedTaskOnNotFound(id, e);
     } finally {
       if (ensuringTaskID === id) ensuringTaskID = null;
     }
@@ -896,7 +898,7 @@ function createAppStore() {
     navigate,
     auth,
     // task data + selection
-    tasks, repos, selectedId, selectedTask, taskById,
+    tasks, repos, selectedId, selectedTask, taskById, dismissSelectedTaskOnNotFound,
     // new-task form
     prompt, setPrompt, selectedRepos, setSelectedRepos, selectedModel, setSelectedModel: selectModel,
     selectedEffort, setSelectedEffort: selectEffort, selectedHarness, setSelectedHarness: selectHarness, harnesses,

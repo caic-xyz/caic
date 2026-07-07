@@ -16,6 +16,7 @@ interface Props {
   diffStat: DiffFileStat[];
   repos?: { name: string; branch: string }[];
   taskPath: string;
+  onTaskRefreshError?: (taskId: string, err: unknown) => boolean;
 }
 
 export default function DiffDetail(props: Props) {
@@ -28,12 +29,16 @@ export default function DiffDetail(props: Props) {
 
   createEffect(() => {
     const id = props.taskId;
+    const onTaskRefreshError = props.onTaskRefreshError;
     setLoading(true);
     setError(null);
     setCollapsedFiles(new Set<string>());
     getTaskDiff(id, "")
       .then((d) => setFullDiff(d.diff))
-      .catch((e) => setError(e instanceof Error ? e.message : "Unknown error"))
+      .catch((e: unknown) => {
+        if (onTaskRefreshError?.(id, e)) return;
+        setError(e instanceof Error ? e.message : "Unknown error");
+      })
       .finally(() => setLoading(false));
   });
 

@@ -52,6 +52,7 @@ interface Props {
   repo: string;
   branch: string;
   taskPath: string;
+  onTaskRefreshError?: (taskId: string, err: unknown) => boolean;
 }
 
 // Collapsed set shared across the component, keyed by pid.
@@ -161,16 +162,24 @@ export default function ProcessDetail(props: Props) {
     });
   };
 
-  const refresh = () => {
+  const refresh = async () => {
+    const id = props.taskId;
+    const onTaskRefreshError = props.onTaskRefreshError;
     setLoading(true);
     setError(null);
-    getTaskProcesses(props.taskId)
-      .then((resp) => setProcesses(resp.processes))
-      .catch((e) => setError(e instanceof Error ? e.message : "Unknown error"))
-      .finally(() => setLoading(false));
+    try {
+      const resp = await getTaskProcesses(id);
+      setProcesses(resp.processes);
+    } catch (e: unknown) {
+      if (!onTaskRefreshError?.(id, e)) setError(e instanceof Error ? e.message : "Unknown error");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  createEffect(refresh);
+  createEffect(() => {
+    void refresh();
+  });
 
   // Escape navigates back to the task detail.
   onMount(() => {
@@ -182,12 +191,14 @@ export default function ProcessDetail(props: Props) {
   });
 
   const handleSignal = async (pid: number, sig: "SIGTERM" | "SIGKILL") => {
+    const id = props.taskId;
+    const onTaskRefreshError = props.onTaskRefreshError;
     setSignallingPid(pid);
     try {
-      await signalProcess(props.taskId, String(pid), { signal: sig });
+      await signalProcess(id, String(pid), { signal: sig });
       await refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to send signal");
+    } catch (e: unknown) {
+      if (!onTaskRefreshError?.(id, e)) setError(e instanceof Error ? e.message : "Failed to send signal");
     } finally {
       setSignallingPid(null);
     }

@@ -8,6 +8,10 @@ import type { Repo, PreferencesResp, HarnessInfo, Task, ISOTimestamp } from "@sd
 
 // Minimal complete Task, matching what the backend now returns from createTask
 // so the app can seed its store and render the detail view immediately.
+function apiError(status: number): Error & { status: number } {
+  return Object.assign(new Error(`HTTP ${status}`), { status });
+}
+
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {
     id: "task1",
@@ -81,6 +85,9 @@ vi.mock("./api", () => ({
   compactContext: vi.fn(() => Promise.resolve({ status: "compacting" })),
   syncTask: vi.fn(),
   getTaskDiff: vi.fn(),
+  getTaskProcesses: vi.fn(),
+  signalProcess: vi.fn(),
+  getTaskInfo: vi.fn(),
 }));
 
 vi.mock("./AuthContext", () => ({
@@ -169,6 +176,13 @@ beforeEach(() => {
   vi.mocked(api.cloneRepo).mockResolvedValue(newRepo);
   vi.mocked(api.createTask).mockResolvedValue(makeTask());
   vi.mocked(api.getTask).mockResolvedValue(makeTask());
+  vi.mocked(api.getTaskDiff).mockResolvedValue({ diff: "" });
+  vi.mocked(api.getTaskProcesses).mockResolvedValue({ processes: [] });
+  vi.mocked(api.getTaskInfo).mockResolvedValue({
+    id: "task1",
+    recorded: { state: "running" },
+    observed: {},
+  } as Awaited<ReturnType<typeof api.getTaskInfo>>);
 });
 
 afterEach(() => {
@@ -214,6 +228,42 @@ describe("App repo chips: No repository", () => {
     expect(api.purgeTask).toHaveBeenCalledWith("a3");
     await waitFor(() => expect(history.get()).toBe("/"));
     await waitFor(() => expect(screen.getByTestId("prompt-input")).toHaveFocus());
+  });
+
+  it.each([
+    ["diff", "/task/@task1+do-something/diff", () => vi.mocked(api.getTaskDiff).mockRejectedValue(apiError(404))],
+    ["processes", "/task/@task1+do-something/processes", () => vi.mocked(api.getTaskProcesses).mockRejectedValue(apiError(404))],
+    ["info", "/task/@task1+do-something/info", () => vi.mocked(api.getTaskInfo).mockRejectedValue(apiError(404))],
+  ] as const)("dismisses the %s pane when its task refresh returns 404", async (_name, route, rejectRefresh) => {
+    rejectRefresh();
+    const { history } = renderApp(route);
+
+    await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  it("does not dismiss a task pane when its refresh returns 403", async () => {
+    vi.mocked(api.getTaskDiff).mockRejectedValue(apiError(403));
+    const { history } = renderApp("/task/@task1+do-something/diff");
+
+    await waitFor(() => expect(screen.getByText("HTTP 403")).toBeInTheDocument());
+    expect(history.get()).toBe("/task/@task1+do-something/diff");
+  });
+
+  it("dismisses a deep-linked task detail only when task lookup returns 404", async () => {
+    vi.mocked(api.getTask).mockRejectedValue(apiError(404));
+    const { history } = renderApp("/task/@missing+gone");
+
+    await waitFor(() => expect(api.getTask).toHaveBeenCalledWith("missing"));
+    await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  it("keeps a deep-linked task detail when task lookup returns 403", async () => {
+    vi.mocked(api.getTask).mockRejectedValue(apiError(403));
+    const { history } = renderApp("/task/@secret+denied");
+
+    await waitFor(() => expect(api.getTask).toHaveBeenCalledWith("secret"));
+    await Promise.resolve();
+    expect(history.get()).toBe("/task/@secret+denied");
   });
 
   it("syncs harness model and effort from per-model preferences", async () => {

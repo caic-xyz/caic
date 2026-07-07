@@ -14,6 +14,7 @@ interface Props {
   repo: string;
   branch: string;
   taskPath: string;
+  onTaskRefreshError?: (taskId: string, err: unknown) => boolean;
 }
 
 function value(v: string | number | boolean | undefined): string {
@@ -180,11 +181,15 @@ export default function TaskInfo(props: Props) {
 
   createEffect(() => {
     const id = props.taskId;
+    const onTaskRefreshError = props.onTaskRefreshError;
     setInfo(null);
     setError(null);
     void getTaskInfo(id)
       .then(setInfo)
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load task info"));
+      .catch((err: unknown) => {
+        if (onTaskRefreshError?.(id, err)) return;
+        setError(err instanceof Error ? err.message : "Failed to load task info");
+      });
   });
 
   // Escape navigates back to the task detail.

@@ -28,6 +28,7 @@ export default function DiffPage() {
               diffStat={t()?.diffStat ?? []}
               repos={(t()?.repos ?? []).map((r) => ({ name: r.name, branch: r.branch }))}
               taskPath={tp()}
+              onTaskRefreshError={s.dismissSelectedTaskOnNotFound}
             />
           </DetailPane>
         );

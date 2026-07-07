@@ -28,6 +28,7 @@ export default function ProcessesPage() {
               repo={t()?.repos?.[0]?.name ?? ""}
               branch={t()?.repos?.[0]?.branch ?? ""}
               taskPath={tp()}
+              onTaskRefreshError={s.dismissSelectedTaskOnNotFound}
             />
           </DetailPane>
         );
