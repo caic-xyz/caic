@@ -4,7 +4,7 @@
 import { createContext, createEffect, createSignal, onCleanup, useContext, type JSX } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
 
-import type { Config, Harness, HarnessInfo, Repo, Task, UsageResp, ImageData as APIImageData, CacheMappingResp, CacheSize, OAuthGrantResp, MountMappingResp, Platform, WellKnownCachesResp, VersionResp } from "@sdk/types.gen";
+import type { Config, Harness, HarnessInfo, Repo, Task, TaskState, UsageResp, ImageData as APIImageData, CacheMappingResp, CacheSize, OAuthGrantResp, MountMappingResp, Platform, WellKnownCachesResp, VersionResp } from "@sdk/types.gen";
 
 import { useHostMode } from "./gomode/HostMode";
 
@@ -20,6 +20,20 @@ import { taskPath, taskIdFromPath } from "./taskPath";
 function jitteredDelay(base: number): number {
   return base * (0.75 + Math.random() * 0.5);
 }
+
+const inputNeededTaskStates = new Set<TaskState>(["waiting", "asking", "has_plan"]);
+const otherAliveTaskStates = new Set<TaskState>([
+  "pending",
+  "branching",
+  "provisioning",
+  "starting",
+  "pulling",
+  "pushing",
+]);
+
+type PurgeFocusTarget =
+  | { kind: "task"; task: Task }
+  | { kind: "prompt" };
 
 function createAppStore() {
   const navigate = useNavigate();
@@ -138,6 +152,52 @@ function createAppStore() {
     return id !== null ? (tasks().find((t) => t.id === id) ?? null) : null;
   };
   const taskById = (id: string): Task | undefined => tasks().find((t) => t.id === id);
+
+  function tasksInSidebarOrder(): Task[] {
+    const byId = new Map(tasks().map((t) => [t.id, t]));
+    const ordered = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"))
+      .map((el) => el.dataset.taskId ?? "")
+      .map((id) => byId.get(id))
+      .filter((t): t is Task => t !== undefined);
+    return ordered.length > 0 ? ordered : tasks();
+  }
+
+  function purgeFocusTarget(id: string): PurgeFocusTarget {
+    const ordered = tasksInSidebarOrder();
+    const currentIdx = ordered.findIndex((t) => t.id === id);
+    const rotated = currentIdx === -1
+      ? ordered
+      : ordered.slice(currentIdx + 1).concat(ordered.slice(0, currentIdx));
+    const candidates = rotated.filter((t) => t.id !== id);
+    const nextTask = candidates.find((t) => inputNeededTaskStates.has(t.state))
+      ?? candidates.find((t) => t.state === "running")
+      ?? candidates.find((t) => otherAliveTaskStates.has(t.state));
+    return nextTask ? { kind: "task", task: nextTask } : { kind: "prompt" };
+  }
+
+  function focusTaskCard(id: string) {
+    requestAnimationFrame(() => {
+      const card = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"))
+        .find((el) => el.dataset.taskId === id);
+      card?.focus();
+    });
+  }
+
+  function focusPrompt() {
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>("[data-testid='prompt-input']")?.focus();
+    });
+  }
+
+  function navigateToPurgeFocusTarget(target: PurgeFocusTarget) {
+    if (target.kind === "task") {
+      navigate(taskPath(target.task.id, target.task.repos?.[0]?.name ?? "", target.task.repos?.[0]?.branch ?? "", target.task.title), { replace: true });
+      focusTaskCard(target.task.id);
+      return;
+    }
+    navigate("/", { replace: true });
+    focusPrompt();
+  }
 
   // Insert or replace a task in the store by id, keeping the id-sorted order.
   // Used both by the SSE upsert handler and to seed a task the client just
@@ -605,9 +665,11 @@ function createAppStore() {
 
   async function handlePurge(id: string) {
     if (actionId()) return;
+    const target = selectedId() === id ? purgeFocusTarget(id) : null;
     setActionId(id);
     try {
       await purgeTask(id);
+      if (target && selectedId() === id) navigateToPurgeFocusTarget(target);
     } catch {
       setActionId(null);
     }

@@ -1,6 +1,6 @@
 // Tests for app-shell task creation, repo selection, and harness preferences.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 
@@ -66,7 +66,10 @@ vi.mock("./api", () => ({
   stopTask: vi.fn(),
   purgeTask: vi.fn(),
   reviveTask: vi.fn(),
-  globalTaskEvents: vi.fn(() => new FakeEventSource()),
+  globalTaskEvents: vi.fn((onMessage: (event: unknown) => void) => {
+    fakeESListeners.push((e) => onMessage(JSON.parse(e.data)));
+    return new FakeEventSource();
+  }),
   globalUsageEvents: vi.fn(() => new FakeEventSource()),
   // Used by TaskDetail once a created task navigates into its detail route.
   taskEventStream: vi.fn(() => new FakeEventSource()),
@@ -101,6 +104,10 @@ function dispatchSSE(data: unknown) {
 
 function dispatchOpen() {
   fakeESOpenListeners.forEach((fn) => fn());
+}
+
+async function waitForTaskEventsSubscription() {
+  await waitFor(() => expect(fakeESListeners.length).toBeGreaterThan(0));
 }
 
 // Imports must follow vi.mock declarations.
@@ -162,7 +169,51 @@ beforeEach(() => {
   vi.mocked(api.getTask).mockResolvedValue(makeTask());
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("App repo chips: No repository", () => {
+  it("moves from a purged selected task to the next task needing input first", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const killed = makeTask({ id: "a3", title: "kill me", state: "running", repos: [{ name: "repos/a", branch: "main" }] });
+    const running = makeTask({ id: "a2", title: "running next", state: "running", repos: [{ name: "repos/a", branch: "main" }] });
+    const asking = makeTask({ id: "a1", title: "asking next", state: "asking", repos: [{ name: "repos/a", branch: "main" }] });
+    vi.mocked(api.getTask).mockResolvedValue(killed);
+    vi.mocked(api.purgeTask).mockResolvedValue(undefined);
+    const { history } = renderApp("/task/@a3+kill-me");
+
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [killed, running, asking] });
+    await waitFor(() => expect(document.querySelector("[data-task-id='a3']")).toBeInTheDocument());
+
+    await user.keyboard("{Shift>}{Delete}{/Shift}");
+
+    expect(api.purgeTask).toHaveBeenCalledWith("a3");
+    await waitFor(() => expect(history.get()).toContain("/task/@a1+"));
+    await waitFor(() => expect(document.querySelector("[data-task-id='a1']")).toHaveFocus());
+  });
+
+  it("returns to the new-task prompt after purging the last alive selected task", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const killed = makeTask({ id: "a3", title: "kill me", state: "running", repos: [{ name: "repos/a", branch: "main" }] });
+    vi.mocked(api.getTask).mockResolvedValue(killed);
+    vi.mocked(api.purgeTask).mockResolvedValue(undefined);
+    const { history } = renderApp("/task/@a3+kill-me");
+
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [killed] });
+    await waitFor(() => expect(document.querySelector("[data-task-id='a3']")).toBeInTheDocument());
+
+    await user.keyboard("{Shift>}{Delete}{/Shift}");
+
+    expect(api.purgeTask).toHaveBeenCalledWith("a3");
+    await waitFor(() => expect(history.get()).toBe("/"));
+    await waitFor(() => expect(screen.getByTestId("prompt-input")).toHaveFocus());
+  });
+
   it("syncs harness model and effort from per-model preferences", async () => {
     const user = userEvent.setup();
     vi.mocked(api.getPreferences).mockResolvedValue({
