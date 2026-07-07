@@ -258,6 +258,11 @@ func (*Backend) WritePrePrompt(w io.Writer, model string, logW io.Writer) error 
 	return nil
 }
 
+// FetchModels implements agent.ModelFetcher.
+func (*Backend) FetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) ([]string, error) {
+	return FetchModels(ctx, target, extraEnv)
+}
+
 // caicModelInfo is written to output.jsonl during Start so replay/adoption
 // can restore the model's context window. Without it, the context window
 // defaults to the harness's hardcoded fallback (200k) after server restart.
@@ -751,11 +756,6 @@ func writeSetThinking(w io.Writer, level string, logW io.Writer) error {
 
 func writeGetState(w, logW io.Writer) error {
 	return writeJSONLine(w, pi.GetStateCmd{Type: pi.CmdGetState}, logW)
-}
-
-// FetchModels implements agent.ModelFetcher.
-func (*Backend) FetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) ([]string, error) {
-	return FetchModels(ctx, target, extraEnv)
 }
 
 // FetchModels runs pi in the target,

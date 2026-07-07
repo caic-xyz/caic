@@ -1211,6 +1211,132 @@ func (h *Handler) validateToolParamHeaders(ctx context.Context, header http.Head
 	return nil
 }
 
+// handleCompat serves one released Streamable HTTP request. caic runs as a
+// stateless server: it does not issue an Mcp-Session-Id and offers no
+// server-initiated SSE stream, so a GET returns 405 (permitted by the released
+// transport spec) and clients fall back to plain POST request/response.
+func (h *Handler) handleCompat(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "no server-initiated SSE stream", http.StatusMethodNotAllowed)
+		return
+	}
+	var req JSONRPCRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeResponse(w, http.StatusOK, JSONRPCResponse{JSONRPC: jsonRPCVersion, Error: rpcError(ParseErrorCode, "Parse error")})
+		return
+	}
+	// Requests without a valid id are notifications (e.g.
+	// notifications/initialized); they take no response body.
+	if !validJSONRPCRequestID(req.ID) {
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
+	result, rpcErr := h.dispatchCompat(r.Context(), req.Method, req.Params)
+	if rpcErr != nil {
+		logMCPFailure(r, http.StatusOK, &req, rpcErr, nil)
+		h.writeResponse(w, http.StatusOK, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
+		return
+	}
+	h.writeResponse(w, http.StatusOK, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Result: result})
+}
+
+// dispatchCompat routes a released request to its handler and builds the
+// released result envelope.
+func (h *Handler) dispatchCompat(ctx context.Context, method Method, params json.RawMessage) (any, *JSONRPCError) {
+	switch method {
+	case "initialize":
+		var p compatInitializeParams
+		_ = decodeCompatParams(params, &p)
+		instructions, err := h.Registry.Instructions(ctx)
+		if err != nil {
+			return nil, rpcError(InternalErrorCode, err.Error())
+		}
+		return compatInitializeResult{
+			ProtocolVersion: negotiateCompatVersion(p.ProtocolVersion),
+			Capabilities:    compatServerCapabilities{},
+			ServerInfo:      h.serverInfo(),
+			Instructions:    instructions,
+		}, nil
+	case "ping":
+		return struct{}{}, nil
+	case MethodToolsList:
+		var p PaginatedRequestParams
+		if err := decodeCompatParams(params, &p); err != nil {
+			return nil, rpcError(InvalidParamsCode, "Invalid params")
+		}
+		tools, err := h.Registry.Tools(ctx)
+		if err != nil {
+			return nil, rpcError(InternalErrorCode, err.Error())
+		}
+		page, next, err := paginate(tools, p.Cursor)
+		if err != nil {
+			return nil, rpcError(InvalidParamsCode, err.Error())
+		}
+		return compatListToolsResult{Tools: page, NextCursor: next}, nil
+	case MethodToolsCall:
+		var p ToolsCallParams
+		if err := decodeCompatParams(params, &p); err != nil || p.Name == "" {
+			return nil, rpcError(InvalidParamsCode, "Invalid params")
+		}
+		res, err := h.Registry.CallTool(ctx, p.Name, p.Arguments)
+		if err != nil {
+			return nil, registryError(err)
+		}
+		out := compatCallToolResult{
+			Content: []ContentBlock{{Type: ContentTypeText, Text: toolResultText(res.Structured)}},
+			IsError: res.IsError,
+		}
+		if !res.IsError {
+			out.StructuredContent = res.Structured
+		}
+		for i := range out.Content {
+			if err := out.Content[i].Validate(); err != nil {
+				return nil, rpcError(InternalErrorCode, "invalid tool content")
+			}
+		}
+		return out, nil
+	case MethodResourcesList:
+		var p PaginatedRequestParams
+		if err := decodeCompatParams(params, &p); err != nil {
+			return nil, rpcError(InvalidParamsCode, "Invalid params")
+		}
+		res := h.Registry.ListResources(ctx)
+		page, next, err := paginate(res.Resources, p.Cursor)
+		if err != nil {
+			return nil, rpcError(InvalidParamsCode, err.Error())
+		}
+		return compatListResourcesResult{Resources: page, NextCursor: next}, nil
+	case MethodResourceTemplatesList:
+		var p PaginatedRequestParams
+		if err := decodeCompatParams(params, &p); err != nil {
+			return nil, rpcError(InvalidParamsCode, "Invalid params")
+		}
+		page, next, err := paginate(h.resourceTemplates(), p.Cursor)
+		if err != nil {
+			return nil, rpcError(InvalidParamsCode, err.Error())
+		}
+		return compatListResourceTemplatesResult{ResourceTemplates: page, NextCursor: next}, nil
+	case MethodResourcesRead:
+		var p ResourcesReadParams
+		if err := decodeCompatParams(params, &p); err != nil || p.URI == "" {
+			return nil, rpcError(InvalidParamsCode, "Invalid params")
+		}
+		res, err := h.Registry.ReadResource(ctx, p.URI)
+		if err != nil {
+			return nil, registryError(err)
+		}
+		for i := range res.Contents {
+			if err := res.Contents[i].Validate(); err != nil {
+				return nil, rpcError(InternalErrorCode, "invalid resource content")
+			}
+		}
+		return compatReadResourceResult{Contents: res.Contents}, nil
+	default:
+		return nil, rpcError(MethodNotFoundCode, "Method not found")
+	}
+}
+
 // HeaderParam maps an MCP input-schema property to a required HTTP header.
 type HeaderParam struct {
 	Header string

@@ -174,17 +174,6 @@ func (m *Manager) CommenterFor(installationID int64) bot.Commenter {
 	return nil
 }
 
-// appInstallCommenter adapts GitHubAppClient.PostComment to bot.Commenter by
-// binding a fixed installation ID.
-type appInstallCommenter struct {
-	app            GitHubAppClient
-	installationID int64
-}
-
-func (c *appInstallCommenter) PostComment(ctx context.Context, owner, repoName string, issueNumber int, body string) error {
-	return c.app.PostComment(ctx, c.installationID, owner, repoName, issueNumber, body)
-}
-
 // newThrottle returns a Throttle transport at 1 QPS backed by http.DefaultTransport.
 func newThrottle() http.RoundTripper {
 	return &roundtrippers.Throttle{QPS: 1, Transport: http.DefaultTransport}
@@ -222,4 +211,15 @@ func (m *Manager) gitlabOAuthThrottle(userID string) http.RoundTripper {
 	t := newThrottle()
 	m.gitlabOAuthThrottles[userID] = t
 	return t
+}
+
+// appInstallCommenter adapts GitHubAppClient.PostComment to bot.Commenter by
+// binding a fixed installation ID.
+type appInstallCommenter struct {
+	app            GitHubAppClient
+	installationID int64
+}
+
+func (c *appInstallCommenter) PostComment(ctx context.Context, owner, repoName string, issueNumber int, body string) error {
+	return c.app.PostComment(ctx, c.installationID, owner, repoName, issueNumber, body)
 }

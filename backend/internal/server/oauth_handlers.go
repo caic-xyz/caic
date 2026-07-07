@@ -86,18 +86,6 @@ func (caicAuthorizationUI) RenderOAuthConsent(w http.ResponseWriter, data *oauth
 	return oauthConsentTemplate.Execute(w, data)
 }
 
-// RecordOAuth records an OAuth audit event.
-func (a *auditStore) RecordOAuth(ctx context.Context, userID, operation, name, decision, status string, args any) {
-	a.record(ctx, &auditEvent{
-		UserID:    userID,
-		Operation: operation,
-		Name:      name,
-		Args:      auditValueSummary(args),
-		Decision:  decision,
-		Status:    status,
-	})
-}
-
 type oauthGrantHandlers struct {
 	oauthServer *oauthserver.Server
 }

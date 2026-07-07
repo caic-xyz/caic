@@ -388,11 +388,6 @@ func (s *localStackSession) speak(ctx context.Context, text string) {
 	s.speakFragments(ctx, slices.Values(fragments))
 }
 
-type assistantSpeechQueue struct {
-	textCh chan string
-	done   chan struct{}
-}
-
 func (s *localStackSession) startSpeechQueue(ctx context.Context) *assistantSpeechQueue {
 	q := &assistantSpeechQueue{
 		textCh: make(chan string, 4),
@@ -403,28 +398,6 @@ func (s *localStackSession) startSpeechQueue(ctx context.Context) *assistantSpee
 		close(q.done)
 	}()
 	return q
-}
-
-func (q *assistantSpeechQueue) send(ctx context.Context, text string) bool {
-	if text == "" {
-		return true
-	}
-	select {
-	case q.textCh <- text:
-		return true
-	case <-q.done:
-		return false
-	case <-ctx.Done():
-		return false
-	}
-}
-
-func (q *assistantSpeechQueue) close(ctx context.Context) {
-	close(q.textCh)
-	select {
-	case <-q.done:
-	case <-ctx.Done():
-	}
 }
 
 func (s *localStackSession) speakFragments(ctx context.Context, fragments iter.Seq[string]) {
@@ -693,5 +666,32 @@ func (placeholderTTS) synthesize(_ context.Context, text string) iter.Seq2[[]byt
 			binary.LittleEndian.PutUint16(pcm[i*2:], uint16(v)) //nolint:gosec // PCM int16→uint16 reinterpret
 		}
 		yield(pcm, nil)
+	}
+}
+
+type assistantSpeechQueue struct {
+	textCh chan string
+	done   chan struct{}
+}
+
+func (q *assistantSpeechQueue) send(ctx context.Context, text string) bool {
+	if text == "" {
+		return true
+	}
+	select {
+	case q.textCh <- text:
+		return true
+	case <-q.done:
+		return false
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func (q *assistantSpeechQueue) close(ctx context.Context) {
+	close(q.textCh)
+	select {
+	case <-q.done:
+	case <-ctx.Done():
 	}
 }

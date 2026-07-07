@@ -167,24 +167,6 @@ func compressibleLogState(s State) bool {
 	return s == StatePurged || s == StateFailed
 }
 
-// compressLogIfDone compresses the task log after a terminal non-revivable state.
-func (t *Task) compressLogIfDone(s State) error {
-	if !compressibleLogState(s) {
-		return nil
-	}
-	t.mu.Lock()
-	path := t.logPath
-	t.mu.Unlock()
-	compressed, err := compressLogFile(path)
-	if err != nil {
-		return err
-	}
-	if compressed != path {
-		t.SetLogPath(compressed)
-	}
-	return nil
-}
-
 // CompressTerminalLogs compresses loaded non-revivable task logs and updates
 // their paths so later lazy reads use the compressed files.
 func CompressTerminalLogs(logs []*LoadedTask) error {

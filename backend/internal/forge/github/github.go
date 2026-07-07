@@ -422,6 +422,47 @@ func (c *Client) PostComment(ctx context.Context, owner, repo string, issueNumbe
 // Name returns "GitHub".
 func (c *Client) Name() string { return "GitHub" }
 
+// LatestRelease fetches the latest non-prerelease for the given owner/repo.
+func (c *Client) LatestRelease(ctx context.Context, owner, repo string) (*Release, error) {
+	u := fmt.Sprintf("%s/repos/%s/%s/releases/latest", c.apiBase(), owner, repo)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("GitHub API returned %d: %s", resp.StatusCode, body)
+	}
+	var rel Release
+	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+		return nil, err
+	}
+	return &rel, nil
+}
+
+// DownloadAsset fetches a release asset URL and returns the response body as a
+// stream. The caller must close the returned ReadCloser.
+func (c *Client) DownloadAsset(ctx context.Context, url string) (io.ReadCloser, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
+	}
+	return resp.Body, nil
+}
+
 // apiBase returns the GitHub API base URL, using the override if set.
 func (c *Client) apiBase() string {
 	if c.baseURL != "" {

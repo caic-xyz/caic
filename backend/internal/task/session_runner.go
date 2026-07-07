@@ -209,13 +209,6 @@ func (r *SessionRunner) ClearContextSession(ctx context.Context, t *Task) (*Sess
 	return r.replaceSession(ctx, t, agent.Prompt{}, replaceSessionClearContext)
 }
 
-type replaceSessionMode int
-
-const (
-	replaceSessionRestart replaceSessionMode = iota
-	replaceSessionClearContext
-)
-
 func (r *SessionRunner) replaceSession(ctx context.Context, t *Task, prompt agent.Prompt, mode replaceSessionMode) (*SessionHandle, error) {
 	r.initDefaults()
 	traceName := "task.clear-context:"
@@ -300,24 +293,6 @@ func (r *SessionRunner) replaceSession(ctx context.Context, t *Task, prompt agen
 		tlog.Info("context cleared")
 	}
 	return h, nil
-}
-
-func (m replaceSessionMode) String() string {
-	switch m {
-	case replaceSessionRestart:
-		return "restart"
-	case replaceSessionClearContext:
-		return "clear context"
-	default:
-		return "replace session"
-	}
-}
-
-func (m replaceSessionMode) logMessage() string {
-	if m == replaceSessionRestart {
-		return "restarting session"
-	}
-	return "clearing context"
 }
 
 // startMessageDispatch starts a goroutine that reads from msgCh and dispatches
@@ -426,4 +401,29 @@ func (r *SessionRunner) runtimeDir(t *Task) string {
 		return "/home/user"
 	}
 	return "/home/user/src/" + filepath.Base(r.Workspace.Dir)
+}
+
+type replaceSessionMode int
+
+const (
+	replaceSessionRestart replaceSessionMode = iota
+	replaceSessionClearContext
+)
+
+func (m replaceSessionMode) String() string {
+	switch m {
+	case replaceSessionRestart:
+		return "restart"
+	case replaceSessionClearContext:
+		return "clear context"
+	default:
+		return "replace session"
+	}
+}
+
+func (m replaceSessionMode) logMessage() string {
+	if m == replaceSessionRestart {
+		return "restarting session"
+	}
+	return "clearing context"
 }

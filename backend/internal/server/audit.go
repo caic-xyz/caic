@@ -35,6 +35,18 @@ type auditEvent struct {
 	Status    string    `json:"status,omitempty"`
 }
 
+// RecordOAuth records an OAuth audit event.
+func (a *auditStore) RecordOAuth(ctx context.Context, userID, operation, name, decision, status string, args any) {
+	a.record(ctx, &auditEvent{
+		UserID:    userID,
+		Operation: operation,
+		Name:      name,
+		Args:      auditValueSummary(args),
+		Decision:  decision,
+		Status:    status,
+	})
+}
+
 func (a *auditStore) record(ctx context.Context, e *auditEvent) {
 	if a == nil || e == nil {
 		return

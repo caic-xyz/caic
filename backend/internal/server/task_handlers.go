@@ -483,32 +483,6 @@ func (h *taskHandlers) handleVNCWebSocket(w http.ResponseWriter, r *http.Request
 	slog.InfoContext(ctx, "vnc proxy done", "task", t.ID, "vnc→ws_bytes", n, "err", cpErr)
 }
 
-// wsNetConn adapts a coder/websocket connection to net.Conn for io.Copy.
-type wsNetConn struct {
-	*websocket.Conn
-
-	ctx context.Context
-}
-
-func (w wsNetConn) Read(b []byte) (int, error) {
-	_, buf, err := w.Conn.Read(w.ctx)
-	if err != nil {
-		return 0, err
-	}
-	n := copy(b, buf)
-	if n < len(buf) {
-		return n, io.ErrShortBuffer
-	}
-	return n, nil
-}
-
-func (w wsNetConn) Write(b []byte) (int, error) {
-	if err := w.Conn.Write(w.ctx, websocket.MessageBinary, b); err != nil {
-		return 0, err
-	}
-	return len(b), nil
-}
-
 // getTask looks up a task by the {id} path parameter.
 // When auth is enabled, returns 403 if the task belongs to a different user.
 func (h *taskHandlers) getTask(r *http.Request) (*taskmgr.Entry, error) {
@@ -558,4 +532,30 @@ func (h *taskHandlers) routes() http.Handler {
 	m.HandleFunc("GET /tasks/{id}/vnc/ws", h.handleVNCWebSocket)
 	m.HandleFunc("GET /tasks/{id}/tool/{toolUseID}", h.handleTaskToolInput)
 	return m
+}
+
+// wsNetConn adapts a coder/websocket connection to net.Conn for io.Copy.
+type wsNetConn struct {
+	*websocket.Conn
+
+	ctx context.Context
+}
+
+func (w wsNetConn) Read(b []byte) (int, error) {
+	_, buf, err := w.Conn.Read(w.ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := copy(b, buf)
+	if n < len(buf) {
+		return n, io.ErrShortBuffer
+	}
+	return n, nil
+}
+
+func (w wsNetConn) Write(b []byte) (int, error) {
+	if err := w.Conn.Write(w.ctx, websocket.MessageBinary, b); err != nil {
+		return 0, err
+	}
+	return len(b), nil
 }

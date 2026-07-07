@@ -214,24 +214,6 @@ func (m *mcpRegistry) SubscribeResourceUpdates(ctx context.Context, filter mcp.S
 	}, nil
 }
 
-type subscriptionSources struct {
-	taskC       <-chan struct{}
-	repoC       <-chan struct{}
-	repoStatusC <-chan struct{}
-
-	resourcesListChanged bool
-	taskResourceURIs     []string
-	repoResourceURIs     []string
-}
-
-func (s *subscriptionSources) taskUpdate() mcp.ResourceUpdate {
-	return mcp.ResourceUpdate{ResourcesListChanged: s.resourcesListChanged, ResourceURIs: s.taskResourceURIs}
-}
-
-func (s *subscriptionSources) repoUpdate() mcp.ResourceUpdate {
-	return mcp.ResourceUpdate{ResourcesListChanged: s.resourcesListChanged, ResourceURIs: s.repoResourceURIs}
-}
-
 func (m *mcpRegistry) voiceSessionContext(ctx context.Context) string {
 	parts := make([]string, 0, 3)
 	prefs := m.serverConfig.prefs.Get(userIDFromCtx(ctx))
@@ -1001,4 +983,22 @@ func mcpScopeChallenge(scope string) string {
 
 func redactedResourceJSON(uri string, value any) (mcp.ResourcesReadResult, error) {
 	return mcp.ResourceJSON(uri, redactForJSON(value))
+}
+
+type subscriptionSources struct {
+	taskC       <-chan struct{}
+	repoC       <-chan struct{}
+	repoStatusC <-chan struct{}
+
+	resourcesListChanged bool
+	taskResourceURIs     []string
+	repoResourceURIs     []string
+}
+
+func (s *subscriptionSources) taskUpdate() mcp.ResourceUpdate {
+	return mcp.ResourceUpdate{ResourcesListChanged: s.resourcesListChanged, ResourceURIs: s.taskResourceURIs}
+}
+
+func (s *subscriptionSources) repoUpdate() mcp.ResourceUpdate {
+	return mcp.ResourceUpdate{ResourcesListChanged: s.resourcesListChanged, ResourceURIs: s.repoResourceURIs}
 }

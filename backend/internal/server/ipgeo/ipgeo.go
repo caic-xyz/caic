@@ -148,29 +148,6 @@ func (c *Checker) Close() error {
 	return errors.Join(errs...)
 }
 
-// countryRecord is the minimal MMDB struct for country lookups.
-type countryRecord struct {
-	Country struct {
-		ISOCode string `maxminddb:"iso_code"`
-	} `maxminddb:"country"`
-}
-
-type maxMindResolver struct {
-	reader *maxminddb.Reader
-}
-
-func (r maxMindResolver) Resolve(addr netip.Addr) string {
-	var rec countryRecord
-	if err := r.reader.Lookup(addr).Decode(&rec); err == nil {
-		return rec.Country.ISOCode
-	}
-	return ""
-}
-
-func (r maxMindResolver) Close() error {
-	return r.reader.Close()
-}
-
 // CheckOrigin resolves the IP origin and reports whether it is allowlisted.
 //
 // It returns the resolved origin even when the allowlist blocks the IP, so
@@ -195,6 +172,29 @@ func (c *Checker) resolve(addr netip.Addr) string {
 		}
 	}
 	return ""
+}
+
+// countryRecord is the minimal MMDB struct for country lookups.
+type countryRecord struct {
+	Country struct {
+		ISOCode string `maxminddb:"iso_code"`
+	} `maxminddb:"country"`
+}
+
+type maxMindResolver struct {
+	reader *maxminddb.Reader
+}
+
+func (r maxMindResolver) Resolve(addr netip.Addr) string {
+	var rec countryRecord
+	if err := r.reader.Lookup(addr).Decode(&rec); err == nil {
+		return rec.Country.ISOCode
+	}
+	return ""
+}
+
+func (r maxMindResolver) Close() error {
+	return r.reader.Close()
 }
 
 // allowlist checks whether a country code or IP address is permitted.

@@ -186,6 +186,11 @@ func (*Backend) NewWire() agent.WireFormat {
 	return &wireFormat{}
 }
 
+// FetchModels implements agent.ModelFetcher.
+func (*Backend) FetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) ([]string, error) {
+	return FetchModels(ctx, target, extraEnv)
+}
+
 // TODO: Trim caicInit after 2026-08 once legacy caic_init logs are old enough to ignore.
 // caicInit is the legacy pre-caic_session metadata record.
 type caicInit struct {
@@ -592,11 +597,6 @@ func readJSONRPCResponse(ctx context.Context, r *bufio.Reader) (*opencode.JSONRP
 	case <-ctx.Done():
 		return nil, fmt.Errorf("handshake: %w", ctx.Err())
 	}
-}
-
-// FetchModels implements agent.ModelFetcher.
-func (*Backend) FetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) ([]string, error) {
-	return FetchModels(ctx, target, extraEnv)
 }
 
 // FetchModels runs "opencode models" in the target and

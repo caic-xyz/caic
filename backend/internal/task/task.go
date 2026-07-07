@@ -1852,6 +1852,24 @@ func (t *Task) trackToolUse(tu *agent.ToolUseMessage) {
 	}
 }
 
+// compressLogIfDone compresses the task log after a terminal non-revivable state.
+func (t *Task) compressLogIfDone(s State) error {
+	if !compressibleLogState(s) {
+		return nil
+	}
+	t.mu.Lock()
+	path := t.logPath
+	t.mu.Unlock()
+	compressed, err := compressLogFile(path)
+	if err != nil {
+		return err
+	}
+	if compressed != path {
+		t.SetLogPath(compressed)
+	}
+	return nil
+}
+
 // syntheticContextCleared creates a SystemMessage marking a context-clear
 // boundary. Injected into the message stream so SSE subscribers see the
 // marker before history is wiped.

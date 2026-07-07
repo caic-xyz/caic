@@ -2,6 +2,8 @@
 
 package v1
 
+import "github.com/caic-xyz/caic/gomode/voicegateway/api"
+
 // StatusResp is a common response for mutation endpoints.
 type StatusResp struct {
 	Status string `json:"status"`
@@ -10,6 +12,14 @@ type StatusResp struct {
 // VoiceRTCOfferReq is the request body for POST /api/voicegateway/v1/voice/rtc/offer.
 type VoiceRTCOfferReq struct {
 	SDP string `json:"sdp"`
+}
+
+// Validate checks that the SDP offer is provided.
+func (r *VoiceRTCOfferReq) Validate() error {
+	if r.SDP == "" {
+		return api.BadRequest("sdp is required")
+	}
+	return nil
 }
 
 // VoiceRTCAnswerResp is the response for POST /api/voicegateway/v1/voice/rtc/offer.

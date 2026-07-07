@@ -1393,126 +1393,6 @@ func mergeLogAndRelayMessages(logMsgs, relayMsgs []agent.Message) []agent.Messag
 	return newLogRelayMessageMerger(logMsgs).merge(relayMsgs)
 }
 
-// logRelayMessageMerger owns the adoption-time overlap rules for disk-log
-// messages and relay-tail messages.
-type logRelayMessageMerger struct {
-	logMsgs    []agent.Message
-	logHasInit bool
-}
-
-func newLogRelayMessageMerger(logMsgs []agent.Message) *logRelayMessageMerger {
-	return &logRelayMessageMerger{
-		logMsgs:    logMsgs,
-		logHasInit: messagesContainInit(logMsgs),
-	}
-}
-
-func (m *logRelayMessageMerger) merge(relayMsgs []agent.Message) []agent.Message {
-	relayMsgs = m.comparableRelayMessages(relayMsgs)
-	if len(m.logMsgs) == 0 {
-		return append([]agent.Message(nil), relayMsgs...)
-	}
-	if len(relayMsgs) == 0 {
-		return append([]agent.Message(nil), m.logMsgs...)
-	}
-	maxOverlap := min(len(m.logMsgs), len(relayMsgs))
-	for n := maxOverlap; n > 0; n-- {
-		if m.messagesEqual(m.logMsgs[len(m.logMsgs)-n:], relayMsgs[:n]) {
-			merged := append([]agent.Message(nil), m.logMsgs...)
-			return append(merged, relayMsgs[n:]...)
-		}
-	}
-	merged := append([]agent.Message(nil), m.logMsgs...)
-	return append(merged, relayMsgs...)
-}
-
-// comparableRelayMessages drops relay-only metadata before overlap matching.
-//
-// The returned slice is either the original relayMsgs slice or a filtered copy.
-func (m *logRelayMessageMerger) comparableRelayMessages(relayMsgs []agent.Message) []agent.Message {
-	for i, msg := range relayMsgs {
-		if !m.relayMessageComparableToLog(msg) {
-			out := append([]agent.Message(nil), relayMsgs[:i]...)
-			for _, msg := range relayMsgs[i+1:] {
-				if m.relayMessageComparableToLog(msg) {
-					out = append(out, msg)
-				}
-			}
-			return out
-		}
-	}
-	return relayMsgs
-}
-
-func (m *logRelayMessageMerger) relayMessageComparableToLog(msg agent.Message) bool {
-	switch msg.(type) {
-	case *agent.DiffStatMessage:
-		// caic_diff_stat is emitted by caic, not the agent conversation. It may be
-		// present in the relay output but absent from the task log replay stream.
-		return false
-	case *agent.InitMessage:
-		// Pi can synthesize an init from message_start during relay-tail parsing. If
-		// the durable log already has an init, keep the log's session boundary and
-		// ignore the relay one for overlap matching.
-		return !m.logHasInit
-	default:
-		return true
-	}
-}
-
-func (m *logRelayMessageMerger) messagesEqual(a, b []agent.Message) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if !m.messagesEquivalent(a[i], b[i]) {
-			return false
-		}
-	}
-	return true
-}
-
-// messagesEquivalent reports whether two parsed messages represent the same
-// agent event for overlap detection.
-func (m *logRelayMessageMerger) messagesEquivalent(a, b agent.Message) bool {
-	switch av := a.(type) {
-	case *agent.UsageMessage:
-		bv, ok := b.(*agent.UsageMessage)
-		// ContextWindow is restored from caic_model_info in the durable task log.
-		// A bounded relay tail can start after that record, leaving the replayed
-		// usage with the same token counts but no context-window metadata.
-		return ok && av.Usage == bv.Usage && av.Model == bv.Model
-	case *agent.ResultMessage:
-		bv, ok := b.(*agent.ResultMessage)
-		if !ok {
-			return false
-		}
-		aa := *av
-		bb := *bv
-		// Pi derives duration and turn count from parser/session-local state. The
-		// same completed turn can therefore have different values when parsed from
-		// the durable log and from the relay tail during restart adoption.
-		aa.DurationMs = 0
-		bb.DurationMs = 0
-		aa.DurationAPIMs = 0
-		bb.DurationAPIMs = 0
-		aa.NumTurns = 0
-		bb.NumTurns = 0
-		return reflect.DeepEqual(&aa, &bb)
-	default:
-		return reflect.DeepEqual(a, b)
-	}
-}
-
-func messagesContainInit(msgs []agent.Message) bool {
-	for _, msg := range msgs {
-		if _, ok := msg.(*agent.InitMessage); ok {
-			return true
-		}
-	}
-	return false
-}
-
 // adoptOne investigates a single runtime instance and registers it as a task.
 func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowork.Workspace, c *runtime.Instance, branch string, branchIDs map[string][]string, allLogs []*task.LoadedTask) (*AdoptedTask, error) { //nolint:gocritic // massive function from existing code; refactor deferred
 	ctx, adoptTask := trace.NewTask(ctx, "adopt-instance")
@@ -2083,4 +1963,124 @@ func (m *Manager) cleanupTask(entry *Entry, workspace *repowork.Workspace, reaso
 		entry.Finish(&result)
 		m.NotifyTaskChange()
 	})
+}
+
+// logRelayMessageMerger owns the adoption-time overlap rules for disk-log
+// messages and relay-tail messages.
+type logRelayMessageMerger struct {
+	logMsgs    []agent.Message
+	logHasInit bool
+}
+
+func newLogRelayMessageMerger(logMsgs []agent.Message) *logRelayMessageMerger {
+	return &logRelayMessageMerger{
+		logMsgs:    logMsgs,
+		logHasInit: messagesContainInit(logMsgs),
+	}
+}
+
+func (m *logRelayMessageMerger) merge(relayMsgs []agent.Message) []agent.Message {
+	relayMsgs = m.comparableRelayMessages(relayMsgs)
+	if len(m.logMsgs) == 0 {
+		return append([]agent.Message(nil), relayMsgs...)
+	}
+	if len(relayMsgs) == 0 {
+		return append([]agent.Message(nil), m.logMsgs...)
+	}
+	maxOverlap := min(len(m.logMsgs), len(relayMsgs))
+	for n := maxOverlap; n > 0; n-- {
+		if m.messagesEqual(m.logMsgs[len(m.logMsgs)-n:], relayMsgs[:n]) {
+			merged := append([]agent.Message(nil), m.logMsgs...)
+			return append(merged, relayMsgs[n:]...)
+		}
+	}
+	merged := append([]agent.Message(nil), m.logMsgs...)
+	return append(merged, relayMsgs...)
+}
+
+// comparableRelayMessages drops relay-only metadata before overlap matching.
+//
+// The returned slice is either the original relayMsgs slice or a filtered copy.
+func (m *logRelayMessageMerger) comparableRelayMessages(relayMsgs []agent.Message) []agent.Message {
+	for i, msg := range relayMsgs {
+		if !m.relayMessageComparableToLog(msg) {
+			out := append([]agent.Message(nil), relayMsgs[:i]...)
+			for _, msg := range relayMsgs[i+1:] {
+				if m.relayMessageComparableToLog(msg) {
+					out = append(out, msg)
+				}
+			}
+			return out
+		}
+	}
+	return relayMsgs
+}
+
+func (m *logRelayMessageMerger) relayMessageComparableToLog(msg agent.Message) bool {
+	switch msg.(type) {
+	case *agent.DiffStatMessage:
+		// caic_diff_stat is emitted by caic, not the agent conversation. It may be
+		// present in the relay output but absent from the task log replay stream.
+		return false
+	case *agent.InitMessage:
+		// Pi can synthesize an init from message_start during relay-tail parsing. If
+		// the durable log already has an init, keep the log's session boundary and
+		// ignore the relay one for overlap matching.
+		return !m.logHasInit
+	default:
+		return true
+	}
+}
+
+func (m *logRelayMessageMerger) messagesEqual(a, b []agent.Message) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !m.messagesEquivalent(a[i], b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// messagesEquivalent reports whether two parsed messages represent the same
+// agent event for overlap detection.
+func (m *logRelayMessageMerger) messagesEquivalent(a, b agent.Message) bool {
+	switch av := a.(type) {
+	case *agent.UsageMessage:
+		bv, ok := b.(*agent.UsageMessage)
+		// ContextWindow is restored from caic_model_info in the durable task log.
+		// A bounded relay tail can start after that record, leaving the replayed
+		// usage with the same token counts but no context-window metadata.
+		return ok && av.Usage == bv.Usage && av.Model == bv.Model
+	case *agent.ResultMessage:
+		bv, ok := b.(*agent.ResultMessage)
+		if !ok {
+			return false
+		}
+		aa := *av
+		bb := *bv
+		// Pi derives duration and turn count from parser/session-local state. The
+		// same completed turn can therefore have different values when parsed from
+		// the durable log and from the relay tail during restart adoption.
+		aa.DurationMs = 0
+		bb.DurationMs = 0
+		aa.DurationAPIMs = 0
+		bb.DurationAPIMs = 0
+		aa.NumTurns = 0
+		bb.NumTurns = 0
+		return reflect.DeepEqual(&aa, &bb)
+	default:
+		return reflect.DeepEqual(a, b)
+	}
+}
+
+func messagesContainInit(msgs []agent.Message) bool {
+	for _, msg := range msgs {
+		if _, ok := msg.(*agent.InitMessage); ok {
+			return true
+		}
+	}
+	return false
 }
