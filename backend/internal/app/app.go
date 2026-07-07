@@ -58,28 +58,16 @@ type backgroundTask func(context.Context) error
 
 // Serve starts the HTTP server and closes app-owned resources when serving ends.
 func (a *App) Serve(ctx context.Context, ln net.Listener) error {
-	runCtx, cancel := context.WithCancel(ctx)
-	group, bgCtx := errgroup.WithContext(runCtx)
+	group, groupCtx := errgroup.WithContext(ctx)
 	for _, task := range a.backgroundTasks {
-		group.Go(func() error { return task(bgCtx) })
+		group.Go(func() error { return task(groupCtx) })
 	}
-	serverErr := a.Server.Serve(runCtx, ln)
-	cancel()
+	group.Go(func() error { return a.Server.Serve(groupCtx, ln) })
+	err := group.Wait()
 	if a.voiceBridge != nil {
 		a.voiceBridge.CloseAll()
 	}
-	bgErrCh := make(chan error, 1)
-	go func() { bgErrCh <- group.Wait() }()
-	select {
-	case bgErr := <-bgErrCh:
-		if serverErr != nil {
-			return serverErr
-		}
-		return bgErr
-	case <-time.After(10 * time.Second):
-		slog.WarnContext(context.WithoutCancel(ctx), "background shutdown timed out")
-		return serverErr
-	}
+	return err
 }
 
 // New creates the caic backend server application.
