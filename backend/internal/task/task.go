@@ -450,6 +450,7 @@ func lastTurnHasUnansweredAsk(msgs []agent.Message) bool {
 func pendingUserActionsFromMessages(msgs []agent.Message) []agent.PendingUserAction {
 	skipTrailingResult := lastAgentMessage(msgs) != nil
 	answered := map[string]struct{}{}
+	restored := map[string]struct{}{}
 	pending := map[string]agent.PendingUserAction{}
 	var actions []agent.PendingUserAction
 	for _, msg := range slices.Backward(msgs) {
@@ -461,9 +462,13 @@ func pendingUserActionsFromMessages(msgs []agent.Message) []agent.PendingUserAct
 			if _, ok := answered[m.ToolUseID]; ok {
 				continue
 			}
+			if _, ok := restored[m.ToolUseID]; ok {
+				continue
+			}
 			action, ok := pending[m.ToolUseID]
 			if ok {
 				actions = append(actions, agent.ClonePendingUserAction(action))
+				restored[m.ToolUseID] = struct{}{}
 				delete(pending, m.ToolUseID)
 			}
 		case *agent.PendingUserActionMessage:

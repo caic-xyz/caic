@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"sync"
 
 	"github.com/maruel/genai/providers/claudecode"
@@ -42,6 +43,12 @@ func (p *pendingControlAsk) answerResponse(answer string) ([]byte, error) {
 			UpdatedInput: updatedInput,
 		},
 	})
+}
+
+func (p *pendingControlAsk) same(other pendingControlAsk) bool {
+	return p.requestID == other.requestID &&
+		p.toolUseID == other.toolUseID &&
+		reflect.DeepEqual(p.questions, other.questions)
 }
 
 // controlConn adapts Claude Code's stdio permission protocol into caic prompts.
@@ -171,20 +178,26 @@ func (c *controlConn) handleControlRequest(raw []byte) (bool, error) {
 // Claude Code currently supports only one AskUserQuestion action because it has
 // a single prompt channel and no action selector.
 func (c *controlConn) restorePendingActions(actions []agent.PendingUserAction) error {
-	restoredAsk := false
+	var restoredAsk pendingControlAsk
+	hasRestoredAsk := false
 	for _, action := range actions {
 		switch action.Kind {
 		case agent.PendingUserActionAskUserQuestion:
 		default:
 			return fmt.Errorf("unsupported pending user action kind %q", action.Kind)
 		}
-		if restoredAsk {
+		ask := pendingAskFromUserAction(action)
+		if hasRestoredAsk {
+			if restoredAsk.same(ask) {
+				continue
+			}
 			return errors.New("multiple pending AskUserQuestion actions are not supported")
 		}
-		if err := c.setPendingAsk(pendingAskFromUserAction(action)); err != nil {
+		if err := c.setPendingAsk(ask); err != nil {
 			return err
 		}
-		restoredAsk = true
+		restoredAsk = ask
+		hasRestoredAsk = true
 	}
 	return nil
 }
@@ -206,7 +219,7 @@ func (c *controlConn) setPendingAsk(p pendingControlAsk) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.pendingAsk != nil {
-		if c.pendingAsk.requestID == p.requestID && c.pendingAsk.toolUseID == p.toolUseID {
+		if c.pendingAsk.same(p) {
 			return nil
 		}
 		return fmt.Errorf("AskUserQuestion control request %q already pending", c.pendingAsk.requestID)

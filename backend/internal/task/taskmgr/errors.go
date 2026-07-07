@@ -8,31 +8,33 @@ import (
 )
 
 // ErrNoSession is a sentinel reported by Manager.SendInput when the task has no
-// active agent session to forward input to. The underlying error from
-// task.SendInput (which carries the state/session diagnostics) is wrapped, so
-// both errors.Is(err, ErrNoSession) and the original message remain reachable.
+// active agent session to forward input to.
 //
-// Manager.SendInput returns a *NoSessionError, whose Error() is exactly the
-// underlying task.SendInput message (no sentinel prefix) while still satisfying
-// errors.Is(err, ErrNoSession). This lets the HTTP layer detect the condition
-// and surface the original diagnostic text byte-for-byte.
+// The returned *NoSessionError wraps the underlying task.SendInput diagnostic
+// and, when recovery was attempted, the reconnect failure.
 var ErrNoSession = errors.New("no active session")
 
 // NoSessionError wraps the underlying task.SendInput error when there is no
-// active agent session. It reports the underlying message verbatim and
-// satisfies errors.Is(err, ErrNoSession).
+// active agent session.
 type NoSessionError struct {
-	Err error // underlying task.SendInput diagnostic error
+	Err          error // underlying task.SendInput diagnostic error
+	ReconnectErr error // reconnect failure, if recovery was attempted
 }
 
-// Error returns the underlying diagnostic message verbatim.
+// Error returns the diagnostic message, including reconnect failure if present.
 func (e *NoSessionError) Error() string {
+	if e.ReconnectErr != nil {
+		return fmt.Sprintf("%s; reconnect failed: %v", e.Err, e.ReconnectErr)
+	}
 	return e.Err.Error()
 }
 
-// Unwrap returns the underlying error for errors.Is/errors.As traversal.
-func (e *NoSessionError) Unwrap() error {
-	return e.Err
+// Unwrap returns the underlying errors for errors.Is/errors.As traversal.
+func (e *NoSessionError) Unwrap() []error {
+	if e.ReconnectErr == nil {
+		return []error{e.Err}
+	}
+	return []error{e.Err, e.ReconnectErr}
 }
 
 // Is reports a match against the ErrNoSession sentinel.

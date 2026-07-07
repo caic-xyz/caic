@@ -443,6 +443,33 @@ func TestControlConn(t *testing.T) {
 		}
 	})
 
+	t.Run("DuplicateRestoredAskUserQuestionIsIgnored", func(t *testing.T) {
+		t.Parallel()
+		inner := &fakeConn{}
+		c := &controlConn{Conn: inner}
+		pending := agent.PendingUserAction{
+			Kind:      agent.PendingUserActionAskUserQuestion,
+			RequestID: "req-restored",
+			ToolUseID: "toolu-restored",
+			Ask: agent.PendingAskAction{
+				Questions: []agent.AskQuestion{{Question: "Which?"}},
+			},
+		}
+		if err := c.restorePendingActions([]agent.PendingUserAction{pending, pending}); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := c.SendPrompt(agent.Prompt{Text: "answer"}); err != nil {
+			t.Fatal(err)
+		}
+		if len(inner.prompts) != 0 {
+			t.Fatalf("delegated prompts = %d, want 0", len(inner.prompts))
+		}
+		if len(inner.sent) != 1 {
+			t.Fatalf("SendRaw calls = %d, want 1", len(inner.sent))
+		}
+	})
+
 	t.Run("RejectsMultipleRestoredAskUserQuestions", func(t *testing.T) {
 		t.Parallel()
 		inner := &fakeConn{}

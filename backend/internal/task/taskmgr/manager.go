@@ -489,6 +489,25 @@ func (m *Manager) SendInput(ctx context.Context, entry *Entry, prompt agent.Prom
 		if !errors.Is(err, task.ErrNoActiveSession) {
 			return conflictErr(err, "send input")
 		}
+		var failedReconnect error
+		if reconnectErr := m.reconnectForInput(entry); reconnectErr == nil {
+			if retryErr := entry.task.SendInput(ctx, prompt); retryErr == nil {
+				return nil
+			} else if !errors.Is(retryErr, task.ErrNoActiveSession) {
+				return conflictErr(retryErr, "send input")
+			} else {
+				err = retryErr
+			}
+		} else {
+			failedReconnect = reconnectErr
+			t := entry.task
+			slog.WarnContext(ctx, "reconnect before send input failed",
+				"task", t.ID,
+				"instance", t.RuntimeInstanceID(),
+				"state", t.GetState(),
+				"err", reconnectErr,
+			)
+		}
 		t := entry.task
 		taskState := t.GetState()
 		slog.WarnContext(ctx, "no active session",
@@ -497,9 +516,9 @@ func (m *Manager) SendInput(ctx context.Context, entry *Entry, prompt agent.Prom
 			"state", taskState,
 		)
 		// Wrap so the handler can detect the no-session condition via
-		// errors.Is while preserving the underlying diagnostic message
-		// verbatim (NoSessionError.Error() == err.Error()).
-		return &NoSessionError{Err: err}
+		// errors.Is while preserving the task diagnostic and any reconnect
+		// failure.
+		return &NoSessionError{Err: err, ReconnectErr: failedReconnect}
 	}
 	return nil
 }
@@ -1118,6 +1137,28 @@ func (m *Manager) Sync(ctx context.Context, entry *Entry, target SyncTarget, for
 		status = "blocked"
 	}
 	return &SyncResult{Status: status, Branch: syncPrimaryBranch, DiffStat: ds, SafetyIssues: issues}, nil
+}
+
+func (m *Manager) reconnectForInput(entry *Entry) error {
+	t := entry.task
+	if t.HasSession() {
+		return nil
+	}
+	workspace := m.resolveWorkspace(t)
+	h, err := m.sessions(workspace).Reconnect(m.serverCtx, t, false)
+	if err != nil {
+		if t.HasSession() {
+			return nil
+		}
+		return err
+	}
+	tlog := slog.With("task", t.ID, "instance", t.RuntimeInstanceID())
+	h, err = m.sessions(workspace).EnsureSession(m.serverCtx, t, h, tlog)
+	if err != nil {
+		return err
+	}
+	m.watchSession(entry, workspace, h)
+	return nil
 }
 
 func (m *Manager) logStore() *task.LogStore {
@@ -1739,17 +1780,20 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 		go t.GenerateTitle(m.serverCtx) //nolint:contextcheck // fire-and-forget; must outlive adoption
 	}
 
-	// Auto-reconnect in background.
+	// Auto-reconnect immediately so adopted live tasks can accept input as
+	// soon as startup returns. EnsureSession may still replace an already-exited
+	// attach in the background, but the attach itself must not race the first
+	// user reply after restart.
 	if t.GetState() != task.StateStopped && relayAlive {
 		slog.DebugContext(ctx, "instance", "msg", "auto-reconnect starting", "repo", ri.RelPath, "br", branch, "instance", c.ID)
+		tlog := slog.With("repo", ri.RelPath, "br", branch, "instance", t.RuntimeInstanceID())
+		h, err := m.sessions(workspace).Reconnect(m.serverCtx, t, true) //nolint:contextcheck // adopted sessions must outlive startup/adoption.
+		if err != nil {
+			tlog.Warn("auto-reconnect failed", "err", err)
+			m.NotifyTaskChange()
+			return &AdoptedTask{Entry: entry, Task: t, RelPath: ri.RelPath, ForgeKind: ri.ForgeKind, ForgeOwner: ri.ForgeOwner, ForgeRepo: ri.ForgeRepo, Branch: branch, FoundPRFromLog: foundPRFromLog}, nil
+		}
 		go func() {
-			tlog := slog.With("repo", ri.RelPath, "br", branch, "instance", t.RuntimeInstanceID())
-			h, err := m.sessions(workspace).Reconnect(m.serverCtx, t, true)
-			if err != nil {
-				tlog.Warn("auto-reconnect failed", "err", err)
-				m.NotifyTaskChange()
-				return
-			}
 			h, err = m.sessions(workspace).EnsureSession(m.serverCtx, t, h, tlog)
 			if err != nil {
 				tlog.Warn("ensure session failed", "err", err)

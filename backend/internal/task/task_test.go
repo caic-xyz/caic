@@ -2201,6 +2201,54 @@ func TestTask(t *testing.T) {
 				t.Errorf("question = %q, want Which?", got[0].Ask.Questions[0].Question)
 			}
 		})
+		t.Run("DedupesDuplicatedRestoredAsk", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{}
+			tk.RestoreMessages([]agent.Message{
+				&agent.AskMessage{
+					ToolUseID: "toolu-1",
+					Questions: []agent.AskQuestion{{Question: "Which?"}},
+				},
+				&agent.PendingUserActionMessage{
+					MessageType: agent.PendingUserActionMessageType,
+					Action: agent.PendingUserAction{
+						Kind:      agent.PendingUserActionAskUserQuestion,
+						RequestID: "req-1",
+						ToolUseID: "toolu-1",
+						Ask: agent.PendingAskAction{
+							Questions: []agent.AskQuestion{{Question: "Which?"}},
+						},
+					},
+				},
+				&agent.AskMessage{
+					ToolUseID: "toolu-1",
+					Questions: []agent.AskQuestion{{Question: "Which?"}},
+				},
+				&agent.PendingUserActionMessage{
+					MessageType: agent.PendingUserActionMessageType,
+					Action: agent.PendingUserAction{
+						Kind:      agent.PendingUserActionAskUserQuestion,
+						RequestID: "req-1",
+						ToolUseID: "toolu-1",
+						Ask: agent.PendingAskAction{
+							Questions: []agent.AskQuestion{{Question: "Which?"}},
+						},
+					},
+				},
+				&agent.ResultMessage{MessageType: "result"},
+			})
+
+			got := tk.PendingUserActions()
+			if len(got) != 1 {
+				t.Fatalf("PendingUserActions len = %d, want 1", len(got))
+			}
+			if got[0].RequestID != "req-1" {
+				t.Errorf("RequestID = %q, want req-1", got[0].RequestID)
+			}
+			if got[0].ToolUseID != "toolu-1" {
+				t.Errorf("ToolUseID = %q, want toolu-1", got[0].ToolUseID)
+			}
+		})
 		t.Run("RestoresMultipleCurrentAsks", func(t *testing.T) {
 			t.Parallel()
 			tk := &Task{}

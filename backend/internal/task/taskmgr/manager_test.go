@@ -48,6 +48,102 @@ func (f fakeRelayReader) ReadLog(ctx context.Context, target runtime.ConnectionT
 	return f.readLogFn(ctx, target, maxBytes)
 }
 
+type reconnectInputBackend struct {
+	mu sync.Mutex
+
+	attachCalls int
+	prompts     []agent.Prompt
+	opts        *agent.Options
+	cancel      context.CancelFunc
+	session     *agent.Session
+}
+
+func (b *reconnectInputBackend) Start(context.Context, *agent.Options) (*agent.Session, error) {
+	return nil, errors.New("unexpected start")
+}
+
+func (b *reconnectInputBackend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	cmdCtx, cancel := context.WithCancel(ctx)
+	cmd := exec.CommandContext(cmdCtx, "sleep", "60")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		cancel()
+		return nil, err
+	}
+	c := &reconnectInputConn{backend: b, cancel: cancel}
+	session := agent.NewSession(cmd, c, stdout, opts.MsgCh, nil)
+	b.mu.Lock()
+	b.attachCalls++
+	b.opts = opts
+	b.cancel = cancel
+	b.session = session
+	b.mu.Unlock()
+	return session, nil
+}
+
+func (*reconnectInputBackend) Harness() harness.Name { return "reconnect" }
+
+func (*reconnectInputBackend) Models() []string { return nil }
+
+func (*reconnectInputBackend) SetModels([]string) {}
+
+func (*reconnectInputBackend) SupportsImages() bool { return true }
+
+func (*reconnectInputBackend) SupportsCompact() bool { return false }
+
+func (*reconnectInputBackend) AgentArgs(agent.HarnessArgs) []string { return nil }
+
+func (*reconnectInputBackend) NewWire() agent.WireFormat { return codex.New("", nil).NewWire() }
+
+func (*reconnectInputBackend) ContextWindowLimit(string) int { return 200_000 }
+
+func (b *reconnectInputBackend) stop() {
+	b.mu.Lock()
+	cancel := b.cancel
+	session := b.session
+	b.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if session != nil {
+		_ = session.Wait()
+	}
+}
+
+type reconnectInputConn struct {
+	backend *reconnectInputBackend
+	cancel  context.CancelFunc
+}
+
+func (c *reconnectInputConn) SendPrompt(p agent.Prompt) error {
+	c.backend.mu.Lock()
+	c.backend.prompts = append(c.backend.prompts, p)
+	c.backend.mu.Unlock()
+	return nil
+}
+
+func (*reconnectInputConn) SendRaw([]byte) error { return nil }
+
+func (*reconnectInputConn) SendCompact(string) error { return errors.New("compact not supported") }
+
+func (*reconnectInputConn) ReadMessages(r io.Reader, _ chan<- agent.Message) error {
+	_, err := io.Copy(io.Discard, r)
+	return err
+}
+
+func (c *reconnectInputConn) SendStop(context.Context) {
+	c.cancel()
+}
+
+func (c *reconnectInputConn) Close() error {
+	c.cancel()
+	return nil
+}
+
 func textMessages(msgs []agent.Message) []string {
 	texts := make([]string, 0, len(msgs))
 	for _, msg := range msgs {
@@ -1113,6 +1209,68 @@ func TestManager(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), "no active session") {
 				t.Errorf("err message %q lost underlying diagnostic", err.Error())
+			}
+		})
+		t.Run("valid_reconnects_before_answering_restored_ask", func(t *testing.T) {
+			t.Parallel()
+			backend := &reconnectInputBackend{}
+			t.Cleanup(backend.stop)
+			m := New(Config{
+				ServerCtx: t.Context(),
+				LogDir:    filepath.Join(t.TempDir(), "logs"),
+				Backends:  map[harness.Name]agent.Backend{"reconnect": backend},
+			})
+			tk := &task.Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "x"},
+				Harness:       "reconnect",
+			}
+			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetState(task.StateRunning)
+			tk.RestoreMessages([]agent.Message{
+				&agent.AskMessage{
+					ToolUseID: "toolu-1",
+					Questions: []agent.AskQuestion{{Question: "Which?"}},
+				},
+				&agent.PendingUserActionMessage{
+					MessageType: agent.PendingUserActionMessageType,
+					Action: agent.PendingUserAction{
+						Kind:      agent.PendingUserActionAskUserQuestion,
+						RequestID: "req-1",
+						ToolUseID: "toolu-1",
+						Ask: agent.PendingAskAction{
+							Questions: []agent.AskQuestion{{Question: "Which?"}},
+						},
+					},
+				},
+				&agent.ResultMessage{MessageType: "result"},
+			})
+			e := NewEntry(tk, nil)
+			m.Insert(tk.ID.String(), e)
+
+			if err := m.SendInput(t.Context(), e, agent.Prompt{Text: "A"}); err != nil {
+				t.Fatal(err)
+			}
+
+			backend.mu.Lock()
+			attachCalls := backend.attachCalls
+			prompts := slices.Clone(backend.prompts)
+			opts := backend.opts
+			backend.mu.Unlock()
+			if attachCalls != 1 {
+				t.Fatalf("AttachRelay calls = %d, want 1", attachCalls)
+			}
+			if opts == nil {
+				t.Fatal("AttachRelay opts = nil")
+			}
+			if len(opts.PendingUserActions) != 1 {
+				t.Fatalf("PendingUserActions = %#v, want one restored ask", opts.PendingUserActions)
+			}
+			if len(prompts) != 1 || prompts[0].Text != "A" {
+				t.Fatalf("prompts = %#v, want answer prompt", prompts)
+			}
+			if got := tk.GetState(); got != task.StateRunning {
+				t.Fatalf("state = %s, want %s", got, task.StateRunning)
 			}
 		})
 		t.Run("error_delivery_failure_is_not_no_session", func(t *testing.T) {
@@ -2503,6 +2661,92 @@ func TestManager(t *testing.T) {
 			texts := textMessages(adopted[0].Task.Messages())
 			if !slices.Contains(texts, "before restart") || !slices.Contains(texts, "during restart") {
 				t.Fatalf("messages = %#v, want disk history plus relay tail", texts)
+			}
+		})
+		t.Run("valid_reconnects_live_restored_ask_before_returning", func(t *testing.T) {
+			t.Parallel()
+			taskID := ksid.NewID()
+			backend := &reconnectInputBackend{}
+			t.Cleanup(backend.stop)
+			fake := &fakeMD{metadata: map[string]string{
+				"ask-tail\x00caic.id":      taskID.String(),
+				"ask-tail\x00caic.harness": "reconnect",
+			}}
+			m := New(Config{
+				ServerCtx: t.Context(),
+				LogDir:    filepath.Join(t.TempDir(), "logs"),
+				Monitor:   fake,
+				Inventory: fake,
+				Privilege: fake,
+				Backends:  map[harness.Name]agent.Backend{"reconnect": backend},
+			})
+			m.relay = fakeRelayReader{
+				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
+					return true, "alive", nil
+				},
+				readTailFn: func(context.Context, runtime.ConnectionTarget, func([]byte) ([]agent.Message, error), int64) ([]agent.Message, int64, error) {
+					return []agent.Message{
+						&agent.AskMessage{
+							ToolUseID: "toolu-1",
+							Questions: []agent.AskQuestion{{Question: "Which?"}},
+						},
+						&agent.PendingUserActionMessage{
+							MessageType: agent.PendingUserActionMessageType,
+							Action: agent.PendingUserAction{
+								Kind:      agent.PendingUserActionAskUserQuestion,
+								RequestID: "req-1",
+								ToolUseID: "toolu-1",
+								Ask: agent.PendingAskAction{
+									Questions: []agent.AskQuestion{{Question: "Which?"}},
+								},
+							},
+						},
+						&agent.ResultMessage{MessageType: "result"},
+					}, 599440, nil
+				},
+				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
+			}
+			m.RegisterWorkspace("repo/a", &repowork.Workspace{Dir: "/home/user/src/repo/a"})
+
+			adopted, err := m.AdoptInstances(t.Context(), []AdoptRepo{
+				{RelPath: "repo/a", AbsPath: "/home/user/src/repo/a"},
+			}, []runtime.Instance{
+				{
+					ID:          "ask-tail",
+					AgentTarget: runtime.ConnectionTarget{SSHHost: "ask-tail"},
+					State:       "running",
+					Repos: []runtime.Repo{{
+						HostPath:  "/home/user/src/repo/a",
+						Branch:    "caic-10",
+						MountPath: "/home/user/src/repo/a",
+					}},
+				},
+			}, nil)
+			if err != nil {
+				t.Fatalf("AdoptInstances: %v", err)
+			}
+			if len(adopted) != 1 {
+				t.Fatalf("adopted len = %d, want 1", len(adopted))
+			}
+
+			backend.mu.Lock()
+			attachCalls := backend.attachCalls
+			opts := backend.opts
+			backend.mu.Unlock()
+			if attachCalls != 1 {
+				t.Fatalf("AttachRelay calls = %d, want 1", attachCalls)
+			}
+			if opts == nil {
+				t.Fatal("AttachRelay opts = nil")
+			}
+			if opts.RelayOffset != 599440 {
+				t.Fatalf("RelayOffset = %d, want 599440", opts.RelayOffset)
+			}
+			if len(opts.PendingUserActions) != 1 {
+				t.Fatalf("PendingUserActions = %#v, want one restored ask", opts.PendingUserActions)
+			}
+			if !adopted[0].Task.HasSession() {
+				t.Fatal("adopted task has no attached session")
 			}
 		})
 		t.Run("valid_dead_relay_exit_error_crashes_adopted_task", func(t *testing.T) {
