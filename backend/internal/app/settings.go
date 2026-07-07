@@ -11,7 +11,6 @@ import (
 	"encoding/pem"
 	"log/slog"
 	"os"
-	"path/filepath"
 )
 
 type settings struct {
@@ -70,9 +69,6 @@ func newMCPOAuthSigningKey() (keyPEM, keyID string, err error) {
 }
 
 func writeSettingsAtomic(path string, s *settings) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
 	data, err := json.MarshalIndent(s, "", "  ") //nolint:gosec // G117: sessionSecret is intentionally written to config file owned by the user
 	if err != nil {
 		return err

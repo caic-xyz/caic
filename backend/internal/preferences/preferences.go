@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -286,9 +285,6 @@ func (s *Store) Update(userID string, fn func(*Preferences)) error {
 		return fmt.Errorf("marshal preferences: %w", err)
 	}
 	data = append(data, '\n')
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
-		return fmt.Errorf("create preferences dir: %w", err)
-	}
 	tmp := s.path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return fmt.Errorf("write preferences: %w", err)

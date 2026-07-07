@@ -109,9 +109,6 @@ func (a *auditStore) persistLocked(e *auditEvent) error {
 	if a.path == "" {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(a.path), 0o700); err != nil {
-		return err
-	}
 	f, err := os.OpenFile(filepath.Clean(a.path), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err

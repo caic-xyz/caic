@@ -199,10 +199,6 @@ type CacheWriter struct {
 // new writer so later sessions can append without rebuilding from raw.
 func NewCacheWriter(logPath string) *CacheWriter {
 	dst := CachePath(logPath)
-	if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
-		slog.Warn("replay cache: create dir", "err", err)
-		return nil
-	}
 	body, err := os.CreateTemp(filepath.Dir(dst), filepath.Base(dst)+".*.body")
 	if err != nil {
 		slog.Warn("replay cache: create temp", "err", err)

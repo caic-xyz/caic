@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -103,9 +102,6 @@ func APIKeyHash(envVars []string) string {
 }
 
 func (c *HarnessCache) flush() {
-	if err := os.MkdirAll(filepath.Dir(c.path), 0o700); err != nil {
-		return
-	}
 	data, err := json.MarshalIndent(c.data, "", "  ")
 	if err != nil {
 		return

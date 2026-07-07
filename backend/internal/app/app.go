@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"runtime/trace"
 	"strings"
@@ -72,8 +73,17 @@ func (a *App) Serve(ctx context.Context, ln net.Listener) error {
 
 // New creates the caic backend server application.
 func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) {
+	if cfg.Dirs.ConfigDir == "" {
+		return nil, errors.New("ConfigDir is required")
+	}
 	if cfg.Dirs.CacheDir == "" {
 		return nil, errors.New("CacheDir is required")
+	}
+	if err := os.MkdirAll(cfg.Dirs.ConfigDir, 0o700); err != nil {
+		return nil, fmt.Errorf("create config directory: %w", err)
+	}
+	if err := os.MkdirAll(cfg.Dirs.CacheDir, 0o700); err != nil {
+		return nil, fmt.Errorf("create cache directory: %w", err)
 	}
 	logDir := filepath.Join(cfg.Dirs.CacheDir, "tasks")
 
@@ -418,11 +428,10 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	}
 	backgroundTasks = append(backgroundTasks,
 		func(ctx context.Context) error {
-			_, tk := trace.NewTask(ctx, "refresh-harness-models")
+			_, tk := trace.NewTask(ctx, "watch-harness-model-cache")
 			defer tk.End()
-			trace.Log(ctx, "startup", "refresh-harness-models: begin")
-			refreshHarnessModels(ctx, cfg.Dirs.CacheDir, runtimeBackend, runtimeInventory, taskMgr, cfg.Agent.HarnessEnv)
-			return nil
+			trace.Log(ctx, "startup", "watch-harness-model-cache: begin")
+			return watchHarnessModelCache(ctx, cfg.Dirs.CacheDir, runtimeBackend, runtimeInventory, taskMgr, cfg.Agent.HarnessEnv)
 		},
 		func(ctx context.Context) error {
 			_, tk := trace.NewTask(ctx, "refresh-cache-sizes")

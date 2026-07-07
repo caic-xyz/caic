@@ -317,9 +317,9 @@ func TestUsers(t *testing.T) {
 		}
 	})
 
-	t.Run("update_persists_and_creates_dirs", func(t *testing.T) {
+	t.Run("update_persists", func(t *testing.T) {
 		t.Parallel()
-		fp := filepath.Join(t.TempDir(), "sub", "deep", "preferences.json")
+		fp := filepath.Join(t.TempDir(), "preferences.json")
 		s, err := Open(fp)
 		if err != nil {
 			t.Fatal(err)

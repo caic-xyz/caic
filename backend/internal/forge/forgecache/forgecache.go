@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -137,9 +136,6 @@ func (c *Cache) save() error {
 		return fmt.Errorf("forgecache marshal: %w", err)
 	}
 	raw = append(raw, '\n')
-	if err := os.MkdirAll(filepath.Dir(c.path), 0o700); err != nil {
-		return fmt.Errorf("forgecache mkdir: %w", err)
-	}
 	tmp := c.path + ".tmp"
 	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
 		return fmt.Errorf("forgecache write: %w", err)

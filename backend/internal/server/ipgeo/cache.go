@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 )
@@ -84,9 +83,6 @@ func (c *originCache) set(name string, prefixes []netip.Prefix) error {
 }
 
 func (c *originCache) flushLocked() error {
-	if err := os.MkdirAll(filepath.Dir(c.path), 0o700); err != nil {
-		return err
-	}
 	data, err := json.MarshalIndent(c.data, "", "  ")
 	if err != nil {
 		return err

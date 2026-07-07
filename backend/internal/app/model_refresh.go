@@ -1,20 +1,64 @@
-// Harness model-cache refresh during app startup.
+// Harness model-cache refresh and deletion watcher.
 
 package app
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"maps"
 	"path/filepath"
 	"slices"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
+
+// watchHarnessModelCache refreshes stale model caches at startup, then watches
+// harnesses.json for deletion and regenerates it on demand.
+func watchHarnessModelCache(ctx context.Context, cacheDir string, backend runtime.Backend, inventory runtime.Inventory, taskMgr *taskmgr.Manager, harnessEnv map[string][]string) error {
+	refreshHarnessModels(ctx, cacheDir, backend, inventory, taskMgr, harnessEnv)
+
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return fmt.Errorf("create model cache watcher: %w", err)
+	}
+	defer func() { _ = watcher.Close() }()
+
+	if err := watcher.Add(cacheDir); err != nil {
+		return fmt.Errorf("watch model cache directory: %w", err)
+	}
+
+	cachePath := filepath.Clean(filepath.Join(cacheDir, "harnesses.json"))
+	for {
+		select {
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return nil
+			}
+			if filepath.Clean(event.Name) != cachePath {
+				continue
+			}
+			if !event.Has(fsnotify.Remove) && !event.Has(fsnotify.Rename) {
+				continue
+			}
+			slog.InfoContext(ctx, "model cache deleted, regenerating", "path", cachePath)
+			refreshHarnessModels(ctx, cacheDir, backend, inventory, taskMgr, harnessEnv)
+		case err, ok := <-watcher.Errors:
+			if !ok {
+				return nil
+			}
+			slog.WarnContext(ctx, "model refresh: cache watcher error", "err", err)
+		case <-ctx.Done():
+			return nil
+		}
+	}
+}
 
 // refreshHarnessModels checks if any harness caches are stale and refreshes
 // them by launching a temporary runtime instance.
