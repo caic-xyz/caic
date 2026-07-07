@@ -15,5 +15,7 @@ import (
 
 func TestExportDiscussionGolden(t *testing.T) {
 	t.Parallel()
-	agenttest.RunExportDiscussionGolden(t, codex.New("", nil).NewWire().ParseMessage)
+	agenttest.RunExportDiscussionGolden(t, func() agenttest.Parser {
+		return codex.New("", nil).NewWire().ParseMessage
+	})
 }

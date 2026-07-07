@@ -11,8 +11,11 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
+// Parser parses one harness log line into normalized agent messages.
+type Parser func([]byte) ([]agent.Message, error)
+
 // ParseJSONL parses every non-empty line in a JSONL fixture with parser.
-func ParseJSONL(t testing.TB, path string, parser func([]byte) ([]agent.Message, error)) []agent.Message {
+func ParseJSONL(t testing.TB, path string, parser Parser) []agent.Message {
 	file, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		t.Fatal(err)
@@ -44,9 +47,9 @@ func ParseJSONL(t testing.TB, path string, parser func([]byte) ([]agent.Message,
 }
 
 // RunExportDiscussionGolden runs golden-file tests for ExportDiscussion
-// against all .jsonl files in testdata/. The parser is typically
+// against all .jsonl files in testdata/. newParser typically returns
 // b.NewWire().ParseMessage from the harness backend.
-func RunExportDiscussionGolden(t *testing.T, parser func([]byte) ([]agent.Message, error)) {
+func RunExportDiscussionGolden(t *testing.T, newParser func() Parser) {
 	files, err := filepath.Glob("testdata/*.jsonl")
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +71,7 @@ func RunExportDiscussionGolden(t *testing.T, parser func([]byte) ([]agent.Messag
 					t.Error(err)
 				}
 			})
-			got, err := agent.ExportDiscussion(logFile, f, parser)
+			got, err := agent.ExportDiscussion(logFile, f, newParser())
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -807,6 +807,85 @@ func TestWireFormatPromptResponse(t *testing.T) {
 		}
 	})
 
+	t.Run("ReplayPromptResponseWithoutRequestID", func(t *testing.T) {
+		t.Parallel()
+		w := &wireFormat{}
+		for _, text := range []string{"Done", "."} {
+			chunk := mustJSON(t, map[string]any{
+				"jsonrpc": "2.0",
+				"method":  "session/update",
+				"params": map[string]any{
+					"sessionId": "ses_1",
+					"update": map[string]any{
+						"sessionUpdate": "agent_message_chunk",
+						"content":       map[string]any{"type": "text", "text": text},
+					},
+				},
+			})
+			if _, err := w.ParseMessage(chunk); err != nil {
+				t.Fatal(err)
+			}
+		}
+		resp := mustJSON(t, map[string]any{
+			"jsonrpc": "2.0",
+			"id":      42,
+			"result":  map[string]any{"stopReason": "end_turn"},
+		})
+		msgs, err := w.ParseMessage(resp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 2 {
+			t.Fatalf("msgs = %d, want 2", len(msgs))
+		}
+		tm, ok := msgs[0].(*agent.TextMessage)
+		if !ok {
+			t.Fatalf("msgs[0] type = %T, want *agent.TextMessage", msgs[0])
+		}
+		if tm.Text != "Done." {
+			t.Errorf("Text = %q, want Done.", tm.Text)
+		}
+		if _, ok := msgs[1].(*agent.ResultMessage); !ok {
+			t.Fatalf("msgs[1] type = %T, want *agent.ResultMessage", msgs[1])
+		}
+	})
+
+	t.Run("ReplayPromptErrorAfterRecordedRequest", func(t *testing.T) {
+		t.Parallel()
+		w := &wireFormat{}
+		req := mustJSON(t, map[string]any{
+			"jsonrpc": "2.0",
+			"id":      11,
+			"method":  "session/prompt",
+			"params":  map[string]any{"sessionId": "ses_1"},
+		})
+		if _, err := w.ParseMessage(req); err != nil {
+			t.Fatal(err)
+		}
+		resp := mustJSON(t, map[string]any{
+			"jsonrpc": "2.0",
+			"id":      11,
+			"error": map[string]any{
+				"code":    -32603,
+				"message": "prompt failed",
+			},
+		})
+		msgs, err := w.ParseMessage(resp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		rm, ok := msgs[0].(*agent.ResultMessage)
+		if !ok {
+			t.Fatalf("msgs[0] type = %T, want *agent.ResultMessage", msgs[0])
+		}
+		if !rm.IsError || rm.Result != "prompt failed" {
+			t.Errorf("ResultMessage = %+v, want prompt failed error", rm)
+		}
+	})
+
 	t.Run("SyntheticFinalMessages", func(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{sessionID: "ses_1"}

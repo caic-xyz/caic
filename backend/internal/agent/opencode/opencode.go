@@ -263,8 +263,9 @@ func (w *wireFormat) WriteCompact(wr io.Writer, _ string, logW io.Writer) error 
 // ParseMessage wraps the package-level parseMessage with interceptions:
 //
 //   - usage_update → emits UsageMessage and accumulates into totalUsage.
+//   - logged session/prompt requests → restores prompt response correlation.
 //   - session/request_permission → auto-approves with "allow_once".
-//   - ResultMessage has Usage populated from totalUsage, then totalUsage resets.
+//   - prompt responses → emits final Text/Thinking messages and ResultMessage.
 //
 // It also captures the session ID from InitMessage if present.
 func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
@@ -273,14 +274,21 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		return nil, fmt.Errorf("unmarshal probe: %w", err)
 	}
 
-	// Intercept session/prompt response → ResultMessage.
+	// JSON-RPC requests can appear in replay logs when stdin was logged. Capture
+	// session/prompt IDs so the later response is still recognized.
 	if probe.ID != nil {
 		var id int64
 		if json.Unmarshal(probe.ID, &id) == nil {
+			if probe.Method != "" {
+				if probe.Method == opencode.MethodSessionPrompt {
+					w.notePromptRequest(id)
+				}
+				return []agent.Message{&agent.RawMessage{MessageType: "jsonrpc_request", Raw: append([]byte(nil), line...)}}, nil
+			}
 			w.mu.Lock()
-			isPromptResp := id == w.promptReqID
+			isPromptResp := id == w.promptReqID && w.promptReqID != 0
 			w.mu.Unlock()
-			if isPromptResp {
+			if isPromptResp || isPromptResultResponse(line) {
 				return w.handlePromptResponseLocked(line)
 			}
 		}
@@ -329,6 +337,23 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		}
 	}
 	return msgs, nil
+}
+
+func (w *wireFormat) notePromptRequest(id int64) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.promptReqID = id
+	w.textAccum.Reset()
+	w.thinkAccum.Reset()
+}
+
+func isPromptResultResponse(line []byte) bool {
+	var resp opencode.JSONRPCMessage
+	if err := json.Unmarshal(line, &resp); err != nil || resp.Result == nil {
+		return false
+	}
+	var pr opencode.PromptResult
+	return json.Unmarshal(resp.Result, &pr) == nil && pr.StopReason != ""
 }
 
 // allocIDLocked returns the next JSON-RPC request ID. Not thread-safe; callers
