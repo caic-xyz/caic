@@ -1634,6 +1634,13 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 		slog.WarnContext(ctx, "relay", "msg", "restored from log", "repo", ri.RelPath, "br", branch, "instance", c.ID, "msgs", len(lt.Msgs))
 	}
 	applyLoadedSessionMetadata(t, lt)
+	// Restore the persisted diff signal. RestoreMessages recomputes diffCreated
+	// from replayed history, but that replay is skipped when neither the relay
+	// tail nor the log messages load; the summary flag (scanned from the log)
+	// carries it through regardless. Sticky: only ever set, never cleared.
+	if lt != nil && lt.DiffCreated {
+		t.MarkDiffCreated()
+	}
 	t.SetStateAt(t.GetState(), stateUpdatedAt)
 	if lt != nil && lt.State == task.StateFailed {
 		t.SetStateAt(lt.State, stateUpdatedAt)

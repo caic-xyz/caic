@@ -886,6 +886,17 @@ func (t *Task) DiffCreated() bool {
 	return t.diffCreated
 }
 
+// MarkDiffCreated records that a non-empty diff was observed, without a diff
+// stat payload. Adoption uses it to restore the persisted DiffCreated flag from
+// the log summary, so the signal survives a restart even when message replay is
+// skipped or the relay's last diff was empty. The flag is sticky and never
+// cleared here.
+func (t *Task) MarkDiffCreated() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.diffCreated = true
+}
+
 // SetLiveDiffStat overwrites the live diff stat. Used by adoptOne to set
 // the host-side branch diff after RestoreMessages, because the relay's
 // diff_watcher only tracks uncommitted changes (git diff HEAD) which
@@ -1178,7 +1189,10 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 	// Restore live diff stat from the last DiffStatMessage or ResultMessage,
 	// whichever appears later. ResultMessage carries the authoritative
 	// host-side diff stat but a DiffStatMessage from the relay may follow it.
-	t.diffCreated = false
+	//
+	// diffCreated is sticky: only ever set true here, never cleared. A re-restore
+	// from a truncated or bounded message set (e.g. lazy reload, relay tail) must
+	// not erase a diff that an earlier restore or MarkDiffCreated already recorded.
 	for _, msg := range msgs {
 		switch m := msg.(type) {
 		case *agent.DiffStatMessage:

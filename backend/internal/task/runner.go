@@ -209,17 +209,22 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 		}
 	}
 
-	emptyBranchVerified := true
+	// Positively confirm the branch is empty against the live instance before
+	// deleting it below. branchConfirmedEmpty is set only when this cleanup
+	// fetched the instance's branch diff and observed it empty. A lost or absent
+	// signal (dead instance, fetch failure, or no instance at all) must never
+	// authorize deletion: unsynced work lives only in the container's branch, and
+	// the host branch's own commit count says nothing about it.
+	branchConfirmedEmpty := false
 	if reason == StatePurged && !t.DiffCreated() && name != "" && r.runtime() != nil && r.Workspace.Dir != "" {
-		emptyBranchVerified = false
 		ds, err := r.branchDiffStat(ctx, t)
-		if err != nil {
+		switch {
+		case err != nil:
 			tlog.WarnContext(ctx, "verify empty task branch failed", "err", err)
-		} else {
-			emptyBranchVerified = true
-			if len(ds) > 0 {
-				t.SetLiveDiffStat(ds)
-			}
+		case len(ds) > 0:
+			t.SetLiveDiffStat(ds)
+		default:
+			branchConfirmedEmpty = true
 		}
 	}
 
@@ -265,7 +270,7 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 	if ds := t.LiveDiffStat(); len(ds) > 0 {
 		res.DiffStat = ds
 	}
-	if reason == StatePurged && runtimeRemovedOrAbsent && emptyBranchVerified && !t.DiffCreated() {
+	if reason == StatePurged && runtimeRemovedOrAbsent && branchConfirmedEmpty {
 		r.Workspace.DeleteUnmodifiedTaskBranches(ctx, t)
 	}
 	var logW io.WriteCloser

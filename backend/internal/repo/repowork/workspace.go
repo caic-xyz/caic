@@ -20,6 +20,11 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
+// errBranchCheckedOut reports that a task branch could not be deleted because it
+// is the currently checked-out branch of the host repo. Expected when caic hosts
+// its own repository, so callers log it below warning level.
+var errBranchCheckedOut = errors.New("branch is currently checked out")
+
 // ParseDiffNumstat parses git diff --numstat output into a DiffStat.
 // Each line has the format: <added>\t<deleted>\t<path>.
 // Binary files use "-\t-\t<path>".
@@ -306,7 +311,14 @@ func (w *Workspace) DeleteUnmodifiedTaskBranches(ctx context.Context, t TaskView
 		checkout := &git.Checkout{Root: dir, Logger: w.Log}
 		deleted, err := deleteLocalBranchIfUnmodified(gitCtx, checkout, repo.Branch, baseBranch)
 		if err != nil {
-			w.Log.WarnContext(ctx, "delete empty task branch skipped", "br", repo.Branch, "err", err)
+			// A checked-out task branch is expected when caic hosts its own repo
+			// (the developer's working branch shares the task namespace); it is not
+			// a fault, so keep it out of the warning stream.
+			if errors.Is(err, errBranchCheckedOut) {
+				w.Log.DebugContext(ctx, "delete empty task branch skipped: checked out", "br", repo.Branch)
+			} else {
+				w.Log.WarnContext(ctx, "delete empty task branch skipped", "br", repo.Branch, "err", err)
+			}
 			continue
 		}
 		if deleted {
@@ -564,7 +576,7 @@ func deleteLocalBranchIfUnmodified(ctx context.Context, checkout *git.Checkout, 
 		return false, err
 	}
 	if current == branch {
-		return false, fmt.Errorf("branch %q is currently checked out", branch)
+		return false, errBranchCheckedOut
 	}
 	baseRef := "refs/remotes/origin/" + baseBranch
 	remoteBranches, remoteErr := checkout.ListBranches(ctx, "origin")

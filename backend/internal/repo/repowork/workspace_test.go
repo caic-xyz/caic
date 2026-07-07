@@ -4,6 +4,7 @@ package repowork
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/caic-xyz/md/git"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -472,6 +475,72 @@ func TestParseDiffNumstat(t *testing.T) {
 		}
 		if ds[2].Path != "README.md" {
 			t.Errorf("files[2].path = %q, want %q", ds[2].Path, "README.md")
+		}
+	})
+}
+
+func TestDeleteLocalBranchIfUnmodified(t *testing.T) {
+	t.Parallel()
+
+	newCheckout := func(dir string) *git.Checkout {
+		return &git.Checkout{Root: dir, Logger: slog.Default()}
+	}
+	branchExists := func(t *testing.T, dir, branch string) bool {
+		cmd := exec.CommandContext(t.Context(), "git", "-C", dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch) //nolint:gosec // test helper with controlled args
+		return cmd.Run() == nil
+	}
+
+	t.Run("valid_deletes_unmodified", func(t *testing.T) {
+		t.Parallel()
+		clone := initTestRepo(t, "main")
+		runGit(t, clone, "branch", "caic-1", "main")
+		deleted, err := deleteLocalBranchIfUnmodified(t.Context(), newCheckout(clone), "caic-1", "main")
+		if err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+		if !deleted {
+			t.Error("deleted = false, want true")
+		}
+		if branchExists(t, clone, "caic-1") {
+			t.Error("branch caic-1 still exists after deletion")
+		}
+	})
+
+	t.Run("valid_keeps_modified", func(t *testing.T) {
+		t.Parallel()
+		clone := initTestRepo(t, "main")
+		runGit(t, clone, "checkout", "-b", "caic-2", "main")
+		if err := os.WriteFile(filepath.Join(clone, "extra.txt"), []byte("work\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, clone, "add", ".")
+		runGit(t, clone, "commit", "-m", "work")
+		runGit(t, clone, "checkout", "main")
+		deleted, err := deleteLocalBranchIfUnmodified(t.Context(), newCheckout(clone), "caic-2", "main")
+		if err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+		if deleted {
+			t.Error("deleted = true, want false for a modified branch")
+		}
+		if !branchExists(t, clone, "caic-2") {
+			t.Error("branch caic-2 was deleted despite unique commits")
+		}
+	})
+
+	t.Run("error_checked_out", func(t *testing.T) {
+		t.Parallel()
+		clone := initTestRepo(t, "main")
+		runGit(t, clone, "checkout", "-b", "caic-3", "main")
+		deleted, err := deleteLocalBranchIfUnmodified(t.Context(), newCheckout(clone), "caic-3", "main")
+		if !errors.Is(err, errBranchCheckedOut) {
+			t.Fatalf("err = %v, want errBranchCheckedOut", err)
+		}
+		if deleted {
+			t.Error("deleted = true, want false for a checked-out branch")
+		}
+		if !branchExists(t, clone, "caic-3") {
+			t.Error("checked-out branch caic-3 was deleted")
 		}
 	})
 }

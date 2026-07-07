@@ -170,6 +170,44 @@ func TestLoadLogs(t *testing.T) {
 			t.Errorf("Mounts = %+v", lt.Mounts)
 		}
 	})
+	t.Run("DiffCreatedStickyAcrossEmptyTail", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "task1", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude"})
+		withDiff := mustJSON(t, agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: agent.DiffStat{{Path: "a.go", Added: 3, Deleted: 1}}, Ts: 1})
+		// A later empty diff (agent committed, working tree clean) must not clear it.
+		emptyDiff := mustJSON(t, agent.DiffStatMessage{MessageType: "caic_diff_stat", Ts: 2})
+		writeLogFile(t, dir, "a.jsonl", meta, withDiff, emptyDiff)
+
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(tasks) != 1 {
+			t.Fatalf("len = %d, want 1", len(tasks))
+		}
+		if !tasks[0].DiffCreated {
+			t.Error("DiffCreated = false, want true after a non-empty diff followed by an empty one")
+		}
+	})
+	t.Run("DiffCreatedFalseWithoutDiff", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "task1", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude"})
+		emptyDiff := mustJSON(t, agent.DiffStatMessage{MessageType: "caic_diff_stat", Ts: 1})
+		writeLogFile(t, dir, "a.jsonl", meta, emptyDiff)
+
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(tasks) != 1 {
+			t.Fatalf("len = %d, want 1", len(tasks))
+		}
+		if tasks[0].DiffCreated {
+			t.Error("DiffCreated = true, want false when only empty diffs were recorded")
+		}
+	})
 	t.Run("ResultReasoningTokens", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()

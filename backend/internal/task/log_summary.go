@@ -59,6 +59,7 @@ type loadedTaskSummary struct {
 	Effort            string              `json:"effort,omitempty"`
 	SessionID         string              `json:"sessionID,omitempty"`
 	AgentVersion      string              `json:"agentVersion,omitempty"`
+	DiffCreated       bool                `json:"diffCreated,omitempty"`
 	Result            *resultSummary      `json:"result,omitempty"`
 }
 
@@ -181,6 +182,7 @@ func loadedTaskSummaryFrom(lt *LoadedTask) loadedTaskSummary {
 		Effort:            lt.Effort,
 		SessionID:         lt.SessionID,
 		AgentVersion:      lt.AgentVersion,
+		DiffCreated:       lt.DiffCreated,
 		Result:            resultSummaryFrom(lt.Result),
 	}
 }
@@ -215,6 +217,7 @@ func (s *loadedTaskSummary) toLoadedTask(path string, size int64) *LoadedTask {
 		SessionID:         s.SessionID,
 		AgentVersion:      s.AgentVersion,
 		LogSize:           size,
+		DiffCreated:       s.DiffCreated,
 		Result:            s.Result.toResult(),
 	}
 }

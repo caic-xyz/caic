@@ -87,8 +87,29 @@ func applyMetaResult(lt *LoadedTask, mr *agent.MetaResultMessage) {
 		DiffStat:    mr.DiffStat,
 		AgentResult: mr.AgentResult,
 	}
+	if len(mr.DiffStat) > 0 {
+		lt.DiffCreated = true
+	}
 	if mr.Error != "" {
 		lt.Result.Err = errors.New(mr.Error)
+	}
+}
+
+// noteDiffStatLine updates lt from a caic_diff_stat record: it marks DiffCreated
+// when the diff is non-empty (sticky, so a later empty diff never clears it) and
+// advances LastStateUpdateAt from the relay timestamp.
+func noteDiffStatLine(lt *LoadedTask, line []byte) {
+	var ds agent.DiffStatMessage
+	if json.Unmarshal(line, &ds) != nil {
+		return
+	}
+	if len(ds.DiffStat) > 0 {
+		lt.DiffCreated = true
+	}
+	if ds.Ts > 0 {
+		if t := tsToTime(ds.Ts); t.After(lt.LastStateUpdateAt) {
+			lt.LastStateUpdateAt = t
+		}
 	}
 }
 
@@ -129,6 +150,7 @@ type LoadedTask struct {
 	SessionID         string // Backend-native session/thread ID required to resume stateful harnesses.
 	AgentVersion      string
 	LogSize           int64 // Byte size of the log file on disk; populated by LoadLogs.
+	DiffCreated       bool  // True if any non-empty diff was recorded in the log; sticky across the run.
 	Msgs              []agent.Message
 	Result            *Result
 
@@ -590,12 +612,7 @@ func (s *logTailScan) apply(lt *LoadedTask, line []byte) {
 			lt.ForgePR = mp.ForgePR
 		}
 	case "caic_diff_stat":
-		var ds agent.DiffStatMessage
-		if json.Unmarshal(line, &ds) == nil && ds.Ts > 0 {
-			if t := tsToTime(ds.Ts); t.After(lt.LastStateUpdateAt) {
-				lt.LastStateUpdateAt = t
-			}
-		}
+		noteDiffStatLine(lt, line)
 	case "caic_result":
 		var mr agent.MetaResultMessage
 		if err := json.Unmarshal(line, &mr); err == nil {
@@ -873,12 +890,7 @@ func loadLogFile(path string, parseFn func([]byte) ([]agent.Message, error)) (_ 
 			}
 
 		case "caic_diff_stat":
-			var ds agent.DiffStatMessage
-			if json.Unmarshal(line, &ds) == nil && ds.Ts > 0 {
-				if t := tsToTime(ds.Ts); t.After(lt.LastStateUpdateAt) {
-					lt.LastStateUpdateAt = t
-				}
-			}
+			noteDiffStatLine(lt, line)
 
 		case "caic_result":
 			var mr agent.MetaResultMessage
@@ -975,12 +987,7 @@ func loadLogFileTail(path string, parseFn func([]byte) ([]agent.Message, error),
 				lt.ForgePR = mp.ForgePR
 			}
 		case "caic_diff_stat":
-			var ds agent.DiffStatMessage
-			if json.Unmarshal(line, &ds) == nil && ds.Ts > 0 {
-				if t := tsToTime(ds.Ts); t.After(lt.LastStateUpdateAt) {
-					lt.LastStateUpdateAt = t
-				}
-			}
+			noteDiffStatLine(lt, line)
 		case "caic_result":
 			var mr agent.MetaResultMessage
 			if err := json.Unmarshal(line, &mr); err != nil {
@@ -1076,12 +1083,7 @@ func applyLoadedLogLine(lt *LoadedTask, line []byte, parseFn func([]byte) ([]age
 		}
 
 	case "caic_diff_stat":
-		var ds agent.DiffStatMessage
-		if json.Unmarshal(line, &ds) == nil && ds.Ts > 0 {
-			if t := tsToTime(ds.Ts); t.After(lt.LastStateUpdateAt) {
-				lt.LastStateUpdateAt = t
-			}
-		}
+		noteDiffStatLine(lt, line)
 
 	case "caic_result":
 		var mr agent.MetaResultMessage
