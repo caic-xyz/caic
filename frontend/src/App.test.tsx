@@ -66,9 +66,11 @@ vi.mock("./api", () => ({
   stopTask: vi.fn(),
   purgeTask: vi.fn(),
   reviveTask: vi.fn(),
-  globalTaskEvents: vi.fn((onMessage: (event: unknown) => void) => {
-    fakeESListeners.push((e) => onMessage(JSON.parse(e.data)));
-    return new FakeEventSource();
+  globalTaskEvents: vi.fn((cb: (e: unknown) => void) => {
+    const es = new FakeEventSource();
+    // Mirror the real client: parse the SSE payload before invoking the handler.
+    es.addEventListener("message", (e: { data: string }) => cb(JSON.parse(e.data)));
+    return es;
   }),
   globalUsageEvents: vi.fn(() => new FakeEventSource()),
   // Used by TaskDetail once a created task navigates into its detail route.
@@ -261,6 +263,32 @@ describe("App repo chips: No repository", () => {
     await user.selectOptions(harness, "claude");
     expect(model).toHaveTextContent("sonnet");
     expect(effort).toHaveValue("max");
+  });
+
+  it("opens the model picker on ArrowDown without navigating tasks", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getPreferences).mockResolvedValue({
+      repositories: [{ path: "repos/a" }],
+      harness: "codex",
+      models: { codex: "gpt-5" },
+      efforts: {},
+      settings: { baseImage: "" },
+    } as unknown as PreferencesResp);
+    vi.mocked(api.listHarnesses).mockResolvedValue([
+      { name: "codex", models: ["gpt-5"], supportsImages: false, supportsCompact: false },
+    ] as unknown as HarnessInfo[]);
+
+    const { history } = renderApp("/");
+    // Seed a task card so the global ArrowUp/Down handler would otherwise navigate.
+    dispatchSSE({ kind: "snapshot", snapshot: [makeTask({ id: "taskX", title: "other task" })] });
+    await screen.findByText("other task");
+    const model = await screen.findByRole("button", { name: "Model" });
+    model.focus();
+    await user.keyboard("{ArrowDown}");
+    // The global ArrowUp/Down task-navigation handler must ignore the focused
+    // combobox trigger, so the route stays put and the picker opens instead.
+    expect(history.get()).toBe("/");
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
   });
 
   it("does not mount browser voice in Go Mode host mode", async () => {

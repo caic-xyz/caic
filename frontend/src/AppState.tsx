@@ -277,9 +277,12 @@ function createAppStore() {
         return;
       }
       if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
-      // Don't intercept when typing in an input/textarea.
-      const tag = (e.target as HTMLElement)?.tagName;
+      // Don't intercept when typing in an input/textarea, or when a combobox
+      // (e.g. the model/branch picker) owns the key — its own handler navigates.
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (target?.closest('[aria-haspopup="listbox"], [role="listbox"], [role="option"]')) return;
       // Query visible task cards in DOM (visual) order to match the grouped sidebar layout.
       const cards = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"));
       if (cards.length === 0) return;
