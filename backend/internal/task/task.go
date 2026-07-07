@@ -1806,7 +1806,14 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 	if t.eventReplay != nil {
 		t.eventReplay.WriteMessage(m)
 	}
-	// Fan out to subscribers (non-blocking).
+	// Fan out to subscribers (non-blocking). Skip a non-zero exit message that
+	// follows a cleanly completed turn: it is a spurious termination artifact
+	// (e.g. SIGINT from a user-requested stop) and is already dropped from the
+	// persisted replay, so the live stream must match to avoid a transient
+	// "Parse error" that disappears when the task log is reloaded.
+	if exit, ok := m.(*agent.ExitMessage); ok && exit.ExitCode != 0 && t.lastExitError == "" {
+		return
+	}
 	for i := 0; i < len(t.subs); i++ {
 		select {
 		case t.subs[i].ch <- m:

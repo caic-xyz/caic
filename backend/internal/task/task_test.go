@@ -41,6 +41,23 @@ func (*failingConn) SendStop(context.Context) {}
 
 func (*failingConn) Close() error { return nil }
 
+// recvType reads one message type from a live subscriber channel. The task
+// fanout performs a synchronous non-blocking send into a buffered channel
+// during addMessage, so a message is available immediately on return; a
+// non-blocking receive is therefore deterministic with no timing dependency.
+func recvType(t *testing.T, ch <-chan agent.Message) string {
+	t.Helper()
+	select {
+	case m, ok := <-ch:
+		if !ok {
+			return ""
+		}
+		return m.Type()
+	default:
+		return ""
+	}
+}
+
 func TestTask(t *testing.T) {
 	t.Parallel()
 	t.Run("ConcurrentMetadataSnapshots", func(t *testing.T) {
@@ -142,6 +159,43 @@ func TestTask(t *testing.T) {
 		}
 		if got := tk.GetState(); got != StateWaiting {
 			t.Errorf("state = %v, want waiting", got)
+		}
+	})
+	t.Run("AddMessageSkipsSpuriousExitAfterCleanTurn", func(t *testing.T) {
+		t.Parallel()
+		// A non-zero exit that follows a cleanly completed turn (e.g. SIGINT
+		// from a user-requested stop, exit code -2) must not be fanned out to
+		// live SSE subscribers: it is a spurious termination artifact already
+		// dropped from the persisted replay, so the live stream must match.
+		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}
+		tk.SetState(StateRunning)
+		_, ch, unsub := tk.Subscribe(t.Context())
+		defer unsub()
+
+		tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done"}, false)
+		tk.addMessage(t.Context(), &agent.ExitMessage{ExitCode: -2}, true)
+
+		got := recvType(t, ch)
+		if got != "result" {
+			t.Fatalf("live msg = %q, want %q", got, "result")
+		}
+		if extra := recvType(t, ch); extra != "" {
+			t.Fatalf("spurious exit fanned out: got %q, want none", extra)
+		}
+	})
+	t.Run("AddMessageFansOutExitMidTurn", func(t *testing.T) {
+		t.Parallel()
+		// A non-zero exit with no preceding clean result is a genuine
+		// interruption and must still reach live subscribers.
+		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}
+		tk.SetState(StateRunning)
+		_, ch, unsub := tk.Subscribe(t.Context())
+		defer unsub()
+
+		tk.addMessage(t.Context(), &agent.ExitMessage{ExitCode: -2}, true)
+
+		if got := recvType(t, ch); got != "caic_exit" {
+			t.Fatalf("live msg = %q, want %q", got, "caic_exit")
 		}
 	})
 	t.Run("RecordSessionFailure", func(t *testing.T) {
