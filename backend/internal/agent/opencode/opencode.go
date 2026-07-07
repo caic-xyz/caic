@@ -35,9 +35,11 @@ type Backend struct {
 	EnvVars []string // KEY=VALUE pairs for FetchModels SSH commands
 }
 
-var _ agent.Backend = (*Backend)(nil)
-var _ agent.ModelFetcher = (*Backend)(nil)
-var _ agent.RecordHandshaker = (*Backend)(nil)
+var (
+	_ agent.Backend          = (*Backend)(nil)
+	_ agent.ModelFetcher     = (*Backend)(nil)
+	_ agent.RecordHandshaker = (*Backend)(nil)
+)
 
 // New creates an OpenCode backend with parser configured. If cacheDir is
 // non-empty, the model list is loaded from the on-disk harness cache.
@@ -611,7 +613,7 @@ func FetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv 
 		args = append(args, "env")
 		args = append(args, extraEnv...)
 	}
-	args = append(args, "opencode", "models")
+	args = append(args, "opencode", "models", "--refresh")
 	out, err := exec.CommandContext(ctx, "ssh", args...).Output() //nolint:gosec // target is not user-controlled
 	if err != nil {
 		return nil, fmt.Errorf("opencode models: %w", err)
