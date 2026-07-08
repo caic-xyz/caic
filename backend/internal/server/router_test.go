@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -28,6 +27,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
+	"github.com/caic-xyz/caic/backend/internal/logtest"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
@@ -98,11 +98,13 @@ func newTestPrefs(t testing.TB) *preferences.Store {
 // production Router exposes these only through handler concerns; the wrapper
 // keeps test access ergonomic without re-adding fields to Router.
 func newRouterTestWorkspace(t testing.TB, baseBranch, dir string) *repowork.Workspace {
-	workspace, err := repowork.NewWorkspace(baseBranch, dir, filepath.Base(dir), time.Minute, nil, slog.With("repo", "test"))
-	if err != nil {
-		t.Fatal(err)
+	return &repowork.Workspace{
+		BaseBranch: baseBranch,
+		Dir:        dir,
+		RepoName:   filepath.Base(dir),
+		GitTimeout: time.Minute,
+		Log:        logtest.Logger(t),
 	}
-	return workspace
 }
 
 type testRouter struct {

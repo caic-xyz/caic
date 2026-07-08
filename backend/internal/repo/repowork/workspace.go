@@ -80,24 +80,6 @@ type Workspace struct {
 	nextID   int        // Next branch sequence number (protected by branchMu).
 }
 
-// NewWorkspace creates a workspace for a managed git repository.
-func NewWorkspace(baseBranch, dir, repoName string, gitTimeout time.Duration, backend runtime.Backend, log *slog.Logger) (*Workspace, error) {
-	if gitTimeout == 0 {
-		return nil, errors.New("git timeout must be non-zero")
-	}
-	if log == nil {
-		return nil, errors.New("log must be non-nil")
-	}
-	return &Workspace{
-		BaseBranch: baseBranch,
-		Dir:        dir,
-		RepoName:   repoName,
-		GitTimeout: gitTimeout,
-		Runtime:    backend,
-		Log:        log,
-	}, nil
-}
-
 // Init sets nextID past any existing caic-* branches so that restarts don't
 // waste attempts on branches that already exist. No-op for no-repo workspaces.
 func (w *Workspace) Init(ctx context.Context) error {

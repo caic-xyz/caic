@@ -3,11 +3,10 @@
 package repomgr
 
 import (
-	"log/slog"
-	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/logtest"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 )
@@ -19,9 +18,12 @@ func TestServiceChanged(t *testing.T) {
 		t.Parallel()
 
 		s := NewService(t.Context(), "", repo.New([]repo.Info{{RelPath: "old", AbsPath: "/repo"}}), nil)
-		workspace, err := repowork.NewWorkspace("main", "/repo", filepath.Base("/repo"), time.Minute, nil, slog.With("repo", "test"))
-		if err != nil {
-			t.Fatal(err)
+		workspace := &repowork.Workspace{
+			BaseBranch: "main",
+			Dir:        "/repo",
+			RepoName:   "repo",
+			GitTimeout: time.Minute,
+			Log:        logtest.Logger(t),
 		}
 		ch := s.Changed()
 		var sawNotifyBeforeHook bool

@@ -17,6 +17,7 @@ import (
 	"github.com/caic-xyz/md/git"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/logtest"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
@@ -35,12 +36,15 @@ func (f *fakeTaskView) RuntimeRepos() []runtime.Repo          { return f.repo }
 func (f *fakeTaskView) SetRepoBranch(i int, branch string)    { f.repo[i].Branch = branch }
 func (f *fakeTaskView) PrimaryBaseBranch() string             { return f.baseBranch }
 
-func newTestRepoWorkspace(baseBranch, dir string, backend runtime.Backend) *Workspace {
-	workspace, err := NewWorkspace(baseBranch, dir, filepath.Base(dir), time.Minute, backend, slog.With("repo", "test"))
-	if err != nil {
-		panic(err)
+func newTestRepoWorkspace(t *testing.T, baseBranch, dir string, backend runtime.Backend) *Workspace {
+	return &Workspace{
+		BaseBranch: baseBranch,
+		Dir:        dir,
+		RepoName:   filepath.Base(dir),
+		GitTimeout: time.Minute,
+		Runtime:    backend,
+		Log:        logtest.Logger(t),
 	}
-	return workspace
 }
 
 func TestRepoWorkspace(t *testing.T) {
@@ -50,7 +54,7 @@ func TestRepoWorkspace(t *testing.T) {
 		t.Run("Basic", func(t *testing.T) {
 			t.Parallel()
 			clone := initTestRepo(t, "main")
-			r := newTestRepoWorkspace("main", clone, nil)
+			r := newTestRepoWorkspace(t, "main", clone, nil)
 			if err := r.Init(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -67,7 +71,7 @@ func TestRepoWorkspace(t *testing.T) {
 			runGit(t, clone, "branch", "caic-3")
 			runGit(t, clone, "push", "origin", "caic-3")
 
-			r := newTestRepoWorkspace("main", clone, nil)
+			r := newTestRepoWorkspace(t, "main", clone, nil)
 			if err := r.Init(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -84,7 +88,7 @@ func TestRepoWorkspace(t *testing.T) {
 			// Do NOT push — simulates a stopped task whose branch was
 			// never synced to origin.
 
-			r := newTestRepoWorkspace("main", clone, nil)
+			r := newTestRepoWorkspace(t, "main", clone, nil)
 			if err := r.Init(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -99,7 +103,7 @@ func TestRepoWorkspace(t *testing.T) {
 			runGit(t, clone, "branch", "foo-caic-9")
 			runGit(t, clone, "branch", "caic-2")
 
-			r := newTestRepoWorkspace("main", clone, nil)
+			r := newTestRepoWorkspace(t, "main", clone, nil)
 			if err := r.Init(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -112,7 +116,7 @@ func TestRepoWorkspace(t *testing.T) {
 	t.Run("BranchDiffStat", func(t *testing.T) {
 		t.Parallel()
 		sc := &stubContainer{}
-		r := newTestRepoWorkspace("", "/repo", sc)
+		r := newTestRepoWorkspace(t, "", "/repo", sc)
 		tv := &fakeTaskView{instanceID: "ctr-1", repo: []runtime.Repo{{HostPath: "/repo", Branch: "feature"}}}
 		ds := r.BranchDiffStat(t.Context(), tv)
 		if !sc.fetched {
@@ -128,7 +132,7 @@ func TestRepoWorkspace(t *testing.T) {
 	t.Run("BranchDiffStatMultiRepoUsesInstanceID", func(t *testing.T) {
 		t.Parallel()
 		sc := &stubContainer{}
-		r := newTestRepoWorkspace("", "/home/user/src/caic", sc)
+		r := newTestRepoWorkspace(t, "", "/home/user/src/caic", sc)
 		tv := &fakeTaskView{instanceID: "ctr-2", repo: []runtime.Repo{
 			{HostPath: "/home/user/src/caic", Branch: "caic-7", MountPath: "/home/user/src/caic"},
 			{HostPath: "/home/user/src/genai", Branch: "caic-0", MountPath: "/home/user/src/genai"},
@@ -156,14 +160,14 @@ func TestRepoWorkspace(t *testing.T) {
 	})
 	t.Run("BranchDiffStatNoContainer", func(t *testing.T) {
 		t.Parallel()
-		r := newTestRepoWorkspace("", "", nil)
+		r := newTestRepoWorkspace(t, "", "", nil)
 		if ds := r.BranchDiffStat(t.Context(), &fakeTaskView{}); ds != nil {
 			t.Errorf("BranchDiffStat with no instance = %+v, want nil", ds)
 		}
 	})
 	t.Run("BranchDiffStatNoDir", func(t *testing.T) {
 		t.Parallel()
-		r := newTestRepoWorkspace("", "", &stubContainer{})
+		r := newTestRepoWorkspace(t, "", "", &stubContainer{})
 		if ds := r.BranchDiffStat(t.Context(), &fakeTaskView{}); ds != nil {
 			t.Errorf("BranchDiffStat with no dir = %+v, want nil", ds)
 		}
@@ -174,7 +178,7 @@ func TestTaskRuntime(t *testing.T) {
 	t.Parallel()
 	t.Run("valid_preserves_mounted_path", func(t *testing.T) {
 		t.Parallel()
-		r := newTestRepoWorkspace("", "/home/user/src/caic-xyz/caic", nil)
+		r := newTestRepoWorkspace(t, "", "/home/user/src/caic-xyz/caic", nil)
 		tv := &fakeTaskView{instanceID: "ctr-1", repo: []runtime.Repo{
 			{Branch: "caic-7", MountPath: "/home/user/src/caic-xyz/caic"},
 			{Branch: "caic-0", HostPath: "/home/user/src/caic-xyz/md", MountPath: "/home/user/src/caic-xyz/md"},
@@ -202,7 +206,7 @@ func TestTaskRuntime(t *testing.T) {
 	})
 	t.Run("valid_no_repos", func(t *testing.T) {
 		t.Parallel()
-		r := newTestRepoWorkspace("", "/repo", nil)
+		r := newTestRepoWorkspace(t, "", "/repo", nil)
 		tv := &fakeTaskView{instanceID: "ctr-1"}
 		id, repos, err := r.taskRuntime(tv)
 		if err != nil {
@@ -217,7 +221,7 @@ func TestTaskRuntime(t *testing.T) {
 	})
 	t.Run("error_no_instance", func(t *testing.T) {
 		t.Parallel()
-		if _, _, err := newTestRepoWorkspace("", "", nil).taskRuntime(&fakeTaskView{}); err == nil {
+		if _, _, err := newTestRepoWorkspace(t, "", "", nil).taskRuntime(&fakeTaskView{}); err == nil {
 			t.Fatal("want error")
 		}
 	})

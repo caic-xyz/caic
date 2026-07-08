@@ -6,7 +6,6 @@ package task
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +18,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/logtest"
 	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
@@ -31,11 +31,14 @@ type instantExitBackend struct {
 }
 
 func newTestRepoWorkspace(t *testing.T, baseBranch, dir string, backend runtime.Backend) *repowork.Workspace {
-	workspace, err := repowork.NewWorkspace(baseBranch, dir, filepath.Base(dir), time.Minute, backend, slog.With("repo", "test"))
-	if err != nil {
-		t.Fatal(err)
+	return &repowork.Workspace{
+		BaseBranch: baseBranch,
+		Dir:        dir,
+		RepoName:   filepath.Base(dir),
+		GitTimeout: time.Minute,
+		Runtime:    backend,
+		Log:        logtest.Logger(t),
 	}
-	return workspace
 }
 
 func newTestRunner(t *testing.T, workspace *repowork.Workspace, backends map[harness.Name]agent.Backend, logDir string) *Runner {

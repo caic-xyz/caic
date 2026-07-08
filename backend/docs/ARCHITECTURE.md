@@ -300,6 +300,7 @@ graph TD
     pkg_internal_eventreplay["internal/eventreplay"]
     pkg_internal_httplog["internal/httplog"]
     pkg_internal_jsonutil["internal/jsonutil"]
+    pkg_internal_logtest["internal/logtest"]
     pkg_internal_mcp["internal/mcp"]
     pkg_internal_preferences["internal/preferences"]
     pkg_internal_smoketest["internal/smoketest"]
@@ -501,6 +502,7 @@ graph TD
 | `internal/forge/gitlab` | `internal/forge` |
 | `internal/httplog` | None |
 | `internal/jsonutil` | None |
+| `internal/logtest` | None |
 | `internal/mcp` | None |
 | `internal/preferences` | None |
 | `internal/repo` | `internal/forge` |

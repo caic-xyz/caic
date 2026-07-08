@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +19,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/logtest"
 	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
@@ -128,11 +128,7 @@ func (w *testWire) ParseMessage(line []byte) ([]agent.Message, error) {
 
 func newTestSessionRunner(t *testing.T, workspace *repowork.Workspace, logDir string, backends map[harness.Name]agent.Backend) *SessionRunner {
 	if workspace == nil {
-		var err error
-		workspace, err = repowork.NewWorkspace("", "", "", time.Minute, nil, slog.With("repo", "test"))
-		if err != nil {
-			t.Fatal(err)
-		}
+		workspace = &repowork.Workspace{GitTimeout: time.Minute, Log: logtest.Logger(t)}
 	}
 	return &SessionRunner{Backends: backends, Workspace: workspace, Logs: &LogStore{LogDir: logDir}}
 }

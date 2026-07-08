@@ -117,9 +117,12 @@ func (s *Service) DiscoverWorkspace(ctx context.Context, abs string) (InitResult
 		ForgeOwner:       forgeOwner,
 		ForgeRepo:        forgeRepo,
 	}
-	workspace, err := repowork.NewWorkspace(info.BaseBranch, info.AbsPath, info.RelPath, time.Minute, nil, slog.With("repo", filepath.Base(info.AbsPath)))
-	if err != nil {
-		return InitResult{}, fmt.Errorf("create repo workspace: %w", err)
+	workspace := &repowork.Workspace{
+		BaseBranch: info.BaseBranch,
+		Dir:        info.AbsPath,
+		RepoName:   info.RelPath,
+		GitTimeout: time.Minute,
+		Log:        slog.With("repo", filepath.Base(info.AbsPath)),
 	}
 	return InitResult{Info: info, Workspace: workspace}, nil
 }
@@ -251,10 +254,12 @@ func (s *Service) Clone(ctx context.Context, req CloneRequest) (repo.Info, error
 	}
 	remote := checkout.RemoteOriginURL(ctx)
 	info := repo.Info{RelPath: targetPath, AbsPath: absTarget, BaseBranch: branch, BaseBranchRemote: remoteName, Remote: remote}
-	workspace, err := repowork.NewWorkspace(info.BaseBranch, info.AbsPath, info.RelPath, time.Minute, nil, slog.With("repo", filepath.Base(info.AbsPath)))
-	if err != nil {
-		_ = os.RemoveAll(absTarget)
-		return repo.Info{}, repoError(ErrorInternal, "create repo workspace: "+err.Error())
+	workspace := &repowork.Workspace{
+		BaseBranch: info.BaseBranch,
+		Dir:        info.AbsPath,
+		RepoName:   info.RelPath,
+		GitTimeout: time.Minute,
+		Log:        slog.With("repo", filepath.Base(info.AbsPath)),
 	}
 	info.ForgeKind, info.ForgeOwner, info.ForgeRepo = parseForgeRemote(ctx, remote)
 	s.registry.Add(&info)
