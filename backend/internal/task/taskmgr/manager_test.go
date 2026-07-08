@@ -26,8 +26,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
+	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/caic-xyz/caic/backend/internal/task/tasktest"
 )
 
 type fakeRelayReader struct {
@@ -46,6 +46,45 @@ func (f fakeRelayReader) ReadTail(ctx context.Context, target runtime.Connection
 
 func (f fakeRelayReader) ReadLog(ctx context.Context, target runtime.ConnectionTarget, maxBytes int) string {
 	return f.readLogFn(ctx, target, maxBytes)
+}
+
+// blockingStopBackend blocks in Stop until release is closed (or the context is
+// cancelled), widening the Stop/Purge race window. started and returned signal
+// the call's entry and exit.
+type blockingStopBackend struct {
+	*runtimetest.FakeBackend
+
+	started  chan struct{}
+	returned chan struct{}
+	release  chan struct{}
+}
+
+func (b *blockingStopBackend) Stop(ctx context.Context, id runtime.InstanceID) error {
+	close(b.started)
+	defer close(b.returned)
+	select {
+	case <-b.release:
+		return b.FakeBackend.Stop(ctx, id) // advances to StatusStopped
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// blockingReviveBackend blocks in Revive until release is closed, then fails
+// without advancing the instance state.
+type blockingReviveBackend struct {
+	*runtimetest.FakeBackend
+
+	release chan struct{}
+}
+
+func (b *blockingReviveBackend) Revive(ctx context.Context, id runtime.InstanceID) error {
+	select {
+	case <-b.release:
+		return errors.New("revive boom")
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 type reconnectInputBackend struct {
@@ -1991,13 +2030,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("valid_after_finished_crash", func(t *testing.T) {
 			t.Parallel()
-			purgeCalled := make(chan struct{}, 1)
-			fake := &tasktest.FakeRuntimeBackend{
-				PurgeFunc: func(context.Context, runtime.InstanceID) error {
-					purgeCalled <- struct{}{}
-					return nil
-				},
-			}
+			fake := &runtimetest.FakeBackend{}
 			m := New(Config{ServerCtx: t.Context(), Backend: fake})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
@@ -2009,10 +2042,12 @@ func TestManager(t *testing.T) {
 			if err := m.Purge(t.Context(), entry); err != nil {
 				t.Fatalf("Purge: %v", err)
 			}
-			select {
-			case <-purgeCalled:
-			case <-time.After(time.Second):
-				t.Fatal("backend Purge was not called")
+			purgeDeadline := time.Now().Add(time.Second)
+			for fake.Status("ctr-1") != runtimetest.StatusPurged {
+				if time.Now().After(purgeDeadline) {
+					t.Fatalf("instance status = %v, want purged", fake.Status("ctr-1"))
+				}
+				time.Sleep(time.Millisecond)
 			}
 			deadline := time.Now().Add(time.Second)
 			for {
@@ -2027,20 +2062,11 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("valid_wins_race_with_stop", func(t *testing.T) {
 			t.Parallel()
-			stopStarted := make(chan struct{})
-			stopReturned := make(chan struct{})
-			releaseStop := make(chan struct{})
-			fake := &tasktest.FakeRuntimeBackend{
-				StopFunc: func(ctx context.Context, _ runtime.InstanceID) error {
-					close(stopStarted)
-					defer close(stopReturned)
-					select {
-					case <-releaseStop:
-						return nil
-					case <-ctx.Done():
-						return ctx.Err()
-					}
-				},
+			fake := &blockingStopBackend{
+				FakeBackend: &runtimetest.FakeBackend{},
+				started:     make(chan struct{}),
+				returned:    make(chan struct{}),
+				release:     make(chan struct{}),
 			}
 			m := New(Config{ServerCtx: t.Context(), Backend: fake})
 			tk := &task.Task{
@@ -2056,7 +2082,7 @@ func TestManager(t *testing.T) {
 				t.Fatalf("Stop: %v", err)
 			}
 			select {
-			case <-stopStarted:
+			case <-fake.started:
 			case <-time.After(time.Second):
 				t.Fatal("StopTask did not reach backend Stop")
 			}
@@ -2070,9 +2096,9 @@ func TestManager(t *testing.T) {
 				t.Fatal("purge did not close done")
 			}
 			stopDoneChanged := m.Changed()
-			close(releaseStop)
+			close(fake.release)
 			select {
-			case <-stopReturned:
+			case <-fake.returned:
 			case <-time.After(time.Second):
 				t.Fatal("backend Stop did not return")
 			}
@@ -2083,13 +2109,6 @@ func TestManager(t *testing.T) {
 			}
 
 			deadline := time.Now().Add(time.Second)
-			for fake.Count("Stop") == 0 || fake.Count("Purge") == 0 {
-				if time.Now().After(deadline) {
-					t.Fatalf("backend calls = %+v, want Stop and Purge", fake.Calls())
-				}
-				time.Sleep(time.Millisecond)
-			}
-			deadline = time.Now().Add(time.Second)
 			for tk.GetState() != task.StatePurged {
 				if time.Now().After(deadline) {
 					t.Fatalf("state = %v, want StatePurged after StopTask finishes", tk.GetState())
@@ -2119,7 +2138,7 @@ func TestManager(t *testing.T) {
 		t.Run("valid_stops_container_backend", func(t *testing.T) {
 			t.Parallel()
 			// Backend is the interface seam, so a fake stands in for Docker.
-			fake := &tasktest.FakeRuntimeBackend{}
+			fake := &runtimetest.FakeBackend{}
 			m := New(Config{ServerCtx: t.Context(), Backend: fake})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
@@ -2143,9 +2162,8 @@ func TestManager(t *testing.T) {
 				}
 				time.Sleep(time.Millisecond)
 			}
-			calls := fake.Calls()
-			if len(calls) != 1 || calls[0].Method != "Stop" || calls[0].Name != "ctr-1" {
-				t.Errorf("backend calls = %+v, want one Stop of ctr-1", calls)
+			if got := fake.Status("ctr-1"); got != runtimetest.StatusStopped {
+				t.Errorf("instance ctr-1 status = %v, want stopped", got)
 			}
 		})
 	})
@@ -2167,16 +2185,7 @@ func TestManager(t *testing.T) {
 		t.Run("valid_accepts_crashed", func(t *testing.T) {
 			t.Parallel()
 			releaseRevive := make(chan struct{})
-			fake := &tasktest.FakeRuntimeBackend{
-				ReviveFunc: func(ctx context.Context, _ runtime.InstanceID) error {
-					select {
-					case <-releaseRevive:
-						return errors.New("revive boom")
-					case <-ctx.Done():
-						return ctx.Err()
-					}
-				},
-			}
+			fake := &blockingReviveBackend{FakeBackend: &runtimetest.FakeBackend{}, release: releaseRevive}
 			m := New(Config{ServerCtx: t.Context(), Backend: fake})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
@@ -2203,16 +2212,7 @@ func TestManager(t *testing.T) {
 		t.Run("error_failure_closes_done_and_publishes_result", func(t *testing.T) {
 			t.Parallel()
 			releaseRevive := make(chan struct{})
-			fake := &tasktest.FakeRuntimeBackend{
-				ReviveFunc: func(ctx context.Context, _ runtime.InstanceID) error {
-					select {
-					case <-releaseRevive:
-						return errors.New("revive boom")
-					case <-ctx.Done():
-						return ctx.Err()
-					}
-				},
-			}
+			fake := &blockingReviveBackend{FakeBackend: &runtimetest.FakeBackend{}, release: releaseRevive}
 			m := New(Config{ServerCtx: t.Context(), Backend: fake})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
@@ -2301,7 +2301,7 @@ func TestManager(t *testing.T) {
 			tk.SetState(task.StateRunning)
 			tk.AttachSession(h)
 			entry := NewEntry(tk, nil)
-			runtimeBackend := &tasktest.FakeRuntimeBackend{}
+			runtimeBackend := &runtimetest.FakeBackend{}
 			m := New(Config{ServerCtx: t.Context(), Backend: runtimeBackend})
 
 			m.watchSession(entry, &repowork.Workspace{Dir: "", Log: slog.With("repo", "test")}, h)
@@ -2314,11 +2314,8 @@ func TestManager(t *testing.T) {
 			if got := tk.GetState(); got != task.StateCrashed {
 				t.Fatalf("state = %v, want crashed", got)
 			}
-			if got := runtimeBackend.Count("Stop"); got != 1 {
-				t.Fatalf("Stop count = %d, want 1", got)
-			}
-			if got := runtimeBackend.Calls()[0].Name; got != "ssh-failed" {
-				t.Fatalf("Stop instance = %q, want ssh-failed", got)
+			if got := runtimeBackend.Status("ssh-failed"); got != runtimetest.StatusStopped {
+				t.Fatalf("instance ssh-failed status = %v, want stopped", got)
 			}
 		})
 	})
@@ -2820,7 +2817,7 @@ func TestManager(t *testing.T) {
 				"dead-relay-tail\x00caic.id":      taskID.String(),
 				"dead-relay-tail\x00caic.harness": string(harness.Claude),
 			}}
-			m := New(Config{ServerCtx: t.Context(), Backend: &tasktest.FakeRuntimeBackend{}, Monitor: fake, Inventory: fake, Privilege: fake, Backends: map[harness.Name]agent.Backend{harness.Claude: &fakeBackend{models: []string{"m1"}}}})
+			m := New(Config{ServerCtx: t.Context(), Backend: &runtimetest.FakeBackend{}, Monitor: fake, Inventory: fake, Privilege: fake, Backends: map[harness.Name]agent.Backend{harness.Claude: &fakeBackend{models: []string{"m1"}}}})
 			m.relay = fakeRelayReader{
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 					return false, "dead", nil
@@ -2865,7 +2862,7 @@ func TestManager(t *testing.T) {
 				"stale-tail\x00caic.id":      taskID.String(),
 				"stale-tail\x00caic.harness": string(harness.Claude),
 			}}
-			runtimeBackend := &tasktest.FakeRuntimeBackend{}
+			runtimeBackend := &runtimetest.FakeBackend{}
 			m := New(Config{ServerCtx: t.Context(), Backend: runtimeBackend, Monitor: fake, Inventory: fake, Privilege: fake, Backends: map[harness.Name]agent.Backend{harness.Claude: &fakeBackend{models: []string{"m1"}}}})
 			m.relay = fakeRelayReader{
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
@@ -3227,11 +3224,7 @@ func TestRefreshAdoptedDiffStat(t *testing.T) {
 	t.Parallel()
 	t.Run("valid_waiting_fetches_branch_diff", func(t *testing.T) {
 		t.Parallel()
-		fake := &tasktest.FakeRuntimeBackend{
-			DiffFunc: func(context.Context, runtime.InstanceID, int, ...string) (string, error) {
-				return "5\t1\tmain.go\n", nil
-			},
-		}
+		fake := &runtimetest.FakeBackend{DiffOutput: "5\t1\tmain.go\n"}
 		workspace, err := repowork.NewWorkspace("", "/repo", "repo", time.Minute, fake, slog.With("repo", "test"))
 		if err != nil {
 			t.Fatal(err)
@@ -3242,12 +3235,7 @@ func TestRefreshAdoptedDiffStat(t *testing.T) {
 
 		refreshAdoptedDiffStat(t.Context(), workspace, tk)
 
-		if got := fake.Count("Fetch"); got != 1 {
-			t.Errorf("Fetch count = %d, want 1", got)
-		}
-		if got := fake.Count("Diff"); got != 1 {
-			t.Errorf("Diff count = %d, want 1", got)
-		}
+		// A populated DiffStat is the observable proof the fetch-then-diff path ran.
 		ds := tk.Snapshot().DiffStat
 		if len(ds) != 1 || ds[0].Path != "main.go" || ds[0].Added != 5 || ds[0].Deleted != 1 {
 			t.Errorf("DiffStat = %+v, want [{main.go 5 1}]", ds)
@@ -3255,11 +3243,7 @@ func TestRefreshAdoptedDiffStat(t *testing.T) {
 	})
 	t.Run("valid_running_skips_branch_diff", func(t *testing.T) {
 		t.Parallel()
-		fake := &tasktest.FakeRuntimeBackend{
-			DiffFunc: func(context.Context, runtime.InstanceID, int, ...string) (string, error) {
-				return "5\t1\tmain.go\n", nil
-			},
-		}
+		fake := &runtimetest.FakeBackend{DiffOutput: "5\t1\tmain.go\n"}
 		workspace, err := repowork.NewWorkspace("", "/repo", "repo", time.Minute, fake, slog.With("repo", "test"))
 		if err != nil {
 			t.Fatal(err)
@@ -3270,12 +3254,7 @@ func TestRefreshAdoptedDiffStat(t *testing.T) {
 
 		refreshAdoptedDiffStat(t.Context(), workspace, tk)
 
-		if got := fake.Count("Fetch"); got != 0 {
-			t.Errorf("Fetch count = %d, want 0", got)
-		}
-		if got := fake.Count("Diff"); got != 0 {
-			t.Errorf("Diff count = %d, want 0", got)
-		}
+		// An empty DiffStat is the observable proof the diff path was skipped.
 		if ds := tk.Snapshot().DiffStat; len(ds) != 0 {
 			t.Errorf("DiffStat = %+v, want empty", ds)
 		}

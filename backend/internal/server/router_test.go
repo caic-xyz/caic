@@ -35,13 +35,13 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
+	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
-	"github.com/caic-xyz/caic/backend/internal/task/tasktest"
 	"github.com/caic-xyz/caic/gomode"
 	"github.com/caic-xyz/caic/gomode/voicegateway/voicertc"
 	"github.com/caic-xyz/caic/oauth/oauthclient"
@@ -1097,12 +1097,7 @@ func TestSignalProcess(t *testing.T) {
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
 		tk.SetRuntimeConnectionInfo("ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", "", 0)
 		insertTestTask(t, s, "t1", tk)
-		backend := &tasktest.FakeRuntimeBackend{
-			SignalFunc: func(context.Context, runtime.InstanceID, int, string) error {
-				t.Fatal("Signal should not be called")
-				return nil
-			},
-		}
+		backend := &runtimetest.FakeBackend{}
 		processes := &runtimeProcessHandlers{
 			taskMgr:     s.taskMgr,
 			backend:     backend,
@@ -1119,6 +1114,9 @@ func TestSignalProcess(t *testing.T) {
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
 		}
+		if _, ok := backend.LastSignal("ctr"); ok {
+			t.Error("no signal should have been delivered")
+		}
 	})
 
 	t.Run("valid", func(t *testing.T) {
@@ -1127,18 +1125,7 @@ func TestSignalProcess(t *testing.T) {
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
 		tk.SetRuntimeConnectionInfo("ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", "", 0)
 		insertTestTask(t, s, "t1", tk)
-		var gotPID int
-		var gotSignal string
-		backend := &tasktest.FakeRuntimeBackend{
-			SignalFunc: func(_ context.Context, id runtime.InstanceID, pid int, sig string) error {
-				if id != "ctr" {
-					t.Errorf("instance = %q, want ctr", id)
-				}
-				gotPID = pid
-				gotSignal = sig
-				return nil
-			},
-		}
+		backend := &runtimetest.FakeBackend{}
 		processes := &runtimeProcessHandlers{
 			taskMgr:     s.taskMgr,
 			backend:     backend,
@@ -1155,11 +1142,15 @@ func TestSignalProcess(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
-		if gotPID != 123 {
-			t.Errorf("pid = %d, want 123", gotPID)
+		sig, ok := backend.LastSignal("ctr")
+		if !ok {
+			t.Fatal("no signal delivered to ctr, want one")
 		}
-		if gotSignal != "SIGKILL" {
-			t.Errorf("signal = %q, want SIGKILL", gotSignal)
+		if sig.PID != 123 {
+			t.Errorf("pid = %d, want 123", sig.PID)
+		}
+		if sig.Signal != "SIGKILL" {
+			t.Errorf("signal = %q, want SIGKILL", sig.Signal)
 		}
 	})
 }

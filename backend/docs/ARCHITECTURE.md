@@ -280,9 +280,9 @@ graph TD
   subgraph Task_Runtime["Task Runtime"]
     pkg_internal_runtime["internal/runtime"]
     pkg_internal_runtime_mdruntime["internal/runtime/mdruntime"]
+    pkg_internal_runtime_runtimetest["internal/runtime/runtimetest"]
     pkg_internal_task["internal/task"]
     pkg_internal_task_taskmgr["internal/task/taskmgr"]
-    pkg_internal_task_tasktest["internal/task/tasktest"]
   end
 
   subgraph Repo["Repo"]
@@ -411,6 +411,7 @@ graph TD
   pkg_internal_runtime --> pkg_internal_agent_harness
   pkg_internal_runtime_mdruntime --> pkg_internal_agent_harness
   pkg_internal_runtime_mdruntime --> pkg_internal_runtime
+  pkg_internal_runtime_runtimetest --> pkg_internal_runtime
   pkg_internal_server --> pkg_frontend
   pkg_internal_server --> pkg_internal_agent
   pkg_internal_server --> pkg_internal_agent_harness
@@ -466,7 +467,6 @@ graph TD
   pkg_internal_task_taskmgr --> pkg_internal_repo_repowork
   pkg_internal_task_taskmgr --> pkg_internal_runtime
   pkg_internal_task_taskmgr --> pkg_internal_task
-  pkg_internal_task_tasktest --> pkg_internal_runtime
 ```
 
 ## Package Dependencies
@@ -508,6 +508,7 @@ graph TD
 | `internal/repo/repowork` | `internal/agent`, `internal/runtime` |
 | `internal/runtime` | `internal/agent/harness` |
 | `internal/runtime/mdruntime` | `internal/agent/harness`, `internal/runtime` |
+| `internal/runtime/runtimetest` | `internal/runtime` |
 | `internal/server` | `frontend`, `internal/agent`, `internal/agent/harness`, `internal/auth`, `internal/autoupdate`, `internal/bot`, `internal/ci`, `internal/eventreplay`, `internal/forge`, `internal/forge/forgecache`, `internal/forge/forgemgr`, `internal/forge/github`, `internal/forge/gitlab`, `internal/httplog`, `internal/mcp`, `internal/preferences`, `internal/repo`, `internal/repo/repomgr`, `internal/repo/repowork`, `internal/runtime`, `internal/server/api`, `internal/server/api/v1`, `internal/server/api/v1conv`, `internal/server/ipgeo`, `internal/task`, `internal/task/taskmgr`, `internal/usage` |
 | `internal/server/api` | None |
 | `internal/server/api/v1` | `internal/server/api` |
@@ -516,7 +517,6 @@ graph TD
 | `internal/smoketest` | `internal/agent`, `internal/agent/harness`, `internal/forge`, `internal/runtime`, `internal/task`, `internal/usage` |
 | `internal/task` | `internal/agent`, `internal/agent/harness`, `internal/forge`, `internal/jsonutil`, `internal/repo/repowork`, `internal/runtime` |
 | `internal/task/taskmgr` | `internal/agent`, `internal/agent/harness`, `internal/preferences`, `internal/repo/repowork`, `internal/runtime`, `internal/task` |
-| `internal/task/tasktest` | `internal/runtime` |
 | `internal/usage` | None |
 <!-- END GENERATED PACKAGE DEPENDENCIES -->
 
