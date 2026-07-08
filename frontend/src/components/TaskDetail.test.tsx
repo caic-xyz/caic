@@ -5,7 +5,7 @@ import { render } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { type JSX } from "solid-js";
 
-import type { EventMessage } from "@sdk/types.gen";
+import type { EventMessage, ISOTimestamp } from "@sdk/types.gen";
 
 const navigateMock = vi.fn();
 
@@ -305,6 +305,32 @@ describe("SSE connection", () => {
 
     expect(document.body.textContent).toContain("planning tool 1");
     expect(document.body.textContent).toContain("planning tool 2");
+  });
+
+  it("labels overage as a reached 5-hour quota", () => {
+    const created: FakeES[] = [];
+    const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
+    makeSyncReadyMock(created, capturedCb);
+
+    renderTaskDetail();
+    if (!capturedCb.value) throw new Error("taskEvents callback not captured");
+
+    capturedCb.value({
+      kind: "rateLimit",
+      ts: 1,
+      rateLimit: {
+        status: "rejected",
+        rateLimitType: "five_hour",
+        utilization: 1,
+        isUsingOverage: true,
+        resetsAt: "2024-03-21T04:26:40Z" as ISOTimestamp,
+        overageResetsAt: "2024-04-01T00:00:00Z" as ISOTimestamp,
+      },
+    });
+    vi.advanceTimersByTime(100);
+
+    expect(document.body.textContent).toContain("5-hour quota reached; using extra usage");
+    expect(document.body.textContent).not.toContain("monthly");
   });
 
   it("does not render empty usage metadata", () => {

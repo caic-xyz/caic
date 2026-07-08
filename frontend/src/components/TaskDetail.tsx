@@ -971,10 +971,24 @@ function SessionBoundaryItem(props: { event: EventMessage }) {
   );
 }
 
+function rateLimitLabel(rateLimitType: string | undefined): string {
+  switch (rateLimitType) {
+    case "five_hour":
+      return "5-hour quota";
+    case "seven_day":
+      return "7-day quota";
+    case "":
+    case undefined:
+      return "quota";
+    default:
+      return `${rateLimitType.replaceAll("_", "-")} quota`;
+  }
+}
+
 function RateLimitBanner(props: { ev: EventMessage }) {
   const rl = () => props.ev.rateLimit;
   const resetsLabel = () => {
-    const r = rl()?.isUsingOverage ? rl()?.overageResetsAt : rl()?.resetsAt;
+    const r = rl()?.resetsAt;
     if (!r) return "";
     const resetMS = Date.parse(r);
     if (!Number.isFinite(resetMS) || resetMS <= 0) return "";
@@ -983,8 +997,9 @@ function RateLimitBanner(props: { ev: EventMessage }) {
   };
   const rejectedLabel = () => {
     const r = rl();
-    if (r?.isUsingOverage) return `Using extra usage (${r.rateLimitType || "plan"} limit reached)`;
-    return `Rate limited (${r?.rateLimitType || "unknown"})`;
+    const label = rateLimitLabel(r?.rateLimitType);
+    if (r?.isUsingOverage) return `${label} reached; using extra usage`;
+    return `Rate limited (${label})`;
   };
   return (
     <Switch>
@@ -995,7 +1010,7 @@ function RateLimitBanner(props: { ev: EventMessage }) {
       </Match>
       <Match when={rl()?.status === "allowed_warning"}>
         <div class={styles.rateLimitWarning}>
-          Rate limit warning: {Math.round((rl()?.utilization ?? 0) * 100)}% of {rl()?.rateLimitType || "quota"} used{resetsLabel()}
+          Rate limit warning: {Math.round((rl()?.utilization ?? 0) * 100)}% of {rateLimitLabel(rl()?.rateLimitType)} used{resetsLabel()}
         </div>
       </Match>
     </Switch>
