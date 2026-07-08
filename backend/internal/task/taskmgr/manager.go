@@ -136,7 +136,7 @@ func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passe
 		backends:            cfg.Backends,
 		eventReplayFactory:  cfg.EventReplayFactory,
 		harnessEnv:          cfg.HarnessEnv,
-		runtimeStartTimeout: cfg.RuntimeStartTimeout,
+		runtimeStartTimeout: managerRuntimeStartTimeout(cfg.RuntimeStartTimeout),
 		prefs:               cfg.Prefs,
 		provider:            cfg.Provider,
 		workspaceRegistry:   workspaceRegistry,
@@ -145,11 +145,11 @@ func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passe
 		changed:             make(chan struct{}),
 	}
 	if _, ok := workspaceRegistry.Workspace(""); !ok {
-		noRepoWorkspace, err := repowork.NewWorkspace("", "", "", time.Minute, cfg.Backend, slog.With("repo", "(none)"))
-		if err != nil {
-			panic(err)
-		}
-		workspaceRegistry.RegisterWorkspace("", noRepoWorkspace)
+		workspaceRegistry.RegisterWorkspace("", &repowork.Workspace{
+			GitTimeout: time.Minute,
+			Runtime:    cfg.Backend,
+			Log:        slog.With("repo", "(none)"),
+		})
 	}
 	return m
 }
@@ -1171,6 +1171,13 @@ func (m *Manager) sessions(r *repowork.Workspace) *task.SessionRunner {
 
 func (m *Manager) runner(r *repowork.Workspace) *task.Runner {
 	return &task.Runner{Workspace: r, Sessions: m.sessions(r), RuntimeStartTimeout: m.runtimeStartTimeout}
+}
+
+func managerRuntimeStartTimeout(d time.Duration) time.Duration {
+	if d != 0 {
+		return d
+	}
+	return time.Hour
 }
 
 func (m *Manager) mountPathForRepo(relPath string) string {

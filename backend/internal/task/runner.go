@@ -66,7 +66,7 @@ type Runner struct {
 	// t.RuntimeRepos() through the runtime backend, keyed by repo index.
 	Workspace           *repowork.Workspace
 	Sessions            *SessionRunner
-	RuntimeStartTimeout time.Duration // Timeout for instance start (image pull); defaults to 1 hour.
+	RuntimeStartTimeout time.Duration // Timeout for instance start (image pull). Must be non-zero.
 }
 
 // Start performs branch/instance setup, starts the agent session, and sends
@@ -83,7 +83,6 @@ type Runner struct {
 //
 // The session is left open for follow-up messages via SendInput.
 func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string) (*SessionHandle, error) {
-	r.initDefaults()
 	ctx, task := trace.NewTask(ctx, "task.start:"+t.ID.String())
 	defer task.End()
 
@@ -183,7 +182,6 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 //  6. Close msgCh and logW, write log trailer.
 //  7. Build and return Result.
 func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
-	r.initDefaults()
 	ctx, task := trace.NewTask(ctx, "task.cleanup:"+t.ID.String())
 	defer task.End()
 
@@ -315,7 +313,6 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 // without removing it. The instance can be revived later. Unlike Cleanup,
 // this preserves git remotes and runtime config.
 func (r *Runner) StopTask(ctx context.Context, t *Task) {
-	r.initDefaults()
 	ctx, task := trace.NewTask(ctx, "task.stop:"+t.ID.String())
 	defer task.End()
 
@@ -406,7 +403,6 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 // ReviveTask restarts a stopped or crashed instance and resumes the agent session.
 // The instance's filesystem is preserved from the previous run.
 func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error) {
-	r.initDefaults()
 	ctx, task := trace.NewTask(ctx, "task.revive:"+t.ID.String())
 	defer task.End()
 
@@ -496,7 +492,6 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 // Harness, Model, and other immutable fields set. The method fills in
 // Runtime, Repos[*].Branch, and starts the session.
 func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *runtime.ForkOptions, resolvedGitHubToken string) (*SessionHandle, error) {
-	r.initDefaults()
 	ctx, task := trace.NewTask(ctx, "task.fork:"+source.ID.String()+"->"+fork.ID.String())
 	defer task.End()
 
@@ -672,23 +667,6 @@ func (r *Runner) logRelayDiag(ctx context.Context, tlog *slog.Logger, target run
 		return
 	}
 	tlog.Warn("relay.log tail on shutdown timeout", "log", tail)
-}
-
-// initDefaults populates the runtime start timeout and ensures Workspace/
-// Sessions default their own fields. Cheap and idempotent; Runner instances
-// are typically constructed fresh per call, so no sync.Once is needed here.
-func (r *Runner) initDefaults() {
-	if r.Workspace == nil {
-		workspace, err := repowork.NewWorkspace("", "", "", time.Minute, nil, slog.With("repo", "(none)"))
-		if err != nil {
-			panic(err)
-		}
-		r.Workspace = workspace
-	}
-	r.Sessions.initDefaults()
-	if r.RuntimeStartTimeout == 0 {
-		r.RuntimeStartTimeout = time.Hour
-	}
 }
 
 // runtime returns the runtime backend shared with the workspace. Workspace.

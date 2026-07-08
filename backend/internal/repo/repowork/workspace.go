@@ -68,15 +68,16 @@ type TaskView interface {
 // Workspace holds one repo's config and serializes branch/git/fetch/diff
 // operations across every task backed by that repo.
 type Workspace struct {
+	// Immutable
 	BaseBranch string
 	Dir        string          // Absolute path to the git repository.
 	RepoName   string          // Relative repo path (e.g. "github/caic"); empty for no-repo workspaces.
 	GitTimeout time.Duration   // Timeout for git/instance ops. Must be non-zero.
 	Runtime    runtime.Backend // Runtime provides runtime instance and repo diff/sync operations.
+	Log        *slog.Logger
 
 	branchMu sync.Mutex // Serializes branch creation (nextID + git branch) to avoid duplicate names.
 	nextID   int        // Next branch sequence number (protected by branchMu).
-	Log      *slog.Logger
 }
 
 // NewWorkspace creates a workspace for a managed git repository.

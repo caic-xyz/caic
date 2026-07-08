@@ -22,8 +22,8 @@ import (
 // SessionRunner manages agent sessions and dispatches backend messages into tasks.
 type SessionRunner struct {
 	Backends  map[harness.Name]agent.Backend
-	Workspace *repowork.Workspace
 	Logs      *LogStore
+	Workspace *repowork.Workspace
 }
 
 // Reconnect reattaches to a running relay, or starts a new agent session
@@ -45,7 +45,6 @@ type SessionRunner struct {
 //     process is started.
 //   - All-fail: reverts to StateWaiting.
 func (r *SessionRunner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (*SessionHandle, error) {
-	r.initDefaults()
 	ctx, task := trace.NewTask(ctx, "task.reconnect:"+t.ID.String())
 	defer task.End()
 
@@ -107,7 +106,7 @@ func (r *SessionRunner) Reconnect(ctx context.Context, t *Task, skipSideEffects 
 		close(msgCh)
 		<-dispatchDone
 		t.SetState(StateWaiting)
-		r.log().Error("attach relay failed", "br", primaryBranch, "instance", instanceID, "err", err)
+		r.Workspace.Log.Error("attach relay failed", "br", primaryBranch, "instance", instanceID, "err", err)
 		return nil, fmt.Errorf("reconnect: %w", err)
 	}
 
@@ -145,7 +144,6 @@ func (r *SessionRunner) EnsureSession(ctx context.Context, t *Task, h *SessionHa
 // transitions to StateRunning. If prompt is empty, the agent starts idle
 // and the task stays in its current state (typically StateWaiting).
 func (r *SessionRunner) StartSession(ctx context.Context, t *Task, prompt agent.Prompt) (*SessionHandle, error) {
-	r.initDefaults()
 	ctx, task := trace.NewTask(ctx, "task.start-session:"+t.ID.String())
 	defer task.End()
 
@@ -157,7 +155,7 @@ func (r *SessionRunner) StartSession(ctx context.Context, t *Task, prompt agent.
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
 	}
-	tlog := r.log().With("br", primaryBranch, "instance", instanceID)
+	tlog := r.Workspace.Log.With("br", primaryBranch, "instance", instanceID)
 
 	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false)
 	logW, err := r.Logs.Open(t)
@@ -210,7 +208,6 @@ func (r *SessionRunner) ClearContextSession(ctx context.Context, t *Task) (*Sess
 }
 
 func (r *SessionRunner) replaceSession(ctx context.Context, t *Task, prompt agent.Prompt, mode replaceSessionMode) (*SessionHandle, error) {
-	r.initDefaults()
 	traceName := "task.clear-context:"
 	if mode == replaceSessionRestart {
 		traceName = "task.restart:"
@@ -259,7 +256,7 @@ func (r *SessionRunner) replaceSession(ctx context.Context, t *Task, prompt agen
 		branch = p.Branch
 	}
 	instanceID := t.RuntimeInstanceID()
-	tlog := r.log().With("br", branch, "instance", instanceID)
+	tlog := r.Workspace.Log.With("br", branch, "instance", instanceID)
 	tlog.Info(mode.logMessage(), "hns", t.Harness)
 	target := t.RuntimeConnectionTarget()
 	opts := &agent.Options{
@@ -298,7 +295,6 @@ func (r *SessionRunner) replaceSession(ctx context.Context, t *Task, prompt agen
 // startMessageDispatch starts a goroutine that reads from msgCh and dispatches
 // to t.addMessage.
 func (r *SessionRunner) startMessageDispatch(ctx context.Context, t *Task, skipSideEffects bool) (msgCh chan agent.Message, dispatchDone <-chan struct{}) {
-	r.initDefaults()
 	// Capture all repos outside the goroutine to avoid races.
 	allRepos := t.RuntimeRepos()
 	instanceID := t.RuntimeInstanceID()
@@ -359,31 +355,8 @@ func (r *SessionRunner) emitDiffStatBranch(ctx context.Context, t *Task, id runt
 	}, false)
 }
 
-func (r *SessionRunner) initDefaults() {
-	if r.Workspace == nil {
-		workspace, err := repowork.NewWorkspace("", "", "", time.Minute, nil, slog.With("repo", "(none)"))
-		if err != nil {
-			panic(err)
-		}
-		r.Workspace = workspace
-	}
-	if r.Logs == nil {
-		r.Logs = &LogStore{}
-	}
-	if r.Backends == nil {
-		r.Backends = map[harness.Name]agent.Backend{}
-	}
-}
-
 func (r *SessionRunner) backend(name harness.Name) agent.Backend {
 	return r.Backends[name]
-}
-
-func (r *SessionRunner) log() *slog.Logger {
-	if r.Workspace == nil {
-		return slog.Default()
-	}
-	return r.Workspace.Log
 }
 
 // runtimeDir returns the working directory path inside a runtime instance.

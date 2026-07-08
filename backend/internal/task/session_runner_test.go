@@ -29,7 +29,7 @@ func TestSessionRunner(t *testing.T) {
 			for _, harness := range []harness.Name{harness.Codex, harness.OpenCode} {
 				t.Run(string(harness), func(t *testing.T) {
 					t.Parallel()
-					r := newTestSessionRunner(nil, "", nil)
+					r := newTestSessionRunner(t, nil, "", nil)
 					tk := &Task{
 						ID:            ksid.NewID(),
 						InitialPrompt: agent.Prompt{Text: "test"},
@@ -50,7 +50,7 @@ func TestSessionRunner(t *testing.T) {
 		t.Run("passes_history_to_attach_backend", func(t *testing.T) {
 			t.Parallel()
 			backend := &attachCaptureBackend{}
-			r := newTestSessionRunner(nil, filepath.Join(t.TempDir(), "logs"), map[harness.Name]agent.Backend{"test": backend})
+			r := newTestSessionRunner(t, nil, filepath.Join(t.TempDir(), "logs"), map[harness.Name]agent.Backend{"test": backend})
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -214,7 +214,7 @@ func TestSessionRunner(t *testing.T) {
 			{dir: "/opt/repos/foo", want: "/home/user/src/foo"},
 		}
 		for _, tc := range tests {
-			r := newTestSessionRunner(newTestRepoWorkspace("", tc.dir, nil), "", nil)
+			r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", tc.dir, nil), "", nil)
 			tk := tc.task
 			if tk == nil {
 				tk = &Task{}
@@ -231,7 +231,7 @@ func TestSessionRunner(t *testing.T) {
 		t.Run("ResultMessage", func(t *testing.T) {
 			t.Parallel()
 			stub := &stubContainer{}
-			r := newTestSessionRunner(newTestRepoWorkspace("", "/repo", stub), "", nil)
+			r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "/repo", stub), "", nil)
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
 			tk.SetState(StateRunning)
@@ -269,7 +269,7 @@ func TestSessionRunner(t *testing.T) {
 				t.Run(tool, func(t *testing.T) {
 					t.Parallel()
 					stub := &stubContainer{}
-					r := newTestSessionRunner(newTestRepoWorkspace("", "/repo", stub), "", nil)
+					r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "/repo", stub), "", nil)
 
 					tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
 					tk.SetState(StateRunning)
@@ -316,7 +316,7 @@ func TestSessionRunner(t *testing.T) {
 		t.Run("NonMutatingToolNoDiffStat", func(t *testing.T) {
 			t.Parallel()
 			stub := &stubContainer{}
-			r := newTestSessionRunner(newTestRepoWorkspace("", "", stub), "", nil)
+			r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "", stub), "", nil)
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
 			tk.SetState(StateRunning)
@@ -350,7 +350,7 @@ func TestSessionRunner(t *testing.T) {
 		t.Run("SkipSideEffects", func(t *testing.T) {
 			t.Parallel()
 			stub := &stubContainer{}
-			r := newTestSessionRunner(newTestRepoWorkspace("", "/repo", stub), "", nil)
+			r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "/repo", stub), "", nil)
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
 			tk.SetState(StateRunning)
@@ -377,7 +377,7 @@ func TestSessionRunner(t *testing.T) {
 
 		t.Run("DispatchDrainBeforeClose", func(t *testing.T) {
 			t.Parallel()
-			r := newTestSessionRunner(nil, "", nil)
+			r := newTestSessionRunner(t, nil, "", nil)
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateRunning)
@@ -421,7 +421,7 @@ func TestSessionRunner(t *testing.T) {
 				logDir := t.TempDir()
 				backend := &testBackend{}
 
-				r := newTestSessionRunner(newTestRepoWorkspace("", "", &stubContainer{}), logDir, map[harness.Name]agent.Backend{"test": backend})
+				r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "", &stubContainer{}), logDir, map[harness.Name]agent.Backend{"test": backend})
 
 				tk := &Task{
 					ID:            ksid.NewID(),
@@ -474,7 +474,7 @@ func TestSessionRunner(t *testing.T) {
 		logDir := t.TempDir()
 		backend := &testBackend{}
 
-		r := newTestSessionRunner(newTestRepoWorkspace("", "", &stubContainer{}), logDir, map[harness.Name]agent.Backend{"test": backend})
+		r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "", &stubContainer{}), logDir, map[harness.Name]agent.Backend{"test": backend})
 
 		tk := &Task{
 			ID:            ksid.NewID(),

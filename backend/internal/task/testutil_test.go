@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -125,7 +126,14 @@ func (w *testWire) ParseMessage(line []byte) ([]agent.Message, error) {
 	return w.parse(line)
 }
 
-func newTestSessionRunner(workspace *repowork.Workspace, logDir string, backends map[harness.Name]agent.Backend) *SessionRunner {
+func newTestSessionRunner(t *testing.T, workspace *repowork.Workspace, logDir string, backends map[harness.Name]agent.Backend) *SessionRunner {
+	if workspace == nil {
+		var err error
+		workspace, err = repowork.NewWorkspace("", "", "", time.Minute, nil, slog.With("repo", "test"))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	return &SessionRunner{Backends: backends, Workspace: workspace, Logs: &LogStore{LogDir: logDir}}
 }
 
