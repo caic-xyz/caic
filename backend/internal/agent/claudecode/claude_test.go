@@ -227,6 +227,15 @@ func TestBackend(t *testing.T) {
 			t.Fatalf("AgentArgs = %v, want deterministic permission mode", got)
 		}
 	})
+
+	t.Run("NewExposesClaudeModelAliases", func(t *testing.T) {
+		t.Parallel()
+		got := New().Models()
+		want := []string{"opus", "sonnet", "haiku", "fable"}
+		if !slices.Equal(got, want) {
+			t.Fatalf("Models = %v, want %v", got, want)
+		}
+	})
 }
 
 func containsArgPair(args []string, key, value string) bool {

@@ -75,7 +75,7 @@ type Prompt struct {
 type Options struct {
 	Target          runtime.ConnectionTarget
 	Dir             string // Working directory inside the runtime.
-	Model           string // Model alias ("opus", "sonnet", "haiku") or full ID. Empty = default.
+	Model           string // Model alias ("opus", "sonnet", "haiku", "fable") or full ID. Empty = default.
 	Effort          string // Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default.
 	InitialPrompt   Prompt // Initial prompt; never mutated after creation.
 	ResumeSessionID string
