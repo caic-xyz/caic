@@ -19,6 +19,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/logtest"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 )
 
 // fakeTaskView is a minimal TaskView implementation for tests. It cannot be
@@ -115,11 +116,11 @@ func TestRepoWorkspace(t *testing.T) {
 
 	t.Run("BranchDiffStat", func(t *testing.T) {
 		t.Parallel()
-		sc := &stubContainer{}
+		sc := newRecordingContainer()
 		r := newTestRepoWorkspace(t, "", "/repo", sc)
 		tv := &fakeTaskView{instanceID: "ctr-1", repo: []runtime.Repo{{HostPath: "/repo", Branch: "feature"}}}
 		ds := r.BranchDiffStat(t.Context(), tv)
-		if !sc.fetched {
+		if len(sc.fetchIDs) == 0 {
 			t.Error("BranchDiffStat did not call Fetch")
 		}
 		if len(sc.fetchIDs) != 1 || sc.fetchIDs[0] != "ctr-1" {
@@ -131,7 +132,7 @@ func TestRepoWorkspace(t *testing.T) {
 	})
 	t.Run("BranchDiffStatMultiRepoUsesInstanceID", func(t *testing.T) {
 		t.Parallel()
-		sc := &stubContainer{}
+		sc := newRecordingContainer()
 		r := newTestRepoWorkspace(t, "", "/home/user/src/caic", sc)
 		tv := &fakeTaskView{instanceID: "ctr-2", repo: []runtime.Repo{
 			{HostPath: "/home/user/src/caic", Branch: "caic-7", MountPath: "/home/user/src/caic"},
@@ -167,7 +168,7 @@ func TestRepoWorkspace(t *testing.T) {
 	})
 	t.Run("BranchDiffStatNoDir", func(t *testing.T) {
 		t.Parallel()
-		r := newTestRepoWorkspace(t, "", "", &stubContainer{})
+		r := newTestRepoWorkspace(t, "", "", &runtimetest.FakeBackend{})
 		if ds := r.BranchDiffStat(t.Context(), &fakeTaskView{}); ds != nil {
 			t.Errorf("BranchDiffStat with no dir = %+v, want nil", ds)
 		}
@@ -322,68 +323,31 @@ func TestDiffRepoPrefix(t *testing.T) {
 	}
 }
 
-// stubContainer implements runtime.Backend for testing. Diff returns a fixed
-// numstat line; Fetch records that it was called.
-type stubContainer struct {
-	fetched   bool
-	launchErr error // If set, Launch returns this error.
-	fetchErr  error // If set, Fetch returns this error.
-	stopped   bool
-	diffIDs   []runtime.InstanceID
-	fetchIDs  []runtime.InstanceID
-	diffIdxs  []int
+// recordingContainer is a fake runtime whose Diff reports a fixed one-file
+// numstat and which records the Fetch/Diff calls BranchDiffStat makes, so tests
+// can assert per-repo diffing by instance id and repo index.
+type recordingContainer struct {
+	*runtimetest.FakeBackend
+
+	fetchIDs []runtime.InstanceID
+	diffIDs  []runtime.InstanceID
+	diffIdxs []int
 }
 
-func (s *stubContainer) Launch(_ context.Context, _ []runtime.Repo, _ *runtime.StartOptions) (runtime.InstanceID, error) {
-	if s.launchErr != nil {
-		return "", s.launchErr
-	}
-	return "stub", nil
+func (c *recordingContainer) Fetch(ctx context.Context, id runtime.InstanceID) error {
+	c.fetchIDs = append(c.fetchIDs, id)
+	return c.FakeBackend.Fetch(ctx, id)
 }
 
-func (s *stubContainer) Connect(_ context.Context, id runtime.InstanceID, _ *runtime.StartOptions) (runtime.ConnectionInfo, error) {
-	return runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: string(id)}}, nil
+func (c *recordingContainer) Diff(ctx context.Context, id runtime.InstanceID, repoIdx int, args ...string) (string, error) {
+	c.diffIDs = append(c.diffIDs, id)
+	c.diffIdxs = append(c.diffIdxs, repoIdx)
+	return c.FakeBackend.Diff(ctx, id, repoIdx, args...)
 }
 
-func (s *stubContainer) Diff(_ context.Context, id runtime.InstanceID, repoIdx int, _ ...string) (string, error) {
-	s.diffIDs = append(s.diffIDs, id)
-	s.diffIdxs = append(s.diffIdxs, repoIdx)
-	return "5\t1\tmain.go\n", nil
-}
-
-func (s *stubContainer) Fetch(_ context.Context, id runtime.InstanceID) error {
-	s.fetched = true
-	s.fetchIDs = append(s.fetchIDs, id)
-	if s.fetchErr != nil {
-		return s.fetchErr
-	}
-	return nil
-}
-
-func (s *stubContainer) Stop(_ context.Context, _ runtime.InstanceID) error {
-	s.stopped = true
-	return nil
-}
-
-func (s *stubContainer) Purge(_ context.Context, _ runtime.InstanceID) error {
-	return nil
-}
-
-func (s *stubContainer) Revive(_ context.Context, _ runtime.InstanceID) error {
-	return nil
-}
-
-func (s *stubContainer) Fork(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo, _ *runtime.ForkOptions) (runtime.InstanceID, runtime.ConnectionInfo, []runtime.Repo, error) {
-	return "stub-fork", runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: "stub-fork"}}, nil, nil
-}
-func (s *stubContainer) VNCPort(_ context.Context, _ runtime.InstanceID) int { return 0 }
-
-func (s *stubContainer) Processes(_ context.Context, _ runtime.InstanceID) ([]runtime.ProcessInfo, error) {
-	return nil, nil
-}
-
-func (s *stubContainer) Signal(_ context.Context, _ runtime.InstanceID, _ int, _ string) error {
-	return nil
+// newRecordingContainer builds a recordingContainer with the fixed diff output.
+func newRecordingContainer() *recordingContainer {
+	return &recordingContainer{FakeBackend: &runtimetest.FakeBackend{DiffOutput: "5\t1\tmain.go\n"}}
 }
 
 // initTestRepo creates a bare "remote" and a local clone with one commit on

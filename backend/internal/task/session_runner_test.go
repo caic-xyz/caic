@@ -16,6 +16,7 @@ import (
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
@@ -49,7 +50,7 @@ func TestSessionRunner(t *testing.T) {
 		})
 		t.Run("passes_history_to_attach_backend", func(t *testing.T) {
 			t.Parallel()
-			backend := &attachCaptureBackend{}
+			backend := &attachCaptureBackend{testBackend: testBackend{FakeBackend: &agenttest.FakeBackend{}}}
 			r := newTestSessionRunner(t, nil, filepath.Join(t.TempDir(), "logs"), map[harness.Name]agent.Backend{"test": backend})
 			tk := &Task{
 				ID:            ksid.NewID(),
@@ -230,7 +231,7 @@ func TestSessionRunner(t *testing.T) {
 		t.Parallel()
 		t.Run("ResultMessage", func(t *testing.T) {
 			t.Parallel()
-			stub := &stubContainer{}
+			stub := &fetchRecorder{FakeBackend: testContainer()}
 			r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "/repo", stub), "", nil)
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
@@ -258,7 +259,7 @@ func TestSessionRunner(t *testing.T) {
 			case <-timeout:
 				t.Fatal("timed out waiting for message")
 			}
-			if !stub.fetched {
+			if !stub.fetched.Load() {
 				t.Error("Fetch was not called on result message")
 			}
 		})
@@ -268,7 +269,7 @@ func TestSessionRunner(t *testing.T) {
 			for _, tool := range []string{"Edit", "Bash", "Write", "NotebookEdit"} {
 				t.Run(tool, func(t *testing.T) {
 					t.Parallel()
-					stub := &stubContainer{}
+					stub := &fetchRecorder{FakeBackend: testContainer()}
 					r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "/repo", stub), "", nil)
 
 					tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
@@ -305,7 +306,7 @@ func TestSessionRunner(t *testing.T) {
 					if len(ds.DiffStat) != 1 || ds.DiffStat[0].Path != "main.go" {
 						t.Errorf("DiffStat = %+v, want [{main.go 5 1}]", ds.DiffStat)
 					}
-					if stub.fetched {
+					if stub.fetched.Load() {
 						t.Error("Fetch was called for mutating tool result")
 					}
 					close(msgCh)
@@ -315,7 +316,7 @@ func TestSessionRunner(t *testing.T) {
 
 		t.Run("NonMutatingToolNoDiffStat", func(t *testing.T) {
 			t.Parallel()
-			stub := &stubContainer{}
+			stub := &fetchRecorder{FakeBackend: testContainer()}
 			r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "", stub), "", nil)
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
@@ -341,7 +342,7 @@ func TestSessionRunner(t *testing.T) {
 			if _, ok := msg.(*agent.DiffStatMessage); ok {
 				t.Error("unexpected DiffStatMessage emitted for non-mutating tool")
 			}
-			if stub.fetched {
+			if stub.fetched.Load() {
 				t.Error("Fetch was called for non-mutating tool")
 			}
 			close(msgCh)
@@ -349,7 +350,7 @@ func TestSessionRunner(t *testing.T) {
 
 		t.Run("SkipSideEffects", func(t *testing.T) {
 			t.Parallel()
-			stub := &stubContainer{}
+			stub := &fetchRecorder{FakeBackend: testContainer()}
 			r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "/repo", stub), "", nil)
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
@@ -370,7 +371,7 @@ func TestSessionRunner(t *testing.T) {
 			close(msgCh)
 			<-done
 
-			if stub.fetched {
+			if stub.fetched.Load() {
 				t.Error("Fetch was called despite skipSideEffects=true")
 			}
 		})
@@ -419,9 +420,9 @@ func TestSessionRunner(t *testing.T) {
 			t.Run(startState.String(), func(t *testing.T) {
 				t.Parallel()
 				logDir := t.TempDir()
-				backend := &testBackend{}
+				backend := &testBackend{FakeBackend: &agenttest.FakeBackend{}}
 
-				r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "", &stubContainer{}), logDir, map[harness.Name]agent.Backend{"test": backend})
+				r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "", testContainer()), logDir, map[harness.Name]agent.Backend{"test": backend})
 
 				tk := &Task{
 					ID:            ksid.NewID(),
@@ -472,9 +473,9 @@ func TestSessionRunner(t *testing.T) {
 	t.Run("RestartSession/LogContainsContextCleared", func(t *testing.T) {
 		t.Parallel()
 		logDir := t.TempDir()
-		backend := &testBackend{}
+		backend := &testBackend{FakeBackend: &agenttest.FakeBackend{}}
 
-		r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "", &stubContainer{}), logDir, map[harness.Name]agent.Backend{"test": backend})
+		r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "", testContainer()), logDir, map[harness.Name]agent.Backend{"test": backend})
 
 		tk := &Task{
 			ID:            ksid.NewID(),

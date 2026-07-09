@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"iter"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -22,40 +21,10 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
+	"github.com/caic-xyz/caic/backend/internal/mcp/mcptest"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/oauth"
 )
-
-// fakeMCPRegistry is a minimal mcpRegistry that surfaces canned errors so the
-// dispatcher's error categorization can be tested in isolation.
-type fakeMCPRegistry struct {
-	callErr error
-	readErr error
-}
-
-func (f fakeMCPRegistry) Instructions(context.Context) (string, error) {
-	return "Use fake test tools.", nil
-}
-
-func (f fakeMCPRegistry) Tools(context.Context) ([]mcp.ToolDescriptor, error) {
-	return nil, nil
-}
-
-func (f fakeMCPRegistry) CallTool(context.Context, string, json.RawMessage) (mcp.RawToolResult, error) {
-	return mcp.RawToolResult{}, f.callErr
-}
-
-func (f fakeMCPRegistry) ListResources(context.Context) mcp.ResourcesListResult {
-	return mcp.ResourcesListResult{}
-}
-
-func (f fakeMCPRegistry) ReadResource(context.Context, string) (mcp.ResourcesReadResult, error) {
-	return mcp.ResourcesReadResult{}, f.readErr
-}
-
-func (f fakeMCPRegistry) SubscribeResourceUpdates(context.Context, mcp.SubscriptionFilter) (iter.Seq2[mcp.ResourceUpdate, error], error) {
-	return func(func(mcp.ResourceUpdate, error) bool) {}, nil
-}
 
 func mcpRequestJSON(method, paramsFields string) string {
 	if paramsFields == "{}" || paramsFields == "" {
@@ -509,7 +478,7 @@ func TestMCPHandlers(t *testing.T) {
 	// must surface as an internal error, not as invalid params.
 	t.Run("toolCallBackendError", func(t *testing.T) {
 		t.Parallel()
-		h := &mcp.Handler{Registry: fakeMCPRegistry{callErr: errors.New("backend unavailable")}, ServerInfo: mcp.Implementation{Name: "caic"}}
+		h := &mcp.Handler{Registry: mcptest.FakeRegistry{CallErr: errors.New("backend unavailable")}, ServerInfo: mcp.Implementation{Name: "caic"}}
 		body := mcpRequestJSON("tools/call", `"name":"tasks_list","arguments":{}`)
 		w, resp := postMCP(t, h, "tools/call", "tasks_list", body)
 		if w.Code != http.StatusOK {
@@ -523,7 +492,7 @@ func TestMCPHandlers(t *testing.T) {
 	// Bad client input (unknown tool) stays an invalid-params error.
 	t.Run("toolCallInvalidParams", func(t *testing.T) {
 		t.Parallel()
-		h := &mcp.Handler{Registry: fakeMCPRegistry{callErr: mcp.ErrInvalidParams("unknown tool: nope")}, ServerInfo: mcp.Implementation{Name: "caic"}}
+		h := &mcp.Handler{Registry: mcptest.FakeRegistry{CallErr: mcp.ErrInvalidParams("unknown tool: nope")}, ServerInfo: mcp.Implementation{Name: "caic"}}
 		body := mcpRequestJSON("tools/call", `"name":"nope","arguments":{}`)
 		_, resp := postMCP(t, h, "tools/call", "nope", body)
 		if resp.Error == nil || resp.Error.Code != mcp.InvalidParamsCode {
@@ -534,12 +503,12 @@ func TestMCPHandlers(t *testing.T) {
 	// A resource backend fault is internal; an unknown resource is invalid params.
 	t.Run("resourceReadErrors", func(t *testing.T) {
 		t.Parallel()
-		internal := &mcp.Handler{Registry: fakeMCPRegistry{readErr: errors.New("snapshot failed")}, ServerInfo: mcp.Implementation{Name: "caic"}}
+		internal := &mcp.Handler{Registry: mcptest.FakeRegistry{ReadErr: errors.New("snapshot failed")}, ServerInfo: mcp.Implementation{Name: "caic"}}
 		_, resp := postMCP(t, internal, "resources/read", "caic://tasks", mcpRequestJSON("resources/read", `"uri":"caic://tasks"`))
 		if resp.Error == nil || resp.Error.Code != mcp.InternalErrorCode {
 			t.Fatalf("error = %#v, want internal error", resp.Error)
 		}
-		notFound := &mcp.Handler{Registry: fakeMCPRegistry{readErr: mcp.ErrInvalidParams("unknown resource: caic://nope")}, ServerInfo: mcp.Implementation{Name: "caic"}}
+		notFound := &mcp.Handler{Registry: mcptest.FakeRegistry{ReadErr: mcp.ErrInvalidParams("unknown resource: caic://nope")}, ServerInfo: mcp.Implementation{Name: "caic"}}
 		_, resp = postMCP(t, notFound, "resources/read", "caic://nope", mcpRequestJSON("resources/read", `"uri":"caic://nope"`))
 		if resp.Error == nil || resp.Error.Code != mcp.InvalidParamsCode {
 			t.Fatalf("error = %#v, want invalid params", resp.Error)

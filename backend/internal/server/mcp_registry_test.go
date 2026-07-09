@@ -7,20 +7,13 @@ import (
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
+	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
-
-// modelListBackend is a stub backend with caller-specified model support.
-type modelListBackend struct {
-	stubBackend
-
-	models []string
-}
-
-func (b modelListBackend) Models() []string { return b.models }
 
 func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 	t.Parallel()
@@ -177,8 +170,8 @@ func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 func newMCPTaskCreateTestRouter(t *testing.T) *testRouter {
 	s := newTestRouter(t)
 	s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{
-		harness.Claude: modelListBackend{models: []string{"claude-default"}},
-		harness.Pi:     modelListBackend{models: []string{"pi-default"}},
+		harness.Claude: &agenttest.FakeBackend{ModelList: []string{"claude-default"}, WireFactory: claudecode.New().NewWire},
+		harness.Pi:     &agenttest.FakeBackend{ModelList: []string{"pi-default"}, WireFactory: claudecode.New().NewWire},
 	})
 	s.taskMgr.RegisterWorkspace("myrepo", newRouterTestWorkspace(t, "main", t.TempDir()))
 	return s

@@ -209,6 +209,7 @@ graph TD
   pkg_internal_agent --> pkg_internal_agent_relay
   pkg_internal_agent --> pkg_internal_runtime
   pkg_internal_agent_agenttest --> pkg_internal_agent
+  pkg_internal_agent_agenttest --> pkg_internal_agent_harness
   pkg_internal_agent_backends --> pkg_internal_agent
   pkg_internal_agent_backends --> pkg_internal_agent_claudecode
   pkg_internal_agent_backends --> pkg_internal_agent_codex
@@ -302,6 +303,7 @@ graph TD
     pkg_internal_jsonutil["internal/jsonutil"]
     pkg_internal_logtest["internal/logtest"]
     pkg_internal_mcp["internal/mcp"]
+    pkg_internal_mcp_mcptest["internal/mcp/mcptest"]
     pkg_internal_preferences["internal/preferences"]
     pkg_internal_smoketest["internal/smoketest"]
     pkg_internal_usage["internal/usage"]
@@ -317,6 +319,7 @@ graph TD
   pkg_internal_agent --> pkg_internal_agent_relay
   pkg_internal_agent --> pkg_internal_runtime
   pkg_internal_agent_agenttest --> pkg_internal_agent
+  pkg_internal_agent_agenttest --> pkg_internal_agent_harness
   pkg_internal_agent_backends --> pkg_internal_agent
   pkg_internal_agent_backends --> pkg_internal_agent_claudecode
   pkg_internal_agent_backends --> pkg_internal_agent_codex
@@ -403,6 +406,7 @@ graph TD
   pkg_internal_forge_forgemgr --> pkg_internal_repo
   pkg_internal_forge_github --> pkg_internal_forge
   pkg_internal_forge_gitlab --> pkg_internal_forge
+  pkg_internal_mcp_mcptest --> pkg_internal_mcp
   pkg_internal_repo --> pkg_internal_forge
   pkg_internal_repo_repomgr --> pkg_internal_forge
   pkg_internal_repo_repomgr --> pkg_internal_repo
@@ -478,7 +482,7 @@ graph TD
 | `cmd/voice-gateway` | `internal/httplog` |
 | `frontend` | None |
 | `internal/agent` | `internal/agent/harness`, `internal/agent/relay`, `internal/runtime` |
-| `internal/agent/agenttest` | `internal/agent` |
+| `internal/agent/agenttest` | `internal/agent`, `internal/agent/harness` |
 | `internal/agent/backends` | `internal/agent`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/agent/harness`, `internal/agent/opencode`, `internal/agent/pi` |
 | `internal/agent/claudecode` | `internal/agent`, `internal/agent/harness`, `internal/jsonutil` |
 | `internal/agent/codex` | `internal/agent`, `internal/agent/harness`, `internal/jsonutil`, `internal/runtime` |
@@ -504,6 +508,7 @@ graph TD
 | `internal/jsonutil` | None |
 | `internal/logtest` | None |
 | `internal/mcp` | None |
+| `internal/mcp/mcptest` | `internal/mcp` |
 | `internal/preferences` | None |
 | `internal/repo` | `internal/forge` |
 | `internal/repo/repomgr` | `internal/forge`, `internal/repo`, `internal/repo/repowork` |

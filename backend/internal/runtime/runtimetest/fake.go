@@ -61,6 +61,10 @@ type SignalDelivery struct {
 type FakeBackend struct {
 	// DiffOutput is returned verbatim by Diff.
 	DiffOutput string
+	// LaunchErr, when set, is returned by Launch.
+	LaunchErr error
+	// FetchErr, when set, is returned by Fetch.
+	FetchErr error
 
 	mu      sync.Mutex
 	status  map[runtime.InstanceID]InstanceStatus
@@ -87,6 +91,9 @@ func (f *FakeBackend) LastSignal(id runtime.InstanceID) (SignalDelivery, bool) {
 
 // Launch implements runtime.Backend.
 func (f *FakeBackend) Launch(ctx context.Context, repos []runtime.Repo, opts *runtime.StartOptions) (runtime.InstanceID, error) {
+	if f.LaunchErr != nil {
+		return "", f.LaunchErr
+	}
 	f.set("fake-container", StatusRunning)
 	return "fake-container", nil
 }
@@ -102,7 +109,7 @@ func (f *FakeBackend) Diff(ctx context.Context, id runtime.InstanceID, repoIdx i
 }
 
 // Fetch implements runtime.Backend.
-func (f *FakeBackend) Fetch(ctx context.Context, id runtime.InstanceID) error { return nil }
+func (f *FakeBackend) Fetch(ctx context.Context, id runtime.InstanceID) error { return f.FetchErr }
 
 // Stop implements runtime.Backend.
 func (f *FakeBackend) Stop(ctx context.Context, id runtime.InstanceID) error {

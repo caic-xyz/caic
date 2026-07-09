@@ -17,6 +17,8 @@ import (
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
+	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	capipi "github.com/caic-xyz/caic/backend/internal/agent/pi"
 )
@@ -124,7 +126,7 @@ func benchmarkPurgedTaskEventServer(b *testing.B, deltaCount int) (string, *test
 	}
 
 	s := newTestRouter(b)
-	s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: stubBackend{}})
+	s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{ModelList: []string{"m1", "m2"}, WireFactory: claudecode.New().NewWire}})
 	if err := loadPurgedTasksForTest(s, logDir); err != nil {
 		b.Fatal(err)
 	}

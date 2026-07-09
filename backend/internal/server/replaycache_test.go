@@ -16,6 +16,8 @@ import (
 	"github.com/klauspost/compress/zstd"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
+	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
@@ -65,7 +67,7 @@ func TestReplayCache(t *testing.T) {
 	newServer := func(t *testing.T, logDir string) (*testRouter, string) {
 		t.Helper()
 		s := newTestRouter(t)
-		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: stubBackend{}})
+		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{ModelList: []string{"m1", "m2"}, WireFactory: claudecode.New().NewWire}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}

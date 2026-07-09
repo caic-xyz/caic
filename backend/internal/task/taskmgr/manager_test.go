@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"iter"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +19,8 @@ import (
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
+	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/logtest"
@@ -87,7 +88,11 @@ func (b *blockingReviveBackend) Revive(ctx context.Context, id runtime.InstanceI
 	}
 }
 
+// reconnectInputBackend drives a real relay session for reconnect tests. It
+// inherits metadata from the embedded fake and overrides AttachRelay/NewWire.
 type reconnectInputBackend struct {
+	*agenttest.FakeBackend
+
 	mu sync.Mutex
 
 	attachCalls int
@@ -95,10 +100,6 @@ type reconnectInputBackend struct {
 	opts        *agent.Options
 	cancel      context.CancelFunc
 	session     *agent.Session
-}
-
-func (b *reconnectInputBackend) Start(context.Context, *agent.Options) (*agent.Session, error) {
-	return nil, errors.New("unexpected start")
 }
 
 func (b *reconnectInputBackend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
@@ -124,21 +125,7 @@ func (b *reconnectInputBackend) AttachRelay(ctx context.Context, opts *agent.Opt
 	return session, nil
 }
 
-func (*reconnectInputBackend) Harness() harness.Name { return "reconnect" }
-
-func (*reconnectInputBackend) Models() []string { return nil }
-
-func (*reconnectInputBackend) SetModels([]string) {}
-
-func (*reconnectInputBackend) SupportsImages() bool { return true }
-
-func (*reconnectInputBackend) SupportsCompact() bool { return false }
-
-func (*reconnectInputBackend) AgentArgs(agent.HarnessArgs) []string { return nil }
-
 func (*reconnectInputBackend) NewWire() agent.WireFormat { return codex.New("", nil).NewWire() }
-
-func (*reconnectInputBackend) ContextWindowLimit(string) int { return 200_000 }
 
 func (b *reconnectInputBackend) stop() {
 	b.mu.Lock()
@@ -335,7 +322,7 @@ func TestNew(t *testing.T) {
 			LogDir:     "/tmp/logs",
 			CacheDir:   "/tmp/cache",
 			Backend:    &mdruntime.Backend{},
-			Backends:   map[harness.Name]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}},
+			Backends:   map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}},
 			HarnessEnv: map[string][]string{string(harness.Codex): {"CODEX_HOME=/tmp/codex"}},
 		}
 		m := New(cfg)
@@ -943,7 +930,7 @@ func TestManager(t *testing.T) {
 		// newManagerWithRepo returns a Manager with one repo workspace that has a
 		// fake backend for harness "fake".
 		newManagerWithRepo := func(t *testing.T) *Manager {
-			m := New(Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}}})
+			m := New(Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
 			m.RegisterWorkspace("my/repo", &repowork.Workspace{Dir: "/tmp/my-repo", Log: logtest.Logger(t)})
 			return m
 		}
@@ -1097,7 +1084,7 @@ func TestManager(t *testing.T) {
 		// newForkManager returns a Manager with a source task that has a
 		// instance, plus an workspace with a fake backend.
 		newForkManager := func(t *testing.T) (*Manager, *Entry) {
-			m := New(Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}}})
+			m := New(Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
 			m.RegisterWorkspace("my/repo", &repowork.Workspace{Dir: "/tmp/my-repo", Log: logtest.Logger(t)})
 			src := &task.Task{
 				ID:            ksid.NewID(),
@@ -1247,7 +1234,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("valid_reconnects_before_answering_restored_ask", func(t *testing.T) {
 			t.Parallel()
-			backend := &reconnectInputBackend{}
+			backend := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: "reconnect", Images: true, ContextLimit: 200_000}}
 			t.Cleanup(backend.stop)
 			m := New(Config{
 				ServerCtx: t.Context(),
@@ -1484,15 +1471,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("valid_fetches_then_caches", func(t *testing.T) {
 			t.Parallel()
-			fake := &fakeMD{
-				sudoFn: func(_ context.Context, id runtime.InstanceID) (string, error) {
-					name := string(id)
-					if name != "ctr-1" {
-						t.Errorf("SudoPassword called with name %q, want ctr-1", name)
-					}
-					return "fetched-pw", nil
-				},
-			}
+			fake := &runtimetest.FakeInfo{SudoResult: "fetched-pw"}
 			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
@@ -1506,21 +1485,16 @@ func TestManager(t *testing.T) {
 			if snap := tk.Snapshot(); snap.SudoPassword != "fetched-pw" {
 				t.Error("password not cached on task after fetch")
 			}
-			// Second call must hit the cache, not the backend.
+			// Change what the backend would return; a second call must serve the
+			// cached value, proving it did not hit the backend again.
+			fake.SudoResult = "second-pw"
 			if got := m.SudoPassword(t.Context(), tk); got != "fetched-pw" {
-				t.Errorf("cached SudoPassword = %q, want fetched-pw", got)
-			}
-			if fake.sudoCalls != 1 {
-				t.Errorf("sudoCalls = %d, want 1 (second call should be cached)", fake.sudoCalls)
+				t.Errorf("cached SudoPassword = %q, want fetched-pw (cache bypassed)", got)
 			}
 		})
 		t.Run("valid_fetch_error_returns_empty", func(t *testing.T) {
 			t.Parallel()
-			fake := &fakeMD{
-				sudoFn: func(_ context.Context, _ runtime.InstanceID) (string, error) {
-					return "", errors.New("ssh boom")
-				},
-			}
+			fake := &runtimetest.FakeInfo{SudoErr: errors.New("ssh boom")}
 			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
@@ -2258,7 +2232,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("error_images_unsupported", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}}})
+			m := New(Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
 			m.RegisterWorkspace("repo/a", &repowork.Workspace{Dir: "/tmp/repo", Log: logtest.Logger(t)})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
@@ -2323,7 +2297,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_with_backend", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"claude": &fakeBackend{models: []string{"m1"}}}})
+			m := New(Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"claude": &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
 			m.RegisterWorkspace("repo/a", &repowork.Workspace{Dir: "", Log: logtest.Logger(t)})
 			lt := &task.LoadedTask{Harness: "claude"}
 			m.setParser(lt)
@@ -2372,7 +2346,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error_unsupported_model", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}}})
+			m := New(Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
 			m.RegisterWorkspace("repo/a", &repowork.Workspace{Dir: "/tmp/repo", Log: logtest.Logger(t)})
 			_, err := m.Create(t.Context(), CreateParams{
 				Prompt:  agent.Prompt{Text: "hi"},
@@ -2387,7 +2361,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error_unknown_extra_repo", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}}})
+			m := New(Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
 			m.RegisterWorkspace("repo/a", &repowork.Workspace{Dir: "/tmp/repo", Log: logtest.Logger(t)})
 			_, err := m.Create(t.Context(), CreateParams{
 				Prompt:  agent.Prompt{Text: "hi"},
@@ -2422,7 +2396,7 @@ func TestManager(t *testing.T) {
 			return m, e
 		}
 
-		defaultBackends := map[harness.Name]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}}
+		defaultBackends := map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}
 
 		t.Run("error_unknown_harness", func(t *testing.T) {
 			t.Parallel()
@@ -2445,8 +2419,8 @@ func TestManager(t *testing.T) {
 		t.Run("error_model_with_new_harness", func(t *testing.T) {
 			t.Parallel()
 			backends := map[harness.Name]agent.Backend{
-				"fake":  &fakeBackend{models: []string{"m1"}},
-				"fake2": &fakeBackend{models: []string{"m2"}},
+				"fake":  &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire},
+				"fake2": &agenttest.FakeBackend{ModelList: []string{"m2"}, WireFactory: claudecode.New().NewWire},
 			}
 			m, e := forkSetup(t, "fake", backends)
 			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}, Harness: "fake2", Model: "unsupported"})
@@ -2501,11 +2475,11 @@ func TestManager(t *testing.T) {
 		t.Run("valid_matches_only_primary_repo", func(t *testing.T) {
 			t.Parallel()
 			taskID := ksid.NewID()
-			fake := &fakeMD{metadata: map[string]string{
+			fake := &runtimetest.FakeInfo{Meta: map[string]string{
 				"md-caic-caic-5\x00caic.id":      taskID.String(),
 				"md-caic-caic-5\x00caic.harness": string(harness.Claude),
 			}}
-			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake, Backends: map[harness.Name]agent.Backend{harness.Claude: &fakeBackend{models: []string{"m1"}}}})
+			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake, Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
 			m.RegisterWorkspace("caic-xyz/caic", &repowork.Workspace{Dir: "/home/user/src/caic-xyz/caic", Log: logtest.Logger(t)})
 			m.RegisterWorkspace("caic-xyz/md", &repowork.Workspace{Dir: "/home/user/src/caic-xyz/md", Log: logtest.Logger(t)})
 
@@ -2541,11 +2515,11 @@ func TestManager(t *testing.T) {
 		t.Run("valid_restores_launch_config_from_log", func(t *testing.T) {
 			t.Parallel()
 			taskID := ksid.NewID()
-			fake := &fakeMD{metadata: map[string]string{
+			fake := &runtimetest.FakeInfo{Meta: map[string]string{
 				"restore-config\x00caic.id":      taskID.String(),
 				"restore-config\x00caic.harness": string(harness.Claude),
 			}}
-			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake, Backends: map[harness.Name]agent.Backend{harness.Claude: &fakeBackend{models: []string{"m1"}}}})
+			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake, Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
 			m.RegisterWorkspace("repo/a", &repowork.Workspace{Dir: "/home/user/src/repo/a", Log: logtest.Logger(t)})
 
 			logDir := t.TempDir()
@@ -2595,11 +2569,11 @@ func TestManager(t *testing.T) {
 		t.Run("valid_merges_local_log_with_relay_tail", func(t *testing.T) {
 			t.Parallel()
 			taskID := ksid.NewID()
-			fake := &fakeMD{metadata: map[string]string{
+			fake := &runtimetest.FakeInfo{Meta: map[string]string{
 				"merge-tail\x00caic.id":      taskID.String(),
 				"merge-tail\x00caic.harness": string(harness.Claude),
 			}}
-			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake, Backends: map[harness.Name]agent.Backend{harness.Claude: &fakeBackend{models: []string{"m1"}}}})
+			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake, Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
 			m.relay = fakeRelayReader{
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 					return true, "alive", nil
@@ -2658,9 +2632,9 @@ func TestManager(t *testing.T) {
 		t.Run("valid_reconnects_live_restored_ask_before_returning", func(t *testing.T) {
 			t.Parallel()
 			taskID := ksid.NewID()
-			backend := &reconnectInputBackend{}
+			backend := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: "reconnect", Images: true, ContextLimit: 200_000}}
 			t.Cleanup(backend.stop)
-			fake := &fakeMD{metadata: map[string]string{
+			fake := &runtimetest.FakeInfo{Meta: map[string]string{
 				"ask-tail\x00caic.id":      taskID.String(),
 				"ask-tail\x00caic.harness": "reconnect",
 			}}
@@ -2746,11 +2720,11 @@ func TestManager(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
 			defer cancel()
 			taskID := ksid.NewID()
-			fake := &fakeMD{metadata: map[string]string{
+			fake := &runtimetest.FakeInfo{Meta: map[string]string{
 				"dead-relay\x00caic.id":      taskID.String(),
 				"dead-relay\x00caic.harness": string(harness.Claude),
 			}}
-			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake, Backends: map[harness.Name]agent.Backend{harness.Claude: &fakeBackend{models: []string{"m1"}}}})
+			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake, Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
 			m.RegisterWorkspace("caic-xyz/caic", &repowork.Workspace{Dir: "/home/user/src/caic-xyz/caic", Log: logtest.Logger(t)})
 
 			logDir := t.TempDir()
@@ -2813,11 +2787,11 @@ func TestManager(t *testing.T) {
 		t.Run("valid_dead_relay_tail_exit_error_crashes_adopted_task", func(t *testing.T) {
 			t.Parallel()
 			taskID := ksid.NewID()
-			fake := &fakeMD{metadata: map[string]string{
+			fake := &runtimetest.FakeInfo{Meta: map[string]string{
 				"dead-relay-tail\x00caic.id":      taskID.String(),
 				"dead-relay-tail\x00caic.harness": string(harness.Claude),
 			}}
-			m := New(Config{ServerCtx: t.Context(), Backend: &runtimetest.FakeBackend{}, Monitor: fake, Inventory: fake, Privilege: fake, Backends: map[harness.Name]agent.Backend{harness.Claude: &fakeBackend{models: []string{"m1"}}}})
+			m := New(Config{ServerCtx: t.Context(), Backend: &runtimetest.FakeBackend{}, Monitor: fake, Inventory: fake, Privilege: fake, Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
 			m.relay = fakeRelayReader{
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 					return false, "dead", nil
@@ -2858,12 +2832,12 @@ func TestManager(t *testing.T) {
 		t.Run("valid_stale_tail_exit_error_does_not_crash_adopted_task", func(t *testing.T) {
 			t.Parallel()
 			taskID := ksid.NewID()
-			fake := &fakeMD{metadata: map[string]string{
+			fake := &runtimetest.FakeInfo{Meta: map[string]string{
 				"stale-tail\x00caic.id":      taskID.String(),
 				"stale-tail\x00caic.harness": string(harness.Claude),
 			}}
 			runtimeBackend := &runtimetest.FakeBackend{}
-			m := New(Config{ServerCtx: t.Context(), Backend: runtimeBackend, Monitor: fake, Inventory: fake, Privilege: fake, Backends: map[harness.Name]agent.Backend{harness.Claude: &fakeBackend{models: []string{"m1"}}}})
+			m := New(Config{ServerCtx: t.Context(), Backend: runtimeBackend, Monitor: fake, Inventory: fake, Privilege: fake, Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
 			m.relay = fakeRelayReader{
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 					return false, "dead", nil
@@ -2911,7 +2885,7 @@ func TestManager(t *testing.T) {
 		t.Run("valid_stale_crashed_trailer_does_not_crash_adopted_task", func(t *testing.T) {
 			t.Parallel()
 			taskID := ksid.NewID()
-			fake := &fakeMD{metadata: map[string]string{
+			fake := &runtimetest.FakeInfo{Meta: map[string]string{
 				"stale-trailer\x00caic.id":      taskID.String(),
 				"stale-trailer\x00caic.harness": string(harness.Claude),
 			}}
@@ -2970,7 +2944,7 @@ func TestManager(t *testing.T) {
 		t.Run("valid_loads_legacy_codex_session_metadata", func(t *testing.T) {
 			t.Parallel()
 			taskID := ksid.NewID()
-			fake := &fakeMD{metadata: map[string]string{
+			fake := &runtimetest.FakeInfo{Meta: map[string]string{
 				"md-caic-caic-6\x00caic.id":      taskID.String(),
 				"md-caic-caic-6\x00caic.harness": string(harness.Codex),
 			}}
@@ -3025,16 +2999,9 @@ func TestManager(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		t.Cleanup(cancel)
 		started := make(chan []runtime.InstanceID, 1)
-		fake := &fakeMD{
-			watchStatsFn: func(ctx context.Context, ids []runtime.InstanceID) (iter.Seq2[runtime.StatsSample, error], error) {
-				started <- slices.Clone(ids)
-				return func(yield func(runtime.StatsSample, error) bool) {
-					if !yield(runtime.StatsSample{InstanceID: "ctr-1", Stats: runtime.Stats{CPUPerc: 2.5, MemUsed: 200, DiskUsed: -1}}, nil) {
-						return
-					}
-					<-ctx.Done()
-				}, nil
-			},
+		fake := &runtimetest.FakeInfo{
+			WatchStarted: started,
+			Stats:        []runtime.StatsSample{{InstanceID: "ctr-1", Stats: runtime.Stats{CPUPerc: 2.5, MemUsed: 200, DiskUsed: -1}}},
 		}
 		m := New(Config{ServerCtx: ctx, Monitor: fake, Inventory: fake, Privilege: fake})
 		tk := &task.Task{
@@ -3080,7 +3047,7 @@ func TestManager(t *testing.T) {
 		t.Run("valid_dispatches_death", func(t *testing.T) {
 			t.Parallel()
 			events := make(chan runtime.Event, 1)
-			fake := &fakeMD{events: events}
+			fake := &runtimetest.FakeInfo{Events: events}
 			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
 			tk := &task.Task{
 				ID:            ksid.NewID(),

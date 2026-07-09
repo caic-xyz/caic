@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
@@ -25,10 +25,10 @@ func TestRefreshHarnessModels(t *testing.T) {
 		env := map[string][]string{string(fetchHarness): {"FETCH_API_KEY=secret"}}
 		runtimeBackend := &modelRefreshRuntime{}
 		inventory := &modelRefreshInventory{}
-		fetcher := &modelFetchBackend{harness: fetchHarness, models: []string{"z-model", "a-model"}}
+		fetcher := &modelFetchBackend{FakeBackend: &agenttest.FakeBackend{}, harness: fetchHarness, models: []string{"z-model", "a-model"}}
 		taskMgr := newModelRefreshTestManager(t.Context(), runtimeBackend, map[harness.Name]agent.Backend{
 			fetchHarness: fetcher,
-			"plain":      stubBackend{},
+			"plain":      &agenttest.FakeBackend{ModelList: []string{"m1", "m2"}},
 		})
 
 		refreshHarnessModels(t.Context(), cacheDir, runtimeBackend, inventory, taskMgr, env)
@@ -62,7 +62,7 @@ func TestRefreshHarnessModels(t *testing.T) {
 		cache.SetModels(fetchHarness, []string{"cached-model"}, "")
 		runtimeBackend := &modelRefreshRuntime{}
 		inventory := &modelRefreshInventory{}
-		fetcher := &modelFetchBackend{harness: fetchHarness, models: []string{"new-model"}}
+		fetcher := &modelFetchBackend{FakeBackend: &agenttest.FakeBackend{}, harness: fetchHarness, models: []string{"new-model"}}
 		taskMgr := newModelRefreshTestManager(t.Context(), runtimeBackend, map[harness.Name]agent.Backend{
 			fetchHarness: fetcher,
 		})
@@ -94,7 +94,7 @@ func TestRefreshHarnessModels(t *testing.T) {
 				"regular-task":  {runtime.MetadataTaskID: "task-id"},
 			},
 		}
-		fetcher := &modelFetchBackend{harness: fetchHarness, models: []string{"new-model"}}
+		fetcher := &modelFetchBackend{FakeBackend: &agenttest.FakeBackend{}, harness: fetchHarness, models: []string{"new-model"}}
 		taskMgr := newModelRefreshTestManager(t.Context(), runtimeBackend, map[harness.Name]agent.Backend{
 			fetchHarness: fetcher,
 		})
@@ -118,34 +118,8 @@ func newModelRefreshTestManager(ctx context.Context, runtimeBackend runtime.Back
 	})
 }
 
-type stubBackend struct{}
-
-func (stubBackend) Harness() harness.Name { return "stub" }
-
-func (stubBackend) Start(context.Context, *agent.Options) (*agent.Session, error) {
-	return nil, errors.New("start not implemented")
-}
-
-func (stubBackend) AttachRelay(context.Context, *agent.Options) (*agent.Session, error) {
-	return nil, errors.New("attach relay not implemented")
-}
-
-func (stubBackend) Models() []string { return []string{"m1", "m2"} }
-
-func (stubBackend) SetModels([]string) {}
-
-func (stubBackend) SupportsImages() bool { return false }
-
-func (stubBackend) AgentArgs(agent.HarnessArgs) []string { return nil }
-
-func (stubBackend) NewWire() agent.WireFormat { return claudecode.New() }
-
-func (stubBackend) SupportsCompact() bool { return false }
-
-func (stubBackend) ContextWindowLimit(string) int { return 180_000 }
-
 type modelFetchBackend struct {
-	stubBackend
+	*agenttest.FakeBackend
 
 	harness   harness.Name
 	models    []string

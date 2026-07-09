@@ -7,32 +7,34 @@ package task
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/logtest"
 	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 )
 
 // testBackend implements agent.Backend for tests. It launches a process that
 // reads one line from stdin then exits. capturedCtx records the context passed
 // to Start so tests can assert context lifetime.
 type testBackend struct {
+	*agenttest.FakeBackend
+
 	capturedCtx  context.Context
 	capturedOpts agent.Options
 }
-
-func (b *testBackend) Harness() harness.Name { return "test" }
 
 func (b *testBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	b.capturedCtx = ctx
@@ -47,28 +49,6 @@ func (b *testBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Se
 	}
 	return agent.NewSession(cmd, agent.NewConn(stdin, opts.LogW, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, opts.MsgCh, nil), nil
 }
-
-func (b *testBackend) AttachRelay(context.Context, *agent.Options) (*agent.Session, error) {
-	return nil, errors.New("test backend does not support relay")
-}
-
-func (b *testBackend) ReadRelayOutput(context.Context, string) ([]agent.Message, int64, error) {
-	return nil, 0, errors.New("test backend does not support relay")
-}
-
-func (b *testBackend) Models() []string   { return []string{"test-model"} }
-func (b *testBackend) SetModels([]string) {}
-
-// SupportsImages always returns false in the test backend.
-func (b *testBackend) SupportsImages() bool { return false }
-
-func (b *testBackend) AgentArgs(agent.HarnessArgs) []string { return nil }
-
-func (b *testBackend) NewWire() agent.WireFormat { return claudecode.New() }
-
-func (b *testBackend) SupportsCompact() bool { return false }
-
-func (b *testBackend) ContextWindowLimit(string) int { return 180_000 }
 
 type attachCaptureBackend struct {
 	testBackend
@@ -133,66 +113,24 @@ func newTestSessionRunner(t *testing.T, workspace *repowork.Workspace, logDir st
 	return &SessionRunner{Backends: backends, Workspace: workspace, Logs: &LogStore{LogDir: logDir}}
 }
 
-// stubContainer implements runtime.Backend for testing. Diff returns a fixed
-// numstat line; Fetch records that it was called.
-type stubContainer struct {
-	fetched   bool
-	launchErr error // If set, Launch returns this error.
-	fetchErr  error // If set, Fetch returns this error.
-	stopped   bool
-	diffIDs   []runtime.InstanceID
-	fetchIDs  []runtime.InstanceID
-	diffIdxs  []int
+// testContainer returns a fake runtime whose Diff reports a fixed one-file
+// numstat, matching the diff the runner/session tests parse.
+func testContainer() *runtimetest.FakeBackend {
+	return &runtimetest.FakeBackend{DiffOutput: "5\t1\tmain.go\n"}
 }
 
-func (s *stubContainer) Launch(_ context.Context, _ []runtime.Repo, _ *runtime.StartOptions) (runtime.InstanceID, error) {
-	if s.launchErr != nil {
-		return "", s.launchErr
-	}
-	return "stub", nil
+// fetchRecorder is a fake runtime that additionally records whether Fetch was
+// called, for the few tests that must distinguish a diff computed after a
+// fetch from one computed without.
+type fetchRecorder struct {
+	*runtimetest.FakeBackend
+
+	fetched atomic.Bool
 }
 
-func (s *stubContainer) Connect(_ context.Context, id runtime.InstanceID, _ *runtime.StartOptions) (runtime.ConnectionInfo, error) {
-	return runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: string(id)}}, nil
-}
-
-func (s *stubContainer) Diff(_ context.Context, id runtime.InstanceID, repoIdx int, _ ...string) (string, error) {
-	s.diffIDs = append(s.diffIDs, id)
-	s.diffIdxs = append(s.diffIdxs, repoIdx)
-	return "5\t1\tmain.go\n", nil
-}
-
-func (s *stubContainer) Fetch(_ context.Context, id runtime.InstanceID) error {
-	s.fetched = true
-	s.fetchIDs = append(s.fetchIDs, id)
-	if s.fetchErr != nil {
-		return s.fetchErr
-	}
-	return nil
-}
-
-func (s *stubContainer) Stop(_ context.Context, _ runtime.InstanceID) error {
-	s.stopped = true
-	return nil
-}
-func (s *stubContainer) Purge(_ context.Context, _ runtime.InstanceID) error {
-	return nil
-}
-func (s *stubContainer) Revive(_ context.Context, _ runtime.InstanceID) error {
-	return nil
-}
-
-func (s *stubContainer) Fork(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo, _ *runtime.ForkOptions) (runtime.InstanceID, runtime.ConnectionInfo, []runtime.Repo, error) {
-	return "stub-fork", runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: "stub-fork"}}, nil, nil
-}
-func (s *stubContainer) VNCPort(_ context.Context, _ runtime.InstanceID) int { return 0 }
-
-func (s *stubContainer) Processes(_ context.Context, _ runtime.InstanceID) ([]runtime.ProcessInfo, error) {
-	return nil, nil
-}
-
-func (s *stubContainer) Signal(_ context.Context, _ runtime.InstanceID, _ int, _ string) error {
-	return nil
+func (b *fetchRecorder) Fetch(ctx context.Context, id runtime.InstanceID) error {
+	b.fetched.Store(true)
+	return b.FakeBackend.Fetch(ctx, id)
 }
 
 // recvMsg reads a single message from ch, respecting the test context and a
