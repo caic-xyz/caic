@@ -1351,26 +1351,23 @@ func TestTask(t *testing.T) {
 			tk.SetState(StateRunning)
 			return tk
 		}
-		result1 := &agent.ResultMessage{
-			MessageType:  "result",
-			TotalCostUSD: 10.0,
-			NumTurns:     3,
-			DurationMs:   5000,
-		}
-		compact := &agent.SystemMessage{MessageType: "system", Subtype: "compact_boundary"}
-		result2 := &agent.ResultMessage{
-			MessageType:  "result",
-			TotalCostUSD: 5.0,
-			NumTurns:     2,
-			DurationMs:   3000,
+		// newMsgs returns fresh messages per subtest: addMessage and
+		// RestoreMessages both mutate ResultMessage.Result, so the parallel
+		// subtests must not share the same pointers.
+		newMsgs := func() []agent.Message {
+			return []agent.Message{
+				&agent.ResultMessage{MessageType: "result", TotalCostUSD: 10.0, NumTurns: 3, DurationMs: 5000},
+				&agent.SystemMessage{MessageType: "system", Subtype: "compact_boundary"},
+				&agent.ResultMessage{MessageType: "result", TotalCostUSD: 5.0, NumTurns: 2, DurationMs: 3000},
+			}
 		}
 
 		t.Run("Live", func(t *testing.T) {
 			t.Parallel()
 			tk := newTask()
-			tk.addMessage(t.Context(), result1, false)
-			tk.addMessage(t.Context(), compact, false)
-			tk.addMessage(t.Context(), result2, false)
+			for _, m := range newMsgs() {
+				tk.addMessage(t.Context(), m, false)
+			}
 			costUSD, numTurns, duration, _, _ := tk.LiveStats()
 			if costUSD != 15.0 {
 				t.Errorf("costUSD = %v, want 15.0", costUSD)
@@ -1387,7 +1384,7 @@ func TestTask(t *testing.T) {
 			t.Parallel()
 			tk := newTask()
 			tk.SetState(StatePurged)
-			tk.RestoreMessages([]agent.Message{result1, compact, result2})
+			tk.RestoreMessages(newMsgs())
 			costUSD, numTurns, duration, _, _ := tk.LiveStats()
 			if costUSD != 15.0 {
 				t.Errorf("costUSD = %v, want 15.0", costUSD)
