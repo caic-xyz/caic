@@ -81,7 +81,7 @@ func TestTask(t *testing.T) {
 			func(i int) { tk.SetRepoBranch(0, "task-"+strconv.Itoa(i)) },
 			func(i int) { tk.SetRepoBranch(1, "extra-"+strconv.Itoa(i)) },
 			func(i int) {
-				id := runtime.InstanceID("ctr-" + strconv.Itoa(i))
+				id := runtime.ID("ctr-" + strconv.Itoa(i))
 				tk.SetRuntimeConnectionInfo(id, runtime.ConnectionTarget{SSHHost: string(id)}, "host.example", "https://auth.example", 5900+i)
 			},
 			func(i int) { tk.SetVNCPort(6000 + i) },

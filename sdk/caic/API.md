@@ -118,6 +118,14 @@ VoiceGatewayMetadata reports structured voice gateway support.
 | `authRequired` | `boolean` |  |  |
 | `capabilities` | `string[]` |  |  |
 
+### RuntimeInfo
+
+RuntimeInfo is the JSON representation of an available task runtime backend.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `name` | `string` |  | yes |
+
 ### Config
 
 Config reports server capabilities to the frontend.
@@ -134,6 +142,7 @@ Config reports server capabilities to the frontend.
 | `voiceGateway` | `VoiceGatewayMetadata` |  | yes |
 | `gitHubAppEnabled` | `boolean` |  |  |
 | `authProviders` | `string[]` | e.g. ["github","gitlab"] |  |
+| `runtimes` | `RuntimeInfo[]` |  |  |
 
 ### VersionResp
 
@@ -223,6 +232,7 @@ the default. |  |
 the host's native platform. Valid values are linux/amd64 and linux/arm64. |  |
 | `maxCPUs` | `int` | MaxCPUs limits the number of CPU cores the runtime instance may use.
 Zero means use the system default (max(2, NumCPU-2)). |  |
+| `runtimeName` | `string` | RuntimeName is the preferred runtime backend for new tasks. |  |
 | `wellKnownCaches` | `Record<string, boolean>` | WellKnownCaches maps cache name to enabled state. Absent or false means
 disabled, true means enabled. Caches are opt-in. |  |
 | `cacheMappings` | `CacheMappingResp[]` | CacheMappings are custom host-to-runtime directory mappings. |  |
@@ -427,6 +437,7 @@ RuntimeInstance holds per-task runtime metadata.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `id` | `string` | Runtime instance ID. | yes |
+| `runtimeName` | `string` | Runtime backend name. |  |
 | `tailscale` | `string` | Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown. |  |
 | `usb` | `boolean` |  |  |
 | `display` | `boolean` |  |  |
@@ -569,6 +580,7 @@ TaskInfoObservedRuntime describes runtime-observed instance details from the run
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
+| `runtimeName` | `string` |  |  |
 | `runtime` | `string` |  |  |
 | `id` | `string` |  |  |
 | `state` | `string` |  |  |
@@ -629,6 +641,7 @@ CreateTaskReq is the request body for POST /api/caic/v1/tasks.
 | `model` | `string` |  |  |
 | `effort` | `string` | Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default. |  |
 | `harness` | `string` |  | yes |
+| `runtimeName` | `string` |  |  |
 | `tailscale` | `boolean` |  |  |
 | `usb` | `boolean` |  |  |
 | `display` | `boolean` |  |  |

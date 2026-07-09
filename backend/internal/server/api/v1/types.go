@@ -74,6 +74,11 @@ type Prompt struct {
 	Images []ImageData `json:"images,omitempty"`
 }
 
+// RuntimeInfo is the JSON representation of an available task runtime backend.
+type RuntimeInfo struct {
+	Name string `json:"name"`
+}
+
 // Config reports server capabilities to the frontend.
 type Config struct {
 	Version              string               `json:"version,omitempty"`
@@ -86,6 +91,7 @@ type Config struct {
 	VoiceGateway         VoiceGatewayMetadata `json:"voiceGateway"`
 	GitHubAppEnabled     bool                 `json:"gitHubAppEnabled,omitempty"`
 	AuthProviders        []string             `json:"authProviders,omitempty"` // e.g. ["github","gitlab"]
+	Runtimes             []RuntimeInfo        `json:"runtimes,omitempty"`
 }
 
 // VoiceGatewayMode is the advertised service-side voice gateway mode.
@@ -233,11 +239,12 @@ type TaskRepo struct {
 
 // RuntimeInstance holds per-task runtime metadata.
 type RuntimeInstance struct {
-	ID        string `json:"id"`                  // Runtime instance ID.
-	Tailscale string `json:"tailscale,omitempty"` // Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown.
-	USB       bool   `json:"usb,omitempty"`
-	Display   bool   `json:"display,omitempty"`
-	Sudo      bool   `json:"sudo,omitempty"`
+	ID          string `json:"id"`                    // Runtime instance ID.
+	RuntimeName string `json:"runtimeName,omitempty"` // Runtime backend name.
+	Tailscale   string `json:"tailscale,omitempty"`   // Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown.
+	USB         bool   `json:"usb,omitempty"`
+	Display     bool   `json:"display,omitempty"`
+	Sudo        bool   `json:"sudo,omitempty"`
 	// SudoPassword is the random sudo password, only populated when Sudo is true.
 	SudoPassword string `json:"sudoPassword,omitempty"`
 	VNCPort      int    `json:"vncPort,omitempty"`
@@ -357,6 +364,7 @@ type TaskInfoMount struct {
 
 // TaskInfoObservedRuntime describes runtime-observed instance details from the runtime adapter.
 type TaskInfoObservedRuntime struct {
+	RuntimeName     string               `json:"runtimeName,omitempty"`
 	Runtime         string               `json:"runtime,omitempty"`
 	ID              string               `json:"id,omitempty"`
 	State           string               `json:"state,omitempty"`
@@ -468,6 +476,7 @@ type CreateTaskReq struct {
 	Model         string     `json:"model,omitempty"`
 	Effort        string     `json:"effort,omitempty"` // Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default.
 	Harness       Harness    `json:"harness"`
+	RuntimeName   string     `json:"runtimeName,omitempty"`
 	Tailscale     bool       `json:"tailscale,omitempty"`
 	USB           bool       `json:"usb,omitempty"`
 	Display       bool       `json:"display,omitempty"`
@@ -762,6 +771,8 @@ type UserSettings struct {
 	// MaxCPUs limits the number of CPU cores the runtime instance may use.
 	// Zero means use the system default (max(2, NumCPU-2)).
 	MaxCPUs int `json:"maxCPUs,omitempty"`
+	// RuntimeName is the preferred runtime backend for new tasks.
+	RuntimeName string `json:"runtimeName,omitempty"`
 	// WellKnownCaches maps cache name to enabled state. Absent or false means
 	// disabled, true means enabled. Caches are opt-in.
 	WellKnownCaches map[string]bool `json:"wellKnownCaches,omitempty"`

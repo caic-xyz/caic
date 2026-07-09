@@ -27,23 +27,47 @@ import (
 // test in package repowork importing internal/task would create an import
 // cycle.
 type fakeTaskView struct {
-	instanceID runtime.InstanceID
+	instanceID runtime.ID
 	repo       []runtime.Repo
 	baseBranch string
 }
 
-func (f *fakeTaskView) RuntimeInstanceID() runtime.InstanceID { return f.instanceID }
-func (f *fakeTaskView) RuntimeRepos() []runtime.Repo          { return f.repo }
-func (f *fakeTaskView) SetRepoBranch(i int, branch string)    { f.repo[i].Branch = branch }
-func (f *fakeTaskView) PrimaryBaseBranch() string             { return f.baseBranch }
+type testRuntimeSystem struct {
+	runtime.Lifecycle
+	runtimetest.FakeInfo
+}
 
-func newTestRepoWorkspace(t *testing.T, baseBranch, dir string, backend runtime.Backend) *Workspace {
+func (*testRuntimeSystem) Name() runtime.Name { return "test-runtime" }
+
+func (f *fakeTaskView) RuntimeInstanceID() runtime.ID      { return f.instanceID }
+func (f *fakeTaskView) RuntimeRepos() []runtime.Repo       { return f.repo }
+func (f *fakeTaskView) SetRepoBranch(i int, branch string) { f.repo[i].Branch = branch }
+func (f *fakeTaskView) PrimaryBaseBranch() string          { return f.baseBranch }
+
+func TestRuntimeRemoteRef(t *testing.T) {
+	t.Parallel()
+	got := runtimeRemoteRef(runtime.NewID("docker", "md-agent-1"), "caic-1")
+	want := "refs/remotes/md-agent-1/caic-1"
+	if got != want {
+		t.Fatalf("runtimeRemoteRef = %q, want %q", got, want)
+	}
+}
+
+func newTestRepoWorkspace(t *testing.T, baseBranch, dir string, backend runtime.Lifecycle) *Workspace {
+	var rt *runtime.Router
+	if backend != nil {
+		var err error
+		rt, err = runtime.NewRouter([]runtime.System{&testRuntimeSystem{Lifecycle: backend}})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	return &Workspace{
 		BaseBranch: baseBranch,
 		Dir:        dir,
 		RepoName:   filepath.Base(dir),
 		GitTimeout: time.Minute,
-		Runtime:    backend,
+		Runtimes:   rt,
 		Log:        logtest.Logger(t),
 	}
 }
@@ -118,13 +142,13 @@ func TestRepoWorkspace(t *testing.T) {
 		t.Parallel()
 		sc := newRecordingContainer()
 		r := newTestRepoWorkspace(t, "", "/repo", sc)
-		tv := &fakeTaskView{instanceID: "ctr-1", repo: []runtime.Repo{{HostPath: "/repo", Branch: "feature"}}}
+		tv := &fakeTaskView{instanceID: runtime.NewID("test-runtime", "ctr-1"), repo: []runtime.Repo{{HostPath: "/repo", Branch: "feature"}}}
 		ds := r.BranchDiffStat(t.Context(), tv)
 		if len(sc.fetchIDs) == 0 {
 			t.Error("BranchDiffStat did not call Fetch")
 		}
-		if len(sc.fetchIDs) != 1 || sc.fetchIDs[0] != "ctr-1" {
-			t.Errorf("fetch IDs = %v, want [ctr-1]", sc.fetchIDs)
+		if len(sc.fetchIDs) != 1 || sc.fetchIDs[0] != "test-runtime:ctr-1" {
+			t.Errorf("fetch IDs = %v, want [test-runtime:ctr-1]", sc.fetchIDs)
 		}
 		if len(ds) != 1 || ds[0].Path != "main.go" || ds[0].Added != 5 || ds[0].Deleted != 1 {
 			t.Errorf("BranchDiffStat = %+v, want [{main.go +5 -1}]", ds)
@@ -134,7 +158,7 @@ func TestRepoWorkspace(t *testing.T) {
 		t.Parallel()
 		sc := newRecordingContainer()
 		r := newTestRepoWorkspace(t, "", "/home/user/src/caic", sc)
-		tv := &fakeTaskView{instanceID: "ctr-2", repo: []runtime.Repo{
+		tv := &fakeTaskView{instanceID: runtime.NewID("test-runtime", "ctr-2"), repo: []runtime.Repo{
 			{HostPath: "/home/user/src/caic", Branch: "caic-7", MountPath: "/home/user/src/caic"},
 			{HostPath: "/home/user/src/genai", Branch: "caic-0", MountPath: "/home/user/src/genai"},
 		}}
@@ -148,8 +172,8 @@ func TestRepoWorkspace(t *testing.T) {
 			t.Fatalf("diff calls = %d, want 2", len(sc.diffIDs))
 		}
 		for i, id := range sc.diffIDs {
-			if id != "ctr-2" {
-				t.Errorf("diff call %d id = %q, want ctr-2", i, id)
+			if id != "test-runtime:ctr-2" {
+				t.Errorf("diff call %d id = %q, want test-runtime:ctr-2", i, id)
 			}
 		}
 		if sc.diffIdxs[0] != 0 || sc.diffIdxs[1] != 1 {
@@ -329,17 +353,17 @@ func TestDiffRepoPrefix(t *testing.T) {
 type recordingContainer struct {
 	*runtimetest.FakeBackend
 
-	fetchIDs []runtime.InstanceID
-	diffIDs  []runtime.InstanceID
+	fetchIDs []runtime.ID
+	diffIDs  []runtime.ID
 	diffIdxs []int
 }
 
-func (c *recordingContainer) Fetch(ctx context.Context, id runtime.InstanceID) error {
+func (c *recordingContainer) Fetch(ctx context.Context, id runtime.ID) error {
 	c.fetchIDs = append(c.fetchIDs, id)
 	return c.FakeBackend.Fetch(ctx, id)
 }
 
-func (c *recordingContainer) Diff(ctx context.Context, id runtime.InstanceID, repoIdx int, args ...string) (string, error) {
+func (c *recordingContainer) Diff(ctx context.Context, id runtime.ID, repoIdx int, args ...string) (string, error) {
 	c.diffIDs = append(c.diffIDs, id)
 	c.diffIdxs = append(c.diffIdxs, repoIdx)
 	return c.FakeBackend.Diff(ctx, id, repoIdx, args...)

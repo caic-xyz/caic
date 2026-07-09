@@ -207,6 +207,8 @@ type Settings struct {
 	CacheMappings []CacheMapping `json:"cacheMappings,omitempty"`
 	// CustomMounts are custom non-cache directory mappings to mount into the container.
 	CustomMounts []MountMapping `json:"customMounts,omitempty"`
+	// RuntimeName is the last selected runtime backend for new tasks.
+	RuntimeName string `json:"runtimeName,omitempty"`
 }
 
 // RepoPrefs stores per-repository user preferences. Fields override the

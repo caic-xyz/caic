@@ -358,10 +358,11 @@ type mcpTaskCreatedOutput struct {
 
 type mcpTaskCreateArgs struct {
 	Prompt      string   `json:"prompt"                jsonschema_description:"The task description/prompt for the coding agent"`
-	Repos       []string `json:"repos"                 jsonschema:"minItems=1"                                                     jsonschema_description:"Repositories to work in (one or more)"`
+	Repos       []string `json:"repos"                 jsonschema:"minItems=1"                                                                   jsonschema_description:"Repositories to work in (one or more)"`
 	Harness     string   `json:"harness,omitempty"     jsonschema_description:"Agent harness to use (optional)"`
 	Model       string   `json:"model,omitempty"       jsonschema_description:"Model to use (optional)"`
 	Effort      string   `json:"effort,omitempty"      jsonschema_description:"Thinking effort to use (optional)"`
+	RuntimeName string   `json:"runtimeName,omitempty" jsonschema_description:"Runtime backend name to use, such as docker or podman (optional)"`
 	Display     bool     `json:"display,omitempty"     jsonschema_description:"Enable virtual display (VNC) for this task"`
 	Tailscale   bool     `json:"tailscale,omitempty"   jsonschema_description:"Enable Tailscale networking for this task"`
 	USB         bool     `json:"usb,omitempty"         jsonschema_description:"Enable USB passthrough for this task"`
@@ -383,6 +384,7 @@ func (m *mcpRegistry) handleTaskCreate(ctx context.Context, args mcpTaskCreateAr
 		Harness:       v1.Harness(harness),
 		Model:         args.Model,
 		Effort:        args.Effort,
+		RuntimeName:   args.RuntimeName,
 		Display:       args.Display,
 		Tailscale:     args.Tailscale,
 		USB:           args.USB,
@@ -449,6 +451,9 @@ func (m *mcpRegistry) handleTaskGetDetail(ctx context.Context, args mcpTaskNumbe
 		fmt.Sprintf("## Task #%d: %s", args.TaskNumber, taskTitle(&t)),
 		"",
 		fmt.Sprintf("State: %s  Elapsed: %s  Cost: %s", t.State, formatElapsed(time.Duration(t.Duration*float64(time.Second))), formatCost(t.CostUSD)),
+	}
+	if t.Runtime.RuntimeName != "" {
+		lines = append(lines, "Runtime: "+t.Runtime.RuntimeName)
 	}
 	if t.State == v1.TaskStatePurged && t.Result != "" {
 		lines = append(lines, "**Result:** "+t.Result)
@@ -766,6 +771,7 @@ func buildTaskCreateSchema() *jsonschema.Schema {
 	props.Set("model", &jsonschema.Schema{Type: "string", Description: "Model override (optional). Omit unless the user explicitly requested a model; omitted means the selected harness default."})
 	props.Set("effort", &jsonschema.Schema{Type: "string", Description: "Thinking effort override (optional). Omit unless the user explicitly requested effort; omitted means the selected harness default."})
 	props.Set("harness", &jsonschema.Schema{Type: "string", Description: "Agent harness override (optional). Omit to use the saved default harness."})
+	props.Set("runtimeName", &jsonschema.Schema{Type: "string", Description: "Runtime backend name (optional). Use docker or podman when multiple runtimes are available."})
 	props.Set("display", &jsonschema.Schema{Type: "boolean", Description: "Enable virtual display (VNC) for this task"})
 	props.Set("tailscale", &jsonschema.Schema{Type: "boolean", Description: "Enable Tailscale networking for this task"})
 	props.Set("usb", &jsonschema.Schema{Type: "boolean", Description: "Enable USB passthrough for this task"})
@@ -802,6 +808,9 @@ func taskSummaryLine(num int, t *v1.Task) string {
 	}
 	if t.CIStatus != "" {
 		extras = append(extras, "CI: "+string(t.CIStatus))
+	}
+	if t.Runtime.RuntimeName != "" {
+		extras = append(extras, "runtime: "+t.Runtime.RuntimeName)
 	}
 	extrasStr := ""
 	if len(extras) > 0 {

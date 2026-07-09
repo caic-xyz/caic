@@ -25,9 +25,10 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
 	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
-	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
+	"github.com/caic-xyz/caic/backend/internal/smoketest"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
@@ -168,9 +169,13 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 	if err != nil {
 		return "", "", nil, err
 	}
-	backend := &mdruntime.Backend{}
+	backend := smoketest.NewRuntimeBackend(0)
+	runtimeRouter, err := runtime.NewRouter([]runtime.System{backend})
+	if err != nil {
+		return "", "", nil, err
+	}
 	workspaceRegistry := repowork.NewRegistry(ctx, nil)
-	taskMgr := taskmgr.New(taskmgr.Config{ServerCtx: ctx, WorkspaceRegistry: workspaceRegistry})
+	taskMgr := taskmgr.New(taskmgr.Config{ServerCtx: ctx, Runtimes: runtimeRouter, WorkspaceRegistry: workspaceRegistry})
 	repoSvc := repomgr.NewService(ctx, "", repo.New(nil), workspaceRegistry)
 	prefs, err := preferences.Open(filepath.Join(stateDir, "preferences.json"))
 	if err != nil {
@@ -190,14 +195,14 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 		return "", "", nil, err
 	}
 	router, err := server.New(ctx, server.Dependencies{
-		RepoSvc:        repoSvc,
-		ProcessBackend: backend,
-		TaskMgr:        taskMgr,
-		Preferences:    prefs,
-		IPGeoChecker:   checker,
-		ForgeMgr:       forgemgr.New("", "", nil),
-		AuthStore:      store,
-		SessionSecret:  secret,
+		RepoSvc:       repoSvc,
+		Runtimes:      runtimeRouter,
+		TaskMgr:       taskMgr,
+		Preferences:   prefs,
+		IPGeoChecker:  checker,
+		ForgeMgr:      forgemgr.New("", "", nil),
+		AuthStore:     store,
+		SessionSecret: secret,
 	})
 	if err != nil {
 		return "", "", nil, err

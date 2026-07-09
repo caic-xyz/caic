@@ -368,7 +368,7 @@ type Dependencies struct {
 	VoiceGateway               VoiceGatewayConfig
 	ForgeMgr                   *forgemgr.Manager
 	CICache                    *forgecache.Cache
-	ProcessBackend             runtime.Backend
+	Runtimes                   *runtime.Router
 	TaskMgr                    *taskmgr.Manager
 	Provider                   genai.Provider
 	IPGeoChecker               *ipgeo.Checker
@@ -394,8 +394,8 @@ type Dependencies struct {
 // the injected services into HTTP handler concerns and the webhook endpoint; it
 // does not construct or own application services.
 func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocritic // Dependencies is a startup value bag.
-	if d.ProcessBackend == nil {
-		return nil, errors.New("process backend is required")
+	if d.Runtimes == nil {
+		return nil, errors.New("runtime is required")
 	}
 	if d.TaskMgr == nil {
 		return nil, errors.New("task manager is required")
@@ -426,6 +426,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		ciSvc:     d.CIService,
 		authStore: d.AuthStore,
 		fakeCI:    d.FakeCI,
+		runtimes:  d.Runtimes,
 	}
 	audit := &auditStore{path: d.AuditLogPath}
 	rateLimiter := newRateLimiter(120, time.Minute)
@@ -455,11 +456,12 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		goModeHandler: goModeHandler,
 		runtimeProcesses: &runtimeProcessHandlers{
 			taskMgr:     d.TaskMgr,
-			backend:     d.ProcessBackend,
+			runtimes:    d.Runtimes,
 			authEnabled: d.AuthStore != nil,
 		},
 		serverHandlers: &serverHandlers{
 			serverCtx:          ctx,
+			runtimes:           d.Runtimes,
 			tailscaleAvailable: d.Tailscale,
 			forgeMgr:           d.ForgeMgr,
 			prefs:              d.Preferences,

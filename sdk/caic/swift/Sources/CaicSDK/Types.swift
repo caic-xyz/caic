@@ -399,6 +399,11 @@ public struct VoiceGatewayMetadata: Codable {
     public let capabilities: [String]?
 }
 
+/// RuntimeInfo is the JSON representation of an available task runtime backend.
+public struct RuntimeInfo: Codable {
+    public let name: String
+}
+
 /// Config reports server capabilities to the frontend.
 public struct Config: Codable {
     public let version: String?
@@ -412,6 +417,7 @@ public struct Config: Codable {
     public let gitHubAppEnabled: Bool?
     /// e.g. ["github","gitlab"]
     public let authProviders: [String]?
+    public let runtimes: [RuntimeInfo]?
 }
 
 /// VersionResp is the response for GET /api/caic/v1/server/version.
@@ -487,6 +493,8 @@ public struct UserSettings: Codable {
     /// MaxCPUs limits the number of CPU cores the runtime instance may use.
     /// Zero means use the system default (max(2, NumCPU-2)).
     public let maxCPUs: Int?
+    /// RuntimeName is the preferred runtime backend for new tasks.
+    public let runtimeName: String?
     /// WellKnownCaches maps cache name to enabled state. Absent or false means
     /// disabled, true means enabled. Caches are opt-in.
     public let wellKnownCaches: [String: Bool]?
@@ -651,6 +659,8 @@ public struct DiffFileStat: Codable {
 public struct RuntimeInstance: Codable {
     /// Runtime instance ID.
     public let id: String
+    /// Runtime backend name.
+    public let runtimeName: String?
     /// Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown.
     public let tailscale: String?
     public let usb: Bool?
@@ -784,6 +794,7 @@ public struct TaskInfoRecorded: Codable {
 
 /// TaskInfoObservedRuntime describes runtime-observed instance details from the runtime adapter.
 public struct TaskInfoObservedRuntime: Codable {
+    public let runtimeName: String?
     public let runtime: String?
     public let id: String?
     public let state: String?
@@ -832,6 +843,7 @@ public struct CreateTaskReq: Codable {
     /// Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default.
     public let effort: String?
     public let harness: Harness
+    public let runtimeName: String?
     public let tailscale: Bool?
     public let usb: Bool?
     public let display: Bool?

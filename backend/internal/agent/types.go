@@ -604,6 +604,7 @@ type MetaMessage struct {
 	Display           bool             `json:"display,omitempty"`
 	Sudo              bool             `json:"sudo,omitempty"`
 	GitHubToken       bool             `json:"gitHubToken,omitempty"`
+	RuntimeName       string           `json:"runtimeName,omitempty"`
 	BaseImage         string           `json:"baseImage,omitempty"`
 	ContainerPlatform string           `json:"containerPlatform,omitempty"`
 	MaxCPUs           int              `json:"maxCPUs,omitempty"`

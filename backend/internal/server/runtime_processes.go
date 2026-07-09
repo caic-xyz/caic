@@ -16,15 +16,10 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
-type runtimeProcessBackend interface {
-	Processes(ctx context.Context, id runtime.InstanceID) ([]runtime.ProcessInfo, error)
-	Signal(ctx context.Context, id runtime.InstanceID, pid int, sig string) error
-}
-
 // runtimeProcessHandlers handles task runtime process routes.
 type runtimeProcessHandlers struct {
 	taskMgr     *taskmgr.Manager
-	backend     runtimeProcessBackend
+	runtimes    *runtime.Router
 	authEnabled bool
 }
 
@@ -41,11 +36,7 @@ func (h *runtimeProcessHandlers) HandleGetProcesses(w http.ResponseWriter, r *ht
 		writeError(w, api.Conflict("task has no instance"))
 		return
 	}
-	if h.backend == nil {
-		writeError(w, api.InternalError("runtime backend not configured"))
-		return
-	}
-	procs, err := h.backend.Processes(r.Context(), instanceID)
+	procs, err := h.runtimes.Processes(r.Context(), instanceID)
 	if err != nil {
 		writeError(w, api.InternalError(err.Error()))
 		return
@@ -85,10 +76,7 @@ func (h *runtimeProcessHandlers) signalProcess(ctx context.Context, entry *taskm
 	if instanceID == "" {
 		return nil, api.Conflict("task has no instance")
 	}
-	if h.backend == nil {
-		return nil, api.InternalError("runtime backend not configured")
-	}
-	if err := h.backend.Signal(ctx, instanceID, req.PID, req.Signal); err != nil {
+	if err := h.runtimes.Signal(ctx, instanceID, req.PID, req.Signal); err != nil {
 		return nil, api.InternalError(err.Error())
 	}
 	slog.InfoContext(ctx, "signal sent", "task", t.ID, "instance", instanceID, "pid", req.PID, "signal", req.Signal)

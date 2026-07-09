@@ -458,6 +458,7 @@ export function validateRuntimeInstance(raw: ValidatorInput): RuntimeInstance {
   const obj = asObject(raw, "RuntimeInstance");
   return {
     id: asString(obj["id"], "RuntimeInstance.id"),
+    runtimeName: (obj["runtimeName"] === undefined || obj["runtimeName"] === null ? undefined : asString(obj["runtimeName"], "RuntimeInstance.runtimeName")),
     tailscale: (obj["tailscale"] === undefined || obj["tailscale"] === null ? undefined : asString(obj["tailscale"], "RuntimeInstance.tailscale")),
     usb: (obj["usb"] === undefined || obj["usb"] === null ? undefined : asBoolean(obj["usb"], "RuntimeInstance.usb")),
     display: (obj["display"] === undefined || obj["display"] === null ? undefined : asBoolean(obj["display"], "RuntimeInstance.display")),

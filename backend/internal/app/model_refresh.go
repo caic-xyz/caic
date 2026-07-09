@@ -21,8 +21,8 @@ import (
 
 // watchHarnessModelCache refreshes stale model caches at startup, then watches
 // harnesses.json for deletion and regenerates it on demand.
-func watchHarnessModelCache(ctx context.Context, cacheDir string, backend runtime.Backend, inventory runtime.Inventory, taskMgr *taskmgr.Manager, harnessEnv map[string][]string) error {
-	refreshHarnessModels(ctx, cacheDir, backend, inventory, taskMgr, harnessEnv)
+func watchHarnessModelCache(ctx context.Context, cacheDir string, router *runtime.Router, taskMgr *taskmgr.Manager, harnessEnv map[string][]string) error {
+	refreshHarnessModels(ctx, cacheDir, router, taskMgr, harnessEnv)
 
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -48,7 +48,7 @@ func watchHarnessModelCache(ctx context.Context, cacheDir string, backend runtim
 				continue
 			}
 			slog.InfoContext(ctx, "model cache deleted, regenerating", "path", cachePath)
-			refreshHarnessModels(ctx, cacheDir, backend, inventory, taskMgr, harnessEnv)
+			refreshHarnessModels(ctx, cacheDir, router, taskMgr, harnessEnv)
 		case err, ok := <-watcher.Errors:
 			if !ok {
 				return nil
@@ -62,8 +62,8 @@ func watchHarnessModelCache(ctx context.Context, cacheDir string, backend runtim
 
 // refreshHarnessModels checks if any harness caches are stale and refreshes
 // them by launching a temporary runtime instance.
-func refreshHarnessModels(ctx context.Context, cacheDir string, backend runtime.Backend, inventory runtime.Inventory, taskMgr *taskmgr.Manager, harnessEnv map[string][]string) {
-	purgeStaleModelRefreshInstances(ctx, backend, inventory)
+func refreshHarnessModels(ctx context.Context, cacheDir string, router *runtime.Router, taskMgr *taskmgr.Manager, harnessEnv map[string][]string) {
+	purgeStaleModelRefreshInstances(ctx, router)
 	cache := agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
 
 	fetchers := map[harness.Name]agent.ModelFetcher{}
@@ -77,38 +77,36 @@ func refreshHarnessModels(ctx context.Context, cacheDir string, backend runtime.
 		if _, fresh := cache.Models(h, agent.APIKeyHash(env)); fresh {
 			continue
 		}
-		refreshOneHarness(ctx, cache, backend, taskMgr, h, fetchers[h], env)
+		refreshOneHarness(ctx, cache, router, taskMgr, h, fetchers[h], env)
 	}
 }
 
 // purgeStaleModelRefreshInstances removes temporary model-refresh runtimes left
 // behind by a previous server exit.
-func purgeStaleModelRefreshInstances(ctx context.Context, backend runtime.Backend, inventory runtime.Inventory) {
-	if backend == nil || inventory == nil {
-		return
-	}
-	instances, err := inventory.List(ctx)
+func purgeStaleModelRefreshInstances(ctx context.Context, router *runtime.Router) {
+	instances, err := router.List(ctx)
 	if err != nil {
 		slog.WarnContext(ctx, "model refresh: stale instance scan failed", "err", err)
 		return
 	}
-	for _, instance := range instances {
-		value, err := inventory.Metadata(ctx, instance.ID, runtime.MetadataModelRefresh)
+	for i := range instances {
+		id := instances[i].ID
+		value, err := router.Metadata(ctx, id, runtime.MetadataModelRefresh)
 		if err != nil {
-			slog.WarnContext(ctx, "model refresh: metadata read failed", "instance", instance.ID, "err", err)
+			slog.WarnContext(ctx, "model refresh: metadata read failed", "instance", id, "err", err)
 			continue
 		}
 		if value != "true" {
 			continue
 		}
 		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-		err = backend.Purge(purgeCtx, instance.ID)
+		err = router.Purge(purgeCtx, id)
 		cancel()
 		if err != nil {
-			slog.WarnContext(ctx, "model refresh: stale instance purge failed", "instance", instance.ID, "err", err)
+			slog.WarnContext(ctx, "model refresh: stale instance purge failed", "instance", id, "err", err)
 			continue
 		}
-		slog.InfoContext(ctx, "model refresh: purged stale instance", "instance", instance.ID)
+		slog.InfoContext(ctx, "model refresh: purged stale instance", "instance", id)
 	}
 }
 
@@ -117,21 +115,19 @@ func purgeStaleModelRefreshInstances(ctx context.Context, backend runtime.Backen
 func refreshOneHarness(
 	ctx context.Context,
 	cache *agent.HarnessCache,
-	backend runtime.Backend,
+	router *runtime.Router,
 	taskMgr *taskmgr.Manager,
 	h harness.Name,
 	fetcher agent.ModelFetcher,
 	env []string,
 ) {
-	if backend == nil {
-		return
-	}
 	slog.InfoContext(ctx, "model cache stale, fetching", "harness", h)
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
 	w := phaseLogWriter{phase: "model-refresh"}
-	name, err := backend.Launch(ctx, nil, &runtime.StartOptions{
+	name, err := router.Launch(ctx, nil, &runtime.StartOptions{
+		RuntimeName: router.Runtimes[0].Name(),
 		Metadata: runtime.Metadata{
 			runtime.MetadataModelRefresh: "true",
 		},
@@ -143,9 +139,11 @@ func refreshOneHarness(
 		return
 	}
 	defer func() {
-		_ = backend.Purge(context.WithoutCancel(ctx), name)
+		if err := router.Purge(context.WithoutCancel(ctx), name); err != nil {
+			slog.WarnContext(ctx, "model refresh: purge failed", "harness", h, "instance", name, "err", err)
+		}
 	}()
-	conn, err := backend.Connect(ctx, name, &runtime.StartOptions{Harness: h, LogWriter: w})
+	conn, err := router.Connect(ctx, name, &runtime.StartOptions{Harness: h, LogWriter: w})
 	if err != nil {
 		slog.WarnContext(ctx, "model refresh: connect failed", "harness", h, "err", err)
 		return

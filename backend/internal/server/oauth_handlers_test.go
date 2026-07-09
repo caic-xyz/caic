@@ -408,8 +408,9 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 		t.Fatalf("ipgeo.NewChecker: %v", err)
 	}
 	backend := &mdruntime.Backend{}
+	runtimeRouter := newTestRuntime(t, backend)
 	workspaceRegistry := repowork.NewRegistry(t.Context(), nil)
-	taskMgr := taskmgr.New(taskmgr.Config{ServerCtx: t.Context(), WorkspaceRegistry: workspaceRegistry})
+	taskMgr := taskmgr.New(taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, WorkspaceRegistry: workspaceRegistry})
 	repoSvc := repomgr.NewService(t.Context(), "", repo.New(nil), workspaceRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
@@ -424,7 +425,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 	s, err := New(t.Context(), Dependencies{
 		RepoSvc:                    repoSvc,
 		RepoStatus:                 repoStatus,
-		ProcessBackend:             backend,
+		Runtimes:                   runtimeRouter,
 		TaskMgr:                    taskMgr,
 		Preferences:                prefs,
 		IPGeoChecker:               checker,

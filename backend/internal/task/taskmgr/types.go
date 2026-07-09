@@ -25,6 +25,7 @@ type CreateParams struct {
 	Display           bool
 	Sudo              bool
 	GitHubToken       bool                 // inject GitHub token into the runtime environment
+	RuntimeName       runtime.Name         // selected runtime backend; empty means backend default
 	BaseImage         string               // resolved base image
 	ContainerPlatform string               // resolved container platform; empty means use host default
 	MaxCPUs           int                  // max CPU cores; 0 means use the default

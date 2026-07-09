@@ -315,10 +315,10 @@ func (r *SessionRunner) startMessageDispatch(ctx context.Context, t *Task, skipS
 			case *agent.ToolResultMessage:
 				if _, ok := pendingMutating[msg.ToolUseID]; ok {
 					delete(pendingMutating, msg.ToolUseID)
-					emitToolDiff = !skipSideEffects && r.Workspace.Runtime != nil && r.Workspace.Dir != ""
+					emitToolDiff = !skipSideEffects && r.Workspace.Runtimes != nil && r.Workspace.Dir != ""
 				}
 			case *agent.ResultMessage:
-				if !skipSideEffects && r.Workspace.Runtime != nil && r.Workspace.Dir != "" {
+				if !skipSideEffects && r.Workspace.Runtimes != nil && r.Workspace.Dir != "" {
 					ds, _ := r.Workspace.DiffStat(ctx, instanceID, allRepos, repowork.DiffFetchBestEffort, "")
 					msg.DiffStat = ds
 				}
@@ -344,7 +344,7 @@ var mutatingTools = map[string]struct{}{
 // emitDiffStatBranch emits a DiffStatMessage from the current instance diff
 // without fetching from the instance. This keeps live UI diff stats fresh during
 // a running turn without triggering md fetch side effects.
-func (r *SessionRunner) emitDiffStatBranch(ctx context.Context, t *Task, id runtime.InstanceID, repos []runtime.Repo) {
+func (r *SessionRunner) emitDiffStatBranch(ctx context.Context, t *Task, id runtime.ID, repos []runtime.Repo) {
 	ds, _ := r.Workspace.DiffStat(ctx, id, repos, repowork.DiffWithoutFetch, "")
 	if len(ds) == 0 {
 		return

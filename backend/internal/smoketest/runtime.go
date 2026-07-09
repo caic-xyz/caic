@@ -41,67 +41,67 @@ func InitHarnessCache(cacheDir string) error {
 	return nil
 }
 
-// RuntimeBackend implements runtime.Backend with no-op operations and canned
+// RuntimeBackend implements runtime.System with no-op operations and canned
 // process data.
 type RuntimeBackend struct {
 	vncPort int // non-zero when a fake VNC server is running.
 }
 
-var _ runtime.Backend = (*RuntimeBackend)(nil)
-var _ runtime.Inventory = (*RuntimeBackend)(nil)
-var _ runtime.Monitor = (*RuntimeBackend)(nil)
-var _ runtime.PrivilegeInfo = (*RuntimeBackend)(nil)
+var _ runtime.System = (*RuntimeBackend)(nil)
 
 // NewRuntimeBackend creates a fake runtime backend for smoke and e2e tests.
 func NewRuntimeBackend(vncPort int) *RuntimeBackend {
 	return &RuntimeBackend{vncPort: vncPort}
 }
 
-// Launch implements runtime.Backend.
-func (*RuntimeBackend) Launch(_ context.Context, repos []runtime.Repo, _ *runtime.StartOptions) (runtime.InstanceID, error) {
+// Name returns the runtime backend name.
+func (*RuntimeBackend) Name() runtime.Name { return "test-runtime" }
+
+// Launch implements runtime.Lifecycle.
+func (b *RuntimeBackend) Launch(_ context.Context, repos []runtime.Repo, _ *runtime.StartOptions) (runtime.ID, error) {
 	if len(repos) == 0 {
-		return "md-test-no-repo", nil
+		return runtime.NewID(b.Name(), "md-test-no-repo"), nil
 	}
-	return runtime.InstanceID("md-test-" + strings.ReplaceAll(repos[0].Branch, "/", "-")), nil
+	return runtime.NewID(b.Name(), runtime.InstanceID("md-test-"+strings.ReplaceAll(repos[0].Branch, "/", "-"))), nil
 }
 
-// Connect implements runtime.Backend.
-func (*RuntimeBackend) Connect(_ context.Context, id runtime.InstanceID, _ *runtime.StartOptions) (runtime.ConnectionInfo, error) {
-	return runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: string(id)}}, nil
+// Connect implements runtime.Lifecycle.
+func (*RuntimeBackend) Connect(_ context.Context, id runtime.ID, _ *runtime.StartOptions) (runtime.ConnectionInfo, error) {
+	return runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: string(id.InstanceID())}}, nil
 }
 
-// Diff implements runtime.Backend.
-func (*RuntimeBackend) Diff(_ context.Context, _ runtime.InstanceID, _ int, _ ...string) (string, error) {
+// Diff implements runtime.Lifecycle.
+func (*RuntimeBackend) Diff(_ context.Context, _ runtime.ID, _ int, _ ...string) (string, error) {
 	return "", nil
 }
 
-// Fetch implements runtime.Backend.
-func (*RuntimeBackend) Fetch(_ context.Context, _ runtime.InstanceID) error { return nil }
+// Fetch implements runtime.Lifecycle.
+func (*RuntimeBackend) Fetch(_ context.Context, _ runtime.ID) error { return nil }
 
-// Stop implements runtime.Backend.
-func (*RuntimeBackend) Stop(_ context.Context, _ runtime.InstanceID) error { return nil }
+// Stop implements runtime.Lifecycle.
+func (*RuntimeBackend) Stop(_ context.Context, _ runtime.ID) error { return nil }
 
-// Purge implements runtime.Backend.
-func (*RuntimeBackend) Purge(_ context.Context, _ runtime.InstanceID) error { return nil }
+// Purge implements runtime.Lifecycle.
+func (*RuntimeBackend) Purge(_ context.Context, _ runtime.ID) error { return nil }
 
-// Revive implements runtime.Backend.
-func (*RuntimeBackend) Revive(_ context.Context, _ runtime.InstanceID) error { return nil }
+// Revive implements runtime.Lifecycle.
+func (*RuntimeBackend) Revive(_ context.Context, _ runtime.ID) error { return nil }
 
-// Fork implements runtime.Backend.
-func (*RuntimeBackend) Fork(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo, _ *runtime.ForkOptions) (runtime.InstanceID, runtime.ConnectionInfo, []runtime.Repo, error) {
-	return "fake-fork", runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: "fake-fork"}}, nil, errors.New("fork not supported in fake runtime")
+// Fork implements runtime.Lifecycle.
+func (b *RuntimeBackend) Fork(_ context.Context, _ runtime.ID, _ []runtime.Repo, _ *runtime.ForkOptions) (runtime.ID, runtime.ConnectionInfo, []runtime.Repo, error) {
+	return runtime.NewID(b.Name(), "fake-fork"), runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: "fake-fork"}}, nil, errors.New("fork not supported in fake runtime")
 }
 
-// VNCPort implements runtime.Backend.
-func (b *RuntimeBackend) VNCPort(_ context.Context, _ runtime.InstanceID) int { return b.vncPort }
+// VNCPort implements runtime.Lifecycle.
+func (b *RuntimeBackend) VNCPort(_ context.Context, _ runtime.ID) int { return b.vncPort }
 
-// Processes implements runtime.Backend.
-func (*RuntimeBackend) Processes(_ context.Context, _ runtime.InstanceID) ([]runtime.ProcessInfo, error) {
+// Processes implements runtime.Lifecycle.
+func (*RuntimeBackend) Processes(_ context.Context, _ runtime.ID) ([]runtime.ProcessInfo, error) {
 	return fakeProcesses(), nil
 }
 
-// Signal implements runtime.Backend.
-func (*RuntimeBackend) Signal(_ context.Context, _ runtime.InstanceID, _ int, _ string) error {
+// Signal implements runtime.Lifecycle.
+func (*RuntimeBackend) Signal(_ context.Context, _ runtime.ID, _ int, _ string) error {
 	return nil
 }
 
@@ -111,17 +111,17 @@ func (*RuntimeBackend) List(context.Context) ([]runtime.Instance, error) {
 }
 
 // Metadata implements runtime.Inventory.
-func (*RuntimeBackend) Metadata(context.Context, runtime.InstanceID, runtime.MetadataKey) (string, error) {
+func (*RuntimeBackend) Metadata(context.Context, runtime.ID, runtime.MetadataKey) (string, error) {
 	return "", nil
 }
 
 // Inspect implements runtime.Inventory.
-func (*RuntimeBackend) Inspect(_ context.Context, id runtime.InstanceID) (*runtime.InstanceInspect, error) {
+func (*RuntimeBackend) Inspect(_ context.Context, id runtime.ID) (*runtime.InstanceInspect, error) {
 	return &runtime.InstanceInspect{Runtime: "fake", ID: id, State: "running", OS: "linux", CPUArchitecture: stdruntime.GOARCH}, nil
 }
 
 // WatchStats implements runtime.Monitor.
-func (*RuntimeBackend) WatchStats(ctx context.Context, _ []runtime.InstanceID) (iter.Seq2[runtime.StatsSample, error], error) {
+func (*RuntimeBackend) WatchStats(ctx context.Context, _ []runtime.ID) (iter.Seq2[runtime.StatsSample, error], error) {
 	return func(func(runtime.StatsSample, error) bool) {
 		<-ctx.Done()
 	}, nil
@@ -138,7 +138,7 @@ func (*RuntimeBackend) WatchEvents(ctx context.Context, _ runtime.EventFilter) (
 }
 
 // SudoPassword implements runtime.PrivilegeInfo.
-func (*RuntimeBackend) SudoPassword(context.Context, runtime.InstanceID) (string, error) {
+func (*RuntimeBackend) SudoPassword(context.Context, runtime.ID) (string, error) {
 	return "", nil
 }
 

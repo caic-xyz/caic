@@ -49,6 +49,24 @@ type taskService struct {
 	ciSvc     *ci.Service
 	authStore *auth.Store
 	fakeCI    FakeCIHook
+	runtimes  *runtime.Router
+}
+
+func (s *taskService) runtimeNameForCreate(requested string, settings *preferences.Settings) runtime.Name {
+	if requested != "" {
+		return runtime.Name(requested)
+	}
+	if settings.RuntimeName == "" {
+		return ""
+	}
+	id := runtime.Name(settings.RuntimeName)
+	if s.runtimes == nil {
+		return ""
+	}
+	if _, ok := s.runtimes.ByName[id]; !ok {
+		return ""
+	}
+	return id
 }
 
 func (s *taskService) maybeFakeCI(t *task.Task) {
@@ -134,12 +152,13 @@ func (s *taskService) getTaskInfo(ctx context.Context, entry *taskmgr.Entry, _ *
 				GitHubToken: snap.GitHubToken,
 			},
 			Runtime: v1.RuntimeInstance{
-				ID:        string(snap.RuntimeInstanceID),
-				Tailscale: taskInfoTailscaleURL(&snap),
-				USB:       snap.USB,
-				Display:   snap.Display,
-				Sudo:      snap.Sudo,
-				VNCPort:   snap.VNCPort,
+				ID:          string(snap.RuntimeInstanceID),
+				RuntimeName: string(snap.RuntimeName),
+				Tailscale:   taskInfoTailscaleURL(&snap),
+				USB:         snap.USB,
+				Display:     snap.Display,
+				Sudo:        snap.Sudo,
+				VNCPort:     snap.VNCPort,
 			},
 			Repos:  taskRepos,
 			Caches: taskInfoCaches(t.CacheMounts),
@@ -148,7 +167,7 @@ func (s *taskService) getTaskInfo(ctx context.Context, entry *taskmgr.Entry, _ *
 	}
 
 	if snap.RuntimeInstanceID != "" {
-		observed, err := s.taskMgr.InspectRuntime(ctx, snap.RuntimeInstanceID)
+		observed, err := s.taskMgr.Runtimes.Inspect(ctx, snap.RuntimeInstanceID)
 		if err != nil {
 			info.Warnings = append(info.Warnings, "runtime inspect unavailable: "+err.Error())
 		} else if observed != nil {
@@ -190,6 +209,7 @@ func taskInfoMounts(in []runtime.Mount) []v1.TaskInfoMount {
 
 func taskInfoObserved(in *runtime.InstanceInspect) v1.TaskInfoObservedRuntime {
 	return v1.TaskInfoObservedRuntime{
+		RuntimeName:     string(in.ID.RuntimeName()),
 		Runtime:         in.Runtime,
 		ID:              string(in.ID),
 		State:           in.State,
@@ -216,6 +236,9 @@ func taskInfoCompareWarnings(recorded *v1.TaskInfoRecorded, observed *v1.TaskInf
 	hostHome, homeErr := os.UserHomeDir()
 	if homeErr != nil && len(recorded.Mounts) > 0 {
 		warnings = append(warnings, "host home unavailable for mount diagnostics: "+homeErr.Error())
+	}
+	if recorded.Runtime.RuntimeName != "" && observed.RuntimeName != "" && recorded.Runtime.RuntimeName != observed.RuntimeName {
+		warnings = append(warnings, fmt.Sprintf("observed runtime name %q differs from recorded runtime name %q", observed.RuntimeName, recorded.Runtime.RuntimeName))
 	}
 	if recorded.BaseImage != "" && observed.ImageRef != "" && recorded.BaseImage != observed.ImageRef {
 		warnings = append(warnings, fmt.Sprintf("observed image %q differs from recorded image %q", observed.ImageRef, recorded.BaseImage))
@@ -323,6 +346,8 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v
 		taskRepos[i] = taskmgr.CreateRepo{Name: r.Name, BaseBranch: r.BaseBranch}
 	}
 
+	runtimeName := s.runtimeNameForCreate(req.RuntimeName, &prefs.Settings)
+
 	id, err := s.taskMgr.Create(ctx, taskmgr.CreateParams{
 		OwnerID:             ownerID,
 		Prompt:              v1conv.PromptToAgent(req.InitialPrompt),
@@ -335,6 +360,7 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v
 		Display:             req.Display,
 		Sudo:                req.Sudo,
 		GitHubToken:         req.GitHubToken,
+		RuntimeName:         runtimeName,
 		ResolvedGitHubToken: s.resolveGitHubContainerToken(ctx, req.GitHubToken),
 		BaseImage:           prefs.Settings.BaseImage,
 		ContainerPlatform:   prefs.Settings.ContainerPlatform.String(),
@@ -367,6 +393,7 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v
 			p.Efforts[harnessName] = make(map[string]string)
 		}
 		p.Efforts[harnessName][req.Model] = req.Effort
+		p.Settings.RuntimeName = string(entry.Task().RuntimeName)
 		if len(req.Repos) > 0 {
 			p.TouchRepo(req.Repos[0].Name, &preferences.RepoPrefs{
 				BaseBranch: req.Repos[0].BaseBranch,
@@ -434,7 +461,7 @@ func (s *taskService) sendInput(ctx context.Context, entry *taskmgr.Entry, req *
 	instanceID := t.RuntimeInstanceID()
 	if instanceID != "" {
 		probeCtx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
-		alive, relayErr := agent.IsRelayRunning(probeCtx, string(instanceID)) //nolint:contextcheck // diagnostic probe; must outlive request
+		alive, relayErr := agent.IsRelayRunning(probeCtx, t.RuntimeConnectionTarget().SSHHost) //nolint:contextcheck // diagnostic probe; must outlive request
 		cancel()
 		switch {
 		case relayErr != nil:

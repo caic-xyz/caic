@@ -35,7 +35,7 @@ import (
 	"github.com/caic-xyz/caic/oauth/oauthclient"
 )
 
-type workspaceRegistry interface {
+type serverTaskManager interface {
 	Backends() map[harness.Name]agent.Backend
 	RangeWorkspaces(fn func(relPath string, r *repowork.Workspace) bool)
 	Workspace(relPath string) (*repowork.Workspace, bool)
@@ -44,12 +44,13 @@ type workspaceRegistry interface {
 
 type serverHandlers struct {
 	serverCtx          context.Context
+	runtimes           *caicruntime.Router
 	tailscaleAvailable bool
 	forgeMgr           *forgemgr.Manager
 	prefs              *preferences.Store
 	repoSvc            *repomgr.Service
 	repoStatus         *ci.RepoStatusStore
-	taskMgr            workspaceRegistry
+	taskMgr            serverTaskManager
 	cacheSizes         *CacheSizeStore
 	authStore          *auth.Store
 	githubOAuth        *oauthclient.ProviderConfig
@@ -77,6 +78,10 @@ func (h *serverHandlers) getConfig(_ context.Context, _ *api.EmptyReq) (*v1.Conf
 	}
 	if h.authStore != nil {
 		cfg.AuthProviders = h.authProviders()
+	}
+	cfg.Runtimes = make([]v1.RuntimeInfo, len(h.runtimes.Runtimes))
+	for i, rt := range h.runtimes.Runtimes {
+		cfg.Runtimes[i] = v1.RuntimeInfo{Name: string(rt.Name())}
 	}
 	return cfg, nil
 }
@@ -179,6 +184,7 @@ func (h *serverHandlers) getPreferences(ctx context.Context, _ *api.EmptyReq) (*
 			BaseImage:          prefs.Settings.BaseImage,
 			ContainerPlatform:  v1.Platform(prefs.Settings.ContainerPlatform),
 			MaxCPUs:            prefs.Settings.MaxCPUs,
+			RuntimeName:        prefs.Settings.RuntimeName,
 			WellKnownCaches:    prefs.Settings.WellKnownCaches,
 			CacheMappings:      cacheMappings,
 			CustomMounts:       customMounts,
@@ -187,12 +193,18 @@ func (h *serverHandlers) getPreferences(ctx context.Context, _ *api.EmptyReq) (*
 }
 
 func (h *serverHandlers) updatePreferences(ctx context.Context, req *v1.UpdatePreferencesReq) (*v1.PreferencesResp, error) {
+	if req.Settings.RuntimeName != "" {
+		if _, ok := h.runtimes.ByName[caicruntime.Name(req.Settings.RuntimeName)]; !ok {
+			return nil, api.BadRequest(fmt.Sprintf("unknown runtime %q", req.Settings.RuntimeName))
+		}
+	}
 	if err := h.prefs.Update(userIDFromCtx(ctx), func(p *preferences.Preferences) {
 		p.Settings.AutoFixOnCIFailure = req.Settings.AutoFixOnCIFailure
 		p.Settings.AutoFixOnPROpen = req.Settings.AutoFixOnPROpen
 		p.Settings.BaseImage = req.Settings.BaseImage
 		p.Settings.ContainerPlatform = md.Platform(req.Settings.ContainerPlatform)
 		p.Settings.MaxCPUs = req.Settings.MaxCPUs
+		p.Settings.RuntimeName = req.Settings.RuntimeName
 		p.Settings.WellKnownCaches = req.Settings.WellKnownCaches
 		if req.Settings.CacheMappings != nil {
 			p.Settings.CacheMappings = make([]preferences.CacheMapping, len(req.Settings.CacheMappings))

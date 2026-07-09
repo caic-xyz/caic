@@ -22,8 +22,9 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/app"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/app"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/smoketest"
@@ -104,6 +105,7 @@ func TestSmoke(t *testing.T) {
 			InitialPrompt: v1.Prompt{Text: "smoke test " + fmt.Sprint(time.Now().UnixNano())},
 			Repos:         []v1.RepoSpec{{Name: repos[0].Path}},
 			Harness:       v1.Harness(harnesses[0].Name),
+			RuntimeName:   smoketest.SmokeRuntime(),
 		}
 		var createResp v1.Task
 		postJSON(t, baseURL, "/api/caic/v1/tasks", createReq, &createResp)
@@ -161,7 +163,7 @@ func TestSmoke(t *testing.T) {
 		}
 		t.Logf("fork task %s reached 'waiting'", forkID)
 
-		forkContainerName := forkTask.Runtime.ID
+		forkContainerName := runtime.InstanceID(forkTask.Runtime.ID)
 		if forkContainerName == "" {
 			t.Fatalf("fork task %s has no runtime ID before purge", forkID)
 		}
@@ -183,7 +185,7 @@ func TestSmoke(t *testing.T) {
 		t.Logf("task %s reached 'stopped'", taskID)
 
 		// Purge the task.
-		containerName := task.Runtime.ID
+		containerName := runtime.InstanceID(task.Runtime.ID)
 		if containerName == "" {
 			t.Fatalf("task %s has no runtime ID before purge", taskID)
 		}
@@ -271,7 +273,6 @@ func startSmokeServer(t *testing.T) string {
 			CacheDir:  cacheDir,
 		},
 		Runtime: server.RuntimeConfig{
-			Name:       smoketest.SmokeRuntime(),
 			SkipWarmup: true,
 		},
 		Agent: server.AgentConfig{

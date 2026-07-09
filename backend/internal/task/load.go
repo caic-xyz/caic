@@ -140,6 +140,7 @@ type LoadedTask struct {
 	Display           bool
 	Sudo              bool
 	GitHubToken       bool
+	RuntimeName       runtime.Name
 	BaseImage         string
 	ContainerPlatform string
 	MaxCPUs           int
@@ -194,6 +195,7 @@ func loadedTaskFromMeta(path, taskID string, meta *agent.MetaMessage, modified t
 		Display:           meta.Display,
 		Sudo:              meta.Sudo,
 		GitHubToken:       meta.GitHubToken,
+		RuntimeName:       runtime.Name(meta.RuntimeName),
 		BaseImage:         meta.BaseImage,
 		ContainerPlatform: meta.ContainerPlatform,
 		MaxCPUs:           meta.MaxCPUs,

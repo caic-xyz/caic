@@ -178,8 +178,9 @@ func InitSmokeHarnessCache(cacheDir string) error {
 	return nil
 }
 
-// WaitForRuntimeGone waits until the runtime no longer knows a container.
-func WaitForRuntimeGone(ctx context.Context, runtimeName, containerName string) error {
+// WaitForRuntimeGone waits until the runtime no longer knows an instance.
+func WaitForRuntimeGone(ctx context.Context, runtimeName string, id runtime.ID) error {
+	containerName := string(id.InstanceID())
 	for {
 		select {
 		case <-ctx.Done():

@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"iter"
+	"strings"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
@@ -35,8 +36,50 @@ type EventFilter struct {
 	MetadataKey MetadataKey
 }
 
-// InstanceID identifies a task runtime instance.
+// Name identifies a runtime backend, such as docker or podman.
+type Name string
+
+// ID identifies a runtime instance across runtime backends.
+//
+// It combines a runtime Name with a backend-local instance ID, encoded as
+// "name:instance". Runtime systems receive and return the qualified form so
+// different runtimes can own colliding backend-local instance IDs.
+type ID string
+
+// InstanceID identifies a backend-local runtime allocation.
+//
+// It is used only inside concrete runtime adapters when calling their backing
+// runtime APIs. Application-facing runtime interfaces use qualified ID values.
 type InstanceID string
+
+// NewID returns a qualified ID from a runtime name and backend-local instance ID.
+func NewID(runtimeName Name, instanceID InstanceID) ID {
+	if instanceID == "" || runtimeName == "" {
+		return ID(instanceID)
+	}
+	return ID(string(runtimeName) + ":" + string(instanceID))
+}
+
+// RuntimeName returns the runtime name part of the qualified ID.
+//
+// An empty return means the ID is unqualified and invalid outside a concrete
+// runtime backend implementation.
+func (id ID) RuntimeName() Name {
+	runtimeName, _, ok := strings.Cut(string(id), ":")
+	if !ok {
+		return ""
+	}
+	return Name(runtimeName)
+}
+
+// InstanceID returns the backend-local instance ID part of the qualified ID.
+func (id ID) InstanceID() InstanceID {
+	_, instanceID, ok := strings.Cut(string(id), ":")
+	if !ok {
+		return InstanceID(id)
+	}
+	return InstanceID(instanceID)
+}
 
 // ConnectionTarget describes how agent relay operations reach a runtime.
 //
@@ -83,7 +126,7 @@ type ConnectionInfo struct {
 
 // Instance describes a known runtime instance.
 type Instance struct {
-	ID            InstanceID
+	ID            ID
 	AgentTarget   ConnectionTarget
 	State         string
 	Repos         []Repo
@@ -98,7 +141,7 @@ type Instance struct {
 // InstanceInspect describes observed runtime configuration for an instance.
 type InstanceInspect struct {
 	Runtime         string
-	ID              InstanceID
+	ID              ID
 	State           string
 	ImageRef        string
 	ImageID         string
@@ -137,17 +180,18 @@ type Stats struct {
 
 // StatsSample is a streamed runtime resource usage snapshot for one instance.
 type StatsSample struct {
-	InstanceID InstanceID
+	InstanceID ID
 	Stats      Stats
 }
 
 // Event describes a runtime lifecycle event.
 type Event struct {
-	InstanceID InstanceID
+	InstanceID ID
 }
 
 // StartOptions holds optional flags for runtime instance startup.
 type StartOptions struct {
+	RuntimeName       Name
 	Metadata          Metadata
 	BaseImage         string
 	ContainerPlatform string
@@ -171,63 +215,73 @@ type StartOptions struct {
 
 // ForkOptions holds parameters for forking a runtime instance.
 type ForkOptions struct {
-	Metadata   Metadata
-	ExtraRepos []Repo // Additional repos to map into the fork beyond the source's repos.
-	Display    bool   // Inherit or enable X11/VNC.
-	Tailscale  bool   // Inherit or enable Tailscale.
-	USB        bool   // Inherit or enable USB.
-	Sudo       bool   // Inherit or enable root access (password-based sudo).
-	Harness    harness.Name
-	ExtraEnv   []string  // KEY=VALUE pairs for ~/.env.
-	Mounts     []Mount   // Host directories bind-mounted into the fork.
-	MaxCPUs    int       // Max CPU cores; 0 means use the default.
-	LogWriter  io.Writer // Provisioning log output.
+	RuntimeName Name
+	Metadata    Metadata
+	ExtraRepos  []Repo // Additional repos to map into the fork beyond the source's repos.
+	Display     bool   // Inherit or enable X11/VNC.
+	Tailscale   bool   // Inherit or enable Tailscale.
+	USB         bool   // Inherit or enable USB.
+	Sudo        bool   // Inherit or enable root access (password-based sudo).
+	Harness     harness.Name
+	ExtraEnv    []string  // KEY=VALUE pairs for ~/.env.
+	Mounts      []Mount   // Host directories bind-mounted into the fork.
+	MaxCPUs     int       // Max CPU cores; 0 means use the default.
+	LogWriter   io.Writer // Provisioning log output.
 }
 
-// Backend manages runtime instance lifecycle operations.
-type Backend interface {
+// System provides all runtime capabilities used by the application.
+type System interface {
+	Name() Name
+	Lifecycle
+	Monitor
+	Inventory
+	PrivilegeInfo
+}
+
+// Lifecycle manages runtime instance lifecycle operations.
+type Lifecycle interface {
 	// Launch starts the runtime instance and writes connection config. It does
 	// not wait for transport readiness. Repos must have branches set.
-	Launch(ctx context.Context, repos []Repo, opts *StartOptions) (InstanceID, error)
+	Launch(ctx context.Context, repos []Repo, opts *StartOptions) (ID, error)
 	// Connect waits for transport readiness and completes provisioning for the
 	// runtime instance identified by id. It returns optional connection details.
-	Connect(ctx context.Context, id InstanceID, opts *StartOptions) (ConnectionInfo, error)
-	Diff(ctx context.Context, id InstanceID, repoIdx int, args ...string) (string, error)
-	Fetch(ctx context.Context, id InstanceID) error
+	Connect(ctx context.Context, id ID, opts *StartOptions) (ConnectionInfo, error)
+	Diff(ctx context.Context, id ID, repoIdx int, args ...string) (string, error)
+	Fetch(ctx context.Context, id ID) error
 	// Stop gracefully stops the runtime instance without removing it. The
 	// instance can be restarted later with Revive.
-	Stop(ctx context.Context, id InstanceID) error
+	Stop(ctx context.Context, id ID) error
 	// Purge stops and removes the runtime instance identified by id.
-	Purge(ctx context.Context, id InstanceID) error
+	Purge(ctx context.Context, id ID) error
 	// Revive restarts a stopped runtime instance and waits for connectivity.
 	// The instance's filesystem is preserved.
-	Revive(ctx context.Context, id InstanceID) error
+	Revive(ctx context.Context, id ID) error
 	// Fork snapshots a running instance and creates a new one where each mapped
 	// repo is checked out on a new branch derived from the current state.
-	Fork(ctx context.Context, id InstanceID, repos []Repo, opts *ForkOptions) (InstanceID, ConnectionInfo, []Repo, error)
+	Fork(ctx context.Context, id ID, repos []Repo, opts *ForkOptions) (ID, ConnectionInfo, []Repo, error)
 	// VNCPort returns the host port mapped to the runtime instance's VNC port.
 	// Returns 0 when the instance has no display.
-	VNCPort(ctx context.Context, id InstanceID) int
+	VNCPort(ctx context.Context, id ID) int
 	// Processes returns the list of running processes inside the runtime instance.
-	Processes(ctx context.Context, id InstanceID) ([]ProcessInfo, error)
+	Processes(ctx context.Context, id ID) ([]ProcessInfo, error)
 	// Signal sends a signal to a process inside the runtime instance.
-	Signal(ctx context.Context, id InstanceID, pid int, sig string) error
+	Signal(ctx context.Context, id ID, pid int, sig string) error
 }
 
 // Monitor reads resource usage and lifecycle events.
 type Monitor interface {
-	WatchStats(ctx context.Context, ids []InstanceID) (iter.Seq2[StatsSample, error], error)
+	WatchStats(ctx context.Context, ids []ID) (iter.Seq2[StatsSample, error], error)
 	WatchEvents(ctx context.Context, filter EventFilter) (<-chan Event, error)
 }
 
 // Inventory lists runtime instances and their observed metadata.
 type Inventory interface {
 	List(ctx context.Context) ([]Instance, error)
-	Metadata(ctx context.Context, id InstanceID, key MetadataKey) (string, error)
-	Inspect(ctx context.Context, id InstanceID) (*InstanceInspect, error)
+	Metadata(ctx context.Context, id ID, key MetadataKey) (string, error)
+	Inspect(ctx context.Context, id ID) (*InstanceInspect, error)
 }
 
 // PrivilegeInfo reads privileged runtime instance credentials.
 type PrivilegeInfo interface {
-	SudoPassword(ctx context.Context, id InstanceID) (string, error)
+	SudoPassword(ctx context.Context, id ID) (string, error)
 }

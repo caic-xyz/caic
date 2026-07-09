@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caic-xyz/md"
 	"github.com/caic-xyz/md/git"
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers"
@@ -57,6 +58,21 @@ type App struct {
 
 type backgroundTask func(context.Context) error
 
+type mdRuntime struct {
+	client  *md.Client
+	backend *mdruntime.Backend
+}
+
+type repoDiscoveryResult struct {
+	paths []string
+	err   error
+}
+
+type instanceDiscoveryResult struct {
+	instances []runtime.Instance
+	err       error
+}
+
 // Serve starts the HTTP server and closes app-owned resources when serving ends.
 func (a *App) Serve(ctx context.Context, ln net.Listener) error {
 	group, groupCtx := errgroup.WithContext(ctx)
@@ -95,52 +111,23 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	ctx, startTask := trace.NewTask(ctx, "server.startup")
 	defer startTask.End()
 
-	mdClient, err := mdruntime.New(cfg.Runtime.TailscaleAPIKey, cfg.GitHub.Token, cfg.Runtime.Name)
+	runtimes, mdRuntimes, err := initRuntimeSystem(ctx, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("init md runtime adapter: %w", err)
-	}
-	mdClient.DigestCacheTTL = warmupInterval
-	backend := mdruntime.NewBackend(mdClient)
-	backend.HarnessEnv = cfg.Agent.HarnessEnv
-	runtimeInfo := mdruntime.NewRuntimeInfoBackend(mdClient, backend)
-	runtimeBackend := runtime.Backend(backend)
-	if cfg.Runtime.Backend != nil {
-		runtimeBackend = cfg.Runtime.Backend
-	}
-	runtimeMonitor := runtime.Monitor(runtimeInfo)
-	if cfg.Runtime.Monitor != nil {
-		runtimeMonitor = cfg.Runtime.Monitor
-	}
-	runtimeInventory := runtime.Inventory(runtimeInfo)
-	if cfg.Runtime.Inventory != nil {
-		runtimeInventory = cfg.Runtime.Inventory
-	}
-	runtimePrivilege := runtime.PrivilegeInfo(runtimeInfo)
-	if cfg.Runtime.Privilege != nil {
-		runtimePrivilege = cfg.Runtime.Privilege
+		return nil, err
 	}
 
-	type reposResult struct {
-		paths []string
-		err   error
-	}
-	type instancesResult struct {
-		instances []runtime.Instance
-		err       error
-	}
-
-	repoCh := make(chan reposResult, 1)
-	instanceCh := make(chan instancesResult, 1)
+	repoCh := make(chan repoDiscoveryResult, 1)
+	instanceCh := make(chan instanceDiscoveryResult, 1)
 
 	go func() {
 		defer trace.StartRegion(ctx, "discover-repos").End()
 		paths, err := git.DiscoverCheckouts(rootDir, repoDiscoveryDepth)
-		repoCh <- reposResult{paths, err}
+		repoCh <- repoDiscoveryResult{paths, err}
 	}()
 	go func() {
 		defer trace.StartRegion(ctx, "list-runtime-instances").End()
-		instances, err := runtimeInventory.List(ctx)
-		instanceCh <- instancesResult{instances, err}
+		instances, err := runtimes.List(ctx)
+		instanceCh <- instanceDiscoveryResult{instances, err}
 	}()
 
 	repoRes := <-repoCh
@@ -266,18 +253,18 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		forgeManager.SetGitHubApp(app)
 	}
 
-	provider := initProvider(ctx, cfg, backend)
+	provider := initProvider(ctx, cfg)
+	for i := range mdRuntimes {
+		mdRuntimes[i].backend.Provider = provider
+	}
 
-	workspaceRegistry := repowork.NewRegistry(ctx, runtimeBackend)
+	workspaceRegistry := repowork.NewRegistry(ctx, runtimes)
 	taskMgr := taskmgr.New(taskmgr.Config{
 		ServerCtx:         ctx,
 		LogDir:            logDir,
 		CacheDir:          cfg.Dirs.CacheDir,
-		Backend:           runtimeBackend,
+		Runtimes:          runtimes,
 		WorkspaceRegistry: workspaceRegistry,
-		Monitor:           runtimeMonitor,
-		Inventory:         runtimeInventory,
-		Privilege:         runtimePrivilege,
 		Backends:          agentBackends,
 		EventReplayFactory: func(path string, h harness.Name) (task.EventReplayWriter, error) {
 			return eventreplay.NewMessageWriter(path, h)
@@ -333,7 +320,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		VoiceGateway:               cfg.Voice.Gateway,
 		ForgeMgr:                   forgeManager,
 		CICache:                    cache,
-		ProcessBackend:             runtimeBackend,
+		Runtimes:                   runtimes,
 		TaskMgr:                    taskMgr,
 		Provider:                   provider,
 		IPGeoChecker:               ipgeoChecker,
@@ -377,7 +364,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	taskMgr.Start()
 
 	phase3 := trace.StartRegion(ctx, "load-live-task-logs")
-	liveLogs, err := loadRuntimeTaskLogs(ctx, logDir, runtimeInventory, instanceRes.instances)
+	liveLogs, err := loadRuntimeTaskLogs(ctx, logDir, runtimes, instanceRes.instances)
 	if err != nil {
 		slog.WarnContext(ctx, "load live task logs failed", "err", err)
 	}
@@ -423,7 +410,13 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 			_, tk := trace.NewTask(ctx, "warmup-images")
 			defer tk.End()
 			trace.Log(ctx, "startup", "warmup-images: begin")
-			return warmupImages(ctx, mdClient, prefsStore)
+			var errs []error
+			for i := range mdRuntimes {
+				if err := warmupImages(ctx, mdRuntimes[i].client, prefsStore); err != nil {
+					errs = append(errs, err)
+				}
+			}
+			return errors.Join(errs...)
 		})
 	}
 	backgroundTasks = append(backgroundTasks,
@@ -431,7 +424,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 			_, tk := trace.NewTask(ctx, "watch-harness-model-cache")
 			defer tk.End()
 			trace.Log(ctx, "startup", "watch-harness-model-cache: begin")
-			return watchHarnessModelCache(ctx, cfg.Dirs.CacheDir, runtimeBackend, runtimeInventory, taskMgr, cfg.Agent.HarnessEnv)
+			return watchHarnessModelCache(ctx, cfg.Dirs.CacheDir, runtimes, taskMgr, cfg.Agent.HarnessEnv)
 		},
 		func(ctx context.Context) error {
 			_, tk := trace.NewTask(ctx, "refresh-cache-sizes")
@@ -478,6 +471,43 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	return &App{Server: s, voiceBridge: voiceBridge, backgroundTasks: backgroundTasks}, nil
 }
 
+func initRuntimeSystem(ctx context.Context, cfg *server.Config) (*runtime.Router, []mdRuntime, error) {
+	if cfg.Runtime.System != nil {
+		runtimeRouter, err := runtime.NewRouter([]runtime.System{cfg.Runtime.System})
+		if err != nil {
+			return nil, nil, fmt.Errorf("init fake runtime router: %w", err)
+		}
+		return runtimeRouter, nil, nil
+	}
+
+	var mdRuntimes []mdRuntime
+	var runtimes []runtime.System
+	for _, name := range mdruntime.AvailableRuntimeNames() {
+		mdClient, err := mdruntime.New(cfg.Runtime.TailscaleAPIKey, cfg.GitHub.Token, name)
+		if err != nil {
+			return nil, nil, fmt.Errorf("init %s md runtime adapter: %w", name, err)
+		}
+		mdClient.DigestCacheTTL = warmupInterval
+		backend := mdruntime.NewBackend(mdClient)
+		backend.HarnessEnv = cfg.Agent.HarnessEnv
+		if _, err := backend.List(ctx); err != nil {
+			slog.WarnContext(ctx, "container runtime unavailable", "runtime", name, "err", err)
+			continue
+		}
+		mdRuntimes = append(mdRuntimes, mdRuntime{client: mdClient, backend: backend})
+		runtimes = append(runtimes, backend)
+	}
+	if len(runtimes) == 0 {
+		return nil, nil, errors.New("no container runtime available: install docker or podman")
+	}
+
+	runtimeRouter, err := runtime.NewRouter(runtimes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("init runtime router: %w", err)
+	}
+	return runtimeRouter, mdRuntimes, nil
+}
+
 func adoptionRepos(in []repo.Info) []taskmgr.AdoptRepo {
 	out := make([]taskmgr.AdoptRepo, len(in))
 	for i := range in {
@@ -493,7 +523,7 @@ func adoptionRepos(in []repo.Info) []taskmgr.AdoptRepo {
 	return out
 }
 
-func loadRuntimeTaskLogs(ctx context.Context, logDir string, inventory runtime.Inventory, instances []runtime.Instance) ([]*task.LoadedTask, error) {
+func loadRuntimeTaskLogs(ctx context.Context, logDir string, inventory *runtime.Router, instances []runtime.Instance) ([]*task.LoadedTask, error) {
 	seen := make(map[string]struct{}, len(instances))
 	ids := make([]string, 0, len(instances))
 	var errs []error
@@ -519,7 +549,7 @@ func loadRuntimeTaskLogs(ctx context.Context, logDir string, inventory runtime.I
 	return logs, errors.Join(errs...)
 }
 
-func runtimeTaskID(ctx context.Context, inventory runtime.Inventory, id runtime.InstanceID) (string, error) {
+func runtimeTaskID(ctx context.Context, inventory *runtime.Router, id runtime.ID) (string, error) {
 	value, err := inventory.Metadata(ctx, id, runtime.MetadataTaskID)
 	if err != nil {
 		return "", fmt.Errorf("metadata %s on %s: %w", runtime.MetadataTaskID, id, err)
@@ -534,7 +564,7 @@ func runtimeTaskID(ctx context.Context, inventory runtime.Inventory, id runtime.
 	return value, nil
 }
 
-func initProvider(ctx context.Context, cfg *server.Config, backend *mdruntime.Backend) genai.Provider {
+func initProvider(ctx context.Context, cfg *server.Config) genai.Provider {
 	llmProvider := cfg.LLM.Provider
 	if !cfg.LLM.Disable && llmProvider == "" {
 		llmProvider = autoDetectLLMProvider(ctx, cfg.Agent.CoreEnv)
@@ -564,6 +594,5 @@ func initProvider(ctx context.Context, cfg *server.Config, backend *mdruntime.Ba
 		return nil
 	}
 	slog.InfoContext(ctx, "title", "prov", p.Name(), "mdl", p.ModelID())
-	backend.Provider = p
 	return p
 }

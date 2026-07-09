@@ -4,7 +4,7 @@
 import { createContext, createEffect, createSignal, onCleanup, useContext, type JSX } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
 
-import type { Config, Harness, HarnessInfo, Repo, Task, TaskState, UsageResp, ImageData as APIImageData, CacheMappingResp, CacheSize, OAuthGrantResp, MountMappingResp, Platform, WellKnownCachesResp, VersionResp } from "@sdk/types.gen";
+import type { Config, Harness, HarnessInfo, Repo, Task, TaskState, UsageResp, ImageData as APIImageData, CacheMappingResp, CacheSize, OAuthGrantResp, MountMappingResp, Platform, RuntimeInfo, WellKnownCachesResp, VersionResp } from "@sdk/types.gen";
 
 import { useHostMode } from "./gomode/HostMode";
 
@@ -52,6 +52,8 @@ function createAppStore() {
   const [selectedImage, setSelectedImage] = createSignal("");
   const [harnesses, setHarnesses] = createSignal<HarnessInfo[]>([]);
   const [selectedHarness, setSelectedHarness] = createSignal("");
+  const [runtimes, setRuntimes] = createSignal<RuntimeInfo[]>([]);
+  const [selectedRuntimeName, setSelectedRuntimeName] = createSignal("");
   const [sidebarOpen, setSidebarOpen] = createSignal(true);
   const [usage, setUsage] = createSignal<UsageResp | null>(null);
   const [tailscaleAvailable, setTailscaleAvailable] = createSignal(false);
@@ -86,6 +88,13 @@ function createAppStore() {
   const [checkingUpdate, setCheckingUpdate] = createSignal(false);
   const [updating, setUpdating] = createSignal(false);
 
+  createEffect(() => {
+    const available = runtimes();
+    if (available.length > 0 && !available.some((rt) => rt.name === selectedRuntimeName())) {
+      setSelectedRuntimeName(available[0].name);
+    }
+  });
+
   /** Build the current settings payload for updatePreferences, with optional overrides. */
   const currentSettings = (overrides: Partial<Parameters<typeof updatePreferences>[0]["settings"]> = {}) => ({
     settings: {
@@ -94,6 +103,7 @@ function createAppStore() {
       baseImage: selectedImage() || "",
       containerPlatform: (containerPlatform() || "") as Platform,
       maxCPUs: maxCPUs(),
+      runtimeName: selectedRuntimeName(),
       wellKnownCaches: wellKnownCaches() as Record<string, boolean>,
       cacheMappings: cacheMappings(),
       customMounts: customMounts(),
@@ -127,7 +137,16 @@ function createAppStore() {
 
   const harnessSupportsImages = () => harnesses().find((h) => h.name === selectedHarness())?.supportsImages ?? false;
 
+  const selectRuntimeName = (runtimeName: string) => {
+    setSelectedRuntimeName(runtimeName);
+  };
+
   const applyServerConfig = (config: Config) => {
+    const availableRuntimes = config.runtimes ?? [];
+    setRuntimes(availableRuntimes);
+    if (availableRuntimes.length > 0 && !availableRuntimes.some((rt) => rt.name === selectedRuntimeName())) {
+      setSelectedRuntimeName(availableRuntimes[0].name);
+    }
     setTailscaleAvailable(config.tailscaleAvailable);
     setUSBAvailable(config.usbAvailable);
     setDisplayAvailable(config.displayAvailable);
@@ -439,6 +458,7 @@ function createAppStore() {
           setAutoFixCI(prefs.settings.autoFixOnCIFailure);
           setAutoFixPR(prefs.settings.autoFixOnPROpen);
           setMaxCPUs(prefs.settings.maxCPUs ?? 0);
+          setSelectedRuntimeName(prefs.settings.runtimeName ?? selectedRuntimeName());
           setContainerPlatform(prefs.settings.containerPlatform ?? "");
           setWellKnownCaches(prefs.settings.wellKnownCaches ?? {});
           setCacheMappings(prefs.settings.cacheMappings ?? []);
@@ -807,8 +827,9 @@ function createAppStore() {
       const sudo = sudoEnabled();
       const ght = gitHubTokenEnabled();
       const harness = selectedHarness();
+      const runtimeName = selectedRuntimeName();
       const repoSpecs = selRepos.length > 0 ? selRepos.map((r) => ({ name: r.path, ...(r.branch ? { baseBranch: r.branch } : {}) })) : undefined;
-      const data = await createTask({ initialPrompt: { text: p, ...(imgs.length > 0 ? { images: imgs } : {}) }, repos: repoSpecs, harness: harness as Harness, ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(ts ? { tailscale: true } : {}), ...(usb ? { usb: true } : {}), ...(disp ? { display: true } : {}), ...(sudo ? { sudo: true } : {}), ...(ght ? { gitHubToken: true } : {}) });
+      const data = await createTask({ initialPrompt: { text: p, ...(imgs.length > 0 ? { images: imgs } : {}) }, repos: repoSpecs, harness: harness as Harness, ...(runtimeName ? { runtimeName } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(ts ? { tailscale: true } : {}), ...(usb ? { usb: true } : {}), ...(disp ? { display: true } : {}), ...(sudo ? { sudo: true } : {}), ...(ght ? { gitHubToken: true } : {}) });
       setPrefModel(harness, model);
       setPrefEffort(harness, model, effort);
       setPrompt("");
@@ -902,6 +923,7 @@ function createAppStore() {
     // new-task form
     prompt, setPrompt, selectedRepos, setSelectedRepos, selectedModel, setSelectedModel: selectModel,
     selectedEffort, setSelectedEffort: selectEffort, selectedHarness, setSelectedHarness: selectHarness, harnesses,
+    runtimes, selectedRuntimeName, setSelectedRuntimeName: selectRuntimeName,
     harnessSupportsImages, pendingImages, setPendingImages, availableRecent, availableRest,
     getPrefModel, setPrefModel, getPrefEffort, setPrefEffort, initializing, submitting, submitTask,
     // capability toggles

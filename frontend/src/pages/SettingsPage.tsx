@@ -15,6 +15,9 @@ export default function SettingsPage() {
         setContainerPlatform={s.setContainerPlatform}
         maxCPUs={s.maxCPUs}
         setMaxCPUs={s.setMaxCPUs}
+        runtimes={s.runtimes}
+        selectedRuntimeName={s.selectedRuntimeName}
+        setSelectedRuntimeName={s.setSelectedRuntimeName}
         wellKnownCaches={s.wellKnownCaches}
         setWellKnownCaches={s.setWellKnownCaches}
         wellKnownCachesList={s.wellKnownCachesList}

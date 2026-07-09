@@ -1,6 +1,6 @@
 // Default layout: the new-task form, the sidebar task list, and the routed detail pane.
 
-import { type JSX } from "solid-js";
+import { type JSX, For } from "solid-js";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
@@ -13,7 +13,7 @@ import PromptInput from "./PromptInput";
 import Button from "./Button";
 import TaskList from "./TaskList";
 import { useAppState } from "../AppState";
-import { HarnessControls, ToggleChip } from "./FormControls";
+import { ControlSelect, HarnessControls, ToggleChip } from "./FormControls";
 import { Layout } from "./Layout";
 import TokenIcon from "./github.svg?solid";
 import TailscaleIcon from "./tailscale.svg?solid";
@@ -45,6 +45,15 @@ export default function MainLayout(props: { children?: JSX.Element }) {
           onModel={s.setSelectedModel}
           onEffort={s.setSelectedEffort}
         />
+        {s.runtimes().length > 1 && (
+          <ControlSelect
+            aria-label="Runtime"
+            value={s.selectedRuntimeName()}
+            onChange={(e) => s.setSelectedRuntimeName(e.currentTarget.value)}
+          >
+            <For each={s.runtimes()}>{(rt) => <option value={rt.name} selected={rt.name === s.selectedRuntimeName()}>{rt.name}</option>}</For>
+          </ControlSelect>
+        )}
         <ToggleChip
           checked={s.tailscaleEnabled()}
           disabled={!s.tailscaleAvailable()}

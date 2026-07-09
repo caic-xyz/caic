@@ -39,7 +39,6 @@ type tomlHarness struct {
 
 type tomlCore struct {
 	Root       string            `toml:"root"`
-	Runtime    string            `toml:"runtime"`     // Container runtime: "docker" or "podman" (default: "docker")
 	AutoUpdate *string           `toml:"auto_update"` // nil = default schedule; "" = disabled; else cron expression
 	Env        map[string]string `toml:"env"`
 }
@@ -222,7 +221,6 @@ func tomlToServerConfig(ctx context.Context, tc *tomlConfig, cfgDir string) (cfg
 			CacheDir:  cacheDir(),
 		},
 		Runtime: server.RuntimeConfig{
-			Name:            tc.Core.Runtime,
 			TailscaleAPIKey: tailscaleAPIKey,
 		},
 		Agent: server.AgentConfig{

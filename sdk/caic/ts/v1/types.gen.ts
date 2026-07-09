@@ -526,6 +526,11 @@ export interface VoiceGatewayMetadata {
   capabilities?: string[];
 }
 
+/** RuntimeInfo is the JSON representation of an available task runtime backend. */
+export interface RuntimeInfo {
+  name: string;
+}
+
 /** Config reports server capabilities to the frontend. */
 export interface Config {
   version?: string;
@@ -539,6 +544,7 @@ export interface Config {
   gitHubAppEnabled?: boolean;
   /** e.g. ["github","gitlab"] */
   authProviders?: string[];
+  runtimes?: RuntimeInfo[];
 }
 
 /** VersionResp is the response for GET /api/caic/v1/server/version. */
@@ -624,6 +630,8 @@ export interface UserSettings {
    * Zero means use the system default (max(2, NumCPU-2)).
    */
   maxCPUs?: number /* int */;
+  /** RuntimeName is the preferred runtime backend for new tasks. */
+  runtimeName?: string;
   /**
    * WellKnownCaches maps cache name to enabled state. Absent or false means
    * disabled, true means enabled. Caches are opt-in.
@@ -792,6 +800,8 @@ export interface DiffFileStat {
 export interface RuntimeInstance {
   /** Runtime instance ID. */
   id: string;
+  /** Runtime backend name. */
+  runtimeName?: string;
   /** Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown. */
   tailscale?: string;
   usb?: boolean;
@@ -927,6 +937,7 @@ export interface TaskInfoRecorded {
 
 /** TaskInfoObservedRuntime describes runtime-observed instance details from the runtime adapter. */
 export interface TaskInfoObservedRuntime {
+  runtimeName?: string;
   runtime?: string;
   id?: string;
   state?: string;
@@ -975,6 +986,7 @@ export interface CreateTaskReq {
   /** Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default. */
   effort?: string;
   harness: Harness;
+  runtimeName?: string;
   tailscale?: boolean;
   usb?: boolean;
   display?: boolean;

@@ -1,4 +1,4 @@
-// Tests for Backend's runtime.Backend logic using fake md seams.
+// Tests for Backend's runtime.Lifecycle logic using fake md seams.
 
 package mdruntime
 
@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"iter"
 	"slices"
 	"testing"
 
@@ -171,6 +172,32 @@ func (f *fakeMDClient) Get(_ context.Context, name string) (mdContainer, error) 
 	return f.getResult, nil
 }
 
+func (*fakeMDClient) List(context.Context) ([]runtime.Instance, error) {
+	return []runtime.Instance{}, nil
+}
+
+func (*fakeMDClient) Metadata(context.Context, runtime.InstanceID, runtime.MetadataKey) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
+func (*fakeMDClient) Inspect(context.Context, runtime.InstanceID) (*runtime.InstanceInspect, error) {
+	return &runtime.InstanceInspect{}, nil
+}
+
+func (*fakeMDClient) WatchStats(context.Context, []runtime.InstanceID) (iter.Seq2[runtime.StatsSample, error], error) {
+	return func(func(runtime.StatsSample, error) bool) {}, nil
+}
+
+func (*fakeMDClient) WatchEvents(context.Context, runtime.EventFilter) (<-chan runtime.Event, error) {
+	ch := make(chan runtime.Event)
+	close(ch)
+	return ch, nil
+}
+
+func (*fakeMDClient) SudoPassword(context.Context, runtime.InstanceID) (string, error) {
+	return "", nil
+}
+
 func newTestBackend(c mdClient) *Backend {
 	return &Backend{client: c, containers: make(map[string]mdContainer), vncPorts: make(map[string]int32)}
 }
@@ -190,8 +217,8 @@ func TestBackend(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Launch: %v", err)
 			}
-			if name != "ctr-x" {
-				t.Errorf("name = %q, want ctr-x", name)
+			if name != "docker:ctr-x" {
+				t.Errorf("name = %q, want docker:ctr-x", name)
 			}
 			if !slices.Contains(ctr.calls, "Launch") {
 				t.Errorf("Launch not called on container, calls=%v", ctr.calls)
@@ -236,7 +263,7 @@ func TestBackend(t *testing.T) {
 		}}
 		fc := &fakeMDClient{getResult: ctr}
 		b := newTestBackend(fc)
-		if _, err := b.Diff(t.Context(), "ctr-1", 1, "--numstat"); err != nil {
+		if _, err := b.Diff(t.Context(), "docker:ctr-1", 1, "--numstat"); err != nil {
 			t.Fatalf("Diff: %v", err)
 		}
 		if fc.getCalls != 1 || fc.getName != "ctr-1" {
@@ -258,7 +285,7 @@ func TestBackend(t *testing.T) {
 		}}
 		fc := &fakeMDClient{getResult: ctr}
 		b := newTestBackend(fc)
-		if err := b.Fetch(t.Context(), "ctr-1"); err != nil {
+		if err := b.Fetch(t.Context(), "docker:ctr-1"); err != nil {
 			t.Fatalf("Fetch: %v", err)
 		}
 		if fc.getCalls != 1 || fc.getName != "ctr-1" {
@@ -286,7 +313,7 @@ func TestBackend(t *testing.T) {
 			if _, err := b.Launch(t.Context(), nil, &runtime.StartOptions{Harness: harness.Claude}); err != nil {
 				t.Fatalf("Launch: %v", err)
 			}
-			conn, err := b.Connect(t.Context(), "ctr-x", &runtime.StartOptions{Harness: harness.Claude})
+			conn, err := b.Connect(t.Context(), "docker:ctr-x", &runtime.StartOptions{Harness: harness.Claude})
 			if err != nil {
 				t.Fatalf("Connect: %v", err)
 			}
@@ -294,14 +321,14 @@ func TestBackend(t *testing.T) {
 				t.Errorf("fqdn = %q, want host.ts.net", conn.TailscaleFQDN)
 			}
 			// Pending entry must be consumed: a second Connect fails.
-			if _, err := b.Connect(t.Context(), "ctr-x", &runtime.StartOptions{Harness: harness.Claude}); err == nil {
+			if _, err := b.Connect(t.Context(), "docker:ctr-x", &runtime.StartOptions{Harness: harness.Claude}); err == nil {
 				t.Error("second Connect should fail; pending entry not consumed")
 			}
 		})
 		t.Run("error no pending", func(t *testing.T) {
 			t.Parallel()
 			b := newTestBackend(&fakeMDClient{})
-			if _, err := b.Connect(t.Context(), "missing", &runtime.StartOptions{Harness: harness.Claude}); err == nil {
+			if _, err := b.Connect(t.Context(), "docker:missing", &runtime.StartOptions{Harness: harness.Claude}); err == nil {
 				t.Fatal("want error when no pending container")
 			}
 		})
@@ -312,7 +339,7 @@ func TestBackend(t *testing.T) {
 		ctr := &fakeMDContainer{name: "ctr-1"}
 		fc := &fakeMDClient{getResult: ctr}
 		b := newTestBackend(fc)
-		if err := b.Stop(t.Context(), "ctr-1"); err != nil {
+		if err := b.Stop(t.Context(), "docker:ctr-1"); err != nil {
 			t.Fatalf("Stop: %v", err)
 		}
 		if fc.getCalls != 1 || fc.getName != "ctr-1" {
@@ -331,7 +358,7 @@ func TestBackend(t *testing.T) {
 		ctr := &fakeMDContainer{name: "ctr-1", repo: []md.Repo{{GitRoot: "/repo", Branches: []string{"caic-0"}, MountedPath: "/repo"}}}
 		fc := &fakeMDClient{getResult: ctr}
 		b := newTestBackend(fc)
-		if err := b.Purge(t.Context(), "ctr-1"); err != nil {
+		if err := b.Purge(t.Context(), "docker:ctr-1"); err != nil {
 			t.Fatalf("Purge: %v", err)
 		}
 		if fc.getCalls != 1 || fc.getName != "ctr-1" {
@@ -350,7 +377,7 @@ func TestBackend(t *testing.T) {
 		ctr := &fakeMDContainer{name: "ctr-1", vncPort: 5903, repo: []md.Repo{{GitRoot: "/repo", Branches: []string{"caic-0"}, MountedPath: "/repo"}}}
 		fc := &fakeMDClient{getResult: ctr}
 		b := newTestBackend(fc)
-		if err := b.Revive(t.Context(), "ctr-1"); err != nil {
+		if err := b.Revive(t.Context(), "docker:ctr-1"); err != nil {
 			t.Fatalf("Revive: %v", err)
 		}
 		if fc.getCalls != 1 || fc.getName != "ctr-1" {
@@ -371,12 +398,12 @@ func TestBackend(t *testing.T) {
 		t.Parallel()
 		src := &fakeMDContainer{forkResult: &fakeMDContainer{name: "fork-1", vncPort: 5902, repo: []md.Repo{{Branches: []string{"caic-2"}}}}}
 		b := newTestBackend(&fakeMDClient{getResult: src})
-		name, conn, repos, err := b.Fork(t.Context(), "src", nil, &runtime.ForkOptions{Harness: harness.Claude})
+		name, conn, repos, err := b.Fork(t.Context(), "docker:src", nil, &runtime.ForkOptions{Harness: harness.Claude})
 		if err != nil {
 			t.Fatalf("Fork: %v", err)
 		}
-		if name != "fork-1" {
-			t.Errorf("fork name = %q, want fork-1", name)
+		if name != "docker:fork-1" {
+			t.Errorf("fork name = %q, want docker:fork-1", name)
 		}
 		if conn.AgentTarget.SSHHost != "fork-1" {
 			t.Errorf("fork agent target = %q, want fork-1", conn.AgentTarget.SSHHost)
@@ -403,7 +430,7 @@ func TestBackend(t *testing.T) {
 			t.Parallel()
 			b := newTestBackend(&fakeMDClient{})
 			b.vncPorts["c"] = 4242
-			if got := b.VNCPort(t.Context(), "c"); got != 4242 {
+			if got := b.VNCPort(t.Context(), "docker:c"); got != 4242 {
 				t.Errorf("VNCPort = %d, want 4242 (in-memory hit)", got)
 			}
 		})
@@ -411,7 +438,7 @@ func TestBackend(t *testing.T) {
 			t.Parallel()
 			fc := &fakeMDClient{getResult: &fakeMDContainer{vncPort: 5901}}
 			b := newTestBackend(fc)
-			if got := b.VNCPort(t.Context(), "c"); got != 5901 {
+			if got := b.VNCPort(t.Context(), "docker:c"); got != 5901 {
 				t.Errorf("VNCPort = %d, want 5901", got)
 			}
 			if fc.getCalls != 1 || fc.getName != "c" {
@@ -426,7 +453,7 @@ func TestBackend(t *testing.T) {
 		fc := &fakeMDClient{}
 		b := newTestBackend(fc)
 		b.containers["ctr"] = ctr
-		procs, err := b.Processes(t.Context(), "ctr")
+		procs, err := b.Processes(t.Context(), "docker:ctr")
 		if err != nil {
 			t.Fatalf("Processes: %v", err)
 		}
@@ -444,7 +471,7 @@ func TestBackend(t *testing.T) {
 		fc := &fakeMDClient{}
 		b := newTestBackend(fc)
 		b.containers["ctr"] = ctr
-		if err := b.Signal(t.Context(), "ctr", 123, "SIGTERM"); err != nil {
+		if err := b.Signal(t.Context(), "docker:ctr", 123, "SIGTERM"); err != nil {
 			t.Fatalf("Signal: %v", err)
 		}
 		if ctr.signalCalls != 1 || ctr.signalPID != 123 || ctr.signalSig != "SIGTERM" || fc.getCalls != 0 {

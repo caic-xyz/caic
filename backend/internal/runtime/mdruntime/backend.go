@@ -1,4 +1,4 @@
-// Backend adapts md containers to runtime.Backend for launching and managing runtime instances.
+// Backend adapts md containers to runtime.Lifecycle for launching and managing runtime instances.
 
 package mdruntime
 
@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"iter"
 	"log/slog"
 	"runtime/trace"
 	"slices"
@@ -27,6 +28,12 @@ type mdClient interface {
 	Runtime() string
 	Container(repos ...md.Repo) (mdContainer, error)
 	Get(ctx context.Context, name string) (mdContainer, error)
+	List(ctx context.Context) ([]runtime.Instance, error)
+	Metadata(ctx context.Context, id runtime.InstanceID, key runtime.MetadataKey) (map[string]string, error)
+	Inspect(ctx context.Context, id runtime.InstanceID) (*runtime.InstanceInspect, error)
+	WatchStats(ctx context.Context, ids []runtime.InstanceID) (iter.Seq2[runtime.StatsSample, error], error)
+	WatchEvents(ctx context.Context, filter runtime.EventFilter) (<-chan runtime.Event, error)
+	SudoPassword(ctx context.Context, id runtime.InstanceID) (string, error)
 }
 
 // mdContainer is the subset of *md.Container that Backend drives. It exposes
@@ -51,9 +58,9 @@ type mdContainer interface {
 }
 
 var (
-	_ mdClient        = mdClientAdapter{}
-	_ mdContainer     = mdContainerAdapter{}
-	_ runtime.Backend = (*Backend)(nil)
+	_ mdClient       = mdClientAdapter{}
+	_ mdContainer    = mdContainerAdapter{}
+	_ runtime.System = (*Backend)(nil)
 )
 
 // mdClientAdapter adapts *md.Client to mdClient.
@@ -78,6 +85,125 @@ func (a mdClientAdapter) Get(ctx context.Context, name string) (mdContainer, err
 		return nil, err
 	}
 	return mdContainerAdapter{ct}, nil
+}
+
+func (a mdClientAdapter) List(ctx context.Context) ([]runtime.Instance, error) {
+	containers, err := a.c.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return InstancesFromMD(ctx, containers), nil
+}
+
+func (a mdClientAdapter) Inspect(ctx context.Context, id runtime.InstanceID) (*runtime.InstanceInspect, error) {
+	info, err := (&md.Container{Client: a.c, Name: string(id)}).Inspect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	mounts := make([]runtime.Mount, len(info.Mounts))
+	for i, m := range info.Mounts {
+		mounts[i] = runtime.Mount{HostPath: m.HostPath, MountPath: m.ContainerPath, ReadOnly: m.ReadOnly}
+	}
+	caches := make([]runtime.CacheMount, len(info.Caches))
+	for i, c := range info.Caches {
+		caches[i] = runtime.CacheMount{
+			Name:        c.Name,
+			Description: c.Description,
+			HostPath:    c.HostPath,
+			MountPath:   c.ContainerPath,
+			ReadOnly:    c.ReadOnly,
+			Shallow:     c.Shallow,
+		}
+	}
+	inspectID := runtime.ID(info.ID)
+	if inspectID == "" {
+		inspectID = runtime.ID(id)
+	}
+	return &runtime.InstanceInspect{
+		Runtime:         info.Runtime,
+		ID:              inspectID,
+		State:           info.State,
+		ImageRef:        info.ImageRef,
+		ImageID:         info.ImageID,
+		OS:              info.OS,
+		CPUArchitecture: info.Architecture,
+		CPULimit:        info.CPULimit,
+		Mounts:          mounts,
+		Caches:          caches,
+	}, nil
+}
+
+func (a mdClientAdapter) WatchStats(ctx context.Context, ids []runtime.InstanceID) (iter.Seq2[runtime.StatsSample, error], error) {
+	names := make([]string, len(ids))
+	for i, id := range ids {
+		names[i] = string(id)
+	}
+	stats, err := a.c.Runtime.WatchStats(ctx, names)
+	if err != nil {
+		return nil, err
+	}
+	return func(yield func(runtime.StatsSample, error) bool) {
+		for sample, err := range stats {
+			if err != nil {
+				_ = yield(runtime.StatsSample{}, err)
+				return
+			}
+			out := runtime.StatsSample{
+				InstanceID: runtime.ID(sample.Name),
+				Stats: runtime.Stats{
+					CPUPerc:    sample.Stats.CPUPerc,
+					MemUsed:    sample.Stats.MemUsed,
+					MemLimit:   sample.Stats.MemLimit,
+					MemPerc:    sample.Stats.MemPerc,
+					NetRx:      sample.Stats.NetRx,
+					NetTx:      sample.Stats.NetTx,
+					BlockRead:  sample.Stats.BlockRead,
+					BlockWrite: sample.Stats.BlockWrite,
+					DiskUsed:   sample.Stats.DiskUsed,
+				},
+			}
+			if !yield(out, nil) {
+				return
+			}
+		}
+	}, nil
+}
+
+func (a mdClientAdapter) SudoPassword(ctx context.Context, id runtime.InstanceID) (string, error) {
+	return (&md.Container{Client: a.c, Name: string(id)}).SudoPassword(ctx)
+}
+
+func (a mdClientAdapter) Metadata(ctx context.Context, id runtime.InstanceID, _ runtime.MetadataKey) (map[string]string, error) {
+	ct, err := a.c.Get(ctx, string(id))
+	if err != nil {
+		return nil, err
+	}
+	return cloneLabelMap(ct.Labels), nil
+}
+
+func (a mdClientAdapter) WatchEvents(ctx context.Context, filter runtime.EventFilter) (<-chan runtime.Event, error) {
+	events, err := a.c.Runtime.WatchDieEvents(ctx, string(filter.MetadataKey))
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan runtime.Event, 16)
+	go func() {
+		defer close(out)
+		for ev, err := range events {
+			if err != nil {
+				if ctx.Err() == nil {
+					slog.WarnContext(ctx, "runtime events stream failed", "err", err)
+				}
+				return
+			}
+			select {
+			case out <- runtime.Event{InstanceID: runtime.ID(ev.Name)}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out, nil
 }
 
 // mdContainerAdapter adapts *md.Container to mdContainer.
@@ -134,16 +260,17 @@ func (a mdContainerAdapter) Signal(ctx context.Context, pid int, sig string) err
 	return a.c.Signal(ctx, pid, sig)
 }
 
-// Backend adapts *md.Client to runtime.Backend.
+// Backend adapts *md.Client to runtime.Lifecycle.
 type Backend struct {
 	client     mdClient
 	Provider   genai.Provider      // nil if LLM not configured
 	HarnessEnv map[string][]string // per-harness KEY=VALUE env vars from config
 
 	mu                sync.Mutex
-	containers        map[string]mdContainer // keyed by runtime instance name
-	pendingContainers map[string]mdContainer // keyed by runtime instance name
-	vncPorts          map[string]int32       // runtime instance name to host VNC port
+	containers        map[string]mdContainer           // keyed by runtime instance name
+	pendingContainers map[string]mdContainer           // keyed by runtime instance name
+	vncPorts          map[string]int32                 // runtime instance name to host VNC port
+	labels            map[runtime.ID]map[string]string // keyed by qualified runtime instance ID
 }
 
 // NewBackend creates a Backend wrapping the given md client.
@@ -155,8 +282,11 @@ func NewBackend(client *md.Client) *Backend {
 	}
 }
 
-// Launch implements runtime.Backend.
-func (b *Backend) Launch(ctx context.Context, repos []runtime.Repo, opts *runtime.StartOptions) (runtime.InstanceID, error) {
+// Name returns the runtime backend name.
+func (b *Backend) Name() runtime.Name { return runtime.Name(b.client.Runtime()) }
+
+// Launch implements runtime.Lifecycle.
+func (b *Backend) Launch(ctx context.Context, repos []runtime.Repo, opts *runtime.StartOptions) (runtime.ID, error) {
 	defer trace.StartRegion(ctx, "container.launch").End()
 	if len(repos) > 0 {
 		slog.InfoContext(ctx, "md", "phase", "launch", "dir", repos[0].HostPath, "br", repos[0].Branch, "hns", opts.Harness)
@@ -204,13 +334,17 @@ func (b *Backend) Launch(ctx context.Context, repos []runtime.Repo, opts *runtim
 	}
 	b.mu.Unlock()
 	slog.DebugContext(ctx, "launch returning", "rt", rt, "ctr", name)
-	return runtime.InstanceID(name), nil
+	return runtime.NewID(b.Name(), runtime.InstanceID(name)), nil
 }
 
-// Connect implements runtime.Backend.
-func (b *Backend) Connect(ctx context.Context, id runtime.InstanceID, opts *runtime.StartOptions) (runtime.ConnectionInfo, error) {
+// Connect implements runtime.Lifecycle.
+func (b *Backend) Connect(ctx context.Context, id runtime.ID, opts *runtime.StartOptions) (runtime.ConnectionInfo, error) {
 	defer trace.StartRegion(ctx, "container.connect").End()
-	name := string(id)
+	localID, err := b.localID(id)
+	if err != nil {
+		return runtime.ConnectionInfo{}, err
+	}
+	name := string(localID)
 	rt := b.client.Runtime()
 	slog.DebugContext(ctx, "connect starting", "rt", rt, "ctr", name)
 	b.mu.Lock()
@@ -243,10 +377,14 @@ func (b *Backend) Connect(ctx context.Context, id runtime.InstanceID, opts *runt
 	}, nil
 }
 
-// Diff implements runtime.Backend.
-func (b *Backend) Diff(ctx context.Context, id runtime.InstanceID, repoIdx int, args ...string) (string, error) {
+// Diff implements runtime.Lifecycle.
+func (b *Backend) Diff(ctx context.Context, id runtime.ID, repoIdx int, args ...string) (string, error) {
 	defer trace.StartRegion(ctx, "instance.diff").End()
-	name := string(id)
+	localID, err := b.localID(id)
+	if err != nil {
+		return "", err
+	}
+	name := string(localID)
 	ct, err := b.container(ctx, name)
 	if err != nil {
 		return "", err
@@ -264,10 +402,14 @@ func (b *Backend) Diff(ctx context.Context, id runtime.InstanceID, repoIdx int, 
 	return stdout.String(), nil
 }
 
-// Fetch implements runtime.Backend.
-func (b *Backend) Fetch(ctx context.Context, id runtime.InstanceID) error {
+// Fetch implements runtime.Lifecycle.
+func (b *Backend) Fetch(ctx context.Context, id runtime.ID) error {
 	defer trace.StartRegion(ctx, "instance.fetch").End()
-	name := string(id)
+	localID, err := b.localID(id)
+	if err != nil {
+		return err
+	}
+	name := string(localID)
 	ct, err := b.container(ctx, name)
 	if err != nil {
 		return err
@@ -284,10 +426,14 @@ func (b *Backend) Fetch(ctx context.Context, id runtime.InstanceID) error {
 	return nil
 }
 
-// Stop implements runtime.Backend.
-func (b *Backend) Stop(ctx context.Context, id runtime.InstanceID) error {
+// Stop implements runtime.Lifecycle.
+func (b *Backend) Stop(ctx context.Context, id runtime.ID) error {
 	defer trace.StartRegion(ctx, "instance.stop").End()
-	name := string(id)
+	localID, err := b.localID(id)
+	if err != nil {
+		return err
+	}
+	name := string(localID)
 	slog.InfoContext(ctx, "md stop", "name", name)
 	ct, err := b.container(ctx, name)
 	if err != nil {
@@ -296,10 +442,14 @@ func (b *Backend) Stop(ctx context.Context, id runtime.InstanceID) error {
 	return ct.Stop(ctx)
 }
 
-// Purge implements runtime.Backend.
-func (b *Backend) Purge(ctx context.Context, id runtime.InstanceID) error {
+// Purge implements runtime.Lifecycle.
+func (b *Backend) Purge(ctx context.Context, id runtime.ID) error {
 	defer trace.StartRegion(ctx, "instance.purge").End()
-	name := string(id)
+	localID, err := b.localID(id)
+	if err != nil {
+		return err
+	}
+	name := string(localID)
 	ct, err := b.container(ctx, name)
 	if err != nil {
 		return err
@@ -317,10 +467,14 @@ func (b *Backend) Purge(ctx context.Context, id runtime.InstanceID) error {
 	return nil
 }
 
-// Revive implements runtime.Backend.
-func (b *Backend) Revive(ctx context.Context, id runtime.InstanceID) error {
+// Revive implements runtime.Lifecycle.
+func (b *Backend) Revive(ctx context.Context, id runtime.ID) error {
 	defer trace.StartRegion(ctx, "instance.revive").End()
-	name := string(id)
+	localID, err := b.localID(id)
+	if err != nil {
+		return err
+	}
+	name := string(localID)
 	rt := b.client.Runtime()
 	ct, err := b.container(ctx, name)
 	if err != nil {
@@ -346,10 +500,14 @@ func (b *Backend) Revive(ctx context.Context, id runtime.InstanceID) error {
 	return nil
 }
 
-// Fork implements runtime.Backend.
-func (b *Backend) Fork(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo, opts *runtime.ForkOptions) (runtime.InstanceID, runtime.ConnectionInfo, []runtime.Repo, error) {
+// Fork implements runtime.Lifecycle.
+func (b *Backend) Fork(ctx context.Context, id runtime.ID, repos []runtime.Repo, opts *runtime.ForkOptions) (runtime.ID, runtime.ConnectionInfo, []runtime.Repo, error) {
 	defer trace.StartRegion(ctx, "instance.fork").End()
-	name := string(id)
+	localID, err := b.localID(id)
+	if err != nil {
+		return "", runtime.ConnectionInfo{}, nil, err
+	}
+	name := string(localID)
 	if len(repos) > 0 {
 		slog.InfoContext(ctx, "md", "phase", "fork", "src", name, "dir", repos[0].HostPath, "br", repos[0].Branch)
 	}
@@ -389,12 +547,16 @@ func (b *Backend) Fork(ctx context.Context, id runtime.InstanceID, repos []runti
 	forkName := forked.Name()
 	slog.DebugContext(ctx, "fork succeeded", "rt", rt, "source", name, "fork", forkName)
 	b.rememberContainer(forkName, forked)
-	return runtime.InstanceID(forkName), runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: forkName}}, fromMDRepos(forked.Repos()), nil
+	return runtime.NewID(b.Name(), runtime.InstanceID(forkName)), runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: forkName}}, fromMDRepos(forked.Repos()), nil
 }
 
-// VNCPort implements runtime.Backend.
-func (b *Backend) VNCPort(ctx context.Context, id runtime.InstanceID) int {
-	instanceID := string(id)
+// VNCPort implements runtime.Lifecycle.
+func (b *Backend) VNCPort(ctx context.Context, id runtime.ID) int {
+	localID, err := b.localID(id)
+	if err != nil {
+		return 0
+	}
+	instanceID := string(localID)
 	b.mu.Lock()
 	port := int(b.vncPorts[instanceID])
 	b.mu.Unlock()
@@ -417,8 +579,12 @@ func (b *Backend) VNCPort(ctx context.Context, id runtime.InstanceID) int {
 }
 
 // Processes returns the process list inside the runtime instance.
-func (b *Backend) Processes(ctx context.Context, id runtime.InstanceID) ([]runtime.ProcessInfo, error) {
-	ct, err := b.container(ctx, string(id))
+func (b *Backend) Processes(ctx context.Context, id runtime.ID) ([]runtime.ProcessInfo, error) {
+	localID, err := b.localID(id)
+	if err != nil {
+		return nil, err
+	}
+	ct, err := b.container(ctx, string(localID))
 	if err != nil {
 		return nil, err
 	}
@@ -430,12 +596,116 @@ func (b *Backend) Processes(ctx context.Context, id runtime.InstanceID) ([]runti
 }
 
 // Signal sends a signal to a process inside the runtime instance.
-func (b *Backend) Signal(ctx context.Context, id runtime.InstanceID, pid int, sig string) error {
-	ct, err := b.container(ctx, string(id))
+func (b *Backend) Signal(ctx context.Context, id runtime.ID, pid int, sig string) error {
+	localID, err := b.localID(id)
+	if err != nil {
+		return err
+	}
+	ct, err := b.container(ctx, string(localID))
 	if err != nil {
 		return err
 	}
 	return ct.Signal(ctx, pid, sig)
+}
+
+// List returns known runtime instances.
+func (b *Backend) List(ctx context.Context) ([]runtime.Instance, error) {
+	instances, err := b.client.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range instances {
+		instances[i].ID = runtime.NewID(b.Name(), instances[i].ID.InstanceID())
+	}
+	return instances, nil
+}
+
+// Inspect returns observed runtime configuration for a runtime instance.
+func (b *Backend) Inspect(ctx context.Context, id runtime.ID) (*runtime.InstanceInspect, error) {
+	localID, err := b.localID(id)
+	if err != nil {
+		return nil, err
+	}
+	info, err := b.client.Inspect(ctx, localID)
+	if err != nil {
+		return nil, err
+	}
+	info.ID = runtime.NewID(b.Name(), info.ID.InstanceID())
+	return info, nil
+}
+
+// WatchStats streams resource stats for the named runtime instances.
+func (b *Backend) WatchStats(ctx context.Context, ids []runtime.ID) (iter.Seq2[runtime.StatsSample, error], error) {
+	localIDs := make([]runtime.InstanceID, len(ids))
+	for i, id := range ids {
+		localID, err := b.localID(id)
+		if err != nil {
+			return nil, err
+		}
+		localIDs[i] = localID
+	}
+	seq, err := b.client.WatchStats(ctx, localIDs)
+	if err != nil {
+		return nil, err
+	}
+	return func(yield func(runtime.StatsSample, error) bool) {
+		for sample, err := range seq {
+			if err != nil {
+				_ = yield(runtime.StatsSample{}, err)
+				return
+			}
+			sample.InstanceID = runtime.NewID(b.Name(), sample.InstanceID.InstanceID())
+			if !yield(sample, nil) {
+				return
+			}
+		}
+	}, nil
+}
+
+// SudoPassword fetches the sudo password for a runtime instance over SSH.
+func (b *Backend) SudoPassword(ctx context.Context, id runtime.ID) (string, error) {
+	localID, err := b.localID(id)
+	if err != nil {
+		return "", err
+	}
+	return b.client.SudoPassword(ctx, localID)
+}
+
+// Metadata reads a single runtime instance metadata value, returning "" when unset.
+func (b *Backend) Metadata(ctx context.Context, id runtime.ID, key runtime.MetadataKey) (string, error) {
+	if err := b.validateID(id); err != nil {
+		return "", err
+	}
+	if value, ok := b.cachedLabel(id, string(key)); ok {
+		return value, nil
+	}
+	labels, err := b.client.Metadata(ctx, id.InstanceID(), key)
+	if err != nil {
+		return "", err
+	}
+	b.rememberLabelMap(id, labels)
+	return labels[string(key)], nil
+}
+
+// WatchEvents streams lifecycle events for instances matching filter.
+func (b *Backend) WatchEvents(ctx context.Context, filter runtime.EventFilter) (<-chan runtime.Event, error) {
+	ch, err := b.client.WatchEvents(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan runtime.Event, 16)
+	go func() {
+		defer close(out)
+		for ev := range ch {
+			ev.InstanceID = runtime.NewID(b.Name(), ev.InstanceID.InstanceID())
+			select {
+			case out <- ev:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out, nil
 }
 
 func (b *Backend) container(ctx context.Context, name string) (mdContainer, error) {
@@ -457,17 +727,6 @@ func (b *Backend) rememberContainer(name string, c mdContainer) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.rememberContainerLocked(name, c)
-}
-
-func (b *Backend) rememberMDContainers(containers []*md.Container) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for _, c := range containers {
-		if c.Name == "" {
-			continue
-		}
-		b.rememberContainerLocked(c.Name, mdContainerAdapter{c})
-	}
 }
 
 func (b *Backend) rememberContainerLocked(name string, c mdContainer) {
@@ -530,6 +789,39 @@ func (b *Backend) mdStartOpts(c mdContainer, opts *runtime.StartOptions) (*md.St
 		Mounts:    mounts,
 		MaxCPUs:   maxCPUsOrDefault(opts.MaxCPUs),
 	}, nil
+}
+
+func (b *Backend) localID(id runtime.ID) (runtime.InstanceID, error) {
+	if err := b.validateID(id); err != nil {
+		return "", err
+	}
+	return id.InstanceID(), nil
+}
+
+func (b *Backend) validateID(id runtime.ID) error {
+	if id.RuntimeName() != b.Name() {
+		return fmt.Errorf("runtime %q cannot use instance %q", b.Name(), id)
+	}
+	return nil
+}
+
+func (b *Backend) rememberLabelMap(id runtime.ID, labels map[string]string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.labels == nil {
+		b.labels = make(map[runtime.ID]map[string]string)
+	}
+	b.labels[id] = cloneLabelMap(labels)
+}
+
+func (b *Backend) cachedLabel(id runtime.ID, key string) (string, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	labels, ok := b.labels[id]
+	if !ok {
+		return "", false
+	}
+	return labels[key], true
 }
 
 func mdMounts(c mdContainer, h harness.Name, mounts []runtime.Mount) ([]md.Mount, error) {

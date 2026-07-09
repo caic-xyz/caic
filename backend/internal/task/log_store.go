@@ -147,6 +147,7 @@ func writeMetadataHeader(w io.Writer, t *Task) error {
 		Display:           t.Display,
 		Sudo:              t.Sudo,
 		GitHubToken:       t.GitHubTokenEnabled(),
+		RuntimeName:       string(t.RuntimeName),
 		BaseImage:         t.BaseImage,
 		ContainerPlatform: t.ContainerPlatform,
 		MaxCPUs:           t.MaxCPUs,

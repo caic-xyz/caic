@@ -6,12 +6,24 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"os/exec"
 
 	"github.com/caic-xyz/md"
 	"github.com/caic-xyz/md/containers"
 
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
+
+// AvailableRuntimeNames returns installed container runtime names in preference order.
+func AvailableRuntimeNames() []string {
+	var names []string
+	for _, name := range []string{"docker", "podman"} {
+		if _, err := exec.LookPath(name); err == nil {
+			names = append(names, name)
+		}
+	}
+	return names
+}
 
 // New creates an md.Client for the md runtime adapter.
 // runtimeName selects the container runtime ("docker" or "podman"); empty means auto-detect.
@@ -42,7 +54,7 @@ func InstancesFromMD(ctx context.Context, mdContainers []*md.Container) []runtim
 	out := make([]runtime.Instance, len(mdContainers))
 	for i, c := range mdContainers {
 		out[i] = runtime.Instance{
-			ID:            runtime.InstanceID(c.Name),
+			ID:            runtime.ID(c.Name),
 			AgentTarget:   runtime.ConnectionTarget{SSHHost: c.Name},
 			State:         c.State,
 			Repos:         fromMDRepos(c.Repos),
@@ -65,6 +77,7 @@ type SlogWriter struct {
 	buf   []byte
 }
 
+// Write logs complete non-empty lines from p and buffers incomplete tails.
 func (w *SlogWriter) Write(p []byte) (int, error) {
 	w.buf = append(w.buf, p...)
 	for {

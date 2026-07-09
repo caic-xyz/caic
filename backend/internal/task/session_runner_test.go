@@ -36,7 +36,7 @@ func TestSessionRunner(t *testing.T) {
 						InitialPrompt: agent.Prompt{Text: "test"},
 						Harness:       harness,
 					}
-					tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 					tk.SetState(StateRunning)
 					_, err := r.Reconnect(t.Context(), tk, true)
 					if err == nil {
@@ -57,7 +57,7 @@ func TestSessionRunner(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "test"},
 				Harness:       "test",
 			}
-			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(StateRunning)
 			tk.RestoreMessages([]agent.Message{
 				&agent.AskMessage{
@@ -235,6 +235,7 @@ func TestSessionRunner(t *testing.T) {
 			r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "/repo", stub), "", nil)
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(StateRunning)
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
@@ -273,6 +274,7 @@ func TestSessionRunner(t *testing.T) {
 					r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "/repo", stub), "", nil)
 
 					tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
+					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 					tk.SetState(StateRunning)
 					_, ch, unsub := tk.Subscribe(t.Context())
 					defer unsub()
@@ -320,6 +322,7 @@ func TestSessionRunner(t *testing.T) {
 			r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "", stub), "", nil)
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(StateRunning)
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
@@ -354,6 +357,7 @@ func TestSessionRunner(t *testing.T) {
 			r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "/repo", stub), "", nil)
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(StateRunning)
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
@@ -430,7 +434,7 @@ func TestSessionRunner(t *testing.T) {
 					Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
 					Harness:       "test",
 				}
-				tk.SetRuntimeConnectionInfo("fake-instance", runtime.ConnectionTarget{SSHHost: "fake-instance"}, "", "", 0)
+				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "fake-instance"), runtime.ConnectionTarget{SSHHost: "fake-instance"}, "", "", 0)
 				tk.SetState(startState)
 
 				h, err := r.RestartSession(t.Context(), tk, agent.Prompt{Text: "new plan"})
@@ -483,7 +487,7 @@ func TestSessionRunner(t *testing.T) {
 			Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
 			Harness:       "test",
 		}
-		tk.SetRuntimeConnectionInfo("fake-instance", runtime.ConnectionTarget{SSHHost: "fake-instance"}, "", "", 0)
+		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "fake-instance"), runtime.ConnectionTarget{SSHHost: "fake-instance"}, "", "", 0)
 
 		// Create an initial session with a log writer by using the backend
 		// directly (RepoWorkspace.Start needs a instance backend).

@@ -88,30 +88,46 @@ type testRouter struct {
 	oauthRefreshTokenPath string
 }
 
+type testRuntimeSystem struct {
+	runtime.Lifecycle
+	runtimetest.FakeInfo
+}
+
+func (*testRuntimeSystem) Name() runtime.Name { return "test-runtime" }
+
 // newTestRouter creates a Router for tests. Tests commonly mutate auth/host
 // fields (authStore, sessionSecret, hostState) on the returned Router and then
 // call buildHandler; buildHandler re-syncs hostState into the MCP concern, and
 // the authHandlers copies must be synced by the test if exercised.
+func newTestRuntime(t testing.TB, lifecycle runtime.Lifecycle) *runtime.Router {
+	router, err := runtime.NewRouter([]runtime.System{&testRuntimeSystem{Lifecycle: lifecycle}})
+	if err != nil {
+		t.Fatalf("runtime.NewRouter: %v", err)
+	}
+	return router
+}
+
 func newTestRouter(t testing.TB) *testRouter {
 	checker, err := ipgeo.NewChecker(t.Context(), "0.0.0.0/0,::/0", "", "")
 	if err != nil {
 		t.Fatalf("ipgeo.NewChecker: %v", err)
 	}
-	backend := &mdruntime.Backend{}
-	workspaceRegistry := repowork.NewRegistry(t.Context(), nil)
-	taskMgr := taskmgr.New(taskmgr.Config{ServerCtx: t.Context(), WorkspaceRegistry: workspaceRegistry})
+	backend := &runtimetest.FakeBackend{}
+	runtimeRouter := newTestRuntime(t, backend)
+	workspaceRegistry := repowork.NewRegistry(t.Context(), runtimeRouter)
+	taskMgr := taskmgr.New(taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, WorkspaceRegistry: workspaceRegistry})
 	repoSvc := repomgr.NewService(t.Context(), "", repo.New(nil), workspaceRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
 	forgeManager := forgemgr.New("", "", nil)
 	s, err := New(t.Context(), Dependencies{
-		RepoSvc:        repoSvc,
-		RepoStatus:     repoStatus,
-		ProcessBackend: backend,
-		TaskMgr:        taskMgr,
-		Preferences:    prefs,
-		IPGeoChecker:   checker,
-		ForgeMgr:       forgeManager,
+		RepoSvc:      repoSvc,
+		RepoStatus:   repoStatus,
+		Runtimes:     runtimeRouter,
+		TaskMgr:      taskMgr,
+		Preferences:  prefs,
+		IPGeoChecker: checker,
+		ForgeMgr:     forgeManager,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -127,9 +143,10 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 	if err != nil {
 		t.Fatalf("ipgeo.NewChecker: %v", err)
 	}
-	backend := &mdruntime.Backend{}
-	workspaceRegistry := repowork.NewRegistry(t.Context(), nil)
-	taskMgr := taskmgr.New(taskmgr.Config{ServerCtx: t.Context(), WorkspaceRegistry: workspaceRegistry})
+	backend := &runtimetest.FakeBackend{}
+	runtimeRouter := newTestRuntime(t, backend)
+	workspaceRegistry := repowork.NewRegistry(t.Context(), runtimeRouter)
+	taskMgr := taskmgr.New(taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, WorkspaceRegistry: workspaceRegistry})
 	repoSvc := repomgr.NewService(t.Context(), "", repo.New(nil), workspaceRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
@@ -137,7 +154,7 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 	s, err := New(t.Context(), Dependencies{
 		RepoSvc:                    repoSvc,
 		RepoStatus:                 repoStatus,
-		ProcessBackend:             backend,
+		Runtimes:                   runtimeRouter,
 		TaskMgr:                    taskMgr,
 		Preferences:                prefs,
 		IPGeoChecker:               checker,
@@ -168,21 +185,22 @@ func testTaskHandlers(s *testRouter) *taskHandlers {
 func TestNew(t *testing.T) {
 	t.Parallel()
 
-	t.Run("missing process backend", func(t *testing.T) {
+	t.Run("missing runtime", func(t *testing.T) {
 		t.Parallel()
 		if _, err := New(t.Context(), Dependencies{}); err == nil {
-			t.Fatal("New() error = nil, want process backend required")
+			t.Fatal("New() error = nil, want runtime required")
 		}
 	})
 
 	t.Run("missing repos", func(t *testing.T) {
 		t.Parallel()
-		workspaceRegistry := repowork.NewRegistry(t.Context(), nil)
+		runtimeRouter := newTestRuntime(t, &runtimetest.FakeBackend{})
+		workspaceRegistry := repowork.NewRegistry(t.Context(), runtimeRouter)
 		_, err := New(t.Context(), Dependencies{
-			ProcessBackend: &mdruntime.Backend{},
-			TaskMgr:        taskmgr.New(taskmgr.Config{ServerCtx: t.Context(), WorkspaceRegistry: workspaceRegistry}),
-			Preferences:    newTestPrefs(t),
-			RepoStatus:     ci.NewRepoStatusStore(),
+			Runtimes:    runtimeRouter,
+			TaskMgr:     taskmgr.New(taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, WorkspaceRegistry: workspaceRegistry}),
+			Preferences: newTestPrefs(t),
+			RepoStatus:  ci.NewRepoStatusStore(),
 		})
 		if err == nil || err.Error() != "repos service is required" {
 			t.Fatalf("New() error = %v, want repos service required", err)
@@ -191,12 +209,13 @@ func TestNew(t *testing.T) {
 
 	t.Run("missing repo status", func(t *testing.T) {
 		t.Parallel()
-		workspaceRegistry := repowork.NewRegistry(t.Context(), nil)
+		runtimeRouter := newTestRuntime(t, &runtimetest.FakeBackend{})
+		workspaceRegistry := repowork.NewRegistry(t.Context(), runtimeRouter)
 		_, err := New(t.Context(), Dependencies{
-			RepoSvc:        repomgr.NewService(t.Context(), "", repo.New(nil), workspaceRegistry),
-			ProcessBackend: &mdruntime.Backend{},
-			TaskMgr:        taskmgr.New(taskmgr.Config{ServerCtx: t.Context(), WorkspaceRegistry: workspaceRegistry}),
-			Preferences:    newTestPrefs(t),
+			RepoSvc:     repomgr.NewService(t.Context(), "", repo.New(nil), workspaceRegistry),
+			Runtimes:    runtimeRouter,
+			TaskMgr:     taskmgr.New(taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, WorkspaceRegistry: workspaceRegistry}),
+			Preferences: newTestPrefs(t),
 		})
 		if err == nil || err.Error() != "repo status store is required" {
 			t.Fatalf("New() error = %v, want repo status store required", err)
@@ -319,21 +338,22 @@ type workspaceConstructionTestFixture struct {
 	server   *testRouter
 	logDir   string
 	cacheDir string
-	backend  *mdruntime.Backend
+	runtimes *runtime.Router
 }
 
 func newWorkspaceConstructionTestServer(t *testing.T, root string) workspaceConstructionTestFixture {
 	harnessEnv := map[string][]string{string(harness.Codex): {"CODEX_HOME=/tmp/codex"}}
 	backend := &mdruntime.Backend{HarnessEnv: harnessEnv}
+	runtimeRouter := newTestRuntime(t, backend)
 	backends := map[harness.Name]agent.Backend{harness.Codex: &agenttest.FakeBackend{ModelList: []string{"m1", "m2"}, WireFactory: claudecode.New().NewWire}}
 	logDir := filepath.Join(t.TempDir(), "logs")
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	workspaceRegistry := repowork.NewRegistry(t.Context(), backend)
+	workspaceRegistry := repowork.NewRegistry(t.Context(), runtimeRouter)
 	taskMgr := taskmgr.New(taskmgr.Config{
 		ServerCtx:         t.Context(),
 		LogDir:            logDir,
 		CacheDir:          cacheDir,
-		Backend:           backend,
+		Runtimes:          runtimeRouter,
 		Backends:          backends,
 		HarnessEnv:        harnessEnv,
 		WorkspaceRegistry: workspaceRegistry,
@@ -342,12 +362,12 @@ func newWorkspaceConstructionTestServer(t *testing.T, root string) workspaceCons
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
 	s, err := New(t.Context(), Dependencies{
-		RepoSvc:        repoSvc,
-		RepoStatus:     repoStatus,
-		ProcessBackend: backend,
-		TaskMgr:        taskMgr,
-		Preferences:    prefs,
-		ForgeMgr:       forgemgr.New("", "", nil),
+		RepoSvc:     repoSvc,
+		RepoStatus:  repoStatus,
+		Runtimes:    runtimeRouter,
+		TaskMgr:     taskMgr,
+		Preferences: prefs,
+		ForgeMgr:    forgemgr.New("", "", nil),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -356,7 +376,7 @@ func newWorkspaceConstructionTestServer(t *testing.T, root string) workspaceCons
 		server:   &testRouter{Router: s, taskMgr: taskMgr, repoSvc: repoSvc, repoStatus: repoStatus, prefs: prefs},
 		logDir:   logDir,
 		cacheDir: cacheDir,
-		backend:  backend,
+		runtimes: runtimeRouter,
 	}
 }
 
@@ -445,7 +465,7 @@ func TestCloneRepo(t *testing.T) {
 		if workspace.Dir != filepath.Join(root, "cloned") {
 			t.Fatalf("Dir = %q, want cloned path", workspace.Dir)
 		}
-		if workspace.Runtime != fixture.backend {
+		if workspace.Runtimes != fixture.runtimes {
 			t.Fatal("workspace instance backend was not wired")
 		}
 		if len(s.taskMgr.Backends()) == 0 {
@@ -1022,6 +1042,35 @@ func TestHandleCreateTask(t *testing.T) {
 		}
 	})
 
+	t.Run("StaleSavedRuntimeUsesDefault", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t)
+		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}})
+		s.taskMgr.RegisterWorkspace("", newRouterTestWorkspace(t, "", ""))
+		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
+			p.Settings.RuntimeName = "ghost"
+		}); err != nil {
+			t.Fatal(err)
+		}
+		handler := handle(testTaskHandlers(s).taskSvc.createTask)
+
+		body := strings.NewReader(`{"initialPrompt":{"text":"no repo task"},"harness":"claude","model":"m1"}`)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
+		w := httptest.NewRecorder()
+		handler(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var resp v1.Task
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatal(err)
+		}
+		if resp.Runtime.RuntimeName != "test-runtime" {
+			t.Fatalf("runtime = %q, want test-runtime", resp.Runtime.RuntimeName)
+		}
+	})
+
 	t.Run("NoRepoWorkspaceNoBackend", func(t *testing.T) {
 		t.Parallel()
 		// Creating a no-repo task with no registered harness backends returns
@@ -1067,12 +1116,12 @@ func TestSignalProcess(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
-		tk.SetRuntimeConnectionInfo("ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", "", 0)
+		tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", "", 0)
 		insertTestTask(t, s, "t1", tk)
 		backend := &runtimetest.FakeBackend{}
 		processes := &runtimeProcessHandlers{
 			taskMgr:     s.taskMgr,
-			backend:     backend,
+			runtimes:    newTestRuntime(t, backend),
 			authEnabled: false,
 		}
 
@@ -1095,12 +1144,12 @@ func TestSignalProcess(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
-		tk.SetRuntimeConnectionInfo("ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", "", 0)
+		tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", "", 0)
 		insertTestTask(t, s, "t1", tk)
 		backend := &runtimetest.FakeBackend{}
 		processes := &runtimeProcessHandlers{
 			taskMgr:     s.taskMgr,
-			backend:     backend,
+			runtimes:    newTestRuntime(t, backend),
 			authEnabled: false,
 		}
 
@@ -2092,6 +2141,25 @@ func TestBuildHandler(t *testing.T) {
 		}
 		if strings.Contains(w.Body.String(), "<html") {
 			t.Fatalf("body = %q, want 404 not SPA HTML", w.Body.String())
+		}
+	})
+
+	t.Run("preferences rejects unknown runtime", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t)
+		h, err := s.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler() error = %v", err)
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/server/preferences", strings.NewReader(`{"settings":{"runtimeName":"ghost"}}`))
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
+		}
+		prefs := s.prefs.Get("default")
+		if prefs.Settings.RuntimeName != "" {
+			t.Fatalf("persisted runtime = %q, want empty", prefs.Settings.RuntimeName)
 		}
 	})
 

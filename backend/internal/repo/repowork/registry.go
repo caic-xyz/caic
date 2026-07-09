@@ -17,17 +17,17 @@ import (
 // repo.Registry, but each registry keeps its own lock domain.
 type Registry struct {
 	serverCtx context.Context
-	backend   runtime.Backend
+	runtimes  *runtime.Router
 
 	mu         sync.Mutex
 	workspaces map[string]*Workspace
 }
 
 // NewRegistry creates an empty workspace registry.
-func NewRegistry(ctx context.Context, backend runtime.Backend) *Registry {
+func NewRegistry(ctx context.Context, runtimes *runtime.Router) *Registry {
 	return &Registry{
 		serverCtx:  ctx,
-		backend:    backend,
+		runtimes:   runtimes,
 		workspaces: make(map[string]*Workspace),
 	}
 }
@@ -35,7 +35,7 @@ func NewRegistry(ctx context.Context, backend runtime.Backend) *Registry {
 // RegisterWorkspace registers a task repo workspace keyed by relPath.
 // "" registers the no-repo workspace.
 func (r *Registry) RegisterWorkspace(relPath string, w *Workspace) {
-	w.Runtime = r.backend
+	w.Runtimes = r.runtimes
 	if err := w.Init(r.serverCtx); err != nil {
 		slog.WarnContext(r.serverCtx, "repo workspace init failed", "repo", relPath, "err", err)
 	}

@@ -1,5 +1,5 @@
 // Shared test doubles and fixtures for the task package's Runner and
-// SessionRunner tests: fake agent backends, a fake runtime.Backend, and git
+// SessionRunner tests: fake agent backends, a fake runtime.Lifecycle, and git
 // test-repo helpers.
 
 package task
@@ -128,7 +128,7 @@ type fetchRecorder struct {
 	fetched atomic.Bool
 }
 
-func (b *fetchRecorder) Fetch(ctx context.Context, id runtime.InstanceID) error {
+func (b *fetchRecorder) Fetch(ctx context.Context, id runtime.ID) error {
 	b.fetched.Store(true)
 	return b.FakeBackend.Fetch(ctx, id)
 }

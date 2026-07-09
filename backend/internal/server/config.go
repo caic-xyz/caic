@@ -39,9 +39,6 @@ type Config struct {
 
 // Validate returns an error if the configuration is invalid.
 func (c *Config) Validate() error {
-	if err := c.Runtime.Validate(); err != nil {
-		return err
-	}
 	if err := c.GitHub.Validate(); err != nil {
 		return err
 	}
@@ -82,23 +79,11 @@ type DirsConfig struct {
 
 // RuntimeConfig selects and configures task runtime provisioning.
 type RuntimeConfig struct {
-	Name            string                // container runtime: "docker" or "podman" (default: "docker")
-	TailscaleAPIKey string                // required for Tailscale networking inside runtime instances
-	Backend         runtime.Backend       // optional runtime lifecycle override for smoke/e2e tests
-	Monitor         runtime.Monitor       // optional runtime stats/events override for smoke/e2e tests
-	Inventory       runtime.Inventory     // optional runtime inventory override for smoke/e2e tests
-	Privilege       runtime.PrivilegeInfo // optional privileged runtime info override for smoke/e2e tests
+	TailscaleAPIKey string         // required for Tailscale networking inside runtime instances
+	System          runtime.System // optional runtime override for smoke/e2e tests
 	// SkipWarmup skips base-image warmup at startup. Used by e2e fake mode to
 	// avoid pulling Docker images that aren't needed for testing.
 	SkipWarmup bool
-}
-
-// Validate returns an error if the runtime configuration is invalid.
-func (c *RuntimeConfig) Validate() error {
-	if c.Name != "" && c.Name != "docker" && c.Name != "podman" {
-		return fmt.Errorf("core.runtime must be \"docker\" or \"podman\", got %q", c.Name)
-	}
-	return nil
 }
 
 // AgentConfig configures coding-agent process environments.

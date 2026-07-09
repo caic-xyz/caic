@@ -14,8 +14,8 @@ import (
 	"path/filepath"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/app"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/app"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/smoketest"
 )
@@ -72,10 +72,7 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config, traceFile s
 	defer func() { retErr = errors.Join(retErr, fvnc.Close()) }()
 
 	fc := smoketest.NewRuntimeBackend(fvnc.Port())
-	cfg.Runtime.Backend = fc
-	cfg.Runtime.Monitor = fc
-	cfg.Runtime.Inventory = fc
-	cfg.Runtime.Privilege = fc
+	cfg.Runtime.System = fc
 	fb := smoketest.NewFakeBackend()
 	cfg.Agent.Backends = map[harness.Name]agent.Backend{fb.Harness(): fb}
 

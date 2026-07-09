@@ -2,7 +2,7 @@
 
 import { For, Show, type Accessor, type Setter } from "solid-js";
 
-import type { CacheMappingResp, CacheSize, OAuthGrantResp, MountMappingResp, Platform, UpdatePreferencesReq, VersionResp, WellKnownCachesResp } from "@sdk/types.gen";
+import type { CacheMappingResp, CacheSize, OAuthGrantResp, MountMappingResp, Platform, RuntimeInfo, UpdatePreferencesReq, VersionResp, WellKnownCachesResp } from "@sdk/types.gen";
 
 import styles from "./SettingsForm.module.css";
 
@@ -15,6 +15,9 @@ interface SettingsFormProps {
   setContainerPlatform: Setter<string>;
   maxCPUs: Accessor<number>;
   setMaxCPUs: Setter<number>;
+  runtimes: Accessor<RuntimeInfo[]>;
+  selectedRuntimeName: Accessor<string>;
+  setSelectedRuntimeName: (runtimeName: string) => void;
   wellKnownCaches: Accessor<Record<string, boolean | undefined>>;
   setWellKnownCaches: Setter<Record<string, boolean | undefined>>;
   wellKnownCachesList: Accessor<WellKnownCachesResp["wellKnown"]>;
@@ -91,6 +94,24 @@ export default function SettingsForm(props: SettingsFormProps) {
               }}
             />
           </label>
+          <Show when={props.runtimes().length > 1}>
+            <label class={styles.settingsLabel}>
+              Runtime
+              <select
+                class={styles.settingsInput}
+                value={props.selectedRuntimeName()}
+                onChange={(e) => {
+                  const runtimeName = e.currentTarget.value;
+                  props.setSelectedRuntimeName(runtimeName);
+                  void props.saveSettings({ runtimeName });
+                }}
+              >
+                <For each={props.runtimes()}>
+                  {(rt) => <option value={rt.name} selected={rt.name === props.selectedRuntimeName()}>{rt.name}</option>}
+                </For>
+              </select>
+            </label>
+          </Show>
           <label class={styles.settingsLabel}>
             CPU architecture
             <select

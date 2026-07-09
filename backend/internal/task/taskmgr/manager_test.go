@@ -31,6 +31,47 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
+type testRuntimeInfo interface {
+	runtime.Monitor
+	runtime.Inventory
+	runtime.PrivilegeInfo
+}
+
+type testRuntimeSystem struct {
+	runtime.Lifecycle
+	runtimetest.FakeInfo
+}
+
+func (*testRuntimeSystem) Name() runtime.Name { return "test-runtime" }
+
+type testRuntimeInfoSystem struct {
+	runtime.Lifecycle
+	runtime.Monitor
+	runtime.Inventory
+	runtime.PrivilegeInfo
+}
+
+func (testRuntimeInfoSystem) Name() runtime.Name { return "test-runtime" }
+
+func newTestManager(t testing.TB, cfg Config) *Manager { //nolint:gocritic // Config mirrors New's value bag in tests.
+	if cfg.Runtimes == nil {
+		cfg.Runtimes = newTestRuntime(t, &runtimetest.FakeBackend{}, nil)
+	}
+	return New(cfg)
+}
+
+func newTestRuntime(t testing.TB, lc runtime.Lifecycle, info testRuntimeInfo) *runtime.Router {
+	var sys runtime.System = &testRuntimeSystem{Lifecycle: lc}
+	if info != nil {
+		sys = testRuntimeInfoSystem{Lifecycle: lc, Monitor: info, Inventory: info, PrivilegeInfo: info}
+	}
+	router, err := runtime.NewRouter([]runtime.System{sys})
+	if err != nil {
+		t.Fatalf("runtime.NewRouter: %v", err)
+	}
+	return router
+}
+
 type fakeRelayReader struct {
 	statusFn   func(context.Context, runtime.ConnectionTarget) (bool, string, error)
 	readTailFn func(context.Context, runtime.ConnectionTarget, func([]byte) ([]agent.Message, error), int64) ([]agent.Message, int64, error)
@@ -60,7 +101,7 @@ type blockingStopBackend struct {
 	release  chan struct{}
 }
 
-func (b *blockingStopBackend) Stop(ctx context.Context, id runtime.InstanceID) error {
+func (b *blockingStopBackend) Stop(ctx context.Context, id runtime.ID) error {
 	close(b.started)
 	defer close(b.returned)
 	select {
@@ -79,7 +120,7 @@ type blockingReviveBackend struct {
 	release chan struct{}
 }
 
-func (b *blockingReviveBackend) Revive(ctx context.Context, id runtime.InstanceID) error {
+func (b *blockingReviveBackend) Revive(ctx context.Context, id runtime.ID) error {
 	select {
 	case <-b.release:
 		return errors.New("revive boom")
@@ -295,7 +336,7 @@ func TestNew(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
 		t.Parallel()
 		cfg := Config{ServerCtx: t.Context()}
-		m := New(cfg)
+		m := newTestManager(t, cfg)
 		if m == nil {
 			t.Fatal("New returned nil")
 		}
@@ -317,11 +358,16 @@ func TestNew(t *testing.T) {
 	})
 	t.Run("no-repo workspace is fully constructed", func(t *testing.T) {
 		t.Parallel()
+		backend := &mdruntime.Backend{}
+		router, err := runtime.NewRouter([]runtime.System{&testRuntimeSystem{Lifecycle: backend}})
+		if err != nil {
+			t.Fatal(err)
+		}
 		cfg := Config{
 			ServerCtx:  t.Context(),
 			LogDir:     "/tmp/logs",
 			CacheDir:   "/tmp/cache",
-			Backend:    &mdruntime.Backend{},
+			Runtimes:   router,
 			Backends:   map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}},
 			HarnessEnv: map[string][]string{string(harness.Codex): {"CODEX_HOME=/tmp/codex"}},
 		}
@@ -333,7 +379,7 @@ func TestNew(t *testing.T) {
 		if m.logDir != cfg.LogDir || m.cacheDir != cfg.CacheDir {
 			t.Fatalf("manager dirs = log %q cache %q, want log %q cache %q", m.logDir, m.cacheDir, cfg.LogDir, cfg.CacheDir)
 		}
-		if r.Runtime != cfg.Backend {
+		if r.Runtimes != cfg.Runtimes {
 			t.Fatal("workspace instance backend was not wired")
 		}
 		if len(m.harnessEnv[string(harness.Codex)]) != 1 || m.harnessEnv[string(harness.Codex)][0] != "CODEX_HOME=/tmp/codex" {
@@ -352,7 +398,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			r := &repowork.Workspace{Dir: "/tmp/test", Log: logtest.Logger(t)}
 			m.RegisterWorkspace("my/repo", r)
 			got, ok := m.Workspace("my/repo")
@@ -369,7 +415,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			r := &repowork.Workspace{Dir: "/tmp/test", Log: logtest.Logger(t)}
 			m.RegisterWorkspace("my/repo", r)
 			m.UnregisterWorkspace("my/repo")
@@ -379,7 +425,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("valid_removes_only_matching", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			r1 := &repowork.Workspace{Dir: "/tmp/a", Log: logtest.Logger(t)}
 			r2 := &repowork.Workspace{Dir: "/tmp/b", Log: logtest.Logger(t)}
 			m.RegisterWorkspace("a", r1)
@@ -398,7 +444,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -415,7 +461,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			_, ok := m.GetEntry("nonexistent")
 			if ok {
 				t.Error("GetEntry should return false for nonexistent task")
@@ -428,7 +474,7 @@ func TestManager(t *testing.T) {
 	// during fn self-deadlocks the whole server (caught only by e2e before).
 	t.Run("RangeCallbackCanCallManager", func(t *testing.T) {
 		t.Parallel()
-		m := New(Config{ServerCtx: t.Context()})
+		m := newTestManager(t, Config{ServerCtx: t.Context()})
 		tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 		m.Insert(tk.ID.String(), NewEntry(tk, nil))
 		done := make(chan struct{})
@@ -454,7 +500,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			for range 5 {
 				m.Insert(ksid.NewID().String(), NewEntry(&task.Task{
 					ID:            ksid.NewID(),
@@ -472,7 +518,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("valid_stops_on_false", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			for range 5 {
 				m.Insert(ksid.NewID().String(), NewEntry(&task.Task{
 					ID:            ksid.NewID(),
@@ -494,7 +540,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_on_insert", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			oldCh := m.Changed()
 			m.Insert(ksid.NewID().String(), NewEntry(&task.Task{
 				ID:            ksid.NewID(),
@@ -508,7 +554,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("valid_new_channel_after_mutation", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			ch1 := m.Changed()
 			m.NotifyTaskChange()
 			ch2 := m.Changed()
@@ -527,7 +573,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -545,7 +591,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -564,7 +610,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -579,7 +625,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -598,7 +644,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -615,7 +661,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -634,7 +680,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -654,7 +700,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("valid_skips_no_forge_issue", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -668,7 +714,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("valid_skips_terminal_states", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			for _, st := range []task.State{task.StateWaiting, task.StateStopped, task.StateCrashed, task.StateFailed, task.StatePurged} {
 				tk := &task.Task{
 					ID:            ksid.NewID(),
@@ -689,7 +735,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_with_repo", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			r := &repowork.Workspace{Dir: "/tmp/test", Log: logtest.Logger(t)}
 			m.RegisterWorkspace("my/repo", r)
 			tk := &task.Task{
@@ -703,7 +749,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("valid_no_repo_fallback", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			got := m.resolveWorkspace(tk)
 			if got == nil {
@@ -745,7 +791,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_explicit", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			m.RegisterWorkspace("my/repo", &repowork.Workspace{
 				BaseBranch: "develop",
 				Log:        logtest.Logger(t),
@@ -759,7 +805,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("valid_workspace_default", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			m.RegisterWorkspace("my/repo", &repowork.Workspace{
 				BaseBranch: "develop",
 				Log:        logtest.Logger(t),
@@ -773,7 +819,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("valid_no_repo", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{}
 			if got := m.EffectiveBaseBranch(tk); got != "" {
 				t.Errorf("EffectiveBaseBranch = %q for no-repo, want empty", got)
@@ -785,7 +831,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}
 			e := NewEntry(tk, nil)
 			m.SetTaskMonitorBranch(e, "caic-1")
@@ -799,7 +845,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_already_terminal", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -819,7 +865,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error_not_found", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			_, _, err := m.WatchTaskCompletion(t.Context(), "nonexistent")
 			if err == nil {
 				t.Fatal("expected error for nonexistent task")
@@ -831,7 +877,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("valid_waits_for_terminal", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -853,7 +899,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error_context_cancelled", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -905,7 +951,7 @@ func TestManager(t *testing.T) {
 		for _, c := range cases {
 			t.Run(c.name, func(t *testing.T) {
 				t.Parallel()
-				m := New(Config{ServerCtx: t.Context()})
+				m := newTestManager(t, Config{ServerCtx: t.Context()})
 				tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}
 				tk.SetState(c.state)
 				e := NewEntry(tk, nil)
@@ -930,7 +976,7 @@ func TestManager(t *testing.T) {
 		// newManagerWithRepo returns a Manager with one repo workspace that has a
 		// fake backend for harness "fake".
 		newManagerWithRepo := func(t *testing.T) *Manager {
-			m := New(Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
 			m.RegisterWorkspace("my/repo", &repowork.Workspace{Dir: "/tmp/my-repo", Log: logtest.Logger(t)})
 			return m
 		}
@@ -1084,7 +1130,7 @@ func TestManager(t *testing.T) {
 		// newForkManager returns a Manager with a source task that has a
 		// instance, plus an workspace with a fake backend.
 		newForkManager := func(t *testing.T) (*Manager, *Entry) {
-			m := New(Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
 			m.RegisterWorkspace("my/repo", &repowork.Workspace{Dir: "/tmp/my-repo", Log: logtest.Logger(t)})
 			src := &task.Task{
 				ID:            ksid.NewID(),
@@ -1094,7 +1140,7 @@ func TestManager(t *testing.T) {
 				MaxCPUs:       5,
 				GitHubToken:   true,
 			}
-			src.SetRuntimeConnectionInfo("md-agent-src", runtime.ConnectionTarget{SSHHost: "md-agent-src"}, "", "", 0)
+			src.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "md-agent-src"), runtime.ConnectionTarget{SSHHost: "md-agent-src"}, "", "", 0)
 			src.SetState(task.StateWaiting)
 			e := NewEntry(src, nil)
 			m.Insert(src.ID.String(), e)
@@ -1156,13 +1202,13 @@ func TestManager(t *testing.T) {
 			// Forking a task with no repos is invalid input (KindBadRequest,
 			// 400), not a state conflict. Guards against the parity drift where
 			// this returned 409.
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			src := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "src"},
 				Harness:       "fake",
 			}
-			src.SetRuntimeConnectionInfo("md-agent-src", runtime.ConnectionTarget{SSHHost: "md-agent-src"}, "", "", 0)
+			src.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "md-agent-src"), runtime.ConnectionTarget{SSHHost: "md-agent-src"}, "", "", 0)
 			src.SetState(task.StateWaiting)
 			e := NewEntry(src, nil)
 			m.Insert(src.ID.String(), e)
@@ -1180,7 +1226,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			// Empty prompt triggers the plan-file fallback; with no instance,
 			// agent.ReadPlan fails and Restart returns KindBadRequest.
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetState(task.StateWaiting)
 			e := NewEntry(tk, nil)
@@ -1196,7 +1242,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error_wrong_state", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetState(task.StateStopped)
 			e := NewEntry(tk, nil)
@@ -1216,7 +1262,7 @@ func TestManager(t *testing.T) {
 			// A waiting task with no active session: SendInput fails and the
 			// error must satisfy errors.Is(err, ErrNoSession) while still
 			// carrying the underlying diagnostic message.
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetState(task.StateWaiting)
 			e := NewEntry(tk, nil)
@@ -1236,7 +1282,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			backend := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: "reconnect", Images: true, ContextLimit: 200_000}}
 			t.Cleanup(backend.stop)
-			m := New(Config{
+			m := newTestManager(t, Config{
 				ServerCtx: t.Context(),
 				LogDir:    filepath.Join(t.TempDir(), "logs"),
 				Backends:  map[harness.Name]agent.Backend{"reconnect": backend},
@@ -1246,7 +1292,7 @@ func TestManager(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "x"},
 				Harness:       "reconnect",
 			}
-			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(task.StateRunning)
 			tk.RestoreMessages([]agent.Message{
 				&agent.AskMessage{
@@ -1296,7 +1342,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error_delivery_failure_is_not_no_session", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}, Harness: harness.Codex}
 			tk.SetState(task.StateWaiting)
 
@@ -1349,7 +1395,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_concurrent_insert_and_range", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			var wg sync.WaitGroup
 			for range 10 {
 				tk := &task.Task{
@@ -1373,7 +1419,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("valid_concurrent_notify_change", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			var wg sync.WaitGroup
 			for range 50 {
 				wg.Go(func() {
@@ -1387,7 +1433,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("error_wrong_state", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetState(task.StateStopped)
 			e := NewEntry(tk, nil)
@@ -1400,7 +1446,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error_no_workspace_backend", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetState(task.StateWaiting)
 			e := NewEntry(tk, nil)
@@ -1416,7 +1462,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("error_no_session", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetState(task.StateWaiting)
 			e := NewEntry(tk, nil)
@@ -1432,20 +1478,20 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_no_sudo", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 				Sudo:          false,
 			}
-			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			if got := m.SudoPassword(t.Context(), tk); got != "" {
 				t.Errorf("SudoPassword = %q, want empty for !Sudo", got)
 			}
 		})
 		t.Run("valid_no_container", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
@@ -1457,14 +1503,14 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("valid_cached", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 				Sudo:          true,
 				SudoPassword:  "cached-pw",
 			}
-			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			if got := m.SudoPassword(t.Context(), tk); got != "cached-pw" {
 				t.Errorf("SudoPassword = %q, want cached-pw", got)
 			}
@@ -1472,13 +1518,13 @@ func TestManager(t *testing.T) {
 		t.Run("valid_fetches_then_caches", func(t *testing.T) {
 			t.Parallel()
 			fake := &runtimetest.FakeInfo{SudoResult: "fetched-pw"}
-			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake)})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 				Sudo:          true,
 			}
-			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			if got := m.SudoPassword(t.Context(), tk); got != "fetched-pw" {
 				t.Errorf("SudoPassword = %q, want fetched-pw", got)
 			}
@@ -1495,13 +1541,13 @@ func TestManager(t *testing.T) {
 		t.Run("valid_fetch_error_returns_empty", func(t *testing.T) {
 			t.Parallel()
 			fake := &runtimetest.FakeInfo{SudoErr: errors.New("ssh boom")}
-			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake)})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 				Sudo:          true,
 			}
-			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			if got := m.SudoPassword(t.Context(), tk); got != "" {
 				t.Errorf("SudoPassword = %q, want empty on fetch error", got)
 			}
@@ -1514,94 +1560,94 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_transitions_to_stopped", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 				Repos:         []task.RepoMount{{Name: "repo/x", Branch: "caic-1"}},
 			}
-			tk.SetRuntimeConnectionInfo("ctr-dead", runtime.ConnectionTarget{SSHHost: "ctr-dead"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-dead"), runtime.ConnectionTarget{SSHHost: "ctr-dead"}, "", "", 0)
 			tk.SetState(task.StateRunning)
 			m.Insert(tk.ID.String(), NewEntry(tk, nil))
-			m.handleRuntimeInstanceExit("ctr-dead")
+			m.handleRuntimeInstanceExit(runtime.NewID("test-runtime", "ctr-dead"))
 			if got := tk.GetState(); got != task.StateStopped {
 				t.Errorf("state = %v, want StateStopped", got)
 			}
 		})
 		t.Run("valid_skips_purged", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 			}
-			tk.SetRuntimeConnectionInfo("ctr-purged", runtime.ConnectionTarget{SSHHost: "ctr-purged"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-purged"), runtime.ConnectionTarget{SSHHost: "ctr-purged"}, "", "", 0)
 			tk.SetState(task.StatePurged)
 			m.Insert(tk.ID.String(), NewEntry(tk, nil))
-			m.handleRuntimeInstanceExit("ctr-purged")
+			m.handleRuntimeInstanceExit(runtime.NewID("test-runtime", "ctr-purged"))
 			if got := tk.GetState(); got != task.StatePurged {
 				t.Errorf("state = %v (should stay Purged)", got)
 			}
 		})
 		t.Run("valid_skips_purging", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 			}
-			tk.SetRuntimeConnectionInfo("ctr-purging", runtime.ConnectionTarget{SSHHost: "ctr-purging"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-purging"), runtime.ConnectionTarget{SSHHost: "ctr-purging"}, "", "", 0)
 			// A purge in progress: removing the instance emits the very "die"
 			// event handled here. Acting on it would flap the task to Stopped
 			// mid-purge and race the cleanup goroutine.
 			tk.SetState(task.StatePurging)
 			m.Insert(tk.ID.String(), NewEntry(tk, nil))
-			m.handleRuntimeInstanceExit("ctr-purging")
+			m.handleRuntimeInstanceExit(runtime.NewID("test-runtime", "ctr-purging"))
 			if got := tk.GetState(); got != task.StatePurging {
 				t.Errorf("state = %v (should stay Purging)", got)
 			}
 		})
 		t.Run("valid_skips_stopping", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 			}
-			tk.SetRuntimeConnectionInfo("ctr-stopping", runtime.ConnectionTarget{SSHHost: "ctr-stopping"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-stopping"), runtime.ConnectionTarget{SSHHost: "ctr-stopping"}, "", "", 0)
 			tk.SetState(task.StateStopping)
 			m.Insert(tk.ID.String(), NewEntry(tk, nil))
-			m.handleRuntimeInstanceExit("ctr-stopping")
+			m.handleRuntimeInstanceExit(runtime.NewID("test-runtime", "ctr-stopping"))
 			if got := tk.GetState(); got != task.StateStopping {
 				t.Errorf("state = %v (should stay Stopping)", got)
 			}
 		})
 		t.Run("valid_skips_stopped", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 			}
-			tk.SetRuntimeConnectionInfo("ctr-stopped", runtime.ConnectionTarget{SSHHost: "ctr-stopped"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-stopped"), runtime.ConnectionTarget{SSHHost: "ctr-stopped"}, "", "", 0)
 			tk.SetState(task.StateStopped)
 			m.Insert(tk.ID.String(), NewEntry(tk, nil))
-			m.handleRuntimeInstanceExit("ctr-stopped")
+			m.handleRuntimeInstanceExit(runtime.NewID("test-runtime", "ctr-stopped"))
 			if got := tk.GetState(); got != task.StateStopped {
 				t.Errorf("state = %v (should stay Stopped)", got)
 			}
 		})
 		t.Run("valid_skips_wrong_container", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 			}
-			tk.SetRuntimeConnectionInfo("ctr-alive", runtime.ConnectionTarget{SSHHost: "ctr-alive"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-alive"), runtime.ConnectionTarget{SSHHost: "ctr-alive"}, "", "", 0)
 			tk.SetState(task.StateRunning)
 			m.Insert(tk.ID.String(), NewEntry(tk, nil))
-			m.handleRuntimeInstanceExit("ctr-other")
+			m.handleRuntimeInstanceExit(runtime.NewID("test-runtime", "ctr-other"))
 			if got := tk.GetState(); got != task.StateRunning {
 				t.Errorf("state = %v (should stay Running)", got)
 			}
@@ -1611,7 +1657,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_no_loaded_task", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
@@ -1625,7 +1671,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_empty", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			err := m.LoadPurgedTasks(nil)
 			if err != nil {
 				t.Fatalf("LoadPurgedTasks(nil): %v", err)
@@ -1636,7 +1682,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("valid_filters_old", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			old := time.Now().Add(-30 * 24 * time.Hour).UTC()
 			all := []*task.LoadedTask{
 				{
@@ -1657,7 +1703,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("valid_creates_entries", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			m.RegisterWorkspace("repo/a", &repowork.Workspace{Dir: "", Log: logtest.Logger(t)})
 			now := time.Now().UTC()
 			id := ksid.NewID()
@@ -1667,6 +1713,7 @@ func TestManager(t *testing.T) {
 					Prompt:            "test task",
 					Title:             "Test Title",
 					Harness:           "claude",
+					RuntimeName:       "docker",
 					Repos:             []task.RepoMount{{Name: "repo/a", Branch: "caic-1"}},
 					State:             task.StateStopped,
 					Result:            &task.Result{State: task.StateStopped},
@@ -1709,6 +1756,9 @@ func TestManager(t *testing.T) {
 			if !snap.Sudo || !snap.GitHubToken {
 				t.Errorf("privileged flags not restored: sudo=%v gitHubToken=%v", snap.Sudo, snap.GitHubToken)
 			}
+			if tk.RuntimeName != "docker" {
+				t.Errorf("RuntimeName = %q, want docker", tk.RuntimeName)
+			}
 			if tk.Model != "model-1" || tk.Effort != "high" {
 				t.Errorf("model/effort = %q/%q, want model-1/high", tk.Model, tk.Effort)
 			}
@@ -1731,9 +1781,35 @@ func TestManager(t *testing.T) {
 				t.Errorf("Result = %v, want StateStopped", e.Result())
 			}
 		})
+		t.Run("valid_promotes_missing_log_runtime", func(t *testing.T) {
+			t.Parallel()
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
+			id := ksid.NewID()
+			all := []*task.LoadedTask{{
+				TaskID:            id.String(),
+				Prompt:            "old task",
+				Harness:           "claude",
+				State:             task.StateStopped,
+				Result:            &task.Result{State: task.StateStopped},
+				LastStateUpdateAt: time.Now().UTC(),
+			}}
+			if err := m.LoadPurgedTasks(all); err != nil {
+				t.Fatalf("LoadPurgedTasks: %v", err)
+			}
+			e, ok := m.GetEntry(id.String())
+			if !ok {
+				t.Fatal("entry not found")
+			}
+			if got := e.Task().RuntimeName; got != "test-runtime" {
+				t.Fatalf("RuntimeName = %q, want test-runtime", got)
+			}
+			if got := all[0].RuntimeName; got != "test-runtime" {
+				t.Fatalf("loaded RuntimeName = %q, want test-runtime", got)
+			}
+		})
 		t.Run("valid_keeps_session_metadata_lazy", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			dir := t.TempDir()
 			id := ksid.NewID()
 			marshal := func(v any) string {
@@ -1781,7 +1857,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("valid_running_becomes_failed", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			now := time.Now().UTC()
 			id := ksid.NewID()
 			all := []*task.LoadedTask{
@@ -1804,7 +1880,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("valid_max_per_repo", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			now := time.Now().UTC()
 			all := make([]*task.LoadedTask, 0, 7)
 			for i := range 7 {
@@ -1826,7 +1902,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("valid_fallback_title", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			now := time.Now().UTC()
 			id := ksid.NewID()
 			all := []*task.LoadedTask{
@@ -1845,7 +1921,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("valid_no_result_fallback_to_failed", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			now := time.Now().UTC()
 			id := ksid.NewID()
 			all := []*task.LoadedTask{
@@ -1863,7 +1939,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("valid_invalid_ksid_fallback", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			now := time.Now().UTC()
 			all := []*task.LoadedTask{
 				{
@@ -1880,7 +1956,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("valid_skips_existing_live_tasks", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			now := time.Now().UTC()
 			activeID := ksid.NewID()
 			active := &task.Task{
@@ -1937,7 +2013,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("error_pending_no_container", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetState(task.StatePending)
 			e := NewEntry(tk, nil)
@@ -1950,7 +2026,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error_purging", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetState(task.StatePurging)
 			e := NewEntry(tk, nil)
@@ -1963,7 +2039,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error_provisioning_no_workspace", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetState(task.StateProvisioning)
 			e := NewEntry(tk, nil)
@@ -1975,7 +2051,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error_force_not_supported", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetState(task.StateRunning)
 			e := NewEntry(tk, nil)
@@ -1991,7 +2067,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("error_wrong_state", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetState(task.StatePurged)
 			e := NewEntry(tk, nil)
@@ -2005,9 +2081,9 @@ func TestManager(t *testing.T) {
 		t.Run("valid_after_finished_crash", func(t *testing.T) {
 			t.Parallel()
 			fake := &runtimetest.FakeBackend{}
-			m := New(Config{ServerCtx: t.Context(), Backend: fake})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, fake, nil)})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
-			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(task.StateCrashed)
 			entry := NewEntry(tk, nil)
 			entry.Finish(&task.Result{State: task.StateCrashed, Err: errors.New("agent crashed")})
@@ -2042,12 +2118,12 @@ func TestManager(t *testing.T) {
 				returned:    make(chan struct{}),
 				release:     make(chan struct{}),
 			}
-			m := New(Config{ServerCtx: t.Context(), Backend: fake})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, fake, nil)})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 			}
-			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(task.StateRunning)
 			entry := NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), entry)
@@ -2098,7 +2174,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("error_wrong_state", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetState(task.StateStopped)
 			e := NewEntry(tk, nil)
@@ -2113,12 +2189,12 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			// Backend is the interface seam, so a fake stands in for Docker.
 			fake := &runtimetest.FakeBackend{}
-			m := New(Config{ServerCtx: t.Context(), Backend: fake})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, fake, nil)})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 			}
-			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(task.StateRunning)
 			entry := NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), entry)
@@ -2145,7 +2221,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("error_wrong_state", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetState(task.StateRunning)
 			e := NewEntry(tk, nil)
@@ -2160,12 +2236,12 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			releaseRevive := make(chan struct{})
 			fake := &blockingReviveBackend{FakeBackend: &runtimetest.FakeBackend{}, release: releaseRevive}
-			m := New(Config{ServerCtx: t.Context(), Backend: fake})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, fake, nil)})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 			}
-			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(task.StateCrashed)
 			entry := NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), entry)
@@ -2187,12 +2263,12 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			releaseRevive := make(chan struct{})
 			fake := &blockingReviveBackend{FakeBackend: &runtimetest.FakeBackend{}, release: releaseRevive}
-			m := New(Config{ServerCtx: t.Context(), Backend: fake})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, fake, nil)})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 			}
-			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(task.StateStopped)
 			entry := NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), entry)
@@ -2232,7 +2308,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("error_images_unsupported", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
 			m.RegisterWorkspace("repo/a", &repowork.Workspace{Dir: "/tmp/repo", Log: logtest.Logger(t)})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
@@ -2271,12 +2347,12 @@ func TestManager(t *testing.T) {
 			s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, codex.New("", nil).NewWire()), stdout, msgCh, nil)
 			h := &task.SessionHandle{Session: s, MsgCh: msgCh, DispatchDone: dispatchDone}
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
-			tk.SetRuntimeConnectionInfo("ssh-failed", runtime.ConnectionTarget{SSHHost: "ssh-failed"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ssh-failed"), runtime.ConnectionTarget{SSHHost: "ssh-failed"}, "", "", 0)
 			tk.SetState(task.StateRunning)
 			tk.AttachSession(h)
 			entry := NewEntry(tk, nil)
 			runtimeBackend := &runtimetest.FakeBackend{}
-			m := New(Config{ServerCtx: t.Context(), Backend: runtimeBackend})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, runtimeBackend, nil)})
 
 			m.watchSession(entry, &repowork.Workspace{Dir: "", Log: logtest.Logger(t)}, h)
 
@@ -2297,7 +2373,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_with_backend", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"claude": &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"claude": &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
 			m.RegisterWorkspace("repo/a", &repowork.Workspace{Dir: "", Log: logtest.Logger(t)})
 			lt := &task.LoadedTask{Harness: "claude"}
 			m.setParser(lt)
@@ -2305,7 +2381,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("valid_no_backend", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			lt := &task.LoadedTask{Harness: "pi"}
 			m.setParser(lt)
 			// No panic — graceful no-op when no matching backend.
@@ -2315,7 +2391,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_with_loaded_task", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
@@ -2332,7 +2408,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("error_unknown_harness", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{}})
 			m.RegisterWorkspace("repo/a", &repowork.Workspace{Dir: "/tmp/repo", Log: logtest.Logger(t)})
 			_, err := m.Create(t.Context(), CreateParams{
 				Prompt:  agent.Prompt{Text: "hi"},
@@ -2346,7 +2422,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error_unsupported_model", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
 			m.RegisterWorkspace("repo/a", &repowork.Workspace{Dir: "/tmp/repo", Log: logtest.Logger(t)})
 			_, err := m.Create(t.Context(), CreateParams{
 				Prompt:  agent.Prompt{Text: "hi"},
@@ -2361,7 +2437,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error_unknown_extra_repo", func(t *testing.T) {
 			t.Parallel()
-			m := New(Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
 			m.RegisterWorkspace("repo/a", &repowork.Workspace{Dir: "/tmp/repo", Log: logtest.Logger(t)})
 			_, err := m.Create(t.Context(), CreateParams{
 				Prompt:  agent.Prompt{Text: "hi"},
@@ -2380,7 +2456,7 @@ func TestManager(t *testing.T) {
 		// forkSetup creates a Manager with an workspace for "repo/a" and a source
 		// task in StateWaiting. Returns the Manager and the source Entry.
 		forkSetup := func(t *testing.T, sourceHarness harness.Name, backends map[harness.Name]agent.Backend) (*Manager, *Entry) {
-			m := New(Config{ServerCtx: t.Context(), Backends: backends})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: backends})
 			r := &repowork.Workspace{Dir: "/tmp/repo", Log: logtest.Logger(t)}
 			m.RegisterWorkspace("repo/a", r)
 			src := &task.Task{
@@ -2389,7 +2465,7 @@ func TestManager(t *testing.T) {
 				Repos:         []task.RepoMount{{Name: "repo/a", Branch: "caic-1"}},
 				Harness:       sourceHarness,
 			}
-			src.SetRuntimeConnectionInfo("md-agent-src", runtime.ConnectionTarget{SSHHost: "md-agent-src"}, "", "", 0)
+			src.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "md-agent-src"), runtime.ConnectionTarget{SSHHost: "md-agent-src"}, "", "", 0)
 			src.SetState(task.StateWaiting)
 			e := NewEntry(src, nil)
 			m.Insert(src.ID.String(), e)
@@ -2479,7 +2555,7 @@ func TestManager(t *testing.T) {
 				"md-caic-caic-5\x00caic.id":      taskID.String(),
 				"md-caic-caic-5\x00caic.harness": string(harness.Claude),
 			}}
-			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake, Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
 			m.RegisterWorkspace("caic-xyz/caic", &repowork.Workspace{Dir: "/home/user/src/caic-xyz/caic", Log: logtest.Logger(t)})
 			m.RegisterWorkspace("caic-xyz/md", &repowork.Workspace{Dir: "/home/user/src/caic-xyz/md", Log: logtest.Logger(t)})
 
@@ -2488,7 +2564,7 @@ func TestManager(t *testing.T) {
 				{RelPath: "caic-xyz/md", AbsPath: "/home/user/src/caic-xyz/md"},
 			}, []runtime.Instance{
 				{
-					ID:    "md-caic-caic-5",
+					ID:    runtime.NewID("test-runtime", "md-caic-caic-5"),
 					State: "exited",
 					Repos: []runtime.Repo{
 						{HostPath: "/home/user/src/caic-xyz/caic", Branch: "caic-5", MountPath: "/home/user/src/caic-xyz/caic"},
@@ -2512,6 +2588,30 @@ func TestManager(t *testing.T) {
 				t.Errorf("manager Len = %d, want 1", m.Len())
 			}
 		})
+		t.Run("valid_adopts_qualified_no_repo_instance", func(t *testing.T) {
+			t.Parallel()
+			taskID := ksid.NewID()
+			instanceID := runtime.NewID("test-runtime", "md-agent-no-repo")
+			fake := &runtimetest.FakeInfo{Meta: map[string]string{
+				"md-agent-no-repo\x00caic.id":      taskID.String(),
+				"md-agent-no-repo\x00caic.harness": string(harness.Claude),
+			}}
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
+
+			adopted, err := m.AdoptInstances(t.Context(), nil, []runtime.Instance{{ID: instanceID, State: "exited"}}, nil)
+			if err != nil {
+				t.Fatalf("AdoptInstances: %v", err)
+			}
+			if len(adopted) != 1 {
+				t.Fatalf("adopted len = %d, want 1", len(adopted))
+			}
+			if adopted[0].Task.ID != taskID {
+				t.Fatalf("adopted task ID = %s, want %s", adopted[0].Task.ID, taskID)
+			}
+			if adopted[0].RelPath != "" {
+				t.Fatalf("adopted RelPath = %q, want no repo", adopted[0].RelPath)
+			}
+		})
 		t.Run("valid_restores_launch_config_from_log", func(t *testing.T) {
 			t.Parallel()
 			taskID := ksid.NewID()
@@ -2519,7 +2619,7 @@ func TestManager(t *testing.T) {
 				"restore-config\x00caic.id":      taskID.String(),
 				"restore-config\x00caic.harness": string(harness.Claude),
 			}}
-			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake, Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
 			m.RegisterWorkspace("repo/a", &repowork.Workspace{Dir: "/home/user/src/repo/a", Log: logtest.Logger(t)})
 
 			logDir := t.TempDir()
@@ -2547,7 +2647,7 @@ func TestManager(t *testing.T) {
 			}
 
 			adopted, err := m.AdoptInstances(t.Context(), []AdoptRepo{{RelPath: "repo/a", AbsPath: "/home/user/src/repo/a"}}, []runtime.Instance{
-				{ID: "restore-config", State: "exited", Repos: []runtime.Repo{{HostPath: "/home/user/src/repo/a", Branch: "caic-9", MountPath: "/home/user/src/repo/a"}}},
+				{ID: runtime.NewID("test-runtime", "restore-config"), State: "exited", Repos: []runtime.Repo{{HostPath: "/home/user/src/repo/a", Branch: "caic-9", MountPath: "/home/user/src/repo/a"}}},
 			}, logs)
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
@@ -2573,7 +2673,7 @@ func TestManager(t *testing.T) {
 				"merge-tail\x00caic.id":      taskID.String(),
 				"merge-tail\x00caic.harness": string(harness.Claude),
 			}}
-			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake, Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
 			m.relay = fakeRelayReader{
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 					return true, "alive", nil
@@ -2609,7 +2709,7 @@ func TestManager(t *testing.T) {
 				{RelPath: "caic-xyz/caic", AbsPath: "/home/user/src/caic-xyz/caic"},
 			}, []runtime.Instance{
 				{
-					ID:    "merge-tail",
+					ID:    runtime.NewID("test-runtime", "merge-tail"),
 					State: "running",
 					Repos: []runtime.Repo{{
 						HostPath:  "/home/user/src/caic-xyz/caic",
@@ -2638,12 +2738,10 @@ func TestManager(t *testing.T) {
 				"ask-tail\x00caic.id":      taskID.String(),
 				"ask-tail\x00caic.harness": "reconnect",
 			}}
-			m := New(Config{
+			m := newTestManager(t, Config{
 				ServerCtx: t.Context(),
 				LogDir:    filepath.Join(t.TempDir(), "logs"),
-				Monitor:   fake,
-				Inventory: fake,
-				Privilege: fake,
+				Runtimes:  newTestRuntime(t, &runtimetest.FakeBackend{}, fake),
 				Backends:  map[harness.Name]agent.Backend{"reconnect": backend},
 			})
 			m.relay = fakeRelayReader{
@@ -2678,7 +2776,7 @@ func TestManager(t *testing.T) {
 				{RelPath: "repo/a", AbsPath: "/home/user/src/repo/a"},
 			}, []runtime.Instance{
 				{
-					ID:          "ask-tail",
+					ID:          runtime.NewID("test-runtime", "ask-tail"),
 					AgentTarget: runtime.ConnectionTarget{SSHHost: "ask-tail"},
 					State:       "running",
 					Repos: []runtime.Repo{{
@@ -2724,7 +2822,7 @@ func TestManager(t *testing.T) {
 				"dead-relay\x00caic.id":      taskID.String(),
 				"dead-relay\x00caic.harness": string(harness.Claude),
 			}}
-			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake, Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
 			m.RegisterWorkspace("caic-xyz/caic", &repowork.Workspace{Dir: "/home/user/src/caic-xyz/caic", Log: logtest.Logger(t)})
 
 			logDir := t.TempDir()
@@ -2752,7 +2850,7 @@ func TestManager(t *testing.T) {
 				{RelPath: "caic-xyz/caic", AbsPath: "/home/user/src/caic-xyz/caic"},
 			}, []runtime.Instance{
 				{
-					ID:    "dead-relay",
+					ID:    runtime.NewID("test-runtime", "dead-relay"),
 					State: "running",
 					Repos: []runtime.Repo{{
 						HostPath:  "/home/user/src/caic-xyz/caic",
@@ -2791,7 +2889,8 @@ func TestManager(t *testing.T) {
 				"dead-relay-tail\x00caic.id":      taskID.String(),
 				"dead-relay-tail\x00caic.harness": string(harness.Claude),
 			}}
-			m := New(Config{ServerCtx: t.Context(), Backend: &runtimetest.FakeBackend{}, Monitor: fake, Inventory: fake, Privilege: fake, Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
+			runtimeBackend := &runtimetest.FakeBackend{}
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, runtimeBackend, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
 			m.relay = fakeRelayReader{
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 					return false, "dead", nil
@@ -2807,7 +2906,7 @@ func TestManager(t *testing.T) {
 				{RelPath: "caic-xyz/caic", AbsPath: "/home/user/src/caic-xyz/caic"},
 			}, []runtime.Instance{
 				{
-					ID:    "dead-relay-tail",
+					ID:    runtime.NewID("test-runtime", "dead-relay-tail"),
 					State: "running",
 					Repos: []runtime.Repo{{
 						HostPath:  "/home/user/src/caic-xyz/caic",
@@ -2837,7 +2936,7 @@ func TestManager(t *testing.T) {
 				"stale-tail\x00caic.harness": string(harness.Claude),
 			}}
 			runtimeBackend := &runtimetest.FakeBackend{}
-			m := New(Config{ServerCtx: t.Context(), Backend: runtimeBackend, Monitor: fake, Inventory: fake, Privilege: fake, Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, runtimeBackend, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{ModelList: []string{"m1"}, WireFactory: claudecode.New().NewWire}}})
 			m.relay = fakeRelayReader{
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 					return false, "dead", nil
@@ -2857,7 +2956,7 @@ func TestManager(t *testing.T) {
 				{RelPath: "caic-xyz/caic", AbsPath: "/home/user/src/caic-xyz/caic"},
 			}, []runtime.Instance{
 				{
-					ID:    "stale-tail",
+					ID:    runtime.NewID("test-runtime", "stale-tail"),
 					State: "running",
 					Repos: []runtime.Repo{{
 						HostPath:  "/home/user/src/caic-xyz/caic",
@@ -2889,7 +2988,7 @@ func TestManager(t *testing.T) {
 				"stale-trailer\x00caic.id":      taskID.String(),
 				"stale-trailer\x00caic.harness": string(harness.Claude),
 			}}
-			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake)})
 			m.RegisterWorkspace("caic-xyz/caic", &repowork.Workspace{Dir: "/home/user/src/caic-xyz/caic", Log: logtest.Logger(t)})
 
 			logDir := t.TempDir()
@@ -2919,7 +3018,7 @@ func TestManager(t *testing.T) {
 				{RelPath: "caic-xyz/caic", AbsPath: "/home/user/src/caic-xyz/caic"},
 			}, []runtime.Instance{
 				{
-					ID:    "stale-trailer",
+					ID:    runtime.NewID("test-runtime", "stale-trailer"),
 					State: "exited",
 					Repos: []runtime.Repo{{
 						HostPath:  "/home/user/src/caic-xyz/caic",
@@ -2948,7 +3047,7 @@ func TestManager(t *testing.T) {
 				"md-caic-caic-6\x00caic.id":      taskID.String(),
 				"md-caic-caic-6\x00caic.harness": string(harness.Codex),
 			}}
-			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake, Backends: map[harness.Name]agent.Backend{harness.Codex: codex.New("", nil)}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Codex: codex.New("", nil)}})
 			m.RegisterWorkspace("caic-xyz/caic", &repowork.Workspace{Dir: "/home/user/src/caic-xyz/caic", Log: logtest.Logger(t)})
 
 			logDir := t.TempDir()
@@ -2975,7 +3074,7 @@ func TestManager(t *testing.T) {
 				{RelPath: "caic-xyz/caic", AbsPath: "/home/user/src/caic-xyz/caic"},
 			}, []runtime.Instance{
 				{
-					ID:    "md-caic-caic-6",
+					ID:    runtime.NewID("test-runtime", "md-caic-caic-6"),
 					State: "exited",
 					Repos: []runtime.Repo{
 						{HostPath: "/home/user/src/caic-xyz/caic", Branch: "caic-6", MountPath: "/home/user/src/caic-xyz/caic"},
@@ -2998,24 +3097,24 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		ctx, cancel := context.WithCancel(t.Context())
 		t.Cleanup(cancel)
-		started := make(chan []runtime.InstanceID, 1)
+		started := make(chan []runtime.ID, 1)
 		fake := &runtimetest.FakeInfo{
 			WatchStarted: started,
 			Stats:        []runtime.StatsSample{{InstanceID: "ctr-1", Stats: runtime.Stats{CPUPerc: 2.5, MemUsed: 200, DiskUsed: -1}}},
 		}
-		m := New(Config{ServerCtx: ctx, Monitor: fake, Inventory: fake, Privilege: fake})
+		m := newTestManager(t, Config{ServerCtx: ctx, Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake)})
 		tk := &task.Task{
 			ID:            ksid.NewID(),
 			InitialPrompt: agent.Prompt{Text: "x"},
 		}
-		tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 		tk.SetState(task.StateRunning)
 		m.Insert(tk.ID.String(), NewEntry(tk, nil))
 
 		go m.watchStats(ctx)
 		select {
 		case ids := <-started:
-			if !slices.Equal(ids, []runtime.InstanceID{"ctr-1"}) {
+			if !slices.Equal(ids, []runtime.ID{"test-runtime:ctr-1"}) {
 				t.Fatalf("watch ids = %v, want [ctr-1]", ids)
 			}
 		case <-time.After(2 * time.Second):
@@ -3048,13 +3147,13 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			events := make(chan runtime.Event, 1)
 			fake := &runtimetest.FakeInfo{Events: events}
-			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake)})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 				Repos:         []task.RepoMount{{Name: "repo/x", Branch: "caic-1"}},
 			}
-			tk.SetRuntimeConnectionInfo("ctr-dead", runtime.ConnectionTarget{SSHHost: "ctr-dead"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-dead"), runtime.ConnectionTarget{SSHHost: "ctr-dead"}, "", "", 0)
 			tk.SetState(task.StateRunning)
 			m.Insert(tk.ID.String(), NewEntry(tk, nil))
 
@@ -3196,11 +3295,11 @@ func TestRefreshAdoptedDiffStat(t *testing.T) {
 			Dir:        "/repo",
 			RepoName:   "repo",
 			GitTimeout: time.Minute,
-			Runtime:    fake,
+			Runtimes:   newTestRuntime(t, fake, nil),
 			Log:        logtest.Logger(t),
 		}
 		tk := &task.Task{Repos: []task.RepoMount{{GitRoot: "/repo", Branch: "caic-0"}}}
-		tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 		tk.SetState(task.StateWaiting)
 
 		refreshAdoptedDiffStat(t.Context(), workspace, tk)
@@ -3218,11 +3317,11 @@ func TestRefreshAdoptedDiffStat(t *testing.T) {
 			Dir:        "/repo",
 			RepoName:   "repo",
 			GitTimeout: time.Minute,
-			Runtime:    fake,
+			Runtimes:   newTestRuntime(t, fake, nil),
 			Log:        logtest.Logger(t),
 		}
 		tk := &task.Task{Repos: []task.RepoMount{{GitRoot: "/repo", Branch: "caic-0"}}}
-		tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 		tk.SetState(task.StateRunning)
 
 		refreshAdoptedDiffStat(t.Context(), workspace, tk)

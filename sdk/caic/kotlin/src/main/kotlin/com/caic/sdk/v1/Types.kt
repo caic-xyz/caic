@@ -681,6 +681,10 @@ data class VoiceGatewayMetadata(
     val capabilities: List<String>? = null,
 )
 
+/** RuntimeInfo is the JSON representation of an available task runtime backend. */
+@Serializable
+data class RuntimeInfo(val name: String)
+
 /** Config reports server capabilities to the frontend. */
 @Serializable
 data class Config(
@@ -695,6 +699,7 @@ data class Config(
     val gitHubAppEnabled: Boolean? = null,
     /** e.g. ["github","gitlab"] */
     val authProviders: List<String>? = null,
+    val runtimes: List<RuntimeInfo>? = null,
 )
 
 /** VersionResp is the response for GET /api/caic/v1/server/version. */
@@ -786,6 +791,8 @@ data class UserSettings(
      * Zero means use the system default (max(2, NumCPU-2)).
      */
     @SerialName("maxCPUs") val maxCPUs: Int? = null,
+    /** RuntimeName is the preferred runtime backend for new tasks. */
+    val runtimeName: String? = null,
     /**
      * WellKnownCaches maps cache name to enabled state. Absent or false means
      * disabled, true means enabled. Caches are opt-in.
@@ -959,6 +966,8 @@ data class DiffFileStat(
 data class RuntimeInstance(
     /** Runtime instance ID. */
     val id: String,
+    /** Runtime backend name. */
+    val runtimeName: String? = null,
     /** Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown. */
     val tailscale: String? = null,
     val usb: Boolean? = null,
@@ -1100,6 +1109,7 @@ data class TaskInfoRecorded(
 /** TaskInfoObservedRuntime describes runtime-observed instance details from the runtime adapter. */
 @Serializable
 data class TaskInfoObservedRuntime(
+    val runtimeName: String? = null,
     val runtime: String? = null,
     val id: String? = null,
     val state: String? = null,
@@ -1147,6 +1157,7 @@ data class CreateTaskReq(
     /** Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default. */
     val effort: String? = null,
     val harness: Harness,
+    val runtimeName: String? = null,
     val tailscale: Boolean? = null,
     val usb: Boolean? = null,
     val display: Boolean? = null,

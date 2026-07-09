@@ -86,9 +86,6 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 	ctx, task := trace.NewTask(ctx, "task.start:"+t.ID.String())
 	defer task.End()
 
-	if r.runtime() == nil {
-		return nil, errors.New("workspace has no instance backend configured")
-	}
 	if r.Workspace.Dir != "" {
 		t.SetState(StateBranching)
 	}
@@ -103,7 +100,7 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 		t.recordStartupFailure(ctx, err)
 		return nil, err
 	}
-	t.SetRuntimeConnectionInfo(sr.InstanceID, sr.AgentTarget, sr.TailscaleFQDN, sr.TailscaleAuthURL, r.runtime().VNCPort(ctx, sr.InstanceID))
+	t.SetRuntimeConnectionInfo(sr.InstanceID, sr.AgentTarget, sr.TailscaleFQDN, sr.TailscaleAuthURL, r.Workspace.Runtimes.VNCPort(ctx, sr.InstanceID))
 	var primaryBranch string
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
@@ -214,7 +211,7 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 	// authorize deletion: unsynced work lives only in the container's branch, and
 	// the host branch's own commit count says nothing about it.
 	branchConfirmedEmpty := false
-	if reason == StatePurged && !t.DiffCreated() && name != "" && r.runtime() != nil && r.Workspace.Dir != "" {
+	if reason == StatePurged && !t.DiffCreated() && name != "" && r.Workspace.Dir != "" {
 		ds, err := r.branchDiffStat(ctx, t)
 		switch {
 		case err != nil:
@@ -229,11 +226,11 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 	t.SetState(reason)
 
 	runtimeRemovedOrAbsent := name == ""
-	if name != "" && r.runtime() != nil {
+	if name != "" {
 		tlog.InfoContext(ctx, "cleanup: purging instance")
 		pStart := time.Now()
 		purgeCtx, purgeCancel := context.WithTimeout(context.WithoutCancel(ctx), r.Workspace.GitTimeout)
-		err := r.runtime().Purge(purgeCtx, name)
+		err := r.Workspace.Runtimes.Purge(purgeCtx, name)
 		purgeCancel()
 		if err != nil {
 			tlog.WarnContext(ctx, "purge instance failed", "err", err, "dur", time.Since(pStart).Round(time.Millisecond))
@@ -242,7 +239,7 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 			tlog.DebugContext(ctx, "cleanup: instance purged", "dur", time.Since(pStart).Round(time.Millisecond))
 		}
 	} else {
-		tlog.DebugContext(ctx, "cleanup: no instance to purge", "name", name, "has_backend", r.runtime() != nil)
+		tlog.DebugContext(ctx, "cleanup: no instance to purge", "name", name)
 	}
 
 	// Drain the session: if graceful stop timed out, the instance purge
@@ -344,15 +341,15 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 	}
 
 	tlog.InfoContext(ctx, "stop: stopping instance")
-	if name != "" && r.runtime() != nil {
+	if name != "" {
 		cStart := time.Now()
-		if err := r.runtime().Stop(ctx, name); err != nil {
+		if err := r.Workspace.Runtimes.Stop(ctx, name); err != nil {
 			tlog.WarnContext(ctx, "stop: instance Stop failed", "err", err, "dur", time.Since(cStart).Round(time.Millisecond))
 		} else {
 			tlog.DebugContext(ctx, "stop: instance Stop succeeded", "dur", time.Since(cStart).Round(time.Millisecond))
 		}
 	} else {
-		tlog.DebugContext(ctx, "stop: no instance to stop", "name", name, "has_backend", r.runtime() != nil)
+		tlog.DebugContext(ctx, "stop: no instance to stop", "name", name)
 	}
 
 	// Drain session after instance is stopped, then wait for the dispatch
@@ -412,9 +409,6 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 	ctx, task := trace.NewTask(ctx, "task.revive:"+t.ID.String())
 	defer task.End()
 
-	if r.runtime() == nil {
-		return nil, errors.New("workspace has no instance backend configured")
-	}
 	instanceID := t.RuntimeInstanceID()
 	if instanceID == "" {
 		return nil, errors.New("no instance to revive")
@@ -431,13 +425,13 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 	}
 	tlog.Info("reviving instance")
 	tlog.Debug("workspace", "msg", "calling instance.Revive")
-	if err := r.runtime().Revive(ctx, instanceID); err != nil {
+	if err := r.Workspace.Runtimes.Revive(ctx, instanceID); err != nil {
 		tlog.Error("workspace", "msg", "Revive failed", "err", err)
 		t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
 		return nil, fmt.Errorf("revive instance: %w", err)
 	}
 	tlog.Debug("workspace", "msg", "Revive succeeded", "instance", instanceID)
-	t.SetVNCPort(r.runtime().VNCPort(ctx, instanceID))
+	t.SetVNCPort(r.Workspace.Runtimes.VNCPort(ctx, instanceID))
 
 	// 2. Start a new relay with --resume to continue the previous session.
 	// skipSideEffects=true: --resume replays all historical messages and
@@ -501,9 +495,6 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *run
 	ctx, task := trace.NewTask(ctx, "task.fork:"+source.ID.String()+"->"+fork.ID.String())
 	defer task.End()
 
-	if r.runtime() == nil {
-		return nil, errors.New("workspace has no instance backend configured")
-	}
 	sourceInstanceID := source.RuntimeInstanceID()
 	if sourceInstanceID == "" {
 		return nil, errors.New("source task has no instance")
@@ -520,14 +511,14 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *run
 	tlog.Info("forking instance")
 	tlog.Debug("workspace", "msg", "calling instance.Fork", "source", sourceInstanceID, "harness", forkOpts.Harness, "tailscale", forkOpts.Tailscale, "usb", forkOpts.USB, "display", forkOpts.Display, "sudo", forkOpts.Sudo, "gitHubToken", fork.GitHubTokenEnabled())
 	forkOpts.LogWriter = &provisioningWriter{ctx: ctx, t: fork}
-	forkName, forkConn, forkRepos, err := r.runtime().Fork(ctx, sourceInstanceID, source.RuntimeRepos(), forkOpts)
+	forkName, forkConn, forkRepos, err := r.Workspace.Runtimes.Fork(ctx, sourceInstanceID, source.RuntimeRepos(), forkOpts)
 	if err != nil {
 		tlog.Error("workspace", "msg", "instance.Fork failed", "source", sourceInstanceID, "err", err)
 		fork.SetState(StateFailed)
 		return nil, fmt.Errorf("fork instance: %w", err)
 	}
 	tlog.Debug("workspace", "msg", "instance.Fork succeeded", "source", sourceInstanceID, "fork", forkName)
-	fork.SetRuntimeConnectionInfo(forkName, forkConn.AgentTarget, "", "", r.runtime().VNCPort(ctx, forkName))
+	fork.SetRuntimeConnectionInfo(forkName, forkConn.AgentTarget, "", "", r.Workspace.Runtimes.VNCPort(ctx, forkName))
 	for i := range fork.ReposSnapshot() {
 		if i < len(forkRepos) {
 			fork.SetRepoBranch(i, forkRepos[i].Branch)
@@ -537,7 +528,11 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *run
 
 	// 2. Clean relay state from the source instance's snapshot so the
 	// forked task starts with an empty output.jsonl.
-	if err := agent.CleanRelayState(ctx, string(forkName)); err != nil {
+	forkSSHHost := forkConn.AgentTarget.SSHHost
+	if forkSSHHost == "" {
+		forkSSHHost = string(forkName)
+	}
+	if err := agent.CleanRelayState(ctx, forkSSHHost); err != nil {
 		tlog.Warn("clean relay state failed (non-fatal)", "err", err)
 	}
 
@@ -554,7 +549,7 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *run
 }
 
 func (r *Runner) branchDiffStat(ctx context.Context, t *Task) (agent.DiffStat, error) {
-	if r.runtime() == nil || r.Workspace.Dir == "" {
+	if r.Workspace.Dir == "" {
 		return nil, nil
 	}
 	id := t.RuntimeInstanceID()
@@ -588,7 +583,12 @@ func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, 
 	startCtx, startCancel := context.WithTimeout(detached, r.RuntimeStartTimeout)
 	defer startCancel()
 
+	runtimeName := t.RuntimeName
+	if runtimeName == "" {
+		runtimeName = r.Workspace.Runtimes.Runtimes[0].Name()
+	}
 	opts := &runtime.StartOptions{
+		RuntimeName:       runtimeName,
 		Metadata:          metadata,
 		BaseImage:         t.BaseImage,
 		ContainerPlatform: t.ContainerPlatform,
@@ -610,13 +610,13 @@ func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, 
 	if r.Workspace.Dir != "" {
 		repos = t.RuntimeRepos()
 	}
-	var instanceID runtime.InstanceID
+	var instanceID runtime.ID
 	r.Workspace.Log.Debug("workspace", "msg", "provisioning phase A: launching instance and creating branch", "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "sudo", opts.Sudo, "repos_count", len(repos))
 	eg, egCtx := errgroup.WithContext(startCtx)
 	eg.Go(func() error {
 		defer trace.StartRegion(egCtx, "instance-launch").End()
 		r.Workspace.Log.Debug("workspace", "msg", "calling instance.Launch", "branch", primaryBranch)
-		id, err := r.runtime().Launch(egCtx, repos, opts)
+		id, err := r.Workspace.Runtimes.Launch(egCtx, repos, opts)
 		if err != nil {
 			r.Workspace.Log.Error("workspace", "msg", "instance.Launch failed", "branch", primaryBranch, "err", err)
 			return err
@@ -646,7 +646,7 @@ func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, 
 
 	// Phase B: wait for runtime connection + push (branch now exists locally).
 	r.Workspace.Log.Debug("workspace", "msg", "provisioning phase B: connecting to instance", "instance", instanceID)
-	conn, err := r.runtime().Connect(startCtx, instanceID, opts)
+	conn, err := r.Workspace.Runtimes.Connect(startCtx, instanceID, opts)
 	if err != nil {
 		r.Workspace.Log.Error("workspace", "msg", "instance.Connect failed", "instance", instanceID, "err", err)
 		return setupResult{}, fmt.Errorf("start instance: %w", err)
@@ -675,17 +675,10 @@ func (r *Runner) logRelayDiag(ctx context.Context, tlog *slog.Logger, target run
 	tlog.Warn("relay.log tail on shutdown timeout", "log", tail)
 }
 
-// runtime returns the runtime backend shared with the workspace. Workspace.
-// Runtime is the single source of truth so Runner never risks holding a
-// stale copy that drifts from the workspace's.
-func (r *Runner) runtime() runtime.Backend {
-	return r.Workspace.Runtime
-}
-
 // setupResult holds the outputs of setup: the instance name and optional Tailscale FQDN.
 // The primary branch is written into the task repo metadata during setup.
 type setupResult struct {
-	InstanceID       runtime.InstanceID
+	InstanceID       runtime.ID
 	AgentTarget      runtime.ConnectionTarget
 	TailscaleFQDN    string
 	TailscaleAuthURL string

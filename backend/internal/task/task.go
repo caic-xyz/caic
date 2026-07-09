@@ -80,6 +80,7 @@ const (
 	StatePurged             // Runtime deleted, task is final.
 )
 
+// String returns the API and log representation of the task state.
 func (s State) String() string {
 	switch s {
 	case StatePending:
@@ -212,6 +213,7 @@ type Task struct {
 	Harness           harness.Name         // Agent harness ("claude", "codex", etc.).
 	Model             string               // User-requested model; passed to agent CLI.
 	Effort            string               // Thinking effort; passed to agent CLI. Empty = default.
+	RuntimeName       runtime.Name         // Runtime backend used for this task.
 	BaseImage         string               // Custom runtime base image; empty means use the default.
 	ContainerPlatform string               // Container CPU architecture; empty means use the host default.
 	MaxCPUs           int                  // Max CPU cores for the instance; 0 means use the default.
@@ -239,7 +241,7 @@ type Task struct {
 
 	// mu protects mutable task metadata above and all fields below.
 	mu                    sync.Mutex
-	runtimeInstanceID     runtime.InstanceID
+	runtimeInstanceID     runtime.ID
 	runtimeConnection     runtime.ConnectionTarget
 	logPath               string // Absolute JSONL log path used for appending task metadata.
 	statsRing             [statsRingSize]runtime.Stats
@@ -606,7 +608,7 @@ func (t *Task) SetRepoBranch(i int, branch string) {
 }
 
 // RuntimeInstanceID returns the current runtime instance ID.
-func (t *Task) RuntimeInstanceID() runtime.InstanceID {
+func (t *Task) RuntimeInstanceID() runtime.ID {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.runtimeInstanceID
@@ -620,7 +622,7 @@ func (t *Task) RuntimeConnectionTarget() runtime.ConnectionTarget {
 }
 
 // SetRuntimeConnectionInfo records runtime instance metadata and agent connection details.
-func (t *Task) SetRuntimeConnectionInfo(id runtime.InstanceID, target runtime.ConnectionTarget, tailscaleFQDN, tailscaleAuthURL string, vncPort int) {
+func (t *Task) SetRuntimeConnectionInfo(id runtime.ID, target runtime.ConnectionTarget, tailscaleFQDN, tailscaleAuthURL string, vncPort int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.runtimeInstanceID = id
@@ -697,7 +699,7 @@ func (t *Task) CommitEventReplay() error {
 }
 
 // SudoLookupState returns the sudo lookup inputs and cached password.
-func (t *Task) SudoLookupState() (enabled bool, id runtime.InstanceID, password string) {
+func (t *Task) SudoLookupState() (enabled bool, id runtime.ID, password string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.Sudo, t.runtimeInstanceID, t.SudoPassword
@@ -986,7 +988,8 @@ type Snapshot struct {
 	StateUpdatedAt     time.Time
 	TurnStartedAt      time.Time // non-zero only while state is Running
 	Repos              []RepoMount
-	RuntimeInstanceID  runtime.InstanceID
+	RuntimeName        runtime.Name
+	RuntimeInstanceID  runtime.ID
 	Tailscale          bool
 	TailscaleFQDN      string
 	TailscaleAuthURL   string
@@ -1035,6 +1038,7 @@ func (t *Task) Snapshot() Snapshot {
 		StateUpdatedAt:     t.stateUpdatedAt,
 		TurnStartedAt:      t.turnStartedAt,
 		Repos:              append([]RepoMount(nil), t.Repos...),
+		RuntimeName:        t.RuntimeName,
 		RuntimeInstanceID:  t.runtimeInstanceID,
 		Tailscale:          t.Tailscale,
 		TailscaleFQDN:      t.TailscaleFQDN,

@@ -76,13 +76,8 @@ type Config struct {
 	ServerCtx context.Context
 	LogDir    string
 	CacheDir  string
-	// Backend is the per-task instance lifecycle seam (launch/stop/purge/fork).
-	// Production passes *mdruntime.Backend (md over Docker/Podman); a future VM backend or a
-	// test fake can be substituted via this interface.
-	Backend             runtime.Backend
-	Monitor             runtime.Monitor
-	Inventory           runtime.Inventory
-	Privilege           runtime.PrivilegeInfo
+	// Runtimes validates runtime selection and dispatches task runtime operations.
+	Runtimes            *runtime.Router
 	Backends            map[harness.Name]agent.Backend
 	EventReplayFactory  func(logPath string, h harness.Name) (task.EventReplayWriter, error)
 	HarnessEnv          map[string][]string
@@ -99,10 +94,7 @@ type Manager struct {
 	serverCtx           context.Context // lifetime of the Manager; for goroutines that outlive requests
 	logDir              string
 	cacheDir            string
-	backend             runtime.Backend
-	monitor             runtime.Monitor
-	inventory           runtime.Inventory
-	privilege           runtime.PrivilegeInfo
+	Runtimes            *runtime.Router
 	backends            map[harness.Name]agent.Backend
 	eventReplayFactory  func(logPath string, h harness.Name) (task.EventReplayWriter, error)
 	harnessEnv          map[string][]string
@@ -123,16 +115,13 @@ type Manager struct {
 func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passed once at construction
 	workspaceRegistry := cfg.WorkspaceRegistry
 	if workspaceRegistry == nil {
-		workspaceRegistry = repowork.NewRegistry(cfg.ServerCtx, cfg.Backend)
+		workspaceRegistry = repowork.NewRegistry(cfg.ServerCtx, cfg.Runtimes)
 	}
 	m := &Manager{
 		serverCtx:           cfg.ServerCtx,
 		logDir:              cfg.LogDir,
 		cacheDir:            cfg.CacheDir,
-		backend:             cfg.Backend,
-		monitor:             cfg.Monitor,
-		inventory:           cfg.Inventory,
-		privilege:           cfg.Privilege,
+		Runtimes:            cfg.Runtimes,
 		backends:            cfg.Backends,
 		eventReplayFactory:  cfg.EventReplayFactory,
 		harnessEnv:          cfg.HarnessEnv,
@@ -147,7 +136,7 @@ func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passe
 	if _, ok := workspaceRegistry.Workspace(""); !ok {
 		workspaceRegistry.RegisterWorkspace("", &repowork.Workspace{
 			GitTimeout: time.Minute,
-			Runtime:    cfg.Backend,
+			Runtimes:   cfg.Runtimes,
 			Log:        slog.With("repo", "(none)"),
 		})
 	}
@@ -273,6 +262,11 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 		extraWorkspaces = append(extraWorkspaces, er)
 	}
 
+	runtimeName, err := resolveRuntimeName(m.Runtimes, p.RuntimeName)
+	if err != nil {
+		return "", err
+	}
+
 	backend, ok := m.backends[p.Harness]
 	if !ok {
 		return "", badRequestf("unknown harness: %s", string(p.Harness))
@@ -302,6 +296,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 		Harness:           p.Harness,
 		Model:             p.Model,
 		Effort:            p.Effort,
+		RuntimeName:       runtimeName,
 		BaseImage:         p.BaseImage,
 		ContainerPlatform: p.ContainerPlatform,
 		MaxCPUs:           p.MaxCPUs,
@@ -600,6 +595,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 		Harness:           forkHarness,
 		Model:             forkModel,
 		Effort:            forkEffort,
+		RuntimeName:       source.RuntimeName,
 		BaseImage:         source.BaseImage,
 		ContainerPlatform: source.ContainerPlatform,
 		MaxCPUs:           source.MaxCPUs,
@@ -631,16 +627,17 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 		}
 
 		forkOpts := &runtime.ForkOptions{
-			ExtraRepos: extraRepos,
-			Display:    p.Display,
-			Tailscale:  p.Tailscale,
-			USB:        p.USB,
-			Sudo:       p.Sudo,
-			Metadata:   task.MakeMetadata(t),
-			Harness:    forkHarness,
-			ExtraEnv:   extraEnv,
-			Mounts:     slices.Clone(source.Mounts),
-			MaxCPUs:    source.MaxCPUs,
+			RuntimeName: source.RuntimeName,
+			ExtraRepos:  extraRepos,
+			Display:     p.Display,
+			Tailscale:   p.Tailscale,
+			USB:         p.USB,
+			Sudo:        p.Sudo,
+			Metadata:    task.MakeMetadata(t),
+			Harness:     forkHarness,
+			ExtraEnv:    extraEnv,
+			Mounts:      slices.Clone(source.Mounts),
+			MaxCPUs:     source.MaxCPUs,
 		}
 		h, err := m.runner(workspace).ForkTask(ctx, source, t, forkOpts, ghToken)
 		if err != nil {
@@ -694,21 +691,13 @@ func (m *Manager) SudoPassword(ctx context.Context, t *task.Task) string {
 	if cached != "" {
 		return cached
 	}
-	pw, err := m.privilege.SudoPassword(ctx, instanceID)
+	pw, err := m.Runtimes.SudoPassword(ctx, instanceID)
 	if err != nil {
 		slog.WarnContext(ctx, "sudo password lookup failed", "instance", instanceID, "err", err)
 		return ""
 	}
 	t.SetSudoPassword(pw)
 	return pw
-}
-
-// InspectRuntime returns observed runtime configuration for an instance.
-func (m *Manager) InspectRuntime(ctx context.Context, id runtime.InstanceID) (*runtime.InstanceInspect, error) {
-	if m.inventory == nil {
-		return nil, errors.New("runtime inventory is not configured")
-	}
-	return m.inventory.Inspect(ctx, id)
 }
 
 // SetTaskMonitorBranch sets the CI monitor branch on a task entry.
@@ -739,7 +728,7 @@ func (m *Manager) AdoptInstances(ctx context.Context, adoptRepos []AdoptRepo, in
 	var mu sync.Mutex
 	var errs []error
 	var adopted []AdoptedTask
-	claimed := make(map[runtime.InstanceID]bool, len(instances))
+	claimed := make(map[runtime.ID]bool, len(instances))
 
 	for i := range adoptRepos {
 		ri := &adoptRepos[i]
@@ -778,7 +767,7 @@ func (m *Manager) AdoptInstances(ctx context.Context, adoptRepos []AdoptRepo, in
 	if noRepoWorkspace, ok := m.Workspace(""); ok {
 		for i := range instances {
 			c := &instances[i]
-			if claimed[c.ID] || !strings.HasPrefix(string(c.ID), "md-agent-") {
+			if claimed[c.ID] || !strings.HasPrefix(string(c.ID.InstanceID()), "md-agent-") {
 				continue
 			}
 			wg.Go(func() {
@@ -1030,9 +1019,16 @@ func (m *Manager) LoadPurgedTasks(all []*task.LoadedTask) error {
 			}
 		}
 		m.setParserLocked(lt)
+		rt := m.defaultRuntimeName()
+		if lt.RuntimeName != "" {
+			rt = lt.RuntimeName
+		} else {
+			lt.RuntimeName = rt
+		}
 		t := &task.Task{
 			ID:                taskID,
 			InitialPrompt:     agent.Prompt{Text: lt.Prompt},
+			RuntimeName:       rt,
 			Model:             lt.Model,
 			Effort:            lt.Effort,
 			Repos:             lt.Repos,
@@ -1226,7 +1222,7 @@ func (m *Manager) watchStats(ctx context.Context) {
 			}
 		}()
 
-		stats, err := m.monitor.WatchStats(streamCtx, ids)
+		stats, err := m.Runtimes.WatchStats(streamCtx, ids)
 		if err != nil {
 			cancel()
 			<-changedDone
@@ -1256,10 +1252,10 @@ func (m *Manager) watchStats(ctx context.Context) {
 	}
 }
 
-func (m *Manager) activeStatsIDs() (ids []runtime.InstanceID, changed <-chan struct{}) {
+func (m *Manager) activeStatsIDs() (ids []runtime.ID, changed <-chan struct{}) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	ids = make([]runtime.InstanceID, 0, len(m.tasks))
+	ids = make([]runtime.ID, 0, len(m.tasks))
 	for _, e := range m.tasks {
 		name := e.task.RuntimeInstanceID()
 		if name == "" || !statsStateActive(e.task.GetState()) {
@@ -1268,6 +1264,20 @@ func (m *Manager) activeStatsIDs() (ids []runtime.InstanceID, changed <-chan str
 		ids = append(ids, name)
 	}
 	return ids, m.changed
+}
+
+func (m *Manager) defaultRuntimeName() runtime.Name {
+	return m.Runtimes.Runtimes[0].Name()
+}
+
+func resolveRuntimeName(router *runtime.Router, id runtime.Name) (runtime.Name, error) {
+	if id == "" {
+		return router.Runtimes[0].Name(), nil
+	}
+	if _, ok := router.ByName[id]; !ok {
+		return "", badRequestf("unknown runtime: %s", id)
+	}
+	return id, nil
 }
 
 func waitStatsChange(ctx context.Context, changed <-chan struct{}) bool {
@@ -1325,7 +1335,7 @@ func statsStateActive(st task.State) bool {
 func (m *Manager) watchRuntimeEvents(ctx context.Context) {
 	go func() {
 		for {
-			ch, err := m.monitor.WatchEvents(ctx, runtime.EventFilter{MetadataKey: runtime.MetadataLegacyTaskID})
+			ch, err := m.Runtimes.WatchEvents(ctx, runtime.EventFilter{MetadataKey: runtime.MetadataLegacyTaskID})
 			if err != nil {
 				if ctx.Err() != nil {
 					return
@@ -1355,7 +1365,7 @@ func (m *Manager) watchRuntimeEvents(ctx context.Context) {
 }
 
 // handleRuntimeInstanceExit looks up a task by runtime instance name and archives it.
-func (m *Manager) handleRuntimeInstanceExit(instanceID runtime.InstanceID) {
+func (m *Manager) handleRuntimeInstanceExit(instanceID runtime.ID) {
 	m.mu.Lock()
 	var found *Entry
 	for _, e := range m.tasks {
@@ -1449,9 +1459,9 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 
 	// Only adopt runtime instances that caic started. MetadataTaskID is set at
 	// creation and is the authoritative proof of ownership.
-	taskIDVal, err := m.inventory.Metadata(ctx, c.ID, runtime.MetadataTaskID)
+	taskIDVal, err := m.Runtimes.Metadata(ctx, c.ID, runtime.MetadataTaskID)
 	if taskIDVal == "" && err == nil {
-		taskIDVal, err = m.inventory.Metadata(ctx, c.ID, runtime.MetadataLegacyTaskID)
+		taskIDVal, err = m.Runtimes.Metadata(ctx, c.ID, runtime.MetadataLegacyTaskID)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("metadata check for %s: %w", c.ID, err)
@@ -1492,9 +1502,9 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 	var stateUpdatedAt time.Time
 
 	// Read harness from runtime metadata (authoritative), fall back to log.
-	harnessLabel, _ := m.inventory.Metadata(ctx, c.ID, runtime.MetadataHarness)
+	harnessLabel, _ := m.Runtimes.Metadata(ctx, c.ID, runtime.MetadataHarness)
 	if harnessLabel == "" {
-		harnessLabel, _ = m.inventory.Metadata(ctx, c.ID, runtime.MetadataLegacyHarness)
+		harnessLabel, _ = m.Runtimes.Metadata(ctx, c.ID, runtime.MetadataLegacyHarness)
 	}
 	harnessName := harness.Name(harnessLabel)
 	if harnessName == "" && lt != nil {
@@ -1591,6 +1601,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 	}
 
 	var forgeIssue int
+	rt := m.defaultRuntimeName()
 	var baseImage string
 	var containerPlatform string
 	var maxCPUs int
@@ -1598,11 +1609,19 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 	var mounts []runtime.Mount
 	if lt != nil {
 		forgeIssue = lt.ForgeIssue
+		if lt.RuntimeName != "" {
+			rt = lt.RuntimeName
+		} else {
+			lt.RuntimeName = rt
+		}
 		baseImage = lt.BaseImage
 		containerPlatform = lt.ContainerPlatform
 		maxCPUs = lt.MaxCPUs
 		cacheMounts = slices.Clone(lt.CacheMounts)
 		mounts = slices.Clone(lt.Mounts)
+	}
+	if c.ID.RuntimeName() != "" {
+		rt = c.ID.RuntimeName()
 	}
 
 	t := &task.Task{
@@ -1612,6 +1631,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 		Harness:           harnessName,
 		Model:             model,
 		Effort:            effort,
+		RuntimeName:       rt,
 		BaseImage:         baseImage,
 		ContainerPlatform: containerPlatform,
 		MaxCPUs:           maxCPUs,
@@ -1629,13 +1649,13 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 	}
 	t.SetRuntimeConnectionInfo(c.ID, c.AgentTarget, c.TailscaleFQDN, "", c.VNCPort)
 	// Restore GitHub token flag from log trailer (primary) or runtime metadata (fallback).
-	gtLabel, _ := m.inventory.Metadata(ctx, c.ID, runtime.MetadataGitHubToken)
+	gtLabel, _ := m.Runtimes.Metadata(ctx, c.ID, runtime.MetadataGitHubToken)
 	if (lt != nil && lt.GitHubToken) || gtLabel == "true" {
 		t.SetGitHubTokenEnabled(true)
 	}
 	t.SetStateAt(task.StateRunning, stateUpdatedAt)
 	if c.Sudo {
-		if pw, err := m.privilege.SudoPassword(ctx, c.ID); err == nil {
+		if pw, err := m.Runtimes.SudoPassword(ctx, c.ID); err == nil {
 			t.SetSudoPassword(pw)
 		}
 	}
@@ -1728,10 +1748,8 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 		trace.Logf(ctx, "adopt", "%s: relay-dead", c.ID)
 		if t.LastExitError() != "" {
 			t.RecordSessionCrash(ctx, errors.New("relay exited before adoption"))
-			if m.backend != nil {
-				if err := m.backend.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // adoption must outlive request
-					slog.ErrorContext(ctx, "stop failed after adopted relay crash", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", err)
-				}
+			if err := m.Runtimes.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // adoption must outlive request
+				slog.ErrorContext(ctx, "stop failed after adopted relay crash", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", err)
 			}
 		} else if t.GetState() == task.StateRunning {
 			t.SetStateAt(task.StateWaiting, stateUpdatedAt)
@@ -1809,9 +1827,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 				return
 			}
 			tlog.Debug("auto-reconnect succeeded")
-			if m.backend != nil {
-				t.SetVNCPort(m.backend.VNCPort(m.serverCtx, t.RuntimeInstanceID()))
-			}
+			t.SetVNCPort(m.Runtimes.VNCPort(m.serverCtx, t.RuntimeInstanceID()))
 			refreshAdoptedDiffStat(m.serverCtx, workspace, t)
 			m.NotifyTaskChange()
 			m.watchSession(entry, workspace, h)
@@ -1821,10 +1837,8 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 			"repo", ri.RelPath, "br", branch, "instance", c.ID,
 			"state", t.GetState())
 		t.SetState(task.StateStopping)
-		if m.backend != nil {
-			if err := m.backend.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // adoption must outlive request
-				slog.ErrorContext(ctx, "stop failed", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", err)
-			}
+		if err := m.Runtimes.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // adoption must outlive request
+			slog.ErrorContext(ctx, "stop failed", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", err)
 		}
 		t.SetState(task.StateStopped)
 	}
@@ -1999,14 +2013,11 @@ func (m *Manager) watchSession(entry *Entry, workspace *repowork.Workspace, h *t
 }
 
 func (m *Manager) stopFailedSessionInstance(_ *repowork.Workspace, t *task.Task, attrs []any) {
-	if m.backend == nil {
-		return
-	}
 	id := t.RuntimeInstanceID()
 	if id == "" {
 		return
 	}
-	if err := m.backend.Stop(m.serverCtx, id); err != nil {
+	if err := m.Runtimes.Stop(m.serverCtx, id); err != nil {
 		slog.ErrorContext(m.serverCtx, "stop failed after session error", append(attrs, "err", err)...)
 	}
 }

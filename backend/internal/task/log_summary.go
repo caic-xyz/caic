@@ -38,6 +38,7 @@ type loadedTaskSummary struct {
 	Title             string              `json:"title,omitempty"`
 	Repos             []repoMountSummary  `json:"repos,omitempty"`
 	Harness           harness.Name        `json:"harness,omitempty"`
+	RuntimeName       runtime.Name        `json:"runtimeName,omitempty"`
 	StartedAt         time.Time           `json:"startedAt,omitzero"`
 	LastStateUpdateAt time.Time           `json:"lastStateUpdateAt,omitzero"`
 	State             string              `json:"state,omitempty"`
@@ -161,6 +162,7 @@ func loadedTaskSummaryFrom(lt *LoadedTask) loadedTaskSummary {
 		Title:             lt.Title,
 		Repos:             repoMountSummaries(lt.Repos),
 		Harness:           lt.Harness,
+		RuntimeName:       lt.RuntimeName,
 		StartedAt:         lt.StartedAt,
 		LastStateUpdateAt: lt.LastStateUpdateAt,
 		State:             lt.State.String(),
@@ -195,6 +197,7 @@ func (s *loadedTaskSummary) toLoadedTask(path string, size int64) *LoadedTask {
 		Title:             s.Title,
 		Repos:             repoMountsFromSummaries(s.Repos),
 		Harness:           s.Harness,
+		RuntimeName:       s.RuntimeName,
 		StartedAt:         s.StartedAt,
 		LastStateUpdateAt: s.LastStateUpdateAt,
 		State:             parseState(s.State),

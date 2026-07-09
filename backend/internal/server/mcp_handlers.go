@@ -136,12 +136,11 @@ var mcpScopeLabels = map[string]string{
 	mcpScopeReposWrite: "Manage repositories",
 }
 
-// mcpPrincipal types are MCP protocol concepts shared by the endpoint (which
-// adapts OAuth bearer claims) and mcpRegistry (which checks scopes on
-// tool/resource access).
-
 type mcpPrincipalContextKey struct{}
 
+// mcpPrincipal stores MCP protocol identity shared by the endpoint (which
+// adapts OAuth bearer claims) and mcpRegistry (which checks scopes on
+// tool/resource access).
 type mcpPrincipal struct {
 	Subject  string
 	Username string

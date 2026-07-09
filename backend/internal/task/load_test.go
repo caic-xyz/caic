@@ -782,7 +782,7 @@ func TestLoadLogs(t *testing.T) {
 func TestCompressTerminalLogs(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "task", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude"})
+	meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "task", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude", RuntimeName: "docker"})
 	asst := claudeAssistant(t, map[string]any{"type": "text", "text": "hello"})
 	trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 	writeLogFile(t, dir, "t.jsonl", meta, asst, trailer)
@@ -806,6 +806,16 @@ func TestCompressTerminalLogs(t *testing.T) {
 	}
 	if !isLogCompressed(tasks[0].LogPath()) {
 		t.Fatalf("LogPath = %q, want compressed path", tasks[0].LogPath())
+	}
+	reloaded, err := LoadLogs(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reloaded) != 1 {
+		t.Fatalf("reloaded len = %d, want 1", len(reloaded))
+	}
+	if reloaded[0].RuntimeName != "docker" {
+		t.Fatalf("reloaded RuntimeName = %q, want docker", reloaded[0].RuntimeName)
 	}
 	setClaudeParser(tasks)
 	if err := tasks[0].LoadMessages(); err != nil {

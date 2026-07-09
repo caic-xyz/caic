@@ -25,6 +25,10 @@ import (
 // its own repository, so callers log it below warning level.
 var errBranchCheckedOut = errors.New("branch is currently checked out")
 
+func runtimeRemoteRef(id runtime.ID, branch string) string {
+	return "refs/remotes/" + string(id.InstanceID()) + "/" + branch
+}
+
 // ParseDiffNumstat parses git diff --numstat output into a DiffStat.
 // Each line has the format: <added>\t<deleted>\t<path>.
 // Binary files use "-\t-\t<path>".
@@ -59,7 +63,7 @@ func ParseDiffNumstat(numstat string) agent.DiffStat {
 // TaskView is the read/write surface Workspace needs from a task.
 // *task.Task satisfies it structurally.
 type TaskView interface {
-	RuntimeInstanceID() runtime.InstanceID
+	RuntimeInstanceID() runtime.ID
 	RuntimeRepos() []runtime.Repo
 	SetRepoBranch(i int, branch string)
 	PrimaryBaseBranch() string // "" when no primary/override
@@ -73,7 +77,7 @@ type Workspace struct {
 	Dir        string          // Absolute path to the git repository.
 	RepoName   string          // Relative repo path (e.g. "github/caic"); empty for no-repo workspaces.
 	GitTimeout time.Duration   // Timeout for git/instance ops. Must be non-zero.
-	Runtime    runtime.Backend // Runtime provides runtime instance and repo diff/sync operations.
+	Runtimes   *runtime.Router // Runtime provides runtime instance and repo diff/sync operations.
 	Log        *slog.Logger
 
 	branchMu sync.Mutex // Serializes branch creation (nextID + git branch) to avoid duplicate names.
@@ -132,7 +136,7 @@ func (w *Workspace) SyncToOrigin(ctx context.Context, t TaskView, force bool) (a
 	var allIssues []SafetyIssue
 	for _, repo := range repos {
 		branch := repo.Branch
-		ref := "refs/remotes/" + string(id) + "/" + branch
+		ref := runtimeRemoteRef(id, branch)
 		repoDS := extractRepoDS(ds, diffRepoPrefix(&repo), multi)
 		safetyCtx, safetyCancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
 		issues, err := CheckSafety(safetyCtx, repo.HostPath, ref, w.BaseBranch, repoDS)
@@ -149,7 +153,7 @@ func (w *Workspace) SyncToOrigin(ctx context.Context, t TaskView, force bool) (a
 	// Phase 2: push each repo.
 	for _, repo := range repos {
 		branch := repo.Branch
-		ref := "refs/remotes/" + string(id) + "/" + branch
+		ref := runtimeRemoteRef(id, branch)
 		pushCtx, pushCancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
 		checkout := &git.Checkout{Root: repo.HostPath, Logger: w.Log}
 		if err := checkout.PushRef(pushCtx, ref, branch, true); err != nil {
@@ -185,7 +189,7 @@ func (w *Workspace) SyncToDefault(ctx context.Context, t TaskView, message strin
 	var allIssues []SafetyIssue
 	for _, repo := range repos {
 		branch := repo.Branch
-		ref := "refs/remotes/" + string(id) + "/" + branch
+		ref := runtimeRemoteRef(id, branch)
 		repoDS := extractRepoDS(ds, diffRepoPrefix(&repo), multi)
 		safetyCtx, safetyCancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
 		issues, err := CheckSafety(safetyCtx, repo.HostPath, ref, w.BaseBranch, repoDS)
@@ -202,7 +206,7 @@ func (w *Workspace) SyncToDefault(ctx context.Context, t TaskView, message strin
 	// Phase 2: squash each repo onto its default branch.
 	for _, repo := range repos {
 		branch := repo.Branch
-		ref := "refs/remotes/" + string(id) + "/" + branch
+		ref := runtimeRemoteRef(id, branch)
 		squashCtx, squashCancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
 		checkout := &git.Checkout{Root: repo.HostPath, Logger: w.Log}
 		if err := checkout.SquashOnto(squashCtx, ref, w.BaseBranch, message); err != nil {
@@ -234,7 +238,7 @@ func (w *Workspace) DiffContent(ctx context.Context, t TaskView, path string) (s
 	for i := range repos {
 		repo := &repos[i]
 		args := diffContentArgs(path, repo, len(repos) > 1)
-		diff, err := w.Runtime.Diff(ctx, id, i, args...)
+		diff, err := w.Runtimes.Diff(ctx, id, i, args...)
 		if err != nil {
 			w.Log.Warn("diff failed", "repo", repo.MountPath, "br", repo.Branch, "err", err)
 			continue
@@ -252,7 +256,7 @@ func (w *Workspace) DiffContent(ctx context.Context, t TaskView, path string) (s
 // uncommitted changes, this captures the full branch diff relative to the base.
 // Used by adoptOne to restore the diff stat after server restart.
 func (w *Workspace) BranchDiffStat(ctx context.Context, t TaskView) agent.DiffStat {
-	if w.Runtime == nil || w.Dir == "" {
+	if w.Runtimes == nil || w.Dir == "" {
 		return nil
 	}
 	id, repos, err := w.taskRuntime(t)
@@ -362,7 +366,7 @@ const (
 
 // DiffStat optionally fetches from the instance, then returns the combined
 // per-repo diff stat (git diff --numstat).
-func (w *Workspace) DiffStat(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo, fetchMode DiffFetchMode, fetchLogMsg string) (agent.DiffStat, error) {
+func (w *Workspace) DiffStat(ctx context.Context, id runtime.ID, repos []runtime.Repo, fetchMode DiffFetchMode, fetchLogMsg string) (agent.DiffStat, error) {
 	if w.Dir == "" {
 		return nil, nil
 	}
@@ -374,7 +378,7 @@ func (w *Workspace) DiffStat(ctx context.Context, id runtime.InstanceID, repos [
 		if fetchLogMsg != "" {
 			w.Log.Info(fetchLogMsg, "repos", len(repos))
 		}
-		if err := w.Runtime.Fetch(ctx, id); err != nil {
+		if err := w.Runtimes.Fetch(ctx, id); err != nil {
 			if fetchMode == DiffFetchRequired {
 				return nil, err
 			}
@@ -384,7 +388,7 @@ func (w *Workspace) DiffStat(ctx context.Context, id runtime.InstanceID, repos [
 	return w.diffStatLocked(ctx, id, repos), nil
 }
 
-func (w *Workspace) taskRuntime(t TaskView) (runtime.InstanceID, []runtime.Repo, error) {
+func (w *Workspace) taskRuntime(t TaskView) (runtime.ID, []runtime.Repo, error) {
 	if t == nil {
 		return "", nil, errors.New("task is nil")
 	}
@@ -455,14 +459,14 @@ func (w *Workspace) effectiveBaseBranch(t TaskView) string {
 // diff stat. File paths are prefixed with `<repoName>/` when there are multiple
 // repos so the frontend can distinguish changes per repo. Returns nil for
 // no-repo workspaces (dir == ""). The caller must hold branchMu.
-func (w *Workspace) diffStatLocked(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo) agent.DiffStat {
+func (w *Workspace) diffStatLocked(ctx context.Context, id runtime.ID, repos []runtime.Repo) agent.DiffStat {
 	if w.Dir == "" {
 		return nil
 	}
 	var result agent.DiffStat
 	for i := range repos {
 		repo := &repos[i]
-		numstat, err := w.Runtime.Diff(ctx, id, i, "--numstat")
+		numstat, err := w.Runtimes.Diff(ctx, id, i, "--numstat")
 		if err != nil {
 			w.Log.Warn("diff numstat failed", "repo", repo.MountPath, "br", repo.Branch, "err", err)
 			continue

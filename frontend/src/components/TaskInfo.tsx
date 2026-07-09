@@ -233,7 +233,7 @@ export default function TaskInfo(props: Props) {
 
               <Section title="Runtime">
                 <div class={styles.grid}>
-                  <Field label="Runtime" value={data.observed?.runtime} />
+                  <Field label="Runtime" value={runtimeText(data.recorded.runtime.runtimeName, data.observed?.runtimeName || data.observed?.runtime)} />
                   <Field label="Instance" value={data.recorded.runtime.id} code />
                   <Field label="State" value={data.observed?.state || data.recorded.state} />
                   <Field label="Image" value={imageText(data.recorded.baseImage, data.observed?.imageRef)} code />

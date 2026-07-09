@@ -32,13 +32,28 @@ type instantExitBackend struct {
 	testBackend
 }
 
-func newTestRepoWorkspace(t *testing.T, baseBranch, dir string, backend runtime.Backend) *repowork.Workspace {
+type testRuntimeSystem struct {
+	runtime.Lifecycle
+	runtimetest.FakeInfo
+}
+
+func (*testRuntimeSystem) Name() runtime.Name { return "test-runtime" }
+
+func newTestRepoWorkspace(t *testing.T, baseBranch, dir string, backend runtime.Lifecycle) *repowork.Workspace {
+	var rt *runtime.Router
+	if backend != nil {
+		var err error
+		rt, err = runtime.NewRouter([]runtime.System{&testRuntimeSystem{Lifecycle: backend}})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	return &repowork.Workspace{
 		BaseBranch: baseBranch,
 		Dir:        dir,
 		RepoName:   filepath.Base(dir),
 		GitTimeout: time.Minute,
-		Runtime:    backend,
+		Runtimes:   rt,
 		Log:        logtest.Logger(t),
 	}
 }
@@ -465,7 +480,7 @@ func TestRunner(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "test"},
 				Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0", GitRoot: clone}},
 			}
-			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(StateStopped)
 
 			r.Cleanup(t.Context(), tk, StatePurged)
@@ -486,7 +501,7 @@ func TestRunner(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "test"},
 				Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0", GitRoot: clone}},
 			}
-			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(StateStopped)
 
 			r.Cleanup(t.Context(), tk, StatePurged)
@@ -507,7 +522,7 @@ func TestRunner(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "test"},
 				Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0", GitRoot: clone}},
 			}
-			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(StateStopped)
 			tk.RestoreMessages([]agent.Message{
 				&agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: agent.DiffStat{{Path: "main.go", Added: 1}}},
@@ -538,7 +553,7 @@ func TestRunner(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "test"},
 				Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0", GitRoot: clone}},
 			}
-			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(StateStopped)
 
 			r.Cleanup(t.Context(), tk, StatePurged)
@@ -561,7 +576,7 @@ func TestRunner(t *testing.T) {
 					ID:            ksid.NewID(),
 					InitialPrompt: agent.Prompt{Text: "test"},
 				}
-				tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 				tk.SetState(state)
 
 				r.StopTask(t.Context(), tk)
@@ -603,7 +618,7 @@ func TestRunner(t *testing.T) {
 				workspace := newTestRepoWorkspace(t, "", "", testContainer())
 				r := newTestRunner(t, workspace, nil, "")
 				tk := &Task{ID: ksid.NewID()}
-				tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 				tk.SetState(StateRunning)
 				if _, err := r.ReviveTask(t.Context(), tk); err == nil {
 					t.Fatal("want error")
@@ -620,7 +635,7 @@ func TestRunner(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "test"},
 				Harness:       "test",
 			}
-			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(StateStopped)
 
 			h, err := r.ReviveTask(t.Context(), tk)
@@ -670,7 +685,7 @@ func TestRunner(t *testing.T) {
 			backend := &instantExitBackend{}
 			r := newTestRunner(t, workspace, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			source := &Task{ID: ksid.NewID(), Harness: "test"}
-			source.SetRuntimeConnectionInfo("ctr-src", runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
+			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
 			fork := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "fork prompt"},
@@ -684,8 +699,8 @@ func TestRunner(t *testing.T) {
 			if h == nil {
 				t.Fatal("ForkTask returned nil handle")
 			}
-			if fork.RuntimeInstanceID() != "fake-fork" {
-				t.Errorf("fork instance = %q, want fake-fork", fork.RuntimeInstanceID())
+			if fork.RuntimeInstanceID() != runtime.NewID("test-runtime", "fake-fork") {
+				t.Errorf("fork instance = %q, want test-runtime:fake-fork", fork.RuntimeInstanceID())
 			}
 			if got := fork.GetState(); got != StateRunning {
 				t.Errorf("state = %v, want %v", got, StateRunning)
