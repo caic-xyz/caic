@@ -163,8 +163,8 @@ func TestSmoke(t *testing.T) {
 		}
 		t.Logf("fork task %s reached 'waiting'", forkID)
 
-		forkContainerName := runtime.InstanceID(forkTask.Runtime.ID)
-		if forkContainerName == "" {
+		forkRuntimeID := runtime.ID(forkTask.Runtime.ID)
+		if forkRuntimeID == "" {
 			t.Fatalf("fork task %s has no runtime ID before purge", forkID)
 		}
 		postJSON(t, baseURL, "/api/caic/v1/tasks/"+forkID+"/stop", nil, nil)
@@ -172,7 +172,7 @@ func TestSmoke(t *testing.T) {
 		postJSON(t, baseURL, "/api/caic/v1/tasks/"+forkID+"/purge", nil, nil)
 		waitForTaskState(forkID, "purged")
 		forkPurgeCtx, forkPurgeCancel := context.WithTimeout(t.Context(), 2*time.Minute)
-		if err := smoketest.WaitForRuntimeGone(forkPurgeCtx, smoketest.SmokeRuntime(), forkContainerName); err != nil {
+		if err := smoketest.WaitForRuntimeGone(forkPurgeCtx, smoketest.SmokeRuntime(), forkRuntimeID); err != nil {
 			forkPurgeCancel()
 			t.Fatal(err)
 		}
@@ -185,14 +185,14 @@ func TestSmoke(t *testing.T) {
 		t.Logf("task %s reached 'stopped'", taskID)
 
 		// Purge the task.
-		containerName := runtime.InstanceID(task.Runtime.ID)
-		if containerName == "" {
+		runtimeID := runtime.ID(task.Runtime.ID)
+		if runtimeID == "" {
 			t.Fatalf("task %s has no runtime ID before purge", taskID)
 		}
 		postJSON(t, baseURL, "/api/caic/v1/tasks/"+taskID+"/purge", nil, nil)
 		waitForTaskState(taskID, "purged")
 		purgeCtx, purgeCancel := context.WithTimeout(t.Context(), 2*time.Minute)
-		if err := smoketest.WaitForRuntimeGone(purgeCtx, smoketest.SmokeRuntime(), containerName); err != nil {
+		if err := smoketest.WaitForRuntimeGone(purgeCtx, smoketest.SmokeRuntime(), runtimeID); err != nil {
 			purgeCancel()
 			t.Fatal(err)
 		}

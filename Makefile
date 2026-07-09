@@ -89,6 +89,8 @@ lint-docs:
 lint-go:
 	@which golangci-lint > /dev/null || go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 	@golangci-lint run ./...
+	@# Compile-check build-tagged code (e.g. smoke tests) that golangci-lint skips.
+	@go vet -tags=smoke ./...
 
 lint-frontend: $(FRONTEND_STAMP)
 	@pnpm lint
