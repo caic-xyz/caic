@@ -517,12 +517,7 @@ func (w *piWireFormat) handleMessageEnd(line []byte) ([]agent.Message, error) {
 		return nil, fmt.Errorf("unmarshal message_end: %w", err)
 	}
 	if ev.Message.StopReason == pi.StopReasonError {
-		return []agent.Message{&agent.ResultMessage{
-			MessageType: "result",
-			Subtype:     "error",
-			IsError:     true,
-			Result:      ev.Message.ErrorMessage,
-		}}, nil
+		return errorResultMessages(ev.Message.ErrorMessage), nil
 	}
 	return messagesFromAgentMessage(&ev.Message), nil
 }
@@ -579,12 +574,49 @@ func (w *piWireFormat) handleError(ev *pi.MessageUpdateDeltaEvent) ([]agent.Mess
 	if ev.AssistantMessageEvent.Error != nil && ev.AssistantMessageEvent.Error.ErrorMessage != "" {
 		result = ev.AssistantMessageEvent.Error.ErrorMessage
 	}
-	return []agent.Message{&agent.ResultMessage{
+	return errorResultMessages(result), nil
+}
+
+// errorResultMessages builds the terminal messages for a Pi error stop. When
+// the error text names a provider quota or rate limit, it prepends a
+// RateLimitMessage so the UI surfaces the quota banner instead of a bare error;
+// Pi relays only free-text errors, so status is "rejected" with no reset time.
+func errorResultMessages(errMsg string) []agent.Message {
+	var msgs []agent.Message
+	if isQuotaError(errMsg) {
+		msgs = append(msgs, &agent.RateLimitMessage{Status: "rejected"})
+	}
+	return append(msgs, &agent.ResultMessage{
 		MessageType: "result",
 		Subtype:     "error",
 		IsError:     true,
-		Result:      result,
-	}}, nil
+		Result:      errMsg,
+	})
+}
+
+// quotaErrorMarkers are lowercase substrings that identify a provider quota or
+// rate-limit exhaustion in a Pi error message. Pi bubbles up provider-specific
+// wording (e.g. Codex's "The usage limit has been reached"), so match on the
+// common phrasings across providers rather than a single exact string.
+var quotaErrorMarkers = []string{
+	"usage limit",
+	"rate limit",
+	"quota",
+	"too many requests",
+	"resource exhausted",
+	"resource_exhausted",
+	"429",
+}
+
+// isQuotaError reports whether errMsg names a provider quota or rate limit.
+func isQuotaError(errMsg string) bool {
+	lower := strings.ToLower(errMsg)
+	for _, marker := range quotaErrorMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // handleAgentEnd extracts final usage from the last assistant message and emits
