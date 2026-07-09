@@ -279,7 +279,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		Inventory:         runtimeInventory,
 		Privilege:         runtimePrivilege,
 		Backends:          agentBackends,
-		EventReplayFactory: func(path string, h harness.Name) task.EventReplayWriter {
+		EventReplayFactory: func(path string, h harness.Name) (task.EventReplayWriter, error) {
 			return eventreplay.NewMessageWriter(path, h)
 		},
 		HarnessEnv: cfg.Agent.HarnessEnv,

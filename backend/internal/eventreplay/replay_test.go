@@ -7,7 +7,60 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
+
+func TestCacheWriter(t *testing.T) {
+	t.Parallel()
+
+	t.Run("live_append_without_seed_does_not_commit", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		logPath := filepath.Join(dir, "task.jsonl")
+		if err := os.WriteFile(logPath, []byte("existing raw log\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		w, err := NewMessageWriter(logPath, harness.Claude)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.WriteMessage(&agent.TextMessage{Text: "partial append"})
+		if err := w.Commit(logPath); err == nil {
+			t.Fatal("Commit succeeded for partial live append cache without seed")
+		}
+
+		if _, ok := OpenReplay(logPath); ok {
+			t.Fatal("partial live append cache was committed for existing raw log without seed")
+		}
+	})
+
+	t.Run("full_rebuild_can_commit_existing_log", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		logPath := filepath.Join(dir, "task.jsonl")
+		if err := os.WriteFile(logPath, []byte("existing raw log\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		w, err := NewCacheWriter(logPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.WriteEventData([]byte(`{"kind":"text","ts":1,"text":{"text":"rebuilt"}}`))
+		if err := w.Commit(logPath); err != nil {
+			t.Fatal(err)
+		}
+
+		if replay, ok := OpenReplay(logPath); !ok {
+			t.Fatal("rebuilt cache was not committed")
+		} else {
+			replay.Close()
+		}
+	})
+}
 
 func TestPruneStaleCaches(t *testing.T) {
 	t.Parallel()
@@ -19,9 +72,14 @@ func TestPruneStaleCaches(t *testing.T) {
 		if err := os.WriteFile(logPath, []byte("raw\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		w := NewCacheWriter(logPath)
+		w, err := NewCacheWriter(logPath)
+		if err != nil {
+			t.Fatal(err)
+		}
 		w.WriteEventData([]byte(`{"kind":"text","ts":1,"text":{"text":"ok"}}`))
-		w.Commit(logPath)
+		if err := w.Commit(logPath); err != nil {
+			t.Fatal(err)
+		}
 
 		removed, err := PruneStaleCaches(dir)
 		if err != nil {
@@ -62,9 +120,14 @@ func TestPruneStaleCaches(t *testing.T) {
 		if err := os.WriteFile(logPath, []byte("old\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		w := NewCacheWriter(logPath)
+		w, err := NewCacheWriter(logPath)
+		if err != nil {
+			t.Fatal(err)
+		}
 		w.WriteEventData([]byte(`{"kind":"text","ts":1,"text":{"text":"old"}}`))
-		w.Commit(logPath)
+		if err := w.Commit(logPath); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.WriteFile(logPath, []byte("new content\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}

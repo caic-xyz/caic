@@ -4,6 +4,7 @@ package task
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -12,20 +13,8 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/task/tasktest"
 )
-
-type fakeReplayWriter struct {
-	messages []agent.Message
-	commits  []string
-}
-
-func (w *fakeReplayWriter) WriteMessage(msg agent.Message) {
-	w.messages = append(w.messages, msg)
-}
-
-func (w *fakeReplayWriter) Commit(logPath string) {
-	w.commits = append(w.commits, logPath)
-}
 
 func logLines(t *testing.T, path string) []string {
 	data, err := os.ReadFile(path) //nolint:gosec // path is test-controlled.
@@ -59,15 +48,15 @@ func TestLogStore(t *testing.T) {
 	})
 	t.Run("OpenAttachesReplayAndWritesMetadata", func(t *testing.T) {
 		t.Parallel()
-		replay := &fakeReplayWriter{}
+		replay := &tasktest.FakeEventReplayWriter{}
 		var gotPath string
 		var gotHarness harness.Name
 		store := &LogStore{
 			LogDir: t.TempDir(),
-			EventReplayFactory: func(logPath string, h harness.Name) EventReplayWriter {
+			EventReplayFactory: func(logPath string, h harness.Name) (EventReplayWriter, error) {
 				gotPath = logPath
 				gotHarness = h
-				return replay
+				return replay, nil
 			},
 		}
 		tk := &Task{
@@ -109,8 +98,27 @@ func TestLogStore(t *testing.T) {
 		}
 
 		tk.addMessage(t.Context(), &agent.TextMessage{Text: "hello"}, false)
-		if len(replay.messages) != 1 {
-			t.Fatalf("replay messages = %d, want 1", len(replay.messages))
+		if len(replay.Messages) != 1 {
+			t.Fatalf("replay messages = %d, want 1", len(replay.Messages))
+		}
+	})
+	t.Run("OpenSurfacesReplayFactoryError", func(t *testing.T) {
+		t.Parallel()
+		wantErr := errors.New("replay unavailable")
+		store := &LogStore{
+			LogDir: t.TempDir(),
+			EventReplayFactory: func(string, harness.Name) (EventReplayWriter, error) {
+				return nil, wantErr
+			},
+		}
+		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test prompt"}, Harness: harness.Codex}
+
+		w, err := store.Open(tk)
+		if w != nil {
+			t.Fatal("Open returned writer with replay factory error")
+		}
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("Open error = %v, want %v", err, wantErr)
 		}
 	})
 }

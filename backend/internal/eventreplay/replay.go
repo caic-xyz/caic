@@ -40,7 +40,7 @@ import (
 // CacheVersion is the schema version of the cached EventMessage JSONL.
 // Bump it whenever event conversion or DTO semantics change so stale caches are
 // ignored rather than served.
-const CacheVersion = 3
+const CacheVersion = 4
 
 // CacheHeader is the first JSONL record of a replay cache. It binds the cache
 // to a specific raw log file so a changed or replaced log invalidates it.
@@ -194,27 +194,55 @@ type CacheWriter struct {
 	werr     error
 }
 
-// NewCacheWriter opens a temp EventMessage body file for logPath. If a valid
-// cache already exists for the current log identity, its body is copied into the
-// new writer so later sessions can append without rebuilding from raw.
-func NewCacheWriter(logPath string) *CacheWriter {
+// NewCacheWriter opens a temp EventMessage body file for logPath.
+//
+// If a valid cache already exists for the current log identity, its body is
+// copied into the new writer so callers can rebuild or replace it incrementally.
+func NewCacheWriter(logPath string) (*CacheWriter, error) {
+	w, err := newCacheWriter(logPath)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := w.seedFromFreshCache(logPath); err != nil {
+		w.Abort()
+		return nil, err
+	}
+	return w, nil
+}
+
+func newAppendCacheWriter(logPath string) (*CacheWriter, error) {
+	w, err := newCacheWriter(logPath)
+	if err != nil {
+		return nil, err
+	}
+	seeded, err := w.seedFromFreshCache(logPath)
+	if err != nil {
+		w.Abort()
+		return nil, err
+	}
+	info, err := os.Stat(filepath.Clean(logPath))
+	if err != nil {
+		w.Abort()
+		return nil, err
+	}
+	if info.Size() > 0 && !seeded {
+		w.werr = errors.New("existing log has no complete replay cache to append to")
+	}
+	return w, nil
+}
+
+func newCacheWriter(logPath string) (*CacheWriter, error) {
 	dst := CachePath(logPath)
 	body, err := os.CreateTemp(filepath.Dir(dst), filepath.Base(dst)+".*.body")
 	if err != nil {
-		slog.Warn("replay cache: create temp", "err", err)
-		return nil
+		return nil, fmt.Errorf("create replay cache temp: %w", err)
 	}
-	w := &CacheWriter{body: body, bodyName: body.Name(), dst: dst}
-	w.seedFromFreshCache(logPath)
-	return w
+	return &CacheWriter{body: body, bodyName: body.Name(), dst: dst}, nil
 }
 
 // WriteEventData appends a marshaled EventMessage JSON object to the cache,
 // recording the first error so Commit can discard a partial cache.
 func (w *CacheWriter) WriteEventData(data []byte) {
-	if w == nil {
-		return
-	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.writeLineLocked(data)
@@ -222,34 +250,30 @@ func (w *CacheWriter) WriteEventData(data []byte) {
 
 // Commit finalizes the cache via atomic rename using logPath's current size and
 // mtime, or discards it on any error.
-func (w *CacheWriter) Commit(logPath string) {
-	if w == nil {
-		return
-	}
+func (w *CacheWriter) Commit(logPath string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.commitLocked(logPath)
+	return w.commitLocked(logPath)
 }
 
 // Abort discards an uncommitted cache body.
 func (w *CacheWriter) Abort() {
-	if w == nil {
-		return
-	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.abortLocked()
 }
 
-func (w *CacheWriter) seedFromFreshCache(logPath string) {
+func (w *CacheWriter) seedFromFreshCache(logPath string) (bool, error) {
 	br, closeFn, ok := openFreshCacheBody(logPath)
 	if !ok {
-		return
+		return false, nil
 	}
 	defer closeFn()
 	if _, err := io.Copy(w.body, br); err != nil {
 		w.werr = err
+		return false, fmt.Errorf("seed replay cache: %w", err)
 	}
+	return true, nil
 }
 
 func (w *CacheWriter) writeLineLocked(data []byte) {
@@ -275,9 +299,9 @@ func (w *CacheWriter) abortLocked() {
 	_ = os.Remove(w.bodyName)
 }
 
-func (w *CacheWriter) commitLocked(logPath string) {
+func (w *CacheWriter) commitLocked(logPath string) error {
 	if w.body == nil {
-		return
+		return nil
 	}
 	body := w.body
 	w.body = nil
@@ -294,24 +318,20 @@ func (w *CacheWriter) commitLocked(logPath string) {
 		w.werr = errors.Join(w.werr, err)
 	}
 	if w.werr != nil {
-		_ = closeBody()
-		slog.Warn("replay cache: discarding partial cache", "path", w.dst, "err", w.werr)
-		return
+		closeErr := closeBody()
+		return fmt.Errorf("discard partial replay cache %s: %w", w.dst, errors.Join(w.werr, closeErr))
 	}
 
 	tmp, err := os.CreateTemp(filepath.Dir(w.dst), filepath.Base(w.dst)+".*.tmp")
 	if err != nil {
-		_ = closeBody()
-		slog.Warn("replay cache: create commit temp", "err", err)
-		return
+		closeErr := closeBody()
+		return fmt.Errorf("create replay cache commit temp: %w", errors.Join(err, closeErr))
 	}
 	tmpName := tmp.Name()
 	enc, err := zstd.NewWriter(tmp, zstd.WithEncoderLevel(zstd.SpeedFastest), zstd.WithWindowSize(64<<10))
 	if err != nil {
-		_ = closeBody()
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return
+		closeErr := errors.Join(closeBody(), tmp.Close(), os.Remove(tmpName))
+		return fmt.Errorf("create replay cache zstd writer: %w", errors.Join(err, closeErr))
 	}
 	header, err := json.Marshal(CacheHeader{
 		Version:  CacheVersion,
@@ -326,21 +346,21 @@ func (w *CacheWriter) commitLocked(logPath string) {
 	}
 	closeErr := errors.Join(enc.Close(), tmp.Close(), closeBody())
 	if err = errors.Join(err, closeErr); err != nil {
-		_ = os.Remove(tmpName)
-		slog.Warn("replay cache: discarding partial cache", "path", w.dst, "err", err)
-		return
+		removeErr := os.Remove(tmpName)
+		return fmt.Errorf("discard partial replay cache %s: %w", w.dst, errors.Join(err, removeErr))
 	}
 	if err := os.Rename(tmpName, w.dst); err != nil {
-		_ = os.Remove(tmpName)
-		slog.Warn("replay cache: rename", "path", w.dst, "err", err)
+		removeErr := os.Remove(tmpName)
+		return fmt.Errorf("rename replay cache %s: %w", w.dst, errors.Join(err, removeErr))
 	}
+	return nil
 }
 
 // RegenerateReplay rebuilds the DTO replay sidecar from parsed raw-log messages.
 func RegenerateReplay(logPath string, h harness.Name, msgs iter.Seq2[agent.Message, error]) error {
-	cache := NewCacheWriter(logPath)
-	if cache == nil {
-		return errors.New("create replay cache writer")
+	cache, err := NewCacheWriter(logPath)
+	if err != nil {
+		return err
 	}
 	committed := false
 	defer func() {
@@ -370,7 +390,9 @@ func RegenerateReplay(logPath string, h harness.Name, msgs iter.Seq2[agent.Messa
 		push(msg)
 	}
 	flush()
-	cache.Commit(logPath)
+	if err := cache.Commit(logPath); err != nil {
+		return err
+	}
 	committed = true
 	return nil
 }
@@ -385,10 +407,10 @@ type MessageWriter struct {
 }
 
 // NewMessageWriter creates a live EventMessage replay writer for logPath.
-func NewMessageWriter(logPath string, h harness.Name) *MessageWriter {
-	cache := NewCacheWriter(logPath)
-	if cache == nil {
-		return nil
+func NewMessageWriter(logPath string, h harness.Name) (*MessageWriter, error) {
+	cache, err := newAppendCacheWriter(logPath)
+	if err != nil {
+		return nil, err
 	}
 	w := &MessageWriter{
 		cache:   cache,
@@ -406,28 +428,22 @@ func NewMessageWriter(logPath string, h harness.Name) *MessageWriter {
 		}
 	}
 	w.push, w.flush = NewFilter(emit)
-	return w
+	return w, nil
 }
 
 // WriteMessage appends m to the live replay stream after write-time compaction.
 func (w *MessageWriter) WriteMessage(m agent.Message) {
-	if w == nil {
-		return
-	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.push(m)
 }
 
 // Commit flushes any buffered delta tail and commits the underlying cache.
-func (w *MessageWriter) Commit(logPath string) {
-	if w == nil {
-		return
-	}
+func (w *MessageWriter) Commit(logPath string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.flush()
-	w.cache.Commit(logPath)
+	return w.cache.Commit(logPath)
 }
 
 // NewFilter is the streaming replay compactor. It collapses a contiguous run of

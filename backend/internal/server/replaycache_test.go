@@ -116,16 +116,22 @@ func TestReplayCache(t *testing.T) {
 		t.Parallel()
 		logDir := t.TempDir()
 		logPath := filepath.Join(logDir, "task.jsonl")
-		writeLogFile(t, logDir, "task.jsonl", mustJSON(t, agent.MetaMessage{
-			MessageType: "caic_meta", Version: 1, Prompt: "fix the bug",
-			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Claude,
-			StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-		}))
+		if err := os.WriteFile(logPath, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
 
-		w := eventreplay.NewMessageWriter(logPath, harness.Claude)
+		w, err := eventreplay.NewMessageWriter(logPath, harness.Claude)
+		if err != nil {
+			t.Fatal(err)
+		}
 		w.WriteMessage(&agent.TextDeltaMessage{Text: "partial"})
 		w.WriteMessage(&agent.TextMessage{Text: "final"})
-		w.Commit(logPath)
+		if err := os.WriteFile(logPath, []byte("raw log\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Commit(logPath); err != nil {
+			t.Fatal(err)
+		}
 
 		contents := readReplayCacheEvents(t, eventreplay.CachePath(logPath))
 		if len(contents.events) != 1 {
@@ -160,8 +166,13 @@ func TestReplayCache(t *testing.T) {
 		t.Parallel()
 		logDir := t.TempDir()
 		logPath := writePurged(t, logDir, "empty cache raw truth")
-		cache := eventreplay.NewCacheWriter(logPath)
-		cache.Commit(logPath)
+		cache, err := eventreplay.NewCacheWriter(logPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := cache.Commit(logPath); err != nil {
+			t.Fatal(err)
+		}
 		s, taskID := newServer(t, logDir)
 
 		body := serveEvents(t, s, taskID)

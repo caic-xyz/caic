@@ -284,6 +284,7 @@ graph TD
     pkg_internal_runtime_runtimetest["internal/runtime/runtimetest"]
     pkg_internal_task["internal/task"]
     pkg_internal_task_taskmgr["internal/task/taskmgr"]
+    pkg_internal_task_tasktest["internal/task/tasktest"]
   end
 
   subgraph Repo["Repo"]
@@ -472,6 +473,7 @@ graph TD
   pkg_internal_task_taskmgr --> pkg_internal_repo_repowork
   pkg_internal_task_taskmgr --> pkg_internal_runtime
   pkg_internal_task_taskmgr --> pkg_internal_task
+  pkg_internal_task_tasktest --> pkg_internal_agent
 ```
 
 ## Package Dependencies
@@ -524,6 +526,7 @@ graph TD
 | `internal/smoketest` | `internal/agent`, `internal/agent/harness`, `internal/forge`, `internal/runtime`, `internal/task`, `internal/usage` |
 | `internal/task` | `internal/agent`, `internal/agent/harness`, `internal/forge`, `internal/jsonutil`, `internal/repo/repowork`, `internal/runtime` |
 | `internal/task/taskmgr` | `internal/agent`, `internal/agent/harness`, `internal/preferences`, `internal/repo/repowork`, `internal/runtime`, `internal/task` |
+| `internal/task/tasktest` | `internal/agent` |
 | `internal/usage` | None |
 <!-- END GENERATED PACKAGE DEPENDENCIES -->
 

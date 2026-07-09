@@ -84,7 +84,7 @@ type Config struct {
 	Inventory           runtime.Inventory
 	Privilege           runtime.PrivilegeInfo
 	Backends            map[harness.Name]agent.Backend
-	EventReplayFactory  func(logPath string, h harness.Name) task.EventReplayWriter
+	EventReplayFactory  func(logPath string, h harness.Name) (task.EventReplayWriter, error)
 	HarnessEnv          map[string][]string
 	RuntimeStartTimeout time.Duration
 	Prefs               *preferences.Store
@@ -104,7 +104,7 @@ type Manager struct {
 	inventory           runtime.Inventory
 	privilege           runtime.PrivilegeInfo
 	backends            map[harness.Name]agent.Backend
-	eventReplayFactory  func(logPath string, h harness.Name) task.EventReplayWriter
+	eventReplayFactory  func(logPath string, h harness.Name) (task.EventReplayWriter, error)
 	harnessEnv          map[string][]string
 	runtimeStartTimeout time.Duration
 	prefs               *preferences.Store
@@ -1952,7 +1952,9 @@ func (m *Manager) watchSession(entry *Entry, workspace *repowork.Workspace, h *t
 					if err := writeTaskResultTrailer(t, result); err != nil {
 						slog.WarnContext(m.serverCtx, "write crashed task trailer failed", append(attrs, "err", err)...)
 					}
-					t.CommitEventReplay()
+					if err := t.CommitEventReplay(); err != nil {
+						slog.WarnContext(m.serverCtx, "commit event replay failed", append(attrs, "err", err)...)
+					}
 				} else if t.RecordSessionFailure(m.serverCtx, sessionErr) {
 					failureErr := sessionErr
 					if exitErr := t.LastExitError(); exitErr != "" {
@@ -1973,7 +1975,9 @@ func (m *Manager) watchSession(entry *Entry, workspace *repowork.Workspace, h *t
 					if err := writeTaskResultTrailer(t, result); err != nil {
 						slog.WarnContext(m.serverCtx, "write failed task trailer failed", append(attrs, "err", err)...)
 					}
-					t.CommitEventReplay()
+					if err := t.CommitEventReplay(); err != nil {
+						slog.WarnContext(m.serverCtx, "commit event replay failed", append(attrs, "err", err)...)
+					}
 				}
 			} else {
 				slog.InfoContext(m.serverCtx, "session exited", attrs...)
@@ -1984,7 +1988,9 @@ func (m *Manager) watchSession(entry *Entry, workspace *repowork.Workspace, h *t
 				// handling in task.go). The CAS only fires from Running, so
 				// it is a no-op once addMessage has already moved the state.
 				t.SetStateIf(task.StateRunning, task.StateWaiting)
-				t.CommitEventReplay()
+				if err := t.CommitEventReplay(); err != nil {
+					slog.WarnContext(m.serverCtx, "commit event replay failed", append(attrs, "err", err)...)
+				}
 			}
 			m.NotifyTaskChange()
 		case <-entry.Done():

@@ -18,7 +18,7 @@ import (
 // LogStore manages raw task JSONL logs and their companion replay writers.
 type LogStore struct {
 	LogDir             string
-	EventReplayFactory func(logPath string, h harness.Name) EventReplayWriter
+	EventReplayFactory func(logPath string, h harness.Name) (EventReplayWriter, error)
 }
 
 // Open creates a JSONL log file and writes a metadata header as the first line.
@@ -31,7 +31,9 @@ func (s *LogStore) Open(t *Task) (io.WriteCloser, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create log file: %w", err)
 	}
-	s.attachReplay(t, path)
+	if err := s.attachReplay(t, path); err != nil {
+		return nil, errors.Join(err, f.Close())
+	}
 	if err := writeMetadataHeader(f, t); err != nil {
 		_ = f.Close()
 		return nil, err
@@ -49,7 +51,9 @@ func (s *LogStore) Reopen(t *Task) (io.WriteCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.attachReplay(t, path)
+	if err := s.attachReplay(t, path); err != nil {
+		return nil, errors.Join(err, w.Close())
+	}
 	return w, nil
 }
 
@@ -98,11 +102,17 @@ func (*LogStore) WriteContextCleared(w io.Writer) error {
 	return err
 }
 
-func (s *LogStore) attachReplay(t *Task, path string) {
+func (s *LogStore) attachReplay(t *Task, path string) error {
 	t.SetLogPath(path)
-	if s.EventReplayFactory != nil {
-		t.StartEventReplay(s.EventReplayFactory(path, t.Harness))
+	if s.EventReplayFactory == nil {
+		return nil
 	}
+	w, err := s.EventReplayFactory(path, t.Harness)
+	if err != nil {
+		return err
+	}
+	t.StartEventReplay(w)
+	return nil
 }
 
 func taskLogFileName(t *Task) string {

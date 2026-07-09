@@ -303,7 +303,9 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 			}
 		}
 	}
-	t.CommitEventReplay()
+	if err := t.CommitEventReplay(); err != nil {
+		tlog.WarnContext(ctx, "commit event replay failed", "err", err)
+	}
 	tlog.InfoContext(ctx, "cleanup done", "dur", time.Since(start).Round(time.Millisecond),
 		"cost", res.CostUSD, "turns", res.NumTurns, "reason", reason)
 	return res
@@ -368,7 +370,9 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 		if h != nil && h.LogW != nil {
 			_ = h.LogW.Close()
 		}
-		t.CommitEventReplay()
+		if err := t.CommitEventReplay(); err != nil {
+			tlog.WarnContext(ctx, "commit event replay failed", "err", err)
+		}
 		tlog.InfoContext(ctx, "stop abandoned", "state", t.GetState())
 		return
 	}
@@ -395,7 +399,9 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 	if logW != nil {
 		_ = logW.Close()
 	}
-	t.CommitEventReplay()
+	if err := t.CommitEventReplay(); err != nil {
+		tlog.WarnContext(ctx, "commit event replay failed", "err", err)
+	}
 	tlog.InfoContext(ctx, "stop done", "dur", time.Since(start).Round(time.Millisecond),
 		"cost", res.CostUSD, "turns", res.NumTurns)
 }

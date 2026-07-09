@@ -668,7 +668,7 @@ func (t *Task) LogPath() string {
 // EventReplayWriter stores backend-neutral replay events beside the raw task log.
 type EventReplayWriter interface {
 	WriteMessage(msg agent.Message)
-	Commit(logPath string)
+	Commit(logPath string) error
 }
 
 // StartEventReplay attaches a live DTO replay writer if one is not already active.
@@ -684,15 +684,16 @@ func (t *Task) StartEventReplay(w EventReplayWriter) {
 }
 
 // CommitEventReplay finalizes and detaches the live DTO replay writer.
-func (t *Task) CommitEventReplay() {
+func (t *Task) CommitEventReplay() error {
 	t.mu.Lock()
 	w := t.eventReplay
 	path := t.logPath
 	t.eventReplay = nil
 	t.mu.Unlock()
-	if w != nil {
-		w.Commit(path)
+	if w == nil {
+		return nil
 	}
+	return w.Commit(path)
 }
 
 // SudoLookupState returns the sudo lookup inputs and cached password.
