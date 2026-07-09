@@ -7,15 +7,17 @@ import LeftPanelOpen from "@material-symbols/svg-400/outlined/left_panel_open.sv
 import ArrowRight from "@material-symbols/svg-400/outlined/arrow_right.svg?solid";
 import ArrowDropDown from "@material-symbols/svg-400/outlined/arrow_drop_down.svg?solid";
 
-import type { CIStatus, Repo, Task } from "@sdk/types.gen";
+import type { CIStatus, Repo, Task, UsageResp } from "@sdk/types.gen";
 
 import TaskCard from "./TaskCard";
 import CIDot from "./CIDot";
 import styles from "./TaskList.module.css";
+import { taskQuotaCountdown } from "../quota";
 
 export interface TaskListProps {
   tasks: Accessor<Task[]>;
   repos: Accessor<Repo[]>;
+  usage: Accessor<UsageResp | null>;
   selectedId: string | null;
   sidebarOpen: Accessor<boolean>;
   setSidebarOpen: (open: boolean) => void;
@@ -219,6 +221,7 @@ export default function TaskList(props: TaskListProps) {
       ciStatus={t().ciStatus}
       ciChecks={t().ciChecks}
       autoFixPR={props.autoFixPR()}
+      quotaCountdown={taskQuotaCountdown(t(), props.usage(), props.now())}
       selected={props.selectedId === t().id}
       now={props.now}
       onClick={() => props.onSelect(t().id)}

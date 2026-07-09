@@ -107,6 +107,7 @@ export default function MainLayout(props: { children?: JSX.Element }) {
         <TaskList
           tasks={s.tasks}
           repos={s.repos}
+          usage={s.usage}
           selectedId={s.selectedId()}
           sidebarOpen={s.sidebarOpen}
           setSidebarOpen={s.setSidebarOpen}

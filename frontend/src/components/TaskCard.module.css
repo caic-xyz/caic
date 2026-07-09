@@ -137,6 +137,12 @@
   color: var(--color-text-meta);
 }
 
+.quotaCountdown {
+  color: var(--color-danger);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
 .branchMeta {
   font-size: 0.75rem;
   color: var(--color-text-meta);
