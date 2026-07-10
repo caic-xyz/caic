@@ -3,6 +3,7 @@
 import { createSignal, createEffect, createMemo, For, Show, onMount, onCleanup } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
+import WrapTextIcon from "@material-symbols/svg-400/outlined/wrap_text.svg?solid";
 
 import type { DiffFileStat } from "@sdk/types.gen";
 
@@ -26,6 +27,7 @@ export default function DiffDetail(props: Props) {
   const [loading, setLoading] = createSignal(true);
   // Collapsed files (all expanded by default).
   const [collapsedFiles, setCollapsedFiles] = createSignal<Set<string>>(new Set());
+  const [lineWrap, setLineWrap] = createSignal(false);
 
   createEffect(() => {
     const id = props.taskId;
@@ -90,6 +92,16 @@ export default function DiffDetail(props: Props) {
             )}
           </For>
         </span>
+        <button
+          type="button"
+          class={`${styles.wrapToggle} ${lineWrap() ? styles.wrapToggleActive : ""}`}
+          aria-label={lineWrap() ? "Disable line wrap" : "Enable line wrap"}
+          aria-pressed={lineWrap()}
+          title={lineWrap() ? "Disable line wrap" : "Enable line wrap"}
+          onClick={() => setLineWrap((wrap) => !wrap)}
+        >
+          <WrapTextIcon width={20} height={20} />
+        </button>
       </div>
       <div class={styles.fileList}>
         <Show when={loading()}>
@@ -105,20 +117,38 @@ export default function DiffDetail(props: Props) {
               const collapsed = () => collapsedFiles().has(fd.path);
               return (
                 <>
-                  <div class={`${styles.fileRow} ${styles.fileRowClickable}`} role="button" tabIndex={0} onClick={() => toggleFile(fd.path)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleFile(fd.path); } }}>
+                  <div
+                    class={`${styles.fileRow} ${styles.fileRowClickable}`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => toggleFile(fd.path)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        toggleFile(fd.path);
+                      }
+                    }}
+                  >
                     <span class={styles.collapseIndicator}>{collapsed() ? "\u25b6" : "\u25bc"}</span>
                     <span class={styles.filePath}>{fd.path}</span>
-                    <Show when={stat()?.binary} fallback={
-                      <span class={styles.fileCounts}>
-                        <Show when={(stat()?.added ?? 0) > 0}><span class={styles.added}>+{stat()?.added}</span></Show>
-                        <Show when={(stat()?.deleted ?? 0) > 0}><span class={styles.deleted}>&minus;{stat()?.deleted}</span></Show>
-                      </span>
-                    }>
+                    <Show
+                      when={stat()?.binary}
+                      fallback={
+                        <span class={styles.fileCounts}>
+                          <Show when={(stat()?.added ?? 0) > 0}>
+                            <span class={styles.added}>+{stat()?.added}</span>
+                          </Show>
+                          <Show when={(stat()?.deleted ?? 0) > 0}>
+                            <span class={styles.deleted}>&minus;{stat()?.deleted}</span>
+                          </Show>
+                        </span>
+                      }
+                    >
                       <span class={styles.binary}>binary</span>
                     </Show>
                   </div>
                   <Show when={!collapsed()}>
-                    <UnifiedDiffBlock lines={fd.lines} />
+                    <UnifiedDiffBlock lines={fd.lines} lineWrap={lineWrap()} />
                   </Show>
                 </>
               );

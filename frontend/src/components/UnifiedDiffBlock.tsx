@@ -7,6 +7,7 @@ import styles from "./UnifiedDiffBlock.module.css";
 
 type Props = {
   compact?: boolean;
+  lineWrap?: boolean;
 } & (
   | { diff: string; lines?: never }
   | { lines: DiffLine[]; diff?: never }
@@ -15,7 +16,7 @@ type Props = {
 export default function UnifiedDiffBlock(props: Props) {
   const lines = createMemo(() => props.lines ?? annotateDiffLines(props.diff));
   return (
-    <pre class={`${styles.block} ${props.compact ? styles.compact : ""}`}>
+    <pre class={styles.block} classList={{ [styles.compact]: props.compact, [styles.lineWrap]: props.lineWrap }}>
       <For each={lines()}>
         {(line) => <UnifiedDiffLine line={line} />}
       </For>

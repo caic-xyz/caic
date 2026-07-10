@@ -39,6 +39,15 @@
   white-space: pre;
 }
 
+.lineWrap {
+  overflow-x: hidden;
+}
+
+.lineWrap .line {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .lineAdded {
   color: var(--diff-added-line);
 }
