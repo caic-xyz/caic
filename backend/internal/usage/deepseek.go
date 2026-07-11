@@ -40,26 +40,15 @@ func NewDeepSeekFetcher(apiKey string) *DeepSeekFetcher {
 		return nil
 	}
 	return &DeepSeekFetcher{
-		client: &http.Client{Timeout: 10 * time.Second},
-		apiKey: apiKey,
+		baseFetcher: newBaseFetcher("deepseek", "DeepSeek", "apikey", "https://platform.deepseek.com/usage"),
+		client:      &http.Client{Timeout: 10 * time.Second},
+		apiKey:      apiKey,
 	}
 }
 
-// Provider returns the provider identifier.
-func (f *DeepSeekFetcher) Provider() string { return "deepseek" }
-
-// Label returns the human-readable provider name.
-func (f *DeepSeekFetcher) Label() string { return "DeepSeek" }
-
-// AuthKind returns the authentication method.
-func (f *DeepSeekFetcher) AuthKind() string { return "apikey" }
-
-// UsageURL returns the link to the provider's usage/billing page.
-func (f *DeepSeekFetcher) UsageURL() string { return "https://platform.deepseek.com/usage" }
-
 // Get returns the cached balance, refreshing if stale.
 func (f *DeepSeekFetcher) Get(ctx context.Context) *ProviderQuota {
-	return f.get(ctx, f.fetch, "DeepSeek")
+	return f.get(ctx, f.fetch)
 }
 
 func (f *DeepSeekFetcher) fetch(ctx context.Context) (*ProviderQuota, error) {
@@ -86,11 +75,7 @@ func (f *DeepSeekFetcher) fetch(ctx context.Context) (*ProviderQuota, error) {
 		return nil, fmt.Errorf("decode DeepSeek balance: %w", err)
 	}
 
-	out := &ProviderQuota{
-		Provider: f.Provider(),
-		Label:    f.Label(),
-		AuthKind: f.AuthKind(),
-	}
+	out := f.quota()
 	// Take the first balance info (usually CNY).
 	for _, bi := range raw.BalanceInfos {
 		total, _ := parseFloat(bi.TotalBalance)

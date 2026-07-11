@@ -38,26 +38,15 @@ func NewOpenRouterFetcher(apiKey string) *OpenRouterFetcher {
 		return nil
 	}
 	return &OpenRouterFetcher{
-		client: &http.Client{Timeout: 10 * time.Second},
-		apiKey: apiKey,
+		baseFetcher: newBaseFetcher("openrouter", "OpenRouter", "apikey", "https://openrouter.ai/settings/credits"),
+		client:      &http.Client{Timeout: 10 * time.Second},
+		apiKey:      apiKey,
 	}
 }
 
-// Provider returns the provider identifier.
-func (f *OpenRouterFetcher) Provider() string { return "openrouter" }
-
-// Label returns the human-readable provider name.
-func (f *OpenRouterFetcher) Label() string { return "OpenRouter" }
-
-// AuthKind returns the authentication method.
-func (f *OpenRouterFetcher) AuthKind() string { return "apikey" }
-
-// UsageURL returns the link to the provider's usage/billing page.
-func (f *OpenRouterFetcher) UsageURL() string { return "https://openrouter.ai/settings/credits" }
-
 // Get returns the cached credit balance.
 func (f *OpenRouterFetcher) Get(ctx context.Context) *ProviderQuota {
-	return f.get(ctx, f.fetch, "OpenRouter")
+	return f.get(ctx, f.fetch)
 }
 
 func (f *OpenRouterFetcher) fetch(ctx context.Context) (*ProviderQuota, error) {
@@ -89,15 +78,12 @@ func (f *OpenRouterFetcher) fetch(ctx context.Context) (*ProviderQuota, error) {
 	// Balance = total_credits - total_usage.
 	var payload openRouterCreditsPayload
 	if err := json.Unmarshal(raw, &payload); err == nil && payload.Data.TotalCredits != 0 {
-		return &ProviderQuota{
-			Provider: f.Provider(),
-			Label:    f.Label(),
-			AuthKind: f.AuthKind(),
-			Balance: QuotaBalance{
-				Currency: "USD",
-				Total:    payload.Data.TotalCredits - payload.Data.TotalUsage,
-			},
-		}, nil
+		out := f.quota()
+		out.Balance = QuotaBalance{
+			Currency: "USD",
+			Total:    payload.Data.TotalCredits - payload.Data.TotalUsage,
+		}
+		return out, nil
 	}
 
 	slog.WarnContext(ctx, "unrecognized OpenRouter credits response shape", "body", string(raw))

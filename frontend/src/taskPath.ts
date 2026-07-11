@@ -3,6 +3,12 @@
 /** Max slug length in the URL (characters after the "+"). */
 const MAX_SLUG = 80;
 
+type TaskPathTask = {
+  id: string;
+  repos?: { name: string; branch?: string }[];
+  title: string;
+};
+
 /** Build a URL-safe slug from arbitrary text: lowercase, non-alnum replaced with "-", collapsed. */
 export function slugify(s: string): string {
   return s
@@ -17,6 +23,11 @@ export function taskPath(id: string, repo: string, branch: string, query: string
   const parts = [repoName, branch, query].filter(Boolean).map(slugify).join("-");
   const slug = parts.slice(0, MAX_SLUG).replace(/-$/, "");
   return `/task/@${id}+${slug}`;
+}
+
+/** Build a task URL from a task DTO. */
+export function taskPathForTask(task: TaskPathTask): string {
+  return taskPath(task.id, task.repos?.[0]?.name ?? "", task.repos?.[0]?.branch ?? "", task.title);
 }
 
 /** Extract the task ID from a /task/@{id}+{slug}[/diff|/processes|/vnc|/info] pathname, or null. */

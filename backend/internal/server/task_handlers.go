@@ -50,12 +50,6 @@ func (h *taskHandlers) notifyTaskChange() {
 	h.taskMgr.NotifyTaskChange()
 }
 
-// handleTaskRawEvents delegates to handleTaskEvents — both endpoints now
-// serve the same backend-neutral EventMessage stream.
-func (h *taskHandlers) handleTaskRawEvents(w http.ResponseWriter, r *http.Request) {
-	h.handleTaskEvents(w, r)
-}
-
 // handleTaskEvents streams agent messages as SSE using backend-neutral
 // EventMessage DTOs. All tool invocations are emitted as toolUse events.
 func (h *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
@@ -517,7 +511,7 @@ func (h *taskHandlers) routes() http.Handler {
 	m.HandleFunc("GET /tasks/events", h.handleTaskListEvents)
 	m.HandleFunc("GET /tasks/{id}", handleWithTask(h, h.taskSvc.getTask))
 	m.HandleFunc("GET /tasks/{id}/info", handleWithTask(h, h.taskSvc.getTaskInfo))
-	m.HandleFunc("GET /tasks/{id}/raw_events", h.handleTaskRawEvents)
+	m.HandleFunc("GET /tasks/{id}/raw_events", h.handleTaskEvents)
 	m.HandleFunc("GET /tasks/{id}/events", h.handleTaskEvents)
 	m.HandleFunc("POST /tasks/{id}/input", handleWithTask(h, h.taskSvc.sendInput))
 	m.HandleFunc("POST /tasks/{id}/restart", handleWithTask(h, h.taskSvc.restartTask))

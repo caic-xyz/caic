@@ -66,9 +66,10 @@ func NewAnthropicFetcher(ctx context.Context) *AnthropicFetcher {
 	}
 
 	f := &AnthropicFetcher{
-		client:   &http.Client{Timeout: 10 * time.Second},
-		token:    token,
-		credPath: credPath,
+		baseFetcher: newBaseFetcher("anthropic", "Anthropic", "oauth", "https://claude.ai/settings/usage"),
+		client:      &http.Client{Timeout: 10 * time.Second},
+		token:       token,
+		credPath:    credPath,
 	}
 
 	if err := f.startWatcher(ctx); err != nil {
@@ -77,28 +78,10 @@ func NewAnthropicFetcher(ctx context.Context) *AnthropicFetcher {
 	return f
 }
 
-// Provider returns the provider identifier.
-func (f *AnthropicFetcher) Provider() string { return "anthropic" }
-
-// Label returns the human-readable provider name.
-func (f *AnthropicFetcher) Label() string { return "Anthropic" }
-
-// AuthKind returns the authentication method.
-func (f *AnthropicFetcher) AuthKind() string { return "oauth" }
-
-// UsageURL returns the link to the provider's usage/billing page.
-func (f *AnthropicFetcher) UsageURL() string { return "https://claude.ai/settings/usage" }
-
 // Get returns the cached quota data, refreshing if stale. Returns nil when
 // no token is available.
 func (f *AnthropicFetcher) Get(ctx context.Context) *ProviderQuota {
-	f.mu.Lock()
-	if f.token == "" {
-		f.mu.Unlock()
-		return nil
-	}
-	f.mu.Unlock()
-	return f.get(ctx, f.fetch, "Anthropic")
+	return f.getIf(ctx, func() bool { return f.token != "" }, f.fetch)
 }
 
 func (f *AnthropicFetcher) fetch(ctx context.Context) (*ProviderQuota, error) {
@@ -127,11 +110,7 @@ func (f *AnthropicFetcher) fetch(ctx context.Context) (*ProviderQuota, error) {
 		return nil, fmt.Errorf("decode usage: %w", err)
 	}
 
-	out := &ProviderQuota{
-		Provider: f.Provider(),
-		Label:    f.Label(),
-		AuthKind: f.AuthKind(),
-	}
+	out := f.quota()
 	if raw.FiveHour != nil {
 		t, _ := time.Parse(time.RFC3339, raw.FiveHour.ResetsAt)
 		out.RateLimits = append(out.RateLimits, QuotaRateLimit{

@@ -26,13 +26,13 @@ import (
 
 func TestReplayCache(t *testing.T) {
 	t.Parallel()
-	// serveEvents drives handleTaskRawEvents once and returns the SSE body.
+	// serveEvents drives handleTaskEvents once and returns the SSE body.
 	serveEvents := func(t *testing.T, s *testRouter, taskID string) string {
 		t.Helper()
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID+"/raw_events", http.NoBody)
 		req.SetPathValue("id", taskID)
 		w := httptest.NewRecorder()
-		testTaskHandlers(s).handleTaskRawEvents(w, req)
+		testTaskHandlers(s).handleTaskEvents(w, req)
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}

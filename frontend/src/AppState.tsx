@@ -14,7 +14,7 @@ import { useAuth } from "./AuthContext";
 import { confirmTaskAction } from "./components/TaskCard";
 import { effortOptions } from "./effortOptions";
 import { requestNotificationPermission, notifyWaiting, dismissNotification } from "./gomode/notifications";
-import { taskPath, taskIdFromPath } from "./taskPath";
+import { taskPath, taskIdFromPath, taskPathForTask } from "./taskPath";
 
 /** Add ±25% jitter to a delay to avoid thundering herd on server restart. */
 function jitteredDelay(base: number): number {
@@ -210,7 +210,7 @@ function createAppStore() {
 
   function navigateToPurgeFocusTarget(target: PurgeFocusTarget) {
     if (target.kind === "task") {
-      navigate(taskPath(target.task.id, target.task.repos?.[0]?.name ?? "", target.task.repos?.[0]?.branch ?? "", target.task.title), { replace: true });
+      navigate(taskPathForTask(target.task), { replace: true });
       focusTaskCard(target.task.id);
       return;
     }
@@ -317,7 +317,7 @@ function createAppStore() {
       if (!id) return;
       const task = tasks().find((t) => t.id === id);
       if (!task) return;
-      navigate(taskPath(task.id, task.repos?.[0]?.name ?? "", task.repos?.[0]?.branch ?? "", task.title));
+      navigate(taskPathForTask(task));
       card.focus();
       e.preventDefault();
     };
@@ -894,12 +894,12 @@ function createAppStore() {
   // Navigate to a task's detail route, building the slugged path from its repo/branch/title.
   const navigateToTask = (id: string) => {
     const found = taskById(id);
-    navigate(found ? taskPath(found.id, found.repos?.[0]?.name ?? "", found.repos?.[0]?.branch ?? "", found.title) : `/task/@${id}`);
+    navigate(found ? taskPathForTask(found) : `/task/@${id}`);
   };
   const navigateToDiff = (id: string) => {
     const found = taskById(id);
     if (found?.diffStat?.length) {
-      navigate(taskPath(found.id, found.repos?.[0]?.name ?? "", found.repos?.[0]?.branch ?? "", found.title) + "/diff");
+      navigate(taskPathForTask(found) + "/diff");
     }
   };
   const fixCI = (repoPath: string) => {

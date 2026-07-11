@@ -68,10 +68,23 @@ type ProviderQuota struct {
 	ExtraUsage QuotaExtraUsage
 }
 
-// baseFetcher holds the shared caching, backoff, and locking logic used by
-// all ProviderFetcher implementations. Each concrete fetcher embeds this
-// and calls get with its own fetch function and a provider name for logging.
+func newBaseFetcher(provider, label, authKind, usageURL string) baseFetcher {
+	return baseFetcher{
+		provider: provider,
+		label:    label,
+		authKind: authKind,
+		usageURL: usageURL,
+	}
+}
+
+// baseFetcher holds the shared provider metadata, caching, backoff, and
+// locking logic used by all ProviderFetcher implementations.
 type baseFetcher struct {
+	provider string
+	label    string
+	authKind string
+	usageURL string
+
 	mu      sync.Mutex
 	cached  *ProviderQuota
 	fetchAt time.Time
@@ -79,11 +92,36 @@ type baseFetcher struct {
 	errorAt time.Time
 }
 
-// get runs the common fetch-with-cache-and-backoff logic. providerName is
-// used only in the warning log message on fetch failure.
-func (b *baseFetcher) get(ctx context.Context, fetch func(context.Context) (*ProviderQuota, error), providerName string) *ProviderQuota {
+// Provider returns the provider identifier.
+func (b *baseFetcher) Provider() string { return b.provider }
+
+// Label returns the human-readable provider name.
+func (b *baseFetcher) Label() string { return b.label }
+
+// AuthKind returns the authentication method.
+func (b *baseFetcher) AuthKind() string { return b.authKind }
+
+// UsageURL returns the link to the provider's usage/billing page.
+func (b *baseFetcher) UsageURL() string { return b.usageURL }
+
+func (b *baseFetcher) quota() *ProviderQuota {
+	return &ProviderQuota{
+		Provider: b.provider,
+		Label:    b.label,
+		AuthKind: b.authKind,
+	}
+}
+
+func (b *baseFetcher) get(ctx context.Context, fetch func(context.Context) (*ProviderQuota, error)) *ProviderQuota {
+	return b.getIf(ctx, nil, fetch)
+}
+
+func (b *baseFetcher) getIf(ctx context.Context, ok func() bool, fetch func(context.Context) (*ProviderQuota, error)) *ProviderQuota {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if ok != nil && !ok() {
+		return nil
+	}
 	if b.cached != nil && time.Since(b.fetchAt) < CacheTTL {
 		return b.cached
 	}
@@ -92,7 +130,7 @@ func (b *baseFetcher) get(ctx context.Context, fetch func(context.Context) (*Pro
 	}
 	resp, err := fetch(ctx)
 	if err != nil {
-		slog.WarnContext(ctx, "failed to fetch "+providerName+" usage", "err", err)
+		slog.WarnContext(ctx, "failed to fetch "+b.label+" usage", "err", err)
 		b.errorAt = time.Now()
 		if b.backoff == 0 {
 			b.backoff = backoffMin

@@ -520,7 +520,7 @@ func TestHandleTaskEvents(t *testing.T) {
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/99/raw_events", http.NoBody)
 		req.SetPathValue("id", "99")
 		w := httptest.NewRecorder()
-		testTaskHandlers(s).handleTaskRawEvents(w, req)
+		testTaskHandlers(s).handleTaskEvents(w, req)
 		if w.Code != http.StatusNotFound {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
 		}
@@ -536,7 +536,7 @@ func TestHandleTaskEvents(t *testing.T) {
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/abc/raw_events", http.NoBody)
 		req.SetPathValue("id", "abc")
 		w := httptest.NewRecorder()
-		testTaskHandlers(s).handleTaskRawEvents(w, req)
+		testTaskHandlers(s).handleTaskEvents(w, req)
 		if w.Code != http.StatusNotFound {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
 		}
@@ -1823,9 +1823,9 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/caic/v1/tasks/"+taskID+"/raw_events", http.NoBody)
 		req.SetPathValue("id", taskID)
 		w := httptest.NewRecorder()
-		testTaskHandlers(s).handleTaskRawEvents(w, req)
+		testTaskHandlers(s).handleTaskEvents(w, req)
 		if err := ctx.Err(); err != nil {
-			t.Fatalf("handleTaskRawEvents blocked until context deadline: %v", err)
+			t.Fatalf("handleTaskEvents blocked until context deadline: %v", err)
 		}
 
 		if w.Code != http.StatusOK {
@@ -1881,7 +1881,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
 		req.SetPathValue("id", taskID.String())
 		w := httptest.NewRecorder()
-		testTaskHandlers(s).handleTaskRawEvents(w, req)
+		testTaskHandlers(s).handleTaskEvents(w, req)
 
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -1944,7 +1944,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
 		req.SetPathValue("id", taskID.String())
 		w := httptest.NewRecorder()
-		testTaskHandlers(s).handleTaskRawEvents(w, req)
+		testTaskHandlers(s).handleTaskEvents(w, req)
 
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -2016,7 +2016,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID+"/raw_events", http.NoBody).WithContext(ctx)
 		req.SetPathValue("id", taskID)
 		w := httptest.NewRecorder()
-		testTaskHandlers(s).handleTaskRawEvents(w, req)
+		testTaskHandlers(s).handleTaskEvents(w, req)
 
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)

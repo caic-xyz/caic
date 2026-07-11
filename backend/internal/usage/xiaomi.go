@@ -9,33 +9,19 @@ import "context"
 // XiaomiFetcher registers the Xiaomi MiMo provider without balance data.
 // The platform (platform.xiaomimimo.com) requires Xiaomi account OAuth for
 // balance queries, which cannot be done with a plain API key.
-type XiaomiFetcher struct{}
+type XiaomiFetcher struct {
+	baseFetcher
+}
 
 // NewXiaomiFetcher creates a fetcher. Returns nil when apiKey is empty.
 func NewXiaomiFetcher(apiKey string) *XiaomiFetcher {
 	if apiKey == "" {
 		return nil
 	}
-	return &XiaomiFetcher{}
+	return &XiaomiFetcher{baseFetcher: newBaseFetcher("xiaomi", "Xiaomi MiMo", "apikey", "https://platform.xiaomimimo.com/console/balance")}
 }
 
-// Provider returns the provider identifier.
-func (f *XiaomiFetcher) Provider() string { return "xiaomi" }
-
-// Label returns the human-readable provider name.
-func (f *XiaomiFetcher) Label() string { return "Xiaomi MiMo" }
-
-// AuthKind returns the authentication method.
-func (f *XiaomiFetcher) AuthKind() string { return "apikey" }
-
-// UsageURL returns the link to the provider's usage/billing page.
-func (f *XiaomiFetcher) UsageURL() string { return "https://platform.xiaomimimo.com/console/balance" }
-
 // Get returns provider metadata with no balance data.
-func (f *XiaomiFetcher) Get(ctx context.Context) *ProviderQuota {
-	return &ProviderQuota{
-		Provider: f.Provider(),
-		Label:    f.Label(),
-		AuthKind: f.AuthKind(),
-	}
+func (f *XiaomiFetcher) Get(_ context.Context) *ProviderQuota {
+	return f.quota()
 }

@@ -5,7 +5,7 @@ import { useParams } from "@solidjs/router";
 
 import ProcessDetail from "../components/ProcessDetail";
 import { useAppState } from "../AppState";
-import { taskIdFromParam, taskPath } from "../taskPath";
+import { taskIdFromParam, taskPathForTask } from "../taskPath";
 import { DetailPane } from "../components/Layout";
 
 export default function ProcessesPage() {
@@ -19,7 +19,7 @@ export default function ProcessesPage() {
         const t = () => s.taskById(taskId);
         const tp = () => {
           const task = t();
-          return task ? taskPath(task.id, task.repos?.[0]?.name ?? "", task.repos?.[0]?.branch ?? "", task.title) : `/task/@${taskId}`;
+          return task ? taskPathForTask(task) : `/task/@${taskId}`;
         };
         return (
           <DetailPane>

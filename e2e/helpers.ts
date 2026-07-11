@@ -21,18 +21,11 @@ function playwrightFetch(request: APIRequestContext): FetchFn {
 }
 
 // ---------------------------------------------------------------------------
-// APIClient: SDK client extended with a getTask convenience method.
+// APIClient: generated SDK client bound to Playwright's request fixture.
 // ---------------------------------------------------------------------------
 
 function createClient(request: APIRequestContext) {
-  const sdk = createApiClient(playwrightFetch(request));
-  return {
-    ...sdk,
-    getTask: async (id: string): Promise<Task | undefined> => {
-      const tasks = await sdk.listTasks();
-      return tasks.find((t) => t.id === id);
-    },
-  };
+  return createApiClient(playwrightFetch(request));
 }
 
 export type APIClient = ReturnType<typeof createClient>;
@@ -98,13 +91,12 @@ export async function waitForTaskState(
   state: string,
   timeoutMs = 15_000,
 ): Promise<Task> {
-  let task: Task | undefined;
+  let task!: Task;
   await expect(async () => {
     task = await api.getTask(taskId);
-    expect(task).toBeTruthy();
-    expect(task!.state).toBe(state);
+    expect(task.state).toBe(state);
   }).toPass({ timeout: timeoutMs, intervals: [500] });
-  return task!;
+  return task;
 }
 
 // ---------------------------------------------------------------------------

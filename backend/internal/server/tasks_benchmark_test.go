@@ -35,7 +35,7 @@ func BenchmarkHandleTaskRawEventsPurgedReplay(b *testing.B) {
 			req.SetPathValue("id", taskID)
 			w := httptest.NewRecorder()
 
-			testTaskHandlers(s).handleTaskRawEvents(w, req)
+			testTaskHandlers(s).handleTaskEvents(w, req)
 
 			if w.Code != http.StatusOK {
 				b.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -57,7 +57,7 @@ func BenchmarkHandleTaskRawEventsPurgedReplay(b *testing.B) {
 			req.SetPathValue("id", taskID)
 			w := httptest.NewRecorder()
 
-			testTaskHandlers(s).handleTaskRawEvents(w, req)
+			testTaskHandlers(s).handleTaskEvents(w, req)
 
 			if w.Code != http.StatusOK {
 				b.Fatalf("status = %d, want %d", w.Code, http.StatusOK)

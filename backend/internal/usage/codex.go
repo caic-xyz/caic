@@ -77,10 +77,11 @@ func NewCodexFetcher(ctx context.Context) *CodexFetcher {
 	}
 
 	f := &CodexFetcher{
-		client:    &http.Client{Timeout: 10 * time.Second},
-		token:     token,
-		accountID: accountID,
-		authPath:  authPath,
+		baseFetcher: newBaseFetcher("codex", "Codex", "oauth", "https://chatgpt.com/codex/cloud/settings/analytics"),
+		client:      &http.Client{Timeout: 10 * time.Second},
+		token:       token,
+		accountID:   accountID,
+		authPath:    authPath,
 	}
 
 	if err := f.startWatcher(ctx); err != nil {
@@ -89,27 +90,9 @@ func NewCodexFetcher(ctx context.Context) *CodexFetcher {
 	return f
 }
 
-// Provider returns the provider identifier.
-func (f *CodexFetcher) Provider() string { return "codex" }
-
-// Label returns the human-readable provider name.
-func (f *CodexFetcher) Label() string { return "Codex" }
-
-// AuthKind returns the authentication method.
-func (f *CodexFetcher) AuthKind() string { return "oauth" }
-
-// UsageURL returns the link to the provider's usage/billing page.
-func (f *CodexFetcher) UsageURL() string { return "https://chatgpt.com/codex/cloud/settings/analytics" }
-
 // Get returns the cached quota data, refreshing if stale.
 func (f *CodexFetcher) Get(ctx context.Context) *ProviderQuota {
-	f.mu.Lock()
-	if f.token == "" {
-		f.mu.Unlock()
-		return nil
-	}
-	f.mu.Unlock()
-	return f.get(ctx, f.fetch, "Codex")
+	return f.getIf(ctx, func() bool { return f.token != "" }, f.fetch)
 }
 
 func (f *CodexFetcher) fetch(ctx context.Context) (*ProviderQuota, error) {
@@ -139,11 +122,7 @@ func (f *CodexFetcher) fetch(ctx context.Context) (*ProviderQuota, error) {
 		return nil, fmt.Errorf("decode Codex usage: %w", err)
 	}
 
-	out := &ProviderQuota{
-		Provider: f.Provider(),
-		Label:    f.Label(),
-		AuthKind: f.AuthKind(),
-	}
+	out := f.quota()
 	if raw.RateLimit != nil {
 		if w := raw.RateLimit.PrimaryWindow; w != nil {
 			out.RateLimits = append(out.RateLimits, QuotaRateLimit{
