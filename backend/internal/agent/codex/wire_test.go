@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/maruel/genai/providers/codex"
 
@@ -373,7 +374,7 @@ func TestPerItemTypeStructs(t *testing.T) {
 	})
 	t.Run("CommandExecution", func(t *testing.T) {
 		t.Parallel()
-		const input = `{"id":"item_1","type":"commandExecution","command":"bash -lc ls","aggregatedOutput":"docs\nsrc\n","exitCode":0,"status":"completed","cwd":"/repo","durationMs":150}`
+		const input = `{"id":"item_1","type":"commandExecution","command":"bash -lc ls","aggregatedOutput":"docs\nsrc\n","exitCode":0,"status":"completed","cwd":"/repo","durationMs":150.5}`
 		var item codex.CommandExecutionItem
 		if err := json.Unmarshal([]byte(input), &item); err != nil {
 			t.Fatal(err)
@@ -390,8 +391,8 @@ func TestPerItemTypeStructs(t *testing.T) {
 		if item.Cwd != "/repo" {
 			t.Errorf("Cwd = %q", item.Cwd)
 		}
-		if item.DurationMs == nil || *item.DurationMs != 150 {
-			t.Errorf("DurationMs = %v", item.DurationMs)
+		if item.Duration == nil || item.Duration.AsDuration() != 150*time.Millisecond+500*time.Microsecond {
+			t.Errorf("Duration = %v", item.Duration)
 		}
 	})
 	t.Run("FileChange", func(t *testing.T) {

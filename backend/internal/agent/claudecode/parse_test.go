@@ -419,7 +419,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("Result", func(t *testing.T) {
 		t.Parallel()
-		line := `{"type":"result","subtype":"success","is_error":false,"duration_ms":1234,"num_turns":3,"result":"done","total_cost_usd":0.05,"usage":{"input_tokens":100,"output_tokens":50,"output_tokens_details":{"thinking_tokens":12}}}`
+		line := `{"type":"result","subtype":"success","is_error":false,"duration_ms":1234.5,"duration_api_ms":987.6,"num_turns":3,"result":"done","total_cost_usd":0.05,"usage":{"input_tokens":100,"output_tokens":50,"output_tokens_details":{"thinking_tokens":12}}}`
 		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
@@ -433,6 +433,12 @@ func TestParseMessage(t *testing.T) {
 		}
 		if m.NumTurns != 3 {
 			t.Errorf("turns = %d, want 3", m.NumTurns)
+		}
+		if m.DurationMs != 1234 {
+			t.Errorf("DurationMs = %d, want 1234", m.DurationMs)
+		}
+		if m.DurationAPIMs != 987 {
+			t.Errorf("DurationAPIMs = %d, want 987", m.DurationAPIMs)
 		}
 		if m.Usage.ReasoningOutputTokens != 12 {
 			t.Errorf("ReasoningOutputTokens = %d, want 12", m.Usage.ReasoningOutputTokens)

@@ -200,8 +200,8 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker, fw *jsonutil.FieldW
 			MessageType:   string(w.Type),
 			Subtype:       w.Subtype,
 			IsError:       w.IsError,
-			DurationMs:    w.DurationMs,
-			DurationAPIMs: w.DurationAPIMs,
+			DurationMs:    w.Duration.AsDuration().Milliseconds(),
+			DurationAPIMs: w.DurationAPI.AsDuration().Milliseconds(),
 			NumTurns:      w.NumTurns,
 			Result:        w.Result,
 			SessionID:     w.SessionID,
@@ -327,7 +327,7 @@ func parseSystem(line []byte, subtype string, fw *jsonutil.FieldWarner) ([]agent
 		if w.Patch.Status != "" {
 			return []agent.Message{&agent.SubagentEndMessage{
 				TaskID: w.TaskID,
-				Status: w.Patch.Status,
+				Status: string(w.Patch.Status),
 			}}, nil
 		}
 		return nil, nil

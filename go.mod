@@ -3,14 +3,14 @@ module github.com/caic-xyz/caic
 go 1.26.4
 
 require (
-	github.com/andybalholm/brotli v1.2.1
-	github.com/caic-xyz/md v0.16.0
+	github.com/andybalholm/brotli v1.2.2
+	github.com/caic-xyz/md v0.16.1
 	github.com/coder/websocket v1.8.14
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/invopop/jsonschema v0.14.0
-	github.com/klauspost/compress v1.18.6
+	github.com/klauspost/compress v1.19.0
 	github.com/lmittmann/tint v1.1.3
-	github.com/maruel/genai v0.6.3
+	github.com/maruel/genai v0.7.0
 	github.com/maruel/gopus v0.0.0-20260506115108-4c6355c2de38
 	github.com/maruel/ksid v0.1.1
 	github.com/maruel/roundtrippers v0.5.0
@@ -22,8 +22,8 @@ require (
 	github.com/pion/ice/v4 v4.2.7
 	github.com/pion/transport/v4 v4.0.2
 	github.com/pion/webrtc/v4 v4.2.15
-	golang.org/x/net v0.56.0
-	golang.org/x/sync v0.21.0
+	golang.org/x/net v0.57.0
+	golang.org/x/sync v0.22.0
 )
 
 require (
@@ -45,9 +45,9 @@ require (
 	github.com/pion/stun/v3 v3.1.5 // indirect
 	github.com/pion/turn/v5 v5.0.10 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
-	go.yaml.in/yaml/v4 v4.0.0-rc.5 // indirect
-	golang.org/x/crypto v0.53.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
-	golang.org/x/term v0.44.0 // indirect
+	go.yaml.in/yaml/v4 v4.0.0-rc.6 // indirect
+	golang.org/x/crypto v0.54.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/term v0.45.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 )
