@@ -294,58 +294,95 @@ public enum ErrorCodes {
 
 /// VoiceRTCOfferReq is the request body for POST /api/voicegateway/v1/voice/rtc/offer.
 public struct VoiceRTCOfferReq: Codable {
+    /// SDP is the browser/client WebRTC offer session description from RTCSessionDescription.sdp after createOffer and setLocalDescription.
     public let sdp: String
 }
 
 /// VoiceRTCAnswerResp is the response for POST /api/voicegateway/v1/voice/rtc/offer.
 public struct VoiceRTCAnswerResp: Codable {
+    /// SDP is the gateway WebRTC answer session description to pass to setRemoteDescription with type "answer".
     public let sdp: String
+    /// SessionID identifies the voice RTC session for diagnostics and close calls.
     public let sessionID: String
 }
 
 /// VoiceRTCClientDiagnostics reports client-observed WebRTC state for diagnosis.
 public struct VoiceRTCClientDiagnostics: Codable {
+    /// ICEConnectionState is the client's RTCPeerConnection.iceConnectionState.
     public let iceConnectionState: VoiceRTCICEConnectionState?
+    /// ICEGatheringState is the client's RTCPeerConnection.iceGatheringState.
     public let iceGatheringState: VoiceRTCICEGatheringState?
+    /// ConnectionState is the client's RTCPeerConnection.connectionState.
     public let connectionState: VoiceRTCConnectionState?
+    /// SignalingState is the client's RTCPeerConnection.signalingState.
     public let signalingState: VoiceRTCSignalingState?
+    /// DataChannelState is the client's voice-gateway RTCDataChannel.readyState.
     public let dataChannelState: VoiceRTCDataChannelState?
 }
 
 /// VoiceRTCDiagnosticsReq is the request body for POST /api/voicegateway/v1/voice/rtc/{sessionID}/diagnostics.
 public struct VoiceRTCDiagnosticsReq: Codable {
+    /// Client contains the browser/client WebRTC state observed by the caller.
     public let client: VoiceRTCClientDiagnostics?
+}
+
+/// VoiceRTCUDPEndpoint reports one server UDP candidate for diagnosis.
+public struct VoiceRTCUDPEndpoint: Codable {
+    /// Host is an IP address advertised in the gateway SDP answer.
+    public let host: String
+    /// Port is the UDP port paired with host in the gateway SDP answer.
+    public let port: Int
 }
 
 /// VoiceRTCServerDiagnostics reports server-observed WebRTC state for diagnosis.
 public struct VoiceRTCServerDiagnostics: Codable {
+    /// SessionFound reports whether the gateway still has the requested session.
     public let sessionFound: Bool
-    public let udpHost: String?
-    public let udpPort: Int?
+    /// UDPEndpoints are the LAN/Tailscale and optional UPnP public UDP candidates advertised to the client.
+    public let udpEndpoints: [VoiceRTCUDPEndpoint]?
+    /// UDPMappingError is the last UPnP mapping or refresh error, if any.
+    public let udpMappingError: String?
+    /// ICEConnectionState is the gateway PeerConnection ICE connection state.
     public let iceConnectionState: VoiceRTCICEConnectionState?
+    /// ICEGatheringState is the gateway PeerConnection ICE gathering state.
     public let iceGatheringState: VoiceRTCICEGatheringState?
+    /// ConnectionState is the gateway PeerConnection aggregate connection state.
     public let connectionState: VoiceRTCConnectionState?
+    /// SignalingState is the gateway PeerConnection signaling state.
     public let signalingState: VoiceRTCSignalingState?
+    /// DataChannelState is the gateway-observed voice data channel state.
     public let dataChannelState: VoiceRTCDataChannelState?
+    /// DataChannelOpened reports whether the voice data channel reached open.
     public let dataChannelOpened: Bool?
+    /// AudioTrackReceived reports whether the gateway received the client's microphone track.
     public let audioTrackReceived: Bool?
+    /// BackendConnected reports whether the gateway connected to the configured voice backend.
     public let backendConnected: Bool?
+    /// SessionReadySent reports whether the gateway sent session.ready to the client.
     public let sessionReadySent: Bool?
+    /// LastError is the last gateway error sent to the client, if any.
     public let lastError: String?
 }
 
 /// VoiceRTCDiagnosticsResp reports structured WebRTC connectivity diagnostics.
 public struct VoiceRTCDiagnosticsResp: Codable {
+    /// SessionID is the diagnosed voice RTC session ID.
     public let sessionID: String
+    /// Issue is the machine-readable connectivity diagnosis.
     public let issue: VoiceRTCConnectivityIssue
+    /// Side identifies where the issue appears to be.
     public let side: VoiceRTCConnectivitySide
+    /// Message is a human-readable explanation of the diagnosis.
     public let message: String
+    /// Server contains gateway-observed WebRTC state.
     public let server: VoiceRTCServerDiagnostics
+    /// Client echoes the client diagnostics included in the request.
     public let client: VoiceRTCClientDiagnostics?
 }
 
 /// StatusResp is a common response for mutation endpoints.
 public struct StatusResp: Codable {
+    /// Status is a short human-readable result such as "closed".
     public let status: String
 }
 
@@ -361,117 +398,161 @@ public struct ErrorResponse: Codable {
 
 /// MessageEnvelope carries the kind used to dispatch data-channel messages.
 public struct MessageEnvelope: Codable {
+    /// Kind is the message discriminator used to decode the concrete message type.
     public let kind: MessageKind
 }
 
 /// VoiceConfig describes provider-neutral voice preferences.
 public struct VoiceConfig: Codable {
+    /// Name is the requested provider-specific voice name.
     public let name: String
+    /// Language is the requested BCP 47 language tag, such as "en" or "fr-CA".
     public let language: String
 }
 
 /// ToolDeclaration is a provider-neutral service tool declaration.
 public struct ToolDeclaration: Codable {
+    /// Name is the tool name the assistant uses in tool.call messages.
     public let name: String
+    /// Description explains when and how the assistant should use the tool.
     public let description: String
+    /// Parameters is a JSON Schema object describing the tool arguments.
     public let parameters: JSONValue
 }
 
 /// Context carries provider-neutral text or instruction context.
 public struct Context: Codable {
+    /// SystemInstruction is provider-neutral instruction text for the assistant.
     public let systemInstruction: String?
+    /// Text is additional conversational context for the session.
     public let text: String?
 }
 
 /// SessionSetup is the client message that initializes a voice session.
 public struct SessionSetup: Codable {
+    /// Kind must be "session.setup".
     public let kind: MessageKind
+    /// Voice contains the requested voice and language.
     public let voice: VoiceConfig
+    /// Tools declares the client-side tools the assistant may call.
     public let tools: [ToolDeclaration]
+    /// Context provides initial instructions or text context for the session.
     public let context: Context
 }
 
 /// ContextUpdate is a client message that appends session context.
 public struct ContextUpdate: Codable {
+    /// Kind must be "context.update".
     public let kind: MessageKind
+    /// Context contains the instructions or text to append.
     public let context: Context
 }
 
 /// UserMessage is a client message that appends completed user text and asks the assistant to respond.
 public struct UserMessage: Codable {
+    /// Kind must be "user.message".
     public let kind: MessageKind
+    /// Text is the completed user utterance to send to the assistant.
     public let text: String
 }
 
 /// ToolResult is a client message that returns a tool execution result.
 public struct ToolResult: Codable {
+    /// Kind must be "tool.result".
     public let kind: MessageKind
+    /// ID matches the tool.call ID being answered.
     public let id: String
+    /// Name is the tool name that produced the result.
     public let name: String
+    /// Result is the JSON result returned to the assistant.
     public let result: JSONValue
 }
 
 /// TurnCancel is a client message that cancels the current turn.
 public struct TurnCancel: Codable {
+    /// Kind must be "turn.cancel".
     public let kind: MessageKind
+    /// Reason optionally explains why the current assistant turn was cancelled.
     public let reason: String?
 }
 
 /// SessionClose is a client message that closes the voice session.
 public struct SessionClose: Codable {
+    /// Kind must be "session.close".
     public let kind: MessageKind
+    /// Reason optionally explains why the client closed the session.
     public let reason: String?
 }
 
 /// SessionReady is a gateway message that reports the session is ready.
 public struct SessionReady: Codable {
+    /// Kind is "session.ready".
     public let kind: MessageKind
 }
 
 /// TranscriptDelta is a gateway message that streams transcript text.
 public struct TranscriptDelta: Codable {
+    /// Kind is "transcript.delta".
     public let kind: MessageKind
+    /// Speaker identifies who produced this transcript text.
     public let speaker: Speaker
+    /// Text is an incremental transcript fragment.
     public let text: String
 }
 
 /// AssistantTextDelta is a gateway message that streams assistant text.
 public struct AssistantTextDelta: Codable {
+    /// Kind is "assistant.text.delta".
     public let kind: MessageKind
+    /// Text is an incremental assistant text fragment.
     public let text: String
 }
 
 /// SpeechStarted is a gateway message that reports speech output started.
 public struct SpeechStarted: Codable {
+    /// Kind is "speech.started".
     public let kind: MessageKind
+    /// Speaker identifies whose speech output started.
     public let speaker: Speaker
 }
 
 /// SpeechEnded is a gateway message that reports speech output ended.
 public struct SpeechEnded: Codable {
+    /// Kind is "speech.ended".
     public let kind: MessageKind
+    /// Speaker identifies whose speech output ended.
     public let speaker: Speaker
 }
 
 /// ToolCall is a gateway message that asks the client to execute a tool.
 public struct ToolCall: Codable {
+    /// Kind is "tool.call".
     public let kind: MessageKind
+    /// ID uniquely identifies this tool call for the matching tool.result.
     public let id: String
+    /// Name is the requested tool name.
     public let name: String
+    /// Args is the JSON argument object for the requested tool.
     public let args: JSONValue
 }
 
 /// Interrupted is a gateway message that reports an interruption.
 public struct Interrupted: Codable {
+    /// Kind is "interrupted".
     public let kind: MessageKind
+    /// Source identifies what interrupted the turn.
     public let source: InterruptSource
+    /// Message optionally provides more detail about the interruption.
     public let message: String?
 }
 
 /// Error is a gateway message that reports an error.
 public struct Error: Codable {
+    /// Kind is "error".
     public let kind: MessageKind
+    /// Message is a human-readable error description.
     public let message: String
+    /// Recoverable reports whether the client may continue using the session.
     public let recoverable: Bool
 }
 

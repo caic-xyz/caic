@@ -27,6 +27,8 @@
 # UDP port for WebRTC ICE (single-port mux).
 # 0 (default) = enabled with OS-assigned ephemeral port.
 # >0 = enabled on that static port (open it in your firewall for UDP traffic).
+# The gateway automatically asks the router to map this selected port with UPnP
+# IGD and advertises the router's external address in ICE when that succeeds.
 # GEMINI_API_KEY is required.
 #webrtc_udp_port = 0
 

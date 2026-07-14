@@ -1,10 +1,51 @@
-// Unit tests for Go Mode voice service URL resolution.
+// Unit tests for Go Mode voice session diagnostics and service URL resolution.
 package com.fghbuild.gomode.voice
 
+import com.caic.voicegateway.sdk.v1.VoiceRTCConnectivityIssue
+import com.caic.voicegateway.sdk.v1.VoiceRTCConnectivitySide
+import com.caic.voicegateway.sdk.v1.VoiceRTCDiagnosticsResp
+import com.caic.voicegateway.sdk.v1.VoiceRTCServerDiagnostics
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VoiceSessionTest {
+    @Test
+    fun summarizeSDPCandidatesReportsCandidateHostPortAndType() {
+        val sdp = "v=0\r\n" +
+            "a=candidate:1 1 udp 2130706431 70.51.33.231 42602 typ srflx " +
+            "raddr 192.168.1.123 rport 42602\r\n" +
+            "a=candidate:2 1 udp 2130706431 192.168.1.123 42602 typ host\r\n"
+
+        assertEquals(
+            "70.51.33.231:42602 srflx, 192.168.1.123:42602 host",
+            summarizeSDPCandidates(sdp),
+        )
+    }
+
+    @Test
+    fun summarizeSDPCandidatesReportsNoneWithoutCandidates() {
+        assertEquals("none", summarizeSDPCandidates("v=0\r\n"))
+    }
+
+    @Test
+    fun formatVoiceRTCDiagnosticsSurfacesUDPMappingError() {
+        val message = formatVoiceRTCDiagnostics(
+            VoiceRTCDiagnosticsResp(
+                sessionID = "voice-session",
+                issue = VoiceRTCConnectivityIssue.UDPUnreachable,
+                side = VoiceRTCConnectivitySide.Network,
+                message = "server is waiting for a WebRTC data channel",
+                server = VoiceRTCServerDiagnostics(
+                    sessionFound = true,
+                    udpMappingError = "refresh UPnP UDP mapping 40000 -> 3478: timeout",
+                ),
+            ),
+        )
+
+        assertTrue(message.contains("UDP mapping: refresh UPnP UDP mapping 40000 -> 3478: timeout"))
+    }
+
     @Test
     fun resolveServiceURLUsesConfiguredServiceOriginForRelativePaths() {
         assertEquals(

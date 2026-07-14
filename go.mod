@@ -7,6 +7,7 @@ require (
 	github.com/caic-xyz/md v0.16.1
 	github.com/coder/websocket v1.8.14
 	github.com/fsnotify/fsnotify v1.10.1
+	github.com/huin/goupnp v1.3.0
 	github.com/invopop/jsonschema v0.14.0
 	github.com/klauspost/compress v1.19.0
 	github.com/lmittmann/tint v1.1.3

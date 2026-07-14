@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -51,16 +52,28 @@ const (
 // Bridge manages active WebRTC voice sessions for a single configured backend.
 type Bridge struct {
 	backend  backendConnector
-	api      *webrtc.API
 	udpMux   ice.UDPMux
+	voiceNet *ipv4Net
 	hostIP   net.IP
 	udpPort  int
-	mu       sync.Mutex
-	sessions map[string]*session
+
+	setupMu             sync.Mutex
+	api                 *webrtc.API
+	upnpMapping         *upnpMapping
+	advertisedEndpoints []udpCandidate
+	udpMappingError     string
+
+	sessionsMu sync.Mutex
+	sessions   map[string]*session
 }
 
-// NewBridge creates a Bridge that multiplexes all WebRTC traffic through a
-// single UDP port. This avoids opening ephemeral port ranges in the firewall.
+type udpCandidate struct {
+	host net.IP
+	port int
+}
+
+// NewBridge creates a Bridge that multiplexes WebRTC traffic through a single
+// UDP port. UPnP publication is delayed until the first offer.
 //
 // A gateway instance serves exactly the backend named in cfg. geminiAPIKey is
 // only consumed by the Gemini Live backend.
@@ -109,32 +122,23 @@ func newBridgeWithBackend(ctx context.Context, backend backendConnector, udpPort
 	if err != nil {
 		return nil, fmt.Errorf("listen UDP4 :%d: %w", udpPort, err)
 	}
-	mux := ice.NewUDPMuxDefault(ice.UDPMuxParams{UDPConn: conn})
-	se := webrtc.SettingEngine{}
-	se.SetICEUDPMux(mux)
-	se.SetNet(newIPv4Net(ctx, hostIP))
-	se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
-	if err := se.SetICEAddressRewriteRules(webrtc.ICEAddressRewriteRule{
-		External:        []string{hostIP.String()},
-		AsCandidateType: webrtc.ICECandidateTypeHost,
-	}); err != nil {
-		_ = conn.Close()
-		return nil, fmt.Errorf("set ICE address rewrite: %w", err)
-	}
-	api := webrtc.NewAPI(webrtc.WithSettingEngine(se))
 	addr, ok := conn.LocalAddr().(*net.UDPAddr)
 	if !ok {
 		_ = conn.Close()
 		return nil, fmt.Errorf("unexpected local address type: %T", conn.LocalAddr())
 	}
+	candidateIPs := iceCandidateIPv4s(hostIP)
+	voiceNet := newIPv4Net(ctx, candidateIPs)
+	mux := ice.NewUDPMuxDefault(ice.UDPMuxParams{UDPConn: conn, Net: voiceNet})
 	slog.InfoContext(ctx, "voicertc: listening", "udpPort", addr.Port, "hostIP", hostIP)
 	return &Bridge{
-		backend:  backend,
-		api:      api,
-		udpMux:   mux,
-		hostIP:   append(net.IP(nil), hostIP...),
-		udpPort:  addr.Port,
-		sessions: make(map[string]*session),
+		backend:             backend,
+		udpMux:              mux,
+		voiceNet:            voiceNet,
+		hostIP:              append(net.IP(nil), hostIP...),
+		advertisedEndpoints: udpCandidates(candidateIPs, addr.Port),
+		udpPort:             addr.Port,
+		sessions:            make(map[string]*session),
 	}, nil
 }
 
@@ -143,14 +147,17 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 	if !strings.Contains(sdpOffer, "m=audio ") {
 		return "", "", errors.New("SDP offer must include an audio track")
 	}
+	api, err := b.ensureWebRTCAPI(ctx)
+	if err != nil {
+		return "", "", err
+	}
 	connector := b.backend
 
-	// Create PeerConnection using the shared UDP mux.
-	pc, err := b.api.NewPeerConnection(webrtc.Configuration{
-		ICEServers: []webrtc.ICEServer{
-			{URLs: []string{"stun:stun.l.google.com:19302"}},
-		},
-	})
+	// Create PeerConnection using the shared UDP mux. The gateway publishes a
+	// host candidate rewritten to the UPnP external address when available; the
+	// client owns STUN for its side. Server-side STUN would re-enter Pion's
+	// default interface discovery and fail on hosts without IPv6 netlink support.
+	pc, err := api.NewPeerConnection(webrtc.Configuration{})
 	if err != nil {
 		return "", "", fmt.Errorf("create peer connection: %w", err)
 	}
@@ -325,16 +332,16 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 	}
 
 	// Register session.
-	b.mu.Lock()
+	b.sessionsMu.Lock()
 	b.sessions[sess.id] = sess
-	b.mu.Unlock()
+	b.sessionsMu.Unlock()
 
 	// Background cleanup.
 	go func() {
 		defer func() {
-			b.mu.Lock()
+			b.sessionsMu.Lock()
 			delete(b.sessions, sess.id)
-			b.mu.Unlock()
+			b.sessionsMu.Unlock()
 			sess.close()
 			slog.InfoContext(sessionCtx, "voicertc: session cleaned up", "session", sess.id)
 		}()
@@ -355,34 +362,35 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 		cancel()
 		return "", "", errors.New("no local description after ICE gathering")
 	}
-	return localDesc.SDP, sess.id, nil
+	return b.rewriteMappedCandidatePort(localDesc.SDP), sess.id, nil
 }
 
 // DiagnoseVoiceRTC returns structured connectivity diagnostics for a session.
 func (b *Bridge) DiagnoseVoiceRTC(_ context.Context, sessionID string, client *voicev1.VoiceRTCClientDiagnostics) voicev1.VoiceRTCDiagnosticsResp {
-	b.mu.Lock()
+	udpEndpoints, udpMappingError := b.udpDiagnostics()
+	b.sessionsMu.Lock()
 	sess := b.sessions[sessionID]
-	b.mu.Unlock()
+	b.sessionsMu.Unlock()
 	if sess == nil {
 		server := voicev1.VoiceRTCServerDiagnostics{
-			SessionFound: false,
-			UDPHost:      b.hostIP.String(),
-			UDPPort:      b.udpPort,
+			SessionFound:    false,
+			UDPEndpoints:    udpEndpoints,
+			UDPMappingError: udpMappingError,
 		}
 		return buildVoiceRTCDiagnostics(sessionID, &server, client)
 	}
-	server := sess.diagnostics(b.hostIP.String(), b.udpPort)
+	server := sess.diagnostics(udpEndpoints, udpMappingError)
 	return buildVoiceRTCDiagnostics(sessionID, &server, client)
 }
 
 // Close tears down a session by ID. No-op if not found.
 func (b *Bridge) Close(sessionID string) {
-	b.mu.Lock()
+	b.sessionsMu.Lock()
 	sess, ok := b.sessions[sessionID]
 	if ok {
 		delete(b.sessions, sessionID)
 	}
-	b.mu.Unlock()
+	b.sessionsMu.Unlock()
 	if ok {
 		sess.cancel()
 		sess.close()
@@ -390,24 +398,104 @@ func (b *Bridge) Close(sessionID string) {
 }
 
 // CloseAll tears down all sessions and the UDP mux. Called on server shutdown.
-func (b *Bridge) CloseAll() {
-	b.mu.Lock()
+func (b *Bridge) CloseAll(ctx context.Context) {
+	b.sessionsMu.Lock()
 	sessions := make([]*session, 0, len(b.sessions))
 	for _, s := range b.sessions {
 		sessions = append(sessions, s)
 	}
 	b.sessions = make(map[string]*session)
-	b.mu.Unlock()
+	b.sessionsMu.Unlock()
 	for _, s := range sessions {
 		s.cancel()
 		s.close()
 	}
+	b.setupMu.Lock()
+	upnpMapping := b.upnpMapping
+	b.upnpMapping = nil
+	b.api = nil
+	b.advertisedEndpoints = nil
+	b.udpMappingError = ""
+	b.setupMu.Unlock()
 	if b.udpMux != nil {
 		_ = b.udpMux.Close()
+	}
+	if upnpMapping != nil {
+		if err := upnpMapping.close(ctx); err != nil {
+			slog.WarnContext(ctx, "voicertc: delete UPnP mapping", "err", err)
+		}
 	}
 	if err := b.backend.Close(); err != nil {
 		slog.Warn("voicertc: close backend", "err", err)
 	}
+}
+
+func (b *Bridge) ensureWebRTCAPI(ctx context.Context) (*webrtc.API, error) {
+	b.setupMu.Lock()
+	defer b.setupMu.Unlock()
+	if b.api != nil {
+		return b.api, nil
+	}
+	advertisedEndpoints := append([]udpCandidate(nil), b.advertisedEndpoints...)
+	mapping, err := mapUPnPUDP(ctx, b.hostIP, b.udpPort)
+	if err != nil {
+		b.udpMappingError = fmt.Sprintf("UPnP UDP mapping failed: %v", err)
+		slog.ErrorContext(ctx, "voicertc: UPnP UDP mapping failed; falling back to local ICE address", "udpPort", b.udpPort, "err", err)
+	} else {
+		b.udpMappingError = ""
+		updated := appendUniqueUDPCandidate(nil, udpCandidate{host: mapping.ip, port: int(mapping.externalPort)})
+		for _, c := range advertisedEndpoints {
+			updated = appendUniqueUDPCandidate(updated, c)
+		}
+		advertisedEndpoints = updated
+	}
+	se := webrtc.SettingEngine{}
+	se.SetICEUDPMux(b.udpMux)
+	se.SetNet(b.voiceNet)
+	se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
+	se.SetICEMulticastDNSMode(ice.MulticastDNSModeDisabled)
+	if mapping != nil {
+		if err := se.SetICEAddressRewriteRules(webrtc.ICEAddressRewriteRule{
+			External:        []string{mapping.ip.String()},
+			Local:           b.hostIP.String(),
+			AsCandidateType: webrtc.ICECandidateTypeSrflx,
+			Mode:            webrtc.ICEAddressRewriteAppend,
+		}); err != nil {
+			_ = mapping.close(ctx)
+			return nil, fmt.Errorf("set ICE address rewrite: %w", err)
+		}
+	}
+	b.api = webrtc.NewAPI(webrtc.WithSettingEngine(se))
+	b.upnpMapping = mapping
+	b.advertisedEndpoints = advertisedEndpoints
+	slog.InfoContext(ctx, "voicertc: WebRTC API ready", "udpPort", b.udpPort, "hostIP", b.hostIP, "advertisedEndpoints", udpEndpointStrings(advertisedEndpoints), "upnpMapped", mapping != nil)
+	return b.api, nil
+}
+
+func (b *Bridge) udpDiagnostics() (endpoints []voicev1.VoiceRTCUDPEndpoint, mappingError string) {
+	b.setupMu.Lock()
+	mapping := b.upnpMapping
+	endpoints = voiceRTCUDPEndpoints(b.advertisedEndpoints)
+	mappingError = b.udpMappingError
+	b.setupMu.Unlock()
+	if mappingError != "" {
+		return endpoints, mappingError
+	}
+	if mapping == nil {
+		return endpoints, ""
+	}
+	return endpoints, mapping.refreshError()
+}
+
+func (b *Bridge) rewriteMappedCandidatePort(sdp string) string {
+	b.setupMu.Lock()
+	mapping := b.upnpMapping
+	hostIP := append(net.IP(nil), b.hostIP...)
+	b.setupMu.Unlock()
+	if mapping == nil {
+		return sdp
+	}
+	return rewriteSDPMappedCandidates(sdp, hostIP.String(), mapping.ip.String(), int(mapping.internalPort), int(mapping.externalPort))
 }
 
 // session holds all state for one bridge session.
@@ -483,13 +571,13 @@ func (s *session) markAudioTrackReceived() {
 	s.mu.Unlock()
 }
 
-func (s *session) diagnostics(udpHost string, udpPort int) voicev1.VoiceRTCServerDiagnostics {
+func (s *session) diagnostics(endpoints []voicev1.VoiceRTCUDPEndpoint, mappingError string) voicev1.VoiceRTCServerDiagnostics {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return voicev1.VoiceRTCServerDiagnostics{
 		SessionFound:       true,
-		UDPHost:            udpHost,
-		UDPPort:            udpPort,
+		UDPEndpoints:       endpoints,
+		UDPMappingError:    mappingError,
 		ICEConnectionState: s.iceConnectionState,
 		ICEGatheringState:  s.iceGatheringState,
 		ConnectionState:    s.peerConnectionState,
@@ -716,6 +804,105 @@ func buildVoiceRTCDiagnostics(sessionID string, server *voicev1.VoiceRTCServerDi
 	}
 }
 
+func rewriteSDPMappedCandidates(sdp, localHost, externalHost string, internalPort, externalPort int) string {
+	lines := strings.Split(sdp, "\n")
+	internalPortString := strconv.Itoa(internalPort)
+	externalPortString := strconv.Itoa(externalPort)
+	for i, line := range lines {
+		body := strings.TrimSuffix(line, "\r")
+		suffix := line[len(body):]
+		if !strings.HasPrefix(body, "a=candidate:") {
+			continue
+		}
+		fields := strings.Fields(body)
+		if !mappedCandidateNeedsRewrite(fields, localHost, externalHost, internalPortString) {
+			continue
+		}
+		fields[4] = externalHost
+		fields[5] = externalPortString
+		lines[i] = strings.Join(fields, " ") + suffix
+	}
+	return strings.Join(lines, "\n")
+}
+
+func mappedCandidateNeedsRewrite(fields []string, localHost, externalHost, internalPort string) bool {
+	if len(fields) < 8 || fields[7] != "srflx" {
+		return false
+	}
+	candidateHost := fields[4]
+	candidatePort := fields[5]
+	if candidateHost == externalHost {
+		return true
+	}
+	if candidateHost == localHost && candidatePort == internalPort {
+		return true
+	}
+	return candidateAttribute(fields, "raddr") == localHost && candidateAttribute(fields, "rport") == internalPort
+}
+
+func candidateAttribute(fields []string, name string) string {
+	for i := 8; i+1 < len(fields); i += 2 {
+		if fields[i] == name {
+			return fields[i+1]
+		}
+	}
+	return ""
+}
+
+func udpCandidates(ips []net.IP, port int) []udpCandidate {
+	candidates := make([]udpCandidate, 0, len(ips))
+	for _, ip := range ips {
+		candidates = appendUniqueUDPCandidate(candidates, udpCandidate{host: ip, port: port})
+	}
+	return candidates
+}
+
+func appendUniqueUDPCandidate(candidates []udpCandidate, c udpCandidate) []udpCandidate {
+	v4 := c.host.To4()
+	if v4 == nil || c.port <= 0 {
+		return candidates
+	}
+	for _, existing := range candidates {
+		if existing.host.Equal(v4) && existing.port == c.port {
+			return candidates
+		}
+	}
+	return append(candidates, udpCandidate{host: append(net.IP(nil), v4...), port: c.port})
+}
+
+func voiceRTCUDPEndpoints(candidates []udpCandidate) []voicev1.VoiceRTCUDPEndpoint {
+	if len(candidates) == 0 {
+		return nil
+	}
+	endpoints := make([]voicev1.VoiceRTCUDPEndpoint, 0, len(candidates))
+	for _, c := range candidates {
+		endpoints = append(endpoints, voicev1.VoiceRTCUDPEndpoint{Host: c.host.String(), Port: c.port})
+	}
+	return endpoints
+}
+
+func udpEndpointStrings(candidates []udpCandidate) []string {
+	if len(candidates) == 0 {
+		return nil
+	}
+	endpoints := make([]string, 0, len(candidates))
+	for _, c := range candidates {
+		endpoints = append(endpoints, net.JoinHostPort(c.host.String(), strconv.Itoa(c.port)))
+	}
+	return endpoints
+}
+
+func formatUDPServerCandidates(server *voicev1.VoiceRTCServerDiagnostics) string {
+	if len(server.UDPEndpoints) == 0 {
+		return "unknown"
+	}
+	candidates := make([]string, 0, len(server.UDPEndpoints))
+	for _, e := range server.UDPEndpoints {
+		candidates = append(candidates, net.JoinHostPort(e.Host, strconv.Itoa(e.Port)))
+	}
+	return strings.Join(candidates, ", ")
+}
+
 func classifyVoiceRTCConnectivity(server *voicev1.VoiceRTCServerDiagnostics, client *voicev1.VoiceRTCClientDiagnostics) (voicev1.VoiceRTCConnectivityIssue, voicev1.VoiceRTCConnectivitySide, string) {
 	if !server.SessionFound {
 		return voicev1.VoiceRTCConnectivityIssueServerSessionMissing,
@@ -734,7 +921,7 @@ func classifyVoiceRTCConnectivity(server *voicev1.VoiceRTCServerDiagnostics, cli
 		if clientICE == "failed" || clientICE == "disconnected" || clientICE == "closed" || clientConn == "failed" || clientConn == "closed" {
 			return voicev1.VoiceRTCConnectivityIssueUDPUnreachable,
 				voicev1.VoiceRTCConnectivitySideNetwork,
-				fmt.Sprintf("client could not establish ICE with server UDP candidate %s:%d", server.UDPHost, server.UDPPort)
+				"client could not establish ICE with server UDP candidates " + formatUDPServerCandidates(server)
 		}
 		if clientICE == "connected" || clientICE == "completed" || clientConn == "connected" {
 			return voicev1.VoiceRTCConnectivityIssueDataChannelNotOpen,
@@ -743,7 +930,7 @@ func classifyVoiceRTCConnectivity(server *voicev1.VoiceRTCServerDiagnostics, cli
 		}
 		return voicev1.VoiceRTCConnectivityIssueUDPUnreachable,
 			voicev1.VoiceRTCConnectivitySideNetwork,
-			fmt.Sprintf("server is waiting for a WebRTC data channel on UDP %s:%d", server.UDPHost, server.UDPPort)
+			"server is waiting for a WebRTC data channel on UDP candidates " + formatUDPServerCandidates(server)
 	}
 	if !server.BackendConnected {
 		return voicev1.VoiceRTCConnectivityIssueVoiceBackendConnecting,

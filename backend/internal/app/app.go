@@ -82,7 +82,7 @@ func (a *App) Serve(ctx context.Context, ln net.Listener) error {
 	group.Go(func() error { return a.Server.Serve(groupCtx, ln) })
 	err := group.Wait()
 	if a.voiceBridge != nil {
-		a.voiceBridge.CloseAll()
+		a.voiceBridge.CloseAll(context.WithoutCancel(ctx))
 	}
 	return err
 }

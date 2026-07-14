@@ -176,58 +176,95 @@ export const VoiceRTCSignalingStateClosed: VoiceRTCSignalingState = "closed";
 
 /** VoiceRTCOfferReq is the request body for POST /api/voicegateway/v1/voice/rtc/offer. */
 export interface VoiceRTCOfferReq {
+  /** SDP is the browser/client WebRTC offer session description from RTCSessionDescription.sdp after createOffer and setLocalDescription. */
   sdp: string;
 }
 
 /** VoiceRTCAnswerResp is the response for POST /api/voicegateway/v1/voice/rtc/offer. */
 export interface VoiceRTCAnswerResp {
+  /** SDP is the gateway WebRTC answer session description to pass to setRemoteDescription with type "answer". */
   sdp: string;
+  /** SessionID identifies the voice RTC session for diagnostics and close calls. */
   sessionID: string;
 }
 
 /** VoiceRTCClientDiagnostics reports client-observed WebRTC state for diagnosis. */
 export interface VoiceRTCClientDiagnostics {
+  /** ICEConnectionState is the client's RTCPeerConnection.iceConnectionState. */
   iceConnectionState?: VoiceRTCICEConnectionState;
+  /** ICEGatheringState is the client's RTCPeerConnection.iceGatheringState. */
   iceGatheringState?: VoiceRTCICEGatheringState;
+  /** ConnectionState is the client's RTCPeerConnection.connectionState. */
   connectionState?: VoiceRTCConnectionState;
+  /** SignalingState is the client's RTCPeerConnection.signalingState. */
   signalingState?: VoiceRTCSignalingState;
+  /** DataChannelState is the client's voice-gateway RTCDataChannel.readyState. */
   dataChannelState?: VoiceRTCDataChannelState;
 }
 
 /** VoiceRTCDiagnosticsReq is the request body for POST /api/voicegateway/v1/voice/rtc/{sessionID}/diagnostics. */
 export interface VoiceRTCDiagnosticsReq {
+  /** Client contains the browser/client WebRTC state observed by the caller. */
   client?: VoiceRTCClientDiagnostics;
+}
+
+/** VoiceRTCUDPEndpoint reports one server UDP candidate for diagnosis. */
+export interface VoiceRTCUDPEndpoint {
+  /** Host is an IP address advertised in the gateway SDP answer. */
+  host: string;
+  /** Port is the UDP port paired with host in the gateway SDP answer. */
+  port: number /* int */;
 }
 
 /** VoiceRTCServerDiagnostics reports server-observed WebRTC state for diagnosis. */
 export interface VoiceRTCServerDiagnostics {
+  /** SessionFound reports whether the gateway still has the requested session. */
   sessionFound: boolean;
-  udpHost?: string;
-  udpPort?: number /* int */;
+  /** UDPEndpoints are the LAN/Tailscale and optional UPnP public UDP candidates advertised to the client. */
+  udpEndpoints?: VoiceRTCUDPEndpoint[];
+  /** UDPMappingError is the last UPnP mapping or refresh error, if any. */
+  udpMappingError?: string;
+  /** ICEConnectionState is the gateway PeerConnection ICE connection state. */
   iceConnectionState?: VoiceRTCICEConnectionState;
+  /** ICEGatheringState is the gateway PeerConnection ICE gathering state. */
   iceGatheringState?: VoiceRTCICEGatheringState;
+  /** ConnectionState is the gateway PeerConnection aggregate connection state. */
   connectionState?: VoiceRTCConnectionState;
+  /** SignalingState is the gateway PeerConnection signaling state. */
   signalingState?: VoiceRTCSignalingState;
+  /** DataChannelState is the gateway-observed voice data channel state. */
   dataChannelState?: VoiceRTCDataChannelState;
+  /** DataChannelOpened reports whether the voice data channel reached open. */
   dataChannelOpened?: boolean;
+  /** AudioTrackReceived reports whether the gateway received the client's microphone track. */
   audioTrackReceived?: boolean;
+  /** BackendConnected reports whether the gateway connected to the configured voice backend. */
   backendConnected?: boolean;
+  /** SessionReadySent reports whether the gateway sent session.ready to the client. */
   sessionReadySent?: boolean;
+  /** LastError is the last gateway error sent to the client, if any. */
   lastError?: string;
 }
 
 /** VoiceRTCDiagnosticsResp reports structured WebRTC connectivity diagnostics. */
 export interface VoiceRTCDiagnosticsResp {
+  /** SessionID is the diagnosed voice RTC session ID. */
   sessionID: string;
+  /** Issue is the machine-readable connectivity diagnosis. */
   issue: VoiceRTCConnectivityIssue;
+  /** Side identifies where the issue appears to be. */
   side: VoiceRTCConnectivitySide;
+  /** Message is a human-readable explanation of the diagnosis. */
   message: string;
+  /** Server contains gateway-observed WebRTC state. */
   server: VoiceRTCServerDiagnostics;
+  /** Client echoes the client diagnostics included in the request. */
   client?: VoiceRTCClientDiagnostics;
 }
 
 /** StatusResp is a common response for mutation endpoints. */
 export interface StatusResp {
+  /** Status is a short human-readable result such as "closed". */
   status: string;
 }
 
@@ -243,117 +280,161 @@ export interface ErrorResponse {
 
 /** MessageEnvelope carries the kind used to dispatch data-channel messages. */
 export interface MessageEnvelope {
+  /** Kind is the message discriminator used to decode the concrete message type. */
   kind: MessageKind;
 }
 
 /** VoiceConfig describes provider-neutral voice preferences. */
 export interface VoiceConfig {
+  /** Name is the requested provider-specific voice name. */
   name: string;
+  /** Language is the requested BCP 47 language tag, such as "en" or "fr-CA". */
   language: string;
 }
 
 /** ToolDeclaration is a provider-neutral service tool declaration. */
 export interface ToolDeclaration {
+  /** Name is the tool name the assistant uses in tool.call messages. */
   name: string;
+  /** Description explains when and how the assistant should use the tool. */
   description: string;
+  /** Parameters is a JSON Schema object describing the tool arguments. */
   parameters: any /* json.RawMessage */;
 }
 
 /** Context carries provider-neutral text or instruction context. */
 export interface Context {
+  /** SystemInstruction is provider-neutral instruction text for the assistant. */
   systemInstruction?: string;
+  /** Text is additional conversational context for the session. */
   text?: string;
 }
 
 /** SessionSetup is the client message that initializes a voice session. */
 export interface SessionSetup {
+  /** Kind must be "session.setup". */
   kind: MessageKind;
+  /** Voice contains the requested voice and language. */
   voice: VoiceConfig;
+  /** Tools declares the client-side tools the assistant may call. */
   tools: ToolDeclaration[];
+  /** Context provides initial instructions or text context for the session. */
   context: Context;
 }
 
 /** ContextUpdate is a client message that appends session context. */
 export interface ContextUpdate {
+  /** Kind must be "context.update". */
   kind: MessageKind;
+  /** Context contains the instructions or text to append. */
   context: Context;
 }
 
 /** UserMessage is a client message that appends completed user text and asks the assistant to respond. */
 export interface UserMessage {
+  /** Kind must be "user.message". */
   kind: MessageKind;
+  /** Text is the completed user utterance to send to the assistant. */
   text: string;
 }
 
 /** ToolResult is a client message that returns a tool execution result. */
 export interface ToolResult {
+  /** Kind must be "tool.result". */
   kind: MessageKind;
+  /** ID matches the tool.call ID being answered. */
   id: string;
+  /** Name is the tool name that produced the result. */
   name: string;
+  /** Result is the JSON result returned to the assistant. */
   result: any /* json.RawMessage */;
 }
 
 /** TurnCancel is a client message that cancels the current turn. */
 export interface TurnCancel {
+  /** Kind must be "turn.cancel". */
   kind: MessageKind;
+  /** Reason optionally explains why the current assistant turn was cancelled. */
   reason?: string;
 }
 
 /** SessionClose is a client message that closes the voice session. */
 export interface SessionClose {
+  /** Kind must be "session.close". */
   kind: MessageKind;
+  /** Reason optionally explains why the client closed the session. */
   reason?: string;
 }
 
 /** SessionReady is a gateway message that reports the session is ready. */
 export interface SessionReady {
+  /** Kind is "session.ready". */
   kind: MessageKind;
 }
 
 /** TranscriptDelta is a gateway message that streams transcript text. */
 export interface TranscriptDelta {
+  /** Kind is "transcript.delta". */
   kind: MessageKind;
+  /** Speaker identifies who produced this transcript text. */
   speaker: Speaker;
+  /** Text is an incremental transcript fragment. */
   text: string;
 }
 
 /** AssistantTextDelta is a gateway message that streams assistant text. */
 export interface AssistantTextDelta {
+  /** Kind is "assistant.text.delta". */
   kind: MessageKind;
+  /** Text is an incremental assistant text fragment. */
   text: string;
 }
 
 /** SpeechStarted is a gateway message that reports speech output started. */
 export interface SpeechStarted {
+  /** Kind is "speech.started". */
   kind: MessageKind;
+  /** Speaker identifies whose speech output started. */
   speaker: Speaker;
 }
 
 /** SpeechEnded is a gateway message that reports speech output ended. */
 export interface SpeechEnded {
+  /** Kind is "speech.ended". */
   kind: MessageKind;
+  /** Speaker identifies whose speech output ended. */
   speaker: Speaker;
 }
 
 /** ToolCall is a gateway message that asks the client to execute a tool. */
 export interface ToolCall {
+  /** Kind is "tool.call". */
   kind: MessageKind;
+  /** ID uniquely identifies this tool call for the matching tool.result. */
   id: string;
+  /** Name is the requested tool name. */
   name: string;
+  /** Args is the JSON argument object for the requested tool. */
   args: any /* json.RawMessage */;
 }
 
 /** Interrupted is a gateway message that reports an interruption. */
 export interface Interrupted {
+  /** Kind is "interrupted". */
   kind: MessageKind;
+  /** Source identifies what interrupted the turn. */
   source: InterruptSource;
+  /** Message optionally provides more detail about the interruption. */
   message?: string;
 }
 
 /** Error is a gateway message that reports an error. */
 export interface Error {
+  /** Kind is "error". */
   kind: MessageKind;
+  /** Message is a human-readable error description. */
   message: string;
+  /** Recoverable reports whether the client may continue using the session. */
   recoverable: boolean;
 }
 

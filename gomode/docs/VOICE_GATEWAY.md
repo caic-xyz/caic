@@ -56,6 +56,15 @@ sets gateway `authRequired` false.
 
 Use embedded mode for single-host deployments and development.
 
+### NAT traversal
+
+The gateway uses one UDP port for WebRTC ICE. At startup, it requests a UPnP
+IGD port mapping for the selected UDP port and advertises the router's external
+IPv4 address in ICE when that succeeds. This works with
+`server.webrtc_udp_port = 0`: the gateway listens on an OS-assigned UDP port and
+maps that selected port. UPnP does not replace TURN; clients can still fail
+behind networks that block UDP or when the server is behind double NAT.
+
 ### External Gateway
 
 A separate process serves the voice gateway. It has no login UI and holds no

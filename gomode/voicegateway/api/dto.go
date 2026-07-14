@@ -89,12 +89,16 @@ func BadRequest(msg string) *Error {
 
 // ErrorResponse is the JSON envelope for error responses.
 type ErrorResponse struct {
-	Error   ErrorDetails   `json:"error"`
+	// Error contains the machine-readable code and human-readable message.
+	Error ErrorDetails `json:"error"`
+	// Details contains optional endpoint-specific structured error context.
 	Details map[string]any `json:"details,omitempty"`
 }
 
 // ErrorDetails holds the code and message within an error response.
 type ErrorDetails struct {
-	Code    ErrorCode `json:"code"`
-	Message string    `json:"message"`
+	// Code is the machine-readable error code.
+	Code ErrorCode `json:"code"`
+	// Message is the human-readable error message.
+	Message string `json:"message"`
 }

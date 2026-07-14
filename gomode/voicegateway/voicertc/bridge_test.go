@@ -7,8 +7,10 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"math"
 	"net"
+	"strconv"
 	"testing"
 
 	"github.com/maruel/gopus"
@@ -38,11 +40,11 @@ func TestClassifyVoiceRTCConnectivity(t *testing.T) {
 		},
 		{
 			name:       "udp unreachable",
-			server:     voicev1.VoiceRTCServerDiagnostics{SessionFound: true, UDPHost: "192.0.2.10", UDPPort: 3478},
+			server:     voicev1.VoiceRTCServerDiagnostics{SessionFound: true, UDPEndpoints: []voicev1.VoiceRTCUDPEndpoint{{Host: "192.0.2.10", Port: 3478}}},
 			client:     voicev1.VoiceRTCClientDiagnostics{ICEConnectionState: "failed"},
 			wantIssue:  voicev1.VoiceRTCConnectivityIssueUDPUnreachable,
 			wantSide:   voicev1.VoiceRTCConnectivitySideNetwork,
-			wantReason: "client could not establish ICE with server UDP candidate 192.0.2.10:3478",
+			wantReason: "client could not establish ICE with server UDP candidates 192.0.2.10:3478",
 		},
 		{
 			name:       "backend connecting",
@@ -364,7 +366,7 @@ func TestNewBridge(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer b.CloseAll()
+		defer b.CloseAll(t.Context())
 	})
 
 	t.Run("PeerConnection", func(t *testing.T) {
@@ -373,9 +375,13 @@ func TestNewBridge(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer b.CloseAll()
+		defer b.CloseAll(t.Context())
 
-		pc, err := b.api.NewPeerConnection(webrtc.Configuration{})
+		api, err := b.ensureWebRTCAPI(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		pc, err := api.NewPeerConnection(webrtc.Configuration{})
 		if err != nil {
 			t.Fatal("create PeerConnection:", err)
 		}
@@ -392,6 +398,78 @@ func TestNewBridge(t *testing.T) {
 			t.Fatal("set local description:", err)
 		}
 	})
+}
+
+func TestRewriteSDPMappedCandidates(t *testing.T) {
+	t.Parallel()
+	t.Run("rewrites mapped external port", func(t *testing.T) {
+		t.Parallel()
+		sdp := "v=0\r\na=candidate:1 1 udp 2130706431 203.0.113.10 3478 typ srflx\r\na=candidate:2 1 udp 2130706431 192.168.1.20 3478 typ host\r\n"
+		got := rewriteSDPMappedCandidates(sdp, "192.168.1.20", "203.0.113.10", 3478, 40000)
+		want := "v=0\r\na=candidate:1 1 udp 2130706431 203.0.113.10 40000 typ srflx\r\na=candidate:2 1 udp 2130706431 192.168.1.20 3478 typ host\r\n"
+		if got != want {
+			t.Fatalf("sdp = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("rewrites unspecified srflx candidate from pion", func(t *testing.T) {
+		t.Parallel()
+		sdp := "v=0\r\na=candidate:1 1 udp 2130706431 192.168.1.20 3478 typ host\r\na=candidate:2 1 udp 1694498815 0.0.0.0 34123 typ srflx raddr 192.168.1.20 rport 3478\r\n"
+		got := rewriteSDPMappedCandidates(sdp, "192.168.1.20", "203.0.113.10", 3478, 40000)
+		want := "v=0\r\na=candidate:1 1 udp 2130706431 192.168.1.20 3478 typ host\r\na=candidate:2 1 udp 1694498815 203.0.113.10 40000 typ srflx raddr 192.168.1.20 rport 3478\r\n"
+		if got != want {
+			t.Fatalf("sdp = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("leaves unrelated srflx candidate unchanged", func(t *testing.T) {
+		t.Parallel()
+		sdp := "v=0\r\na=candidate:1 1 udp 1694498815 0.0.0.0 34123 typ srflx raddr 192.168.122.1 rport 3478\r\n"
+		got := rewriteSDPMappedCandidates(sdp, "192.168.1.20", "203.0.113.10", 3478, 40000)
+		if got != sdp {
+			t.Fatalf("sdp = %q, want unchanged %q", got, sdp)
+		}
+	})
+}
+
+func TestIceCandidateIPv4(t *testing.T) {
+	t.Parallel()
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		for _, raw := range []string{"192.168.1.10", "100.64.1.2", "10.0.0.5"} {
+			if !iceCandidateIPv4(net.ParseIP(raw)) {
+				t.Fatalf("iceCandidateIPv4(%s) = false, want true", raw)
+			}
+		}
+	})
+
+	t.Run("rejects loopback and link local", func(t *testing.T) {
+		t.Parallel()
+		for _, raw := range []string{"127.0.0.1", "169.254.10.20"} {
+			if iceCandidateIPv4(net.ParseIP(raw)) {
+				t.Fatalf("iceCandidateIPv4(%s) = true, want false", raw)
+			}
+		}
+	})
+}
+
+func TestNewIPv4Net(t *testing.T) {
+	t.Parallel()
+	n := newIPv4Net(t.Context(), []net.IP{net.ParseIP("192.168.1.10"), net.ParseIP("100.64.1.2")})
+	interfaces, err := n.Interfaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(interfaces) != 1 {
+		t.Fatalf("len(interfaces) = %d, want 1", len(interfaces))
+	}
+	addrs, err := interfaces[0].Addrs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(addrs) != 2 {
+		t.Fatalf("len(addrs) = %d, want 2", len(addrs))
+	}
 }
 
 func TestDefaultIPv4(t *testing.T) {
@@ -454,9 +532,48 @@ func TestBackendConnector(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		b.CloseAll()
+		b.CloseAll(t.Context())
 		if !backend.closed {
 			t.Fatal("backend was not closed by CloseAll")
+		}
+	})
+
+	t.Run("NewBridgeWithBackendBindsUDPAndDefersAPI", func(t *testing.T) {
+		t.Parallel()
+		backend := &fakeBackendConnector{}
+		b, err := newBridgeWithBackend(t.Context(), backend, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer b.CloseAll(t.Context())
+		if b.udpPort == 0 {
+			t.Fatal("udpPort = 0, want bound port")
+		}
+		if b.api != nil {
+			t.Fatal("api initialized before first offer")
+		}
+		var lc net.ListenConfig
+		conn, err := lc.ListenPacket(t.Context(), "udp4", net.JoinHostPort("", strconv.Itoa(b.udpPort)))
+		if err == nil {
+			_ = conn.Close()
+			t.Fatal("expected UDP port to be in use")
+		}
+	})
+
+	t.Run("DiagnosticsSurfacesUDPMappingError", func(t *testing.T) {
+		t.Parallel()
+		mapping := &upnpMapping{}
+		mapping.setRefreshErr(errors.New("refresh failed"))
+		b := &Bridge{
+			upnpMapping: mapping,
+			advertisedEndpoints: []udpCandidate{{
+				host: net.ParseIP("192.168.1.20"),
+				port: 3478,
+			}},
+		}
+		got := b.DiagnoseVoiceRTC(t.Context(), "missing", nil)
+		if got.Server.UDPMappingError != "refresh failed" {
+			t.Fatalf("UDPMappingError = %q, want refresh failed", got.Server.UDPMappingError)
 		}
 	})
 

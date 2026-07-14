@@ -52,6 +52,17 @@ func defaultRouteIPv4(ctx context.Context) (net.IP, error) {
 }
 
 func interfaceIPv4() (net.IP, error) {
+	candidates, err := interfaceIPv4Candidates()
+	if err != nil {
+		return nil, err
+	}
+	if ip, ok := bestIPv4Candidate(candidates); ok {
+		return ip, nil
+	}
+	return net.IPv4(127, 0, 0, 1), nil
+}
+
+func interfaceIPv4Candidates() ([]net.IP, error) {
 	ifcs, err := net.Interfaces()
 	if err != nil {
 		return nil, fmt.Errorf("list interfaces: %w", err)
@@ -73,10 +84,7 @@ func interfaceIPv4() (net.IP, error) {
 			candidates = append(candidates, ip)
 		}
 	}
-	if ip, ok := bestIPv4Candidate(candidates); ok {
-		return ip, nil
-	}
-	return net.IPv4(127, 0, 0, 1), nil
+	return candidates, nil
 }
 
 func addrIPv4(addr net.Addr) net.IP {
@@ -115,17 +123,53 @@ func bestIPv4Candidate(candidates []net.IP) (net.IP, bool) {
 	return nil, false
 }
 
-// newIPv4Net returns an ipv4Net with a synthetic interface carrying hostIP.
+func iceCandidateIPv4s(primary net.IP) []net.IP {
+	ips := make([]net.IP, 0, 4)
+	ips = appendUniqueIPv4(ips, primary)
+	candidates, err := interfaceIPv4Candidates()
+	if err != nil {
+		return ips
+	}
+	for _, ip := range candidates {
+		if !iceCandidateIPv4(ip) {
+			continue
+		}
+		ips = appendUniqueIPv4(ips, ip)
+	}
+	return ips
+}
+
+func iceCandidateIPv4(ip net.IP) bool {
+	v4 := ip.To4()
+	return v4 != nil && v4.IsGlobalUnicast() && !v4.IsLoopback() && !v4.IsLinkLocalUnicast()
+}
+
+func appendUniqueIPv4(ips []net.IP, ip net.IP) []net.IP {
+	v4 := ip.To4()
+	if v4 == nil {
+		return ips
+	}
+	for _, existing := range ips {
+		if existing.Equal(v4) {
+			return ips
+		}
+	}
+	return append(ips, append(net.IP(nil), v4...))
+}
+
+// newIPv4Net returns an ipv4Net with a synthetic interface carrying hostIPs.
 //
-// This avoids netlink enumeration while giving pion a routable address
+// This avoids netlink enumeration while giving pion routable addresses
 // for ICE candidate gathering.
-func newIPv4Net(ctx context.Context, hostIP net.IP) *ipv4Net {
+func newIPv4Net(ctx context.Context, hostIPs []net.IP) *ipv4Net {
 	ifc := transport.NewInterface(net.Interface{
 		Index: 1,
 		Name:  "eth0",
 		Flags: net.FlagUp | net.FlagMulticast,
 	})
-	ifc.AddAddress(&net.IPNet{IP: hostIP, Mask: net.CIDRMask(32, 32)})
+	for _, ip := range hostIPs {
+		ifc.AddAddress(&net.IPNet{IP: ip, Mask: net.CIDRMask(32, 32)})
+	}
 	return &ipv4Net{ctx: ctx, interfaces: []*transport.Interface{ifc}}
 }
 

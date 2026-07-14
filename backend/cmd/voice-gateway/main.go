@@ -65,7 +65,7 @@ func mainImpl(args []string) error {
 		if err != nil {
 			return err
 		}
-		defer bridge.CloseAll()
+		defer bridge.CloseAll(context.WithoutCancel(ctx))
 	}
 
 	handler, err := voicegateway.NewHandler(&cfg, bridge)

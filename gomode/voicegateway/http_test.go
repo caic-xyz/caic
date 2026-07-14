@@ -34,8 +34,7 @@ func (f *fakeMediaBridge) DiagnoseVoiceRTC(_ context.Context, sessionID string, 
 		Message:   "server is waiting for a WebRTC data channel on UDP 192.0.2.10:3478",
 		Server: voicev1.VoiceRTCServerDiagnostics{
 			SessionFound: true,
-			UDPHost:      "192.0.2.10",
-			UDPPort:      3478,
+			UDPEndpoints: []voicev1.VoiceRTCUDPEndpoint{{Host: "192.0.2.10", Port: 3478}},
 		},
 		Client: *client,
 	}

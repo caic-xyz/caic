@@ -504,61 +504,105 @@ object ErrorCodes {
 
 /** VoiceRTCOfferReq is the request body for POST /api/voicegateway/v1/voice/rtc/offer. */
 @Serializable
-data class VoiceRTCOfferReq(val sdp: String)
+data class VoiceRTCOfferReq(
+    /** SDP is the browser/client WebRTC offer session description from RTCSessionDescription.sdp after createOffer and setLocalDescription. */
+    val sdp: String,
+)
 
 /** VoiceRTCAnswerResp is the response for POST /api/voicegateway/v1/voice/rtc/offer. */
 @Serializable
 data class VoiceRTCAnswerResp(
+    /** SDP is the gateway WebRTC answer session description to pass to setRemoteDescription with type "answer". */
     val sdp: String,
+    /** SessionID identifies the voice RTC session for diagnostics and close calls. */
     @SerialName("sessionID") val sessionID: String,
 )
 
 /** VoiceRTCClientDiagnostics reports client-observed WebRTC state for diagnosis. */
 @Serializable
 data class VoiceRTCClientDiagnostics(
+    /** ICEConnectionState is the client's RTCPeerConnection.iceConnectionState. */
     val iceConnectionState: VoiceRTCICEConnectionState? = null,
+    /** ICEGatheringState is the client's RTCPeerConnection.iceGatheringState. */
     val iceGatheringState: VoiceRTCICEGatheringState? = null,
+    /** ConnectionState is the client's RTCPeerConnection.connectionState. */
     val connectionState: VoiceRTCConnectionState? = null,
+    /** SignalingState is the client's RTCPeerConnection.signalingState. */
     val signalingState: VoiceRTCSignalingState? = null,
+    /** DataChannelState is the client's voice-gateway RTCDataChannel.readyState. */
     val dataChannelState: VoiceRTCDataChannelState? = null,
 )
 
 /** VoiceRTCDiagnosticsReq is the request body for POST /api/voicegateway/v1/voice/rtc/{sessionID}/diagnostics. */
 @Serializable
-data class VoiceRTCDiagnosticsReq(val client: VoiceRTCClientDiagnostics? = null)
+data class VoiceRTCDiagnosticsReq(
+    /** Client contains the browser/client WebRTC state observed by the caller. */
+    val client: VoiceRTCClientDiagnostics? = null,
+)
+
+/** VoiceRTCUDPEndpoint reports one server UDP candidate for diagnosis. */
+@Serializable
+data class VoiceRTCUDPEndpoint(
+    /** Host is an IP address advertised in the gateway SDP answer. */
+    val host: String,
+    /** Port is the UDP port paired with host in the gateway SDP answer. */
+    val port: Int,
+)
 
 /** VoiceRTCServerDiagnostics reports server-observed WebRTC state for diagnosis. */
 @Serializable
 data class VoiceRTCServerDiagnostics(
+    /** SessionFound reports whether the gateway still has the requested session. */
     val sessionFound: Boolean,
-    val udpHost: String? = null,
-    val udpPort: Int? = null,
+    /** UDPEndpoints are the LAN/Tailscale and optional UPnP public UDP candidates advertised to the client. */
+    val udpEndpoints: List<VoiceRTCUDPEndpoint>? = null,
+    /** UDPMappingError is the last UPnP mapping or refresh error, if any. */
+    val udpMappingError: String? = null,
+    /** ICEConnectionState is the gateway PeerConnection ICE connection state. */
     val iceConnectionState: VoiceRTCICEConnectionState? = null,
+    /** ICEGatheringState is the gateway PeerConnection ICE gathering state. */
     val iceGatheringState: VoiceRTCICEGatheringState? = null,
+    /** ConnectionState is the gateway PeerConnection aggregate connection state. */
     val connectionState: VoiceRTCConnectionState? = null,
+    /** SignalingState is the gateway PeerConnection signaling state. */
     val signalingState: VoiceRTCSignalingState? = null,
+    /** DataChannelState is the gateway-observed voice data channel state. */
     val dataChannelState: VoiceRTCDataChannelState? = null,
+    /** DataChannelOpened reports whether the voice data channel reached open. */
     val dataChannelOpened: Boolean? = null,
+    /** AudioTrackReceived reports whether the gateway received the client's microphone track. */
     val audioTrackReceived: Boolean? = null,
+    /** BackendConnected reports whether the gateway connected to the configured voice backend. */
     val backendConnected: Boolean? = null,
+    /** SessionReadySent reports whether the gateway sent session.ready to the client. */
     val sessionReadySent: Boolean? = null,
+    /** LastError is the last gateway error sent to the client, if any. */
     val lastError: String? = null,
 )
 
 /** VoiceRTCDiagnosticsResp reports structured WebRTC connectivity diagnostics. */
 @Serializable
 data class VoiceRTCDiagnosticsResp(
+    /** SessionID is the diagnosed voice RTC session ID. */
     @SerialName("sessionID") val sessionID: String,
+    /** Issue is the machine-readable connectivity diagnosis. */
     val issue: VoiceRTCConnectivityIssue,
+    /** Side identifies where the issue appears to be. */
     val side: VoiceRTCConnectivitySide,
+    /** Message is a human-readable explanation of the diagnosis. */
     val message: String,
+    /** Server contains gateway-observed WebRTC state. */
     val server: VoiceRTCServerDiagnostics,
+    /** Client echoes the client diagnostics included in the request. */
     val client: VoiceRTCClientDiagnostics? = null,
 )
 
 /** StatusResp is a common response for mutation endpoints. */
 @Serializable
-data class StatusResp(val status: String)
+data class StatusResp(
+    /** Status is a short human-readable result such as "closed". */
+    val status: String,
+)
 
 @Serializable
 data class ErrorDetails(val code: String, val message: String)
@@ -568,104 +612,179 @@ data class ErrorResponse(val error: ErrorDetails, val details: Map<String, JsonE
 
 /** MessageEnvelope carries the kind used to dispatch data-channel messages. */
 @Serializable
-data class MessageEnvelope(val kind: MessageKind)
+data class MessageEnvelope(
+    /** Kind is the message discriminator used to decode the concrete message type. */
+    val kind: MessageKind,
+)
 
 /** VoiceConfig describes provider-neutral voice preferences. */
 @Serializable
-data class VoiceConfig(val name: String, val language: String)
+data class VoiceConfig(
+    /** Name is the requested provider-specific voice name. */
+    val name: String,
+    /** Language is the requested BCP 47 language tag, such as "en" or "fr-CA". */
+    val language: String,
+)
 
 /** ToolDeclaration is a provider-neutral service tool declaration. */
 @Serializable
 data class ToolDeclaration(
+    /** Name is the tool name the assistant uses in tool.call messages. */
     val name: String,
+    /** Description explains when and how the assistant should use the tool. */
     val description: String,
+    /** Parameters is a JSON Schema object describing the tool arguments. */
     val parameters: JsonElement,
 )
 
 /** Context carries provider-neutral text or instruction context. */
 @Serializable
-data class Context(val systemInstruction: String? = null, val text: String? = null)
+data class Context(
+    /** SystemInstruction is provider-neutral instruction text for the assistant. */
+    val systemInstruction: String? = null,
+    /** Text is additional conversational context for the session. */
+    val text: String? = null,
+)
 
 /** SessionSetup is the client message that initializes a voice session. */
 @Serializable
 data class SessionSetup(
+    /** Kind must be "session.setup". */
     val kind: MessageKind,
+    /** Voice contains the requested voice and language. */
     val voice: VoiceConfig,
+    /** Tools declares the client-side tools the assistant may call. */
     val tools: List<ToolDeclaration>,
+    /** Context provides initial instructions or text context for the session. */
     val context: Context,
 )
 
 /** ContextUpdate is a client message that appends session context. */
 @Serializable
-data class ContextUpdate(val kind: MessageKind, val context: Context)
+data class ContextUpdate(
+    /** Kind must be "context.update". */
+    val kind: MessageKind,
+    /** Context contains the instructions or text to append. */
+    val context: Context,
+)
 
 /** UserMessage is a client message that appends completed user text and asks the assistant to respond. */
 @Serializable
-data class UserMessage(val kind: MessageKind, val text: String)
+data class UserMessage(
+    /** Kind must be "user.message". */
+    val kind: MessageKind,
+    /** Text is the completed user utterance to send to the assistant. */
+    val text: String,
+)
 
 /** ToolResult is a client message that returns a tool execution result. */
 @Serializable
 data class ToolResult(
+    /** Kind must be "tool.result". */
     val kind: MessageKind,
+    /** ID matches the tool.call ID being answered. */
     val id: String,
+    /** Name is the tool name that produced the result. */
     val name: String,
+    /** Result is the JSON result returned to the assistant. */
     val result: JsonElement,
 )
 
 /** TurnCancel is a client message that cancels the current turn. */
 @Serializable
-data class TurnCancel(val kind: MessageKind, val reason: String? = null)
+data class TurnCancel(
+    /** Kind must be "turn.cancel". */
+    val kind: MessageKind,
+    /** Reason optionally explains why the current assistant turn was cancelled. */
+    val reason: String? = null,
+)
 
 /** SessionClose is a client message that closes the voice session. */
 @Serializable
-data class SessionClose(val kind: MessageKind, val reason: String? = null)
+data class SessionClose(
+    /** Kind must be "session.close". */
+    val kind: MessageKind,
+    /** Reason optionally explains why the client closed the session. */
+    val reason: String? = null,
+)
 
 /** SessionReady is a gateway message that reports the session is ready. */
 @Serializable
-data class SessionReady(val kind: MessageKind)
+data class SessionReady(
+    /** Kind is "session.ready". */
+    val kind: MessageKind,
+)
 
 /** TranscriptDelta is a gateway message that streams transcript text. */
 @Serializable
 data class TranscriptDelta(
+    /** Kind is "transcript.delta". */
     val kind: MessageKind,
+    /** Speaker identifies who produced this transcript text. */
     val speaker: Speaker,
+    /** Text is an incremental transcript fragment. */
     val text: String,
 )
 
 /** AssistantTextDelta is a gateway message that streams assistant text. */
 @Serializable
-data class AssistantTextDelta(val kind: MessageKind, val text: String)
+data class AssistantTextDelta(
+    /** Kind is "assistant.text.delta". */
+    val kind: MessageKind,
+    /** Text is an incremental assistant text fragment. */
+    val text: String,
+)
 
 /** SpeechStarted is a gateway message that reports speech output started. */
 @Serializable
-data class SpeechStarted(val kind: MessageKind, val speaker: Speaker)
+data class SpeechStarted(
+    /** Kind is "speech.started". */
+    val kind: MessageKind,
+    /** Speaker identifies whose speech output started. */
+    val speaker: Speaker,
+)
 
 /** SpeechEnded is a gateway message that reports speech output ended. */
 @Serializable
-data class SpeechEnded(val kind: MessageKind, val speaker: Speaker)
+data class SpeechEnded(
+    /** Kind is "speech.ended". */
+    val kind: MessageKind,
+    /** Speaker identifies whose speech output ended. */
+    val speaker: Speaker,
+)
 
 /** ToolCall is a gateway message that asks the client to execute a tool. */
 @Serializable
 data class ToolCall(
+    /** Kind is "tool.call". */
     val kind: MessageKind,
+    /** ID uniquely identifies this tool call for the matching tool.result. */
     val id: String,
+    /** Name is the requested tool name. */
     val name: String,
+    /** Args is the JSON argument object for the requested tool. */
     val args: JsonElement,
 )
 
 /** Interrupted is a gateway message that reports an interruption. */
 @Serializable
 data class Interrupted(
+    /** Kind is "interrupted". */
     val kind: MessageKind,
+    /** Source identifies what interrupted the turn. */
     val source: InterruptSource,
+    /** Message optionally provides more detail about the interruption. */
     val message: String? = null,
 )
 
 /** Error is a gateway message that reports an error. */
 @Serializable
 data class Error(
+    /** Kind is "error". */
     val kind: MessageKind,
+    /** Message is a human-readable error description. */
     val message: String,
+    /** Recoverable reports whether the client may continue using the session. */
     val recoverable: Boolean,
 )
 

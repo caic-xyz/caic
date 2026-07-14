@@ -111,7 +111,7 @@ func newVoiceRTCTestSession(ctx context.Context, t *testing.T, backend backendCo
 			t.Fatal(err)
 		}
 	})
-	t.Cleanup(bridge.CloseAll)
+	t.Cleanup(func() { bridge.CloseAll(ctx) })
 
 	remoteAudioEnergy := make(chan float64, 1)
 	mediaErrs := make(chan error, 1)

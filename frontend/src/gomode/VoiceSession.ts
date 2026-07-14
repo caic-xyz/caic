@@ -42,6 +42,7 @@ import {
 
 /** Max time (ms) to wait for session.ready before timing out. */
 const SETUP_TIMEOUT_MS = 15000;
+const ICE_GATHERING_TIMEOUT_MS = 10000;
 
 export const voiceGatewayApi = voicegatewaySDK.createApiClient();
 
@@ -102,6 +103,8 @@ export class VoiceSession {
   private _pc: RTCPeerConnection | null = null;
   private _dc: RTCDataChannel | null = null;
   private _rtcSessionID: string | null = null;
+  private _lastOfferSDP = "";
+  private _lastAnswerSDP = "";
   private _audioContext: AudioContext | null = null;
   private _micStream: MediaStream | null = null;
   /** The <audio> element playing remote RTP audio, stored so we can call setSinkId(). */
@@ -262,6 +265,8 @@ export class VoiceSession {
     _defaultModel: string,
   ): Promise<void> {
     this._releaseAll();
+    this._lastOfferSDP = "";
+    this._lastAnswerSDP = "";
     this._audioContext = new AudioContext({ sampleRate: 16000 });
     this._clearTranscript();
     this._setStatus("Setting up WebRTC…");
@@ -384,25 +389,20 @@ export class VoiceSession {
       pc.oniceconnectionstatechange = () => {
         const st = pc.iceConnectionState;
         if (st === "failed" || st === "disconnected" || st === "closed") {
-          this._setError(`WebRTC ICE ${st}`);
+          void this._setDiagnosticError(pc, `WebRTC ICE ${st}`);
         }
       };
-
-      // Setup timeout.
-      if (this._setupTimer !== null) clearTimeout(this._setupTimer);
-      this._setupTimer = setTimeout(() => {
-        if (this._pc === pc && !this.state.connected && !this.state.error) {
-          void this._setConnectionTimeoutError(pc);
-        }
-      }, SETUP_TIMEOUT_MS);
 
       // SDP offer/answer exchange.
       this._setStatus("Signaling…");
       const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      const resp = await voiceRTCOffer({ sdp: offer.sdp ?? "" });
+      const offerSDP = await completeLocalOffer(pc, offer);
+      this._lastOfferSDP = offerSDP;
+      const resp = await voiceRTCOffer({ sdp: offerSDP });
       this._rtcSessionID = resp.sessionID;
+      this._lastAnswerSDP = resp.sdp;
       await pc.setRemoteDescription({ type: "answer", sdp: resp.sdp });
+      this._startSetupTimer(pc);
 
       this._update((s) => {
         s.listening = true;
@@ -493,10 +493,31 @@ export class VoiceSession {
     });
   }
 
+  private _startSetupTimer(pc: RTCPeerConnection): void {
+    if (this._setupTimer !== null) clearTimeout(this._setupTimer);
+    this._setupTimer = setTimeout(() => {
+      if (this._pc === pc && !this.state.connected && !this.state.error) {
+        void this._setConnectionTimeoutError(pc);
+      }
+    }, SETUP_TIMEOUT_MS);
+  }
+
   private async _setConnectionTimeoutError(
     pc: RTCPeerConnection,
   ): Promise<void> {
-    const fallback = "Connection timed out — server did not respond";
+    await this._setDiagnosticError(
+      pc,
+      "Connection timed out — server did not respond",
+    );
+  }
+
+  private async _setDiagnosticError(
+    pc: RTCPeerConnection,
+    fallback: string,
+  ): Promise<void> {
+    if (this._pc !== pc || this.state.error) {
+      return;
+    }
     const sessionID = this._rtcSessionID;
     if (!sessionID) {
       this._setError(fallback);
@@ -506,12 +527,14 @@ export class VoiceSession {
       const diagnostics = await diagnoseVoiceRTC(sessionID, {
         client: this._clientDiagnostics(pc),
       });
+      logVoiceRTCDiagnostics(diagnostics, this._lastOfferSDP, this._lastAnswerSDP);
       if (this._pc === pc && !this.state.connected && !this.state.error) {
         this._setError(formatVoiceRTCDiagnostics(diagnostics));
       }
-    } catch {
+    } catch (e: unknown) {
+      const detail = e instanceof Error ? ` (${e.message})` : "";
       if (this._pc === pc && !this.state.connected && !this.state.error) {
-        this._setError(fallback);
+        this._setError(`${fallback}${detail}`);
       }
     }
   }
@@ -731,11 +754,84 @@ export class VoiceSession {
   }
 }
 
-function formatVoiceRTCDiagnostics(
+function completeLocalOffer(
+  pc: RTCPeerConnection,
+  offer: RTCSessionDescriptionInit,
+): Promise<string> {
+  return pc.setLocalDescription(offer).then(async () => {
+    await waitForICEGatheringComplete(pc);
+    const sdp = pc.localDescription?.sdp;
+    if (!sdp) {
+      throw new Error("WebRTC local offer SDP unavailable after ICE gathering");
+    }
+    return sdp;
+  });
+}
+
+function waitForICEGatheringComplete(pc: RTCPeerConnection): Promise<void> {
+  if (pc.iceGatheringState === "complete") return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("Timed out waiting for WebRTC ICE candidates"));
+    }, ICE_GATHERING_TIMEOUT_MS);
+    const cleanup = () => {
+      window.clearTimeout(timeout);
+      pc.removeEventListener("icegatheringstatechange", onGatheringStateChange);
+      pc.removeEventListener("connectionstatechange", onConnectionStateChange);
+    };
+    const onGatheringStateChange = () => {
+      if (pc.iceGatheringState !== "complete") return;
+      cleanup();
+      resolve();
+    };
+    const onConnectionStateChange = () => {
+      if (pc.connectionState !== "closed" && pc.connectionState !== "failed") return;
+      cleanup();
+      reject(new Error(`WebRTC connection ${pc.connectionState} before ICE gathering completed`));
+    };
+    pc.addEventListener("icegatheringstatechange", onGatheringStateChange);
+    pc.addEventListener("connectionstatechange", onConnectionStateChange);
+    onGatheringStateChange();
+  });
+}
+
+function logVoiceRTCDiagnostics(
+  diagnostics: VoiceRTCDiagnosticsResp,
+  offerSDP: string,
+  answerSDP: string,
+): void {
+  console.warn("Voice RTC diagnostics", {
+    issue: diagnostics.issue,
+    side: diagnostics.side,
+    message: diagnostics.message,
+    server: diagnostics.server,
+    client: diagnostics.client,
+    clientOfferCandidates: summarizeSDPCandidates(offerSDP),
+    serverAnswerCandidates: summarizeSDPCandidates(answerSDP),
+  });
+}
+
+export function summarizeSDPCandidates(sdp: string): string {
+  const candidates: string[] = [];
+  for (const line of sdp.split("\n")) {
+    const body = line.trim();
+    if (!body.startsWith("a=candidate:")) continue;
+    const fields = body.split(/\s+/);
+    if (fields.length < 8) continue;
+    candidates.push(`${fields[4]}:${fields[5]} ${fields[7]}`);
+  }
+  return candidates.length === 0 ? "none" : candidates.join(", ");
+}
+
+export function formatVoiceRTCDiagnostics(
   diagnostics: VoiceRTCDiagnosticsResp,
 ): string {
   const side = diagnostics.side === "none" ? "unknown" : diagnostics.side;
-  return `Voice connection timed out (${side}: ${diagnostics.issue}) — ${diagnostics.message}`;
+  const mappingError = diagnostics.server.udpMappingError
+    ? ` UDP mapping: ${diagnostics.server.udpMappingError}`
+    : "";
+  return `Voice connection failed (${side}: ${diagnostics.issue}) — ${diagnostics.message}${mappingError}`;
 }
 
 function gatewayContextUpdate(text: string): ContextUpdate {

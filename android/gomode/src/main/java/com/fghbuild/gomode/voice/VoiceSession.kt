@@ -14,6 +14,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.webkit.CookieManager
+import com.caic.voicegateway.sdk.v1.ApiClient
 import com.caic.voicegateway.sdk.v1.ContextUpdate
 import com.caic.voicegateway.sdk.v1.Error
 import com.caic.voicegateway.sdk.v1.MessageEnvelope
@@ -38,6 +39,7 @@ import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.service.ServiceSettingsClient
 import com.fghbuild.mcp.sdk.v1.ToolDescriptor
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -48,6 +50,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -69,6 +72,8 @@ import kotlin.math.sqrt
 private const val TAG = "GoModeVoiceSession"
 private const val MIC_LEVEL_POLL_MS = 100L
 private const val SETUP_TIMEOUT_MS = 15_000L
+private const val ICE_GATHERING_TIMEOUT_MS = 10_000L
+private val sdpWhitespaceRegex = Regex("\\s+")
 
 class VoiceSession(
     private val appContext: Context,
@@ -84,6 +89,8 @@ class VoiceSession(
     private var peerConnection: PeerConnection? = null
     private var dataChannel: DataChannel? = null
     private var rtcSessionID: String? = null
+    private var lastOfferSDP = ""
+    private var lastAnswerSDP = ""
     private var pcFactory: PeerConnectionFactory? = null
     private var rtcAudioSource: org.webrtc.AudioSource? = null
     private var localAudioTrack: org.webrtc.AudioTrack? = null
@@ -151,6 +158,8 @@ class VoiceSession(
         lastIceConnectionState = "new"
         lastIceGatheringState = "new"
         lastSignalingState = "new"
+        lastOfferSDP = ""
+        lastAnswerSDP = ""
         clearTranscript()
         requestAudioFocus()
         VoiceService.start(appContext)
@@ -201,8 +210,7 @@ class VoiceSession(
                 mcpClient = client
                 val systemInstruction = client.serverInstructions().ifBlank { FALLBACK_SYSTEM_INSTRUCTION }
                 mcpTools = client.listTools()
-                val voiceGatewayClient =
-                    com.caic.voicegateway.sdk.v1.ApiClient(voiceGatewayEndpointURL)
+                val voiceGatewayClient = ApiClient(voiceGatewayEndpointURL)
                 val voiceGatewayHeaders = cookieHeaders(voiceGatewayEndpointURL)
 
                 // Initialize WebRTC factory.
@@ -224,7 +232,10 @@ class VoiceSession(
                 )
                 val rtcConfig = PeerConnection.RTCConfiguration(iceServers)
 
-                val pc = factory.createPeerConnection(rtcConfig, createPeerConnectionObserver()) ?: run {
+                val pc = factory.createPeerConnection(
+                    rtcConfig,
+                    createPeerConnectionObserver(voiceGatewayClient, voiceGatewayHeaders),
+                ) ?: run {
                     setError("Failed to create PeerConnection")
                     return@launch
                 }
@@ -279,14 +290,18 @@ class VoiceSession(
                 setStatus("Signaling…")
                 pc.createOffer(object : SdpObserver {
                     override fun onCreateSuccess(desc: SessionDescription) {
-                        pc.setLocalDescription(noOpSdpObserver(), desc)
                         scope.launch {
                             try {
+                                setLocalDescriptionAndWaitForICE(pc, desc)
+                                val offerSDP = pc.localDescription?.description
+                                    ?: error("WebRTC local offer SDP unavailable after ICE gathering")
+                                lastOfferSDP = offerSDP
                                 val resp = voiceGatewayClient.voiceRTCOffer(
-                                    VoiceRTCOfferReq(sdp = desc.description),
+                                    VoiceRTCOfferReq(sdp = offerSDP),
                                     headers = voiceGatewayHeaders,
                                 )
                                 rtcSessionID = resp.sessionID
+                                lastAnswerSDP = resp.sdp
                                 val answer = SessionDescription(SessionDescription.Type.ANSWER, resp.sdp)
                                 pc.setRemoteDescription(noOpSdpObserver(), answer)
                                 startSetupTimeout(pc, voiceGatewayClient, voiceGatewayHeaders)
@@ -313,7 +328,10 @@ class VoiceSession(
     }
 
     @Suppress("TooManyFunctions") // PeerConnection.Observer has many required overrides.
-    private fun createPeerConnectionObserver() = object : PeerConnection.Observer {
+    private fun createPeerConnectionObserver(
+        gatewayClient: ApiClient,
+        headers: Map<String, String>,
+    ) = object : PeerConnection.Observer {
         override fun onIceCandidate(candidate: IceCandidate) = Unit
         override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) {
             lastIceConnectionState = state.name.lowercase()
@@ -321,7 +339,12 @@ class VoiceSession(
             when (state) {
                 PeerConnection.IceConnectionState.FAILED,
                 PeerConnection.IceConnectionState.DISCONNECTED,
-                PeerConnection.IceConnectionState.CLOSED -> setError("WebRTC ICE $state")
+                PeerConnection.IceConnectionState.CLOSED -> setDiagnosticError(
+                    pc = peerConnection ?: return,
+                    gatewayClient = gatewayClient,
+                    headers = headers,
+                    fallback = "WebRTC ICE $state",
+                )
                 else -> Unit
             }
         }
@@ -401,35 +424,19 @@ class VoiceSession(
 
     private fun startSetupTimeout(
         pc: PeerConnection,
-        gatewayClient: com.caic.voicegateway.sdk.v1.ApiClient,
+        gatewayClient: ApiClient,
         headers: Map<String, String>,
     ) {
         setupTimeoutJob?.cancel()
         setupTimeoutJob = scope.launch {
             delay(SETUP_TIMEOUT_MS)
             if (peerConnection !== pc || _state.value.connected || _state.value.error != null) return@launch
-            val sessionID = rtcSessionID
-            if (sessionID == null) {
-                setError("Connection timed out — server did not respond")
-                return@launch
-            }
-            try {
-                val diagnostics = gatewayClient.diagnoseVoiceRTC(
-                    sessionID,
-                    VoiceRTCDiagnosticsReq(client = clientDiagnostics()),
-                    headers = headers,
-                )
-                if (peerConnection === pc && !_state.value.connected && _state.value.error == null) {
-                    setError(formatVoiceRTCDiagnostics(diagnostics))
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
-                Log.w(TAG, "Voice RTC diagnostics failed", e)
-                if (peerConnection === pc && !_state.value.connected && _state.value.error == null) {
-                    setError("Connection timed out — server did not respond")
-                }
-            }
+            setDiagnosticError(
+                pc = pc,
+                gatewayClient = gatewayClient,
+                headers = headers,
+                fallback = "Connection timed out — server did not respond",
+            )
         }
     }
 
@@ -440,9 +447,84 @@ class VoiceSession(
         dataChannelState = dataChannel?.state()?.name?.lowercase()?.let { VoiceRTCDataChannelState.Other(it) },
     )
 
-    private fun formatVoiceRTCDiagnostics(diagnostics: VoiceRTCDiagnosticsResp): String {
-        val side = if (diagnostics.side.value == "none") "unknown" else diagnostics.side.value
-        return "Voice connection timed out ($side: ${diagnostics.issue.value}) — ${diagnostics.message}"
+    private fun setDiagnosticError(
+        pc: PeerConnection,
+        gatewayClient: ApiClient,
+        headers: Map<String, String>,
+        fallback: String,
+    ) {
+        scope.launch {
+            val message = diagnosticErrorMessage(gatewayClient, headers, fallback)
+            if (peerConnection === pc && !_state.value.connected && _state.value.error == null) {
+                setError(message)
+            }
+        }
+    }
+
+    private suspend fun diagnosticErrorMessage(
+        gatewayClient: ApiClient,
+        headers: Map<String, String>,
+        fallback: String,
+    ): String {
+        val sessionID = rtcSessionID ?: return fallback
+        return try {
+            val diagnostics = gatewayClient.diagnoseVoiceRTC(
+                sessionID,
+                VoiceRTCDiagnosticsReq(client = clientDiagnostics()),
+                headers = headers,
+            )
+            logVoiceRTCDiagnostics(diagnostics)
+            formatVoiceRTCDiagnostics(diagnostics)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+            Log.w(TAG, "Voice RTC diagnostics failed", e)
+            fallback
+        }
+    }
+
+    private suspend fun setLocalDescriptionAndWaitForICE(pc: PeerConnection, desc: SessionDescription) {
+        setLocalDescription(pc, desc)
+        waitForICEGatheringComplete(pc)
+    }
+
+    private suspend fun setLocalDescription(pc: PeerConnection, desc: SessionDescription) {
+        val result = CompletableDeferred<String?>()
+        pc.setLocalDescription(object : SdpObserver {
+            override fun onCreateSuccess(p0: SessionDescription) = Unit
+            override fun onSetSuccess() {
+                result.complete(null)
+            }
+            override fun onCreateFailure(p0: String) = Unit
+            override fun onSetFailure(p0: String) {
+                result.complete(p0)
+            }
+        }, desc)
+        val error = withTimeout(ICE_GATHERING_TIMEOUT_MS) { result.await() }
+        if (error != null) {
+            error("Set local description failed: $error")
+        }
+    }
+
+    private suspend fun waitForICEGatheringComplete(pc: PeerConnection) {
+        withTimeout(ICE_GATHERING_TIMEOUT_MS) {
+            while (peerConnection === pc && pc.iceGatheringState() != PeerConnection.IceGatheringState.COMPLETE) {
+                delay(25)
+            }
+        }
+        if (peerConnection !== pc) {
+            throw CancellationException("WebRTC peer connection changed before ICE gathering completed")
+        }
+    }
+
+    private fun logVoiceRTCDiagnostics(diagnostics: VoiceRTCDiagnosticsResp) {
+        Log.w(
+            TAG,
+            "Voice RTC diagnostics: issue=${diagnostics.issue.value} side=${diagnostics.side.value} " +
+                "server=${diagnostics.server} client=${diagnostics.client} " +
+                "clientOfferCandidates=${summarizeSDPCandidates(lastOfferSDP)} " +
+                "serverAnswerCandidates=${summarizeSDPCandidates(lastAnswerSDP)}",
+        )
     }
 
     private fun noOpSdpObserver() = object : SdpObserver {
@@ -838,6 +920,25 @@ class VoiceSession(
         fun resolveServiceURL(baseURL: String, advertisedURL: String): String =
             com.fghbuild.gomode.service.resolveServiceURL(baseURL, advertisedURL)
     }
+}
+
+internal fun summarizeSDPCandidates(sdp: String): String {
+    val candidates = sdp.lineSequence().mapNotNull { line ->
+        val body = line.trim()
+        if (!body.startsWith("a=candidate:")) return@mapNotNull null
+        val fields = body.split(sdpWhitespaceRegex)
+        if (fields.size < 8) return@mapNotNull null
+        "${fields[4]}:${fields[5]} ${fields[7]}"
+    }.toList()
+    return candidates.takeIf { it.isNotEmpty() }?.joinToString(", ") ?: "none"
+}
+
+internal fun formatVoiceRTCDiagnostics(diagnostics: VoiceRTCDiagnosticsResp): String {
+    val side = if (diagnostics.side.value == "none") "unknown" else diagnostics.side.value
+    val mappingError = diagnostics.server.udpMappingError?.takeIf { it.isNotBlank() }
+        ?.let { " UDP mapping: $it" }
+        .orEmpty()
+    return "Voice connection failed ($side: ${diagnostics.issue.value}) — ${diagnostics.message}$mappingError"
 }
 
 enum class TranscriptSpeaker { USER, ASSISTANT }
