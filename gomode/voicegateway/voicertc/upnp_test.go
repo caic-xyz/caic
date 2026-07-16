@@ -274,7 +274,7 @@ func TestNewUPnPHTTPClient(t *testing.T) {
 		server.Start()
 		t.Cleanup(server.Close)
 
-		client, err := newUPnPHTTPClient(net.ParseIP("127.0.0.2"))
+		client, err := newUPnPHTTPClient(net.ParseIP("127.0.0.1"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -289,8 +289,8 @@ func TestNewUPnPHTTPClient(t *testing.T) {
 		if err := response.Body.Close(); err != nil {
 			t.Fatal(err)
 		}
-		if remoteHost != "127.0.0.2" {
-			t.Fatalf("request source = %s, want 127.0.0.2", remoteHost)
+		if remoteHost != "127.0.0.1" {
+			t.Fatalf("request source = %s, want 127.0.0.1", remoteHost)
 		}
 	})
 }
@@ -307,7 +307,7 @@ func TestUPnPRootDeviceByURL(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = upnpRootDeviceByURL(t.Context(), loc, net.ParseIP("127.0.0.2"))
+		_, err = upnpRootDeviceByURL(t.Context(), loc, net.ParseIP("127.0.0.1"))
 		if err == nil {
 			t.Fatal("expected error")
 		}
