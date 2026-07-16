@@ -1229,7 +1229,7 @@ func (m *Manager) watchStats(ctx context.Context) {
 		if err != nil {
 			cancel()
 			<-changedDone
-			m.log.DebugContext(ctx, "stats stream failed", "err", err)
+			m.log.WarnContext(ctx, "stats stream failed", "err", err)
 			if !waitStatsRetry(ctx, changed, retryDelay) {
 				return
 			}
@@ -1238,7 +1238,7 @@ func (m *Manager) watchStats(ctx context.Context) {
 		for sample, err := range stats {
 			if err != nil {
 				if streamCtx.Err() == nil {
-					m.log.DebugContext(ctx, "stats stream failed", "err", err)
+					m.log.WarnContext(ctx, "stats stream failed", "err", err)
 				}
 				break
 			}
