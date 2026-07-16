@@ -46,6 +46,8 @@ const ICE_GATHERING_TIMEOUT_MS = 10000;
 const ICE_HOST_CANDIDATE_GRACE_MS = 1000;
 const ICE_DISCONNECTED_GRACE_MS = 5000;
 const MAX_RECONNECT_ATTEMPTS = 3;
+/** Conservative data-channel/model-safe bound for a recovery context update. */
+export const MAX_RECOVERY_CONTEXT_CHARS = 8000;
 
 export const voiceGatewayApi = voicegatewaySDK.createApiClient();
 
@@ -120,6 +122,8 @@ export class VoiceSession {
   private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private _reconnectArgs: [Task[], string, string, string] | null = null;
   private _reconnectAttempts = 0;
+  private _recoveryContext = "";
+  private _recoveryServiceContext = "";
 
   constructor() {
     const [state, setState] = createStore<VoiceState>({
@@ -269,6 +273,7 @@ export class VoiceSession {
     _recentRepo: string,
     _defaultHarness: string,
     _defaultModel: string,
+    preserveTranscript = false,
   ): Promise<void> {
     this._reconnectArgs = [tasks, _recentRepo, _defaultHarness, _defaultModel];
     if (this._reconnectTimer !== null) {
@@ -279,7 +284,11 @@ export class VoiceSession {
     this._lastOfferSDP = "";
     this._lastAnswerSDP = "";
     this._audioContext = new AudioContext({ sampleRate: 16000 });
-    this._clearTranscript();
+    if (!preserveTranscript) {
+      this._reconnectAttempts = 0;
+      this._recoveryContext = "";
+      this._clearTranscript();
+    }
     this._setStatus("Setting up WebRTC…");
 
     try {
@@ -304,6 +313,7 @@ export class VoiceSession {
       this.excludedTaskIds = prePurged;
       this.taskNumberMap.reset();
       this.taskNumberMap.update(tasks);
+      this._recoveryServiceContext = taskServiceContext(systemInstruction, tasks);
 
       // Create PeerConnection.
       const pc = new RTCPeerConnection({
@@ -320,6 +330,7 @@ export class VoiceSession {
       this._micStream =
         await navigator.mediaDevices.getUserMedia(micConstraints);
       for (const t of this._micStream.getAudioTracks()) {
+        t.enabled = !this.state.muted;
         pc.addTrack(t, this._micStream);
       }
 
@@ -518,7 +529,11 @@ export class VoiceSession {
   }
 
   private _scheduleReconnect(pc: RTCPeerConnection, reason: string, delay: number): void {
-    if (this._pc !== pc || this._reconnectArgs === null || this._reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) return;
+    if (this._pc !== pc || this._reconnectArgs === null) return;
+    if (this._reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      this._setError(`Voice connection lost after ${MAX_RECONNECT_ATTEMPTS} recovery attempts`);
+      return;
+    }
     if (this._reconnectTimer !== null) {
       if (delay !== 0) return;
       clearTimeout(this._reconnectTimer);
@@ -529,7 +544,16 @@ export class VoiceSession {
       const args = this._reconnectArgs;
       if (args === null) return;
       this._reconnectAttempts++;
-      void this.connect(...args);
+      this._speakerActive = false;
+      this._update((s) => {
+        s.speaking = false;
+        s.activeTool = null;
+      });
+      this._recoveryContext = buildRecoveryContext(
+        this.state.transcript,
+        this._recoveryServiceContext,
+      );
+      void this.connect(...args, true);
     }, delay);
   }
 
@@ -653,6 +677,11 @@ export class VoiceSession {
         s.connected = true;
         s.error = null;
       });
+      if (this._recoveryContext !== "") {
+        this._send(JSON.stringify(gatewayContextUpdate(this._recoveryContext)));
+        this._recoveryContext = "";
+      }
+      this._flushPendingNotifications();
       this._send(JSON.stringify(gatewayUserMessage("Say exactly one word: Ready")));
       // Audio capture is handled via WebRTC RTP tracks; no separate audio setup needed.
       return;
@@ -923,6 +952,39 @@ export function formatVoiceRTCDiagnostics(
     ? ` UDP mapping: ${diagnostics.server.udpMappingError}`
     : "";
   return `Voice connection failed (${side}: ${diagnostics.issue}) — ${diagnostics.message}${mappingError}`;
+}
+
+/** Build a bounded recovery-only context without replaying unfinished transcript deltas. */
+export function buildRecoveryContext(
+  transcript: TranscriptEntry[],
+  serviceContext: string,
+): string {
+  const prefix = "Network recovery context. Continue the existing conversation; do not treat this as a new user turn.";
+  const service = serviceContext.trim();
+  // Reserve at most one quarter for service/task state, leaving room for the conversation.
+  const serviceLimit = Math.floor(MAX_RECOVERY_CONTEXT_CHARS / 4);
+  const serviceSection = service === ""
+    ? ""
+    : `\nCurrent service/task context:\n${service.slice(0, serviceLimit)}`;
+  const availableTranscriptChars = MAX_RECOVERY_CONTEXT_CHARS - prefix.length - serviceSection.length - 24;
+  const lines: string[] = [];
+  let lineChars = 0;
+  for (const entry of [...transcript].reverse()) {
+    if (!entry.final || entry.text.trim() === "") continue;
+    const line = `${entry.speaker}: ${entry.text.trim()}`;
+    if (lineChars + line.length + (lines.length === 0 ? 0 : 1) > availableTranscriptChars) break;
+    lines.unshift(line);
+    lineChars += line.length + (lines.length === 1 ? 0 : 1);
+  }
+  const transcriptSection = lines.length === 0 ? "" : `\nFinalized transcript:\n${lines.join("\n")}`;
+  return `${prefix}${serviceSection}${transcriptSection}`;
+}
+
+function taskServiceContext(systemInstruction: string, tasks: Task[]): string {
+  const taskSummary = tasks
+    .map((task) => `Task ${task.id}: ${task.title} (${task.state})`)
+    .join("\n");
+  return [systemInstruction.trim(), taskSummary].filter((text) => text !== "").join("\n");
 }
 
 function gatewayContextUpdate(text: string): ContextUpdate {

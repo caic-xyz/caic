@@ -6,6 +6,7 @@ import com.caic.voicegateway.sdk.v1.VoiceRTCConnectivitySide
 import com.caic.voicegateway.sdk.v1.VoiceRTCDiagnosticsResp
 import com.caic.voicegateway.sdk.v1.VoiceRTCServerDiagnostics
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -56,6 +57,56 @@ class VoiceSessionTest {
         )
 
         assertTrue(message.contains("UDP mapping: refresh UPnP UDP mapping 40000 -> 3478: timeout"))
+    }
+
+    @Test
+    fun recoveryPolicyCancelsDisconnectedGraceAndAllowsImmediateFailureRecovery() {
+        val policy = VoiceRecoveryPolicy(maxAttempts = 3)
+
+        assertEquals(5_000L, recoveryDelayMs(org.webrtc.PeerConnection.IceConnectionState.DISCONNECTED))
+        assertTrue(policy.schedule())
+        policy.cancelPending()
+        assertFalse(policy.beginScheduledRecovery())
+
+        assertEquals(0L, recoveryDelayMs(org.webrtc.PeerConnection.IceConnectionState.FAILED))
+        assertTrue(policy.schedule())
+        assertTrue(policy.beginScheduledRecovery())
+        assertEquals(1, policy.attempts)
+    }
+
+    @Test
+    fun recoveryPolicyLimitsRetriesAndManualResetCancelsPendingRecovery() {
+        val policy = VoiceRecoveryPolicy(maxAttempts = 3)
+
+        repeat(3) {
+            assertTrue(policy.schedule())
+            assertTrue(policy.beginScheduledRecovery())
+        }
+        assertFalse(policy.schedule())
+
+        policy.reset()
+        assertTrue(policy.schedule())
+        policy.cancelPending()
+        assertFalse(policy.beginScheduledRecovery())
+        assertEquals(0, policy.attempts)
+    }
+
+    @Test
+    fun recoveryContextPreservesFinalTranscriptAndBoundsMessage() {
+        val context = buildNetworkRecoveryContext(
+            listOf(
+                TranscriptEntry(TranscriptSpeaker.USER, "first", final = true),
+                TranscriptEntry(TranscriptSpeaker.ASSISTANT, "second", final = true),
+                TranscriptEntry(TranscriptSpeaker.USER, "partial", final = false),
+            ),
+            "active service context",
+        )
+
+        assertTrue(context.contains("do not treat this as a new user turn"))
+        assertTrue(context.contains("Current service/task context:\nactive service context"))
+        assertTrue(context.contains("user: first\nassistant: second"))
+        assertFalse(context.contains("partial"))
+        assertTrue(context.length <= MAX_RECOVERY_CONTEXT_CHARS)
     }
 
     @Test

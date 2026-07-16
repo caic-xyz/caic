@@ -18,7 +18,13 @@ vi.mock("./McpClient", () => ({
   mcpServerInstructions: vi.fn(async () => "instructions"),
 }));
 
-import { formatVoiceRTCDiagnostics, summarizeSDPCandidates, VoiceSession } from "./VoiceSession";
+import {
+  buildRecoveryContext,
+  formatVoiceRTCDiagnostics,
+  MAX_RECOVERY_CONTEXT_CHARS,
+  summarizeSDPCandidates,
+  VoiceSession,
+} from "./VoiceSession";
 import {
   VoiceRTCConnectivityIssueUDPUnreachable,
   VoiceRTCConnectivitySideNetwork,
@@ -29,6 +35,7 @@ class FakePeerConnection extends EventTarget {
   static completeICE = true;
   static reflexiveCandidateDelayMs: number | null = null;
   static last: FakePeerConnection | null = null;
+  static instances: FakePeerConnection[] = [];
 
   connectionState: RTCPeerConnectionState = "new";
   iceConnectionState: RTCIceConnectionState = "new";
@@ -40,6 +47,7 @@ class FakePeerConnection extends EventTarget {
   constructor() {
     super();
     FakePeerConnection.last = this;
+    FakePeerConnection.instances.push(this);
   }
 
   addTrack(): void {}
@@ -96,6 +104,8 @@ class FakePeerConnection extends EventTarget {
 beforeEach(() => {
   FakePeerConnection.completeICE = true;
   FakePeerConnection.reflexiveCandidateDelayMs = null;
+  FakePeerConnection.last = null;
+  FakePeerConnection.instances = [];
   sdkMocks.closeVoiceRTC.mockReset();
   sdkMocks.diagnoseVoiceRTC.mockReset();
   sdkMocks.voiceRTCOffer.mockReset();
@@ -190,6 +200,104 @@ describe("VoiceSession", () => {
       session.disconnect();
       vi.useRealTimers();
     }
+  });
+});
+
+function triggerIceState(state: RTCIceConnectionState): void {
+  const pc = FakePeerConnection.last;
+  if (!pc) throw new Error("Expected a peer connection");
+  pc.iceConnectionState = state;
+  pc.oniceconnectionstatechange?.call(
+    pc as unknown as RTCPeerConnection,
+    new Event("iceconnectionstatechange"),
+  );
+}
+
+describe("voice network recovery", () => {
+  it("cancels the disconnected grace recovery when ICE reconnects", async () => {
+    vi.useFakeTimers();
+    const session = new VoiceSession();
+    try {
+      await session.connect([], "", "", "");
+      triggerIceState("disconnected");
+      expect(session.state.connectStatus).toContain("reconnecting");
+
+      await vi.advanceTimersByTimeAsync(4_999);
+      triggerIceState("connected");
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(FakePeerConnection.instances).toHaveLength(1);
+    } finally {
+      session.disconnect();
+      vi.useRealTimers();
+    }
+  });
+
+  it("recovers immediately after ICE failure and stops after three retries", async () => {
+    vi.useFakeTimers();
+    const session = new VoiceSession();
+    try {
+      await session.connect([], "", "", "");
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        triggerIceState("failed");
+        await vi.advanceTimersByTimeAsync(0);
+        await vi.waitFor(() => expect(FakePeerConnection.instances).toHaveLength(attempt + 1));
+      }
+
+      triggerIceState("failed");
+      expect(session.state.error).toBe("Voice connection lost after 3 recovery attempts");
+      expect(FakePeerConnection.instances).toHaveLength(4);
+    } finally {
+      session.disconnect();
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels a pending recovery when manually disconnected", async () => {
+    vi.useFakeTimers();
+    const session = new VoiceSession();
+    try {
+      await session.connect([], "", "", "");
+      triggerIceState("disconnected");
+      session.disconnect();
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(FakePeerConnection.instances).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("buildRecoveryContext", () => {
+  it("preserves finalized chronological transcript and bounded service context", () => {
+    const context = buildRecoveryContext(
+      [
+        { speaker: "user", text: "first", final: true },
+        { speaker: "assistant", text: "second", final: true },
+        { speaker: "user", text: "partial", final: false },
+      ],
+      "active service context",
+    );
+
+    expect(context).toContain("do not treat this as a new user turn");
+    expect(context).toContain("Current service/task context:\nactive service context");
+    expect(context).toContain("user: first\nassistant: second");
+    expect(context).not.toContain("partial");
+  });
+
+  it("bounds recovery messages without splitting finalized history order", () => {
+    const context = buildRecoveryContext(
+      Array.from({ length: 20 }, (_, index) => ({
+        speaker: "user" as const,
+        text: `${index}: ${"x".repeat(600)}`,
+        final: true,
+      })),
+      "service".repeat(1_000),
+    );
+
+    expect(context.length).toBeLessThanOrEqual(MAX_RECOVERY_CONTEXT_CHARS);
+    expect(context.indexOf("user: 19:")).toBeGreaterThan(context.indexOf("user: 18:"));
   });
 });
 

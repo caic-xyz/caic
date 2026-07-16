@@ -75,6 +75,8 @@ private const val SETUP_TIMEOUT_MS = 15_000L
 private const val ICE_GATHERING_TIMEOUT_MS = 10_000L
 private const val ICE_DISCONNECTED_GRACE_MS = 5_000L
 private const val MAX_RECONNECT_ATTEMPTS = 3
+/** Conservative data-channel/model-safe bound for a recovery context update. */
+internal const val MAX_RECOVERY_CONTEXT_CHARS = 8_000
 private val sdpWhitespaceRegex = Regex("\\s+")
 
 internal fun isUsableICECandidate(candidate: String): Boolean {
@@ -86,6 +88,41 @@ private fun isUsableIPv4(address: String): Boolean {
     if (address.startsWith("169.254.")) return false
     val octets = address.split(".")
     return octets.size == 4 && octets.all { octet -> octet.toIntOrNull()?.let { it in 0..255 } == true }
+}
+
+/** Tracks pending and completed network recovery attempts independently from WebRTC callbacks. */
+internal fun recoveryDelayMs(state: PeerConnection.IceConnectionState): Long = when (state) {
+    PeerConnection.IceConnectionState.FAILED -> 0L
+    PeerConnection.IceConnectionState.DISCONNECTED -> ICE_DISCONNECTED_GRACE_MS
+    else -> error("ICE state $state does not require recovery")
+}
+
+internal class VoiceRecoveryPolicy(private val maxAttempts: Int) {
+    private var pending = false
+    var attempts = 0
+        private set
+
+    fun schedule(): Boolean {
+        if (attempts >= maxAttempts) return false
+        pending = true
+        return true
+    }
+
+    fun cancelPending() {
+        pending = false
+    }
+
+    fun beginScheduledRecovery(): Boolean {
+        if (!pending || attempts >= maxAttempts) return false
+        pending = false
+        attempts++
+        return true
+    }
+
+    fun reset() {
+        pending = false
+        attempts = 0
+    }
 }
 
 class VoiceSession(
@@ -110,7 +147,9 @@ class VoiceSession(
     private var micLevelJob: Job? = null
     private var setupTimeoutJob: Job? = null
     private var reconnectJob: Job? = null
-    private var reconnectAttempts = 0
+    private val recoveryPolicy = VoiceRecoveryPolicy(MAX_RECONNECT_ATTEMPTS)
+    private var recoveryContext = ""
+    private var recoveryServiceInstruction = ""
     private val micEnergySamples = mutableMapOf<String, MicEnergySample>()
 
     @Volatile
@@ -142,6 +181,8 @@ class VoiceSession(
     private var lastSignalingState: String? = null
 
     fun setError(message: String) {
+        reconnectJob?.cancel()
+        reconnectJob = null
         setupTimeoutJob?.cancel()
         setupTimeoutJob = null
         Log.e(TAG, "setError: $message")
@@ -169,11 +210,12 @@ class VoiceSession(
 
     /** Connect via WebRTC data channel through the configured service voice gateway. */
     @Suppress("TooGenericExceptionCaught") // Error boundary: surface all failures to UI.
-    fun connect() {
+    fun connect(preserveTranscript: Boolean = false) {
         reconnectJob?.cancel()
         reconnectJob = null
         usableICECandidateWaiter?.cancel()
         usableICECandidateWaiter = null
+        releaseTransport()
         peerConnection?.close()
         peerConnection?.dispose()
         peerConnection = null
@@ -182,7 +224,12 @@ class VoiceSession(
         lastSignalingState = "new"
         lastOfferSDP = ""
         lastAnswerSDP = ""
-        clearTranscript()
+        if (!preserveTranscript) {
+            recoveryPolicy.reset()
+            recoveryContext = ""
+            recoveryServiceInstruction = ""
+            clearTranscript()
+        }
         requestAudioFocus()
         VoiceService.start(appContext)
         refreshAvailableDevices()
@@ -231,6 +278,7 @@ class VoiceSession(
                 )
                 mcpClient = client
                 val systemInstruction = client.serverInstructions().ifBlank { FALLBACK_SYSTEM_INSTRUCTION }
+                recoveryServiceInstruction = systemInstruction
                 mcpTools = client.listTools()
                 val voiceGatewayClient = ApiClient(voiceGatewayEndpointURL)
                 val voiceGatewayHeaders = cookieHeaders(voiceGatewayEndpointURL)
@@ -279,6 +327,7 @@ class VoiceSession(
                 val audioSrc = factory.createAudioSource(audioConstraints)
                 rtcAudioSource = audioSrc
                 val micTrack = factory.createAudioTrack("mic-audio", audioSrc)
+                micTrack.setEnabled(!muted)
                 localAudioTrack = micTrack
                 pc.addTrack(micTrack)
                 startMicLevelMonitoring()
@@ -296,7 +345,7 @@ class VoiceSession(
                     override fun onStateChange() {
                         Log.d(TAG, "DC state: ${dc.state()}")
                         if (dc.state() == DataChannel.State.OPEN) {
-                            reconnectAttempts = 0
+                            recoveryPolicy.reset()
                             setStatus("Waiting for server…")
                             sendSetupMessage(systemInstruction)
                         }
@@ -364,11 +413,11 @@ class VoiceSession(
             lastIceConnectionState = state.name.lowercase()
             Log.d(TAG, "ICE state: $state")
             when (state) {
-                PeerConnection.IceConnectionState.FAILED ->
-                    scheduleReconnect(peerConnection ?: return, state, 0)
+                PeerConnection.IceConnectionState.FAILED,
                 PeerConnection.IceConnectionState.DISCONNECTED ->
-                    scheduleReconnect(peerConnection ?: return, state, ICE_DISCONNECTED_GRACE_MS)
+                    scheduleReconnect(peerConnection ?: return, state, recoveryDelayMs(state))
                 PeerConnection.IceConnectionState.CONNECTED -> {
+                    recoveryPolicy.cancelPending()
                     reconnectJob?.cancel()
                     reconnectJob = null
                 }
@@ -456,18 +505,29 @@ class VoiceSession(
     }
 
     private fun scheduleReconnect(pc: PeerConnection, state: PeerConnection.IceConnectionState, delayMs: Long) {
-        if (peerConnection !== pc || reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) return
+        if (peerConnection !== pc) return
         if (reconnectJob != null) {
             if (delayMs != 0L) return
             reconnectJob?.cancel()
+        }
+        if (!recoveryPolicy.schedule()) {
+            setError("Voice connection lost after $MAX_RECONNECT_ATTEMPTS recovery attempts")
+            return
         }
         setStatus("WebRTC ICE $state; reconnecting…")
         reconnectJob = scope.launch {
             delay(delayMs)
             reconnectJob = null
-            if (peerConnection === pc) {
-                reconnectAttempts++
-                connect()
+            if (peerConnection === pc && recoveryPolicy.beginScheduledRecovery()) {
+                speakerActive = false
+                _state.update { it.copy(speaking = false) }
+                recoveryContext = buildNetworkRecoveryContext(
+                    _state.value.transcript,
+                    listOf(recoveryServiceInstruction, serviceContextText.orEmpty())
+                        .filter { it.isNotBlank() }
+                        .joinToString("\n"),
+                )
+                connect(preserveTranscript = true)
             }
         }
     }
@@ -611,9 +671,25 @@ class VoiceSession(
         applyCommunicationDevice(deviceId)
     }
 
+    private fun releaseTransport() {
+        stopMicLevelMonitoring()
+        unregisterDeviceCallback()
+        unregisterScoReceiver()
+        clearCommunicationDevice()
+        dataChannel?.close()
+        dataChannel?.dispose()
+        dataChannel = null
+        localAudioTrack?.dispose()
+        localAudioTrack = null
+        rtcAudioSource?.dispose()
+        rtcAudioSource = null
+    }
+
     fun disconnect() {
         reconnectJob?.cancel()
         reconnectJob = null
+        recoveryPolicy.reset()
+        recoveryContext = ""
         usableICECandidateWaiter?.cancel()
         usableICECandidateWaiter = null
         muted = false
@@ -717,6 +793,11 @@ class VoiceSession(
                             error = null,
                         )
                     }
+                    if (recoveryContext.isNotEmpty()) {
+                        send(json.encodeToString(ContextUpdate.serializer(), gatewayContextUpdate(recoveryContext)))
+                        recoveryContext = ""
+                    }
+                    flushPendingNotifications()
                     sendUserMessage("Say exactly one word: Ready")
                 }
                 MessageKind.TranscriptDelta -> {
@@ -1039,6 +1120,33 @@ data class VoiceState(
  * chunk onto it (the API streams one word/phrase at a time per message).
  * Otherwise start a new entry.
  */
+/** Build a bounded recovery-only context without replaying unfinished transcript deltas. */
+internal fun buildNetworkRecoveryContext(
+    transcript: List<TranscriptEntry>,
+    serviceContext: String,
+): String {
+    val prefix = "Network recovery context. Continue the existing conversation; do not treat this as a new user turn."
+    // Reserve at most one quarter for service/task state, leaving room for the conversation.
+    val service = serviceContext.trim().take(MAX_RECOVERY_CONTEXT_CHARS / 4)
+    val serviceSection = service.takeIf { it.isNotEmpty() }?.let { "\nCurrent service/task context:\n$it" }.orEmpty()
+    val availableTranscriptChars = MAX_RECOVERY_CONTEXT_CHARS - prefix.length - serviceSection.length - 24
+    val lines = mutableListOf<String>()
+    var lineChars = 0
+    transcript.asReversed().forEach { entry ->
+        if (!entry.final || entry.text.isBlank()) return@forEach
+        val line = "${entry.speaker.name.lowercase()}: ${entry.text.trim()}"
+        if (lineChars + line.length + (if (lines.isEmpty()) 0 else 1) > availableTranscriptChars) {
+            return@forEach
+        }
+        lines.add(0, line)
+        lineChars += line.length + (if (lines.size == 1) 0 else 1)
+    }
+    val transcriptSection = lines.takeIf { it.isNotEmpty() }
+        ?.joinToString(prefix = "\nFinalized transcript:\n", separator = "\n")
+        .orEmpty()
+    return "$prefix$serviceSection$transcriptSection"
+}
+
 private fun List<TranscriptEntry>.appendChunk(speaker: TranscriptSpeaker, text: String): List<TranscriptEntry> =
     if (isNotEmpty() && last().speaker == speaker && !last().final) {
         dropLast(1) + TranscriptEntry(speaker, last().text + text)
