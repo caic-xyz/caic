@@ -9,7 +9,7 @@ Platform service files and default configuration for running caic as a daemon.
 - `voice-gateway-config.toml` — Standalone voice gateway configuration; copy to
   `~/.config/voice-gateway/config.toml` and edit.
 - `com.caic.caic.plist` — macOS launchd user agent.
-- `caic.service` — Linux systemd user service.
+- `caic.service` — Linux systemd user service; uses Podman's packaged user socket.
 - `install.sh` — Installer script served at `https://caic.xyz/install.sh`.
 
 ## macOS (launchd)
@@ -41,9 +41,13 @@ tail -f /tmp/caic.log
 mkdir -p ~/.config/systemd/user
 cp contrib/caic.service ~/.config/systemd/user/
 
-# Enable and start
+# Enable and start. caic requires Podman's packaged podman.socket, which starts
+# the separate Podman API service on demand.
 systemctl --user daemon-reload
 systemctl --user enable --now caic
+
+# Confirm the Podman socket is active.
+systemctl --user status podman.socket
 
 # Restart (after editing the unit file)
 systemctl --user daemon-reload
