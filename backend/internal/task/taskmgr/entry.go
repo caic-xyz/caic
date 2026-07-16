@@ -16,14 +16,13 @@ import (
 // doneClosed, and monitorBranch are guarded by mu and must only be accessed
 // through methods. Code outside this package never touches the fields directly.
 type Entry struct {
-	mu sync.Mutex
-
-	// Immutable after construction.
+	// Immutable.
 	task           *task.Task
 	loadedTask     *task.LoadedTask
 	loadedTaskOnce *sync.Once
 
 	// Guarded by mu.
+	mu            sync.Mutex
 	result        *task.Result
 	done          chan struct{}
 	doneClosed    bool

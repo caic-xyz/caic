@@ -3,6 +3,7 @@
 package repomgr
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -21,7 +22,7 @@ func TestCollectWatchDirs(t *testing.T) {
 			".hidden",
 		})
 
-		dirs := collectWatchDirs(t.Context(), root, 3)
+		dirs := collectWatchDirs(t.Context(), slog.Default(), root, 3)
 
 		want := []string{
 			root,
@@ -40,7 +41,7 @@ func TestCollectWatchDirs(t *testing.T) {
 		root := t.TempDir()
 		makeDirs(t, root, []string{"a/b/c/d"})
 
-		dirs := collectWatchDirs(t.Context(), root, 2)
+		dirs := collectWatchDirs(t.Context(), slog.Default(), root, 2)
 
 		want := []string{
 			root,

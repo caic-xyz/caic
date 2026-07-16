@@ -64,7 +64,11 @@ var (
 )
 
 // mdClientAdapter adapts *md.Client to mdClient.
-type mdClientAdapter struct{ c *md.Client }
+type mdClientAdapter struct {
+	// Immutable.
+	log *slog.Logger
+	c   *md.Client
+}
 
 // Runtime returns the underlying container runtime name ("docker" or "podman").
 func (a mdClientAdapter) Runtime() string { return a.c.Runtime.Name() }
@@ -192,7 +196,7 @@ func (a mdClientAdapter) WatchEvents(ctx context.Context, filter runtime.EventFi
 		for ev, err := range events {
 			if err != nil {
 				if ctx.Err() == nil {
-					slog.WarnContext(ctx, "runtime events stream failed", "err", err)
+					a.log.WarnContext(ctx, "runtime events stream failed", "err", err)
 				}
 				return
 			}
@@ -262,10 +266,14 @@ func (a mdContainerAdapter) Signal(ctx context.Context, pid int, sig string) err
 
 // Backend adapts *md.Client to runtime.Lifecycle.
 type Backend struct {
-	client     mdClient
 	Provider   genai.Provider      // nil if LLM not configured
 	HarnessEnv map[string][]string // per-harness KEY=VALUE env vars from config
 
+	// Immutable.
+	log    *slog.Logger
+	client mdClient
+
+	// Guarded by mu.
 	mu                sync.Mutex
 	containers        map[string]mdContainer           // keyed by runtime instance name
 	pendingContainers map[string]mdContainer           // keyed by runtime instance name
@@ -275,8 +283,10 @@ type Backend struct {
 
 // NewBackend creates a Backend wrapping the given md client.
 func NewBackend(client *md.Client) *Backend {
+	log := slog.Default().With(slog.String("cmp", "md"), slog.String("runtime", client.Runtime.Name()))
 	return &Backend{
-		client:     mdClientAdapter{client},
+		log:        log,
+		client:     mdClientAdapter{log: log, c: client},
 		containers: make(map[string]mdContainer),
 		vncPorts:   make(map[string]int32),
 	}
@@ -289,17 +299,16 @@ func (b *Backend) Name() runtime.Name { return runtime.Name(b.client.Runtime()) 
 func (b *Backend) Launch(ctx context.Context, repos []runtime.Repo, opts *runtime.StartOptions) (runtime.ID, error) {
 	defer trace.StartRegion(ctx, "container.launch").End()
 	if len(repos) > 0 {
-		slog.InfoContext(ctx, "md", "phase", "launch", "dir", repos[0].HostPath, "br", repos[0].Branch, "hns", opts.Harness)
+		b.log.InfoContext(ctx, "md", "phase", "launch", "dir", repos[0].HostPath, "br", repos[0].Branch, "hns", opts.Harness)
 	} else {
-		slog.InfoContext(ctx, "md", "phase", "launch", "hns", opts.Harness)
+		b.log.InfoContext(ctx, "md", "phase", "launch", "hns", opts.Harness)
 	}
-	rt := b.client.Runtime()
-	slog.DebugContext(ctx, "launch starting", "rt", rt, "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "repos_count", len(repos))
+	b.log.DebugContext(ctx, "launch starting", "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "repos_count", len(repos))
 	if _, ok := harnessMap[opts.Harness]; !ok {
 		return "", fmt.Errorf("unknown harness %q", opts.Harness)
 	}
-	slog.DebugContext(ctx, "harness verified", "rt", rt, "harness", opts.Harness)
-	slog.DebugContext(ctx, "creating container", "rt", rt, "repos_count", len(repos))
+	b.log.DebugContext(ctx, "harness verified", "harness", opts.Harness)
+	b.log.DebugContext(ctx, "creating container", "repos_count", len(repos))
 	mdRepos := toMDRepos(repos)
 	c, err := b.client.Container(mdRepos...)
 	if err != nil {
@@ -310,13 +319,13 @@ func (b *Backend) Launch(ctx context.Context, repos []runtime.Repo, opts *runtim
 		return "", err
 	}
 	stdout, stderr := logWriters(opts.LogWriter, "launch")
-	slog.DebugContext(ctx, "launching", "rt", rt)
+	b.log.DebugContext(ctx, "launching")
 	if err := c.Launch(ctx, stdout, stderr, mdOpts); err != nil {
-		slog.ErrorContext(ctx, "launch failed", "rt", rt, "err", err)
+		b.log.ErrorContext(ctx, "launch failed", "err", err)
 		return "", err
 	}
 	name := c.Name()
-	slog.DebugContext(ctx, "launch succeeded", "rt", rt, "ctr", name)
+	b.log.DebugContext(ctx, "launch succeeded", "ctr", name)
 	b.mu.Lock()
 	if b.pendingContainers == nil {
 		b.pendingContainers = make(map[string]mdContainer)
@@ -333,7 +342,7 @@ func (b *Backend) Launch(ctx context.Context, repos []runtime.Repo, opts *runtim
 		b.vncPorts[name] = port
 	}
 	b.mu.Unlock()
-	slog.DebugContext(ctx, "launch returning", "rt", rt, "ctr", name)
+	b.log.DebugContext(ctx, "launch returning", "ctr", name)
 	return runtime.NewID(b.Name(), runtime.InstanceID(name)), nil
 }
 
@@ -345,8 +354,7 @@ func (b *Backend) Connect(ctx context.Context, id runtime.ID, opts *runtime.Star
 		return runtime.ConnectionInfo{}, err
 	}
 	name := string(localID)
-	rt := b.client.Runtime()
-	slog.DebugContext(ctx, "connect starting", "rt", rt, "ctr", name)
+	b.log.DebugContext(ctx, "connect starting", "ctr", name)
 	b.mu.Lock()
 	c, ok := b.pendingContainers[name]
 	if ok {
@@ -354,22 +362,22 @@ func (b *Backend) Connect(ctx context.Context, id runtime.ID, opts *runtime.Star
 	}
 	b.mu.Unlock()
 	if !ok {
-		slog.DebugContext(ctx, "no pending container", "rt", rt, "ctr", name)
+		b.log.DebugContext(ctx, "no pending container", "ctr", name)
 		return runtime.ConnectionInfo{}, fmt.Errorf("no pending container %q", name)
 	}
-	slog.DebugContext(ctx, "found pending container", "rt", rt, "ctr", name)
+	b.log.DebugContext(ctx, "found pending container", "ctr", name)
 	mdOpts, err := b.mdStartOpts(c, opts)
 	if err != nil {
 		return runtime.ConnectionInfo{}, err
 	}
 	stdout, stderr := logWriters(opts.LogWriter, "connect")
-	slog.DebugContext(ctx, "calling connect", "rt", rt, "ctr", name)
+	b.log.DebugContext(ctx, "calling connect", "ctr", name)
 	sr, err := c.Connect(ctx, stdout, stderr, mdOpts)
 	if err != nil {
-		slog.ErrorContext(ctx, "connect failed", "rt", rt, "ctr", name, "err", err)
+		b.log.ErrorContext(ctx, "connect failed", "ctr", name, "err", err)
 		return runtime.ConnectionInfo{}, err
 	}
-	slog.DebugContext(ctx, "connect succeeded", "rt", rt, "ctr", name, "fqdn", sr.TailscaleFQDN, "authurl", sr.TailscaleAuthURL)
+	b.log.DebugContext(ctx, "connect succeeded", "ctr", name, "fqdn", sr.TailscaleFQDN, "authurl", sr.TailscaleAuthURL)
 	return runtime.ConnectionInfo{
 		AgentTarget:      runtime.ConnectionTarget{SSHHost: name},
 		TailscaleFQDN:    sr.TailscaleFQDN,
@@ -394,7 +402,7 @@ func (b *Backend) Diff(ctx context.Context, id runtime.ID, repoIdx int, args ...
 		return "", fmt.Errorf("repo index %d out of range for %d repos", repoIdx, len(repos))
 	}
 	repo := &repos[repoIdx]
-	slog.DebugContext(ctx, "md diff", "ctr", name, "dir", repo.GitRoot, "br", primaryBranch(repo), "args", args)
+	b.log.DebugContext(ctx, "md diff", "ctr", name, "dir", repo.GitRoot, "br", primaryBranch(repo), "args", args)
 	var stdout bytes.Buffer
 	if err := ct.Diff(ctx, &stdout, &SlogWriter{Phase: "diff"}, repoIdx, args); err != nil {
 		return "", err
@@ -416,7 +424,7 @@ func (b *Backend) Fetch(ctx context.Context, id runtime.ID) error {
 	}
 	repos := ct.Repos()
 	if len(repos) > 0 {
-		slog.DebugContext(ctx, "md fetch", "ctr", name, "dir", repos[0].GitRoot, "br", primaryBranch(&repos[0]))
+		b.log.DebugContext(ctx, "md fetch", "ctr", name, "dir", repos[0].GitRoot, "br", primaryBranch(&repos[0]))
 	}
 	for i := range repos {
 		if err := ct.Fetch(ctx, &SlogWriter{Phase: "fetch"}, &SlogWriter{Phase: "fetch"}, i, b.Provider); err != nil {
@@ -434,7 +442,7 @@ func (b *Backend) Stop(ctx context.Context, id runtime.ID) error {
 		return err
 	}
 	name := string(localID)
-	slog.InfoContext(ctx, "md stop", "name", name)
+	b.log.InfoContext(ctx, "md stop", "name", name)
 	ct, err := b.container(ctx, name)
 	if err != nil {
 		return err
@@ -456,9 +464,9 @@ func (b *Backend) Purge(ctx context.Context, id runtime.ID) error {
 	}
 	ctRepos := ct.Repos()
 	if len(ctRepos) > 0 {
-		slog.InfoContext(ctx, "md purge", "ctr", name, "dir", ctRepos[0].GitRoot, "br", primaryBranch(&ctRepos[0]))
+		b.log.InfoContext(ctx, "md purge", "ctr", name, "dir", ctRepos[0].GitRoot, "br", primaryBranch(&ctRepos[0]))
 	} else {
-		slog.InfoContext(ctx, "md purge", "name", name)
+		b.log.InfoContext(ctx, "md purge", "name", name)
 	}
 	if err := ct.Purge(ctx, &SlogWriter{Phase: "purge"}, &SlogWriter{Phase: "purge"}); err != nil {
 		return err
@@ -475,24 +483,23 @@ func (b *Backend) Revive(ctx context.Context, id runtime.ID) error {
 		return err
 	}
 	name := string(localID)
-	rt := b.client.Runtime()
 	ct, err := b.container(ctx, name)
 	if err != nil {
 		return err
 	}
 	ctRepos := ct.Repos()
 	if len(ctRepos) > 0 {
-		slog.InfoContext(ctx, "md revive", "ctr", name, "dir", ctRepos[0].GitRoot, "br", primaryBranch(&ctRepos[0]))
+		b.log.InfoContext(ctx, "md revive", "ctr", name, "dir", ctRepos[0].GitRoot, "br", primaryBranch(&ctRepos[0]))
 	} else {
-		slog.InfoContext(ctx, "md revive", "name", name)
+		b.log.InfoContext(ctx, "md revive", "name", name)
 	}
-	slog.DebugContext(ctx, "revive starting", "rt", rt, "ctr", name, "repos_count", len(ctRepos))
-	slog.DebugContext(ctx, "calling revive", "rt", rt, "ctr", name)
+	b.log.DebugContext(ctx, "revive starting", "ctr", name, "repos_count", len(ctRepos))
+	b.log.DebugContext(ctx, "calling revive", "ctr", name)
 	if err = ct.Revive(ctx, &SlogWriter{Phase: "revive"}, &SlogWriter{Phase: "revive"}); err != nil {
-		slog.ErrorContext(ctx, "revive failed", "rt", rt, "ctr", name, "err", err)
+		b.log.ErrorContext(ctx, "revive failed", "ctr", name, "err", err)
 		return err
 	}
-	slog.DebugContext(ctx, "revive succeeded", "rt", rt, "ctr", name)
+	b.log.DebugContext(ctx, "revive succeeded", "ctr", name)
 	// VNC port may have changed after restart (port remapping).
 	b.mu.Lock()
 	b.vncPorts[name] = ct.VNCPort()
@@ -509,10 +516,9 @@ func (b *Backend) Fork(ctx context.Context, id runtime.ID, repos []runtime.Repo,
 	}
 	name := string(localID)
 	if len(repos) > 0 {
-		slog.InfoContext(ctx, "md", "phase", "fork", "src", name, "dir", repos[0].HostPath, "br", repos[0].Branch)
+		b.log.InfoContext(ctx, "md", "phase", "fork", "src", name, "dir", repos[0].HostPath, "br", repos[0].Branch)
 	}
-	rt := b.client.Runtime()
-	slog.DebugContext(ctx, "fork starting", "rt", rt, "source", name, "repos_count", len(repos))
+	b.log.DebugContext(ctx, "fork starting", "source", name, "repos_count", len(repos))
 
 	// Look up the source instance so Fork inherits Display, Tailscale,
 	// USB, and Sudo from the source unless explicitly overridden by opts.
@@ -525,7 +531,7 @@ func (b *Backend) Fork(ctx context.Context, id runtime.ID, repos []runtime.Repo,
 	if err != nil {
 		return "", runtime.ConnectionInfo{}, nil, err
 	}
-	slog.DebugContext(ctx, "building fork options", "rt", rt, "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "sudo", opts.Sudo)
+	b.log.DebugContext(ctx, "building fork options", "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "sudo", opts.Sudo)
 	forkOpts := &md.ForkOpts{
 		ExtraRepos: toMDRepos(opts.ExtraRepos),
 		Display:    opts.Display,
@@ -538,14 +544,14 @@ func (b *Backend) Fork(ctx context.Context, id runtime.ID, repos []runtime.Repo,
 		MaxCPUs:    maxCPUsOrDefault(opts.MaxCPUs),
 	}
 	stdout, stderr := logWriters(opts.LogWriter, "fork")
-	slog.DebugContext(ctx, "calling fork", "rt", rt, "source", name)
+	b.log.DebugContext(ctx, "calling fork", "source", name)
 	forked, err := ct.Fork(ctx, stdout, stderr, forkOpts)
 	if err != nil {
-		slog.ErrorContext(ctx, "fork failed", "rt", rt, "source", name, "err", err)
+		b.log.ErrorContext(ctx, "fork failed", "source", name, "err", err)
 		return "", runtime.ConnectionInfo{}, nil, err
 	}
 	forkName := forked.Name()
-	slog.DebugContext(ctx, "fork succeeded", "rt", rt, "source", name, "fork", forkName)
+	b.log.DebugContext(ctx, "fork succeeded", "source", name, "fork", forkName)
 	b.rememberContainer(forkName, forked)
 	return runtime.NewID(b.Name(), runtime.InstanceID(forkName)), runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: forkName}}, fromMDRepos(forked.Repos()), nil
 }

@@ -36,6 +36,8 @@ type WatcherConfig struct {
 
 // Watcher polls the repository root and reconciles the workspace registry.
 type Watcher struct {
+	// Immutable.
+	log     *slog.Logger
 	ctx     context.Context
 	absRoot string
 	// TODO: I'm unhappy with this design.
@@ -71,6 +73,7 @@ func NewWatcher(c *WatcherConfig) *Watcher {
 		onRemoved = func(string) {}
 	}
 	return &Watcher{
+		log:             slog.Default().With(slog.String("cmp", "repo-watcher"), slog.String("root", c.AbsRoot)),
 		ctx:             c.Ctx,
 		absRoot:         c.AbsRoot,
 		repos:           c.Repos,
@@ -104,7 +107,7 @@ func (w *Watcher) Watch() {
 func (w *Watcher) SyncReposInDir(ctx context.Context, dir string) {
 	paths, err := git.DiscoverCheckouts(dir, 1)
 	if err != nil {
-		slog.WarnContext(ctx, "discover repos: scan failed", "dir", dir, "err", err)
+		w.log.WarnContext(ctx, "repo scan failed", "dir", dir, "err", err)
 		return
 	}
 	currentSet := make(map[string]struct{}, len(paths))
@@ -124,7 +127,7 @@ func (w *Watcher) SyncReposInDir(ctx context.Context, dir string) {
 			continue
 		}
 		w.onRemoved(r.RelPath)
-		slog.InfoContext(ctx, "deregistered removed repo", "path", r.RelPath)
+		w.log.InfoContext(ctx, "deregistered removed repo", "path", r.RelPath)
 	}
 
 	var newPaths []string
@@ -150,7 +153,7 @@ func (w *Watcher) SyncReposInDir(ctx context.Context, dir string) {
 }
 
 func (w *Watcher) pollRepoChanges(ctx context.Context, mtimes map[string]time.Time) {
-	dirs := collectWatchDirs(ctx, w.absRoot, w.maxDepth-1)
+	dirs := collectWatchDirs(ctx, w.log, w.absRoot, w.maxDepth-1)
 	dirSet := make(map[string]struct{}, len(dirs))
 	for _, d := range dirs {
 		dirSet[d] = struct{}{}
@@ -185,7 +188,7 @@ func (w *Watcher) deregisterReposUnder(ctx context.Context, dir string) {
 			continue
 		}
 		w.onRemoved(r.RelPath)
-		slog.InfoContext(ctx, "deregistered removed repo", "path", r.RelPath)
+		w.log.InfoContext(ctx, "deregistered removed repo", "path", r.RelPath)
 	}
 }
 
@@ -198,14 +201,14 @@ func (w *Watcher) registeredAbsPathSet() map[string]struct{} {
 	return out
 }
 
-func collectWatchDirs(ctx context.Context, root string, maxDepth int) []string {
+func collectWatchDirs(ctx context.Context, log *slog.Logger, root string, maxDepth int) []string {
 	dirs := []string{root}
 	if maxDepth <= 0 {
 		return dirs
 	}
 	entries, err := os.ReadDir(root)
 	if err != nil {
-		slog.DebugContext(ctx, "watch dirs: read dir failed", "path", root, "err", err)
+		log.DebugContext(ctx, "watch dirs: read dir failed", "path", root, "err", err)
 		return dirs
 	}
 	for _, e := range entries {
@@ -213,7 +216,7 @@ func collectWatchDirs(ctx context.Context, root string, maxDepth int) []string {
 			continue
 		}
 		sub := filepath.Join(root, e.Name())
-		dirs = append(dirs, collectWatchDirs(ctx, sub, maxDepth-1)...)
+		dirs = append(dirs, collectWatchDirs(ctx, log, sub, maxDepth-1)...)
 	}
 	return dirs
 }

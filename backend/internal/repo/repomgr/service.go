@@ -57,10 +57,13 @@ type InitResult struct {
 
 // Service owns managed repository metadata and workspace registration.
 type Service struct {
+	// Immutable.
+	log        *slog.Logger
 	absRoot    string
 	registry   *repo.Registry
 	workspaces *repowork.Registry
 
+	// Guarded by mu.
 	mu      sync.Mutex
 	changed chan struct{}
 }
@@ -74,6 +77,7 @@ func NewService(ctx context.Context, absRoot string, registry *repo.Registry, wo
 		workspaces = repowork.NewRegistry(ctx, nil)
 	}
 	return &Service{
+		log:        slog.Default().With(slog.String("cmp", "reposvc")),
 		absRoot:    absRoot,
 		registry:   registry,
 		workspaces: workspaces,
@@ -96,7 +100,7 @@ func (s *Service) Changed() <-chan struct{} {
 // DiscoverWorkspace discovers repo metadata and creates its task workspace.
 func (s *Service) DiscoverWorkspace(ctx context.Context, abs string) (InitResult, error) {
 	rel := s.RelPath(abs)
-	checkout := &git.Checkout{Root: abs, Logger: slog.Default()}
+	checkout := &git.Checkout{Root: abs, Logger: s.log}
 	remoteName, err := checkout.DefaultRemote(ctx)
 	if err != nil {
 		return InitResult{}, fmt.Errorf("cannot determine default remote: %w", err)
@@ -106,7 +110,7 @@ func (s *Service) DiscoverWorkspace(ctx context.Context, abs string) (InitResult
 		return InitResult{}, fmt.Errorf("cannot determine default branch: %w", err)
 	}
 	remote := checkout.RemoteOriginURL(ctx)
-	forgeKind, forgeOwner, forgeRepo := parseForgeRemote(ctx, remote)
+	forgeKind, forgeOwner, forgeRepo := parseForgeRemote(ctx, s.log, remote)
 	info := repo.Info{
 		RelPath:          rel,
 		AbsPath:          abs,
@@ -122,7 +126,7 @@ func (s *Service) DiscoverWorkspace(ctx context.Context, abs string) (InitResult
 		Dir:        info.AbsPath,
 		RepoName:   info.RelPath,
 		GitTimeout: time.Minute,
-		Log:        slog.With("repo", filepath.Base(info.AbsPath)),
+		Log:        s.log.With(slog.String("repo", info.RelPath)),
 	}
 	return InitResult{Info: info, Workspace: workspace}, nil
 }
@@ -237,11 +241,11 @@ func (s *Service) Clone(ctx context.Context, req CloneRequest) (repo.Info, error
 	cmd := exec.CommandContext(cloneCtx, "git", args...) //nolint:gosec // args are validated: depth is an int, URL is user-provided input, absTarget is validated above
 	if out, err := cmd.CombinedOutput(); err != nil {
 		_ = os.RemoveAll(absTarget)
-		slog.WarnContext(ctx, "git clone failed", "url", req.URL, "err", err, "out", string(out))
+		s.log.WarnContext(ctx, "git clone failed", "url", req.URL, "err", err, "out", string(out))
 		return repo.Info{}, repoError(ErrorInternal, "git clone failed: "+err.Error())
 	}
 
-	checkout := &git.Checkout{Root: absTarget, Logger: slog.Default()}
+	checkout := &git.Checkout{Root: absTarget, Logger: s.log}
 	remoteName, err := checkout.DefaultRemote(ctx)
 	if err != nil {
 		_ = os.RemoveAll(absTarget)
@@ -259,13 +263,13 @@ func (s *Service) Clone(ctx context.Context, req CloneRequest) (repo.Info, error
 		Dir:        info.AbsPath,
 		RepoName:   info.RelPath,
 		GitTimeout: time.Minute,
-		Log:        slog.With("repo", filepath.Base(info.AbsPath)),
+		Log:        s.log.With(slog.String("repo", info.RelPath)),
 	}
-	info.ForgeKind, info.ForgeOwner, info.ForgeRepo = parseForgeRemote(ctx, remote)
+	info.ForgeKind, info.ForgeOwner, info.ForgeRepo = parseForgeRemote(ctx, s.log, remote)
 	s.registry.Add(&info)
 	s.workspaces.RegisterWorkspace(targetPath, workspace)
 	s.notifyChanged()
-	slog.InfoContext(ctx, "cloned repo", "url", req.URL, "path", targetPath)
+	s.log.InfoContext(ctx, "cloned repo", "url", req.URL, "path", targetPath)
 
 	return info, nil
 }
@@ -277,13 +281,13 @@ func (s *Service) notifyChanged() {
 	s.mu.Unlock()
 }
 
-func parseForgeRemote(ctx context.Context, remote string) (kind forge.Kind, owner, repoName string) {
+func parseForgeRemote(ctx context.Context, log *slog.Logger, remote string) (kind forge.Kind, owner, repoName string) {
 	if remote == "" {
 		return "", "", ""
 	}
 	kind, owner, repoName, err := forge.ParseRemoteURL(remote)
 	if err != nil {
-		slog.DebugContext(ctx, "unsupported forge remote", "remote", remote, "err", err)
+		log.DebugContext(ctx, "unsupported forge remote", "remote", remote, "err", err)
 		return "", "", ""
 	}
 	return kind, owner, repoName

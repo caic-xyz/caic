@@ -31,10 +31,15 @@ type GitHubAppClient interface {
 // Manager resolves forge clients for repos, manages per-user rate-limit
 // throttles, and caches GitHub App installation IDs.
 type Manager struct {
+	// Immutable.
+	log         *slog.Logger
 	githubToken string
 	gitlabToken string
-	githubApp   GitHubAppClient // nil when GitHub App not configured
 
+	// Set during startup before the manager serves requests.
+	githubApp GitHubAppClient // nil when GitHub App not configured
+
+	// Guarded by mu.
 	mu                   sync.Mutex
 	githubOAuthThrottles map[string]http.RoundTripper // keyed by user ID
 	githubPATThrottle    http.RoundTripper
@@ -48,6 +53,7 @@ type Manager struct {
 // GitHub App client.
 func New(githubToken, gitlabToken string, githubApp GitHubAppClient) *Manager {
 	return &Manager{
+		log:                  slog.Default().With(slog.String("cmp", "forgemgr")),
 		githubToken:          githubToken,
 		gitlabToken:          gitlabToken,
 		githubApp:            githubApp,
@@ -104,7 +110,7 @@ func (m *Manager) ForgeForInfo(ctx context.Context, info *repo.Info) forge.Forge
 		}
 		client, err := m.githubApp.ForgeClient(ctx, installID)
 		if err != nil {
-			slog.WarnContext(ctx, "forgeForInfo: app forge client", "err", err)
+			m.log.WarnContext(ctx, "create GitHub App forge client", "err", err)
 			return nil
 		}
 		return client

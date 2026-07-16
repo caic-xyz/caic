@@ -39,10 +39,9 @@ import (
 // long-lived automation (tasks, runtime, forge, bot/CI) are owned by
 // internal/app and reached through the handler concerns below.
 type Router struct {
-	// Immutable after construction.
-
-	// server-lifetime context; outlives individual HTTP requests.
-	ctx context.Context
+	// Immutable.
+	log *slog.Logger
+	ctx context.Context // server-lifetime context; outlives individual HTTP requests
 
 	// Route handler concerns.
 	authHandlers     *authHandlers
@@ -85,7 +84,7 @@ type Router struct {
 func (r *Router) Serve(ctx context.Context, ln net.Listener) error {
 	if r.authStore == nil && !hostIsLoopback(hostOnly(ln.Addr().String())) {
 		r.mcpDisabled = true
-		slog.WarnContext(ctx, "MCP endpoint disabled: no OAuth login configured and the server binds a non-loopback address; configure OAuth login or bind to localhost to enable MCP",
+		r.log.WarnContext(ctx, "MCP endpoint disabled: no OAuth login configured and the server binds a non-loopback address; configure OAuth login or bind to localhost to enable MCP",
 			"addr", ln.Addr())
 	}
 	handler, err := r.buildHandler()
@@ -109,7 +108,7 @@ func (r *Router) Serve(ctx context.Context, ln net.Listener) error {
 		_ = srv.Shutdown(shutdownCtx)
 		shutdownCancel()
 	}()
-	slog.InfoContext(ctx, "listening", "addr", ln.Addr())
+	r.log.InfoContext(ctx, "listening", "addr", ln.Addr())
 	err = srv.Serve(ln)
 	if errors.Is(err, http.ErrServerClosed) {
 		<-shutdownDone
@@ -213,7 +212,7 @@ func (r *Router) buildHandler() (http.Handler, error) {
 	// Profiling (opt-in via -pprof / CAIC_PPROF).
 	if r.pprof {
 		registerPprof(mux)
-		slog.Info("pprof enabled", "url", "/debug/pprof/")
+		r.log.Info("pprof enabled", "url", "/debug/pprof/")
 	}
 
 	// Serve embedded provider logos (static, no auth).
@@ -432,6 +431,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 	rateLimiter := newRateLimiter(120, time.Minute)
 
 	s := &Router{
+		log: slog.Default().With(slog.String("cmp", "server")),
 		ctx: ctx,
 		authHandlers: &authHandlers{
 			store:              d.AuthStore,
