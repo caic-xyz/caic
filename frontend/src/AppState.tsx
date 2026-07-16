@@ -751,11 +751,13 @@ function createAppStore() {
 
   function handleFork(id: string) {
     const task = tasks().find((t) => t.id === id);
+    const harness = task?.harness ?? selectedHarness();
+    const model = selectedModelForHarness(harness);
     setForkTaskId(id);
     setForkPrompt("");
-    setForkHarness(task?.harness ?? selectedHarness());
-    setForkModel(task?.model ?? "");
-    setForkEffort(task?.effort ?? "");
+    setForkHarness(harness);
+    setForkModel(model);
+    setForkEffort(selectedEffortForModel(harness, model));
     setForkExtraRepos([]);
     setForkTailscale(task?.runtime?.tailscale === "true" || task?.runtime?.tailscale?.startsWith("https://") || false);
     setForkUSB(task?.runtime?.usb ?? false);

@@ -42,6 +42,24 @@ describe("SearchableSelect", () => {
     expect(screen.getByRole("option", { name: "Default" })).toBeInTheDocument();
   });
 
+  it("renders the popup inside its dialog so it remains above the modal backdrop", async () => {
+    const user = userEvent.setup();
+    render(() => (
+      <dialog open data-testid="dialog">
+        <SearchableSelect
+          ariaLabel="Pick"
+          value="a"
+          options={options}
+          onChange={vi.fn()}
+        />
+      </dialog>
+    ));
+
+    await user.click(screen.getByRole("button", { name: "Pick" }));
+
+    expect(screen.getByRole("listbox").closest("dialog")).toBe(screen.getByTestId("dialog"));
+  });
+
   it("calls onOpen when the popup opens", async () => {
     const user = userEvent.setup();
     const { onOpen } = setup();

@@ -174,7 +174,7 @@ export default function SearchableSelect(props: Props) {
         </Show>
       </button>
       <Show when={open()}>
-        <Portal>
+        <Portal mount={triggerRef?.closest("dialog") ?? undefined}>
           <div
             ref={(el) => { menuRef = el; }}
             class={`${styles.menu} ${props.menuClass ?? ""}`}

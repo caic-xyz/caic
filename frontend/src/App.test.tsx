@@ -65,6 +65,7 @@ vi.mock("./api", () => ({
   listRepoBranches: vi.fn(),
   cloneRepo: vi.fn(),
   createTask: vi.fn(),
+  forkTask: vi.fn(),
   getTask: vi.fn(),
   botFixCI: vi.fn(),
   stopTask: vi.fn(),
@@ -503,6 +504,40 @@ describe("App repo chips: No repository", () => {
       // No chip should have been added back.
       expect(chipPathValues()).toHaveLength(0);
     });
+  });
+
+  it("uses the saved model preference when opening the fork dialog", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getPreferences).mockResolvedValue({
+      repositories: [{ path: "repos/a" }],
+      harness: "pi",
+      models: { pi: "openai-codex/gpt-5.6-terra" },
+      settings: { baseImage: "" },
+    } as unknown as PreferencesResp);
+    vi.mocked(api.listHarnesses).mockResolvedValue([
+      {
+        name: "pi",
+        models: ["openai-codex/gpt-5.5", "openai-codex/gpt-5.6-terra"],
+        supportsImages: false,
+        supportsCompact: false,
+      },
+    ] as unknown as HarnessInfo[]);
+
+    renderApp("/task/@task1");
+    await waitForTaskEventsSubscription();
+    dispatchSSE({
+      kind: "snapshot",
+      snapshot: [makeTask({
+        harness: "pi",
+        model: "openai-codex/gpt-5.5",
+        repos: [{ name: "repos/a", branch: "fork-source" }],
+      })],
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Context actions" }));
+    await user.click(screen.getByRole("button", { name: "Fork" }));
+
+    expect(screen.getByRole("button", { name: "Fork Model" })).toHaveTextContent("openai-codex/gpt-5.6-terra");
   });
 
   it("creates task without repos when no chips are selected", async () => {
