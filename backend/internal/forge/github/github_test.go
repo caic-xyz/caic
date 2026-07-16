@@ -1,4 +1,4 @@
-// Tests for GitHub-specific log extraction.
+// Tests for GitHub API error handling and log extraction.
 
 package github
 
@@ -51,6 +51,30 @@ func TestGetJobLog(t *testing.T) {
 			t.Errorf("unexpected log: %q", log)
 		}
 	})
+}
+
+func TestGetDefaultBranchSHA(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/owner/repo/git/ref/heads/main" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`<!doctype html><html><body><p>Hello future GitHubber!</p><p><strong>No server is currently available to service your request.</strong></p><script>veryLongScriptThatMustNotAppear()</script></body></html>`))
+	}))
+	t.Cleanup(srv.Close)
+
+	_, err := NewClientForTest("token", srv.URL).GetDefaultBranchSHA(t.Context(), "owner", "repo", "main")
+	if err == nil {
+		t.Fatal("GetDefaultBranchSHA returned nil error")
+	}
+	want := "github get ref: status 503: Hello future GitHubber! No server is currently available to service your request."
+	if err.Error() != want {
+		t.Errorf("GetDefaultBranchSHA() error = %q, want %q", err, want)
+	}
 }
 
 func TestExtractGitHubSteps(t *testing.T) {

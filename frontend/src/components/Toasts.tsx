@@ -14,7 +14,7 @@ export default function Toasts() {
         <For each={s.warnings()}>
           {(w) => (
             <div class={styles.toast}>
-              <span>{w.message}</span>
+              <span class={styles.toastMessage}>{w.message}</span>
               <button class={styles.toastDismiss} onClick={() => s.dismissWarning(w.id)}>×</button>
             </div>
           )}

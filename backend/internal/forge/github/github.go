@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/maruel/roundtrippers"
+	"golang.org/x/net/html"
 
 	"github.com/caic-xyz/caic/backend/internal/forge"
 )
@@ -174,7 +175,7 @@ func (c *Client) FindPRByBranch(ctx context.Context, owner, repo, headBranch str
 // GetDefaultBranchSHA returns the HEAD commit SHA of branch in the given repo.
 // Uses the lightweight git refs API — no full commit data is fetched.
 func (c *Client) GetDefaultBranchSHA(ctx context.Context, owner, repo, branch string) (string, error) {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/ref/heads/%s", owner, repo, branch)
+	url := fmt.Sprintf("%s/repos/%s/%s/git/ref/heads/%s", c.apiBase(), owner, repo, branch)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return "", err
@@ -192,7 +193,14 @@ func (c *Client) GetDefaultBranchSHA(ctx context.Context, owner, repo, branch st
 		return "", fmt.Errorf("github get ref: %w", forge.ErrNotFound)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("github get ref: status %d: %s", resp.StatusCode, data)
+		message := string(data)
+		if isGitHubHTMLResponse(resp.Header.Get("Content-Type"), data) {
+			message, err = trimGitHubErrorHTML(data)
+			if err != nil {
+				return "", fmt.Errorf("github get ref: trim HTML response: %w", err)
+			}
+		}
+		return "", fmt.Errorf("github get ref: status %d: %s", resp.StatusCode, message)
 	}
 	var r refResponse
 	if err := json.Unmarshal(data, &r); err != nil {
@@ -469,6 +477,52 @@ func (c *Client) apiBase() string {
 		return c.baseURL
 	}
 	return "https://api.github.com"
+}
+
+const maxGitHubErrorHTMLLength = 512
+
+func isGitHubHTMLResponse(contentType string, data []byte) bool {
+	if strings.Contains(strings.ToLower(contentType), "text/html") {
+		return true
+	}
+	data = bytes.TrimSpace(data)
+	return bytes.HasPrefix(bytes.ToLower(data), []byte("<!doctype html")) || bytes.HasPrefix(bytes.ToLower(data), []byte("<html"))
+}
+
+func trimGitHubErrorHTML(data []byte) (string, error) {
+	n, err := html.Parse(bytes.NewReader(data))
+	if err != nil {
+		return "", err
+	}
+	var sb strings.Builder
+	appendGitHubErrorHTMLText(&sb, n)
+	message := strings.Join(strings.Fields(sb.String()), " ")
+	if message == "" {
+		return "HTML error response", nil
+	}
+	return truncateGitHubErrorHTML(message), nil
+}
+
+func appendGitHubErrorHTMLText(sb *strings.Builder, n *html.Node) {
+	if n.Type == html.TextNode {
+		sb.WriteString(n.Data)
+		sb.WriteByte(' ')
+		return
+	}
+	if n.Type == html.ElementNode && (n.Data == "script" || n.Data == "style") {
+		return
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		appendGitHubErrorHTMLText(sb, c)
+	}
+}
+
+func truncateGitHubErrorHTML(message string) string {
+	runes := []rune(message)
+	if len(runes) <= maxGitHubErrorHTMLLength {
+		return message
+	}
+	return string(runes[:maxGitHubErrorHTMLLength]) + "…"
 }
 
 // extractGitHubSteps returns the content of ##[group]…##[endgroup] sections

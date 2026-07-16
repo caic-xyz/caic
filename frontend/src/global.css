@@ -67,6 +67,8 @@
   --color-bg-hover: #eee;
   --color-bg-code: #e8e8e8;
   --color-bg-surface: #fafafa;
+  --color-toast-bg: #333;
+  --color-on-toast: #fff;
 
   /* Borders */
   --color-border: #ddd;

@@ -10,22 +10,31 @@
   gap: 0.5rem;
   z-index: 300;
   pointer-events: none;
-  max-width: 32rem;
+  max-width: min(32rem, 90vw);
   width: 90vw;
 }
 
 .toast {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.5rem;
+  max-height: min(12rem, calc(100vh - 3rem));
+  box-sizing: border-box;
+  overflow-y: auto;
   padding: 0.6rem 0.75rem;
   border-radius: var(--radius-md);
-  background: #333;
-  color: #fff;
+  background: var(--color-toast-bg);
+  color: var(--color-on-toast);
   font-size: 0.85rem;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
   pointer-events: auto;
   animation: toastIn 200ms ease-out;
+}
+
+.toastMessage {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .toastDismiss {
