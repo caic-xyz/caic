@@ -405,7 +405,7 @@ func TestRewriteSDPMappedCandidates(t *testing.T) {
 	t.Run("rewrites mapped external port", func(t *testing.T) {
 		t.Parallel()
 		sdp := "v=0\r\na=candidate:1 1 udp 2130706431 203.0.113.10 3478 typ srflx\r\na=candidate:2 1 udp 2130706431 192.168.1.20 3478 typ host\r\n"
-		got := rewriteSDPMappedCandidates(sdp, "192.168.1.20", "203.0.113.10", 3478, 40000)
+		got := rewriteSDPMappedCandidates(sdp, "203.0.113.10", 40000)
 		want := "v=0\r\na=candidate:1 1 udp 2130706431 203.0.113.10 40000 typ srflx\r\na=candidate:2 1 udp 2130706431 192.168.1.20 3478 typ host\r\n"
 		if got != want {
 			t.Fatalf("sdp = %q, want %q", got, want)
@@ -415,19 +415,20 @@ func TestRewriteSDPMappedCandidates(t *testing.T) {
 	t.Run("rewrites unspecified srflx candidate from pion", func(t *testing.T) {
 		t.Parallel()
 		sdp := "v=0\r\na=candidate:1 1 udp 2130706431 192.168.1.20 3478 typ host\r\na=candidate:2 1 udp 1694498815 0.0.0.0 34123 typ srflx raddr 192.168.1.20 rport 3478\r\n"
-		got := rewriteSDPMappedCandidates(sdp, "192.168.1.20", "203.0.113.10", 3478, 40000)
+		got := rewriteSDPMappedCandidates(sdp, "203.0.113.10", 40000)
 		want := "v=0\r\na=candidate:1 1 udp 2130706431 192.168.1.20 3478 typ host\r\na=candidate:2 1 udp 1694498815 203.0.113.10 40000 typ srflx raddr 192.168.1.20 rport 3478\r\n"
 		if got != want {
 			t.Fatalf("sdp = %q, want %q", got, want)
 		}
 	})
 
-	t.Run("leaves unrelated srflx candidate unchanged", func(t *testing.T) {
+	t.Run("rewrites every srflx candidate", func(t *testing.T) {
 		t.Parallel()
 		sdp := "v=0\r\na=candidate:1 1 udp 1694498815 0.0.0.0 34123 typ srflx raddr 192.168.122.1 rport 3478\r\n"
-		got := rewriteSDPMappedCandidates(sdp, "192.168.1.20", "203.0.113.10", 3478, 40000)
-		if got != sdp {
-			t.Fatalf("sdp = %q, want unchanged %q", got, sdp)
+		got := rewriteSDPMappedCandidates(sdp, "203.0.113.10", 40000)
+		want := "v=0\r\na=candidate:1 1 udp 1694498815 203.0.113.10 40000 typ srflx raddr 192.168.122.1 rport 3478\r\n"
+		if got != want {
+			t.Fatalf("sdp = %q, want %q", got, want)
 		}
 	})
 }

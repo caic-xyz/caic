@@ -11,6 +11,18 @@ import org.junit.Test
 
 class VoiceSessionTest {
     @Test
+    fun usableICECandidateAcceptsLANAndTailscaleIPv4UDP() {
+        assertTrue(isUsableICECandidate("candidate:1 1 udp 2130706431 192.168.1.64 57033 typ host"))
+        assertTrue(isUsableICECandidate("candidate:2 1 udp 2121998079 100.99.136.28 57469 typ host"))
+    }
+
+    @Test
+    fun usableICECandidateRejectsLinkLocalIPv4AndNonUDPCandidates() {
+        assertTrue(!isUsableICECandidate("candidate:1 1 udp 2122260223 169.254.58.144 58981 typ host"))
+        assertTrue(!isUsableICECandidate("candidate:2 1 tcp 1518149375 192.168.1.64 9 typ host tcptype active"))
+    }
+
+    @Test
     fun summarizeSDPCandidatesReportsCandidateHostPortAndType() {
         val sdp = "v=0\r\n" +
             "a=candidate:1 1 udp 2130706431 70.51.33.231 42602 typ srflx " +

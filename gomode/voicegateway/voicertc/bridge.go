@@ -73,7 +73,7 @@ type udpCandidate struct {
 }
 
 // NewBridge creates a Bridge that multiplexes WebRTC traffic through a single
-// UDP port. UPnP publication is delayed until the first offer.
+// UDP port and eagerly verifies its UPnP publication.
 //
 // A gateway instance serves exactly the backend named in cfg. geminiAPIKey is
 // only consumed by the Gemini Live backend.
@@ -88,6 +88,10 @@ func NewBridge(ctx context.Context, cfg *voicegateway.Config, geminiAPIKey strin
 			slog.WarnContext(ctx, "voicertc: close backend", "err", cerr)
 		}
 		return nil, err
+	}
+	if _, err := b.ensureWebRTCAPI(ctx); err != nil {
+		b.CloseAll(ctx)
+		return nil, fmt.Errorf("initialize WebRTC API: %w", err)
 	}
 	return b, nil
 }
@@ -490,12 +494,11 @@ func (b *Bridge) udpDiagnostics() (endpoints []voicev1.VoiceRTCUDPEndpoint, mapp
 func (b *Bridge) rewriteMappedCandidatePort(sdp string) string {
 	b.setupMu.Lock()
 	mapping := b.upnpMapping
-	hostIP := append(net.IP(nil), b.hostIP...)
 	b.setupMu.Unlock()
 	if mapping == nil {
 		return sdp
 	}
-	return rewriteSDPMappedCandidates(sdp, hostIP.String(), mapping.ip.String(), int(mapping.internalPort), int(mapping.externalPort))
+	return rewriteSDPMappedCandidates(sdp, mapping.ip.String(), int(mapping.externalPort))
 }
 
 // session holds all state for one bridge session.
@@ -804,9 +807,8 @@ func buildVoiceRTCDiagnostics(sessionID string, server *voicev1.VoiceRTCServerDi
 	}
 }
 
-func rewriteSDPMappedCandidates(sdp, localHost, externalHost string, internalPort, externalPort int) string {
+func rewriteSDPMappedCandidates(sdp, externalHost string, externalPort int) string {
 	lines := strings.Split(sdp, "\n")
-	internalPortString := strconv.Itoa(internalPort)
 	externalPortString := strconv.Itoa(externalPort)
 	for i, line := range lines {
 		body := strings.TrimSuffix(line, "\r")
@@ -815,7 +817,7 @@ func rewriteSDPMappedCandidates(sdp, localHost, externalHost string, internalPor
 			continue
 		}
 		fields := strings.Fields(body)
-		if !mappedCandidateNeedsRewrite(fields, localHost, externalHost, internalPortString) {
+		if !mappedCandidateNeedsRewrite(fields) {
 			continue
 		}
 		fields[4] = externalHost
@@ -825,28 +827,11 @@ func rewriteSDPMappedCandidates(sdp, localHost, externalHost string, internalPor
 	return strings.Join(lines, "\n")
 }
 
-func mappedCandidateNeedsRewrite(fields []string, localHost, externalHost, internalPort string) bool {
-	if len(fields) < 8 || fields[7] != "srflx" {
-		return false
-	}
-	candidateHost := fields[4]
-	candidatePort := fields[5]
-	if candidateHost == externalHost {
-		return true
-	}
-	if candidateHost == localHost && candidatePort == internalPort {
-		return true
-	}
-	return candidateAttribute(fields, "raddr") == localHost && candidateAttribute(fields, "rport") == internalPort
-}
-
-func candidateAttribute(fields []string, name string) string {
-	for i := 8; i+1 < len(fields); i += 2 {
-		if fields[i] == name {
-			return fields[i+1]
-		}
-	}
-	return ""
+func mappedCandidateNeedsRewrite(fields []string) bool {
+	// The bridge has no server-side STUN configuration. Every srflx candidate
+	// Pion produces therefore represents the local UDP mux and must advertise
+	// its UPnP-mapped endpoint, including Pion's 0.0.0.0 placeholders.
+	return len(fields) >= 8 && fields[7] == "srflx"
 }
 
 func udpCandidates(ips []net.IP, port int) []udpCandidate {

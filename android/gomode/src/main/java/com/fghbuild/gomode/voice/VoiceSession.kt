@@ -73,7 +73,20 @@ private const val TAG = "GoModeVoiceSession"
 private const val MIC_LEVEL_POLL_MS = 100L
 private const val SETUP_TIMEOUT_MS = 15_000L
 private const val ICE_GATHERING_TIMEOUT_MS = 10_000L
+private const val ICE_DISCONNECTED_GRACE_MS = 5_000L
+private const val MAX_RECONNECT_ATTEMPTS = 3
 private val sdpWhitespaceRegex = Regex("\\s+")
+
+internal fun isUsableICECandidate(candidate: String): Boolean {
+    val fields = candidate.trim().split(sdpWhitespaceRegex)
+    return fields.size >= 8 && fields[2] == "udp" && isUsableIPv4(fields[4])
+}
+
+private fun isUsableIPv4(address: String): Boolean {
+    if (address.startsWith("169.254.")) return false
+    val octets = address.split(".")
+    return octets.size == 4 && octets.all { octet -> octet.toIntOrNull()?.let { it in 0..255 } == true }
+}
 
 class VoiceSession(
     private val appContext: Context,
@@ -96,7 +109,12 @@ class VoiceSession(
     private var localAudioTrack: org.webrtc.AudioTrack? = null
     private var micLevelJob: Job? = null
     private var setupTimeoutJob: Job? = null
+    private var reconnectJob: Job? = null
+    private var reconnectAttempts = 0
     private val micEnergySamples = mutableMapOf<String, MicEnergySample>()
+
+    @Volatile
+    private var usableICECandidateWaiter: CompletableDeferred<Unit>? = null
     private var mcpClient: McpClient? = null
     private var mcpTools: List<ToolDescriptor> = emptyList()
     private var deviceCallback: AudioDeviceCallback? = null
@@ -152,6 +170,10 @@ class VoiceSession(
     /** Connect via WebRTC data channel through the configured service voice gateway. */
     @Suppress("TooGenericExceptionCaught") // Error boundary: surface all failures to UI.
     fun connect() {
+        reconnectJob?.cancel()
+        reconnectJob = null
+        usableICECandidateWaiter?.cancel()
+        usableICECandidateWaiter = null
         peerConnection?.close()
         peerConnection?.dispose()
         peerConnection = null
@@ -274,6 +296,7 @@ class VoiceSession(
                     override fun onStateChange() {
                         Log.d(TAG, "DC state: ${dc.state()}")
                         if (dc.state() == DataChannel.State.OPEN) {
+                            reconnectAttempts = 0
                             setStatus("Waiting for server…")
                             sendSetupMessage(systemInstruction)
                         }
@@ -332,13 +355,23 @@ class VoiceSession(
         gatewayClient: ApiClient,
         headers: Map<String, String>,
     ) = object : PeerConnection.Observer {
-        override fun onIceCandidate(candidate: IceCandidate) = Unit
+        override fun onIceCandidate(candidate: IceCandidate) {
+            if (isUsableICECandidate(candidate.sdp)) {
+                usableICECandidateWaiter?.complete(Unit)
+            }
+        }
         override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) {
             lastIceConnectionState = state.name.lowercase()
             Log.d(TAG, "ICE state: $state")
             when (state) {
-                PeerConnection.IceConnectionState.FAILED,
-                PeerConnection.IceConnectionState.DISCONNECTED,
+                PeerConnection.IceConnectionState.FAILED ->
+                    scheduleReconnect(peerConnection ?: return, state, 0)
+                PeerConnection.IceConnectionState.DISCONNECTED ->
+                    scheduleReconnect(peerConnection ?: return, state, ICE_DISCONNECTED_GRACE_MS)
+                PeerConnection.IceConnectionState.CONNECTED -> {
+                    reconnectJob?.cancel()
+                    reconnectJob = null
+                }
                 PeerConnection.IceConnectionState.CLOSED -> setDiagnosticError(
                     pc = peerConnection ?: return,
                     gatewayClient = gatewayClient,
@@ -422,6 +455,23 @@ class VoiceSession(
         return kind == null || kind == "audio"
     }
 
+    private fun scheduleReconnect(pc: PeerConnection, state: PeerConnection.IceConnectionState, delayMs: Long) {
+        if (peerConnection !== pc || reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) return
+        if (reconnectJob != null) {
+            if (delayMs != 0L) return
+            reconnectJob?.cancel()
+        }
+        setStatus("WebRTC ICE $state; reconnecting…")
+        reconnectJob = scope.launch {
+            delay(delayMs)
+            reconnectJob = null
+            if (peerConnection === pc) {
+                reconnectAttempts++
+                connect()
+            }
+        }
+    }
+
     private fun startSetupTimeout(
         pc: PeerConnection,
         gatewayClient: ApiClient,
@@ -484,8 +534,16 @@ class VoiceSession(
     }
 
     private suspend fun setLocalDescriptionAndWaitForICE(pc: PeerConnection, desc: SessionDescription) {
-        setLocalDescription(pc, desc)
-        waitForICEGatheringComplete(pc)
+        val candidate = CompletableDeferred<Unit>()
+        usableICECandidateWaiter = candidate
+        try {
+            setLocalDescription(pc, desc)
+            waitForUsableICECandidate(pc, candidate)
+        } finally {
+            if (usableICECandidateWaiter === candidate) {
+                usableICECandidateWaiter = null
+            }
+        }
     }
 
     private suspend fun setLocalDescription(pc: PeerConnection, desc: SessionDescription) {
@@ -506,14 +564,17 @@ class VoiceSession(
         }
     }
 
-    private suspend fun waitForICEGatheringComplete(pc: PeerConnection) {
+    // waitForUsableICECandidate does not wait for every configured STUN server.
+    // A slow or unreachable STUN request must not delay LAN or Tailscale signaling.
+    private suspend fun waitForUsableICECandidate(pc: PeerConnection, candidate: CompletableDeferred<Unit>) {
+        if (!candidate.isCompleted && pc.iceGatheringState() == PeerConnection.IceGatheringState.COMPLETE) {
+            error("WebRTC ICE gathering completed without a usable candidate")
+        }
         withTimeout(ICE_GATHERING_TIMEOUT_MS) {
-            while (peerConnection === pc && pc.iceGatheringState() != PeerConnection.IceGatheringState.COMPLETE) {
-                delay(25)
-            }
+            candidate.await()
         }
         if (peerConnection !== pc) {
-            throw CancellationException("WebRTC peer connection changed before ICE gathering completed")
+            throw CancellationException("WebRTC peer connection changed before a usable ICE candidate was gathered")
         }
     }
 
@@ -551,6 +612,10 @@ class VoiceSession(
     }
 
     fun disconnect() {
+        reconnectJob?.cancel()
+        reconnectJob = null
+        usableICECandidateWaiter?.cancel()
+        usableICECandidateWaiter = null
         muted = false
         setupTimeoutJob?.cancel()
         setupTimeoutJob = null

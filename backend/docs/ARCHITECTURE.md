@@ -244,6 +244,7 @@ graph TD
     pkg_internal_cmd_gen_api_sdk["internal/cmd/gen-api-sdk"]
     pkg_internal_cmd_mcp_auth_smoke["internal/cmd/mcp-auth-smoke"]
     pkg_internal_cmd_record_trace["internal/cmd/record-trace"]
+    pkg_internal_cmd_upnp_dump["internal/cmd/upnp-dump"]
   end
 
   subgraph Static_Assets["Static Assets"]
@@ -501,6 +502,7 @@ graph TD
 | `internal/cmd/gen-api-sdk` | `internal/mcp`, `internal/server/api/v1` |
 | `internal/cmd/mcp-auth-smoke` | `internal/auth`, `internal/forge/forgemgr`, `internal/preferences`, `internal/repo`, `internal/repo/repomgr`, `internal/repo/repowork`, `internal/runtime`, `internal/server`, `internal/server/ipgeo`, `internal/smoketest`, `internal/task/taskmgr` |
 | `internal/cmd/record-trace` | `internal/agent`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/agent/harness`, `internal/agent/opencode`, `internal/agent/pi`, `internal/agent/relay` |
+| `internal/cmd/upnp-dump` | None |
 | `internal/eventreplay` | `internal/agent`, `internal/agent/harness`, `internal/server/api/v1`, `internal/server/api/v1conv` |
 | `internal/forge` | None |
 | `internal/forge/forgecache` | `internal/forge` |

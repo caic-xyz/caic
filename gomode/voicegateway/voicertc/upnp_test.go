@@ -7,6 +7,8 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +17,7 @@ import (
 type upnpWANConnectionFake struct {
 	externalIP string
 	addErr     error
+	exactErr   error
 	ipErr      error
 	deleteErr  error
 
@@ -33,6 +36,9 @@ type upnpWANConnectionFake struct {
 }
 
 func (f *upnpWANConnectionFake) AddPortMappingCtx(_ context.Context, remoteHost string, externalPort uint16, protocol string, internalPort uint16, internalClient string, enabled bool, description string, leaseDuration uint32) error {
+	if f.exactErr != nil {
+		return f.exactErr
+	}
 	if f.addErr != nil {
 		return f.addErr
 	}
@@ -115,7 +121,7 @@ func TestTryMapUPnPUDP(t *testing.T) {
 
 	t.Run("valid add any", func(t *testing.T) {
 		t.Parallel()
-		client := &upnpWANAnyPortConnectionFake{upnpWANConnectionFake: upnpWANConnectionFake{externalIP: "203.0.113.10"}, reservedPort: 40000}
+		client := &upnpWANAnyPortConnectionFake{upnpWANConnectionFake: upnpWANConnectionFake{externalIP: "203.0.113.10", exactErr: errors.New("port in use")}, reservedPort: 40000}
 		mapping, err := tryMapUPnPUDP(t.Context(), client, "192.168.1.20", 3478)
 		if err != nil {
 			t.Fatal(err)
@@ -208,6 +214,105 @@ func TestUpnpLocationsFromResponses(t *testing.T) {
 		}
 		if locations[0].String() != "http://192.168.1.1/root.xml" || locations[1].String() != "http://192.168.1.2/root.xml" {
 			t.Fatalf("locations = %v", locations)
+		}
+	})
+}
+
+func TestSameIPv4Address(t *testing.T) {
+	t.Parallel()
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		if err := sameIPv4Address(net.ParseIP("192.168.1.123"), net.ParseIP("192.168.1.123")); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		err := sameIPv4Address(net.ParseIP("192.168.1.123"), net.ParseIP("100.99.136.28"))
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "route selects source") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
+func TestURLIPv4(t *testing.T) {
+	t.Parallel()
+	t.Run("error hostname", func(t *testing.T) {
+		t.Parallel()
+		loc, err := url.Parse("http://router.example/root.xml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = urlIPv4(loc)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "literal IPv4 address") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
+func TestNewUPnPHTTPClient(t *testing.T) {
+	t.Parallel()
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		var remoteHost string
+		server := httptest.NewUnstartedServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+			remoteHost, _, _ = net.SplitHostPort(request.RemoteAddr)
+			response.WriteHeader(http.StatusNoContent)
+		}))
+		var listenConfig net.ListenConfig
+		listener, err := listenConfig.Listen(t.Context(), "tcp4", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		server.Listener = listener
+		server.Start()
+		t.Cleanup(server.Close)
+
+		client, err := newUPnPHTTPClient(net.ParseIP("127.0.0.2"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL, http.NoBody)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := response.Body.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if remoteHost != "127.0.0.2" {
+			t.Fatalf("request source = %s, want 127.0.0.2", remoteHost)
+		}
+	})
+}
+
+func TestUPnPRootDeviceByURL(t *testing.T) {
+	t.Parallel()
+	t.Run("error redirect", func(t *testing.T) {
+		t.Parallel()
+		server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+			http.Redirect(response, request, "http://192.0.2.1/root.xml", http.StatusFound)
+		}))
+		t.Cleanup(server.Close)
+		loc, err := url.Parse(server.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = upnpRootDeviceByURL(t.Context(), loc, net.ParseIP("127.0.0.2"))
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "redirects are not permitted") {
+			t.Fatalf("unexpected error: %v", err)
 		}
 	})
 }

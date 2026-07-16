@@ -43,6 +43,9 @@ import {
 /** Max time (ms) to wait for session.ready before timing out. */
 const SETUP_TIMEOUT_MS = 15000;
 const ICE_GATHERING_TIMEOUT_MS = 10000;
+const ICE_HOST_CANDIDATE_GRACE_MS = 1000;
+const ICE_DISCONNECTED_GRACE_MS = 5000;
+const MAX_RECONNECT_ATTEMPTS = 3;
 
 export const voiceGatewayApi = voicegatewaySDK.createApiClient();
 
@@ -114,6 +117,9 @@ export class VoiceSession {
   /** Text notifications buffered while the model is speaking; flushed on turn end. */
   private _pendingNotifications: string[] = [];
   private _setupTimer: ReturnType<typeof setTimeout> | null = null;
+  private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private _reconnectArgs: [Task[], string, string, string] | null = null;
+  private _reconnectAttempts = 0;
 
   constructor() {
     const [state, setState] = createStore<VoiceState>({
@@ -264,6 +270,11 @@ export class VoiceSession {
     _defaultHarness: string,
     _defaultModel: string,
   ): Promise<void> {
+    this._reconnectArgs = [tasks, _recentRepo, _defaultHarness, _defaultModel];
+    if (this._reconnectTimer !== null) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
     this._releaseAll();
     this._lastOfferSDP = "";
     this._lastAnswerSDP = "";
@@ -371,6 +382,7 @@ export class VoiceSession {
       };
 
       dc.onopen = () => {
+        this._reconnectAttempts = 0;
         this._setStatus("Waiting for server…");
         this._sendSetup(mcpTools, systemInstruction);
       };
@@ -388,7 +400,14 @@ export class VoiceSession {
 
       pc.oniceconnectionstatechange = () => {
         const st = pc.iceConnectionState;
-        if (st === "failed" || st === "disconnected" || st === "closed") {
+        if (st === "failed") {
+          this._scheduleReconnect(pc, `WebRTC ICE ${st}`, 0);
+        } else if (st === "disconnected") {
+          this._scheduleReconnect(pc, `WebRTC ICE ${st}`, ICE_DISCONNECTED_GRACE_MS);
+        } else if (st === "connected" && this._reconnectTimer !== null) {
+          clearTimeout(this._reconnectTimer);
+          this._reconnectTimer = null;
+        } else if (st === "closed") {
           void this._setDiagnosticError(pc, `WebRTC ICE ${st}`);
         }
       };
@@ -415,6 +434,11 @@ export class VoiceSession {
   }
 
   disconnect(): void {
+    this._reconnectArgs = null;
+    if (this._reconnectTimer !== null) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
     if (this._setupTimer !== null) {
       clearTimeout(this._setupTimer);
       this._setupTimer = null;
@@ -491,6 +515,22 @@ export class VoiceSession {
       s.connectStatus = status;
       s.error = null;
     });
+  }
+
+  private _scheduleReconnect(pc: RTCPeerConnection, reason: string, delay: number): void {
+    if (this._pc !== pc || this._reconnectArgs === null || this._reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) return;
+    if (this._reconnectTimer !== null) {
+      if (delay !== 0) return;
+      clearTimeout(this._reconnectTimer);
+    }
+    this._setStatus(`${reason}; reconnecting…`);
+    this._reconnectTimer = setTimeout(() => {
+      this._reconnectTimer = null;
+      const args = this._reconnectArgs;
+      if (args === null) return;
+      this._reconnectAttempts++;
+      void this.connect(...args);
+    }, delay);
   }
 
   private _startSetupTimer(pc: RTCPeerConnection): void {
@@ -759,7 +799,7 @@ function completeLocalOffer(
   offer: RTCSessionDescriptionInit,
 ): Promise<string> {
   return pc.setLocalDescription(offer).then(async () => {
-    await waitForICEGatheringComplete(pc);
+    await waitForUsableICECandidate(pc);
     const sdp = pc.localDescription?.sdp;
     if (!sdp) {
       throw new Error("WebRTC local offer SDP unavailable after ICE gathering");
@@ -768,32 +808,83 @@ function completeLocalOffer(
   });
 }
 
-function waitForICEGatheringComplete(pc: RTCPeerConnection): Promise<void> {
-  if (pc.iceGatheringState === "complete") return Promise.resolve();
+// waitForUsableICECandidate does not wait for every configured STUN server.
+// A slow or unreachable STUN request must not delay LAN or Tailscale signaling.
+function waitForUsableICECandidate(pc: RTCPeerConnection): Promise<void> {
   return new Promise((resolve, reject) => {
+    let hostCandidateGrace: number | null = null;
     const timeout = window.setTimeout(() => {
       cleanup();
-      reject(new Error("Timed out waiting for WebRTC ICE candidates"));
+      reject(new Error("Timed out waiting for a usable WebRTC ICE candidate"));
     }, ICE_GATHERING_TIMEOUT_MS);
     const cleanup = () => {
       window.clearTimeout(timeout);
+      if (hostCandidateGrace !== null) window.clearTimeout(hostCandidateGrace);
+      pc.removeEventListener("icecandidate", onICECandidate);
       pc.removeEventListener("icegatheringstatechange", onGatheringStateChange);
       pc.removeEventListener("connectionstatechange", onConnectionStateChange);
     };
-    const onGatheringStateChange = () => {
-      if (pc.iceGatheringState !== "complete") return;
+    const resolveIfUsable = (): boolean => {
+      if (!localDescriptionHasUsableICECandidate(pc)) return false;
       cleanup();
       resolve();
+      return true;
+    };
+    const onICECandidate = (event: Event) => {
+      const candidate = (event as Event & { candidate: RTCIceCandidate | null }).candidate;
+      if (candidate === null || !isUsableICECandidate(candidate.candidate)) return;
+      if (iceCandidateType(candidate.candidate) === "srflx") {
+        cleanup();
+        resolve();
+        return;
+      }
+      if (hostCandidateGrace !== null) return;
+      hostCandidateGrace = window.setTimeout(resolveIfUsable, ICE_HOST_CANDIDATE_GRACE_MS);
+    };
+    const onGatheringStateChange = () => {
+      if (resolveIfUsable() || pc.iceGatheringState !== "complete") return;
+      cleanup();
+      reject(new Error("WebRTC ICE gathering completed without a usable candidate"));
     };
     const onConnectionStateChange = () => {
       if (pc.connectionState !== "closed" && pc.connectionState !== "failed") return;
       cleanup();
-      reject(new Error(`WebRTC connection ${pc.connectionState} before ICE gathering completed`));
+      reject(new Error(`WebRTC connection ${pc.connectionState} before ICE candidate gathering completed`));
     };
+    pc.addEventListener("icecandidate", onICECandidate);
     pc.addEventListener("icegatheringstatechange", onGatheringStateChange);
     pc.addEventListener("connectionstatechange", onConnectionStateChange);
-    onGatheringStateChange();
+    if (pc.iceGatheringState === "complete" || localDescriptionHasReflexiveICECandidate(pc)) {
+      resolveIfUsable();
+    } else if (localDescriptionHasUsableICECandidate(pc)) {
+      hostCandidateGrace = window.setTimeout(resolveIfUsable, ICE_HOST_CANDIDATE_GRACE_MS);
+    }
   });
+}
+
+function localDescriptionHasUsableICECandidate(pc: RTCPeerConnection): boolean {
+  return pc.localDescription?.sdp.split("\n").some(isUsableICECandidate) ?? false;
+}
+
+function localDescriptionHasReflexiveICECandidate(pc: RTCPeerConnection): boolean {
+  return pc.localDescription?.sdp.split("\n").some((candidate) => {
+    return isUsableICECandidate(candidate) && iceCandidateType(candidate) === "srflx";
+  }) ?? false;
+}
+
+function isUsableICECandidate(candidate: string): boolean {
+  const fields = candidate.trim().split(/\s+/);
+  return fields.length >= 8 && fields[2] === "udp" && isUsableIPv4(fields[4]);
+}
+
+function iceCandidateType(candidate: string): string | undefined {
+  return candidate.trim().split(/\s+/)[7];
+}
+
+function isUsableIPv4(address: string | undefined): boolean {
+  if (address === undefined || address.startsWith("169.254.")) return false;
+  const octets = address.split(".");
+  return octets.length === 4 && octets.every((octet) => /^\d{1,3}$/.test(octet) && Number(octet) <= 255);
 }
 
 function logVoiceRTCDiagnostics(

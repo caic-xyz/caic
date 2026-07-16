@@ -26,6 +26,8 @@ import {
 } from "@voicegateway-sdk/types.gen";
 
 class FakePeerConnection extends EventTarget {
+  static completeICE = true;
+  static reflexiveCandidateDelayMs: number | null = null;
   static last: FakePeerConnection | null = null;
 
   connectionState: RTCPeerConnectionState = "new";
@@ -58,8 +60,28 @@ class FakePeerConnection extends EventTarget {
         type: "offer",
         sdp: "v=0\r\na=candidate:1 1 udp 2130706431 192.0.2.2 50000 typ host\r\n",
       } as RTCSessionDescription;
-      this.iceGatheringState = "complete";
-      this.dispatchEvent(new Event("icegatheringstatechange"));
+      const candidateEvent = new Event("icecandidate");
+      Object.defineProperty(candidateEvent, "candidate", {
+        value: { candidate: "candidate:1 1 udp 2130706431 192.0.2.2 50000 typ host" },
+      });
+      this.dispatchEvent(candidateEvent);
+      if (FakePeerConnection.reflexiveCandidateDelayMs !== null) {
+        window.setTimeout(() => {
+          this.localDescription = {
+            type: "offer",
+            sdp: "v=0\r\na=candidate:1 1 udp 2130706431 192.0.2.2 50000 typ host\r\na=candidate:2 1 udp 1694498815 203.0.113.2 50000 typ srflx raddr 192.0.2.2 rport 50000\r\n",
+          } as RTCSessionDescription;
+          const reflexiveCandidateEvent = new Event("icecandidate");
+          Object.defineProperty(reflexiveCandidateEvent, "candidate", {
+            value: { candidate: "candidate:2 1 udp 1694498815 203.0.113.2 50000 typ srflx raddr 192.0.2.2 rport 50000" },
+          });
+          this.dispatchEvent(reflexiveCandidateEvent);
+        }, FakePeerConnection.reflexiveCandidateDelayMs);
+      }
+      if (FakePeerConnection.completeICE) {
+        this.iceGatheringState = "complete";
+        this.dispatchEvent(new Event("icegatheringstatechange"));
+      }
     });
     return Promise.resolve();
   }
@@ -72,6 +94,8 @@ class FakePeerConnection extends EventTarget {
 }
 
 beforeEach(() => {
+  FakePeerConnection.completeICE = true;
+  FakePeerConnection.reflexiveCandidateDelayMs = null;
   sdkMocks.closeVoiceRTC.mockReset();
   sdkMocks.diagnoseVoiceRTC.mockReset();
   sdkMocks.voiceRTCOffer.mockReset();
@@ -117,6 +141,30 @@ describe("VoiceSession", () => {
     expect(sdkMocks.voiceRTCOffer).toHaveBeenCalledWith({
       sdp: "v=0\r\na=candidate:1 1 udp 2130706431 192.0.2.2 50000 typ host\r\n",
     });
+  });
+
+  it("waits briefly for a reflexive candidate without waiting for ICE completion", async () => {
+    vi.useFakeTimers();
+    FakePeerConnection.completeICE = false;
+    FakePeerConnection.reflexiveCandidateDelayMs = 50;
+    const session = new VoiceSession();
+
+    try {
+      const connect = session.connect([], "", "", "");
+      await vi.advanceTimersByTimeAsync(49);
+      expect(sdkMocks.voiceRTCOffer).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      await connect;
+
+      expect(sdkMocks.voiceRTCOffer).toHaveBeenCalledWith({
+        sdp: "v=0\r\na=candidate:1 1 udp 2130706431 192.0.2.2 50000 typ host\r\na=candidate:2 1 udp 1694498815 203.0.113.2 50000 typ srflx raddr 192.0.2.2 rport 50000\r\n",
+      });
+      expect(FakePeerConnection.last?.iceGatheringState).toBe("gathering");
+    } finally {
+      session.disconnect();
+      vi.useRealTimers();
+    }
   });
 
   it("does not start setup timeout before signaling completes", async () => {
