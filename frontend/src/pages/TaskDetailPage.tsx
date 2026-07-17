@@ -23,6 +23,7 @@ export default function TaskDetailPage() {
               taskId={taskId}
               taskState={t()?.state ?? "pending"}
               title={t()?.title}
+              error={t()?.error}
               initialPrompt={t()?.initialPrompt}
               inPlanMode={t()?.inPlanMode}
               planContent={t()?.planContent}

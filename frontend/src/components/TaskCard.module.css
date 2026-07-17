@@ -288,9 +288,16 @@
   line-height: 1;
 }
 
-.error {
-  color: red;
+.errorSummary {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin-top: 0.25rem;
+  color: var(--color-danger-text);
   font-size: 0.8rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 768px) {

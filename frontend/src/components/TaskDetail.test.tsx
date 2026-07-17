@@ -1,4 +1,4 @@
-// Tests for the TaskDetail diff link navigation and SSE connection behaviour.
+// Tests for TaskDetail navigation, recorded errors, and SSE connection behaviour.
 
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render } from "@solidjs/testing-library";
@@ -193,6 +193,14 @@ describe("TaskDetail", () => {
     await user.click(getByText("Revive"));
 
     expect(onRevive).toHaveBeenCalledWith("abc");
+  });
+
+  it("shows the complete task error", () => {
+    const error = "Error: failed to load extension from a very long runtime path";
+    const { getByRole, getByText } = renderTaskDetail({ taskState: "failed", error });
+
+    expect(getByRole("heading", { name: "Task error" })).toBeInTheDocument();
+    expect(getByText(error)).toBeInTheDocument();
   });
 });
 

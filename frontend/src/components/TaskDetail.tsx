@@ -1,4 +1,4 @@
-// TaskDetail renders the real-time agent output stream for a single task.
+// TaskDetail renders real-time agent output and recorded task errors for a single task.
 
 import { createSignal, createMemo, createEffect, For, Index, Show, onCleanup, onMount, untrack, Switch, Match, type Accessor } from "solid-js";
 import { A, useNavigate, useLocation } from "@solidjs/router";
@@ -62,6 +62,7 @@ interface Props {
   taskId: string;
   taskState: string;
   title?: string;
+  error?: string;
   initialPrompt?: string;
   inPlanMode?: boolean;
   planContent?: string;
@@ -712,6 +713,14 @@ export default function TaskDetail(props: Props) {
         </Show>
         <StatsIcon stats={statsHistory()} sessions={allCompletedSessions()} />
       </div>
+      <Show when={props.error} keyed>
+        {(error) => (
+          <section class={styles.taskError} aria-labelledby="task-error-title">
+            <h4 id="task-error-title" class={styles.taskErrorTitle}>Task error</h4>
+            <pre class={styles.taskErrorText}>{error}</pre>
+          </section>
+        )}
+      </Show>
       <div class={styles.messageArea} ref={messageAreaRef} onScroll={handleScroll} data-testid="task-message-area">
         <Index each={items()}>
           {(item) => {

@@ -535,7 +535,7 @@ export default function TaskCard(props: TaskCardProps) {
         }}
       </Show>
       <Show when={props.error}>
-        <div class={styles.error}>{props.error}</div>
+        <div class={styles.errorSummary}>{props.error}</div>
       </Show>
     </div>
   );

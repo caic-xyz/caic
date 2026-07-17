@@ -52,4 +52,11 @@ describe("TaskCard", () => {
 
     expect(getByTestId("quota-countdown")).toHaveTextContent("quota resets in 42m");
   });
+
+  it("renders errors as a clamped summary", () => {
+    const error = "Error: failed to load extension from a very long runtime path";
+    const { getByText } = render(() => <TaskCard {...props({ error })} />);
+
+    expect(getByText(error).className).toContain("errorSummary");
+  });
 });
