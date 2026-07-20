@@ -41,7 +41,6 @@ type mdClient interface {
 type mdContainer interface {
 	Name() string
 	SetName(name string)
-	SetState(state string)
 	VNCPort() int32
 	Repos() []md.Repo
 	AgentMounts(paths ...md.AgentPaths) ([]md.Mount, error)
@@ -213,11 +212,10 @@ func (a mdClientAdapter) WatchEvents(ctx context.Context, filter runtime.EventFi
 // mdContainerAdapter adapts *md.Container to mdContainer.
 type mdContainerAdapter struct{ c *md.Container }
 
-func (a mdContainerAdapter) Name() string          { return a.c.Name }
-func (a mdContainerAdapter) SetName(name string)   { a.c.Name = name }
-func (a mdContainerAdapter) SetState(state string) { a.c.State = state }
-func (a mdContainerAdapter) VNCPort() int32        { return a.c.VNCPort }
-func (a mdContainerAdapter) Repos() []md.Repo      { return a.c.Repos }
+func (a mdContainerAdapter) Name() string        { return a.c.Name }
+func (a mdContainerAdapter) SetName(name string) { a.c.Name = name }
+func (a mdContainerAdapter) VNCPort() int32      { return a.c.VNCPort }
+func (a mdContainerAdapter) Repos() []md.Repo    { return a.c.Repos }
 func (a mdContainerAdapter) AgentMounts(paths ...md.AgentPaths) ([]md.Mount, error) {
 	return a.c.AgentMounts(paths...)
 }
@@ -526,7 +524,6 @@ func (b *Backend) Fork(ctx context.Context, id runtime.ID, repos []runtime.Repo,
 	if err != nil {
 		return "", runtime.ConnectionInfo{}, nil, fmt.Errorf("source instance %s: %w", name, err)
 	}
-	ct.SetState("running")
 	mounts, err := mdMounts(ct, opts.Harness, opts.Mounts)
 	if err != nil {
 		return "", runtime.ConnectionInfo{}, nil, err

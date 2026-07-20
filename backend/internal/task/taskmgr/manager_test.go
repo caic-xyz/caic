@@ -946,7 +946,7 @@ func TestManager(t *testing.T) {
 			{"revive_not_stopped", task.StateRunning, KindConflict, revive},
 			{"sync_terminal_state", task.StateStopped, KindConflict, syncOrigin},
 			{"sync_force_default", task.StateWaiting, KindBadRequest, syncForceDefault},
-			{"fork_wrong_state", task.StateStopped, KindConflict, fork},
+			{"fork_wrong_state", task.StateStopping, KindConflict, fork},
 		}
 		for _, c := range cases {
 			t.Run(c.name, func(t *testing.T) {
@@ -1170,6 +1170,48 @@ func TestManager(t *testing.T) {
 			}
 			if tk.MaxCPUs != 5 {
 				t.Errorf("MaxCPUs = %d, want 5 (from source)", tk.MaxCPUs)
+			}
+		})
+		t.Run("valid_stopped_source", func(t *testing.T) {
+			t.Parallel()
+			m, src := newForkManager(t)
+			src.Task().SetState(task.StateStopped)
+			id, err := m.Fork(t.Context(), src, ForkParams{Prompt: agent.Prompt{Text: "fork"}})
+			if err != nil {
+				t.Fatalf("Fork: %v", err)
+			}
+			fork, ok := m.GetEntry(id)
+			if !ok {
+				t.Fatal("fork entry not found")
+			}
+			select {
+			case <-fork.Done():
+			case <-time.After(time.Second):
+				t.Fatal("fork did not finish")
+			}
+			if got := src.Task().GetState(); got != task.StateStopped {
+				t.Errorf("source state = %v, want %v", got, task.StateStopped)
+			}
+		})
+		t.Run("valid_crashed_source", func(t *testing.T) {
+			t.Parallel()
+			m, src := newForkManager(t)
+			src.Task().SetState(task.StateCrashed)
+			id, err := m.Fork(t.Context(), src, ForkParams{Prompt: agent.Prompt{Text: "fork"}})
+			if err != nil {
+				t.Fatalf("Fork: %v", err)
+			}
+			fork, ok := m.GetEntry(id)
+			if !ok {
+				t.Fatal("fork entry not found")
+			}
+			select {
+			case <-fork.Done():
+			case <-time.After(time.Second):
+				t.Fatal("fork did not finish")
+			}
+			if got := src.Task().GetState(); got != task.StateCrashed {
+				t.Errorf("source state = %v, want %v", got, task.StateCrashed)
 			}
 		})
 		t.Run("valid_metadata_matches_task", func(t *testing.T) {

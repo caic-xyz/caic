@@ -256,8 +256,8 @@ type Lifecycle interface {
 	// Revive restarts a stopped runtime instance and waits for connectivity.
 	// The instance's filesystem is preserved.
 	Revive(ctx context.Context, id ID) error
-	// Fork snapshots a running instance and creates a new one where each mapped
-	// repo is checked out on a new branch derived from the current state.
+	// Fork snapshots a running or stopped instance and creates a new one where
+	// each mapped repo is checked out on a new branch derived from the current state.
 	Fork(ctx context.Context, id ID, repos []Repo, opts *ForkOptions) (ID, ConnectionInfo, []Repo, error)
 	// VNCPort returns the host port mapped to the runtime instance's VNC port.
 	// Returns 0 when the instance has no display.

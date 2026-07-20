@@ -521,14 +521,14 @@ func (m *Manager) SendInput(ctx context.Context, entry *Entry, prompt agent.Prom
 	return nil
 }
 
-// Fork creates a new task from a running task's instance.
+// Fork creates a new task from a source task's retained instance.
 func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (string, error) { //nolint:gocritic // ForkParams is a request-shaped value bag
 	source := sourceEntry.task
 	state := source.GetState()
 	switch state {
-	case task.StateRunning, task.StateWaiting, task.StateAsking, task.StateHasPlan, task.StateCrashed:
+	case task.StateRunning, task.StateWaiting, task.StateAsking, task.StateHasPlan, task.StateStopped, task.StateCrashed:
 	default:
-		return "", conflict("task must be running, waiting, or crashed to fork")
+		return "", conflict("task must be active, stopped, or crashed to fork")
 	}
 	if source.RuntimeInstanceID() == "" {
 		return "", conflict("task has no instance")

@@ -24,7 +24,6 @@ type fakeMDContainer struct {
 	name    string
 	vncPort int32
 	repo    []md.Repo
-	state   string
 	diffIdx int
 
 	launchErr   error
@@ -48,11 +47,10 @@ type fakeMDContainer struct {
 	signalSig    string
 }
 
-func (f *fakeMDContainer) Name() string      { return f.name }
-func (f *fakeMDContainer) SetName(n string)  { f.name = n }
-func (f *fakeMDContainer) SetState(s string) { f.state = s }
-func (f *fakeMDContainer) VNCPort() int32    { return f.vncPort }
-func (f *fakeMDContainer) Repos() []md.Repo  { return f.repo }
+func (f *fakeMDContainer) Name() string     { return f.name }
+func (f *fakeMDContainer) SetName(n string) { f.name = n }
+func (f *fakeMDContainer) VNCPort() int32   { return f.vncPort }
+func (f *fakeMDContainer) Repos() []md.Repo { return f.repo }
 
 func (f *fakeMDContainer) AgentMounts(paths ...md.AgentPaths) ([]md.Mount, error) {
 	f.agentPaths = append([]md.AgentPaths(nil), paths...)
@@ -411,9 +409,6 @@ func TestBackend(t *testing.T) {
 		}
 		if len(repos) != 1 || repos[0].Branch != "caic-2" {
 			t.Errorf("repos = %+v, want one repo on caic-2", repos)
-		}
-		if src.state != "running" {
-			t.Errorf("source state = %q, want running (SetState not applied)", src.state)
 		}
 		if b.vncPorts["fork-1"] != 5902 {
 			t.Errorf("fork vncPort = %d, want 5902", b.vncPorts["fork-1"])
