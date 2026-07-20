@@ -1,7 +1,7 @@
 // Tests for the compact task card summary.
 
-import { render } from "@solidjs/testing-library";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@solidjs/testing-library";
+import { describe, expect, it, vi } from "vitest";
 
 import type { TaskCardProps } from "./TaskCard";
 
@@ -32,6 +32,7 @@ function props(overrides: Partial<TaskCardProps> = {}): TaskCardProps {
     selected: false,
     now,
     onClick: () => undefined,
+    onError: () => undefined,
     ...overrides,
   };
 }
@@ -58,5 +59,51 @@ describe("TaskCard", () => {
     const { getByText } = render(() => <TaskCard {...props({ error })} />);
 
     expect(getByText(error).className).toContain("errorSummary");
+  });
+
+  it("opens the task actions menu on right click", () => {
+    const onClick = vi.fn();
+    const onStop = vi.fn();
+    const { container } = render(() => (
+      <TaskCard
+        {...props({
+          repos: [
+            {
+              name: "repo",
+              branch: "task-branch",
+              baseBranch: "main",
+              forge: "github",
+            },
+          ],
+          forgePR: 42,
+          supportsCompact: true,
+          onClick,
+          onStop,
+          onPurge: vi.fn(),
+          onFork: vi.fn(),
+        })}
+      />
+    ));
+    const card = container.querySelector("[data-task-id='1']");
+    if (!card) throw new Error("task card not rendered");
+
+    fireEvent.contextMenu(card, { clientX: 20, clientY: 30 });
+
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Push" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Push to main" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Purge" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear context" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Compact context" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Fork" })).toBeInTheDocument();
+
+    const stopButton = screen.getByRole("button", { name: "Stop" });
+    fireEvent.pointerDown(stopButton);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    fireEvent.click(stopButton);
+
+    expect(onStop).toHaveBeenCalledOnce();
+    expect(onClick).not.toHaveBeenCalled();
   });
 });

@@ -6,13 +6,6 @@ import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 import CopyIcon from "@material-symbols/svg-400/outlined/content_copy.svg?solid";
 import CheckIcon from "@material-symbols/svg-400/outlined/check.svg?solid";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
-import SyncIcon from "@material-symbols/svg-400/outlined/sync.svg?solid";
-import StopIcon from "@material-symbols/svg-400/outlined/stop_circle.svg?solid";
-import DeleteIcon from "@material-symbols/svg-400/outlined/delete.svg?solid";
-import RestartIcon from "@material-symbols/svg-400/outlined/restart_alt.svg?solid";
-import BlockIcon from "@material-symbols/svg-400/outlined/block.svg?solid";
-import CompressIcon from "@material-symbols/svg-400/outlined/compress.svg?solid";
-import ForkIcon from "@material-symbols/svg-400/outlined/fork_right.svg?solid";
 
 import type { EventMessage, EventResult, AskQuestion, EventAsk, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, ForgeCheck, EventStats, EventUsage, EventToolInputView, EventSubagentSpawn } from "@sdk/types.gen";
 import { SyncTargetDefault } from "@sdk/types.gen";
@@ -20,7 +13,7 @@ import { SyncTargetDefault } from "@sdk/types.gen";
 import { useHostMode } from "../gomode/HostMode";
 import { requestNotificationPermission } from "../gomode/notifications";
 
-import { sendInput as apiSendInput, restartTask as apiRestartTask, clearContext as apiClearContext, compactContext as apiCompactContext, syncTask as apiSyncTask, taskEventStream, getTaskToolInput, botFixPR } from "../api";
+import { sendInput as apiSendInput, restartTask as apiRestartTask, compactContext as apiCompactContext, syncTask as apiSyncTask, taskEventStream, getTaskToolInput, botFixPR } from "../api";
 import { groupMessagesInc, resetGroupIncCache, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "../grouping";
 import { formatDuration, formatElapsed, formatTokens, toolCallDetail } from "../formatting";
 import type { ToolCall } from "../grouping";
@@ -31,11 +24,10 @@ import Button from "./Button";
 import UnifiedDiffBlock from "./UnifiedDiffBlock";
 import ProgressPanel from "./ProgressPanel";
 import StatsIcon from "./StatsIcon";
-import GitHubIcon from "./github.svg?solid";
-import GitLabIcon from "./gitlab.svg?solid";
 import WidgetCard from "./WidgetCard";
 import { confirmTaskAction } from "./TaskCard";
 import Dropdown from "./Dropdown";
+import TaskActionsMenu from "./TaskActionsMenu";
 import styles from "./TaskDetail.module.css";
 
 /** Add ±25% jitter to a delay to avoid thundering herd on server restart. */
@@ -160,7 +152,7 @@ export default function TaskDetail(props: Props) {
   const location = useLocation();
   const [messages, setMessages] = createSignal<EventMessage[]>([]);
   const [sending, setSending] = createSignal(false);
-  const [pendingAction, setPendingAction] = createSignal<"sync" | "restart" | "clear-context" | "compact" | null>(null);
+  const [pendingAction, setPendingAction] = createSignal<"sync" | "restart" | "compact" | null>(null);
   const [actionError, setActionError] = createSignal<string | null>(null);
   const [safetyIssues, setSafetyIssues] = createSignal<SafetyIssue[]>([]);
   const [contextMenuOpen, setContextMenuOpen] = createSignal(false);
@@ -563,11 +555,6 @@ export default function TaskDetail(props: Props) {
     });
   }
 
-  function doClearContext() {
-    // eslint-disable-next-line solid/reactivity -- only called from onClick
-    runAction("clear-context", () => apiClearContext(props.taskId));
-  }
-
   function doCompact() {
     // eslint-disable-next-line solid/reactivity -- only called from onClick
     runAction("compact", () => apiCompactContext(props.taskId, {}));
@@ -607,7 +594,7 @@ export default function TaskDetail(props: Props) {
     }
   }
 
-  async function runAction(name: "sync" | "restart" | "clear-context" | "compact", fn: () => Promise<unknown>) {
+  async function runAction(name: "sync" | "restart" | "compact", fn: () => Promise<unknown>) {
     if (pendingAction()) return;
     setPendingAction(name);
     setActionError(null);
@@ -847,53 +834,28 @@ export default function TaskDetail(props: Props) {
             onOpenChange={setContextMenuOpen}
             class={styles.syncButtonGroup}
             content={
-              <div class={styles.syncDropdown}>
-                <button type="button" class={`${styles.syncDropdownItem} ${props.taskState === "purging" ? styles.syncDropdownItemDisabled : ""}`} disabled={props.taskState === "purging"} onClick={() => { setContextMenuOpen(false); doSync(false); }}>
-                  <Switch fallback={<SyncIcon width="1em" height="1em" />}>
-                    <Match when={props.forge === "github"}><GitHubIcon width="1em" height="1em" /></Match>
-                    <Match when={props.forge === "gitlab"}><GitLabIcon width="1em" height="1em" /></Match>
-                  </Switch>
-                  {props.forge ? (props.forgePR ? "Push" : "Create PR") : "Push"}
-                </button>
-                <button type="button" class={`${styles.syncDropdownItem} ${props.taskState === "purging" ? styles.syncDropdownItemDisabled : ""}`} disabled={props.taskState === "purging"} onClick={() => { setContextMenuOpen(false); doSync(false, SyncTargetDefault); }}>
-                  <SyncIcon width="1em" height="1em" />
-                  Push to {props.baseBranch}
-                </button>
-                <Show when={isActive()}>
-                  <button type="button" class={`${styles.syncDropdownItem} ${styles.syncDropdownItemDanger}`} onClick={() => { setContextMenuOpen(false); props.onStop(props.taskId); }}>
-                    <StopIcon width="1em" height="1em" />
-                    Stop
-                  </button>
-                </Show>
-                <Show when={isRecoverable()}>
-                  <button type="button" class={styles.syncDropdownItem} onClick={() => { setContextMenuOpen(false); props.onRevive(props.taskId); }}>
-                    <RestartIcon width="1em" height="1em" />
-                    Revive
-                  </button>
-                </Show>
-                <Show when={isActive() || isRecoverable()}>
-                  <button type="button" class={`${styles.syncDropdownItem} ${styles.syncDropdownItemDanger}`} onClick={() => { setContextMenuOpen(false); if (confirmTaskAction("Purge", props.title ?? "", props.branch)) props.onPurge(props.taskId); }}>
-                    <DeleteIcon width="1em" height="1em" />
-                    Purge
-                  </button>
-                </Show>
-                <button type="button" class={`${styles.syncDropdownItem} ${styles.syncDropdownItemDisabled}`} disabled onClick={() => { setContextMenuOpen(false); doClearContext(); }}>
-                  <BlockIcon width="1em" height="1em" />
-                  Clear context
-                </button>
-                <Show when={props.supportsCompact}>
-                  <button type="button" class={`${styles.syncDropdownItem} ${!isWaiting() ? styles.syncDropdownItemDisabled : ""}`} disabled={!isWaiting()} onClick={() => { setContextMenuOpen(false); doCompact(); }}>
-                    <CompressIcon width="1em" height="1em" />
-                    Compact context
-                  </button>
-                </Show>
-                <Show when={props.onFork && props.repo}>
-                  <button type="button" class={styles.syncDropdownItem} onClick={() => { setContextMenuOpen(false); props.onFork?.(props.taskId); }}>
-                    <ForkIcon width="1em" height="1em" />
-                    Fork
-                  </button>
-                </Show>
-              </div>
+              <TaskActionsMenu
+                class={styles.syncDropdown}
+                forge={props.forge}
+                forgePR={props.forgePR}
+                baseBranch={props.baseBranch}
+                active={isActive()}
+                recoverable={isRecoverable()}
+                waiting={isWaiting()}
+                purging={props.taskState === "purging"}
+                supportsCompact={props.supportsCompact}
+                canFork={!!props.onFork && !!props.repo}
+                onSync={() => { setContextMenuOpen(false); doSync(false); }}
+                onSyncDefault={() => { setContextMenuOpen(false); doSync(false, SyncTargetDefault); }}
+                onStop={() => { setContextMenuOpen(false); props.onStop(props.taskId); }}
+                onRevive={() => { setContextMenuOpen(false); props.onRevive(props.taskId); }}
+                onPurge={() => {
+                  setContextMenuOpen(false);
+                  if (confirmTaskAction("Purge", props.title ?? "", props.branch)) props.onPurge(props.taskId);
+                }}
+                onCompact={() => { setContextMenuOpen(false); doCompact(); }}
+                onFork={() => { setContextMenuOpen(false); props.onFork?.(props.taskId); }}
+              />
             }
           >
             <Show when={!!pendingAction()} fallback={

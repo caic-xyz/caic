@@ -125,6 +125,9 @@ export default function MainLayout(props: { children?: JSX.Element }) {
           onStop={s.handleStop}
           onPurge={s.handlePurge}
           onRevive={s.handleRevive}
+          onFork={s.handleFork}
+          onError={s.showWarning}
+          supportsCompact={(harness) => s.harnesses().find((candidate) => candidate.name === harness)?.supportsCompact ?? false}
           actionId={s.actionId}
           onDiffClick={s.navigateToDiff}
           autoFixCI={s.autoFixCI}

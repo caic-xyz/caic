@@ -1264,38 +1264,6 @@ a.ciStatus:hover {
   bottom: 100%;
   right: 0;
   margin-bottom: 2px;
-  background: white;
-  border: 1px solid var(--color-border-medium);
-  border-radius: var(--radius-md);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-  z-index: 10;
-  min-width: 10rem;
-}
-
-.syncDropdownItem {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  width: 100%;
-  padding: 0.4rem 0.75rem;
-  border: none;
-  background: none;
-  cursor: pointer;
-  font-size: 0.8rem;
-  text-align: left;
-  white-space: nowrap;
-}
-
-.syncDropdownItem:hover {
-  background: var(--color-bg-input);
-}
-
-.syncDropdownItem:first-child {
-  border-radius: 4px 4px 0 0;
-}
-
-.syncDropdownItem:last-child {
-  border-radius: 0 0 4px 4px;
 }
 
 .contextMenuToggle {
@@ -1316,19 +1284,6 @@ a.ciStatus:hover {
 .contextMenuToggle:disabled {
   cursor: default;
   opacity: 0.5;
-}
-
-.syncDropdownItemDisabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.syncDropdownItemDisabled:hover {
-  background: none;
-}
-
-.syncDropdownItemDanger {
-  color: var(--color-danger);
 }
 
 /* Mobile: <=768px */

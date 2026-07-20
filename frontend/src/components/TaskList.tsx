@@ -26,6 +26,9 @@ export interface TaskListProps {
   onStop: (id: string) => void;
   onPurge: (id: string) => void;
   onRevive: (id: string) => void;
+  onFork: (id: string) => void;
+  onError: (message: string) => void;
+  supportsCompact: (harness: string) => boolean;
   actionId: Accessor<string | null>;
   onDiffClick?: (id: string) => void;
   autoFixCI: Accessor<boolean>;
@@ -228,6 +231,9 @@ export default function TaskList(props: TaskListProps) {
       onStop={() => props.onStop(t().id)}
       onPurge={() => props.onPurge(t().id)}
       onRevive={() => props.onRevive(t().id)}
+      onFork={() => props.onFork(t().id)}
+      onError={props.onError}
+      supportsCompact={props.supportsCompact(t().harness)}
       actionLoading={props.actionId() === t().id}
       onDiffClick={props.onDiffClick ? () => { const fn = props.onDiffClick; if (fn) fn(t().id); } : undefined}
       voiceNumber={props.voiceConnected() ? props.getTaskNumber(t().id) : undefined}

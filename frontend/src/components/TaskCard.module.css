@@ -12,6 +12,13 @@
   border: 2px solid var(--color-selected);
 }
 
+.contextMenu {
+  position: fixed;
+  z-index: 100;
+  max-height: calc(100vh - 1rem);
+  overflow-y: auto;
+}
+
 .header {
   display: flex;
   justify-content: space-between;

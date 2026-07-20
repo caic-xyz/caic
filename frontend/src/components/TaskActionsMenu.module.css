@@ -1,0 +1,50 @@
+/* Shared task actions menu styles. */
+
+.menu {
+  background: rgb(var(--color-bg-app-rgb));
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-md);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 10;
+  min-width: 10rem;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.4rem 0.75rem;
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.8rem;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.item:hover {
+  background: var(--color-bg-input);
+}
+
+.item:first-child {
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+.item:last-child {
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+}
+
+.disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.disabled:hover {
+  background: none;
+}
+
+.danger {
+  color: var(--color-danger);
+}

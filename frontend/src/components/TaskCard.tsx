@@ -1,7 +1,8 @@
 // Compact card for a single task, used in the sidebar task list.
 
-import { For, Show, createSignal, onMount, onCleanup } from "solid-js";
+import { For, Show, createEffect, createSignal, onMount, onCleanup } from "solid-js";
 import type { Accessor } from "solid-js";
+import { Portal } from "solid-js/web";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
 import SudoIcon from "@material-symbols/svg-400/outlined/shield_person.svg?solid";
 import DeleteIcon from "@material-symbols/svg-400/outlined/delete.svg?solid";
@@ -15,9 +16,13 @@ import type {
   RuntimeInstance,
   TaskRepo,
   TaskState,
+  SyncTarget,
 } from "@sdk/types.gen";
+import { SyncTargetDefault } from "@sdk/types.gen";
 
+import { compactContext, syncTask } from "../api";
 import CIDot from "./CIDot";
+import TaskActionsMenu from "./TaskActionsMenu";
 import Tooltip from "./Tooltip";
 import TailscaleIcon from "./tailscale.svg?solid";
 import TokenIcon from "./github.svg?solid";
@@ -72,6 +77,9 @@ export interface TaskCardProps {
   onRevive?: () => void;
   actionLoading?: boolean;
   onDiffClick?: () => void;
+  supportsCompact?: boolean;
+  onFork?: () => void;
+  onError: (message: string) => void;
   /** Task number for voice mode display. Shown only when voice is connected. */
   voiceNumber?: number;
 }
@@ -84,6 +92,19 @@ const terminalStates = new Set([
   "crashed",
   "failed",
 ]);
+
+const actionMenuActiveStates = new Set([
+  "running",
+  "branching",
+  "provisioning",
+  "starting",
+  "waiting",
+  "asking",
+  "has_plan",
+  "purging",
+]);
+
+const actionMenuWaitingStates = new Set(["waiting", "asking", "has_plan"]);
 
 /** Confirm a destructive task action (purge or stop) with a dialog. */
 export function confirmTaskAction(
@@ -103,7 +124,72 @@ export default function TaskCard(props: TaskCardProps) {
     props.state !== "running" &&
     isCacheStale(props.now(), props.cacheExpiresAt);
   const [titleTruncated, setTitleTruncated] = createSignal(false);
+  const [contextMenuPosition, setContextMenuPosition] = createSignal<
+    { x: number; y: number } | undefined
+  >();
+  const [menuActionPending, setMenuActionPending] = createSignal(false);
   let titleRef: HTMLElement | undefined; // eslint-disable-line no-unassigned-vars -- assigned by SolidJS ref
+  let contextMenuRef: HTMLDivElement | undefined;
+
+  createEffect(() => {
+    if (!contextMenuPosition()) return;
+    const close = () => setContextMenuPosition(undefined);
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!contextMenuRef?.contains(event.target as Node)) close();
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer, true);
+    document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("blur", close);
+    window.addEventListener("resize", close);
+    onCleanup(() => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
+      document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("blur", close);
+      window.removeEventListener("resize", close);
+    });
+  });
+
+  async function runMenuAction(
+    name: "sync" | "compact",
+    action: () => Promise<void>,
+  ) {
+    setContextMenuPosition(undefined);
+    if (menuActionPending()) return;
+    setMenuActionPending(true);
+    try {
+      await action();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      props.onError(`${name} failed: ${message}`);
+    } finally {
+      setMenuActionPending(false);
+    }
+  }
+
+  function doSync(target?: SyncTarget) {
+    const taskId = props.id;
+    void runMenuAction("sync", async () => {
+      const response = await syncTask(taskId, {
+        force: false,
+        ...(target ? { target } : {}),
+      });
+      if (response.status !== "blocked") return;
+      const issues = response.safetyIssues
+        ?.map((issue) => `${issue.file}: ${issue.detail}`)
+        .join("; ");
+      throw new Error(issues ? `blocked: ${issues}` : "blocked by safety checks");
+    });
+  }
+
+  function doCompact() {
+    const taskId = props.id;
+    void runMenuAction("compact", async () => {
+      await compactContext(taskId, {});
+    });
+  }
 
   onMount(() => {
     const check = () => {
@@ -119,11 +205,18 @@ export default function TaskCard(props: TaskCardProps) {
   });
 
   return (
+    <>
     <div
       data-task-id={props.id}
       role="button"
       tabIndex={0}
       onClick={() => props.onClick()}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (props.actionLoading || menuActionPending()) return;
+        setContextMenuPosition({ x: event.clientX, y: event.clientY });
+      }}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
@@ -538,6 +631,43 @@ export default function TaskCard(props: TaskCardProps) {
         <div class={styles.errorSummary}>{props.error}</div>
       </Show>
     </div>
+    <Portal>
+      <Show when={contextMenuPosition()} keyed>
+        {(position) => (
+          <TaskActionsMenu
+            class={styles.contextMenu}
+            style={{ left: `${position.x}px`, top: `${position.y}px` }}
+            menuRef={(element) => {
+              contextMenuRef = element;
+              const bounds = element.getBoundingClientRect();
+              const x = Math.max(8, Math.min(position.x, window.innerWidth - bounds.width - 8));
+              const y = Math.max(8, Math.min(position.y, window.innerHeight - bounds.height - 8));
+              if (x !== position.x || y !== position.y) setContextMenuPosition({ x, y });
+            }}
+            forge={props.repos?.[0]?.forge}
+            forgePR={props.forgePR}
+            baseBranch={props.repos?.[0]?.baseBranch ?? "main"}
+            active={actionMenuActiveStates.has(props.state)}
+            recoverable={props.state === "stopped" || props.state === "crashed"}
+            waiting={actionMenuWaitingStates.has(props.state)}
+            purging={props.state === "purging"}
+            supportsCompact={props.supportsCompact}
+            canFork={!!props.onFork && !!props.repos?.[0]?.name}
+            onSync={() => doSync()}
+            onSyncDefault={() => doSync(SyncTargetDefault)}
+            onStop={() => { setContextMenuPosition(undefined); props.onStop?.(); }}
+            onRevive={() => { setContextMenuPosition(undefined); props.onRevive?.(); }}
+            onPurge={() => {
+              setContextMenuPosition(undefined);
+              if (confirmTaskAction("Purge", props.title, props.repos?.[0]?.branch ?? "")) props.onPurge?.();
+            }}
+            onCompact={doCompact}
+            onFork={() => { setContextMenuPosition(undefined); props.onFork?.(); }}
+          />
+        )}
+      </Show>
+    </Portal>
+    </>
   );
 }
 
