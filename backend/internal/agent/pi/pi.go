@@ -84,36 +84,67 @@ func (b *Backend) SetModels(models []string) {
 	b.ModelList = agent.SortModels(models)
 }
 
-func readAgentVersion(ctx context.Context, target runtime.ConnectionTarget) (string, error) {
-	if target.SSHHost == "" {
-		return "", errors.New("agent connection target missing SSH host")
+// Start launches a Pi RPC process via the relay daemon. If Pi exits while
+// starting, it updates Pi once and retries the launch.
+func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	sess, err := b.start(ctx, opts)
+	if err == nil {
+		return sess, nil
 	}
-	versionCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(versionCtx, "ssh", target.SSHHost, "pi", "--version") //nolint:gosec // target is not user-controlled.
-	out, err := cmd.CombinedOutput()
-	version := strings.TrimSpace(string(out))
-	if err != nil {
-		if version != "" {
-			return "", fmt.Errorf("pi --version: %w: %s", err, version)
-		}
-		return "", fmt.Errorf("pi --version: %w", err)
+	if _, ok := errors.AsType[*piProcessExitError](err); !ok {
+		return nil, err
 	}
-	if version == "" {
-		return "", errors.New("pi --version returned empty output")
+
+	slog.WarnContext(ctx, "pi: startup failed; updating and retrying", "err", err)
+	if logErr := writeStartupLog(opts.LogW, "Pi startup failed; running pi update --all ..."); logErr != nil {
+		return nil, errors.Join(err, logErr)
 	}
-	return version, nil
+	out, updateErr := updatePi(ctx, opts.Target)
+	if logErr := writeStartupLogOutput(opts.LogW, "pi update", out); logErr != nil {
+		return nil, errors.Join(err, updateErr, logErr)
+	}
+	if updateErr != nil {
+		return nil, errors.Join(err, updateErr)
+	}
+	if logErr := writeStartupLog(opts.LogW, "Pi update completed; retrying startup ..."); logErr != nil {
+		return nil, errors.Join(err, logErr)
+	}
+	return b.start(ctx, opts)
 }
 
-// Start launches a Pi RPC process via the relay daemon. It sends optional
-// set_model commands before the initial prompt.
-func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	wire := &piWireFormat{fw: &jsonutil.FieldWarner{}}
+// AgentArgs implements agent.Backend.
+func (*Backend) AgentArgs(_ agent.HarnessArgs) []string {
+	return []string{"pi", "--mode", "rpc", "--approve"}
+}
 
-	agentVersion, err := readAgentVersion(ctx, opts.Target)
-	if err != nil {
-		slog.WarnContext(ctx, "pi: agent version unavailable", "err", err)
+// AttachRelay connects to an already-running relay in the container.
+func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	wire := &piWireFormat{fw: &jsonutil.FieldWarner{}}
+	return agent.AttachRelaySession(ctx, opts, wire, nil)
+}
+
+// NewWire implements agent.Backend.
+func (*Backend) NewWire() agent.WireFormat {
+	// Log replay can parse large histories; skip development-only unknown-field scans.
+	return &piWireFormat{}
+}
+
+// WritePrePrompt implements agent.PrePromptWriter. It sends a set_model command
+// when model is non-empty.
+func (*Backend) WritePrePrompt(w io.Writer, model string, logW io.Writer) error {
+	if model != "" {
+		return writeSetModel(w, model, logW)
 	}
+	return nil
+}
+
+// FetchModels implements agent.ModelFetcher.
+func (*Backend) FetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) ([]string, error) {
+	return FetchModels(ctx, target, extraEnv)
+}
+
+func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	wire := &piWireFormat{fw: &jsonutil.FieldWarner{}}
 
 	rp, err := agent.PrepareRelay(ctx, opts, b.AgentArgs(agent.HarnessArgs{Model: opts.Model}))
 	if err != nil {
@@ -130,6 +161,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		br = bufio.NewReaderSize(rp.Stdout, 1<<20)
 		resp, err := waitForResponse(br, pi.CmdSetModel, opts.LogW)
 		if err != nil {
+			err = reapPiProcessExit(rp, err)
 			return nil, fmt.Errorf("pi: set_model %s: %w", opts.Model, err)
 		}
 		if cw := parseModelContextWindow(&resp); cw > 0 {
@@ -158,6 +190,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 			br = bufio.NewReaderSize(rp.Stdout, 1<<20)
 		}
 		if _, err := waitForResponse(br, pi.CmdSetThinking, opts.LogW); err != nil {
+			err = reapPiProcessExit(rp, err)
 			return nil, fmt.Errorf("pi: set_thinking_level %s: %w", opts.Effort, err)
 		}
 		rp.Stdout = br
@@ -180,6 +213,9 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 				_ = rp.Cmd.Wait()
 				return nil, fmt.Errorf("pi: get_state: %w", err)
 			}
+			if _, ok := errors.AsType[*piProcessExitError](err); ok {
+				return nil, fmt.Errorf("pi: get_state: %w", reapPiProcessExit(rp, err))
+			}
 			slog.WarnContext(ctx, "pi: get_state failed", "err", err)
 		} else {
 			var state pi.StateData
@@ -192,11 +228,10 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		rp.Stdout = br
 	}
 	wire.sessionID = sessionID
-	wire.agentVersion = agentVersion
 
-	if sessionID != "" || agentVersion != "" {
-		opts.MsgCh <- &agent.MetaSessionMessage{MessageType: "caic_session", SessionID: sessionID, AgentVersion: agentVersion}
-		if err := agent.WriteMetaSession(opts.LogW, &agent.InitMessage{SessionID: sessionID, Version: agentVersion}); err != nil {
+	if sessionID != "" {
+		opts.MsgCh <- &agent.MetaSessionMessage{MessageType: "caic_session", SessionID: sessionID}
+		if err := agent.WriteMetaSession(opts.LogW, &agent.InitMessage{SessionID: sessionID}); err != nil {
 			_ = rp.Cmd.Process.Kill()
 			_ = rp.Cmd.Wait()
 			return nil, fmt.Errorf("write session metadata: %w", err)
@@ -232,35 +267,54 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	return sess, nil
 }
 
-// AgentArgs implements agent.Backend.
-func (*Backend) AgentArgs(_ agent.HarnessArgs) []string {
-	return []string{"pi", "--mode", "rpc", "--approve"}
+// updatePi updates Pi and its extensions in the target container after a failed startup.
+func updatePi(ctx context.Context, target runtime.ConnectionTarget) (string, error) {
+	if target.SSHHost == "" {
+		return "", errors.New("agent connection target missing SSH host")
+	}
+	updateCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(updateCtx, "ssh", target.SSHHost, "pi", "update", "--all") //nolint:gosec // target is not user-controlled.
+	out, err := cmd.CombinedOutput()
+	output := strings.TrimSpace(string(out))
+	if err == nil {
+		return output, nil
+	}
+	if output != "" {
+		return output, fmt.Errorf("pi update --all: %w: %s", err, output)
+	}
+	return "", fmt.Errorf("pi update --all: %w", err)
 }
 
-// AttachRelay connects to an already-running relay in the container.
-func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	wire := &piWireFormat{fw: &jsonutil.FieldWarner{}}
-	return agent.AttachRelaySession(ctx, opts, wire, nil)
-}
-
-// NewWire implements agent.Backend.
-func (*Backend) NewWire() agent.WireFormat {
-	// Log replay can parse large histories; skip development-only unknown-field scans.
-	return &piWireFormat{}
-}
-
-// WritePrePrompt implements agent.PrePromptWriter. It sends a set_model command
-// when model is non-empty.
-func (*Backend) WritePrePrompt(w io.Writer, model string, logW io.Writer) error {
-	if model != "" {
-		return writeSetModel(w, model, logW)
+// writeStartupLog writes a task log line for Pi startup recovery.
+func writeStartupLog(w io.Writer, line string) error {
+	data, err := agent.MarshalMessage(&agent.LogMessage{MessageType: "caic_log", Line: line})
+	if err != nil {
+		return fmt.Errorf("marshal Pi startup log: %w", err)
+	}
+	data = append(data, '\n')
+	n, err := w.Write(data)
+	if err != nil {
+		return fmt.Errorf("write Pi startup log: %w", err)
+	}
+	if n != len(data) {
+		return fmt.Errorf("write Pi startup log: %w", io.ErrShortWrite)
 	}
 	return nil
 }
 
-// FetchModels implements agent.ModelFetcher.
-func (*Backend) FetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) ([]string, error) {
-	return FetchModels(ctx, target, extraEnv)
+// writeStartupLogOutput writes each non-empty command-output line to the task log.
+func writeStartupLogOutput(w io.Writer, command, output string) error {
+	for line := range strings.Lines(output) {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if err := writeStartupLog(w, command+": "+line); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // caicModelInfo is written to output.jsonl during Start so replay/adoption
@@ -350,12 +404,11 @@ func handleExtensionUI(conn agent.Conn, raw []byte) error {
 // type-dispatched JSONL protocol. It holds per-session state: a start time for
 // duration tracking and a turn counter incremented by handleTurnEnd.
 type piWireFormat struct {
-	mu           sync.Mutex
-	initSent     bool
-	sessionID    string
-	agentVersion string
-	startTime    time.Time // When the prompt was written.
-	numTurns     int       // Incremented by handleTurnEnd; consumed by handleAgentEnd.
+	mu        sync.Mutex
+	initSent  bool
+	sessionID string
+	startTime time.Time // When the prompt was written.
+	numTurns  int       // Incremented by handleTurnEnd; consumed by handleAgentEnd.
 
 	modelCtxWindow int64 // Model's context window from set_model response; 0 if unknown.
 
@@ -565,7 +618,7 @@ func (w *piWireFormat) handleMessageStart(line []byte) ([]agent.Message, error) 
 	if ev.Message.Provider != "" {
 		model = ev.Message.Provider + "/" + model
 	}
-	return []agent.Message{&agent.InitMessage{SessionID: w.sessionID, Model: model, Version: w.agentVersion}}, nil
+	return []agent.Message{&agent.InitMessage{SessionID: w.sessionID, Model: model}}, nil
 }
 
 // handleError converts an error delta into a ResultMessage.
@@ -688,6 +741,30 @@ func (w *piWireFormat) handleTurnEnd(line []byte) ([]agent.Message, error) {
 
 var errResponseTimeout = errors.New("pi response wait timed out")
 
+type piProcessExitError struct {
+	exit agent.ExitMessage
+}
+
+func (e *piProcessExitError) Error() string {
+	return fmt.Sprintf("agent subprocess exited with code %d: %s", e.exit.ExitCode, e.exit.Error)
+}
+
+func reapPiProcessExit(rp *agent.RelayProcess, err error) error {
+	if _, ok := errors.AsType[*piProcessExitError](err); !ok {
+		return err
+	}
+	// The relay's attach process keeps reading stdin after its daemon reports
+	// a failed agent startup. Close the pipe before Wait so it can exit instead
+	// of leaving task startup stuck in StateStarting.
+	if closeErr := rp.Stdin.Close(); closeErr != nil {
+		err = errors.Join(err, fmt.Errorf("close failed Pi startup stdin: %w", closeErr))
+	}
+	if waitErr := rp.Cmd.Wait(); waitErr != nil {
+		return errors.Join(err, fmt.Errorf("wait for failed Pi startup: %w", waitErr))
+	}
+	return err
+}
+
 // waitForResponse reads JSONL lines from r until a response for the given
 // command is found. Returns the full response envelope. Lines are logged to
 // logW. Non-response events are discarded (Pi should not emit any before the
@@ -708,7 +785,7 @@ func waitForResponse(r *bufio.Reader, cmd pi.CommandType, logW io.Writer) (pi.Re
 		if probe.Type == "caic_exit" {
 			var exit agent.ExitMessage
 			if json.Unmarshal(line, &exit) == nil && exit.ExitCode != 0 {
-				return pi.Response{}, fmt.Errorf("agent subprocess exited with code %d: %s", exit.ExitCode, exit.Error)
+				return pi.Response{}, &piProcessExitError{exit: exit}
 			}
 		}
 		if probe.Type != pi.EventResponse {

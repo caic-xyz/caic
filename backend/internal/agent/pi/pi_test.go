@@ -1,16 +1,105 @@
-// Tests for the Pi CLI backend process configuration.
+// Tests Pi CLI startup, update recovery, and wire configuration.
 
 package pi
 
 import (
 	"bufio"
 	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
+
+const piSSHHelperEnv = "GO_WANT_PI_SSH_HELPER"
+
+func init() {
+	if os.Getenv(piSSHHelperEnv) != "1" {
+		return
+	}
+	runPiSSHHelper()
+	os.Exit(0)
+}
+
+func runPiSSHHelper() {
+	args := os.Args
+	for i, arg := range args {
+		if arg == "task" {
+			args = args[i:]
+			break
+		}
+	}
+
+	switch {
+	case slices.Equal(args, []string{"task", "pi", "--version"}):
+		//nolint:gosec // The test-only helper receives its state directory through the environment.
+		if err := os.WriteFile(filepath.Join(os.Getenv("PI_SSH_HELPER_DIR"), "version-called"), nil, 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	case slices.Equal(args, []string{"task", "pi", "update", "--all"}):
+		//nolint:gosec // The test-only helper receives its state directory through the environment.
+		if err := os.WriteFile(filepath.Join(os.Getenv("PI_SSH_HELPER_DIR"), "updated"), nil, 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println("Pi and extensions updated")
+	case slices.Contains(args, "serve-attach"):
+		runPiRelayHelper()
+	}
+}
+
+func runPiRelayHelper() {
+	dir := os.Getenv("PI_SSH_HELPER_DIR")
+	path := filepath.Join(dir, "relay-count")
+	count, err := os.ReadFile(path) //nolint:gosec // The path is constructed by the test-only helper.
+	if err != nil && !os.IsNotExist(err) {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if err := os.WriteFile(path, append(count, '1'), 0o600); err != nil { //nolint:gosec // The path is constructed by the test-only helper.
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if len(count) == 0 {
+		fmt.Println(`{"type":"caic_exit","exit_code":1,"error":"extension load failure"}`)
+		return
+	}
+
+	s := bufio.NewScanner(os.Stdin)
+	for s.Scan() {
+		if bytes.Equal(s.Bytes(), []byte{0}) {
+			return
+		}
+		var cmd struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(s.Bytes(), &cmd); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		switch cmd.Type {
+		case "set_model":
+			fmt.Println(`{"type":"response","command":"set_model","success":true,"data":{}}`)
+		case "get_state":
+			fmt.Println(`{"type":"response","command":"get_state","success":true,"data":{"sessionId":"ses-1"}}`)
+		}
+	}
+	if err := s.Err(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
 
 func TestWaitForResponse(t *testing.T) {
 	t.Parallel()
@@ -25,14 +114,113 @@ func TestWaitForResponse(t *testing.T) {
 		if !strings.Contains(err.Error(), "Unknown option: --approve") {
 			t.Fatalf("err = %v, want relay stderr", err)
 		}
+		if _, ok := errors.AsType[*piProcessExitError](err); !ok {
+			t.Fatalf("errors.AsType[*piProcessExitError](%v) = (_, false), want (_, true)", err)
+		}
 	})
+}
+
+func TestReapPiProcessExit(t *testing.T) {
+	t.Parallel()
+
+	cmd := exec.CommandContext(t.Context(), "bash", "-c", "printf '%s\\n' '{\"type\":\"caic_exit\",\"exit_code\":1,\"error\":\"extension load failure\"}'; cat >/dev/null")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = stdin.Close()
+	})
+
+	_, err = waitForResponse(bufio.NewReader(stdout), "set_model", nil)
+	if err == nil {
+		t.Fatal("waitForResponse returned nil error")
+	}
+	rp := &agent.RelayProcess{Cmd: cmd, Stdin: stdin, Stdout: stdout}
+	done := make(chan error, 1)
+	go func() { done <- reapPiProcessExit(rp, err) }()
+	select {
+	case got := <-done:
+		if !errors.Is(got, err) {
+			t.Errorf("reapPiProcessExit error = %v, want wrapped %v", got, err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("reapPiProcessExit did not close the relay stdin")
+	}
+}
+
+func TestBackendStart(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.Symlink(exe, filepath.Join(dir, "ssh")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(piSSHHelperEnv, "1")
+	t.Setenv("PATH", dir)
+	t.Setenv("PI_SSH_HELPER_DIR", dir)
+
+	msgs := make(chan agent.Message, 1)
+	log := &bytes.Buffer{}
+	sess, err := New("", nil).Start(t.Context(), &agent.Options{
+		Target: runtime.ConnectionTarget{SSHHost: "task"},
+		Dir:    "/workspace",
+		Model:  "openai-codex/gpt-5.6-terra",
+		MsgCh:  msgs,
+		LogW:   log,
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "updated")); err != nil {
+		t.Fatalf("pi update was not run: %v", err)
+	}
+	if !strings.Contains(log.String(), `"type":"caic_exit"`) {
+		t.Fatalf("startup log = %q, want failed launch diagnostics", log.String())
+	}
+	for _, want := range []string{
+		"Pi startup failed; running pi update --all ...",
+		"Pi and extensions updated",
+		"Pi update completed; retrying startup ...",
+	} {
+		if !strings.Contains(log.String(), want) {
+			t.Fatalf("startup log = %q, want %q", log.String(), want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "version-called")); err == nil {
+		t.Fatal("pi --version was called")
+	} else if !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	count, err := os.ReadFile(filepath.Join(dir, "relay-count")) //nolint:gosec // dir is a test-owned temporary directory.
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(count) != "11" {
+		t.Errorf("Pi relay launches = %d, want 2", len(count))
+	}
+
+	stopCtx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if err := sess.Stop(stopCtx); err != nil {
+		t.Errorf("Stop: %v", err)
+	}
 }
 
 func TestPiWireFormat(t *testing.T) {
 	t.Parallel()
 	t.Run("MessageStartIncludesSessionMetadata", func(t *testing.T) {
 		t.Parallel()
-		w := &piWireFormat{sessionID: "ses-1", agentVersion: "pi 1.2.3"}
+		w := &piWireFormat{sessionID: "ses-1"}
 		msgs, err := w.ParseMessage([]byte(`{"type":"message_start","message":{"role":"assistant","provider":"openai","model":"gpt-5"}}`))
 		if err != nil {
 			t.Fatal(err)
@@ -44,7 +232,7 @@ func TestPiWireFormat(t *testing.T) {
 		if !ok {
 			t.Fatalf("message type = %T, want *agent.InitMessage", msgs[0])
 		}
-		if init.SessionID != "ses-1" || init.Model != "openai/gpt-5" || init.Version != "pi 1.2.3" {
+		if init.SessionID != "ses-1" || init.Model != "openai/gpt-5" || init.Version != "" {
 			t.Fatalf("InitMessage = %+v", init)
 		}
 	})
