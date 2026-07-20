@@ -4,6 +4,7 @@
 package task
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -38,6 +39,17 @@ type testRuntimeSystem struct {
 }
 
 func (*testRuntimeSystem) Name() runtime.Name { return "test-runtime" }
+
+type setupLogFailureRuntime struct {
+	*runtimetest.FakeBackend
+}
+
+func (r *setupLogFailureRuntime) Launch(ctx context.Context, repos []runtime.Repo, opts *runtime.StartOptions) (runtime.ID, error) {
+	if _, err := opts.LogWriter.Write([]byte("md setup output\n")); err != nil {
+		return "", err
+	}
+	return "", errors.New("runtime launch failed")
+}
 
 func newTestRepoWorkspace(t *testing.T, baseBranch, dir string, backend runtime.Lifecycle) *repowork.Workspace {
 	var rt *runtime.Router
@@ -141,7 +153,8 @@ func TestRunner(t *testing.T) {
 		_, ch, unsub := tk.Subscribe(t.Context())
 		t.Cleanup(unsub)
 
-		w := &provisioningWriter{ctx: t.Context(), t: tk}
+		var persisted bytes.Buffer
+		w := &provisioningWriter{ctx: t.Context(), t: tk, logW: &persisted}
 
 		n, err := w.Write([]byte("hel"))
 		if err != nil {
@@ -189,6 +202,9 @@ func TestRunner(t *testing.T) {
 		if lm, ok := msg2.(*agent.LogMessage); !ok || lm.Line != "line2" {
 			t.Errorf("msg2 = %+v", msg2)
 		}
+		if got := persisted.String(); !strings.Contains(got, `{"type":"caic_log","line":"hello"}`) || !strings.Contains(got, `{"type":"caic_log","line":"line2"}`) {
+			t.Errorf("persisted logs = %q", got)
+		}
 	})
 
 	t.Run("Start", func(t *testing.T) {
@@ -224,11 +240,48 @@ func TestRunner(t *testing.T) {
 				t.Errorf("Effort = %q, want high", backend.capturedOpts.Effort)
 			}
 		})
+		t.Run("PersistsSetupLogsOnFailure", func(t *testing.T) {
+			t.Parallel()
+			logDir := t.TempDir()
+			workspace := newTestRepoWorkspace(t, "", "", &setupLogFailureRuntime{FakeBackend: &runtimetest.FakeBackend{}})
+			r := newTestRunner(t, workspace, nil, logDir)
+			tk := &Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "test"},
+				Harness:       harness.Claude,
+				StartedAt:     time.Now().UTC(),
+			}
+
+			if _, err := r.Start(t.Context(), tk, ""); err == nil {
+				t.Fatal("want launch error")
+			}
+			logs, err := LoadLogs(logDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(logs) != 1 {
+				t.Fatalf("loaded %d logs, want 1", len(logs))
+			}
+			logs[0].SetParser(claudecode.New().NewWire().ParseMessage)
+			if err := logs[0].LoadMessages(); err != nil {
+				t.Fatal(err)
+			}
+			if len(logs[0].Msgs) != 2 {
+				t.Fatalf("loaded %d messages, want setup log and failure", len(logs[0].Msgs))
+			}
+			for i, want := range []string{"md setup output", "Task startup failed: runtime launch failed"} {
+				log, ok := logs[0].Msgs[i].(*agent.LogMessage)
+				if !ok || log.Line != want {
+					t.Fatalf("message[%d] = %#v, want log %q", i, logs[0].Msgs[i], want)
+				}
+			}
+		})
+
 		t.Run("SurfacesSetupFailure", func(t *testing.T) {
 			t.Parallel()
 			launchErr := errors.New("invalid context name cache-custom-mount:~/.cache/caic: invalid reference format")
 			workspace := newTestRepoWorkspace(t, "", "", &runtimetest.FakeBackend{LaunchErr: launchErr})
-			r := newTestRunner(t, workspace, nil, "")
+			r := newTestRunner(t, workspace, nil, t.TempDir())
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -283,7 +336,8 @@ func TestRunner(t *testing.T) {
 				Harness:       harness.Claude,
 			}
 
-			if _, err := r.setup(t.Context(), tk, nil, ""); err != nil {
+			workspace.ReserveBranch(tk)
+			if _, err := r.setup(t.Context(), tk, nil, "", nil); err != nil {
 				t.Fatal(err)
 			}
 
@@ -322,7 +376,8 @@ func TestRunner(t *testing.T) {
 				Harness:       harness.Claude,
 			}
 
-			if _, err := r.setup(t.Context(), tk, nil, ""); err != nil {
+			workspace.ReserveBranch(tk)
+			if _, err := r.setup(t.Context(), tk, nil, "", nil); err != nil {
 				t.Fatal(err)
 			}
 

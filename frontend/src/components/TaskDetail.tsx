@@ -1,4 +1,4 @@
-// TaskDetail renders real-time agent output and recorded task errors for a single task.
+// TaskDetail renders agent output, task context, and task actions.
 
 import { createSignal, createMemo, createEffect, For, Index, Show, onCleanup, onMount, untrack, Switch, Match, type Accessor } from "solid-js";
 import { A, useNavigate, useLocation } from "@solidjs/router";
@@ -256,6 +256,22 @@ export default function TaskDetail(props: Props) {
 
   // Extract stats events from the full message stream for StatsIcon.
   const statsHistory = createMemo<EventStats[]>(() => messages().filter((m) => m.kind === "stats" && m.stats !== undefined).map((m) => m.stats as EventStats));
+  // The agent normally emits the initial prompt as its first user-input event.
+  // Setup can fail before that happens, so retain the recorded prompt as task context.
+  const hasInitialPromptEvent = createMemo(() => {
+    const history = messages();
+    const firstInput = history.findIndex((event) => event.kind === "userInput");
+    if (firstInput < 0 || history[firstInput].userInput?.text !== props.initialPrompt) return false;
+    return !history.slice(0, firstInput).some((event) =>
+      event.kind === "text" || event.kind === "textDelta" || event.kind === "thinking" || event.kind === "thinkingDelta" || event.kind === "toolUse" || event.kind === "toolResult" || event.kind === "result",
+    );
+  });
+  // Runtime setup output precedes the agent conversation. Keep it out of
+  // elided turns so it remains inspectable after replaying a task history.
+  const setupLogLines = createMemo(() => messages().flatMap((event) =>
+    event.kind === "log" && event.log ? [event.log.line] : [],
+  ));
+  const hasSessionStarted = createMemo(() => messages().some((event) => event.kind === "init"));
 
   // Sessions from completed messages: stable during streaming (only updates on turn completion).
   // groupSessions extracts init/compact_boundary events as session headers, not message groups.
@@ -721,7 +737,21 @@ export default function TaskDetail(props: Props) {
           </section>
         )}
       </Show>
+      <Show when={!hasInitialPromptEvent() && props.initialPrompt} keyed>
+        {(prompt) => (
+          <section class={styles.taskPrompt} aria-labelledby="task-prompt-title">
+            <h4 id="task-prompt-title" class={styles.taskPromptTitle}>Prompt</h4>
+            <div class={styles.userInputMsg}><Markdown text={prompt} /></div>
+          </section>
+        )}
+      </Show>
       <div class={styles.messageArea} ref={messageAreaRef} onScroll={handleScroll} data-testid="task-message-area">
+        <Show when={setupLogLines().length > 0}>
+          <details class={styles.taskSetup} open={!hasSessionStarted()} data-testid="task-setup">
+            <summary class={styles.taskSetupTitle}>Setup logs</summary>
+            <pre class={styles.taskSetupLogs} data-testid="task-setup-logs">{setupLogLines().join("\n")}</pre>
+          </details>
+        </Show>
         <Index each={items()}>
           {(item) => {
             // Type-narrowing accessors for the MsgItem discriminated union.
@@ -790,13 +820,7 @@ export default function TaskDetail(props: Props) {
           }}
         </Index>
         <Show when={messages().length === 0}>
-          <Show when={props.initialPrompt} keyed fallback={<p class={styles.placeholder}>Waiting for agent output...</p>}>
-            {(prompt) => (
-              <div class={styles.userInputMsg}>
-                <Markdown text={prompt} />
-              </div>
-            )}
-          </Show>
+          <p class={styles.placeholder}>Waiting for agent output...</p>
         </Show>
       </div>
 

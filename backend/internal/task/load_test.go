@@ -881,6 +881,46 @@ func TestLoadedTask(t *testing.T) {
 		}
 	})
 
+	t.Run("StreamMessagesIncludesProvisioningLogs", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "stream task", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude"})
+		setupLog := mustJSON(t, map[string]string{"type": "caic_log", "line": "creating runtime"})
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "failed"})
+		writeLogFile(t, dir, "t.jsonl", meta, setupLog, trailer)
+
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		setClaudeParser(tasks)
+
+		var streamed []agent.Message
+		for m, e := range tasks[0].StreamMessages() {
+			if e != nil {
+				t.Fatal(e)
+			}
+			streamed = append(streamed, m)
+		}
+		if len(streamed) != 1 {
+			t.Fatalf("streamed %d messages, want 1", len(streamed))
+		}
+		log, ok := streamed[0].(*agent.LogMessage)
+		if !ok || log.Line != "creating runtime" {
+			t.Fatalf("message = %#v, want provisioning log", streamed[0])
+		}
+		if err := tasks[0].LoadMessages(); err != nil {
+			t.Fatal(err)
+		}
+		if len(tasks[0].Msgs) != 1 {
+			t.Fatalf("loaded %d messages, want 1", len(tasks[0].Msgs))
+		}
+		loaded, ok := tasks[0].Msgs[0].(*agent.LogMessage)
+		if !ok || loaded.Line != "creating runtime" {
+			t.Fatalf("loaded message = %#v, want provisioning log", tasks[0].Msgs[0])
+		}
+	})
+
 	t.Run("StreamMessagesCompressed", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()

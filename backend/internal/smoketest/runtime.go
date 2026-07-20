@@ -58,7 +58,10 @@ func NewRuntimeBackend(vncPort int) *RuntimeBackend {
 func (*RuntimeBackend) Name() runtime.Name { return "test-runtime" }
 
 // Launch implements runtime.Lifecycle.
-func (b *RuntimeBackend) Launch(_ context.Context, repos []runtime.Repo, _ *runtime.StartOptions) (runtime.ID, error) {
+func (b *RuntimeBackend) Launch(_ context.Context, repos []runtime.Repo, opts *runtime.StartOptions) (runtime.ID, error) {
+	if _, err := opts.LogWriter.Write([]byte("- Fake runtime setup complete\n")); err != nil {
+		return "", err
+	}
 	if len(repos) == 0 {
 		return runtime.NewID(b.Name(), "md-test-no-repo"), nil
 	}

@@ -448,10 +448,24 @@ func (lt *LoadedTask) replayParser() func([]byte) ([]agent.Message, error) {
 		switch env.Type {
 		case "caic_meta", "caic_pr", "caic_result", "caic_diff_stat", "caic_session", "caic_init", agent.PendingUserActionMessageType:
 			return nil, nil
+		case "caic_log":
+			m, err := unmarshalProvisioningLog(line)
+			if err != nil {
+				return nil, err
+			}
+			return []agent.Message{m}, nil
 		default:
 			return lt.parseFn(line)
 		}
 	}
+}
+
+func unmarshalProvisioningLog(line []byte) (*agent.LogMessage, error) {
+	var m agent.LogMessage
+	if err := json.Unmarshal(line, &m); err != nil {
+		return nil, err
+	}
+	return &m, nil
 }
 
 // streamLogFile streams parsed messages from a plain or compressed task log.
@@ -894,6 +908,13 @@ func loadLogFile(path string, parseFn func([]byte) ([]agent.Message, error)) (_ 
 		case "caic_diff_stat":
 			noteDiffStatLine(lt, line)
 
+		case "caic_log":
+			m, err := unmarshalProvisioningLog(line)
+			if err != nil {
+				return nil, fmt.Errorf("invalid caic_log: %w", err)
+			}
+			lt.Msgs = append(lt.Msgs, m)
+
 		case "caic_result":
 			var mr agent.MetaResultMessage
 			if err := json.Unmarshal(line, &mr); err != nil {
@@ -990,6 +1011,12 @@ func loadLogFileTail(path string, parseFn func([]byte) ([]agent.Message, error),
 			}
 		case "caic_diff_stat":
 			noteDiffStatLine(lt, line)
+		case "caic_log":
+			m, err := unmarshalProvisioningLog(line)
+			if err != nil {
+				return nil, fmt.Errorf("invalid caic_log: %w", err)
+			}
+			lt.Msgs = append(lt.Msgs, m)
 		case "caic_result":
 			var mr agent.MetaResultMessage
 			if err := json.Unmarshal(line, &mr); err != nil {
@@ -1086,6 +1113,13 @@ func applyLoadedLogLine(lt *LoadedTask, line []byte, parseFn func([]byte) ([]age
 
 	case "caic_diff_stat":
 		noteDiffStatLine(lt, line)
+
+	case "caic_log":
+		m, err := unmarshalProvisioningLog(line)
+		if err != nil {
+			return fmt.Errorf("invalid caic_log: %w", err)
+		}
+		lt.Msgs = append(lt.Msgs, m)
 
 	case "caic_result":
 		var mr agent.MetaResultMessage

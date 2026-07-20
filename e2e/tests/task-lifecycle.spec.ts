@@ -62,6 +62,31 @@ test("create task, verify streaming text and result, then purge", async ({ page,
   await waitForTaskState(api, task!.id, "purged");
 });
 
+test("setup logs remain visible after task-detail replay", async ({ page, api }, testInfo) => {
+  const id = await createTaskAPI(api, "Verify setup log replay");
+  await waitForTaskState(api, id, "waiting", 30_000);
+
+  await page.goto(`/task/@${id}`);
+  const setup = page.getByTestId("task-setup");
+  const setupLogs = page.getByTestId("task-setup-logs");
+  const messageArea = page.getByTestId("task-message-area");
+  await expect(setup).toBeVisible();
+  await expect(messageArea.getByTestId("task-setup")).toBeVisible();
+  await expect(setup).not.toHaveAttribute("open");
+  await expect(setupLogs).not.toBeVisible();
+
+  await setup.getByText("Setup logs").click();
+  await expect(setupLogs).toContainText("Fake runtime setup complete");
+
+  // Reopening the detail stream preserves setup output and restores its
+  // collapsed default instead of burying it in a historical turn.
+  await page.reload();
+  await expect(setup).toBeVisible();
+  await expect(messageArea.getByTestId("task-setup")).toBeVisible();
+  await expect(setup).not.toHaveAttribute("open");
+  await page.screenshot({ path: testInfo.outputPath("task-setup-logs.png") });
+});
+
 test("task detail desktop layout avoids extra gutters and pane-level horizontal scrolling", async ({ page, api }) => {
   await page.setViewportSize({ width: 950, height: 800 });
   const id = await createTaskAPI(api, "Fix a desktop overflow regression");

@@ -110,6 +110,69 @@ a.headerPR:hover {
   overflow-wrap: anywhere;
 }
 
+.taskPrompt {
+  margin-bottom: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+}
+
+.taskPromptTitle {
+  margin: 0 0 0.25rem;
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+}
+
+.taskPrompt .userInputMsg {
+  margin: 0;
+}
+
+.taskSetup {
+  margin: 0.35rem 0;
+}
+
+.taskSetupTitle {
+  display: block;
+  width: 100%;
+  padding: 0.25rem 0.5rem;
+  color: #4a6785;
+  background: #e4eaf1;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: 0.8rem;
+  list-style: none;
+}
+
+.taskSetupTitle::-webkit-details-marker {
+  display: none;
+}
+
+.taskSetupTitle::before {
+  content: "▶";
+  margin-right: 0.4em;
+  font-size: 0.7em;
+}
+
+.taskSetup:hover .taskSetupTitle,
+.taskSetup[open] .taskSetupTitle {
+  background: #d5e3f0;
+}
+
+.taskSetup[open] .taskSetupTitle::before {
+  content: "▼";
+}
+
+.taskSetupLogs {
+  margin: 0.35rem 0 0;
+  color: var(--color-text-secondary);
+  font-family: monospace;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .messageArea {
   flex: 1;
   overflow-y: auto;

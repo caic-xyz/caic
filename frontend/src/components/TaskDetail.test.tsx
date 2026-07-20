@@ -1,4 +1,4 @@
-// Tests for TaskDetail navigation, recorded errors, and SSE connection behaviour.
+// Tests for TaskDetail navigation, prompts, and SSE connection behaviour.
 
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render } from "@solidjs/testing-library";
@@ -201,6 +201,66 @@ describe("TaskDetail", () => {
 
     expect(getByRole("heading", { name: "Task error" })).toBeInTheDocument();
     expect(getByText(error)).toBeInTheDocument();
+  });
+
+  it("keeps the prompt visible when a later input repeats it", () => {
+    vi.mocked(taskEventStream).mockImplementationOnce((_id, cb, _onError, onReady) => {
+      cb({ kind: "text", ts: 1, text: { text: "agent reply" } });
+      cb({ kind: "userInput", ts: 2, userInput: { text: "same prompt" } });
+      onReady?.();
+      return {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      } as unknown as EventSource;
+    });
+
+    const { getByRole } = renderTaskDetail({ initialPrompt: "same prompt" });
+
+    expect(getByRole("heading", { name: "Prompt" })).toBeInTheDocument();
+  });
+
+  it("shows setup logs inside task details", () => {
+    vi.mocked(taskEventStream).mockImplementationOnce((_id, cb, _onError, onReady) => {
+      cb({ kind: "log", ts: 1, log: { line: "starting runtime" } });
+      cb({ kind: "error", ts: 2, error: { err: "agent extension failed to load", line: "" } });
+      onReady?.();
+      return {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      } as unknown as EventSource;
+    });
+
+    const { getByRole, getByTestId, getByText } = renderTaskDetail({
+      taskState: "crashed",
+      initialPrompt: "fetch origin then rebase on origin/main",
+    });
+
+    expect(getByRole("heading", { name: "Prompt" })).toBeInTheDocument();
+    expect(getByText("fetch origin then rebase on origin/main")).toBeInTheDocument();
+    expect(getByText("Setup logs")).toBeInTheDocument();
+    expect(getByTestId("task-setup")).toHaveAttribute("open");
+    expect(getByTestId("task-setup-logs")).toHaveTextContent("starting runtime");
+    expect(getByTestId("task-message-area")).toContainElement(getByTestId("task-setup"));
+    expect(getByTestId("task-message-area")).toHaveTextContent("agent extension failed to load");
+  });
+
+  it("collapses setup logs after the agent session starts", () => {
+    vi.mocked(taskEventStream).mockImplementationOnce((_id, cb, _onError, onReady) => {
+      cb({ kind: "log", ts: 1, log: { line: "starting runtime" } });
+      cb({ kind: "init", ts: 2, init: { model: "test", agentVersion: "test", sessionID: "session", cwd: "", harness: "test" } });
+      onReady?.();
+      return {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      } as unknown as EventSource;
+    });
+
+    const { getByTestId } = renderTaskDetail();
+
+    expect(getByTestId("task-setup")).not.toHaveAttribute("open");
   });
 });
 
@@ -433,7 +493,7 @@ describe("SSE connection", () => {
     renderTaskDetail({ taskState: "purged", initialPrompt: "initial prompt" });
 
     expect(document.body.textContent).toContain("purged history");
-    expect(document.body.textContent).not.toContain("initial prompt");
+    expect(document.body.textContent).toContain("initial prompt");
   });
 
   it("live textDelta events render before the turn ends", () => {

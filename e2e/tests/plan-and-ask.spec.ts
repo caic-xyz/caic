@@ -30,11 +30,11 @@ test("FAKE_PLAN: clear-plan button appears and restarts task", async ({ page, ap
   const prompt = `FAKE_PLAN e2e ${Date.now()}`;
   const taskId = await submitAndGetId(page, api, prompt);
 
-  // Open task detail.
-  await page.locator(`div[class*="card"]:has-text("${prompt.replace(/"/g, '\\"')}")`).first().click();
-
-  // Wait for the task to reach has_plan state.
+  // Wait for the task to reach has_plan state, then load it from the server.
+  // A direct navigation avoids relying on the delayed global task-list stream
+  // to update the newly-created card before the detail view renders.
   await waitForTaskState(api, taskId, "has_plan", 20_000);
+  await page.goto(`/task/@${taskId}`);
 
   // The "Clear and execute plan" button must be visible.
   const clearBtn = page.getByTestId("clear-and-execute-plan");
@@ -62,11 +62,9 @@ test("FAKE_ASK: AskUserQuestion card renders, accepts answer, submits", async ({
   const prompt = `FAKE_ASK e2e ${Date.now()}`;
   const taskId = await submitAndGetId(page, api, prompt);
 
-  // Open task detail.
-  await page.locator(`div[class*="card"]:has-text("${prompt.replace(/"/g, '\\"')}")`).first().click();
-
-  // Wait for the task to reach asking state.
+  // Wait for the task to reach asking state, then load it from the server.
   await waitForTaskState(api, taskId, "asking", 20_000);
+  await page.goto(`/task/@${taskId}`);
 
   // The question and option chips must be visible.
   await expect(page.getByText("Which approach should I use?")).toBeVisible({ timeout: 10_000 });

@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"runtime/trace"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -89,16 +90,23 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 	if r.Workspace.Dir != "" {
 		t.SetState(StateBranching)
 	}
+	// Reserve the branch before opening the log because the branch is part of
+	// the durable log filename. Setup output must be persisted from its first line.
+	r.Workspace.ReserveBranch(t)
+	logW, err := r.Sessions.Logs.Open(t)
+	if err != nil {
+		t.recordStartupFailure(ctx, err)
+		return nil, err
+	}
 
 	tStart := time.Now()
 	// 1. Create branch (serialized) + start instance (concurrent).
 	r.Workspace.Log.Info("setup task")
 	region := trace.StartRegion(ctx, "setup")
-	sr, err := r.setup(ctx, t, MakeMetadata(t), resolvedGitHubToken)
+	sr, err := r.setup(ctx, t, MakeMetadata(t), resolvedGitHubToken, logW)
 	region.End()
 	if err != nil {
-		t.recordStartupFailure(ctx, err)
-		return nil, err
+		return nil, r.finishStartupFailure(ctx, t, logW, err)
 	}
 	t.SetRuntimeConnectionInfo(sr.InstanceID, sr.AgentTarget, sr.TailscaleFQDN, sr.TailscaleAuthURL, r.Workspace.Runtimes.VNCPort(ctx, sr.InstanceID))
 	var primaryBranch string
@@ -111,18 +119,10 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 	t.SetState(StateStarting)
 	var msgCh chan agent.Message
 	var dispatchDone <-chan struct{}
-	var logW io.WriteCloser
 	{
 		region := trace.StartRegion(ctx, "dispatch-init")
 		msgCh, dispatchDone = r.Sessions.startMessageDispatch(ctx, t, false)
-		logW, err = r.Sessions.Logs.Open(t)
 		region.End()
-	}
-	if err != nil {
-		close(msgCh)
-		<-dispatchDone
-		t.recordStartupFailure(ctx, err)
-		return nil, err
 	}
 
 	tSession := time.Now()
@@ -141,12 +141,10 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 	})
 	region.End()
 	if err != nil {
-		_ = logW.Close()
 		close(msgCh)
 		<-dispatchDone
-		t.recordStartupFailure(ctx, err)
 		tlog.Error("session start failed", "err", err)
-		return nil, err
+		return nil, r.finishStartupFailure(ctx, t, logW, err)
 	}
 
 	// Store handle so SendInput can reach it.
@@ -567,11 +565,7 @@ func (r *Runner) branchDiffStat(ctx context.Context, t *Task) (agent.DiffStat, e
 // git branch concurrently, then completes instance startup (Phase B).
 // Phase A (runtime launch) and git fetch+branch-create overlap, cutting the
 // branch-allocation time off the critical path.
-func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, resolvedGitHubToken string) (setupResult, error) {
-	// Reserve the branch ID instantly (under lock, ~µs). The branch itself is
-	// created concurrently with runtime launch in Phase A.
-	r.Workspace.ReserveBranch(t)
-
+func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, resolvedGitHubToken string, logW io.Writer) (setupResult, error) {
 	t.SetState(StateProvisioning)
 	detached := context.WithoutCancel(ctx)
 	var primaryBranch string
@@ -601,7 +595,7 @@ func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, 
 		Mounts:            t.Mounts,
 		MaxCPUs:           t.MaxCPUs,
 		GitHubToken:       resolvedGitHubToken,
-		LogWriter:         &provisioningWriter{ctx: ctx, t: t},
+		LogWriter:         &provisioningWriter{ctx: ctx, t: t, logW: logW},
 	}
 
 	// Phase A: runtime launch + connection config. Branch creation runs concurrently so
@@ -660,6 +654,34 @@ func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, 
 	}, nil
 }
 
+// finishStartupFailure records a startup error in the task log and finalizes
+// its event replay so the failure survives a server restart.
+func (r *Runner) finishStartupFailure(ctx context.Context, t *Task, logW io.WriteCloser, startupErr error) error {
+	failure := &agent.LogMessage{MessageType: "caic_log", Line: "Task startup failed: " + startupErr.Error()}
+	writeErr := appendTaskLogMessage(logW, failure)
+	t.SetState(StateFailed)
+	t.addMessage(ctx, failure, false)
+
+	res := Result{State: StateFailed, Err: startupErr}
+	trailerErr := r.Sessions.Logs.WriteResultTrailer(logW, t.Title(), &res)
+	closeErr := logW.Close()
+	commitErr := t.CommitEventReplay()
+	return errors.Join(startupErr, writeErr, trailerErr, closeErr, commitErr)
+}
+
+// appendTaskLogMessage appends a backend-neutral task message to an open task log.
+func appendTaskLogMessage(w io.Writer, m agent.Message) error {
+	if w == nil {
+		return ErrNoLog
+	}
+	data, err := agent.MarshalMessage(m)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(append(data, '\n'))
+	return err
+}
+
 // logRelayDiag reads the relay daemon's relay.log from the instance and logs
 // its tail. Called when GracefulStop times out to capture relay-side diagnostics.
 func (r *Runner) logRelayDiag(ctx context.Context, tlog *slog.Logger, target runtime.ConnectionTarget) {
@@ -687,12 +709,17 @@ type setupResult struct {
 // provisioningWriter is an io.Writer that converts line-by-line output from the
 // instance backend into LogMessage events stored on the task for SSE streaming.
 type provisioningWriter struct {
-	ctx context.Context
-	t   *Task
+	ctx  context.Context
+	t    *Task
+	logW io.Writer
+
+	mu  sync.Mutex
 	buf []byte
 }
 
 func (w *provisioningWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	w.buf = append(w.buf, p...)
 	for {
 		i := bytes.IndexByte(w.buf, '\n')
@@ -702,7 +729,13 @@ func (w *provisioningWriter) Write(p []byte) (int, error) {
 		line := strings.TrimSpace(string(w.buf[:i]))
 		w.buf = w.buf[i+1:]
 		if line != "" {
-			w.t.addMessage(w.ctx, &agent.LogMessage{Line: line}, false)
+			m := &agent.LogMessage{MessageType: "caic_log", Line: line}
+			if w.logW != nil {
+				if err := appendTaskLogMessage(w.logW, m); err != nil {
+					return 0, err
+				}
+			}
+			w.t.addMessage(w.ctx, m, false)
 		}
 	}
 	return len(p), nil

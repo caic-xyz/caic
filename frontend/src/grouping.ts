@@ -328,10 +328,13 @@ export function groupMessages(msgs: EventMessage[]): MessageGroup[] {
         // Skip: subagent lifecycle events are not rendered yet. Explicitly
         // listed to avoid creating OTHER groups that act as hard barriers.
         break;
+      case "log":
+        // Setup output is rendered in TaskDetail's persistent setup-log panel,
+        // rather than inside a turn that can be elided.
+        break;
       case "init":
       case "result":
       case "error":
-      case "log":
       default:
         groups.push({ kind: "other", events: [ev], toolCalls: [] });
         break;

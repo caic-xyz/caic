@@ -508,7 +508,8 @@ func (m *ParseErrorMessage) Type() string { return "parse_error" }
 
 // LogMessage is a provisioning/startup log line from the container backend.
 type LogMessage struct {
-	Line string
+	MessageType string `json:"type"`
+	Line        string `json:"line"`
 }
 
 // Type implements Message.
