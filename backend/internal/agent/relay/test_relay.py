@@ -727,6 +727,44 @@ def test_reconnect_after_ssh_drop_then_shutdown():
         _cleanup(relay_dir)
 
 
+def test_serve_discards_previous_session_output():
+    """A new serve session must not replay a prior agent's terminal event."""
+    relay_dir = tempfile.mkdtemp(prefix="caic-relay-test-")
+    output_path = os.path.join(relay_dir, "output.jsonl")
+    env = _make_env(relay_dir)
+    with open(output_path, "w") as f:
+        f.write('{"type":"caic_exit","exit_code":1,"error":"stale failure"}\n')
+
+    try:
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                RELAY_PY,
+                "serve-attach",
+                "--dir",
+                relay_dir,
+                "--",
+                sys.executable,
+                "-c",
+                "print('fresh startup')",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+        )
+        stdout, _ = proc.communicate(timeout=10)
+
+        assert b"fresh startup" in stdout, stdout
+        assert b"stale failure" not in stdout, stdout
+        with open(output_path, "rb") as f:
+            output = f.read()
+        assert b"fresh startup" in output, output
+        assert b"stale failure" not in output, output
+    finally:
+        _cleanup(relay_dir)
+
+
 def test_caic_exit_includes_stderr():
     """A subprocess stderr failure is recorded in caic_exit.error."""
     relay_dir = tempfile.mkdtemp(prefix="caic-relay-test-")

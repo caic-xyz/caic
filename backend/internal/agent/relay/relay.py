@@ -463,6 +463,14 @@ def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace):
     """
     os.makedirs(RELAY_DIR, exist_ok=True)
 
+    # serve-attach always starts a new subprocess. Its output must begin empty:
+    # replaying a prior subprocess's terminal event makes a fresh client treat
+    # the old failure as the new process's startup result.
+    try:
+        os.unlink(OUTPUT_PATH)
+    except FileNotFoundError:
+        pass
+
     # Clean up stale socket.
     try:
         os.unlink(SOCK_PATH)
