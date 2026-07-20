@@ -31,12 +31,11 @@ func (s *LogStore) Open(t *Task) (io.WriteCloser, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create log file: %w", err)
 	}
-	if err := s.attachReplay(t, path); err != nil {
+	if err := writeMetadataHeader(f, t); err != nil {
 		return nil, errors.Join(err, f.Close())
 	}
-	if err := writeMetadataHeader(f, t); err != nil {
-		_ = f.Close()
-		return nil, err
+	if err := s.attachReplay(t, path); err != nil {
+		return nil, errors.Join(err, f.Close())
 	}
 	return f, nil
 }

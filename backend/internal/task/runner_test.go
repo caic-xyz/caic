@@ -24,6 +24,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
+	"github.com/caic-xyz/caic/backend/internal/task/tasktest"
 )
 
 // instantExitBackend embeds testBackend but spawns a process that exits
@@ -45,10 +46,27 @@ type setupLogFailureRuntime struct {
 }
 
 func (r *setupLogFailureRuntime) Launch(ctx context.Context, repos []runtime.Repo, opts *runtime.StartOptions) (runtime.ID, error) {
-	if _, err := opts.LogWriter.Write([]byte("md setup output\n")); err != nil {
+	if _, err := opts.LogWriter.Write([]byte("md setup output")); err != nil {
 		return "", err
 	}
 	return "", errors.New("runtime launch failed")
+}
+
+type forkLogRuntime struct {
+	*runtimetest.FakeBackend
+
+	forkErr error
+}
+
+func (r *forkLogRuntime) Fork(ctx context.Context, id runtime.ID, repos []runtime.Repo, opts *runtime.ForkOptions) (runtime.ID, runtime.ConnectionInfo, []runtime.Repo, error) {
+	if _, err := opts.LogWriter.Write([]byte("fork setup complete\nfinal setup line")); err != nil {
+		return "", runtime.ConnectionInfo{}, nil, err
+	}
+	if r.forkErr != nil {
+		return "", runtime.ConnectionInfo{}, nil, r.forkErr
+	}
+	forkID, conn, _, err := r.FakeBackend.Fork(ctx, id, repos, opts)
+	return forkID, conn, []runtime.Repo{{Branch: "caic/fork"}}, err
 }
 
 func newTestRepoWorkspace(t *testing.T, baseBranch, dir string, backend runtime.Lifecycle) *repowork.Workspace {
@@ -203,6 +221,33 @@ func TestRunner(t *testing.T) {
 			t.Errorf("msg2 = %+v", msg2)
 		}
 		if got := persisted.String(); !strings.Contains(got, `{"type":"caic_log","line":"hello"}`) || !strings.Contains(got, `{"type":"caic_log","line":"line2"}`) {
+			t.Errorf("persisted logs = %q", got)
+		}
+
+		if _, err := w.Write([]byte("final line")); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-ch:
+			t.Fatal("unexpected message before flush")
+		default:
+		}
+		if err := w.Flush(); err != nil {
+			t.Fatal(err)
+		}
+		flushed := recvMsg(t, ch)
+		if lm, ok := flushed.(*agent.LogMessage); !ok || lm.Line != "final line" {
+			t.Errorf("flushed message = %#v, want final line", flushed)
+		}
+		if err := w.Flush(); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-ch:
+			t.Fatal("duplicate message after second flush")
+		default:
+		}
+		if got := persisted.String(); !strings.Contains(got, `{"type":"caic_log","line":"final line"}`) {
 			t.Errorf("persisted logs = %q", got)
 		}
 	})
@@ -733,6 +778,144 @@ func TestRunner(t *testing.T) {
 					t.Fatal("want error")
 				}
 			})
+		})
+		t.Run("persists_setup_logs", func(t *testing.T) {
+			t.Parallel()
+			runtimeBackend := &forkLogRuntime{FakeBackend: testContainer()}
+			workspace := newTestRepoWorkspace(t, "", "", runtimeBackend)
+			backend := &testBackend{FakeBackend: &agenttest.FakeBackend{}}
+			r := newTestRunner(t, workspace, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
+			replay := &tasktest.FakeEventReplayWriter{}
+			r.Sessions.Logs.EventReplayFactory = func(string, harness.Name) (EventReplayWriter, error) {
+				return replay, nil
+			}
+			source := &Task{
+				ID:      ksid.NewID(),
+				Harness: "test",
+				Repos:   []RepoMount{{Name: "caic", Branch: "caic/source"}},
+			}
+			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
+			fork := &Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "fork prompt"},
+				Harness:       "test",
+				Repos:         []RepoMount{{Name: "caic", Branch: "caic/source"}},
+				StartedAt:     time.Now().UTC(),
+			}
+
+			h, err := r.ForkTask(t.Context(), source, fork, &runtime.ForkOptions{}, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				fork.CloseAndDetachSession(t.Context())
+				_ = h.LogW.Close()
+			})
+
+			if got := filepath.Base(fork.LogPath()); !strings.Contains(got, "caic-fork") {
+				t.Errorf("log filename = %q, want generated fork branch", got)
+			}
+			logs := strings.Join(logLines(t, fork.LogPath()), "\n")
+			first := strings.Index(logs, `{"type":"caic_log","line":"fork setup complete"}`)
+			last := strings.Index(logs, `{"type":"caic_log","line":"final setup line"}`)
+			if first < 0 || last <= first {
+				t.Errorf("persisted setup logs missing or out of order: %q", logs)
+			}
+			if got := strings.Count(logs, `"type":"caic_meta"`); got != 1 {
+				t.Errorf("metadata header count = %d, want 1", got)
+			}
+			if len(replay.Messages) < 2 {
+				t.Fatalf("replay has %d messages, want setup logs", len(replay.Messages))
+			}
+			for i, want := range []string{"fork setup complete", "final setup line"} {
+				log, ok := replay.Messages[i].(*agent.LogMessage)
+				if !ok || log.Line != want {
+					t.Errorf("replay message[%d] = %#v, want log %q", i, replay.Messages[i], want)
+				}
+			}
+		})
+		t.Run("persists_setup_logs_on_failure", func(t *testing.T) {
+			t.Parallel()
+			runtimeBackend := &forkLogRuntime{
+				FakeBackend: testContainer(),
+				forkErr:     errors.New("fork failed"),
+			}
+			workspace := newTestRepoWorkspace(t, "", "", runtimeBackend)
+			r := newTestRunner(t, workspace, nil, t.TempDir())
+			replay := &tasktest.FakeEventReplayWriter{}
+			r.Sessions.Logs.EventReplayFactory = func(string, harness.Name) (EventReplayWriter, error) {
+				return replay, nil
+			}
+			source := &Task{
+				ID:      ksid.NewID(),
+				Harness: "test",
+				Repos:   []RepoMount{{Name: "caic", Branch: "caic/source"}},
+			}
+			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
+			fork := &Task{
+				ID:        ksid.NewID(),
+				Harness:   "test",
+				Repos:     []RepoMount{{Name: "caic", Branch: "caic/source"}},
+				StartedAt: time.Now().UTC(),
+			}
+
+			if _, err := r.ForkTask(t.Context(), source, fork, &runtime.ForkOptions{}, ""); err == nil {
+				t.Fatal("want fork error")
+			}
+			if got := fork.GetState(); got != StateFailed {
+				t.Errorf("state = %s, want failed", got)
+			}
+			logs := strings.Join(logLines(t, fork.LogPath()), "\n")
+			for _, want := range []string{"fork setup complete", "final setup line", "Task startup failed: fork instance: fork failed"} {
+				if !strings.Contains(logs, want) {
+					t.Errorf("persisted log does not contain %q: %s", want, logs)
+				}
+			}
+			if !strings.Contains(logs, `"type":"caic_result"`) {
+				t.Errorf("persisted log has no result trailer: %s", logs)
+			}
+			if got := len(replay.Commits); got != 1 {
+				t.Errorf("replay commit count = %d, want 1", got)
+			}
+		})
+		t.Run("persists_setup_logs_on_session_failure", func(t *testing.T) {
+			t.Parallel()
+			runtimeBackend := &forkLogRuntime{FakeBackend: testContainer()}
+			workspace := newTestRepoWorkspace(t, "", "", runtimeBackend)
+			backend := &agenttest.FakeBackend{}
+			r := newTestRunner(t, workspace, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
+			replay := &tasktest.FakeEventReplayWriter{}
+			r.Sessions.Logs.EventReplayFactory = func(string, harness.Name) (EventReplayWriter, error) {
+				return replay, nil
+			}
+			source := &Task{
+				ID:      ksid.NewID(),
+				Harness: "test",
+				Repos:   []RepoMount{{Name: "caic", Branch: "caic/source"}},
+			}
+			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
+			fork := &Task{
+				ID:        ksid.NewID(),
+				Harness:   "test",
+				Repos:     []RepoMount{{Name: "caic", Branch: "caic/source"}},
+				StartedAt: time.Now().UTC(),
+			}
+
+			if _, err := r.ForkTask(t.Context(), source, fork, &runtime.ForkOptions{}, ""); err == nil {
+				t.Fatal("want session start error")
+			}
+			if got := fork.GetState(); got != StateFailed {
+				t.Errorf("state = %s, want failed", got)
+			}
+			logs := strings.Join(logLines(t, fork.LogPath()), "\n")
+			for _, want := range []string{"fork setup complete", "final setup line", "Task startup failed: start session on fork"} {
+				if !strings.Contains(logs, want) {
+					t.Errorf("persisted log does not contain %q: %s", want, logs)
+				}
+			}
+			if got := len(replay.Commits); got != 1 {
+				t.Errorf("replay commit count = %d, want 1", got)
+			}
 		})
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()

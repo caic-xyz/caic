@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -144,51 +145,16 @@ func (r *SessionRunner) EnsureSession(ctx context.Context, t *Task, h *SessionHa
 // transitions to StateRunning. If prompt is empty, the agent starts idle
 // and the task stays in its current state (typically StateWaiting).
 func (r *SessionRunner) StartSession(ctx context.Context, t *Task, prompt agent.Prompt) (*SessionHandle, error) {
-	ctx, task := trace.NewTask(ctx, "task.start-session:"+t.ID.String())
-	defer task.End()
-
-	instanceID := t.RuntimeInstanceID()
-	if instanceID == "" {
+	if t.RuntimeInstanceID() == "" {
 		return nil, errors.New("no instance")
 	}
-	var primaryBranch string
-	if p := t.Primary(); p != nil {
-		primaryBranch = p.Branch
-	}
-	tlog := r.Workspace.Log.With("br", primaryBranch, "instance", instanceID)
-
-	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false)
 	logW, err := r.Logs.Open(t)
 	if err != nil {
-		close(msgCh)
-		<-dispatchDone
 		return nil, err
 	}
-
-	tlog.Info("starting session", "hns", t.Harness)
-	target := t.RuntimeConnectionTarget()
-	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
-		Target:        target,
-		Dir:           r.runtimeDir(t),
-		Model:         t.Model,
-		Effort:        t.Effort,
-		InitialPrompt: prompt,
-		MsgCh:         msgCh,
-		LogW:          logW,
-	})
+	h, err := r.startSessionWithLog(ctx, t, prompt, logW)
 	if err != nil {
-		_ = logW.Close()
-		close(msgCh)
-		<-dispatchDone
-		tlog.Error("session start failed", "err", err)
-		return nil, err
-	}
-
-	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, LogW: logW}
-	t.AttachSession(h)
-	if prompt.Text != "" || len(prompt.Images) > 0 {
-		t.addMessage(ctx, syntheticUserInput(prompt), false)
-		t.SetState(StateRunning)
+		return nil, errors.Join(err, logW.Close())
 	}
 	return h, nil
 }
@@ -205,6 +171,48 @@ func (r *SessionRunner) RestartSession(ctx context.Context, t *Task, prompt agen
 // so the user can send a new message when ready.
 func (r *SessionRunner) ClearContextSession(ctx context.Context, t *Task) (*SessionHandle, error) {
 	return r.replaceSession(ctx, t, agent.Prompt{}, replaceSessionClearContext)
+}
+
+func (r *SessionRunner) startSessionWithLog(ctx context.Context, t *Task, prompt agent.Prompt, logW io.WriteCloser) (*SessionHandle, error) {
+	ctx, task := trace.NewTask(ctx, "task.start-session:"+t.ID.String())
+	defer task.End()
+
+	instanceID := t.RuntimeInstanceID()
+	if instanceID == "" {
+		return nil, errors.New("no instance")
+	}
+	var primaryBranch string
+	if p := t.Primary(); p != nil {
+		primaryBranch = p.Branch
+	}
+	tlog := r.Workspace.Log.With("br", primaryBranch, "instance", instanceID)
+
+	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false)
+	tlog.Info("starting session", "hns", t.Harness)
+	target := t.RuntimeConnectionTarget()
+	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
+		Target:        target,
+		Dir:           r.runtimeDir(t),
+		Model:         t.Model,
+		Effort:        t.Effort,
+		InitialPrompt: prompt,
+		MsgCh:         msgCh,
+		LogW:          logW,
+	})
+	if err != nil {
+		close(msgCh)
+		<-dispatchDone
+		tlog.Error("session start failed", "err", err)
+		return nil, err
+	}
+
+	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, LogW: logW}
+	t.AttachSession(h)
+	if prompt.Text != "" || len(prompt.Images) > 0 {
+		t.addMessage(ctx, syntheticUserInput(prompt), false)
+		t.SetState(StateRunning)
+	}
+	return h, nil
 }
 
 func (r *SessionRunner) replaceSession(ctx context.Context, t *Task, prompt agent.Prompt, mode replaceSessionMode) (*SessionHandle, error) {

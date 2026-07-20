@@ -1638,6 +1638,17 @@ func (t *Task) RecordSessionFailure(ctx context.Context, err error) bool {
 	return true
 }
 
+func (t *Task) writeEventReplayMessages(msgs []agent.Message) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.eventReplay == nil {
+		return
+	}
+	for _, m := range msgs {
+		t.eventReplay.WriteMessage(m)
+	}
+}
+
 func (t *Task) setLiveDiffStatLocked(ds agent.DiffStat) {
 	t.liveDiffStat = ds
 	if len(ds) > 0 {

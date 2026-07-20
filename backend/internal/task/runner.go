@@ -508,12 +508,25 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *run
 	fork.SetState(StateProvisioning)
 	tlog.Info("forking instance")
 	tlog.Debug("workspace", "msg", "calling instance.Fork", "source", sourceInstanceID, "harness", forkOpts.Harness, "tailscale", forkOpts.Tailscale, "usb", forkOpts.USB, "display", forkOpts.Display, "sudo", forkOpts.Sudo, "gitHubToken", fork.GitHubTokenEnabled())
-	forkOpts.LogWriter = &provisioningWriter{ctx: ctx, t: fork}
+	provisioningLog := &provisioningWriter{ctx: ctx, t: fork}
+	forkOpts.LogWriter = provisioningLog
 	forkName, forkConn, forkRepos, err := r.Workspace.Runtimes.Fork(ctx, sourceInstanceID, source.RuntimeRepos(), forkOpts)
+	flushErr := provisioningLog.Flush()
 	if err != nil {
 		tlog.Error("workspace", "msg", "instance.Fork failed", "source", sourceInstanceID, "err", err)
-		fork.SetState(StateFailed)
-		return nil, fmt.Errorf("fork instance: %w", err)
+		startupErr := errors.Join(fmt.Errorf("fork instance: %w", err), flushErr)
+		logW, openErr := r.Sessions.Logs.Open(fork)
+		if openErr != nil {
+			fork.recordStartupFailure(ctx, startupErr)
+			return nil, errors.Join(startupErr, openErr)
+		}
+		if attachErr := provisioningLog.AttachLogWriter(logW); attachErr != nil {
+			startupErr = errors.Join(startupErr, attachErr)
+		}
+		return nil, r.finishStartupFailure(ctx, fork, logW, startupErr)
+	}
+	if flushErr != nil {
+		return nil, flushErr
 	}
 	tlog.Debug("workspace", "msg", "instance.Fork succeeded", "source", sourceInstanceID, "fork", forkName)
 	fork.SetRuntimeConnectionInfo(forkName, forkConn.AgentTarget, "", "", r.Workspace.Runtimes.VNCPort(ctx, forkName))
@@ -521,6 +534,14 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *run
 		if i < len(forkRepos) {
 			fork.SetRepoBranch(i, forkRepos[i].Branch)
 		}
+	}
+	logW, err := r.Sessions.Logs.Open(fork)
+	if err != nil {
+		fork.recordStartupFailure(ctx, err)
+		return nil, err
+	}
+	if err := provisioningLog.AttachLogWriter(logW); err != nil {
+		return nil, r.finishStartupFailure(ctx, fork, logW, err)
 	}
 	tlog.Info("fork instance ready", "instance", forkName)
 
@@ -537,10 +558,10 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *run
 	// 3. Start a fresh agent session with the fork prompt.
 	// No --resume: the fork gets its own session ID and clean message history.
 	fork.SetState(StateStarting)
-	h, err := r.Sessions.StartSession(ctx, fork, fork.InitialPrompt)
+	h, err := r.Sessions.startSessionWithLog(ctx, fork, fork.InitialPrompt, logW)
 	if err != nil {
-		fork.SetState(StateFailed)
-		return nil, fmt.Errorf("start session on fork: %w", err)
+		startupErr := fmt.Errorf("start session on fork: %w", err)
+		return nil, r.finishStartupFailure(ctx, fork, logW, startupErr)
 	}
 	tlog.Info("fork session running", "instance", forkName)
 	return h, nil
@@ -581,6 +602,7 @@ func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, 
 	if runtimeName == "" {
 		runtimeName = r.Workspace.Runtimes.Runtimes[0].Name()
 	}
+	provisioningLog := &provisioningWriter{ctx: ctx, t: t, logW: logW}
 	opts := &runtime.StartOptions{
 		RuntimeName:       runtimeName,
 		Metadata:          metadata,
@@ -595,7 +617,7 @@ func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, 
 		Mounts:            t.Mounts,
 		MaxCPUs:           t.MaxCPUs,
 		GitHubToken:       resolvedGitHubToken,
-		LogWriter:         &provisioningWriter{ctx: ctx, t: t, logW: logW},
+		LogWriter:         provisioningLog,
 	}
 
 	// Phase A: runtime launch + connection config. Branch creation runs concurrently so
@@ -634,6 +656,9 @@ func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, 
 	}
 	r.Workspace.Log.Debug("workspace", "msg", "waiting for phase A errgroup")
 	if err := eg.Wait(); err != nil {
+		return setupResult{}, errors.Join(err, provisioningLog.Flush())
+	}
+	if err := provisioningLog.Flush(); err != nil {
 		return setupResult{}, err
 	}
 	r.Workspace.Log.Debug("workspace", "msg", "phase A complete", "instance", instanceID)
@@ -643,7 +668,10 @@ func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, 
 	conn, err := r.Workspace.Runtimes.Connect(startCtx, instanceID, opts)
 	if err != nil {
 		r.Workspace.Log.Error("workspace", "msg", "instance.Connect failed", "instance", instanceID, "err", err)
-		return setupResult{}, fmt.Errorf("start instance: %w", err)
+		return setupResult{}, errors.Join(fmt.Errorf("start instance: %w", err), provisioningLog.Flush())
+	}
+	if err := provisioningLog.Flush(); err != nil {
+		return setupResult{}, err
 	}
 	r.Workspace.Log.Info("workspace", "msg", "started", "br", primaryBranch, "dur", time.Since(tContainer), "instance", instanceID, "fqdn", conn.TailscaleFQDN)
 	return setupResult{
@@ -678,8 +706,15 @@ func appendTaskLogMessage(w io.Writer, m agent.Message) error {
 	if err != nil {
 		return err
 	}
-	_, err = w.Write(append(data, '\n'))
-	return err
+	data = append(data, '\n')
+	n, err := w.Write(data)
+	if err != nil {
+		return err
+	}
+	if n != len(data) {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 // logRelayDiag reads the relay daemon's relay.log from the instance and logs
@@ -713,8 +748,9 @@ type provisioningWriter struct {
 	t    *Task
 	logW io.Writer
 
-	mu  sync.Mutex
-	buf []byte
+	mu      sync.Mutex
+	buf     []byte
+	pending []agent.Message
 }
 
 func (w *provisioningWriter) Write(p []byte) (int, error) {
@@ -729,14 +765,52 @@ func (w *provisioningWriter) Write(p []byte) (int, error) {
 		line := strings.TrimSpace(string(w.buf[:i]))
 		w.buf = w.buf[i+1:]
 		if line != "" {
-			m := &agent.LogMessage{MessageType: "caic_log", Line: line}
-			if w.logW != nil {
-				if err := appendTaskLogMessage(w.logW, m); err != nil {
-					return 0, err
-				}
+			if err := w.emitLineLocked(line); err != nil {
+				return len(p), err
 			}
-			w.t.addMessage(w.ctx, m, false)
 		}
 	}
 	return len(p), nil
+}
+
+func (w *provisioningWriter) Flush() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	line := strings.TrimSpace(string(w.buf))
+	if line == "" {
+		w.buf = nil
+		return nil
+	}
+	w.buf = nil
+	return w.emitLineLocked(line)
+}
+
+func (w *provisioningWriter) AttachLogWriter(logW io.Writer) error {
+	if logW == nil {
+		return ErrNoLog
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, m := range w.pending {
+		if err := appendTaskLogMessage(logW, m); err != nil {
+			return err
+		}
+	}
+	w.t.writeEventReplayMessages(w.pending)
+	w.pending = nil
+	w.logW = logW
+	return nil
+}
+
+func (w *provisioningWriter) emitLineLocked(line string) error {
+	m := &agent.LogMessage{MessageType: "caic_log", Line: line}
+	if w.logW != nil {
+		if err := appendTaskLogMessage(w.logW, m); err != nil {
+			return err
+		}
+	} else {
+		w.pending = append(w.pending, m)
+	}
+	w.t.addMessage(w.ctx, m, false)
+	return nil
 }
