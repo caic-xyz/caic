@@ -95,12 +95,13 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if err := agent.DeployEmbeddedDir(ctx, sshHost, pluginFS, agent.WidgetPluginDir); err != nil {
 		return nil, err
 	}
-	// Temporarily disabled; I look at the traces and claude code switches midway authentication when it
-	// receives the key. What a monster.
-	// The only way to fix this is to open claude code while it's running and to manually deny it the use of the
-	// API key.
-	stripAndInject := false && hasOAuth()
-	if stripAndInject {
+	// When Claude Code has an OAuth session, strip ANTHROPIC_API_KEY from the
+	// agent subprocess so it authenticates via the subscription instead of
+	// silently billing API credits. The key is deliberately NOT re-injected
+	// afterward: re-injecting it made Claude Code switch authentication to API
+	// billing mid-session (observed in traces). The tradeoff is that
+	// in-container tools and MCP servers do not receive ANTHROPIC_API_KEY.
+	if hasOAuth() {
 		opts.StripEnv = []string{"ANTHROPIC_API_KEY"}
 	}
 	args := b.AgentArgs(agent.HarnessArgs{Model: opts.Model, Effort: opts.Effort, ResumeSessionID: opts.ResumeSessionID})
@@ -108,10 +109,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if err != nil {
 		return nil, err
 	}
-	var c agent.Conn = &controlConn{Conn: agent.NewConn(rp.Stdin, opts.LogW, b)}
-	if stripAndInject {
-		c = &envInjectorConn{Conn: c}
-	}
+	c := agent.Conn(&controlConn{Conn: agent.NewConn(rp.Stdin, opts.LogW, b)})
 	return agent.StartSession(rp, c, opts)
 }
 
@@ -197,49 +195,6 @@ func (b *Backend) WriteCompact(w io.Writer, instructions string, logW io.Writer)
 		text = "/compact " + instructions
 	}
 	return b.WritePrompt(w, agent.Prompt{Text: text}, logW)
-}
-
-// envInjectorConn wraps a Conn to re-inject environment variables that the
-// relay stripped for OAuth authentication. The relay emits a
-// caic_stripped_env event after the first subprocess output (system/init)
-// which confirms auth succeeded. This conn intercepts the event and
-// immediately sends an InputUpdateEnvVars message so tools and MCP servers
-// can use the key.
-type envInjectorConn struct {
-	agent.Conn
-}
-
-func (c *envInjectorConn) ReadMessages(r io.Reader, msgCh chan<- agent.Message) error {
-	proxy := make(chan agent.Message, 1)
-	errc := make(chan error, 1)
-	go func() {
-		defer close(errc)
-		for m := range proxy {
-			if v, ok := m.(*agent.StrippedEnvMessage); ok {
-				payload, err := json.Marshal(claudecode.InputUpdateEnvVarsMsg{
-					Type:      claudecode.InputUpdateEnvVars,
-					Variables: v.Variables,
-				})
-				if err != nil {
-					errc <- fmt.Errorf("marshal InputUpdateEnvVars: %w", err)
-					return
-				}
-				payload = append(payload, '\n')
-				if err := c.SendRaw(payload); err != nil {
-					errc <- fmt.Errorf("inject stripped env vars: %w", err)
-					return
-				}
-				continue // Don't forward to consumer.
-			}
-			msgCh <- m
-		}
-	}()
-	err := c.Conn.ReadMessages(r, proxy)
-	close(proxy)
-	if injErr := <-errc; injErr != nil {
-		return errors.Join(err, injErr)
-	}
-	return err
 }
 
 // hasOAuth reports whether Claude Code has an OAuth session configured

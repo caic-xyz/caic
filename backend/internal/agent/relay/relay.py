@@ -448,8 +448,8 @@ def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace):
         but does NOT write it to output.jsonl. This keeps the log clean for
         protocols like JSON-RPC where stdin contains handshake/request noise.
       strip_env: List of environment variable names to strip from the
-        subprocess environment. Stripped values are emitted as a
-        caic_stripped_env event after the first subprocess output.
+        subprocess environment. Their names (values redacted) are reported in
+        a caic_stripped_env event after the first subprocess output.
       shutdown_grace: Seconds to wait after SIGINT before escalating to
         SIGTERM, then SIGKILL.
 
@@ -539,12 +539,16 @@ def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace):
     _start_time = time.monotonic()
 
     # Strip requested env vars from the subprocess so it authenticates via
-    # OAuth. Stripped values are emitted as a caic_stripped_env event so the
-    # backend can re-inject them after auth completes.
+    # OAuth (e.g. ANTHROPIC_API_KEY, so Claude Code bills the subscription
+    # instead of API credits). The stripped values are discarded, never
+    # re-injected: re-injecting made Claude Code switch to API billing
+    # mid-session. The caic_stripped_env event reports only the names (values
+    # redacted) so the value never lands in output.jsonl or the task log.
     env = os.environ.copy()
     pending_env = [k for k in strip_env if k in env]
-    stripped_vars = {k: env.pop(k) for k in pending_env}
-    if stripped_vars:
+    for k in pending_env:
+        del env[k]
+    if pending_env:
         logging.info("stripped env vars: %s", pending_env)
 
     # EDITOR=true prevents git commit (and similar) from opening a text editor.
@@ -558,8 +562,9 @@ def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace):
 
     output_file = open(OUTPUT_PATH, "ab", buffering=0)
     env_event = b""
-    if stripped_vars:
-        env_event = (json.dumps({"type": "caic_stripped_env", "variables": stripped_vars}) + "\n").encode()
+    if pending_env:
+        redacted = {k: "" for k in pending_env}
+        env_event = (json.dumps({"type": "caic_stripped_env", "variables": redacted}) + "\n").encode()
     d = _Daemon(None, output_file, work_dir, log_stdin, env_event, cmd_args)
     threading.Thread(target=d.accept_thread, args=(srv,), daemon=True).start()
 

@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -140,68 +142,45 @@ func (f *fakeConn) ReadMessages(_ io.Reader, msgCh chan<- agent.Message) error {
 	return nil
 }
 
-func TestEnvInjectorConn(t *testing.T) {
-	t.Parallel()
-	t.Run("InjectsOnStrippedEnv", func(t *testing.T) {
-		t.Parallel()
-		key := "sk-ant-container-key"
-		inner := &fakeConn{
-			// The relay emits caic_stripped_env after system/init.
-			messages: []agent.Message{
-				&agent.InitMessage{SessionID: "sess-1", Model: "opus"},
-				&agent.StrippedEnvMessage{
-					MessageType: "caic_stripped_env",
-					Variables:   map[string]string{"ANTHROPIC_API_KEY": key},
-				},
-				&agent.TextMessage{Text: "hello"},
-			},
-		}
-		c := &envInjectorConn{Conn: inner}
-
-		msgCh := make(chan agent.Message, 10)
-		_ = c.ReadMessages(nil, msgCh)
-		close(msgCh)
-		var forwarded []agent.Message
-		for m := range msgCh {
-			forwarded = append(forwarded, m)
-		}
-
-		// StrippedEnvMessage must not be forwarded.
-		for _, m := range forwarded {
-			if _, ok := m.(*agent.StrippedEnvMessage); ok {
-				t.Error("StrippedEnvMessage was forwarded to consumer")
-			}
-		}
-
-		// SendRaw must have been called once with the correct key.
-		if len(inner.sent) != 1 {
-			t.Fatalf("SendRaw called %d times, want 1", len(inner.sent))
-		}
-		var got claudecode.InputUpdateEnvVarsMsg
-		if err := json.Unmarshal(bytes.TrimSpace(inner.sent[0]), &got); err != nil {
+// TestHasOAuth uses t.Setenv to point HOME at a temp dir and therefore cannot
+// run in parallel.
+func TestHasOAuth(t *testing.T) {
+	writeClaudeJSON := func(t *testing.T, home, contents string) {
+		if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if got.Variables["ANTHROPIC_API_KEY"] != key {
-			t.Errorf("injected key = %q, want %q", got.Variables["ANTHROPIC_API_KEY"], key)
+		if err := os.WriteFile(filepath.Join(home, ".claude", "claude.json"), []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Run("present", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		writeClaudeJSON(t, home, `{"oauthAccount":{"emailAddress":"x@y.z"}}`)
+		if !hasOAuth() {
+			t.Error("hasOAuth() = false, want true when oauthAccount is present")
 		}
 	})
-
-	t.Run("NoStrippedEnv", func(t *testing.T) {
-		t.Parallel()
-		// When no StrippedEnvMessage arrives, no injection occurs.
-		inner := &fakeConn{
-			messages: []agent.Message{
-				&agent.InitMessage{SessionID: "sess-2", Model: "sonnet"},
-			},
+	t.Run("absent", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		writeClaudeJSON(t, home, `{"numStartups":3}`)
+		if hasOAuth() {
+			t.Error("hasOAuth() = true, want false when oauthAccount is missing")
 		}
-		c := &envInjectorConn{Conn: inner}
-		msgCh := make(chan agent.Message, 10)
-		_ = c.ReadMessages(nil, msgCh)
-		close(msgCh)
-		for range msgCh {
+	})
+	t.Run("noFile", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		if hasOAuth() {
+			t.Error("hasOAuth() = true, want false when claude.json is absent")
 		}
-		if len(inner.sent) != 0 {
-			t.Errorf("SendRaw called %d times, want 0", len(inner.sent))
+	})
+	t.Run("malformed", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		writeClaudeJSON(t, home, `not json`)
+		if hasOAuth() {
+			t.Error("hasOAuth() = true, want false when claude.json is malformed")
 		}
 	})
 }
