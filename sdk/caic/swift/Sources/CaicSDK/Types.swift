@@ -541,10 +541,19 @@ public struct OAuthGrantsResp: Codable {
 public struct RevokeOAuthGrantReq: Codable {
 }
 
+/// ModelCapability describes the configuration choices supported by a harness model.
+public struct ModelCapability: Codable {
+    public let model: String
+    public let effortOptions: [String]
+    public let modes: [String]
+}
+
 /// HarnessInfo is the JSON representation of an available harness.
 public struct HarnessInfo: Codable {
     public let name: String
     public let models: [String]
+    public let effortOptions: [String]
+    public let modelCapabilities: [ModelCapability]
     public let supportsImages: Bool
     public let supportsCompact: Bool
 }

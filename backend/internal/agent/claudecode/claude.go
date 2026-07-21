@@ -70,6 +70,7 @@ func New() *Backend {
 	b.Base = agent.Base{
 		HarnessID:     harness.Claude,
 		ModelList:     []string{"opus", "sonnet", "haiku", "fable"},
+		Efforts:       []string{claudecode.EffortLow, claudecode.EffortMedium, claudecode.EffortHigh, claudecode.EffortXHigh, claudecode.EffortMax},
 		Images:        true,
 		Compact:       true,
 		ContextWindow: 180_000,

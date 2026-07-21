@@ -50,7 +50,17 @@ var (
 func New(cacheDir string, envVars []string) *Backend {
 	b := &Backend{EnvVars: envVars}
 	b.Base = agent.Base{
-		HarnessID:     harness.Codex,
+		HarnessID: harness.Codex,
+		Efforts: []string{
+			string(codex.ReasoningEffortNone),
+			string(codex.ReasoningEffortMinimal),
+			string(codex.ReasoningEffortLow),
+			string(codex.ReasoningEffortMedium),
+			string(codex.ReasoningEffortHigh),
+			string(codex.ReasoningEffortXHigh),
+			string(codex.ReasoningEffortMax),
+			string(codex.ReasoningEffortUltra),
+		},
 		Images:        true,
 		Compact:       true,
 		ContextWindow: 200_000,
@@ -74,6 +84,13 @@ func (b *Backend) Models() []string {
 // SetModels replaces the model list with sorted models. Thread-safe.
 func (b *Backend) SetModels(models []string) {
 	b.setModels(models)
+}
+
+// ModelCapabilities implements agent.Backend.
+func (b *Backend) ModelCapabilities() []agent.ModelCapability {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.Base.ModelCapabilities()
 }
 
 // RecordHandshake performs the codex app-server JSON-RPC handshake

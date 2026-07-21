@@ -5,6 +5,7 @@ package agent
 import (
 	"context"
 	"io"
+	"slices"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -45,6 +46,14 @@ type Backend interface {
 	// SupportsCompact reports whether this backend supports context compaction.
 	SupportsCompact() bool
 
+	// EffortOptions returns the valid thinking-effort levels for this backend.
+	EffortOptions() []string
+
+	// ModelCapabilities returns the supported configuration for each model.
+	// Harnesses that expose model-specific configuration override the Base
+	// implementation with their runtime-discovered capabilities.
+	ModelCapabilities() []ModelCapability
+
 	// AgentArgs returns the CLI arguments for launching this backend's agent
 	// subprocess, including the executable name and all session-specific flags
 	// derived from a. Empty fields in a are treated as "use default".
@@ -57,6 +66,15 @@ type Backend interface {
 	// ContextWindowLimit returns the API prompt token limit for the given model.
 	// The model parameter is the model name reported by the agent at runtime.
 	ContextWindowLimit(model string) int
+}
+
+// ModelCapability describes the configuration choices supported by one model.
+// Values are protocol-agnostic strings because they are persisted in task
+// preferences and sent back to each harness as user selections.
+type ModelCapability struct {
+	Model         string
+	EffortOptions []string
+	Modes         []string
 }
 
 // ModelFetcher is an optional backend capability for discovering available models.
@@ -94,6 +112,7 @@ type RecordHandshaker interface {
 type Base struct {
 	HarnessID     harness.Name
 	ModelList     []string
+	Efforts       []string
 	Images        bool
 	ContextWindow int
 	Compact       bool
@@ -113,6 +132,26 @@ func (b *Base) SupportsImages() bool { return b.Images }
 
 // SupportsCompact implements Backend.
 func (b *Base) SupportsCompact() bool { return b.Compact }
+
+// EffortOptions implements Backend.
+func (b *Base) EffortOptions() []string {
+	if b.Efforts == nil {
+		return []string{}
+	}
+	return b.Efforts
+}
+
+// ModelCapabilities implements Backend.
+func (b *Base) ModelCapabilities() []ModelCapability {
+	capabilities := make([]ModelCapability, 0, len(b.ModelList))
+	for _, model := range b.ModelList {
+		capabilities = append(capabilities, ModelCapability{
+			Model:         model,
+			EffortOptions: slices.Clone(b.Efforts),
+		})
+	}
+	return capabilities
+}
 
 // ContextWindowLimit implements Backend.
 func (b *Base) ContextWindowLimit(string) int { return b.ContextWindow }

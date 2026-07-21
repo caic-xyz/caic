@@ -163,7 +163,7 @@ beforeEach(() => {
     settings: { baseImage: "" },
   } as unknown as PreferencesResp);
   vi.mocked(api.listHarnesses).mockResolvedValue([
-    { name: "claude", models: [], supportsImages: false, supportsCompact: false },
+    { name: "claude", models: [], effortOptions: [], supportsImages: false, supportsCompact: false },
   ] as unknown as HarnessInfo[]);
   vi.mocked(api.getConfig).mockRejectedValue(new Error("no config"));
   vi.mocked(api.getVersion).mockResolvedValue({
@@ -277,8 +277,8 @@ describe("App repo chips: No repository", () => {
       settings: { baseImage: "" },
     } as unknown as PreferencesResp);
     vi.mocked(api.listHarnesses).mockResolvedValue([
-      { name: "claude", models: ["sonnet"], supportsImages: false, supportsCompact: false },
-      { name: "codex", models: ["gpt-5", "gpt-5-mini"], supportsImages: false, supportsCompact: false },
+      { name: "claude", models: ["sonnet"], effortOptions: ["low", "medium", "high", "xhigh", "max"], supportsImages: false, supportsCompact: false },
+      { name: "codex", models: ["gpt-5", "gpt-5-mini"], effortOptions: ["minimal", "low", "medium", "high"], supportsImages: false, supportsCompact: false },
     ] as unknown as HarnessInfo[]);
 
     renderApp();
@@ -316,6 +316,32 @@ describe("App repo chips: No repository", () => {
     expect(effort).toHaveValue("max");
   });
 
+  it("uses effort options reported by the selected harness", async () => {
+    vi.mocked(api.getPreferences).mockResolvedValue({
+      repositories: [{ path: "repos/a" }],
+      harness: "codex",
+      models: { codex: "gpt-5" },
+      efforts: { codex: { "gpt-5": "high" } },
+      settings: { baseImage: "" },
+    } as unknown as PreferencesResp);
+    vi.mocked(api.listHarnesses).mockResolvedValue([
+      {
+        name: "codex",
+        models: ["gpt-5"],
+        effortOptions: ["low"],
+        supportsImages: false,
+        supportsCompact: false,
+      },
+    ] as unknown as HarnessInfo[]);
+
+    renderApp();
+
+    const effort = await screen.findByRole("combobox", { name: "Effort" });
+    expect(effort).toHaveValue("");
+    expect(screen.getByRole("option", { name: "low" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "high" })).not.toBeInTheDocument();
+  });
+
   it("opens the model picker on ArrowDown without navigating tasks", async () => {
     const user = userEvent.setup();
     vi.mocked(api.getPreferences).mockResolvedValue({
@@ -326,7 +352,7 @@ describe("App repo chips: No repository", () => {
       settings: { baseImage: "" },
     } as unknown as PreferencesResp);
     vi.mocked(api.listHarnesses).mockResolvedValue([
-      { name: "codex", models: ["gpt-5"], supportsImages: false, supportsCompact: false },
+      { name: "codex", models: ["gpt-5"], effortOptions: [], supportsImages: false, supportsCompact: false },
     ] as unknown as HarnessInfo[]);
 
     const { history } = renderApp("/");
@@ -518,6 +544,7 @@ describe("App repo chips: No repository", () => {
       {
         name: "pi",
         models: ["openai-codex/gpt-5.5", "openai-codex/gpt-5.6-terra"],
+        effortOptions: [],
         supportsImages: false,
         supportsCompact: false,
       },

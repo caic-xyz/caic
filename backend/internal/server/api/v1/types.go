@@ -46,10 +46,19 @@ const (
 
 // HarnessInfo is the JSON representation of an available harness.
 type HarnessInfo struct {
-	Name            string   `json:"name"`
-	Models          []string `json:"models"`
-	SupportsImages  bool     `json:"supportsImages"`
-	SupportsCompact bool     `json:"supportsCompact"`
+	Name              string            `json:"name"`
+	Models            []string          `json:"models"`
+	EffortOptions     []string          `json:"effortOptions"`
+	ModelCapabilities []ModelCapability `json:"modelCapabilities"`
+	SupportsImages    bool              `json:"supportsImages"`
+	SupportsCompact   bool              `json:"supportsCompact"`
+}
+
+// ModelCapability describes the configuration choices supported by a harness model.
+type ModelCapability struct {
+	Model         string   `json:"model"`
+	EffortOptions []string `json:"effortOptions"`
+	Modes         []string `json:"modes"`
 }
 
 // Platform selects the runtime CPU architecture.

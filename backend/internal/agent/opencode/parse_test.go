@@ -4,6 +4,7 @@ package opencode
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -993,6 +994,16 @@ func assertInitMessage(t *testing.T, input []byte, wantSessionID, wantModel, wan
 
 func TestNew(t *testing.T) {
 	t.Parallel()
+	t.Run("does not invent effort levels before ACP negotiation", func(t *testing.T) {
+		t.Parallel()
+
+		got := New("", nil).EffortOptions()
+		want := []string{}
+		if !slices.Equal(got, want) {
+			t.Fatalf("EffortOptions = %v, want %v", got, want)
+		}
+	})
+
 	t.Run("edit tool display", func(t *testing.T) {
 		t.Parallel()
 

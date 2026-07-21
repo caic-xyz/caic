@@ -56,7 +56,15 @@ var _ agent.ModelFetcher = (*Backend)(nil)
 func New(cacheDir string, envVars []string) *Backend {
 	b := &Backend{EnvVars: envVars}
 	b.Base = agent.Base{
-		HarnessID:     harness.Pi,
+		HarnessID: harness.Pi,
+		Efforts: []string{
+			string(pi.ThinkingOff),
+			string(pi.ThinkingMinimal),
+			string(pi.ThinkingLow),
+			string(pi.ThinkingMedium),
+			string(pi.ThinkingHigh),
+			string(pi.ThinkingXHigh),
+		},
 		Images:        true,
 		Compact:       true,
 		ContextWindow: 200_000,
@@ -82,6 +90,13 @@ func (b *Backend) SetModels(models []string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.ModelList = agent.SortModels(models)
+}
+
+// ModelCapabilities implements agent.Backend.
+func (b *Backend) ModelCapabilities() []agent.ModelCapability {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.Base.ModelCapabilities()
 }
 
 // Start launches a Pi RPC process via the relay daemon. If Pi exits while

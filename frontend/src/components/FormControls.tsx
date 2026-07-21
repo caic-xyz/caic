@@ -2,11 +2,10 @@
 
 import { For, Show, splitProps, type JSX } from "solid-js";
 
-import type { Harness, HarnessInfo } from "@sdk/types.gen";
+import type { HarnessInfo } from "@sdk/types.gen";
 
 import KeyboardArrowDown from "@material-symbols/svg-400/outlined/keyboard_arrow_down.svg?solid";
 
-import { effortOptions } from "../effortOptions";
 import SearchableSelect from "./SearchableSelect";
 import styles from "./FormControls.module.css";
 
@@ -46,7 +45,11 @@ export function HarnessControls(props: {
   const label = (name: string) => `${props.labelPrefix ?? ""}${name}`;
   const modelOptions = () => (props.harnesses.find((h) => h.name === props.harness)?.models ?? [])
     .map((m) => ({ value: m, label: m as JSX.Element, search: m }));
-  const efforts = () => effortOptions(props.harness as Harness);
+  const efforts = () => {
+    const harness = props.harnesses.find((h) => h.name === props.harness);
+    const capability = harness?.modelCapabilities?.find((c) => c.model === props.model);
+    return capability?.effortOptions ?? harness?.effortOptions ?? [];
+  };
   return (
     <>
       <Show when={props.harnesses.length > 1}>

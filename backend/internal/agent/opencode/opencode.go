@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -30,9 +31,10 @@ import (
 type Backend struct {
 	agent.Base
 
-	mu      sync.Mutex
-	cache   *agent.HarnessCache
-	EnvVars []string // KEY=VALUE pairs for FetchModels SSH commands
+	mu           sync.Mutex
+	cache        *agent.HarnessCache
+	EnvVars      []string // KEY=VALUE pairs for FetchModels SSH commands
+	capabilities []agent.ModelCapability
 }
 
 var (
@@ -59,6 +61,7 @@ func New(cacheDir string, envVars []string) *Backend {
 			b.ModelList = agent.SortModels(models)
 		}
 	}
+	b.capabilities = capabilitiesForModels(b.ModelList, "", nil, nil)
 	return b
 }
 
@@ -87,6 +90,28 @@ func (b *Backend) SetModels(models []string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.ModelList = agent.SortModels(models)
+	b.capabilities = capabilitiesForModels(b.ModelList, "", nil, nil)
+}
+
+// EffortOptions implements agent.Backend. OpenCode does not have a universal
+// effort set: ACP reports the choices for the selected model at runtime.
+func (b *Backend) EffortOptions() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, capability := range b.capabilities {
+		if len(capability.EffortOptions) > 0 {
+			return append([]string(nil), capability.EffortOptions...)
+		}
+	}
+	return []string{}
+}
+
+// ModelCapabilities implements agent.Backend using capabilities discovered
+// during the most recent ACP handshake.
+func (b *Backend) ModelCapabilities() []agent.ModelCapability {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return cloneCapabilities(b.capabilities)
 }
 
 // Start launches an OpenCode ACP process via the relay daemon in the given
@@ -138,6 +163,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if len(hs.models) > 0 {
 		b.mu.Lock()
 		b.ModelList = agent.SortModels(hs.models)
+		b.capabilities = cloneCapabilities(hs.capabilities)
 		b.mu.Unlock()
 		if b.cache != nil {
 			b.cache.SetModels(harness.OpenCode, hs.models, agent.APIKeyHash(b.EnvVars))
@@ -421,10 +447,13 @@ func (w *wireFormat) handlePromptResponseLocked(line []byte) ([]agent.Message, e
 
 // handshakeResult bundles everything returned by a successful handshake.
 type handshakeResult struct {
-	wire         *wireFormat
-	models       []string // All available model IDs (current first).
-	currentModel string   // Model ID the session is using.
-	agentVersion string   // Agent version string from initialize.
+	wire          *wireFormat
+	models        []string // All available model IDs (current first).
+	currentModel  string   // Model ID the session is using.
+	agentVersion  string   // Agent version string from initialize.
+	configOptions []opencode.SessionConfigOption
+	modes         []string
+	capabilities  []agent.ModelCapability
 }
 
 // handshake performs the ACP initialize → session/new sequence and returns
@@ -521,44 +550,204 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	if w.sessionID == "" {
 		return nil, errors.New("session response missing sessionId")
 	}
-	// Put the current model first so the frontend shows it as default.
-	res.currentModel = snResult.Models.CurrentModelID
-	if res.currentModel != "" {
-		res.models = append(res.models, res.currentModel)
-	}
-	for _, m := range snResult.Models.AvailableModels {
-		if m.ModelID != "" && m.ModelID != res.currentModel {
-			res.models = append(res.models, m.ModelID)
-		}
-	}
+	res.setModels(snResult.Models)
+	res.modes = modeIDs(snResult.Modes.AvailableModes)
+	res.setConfigOptions(snResult.ConfigOptions)
 
-	// 3. Switch model if the caller requested a specific one.
-	if opts.Model != "" {
-		params, err := marshalParams(opencode.SetSessionModelParams{SessionID: w.sessionID, ModelID: opts.Model})
+	// 3. Select the requested model and effort using ACP configuration options.
+	// Older ACP implementations do not expose configuration options, so model
+	// selection falls back to their legacy session/set_model method. Effort has
+	// no safe fallback: only ACP tells us which values a model supports.
+	model := opts.Model
+	if model == "" {
+		model = res.currentModel
+	}
+	if model != "" && model != res.currentModel {
+		hasModelConfig := res.configOption(opencode.ConfigOptionModel) != nil
+		selected, err := res.setSessionModel(ctx, stdin, stdout, model)
 		if err != nil {
-			return nil, fmt.Errorf("marshal session/set_model params: %w", err)
+			return nil, err
 		}
-		setModelReq := opencode.JSONRPCRequest{
-			JSONRPC: "2.0",
-			ID:      w.allocIDLocked(),
-			Method:  opencode.MethodSessionSetModel,
-			Params:  params,
+		if selected && !hasModelConfig {
+			res.currentModel = model
 		}
-		if err := writeJSON(stdin, setModelReq); err != nil {
-			return nil, fmt.Errorf("write session/set_model: %w", err)
+		if selected {
+			res.refreshCapabilities()
 		}
-		resp, err := readJSONRPCResponse(ctx, stdout)
-		if err != nil {
-			// Log and continue — model switch is best-effort. Older agents
-			// may not support session/set_model.
-			slog.WarnContext(ctx, "opencode: session/set_model failed, using default model", "err", err, "model", opts.Model)
-		} else {
-			_ = resp // success; model has been switched
-			res.currentModel = opts.Model
+	}
+	if opts.Effort != "" {
+		if err := res.setSessionConfigOption(ctx, stdin, stdout, opencode.ConfigOptionEffort, opts.Effort); err != nil {
+			return nil, err
 		}
 	}
 
 	return res, nil
+}
+
+func (res *handshakeResult) setModels(models opencode.ModelsInfo) {
+	res.currentModel = models.CurrentModelID
+	res.models = appendModel(res.models, res.currentModel)
+	for _, model := range models.AvailableModels {
+		res.models = appendModel(res.models, model.ModelID)
+	}
+	res.refreshCapabilities()
+}
+
+func (res *handshakeResult) setConfigOptions(options []opencode.SessionConfigOption) {
+	res.configOptions = options
+	if model := res.configOption(opencode.ConfigOptionModel); model != nil {
+		res.currentModel = model.CurrentValue
+		res.models = nil
+		res.models = appendModel(res.models, res.currentModel)
+		for _, value := range model.Options {
+			res.models = appendModel(res.models, value.Value)
+		}
+	}
+	res.refreshCapabilities()
+}
+
+func (res *handshakeResult) configOption(id opencode.ConfigOptionID) *opencode.SessionConfigOption {
+	for i := range res.configOptions {
+		if res.configOptions[i].ID == id {
+			return &res.configOptions[i]
+		}
+	}
+	return nil
+}
+
+func (res *handshakeResult) setSessionModel(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, model string) (bool, error) {
+	if res.configOption(opencode.ConfigOptionModel) != nil {
+		if err := res.setSessionConfigOption(ctx, stdin, stdout, opencode.ConfigOptionModel, model); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	params, err := marshalParams(opencode.SetSessionModelParams{SessionID: res.wire.sessionID, ModelID: model})
+	if err != nil {
+		return false, fmt.Errorf("marshal session/set_model params: %w", err)
+	}
+	if err := writeJSON(stdin, opencode.JSONRPCRequest{
+		JSONRPC: "2.0", ID: res.wire.allocIDLocked(), Method: opencode.MethodSessionSetModel, Params: params,
+	}); err != nil {
+		return false, fmt.Errorf("write session/set_model: %w", err)
+	}
+	if _, err := readJSONRPCResponse(ctx, stdout); err != nil {
+		slog.WarnContext(ctx, "opencode: session/set_model failed, using default model", "err", err, "model", model)
+		return false, nil
+	}
+	return true, nil
+}
+
+func (res *handshakeResult) setSessionConfigOption(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, id opencode.ConfigOptionID, value string) error {
+	option := res.configOption(id)
+	if option == nil {
+		return fmt.Errorf("opencode ACP does not expose %q for the selected model", id)
+	}
+	if option.Type != opencode.ConfigOptionTypeSelect {
+		return fmt.Errorf("opencode ACP %q option has unsupported type %q", id, option.Type)
+	}
+	if id != opencode.ConfigOptionModel && !hasConfigValue(option.Options, value) {
+		return fmt.Errorf("opencode ACP %q value %q is unavailable", id, value)
+	}
+	params, err := marshalParams(opencode.SetSessionConfigOptionParams{SessionID: res.wire.sessionID, ConfigID: id, Value: value})
+	if err != nil {
+		return fmt.Errorf("marshal session/set_config_option params: %w", err)
+	}
+	if err := writeJSON(stdin, opencode.JSONRPCRequest{
+		JSONRPC: "2.0", ID: res.wire.allocIDLocked(), Method: opencode.MethodSessionSetConfigOption, Params: params,
+	}); err != nil {
+		return fmt.Errorf("write session/set_config_option: %w", err)
+	}
+	resp, err := readJSONRPCResponse(ctx, stdout)
+	if err != nil {
+		return fmt.Errorf("read session/set_config_option response: %w", err)
+	}
+	var result opencode.SetSessionConfigOptionResult
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return fmt.Errorf("parse session/set_config_option response: %w", err)
+	}
+	if len(result.ConfigOptions) == 0 {
+		return errors.New("session/set_config_option response missing configOptions")
+	}
+	res.setConfigOptions(result.ConfigOptions)
+	return nil
+}
+
+func (res *handshakeResult) refreshCapabilities() {
+	var efforts, modes []string
+	if option := res.configOption(opencode.ConfigOptionEffort); option != nil {
+		efforts = configValueIDs(option.Options)
+	}
+	if option := res.configOption(opencode.ConfigOptionMode); option != nil {
+		modes = configValueIDs(option.Options)
+	} else {
+		modes = res.modes
+	}
+	res.capabilities = capabilitiesForModels(res.models, res.currentModel, efforts, modes)
+}
+
+func capabilitiesForModels(models []string, selected string, efforts, modes []string) []agent.ModelCapability {
+	capabilities := make([]agent.ModelCapability, 0, len(models))
+	for _, model := range models {
+		capability := agent.ModelCapability{Model: model}
+		if model == selected {
+			capability.EffortOptions = append([]string(nil), efforts...)
+			capability.Modes = append([]string(nil), modes...)
+		}
+		capabilities = append(capabilities, capability)
+	}
+	return capabilities
+}
+
+func cloneCapabilities(capabilities []agent.ModelCapability) []agent.ModelCapability {
+	cloned := make([]agent.ModelCapability, len(capabilities))
+	for i, capability := range capabilities {
+		cloned[i] = agent.ModelCapability{
+			Model:         capability.Model,
+			EffortOptions: append([]string(nil), capability.EffortOptions...),
+			Modes:         append([]string(nil), capability.Modes...),
+		}
+	}
+	return cloned
+}
+
+func appendModel(models []string, model string) []string {
+	if model == "" {
+		return models
+	}
+	if slices.Contains(models, model) {
+		return models
+	}
+	return append(models, model)
+}
+
+func configValueIDs(values []opencode.ConfigOptionValue) []string {
+	ids := make([]string, 0, len(values))
+	for _, value := range values {
+		if value.Value != "" {
+			ids = append(ids, value.Value)
+		}
+	}
+	return ids
+}
+
+func modeIDs(modes []opencode.ModeInfo) []string {
+	ids := make([]string, 0, len(modes))
+	for _, mode := range modes {
+		if mode.ID != "" {
+			ids = append(ids, mode.ID)
+		}
+	}
+	return ids
+}
+
+func hasConfigValue(values []opencode.ConfigOptionValue, want string) bool {
+	for _, value := range values {
+		if value.Value == want {
+			return true
+		}
+	}
+	return false
 }
 
 // marshalParams marshals v into a json.RawMessage for use as JSONRPCRequest.Params.

@@ -1124,6 +1124,16 @@ func TestParseMessage(t *testing.T) {
 
 func TestNew(t *testing.T) {
 	t.Parallel()
+	t.Run("reports supported effort levels", func(t *testing.T) {
+		t.Parallel()
+
+		got := New().EffortOptions()
+		want := []string{"low", "medium", "high", "xhigh", "max"}
+		if !slices.Equal(got, want) {
+			t.Fatalf("EffortOptions = %v, want %v", got, want)
+		}
+	})
+
 	t.Run("edit tool display", func(t *testing.T) {
 		t.Parallel()
 

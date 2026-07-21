@@ -284,12 +284,35 @@ func (h *serverHandlers) listHarnesses(_ context.Context, _ *api.EmptyReq) (*[]v
 	backends := h.taskMgr.Backends()
 	out := make([]v1.HarnessInfo, 0, len(backends))
 	for h, b := range backends {
-		out = append(out, v1.HarnessInfo{Name: string(h), Models: b.Models(), SupportsImages: b.SupportsImages(), SupportsCompact: b.SupportsCompact()})
+		capabilities := b.ModelCapabilities()
+		modelCapabilities := make([]v1.ModelCapability, 0, len(capabilities))
+		for _, capability := range capabilities {
+			modelCapabilities = append(modelCapabilities, v1.ModelCapability{
+				Model:         capability.Model,
+				EffortOptions: nonNilSlice(capability.EffortOptions),
+				Modes:         nonNilSlice(capability.Modes),
+			})
+		}
+		out = append(out, v1.HarnessInfo{
+			Name:              string(h),
+			Models:            nonNilSlice(b.Models()),
+			EffortOptions:     nonNilSlice(b.EffortOptions()),
+			ModelCapabilities: modelCapabilities,
+			SupportsImages:    b.SupportsImages(),
+			SupportsCompact:   b.SupportsCompact(),
+		})
 	}
 	slices.SortFunc(out, func(a, b v1.HarnessInfo) int {
 		return strings.Compare(a.Name, b.Name)
 	})
 	return &out, nil
+}
+
+func nonNilSlice[T any](values []T) []T {
+	if values == nil {
+		return []T{}
+	}
+	return values
 }
 
 func (h *serverHandlers) listCaches(_ context.Context, _ *api.EmptyReq) (*v1.WellKnownCachesResp, error) {

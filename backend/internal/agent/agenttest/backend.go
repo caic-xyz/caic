@@ -19,6 +19,8 @@ import (
 type FakeBackend struct {
 	HarnessName  harness.Name
 	ModelList    []string
+	Efforts      []string
+	Capabilities []agent.ModelCapability
 	Images       bool
 	Compact      bool
 	ContextLimit int
@@ -60,6 +62,26 @@ func (f *FakeBackend) SupportsImages() bool { return f.Images }
 
 // SupportsCompact implements agent.Backend.
 func (f *FakeBackend) SupportsCompact() bool { return f.Compact }
+
+// EffortOptions implements agent.Backend.
+func (f *FakeBackend) EffortOptions() []string {
+	if f.Efforts == nil {
+		return []string{}
+	}
+	return f.Efforts
+}
+
+// ModelCapabilities implements agent.Backend.
+func (f *FakeBackend) ModelCapabilities() []agent.ModelCapability {
+	if f.Capabilities != nil {
+		return f.Capabilities
+	}
+	capabilities := make([]agent.ModelCapability, 0, len(f.ModelList))
+	for _, model := range f.ModelList {
+		capabilities = append(capabilities, agent.ModelCapability{Model: model, EffortOptions: f.EffortOptions()})
+	}
+	return capabilities
+}
 
 // AgentArgs implements agent.Backend.
 func (f *FakeBackend) AgentArgs(agent.HarnessArgs) []string { return nil }

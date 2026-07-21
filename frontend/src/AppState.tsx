@@ -12,7 +12,6 @@ import { getConfig, getPreferences, updatePreferences, listOAuthGrants, revokeOA
 import type { RepoEntry } from "./components/RepoChipStrip";
 import { useAuth } from "./AuthContext";
 import { confirmTaskAction } from "./components/TaskCard";
-import { effortOptions } from "./effortOptions";
 import { requestNotificationPermission, notifyWaiting, dismissNotification } from "./gomode/notifications";
 import { taskPath, taskIdFromPath, taskPathForTask } from "./taskPath";
 
@@ -259,7 +258,10 @@ function createAppStore() {
     return model && models.includes(model) ? model : "";
   };
   const selectedEffortForModel = (harness: string, model: string) => {
-    const options = effortOptions(harness as Harness);
+    const harnessInfo = harnesses().find((x) => x.name === harness);
+    const options = harnessInfo?.modelCapabilities?.find((capability) => capability.model === model)?.effortOptions
+      ?? harnessInfo?.effortOptions
+      ?? [];
     const effort = getPrefEffort(harness, model);
     return effort && options.includes(effort) ? effort : "";
   };
