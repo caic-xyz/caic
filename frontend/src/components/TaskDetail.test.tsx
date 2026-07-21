@@ -50,7 +50,7 @@ vi.mock("../api", () => ({
 }));
 
 // Import after mocks are set up.
-import TaskDetail, { resetTaskDetailCachesForTest } from "./TaskDetail";
+import TaskDetail from "./TaskDetail";
 import { taskEventStream } from "../api";
 import { HostModeProvider } from "../gomode/HostMode";
 
@@ -108,7 +108,6 @@ describe("TaskDetail", () => {
 
   afterEach(() => {
     navigateMock.mockClear();
-    resetTaskDetailCachesForTest();
   });
 
   it("shows Diff link when diffStat has items", () => {
@@ -310,13 +309,11 @@ function makeManualReadyMock(
 
 describe("SSE connection", () => {
   beforeEach(() => {
-    resetTaskDetailCachesForTest();
     // Fake timers so we can control setTimeout for reconnect delays.
     vi.useFakeTimers();
   });
 
   afterEach(() => {
-    resetTaskDetailCachesForTest();
     vi.useRealTimers();
   });
 
@@ -514,6 +511,26 @@ describe("SSE connection", () => {
     vi.advanceTimersByTime(100);
 
     expect(document.body.textContent).toContain("agent reply");
+  });
+
+  it("renders every live textDelta batch after a follow-up prompt", () => {
+    const created: FakeES[] = [];
+    const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
+    makeSyncReadyMock(created, capturedCb);
+
+    renderTaskDetail();
+
+    if (!capturedCb.value) throw new Error("taskEvents callback not captured");
+    capturedCb.value(resultEvent(1));
+    capturedCb.value({ kind: "userInput", ts: 2, userInput: { text: "follow up" } });
+    capturedCb.value({ kind: "textDelta", ts: 3, textDelta: { text: "first batch" } });
+    vi.advanceTimersByTime(100);
+    expect(document.body.textContent).toContain("first batch");
+
+    capturedCb.value({ kind: "textDelta", ts: 4, textDelta: { text: " then second batch" } });
+    vi.advanceTimersByTime(100);
+
+    expect(document.body.textContent).toContain("first batch then second batch");
   });
 
   it("live ask events render immediately so the user can answer", () => {

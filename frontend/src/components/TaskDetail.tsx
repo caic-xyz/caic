@@ -14,7 +14,7 @@ import { useHostMode } from "../gomode/HostMode";
 import { requestNotificationPermission } from "../gomode/notifications";
 
 import { sendInput as apiSendInput, restartTask as apiRestartTask, compactContext as apiCompactContext, syncTask as apiSyncTask, taskEventStream, getTaskToolInput, botFixPR } from "../api";
-import { groupMessagesInc, resetGroupIncCache, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "../grouping";
+import { IncrementalMessageGrouper, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "../grouping";
 import { formatDuration, formatElapsed, formatTokens, toolCallDetail } from "../formatting";
 import type { ToolCall } from "../grouping";
 import { Marked } from "marked";
@@ -45,10 +45,6 @@ export const detailsOpenState = new Map<string, boolean>();
 // Session keys: "session:<firstEventTs>".
 const expandedTurnsByTask = new Map<string, Set<string>>();
 const expandedSessionsByTask = new Map<string, Set<string>>();
-
-export function resetTaskDetailCachesForTest() {
-  resetGroupIncCache();
-}
 
 interface Props {
   taskId: string;
@@ -300,9 +296,10 @@ export default function TaskDetail(props: Props) {
 
   // Live groups: recomputes on every message. Session boundary events are excluded —
   // they become session headers, not message groups.
+  const messageGrouper = new IncrementalMessageGrouper();
   const currentGroups = createMemo(() => {
     const msgs = messages().slice(splitIdx()).filter((ev) => !isSessionBoundary(ev));
-    return groupMessagesInc(msgs);
+    return messageGrouper.group(msgs);
   });
 
   // Past session items: stable during streaming (only change on turn completion or expansion toggle).
@@ -378,10 +375,10 @@ export default function TaskDetail(props: Props) {
   createEffect(() => {
     const id = props.taskId;
     userScrolledUp = false;
+    messageGrouper.reset();
     setMessages([]);
     setSplitIdx(0);
     setCompletedMsgs([]);
-    resetGroupIncCache();
 
     let es: EventSource | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -478,8 +475,7 @@ export default function TaskDetail(props: Props) {
       es?.close();
       if (timer !== null) clearTimeout(timer);
       pendingEvents = [];
-      // Reset incremental grouping cache on disconnect.
-      resetGroupIncCache();
+      messageGrouper.reset();
     });
   });
 

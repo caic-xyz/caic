@@ -61,12 +61,8 @@ export function isSessionBoundary(ev: EventMessage): boolean {
 
 // Groups consecutive events for cohesive rendering.
 //
-// NOTE: This function is called on the entire current-turn message list on every
-// SSE batch (via currentGroups -> groupMessages). The list grows monotonically between
-// result events, so re-processing all events each time is O(n²) in total across all
-// batches within a turn. For harnesses like pi that emit thousands of thinking_delta
-// events per turn, this dominates CPU during streaming. A future optimisation could
-// cache the mutable group state and only process new events.
+// IncrementalMessageGrouper uses this for cold starts and structural changes,
+// then extends pure streaming-delta batches without regrouping the full turn.
 export function groupMessages(msgs: EventMessage[]): MessageGroup[] {
   const groups: MessageGroup[] = [];
 
@@ -419,103 +415,121 @@ export function groupMessages(msgs: EventMessage[]): MessageGroup[] {
   return merged;
 }
 
-// Incremental wrapper around groupMessages: caches the previous result and
-// only processes new events when they are pure streaming deltas that extend
-// the last group. Falls back to full groupMessages on structural changes
-// (toolUse, toolResult, text, thinking, usage, etc.).
-//
-// For harnesses like pi that emit thousands of thinking_delta / text_delta /
-// toolcall_delta events per turn, this reduces per-frame work from O(n) to O(1).
-//
-// Uses a length-based cache rather than WeakMap because SolidJS signals create
-// a new array on each setMessages call, defeating identity-based caches.
-// Callers must reset _groupIncLen to 0 when the task changes.
-let _groupIncLen = 0;
-let _groupIncResult: MessageGroup[] | null = null;
+// Incremental wrapper around groupMessages. Each instance owns one stream's
+// cache, so concurrently mounted task views cannot affect each other.
+// Pure streaming deltas extend the cached groups; structural events fall back
+// to a full regroup. Updated groups use copy-on-write so Solid can observe each
+// streaming batch through reference changes.
+export class IncrementalMessageGrouper {
+  private previousLength = 0;
+  private result: MessageGroup[] | null = null;
 
-export function resetGroupIncCache(): void {
-  _groupIncLen = 0;
-  _groupIncResult = null;
-}
+  reset(): void {
+    this.previousLength = 0;
+    this.result = null;
+  }
 
-export function groupMessagesInc(msgs: EventMessage[]): MessageGroup[] {
-  if (_groupIncResult && _groupIncLen <= msgs.length) {
-    const newEvents = msgs.slice(_groupIncLen);
-    // Check if all new events are pure streaming deltas that can extend the
-    // last group without structural regrouping.
-    const canExtend = newEvents.length > 0 && newEvents.every((ev) =>
-      ev.kind === "thinkingDelta" || ev.kind === "textDelta" ||
-      ev.kind === "toolOutputDelta" || ev.kind === "widgetDelta",
-    );
-    if (canExtend && _groupIncResult.length > 0) {
-      for (const ev of newEvents) {
-        const lastGroup = _groupIncResult[_groupIncResult.length - 1];
-        if (ev.kind === "thinkingDelta") {
-          if (lastGroup.kind === "action") {
-            lastGroup.events.push(ev);
-          } else {
-            _groupIncResult.push({ kind: "action", events: [ev], toolCalls: [] });
+  group(msgs: EventMessage[]): MessageGroup[] {
+    const previous = this.result;
+    if (previous && this.previousLength <= msgs.length) {
+      const newEvents = msgs.slice(this.previousLength);
+      const canExtend = newEvents.length > 0 && newEvents.every((ev) =>
+        ev.kind === "thinkingDelta" || ev.kind === "textDelta" ||
+        ev.kind === "toolOutputDelta" || ev.kind === "widgetDelta",
+      );
+      if (canExtend && previous.length > 0) {
+        const result = [...previous];
+        const mutableGroup = (index: number): MessageGroup => {
+          const group = result[index];
+          if (group !== previous[index]) return group;
+          const copy = { ...group, events: [...group.events] };
+          result[index] = copy;
+          return copy;
+        };
+        const appendGroup = (group: MessageGroup): void => {
+          const previousGroupIndex = result.length - 1;
+          const previousGroup = result[previousGroupIndex];
+          if (previousGroup.kind === "action" && previousGroup.toolCalls.some((call) => !call.done)) {
+            const mutable = mutableGroup(previousGroupIndex);
+            mutable.toolCalls = mutable.toolCalls.map((call) =>
+              call.done ? call : { ...call, done: true },
+            );
           }
-        } else if (ev.kind === "textDelta") {
-          if (lastGroup.kind === "text") {
-            lastGroup.events.push(ev);
-          } else if (lastGroup.kind === "action" && lastGroup.toolCalls.length === 0) {
-            lastGroup.kind = "text";
-            lastGroup.events.push(ev);
-          } else {
-            _groupIncResult.push({ kind: "text", events: [ev], toolCalls: [] });
-          }
-        } else if (ev.kind === "toolOutputDelta") {
-          const id = ev.toolOutputDelta?.toolUseID;
-          if (id) {
-            let found = false;
-            for (let i = _groupIncResult.length - 1; i >= 0; i--) {
-              const g = _groupIncResult[i];
-              if (g.kind !== "action") continue;
-              if (g.toolCalls.some((c) => c.use.toolUseID === id)) {
-                g.events.push(ev);
-                found = true;
-                break;
+          result.push(group);
+        };
+
+        for (const ev of newEvents) {
+          const lastGroupIndex = result.length - 1;
+          const lastGroup = result[lastGroupIndex];
+          if (ev.kind === "thinkingDelta") {
+            if (lastGroup.kind === "action") {
+              mutableGroup(lastGroupIndex).events.push(ev);
+            } else {
+              appendGroup({ kind: "action", events: [ev], toolCalls: [] });
+            }
+          } else if (ev.kind === "textDelta") {
+            if (lastGroup.kind === "text") {
+              mutableGroup(lastGroupIndex).events.push(ev);
+            } else if (lastGroup.kind === "action" && lastGroup.toolCalls.length === 0) {
+              const group = mutableGroup(lastGroupIndex);
+              group.kind = "text";
+              group.events.push(ev);
+            } else {
+              appendGroup({ kind: "text", events: [ev], toolCalls: [] });
+            }
+          } else if (ev.kind === "toolOutputDelta") {
+            const id = ev.toolOutputDelta?.toolUseID;
+            if (id) {
+              let found = false;
+              for (let i = result.length - 1; i >= 0; i--) {
+                const group = result[i];
+                if (group.kind !== "action") continue;
+                if (group.toolCalls.some((call) => call.use.toolUseID === id)) {
+                  mutableGroup(i).events.push(ev);
+                  found = true;
+                  break;
+                }
               }
+              if (!found) return this.regroup(msgs);
             }
-            if (!found) {
-              // No matching tool group yet — fall back to full reprocess.
-              _groupIncResult = groupMessages(msgs);
-              _groupIncLen = msgs.length;
-              return _groupIncResult;
-            }
-          }
-        } else if (ev.kind === "widgetDelta") {
-          const id = ev.widgetDelta?.toolUseID;
-          if (id) {
-            let found = false;
-            for (let i = _groupIncResult.length - 1; i >= 0; i--) {
-              if (_groupIncResult[i].kind === "widget" && _groupIncResult[i].widgetToolUseID === id) {
-                _groupIncResult[i].events.push(ev);
-                _groupIncResult[i].widgetHTML = (_groupIncResult[i].widgetHTML ?? "") + (ev.widgetDelta?.delta ?? "");
-                found = true;
-                break;
+          } else if (ev.kind === "widgetDelta") {
+            const id = ev.widgetDelta?.toolUseID;
+            if (id) {
+              let found = false;
+              for (let i = result.length - 1; i >= 0; i--) {
+                const group = result[i];
+                if (group.kind === "widget" && group.widgetToolUseID === id) {
+                  const mutable = mutableGroup(i);
+                  mutable.events.push(ev);
+                  mutable.widgetHTML = (mutable.widgetHTML ?? "") + (ev.widgetDelta?.delta ?? "");
+                  found = true;
+                  break;
+                }
               }
-            }
-            if (!found) {
-              _groupIncResult.push({
-                kind: "widget", events: [ev], toolCalls: [],
-                widgetToolUseID: id,
-                widgetHTML: ev.widgetDelta?.delta ?? "",
-                widgetDone: false,
-              });
+              if (!found) {
+                appendGroup({
+                  kind: "widget", events: [ev], toolCalls: [],
+                  widgetToolUseID: id,
+                  widgetHTML: ev.widgetDelta?.delta ?? "",
+                  widgetDone: false,
+                });
+              }
             }
           }
         }
+        this.result = result;
+        this.previousLength = msgs.length;
+        return result;
       }
-      _groupIncLen = msgs.length;
-      return _groupIncResult;
     }
+    return this.regroup(msgs);
   }
-  // Structural change or cold path: full reprocess.
-  _groupIncResult = groupMessages(msgs);
-  _groupIncLen = msgs.length;
-  return _groupIncResult;
+
+  private regroup(msgs: EventMessage[]): MessageGroup[] {
+    this.result = groupMessages(msgs);
+    this.previousLength = msgs.length;
+    return this.result;
+  }
 }
 
 // Splits message groups into turns separated by "result" events.

@@ -4,7 +4,7 @@ import { describe, it, expect } from "vitest";
 
 import type { EventMessage, ISOTimestamp } from "@sdk/types.gen";
 
-import { groupMessages, groupMessagesInc, groupTurns, groupSessions, resetGroupIncCache, turnSummary, buildTurnItems, buildPastSessionItems } from "./grouping";
+import { IncrementalMessageGrouper, groupMessages, groupTurns, groupSessions, turnSummary, buildTurnItems, buildPastSessionItems } from "./grouping";
 
 function toolUseEvent(id: string, name: string): EventMessage {
   return { kind: "toolUse", ts: 0, toolUse: { toolUseID: id, name, input: {} } };
@@ -189,9 +189,9 @@ describe("groupMessages", () => {
       { kind: "thinkingDelta", ts: 1, thinkingDelta: { text: "analyzing" } },
     ] satisfies EventMessage[];
 
-    resetGroupIncCache();
-    groupMessagesInc(toolThenThinking.slice(0, 2));
-    let inc = groupMessagesInc(toolThenThinking);
+    const grouper = new IncrementalMessageGrouper();
+    grouper.group(toolThenThinking.slice(0, 2));
+    let inc = grouper.group(toolThenThinking);
     let full = groupMessages(toolThenThinking);
     expect(inc).toEqual(full);
     expect(inc).toHaveLength(1);
@@ -202,14 +202,55 @@ describe("groupMessages", () => {
       { kind: "textDelta", ts: 2, textDelta: { text: "answer" } },
     ] satisfies EventMessage[];
 
-    resetGroupIncCache();
-    groupMessagesInc(thinkingThenText.slice(0, 1));
-    inc = groupMessagesInc(thinkingThenText);
+    grouper.reset();
+    grouper.group(thinkingThenText.slice(0, 1));
+    inc = grouper.group(thinkingThenText);
     full = groupMessages(thinkingThenText);
     expect(inc).toEqual(full);
     expect(inc).toHaveLength(1);
     expect(inc[0].kind).toBe("text");
     expect(inc[0].events.map((e) => e.kind)).toEqual(["thinkingDelta", "textDelta"]);
+  });
+
+  it("incremental grouping completes tool calls when text starts", () => {
+    const events = [toolUseEvent("t1", "Read"), textDeltaEvent("done")] satisfies EventMessage[];
+    const grouper = new IncrementalMessageGrouper();
+
+    const firstSnapshot = grouper.group(events.slice(0, 1));
+    const updated = grouper.group(events);
+
+    expect(updated).toEqual(groupMessages(events));
+    expect(updated[0].toolCalls[0].done).toBe(true);
+    expect(firstSnapshot[0].toolCalls[0].done).toBe(false);
+  });
+
+  it("incremental grouping completes tool calls when a widget starts", () => {
+    const events = [
+      toolUseEvent("t1", "show_widget"),
+      { kind: "widgetDelta", ts: 1, widgetDelta: { toolUseID: "t1", delta: "<p>done</p>" } },
+    ] satisfies EventMessage[];
+    const grouper = new IncrementalMessageGrouper();
+
+    grouper.group(events.slice(0, 1));
+    const updated = grouper.group(events);
+
+    expect(updated).toEqual(groupMessages(events));
+    expect(updated[0].toolCalls[0].done).toBe(true);
+  });
+
+  it("incremental groupers keep immutable, isolated stream snapshots", () => {
+    const firstGrouper = new IncrementalMessageGrouper();
+    const secondGrouper = new IncrementalMessageGrouper();
+    const firstEvent = textDeltaEvent("first");
+    const firstSnapshot = firstGrouper.group([firstEvent]);
+
+    secondGrouper.group([textDeltaEvent("other stream")]);
+    const updated = firstGrouper.group([firstEvent, textDeltaEvent(" second")]);
+
+    expect(updated).not.toBe(firstSnapshot);
+    expect(updated[0]).not.toBe(firstSnapshot[0]);
+    expect(firstSnapshot[0].events).toEqual([firstEvent]);
+    expect(updated[0].events.map((event) => event.textDelta?.text)).toEqual(["first", " second"]);
   });
 
   it("widgetDelta events create a widget group", () => {
