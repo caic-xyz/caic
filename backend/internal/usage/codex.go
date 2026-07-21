@@ -126,14 +126,14 @@ func (f *CodexFetcher) fetch(ctx context.Context) (*ProviderQuota, error) {
 	if raw.RateLimit != nil {
 		if w := raw.RateLimit.PrimaryWindow; w != nil {
 			out.RateLimits = append(out.RateLimits, QuotaRateLimit{
-				Window:   "5h",
+				Window:   codexWindowLabel(*w, "5h"),
 				UsedPct:  float64(w.UsedPercent),
 				ResetsAt: time.Unix(int64(w.ResetAt), 0).UTC(),
 			})
 		}
 		if w := raw.RateLimit.SecondaryWindow; w != nil {
 			out.RateLimits = append(out.RateLimits, QuotaRateLimit{
-				Window:   "7d",
+				Window:   codexWindowLabel(*w, "7d"),
 				UsedPct:  float64(w.UsedPercent),
 				ResetsAt: time.Unix(int64(w.ResetAt), 0).UTC(),
 			})
@@ -150,6 +150,27 @@ func (f *CodexFetcher) fetch(ctx context.Context) (*ProviderQuota, error) {
 		}
 	}
 	return out, nil
+}
+
+func codexWindowLabel(w codexWindowSnapshot, fallback string) string {
+	const (
+		secondsPerMinute = 60
+		secondsPerHour   = 60 * secondsPerMinute
+		secondsPerDay    = 24 * secondsPerHour
+	)
+	if w.LimitWindowSeconds <= 0 {
+		return fallback
+	}
+	if w.LimitWindowSeconds%secondsPerDay == 0 {
+		return strconv.Itoa(w.LimitWindowSeconds/secondsPerDay) + "d"
+	}
+	if w.LimitWindowSeconds%secondsPerHour == 0 {
+		return strconv.Itoa(w.LimitWindowSeconds/secondsPerHour) + "h"
+	}
+	if w.LimitWindowSeconds%secondsPerMinute == 0 {
+		return strconv.Itoa(w.LimitWindowSeconds/secondsPerMinute) + "m"
+	}
+	return strconv.Itoa(w.LimitWindowSeconds) + "s"
 }
 
 func (f *CodexFetcher) startWatcher(ctx context.Context) error {
