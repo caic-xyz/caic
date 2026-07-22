@@ -526,7 +526,14 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		rateLimiter: rateLimiter,
 		hostState:   d.HostState,
 	}
-	registry := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: svc, ci: s.ciHandlers, usage: s.usageHandlers, audit: audit}
+	registry := &mcpRegistry{
+		serverConfig:  s.serverHandlers,
+		taskSvc:       svc,
+		ci:            s.ciHandlers,
+		usage:         s.usageHandlers,
+		notifications: newNotificationFeed(),
+		audit:         audit,
+	}
 	s.mcpHandlers.protocol = &mcp.Handler{
 		Registry:   registry,
 		ServerInfo: mcp.Implementation{Name: "caic", Title: "caic", Version: autoupdate.Version},

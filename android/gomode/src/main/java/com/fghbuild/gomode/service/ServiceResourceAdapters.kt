@@ -9,20 +9,24 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
+data class ServiceMonitoringPlan(
+    val resourceURI: String,
+    val notificationResourceURI: String? = null,
+    val resourceSubscriptions: List<String> = listOfNotNull(resourceURI, notificationResourceURI),
+    val resourcesListChanged: Boolean = true,
+) {
+    val resourceURIs: List<String>
+        get() = listOfNotNull(resourceURI, notificationResourceURI)
+}
+
 interface ServiceResourceAdapter {
     val service: String
     val apiVersion: Int
 
     fun monitoringPlan(resources: List<ResourceDescriptor>): ServiceMonitoringPlan?
 
-    fun snapshot(readResult: ResourcesReadResult): ServiceMonitoringSnapshot
+    fun snapshot(readResults: Map<String, ResourcesReadResult>): ServiceMonitoringSnapshot
 }
-
-data class ServiceMonitoringPlan(
-    val resourceURI: String,
-    val resourceSubscriptions: List<String> = listOf(resourceURI),
-    val resourcesListChanged: Boolean = true,
-)
 
 data class ServiceMonitoringSnapshot(
     val service: String,
@@ -73,13 +77,17 @@ private object CaicTasksResourceAdapter : ServiceResourceAdapter {
 
     override fun monitoringPlan(resources: List<ResourceDescriptor>): ServiceMonitoringPlan? {
         val resource = resources.firstOrNull { it.uri == CaicTasksResourceURI } ?: return null
-        val mimeType = resource.mimeType
-        if (mimeType != null && mimeType != JsonMimeType) return null
-        return ServiceMonitoringPlan(resourceURI = CaicTasksResourceURI)
+        if (!isJSONResource(resource)) return null
+        val notificationResource = resources.firstOrNull { it.uri == GoModeNotificationsResourceURI }
+        if (notificationResource != null && !isJSONResource(notificationResource)) return null
+        return ServiceMonitoringPlan(
+            resourceURI = CaicTasksResourceURI,
+            notificationResourceURI = notificationResource?.uri,
+        )
     }
 
-    override fun snapshot(readResult: ResourcesReadResult): ServiceMonitoringSnapshot {
-        val text = resourceText(readResult, CaicTasksResourceURI)
+    override fun snapshot(readResults: Map<String, ResourcesReadResult>): ServiceMonitoringSnapshot {
+        val text = resourceText(readResults, CaicTasksResourceURI)
         return ServiceMonitoringSnapshot(
             service = service,
             resourceURI = CaicTasksResourceURI,
@@ -88,7 +96,11 @@ private object CaicTasksResourceAdapter : ServiceResourceAdapter {
     }
 }
 
-private fun resourceText(readResult: ResourcesReadResult, uri: String): String {
+private fun isJSONResource(resource: ResourceDescriptor): Boolean =
+    resource.mimeType == null || resource.mimeType == JsonMimeType
+
+private fun resourceText(readResults: Map<String, ResourcesReadResult>, uri: String): String {
+    val readResult = readResults[uri] ?: throw IllegalArgumentException("resource read result is missing $uri")
     val content = readResult.contents.firstOrNull { it.uri == uri }
         ?: throw IllegalArgumentException("resource read result is missing $uri")
     val mimeType = content.mimeType
@@ -146,5 +158,6 @@ private enum class CaicTaskState(val wireName: String, val needsAttention: Boole
     }
 }
 
+internal const val GoModeNotificationsResourceURI = "gomode://notifications"
 private const val CaicTasksResourceURI = "caic://tasks"
 private const val JsonMimeType = "application/json"

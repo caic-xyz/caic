@@ -46,6 +46,8 @@ import com.fghbuild.gomode.data.SettingsState
 import com.fghbuild.gomode.halo.HaloController
 import com.fghbuild.gomode.sdk.v1.Settings as ServiceSettings
 import com.fghbuild.gomode.service.ServiceMonitor
+import com.fghbuild.gomode.service.ServiceNotification
+import com.fghbuild.gomode.service.ServiceNotificationPublisher
 import com.fghbuild.gomode.service.ServiceSettingsClient
 import com.fghbuild.gomode.service.ServiceSettingsException
 import com.fghbuild.gomode.service.compatibilityError
@@ -97,6 +99,14 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
     }
 
     val snackbarHostState = remember { SnackbarHostState() }
+    val notificationPublisher = remember(context) { ServiceNotificationPublisher(context.applicationContext) }
+    var pendingNotifications by remember { mutableStateOf(emptyList<ServiceNotification>()) }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) pendingNotifications.forEach(notificationPublisher::publish)
+        pendingNotifications = emptyList()
+    }
     val scope = rememberCoroutineScope()
     val voiceSession = remember(settingsRepository) {
         VoiceSession(context.applicationContext, settingsRepository, settingsClient)
@@ -155,6 +165,17 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
 
     LaunchedEffect(serviceMonitorState.notificationText) {
         VoiceService.setServiceNotificationText(serviceMonitorState.notificationText)
+    }
+
+    LaunchedEffect(serviceMonitorState.notifications) {
+        val notifications = serviceMonitorState.notifications
+        if (notifications.isEmpty()) return@LaunchedEffect
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+            notifications.forEach(notificationPublisher::publish)
+        } else {
+            pendingNotifications = notifications
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
     }
 
     LaunchedEffect(serviceMonitorState.error) {

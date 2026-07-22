@@ -105,6 +105,34 @@ class ServiceMonitorTest {
     }
 
     @Test
+    fun `generic service notifications are delivered once`() = runTest {
+        val client = FakeServiceResourceClient().apply {
+            resources = listOf(
+                ResourceDescriptor(uri = "caic://tasks", name = "tasks", mimeType = "application/json"),
+                ResourceDescriptor(uri = GoModeNotificationsResourceURI, name = "notifications", mimeType = "application/json"),
+            )
+            enqueueReadResult("""[{"id":"t1","title":"Build feature","state":"waiting"}]""")
+            enqueueNotificationReadResult("[]")
+            enqueueReadResult("""[{"id":"t1","title":"Build feature","state":"waiting"}]""")
+            enqueueNotificationReadResult("""[{"id":"event-1","title":"Task ready","body":"Build feature needs your input."}]""")
+            enqueueReadResult("""[{"id":"t1","title":"Build feature","state":"waiting"}]""")
+            enqueueNotificationReadResult("""[{"id":"event-1","title":"Task ready","body":"Build feature needs your input."}]""")
+        }
+        val monitor = ServiceMonitor(this) { _, _ -> client }
+
+        monitor.start("https://service.test", caicSettings())
+        advanceUntilIdle()
+        client.emit(resourceUpdated(GoModeNotificationsResourceURI))
+        advanceUntilIdle()
+        assertEquals(listOf("Task ready"), monitor.state.value.notifications.map { it.title })
+
+        client.emit(resourceUpdated(GoModeNotificationsResourceURI))
+        advanceUntilIdle()
+        assertTrue(monitor.state.value.notifications.isEmpty())
+        monitor.stop()
+    }
+
+    @Test
     fun `unsupported resources disable monitoring without subscribing`() = runTest {
         val client = FakeServiceResourceClient().apply {
             resources = listOf(ResourceDescriptor(uri = "caic://usage", name = "usage", mimeType = "application/json"))
@@ -228,6 +256,10 @@ class ServiceMonitorTest {
             readResults.addLast(caicTasksReadResult(text))
         }
 
+        fun enqueueNotificationReadResult(text: String) {
+            readResults.addLast(goModeNotificationsReadResult(text))
+        }
+
         fun emit(notification: JSONRPCNotification) {
             check(subscriptionEvents.tryEmit(notification))
         }
@@ -284,6 +316,19 @@ class ServiceMonitorTest {
             contents = listOf(
                 ResourceContent(
                     uri = "caic://tasks",
+                    mimeType = "application/json",
+                    text = text,
+                ),
+            ),
+            ttlMs = 1000,
+            cacheScope = CacheScope.Private,
+        )
+
+        fun goModeNotificationsReadResult(text: String): ResourcesReadResult = ResourcesReadResult(
+            resultType = ResultType.Complete,
+            contents = listOf(
+                ResourceContent(
+                    uri = GoModeNotificationsResourceURI,
                     mimeType = "application/json",
                     text = text,
                 ),

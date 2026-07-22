@@ -34,14 +34,16 @@ class ServiceResourceAdaptersTest {
     @Test
     fun `caic adapter maps fake tasks without caic dto imports`() {
         val adapter = serviceResourceAdapterFor(service = "caic", apiVersion = 1)
-        val resources = listOf(ResourceDescriptor(uri = "caic://tasks", name = "tasks", mimeType = "application/json"))
+        val resources = listOf(
+            ResourceDescriptor(uri = "caic://tasks", name = "tasks", mimeType = "application/json"),
+            ResourceDescriptor(uri = GoModeNotificationsResourceURI, name = "notifications", mimeType = "application/json"),
+        )
         val plan = adapter?.monitoringPlan(resources)
-
-        val snapshot = adapter?.snapshot(caicTasksReadResult(FAKE_TASKS_JSON))
+        val snapshot = adapter?.snapshot(mapOf("caic://tasks" to caicTasksReadResult(FAKE_TASKS_JSON)))
 
         assertEquals("caic://tasks", plan?.resourceURI)
-        assertEquals(listOf("caic://tasks"), plan?.resourceSubscriptions)
-        assertEquals(true, plan?.resourcesListChanged)
+        assertEquals(GoModeNotificationsResourceURI, plan?.notificationResourceURI)
+        assertEquals(listOf("caic://tasks", GoModeNotificationsResourceURI), plan?.resourceSubscriptions)
         assertEquals(listOf("t1", "t2", "t3"), snapshot?.tasks?.map { it.id })
         assertEquals(listOf("Review plan", "Fix tests"), snapshot?.attentionTasks?.map { it.title })
         assertEquals(2, snapshot?.attentionCount)

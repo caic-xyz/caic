@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ISOTimestamp, ProviderQuota, Task, UsageResp } from "@sdk/types.gen";
 
-import { formatQuotaCountdown, taskQuotaCountdown } from "./quota";
+import { QuotaRecoveryTracker, formatQuotaCountdown, taskQuotaCountdown } from "./quota";
 
 const now = Date.parse("2026-07-08T12:00:00Z");
 
@@ -73,6 +73,63 @@ describe("taskQuotaCountdown", () => {
     ]);
 
     expect(taskQuotaCountdown(makeTask(), usage, now)?.window).toBe("7d");
+  });
+});
+
+describe("QuotaRecoveryTracker", () => {
+  it("notifies once when a waiting quota-blocked task becomes eligible again", () => {
+    const tracker = new QuotaRecoveryTracker();
+    const task = makeTask({ state: "waiting" });
+    const exhausted = makeUsage([
+      makeProvider({ rateLimits: [{ window: "5h", usedPct: 100, resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp }] }),
+    ]);
+    const available = makeUsage([
+      makeProvider({ rateLimits: [{ window: "5h", usedPct: 42, resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp }] }),
+    ]);
+
+    expect(tracker.update([task as Task], exhausted, now)).toEqual([]);
+    expect(tracker.update([task as Task], available, now)).toEqual([task]);
+    expect(tracker.update([task as Task], available, now)).toEqual([]);
+  });
+
+  it("records a task that becomes waiting while its quota is exhausted", () => {
+    const tracker = new QuotaRecoveryTracker();
+    const task = makeTask({ state: "waiting" });
+    const exhausted = makeUsage([
+      makeProvider({ rateLimits: [{ window: "5h", usedPct: 100, resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp }] }),
+    ]);
+    const available = makeUsage([
+      makeProvider({ rateLimits: [{ window: "5h", usedPct: 42, resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp }] }),
+    ]);
+
+    expect(tracker.update([{ ...task, state: "running" } as Task], exhausted, now)).toEqual([]);
+    expect(tracker.update([task as Task], exhausted, now)).toEqual([]);
+    expect(tracker.update([task as Task], available, now)).toEqual([task]);
+  });
+
+  it("does not notify when a task stops waiting before quota recovers", () => {
+    const tracker = new QuotaRecoveryTracker();
+    const task = makeTask({ state: "waiting" });
+    const exhausted = makeUsage([
+      makeProvider({ rateLimits: [{ window: "5h", usedPct: 100, resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp }] }),
+    ]);
+    const available = makeUsage([
+      makeProvider({ rateLimits: [{ window: "5h", usedPct: 42, resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp }] }),
+    ]);
+
+    tracker.update([task as Task], exhausted, now);
+
+    expect(tracker.update([{ ...task, state: "running" } as Task], available, now)).toEqual([]);
+  });
+
+  it("does not notify for a task that was already quota-available", () => {
+    const tracker = new QuotaRecoveryTracker();
+    const task = makeTask({ state: "waiting" });
+    const available = makeUsage([
+      makeProvider({ rateLimits: [{ window: "5h", usedPct: 42, resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp }] }),
+    ]);
+
+    expect(tracker.update([task as Task], available, now)).toEqual([]);
   });
 });
 

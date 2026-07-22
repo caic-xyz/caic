@@ -271,19 +271,22 @@ func TestMCPHandlers(t *testing.T) {
 		}
 	})
 
-	t.Run("subscriptionsListenRejectsUnsupportedResource", func(t *testing.T) {
+	t.Run("subscriptionsListenAcceptsGoModeNotifications", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
-		body := mcpRequestJSON("subscriptions/listen", `"notifications":{"resourceSubscriptions":["caic://usage"]}`)
-		_, resp := postMCP(t, s.mcpHandlers.protocol, "subscriptions/listen", "", body)
-		if resp.Error == nil {
-			t.Fatal("error is nil, want invalid params")
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		body := mcpRequestJSON("subscriptions/listen", `"notifications":{"resourceSubscriptions":["gomode://notifications"]}`)
+		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
+		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
+		req.Header.Set("Mcp-Method", "subscriptions/listen")
+		w := httptest.NewRecorder()
+		s.mcpHandlers.protocol.HandleMCP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
-		if resp.Error.Code != mcp.InvalidParamsCode {
-			t.Fatalf("error code = %d, want %d", resp.Error.Code, mcp.InvalidParamsCode)
-		}
-		if !strings.Contains(resp.Error.Message, "caic://usage") {
-			t.Fatalf("error message = %q, want caic://usage", resp.Error.Message)
+		if !strings.Contains(w.Body.String(), `"uri":"gomode://notifications"`) {
+			t.Fatalf("subscription response = %s, want gomode://notifications update", w.Body.String())
 		}
 	})
 

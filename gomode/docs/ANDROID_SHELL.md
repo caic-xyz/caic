@@ -112,6 +112,19 @@ Adapter rules:
 For caic, the adapter may recognize `caic://tasks` from `resources/list`, read it
 through `resources/read`, and subscribe to it through `subscriptions/listen`.
 
+## Service Notifications
+
+A host may expose `gomode://notifications`, a JSON array of service-authored
+notification events. Each event has a stable `id`, user-visible `title` and
+`body`, plus `occurredAt` and `expiresAt` timestamps. The shell treats these
+fields as untrusted display data, deduplicates by `id`, and publishes them on
+its native alert channel. It does not infer product conditions from task,
+usage, or other product resources.
+
+Hosts update this resource through `notifications/resources/updated`; clients
+re-read it as an invalidation. Hosts own event generation, retention, and
+expiry. The shell owns permission handling and delivery.
+
 ## Voice Session Setup
 
 Voice setup uses the manifest, not product constants:

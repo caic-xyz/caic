@@ -22,6 +22,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	providerusage "github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/oauth"
 )
 
@@ -66,11 +67,12 @@ At session start this prompt includes a snapshot of all current tasks. Use it to
 - For safety issues during sync, describe each issue and ask whether to force.`
 
 type mcpRegistry struct {
-	serverConfig *serverHandlers // required
-	taskSvc      *taskService
-	ci           *ciHandlers
-	usage        *usageHandlers
-	audit        *auditStore
+	serverConfig  *serverHandlers // required
+	taskSvc       *taskService
+	ci            *ciHandlers
+	usage         *usageHandlers
+	notifications *notificationFeed
+	audit         *auditStore
 }
 
 func (m *mcpRegistry) Instructions(ctx context.Context) (string, error) {
@@ -118,6 +120,7 @@ func (m *mcpRegistry) ListResources(ctx context.Context) mcp.ResourcesListResult
 		mcp.ResourceDescriptor{URI: "caic://repos", Name: "repos", Title: "Repositories", Description: "Managed repository summary", MimeType: "application/json"},
 		mcp.ResourceDescriptor{URI: "caic://tasks", Name: "tasks", Title: "Tasks", Description: "Coding task summary", MimeType: "application/json"},
 		mcp.ResourceDescriptor{URI: "caic://usage", Name: "usage", Title: "Usage", Description: "Local and provider usage", MimeType: "application/json"},
+		mcp.ResourceDescriptor{URI: "gomode://notifications", Name: "notifications", Title: "Notifications", Description: "Service notifications for native clients", MimeType: "application/json"},
 	)
 	for i := range repoList {
 		repo := &repoList[i]
@@ -148,6 +151,10 @@ func (m *mcpRegistry) ReadResource(ctx context.Context, uri string) (mcp.Resourc
 		usage := m.usage.buildResp(ctx)
 		m.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
 		return redactedResourceJSON(uri, usage)
+	case uri == "gomode://notifications":
+		notifications := m.notifications.notifications(ctx, taskList, m.usage.buildResp(ctx))
+		m.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
+		return redactedResourceJSON(uri, notifications)
 	case strings.HasPrefix(uri, "caic://repos/"):
 		name, err := url.PathUnescape(strings.TrimPrefix(uri, "caic://repos/"))
 		if err != nil {
@@ -183,6 +190,12 @@ func (m *mcpRegistry) SubscribeResourceUpdates(ctx context.Context, filter mcp.S
 	repoC := sources.repoC
 	repoStatusC := sources.repoStatusC
 	return func(yield func(mcp.ResourceUpdate, error) bool) {
+		var usageC <-chan time.Time
+		if sources.usagePolling {
+			usageTicker := time.NewTicker(providerusage.CacheTTL)
+			defer usageTicker.Stop()
+			usageC = usageTicker.C
+		}
 		for {
 			select {
 			case <-ctx.Done():
@@ -206,8 +219,12 @@ func (m *mcpRegistry) SubscribeResourceUpdates(ctx context.Context, filter mcp.S
 					return
 				}
 				repoStatusC = m.serverConfig.repoStatus.Changed()
+			case <-usageC:
+				if !yield(sources.usageUpdate(), nil) {
+					return
+				}
 			}
-			if taskC == nil && repoC == nil && repoStatusC == nil {
+			if taskC == nil && repoC == nil && repoStatusC == nil && usageC == nil {
 				return
 			}
 		}
@@ -307,6 +324,9 @@ func (m *mcpRegistry) subscriptionSources(filter mcp.SubscriptionFilter) (subscr
 			sources.repoC = m.serverConfig.repoSvc.Changed()
 			sources.repoStatusC = m.serverConfig.repoStatus.Changed()
 			sources.repoResourceURIs = append(sources.repoResourceURIs, uri)
+		case uri == "gomode://notifications":
+			sources.usagePolling = true
+			sources.usageResourceURIs = append(sources.usageResourceURIs, uri)
 		default:
 			return subscriptionSources{}, mcp.ErrInvalidParams("unsupported resource subscription: %s", uri)
 		}
@@ -995,13 +1015,15 @@ func redactedResourceJSON(uri string, value any) (mcp.ResourcesReadResult, error
 }
 
 type subscriptionSources struct {
-	taskC       <-chan struct{}
-	repoC       <-chan struct{}
-	repoStatusC <-chan struct{}
+	taskC        <-chan struct{}
+	repoC        <-chan struct{}
+	repoStatusC  <-chan struct{}
+	usagePolling bool
 
 	resourcesListChanged bool
 	taskResourceURIs     []string
 	repoResourceURIs     []string
+	usageResourceURIs    []string
 }
 
 func (s *subscriptionSources) taskUpdate() mcp.ResourceUpdate {
@@ -1010,4 +1032,8 @@ func (s *subscriptionSources) taskUpdate() mcp.ResourceUpdate {
 
 func (s *subscriptionSources) repoUpdate() mcp.ResourceUpdate {
 	return mcp.ResourceUpdate{ResourcesListChanged: s.resourcesListChanged, ResourceURIs: s.repoResourceURIs}
+}
+
+func (s *subscriptionSources) usageUpdate() mcp.ResourceUpdate {
+	return mcp.ResourceUpdate{ResourcesListChanged: s.resourcesListChanged, ResourceURIs: s.usageResourceURIs}
 }

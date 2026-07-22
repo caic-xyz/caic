@@ -1,4 +1,4 @@
-// ServiceMonitor turns MCP resources into native attention, notification, and voice context state.
+// ServiceMonitor turns MCP resources into native attention, service notification, and voice context state.
 package com.fghbuild.gomode.service
 
 import com.fghbuild.gomode.sdk.v1.Settings
@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
@@ -28,8 +30,15 @@ interface ServiceResourceClient {
     fun listenSubscriptions(notifications: SubscriptionFilter): Flow<JSONRPCNotification>
 }
 
+data class ServiceNotification(
+    val id: String,
+    val title: String,
+    val text: String,
+)
+
 data class ServiceMonitorState(
     val snapshot: ServiceMonitoringSnapshot? = null,
+    val notifications: List<ServiceNotification> = emptyList(),
     val error: String? = null,
 ) {
     val attentionCount: Int
@@ -50,9 +59,11 @@ class ServiceMonitor(
     val state: StateFlow<ServiceMonitorState> = _state.asStateFlow()
 
     private var job: Job? = null
+    internal val observedNotificationIDs = mutableSetOf<String>()
 
     fun start(serviceURL: String, settings: Settings) {
         job?.cancel()
+        observedNotificationIDs.clear()
         _state.value = ServiceMonitorState()
         job = scope.launch {
             run(serviceURL, settings)
@@ -62,6 +73,7 @@ class ServiceMonitor(
     fun stop() {
         job?.cancel()
         job = null
+        observedNotificationIDs.clear()
         _state.value = ServiceMonitorState()
     }
 
@@ -132,10 +144,42 @@ class ServiceMonitor(
         adapter: ServiceResourceAdapter,
         plan: ServiceMonitoringPlan,
     ) {
-        val snapshot = adapter.snapshot(client.readResource(plan.resourceURI))
-        _state.value = ServiceMonitorState(snapshot = snapshot)
+        val readResults = plan.resourceURIs.associateWith { uri -> client.readResource(uri) }
+        val snapshot = adapter.snapshot(readResults)
+        _state.value = ServiceMonitorState(
+            snapshot = snapshot,
+            notifications = serviceNotifications(readResults, plan),
+        )
     }
 }
+
+private fun ServiceMonitor.serviceNotifications(
+    readResults: Map<String, ResourcesReadResult>,
+    plan: ServiceMonitoringPlan,
+): List<ServiceNotification> {
+    val uri = plan.notificationResourceURI ?: return emptyList()
+    val readResult = readResults[uri] ?: throw IllegalArgumentException("resource read result is missing $uri")
+    val content = readResult.contents.firstOrNull { it.uri == uri }
+        ?: throw IllegalArgumentException("resource read result is missing $uri")
+    val text = content.text ?: throw IllegalArgumentException("resource $uri is missing text content")
+    val events = Json.parseToJsonElement(text) as? JsonArray
+        ?: throw IllegalArgumentException("resource $uri must be a JSON array")
+    return events.mapIndexedNotNull { index, element ->
+        val event = element as? JsonObject
+            ?: throw IllegalArgumentException("resource $uri item $index must be an object")
+        val id = event.requiredNotificationString("id", uri, index)
+        if (!observedNotificationIDs.add(id)) return@mapIndexedNotNull null
+        ServiceNotification(
+            id = id,
+            title = event.requiredNotificationString("title", uri, index),
+            text = event.requiredNotificationString("body", uri, index),
+        )
+    }
+}
+
+private fun JsonObject.requiredNotificationString(field: String, uri: String, index: Int): String =
+    this[field]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+        ?: throw IllegalArgumentException("resource $uri item $index is missing $field")
 
 private fun nextRetryDelay(delayMs: Long): Long = (delayMs * 2).coerceAtMost(MaxRetryDelayMs)
 

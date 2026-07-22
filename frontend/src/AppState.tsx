@@ -12,7 +12,8 @@ import { getConfig, getPreferences, updatePreferences, listOAuthGrants, revokeOA
 import type { RepoEntry } from "./components/RepoChipStrip";
 import { useAuth } from "./AuthContext";
 import { confirmTaskAction } from "./components/TaskCard";
-import { requestNotificationPermission, notifyWaiting, dismissNotification } from "./gomode/notifications";
+import { requestNotificationPermission, notifyServiceEvent, notifyWaiting, dismissNotification } from "./gomode/notifications";
+import { QuotaRecoveryTracker } from "./quota";
 import { taskPath, taskIdFromPath, taskPathForTask } from "./taskPath";
 
 /** Add ±25% jitter to a delay to avoid thundering herd on server restart. */
@@ -329,6 +330,7 @@ function createAppStore() {
 
   // Track previous task states to detect transitions to "waiting".
   let prevStates = new Map<string, string>();
+  const quotaRecoveryTracker = new QuotaRecoveryTracker();
 
   const updateWellKnownCacheSizes = (sizes: CacheSize[]) => {
     setWellKnownCacheSizes(Object.fromEntries(sizes.map((size) => [size.name, size])));
@@ -522,11 +524,13 @@ function createAppStore() {
         if (event.kind === "snapshot" && event.snapshot) {
           prevStates = new Map(event.snapshot.map((t) => [t.id, t.state]));
           setTasks(event.snapshot);
+          quotaRecoveryTracker.update(event.snapshot, usage(), Date.now());
         } else if (event.kind === "upsert" && event.upsert) {
           const t = event.upsert;
           checkAndNotify(t);
           prevStates.set(t.id, t.state);
           upsertTask(t);
+          quotaRecoveryTracker.update(tasks(), usage(), Date.now());
         } else if (event.kind === "patch" && event.patch) {
           const patch = event.patch as Record<string, unknown>;
           const id = patch["id"] as string;
@@ -546,12 +550,14 @@ function createAppStore() {
             next[idx] = { ...next[idx], ...patch } as Task;
             return next;
           });
+          quotaRecoveryTracker.update(tasks(), usage(), Date.now());
         } else if (event.kind === "delete" && event.delete) {
           // Authoritative removal: if the deleted task is the one being viewed,
           // leave its now-dead detail route.
           if (event.delete === selectedId()) navigate("/", { replace: true });
           prevStates.delete(event.delete);
           setTasks((prev) => prev.filter((t) => t.id !== event.delete));
+          quotaRecoveryTracker.update(tasks(), usage(), Date.now());
         } else if (event.kind === "repos" && event.repos) {
           const updatedRepos = event.repos;
           setRepos((prev) => {
@@ -595,8 +601,13 @@ function createAppStore() {
     }
 
     function connectUsage() {
+      // eslint-disable-next-line solid/reactivity -- globalUsageEvents is an SSE event handler
       usageES = globalUsageEvents((event) => {
+        const recoveredTasks = quotaRecoveryTracker.update(tasks(), event, Date.now());
         setUsage(event);
+        for (const task of recoveredTasks) {
+          notifyServiceEvent(task.id, `${task.title} quota is available`, { enabled: hostMode.browserNotificationsEnabled() });
+        }
       }, (err) => {
         const msg = err instanceof Error ? err.message : String(err);
         showWarning(`Usage event error: ${msg}`);

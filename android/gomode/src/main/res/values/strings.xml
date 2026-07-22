@@ -1,6 +1,7 @@
 <resources>
     <string name="app_name">Go Mode</string>
     <string name="voice_channel_name">Go Mode Voice</string>
+    <string name="service_alerts_notification_channel">Go Mode alerts</string>
     <string name="voice_notification_title">Go Mode voice active</string>
     <string name="voice_notification_text">Listening for voice commands</string>
 </resources>
