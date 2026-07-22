@@ -90,8 +90,7 @@ func toDTO(err error) error {
 	if err == nil {
 		return nil
 	}
-	var te *taskmgr.Error
-	if errors.As(err, &te) {
+	if te, ok := errors.AsType[*taskmgr.Error](err); ok {
 		// Map every kind via te.Error() so a wrapped cause (e.g. the plan-read
 		// failure on restart, or the compact no-session error) is preserved in
 		// the message. Error() == Msg when there is no wrapped error.
@@ -110,8 +109,7 @@ func toDTO(err error) error {
 			return api.InternalError(te.Error())
 		}
 	}
-	var ews api.ErrorWithStatus
-	if errors.As(err, &ews) {
+	if _, ok := errors.AsType[api.ErrorWithStatus](err); ok {
 		return err
 	}
 	return api.InternalError(err.Error())
@@ -187,14 +185,12 @@ func writeError(w http.ResponseWriter, err error) {
 	code := api.CodeInternalError
 	var details map[string]any
 
-	var ews api.ErrorWithStatus
-	if errors.As(err, &ews) {
+	if ews, ok := errors.AsType[api.ErrorWithStatus](err); ok {
 		statusCode = ews.StatusCode()
 		code = ews.Code()
 		details = ews.Details()
 	}
-	var voiceEWS voiceapi.ErrorWithStatus
-	if errors.As(err, &voiceEWS) {
+	if voiceEWS, ok := errors.AsType[voiceapi.ErrorWithStatus](err); ok {
 		statusCode = voiceEWS.StatusCode()
 		code = api.ErrorCode(voiceEWS.Code())
 		details = voiceEWS.Details()

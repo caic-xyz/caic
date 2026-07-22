@@ -27,9 +27,9 @@ func TestNoSessionError(t *testing.T) {
 		if !errors.Is(e, inner) {
 			t.Error("errors.Is did not find wrapped error")
 		}
-		var ns *NoSessionError
-		if !errors.As(e, &ns) || !errors.Is(ns.Err, inner) {
-			t.Error("errors.As did not extract *NoSessionError")
+		ns, ok := errors.AsType[*NoSessionError](e)
+		if !ok || !errors.Is(ns.Err, inner) {
+			t.Error("errors.AsType did not extract *NoSessionError")
 		}
 	})
 }
@@ -100,9 +100,9 @@ func TestError(t *testing.T) {
 		if !errors.Is(e, inner) {
 			t.Error("errors.Is did not find wrapped error")
 		}
-		var te *Error
-		if !errors.As(error(e), &te) || te.Kind != KindInternal {
-			t.Error("errors.As did not extract *Error with KindInternal")
+		te, ok := errors.AsType[*Error](error(e))
+		if !ok || te.Kind != KindInternal {
+			t.Error("errors.AsType did not extract *Error with KindInternal")
 		}
 	})
 	t.Run("unwrap_nil", func(t *testing.T) {

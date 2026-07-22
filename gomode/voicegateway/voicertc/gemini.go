@@ -293,8 +293,7 @@ func geminiHasSetupComplete(data []byte) bool {
 // close error, stripping the websocket library's internal error chain. Returns
 // the raw error string if the error is not a close frame.
 func geminiCloseReason(err error) string {
-	var ce websocket.CloseError
-	if errors.As(err, &ce) {
+	if ce, ok := errors.AsType[websocket.CloseError](err); ok {
 		if ce.Reason != "" {
 			return ce.Reason
 		}

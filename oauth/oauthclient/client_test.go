@@ -223,8 +223,8 @@ func TestRetrieveError(t *testing.T) {
 		if err == nil {
 			t.Fatal("ExchangeCode succeeded, want error")
 		}
-		var rerr *RetrieveError
-		if !errors.As(err, &rerr) {
+		rerr, ok := errors.AsType[*RetrieveError](err)
+		if !ok {
 			t.Fatalf("error is not *RetrieveError: %T %v", err, err)
 		}
 		if rerr.StatusCode != http.StatusBadRequest {
@@ -265,8 +265,8 @@ func TestRetrieveError(t *testing.T) {
 
 		cfg := oauth.ClientConfig{ClientID: "c", ClientSecret: "s", TokenURL: srv.URL, RedirectURI: "https://app/cb"}
 		_, err := ExchangeCode(t.Context(), cfg, "code-1", "")
-		var rerr *RetrieveError
-		if !errors.As(err, &rerr) {
+		rerr, ok := errors.AsType[*RetrieveError](err)
+		if !ok {
 			t.Fatalf("error is not *RetrieveError: %T %v", err, err)
 		}
 		if rerr.StatusCode != http.StatusInternalServerError {
@@ -325,8 +325,8 @@ func TestExchangeCodeFormEncodedFallback(t *testing.T) {
 		if err == nil {
 			t.Fatal("ExchangeCode succeeded, want error")
 		}
-		var rerr *RetrieveError
-		if !errors.As(err, &rerr) {
+		rerr, ok := errors.AsType[*RetrieveError](err)
+		if !ok {
 			t.Fatalf("error is not *RetrieveError: %T %v", err, err)
 		}
 		if rerr.ErrorCode != "invalid_client" {
@@ -387,8 +387,8 @@ func TestRefreshAccessToken(t *testing.T) {
 
 		cfg := oauth.ClientConfig{ClientID: "c", ClientSecret: "s", TokenURL: srv.URL}
 		_, err := RefreshAccessToken(t.Context(), cfg, "expired-rt")
-		var rerr *RetrieveError
-		if !errors.As(err, &rerr) {
+		rerr, ok := errors.AsType[*RetrieveError](err)
+		if !ok {
 			t.Fatalf("error is not *RetrieveError: %T %v", err, err)
 		}
 		if rerr.ErrorCode != "invalid_grant" {

@@ -408,8 +408,7 @@ func CleanRelayState(ctx context.Context, container string) error {
 func HasRelayDir(ctx context.Context, container string) (bool, error) {
 	cmd := exec.CommandContext(ctx, "ssh", container, "test", "-d", RelayDir) //nolint:gosec // container is not user-controlled
 	if err := cmd.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && exitErr.ExitCode() == 1 {
 			return false, nil
 		}
 		return false, fmt.Errorf("test relay dir: %w", err)
@@ -431,8 +430,7 @@ func RelayStatus(ctx context.Context, container string) (alive bool, detail stri
 	out, err := cmd.CombinedOutput()
 	detail = strings.TrimSpace(string(out))
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() != 0 {
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && exitErr.ExitCode() != 0 {
 			return false, detail, nil
 		}
 		return false, detail, fmt.Errorf("test relay: %w", err)
@@ -779,8 +777,8 @@ func PlainTextWritePrompt(w io.Writer, p Prompt, logW io.Writer) error {
 // isSignalExit reports whether err indicates the process was killed by a
 // signal (e.g. SIGKILL from container purge).
 func isSignalExit(err error) bool {
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) {
+	exitErr, ok := errors.AsType[*exec.ExitError](err)
+	if !ok {
 		return false
 	}
 	// On Unix, ExitCode() returns -1 when the process was killed by a signal.

@@ -286,8 +286,8 @@ func assertBadRequest(t *testing.T, err error, wantMsg string) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	var apiErr *api.Error
-	if !errors.As(err, &apiErr) {
+	apiErr, ok := errors.AsType[*api.Error](err)
+	if !ok {
 		t.Fatalf("expected *api.Error, got %T", err)
 	}
 	if apiErr.StatusCode() != http.StatusBadRequest {

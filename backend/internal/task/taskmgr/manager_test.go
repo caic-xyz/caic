@@ -870,8 +870,8 @@ func TestManager(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error for nonexistent task")
 			}
-			var te *Error
-			if !errors.As(err, &te) || te.Kind != KindNotFound {
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindNotFound {
 				t.Fatalf("err = %v, want KindNotFound", err)
 			}
 		})
@@ -960,8 +960,8 @@ func TestManager(t *testing.T) {
 				if err == nil {
 					t.Fatalf("expected *Error with Kind %v, got nil", c.want)
 				}
-				var te *Error
-				if !errors.As(err, &te) {
+				te, ok := errors.AsType[*Error](err)
+				if !ok {
 					t.Fatalf("error %v is not a *Error", err)
 				}
 				if te.Kind != c.want {
@@ -1105,8 +1105,8 @@ func TestManager(t *testing.T) {
 				Repos:   []CreateRepo{{Name: "ghost"}},
 				Harness: "fake",
 			})
-			var te *Error
-			if !errors.As(err, &te) || te.Kind != KindBadRequest {
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
 			}
 		})
@@ -1118,8 +1118,8 @@ func TestManager(t *testing.T) {
 				Repos:   []CreateRepo{{Name: "my/repo"}},
 				Harness: "fake",
 			})
-			var te *Error
-			if !errors.As(err, &te) || te.Kind != KindBadRequest {
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
 			}
 		})
@@ -1234,8 +1234,8 @@ func TestManager(t *testing.T) {
 				Prompt:     agent.Prompt{Text: "fork"},
 				ExtraRepos: []ForkRepo{{Name: "my/repo"}},
 			})
-			var te *Error
-			if !errors.As(err, &te) || te.Kind != KindBadRequest {
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
 			}
 		})
@@ -1255,8 +1255,8 @@ func TestManager(t *testing.T) {
 			e := NewEntry(src, nil)
 			m.Insert(src.ID.String(), e)
 			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}})
-			var te *Error
-			if !errors.As(err, &te) || te.Kind != KindBadRequest {
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
 			}
 		})
@@ -1274,8 +1274,8 @@ func TestManager(t *testing.T) {
 			e := NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
 			err := m.Restart(t.Context(), e, agent.Prompt{})
-			var te *Error
-			if !errors.As(err, &te) {
+			te, ok := errors.AsType[*Error](err)
+			if !ok {
 				t.Fatalf("err %v is not a *Error", err)
 			}
 			if te.Kind != KindBadRequest {
@@ -1290,8 +1290,8 @@ func TestManager(t *testing.T) {
 			e := NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
 			err := m.Restart(t.Context(), e, agent.Prompt{Text: "go"})
-			var te *Error
-			if !errors.As(err, &te) || te.Kind != KindConflict {
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindConflict {
 				t.Fatalf("err = %v, want KindConflict", err)
 			}
 		})
@@ -1417,8 +1417,8 @@ func TestManager(t *testing.T) {
 			if errors.Is(err, ErrNoSession) {
 				t.Fatalf("errors.Is(err, ErrNoSession) = true, err = %v", err)
 			}
-			var taskErr *Error
-			if !errors.As(err, &taskErr) {
+			taskErr, ok := errors.AsType[*Error](err)
+			if !ok {
 				t.Fatalf("err type = %T, want *Error", err)
 			}
 			if taskErr.Kind != KindConflict {
@@ -1481,8 +1481,8 @@ func TestManager(t *testing.T) {
 			e := NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
 			err := m.ClearContext(t.Context(), e)
-			var te *Error
-			if !errors.As(err, &te) || te.Kind != KindConflict {
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindConflict {
 				t.Fatalf("err = %v, want KindConflict", err)
 			}
 		})
@@ -1494,8 +1494,8 @@ func TestManager(t *testing.T) {
 			e := NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
 			err := m.ClearContext(t.Context(), e)
-			var te *Error
-			if !errors.As(err, &te) || te.Kind != KindInternal {
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindInternal {
 				t.Fatalf("err = %v, want KindInternal", err)
 			}
 		})
@@ -1510,8 +1510,8 @@ func TestManager(t *testing.T) {
 			e := NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
 			err := m.Compact(t.Context(), e, "shorten")
-			var te *Error
-			if !errors.As(err, &te) || te.Kind != KindConflict {
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindConflict {
 				t.Fatalf("err = %v, want KindConflict", err)
 			}
 		})
@@ -2061,8 +2061,8 @@ func TestManager(t *testing.T) {
 			e := NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
 			_, err := m.Sync(t.Context(), e, SyncTargetOrigin, false)
-			var te *Error
-			if !errors.As(err, &te) || te.Kind != KindConflict {
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindConflict {
 				t.Fatalf("err = %v, want KindConflict", err)
 			}
 		})
@@ -2074,8 +2074,8 @@ func TestManager(t *testing.T) {
 			e := NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
 			_, err := m.Sync(t.Context(), e, SyncTargetOrigin, false)
-			var te *Error
-			if !errors.As(err, &te) || te.Kind != KindConflict {
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindConflict {
 				t.Fatalf("err = %v, want KindConflict", err)
 			}
 		})
@@ -2099,8 +2099,8 @@ func TestManager(t *testing.T) {
 			e := NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
 			_, err := m.Sync(t.Context(), e, SyncTargetDefault, true)
-			var te *Error
-			if !errors.As(err, &te) || te.Kind != KindBadRequest {
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
 			}
 		})
@@ -2115,8 +2115,8 @@ func TestManager(t *testing.T) {
 			e := NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
 			err := m.Purge(t.Context(), e)
-			var te *Error
-			if !errors.As(err, &te) || te.Kind != KindConflict {
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindConflict {
 				t.Fatalf("err = %v, want KindConflict", err)
 			}
 		})
@@ -2222,8 +2222,8 @@ func TestManager(t *testing.T) {
 			e := NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
 			err := m.Stop(t.Context(), e)
-			var te *Error
-			if !errors.As(err, &te) || te.Kind != KindConflict {
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindConflict {
 				t.Fatalf("err = %v, want KindConflict", err)
 			}
 		})
@@ -2269,8 +2269,8 @@ func TestManager(t *testing.T) {
 			e := NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
 			err := m.Revive(t.Context(), e)
-			var te *Error
-			if !errors.As(err, &te) || te.Kind != KindConflict {
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindConflict {
 				t.Fatalf("err = %v, want KindConflict", err)
 			}
 		})
@@ -2362,8 +2362,8 @@ func TestManager(t *testing.T) {
 			e := NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
 			err := m.SendInput(t.Context(), e, agent.Prompt{Text: "go", Images: []agent.ImageData{{}}})
-			var te *Error
-			if !errors.As(err, &te) || te.Kind != KindBadRequest {
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
 			}
 		})
@@ -2457,8 +2457,8 @@ func TestManager(t *testing.T) {
 				Repos:   []CreateRepo{{Name: "repo/a"}},
 				Harness: "bogus",
 			})
-			var te *Error
-			if !errors.As(err, &te) || te.Kind != KindBadRequest {
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
 			}
 		})
@@ -2472,8 +2472,8 @@ func TestManager(t *testing.T) {
 				Harness: "fake",
 				Model:   "unsupported-model",
 			})
-			var te *Error
-			if !errors.As(err, &te) || te.Kind != KindBadRequest {
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
 			}
 		})
@@ -2486,8 +2486,8 @@ func TestManager(t *testing.T) {
 				Repos:   []CreateRepo{{Name: "repo/a"}, {Name: "ghost"}},
 				Harness: "fake",
 			})
-			var te *Error
-			if !errors.As(err, &te) || te.Kind != KindBadRequest {
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
 			}
 		})
@@ -2520,8 +2520,8 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m, e := forkSetup(t, "fake", defaultBackends)
 			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}, Harness: "bogus"})
-			var te *Error
-			if !errors.As(err, &te) || te.Kind != KindBadRequest {
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
 			}
 		})
@@ -2529,8 +2529,8 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m, e := forkSetup(t, "fake", defaultBackends)
 			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}, Model: "unsupported"})
-			var te *Error
-			if !errors.As(err, &te) || te.Kind != KindBadRequest {
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
 			}
 		})
@@ -2542,8 +2542,8 @@ func TestManager(t *testing.T) {
 			}
 			m, e := forkSetup(t, "fake", backends)
 			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}, Harness: "fake2", Model: "unsupported"})
-			var te *Error
-			if !errors.As(err, &te) || te.Kind != KindBadRequest {
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
 			}
 		})
@@ -2553,8 +2553,8 @@ func TestManager(t *testing.T) {
 			// Overwrite the instance to empty.
 			e.Task().SetRuntimeConnectionInfo("", runtime.ConnectionTarget{SSHHost: ""}, "", "", 0)
 			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}})
-			var te *Error
-			if !errors.As(err, &te) || te.Kind != KindConflict {
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindConflict {
 				t.Fatalf("err = %v, want KindConflict", err)
 			}
 		})
@@ -2563,8 +2563,8 @@ func TestManager(t *testing.T) {
 			m, e := forkSetup(t, "fake", defaultBackends)
 			e.Task().SetState(task.StateProvisioning)
 			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}})
-			var te *Error
-			if !errors.As(err, &te) || te.Kind != KindConflict {
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindConflict {
 				t.Fatalf("err = %v, want KindConflict", err)
 			}
 		})
@@ -2572,8 +2572,8 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m, e := forkSetup(t, "fake", defaultBackends)
 			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}, ExtraRepos: []ForkRepo{{Name: "ghost"}}})
-			var te *Error
-			if !errors.As(err, &te) || te.Kind != KindBadRequest {
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
 			}
 		})
@@ -2581,8 +2581,8 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m, e := forkSetup(t, "bogus", defaultBackends)
 			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}, Model: "m1"})
-			var te *Error
-			if !errors.As(err, &te) || te.Kind != KindBadRequest {
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
 			}
 		})
@@ -3385,8 +3385,8 @@ func TestErrTaskNotFound(t *testing.T) {
 	})
 	t.Run("kind", func(t *testing.T) {
 		t.Parallel()
-		var te *Error
-		if !errors.As(error(errTaskNotFound), &te) {
+		te, ok := errors.AsType[*Error](error(errTaskNotFound))
+		if !ok {
 			t.Fatal("errTaskNotFound is not a *Error")
 		}
 		if te.Kind != KindNotFound {

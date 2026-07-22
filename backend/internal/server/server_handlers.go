@@ -410,8 +410,8 @@ func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.R
 func (h *serverHandlers) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo, error) {
 	info, err := h.repoSvc.Clone(ctx, repomgr.CloneRequest{URL: req.URL, Path: req.Path, Depth: req.Depth})
 	if err != nil {
-		var repoErr *repomgr.Error
-		if !errors.As(err, &repoErr) {
+		repoErr, ok := errors.AsType[*repomgr.Error](err)
+		if !ok {
 			return nil, api.InternalError(err.Error())
 		}
 		switch repoErr.Kind {

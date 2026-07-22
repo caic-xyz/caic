@@ -38,8 +38,8 @@ func TestToDTO(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				got := toDTO(&taskmgr.Error{Kind: tc.kind, Msg: "boom"})
-				var ews api.ErrorWithStatus
-				if !errors.As(got, &ews) {
+				ews, ok := errors.AsType[api.ErrorWithStatus](got)
+				if !ok {
 					t.Fatalf("toDTO returned %T, want api.ErrorWithStatus", got)
 				}
 				if ews.StatusCode() != tc.wantStatus {
@@ -81,8 +81,8 @@ func TestToDTO(t *testing.T) {
 	t.Run("fallback_plain_error", func(t *testing.T) {
 		t.Parallel()
 		got := toDTO(errors.New("random failure"))
-		var ews api.ErrorWithStatus
-		if !errors.As(got, &ews) {
+		ews, ok := errors.AsType[api.ErrorWithStatus](got)
+		if !ok {
 			t.Fatalf("toDTO returned %T, want api.ErrorWithStatus", got)
 		}
 		if ews.StatusCode() != http.StatusInternalServerError {

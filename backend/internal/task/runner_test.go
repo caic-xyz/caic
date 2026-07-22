@@ -115,8 +115,7 @@ func caic0BranchExists(t *testing.T, dir string) bool {
 	if err == nil {
 		return true
 	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && exitErr.ExitCode() == 1 {
 		return false
 	}
 	t.Fatalf("git rev-parse caic-0: %v", err)
