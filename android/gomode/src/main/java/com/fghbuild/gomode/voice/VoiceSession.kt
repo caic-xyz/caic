@@ -1126,9 +1126,9 @@ internal fun buildNetworkRecoveryContext(
     serviceContext: String,
 ): String {
     val prefix = "Network recovery context. Continue the existing conversation; do not treat this as a new user turn."
-    // Reserve at most one quarter for service/task state, leaving room for the conversation.
+    // Reserve at most one quarter for service state, leaving room for the conversation.
     val service = serviceContext.trim().take(MAX_RECOVERY_CONTEXT_CHARS / 4)
-    val serviceSection = service.takeIf { it.isNotEmpty() }?.let { "\nCurrent service/task context:\n$it" }.orEmpty()
+    val serviceSection = service.takeIf { it.isNotEmpty() }?.let { "\nCurrent service context:\n$it" }.orEmpty()
     val availableTranscriptChars = MAX_RECOVERY_CONTEXT_CHARS - prefix.length - serviceSection.length - 24
     val lines = mutableListOf<String>()
     var lineChars = 0

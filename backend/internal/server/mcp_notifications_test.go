@@ -36,8 +36,8 @@ func TestNotificationFeed(t *testing.T) {
 		}},
 	}}}
 
-	if got := feed.notifications(t.Context(), []v1.Task{task}, blockedUsage); len(got) != 0 {
-		t.Fatalf("initial notifications = %#v, want none", got)
+	if got := feed.notifications(t.Context(), []v1.Task{task}, blockedUsage); got == nil || len(got) != 0 {
+		t.Fatalf("initial notifications = %#v, want empty array", got)
 	}
 	got := feed.notifications(t.Context(), []v1.Task{task}, availableUsage)
 	if len(got) != 1 {

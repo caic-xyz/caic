@@ -59,13 +59,13 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
     }
 
     @Test
-    fun nativeServiceAttentionFollowsMcpResourceUpdates() {
+    fun nativeServiceAttentionFollowsGenericMcpItemUpdates() {
         openWebShell()
         waitForHostedCaicFrontend()
 
         val initialAttentionText = serviceAttentionText()
-        submitAttentionUpdateTask(promptSuffix = "alpha")
-        submitAttentionUpdateTask(promptSuffix = "beta")
+        submitAttentionUpdateItem(promptSuffix = "alpha")
+        submitAttentionUpdateItem(promptSuffix = "beta")
 
         composeRule.waitUntil(GOMODE_LOAD_TIMEOUT_MS) {
             serviceAttentionShowsCountChangedFrom(initialAttentionText)
@@ -130,7 +130,7 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
         assertEquals("com.fghbuild.gomode", context.packageName)
     }
 
-    private fun submitAttentionUpdateTask(promptSuffix: String) {
+    private fun submitAttentionUpdateItem(promptSuffix: String) {
         val prompt = "FAKE_ATTENTION_UPDATE gomode e2e $promptSuffix"
         submitPromptThroughHostedUi(prompt)
         waitForText(ATTENTION_RUNNING_TEXT, GOMODE_LOAD_TIMEOUT_MS)

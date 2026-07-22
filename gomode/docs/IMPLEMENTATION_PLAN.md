@@ -19,13 +19,10 @@ This plan tracks remaining work to converge the codebase on:
   `server/discover`, `tools/list`, and `tools/call`.
 - Android `McpClient` supports `resources/list`, `resources/templates/list`,
   `resources/read`, and POST-based SSE `subscriptions/listen`.
-- Android has a service-resource adapter registry keyed by manifest `service`
-  and `apiVersion`, with caic `caic://tasks` mapping into neutral monitoring
-  snapshots.
-- Android service monitoring feeds caic task-resource snapshots into native
-  attention text, voice session context, and the foreground voice notification;
-  subscription invalidations trigger resource re-reads and monitoring state
-  updates.
+- Android service monitoring consumes the generic `gomode://items` resource
+  for native attention text, voice session context, and the foreground voice
+  notification. Hosts map product state into its item schema; subscription
+  invalidations trigger resource re-reads and monitoring state updates.
 - Backend MCP supports `server/discover`, resources, resource templates, and
   POST-based SSE `subscriptions/listen`.
 - Backend resource subscriptions validate filters, stream task/repo

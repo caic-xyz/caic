@@ -64,7 +64,7 @@ func (f *notificationFeed) notifications(ctx context.Context, tasks []v1.Task, u
 	}
 	f.blockedTaskIDs[owner] = blockedTaskIDs
 	f.events[owner] = recentNotifications(f.events[owner], now)
-	return append([]serviceNotification(nil), f.events[owner]...)
+	return append(make([]serviceNotification, 0, len(f.events[owner])), f.events[owner]...)
 }
 
 func notificationOwner(ctx context.Context) string {

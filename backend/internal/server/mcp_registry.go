@@ -120,6 +120,7 @@ func (m *mcpRegistry) ListResources(ctx context.Context) mcp.ResourcesListResult
 		mcp.ResourceDescriptor{URI: "caic://repos", Name: "repos", Title: "Repositories", Description: "Managed repository summary", MimeType: "application/json"},
 		mcp.ResourceDescriptor{URI: "caic://tasks", Name: "tasks", Title: "Tasks", Description: "Coding task summary", MimeType: "application/json"},
 		mcp.ResourceDescriptor{URI: "caic://usage", Name: "usage", Title: "Usage", Description: "Local and provider usage", MimeType: "application/json"},
+		mcp.ResourceDescriptor{URI: "gomode://items", Name: "items", Title: "Items", Description: "Generic service item status for native clients", MimeType: "application/json"},
 		mcp.ResourceDescriptor{URI: "gomode://notifications", Name: "notifications", Title: "Notifications", Description: "Service notifications for native clients", MimeType: "application/json"},
 	)
 	for i := range repoList {
@@ -151,6 +152,9 @@ func (m *mcpRegistry) ReadResource(ctx context.Context, uri string) (mcp.Resourc
 		usage := m.usage.buildResp(ctx)
 		m.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
 		return redactedResourceJSON(uri, usage)
+	case uri == "gomode://items":
+		m.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
+		return redactedResourceJSON(uri, serviceItems(taskList))
 	case uri == "gomode://notifications":
 		notifications := m.notifications.notifications(ctx, taskList, m.usage.buildResp(ctx))
 		m.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
@@ -324,6 +328,13 @@ func (m *mcpRegistry) subscriptionSources(filter mcp.SubscriptionFilter) (subscr
 			sources.repoC = m.serverConfig.repoSvc.Changed()
 			sources.repoStatusC = m.serverConfig.repoStatus.Changed()
 			sources.repoResourceURIs = append(sources.repoResourceURIs, uri)
+		case uri == "gomode://items":
+			if m.taskSvc != nil && m.taskSvc.taskMgr != nil {
+				sources.taskC = m.taskSvc.taskMgr.Changed()
+				sources.taskResourceURIs = append(sources.taskResourceURIs, uri)
+			} else {
+				return subscriptionSources{}, errors.New("item subscription notifier unavailable")
+			}
 		case uri == "gomode://notifications":
 			sources.usagePolling = true
 			sources.usageResourceURIs = append(sources.usageResourceURIs, uri)
@@ -974,7 +985,7 @@ func (m *mcpRegistry) authorizeTool(ctx context.Context, name string) (string, b
 
 func authorizeResource(ctx context.Context, uri string) (string, bool) {
 	required := mcpScopeRead
-	if uri == "caic://tasks" || strings.HasPrefix(uri, "caic://tasks/") {
+	if uri == "caic://tasks" || strings.HasPrefix(uri, "caic://tasks/") || uri == "gomode://items" {
 		required = mcpScopeTasksRead
 	}
 	if !mcpHasScope(ctx, required) {

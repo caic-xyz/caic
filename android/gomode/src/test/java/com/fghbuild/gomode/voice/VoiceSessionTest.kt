@@ -103,7 +103,7 @@ class VoiceSessionTest {
         )
 
         assertTrue(context.contains("do not treat this as a new user turn"))
-        assertTrue(context.contains("Current service/task context:\nactive service context"))
+        assertTrue(context.contains("Current service context:\nactive service context"))
         assertTrue(context.contains("user: first\nassistant: second"))
         assertFalse(context.contains("partial"))
         assertTrue(context.length <= MAX_RECOVERY_CONTEXT_CHARS)

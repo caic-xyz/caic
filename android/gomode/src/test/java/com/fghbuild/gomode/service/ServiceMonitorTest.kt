@@ -50,13 +50,13 @@ import java.io.IOException
 @OptIn(ExperimentalCoroutinesApi::class)
 class ServiceMonitorTest {
     @Test
-    fun `adapter output updates native attention notification and voice context state`() = runTest {
+    fun `generic items update native attention notification and voice context state`() = runTest {
         val client = FakeServiceResourceClient().apply {
             enqueueReadResult(
                 """
                     [
-                      {"id":"t1","title":"Build feature","state":"running"},
-                      {"id":"t2","title":"Review plan","state":"asking"}
+                      {"id":"i1","title":"Build feature","state":"active","needsAttention":false},
+                      {"id":"i2","title":"Review plan","state":"awaiting input","needsAttention":true}
                     ]
                 """.trimIndent(),
             )
@@ -69,35 +69,35 @@ class ServiceMonitorTest {
             client
         }
 
-        monitor.start("https://service.test/mobile", caicSettings())
+        monitor.start("https://service.test/mobile", serviceSettings())
         advanceUntilIdle()
 
         val state = monitor.state.value
-        assertEquals("https://service.test/api/caic/v1/mcp", endpointURL)
+        assertEquals("https://service.test/api/service/v1/mcp", endpointURL)
         assertEquals("2026-07-28", protocolVersion)
         assertEquals(1, state.attentionCount)
         assertEquals("Review plan needs attention", state.notificationText)
-        assertTrue(state.voiceContext?.contains("Build feature: running") == true)
-        assertTrue(state.voiceContext?.contains("Review plan: asking needs attention") == true)
+        assertTrue(state.voiceContext?.contains("Build feature: active") == true)
+        assertTrue(state.voiceContext?.contains("Review plan: awaiting input needs attention") == true)
         monitor.stop()
     }
 
     @Test
     fun `resource update notifications re-read resources and update state`() = runTest {
         val client = FakeServiceResourceClient().apply {
-            enqueueReadResult("""[{"id":"t1","title":"Build feature","state":"running"}]""")
-            enqueueReadResult("""[{"id":"t2","title":"Fix tests","state":"failed"}]""")
+            enqueueReadResult("""[{"id":"i1","title":"Build feature","state":"active","needsAttention":false}]""")
+            enqueueReadResult("""[{"id":"i2","title":"Fix tests","state":"failed","needsAttention":true,"needsAttention":true}]""")
         }
         val monitor = ServiceMonitor(this) { _, _ -> client }
-        monitor.start("https://service.test", caicSettings())
+        monitor.start("https://service.test", serviceSettings())
         advanceUntilIdle()
 
-        client.emit(resourceUpdated("caic://tasks"))
+        client.emit(resourceUpdated(GoModeItemsResourceURI))
         advanceUntilIdle()
 
-        assertEquals(listOf("caic://tasks", "caic://tasks"), client.readURIs)
+        assertEquals(listOf(GoModeItemsResourceURI, GoModeItemsResourceURI), client.readURIs)
         assertEquals("Fix tests needs attention", monitor.state.value.notificationText)
-        assertEquals(listOf("caic://tasks"), client.subscriptionFilters.single().resourceSubscriptions)
+        assertEquals(listOf(GoModeItemsResourceURI), client.subscriptionFilters.single().resourceSubscriptions)
         assertEquals(true, client.subscriptionFilters.single().resourcesListChanged)
         monitor.stop()
         advanceUntilIdle()
@@ -108,23 +108,23 @@ class ServiceMonitorTest {
     fun `generic service notifications are delivered once`() = runTest {
         val client = FakeServiceResourceClient().apply {
             resources = listOf(
-                ResourceDescriptor(uri = "caic://tasks", name = "tasks", mimeType = "application/json"),
+                ResourceDescriptor(uri = GoModeItemsResourceURI, name = "items", mimeType = "application/json"),
                 ResourceDescriptor(uri = GoModeNotificationsResourceURI, name = "notifications", mimeType = "application/json"),
             )
-            enqueueReadResult("""[{"id":"t1","title":"Build feature","state":"waiting"}]""")
+            enqueueReadResult("""[{"id":"i1","title":"Build feature","state":"awaiting input","needsAttention":true}]""")
             enqueueNotificationReadResult("[]")
-            enqueueReadResult("""[{"id":"t1","title":"Build feature","state":"waiting"}]""")
-            enqueueNotificationReadResult("""[{"id":"event-1","title":"Task ready","body":"Build feature needs your input."}]""")
-            enqueueReadResult("""[{"id":"t1","title":"Build feature","state":"waiting"}]""")
-            enqueueNotificationReadResult("""[{"id":"event-1","title":"Task ready","body":"Build feature needs your input."}]""")
+            enqueueReadResult("""[{"id":"i1","title":"Build feature","state":"awaiting input","needsAttention":true}]""")
+            enqueueNotificationReadResult("""[{"id":"event-1","title":"Item ready","body":"Build feature needs your input."}]""")
+            enqueueReadResult("""[{"id":"i1","title":"Build feature","state":"awaiting input","needsAttention":true}]""")
+            enqueueNotificationReadResult("""[{"id":"event-1","title":"Item ready","body":"Build feature needs your input."}]""")
         }
         val monitor = ServiceMonitor(this) { _, _ -> client }
 
-        monitor.start("https://service.test", caicSettings())
+        monitor.start("https://service.test", serviceSettings())
         advanceUntilIdle()
         client.emit(resourceUpdated(GoModeNotificationsResourceURI))
         advanceUntilIdle()
-        assertEquals(listOf("Task ready"), monitor.state.value.notifications.map { it.title })
+        assertEquals(listOf("Item ready"), monitor.state.value.notifications.map { it.title })
 
         client.emit(resourceUpdated(GoModeNotificationsResourceURI))
         advanceUntilIdle()
@@ -135,11 +135,11 @@ class ServiceMonitorTest {
     @Test
     fun `unsupported resources disable monitoring without subscribing`() = runTest {
         val client = FakeServiceResourceClient().apply {
-            resources = listOf(ResourceDescriptor(uri = "caic://usage", name = "usage", mimeType = "application/json"))
+            resources = listOf(ResourceDescriptor(uri = "service://other", name = "other", mimeType = "application/json"))
         }
         val monitor = ServiceMonitor(this) { _, _ -> client }
 
-        monitor.start("https://service.test", caicSettings())
+        monitor.start("https://service.test", serviceSettings())
         advanceUntilIdle()
 
         assertNull(monitor.state.value.snapshot)
@@ -152,11 +152,11 @@ class ServiceMonitorTest {
     fun `startup failures retry and recover`() = runTest {
         val client = FakeServiceResourceClient().apply {
             listFailuresRemaining = 1
-            enqueueReadResult("""[{"id":"t1","title":"Build feature","state":"running"}]""")
+            enqueueReadResult("""[{"id":"t1","title":"Build feature","state":"active","needsAttention":false}]""")
         }
         val monitor = ServiceMonitor(this) { _, _ -> client }
 
-        monitor.start("https://service.test", caicSettings())
+        monitor.start("https://service.test", serviceSettings())
         runCurrent()
         assertEquals("HTTP 401", monitor.state.value.error)
         assertNull(monitor.state.value.snapshot)
@@ -166,7 +166,7 @@ class ServiceMonitorTest {
 
         assertEquals(2, client.listCalls)
         assertNull(monitor.state.value.error)
-        assertEquals("Build feature", monitor.state.value.snapshot?.tasks?.single()?.title)
+        assertEquals("Build feature", monitor.state.value.snapshot?.items?.single()?.title)
         monitor.stop()
     }
 
@@ -174,12 +174,12 @@ class ServiceMonitorTest {
     fun `closed subscription streams clear stale state and retry`() = runTest {
         val client = FakeServiceResourceClient().apply {
             closeSubscriptionsImmediately = true
-            enqueueReadResult("""[{"id":"t1","title":"Build feature","state":"running"}]""")
-            enqueueReadResult("""[{"id":"t2","title":"Fix tests","state":"failed"}]""")
+            enqueueReadResult("""[{"id":"t1","title":"Build feature","state":"active","needsAttention":false}]""")
+            enqueueReadResult("""[{"id":"t2","title":"Fix tests","state":"failed","needsAttention":true}]""")
         }
         val monitor = ServiceMonitor(this) { _, _ -> client }
 
-        monitor.start("https://service.test", caicSettings())
+        monitor.start("https://service.test", serviceSettings())
         runCurrent()
 
         assertEquals("MCP subscription stream ended", monitor.state.value.error)
@@ -202,7 +202,7 @@ class ServiceMonitorTest {
             override fun dispatch(request: RecordedRequest): MockResponse = when (request.getHeader("Mcp-Method")) {
                 "resources/list" -> jsonResponse(RESOURCES_LIST_JSON)
                 "resources/read" -> {
-                    if (request.getHeader("Mcp-Name") != "caic://tasks") {
+                    if (request.getHeader("Mcp-Name") != "gomode://items") {
                         mcpErrorResponse("Header mismatch: Mcp-Name header is required")
                     } else {
                         jsonResponse(RESOURCE_READ_JSON)
@@ -225,14 +225,14 @@ class ServiceMonitorTest {
             )
         }
         try {
-            monitor.start(server.url("/").toString(), caicSettings(endpoint = "/mcp"))
+            monitor.start(server.url("/").toString(), serviceSettings(endpoint = "/mcp"))
             val state = withTimeout(3000) {
                 monitor.state.filter { it.snapshot != null || it.error != null }.first()
             }
 
             assertNull(state.error)
             assertNotNull(state.snapshot)
-            assertEquals("Build feature", state.snapshot?.tasks?.single()?.title)
+            assertEquals("Build feature", state.snapshot?.items?.single()?.title)
         } finally {
             monitor.stop()
             scope.cancel()
@@ -241,7 +241,7 @@ class ServiceMonitorTest {
     }
 
     private class FakeServiceResourceClient : ServiceResourceClient {
-        var resources = listOf(ResourceDescriptor(uri = "caic://tasks", name = "tasks", mimeType = "application/json"))
+        var resources = listOf(ResourceDescriptor(uri = "gomode://items", name = "service", mimeType = "application/json"))
         val readURIs = mutableListOf<String>()
         val subscriptionFilters = mutableListOf<SubscriptionFilter>()
         var closeSubscriptionsImmediately = false
@@ -253,7 +253,7 @@ class ServiceMonitorTest {
         private val subscriptionEvents = MutableSharedFlow<JSONRPCNotification>(extraBufferCapacity = 8)
 
         fun enqueueReadResult(text: String) {
-            readResults.addLast(caicTasksReadResult(text))
+            readResults.addLast(itemsReadResult(text))
         }
 
         fun enqueueNotificationReadResult(text: String) {
@@ -294,14 +294,14 @@ class ServiceMonitorTest {
     }
 
     private companion object {
-        fun caicSettings(endpoint: String = "/api/caic/v1/mcp"): Settings = Settings(
-            service = "caic",
+        fun serviceSettings(endpoint: String = "/api/service/v1/mcp"): Settings = Settings(
+            service = "example",
             apiVersion = 1,
             webShell = WebShellSettings(
                 bridgeVersion = 1,
                 toolGroups = listOf(
                     ToolGroup(
-                        name = "tasks",
+                        name = "service",
                         endpoint = endpoint,
                         protocolVersion = "2026-07-28",
                         authRequired = false,
@@ -311,11 +311,11 @@ class ServiceMonitorTest {
             ),
         )
 
-        fun caicTasksReadResult(text: String): ResourcesReadResult = ResourcesReadResult(
+        fun itemsReadResult(text: String): ResourcesReadResult = ResourcesReadResult(
             resultType = ResultType.Complete,
             contents = listOf(
                 ResourceContent(
-                    uri = "caic://tasks",
+                    uri = "gomode://items",
                     mimeType = "application/json",
                     text = text,
                 ),
@@ -363,7 +363,7 @@ class ServiceMonitorTest {
               "result": {
                 "resultType": "complete",
                 "resources": [
-                  {"uri": "caic://tasks", "name": "tasks", "mimeType": "application/json"}
+                  {"uri": "gomode://items", "name": "items", "mimeType": "application/json"}
                 ],
                 "ttlMs": 1000,
                 "cacheScope": "private"
@@ -379,7 +379,7 @@ class ServiceMonitorTest {
                 "resultType": "complete",
                 "contents": [
                   {
-                    "uri": "caic://tasks",
+                    "uri": "gomode://items",
                     "mimeType": "application/json",
                     "text": "[{\"id\":\"t1\",\"title\":\"Build feature\",\"state\":\"running\"}]"
                   }
@@ -392,6 +392,6 @@ class ServiceMonitorTest {
 
         const val SUBSCRIPTION_ACK_SSE =
             "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/subscriptions/acknowledged\"," +
-                "\"params\":{\"notifications\":{\"resourceSubscriptions\":[\"caic://tasks\"]}}}\n\n"
+                "\"params\":{\"notifications\":{\"resourceSubscriptions\":[\"gomode://items\"]}}}\n\n"
     }
 }

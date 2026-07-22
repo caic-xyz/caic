@@ -163,7 +163,7 @@ class ServiceSettingsClientTest {
         )
 
         val badSkillURL = settings.copy(
-            webShell = settings.webShell.copy(toolGroups = listOf(group.copy(skillUrl = "skills/tasks/SKILL.md"))),
+            webShell = settings.webShell.copy(toolGroups = listOf(group.copy(skillUrl = "skills/service/SKILL.md"))),
         )
         assertEquals(
             "Service settings field webShell.toolGroups[0].skillUrl must be an absolute URL or absolute path.",
@@ -192,7 +192,7 @@ class ServiceSettingsClientTest {
             bridgeVersion = bridgeVersion,
             toolGroups = listOf(
                 ToolGroup(
-                    name = "tasks",
+                    name = "service",
                     endpoint = "/api/service/v1/mcp",
                     protocolVersion = "2026-07-28",
                     authRequired = true,
@@ -215,7 +215,7 @@ class ServiceSettingsClientTest {
                 "bridgeVersion": 1,
                 "toolGroups": [
                   {
-                    "name": "tasks",
+                    "name": "service",
                     "endpoint": "/api/service/v1/mcp",
                     "protocolVersion": "2026-07-28",
                     "authRequired": true

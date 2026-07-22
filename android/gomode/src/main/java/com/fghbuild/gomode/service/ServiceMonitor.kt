@@ -79,10 +79,6 @@ class ServiceMonitor(
 
     @Suppress("TooGenericExceptionCaught") // Native monitoring must retry transient service and network failures.
     private suspend fun run(serviceURL: String, settings: Settings) {
-        val adapter = serviceResourceAdapterFor(settings.service, settings.apiVersion) ?: run {
-            _state.value = ServiceMonitorState()
-            return
-        }
         val group = settings.webShell.toolGroups.firstOrNull() ?: run {
             _state.value = ServiceMonitorState()
             return
@@ -92,7 +88,7 @@ class ServiceMonitor(
         var retryDelayMs = InitialRetryDelayMs
         while (true) {
             try {
-                when (monitorOnce(client, adapter)) {
+                when (monitorOnce(client)) {
                     MonitorRunResult.Disabled,
                     MonitorRunResult.Static -> return
                     MonitorRunResult.Retry -> {
@@ -111,41 +107,34 @@ class ServiceMonitor(
         }
     }
 
-    private suspend fun monitorOnce(
-        client: ServiceResourceClient,
-        adapter: ServiceResourceAdapter,
-    ): MonitorRunResult {
-        var plan = refreshPlan(client, adapter) ?: return MonitorRunResult.Disabled
+    private suspend fun monitorOnce(client: ServiceResourceClient): MonitorRunResult {
+        var plan = refreshPlan(client) ?: return MonitorRunResult.Disabled
         val notifications = subscriptionFilter(plan) ?: return MonitorRunResult.Static
         client.listenSubscriptions(notifications).collect { notification ->
             when {
-                notification.invalidatesResource(plan) -> refreshSnapshot(client, adapter, plan)
-                notification.invalidatesResourceList(plan) -> plan = refreshPlan(client, adapter) ?: return@collect
+                notification.invalidatesResource(plan) -> refreshSnapshot(client, plan)
+                notification.invalidatesResourceList(plan) -> plan = refreshPlan(client) ?: return@collect
             }
         }
         return MonitorRunResult.Retry
     }
 
-    private suspend fun refreshPlan(
-        client: ServiceResourceClient,
-        adapter: ServiceResourceAdapter,
-    ): ServiceMonitoringPlan? {
-        val plan = adapter.monitoringPlan(client.listResources())
+    private suspend fun refreshPlan(client: ServiceResourceClient): ServiceMonitoringPlan? {
+        val plan = serviceMonitoringPlan(client.listResources())
         if (plan == null) {
             _state.value = ServiceMonitorState()
             return null
         }
-        refreshSnapshot(client, adapter, plan)
+        refreshSnapshot(client, plan)
         return plan
     }
 
     private suspend fun refreshSnapshot(
         client: ServiceResourceClient,
-        adapter: ServiceResourceAdapter,
         plan: ServiceMonitoringPlan,
     ) {
         val readResults = plan.resourceURIs.associateWith { uri -> client.readResource(uri) }
-        val snapshot = adapter.snapshot(readResults)
+        val snapshot = serviceMonitoringSnapshot(readResults, plan)
         _state.value = ServiceMonitorState(
             snapshot = snapshot,
             notifications = serviceNotifications(readResults, plan),

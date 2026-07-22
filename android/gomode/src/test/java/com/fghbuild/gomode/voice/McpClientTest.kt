@@ -59,7 +59,7 @@ class McpClientTest {
 
             val resources = client.listResources()
 
-            assertEquals(listOf("caic://tasks", "caic://usage"), resources.map { it.uri })
+            assertEquals(listOf("service://items", "service://usage"), resources.map { it.uri })
             val firstRequest = server.takeRequest()
             val firstBody = Json.parseToJsonElement(firstRequest.body.readUtf8()).jsonObject
             assertEquals("/mcp", firstRequest.path)
@@ -90,7 +90,7 @@ class McpClientTest {
 
             val templates = client.listResourceTemplates()
 
-            assertEquals(listOf("task"), templates.map { it.name })
+            assertEquals(listOf("item"), templates.map { it.name })
             val request = server.takeRequest()
             val body = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
             assertEquals("resources/templates/list", request.getHeader("Mcp-Method"))
@@ -112,15 +112,15 @@ class McpClientTest {
                 cookieProvider = { null },
             )
 
-            val result = client.readResource("caic://tasks")
+            val result = client.readResource("service://items")
 
             assertEquals("[]", result.contents.single().text)
             val request = server.takeRequest()
             val body = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
             assertEquals("resources/read", request.getHeader("Mcp-Method"))
-            assertEquals("caic://tasks", request.getHeader("Mcp-Name"))
+            assertEquals("service://items", request.getHeader("Mcp-Name"))
             assertEquals("resources/read", body["method"]?.jsonPrimitive?.content)
-            assertEquals("caic://tasks", body["params"]?.jsonObject?.get("uri")?.jsonPrimitive?.content)
+            assertEquals("service://items", body["params"]?.jsonObject?.get("uri")?.jsonPrimitive?.content)
         } finally {
             server.shutdown()
         }
@@ -144,7 +144,7 @@ class McpClientTest {
             )
 
             val events = client.listenSubscriptions(
-                SubscriptionFilter(resourceSubscriptions = listOf("caic://tasks")),
+                SubscriptionFilter(resourceSubscriptions = listOf("service://items")),
             ).take(2).toList()
 
             assertEquals(NotificationMethod.SubscriptionsAcknowledged, events[0].method)
@@ -162,7 +162,7 @@ class McpClientTest {
             assertEquals("text/event-stream", request.getHeader("Accept"))
             assertEquals("subscriptions/listen", request.getHeader("Mcp-Method"))
             assertEquals("subscriptions/listen", body["method"]?.jsonPrimitive?.content)
-            assertEquals(listOf("caic://tasks"), resourceSubscriptions)
+            assertEquals(listOf("service://items"), resourceSubscriptions)
         } finally {
             server.shutdown()
         }
@@ -193,7 +193,7 @@ class McpClientTest {
                 "resultType": "complete",
                 "nextCursor": "next",
                 "resources": [
-                  {"uri": "caic://tasks", "name": "tasks", "mimeType": "application/json"}
+                  {"uri": "service://items", "name": "items", "mimeType": "application/json"}
                 ],
                 "ttlMs": 1000,
                 "cacheScope": "private"
@@ -208,7 +208,7 @@ class McpClientTest {
               "result": {
                 "resultType": "complete",
                 "resources": [
-                  {"uri": "caic://usage", "name": "usage", "mimeType": "application/json"}
+                  {"uri": "service://usage", "name": "usage", "mimeType": "application/json"}
                 ],
                 "ttlMs": 1000,
                 "cacheScope": "private"
@@ -223,7 +223,7 @@ class McpClientTest {
               "result": {
                 "resultType": "complete",
                 "resourceTemplates": [
-                  {"name": "task", "uriTemplate": "caic://tasks/{id}", "mimeType": "application/json"}
+                  {"name": "item", "uriTemplate": "service://items/{id}", "mimeType": "application/json"}
                 ],
                 "ttlMs": 1000,
                 "cacheScope": "private"
@@ -238,7 +238,7 @@ class McpClientTest {
               "result": {
                 "resultType": "complete",
                 "contents": [
-                  {"uri": "caic://tasks", "mimeType": "application/json", "text": "[]"}
+                  {"uri": "service://items", "mimeType": "application/json", "text": "[]"}
                 ],
                 "ttlMs": 1000,
                 "cacheScope": "private"
@@ -248,8 +248,8 @@ class McpClientTest {
 
         const val SUBSCRIPTION_SSE =
             "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/subscriptions/acknowledged\"," +
-                "\"params\":{\"notifications\":{\"resourceSubscriptions\":[\"caic://tasks\"]}}}\n\n" +
+                "\"params\":{\"notifications\":{\"resourceSubscriptions\":[\"service://items\"]}}}\n\n" +
                 "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/resources/updated\"," +
-                "\"params\":{\"uri\":\"caic://tasks\"}}\n\n"
+                "\"params\":{\"uri\":\"service://items\"}}\n\n"
     }
 }
