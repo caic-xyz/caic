@@ -532,14 +532,19 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("SystemNoiseDropped", func(t *testing.T) {
 		t.Parallel()
-		for _, subtype := range []string{"status", "task_progress", "turn_duration"} {
-			line := `{"type":"system","subtype":"` + subtype + `","session_id":"s1","uuid":"u1"}`
+		lines := []string{
+			`{"type":"system","subtype":"status","session_id":"s1","uuid":"u1"}`,
+			`{"type":"system","subtype":"task_progress","session_id":"s1","uuid":"u1"}`,
+			`{"type":"system","subtype":"turn_duration","session_id":"s1","uuid":"u1"}`,
+			`{"type":"system","subtype":"commands_changed","commands":[{"name":"widget","description":"Render widgets","argumentHint":"","aliases":["caic-widget:widget"]}],"session_id":"s1","uuid":"u1"}`,
+		}
+		for _, line := range lines {
 			msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 			if err != nil {
-				t.Fatalf("subtype %q: %v", subtype, err)
+				t.Fatalf("line %s: %v", line, err)
 			}
 			if len(msgs) != 0 {
-				t.Errorf("subtype %q: got %d messages, want 0", subtype, len(msgs))
+				t.Errorf("line %s: got %d messages, want 0", line, len(msgs))
 			}
 		}
 	})

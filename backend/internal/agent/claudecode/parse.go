@@ -198,7 +198,7 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker, fw *jsonutil.FieldW
 		usage.ReasoningOutputTokens = resultThinkingTokens(line)
 		return []agent.Message{&agent.ResultMessage{
 			MessageType:   string(w.Type),
-			Subtype:       w.Subtype,
+			Subtype:       string(w.Subtype),
 			IsError:       w.IsError,
 			DurationMs:    w.Duration.AsDuration().Milliseconds(),
 			DurationAPIMs: w.DurationAPI.AsDuration().Milliseconds(),
@@ -217,9 +217,9 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker, fw *jsonutil.FieldW
 			return nil, err
 		}
 		return []agent.Message{&agent.RateLimitMessage{
-			Status:          w.RateLimitInfo.Status,
+			Status:          string(w.RateLimitInfo.Status),
 			ResetsAt:        w.RateLimitInfo.ResetsAt,
-			RateLimitType:   w.RateLimitInfo.RateLimitType,
+			RateLimitType:   string(w.RateLimitInfo.RateLimitType),
 			Utilization:     w.RateLimitInfo.Utilization,
 			IsUsingOverage:  w.RateLimitInfo.IsUsingOverage,
 			OverageResetsAt: w.RateLimitInfo.OverageResetsAt,
@@ -336,7 +336,7 @@ func parseSystem(line []byte, subtype string, fw *jsonutil.FieldWarner) ([]agent
 			TaskID: w.TaskID,
 			Status: w.Status,
 		}}, nil
-	case claudecode.SystemStatus, claudecode.SystemTaskProgress, "turn_duration":
+	case claudecode.SystemStatus, claudecode.SystemTaskProgress, claudecode.SystemCommandsChanged, claudecode.SystemTurnDuration:
 		return nil, nil
 	default:
 		return []agent.Message{&agent.SystemMessage{
