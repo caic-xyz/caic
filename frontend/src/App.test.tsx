@@ -198,7 +198,7 @@ describe("App repo chips: No repository", () => {
     const running = makeTask({ id: "a2", title: "running next", state: "running", repos: [{ name: "repos/a", branch: "main" }] });
     const asking = makeTask({ id: "a1", title: "asking next", state: "asking", repos: [{ name: "repos/a", branch: "main" }] });
     vi.mocked(api.getTask).mockResolvedValue(killed);
-    vi.mocked(api.purgeTask).mockResolvedValue(undefined);
+    vi.mocked(api.purgeTask).mockResolvedValue({ status: "ok" });
     const { history } = renderApp("/task/@a3+kill-me");
 
     await waitForTaskEventsSubscription();
@@ -217,7 +217,7 @@ describe("App repo chips: No repository", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     const killed = makeTask({ id: "a3", title: "kill me", state: "running", repos: [{ name: "repos/a", branch: "main" }] });
     vi.mocked(api.getTask).mockResolvedValue(killed);
-    vi.mocked(api.purgeTask).mockResolvedValue(undefined);
+    vi.mocked(api.purgeTask).mockResolvedValue({ status: "ok" });
     const { history } = renderApp("/task/@a3+kill-me");
 
     await waitForTaskEventsSubscription();

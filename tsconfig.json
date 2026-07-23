@@ -9,7 +9,7 @@
     "noEmit": true,
     "isolatedModules": true,
     "skipLibCheck": true,
-    "types": ["vite/client", "@testing-library/jest-dom", "vite-solid-svg"],
+    "types": ["vite/client", "@testing-library/jest-dom", "vite-solid-svg", "vitest/globals"],
     "paths": {
       "@sdk/*": ["./sdk/caic/ts/v1/*"],
       "@voicegateway-sdk/*": ["./sdk/voicegateway/ts/v1/*"],
