@@ -873,11 +873,12 @@ func fromMDRepos(repos []md.Repo) []runtime.Repo {
 		return nil
 	}
 	out := make([]runtime.Repo, len(repos))
-	for i, r := range repos {
+	for i := range repos {
+		r := &repos[i]
 		out[i] = runtime.Repo{
 			HostPath:   r.GitRoot,
 			MountPath:  r.MountedPath,
-			Branch:     primaryBranch(&r),
+			Branch:     primaryBranch(r),
 			BaseBranch: r.DefaultBranch,
 			Remote:     r.DefaultRemote,
 		}
