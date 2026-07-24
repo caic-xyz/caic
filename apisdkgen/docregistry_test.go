@@ -32,6 +32,17 @@ type TestKotlinDocumentedFields struct {
 	ID   string `json:"id,omitempty"`
 }
 
+type TestDocAuthKind string
+
+const (
+	TestDocAuthKindOAuth  TestDocAuthKind = "oauth"
+	TestDocAuthKindAPIKey TestDocAuthKind = "apikey"
+)
+
+type TestDocProviderQuota struct {
+	AuthKind TestDocAuthKind `json:"authKind"`
+}
+
 func TestGenConfigGoTypeToDoc(t *testing.T) {
 	t.Parallel()
 
@@ -63,6 +74,86 @@ func TestGenConfigGoTypeToDoc(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDocRegistryGenerateMarkdownDoc(t *testing.T) {
+	t.Parallel()
+
+	t.Run("enum fields retain their type and values", func(t *testing.T) {
+		t.Parallel()
+		outDir := t.TempDir()
+		quotaType := reflect.TypeFor[TestDocProviderQuota]()
+		docs := &docRegistry{
+			cfg: &apispec.Config{
+				APIDocTitle:     "Test API",
+				SDKPackagePaths: map[string]struct{}{quotaType.PkgPath(): {}},
+				Routes: []apispec.Route{{
+					Name:   "quota",
+					Method: "GET",
+					Path:   "/quota",
+					Resp:   quotaType,
+				}},
+			},
+			typeDoc: map[string]string{"TestDocAuthKind": "TestDocAuthKind identifies an authentication method."},
+			aliases: []aliasInfo{{
+				name: "TestDocAuthKind",
+				constants: []aliasConstant{
+					{name: "TestDocAuthKindOAuth", value: "oauth"},
+					{name: "TestDocAuthKindAPIKey", value: "apikey", doc: "API key credentials."},
+				},
+			}},
+		}
+		if err := docs.generateMarkdownDoc(outDir); err != nil {
+			t.Fatal(err)
+		}
+		data, err := fs.ReadFile(os.DirFS(outDir), "API.md")
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(data)
+		for _, want := range []string{
+			"### TestDocAuthKind",
+			"| `oauth` |  |",
+			"| `apikey` | API key credentials. |",
+			"| `authKind` | `TestDocAuthKind` |  | yes |",
+		} {
+			if !strings.Contains(text, want) {
+				t.Errorf("API.md does not contain %q:\n%s", want, text)
+			}
+		}
+	})
+}
+
+func TestLoadDocsInDir(t *testing.T) {
+	t.Parallel()
+
+	t.Run("string alias docs", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		source := `package v1
+
+// TestAuthKind identifies an authentication method.
+type TestAuthKind string
+
+const (
+	// TestAuthKindOAuth uses OAuth credentials.
+	TestAuthKindOAuth TestAuthKind = "oauth"
+)
+`
+		if err := os.WriteFile(filepath.Join(dir, "types.go"), []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		docs, err := loadDocsInDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := docs.typeDoc["TestAuthKind"]; got != "TestAuthKind identifies an authentication method." {
+			t.Errorf("string alias doc = %q", got)
+		}
+		if got := docs.aliases[0].constants[0].doc; got != "TestAuthKindOAuth uses OAuth credentials." {
+			t.Errorf("string alias value doc = %q", got)
+		}
+	})
 }
 
 func TestDocRegistryGenerateKotlinMCPClient(t *testing.T) {

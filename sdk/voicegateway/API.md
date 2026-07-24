@@ -33,6 +33,135 @@ All errors return:
 
 ## Types
 
+### InterruptSource
+
+InterruptSource identifies why a voice gateway turn was interrupted.
+
+| Value | Description |
+|-------|-------------|
+| `user` | InterruptSourceUser means user speech interrupted the assistant. |
+| `tool` | InterruptSourceTool means tool execution was cancelled. |
+
+### MessageKind
+
+MessageKind identifies a voice gateway WebRTC data-channel message.
+
+| Value | Description |
+|-------|-------------|
+| `session.setup` | MessageKindSessionSetup starts a provider-neutral voice session. |
+| `context.update` | MessageKindContextUpdate sends provider-neutral text context to the session. |
+| `user.message` | MessageKindUserMessage appends completed user text and asks the assistant to respond. |
+| `tool.result` | MessageKindToolResult returns the result of a tool call. |
+| `turn.cancel` | MessageKindTurnCancel asks the gateway to cancel the current turn. |
+| `session.close` | MessageKindSessionClose asks the gateway to close the session. |
+| `session.ready` | MessageKindSessionReady reports that the gateway session is ready. |
+| `transcript.delta` | MessageKindTranscriptDelta streams transcript text. |
+| `assistant.text.delta` | MessageKindAssistantTextDelta streams assistant text. |
+| `speech.started` | MessageKindSpeechStarted reports that speech output started. |
+| `speech.ended` | MessageKindSpeechEnded reports that speech output ended. |
+| `tool.call` | MessageKindToolCall asks the client to execute a tool. |
+| `interrupted` | MessageKindInterrupted reports an interruption. |
+| `error` | MessageKindError reports a gateway error. |
+
+### Speaker
+
+Speaker identifies a transcript or speech speaker.
+
+| Value | Description |
+|-------|-------------|
+| `user` | SpeakerUser is the human speaker. |
+| `assistant` | SpeakerAssistant is the assistant speaker. |
+
+### VoiceRTCConnectionState
+
+VoiceRTCConnectionState is a WebRTC peer connection state.
+
+| Value | Description |
+|-------|-------------|
+| `new` |  |
+| `connecting` |  |
+| `connected` |  |
+| `disconnected` |  |
+| `failed` |  |
+| `closed` |  |
+
+### VoiceRTCConnectivityIssue
+
+VoiceRTCConnectivityIssue identifies a structured voice RTC connectivity issue.
+
+| Value | Description |
+|-------|-------------|
+| `none` |  |
+| `voice_bridge_unavailable` |  |
+| `server_session_missing` |  |
+| `server_ice_failed` |  |
+| `udp_unreachable` |  |
+| `data_channel_not_open` |  |
+| `voice_backend_connecting` |  |
+| `session_ready_not_delivered` |  |
+| `unknown_timeout` |  |
+
+### VoiceRTCConnectivitySide
+
+VoiceRTCConnectivitySide identifies where a voice RTC failure appears to be.
+
+| Value | Description |
+|-------|-------------|
+| `none` |  |
+| `server` |  |
+| `client` |  |
+| `network` |  |
+| `unknown` |  |
+
+### VoiceRTCDataChannelState
+
+VoiceRTCDataChannelState is a WebRTC data channel state.
+
+| Value | Description |
+|-------|-------------|
+| `new` |  |
+| `connecting` |  |
+| `open` |  |
+| `closing` |  |
+| `closed` |  |
+
+### VoiceRTCICEConnectionState
+
+VoiceRTCICEConnectionState is a WebRTC ICE transport connection state.
+
+| Value | Description |
+|-------|-------------|
+| `new` |  |
+| `checking` |  |
+| `connected` |  |
+| `completed` |  |
+| `disconnected` |  |
+| `failed` |  |
+| `closed` |  |
+
+### VoiceRTCICEGatheringState
+
+VoiceRTCICEGatheringState is a WebRTC ICE candidate gathering state.
+
+| Value | Description |
+|-------|-------------|
+| `new` |  |
+| `gathering` |  |
+| `complete` |  |
+
+### VoiceRTCSignalingState
+
+VoiceRTCSignalingState is a WebRTC peer connection signaling state.
+
+| Value | Description |
+|-------|-------------|
+| `stable` |  |
+| `have-local-offer` |  |
+| `have-remote-offer` |  |
+| `have-local-pranswer` |  |
+| `have-remote-pranswer` |  |
+| `closed` |  |
+
 ### VoiceRTCOfferReq
 
 VoiceRTCOfferReq is the request body for POST /api/voicegateway/v1/voice/rtc/offer.
@@ -56,11 +185,11 @@ VoiceRTCClientDiagnostics reports client-observed WebRTC state for diagnosis.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `iceConnectionState` | `string` | ICEConnectionState is the client's RTCPeerConnection.iceConnectionState. |  |
-| `iceGatheringState` | `string` | ICEGatheringState is the client's RTCPeerConnection.iceGatheringState. |  |
-| `connectionState` | `string` | ConnectionState is the client's RTCPeerConnection.connectionState. |  |
-| `signalingState` | `string` | SignalingState is the client's RTCPeerConnection.signalingState. |  |
-| `dataChannelState` | `string` | DataChannelState is the client's voice-gateway RTCDataChannel.readyState. |  |
+| `iceConnectionState` | `VoiceRTCICEConnectionState` | ICEConnectionState is the client's RTCPeerConnection.iceConnectionState. |  |
+| `iceGatheringState` | `VoiceRTCICEGatheringState` | ICEGatheringState is the client's RTCPeerConnection.iceGatheringState. |  |
+| `connectionState` | `VoiceRTCConnectionState` | ConnectionState is the client's RTCPeerConnection.connectionState. |  |
+| `signalingState` | `VoiceRTCSignalingState` | SignalingState is the client's RTCPeerConnection.signalingState. |  |
+| `dataChannelState` | `VoiceRTCDataChannelState` | DataChannelState is the client's voice-gateway RTCDataChannel.readyState. |  |
 
 ### VoiceRTCDiagnosticsReq
 
@@ -88,11 +217,11 @@ VoiceRTCServerDiagnostics reports server-observed WebRTC state for diagnosis.
 | `sessionFound` | `boolean` | SessionFound reports whether the gateway still has the requested session. | yes |
 | `udpEndpoints` | `VoiceRTCUDPEndpoint[]` | UDPEndpoints are the LAN/Tailscale and optional UPnP public UDP candidates advertised to the client. |  |
 | `udpMappingError` | `string` | UDPMappingError is the last UPnP mapping or refresh error, if any. |  |
-| `iceConnectionState` | `string` | ICEConnectionState is the gateway PeerConnection ICE connection state. |  |
-| `iceGatheringState` | `string` | ICEGatheringState is the gateway PeerConnection ICE gathering state. |  |
-| `connectionState` | `string` | ConnectionState is the gateway PeerConnection aggregate connection state. |  |
-| `signalingState` | `string` | SignalingState is the gateway PeerConnection signaling state. |  |
-| `dataChannelState` | `string` | DataChannelState is the gateway-observed voice data channel state. |  |
+| `iceConnectionState` | `VoiceRTCICEConnectionState` | ICEConnectionState is the gateway PeerConnection ICE connection state. |  |
+| `iceGatheringState` | `VoiceRTCICEGatheringState` | ICEGatheringState is the gateway PeerConnection ICE gathering state. |  |
+| `connectionState` | `VoiceRTCConnectionState` | ConnectionState is the gateway PeerConnection aggregate connection state. |  |
+| `signalingState` | `VoiceRTCSignalingState` | SignalingState is the gateway PeerConnection signaling state. |  |
+| `dataChannelState` | `VoiceRTCDataChannelState` | DataChannelState is the gateway-observed voice data channel state. |  |
 | `dataChannelOpened` | `boolean` | DataChannelOpened reports whether the voice data channel reached open. |  |
 | `audioTrackReceived` | `boolean` | AudioTrackReceived reports whether the gateway received the client's microphone track. |  |
 | `backendConnected` | `boolean` | BackendConnected reports whether the gateway connected to the configured voice backend. |  |
@@ -106,8 +235,8 @@ VoiceRTCDiagnosticsResp reports structured WebRTC connectivity diagnostics.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `sessionID` | `string` | SessionID is the diagnosed voice RTC session ID. | yes |
-| `issue` | `string` | Issue is the machine-readable connectivity diagnosis. | yes |
-| `side` | `string` | Side identifies where the issue appears to be. | yes |
+| `issue` | `VoiceRTCConnectivityIssue` | Issue is the machine-readable connectivity diagnosis. | yes |
+| `side` | `VoiceRTCConnectivitySide` | Side identifies where the issue appears to be. | yes |
 | `message` | `string` | Message is a human-readable explanation of the diagnosis. | yes |
 | `server` | `VoiceRTCServerDiagnostics` | Server contains gateway-observed WebRTC state. | yes |
 | `client` | `VoiceRTCClientDiagnostics` | Client echoes the client diagnostics included in the request. |  |
@@ -124,7 +253,7 @@ StatusResp is a common response for mutation endpoints.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `code` | `string` |  | yes |
+| `code` | `ErrorCode` |  | yes |
 | `message` | `string` |  | yes |
 
 ### ErrorResponse
@@ -140,7 +269,7 @@ MessageEnvelope carries the kind used to dispatch data-channel messages.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `kind` | `string` | Kind is the message discriminator used to decode the concrete message type. | yes |
+| `kind` | `MessageKind` | Kind is the message discriminator used to decode the concrete message type. | yes |
 
 ### VoiceConfig
 
@@ -176,7 +305,7 @@ SessionSetup is the client message that initializes a voice session.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `kind` | `string` | Kind must be "session.setup". | yes |
+| `kind` | `MessageKind` | Kind must be "session.setup". | yes |
 | `voice` | `VoiceConfig` | Voice contains the requested voice and language. | yes |
 | `tools` | `ToolDeclaration[]` | Tools declares the client-side tools the assistant may call. | yes |
 | `context` | `Context` | Context provides initial instructions or text context for the session. | yes |
@@ -187,7 +316,7 @@ ContextUpdate is a client message that appends session context.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `kind` | `string` | Kind must be "context.update". | yes |
+| `kind` | `MessageKind` | Kind must be "context.update". | yes |
 | `context` | `Context` | Context contains the instructions or text to append. | yes |
 
 ### UserMessage
@@ -196,7 +325,7 @@ UserMessage is a client message that appends completed user text and asks the as
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `kind` | `string` | Kind must be "user.message". | yes |
+| `kind` | `MessageKind` | Kind must be "user.message". | yes |
 | `text` | `string` | Text is the completed user utterance to send to the assistant. | yes |
 
 ### ToolResult
@@ -205,7 +334,7 @@ ToolResult is a client message that returns a tool execution result.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `kind` | `string` | Kind must be "tool.result". | yes |
+| `kind` | `MessageKind` | Kind must be "tool.result". | yes |
 | `id` | `string` | ID matches the tool.call ID being answered. | yes |
 | `name` | `string` | Name is the tool name that produced the result. | yes |
 | `result` | `JSONValue` | Result is the JSON result returned to the assistant. | yes |
@@ -216,7 +345,7 @@ TurnCancel is a client message that cancels the current turn.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `kind` | `string` | Kind must be "turn.cancel". | yes |
+| `kind` | `MessageKind` | Kind must be "turn.cancel". | yes |
 | `reason` | `string` | Reason optionally explains why the current assistant turn was cancelled. |  |
 
 ### SessionClose
@@ -225,7 +354,7 @@ SessionClose is a client message that closes the voice session.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `kind` | `string` | Kind must be "session.close". | yes |
+| `kind` | `MessageKind` | Kind must be "session.close". | yes |
 | `reason` | `string` | Reason optionally explains why the client closed the session. |  |
 
 ### SessionReady
@@ -234,7 +363,7 @@ SessionReady is a gateway message that reports the session is ready.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `kind` | `string` | Kind is "session.ready". | yes |
+| `kind` | `MessageKind` | Kind is "session.ready". | yes |
 
 ### TranscriptDelta
 
@@ -242,8 +371,8 @@ TranscriptDelta is a gateway message that streams transcript text.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `kind` | `string` | Kind is "transcript.delta". | yes |
-| `speaker` | `string` | Speaker identifies who produced this transcript text. | yes |
+| `kind` | `MessageKind` | Kind is "transcript.delta". | yes |
+| `speaker` | `Speaker` | Speaker identifies who produced this transcript text. | yes |
 | `text` | `string` | Text is an incremental transcript fragment. | yes |
 
 ### AssistantTextDelta
@@ -252,7 +381,7 @@ AssistantTextDelta is a gateway message that streams assistant text.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `kind` | `string` | Kind is "assistant.text.delta". | yes |
+| `kind` | `MessageKind` | Kind is "assistant.text.delta". | yes |
 | `text` | `string` | Text is an incremental assistant text fragment. | yes |
 
 ### SpeechStarted
@@ -261,8 +390,8 @@ SpeechStarted is a gateway message that reports speech output started.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `kind` | `string` | Kind is "speech.started". | yes |
-| `speaker` | `string` | Speaker identifies whose speech output started. | yes |
+| `kind` | `MessageKind` | Kind is "speech.started". | yes |
+| `speaker` | `Speaker` | Speaker identifies whose speech output started. | yes |
 
 ### SpeechEnded
 
@@ -270,8 +399,8 @@ SpeechEnded is a gateway message that reports speech output ended.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `kind` | `string` | Kind is "speech.ended". | yes |
-| `speaker` | `string` | Speaker identifies whose speech output ended. | yes |
+| `kind` | `MessageKind` | Kind is "speech.ended". | yes |
+| `speaker` | `Speaker` | Speaker identifies whose speech output ended. | yes |
 
 ### ToolCall
 
@@ -279,7 +408,7 @@ ToolCall is a gateway message that asks the client to execute a tool.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `kind` | `string` | Kind is "tool.call". | yes |
+| `kind` | `MessageKind` | Kind is "tool.call". | yes |
 | `id` | `string` | ID uniquely identifies this tool call for the matching tool.result. | yes |
 | `name` | `string` | Name is the requested tool name. | yes |
 | `args` | `JSONValue` | Args is the JSON argument object for the requested tool. | yes |
@@ -290,8 +419,8 @@ Interrupted is a gateway message that reports an interruption.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `kind` | `string` | Kind is "interrupted". | yes |
-| `source` | `string` | Source identifies what interrupted the turn. | yes |
+| `kind` | `MessageKind` | Kind is "interrupted". | yes |
+| `source` | `InterruptSource` | Source identifies what interrupted the turn. | yes |
 | `message` | `string` | Message optionally provides more detail about the interruption. |  |
 
 ### Error
@@ -300,7 +429,7 @@ Error is a gateway message that reports an error.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `kind` | `string` | Kind is "error". | yes |
+| `kind` | `MessageKind` | Kind is "error". | yes |
 | `message` | `string` | Message is a human-readable error description. | yes |
 | `recoverable` | `boolean` | Recoverable reports whether the client may continue using the session. | yes |
 

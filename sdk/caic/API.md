@@ -107,13 +107,191 @@ All errors return:
 
 ## Types
 
+### CIStatus
+
+CIStatus is the CI check state for a task or repo default branch.
+
+| Value | Description |
+|-------|-------------|
+| `pending` |  |
+| `success` |  |
+| `failure` |  |
+
+### CheckConclusion
+
+CheckConclusion is the conclusion of a completed CI check run.
+
+| Value | Description |
+|-------|-------------|
+| `success` |  |
+| `failure` |  |
+| `neutral` |  |
+| `skipped` |  |
+| `cancelled` |  |
+| `timed_out` |  |
+| `action_required` |  |
+| `stale` |  |
+
+### CheckStatus
+
+CheckStatus is the status of a CI check run.
+
+| Value | Description |
+|-------|-------------|
+| `queued` |  |
+| `in_progress` |  |
+| `completed` |  |
+
+### EventKind
+
+EventKind identifies the type of SSE event.
+
+| Value | Description |
+|-------|-------------|
+| `init` |  |
+| `text` |  |
+| `textDelta` |  |
+| `toolUse` |  |
+| `toolResult` |  |
+| `ask` |  |
+| `usage` |  |
+| `result` |  |
+| `system` |  |
+| `userInput` |  |
+| `todo` |  |
+| `diffStat` |  |
+| `error` |  |
+| `thinking` |  |
+| `thinkingDelta` |  |
+| `subagentStart` |  |
+| `subagentEnd` |  |
+| `log` |  |
+| `toolOutputDelta` |  |
+| `widget` |  |
+| `widgetDelta` |  |
+| `rateLimit` |  |
+| `stats` |  |
+
+### EventToolInputKind
+
+EventToolInputKind identifies a normalized tool input view.
+
+| Value | Description |
+|-------|-------------|
+| `fileChanges` | EventToolInputFileChanges renders changed files as unified patches. |
+| `subagents` | EventToolInputSubagents renders one or more spawned subagents. |
+
+### Forge
+
+Forge identifies the code hosting forge.
+Values must match forge.Kind constants.
+
+| Value | Description |
+|-------|-------------|
+| `github` |  |
+| `gitlab` |  |
+
+### ForgePRState
+
+ForgePRState is the state of a pull/merge request.
+
+| Value | Description |
+|-------|-------------|
+| `open` |  |
+| `closed` |  |
+| `merged` |  |
+
+### Harness
+
+Harness identifies the coding agent harness.
+Values must match harness.Name constants.
+
+| Value | Description |
+|-------|-------------|
+| `claude` |  |
+| `codex` |  |
+| `opencode` |  |
+| `pi` |  |
+
+### OAuthGrantStatus
+
+OAuthGrantStatus is the user-visible state of a connected OAuth client grant.
+
+| Value | Description |
+|-------|-------------|
+| `active` |  |
+| `expired` |  |
+| `revoked` |  |
+
+### Platform
+
+Platform selects the runtime CPU architecture.
+
+| Value | Description |
+|-------|-------------|
+| `` |  |
+| `linux/arm64` |  |
+| `linux/amd64` |  |
+
+### SyncTarget
+
+SyncTarget selects where to push changes.
+
+| Value | Description |
+|-------|-------------|
+| `branch` | Push to the task's own branch (default). |
+| `default` | Squash-push to the repo's default branch. |
+
+### TaskState
+
+TaskState is the lifecycle state of a task.
+
+| Value | Description |
+|-------|-------------|
+| `pending` |  |
+| `branching` |  |
+| `provisioning` |  |
+| `starting` |  |
+| `running` |  |
+| `waiting` |  |
+| `asking` |  |
+| `has_plan` |  |
+| `pulling` |  |
+| `pushing` |  |
+| `stopping` |  |
+| `stopped` |  |
+| `purging` |  |
+| `crashed` |  |
+| `failed` |  |
+| `purged` |  |
+
+### ToolOutputContentType
+
+ToolOutputContentType identifies the type of a tool output for rendering.
+
+| Value | Description |
+|-------|-------------|
+| `text` | ToolOutputText indicates plain text output. |
+| `json` | ToolOutputJSON indicates JSON output. |
+| `markdown` | ToolOutputMarkdown indicates markdown output. |
+
+### VoiceGatewayMode
+
+VoiceGatewayMode is the advertised service-side voice gateway mode.
+
+| Value | Description |
+|-------|-------------|
+| `disabled` |  |
+| `embedded` |  |
+| `external` |  |
+
 ### VoiceGatewayMetadata
 
 VoiceGatewayMetadata reports structured voice gateway support.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `mode` | `string` |  | yes |
+| `mode` | `VoiceGatewayMode` |  | yes |
 | `url` | `string` |  |  |
 | `authRequired` | `boolean` |  |  |
 | `capabilities` | `string[]` |  |  |
@@ -228,7 +406,7 @@ Only effective when the GitHub App is configured. | yes |
 request when it is opened or reopened via a forge webhook. | yes |
 | `baseImage` | `string` | BaseImage overrides the default runtime base image. Empty means use
 the default. |  |
-| `containerPlatform` | `string` | ContainerPlatform selects the runtime CPU architecture. Empty means use
+| `containerPlatform` | `Platform` | ContainerPlatform selects the runtime CPU architecture. Empty means use
 the host's native platform. Valid values are linux/amd64 and linux/arm64. |  |
 | `maxCPUs` | `int` | MaxCPUs limits the number of CPU cores the runtime instance may use.
 Zero means use the system default (max(2, NumCPU-2)). |  |
@@ -273,7 +451,7 @@ OAuthGrantResp describes one user-authorized remote MCP client grant.
 | `lastUsedAt` | `ISOTimestamp` |  |  |
 | `expiresAt` | `ISOTimestamp` |  | yes |
 | `revokedAt` | `ISOTimestamp` |  |  |
-| `status` | `string` |  | yes |
+| `status` | `OAuthGrantStatus` |  | yes |
 
 ### OAuthGrantsResp
 
@@ -371,8 +549,8 @@ ForgeCheck describes a CI check run with its status, conclusion, and timing.
 | `repo` | `string` |  | yes |
 | `runID` | `int64` | Pipeline/workflow run ID. | yes |
 | `jobID` | `int64` | Check run / job ID. | yes |
-| `status` | `string` | queued, in_progress, completed. | yes |
-| `conclusion` | `string` | Empty when not completed. | yes |
+| `status` | `CheckStatus` | queued, in_progress, completed. | yes |
+| `conclusion` | `CheckConclusion` | Empty when not completed. | yes |
 | `queuedAt` | `ISOTimestamp` | When the check was created/queued. |  |
 | `startedAt` | `ISOTimestamp` | When execution began. |  |
 | `completedAt` | `ISOTimestamp` | When execution finished. |  |
@@ -387,8 +565,8 @@ Repo is the JSON representation of a discovered repo.
 | `branch` | `string` |  | yes |
 | `baseBranch` | `BranchInfo` |  | yes |
 | `remoteURL` | `string` |  |  |
-| `forge` | `string` | "github", "gitlab", or empty if unknown. |  |
-| `ci` | `string` |  |  |
+| `forge` | `Forge` | "github", "gitlab", or empty if unknown. |  |
+| `ci` | `CIStatus` |  |  |
 | `ciChecks` | `ForgeCheck[]` |  |  |
 | `checksDate` | `ISOTimestamp` |  |  |
 
@@ -429,7 +607,7 @@ TaskRepo describes a repository associated with a task in the API response.
 | `baseBranch` | `string` |  |  |
 | `branch` | `string` |  | yes |
 | `remoteURL` | `string` |  |  |
-| `forge` | `string` | "github", "gitlab", or empty if unknown. |  |
+| `forge` | `Forge` | "github", "gitlab", or empty if unknown. |  |
 
 ### DiffFileStat
 
@@ -467,7 +645,7 @@ Task is the JSON representation sent to the frontend.
 | `initialPrompt` | `string` |  | yes |
 | `title` | `string` |  | yes |
 | `repos` | `TaskRepo[]` |  |  |
-| `state` | `string` |  | yes |
+| `state` | `TaskState` |  | yes |
 | `stateUpdatedAt` | `ISOTimestamp` | When the task state last changed. | yes |
 | `diffStat` | `DiffStat` |  |  |
 | `costUSD` | `float64` |  | yes |
@@ -487,12 +665,12 @@ Task is the JSON representation sent to the frontend.
 | `forgeOwner` | `string` |  |  |
 | `forgeRepo` | `string` |  |  |
 | `forgePR` | `int` |  |  |
-| `forgePRState` | `string` |  |  |
+| `forgePRState` | `ForgePRState` |  |  |
 | `forgeIssue` | `int` |  |  |
-| `ciStatus` | `string` |  |  |
+| `ciStatus` | `CIStatus` |  |  |
 | `ciChecks` | `ForgeCheck[]` |  |  |
 | `owner` | `string` | username of creator; omitted in no-auth mode |  |
-| `harness` | `string` | Per-task harness/agent metadata. | yes |
+| `harness` | `Harness` | Per-task harness/agent metadata. | yes |
 | `model` | `string` |  |  |
 | `effort` | `string` | Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default. |  |
 | `agentVersion` | `string` |  |  |
@@ -537,7 +715,7 @@ TaskInfoRepo describes a repository mounted into a task runtime.
 | `hostPath` | `string` |  |  |
 | `mountedPath` | `string` |  |  |
 | `remoteURL` | `string` |  |  |
-| `forge` | `string` |  |  |
+| `forge` | `Forge` |  |  |
 
 ### TaskInfoCacheMount
 
@@ -568,10 +746,10 @@ TaskInfoRecorded holds caic-recorded task launch configuration and metadata.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `state` | `string` |  | yes |
+| `state` | `TaskState` |  | yes |
 | `startedAt` | `ISOTimestamp` |  |  |
 | `stateUpdatedAt` | `ISOTimestamp` |  |  |
-| `harness` | `string` |  | yes |
+| `harness` | `Harness` |  | yes |
 | `model` | `string` |  |  |
 | `effort` | `string` |  |  |
 | `agentVersion` | `string` |  |  |
@@ -652,7 +830,7 @@ CreateTaskReq is the request body for POST /api/caic/v1/tasks.
 | `repos` | `RepoSpec[]` |  |  |
 | `model` | `string` |  |  |
 | `effort` | `string` | Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default. |  |
-| `harness` | `string` |  | yes |
+| `harness` | `Harness` |  | yes |
 | `runtimeName` | `string` |  |  |
 | `tailscale` | `boolean` |  |  |
 | `usb` | `boolean` |  |  |
@@ -718,7 +896,7 @@ inputs. It keeps harness-specific tool schemas out of clients.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `kind` | `string` |  | yes |
+| `kind` | `EventToolInputKind` |  | yes |
 | `files` | `EventFileChange[]` |  |  |
 | `subagents` | `EventSubagentSpawn[]` |  |  |
 
@@ -913,7 +1091,7 @@ MCP tool progress messages (item/mcpToolCall/progress).
 |-------|------|-------------|----------|
 | `toolUseID` | `string` |  | yes |
 | `delta` | `string` |  | yes |
-| `contentType` | `string` |  |  |
+| `contentType` | `ToolOutputContentType` |  |  |
 | `formatted` | `string` | Pretty-printed JSON or other transformation. |  |
 
 ### EventWidget
@@ -972,7 +1150,7 @@ EventMessage is a single SSE event in the backend-neutral stream
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `kind` | `string` |  | yes |
+| `kind` | `EventKind` |  | yes |
 | `ts` | `int64` |  | yes |
 | `init` | `EventInit` |  |  |
 | `text` | `EventText` |  |  |
@@ -1039,7 +1217,7 @@ SyncReq is the request body for POST /api/caic/v1/tasks/{id}/sync.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `force` | `boolean` |  |  |
-| `target` | `string` |  |  |
+| `target` | `SyncTarget` |  |  |
 
 ### SafetyIssue
 
@@ -1070,7 +1248,7 @@ ForkTaskReq is the request body for POST /api/caic/v1/tasks/{id}/fork.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `prompt` | `Prompt` | Initial prompt for the forked task. | yes |
-| `harness` | `string` | Override harness; empty means inherit from source. |  |
+| `harness` | `Harness` | Override harness; empty means inherit from source. |  |
 | `model` | `string` | Override model; empty means inherit from source. |  |
 | `effort` | `string` | Override thinking effort; empty means inherit from source. |  |
 | `extraRepos` | `RepoSpec[]` | Additional repos to map into the fork. |  |

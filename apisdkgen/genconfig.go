@@ -193,6 +193,9 @@ func goTypeToDoc(c *apispec.Config, t reflect.Type) (string, error) {
 	if m := lookupSpecial(c, t); m != nil {
 		return m.DocType, nil
 	}
+	if t.Kind() == reflect.String && t.Name() != "" && isSDKPkg(c, t.PkgPath()) {
+		return t.Name(), nil
+	}
 	switch t.Kind() {
 	case reflect.String:
 		return "string", nil

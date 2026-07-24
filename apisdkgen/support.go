@@ -105,6 +105,15 @@ func loadDocsInDir(dir string) (*docRegistry, error) {
 						fn := filepath.Base(fset.Position(typeSpec.Pos()).Filename)
 						stringAliases[typeSpec.Name.Name] = fn
 						reg.typeFile[typeSpec.Name.Name] = fn
+						var doc string
+						if typeSpec.Doc != nil {
+							doc = typeSpec.Doc.Text()
+						} else if genDecl.Doc != nil && len(genDecl.Specs) == 1 {
+							doc = genDecl.Doc.Text()
+						}
+						if doc = strings.TrimSpace(doc); doc != "" {
+							reg.typeDoc[typeSpec.Name.Name] = doc
+						}
 					}
 				case *ast.ArrayType:
 					// Named slice type.
@@ -163,6 +172,7 @@ func loadDocsInDir(dir string) (*docRegistry, error) {
 					aliasConsts[typeName] = append(aliasConsts[typeName], aliasConstant{
 						name:  name.Name,
 						value: val,
+						doc:   valueSpecDoc(vs),
 					})
 				}
 			}
@@ -186,6 +196,16 @@ func loadDocsInDir(dir string) (*docRegistry, error) {
 	}
 
 	return reg, nil
+}
+
+func valueSpecDoc(vs *ast.ValueSpec) string {
+	if vs.Doc != nil {
+		return strings.TrimSpace(vs.Doc.Text())
+	}
+	if vs.Comment != nil {
+		return strings.TrimSpace(vs.Comment.Text())
+	}
+	return ""
 }
 
 // formatBlockDoc formats a doc string as a /** ... */ block comment with the given indent.
@@ -258,4 +278,5 @@ func (a aliasInfo) shortName(c aliasConstant) string { return strings.TrimPrefix
 type aliasConstant struct {
 	name  string // const name from Go source, e.g. "HarnessClaude"
 	value string // wire value, e.g. "claude"
+	doc   string // source documentation, when present
 }

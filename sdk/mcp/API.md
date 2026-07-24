@@ -21,6 +21,68 @@ MCP errors are JSON-RPC error objects in `JSONRPCResponse.error`. Transport-laye
 
 ## Types
 
+### CacheScope
+
+CacheScope describes who may cache an MCP result.
+
+| Value | Description |
+|-------|-------------|
+| `public` |  |
+| `private` |  |
+
+### ContentType
+
+ContentType identifies the kind of content block in a tool result.
+
+| Value | Description |
+|-------|-------------|
+| `audio` |  |
+| `image` |  |
+| `resource` |  |
+| `resource_link` |  |
+| `text` |  |
+
+### Method
+
+Method is an MCP JSON-RPC method name.
+
+| Value | Description |
+|-------|-------------|
+| `server/discover` |  |
+| `tools/list` |  |
+| `tools/call` |  |
+| `resources/list` |  |
+| `resources/read` |  |
+| `resources/templates/list` |  |
+| `subscriptions/listen` |  |
+
+### NotificationMethod
+
+NotificationMethod is an MCP JSON-RPC notification method name.
+
+| Value | Description |
+|-------|-------------|
+| `notifications/subscriptions/acknowledged` |  |
+| `notifications/resources/list_changed` |  |
+| `notifications/resources/updated` |  |
+
+### ResultType
+
+ResultType describes whether an MCP result is complete or partial.
+
+| Value | Description |
+|-------|-------------|
+| `complete` |  |
+
+### Role
+
+Role identifies an MCP audience role.
+
+| Value | Description |
+|-------|-------------|
+| `user` |  |
+| `assistant` |  |
+
 ### JSONRPCRequest
 
 JSONRPCRequest is a JSON-RPC request that expects a response.
@@ -29,7 +91,7 @@ JSONRPCRequest is a JSON-RPC request that expects a response.
 |-------|------|-------------|----------|
 | `jsonrpc` | `string` |  | yes |
 | `id` | `JSONValue` |  |  |
-| `method` | `string` |  | yes |
+| `method` | `Method` |  | yes |
 | `params` | `JSONValue` |  |  |
 
 ### JSONRPCError
@@ -126,7 +188,7 @@ ServerDiscoverResult is the result returned for a server/discover request.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `resultType` | `string` |  | yes |
+| `resultType` | `ResultType` |  | yes |
 | `supportedVersions` | `string[]` | SupportedVersions lists MCP protocol versions supported by this server. | yes |
 | `capabilities` | `Capabilities` | Capabilities advertises server features. | yes |
 | `serverInfo` | `Implementation` | ServerInfo describes the server software implementation. | yes |
@@ -135,7 +197,7 @@ ServerDiscoverResult is the result returned for a server/discover request.
 Clients may include it in an LLM system prompt. It should not duplicate tool
 descriptions. |  |
 | `ttlMs` | `int` | TTLMS hints how long clients may cache this response in milliseconds. | yes |
-| `cacheScope` | `string` | CacheScope indicates whether the response may be cached publicly or privately. | yes |
+| `cacheScope` | `CacheScope` | CacheScope indicates whether the response may be cached publicly or privately. | yes |
 
 ### SamplingCapability
 
@@ -236,11 +298,11 @@ ToolsListResult is the response payload for tools/list.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `_meta` | `Record<string, JSONValue>` |  |  |
-| `resultType` | `string` |  | yes |
+| `resultType` | `ResultType` |  | yes |
 | `nextCursor` | `string` |  |  |
 | `tools` | `ToolDescriptor[]` |  | yes |
 | `ttlMs` | `int` |  | yes |
-| `cacheScope` | `string` |  | yes |
+| `cacheScope` | `CacheScope` |  | yes |
 
 ### ToolsCallParams
 
@@ -272,7 +334,7 @@ Annotations provide optional metadata for MCP resources and content.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `audience` | `string[]` | Audience describes who the data is intended for. |  |
+| `audience` | `Role[]` | Audience describes who the data is intended for. |  |
 | `priority` | `int` | Priority describes importance from 0 to 1, with 1 most important. |  |
 | `lastModified` | `string` | LastModified is an ISO 8601 timestamp for the last modification time. |  |
 
@@ -287,7 +349,7 @@ the selected content type are present.
 |-------|------|-------------|----------|
 | `_meta` | `Record<string, JSONValue>` |  |  |
 | `icons` | `Icon[]` |  |  |
-| `type` | `string` | Type identifies the content variant. | yes |
+| `type` | `ContentType` | Type identifies the content variant. | yes |
 | `name` | `string` | Name is used by resource_link content. |  |
 | `title` | `string` | Title is a human-readable display name. |  |
 | `text` | `string` | Text is the text content for text blocks. |  |
@@ -306,7 +368,7 @@ ToolCallResult is the response payload for a tool call.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `_meta` | `Record<string, JSONValue>` |  |  |
-| `resultType` | `string` |  | yes |
+| `resultType` | `ResultType` |  | yes |
 | `content` | `ContentBlock[]` | Content is the unstructured result of the tool call. | yes |
 | `structuredContent` | `JSONValue` | StructuredContent is optional JSON matching the tool output schema on success. |  |
 | `isError` | `boolean` | IsError indicates the tool call ended in an error visible to the model. |  |
@@ -334,11 +396,11 @@ ResourcesListResult is the response payload for resources/list.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `_meta` | `Record<string, JSONValue>` |  |  |
-| `resultType` | `string` |  | yes |
+| `resultType` | `ResultType` |  | yes |
 | `nextCursor` | `string` |  |  |
 | `resources` | `ResourceDescriptor[]` |  | yes |
 | `ttlMs` | `int` |  | yes |
-| `cacheScope` | `string` |  | yes |
+| `cacheScope` | `CacheScope` |  | yes |
 
 ### ResourceTemplateDescriptor
 
@@ -362,11 +424,11 @@ ResourceTemplatesListResult is the response payload for resources/templates/list
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `_meta` | `Record<string, JSONValue>` |  |  |
-| `resultType` | `string` |  | yes |
+| `resultType` | `ResultType` |  | yes |
 | `nextCursor` | `string` |  |  |
 | `resourceTemplates` | `ResourceTemplateDescriptor[]` |  | yes |
 | `ttlMs` | `int` |  | yes |
-| `cacheScope` | `string` |  | yes |
+| `cacheScope` | `CacheScope` |  | yes |
 
 ### ResourcesReadParams
 
@@ -386,10 +448,10 @@ ResourcesReadResult is the response payload for resources/read.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `_meta` | `Record<string, JSONValue>` |  |  |
-| `resultType` | `string` |  | yes |
+| `resultType` | `ResultType` |  | yes |
 | `contents` | `ResourceContent[]` | Contents contains text or blob resource contents. | yes |
 | `ttlMs` | `int` | TTLMS hints how long clients may cache this response in milliseconds. | yes |
-| `cacheScope` | `string` | CacheScope indicates whether the response may be cached publicly or privately. | yes |
+| `cacheScope` | `CacheScope` | CacheScope indicates whether the response may be cached publicly or privately. | yes |
 
 ### SubscriptionFilter
 
@@ -416,7 +478,7 @@ JSONRPCNotification is a JSON-RPC notification that does not expect a response.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `jsonrpc` | `string` |  | yes |
-| `method` | `string` |  | yes |
+| `method` | `NotificationMethod` |  | yes |
 | `params` | `JSONValue` |  |  |
 
 ### SubscriptionNotificationParams

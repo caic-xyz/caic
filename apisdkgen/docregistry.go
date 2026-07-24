@@ -1433,6 +1433,9 @@ func (d *docRegistry) generateMarkdownDoc(outDir string) error {
 
 	// Types section.
 	b.WriteString("## Types\n\n")
+	for i := range d.aliases {
+		d.writeDocAlias(&b, &d.aliases[i])
+	}
 	seeds := routeSeedTypes(d.cfg)
 	if d.cfg.DocumentExtraSeeds {
 		seeds = sdkSeedTypes(d.cfg)
@@ -1445,6 +1448,26 @@ func (d *docRegistry) generateMarkdownDoc(outDir string) error {
 	}
 
 	return os.WriteFile(filepath.Join(outDir, "API.md"), []byte(b.String()), 0o600)
+}
+
+func (d *docRegistry) writeDocAlias(b *strings.Builder, a *aliasInfo) {
+	if len(a.constants) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "### %s\n\n", a.name)
+	if typeDoc := d.typeDoc[a.name]; typeDoc != "" {
+		fmt.Fprintf(b, "%s\n\n", typeDoc)
+	}
+	b.WriteString("| Value | Description |\n")
+	b.WriteString("|-------|-------------|\n")
+	for _, c := range a.constants {
+		fmt.Fprintf(b, "| `%s` | %s |\n", c.value, enumValueDescription(c))
+	}
+	b.WriteString("\n")
+}
+
+func enumValueDescription(c aliasConstant) string {
+	return strings.ReplaceAll(strings.Join(strings.Fields(c.doc), " "), "|", `\|`)
 }
 
 func (d *docRegistry) writeDocType(b *strings.Builder, t reflect.Type) error {
