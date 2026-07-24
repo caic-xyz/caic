@@ -530,15 +530,16 @@ func (b *Backend) Fork(ctx context.Context, id runtime.ID, repos []runtime.Repo,
 	}
 	b.log.DebugContext(ctx, "building fork options", "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "sudo", opts.Sudo)
 	forkOpts := &md.ForkOpts{
-		ExtraRepos: toMDRepos(opts.ExtraRepos),
-		Display:    opts.Display,
-		Tailscale:  opts.Tailscale,
-		USB:        opts.USB,
-		Sudo:       opts.Sudo,
-		Labels:     metadataLabels(opts.Metadata),
-		ExtraEnv:   opts.ExtraEnv,
-		Mounts:     mounts,
-		MaxCPUs:    maxCPUsOrDefault(opts.MaxCPUs),
+		ExtraRepos:          toMDRepos(opts.ExtraRepos),
+		DestPrimaryBranches: opts.DestPrimaryBranches,
+		Display:             opts.Display,
+		Tailscale:           opts.Tailscale,
+		USB:                 opts.USB,
+		Sudo:                opts.Sudo,
+		Labels:              metadataLabels(opts.Metadata),
+		ExtraEnv:            opts.ExtraEnv,
+		Mounts:              mounts,
+		MaxCPUs:             maxCPUsOrDefault(opts.MaxCPUs),
 	}
 	stdout, stderr := logWriters(opts.LogWriter, "fork")
 	b.log.DebugContext(ctx, "calling fork", "source", name)

@@ -55,10 +55,12 @@ func (r *setupLogFailureRuntime) Launch(ctx context.Context, repos []runtime.Rep
 type forkLogRuntime struct {
 	*runtimetest.FakeBackend
 
-	forkErr error
+	forkErr      error
+	capturedDest map[string]string // DestPrimaryBranches seen by Fork.
 }
 
 func (r *forkLogRuntime) Fork(ctx context.Context, id runtime.ID, repos []runtime.Repo, opts *runtime.ForkOptions) (runtime.ID, runtime.ConnectionInfo, []runtime.Repo, error) {
+	r.capturedDest = opts.DestPrimaryBranches
 	if _, err := opts.LogWriter.Write([]byte("fork setup complete\nfinal setup line")); err != nil {
 		return "", runtime.ConnectionInfo{}, nil, err
 	}
@@ -66,7 +68,16 @@ func (r *forkLogRuntime) Fork(ctx context.Context, id runtime.ID, repos []runtim
 		return "", runtime.ConnectionInfo{}, nil, r.forkErr
 	}
 	forkID, conn, _, err := r.FakeBackend.Fork(ctx, id, repos, opts)
-	return forkID, conn, []runtime.Repo{{Branch: "caic/fork"}}, err
+	// Honor the pinned destination branch per repo, like the real runtime.
+	out := make([]runtime.Repo, len(repos))
+	for i := range repos {
+		branch := opts.DestPrimaryBranches[repos[i].HostPath]
+		if branch == "" {
+			branch = "caic/fork"
+		}
+		out[i] = runtime.Repo{Branch: branch}
+	}
+	return forkID, conn, out, err
 }
 
 func newTestRepoWorkspace(t *testing.T, baseBranch, dir string, backend runtime.Lifecycle) *repowork.Workspace {
@@ -791,14 +802,14 @@ func TestRunner(t *testing.T) {
 			source := &Task{
 				ID:      ksid.NewID(),
 				Harness: "test",
-				Repos:   []RepoMount{{Name: "caic", Branch: "caic/source"}},
+				Repos:   []RepoMount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}},
 			}
 			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
 			fork := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "fork prompt"},
 				Harness:       "test",
-				Repos:         []RepoMount{{Name: "caic", Branch: "caic/source"}},
+				Repos:         []RepoMount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}},
 				StartedAt:     time.Now().UTC(),
 			}
 
@@ -811,8 +822,15 @@ func TestRunner(t *testing.T) {
 				_ = h.LogW.Close()
 			})
 
-			if got := filepath.Base(fork.LogPath()); !strings.Contains(got, "caic-fork") {
-				t.Errorf("log filename = %q, want generated fork branch", got)
+			// Readable "<id>-<repo>-<branch>" name, computed at Open from the
+			// pinned branch and stable afterward (matches a later Reopen).
+			if got, want := filepath.Base(fork.LogPath()), taskLogFileName(fork); got != want {
+				t.Errorf("log filename = %q, want %q", got, want)
+			}
+			// The fork's primary branch is pinned before Fork and handed to the
+			// runtime keyed by GitRoot, so the runtime creates exactly it.
+			if _, ok := runtimeBackend.capturedDest["/src/caic"]; !ok {
+				t.Errorf("Fork received DestPrimaryBranches = %v, want an entry for /src/caic", runtimeBackend.capturedDest)
 			}
 			logs := strings.Join(logLines(t, fork.LogPath()), "\n")
 			first := strings.Index(logs, `{"type":"caic_log","line":"fork setup complete"}`)
@@ -833,6 +851,47 @@ func TestRunner(t *testing.T) {
 				}
 			}
 		})
+		t.Run("pins_each_repo_to_its_own_branch", func(t *testing.T) {
+			t.Parallel()
+			runtimeBackend := &forkLogRuntime{FakeBackend: testContainer()}
+			workspace := newTestRepoWorkspace(t, "", "", runtimeBackend)
+			backend := &testBackend{FakeBackend: &agenttest.FakeBackend{}}
+			r := newTestRunner(t, workspace, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
+			source := &Task{
+				ID:      ksid.NewID(),
+				Harness: "test",
+				Repos:   []RepoMount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic-3"}},
+			}
+			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
+			// Primary repo plus an extra repo whose branch the caller already
+			// allocated from its own workspace (a different number than primary).
+			fork := &Task{
+				ID:      ksid.NewID(),
+				Harness: "test",
+				Repos: []RepoMount{
+					{Name: "caic", GitRoot: "/src/caic", Branch: "caic-3"},
+					{Name: "other", GitRoot: "/src/other", Branch: "caic-9"},
+				},
+				StartedAt: time.Now().UTC(),
+			}
+
+			h, err := r.ForkTask(t.Context(), source, fork, &runtime.ForkOptions{}, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				fork.CloseAndDetachSession(t.Context())
+				_ = h.LogW.Close()
+			})
+
+			// Each repo is pinned to its own branch, not both to the primary's.
+			if got := runtimeBackend.capturedDest["/src/caic"]; got != "caic-3" {
+				t.Errorf("primary pin = %q, want caic-3", got)
+			}
+			if got := runtimeBackend.capturedDest["/src/other"]; got != "caic-9" {
+				t.Errorf("extra repo pin = %q, want caic-9 (its own branch, not the primary's)", got)
+			}
+		})
 		t.Run("persists_setup_logs_on_failure", func(t *testing.T) {
 			t.Parallel()
 			runtimeBackend := &forkLogRuntime{
@@ -848,13 +907,13 @@ func TestRunner(t *testing.T) {
 			source := &Task{
 				ID:      ksid.NewID(),
 				Harness: "test",
-				Repos:   []RepoMount{{Name: "caic", Branch: "caic/source"}},
+				Repos:   []RepoMount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}},
 			}
 			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
 			fork := &Task{
 				ID:        ksid.NewID(),
 				Harness:   "test",
-				Repos:     []RepoMount{{Name: "caic", Branch: "caic/source"}},
+				Repos:     []RepoMount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}},
 				StartedAt: time.Now().UTC(),
 			}
 
@@ -890,13 +949,13 @@ func TestRunner(t *testing.T) {
 			source := &Task{
 				ID:      ksid.NewID(),
 				Harness: "test",
-				Repos:   []RepoMount{{Name: "caic", Branch: "caic/source"}},
+				Repos:   []RepoMount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}},
 			}
 			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
 			fork := &Task{
 				ID:        ksid.NewID(),
 				Harness:   "test",
-				Repos:     []RepoMount{{Name: "caic", Branch: "caic/source"}},
+				Repos:     []RepoMount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}},
 				StartedAt: time.Now().UTC(),
 			}
 

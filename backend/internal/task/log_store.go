@@ -114,6 +114,10 @@ func (s *LogStore) attachReplay(t *Task, path string) error {
 	return nil
 }
 
+// taskLogFileName is the log file name for t: "<taskID>-<safeRepo>-<safeBranch>".
+// The branch is known before the log opens in every path (the primary path
+// reserves it before setup; a fork reserves and pins it before Fork), so the
+// full name is available up front and stays stable for later Reopen.
 func taskLogFileName(t *Task) string {
 	safeRepo := ""
 	safeBranch := ""

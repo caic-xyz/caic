@@ -218,15 +218,20 @@ type ForkOptions struct {
 	RuntimeName Name
 	Metadata    Metadata
 	ExtraRepos  []Repo // Additional repos to map into the fork beyond the source's repos.
-	Display     bool   // Inherit or enable X11/VNC.
-	Tailscale   bool   // Inherit or enable Tailscale.
-	USB         bool   // Inherit or enable USB.
-	Sudo        bool   // Inherit or enable root access (password-based sudo).
-	Harness     harness.Name
-	ExtraEnv    []string  // KEY=VALUE pairs for ~/.env.
-	Mounts      []Mount   // Host directories bind-mounted into the fork.
-	MaxCPUs     int       // Max CPU cores; 0 means use the default.
-	LogWriter   io.Writer // Provisioning log output.
+	// DestPrimaryBranches optionally pins each mapped repo's destination primary
+	// branch, keyed by repo host path (GitRoot). When set for a repo the runtime
+	// uses that name verbatim instead of generating one; the caller owns
+	// uniqueness. Repos absent from the map keep runtime-generated naming.
+	DestPrimaryBranches map[string]string
+	Display             bool // Inherit or enable X11/VNC.
+	Tailscale           bool // Inherit or enable Tailscale.
+	USB                 bool // Inherit or enable USB.
+	Sudo                bool // Inherit or enable root access (password-based sudo).
+	Harness             harness.Name
+	ExtraEnv            []string  // KEY=VALUE pairs for ~/.env.
+	Mounts              []Mount   // Host directories bind-mounted into the fork.
+	MaxCPUs             int       // Max CPU cores; 0 means use the default.
+	LogWriter           io.Writer // Provisioning log output.
 }
 
 // System provides all runtime capabilities used by the application.

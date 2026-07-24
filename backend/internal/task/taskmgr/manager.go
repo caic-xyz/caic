@@ -574,6 +574,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 	}
 	var extraMounts []task.RepoMount
 	var extraRepos []runtime.Repo
+	var extraWorkspaces []*repowork.Workspace
 	for _, rs := range p.ExtraRepos {
 		if _, overlap := sourceRepoNames[rs.Name]; overlap {
 			return "", badRequestf("extraRepos contains repo already in source task: %s", rs.Name)
@@ -585,6 +586,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 		rm := task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: er.Dir, MountedPath: m.mountPathForRepo(rs.Name)}
 		extraMounts = append(extraMounts, rm)
 		extraRepos = append(extraRepos, rm.ToRuntimeRepo())
+		extraWorkspaces = append(extraWorkspaces, er)
 	}
 
 	mounts := make([]task.RepoMount, len(sourceRepos), len(sourceRepos)+len(extraMounts))
@@ -622,6 +624,20 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 	go func() { //nolint:contextcheck // background goroutine roots its own trace task on serverCtx
 		ctx, tk := trace.NewTask(m.serverCtx, "task.fork:"+source.ID.String()+"->"+t.ID.String())
 		defer tk.End()
+
+		// Allocate a distinct branch per extra repo from its own workspace, the
+		// same as fresh tasks. ForkTask reserves the primary repo's branch; each
+		// extra repo needs its own so it is not pinned to the primary's name.
+		for i, er := range extraWorkspaces {
+			branch, err := er.AllocateBranch(ctx)
+			if err != nil {
+				forkEntry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "allocate branch for extra repo")})
+				m.NotifyTaskChange()
+				return
+			}
+			t.SetRepoBranch(len(sourceRepos)+i, branch)
+		}
+
 		ghToken := p.ResolvedGitHubToken
 
 		var extraEnv []string
