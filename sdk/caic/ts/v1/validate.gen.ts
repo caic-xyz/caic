@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventRateLimit, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderQuota, QuotaBalance, QuotaExtraUsage, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskListEvent, TaskRepo, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
+import type { AskOption, AskQuestion, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventRateLimit, EventRateLimitStatus, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderQuota, QuotaBalance, QuotaExtraUsage, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskListEvent, TaskRateLimit, TaskRepo, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
 
 // ---- helpers ----
 
@@ -321,7 +321,7 @@ export function validateEventWidgetDelta(raw: ValidatorInput): EventWidgetDelta 
 export function validateEventRateLimit(raw: ValidatorInput): EventRateLimit {
   const obj = asObject(raw, "EventRateLimit");
   return {
-    status: asString(obj["status"], "EventRateLimit.status"),
+    status: (asString(obj["status"], "EventRateLimit.status") as EventRateLimitStatus),
     resetsAt: (obj["resetsAt"] === undefined || obj["resetsAt"] === null ? undefined : asString(obj["resetsAt"], "EventRateLimit.resetsAt") as ISOTimestamp),
     rateLimitType: asString(obj["rateLimitType"], "EventRateLimit.rateLimitType"),
     utilization: asNumber(obj["utilization"], "EventRateLimit.utilization"),
@@ -468,6 +468,15 @@ export function validateRuntimeInstance(raw: ValidatorInput): RuntimeInstance {
   };
 }
 
+export function validateTaskRateLimit(raw: ValidatorInput): TaskRateLimit {
+  const obj = asObject(raw, "TaskRateLimit");
+  return {
+    blocked: asBoolean(obj["blocked"], "TaskRateLimit.blocked"),
+    window: (obj["window"] === undefined || obj["window"] === null ? undefined : asString(obj["window"], "TaskRateLimit.window")),
+    resetsAt: (obj["resetsAt"] === undefined || obj["resetsAt"] === null ? undefined : asString(obj["resetsAt"], "TaskRateLimit.resetsAt") as ISOTimestamp),
+  };
+}
+
 export function validateTask(raw: ValidatorInput): Task {
   const obj = asObject(raw, "Task");
   return {
@@ -510,6 +519,7 @@ export function validateTask(raw: ValidatorInput): Task {
     inPlanMode: (obj["inPlanMode"] === undefined || obj["inPlanMode"] === null ? undefined : asBoolean(obj["inPlanMode"], "Task.inPlanMode")),
     planContent: (obj["planContent"] === undefined || obj["planContent"] === null ? undefined : asString(obj["planContent"], "Task.planContent")),
     runtime: validateRuntimeInstance(obj["runtime"]),
+    rateLimit: (obj["rateLimit"] === undefined || obj["rateLimit"] === null ? undefined : validateTaskRateLimit(obj["rateLimit"])),
     gitHubToken: (obj["gitHubToken"] === undefined || obj["gitHubToken"] === null ? undefined : asBoolean(obj["gitHubToken"], "Task.gitHubToken")),
   };
 }
@@ -598,10 +608,10 @@ export function validateQuotaExtraUsage(raw: ValidatorInput): QuotaExtraUsage {
 export function validateProviderQuota(raw: ValidatorInput): ProviderQuota {
   const obj = asObject(raw, "ProviderQuota");
   return {
-    provider: asString(obj["provider"], "ProviderQuota.provider"),
+    provider: (asString(obj["provider"], "ProviderQuota.provider") as QuotaProvider),
     label: asString(obj["label"], "ProviderQuota.label"),
     logoUrl: asString(obj["logoUrl"], "ProviderQuota.logoUrl"),
-    authKind: asString(obj["authKind"], "ProviderQuota.authKind"),
+    authKind: (asString(obj["authKind"], "ProviderQuota.authKind") as ProviderAuthKind),
     usageUrl: asString(obj["usageUrl"], "ProviderQuota.usageUrl"),
     rateLimits: (obj["rateLimits"] === undefined || obj["rateLimits"] === null ? undefined : validateArray(obj["rateLimits"], "ProviderQuota.rateLimits", validateQuotaRateLimit) as QuotaRateLimit[]),
     balance: (obj["balance"] === undefined || obj["balance"] === null ? undefined : validateQuotaBalance(obj["balance"])),

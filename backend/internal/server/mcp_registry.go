@@ -67,7 +67,8 @@ At session start this prompt includes a snapshot of all current tasks. Use it to
 - For safety issues during sync, describe each issue and ask whether to force.`
 
 type mcpRegistry struct {
-	serverConfig  *serverHandlers // required
+	// All fields are required by the full MCP registry.
+	serverConfig  *serverHandlers
 	taskSvc       *taskService
 	ci            *ciHandlers
 	usage         *usageHandlers
@@ -208,11 +209,7 @@ func (m *mcpRegistry) SubscribeResourceUpdates(ctx context.Context, filter mcp.S
 				if !yield(sources.taskUpdate(), nil) {
 					return
 				}
-				if m.taskSvc != nil && m.taskSvc.taskMgr != nil {
-					taskC = m.taskSvc.taskMgr.Changed()
-				} else {
-					taskC = nil
-				}
+				taskC = m.taskSvc.taskMgr.Changed()
 			case <-repoC:
 				if !yield(sources.repoUpdate(), nil) {
 					return
@@ -318,24 +315,18 @@ func (m *mcpRegistry) subscriptionSources(filter mcp.SubscriptionFilter) (subscr
 		hasFilter = true
 		switch {
 		case uri == "caic://tasks" || strings.HasPrefix(uri, "caic://tasks/"):
-			if m.taskSvc != nil && m.taskSvc.taskMgr != nil {
-				sources.taskC = m.taskSvc.taskMgr.Changed()
-				sources.taskResourceURIs = append(sources.taskResourceURIs, uri)
-			} else {
-				return subscriptionSources{}, errors.New("task subscription notifier unavailable")
-			}
+			sources.taskC = m.taskSvc.taskMgr.Changed()
+			sources.taskResourceURIs = append(sources.taskResourceURIs, uri)
 		case uri == "caic://repos" || strings.HasPrefix(uri, "caic://repos/"):
 			sources.repoC = m.serverConfig.repoSvc.Changed()
 			sources.repoStatusC = m.serverConfig.repoStatus.Changed()
 			sources.repoResourceURIs = append(sources.repoResourceURIs, uri)
 		case uri == "gomode://items":
-			if m.taskSvc != nil && m.taskSvc.taskMgr != nil {
-				sources.taskC = m.taskSvc.taskMgr.Changed()
-				sources.taskResourceURIs = append(sources.taskResourceURIs, uri)
-			} else {
-				return subscriptionSources{}, errors.New("item subscription notifier unavailable")
-			}
+			sources.taskC = m.taskSvc.taskMgr.Changed()
+			sources.taskResourceURIs = append(sources.taskResourceURIs, uri)
 		case uri == "gomode://notifications":
+			sources.taskC = m.taskSvc.taskMgr.Changed()
+			sources.taskResourceURIs = append(sources.taskResourceURIs, uri)
 			sources.usagePolling = true
 			sources.usageResourceURIs = append(sources.usageResourceURIs, uri)
 		default:
@@ -344,11 +335,7 @@ func (m *mcpRegistry) subscriptionSources(filter mcp.SubscriptionFilter) (subscr
 	}
 	if filter.ResourcesListChanged {
 		hasFilter = true
-		if m.taskSvc != nil && m.taskSvc.taskMgr != nil {
-			sources.taskC = m.taskSvc.taskMgr.Changed()
-		} else {
-			return subscriptionSources{}, errors.New("task subscription notifier unavailable")
-		}
+		sources.taskC = m.taskSvc.taskMgr.Changed()
 		sources.repoC = m.serverConfig.repoSvc.Changed()
 		sources.repoStatusC = m.serverConfig.repoStatus.Changed()
 		sources.resourcesListChanged = true

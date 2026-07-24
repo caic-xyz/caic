@@ -315,12 +315,12 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 			Kind: v1.EventKindRateLimit,
 			Ts:   ts,
 			RateLimit: &v1.EventRateLimit{
-				Status:          m.Status,
-				ResetsAt:        epochSecondsToTime(m.ResetsAt),
+				Status:          v1.EventRateLimitStatus(m.Status),
+				ResetsAt:        m.ResetsAt,
 				RateLimitType:   m.RateLimitType,
 				Utilization:     m.Utilization,
 				IsUsingOverage:  m.IsUsingOverage,
-				OverageResetsAt: epochSecondsToTime(m.OverageResetsAt),
+				OverageResetsAt: m.OverageResetsAt,
 			},
 		}}
 	default:
@@ -364,15 +364,6 @@ func TodoItems(items []agent.TodoItem) []v1.TodoItem {
 // MarshalEvent marshals an EventMessage.
 func MarshalEvent(ev *v1.EventMessage) ([]byte, error) {
 	return json.Marshal(ev)
-}
-
-func epochSecondsToTime(seconds float64) time.Time {
-	if seconds <= 0 {
-		return time.Time{}
-	}
-	sec := int64(seconds)
-	nsec := int64((seconds - float64(sec)) * 1e9)
-	return time.Unix(sec, nsec).UTC()
 }
 
 // toolInputProbe extracts run_in_background from a tool's raw JSON input.

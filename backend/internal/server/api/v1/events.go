@@ -291,13 +291,24 @@ type EventWidgetDelta struct {
 
 // EventRateLimit is emitted when the agent's rate limit status changes.
 type EventRateLimit struct {
-	Status          string    `json:"status"`                   // "allowed", "allowed_warning", "rejected".
-	ResetsAt        time.Time `json:"resetsAt,omitzero"`        // When the limit resets; zero if unknown.
-	RateLimitType   string    `json:"rateLimitType"`            // "five_hour", "seven_day", etc.
-	Utilization     float64   `json:"utilization"`              // 0.0–1.0.
-	IsUsingOverage  bool      `json:"isUsingOverage,omitempty"` // True when extra/overage usage is active.
-	OverageResetsAt time.Time `json:"overageResetsAt,omitzero"` // When overage resets; zero if not using overage.
+	Status          EventRateLimitStatus `json:"status"`
+	ResetsAt        time.Time            `json:"resetsAt,omitzero"`        // When the limit resets; zero if unknown.
+	RateLimitType   string               `json:"rateLimitType"`            // "five_hour", "seven_day", etc.
+	Utilization     float64              `json:"utilization"`              // 0.0–1.0.
+	IsUsingOverage  bool                 `json:"isUsingOverage,omitempty"` // True when extra/overage usage is active.
+	OverageResetsAt time.Time            `json:"overageResetsAt,omitzero"` // When overage resets; zero if not using overage.
 }
+
+// EventRateLimitStatus describes whether a rate-limited request was accepted
+// or rejected.
+type EventRateLimitStatus string
+
+// Event rate-limit statuses.
+const (
+	EventRateLimitStatusAllowed        EventRateLimitStatus = "allowed"
+	EventRateLimitStatusAllowedWarning EventRateLimitStatus = "allowed_warning"
+	EventRateLimitStatusRejected       EventRateLimitStatus = "rejected"
+)
 
 // EventStats is a runtime resource usage snapshot emitted periodically.
 type EventStats struct {

@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/maruel/genai/providers/claudecode"
 
@@ -216,13 +217,19 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker, fw *jsonutil.FieldW
 		if err := unmarshalOutput(line, &w, "OutputRateLimitEventMsg", fw); err != nil {
 			return nil, err
 		}
+		// Claude Code rate-limit events describe its OAuth subscription. Keep
+		// them under claudecode rather than anthropic, which represents direct
+		// Anthropic API usage and has independent quotas.
 		return []agent.Message{&agent.RateLimitMessage{
-			Status:          string(w.RateLimitInfo.Status),
-			ResetsAt:        w.RateLimitInfo.ResetsAt,
+			Status:          agent.RateLimitStatus(w.RateLimitInfo.Status),
+			ResetsAt:        epochSecondsToTime(w.RateLimitInfo.ResetsAt),
 			RateLimitType:   string(w.RateLimitInfo.RateLimitType),
 			Utilization:     w.RateLimitInfo.Utilization,
 			IsUsingOverage:  w.RateLimitInfo.IsUsingOverage,
-			OverageResetsAt: w.RateLimitInfo.OverageResetsAt,
+			OverageResetsAt: epochSecondsToTime(w.RateLimitInfo.OverageResetsAt),
+			QuotaProvider:   agent.QuotaProviderClaudeCode,
+			QuotaLabel:      "Claude Code",
+			QuotaWindow:     canonicalQuotaWindow(w.RateLimitInfo.RateLimitType),
 		}}, nil
 	case claudecode.OutputControlRequest:
 		return parseControlRequest(line, fw)
@@ -252,6 +259,32 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker, fw *jsonutil.FieldW
 		return []agent.Message{&m}, nil
 	default:
 		return []agent.Message{&agent.RawMessage{MessageType: string(env.Type), Raw: append([]byte(nil), line...)}}, nil
+	}
+}
+
+func epochSecondsToTime(seconds float64) time.Time {
+	if seconds <= 0 {
+		return time.Time{}
+	}
+	sec := int64(seconds)
+	nsec := int64((seconds - float64(sec)) * 1e9)
+	return time.Unix(sec, nsec).UTC()
+}
+
+// canonicalQuotaWindow translates Claude Code's protocol-specific window type
+// to the provider-neutral identifier used by the usage tracker.
+func canonicalQuotaWindow(rateLimitType claudecode.RateLimitType) string {
+	switch rateLimitType {
+	case claudecode.RateLimitFiveHour:
+		return "5h"
+	case claudecode.RateLimitSevenDay, claudecode.RateLimitSevenDayOpus, claudecode.RateLimitSevenDaySonnet, claudecode.RateLimitSevenDayOverage:
+		return "7d"
+	case claudecode.RateLimitOverage:
+		// Overage is a pay-as-you-go billing window, not one of the
+		// subscription windows fetched as 5h or 7d.
+		return "overage"
+	default:
+		return string(rateLimitType)
 	}
 }
 

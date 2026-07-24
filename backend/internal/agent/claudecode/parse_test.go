@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	genclaudecode "github.com/maruel/genai/providers/claudecode"
 
@@ -1035,20 +1036,56 @@ func TestParseMessage(t *testing.T) {
 		if !ok {
 			t.Fatalf("got %T, want *agent.RateLimitMessage", msgs[0])
 		}
-		if rl.Status != "allowed_warning" {
-			t.Errorf("status = %q, want %q", rl.Status, "allowed_warning")
+		if rl.Status != agent.RateLimitStatusAllowedWarning {
+			t.Errorf("status = %q, want %q", rl.Status, agent.RateLimitStatusAllowedWarning)
 		}
-		if rl.ResetsAt != 1711000000 {
-			t.Errorf("resets_at = %v, want 1711000000", rl.ResetsAt)
+		wantReset := time.Unix(1711000000, 0).UTC()
+		if !rl.ResetsAt.Equal(wantReset) {
+			t.Errorf("resets_at = %v, want %v", rl.ResetsAt, wantReset)
 		}
-		if rl.RateLimitType != "five_hour" {
-			t.Errorf("rate_limit_type = %q, want %q", rl.RateLimitType, "five_hour")
+		if rl.RateLimitType != string(genclaudecode.RateLimitFiveHour) {
+			t.Errorf("rate_limit_type = %q, want %q", rl.RateLimitType, genclaudecode.RateLimitFiveHour)
+		}
+		if rl.QuotaProvider != agent.QuotaProviderClaudeCode || rl.QuotaLabel != "Claude Code" || rl.QuotaWindow != "5h" {
+			t.Errorf("canonical quota = (%q, %q, %q), want (%q, Claude Code, 5h)", rl.QuotaProvider, rl.QuotaLabel, rl.QuotaWindow, agent.QuotaProviderClaudeCode)
 		}
 		if rl.Utilization != 0.85 {
 			t.Errorf("utilization = %v, want 0.85", rl.Utilization)
 		}
 		if rl.IsUsingOverage {
 			t.Error("is_using_overage = true, want false")
+		}
+	})
+	t.Run("RateLimitWindowCanonicalization", func(t *testing.T) {
+		t.Parallel()
+		tests := []struct {
+			name      string
+			wire      genclaudecode.RateLimitType
+			canonical string
+		}{
+			{name: "FiveHour", wire: genclaudecode.RateLimitFiveHour, canonical: "5h"},
+			{name: "SevenDay", wire: genclaudecode.RateLimitSevenDay, canonical: "7d"},
+			{name: "SevenDayOpus", wire: genclaudecode.RateLimitSevenDayOpus, canonical: "7d"},
+			{name: "SevenDaySonnet", wire: genclaudecode.RateLimitSevenDaySonnet, canonical: "7d"},
+			{name: "SevenDayOverageIncluded", wire: genclaudecode.RateLimitSevenDayOverage, canonical: "7d"},
+			{name: "Overage", wire: genclaudecode.RateLimitOverage, canonical: "overage"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
+				line := `{"type":"rate_limit_event","uuid":"u1","session_id":"s1","rate_limit_info":{"status":"allowed","rateLimitType":"` + string(tt.wire) + `"}}`
+				msgs, err := parseMessage([]byte(line), nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				rl, ok := msgs[0].(*agent.RateLimitMessage)
+				if !ok {
+					t.Fatalf("message = %T, want *agent.RateLimitMessage", msgs[0])
+				}
+				if rl.QuotaWindow != tt.canonical {
+					t.Errorf("QuotaWindow = %q, want %q", rl.QuotaWindow, tt.canonical)
+				}
+			})
 		}
 	})
 	t.Run("RateLimitEventOverage", func(t *testing.T) {
@@ -1067,17 +1104,21 @@ func TestParseMessage(t *testing.T) {
 		if !ok {
 			t.Fatalf("got %T, want *agent.RateLimitMessage", msgs[0])
 		}
-		if rl.Status != "rejected" {
-			t.Errorf("status = %q, want %q", rl.Status, "rejected")
+		if rl.Status != agent.RateLimitStatusRejected {
+			t.Errorf("status = %q, want %q", rl.Status, agent.RateLimitStatusRejected)
 		}
-		if rl.RateLimitType != "five_hour" {
-			t.Errorf("rate_limit_type = %q, want %q", rl.RateLimitType, "five_hour")
+		if rl.RateLimitType != string(genclaudecode.RateLimitFiveHour) {
+			t.Errorf("rate_limit_type = %q, want %q", rl.RateLimitType, genclaudecode.RateLimitFiveHour)
+		}
+		if rl.QuotaProvider != agent.QuotaProviderClaudeCode || rl.QuotaWindow != "5h" {
+			t.Errorf("canonical quota = (%q, %q), want (%q, 5h)", rl.QuotaProvider, rl.QuotaWindow, agent.QuotaProviderClaudeCode)
 		}
 		if !rl.IsUsingOverage {
 			t.Error("is_using_overage = false, want true")
 		}
-		if rl.OverageResetsAt != 1777593600 {
-			t.Errorf("overage_resets_at = %v, want 1777593600", rl.OverageResetsAt)
+		wantOverageReset := time.Unix(1777593600, 0).UTC()
+		if !rl.OverageResetsAt.Equal(wantOverageReset) {
+			t.Errorf("overage_resets_at = %v, want %v", rl.OverageResetsAt, wantOverageReset)
 		}
 	})
 	t.Run("RateLimitEventMinimal", func(t *testing.T) {
@@ -1095,11 +1136,11 @@ func TestParseMessage(t *testing.T) {
 		if !ok {
 			t.Fatalf("got %T, want *agent.RateLimitMessage", msgs[0])
 		}
-		if rl.Status != "rejected" {
-			t.Errorf("status = %q, want %q", rl.Status, "rejected")
+		if rl.Status != agent.RateLimitStatusRejected {
+			t.Errorf("status = %q, want %q", rl.Status, agent.RateLimitStatusRejected)
 		}
-		if rl.ResetsAt != 0 {
-			t.Errorf("resets_at = %v, want 0", rl.ResetsAt)
+		if !rl.ResetsAt.IsZero() {
+			t.Errorf("resets_at = %v, want zero", rl.ResetsAt)
 		}
 	})
 	t.Run("UnknownFieldsForwardCompat", func(t *testing.T) {

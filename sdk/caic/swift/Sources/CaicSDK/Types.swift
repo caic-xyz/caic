@@ -150,6 +150,28 @@ public struct EventKind: Codable, Equatable, Hashable {
     }
 }
 
+public struct EventRateLimitStatus: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let Allowed = EventRateLimitStatus("allowed")
+    public static let AllowedWarning = EventRateLimitStatus("allowed_warning")
+    public static let Rejected = EventRateLimitStatus("rejected")
+
+    public static func other(_ value: String) -> EventRateLimitStatus { EventRateLimitStatus(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
 public struct EventToolInputKind: Codable, Equatable, Hashable {
     public let value: String
 
@@ -269,6 +291,52 @@ public struct Platform: Codable, Equatable, Hashable {
     public static let LinuxAMD64 = Platform("linux/amd64")
 
     public static func other(_ value: String) -> Platform { Platform(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
+public struct ProviderAuthKind: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let OAuth = ProviderAuthKind("oauth")
+    public static let APIKey = ProviderAuthKind("apikey")
+
+    public static func other(_ value: String) -> ProviderAuthKind { ProviderAuthKind(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
+public struct QuotaProvider: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let Anthropic = QuotaProvider("anthropic")
+    public static let ClaudeCode = QuotaProvider("claudecode")
+    public static let Codex = QuotaProvider("codex")
+    public static let DeepSeek = QuotaProvider("deepseek")
+    public static let OpenRouter = QuotaProvider("openrouter")
+    public static let Xiaomi = QuotaProvider("xiaomi")
+
+    public static func other(_ value: String) -> QuotaProvider { QuotaProvider(value) }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.singleValueContainer()
@@ -680,6 +748,13 @@ public struct RuntimeInstance: Codable {
     public let vncPort: Int?
 }
 
+/// TaskRateLimit is the current quota block resolved by the backend for one task.
+public struct TaskRateLimit: Codable {
+    public let blocked: Bool
+    public let window: String?
+    public let resetsAt: ISOTimestamp?
+}
+
 /// Task is the JSON representation sent to the frontend.
 public struct Task: Codable {
     public let id: String
@@ -733,6 +808,8 @@ public struct Task: Codable {
     public let inPlanMode: Bool?
     public let planContent: String?
     public let runtime: RuntimeInstance
+    /// Current quota block resolved by the backend.
+    public let rateLimit: TaskRateLimit?
     /// Per-task feature flags.
     public let gitHubToken: Bool?
 }
@@ -1069,8 +1146,7 @@ public struct EventWidgetDelta: Codable {
 
 /// EventRateLimit is emitted when the agent's rate limit status changes.
 public struct EventRateLimit: Codable {
-    /// "allowed", "allowed_warning", "rejected".
-    public let status: String
+    public let status: EventRateLimitStatus
     /// When the limit resets; zero if unknown.
     public let resetsAt: ISOTimestamp?
     /// "five_hour", "seven_day", etc.
@@ -1290,14 +1366,12 @@ public struct QuotaExtraUsage: Codable {
 
 /// ProviderQuota is the quota data for one provider.
 public struct ProviderQuota: Codable {
-    /// "anthropic", "deepseek", "gemini", "openai", "codex", "openrouter", …
-    public let provider: String
+    public let provider: QuotaProvider
     /// human-readable: "Anthropic", "DeepSeek", …
     public let label: String
     /// absolute URL path to provider SVG, e.g. "/logos/anthropic.svg"
     public let logoUrl: String
-    /// "oauth" or "apikey"
-    public let authKind: String
+    public let authKind: ProviderAuthKind
     /// link to provider's usage/billing page
     public let usageUrl: String
     public let rateLimits: [QuotaRateLimit]?

@@ -14,6 +14,7 @@ import type {
   CIStatus,
   ForgeCheck,
   RuntimeInstance,
+  TaskRateLimit,
   TaskRepo,
   TaskState,
   SyncTarget,
@@ -35,7 +36,7 @@ import {
   staleStateColor,
   isCacheStale,
 } from "../formatting";
-import { formatQuotaCountdown, type QuotaCountdown } from "../quota";
+import { formatQuotaCountdown } from "../quota";
 
 export interface TaskCardProps {
   id: string;
@@ -68,7 +69,7 @@ export interface TaskCardProps {
   ciStatus?: CIStatus;
   ciChecks?: ForgeCheck[];
   autoFixPR?: boolean;
-  quotaCountdown?: QuotaCountdown;
+  rateLimit?: TaskRateLimit;
   selected: boolean;
   now: Accessor<number>;
   onClick: () => void;
@@ -543,17 +544,15 @@ export default function TaskCard(props: TaskCardProps) {
               if (props.effort) parts.push(props.effort);
               return parts.join(" · ");
             })()}
-            <Show when={props.quotaCountdown} keyed>
-              {(quota) => (
-                <>
-                  {" · "}
-                  <Tooltip text={`${quota.providerLabel} ${quota.window} quota resets at ${new Date(quota.resetsAt).toLocaleString()}`}>
-                    <span class={styles.quotaCountdown} data-testid="quota-countdown">
-                      quota resets in {formatQuotaCountdown(quota.resetsAt, props.now())}
-                    </span>
-                  </Tooltip>
-                </>
-              )}
+            <Show when={props.rateLimit?.blocked}>
+              <>
+                {" · "}
+                <Tooltip text={`${props.rateLimit?.window} quota resets at ${new Date(props.rateLimit?.resetsAt ?? "").toLocaleString()}`}>
+                  <span class={styles.quotaCountdown} data-testid="quota-countdown">
+                    out of quota · resets in {formatQuotaCountdown(props.rateLimit?.resetsAt ?? "", props.now())}
+                  </span>
+                </Tooltip>
+              </>
             </Show>
             <Show
               when={props.activeInputTokens + props.activeCacheReadTokens > 0}

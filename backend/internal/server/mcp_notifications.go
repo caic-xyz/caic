@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 )
@@ -98,9 +99,12 @@ func isBlocked(taskIDs map[string]struct{}, id string) bool {
 }
 
 func taskQuotaBlocked(task *v1.Task, usage *v1.UsageResp, now time.Time) bool {
+	if task.RateLimit.Blocked && task.RateLimit.ResetsAt.After(now) {
+		return true
+	}
 	for i := range usage.Providers {
 		provider := &usage.Providers[i]
-		if !taskUsesProvider(task, provider.Provider) {
+		if !taskUsesProvider(task, agent.QuotaProvider(provider.Provider)) {
 			continue
 		}
 		for _, limit := range provider.RateLimits {
@@ -112,42 +116,47 @@ func taskQuotaBlocked(task *v1.Task, usage *v1.UsageResp, now time.Time) bool {
 	return false
 }
 
-func taskUsesProvider(task *v1.Task, provider string) bool {
-	candidates := map[string]struct{}{}
-	addProviderCandidate(candidates, string(task.Harness))
+func taskUsesProvider(task *v1.Task, provider agent.QuotaProvider) bool {
+	candidates := map[agent.QuotaProvider]struct{}{}
 	switch task.Harness {
 	case v1.HarnessClaude:
-		addProviderCandidate(candidates, "anthropic")
+		addProviderCandidate(candidates, agent.QuotaProviderAnthropic)
+		addProviderCandidate(candidates, agent.QuotaProviderClaudeCode)
 	case v1.HarnessCodex:
-		addProviderCandidate(candidates, "codex")
-		addProviderCandidate(candidates, "openai")
-	case v1.HarnessOpenCode:
-		addProviderCandidate(candidates, "opencode")
-	case v1.HarnessPi:
-		addProviderCandidate(candidates, "pi")
+		addProviderCandidate(candidates, agent.QuotaProviderCodex)
+	case v1.HarnessOpenCode, v1.HarnessPi:
+		// These harnesses select the billing provider through the task model.
 	}
-	model := strings.ToLower(strings.TrimSpace(task.Model))
-	if model != "" {
-		addProviderCandidate(candidates, strings.FieldsFunc(model, func(r rune) bool { return r == '/' || r == ':' })[0])
-		switch {
-		case strings.HasPrefix(model, "claude-") || strings.Contains(model, "/claude-"):
-			addProviderCandidate(candidates, "anthropic")
-		case strings.HasPrefix(model, "gpt-"), strings.HasPrefix(model, "o1"), strings.HasPrefix(model, "o3"), strings.HasPrefix(model, "o4"):
-			addProviderCandidate(candidates, "openai")
-		case strings.HasPrefix(model, "deepseek"):
-			addProviderCandidate(candidates, "deepseek")
-		case strings.HasPrefix(model, "gemini"):
-			addProviderCandidate(candidates, "gemini")
-		case strings.Contains(model, "mimo"):
-			addProviderCandidate(candidates, "xiaomi")
-		}
-	}
-	_, ok := candidates[strings.ToLower(provider)]
+	addModelProviderCandidate(candidates, task.Model)
+	_, ok := candidates[provider]
 	return ok
 }
 
-func addProviderCandidate(candidates map[string]struct{}, value string) {
-	if value = strings.ToLower(strings.TrimSpace(value)); value != "" {
+func addModelProviderCandidate(candidates map[agent.QuotaProvider]struct{}, model string) {
+	if model == "" {
+		return
+	}
+	if provider, _, ok := strings.Cut(model, "/"); ok {
+		addProviderCandidate(candidates, agent.QuotaProvider(provider))
+		return
+	}
+	if provider, _, ok := strings.Cut(model, ":"); ok {
+		addProviderCandidate(candidates, agent.QuotaProvider(provider))
+		return
+	}
+	switch {
+	case strings.HasPrefix(model, "claude-"):
+		addProviderCandidate(candidates, agent.QuotaProviderAnthropic)
+	case strings.HasPrefix(model, "deepseek"):
+		addProviderCandidate(candidates, agent.QuotaProviderDeepSeek)
+	case strings.Contains(model, "mimo"):
+		addProviderCandidate(candidates, agent.QuotaProviderXiaomi)
+	}
+}
+
+func addProviderCandidate(candidates map[agent.QuotaProvider]struct{}, value agent.QuotaProvider) {
+	value = agent.QuotaProvider(strings.ToLower(strings.TrimSpace(string(value))))
+	if value.Valid() {
 		candidates[value] = struct{}{}
 	}
 }

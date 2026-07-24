@@ -187,6 +187,8 @@ graph TD
   pkg_internal_task_taskmgr --> pkg_internal_repo_repowork
   pkg_internal_task_taskmgr --> pkg_internal_runtime
   pkg_internal_task_taskmgr --> pkg_internal_task
+  pkg_internal_task_taskmgr --> pkg_internal_usage
+  pkg_internal_usage --> pkg_internal_agent
 ```
 
 ## Agent Backends
@@ -475,7 +477,9 @@ graph TD
   pkg_internal_task_taskmgr --> pkg_internal_repo_repowork
   pkg_internal_task_taskmgr --> pkg_internal_runtime
   pkg_internal_task_taskmgr --> pkg_internal_task
+  pkg_internal_task_taskmgr --> pkg_internal_usage
   pkg_internal_task_tasktest --> pkg_internal_agent
+  pkg_internal_usage --> pkg_internal_agent
 ```
 
 ## Package Dependencies
@@ -528,9 +532,9 @@ graph TD
 | `internal/server/ipgeo` | None |
 | `internal/smoketest` | `internal/agent`, `internal/agent/harness`, `internal/forge`, `internal/runtime`, `internal/task`, `internal/usage` |
 | `internal/task` | `internal/agent`, `internal/agent/harness`, `internal/forge`, `internal/jsonutil`, `internal/repo/repowork`, `internal/runtime` |
-| `internal/task/taskmgr` | `internal/agent`, `internal/agent/harness`, `internal/preferences`, `internal/repo/repowork`, `internal/runtime`, `internal/task` |
+| `internal/task/taskmgr` | `internal/agent`, `internal/agent/harness`, `internal/preferences`, `internal/repo/repowork`, `internal/runtime`, `internal/task`, `internal/usage` |
 | `internal/task/tasktest` | `internal/agent` |
-| `internal/usage` | None |
+| `internal/usage` | `internal/agent` |
 <!-- END GENERATED PACKAGE DEPENDENCIES -->
 
 ## Layering Notes

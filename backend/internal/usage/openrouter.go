@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
 const openRouterCreditsURL = "https://openrouter.ai/api/v1/credits" //nolint:gosec // URL, not a credential
@@ -38,7 +40,7 @@ func NewOpenRouterFetcher(apiKey string) *OpenRouterFetcher {
 		return nil
 	}
 	return &OpenRouterFetcher{
-		baseFetcher: newBaseFetcher("openrouter", "OpenRouter", "apikey", "https://openrouter.ai/settings/credits"),
+		baseFetcher: newBaseFetcher(agent.QuotaProviderOpenRouter, "OpenRouter", AuthKindAPIKey, "https://openrouter.ai/settings/credits"),
 		client:      &http.Client{Timeout: 10 * time.Second},
 		apiKey:      apiKey,
 	}

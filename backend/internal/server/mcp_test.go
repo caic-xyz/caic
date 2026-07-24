@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -306,7 +307,7 @@ func TestMCPHandlers(t *testing.T) {
 		}
 	})
 
-	t.Run("subscriptionChangesSignalTaskResource", func(t *testing.T) {
+	t.Run("subscriptionChangesSignalTaskAndNotificationResources", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
 		registry, ok := s.mcpHandlers.protocol.Registry.(*mcpRegistry)
@@ -314,20 +315,24 @@ func TestMCPHandlers(t *testing.T) {
 			t.Fatalf("registry type = %T", s.mcpHandlers.protocol.Registry)
 		}
 		ctx, cancel := context.WithCancel(t.Context())
-		t.Cleanup(cancel)
-		changes, err := registry.SubscribeResourceUpdates(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{"caic://tasks"}})
+		changes, err := registry.SubscribeResourceUpdates(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{"caic://tasks", "gomode://notifications"}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		got := make(chan mcp.ResourceUpdate, 1)
 		done := make(chan struct{})
-		go func() {
+		var wg sync.WaitGroup
+		wg.Go(func() {
 			defer close(done)
 			for update := range changes {
 				got <- update
 				return
 			}
-		}()
+		})
+		t.Cleanup(func() {
+			cancel()
+			wg.Wait()
+		})
 		s.taskMgr.NotifyTaskChange()
 		var update mcp.ResourceUpdate
 		select {
@@ -335,8 +340,8 @@ func TestMCPHandlers(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatal("timed out waiting for subscription change")
 		}
-		if !slices.Equal(update.ResourceURIs, []string{"caic://tasks"}) {
-			t.Fatalf("update resource uris = %#v, want caic://tasks", update.ResourceURIs)
+		if !slices.Equal(update.ResourceURIs, []string{"caic://tasks", "gomode://notifications"}) {
+			t.Fatalf("update resource uris = %#v, want task and notification resources", update.ResourceURIs)
 		}
 		cancel()
 		select {

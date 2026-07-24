@@ -133,4 +133,18 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 			t.Fatalf("got %d events, want 0", len(events))
 		}
 	})
+
+	t.Run("rate limit uses API status", func(t *testing.T) {
+		t.Parallel()
+		tracker := NewToolTimingTracker(harness.Claude, nil)
+		events := tracker.ConvertMessage(&agent.RateLimitMessage{
+			Status: agent.RateLimitStatusAllowedWarning,
+		}, time.Unix(1, 0))
+		if len(events) != 1 {
+			t.Fatalf("got %d events, want 1", len(events))
+		}
+		if events[0].RateLimit == nil || events[0].RateLimit.Status != v1.EventRateLimitStatusAllowedWarning {
+			t.Fatalf("rate limit status = %#v, want %q", events[0].RateLimit, v1.EventRateLimitStatusAllowedWarning)
+		}
+	})
 }

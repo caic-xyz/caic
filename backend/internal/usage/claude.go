@@ -1,4 +1,4 @@
-// Anthropic OAuth usage quota fetcher with caching, credential file watching, and exponential backoff.
+// Claude Code OAuth subscription quota fetcher with caching, credential file watching, and exponential backoff.
 
 package usage
 
@@ -13,10 +13,11 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/fsnotify/fsnotify"
 )
 
-const anthropicUsageAPIURL = "https://api.anthropic.com/api/oauth/usage"
+const claudeCodeUsageAPIURL = "https://api.anthropic.com/api/oauth/usage"
 
 // anthropicUsagePayload mirrors the Anthropic GET /api/oauth/usage response.
 type anthropicUsagePayload struct {
@@ -37,10 +38,10 @@ type anthropicExtraUsage struct {
 	Utilization  float64 `json:"utilization"`
 }
 
-// AnthropicFetcher fetches and caches Anthropic OAuth usage quota data. It
+// ClaudeCodeFetcher fetches and caches Claude Code OAuth subscription quota data. It
 // watches ~/.claude/.credentials.json for token changes and applies
 // exponential backoff when fetches fail.
-type AnthropicFetcher struct {
+type ClaudeCodeFetcher struct {
 	baseFetcher
 
 	client   *http.Client
@@ -49,43 +50,43 @@ type AnthropicFetcher struct {
 	token    string
 }
 
-// NewAnthropicFetcher creates a fetcher and starts watching
+// NewClaudeCodeFetcher creates a fetcher and starts watching
 // ~/.claude/.credentials.json for token changes. Returns nil if the home
 // directory cannot be determined. The watcher goroutine exits when ctx is
 // cancelled.
-func NewAnthropicFetcher(ctx context.Context) *AnthropicFetcher {
+func NewClaudeCodeFetcher(ctx context.Context) *ClaudeCodeFetcher {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		slog.WarnContext(ctx, "cannot determine home dir; Anthropic usage disabled", "err", err)
+		slog.WarnContext(ctx, "cannot determine home dir; Claude Code usage disabled", "err", err)
 		return nil
 	}
 	credPath := filepath.Join(home, ".claude", ".credentials.json")
-	token := readAnthropicToken(credPath)
+	token := readClaudeCodeToken(credPath)
 	if token == "" {
-		slog.InfoContext(ctx, "no Claude OAuth token found; Anthropic usage disabled (will watch for credentials)")
+		slog.InfoContext(ctx, "no Claude Code OAuth token found; usage disabled (will watch for credentials)")
 	}
 
-	f := &AnthropicFetcher{
-		baseFetcher: newBaseFetcher("anthropic", "Anthropic", "oauth", "https://claude.ai/settings/usage"),
+	f := &ClaudeCodeFetcher{
+		baseFetcher: newBaseFetcher(agent.QuotaProviderClaudeCode, "Claude Code", AuthKindOAuth, "https://claude.ai/settings/usage"),
 		client:      &http.Client{Timeout: 10 * time.Second},
 		token:       token,
 		credPath:    credPath,
 	}
 
 	if err := f.startWatcher(ctx); err != nil {
-		slog.WarnContext(ctx, "failed to watch Anthropic credentials file", "err", err)
+		slog.WarnContext(ctx, "failed to watch Claude Code credentials file", "err", err)
 	}
 	return f
 }
 
 // Get returns the cached quota data, refreshing if stale. Returns nil when
 // no token is available.
-func (f *AnthropicFetcher) Get(ctx context.Context) *ProviderQuota {
+func (f *ClaudeCodeFetcher) Get(ctx context.Context) *ProviderQuota {
 	return f.getIf(ctx, func() bool { return f.token != "" }, f.fetch)
 }
 
-func (f *AnthropicFetcher) fetch(ctx context.Context) (*ProviderQuota, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, anthropicUsageAPIURL, http.NoBody)
+func (f *ClaudeCodeFetcher) fetch(ctx context.Context) (*ProviderQuota, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, claudeCodeUsageAPIURL, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +140,7 @@ func (f *AnthropicFetcher) fetch(ctx context.Context) (*ProviderQuota, error) {
 	return out, nil
 }
 
-func (f *AnthropicFetcher) startWatcher(ctx context.Context) error {
+func (f *ClaudeCodeFetcher) startWatcher(ctx context.Context) error {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		return err
@@ -154,7 +155,7 @@ func (f *AnthropicFetcher) startWatcher(ctx context.Context) error {
 	return nil
 }
 
-func (f *AnthropicFetcher) watchLoop(ctx context.Context) {
+func (f *ClaudeCodeFetcher) watchLoop(ctx context.Context) {
 	defer func() { _ = f.watcher.Close() }()
 	base := filepath.Base(f.credPath)
 	for {
@@ -181,8 +182,8 @@ func (f *AnthropicFetcher) watchLoop(ctx context.Context) {
 	}
 }
 
-func (f *AnthropicFetcher) onCredentialsChanged() {
-	token := readAnthropicToken(f.credPath)
+func (f *ClaudeCodeFetcher) onCredentialsChanged() {
+	token := readClaudeCodeToken(f.credPath)
 	if token == "" {
 		return
 	}
@@ -196,10 +197,10 @@ func (f *AnthropicFetcher) onCredentialsChanged() {
 	f.errorAt = time.Time{}
 	f.cached = nil
 	f.fetchAt = time.Time{}
-	slog.Info("credentials updated, Anthropic token refreshed")
+	slog.Info("credentials updated, Claude Code token refreshed")
 }
 
-func readAnthropicToken(credPath string) string {
+func readClaudeCodeToken(credPath string) string {
 	data, err := os.ReadFile(credPath) //nolint:gosec // credPath from os.UserHomeDir
 	if err != nil {
 		return ""

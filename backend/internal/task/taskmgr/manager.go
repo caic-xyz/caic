@@ -35,6 +35,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	quotausage "github.com/caic-xyz/caic/backend/internal/usage"
 )
 
 // errTaskNotFound is returned when a task ID doesn't exist.
@@ -85,17 +86,22 @@ type Config struct {
 	Prefs               *preferences.Store
 	Provider            genai.Provider // nil-safe
 	WorkspaceRegistry   *repowork.Registry
+	QuotaTracker        *quotausage.Tracker
 }
 
 // Manager owns task lifecycle state, instance adoption, session watching, and
 // stats streaming.
 type Manager struct {
+	Runtimes *runtime.Router
+	// QuotaTracker holds canonical quota updates received from tasks.
+	QuotaTracker *quotausage.Tracker
+
 	// Immutable.
 	log                 *slog.Logger
 	serverCtx           context.Context // lifetime of the Manager; for goroutines that outlive requests
+	cancelServerCtx     context.CancelFunc
 	logDir              string
 	cacheDir            string
-	Runtimes            *runtime.Router
 	backends            map[harness.Name]agent.Backend
 	eventReplayFactory  func(logPath string, h harness.Name) (task.EventReplayWriter, error)
 	harnessEnv          map[string][]string
@@ -104,6 +110,11 @@ type Manager struct {
 	provider            genai.Provider
 	workspaceRegistry   *repowork.Registry
 	relay               relayReader
+
+	// Guarded by quotaWatchMu.
+	quotaWatchMu     sync.Mutex
+	quotaWatchers    sync.WaitGroup
+	quotaWatchClosed bool
 
 	// Guarded by mu.
 	mu      sync.Mutex
@@ -115,16 +126,23 @@ type Manager struct {
 // Register each repo workspace in the configured WorkspaceRegistry, then Start.
 func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passed once at construction
 	log := slog.Default().With(slog.String("cmp", "taskmgr"))
+	serverCtx, cancelServerCtx := context.WithCancel(cfg.ServerCtx)
 	workspaceRegistry := cfg.WorkspaceRegistry
 	if workspaceRegistry == nil {
 		workspaceRegistry = repowork.NewRegistry(cfg.ServerCtx, cfg.Runtimes)
 	}
+	quotaTracker := cfg.QuotaTracker
+	if quotaTracker == nil {
+		quotaTracker = quotausage.NewTracker()
+	}
 	m := &Manager{
 		log:                 log,
-		serverCtx:           cfg.ServerCtx,
+		Runtimes:            cfg.Runtimes,
+		QuotaTracker:        quotaTracker,
+		serverCtx:           serverCtx,
+		cancelServerCtx:     cancelServerCtx,
 		logDir:              cfg.LogDir,
 		cacheDir:            cfg.CacheDir,
-		Runtimes:            cfg.Runtimes,
 		backends:            cfg.Backends,
 		eventReplayFactory:  cfg.EventReplayFactory,
 		harnessEnv:          cfg.HarnessEnv,
@@ -144,6 +162,17 @@ func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passe
 		})
 	}
 	return m
+}
+
+// Close stops quota-event watchers and waits for their live task subscriptions
+// to close. It currently always returns nil.
+func (m *Manager) Close() error {
+	m.quotaWatchMu.Lock()
+	m.quotaWatchClosed = true
+	m.cancelServerCtx()
+	m.quotaWatchMu.Unlock()
+	m.quotaWatchers.Wait()
+	return nil
 }
 
 // Start launches background goroutines: instance event watching and stats streaming.
@@ -1427,6 +1456,48 @@ func (m *Manager) insertEntry(id string, entry *Entry) {
 	m.tasks[id] = entry
 	m.taskChanged()
 	m.mu.Unlock()
+	m.watchRateLimitEvents(entry.Task())
+}
+
+// watchRateLimitEvents forwards task quota changes to the shared change
+// channel, letting task and usage SSE subscribers refresh immediately.
+func (m *Manager) watchRateLimitEvents(t *task.Task) {
+	m.quotaWatchMu.Lock()
+	defer m.quotaWatchMu.Unlock()
+	if m.quotaWatchClosed {
+		return
+	}
+	history, live, _ := t.SubscribeRateLimits(m.serverCtx)
+	// Subscribe before processing history so events arriving during setup are
+	// buffered on live. Apply each event directly: the task snapshot retains
+	// only its latest rate limit, while the tracker needs every quota window.
+	historyChanged := false
+	for _, rateLimit := range history {
+		if m.recordRateLimitMessage(rateLimit) {
+			historyChanged = true
+		}
+	}
+	if historyChanged {
+		m.NotifyTaskChange()
+	}
+	m.quotaWatchers.Go(func() {
+		for rateLimit := range live {
+			m.recordRateLimitMessage(rateLimit)
+			m.NotifyTaskChange()
+		}
+	})
+}
+
+func (m *Manager) recordRateLimitMessage(rateLimit *agent.RateLimitMessage) bool {
+	return m.QuotaTracker.Apply(&quotausage.TaskQuotaUpdate{
+		Provider:      rateLimit.QuotaProvider,
+		ProviderLabel: rateLimit.QuotaLabel,
+		Window:        rateLimit.QuotaWindow,
+		Status:        rateLimit.Status,
+		UsedPct:       rateLimit.Utilization * 100,
+		ResetsAt:      rateLimit.ResetsAt,
+		ObservedAt:    time.Now().UTC(),
+	})
 }
 
 // taskChanged closes the current changed channel and replaces it.
@@ -1814,6 +1885,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 	m.tasks[t.ID.String()] = entry
 	m.taskChanged()
 	m.mu.Unlock()
+	m.watchRateLimitEvents(t)
 
 	m.log.InfoContext(ctx, "instance", "msg", "adopted",
 		"repo", ri.RelPath, "instance", c.ID, "br", branch,

@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
 const deepseekBalanceURL = "https://api.deepseek.com/user/balance"
@@ -40,7 +42,7 @@ func NewDeepSeekFetcher(apiKey string) *DeepSeekFetcher {
 		return nil
 	}
 	return &DeepSeekFetcher{
-		baseFetcher: newBaseFetcher("deepseek", "DeepSeek", "apikey", "https://platform.deepseek.com/usage"),
+		baseFetcher: newBaseFetcher(agent.QuotaProviderDeepSeek, "DeepSeek", AuthKindAPIKey, "https://platform.deepseek.com/usage"),
 		client:      &http.Client{Timeout: 10 * time.Second},
 		apiKey:      apiKey,
 	}

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
@@ -19,8 +20,9 @@ import (
 )
 
 type usageHandlers struct {
-	taskMgr  *taskmgr.Manager
-	fetchers []usage.ProviderFetcher
+	taskMgr      *taskmgr.Manager
+	fetchers     []usage.ProviderFetcher
+	quotaTracker *usage.Tracker
 }
 
 // handleEvents streams usage snapshots as SSE. It reacts to task changes
@@ -75,17 +77,25 @@ func (h *usageHandlers) handleGetUsage(w http.ResponseWriter, r *http.Request) {
 // buildResp assembles the full usage response: local task cost
 // aggregation plus per-provider quota data from each registered fetcher.
 func (h *usageHandlers) buildResp(ctx context.Context) v1.UsageResp {
-	local := v1conv.LocalUsage(h.taskMgr, time.Now())
+	now := time.Now()
+	local := v1conv.LocalUsage(h.taskMgr, now)
 
 	resp := v1.UsageResp{Local: local}
 	detached := context.WithoutCancel(ctx)
+	providerQuotas := make([]usage.ProviderQuota, 0, len(h.fetchers))
+	usageURLs := make(map[agent.QuotaProvider]string, len(h.fetchers))
 	for _, f := range h.fetchers {
 		if q := f.Get(detached); q != nil {
-			out := v1conv.ProviderQuota(q)
-			out.LogoURL = "/logos/" + out.Provider + ".svg"
-			out.UsageURL = f.UsageURL()
-			resp.Providers = append(resp.Providers, out)
+			providerQuotas = append(providerQuotas, *q)
 		}
+		usageURLs[f.Provider()] = f.UsageURL()
+	}
+	mergedQuotas := h.quotaTracker.Merge(providerQuotas, now)
+	for i := range mergedQuotas {
+		out := v1conv.ProviderQuota(&mergedQuotas[i])
+		out.LogoURL = "/logos/" + string(out.Provider) + ".svg"
+		out.UsageURL = usageURLs[agent.QuotaProvider(out.Provider)]
+		resp.Providers = append(resp.Providers, out)
 	}
 	return resp
 }

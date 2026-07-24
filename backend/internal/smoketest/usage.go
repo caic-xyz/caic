@@ -6,25 +6,26 @@ import (
 	"context"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
 
 // fakeFetcher implements usage.ProviderFetcher with a static response.
 type fakeFetcher struct {
-	provider string
+	provider agent.QuotaProvider
 	label    string
-	authKind string
+	authKind usage.AuthKind
 	resp     usage.ProviderQuota
 }
 
 // Provider implements usage.ProviderFetcher.
-func (f *fakeFetcher) Provider() string { return f.provider }
+func (f *fakeFetcher) Provider() agent.QuotaProvider { return f.provider }
 
 // Label implements usage.ProviderFetcher.
 func (f *fakeFetcher) Label() string { return f.label }
 
 // AuthKind implements usage.ProviderFetcher.
-func (f *fakeFetcher) AuthKind() string { return f.authKind }
+func (f *fakeFetcher) AuthKind() usage.AuthKind { return f.authKind }
 
 // UsageURL implements usage.ProviderFetcher.
 func (f *fakeFetcher) UsageURL() string { return "https://example.com" }
@@ -42,13 +43,13 @@ func UsageFetchers() []usage.ProviderFetcher {
 
 	return []usage.ProviderFetcher{
 		&fakeFetcher{
-			provider: "anthropic",
+			provider: agent.QuotaProviderAnthropic,
 			label:    "Anthropic",
-			authKind: "oauth",
+			authKind: usage.AuthKindOAuth,
 			resp: usage.ProviderQuota{
-				Provider: "anthropic",
+				Provider: agent.QuotaProviderAnthropic,
 				Label:    "Anthropic",
-				AuthKind: "oauth",
+				AuthKind: usage.AuthKindOAuth,
 				RateLimits: []usage.QuotaRateLimit{
 					{Window: "5h", UsedPct: 42, ResetsAt: fiveHourReset},
 					{Window: "7d", UsedPct: 15, ResetsAt: sevenDayReset},
@@ -63,13 +64,13 @@ func UsageFetchers() []usage.ProviderFetcher {
 			},
 		},
 		&fakeFetcher{
-			provider: "codex",
+			provider: agent.QuotaProviderCodex,
 			label:    "Codex",
-			authKind: "oauth",
+			authKind: usage.AuthKindOAuth,
 			resp: usage.ProviderQuota{
-				Provider: "codex",
+				Provider: agent.QuotaProviderCodex,
 				Label:    "Codex",
-				AuthKind: "oauth",
+				AuthKind: usage.AuthKindOAuth,
 				RateLimits: []usage.QuotaRateLimit{
 					{Window: "primary", UsedPct: 68, ResetsAt: primaryReset},
 					{Window: "secondary", UsedPct: 23, ResetsAt: secondaryReset},

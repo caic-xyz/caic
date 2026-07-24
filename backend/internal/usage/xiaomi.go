@@ -4,7 +4,11 @@
 
 package usage
 
-import "context"
+import (
+	"context"
+
+	"github.com/caic-xyz/caic/backend/internal/agent"
+)
 
 // XiaomiFetcher registers the Xiaomi MiMo provider without balance data.
 // The platform (platform.xiaomimimo.com) requires Xiaomi account OAuth for
@@ -18,7 +22,7 @@ func NewXiaomiFetcher(apiKey string) *XiaomiFetcher {
 	if apiKey == "" {
 		return nil
 	}
-	return &XiaomiFetcher{baseFetcher: newBaseFetcher("xiaomi", "Xiaomi MiMo", "apikey", "https://platform.xiaomimimo.com/console/balance")}
+	return &XiaomiFetcher{baseFetcher: newBaseFetcher(agent.QuotaProviderXiaomi, "Xiaomi MiMo", AuthKindAPIKey, "https://platform.xiaomimimo.com/console/balance")}
 }
 
 // Get returns provider metadata with no balance data.

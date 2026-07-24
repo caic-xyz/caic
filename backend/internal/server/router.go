@@ -485,7 +485,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 			warnings:   d.Warnings,
 			taskSvc:    svc,
 		},
-		usageHandlers:    &usageHandlers{taskMgr: d.TaskMgr, fetchers: d.UsageFetchers},
+		usageHandlers:    &usageHandlers{taskMgr: d.TaskMgr, fetchers: d.UsageFetchers, quotaTracker: d.TaskMgr.QuotaTracker},
 		voiceHandlers:    voice,
 		webFetchHandlers: webFetch,
 		authStore:        d.AuthStore,

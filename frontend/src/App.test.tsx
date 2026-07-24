@@ -102,6 +102,13 @@ vi.mock("./AuthContext", () => ({
   }),
 }));
 
+vi.mock("./gomode/notifications", () => ({
+  requestNotificationPermission: vi.fn(),
+  notifyWaiting: vi.fn(),
+  dismissNotification: vi.fn(),
+  notifyServiceEvent: vi.fn(),
+}));
+
 vi.stubGlobal("EventSource", FakeEventSource);
 
 // Stub VoiceOverlay to avoid WebRTC/WebSocket connections in tests.
@@ -124,6 +131,7 @@ async function waitForTaskEventsSubscription() {
 import { MemoryRouter, createMemoryHistory } from "@solidjs/router";
 import { appRoutes } from "./routes";
 import * as api from "./api";
+import * as notifications from "./gomode/notifications";
 
 /** Render the full app at an initial route, returning the memory history for assertions. */
 function renderApp(initial = "/") {
@@ -191,7 +199,25 @@ afterEach(() => {
 });
 
 describe("App repo chips: No repository", () => {
-  it("moves from a purged selected task to the next task needing input first", async () => {
+  it("notifies when a waiting task's backend rate limit clears", async () => {
+    const blockedTask = makeTask({ state: "waiting", rateLimit: { blocked: true } });
+    const recoveredTask = makeTask({ state: "waiting", rateLimit: { blocked: false } });
+    renderApp();
+
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [blockedTask] });
+    dispatchSSE({ kind: "upsert", upsert: recoveredTask });
+
+    await waitFor(() => {
+      expect(notifications.notifyServiceEvent).toHaveBeenCalledWith(
+        "task1",
+        "do something quota is available",
+      { enabled: true },
+      );
+    });
+  });
+
+	it("moves from a purged selected task to the next task needing input first", async () => {
     const user = userEvent.setup();
     vi.spyOn(window, "confirm").mockReturnValue(true);
     const killed = makeTask({ id: "a3", title: "kill me", state: "running", repos: [{ name: "repos/a", branch: "main" }] });

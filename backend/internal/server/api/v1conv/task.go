@@ -4,6 +4,7 @@ package v1conv
 
 import (
 	"context"
+	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
@@ -99,6 +100,17 @@ func Task(ctx context.Context, e *taskmgr.Entry, r TaskResolvers) v1.Task {
 	}
 	out.StartedAt = t.StartedAt
 	out.TurnStartedAt = snap.TurnStartedAt
+	if snap.RateLimit.Status == "rejected" && !snap.RateLimit.IsUsingOverage && snap.RateLimit.ResetsAt.After(time.Now()) {
+		window := snap.RateLimit.QuotaWindow
+		if window == "" {
+			window = snap.RateLimit.RateLimitType
+		}
+		out.RateLimit = v1.TaskRateLimit{
+			Blocked:  true,
+			Window:   window,
+			ResetsAt: snap.RateLimit.ResetsAt,
+		}
+	}
 	out.CumulativeInputTokens = cumulativeUsage.InputTokens
 	out.CumulativeOutputTokens = cumulativeUsage.OutputTokens
 	out.CumulativeCacheCreationInputTokens = cumulativeUsage.CacheCreationInputTokens

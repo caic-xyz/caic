@@ -27,7 +27,7 @@ func usageFetchers(cfg *server.Config, ctx context.Context) []usage.ProviderFetc
 func detectProviders(ctx context.Context, coreEnv map[string]string, harnessEnv map[string][]string) []usage.ProviderFetcher {
 	var fetchers []usage.ProviderFetcher
 
-	if f := usage.NewAnthropicFetcher(ctx); f != nil {
+	if f := usage.NewClaudeCodeFetcher(ctx); f != nil {
 		fetchers = append(fetchers, f)
 	}
 	if f := usage.NewCodexFetcher(ctx); f != nil {

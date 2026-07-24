@@ -172,6 +172,17 @@ EventKind identifies the type of SSE event.
 | `rateLimit` |  |
 | `stats` |  |
 
+### EventRateLimitStatus
+
+EventRateLimitStatus describes whether a rate-limited request was accepted
+or rejected.
+
+| Value | Description |
+|-------|-------------|
+| `allowed` |  |
+| `allowed_warning` |  |
+| `rejected` |  |
+
 ### EventToolInputKind
 
 EventToolInputKind identifies a normalized tool input view.
@@ -232,6 +243,28 @@ Platform selects the runtime CPU architecture.
 | `` |  |
 | `linux/arm64` |  |
 | `linux/amd64` |  |
+
+### ProviderAuthKind
+
+ProviderAuthKind identifies a provider authentication method.
+
+| Value | Description |
+|-------|-------------|
+| `oauth` |  |
+| `apikey` |  |
+
+### QuotaProvider
+
+QuotaProvider identifies a monitored quota source.
+
+| Value | Description |
+|-------|-------------|
+| `anthropic` |  |
+| `claudecode` |  |
+| `codex` |  |
+| `deepseek` |  |
+| `openrouter` |  |
+| `xiaomi` |  |
 
 ### SyncTarget
 
@@ -635,6 +668,16 @@ RuntimeInstance holds per-task runtime metadata.
 | `sudoPassword` | `string` | SudoPassword is the random sudo password, only populated when Sudo is true. |  |
 | `vncPort` | `int` |  |  |
 
+### TaskRateLimit
+
+TaskRateLimit is the current quota block resolved by the backend for one task.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `blocked` | `boolean` |  | yes |
+| `window` | `string` |  |  |
+| `resetsAt` | `ISOTimestamp` |  |  |
+
 ### Task
 
 Task is the JSON representation sent to the frontend.
@@ -680,6 +723,7 @@ Task is the JSON representation sent to the frontend.
 | `inPlanMode` | `boolean` |  |  |
 | `planContent` | `string` |  |  |
 | `runtime` | `RuntimeInstance` |  | yes |
+| `rateLimit` | `TaskRateLimit` | Current quota block resolved by the backend. |  |
 | `gitHubToken` | `boolean` | Per-task feature flags. |  |
 
 ### BotFixPRReq
@@ -1119,7 +1163,7 @@ EventRateLimit is emitted when the agent's rate limit status changes.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `status` | `string` | "allowed", "allowed_warning", "rejected". | yes |
+| `status` | `EventRateLimitStatus` |  | yes |
 | `resetsAt` | `ISOTimestamp` | When the limit resets; zero if unknown. |  |
 | `rateLimitType` | `string` | "five_hour", "seven_day", etc. | yes |
 | `utilization` | `float64` | 0.0–1.0. | yes |
@@ -1366,10 +1410,10 @@ ProviderQuota is the quota data for one provider.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `provider` | `string` | "anthropic", "deepseek", "gemini", "openai", "codex", "openrouter", … | yes |
+| `provider` | `QuotaProvider` |  | yes |
 | `label` | `string` | human-readable: "Anthropic", "DeepSeek", … | yes |
 | `logoUrl` | `string` | absolute URL path to provider SVG, e.g. "/logos/anthropic.svg" | yes |
-| `authKind` | `string` | "oauth" or "apikey" | yes |
+| `authKind` | `ProviderAuthKind` |  | yes |
 | `usageUrl` | `string` | link to provider's usage/billing page | yes |
 | `rateLimits` | `QuotaRateLimit[]` |  |  |
 | `balance` | `QuotaBalance` |  |  |

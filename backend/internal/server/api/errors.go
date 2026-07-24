@@ -39,6 +39,7 @@ type Error struct {
 	wrappedErr error
 }
 
+// Error returns the error message, including any wrapped error.
 func (e *Error) Error() string {
 	if e.wrappedErr != nil {
 		return fmt.Sprintf("%s: %v", e.message, e.wrappedErr)

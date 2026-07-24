@@ -59,6 +59,17 @@ export const EventKindWidgetDelta: EventKind = "widgetDelta";
 export const EventKindRateLimit: EventKind = "rateLimit";
 export const EventKindStats: EventKind = "stats";
 
+export type EventRateLimitStatus =
+  | "allowed"
+  | "allowed_warning"
+  | "rejected";
+/**
+ * Supported values.
+ */
+export const EventRateLimitStatusAllowed: EventRateLimitStatus = "allowed";
+export const EventRateLimitStatusAllowedWarning: EventRateLimitStatus = "allowed_warning";
+export const EventRateLimitStatusRejected: EventRateLimitStatus = "rejected";
+
 export type EventToolInputKind =
   | "fileChanges"
   | "subagents";
@@ -296,8 +307,7 @@ export interface EventWidgetDelta {
 
 /** EventRateLimit is emitted when the agent's rate limit status changes. */
 export interface EventRateLimit {
-  /** "allowed", "allowed_warning", "rejected". */
-  status: string;
+  status: EventRateLimitStatus;
   /** When the limit resets; zero if unknown. */
   resetsAt?: ISOTimestamp;
   /** "five_hour", "seven_day", etc. */
@@ -457,6 +467,32 @@ export type Platform =
 export const PlatformDefault: Platform = "";
 export const PlatformLinuxARM64: Platform = "linux/arm64";
 export const PlatformLinuxAMD64: Platform = "linux/amd64";
+
+export type ProviderAuthKind =
+  | "oauth"
+  | "apikey";
+/**
+ * Supported values.
+ */
+export const ProviderAuthKindOAuth: ProviderAuthKind = "oauth";
+export const ProviderAuthKindAPIKey: ProviderAuthKind = "apikey";
+
+export type QuotaProvider =
+  | "anthropic"
+  | "claudecode"
+  | "codex"
+  | "deepseek"
+  | "openrouter"
+  | "xiaomi";
+/**
+ * Supported values.
+ */
+export const QuotaProviderAnthropic: QuotaProvider = "anthropic";
+export const QuotaProviderClaudeCode: QuotaProvider = "claudecode";
+export const QuotaProviderCodex: QuotaProvider = "codex";
+export const QuotaProviderDeepSeek: QuotaProvider = "deepseek";
+export const QuotaProviderOpenRouter: QuotaProvider = "openrouter";
+export const QuotaProviderXiaomi: QuotaProvider = "xiaomi";
 
 export type SyncTarget =
   | "branch"
@@ -821,6 +857,13 @@ export interface RuntimeInstance {
   vncPort?: number /* int */;
 }
 
+/** TaskRateLimit is the current quota block resolved by the backend for one task. */
+export interface TaskRateLimit {
+  blocked: boolean;
+  window?: string;
+  resetsAt?: ISOTimestamp;
+}
+
 /** Task is the JSON representation sent to the frontend. */
 export interface Task {
   id: string;
@@ -874,6 +917,8 @@ export interface Task {
   inPlanMode?: boolean;
   planContent?: string;
   runtime: RuntimeInstance;
+  /** Current quota block resolved by the backend. */
+  rateLimit?: TaskRateLimit;
   /** Per-task feature flags. */
   gitHubToken?: boolean;
 }
@@ -1170,14 +1215,12 @@ export interface QuotaExtraUsage {
 
 /** ProviderQuota is the quota data for one provider. */
 export interface ProviderQuota {
-  /** "anthropic", "deepseek", "gemini", "openai", "codex", "openrouter", … */
-  provider: string;
+  provider: QuotaProvider;
   /** human-readable: "Anthropic", "DeepSeek", … */
   label: string;
   /** absolute URL path to provider SVG, e.g. "/logos/anthropic.svg" */
   logoUrl: string;
-  /** "oauth" or "apikey" */
-  authKind: string;
+  authKind: ProviderAuthKind;
   /** link to provider's usage/billing page */
   usageUrl: string;
   rateLimits?: QuotaRateLimit[];

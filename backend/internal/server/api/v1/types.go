@@ -44,6 +44,19 @@ const (
 	HarnessPi       Harness = "pi"
 )
 
+// QuotaProvider identifies a monitored quota source.
+type QuotaProvider string
+
+// Supported quota providers.
+const (
+	QuotaProviderAnthropic  QuotaProvider = "anthropic"
+	QuotaProviderClaudeCode QuotaProvider = "claudecode"
+	QuotaProviderCodex      QuotaProvider = "codex"
+	QuotaProviderDeepSeek   QuotaProvider = "deepseek"
+	QuotaProviderOpenRouter QuotaProvider = "openrouter"
+	QuotaProviderXiaomi     QuotaProvider = "xiaomi"
+)
+
 // HarnessInfo is the JSON representation of an available harness.
 type HarnessInfo struct {
 	Name              string            `json:"name"`
@@ -301,8 +314,16 @@ type Task struct {
 	InPlanMode    bool            `json:"inPlanMode,omitempty"`
 	PlanContent   string          `json:"planContent,omitempty"`
 	Runtime       RuntimeInstance `json:"runtime"`
+	RateLimit     TaskRateLimit   `json:"rateLimit,omitzero"` // Current quota block resolved by the backend.
 	// Per-task feature flags.
 	GitHubToken bool `json:"gitHubToken,omitempty"`
+}
+
+// TaskRateLimit is the current quota block resolved by the backend for one task.
+type TaskRateLimit struct {
+	Blocked  bool      `json:"blocked"`
+	Window   string    `json:"window,omitempty"`
+	ResetsAt time.Time `json:"resetsAt,omitzero"`
 }
 
 // TaskInfo is the detailed metadata response for a task.
@@ -668,16 +689,25 @@ type QuotaExtraUsage struct {
 
 // ProviderQuota is the quota data for one provider.
 type ProviderQuota struct {
-	Provider string `json:"provider"` // "anthropic", "deepseek", "gemini", "openai", "codex", "openrouter", …
-	Label    string `json:"label"`    // human-readable: "Anthropic", "DeepSeek", …
-	LogoURL  string `json:"logoUrl"`  // absolute URL path to provider SVG, e.g. "/logos/anthropic.svg"
-	AuthKind string `json:"authKind"` // "oauth" or "apikey"
-	UsageURL string `json:"usageUrl"` // link to provider's usage/billing page
+	Provider QuotaProvider    `json:"provider"`
+	Label    string           `json:"label"`   // human-readable: "Anthropic", "DeepSeek", …
+	LogoURL  string           `json:"logoUrl"` // absolute URL path to provider SVG, e.g. "/logos/anthropic.svg"
+	AuthKind ProviderAuthKind `json:"authKind"`
+	UsageURL string           `json:"usageUrl"` // link to provider's usage/billing page
 
 	RateLimits []QuotaRateLimit `json:"rateLimits,omitzero"`
 	Balance    QuotaBalance     `json:"balance,omitzero"`
 	ExtraUsage QuotaExtraUsage  `json:"extraUsage,omitzero"`
 }
+
+// ProviderAuthKind identifies a provider authentication method.
+type ProviderAuthKind string
+
+// Provider authentication methods.
+const (
+	ProviderAuthKindOAuth  ProviderAuthKind = "oauth"
+	ProviderAuthKindAPIKey ProviderAuthKind = "apikey"
+)
 
 // LocalWindow is the aggregated local cost for a rolling time window.
 type LocalWindow struct {

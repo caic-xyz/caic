@@ -278,6 +278,39 @@ object EventKindSerializer : KSerializer<EventKind> {
     }
 }
 
+@Serializable(with = EventRateLimitStatusSerializer::class)
+sealed interface EventRateLimitStatus {
+    val value: String
+    @Serializable
+    data object Allowed : EventRateLimitStatus {
+        override val value = "allowed"
+    }
+    @Serializable
+    data object AllowedWarning : EventRateLimitStatus {
+        override val value = "allowed_warning"
+    }
+    @Serializable
+    data object Rejected : EventRateLimitStatus {
+        override val value = "rejected"
+    }
+    @Serializable
+    data class Other(override val value: String) : EventRateLimitStatus
+}
+
+object EventRateLimitStatusSerializer : KSerializer<EventRateLimitStatus> {
+    override val descriptor = PrimitiveSerialDescriptor("EventRateLimitStatus", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: EventRateLimitStatus) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): EventRateLimitStatus {
+        val v = decoder.decodeString()
+        return when (v) {
+            "allowed" -> EventRateLimitStatus.Allowed
+            "allowed_warning" -> EventRateLimitStatus.AllowedWarning
+            "rejected" -> EventRateLimitStatus.Rejected
+            else -> EventRateLimitStatus.Other(v)
+        }
+    }
+}
+
 @Serializable(with = EventToolInputKindSerializer::class)
 sealed interface EventToolInputKind {
     val value: String
@@ -467,6 +500,82 @@ object PlatformSerializer : KSerializer<Platform> {
             "linux/arm64" -> Platform.LinuxARM64
             "linux/amd64" -> Platform.LinuxAMD64
             else -> Platform.Other(v)
+        }
+    }
+}
+
+@Serializable(with = ProviderAuthKindSerializer::class)
+sealed interface ProviderAuthKind {
+    val value: String
+    @Serializable
+    data object OAuth : ProviderAuthKind {
+        override val value = "oauth"
+    }
+    @Serializable
+    data object APIKey : ProviderAuthKind {
+        override val value = "apikey"
+    }
+    @Serializable
+    data class Other(override val value: String) : ProviderAuthKind
+}
+
+object ProviderAuthKindSerializer : KSerializer<ProviderAuthKind> {
+    override val descriptor = PrimitiveSerialDescriptor("ProviderAuthKind", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: ProviderAuthKind) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): ProviderAuthKind {
+        val v = decoder.decodeString()
+        return when (v) {
+            "oauth" -> ProviderAuthKind.OAuth
+            "apikey" -> ProviderAuthKind.APIKey
+            else -> ProviderAuthKind.Other(v)
+        }
+    }
+}
+
+@Serializable(with = QuotaProviderSerializer::class)
+sealed interface QuotaProvider {
+    val value: String
+    @Serializable
+    data object Anthropic : QuotaProvider {
+        override val value = "anthropic"
+    }
+    @Serializable
+    data object ClaudeCode : QuotaProvider {
+        override val value = "claudecode"
+    }
+    @Serializable
+    data object Codex : QuotaProvider {
+        override val value = "codex"
+    }
+    @Serializable
+    data object DeepSeek : QuotaProvider {
+        override val value = "deepseek"
+    }
+    @Serializable
+    data object OpenRouter : QuotaProvider {
+        override val value = "openrouter"
+    }
+    @Serializable
+    data object Xiaomi : QuotaProvider {
+        override val value = "xiaomi"
+    }
+    @Serializable
+    data class Other(override val value: String) : QuotaProvider
+}
+
+object QuotaProviderSerializer : KSerializer<QuotaProvider> {
+    override val descriptor = PrimitiveSerialDescriptor("QuotaProvider", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: QuotaProvider) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): QuotaProvider {
+        val v = decoder.decodeString()
+        return when (v) {
+            "anthropic" -> QuotaProvider.Anthropic
+            "claudecode" -> QuotaProvider.ClaudeCode
+            "codex" -> QuotaProvider.Codex
+            "deepseek" -> QuotaProvider.DeepSeek
+            "openrouter" -> QuotaProvider.OpenRouter
+            "xiaomi" -> QuotaProvider.Xiaomi
+            else -> QuotaProvider.Other(v)
         }
     }
 }
@@ -988,6 +1097,14 @@ data class RuntimeInstance(
     val vncPort: Int? = null,
 )
 
+/** TaskRateLimit is the current quota block resolved by the backend for one task. */
+@Serializable
+data class TaskRateLimit(
+    val blocked: Boolean,
+    val window: String? = null,
+    val resetsAt: Instant? = null,
+)
+
 /** Task is the JSON representation sent to the frontend. */
 @Serializable
 data class Task(
@@ -1042,6 +1159,8 @@ data class Task(
     val inPlanMode: Boolean? = null,
     val planContent: String? = null,
     val runtime: RuntimeInstance,
+    /** Current quota block resolved by the backend. */
+    val rateLimit: TaskRateLimit? = null,
     /** Per-task feature flags. */
     val gitHubToken: Boolean? = null,
 )
@@ -1396,8 +1515,7 @@ data class EventWidgetDelta(
 /** EventRateLimit is emitted when the agent's rate limit status changes. */
 @Serializable
 data class EventRateLimit(
-    /** "allowed", "allowed_warning", "rejected". */
-    val status: String,
+    val status: EventRateLimitStatus,
     /** When the limit resets; zero if unknown. */
     val resetsAt: Instant? = null,
     /** "five_hour", "seven_day", etc. */
@@ -1629,14 +1747,12 @@ data class QuotaExtraUsage(
 /** ProviderQuota is the quota data for one provider. */
 @Serializable
 data class ProviderQuota(
-    /** "anthropic", "deepseek", "gemini", "openai", "codex", "openrouter", … */
-    val provider: String,
+    val provider: QuotaProvider,
     /** human-readable: "Anthropic", "DeepSeek", … */
     val label: String,
     /** absolute URL path to provider SVG, e.g. "/logos/anthropic.svg" */
     val logoUrl: String,
-    /** "oauth" or "apikey" */
-    val authKind: String,
+    val authKind: ProviderAuthKind,
     /** link to provider's usage/billing page */
     val usageUrl: String,
     val rateLimits: List<QuotaRateLimit>? = null,

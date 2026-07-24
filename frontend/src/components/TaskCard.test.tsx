@@ -42,16 +42,16 @@ describe("TaskCard", () => {
     const { getByTestId } = render(() => (
       <TaskCard
         {...props({
-          quotaCountdown: {
-            providerLabel: "Anthropic",
-            window: "5h",
+          rateLimit: {
+            blocked: true,
+            window: "five_hour",
             resetsAt: "2026-07-08T12:42:00Z",
           },
         })}
       />
     ));
 
-    expect(getByTestId("quota-countdown")).toHaveTextContent("quota resets in 42m");
+    expect(getByTestId("quota-countdown")).toHaveTextContent("out of quota · resets in 42m");
   });
 
   it("renders errors as a clamped summary", () => {

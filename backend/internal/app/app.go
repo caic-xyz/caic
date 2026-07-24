@@ -54,6 +54,7 @@ type App struct {
 
 	voiceBridge     *voicertc.Bridge
 	backgroundTasks []backgroundTask
+	taskMgr         *taskmgr.Manager
 }
 
 type backgroundTask func(context.Context) error
@@ -74,13 +75,15 @@ type instanceDiscoveryResult struct {
 }
 
 // Serve starts the HTTP server and closes app-owned resources when serving ends.
-func (a *App) Serve(ctx context.Context, ln net.Listener) error {
+func (a *App) Serve(ctx context.Context, ln net.Listener) (err error) {
+	defer func() { err = errors.Join(err, a.taskMgr.Close()) }()
+
 	group, groupCtx := errgroup.WithContext(ctx)
 	for _, task := range a.backgroundTasks {
 		group.Go(func() error { return task(groupCtx) })
 	}
 	group.Go(func() error { return a.Server.Serve(groupCtx, ln) })
-	err := group.Wait()
+	err = group.Wait()
 	if a.voiceBridge != nil {
 		a.voiceBridge.CloseAll(context.WithoutCancel(ctx))
 	}
@@ -468,7 +471,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		},
 	)
 
-	return &App{Server: s, voiceBridge: voiceBridge, backgroundTasks: backgroundTasks}, nil
+	return &App{Server: s, voiceBridge: voiceBridge, backgroundTasks: backgroundTasks, taskMgr: taskMgr}, nil
 }
 
 func initRuntimeSystem(ctx context.Context, cfg *server.Config) (*runtime.Router, []mdRuntime, error) {

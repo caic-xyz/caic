@@ -411,6 +411,78 @@ func TestManager(t *testing.T) {
 		})
 	})
 
+	t.Run("Close", func(t *testing.T) {
+		t.Parallel()
+		m := newTestManager(t, Config{ServerCtx: t.Context()})
+		tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}
+		tk.RestoreMessages([]agent.Message{&agent.RateLimitMessage{
+			Status:        agent.RateLimitStatusRejected,
+			QuotaProvider: agent.QuotaProviderClaudeCode,
+			QuotaWindow:   "five_hour",
+			Utilization:   1,
+		}})
+		m.Insert(tk.ID.String(), NewEntry(tk, nil))
+		_, live, unsubscribe := tk.Subscribe(m.serverCtx)
+		t.Cleanup(unsubscribe)
+		_, rateLimitLive, _ := tk.SubscribeRateLimits(m.serverCtx)
+
+		if err := m.Close(); err != nil {
+			t.Fatalf("Close() = %v, want nil", err)
+		}
+
+		select {
+		case _, ok := <-live:
+			if ok {
+				t.Fatal("live task subscription remained open after Manager.Close")
+			}
+		case <-time.After(time.Second):
+			t.Fatal("live task subscription did not close after Manager.Close")
+		}
+		select {
+		case _, ok := <-rateLimitLive:
+			if ok {
+				t.Fatal("rate-limit subscription remained open after Manager.Close")
+			}
+		case <-time.After(time.Second):
+			t.Fatal("rate-limit subscription did not close after Manager.Close")
+		}
+	})
+
+	t.Run("RateLimitEvents", func(t *testing.T) {
+		t.Parallel()
+		m := newTestManager(t, Config{ServerCtx: t.Context()})
+		now := time.Now().UTC()
+		tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}
+		tk.RestoreMessages([]agent.Message{
+			&agent.RateLimitMessage{
+				Status:        agent.RateLimitStatusRejected,
+				ResetsAt:      now.Add(time.Hour),
+				QuotaProvider: agent.QuotaProviderClaudeCode,
+				QuotaWindow:   "5h",
+				Utilization:   1,
+			},
+			&agent.RateLimitMessage{
+				Status:        agent.RateLimitStatusAllowedWarning,
+				ResetsAt:      now.Add(7 * 24 * time.Hour),
+				QuotaProvider: agent.QuotaProviderClaudeCode,
+				QuotaWindow:   "7d",
+				Utilization:   0.91,
+			},
+		})
+		m.Insert(tk.ID.String(), NewEntry(tk, nil))
+
+		quotas := m.QuotaTracker.Merge(nil, now)
+		if len(quotas) != 1 || len(quotas[0].RateLimits) != 2 {
+			t.Fatalf("tracked quotas = %#v, want two Claude Code quota windows", quotas)
+		}
+		if got := quotas[0].RateLimits[0]; got.Window != "5h" || got.UsedPct != 100 {
+			t.Errorf("5h rate limit = %#v, want rejected update", got)
+		}
+		if got := quotas[0].RateLimits[1]; got.Window != "7d" || got.UsedPct != 91 {
+			t.Errorf("7d rate limit = %#v, want warning update", got)
+		}
+	})
+
 	t.Run("UnregisterWorkspace", func(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
@@ -2593,6 +2665,7 @@ func TestManager(t *testing.T) {
 		t.Run("valid_matches_only_primary_repo", func(t *testing.T) {
 			t.Parallel()
 			taskID := ksid.NewID()
+			resetAt := time.Now().Add(time.Hour).UTC()
 			fake := &runtimetest.FakeInfo{Meta: map[string]string{
 				"md-caic-caic-5\x00caic.id":      taskID.String(),
 				"md-caic-caic-5\x00caic.harness": string(harness.Claude),
@@ -2613,7 +2686,18 @@ func TestManager(t *testing.T) {
 						{HostPath: "/home/user/src/caic-xyz/md", Branch: "caic-0", MountPath: "/home/user/src/caic-xyz/md"},
 					},
 				},
-			}, nil)
+			}, []*task.LoadedTask{{
+				TaskID:  taskID.String(),
+				Harness: harness.Claude,
+				Repos:   []task.RepoMount{{Name: "caic-xyz/caic", Branch: "caic-5"}},
+				Msgs: []agent.Message{&agent.RateLimitMessage{
+					Status:        agent.RateLimitStatusRejected,
+					ResetsAt:      resetAt,
+					QuotaProvider: agent.QuotaProviderClaudeCode,
+					QuotaWindow:   "five_hour",
+					Utilization:   1,
+				}},
+			}})
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
 			}
@@ -2628,6 +2712,13 @@ func TestManager(t *testing.T) {
 			}
 			if m.Len() != 1 {
 				t.Errorf("manager Len = %d, want 1", m.Len())
+			}
+			quotas := m.QuotaTracker.Merge(nil, time.Now())
+			if len(quotas) != 1 || len(quotas[0].RateLimits) != 1 {
+				t.Fatalf("tracked quotas = %#v, want one restored rate limit", quotas)
+			}
+			if got := quotas[0].RateLimits[0]; got.UsedPct != 100 || !got.ResetsAt.Equal(resetAt) {
+				t.Errorf("tracked rate limit = %#v, want 100%% used with reset %v", got, resetAt)
 			}
 		})
 		t.Run("valid_adopts_qualified_no_repo_instance", func(t *testing.T) {

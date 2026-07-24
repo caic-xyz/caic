@@ -123,9 +123,9 @@ func ProviderQuota(q *usage.ProviderQuota) v1.ProviderQuota {
 		return v1.ProviderQuota{}
 	}
 	out := v1.ProviderQuota{
-		Provider:   q.Provider,
+		Provider:   v1.QuotaProvider(q.Provider),
 		Label:      q.Label,
-		AuthKind:   q.AuthKind,
+		AuthKind:   v1.ProviderAuthKind(q.AuthKind),
 		RateLimits: make([]v1.QuotaRateLimit, len(q.RateLimits)),
 		Balance: v1.QuotaBalance{
 			Currency: q.Balance.Currency,

@@ -4,7 +4,7 @@ import { describe, it, expect } from "vitest";
 import { render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 
-import type { UsageResp, ProviderQuota, ISOTimestamp } from "@sdk/types.gen";
+import { QuotaProviderAnthropic, QuotaProviderDeepSeek, type UsageResp, type ProviderQuota, type ISOTimestamp } from "@sdk/types.gen";
 
 import UsageBadges from "./UsageBadges";
 import styles from "./UsageBadges.module.css";
@@ -25,12 +25,12 @@ function makeExtra(isEnabled: boolean, usedCredits: number, monthlyLimit: number
 
 function makeProvider(overrides: Partial<ProviderQuota> = {}): ProviderQuota {
   return {
-    provider: "test",
+    provider: QuotaProviderAnthropic,
     label: "Test",
     logoUrl: "",
     authKind: "apikey",
     ...overrides,
-  } as ProviderQuota;
+  };
 }
 
 function makeUsage(providers: ProviderQuota[]): UsageResp {
@@ -51,8 +51,8 @@ describe("UsageBadges", () => {
 
   it("renders a pill per provider", () => {
     const u = makeUsage([
-      makeProvider({ provider: "anthropic", label: "Anthropic", rateLimits: [makeRateLimit("5h", 45)] }),
-      makeProvider({ provider: "deepseek", label: "DeepSeek", balance: makeBalance(110, "CNY") }),
+      makeProvider({ provider: QuotaProviderAnthropic, label: "Anthropic", rateLimits: [makeRateLimit("5h", 45)] }),
+      makeProvider({ provider: QuotaProviderDeepSeek, label: "DeepSeek", balance: makeBalance(110, "CNY") }),
     ]);
     const [usage] = createSignal<UsageResp>(u);
     const { container } = render(() => <UsageBadges usage={usage} now={now} />);

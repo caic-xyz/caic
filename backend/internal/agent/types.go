@@ -473,14 +473,71 @@ type WidgetDeltaMessage struct {
 // Type implements Message.
 func (m *WidgetDeltaMessage) Type() string { return "widget_delta" }
 
+// QuotaProvider identifies a monitored quota source. Add a value here when
+// adding a provider fetcher or harness quota adapter so their identifiers stay
+// coupled at compile time.
+type QuotaProvider string
+
+const (
+	// QuotaProviderAnthropic identifies direct Anthropic API usage.
+	QuotaProviderAnthropic QuotaProvider = "anthropic"
+	// QuotaProviderClaudeCode identifies a Claude Code OAuth subscription.
+	QuotaProviderClaudeCode QuotaProvider = "claudecode"
+	// QuotaProviderCodex identifies Codex usage.
+	QuotaProviderCodex QuotaProvider = "codex"
+	// QuotaProviderDeepSeek identifies DeepSeek API usage.
+	QuotaProviderDeepSeek QuotaProvider = "deepseek"
+	// QuotaProviderOpenRouter identifies OpenRouter API usage.
+	QuotaProviderOpenRouter QuotaProvider = "openrouter"
+	// QuotaProviderXiaomi identifies Xiaomi MiMo API usage.
+	QuotaProviderXiaomi QuotaProvider = "xiaomi"
+)
+
+// Valid reports whether p is a supported quota provider.
+func (p QuotaProvider) Valid() bool {
+	switch p {
+	case QuotaProviderAnthropic, QuotaProviderClaudeCode, QuotaProviderCodex,
+		QuotaProviderDeepSeek, QuotaProviderOpenRouter, QuotaProviderXiaomi:
+		return true
+	default:
+		return false
+	}
+}
+
+// RateLimitStatus describes whether a provider accepted or rejected a request
+// for a quota window.
+type RateLimitStatus string
+
+const (
+	// RateLimitStatusAllowed means the provider accepted the request.
+	RateLimitStatusAllowed RateLimitStatus = "allowed"
+	// RateLimitStatusAllowedWarning means the provider accepted the request and warned of high usage.
+	RateLimitStatusAllowedWarning RateLimitStatus = "allowed_warning"
+	// RateLimitStatusRejected means the provider rejected the request for quota exhaustion.
+	RateLimitStatusRejected RateLimitStatus = "rejected"
+)
+
+// Valid reports whether s is a supported rate-limit status.
+func (s RateLimitStatus) Valid() bool {
+	switch s {
+	case RateLimitStatusAllowed, RateLimitStatusAllowedWarning, RateLimitStatusRejected:
+		return true
+	default:
+		return false
+	}
+}
+
 // RateLimitMessage is emitted when the CLI reports a rate limit status change.
 type RateLimitMessage struct {
-	Status          string  `json:"status"`            // "allowed", "allowed_warning", "rejected".
-	ResetsAt        float64 `json:"resets_at"`         // Unix epoch seconds; 0 if unknown.
-	RateLimitType   string  `json:"rate_limit_type"`   // "five_hour", "seven_day", etc.; empty if unknown.
-	Utilization     float64 `json:"utilization"`       // 0.0–1.0; 0 if unknown.
-	IsUsingOverage  bool    `json:"is_using_overage"`  // True when extra/overage usage is active.
-	OverageResetsAt float64 `json:"overage_resets_at"` // Unix epoch seconds; 0 if unknown.
+	Status          RateLimitStatus `json:"status"`            // "allowed", "allowed_warning", "rejected".
+	ResetsAt        time.Time       `json:"resets_at"`         // When the quota window resets; zero if unknown.
+	RateLimitType   string          `json:"rate_limit_type"`   // Harness-native window ID (for example, "five_hour"); use QuotaWindow for the canonical ID.
+	Utilization     float64         `json:"utilization"`       // Fraction of the window used in [0, 1], not a percentage; 0 if unknown.
+	IsUsingOverage  bool            `json:"is_using_overage"`  // True when extra/overage usage is active.
+	OverageResetsAt time.Time       `json:"overage_resets_at"` // When overage resets; zero if unknown.
+	QuotaProvider   QuotaProvider   `json:"quota_provider"`    // Canonical usage-provider ID that matches ProviderQuota.Provider; empty when the harness cannot identify it.
+	QuotaLabel      string          `json:"quota_label"`       // Human-readable canonical provider label.
+	QuotaWindow     string          `json:"quota_window"`      // Canonical provider window ID; empty when unknown.
 }
 
 // Type implements Message.

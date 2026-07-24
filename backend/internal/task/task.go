@@ -261,6 +261,7 @@ type Task struct {
 	title                 string    // LLM-generated short title; set via SetTitle.
 	msgs                  []agent.Message
 	subs                  []*sub            // active SSE subscribers
+	rateLimitSubs         []*rateLimitSub   // active lossless quota subscribers
 	handle                *SessionHandle    // current active session; nil when no session is attached
 	eventReplay           EventReplayWriter // live DTO replay writer; nil when no log is open
 	priorCostUSD          float64           // accumulated cost from all cleared sessions
@@ -283,6 +284,8 @@ type Task struct {
 	forgePRState          forge.PRState // "open", "closed", "merged"; empty when no PR.
 	ciStatus              forge.CIStatus
 	ciChecks              []forge.Check
+	rateLimit             RateLimit                    // Active task quota block resolved across provider windows.
+	rateLimits            map[quotaWindowKey]RateLimit // Latest quota status for each provider window.
 }
 
 // Primary returns a pointer to the primary RepoMount (Repos[0]), or nil for no-repo tasks.
@@ -530,6 +533,10 @@ type sub struct {
 
 func (s *sub) close() {
 	s.once.Do(func() { close(s.ch) })
+}
+
+type rateLimitSub struct {
+	ch chan *agent.RateLimitMessage
 }
 
 // computeCost returns the true USD cost for a Claude API result by adding the
@@ -1023,6 +1030,28 @@ type Snapshot struct {
 	ForgeIssue         int
 	CIStatus           forge.CIStatus
 	CIChecks           []forge.Check
+	RateLimit          RateLimit
+}
+
+// RateLimit records the active quota block resolved for a task. It is retained
+// with task state so summaries and provider monitors can react immediately
+// without waiting for a separate provider-usage refresh.
+type RateLimit struct {
+	Status          agent.RateLimitStatus
+	ResetsAt        time.Time
+	RateLimitType   string  // Harness-native window ID; QuotaWindow is the canonical provider window.
+	Utilization     float64 // Fraction of the window used in [0, 1], not a percentage.
+	IsUsingOverage  bool
+	OverageResetsAt time.Time
+	QuotaProvider   agent.QuotaProvider // Canonical usage-provider ID matching ProviderQuota.Provider.
+	QuotaLabel      string
+	QuotaWindow     string
+	ObservedAt      time.Time
+}
+
+type quotaWindowKey struct {
+	provider agent.QuotaProvider
+	window   string
 }
 
 // Snapshot returns a consistent read of all volatile fields under the mutex.
@@ -1073,6 +1102,7 @@ func (t *Task) Snapshot() Snapshot {
 		ForgeIssue:         t.ForgeIssue,
 		CIStatus:           t.ciStatus,
 		CIChecks:           append([]forge.Check(nil), t.ciChecks...),
+		RateLimit:          t.rateLimit,
 	}
 }
 
@@ -1111,6 +1141,8 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 	defer t.mu.Unlock()
 	fillEmptyResultMessages(msgs)
 	t.msgs = msgs
+	t.rateLimit = RateLimit{}
+	t.rateLimits = nil
 	// Scan forward so later entries (model_rerouted) override earlier ones.
 	for _, m := range msgs {
 		if meta, ok := m.(*agent.MetaSessionMessage); ok {
@@ -1137,6 +1169,9 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 		}
 		if sm, ok := m.(*agent.SystemMessage); ok && sm.Subtype == "model_rerouted" && sm.Model != "" {
 			t.reportedModel = sm.Model
+		}
+		if rateLimit, ok := m.(*agent.RateLimitMessage); ok {
+			t.recordRateLimitLocked(rateLimit)
 		}
 	}
 	// Restore plan state from tool_use events. A context_cleared marker
@@ -1390,6 +1425,42 @@ func (t *Task) Subscribe(ctx context.Context) (history []agent.Message, live <-c
 	return history, s.ch, unsub
 }
 
+// SubscribeRateLimits returns historical quota messages and a lossless stream
+// of future quota messages. The caller must call unsubFn at most once when
+// done; context cancellation automatically unsubscribes.
+func (t *Task) SubscribeRateLimits(ctx context.Context) (history []*agent.RateLimitMessage, live <-chan *agent.RateLimitMessage, unsubFn func()) {
+	s := &rateLimitSub{ch: make(chan *agent.RateLimitMessage, 16)}
+
+	t.mu.Lock()
+	for _, message := range t.msgs {
+		if rateLimit, ok := message.(*agent.RateLimitMessage); ok {
+			history = append(history, rateLimit)
+		}
+	}
+	t.rateLimitSubs = append(t.rateLimitSubs, s)
+	t.mu.Unlock()
+
+	unsub := func() {
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		for i, ss := range t.rateLimitSubs {
+			if ss == s {
+				t.rateLimitSubs = append(t.rateLimitSubs[:i], t.rateLimitSubs[i+1:]...)
+				close(s.ch)
+				return
+			}
+		}
+		panic("rate limit subscriber already unsubscribed")
+	}
+	stop := context.AfterFunc(ctx, unsub)
+	return history, s.ch, func() {
+		if !stop() {
+			panic("rate limit subscriber already unsubscribed")
+		}
+		unsub()
+	}
+}
+
 // PushStats records a runtime stats snapshot and notifies live subscribers.
 func (t *Task) PushStats(s *runtime.Stats) {
 	t.mu.Lock()
@@ -1400,15 +1471,14 @@ func (t *Task) PushStats(s *runtime.Stats) {
 	} else {
 		t.statsHead = (t.statsHead + 1) % statsRingSize
 	}
-	subs := append([]*statsSub(nil), t.statsSubs...)
 	val := *s
-	t.mu.Unlock()
-	for _, sub := range subs {
+	for _, sub := range t.statsSubs {
 		select {
 		case sub.ch <- val:
 		default:
 		}
 	}
+	t.mu.Unlock()
 }
 
 // SubscribeStats returns a snapshot of the stats ring buffer and a channel that
@@ -1683,6 +1753,12 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 		return
 	}
 	t.msgs = append(t.msgs, m)
+	if rateLimit, ok := m.(*agent.RateLimitMessage); ok {
+		t.recordRateLimitLocked(rateLimit)
+		for _, sub := range t.rateLimitSubs {
+			sub.ch <- rateLimit
+		}
+	}
 	if rm, ok := m.(*agent.ResultMessage); ok && rm.Result == "" {
 		rm.Result = fallbackResultText(t.msgs)
 	}
@@ -1834,6 +1910,55 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 			i--
 		}
 	}
+}
+
+func rateLimitFromMessage(m *agent.RateLimitMessage) RateLimit {
+	rateLimit := RateLimit{
+		Status:         m.Status,
+		RateLimitType:  m.RateLimitType,
+		Utilization:    m.Utilization,
+		IsUsingOverage: m.IsUsingOverage,
+		QuotaProvider:  m.QuotaProvider,
+		QuotaLabel:     m.QuotaLabel,
+		QuotaWindow:    m.QuotaWindow,
+		ObservedAt:     time.Now(),
+	}
+	rateLimit.ResetsAt = m.ResetsAt
+	rateLimit.OverageResetsAt = m.OverageResetsAt
+	return rateLimit
+}
+
+// recordRateLimitLocked records one provider-window update and refreshes the
+// active task block. The caller must hold t.mu.
+func (t *Task) recordRateLimitLocked(m *agent.RateLimitMessage) {
+	rateLimit := rateLimitFromMessage(m)
+	if t.rateLimits == nil {
+		t.rateLimits = make(map[quotaWindowKey]RateLimit)
+	}
+	t.rateLimits[rateLimitKey(&rateLimit)] = rateLimit
+	t.rateLimit = activeRateLimit(t.rateLimits, time.Now())
+}
+
+func rateLimitKey(rateLimit *RateLimit) quotaWindowKey {
+	window := rateLimit.QuotaWindow
+	if window == "" {
+		window = rateLimit.RateLimitType
+	}
+	return quotaWindowKey{provider: rateLimit.QuotaProvider, window: window}
+}
+
+func activeRateLimit(rateLimits map[quotaWindowKey]RateLimit, now time.Time) RateLimit {
+	var active RateLimit
+	for key := range rateLimits {
+		rateLimit := rateLimits[key]
+		if rateLimit.Status != agent.RateLimitStatusRejected || rateLimit.IsUsingOverage || !rateLimit.ResetsAt.After(now) {
+			continue
+		}
+		if active.ResetsAt.IsZero() || rateLimit.ResetsAt.After(active.ResetsAt) {
+			active = rateLimit
+		}
+	}
+	return active
 }
 
 // writeToolInput is the JSON input schema for the Write tool_use block.

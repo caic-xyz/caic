@@ -60,6 +60,73 @@ func recvType(t *testing.T, ch <-chan agent.Message) string {
 
 func TestTask(t *testing.T) {
 	t.Parallel()
+	t.Run("RateLimitSnapshot", func(t *testing.T) {
+		t.Parallel()
+		resetAt := time.Now().UTC().Add(time.Hour)
+		message := &agent.RateLimitMessage{
+			Status:        "rejected",
+			ResetsAt:      resetAt,
+			RateLimitType: "five_hour",
+			Utilization:   1,
+			QuotaProvider: agent.QuotaProviderAnthropic,
+			QuotaLabel:    "Anthropic",
+			QuotaWindow:   "5h",
+		}
+		tk := &Task{}
+		tk.addMessage(t.Context(), message, false)
+		snapshot := tk.Snapshot()
+		if snapshot.RateLimit.Status != "rejected" {
+			t.Errorf("RateLimit.Status = %q, want rejected", snapshot.RateLimit.Status)
+		}
+		if !snapshot.RateLimit.ResetsAt.Equal(resetAt) {
+			t.Errorf("RateLimit.ResetsAt = %v, want %v", snapshot.RateLimit.ResetsAt, resetAt)
+		}
+		if snapshot.RateLimit.QuotaProvider != "anthropic" || snapshot.RateLimit.QuotaWindow != "5h" {
+			t.Errorf("canonical rate limit = (%q, %q), want (anthropic, 5h)", snapshot.RateLimit.QuotaProvider, snapshot.RateLimit.QuotaWindow)
+		}
+		if snapshot.RateLimit.ObservedAt.IsZero() {
+			t.Error("RateLimit.ObservedAt is zero")
+		}
+
+		tk.RestoreMessages([]agent.Message{message})
+		if got := tk.Snapshot().RateLimit; got.Status != "rejected" || !got.ResetsAt.Equal(resetAt) {
+			t.Errorf("restored RateLimit = %+v, want rejected until %v", got, resetAt)
+		}
+
+		tk.addMessage(t.Context(), &agent.RateLimitMessage{
+			Status:        agent.RateLimitStatusAllowedWarning,
+			ResetsAt:      resetAt.Add(6 * 24 * time.Hour),
+			QuotaProvider: agent.QuotaProviderAnthropic,
+			QuotaWindow:   "7d",
+		}, false)
+		if got := tk.Snapshot().RateLimit; got.Status != agent.RateLimitStatusRejected || got.QuotaWindow != "5h" {
+			t.Errorf("RateLimit after a different-window update = %+v, want active 5h rejection", got)
+		}
+	})
+	t.Run("SubscribeRateLimits", func(t *testing.T) {
+		t.Parallel()
+		tk := &Task{}
+		historical := &agent.RateLimitMessage{Status: agent.RateLimitStatusAllowed, QuotaProvider: agent.QuotaProviderClaudeCode, QuotaWindow: "5h"}
+		tk.addMessage(t.Context(), historical, false)
+		history, live, _ := tk.SubscribeRateLimits(t.Context())
+		if len(history) != 1 || history[0] != historical {
+			t.Fatalf("history = %#v, want the historical rate-limit message", history)
+		}
+
+		for range 257 {
+			tk.addMessage(t.Context(), &agent.TextMessage{Text: "ordinary task output"}, false)
+		}
+		liveRateLimit := &agent.RateLimitMessage{Status: agent.RateLimitStatusAllowedWarning, QuotaProvider: agent.QuotaProviderClaudeCode, QuotaWindow: "7d"}
+		tk.addMessage(t.Context(), liveRateLimit, false)
+		select {
+		case got := <-live:
+			if got != liveRateLimit {
+				t.Errorf("live rate-limit = %#v, want %#v", got, liveRateLimit)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for live rate-limit message")
+		}
+	})
 	t.Run("ConcurrentMetadataSnapshots", func(t *testing.T) {
 		t.Parallel()
 		tk := &Task{

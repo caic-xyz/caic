@@ -12,7 +12,6 @@ import type { CIStatus, Repo, Task, UsageResp } from "@sdk/types.gen";
 import TaskCard from "./TaskCard";
 import CIDot from "./CIDot";
 import styles from "./TaskList.module.css";
-import { taskQuotaCountdown } from "../quota";
 
 export interface TaskListProps {
   tasks: Accessor<Task[]>;
@@ -224,7 +223,7 @@ export default function TaskList(props: TaskListProps) {
       ciStatus={t().ciStatus}
       ciChecks={t().ciChecks}
       autoFixPR={props.autoFixPR()}
-      quotaCountdown={taskQuotaCountdown(t(), props.usage(), props.now())}
+      rateLimit={t().rateLimit}
       selected={props.selectedId === t().id}
       now={props.now}
       onClick={() => props.onSelect(t().id)}

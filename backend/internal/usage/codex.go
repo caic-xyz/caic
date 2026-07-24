@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -77,7 +78,7 @@ func NewCodexFetcher(ctx context.Context) *CodexFetcher {
 	}
 
 	f := &CodexFetcher{
-		baseFetcher: newBaseFetcher("codex", "Codex", "oauth", "https://chatgpt.com/codex/cloud/settings/analytics"),
+		baseFetcher: newBaseFetcher(agent.QuotaProviderCodex, "Codex", AuthKindOAuth, "https://chatgpt.com/codex/cloud/settings/analytics"),
 		client:      &http.Client{Timeout: 10 * time.Second},
 		token:       token,
 		accountID:   accountID,
