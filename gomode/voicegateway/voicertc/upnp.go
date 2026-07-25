@@ -433,7 +433,7 @@ func logUPnPPortMappings(ctx context.Context, client upnpWANConnection) {
 		if err != nil {
 			return
 		}
-		slog.InfoContext(ctx, "voicertc: UPnP port mapping", "index", index, "remoteHost", remoteHost, "externalPort", externalPort, "protocol", protocol, "internalPort", internalPort, "internalClient", internalClient, "enabled", enabled, "description", description, "leaseDuration", leaseDuration)
+		slog.DebugContext(ctx, "voicertc: UPnP port mapping", "index", index, "remoteHost", remoteHost, "externalPort", externalPort, "protocol", protocol, "internalPort", internalPort, "internalClient", internalClient, "enabled", enabled, "description", description, "leaseDuration", leaseDuration)
 	}
 	slog.WarnContext(ctx, "voicertc: UPnP port mapping list reached limit", "limit", 64)
 }
