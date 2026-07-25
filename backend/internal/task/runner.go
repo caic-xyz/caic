@@ -90,9 +90,9 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 	if r.Workspace.Dir != "" {
 		t.SetState(StateBranching)
 	}
-	// Reserve the branch before opening the log because the branch is part of
-	// the durable log filename. Setup output must be persisted from its first line.
-	r.Workspace.ReserveBranch(t)
+	// The Manager has already assigned every repo's branch name (the branch itself
+	// is created below, concurrently with launch), so the log can open with the
+	// durable, branch-derived filename and persist output from its first line.
 	logW, err := r.Sessions.Logs.Open(t)
 	if err != nil {
 		t.recordStartupFailure(ctx, err)
@@ -504,13 +504,10 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *run
 	}
 	tlog := r.Workspace.Log.With("src_br", sourcePrimaryBranch, "src_instance", sourceInstanceID)
 
-	// 1. Reserve the fork's primary branch, then pin each repo's already-assigned
-	// branch (primary here; extra repos were allocated by the caller from their
-	// own workspaces) so Fork creates exactly those. This lets the log open with
-	// a correct metadata header up front, so provisioning output is durable from
-	// the first line instead of buffered in memory until Fork reports back.
+	// Every fork branch — primary and extras alike — was assigned by the Manager
+	// before ForkTask, so the log can open with a correct metadata header up
+	// front and provisioning output is durable from the first line.
 	fork.SetState(StateProvisioning)
-	r.Workspace.ReserveBranch(fork)
 	forkBranch := ""
 	if p := fork.Primary(); p != nil {
 		forkBranch = p.Branch

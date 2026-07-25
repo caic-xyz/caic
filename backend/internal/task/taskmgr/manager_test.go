@@ -3309,6 +3309,42 @@ func TestManager(t *testing.T) {
 	})
 }
 
+func TestAllocateBranches(t *testing.T) {
+	t.Parallel()
+	m := newTestManager(t, Config{ServerCtx: t.Context()})
+	// Fake dirs: Init's branch scan fails and is ignored, leaving nextID at 0, so
+	// the first ReserveBranchName on each repo yields caic-0.
+	m.RegisterWorkspace("acme/app", &repowork.Workspace{Dir: "/tmp/app", Log: logtest.Logger(t)})
+	m.RegisterWorkspace("caic-xyz/caic", &repowork.Workspace{Dir: "/tmp/caic", Log: logtest.Logger(t)})
+
+	// Forking a 2-repo task carries both repos on their source branches. Every
+	// repo — primary and non-primary alike — is reallocated to its own fresh
+	// branch (from its own workspace), so the fork never shares a branch with the
+	// still-checked-out source instance. Index 0 is not special.
+	mounts := []task.RepoMount{
+		{Name: "acme/app", Branch: "caic-2"},
+		{Name: "caic-xyz/caic", Branch: "caic-18"},
+	}
+	tk := &task.Task{Repos: slices.Clone(mounts)}
+	if err := m.allocateBranches(t.Context(), tk, mounts, len(mounts)); err != nil {
+		t.Fatal(err)
+	}
+	for i, r := range tk.ReposSnapshot() {
+		if r.Branch == mounts[i].Branch {
+			t.Errorf("repo %d (%s) not reallocated, still on source branch %q", i, r.Name, r.Branch)
+		}
+		if r.Branch != "caic-0" {
+			t.Errorf("repo %d branch = %q, want caic-0", i, r.Branch)
+		}
+	}
+
+	// A repo with no registered workspace is a hard error.
+	bad := &task.Task{Repos: []task.RepoMount{{Name: "ghost/repo", Branch: "caic-1"}}}
+	if err := m.allocateBranches(t.Context(), bad, bad.ReposSnapshot(), 1); err == nil {
+		t.Fatal("allocateForkBranches error = nil, want error for unregistered repo")
+	}
+}
+
 func TestCountResultMessages(t *testing.T) {
 	t.Parallel()
 	t.Run("valid", func(t *testing.T) {

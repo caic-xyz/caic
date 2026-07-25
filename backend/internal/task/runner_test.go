@@ -401,7 +401,7 @@ func TestRunner(t *testing.T) {
 				Harness:       harness.Claude,
 			}
 
-			workspace.ReserveBranch(tk)
+			tk.SetRepoBranch(0, workspace.ReserveBranchName())
 			if _, err := r.setup(t.Context(), tk, nil, "", nil); err != nil {
 				t.Fatal(err)
 			}
@@ -441,7 +441,7 @@ func TestRunner(t *testing.T) {
 				Harness:       harness.Claude,
 			}
 
-			workspace.ReserveBranch(tk)
+			tk.SetRepoBranch(0, workspace.ReserveBranchName())
 			if _, err := r.setup(t.Context(), tk, nil, "", nil); err != nil {
 				t.Fatal(err)
 			}

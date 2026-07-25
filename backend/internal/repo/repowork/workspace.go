@@ -314,17 +314,15 @@ func (w *Workspace) DeleteUnmodifiedTaskBranches(ctx context.Context, t TaskView
 	}
 }
 
-// ReserveBranch instantly reserves the next branch name (under lock, ~µs). The
-// branch itself is created concurrently with runtime launch by
-// FetchAndCreateBranch.
-func (w *Workspace) ReserveBranch(t TaskView) {
-	if w.Dir == "" {
-		return
-	}
+// ReserveBranchName reserves and returns the next branch name ("caic-N") without
+// touching git (under branchMu, ~µs). The branch itself is created later — by the
+// runtime when forking, or by FetchAndCreateBranch for a fresh task.
+func (w *Workspace) ReserveBranchName() string {
 	w.branchMu.Lock()
-	t.SetRepoBranch(0, fmt.Sprintf("caic-%d", w.nextID))
+	defer w.branchMu.Unlock()
+	name := fmt.Sprintf("caic-%d", w.nextID)
 	w.nextID++
-	w.branchMu.Unlock()
+	return name
 }
 
 // FetchAndCreateBranch fetches origin and creates the given branch from the

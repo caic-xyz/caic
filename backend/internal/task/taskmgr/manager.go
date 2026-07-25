@@ -284,14 +284,12 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 		primaryWorkspace, _ = m.Workspace("")
 	}
 
-	// Validate and resolve extra repo workspaces.
-	extraWorkspaces := make([]*repowork.Workspace, 0, max(0, len(p.Repos)-1))
+	// Validate that every extra repo has a registered workspace (branches are
+	// allocated later, in one pass, by allocateBranches).
 	for _, rs := range p.Repos[min(1, len(p.Repos)):] {
-		er, ok := m.Workspace(rs.Name)
-		if !ok {
+		if _, ok := m.Workspace(rs.Name); !ok {
 			return "", badRequestf("unknown extra repo: %s", rs.Name)
 		}
-		extraWorkspaces = append(extraWorkspaces, er)
 	}
 
 	runtimeName, err := resolveRuntimeName(m.Runtimes, p.RuntimeName)
@@ -356,14 +354,12 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 
 	// Run in background using server context.
 	go func() {
-		for i, er := range extraWorkspaces {
-			branch, err := er.AllocateBranch(m.serverCtx)
-			if err != nil {
-				entry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "allocate branch for extra repo")})
-				m.NotifyTaskChange()
-				return
-			}
-			t.SetRepoBranch(i+1, branch)
+		// The primary's branch is created by the runner concurrently with instance
+		// launch, so it only needs a name reserved; extras are created here.
+		if err := m.allocateBranches(m.serverCtx, t, mounts, 1); err != nil {
+			entry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "allocate branch")})
+			m.NotifyTaskChange()
+			return
 		}
 
 		ghToken := p.ResolvedGitHubToken
@@ -602,7 +598,6 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 		sourceRepoNames[r.Name] = struct{}{}
 	}
 	var extraMounts []task.RepoMount
-	var extraWorkspaces []*repowork.Workspace
 	for _, rs := range p.ExtraRepos {
 		if _, overlap := sourceRepoNames[rs.Name]; overlap {
 			return "", badRequestf("extraRepos contains repo already in source task: %s", rs.Name)
@@ -611,9 +606,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 		if !ok {
 			return "", badRequestf("unknown extra repo: %s", rs.Name)
 		}
-		rm := task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: er.Dir, MountedPath: m.mountPathForRepo(rs.Name)}
-		extraMounts = append(extraMounts, rm)
-		extraWorkspaces = append(extraWorkspaces, er)
+		extraMounts = append(extraMounts, task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: er.Dir, MountedPath: m.mountPathForRepo(rs.Name)})
 	}
 
 	mounts := make([]task.RepoMount, len(sourceRepos), len(sourceRepos)+len(extraMounts))
@@ -652,17 +645,10 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 		ctx, tk := trace.NewTask(m.serverCtx, "task.fork:"+source.ID.String()+"->"+t.ID.String())
 		defer tk.End()
 
-		// Allocate a distinct branch per extra repo from its own workspace, the
-		// same as fresh tasks. ForkTask reserves the primary repo's branch; each
-		// extra repo needs its own so it is not pinned to the primary's name.
-		for i, er := range extraWorkspaces {
-			branch, err := er.AllocateBranch(ctx)
-			if err != nil {
-				forkEntry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "allocate branch for extra repo")})
-				m.NotifyTaskChange()
-				return
-			}
-			t.SetRepoBranch(len(sourceRepos)+i, branch)
+		if err := m.allocateBranches(ctx, t, mounts, len(sourceRepos)); err != nil {
+			forkEntry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "allocate fork branch")})
+			m.NotifyTaskChange()
+			return
 		}
 
 		ghToken := p.ResolvedGitHubToken
@@ -1240,6 +1226,32 @@ func (m *Manager) repoBasenameCollides(relPath string) bool {
 		return true
 	})
 	return collides
+}
+
+// allocateBranches assigns every repo of a task its own branch name, uniformly —
+// the Manager owns branch-name allocation for all repos, with no special case for
+// the primary. mounts[:reserveOnly] are repos whose branch is created elsewhere
+// (by md.Fork for a fork's source repos, or by the runner concurrently with
+// launch for a fresh task's primary), so they only need a name reserved.
+// mounts[reserveOnly:] are new to the host, so their branch is created here from
+// their own workspace.
+func (m *Manager) allocateBranches(ctx context.Context, t *task.Task, mounts []task.RepoMount, reserveOnly int) error {
+	for i := range mounts {
+		ws, ok := m.Workspace(mounts[i].Name)
+		if !ok {
+			return fmt.Errorf("repo %q is not registered", mounts[i].Name)
+		}
+		if i < reserveOnly {
+			t.SetRepoBranch(i, ws.ReserveBranchName())
+			continue
+		}
+		branch, err := ws.AllocateBranch(ctx)
+		if err != nil {
+			return fmt.Errorf("allocate branch for %s: %w", mounts[i].Name, err)
+		}
+		t.SetRepoBranch(i, branch)
+	}
+	return nil
 }
 
 // watchStats streams runtime resource stats for the current active task set.
