@@ -91,7 +91,7 @@ func (*RuntimeBackend) Purge(_ context.Context, _ runtime.ID) error { return nil
 func (*RuntimeBackend) Revive(_ context.Context, _ runtime.ID) error { return nil }
 
 // Fork implements runtime.Lifecycle.
-func (b *RuntimeBackend) Fork(_ context.Context, _ runtime.ID, _ []runtime.Repo, _ *runtime.ForkOptions) (runtime.ID, runtime.ConnectionInfo, []runtime.Repo, error) {
+func (b *RuntimeBackend) Fork(_ context.Context, _ runtime.ID, _ *runtime.ForkOptions) (runtime.ID, runtime.ConnectionInfo, []runtime.Repo, error) {
 	return runtime.NewID(b.Name(), "fake-fork"), runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: "fake-fork"}}, nil, errors.New("fork not supported in fake runtime")
 }
 

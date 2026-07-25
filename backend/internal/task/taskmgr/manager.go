@@ -602,7 +602,6 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 		sourceRepoNames[r.Name] = struct{}{}
 	}
 	var extraMounts []task.RepoMount
-	var extraRepos []runtime.Repo
 	var extraWorkspaces []*repowork.Workspace
 	for _, rs := range p.ExtraRepos {
 		if _, overlap := sourceRepoNames[rs.Name]; overlap {
@@ -614,7 +613,6 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 		}
 		rm := task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: er.Dir, MountedPath: m.mountPathForRepo(rs.Name)}
 		extraMounts = append(extraMounts, rm)
-		extraRepos = append(extraRepos, rm.ToRuntimeRepo())
 		extraWorkspaces = append(extraWorkspaces, er)
 	}
 
@@ -676,7 +674,6 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 
 		forkOpts := &runtime.ForkOptions{
 			RuntimeName: source.RuntimeName,
-			ExtraRepos:  extraRepos,
 			Display:     p.Display,
 			Tailscale:   p.Tailscale,
 			USB:         p.USB,

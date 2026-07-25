@@ -506,17 +506,17 @@ func (b *Backend) Revive(ctx context.Context, id runtime.ID) error {
 }
 
 // Fork implements runtime.Lifecycle.
-func (b *Backend) Fork(ctx context.Context, id runtime.ID, repos []runtime.Repo, opts *runtime.ForkOptions) (runtime.ID, runtime.ConnectionInfo, []runtime.Repo, error) {
+func (b *Backend) Fork(ctx context.Context, id runtime.ID, opts *runtime.ForkOptions) (runtime.ID, runtime.ConnectionInfo, []runtime.Repo, error) {
 	defer trace.StartRegion(ctx, "instance.fork").End()
 	localID, err := b.localID(id)
 	if err != nil {
 		return "", runtime.ConnectionInfo{}, nil, err
 	}
 	name := string(localID)
-	if len(repos) > 0 {
-		b.log.InfoContext(ctx, "md", "phase", "fork", "src", name, "dir", repos[0].HostPath, "br", repos[0].Branch)
+	if len(opts.Repos) > 0 {
+		b.log.InfoContext(ctx, "md", "phase", "fork", "src", name, "dir", opts.Repos[0].HostPath, "br", opts.Repos[0].DestPrimary)
 	}
-	b.log.DebugContext(ctx, "fork starting", "source", name, "repos_count", len(repos))
+	b.log.DebugContext(ctx, "fork starting", "source", name, "repos_count", len(opts.Repos))
 
 	// Look up the source instance so Fork inherits Display, Tailscale,
 	// USB, and Sudo from the source unless explicitly overridden by opts.
@@ -529,17 +529,20 @@ func (b *Backend) Fork(ctx context.Context, id runtime.ID, repos []runtime.Repo,
 		return "", runtime.ConnectionInfo{}, nil, err
 	}
 	b.log.DebugContext(ctx, "building fork options", "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "sudo", opts.Sudo)
+	forkRepos := make([]md.ForkRepo, len(opts.Repos))
+	for i, r := range opts.Repos {
+		forkRepos[i] = md.ForkRepo{GitRoot: r.HostPath, SourceBranches: r.SourceBranches, MountedPath: r.MountPath, DestPrimary: r.DestPrimary}
+	}
 	forkOpts := &md.ForkOpts{
-		ExtraRepos:          toMDRepos(opts.ExtraRepos),
-		DestPrimaryBranches: opts.DestPrimaryBranches,
-		Display:             opts.Display,
-		Tailscale:           opts.Tailscale,
-		USB:                 opts.USB,
-		Sudo:                opts.Sudo,
-		Labels:              metadataLabels(opts.Metadata),
-		ExtraEnv:            opts.ExtraEnv,
-		Mounts:              mounts,
-		MaxCPUs:             maxCPUsOrDefault(opts.MaxCPUs),
+		Repos:     forkRepos,
+		Display:   opts.Display,
+		Tailscale: opts.Tailscale,
+		USB:       opts.USB,
+		Sudo:      opts.Sudo,
+		Labels:    metadataLabels(opts.Metadata),
+		ExtraEnv:  opts.ExtraEnv,
+		Mounts:    mounts,
+		MaxCPUs:   maxCPUsOrDefault(opts.MaxCPUs),
 	}
 	stdout, stderr := logWriters(opts.LogWriter, "fork")
 	b.log.DebugContext(ctx, "calling fork", "source", name)

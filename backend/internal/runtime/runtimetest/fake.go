@@ -141,7 +141,7 @@ func (f *FakeBackend) Revive(ctx context.Context, id runtime.ID) error {
 }
 
 // Fork implements runtime.Lifecycle.
-func (f *FakeBackend) Fork(ctx context.Context, id runtime.ID, repos []runtime.Repo, opts *runtime.ForkOptions) (runtime.ID, runtime.ConnectionInfo, []runtime.Repo, error) {
+func (f *FakeBackend) Fork(ctx context.Context, id runtime.ID, opts *runtime.ForkOptions) (runtime.ID, runtime.ConnectionInfo, []runtime.Repo, error) {
 	forkID := runtime.NewID(f.Name(), "fake-fork")
 	f.set(forkID, StatusRunning)
 	return forkID, runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: "fake-fork"}}, nil, nil

@@ -55,29 +55,39 @@ func (r *setupLogFailureRuntime) Launch(ctx context.Context, repos []runtime.Rep
 type forkLogRuntime struct {
 	*runtimetest.FakeBackend
 
-	forkErr      error
-	capturedDest map[string]string // DestPrimaryBranches seen by Fork.
+	forkErr       error
+	capturedRepos []runtime.ForkRepo // opts.Repos seen by Fork.
 }
 
-func (r *forkLogRuntime) Fork(ctx context.Context, id runtime.ID, repos []runtime.Repo, opts *runtime.ForkOptions) (runtime.ID, runtime.ConnectionInfo, []runtime.Repo, error) {
-	r.capturedDest = opts.DestPrimaryBranches
+func (r *forkLogRuntime) Fork(ctx context.Context, id runtime.ID, opts *runtime.ForkOptions) (runtime.ID, runtime.ConnectionInfo, []runtime.Repo, error) {
+	r.capturedRepos = opts.Repos
 	if _, err := opts.LogWriter.Write([]byte("fork setup complete\nfinal setup line")); err != nil {
 		return "", runtime.ConnectionInfo{}, nil, err
 	}
 	if r.forkErr != nil {
 		return "", runtime.ConnectionInfo{}, nil, r.forkErr
 	}
-	forkID, conn, _, err := r.FakeBackend.Fork(ctx, id, repos, opts)
+	forkID, conn, _, err := r.FakeBackend.Fork(ctx, id, opts)
 	// Honor the pinned destination branch per repo, like the real runtime.
-	out := make([]runtime.Repo, len(repos))
-	for i := range repos {
-		branch := opts.DestPrimaryBranches[repos[i].HostPath]
+	out := make([]runtime.Repo, len(opts.Repos))
+	for i, rp := range opts.Repos {
+		branch := rp.DestPrimary
 		if branch == "" {
 			branch = "caic/fork"
 		}
 		out[i] = runtime.Repo{Branch: branch}
 	}
 	return forkID, conn, out, err
+}
+
+// destPrimary returns the captured destination primary branch for hostPath.
+func (r *forkLogRuntime) destPrimary(hostPath string) (string, bool) {
+	for _, rp := range r.capturedRepos {
+		if rp.HostPath == hostPath {
+			return rp.DestPrimary, true
+		}
+	}
+	return "", false
 }
 
 func newTestRepoWorkspace(t *testing.T, baseBranch, dir string, backend runtime.Lifecycle) *repowork.Workspace {
@@ -829,8 +839,8 @@ func TestRunner(t *testing.T) {
 			}
 			// The fork's primary branch is pinned before Fork and handed to the
 			// runtime keyed by GitRoot, so the runtime creates exactly it.
-			if _, ok := runtimeBackend.capturedDest["/src/caic"]; !ok {
-				t.Errorf("Fork received DestPrimaryBranches = %v, want an entry for /src/caic", runtimeBackend.capturedDest)
+			if _, ok := runtimeBackend.destPrimary("/src/caic"); !ok {
+				t.Errorf("Fork received repos = %v, want an entry for /src/caic", runtimeBackend.capturedRepos)
 			}
 			logs := strings.Join(logLines(t, fork.LogPath()), "\n")
 			first := strings.Index(logs, `{"type":"caic_log","line":"fork setup complete"}`)
@@ -885,10 +895,10 @@ func TestRunner(t *testing.T) {
 			})
 
 			// Each repo is pinned to its own branch, not both to the primary's.
-			if got := runtimeBackend.capturedDest["/src/caic"]; got != "caic-3" {
+			if got, _ := runtimeBackend.destPrimary("/src/caic"); got != "caic-3" {
 				t.Errorf("primary pin = %q, want caic-3", got)
 			}
-			if got := runtimeBackend.capturedDest["/src/other"]; got != "caic-9" {
+			if got, _ := runtimeBackend.destPrimary("/src/other"); got != "caic-9" {
 				t.Errorf("extra repo pin = %q, want caic-9 (its own branch, not the primary's)", got)
 			}
 		})

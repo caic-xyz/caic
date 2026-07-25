@@ -213,25 +213,40 @@ type StartOptions struct {
 	LogWriter io.Writer
 }
 
+// ForkRepo describes one repository in a fork: its identity, the branches it
+// carries, and the fork's destination primary branch.
+type ForkRepo struct {
+	// HostPath is the absolute host git repository path (the runtime's GitRoot).
+	HostPath string
+	// MountPath is the container path to mount a new repo at. Used only for repos
+	// not already in the source instance; existing repos keep their mount.
+	MountPath string
+	// SourceBranches are the branches to carry, primary first. For a repo already
+	// in the source instance these are its current branches; for a new repo they
+	// are the host branches to push (empty defaults to the repo's upstream).
+	SourceBranches []string
+	// DestPrimary is the fork's primary branch. The caller owns its uniqueness;
+	// the runtime uses it verbatim.
+	DestPrimary string
+}
+
 // ForkOptions holds parameters for forking a runtime instance.
 type ForkOptions struct {
 	RuntimeName Name
 	Metadata    Metadata
-	ExtraRepos  []Repo // Additional repos to map into the fork beyond the source's repos.
-	// DestPrimaryBranches optionally pins each mapped repo's destination primary
-	// branch, keyed by repo host path (GitRoot). When set for a repo the runtime
-	// uses that name verbatim instead of generating one; the caller owns
-	// uniqueness. Repos absent from the map keep runtime-generated naming.
-	DestPrimaryBranches map[string]string
-	Display             bool // Inherit or enable X11/VNC.
-	Tailscale           bool // Inherit or enable Tailscale.
-	USB                 bool // Inherit or enable USB.
-	Sudo                bool // Inherit or enable root access (password-based sudo).
-	Harness             harness.Name
-	ExtraEnv            []string  // KEY=VALUE pairs for ~/.env.
-	Mounts              []Mount   // Host directories bind-mounted into the fork.
-	MaxCPUs             int       // Max CPU cores; 0 means use the default.
-	LogWriter           io.Writer // Provisioning log output.
+	// Repos is the full set of repositories the fork should contain: every repo
+	// already in the source instance plus any new ones to add. Each names its
+	// destination primary branch; the caller owns branch uniqueness.
+	Repos     []ForkRepo
+	Display   bool // Inherit or enable X11/VNC.
+	Tailscale bool // Inherit or enable Tailscale.
+	USB       bool // Inherit or enable USB.
+	Sudo      bool // Inherit or enable root access (password-based sudo).
+	Harness   harness.Name
+	ExtraEnv  []string  // KEY=VALUE pairs for ~/.env.
+	Mounts    []Mount   // Host directories bind-mounted into the fork.
+	MaxCPUs   int       // Max CPU cores; 0 means use the default.
+	LogWriter io.Writer // Provisioning log output.
 }
 
 // System provides all runtime capabilities used by the application.
@@ -262,8 +277,9 @@ type Lifecycle interface {
 	// The instance's filesystem is preserved.
 	Revive(ctx context.Context, id ID) error
 	// Fork snapshots a running or stopped instance and creates a new one where
-	// each mapped repo is checked out on a new branch derived from the current state.
-	Fork(ctx context.Context, id ID, repos []Repo, opts *ForkOptions) (ID, ConnectionInfo, []Repo, error)
+	// each mapped repo is checked out on a new branch. opts.Repos names the full
+	// repo set and each repo's destination primary branch.
+	Fork(ctx context.Context, id ID, opts *ForkOptions) (ID, ConnectionInfo, []Repo, error)
 	// VNCPort returns the host port mapped to the runtime instance's VNC port.
 	// Returns 0 when the instance has no display.
 	VNCPort(ctx context.Context, id ID) int

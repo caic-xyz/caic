@@ -133,7 +133,7 @@ func (r *Router) Revive(ctx context.Context, id ID) error {
 }
 
 // Fork snapshots an instance on its owning backend. Cross-runtime forks are rejected.
-func (r *Router) Fork(ctx context.Context, id ID, repos []Repo, opts *ForkOptions) (ID, ConnectionInfo, []Repo, error) {
+func (r *Router) Fork(ctx context.Context, id ID, opts *ForkOptions) (ID, ConnectionInfo, []Repo, error) {
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return "", ConnectionInfo{}, nil, err
@@ -143,7 +143,7 @@ func (r *Router) Fork(ctx context.Context, id ID, repos []Repo, opts *ForkOption
 	}
 	delegateOpts := *opts
 	delegateOpts.RuntimeName = rt.Name()
-	forkID, conn, forkRepos, err := rt.Fork(ctx, id, repos, &delegateOpts)
+	forkID, conn, forkRepos, err := rt.Fork(ctx, id, &delegateOpts)
 	if err != nil {
 		return "", ConnectionInfo{}, nil, err
 	}

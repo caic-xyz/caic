@@ -397,7 +397,7 @@ func TestBackend(t *testing.T) {
 		t.Parallel()
 		src := &fakeMDContainer{forkResult: &fakeMDContainer{name: "fork-1", vncPort: 5902, repo: []md.Repo{{Branches: []string{"caic-2"}}}}}
 		b := newTestBackend(&fakeMDClient{getResult: src})
-		name, conn, repos, err := b.Fork(t.Context(), "docker:src", nil, &runtime.ForkOptions{Harness: harness.Claude})
+		name, conn, repos, err := b.Fork(t.Context(), "docker:src", &runtime.ForkOptions{Harness: harness.Claude})
 		if err != nil {
 			t.Fatalf("Fork: %v", err)
 		}

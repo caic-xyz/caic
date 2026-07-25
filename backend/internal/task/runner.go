@@ -515,12 +515,27 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *run
 	if p := fork.Primary(); p != nil {
 		forkBranch = p.Branch
 	}
-	repos := fork.ReposSnapshot()
-	destBranches := make(map[string]string, len(repos))
-	for i := range repos {
-		destBranches[repos[i].GitRoot] = repos[i].Branch
+	// Build the full fork repo set: every fork repo with its reserved destination
+	// primary branch. Repos already in the source instance carry that instance's
+	// current branch (so the runtime can validate against the snapshot); new repos
+	// carry the host branch to push — their base branch, or the repo's upstream
+	// default when empty.
+	srcBranch := make(map[string]string) // GitRoot -> source instance branch
+	for _, r := range source.RuntimeRepos() {
+		srcBranch[r.HostPath] = r.Branch
 	}
-	forkOpts.DestPrimaryBranches = destBranches
+	forkMounts := fork.ReposSnapshot()
+	specs := make([]runtime.ForkRepo, len(forkMounts))
+	for i, r := range forkMounts {
+		spec := runtime.ForkRepo{HostPath: r.GitRoot, MountPath: r.MountedPath, DestPrimary: r.Branch}
+		if b, ok := srcBranch[r.GitRoot]; ok {
+			spec.SourceBranches = []string{b}
+		} else if r.BaseBranch != "" {
+			spec.SourceBranches = []string{r.BaseBranch}
+		}
+		specs[i] = spec
+	}
+	forkOpts.Repos = specs
 
 	logW, err := r.Sessions.Logs.Open(fork)
 	if err != nil {
@@ -535,7 +550,7 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *run
 	tlog.Debug("workspace", "msg", "calling instance.Fork", "source", sourceInstanceID, "harness", forkOpts.Harness, "tailscale", forkOpts.Tailscale, "usb", forkOpts.USB, "display", forkOpts.Display, "sudo", forkOpts.Sudo, "gitHubToken", fork.GitHubTokenEnabled())
 	provisioningLog := &provisioningWriter{ctx: ctx, t: fork, logW: logW}
 	forkOpts.LogWriter = provisioningLog
-	forkName, forkConn, forkRepos, err := r.Workspace.Runtimes.Fork(ctx, sourceInstanceID, source.RuntimeRepos(), forkOpts)
+	forkName, forkConn, forkRepos, err := r.Workspace.Runtimes.Fork(ctx, sourceInstanceID, forkOpts)
 	if flushErr := provisioningLog.Flush(); flushErr != nil {
 		err = errors.Join(err, flushErr)
 	}
