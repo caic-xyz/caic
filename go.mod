@@ -4,7 +4,7 @@ go 1.26.5
 
 require (
 	github.com/andybalholm/brotli v1.2.2
-	github.com/caic-xyz/md v0.16.5-0.20260726215815-968e068b275e
+	github.com/caic-xyz/md v0.17.0
 	github.com/coder/websocket v1.8.14
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/huin/goupnp v1.3.0
