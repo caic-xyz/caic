@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { Task } from "@sdk/types.gen";
+import type { ISOTimestamp, Task } from "@sdk/types.gen";
 
 import { QuotaRecoveryTracker, formatQuotaCountdown } from "./quota";
 
@@ -19,7 +19,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 describe("QuotaRecoveryTracker", () => {
   it("notifies once when a waiting quota-blocked task becomes eligible again", () => {
     const tracker = new QuotaRecoveryTracker();
-    const task = makeTask({ state: "waiting", rateLimit: { blocked: true, window: "5h", resetsAt: "2026-07-08T12:42:00Z" } });
+    const task = makeTask({ state: "waiting", rateLimit: { blocked: true, window: "5h", resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp } });
     const available = { ...task, rateLimit: undefined };
 
     expect(tracker.update([task])).toEqual([]);
@@ -29,7 +29,7 @@ describe("QuotaRecoveryTracker", () => {
 
   it("records a task that becomes waiting while its quota is exhausted", () => {
     const tracker = new QuotaRecoveryTracker();
-    const task = makeTask({ state: "waiting", rateLimit: { blocked: true, window: "5h", resetsAt: "2026-07-08T12:42:00Z" } });
+    const task = makeTask({ state: "waiting", rateLimit: { blocked: true, window: "5h", resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp } });
     const available = { ...task, rateLimit: undefined };
 
     expect(tracker.update([{ ...task, state: "running" }])).toEqual([]);
@@ -39,7 +39,7 @@ describe("QuotaRecoveryTracker", () => {
 
   it("does not notify when a task stops waiting before quota recovers", () => {
     const tracker = new QuotaRecoveryTracker();
-    const task = makeTask({ state: "waiting", rateLimit: { blocked: true, window: "5h", resetsAt: "2026-07-08T12:42:00Z" } });
+    const task = makeTask({ state: "waiting", rateLimit: { blocked: true, window: "5h", resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp } });
 
     tracker.update([task]);
 

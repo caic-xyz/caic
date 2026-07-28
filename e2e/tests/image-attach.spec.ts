@@ -46,6 +46,7 @@ test("UI: screenshot capture attaches a thumbnail which is sent and cleared on s
     srcCanvas.width = 100;
     srcCanvas.height = 100;
     const ctx = srcCanvas.getContext("2d");
+    if (!ctx) throw new Error("2d canvas context unavailable");
     ctx.fillStyle = "#4a90d9";
     ctx.fillRect(0, 0, 100, 100);
 

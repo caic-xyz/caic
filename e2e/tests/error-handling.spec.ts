@@ -1,5 +1,6 @@
 // Error handling and edge case tests.
 import { test, expect, createTaskAPI, waitForTaskState, APIError } from "../helpers";
+import type { Harness } from "../../sdk/caic/ts/v1/types.gen";
 
 test("POST /api/caic/v1/tasks with missing prompt returns 400", async ({ api }) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -11,7 +12,7 @@ test("POST /api/caic/v1/tasks with missing prompt returns 400", async ({ api }) 
 
 test("POST /api/caic/v1/tasks with unknown repo returns 400", async ({ api }) => {
   const err = await api
-    .createTask({ initialPrompt: { text: "hello" }, repos: [{ name: "nonexistent" }], harness: "fake" })
+    .createTask({ initialPrompt: { text: "hello" }, repos: [{ name: "nonexistent" }], harness: "fake" as Harness })
     .catch((e: unknown) => e);
   expect(err).toBeInstanceOf(APIError);
   expect((err as APIError).status).toBe(400);
@@ -19,7 +20,8 @@ test("POST /api/caic/v1/tasks with unknown repo returns 400", async ({ api }) =>
 
 test("POST /api/caic/v1/tasks with unknown harness returns 400", async ({ api }) => {
   const err = await api
-    .createTask({ initialPrompt: { text: "hello" }, harness: "does-not-exist" })
+    // Deliberately outside the Harness enum: the server must reject it.
+    .createTask({ initialPrompt: { text: "hello" }, harness: "does-not-exist" as Harness })
     .catch((e: unknown) => e);
   expect(err).toBeInstanceOf(APIError);
   expect((err as APIError).status).toBe(400);

@@ -3,6 +3,7 @@
 import { fireEvent, render, screen } from "@solidjs/testing-library";
 import { describe, expect, it, vi } from "vitest";
 
+import type { ISOTimestamp } from "@sdk/types.gen";
 import type { TaskCardProps } from "./TaskCard";
 
 import TaskCard from "./TaskCard";
@@ -45,7 +46,7 @@ describe("TaskCard", () => {
           rateLimit: {
             blocked: true,
             window: "five_hour",
-            resetsAt: "2026-07-08T12:42:00Z",
+            resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp,
           },
         })}
       />

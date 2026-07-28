@@ -93,6 +93,7 @@ lint-go:
 	@go vet -tags=smoke ./...
 
 lint-frontend: $(FRONTEND_STAMP)
+	@pnpm typecheck
 	@pnpm lint
 	@python3 scripts/lint_css_vars.py
 

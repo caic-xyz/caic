@@ -38,10 +38,16 @@ make check     # Refresh generated files, build, lint, and test (non-Android).
 
 ### E2E Tests
 
-The `e2e/` directory contains Playwright tests. There is **no `tsconfig.json`**
-in `e2e/` — Playwright transpiles the TypeScript itself. Do not run `tsc`
-directly on e2e files; use `make frontend-e2e` instead, which starts the fake backend
-server and runs Playwright (type errors surface as test failures).
+The `e2e/` directory contains Playwright tests. Playwright transpiles the
+TypeScript itself without type checking, so `e2e/tsconfig.json` exists solely to
+give `tsc` a project to check: `make lint-frontend` runs `pnpm typecheck`, which
+checks both the root project (`frontend/src`, `sdk/`) and `e2e/`. Run
+`make frontend-e2e` to actually execute the tests; it starts the fake backend
+server and runs Playwright.
+
+Type checking catches e2e drift against the generated SDK (wrong field names,
+wrong request shapes), but note that Playwright matchers like `toContain` accept
+`unknown`, so assertion arguments are not type checked.
 
 For Android e2e tests, start the emulator with `make android-start-emulator`, then
 run `make android-e2e`. The start target runs emulator setup first.

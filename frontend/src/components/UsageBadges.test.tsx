@@ -29,6 +29,7 @@ function makeProvider(overrides: Partial<ProviderQuota> = {}): ProviderQuota {
     label: "Test",
     logoUrl: "",
     authKind: "apikey",
+    usageUrl: "",
     ...overrides,
   };
 }

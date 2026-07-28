@@ -15,6 +15,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p e2e/tsconfig.json",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
   },
@@ -31,6 +32,7 @@
     "@solidjs/testing-library": "^0.8.10",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^24.13.3",
     "@vitest/coverage-v8": "^4.1.8",
     "eslint": "^10.5.0",
     "eslint-plugin-jsx-a11y": "^6.10.2",

@@ -14,5 +14,5 @@ test("list harnesses returns the fake harness", async ({ api }) => {
   expect(harnesses.length).toBeGreaterThan(0);
   const fake = harnesses.find((h) => h.name === "fake");
   expect(fake).toBeTruthy();
-  expect(fake!.models).toContain("fake-model");
+  expect(fake!.models.map((m) => m.id)).toContain("fake-model");
 });
