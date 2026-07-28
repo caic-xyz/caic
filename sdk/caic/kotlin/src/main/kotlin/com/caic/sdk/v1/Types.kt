@@ -950,21 +950,15 @@ data class OAuthGrantsResp(val grants: List<OAuthGrantResp>)
 @Serializable
 class RevokeOAuthGrantReq
 
-/** ModelCapability describes the configuration choices supported by a harness model. */
+/** Model describes the configuration choices supported by a harness model. */
 @Serializable
-data class ModelCapability(
-    val model: String,
-    val effortOptions: List<String>,
-    val modes: List<String>,
-)
+data class Model(val id: String, val effortOptions: List<String>)
 
 /** HarnessInfo is the JSON representation of an available harness. */
 @Serializable
 data class HarnessInfo(
     val name: String,
-    val models: List<String>,
-    val effortOptions: List<String>,
-    val modelCapabilities: List<ModelCapability>,
+    val models: List<Model>,
     val supportsImages: Boolean,
     val supportsCompact: Boolean,
 )

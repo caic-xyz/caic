@@ -30,7 +30,7 @@ var _ agent.Backend = (*FakeBackend)(nil)
 func NewFakeBackend() *FakeBackend {
 	return &FakeBackend{Base: agent.Base{
 		HarnessID:     "fake",
-		ModelList:     []string{"fake-model"},
+		Inventory:     agent.ModelInventory{Models: []agent.Model{{ID: "fake-model"}}},
 		Images:        true,
 		Compact:       true,
 		ContextWindow: 180_000,

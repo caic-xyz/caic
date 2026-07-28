@@ -1170,13 +1170,18 @@ func TestParseMessage(t *testing.T) {
 
 func TestNew(t *testing.T) {
 	t.Parallel()
-	t.Run("reports supported effort levels", func(t *testing.T) {
+	t.Run("reports supported effort levels per model", func(t *testing.T) {
 		t.Parallel()
 
-		got := New().EffortOptions()
+		models := New().ModelInventory().Models
+		if len(models) != 4 {
+			t.Fatalf("len(ModelInventory().Models) = %d, want 4", len(models))
+		}
 		want := []string{"low", "medium", "high", "xhigh", "max"}
-		if !slices.Equal(got, want) {
-			t.Fatalf("EffortOptions = %v, want %v", got, want)
+		for _, model := range models {
+			if !slices.Equal(model.EffortOptions, want) {
+				t.Fatalf("%s effort options = %v, want %v", model.ID, model.EffortOptions, want)
+			}
 		}
 	})
 

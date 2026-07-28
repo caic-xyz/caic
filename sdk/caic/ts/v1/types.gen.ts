@@ -716,19 +716,16 @@ export interface OAuthGrantsResp {
 export interface RevokeOAuthGrantReq {
 }
 
-/** ModelCapability describes the configuration choices supported by a harness model. */
-export interface ModelCapability {
-  model: string;
+/** Model describes the configuration choices supported by a harness model. */
+export interface Model {
+  id: string;
   effortOptions: string[];
-  modes: string[];
 }
 
 /** HarnessInfo is the JSON representation of an available harness. */
 export interface HarnessInfo {
   name: string;
-  models: string[];
-  effortOptions: string[];
-  modelCapabilities: ModelCapability[];
+  models: Model[];
   supportsImages: boolean;
   supportsCompact: boolean;
 }

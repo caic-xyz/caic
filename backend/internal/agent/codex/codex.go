@@ -11,7 +11,6 @@ import (
 	"io"
 	"log/slog"
 	"os/exec"
-	"path/filepath"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -34,9 +33,8 @@ import (
 type Backend struct {
 	agent.Base
 
-	mu      sync.Mutex
-	cache   *agent.HarnessCache
-	EnvVars []string // KEY=VALUE pairs used to scope cached model lists.
+	mu        sync.Mutex
+	inventory agent.ModelInventory
 }
 
 var (
@@ -45,52 +43,40 @@ var (
 	_ agent.RecordHandshaker = (*Backend)(nil)
 )
 
-// New creates a Codex CLI backend with parser configured. If cacheDir is
-// non-empty, the model list is loaded from the on-disk harness cache.
+// New creates a Codex CLI backend with parser configured.
 func New(cacheDir string, envVars []string) *Backend {
-	b := &Backend{EnvVars: envVars}
+	b := &Backend{}
 	b.Base = agent.Base{
-		HarnessID: harness.Codex,
-		Efforts: []string{
-			string(codex.ReasoningEffortNone),
-			string(codex.ReasoningEffortMinimal),
-			string(codex.ReasoningEffortLow),
-			string(codex.ReasoningEffortMedium),
-			string(codex.ReasoningEffortHigh),
-			string(codex.ReasoningEffortXHigh),
-			string(codex.ReasoningEffortMax),
-			string(codex.ReasoningEffortUltra),
-		},
+		HarnessID:     harness.Codex,
 		Images:        true,
 		Compact:       true,
 		ContextWindow: 200_000,
 	}
-	if cacheDir != "" {
-		b.cache = agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
-		if models, _ := b.cache.Models(harness.Codex, agent.APIKeyHash(envVars)); len(models) > 0 {
-			b.setModels(models)
-		}
-	}
+	b.SetModelInventory(agent.CachedModelInventory(cacheDir, harness.Codex, envVars))
 	return b
 }
 
-// Models returns the current model list, updated dynamically after each handshake.
-func (b *Backend) Models() []string {
+// ModelInventory implements agent.Backend.
+func (b *Backend) ModelInventory() agent.ModelInventory {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.ModelList
+	return b.inventory
 }
 
-// SetModels replaces the model list with sorted models. Thread-safe.
-func (b *Backend) SetModels(models []string) {
-	b.setModels(models)
-}
-
-// ModelCapabilities implements agent.Backend.
-func (b *Backend) ModelCapabilities() []agent.ModelCapability {
+// SetModelInventory implements agent.Backend.
+func (b *Backend) SetModelInventory(inventory agent.ModelInventory) {
+	byID := make(map[string]agent.Model, len(inventory.Models))
+	for _, model := range inventory.Models {
+		byID[model.ID] = model
+	}
+	ids := sortedModels(inventory.IDs())
+	sorted := make([]agent.Model, 0, len(ids))
+	for _, id := range ids {
+		sorted = append(sorted, byID[id])
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.Base.ModelCapabilities()
+	b.inventory = agent.ModelInventory{Models: sorted}
 }
 
 // RecordHandshake performs the codex app-server JSON-RPC handshake
@@ -156,7 +142,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		return nil, fmt.Errorf("codex handshake: %w", err)
 	}
 	if len(models) > 0 {
-		b.setDiscoveredModels(models)
+		b.SetModelInventory(newModelInventory(models))
 	}
 	wire.suppressUserInput = true
 	initMsg := &agent.InitMessage{SessionID: wire.threadID, Model: opts.Model, Version: wire.agentVersion}
@@ -191,15 +177,16 @@ func (*Backend) AgentArgs(_ agent.HarnessArgs) []string {
 	return codexAppServerArgs()
 }
 
-// FetchModels implements agent.ModelFetcher.
-func (*Backend) FetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) ([]string, error) {
-	return FetchModels(ctx, target, extraEnv)
+// FetchModelInventory implements agent.ModelFetcher.
+func (*Backend) FetchModelInventory(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) (agent.ModelInventory, error) {
+	models, err := fetchModelInfo(ctx, target, extraEnv)
+	if err != nil {
+		return agent.ModelInventory{}, err
+	}
+	return newModelInventory(models), nil
 }
 
-// FetchModels runs codex app-server in the target, fetches
-// model/list, and returns the model ID list.
-// extraEnv holds KEY=VALUE pairs injected via the env command.
-func FetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) ([]string, error) {
+func fetchModelInfo(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) ([]codex.ModelInfo, error) {
 	if target.SSHHost == "" {
 		return nil, errors.New("agent connection target missing SSH host")
 	}
@@ -265,21 +252,45 @@ func codexAppServerArgs() []string {
 	}
 }
 
-func (b *Backend) setDiscoveredModels(models []string) {
-	models = b.setModels(models)
-	if b.cache != nil {
-		b.cache.SetModels(harness.Codex, models, agent.APIKeyHash(b.EnvVars))
-	}
+func newModelInventory(modelInfo []codex.ModelInfo) agent.ModelInventory {
+	models := sortedModels(modelIDs(modelInfo))
+	return agent.ModelInventory{Models: modelsForModelInfo(models, modelInfo)}
 }
 
-func (b *Backend) setModels(models []string) []string {
+func sortedModels(models []string) []string {
 	models = agent.SortModels(models)
 	slices.Reverse(models)
-
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.ModelList = models
 	return models
+}
+
+func modelIDs(modelInfo []codex.ModelInfo) []string {
+	models := make([]string, 0, len(modelInfo))
+	for i := range modelInfo {
+		if modelInfo[i].ID != "" {
+			models = append(models, modelInfo[i].ID)
+		}
+	}
+	return models
+}
+
+func modelsForModelInfo(models []string, modelInfo []codex.ModelInfo) []agent.Model {
+	efforts := make(map[string][]string, len(modelInfo))
+	for i := range modelInfo {
+		for _, effort := range modelInfo[i].SupportedReasoningEfforts {
+			if effort.ReasoningEffort != "" {
+				efforts[modelInfo[i].ID] = append(efforts[modelInfo[i].ID], string(effort.ReasoningEffort))
+			}
+		}
+	}
+
+	result := make([]agent.Model, 0, len(models))
+	for _, model := range models {
+		result = append(result, agent.Model{
+			ID:            model,
+			EffortOptions: efforts[model],
+		})
+	}
+	return result
 }
 
 // wireFormat implements agent.WireFormat for the codex app-server JSON-RPC
@@ -431,8 +442,8 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 
 // handshake performs the JSON-RPC initialize → initialized → model/list →
 // thread/start (or thread/resume) sequence and returns a wireFormat with the
-// thread ID set, plus the model IDs from model/list.
-func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts *agent.Options) (*wireFormat, []string, error) {
+// thread ID set, plus model metadata from model/list.
+func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts *agent.Options) (*wireFormat, []codex.ModelInfo, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -491,7 +502,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	return w, models, nil
 }
 
-func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, nextID *atomic.Int64) ([]string, error) {
+func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, nextID *atomic.Int64) ([]codex.ModelInfo, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -547,7 +558,7 @@ func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, stdout *bufi
 	}
 
 	// 3. Fetch model list so the UI offers only valid model IDs.
-	var models []string
+	var models []codex.ModelInfo
 	mlParams, err := marshalParams(struct{}{})
 	if err != nil {
 		return nil, fmt.Errorf("marshal model/list params: %w", err)
@@ -568,7 +579,7 @@ func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, stdout *bufi
 	}
 	for i := range mlResult.Data {
 		if mlResult.Data[i].ID != "" {
-			models = append(models, mlResult.Data[i].ID)
+			models = append(models, mlResult.Data[i])
 		}
 	}
 	return models, nil

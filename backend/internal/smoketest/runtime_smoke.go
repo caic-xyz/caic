@@ -46,7 +46,7 @@ func NewSmokeBackend() *SmokeBackend {
 	b := &SmokeBackend{}
 	b.Base = agent.Base{
 		HarnessID:     harness.Codex,
-		ModelList:     []string{"smoke-model"},
+		Inventory:     agent.ModelInventory{Models: []agent.Model{{ID: "smoke-model"}}},
 		ContextWindow: 200_000,
 	}
 	return b
@@ -173,7 +173,7 @@ func InitSmokeRepos(ctx context.Context, tmpDir string) (string, error) {
 func InitSmokeHarnessCache(cacheDir string) error {
 	cache := agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
 	for _, h := range []harness.Name{harness.Codex, harness.Pi, harness.OpenCode} {
-		cache.SetModels(h, []string{"smoke-model"}, "")
+		cache.SetModelInventory(h, agent.ModelInventory{Models: []agent.Model{{ID: "smoke-model"}}}, "")
 	}
 	return nil
 }

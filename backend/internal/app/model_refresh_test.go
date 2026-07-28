@@ -1,4 +1,4 @@
-// Tests for harness model refresh.
+// Tests for harness model inventory refresh.
 
 package app
 
@@ -27,10 +27,10 @@ func TestRefreshHarnessModels(t *testing.T) {
 		runtimeBackend := &modelRefreshRuntime{}
 		inventory := &modelRefreshInventory{}
 		router := newModelRefreshRouter(t, runtimeBackend, inventory)
-		fetcher := &modelFetchBackend{FakeBackend: &agenttest.FakeBackend{}, harness: fetchHarness, models: []string{"z-model", "a-model"}}
+		fetcher := &modelFetchBackend{FakeBackend: &agenttest.FakeBackend{}, harness: fetchHarness, inventory: agent.ModelInventory{Models: []agent.Model{{ID: "z-model"}, {ID: "a-model"}}}}
 		taskMgr := newModelRefreshTestManager(t.Context(), router, map[harness.Name]agent.Backend{
 			fetchHarness: fetcher,
-			"plain":      &agenttest.FakeBackend{ModelList: []string{"m1", "m2"}},
+			"plain":      &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}},
 		})
 
 		refreshHarnessModels(t.Context(), cacheDir, router, taskMgr, env)
@@ -50,12 +50,36 @@ func TestRefreshHarnessModels(t *testing.T) {
 		if !slices.Equal(fetcher.env, env[string(fetchHarness)]) {
 			t.Fatalf("fetch env = %v, want %v", fetcher.env, env[string(fetchHarness)])
 		}
-		if !slices.Equal(fetcher.setModels, []string{"z-model", "a-model"}) {
-			t.Fatalf("SetModels = %v, want fetched models", fetcher.setModels)
+		if got := fetcher.setInventory.IDs(); !slices.Equal(got, []string{"z-model", "a-model"}) {
+			t.Fatalf("SetModelInventory models = %v, want fetched models", got)
 		}
-		models, fresh := agent.OpenHarnessCache(cacheDir+"/harnesses.json").Models(fetchHarness, agent.APIKeyHash(env[string(fetchHarness)]))
-		if !fresh || !slices.Equal(models, []string{"z-model", "a-model"}) {
-			t.Fatalf("cache models = %v fresh=%t, want fetched fresh models", models, fresh)
+		cached, fresh := agent.OpenHarnessCache(cacheDir+"/harnesses.json").ModelInventory(fetchHarness, agent.APIKeyHash(env[string(fetchHarness)]))
+		if !fresh || !slices.Equal(cached.IDs(), []string{"z-model", "a-model"}) {
+			t.Fatalf("cache inventory = %#v fresh=%t, want fetched inventory", cached, fresh)
+		}
+	})
+
+	t.Run("valid_caches_models_without_api_keys", func(t *testing.T) {
+		t.Parallel()
+
+		cacheDir := t.TempDir()
+		fetchHarness := harness.Name("fetch")
+		env := map[string][]string{}
+		runtimeBackend := &modelRefreshRuntime{}
+		inventory := &modelRefreshInventory{}
+		router := newModelRefreshRouter(t, runtimeBackend, inventory)
+		fetcher := &modelFetchBackend{
+			FakeBackend: &agenttest.FakeBackend{},
+			harness:     fetchHarness,
+			inventory:   agent.ModelInventory{Models: []agent.Model{{ID: "openai/gpt-5", EffortOptions: []string{"low", "high"}}}},
+		}
+		taskMgr := newModelRefreshTestManager(t.Context(), router, map[harness.Name]agent.Backend{fetchHarness: fetcher})
+
+		refreshHarnessModels(t.Context(), cacheDir, router, taskMgr, env)
+
+		cached, fresh := agent.OpenHarnessCache(cacheDir+"/harnesses.json").ModelInventory(fetchHarness, agent.APIKeyHash(env[string(fetchHarness)]))
+		if !fresh || len(cached.Models) != 1 || !slices.Equal(cached.Models[0].EffortOptions, []string{"low", "high"}) {
+			t.Fatalf("cache inventory = %#v fresh=%t, want fetched effort options", cached, fresh)
 		}
 	})
 
@@ -64,11 +88,11 @@ func TestRefreshHarnessModels(t *testing.T) {
 		cacheDir := t.TempDir()
 		fetchHarness := harness.Name("fetch")
 		cache := agent.OpenHarnessCache(cacheDir + "/harnesses.json")
-		cache.SetModels(fetchHarness, []string{"cached-model"}, "")
+		cache.SetModelInventory(fetchHarness, agent.ModelInventory{Models: []agent.Model{{ID: "cached-model"}}}, "")
 		runtimeBackend := &modelRefreshRuntime{}
 		inventory := &modelRefreshInventory{}
 		router := newModelRefreshRouter(t, runtimeBackend, inventory)
-		fetcher := &modelFetchBackend{FakeBackend: &agenttest.FakeBackend{}, harness: fetchHarness, models: []string{"new-model"}}
+		fetcher := &modelFetchBackend{FakeBackend: &agenttest.FakeBackend{}, harness: fetchHarness, inventory: agent.ModelInventory{Models: []agent.Model{{ID: "new-model"}}}}
 		taskMgr := newModelRefreshTestManager(t.Context(), router, map[harness.Name]agent.Backend{
 			fetchHarness: fetcher,
 		})
@@ -88,7 +112,7 @@ func TestRefreshHarnessModels(t *testing.T) {
 		cacheDir := t.TempDir()
 		fetchHarness := harness.Name("fetch")
 		cache := agent.OpenHarnessCache(cacheDir + "/harnesses.json")
-		cache.SetModels(fetchHarness, []string{"cached-model"}, "")
+		cache.SetModelInventory(fetchHarness, agent.ModelInventory{Models: []agent.Model{{ID: "cached-model"}}}, "")
 		runtimeBackend := &modelRefreshRuntime{}
 		inventory := &modelRefreshInventory{
 			instances: []runtime.Instance{
@@ -101,7 +125,7 @@ func TestRefreshHarnessModels(t *testing.T) {
 			},
 		}
 		router := newModelRefreshRouter(t, runtimeBackend, inventory)
-		fetcher := &modelFetchBackend{FakeBackend: &agenttest.FakeBackend{}, harness: fetchHarness, models: []string{"new-model"}}
+		fetcher := &modelFetchBackend{FakeBackend: &agenttest.FakeBackend{}, harness: fetchHarness, inventory: agent.ModelInventory{Models: []agent.Model{{ID: "new-model"}}}}
 		taskMgr := newModelRefreshTestManager(t.Context(), router, map[harness.Name]agent.Backend{
 			fetchHarness: fetcher,
 		})
@@ -145,23 +169,23 @@ func (*modelRefreshSystem) Name() runtime.Name { return "test-runtime" }
 type modelFetchBackend struct {
 	*agenttest.FakeBackend
 
-	harness   harness.Name
-	models    []string
-	target    runtime.ConnectionTarget
-	env       []string
-	setModels []string
+	harness      harness.Name
+	inventory    agent.ModelInventory
+	target       runtime.ConnectionTarget
+	env          []string
+	setInventory agent.ModelInventory
 }
 
 func (b *modelFetchBackend) Harness() harness.Name { return b.harness }
 
-func (b *modelFetchBackend) FetchModels(_ context.Context, target runtime.ConnectionTarget, env []string) ([]string, error) {
+func (b *modelFetchBackend) FetchModelInventory(_ context.Context, target runtime.ConnectionTarget, env []string) (agent.ModelInventory, error) {
 	b.target = target
 	b.env = append([]string(nil), env...)
-	return b.models, nil
+	return b.inventory, nil
 }
 
-func (b *modelFetchBackend) SetModels(models []string) {
-	b.setModels = append([]string(nil), models...)
+func (b *modelFetchBackend) SetModelInventory(inventory agent.ModelInventory) {
+	b.setInventory = inventory
 }
 
 type modelRefreshRuntime struct {

@@ -24,8 +24,8 @@ func TestNew(t *testing.T) {
 	t.Run("empty_without_cache", func(t *testing.T) {
 		t.Parallel()
 		b := New("", nil)
-		if len(b.Models()) != 0 {
-			t.Fatalf("Models() = %v, want empty", b.Models())
+		if len(b.ModelInventory().Models) != 0 {
+			t.Fatalf("ModelInventory() = %#v, want empty", b.ModelInventory())
 		}
 	})
 	t.Run("loads_cached_models", func(t *testing.T) {
@@ -33,29 +33,41 @@ func TestNew(t *testing.T) {
 		dir := t.TempDir()
 		envVars := []string{"OPENAI_API_KEY=secret"}
 		cache := agent.OpenHarnessCache(filepath.Join(dir, "harnesses.json"))
-		cache.SetModels(harness.Codex, []string{"z-model", "a-model"}, agent.APIKeyHash(envVars))
+		cache.SetModelInventory(harness.Codex, agent.ModelInventory{Models: []agent.Model{{ID: "z-model"}, {ID: "a-model"}}}, agent.APIKeyHash(envVars))
 
 		b := New(dir, envVars)
-		if got, want := b.Models(), []string{"z-model", "a-model"}; !slices.Equal(got, want) {
-			t.Fatalf("Models() = %v, want %v", got, want)
+		if got, want := b.ModelInventory().IDs(), []string{"z-model", "a-model"}; !slices.Equal(got, want) {
+			t.Fatalf("ModelInventory().IDs() = %v, want %v", got, want)
 		}
 	})
-	t.Run("persists_discovered_models", func(t *testing.T) {
+	t.Run("loads cached model effort options", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		envVars := []string{"OPENAI_API_KEY=secret"}
-		b := New(dir, envVars)
-
-		b.setDiscoveredModels([]string{"z-model", "a-model"})
-
 		cache := agent.OpenHarnessCache(filepath.Join(dir, "harnesses.json"))
-		got, fresh := cache.Models(harness.Codex, agent.APIKeyHash(envVars))
-		if !fresh {
-			t.Fatal("cached models are not fresh")
+		cache.SetModelInventory(harness.Codex, agent.ModelInventory{Models: []agent.Model{{ID: "gpt-5", EffortOptions: []string{"minimal", "high"}}}}, agent.APIKeyHash(envVars))
+
+		b := New(dir, envVars)
+		models := b.ModelInventory().Models
+		if got, want := models[0].EffortOptions, []string{"minimal", "high"}; !slices.Equal(got, want) {
+			t.Fatalf("cached effort options = %v, want %v", got, want)
 		}
-		want := []string{"z-model", "a-model"}
-		if !slices.Equal(got, want) {
-			t.Fatalf("cached models = %v, want %v", got, want)
+	})
+	t.Run("records discovered models and their effort options", func(t *testing.T) {
+		t.Parallel()
+		b := New("", nil)
+
+		b.SetModelInventory(newModelInventory([]codex.ModelInfo{
+			{ID: "z-model", SupportedReasoningEfforts: []codex.ModelReasoningOpt{{ReasoningEffort: codex.ReasoningEffortMinimal}, {ReasoningEffort: codex.ReasoningEffortHigh}}},
+			{ID: "a-model", SupportedReasoningEfforts: []codex.ModelReasoningOpt{{ReasoningEffort: codex.ReasoningEffortNone}}},
+		}))
+
+		models := b.ModelInventory().Models
+		if got, want := models[0].EffortOptions, []string{"minimal", "high"}; !slices.Equal(got, want) {
+			t.Fatalf("z-model effort options = %v, want %v", got, want)
+		}
+		if got, want := models[1].EffortOptions, []string{"none"}; !slices.Equal(got, want) {
+			t.Fatalf("a-model effort options = %v, want %v", got, want)
 		}
 	})
 }
@@ -114,7 +126,7 @@ func TestFetchModels(t *testing.T) {
 	t.Run("protocol", func(t *testing.T) {
 		t.Parallel()
 		const responses = `{"id":1,"result":{"userAgent":"caic/0.1"}}
-{"id":2,"result":{"data":[{"id":"gpt-5.4"},{"id":"gpt-5.3-codex"}],"nextCursor":null}}
+{"id":2,"result":{"data":[{"id":"gpt-5.4","supportedReasoningEfforts":[{"reasoningEffort":"minimal"},{"reasoningEffort":"high"}]},{"id":"gpt-5.3-codex","supportedReasoningEfforts":[{"reasoningEffort":"low"}]}],"nextCursor":null}}
 `
 		var stdin bytes.Buffer
 		var nextID atomic.Int64
@@ -123,8 +135,11 @@ func TestFetchModels(t *testing.T) {
 			t.Fatal(err)
 		}
 		wantModels := []string{"gpt-5.4", "gpt-5.3-codex"}
-		if !slices.Equal(models, wantModels) {
-			t.Errorf("models = %v, want %v", models, wantModels)
+		if got := modelIDs(models); !slices.Equal(got, wantModels) {
+			t.Errorf("models = %v, want %v", got, wantModels)
+		}
+		if got, want := models[0].SupportedReasoningEfforts[1].ReasoningEffort, codex.ReasoningEffortHigh; got != want {
+			t.Errorf("gpt-5.4 second effort = %q, want %q", got, want)
 		}
 
 		lines := bytes.Split(bytes.TrimSpace(stdin.Bytes()), []byte{'\n'})
@@ -161,8 +176,8 @@ func TestHandshake(t *testing.T) {
 			t.Errorf("agentVersion = %q, want 0.133.0", w.agentVersion)
 		}
 		wantModels := []string{"gpt-5.4", "gpt-5.3-codex"}
-		if !slices.Equal(models, wantModels) {
-			t.Errorf("models = %v, want %v", models, wantModels)
+		if got := modelIDs(models); !slices.Equal(got, wantModels) {
+			t.Errorf("models = %v, want %v", got, wantModels)
 		}
 
 		lines := bytes.Split(bytes.TrimSpace(stdin.Bytes()), []byte{'\n'})

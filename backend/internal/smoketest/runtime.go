@@ -36,7 +36,7 @@ func InitRepo(ctx context.Context, tmpDir string) (string, error) {
 func InitHarnessCache(cacheDir string) error {
 	cache := agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
 	for _, h := range []harness.Name{harness.Codex, harness.Pi, harness.OpenCode} {
-		cache.SetModels(h, []string{"fake-model"}, "")
+		cache.SetModelInventory(h, agent.ModelInventory{Models: []agent.Model{{ID: "fake-model"}}}, "")
 	}
 	return nil
 }

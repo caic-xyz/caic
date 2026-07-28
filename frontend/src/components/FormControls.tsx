@@ -44,11 +44,11 @@ export function HarnessControls(props: {
 }) {
   const label = (name: string) => `${props.labelPrefix ?? ""}${name}`;
   const modelOptions = () => (props.harnesses.find((h) => h.name === props.harness)?.models ?? [])
-    .map((m) => ({ value: m, label: m as JSX.Element, search: m }));
+    .map((model) => ({ value: model.id, label: model.id as JSX.Element, search: model.id }));
   const efforts = () => {
     const harness = props.harnesses.find((h) => h.name === props.harness);
-    const capability = harness?.modelCapabilities?.find((c) => c.model === props.model);
-    return capability?.effortOptions ?? harness?.effortOptions ?? [];
+    const model = harness?.models.find((candidate) => candidate.id === props.model);
+    return model?.effortOptions ?? [];
   };
   return (
     <>

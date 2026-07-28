@@ -1,4 +1,4 @@
-// Shared disk cache for per-harness data (model lists).
+// Shared disk cache for per-harness model inventories.
 
 package agent
 
@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -19,13 +20,14 @@ const cacheMaxAge = 24 * time.Hour
 
 // HarnessCacheEntry holds cached data for a single harness.
 type HarnessCacheEntry struct {
-	Models  []string  `json:"models"`
-	Updated time.Time `json:"updated"`
-	EnvHash string    `json:"env_hash,omitempty"` // SHA-256 of *_API_KEY env vars from config.toml
+	Inventory ModelInventory `json:"inventory"`
+	Updated   time.Time      `json:"updated"`
+	EnvHash   string         `json:"env_hash,omitempty"` // SHA-256 of *_API_KEY env vars from config.toml
 }
 
-// HarnessCache is a thread-safe disk-backed cache for per-harness model lists.
-// The file is shared across harnesses; each harness owns its own key.
+// HarnessCache is a thread-safe disk-backed cache for per-harness model
+// inventories. The file is shared across harnesses; each harness owns its own
+// key.
 type HarnessCache struct {
 	mu   sync.Mutex
 	path string
@@ -44,28 +46,39 @@ func OpenHarnessCache(path string) *HarnessCache {
 	return c
 }
 
-// Models returns the cached model list for h and whether the entry is fresh
-// (updated within the last 24 h) and its API-key hash matches envHash.
-// When envHash is non-empty and differs from the stored hash, the cache is
-// treated as stale so models are re-fetched with the new API key.
-func (c *HarnessCache) Models(h harness.Name, envHash string) (models []string, fresh bool) {
+// CachedModelInventory loads a harness inventory from cacheDir. An empty
+// cacheDir returns an empty inventory.
+func CachedModelInventory(cacheDir string, h harness.Name, envVars []string) ModelInventory {
+	if cacheDir == "" {
+		return ModelInventory{}
+	}
+	inventory, _ := OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json")).ModelInventory(h, APIKeyHash(envVars))
+	return inventory
+}
+
+// ModelInventory returns the cached inventory for h and whether it is fresh
+// (updated within the last 24 h) and its API-key hash matches envHash. Invalid
+// inventory entries are treated as unavailable.
+func (c *HarnessCache) ModelInventory(h harness.Name, envHash string) (inventory ModelInventory, fresh bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e := c.data[h]
-	if e == nil || len(e.Models) == 0 {
-		return nil, false
+	if e == nil || !e.Inventory.valid() || e.EnvHash != envHash {
+		return ModelInventory{}, false
 	}
-	if e.EnvHash != envHash {
-		return nil, false
-	}
-	return e.Models, time.Since(e.Updated) < cacheMaxAge
+	return e.Inventory, time.Since(e.Updated) < cacheMaxAge
 }
 
-// SetModels updates the cache for h and writes to disk atomically.
-func (c *HarnessCache) SetModels(h harness.Name, models []string, envHash string) {
+// SetModelInventory updates the cache for h and writes to disk atomically.
+func (c *HarnessCache) SetModelInventory(h harness.Name, inventory ModelInventory, envHash string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.data[h] = &HarnessCacheEntry{Models: models, Updated: time.Now(), EnvHash: envHash}
+
+	c.data[h] = &HarnessCacheEntry{
+		Inventory: inventory,
+		Updated:   time.Now(),
+		EnvHash:   envHash,
+	}
 	c.flush()
 }
 

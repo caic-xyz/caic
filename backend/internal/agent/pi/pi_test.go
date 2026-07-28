@@ -1,4 +1,4 @@
-// Tests Pi CLI startup, update recovery, and wire configuration.
+// Tests Pi CLI model discovery, startup, update recovery, and wire configuration.
 
 package pi
 
@@ -17,7 +17,10 @@ import (
 	"testing"
 	"time"
 
+	genaipi "github.com/maruel/genai/providers/pi"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
@@ -98,6 +101,55 @@ func runPiRelayHelper() {
 	if err := s.Err(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+}
+
+func TestModelsForPiModels(t *testing.T) {
+	t.Parallel()
+
+	models := modelsForPiModels([]genaipi.Model{
+		{ID: "non-reasoning", Provider: "test"},
+		{ID: "defaults", Provider: "test", Reasoning: true},
+		{
+			ID:        "mapped",
+			Provider:  "test",
+			Reasoning: true,
+			ThinkingLevelMap: map[genaipi.ThinkingLevel]string{
+				genaipi.ThinkingOff:     "",
+				genaipi.ThinkingMinimal: "minimal",
+				genaipi.ThinkingLow:     "",
+				genaipi.ThinkingHigh:    "high",
+				genaipi.ThinkingXHigh:   "xhigh",
+				genaipi.ThinkingMax:     "",
+			},
+		},
+	})
+	if got, want := (agent.ModelInventory{Models: models}).IDs(), []string{"test/defaults", "test/mapped", "test/non-reasoning"}; !slices.Equal(got, want) {
+		t.Fatalf("models = %v, want %v", got, want)
+	}
+	if got, want := models[0].EffortOptions, []string{"off", "minimal", "low", "medium", "high"}; !slices.Equal(got, want) {
+		t.Fatalf("default effort options = %v, want %v", got, want)
+	}
+	if got, want := models[1].EffortOptions, []string{"minimal", "medium", "high", "xhigh"}; !slices.Equal(got, want) {
+		t.Fatalf("mapped effort options = %v, want %v", got, want)
+	}
+	if got, want := models[2].EffortOptions, []string{"off"}; !slices.Equal(got, want) {
+		t.Fatalf("non-reasoning effort options = %v, want %v", got, want)
+	}
+}
+
+func TestCachedModels(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	envVars := []string{"PI_API_KEY=secret"}
+	cache := agent.OpenHarnessCache(filepath.Join(dir, "harnesses.json"))
+	cache.SetModelInventory(harness.Pi, agent.ModelInventory{Models: []agent.Model{{ID: "openai/gpt-5", EffortOptions: []string{"low", "high"}}}}, agent.APIKeyHash(envVars))
+
+	b := New(dir, envVars)
+	inventory := b.ModelInventory()
+	if len(inventory.Models) != 1 || !slices.Equal(inventory.Models[0].EffortOptions, []string{"low", "high"}) {
+		t.Fatalf("ModelInventory() = %#v, want cached effort options", inventory)
 	}
 }
 

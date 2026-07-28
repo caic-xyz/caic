@@ -1,4 +1,4 @@
-// Harness model-cache refresh and deletion watcher.
+// Harness model inventory cache refresh and deletion watcher.
 
 package app
 
@@ -74,7 +74,9 @@ func refreshHarnessModels(ctx context.Context, cacheDir string, router *runtime.
 	}
 	for _, h := range slices.Sorted(maps.Keys(fetchers)) {
 		env := harnessEnv[string(h)]
-		if _, fresh := cache.Models(h, agent.APIKeyHash(env)); fresh {
+		envHash := agent.APIKeyHash(env)
+		_, fresh := cache.ModelInventory(h, envHash)
+		if fresh {
 			continue
 		}
 		refreshOneHarness(ctx, cache, router, taskMgr, h, fetchers[h], env)
@@ -110,8 +112,8 @@ func purgeStaleModelRefreshInstances(ctx context.Context, router *runtime.Router
 	}
 }
 
-// refreshOneHarness launches a temporary runtime instance, fetches models, and
-// updates the cache and all workspace backends.
+// refreshOneHarness launches a temporary runtime instance, fetches an
+// inventory, and updates the cache and all workspace backends.
 func refreshOneHarness(
 	ctx context.Context,
 	cache *agent.HarnessCache,
@@ -148,17 +150,16 @@ func refreshOneHarness(
 		slog.WarnContext(ctx, "model refresh: connect failed", "harness", h, "err", err)
 		return
 	}
-	models, err := fetcher.FetchModels(ctx, conn.AgentTarget, env)
+	inventory, err := fetcher.FetchModelInventory(ctx, conn.AgentTarget, env)
 	if err != nil {
 		slog.WarnContext(ctx, "model refresh: fetch failed", "harness", h, "err", err)
 		return
 	}
-	cache.SetModels(h, models, agent.APIKeyHash(env))
-	slog.InfoContext(ctx, "model cache refreshed", "harness", h, "count", len(models))
-
 	if b, ok := taskMgr.Backends()[h]; ok {
-		b.SetModels(models)
+		b.SetModelInventory(inventory)
 	}
+	cache.SetModelInventory(h, inventory, agent.APIKeyHash(env))
+	slog.InfoContext(ctx, "model cache refreshed", "harness", h, "count", len(inventory.Models))
 }
 
 type phaseLogWriter struct {

@@ -1,11 +1,10 @@
-// Defines the Backend interface that all coding-agent implementations must satisfy.
+// Defines the Backend interface and model inventories shared by coding-agent implementations.
 
 package agent
 
 import (
 	"context"
 	"io"
-	"slices"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -33,26 +32,20 @@ type Backend interface {
 	// Harness returns the harness identifier ("claude", "codex", etc.)
 	Harness() harness.Name
 
-	// Models returns the list of model names supported by this backend.
-	Models() []string
+	// ModelInventory returns the models and per-model configuration supported
+	// by this backend.
+	ModelInventory() ModelInventory
 
-	// SetModels replaces the model list. Used by the server to push
-	// dynamically-fetched models into all workspaces.
-	SetModels(models []string)
+	// SetModelInventory replaces the models and per-model configuration.
+	// The server uses it to push dynamically discovered inventories into all
+	// workspace backends.
+	SetModelInventory(inventory ModelInventory)
 
 	// SupportsImages reports whether this backend accepts image content blocks.
 	SupportsImages() bool
 
 	// SupportsCompact reports whether this backend supports context compaction.
 	SupportsCompact() bool
-
-	// EffortOptions returns the valid thinking-effort levels for this backend.
-	EffortOptions() []string
-
-	// ModelCapabilities returns the supported configuration for each model.
-	// Harnesses that expose model-specific configuration override the Base
-	// implementation with their runtime-discovered capabilities.
-	ModelCapabilities() []ModelCapability
 
 	// AgentArgs returns the CLI arguments for launching this backend's agent
 	// subprocess, including the executable name and all session-specific flags
@@ -68,18 +61,50 @@ type Backend interface {
 	ContextWindowLimit(model string) int
 }
 
-// ModelCapability describes the configuration choices supported by one model.
+// Model describes the configuration choices supported by one model.
 // Values are protocol-agnostic strings because they are persisted in task
 // preferences and sent back to each harness as user selections.
-type ModelCapability struct {
-	Model         string
-	EffortOptions []string
-	Modes         []string
+type Model struct {
+	ID            string   `json:"id"`
+	EffortOptions []string `json:"effortOptions"`
 }
 
-// ModelFetcher is an optional backend capability for discovering available models.
+// ModelInventory is the immutable model and configuration data discovered for
+// a harness.
+type ModelInventory struct {
+	Models []Model `json:"models"`
+}
+
+// IDs returns the model IDs in inventory order.
+func (i ModelInventory) IDs() []string {
+	ids := make([]string, 0, len(i.Models))
+	for _, model := range i.Models {
+		ids = append(ids, model.ID)
+	}
+	return ids
+}
+
+func (i ModelInventory) valid() bool {
+	if len(i.Models) == 0 {
+		return false
+	}
+	names := make(map[string]struct{}, len(i.Models))
+	for _, model := range i.Models {
+		if model.ID == "" {
+			return false
+		}
+		if _, exists := names[model.ID]; exists {
+			return false
+		}
+		names[model.ID] = struct{}{}
+	}
+	return true
+}
+
+// ModelFetcher is an optional backend capability for discovering a model
+// inventory.
 type ModelFetcher interface {
-	FetchModels(ctx context.Context, target runtime.ConnectionTarget, env []string) ([]string, error)
+	FetchModelInventory(ctx context.Context, target runtime.ConnectionTarget, env []string) (ModelInventory, error)
 }
 
 // HarnessArgs holds the session-specific parameters that influence the CLI
@@ -111,8 +136,7 @@ type RecordHandshaker interface {
 // (StartRelay, AttachRelaySession).
 type Base struct {
 	HarnessID     harness.Name
-	ModelList     []string
-	Efforts       []string
+	Inventory     ModelInventory
 	Images        bool
 	ContextWindow int
 	Compact       bool
@@ -121,37 +145,17 @@ type Base struct {
 // Harness implements Backend.
 func (b *Base) Harness() harness.Name { return b.HarnessID }
 
-// Models implements Backend.
-func (b *Base) Models() []string { return b.ModelList }
+// ModelInventory implements Backend.
+func (b *Base) ModelInventory() ModelInventory { return b.Inventory }
 
-// SetModels implements Backend.
-func (b *Base) SetModels(models []string) { b.ModelList = models }
+// SetModelInventory implements Backend.
+func (b *Base) SetModelInventory(inventory ModelInventory) { b.Inventory = inventory }
 
 // SupportsImages implements Backend.
 func (b *Base) SupportsImages() bool { return b.Images }
 
 // SupportsCompact implements Backend.
 func (b *Base) SupportsCompact() bool { return b.Compact }
-
-// EffortOptions implements Backend.
-func (b *Base) EffortOptions() []string {
-	if b.Efforts == nil {
-		return []string{}
-	}
-	return b.Efforts
-}
-
-// ModelCapabilities implements Backend.
-func (b *Base) ModelCapabilities() []ModelCapability {
-	capabilities := make([]ModelCapability, 0, len(b.ModelList))
-	for _, model := range b.ModelList {
-		capabilities = append(capabilities, ModelCapability{
-			Model:         model,
-			EffortOptions: slices.Clone(b.Efforts),
-		})
-	}
-	return capabilities
-}
 
 // ContextWindowLimit implements Backend.
 func (b *Base) ContextWindowLimit(string) int { return b.ContextWindow }

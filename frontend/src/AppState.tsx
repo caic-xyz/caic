@@ -256,13 +256,11 @@ function createAppStore() {
   const selectedModelForHarness = (harness: string) => {
     const models = harnesses().find((x) => x.name === harness)?.models ?? [];
     const model = getPrefModel(harness);
-    return model && models.includes(model) ? model : "";
+    return model && models.some((candidate) => candidate.id === model) ? model : "";
   };
   const selectedEffortForModel = (harness: string, model: string) => {
     const harnessInfo = harnesses().find((x) => x.name === harness);
-    const options = harnessInfo?.modelCapabilities?.find((capability) => capability.model === model)?.effortOptions
-      ?? harnessInfo?.effortOptions
-      ?? [];
+    const options = harnessInfo?.models.find((candidate) => candidate.id === model)?.effortOptions ?? [];
     const effort = getPrefEffort(harness, model);
     return effort && options.includes(effort) ? effort : "";
   };

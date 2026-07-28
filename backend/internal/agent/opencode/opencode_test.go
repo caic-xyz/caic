@@ -1,4 +1,4 @@
-// Tests OpenCode backend ACP capability handling.
+// Tests OpenCode backend model discovery and ACP capability handling.
 
 package opencode
 
@@ -14,6 +14,53 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
+
+func TestParseModels(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+
+		models, err := parseModels([]byte("\x1b[92mModels cache refreshed\x1b[0m\nopencode/alpha\n{\n  \"variants\": {\n    \"high\": {},\n    \"low\": {}\n  }\n}\nanthropic/bravo\n{\"variants\": {}}\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := (agent.ModelInventory{Models: models}).IDs(), []string{"anthropic/bravo", "opencode/alpha"}; !slices.Equal(got, want) {
+			t.Fatalf("models = %v, want %v", got, want)
+		}
+		if got, want := models[1].EffortOptions, []string{"high", "low"}; !slices.Equal(got, want) {
+			t.Fatalf("effort options = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("missing_metadata", func(t *testing.T) {
+		t.Parallel()
+
+		if _, err := parseModels([]byte("opencode/alpha\n")); err == nil {
+			t.Fatal("parseModels() succeeded, want error")
+		}
+	})
+}
+
+func TestNew(t *testing.T) {
+	t.Parallel()
+
+	if got := New("", nil).ModelInventory(); len(got.Models) != 0 {
+		t.Fatalf("ModelInventory() = %#v, want an empty inventory before discovery", got)
+	}
+}
+
+func TestSetModelInventory(t *testing.T) {
+	t.Parallel()
+
+	b := New("", nil)
+	b.SetModelInventory(agent.ModelInventory{Models: []agent.Model{{ID: "openai/gpt-5", EffortOptions: []string{"low", "high"}}}})
+
+	got := b.ModelInventory()
+	if len(got.Models) != 1 || !slices.Equal(got.Models[0].EffortOptions, []string{"high", "low"}) {
+		t.Fatalf("ModelInventory() = %#v, want normalized inventory", got)
+	}
+}
 
 func TestHandshake(t *testing.T) {
 	t.Parallel()
@@ -37,10 +84,6 @@ func TestHandshake(t *testing.T) {
 		if hs.currentModel != selectedModel {
 			t.Fatalf("current model = %q, want %q", hs.currentModel, selectedModel)
 		}
-		if len(hs.capabilities) != 2 || !slices.Equal(hs.capabilities[0].EffortOptions, []string{"low", "high"}) {
-			t.Fatalf("capabilities = %#v, want selected model effort options", hs.capabilities)
-		}
-
 		lines := strings.Fields(stdin.String())
 		if len(lines) != 4 {
 			t.Fatalf("request count = %d, want 4; requests = %s", len(lines), stdin.String())
@@ -91,28 +134,10 @@ func TestHandshake(t *testing.T) {
 	})
 }
 
-func TestCapabilitiesForModels(t *testing.T) {
-	t.Parallel()
-
-	capabilities := capabilitiesForModels([]string{"openai/gpt-5", "anthropic/claude-sonnet-4"}, "openai/gpt-5", []string{"low", "high"}, []string{"build", "plan"})
-	if len(capabilities) != 2 {
-		t.Fatalf("len(capabilities) = %d, want 2", len(capabilities))
-	}
-	if got, want := capabilities[0].EffortOptions, []string{"low", "high"}; !slices.Equal(got, want) {
-		t.Fatalf("selected effort options = %v, want %v", got, want)
-	}
-	if got, want := capabilities[0].Modes, []string{"build", "plan"}; !slices.Equal(got, want) {
-		t.Fatalf("selected modes = %v, want %v", got, want)
-	}
-	if len(capabilities[1].EffortOptions) != 0 || len(capabilities[1].Modes) != 0 {
-		t.Fatalf("unselected capability = %#v, want no model-specific options", capabilities[1])
-	}
-}
-
 func TestHandshakeResultSetConfigOptions(t *testing.T) {
 	t.Parallel()
 
-	res := &handshakeResult{models: []string{"fallback/model"}, currentModel: "fallback/model"}
+	res := &handshakeResult{currentModel: "fallback/model"}
 	res.setConfigOptions([]genaiopencode.SessionConfigOption{
 		{
 			ID:           genaiopencode.ConfigOptionModel,
@@ -126,10 +151,10 @@ func TestHandshakeResultSetConfigOptions(t *testing.T) {
 			Options: []genaiopencode.ConfigOptionValue{{Value: "minimal"}, {Value: "high"}},
 		},
 	})
-	if got, want := res.models, []string{"openai/gpt-5", "anthropic/claude-sonnet-4"}; !slices.Equal(got, want) {
-		t.Fatalf("models = %v, want %v", got, want)
+	if res.currentModel != "openai/gpt-5" {
+		t.Fatalf("current model = %q, want openai/gpt-5", res.currentModel)
 	}
-	if got, want := res.capabilities[0].EffortOptions, []string{"minimal", "high"}; !slices.Equal(got, want) {
-		t.Fatalf("effort options = %v, want %v", got, want)
+	if got := res.configOption(genaiopencode.ConfigOptionEffort); got == nil || len(got.Options) != 2 || got.Options[0].Value != "minimal" || got.Options[1].Value != "high" {
+		t.Fatalf("effort option = %#v, want minimal and high", got)
 	}
 }

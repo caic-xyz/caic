@@ -23,7 +23,6 @@ import (
 	"io"
 	"log/slog"
 	"os/exec"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -41,62 +40,49 @@ import (
 type Backend struct {
 	agent.Base
 
-	mu      sync.Mutex
-	cache   *agent.HarnessCache
-	EnvVars []string // KEY=VALUE pairs for FetchModels SSH commands
+	mu        sync.Mutex
+	inventory agent.ModelInventory
 }
 
-var _ agent.Backend = (*Backend)(nil)
-var _ agent.ModelFetcher = (*Backend)(nil)
+var (
+	_ agent.Backend      = (*Backend)(nil)
+	_ agent.ModelFetcher = (*Backend)(nil)
+)
 
-// New creates a Pi backend. If cacheDir is non-empty, the model list is loaded
-// from the on-disk harness cache; otherwise a hardcoded default is used.
-// envVars are KEY=VALUE pairs passed to FetchModels SSH commands so Pi sees
-// API keys without requiring a login shell.
+// New creates a Pi backend.
 func New(cacheDir string, envVars []string) *Backend {
-	b := &Backend{EnvVars: envVars}
+	b := &Backend{}
 	b.Base = agent.Base{
-		HarnessID: harness.Pi,
-		Efforts: []string{
-			string(pi.ThinkingOff),
-			string(pi.ThinkingMinimal),
-			string(pi.ThinkingLow),
-			string(pi.ThinkingMedium),
-			string(pi.ThinkingHigh),
-			string(pi.ThinkingXHigh),
-		},
+		HarnessID:     harness.Pi,
 		Images:        true,
 		Compact:       true,
 		ContextWindow: 200_000,
 	}
-	if cacheDir != "" {
-		b.cache = agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
-		if models, _ := b.cache.Models(harness.Pi, agent.APIKeyHash(envVars)); len(models) > 0 {
-			b.ModelList = agent.SortModels(models)
-		}
-	}
+	b.SetModelInventory(agent.CachedModelInventory(cacheDir, harness.Pi, envVars))
 	return b
 }
 
-// Models returns the current model list, updated dynamically after each Start.
-func (b *Backend) Models() []string {
+// ModelInventory implements agent.Backend.
+func (b *Backend) ModelInventory() agent.ModelInventory {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.ModelList
+	return b.inventory
 }
 
-// SetModels replaces the model list with sorted models. Thread-safe.
-func (b *Backend) SetModels(models []string) {
+// SetModelInventory implements agent.Backend.
+func (b *Backend) SetModelInventory(inventory agent.ModelInventory) {
+	byID := make(map[string]agent.Model, len(inventory.Models))
+	for _, model := range inventory.Models {
+		byID[model.ID] = model
+	}
+	ids := agent.SortModels(inventory.IDs())
+	sorted := make([]agent.Model, 0, len(ids))
+	for _, id := range ids {
+		sorted = append(sorted, byID[id])
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.ModelList = agent.SortModels(models)
-}
-
-// ModelCapabilities implements agent.Backend.
-func (b *Backend) ModelCapabilities() []agent.ModelCapability {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.Base.ModelCapabilities()
+	b.inventory = agent.ModelInventory{Models: sorted}
 }
 
 // Start launches a Pi RPC process via the relay daemon. If Pi exits while
@@ -153,9 +139,13 @@ func (*Backend) WritePrePrompt(w io.Writer, model string, logW io.Writer) error 
 	return nil
 }
 
-// FetchModels implements agent.ModelFetcher.
-func (*Backend) FetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) ([]string, error) {
-	return FetchModels(ctx, target, extraEnv)
+// FetchModelInventory implements agent.ModelFetcher.
+func (*Backend) FetchModelInventory(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) (agent.ModelInventory, error) {
+	models, err := fetchModels(ctx, target, extraEnv)
+	if err != nil {
+		return agent.ModelInventory{}, err
+	}
+	return agent.ModelInventory{Models: models}, nil
 }
 
 func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
@@ -259,26 +249,6 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		return nil, err
 	}
 
-	// Opportunistically refresh models in background using the task's container.
-	if b.cache != nil {
-		envHash := agent.APIKeyHash(b.EnvVars)
-		if _, fresh := b.cache.Models(harness.Pi, envHash); !fresh {
-			go func() {
-				fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-				defer cancel()
-				if models, err := FetchModels(fetchCtx, opts.Target, b.EnvVars); err != nil {
-					slog.WarnContext(fetchCtx, "pi: background model fetch failed", "err", err)
-				} else {
-					sorted := agent.SortModels(models)
-					b.mu.Lock()
-					b.ModelList = sorted
-					b.mu.Unlock()
-					// Store raw models so the cache survives blacklist changes.
-					b.cache.SetModels(harness.Pi, models, envHash)
-				}
-			}()
-		}
-	}
 	return sess, nil
 }
 
@@ -882,11 +852,7 @@ func writeGetState(w, logW io.Writer) error {
 	return writeJSONLine(w, pi.GetStateCmd{Type: pi.CmdGetState}, logW)
 }
 
-// FetchModels runs pi in the target,
-// sends get_available_models, and returns the model ID list.
-// extraEnv holds KEY=VALUE pairs injected via the env command so Pi sees them
-// without requiring a login shell that sources ~/.env.
-func FetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) ([]string, error) {
+func fetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) ([]agent.Model, error) {
 	if target.SSHHost == "" {
 		return nil, errors.New("agent connection target missing SSH host")
 	}
@@ -950,12 +916,57 @@ func FetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv 
 		if err := json.Unmarshal(resp.Data, &payload); err != nil {
 			return nil, fmt.Errorf("parse models: %w", err)
 		}
-		models := make([]string, 0, len(payload.Models))
-		for i := range payload.Models {
-			models = append(models, payload.Models[i].GetID())
-		}
-		return models, nil
+		return modelsForPiModels(payload.Models), nil
 	}
+}
+
+func modelsForPiModels(models []pi.Model) []agent.Model {
+	efforts := make(map[string][]string, len(models))
+	ids := make([]string, 0, len(models))
+	for i := range models {
+		id := models[i].GetID()
+		if id == "" {
+			continue
+		}
+		ids = append(ids, id)
+		efforts[id] = effortOptions(&models[i])
+	}
+
+	ids = agent.SortModels(ids)
+	result := make([]agent.Model, 0, len(ids))
+	for _, id := range ids {
+		result = append(result, agent.Model{ID: id, EffortOptions: efforts[id]})
+	}
+	return result
+}
+
+func effortOptions(model *pi.Model) []string {
+	if !model.Reasoning {
+		return []string{string(pi.ThinkingOff)}
+	}
+
+	levels := [...]pi.ThinkingLevel{
+		pi.ThinkingOff,
+		pi.ThinkingMinimal,
+		pi.ThinkingLow,
+		pi.ThinkingMedium,
+		pi.ThinkingHigh,
+		pi.ThinkingXHigh,
+		pi.ThinkingMax,
+	}
+	efforts := make([]string, 0, len(levels))
+	for _, level := range levels {
+		mapped, defined := model.ThinkingLevelMap[level]
+		if defined && mapped == "" {
+			// genai decodes Pi's JSON null (explicitly unsupported) as empty.
+			continue
+		}
+		if (level == pi.ThinkingXHigh || level == pi.ThinkingMax) && !defined {
+			continue
+		}
+		efforts = append(efforts, string(level))
+	}
+	return efforts
 }
 
 // writeJSONLine marshals v as JSON, writes it followed by LF, and logs it.

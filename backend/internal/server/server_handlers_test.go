@@ -19,8 +19,7 @@ func TestServerHandlersListHarnesses(t *testing.T) {
 	s := newTestRouter(t)
 	s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{
 		harness.Codex: &agenttest.FakeBackend{
-			ModelList: []string{"gpt-5"},
-			Efforts:   []string{"low", "ultra"},
+			Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "gpt-5", EffortOptions: []string{"low", "ultra"}}}},
 		},
 	})
 
@@ -31,12 +30,9 @@ func TestServerHandlersListHarnesses(t *testing.T) {
 	if len(*got) != 1 {
 		t.Fatalf("len(harnesses) = %d, want 1", len(*got))
 	}
-	if efforts := (*got)[0].EffortOptions; len(efforts) != 2 || efforts[0] != "low" || efforts[1] != "ultra" {
-		t.Fatalf("effortOptions = %v, want [low ultra]", efforts)
-	}
-	capabilities := (*got)[0].ModelCapabilities
-	if len(capabilities) != 1 || capabilities[0].Model != "gpt-5" || len(capabilities[0].EffortOptions) != 2 {
-		t.Fatalf("modelCapabilities = %#v, want gpt-5 with [low ultra]", capabilities)
+	models := (*got)[0].Models
+	if len(models) != 1 || models[0].ID != "gpt-5" || len(models[0].EffortOptions) != 2 {
+		t.Fatalf("models = %#v, want gpt-5 with [low ultra]", models)
 	}
 	data, err := json.Marshal(got)
 	if err != nil {
@@ -44,5 +40,11 @@ func TestServerHandlersListHarnesses(t *testing.T) {
 	}
 	if strings.Contains(string(data), "null") {
 		t.Fatalf("harnesses JSON = %s, want arrays instead of null", data)
+	}
+	if !strings.Contains(string(data), `"models":[{"id":"gpt-5"`) {
+		t.Fatalf("harnesses JSON = %s, want gpt-5 in models", data)
+	}
+	if strings.Contains(string(data), `"modelCapabilities":`) || strings.Contains(string(data), `"modes":`) {
+		t.Fatalf("harnesses JSON = %s, want models as the only model configuration", data)
 	}
 }

@@ -284,22 +284,19 @@ func (h *serverHandlers) listHarnesses(_ context.Context, _ *api.EmptyReq) (*[]v
 	backends := h.taskMgr.Backends()
 	out := make([]v1.HarnessInfo, 0, len(backends))
 	for h, b := range backends {
-		capabilities := b.ModelCapabilities()
-		modelCapabilities := make([]v1.ModelCapability, 0, len(capabilities))
-		for _, capability := range capabilities {
-			modelCapabilities = append(modelCapabilities, v1.ModelCapability{
-				Model:         capability.Model,
-				EffortOptions: nonNilSlice(capability.EffortOptions),
-				Modes:         nonNilSlice(capability.Modes),
+		inventory := b.ModelInventory()
+		models := make([]v1.Model, 0, len(inventory.Models))
+		for _, model := range inventory.Models {
+			models = append(models, v1.Model{
+				ID:            model.ID,
+				EffortOptions: nonNilSlice(model.EffortOptions),
 			})
 		}
 		out = append(out, v1.HarnessInfo{
-			Name:              string(h),
-			Models:            nonNilSlice(b.Models()),
-			EffortOptions:     nonNilSlice(b.EffortOptions()),
-			ModelCapabilities: modelCapabilities,
-			SupportsImages:    b.SupportsImages(),
-			SupportsCompact:   b.SupportsCompact(),
+			Name:            string(h),
+			Models:          models,
+			SupportsImages:  b.SupportsImages(),
+			SupportsCompact: b.SupportsCompact(),
 		})
 	}
 	slices.SortFunc(out, func(a, b v1.HarnessInfo) int {

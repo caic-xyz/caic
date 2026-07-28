@@ -209,10 +209,10 @@ func TestBackend(t *testing.T) {
 
 	t.Run("NewExposesClaudeModelAliases", func(t *testing.T) {
 		t.Parallel()
-		got := New().Models()
-		want := []string{"opus", "sonnet", "haiku", "fable"}
+		got := New().ModelInventory().IDs()
+		want := []string{"fable", "opus", "sonnet", "haiku"}
 		if !slices.Equal(got, want) {
-			t.Fatalf("Models = %v, want %v", got, want)
+			t.Fatalf("ModelInventory().IDs() = %v, want %v", got, want)
 		}
 	})
 }

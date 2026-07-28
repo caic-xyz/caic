@@ -18,9 +18,7 @@ import (
 // AttachRelay.
 type FakeBackend struct {
 	HarnessName  harness.Name
-	ModelList    []string
-	Efforts      []string
-	Capabilities []agent.ModelCapability
+	Inventory    agent.ModelInventory
 	Images       bool
 	Compact      bool
 	ContextLimit int
@@ -51,36 +49,18 @@ func (f *FakeBackend) AttachRelay(context.Context, *agent.Options) (*agent.Sessi
 	return nil, errors.New("agenttest: AttachRelay not implemented")
 }
 
-// Models implements agent.Backend.
-func (f *FakeBackend) Models() []string { return f.ModelList }
-
-// SetModels implements agent.Backend.
-func (f *FakeBackend) SetModels(models []string) { f.ModelList = models }
-
 // SupportsImages implements agent.Backend.
 func (f *FakeBackend) SupportsImages() bool { return f.Images }
 
 // SupportsCompact implements agent.Backend.
 func (f *FakeBackend) SupportsCompact() bool { return f.Compact }
 
-// EffortOptions implements agent.Backend.
-func (f *FakeBackend) EffortOptions() []string {
-	if f.Efforts == nil {
-		return []string{}
-	}
-	return f.Efforts
-}
+// ModelInventory implements agent.Backend.
+func (f *FakeBackend) ModelInventory() agent.ModelInventory { return f.Inventory }
 
-// ModelCapabilities implements agent.Backend.
-func (f *FakeBackend) ModelCapabilities() []agent.ModelCapability {
-	if f.Capabilities != nil {
-		return f.Capabilities
-	}
-	capabilities := make([]agent.ModelCapability, 0, len(f.ModelList))
-	for _, model := range f.ModelList {
-		capabilities = append(capabilities, agent.ModelCapability{Model: model, EffortOptions: f.EffortOptions()})
-	}
-	return capabilities
+// SetModelInventory implements agent.Backend.
+func (f *FakeBackend) SetModelInventory(inventory agent.ModelInventory) {
+	f.Inventory = inventory
 }
 
 // AgentArgs implements agent.Backend.

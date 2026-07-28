@@ -12,7 +12,6 @@ import (
 	"io"
 	"log/slog"
 	"os/exec"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -31,10 +30,8 @@ import (
 type Backend struct {
 	agent.Base
 
-	mu           sync.Mutex
-	cache        *agent.HarnessCache
-	EnvVars      []string // KEY=VALUE pairs for FetchModels SSH commands
-	capabilities []agent.ModelCapability
+	mu        sync.Mutex
+	inventory agent.ModelInventory
 }
 
 var (
@@ -43,25 +40,16 @@ var (
 	_ agent.RecordHandshaker = (*Backend)(nil)
 )
 
-// New creates an OpenCode backend with parser configured. If cacheDir is
-// non-empty, the model list is loaded from the on-disk harness cache.
-// envVars are KEY=VALUE pairs passed to FetchModels SSH commands.
+// New creates an OpenCode backend with parser configured.
 func New(cacheDir string, envVars []string) *Backend {
-	b := &Backend{EnvVars: envVars}
+	b := &Backend{}
 	b.Base = agent.Base{
 		HarnessID:     harness.OpenCode,
-		ModelList:     []string{"anthropic/claude-sonnet-4"},
 		Images:        true,
 		Compact:       true,
 		ContextWindow: 200_000,
 	}
-	if cacheDir != "" {
-		b.cache = agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
-		if models, _ := b.cache.Models(harness.OpenCode, agent.APIKeyHash(envVars)); len(models) > 0 {
-			b.ModelList = agent.SortModels(models)
-		}
-	}
-	b.capabilities = capabilitiesForModels(b.ModelList, "", nil, nil)
+	b.SetModelInventory(agent.CachedModelInventory(cacheDir, harness.OpenCode, envVars))
 	return b
 }
 
@@ -78,40 +66,18 @@ func (b *Backend) RecordHandshake(ctx context.Context, stdin io.Writer, stdout i
 	return hs.wire, br, nil
 }
 
-// Models returns the current model list, updated dynamically after each handshake.
-func (b *Backend) Models() []string {
+// ModelInventory implements agent.Backend.
+func (b *Backend) ModelInventory() agent.ModelInventory {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.ModelList
+	return b.inventory
 }
 
-// SetModels replaces the model list with sorted models. Thread-safe.
-func (b *Backend) SetModels(models []string) {
+// SetModelInventory implements agent.Backend.
+func (b *Backend) SetModelInventory(inventory agent.ModelInventory) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.ModelList = agent.SortModels(models)
-	b.capabilities = capabilitiesForModels(b.ModelList, "", nil, nil)
-}
-
-// EffortOptions implements agent.Backend. OpenCode does not have a universal
-// effort set: ACP reports the choices for the selected model at runtime.
-func (b *Backend) EffortOptions() []string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for _, capability := range b.capabilities {
-		if len(capability.EffortOptions) > 0 {
-			return append([]string(nil), capability.EffortOptions...)
-		}
-	}
-	return []string{}
-}
-
-// ModelCapabilities implements agent.Backend using capabilities discovered
-// during the most recent ACP handshake.
-func (b *Backend) ModelCapabilities() []agent.ModelCapability {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return cloneCapabilities(b.capabilities)
+	b.inventory = agent.ModelInventory{Models: normalizeModels(inventory.Models)}
 }
 
 // Start launches an OpenCode ACP process via the relay daemon in the given
@@ -160,16 +126,6 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		_ = cmd.Wait()
 		return nil, fmt.Errorf("opencode handshake: %w", err)
 	}
-	if len(hs.models) > 0 {
-		b.mu.Lock()
-		b.ModelList = agent.SortModels(hs.models)
-		b.capabilities = cloneCapabilities(hs.capabilities)
-		b.mu.Unlock()
-		if b.cache != nil {
-			b.cache.SetModels(harness.OpenCode, hs.models, agent.APIKeyHash(b.EnvVars))
-		}
-	}
-
 	log := slog.With("target", sshHost)
 	c := agent.NewConn(stdin, opts.LogW, hs.wire)
 	s := agent.NewSession(cmd, c, br, opts.MsgCh, log)
@@ -214,9 +170,13 @@ func (*Backend) NewWire() agent.WireFormat {
 	return &wireFormat{}
 }
 
-// FetchModels implements agent.ModelFetcher.
-func (*Backend) FetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) ([]string, error) {
-	return FetchModels(ctx, target, extraEnv)
+// FetchModelInventory implements agent.ModelFetcher.
+func (*Backend) FetchModelInventory(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) (agent.ModelInventory, error) {
+	models, err := fetchModels(ctx, target, extraEnv)
+	if err != nil {
+		return agent.ModelInventory{}, err
+	}
+	return agent.ModelInventory{Models: models}, nil
 }
 
 // TODO: Trim caicInit after 2026-08 once legacy caic_init logs are old enough to ignore.
@@ -448,12 +408,9 @@ func (w *wireFormat) handlePromptResponseLocked(line []byte) ([]agent.Message, e
 // handshakeResult bundles everything returned by a successful handshake.
 type handshakeResult struct {
 	wire          *wireFormat
-	models        []string // All available model IDs (current first).
-	currentModel  string   // Model ID the session is using.
-	agentVersion  string   // Agent version string from initialize.
+	currentModel  string // Model ID the session is using.
+	agentVersion  string // Agent version string from initialize.
 	configOptions []opencode.SessionConfigOption
-	modes         []string
-	capabilities  []agent.ModelCapability
 }
 
 // handshake performs the ACP initialize → session/new sequence and returns
@@ -551,7 +508,6 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 		return nil, errors.New("session response missing sessionId")
 	}
 	res.setModels(snResult.Models)
-	res.modes = modeIDs(snResult.Modes.AvailableModes)
 	res.setConfigOptions(snResult.ConfigOptions)
 
 	// 3. Select the requested model and effort using ACP configuration options.
@@ -571,9 +527,6 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 		if selected && !hasModelConfig {
 			res.currentModel = model
 		}
-		if selected {
-			res.refreshCapabilities()
-		}
 	}
 	if opts.Effort != "" {
 		if err := res.setSessionConfigOption(ctx, stdin, stdout, opencode.ConfigOptionEffort, opts.Effort); err != nil {
@@ -586,24 +539,13 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 
 func (res *handshakeResult) setModels(models opencode.ModelsInfo) {
 	res.currentModel = models.CurrentModelID
-	res.models = appendModel(res.models, res.currentModel)
-	for _, model := range models.AvailableModels {
-		res.models = appendModel(res.models, model.ModelID)
-	}
-	res.refreshCapabilities()
 }
 
 func (res *handshakeResult) setConfigOptions(options []opencode.SessionConfigOption) {
 	res.configOptions = options
 	if model := res.configOption(opencode.ConfigOptionModel); model != nil {
 		res.currentModel = model.CurrentValue
-		res.models = nil
-		res.models = appendModel(res.models, res.currentModel)
-		for _, value := range model.Options {
-			res.models = appendModel(res.models, value.Value)
-		}
 	}
-	res.refreshCapabilities()
 }
 
 func (res *handshakeResult) configOption(id opencode.ConfigOptionID) *opencode.SessionConfigOption {
@@ -673,72 +615,28 @@ func (res *handshakeResult) setSessionConfigOption(ctx context.Context, stdin io
 	return nil
 }
 
-func (res *handshakeResult) refreshCapabilities() {
-	var efforts, modes []string
-	if option := res.configOption(opencode.ConfigOptionEffort); option != nil {
-		efforts = configValueIDs(option.Options)
-	}
-	if option := res.configOption(opencode.ConfigOptionMode); option != nil {
-		modes = configValueIDs(option.Options)
-	} else {
-		modes = res.modes
-	}
-	res.capabilities = capabilitiesForModels(res.models, res.currentModel, efforts, modes)
-}
-
-func capabilitiesForModels(models []string, selected string, efforts, modes []string) []agent.ModelCapability {
-	capabilities := make([]agent.ModelCapability, 0, len(models))
+func normalizeModels(models []agent.Model) []agent.Model {
+	byID := make(map[string]agent.Model, len(models))
+	ids := make([]string, 0, len(models))
 	for _, model := range models {
-		capability := agent.ModelCapability{Model: model}
-		if model == selected {
-			capability.EffortOptions = append([]string(nil), efforts...)
-			capability.Modes = append([]string(nil), modes...)
+		if model.ID == "" {
+			continue
 		}
-		capabilities = append(capabilities, capability)
-	}
-	return capabilities
-}
-
-func cloneCapabilities(capabilities []agent.ModelCapability) []agent.ModelCapability {
-	cloned := make([]agent.ModelCapability, len(capabilities))
-	for i, capability := range capabilities {
-		cloned[i] = agent.ModelCapability{
-			Model:         capability.Model,
-			EffortOptions: append([]string(nil), capability.EffortOptions...),
-			Modes:         append([]string(nil), capability.Modes...),
+		if _, ok := byID[model.ID]; !ok {
+			ids = append(ids, model.ID)
 		}
+		model.EffortOptions = slices.Clone(model.EffortOptions)
+		slices.Sort(model.EffortOptions)
+		model.EffortOptions = slices.Compact(model.EffortOptions)
+		byID[model.ID] = model
 	}
-	return cloned
-}
 
-func appendModel(models []string, model string) []string {
-	if model == "" {
-		return models
+	ids = agent.SortModels(ids)
+	normalized := make([]agent.Model, 0, len(ids))
+	for _, id := range ids {
+		normalized = append(normalized, byID[id])
 	}
-	if slices.Contains(models, model) {
-		return models
-	}
-	return append(models, model)
-}
-
-func configValueIDs(values []opencode.ConfigOptionValue) []string {
-	ids := make([]string, 0, len(values))
-	for _, value := range values {
-		if value.Value != "" {
-			ids = append(ids, value.Value)
-		}
-	}
-	return ids
-}
-
-func modeIDs(modes []opencode.ModeInfo) []string {
-	ids := make([]string, 0, len(modes))
-	for _, mode := range modes {
-		if mode.ID != "" {
-			ids = append(ids, mode.ID)
-		}
-	}
-	return ids
+	return normalized
 }
 
 func hasConfigValue(values []opencode.ConfigOptionValue, want string) bool {
@@ -815,10 +713,7 @@ func readJSONRPCResponse(ctx context.Context, r *bufio.Reader) (*opencode.JSONRP
 	}
 }
 
-// FetchModels runs "opencode models" in the target and
-// returns the model ID list (one per line).
-// extraEnv holds KEY=VALUE pairs injected via the env command.
-func FetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) ([]string, error) {
+func fetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) ([]agent.Model, error) {
 	if target.SSHHost == "" {
 		return nil, errors.New("agent connection target missing SSH host")
 	}
@@ -827,18 +722,63 @@ func FetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv 
 		args = append(args, "env")
 		args = append(args, extraEnv...)
 	}
-	args = append(args, "opencode", "models", "--refresh")
+	args = append(args, "opencode", "models", "--refresh", "--verbose")
 	out, err := exec.CommandContext(ctx, "ssh", args...).Output() //nolint:gosec // target is not user-controlled
 	if err != nil {
 		return nil, fmt.Errorf("opencode models: %w", err)
 	}
-	var models []string
-	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
-		if m := strings.TrimSpace(line); m != "" {
-			models = append(models, m)
-		}
+	models, err := parseModels(out)
+	if err != nil {
+		return nil, fmt.Errorf("parse opencode models: %w", err)
 	}
 	return models, nil
+}
+
+// parseModels reads the model ID and pretty-printed metadata pairs
+// emitted by "opencode models --verbose". OpenCode exposes model variants as
+// its ACP effort options.
+func parseModels(out []byte) ([]agent.Model, error) {
+	type modelInfo struct {
+		Variants map[string]json.RawMessage `json:"variants"`
+	}
+
+	lines := strings.Split(string(out), "\n")
+	models := make([]agent.Model, 0)
+	for line := 0; line < len(lines); line++ {
+		model := strings.TrimSpace(lines[line])
+		provider, id, ok := strings.Cut(model, "/")
+		if !ok || provider == "" || id == "" {
+			continue // E.g. the colored "Models cache refreshed" status line.
+		}
+
+		var data []byte
+		var info modelInfo
+		for line++; line < len(lines); line++ {
+			data = append(data, lines[line]...)
+			data = append(data, '\n')
+			if err := json.Unmarshal(data, &info); err == nil {
+				break
+			} else if line == len(lines)-1 {
+				return nil, fmt.Errorf("%s metadata: %w", model, err)
+			}
+		}
+		if len(data) == 0 {
+			return nil, fmt.Errorf("%s missing metadata", model)
+		}
+		if err := json.Unmarshal(data, &info); err != nil {
+			return nil, fmt.Errorf("%s metadata: %w", model, err)
+		}
+
+		efforts := make([]string, 0, len(info.Variants))
+		for effort := range info.Variants {
+			efforts = append(efforts, effort)
+		}
+		models = append(models, agent.Model{ID: model, EffortOptions: efforts})
+	}
+	if len(models) == 0 {
+		return nil, errors.New("no model metadata")
+	}
+	return normalizeModels(models), nil
 }
 
 // extractParams extracts the raw "params" field from a JSON-RPC message.

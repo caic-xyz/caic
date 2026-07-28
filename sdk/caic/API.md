@@ -501,15 +501,14 @@ RevokeOAuthGrantReq is the request for POST /api/caic/v1/oauth/grants/{grantID}/
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 
-### ModelCapability
+### Model
 
-ModelCapability describes the configuration choices supported by a harness model.
+Model describes the configuration choices supported by a harness model.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `model` | `string` |  | yes |
+| `id` | `string` |  | yes |
 | `effortOptions` | `string[]` |  | yes |
-| `modes` | `string[]` |  | yes |
 
 ### HarnessInfo
 
@@ -518,9 +517,7 @@ HarnessInfo is the JSON representation of an available harness.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `name` | `string` |  | yes |
-| `models` | `string[]` |  | yes |
-| `effortOptions` | `string[]` |  | yes |
-| `modelCapabilities` | `ModelCapability[]` |  | yes |
+| `models` | `Model[]` |  | yes |
 | `supportsImages` | `boolean` |  | yes |
 | `supportsCompact` | `boolean` |  | yes |
 

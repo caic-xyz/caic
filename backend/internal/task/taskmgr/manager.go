@@ -302,7 +302,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 		return "", badRequestf("unknown harness: %s", string(p.Harness))
 	}
 
-	if p.Model != "" && !slices.Contains(backend.Models(), p.Model) {
+	if p.Model != "" && !slices.Contains(backend.ModelInventory().IDs(), p.Model) {
 		return "", badRequestf("unsupported model for %s: %s", string(p.Harness), p.Model)
 	}
 
@@ -575,7 +575,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 		if !ok {
 			return "", badRequestf("unknown harness: %s", string(p.Harness))
 		}
-		if p.Model != "" && !slices.Contains(backend.Models(), p.Model) {
+		if p.Model != "" && !slices.Contains(backend.ModelInventory().IDs(), p.Model) {
 			return "", badRequestf("unsupported model for %s: %s", string(p.Harness), p.Model)
 		}
 		forkModel = p.Model
@@ -585,7 +585,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 		if !ok {
 			return "", badRequestf("unknown harness: %s", string(source.Harness))
 		}
-		if !slices.Contains(backend.Models(), p.Model) {
+		if !slices.Contains(backend.ModelInventory().IDs(), p.Model) {
 			return "", badRequestf("unsupported model for %s: %s", string(source.Harness), p.Model)
 		}
 		forkModel = p.Model

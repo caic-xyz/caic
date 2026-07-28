@@ -61,6 +61,14 @@ func (b *Backend) ParseMessage(line []byte) ([]agent.Message, error) {
 
 var _ agent.Backend = (*Backend)(nil)
 
+var claudeEffortOptions = []string{
+	claudecode.EffortLow,
+	claudecode.EffortMedium,
+	claudecode.EffortHigh,
+	claudecode.EffortXHigh,
+	claudecode.EffortMax,
+}
+
 // New creates a Claude Code backend with wire format and parser configured.
 func New() *Backend {
 	b := &Backend{
@@ -69,13 +77,24 @@ func New() *Backend {
 	}
 	b.Base = agent.Base{
 		HarnessID:     harness.Claude,
-		ModelList:     []string{"opus", "sonnet", "haiku", "fable"},
-		Efforts:       []string{claudecode.EffortLow, claudecode.EffortMedium, claudecode.EffortHigh, claudecode.EffortXHigh, claudecode.EffortMax},
+		Inventory:     claudeModelInventory(),
 		Images:        true,
 		Compact:       true,
 		ContextWindow: 180_000,
 	}
 	return b
+}
+
+func claudeModelInventory() agent.ModelInventory {
+	models := [...]string{"fable", "opus", "sonnet", "haiku"}
+	inventory := make([]agent.Model, 0, len(models))
+	for _, model := range models {
+		inventory = append(inventory, agent.Model{
+			ID:            model,
+			EffortOptions: append([]string(nil), claudeEffortOptions...),
+		})
+	}
+	return agent.ModelInventory{Models: inventory}
 }
 
 // Wire is the wire format for Claude Code (stream-json over stdin/stdout).
