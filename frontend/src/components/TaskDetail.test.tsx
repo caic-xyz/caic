@@ -318,9 +318,8 @@ describe("SSE connection", () => {
   });
 
   it("duplicate onerror fires schedule only one reconnect", () => {
-    // Regression test for the clearTimeout fix: a second onerror (which some
-    // EventSource implementations fire) must cancel the first reconnect timer
-    // and schedule exactly one new one, not pile up two connect() calls.
+    // A second onerror from the same EventSource must be ignored rather than
+    // scheduling another reconnect.
     // Pin Math.random so jitteredDelay is deterministic (factor = 0.75 + 0.5*0.5 = 1.0).
     const origRandom = Math.random;
     Math.random = () => 0.5;
@@ -334,13 +333,11 @@ describe("SSE connection", () => {
       expect(created).toHaveLength(1);
       const es1 = created[0];
 
-      // First onerror: sets timer (jitteredDelay(500)=500ms), es → null, delay → 750.
+      // The first error schedules a reconnect; the generation guard ignores the duplicate.
       if (!es1.onerror) throw new Error("onerror not set");
       es1.onerror(new Event("error"));
-      // Second onerror: clears first timer, sets new timer (jitteredDelay(750)=750ms), delay → 1125.
       es1.onerror(new Event("error"));
 
-      // Advance past the 750 ms timer (but not far enough to trigger a third).
       vi.advanceTimersByTime(800);
 
       // Exactly one reconnect: initial connect (1) + one timer-fired connect (2).
@@ -348,6 +345,43 @@ describe("SSE connection", () => {
     } finally {
       Math.random = origRandom;
     }
+  });
+
+  it("reconnects on mobile resume and replays prompts missed while hidden", () => {
+    let hidden = false;
+    vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden);
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
+
+    const created: FakeES[] = [];
+    const callbacks: Array<(ev: EventMessage) => void> = [];
+    const readyHandlers: Array<() => void> = [];
+    vi.mocked(taskEventStream).mockImplementation((_id, cb, _onError, onReady) => {
+      callbacks.push(cb as (ev: EventMessage) => void);
+      if (onReady) readyHandlers.push(onReady);
+      const fakeES: FakeES = {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      };
+      created.push(fakeES);
+      return fakeES as unknown as EventSource;
+    });
+
+    renderTaskDetail();
+    readyHandlers[0]();
+
+    hidden = true;
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(created[0].close).toHaveBeenCalledOnce();
+
+    hidden = false;
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(created).toHaveLength(2);
+
+    callbacks[1]({ kind: "userInput", ts: 1, userInput: { text: "prompt sent before lock" } });
+    readyHandlers[1]();
+
+    expect(document.body).toHaveTextContent("prompt sent before lock");
   });
 
   it("multiple thinking blocks across tool calls are both visible", () => {

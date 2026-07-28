@@ -386,6 +386,7 @@ export default function TaskDetail(props: Props) {
     let live = false;
     let replaceOnNextFlush = true;
     let liveFlushTimer: ReturnType<typeof setTimeout> | null = null;
+    let connectionGeneration = 0;
     // Keep replay off the DOM until ready. Live deltas are flushed at a short
     // interval, or immediately on structural boundaries, so initial task output
     // streams without regrouping the DOM for every token fragment.
@@ -415,65 +416,107 @@ export default function TaskDetail(props: Props) {
       liveFlushTimer = setTimeout(flushPendingEvents, liveFlushDelayMs);
     }
 
-    function connect() {
-      // Close any stale connection that may exist if connect() is called while
-      // a previous EventSource is still open (e.g. from a duplicate timer fire).
+    function clearReconnectTimer() {
+      if (timer === null) return;
+      clearTimeout(timer);
+      timer = null;
+    }
+
+    function closeConnection() {
+      connectionGeneration += 1;
+      clearReconnectTimer();
+      if (live) flushPendingEvents();
+      else {
+        clearLiveFlushTimer();
+        pendingEvents = [];
+      }
       es?.close();
-      clearLiveFlushTimer();
-      pendingEvents = [];
+      es = null;
       live = false;
+    }
+
+    function connect() {
+      closeConnection();
       replaceOnNextFlush = true;
-      es = taskEventStream(
+      const generation = ++connectionGeneration;
+      const nextES = taskEventStream(
         id,
         (ev) => {
+          if (generation !== connectionGeneration) return;
           pendingEvents.push(ev);
           if (!live) return;
           if (shouldFlushBufferedEvent(ev)) flushPendingEvents();
           else scheduleLiveFlush();
         },
         (err) => {
+          if (generation !== connectionGeneration) return;
           const msg = err instanceof Error ? err.message : String(err);
           untrack(() => props.onError(`Task event error: ${msg}`));
         },
         () => {
+          if (generation !== connectionGeneration) return;
           // The server sends a "ready" event after replaying full history.
           // Render replayed history in one pass before switching to live turn-boundary flushing.
           flushPendingEvents();
           live = true;
         },
         () => {
-          delay = 500;
+          if (generation === connectionGeneration) delay = 500;
         },
       );
-      es.onerror = () => {
-        if (live) flushPendingEvents();
+      es = nextES;
+      nextES.onerror = () => {
+        if (generation !== connectionGeneration) return;
+        const wasLive = live;
+        if (wasLive) flushPendingEvents();
         else {
           clearLiveFlushTimer();
           pendingEvents = [];
         }
-        es?.close();
+        connectionGeneration += 1;
+        nextES.close();
         es = null;
+        live = false;
         const st = props.taskState;
-        if (live && (st === "purged" || st === "crashed" || st === "failed")) {
+        if (wasLive && (st === "purged" || st === "crashed" || st === "failed")) {
           return;
         }
-        // Cancel any pending timer before scheduling a new one. Without this,
-        // a second onerror fire (possible with some EventSource implementations)
-        // would leave the first timer running, causing connect() to be called
-        // twice and creating a leaked/duplicate SSE connection.
-        if (timer !== null) clearTimeout(timer);
+        if (document.hidden || !navigator.onLine) return;
+        clearReconnectTimer();
         timer = setTimeout(connect, jitteredDelay(delay));
         delay = Math.min(delay * 1.5, 30_000);
       };
     }
 
-    connect();
+    function reconnectWhenAvailable() {
+      if (document.hidden || !navigator.onLine || es !== null) return;
+      delay = 500;
+      connect();
+    }
+
+    function onVisibilityChange() {
+      if (document.hidden) closeConnection();
+      else reconnectWhenAvailable();
+    }
+
+    function onOnline() {
+      reconnectWhenAvailable();
+    }
+
+    function onOffline() {
+      closeConnection();
+    }
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    reconnectWhenAvailable();
 
     onCleanup(() => {
-      if (live) flushPendingEvents();
-      else clearLiveFlushTimer();
-      es?.close();
-      if (timer !== null) clearTimeout(timer);
+      closeConnection();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
       pendingEvents = [];
       messageGrouper.reset();
     });
