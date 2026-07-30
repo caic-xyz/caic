@@ -102,6 +102,21 @@ func TestHandlerHandleMCP(t *testing.T) {
 			t.Fatalf("initial uri = %q, want test://resource", uri)
 		}
 
+		if separator, err := r.ReadString('\n'); err != nil || separator != "\n" {
+			t.Fatalf("SSE notification terminator = %q, %v; want blank line", separator, err)
+		}
+		registry.sendHeartbeat()
+		heartbeat, err := r.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read SSE heartbeat: %v", err)
+		}
+		if heartbeat != ": keepalive\n" {
+			t.Fatalf("SSE heartbeat = %q, want keepalive comment", heartbeat)
+		}
+		if blank, err := r.ReadString('\n'); err != nil || blank != "\n" {
+			t.Fatalf("SSE heartbeat terminator = %q, %v; want blank line", blank, err)
+		}
+
 		// A subsequent change still produces exactly one update; the initial
 		// burst left the dedup baseline untouched, so the change is not
 		// swallowed and not duplicated.
@@ -117,13 +132,18 @@ func TestHandlerHandleMCP(t *testing.T) {
 }
 
 type subscriptionTestRegistry struct {
-	mu       sync.Mutex
-	resource string
-	changes  chan struct{}
+	mu         sync.Mutex
+	resource   string
+	changes    chan struct{}
+	heartbeats chan struct{}
 }
 
 func newSubscriptionTestRegistry() *subscriptionTestRegistry {
-	return &subscriptionTestRegistry{resource: "initial", changes: make(chan struct{}, 1)}
+	return &subscriptionTestRegistry{
+		resource:   "initial",
+		changes:    make(chan struct{}, 1),
+		heartbeats: make(chan struct{}, 1),
+	}
 }
 
 func (r *subscriptionTestRegistry) Instructions(context.Context) (string, error) {
@@ -158,9 +178,20 @@ func (r *subscriptionTestRegistry) SubscribeResourceUpdates(ctx context.Context,
 				if !yield(ResourceUpdate{ResourceURIs: filter.ResourceSubscriptions}, nil) {
 					return
 				}
+			case <-r.heartbeats:
+				if !yield(ResourceUpdate{KeepAlive: true}, nil) {
+					return
+				}
 			}
 		}
 	}, nil
+}
+
+func (r *subscriptionTestRegistry) sendHeartbeat() {
+	select {
+	case r.heartbeats <- struct{}{}:
+	default:
+	}
 }
 
 func (r *subscriptionTestRegistry) setResource(value string) {

@@ -193,16 +193,6 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
         }
     }
 
-    LaunchedEffect(serviceMonitorState.error) {
-        val error = serviceMonitorState.error ?: return@LaunchedEffect
-        snackbarHostState.showSnackbar(error)
-    }
-
-    LaunchedEffect(voiceState.errorId) {
-        val error = voiceState.error ?: return@LaunchedEffect
-        snackbarHostState.showSnackbar(error)
-    }
-
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = {
@@ -282,7 +272,8 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
                     onSelectDevice = { voiceSession.selectAudioDevice(it) },
                     onClearTranscript = { voiceSession.clearTranscript() },
                     onOpenSettings = { activeNativeScreen = NativeScreen.Settings },
-                    serviceAttentionText = serviceMonitorState.notificationText,
+                    serviceAttentionText = serviceMonitorState.notificationText
+                        ?: serviceMonitorState.error?.let { "Service updates are reconnecting." },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }

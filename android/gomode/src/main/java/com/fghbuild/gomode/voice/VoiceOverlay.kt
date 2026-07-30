@@ -86,7 +86,7 @@ fun VoicePanel(
             HorizontalDivider(color = MaterialTheme.colorScheme.outline)
             when {
                 !voiceEnabled -> IdlePanel(onConnect, onOpenSettings, voiceEnabled = false)
-                voiceState.error != null -> ErrorPanel(onConnect, onOpenSettings)
+                voiceState.error != null -> ErrorPanel(voiceState.error, onConnect, onOpenSettings)
                 voiceState.connectStatus != null -> ConnectingPanel(voiceState.connectStatus, onOpenSettings)
                 voiceState.listening || voiceState.speaking -> ActivePanel(
                     voiceState = voiceState,
@@ -296,7 +296,8 @@ private fun ActivePanel(
 
 @Composable
 private fun ErrorPanel(
-    onClick: () -> Unit,
+    message: String,
+    onReconnect: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     Row(
@@ -312,14 +313,20 @@ private fun ErrorPanel(
             contentDescription = null,
             tint = MaterialTheme.colorScheme.error,
         )
-        Text(
-            text = "Voice error — tap to retry",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.error,
-            modifier = Modifier.weight(1f),
-        )
-        Button(onClick = onClick) {
-            Text("Retry")
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Voice connection unavailable",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Button(onClick = onReconnect) {
+            Text("Reconnect")
         }
     }
 }

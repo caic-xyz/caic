@@ -1,4 +1,4 @@
-// Unit tests for Go Mode MCP client request envelopes.
+// Unit tests for Go Mode MCP client requests and SSE configuration.
 package com.fghbuild.gomode.voice
 
 import com.fghbuild.mcp.sdk.v1.NotificationMethod
@@ -17,6 +17,11 @@ import org.junit.Assert.assertNotNull
 import org.junit.Test
 
 class McpClientTest {
+    @Test
+    fun `subscription client tolerates an idle SSE stream`() {
+        assertEquals(45_000L, newSubscriptionHTTPClient().readTimeoutMillis.toLong())
+    }
+
     @Test
     fun `server instructions request includes json rpc id`() = runBlocking {
         val server = MockWebServer()
@@ -249,6 +254,7 @@ class McpClientTest {
         const val SUBSCRIPTION_SSE =
             "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/subscriptions/acknowledged\"," +
                 "\"params\":{\"notifications\":{\"resourceSubscriptions\":[\"service://items\"]}}}\n\n" +
+                ": keepalive\n\n" +
                 "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/resources/updated\"," +
                 "\"params\":{\"uri\":\"service://items\"}}\n\n"
     }

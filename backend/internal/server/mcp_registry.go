@@ -1,4 +1,4 @@
-// MCP tool registry, schemas, resource catalog, and subscription invalidation.
+// MCP tool registry, schemas, resource catalog, subscription invalidation, and keepalives.
 
 package server
 
@@ -65,6 +65,8 @@ At session start this prompt includes a snapshot of all current tasks. Use it to
 - Free tools: agent_last_message, tasks_list, task_get_detail, get_usage. Call them whenever useful without asking.
 - When the user asks for a status update, call agent_last_message for each waiting/asking task to get latest output.
 - For safety issues during sync, describe each issue and ask whether to force.`
+
+const subscriptionHeartbeatInterval = 15 * time.Second
 
 type mcpRegistry struct {
 	// All fields are required by the full MCP registry.
@@ -195,6 +197,8 @@ func (m *mcpRegistry) SubscribeResourceUpdates(ctx context.Context, filter mcp.S
 	repoC := sources.repoC
 	repoStatusC := sources.repoStatusC
 	return func(yield func(mcp.ResourceUpdate, error) bool) {
+		heartbeatTicker := time.NewTicker(subscriptionHeartbeatInterval)
+		defer heartbeatTicker.Stop()
 		var usageC <-chan time.Time
 		if sources.usagePolling {
 			usageTicker := time.NewTicker(providerusage.CacheTTL)
@@ -224,9 +228,10 @@ func (m *mcpRegistry) SubscribeResourceUpdates(ctx context.Context, filter mcp.S
 				if !yield(sources.usageUpdate(), nil) {
 					return
 				}
-			}
-			if taskC == nil && repoC == nil && repoStatusC == nil && usageC == nil {
-				return
+			case <-heartbeatTicker.C:
+				if !yield(mcp.ResourceUpdate{KeepAlive: true}, nil) {
+					return
+				}
 			}
 		}
 	}, nil

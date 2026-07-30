@@ -129,6 +129,8 @@ type RawToolResult struct {
 
 // ResourceUpdate describes a signal-backed resource update candidate.
 type ResourceUpdate struct {
+	// KeepAlive requests an SSE heartbeat without a resource notification.
+	KeepAlive bool
 	// ResourcesListChanged indicates the resource list may have changed.
 	ResourcesListChanged bool
 	// ResourceURIs are subscribed resource URIs whose contents may have changed.
@@ -1050,6 +1052,13 @@ func (h *Handler) streamSubscriptionNotifications(ctx context.Context, w subscri
 			slog.WarnContext(ctx, "mcp resource update stream stopped", "err", err)
 			return
 		}
+		if update.KeepAlive {
+			if err := writeSSEKeepAlive(w); err != nil {
+				slog.WarnContext(ctx, "write mcp subscription heartbeat", "err", err)
+				return
+			}
+			continue
+		}
 		if update.ResourcesListChanged && filter.ResourcesListChanged {
 			resources := h.subscriptionResourcesHash(ctx)
 			if resources != lastResources {
@@ -1136,6 +1145,14 @@ func logMCPFailure(r *http.Request, status int, req *JSONRPCRequest, rpcErr *JSO
 		attrs = append(attrs, "err", err)
 	}
 	slog.ErrorContext(r.Context(), "mcp request failed", attrs...)
+}
+
+func writeSSEKeepAlive(w subscriptionStreamWriter) error {
+	if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
+		return err
+	}
+	w.Flush()
+	return nil
 }
 
 func writeMCPNotification(w subscriptionStreamWriter, msg JSONRPCNotification) error {

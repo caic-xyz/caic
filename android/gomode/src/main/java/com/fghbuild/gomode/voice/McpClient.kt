@@ -46,7 +46,10 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+
+private const val SUBSCRIPTION_READ_TIMEOUT_MILLIS = 45_000L
 
 private val idCounter = AtomicInteger(0)
 private val jsonMediaType = "application/json".toMediaType()
@@ -63,7 +66,7 @@ class McpClient(
 ) : ServiceResourceClient {
     private val endpointURL = endpointURL.trimEnd('/')
     private val api = ApiClient(this.endpointURL)
-    private val httpClient = OkHttpClient()
+    private val subscriptionHTTPClient = newSubscriptionHTTPClient()
     private val json = Json { ignoreUnknownKeys = true }
     private var toolsByName: Map<String, ToolDescriptor> = emptyMap()
 
@@ -216,7 +219,7 @@ class McpClient(
             .header("Accept", "text/event-stream")
             .apply { mcpHeaders(Method.SubscriptionsListen).forEach { (name, value) -> header(name, value) } }
             .build()
-        val call = httpClient.newCall(request)
+        val call = subscriptionHTTPClient.newCall(request)
         val readerJob = launch(Dispatchers.IO) {
             try {
                 call.execute().use { response ->
@@ -269,6 +272,10 @@ class McpClient(
         putAll(paramHeaders)
     }
 }
+
+internal fun newSubscriptionHTTPClient(): OkHttpClient = OkHttpClient.Builder()
+    .readTimeout(SUBSCRIPTION_READ_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+    .build()
 
 private fun collectSSEData(line: String, dataLines: MutableList<String>): String? {
     if (line.isEmpty()) return flushSSEData(dataLines)
