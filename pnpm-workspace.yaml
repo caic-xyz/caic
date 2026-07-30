@@ -1,4 +1,6 @@
-# pnpm approved builds configuration
+# pnpm configuration
+minimumReleaseAge: 10080
+
 allowBuilds:
   # pnpm v11 returns exit code 1 for unapproved builds, which killed the .stamp target in the Makefile. Set it to true.
   esbuild: true
