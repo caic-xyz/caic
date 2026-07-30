@@ -43,15 +43,15 @@ class WebShellScreenTest {
     fun timeoutMessageExplainsRecoveryAfterAutomaticRetryFails() {
         assertEquals(
             "The service took too long to respond. Check your network connection, then retry.",
-            webLoadErrorMessage(WebViewClient.ERROR_TIMEOUT, "net::ERR_TIMED_OUT"),
+            webLoadErrorMessage(WebViewClient.ERROR_TIMEOUT),
         )
     }
 
     @Test
-    fun nonTimeoutMessagePreservesWebViewDescription() {
+    fun nonTimeoutMessageExplainsServiceRecovery() {
         assertEquals(
-            "net::ERR_CONNECTION_REFUSED",
-            webLoadErrorMessage(WebViewClient.ERROR_CONNECT, "net::ERR_CONNECTION_REFUSED"),
+            "Could not connect to the service. Check your network connection and service address, then retry.",
+            webLoadErrorMessage(WebViewClient.ERROR_CONNECT),
         )
     }
 

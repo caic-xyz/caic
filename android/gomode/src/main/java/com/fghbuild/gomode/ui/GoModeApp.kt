@@ -1,4 +1,4 @@
-// Root Compose surface that bootstraps service settings and chooses native settings or the WebView shell.
+// Root Compose surface that bootstraps service settings and coordinates shell recovery with voice controls.
 package com.fghbuild.gomode.ui
 
 import android.Manifest
@@ -23,6 +23,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -53,6 +54,7 @@ import com.fghbuild.gomode.service.ServiceSettingsException
 import com.fghbuild.gomode.service.compatibilityError
 import com.fghbuild.gomode.ui.halo.HaloScreen
 import com.fghbuild.gomode.ui.settings.SettingsScreen
+import com.fghbuild.gomode.ui.web.WebShellLoadState
 import com.fghbuild.gomode.ui.web.WebShellScreen
 import com.fghbuild.gomode.voice.McpClient
 import com.fghbuild.gomode.voice.VoicePanel
@@ -92,6 +94,8 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
     var bootstrapState by remember(activeURL) {
         mutableStateOf<ServiceBootstrapState>(ServiceBootstrapState.Unvalidated())
     }
+    var webLoadState by remember(activeURL) { mutableStateOf<WebShellLoadState>(WebShellLoadState.Loading) }
+    var webReloadToken by remember { mutableStateOf(0) }
 
     LaunchedEffect(activeURL, reloadToken, settingsClient) {
         if (activeURL.isBlank()) return@LaunchedEffect
@@ -113,6 +117,10 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
     }
     DisposableEffect(voiceSession) {
         onDispose { voiceSession.disconnect() }
+    }
+    // Voice is tied to the selected service instance, unlike transient WebView recovery.
+    LaunchedEffect(activeURL, voiceSession) {
+        voiceSession.disconnect()
     }
     val voiceState by voiceSession.state.collectAsStateWithLifecycle()
     val serviceMonitor = remember(scope) {
@@ -141,12 +149,19 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
         }
         onMicGranted = null
     }
-    val voiceAvailable = (bootstrapState as? ServiceBootstrapState.Ready)
+    val shellRecovery = shellRecoveryState(
+        bootstrapError = (bootstrapState as? ServiceBootstrapState.Error)?.message,
+        webLoadState = webLoadState,
+    ).takeIf { activeNativeScreen == null && activeURL.isNotBlank() }
+    val voiceSessionActive = voiceState.connected || voiceState.connectStatus != null ||
+        voiceState.listening || voiceState.speaking
+    val configuredVoiceAvailable = (bootstrapState as? ServiceBootstrapState.Ready)
         ?.settings
         ?.webShell
         ?.voiceGateway
         ?.url
         ?.isNotBlank() == true
+    val voiceAvailable = voiceSessionActive || (configuredVoiceAvailable && shellRecovery == null)
     val density = LocalDensity.current
     val keyboardOpen = WindowInsets.ime.getBottom(density) > 0
 
@@ -222,7 +237,8 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
                     bootstrapState = bootstrapState,
                     onSetNativeScreen = { activeNativeScreen = it },
                     activeNativeScreen = activeNativeScreen,
-                    onReload = { reloadToken += 1 },
+                    webReloadToken = webReloadToken,
+                    onWebLoadStateChanged = { webLoadState = it },
                     onHostedPageLoaded = {
                         if (bootstrapState is ServiceBootstrapState.Unvalidated) {
                             reloadToken += 1
@@ -230,7 +246,22 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
                     },
                 )
             }
-            if (!keyboardOpen) {
+            shellRecovery?.let { recovery ->
+                ShellRecoveryStrip(
+                    recovery = recovery,
+                    voiceSessionActive = voiceSessionActive,
+                    onRetry = {
+                        when (recovery.retryTarget) {
+                            ShellRecoveryRetryTarget.BOOTSTRAP -> reloadToken += 1
+                            ShellRecoveryRetryTarget.WEB -> webReloadToken += 1
+                            null -> Unit
+                        }
+                    },
+                    onOpenSettings = { activeNativeScreen = NativeScreen.Settings },
+                    modifier = Modifier.fillMaxWidth().imePadding(),
+                )
+            }
+            if (!keyboardOpen && (shellRecovery == null || voiceSessionActive)) {
                 VoicePanel(
                     voiceState = voiceState,
                     voiceEnabled = voiceAvailable,
@@ -291,7 +322,8 @@ private fun GoModeContent(
     bootstrapState: ServiceBootstrapState,
     activeNativeScreen: NativeScreen?,
     onSetNativeScreen: (NativeScreen?) -> Unit,
-    onReload: () -> Unit,
+    webReloadToken: Int,
+    onWebLoadStateChanged: (WebShellLoadState) -> Unit,
     onHostedPageLoaded: () -> Unit,
 ) {
     when {
@@ -312,12 +344,7 @@ private fun GoModeContent(
         else -> {
             when (val state = bootstrapState) {
                 is ServiceBootstrapState.Error -> {
-                    ServiceBootstrapPanel(
-                        title = "Could not use service",
-                        message = state.message,
-                        onRetry = onReload,
-                        onOpenSettings = { onSetNativeScreen(NativeScreen.Settings) },
-                    )
+                    Box(Modifier.fillMaxSize().testTag("gomode-service-bootstrap"))
                 }
                 is ServiceBootstrapState.Unvalidated,
                 is ServiceBootstrapState.Ready -> {
@@ -325,7 +352,8 @@ private fun GoModeContent(
                     // when bootstrap validation completes, which can strand in-flight JavaScript callbacks.
                     WebShellScreen(
                         initialURL = activeURL,
-                        onOpenSettings = { onSetNativeScreen(NativeScreen.Settings) },
+                        reloadToken = webReloadToken,
+                        onLoadStateChanged = onWebLoadStateChanged,
                         onHostedPageLoaded = onHostedPageLoaded,
                     )
                 }
@@ -334,33 +362,66 @@ private fun GoModeContent(
     }
 }
 
+internal enum class ShellRecoveryRetryTarget {
+    BOOTSTRAP,
+    WEB,
+}
+
+internal data class ShellRecoveryState(
+    val title: String,
+    val message: String,
+    val retryTarget: ShellRecoveryRetryTarget?,
+)
+
+internal fun shellRecoveryState(
+    bootstrapError: String?,
+    webLoadState: WebShellLoadState,
+): ShellRecoveryState? = when {
+    bootstrapError != null -> ShellRecoveryState(
+        title = "Could not use service",
+        message = bootstrapError,
+        retryTarget = ShellRecoveryRetryTarget.BOOTSTRAP,
+    )
+    webLoadState is WebShellLoadState.Reconnecting -> ShellRecoveryState(
+        title = "Reconnecting to service",
+        message = "Voice will be available when the service reconnects.",
+        retryTarget = null,
+    )
+    webLoadState is WebShellLoadState.Failed -> ShellRecoveryState(
+        title = "Could not load service",
+        message = webLoadState.message,
+        retryTarget = ShellRecoveryRetryTarget.WEB,
+    )
+    else -> null
+}
+
 @Composable
-private fun ServiceBootstrapPanel(
-    title: String,
-    message: String,
+private fun ShellRecoveryStrip(
+    recovery: ShellRecoveryState,
+    voiceSessionActive: Boolean,
+    onRetry: () -> Unit,
     onOpenSettings: () -> Unit,
-    onRetry: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
 ) {
-    Box(Modifier.fillMaxSize().testTag("gomode-service-bootstrap")) {
+    Surface(modifier = modifier.testTag("gomode-shell-recovery"), tonalElevation = 4.dp) {
         Column(
-            modifier = Modifier
-                .align(Alignment.Center)
-                .padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (onRetry == null) {
-                CircularProgressIndicator(modifier = Modifier.testTag("gomode-service-bootstrap-loading"))
-            }
-            Text(title, style = MaterialTheme.typography.titleLarge)
-            Text(message, style = MaterialTheme.typography.bodyMedium)
+            Text(recovery.title, style = MaterialTheme.typography.titleMedium)
+            Text(recovery.message, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                if (voiceSessionActive) "Voice remains connected." else "Voice is unavailable until the service reconnects.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                onRetry?.let { retry ->
-                    Button(onClick = retry, modifier = Modifier.testTag("gomode-service-bootstrap-retry")) {
-                        Text("Retry")
+                recovery.retryTarget?.let {
+                    Button(onClick = onRetry, modifier = Modifier.testTag("gomode-shell-retry")) {
+                        Text("Retry service")
                     }
                 }
-                Button(onClick = onOpenSettings, modifier = Modifier.testTag("gomode-open-settings")) {
+                Button(onClick = onOpenSettings, modifier = Modifier.testTag("gomode-shell-open-settings")) {
                     Text("Settings")
                 }
             }

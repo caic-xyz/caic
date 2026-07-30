@@ -1,4 +1,4 @@
-// WebView shell for the active backend-hosted frontend.
+// WebView shell that reports active backend-hosted frontend load state.
 package com.fghbuild.gomode.ui.web
 
 import android.Manifest
@@ -22,21 +22,15 @@ import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -45,7 +39,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.core.content.PermissionChecker
@@ -57,25 +50,29 @@ import kotlinx.coroutines.delay
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun WebShellScreen(
+internal fun WebShellScreen(
     initialURL: String,
-    onOpenSettings: () -> Unit,
+    reloadToken: Int,
+    onLoadStateChanged: (WebShellLoadState) -> Unit,
     onHostedPageLoaded: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val hostURL = remember(initialURL) { goModeHostURL(initialURL) }
-    var pageFailed by remember { mutableStateOf<String?>(null) }
-    var loading by remember { mutableStateOf(true) }
-    var loadFailed by remember { mutableStateOf(false) }
-    var automaticRetryState by remember { mutableStateOf(AutomaticTimeoutRetryState()) }
-    var fileChooserCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
-    var loadedHostURL by remember { mutableStateOf<String?>(null) }
+    var loading by remember(hostURL) { mutableStateOf(true) }
+    var loadFailed by remember(hostURL) { mutableStateOf(false) }
+    var automaticRetryState by remember(hostURL) { mutableStateOf(AutomaticTimeoutRetryState()) }
+    var recoveryLoadInProgress by remember(hostURL) { mutableStateOf(false) }
+    var appliedReloadToken by remember(hostURL) { mutableStateOf(reloadToken) }
+    var fileChooserCallback by remember(hostURL) { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+    var loadedHostURL by remember(hostURL) { mutableStateOf<String?>(null) }
+    val currentHostURL by rememberUpdatedState(hostURL)
+    val currentOnLoadStateChanged by rememberUpdatedState(onLoadStateChanged)
     val currentOnHostedPageLoaded by rememberUpdatedState(onHostedPageLoaded)
     val fileChooserLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         fileChooserCallback?.onReceiveValue(uris.toTypedArray())
         fileChooserCallback = null
     }
-    val webView = remember(context) {
+    val webView = remember(context, hostURL) {
         WebView(context).apply {
             id = R.id.web_shell
             settings.javaScriptEnabled = true
@@ -91,14 +88,24 @@ fun WebShellScreen(
                 }
 
                 override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+                    if (currentHostURL != hostURL) return
+
                     automaticRetryState = automaticTimeoutRetryStateOnPageStarted(automaticRetryState)
                     loadFailed = false
                     loading = true
-                    pageFailed = null
+                    currentOnLoadStateChanged(
+                        if (recoveryLoadInProgress) WebShellLoadState.Reconnecting else WebShellLoadState.Loading,
+                    )
                 }
 
                 override fun onPageFinished(view: WebView, url: String?) {
-                    if (!loadFailed) automaticRetryState = automaticRetryState.copy(attempts = 0)
+                    if (currentHostURL != hostURL) return
+
+                    if (!loadFailed) {
+                        automaticRetryState = automaticRetryState.copy(attempts = 0)
+                        recoveryLoadInProgress = false
+                        currentOnLoadStateChanged(WebShellLoadState.Ready)
+                    }
                     loading = automaticRetryState.pending
                     currentOnHostedPageLoaded()
                 }
@@ -108,7 +115,7 @@ fun WebShellScreen(
                     request: WebResourceRequest,
                     error: WebResourceError,
                 ) {
-                    if (!request.isForMainFrame) return
+                    if (!request.isForMainFrame || currentHostURL != hostURL) return
 
                     loadFailed = true
                     if (shouldAutomaticallyRetryWebLoadError(error.errorCode, automaticRetryState.attempts)) {
@@ -116,10 +123,14 @@ fun WebShellScreen(
                             attempts = automaticRetryState.attempts + 1,
                             pending = true,
                         )
+                        recoveryLoadInProgress = true
                         loading = true
+                        currentOnLoadStateChanged(WebShellLoadState.Reconnecting)
                     } else {
+                        val message = webLoadErrorMessage(error.errorCode)
+                        recoveryLoadInProgress = false
                         loading = false
-                        pageFailed = webLoadErrorMessage(error.errorCode, error.description)
+                        currentOnLoadStateChanged(WebShellLoadState.Failed(message))
                     }
                 }
             }
@@ -165,7 +176,18 @@ fun WebShellScreen(
         }
     }
 
-    LaunchedEffect(automaticRetryState.pending) {
+    LaunchedEffect(hostURL, reloadToken) {
+        if (reloadToken == appliedReloadToken) return@LaunchedEffect
+        appliedReloadToken = reloadToken
+        automaticRetryState = AutomaticTimeoutRetryState()
+        recoveryLoadInProgress = true
+        loadFailed = false
+        loading = true
+        currentOnLoadStateChanged(WebShellLoadState.Reconnecting)
+        webView.reload()
+    }
+
+    LaunchedEffect(hostURL, automaticRetryState.pending) {
         if (!automaticRetryState.pending) return@LaunchedEffect
         delay(AUTOMATIC_TIMEOUT_RETRY_DELAY_MILLIS)
         if (automaticRetryState.pending) {
@@ -211,36 +233,26 @@ fun WebShellScreen(
     }
 
     Box(Modifier.fillMaxSize().statusBarsPadding().testTag("gomode-web-shell")) {
-        AndroidView(
-            factory = { webView },
-            update = { view ->
-                if (loadedHostURL != hostURL) {
-                    automaticRetryState = AutomaticTimeoutRetryState()
-                    loadFailed = false
-                    loading = true
-                    pageFailed = null
-                    loadedHostURL = hostURL
-                    view.loadUrl(hostURL)
-                }
-            },
-            modifier = Modifier.fillMaxSize(),
-        )
+        key(hostURL) {
+            AndroidView(
+                factory = { webView },
+                update = { view ->
+                    if (loadedHostURL != hostURL) {
+                        automaticRetryState = AutomaticTimeoutRetryState()
+                        recoveryLoadInProgress = false
+                        loadFailed = false
+                        loading = true
+                        currentOnLoadStateChanged(WebShellLoadState.Loading)
+                        loadedHostURL = hostURL
+                        view.loadUrl(hostURL)
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
         if (loading) {
             CircularProgressIndicator(
                 modifier = Modifier.align(Alignment.Center).testTag("gomode-web-loading"),
-            )
-        }
-        pageFailed?.let { message ->
-            WebRecoveryPanel(
-                message = message,
-                onRetry = {
-                    automaticRetryState = AutomaticTimeoutRetryState()
-                    pageFailed = null
-                    loading = true
-                    webView.reload()
-                },
-                onOpenSettings = onOpenSettings,
-                modifier = Modifier.align(Alignment.Center),
             )
         }
     }
@@ -260,6 +272,13 @@ private fun WebView.enableWebAuthentication() {
 private fun hasPermission(context: Context, permission: String): Boolean =
     ContextCompat.checkSelfPermission(context, permission) == PermissionChecker.PERMISSION_GRANTED
 
+internal sealed interface WebShellLoadState {
+    data object Loading : WebShellLoadState
+    data object Reconnecting : WebShellLoadState
+    data object Ready : WebShellLoadState
+    data class Failed(val message: String) : WebShellLoadState
+}
+
 internal data class AutomaticTimeoutRetryState(
     val attempts: Int = 0,
     val pending: Boolean = false,
@@ -277,11 +296,11 @@ internal fun automaticTimeoutRetryStateOnPageStarted(
 internal fun shouldAutomaticallyRetryWebLoadError(errorCode: Int, retryAttempts: Int): Boolean =
     errorCode == WebViewClient.ERROR_TIMEOUT && retryAttempts == 0
 
-internal fun webLoadErrorMessage(errorCode: Int, description: CharSequence?): String =
+internal fun webLoadErrorMessage(errorCode: Int): String =
     if (errorCode == WebViewClient.ERROR_TIMEOUT) {
         "The service took too long to respond. Check your network connection, then retry."
     } else {
-        description?.toString() ?: "Page load failed."
+        "Could not connect to the service. Check your network connection and service address, then retry."
     }
 
 internal fun openNewWindowInExternalBrowser(
@@ -368,29 +387,4 @@ private class GoModeHostBridge {
     @JavascriptInterface
     @Suppress("FunctionOnlyReturningConstant")
     fun shellVersion(): String = "1"
-}
-
-@Composable
-private fun WebRecoveryPanel(
-    message: String,
-    onRetry: () -> Unit,
-    onOpenSettings: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier = modifier.padding(24.dp).testTag("gomode-web-recovery"),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text("Could not load service", style = MaterialTheme.typography.titleLarge)
-        Text(message, style = MaterialTheme.typography.bodyMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(onClick = onRetry, modifier = Modifier.testTag("gomode-web-retry")) {
-                Text("Retry")
-            }
-            Button(onClick = onOpenSettings, modifier = Modifier.testTag("gomode-open-settings")) {
-                Text("Settings")
-            }
-        }
-    }
 }
