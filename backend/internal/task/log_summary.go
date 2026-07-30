@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	logSummaryVersion = 1
+	logSummaryVersion = 2
 	logSummaryExt     = ".taskmeta.json"
 )
 
@@ -37,6 +37,7 @@ type loadedTaskSummary struct {
 	Prompt            string              `json:"prompt,omitempty"`
 	Title             string              `json:"title,omitempty"`
 	Repos             []repoMountSummary  `json:"repos,omitempty"`
+	LogVersion        agent.LogVersion    `json:"logVersion,omitempty"`
 	Harness           harness.Name        `json:"harness,omitempty"`
 	RuntimeName       runtime.Name        `json:"runtimeName,omitempty"`
 	StartedAt         time.Time           `json:"startedAt,omitzero"`
@@ -102,15 +103,10 @@ func logSummaryPath(logPath string) string {
 	return filepath.Join(filepath.Dir(logPath), trimLogExt(filepath.Base(logPath))+logSummaryExt)
 }
 
-// loadLogSummary returns a LoadedTask reconstructed from a fresh sidecar.
-//
-// Missing, invalid, or stale summaries are cache misses. Callers then fall back
-// to scanning the compressed log and rewriting the sidecar.
-func loadLogSummary(logPath string) (*LoadedTask, bool) {
-	info, err := os.Stat(filepath.Clean(logPath))
-	if err != nil {
-		return nil, false
-	}
+// loadLogSummary returns a LoadedTask reconstructed from a sidecar bound to
+// the already-open physical log. Missing, invalid, stale, or replaced logs are
+// cache misses; callers then scan that same open file and rebuild the sidecar.
+func loadLogSummary(logPath string, file *os.File, info os.FileInfo) (*LoadedTask, bool) {
 	data, err := os.ReadFile(filepath.Clean(logSummaryPath(logPath)))
 	if err != nil {
 		return nil, false
@@ -123,21 +119,51 @@ func loadLogSummary(logPath string) (*LoadedTask, bool) {
 	if summary.Version != logSummaryVersion || summary.LogSize != info.Size() || summary.LogModNs != info.ModTime().UnixNano() {
 		return nil, false
 	}
+	if err := summary.Task.LogVersion.Validate(); err != nil || summary.Task.Harness == "" {
+		return nil, false
+	}
+	if _, err := verifyPhysicalLog(logPath, file, info); err != nil {
+		return nil, false
+	}
 	return summary.Task.toLoadedTask(logPath, info.Size()), true
 }
 
-func storeLogSummary(lt *LoadedTask) error {
+func storeLogSummary(lt *LoadedTask) (retErr error) {
 	if lt == nil || lt.path == "" {
 		return nil
 	}
-	info, err := os.Stat(filepath.Clean(lt.path))
+	file, err := os.Open(filepath.Clean(lt.path))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		retErr = errors.Join(retErr, file.Close())
+	}()
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	return storeLogSummaryForFile(lt, file, info)
+}
+
+func storeLogSummaryForFile(lt *LoadedTask, file *os.File, info os.FileInfo) error {
+	if lt == nil || lt.path == "" {
+		return nil
+	}
+	if err := lt.LogVersion.Validate(); err != nil {
+		return err
+	}
+	if lt.Harness == "" {
+		return errors.New("task log summary: missing harness")
+	}
+	stableInfo, err := verifyPhysicalLog(lt.path, file, info)
 	if err != nil {
 		return err
 	}
 	summary := logSummary{
 		Version:  logSummaryVersion,
-		LogSize:  info.Size(),
-		LogModNs: info.ModTime().UnixNano(),
+		LogSize:  stableInfo.Size(),
+		LogModNs: stableInfo.ModTime().UnixNano(),
 		Task:     loadedTaskSummaryFrom(lt),
 	}
 	data, err := json.Marshal(summary)
@@ -149,8 +175,14 @@ func storeLogSummary(lt *LoadedTask) error {
 	if err := os.WriteFile(filepath.Clean(tmp), data, 0o600); err != nil {
 		return err
 	}
+	if _, err := verifyPhysicalLog(lt.path, file, stableInfo); err != nil {
+		return errors.Join(err, os.Remove(tmp))
+	}
 	if err := os.Rename(tmp, path); err != nil {
 		return errors.Join(err, os.Remove(tmp))
+	}
+	if _, err := verifyPhysicalLog(lt.path, file, stableInfo); err != nil {
+		return errors.Join(err, os.Remove(path))
 	}
 	return nil
 }
@@ -161,6 +193,7 @@ func loadedTaskSummaryFrom(lt *LoadedTask) loadedTaskSummary {
 		Prompt:            lt.Prompt,
 		Title:             lt.Title,
 		Repos:             repoMountSummaries(lt.Repos),
+		LogVersion:        lt.LogVersion,
 		Harness:           lt.Harness,
 		RuntimeName:       lt.RuntimeName,
 		StartedAt:         lt.StartedAt,
@@ -196,6 +229,7 @@ func (s *loadedTaskSummary) toLoadedTask(path string, size int64) *LoadedTask {
 		Prompt:            s.Prompt,
 		Title:             s.Title,
 		Repos:             repoMountsFromSummaries(s.Repos),
+		LogVersion:        s.LogVersion,
 		Harness:           s.Harness,
 		RuntimeName:       s.RuntimeName,
 		StartedAt:         s.StartedAt,

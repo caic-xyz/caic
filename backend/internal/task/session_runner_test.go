@@ -57,6 +57,13 @@ func TestSessionRunner(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "test"},
 				Harness:       "test",
 			}
+			logW, err := r.Logs.Open(tk)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := logW.Close(); err != nil {
+				t.Fatal(err)
+			}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(StateRunning)
 			tk.RestoreMessages([]agent.Message{
@@ -101,6 +108,24 @@ func TestSessionRunner(t *testing.T) {
 			}
 			if pending[0].Ask.Questions[0].Question != "Which?" {
 				t.Errorf("question = %q, want Which?", pending[0].Ask.Questions[0].Question)
+			}
+		})
+		t.Run("missing_log_fails_closed", func(t *testing.T) {
+			t.Parallel()
+			backend := &attachCaptureBackend{testBackend: testBackend{FakeBackend: &agenttest.FakeBackend{}}}
+			r := newTestSessionRunner(t, nil, filepath.Join(t.TempDir(), "logs"), map[harness.Name]agent.Backend{"test": backend})
+			tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Harness: "test"}
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetState(StateRunning)
+
+			if _, err := r.Reconnect(t.Context(), tk, true); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("Reconnect error = %v, want os.ErrNotExist", err)
+			}
+			if backend.capturedAttachOpts.LogW != nil {
+				t.Fatal("AttachRelay called without authoritative local log")
+			}
+			if tk.LogPath() != "" {
+				t.Fatalf("LogPath = %q, want empty", tk.LogPath())
 			}
 		})
 	})
@@ -164,6 +189,8 @@ func TestSessionRunner(t *testing.T) {
 			store := &LogStore{LogDir: logDir}
 			tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Name: "org/repo", Branch: "caic-0"}}}
 
+			tk.Harness = harness.Claude
+
 			// Initial Start writes the header.
 			w, err := store.Open(tk)
 			if err != nil {
@@ -192,10 +219,10 @@ func TestSessionRunner(t *testing.T) {
 		})
 		t.Run("ReopenMissingFile", func(t *testing.T) {
 			t.Parallel()
-			// Reopen must report os.ErrNotExist when no log exists yet so
-			// Reconnect can fall back to Open (which writes the header).
+			// Reopen must report os.ErrNotExist without creating a replacement
+			// header because a reconnect cannot infer the running relay format.
 			store := &LogStore{LogDir: filepath.Join(t.TempDir(), "logs")}
-			tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Name: "org/repo", Branch: "caic-0"}}}
+			tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Name: "org/repo", Branch: "caic-0"}}, Harness: harness.Claude}
 			if _, err := store.Reopen(tk); !errors.Is(err, os.ErrNotExist) {
 				t.Errorf("Reopen err = %v, want os.ErrNotExist", err)
 			}

@@ -644,6 +644,26 @@ type MetaMount struct {
 	ReadOnly  bool   `json:"readOnly,omitempty"`
 }
 
+// LogVersion identifies a physical task-log format.
+type LogVersion int
+
+const (
+	// LogVersionV1 is the legacy bare-harness task-log format.
+	LogVersionV1 LogVersion = 1
+	// LogVersionV2 is the caic-enveloped task-log format.
+	LogVersionV2 LogVersion = 2
+)
+
+// Validate rejects unsupported task-log versions.
+func (v LogVersion) Validate() error {
+	switch v {
+	case LogVersionV1, LogVersionV2:
+		return nil
+	default:
+		return fmt.Errorf("unsupported log version %d", v)
+	}
+}
+
 // MetaMessage is written as the first line of a JSONL log file. It captures
 // task-level metadata so logs can be reloaded on restart.
 type MetaMessage struct {
@@ -678,8 +698,8 @@ func (m *MetaMessage) Validate() error {
 	if m.MessageType != "caic_meta" {
 		return fmt.Errorf("unexpected type %q", m.MessageType)
 	}
-	if m.Version != 1 {
-		return fmt.Errorf("unsupported version %d", m.Version)
+	if err := LogVersion(m.Version).Validate(); err != nil {
+		return err
 	}
 	if m.Prompt == "" {
 		return errors.New("missing prompt")

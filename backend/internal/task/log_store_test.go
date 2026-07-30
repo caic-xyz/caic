@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -90,7 +91,7 @@ func TestLogStore(t *testing.T) {
 		if err := json.Unmarshal([]byte(entries[0]), &meta); err != nil {
 			t.Fatal(err)
 		}
-		if meta.MessageType != "caic_meta" || meta.Prompt != "test prompt" || meta.Model != "model-1" || meta.Effort != "high" {
+		if meta.MessageType != "caic_meta" || meta.Version != int(agent.LogVersionV1) || meta.Prompt != "test prompt" || meta.Model != "model-1" || meta.Effort != "high" {
 			t.Fatalf("unexpected metadata: %+v", meta)
 		}
 		if len(meta.Repos) != 1 || meta.Repos[0].MountedPath != "~/src/org/repo" {
@@ -100,6 +101,123 @@ func TestLogStore(t *testing.T) {
 		tk.addMessage(t.Context(), &agent.TextMessage{Text: "hello"}, false)
 		if len(replay.Messages) != 1 {
 			t.Fatalf("replay messages = %d, want 1", len(replay.Messages))
+		}
+	})
+	t.Run("ReopenRejectsV2WithoutMutation", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		store := &LogStore{LogDir: dir}
+		tk := &Task{
+			ID:            ksid.NewID(),
+			InitialPrompt: agent.Prompt{Text: "test"},
+			Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
+			Harness:       harness.Codex,
+		}
+		path := filepath.Join(dir, taskLogFileName(tk))
+		line := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta",
+			Version:     int(agent.LogVersionV2),
+			Prompt:      "test",
+			Repos:       []agent.MetaRepo{{Name: "org/repo", Branch: "caic-0"}},
+			Harness:     harness.Codex,
+		}) + "\n"
+		if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := store.Reopen(tk); err == nil || !strings.Contains(err.Error(), "requires versioned log sink") {
+			t.Fatalf("Reopen error = %v, want v2 sink error", err)
+		}
+		if _, err := store.Open(tk); err == nil || !strings.Contains(err.Error(), "requires versioned log sink") {
+			t.Fatalf("Open error = %v, want v2 sink error", err)
+		}
+		got, err := os.ReadFile(path) //nolint:gosec // path is test-controlled.
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != line {
+			t.Fatalf("v2 log mutated:\n%s", got)
+		}
+	})
+	t.Run("ReopenRejectsHarnessMismatch", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		store := &LogStore{LogDir: dir}
+		tk := &Task{
+			ID:            ksid.NewID(),
+			InitialPrompt: agent.Prompt{Text: "test"},
+			Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
+			Harness:       harness.Codex,
+		}
+		path := filepath.Join(dir, taskLogFileName(tk))
+		line := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta",
+			Version:     int(agent.LogVersionV1),
+			Prompt:      "test",
+			Repos:       []agent.MetaRepo{{Name: "org/repo", Branch: "caic-0"}},
+			Harness:     harness.Claude,
+		}) + "\n"
+		if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := store.Reopen(tk); err == nil || !strings.Contains(err.Error(), "does not match") {
+			t.Fatalf("Reopen error = %v, want harness mismatch", err)
+		}
+	})
+	t.Run("ReopenWritesValidatedInodeAfterPathReplacement", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		store := &LogStore{LogDir: dir}
+		tk := &Task{
+			ID:            ksid.NewID(),
+			InitialPrompt: agent.Prompt{Text: "test"},
+			Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
+			Harness:       harness.Codex,
+		}
+		path := filepath.Join(dir, taskLogFileName(tk))
+		header := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta",
+			Version:     int(agent.LogVersionV1),
+			Prompt:      "test",
+			Repos:       []agent.MetaRepo{{Name: "org/repo", Branch: "caic-0"}},
+			Harness:     harness.Codex,
+		}) + "\n"
+		if err := os.WriteFile(path, []byte(header), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		w, err := store.Reopen(tk)
+		if err != nil {
+			t.Fatal(err)
+		}
+		validatedPath := path + ".validated"
+		if err := os.Rename(path, validatedPath); err != nil {
+			t.Fatal(err)
+		}
+		const replacement = "unvalidated replacement\n"
+		if err := os.WriteFile(path, []byte(replacement), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		const appendLine = "{\"type\":\"caic_result\",\"state\":\"waiting\"}\n"
+		if _, err := w.Write([]byte(appendLine)); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		gotReplacement, err := os.ReadFile(path) //nolint:gosec // path is test-controlled.
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(gotReplacement) != replacement {
+			t.Fatalf("replacement was mutated: %q", gotReplacement)
+		}
+		gotValidated, err := os.ReadFile(validatedPath) //nolint:gosec // path is test-controlled.
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(gotValidated) != header+appendLine {
+			t.Fatalf("validated inode = %q, want header plus append", gotValidated)
 		}
 	})
 	t.Run("OpenSurfacesReplayFactoryError", func(t *testing.T) {

@@ -43,6 +43,166 @@ func decodeTypeEnvelope(line []byte) (typeEnvelope, bool) {
 	return env, json.Unmarshal(line, &env) == nil
 }
 
+type logAuthority struct {
+	Version agent.LogVersion
+	Harness harness.Name
+}
+
+type physicalLogReader struct {
+	file   *os.File
+	reader io.ReadCloser
+	info   os.FileInfo
+}
+
+func openPhysicalLogReader(path string) (*physicalLogReader, error) {
+	r, err := openLogReader(path)
+	if err != nil {
+		return nil, err
+	}
+	var f *os.File
+	switch v := r.(type) {
+	case *os.File:
+		f = v
+	case *zstdReadCloser:
+		f = v.file
+	default:
+		return nil, errors.Join(fmt.Errorf("unsupported physical log reader %T", r), r.Close())
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return nil, errors.Join(err, r.Close())
+	}
+	return &physicalLogReader{file: f, reader: r, info: info}, nil
+}
+
+func (r *physicalLogReader) Close() error {
+	return r.reader.Close()
+}
+
+func verifyPhysicalLog(path string, f *os.File, expected os.FileInfo) (os.FileInfo, error) {
+	current, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !os.SameFile(expected, current) || current.Size() != expected.Size() || !current.ModTime().Equal(expected.ModTime()) {
+		return nil, fmt.Errorf("task log changed while reading: %s", path)
+	}
+	pathInfo, err := os.Stat(filepath.Clean(path))
+	if err != nil {
+		return nil, err
+	}
+	if !os.SameFile(current, pathInfo) || pathInfo.Size() != current.Size() || !pathInfo.ModTime().Equal(current.ModTime()) {
+		return nil, fmt.Errorf("task log replaced while reading: %s", path)
+	}
+	return current, nil
+}
+
+type physicalLogScanner struct {
+	scanner   *bufio.Scanner
+	src       string
+	authority logAuthority
+	line      []byte
+	err       error
+	headerSet bool
+}
+
+func newPhysicalLogScanner(r io.Reader, src string) *physicalLogScanner {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
+	return &physicalLogScanner{scanner: scanner, src: src}
+}
+
+func (s *physicalLogScanner) ReadHeader(fw *jsonutil.FieldWarner) (agent.MetaMessage, error) {
+	if s.headerSet {
+		return agent.MetaMessage{}, errors.New("task log header already read")
+	}
+	for s.scanner.Scan() {
+		line := s.scanner.Bytes()
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+		var meta agent.MetaMessage
+		if err := unmarshalMeta(line, &meta, fw); err != nil {
+			return agent.MetaMessage{}, fmt.Errorf("%s: invalid first log header: %w", s.src, err)
+		}
+		if err := meta.Validate(); err != nil {
+			return agent.MetaMessage{}, fmt.Errorf("%s: invalid first log header: %w", s.src, err)
+		}
+		s.authority = logAuthority{Version: agent.LogVersion(meta.Version), Harness: meta.Harness}
+		s.headerSet = true
+		return meta, nil
+	}
+	if err := s.scanner.Err(); err != nil {
+		return agent.MetaMessage{}, err
+	}
+	return agent.MetaMessage{}, fmt.Errorf("%s: %w", s.src, errNotLogFile)
+}
+
+func (s *physicalLogScanner) Scan() bool {
+	if !s.headerSet {
+		s.err = errors.New("task log header not read")
+		return false
+	}
+	for s.scanner.Scan() {
+		line := s.scanner.Bytes()
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+		env, ok := decodeTypeEnvelope(line)
+		if !ok || env.Type != "caic_meta" {
+			s.line = line
+			return true
+		}
+		var meta agent.MetaMessage
+		if err := json.Unmarshal(line, &meta); err != nil {
+			s.err = fmt.Errorf("%s: invalid log segment header: %w", s.src, err)
+			return false
+		}
+		if err := meta.Validate(); err != nil {
+			s.err = fmt.Errorf("%s: invalid log segment header: %w", s.src, err)
+			return false
+		}
+		if agent.LogVersion(meta.Version) != s.authority.Version || meta.Harness != s.authority.Harness {
+			s.err = fmt.Errorf(
+				"%s: log segment authority changed from version %d harness %q to version %d harness %q",
+				s.src, s.authority.Version, s.authority.Harness, meta.Version, meta.Harness)
+			return false
+		}
+	}
+	return false
+}
+
+func (s *physicalLogScanner) Bytes() []byte {
+	return s.line
+}
+
+func (s *physicalLogScanner) Err() error {
+	return errors.Join(s.err, s.scanner.Err())
+}
+
+func readLogAuthority(path string) (_ logAuthority, retErr error) {
+	r, err := openPhysicalLogReader(path)
+	if err != nil {
+		return logAuthority{}, err
+	}
+	defer func() {
+		if closeErr := r.Close(); retErr == nil {
+			retErr = closeErr
+		}
+	}()
+	return scanLogAuthority(r.reader, path)
+}
+
+func scanLogAuthority(r io.Reader, src string) (logAuthority, error) {
+	scanner := newPhysicalLogScanner(r, src)
+	if _, err := scanner.ReadHeader(&jsonutil.FieldWarner{}); err != nil {
+		return logAuthority{}, err
+	}
+	for scanner.Scan() {
+	}
+	return scanner.authority, scanner.Err()
+}
+
 // tailInit is the subset of a system/init message parsed from the tail scan.
 type tailInit struct {
 	Subtype string `json:"subtype"`
@@ -127,6 +287,7 @@ type LoadedTask struct {
 	Prompt            string
 	Title             string
 	Repos             []RepoMount // GitRoot will be empty for purged tasks loaded from logs.
+	LogVersion        agent.LogVersion
 	Harness           harness.Name
 	StartedAt         time.Time
 	LastStateUpdateAt time.Time // Latest relay ts from caic_diff_stat records, falling back to log file mtime.
@@ -183,6 +344,7 @@ func loadedTaskFromMeta(path, taskID string, meta *agent.MetaMessage, modified t
 		Prompt:            meta.Prompt,
 		Title:             meta.Title,
 		Repos:             repos,
+		LogVersion:        agent.LogVersion(meta.Version),
 		Harness:           meta.Harness,
 		Model:             meta.Model,
 		Effort:            meta.Effort,
@@ -475,27 +637,58 @@ func streamLogFile(path string, parseFn func([]byte) ([]agent.Message, error), o
 			yield(nil, fmt.Errorf("seek compressed log %s to %d: unsupported", path, offset))
 			return
 		}
-		f, err := openLogReader(path)
+		r, err := openPhysicalLogReader(path)
 		if err != nil {
 			yield(nil, fmt.Errorf("open %s: %w", path, err))
 			return
 		}
-		defer func() { _ = f.Close() }()
+		defer func() { _ = r.Close() }()
+
 		if offset > 0 {
-			sf, ok := f.(io.Seeker)
-			if !ok {
-				yield(nil, fmt.Errorf("seek %s to %d: unsupported", path, offset))
+			if _, err := scanLogAuthority(r.reader, path); err != nil {
+				yield(nil, err)
 				return
 			}
-			if _, err := sf.Seek(offset, io.SeekStart); err != nil {
+			if _, err := verifyPhysicalLog(path, r.file, r.info); err != nil {
+				yield(nil, err)
+				return
+			}
+			if _, err := r.file.Seek(offset, io.SeekStart); err != nil {
 				yield(nil, fmt.Errorf("seek %s to %d: %w", path, offset, err))
 				return
 			}
-		}
-		for m, e := range yieldLogMessages(f, parseFn, offset > 0, path) {
-			if !yield(m, e) {
-				return
+			for m, e := range yieldLogMessages(r.file, parseFn, true, path) {
+				if !yield(m, e) {
+					return
+				}
 			}
+			return
+		}
+
+		scanner := newPhysicalLogScanner(r.reader, path)
+		if _, err := scanner.ReadHeader(&jsonutil.FieldWarner{}); err != nil {
+			yield(nil, err)
+			return
+		}
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			parsed, parseErr := parseFn(line)
+			if parseErr != nil {
+				slog.Warn("log", "msg", "skipping unparseable output line", "src", path, "err", parseErr)
+				continue
+			}
+			for _, m := range parsed {
+				if !yield(m, nil) {
+					return
+				}
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			yield(nil, err)
+			return
+		}
+		if _, err := verifyPhysicalLog(path, r.file, r.info); err != nil {
+			yield(nil, err)
 		}
 	}
 }
@@ -669,43 +862,50 @@ func (s *logTailScan) finish(lt *LoadedTask) {
 }
 
 func loadLogSessionMetadata(path string, parseFn func([]byte) ([]agent.Message, error)) (_ *LoadedTask, retErr error) {
-	f, err := openLogReader(path)
+	r, err := openPhysicalLogReader(path)
 	if err != nil {
 		return nil, err
 	}
 	defer func() {
-		if err2 := f.Close(); retErr == nil {
-			retErr = err2
+		if closeErr := r.Close(); retErr == nil {
+			retErr = closeErr
 		}
 	}()
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 4096), 32<<20)
+	scanner := newPhysicalLogScanner(r.reader, path)
+	if _, err := scanner.ReadHeader(&jsonutil.FieldWarner{}); err != nil {
+		return nil, err
+	}
 	lt := &LoadedTask{}
+	found := false
 	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
+		if found {
 			continue
 		}
+		line := scanner.Bytes()
 		var env typeEnvelope
 		if json.Unmarshal(line, &env) != nil {
 			continue
 		}
 		if applySessionMetadataLine(lt, env.Type, line) {
-			break
+			found = true
+			continue
 		}
 		if parseFn == nil {
 			continue
 		}
 		msgs, err := parseFn(line)
-		if err != nil {
-			continue
-		}
-		if applySessionMetadataMessages(lt, msgs) {
-			break
+		if err == nil && applySessionMetadataMessages(lt, msgs) {
+			found = true
 		}
 	}
-	return lt, scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	if _, err := verifyPhysicalLog(path, r.file, r.info); err != nil {
+		return nil, err
+	}
+	return lt, nil
 }
 
 // loadLogHeader reads the metadata header and result trailer from a task log.
@@ -715,62 +915,49 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 	if isLogCompressed(path) {
 		return loadCompressedLogHeader(path)
 	}
-	f, err := os.Open(filepath.Clean(path))
+	r, err := openPhysicalLogReader(path)
 	if err != nil {
 		return nil, err
 	}
 	defer func() {
-		if err2 := f.Close(); retErr == nil {
-			retErr = err2
+		if closeErr := r.Close(); retErr == nil {
+			retErr = closeErr
 		}
 	}()
 
-	// Read first line: metadata header.
 	fw := &jsonutil.FieldWarner{}
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 4096), 32<<20)
-	if !scanner.Scan() {
-		return nil, errNotLogFile
-	}
-	var meta agent.MetaMessage
-	if err := unmarshalMeta(scanner.Bytes(), &meta, fw); err != nil {
-		return nil, errNotLogFile
-	}
-	if err := meta.Validate(); err != nil {
-		return nil, err
-	}
-
-	info, err := f.Stat()
+	scanner := newPhysicalLogScanner(r.reader, path)
+	meta, err := scanner.ReadHeader(fw)
 	if err != nil {
 		return nil, err
 	}
 
-	// Parse task ID from filename: "<taskID>-<safeRepo>-<safeBranch>.jsonl[.zst]".
 	base := trimLogExt(filepath.Base(path))
 	taskIDStr := taskIDFromLogBase(base)
+	lt := loadedTaskFromMeta(path, taskIDStr, &meta, r.info.ModTime().UTC(), r.info.Size())
 
-	lt := loadedTaskFromMeta(path, taskIDStr, &meta, info.ModTime().UTC(), info.Size())
-
-	// Read the tail of the file to find caic_pr, caic_result, and
-	// caic_diff_stat records. The latest caic_diff_stat "ts" field provides
-	// a more accurate LastStateUpdateAt than file mtime.
-	const tailSize = 65536 // 64 KiB — sufficient for any realistic trailer.
-	size := info.Size()
-	offset := max(int64(0), size-tailSize)
-	buf := make([]byte, size-offset)
-	n, _ := f.ReadAt(buf, offset)
-	if n > 0 {
-		scan := logTailScan{fw: fw}
-		for line := range bytes.SplitSeq(buf[:n], []byte("\n")) {
-			line = bytes.TrimSpace(line)
-			if len(line) == 0 {
-				continue
-			}
-			scan.apply(lt, line)
-		}
-		scan.finish(lt)
+	// Validate every segment header without changing the existing lazy metadata
+	// behavior: only the bounded tail contributes task state here.
+	for scanner.Scan() {
 	}
-
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	const tailSize = 65536
+	offset := max(int64(0), r.info.Size()-tailSize)
+	buf := make([]byte, r.info.Size()-offset)
+	n, readErr := r.file.ReadAt(buf, offset)
+	if readErr != nil && !errors.Is(readErr, io.EOF) {
+		return nil, readErr
+	}
+	tail := logTailScan{fw: fw}
+	for line := range bytes.SplitSeq(buf[:n], []byte("\n")) {
+		line = bytes.TrimSpace(line)
+		if len(line) > 0 {
+			tail.apply(lt, line)
+		}
+	}
+	tail.finish(lt)
 	return lt, nil
 }
 
@@ -780,57 +967,45 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 // and caic_diff_stat records. Zstd logs do not support that random access in
 // this format, so compressed headers use one streaming pass instead.
 func loadCompressedLogHeader(path string) (_ *LoadedTask, retErr error) {
-	if lt, ok := loadLogSummary(path); ok {
-		return lt, nil
-	}
-
-	f, err := openLogReader(path)
+	r, err := openPhysicalLogReader(path)
 	if err != nil {
 		return nil, err
 	}
 	defer func() {
-		if err2 := f.Close(); retErr == nil {
-			retErr = err2
+		if closeErr := r.Close(); retErr == nil {
+			retErr = closeErr
 		}
 	}()
-
-	info, err := os.Stat(filepath.Clean(path))
-	if err != nil {
-		return nil, err
+	if lt, ok := loadLogSummary(path, r.file, r.info); ok {
+		return lt, nil
 	}
 
 	fw := &jsonutil.FieldWarner{}
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 4096), 32<<20)
-	if !scanner.Scan() {
-		return nil, errNotLogFile
-	}
-	var meta agent.MetaMessage
-	if err := unmarshalMeta(scanner.Bytes(), &meta, fw); err != nil {
-		return nil, errNotLogFile
-	}
-	if err := meta.Validate(); err != nil {
+	scanner := newPhysicalLogScanner(r.reader, path)
+	meta, err := scanner.ReadHeader(fw)
+	if err != nil {
 		return nil, err
 	}
-
 	base := trimLogExt(filepath.Base(path))
 	taskIDStr := taskIDFromLogBase(base)
+	lt := loadedTaskFromMeta(path, taskIDStr, &meta, r.info.ModTime().UTC(), r.info.Size())
 
-	lt := loadedTaskFromMeta(path, taskIDStr, &meta, info.ModTime().UTC(), info.Size())
-
-	scan := logTailScan{fw: fw}
+	tail := logTailScan{fw: fw}
 	for scanner.Scan() {
-		line := bytes.TrimSpace(scanner.Bytes())
-		if len(line) == 0 {
-			continue
-		}
-		scan.apply(lt, line)
+		tail.apply(lt, scanner.Bytes())
 	}
-	scan.finish(lt)
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
-	if err := storeLogSummary(lt); err != nil {
+	tail.finish(lt)
+	stableInfo, err := verifyPhysicalLog(path, r.file, r.info)
+	if err != nil {
+		return nil, err
+	}
+	if err := storeLogSummaryForFile(lt, r.file, stableInfo); err != nil {
+		if _, verifyErr := verifyPhysicalLog(path, r.file, stableInfo); verifyErr != nil {
+			return nil, errors.Join(err, verifyErr)
+		}
 		slog.Warn("task log summary: write failed", "path", path, "err", err)
 	}
 	return lt, nil
@@ -842,151 +1017,72 @@ func loadLogFile(path string, parseFn func([]byte) ([]agent.Message, error)) (_ 
 	if parseFn == nil {
 		return nil, errors.New("load log file: parseFn is nil")
 	}
-	f, err := openLogReader(path)
+	r, err := openPhysicalLogReader(path)
 	if err != nil {
 		return nil, err
 	}
 	defer func() {
-		if err2 := f.Close(); retErr == nil {
-			retErr = err2
+		if closeErr := r.Close(); retErr == nil {
+			retErr = closeErr
 		}
 	}()
 
-	scanner := bufio.NewScanner(f)
-	// 32 MiB max line: user input with base64 images can produce very long NDJSON lines.
-	scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
-
 	fw := &jsonutil.FieldWarner{}
-
-	// First line must be the metadata header.
-	if !scanner.Scan() {
-		return nil, errNotLogFile
-	}
-	var meta agent.MetaMessage
-	if err := unmarshalMeta(scanner.Bytes(), &meta, fw); err != nil {
-		return nil, errNotLogFile
-	}
-	if err := meta.Validate(); err != nil {
+	scanner := newPhysicalLogScanner(r.reader, path)
+	meta, err := scanner.ReadHeader(fw)
+	if err != nil {
 		return nil, err
 	}
+	lt := loadedTaskFromMeta(path, "", &meta, r.info.ModTime().UTC(), r.info.Size())
 
-	// Use the file modification time as a best-effort approximation of the
-	// last state change (the file is written to as messages arrive).
-	var mtime time.Time
-	var size int64
-	if info, err := os.Stat(filepath.Clean(path)); err == nil {
-		mtime = info.ModTime().UTC()
-		size = info.Size()
-	}
-
-	lt := loadedTaskFromMeta(path, "", &meta, mtime, size)
-
-	// Parse remaining lines as agent messages or the result trailer.
 	for scanner.Scan() {
 		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		// This confirms the line must be a dict but it's okay to not contain a `type` field.
-		var envelope typeEnvelope
-		if err := json.Unmarshal(line, &envelope); err != nil {
-			continue
-		}
-
-		switch envelope.Type {
-		case "caic_session", "caic_init":
-			applySessionMetadataLine(lt, envelope.Type, line)
-
-		case "caic_pr":
-			var mp agent.MetaPRMessage
-			if json.Unmarshal(line, &mp) == nil && mp.ForgePR > 0 {
-				lt.ForgeOwner = mp.ForgeOwner
-				lt.ForgeRepo = mp.ForgeRepo
-				lt.ForgePR = mp.ForgePR
-			}
-
-		case "caic_diff_stat":
-			noteDiffStatLine(lt, line)
-
-		case "caic_log":
-			m, err := unmarshalProvisioningLog(line)
-			if err != nil {
-				return nil, fmt.Errorf("invalid caic_log: %w", err)
-			}
-			lt.Msgs = append(lt.Msgs, m)
-
-		case "caic_result":
-			var mr agent.MetaResultMessage
-			if err := json.Unmarshal(line, &mr); err != nil {
-				return nil, fmt.Errorf("invalid caic_result: %w", err)
-			}
-			applyMetaResult(lt, &mr)
-
-		default:
-			parsed, err := parseFn(line)
-			if err != nil {
-				slog.Warn("failed to parse message", "err", err, "path", path)
-				continue
-			}
-			lt.Msgs = append(lt.Msgs, parsed...)
+		if err := applyLoadedLogLine(lt, line, parseFn, path); err != nil {
+			return nil, err
 		}
 	}
-
 	return lt, scanner.Err()
 }
 
-// loadLogFileTail reads only the tail of a log file. It always reads the first
-// line (metadata header), then seeks to (size - tailBytes) and parses only the
-// remaining lines. This avoids loading multi-GB files into memory.
+// loadLogFileTail validates header authority across the physical file, then
+// seeks to (size - tailBytes) and parses only the remaining messages. Message
+// retention stays bounded even though authority validation scans every record.
 func loadLogFileTail(path string, parseFn func([]byte) ([]agent.Message, error), tailBytes int64) (_ *LoadedTask, retErr error) {
 	if isLogCompressed(path) {
 		return loadCompressedLogFileTail(path, parseFn, tailBytes)
 	}
-	f, err := os.Open(filepath.Clean(path))
+	r, err := openPhysicalLogReader(path)
 	if err != nil {
 		return nil, err
 	}
 	defer func() {
-		if err2 := f.Close(); retErr == nil {
-			retErr = err2
+		if closeErr := r.Close(); retErr == nil {
+			retErr = closeErr
 		}
 	}()
 
-	info, err := f.Stat()
+	scanner := newPhysicalLogScanner(r.reader, path)
+	meta, err := scanner.ReadHeader(&jsonutil.FieldWarner{})
 	if err != nil {
 		return nil, err
 	}
-
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
-
-	// First line must be the metadata header.
-	if !scanner.Scan() {
-		return nil, errNotLogFile
+	for scanner.Scan() {
 	}
-	var meta agent.MetaMessage
-	if err := unmarshalMeta(scanner.Bytes(), &meta, &jsonutil.FieldWarner{}); err != nil {
-		return nil, errNotLogFile
-	}
-	if err := meta.Validate(); err != nil {
+	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
+	lt := loadedTaskFromMeta(path, "", &meta, r.info.ModTime().UTC(), r.info.Size())
 
-	lt := loadedTaskFromMeta(path, "", &meta, info.ModTime().UTC(), info.Size())
-
-	// Seek to the tail of the file.
-	offset := max(int64(0), info.Size()-tailBytes)
-	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+	offset := max(int64(0), r.info.Size()-tailBytes)
+	if _, err := r.file.Seek(offset, io.SeekStart); err != nil {
 		return nil, fmt.Errorf("seek %s to %d: %w", path, offset, err)
 	}
 
-	// Reuse scanner from the seeked position. The first line after seek is
-	// likely partial (we're mid-line), so skip it unless we're at the start.
-	scanner = bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
+	tailScanner := bufio.NewScanner(r.file)
+	tailScanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
 	skipFirst := offset > 0
-	for scanner.Scan() {
-		line := scanner.Bytes()
+	for tailScanner.Scan() {
+		line := tailScanner.Bytes()
 		if len(line) == 0 {
 			continue
 		}
@@ -994,87 +1090,37 @@ func loadLogFileTail(path string, parseFn func([]byte) ([]agent.Message, error),
 			skipFirst = false
 			continue
 		}
-		var envelope typeEnvelope
-		if err := json.Unmarshal(line, &envelope); err != nil {
-			continue
-		}
-		switch envelope.Type {
-		case "caic_session", "caic_init":
-			applySessionMetadataLine(lt, envelope.Type, line)
-
-		case "caic_pr":
-			var mp agent.MetaPRMessage
-			if json.Unmarshal(line, &mp) == nil && mp.ForgePR > 0 {
-				lt.ForgeOwner = mp.ForgeOwner
-				lt.ForgeRepo = mp.ForgeRepo
-				lt.ForgePR = mp.ForgePR
-			}
-		case "caic_diff_stat":
-			noteDiffStatLine(lt, line)
-		case "caic_log":
-			m, err := unmarshalProvisioningLog(line)
-			if err != nil {
-				return nil, fmt.Errorf("invalid caic_log: %w", err)
-			}
-			lt.Msgs = append(lt.Msgs, m)
-		case "caic_result":
-			var mr agent.MetaResultMessage
-			if err := json.Unmarshal(line, &mr); err != nil {
-				return nil, fmt.Errorf("invalid caic_result: %w", err)
-			}
-			applyMetaResult(lt, &mr)
-		default:
-			parsed, err := parseFn(line)
-			if err != nil {
-				continue
-			}
-			lt.Msgs = append(lt.Msgs, parsed...)
+		if err := applyLoadedLogLine(lt, line, parseFn, path); err != nil {
+			return nil, err
 		}
 	}
-	return lt, scanner.Err()
+	return lt, tailScanner.Err()
 }
 
 // loadCompressedLogFileTail scans a zstd log once and retains only the latest
 // decompressed JSONL records bounded by tailBytes.
 func loadCompressedLogFileTail(path string, parseFn func([]byte) ([]agent.Message, error), tailBytes int64) (_ *LoadedTask, retErr error) {
-	f, err := openLogReader(path)
+	r, err := openPhysicalLogReader(path)
 	if err != nil {
 		return nil, err
 	}
 	defer func() {
-		if err2 := f.Close(); retErr == nil {
-			retErr = err2
+		if closeErr := r.Close(); retErr == nil {
+			retErr = closeErr
 		}
 	}()
 
-	info, err := os.Stat(filepath.Clean(path))
+	scanner := newPhysicalLogScanner(r.reader, path)
+	meta, err := scanner.ReadHeader(&jsonutil.FieldWarner{})
 	if err != nil {
 		return nil, err
 	}
-
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
-	if !scanner.Scan() {
-		return nil, errNotLogFile
-	}
-	var meta agent.MetaMessage
-	if err := unmarshalMeta(scanner.Bytes(), &meta, &jsonutil.FieldWarner{}); err != nil {
-		return nil, errNotLogFile
-	}
-	if err := meta.Validate(); err != nil {
-		return nil, err
-	}
-
-	lt := loadedTaskFromMeta(path, "", &meta, info.ModTime().UTC(), info.Size())
+	lt := loadedTaskFromMeta(path, "", &meta, r.info.ModTime().UTC(), r.info.Size())
 
 	var lines [][]byte
 	var total int64
 	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		line = bytes.Clone(line)
+		line := bytes.Clone(scanner.Bytes())
 		lines = append(lines, line)
 		total += int64(len(line) + 1)
 		for total > tailBytes && len(lines) > 1 {
@@ -1100,6 +1146,8 @@ func applyLoadedLogLine(lt *LoadedTask, line []byte, parseFn func([]byte) ([]age
 	}
 
 	switch envelope.Type {
+	case "caic_meta":
+		return nil
 	case "caic_session", "caic_init":
 		applySessionMetadataLine(lt, envelope.Type, line)
 

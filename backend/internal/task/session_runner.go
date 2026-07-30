@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"runtime/trace"
 	"strings"
@@ -66,14 +65,10 @@ func (r *SessionRunner) Reconnect(ctx context.Context, t *Task, skipSideEffects 
 
 	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, skipSideEffects)
 
-	// Reconnect resumes an existing session, so append to its log without
-	// writing a new caic_meta header — otherwise every server restart that
-	// re-adopts a running instance would append a duplicate header. Fall
-	// back to Open (which writes the header) only if the log is missing.
+	// Reconnect resumes an existing session, so append only after Reopen
+	// validates the existing file's authoritative header. A missing or corrupt
+	// log must not be replaced because the running relay's format is unknown.
 	logW, err := r.Logs.Reopen(t)
-	if errors.Is(err, os.ErrNotExist) {
-		logW, err = r.Logs.Open(t)
-	}
 	if err != nil {
 		close(msgCh)
 		<-dispatchDone

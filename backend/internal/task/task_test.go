@@ -21,6 +21,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
@@ -2441,27 +2442,97 @@ func TestTask(t *testing.T) {
 		t.Run("ReopensPersistedLogWithoutSession", func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
-			tk := &Task{ID: ksid.NewID()}
+			tk := &Task{ID: ksid.NewID(), Harness: "claude"}
 			path := filepath.Join(dir, "task.jsonl")
-			if err := os.WriteFile(path, []byte{}, 0o600); err != nil {
+			header, err := json.Marshal(agent.MetaMessage{
+				MessageType: "caic_meta",
+				Version:     int(agent.LogVersionV1),
+				Prompt:      "test",
+				Harness:     "claude",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := append(append([]byte(nil), header...), '\n')
+			if err := os.WriteFile(path, before, 0o600); err != nil {
 				t.Fatal(err)
 			}
 			tk.SetLogPath(path)
 
-			if err := tk.WriteToLog(&agent.MetaPRMessage{
+			msg := &agent.MetaPRMessage{
 				MessageType: "caic_pr",
 				ForgeOwner:  "acme",
 				ForgeRepo:   "widget",
 				ForgePR:     42,
-			}); err != nil {
+			}
+			if err := tk.WriteToLog(msg); err != nil {
 				t.Fatal(err)
 			}
 			data, err := os.ReadFile(path) //nolint:gosec // path is test-controlled.
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(string(data), `"type":"caic_pr"`) {
-				t.Fatalf("log = %q, want caic_pr", string(data))
+			encoded, err := agent.MarshalMessage(msg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := append(append([]byte(nil), before...), append(encoded, '\n')...)
+			if !bytes.Equal(data, want) {
+				t.Fatalf("log = %q, want %q", data, want)
+			}
+		})
+		t.Run("RejectsInvalidPersistedAuthorityWithoutMutation", func(t *testing.T) {
+			t.Parallel()
+			validHeader := func(version agent.LogVersion, h harness.Name) []byte {
+				data, err := json.Marshal(agent.MetaMessage{
+					MessageType: "caic_meta",
+					Version:     int(version),
+					Prompt:      "test",
+					Harness:     h,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return append(data, '\n')
+			}
+			cases := []struct {
+				name string
+				data []byte
+			}{
+				{name: "v2", data: validHeader(agent.LogVersionV2, "claude")},
+				{name: "corrupt", data: []byte("not json\n")},
+				{name: "unknown", data: validHeader(agent.LogVersion(3), "claude")},
+				{name: "harness mismatch", data: validHeader(agent.LogVersionV1, "codex")},
+				{name: "missing"},
+			}
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					path := filepath.Join(t.TempDir(), "task.jsonl")
+					if tc.data != nil {
+						if err := os.WriteFile(path, tc.data, 0o600); err != nil {
+							t.Fatal(err)
+						}
+					}
+					tk := &Task{ID: ksid.NewID(), Harness: "claude"}
+					tk.SetLogPath(path)
+					if err := tk.WriteToLog(&agent.TextMessage{Text: "hello"}); err == nil {
+						t.Fatal("WriteToLog error = nil")
+					}
+					if tc.data == nil {
+						if _, err := os.Stat(path); !os.IsNotExist(err) {
+							t.Fatalf("stat error = %v, want os.ErrNotExist", err)
+						}
+						return
+					}
+					after, err := os.ReadFile(path) //nolint:gosec // path is test-controlled.
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !bytes.Equal(after, tc.data) {
+						t.Fatalf("log mutated: got %q, want %q", after, tc.data)
+					}
+				})
 			}
 		})
 		t.Run("ReturnsAppendError", func(t *testing.T) {

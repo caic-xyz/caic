@@ -1396,9 +1396,10 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			backend := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: "reconnect", Images: true, ContextLimit: 200_000}}
 			t.Cleanup(backend.stop)
+			logDir := filepath.Join(t.TempDir(), "logs")
 			m := newTestManager(t, Config{
 				ServerCtx: t.Context(),
-				LogDir:    filepath.Join(t.TempDir(), "logs"),
+				LogDir:    logDir,
 				Backends:  map[harness.Name]agent.Backend{"reconnect": backend},
 			})
 			tk := &task.Task{
@@ -1426,6 +1427,13 @@ func TestManager(t *testing.T) {
 				},
 				&agent.ResultMessage{MessageType: "result"},
 			})
+			logW, err := (&task.LogStore{LogDir: logDir}).Open(tk)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := logW.Close(); err != nil {
+				t.Fatal(err)
+			}
 			e := NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
 
@@ -2862,7 +2870,7 @@ func TestManager(t *testing.T) {
 				t.Fatalf("messages = %#v, want disk history plus relay tail", texts)
 			}
 		})
-		t.Run("valid_reconnects_live_restored_ask_before_returning", func(t *testing.T) {
+		t.Run("missing_local_log_refuses_live_reconnect", func(t *testing.T) {
 			t.Parallel()
 			taskID := ksid.NewID()
 			backend := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: "reconnect", Images: true, ContextLimit: 200_000}}
@@ -2930,20 +2938,17 @@ func TestManager(t *testing.T) {
 			attachCalls := backend.attachCalls
 			opts := backend.opts
 			backend.mu.Unlock()
-			if attachCalls != 1 {
-				t.Fatalf("AttachRelay calls = %d, want 1", attachCalls)
+			if attachCalls != 0 {
+				t.Fatalf("AttachRelay calls = %d, want 0", attachCalls)
 			}
-			if opts == nil {
-				t.Fatal("AttachRelay opts = nil")
+			if opts != nil {
+				t.Fatalf("AttachRelay opts = %#v, want nil", opts)
 			}
-			if opts.RelayOffset != 599440 {
-				t.Fatalf("RelayOffset = %d, want 599440", opts.RelayOffset)
+			if adopted[0].Task.HasSession() {
+				t.Fatal("adopted task attached without authoritative local log")
 			}
-			if len(opts.PendingUserActions) != 1 {
-				t.Fatalf("PendingUserActions = %#v, want one restored ask", opts.PendingUserActions)
-			}
-			if !adopted[0].Task.HasSession() {
-				t.Fatal("adopted task has no attached session")
+			if adopted[0].Task.LogPath() != "" {
+				t.Fatalf("replacement LogPath = %q, want empty", adopted[0].Task.LogPath())
 			}
 		})
 		t.Run("valid_dead_relay_exit_error_crashes_adopted_task", func(t *testing.T) {

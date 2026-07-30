@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -964,7 +963,7 @@ func (t *Task) WriteToLog(m agent.Message) error {
 	if path == "" {
 		return ErrNoLog
 	}
-	w, err := newTaskLogWriter(path, os.O_WRONLY|os.O_APPEND)
+	w, err := openTaskLogForAppend(path, t, false)
 	if err != nil {
 		return err
 	}

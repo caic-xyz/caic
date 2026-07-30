@@ -21,32 +21,32 @@ type LogStore struct {
 	EventReplayFactory func(logPath string, h harness.Name) (EventReplayWriter, error)
 }
 
-// Open creates a JSONL log file and writes a metadata header as the first line.
+// Open creates a JSONL log segment and writes its metadata header.
 func (s *LogStore) Open(t *Task) (io.WriteCloser, error) {
 	if err := os.MkdirAll(s.LogDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create log dir: %w", err)
 	}
 	path := filepath.Join(s.LogDir, taskLogFileName(t))
-	f, err := newTaskLogWriter(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND)
+	w, err := openTaskLogForAppend(path, t, true)
 	if err != nil {
-		return nil, fmt.Errorf("create log file: %w", err)
+		return nil, err
 	}
-	if err := writeMetadataHeader(f, t); err != nil {
-		return nil, errors.Join(err, f.Close())
+	if err := writeMetadataHeader(w, t); err != nil {
+		return nil, errors.Join(err, w.Close())
 	}
 	if err := s.attachReplay(t, path); err != nil {
-		return nil, errors.Join(err, f.Close())
+		return nil, errors.Join(err, w.Close())
 	}
-	return f, nil
+	return w, nil
 }
 
-// Reopen opens an existing JSONL log file for appending without writing a metadata header.
+// Reopen validates and opens an existing v1 JSONL log for appending without a header.
 func (s *LogStore) Reopen(t *Task) (io.WriteCloser, error) {
 	if s.LogDir == "" {
 		return nil, errors.New("no log dir")
 	}
 	path := filepath.Join(s.LogDir, taskLogFileName(t))
-	w, err := newTaskLogWriter(path, os.O_WRONLY|os.O_APPEND)
+	w, err := openTaskLogForAppend(path, t, false)
 	if err != nil {
 		return nil, err
 	}
@@ -54,6 +54,59 @@ func (s *LogStore) Reopen(t *Task) (io.WriteCloser, error) {
 		return nil, errors.Join(err, w.Close())
 	}
 	return w, nil
+}
+
+func openTaskLogForAppend(path string, t *Task, create bool) (*taskLogWriter, error) {
+	cleanPath := filepath.Clean(path)
+	if create {
+		w, err := newTaskLogWriter(cleanPath, os.O_CREATE|os.O_EXCL|os.O_RDWR|os.O_APPEND)
+		if err == nil {
+			info, statErr := w.file.Stat()
+			if statErr == nil {
+				_, statErr = verifyPhysicalLog(path, w.file, info)
+			}
+			if statErr != nil {
+				return nil, errors.Join(statErr, w.Close())
+			}
+			return w, nil
+		}
+		if !os.IsExist(err) {
+			return nil, fmt.Errorf("create log file: %w", err)
+		}
+	}
+
+	w, err := newTaskLogWriter(cleanPath, os.O_RDWR|os.O_APPEND)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateRawLogAppend(w.file, path, t); err != nil {
+		return nil, errors.Join(err, w.Close())
+	}
+	return w, nil
+}
+
+func validateRawLogAppend(f *os.File, path string, t *Task) error {
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	authority, err := scanLogAuthority(f, path)
+	if err != nil {
+		return fmt.Errorf("validate task log for append: %w", err)
+	}
+	if _, err := verifyPhysicalLog(path, f, info); err != nil {
+		return fmt.Errorf("validate task log for append: %w", err)
+	}
+	if authority.Version != agent.LogVersionV1 {
+		return fmt.Errorf("append task log: version %d requires versioned log sink", authority.Version)
+	}
+	if authority.Harness != t.Harness {
+		return fmt.Errorf("append task log: header harness %q does not match task harness %q", authority.Harness, t.Harness)
+	}
+	return nil
 }
 
 // WriteResultTrailer appends a MetaResultMessage to the log writer.

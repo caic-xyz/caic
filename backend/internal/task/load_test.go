@@ -76,6 +76,18 @@ func writeCompressedLogFile(t *testing.T, dir, name string, lines iter.Seq[[]byt
 	}
 }
 
+func writePhysicalTestLog(t *testing.T, compressed bool, lines ...string) string {
+	dir := t.TempDir()
+	if compressed {
+		path := filepath.Join(dir, "task.jsonl.zst")
+		writeCompressedLogFile(t, dir, filepath.Base(path), seqOf(lines...))
+		return path
+	}
+	path := filepath.Join(dir, "task.jsonl")
+	writeLogFile(t, dir, filepath.Base(path), lines...)
+	return path
+}
+
 func mustJSON(t *testing.T, v any) string {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -106,8 +118,139 @@ func claudeInit(t *testing.T, sessionID string) string {
 	return mustJSON(t, msg)
 }
 
+func TestReadLogAuthority(t *testing.T) {
+	t.Parallel()
+	meta := func(t *testing.T, version int, h harness.Name) string {
+		return mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta",
+			Version:     version,
+			Prompt:      "task",
+			Repos:       []agent.MetaRepo{{Name: "r", Branch: "caic-0"}},
+			Harness:     h,
+		})
+	}
+
+	t.Run("PlainV1WithMatchingSegment", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "a.jsonl")
+		writeLogFile(t, dir, "a.jsonl", "", meta(t, 1, harness.Claude), `{"type":"assistant"}`, meta(t, 1, harness.Claude))
+		authority, err := readLogAuthority(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if authority.Version != agent.LogVersionV1 || authority.Harness != harness.Claude {
+			t.Fatalf("authority = %+v", authority)
+		}
+	})
+	t.Run("CompressedV2", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "a.jsonl.zst")
+		writeCompressedLogFile(t, dir, "a.jsonl.zst", seqOf(meta(t, 2, harness.Codex)))
+		authority, err := readLogAuthority(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if authority.Version != agent.LogVersionV2 || authority.Harness != harness.Codex {
+			t.Fatalf("authority = %+v", authority)
+		}
+	})
+
+	for _, tc := range []struct {
+		name  string
+		lines []string
+	}{
+		{name: "MissingHeader", lines: []string{`{"type":"assistant"}`}},
+		{name: "CorruptHeader", lines: []string{`{"type":"caic_meta"`}},
+		{name: "MissingVersion", lines: []string{meta(t, 0, harness.Claude)}},
+		{name: "FutureVersion", lines: []string{meta(t, 3, harness.Claude)}},
+		{name: "ChangedVersion", lines: []string{meta(t, 1, harness.Claude), meta(t, 2, harness.Claude)}},
+		{name: "ChangedHarness", lines: []string{meta(t, 1, harness.Claude), meta(t, 1, harness.Codex)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			path := filepath.Join(dir, "a.jsonl")
+			writeLogFile(t, dir, "a.jsonl", tc.lines...)
+			if _, err := readLogAuthority(path); err == nil {
+				t.Fatal("readLogAuthority error = nil")
+			}
+		})
+	}
+	t.Run("Unreadable", func(t *testing.T) {
+		t.Parallel()
+		if _, err := readLogAuthority(filepath.Join(t.TempDir(), "missing.jsonl")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("readLogAuthority error = %v, want os.ErrNotExist", err)
+		}
+	})
+}
+
 func TestLoadLogs(t *testing.T) {
 	t.Parallel()
+	t.Run("PhysicalAuthority", func(t *testing.T) {
+		t.Parallel()
+		meta := func(version agent.LogVersion, h harness.Name) string {
+			return mustJSON(t, agent.MetaMessage{
+				MessageType: "caic_meta",
+				Version:     int(version),
+				Prompt:      "task",
+				Repos:       []agent.MetaRepo{{Name: "r", Branch: "caic-0"}},
+				Harness:     h,
+			})
+		}
+		assistant := claudeAssistant(t, map[string]any{"type": "text", "text": "hello"})
+		for _, compressed := range []bool{false, true} {
+			label := "Plain"
+			name := "authority.jsonl"
+			if compressed {
+				label = "Compressed"
+				name += ".zst"
+			}
+			t.Run(label+"LeadingBlankLines", func(t *testing.T) {
+				t.Parallel()
+				dir := t.TempDir()
+				lines := []string{"", "  ", meta(agent.LogVersionV1, harness.Claude), assistant, meta(agent.LogVersionV1, harness.Claude)}
+				if compressed {
+					writeCompressedLogFile(t, dir, name, seqOf(lines...))
+				} else {
+					writeLogFile(t, dir, name, lines...)
+				}
+				path := filepath.Join(dir, name)
+				if _, err := loadLogHeader(path); err != nil {
+					t.Fatalf("loadLogHeader: %v", err)
+				}
+				if _, err := loadLogFile(path, claudecode.New().NewWire().ParseMessage); err != nil {
+					t.Fatalf("loadLogFile: %v", err)
+				}
+			})
+			for _, mismatch := range []struct {
+				name string
+				line string
+			}{
+				{name: "ChangedVersion", line: meta(agent.LogVersionV2, harness.Claude)},
+				{name: "ChangedHarness", line: meta(agent.LogVersionV1, harness.Codex)},
+			} {
+				t.Run(label+mismatch.name, func(t *testing.T) {
+					t.Parallel()
+					dir := t.TempDir()
+					lines := []string{meta(agent.LogVersionV1, harness.Claude), assistant, mismatch.line}
+					if compressed {
+						writeCompressedLogFile(t, dir, name, seqOf(lines...))
+					} else {
+						writeLogFile(t, dir, name, lines...)
+					}
+					path := filepath.Join(dir, name)
+					if _, err := loadLogHeader(path); err == nil || !strings.Contains(err.Error(), "authority changed") {
+						t.Fatalf("loadLogHeader error = %v, want authority change", err)
+					}
+					if _, err := loadLogFile(path, claudecode.New().NewWire().ParseMessage); err == nil || !strings.Contains(err.Error(), "authority changed") {
+						t.Fatalf("loadLogFile error = %v, want authority change", err)
+					}
+				})
+			}
+		}
+	})
 	t.Run("Valid", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
@@ -274,6 +417,9 @@ func TestLoadLogs(t *testing.T) {
 		if len(first) != 1 {
 			t.Fatalf("len(first) = %d, want 1", len(first))
 		}
+		if first[0].LogVersion != agent.LogVersionV1 {
+			t.Fatalf("LogVersion = %d, want 1", first[0].LogVersion)
+		}
 		info, err := os.Stat(path)
 		if err != nil {
 			t.Fatal(err)
@@ -300,6 +446,122 @@ func TestLoadLogs(t *testing.T) {
 		}
 		if second[0].Prompt != "cached" || second[0].State != StatePurged {
 			t.Fatalf("cached task = prompt %q state %v, want cached/purged", second[0].Prompt, second[0].State)
+		}
+	})
+	t.Run("CompressedSummaryRejectsReplacementBeforePublish", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "a.jsonl.zst")
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "physical", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Claude})
+		writeCompressedLogFile(t, dir, "a.jsonl.zst", seqOf(meta))
+		tasks, err := LoadLogs(dir)
+		if err != nil || len(tasks) != 1 {
+			t.Fatalf("LoadLogs = %d tasks, %v", len(tasks), err)
+		}
+		if err := os.Remove(logSummaryPath(path)); err != nil {
+			t.Fatal(err)
+		}
+		file, err := os.Open(path) //nolint:gosec // path is test-controlled.
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := file.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		info, err := file.Stat()
+		if err != nil {
+			t.Fatal(err)
+		}
+		moved := path + ".moved"
+		if err := os.Rename(path, moved); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(moved) //nolint:gosec // path is test-controlled.
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0o600); err != nil { //nolint:gosec // path is test-controlled.
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+			t.Fatal(err)
+		}
+		if err := storeLogSummaryForFile(tasks[0], file, info); err == nil || !strings.Contains(err.Error(), "replaced") {
+			t.Fatalf("storeLogSummaryForFile error = %v, want replacement", err)
+		}
+		if _, err := os.Stat(logSummaryPath(path)); !os.IsNotExist(err) {
+			t.Fatalf("summary exists after replacement: %v", err)
+		}
+	})
+	t.Run("CompressedSummaryCacheRebuild", func(t *testing.T) {
+		t.Parallel()
+		for _, mutation := range []string{"missing", "corrupt", "old", "stale-size", "stale-mtime"} {
+			t.Run(mutation, func(t *testing.T) {
+				t.Parallel()
+				dir := t.TempDir()
+				path := filepath.Join(dir, "a.jsonl.zst")
+				meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 2, Prompt: "physical", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Codex})
+				writeCompressedLogFile(t, dir, "a.jsonl.zst", seqOf(meta))
+				if tasks, err := LoadLogs(dir); err != nil || len(tasks) != 1 {
+					t.Fatalf("initial LoadLogs = %d tasks, %v", len(tasks), err)
+				}
+				summaryPath := logSummaryPath(path)
+				switch mutation {
+				case "missing":
+					if err := os.Remove(summaryPath); err != nil {
+						t.Fatal(err)
+					}
+				case "corrupt":
+					if err := os.WriteFile(summaryPath, []byte("{"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				case "old", "stale-size", "stale-mtime":
+					data, err := os.ReadFile(summaryPath) //nolint:gosec // path is test-controlled.
+					if err != nil {
+						t.Fatal(err)
+					}
+					var summary logSummary
+					if err := json.Unmarshal(data, &summary); err != nil {
+						t.Fatal(err)
+					}
+					switch mutation {
+					case "old":
+						summary.Version--
+					case "stale-size":
+						summary.LogSize++
+					case "stale-mtime":
+						summary.LogModNs--
+					}
+					data, err = json.Marshal(summary)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(summaryPath, data, 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+
+				tasks, err := LoadLogs(dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(tasks) != 1 || tasks[0].Prompt != "physical" || tasks[0].LogVersion != agent.LogVersionV2 || tasks[0].Harness != harness.Codex {
+					t.Fatalf("rebuilt task = %+v", tasks)
+				}
+				data, err := os.ReadFile(summaryPath) //nolint:gosec // path is test-controlled.
+				if err != nil {
+					t.Fatal(err)
+				}
+				var rebuilt logSummary
+				if err := json.Unmarshal(data, &rebuilt); err != nil {
+					t.Fatal(err)
+				}
+				if rebuilt.Version != logSummaryVersion || rebuilt.Task.LogVersion != agent.LogVersionV2 || rebuilt.Task.Harness != harness.Codex {
+					t.Fatalf("rebuilt summary = %+v", rebuilt)
+				}
+			})
 		}
 	})
 	t.Run("PreferCompressedDuplicate", func(t *testing.T) {
@@ -585,6 +847,47 @@ func TestLoadLogs(t *testing.T) {
 		}
 		if lt.SessionID != "thread-old" {
 			t.Errorf("SessionID = %q, want thread-old", lt.SessionID)
+		}
+	})
+	t.Run("LoadSessionMetadataEnforcesAuthority", func(t *testing.T) {
+		t.Parallel()
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "session task", Harness: harness.Claude,
+		})
+		mismatch := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 2, Prompt: "session task", Harness: harness.Claude,
+		})
+		session := mustJSON(t, agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "session-1"})
+		for _, compressed := range []bool{false, true} {
+			format := "plain"
+			if compressed {
+				format = "zstd"
+			}
+			t.Run(format+" missing header", func(t *testing.T) {
+				t.Parallel()
+				path := writePhysicalTestLog(t, compressed, session)
+				if _, err := loadLogSessionMetadata(path, nil); err == nil || !strings.Contains(err.Error(), "invalid first log header") {
+					t.Fatalf("error = %v, want invalid first header", err)
+				}
+			})
+			t.Run(format+" mixed authority after metadata", func(t *testing.T) {
+				t.Parallel()
+				path := writePhysicalTestLog(t, compressed, meta, session, mismatch)
+				if _, err := loadLogSessionMetadata(path, nil); err == nil || !strings.Contains(err.Error(), "authority changed") {
+					t.Fatalf("error = %v, want authority changed", err)
+				}
+			})
+			t.Run(format+" leading empty lines", func(t *testing.T) {
+				t.Parallel()
+				path := writePhysicalTestLog(t, compressed, "", "  ", meta, session)
+				lt, err := loadLogSessionMetadata(path, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if lt.SessionID != "session-1" {
+					t.Fatalf("SessionID = %q, want session-1", lt.SessionID)
+				}
+			})
 		}
 	})
 	t.Run("LoadSessionMetadataScansLegacyInitMessage", func(t *testing.T) {
@@ -946,6 +1249,74 @@ func TestLoadedTask(t *testing.T) {
 		}
 		if len(streamed) != 2 {
 			t.Fatalf("streamed %d messages, want 2", len(streamed))
+		}
+	})
+
+	t.Run("StreamMessagesEnforcesAuthority", func(t *testing.T) {
+		t.Parallel()
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "stream task", Harness: harness.Claude,
+		})
+		mismatch := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "stream task", Harness: harness.Codex,
+		})
+		message := claudeAssistant(t, map[string]any{"type": "text", "text": "hello"})
+		for _, compressed := range []bool{false, true} {
+			format := "plain"
+			if compressed {
+				format = "zstd"
+			}
+			t.Run(format+" missing header", func(t *testing.T) {
+				t.Parallel()
+				path := writePhysicalTestLog(t, compressed, message)
+				lt := &LoadedTask{path: path, Harness: harness.Claude}
+				lt.SetParser(claudecode.New().NewWire().ParseMessage)
+				var gotErr error
+				for _, err := range lt.StreamMessages() {
+					gotErr = errors.Join(gotErr, err)
+				}
+				if gotErr == nil || !strings.Contains(gotErr.Error(), "invalid first log header") {
+					t.Fatalf("error = %v, want invalid first header", gotErr)
+				}
+			})
+			t.Run(format+" mixed authority", func(t *testing.T) {
+				t.Parallel()
+				path := writePhysicalTestLog(t, compressed, meta, message, mismatch)
+				lt := &LoadedTask{path: path, Harness: harness.Claude}
+				lt.SetParser(claudecode.New().NewWire().ParseMessage)
+				var gotErr error
+				var messages int
+				for msg, err := range lt.StreamMessages() {
+					gotErr = errors.Join(gotErr, err)
+					if msg != nil {
+						messages++
+					}
+				}
+				if messages == 0 {
+					t.Fatal("message before mismatched header was not streamed")
+				}
+				if gotErr == nil || !strings.Contains(gotErr.Error(), "authority changed") {
+					t.Fatalf("error = %v, want authority changed", gotErr)
+				}
+			})
+			t.Run(format+" leading empty lines", func(t *testing.T) {
+				t.Parallel()
+				path := writePhysicalTestLog(t, compressed, "", "  ", meta, message)
+				lt := &LoadedTask{path: path, Harness: harness.Claude}
+				lt.SetParser(claudecode.New().NewWire().ParseMessage)
+				var messages int
+				for msg, err := range lt.StreamMessages() {
+					if err != nil {
+						t.Fatal(err)
+					}
+					if msg != nil {
+						messages++
+					}
+				}
+				if messages == 0 {
+					t.Fatal("no messages streamed")
+				}
+			})
 		}
 	})
 
