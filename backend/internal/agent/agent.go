@@ -48,12 +48,15 @@ import (
 	"io/fs"
 	"iter"
 	"log/slog"
+	"math"
 	"os"
 	"os/exec"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/relay"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -285,6 +288,351 @@ func (s *Session) Done() <-chan struct{} {
 func (s *Session) Wait() error {
 	<-s.done
 	return s.err
+}
+
+// LogRecordParser decodes versioned physical task-log records around one
+// harness-native parser. A parser holds ordered log state and is not safe for
+// concurrent use.
+type LogRecordParser struct {
+	version       LogVersion
+	parseNative   func([]byte) ([]Message, error)
+	contextWindow int
+	pending       map[pendingActionIdentity]struct{}
+}
+
+// NewLogRecordParser constructs a parser for an already-validated physical log
+// version.
+func NewLogRecordParser(version LogVersion, parseNative func([]byte) ([]Message, error)) (*LogRecordParser, error) {
+	if err := version.Validate(); err != nil {
+		return nil, err
+	}
+	if parseNative == nil {
+		return nil, errors.New("native message parser is nil")
+	}
+	return &LogRecordParser{
+		version:     version,
+		parseNative: parseNative,
+		pending:     make(map[pendingActionIdentity]struct{}),
+	}, nil
+}
+
+// ParseRecord decodes one physical task-log record according to the parser's
+// exact version.
+func (p *LogRecordParser) ParseRecord(line []byte) ([]ParsedMessage, error) {
+	if p == nil {
+		return nil, errors.New("log record parser is nil")
+	}
+	if err := p.version.Validate(); err != nil {
+		return nil, err
+	}
+	if p.parseNative == nil {
+		return nil, errors.New("native message parser is nil")
+	}
+
+	if p.version == LogVersionV2 && !utf8.Valid(line) {
+		return nil, errors.New("corrupt v2 log record: invalid UTF-8")
+	}
+
+	var envelope logTypeEnvelope
+	if err := json.Unmarshal(line, &envelope); err != nil {
+		if p.version == LogVersionV1 {
+			msgs, parseErr := p.parseAndApplyNative(line)
+			return wrapParsedMessages(msgs, time.Time{}), parseErr
+		}
+		return nil, fmt.Errorf("corrupt v2 log record: decode envelope: %w", err)
+	}
+
+	if p.version == LogVersionV2 && envelope.Type == "agent" {
+		return p.parseAgentRecord(line)
+	}
+	kind, ok := p.controlKind(envelope.Type)
+	if ok {
+		msgs, err := p.parseControl(kind, envelope.Type, line)
+		if err != nil {
+			return nil, err
+		}
+		msgs, err = p.applyMessageState(msgs)
+		return wrapParsedMessages(msgs, time.Time{}), err
+	}
+	if p.version == LogVersionV1 {
+		msgs, err := p.parseAndApplyNative(line)
+		return wrapParsedMessages(msgs, time.Time{}), err
+	}
+	if envelope.Type == "" {
+		return nil, errors.New("corrupt v2 log record: missing top-level type")
+	}
+	return nil, fmt.Errorf("corrupt v2 log record: unknown top-level type %q", envelope.Type)
+}
+
+type logControlKind int
+
+const (
+	logControlMeta logControlKind = iota
+	logControlDiffStat
+	logControlExit
+	logControlStrippedEnv
+	logControlSession
+	logControlLegacyInit
+	logControlModelInfo
+	logControlPR
+	logControlResult
+	logControlPendingUserAction
+	logControlProvisioningLog
+	logControlContextCleared
+)
+
+var v1LogControlKinds = map[string]logControlKind{
+	"caic_meta":                  logControlMeta,
+	"caic_diff_stat":             logControlDiffStat,
+	"caic_exit":                  logControlExit,
+	"caic_stripped_env":          logControlStrippedEnv,
+	"caic_session":               logControlSession,
+	"caic_init":                  logControlLegacyInit,
+	"caic_model_info":            logControlModelInfo,
+	"caic_pr":                    logControlPR,
+	"caic_result":                logControlResult,
+	PendingUserActionMessageType: logControlPendingUserAction,
+	"caic_log":                   logControlProvisioningLog,
+}
+
+var v2LogControlKinds = map[string]logControlKind{
+	"caic_meta":           logControlMeta,
+	"diff_stat":           logControlDiffStat,
+	"exit":                logControlExit,
+	"stripped_env":        logControlStrippedEnv,
+	"session":             logControlSession,
+	"model_info":          logControlModelInfo,
+	"pr":                  logControlPR,
+	"result":              logControlResult,
+	"pending_user_action": logControlPendingUserAction,
+	"log":                 logControlProvisioningLog,
+	"context_cleared":     logControlContextCleared,
+}
+
+type logTypeEnvelope struct {
+	Type string `json:"type"`
+}
+
+type agentLogRecord struct {
+	Type string          `json:"type"`
+	Ts   *float64        `json:"ts"`
+	Msg  json.RawMessage `json:"msg"`
+}
+
+type modelInfoLogRecord struct {
+	ContextWindow int `json:"context_window"`
+}
+
+type legacyInitLogRecord struct {
+	SessionID string `json:"session_id"`
+	Model     string `json:"model"`
+	Version   string `json:"version"`
+}
+
+type pendingActionIdentity struct {
+	kind      PendingUserActionKind
+	requestID string
+	toolUseID string
+}
+
+func (p *LogRecordParser) controlKind(token string) (logControlKind, bool) {
+	if p.version == LogVersionV1 {
+		kind, ok := v1LogControlKinds[token]
+		return kind, ok
+	}
+	kind, ok := v2LogControlKinds[token]
+	return kind, ok
+}
+
+func (p *LogRecordParser) parseAgentRecord(line []byte) ([]ParsedMessage, error) {
+	var record agentLogRecord
+	if err := json.Unmarshal(line, &record); err != nil {
+		return nil, fmt.Errorf("corrupt v2 agent record: %w", err)
+	}
+	if record.Ts == nil {
+		return nil, errors.New("corrupt v2 agent record: missing ts")
+	}
+	timestamp, err := timestampFromEpochSeconds(*record.Ts)
+	if err != nil {
+		return nil, fmt.Errorf("corrupt v2 agent record: invalid ts: %w", err)
+	}
+	if len(record.Msg) == 0 {
+		return nil, errors.New("corrupt v2 agent record: missing msg")
+	}
+	if bytes.Equal(bytes.TrimSpace(record.Msg), []byte("null")) {
+		return nil, errors.New("corrupt v2 agent record: null msg")
+	}
+	if !json.Valid(record.Msg) {
+		return nil, errors.New("corrupt v2 agent record: invalid msg")
+	}
+	msgs, err := p.parseAndApplyNative(record.Msg)
+	return wrapParsedMessages(msgs, timestamp), err
+}
+
+func (p *LogRecordParser) parseControl(kind logControlKind, token string, line []byte) ([]Message, error) {
+	switch kind {
+	case logControlMeta:
+		var m MetaMessage
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, fmt.Errorf("decode %s: %w", token, err)
+		}
+		if err := m.Validate(); err != nil {
+			return nil, fmt.Errorf("decode %s: %w", token, err)
+		}
+		if LogVersion(m.Version) != p.version {
+			return nil, fmt.Errorf("decode %s: header version %d does not match parser version %d", token, m.Version, p.version)
+		}
+		return []Message{&m}, nil
+	case logControlDiffStat:
+		var m DiffStatMessage
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, fmt.Errorf("decode %s: %w", token, err)
+		}
+		m.MessageType = "caic_diff_stat"
+		return []Message{&m}, nil
+	case logControlExit:
+		var m ExitMessage
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, fmt.Errorf("decode %s: %w", token, err)
+		}
+		m.MessageType = "caic_exit"
+		return []Message{&m}, nil
+	case logControlStrippedEnv:
+		var m StrippedEnvMessage
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, fmt.Errorf("decode %s: %w", token, err)
+		}
+		m.MessageType = "caic_stripped_env"
+		return []Message{&m}, nil
+	case logControlSession:
+		var m MetaSessionMessage
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, fmt.Errorf("decode %s: %w", token, err)
+		}
+		return []Message{&InitMessage{SessionID: m.SessionID, Model: m.Model, Version: m.AgentVersion}}, nil
+	case logControlLegacyInit:
+		var m legacyInitLogRecord
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, fmt.Errorf("decode %s: %w", token, err)
+		}
+		return []Message{&InitMessage{SessionID: m.SessionID, Model: m.Model, Version: m.Version}}, nil
+	case logControlModelInfo:
+		var m modelInfoLogRecord
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, fmt.Errorf("decode %s: %w", token, err)
+		}
+		if m.ContextWindow > 0 {
+			p.contextWindow = m.ContextWindow
+		}
+		return nil, nil
+	case logControlPR:
+		var m MetaPRMessage
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, fmt.Errorf("decode %s: %w", token, err)
+		}
+		m.MessageType = "caic_pr"
+		return []Message{&m}, nil
+	case logControlResult:
+		var m MetaResultMessage
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, fmt.Errorf("decode %s: %w", token, err)
+		}
+		m.MessageType = "caic_result"
+		return []Message{&m}, nil
+	case logControlPendingUserAction:
+		var m PendingUserActionMessage
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, fmt.Errorf("decode %s: %w", token, err)
+		}
+		m.MessageType = PendingUserActionMessageType
+		return []Message{&m}, nil
+	case logControlProvisioningLog:
+		var m LogMessage
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, fmt.Errorf("decode %s: %w", token, err)
+		}
+		m.MessageType = "caic_log"
+		return []Message{&m}, nil
+	case logControlContextCleared:
+		return []Message{&SystemMessage{MessageType: "system", Subtype: "context_cleared"}}, nil
+	default:
+		return nil, fmt.Errorf("decode %s: unknown control kind %d", token, kind)
+	}
+}
+
+func (p *LogRecordParser) parseAndApplyNative(line []byte) ([]Message, error) {
+	msgs, err := p.parseNative(line)
+	if err != nil {
+		return nil, err
+	}
+	return p.applyMessageState(msgs)
+}
+
+func wrapParsedMessages(msgs []Message, producerTime time.Time) []ParsedMessage {
+	if len(msgs) == 0 {
+		return nil
+	}
+	out := make([]ParsedMessage, len(msgs))
+	for i, msg := range msgs {
+		out[i] = ParsedMessage{Message: msg, ProducerTime: producerTime}
+	}
+	return out
+}
+
+func (p *LogRecordParser) applyMessageState(msgs []Message) ([]Message, error) {
+	for i, msg := range msgs {
+		if messageIsNil(msg) {
+			return nil, fmt.Errorf("native message %d is nil", i)
+		}
+	}
+	if len(msgs) == 0 {
+		return nil, nil
+	}
+	out := make([]Message, 0, len(msgs))
+	for _, msg := range msgs {
+		switch m := msg.(type) {
+		case *UsageMessage:
+			if m.ContextWindow == 0 && p.contextWindow > 0 {
+				m.ContextWindow = p.contextWindow
+			}
+		case *PendingUserActionMessage:
+			identity := pendingActionIdentity{
+				kind:      m.Action.Kind,
+				requestID: m.Action.RequestID,
+				toolUseID: m.Action.ToolUseID,
+			}
+			if _, exists := p.pending[identity]; exists {
+				continue
+			}
+			p.pending[identity] = struct{}{}
+		}
+		out = append(out, msg)
+	}
+	return out, nil
+}
+
+func messageIsNil(msg Message) bool {
+	if msg == nil {
+		return true
+	}
+	value := reflect.ValueOf(msg)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
+func timestampFromEpochSeconds(ts float64) (time.Time, error) {
+	if ts <= 0 || math.IsNaN(ts) || math.IsInf(ts, 0) {
+		return time.Time{}, fmt.Errorf("epoch seconds must be finite and positive, got %v", ts)
+	}
+	whole, fractional := math.Modf(ts)
+	if whole >= float64(uint64(1)<<63) {
+		return time.Time{}, fmt.Errorf("epoch seconds out of range: %v", ts)
+	}
+	return time.Unix(int64(whole), int64(fractional*float64(time.Second))).UTC(), nil
 }
 
 // DefaultReadMessages is the standard message read loop. It reads NDJSON lines

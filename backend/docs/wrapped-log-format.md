@@ -2,7 +2,9 @@
 
 ## Current status
 
-The physical authority foundation is implemented and accepted:
+The physical authority foundation is shipped at the shared comparison role,
+`origin/main`. The accepted local integration state adds the shared versioned
+parser, but that work is unshipped:
 
 - `LogVersion` is a closed type supporting exactly v1 and v2; unknown versions
   fail closed.
@@ -16,8 +18,23 @@ The physical authority foundation is implemented and accepted:
 - Missing, corrupt, mismatched, unknown-version, and valid-v2 logs fail closed
   before raw append. Missing local logs no longer create a replacement header
   during live reconnect.
+- `LogRecordParser` provides exact v1/v2 dispatch, the complete shared control
+  converter, strict UTF-8 and v2-envelope validation, Pi model-context snapshot
+  state, nil-safe ordered state application, and deterministic pending-action
+  deduplication.
+- `ParsedMessage` has replaced `TimestampMessage` with explicit outer parsed-
+  message metadata. That dependency-safe correction passed independent review
+  and is accepted, completed, and unshipped; `LogRecordParser` still has no
+  production consumer.
 
-The remaining producer and parser behavior is still legacy v1:
+For compatibility, breaking-change, and churn review, resolve `origin/main`
+immediately before dispatch and freeze its exact commit as `SHIPPED_BASE` in the
+ephemeral orchestration manifest. Resolve the accepted local parser state as
+`LOCAL_BASE` in that same manifest. The local parser work is an integration
+prerequisite, not a published contract; implementation that exists only after
+`SHIPPED_BASE` may be freely reshaped or deleted within an approved phase scope.
+
+The remaining production behavior is still legacy v1:
 
 - New physical task-log files start with `{"type":"caic_meta","version":1,...}`.
 - Relay stdout is persisted as bare harness-native JSONL. Relay controls use
@@ -25,11 +42,22 @@ The remaining producer and parser behavior is still legacy v1:
 - Backend controls, metadata, provisioning output, prompt/compact input, Pi
   startup traffic, and other direct writes still use the v1 vocabulary. Codex
   and OpenCode handshake traffic is not persisted in task logs.
-- Harness parsers still recognize selected `caic_*` records; there is no shared
-  per-version record dispatcher or v2 relay yet.
-- `ToolTimingTracker` exists, but persisted relay timestamps do not:
-  `TimestampMessage` and `caic_ts` are not implemented.
+- Production disk/live/export call sites do not yet use `LogRecordParser`, and
+  harness parsers still recognize selected `caic_*` records. There is no v2
+  relay yet.
+- `ToolTimingTracker` does not yet consume parsed producer-time metadata, and no
+  production relay emits persisted per-message timestamps.
 - `eventreplay.CacheVersion` is 4.
+
+Authority validation currently makes multiple full passes over very large plain
+logs during startup inventory, session restoration, message restoration, and
+reopen. Users have confirmed this adoption latency is already material. The
+active `adoption-scan-performance` phase owns a realistic benchmark and a
+correctness-preserving removal of redundant passes. Later reader and cutover
+phases may not regress its accepted deterministic complete-pass count or logical
+read amplification. Wall time, throughput, allocations, physical-read deltas,
+and benchstat comparisons are advisory same-host evidence with no fixed
+threshold.
 
 New writers must remain on v1 until `v2-producer-cutover` passes its gate. The
 current untyped raw append boundary deliberately rejects valid-v2 files; only the
@@ -143,7 +171,22 @@ persisted.
 
 ### Reader contract
 
-There are two structural readers selected once from file authority:
+There are two structural readers selected once from file authority. The shared
+parser returns an outer stream value:
+
+```go
+type ParsedMessage struct {
+	Message      Message
+	ProducerTime time.Time
+}
+```
+
+`ParsedMessage` does not implement `Message` and exposes no `Type()` method.
+Consumers must explicitly unwrap `.Message`, preserving the concrete message for
+Go type switches and creating compiler pressure at every parsed-stream boundary.
+There is no `HasTime` field: absence is exactly `ProducerTime.IsZero()`.
+Harness-native parsers keep their existing `[]Message` result; only
+`LogRecordParser` adds the outer metadata and returns parsed values.
 
 ```text
 read authority from first caic_meta
@@ -155,11 +198,17 @@ switch version exactly:
 parseV1(record):
   recognized caic_* control -> shared control conversion
   otherwise                 -> native harness parser
+  wrap every semantic result with zero ProducerTime
 
 parseV2(record):
-  agent                      -> validate ts/msg, parse native msg
-  recognized v2 control      -> shared control conversion
-  otherwise                  -> corruption error
+  agent:
+    validate ts/msg
+    messages = native harness parser(msg)
+    wrap every semantic result with ProducerTime = envelope ts
+  recognized v2 control:
+    messages = shared control conversion
+    wrap every semantic result with zero ProducerTime
+  otherwise -> corruption error
 ```
 
 The shared log parser owns control conversion and parsing state. In particular,
@@ -167,10 +216,13 @@ it owns the v1 `caic_model_info` / v2 `model_info` context-window snapshot and
 applies that snapshot to parsed Pi usage when the native event lacks the value.
 The Pi native parser does not route caic records.
 
-A valid `agent.ts` produces timestamp semantics for timing-relevant native
-messages. Timestamp semantics are transparent to replay compaction and
-last-message/control-boundary searches: they advance conversion time without
-becoming a user-visible event.
+Every semantic message produced from one valid v2 `agent` envelope carries that
+same immutable producer timestamp, including messages that are irrelevant to
+tool timing. V1 records and controls without envelope producer time carry zero
+time. Timing relevance is exclusively downstream `ToolTimingTracker` policy,
+not parser framing policy. Producer timestamps are metadata only: they never
+become semantic or user-visible events, and replay compaction and last-message/
+control-boundary searches operate on the explicitly unwrapped message.
 
 ### Relay and direct-write contract
 
@@ -262,47 +314,73 @@ Forbidden additions and fallbacks:
 
 ## Preflight manifest
 
-The accepted integration target currently consists of pre-integration HEAD
-`9ef3f0340e58fc5c082a80db0ac0fa61a24d2a33`, the reviewed Phase
-`log-authority-foundation` worktree delta, and this plan-maintenance edit. The
-Phase implementation changed exactly 11 files (6 production and 5 tests), with
-no staged or untracked paths before this edit; its fresh acceptance review
-returned `PASS`.
+The living plan records symbolic prerequisites; exact Git identities are
+volatile execution evidence. The base roles and complete manifest must be
+freshly captured and recorded immediately before each phase dispatch,
+integration, and review:
 
-Because the user owns staging and history, **no next phase may dispatch from
-this dirty target**. The user must first commit the accepted foundation and plan
-maintenance delta, or otherwise establish an equivalent clean recorded base.
-Immediately before the next dispatch and every later integration, recapture the
-actual HEAD, upstream SHA, dirty/staged/untracked paths, and sensitive-file
-statistics. A changed manifest invalidates the phase contract.
+- **Shipped/shared comparison role:** resolve `origin/main` to an exact commit and
+  record it as `SHIPPED_BASE` in the ephemeral orchestration manifest.
+  Compatibility, breaking-change, and combined parser churn use that frozen
+  value, never the later value of a moving `origin/main`.
+- **Local dispatch/integration role:** confirm that the accepted unshipped shared
+  parser is present in exactly
+  `backend/internal/agent/{agent.go,agent_test.go,types.go}`, then record actual
+  HEAD as `LOCAL_BASE` in the fresh ephemeral manifest. The parser has no
+  production consumers and does not establish a published API contract.
+- **Completed phase role:** after implementation and again after integration,
+  freshly capture and record the exact resulting HEAD as `PHASE_FINAL` in
+  ephemeral status and the phase handoff. Immediately before review, freshly
+  capture and record all three exact values in the reviewer prompt.
 
-- **Pre-integration HEAD:** `9ef3f0340e58fc5c082a80db0ac0fa61a24d2a33`
-- **Target upstream/base at acceptance:**
-  `aa95b310b9f96d87398ab7b7e3852bd867012887` (`host/caic-0`)
-- **Branch:** `caic-0`
-- **Accepted worktree delta:** the completed foundation's 11 files plus this
-  documentation edit; no staged or untracked paths
+Focused and full agent tests, the changed-package race test, vet, mandatory lint,
+method placement, diff, and status checks passed for the accepted local parser.
+The full `agent/...` race run still has the pre-existing Pi one-second timeout
+reproduced at its clean comparison base; it is not evidence against the local
+parser and remains outside its phase. `ParsedMessage` replaced `TimestampMessage`
+and passed independent review. The dependency-safe `parsed-message-metadata`
+phase is accepted and completed out of order ahead of Phase 1; it remains listed
+until its predecessor is removed and is not eligible for redispatch.
+
+No next phase may dispatch unless the worktree condition matches its symbolic
+Base state. Immediately before dispatch, integration, and review, freshly
+capture and record actual HEAD, exact resolved base/upstream commits, dirty/
+staged/untracked paths, and sensitive-file statistics in a dispatch manifest,
+run artifact/status, phase handoff, or reviewer prompt as appropriate. Reusing
+or merely verifying an earlier manifest is insufficient. Any rebase, other
+history change, or worktree/index status change invalidates the ephemeral
+manifest and requires fresh capture and recording before continuing; it does not
+require a plan edit while the symbolic prerequisites still hold.
+
+- **Expected worktree condition:** clean or limited to the exact user-accepted
+  local parser delta and the declared writer-owned phase scope; no unexplained
+  staged, untracked, or generated paths
 - **VCS authority:** the user owns staging and commits. Subagents must not stage,
-  commit, reset, rebase, merge, or push. Restore operations require coordinator
-  approval and may touch only executor-created output.
+  commit, reset, rebase, merge, or push. No history rewrite, amend, or squash may
+  occur without explicit user authorization. Restore operations require
+  coordinator approval and may touch only executor-created output.
 - **Canonical command cwd:** `/home/user/src/caic`, unless a phase explicitly
   gives another cwd
 - **Generated artifacts:** none expected for this docs rewrite. Implementation
   phases must declare any generator and exact output before running it.
 - **Shipped contracts:** no migration, schema, or public API DTO change is
   approved by this plan.
-- **Sensitive baseline:** `backend/docs/wrapped-log-format.md` was 544 lines,
-  4,396 words, 30,533 bytes, SHA-256
-  `f73ac26060e179fa3de797d25f4889085d0c76996a9ecb7000450e69ebc31b7e`.
+- **Sensitive baseline:** freshly capture and record this document and every
+  phase-sensitive file immediately before dispatch, integration, and review.
 
 Global phase rules:
 
 1. One phase-executor subagent owns each phase. One writer may operate in a
    worktree at a time unless isolated worktrees and the recorded concurrency
    contract are both in use.
-2. Before edits, record actual HEAD/upstream, dirty/staged/untracked paths,
+2. Immediately before dispatch, integration, and review, freshly capture and
+   record exact actual HEAD, base/upstream commits, dirty/staged/untracked paths,
    per-file baseline statistics for sensitive files, and the pre-integration
-   target SHA.
+   target commit in ephemeral orchestration state. Freeze `SHIPPED_BASE`,
+   `LOCAL_BASE`, and `PHASE_FINAL` for comparisons and review; never substitute a
+   live moving ref or reuse an earlier manifest. Any rebase, other history
+   change, or worktree/index status change invalidates the ephemeral manifest and
+   requires fresh capture and recording before continuing.
 3. Focused validation runs first. Every implementation phase then runs
    `make lint-fix`, `git diff --check`, and staged/filesystem-delta checks from
    the canonical cwd. Any unexpected generated or out-of-scope change fails the
@@ -319,17 +397,24 @@ Global phase rules:
    `git apply` to transfer accepted output. It may not stage, commit, merge,
    reset, rebase, or push; the user owns staging and history. Integrated
    validation and a fresh read-only `PASS` review are required before removal.
-5. The plan-maintenance subagent applies learnings, moves unresolved work into a
+5. Compatibility and breaking-change review considers only contracts present at
+   frozen `SHIPPED_BASE`. For work built on accepted unshipped local changes,
+   review both `SHIPPED_BASE...PHASE_FINAL` for the final combined change and
+   `LOCAL_BASE...PHASE_FINAL` for the focused phase delta; local-only
+   implementation may be reshaped or deleted inside the phase's exact write
+   scope without churn objections or compatibility adapters.
+6. The plan-maintenance subagent applies learnings, moves unresolved work into a
    named phase, deletes the accepted leading phase, and renumbers the remainder.
    Stable IDs never change.
-6. `make check` is required at cutover and final gates. Runtime validation uses
+7. `make check` is required at cutover and final gates. Runtime validation uses
    the real md/container path, never the fake server or `smoketest` backend.
 
 ## Dependency graph
 
 ```text
-shared-versioned-parser -> persistent-read-paths
-shared-versioned-parser -> live-relay-read-path
+adoption-scan-performance -> persistent-read-paths
+parsed-message-metadata -> persistent-read-paths
+parsed-message-metadata -> live-relay-read-path
 relay-v2 -> live-relay-read-path
 
 persistent-read-paths -> pure-harness-parsers
@@ -347,81 +432,338 @@ agent-direct-write-migration -> v2-producer-cutover
 v2-producer-cutover -> runtime-adoption-smoke
 ```
 
-After a clean base is recorded, `shared-versioned-parser` and `relay-v2` may run
-in isolated worktrees. `relay-v2` may continue with persistent reader work.
-After `persistent-read-paths` is integrated, `versioned-log-sink` may run with a
-still-pending `relay-v2` only in an isolated worktree; it may not run with parser
-or persistent-reader work because its reopen constructor consumes the accepted
-authority scan result. `pure-harness-parsers` and `timestamp-cache-semantics`
-may run together after both read paths are integrated. Integration remains one
-phase at a time.
+After a clean base is recorded, `adoption-scan-performance` remains the next
+performance priority. `parsed-message-metadata` completed dependency-safely
+before it, is not eligible for redispatch, and remains listed only until Phase 1
+is integrated and removed. Its accepted result remains a prerequisite for both
+reader phases. `persistent-read-paths` starts only after the performance phase is
+integrated; `live-relay-read-path` starts only after `relay-v2` is integrated. A
+still-pending `relay-v2` may run with `persistent-read-paths` in an isolated
+worktree.
+`versioned-log-sink` may not run with persistent-reader work because its reopen
+constructor consumes the accepted authority scan result. `pure-harness-parsers`
+and `timestamp-cache-semantics` may run together after both read paths are
+integrated. Integration remains one phase at a time.
 
 ## Active phased rollout
 
-### Phase 1: Add the shared versioned parser
+### Phase 1: Bound adoption scan amplification
 
-- **Stable ID:** `shared-versioned-parser`
+- **Stable ID:** `adoption-scan-performance`
 - **Responsible:** one phase-executor subagent
 - **Depends on:** none
-- **May run with:** `relay-v2` in isolated worktrees after the accepted foundation
-  and plan delta is committed as a clean recorded base
-- **Base state:** clean recorded post-foundation base captured after the user
-  commits the accepted foundation and plan-maintenance delta; recapture actual
-  HEAD/upstream/status immediately before dispatch
+- **May run with:** none; `parsed-message-metadata` is already accepted/completed
+  and is not eligible for redispatch
+- **Base state:** no stable phase dependency; the physical authority foundation
+  is assumed shipped at the resolved shared-base role, the accepted local parser
+  remains unshipped, and the worktree matches the declared clean/accepted-delta
+  condition. Immediately before dispatch, resolve actual HEAD as `LOCAL_BASE`,
+  resolve and freeze `origin/main` as `SHIPPED_BASE`, record any configured
+  upstream and status, and capture plain/zstd loader file statistics, the
+  app/taskmgr live-adoption call graph, and current full-pass behavior in the
+  ephemeral manifest. The coordinator also records an absolute phase artifact
+  directory outside the repository; a relative or repository-contained path
+  blocks dispatch.
 - **VCS authority:** an active-worktree executor writes directly; approved
   isolated output is transferred only by a designated integration subagent using
   `git apply`; the user owns staging and history; no subagent may stage, commit,
-  merge, reset, rebase, or push
-- **Write scope:** shared record parser/converter and deterministic pending-action
-  identity tracking in `backend/internal/agent`, plus focused tests; no
-  read-call-site migration
-- **Data authority:** consumes validated `LogVersion`; owns control-token maps,
-  the model-context snapshot, and per-parse pending-action identity tracking;
-  native parser state remains harness-owned
-- **Purpose:** provide explicit `parseV1`/`parseV2` behavior without changing
-  production call sites
-- **Deliverables:** exact version dispatch; v1/v2 token maps; shared converters
-  for every table entry; v2 `agent` validation/unwrapping; model-info state for Pi
-  usage; unsupported and unknown-top-level errors; timestamp representation;
-  deterministic pending-action deduplication keyed by
-  `(kind, request ID, tool-use ID)`, so a compatibility top-level snapshot and
-  its persisted native Claude `control_request` produce one semantic action
-- **Generated artifacts:** none
-- **Change budget:** at most 6 production files and 4 test files under
-  `backend/internal/agent`; no harness parser edits
-- **Boundary:** production readers/writers remain v1; do not remove caic cases
-  from harness parsers or bump caches
-- **Decision checkpoints:** stop if a control cannot be represented without a new
-  public domain/API field, or if Pi usage requires duplicated persisted state
-- **Validation intent:** both vocabularies yield equivalent domain messages;
-  v2 rejects bare native and `caic_*` top-level records except `caic_meta`; v1
-  preserves fallback; model-info affects only subsequent Pi usage missing native
-  context; unknown versions fail before line dispatch; pending-action order is
-  deterministic and native/top-level duplicates collapse to exactly one semantic
-  action for both v1 and synthetic v2 sequences
-- **Validation commands:** cwd `/home/user/src/caic`: `go test
-  ./backend/internal/agent/...`; `make lint-fix`; `git diff --check`;
-  `git status --short`; `git diff --cached --name-only`
-- **Review:** independent parser/security review against integrated target and
-  pre-integration SHA; require `PASS` and exact corruption behavior
-- **Exit gate:** synthetic pure-v1 and pure-v2 sequences parse equivalently,
-  forbidden mixed records fail, native plus compatibility pending-action records
-  yield exactly one semantic identity, and no production reader or writer changes
-- **Handoff:** include token coverage matrix, model-info evidence, exact rejected
-  fixtures, pending-action identity/order cases, scoped diff, validation output,
-  and risks
+  merge, reset, rebase, or push. Before generated-index replay, the coordinator
+  must obtain a user-owned intent-to-add checkpoint for exactly
+  `backend/internal/task/load_benchmark_test.go`,
+  `backend/internal/task/load_benchmark_cache_linux_test.go`, and
+  `backend/internal/task/load_benchmark_cache_other_test.go`; the executor
+  verifies no staged content with `git diff --cached --exit-code`.
+- **Write scope:** production changes are limited to task-log inventory, session,
+  message, tail, reopen, and local adoption-preparation paths under
+  `backend/internal/task` plus the narrow `backend/internal/task/taskmgr` caller
+  boundary where passes can be fused. The exact approved test files are the three
+  new benchmark/helper files above plus existing
+  `backend/internal/task/load_test.go`,
+  `backend/internal/task/log_store_test.go`, and
+  `backend/internal/task/taskmgr/manager_test.go`. Generated output is limited to
+  `backend/AGENTS.md`.
+- **Data authority:** first-header version/harness and same-inode validation stay
+  authoritative; reused scan/snapshot state is derived, identity-bound, and valid
+  only for the exact inode/size/mtime it observed; `.taskmeta.json` remains a
+  rebuildable cache rather than an alternate authority.
+- **Purpose:** establish a realistic adoption baseline and remove redundant
+  full-file passes that already cause material startup latency.
+- **Deliverables:** `BenchmarkTaskAdoption` has independent warm and Linux-cold
+  subbenchmarks for each operation and for the exact combined live-adoption
+  sequence used by app/taskmgr: `LoadLogsForTaskIDs` for the target task IDs,
+  matching harness parser setup, conditional `LoadSessionMetadata` when the
+  session/version fields are absent, full `LoadMessages`, then a validated
+  `LogStore.Reopen` open/close. `LoadLogs` purged-task inventory and
+  `LoadMessagesTail` on-demand loading remain separate subbenchmarks and never
+  substitute for the combined sequence. One bounded shared fixture per benchmark
+  process contains a realistic NDJSON mix of small deltas, normal events, large
+  tool outputs, controls, and repeated matching segment headers. It is generated
+  and synced in `b.TempDir` before timing; each operation resets its own state.
+  Warm mode primes that exact operation, then resets only its in-memory operation
+  state with the timer stopped before every measured iteration. Cold mode closes
+  operation handles, opens a dedicated fixture descriptor, syncs it, invokes
+  per-fixture `unix.Fadvise(..., unix.FADV_DONTNEED)`, and closes it with the timer
+  stopped before every measured iteration. Subbenchmarks have no execution-order
+  dependency.
+  A kernel refusal marks cold results unsupported/advisory rather than silently
+  making them warm; non-Linux reports cold mode unsupported. Neither mode uses
+  root nor global `drop_caches`.
+- **Measurement boundary:** optimization may introduce only package-private,
+  natural production boundaries for opened physical readers or identity-bound
+  snapshot reuse. Where production benefits, those boundaries accept an
+  `io.Reader` or `io.ReadSeeker`; benchmark and correctness tests wrap the actual
+  readers with counting readers. No global hook, public instrumentation API, or
+  test-only seam is allowed. For each physical file, deterministic logical bytes
+  are the sum returned by its counting readers; read amplification is that sum
+  divided by the fixture's on-disk byte length, and a complete pass is a reader
+  that reaches EOF after consuming that length. Only the deterministic read-
+  amplification ratios and complete-pass counts are the hard performance gate;
+  logical-byte totals are evidence used to compute the ratios. The combined Linux
+  path also records `/proc/self/io` `rchar` and `read_bytes` deltas as advisory
+  corroboration. Wall time, throughput, allocations, physical-read deltas, and
+  benchstat comparisons are advisory same-host evidence with no fixed threshold.
+- **Benchmark checkpoint:** implementation starts with only the three new
+  benchmark/helper files and generated `backend/AGENTS.md`. After the user-owned
+  intent-to-add checkpoint, the executor runs `make lint-fix`, confirms that the
+  phase has zero production-file diff, and records a SHA-256 manifest over all
+  three byte-identical benchmark/helper sources (the fixture generator lives in
+  `load_benchmark_test.go`) in the external artifact directory. Only then may it
+  run the before baseline. Production optimization begins after that baseline.
+  The after run is invalid unless the same three-source manifest verifies
+  byte-for-byte unchanged.
+- **Generated artifacts:** all three new Go files share the
+  `adoption_benchmark` build tag and remain excluded from ordinary test builds.
+  Their exact leading layout is a first-line purpose comment for the generated
+  file index, then the build constraint, then a blank line before `package`: the
+  main benchmark uses `//go:build adoption_benchmark`, the Linux helper uses
+  `//go:build adoption_benchmark && linux`, and the fallback helper uses
+  `//go:build adoption_benchmark && !linux` and reports cold mode unsupported.
+  Despite those constraints, all three files remain authoritative index inputs.
+  After intent-to-add, `make lint-fix` from `/home/user/src/caic` (canonical
+  generator `scripts/update_agents_file_index.py`) may add exactly their three
+  first-line purpose-comment entries to `backend/AGENTS.md`. The Linux helper
+  uses the existing `golang.org/x/sys/unix` dependency. `go.mod` and `go.sum` are additionally
+  approved only if `go mod tidy` changes direct-dependency classification or
+  checksums because of that import; the executor must declare and review their
+  exact diff before continuing. The `b.TempDir` lifecycle removes the fixture.
+  No fixture, benchmark result, profile, cache, or tool binary lives in the
+  repository.
+- **Change budget:** at most 5 production files within the write scope; exactly
+  the six named test files in the write scope; generated `backend/AGENTS.md`; and
+  conditional `go.mod`/`go.sum` changes only under the rule above. No unnamed test
+  budget, broad manager/runtime refactor, parser change, or wire change.
+- **Boundary:** preserve same-inode authority, mixed/later-header rejection,
+  bounded streaming behavior, taskmeta derivation, fail-closed missing/changed-
+  file semantics, and byte-identical v1 output; do not weaken validation, add a
+  second authority, change log format, route through `LogRecordParser`, or
+  measure real containers, networks, or LLMs.
+- **Resource and evidence protocol:** `CAIC_ADOPTION_BENCH_BYTES` has a hard
+  4 GiB maximum and the canonical gate is exactly 1 GiB. Before a canonical run,
+  require at least 3 GiB free on the fixture filesystem and at least 6 GiB
+  available RAM for full-message restoration; otherwise block and escalate
+  rather than shrinking the gate. Reuse the one fixture and never create
+  concurrent copies. Baseline and current run on the same host with the same Go
+  runtime, power, and load controls and the verified benchmark-source hash. The
+  coordinator-provided external directory holds hashed canonical before/after
+  evidence, the source manifest, resource/host metadata, `/proc/self/io` samples,
+  and comparison output through all dependent reviews. Duplicate scratch output
+  is removed after each review; after the phase review, raw transcripts are
+  reduced to their SHA-256 manifest and normalized evidence. All retained
+  external evidence is removed at rollout completion.
+- **Reproducible comparison:** preflight must prove network access or a warmed
+  module cache for `golang.org/x/perf`, require an enabled Go checksum database,
+  and successfully obtain checksum-bearing module metadata before measurement.
+  The only comparison command is `go run
+  golang.org/x/perf/cmd/benchstat@v0.0.0-20260709024250-82a0b07e230d`; `@latest`
+  is forbidden. Benchstat/timing conclusions remain advisory.
+- **Decision checkpoints:** stop before implementation if pass reuse would outlive
+  its inode/size/mtime identity; stop and split/escalate for resource-preflight
+  failure, a changed benchmark hash, unsupported required instrumentation, or an
+  optimization that needs a second authority. If safe material deterministic
+  reduction cannot be achieved inside the task loader/adoption boundary, stop
+  for a split and user decision; benchmark-only work cannot pass.
+- **Validation intent:** hard evidence reports deterministic logical read
+  amplification and complete physical-reader pass counts for many-small-line and
+  large-tool-output fixtures; logical-byte totals are retained as the ratio
+  inputs. Every corrupt, mixed, replaced, and truncated case still fails closed;
+  plain and compressed memory stays bounded. The combined exact live-adoption
+  sequence must materially reduce complete passes/logical read amplification;
+  material means eliminating at least one complete fixture-length pass while all
+  authority tests remain correct. Advisory measurements have no fixed threshold.
+- **Validation commands:** cwd `/home/user/src/caic`: preflight the recorded
+  external artifact directory, 3 GiB disk, 6 GiB available RAM, Go checksum
+  database, and pinned module with `go mod download -json
+  golang.org/x/perf@v0.0.0-20260709024250-82a0b07e230d`, requiring non-empty
+  `Sum` and `GoModSum`. Run `make lint-fix`, verify only the three benchmark/helper
+  sources and their three generated index entries differ, verify `git diff
+  --cached --exit-code`, and write/verify their SHA-256 manifest. With
+  `CAIC_ADOPTION_BENCH_BYTES=$((1024*1024*1024))`, run `go test
+  -tags adoption_benchmark ./backend/internal/task -run '^$' -bench
+  '^BenchmarkTaskAdoption' -benchmem -benchtime=1x -count=3` to hashed before
+  output; only then implement and run the byte-identical command to hashed after
+  output. Compare with `go run
+  golang.org/x/perf/cmd/benchstat@v0.0.0-20260709024250-82a0b07e230d BEFORE AFTER`.
+  Every benchmark invocation, including before/after and carry-forward runs, must
+  use `-tags adoption_benchmark`. Compile without executing test binaries for
+  Linux and representative non-Linux with
+  `CGO_ENABLED=0 GOOS=linux GOARCH=$(go env GOARCH) go test -tags
+  adoption_benchmark -c ./backend/internal/task -o
+  "$ARTIFACT_DIR/task-linux.test"` and
+  `CGO_ENABLED=0 GOOS=darwin GOARCH=$(go env GOARCH) go test -tags
+  adoption_benchmark -c ./backend/internal/task -o
+  "$ARTIFACT_DIR/task-darwin.test"`, then remove both binaries. Run focused
+  deterministic pass-count/read-amplification and authority tests from the three
+  named existing test files, `go test
+  ./backend/internal/agent/... ./backend/internal/task/...`, `go mod tidy` if
+  needed, `make lint-fix`, replay the benchmark after lint, `make lint-docs`,
+  `git diff --check`, `git diff --cached --exit-code`, `git status --short`, and
+  `git ls-files --others --exclude-standard`.
+- **Review:** a fresh performance/correctness reviewer receives the integrated
+  target, pre-integration SHA, exact call sequence, fixture mix, source/hash
+  manifest, resource/host controls, hashed 1 GiB warm/cold before/after evidence,
+  pinned comparison, deterministic natural-boundary pass/byte counts,
+  `/proc/self/io` corroboration, exact artifact delta, cross-platform compile
+  evidence, cleanup state, and all authority/corruption results; require `PASS`.
+- **Exit gate:** benchmark implementation alone cannot pass. The exact combined
+  live-adoption sequence eliminates at least one complete fixture-length logical
+  pass, thereby showing a material deterministic read-amplification reduction;
+  every authority/corruption gate passes, and benchmark/helper hashes match
+  before/after. Wall time, throughput, allocations, physical-read deltas, and
+  benchstat comparisons are advisory same-host evidence with no fixed threshold.
+  Exact generated delta is three index entries; conditional module-file diffs
+  obey the declared rule; no staged content or repository artifact survives. If the
+  reduction is not safely achievable, stop for split/user decision.
+- **Handoff:** report exact operation/caller sequence, fixture composition/size,
+  platform and cold-cache support, source/evidence hashes and external artifact
+  location, resource/host controls, before/after commands and pinned comparison,
+  per-operation logical pass/byte counts plus advisory timing/allocations/physical
+  reads, old/new call graph, authority proof, exact files/generated/module diff,
+  intent-to-add/index state, cleanup, validation, unresolved host noise, and risks.
 
-### Phase 2: Build the v2-only relay
+**Carry-forward performance contract:** every later phase that touches a measured
+reader, adoption, or reopen path (`persistent-read-paths`,
+`pure-harness-parsers`, `timestamp-cache-semantics`, `versioned-log-sink`,
+`agent-direct-write-migration`, `v2-producer-cutover`, and
+`runtime-adoption-smoke` where its environment supports the local gate) reruns
+the focused deterministic counting-reader tests. Only the accepted combined
+`LoadLogsForTaskIDs` through validated reopen deterministic logical read-
+amplification and complete-pass results are a hard non-regression gate. Wall
+time, throughput, allocations, physical-read deltas, and benchstat comparisons
+remain advisory same-host evidence with no fixed threshold. Preflight for each
+such phase records the coordinator-supplied absolute external artifact
+directory, accepted three-source benchmark SHA-256 manifest, and accepted
+evidence hashes. The benchmark sources may not be regenerated or changed. Every
+carry-forward benchmark invocation uses `-tags adoption_benchmark`. A same-host
+control/current run uses identical Go/power/load settings, the canonical 1 GiB
+fixture, and pinned `go run
+golang.org/x/perf/cmd/benchstat@v0.0.0-20260709024250-82a0b07e230d` when host
+resources permit; resource failure blocks/escalates rather than shrinking the
+gate. Each result and normalized comparison is hashed in that external
+directory, transient raw transcripts are removed after review, and retained
+hash manifests/evidence are removed only at rollout completion. No performance
+artifact enters the repository.
+
+### Phase 2: Correct parsed-message producer-time metadata
+
+- **Stable ID:** `parsed-message-metadata`
+- **Status:** accepted/completed dependency-safely out of order ahead of Phase 1;
+  retained only until Phase 1 is integrated and removed; not eligible for
+  redispatch
+- **Responsible:** one phase-executor subagent (completed)
+- **Depends on:** none
+- **May run with:** none; this phase is complete
+- **Base state:** completed from the accepted unshipped shared-parser state after
+  fresh ephemeral capture of `LOCAL_BASE`, `SHIPPED_BASE`, configured upstream,
+  status, and exact parser/type/test statistics. The accepted result remains
+  unshipped and has no production consumer
+- **VCS authority:** follow the global serial/isolated integration rule exactly;
+  no subagent may stage, commit, merge, reset, rebase, or push
+- **Write scope:** exactly
+  `backend/internal/agent/{agent.go,agent_test.go,types.go}`; no production reader,
+  harness parser, timing tracker, replay, task, relay, or API file
+- **Data authority:** a valid v2 `agent.ts` is immutable producer metadata for
+  every semantic message parsed from that envelope; zero producer time is the
+  sole absence representation
+- **Purpose:** establish explicit outer parsed-message metadata before any
+  production read path adopts the shared parser; the accepted result gates both
+  persistent and live read-path adoption
+- **Deliverables:** accepted outer `ParsedMessage` with exactly `Message Message`
+  and `ProducerTime time.Time`; `LogRecordParser.ParseRecord` returns parsed
+  values while native harness parser callbacks continue returning `[]Message`;
+  every semantic result from a valid v2 `agent` envelope carries the same
+  producer time; every v1 result and every control without envelope producer
+  time carries zero time; ordered state application, nil rejection, context-
+  window propagation, and pending-action deduplication are preserved;
+  `TimestampMessage` and parser-side timing-relevance filtering are absent
+- **Generated artifacts:** none
+- **Change budget:** exactly the three named files; no new file, dependency,
+  fixture, or public API DTO. Local-only churn within that exact accepted scope
+  was not a compatibility constraint
+- **Boundary:** `ParsedMessage` has no `Type()` method, does not implement
+  `Message`, and has no presence boolean; consumers must explicitly unwrap
+  `.Message`. No compatibility adapter, persistent/live reader integration,
+  `ToolTimingTracker` change, native parser signature change, physical framing
+  change, or semantic timestamp event is included
+- **Decision checkpoints:** stop if a native harness parser signature must
+  change, metadata cannot remain outside `Message`, parser state would become
+  non-transactional, or any production consumer must be migrated in this phase
+- **Validation intent:** accepted evidence proves one-to-many native parsing gives
+  every result the exact envelope time, including text and other timing-
+  irrelevant messages; v1 native and v1/v2 controls use zero time; empty native
+  results stay empty; concrete Go type switches work after `.Message` unwrapping;
+  value and pointer forms of `ParsedMessage` fail a runtime `Message` interface
+  assertion; `TimestampMessage` and the parser timing-relevance classifier are
+  absent; all accepted parser corruption, state, deduplication, and nil-safety
+  tests are green
+- **Accepted validation commands (record only; do not redispatch):** cwd
+  `/home/user/src/caic`: `go test
+  ./backend/internal/agent -run '^TestLogRecordParser$'`; `go test
+  ./backend/internal/agent/...`; `go test -race ./backend/internal/agent`;
+  `make lint-fix`; `git diff --check`; `git diff --cached --exit-code`; `git
+  status --short`; `git ls-files --others --exclude-standard`; repository audits
+  for removed marker symbols, forbidden presence fields, `ParsedMessage` method
+  sets, `ParseRecord` result consumers, and native parser callback signatures.
+  Separately, record focused parser evidence with `git diff --stat
+  "$SHIPPED_BASE...$PHASE_FINAL" -- backend/internal/agent/agent.go
+  backend/internal/agent/agent_test.go backend/internal/agent/types.go` and `git
+  diff "$SHIPPED_BASE...$PHASE_FINAL" -- backend/internal/agent/agent.go
+  backend/internal/agent/agent_test.go backend/internal/agent/types.go` for the
+  final combined three-file parser result, plus `git diff --stat
+  "$LOCAL_BASE...$PHASE_FINAL" -- backend/internal/agent/agent.go
+  backend/internal/agent/agent_test.go backend/internal/agent/types.go` and `git
+  diff "$LOCAL_BASE...$PHASE_FINAL" -- backend/internal/agent/agent.go
+  backend/internal/agent/agent_test.go backend/internal/agent/types.go` for the
+  focused phase delta
+- **Review:** an independent Go API/type-system reviewer checked both the
+  combined parser result against frozen `SHIPPED_BASE` and the focused delta
+  against frozen `LOCAL_BASE`, including explicit-unwrapping pressure, metadata
+  propagation, the unchanged native parser contract, and focused/full
+  validation; the review passed with no findings
+- **Exit gate:** passed for the exact three-file scope: each parsed value contains
+  one non-nil concrete semantic message; all v2 envelope results carry exact
+  producer time; all v1/control results carry zero time; `ParsedMessage` cannot
+  satisfy `Message`; `TimestampMessage`, parser timing filtering, and compatibility
+  adapters are absent; no production read path consumes `LogRecordParser`; both
+  frozen shared-base combined and local-phase diffs were reviewed; validation
+  and empty staged/untracked checks passed
+- **Handoff:** accepted evidence records old/new method signatures, metadata
+  cases, interface/method-set evidence, removed symbols/helpers, exact combined
+  `SHIPPED_BASE...PHASE_FINAL` and focused `LOCAL_BASE...PHASE_FINAL` diffstats,
+  commands, filesystem status, and residual risks
+
+### Phase 3: Build the v2-only relay
 
 - **Stable ID:** `relay-v2`
 - **Responsible:** one phase-executor subagent
 - **Depends on:** none
-- **May run with:** `shared-versioned-parser` or `persistent-read-paths` in an
-  isolated worktree
-- **Base state:** clean recorded post-foundation base captured after the user
-  commits the accepted foundation and plan-maintenance delta; recapture actual
-  HEAD/upstream/status and byte/hash baselines for `relay.py` and `test_relay.py`
-  immediately before dispatch
+- **May run with:** `persistent-read-paths` in an isolated worktree
+- **Base state:** no stable phase dependency; the physical authority foundation
+  is assumed shipped at the resolved shared-base role, the v2 relay is not yet
+  implemented, and the accepted local parser and rollout-plan work remain
+  unshipped. The worktree matches the declared clean/accepted-delta condition.
+  Immediately before dispatch, resolve actual HEAD, `origin/main`, and any
+  configured upstream into the ephemeral manifest and capture status plus byte/
+  hash baselines for `relay.py` and `test_relay.py`
 - **VCS authority:** follow the global serial/isolated integration rule exactly;
   no subagent may stage, commit, merge, reset, rebase, or push; v1 files are
   read-only. Before generated-file replay, the coordinator must obtain the
@@ -490,15 +832,18 @@ phase at a time.
   --cached --exit-code` result, user-owned index cleanup status, commands, and
   remaining relay risks
 
-### Phase 3: Route persistent readers through version dispatch
+### Phase 4: Route persistent readers through version dispatch
 
 - **Stable ID:** `persistent-read-paths`
 - **Responsible:** one phase-executor subagent
-- **Depends on:** `shared-versioned-parser`
+- **Depends on:** `adoption-scan-performance`, `parsed-message-metadata`
 - **May run with:** `relay-v2`
-- **Base state:** clean integrated shared-parser target based on the recorded
-  post-foundation commit; recapture actual HEAD/upstream/status and loader
-  fixture statistics immediately before dispatch
+- **Base state:** accepted stable phases `adoption-scan-performance` and
+  `parsed-message-metadata` are integrated, all rollout changes remain unshipped,
+  and the worktree is clean. Immediately before dispatch, resolve actual HEAD,
+  `origin/main`, and any configured
+  upstream into the ephemeral manifest and capture accepted adoption benchmark/
+  call-graph evidence, effective pass count, and loader fixture statistics
 - **VCS authority:** follow the global serial/isolated integration rule exactly;
   no subagent may stage, commit, merge, reset, rebase, or push; no fixture
   recording or regeneration without coordinator approval
@@ -510,13 +855,19 @@ phase at a time.
   validated from the same physical file; the identity set is scan output, never
   a persisted authority
 - **Purpose:** eliminate per-line format guesses from disk/replay/export paths
-  without creating another header or file-identity implementation
+  without creating another header/file-identity implementation or reintroducing
+  the redundant adoption scans removed by `adoption-scan-performance`
 - **Deliverables:** plain/compressed/full/tail/session/export record semantics use
-  the shared versioned parser on top of the accepted authority scanner; matching
-  later-header, unknown-version, taskmeta identity, same-inode, and corruption
-  behavior stays unchanged; full/reopen scan results expose already-persisted
+  the shared versioned parser on top of the accepted authority scanner and
+  accepted scan-reuse boundaries; parsed-stream consumers explicitly unwrap
+  `.Message` and preserve `ProducerTime` until the downstream conversion boundary;
+  no metadata wrapper is inserted into semantic message collections; matching
+  later-header, unknown-version,
+  taskmeta identity, same-inode, corruption, and adoption pass-count behavior
+  stays unchanged; full/reopen scan results expose already-persisted
   pending-action identities for later sink construction; offset-tail APIs cannot
-  invent authority or the identity set from a tail fragment
+  invent authority or the identity set from a tail fragment; the accepted
+  realistic adoption benchmark remains runnable against v1 and synthetic v2
 - **Generated artifacts:** no committed artifacts; taskmeta/replay cache tests use
   temporary directories and existing golden recordings are not rewritten
 - **Change budget:** at most 6 production files and 5 tests because physical
@@ -525,38 +876,53 @@ phase at a time.
 - **Boundary:** live relay reads and writers stay unchanged; harness parser caic
   cases remain until all read paths migrate
 - **Decision checkpoints:** stop for compatibility weakening, skipped corruption,
-  fixture rewrites, any second physical authority scanner, or any bypass of the
-  accepted same-file identity checks
-- **Validation intent:** equivalent v1/v2 full and tail results; compressed parity;
+  fixture rewrites, any second physical authority scanner, any bypass of the
+  accepted same-file identity checks, invalidation of identity-bound scan reuse,
+  or any extra effective full-file pass
+- **Validation intent:** equivalent v1/v2 semantic full and tail results, zero v1
+  producer times, exact v2 envelope producer times on every parsed message, and
+  explicit unwrapping with no timestamp event; compressed parity;
   taskmeta hit/miss/stale/corrupt integration; export parity; exact unknown-
   version, changed-segment, bare-v2, and prefixed-v2 errors; v1 and synthetic-v2
   full scans derive the same pending-action identity from a persisted native
-  source; no fallback when a tail omits the first header
-- **Validation commands:** cwd `/home/user/src/caic`: `go test
-  ./backend/internal/agent/... ./backend/internal/task/...
-  ./backend/internal/eventreplay/...`; `make lint-fix`; `git diff --check`;
-  `git status --short`; `git diff --cached --name-only`
+  source; no fallback when a tail omits the first header. Under the carry-forward
+  performance contract, counting-reader correctness tests hard-gate the accepted
+  combined live-adoption logical read amplification and complete-pass count for
+  v1 and synthetic v2; same-host wall time, throughput, allocations, physical-
+  read deltas, and benchstat comparisons remain advisory with no fixed threshold.
+- **Validation commands:** cwd `/home/user/src/caic`: verify the accepted benchmark
+  source/evidence hashes and external artifact path; run the focused deterministic
+  pass-count/read-amplification tests, `go test ./backend/internal/agent/...
+  ./backend/internal/task/... ./backend/internal/eventreplay/...`, and the
+  canonical same-host 1 GiB control/current benchmark with pinned benchstat under
+  the carry-forward contract; hash external results and remove transient raw
+  transcripts after review; `make lint-fix`; `git diff --check`; `git status
+  --short`; `git diff --cached --name-only`
 - **Review:** fresh reviewer checks all persistent entry points against the
   integrated SHA and fixture delta; require `PASS`
 - **Exit gate:** an entry-point inventory proves every persistent path reuses the
   accepted physical authority scanner and dispatches records by its exact
   `LogVersion`; reopen consumers receive the authoritative scan's pending-action
-  identity set, no duplicate scanner or identity index is introduced, existing
+  identity set, no duplicate scanner or identity index is introduced, the hard
+  deterministic combined-adoption logical read amplification and complete-pass
+  count do not regress, advisory same-host measurements are reported, existing
   same-inode/taskmeta/mixed-header tests stay green, and the exact allowed fixture
   delta is two files
 - **Handoff:** list migrated entry points, pending-action scan-output API and
   identity cases, fixture hashes, behavior/error evidence, filesystem delta,
   validation, and risks
 
-### Phase 4: Route live and startup relay reads
+### Phase 5: Route live and startup relay reads
 
 - **Stable ID:** `live-relay-read-path`
 - **Responsible:** one phase-executor subagent
-- **Depends on:** `shared-versioned-parser`, `relay-v2`
+- **Depends on:** `relay-v2`, `parsed-message-metadata`
 - **May run with:** none due to overlap across agent launch/read paths
-- **Base state:** clean integrated parser and latent-relay target based on the
-  recorded post-foundation commit; recapture actual HEAD/upstream/status and
-  existing live-read/handshake test baselines immediately before dispatch
+- **Base state:** accepted stable phases `parsed-message-metadata` and `relay-v2`
+  are integrated, all rollout changes remain unshipped, and the worktree is
+  clean. Immediately before dispatch, resolve
+  actual HEAD, `origin/main`, and any configured upstream into the ephemeral
+  manifest and capture existing live-read/handshake test baselines
 - **VCS authority:** follow the global serial/isolated integration rule exactly;
   no subagent may stage, commit, merge, reset, rebase, or push
 - **Write scope:** shared relay record reader; `DefaultReadMessages`; relay
@@ -567,22 +933,27 @@ phase at a time.
 - **Purpose:** make every live/startup consumer understand v1 and latent v2 while
   still running v1 producers
 - **Deliverables:** relay reader with an explicit per-consumer persistence policy;
-  normal-live log-once behavior; v2 unwrap for handshakes; Pi startup persistence;
+  normal-live log-once behavior; semantic consumers receive parsed values and
+  explicitly unwrap `.Message`; every v2 envelope result retains its
+  `ProducerTime`; v2 native-payload unwrap for handshakes; Pi startup persistence;
   unpersisted Codex/OpenCode handshakes; control routing; physical offsets;
   attach-overlap deduplication; common script deployment/selection seam used by
   custom launchers; v1 byte preservation
 - **Generated artifacts:** none
 - **Change budget:** at most 10 production files and 8 tests; no protocol DTO or
   handshake sequence changes
-- **Boundary:** selected version remains v1 in production; no header bump, v2
-  deployment, sink migration, or harness-parser cleanup
+- **Boundary:** selected version remains v1 in production; parsed metadata must
+  not implement or be inserted as `Message`; no header bump, v2 deployment, sink
+  migration, or harness-parser cleanup
 - **Decision checkpoints:** stop if a handshake must receive a caic control as
   native data, if a consumer cannot state its persistence policy, if logging
   twice appears necessary, or if offset semantics would change for v1
 - **Validation intent:** split reads, interleaved controls, handshake buffering,
   non-zero exits, attach physical offsets, relay-stdin overlap deduplication, no
-  live stdin double write, v1 exact logged bytes, v2 physical-byte counts, Pi
-  startup persistence, Codex/OpenCode handshake non-persistence, and all three
+  live stdin double write, v1 exact logged bytes and zero producer time, v2
+  physical-byte counts and exact per-result producer time without a semantic
+  timestamp event, Pi startup persistence, Codex/OpenCode handshake
+  non-persistence, and all three
   startup paths succeeding with synthetic streams
 - **Validation commands:** cwd `/home/user/src/caic`: `go test
   ./backend/internal/agent/... ./backend/internal/task/...`; `python3
@@ -596,15 +967,17 @@ phase at a time.
 - **Handoff:** report migrated call graph, offset/log-once evidence, protocol
   tests, files, commands, and residual risks
 
-### Phase 5: Make harness parsers native-only
+### Phase 6: Make harness parsers native-only
 
 - **Stable ID:** `pure-harness-parsers`
 - **Responsible:** one phase-executor subagent
 - **Depends on:** `persistent-read-paths`, `live-relay-read-path`
 - **May run with:** `timestamp-cache-semantics` in an isolated worktree
-- **Base state:** clean integrated persistent/live-reader target based on the
-  recorded post-foundation commit; recapture actual HEAD/upstream/status and
-  baseline each harness parser/test file immediately before dispatch
+- **Base state:** accepted stable phases `persistent-read-paths` and
+  `live-relay-read-path` are integrated, all rollout changes remain unshipped,
+  and the worktree is clean. Immediately before dispatch, resolve actual HEAD,
+  `origin/main`, and any configured upstream into the ephemeral manifest and
+  baseline each harness parser/test file
 - **VCS authority:** follow the global serial/isolated integration rule exactly;
   no subagent may stage, commit, merge, reset, rebase, or push; golden recordings
   are read-only
@@ -615,7 +988,8 @@ phase at a time.
 - **Purpose:** remove caic vocabulary and provenance guessing from harness code
 - **Deliverables:** remove all caic control branches/comments/tests from native
   parsers; retain native Codex duration and harness-specific behavior; prove
-  shared entry points preserve output
+  native callbacks still return `[]Message` and shared entry points preserve
+  parsed metadata plus explicitly unwrapped semantic output
 - **Generated artifacts:** none
 - **Change budget:** only the four parser families and adjacent tests/docs;
   expected net deletion; no golden fixture rewrite
@@ -625,72 +999,105 @@ phase at a time.
 - **Validation intent:** native fixtures parse unchanged through shared entry;
   direct native parsers reject/ignore caic records consistently; all control
   coverage lives in shared parser tests; regression/audit coverage proves the
-  Phase 1 pending-action deduplication remains at the shared entry point; Codex
-  native duration remains
-- **Validation commands:** cwd `/home/user/src/caic`: `go test
-  ./backend/internal/agent/... ./backend/internal/task/...`; `make lint-fix`;
+  local shared parser's pending-action deduplication remains at the shared entry
+  point; Codex native duration remains. Because the shared entry is
+  on the measured message path, focused counting-reader tests hard-gate the
+  accepted combined live-adoption logical read amplification and complete-pass
+  result; same-host measurements remain advisory under the carry-forward contract.
+- **Validation commands:** cwd `/home/user/src/caic`: verify the accepted benchmark
+  source/evidence hashes and external artifact path; run the focused deterministic
+  pass-count/read-amplification tests, `go test ./backend/internal/agent/...
+  ./backend/internal/task/...`, and the canonical same-host 1 GiB control/current
+  benchmark with pinned benchstat under the carry-forward contract; hash external
+  results and remove transient raw transcripts after review; `make lint-fix`;
   `git diff --check`; `git status --short`; `git diff --cached --name-only`
 - **Review:** fresh harness-focused reviewer checks for remaining `caic_` parser
   branches and semantic regressions on integrated target; require `PASS`
-- **Exit gate:** repository audit finds no caic routing in native parsers and all
-  four golden suites pass without recording changes
+- **Exit gate:** repository audit finds no caic routing in native parsers, all
+  four golden suites pass without recording changes, and deterministic counting-
+  reader evidence proves no regression in the accepted combined-adoption logical
+  read amplification and complete-pass count; advisory evidence follows the
+  external artifact hash and cleanup protocol
 - **Handoff:** provide audit command/result, per-harness tests, deletions/delta,
   validation, and unresolved risks
 
-### Phase 6: Make timestamps and replay caches version-correct
+### Phase 7: Make producer-time metadata and replay caches version-correct
 
 - **Stable ID:** `timestamp-cache-semantics`
 - **Responsible:** one phase-executor subagent
 - **Depends on:** `persistent-read-paths`, `live-relay-read-path`
 - **May run with:** `pure-harness-parsers`
-- **Base state:** clean integrated reader target based on the recorded
-  post-foundation commit; recapture actual HEAD/upstream/status, cache version,
-  and replay-fixture baselines immediately before dispatch
+- **Base state:** accepted stable phases `persistent-read-paths` and
+  `live-relay-read-path` are integrated, all rollout changes remain unshipped,
+  and the worktree is clean. Immediately before dispatch, resolve actual HEAD,
+  `origin/main`, and any configured upstream into the ephemeral manifest and
+  capture cache version and replay-
+  fixture baselines
 - **VCS authority:** follow the global serial/isolated integration rule exactly;
   no subagent may stage, commit, merge, reset, rebase, or push; no generated
   replay recording without approval
-- **Write scope:** timestamp domain semantics, `ToolTimingTracker`, replay filters,
-  `backend/internal/eventreplay`, server replay tests, minimal fixtures
-- **Data authority:** `agent.ts` is immutable producer time; conversion clock is
-  derived; replay sidecars remain rebuildable caches
-- **Purpose:** use exact v2 producer time without changing v1 files or exposing a
-  timestamp event
-- **Deliverables:** timestamp-transparent conversion and compaction; stable
-  tool-duration replay; fallback for v1/no timestamp; timing-relevant gating;
+- **Write scope:** parsed producer-time consumption, `ToolTimingTracker`, replay
+  filters, `backend/internal/eventreplay`, server replay tests, minimal fixtures
+- **Data authority:** `ParsedMessage.ProducerTime` copied from `agent.ts` is
+  immutable producer time; conversion clock is derived; replay sidecars remain
+  rebuildable caches
+- **Purpose:** consume exact v2 producer-time metadata without changing v1 files
+  or exposing a timestamp event
+- **Deliverables:** explicit `.Message` unwrapping; metadata-transparent
+  conversion and compaction; stable tool-duration replay; fallback for zero
+  producer time; timing-relevance gating owned only by `ToolTimingTracker`;
   `CacheVersion` bump; pure-v1/v2 parity fixtures
 - **Generated artifacts:** no committed generated sidecars; tests generate in
   temporary directories only
 - **Change budget:** at most 8 production files and 7 tests; two minimal raw-log
   fixtures maximum; one intentional cache constant change
-- **Boundary:** no API DTO field, v1 timestamp retrofit, relay change, or producer
-  cutover
-- **Decision checkpoints:** stop if timestamp must be persisted twice, becomes a
-  user-visible event, or changes native harness duration precedence
-- **Validation intent:** exact v2 tool spans; first-timestamp fallback; native
-  duration precedence; v1 safe fallback; timestamps transparent to deltas,
-  control searches, and exports; stale cache rejection and regeneration
-- **Validation commands:** cwd `/home/user/src/caic`: `go test
+- **Boundary:** no parser-side timing relevance, metadata-to-message adapter, API
+  DTO field, v1 timestamp retrofit, relay change, or producer cutover
+- **Decision checkpoints:** stop if producer time must be persisted twice, becomes
+  a semantic/user-visible event, is lost before `ToolTimingTracker`, or changes
+  native harness duration precedence
+- **Validation intent:** exact v2 tool spans; first-producer-time fallback; native
+  duration precedence; zero-time v1 safe fallback; tracker ignores metadata on
+  timing-irrelevant messages while semantic consumers still receive those
+  messages; producer metadata is transparent to deltas, control searches,
+  exports, and the measured full-message restore path; stale
+  cache rejection and regeneration. Focused counting-reader tests hard-gate the
+  accepted combined live-adoption logical read amplification and complete-pass
+  result; same-host measurements remain advisory under the carry-forward contract.
+- **Validation commands:** cwd `/home/user/src/caic`: verify the accepted benchmark
+  source/evidence hashes and external artifact path; run focused deterministic
+  pass-count/read-amplification tests, `go test
   ./backend/internal/server/api/v1conv/... ./backend/internal/eventreplay/...
-  ./backend/internal/server/...`; `make lint-fix`; `git diff --check`;
-  `git status --short`; `git diff --cached --name-only`
+  ./backend/internal/server/... ./backend/internal/task/...`, and the canonical
+  same-host 1 GiB control/current benchmark with pinned benchstat under the
+  carry-forward contract; hash external results and remove transient raw
+  transcripts after review; `make lint-fix`; `git diff --check`; `git status
+  --short`; `git diff --cached --name-only`
 - **Review:** fresh timing/replay reviewer checks integrated semantics, cache bump,
   and fixture delta; require `PASS`
-- **Exit gate:** v1/v2 fixture events are equivalent except exact v2 timestamps
-  and durations; cache rebuild tests pass; no sidecar artifact is committed
+- **Exit gate:** v1/v2 fixture semantic events are equivalent; v1 parsed values
+  carry zero time, v2 parsed values carry exact producer metadata, and only
+  downstream durations may differ; cache rebuild tests pass; deterministic
+  combined-adoption
+  logical read amplification and complete-pass count do not regress; advisory
+  performance evidence follows the external artifact hash/cleanup protocol; no
+  sidecar or benchmark artifact is committed
 - **Handoff:** report timing cases, old/new cache version, fixture hashes,
   filesystem delta, commands, and risks
 
-### Phase 7: Introduce the enforcing versioned log sink
+### Phase 8: Introduce the enforcing versioned log sink
 
 - **Stable ID:** `versioned-log-sink`
 - **Responsible:** one phase-executor subagent
 - **Depends on:** `persistent-read-paths`
-- **May run with:** a still-pending `relay-v2` in an isolated worktree; no parser
-  or persistent-reader phase
-- **Base state:** clean integrated `persistent-read-paths` target based on the
-  recorded post-foundation commit; recapture actual HEAD/upstream/status, the
-  accepted same-inode append constructor, direct `LogW.Write` inventory, and
-  authoritative-scan outputs immediately before dispatch
+- **May run with:** none
+- **Base state:** accepted stable phase `persistent-read-paths` is integrated,
+  all rollout changes remain unshipped, and the worktree is clean. Immediately
+  before dispatch, resolve actual HEAD,
+  `origin/main`, and any configured upstream into the ephemeral manifest and
+  capture the accepted same-inode append constructor, direct `LogW.Write`
+  inventory, authoritative-scan outputs, and adoption benchmark/pass-count
+  baseline
 - **VCS authority:** follow the global serial/isolated integration rule exactly;
   no subagent may stage, commit, merge, reset, rebase, or push
 - **Write scope:** versioned sink API/implementation in `backend/internal/agent`
@@ -714,7 +1121,7 @@ phase at a time.
   than the minimum constructor/reopen plumbing
 - **Boundary:** all production callers still select v1; the existing untyped raw
   path continues rejecting valid v2; no removal of raw writer paths yet, header
-  bump, relay selection, or parser cleanup
+  bump, relay selection, parser cleanup, or redundant full scan on reopen
 - **Decision checkpoints:** stop if the accepted same-inode constructor would be
   bypassed, if valid-v2 append becomes possible through an untyped writer, if the
   sink stores an independent version or pending-action identity index, if a
@@ -725,32 +1132,43 @@ phase at a time.
   every untyped append path; v1 and synthetic-v2 reopen cases where a native
   source predates reopen and the sink refuses an equivalent top-level pending-
   action snapshot from the supplied authoritative identity set; unsupported/
-  mixed refusal before write; same-inode and concurrent append integrity; errors
-  surfaced
-- **Validation commands:** cwd `/home/user/src/caic`: `go test
-  ./backend/internal/agent/... ./backend/internal/task/...`; `make lint-fix`;
-  `git diff --check`; `git status --short`; `git diff --cached --name-only`
+  mixed refusal before write; same-inode and concurrent append integrity;
+  counting-reader tests hard-gate the accepted combined live-adoption and reopen
+  logical read amplification and complete-pass counts; errors surfaced. Same-host
+  measurements remain advisory under the carry-forward contract.
+- **Validation commands:** cwd `/home/user/src/caic`: verify the accepted benchmark
+  source/evidence hashes and external artifact path; run focused deterministic
+  pass-count/read-amplification and reopen tests, `go test
+  ./backend/internal/agent/... ./backend/internal/task/...`, and the canonical
+  same-host 1 GiB control/current benchmark with pinned benchstat under the
+  carry-forward contract; hash external results and remove transient raw
+  transcripts after review; `make lint-fix`; `git diff --check`; `git status
+  --short`; `git diff --cached --name-only`
 - **Review:** independent API/authority reviewer inspects the integrated sink and
   writer escape hatches; require `PASS`
 - **Exit gate:** sink tests prove accepted same-inode behavior, v1 byte identity,
   typed-only v2 append/enforcement, continued untyped-v2 rejection, and restart-
   safe refusal of pending-action duplicates based on authoritative scan output,
-  while all produced repository logs remain v1
+  while all produced repository logs remain v1, deterministic combined-adoption
+  and reopen logical read amplification and complete-pass counts do not regress,
+  and advisory evidence follows the external artifact hash/cleanup protocol
 - **Handoff:** include direct-write inventory, constructor/reopen API contract,
   authoritative identity-set evidence, v1/v2 reopen cases, byte fixtures,
   commands, exact delta, and remaining migration sites
 
-### Phase 8: Migrate every direct log writer
+### Phase 9: Migrate every direct log writer
 
 - **Stable ID:** `agent-direct-write-migration`
 - **Responsible:** one phase-executor subagent
 - **Depends on:** `versioned-log-sink`, `live-relay-read-path`,
   `pure-harness-parsers`
 - **May run with:** none; it crosses all agent backends and task writers
-- **Base state:** clean integrated sink/readers/pure-parser target based on the
-  recorded post-foundation commit; recapture actual HEAD/upstream/status, the
-  complete physical reader/append inventory, direct-write inventory, and v1
-  trace hashes immediately before dispatch
+- **Base state:** accepted stable phases `versioned-log-sink`,
+  `live-relay-read-path`, and `pure-harness-parsers` are integrated, all rollout
+  changes remain unshipped, and the worktree is clean. Immediately before
+  dispatch, resolve actual HEAD, `origin/main`, and
+  any configured upstream into the ephemeral manifest and capture the complete
+  physical reader/append inventory, direct-write inventory, and v1 trace hashes
 - **VCS authority:** follow the global serial/isolated integration rule exactly;
   no subagent may stage, commit, merge, reset, rebase, or push; no golden
   recording regeneration without approval
@@ -785,33 +1203,45 @@ phase at a time.
   `SendRaw` framing has no relay duplicate; native/top-level pending actions
   deduplicate by semantic identity; model/session state and context/trailer/
   provisioning behavior remain correct; an inventory audit finds no physical
-  reader or append bypass
-- **Validation commands:** cwd `/home/user/src/caic`: `go test
-  ./backend/internal/agent/... ./backend/internal/task/...`; `python3
-  backend/internal/agent/relay/test_relay.py`; `make lint-fix`;
-  `git diff --check`; `git status --short`; `git diff --cached --name-only`;
-  audit direct `.Write` calls against an allowlist
+  reader or append bypass; focused counting-reader tests hard-gate the accepted
+  combined live-adoption/reopen logical read amplification and complete-pass
+  counts. Same-host measurements remain advisory under the carry-forward contract.
+- **Validation commands:** cwd `/home/user/src/caic`: verify the accepted benchmark
+  source/evidence hashes and external artifact path; run focused deterministic
+  pass-count/read-amplification and reopen tests, `go test
+  ./backend/internal/agent/... ./backend/internal/task/...`, `python3
+  backend/internal/agent/relay/test_relay.py`, and the canonical same-host 1 GiB
+  control/current benchmark with pinned benchstat under the carry-forward
+  contract; hash external results and remove transient raw transcripts after
+  review; `make lint-fix`; `git diff --check`; `git status --short`; `git diff
+  --cached --name-only`; audit direct `.Write` calls against an allowlist
 - **Review:** fresh cross-backend reviewer receives inventory before/after,
   integrated SHA, v1 trace hashes, and gate; require `PASS`
 - **Exit gate:** every task-log write, including both `Task.WriteToLog` branches,
   flows through the versioned sink or version-aware relay reader under an
   explicit persistence policy; a full production physical entry-point inventory
   has no authority/parser/append bypass; v1 trace hashes match; stdin and pending-
-  action semantics occur exactly once; production still emits v1
+  action semantics occur exactly once; deterministic combined-adoption/reopen
+  logical read amplification and complete-pass counts do not regress; advisory
+  evidence follows the external artifact hash/cleanup protocol; production still
+  emits v1
 - **Handoff:** report inventory closure, byte hashes, backend-specific tests,
   scoped exceptions, commands, and risks
 
-### Phase 9: Cut new producers over to pure v2
+### Phase 10: Cut new producers over to pure v2
 
 - **Stable ID:** `v2-producer-cutover`
 - **Responsible:** one phase-executor subagent
 - **Depends on:** `pure-harness-parsers`, `timestamp-cache-semantics`,
   `agent-direct-write-migration`
 - **May run with:** none
-- **Base state:** clean integrated prerequisite target descended from the
-  recorded post-foundation commit; recapture actual HEAD/upstream/status, full
-  production physical entry-point inventory, and v1/v2 fixture statistics
-  immediately before dispatch
+- **Base state:** accepted stable phases `pure-harness-parsers`,
+  `timestamp-cache-semantics`, and `agent-direct-write-migration` are integrated;
+  the worktree is clean and producer cutover remains unshipped. Immediately
+  before dispatch, resolve actual HEAD, `origin/main`, and any configured
+  upstream into the ephemeral manifest and capture the full production physical
+  entry-point inventory, v1/v2 fixture statistics, and accepted 1 GiB adoption
+  benchmark/pass-count baseline
 - **VCS authority:** follow the global serial/isolated integration rule exactly;
   no subagent may stage, commit, merge, reset, rebase, or push; any unexpected
   generated delta fails the phase
@@ -838,34 +1268,46 @@ phase at a time.
   before append; every production physical entry point derives authority/parser/
   sink behavior from the header; prompt and pending-action identities occur
   exactly once across live/attach/replay; taskmeta cannot override the header;
-  all line sizes fit
-- **Validation commands:** cwd `/home/user/src/caic`: focused `go test
+  all line sizes fit; focused counting-reader tests hard-gate the accepted
+  combined live-adoption/reopen logical read amplification and complete-pass
+  counts for both v1 and v2. Same-host measurements remain advisory under the
+  carry-forward contract.
+- **Validation commands:** cwd `/home/user/src/caic`: verify the accepted benchmark
+  source/evidence hashes and external artifact path; run focused deterministic
+  pass-count/read-amplification and reopen tests, `go test
   ./backend/internal/agent/... ./backend/internal/task/...
-  ./backend/internal/eventreplay/... ./backend/internal/server/...`; `python3
-  backend/internal/agent/relay/test_relay.py`; `python3
-  backend/internal/agent/relay/test_relay_v2.py`; `make lint-fix`; `make check`;
-  `git diff --check`; `git status --short`; `git diff --cached --name-only`
+  ./backend/internal/eventreplay/... ./backend/internal/server/...`, `python3
+  backend/internal/agent/relay/test_relay.py`, `python3
+  backend/internal/agent/relay/test_relay_v2.py`, and canonical same-host 1 GiB
+  v1/v2 control/current benchmarks with pinned benchstat under the carry-forward
+  contract; hash external results and remove transient raw transcripts after
+  review; `make lint-fix`; `make check`; `git diff --check`; `git status
+  --short`; `git diff --cached --name-only`
 - **Review:** fresh full-diff reviewer receives pre-integration SHA, authority
   contract, producer inventory, exact fixtures/artifact delta, and all command
   results; require `PASS` before integration acceptance
 - **Exit gate:** automated purity and entry-point audits find only `caic_meta`
   prefixed in v2, no bare native line, no `Task.WriteToLog` or other physical
   append bypass, and no reader using alternate authority; controlled existing v1
-  stays entirely v1; full `make check` passes with no unexpected filesystem or
-  staged delta
+  stays entirely v1; deterministic combined-adoption/reopen logical read
+  amplification and complete-pass counts do not regress for v1 or v2; advisory
+  evidence follows the external artifact hash/cleanup protocol; full `make check`
+  passes with no
+  unexpected filesystem or staged delta
 - **Handoff:** report new/existing cases, relay selection proof, purity audit,
   full validation, generated-state check, diffstat, and risks
 
-### Phase 10: Prove real-runtime creation and adoption
+### Phase 11: Prove real-runtime creation and adoption
 
 - **Stable ID:** `runtime-adoption-smoke`
 - **Responsible:** one phase-executor subagent
 - **Depends on:** `v2-producer-cutover`
 - **May run with:** none
-- **Base state:** clean integrated cutover target descended from the recorded
-  post-foundation commit; recapture actual HEAD/upstream/status plus md,
-  container, caic binary, and controlled fixture identities immediately before
-  dispatch
+- **Base state:** accepted stable phase `v2-producer-cutover` is integrated; the
+  worktree is clean and the cutover is not treated as shipped until release
+  authority confirms it. Immediately before dispatch, resolve actual HEAD,
+  `origin/main`, and any configured upstream into the ephemeral manifest and
+  capture md, container, caic binary, and controlled fixture identities
 - **VCS authority:** follow the global serial/isolated integration rule exactly;
   no subagent may stage, commit, merge, reset, rebase, or push; runtime containers
   and temporary logs may be created only under the smoke harness cleanup contract
@@ -890,18 +1332,33 @@ phase at a time.
   v1 fixture cannot be created reproducibly, or if cleanup cannot be guaranteed
 - **Validation intent:** new v2 round-trip; alive v1 adoption remains v1; alive v2
   adoption remains v2; restart selects matching script for existing files;
-  missing-header and mixed-file cases refuse attach/append; no duplicate log line
-- **Validation commands:** cwd `/home/user/src/caic`: `make smoke-wrapped-log`;
-  `make lint-fix`; `make check`; rerun `make smoke-wrapped-log`; `git diff
-  --check`; `git status --short`; `git diff --cached --name-only`; verify no
-  runtime, temp, generated, staged, untracked, or `coverage.out` artifact remains
+  missing-header and mixed-file cases refuse attach/append; no duplicate log
+  line. Where the smoke host satisfies the canonical resource gate, focused
+  counting-reader tests hard-gate the accepted combined live-adoption/reopen
+  logical read amplification and complete-pass counts. The same-host 1 GiB
+  control/current result is recorded as advisory evidence with no fixed threshold.
+- **Validation commands:** cwd `/home/user/src/caic`: verify the accepted benchmark
+  source/evidence hashes and external artifact path; where the smoke host meets
+  the resource gate, run focused deterministic pass-count/read-amplification and
+  reopen tests plus the canonical same-host 1 GiB control/current benchmark with
+  pinned benchstat under the carry-forward contract; otherwise block/escalate
+  that local gate rather than shrinking it. Hash external results and remove
+  transient raw transcripts after review; run `make smoke-wrapped-log`; `make
+  lint-fix`; `make check`; rerun `make smoke-wrapped-log`; `git diff --check`;
+  `git status --short`; `git diff --cached --name-only`; verify no runtime, temp,
+  generated, staged, untracked, `coverage.out`, or repository performance
+  artifact remains
 - **Review:** fresh runtime/reliability reviewer inspects the integrated smoke
   harness, command logs, physical samples, cleanup evidence, and exact test-only
   delta; require `PASS`
 - **Exit gate:** controlled v1/v2 creation and adoption pass on real md through
-  `make smoke-wrapped-log`; byte-level audits show no mixed file; full `make
-  check` passes; cleanup leaves no container, log, temp, generated, staged,
-  untracked, or `coverage.out` artifact
+  `make smoke-wrapped-log`; byte-level audits show no mixed file; the hard
+  deterministic combined-adoption/reopen logical read amplification and complete-
+  pass result does not regress on a resource-qualified smoke host; advisory
+  evidence follows the
+  external artifact hash/cleanup protocol, and real restart timing is recorded;
+  full `make check` passes; cleanup leaves no container, log, temp, generated,
+  staged, untracked, `coverage.out`, or performance artifact
 - **Handoff:** report environment, exact commands, sample hashes/vocabularies,
   restart results, cleanup proof, changed files, and residual host risks
 

@@ -31,6 +31,13 @@ type Message interface {
 	Type() string
 }
 
+// ParsedMessage pairs a semantic message with its producer timestamp. A zero
+// ProducerTime means the physical record did not provide producer time.
+type ParsedMessage struct {
+	Message      Message
+	ProducerTime time.Time
+}
+
 // InitMessage is emitted when a session starts.
 type InitMessage struct {
 	SessionID string   `json:"session_id"`
