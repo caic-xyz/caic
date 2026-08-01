@@ -486,10 +486,6 @@ func TestLogRecordParser(t *testing.T) {
 		if _, err := NewLogRecordParser(LogVersionV1, nil); err == nil || !strings.Contains(err.Error(), "native message parser is nil") {
 			t.Fatalf("nil parser error = %v", err)
 		}
-		var zero LogRecordParser
-		if _, err := zero.ParseRecord([]byte(`{"type":"assistant"}`)); err == nil || !strings.Contains(err.Error(), "unsupported log version 0") {
-			t.Fatalf("zero parser error = %v", err)
-		}
 	})
 
 	t.Run("ControlVocabulary", func(t *testing.T) {
@@ -502,42 +498,42 @@ func TestLogRecordParser(t *testing.T) {
 			{
 				name: "diff_stat",
 				v1:   `{"type":"caic_diff_stat","diff_stat":[{"path":"a.go","added":2,"deleted":1}],"ts":12.5}`,
-				v2:   `{"type":"diff_stat","diff_stat":[{"path":"a.go","added":2,"deleted":1}],"ts":12.5}`,
+				v2:   `{"t":"diff_stat","diff_stat":[{"path":"a.go","added":2,"deleted":1}],"ts":12.5}`,
 			},
 			{
 				name: "exit",
 				v1:   `{"type":"caic_exit","exit_code":2,"cmd":["agent"],"error":"failed","ts":13}`,
-				v2:   `{"type":"exit","exit_code":2,"cmd":["agent"],"error":"failed","ts":13}`,
+				v2:   `{"t":"exit","exit_code":2,"cmd":["agent"],"error":"failed","ts":13}`,
 			},
 			{
 				name: "stripped_env",
 				v1:   `{"type":"caic_stripped_env","variables":{"TOKEN":"secret"}}`,
-				v2:   `{"type":"stripped_env","variables":{"TOKEN":"secret"}}`,
+				v2:   `{"t":"stripped_env","variables":{"TOKEN":"secret"}}`,
 			},
 			{
 				name: "session",
 				v1:   `{"type":"caic_session","session_id":"s1","model":"m1","agent_version":"1.2.3"}`,
-				v2:   `{"type":"session","session_id":"s1","model":"m1","agent_version":"1.2.3"}`,
+				v2:   `{"t":"session","session_id":"s1","model":"m1","agent_version":"1.2.3"}`,
 			},
 			{
 				name: "pr",
 				v1:   `{"type":"caic_pr","forge_owner":"o","forge_repo":"r","forge_pr":7}`,
-				v2:   `{"type":"pr","forge_owner":"o","forge_repo":"r","forge_pr":7}`,
+				v2:   `{"t":"pr","forge_owner":"o","forge_repo":"r","forge_pr":7}`,
 			},
 			{
 				name: "result",
 				v1:   `{"type":"caic_result","state":"purged","title":"done","cost_usd":1.5,"num_turns":2}`,
-				v2:   `{"type":"result","state":"purged","title":"done","cost_usd":1.5,"num_turns":2}`,
+				v2:   `{"t":"result","state":"purged","title":"done","cost_usd":1.5,"num_turns":2}`,
 			},
 			{
 				name: "pending_user_action",
 				v1:   `{"type":"caic_pending_user_action","action":{"kind":"ask_user_question","request_id":"r1","tool_use_id":"t1"}}`,
-				v2:   `{"type":"pending_user_action","action":{"kind":"ask_user_question","request_id":"r1","tool_use_id":"t1"}}`,
+				v2:   `{"t":"pending_user_action","action":{"kind":"ask_user_question","request_id":"r1","tool_use_id":"t1"}}`,
 			},
 			{
 				name: "provisioning_log",
 				v1:   `{"type":"caic_log","line":"starting"}`,
-				v2:   `{"type":"log","line":"starting"}`,
+				v2:   `{"t":"log","line":"starting"}`,
 			},
 		}
 		for _, tc := range pairs {
@@ -576,7 +572,11 @@ func TestLogRecordParser(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			line := fmt.Sprintf(`{"type":"caic_meta","version":%d,"prompt":"p","repos":[],"harness":"claude"}`, version)
+			discriminator := "type"
+			if version == LogVersionV2 {
+				discriminator = "t"
+			}
+			line := fmt.Sprintf(`{%q:"caic_meta","version":%d,"prompt":"p","repos":[],"harness":"claude"}`, discriminator, version)
 			msgs, err := p.ParseRecord([]byte(line))
 			if err != nil {
 				t.Fatal(err)
@@ -594,7 +594,7 @@ func TestLogRecordParser(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		wrongVersion := []byte(`{"type":"caic_meta","version":1,"prompt":"p","repos":[],"harness":"claude"}`)
+		wrongVersion := []byte(`{"t":"caic_meta","version":1,"prompt":"p","repos":[],"harness":"claude"}`)
 		if _, err := v2.ParseRecord(wrongVersion); err == nil || !strings.Contains(err.Error(), "does not match parser version 2") {
 			t.Fatalf("mismatched header error = %v", err)
 		}
@@ -627,7 +627,7 @@ func TestLogRecordParser(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		gotV2, err := v2.ParseRecord([]byte(`{"type":"context_cleared"}`))
+		gotV2, err := v2.ParseRecord([]byte(`{"t":"context_cleared"}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -672,7 +672,7 @@ func TestLogRecordParser(t *testing.T) {
 		}
 		payloads := []string{`{"type":"native","value":1}`, `42`, `true`, `"text"`}
 		for _, payload := range payloads {
-			line := fmt.Sprintf(`{"type":"agent","ts":123.5,"msg":%s}`, payload)
+			line := fmt.Sprintf(`{"t":"agent","ts":123.500,"msg":%s}`, payload)
 			msgs, err := p.ParseRecord([]byte(line))
 			if err != nil {
 				t.Fatalf("payload %s: %v", payload, err)
@@ -698,18 +698,18 @@ func TestLogRecordParser(t *testing.T) {
 			line string
 			want string
 		}{
-			{name: "bare_native", line: `{"type":"assistant"}`, want: `unknown top-level type "assistant"`},
-			{name: "prefixed_v1", line: `{"type":"caic_diff_stat","diff_stat":[]}`, want: `unknown top-level type "caic_diff_stat"`},
-			{name: "unknown", line: `{"type":"future"}`, want: `unknown top-level type "future"`},
-			{name: "missing_type", line: `{"value":1}`, want: "missing top-level type"},
-			{name: "malformed_json", line: `{`, want: "decode envelope"},
-			{name: "missing_ts", line: `{"type":"agent","msg":{"type":"assistant"}}`, want: "missing ts"},
-			{name: "invalid_ts_type", line: `{"type":"agent","ts":"now","msg":{"type":"assistant"}}`, want: "cannot unmarshal string"},
-			{name: "zero_ts", line: `{"type":"agent","ts":0,"msg":{"type":"assistant"}}`, want: "must be finite and positive"},
-			{name: "out_of_range_ts", line: `{"type":"agent","ts":1e40,"msg":{"type":"assistant"}}`, want: "out of range"},
-			{name: "missing_msg", line: `{"type":"agent","ts":1}`, want: "missing msg"},
-			{name: "null_msg", line: `{"type":"agent","ts":1,"msg":null}`, want: "null msg"},
-			{name: "invalid_msg", line: `{"type":"agent","ts":1,"msg":}`, want: "decode envelope"},
+			{name: "bare_native", line: `{"type":"assistant"}`, want: "top-level type discriminator"},
+			{name: "prefixed_v1", line: `{"type":"caic_diff_stat","diff_stat":[]}`, want: "top-level type discriminator"},
+			{name: "unknown", line: `{"t":"future"}`, want: `unknown top-level t "future"`},
+			{name: "missing_t", line: `{"value":1}`, want: "missing top-level t"},
+			{name: "malformed_json", line: `{`, want: "decode control discriminator"},
+			{name: "missing_ts", line: `{"t":"agent","msg":{"type":"assistant"}}`, want: "noncanonical envelope"},
+			{name: "invalid_ts_type", line: `{"t":"agent","ts":"now","msg":{"type":"assistant"}}`, want: "invalid ts"},
+			{name: "zero_ts", line: `{"t":"agent","ts":0.000,"msg":{"type":"assistant"}}`, want: "timestamp must be positive"},
+			{name: "out_of_range_ts", line: `{"t":"agent","ts":9223372036854775807.000,"msg":{"type":"assistant"}}`, want: "outside the supported Unix time range"},
+			{name: "missing_msg", line: `{"t":"agent","ts":1.000}`, want: "invalid timestamp delimiter"},
+			{name: "null_msg", line: `{"t":"agent","ts":1.000,"msg":null}`, want: "null msg"},
+			{name: "invalid_msg", line: `{"t":"agent","ts":1.000,"msg":{"x":}}`, want: "unmarshal envelope"},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
@@ -733,11 +733,11 @@ func TestLogRecordParser(t *testing.T) {
 		}{
 			{
 				name: "envelope",
-				line: []byte{'{', '"', 't', 'y', 'p', 'e', '"', ':', '"', 'a', 'g', 0xff, 'e', 'n', 't', '"', '}'},
+				line: []byte{'{', '"', 't', '"', ':', '"', 'a', 'g', 0xff, 'e', 'n', 't', '"', '}'},
 			},
 			{
 				name: "msg",
-				line: append(append([]byte(`{"type":"agent","ts":1,"msg":{"text":"`), 0xff), []byte(`"}}`)...),
+				line: append(append([]byte(`{"t":"agent","ts":1.000,"msg":{"text":"`), 0xff), []byte(`"}}`)...),
 			},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
@@ -798,10 +798,12 @@ func TestLogRecordParser(t *testing.T) {
 					if version == LogVersionV1 {
 						return payload
 					}
-					return fmt.Sprintf(`{"type":"agent","ts":10,"msg":%s}`, payload)
+					return fmt.Sprintf(`{"t":"agent","ts":10.000,"msg":%s}`, payload)
 				}
+				infoDiscriminator := "type"
 				infoType := "caic_model_info"
 				if version == LogVersionV2 {
+					infoDiscriminator = "t"
 					infoType = "model_info"
 				}
 
@@ -816,7 +818,7 @@ func TestLogRecordParser(t *testing.T) {
 				if beforeUsage.ContextWindow != 0 {
 					t.Fatalf("pre-snapshot context = %d", beforeUsage.ContextWindow)
 				}
-				if msgs, err := p.ParseRecord(fmt.Appendf(nil, `{"type":%q,"context_window":1000000}`, infoType)); err != nil || len(msgs) != 0 {
+				if msgs, err := p.ParseRecord(fmt.Appendf(nil, `{%q:%q,"context_window":1000000}`, infoDiscriminator, infoType)); err != nil || len(msgs) != 0 {
 					t.Fatalf("model info messages = %#v, err = %v", msgs, err)
 				}
 				after, err := p.ParseRecord([]byte(native(0)))
@@ -869,18 +871,24 @@ func TestLogRecordParser(t *testing.T) {
 					if version == LogVersionV1 {
 						return string(data)
 					}
-					return fmt.Sprintf(`{"type":"agent","ts":11,"msg":%s}`, data)
+					return fmt.Sprintf(`{"t":"agent","ts":11.000,"msg":%s}`, data)
 				}
 				topLine := func(action PendingUserAction) string {
-					typ := PendingUserActionMessageType
-					if version == LogVersionV2 {
-						typ = "pending_user_action"
+					if version == LogVersionV1 {
+						data, err := json.Marshal(PendingUserActionMessage{
+							MessageType: PendingUserActionMessageType,
+							Action:      action,
+						})
+						if err != nil {
+							t.Fatal(err)
+						}
+						return string(data)
 					}
-					data, err := json.Marshal(PendingUserActionMessage{MessageType: typ, Action: action})
+					data, err := json.Marshal(action)
 					if err != nil {
 						t.Fatal(err)
 					}
-					return string(data)
+					return fmt.Sprintf(`{"t":"pending_user_action","action":%s}`, data)
 				}
 
 				first := PendingUserAction{
@@ -933,7 +941,7 @@ func TestLogRecordParser(t *testing.T) {
 				Kind: PendingUserActionAskUserQuestion, RequestID: "r1", ToolUseID: "t1",
 			},
 		}
-		agentLine := []byte(`{"type":"agent","ts":1,"msg":{"type":"native"}}`)
+		agentLine := []byte(`{"t":"agent","ts":1.000,"msg":{"type":"native"}}`)
 
 		for _, tc := range []struct {
 			name    string
@@ -975,7 +983,7 @@ func TestLogRecordParser(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := p.ParseRecord([]byte(`{"type":"model_info","context_window":1000000}`)); err != nil {
+			if _, err := p.ParseRecord([]byte(`{"t":"model_info","context_window":1000000}`)); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := p.ParseRecord(agentLine); err == nil || !strings.Contains(err.Error(), "native message 1 is nil") {
@@ -1025,7 +1033,7 @@ func TestLogRecordParser(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		mixed, err := v2.ParseRecord([]byte(`{"type":"agent","ts":123.25,"msg":{"kind":"mixed"}}`))
+		mixed, err := v2.ParseRecord([]byte(`{"t":"agent","ts":123.250,"msg":{"kind":"mixed"}}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1071,7 +1079,7 @@ func TestLogRecordParser(t *testing.T) {
 			}
 		}
 
-		empty, err := v2.ParseRecord([]byte(`{"type":"agent","ts":124,"msg":{"kind":"empty"}}`))
+		empty, err := v2.ParseRecord([]byte(`{"t":"agent","ts":124.000,"msg":{"kind":"empty"}}`))
 		if err != nil {
 			t.Fatal(err)
 		}

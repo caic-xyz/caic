@@ -1,0 +1,64 @@
+{
+  "reader_cases": [
+    {
+      "name": "object_nested",
+      "timestamp": "1700000000.123",
+      "native_bytes": "{\"type\":\"event\",\"data\":{\"items\":[1,true,{\"text\":\"quote: \\\" slash: \\\\\"}]}}",
+      "record_bytes": "{\"t\":\"agent\",\"ts\":1700000000.123,\"msg\":{\"type\":\"event\",\"data\":{\"items\":[1,true,{\"text\":\"quote: \\\" slash: \\\\\"}]}}}\n"
+    },
+    {
+      "name": "array_whitespace",
+      "timestamp": "1700000001.001",
+      "native_bytes": "[1, {\"key\" : [false, 2]}, true]",
+      "record_bytes": "{\"t\":\"agent\",\"ts\":1700000001.001,\"msg\":[1, {\"key\" : [false, 2]}, true]}\n"
+    },
+    {
+      "name": "string_scalar",
+      "timestamp": "1700000002.002",
+      "native_bytes": "\"diagnostic: invalid native JSON {not-json}; delimiter ,\\\"msg\\\":\"",
+      "record_bytes": "{\"t\":\"agent\",\"ts\":1700000002.002,\"msg\":\"diagnostic: invalid native JSON {not-json}; delimiter ,\\\"msg\\\":\"}\n"
+    },
+    {
+      "name": "number_scalar",
+      "timestamp": "1700000003.003",
+      "native_bytes": "-12.50e+2",
+      "record_bytes": "{\"t\":\"agent\",\"ts\":1700000003.003,\"msg\":-12.50e+2}\n"
+    },
+    {
+      "name": "boolean_scalar",
+      "timestamp": "1700000004.004",
+      "native_bytes": "true",
+      "record_bytes": "{\"t\":\"agent\",\"ts\":1700000004.004,\"msg\":true}\n"
+    }
+  ],
+  "encoder_vectors": [
+    {
+      "name": "below_half",
+      "observed_unix_ns": "1234499000",
+      "expected_timestamp": "1.234",
+      "native_bytes": "{\"event\":\"below_half\"}",
+      "record_bytes": "{\"t\":\"agent\",\"ts\":1.234,\"msg\":{\"event\":\"below_half\"}}\n"
+    },
+    {
+      "name": "exact_half",
+      "observed_unix_ns": "1234500000",
+      "expected_timestamp": "1.235",
+      "native_bytes": "{\"event\":\"exact_half\"}",
+      "record_bytes": "{\"t\":\"agent\",\"ts\":1.235,\"msg\":{\"event\":\"exact_half\"}}\n"
+    },
+    {
+      "name": "above_half",
+      "observed_unix_ns": "1234501000",
+      "expected_timestamp": "1.235",
+      "native_bytes": "{\"event\":\"above_half\"}",
+      "record_bytes": "{\"t\":\"agent\",\"ts\":1.235,\"msg\":{\"event\":\"above_half\"}}\n"
+    },
+    {
+      "name": "second_carry",
+      "observed_unix_ns": "1999500000",
+      "expected_timestamp": "2.000",
+      "native_bytes": "{\"event\":\"second_carry\"}",
+      "record_bytes": "{\"t\":\"agent\",\"ts\":2.000,\"msg\":{\"event\":\"second_carry\"}}\n"
+    }
+  ]
+}

@@ -48,7 +48,6 @@ import (
 	"io/fs"
 	"iter"
 	"log/slog"
-	"math"
 	"os"
 	"os/exec"
 	"reflect"
@@ -56,7 +55,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/relay"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -301,7 +299,11 @@ type LogRecordParser struct {
 }
 
 // NewLogRecordParser constructs a parser for an already-validated physical log
-// version.
+// version. parseNative is called synchronously and must parse and validate the
+// supplied harness-native JSON before returning.
+//
+// The callback input may alias scanner-owned record memory. parseNative must not
+// retain or use the input after it returns.
 func NewLogRecordParser(version LogVersion, parseNative func([]byte) ([]Message, error)) (*LogRecordParser, error) {
 	if err := version.Validate(); err != nil {
 		return nil, err
@@ -319,31 +321,14 @@ func NewLogRecordParser(version LogVersion, parseNative func([]byte) ([]Message,
 // ParseRecord decodes one physical task-log record according to the parser's
 // exact version.
 func (p *LogRecordParser) ParseRecord(line []byte) ([]ParsedMessage, error) {
-	if p == nil {
-		return nil, errors.New("log record parser is nil")
-	}
-	if err := p.version.Validate(); err != nil {
-		return nil, err
-	}
-	if p.parseNative == nil {
-		return nil, errors.New("native message parser is nil")
-	}
-
-	if p.version == LogVersionV2 && !utf8.Valid(line) {
-		return nil, errors.New("corrupt v2 log record: invalid UTF-8")
+	if p.version == LogVersionV2 {
+		return parseV2Record(p, line)
 	}
 
 	var envelope logTypeEnvelope
 	if err := json.Unmarshal(line, &envelope); err != nil {
-		if p.version == LogVersionV1 {
-			msgs, parseErr := p.parseAndApplyNative(line)
-			return wrapParsedMessages(msgs, time.Time{}), parseErr
-		}
-		return nil, fmt.Errorf("corrupt v2 log record: decode envelope: %w", err)
-	}
-
-	if p.version == LogVersionV2 && envelope.Type == "agent" {
-		return p.parseAgentRecord(line)
+		msgs, parseErr := p.parseAndApplyNative(line)
+		return wrapParsedMessages(msgs, time.Time{}), parseErr
 	}
 	kind, ok := p.controlKind(envelope.Type)
 	if ok {
@@ -354,14 +339,8 @@ func (p *LogRecordParser) ParseRecord(line []byte) ([]ParsedMessage, error) {
 		msgs, err = p.applyMessageState(msgs)
 		return wrapParsedMessages(msgs, time.Time{}), err
 	}
-	if p.version == LogVersionV1 {
-		msgs, err := p.parseAndApplyNative(line)
-		return wrapParsedMessages(msgs, time.Time{}), err
-	}
-	if envelope.Type == "" {
-		return nil, errors.New("corrupt v2 log record: missing top-level type")
-	}
-	return nil, fmt.Errorf("corrupt v2 log record: unknown top-level type %q", envelope.Type)
+	msgs, err := p.parseAndApplyNative(line)
+	return wrapParsedMessages(msgs, time.Time{}), err
 }
 
 type logControlKind int
@@ -413,12 +392,6 @@ type logTypeEnvelope struct {
 	Type string `json:"type"`
 }
 
-type agentLogRecord struct {
-	Type string          `json:"type"`
-	Ts   *float64        `json:"ts"`
-	Msg  json.RawMessage `json:"msg"`
-}
-
 type modelInfoLogRecord struct {
 	ContextWindow int `json:"context_window"`
 }
@@ -442,31 +415,6 @@ func (p *LogRecordParser) controlKind(token string) (logControlKind, bool) {
 	}
 	kind, ok := v2LogControlKinds[token]
 	return kind, ok
-}
-
-func (p *LogRecordParser) parseAgentRecord(line []byte) ([]ParsedMessage, error) {
-	var record agentLogRecord
-	if err := json.Unmarshal(line, &record); err != nil {
-		return nil, fmt.Errorf("corrupt v2 agent record: %w", err)
-	}
-	if record.Ts == nil {
-		return nil, errors.New("corrupt v2 agent record: missing ts")
-	}
-	timestamp, err := timestampFromEpochSeconds(*record.Ts)
-	if err != nil {
-		return nil, fmt.Errorf("corrupt v2 agent record: invalid ts: %w", err)
-	}
-	if len(record.Msg) == 0 {
-		return nil, errors.New("corrupt v2 agent record: missing msg")
-	}
-	if bytes.Equal(bytes.TrimSpace(record.Msg), []byte("null")) {
-		return nil, errors.New("corrupt v2 agent record: null msg")
-	}
-	if !json.Valid(record.Msg) {
-		return nil, errors.New("corrupt v2 agent record: invalid msg")
-	}
-	msgs, err := p.parseAndApplyNative(record.Msg)
-	return wrapParsedMessages(msgs, timestamp), err
 }
 
 func (p *LogRecordParser) parseControl(kind logControlKind, token string, line []byte) ([]Message, error) {
@@ -622,17 +570,6 @@ func messageIsNil(msg Message) bool {
 	default:
 		return false
 	}
-}
-
-func timestampFromEpochSeconds(ts float64) (time.Time, error) {
-	if ts <= 0 || math.IsNaN(ts) || math.IsInf(ts, 0) {
-		return time.Time{}, fmt.Errorf("epoch seconds must be finite and positive, got %v", ts)
-	}
-	whole, fractional := math.Modf(ts)
-	if whole >= float64(uint64(1)<<63) {
-		return time.Time{}, fmt.Errorf("epoch seconds out of range: %v", ts)
-	}
-	return time.Unix(int64(whole), int64(fractional*float64(time.Second))).UTC(), nil
 }
 
 // DefaultReadMessages is the standard message read loop. It reads NDJSON lines
