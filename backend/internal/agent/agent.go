@@ -324,23 +324,7 @@ func (p *LogRecordParser) ParseRecord(line []byte) ([]ParsedMessage, error) {
 	if p.version == LogVersionV2 {
 		return parseV2Record(p, line)
 	}
-
-	var envelope logTypeEnvelope
-	if err := json.Unmarshal(line, &envelope); err != nil {
-		msgs, parseErr := p.parseAndApplyNative(line)
-		return wrapParsedMessages(msgs, time.Time{}), parseErr
-	}
-	kind, ok := p.controlKind(envelope.Type)
-	if ok {
-		msgs, err := p.parseControl(kind, envelope.Type, line)
-		if err != nil {
-			return nil, err
-		}
-		msgs, err = p.applyMessageState(msgs)
-		return wrapParsedMessages(msgs, time.Time{}), err
-	}
-	msgs, err := p.parseAndApplyNative(line)
-	return wrapParsedMessages(msgs, time.Time{}), err
+	return parseV1Record(p, line)
 }
 
 type logControlKind int
@@ -386,10 +370,6 @@ var v2LogControlKinds = map[string]logControlKind{
 	"pending_user_action": logControlPendingUserAction,
 	"log":                 logControlProvisioningLog,
 	"context_cleared":     logControlContextCleared,
-}
-
-type logTypeEnvelope struct {
-	Type string `json:"type"`
 }
 
 type modelInfoLogRecord struct {
