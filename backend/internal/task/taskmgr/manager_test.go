@@ -1929,7 +1929,7 @@ func TestManager(t *testing.T) {
 				t.Fatalf("loaded RuntimeName = %q, want test-runtime", got)
 			}
 		})
-		t.Run("valid_keeps_session_metadata_lazy", func(t *testing.T) {
+		t.Run("valid_preloads_session_metadata", func(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			dir := t.TempDir()
@@ -1958,8 +1958,8 @@ func TestManager(t *testing.T) {
 			if len(logs) != 1 {
 				t.Fatalf("len(logs) = %d, want 1", len(logs))
 			}
-			if logs[0].SessionID != "" || logs[0].AgentVersion != "" {
-				t.Fatalf("preloaded metadata = %q/%q, want empty before full metadata scan", logs[0].SessionID, logs[0].AgentVersion)
+			if logs[0].SessionID != "ses-1" || logs[0].AgentVersion != "pi 1.2.3" {
+				t.Fatalf("preloaded metadata = %q/%q, want ses-1/pi 1.2.3", logs[0].SessionID, logs[0].AgentVersion)
 			}
 
 			if err := m.LoadPurgedTasks(logs); err != nil {
@@ -1970,11 +1970,11 @@ func TestManager(t *testing.T) {
 				t.Fatal("entry not found")
 			}
 			snap := e.Task().Snapshot()
-			if snap.SessionID != "" {
-				t.Errorf("SessionID = %q, want empty without startup metadata scan", snap.SessionID)
+			if snap.SessionID != "ses-1" {
+				t.Errorf("SessionID = %q, want ses-1", snap.SessionID)
 			}
-			if snap.AgentVersion != "" {
-				t.Errorf("AgentVersion = %q, want empty without startup metadata scan", snap.AgentVersion)
+			if snap.AgentVersion != "pi 1.2.3" {
+				t.Errorf("AgentVersion = %q, want pi 1.2.3", snap.AgentVersion)
 			}
 		})
 		t.Run("valid_running_becomes_failed", func(t *testing.T) {

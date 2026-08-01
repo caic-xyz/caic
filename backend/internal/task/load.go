@@ -102,6 +102,7 @@ type physicalLogScanner struct {
 	src       string
 	authority logAuthority
 	line      []byte
+	typ       string
 	err       error
 	headerSet bool
 }
@@ -151,6 +152,7 @@ func (s *physicalLogScanner) Scan() bool {
 		env, ok := decodeTypeEnvelope(line)
 		if !ok || env.Type != "caic_meta" {
 			s.line = line
+			s.typ = env.Type
 			return true
 		}
 		var meta agent.MetaMessage
@@ -174,6 +176,10 @@ func (s *physicalLogScanner) Scan() bool {
 
 func (s *physicalLogScanner) Bytes() []byte {
 	return s.line
+}
+
+func (s *physicalLogScanner) Type() string {
+	return s.typ
 }
 
 func (s *physicalLogScanner) Err() error {
@@ -924,9 +930,12 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 			retErr = closeErr
 		}
 	}()
+	return loadPlainLogHeader(path, r, r.reader, r.file)
+}
 
+func loadPlainLogHeader(path string, r *physicalLogReader, source io.Reader, tailSource io.ReaderAt) (*LoadedTask, error) {
 	fw := &jsonutil.FieldWarner{}
-	scanner := newPhysicalLogScanner(r.reader, path)
+	scanner := newPhysicalLogScanner(source, path)
 	meta, err := scanner.ReadHeader(fw)
 	if err != nil {
 		return nil, err
@@ -936,9 +945,11 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 	taskIDStr := taskIDFromLogBase(base)
 	lt := loadedTaskFromMeta(path, taskIDStr, &meta, r.info.ModTime().UTC(), r.info.Size())
 
-	// Validate every segment header without changing the existing lazy metadata
-	// behavior: only the bounded tail contributes task state here.
+	// The authority pass already visits every record. Capture backend-neutral
+	// session snapshots while validating segment headers so live adoption does
+	// not need a second full scan for the usual persisted metadata form.
 	for scanner.Scan() {
+		applySessionMetadataLine(lt, scanner.Type(), scanner.Bytes())
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
@@ -946,7 +957,7 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 	const tailSize = 65536
 	offset := max(int64(0), r.info.Size()-tailSize)
 	buf := make([]byte, r.info.Size()-offset)
-	n, readErr := r.file.ReadAt(buf, offset)
+	n, readErr := tailSource.ReadAt(buf, offset)
 	if readErr != nil && !errors.Is(readErr, io.EOF) {
 		return nil, readErr
 	}
@@ -958,6 +969,9 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 		}
 	}
 	tail.finish(lt)
+	if _, err := verifyPhysicalLog(path, r.file, r.info); err != nil {
+		return nil, err
+	}
 	return lt, nil
 }
 
@@ -1026,9 +1040,12 @@ func loadLogFile(path string, parseFn func([]byte) ([]agent.Message, error)) (_ 
 			retErr = closeErr
 		}
 	}()
+	return loadLogFileFromReader(path, parseFn, r, r.reader)
+}
 
+func loadLogFileFromReader(path string, parseFn func([]byte) ([]agent.Message, error), r *physicalLogReader, source io.Reader) (*LoadedTask, error) {
 	fw := &jsonutil.FieldWarner{}
-	scanner := newPhysicalLogScanner(r.reader, path)
+	scanner := newPhysicalLogScanner(source, path)
 	meta, err := scanner.ReadHeader(fw)
 	if err != nil {
 		return nil, err
@@ -1041,7 +1058,13 @@ func loadLogFile(path string, parseFn func([]byte) ([]agent.Message, error)) (_ 
 			return nil, err
 		}
 	}
-	return lt, scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	if _, err := verifyPhysicalLog(path, r.file, r.info); err != nil {
+		return nil, err
+	}
+	return lt, nil
 }
 
 // loadLogFileTail validates header authority across the physical file, then

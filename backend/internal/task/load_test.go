@@ -5,6 +5,7 @@ package task
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"iter"
 	"os"
 	"path/filepath"
@@ -94,6 +95,37 @@ func mustJSON(t *testing.T, v any) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+type countingLogReader struct {
+	file *os.File
+	size int64
+
+	bytes    int64
+	complete bool
+}
+
+func (r *countingLogReader) Read(p []byte) (int, error) {
+	n, err := r.file.Read(p)
+	r.bytes += int64(n)
+	if errors.Is(err, io.EOF) && r.bytes >= r.size {
+		r.complete = true
+	}
+	return n, err
+}
+
+func (r *countingLogReader) ReadAt(p []byte, off int64) (int, error) {
+	n, err := r.file.ReadAt(p, off)
+	r.bytes += int64(n)
+	return n, err
+}
+
+func (r *countingLogReader) Seek(offset int64, whence int) (int64, error) {
+	return r.file.Seek(offset, whence)
+}
+
+func (r *countingLogReader) Close() error {
+	return r.file.Close()
 }
 
 // claudeAssistant builds a Claude wire-format assistant NDJSON line from
@@ -839,8 +871,8 @@ func TestLoadLogs(t *testing.T) {
 			t.Fatal(err)
 		}
 		lt := tasks[0]
-		if lt.SessionID != "" {
-			t.Fatalf("SessionID = %q before explicit metadata scan, want empty", lt.SessionID)
+		if lt.SessionID != "thread-old" {
+			t.Fatalf("SessionID = %q after authority scan, want thread-old", lt.SessionID)
 		}
 		if err := lt.LoadSessionMetadata(); err != nil {
 			t.Fatal(err)
@@ -1080,6 +1112,121 @@ func TestLoadLogs(t *testing.T) {
 			t.Errorf("ForgeRepo = %q, want %q", lt.ForgeRepo, "widget")
 		}
 	})
+}
+
+func TestTaskAdoptionReadAmplification(t *testing.T) {
+	t.Parallel()
+	meta := mustJSON(t, agent.MetaMessage{
+		MessageType: "caic_meta",
+		Version:     int(agent.LogVersionV1),
+		Prompt:      "adopt",
+		Harness:     harness.Claude,
+	})
+	session := mustJSON(t, agent.MetaSessionMessage{
+		MessageType:  "caic_session",
+		SessionID:    "session-1",
+		AgentVersion: "1.2.3",
+	})
+	segment := meta
+	control := mustJSON(t, agent.DiffStatMessage{MessageType: "caic_diff_stat", Ts: 1})
+
+	for _, tc := range []struct {
+		name  string
+		lines func(*testing.T) []string
+	}{
+		{
+			name: "many small lines",
+			lines: func(t *testing.T) []string {
+				lines := []string{meta, session}
+				message := claudeAssistant(t, map[string]any{"type": "text", "text": "small delta"})
+				for i := range 8192 {
+					lines = append(lines, message)
+					if i%1024 == 0 {
+						lines = append(lines, control, segment)
+					}
+				}
+				return lines
+			},
+		},
+		{
+			name: "large tool output",
+			lines: func(t *testing.T) []string {
+				large := claudeAssistant(t, map[string]any{"type": "text", "text": strings.Repeat("tool output ", 256<<10)})
+				return []string{meta, session, large, control, segment, large}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			path := filepath.Join(dir, "task-org-repo-caic-0.jsonl")
+			writeLogFile(t, dir, filepath.Base(path), tc.lines(t)...)
+
+			var logicalBytes int64
+			completePasses := 0
+			openCounted := func(flags int) (*physicalLogReader, *countingLogReader) {
+				file, err := os.OpenFile(filepath.Clean(path), flags, 0o600)
+				if err != nil {
+					t.Fatal(err)
+				}
+				info, err := file.Stat()
+				if err != nil {
+					_ = file.Close()
+					t.Fatal(err)
+				}
+				counted := &countingLogReader{file: file, size: info.Size()}
+				return &physicalLogReader{file: file, reader: counted, info: info}, counted
+			}
+			noteRead := func(r *physicalLogReader, counted *countingLogReader) {
+				if err := r.Close(); err != nil {
+					t.Fatal(err)
+				}
+				logicalBytes += counted.bytes
+				if counted.complete {
+					completePasses++
+				}
+			}
+
+			headerReader, headerCount := openCounted(os.O_RDONLY)
+			lt, err := loadPlainLogHeader(path, headerReader, headerCount, headerCount)
+			if err != nil {
+				t.Fatal(err)
+			}
+			noteRead(headerReader, headerCount)
+			if lt.SessionID == "" || lt.AgentVersion == "" {
+				t.Fatal("authority scan did not capture complete session metadata")
+			}
+
+			messageReader, messageCount := openCounted(os.O_RDONLY)
+			if _, err := loadLogFileFromReader(path, func([]byte) ([]agent.Message, error) { return nil, nil }, messageReader, messageCount); err != nil {
+				t.Fatal(err)
+			}
+			noteRead(messageReader, messageCount)
+
+			reopenReader, reopenCount := openCounted(os.O_RDWR | os.O_APPEND)
+			if err := validateRawLogAppend(reopenCount, reopenReader.file, path, &Task{Harness: harness.Claude}); err != nil {
+				t.Fatal(err)
+			}
+			noteRead(reopenReader, reopenCount)
+
+			info, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantBytes := 3*info.Size() + min(int64(65536), info.Size())
+			if logicalBytes != wantBytes {
+				t.Errorf("logical bytes = %d, want %d", logicalBytes, wantBytes)
+			}
+			if completePasses != 3 {
+				t.Errorf("complete passes = %d, want 3", completePasses)
+			}
+			wantAmplification := float64(wantBytes) / float64(info.Size())
+			gotAmplification := float64(logicalBytes) / float64(info.Size())
+			if gotAmplification != wantAmplification {
+				t.Errorf("read amplification = %.6f, want %.6f", gotAmplification, wantAmplification)
+			}
+		})
+	}
 }
 
 func TestCompressTerminalLogs(t *testing.T) {

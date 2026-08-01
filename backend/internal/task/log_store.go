@@ -79,21 +79,21 @@ func openTaskLogForAppend(path string, t *Task, create bool) (*taskLogWriter, er
 	if err != nil {
 		return nil, err
 	}
-	if err := validateRawLogAppend(w.file, path, t); err != nil {
+	if err := validateRawLogAppend(w.file, w.file, path, t); err != nil {
 		return nil, errors.Join(err, w.Close())
 	}
 	return w, nil
 }
 
-func validateRawLogAppend(f *os.File, path string, t *Task) error {
+func validateRawLogAppend(source io.ReadSeeker, f *os.File, path string, t *Task) error {
 	info, err := f.Stat()
 	if err != nil {
 		return err
 	}
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
+	if _, err := source.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	authority, err := scanLogAuthority(f, path)
+	authority, err := scanLogAuthority(source, path)
 	if err != nil {
 		return fmt.Errorf("validate task log for append: %w", err)
 	}
