@@ -443,7 +443,7 @@ func (w *piWireFormat) WriteCompact(wr io.Writer, instructions string, logW io.W
 //   - agent_end: emits ResultMessage with usage + duration.
 //   - turn_end: emits UsageMessage from turn's assistant message.
 func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
-	typ, err := decodeEventType(line)
+	typ, _, err := decodeEventType(line)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal probe: %w", err)
 	}

@@ -3,6 +3,7 @@
 package pi
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -814,6 +815,51 @@ func TestWireFormatDurationTracking(t *testing.T) {
 		}
 		if rm.NumTurns != 2 {
 			t.Errorf("NumTurns = %d, want 2", rm.NumTurns)
+		}
+	})
+}
+
+func TestParseMessage(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		line := []byte("{\"type\":\"future\",\"payload\":{\"items\":[1,{\"text\":\"escaped \\\"value\\\"\"}]}} \t\r\n")
+		msgs, err := parseMessage(line, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		raw, ok := msgs[0].(*agent.RawMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.RawMessage", msgs[0])
+		}
+		if raw.MessageType != "future" {
+			t.Errorf("MessageType = %q, want future", raw.MessageType)
+		}
+		if !bytes.Equal(raw.Raw, line) {
+			t.Errorf("Raw = %q, want byte-identical %q", raw.Raw, line)
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name string
+			line string
+		}{
+			{name: "malformed remainder", line: `{"type":"future","x":}`},
+			{name: "trailing data", line: `{"type":"future"} true`},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				msgs, err := parseMessage([]byte(tc.line), nil)
+				if err == nil {
+					t.Fatalf("parseMessage(%q) = %#v, want error", tc.line, msgs)
+				}
+			})
 		}
 	})
 }

@@ -601,12 +601,21 @@ wait for its hard deterministic gate. Integration remains one phase at a time.
   any approved new Go source; the executor verifies no staged content with `git
   diff --cached --exit-code`
 - **Write scope:** package-private v2 record extraction, shared-parser dispatch,
-  and exact version-aware first-bootstrap discrimination under
-  `backend/internal/agent`; adjacent focused tests/benchmark; one shared byte
-  fixture contract at `backend/internal/agent/testdata/v2_agent_records.json`;
-  and only generated first-line index changes in `backend/AGENTS.md`; no task-layer
-  plain/zstd header scanner, server, relay, harness-native parser, or producer
-  file. Task-layer bootstrap migration remains owned by `persistent-read-paths`
+  exact version-aware first-bootstrap discrimination, and a dedicated
+  package-private v1 compatibility extraction at
+  `backend/internal/agent/v1_record.go` under `backend/internal/agent`; adjacent
+  focused tests/benchmark; one shared byte fixture contract at
+  `backend/internal/agent/testdata/v2_agent_records.json`; and only generated
+  first-line index changes in `backend/AGENTS.md`. The sole exception to the
+  harness-native-parser exclusion consists exactly of
+  `backend/internal/agent/pi/parse.go` and
+  `backend/internal/agent/pi/parse_test.go`, only to make the unknown-event
+  `RawMessage` path consume and validate the complete native JSON value, plus
+  `backend/internal/agent/pi/pi.go`, only for the single stateful
+  `piWireFormat.ParseMessage` call-site adjustment needed to remove the
+  forwarding-only `decodeEventType` wrapper. No task-layer plain/zstd header
+  scanner, server, relay, other harness-native parser, or producer file.
+  Task-layer bootstrap migration remains owned by `persistent-read-paths`
 - **Data authority:** file version/harness remain first-header authority; validated
   version selects exact v1 `type` or v2 `t` bootstrap discrimination; the scanner
   record and its bounded `msg` subslice are ephemeral derived views; canonical
@@ -627,9 +636,19 @@ wait for its hard deterministic gate. Integration remains one phase at a time.
   parser version; uses ordinary decoding only for strict small v2 `t` controls;
   rejects `type` on every v2 record with no alias/backward-compatibility path;
   never rounds reader input, calls `json.Unmarshal` on an outer agent envelope,
-  or has a generic slow fallback; includes focused microbenchmark and CPU/
-  allocation trace/profile evidence. The shared fixture contract keeps reader
-  cases and a separate encoder-vector collection. Every encoder vector contains
+  or has a generic slow fallback; keeps v1 behavior isolated in the dedicated
+  package-private `v1_record.go`; and includes focused microbenchmark and CPU/
+  allocation trace/profile evidence. In the exact Pi exception, an unknown event
+  type must consume and validate one complete native JSON value through its
+  closing object and EOF (apart from trailing JSON whitespace) exactly once
+  before returning an unchanged `RawMessage`; malformed remainder such as
+  `{"type":"future","x":}` must fail. Known Pi event dispatch and behavior
+  remain unchanged, and this targeted validation must not become a pre-scan for
+  known types. One decoder-returning `decodeEventType` helper is used by both
+  `parseMessage` and `piWireFormat.ParseMessage`; the latter ignores the
+  decoder. There is no duplicate parsing implementation or broader `pi.go`
+  behavior change. The shared fixture contract keeps reader cases and a separate
+  encoder-vector collection. Every encoder vector contains
   `observed_unix_ns` as a base-10 decimal string for cross-language exactness,
   `expected_timestamp` in canonical grammar, `native_bytes`, and complete
   LF-terminated `record_bytes`. It includes deterministic below-half
@@ -643,17 +662,24 @@ wait for its hard deterministic gate. Integration remains one phase at a time.
   and analysis remain in the coordinator-provided external artifact directory
   and are removed after review; the shared JSON fixture is reviewed source, not
   generated output
-- **Change budget:** at most 3 production files, 3 test/benchmark files, the one
-  shared fixture, and generated `backend/AGENTS.md`; no dependency, API DTO,
-  native callback signature, or broad parser rewrite
+- **Change budget:** at most 5 production files and 4 test/benchmark files: the
+  package-private v1/v2/shared-parser work plus exactly the Pi production and
+  test exception named above; also the one shared fixture and generated
+  `backend/AGENTS.md`. No dependency, API DTO, native callback signature, other
+  harness-parser edit, or broad parser rewrite
 - **Boundary:** preserve v1 `type` bytes, v1 parser correctness, fail-closed
   authority, `[]Message` native callbacks, `[]ParsedMessage` shared output,
   semantic token values, native payload keys, control semantics, ordered parser
   state, null corruption, and the accepted v1 maximum of three complete passes
-  plus bounded tail; do not migrate task-layer bootstrap scanners in this phase;
-  in the fast reader do not add an outer-envelope `json.Unmarshal`, payload-sized
-  envelope-extraction copy, public abstraction, alternate field order, extra
-  field, `type` alias, timestamp normalization, or fallback parser
+  plus bounded tail; preserve all known Pi event behavior and limit the Pi change
+  to complete validation on the unknown-type `RawMessage` branch, with no broader
+  harness-parser cleanup or work pulled forward from `pure-harness-parsers`; do
+  not migrate task-layer bootstrap scanners in this phase. In
+  `parseV2Record`/`parseV2AgentRecord`, do not restore `json.Valid` or any other
+  generic payload-wide pre-scan, and do not add an outer-envelope
+  `json.Unmarshal`, payload-sized envelope-extraction copy, public abstraction,
+  alternate field order, extra field, `type` alias, timestamp normalization, or
+  fallback parser
 - **Decision checkpoints:** stop if scanner-buffer lifetime cannot remain
   synchronous and explicit, if the native callback must retain input bytes, if
   exact extraction requires semantic reserialization, if ordinary control
@@ -679,26 +705,38 @@ wait for its hard deterministic gate. Integration remains one phase at a time.
   fields, extra outer whitespace, trailing data, and delimiter spoofing inside
   nested strings. Reader tests prove accepted timestamps are preserved exactly
   without rounding; instrumentation proves one native callback, no outer agent
-  `encoding/json.Unmarshal`, no payload-sized fast-reader envelope-extraction
-  copy, and bounded allocation behavior
+  `encoding/json.Unmarshal`, no generic payload-wide fast-reader pre-scan, no
+  payload-sized fast-reader envelope-extraction copy, and bounded allocation
+  behavior. Focused Pi tests prove that a valid unknown event still returns the
+  byte-identical `RawMessage`, malformed content after its `type` field (including
+  `{"type":"future","x":}`) and trailing non-whitespace JSON data are
+  rejected, the unknown path consumes the complete native JSON exactly once, and
+  representative known Pi events retain their existing messages/errors
 - **Validation commands:** cwd `/home/user/src/caic`: run focused fast-reader
   tests and microbenchmarks with `go test ./backend/internal/agent -run
   '^Test.*V2.*Record' -bench '^Benchmark.*V2.*Record' -benchmem`; capture a
   representative CPU profile/runtime trace externally and inspect with `go tool
-  pprof`/`go tool trace`; run `go test ./backend/internal/agent/...`; rerun the
+  pprof`/`go tool trace`; run `go test ./backend/internal/agent/pi -run
+  '^TestParseMessage$'` and `go test ./backend/internal/agent/...`; rerun the
   accepted focused v1 counting-reader compatibility tests without changing the
-  immutable benchmark sources; audit for outer-agent `json.Unmarshal`, fallback
-  paths, fast-reader envelope-extraction copies, callback count, any v2 physical
-  `type` discriminator/example and any stale timestamp grammar/precision contract,
-  applying global rule 8's exclusions for v1 framing and native payload keys;
-  run `make lint-fix`, `make lint-docs`, `git diff --check`, `git diff --cached
-  --exit-code`, `git status --short`, and `git ls-files --others
-  --exclude-standard`
+  immutable benchmark sources; audit for outer-agent `json.Unmarshal`, any
+  `json.Valid` or other generic payload-wide pre-scan in
+  `parseV2Record`/`parseV2AgentRecord`, fallback paths, fast-reader envelope-
+  extraction copies, callback count, complete exactly-once validation before the
+  Pi unknown-event `RawMessage` return, changes to known Pi behavior or any other
+  harness parser, any v2 physical `type` discriminator/example, and any stale
+  timestamp grammar/precision contract, applying global rule 8's exclusions for
+  v1 framing and native payload keys; run `make lint-fix`, `make lint-docs`, `git
+  diff --check`, `git diff --cached --exit-code`, `git status --short`, and `git
+  ls-files --others --exclude-standard`
 - **Review:** a fresh Go parsing/performance reviewer receives the integrated
   target and exact pre-integration base from fresh ephemeral state, fixed byte
   contract, fixture schema with reader cases plus all four raw-nanosecond encoder
-  vectors, allocation/callback instrumentation, profile/trace summary, v1
-  compatibility evidence, exact artifact delta, and gate; require `PASS`
+  vectors, allocation/callback/pre-scan instrumentation, profile/trace summary,
+  v1 compatibility evidence, focused Pi unknown-event complete-validation and
+  known-event-preservation evidence, an audit proving the exception touched only
+  the three named Pi files and introduced no generic fast-reader pre-scan or
+  broader harness cleanup, exact artifact delta, and gate; require `PASS`
 - **Exit gate:** all canonical and corruption cases pass; the shared fixture
   schema contains reader cases plus deterministic below-half, exact-half, above-
   half, and second-carry encoder vectors, each with a decimal-string raw Unix-
@@ -707,20 +745,25 @@ wait for its hard deterministic gate. Integration remains one phase at a time.
   discriminators plus canonical three-digit positive timestamps, and the fixture
   is the sole cross-language rounding expectation; version-aware shared-parser
   bootstrap tests require exact v1 `type` and exact v2 `t` while task-layer
-  migration remains
-  deferred; agent extraction performs one native semantic callback and no outer-
-  envelope `encoding/json.Unmarshal`, generic fallback, input rounding, or
-  payload-sized envelope-extraction copy; stale-format audits are clean;
-  microbenchmark/profile evidence is recorded; v1 correctness and three-pass-
-  plus-tail compatibility do not regress; only the allowed repository and
-  external artifact deltas exist
+  migration remains deferred; agent extraction performs one native semantic
+  callback and no outer-envelope `encoding/json.Unmarshal`, generic payload-wide
+  pre-scan (including `json.Valid`), generic fallback, input rounding, or payload-
+  sized envelope-extraction copy. The dedicated package-private `v1_record.go`
+  preserves v1 behavior. Every valid unknown Pi event is returned as an unchanged
+  `RawMessage` only after exactly one complete native-JSON validation, malformed
+  remainder and trailing data fail, known Pi events remain unchanged, and no
+  harness parser beyond the three-file exception changes; stale-format audits
+  are clean; microbenchmark/profile evidence is recorded; v1 correctness and
+  three-pass-plus-tail compatibility do not regress; only the allowed
+  repository and external artifact deltas exist
 - **Handoff:** report API/signature boundaries, shared-parser bootstrap split and
-  deferred task-layer migration, scanner-slice lifetime proof, exact three-digit
-  timestamp parser/rejection rules, callback/copy/unmarshal evidence, fixture
-  schema/vector inventory and hash, stale-format audit commands/results,
+  deferred task-layer migration, dedicated v1 compatibility boundary, scanner-
+  slice lifetime proof, exact three-digit timestamp parser/rejection rules,
+  callback/copy/unmarshal/generic-pre-scan evidence, Pi unknown-event complete-
+  validation tests and known-event preservation, the three-file exception audit,
+  fixture schema/vector inventory and hash, stale-format audit commands/results,
   benchmark/profile/trace commands and results, v1 compatibility, generated-
-  index/intent state, exact files, cleanup,
-  and residual risks
+  index/intent state, exact files, cleanup, and residual risks
 
 ### Phase 2: Build the v2-only relay
 

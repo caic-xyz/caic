@@ -6,6 +6,7 @@ package pi
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -18,28 +19,28 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
-func decodeEventType(line []byte) (pi.EventType, error) {
+func decodeEventType(line []byte) (pi.EventType, *json.Decoder, error) {
 	dec := json.NewDecoder(bytes.NewReader(line))
 	if err := consumeObjectStart(dec); err != nil {
-		return "", err
+		return "", dec, err
 	}
 	for dec.More() {
 		key, err := nextObjectKey(dec)
 		if err != nil {
-			return "", err
+			return "", dec, err
 		}
 		if key == "type" {
 			var typ pi.EventType
 			if err := dec.Decode(&typ); err != nil {
-				return "", err
+				return "", dec, err
 			}
-			return typ, nil
+			return typ, dec, nil
 		}
 		if err := discardValue(dec); err != nil {
-			return "", err
+			return "", dec, err
 		}
 	}
-	return "", nil
+	return "", dec, nil
 }
 
 func decodeMessageUpdateEvent(line []byte) (pi.MessageUpdateDeltaEvent, error) {
@@ -97,6 +98,35 @@ func discardValue(dec *json.Decoder) error {
 	return nil
 }
 
+func validateUnknownEventRemainder(dec *json.Decoder) error {
+	for dec.More() {
+		if _, err := nextObjectKey(dec); err != nil {
+			return err
+		}
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			return err
+		}
+	}
+
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	if delim, ok := tok.(json.Delim); !ok || delim != '}' {
+		return fmt.Errorf("JSON object ends with %T, want closing brace", tok)
+	}
+
+	tok, err = dec.Token()
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("unexpected JSON token %v after object", tok)
+}
+
 // parseMessage decodes a single JSONL line from Pi's stdout into one or more
 // typed agent.Messages.
 //
@@ -116,7 +146,7 @@ func discardValue(dec *json.Decoder) error {
 //   - UserInputMessage     — prompt command (stdin logged by relay)
 //   - RawMessage           — unrecognised event types
 func parseMessage(line []byte, _ *jsonutil.FieldWarner) ([]agent.Message, error) {
-	typ, err := decodeEventType(line)
+	typ, dec, err := decodeEventType(line)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal probe: %w", err)
 	}
@@ -198,6 +228,9 @@ func parseMessage(line []byte, _ *jsonutil.FieldWarner) ([]agent.Message, error)
 
 	// Unknown event type.
 	if typ != "" {
+		if err := validateUnknownEventRemainder(dec); err != nil {
+			return nil, fmt.Errorf("unmarshal unknown event: %w", err)
+		}
 		return []agent.Message{&agent.RawMessage{
 			MessageType: string(typ),
 			Raw:         append([]byte(nil), line...),
