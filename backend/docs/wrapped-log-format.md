@@ -15,6 +15,22 @@ The physical authority foundation is shipped at the shared comparison role,
   mismatched, unknown-version, and valid-v2 raw append all fail closed.
 - `LogRecordParser` with exact v1/v2 dispatch, shared control conversion, strict
   UTF-8 and envelope validation, ordered state, and pending-action deduplication.
+- The strict canonical v2 reader in `backend/internal/agent/v2_record.go` enforces
+  exact `t`, `ts`, `msg` framing, canonical three-digit timestamps, one
+  synchronous native callback, a bounded zero-copy `msg` view, and no outer
+  unmarshal, payload-wide pre-scan, or fallback. Its durable contract lives in
+  `backend/internal/agent/v2_record_test.go`,
+  `backend/internal/agent/v2_record_benchmark_test.go`, and the shared
+  `backend/internal/agent/testdata/v2_agent_records.json` fixture.
+- The separate v2-only relay is embedded as `relay.ScriptV2` without a production
+  consumer. `backend/internal/agent/relay/relay_v2.py` and
+  `backend/internal/agent/relay/test_relay_v2.py` preserve native JSON value bytes,
+  use the shared canonical fixture for exact three-digit timestamp framing, keep
+  the v1 stream asymmetry, and leave the v1 relay sources frozen.
+- Dedicated `backend/internal/agent/v1_record.go` extraction preserves ordinary
+  v1 native fallback. `backend/internal/agent/pi/parse.go` and its focused tests
+  validate complete unknown-event values with the same decoder before unchanged
+  `RawMessage` passthrough. `backend/AGENTS.md` indexes the accepted sources.
 - Explicit outer `ParsedMessage` metadata with `Message` and `ProducerTime`.
   Native callbacks remain `[]Message`, parsed output is `[]ParsedMessage`, and
   every consumer must explicitly unwrap `.Message`. This correction passed
@@ -31,9 +47,10 @@ The physical authority foundation is shipped at the shared comparison role,
 
 The locked unreleased-v2 decisions below supersede every local-only v2
 `type`-discriminator or higher-than-millisecond timestamp assumption. Because v2
-has not shipped, there is no alias or compatibility path to preserve: the current
-fast-reader phase reshapes the shared parser/fixtures first, and the later
-persistent-reader phase migrates task-layer bootstrap scanning.
+has not shipped, there is no alias or compatibility path to preserve. The strict
+reader and shared fixture now establish the canonical parser contract; the
+remaining persistent-reader work migrates task-layer bootstrap and segment
+scanning without transferring that authority into `LogRecordParser`.
 
 For compatibility, breaking-change, and churn review, resolve `origin/main`
 immediately before dispatch and freeze its exact commit as `SHIPPED_BASE` in the
@@ -51,8 +68,9 @@ The remaining production behavior is still legacy v1:
   startup traffic, and other direct writes still use the v1 vocabulary. Codex
   and OpenCode handshake traffic is not persisted in task logs.
 - Production disk/live/export call sites do not yet use `LogRecordParser`, and
-  harness parsers still recognize selected `caic_*` records. There is no v2
-  relay or strict fast v2 record reader yet.
+  harness parsers still recognize selected `caic_*` records. The accepted strict
+  v2 reader and embedded v2 relay remain latent and unselected; there is no
+  production task-layer v2 read path yet.
 - `ToolTimingTracker` does not yet consume parsed producer-time metadata, and no
   production relay emits persisted per-message timestamps.
 - `eventreplay.CacheVersion` is 4.
@@ -124,14 +142,16 @@ discriminator, changed version, or changed harness is corruption.
 read this first-header authority from the same inode they would append. If the
 local header is missing or unreadable, adoption fails closed: no relay attach,
 relay restart, replacement header, or append is allowed. This is intentionally
-stricter than guessing from runtime metadata or the deployed script. The current
-fast-reader phase owns exact version-aware bootstrap discrimination at the shared
-parser boundary; `persistent-read-paths` later owns migration of the task-layer
-plain/zstd header and segment scanners to the same rule. Until that persistent-
-reader migration, exact-`t` v2 is available only at the shared parser boundary,
-not as a production task-layer adoption claim. Until the typed versioned sink is
-integrated, raw append accepts only valid v1 authority; valid v2 is rejected
-before append so an untyped writer cannot create a mixed file.
+stricter than guessing from runtime metadata or the deployed script.
+`persistent-read-paths` owns exact version-aware first-bootstrap and later-
+segment discrimination in every task-layer plain/zstd reader. After validating
+that authority, the task layer constructs `NewLogRecordParser` with the already-
+validated `LogVersion` and passes it every physical record. The record parser
+neither establishes header authority nor tracks which record is first. Until
+that persistent-reader migration, exact-`t` v2 is not a production task-layer
+adoption claim. Until the typed versioned sink is integrated, raw append accepts
+only valid v1 authority; valid v2 is rejected before append so an untyped writer
+cannot create a mixed file.
 
 ### v1 and v2 framing
 
@@ -237,10 +257,14 @@ persisted.
 
 ### Reader contract
 
-There are two structural readers selected once from file authority. V1 retains
-its accepted compatibility parser. V2 uses the strict fast record reader below;
-it never routes an `agent` envelope through generic outer-object decoding. The
-shared parser returns an outer stream value:
+There are two structural record decoders selected once from task-layer file
+authority. The task layer constructs `NewLogRecordParser` with an already-
+validated `LogVersion` and passes it every physical record, including authorized
+bootstrap and segment records. The parser does not discover header authority or
+track first-record position. V1 retains its accepted compatibility parser and
+ordinary native fallback. V2 uses the strict fast record reader below; it never
+routes an `agent` envelope through generic outer-object decoding. The shared
+parser returns an outer stream value:
 
 ```go
 type ParsedMessage struct {
@@ -257,15 +281,18 @@ Harness-native parsers keep their existing `[]Message` result; only
 `LogRecordParser` adds the outer metadata and returns parsed values.
 
 ```text
-read and validate version from first caic_meta bootstrap
-switch version exactly and require its discriminator:
-  1 + exact `type:"caic_meta"` -> parseV1
-  2 + exact `t:"caic_meta"`    -> parseV2
-  default or wrong key          -> corruption/unsupported-version error
+task-layer persistent reader:
+  validate first nonempty record as the exact caic_meta bootstrap
+  parser = NewLogRecordParser(already-validated LogVersion, native parser)
+  parser.ParseRecord(bootstrap)
+  for each later physical record in the same semantic pass:
+    if record is caic_meta:
+      validate its exact discriminator/version/harness against bootstrap
+    parser.ParseRecord(record)
 
 parseV1(record):
   recognized type=caic_* control -> shared control conversion
-  otherwise                      -> native harness parser
+  otherwise, including a missing or unrecognized type -> native harness parser
   wrap every semantic result with zero ProducerTime
 
 parseV2(record):
@@ -337,6 +364,13 @@ replay from a physical byte offset may therefore replay persisted stdin. No
 direction field is added; native payloads retain their existing protocol `type`
 keys. `ProducerTime` is the immutable rounded producer observation captured when
 the logical record is observed; its precision is milliseconds.
+
+Under the same publication lock used by attach replay, the relay persists each
+complete record before client publication: it loops through partial file writes,
+rejects zero, missing, or invalid write counts and write errors, flushes the
+output, and only then sends the same record bytes to the client. A persistence
+failure sends no bytes for that record to the client. This preserves publication
+order and keeps attach offsets aligned to the physical file.
 
 A shared Go version-aware relay-record reader:
 
@@ -444,9 +478,12 @@ integration, and review:
   Compatibility, breaking-change, and combined parser churn use that frozen
   value, never the later value of a moving `origin/main`.
 - **Local dispatch/integration role:** confirm that the accepted unshipped
-  physical-authority, parsed-message metadata, and v1 adoption-performance
-  results are present, including the three immutable adoption benchmark sources,
-  then record actual HEAD as `LOCAL_BASE` in the fresh ephemeral manifest. The
+  physical-authority, parsed-message metadata, strict canonical v2 reader and
+  fixture, Pi complete-value validation, dedicated v1 extraction, v1 adoption-
+  performance results, and the separate latent v2 relay plus `relay.ScriptV2`
+  embed and tests are present, including the strict-reader source, tests and
+  microbenchmark plus the three immutable adoption benchmark sources. Then record
+  actual HEAD as `LOCAL_BASE` in the fresh ephemeral manifest. The
   parser has no production consumers and does not establish a published API
   contract.
 - **Completed phase role:** after implementation and again after integration,
@@ -454,17 +491,23 @@ integration, and review:
   ephemeral status and the phase handoff. Immediately before review, freshly
   capture and record all three exact values in the reviewer prompt.
 
-Focused and full agent tests, the changed-package race test, vet, mandatory lint,
-method placement, diff, and status checks passed for the accepted local parser.
-The full `agent/...` race run still has the pre-existing Pi one-second timeout
-reproduced at its clean comparison base; it is not evidence against the local
-parser and remains outside this rollout. `ParsedMessage` replaced
-`TimestampMessage` and passed independent review. The accepted v1 adoption gate
-also passed fresh independent review: three complete passes plus bounded tail,
-canonical 1 GiB `rchar`/fixture 4.000 to 3.000, corrected advisory
-warm/cold medians recorded above, and `encoding/json` identified as the dominant
-CPU cost. Those durable results and immutable benchmark sources are prerequisites
-rather than active phases.
+Focused and full agent tests, focused changed-path race tests, vet, mandatory
+lint, method placement, diff, and status checks passed for the accepted local
+parser and strict fast reader. The accepted source contract includes strict v2
+control and agent rejection, exact canonical timestamps, a single synchronous
+native callback, bounded zero-copy payload extraction, no outer unmarshal or
+payload-wide pre-scan, dedicated v1 native fallback, and complete same-decoder Pi
+validation before unchanged unknown-event passthrough. The full `agent/...` race
+run still has the pre-existing Pi one-second timeout reproduced at its clean
+comparison base; it is not evidence against the local parser and remains outside
+this rollout. `ParsedMessage` replaced `TimestampMessage` and passed independent
+review. The accepted v1 adoption gate also passed fresh independent review: three
+complete passes plus bounded tail, canonical 1 GiB `rchar`/fixture 4.000 to 3.000,
+corrected advisory warm/cold medians recorded above, and `encoding/json`
+identified as the dominant CPU cost. The strict-reader implementation, fixture,
+tests, microbenchmark, Pi validation, dedicated v1 extraction, immutable v1
+benchmark sources, and the separate latent v2 relay implementation, embed, and
+tests are durable prerequisites rather than active phases.
 
 No next phase may dispatch unless the worktree condition matches its symbolic
 Base state. Immediately before dispatch, integration, and review, freshly
@@ -477,8 +520,8 @@ manifest and requires fresh capture and recording before continuing; it does not
 require a plan edit while the symbolic prerequisites still hold.
 
 - **Expected worktree condition:** clean or limited to the exact user-accepted
-  local parser delta and the declared writer-owned phase scope; no unexplained
-  staged, untracked, or generated paths
+  unshipped rollout delta and the declared writer-owned phase scope; no
+  unexplained staged, untracked, or generated paths
 - **VCS authority:** the user owns staging and commits. Subagents must not stage,
   commit, reset, rebase, merge, or push. No history rewrite, amend, or squash may
   occur without explicit user authorization. Restore operations require
@@ -544,10 +587,7 @@ Global phase rules:
 ## Dependency graph
 
 ```text
-v2-fast-record-reader -> relay-v2
-v2-fast-record-reader -> persistent-read-paths
 relay-v2 -> live-relay-read-path
-v2-fast-record-reader -> live-relay-read-path
 
 persistent-read-paths -> pure-harness-parsers
 live-relay-read-path -> pure-harness-parsers
@@ -569,333 +609,32 @@ v2-adoption-performance -> v2-producer-cutover
 v2-producer-cutover -> runtime-adoption-smoke
 ```
 
-The accepted parsed-message metadata and v1 adoption result are prerequisites of
-the active graph. The strict fast reader is integrated first so both relay and
-persistent paths implement one canonical contract. After it, `relay-v2` and
-`persistent-read-paths` may run in isolated worktrees because their write scopes
-are disjoint. `live-relay-read-path` waits for the relay; `versioned-log-sink`
-waits for the persistent snapshot contract and may not overlap that work.
-`pure-harness-parsers` and `timestamp-cache-semantics` may run together only
-after both read paths are integrated. `v2-adoption-performance` waits for the
-persistent reader and sink, and both direct-writer migration and final cutover
-wait for its hard deterministic gate. Integration remains one phase at a time.
+The `relay-v2 -> live-relay-read-path` edge is a satisfied prerequisite retained
+to make the accepted relay dependency explicit; `relay-v2` is no longer an
+active phase. The accepted relay, parsed-message metadata, strict fast reader,
+shared fixture, Pi validation, dedicated v1 extraction, and v1 adoption result
+are prerequisites of the active graph. `persistent-read-paths` is the earliest
+active phase. `live-relay-read-path` consumes the accepted latent relay and
+`relay.ScriptV2`; `versioned-log-sink` waits for the persistent snapshot contract
+and may not overlap that work. `pure-harness-parsers` and
+`timestamp-cache-semantics` may run together only after both read paths are
+integrated. `v2-adoption-performance` waits for the persistent reader and sink,
+and both direct-writer migration and final cutover wait for its hard deterministic
+gate. Integration remains one phase at a time.
 
 ## Active phased rollout
 
-### Phase 1: Implement the strict v2 fast record reader
-
-- **Stable ID:** `v2-fast-record-reader`
-- **Responsible:** one phase-executor subagent
-- **Depends on:** none
-- **May run with:** none
-- **Base state:** the accepted physical-authority parser, `ParsedMessage`
-  metadata, and v1 adoption result are integrated locally but unshipped; no
-  production consumer uses `LogRecordParser`; the worktree matches the declared
-  clean/accepted-delta condition. Immediately before dispatch, resolve actual
-  HEAD, `origin/main`, and any configured upstream into the ephemeral manifest;
-  record parser/test statistics, current v2 decoding call graph, the accepted
-  three-source benchmark hashes, and an absolute external artifact directory
-- **VCS authority:** follow the global serial/isolated integration rule exactly;
-  no subagent may stage, commit, merge, reset, rebase, or push. Before generated-
-  index replay, the coordinator obtains a user-owned intent-to-add checkpoint for
-  any approved new Go source; the executor verifies no staged content with `git
-  diff --cached --exit-code`
-- **Write scope:** package-private v2 record extraction, shared-parser dispatch,
-  exact version-aware first-bootstrap discrimination, and a dedicated
-  package-private v1 compatibility extraction at
-  `backend/internal/agent/v1_record.go` under `backend/internal/agent`; adjacent
-  focused tests/benchmark; one shared byte fixture contract at
-  `backend/internal/agent/testdata/v2_agent_records.json`; and only generated
-  first-line index changes in `backend/AGENTS.md`. The sole exception to the
-  harness-native-parser exclusion consists exactly of
-  `backend/internal/agent/pi/parse.go` and
-  `backend/internal/agent/pi/parse_test.go`, only to make the unknown-event
-  `RawMessage` path consume and validate the complete native JSON value, plus
-  `backend/internal/agent/pi/pi.go`, only for the single stateful
-  `piWireFormat.ParseMessage` call-site adjustment needed to remove the
-  forwarding-only `decodeEventType` wrapper. No task-layer plain/zstd header
-  scanner, server, relay, other harness-native parser, or producer file.
-  Task-layer bootstrap migration remains owned by `persistent-read-paths`
-- **Data authority:** file version/harness remain first-header authority; validated
-  version selects exact v1 `type` or v2 `t` bootstrap discrimination; the scanner
-  record and its bounded `msg` subslice are ephemeral derived views; canonical
-  `agent.ts` is immutable producer metadata already rounded to milliseconds.
-  Shared fixture raw observations are deterministic encoder inputs and fixture
-  bytes describe transport behavior; neither is an alternate authority
-- **Purpose:** accept canonical v2 agent records with one allocation-conscious
-  structural extraction and exactly one native semantic parse before any relay
-  or production reader integration
-- **Deliverables:** a natural package-private reader that verifies the exact
-  `{"t":"agent","ts":` prefix, canonical positive three-fraction timestamp,
-  `,"msg":` delimiter, final message position, closing brace, and strict outer
-  shape while the enclosing scanner accounts for required LF and size; obtains a
-  zero-copy bounded `msg` slice from the LF-free scanner record; invokes the
-  existing native `[]Message` callback exactly once; returns `[]ParsedMessage`
-  with the exact millisecond timestamp on every result; validates exact v1
-  `type:"caic_meta"` versus v2 `t:"caic_meta"` bootstrap according to the closed
-  parser version; uses ordinary decoding only for strict small v2 `t` controls;
-  rejects `type` on every v2 record with no alias/backward-compatibility path;
-  never rounds reader input, calls `json.Unmarshal` on an outer agent envelope,
-  or has a generic slow fallback; keeps v1 behavior isolated in the dedicated
-  package-private `v1_record.go`; and includes focused microbenchmark and CPU/
-  allocation trace/profile evidence. In the exact Pi exception, an unknown event
-  type must consume and validate one complete native JSON value through its
-  closing object and EOF (apart from trailing JSON whitespace) exactly once
-  before returning an unchanged `RawMessage`; malformed remainder such as
-  `{"type":"future","x":}` must fail. Known Pi event dispatch and behavior
-  remain unchanged, and this targeted validation must not become a pre-scan for
-  known types. One decoder-returning `decodeEventType` helper is used by both
-  `parseMessage` and `piWireFormat.ParseMessage`; the latter ignores the
-  decoder. There is no duplicate parsing implementation or broader `pi.go`
-  behavior change. The shared fixture contract keeps reader cases and a separate
-  encoder-vector collection. Every encoder vector contains
-  `observed_unix_ns` as a base-10 decimal string for cross-language exactness,
-  `expected_timestamp` in canonical grammar, `native_bytes`, and complete
-  LF-terminated `record_bytes`. It includes deterministic below-half
-  (`1234499000` -> `1.234`), exact-half (`1234500000` -> `1.235`), above-half
-  (`1234501000` -> `1.235`), and second-carry (`1999500000` -> `2.000`) vectors.
-  Python relay and Go sink tests reuse these byte-exact vectors read-only; the
-  fixture is the sole source of rounding expectations
-- **Generated artifacts:** `backend/AGENTS.md` may be regenerated only by `make
-  lint-fix` from `/home/user/src/caic` after any required user-owned intent-to-
-  add checkpoint. Benchmark output, CPU/memory profiles, traces, test binaries,
-  and analysis remain in the coordinator-provided external artifact directory
-  and are removed after review; the shared JSON fixture is reviewed source, not
-  generated output
-- **Change budget:** at most 5 production files and 4 test/benchmark files: the
-  package-private v1/v2/shared-parser work plus exactly the Pi production and
-  test exception named above; also the one shared fixture and generated
-  `backend/AGENTS.md`. No dependency, API DTO, native callback signature, other
-  harness-parser edit, or broad parser rewrite
-- **Boundary:** preserve v1 `type` bytes, v1 parser correctness, fail-closed
-  authority, `[]Message` native callbacks, `[]ParsedMessage` shared output,
-  semantic token values, native payload keys, control semantics, ordered parser
-  state, null corruption, and the accepted v1 maximum of three complete passes
-  plus bounded tail; preserve all known Pi event behavior and limit the Pi change
-  to complete validation on the unknown-type `RawMessage` branch, with no broader
-  harness-parser cleanup or work pulled forward from `pure-harness-parsers`; do
-  not migrate task-layer bootstrap scanners in this phase. In
-  `parseV2Record`/`parseV2AgentRecord`, do not restore `json.Valid` or any other
-  generic payload-wide pre-scan, and do not add an outer-envelope
-  `json.Unmarshal`, payload-sized envelope-extraction copy, public abstraction,
-  alternate field order, extra field, `type` alias, timestamp normalization, or
-  fallback parser
-- **Decision checkpoints:** stop if scanner-buffer lifetime cannot remain
-  synchronous and explicit, if the native callback must retain input bytes, if
-  exact extraction requires semantic reserialization, if ordinary control
-  decoding could accept noncanonical agent data, or if any new authority/public
-  API is needed
-- **Validation intent:** exact success for `{"t":"agent","ts":1.000,"msg":...}`
-  with nested objects/arrays, escaped strings, internal native whitespace,
-  canonical payload bytes derived from logical values with surrounding JSON
-  whitespace stripped, JSON string/number/boolean scalar kinds, valid UTF-8,
-  diagnostic strings, maximum accepted size, and one-to-many/zero-message native
-  parses. Validate the shared fixture schema, decimal-string raw nanoseconds,
-  expected timestamp, native bytes, and LF-terminated record bytes; require the
-  named below-half, exact-half, above-half, and second-carry encoder vectors in
-  addition to reader cases. Exact v1 `type` and v2 `t` `caic_meta` bootstrap/
-  segment success occurs under their validated versions. Exact corruption
-  rejection covers
-  `{"t":"agent","ts":1.000,"msg":null}`, v2 `type` agent/control/meta records,
-  v1 `t` bootstrap, both discriminator keys, missing/duplicate discriminator,
-  malformed UTF-8, malformed/oversized records, unstripped surrounding `msg`
-  whitespace, `0.000`, integer/no fraction, one-, two-, and four-or-more-digit
-  fractions, signs, exponents, redundant integer leading zeros, overflow and
-  out-of-range times, unknown fields/tokens, duplicate/missing/reordered agent
-  fields, extra outer whitespace, trailing data, and delimiter spoofing inside
-  nested strings. Reader tests prove accepted timestamps are preserved exactly
-  without rounding; instrumentation proves one native callback, no outer agent
-  `encoding/json.Unmarshal`, no generic payload-wide fast-reader pre-scan, no
-  payload-sized fast-reader envelope-extraction copy, and bounded allocation
-  behavior. Focused Pi tests prove that a valid unknown event still returns the
-  byte-identical `RawMessage`, malformed content after its `type` field (including
-  `{"type":"future","x":}`) and trailing non-whitespace JSON data are
-  rejected, the unknown path consumes the complete native JSON exactly once, and
-  representative known Pi events retain their existing messages/errors
-- **Validation commands:** cwd `/home/user/src/caic`: run focused fast-reader
-  tests and microbenchmarks with `go test ./backend/internal/agent -run
-  '^Test.*V2.*Record' -bench '^Benchmark.*V2.*Record' -benchmem`; capture a
-  representative CPU profile/runtime trace externally and inspect with `go tool
-  pprof`/`go tool trace`; run `go test ./backend/internal/agent/pi -run
-  '^TestParseMessage$'` and `go test ./backend/internal/agent/...`; rerun the
-  accepted focused v1 counting-reader compatibility tests without changing the
-  immutable benchmark sources; audit for outer-agent `json.Unmarshal`, any
-  `json.Valid` or other generic payload-wide pre-scan in
-  `parseV2Record`/`parseV2AgentRecord`, fallback paths, fast-reader envelope-
-  extraction copies, callback count, complete exactly-once validation before the
-  Pi unknown-event `RawMessage` return, changes to known Pi behavior or any other
-  harness parser, any v2 physical `type` discriminator/example, and any stale
-  timestamp grammar/precision contract, applying global rule 8's exclusions for
-  v1 framing and native payload keys; run `make lint-fix`, `make lint-docs`, `git
-  diff --check`, `git diff --cached --exit-code`, `git status --short`, and `git
-  ls-files --others --exclude-standard`
-- **Review:** a fresh Go parsing/performance reviewer receives the integrated
-  target and exact pre-integration base from fresh ephemeral state, fixed byte
-  contract, fixture schema with reader cases plus all four raw-nanosecond encoder
-  vectors, allocation/callback/pre-scan instrumentation, profile/trace summary,
-  v1 compatibility evidence, focused Pi unknown-event complete-validation and
-  known-event-preservation evidence, an audit proving the exception touched only
-  the three named Pi files and introduced no generic fast-reader pre-scan or
-  broader harness cleanup, exact artifact delta, and gate; require `PASS`
-- **Exit gate:** all canonical and corruption cases pass; the shared fixture
-  schema contains reader cases plus deterministic below-half, exact-half, above-
-  half, and second-carry encoder vectors, each with a decimal-string raw Unix-
-  nanosecond observation, expected canonical timestamp, native bytes, and complete
-  LF-terminated record bytes. Those bytes contain only v2 physical `t`
-  discriminators plus canonical three-digit positive timestamps, and the fixture
-  is the sole cross-language rounding expectation; version-aware shared-parser
-  bootstrap tests require exact v1 `type` and exact v2 `t` while task-layer
-  migration remains deferred; agent extraction performs one native semantic
-  callback and no outer-envelope `encoding/json.Unmarshal`, generic payload-wide
-  pre-scan (including `json.Valid`), generic fallback, input rounding, or payload-
-  sized envelope-extraction copy. The dedicated package-private `v1_record.go`
-  preserves v1 behavior. Every valid unknown Pi event is returned as an unchanged
-  `RawMessage` only after exactly one complete native-JSON validation, malformed
-  remainder and trailing data fail, known Pi events remain unchanged, and no
-  harness parser beyond the three-file exception changes; stale-format audits
-  are clean; microbenchmark/profile evidence is recorded; v1 correctness and
-  three-pass-plus-tail compatibility do not regress; only the allowed
-  repository and external artifact deltas exist
-- **Handoff:** report API/signature boundaries, shared-parser bootstrap split and
-  deferred task-layer migration, dedicated v1 compatibility boundary, scanner-
-  slice lifetime proof, exact three-digit timestamp parser/rejection rules,
-  callback/copy/unmarshal/generic-pre-scan evidence, Pi unknown-event complete-
-  validation tests and known-event preservation, the three-file exception audit,
-  fixture schema/vector inventory and hash, stale-format audit commands/results,
-  benchmark/profile/trace commands and results, v1 compatibility, generated-
-  index/intent state, exact files, cleanup, and residual risks
-
-### Phase 2: Build the v2-only relay
-
-- **Stable ID:** `relay-v2`
-- **Responsible:** one phase-executor subagent
-- **Depends on:** `v2-fast-record-reader`
-- **May run with:** `persistent-read-paths` in an isolated worktree
-- **Base state:** accepted stable phase `v2-fast-record-reader` is integrated,
-  the v2 relay is not yet implemented, and all rollout changes remain unshipped.
-  The worktree matches the declared clean/accepted-delta condition.
-  Immediately before dispatch, resolve actual HEAD, `origin/main`, and any
-  configured upstream into the ephemeral manifest and capture status plus byte/
-  hash baselines for `relay.py` and `test_relay.py`
-- **VCS authority:** follow the global serial/isolated integration rule exactly;
-  no subagent may stage, commit, merge, reset, rebase, or push; v1 files are
-  read-only. Before generated-file replay, the coordinator must obtain the
-  user-owned intent-to-add checkpoint for exactly `relay_v2.py` and
-  `test_relay_v2.py`; the executor verifies no staged content with `git diff
-  --cached --exit-code`, and the user owns later index cleanup/staging/history
-- **Write scope:** new `backend/internal/agent/relay/relay_v2.py`, new
-  `backend/internal/agent/relay/test_relay_v2.py`, latent
-  `backend/internal/agent/relay/embed.go` wiring plus its first-line purpose
-  comment, read-only consumption of the accepted shared canonical fixture, and
-  generated `backend/AGENTS.md` file-index output only
-- **Data authority:** script version is derived from backend selection; the relay
-  captures a raw clock observation and, as its own physical encoder, rounds it
-  exactly once. The resulting millisecond `ProducerTime` is immutable metadata,
-  not version authority
-- **Purpose:** create a single-purpose v2 physical stream without activating it
-- **Deliverables:** copied v1 infrastructure with byte-exact canonical v2
-  stdout/logged-stdin framing in exact `t`, `ts`, `msg` order; every v2 physical
-  control also discriminated by `t`; positive Unix seconds with exactly three
-  fractional digits and no sign/exponent/leading zero; deterministic producer
-  rounding from positive Unix nanoseconds via `(ns + 500_000) / 1_000_000`, with
-  half milliseconds upward and carry into the next second; stripping only
-  surrounding native JSON whitespace while preserving the remaining native value
-  bytes without semantic reserialization; computing and enforcing the final
-  encoded-record size before emission; necessary output buffers, copies, and
-  repeated writes permitted; `output.jsonl` as a client-stream superset; byte
-  identity for every canonical record sent to both destinations; no live stdin
-  echo; strict unprefixed control tokens under `t`; newline carry and EOF flush;
-  native logical JSON null, invalid JSON/UTF-8, and oversized diagnostics using
-  the existing bounded representation rather than `msg:null`; read-only
-  consumption of the shared fixture's raw-observation encoder vectors for byte-
-  exact Go reader/relay/sink parity, with no relay-local copy of rounding expected
-  values; no v1-emitting branch or v2 `type` alias; update `embed.go`'s first-line
-  purpose comment from one-script wording to describe the two version-specific
-  relay
-  embeds
-- **Generated artifacts:** `backend/AGENTS.md` is generated from all three
-  affected purpose inputs: the first-line purpose comments of the two new Python
-  files (after any shebang) add `relay_v2.py` and `test_relay_v2.py` entries, and
-  `embed.go`'s updated first line refreshes its existing entry. Run
-  `make lint-fix` (canonical underlying command:
-  `scripts/update_agents_file_index.py`) from `/home/user/src/caic`. The
-  generator reads `git ls-files`, so it must run only after the user-owned
-  intent-to-add checkpoint above; replay mode is the same command from the same
-  cwd, with no hand edit of the index output
-- **Change budget:** exact allowed delta is the two new Python files, one latent
-  `embed.go` edit, and generated `backend/AGENTS.md`; zero-byte delta to
-  `relay.py` and `test_relay.py`; copied infrastructure churn is expected only
-  in `relay_v2.py`
-- **Boundary:** no backend selection, no v2 task logs, no shared Python module,
-  no mutation of the accepted canonical fixture or fast-reader contract, no
-  zero-copy producer requirement, no semantic token change, no v2 `type`
-  compatibility, and no edit to frozen v1 behavior
-- **Decision checkpoints:** stop if the final-record limit cannot fit existing
-  scanner bounds, if a record sent to both client and output must differ between
-  destinations, or if sharing v1 code is proposed
-- **Validation intent:** chunk boundaries, blank lines, partial EOF, logged and
-  unlogged stdin, no live stdin echo, attach replay from a physical offset,
-  stdout, concurrent `t` controls, nested/escaped JSON plus string/number/boolean
-  scalars, surrounding native whitespace, and read-only execution of every shared
-  raw-observation encoder vector, including its below-half, exact-half, above-half,
-  and second-carry cases. The shared fixture supplies all expected timestamps and
-  bytes; tests do not duplicate them. Every output has a positive in-range
-  timestamp with exactly three fractional digits; zero, negative, overflow, or
-  out-of-range producer observations fail before emission.
-  Native logical JSON null converts to the existing bounded diagnostic string
-  with no `msg:null`; also cover invalid UTF-8, oversized input, final-size
-  enforcement before emission, byte-exact cross-language fixture parity, per-
-  record client/file identity, output-superset framing, and absence of extra/
-  reordered fields, v2 `type`, or v1 emissions
-- **Validation commands:** cwd `/home/user/src/caic`: after the coordinator
-  records the user-owned `git add -N` checkpoint for the two approved new files,
-  run `git status --short`; `git diff --cached --exit-code`; `python3
-  backend/internal/agent/relay/test_relay_v2.py`; `python3
-  backend/internal/agent/relay/test_relay.py`; `ruff check
-  backend/internal/agent/relay`; `make lint-fix`; `git diff --check`; `git
-  diff --cached --exit-code`; `git status --short`; `git ls-files --others
-  --exclude-standard`; compare v1 file hashes, verify the generated index, and
-  run the global stale-format audit over relay output/tests, excluding v1 and
-  nested native payload keys exactly as rule 8 permits
-- **Review:** fresh Python/concurrency reviewer inspects the two new scripts,
-  latent embed wiring, `embed.go`'s two-version first-line purpose comment, all
-  three purpose inputs reflected in generated `backend/AGENTS.md`, accepted
-  cross-language fixture parity from read-only execution of the shared raw-
-  observation vectors, exact `t` framing, single-round millisecond/carry and
-  native-byte behavior with no duplicated expected values, intent-to-add status,
-  empty cached-content diff, v1 hashes, final-size math, and integrated gate;
-  require `PASS`
-- **Exit gate:** direct tests cover all named failure paths and prove the
-  output-superset/client-subset contract; exact delta is the two new Python files,
-  latent `embed.go` edit including its two-version purpose comment, and generated
-  `backend/AGENTS.md` with both new entries and the refreshed embed entry;
-  emitted envelopes match every read-only shared raw-observation vector byte-for-
-  byte in exact `t`, `ts`, `msg` order, with exactly three digits after the relay
-  encoder rounds its raw clock observation once; no relay-local rounding
-  expectation is duplicated; every v2 control uses `t`, and no v2 `type` alias
-  exists; logical native null uses the existing bounded diagnostic and never emits
-  `msg:null`; final encoded size is enforced before emission without a zero-copy
-  producer requirement; intent-to-add entries are
-  explicitly accounted for with no staged content; v1 hashes match the baseline;
-  and no production path references the v2 embed
-- **Handoff:** report test cases, exact discriminator audit, shared fixture hash
-  and read-only raw-observation vector results, single-round/carry evidence with no
-  duplicated expectations, native-byte/null-diagnostic behavior, final-size-bound
-  proof, producer emission mechanics, v1 hashes, exact four-file delta/diffstat,
-  the
-  three purpose-input changes and generated index entries, generated-index replay
-  command/result, intent-to-add entries, `git diff --cached --exit-code` result,
-  user-owned index cleanup status, commands, and remaining relay risks
-
-### Phase 3: Build one-pass persistent v2 snapshots
+### Phase 1: Build one-pass persistent v2 snapshots
 
 - **Stable ID:** `persistent-read-paths`
 - **Responsible:** one phase-executor subagent
-- **Depends on:** `v2-fast-record-reader`
-- **May run with:** `relay-v2` in an isolated worktree
-- **Base state:** accepted stable phase `v2-fast-record-reader` and the accepted
-  parsed-message/v1 adoption prerequisites are integrated; all rollout changes
-  remain unshipped and the worktree is clean. Immediately before dispatch,
+- **Depends on:** none
+- **May run with:** none
+- **Base state:** the accepted strict canonical v2 reader, dedicated v1
+  extraction, shared fixture, Pi validation, parsed-message metadata, v1 adoption
+  prerequisites, and latent v2 relay are integrated; all rollout changes remain
+  unshipped and the worktree matches the declared clean/accepted-delta condition.
+  Immediately before dispatch,
   resolve actual HEAD, `origin/main`, and any configured upstream into the
   ephemeral manifest; capture the loader/export/replay entry-point inventory,
   accepted v1 pass-count evidence and immutable source hashes, current v2 parse
@@ -903,30 +642,46 @@ wait for its hard deterministic gate. Integration remains one phase at a time.
 - **VCS authority:** follow the global serial/isolated integration rule exactly;
   no subagent may stage, commit, merge, reset, rebase, or push; no fixture
   recording or regeneration without coordinator approval
-- **Write scope:** `backend/internal/task` plain/zstd full, tail, session, message,
-  inventory, and reopen loaders; `backend/internal/agent/export.go`; replay input
-  adapters; natural package-private snapshot plumbing; and adjacent tests
-- **Data authority:** first-header version/harness and the physical file remain
-  authoritative. `ValidatedLogSnapshot` (or an equally clear package-private
-  name) is an in-memory derived value bound to device, inode, size, mtime, and a
-  validated EOF for the exact observed file; it may carry parsed authority,
-  controls, session state, semantic messages, and pending-action identities but
-  is never persisted or accepted for a different physical identity
+- **Write scope:** `backend/internal/task` plain/zstd first-bootstrap and later-
+  segment authority scanners plus full, tail, session, message, inventory, and
+  reopen loaders; `backend/internal/agent/export.go`; replay input adapters;
+  natural package-private snapshot plumbing; and adjacent tests
+- **Data authority:** the task-layer first nonempty `caic_meta` version/harness
+  and physical file remain authoritative. The persistent reader alone validates
+  the exact first-bootstrap discriminator, closed version, and harness, then
+  constructs `NewLogRecordParser` with the derived validated `LogVersion`. During
+  the same semantic pass, it validates each later segment's exact discriminator,
+  version, and harness against that first header before passing the segment to
+  the record parser, which contributes no first-position/header authority.
+  `ValidatedLogSnapshot` (or an equally clear package-private name) is an in-
+  memory derived value bound to device, inode, size, mtime, and a validated EOF
+  for the exact observed file; it may carry parsed authority, controls, session
+  state, semantic messages, and pending-action identities but is never persisted
+  or accepted for a different physical identity
 - **Purpose:** make v2 persistent adoption parse authority, state, and messages in
   one semantic file pass while preserving the accepted v1 compatibility path
 - **Deliverables:** migrate every task-layer plain/zstd first-header and later-
-  segment scanner to validate the closed version and then discriminate exact v1
-  `type:"caic_meta"` from exact v2 `t:"caic_meta"`, with no v2 `type` alias.
-  V2 plain/full/adoption reads use the strict fast reader to validate authority
-  and later headers, apply `t` controls/session/model state, parse every native
-  record exactly once, collect semantic messages, validate EOF, and return one
-  matching snapshot from the same pass; reopen consumers can receive that
-  snapshot without rescanning. Compressed, tail, export, and replay paths dispatch
-  exactly by authoritative version and cannot invent authority from a fragment.
-  Parsed consumers explicitly unwrap `.Message` and retain the exact already-
-  rounded millisecond `ProducerTime` to the conversion boundary without reader
-  rounding. V1 retains its accepted compatibility implementation and maximum of
-  three complete passes plus bounded tail
+  segment scanner to require the first nonempty record to be `caic_meta`, validate
+  the closed version, and discriminate exact v1 `type:"caic_meta"` from exact v2
+  `t:"caic_meta"`. Reject a missing bootstrap and wrong, both, missing, or
+  duplicate discriminator keys on the first header. Immediately after validating
+  that header, construct `NewLogRecordParser` with its validated `LogVersion` and
+  pass it the authorized bootstrap. Then, while continuing the same semantic
+  pass, validate each later segment's exact discriminator, version, and harness
+  against the first header immediately before passing that segment record to
+  `ParseRecord`; reject wrong, both, missing, or duplicate discriminators and
+  every version or harness mismatch. Pass every other physical record to the
+  parser without relying on parser position state. V2 plain/full/adoption reads
+  use the strict fast reader for per-record `agent` framing and `t` controls, apply
+  session/model state, parse every native record exactly once, collect semantic
+  messages, validate EOF, and return one matching snapshot from the same pass;
+  reopen consumers can receive that snapshot without rescanning. Compressed,
+  tail, export, and replay paths dispatch exactly by authoritative version and
+  cannot invent authority from a fragment. Parsed consumers explicitly unwrap
+  `.Message` and retain the exact already-rounded millisecond `ProducerTime` to
+  the conversion boundary without reader rounding. V1 retains ordinary native
+  fallback, its dedicated `v1_record.go`, accepted bytes, compatibility
+  implementation, and maximum of three complete passes plus bounded tail
 - **Generated artifacts:** no committed artifacts; taskmeta/replay/cache tests use
   temporary directories, existing golden recordings are read-only, and no
   benchmark/profile artifact enters the repository
@@ -935,21 +690,33 @@ wait for its hard deterministic gate. Integration remains one phase at a time.
   timestamp v2 file; no public API or duplicate scanner framework
 - **Boundary:** live relay and writers stay unchanged; `.taskmeta.json` remains a
   rebuildable cache; the validated snapshot is not serialized; harness parser
-  caic cases remain until cleanup; do not weaken same-inode, mixed/later-header,
-  truncation, scanner-size, UTF-8, or fail-closed behavior, and do not regress the
-  accepted v1 three-complete-pass-plus-bounded-tail maximum
+  caic cases remain until cleanup; do not delegate first-bootstrap/later-segment
+  authority to `LogRecordParser`, weaken same-inode, mixed/later-header,
+  truncation, scanner-size, UTF-8, or fail-closed behavior, or regress ordinary
+  v1 native fallback, v1 bytes, dedicated `v1_record.go`, or the accepted v1
+  three-complete-pass-plus-bounded-tail maximum
 - **Decision checkpoints:** stop for any persisted snapshot/second authority,
   inability to bind proof to device/inode/size/mtime/EOF, skipped corruption,
   fixture rewrite, duplicate authority scanner, extra v2 semantic parse/pass, or
   need to alter the accepted immutable v1 benchmark sources
 - **Validation intent:** equivalent v1/v2 semantic full/tail/export/replay output;
-  zero v1 and exact millisecond v2 producer time; exact v1 `type` and v2 `t`
-  bootstrap/later-segment authority; v2 `t` controls, session/model state, native
-  messages, pending-action identities, and EOF validated in one semantic pass;
-  one native parse per agent; compressed parity; taskmeta hit/miss/stale/corrupt
-  behavior. Exact failure covers identity mismatch/replacement, changed segment,
-  truncation, missing EOF proof, unknown version/token, v1 `t`, v2 `type` on meta/
-  control/agent, duplicate/both discriminators, bare-v2, noncanonical envelope,
+  zero v1 and exact millisecond v2 producer time. On both plain and zstd paths,
+  prove exact v1 `type` and v2 `t` first-bootstrap/later-segment success; require
+  first nonempty `caic_meta`; reject wrong, both, missing, and duplicate
+  discriminator keys on first and later meta records; and reject every later
+  version or harness mismatch. Prove the task layer validates first-header
+  authority, constructs the parser from that version without a preliminary scan,
+  and passes it the authorized bootstrap; then, in the same semantic pass,
+  validates each later segment immediately before passing that record to the
+  parser. It passes every physical record and never relies on parser first-
+  position state; after a valid v1 header, ordinary native records with missing or
+  unrecognized `type` still take native fallback. V2 `t` controls,
+  session/model state, native messages, pending-action identities, and EOF are
+  validated in one semantic pass; one native parse per agent; compressed parity;
+  taskmeta hit/miss/stale/corrupt behavior. Exact failure covers identity mismatch/
+  replacement, missing bootstrap, changed segment, truncation, missing EOF proof,
+  unknown version/token, v1 `t` meta, v2 `type` on meta/control/agent, duplicate/
+  both/missing meta discriminators, bare-v2, noncanonical envelope,
   `0.000`, integer/no fraction, one/two/four-or-more fraction digits, signs,
   exponents, leading zeros, overflow/out-of-range time, corrupt UTF-8, and tail
   without authority; readers never round timestamps. V1 counting-reader tests
@@ -958,7 +725,12 @@ wait for its hard deterministic gate. Integration remains one phase at a time.
   benchmark hashes; run focused snapshot/identity/pass-count/corruption tests and
   `go test ./backend/internal/agent/... ./backend/internal/task/...
   ./backend/internal/eventreplay/...`; audit every persistent entry point and
-  snapshot field/lifetime; rerun focused v1 counting-reader tests for the accepted
+  snapshot field/lifetime; exhaustively exercise the first/later meta key and
+  version/harness matrix on plain and zstd paths, plus first-header validation,
+  parser construction without a preliminary scan, same-pass later-segment
+  validation before delivery to `ParseRecord`, every-record delivery, no parser
+  first-position state, and v1 native fallback; rerun focused v1 counting-reader
+  tests for the accepted
   three-pass-plus-tail ceiling without modifying benchmark sources; audit task-
   layer readers/tests/fixtures with the global stale-format audit, preserving v1
   `type` and nested native payload keys exactly as rule 8 permits;
@@ -967,34 +739,53 @@ wait for its hard deterministic gate. Integration remains one phase at a time.
   --exclude-standard`
 - **Review:** a fresh authority/performance reviewer receives the integrated
   target and exact pre-integration base from fresh ephemeral state, entry-point
-  inventory, one-pass v2 instrumentation, snapshot identity/lifetime proof,
-  corruption matrix, v1 compatibility evidence, exact fixture delta, and gate;
-  require `PASS`
-- **Exit gate:** every persistent path dispatches by exact file authority; exact
-  v2 app/taskmgr adoption through validated EOF produces a matching in-memory
-  snapshot in one semantic file pass with one native parse per agent record and
-  no persisted second authority; every bootstrap/discriminator/timestamp mismatch
-  or corruption case fails closed; v1 correctness and the accepted three-
-  complete-pass-plus-bounded-tail maximum do not regress; only the allowed
-  fixture/filesystem delta exists
-- **Handoff:** list migrated entry points, task-layer bootstrap split, snapshot
-  type/fields/lifetime and consumers, exact-millisecond v2 pass/native-parse
-  evidence, pending-action derivation, fixture hashes, stale-format audits, v1
-  compatibility result, corruption/error matrix, exact files, validation,
-  cleanup, and risks
+  inventory, one-pass v2 instrumentation, snapshot identity/lifetime proof, plain/
+  zstd first-bootstrap and later-segment discriminator/version/harness matrix,
+  proof of first-header validation, parser construction without a preliminary
+  scan, and same-pass validation of each later segment before its delivery to
+  `ParseRecord`, plus every-record-delivery proof, no-parser-position-state
+  audit, ordinary v1 native-fallback and byte-compatibility evidence,
+  dedicated `v1_record.go` preservation, exact fixture delta, and gate; require
+  `PASS`
+- **Exit gate:** every persistent plain/zstd path requires and validates the exact
+  first nonempty `caic_meta` and its exact version-specific discriminator, then
+  constructs `NewLogRecordParser` with that validated version without a
+  preliminary scan. During the same semantic pass, it validates each later
+  segment's exact discriminator/version/harness against the first header before
+  passing that segment record to `ParseRecord`; every wrong/both/missing/
+  duplicate-key or version/harness mismatch fails closed. Each path passes every
+  physical record without parser first-position state. Exact v2 app/taskmgr
+  adoption through validated EOF produces a matching in-memory snapshot in one
+  semantic file pass with one native parse per agent record and no persisted second
+  authority; every bootstrap/discriminator/timestamp mismatch or corruption case
+  fails closed; ordinary v1 native fallback, v1 bytes, dedicated `v1_record.go`,
+  correctness, and the accepted three-complete-pass-plus-bounded-tail maximum do
+  not regress; only the allowed fixture/filesystem delta exists
+- **Handoff:** list migrated entry points; plain/zstd first-bootstrap and later-
+  segment ownership plus the exact discriminator/version/harness matrix; proof of
+  first-header validation, parser construction without a preliminary scan, and
+  same-pass validation of each later segment before its `ParseRecord` call;
+  every-record delivery and no-first-position-state proof; snapshot type/fields/
+  lifetime and consumers; exact-millisecond v2 pass/native-
+  parse evidence; pending-action derivation; fixture hashes; stale-format audits;
+  ordinary v1 native fallback, byte compatibility, and dedicated `v1_record.go`
+  preservation; corruption/error matrix; exact files, validation, cleanup, and
+  risks
 
-### Phase 4: Route live and startup relay reads
+### Phase 2: Route live and startup relay reads
 
 - **Stable ID:** `live-relay-read-path`
 - **Responsible:** one phase-executor subagent
-- **Depends on:** `relay-v2`, `v2-fast-record-reader`
+- **Depends on:** accepted stable phase `relay-v2` (satisfied); no remaining
+  active-phase dependency
 - **May run with:** none due to overlap across agent launch/read paths
-- **Base state:** accepted stable phases `v2-fast-record-reader` and `relay-v2`
-  plus accepted parsed-message metadata are integrated, all rollout changes
-  remain unshipped, and the worktree is
-  clean. Immediately before dispatch, resolve
-  actual HEAD, `origin/main`, and any configured upstream into the ephemeral
-  manifest and capture existing live-read/handshake test baselines
+- **Base state:** accepted stable phase `relay-v2`, including the separate tested
+  v2 relay and latent `relay.ScriptV2` embed, the accepted strict canonical v2
+  reader and fixture, and accepted parsed-message metadata are integrated; all
+  rollout changes remain unshipped, and the worktree matches the declared clean/
+  accepted-delta condition. Immediately before dispatch, resolve actual HEAD,
+  `origin/main`, and any configured upstream into the ephemeral manifest and
+  capture existing live-read/handshake test baselines
 - **VCS authority:** follow the global serial/isolated integration rule exactly;
   no subagent may stage, commit, merge, reset, rebase, or push
 - **Write scope:** shared relay record reader; `DefaultReadMessages`; relay
@@ -1011,8 +802,9 @@ wait for its hard deterministic gate. Integration remains one phase at a time.
   envelope result retains its exact immutable millisecond `ProducerTime` without
   reader rounding; v2 native-payload unwrap for handshakes; Pi startup
   persistence; unpersisted Codex/OpenCode handshakes; `t` control routing;
-  physical offsets; attach-overlap deduplication; common script deployment/
-  selection seam used by custom launchers; v1 byte preservation
+  physical offsets; attach-overlap deduplication; common script deployment and
+  selection seam consumes the accepted latent `relay.ScriptV2` and is used by
+  custom launchers; v1 byte preservation
 - **Generated artifacts:** none
 - **Change budget:** at most 10 production files and 8 tests; no protocol DTO or
   handshake sequence changes
@@ -1067,7 +859,7 @@ wait for its hard deterministic gate. Integration remains one phase at a time.
   counting-reader evidence for the accepted three-complete-pass-plus-bounded-tail
   ceiling, files, commands, and residual risks
 
-### Phase 5: Make harness parsers native-only
+### Phase 3: Make harness parsers native-only
 
 - **Stable ID:** `pure-harness-parsers`
 - **Responsible:** one phase-executor subagent
@@ -1118,7 +910,7 @@ wait for its hard deterministic gate. Integration remains one phase at a time.
 - **Handoff:** provide audit command/result, per-harness tests, deletions/delta,
   validation, and unresolved risks
 
-### Phase 6: Make producer-time metadata and replay caches version-correct
+### Phase 4: Make producer-time metadata and replay caches version-correct
 
 - **Stable ID:** `timestamp-cache-semantics`
 - **Responsible:** one phase-executor subagent
@@ -1187,7 +979,7 @@ wait for its hard deterministic gate. Integration remains one phase at a time.
   version, fixture hashes/discriminators, stale-format audits, filesystem delta,
   commands, and risks
 
-### Phase 7: Introduce the enforcing versioned log sink
+### Phase 5: Introduce the enforcing versioned log sink
 
 - **Stable ID:** `versioned-log-sink`
 - **Responsible:** one phase-executor subagent
@@ -1302,7 +1094,7 @@ wait for its hard deterministic gate. Integration remains one phase at a time.
   rounding/canonical formatting proof, caller no-pre-round audit, stale-format
   audit, exact files, commands, cleanup, and remaining migration sites
 
-### Phase 8: Gate v2-primary adoption performance
+### Phase 6: Gate v2-primary adoption performance
 
 - **Stable ID:** `v2-adoption-performance`
 - **Responsible:** one phase-executor subagent
@@ -1476,7 +1268,7 @@ same resource/cross-platform/artifact-cleanup rules, and never commits a
 performance artifact. V1 carry-forward is compatibility-only: correctness,
 fail-closed behavior, and at most three complete passes plus bounded tail.
 
-### Phase 9: Migrate every direct log writer
+### Phase 7: Migrate every direct log writer
 
 - **Stable ID:** `agent-direct-write-migration`
 - **Responsible:** one phase-executor subagent
@@ -1580,7 +1372,7 @@ fail-closed behavior, and at most three complete passes plus bounded tail.
   results, stale-format audits, backend-specific tests, scoped exceptions,
   commands, and risks
 
-### Phase 10: Cut new producers over to pure v2
+### Phase 8: Cut new producers over to pure v2
 
 - **Stable ID:** `v2-producer-cutover`
 - **Responsible:** one phase-executor subagent
@@ -1589,12 +1381,13 @@ fail-closed behavior, and at most three complete passes plus bounded tail.
 - **May run with:** none
 - **Base state:** accepted stable phases `pure-harness-parsers`,
   `timestamp-cache-semantics`, `agent-direct-write-migration`, and
-  `v2-adoption-performance` are integrated; the worktree is clean and producer
-  cutover remains unshipped. Immediately
-  before dispatch, resolve actual HEAD, `origin/main`, and any configured
-  upstream into the ephemeral manifest and capture the full production physical
-  entry-point inventory, v1/v2 fixture statistics, and accepted 1 GiB adoption
-  benchmark/pass-count baseline
+  `v2-adoption-performance` are integrated; the accepted `relay-v2` prerequisite,
+  including the separate tested relay and latent `relay.ScriptV2` embed, remains
+  integrated; the worktree is clean and producer cutover remains unshipped.
+  Immediately before dispatch, resolve actual HEAD, `origin/main`, and any
+  configured upstream into the ephemeral manifest and capture the full production
+  physical entry-point inventory, v1/v2 fixture statistics, and accepted 1 GiB
+  adoption benchmark/pass-count baseline
 - **VCS authority:** follow the global serial/isolated integration rule exactly;
   no subagent may stage, commit, merge, reset, rebase, or push; any unexpected
   generated delta fails the phase
@@ -1605,12 +1398,13 @@ fail-closed behavior, and at most three complete passes plus bounded tail.
   remains authoritative; selected relay and sink derive from it
 - **Purpose:** enable v2 only after every reader and writer is ready
 - **Deliverables:** new files write exact `t:"caic_meta"` version 2 headers;
-  relay script selection is exact; Codex/OpenCode custom paths share it; existing
-  exact-`type` v1 resume starts v1; alive adoption never restarts relay; all v2
-  backend controls use `t` and unchanged semantic tokens; the relay and sink
-  physical encoders each round their own raw observation exactly once and emit
-  exact three-digit timestamps, while backend callers never pre-round; purity
-  guard audits every physical line with no v2 `type` alias
+  exact header-derived relay selection activates the accepted embedded
+  `relay.ScriptV2` only for v2, and Codex/OpenCode custom paths share that seam;
+  existing exact-`type` v1 resume starts v1; alive adoption never restarts relay;
+  all v2 backend controls use `t` and unchanged semantic tokens; the relay and
+  sink physical encoders each round their own raw observation exactly once and
+  emit exact three-digit timestamps, while backend callers never pre-round;
+  purity guard audits every physical line with no v2 `type` alias
 - **Generated artifacts:** none expected; `make check` may verify generated files
   but an actual delta must be explained and separately approved
 - **Change budget:** at most 8 production files and 8 tests; header change occurs
@@ -1619,8 +1413,9 @@ fail-closed behavior, and at most three complete passes plus bounded tail.
   change, or automatic repair; missing-header adoption still fails closed
 - **Decision checkpoints:** stop if more than one new-version default appears, if
   existing files need rewriting, or if any producer cannot derive from header
-- **Validation intent:** pure new v2 across header, relay, direct, provisioning,
-  trailer, and both `Task.WriteToLog` branches: every physical record uses `t`,
+- **Validation intent:** pure new v2 across header, the accepted embedded
+  `relay.ScriptV2`, direct writes, provisioning, trailer, and both
+  `Task.WriteToLog` branches: every physical record uses `t`,
   every agent timestamp is positive/in-range with exactly three fractional digits,
   and the shared read-only encoder vectors prove below/at/above-half plus second
   carry without caller pre-rounding or duplicated expectations. Resumed v1
@@ -1668,7 +1463,7 @@ fail-closed behavior, and at most three complete passes plus bounded tail.
   selection proof, purity/stale-format audits, full validation, generated-state
   check, diffstat, and risks
 
-### Phase 11: Prove real-runtime creation and adoption
+### Phase 9: Prove real-runtime creation and adoption
 
 - **Stable ID:** `runtime-adoption-smoke`
 - **Responsible:** one phase-executor subagent

@@ -1,0 +1,962 @@
+#!/usr/bin/env python3
+# V2-only persistent relay with canonical agent framing inside caic containers.
+#
+# Modes:
+#   serve-attach --dir <path> -- <cmd...>   Start relay daemon + attach as first client.
+#   attach [--offset N]                     Reconnect to a running relay daemon.
+#   read-plan [path]                        Read a plan file from the container.
+#
+# The relay daemon owns the subprocess stdin/stdout, logs all I/O to
+# output.jsonl, and accepts one client at a time via a Unix socket.
+#
+# Shutdown protocol — null-byte sentinel line:
+#   The Go backend (Session.SendStop) writes \x00\n to stdin. The
+#   attach_client forwards this through the socket to the daemon, whose
+#   _client_reader detects the sentinel and sets shutdown_event. The
+#   _shutdown_watchdog thread waits on this event, then closes proc.stdin,
+#   sends SIGINT, and escalates to SIGTERM/SIGKILL after --shutdown-grace.
+#   reader_thread is the authoritative "done" signal: it blocks on
+#   subprocess stdout until EOF, then closes the client socket.
+#   serve() joins reader_thread and cleans up.
+#
+#   Crucially, stdin EOF alone does NOT trigger shutdown. This is what
+#   distinguishes the two flows below.
+#
+# Flow 1 — One task is purged (user clicks "purge"):
+#   1. Server calls Runner.Cleanup → Session.Stop writes \x00\n
+#   2. attach_client forwards \x00\n through the socket
+#   3. _client_reader detects sentinel, sets shutdown_event
+#   4. _shutdown_watchdog closes proc.stdin, sends SIGINT; if subprocess
+#      doesn't exit within --shutdown-grace, escalates to SIGTERM/SIGKILL
+#   5. reader_thread sees stdout EOF, closes client socket
+#   6. Server kills the container
+#
+# Flow 2 — Backend restarts (upgrade, crash):
+#   1. SSH connections are severed, attach_client sees stdin EOF
+#   2. attach_client disconnects from the socket (no \x00 sent)
+#   3. Relay daemon stays alive, subprocess keeps running
+#   4. On restart, server discovers the container via adoptOne()
+#   5. Server reads output.jsonl to restore conversation state
+#   6. Server calls relay_v2.py attach --offset N to reconnect
+#   7. Task resumes seamlessly with zero message loss
+
+import argparse
+import json
+import logging
+import os
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import threading
+import time
+
+RELAY_DIR = os.environ.get("CAIC_RELAY_DIR", "/tmp/caic-relay")
+SOCK_PATH = os.path.join(RELAY_DIR, "relay.sock")
+OUTPUT_PATH = os.path.join(RELAY_DIR, "output.jsonl")
+PID_PATH = os.path.join(RELAY_DIR, "pid")
+
+# Max size of a single read from subprocess stdout.
+BUF_SIZE = 65536
+
+# Interval between diff stat polls (seconds).
+_DIFF_THROTTLE = 10  # minimum seconds between diff runs
+_DIFF_DEBOUNCE = 2  # seconds of quiet before running diff
+
+# Default grace period (seconds) after SIGINT before escalating to
+# SIGTERM/SIGKILL. Overridable via --shutdown-grace.
+_DEFAULT_SHUTDOWN_GRACE = 10
+
+# The backend scanners reject a physical record whose size including LF is not
+# strictly smaller than 32 MiB.
+_MAX_ENCODED_RECORD_LEN = 32 << 20
+_MAX_UNIX_SECONDS = (1 << 63) - 1 - 62_135_596_800
+_DIAGNOSTIC_PREVIEW_BYTES = 1024
+_JSON_WHITESPACE = b" \t\r\n"
+_RELAY_CONTROL_TOKENS = frozenset(("diff_stat", "exit", "stripped_env"))
+
+
+def _observe_unix_ns():
+    """Capture one raw positive Unix clock observation."""
+    return time.time_ns()
+
+
+def _format_timestamp(observed_unix_ns):
+    """Round one raw Unix-nanosecond observation to canonical milliseconds."""
+    if isinstance(observed_unix_ns, bool) or not isinstance(observed_unix_ns, int):
+        raise ValueError("producer observation must be an integer Unix-nanosecond value")
+    if observed_unix_ns <= 0:
+        raise ValueError("producer observation must be positive")
+
+    total_milliseconds = (observed_unix_ns + 500_000) // 1_000_000
+    seconds, milliseconds = divmod(total_milliseconds, 1000)
+    if seconds == 0 and milliseconds == 0:
+        raise ValueError("rounded producer timestamp must be positive")
+    if seconds > _MAX_UNIX_SECONDS:
+        raise ValueError("rounded producer timestamp is outside the supported Unix time range")
+    return f"{seconds}.{milliseconds:03d}".encode("ascii")
+
+
+def _reject_json_constant(value):
+    raise ValueError(f"invalid JSON constant {value}")
+
+
+def _native_diagnostic(reason, native):
+    """Return a bounded JSON string describing a non-embeddable native line."""
+    preview = native[:_DIAGNOSTIC_PREVIEW_BYTES]
+    omitted = len(native) - len(preview)
+    suffix = f"... (+{omitted} bytes)" if omitted else ""
+    diagnostic = f"relay diagnostic: {reason}: {preview!r}{suffix}"
+    return json.dumps(diagnostic, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+
+
+def _diagnostic_record(timestamp, reason, native):
+    prefix = b'{"t":"agent","ts":' + timestamp + b',"msg":'
+    suffix = b"}\n"
+    payload = _native_diagnostic(reason, native)
+    encoded_len = len(prefix) + len(payload) + len(suffix)
+    if encoded_len >= _MAX_ENCODED_RECORD_LEN:
+        payload = json.dumps(f"relay diagnostic: {reason}", separators=(",", ":")).encode("utf-8")
+        encoded_len = len(prefix) + len(payload) + len(suffix)
+    if encoded_len >= _MAX_ENCODED_RECORD_LEN:
+        raise ValueError("bounded diagnostic exceeds the encoded-record size limit")
+    return prefix + payload + suffix
+
+
+def _encode_agent_record(native_line, observed_unix_ns):
+    """Frame one logical native JSON line without reserializing valid bytes."""
+    timestamp = _format_timestamp(observed_unix_ns)
+    native = native_line.strip(_JSON_WHITESPACE)
+    prefix = b'{"t":"agent","ts":' + timestamp + b',"msg":'
+    suffix = b"}\n"
+
+    # Enforce the final physical size, including the envelope and LF, before
+    # allocating or emitting a candidate record.
+    if len(prefix) + len(native) + len(suffix) >= _MAX_ENCODED_RECORD_LEN:
+        return _diagnostic_record(timestamp, f"oversized native JSON ({len(native)} bytes)", native)
+
+    try:
+        text = native.decode("utf-8")
+        value = json.loads(text, parse_constant=_reject_json_constant)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+        return _diagnostic_record(timestamp, f"invalid native JSON ({error})", native)
+    if value is None:
+        return _diagnostic_record(timestamp, "native JSON null", native)
+
+    return prefix + native + suffix
+
+
+def _encode_control(token, fields):
+    """Encode one relay-owned v2 control with an exact top-level t token."""
+    if token not in _RELAY_CONTROL_TOKENS:
+        raise ValueError(f"unknown v2 relay control token {token!r}")
+    if "t" in fields or "type" in fields:
+        raise ValueError("control fields must not supply a discriminator")
+    control = {"t": token, **fields}
+    encoded = (json.dumps(control, ensure_ascii=True, allow_nan=False, separators=(",", ":")) + "\n").encode("utf-8")
+    if len(encoded) >= _MAX_ENCODED_RECORD_LEN:
+        raise ValueError("control exceeds the encoded-record size limit")
+    return encoded
+
+
+def _parse_numstat(numstat):
+    """Parse git diff --numstat output into a list of file stat dicts.
+
+    Each line has the format: <added>\\t<deleted>\\t<path>.
+    Binary files use "-\\t-\\t<path>".
+    Returns an empty list if there are no changed files.
+    """
+    result = []
+    for line in numstat.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split("\t", 2)
+        if len(parts) != 3:
+            continue
+        added_str, deleted_str, path = parts
+        if added_str == "-" and deleted_str == "-":
+            result.append({"path": path, "added": 0, "deleted": 0, "binary": True})
+        else:
+            try:
+                added = int(added_str)
+            except ValueError:
+                added = 0
+            try:
+                deleted = int(deleted_str)
+            except ValueError:
+                deleted = 0
+            result.append({"path": path, "added": added, "deleted": deleted})
+    return result
+
+
+class _Daemon:
+    """Relay daemon state and thread entry points.
+
+    Encapsulates shared mutable state that was previously captured via
+    closures inside serve(). Each thread method operates on explicit
+    ``self`` attributes instead.
+    """
+
+    def __init__(self, proc, output_file, work_dir, log_stdin, env_event, cmd_args):
+        self.proc = proc
+        self.output_file = output_file
+        self.work_dir = work_dir
+        self.log_stdin = log_stdin
+        self.env_event = env_event  # Pre-encoded stripped_env NDJSON; b"" when nothing was stripped.
+        self.cmd_args = list(cmd_args)
+
+        self.publish_lock = threading.Lock()
+        self.client_lock = threading.Lock()
+        self.stderr_lock = threading.Lock()
+        self.stderr_lines = []
+        self.stderr_truncated = False
+        self.stderr_done = threading.Event()
+        self.client_conn = None
+        self.client_id = 0
+        self.proc_ready = threading.Event()
+        if proc is not None:
+            self.proc_ready.set()
+        self.shutdown_event = threading.Event()
+        self.diff_activity = threading.Event()
+
+    def set_proc(self, proc):
+        """Publish the subprocess after the first client can connect."""
+        self.proc = proc
+        self.proc_ready.set()
+
+    def set_client(self, conn, reason):
+        with self.client_lock:
+            old = self.client_conn
+            self.client_conn = conn
+            if old is not None:
+                logging.info("client #%d disconnected reason=%s", self.client_id, reason)
+                try:
+                    old.close()
+                except OSError:
+                    pass
+
+    def send_to_client(self, data):
+        with self.client_lock:
+            c = self.client_conn
+            if c is None:
+                return
+            try:
+                c.sendall(data)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                self.client_conn = None
+
+    def publish_records(self, *records, to_client):
+        """Publish complete records in identical file/client order."""
+        with self.publish_lock:
+            for record in records:
+                if len(record) >= _MAX_ENCODED_RECORD_LEN or not record.endswith(b"\n"):
+                    raise ValueError("invalid encoded physical record")
+                offset = 0
+                while offset < len(record):
+                    written = self.output_file.write(record[offset:])
+                    if written is None or written <= 0:
+                        raise OSError("output file write made no progress")
+                    if written > len(record) - offset:
+                        raise OSError("output file write reported an invalid byte count")
+                    offset += written
+            self.output_file.flush()
+            if to_client:
+                for record in records:
+                    self.send_to_client(record)
+
+    def publish_agent(self, native_line, *, observed_unix_ns=None, to_client):
+        """Encode one agent line completely before publishing it."""
+        if observed_unix_ns is None:
+            observed_unix_ns = _observe_unix_ns()
+        record = _encode_agent_record(native_line, observed_unix_ns)
+        self.publish_records(record, to_client=to_client)
+        return record
+
+    def publish_control(self, token, fields, *, to_client):
+        """Encode one relay control completely before publishing it."""
+        record = _encode_control(token, fields)
+        self.publish_records(record, to_client=to_client)
+        return record
+
+    def stderr_text(self):
+        """Return recent subprocess stderr lines as one diagnostic string."""
+        with self.stderr_lock:
+            return "\n".join(self.stderr_lines)
+
+    def write_exit_event(self, exit_code, error=""):
+        """Record a structured subprocess exit event and forward it to the client."""
+        fields = {
+            "exit_code": exit_code,
+            "cmd": self.cmd_args,
+            "ts": time.time(),
+        }
+        if exit_code < 0:
+            fields["signal"] = -exit_code
+        stderr_text = error or self.stderr_text()
+        if stderr_text:
+            fields["error"] = stderr_text
+        if self.stderr_truncated:
+            fields["stderr_truncated"] = True
+        self.publish_control("exit", fields, to_client=True)
+
+    # -- threads -------------------------------------------------------------
+
+    def stderr_thread(self):
+        """Drain subprocess stderr to relay.log and remember recent lines."""
+        try:
+            for raw in self.proc.stderr:
+                line = raw.decode("utf-8", errors="replace").rstrip()
+                if line:
+                    logging.info("bridge: %s", line)
+                    with self.stderr_lock:
+                        self.stderr_lines.append(line)
+                        if len(self.stderr_lines) > 20:
+                            self.stderr_truncated = True
+                            del self.stderr_lines[:-20]
+        finally:
+            self.stderr_done.set()
+
+    def reader_thread(self):
+        """Frame subprocess stdout lines → output.jsonl + connected client."""
+        pending = bytearray()
+
+        def publish_line(line):
+            record = _encode_agent_record(line, _observe_unix_ns())
+            # Inject stripped_env after the first complete subprocess output
+            # record, which confirms authentication succeeded.
+            env_event = self.env_event
+            self.env_event = b""
+            if env_event:
+                self.publish_records(record, env_event, to_client=True)
+            else:
+                self.publish_records(record, to_client=True)
+
+        try:
+            while True:
+                data = self.proc.stdout.read1(BUF_SIZE)
+                if not data:
+                    break
+                pending.extend(data)
+                while (newline := pending.find(b"\n")) >= 0:
+                    line = bytes(pending[:newline])
+                    del pending[: newline + 1]
+                    publish_line(line)
+                self.diff_activity.set()
+            if pending:
+                publish_line(bytes(pending))
+        except (OSError, ValueError) as e:
+            logging.warning("reader_thread error: %s", e)
+        finally:
+            try:
+                exit_code = self.proc.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                exit_code = self.proc.poll()
+            self.stderr_done.wait(timeout=1)
+            sz = self.output_file.tell() if not self.output_file.closed else -1
+            # Write the exit event before closing so the backend sees
+            # why the relay stopped without needing to parse relay.log.
+            exit_code = exit_code if exit_code is not None else -1
+            self.write_exit_event(exit_code)
+            self.output_file.close()
+            self.set_client(None, "subprocess_eof")
+            self.diff_activity.set()
+            logging.info("reader_thread exited output_bytes=%d exit_code=%s", sz, exit_code)
+
+    def diff_watcher_thread(self):
+        """Poll git diff on activity, with throttle + debounce.
+
+        Uses a temporary index to include untracked files without mutating
+        the real index. Diffs against "base" (merge-base ref set by md
+        start); falls back to HEAD if "base" doesn't exist.
+        """
+        tmp_index = os.path.join(RELAY_DIR, "diff.index")
+        diff_env = {**os.environ, "GIT_INDEX_FILE": tmp_index}
+        prev_raw = None
+        last_run = 0.0
+        diff_ref = "base"
+        try:
+            cp = subprocess.run(
+                ["git", "rev-parse", "--verify", "base"],
+                cwd=self.work_dir,
+                capture_output=True,
+                timeout=5,
+            )
+            if cp.returncode != 0:
+                diff_ref = "HEAD"
+        except (subprocess.TimeoutExpired, OSError):
+            diff_ref = "HEAD"
+        while self.proc.poll() is None:
+            if not self.diff_activity.wait(timeout=30):
+                continue
+            self.diff_activity.clear()
+            if self.proc.poll() is not None:
+                break
+            # Debounce: wait for quiet period (no new activity).
+            while True:
+                if self.diff_activity.wait(timeout=_DIFF_DEBOUNCE):
+                    self.diff_activity.clear()
+                    if self.proc.poll() is not None:
+                        break
+                else:
+                    break
+            if self.proc.poll() is not None:
+                break
+            # Throttle: enforce minimum interval.
+            now = time.monotonic()
+            wait = _DIFF_THROTTLE - (now - last_run)
+            if wait > 0:
+                time.sleep(wait)
+                if self.proc.poll() is not None:
+                    break
+            last_run = time.monotonic()
+            try:
+                subprocess.run(
+                    ["git", "read-tree", diff_ref],
+                    cwd=self.work_dir,
+                    env=diff_env,
+                    capture_output=True,
+                    timeout=5,
+                )
+                subprocess.run(
+                    ["git", "add", "--intent-to-add", "--all"],
+                    cwd=self.work_dir,
+                    env=diff_env,
+                    capture_output=True,
+                    timeout=5,
+                )
+                cp = subprocess.run(
+                    ["git", "diff", "--numstat", diff_ref],
+                    cwd=self.work_dir,
+                    env=diff_env,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                raw = cp.stdout
+            except (subprocess.TimeoutExpired, OSError):
+                continue
+            if raw == prev_raw:
+                continue
+            prev_raw = raw
+            diff_stat = _parse_numstat(raw)
+            try:
+                self.publish_control(
+                    "diff_stat",
+                    {"diff_stat": diff_stat, "ts": time.time()},
+                    to_client=True,
+                )
+            except (OSError, ValueError):
+                pass
+
+    def accept_thread(self, srv):
+        """Accept client connections on the Unix socket."""
+        while True:
+            try:
+                conn, _ = srv.accept()
+            except OSError:
+                break
+
+            # Read handshake: {"offset": N}\n
+            try:
+                hdr = _read_line(conn)
+                hs = json.loads(hdr)
+                offset = hs.get("offset", 0)
+            except (json.JSONDecodeError, OSError, ValueError):
+                conn.close()
+                continue
+
+            # Replay and client publication are one ordered transition: no
+            # physical record can fall between replay EOF and live delivery.
+            try:
+                with self.publish_lock:
+                    with open(OUTPUT_PATH, "rb") as f:
+                        f.seek(offset)
+                        while True:
+                            chunk = f.read(BUF_SIZE)
+                            if not chunk:
+                                break
+                            conn.sendall(chunk)
+                    self.client_id += 1
+                    cid = self.client_id
+                    self.set_client(conn, "replaced")
+            except (OSError, BrokenPipeError):
+                conn.close()
+                continue
+            logging.info(
+                "client #%d connected offset=%d shutting_down=%s proc_alive=%s",
+                cid,
+                offset,
+                self.shutdown_event.is_set(),
+                self.proc is not None and self.proc.poll() is None,
+            )
+
+            ct = threading.Thread(target=self._client_reader, args=(conn, cid), daemon=True)
+            ct.start()
+
+    def _client_reader(self, c, cid):
+        """Read client stdin → subprocess stdin + output log.
+
+        User input is NDJSON: each message is a single JSON line ending
+        with newline. Large messages (e.g. base64 images) may span multiple
+        recv() calls. We buffer incoming data and process complete lines:
+        each line is forwarded to proc.stdin and logged to output_file.
+        Incomplete trailing data is held until the next recv completes it.
+
+        A line consisting of a single null byte (``\\x00\\n``, sent by
+        Session.SendStop) is the graceful-shutdown sentinel. It is consumed
+        here and never forwarded to the subprocess.
+        """
+        close_stdin = False
+        buf = bytearray()
+        try:
+            while not close_stdin:
+                data = c.recv(BUF_SIZE)
+                if not data:
+                    logging.info("client #%d recv EOF", cid)
+                    break
+                buf += data
+                while (nl := buf.find(b"\n")) >= 0:
+                    line = bytes(buf[:nl])
+                    del buf[: nl + 1]
+                    if line == b"\x00":
+                        logging.info("client #%d received shutdown sentinel", cid)
+                        close_stdin = True
+                        break
+                    payload = line + b"\n"
+                    record = None
+                    if self.log_stdin:
+                        record = _encode_agent_record(line, _observe_unix_ns())
+                    self.proc_ready.wait()
+                    if self.proc is None or self.proc.stdin is None:
+                        logging.info("client #%d dropping input because subprocess failed to start", cid)
+                        return
+                    self.proc.stdin.write(payload)
+                    self.proc.stdin.flush()
+                    if record is not None:
+                        self.publish_records(record, to_client=False)
+        except (OSError, BrokenPipeError, ValueError) as e:
+            logging.info("client #%d reader error: %s", cid, e)
+        finally:
+            if buf:
+                logging.warning("client #%d dropping %d bytes of incomplete trailing data", cid, len(buf))
+        if not close_stdin:
+            with self.client_lock:
+                if self.client_conn is c:
+                    self.client_conn = None
+                    logging.info("client #%d disconnected reason=client_eof", cid)
+            try:
+                c.close()
+            except OSError:
+                pass
+            return
+
+        # Signal the shutdown watchdog to close stdin and kill the subprocess.
+        self.shutdown_event.set()
+
+
+def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace):
+    """Start the relay server as a daemon, then attach as the first client.
+
+    Architecture:
+      Parent process → waits for socket → attach_client() (bridges stdio)
+      Child process (daemon):
+        1. Starts subprocess (claude/gemini) with piped stdin/stdout.
+        2. reader_thread: subprocess stdout → output.jsonl + connected client.
+        3. accept_thread: accepts client connections on Unix socket.
+           - On connect: replays output.jsonl from offset, then forwards live.
+           - client_reader: client stdin → subprocess stdin + optionally log.
+        4. When subprocess exits:
+           - reader_thread closes output file and disconnects client.
+           - Socket and PID file are cleaned up.
+
+    Args:
+      log_stdin: When False, client_reader forwards stdin to the subprocess
+        but does NOT write it to output.jsonl. This keeps the log clean for
+        protocols like JSON-RPC where stdin contains handshake/request noise.
+      strip_env: List of environment variable names to strip from the
+        subprocess environment. Their names (values redacted) are reported in
+        a stripped_env event after the first subprocess output.
+      shutdown_grace: Seconds to wait after SIGINT before escalating to
+        SIGTERM, then SIGKILL.
+
+    Failure modes handled:
+      - SSH drops: client disconnects, subprocess keeps running. Next
+        attach reconnects from the offset where the client left off.
+      - Subprocess crash: reader_thread exits, client sees EOF.
+        Socket is cleaned up so IsRelayRunning returns false.
+      - Graceful shutdown: client sends \\x00\\n sentinel → relay closes
+        proc.stdin, sends SIGINT, escalates to SIGTERM/SIGKILL.
+    """
+    os.makedirs(RELAY_DIR, exist_ok=True)
+
+    # serve-attach always starts a new subprocess. Its output must begin empty:
+    # replaying a prior subprocess's terminal event makes a fresh client treat
+    # the old failure as the new process's startup result.
+    try:
+        os.unlink(OUTPUT_PATH)
+    except FileNotFoundError:
+        pass
+
+    # Clean up stale socket.
+    try:
+        os.unlink(SOCK_PATH)
+    except FileNotFoundError:
+        pass
+
+    # Fork to become a daemon.
+    pid = os.fork()
+    if pid > 0:
+        # Parent: wait for socket to appear, then attach.
+        try:
+            if _wait_for_socket(30, child_pid=pid):
+                try:
+                    attach_client(offset=0)
+                except OSError:
+                    _copy_output_to_stdout()
+            else:
+                _copy_output_to_stdout()
+        finally:
+            # Reap the child if it exited (e.g. agent crash).
+            # WNOHANG: don't block if daemon is still running.
+            try:
+                os.waitpid(pid, os.WNOHANG)
+            except ChildProcessError:
+                pass
+        # Exit the parent so it does not fall through into the child's
+        # daemon setup (os.setsid, FD redirect, etc.). Without this, the
+        # parent — already a session leader — crashes on os.setsid() with
+        # PermissionError, causing the SSH session to exit with status 1
+        # even when the relay shut down cleanly.
+        sys.exit(0)
+
+    # Child: become session leader so we survive SSH disconnects.
+    os.setsid()
+
+    # Close inherited stdio FDs. The daemon communicates via the Unix socket
+    # and subprocess pipes, not via its parent's stdio. Leaving them open
+    # leaks the parent's pipe FDs, which can prevent the attach_client from
+    # exiting cleanly on macOS.
+    devnull = os.open(os.devnull, os.O_RDWR)
+    os.dup2(devnull, 0)  # stdin → /dev/null
+    os.dup2(devnull, 1)  # stdout → /dev/null
+    # stderr is redirected to relay.log below.
+    os.close(devnull)
+
+    # Set up logging to relay.log. This replaces the old stderr redirect so
+    # that key lifecycle events are always recorded for diagnostics.
+    log_path = os.path.join(RELAY_DIR, "relay.log")
+    logging.basicConfig(
+        filename=log_path,
+        filemode="w",
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    )
+    # Also capture stray stderr writes (e.g. from tracebacks).
+    log_fd = os.open(log_path, os.O_WRONLY | os.O_APPEND)
+    os.dup2(log_fd, 2)
+    os.close(log_fd)
+
+    # Write PID file.
+    with open(PID_PATH, "w") as f:
+        f.write(str(os.getpid()))
+
+    logging.info("relay daemon started pid=%d cmd=%s cwd=%s", os.getpid(), cmd_args, work_dir)
+    _start_time = time.monotonic()
+
+    # Strip requested env vars from the subprocess so it authenticates via
+    # OAuth (e.g. ANTHROPIC_API_KEY, so Claude Code bills the subscription
+    # instead of API credits). The stripped values are discarded, never
+    # re-injected: re-injecting made Claude Code switch to API billing
+    # mid-session. The stripped_env event reports only the names (values
+    # redacted) so the value never lands in output.jsonl or the task log.
+    env = os.environ.copy()
+    pending_env = [k for k in strip_env if k in env]
+    for k in pending_env:
+        del env[k]
+    if pending_env:
+        logging.info("stripped env vars: %s", pending_env)
+
+    # EDITOR=true prevents git commit (and similar) from opening a text editor.
+    env["EDITOR"] = "true"
+
+    # Listen before spawning the subprocess so the first client can queue its
+    # connection even if the subprocess fails during startup.
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(SOCK_PATH)
+    srv.listen(1)
+
+    output_file = open(OUTPUT_PATH, "ab", buffering=0)
+    env_event = b""
+    if pending_env:
+        redacted = {k: "" for k in pending_env}
+        env_event = _encode_control("stripped_env", {"variables": redacted})
+    d = _Daemon(None, output_file, work_dir, log_stdin, env_event, cmd_args)
+    threading.Thread(target=d.accept_thread, args=(srv,), daemon=True).start()
+
+    try:
+        proc = subprocess.Popen(
+            cmd_args,
+            cwd=work_dir,
+            env=env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except OSError as e:
+        logging.exception("subprocess failed to start")
+        d.write_exit_event(-1, error=str(e))
+        d.proc_ready.set()
+        d.set_client(None, "subprocess_start_failed")
+        output_file.close()
+        srv.close()
+        try:
+            os.unlink(SOCK_PATH)
+        except FileNotFoundError:
+            pass
+        try:
+            os.unlink(PID_PATH)
+        except FileNotFoundError:
+            pass
+        return
+    d.set_proc(proc)
+    logging.info("subprocess started pid=%d", proc.pid)
+
+    # Drain subprocess stderr to relay.log and retain recent lines for the exit event.
+    threading.Thread(target=d.stderr_thread, daemon=True).start()
+
+    # reader_thread is the authoritative "done" signal: it reads stdout
+    # until EOF (which implies the subprocess exited), flushes output.jsonl,
+    # and closes the client socket so attach_client sees a clean EOF.
+    # We join it instead of proc.wait() to avoid a race where the main
+    # thread exits (killing daemon threads) before reader_thread has
+    # delivered the last chunk to the client.
+    reader_t = threading.Thread(target=d.reader_thread)
+    threading.Thread(target=d.diff_watcher_thread, daemon=True).start()
+
+    # Shutdown watchdog: waits for _client_reader to set shutdown_event,
+    # then closes stdin + sends SIGINT, and escalates if the subprocess
+    # doesn't exit (which makes reader_thread see stdout EOF).
+    def _shutdown_watchdog():
+        d.shutdown_event.wait()
+        if not reader_t.is_alive():
+            return  # Subprocess already exited naturally.
+        logging.info("shutdown: closing stdin, sending SIGINT to pid=%d", proc.pid)
+        try:
+            proc.stdin.close()
+        except OSError:
+            pass
+        try:
+            proc.send_signal(signal.SIGINT)
+        except OSError:
+            pass
+        reader_t.join(timeout=shutdown_grace)
+        if not reader_t.is_alive():
+            logging.info("shutdown: subprocess exited after SIGINT, proc_poll=%s", proc.poll())
+            return
+        logging.warning("shutdown: no exit after %ds, sending SIGTERM (proc_poll=%s)", shutdown_grace, proc.poll())
+        try:
+            proc.terminate()
+        except OSError:
+            pass
+        reader_t.join(timeout=2)
+        if not reader_t.is_alive():
+            logging.info("shutdown: subprocess exited after SIGTERM, proc_poll=%s", proc.poll())
+            return
+        logging.warning("shutdown: subprocess did not exit after SIGTERM, sending SIGKILL (proc_poll=%s)", proc.poll())
+        try:
+            proc.kill()
+        except OSError:
+            pass
+
+    watchdog_t = threading.Thread(target=_shutdown_watchdog)
+    watchdog_t.start()
+    reader_t.start()
+    reader_t.join()
+    # Unblock watchdog if subprocess exited naturally (no sentinel received).
+    d.shutdown_event.set()
+    watchdog_t.join()
+    elapsed = time.monotonic() - _start_time
+    logging.info("relay exiting code=%d elapsed=%.0fs", proc.returncode, elapsed)
+
+    # Clean up.
+    srv.close()
+    try:
+        os.unlink(SOCK_PATH)
+    except FileNotFoundError:
+        pass
+    try:
+        os.unlink(PID_PATH)
+    except FileNotFoundError:
+        pass
+
+
+def attach_client(offset):
+    """Connect to relay via Unix socket and bridge to stdio."""
+    conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    conn.connect(SOCK_PATH)
+
+    # Send handshake.
+    hs = json.dumps({"offset": offset}) + "\n"
+    conn.sendall(hs.encode())
+
+    # Thread: relay socket → stdout.
+    def relay_to_stdout():
+        try:
+            while True:
+                data = conn.recv(BUF_SIZE)
+                if not data:
+                    break
+                sys.stdout.buffer.write(data)
+                sys.stdout.buffer.flush()
+        except (OSError, BrokenPipeError, ValueError):
+            pass
+        finally:
+            # When relay closes, signal EOF to our parent.
+            try:
+                sys.stdout.close()
+            except OSError:
+                pass
+
+    t = threading.Thread(target=relay_to_stdout, daemon=True)
+    t.start()
+
+    # Main thread: stdin → socket.
+    # The null byte sentinel for graceful shutdown is written by the Go
+    # backend *before* closing stdin, so it arrives through the normal data
+    # path. We must NOT inject a synthetic null byte on stdin EOF because
+    # EOF also happens on SSH drops / backend restarts where the container
+    # should keep running.
+    try:
+        while True:
+            data = sys.stdin.buffer.read1(BUF_SIZE)
+            if not data:
+                break
+            conn.sendall(data)
+    except (OSError, BrokenPipeError, ValueError, KeyboardInterrupt):
+        pass
+    finally:
+        # Half-close the socket write side so the relay daemon sees EOF on
+        # client_reader, while keeping the read side open for relay_to_stdout
+        # to drain the subprocess's final output (including the ResultMessage
+        # emitted after stdin close).
+        try:
+            conn.shutdown(socket.SHUT_WR)
+        except OSError:
+            pass
+        t.join(timeout=25)
+        conn.close()
+
+
+def _wait_for_socket(timeout, child_pid):
+    """Block until the relay socket appears or the daemon exits."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if os.path.exists(SOCK_PATH):
+            try:
+                s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                s.connect(SOCK_PATH)
+                s.close()
+                return True
+            except OSError:
+                pass
+        if child_pid is not None:
+            try:
+                pid, _ = os.waitpid(child_pid, os.WNOHANG)
+            except ChildProcessError:
+                return False
+            if pid == child_pid:
+                return False
+        time.sleep(0.05)
+    raise TimeoutError("relay: timed out waiting for socket")
+
+
+def _copy_output_to_stdout():
+    """Copy relay output if the daemon exited before the first attach."""
+    try:
+        with open(OUTPUT_PATH, "rb") as f:
+            shutil.copyfileobj(f, sys.stdout.buffer)
+            sys.stdout.buffer.flush()
+    except FileNotFoundError:
+        pass
+
+
+def _read_line(conn):
+    """Read bytes from conn until newline."""
+    buf = bytearray()
+    while True:
+        b = conn.recv(1)
+        if not b or b == b"\n":
+            break
+        buf.extend(b)
+    return buf.decode()
+
+
+def read_plan(path):
+    """Print the content of a plan file.
+
+    If path is given, read that file directly. Otherwise find the most recently
+    modified .md file in ~/.claude/plans/.
+    """
+    if path:
+        with open(path) as f:
+            sys.stdout.write(f.read())
+        return 0
+    plans_dir = os.path.expanduser("~/.claude/plans")
+    if not os.path.isdir(plans_dir):
+        return 1
+    files = [os.path.join(plans_dir, f) for f in os.listdir(plans_dir) if f.endswith(".md")]
+    if not files:
+        return 1
+    latest = max(files, key=os.path.getmtime)
+    with open(latest) as f:
+        sys.stdout.write(f.read())
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="relay_v2.py")
+    sub = parser.add_subparsers(dest="mode")
+
+    sa = sub.add_parser("serve-attach")
+    sa.add_argument("--dir", required=True, dest="work_dir")
+    sa.add_argument("--no-log-stdin", action="store_true")
+    sa.add_argument("--strip-env", action="append", default=[], metavar="KEY")
+    sa.add_argument(
+        "--shutdown-grace",
+        type=int,
+        default=_DEFAULT_SHUTDOWN_GRACE,
+        metavar="SEC",
+        help="seconds to wait after SIGINT before SIGTERM (default: %(default)s)",
+    )
+    sa.add_argument("cmd", nargs="+")
+
+    at = sub.add_parser("attach")
+    at.add_argument("--offset", type=int, default=0)
+
+    rp = sub.add_parser("read-plan")
+    rp.add_argument("path", nargs="?")
+
+    args = parser.parse_args()
+    if args.mode == "serve-attach":
+        serve(
+            args.cmd,
+            args.work_dir,
+            log_stdin=not args.no_log_stdin,
+            strip_env=args.strip_env,
+            shutdown_grace=args.shutdown_grace,
+        )
+    elif args.mode == "attach":
+        attach_client(args.offset)
+    elif args.mode == "read-plan":
+        return read_plan(args.path)
+    else:
+        parser.print_help(sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
