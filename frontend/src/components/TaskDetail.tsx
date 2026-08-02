@@ -208,6 +208,34 @@ export default function TaskDetail(props: Props) {
     setExpandedTurnKeys(expandedTurnsByTask.get(props.taskId) ?? new Set<string>());
     setExpandedSessionKeys(expandedSessionsByTask.get(props.taskId) ?? new Set<string>());
   });
+  // Expanding/collapsing a past turn or session replaces its row with a different
+  // number of rows, shifting every row after it. Since those rows are matched by
+  // array position (not stable identity), Solid destroys and recreates them, which
+  // defeats the browser's native scroll anchoring. Re-anchor manually: remember the
+  // clicked row's viewport offset, then after the DOM updates, find the row with the
+  // same data-anchor-key and correct scrollTop so it lands back at that offset.
+  function anchoredToggleTurn(e: MouseEvent, key: string) {
+    const anchorKey = `turn:${key}`;
+    const beforeTop = (e.currentTarget as HTMLElement | null)?.getBoundingClientRect().top;
+    toggleTurn(key);
+    restoreAnchor(anchorKey, beforeTop);
+  }
+  function anchoredToggleSession(e: MouseEvent, key: string) {
+    const anchorKey = `session:${key}`;
+    const beforeTop = (e.currentTarget as HTMLElement | null)?.getBoundingClientRect().top;
+    toggleSession(key);
+    restoreAnchor(anchorKey, beforeTop);
+  }
+  function restoreAnchor(anchorKey: string, beforeTop: number | undefined) {
+    const container = messageAreaRef;
+    if (!container || beforeTop === undefined) return;
+    requestAnimationFrame(() => {
+      const afterEl = container.querySelector<HTMLElement>(`[data-anchor-key="${CSS.escape(anchorKey)}"]`);
+      if (afterEl) {
+        container.scrollTop += afterEl.getBoundingClientRect().top - beforeTop;
+      }
+    });
+  }
   function toggleTurn(key: string) {
     setExpandedTurnKeys((prev) => {
       const next = new Set(prev);
@@ -792,7 +820,8 @@ export default function TaskDetail(props: Props) {
                 {/* Collapsed past session: single clickable row. */}
                 <Match when={sessElided()} keyed>
                   {(se) => (
-                    <button class={styles.sessionElided} onClick={() => toggleSession(se.sessionKey)}>
+                    <button class={styles.sessionElided} data-anchor-key={`session:${se.sessionKey}`}
+                      onClick={(e) => anchoredToggleSession(e, se.sessionKey)}>
                       {sessionSummary(se.session)}
                     </button>
                   )}
@@ -800,7 +829,8 @@ export default function TaskDetail(props: Props) {
                 {/* Expanded past session header: click to collapse. */}
                 <Match when={sessHdr()} keyed>
                   {(sh) => (
-                    <button class={`${styles.sessionElided} ${styles.sessionElidedExpanded}`} onClick={() => toggleSession(sh.sessionKey)}>
+                    <button class={`${styles.sessionElided} ${styles.sessionElidedExpanded}`} data-anchor-key={`session:${sh.sessionKey}`}
+                      onClick={(e) => anchoredToggleSession(e, sh.sessionKey)}>
                       {sessionSummary(sh.session)}
                     </button>
                   )}
@@ -812,7 +842,8 @@ export default function TaskDetail(props: Props) {
                 {/* Collapsed past turn: single clickable row. */}
                 <Match when={elided()} keyed>
                   {(e) => (
-                    <button class={`${styles.elidedTurn}${e.indent === "session" ? ` ${styles.indentSession}` : ""}`} onClick={() => toggleTurn(e.key)}>
+                    <button class={`${styles.elidedTurn}${e.indent === "session" ? ` ${styles.indentSession}` : ""}`} data-anchor-key={`turn:${e.key}`}
+                      onClick={(ev) => anchoredToggleTurn(ev, e.key)}>
                       {turnSummary(e.turn)}
                     </button>
                   )}
@@ -820,7 +851,8 @@ export default function TaskDetail(props: Props) {
                 {/* Expanded past turn header: click to collapse. */}
                 <Match when={expHdr()} keyed>
                   {(h) => (
-                    <button class={`${styles.elidedTurn} ${styles.elidedTurnExpanded}${h.indent === "session" ? ` ${styles.indentSession}` : ""}`} onClick={() => toggleTurn(h.turnKey)}>
+                    <button class={`${styles.elidedTurn} ${styles.elidedTurnExpanded}${h.indent === "session" ? ` ${styles.indentSession}` : ""}`} data-anchor-key={`turn:${h.turnKey}`}
+                      onClick={(ev) => anchoredToggleTurn(ev, h.turnKey)}>
                       {turnSummary(h.turn)}
                     </button>
                   )}
