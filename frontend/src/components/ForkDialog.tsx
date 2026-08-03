@@ -10,6 +10,7 @@ import RepoChipStrip from "./RepoChipStrip";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import Button from "./Button";
 import { HarnessControls, ToggleChip } from "./FormControls";
+import ModalDialog from "./ModalDialog";
 import TokenIcon from "./github.svg?solid";
 import TailscaleIcon from "./tailscale.svg?solid";
 import styles from "./ForkDialog.module.css";
@@ -18,19 +19,10 @@ export default function ForkDialog() {
   const s = useAppState();
   return (
     <Show when={s.forkTaskId()}>
-      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/click-events-have-key-events -- native <dialog> handles Escape; click-to-dismiss on padding is supplementary */}
-      <dialog
-        ref={(el) => {
-          el.addEventListener("close", () => { s.setForkTaskId(null); });
-          const stopEscape = (e: KeyboardEvent) => {
-            if (e.key === "Escape") { e.stopPropagation(); e.stopImmediatePropagation(); }
-          };
-          el.addEventListener("keydown", stopEscape, true);
-          queueMicrotask(() => el.showModal());
-        }}
+      <ModalDialog
         class={styles.forkDialog}
         data-testid="fork-dialog"
-        onClick={(e) => { if (e.target === e.currentTarget) s.setForkTaskId(null); }}
+        onClose={() => s.setForkTaskId(null)}
       >
         <h2 class={styles.forkTitle}>Fork task</h2>
         <AutoResizeTextarea
@@ -97,7 +89,7 @@ export default function ForkDialog() {
           <button type="button" class={styles.forkCancel} onClick={() => s.setForkTaskId(null)}>Cancel</button>
           <Button type="button" onClick={s.submitFork} disabled={!s.forkPrompt().trim()} data-testid="fork-submit">Fork</Button>
         </div>
-      </dialog>
+      </ModalDialog>
     </Show>
   );
 }

@@ -1,0 +1,11 @@
+/* Shared visual foundation for native modal dialogs. */
+
+.dialog {
+  border: none;
+  border-radius: var(--radius-xl);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.24);
+}
+
+.dialog::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}

@@ -1,7 +1,7 @@
 // Tests for app-shell task creation, repo selection, and harness preferences.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@solidjs/testing-library";
+import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 
 import type { Repo, PreferencesResp, HarnessInfo, Task, ISOTimestamp } from "@sdk/types.gen";
@@ -628,6 +628,44 @@ describe("App repo chips: No repository", () => {
     await user.click(screen.getByRole("button", { name: "Fork" }));
 
     expect(screen.getByRole("button", { name: "Fork Model" })).toHaveTextContent("openai-codex/gpt-5.6-terra");
+  });
+
+  it("does not dismiss the fork dialog when it is clicked", async () => {
+    const user = userEvent.setup();
+    renderApp("/task/@task1");
+    await waitForTaskEventsSubscription();
+    dispatchSSE({
+      kind: "snapshot",
+      snapshot: [makeTask({ repos: [{ name: "repos/a", branch: "fork-source" }] })],
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Context actions" }));
+    await user.click(screen.getByRole("button", { name: "Fork" }));
+
+    const dialog = screen.getByTestId("fork-dialog");
+    await user.click(dialog);
+
+    expect(dialog).toBeInTheDocument();
+    expect(dialog).toHaveAttribute("open");
+  });
+
+  it("dismisses the fork dialog when its backdrop is clicked", async () => {
+    const user = userEvent.setup();
+    renderApp("/task/@task1");
+    await waitForTaskEventsSubscription();
+    dispatchSSE({
+      kind: "snapshot",
+      snapshot: [makeTask({ repos: [{ name: "repos/a", branch: "fork-source" }] })],
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Context actions" }));
+    await user.click(screen.getByRole("button", { name: "Fork" }));
+
+    const dialog = screen.getByTestId("fork-dialog");
+    vi.spyOn(dialog, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 100, 400, 300));
+    fireEvent.click(dialog, { clientX: 50, clientY: 50 });
+
+    expect(screen.queryByTestId("fork-dialog")).not.toBeInTheDocument();
   });
 
   it("creates task without repos when no chips are selected", async () => {

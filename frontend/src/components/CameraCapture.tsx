@@ -6,6 +6,7 @@ import SwitchCameraIcon from "@material-symbols/svg-400/outlined/cameraswitch.sv
 
 import type { ImageData as APIImageData } from "@sdk/types.gen";
 
+import ModalDialog from "./ModalDialog";
 import styles from "./CameraCapture.module.css";
 
 interface Props {
@@ -16,7 +17,6 @@ interface Props {
 export default function CameraCapture(props: Props) {
   let videoRef!: HTMLVideoElement;
   let canvasRef!: HTMLCanvasElement;
-  let dialogRef!: HTMLDialogElement;
   const [stream, setStream] = createSignal<MediaStream | null>(null);
   const [error, setError] = createSignal("");
   const [facingMode, setFacingMode] = createSignal<"environment" | "user">("environment");
@@ -39,13 +39,6 @@ export default function CameraCapture(props: Props) {
   }
 
   onMount(async () => {
-    dialogRef.addEventListener("close", () => props.onClose());
-    // Prevent Escape keydown from bubbling past the dialog to parent components.
-    const stopEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { e.stopPropagation(); e.stopImmediatePropagation(); }
-    };
-    dialogRef.addEventListener("keydown", stopEscape, true);
-    dialogRef.showModal();
     await startCamera(facingMode());
     // Detect whether multiple cameras are available.
     try {
@@ -83,11 +76,9 @@ export default function CameraCapture(props: Props) {
   }
 
   return (
-    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/click-events-have-key-events -- native <dialog> handles Escape; click-to-dismiss on padding is supplementary
-    <dialog
-      ref={(el) => (dialogRef = el)}
+    <ModalDialog
       class={styles.dialog}
-      onClick={(e) => { if (e.target === e.currentTarget) props.onClose(); }}
+      onClose={props.onClose}
     >
       {error() ? (
         <p class={styles.error}>{error()}</p>
@@ -108,6 +99,6 @@ export default function CameraCapture(props: Props) {
         )}
         <button class={styles.closeBtn} onClick={() => props.onClose()}>Cancel</button>
       </div>
-    </dialog>
+    </ModalDialog>
   );
 }

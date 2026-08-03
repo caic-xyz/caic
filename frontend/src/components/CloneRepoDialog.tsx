@@ -1,9 +1,10 @@
 // Modal dialog for cloning a git repository by URL.
 // Uses native <dialog> for built-in Escape handling, focus trapping, and backdrop.
 
-import { createSignal, Show, onMount } from "solid-js";
+import { createSignal, Show } from "solid-js";
 
 import Button from "./Button";
+import ModalDialog from "./ModalDialog";
 import styles from "./CloneRepoDialog.module.css";
 
 interface Props {
@@ -16,8 +17,6 @@ interface Props {
 export default function CloneRepoDialog(props: Props) {
   const [url, setUrl] = createSignal("");
   const [path, setPath] = createSignal("");
-  let dialogRef!: HTMLDialogElement;
-
   function submit() {
     const u = url().trim();
     if (!u) return;
@@ -25,22 +24,12 @@ export default function CloneRepoDialog(props: Props) {
     props.onClone(u, p);
   }
 
-  onMount(() => {
-    dialogRef.addEventListener("close", () => props.onClose());
-    // Prevent Escape keydown from bubbling past the dialog to parent components.
-    const stopEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { e.stopPropagation(); e.stopImmediatePropagation(); }
-    };
-    dialogRef.addEventListener("keydown", stopEscape, true);
-    dialogRef.showModal();
-  });
-
   return (
-    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/click-events-have-key-events -- native <dialog> handles Escape; click-to-dismiss on padding is supplementary
-    <dialog
-      ref={(el) => (dialogRef = el)}
+    <ModalDialog
       class={styles.dialog}
-      onClick={(e) => { if (e.target === e.currentTarget && !props.loading) props.onClose(); }}
+      onClose={props.onClose}
+      dismissOnBackdrop={!props.loading}
+      dismissOnEscape={!props.loading}
     >
       <h2 class={styles.title}>Clone Repository</h2>
       <label class={styles.label}>
@@ -75,6 +64,6 @@ export default function CloneRepoDialog(props: Props) {
         <button type="button" class={styles.cancelBtn} onClick={() => props.onClose()} disabled={props.loading}>Cancel</button>
         <Button type="button" onClick={submit} disabled={props.loading || !url().trim()} loading={props.loading} data-testid="clone-submit">Clone</Button>
       </div>
-    </dialog>
+    </ModalDialog>
   );
 }
