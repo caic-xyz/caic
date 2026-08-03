@@ -684,6 +684,7 @@ type MetaMessage struct {
 	Effort            string           `json:"effort,omitempty"`
 	StartedAt         time.Time        `json:"started_at"`
 	ForgeIssue        int              `json:"forge_issue,omitempty"` // Originating issue/PR number for bot comment callbacks.
+	ForkedFromTaskID  string           `json:"forked_from_task_id,omitempty"`
 	Tailscale         bool             `json:"tailscale,omitempty"`
 	USB               bool             `json:"usb,omitempty"`
 	Display           bool             `json:"display,omitempty"`

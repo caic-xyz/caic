@@ -1243,6 +1243,9 @@ func TestManager(t *testing.T) {
 			if tk.MaxCPUs != 5 {
 				t.Errorf("MaxCPUs = %d, want 5 (from source)", tk.MaxCPUs)
 			}
+			if tk.ForkedFromTaskID != src.Task().ID {
+				t.Errorf("ForkedFromTaskID = %s, want %s", tk.ForkedFromTaskID, src.Task().ID)
+			}
 		})
 		t.Run("valid_stopped_source", func(t *testing.T) {
 			t.Parallel()

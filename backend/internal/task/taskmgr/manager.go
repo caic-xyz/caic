@@ -633,6 +633,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 		Sudo:              p.Sudo,
 		StartedAt:         time.Now().UTC(),
 		OwnerID:           p.OwnerID,
+		ForkedFromTaskID:  source.ID,
 		Provider:          m.provider,
 	}
 	t.SetTitle(p.Prompt.Text)
@@ -1056,6 +1057,14 @@ func (m *Manager) LoadPurgedTasks(all []*task.LoadedTask) error {
 		} else {
 			lt.RuntimeName = rt
 		}
+		var forkedFromTaskID ksid.ID
+		if lt.ForkedFromTaskID != "" {
+			var err error
+			forkedFromTaskID, err = ksid.Parse(lt.ForkedFromTaskID)
+			if err != nil {
+				return fmt.Errorf("load purged task %q: invalid forkedFromTaskID %q: %w", lt.TaskID, lt.ForkedFromTaskID, err)
+			}
+		}
 		t := &task.Task{
 			ID:                taskID,
 			InitialPrompt:     agent.Prompt{Text: lt.Prompt},
@@ -1070,6 +1079,7 @@ func (m *Manager) LoadPurgedTasks(all []*task.LoadedTask) error {
 			CacheMounts:       slices.Clone(lt.CacheMounts),
 			Mounts:            slices.Clone(lt.Mounts),
 			StartedAt:         lt.StartedAt,
+			ForkedFromTaskID:  forkedFromTaskID,
 			Tailscale:         lt.Tailscale,
 			USB:               lt.USB,
 			Display:           lt.Display,
@@ -1706,6 +1716,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 	var maxCPUs int
 	var cacheMounts []runtime.CacheMount
 	var mounts []runtime.Mount
+	var forkedFromTaskID ksid.ID
 	if lt != nil {
 		forgeIssue = lt.ForgeIssue
 		if lt.RuntimeName != "" {
@@ -1718,6 +1729,13 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 		maxCPUs = lt.MaxCPUs
 		cacheMounts = slices.Clone(lt.CacheMounts)
 		mounts = slices.Clone(lt.Mounts)
+		if lt.ForkedFromTaskID != "" {
+			var err error
+			forkedFromTaskID, err = ksid.Parse(lt.ForkedFromTaskID)
+			if err != nil {
+				return nil, fmt.Errorf("adopt task %q: invalid forkedFromTaskID %q: %w", taskID.String(), lt.ForkedFromTaskID, err)
+			}
+		}
 	}
 	if c.ID.RuntimeName() != "" {
 		rt = c.ID.RuntimeName()
@@ -1737,6 +1755,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 		CacheMounts:       cacheMounts,
 		Mounts:            mounts,
 		StartedAt:         startedAt,
+		ForkedFromTaskID:  forkedFromTaskID,
 		Tailscale:         c.Tailscale,
 		TailscaleFQDN:     c.TailscaleFQDN,
 		USB:               c.USB,

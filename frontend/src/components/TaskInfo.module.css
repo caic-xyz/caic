@@ -105,6 +105,24 @@
   word-break: break-all;
 }
 
+.taskLink {
+  color: var(--color-link);
+}
+
+.lineage {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+}
+
+.lineageGlyph {
+  color: var(--color-primary);
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
 .tableWrap {
   overflow: auto;
 }

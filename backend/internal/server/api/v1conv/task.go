@@ -70,10 +70,11 @@ func Task(ctx context.Context, e *taskmgr.Entry, r TaskResolvers) v1.Task {
 	}
 
 	out := v1.Task{
-		ID:            t.ID,
-		InitialPrompt: t.InitialPrompt.Text,
-		Title:         snap.Title,
-		Repos:         taskRepos,
+		ID:               t.ID,
+		InitialPrompt:    t.InitialPrompt.Text,
+		Title:            snap.Title,
+		ForkedFromTaskID: t.ForkedFromTaskID,
+		Repos:            taskRepos,
 		Runtime: v1.RuntimeInstance{
 			ID:           string(snap.RuntimeInstanceID),
 			RuntimeName:  string(snap.RuntimeName),

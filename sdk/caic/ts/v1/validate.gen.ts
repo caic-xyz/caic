@@ -509,6 +509,7 @@ export function validateTask(raw: ValidatorInput): Task {
     ciStatus: (obj["ciStatus"] === undefined || obj["ciStatus"] === null ? undefined : (asString(obj["ciStatus"], "Task.ciStatus") as CIStatus)),
     ciChecks: (obj["ciChecks"] === undefined || obj["ciChecks"] === null ? undefined : validateArray(obj["ciChecks"], "Task.ciChecks", validateForgeCheck) as ForgeCheck[]),
     owner: (obj["owner"] === undefined || obj["owner"] === null ? undefined : asString(obj["owner"], "Task.owner")),
+    forkedFromTaskID: (obj["forkedFromTaskID"] === undefined || obj["forkedFromTaskID"] === null ? undefined : asString(obj["forkedFromTaskID"], "Task.forkedFromTaskID")),
     harness: (asString(obj["harness"], "Task.harness") as Harness),
     model: (obj["model"] === undefined || obj["model"] === null ? undefined : asString(obj["model"], "Task.model")),
     effort: (obj["effort"] === undefined || obj["effort"] === null ? undefined : asString(obj["effort"], "Task.effort")),

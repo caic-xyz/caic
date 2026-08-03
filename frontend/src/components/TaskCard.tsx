@@ -3,6 +3,7 @@
 import { For, Show, createEffect, createSignal, onMount, onCleanup } from "solid-js";
 import type { Accessor } from "solid-js";
 import { Portal } from "solid-js/web";
+import { A } from "@solidjs/router";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
 import SudoIcon from "@material-symbols/svg-400/outlined/shield_person.svg?solid";
 import DeleteIcon from "@material-symbols/svg-400/outlined/delete.svg?solid";
@@ -41,6 +42,7 @@ import { formatQuotaCountdown } from "../quota";
 export interface TaskCardProps {
   id: string;
   title: string;
+  forkedFromTaskID?: string;
   state: TaskState;
   stateUpdatedAt: string;
   repos?: TaskRepo[];
@@ -396,6 +398,23 @@ export default function TaskCard(props: TaskCardProps) {
           </Show>
         </span>
       </div>
+
+      <Show when={props.forkedFromTaskID} keyed>
+        {(parentID) => (
+          <div class={styles.originRow}>
+            <span class={styles.originGlyph} aria-hidden="true">↳</span>
+            <span>forked from</span>
+            <A
+              class={styles.originLink}
+              href={`/task/@${parentID}`}
+              title={`Open origin task ${parentID}`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {parentID}
+            </A>
+          </div>
+        )}
+      </Show>
 
       {/* Line 2: base→branch | [timer times] [PR] [CI] [state badge] */}
       {(() => {

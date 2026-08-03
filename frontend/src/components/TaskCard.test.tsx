@@ -1,12 +1,19 @@
 // Tests for the compact task card summary.
 
 import { fireEvent, render, screen } from "@solidjs/testing-library";
+import type { JSX } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ISOTimestamp } from "@sdk/types.gen";
 import type { TaskCardProps } from "./TaskCard";
 
 import TaskCard from "./TaskCard";
+
+vi.mock("@solidjs/router", () => ({
+  A: (linkProps: { href: string; class?: string; title?: string; onClick?: (event: MouseEvent) => void; children: JSX.Element }) => (
+    <a class={linkProps.class} href={linkProps.href} title={linkProps.title} onClick={(event) => linkProps.onClick?.(event)}>{linkProps.children}</a>
+  ),
+}));
 
 const now = () => Date.parse("2026-07-08T12:00:00Z");
 
@@ -60,6 +67,18 @@ describe("TaskCard", () => {
     const { getByText } = render(() => <TaskCard {...props({ error })} />);
 
     expect(getByText(error).className).toContain("errorSummary");
+  });
+
+  it("renders a clickable origin task without selecting the child", () => {
+    const onClick = vi.fn();
+    const { getByRole } = render(() => (
+      <TaskCard {...props({ forkedFromTaskID: "3BL0EKDTO000", onClick })} />
+    ));
+
+    const link = getByRole("link", { name: "3BL0EKDTO000" });
+    expect(link).toHaveAttribute("href", "/task/@3BL0EKDTO000");
+    fireEvent.click(link);
+    expect(onClick).not.toHaveBeenCalled();
   });
 
   it("opens the task actions menu on right click", () => {

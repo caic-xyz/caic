@@ -139,6 +139,30 @@
   align-items: baseline;
 }
 
+.originRow {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  margin-top: 0.2rem;
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+  min-width: 0;
+}
+
+.originGlyph {
+  color: var(--color-primary);
+  font-size: 0.9rem;
+  line-height: 0.8;
+}
+
+.originLink {
+  color: var(--color-link);
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .meta {
   font-size: 0.75rem;
   color: var(--color-text-meta);

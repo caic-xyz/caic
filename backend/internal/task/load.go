@@ -299,6 +299,7 @@ type LoadedTask struct {
 	LastStateUpdateAt time.Time // Latest relay ts from caic_diff_stat records, falling back to log file mtime.
 	State             State
 	ForgeIssue        int // Originating issue number for bot comment callbacks.
+	ForkedFromTaskID  string
 	ForgeOwner        string
 	ForgeRepo         string
 	ForgePR           int // PR number created during the task; 0 if none.
@@ -358,6 +359,7 @@ func loadedTaskFromMeta(path, taskID string, meta *agent.MetaMessage, modified t
 		LastStateUpdateAt: modified,
 		State:             StateRunning,
 		ForgeIssue:        meta.ForgeIssue,
+		ForkedFromTaskID:  meta.ForkedFromTaskID,
 		Tailscale:         meta.Tailscale,
 		USB:               meta.USB,
 		Display:           meta.Display,

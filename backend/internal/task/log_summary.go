@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	logSummaryVersion = 2
+	logSummaryVersion = 3
 	logSummaryExt     = ".taskmeta.json"
 )
 
@@ -44,6 +44,7 @@ type loadedTaskSummary struct {
 	LastStateUpdateAt time.Time           `json:"lastStateUpdateAt,omitzero"`
 	State             string              `json:"state,omitempty"`
 	ForgeIssue        int                 `json:"forgeIssue,omitempty"`
+	ForkedFromTaskID  string              `json:"forkedFromTaskID,omitempty"`
 	ForgeOwner        string              `json:"forgeOwner,omitempty"`
 	ForgeRepo         string              `json:"forgeRepo,omitempty"`
 	ForgePR           int                 `json:"forgePR,omitempty"`
@@ -200,6 +201,7 @@ func loadedTaskSummaryFrom(lt *LoadedTask) loadedTaskSummary {
 		LastStateUpdateAt: lt.LastStateUpdateAt,
 		State:             lt.State.String(),
 		ForgeIssue:        lt.ForgeIssue,
+		ForkedFromTaskID:  lt.ForkedFromTaskID,
 		ForgeOwner:        lt.ForgeOwner,
 		ForgeRepo:         lt.ForgeRepo,
 		ForgePR:           lt.ForgePR,
@@ -236,6 +238,7 @@ func (s *loadedTaskSummary) toLoadedTask(path string, size int64) *LoadedTask {
 		LastStateUpdateAt: s.LastStateUpdateAt,
 		State:             parseState(s.State),
 		ForgeIssue:        s.ForgeIssue,
+		ForkedFromTaskID:  s.ForkedFromTaskID,
 		ForgeOwner:        s.ForgeOwner,
 		ForgeRepo:         s.ForgeRepo,
 		ForgePR:           s.ForgePR,

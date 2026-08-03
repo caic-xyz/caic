@@ -12,6 +12,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/usage"
+	"github.com/maruel/ksid"
 )
 
 func TestTask(t *testing.T) {
@@ -54,6 +55,16 @@ func TestTask(t *testing.T) {
 		got := Task(t.Context(), taskmgr.NewEntry(tk, nil), TaskResolvers{}).RateLimit
 		if !got.Blocked || got.Window != "5h" {
 			t.Errorf("RateLimit = %#v, want active 5h block", got)
+		}
+	})
+	t.Run("IncludesForkOrigin", func(t *testing.T) {
+		t.Parallel()
+		parentID := ksid.NewID()
+		tk := &task.Task{ID: ksid.NewID(), ForkedFromTaskID: parentID}
+
+		got := Task(t.Context(), taskmgr.NewEntry(tk, nil), TaskResolvers{})
+		if got.ForkedFromTaskID != parentID {
+			t.Errorf("ForkedFromTaskID = %s, want %s", got.ForkedFromTaskID, parentID)
 		}
 	})
 }

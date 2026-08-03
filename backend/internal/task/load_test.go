@@ -218,8 +218,53 @@ func TestReadLogAuthority(t *testing.T) {
 	})
 }
 
+func TestForkedFromTaskIDLoadsFromLogMetadata(t *testing.T) {
+	t.Parallel()
+	path := writePhysicalTestLog(t, false, mustJSON(t, agent.MetaMessage{
+		MessageType:      "caic_meta",
+		Version:          1,
+		Prompt:           "forked task",
+		Repos:            []agent.MetaRepo{{Name: "r", Branch: "caic-1"}},
+		Harness:          harness.Claude,
+		ForkedFromTaskID: "3BL0EKDTO000",
+	}))
+
+	tasks, err := LoadLogs(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("len(tasks) = %d, want 1", len(tasks))
+	}
+	if tasks[0].ForkedFromTaskID != "3BL0EKDTO000" {
+		t.Fatalf("ForkedFromTaskID = %q, want 3BL0EKDTO000", tasks[0].ForkedFromTaskID)
+	}
+}
+
 func TestLoadLogs(t *testing.T) {
 	t.Parallel()
+	t.Run("ForkedFromTaskIDMetadata", func(t *testing.T) {
+		t.Parallel()
+		path := writePhysicalTestLog(t, false, mustJSON(t, agent.MetaMessage{
+			MessageType:      "caic_meta",
+			Version:          1,
+			Prompt:           "forked task",
+			Repos:            []agent.MetaRepo{{Name: "r", Branch: "caic-1"}},
+			Harness:          harness.Claude,
+			ForkedFromTaskID: "3BL0EKDTO000",
+		}))
+
+		tasks, err := LoadLogs(filepath.Dir(path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(tasks) != 1 {
+			t.Fatalf("len(tasks) = %d, want 1", len(tasks))
+		}
+		if tasks[0].ForkedFromTaskID != "3BL0EKDTO000" {
+			t.Fatalf("ForkedFromTaskID = %q, want 3BL0EKDTO000", tasks[0].ForkedFromTaskID)
+		}
+	})
 	t.Run("PhysicalAuthority", func(t *testing.T) {
 		t.Parallel()
 		meta := func(version agent.LogVersion, h harness.Name) string {
@@ -438,7 +483,7 @@ func TestLoadLogs(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		path := filepath.Join(dir, "a.jsonl.zst")
-		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "cached", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude"})
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "cached", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude", ForkedFromTaskID: "3BL0EKDTO000"})
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeCompressedLogFile(t, dir, "a.jsonl.zst", seqOf(meta, trailer))
 
@@ -476,8 +521,8 @@ func TestLoadLogs(t *testing.T) {
 		if len(second) != 1 {
 			t.Fatalf("len(second) = %d, want 1", len(second))
 		}
-		if second[0].Prompt != "cached" || second[0].State != StatePurged {
-			t.Fatalf("cached task = prompt %q state %v, want cached/purged", second[0].Prompt, second[0].State)
+		if second[0].Prompt != "cached" || second[0].State != StatePurged || second[0].ForkedFromTaskID != "3BL0EKDTO000" {
+			t.Fatalf("cached task = prompt %q state %v parent %q, want cached/purged/3BL0EKDTO000", second[0].Prompt, second[0].State, second[0].ForkedFromTaskID)
 		}
 	})
 	t.Run("CompressedSummaryRejectsReplacementBeforePublish", func(t *testing.T) {

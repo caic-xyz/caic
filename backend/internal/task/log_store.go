@@ -198,6 +198,7 @@ func writeMetadataHeader(w io.Writer, t *Task) error {
 		Effort:            t.Effort,
 		StartedAt:         t.StartedAt,
 		ForgeIssue:        t.ForgeIssue,
+		ForkedFromTaskID:  t.ForkedFromTaskID.String(),
 		Tailscale:         t.Tailscale,
 		USB:               t.USB,
 		Display:           t.Display,

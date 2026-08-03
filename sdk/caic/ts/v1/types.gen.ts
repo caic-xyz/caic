@@ -900,6 +900,7 @@ export interface Task {
   ciChecks?: ForgeCheck[];
   /** username of creator; omitted in no-auth mode */
   owner?: string;
+  forkedFromTaskID?: string;
   /** Per-task harness/agent metadata. */
   harness: Harness;
   model?: string;
@@ -968,6 +969,7 @@ export interface TaskInfoMount {
 /** TaskInfoRecorded holds caic-recorded task launch configuration and metadata. */
 export interface TaskInfoRecorded {
   state: TaskState;
+  forkedFromTaskID?: string;
   startedAt?: ISOTimestamp;
   stateUpdatedAt?: ISOTimestamp;
   harness: Harness;

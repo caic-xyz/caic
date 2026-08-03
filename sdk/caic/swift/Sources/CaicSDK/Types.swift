@@ -791,6 +791,7 @@ public struct Task: Codable {
     public let ciChecks: [ForgeCheck]?
     /// username of creator; omitted in no-auth mode
     public let owner: String?
+    public let forkedFromTaskID: String?
     /// Per-task harness/agent metadata.
     public let harness: Harness
     public let model: String?
@@ -857,6 +858,7 @@ public struct TaskInfoMount: Codable {
 /// TaskInfoRecorded holds caic-recorded task launch configuration and metadata.
 public struct TaskInfoRecorded: Codable {
     public let state: TaskState
+    public let forkedFromTaskID: String?
     public let startedAt: ISOTimestamp?
     public let stateUpdatedAt: ISOTimestamp?
     public let harness: Harness

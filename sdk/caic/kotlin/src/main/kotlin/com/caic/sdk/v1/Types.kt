@@ -1139,6 +1139,7 @@ data class Task(
     val ciChecks: List<ForgeCheck>? = null,
     /** username of creator; omitted in no-auth mode */
     val owner: String? = null,
+    @SerialName("forkedFromTaskID") val forkedFromTaskID: String? = null,
     /** Per-task harness/agent metadata. */
     val harness: Harness,
     val model: String? = null,
@@ -1211,6 +1212,7 @@ data class TaskInfoMount(
 @Serializable
 data class TaskInfoRecorded(
     val state: TaskState,
+    @SerialName("forkedFromTaskID") val forkedFromTaskID: String? = null,
     val startedAt: Instant? = null,
     val stateUpdatedAt: Instant? = null,
     val harness: Harness,

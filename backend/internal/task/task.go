@@ -225,6 +225,7 @@ type Task struct {
 	StartedAt         time.Time            // When the task was created.
 	OwnerID           string               // Internal user ID of the creator; empty in no-auth mode.
 	ForgeIssue        int                  // Originating issue number for bot comment callbacks; 0 = none.
+	ForkedFromTaskID  ksid.ID              // Parent task ID when created by fork; zero otherwise.
 	Provider          genai.Provider
 
 	// Mutable task metadata. These fields are populated at construction, setup, or

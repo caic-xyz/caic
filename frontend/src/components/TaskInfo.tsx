@@ -1,7 +1,7 @@
 // Full-page task metadata viewer for launch config and runtime facts.
 
 import { For, Show, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
-import { useNavigate } from "@solidjs/router";
+import { A, useNavigate } from "@solidjs/router";
 import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
 
 import type { TaskInfo as TaskInfoData, TaskInfoCacheMount, TaskInfoMount, TaskInfoRepo } from "@sdk/types.gen";
@@ -84,6 +84,14 @@ function Section(props: { title: string; children: JSX.Element }) {
       <h2 class={styles.sectionTitle}>{props.title}</h2>
       {props.children}
     </section>
+  );
+}
+
+function TaskLink(props: { id: string }) {
+  return (
+    <A class={`${styles.code} ${styles.taskLink}`} href={`/task/@${props.id}`}>
+      {props.id}
+    </A>
   );
 }
 
@@ -230,6 +238,18 @@ export default function TaskInfo(props: Props) {
                   <Field label="Session ID" value={data.recorded.sessionID} code />
                 </div>
               </Section>
+
+              <Show when={data.recorded.forkedFromTaskID} keyed>
+                {(parentID) => (
+                  <Section title="Lineage">
+                    <div class={styles.lineage}>
+                      <span class={styles.lineageGlyph} aria-hidden="true">↳</span>
+                      <span>Forked from</span>
+                      <TaskLink id={parentID} />
+                    </div>
+                  </Section>
+                )}
+              </Show>
 
               <Section title="Runtime">
                 <div class={styles.grid}>
