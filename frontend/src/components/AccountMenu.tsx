@@ -1,6 +1,7 @@
 // Navbar account menu: avatar button with a dropdown for settings and sign-out.
 
 import { createSignal, Show } from "solid-js";
+import { A } from "@solidjs/router";
 import PersonIcon from "@material-symbols/svg-400/outlined/person.svg?solid";
 import SettingsIcon from "@material-symbols/svg-400/outlined/settings.svg?solid";
 
@@ -9,8 +10,7 @@ import Dropdown from "./Dropdown";
 import styles from "./AccountMenu.module.css";
 
 export default function AccountMenu() {
-  const s = useAppState();
-  const auth = s.auth;
+  const auth = useAppState().auth;
   const [menuOpen, setMenuOpen] = createSignal(false);
   const hasAuth = () => auth.providers().length > 0;
   const user = () => auth.user() ?? { username: "", avatarURL: undefined };
@@ -25,10 +25,10 @@ export default function AccountMenu() {
           <Show when={hasAuth() && auth.user()}>
             <span class={styles.dropdownUser}>{user().username}</span>
           </Show>
-          <button type="button" class={styles.dropdownItem} onClick={() => { setMenuOpen(false); s.navigate("/settings"); }}>
+          <A class={styles.dropdownItem} href="/settings" onClick={() => setMenuOpen(false)}>
             <SettingsIcon width="1em" height="1em" style={{ "vertical-align": "middle", "margin-right": "0.4em" }} />
             Settings
-          </button>
+          </A>
           <Show when={hasAuth() && auth.user()}>
             <button class={styles.dropdownItem} onClick={() => { setMenuOpen(false); void auth.logout(); }}>Sign out</button>
           </Show>

@@ -513,12 +513,16 @@ describe("App repo chips: No repository", () => {
     expect(history.get()).toBe("/");
   });
 
-  it("navigates to the settings page from the user menu", async () => {
+  it("links to the settings page from the user menu", async () => {
     const user = userEvent.setup();
     const { history } = renderApp("/");
 
     await user.click(screen.getByRole("button", { name: "Menu" }));
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    const settingsLink = screen.getByRole("link", { name: "Settings" });
+
+    expect(settingsLink).toHaveAttribute("href", "/settings");
+
+    await user.click(settingsLink);
 
     expect(history.get()).toBe("/settings");
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
