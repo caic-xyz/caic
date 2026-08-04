@@ -168,8 +168,7 @@ func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 }
 
 func newMCPTaskCreateTestRouter(t *testing.T) *testRouter {
-	s := newTestRouter(t)
-	s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{
+	s := newTestRouter(t, map[harness.Name]agent.Backend{
 		harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "claude-default"}}}, WireFactory: claudecode.New().NewWire},
 		harness.Pi:     &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "pi-default"}}}, WireFactory: claudecode.New().NewWire},
 	})

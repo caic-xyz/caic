@@ -107,7 +107,7 @@ func newTestRuntime(t testing.TB, lifecycle runtime.Lifecycle) *runtime.Router {
 	return router
 }
 
-func newTestRouter(t testing.TB) *testRouter {
+func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testRouter {
 	checker, err := ipgeo.NewChecker(t.Context(), "0.0.0.0/0,::/0", "", "")
 	if err != nil {
 		t.Fatalf("ipgeo.NewChecker: %v", err)
@@ -115,7 +115,7 @@ func newTestRouter(t testing.TB) *testRouter {
 	backend := &runtimetest.FakeBackend{}
 	runtimeRouter := newTestRuntime(t, backend)
 	workspaceRegistry := repowork.NewRegistry(t.Context(), runtimeRouter)
-	taskMgr := taskmgr.New(taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, WorkspaceRegistry: workspaceRegistry})
+	taskMgr := taskmgr.New(taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Backends: backends, WorkspaceRegistry: workspaceRegistry})
 	repoSvc := repomgr.NewService(t.Context(), "", repo.New(nil), workspaceRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
@@ -516,7 +516,7 @@ func TestHandleTaskEvents(t *testing.T) {
 	t.Parallel()
 	t.Run("NotFound", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/99/raw_events", http.NoBody)
 		req.SetPathValue("id", "99")
 		w := httptest.NewRecorder()
@@ -532,7 +532,7 @@ func TestHandleTaskEvents(t *testing.T) {
 
 	t.Run("NonexistentID", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/abc/raw_events", http.NoBody)
 		req.SetPathValue("id", "abc")
 		w := httptest.NewRecorder()
@@ -572,7 +572,7 @@ func TestHandleTaskInput(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			s := newTestRouter(t)
+			s := newTestRouter(t, nil)
 			insertTestTask(t, s, "t1", &task.Task{InitialPrompt: agent.Prompt{Text: "test"}})
 
 			body := strings.NewReader(tt.bodyJSON)
@@ -593,7 +593,7 @@ func TestHandleTaskInput(t *testing.T) {
 
 // testRestart is a helper for TestHandleRestart subtests.
 func testRestart(t *testing.T, state task.State, bodyJSON string, wantStatus int, wantCode api.ErrorCode) {
-	s := newTestRouter(t)
+	s := newTestRouter(t, nil)
 	tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}}
 	tk.SetState(state)
 	insertTestTask(t, s, "t1", tk)
@@ -629,7 +629,7 @@ func TestHandlePurge(t *testing.T) {
 	t.Parallel()
 	t.Run("NotWaiting", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}}
 		// StatePending is the zero value, but set explicitly for clarity.
 		insertTestTask(t, s, "t1", tk)
@@ -651,7 +651,7 @@ func TestHandlePurge(t *testing.T) {
 		t.Parallel()
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
 		tk.SetState(task.StateWaiting)
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		s.taskMgr.RegisterWorkspace("r", newRouterTestWorkspace(t, "main", t.TempDir()))
 		insertTestTask(t, s, "t1", tk)
 
@@ -679,7 +679,7 @@ func TestHandlePurge(t *testing.T) {
 		t.Parallel()
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
 		tk.SetState(task.StateRunning)
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		s.taskMgr.RegisterWorkspace("r", newRouterTestWorkspace(t, "main", t.TempDir()))
 		insertTestTask(t, s, "t1", tk)
 
@@ -702,8 +702,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Parallel()
 	t.Run("ReturnsID", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
-		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
 		s.taskMgr.RegisterWorkspace("myrepo", newRouterTestWorkspace(t, "main", t.TempDir()))
 		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
@@ -726,7 +725,7 @@ func TestHandleCreateTask(t *testing.T) {
 
 	t.Run("MissingRepo", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test task"}}`)
@@ -745,7 +744,7 @@ func TestHandleCreateTask(t *testing.T) {
 
 	t.Run("UnknownRepo", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"nonexistent"}],"harness":"claude"}`)
@@ -764,7 +763,7 @@ func TestHandleCreateTask(t *testing.T) {
 
 	t.Run("UnknownHarness", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		s.taskMgr.RegisterWorkspace("myrepo", newRouterTestWorkspace(t, "main", t.TempDir()))
 		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
@@ -787,8 +786,7 @@ func TestHandleCreateTask(t *testing.T) {
 
 	t.Run("InvalidModel", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
-		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{"stub": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{"stub": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
 		s.taskMgr.RegisterWorkspace("myrepo", newRouterTestWorkspace(t, "main", t.TempDir()))
 		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
@@ -811,8 +809,7 @@ func TestHandleCreateTask(t *testing.T) {
 
 	t.Run("ValidModel", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
-		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{"stub": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{"stub": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
 		s.taskMgr.RegisterWorkspace("myrepo", newRouterTestWorkspace(t, "main", t.TempDir()))
 		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
@@ -835,8 +832,7 @@ func TestHandleCreateTask(t *testing.T) {
 
 	t.Run("WithImage", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
-		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
 		s.taskMgr.RegisterWorkspace("myrepo", newRouterTestWorkspace(t, "main", t.TempDir()))
 		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
@@ -879,8 +875,7 @@ func TestHandleCreateTask(t *testing.T) {
 
 	t.Run("WithCachePreferences", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
-		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
 		s.taskMgr.RegisterWorkspace("myrepo", newRouterTestWorkspace(t, "main", t.TempDir()))
 		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
 			p.Settings.WellKnownCaches = map[string]bool{"go-mod": false, "npm": true}
@@ -955,8 +950,7 @@ func TestHandleCreateTask(t *testing.T) {
 
 	t.Run("TaskInfo", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
-		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
 		s.taskMgr.RegisterWorkspace("myrepo", newRouterTestWorkspace(t, "main", t.TempDir()))
 		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
 			p.Settings.BaseImage = "ghcr.io/my/image:v1"
@@ -1010,8 +1004,7 @@ func TestHandleCreateTask(t *testing.T) {
 		t.Parallel()
 		// Regression: creating a task with no repos panicked with
 		// "makeslice: cap out of range" because len(req.Repos)-1 == -1.
-		s := newTestRouter(t)
-		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
 		s.taskMgr.RegisterWorkspace("", newRouterTestWorkspace(t, "", ""))
 		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
@@ -1044,8 +1037,7 @@ func TestHandleCreateTask(t *testing.T) {
 
 	t.Run("StaleSavedRuntimeUsesDefault", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
-		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}})
 		s.taskMgr.RegisterWorkspace("", newRouterTestWorkspace(t, "", ""))
 		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
 			p.Settings.RuntimeName = "ghost"
@@ -1075,8 +1067,7 @@ func TestHandleCreateTask(t *testing.T) {
 		t.Parallel()
 		// Creating a no-repo task with no registered harness backends returns
 		// a clear 400 instead of panicking.
-		s := newTestRouter(t)
-		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{})
 		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"no repo task"},"harness":"claude"}`)
@@ -1091,7 +1082,7 @@ func TestHandleCreateTask(t *testing.T) {
 
 	t.Run("UnknownField", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repo":"r","harness":"claude","bogus":true}`)
@@ -1114,7 +1105,7 @@ func TestSignalProcess(t *testing.T) {
 
 	t.Run("strictDecodeRejectsUnknownField", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
 		tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", "", 0)
 		insertTestTask(t, s, "t1", tk)
@@ -1142,7 +1133,7 @@ func TestSignalProcess(t *testing.T) {
 
 	t.Run("valid", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
 		tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", "", 0)
 		insertTestTask(t, s, "t1", tk)
@@ -1178,7 +1169,7 @@ func TestSignalProcess(t *testing.T) {
 
 func TestHandleListRepos(t *testing.T) {
 	t.Parallel()
-	s := newTestRouter(t)
+	s := newTestRouter(t, nil)
 	s.repoSvc = repomgr.NewService(t.Context(), "", repo.New([]repo.Info{
 		{RelPath: "org/repoA", AbsPath: "/src/org/repoA", BaseBranch: "main"},
 		{RelPath: "repoB", AbsPath: "/src/repoB", BaseBranch: "develop"},
@@ -1241,8 +1232,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 			writeLogFile(t, logDir, fmt.Sprintf("%d.jsonl", i), meta, trailer)
 		}
 
-		s := newTestRouter(t)
-		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1305,8 +1295,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		s := newTestRouter(t)
-		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1344,8 +1333,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 			writeLogFile(t, logDir, fmt.Sprintf("b-%d.jsonl", i), meta, trailer)
 		}
 
-		s := newTestRouter(t)
-		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1393,8 +1381,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		})
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, result, trailer)
 
-		s := newTestRouter(t)
-		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1447,8 +1434,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		})
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, result, trailer)
 
-		s := newTestRouter(t)
-		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1501,8 +1487,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		})
 		writeLogFile(t, logDir, "b.jsonl", metaB, trailerB)
 
-		s := newTestRouter(t)
-		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1550,8 +1535,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 	t.Run("EmptyDir", func(t *testing.T) {
 		t.Parallel()
 		logDir := t.TempDir()
-		s := newTestRouter(t)
-		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1592,8 +1576,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		lines = append(lines, trailer)
 		writeLogFile(t, logDir, "task.jsonl", lines...)
 
-		s := newTestRouter(t)
-		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1648,8 +1631,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 			}
 		}
 
-		s := newTestRouter(t)
-		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1704,8 +1686,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeLogFile(t, logDir, "purged.jsonl", meta("purged task"), trailer)
 
-		s := newTestRouter(t)
-		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1741,8 +1722,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeLogFile(t, logDir, "feat.jsonl", meta, trailer)
 
-		s := newTestRouter(t)
-		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1800,8 +1780,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		})
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, assistant, result, trailer)
 
-		s := newTestRouter(t)
-		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1873,7 +1852,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		tk.RestoreMessages([]agent.Message{&agent.TextMessage{Text: "fast in-memory history"}})
 		tk.SetState(task.StateRunning)
 
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		s.taskMgr.Insert(taskID.String(), taskmgr.NewEntry(tk, logs[0]))
 
 		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
@@ -1936,7 +1915,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		tk.RestoreMessages([]agent.Message{&agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done"}})
 		tk.SetState(task.StateStopped)
 
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		s.taskMgr.Insert(taskID.String(), taskmgr.NewEntry(tk, logs[0]))
 
 		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
@@ -1995,8 +1974,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		})
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, msgStart, delta1, delta2, assistant, result, trailer)
 
-		s := newTestRouter(t)
-		s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -2128,7 +2106,7 @@ func TestBuildHandler(t *testing.T) {
 	t.Parallel()
 	t.Run("unknown API path returns 404 not SPA", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -2146,7 +2124,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("preferences rejects unknown runtime", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -2165,7 +2143,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("blocked origin error includes IP and category", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		checker, err := ipgeo.NewChecker(t.Context(), "tailscale", "", "")
 		if err != nil {
 			t.Fatalf("ipgeo.NewChecker: %v", err)
@@ -2264,7 +2242,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("MCP tool scope policy covers every advertised tool", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		registry, ok := s.mcpHandlers.protocol.Registry.(*mcpRegistry)
 		if !ok {
 			t.Fatalf("registry type = %T", s.mcpHandlers.protocol.Registry)
@@ -2312,7 +2290,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("MCP rate limiter rejects excess requests", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		s.hostState = auth.NewHostState("https://caic.example.com")
 		s.mcpHandlers.rateLimiter = newRateLimiter(1, time.Minute)
 		h, err := s.buildHandler()
@@ -2351,7 +2329,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("go mode settings are public", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		secret := make([]byte, 32)
 		s.sessionSecret = secret
 		usersPath := filepath.Join(t.TempDir(), "users.json")
@@ -2385,7 +2363,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("auth disabled", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		if _, err := s.buildHandler(); err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
 		}
@@ -2395,7 +2373,7 @@ func TestBuildHandler(t *testing.T) {
 		t.Parallel()
 		// Regression: adding /auth/ (unqualified) alongside GET / (qualified)
 		// caused a pattern conflict panic in Go 1.22+ ServeMux.
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		secret := make([]byte, 32)
 		s.sessionSecret = secret
 		usersPath := filepath.Join(t.TempDir(), "users.json")
@@ -2411,7 +2389,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("static handler rejects non-GET", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -2428,7 +2406,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("static host check rejects wrong host", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		s.hostState = auth.NewHostState("https://caic.example.com")
 		h, err := s.buildHandler()
 		if err != nil {
@@ -2446,7 +2424,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("static host check allows matching host", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		s.hostState = auth.NewHostState("https://caic.example.com")
 		h, err := s.buildHandler()
 		if err != nil {
@@ -2464,7 +2442,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("static host check is case insensitive", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		s.hostState = auth.NewHostState("https://caic.example.com")
 		h, err := s.buildHandler()
 		if err != nil {
@@ -2482,7 +2460,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("no host check when hostState nil", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -2499,7 +2477,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("auto host check locks first FQDN", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		s.hostState = &auth.HostState{}
 		h, err := s.buildHandler()
 		if err != nil {
@@ -2536,7 +2514,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("auto host check rejects same host on different port", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		s.hostState = &auth.HostState{}
 		h, err := s.buildHandler()
 		if err != nil {
@@ -2573,7 +2551,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("auto host check allows IP before and after lock", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		s.hostState = &auth.HostState{}
 		h, err := s.buildHandler()
 		if err != nil {
@@ -2607,7 +2585,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("auto host check allows localhost", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		s.hostState = &auth.HostState{}
 		h, err := s.buildHandler()
 		if err != nil {
@@ -2625,7 +2603,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("auto host check is case insensitive", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		s.hostState = &auth.HostState{}
 		h, err := s.buildHandler()
 		if err != nil {
@@ -2673,7 +2651,7 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 	}
 
 	host := auth.NewHostState("http://localhost")
-	s := newTestRouter(t)
+	s := newTestRouter(t, nil)
 	s.sessionSecret = secret
 	s.authStore = store
 	s.hostState = host
@@ -2838,7 +2816,7 @@ func TestPrefsPerUser(t *testing.T) {
 	t.Parallel()
 	t.Run("separate users get separate preferences", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 
 		if err := s.prefs.Update("user-alice", func(p *preferences.Preferences) {
 			p.Settings.AutoFixOnCIFailure = true
@@ -2888,7 +2866,7 @@ func TestPrefsPerUser(t *testing.T) {
 
 	t.Run("default user in no-auth mode", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		// No auth in context — userIDFromCtx returns "default".
 		id := userIDFromCtx(t.Context())
 		if id != "default" {

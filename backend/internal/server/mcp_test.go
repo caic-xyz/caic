@@ -57,7 +57,7 @@ func TestMCPHandlers(t *testing.T) {
 
 	t.Run("disabledLeavesEndpointUnregistered", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		s.mcpDisabled = true
 		h, err := s.buildHandler()
 		if err != nil {
@@ -77,7 +77,7 @@ func TestMCPHandlers(t *testing.T) {
 
 	t.Run("enabledServesWithoutAuth", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler: %v", err)
@@ -94,7 +94,7 @@ func TestMCPHandlers(t *testing.T) {
 
 	t.Run("serverDiscover", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		w, resp := postMCP(t, s.mcpHandlers.protocol, "server/discover", "", mcpRequestJSON("server/discover", `{}`))
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -135,7 +135,7 @@ func TestMCPHandlers(t *testing.T) {
 
 	t.Run("serverDiscoverInstructionsIncludeTaskSnapshot", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		id := ksid.NewID()
 		insertTestTask(t, s, id.String(), &task.Task{ID: id, InitialPrompt: agent.Prompt{Text: "ship voice prompt"}, Harness: harness.Claude})
 		_, resp := postMCP(t, s.mcpHandlers.protocol, "server/discover", "", mcpRequestJSON("server/discover", `{}`))
@@ -159,7 +159,7 @@ func TestMCPHandlers(t *testing.T) {
 
 	t.Run("toolsList", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		w, resp := postMCP(t, s.mcpHandlers.protocol, "tools/list", "", mcpRequestJSON("tools/list", `{}`))
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -211,7 +211,7 @@ func TestMCPHandlers(t *testing.T) {
 
 	t.Run("resourceTemplatesList", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		w, resp := postMCP(t, s.mcpHandlers.protocol, "resources/templates/list", "", mcpRequestJSON("resources/templates/list", `{}`))
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -237,7 +237,7 @@ func TestMCPHandlers(t *testing.T) {
 
 	t.Run("subscriptionsListenAcknowledges", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 		body := mcpRequestJSON("subscriptions/listen", `"notifications":{"resourcesListChanged":true,"resourceSubscriptions":["caic://tasks"]}`)
@@ -274,7 +274,7 @@ func TestMCPHandlers(t *testing.T) {
 
 	t.Run("subscriptionsListenAcceptsGoModeNotifications", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 		body := mcpRequestJSON("subscriptions/listen", `"notifications":{"resourceSubscriptions":["gomode://notifications"]}`)
@@ -293,7 +293,7 @@ func TestMCPHandlers(t *testing.T) {
 
 	t.Run("subscriptionsListenRejectsEmptyFilter", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		body := mcpRequestJSON("subscriptions/listen", `"notifications":{}`)
 		_, resp := postMCP(t, s.mcpHandlers.protocol, "subscriptions/listen", "", body)
 		if resp.Error == nil {
@@ -309,7 +309,7 @@ func TestMCPHandlers(t *testing.T) {
 
 	t.Run("subscriptionChangesSignalTaskAndNotificationResources", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		registry, ok := s.mcpHandlers.protocol.Registry.(*mcpRegistry)
 		if !ok {
 			t.Fatalf("registry type = %T", s.mcpHandlers.protocol.Registry)
@@ -353,7 +353,7 @@ func TestMCPHandlers(t *testing.T) {
 
 	t.Run("toolsCall", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		id := ksid.NewID()
 		tk := &task.Task{ID: id, InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Claude}
 		tk.SetTitle("Fix tests")
@@ -386,7 +386,7 @@ func TestMCPHandlers(t *testing.T) {
 
 	t.Run("headerMismatch", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(mcpRequestJSON("tools/list", `{}`)))
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		req.Header.Set("Mcp-Method", "tools/call")
@@ -406,7 +406,7 @@ func TestMCPHandlers(t *testing.T) {
 
 	t.Run("toolParamHeaderMismatch", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		body := mcpRequestJSON("tools/call", `"name":"task_get_detail","arguments":{"task_number":1}`)
 		w, resp := postMCP(t, s.mcpHandlers.protocol, "tools/call", "task_get_detail", body)
 		if w.Code != http.StatusBadRequest {
@@ -419,7 +419,7 @@ func TestMCPHandlers(t *testing.T) {
 
 	t.Run("toolExecutionErrorOmitsStructuredContent", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		body := mcpRequestJSON("tools/call", `"name":"task_get_detail","arguments":{"task_number":1}`)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
@@ -449,7 +449,7 @@ func TestMCPHandlers(t *testing.T) {
 
 	t.Run("unsupportedProtocolVersion", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		body := strings.ReplaceAll(mcpRequestJSON("tools/list", `{}`), mcp.ProtocolVersion, "2099-01-01")
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
 		req.Header.Set("Mcp-Protocol-Version", "2099-01-01")
@@ -472,7 +472,7 @@ func TestMCPHandlers(t *testing.T) {
 	// with a -32601 JSON-RPC error body.
 	t.Run("initializeRemoved", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		w, resp := postMCP(t, s.mcpHandlers.protocol, "initialize", "", mcpRequestJSON("initialize", `{}`))
 		if w.Code != http.StatusNotFound {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusNotFound)

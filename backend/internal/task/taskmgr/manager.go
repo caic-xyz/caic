@@ -211,14 +211,6 @@ func (m *Manager) Backends() map[harness.Name]agent.Backend {
 	return maps.Clone(m.backends)
 }
 
-// RegisterBackends adds or replaces configured agent backends.
-func (m *Manager) RegisterBackends(backends map[harness.Name]agent.Backend) {
-	if m.backends == nil {
-		m.backends = map[harness.Name]agent.Backend{}
-	}
-	maps.Copy(m.backends, backends)
-}
-
 // Insert registers a pre-built entry. Production task creation goes through
 // Create/Fork; Insert is retained for tests (in internal/tasks and
 // internal/server) that seed the registry without a real workspace.
@@ -745,6 +737,7 @@ func (m *Manager) AdoptInstances(ctx context.Context, adoptRepos []AdoptRepo, in
 	if instances == nil {
 		return nil, nil
 	}
+	resolvedTaskIDs, rejected, validationErr := m.resolveAdoptionTaskIDs(ctx, adoptRepos, instances)
 
 	// Map repo+branch loaded from purged task logs to their ID.
 	branchIDs := make(map[string][]string)
@@ -759,8 +752,14 @@ func (m *Manager) AdoptInstances(ctx context.Context, adoptRepos []AdoptRepo, in
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var errs []error
+	if validationErr != nil {
+		errs = append(errs, validationErr)
+	}
 	var adopted []AdoptedTask
 	claimed := make(map[runtime.ID]bool, len(instances))
+	for id := range rejected {
+		claimed[id] = true
+	}
 
 	for i := range adoptRepos {
 		ri := &adoptRepos[i]
@@ -778,8 +777,9 @@ func (m *Manager) AdoptInstances(ctx context.Context, adoptRepos []AdoptRepo, in
 				continue
 			}
 			claimed[c.ID] = true
+			taskIDVal, metadataResolved := resolvedTaskIDs[c.ID]
 			wg.Go(func() {
-				at, err := m.adoptOne(ctx, *ri, workspace, c, branch, branchIDs, allLogs)
+				at, err := m.adoptOne(ctx, *ri, workspace, c, branch, taskIDVal, metadataResolved, branchIDs, allLogs)
 				if err != nil {
 					mu.Lock()
 					errs = append(errs, err)
@@ -802,8 +802,9 @@ func (m *Manager) AdoptInstances(ctx context.Context, adoptRepos []AdoptRepo, in
 			if claimed[c.ID] || !strings.HasPrefix(string(c.ID.InstanceID()), "md-agent-") {
 				continue
 			}
+			taskIDVal, metadataResolved := resolvedTaskIDs[c.ID]
 			wg.Go(func() {
-				at, err := m.adoptOne(ctx, AdoptRepo{}, noRepoWorkspace, c, "", branchIDs, allLogs)
+				at, err := m.adoptOne(ctx, AdoptRepo{}, noRepoWorkspace, c, "", taskIDVal, metadataResolved, branchIDs, allLogs)
 				if err != nil {
 					mu.Lock()
 					errs = append(errs, err)
@@ -1050,7 +1051,7 @@ func (m *Manager) LoadPurgedTasks(all []*task.LoadedTask) error {
 				continue
 			}
 		}
-		m.setParserLocked(lt)
+		m.setParser(lt)
 		rt := m.defaultRuntimeName()
 		if lt.RuntimeName != "" {
 			rt = lt.RuntimeName
@@ -1174,6 +1175,60 @@ func (m *Manager) Sync(ctx context.Context, entry *Entry, target SyncTarget, for
 		status = "blocked"
 	}
 	return &SyncResult{Status: status, Branch: syncPrimaryBranch, DiffStat: ds, SafetyIssues: issues}, nil
+}
+
+// resolveAdoptionTaskIDs selects instances for configured workspaces, reads
+// their task IDs, and rejects candidates with unavailable or duplicate IDs.
+func (m *Manager) resolveAdoptionTaskIDs(ctx context.Context, adoptRepos []AdoptRepo, instances []runtime.Instance) (resolved map[runtime.ID]string, rejected map[runtime.ID]bool, retErr error) {
+	candidates := make(map[runtime.ID]bool, len(instances))
+	for i := range adoptRepos {
+		ri := &adoptRepos[i]
+		workspace, _ := m.Workspace(ri.RelPath)
+		if workspace == nil {
+			continue
+		}
+		for j := range instances {
+			if _, matched := primaryBranchForAdoption(ri, &instances[j]); matched {
+				candidates[instances[j].ID] = true
+			}
+		}
+	}
+	if noRepoWorkspace, ok := m.Workspace(""); ok && noRepoWorkspace != nil {
+		for i := range instances {
+			if strings.HasPrefix(string(instances[i].ID.InstanceID()), "md-agent-") {
+				candidates[instances[i].ID] = true
+			}
+		}
+	}
+
+	resolved = make(map[runtime.ID]string, len(candidates))
+	rejected = make(map[runtime.ID]bool)
+	seen := make(map[string]runtime.ID, len(candidates))
+	var errs []error
+	for i := range instances {
+		instance := &instances[i]
+		if !candidates[instance.ID] {
+			continue
+		}
+		taskID, err := m.runtimeTaskID(ctx, instance.ID)
+		if err != nil {
+			rejected[instance.ID] = true
+			errs = append(errs, fmt.Errorf("metadata check for %s: %w", instance.ID, err))
+			continue
+		}
+		resolved[instance.ID] = taskID
+		if taskID == "" {
+			continue
+		}
+		if previous, ok := seen[taskID]; ok {
+			rejected[previous] = true
+			rejected[instance.ID] = true
+			errs = append(errs, fmt.Errorf("duplicate runtime task ID %q on instances %s and %s", taskID, previous, instance.ID))
+			continue
+		}
+		seen[taskID] = instance.ID
+	}
+	return resolved, rejected, errors.Join(errs...)
 }
 
 func (m *Manager) reconnectForInput(entry *Entry) error {
@@ -1561,19 +1616,19 @@ func mergeLogAndRelayMessages(logMsgs, relayMsgs []agent.Message) []agent.Messag
 }
 
 // adoptOne investigates a single runtime instance and registers it as a task.
-func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowork.Workspace, c *runtime.Instance, branch string, branchIDs map[string][]string, allLogs []*task.LoadedTask) (*AdoptedTask, error) { //nolint:gocritic // massive function from existing code; refactor deferred
+func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowork.Workspace, c *runtime.Instance, branch, taskIDVal string, metadataResolved bool, branchIDs map[string][]string, allLogs []*task.LoadedTask) (*AdoptedTask, error) { //nolint:gocritic // massive function from existing code; refactor deferred
 	ctx, adoptTask := trace.NewTask(ctx, "adopt-instance")
 	defer adoptTask.End()
 	trace.Logf(ctx, "instance", "%s repo=%s branch=%s", c.ID, ri.RelPath, branch)
 
 	// Only adopt runtime instances that caic started. MetadataTaskID is set at
 	// creation and is the authoritative proof of ownership.
-	taskIDVal, err := m.Runtimes.Metadata(ctx, c.ID, runtime.MetadataTaskID)
-	if taskIDVal == "" && err == nil {
-		taskIDVal, err = m.Runtimes.Metadata(ctx, c.ID, runtime.MetadataLegacyTaskID)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("metadata check for %s: %w", c.ID, err)
+	if !metadataResolved {
+		var err error
+		taskIDVal, err = m.runtimeTaskID(ctx, c.ID)
+		if err != nil {
+			return nil, fmt.Errorf("metadata check for %s: %w", c.ID, err)
+		}
 	}
 	if taskIDVal == "" {
 		m.log.InfoContext(ctx, "instance", "msg", "skipping non-caic", "repo", ri.RelPath, "instance", c.ID, "br", branch)
@@ -1590,42 +1645,57 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 	}
 
 	// Find the log file for this task.
-	var lt *task.LoadedTask
-	for _, log := range slices.Backward(allLogs) {
-		if branch == "" && ri.RelPath == "" {
-			if log.TaskID == taskID.String() {
-				lt = log
-				break
-			}
-		} else {
-			lp := log.Primary()
-			if lp != nil && lp.Branch == branch && lp.Name == ri.RelPath {
-				lt = log
-				break
-			}
+	var matchingLogs []*task.LoadedTask
+	for _, log := range allLogs {
+		if log != nil && log.TaskID == taskID.String() {
+			matchingLogs = append(matchingLogs, log)
 		}
+	}
+	switch len(matchingLogs) {
+	case 0:
+		return nil, fmt.Errorf("task log %s not found", taskID)
+	case 1:
+	default:
+		return nil, fmt.Errorf("multiple task logs found for task %s", taskID)
+	}
+	lt := matchingLogs[0]
+	lp := lt.Primary()
+	if branch == "" && ri.RelPath == "" {
+		if lp != nil {
+			return nil, fmt.Errorf("task log %s has repo %q but runtime has no repo", taskID, lp.Name)
+		}
+	} else if lp == nil || lp.Name != ri.RelPath || lp.Branch != branch {
+		return nil, fmt.Errorf("task log %s does not match runtime repo %q branch %q", taskID, ri.RelPath, branch)
 	}
 
 	prompt := branch
 	var startedAt time.Time
 	var stateUpdatedAt time.Time
 
-	// Read harness from runtime metadata (authoritative), fall back to log.
-	harnessLabel, _ := m.Runtimes.Metadata(ctx, c.ID, runtime.MetadataHarness)
+	// Read harness from runtime metadata only as corroboration. The persisted
+	// log header is the authority for any task with a local log.
+	harnessLabel, err := m.Runtimes.Metadata(ctx, c.ID, runtime.MetadataHarness)
+	if err != nil {
+		return nil, fmt.Errorf("read harness metadata for %s: %w", c.ID, err)
+	}
 	if harnessLabel == "" {
-		harnessLabel, _ = m.Runtimes.Metadata(ctx, c.ID, runtime.MetadataLegacyHarness)
+		harnessLabel, err = m.Runtimes.Metadata(ctx, c.ID, runtime.MetadataLegacyHarness)
+		if err != nil {
+			return nil, fmt.Errorf("read legacy harness metadata for %s: %w", c.ID, err)
+		}
 	}
-	harnessName := harness.Name(harnessLabel)
-	if harnessName == "" && lt != nil {
-		harnessName = lt.Harness
+	runtimeHarness := harness.Name(harnessLabel)
+	if lt.Harness == "" {
+		return nil, fmt.Errorf("task log %s has no harness authority", lt.LogPath())
 	}
-	if harnessName == "" {
-		harnessName = harness.Claude
+	if runtimeHarness != "" && runtimeHarness != lt.Harness {
+		return nil, fmt.Errorf("runtime harness %q does not match task log harness %q", runtimeHarness, lt.Harness)
 	}
-	if lt != nil {
-		lt.Harness = harnessName
-		m.setParser(lt)
+	backend, ok := m.backends[lt.Harness]
+	if !ok || backend == nil {
+		return nil, fmt.Errorf("unknown harness %q for adopted task %s", lt.Harness, taskID)
 	}
+	m.setParser(lt)
 
 	// Check relay liveness.
 	var relayAlive bool
@@ -1639,22 +1709,16 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 		if relayErr != nil {
 			m.log.WarnContext(ctx, "relay", "msg", "check failed during adopt", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", relayErr, "diag", relayDiag)
 		}
-		b, ok := m.backends[harnessName]
-		if !ok {
-			m.log.WarnContext(ctx, "relay", "msg", "no backend for harness", "harness", harnessName, "instance", c.ID)
+		readCtx, readCancel := context.WithTimeout(ctx, 30*time.Second)
+		relayMsgs, relaySize, relayErr = m.relay.ReadTail(readCtx, relayTarget, backend.NewWire().ParseMessage, 10<<20) // 10 MiB tail
+		readCancel()
+		if relayErr != nil {
+			m.log.WarnContext(ctx, "relay", "msg", "read output failed", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", relayErr)
 			relayAlive = false
-		} else {
-			readCtx, readCancel := context.WithTimeout(ctx, 30*time.Second)
-			relayMsgs, relaySize, relayErr = m.relay.ReadTail(readCtx, relayTarget, b.NewWire().ParseMessage, 10<<20) // 10 MiB tail
-			readCancel()
-			if relayErr != nil {
-				m.log.WarnContext(ctx, "relay", "msg", "read output failed", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", relayErr)
-				relayAlive = false
-			}
 		}
 	}
 
-	if lt != nil && lt.Prompt != "" {
+	if lt.Prompt != "" {
 		prompt = lt.Prompt
 		startedAt = lt.StartedAt
 		stateUpdatedAt = lt.LastStateUpdateAt
@@ -1662,23 +1726,17 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 	if stateUpdatedAt.IsZero() {
 		stateUpdatedAt = time.Now().UTC()
 	}
-	var model string
-	var effort string
-	if lt != nil {
-		model = lt.Model
-		effort = lt.Effort
-		if lt.SessionID == "" || lt.AgentVersion == "" {
-			if err := lt.LoadSessionMetadata(); err != nil {
-				m.log.WarnContext(ctx, "load session metadata failed", "repo", ri.RelPath, "br", branch, "err", err)
-			}
+	if lt.SessionID == "" || lt.AgentVersion == "" {
+		if err := lt.LoadSessionMetadata(); err != nil {
+			m.log.WarnContext(ctx, "load session metadata failed", "repo", ri.RelPath, "br", branch, "err", err)
 		}
 	}
 
 	var adoptRepos []task.RepoMount
 	if ri.RelPath != "" {
 		primaryBaseBranch := ""
-		if lt != nil && lt.Primary() != nil {
-			primaryBaseBranch = lt.Primary().BaseBranch
+		if lp != nil {
+			primaryBaseBranch = lp.BaseBranch
 		}
 		// Derive MountedPath from the runtime instance repo metadata.
 		var mountedPath string
@@ -1689,52 +1747,36 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 			mountedPath = m.mountPathForRepo(ri.RelPath)
 		}
 		adoptRepos = []task.RepoMount{{Name: ri.RelPath, BaseBranch: primaryBaseBranch, GitRoot: ri.AbsPath, Branch: branch, MountedPath: mountedPath}}
-		if lt != nil {
-			// Build lookup of instance repos by branch for MountedPath.
-			runtimeRepoByBranch := make(map[string]string, len(c.Repos))
-			for _, cr := range c.Repos {
-				runtimeRepoByBranch[cr.Branch] = cr.MountPath
+		// Build lookup of instance repos by branch for MountedPath.
+		runtimeRepoByBranch := make(map[string]string, len(c.Repos))
+		for _, cr := range c.Repos {
+			runtimeRepoByBranch[cr.Branch] = cr.MountPath
+		}
+		for _, lm := range lt.Repos[1:] {
+			gitRoot := ""
+			if er, ok := m.Workspace(lm.Name); ok {
+				gitRoot = er.Dir
 			}
-			for _, lm := range lt.Repos[1:] {
-				gitRoot := ""
-				if er, ok := m.Workspace(lm.Name); ok {
-					gitRoot = er.Dir
-				}
-				mp := runtimeRepoByBranch[lm.Branch]
-				if mp == "" {
-					mp = m.mountPathForRepo(lm.Name)
-				}
-				adoptRepos = append(adoptRepos, task.RepoMount{Name: lm.Name, BaseBranch: lm.BaseBranch, Branch: lm.Branch, GitRoot: gitRoot, MountedPath: mp})
+			mp := runtimeRepoByBranch[lm.Branch]
+			if mp == "" {
+				mp = m.mountPathForRepo(lm.Name)
 			}
+			adoptRepos = append(adoptRepos, task.RepoMount{Name: lm.Name, BaseBranch: lm.BaseBranch, Branch: lm.Branch, GitRoot: gitRoot, MountedPath: mp})
 		}
 	}
 
-	var forgeIssue int
+	forgeIssue := lt.ForgeIssue
 	rt := m.defaultRuntimeName()
-	var baseImage string
-	var containerPlatform string
-	var maxCPUs int
-	var cacheMounts []runtime.CacheMount
-	var mounts []runtime.Mount
 	var forkedFromTaskID ksid.ID
-	if lt != nil {
-		forgeIssue = lt.ForgeIssue
-		if lt.RuntimeName != "" {
-			rt = lt.RuntimeName
-		} else {
-			lt.RuntimeName = rt
-		}
-		baseImage = lt.BaseImage
-		containerPlatform = lt.ContainerPlatform
-		maxCPUs = lt.MaxCPUs
-		cacheMounts = slices.Clone(lt.CacheMounts)
-		mounts = slices.Clone(lt.Mounts)
-		if lt.ForkedFromTaskID != "" {
-			var err error
-			forkedFromTaskID, err = ksid.Parse(lt.ForkedFromTaskID)
-			if err != nil {
-				return nil, fmt.Errorf("adopt task %q: invalid forkedFromTaskID %q: %w", taskID.String(), lt.ForkedFromTaskID, err)
-			}
+	if lt.RuntimeName != "" {
+		rt = lt.RuntimeName
+	} else {
+		lt.RuntimeName = rt
+	}
+	if lt.ForkedFromTaskID != "" {
+		forkedFromTaskID, err = ksid.Parse(lt.ForkedFromTaskID)
+		if err != nil {
+			return nil, fmt.Errorf("adopt task %q: invalid forkedFromTaskID %q: %w", taskID.String(), lt.ForkedFromTaskID, err)
 		}
 	}
 	if c.ID.RuntimeName() != "" {
@@ -1745,15 +1787,15 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 		ID:                taskID,
 		InitialPrompt:     agent.Prompt{Text: prompt},
 		Repos:             adoptRepos,
-		Harness:           harnessName,
-		Model:             model,
-		Effort:            effort,
+		Harness:           lt.Harness,
+		Model:             lt.Model,
+		Effort:            lt.Effort,
 		RuntimeName:       rt,
-		BaseImage:         baseImage,
-		ContainerPlatform: containerPlatform,
-		MaxCPUs:           maxCPUs,
-		CacheMounts:       cacheMounts,
-		Mounts:            mounts,
+		BaseImage:         lt.BaseImage,
+		ContainerPlatform: lt.ContainerPlatform,
+		MaxCPUs:           lt.MaxCPUs,
+		CacheMounts:       lt.CacheMounts,
+		Mounts:            lt.Mounts,
 		StartedAt:         startedAt,
 		ForkedFromTaskID:  forkedFromTaskID,
 		Tailscale:         c.Tailscale,
@@ -1768,7 +1810,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 	t.SetRuntimeConnectionInfo(c.ID, c.AgentTarget, c.TailscaleFQDN, "", c.VNCPort)
 	// Restore GitHub token flag from log trailer (primary) or runtime metadata (fallback).
 	gtLabel, _ := m.Runtimes.Metadata(ctx, c.ID, runtime.MetadataGitHubToken)
-	if (lt != nil && lt.GitHubToken) || gtLabel == "true" {
+	if lt.GitHubToken || gtLabel == "true" {
 		t.SetGitHubTokenEnabled(true)
 	}
 	t.SetStateAt(task.StateRunning, stateUpdatedAt)
@@ -1777,18 +1819,16 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 			t.SetSudoPassword(pw)
 		}
 	}
-	if lt != nil && lt.Title != "" {
+	if lt.Title != "" {
 		t.SetTitle(lt.Title)
 	} else {
 		t.SetTitle(prompt)
 	}
-	if lt != nil && lt.LogPath() != "" {
-		t.SetLogPath(lt.LogPath())
-	}
+	t.SetLogPath(lt.LogPath())
 
 	foundPRFromLog := false
 	switch {
-	case lt != nil && lt.ForgePR > 0:
+	case lt.ForgePR > 0:
 		t.SetPR(lt.ForgeOwner, lt.ForgeRepo, lt.ForgePR)
 		foundPRFromLog = true
 	case forgeIssue > 0 && ri.ForgeOwner != "":
@@ -1799,22 +1839,19 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 	// has the full pre-restart history; the relay tail has any output produced
 	// while the server was down. Merge them by overlap so the UI does not collapse
 	// to the bounded relay tail after a server restart.
-	if lt != nil {
-		m.setParser(lt)
-		if err := lt.LoadMessages(); err != nil {
-			m.log.WarnContext(ctx, "load messages failed", "repo", ri.RelPath, "br", branch, "err", err)
-		}
+	if err := lt.LoadMessages(); err != nil {
+		m.log.WarnContext(ctx, "load messages failed", "repo", ri.RelPath, "br", branch, "err", err)
 	}
 	if len(relayMsgs) > 0 {
 		msgs := relayMsgs
-		if lt != nil && len(lt.Msgs) > 0 {
+		if len(lt.Msgs) > 0 {
 			msgs = mergeLogAndRelayMessages(lt.Msgs, relayMsgs)
 		}
 		t.RestoreMessages(msgs)
 		applyLoadedSessionMetadata(t, lt)
 		t.SetRelayOffset(relaySize)
 		m.log.DebugContext(ctx, "relay", "msg", "restored from", "repo", ri.RelPath, "br", branch, "instance", c.ID, "alive", relayAlive, "msgs", len(msgs), "relayMsgs", len(relayMsgs))
-	} else if lt != nil && len(lt.Msgs) > 0 {
+	} else if len(lt.Msgs) > 0 {
 		t.RestoreMessages(lt.Msgs)
 		applyLoadedSessionMetadata(t, lt)
 		m.log.WarnContext(ctx, "relay", "msg", "restored from log", "repo", ri.RelPath, "br", branch, "instance", c.ID, "msgs", len(lt.Msgs))
@@ -1824,19 +1861,19 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 	// from replayed history, but that replay is skipped when neither the relay
 	// tail nor the log messages load; the summary flag (scanned from the log)
 	// carries it through regardless. Sticky: only ever set, never cleared.
-	if lt != nil && lt.DiffCreated {
+	if lt.DiffCreated {
 		t.MarkDiffCreated()
 	}
 	t.SetStateAt(t.GetState(), stateUpdatedAt)
-	if lt != nil && lt.State == task.StateFailed {
+	if lt.State == task.StateFailed {
 		t.SetStateAt(lt.State, stateUpdatedAt)
 	}
-	if lt != nil && lt.State == task.StateCrashed && t.LastExitError() != "" {
+	if lt.State == task.StateCrashed && t.LastExitError() != "" {
 		t.SetStateAt(lt.State, stateUpdatedAt)
 	}
 
 	// Full log parse for PR recovery.
-	if lt != nil && t.GetPR() == 0 {
+	if t.GetPR() == 0 {
 		if lt.ForgePR == 0 {
 			_ = lt.LoadMessages()
 		}
@@ -1974,6 +2011,17 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 	}, nil
 }
 
+func (m *Manager) runtimeTaskID(ctx context.Context, id runtime.ID) (string, error) {
+	value, err := m.Runtimes.Metadata(ctx, id, runtime.MetadataTaskID)
+	if err != nil {
+		return "", err
+	}
+	if value != "" {
+		return value, nil
+	}
+	return m.Runtimes.Metadata(ctx, id, runtime.MetadataLegacyTaskID)
+}
+
 func writeTaskResultTrailer(t *task.Task, r *task.Result) error {
 	msg := &agent.MetaResultMessage{
 		MessageType:              "caic_result",
@@ -2006,18 +2054,14 @@ func refreshAdoptedDiffStat(ctx context.Context, workspace *repowork.Workspace, 
 	}
 }
 
-// setParser sets the parse function on a LoadedTask from the first workspace
-// that has a backend for the task's harness.
+// setParser installs the parser for a loaded task from the manager's immutable
+// backend map.
 func (m *Manager) setParser(lt *task.LoadedTask) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.setParserLocked(lt)
-}
-
-func (m *Manager) setParserLocked(lt *task.LoadedTask) {
-	if b := m.backends[lt.Harness]; b != nil {
-		lt.SetParser(b.NewWire().ParseMessage)
+	backend := m.backends[lt.Harness]
+	if backend == nil {
+		return
 	}
+	lt.SetParser(backend.NewWire().ParseMessage)
 }
 
 // loadTaskMessagesOnDemand triggers lazy message loading for purged tasks.

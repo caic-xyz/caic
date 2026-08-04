@@ -218,7 +218,7 @@ func TestHandleGitHubWebhook(t *testing.T) {
 
 	t.Run("ping event returns 200", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		s.webhooks.githubSecret = secret
 
 		body := []byte(`{}`)
@@ -236,7 +236,7 @@ func TestHandleGitHubWebhook(t *testing.T) {
 
 	t.Run("bad signature returns 401", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		s.webhooks.githubSecret = secret
 
 		body := []byte(`{}`)
@@ -254,7 +254,7 @@ func TestHandleGitHubWebhook(t *testing.T) {
 
 	t.Run("missing signature returns 401", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		s.webhooks.githubSecret = secret
 
 		body := []byte(`{}`)
@@ -272,7 +272,7 @@ func TestHandleGitHubWebhook(t *testing.T) {
 
 	t.Run("completed check_run returns 204", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		s.webhooks.githubSecret = secret
 
 		ev := github.CheckRunEvent{}
@@ -302,7 +302,7 @@ func TestHandleGitHubWebhookLogging(t *testing.T) { //nolint:paralleltest // Mut
 	t.Cleanup(func() { slog.SetDefault(old) })
 
 	secret := []byte("test-secret-abc123")
-	s := newTestRouter(t)
+	s := newTestRouter(t, nil)
 	s.webhooks.githubSecret = secret
 	handler, err := s.buildHandler()
 	if err != nil {
@@ -342,7 +342,7 @@ func TestHandleGitLabWebhook(t *testing.T) {
 
 	t.Run("valid pipeline event returns 204", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		s.webhooks.gitlabSecret = secret
 
 		ev := gitlab.PipelineEvent{}
@@ -365,7 +365,7 @@ func TestHandleGitLabWebhook(t *testing.T) {
 
 	t.Run("bad token returns 401", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		s.webhooks.gitlabSecret = secret
 
 		body := []byte(`{}`)
@@ -383,7 +383,7 @@ func TestHandleGitLabWebhook(t *testing.T) {
 
 	t.Run("non-terminal status returns 204 without dispatch", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		s.webhooks.gitlabSecret = secret
 
 		ev := gitlab.PipelineEvent{}
@@ -406,7 +406,7 @@ func TestHandleGitLabWebhook(t *testing.T) {
 
 	t.Run("oversized body returns 413", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		s.webhooks.gitlabSecret = secret
 
 		body := make([]byte, maxWebhookBodyBytes+1)
@@ -427,7 +427,7 @@ func TestBuildHandlerWebhookRoutes(t *testing.T) {
 	t.Parallel()
 	t.Run("gitlab webhook registered when secret set", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		s.webhooks.gitlabSecret = []byte("secret")
 
 		h, err := s.buildHandler()
@@ -456,7 +456,7 @@ func TestBuildHandlerWebhookRoutes(t *testing.T) {
 
 	t.Run("gitlab webhook not registered when secret unset", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t)
+		s := newTestRouter(t, nil)
 		// webhooks.gitlabSecret is nil (not configured).
 
 		h, err := s.buildHandler()

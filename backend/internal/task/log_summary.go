@@ -22,14 +22,30 @@ const (
 
 // logSummary is the on-disk sidecar for compressed task-log metadata.
 //
-// It records enough log identity to reject stale caches. When the version,
-// byte size, and mtime match the current zstd log, startup can reconstruct
-// LoadedTask metadata without streaming the whole compressed file.
+// It records complete physical identity, derived authority, and validated EOF
+// proof. When those values match the current zstd log, startup can
+// reconstruct LoadedTask metadata without streaming the whole compressed file.
 type logSummary struct {
-	Version  int               `json:"v"`
-	LogSize  int64             `json:"logSize"`
-	LogModNs int64             `json:"logModNs"`
-	Task     loadedTaskSummary `json:"task"`
+	Version          int               `json:"v"`
+	LogDevice        uint64            `json:"logDevice"`
+	LogInode         uint64            `json:"logInode"`
+	LogSize          int64             `json:"logSize"`
+	LogModNs         int64             `json:"logModNs"`
+	AuthorityVersion agent.LogVersion  `json:"authorityVersion"`
+	AuthorityHarness harness.Name      `json:"authorityHarness"`
+	EOFValidated     bool              `json:"eofValidated"`
+	Task             loadedTaskSummary `json:"task"`
+}
+
+func (summary *logSummary) matches(identity physicalFileIdentity, info os.FileInfo, authority logAuthority) bool {
+	return summary.Version == logSummaryVersion &&
+		summary.LogDevice == identity.Device &&
+		summary.LogInode == identity.Inode &&
+		summary.LogSize == info.Size() &&
+		summary.LogModNs == info.ModTime().UnixNano() &&
+		summary.AuthorityVersion == authority.Version &&
+		summary.AuthorityHarness == authority.Harness &&
+		summary.EOFValidated
 }
 
 type loadedTaskSummary struct {
@@ -105,9 +121,17 @@ func logSummaryPath(logPath string) string {
 }
 
 // loadLogSummary returns a LoadedTask reconstructed from a sidecar bound to
-// the already-open physical log. Missing, invalid, stale, or replaced logs are
-// cache misses; callers then scan that same open file and rebuild the sidecar.
-func loadLogSummary(logPath string, file *os.File, info os.FileInfo) (*LoadedTask, bool) {
+// the already-open physical log. The sidecar's prior EOF proof permits this
+// inventory-only hit, but no current validated snapshot is published until a
+// semantic scan reaches EOF on the current reader.
+func loadLogSummary(logPath string, file *os.File, info os.FileInfo, authority logAuthority, meta *agent.MetaMessage) (*LoadedTask, bool) {
+	identity := physicalFileIdentityFromFile(file, info)
+	if !identity.Valid {
+		return nil, false
+	}
+	if _, err := verifyPhysicalLog(logPath, file, info); err != nil {
+		return nil, false
+	}
 	data, err := os.ReadFile(filepath.Clean(logSummaryPath(logPath)))
 	if err != nil {
 		return nil, false
@@ -117,16 +141,24 @@ func loadLogSummary(logPath string, file *os.File, info os.FileInfo) (*LoadedTas
 		slog.Warn("task log summary: invalid cache", "path", logSummaryPath(logPath), "err", err)
 		return nil, false
 	}
-	if summary.Version != logSummaryVersion || summary.LogSize != info.Size() || summary.LogModNs != info.ModTime().UnixNano() {
+	if !summary.matches(identity, info, authority) {
 		return nil, false
 	}
-	if err := summary.Task.LogVersion.Validate(); err != nil || summary.Task.Harness == "" {
+	if err := summary.Task.LogVersion.Validate(); err != nil || summary.Task.Harness == "" ||
+		summary.Task.LogVersion != authority.Version || summary.Task.Harness != authority.Harness {
 		return nil, false
 	}
-	if _, err := verifyPhysicalLog(logPath, file, info); err != nil {
+	header := loadedTaskFromMeta(logPath, taskIDFromLogBase(trimLogExt(filepath.Base(logPath))), meta, info.ModTime().UTC(), info.Size())
+	cached := summary.Task.toLoadedTask(logPath, info.Size())
+	if !header.headerMatches(cached) {
 		return nil, false
 	}
-	return summary.Task.toLoadedTask(logPath, info.Size()), true
+	validatedInfo, err := verifyPhysicalLog(logPath, file, info)
+	if err != nil {
+		return nil, false
+	}
+	cached.LogSize = validatedInfo.Size()
+	return cached, true
 }
 
 func storeLogSummary(lt *LoadedTask) (retErr error) {
@@ -161,11 +193,27 @@ func storeLogSummaryForFile(lt *LoadedTask, file *os.File, info os.FileInfo) err
 	if err != nil {
 		return err
 	}
+	identity := physicalFileIdentityFromFile(file, stableInfo)
+	if !identity.Valid {
+		return errors.New("task log summary: missing physical identity")
+	}
+	snapshot := lt.ValidatedSnapshot()
+	if snapshot == nil || !snapshot.EOFValidated || snapshot.Path != filepath.Clean(lt.path) || snapshot.Size != stableInfo.Size() ||
+		snapshot.Device != identity.Device || snapshot.Inode != identity.Inode ||
+		snapshot.ModTimeNs != stableInfo.ModTime().UnixNano() || snapshot.Authority.Version != lt.LogVersion ||
+		snapshot.Authority.Harness != lt.Harness {
+		return errors.New("task log summary: missing validated snapshot")
+	}
 	summary := logSummary{
-		Version:  logSummaryVersion,
-		LogSize:  stableInfo.Size(),
-		LogModNs: stableInfo.ModTime().UnixNano(),
-		Task:     loadedTaskSummaryFrom(lt),
+		Version:          logSummaryVersion,
+		LogDevice:        snapshot.Device,
+		LogInode:         snapshot.Inode,
+		LogSize:          stableInfo.Size(),
+		LogModNs:         stableInfo.ModTime().UnixNano(),
+		AuthorityVersion: snapshot.Authority.Version,
+		AuthorityHarness: snapshot.Authority.Harness,
+		EOFValidated:     snapshot.EOFValidated,
+		Task:             loadedTaskSummaryFrom(lt),
 	}
 	data, err := json.Marshal(summary)
 	if err != nil {

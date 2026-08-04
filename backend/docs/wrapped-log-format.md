@@ -5,6 +5,10 @@
 The physical authority foundation is shipped at the shared comparison role,
 `origin/main`. The accepted local integration state is unshipped and adds:
 
+- Fork lineage is now a shipped `caic_meta` field: when present,
+  `forked_from_task_id` identifies the parent task and flows into loaded-task
+  and taskmeta summaries. The v2 migration must preserve the same optional
+  field and semantics; strict v2 metadata validation must not reject it.
 - `LogVersion` as a closed type supporting exactly v1 and v2; unknown versions
   fail closed.
 - First-header version/harness authority for every production plain and zstd
@@ -207,6 +211,10 @@ A v2 file contains only caic-defined top-level records:
   because they are small they may use ordinary decoding, but ordinary decoding
   must reject a missing or duplicate `t`, any top-level `type` (including both
   keys together), and unknown fields/tokens rather than admit an alias;
+- v2 `caic_meta` retains every supported task-header field with its existing JSON
+  name and meaning, including optional `forked_from_task_id`; that value remains
+  task lineage metadata, not header authority, and is projected into loaded-task
+  and taskmeta summaries like its v1 counterpart;
 - an `agent` envelope with `msg:null` is corruption; and
 - an unknown, duplicate, missing, or reordered top-level agent field or semantic
   token is corruption, not a harness fallback.
@@ -265,12 +273,10 @@ persisted.
 ### Reader contract
 
 There are two structural record decoders selected once from task-layer file
-authority. The task package defines a `NativeParserFactory`-equivalent dependency
-whose single operation takes a validated `harness.Name` and returns a newly
-constructed native parse callback or an error. `taskmgr` implements that resolver
-from its backend registry by calling `Backend.NewWire()` for every request; it
-never returns a stored callback. `app` supplies the resolver when it wires loaded
-logs into `taskmgr`. Empty or unknown harnesses fail rather than defaulting. A
+authority. The future persistent-reader migration will resolve a fresh native
+parser only after header validation, calling `Backend.NewWire()` for every
+request and never returning a stored callback. Empty or unknown harnesses fail
+rather than defaulting. A
 summary-only inventory read may omit native-parser construction, but every
 semantic physical scan reads and validates its first header on that same scanner,
 then invokes the resolver exactly once and constructs a fresh
@@ -747,16 +753,19 @@ at a time.
 - **Base state:** accepted reader/v1 extraction, fixture, Pi validation,
   `ParsedMessage`, v1-adoption, and latent-relay prerequisites are integrated;
   apply the global fresh-manifest rule, then refresh loader/export/replay entry
-  points, app/taskmgr factory seams, v1 counts, physical identity/cache schemas,
+  points, task/app factory seams, v1 counts, physical identity/cache schemas,
   runtime/header overwrite, and sensitive-file statistics
 - **VCS authority:** global VCS rule; no fixture recording/regeneration without
   coordinator approval
 - **Write scope:** the shared physical opener/scanner, authority envelope,
   snapshot/factory/cache-key plumbing, taskmeta cache, and reopen proof under
   `backend/internal/task`; resolver wiring in `backend/internal/app/app.go` and
-  `backend/internal/task/taskmgr/manager.go`; and adjacent focused tests. The
-  three v1 benchmark sources are read-only. No export renderer, event-replay/
-  server consumer, full/session/tail migration, or direct writer is in this phase
+  `backend/internal/task/taskmgr/manager.go`; the already-requested immutable
+  backend-map/test-helper cleanup in `backend/internal/server/*_test.go`; and
+  adjacent focused tests. The server changes only update test construction and
+  do not migrate a persistent consumer. The three v1 benchmark sources are
+  read-only. No export renderer, event-replay/server consumer, full/session/tail
+  migration, or direct writer is in this phase
 - **Data authority:** apply the global persistent observation invariants. The
   task-owned scanner alone establishes exact first-header version/harness and
   validates later meta authority. A nonempty runtime harness may only match it;
@@ -775,9 +784,8 @@ at a time.
   discriminator, `version`, or `harness` key on first and later meta records,
   whether values match or conflict. Later meta records must match all three
   first-header authority fields before parser delivery. Define the concrete
-  harness-to-fresh-native-parser factory across task/app/taskmgr: `task` owns the
-  dependency and invokes it only after header validation, `taskmgr` creates a new
-  backend wire parser on every resolution, and `app` wires it to loaded logs;
+  harness-to-fresh-native-parser construction across the persistent-reader
+  integration: it invokes `Backend.NewWire()` only after header validation;
   unknown/empty harnesses fail. Every new semantic snapshot path uses only that
   factory after header validation; test that parallel/repeated scans never share
   parser state or perform a preliminary authority pass. Temporarily retain the
@@ -800,10 +808,11 @@ at a time.
 - **Generated artifacts:** no committed artifacts; taskmeta/cache tests use
   temporary directories, existing golden recordings are read-only, and no
   benchmark/profile artifact enters the repository
-- **Change budget:** at most 7 production files and 6 tests across the named task/
-  app/taskmgr seams; at most two minimal raw-log fixtures (one exact-`type` v1 and
-  one canonical exact-`t` v2); no public API, legacy-consumer migration, or
-  duplicate scanner framework
+- **Change budget:** at most 7 production files and 10 tests, including seven
+  server test files and their helper call sites required by the immutable
+  backend-map cleanup, across the named task/app seams; at most two minimal raw-log
+  fixtures (one exact-`type` v1 and one canonical exact-`t` v2); no public API,
+  legacy-consumer migration, or duplicate scanner framework
 - **Boundary:** inventory/session/tail/export/replay behavior, replay cache version
   and publication, live relay, and writers stay unchanged until their named
   phases. Existing legacy consumers continue using `LoadedTask.SetParser` and its
@@ -856,7 +865,7 @@ at a time.
   first/later key/version/harness matrix on plain/zstd; run the global stale-
   format audit over scoped tests/fixtures, then the standard validation footer
 - **Review:** a fresh authority/API/cache reviewer receives the integrated target,
-  fresh manifest, inventory/call graph, exact task/app/taskmgr factory signatures,
+  fresh manifest, inventory/call graph, exact task/app factory signatures,
   construction-order and fresh-state instrumentation, runtime mismatch proof,
   snapshot/cache identity/lifetime proof, full duplicate/mismatch matrix,
   taskmeta old-entry rebuild and atomicity evidence, v1 compatibility and
@@ -865,7 +874,7 @@ at a time.
   paths and retained legacy `SetParser` consumers, and exact filesystem delta;
   require `PASS`
 - **Exit gate:** one task-owned plain/zstd authority scanner rejects every first/
-  later duplicate/both/missing/wrong authority case; the task/app/taskmgr resolver
+  later duplicate/both/missing/wrong authority case; the task/app resolver
   constructs one fresh parser only after header validation and never performs a
   preliminary authority scan or shares state. Runtime metadata cannot replace the
   header and nonempty mismatch fails adoption. A non-persisted snapshot/cache key
@@ -881,7 +890,7 @@ at a time.
   replaces every caller and deletes that seam. This foundation is not dispatchable
   for consumer migration until independently accepted
 - **Handoff:** report scanner/authority-envelope ownership; full duplicate and
-  mismatch matrix; task/app/taskmgr resolver signatures, call sites, construction
+  mismatch matrix; task/app resolver signatures, call sites, construction
   order, and state-isolation proof; runtime match/mismatch behavior; snapshot and
   cache-key fields/lifetime; taskmeta old/new version, raw-header hit proof,
   old-entry rebuild and atomic failure results; v1 compatibility, foundation scan

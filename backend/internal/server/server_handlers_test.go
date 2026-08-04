@@ -16,8 +16,7 @@ import (
 func TestServerHandlersListHarnesses(t *testing.T) {
 	t.Parallel()
 
-	s := newTestRouter(t)
-	s.taskMgr.RegisterBackends(map[harness.Name]agent.Backend{
+	s := newTestRouter(t, map[harness.Name]agent.Backend{
 		harness.Codex: &agenttest.FakeBackend{
 			Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "gpt-5", EffortOptions: []string{"low", "ultra"}}}},
 		},

@@ -53,6 +53,20 @@ type testRuntimeInfoSystem struct {
 
 func (testRuntimeInfoSystem) Name() runtime.Name { return "test-runtime" }
 
+type metadataErrorInfo struct {
+	*runtimetest.FakeInfo
+
+	key runtime.MetadataKey
+	err error
+}
+
+func (f *metadataErrorInfo) Metadata(ctx context.Context, id runtime.ID, key runtime.MetadataKey) (string, error) {
+	if key == f.key {
+		return "", f.err
+	}
+	return f.FakeInfo.Metadata(ctx, id, key)
+}
+
 func newTestManager(t testing.TB, cfg Config) *Manager { //nolint:gocritic // Config mirrors New's value bag in tests.
 	if cfg.Runtimes == nil {
 		cfg.Runtimes = newTestRuntime(t, &runtimetest.FakeBackend{}, nil)
@@ -2504,12 +2518,21 @@ func TestManager(t *testing.T) {
 			m.setParser(lt)
 			// No panic — setParser succeeded.
 		})
-		t.Run("valid_no_backend", func(t *testing.T) {
+		t.Run("missing_backend", func(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
-			lt := &task.LoadedTask{Harness: "pi"}
-			m.setParser(lt)
-			// No panic — graceful no-op when no matching backend.
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "task.jsonl"), []byte(`{"type":"caic_meta","version":1,"prompt":"task","repos":[],"harness":"pi"}`+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			tasks, err := task.LoadLogs(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			m.setParser(tasks[0])
+			if err := tasks[0].LoadMessages(); err == nil || !strings.Contains(err.Error(), "no parser set") {
+				t.Fatalf("LoadMessages error = %v, want missing-parser error", err)
+			}
 		})
 	})
 	t.Run("LoadMessagesOnDemand_Purged", func(t *testing.T) {
@@ -2673,6 +2696,62 @@ func TestManager(t *testing.T) {
 
 	t.Run("AdoptInstances", func(t *testing.T) {
 		t.Parallel()
+		t.Run("rejects_duplicate_runtime_task_ids", func(t *testing.T) {
+			t.Parallel()
+			taskID := ksid.NewID()
+			fake := &runtimetest.FakeInfo{Meta: map[string]string{
+				"duplicate-one\x00caic.id":      taskID.String(),
+				"duplicate-one\x00caic.harness": string(harness.Claude),
+				"duplicate-two\x00caic.id":      taskID.String(),
+				"duplicate-two\x00caic.harness": string(harness.Claude),
+			}}
+			m := newTestManager(t, Config{
+				ServerCtx: t.Context(),
+				Runtimes:  newTestRuntime(t, &runtimetest.FakeBackend{}, fake),
+				Backends:  map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{}},
+			})
+			m.RegisterWorkspace("repo/a", &repowork.Workspace{Dir: "/home/user/src/repo/a", Log: logtest.Logger(t)})
+			instances := []runtime.Instance{
+				{ID: runtime.NewID("test-runtime", "duplicate-one"), State: "exited", Repos: []runtime.Repo{{MountPath: "/home/user/src/repo/a", Branch: "caic-1"}}},
+				{ID: runtime.NewID("test-runtime", "duplicate-two"), State: "exited", Repos: []runtime.Repo{{MountPath: "/home/user/src/repo/a", Branch: "caic-1"}}},
+			}
+			adopted, err := m.AdoptInstances(t.Context(), []AdoptRepo{{RelPath: "repo/a", AbsPath: "/home/user/src/repo/a"}}, instances, nil)
+			if err == nil || !strings.Contains(err.Error(), "duplicate runtime task ID") {
+				t.Fatalf("AdoptInstances error = %v, want duplicate-task-ID error", err)
+			}
+			if adopted != nil || m.Len() != 0 {
+				t.Fatalf("duplicate adoption mutated manager: adopted=%#v len=%d", adopted, m.Len())
+			}
+		})
+		t.Run("rejects_harness_metadata_error", func(t *testing.T) {
+			t.Parallel()
+			taskID := ksid.NewID()
+			fake := &metadataErrorInfo{
+				FakeInfo: &runtimetest.FakeInfo{Meta: map[string]string{
+					"metadata-error\x00caic.id": taskID.String(),
+				}},
+				key: runtime.MetadataHarness,
+				err: errors.New("harness metadata unavailable"),
+			}
+			m := newTestManager(t, Config{
+				ServerCtx: t.Context(),
+				Runtimes:  newTestRuntime(t, &runtimetest.FakeBackend{}, fake),
+				Backends:  map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{}},
+			})
+			m.RegisterWorkspace("repo/a", &repowork.Workspace{Dir: "/home/user/src/repo/a", Log: logtest.Logger(t)})
+			_, err := m.AdoptInstances(t.Context(), []AdoptRepo{{RelPath: "repo/a", AbsPath: "/home/user/src/repo/a"}}, []runtime.Instance{{
+				ID:    runtime.NewID("test-runtime", "metadata-error"),
+				State: "exited",
+				Repos: []runtime.Repo{{HostPath: "/home/user/src/repo/a", Branch: "caic-1", MountPath: "/home/user/src/repo/a"}},
+			}}, []*task.LoadedTask{{
+				TaskID:  taskID.String(),
+				Harness: harness.Claude,
+				Repos:   []task.RepoMount{{Name: "repo/a", Branch: "caic-1"}},
+			}})
+			if err == nil || !strings.Contains(err.Error(), "harness metadata unavailable") {
+				t.Fatalf("AdoptInstances error = %v, want harness metadata error", err)
+			}
+		})
 		t.Run("valid_matches_only_primary_repo", func(t *testing.T) {
 			t.Parallel()
 			taskID := ksid.NewID()
@@ -2732,6 +2811,51 @@ func TestManager(t *testing.T) {
 				t.Errorf("tracked rate limit = %#v, want 100%% used with reset %v", got, resetAt)
 			}
 		})
+		t.Run("error_does_not_match_log_by_repo_only", func(t *testing.T) {
+			t.Parallel()
+			taskID := ksid.NewID()
+			otherTaskID := ksid.NewID()
+			fake := &runtimetest.FakeInfo{Meta: map[string]string{
+				"repo-only-match\x00caic.id":      taskID.String(),
+				"repo-only-match\x00caic.harness": string(harness.Claude),
+			}}
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
+			m.RegisterWorkspace("repo/a", &repowork.Workspace{Dir: "/home/user/src/repo/a", Log: logtest.Logger(t)})
+
+			_, err := m.AdoptInstances(t.Context(), []AdoptRepo{{RelPath: "repo/a", AbsPath: "/home/user/src/repo/a"}}, []runtime.Instance{{
+				ID: runtime.NewID("test-runtime", "repo-only-match"), State: "exited",
+				Repos: []runtime.Repo{{HostPath: "/home/user/src/repo/a", Branch: "caic-1", MountPath: "/home/user/src/repo/a"}},
+			}}, []*task.LoadedTask{{
+				TaskID:  otherTaskID.String(),
+				Repos:   []task.RepoMount{{Name: "repo/a", Branch: "caic-1"}},
+				Harness: harness.Claude,
+			}})
+			if err == nil || !strings.Contains(err.Error(), "task log "+taskID.String()+" not found") {
+				t.Fatalf("AdoptInstances error = %v, want missing exact task log", err)
+			}
+		})
+		t.Run("error_rejects_unknown_log_harness", func(t *testing.T) {
+			t.Parallel()
+			taskID := ksid.NewID()
+			fake := &runtimetest.FakeInfo{Meta: map[string]string{
+				"unknown-harness\x00caic.id":      taskID.String(),
+				"unknown-harness\x00caic.harness": "unknown",
+			}}
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{}})
+			m.RegisterWorkspace("repo/a", &repowork.Workspace{Dir: "/home/user/src/repo/a", Log: logtest.Logger(t)})
+
+			_, err := m.AdoptInstances(t.Context(), []AdoptRepo{{RelPath: "repo/a", AbsPath: "/home/user/src/repo/a"}}, []runtime.Instance{{
+				ID: runtime.NewID("test-runtime", "unknown-harness"), State: "exited",
+				Repos: []runtime.Repo{{HostPath: "/home/user/src/repo/a", Branch: "caic-1", MountPath: "/home/user/src/repo/a"}},
+			}}, []*task.LoadedTask{{
+				TaskID:  taskID.String(),
+				Repos:   []task.RepoMount{{Name: "repo/a", Branch: "caic-1"}},
+				Harness: "unknown",
+			}})
+			if err == nil || !strings.Contains(err.Error(), `unknown harness "unknown"`) {
+				t.Fatalf("AdoptInstances error = %v, want unknown-harness error", err)
+			}
+		})
 		t.Run("valid_adopts_qualified_no_repo_instance", func(t *testing.T) {
 			t.Parallel()
 			taskID := ksid.NewID()
@@ -2742,7 +2866,9 @@ func TestManager(t *testing.T) {
 			}}
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
 
-			adopted, err := m.AdoptInstances(t.Context(), nil, []runtime.Instance{{ID: instanceID, State: "exited"}}, nil)
+			adopted, err := m.AdoptInstances(t.Context(), nil, []runtime.Instance{{ID: instanceID, State: "exited"}}, []*task.LoadedTask{{
+				TaskID: taskID.String(), Harness: harness.Claude,
+			}})
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
 			}
@@ -2841,7 +2967,7 @@ func TestManager(t *testing.T) {
 				t.Fatal(err)
 			}
 			diskMsg := `{"type":"assistant","message":{"model":"m","id":"msg_01","role":"assistant","content":[{"type":"text","text":"before restart"}],"usage":{}},"session_id":"s","uuid":"u1"}`
-			if err := os.WriteFile(filepath.Join(logDir, "merge-tail.jsonl"), []byte(string(meta)+"\n"+diskMsg+"\n"), 0o600); err != nil {
+			if err := os.WriteFile(filepath.Join(logDir, taskID.String()+".jsonl"), []byte(string(meta)+"\n"+diskMsg+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			logs, err := task.LoadLogs(logDir)
@@ -2929,7 +3055,11 @@ func TestManager(t *testing.T) {
 						MountPath: "/home/user/src/repo/a",
 					}},
 				},
-			}, nil)
+			}, []*task.LoadedTask{{
+				TaskID:  taskID.String(),
+				Harness: "reconnect",
+				Repos:   []task.RepoMount{{Name: "repo/a", Branch: "caic-10"}},
+			}})
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
 			}
@@ -2977,7 +3107,7 @@ func TestManager(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			logPath := filepath.Join(logDir, "dead-relay.jsonl")
+			logPath := filepath.Join(logDir, taskID.String()+".jsonl")
 			body := string(meta) + "\n" + `{"type":"caic_exit","exit_code":2,"error":"Unknown option: --approve"}` + "\n"
 			if err := os.WriteFile(logPath, []byte(body), 0o600); err != nil {
 				t.Fatal(err)
@@ -3055,7 +3185,11 @@ func TestManager(t *testing.T) {
 						MountPath: "/home/user/src/caic-xyz/caic",
 					}},
 				},
-			}, nil)
+			}, []*task.LoadedTask{{
+				TaskID:  taskID.String(),
+				Harness: harness.Claude,
+				Repos:   []task.RepoMount{{Name: "caic-xyz/caic", Branch: "caic-8"}},
+			}})
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
 			}
@@ -3105,7 +3239,11 @@ func TestManager(t *testing.T) {
 						MountPath: "/home/user/src/caic-xyz/caic",
 					}},
 				},
-			}, nil)
+			}, []*task.LoadedTask{{
+				TaskID:  taskID.String(),
+				Harness: harness.Claude,
+				Repos:   []task.RepoMount{{Name: "caic-xyz/caic", Branch: "caic-9"}},
+			}})
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
 			}
@@ -3129,7 +3267,7 @@ func TestManager(t *testing.T) {
 				"stale-trailer\x00caic.id":      taskID.String(),
 				"stale-trailer\x00caic.harness": string(harness.Claude),
 			}}
-			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake)})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
 			m.RegisterWorkspace("caic-xyz/caic", &repowork.Workspace{Dir: "/home/user/src/caic-xyz/caic", Log: logtest.Logger(t)})
 
 			logDir := t.TempDir()
@@ -3147,7 +3285,7 @@ func TestManager(t *testing.T) {
 			staleExit := `{"type":"caic_exit","exit_code":2,"error":"stale crash"}`
 			staleTrailer := `{"type":"caic_result","state":"crashed","error":"agent session crashed"}`
 			logs := string(meta) + "\n" + result + "\n" + staleExit + "\n" + staleTrailer + "\n"
-			if err := os.WriteFile(filepath.Join(logDir, "stale-trailer.jsonl"), []byte(logs), 0o600); err != nil {
+			if err := os.WriteFile(filepath.Join(logDir, taskID.String()+".jsonl"), []byte(logs), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			loaded, err := task.LoadLogs(logDir)
@@ -3203,7 +3341,7 @@ func TestManager(t *testing.T) {
 				t.Fatal(err)
 			}
 			init := `{"method":"thread/started","params":{"thread":{"id":"thread-from-started","cliVersion":"1.0","createdAt":1,"cwd":"/repo","modelProvider":"openai","path":"/repo","preview":"","source":"user","status":{"type":"idle"},"updatedAt":2}}}`
-			if err := os.WriteFile(filepath.Join(logDir, "legacy-codex.jsonl"), []byte(string(meta)+"\n"+init+"\n"), 0o600); err != nil {
+			if err := os.WriteFile(filepath.Join(logDir, taskID.String()+".jsonl"), []byte(string(meta)+"\n"+init+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			logs, err := task.LoadLogs(logDir)

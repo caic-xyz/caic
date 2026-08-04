@@ -148,6 +148,15 @@ func compressLogFile(path string) (string, error) {
 		_ = os.Remove(tmp)
 		return "", err
 	}
+	current, err := os.Stat(filepath.Clean(path))
+	if err != nil {
+		_ = os.Remove(tmp)
+		return "", err
+	}
+	if !os.SameFile(info, current) || current.Size() != info.Size() || current.ModTime().UnixNano() != info.ModTime().UnixNano() {
+		_ = os.Remove(tmp)
+		return "", fmt.Errorf("task log changed while compressing: %s", path)
+	}
 	if err := os.Chtimes(tmp, info.ModTime(), info.ModTime()); err != nil {
 		_ = os.Remove(tmp)
 		return "", fmt.Errorf("set compressed log mtime: %w", err)
@@ -175,6 +184,14 @@ func CompressTerminalLogs(logs []*LoadedTask) error {
 		if lt == nil || !compressibleLogState(lt.State) {
 			continue
 		}
+		if isLogCompressed(lt.path) {
+			continue
+		}
+		snapshot := lt.ValidatedSnapshot()
+		if snapshot == nil || !validatedSnapshotMatchesFile(snapshot, lt.path) {
+			errs = append(errs, fmt.Errorf("task log %s has no current validated snapshot", lt.path))
+			continue
+		}
 		compressed, err := compressLogFile(lt.path)
 		if err != nil {
 			errs = append(errs, err)
@@ -184,9 +201,15 @@ func CompressTerminalLogs(logs []*LoadedTask) error {
 		if info, statErr := os.Stat(compressed); statErr == nil {
 			lt.LogSize = info.Size()
 		}
-		if err := storeLogSummary(lt); err != nil {
-			errs = append(errs, fmt.Errorf("write task log summary: %w", err))
+		// Compression copied the already validated source bytes. Rebind the
+		// semantic carrier to the new identity, but leave EOF proof pending until
+		// a reader observes the compressed stream's EOF.
+		compressedSnapshot, snapshotErr := rebindSnapshotToFile(compressed, snapshot)
+		if snapshotErr != nil {
+			errs = append(errs, fmt.Errorf("validate compressed task identity: %w", snapshotErr))
+			continue
 		}
+		lt.setValidatedSnapshot(compressedSnapshot)
 	}
 	return errors.Join(errs...)
 }

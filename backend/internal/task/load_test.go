@@ -3,13 +3,17 @@
 package task
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"iter"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -94,6 +98,25 @@ func mustJSON(t *testing.T, v any) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var version int
+	switch m := v.(type) {
+	case agent.MetaMessage:
+		version = m.Version
+	case *agent.MetaMessage:
+		version = m.Version
+	}
+	if version == int(agent.LogVersionV2) {
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(b, &raw); err != nil {
+			t.Fatal(err)
+		}
+		delete(raw, "type")
+		raw["t"] = json.RawMessage(`"caic_meta"`)
+		b, err = json.Marshal(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	return string(b)
 }
 
@@ -103,6 +126,26 @@ type countingLogReader struct {
 
 	bytes    int64
 	complete bool
+}
+
+type countingReadCloser struct {
+	reader   io.Reader
+	closeFn  func() error
+	bytes    int64
+	complete bool
+}
+
+func (r *countingReadCloser) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	r.bytes += int64(n)
+	if errors.Is(err, io.EOF) {
+		r.complete = true
+	}
+	return n, err
+}
+
+func (r *countingReadCloser) Close() error {
+	return r.closeFn()
 }
 
 func (r *countingLogReader) Read(p []byte) (int, error) {
@@ -199,6 +242,12 @@ func TestReadLogAuthority(t *testing.T) {
 		{name: "FutureVersion", lines: []string{meta(t, 3, harness.Claude)}},
 		{name: "ChangedVersion", lines: []string{meta(t, 1, harness.Claude), meta(t, 2, harness.Claude)}},
 		{name: "ChangedHarness", lines: []string{meta(t, 1, harness.Claude), meta(t, 1, harness.Codex)}},
+		{name: "WrongLaterDiscriminator", lines: []string{meta(t, 1, harness.Claude), `{"t":"caic_meta","version":1,"prompt":"task","repos":[],"harness":"claude"}`}},
+		{name: "LaterDuplicateTypeMetaFirst", lines: []string{meta(t, 1, harness.Claude), `{"type":"caic_meta","type":"assistant","version":1,"prompt":"task","repos":[],"harness":"claude"}`}},
+		{name: "LaterDuplicateTypeMetaLast", lines: []string{meta(t, 1, harness.Claude), `{"type":"assistant","type":"caic_meta","version":1,"prompt":"task","repos":[],"harness":"claude"}`}},
+		{name: "LaterDuplicateTMetaFirst", lines: []string{meta(t, 2, harness.Codex), `{"t":"caic_meta","t":"assistant","version":2,"prompt":"task","repos":[],"harness":"codex"}`}},
+		{name: "LaterDuplicateTMetaLast", lines: []string{meta(t, 2, harness.Codex), `{"t":"assistant","t":"caic_meta","version":2,"prompt":"task","repos":[],"harness":"codex"}`}},
+		{name: "DuplicateAuthorityKey", lines: []string{`{"type":"caic_meta","type":"caic_meta","version":1,"prompt":"task","repos":[],"harness":"claude"}`}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -210,6 +259,97 @@ func TestReadLogAuthority(t *testing.T) {
 			}
 		})
 	}
+	t.Run("CompressedRejectsRawAuthorityKeys", func(t *testing.T) {
+		t.Parallel()
+		cases := [][]string{
+			{`{"type":"caic_meta","t":"caic_meta","version":1,"prompt":"task","repos":[],"harness":"claude"}`},
+			{`{"type":"caic_meta","version":1,"version":1,"prompt":"task","repos":[],"harness":"claude"}`},
+			{`{"type":"caic_meta","version":1,"prompt":"task","repos":[],"harness":"claude","harness":"claude"}`},
+		}
+		for i, lines := range cases {
+			dir := t.TempDir()
+			path := filepath.Join(dir, fmt.Sprintf("case-%d.jsonl.zst", i))
+			writeCompressedLogFile(t, dir, filepath.Base(path), seqOf(lines...))
+			if _, err := readLogAuthority(path); err == nil {
+				t.Fatalf("case %d: readLogAuthority error = nil", i)
+			}
+		}
+	})
+	t.Run("DuplicateOrdinaryKeyRemainsV1Compatible", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "a.jsonl")
+		writeLogFile(t, dir, "a.jsonl", meta(t, 1, harness.Claude), `{"type":"assistant","type":"assistant"}`)
+		if _, err := readLogAuthority(path); err != nil {
+			t.Fatalf("readLogAuthority error = %v, want ordinary duplicate accepted", err)
+		}
+	})
+	t.Run("DuplicateNonAuthorityKeyRemainsV1Compatible", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "a.jsonl")
+		writeLogFile(t, dir, "a.jsonl", `{"type":"caic_meta","version":1,"prompt":"first","prompt":"last","repos":[],"harness":"claude"}`)
+		if _, err := readLogAuthority(path); err != nil {
+			t.Fatalf("readLogAuthority error = %v, want non-authority duplicate accepted", err)
+		}
+	})
+	t.Run("V2RejectsUnknownHeaderField", func(t *testing.T) {
+		t.Parallel()
+		for _, compressed := range []bool{false, true} {
+			t.Run(map[bool]string{false: "plain", true: "compressed"}[compressed], func(t *testing.T) {
+				t.Parallel()
+				meta := mustJSON(t, agent.MetaMessage{
+					MessageType: "caic_meta",
+					Version:     2,
+					Prompt:      "task",
+					Repos:       []agent.MetaRepo{{Name: "r", Branch: "caic-0"}},
+					Harness:     harness.Codex,
+				})
+				var fields map[string]json.RawMessage
+				if err := json.Unmarshal([]byte(meta), &fields); err != nil {
+					t.Fatal(err)
+				}
+				fields["bogus"] = json.RawMessage(`true`)
+				data, err := json.Marshal(fields)
+				if err != nil {
+					t.Fatal(err)
+				}
+				dir := t.TempDir()
+				path := filepath.Join(dir, "a.jsonl")
+				if compressed {
+					path += logCompressedExt
+					writeCompressedLogFile(t, dir, filepath.Base(path), seqOf(string(data)))
+				} else {
+					writeLogFile(t, dir, filepath.Base(path), string(data))
+				}
+				if _, err := readLogAuthority(path); err == nil || !strings.Contains(err.Error(), "unknown v2 caic_meta fields") {
+					t.Fatalf("readLogAuthority error = %v, want unknown-field error", err)
+				}
+			})
+		}
+	})
+	t.Run("DeepNestedNativeRecordDoesNotUseGoroutineStack", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "a.jsonl")
+		depth := 200_000
+		nested := `{"type":"assistant","nested":` + strings.Repeat("[", depth) + "0" + strings.Repeat("]", depth) + "}"
+		writeLogFile(t, dir, "a.jsonl", meta(t, 1, harness.Claude), nested)
+		if _, err := readLogAuthority(path); err != nil {
+			t.Fatalf("readLogAuthority error = %v, want deeply nested native record accepted", err)
+		}
+	})
+	t.Run("RejectsTooDeepLaterMetadataRecord", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "a.jsonl")
+		deep := strings.Repeat("[", maxJSONNesting+1) + "0" + strings.Repeat("]", maxJSONNesting+1)
+		segment := `{"type":"caic_meta","version":2,"prompt":"task","repos":[],"harness":"codex","nested":` + deep + "}"
+		writeLogFile(t, dir, "a.jsonl", meta(t, 1, harness.Claude), segment)
+		if _, err := readLogAuthority(path); err == nil || !strings.Contains(err.Error(), "nesting exceeds limit") {
+			t.Fatalf("readLogAuthority error = %v, want nesting-limit error", err)
+		}
+	})
 	t.Run("Unreadable", func(t *testing.T) {
 		t.Parallel()
 		if _, err := readLogAuthority(filepath.Join(t.TempDir(), "missing.jsonl")); !errors.Is(err, os.ErrNotExist) {
@@ -218,26 +358,20 @@ func TestReadLogAuthority(t *testing.T) {
 	})
 }
 
-func TestForkedFromTaskIDLoadsFromLogMetadata(t *testing.T) {
+func TestPhysicalFileIdentity(t *testing.T) {
 	t.Parallel()
-	path := writePhysicalTestLog(t, false, mustJSON(t, agent.MetaMessage{
-		MessageType:      "caic_meta",
-		Version:          1,
-		Prompt:           "forked task",
-		Repos:            []agent.MetaRepo{{Name: "r", Branch: "caic-1"}},
-		Harness:          harness.Claude,
-		ForkedFromTaskID: "3BL0EKDTO000",
-	}))
-
-	tasks, err := LoadLogs(filepath.Dir(path))
+	file, err := os.CreateTemp(t.TempDir(), "identity")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tasks) != 1 {
-		t.Fatalf("len(tasks) = %d, want 1", len(tasks))
+	t.Cleanup(func() { _ = file.Close() })
+	info, err := file.Stat()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if tasks[0].ForkedFromTaskID != "3BL0EKDTO000" {
-		t.Fatalf("ForkedFromTaskID = %q, want 3BL0EKDTO000", tasks[0].ForkedFromTaskID)
+	identity := physicalFileIdentityFromFile(file, info)
+	if !identity.Valid {
+		t.Fatalf("physical identity = %+v, want valid identity", identity)
 	}
 }
 
@@ -318,11 +452,15 @@ func TestLoadLogs(t *testing.T) {
 						writeLogFile(t, dir, name, lines...)
 					}
 					path := filepath.Join(dir, name)
-					if _, err := loadLogHeader(path); err == nil || !strings.Contains(err.Error(), "authority changed") {
-						t.Fatalf("loadLogHeader error = %v, want authority change", err)
+					want := "authority changed"
+					if mismatch.name == "ChangedVersion" {
+						want = "wrong t discriminator"
 					}
-					if _, err := loadLogFile(path, claudecode.New().NewWire().ParseMessage); err == nil || !strings.Contains(err.Error(), "authority changed") {
-						t.Fatalf("loadLogFile error = %v, want authority change", err)
+					if _, err := loadLogHeader(path); err == nil || !strings.Contains(err.Error(), want) {
+						t.Fatalf("loadLogHeader error = %v, want %s", err, want)
+					}
+					if _, err := loadLogFile(path, claudecode.New().NewWire().ParseMessage); err == nil || !strings.Contains(err.Error(), want) {
+						t.Fatalf("loadLogFile error = %v, want %s", err, want)
 					}
 				})
 			}
@@ -497,23 +635,14 @@ func TestLoadLogs(t *testing.T) {
 		if first[0].LogVersion != agent.LogVersionV1 {
 			t.Fatalf("LogVersion = %d, want 1", first[0].LogVersion)
 		}
+		if _, err := os.Stat(logSummaryPath(path)); err != nil {
+			t.Fatalf("summary cache was not written: %v", err)
+		}
 		info, err := os.Stat(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := os.Stat(logSummaryPath(path)); err != nil {
-			t.Fatalf("summary cache was not written: %v", err)
-		}
 
-		if err := os.WriteFile(path, nil, 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Truncate(path, info.Size()); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
-			t.Fatal(err)
-		}
 		second, err := LoadLogs(dir)
 		if err != nil {
 			t.Fatal(err)
@@ -523,6 +652,46 @@ func TestLoadLogs(t *testing.T) {
 		}
 		if second[0].Prompt != "cached" || second[0].State != StatePurged || second[0].ForkedFromTaskID != "3BL0EKDTO000" {
 			t.Fatalf("cached task = prompt %q state %v parent %q, want cached/purged/3BL0EKDTO000", second[0].Prompt, second[0].State, second[0].ForkedFromTaskID)
+		}
+		if second[0].ValidatedSnapshot() != nil {
+			t.Fatal("inventory cache hit published a snapshot without a current EOF proof")
+		}
+
+		replacementDir := t.TempDir()
+		var replacement []byte
+		replacementPrompt := ""
+		for _, prompt := range []string{"newval", "reload", "replcd", "freshx"} {
+			candidateName := prompt + ".jsonl.zst"
+			candidateMeta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: prompt, Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude", ForkedFromTaskID: "3BL0EKDTO000"})
+			writeCompressedLogFile(t, replacementDir, candidateName, seqOf(candidateMeta, trailer))
+			candidate, readErr := os.ReadFile(filepath.Join(replacementDir, candidateName)) //nolint:gosec // path is test-controlled.
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if len(candidate) == int(info.Size()) {
+				replacement = candidate
+				replacementPrompt = prompt
+				break
+			}
+		}
+		if replacement == nil {
+			t.Fatal("could not construct a same-size compressed replacement")
+		}
+		if err := os.WriteFile(path, replacement, 0o600); err != nil { //nolint:gosec // path is test-controlled.
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+			t.Fatal(err)
+		}
+		rebuilt, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rebuilt) != 1 || rebuilt[0].Prompt != replacementPrompt {
+			t.Fatalf("same-size same-mtime rewrite = %+v, want rebuilt prompt %q", rebuilt, replacementPrompt)
+		}
+		if rebuilt[0].ValidatedSnapshot() == nil {
+			t.Fatal("rebuilt compressed log has no validated snapshot")
 		}
 	})
 	t.Run("CompressedSummaryRejectsReplacementBeforePublish", func(t *testing.T) {
@@ -572,9 +741,39 @@ func TestLoadLogs(t *testing.T) {
 			t.Fatalf("summary exists after replacement: %v", err)
 		}
 	})
+	t.Run("CompressedSummaryAtomicWriteFailure", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "a.jsonl.zst")
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "atomic", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Claude})
+		writeCompressedLogFile(t, dir, filepath.Base(path), seqOf(meta))
+		tasks, err := LoadLogs(dir)
+		if err != nil || len(tasks) != 1 {
+			t.Fatalf("LoadLogs = %d tasks, %v", len(tasks), err)
+		}
+		summaryPath := logSummaryPath(path)
+		before, err := os.ReadFile(summaryPath) //nolint:gosec // path is test-controlled.
+		if err != nil {
+			t.Fatal(err)
+		}
+		tmp := summaryPath + ".tmp"
+		if err := os.Mkdir(tmp, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := storeLogSummary(tasks[0]); err == nil {
+			t.Fatal("storeLogSummary error = nil, want atomic temp-file failure")
+		}
+		after, err := os.ReadFile(summaryPath) //nolint:gosec // path is test-controlled.
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(after, before) {
+			t.Fatal("summary changed after atomic write failure")
+		}
+	})
 	t.Run("CompressedSummaryCacheRebuild", func(t *testing.T) {
 		t.Parallel()
-		for _, mutation := range []string{"missing", "corrupt", "old", "stale-size", "stale-mtime"} {
+		for _, mutation := range []string{"missing", "corrupt", "old", "stale-size", "stale-mtime", "stale-authority", "stale-device", "stale-inode", "stale-prompt", "eof"} {
 			t.Run(mutation, func(t *testing.T) {
 				t.Parallel()
 				dir := t.TempDir()
@@ -594,7 +793,7 @@ func TestLoadLogs(t *testing.T) {
 					if err := os.WriteFile(summaryPath, []byte("{"), 0o600); err != nil {
 						t.Fatal(err)
 					}
-				case "old", "stale-size", "stale-mtime":
+				case "old", "stale-size", "stale-mtime", "stale-authority", "stale-device", "stale-inode", "stale-prompt", "eof":
 					data, err := os.ReadFile(summaryPath) //nolint:gosec // path is test-controlled.
 					if err != nil {
 						t.Fatal(err)
@@ -610,6 +809,16 @@ func TestLoadLogs(t *testing.T) {
 						summary.LogSize++
 					case "stale-mtime":
 						summary.LogModNs--
+					case "stale-authority":
+						summary.AuthorityHarness = harness.Claude
+					case "stale-device":
+						summary.LogDevice++
+					case "stale-inode":
+						summary.LogInode++
+					case "stale-prompt":
+						summary.Task.Prompt = "tampered"
+					case "eof":
+						summary.EOFValidated = false
 					}
 					data, err = json.Marshal(summary)
 					if err != nil {
@@ -678,6 +887,21 @@ func TestLoadLogs(t *testing.T) {
 		}
 		if tasks[0].TaskID != "live1" || tasks[0].Prompt != "wanted" {
 			t.Errorf("task = (%q, %q), want (live1, wanted)", tasks[0].TaskID, tasks[0].Prompt)
+		}
+	})
+	t.Run("ForTaskIDsMissing", func(t *testing.T) {
+		t.Parallel()
+		if _, err := LoadLogsForTaskIDs(t.TempDir(), []string{"missing"}); err == nil || !strings.Contains(err.Error(), "missing task logs") {
+			t.Fatalf("LoadLogsForTaskIDs error = %v, want missing-log error", err)
+		}
+	})
+	t.Run("ForTaskIDsInvalid", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeLogFile(t, dir, "broken-repo-branch.jsonl", `{"type":"assistant"}`)
+		_, err := LoadLogsForTaskIDs(dir, []string{"broken"})
+		if err == nil || !strings.Contains(err.Error(), "load task log") {
+			t.Fatalf("LoadLogsForTaskIDs error = %v, want invalid-log error", err)
 		}
 	})
 	t.Run("NotExist", func(t *testing.T) {
@@ -877,6 +1101,64 @@ func TestLoadLogs(t *testing.T) {
 			t.Errorf("AgentVersion = %q, want 1.2.3", lt.AgentVersion)
 		}
 	})
+	t.Run("V1NativeSessionTypeIsNotTaskMetadata", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "session task", Harness: harness.Claude,
+		})
+		nativeSession := `{"type":"session","session_id":"native-session","version":"native"}`
+		caicSession := mustJSON(t, agent.MetaSessionMessage{
+			MessageType: "caic_session", SessionID: "caic-session", AgentVersion: "1.2.3",
+		})
+		path := filepath.Join(dir, "session.jsonl")
+		writeLogFile(t, dir, filepath.Base(path), meta, nativeSession, caicSession)
+
+		parsedNative := false
+		parseNativeSession := func(line []byte) ([]agent.Message, error) {
+			if bytes.Contains(line, []byte(`"type":"session"`)) {
+				parsedNative = true
+			}
+			return []agent.Message{&agent.TextMessage{Text: "native session record"}}, nil
+		}
+		lt, err := loadLogSessionMetadata(path, parseNativeSession)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !parsedNative {
+			t.Fatal("v1 native session record did not reach the harness parser")
+		}
+		if lt.SessionID != "caic-session" || lt.AgentVersion != "1.2.3" {
+			t.Fatalf("session metadata = (%q, %q), want (caic-session, 1.2.3)", lt.SessionID, lt.AgentVersion)
+		}
+	})
+	t.Run("V2CaicSessionAliasesAreNotTaskMetadata", func(t *testing.T) {
+		t.Parallel()
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 2, Prompt: "session task", Harness: harness.Claude,
+		})
+		caicSession := `{"t":"caic_session","session_id":"wrong-session","model":"wrong-model","version":"wrong-version"}`
+		caicInit := `{"t":"caic_init","session_id":"wrong-init","model":"wrong-model","version":"wrong-version"}`
+		path := writePhysicalTestLog(t, false, meta, caicSession, caicInit)
+
+		parseAlias := func([]byte) ([]agent.Message, error) {
+			return []agent.Message{&agent.InitMessage{SessionID: "wrong-parser", Version: "wrong-parser"}}, nil
+		}
+		lt, err := loadLogSessionMetadata(path, parseAlias)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if lt.SessionID != "" || lt.AgentVersion != "" || lt.Model != "" {
+			t.Fatalf("v2 alias metadata = (%q, %q, %q), want empty", lt.SessionID, lt.AgentVersion, lt.Model)
+		}
+		tasks, err := LoadLogs(filepath.Dir(path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(tasks) != 1 || tasks[0].SessionID != "" || tasks[0].AgentVersion != "" || tasks[0].Model != "" {
+			t.Fatalf("loaded v2 alias metadata = %#v, want empty session metadata", tasks)
+		}
+	})
 	t.Run("AgentVersionMetadataWithoutSession", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
@@ -950,8 +1232,8 @@ func TestLoadLogs(t *testing.T) {
 			t.Run(format+" mixed authority after metadata", func(t *testing.T) {
 				t.Parallel()
 				path := writePhysicalTestLog(t, compressed, meta, session, mismatch)
-				if _, err := loadLogSessionMetadata(path, nil); err == nil || !strings.Contains(err.Error(), "authority changed") {
-					t.Fatalf("error = %v, want authority changed", err)
+				if _, err := loadLogSessionMetadata(path, nil); err == nil || !strings.Contains(err.Error(), "wrong t discriminator") {
+					t.Fatalf("error = %v, want wrong t discriminator", err)
 				}
 			})
 			t.Run(format+" leading empty lines", func(t *testing.T) {
@@ -1159,6 +1441,219 @@ func TestLoadLogs(t *testing.T) {
 	})
 }
 
+func TestLoadSemanticLogSnapshot(t *testing.T) {
+	t.Parallel()
+	t.Run("PlainOrZstd", func(t *testing.T) {
+		t.Parallel()
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta",
+			Version:     int(agent.LogVersionV1),
+			Prompt:      "snapshot",
+			Harness:     harness.Claude,
+		})
+		native := `{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}]}}`
+		for _, compressed := range []bool{false, true} {
+			format := "plain"
+			if compressed {
+				format = "zstd"
+			}
+			t.Run(format, func(t *testing.T) {
+				t.Parallel()
+				dir := t.TempDir()
+				name := "snapshot" + logPlainExt
+				if compressed {
+					name = "snapshot" + logCompressedExt
+				}
+				if compressed {
+					writeCompressedLogFile(t, dir, name, seqOf(meta, native))
+				} else {
+					writeLogFile(t, dir, name, meta, native)
+				}
+
+				var events []string
+				factory := func(got harness.Name) (func([]byte) ([]agent.Message, error), error) {
+					events = append(events, "factory:"+string(got))
+					return func(line []byte) ([]agent.Message, error) {
+						events = append(events, "native")
+						return []agent.Message{&agent.TextMessage{Text: string(line)}}, nil
+					}, nil
+				}
+				if len(events) != 0 {
+					t.Fatalf("factory events before snapshot = %v, want none", events)
+				}
+				snapshot, err := loadSemanticLogSnapshot(filepath.Join(dir, name), factory)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got, want := events, []string{"factory:claude", "native"}; !slices.Equal(got, want) {
+					t.Fatalf("construction events = %v, want %v", got, want)
+				}
+				if len(snapshot.Messages) != 2 || snapshot.Messages[0].Message.Type() != "caic_meta" || snapshot.Messages[1].Message.Type() != "text" {
+					t.Fatalf("snapshot messages = %#v, want bootstrap and one text message", snapshot.Messages)
+				}
+				if !snapshot.EOFValidated || snapshot.RawHeader != meta {
+					t.Fatalf("snapshot proof = %#v, want validated exact header", snapshot)
+				}
+			})
+		}
+	})
+
+	t.Run("Parallel", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "parallel", Harness: harness.Claude})
+		writeLogFile(t, dir, "parallel.jsonl", meta, `{"type":"assistant","message":{"content":[]}}`)
+		factory := func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			return func([]byte) ([]agent.Message, error) {
+				return []agent.Message{&agent.TextMessage{Text: "parsed"}}, nil
+			}, nil
+		}
+		var wg sync.WaitGroup
+		for range 4 {
+			wg.Go(func() {
+				snapshot, err := loadSemanticLogSnapshot(filepath.Join(dir, "parallel.jsonl"), factory)
+				if err != nil {
+					t.Errorf("loadSemanticLogSnapshot: %v", err)
+					return
+				}
+				if len(snapshot.Messages) != 2 {
+					t.Errorf("snapshot messages = %#v, want bootstrap and parsed message", snapshot.Messages)
+				}
+			})
+		}
+		wg.Wait()
+	})
+
+	t.Run("V2AgentRecords", func(t *testing.T) {
+		t.Parallel()
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta",
+			Version:     int(agent.LogVersionV2),
+			Prompt:      "v2 snapshot",
+			Harness:     harness.Codex,
+		})
+		native := `{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}]}}`
+		agentRecord := `{"t":"agent","ts":1700000000.123,"msg":` + native + `}`
+		for _, compressed := range []bool{false, true} {
+			format := "plain"
+			if compressed {
+				format = "zstd"
+			}
+			t.Run(format, func(t *testing.T) {
+				t.Parallel()
+				dir := t.TempDir()
+				name := "v2" + logPlainExt
+				if compressed {
+					name = "v2" + logCompressedExt
+					writeCompressedLogFile(t, dir, name, seqOf(meta, agentRecord))
+				} else {
+					writeLogFile(t, dir, name, meta, agentRecord)
+				}
+
+				var factoryCalls, nativeCalls int
+				factory := func(got harness.Name) (func([]byte) ([]agent.Message, error), error) {
+					factoryCalls++
+					if got != harness.Codex {
+						t.Fatalf("factory harness = %q, want codex", got)
+					}
+					return func(line []byte) ([]agent.Message, error) {
+						nativeCalls++
+						if string(line) != native {
+							t.Fatalf("native payload = %q, want %q", line, native)
+						}
+						return []agent.Message{&agent.TextMessage{Text: "hello"}}, nil
+					}, nil
+				}
+				snapshot, err := loadSemanticLogSnapshot(filepath.Join(dir, name), factory)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if factoryCalls != 1 || nativeCalls != 1 {
+					t.Fatalf("factory calls = %d, native calls = %d, want 1/1", factoryCalls, nativeCalls)
+				}
+				if len(snapshot.Messages) != 2 {
+					t.Fatalf("snapshot messages = %#v, want bootstrap and agent message", snapshot.Messages)
+				}
+				wantTime := time.Unix(1700000000, 123000000).UTC()
+				if !snapshot.Messages[0].ProducerTime.IsZero() || !snapshot.Messages[1].ProducerTime.Equal(wantTime) {
+					t.Fatalf("producer times = %v, %v, want zero/%v", snapshot.Messages[0].ProducerTime, snapshot.Messages[1].ProducerTime, wantTime)
+				}
+			})
+		}
+	})
+
+	t.Run("CompletesOnePlainOrZstdPass", func(t *testing.T) {
+		t.Parallel()
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta",
+			Version:     int(agent.LogVersionV2),
+			Prompt:      "scan count",
+			Harness:     harness.Codex,
+		})
+		native := `{"type":"assistant","message":{"content":[]}}`
+		agentRecord := `{"t":"agent","ts":1700000000.123,"msg":` + native + `}`
+		for _, compressed := range []bool{false, true} {
+			format := "plain"
+			if compressed {
+				format = "zstd"
+			}
+			t.Run(format, func(t *testing.T) {
+				t.Parallel()
+				dir := t.TempDir()
+				name := "count" + logPlainExt
+				if compressed {
+					name = "count" + logCompressedExt
+					writeCompressedLogFile(t, dir, name, seqOf(meta, agentRecord))
+				} else {
+					writeLogFile(t, dir, name, meta, agentRecord)
+				}
+				path := filepath.Join(dir, name)
+				file, err := os.Open(filepath.Clean(path))
+				if err != nil {
+					t.Fatal(err)
+				}
+				info, err := file.Stat()
+				if err != nil {
+					_ = file.Close()
+					t.Fatal(err)
+				}
+				var source io.Reader = file
+				closeFn := file.Close
+				if compressed {
+					decoder, decodeErr := zstd.NewReader(file)
+					if decodeErr != nil {
+						_ = file.Close()
+						t.Fatal(decodeErr)
+					}
+					source = decoder
+					closeFn = func() error {
+						decoder.Close()
+						return file.Close()
+					}
+				}
+				counted := &countingReadCloser{reader: source, closeFn: closeFn}
+				reader := &physicalLogReader{file: file, reader: counted, info: info}
+				nativeCalls := 0
+				snapshot, err := loadSemanticLogSnapshotFromReader(path, reader, func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+					return func([]byte) ([]agent.Message, error) {
+						nativeCalls++
+						return []agent.Message{&agent.TextMessage{Text: "parsed"}}, nil
+					}, nil
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !counted.complete || counted.bytes == 0 {
+					t.Fatalf("source pass = bytes %d complete %t, want one complete pass", counted.bytes, counted.complete)
+				}
+				if nativeCalls != 1 || len(snapshot.Messages) != 2 {
+					t.Fatalf("native calls = %d, messages = %d, want 1/2", nativeCalls, len(snapshot.Messages))
+				}
+			})
+		}
+	})
+}
+
 func TestTaskAdoptionReadAmplification(t *testing.T) {
 	t.Parallel()
 	meta := mustJSON(t, agent.MetaMessage{
@@ -1276,49 +1771,103 @@ func TestTaskAdoptionReadAmplification(t *testing.T) {
 
 func TestCompressTerminalLogs(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "task", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude", RuntimeName: "docker"})
-	asst := claudeAssistant(t, map[string]any{"type": "text", "text": "hello"})
-	trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
-	writeLogFile(t, dir, "t.jsonl", meta, asst, trailer)
+	t.Run("Compresses", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "task", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude", RuntimeName: "docker"})
+		asst := claudeAssistant(t, map[string]any{"type": "text", "text": "hello"})
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		writeLogFile(t, dir, "t.jsonl", meta, asst, trailer)
 
-	tasks, err := LoadLogs(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := CompressTerminalLogs(tasks); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "t.jsonl")); !os.IsNotExist(err) {
-		t.Fatalf("plain log stat err = %v, want os.ErrNotExist", err)
-	}
-	compressedPath := filepath.Join(dir, "t.jsonl.zst")
-	if _, err := os.Stat(compressedPath); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(logSummaryPath(compressedPath)); err != nil {
-		t.Fatalf("summary cache stat: %v", err)
-	}
-	if !isLogCompressed(tasks[0].LogPath()) {
-		t.Fatalf("LogPath = %q, want compressed path", tasks[0].LogPath())
-	}
-	reloaded, err := LoadLogs(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(reloaded) != 1 {
-		t.Fatalf("reloaded len = %d, want 1", len(reloaded))
-	}
-	if reloaded[0].RuntimeName != "docker" {
-		t.Fatalf("reloaded RuntimeName = %q, want docker", reloaded[0].RuntimeName)
-	}
-	setClaudeParser(tasks)
-	if err := tasks[0].LoadMessages(); err != nil {
-		t.Fatal(err)
-	}
-	if len(tasks[0].Msgs) != 1 {
-		t.Errorf("Msgs len = %d, want 1", len(tasks[0].Msgs))
-	}
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		snapshot, err := loadSemanticLogSnapshot(tasks[0].LogPath(), func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			return claudecode.New().NewWire().ParseMessage, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tasks[0].setValidatedSnapshot(snapshot)
+		if err := CompressTerminalLogs(tasks); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "t.jsonl")); !os.IsNotExist(err) {
+			t.Fatalf("plain log stat err = %v, want os.ErrNotExist", err)
+		}
+		compressedPath := filepath.Join(dir, "t.jsonl.zst")
+		if _, err := os.Stat(compressedPath); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(logSummaryPath(compressedPath)); !os.IsNotExist(err) {
+			t.Fatalf("summary cache stat = %v, want pending EOF proof", err)
+		}
+		if !isLogCompressed(tasks[0].LogPath()) {
+			t.Fatalf("LogPath = %q, want compressed path", tasks[0].LogPath())
+		}
+		compressedSnapshot := tasks[0].ValidatedSnapshot()
+		if compressedSnapshot == nil || len(compressedSnapshot.Messages) != len(snapshot.Messages) {
+			got := 0
+			if compressedSnapshot != nil {
+				got = len(compressedSnapshot.Messages)
+			}
+			t.Fatalf("compressed snapshot messages = %d, want %d", got, len(snapshot.Messages))
+		}
+		reloaded, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(reloaded) != 1 {
+			t.Fatalf("reloaded len = %d, want 1", len(reloaded))
+		}
+		if reloaded[0].RuntimeName != "docker" {
+			t.Fatalf("reloaded RuntimeName = %q, want docker", reloaded[0].RuntimeName)
+		}
+		if _, err := os.Stat(logSummaryPath(compressedPath)); err != nil {
+			t.Fatalf("summary cache after compressed scan: %v", err)
+		}
+		setClaudeParser(tasks)
+		if err := tasks[0].LoadMessages(); err != nil {
+			t.Fatal(err)
+		}
+		if len(tasks[0].Msgs) != 1 {
+			t.Errorf("Msgs len = %d, want 1", len(tasks[0].Msgs))
+		}
+	})
+
+	t.Run("RejectsStaleSnapshot", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "task", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Claude})
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		path := filepath.Join(dir, "t.jsonl")
+		writeLogFile(t, dir, filepath.Base(path), meta, trailer)
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600) //nolint:gosec // path is test-controlled.
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := file.WriteString(`{"type":"assistant"}` + "\n"); err != nil {
+			_ = file.Close()
+			t.Fatal(err)
+		}
+		if err := file.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := CompressTerminalLogs(tasks); err == nil || !strings.Contains(err.Error(), "no current validated snapshot") {
+			t.Fatalf("CompressTerminalLogs error = %v, want stale-snapshot error", err)
+		}
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("plain log stat = %v, want source preserved", err)
+		}
+		if _, err := os.Stat(compressedLogPath(path)); !os.IsNotExist(err) {
+			t.Fatalf("compressed log stat = %v, want no compressed output", err)
+		}
+	})
 }
 
 func TestTsToTime(t *testing.T) {

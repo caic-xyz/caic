@@ -369,15 +369,14 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	phase3 := trace.StartRegion(ctx, "load-live-task-logs")
 	liveLogs, err := loadRuntimeTaskLogs(ctx, logDir, runtimes, instanceRes.instances)
 	if err != nil {
-		slog.WarnContext(ctx, "load live task logs failed", "err", err)
+		slog.WarnContext(ctx, "load live task logs failed; affected instances will not be adopted", "err", err)
 	}
 	phase3.End()
 
 	phase4 := trace.StartRegion(ctx, "adopt-runtime-instances")
 	adopted, err := taskMgr.AdoptInstances(ctx, adoptionRepos(repoService.Snapshot()), instanceRes.instances, liveLogs)
 	if err != nil {
-		phase4.End()
-		return nil, fmt.Errorf("adopt runtime instances: %w", err)
+		slog.ErrorContext(ctx, "adopt runtime instances failed; affected instances will remain unmanaged", "err", err)
 	}
 	backgroundTasks := []backgroundTask{}
 	adoption := &adoptedTaskWiring{
@@ -527,7 +526,6 @@ func adoptionRepos(in []repo.Info) []taskmgr.AdoptRepo {
 }
 
 func loadRuntimeTaskLogs(ctx context.Context, logDir string, inventory *runtime.Router, instances []runtime.Instance) ([]*task.LoadedTask, error) {
-	seen := make(map[string]struct{}, len(instances))
 	ids := make([]string, 0, len(instances))
 	var errs []error
 	for i := range instances {
@@ -539,10 +537,6 @@ func loadRuntimeTaskLogs(ctx context.Context, logDir string, inventory *runtime.
 		if id == "" {
 			continue
 		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
 		ids = append(ids, id)
 	}
 	logs, err := task.LoadLogsForTaskIDs(logDir, ids)

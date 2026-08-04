@@ -11,12 +11,14 @@ import (
 	"io"
 	"iter"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
@@ -48,10 +50,107 @@ type logAuthority struct {
 	Harness harness.Name
 }
 
+// ValidatedLogSnapshot proves the physical file and authority observed by a
+// completed task-log scan. Its fields, including Messages, are immutable by
+// convention after publication. It is in-memory only and is never persisted
+// as an authority source.
+type ValidatedLogSnapshot struct {
+	Path         string
+	Device       uint64
+	Inode        uint64
+	Size         int64
+	ModTimeNs    int64
+	Authority    logAuthority
+	EOFValidated bool
+	// RawHeader is an immutable string containing the exact first header bytes.
+	RawHeader string
+	// Messages contains the semantic records parsed during this scan. The slice
+	// is immutable by convention and is populated only by a semantic scan.
+	Messages []agent.ParsedMessage
+}
+
 type physicalLogReader struct {
 	file   *os.File
 	reader io.ReadCloser
 	info   os.FileInfo
+}
+
+type physicalFileIdentity struct {
+	Device uint64
+	Inode  uint64
+	Valid  bool
+}
+
+func newValidatedLogSnapshot(path string, file *os.File, info os.FileInfo, authority logAuthority, rawHeader []byte, eofValidated bool) (*ValidatedLogSnapshot, error) {
+	if !eofValidated {
+		return nil, fmt.Errorf("task log has not been validated through EOF: %s", path)
+	}
+	identity := physicalFileIdentityFromFile(file, info)
+	if !identity.Valid {
+		return nil, fmt.Errorf("task log has no stable physical identity: %s", path)
+	}
+	return &ValidatedLogSnapshot{
+		Path:         filepath.Clean(path),
+		Device:       identity.Device,
+		Inode:        identity.Inode,
+		Size:         info.Size(),
+		ModTimeNs:    info.ModTime().UnixNano(),
+		Authority:    authority,
+		EOFValidated: true,
+		RawHeader:    string(rawHeader),
+	}, nil
+}
+
+func validatedSnapshotMatchesFile(snapshot *ValidatedLogSnapshot, path string) bool {
+	if snapshot == nil || !snapshot.EOFValidated || snapshot.Path != filepath.Clean(path) {
+		return false
+	}
+	file, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return false
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil {
+		return false
+	}
+	identity := physicalFileIdentityFromFile(file, info)
+	if !identity.Valid || snapshot.Device != identity.Device || snapshot.Inode != identity.Inode ||
+		snapshot.Size != info.Size() || snapshot.ModTimeNs != info.ModTime().UnixNano() {
+		return false
+	}
+	_, err = verifyPhysicalLog(path, file, info)
+	return err == nil
+}
+
+func rebindSnapshotToFile(path string, source *ValidatedLogSnapshot) (_ *ValidatedLogSnapshot, retErr error) {
+	file, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if closeErr := file.Close(); retErr == nil {
+			retErr = closeErr
+		}
+	}()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	identity := physicalFileIdentityFromFile(file, info)
+	if !identity.Valid {
+		return nil, fmt.Errorf("task log has no stable physical identity: %s", path)
+	}
+	return &ValidatedLogSnapshot{
+		Path:      filepath.Clean(path),
+		Device:    identity.Device,
+		Inode:     identity.Inode,
+		Size:      info.Size(),
+		ModTimeNs: info.ModTime().UnixNano(),
+		Authority: source.Authority,
+		RawHeader: source.RawHeader,
+		Messages:  source.Messages,
+	}, nil
 }
 
 func openPhysicalLogReader(path string) (*physicalLogReader, error) {
@@ -84,14 +183,14 @@ func verifyPhysicalLog(path string, f *os.File, expected os.FileInfo) (os.FileIn
 	if err != nil {
 		return nil, err
 	}
-	if !os.SameFile(expected, current) || current.Size() != expected.Size() || !current.ModTime().Equal(expected.ModTime()) {
+	if !os.SameFile(expected, current) || current.Size() != expected.Size() || current.ModTime().UnixNano() != expected.ModTime().UnixNano() {
 		return nil, fmt.Errorf("task log changed while reading: %s", path)
 	}
 	pathInfo, err := os.Stat(filepath.Clean(path))
 	if err != nil {
 		return nil, err
 	}
-	if !os.SameFile(current, pathInfo) || pathInfo.Size() != current.Size() || !pathInfo.ModTime().Equal(current.ModTime()) {
+	if !os.SameFile(current, pathInfo) || pathInfo.Size() != current.Size() || pathInfo.ModTime().UnixNano() != current.ModTime().UnixNano() {
 		return nil, fmt.Errorf("task log replaced while reading: %s", path)
 	}
 	return current, nil
@@ -105,6 +204,8 @@ type physicalLogScanner struct {
 	typ       string
 	err       error
 	headerSet bool
+	headerRaw []byte
+	eof       bool
 }
 
 func newPhysicalLogScanner(r io.Reader, src string) *physicalLogScanner {
@@ -122,14 +223,12 @@ func (s *physicalLogScanner) ReadHeader(fw *jsonutil.FieldWarner) (agent.MetaMes
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
-		var meta agent.MetaMessage
-		if err := unmarshalMeta(line, &meta, fw); err != nil {
+		meta, authority, err := decodeAuthorityMeta(line, fw)
+		if err != nil {
 			return agent.MetaMessage{}, fmt.Errorf("%s: invalid first log header: %w", s.src, err)
 		}
-		if err := meta.Validate(); err != nil {
-			return agent.MetaMessage{}, fmt.Errorf("%s: invalid first log header: %w", s.src, err)
-		}
-		s.authority = logAuthority{Version: agent.LogVersion(meta.Version), Harness: meta.Harness}
+		s.authority = authority
+		s.headerRaw = bytes.Clone(line)
 		s.headerSet = true
 		return meta, nil
 	}
@@ -144,23 +243,36 @@ func (s *physicalLogScanner) Scan() bool {
 		s.err = errors.New("task log header not read")
 		return false
 	}
+	if s.err != nil {
+		return false
+	}
 	for s.scanner.Scan() {
 		line := s.scanner.Bytes()
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
-		env, ok := decodeTypeEnvelope(line)
-		if !ok || env.Type != "caic_meta" {
+		if s.authority.Version == agent.LogVersionV2 && bytes.HasPrefix(line, []byte(`{"t":"agent","ts":`)) {
 			s.line = line
-			s.typ = env.Type
+			s.typ = "agent"
 			return true
 		}
-		var meta agent.MetaMessage
-		if err := json.Unmarshal(line, &meta); err != nil {
-			s.err = fmt.Errorf("%s: invalid log segment header: %w", s.src, err)
+		typ, candidate, probeErr := decodeDiscriminatorProbe(line, s.authority.Version)
+		if probeErr != nil {
+			s.err = fmt.Errorf("%s: invalid log record: %w", s.src, probeErr)
 			return false
 		}
-		if err := meta.Validate(); err != nil {
+		if !candidate {
+			s.line = line
+			s.typ = typ
+			return true
+		}
+		typ, meta, err := decodeSegmentMeta(line, s.authority.Version)
+		if errors.Is(err, errNotMetaRecord) {
+			s.line = line
+			s.typ = typ
+			return true
+		}
+		if err != nil {
 			s.err = fmt.Errorf("%s: invalid log segment header: %w", s.src, err)
 			return false
 		}
@@ -170,6 +282,12 @@ func (s *physicalLogScanner) Scan() bool {
 				s.src, s.authority.Version, s.authority.Harness, meta.Version, meta.Harness)
 			return false
 		}
+		s.line = line
+		s.typ = typ
+		return true
+	}
+	if s.scanner.Err() == nil {
+		s.eof = true
 	}
 	return false
 }
@@ -184,6 +302,562 @@ func (s *physicalLogScanner) Type() string {
 
 func (s *physicalLogScanner) Err() error {
 	return errors.Join(s.err, s.scanner.Err())
+}
+
+// EOFValidated reports whether Scan reached the physical reader's end without
+// a scanner or decompressor error.
+func (s *physicalLogScanner) EOFValidated() bool {
+	return s.eof && s.Err() == nil
+}
+
+var errNotMetaRecord = errors.New("not a caic_meta record")
+var errDuplicateRawKey = errors.New("duplicate raw key")
+
+// decodeDiscriminatorProbe cheaply identifies caic_meta candidates before the
+// allocation-heavy raw-object decoder validates their authority fields.
+func decodeDiscriminatorProbe(line []byte, version agent.LogVersion) (typ string, candidate bool, err error) {
+	i := skipJSONWhitespace(line, 0)
+	if i >= len(line) || line[i] != '{' {
+		return "", false, nil
+	}
+	i++
+	var typeValue, tValue string
+	var typeMeta, tMeta bool
+	for {
+		i = skipJSONWhitespace(line, i)
+		if i >= len(line) {
+			return "", false, nil
+		}
+		if line[i] == '}' {
+			break
+		}
+		keyStart := i
+		var ok bool
+		i, ok = skipJSONString(line, i)
+		if !ok {
+			return "", false, nil
+		}
+		key := discriminatorKey(line[keyStart:i])
+		i = skipJSONWhitespace(line, i)
+		if i >= len(line) || line[i] != ':' {
+			return "", false, nil
+		}
+		i = skipJSONWhitespace(line, i+1)
+		valueStart := i
+		valueEnd, ok, err := skipJSONValue(line, i)
+		if err != nil {
+			return "", false, err
+		}
+		if !ok {
+			return "", false, nil
+		}
+		if key == "type" || key == "t" {
+			var value string
+			if err := json.Unmarshal(line[valueStart:valueEnd], &value); err == nil {
+				if key == "type" {
+					typeValue = value
+					typeMeta = typeMeta || value == "caic_meta"
+				} else {
+					tValue = value
+					tMeta = tMeta || value == "caic_meta"
+				}
+			}
+		}
+		i = skipJSONWhitespace(line, valueEnd)
+		if i >= len(line) {
+			return "", false, nil
+		}
+		switch line[i] {
+		case ',':
+			i++
+		case '}':
+			i++
+			i = skipJSONWhitespace(line, i)
+			if i != len(line) {
+				return "", false, nil
+			}
+			goto done
+		default:
+			return "", false, nil
+		}
+	}
+
+done:
+	typ = typeValue
+	if version == agent.LogVersionV2 {
+		typ = tValue
+	}
+	return typ, typeMeta || tMeta, nil
+}
+
+func discriminatorKey(raw []byte) string {
+	if bytes.Equal(raw, []byte(`"type"`)) {
+		return "type"
+	}
+	if bytes.Equal(raw, []byte(`"t"`)) {
+		return "t"
+	}
+	var key string
+	if json.Unmarshal(raw, &key) == nil {
+		return key
+	}
+	return ""
+}
+
+func skipJSONWhitespace(line []byte, i int) int {
+	for i < len(line) {
+		switch line[i] {
+		case ' ', '\t', '\n', '\r':
+			i++
+		default:
+			return i
+		}
+	}
+	return i
+}
+
+func skipJSONString(line []byte, i int) (int, bool) {
+	if i >= len(line) || line[i] != '"' {
+		return i, false
+	}
+	for i++; i < len(line); i++ {
+		switch line[i] {
+		case '"':
+			return i + 1, true
+		case '\\':
+			i++
+			if i >= len(line) {
+				return i, false
+			}
+			if line[i] == 'u' {
+				if i+4 >= len(line) || !isJSONHex(line[i+1]) || !isJSONHex(line[i+2]) || !isJSONHex(line[i+3]) || !isJSONHex(line[i+4]) {
+					return i, false
+				}
+				i += 4
+			}
+		case '\x00', '\x01', '\x02', '\x03', '\x04', '\x05', '\x06', '\x07', '\x08', '\x09', '\x0a', '\x0b', '\x0c', '\x0d', '\x0e', '\x0f', '\x10', '\x11', '\x12', '\x13', '\x14', '\x15', '\x16', '\x17', '\x18', '\x19', '\x1a', '\x1b', '\x1c', '\x1d', '\x1e', '\x1f':
+			return i, false
+		}
+	}
+	return i, false
+}
+
+func isJSONHex(b byte) bool {
+	return b >= '0' && b <= '9' || b >= 'a' && b <= 'f' || b >= 'A' && b <= 'F'
+}
+
+// Keep nesting bounded without imposing a practical limit on valid 32 MiB
+// task-log records. The scanner is iterative, so this bounds heap growth rather
+// than relying on the goroutine stack.
+const maxJSONNesting = 1 << 20
+
+type jsonContainer struct {
+	kind  byte
+	state uint8
+}
+
+const (
+	jsonObjectKey uint8 = iota
+	jsonObjectAfterComma
+	jsonObjectValue
+	jsonObjectComma
+	jsonArrayValue
+	jsonArrayAfterComma
+	jsonArrayComma
+)
+
+var errJSONNesting = errors.New("JSON nesting exceeds limit")
+
+func skipJSONValue(line []byte, i int) (end int, valid bool, err error) {
+	i = skipJSONWhitespace(line, i)
+	if i >= len(line) {
+		return i, false, nil
+	}
+
+	var inlineStack [64]jsonContainer
+	stack := inlineStack[:0]
+	needValue := true
+	for {
+		if needValue {
+			if len(stack) > 0 {
+				frame := &stack[len(stack)-1]
+				switch frame.state {
+				case jsonObjectValue:
+					frame.state = jsonObjectComma
+				case jsonArrayValue:
+					frame.state = jsonArrayComma
+				}
+			}
+			i = skipJSONWhitespace(line, i)
+			if i >= len(line) {
+				return i, false, nil
+			}
+			switch line[i] {
+			case '"':
+				var ok bool
+				i, ok = skipJSONString(line, i)
+				if !ok {
+					return i, false, nil
+				}
+			case '{', '[':
+				if len(stack) >= maxJSONNesting {
+					return i, false, errJSONNesting
+				}
+				frame := jsonContainer{kind: line[i]}
+				if line[i] == '{' {
+					frame.state = jsonObjectKey
+				} else {
+					frame.state = jsonArrayValue
+				}
+				stack = append(stack, frame)
+				i++
+				needValue = false
+				continue
+			case 't':
+				var ok bool
+				i, ok = skipJSONLiteral(line, i, "true")
+				if !ok {
+					return i, false, nil
+				}
+			case 'f':
+				var ok bool
+				i, ok = skipJSONLiteral(line, i, "false")
+				if !ok {
+					return i, false, nil
+				}
+			case 'n':
+				var ok bool
+				i, ok = skipJSONLiteral(line, i, "null")
+				if !ok {
+					return i, false, nil
+				}
+			default:
+				if line[i] != '-' && (line[i] < '0' || line[i] > '9') {
+					return i, false, nil
+				}
+				var ok bool
+				i, ok = skipJSONNumber(line, i)
+				if !ok {
+					return i, false, nil
+				}
+			}
+			needValue = false
+		}
+
+		if len(stack) == 0 {
+			return i, true, nil
+		}
+		frame := &stack[len(stack)-1]
+		i = skipJSONWhitespace(line, i)
+		switch frame.state {
+		case jsonObjectKey, jsonObjectAfterComma:
+			if i >= len(line) || frame.kind != '{' {
+				return i, false, nil
+			}
+			if line[i] == '}' {
+				if frame.state == jsonObjectAfterComma {
+					return i, false, nil
+				}
+				i++
+				stack = stack[:len(stack)-1]
+				continue
+			}
+			var ok bool
+			if i, ok = skipJSONString(line, i); !ok {
+				return i, false, nil
+			}
+			i = skipJSONWhitespace(line, i)
+			if i >= len(line) || line[i] != ':' {
+				return i, false, nil
+			}
+			frame.state = jsonObjectValue
+			i++
+			needValue = true
+		case jsonObjectComma:
+			if i >= len(line) || frame.kind != '{' {
+				return i, false, nil
+			}
+			switch line[i] {
+			case ',':
+				frame.state = jsonObjectAfterComma
+				i++
+			case '}':
+				i++
+				stack = stack[:len(stack)-1]
+			default:
+				return i, false, nil
+			}
+		case jsonArrayValue, jsonArrayAfterComma:
+			if i >= len(line) || frame.kind != '[' {
+				return i, false, nil
+			}
+			if line[i] == ']' {
+				if frame.state == jsonArrayAfterComma {
+					return i, false, nil
+				}
+				i++
+				stack = stack[:len(stack)-1]
+				continue
+			}
+			frame.state = jsonArrayComma
+			needValue = true
+		case jsonArrayComma:
+			if i >= len(line) || frame.kind != '[' {
+				return i, false, nil
+			}
+			switch line[i] {
+			case ',':
+				frame.state = jsonArrayAfterComma
+				i++
+			case ']':
+				i++
+				stack = stack[:len(stack)-1]
+			default:
+				return i, false, nil
+			}
+		}
+	}
+}
+
+func skipJSONLiteral(line []byte, i int, literal string) (int, bool) {
+	if len(line)-i < len(literal) {
+		return i, false
+	}
+	for j := range literal {
+		if line[i+j] != literal[j] {
+			return i, false
+		}
+	}
+	return i + len(literal), true
+}
+
+func skipJSONNumber(line []byte, i int) (int, bool) {
+	if line[i] == '-' {
+		i++
+		if i >= len(line) {
+			return i, false
+		}
+	}
+	switch {
+	case line[i] == '0':
+		i++
+	case line[i] >= '1' && line[i] <= '9':
+		for i < len(line) && line[i] >= '0' && line[i] <= '9' {
+			i++
+		}
+	default:
+		return i, false
+	}
+	if i < len(line) && line[i] == '.' {
+		i++
+		start := i
+		for i < len(line) && line[i] >= '0' && line[i] <= '9' {
+			i++
+		}
+		if i == start {
+			return i, false
+		}
+	}
+	if i < len(line) && (line[i] == 'e' || line[i] == 'E') {
+		i++
+		if i < len(line) && (line[i] == '+' || line[i] == '-') {
+			i++
+		}
+		start := i
+		for i < len(line) && line[i] >= '0' && line[i] <= '9' {
+			i++
+		}
+		if i == start {
+			return i, false
+		}
+	}
+	return i, true
+}
+
+type rawJSONObject struct {
+	fields map[string]json.RawMessage
+}
+
+func decodeJSONObject(line []byte) (rawJSONObject, bool, error) {
+	decoder := json.NewDecoder(bytes.NewReader(line))
+	opening, err := decoder.Token()
+	if err != nil {
+		return rawJSONObject{}, false, err
+	}
+	if opening != json.Delim('{') {
+		return rawJSONObject{}, false, nil
+	}
+	obj := rawJSONObject{fields: make(map[string]json.RawMessage)}
+	for decoder.More() {
+		keyToken, err := decoder.Token()
+		if err != nil {
+			return rawJSONObject{}, true, err
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			return rawJSONObject{}, true, errors.New("object field name is not a string")
+		}
+		if _, exists := obj.fields[key]; exists && isAuthorityField(key) {
+			return rawJSONObject{}, true, fmt.Errorf("%w %q", errDuplicateRawKey, key)
+		}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return rawJSONObject{}, true, err
+		}
+		obj.fields[key] = value
+	}
+	closing, err := decoder.Token()
+	if err != nil {
+		return rawJSONObject{}, true, err
+	}
+	if closing != json.Delim('}') {
+		return rawJSONObject{}, true, errors.New("object has an invalid closing delimiter")
+	}
+	if trailing, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		if err != nil {
+			return rawJSONObject{}, true, fmt.Errorf("invalid trailing data: %w", err)
+		}
+		return rawJSONObject{}, true, fmt.Errorf("unexpected trailing token %v", trailing)
+	}
+	return obj, true, nil
+}
+
+func isAuthorityField(key string) bool {
+	switch key {
+	case "type", "t", "version", "harness":
+		return true
+	default:
+		return false
+	}
+}
+
+func stringField(obj rawJSONObject, key string) (string, error) {
+	raw, ok := obj.fields[key]
+	if !ok {
+		return "", errors.New("missing " + key)
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", fmt.Errorf("%s must be a string: %w", key, err)
+	}
+	return value, nil
+}
+
+func decodeAuthorityMeta(line []byte, fw *jsonutil.FieldWarner) (agent.MetaMessage, logAuthority, error) {
+	if !utf8.Valid(line) {
+		return agent.MetaMessage{}, logAuthority{}, errors.New("invalid UTF-8")
+	}
+	obj, isObject, err := decodeJSONObject(line)
+	if err != nil {
+		return agent.MetaMessage{}, logAuthority{}, err
+	}
+	if !isObject {
+		return agent.MetaMessage{}, logAuthority{}, errors.New("header must be a JSON object")
+	}
+	rawVersion, ok := obj.fields["version"]
+	if !ok {
+		return agent.MetaMessage{}, logAuthority{}, errors.New("missing version")
+	}
+	var version int
+	if err := json.Unmarshal(rawVersion, &version); err != nil {
+		return agent.MetaMessage{}, logAuthority{}, fmt.Errorf("version must be an integer: %w", err)
+	}
+	authority := logAuthority{Version: agent.LogVersion(version)}
+	if err := authority.Version.Validate(); err != nil {
+		return agent.MetaMessage{}, logAuthority{}, err
+	}
+	key := "type"
+	if authority.Version == agent.LogVersionV2 {
+		key = "t"
+	}
+	otherKey := "t"
+	if key == "t" {
+		otherKey = "type"
+	}
+	if _, exists := obj.fields[otherKey]; exists {
+		return agent.MetaMessage{}, logAuthority{}, fmt.Errorf("both %q and %q discriminators are present", key, otherKey)
+	}
+	discriminator, err := stringField(obj, key)
+	if err != nil {
+		return agent.MetaMessage{}, logAuthority{}, err
+	}
+	if discriminator != "caic_meta" {
+		return agent.MetaMessage{}, logAuthority{}, fmt.Errorf("wrong %s discriminator %q", key, discriminator)
+	}
+	h, err := stringField(obj, "harness")
+	if err != nil || h == "" {
+		if err == nil {
+			err = errors.New("harness is empty")
+		}
+		return agent.MetaMessage{}, logAuthority{}, err
+	}
+	authority.Harness = harness.Name(h)
+	var meta agent.MetaMessage
+	if err := json.Unmarshal(line, &meta); err != nil {
+		return agent.MetaMessage{}, logAuthority{}, err
+	}
+	meta.MessageType = "caic_meta"
+	if err := meta.Validate(); err != nil {
+		return agent.MetaMessage{}, logAuthority{}, err
+	}
+	if authority.Version == agent.LogVersionV2 {
+		delete(obj.fields, "t")
+	}
+	unknown := jsonutil.CollectUnknown(obj.fields, metaKnown)
+	if authority.Version == agent.LogVersionV2 && len(unknown) > 0 {
+		return agent.MetaMessage{}, logAuthority{}, fmt.Errorf("unknown v2 caic_meta fields: %v", slices.Sorted(maps.Keys(unknown)))
+	}
+	if fw != nil {
+		fw.Warn("caic_meta", unknown)
+	}
+	return meta, authority, nil
+}
+
+func decodeSegmentMeta(line []byte, version agent.LogVersion) (string, agent.MetaMessage, error) {
+	typ, candidate, probeErr := decodeDiscriminatorProbe(line, version)
+	if probeErr != nil {
+		return typ, agent.MetaMessage{}, probeErr
+	}
+	if !candidate {
+		return typ, agent.MetaMessage{}, errNotMetaRecord
+	}
+	obj, isObject, err := decodeJSONObject(line)
+	if err != nil {
+		return typ, agent.MetaMessage{}, err
+	}
+	if !isObject {
+		return typ, agent.MetaMessage{}, errNotMetaRecord
+	}
+	key := "type"
+	if version == agent.LogVersionV2 {
+		key = "t"
+	}
+	otherKey := "t"
+	if key == "t" {
+		otherKey = "type"
+	}
+	value, hasKey := obj.fields[key]
+	otherValue, hasOther := obj.fields[otherKey]
+	if hasKey {
+		var discriminator string
+		if err := json.Unmarshal(value, &discriminator); err == nil && discriminator == "caic_meta" {
+			meta, authority, err := decodeAuthorityMeta(line, nil)
+			if err != nil {
+				return typ, agent.MetaMessage{}, err
+			}
+			if authority.Version != version {
+				return typ, agent.MetaMessage{}, fmt.Errorf("authority version %d does not match log version %d", authority.Version, version)
+			}
+			return typ, meta, nil
+		}
+	}
+	if hasOther {
+		var discriminator string
+		if err := json.Unmarshal(otherValue, &discriminator); err == nil && discriminator == "caic_meta" {
+			return typ, agent.MetaMessage{}, fmt.Errorf("wrong %s discriminator for log version %d", otherKey, version)
+		}
+	}
+	return typ, agent.MetaMessage{}, errNotMetaRecord
 }
 
 func readLogAuthority(path string) (_ logAuthority, retErr error) {
@@ -325,6 +999,9 @@ type LoadedTask struct {
 
 	path    string                                // Absolute path for lazy message loading via LoadMessages.
 	parseFn func([]byte) ([]agent.Message, error) // Parser for this harness; set by LoadLogs.
+
+	snapshotMu sync.Mutex
+	snapshot   *ValidatedLogSnapshot // Last completed physical validation.
 }
 
 // Primary returns a pointer to the primary RepoMount (Repos[0]), or nil for no-repo tasks.
@@ -338,6 +1015,70 @@ func (lt *LoadedTask) Primary() *RepoMount {
 // LogPath returns the absolute task log path used to load the task.
 func (lt *LoadedTask) LogPath() string {
 	return lt.path
+}
+
+// ValidatedSnapshot returns the last completed physical validation proof.
+// Callers must treat the proof and its Messages slice as immutable by
+// convention.
+func (lt *LoadedTask) ValidatedSnapshot() *ValidatedLogSnapshot {
+	lt.snapshotMu.Lock()
+	defer lt.snapshotMu.Unlock()
+	return lt.snapshot
+}
+
+func loadSemanticLogSnapshot(path string, factory func(harness.Name) (func([]byte) ([]agent.Message, error), error)) (_ *ValidatedLogSnapshot, retErr error) {
+	r, err := openPhysicalLogReader(path)
+	if err != nil {
+		return nil, err
+	}
+	return loadSemanticLogSnapshotFromReader(path, r, factory)
+}
+
+func loadSemanticLogSnapshotFromReader(path string, r *physicalLogReader, factory func(harness.Name) (func([]byte) ([]agent.Message, error), error)) (_ *ValidatedLogSnapshot, retErr error) {
+	defer func() {
+		if closeErr := r.Close(); retErr == nil {
+			retErr = closeErr
+		}
+	}()
+
+	scanner := newPhysicalLogScanner(r.reader, path)
+	if _, err := scanner.ReadHeader(&jsonutil.FieldWarner{}); err != nil {
+		return nil, err
+	}
+	nativeParser, err := factory(scanner.authority.Harness)
+	if err != nil {
+		return nil, fmt.Errorf("resolve native parser for harness %q: %w", scanner.authority.Harness, err)
+	}
+	parser, err := agent.NewLogRecordParser(scanner.authority.Version, nativeParser)
+	if err != nil {
+		return nil, fmt.Errorf("construct log parser: %w", err)
+	}
+	messages := make([]agent.ParsedMessage, 0)
+	bootstrap, err := parser.ParseRecord(scanner.headerRaw)
+	if err != nil {
+		return nil, fmt.Errorf("parse task log bootstrap %s: %w", path, err)
+	}
+	messages = append(messages, bootstrap...)
+	for scanner.Scan() {
+		parsed, err := parser.ParseRecord(scanner.Bytes())
+		if err != nil {
+			return nil, fmt.Errorf("parse task log %s: %w", path, err)
+		}
+		messages = append(messages, parsed...)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	stableInfo, err := verifyPhysicalLog(path, r.file, r.info)
+	if err != nil {
+		return nil, err
+	}
+	snapshot, err := newValidatedLogSnapshot(path, r.file, stableInfo, scanner.authority, scanner.headerRaw, scanner.EOFValidated())
+	if err != nil {
+		return nil, err
+	}
+	snapshot.Messages = messages
+	return snapshot, nil
 }
 
 func loadedTaskFromMeta(path, taskID string, meta *agent.MetaMessage, modified time.Time, size int64) *LoadedTask {
@@ -377,16 +1118,17 @@ func loadedTaskFromMeta(path, taskID string, meta *agent.MetaMessage, modified t
 
 // LoadLogs scans logDir for task log files and loads task metadata.
 // Only the header and result trailer are parsed; call LoadMessages for
-// full conversation history. Call SetParser on each task before LoadMessages.
+// full conversation history. Configure the SetParser callback before loading
+// messages.
 func LoadLogs(logDir string) ([]*LoadedTask, error) {
 	paths, err := logPaths(logDir, nil)
 	if err != nil {
 		return nil, err
 	}
-	return loadLogsFromPaths(paths), nil
+	return loadLogsFromPaths(paths, false)
 }
 
-// LoadLogsForTaskIDs loads metadata only for logs whose parsed filename task ID
+// LoadLogsForTaskIDs loads metadata for logs whose parsed filename task ID
 // matches one of taskIDs. It avoids parsing unrelated purged task logs during
 // startup adoption of live runtime instances.
 func LoadLogsForTaskIDs(logDir string, taskIDs []string) ([]*LoadedTask, error) {
@@ -403,7 +1145,23 @@ func LoadLogsForTaskIDs(logDir string, taskIDs []string) ([]*LoadedTask, error) 
 	if err != nil {
 		return nil, err
 	}
-	return loadLogsFromPaths(paths), nil
+	found := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		found[taskIDFromLogBase(trimLogExt(filepath.Base(path)))] = struct{}{}
+	}
+	missing := make([]string, 0)
+	for id := range ids {
+		if _, ok := found[id]; !ok {
+			missing = append(missing, id)
+		}
+	}
+	slices.Sort(missing)
+
+	tasks, loadErr := loadLogsFromPaths(paths, true)
+	if len(missing) > 0 {
+		loadErr = errors.Join(loadErr, fmt.Errorf("missing task logs for IDs: %s", strings.Join(missing, ", ")))
+	}
+	return tasks, loadErr
 }
 
 func logPaths(logDir string, taskIDs map[string]struct{}) ([]string, error) {
@@ -441,7 +1199,7 @@ func logPaths(logDir string, taskIDs map[string]struct{}) ([]string, error) {
 	return paths, nil
 }
 
-func loadLogsFromPaths(paths []string) []*LoadedTask {
+func loadLogsFromPaths(paths []string, strict bool) ([]*LoadedTask, error) {
 	// Parse headers in parallel — each file is independent.
 	type result struct {
 		lt  *LoadedTask
@@ -458,9 +1216,12 @@ func loadLogsFromPaths(paths []string) []*LoadedTask {
 	wg.Wait()
 
 	var tasks []*LoadedTask
+	var errs []error
 	for i, r := range results {
 		if r.err != nil {
-			if !errors.Is(r.err, errNotLogFile) {
+			if strict {
+				errs = append(errs, fmt.Errorf("load task log %s: %w", paths[i], r.err))
+			} else if !errors.Is(r.err, errNotLogFile) {
 				slog.Warn("skipping log file", "file", filepath.Base(paths[i]), "err", r.err)
 			}
 			continue
@@ -471,7 +1232,7 @@ func loadLogsFromPaths(paths []string) []*LoadedTask {
 	slices.SortFunc(tasks, func(a, b *LoadedTask) int {
 		return a.StartedAt.Compare(b.StartedAt)
 	})
-	return tasks
+	return tasks, errors.Join(errs...)
 }
 
 func taskIDFromLogBase(base string) string {
@@ -488,7 +1249,7 @@ func (lt *LoadedTask) SetParser(fn func([]byte) ([]agent.Message, error)) {
 
 // LoadMessages lazily loads the full conversation messages from the log file.
 // This is a no-op if messages are already loaded. Requires parseFn to be set
-// via LoadLogs backends or SetParser.
+// via SetParser.
 func (lt *LoadedTask) LoadMessages() error {
 	if lt.Msgs != nil || lt.path == "" {
 		return nil
@@ -586,6 +1347,36 @@ func (lt *LoadedTask) StreamMessages() iter.Seq2[agent.Message, error] {
 			}
 		}
 	}
+}
+
+func (lt *LoadedTask) headerMatches(cached *LoadedTask) bool {
+	// Title and Model are mutable projections updated by later session/result
+	// records, so they are intentionally not compared with the first header.
+	return lt.TaskID == cached.TaskID &&
+		lt.Prompt == cached.Prompt &&
+		slices.Equal(lt.Repos, cached.Repos) &&
+		lt.LogVersion == cached.LogVersion &&
+		lt.Harness == cached.Harness &&
+		lt.RuntimeName == cached.RuntimeName &&
+		lt.StartedAt.Equal(cached.StartedAt) &&
+		lt.ForgeIssue == cached.ForgeIssue &&
+		lt.Tailscale == cached.Tailscale &&
+		lt.USB == cached.USB &&
+		lt.Display == cached.Display &&
+		lt.Sudo == cached.Sudo &&
+		lt.GitHubToken == cached.GitHubToken &&
+		lt.BaseImage == cached.BaseImage &&
+		lt.ContainerPlatform == cached.ContainerPlatform &&
+		lt.MaxCPUs == cached.MaxCPUs &&
+		slices.Equal(lt.CacheMounts, cached.CacheMounts) &&
+		slices.Equal(lt.Mounts, cached.Mounts) &&
+		lt.Effort == cached.Effort
+}
+
+func (lt *LoadedTask) setValidatedSnapshot(snapshot *ValidatedLogSnapshot) {
+	lt.snapshotMu.Lock()
+	lt.snapshot = snapshot
+	lt.snapshotMu.Unlock()
 }
 
 func (lt *LoadedTask) mergeSessionMetadata(src *LoadedTask) {
@@ -733,19 +1524,6 @@ func yieldLogMessages(r io.Reader, parseFn func([]byte) ([]agent.Message, error)
 	}
 }
 
-// unmarshalMeta decodes a MetaMessage from JSON and warns about any unrecognised
-// fields (e.g. fields from an older log format that have since been removed).
-func unmarshalMeta(data []byte, m *agent.MetaMessage, fw *jsonutil.FieldWarner) error {
-	if err := json.Unmarshal(data, m); err != nil {
-		return err
-	}
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err == nil {
-		fw.Warn("caic_meta", jsonutil.CollectUnknown(raw, metaKnown))
-	}
-	return nil
-}
-
 func applySessionMetadataLine(lt *LoadedTask, typ string, line []byte) bool {
 	switch typ {
 	case "caic_session":
@@ -820,7 +1598,10 @@ func (s *logTailScan) apply(lt *LoadedTask, line []byte) {
 	}
 	switch typeEnv.Type {
 	case "caic_session", "caic_init":
-		applySessionMetadataLine(lt, typeEnv.Type, line)
+		if lt.LogVersion == agent.LogVersionV1 {
+			applySessionMetadataLine(lt, typeEnv.Type, line)
+		}
+		return
 	case "caic_pr":
 		var mp agent.MetaPRMessage
 		if json.Unmarshal(line, &mp) == nil && mp.ForgePR > 0 {
@@ -884,18 +1665,18 @@ func loadLogSessionMetadata(path string, parseFn func([]byte) ([]agent.Message, 
 	if _, err := scanner.ReadHeader(&jsonutil.FieldWarner{}); err != nil {
 		return nil, err
 	}
-	lt := &LoadedTask{}
+	lt := &LoadedTask{LogVersion: scanner.authority.Version}
 	found := false
 	for scanner.Scan() {
 		if found {
 			continue
 		}
-		line := scanner.Bytes()
-		var env typeEnvelope
-		if json.Unmarshal(line, &env) != nil {
+		if scanner.authority.Version != agent.LogVersionV1 {
 			continue
 		}
-		if applySessionMetadataLine(lt, env.Type, line) {
+		line := scanner.Bytes()
+		typ := scanner.Type()
+		if applySessionMetadataLine(lt, typ, line) {
 			found = true
 			continue
 		}
@@ -921,7 +1702,7 @@ func loadLogSessionMetadata(path string, parseFn func([]byte) ([]agent.Message, 
 // is stored for lazy loading.
 func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 	if isLogCompressed(path) {
-		return loadCompressedLogHeader(path)
+		return loadCompressedLogHeaderWithOptions(path, true, true)
 	}
 	r, err := openPhysicalLogReader(path)
 	if err != nil {
@@ -951,7 +1732,9 @@ func loadPlainLogHeader(path string, r *physicalLogReader, source io.Reader, tai
 	// session snapshots while validating segment headers so live adoption does
 	// not need a second full scan for the usual persisted metadata form.
 	for scanner.Scan() {
-		applySessionMetadataLine(lt, scanner.Type(), scanner.Bytes())
+		if scanner.authority.Version == agent.LogVersionV1 {
+			applySessionMetadataLine(lt, scanner.Type(), scanner.Bytes())
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
@@ -966,23 +1749,24 @@ func loadPlainLogHeader(path string, r *physicalLogReader, source io.Reader, tai
 	tail := logTailScan{fw: fw}
 	for line := range bytes.SplitSeq(buf[:n], []byte("\n")) {
 		line = bytes.TrimSpace(line)
-		if len(line) > 0 {
+		if len(line) > 0 && scanner.authority.Version == agent.LogVersionV1 {
 			tail.apply(lt, line)
 		}
 	}
 	tail.finish(lt)
-	if _, err := verifyPhysicalLog(path, r.file, r.info); err != nil {
+	stableInfo, err := verifyPhysicalLog(path, r.file, r.info)
+	if err != nil {
 		return nil, err
 	}
+	snapshot, err := newValidatedLogSnapshot(path, r.file, stableInfo, scanner.authority, scanner.headerRaw, scanner.EOFValidated())
+	if err != nil {
+		return nil, err
+	}
+	lt.setValidatedSnapshot(snapshot)
 	return lt, nil
 }
 
-// loadCompressedLogHeader reads compressed metadata and trailers sequentially.
-//
-// Plain logs can seek near EOF and scan only the tail for caic_result, caic_pr,
-// and caic_diff_stat records. Zstd logs do not support that random access in
-// this format, so compressed headers use one streaming pass instead.
-func loadCompressedLogHeader(path string) (_ *LoadedTask, retErr error) {
+func loadCompressedLogHeaderWithOptions(path string, useSummary, storeSummary bool) (_ *LoadedTask, retErr error) {
 	r, err := openPhysicalLogReader(path)
 	if err != nil {
 		return nil, err
@@ -992,15 +1776,16 @@ func loadCompressedLogHeader(path string) (_ *LoadedTask, retErr error) {
 			retErr = closeErr
 		}
 	}()
-	if lt, ok := loadLogSummary(path, r.file, r.info); ok {
-		return lt, nil
-	}
-
 	fw := &jsonutil.FieldWarner{}
 	scanner := newPhysicalLogScanner(r.reader, path)
 	meta, err := scanner.ReadHeader(fw)
 	if err != nil {
 		return nil, err
+	}
+	if useSummary {
+		if lt, ok := loadLogSummary(path, r.file, r.info, scanner.authority, &meta); ok {
+			return lt, nil
+		}
 	}
 	base := trimLogExt(filepath.Base(path))
 	taskIDStr := taskIDFromLogBase(base)
@@ -1008,7 +1793,9 @@ func loadCompressedLogHeader(path string) (_ *LoadedTask, retErr error) {
 
 	tail := logTailScan{fw: fw}
 	for scanner.Scan() {
-		tail.apply(lt, scanner.Bytes())
+		if scanner.authority.Version == agent.LogVersionV1 {
+			tail.apply(lt, scanner.Bytes())
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
@@ -1018,11 +1805,18 @@ func loadCompressedLogHeader(path string) (_ *LoadedTask, retErr error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := storeLogSummaryForFile(lt, r.file, stableInfo); err != nil {
-		if _, verifyErr := verifyPhysicalLog(path, r.file, stableInfo); verifyErr != nil {
-			return nil, errors.Join(err, verifyErr)
+	snapshot, err := newValidatedLogSnapshot(path, r.file, stableInfo, scanner.authority, scanner.headerRaw, scanner.EOFValidated())
+	if err != nil {
+		return nil, err
+	}
+	lt.setValidatedSnapshot(snapshot)
+	if storeSummary {
+		if err := storeLogSummaryForFile(lt, r.file, stableInfo); err != nil {
+			if _, verifyErr := verifyPhysicalLog(path, r.file, stableInfo); verifyErr != nil {
+				return nil, errors.Join(err, verifyErr)
+			}
+			slog.Warn("task log summary: write failed", "path", path, "err", err)
 		}
-		slog.Warn("task log summary: write failed", "path", path, "err", err)
 	}
 	return lt, nil
 }
@@ -1174,7 +1968,10 @@ func applyLoadedLogLine(lt *LoadedTask, line []byte, parseFn func([]byte) ([]age
 	case "caic_meta":
 		return nil
 	case "caic_session", "caic_init":
-		applySessionMetadataLine(lt, envelope.Type, line)
+		if lt.LogVersion == agent.LogVersionV1 {
+			applySessionMetadataLine(lt, envelope.Type, line)
+		}
+		return nil
 
 	case "caic_pr":
 		var mp agent.MetaPRMessage

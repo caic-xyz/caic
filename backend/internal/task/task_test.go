@@ -2484,12 +2484,22 @@ func TestTask(t *testing.T) {
 		t.Run("RejectsInvalidPersistedAuthorityWithoutMutation", func(t *testing.T) {
 			t.Parallel()
 			validHeader := func(version agent.LogVersion, h harness.Name) []byte {
-				data, err := json.Marshal(agent.MetaMessage{
+				meta := agent.MetaMessage{
 					MessageType: "caic_meta",
 					Version:     int(version),
 					Prompt:      "test",
 					Harness:     h,
-				})
+				}
+				value := any(meta)
+				if version == agent.LogVersionV2 {
+					value = map[string]any{
+						"t":       "caic_meta",
+						"version": meta.Version,
+						"prompt":  meta.Prompt,
+						"harness": meta.Harness,
+					}
+				}
+				data, err := json.Marshal(value)
 				if err != nil {
 					t.Fatal(err)
 				}
