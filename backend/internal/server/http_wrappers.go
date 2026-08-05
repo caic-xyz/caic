@@ -256,6 +256,10 @@ func computeTaskPatch(oldJSON, newJSON []byte) (map[string]json.RawMessage, erro
 }
 
 // emitTaskListEvent marshals ev and writes it as an SSE message event.
+//
+// A task-list connection owns its change catch-up loop, so each delivery is
+// bounded and failures end the stream. EventSource then reconnects for a new
+// authoritative snapshot rather than leaving that loop blocked indefinitely.
 func emitTaskListEvent(ctx context.Context, w http.ResponseWriter, controller *http.ResponseController, ev *v1.TaskListEvent) (err error) {
 	data, err := json.Marshal(ev)
 	if err != nil {

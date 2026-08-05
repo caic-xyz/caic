@@ -1,5 +1,12 @@
 // E2E tests for image attachment: API image support and screenshot capture UI flow.
-import { test, expect, createTaskAPI, waitForTaskState, fillContentEditable } from "../helpers";
+import {
+  test,
+  expect,
+  createTaskAPI,
+  waitForTaskState,
+  fillContentEditable,
+  createUniquePrompt,
+} from "../helpers";
 
 // Minimal 1×1 transparent PNG encoded as base64, used as a lightweight test fixture
 // when we need valid image bytes to send via the API.
@@ -7,7 +14,7 @@ const TINY_PNG_B64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQAABjE+ibYAAAAASUVORK5CYII=";
 
 test("API: images are accepted in task inputs when harness supports them", async ({ api }) => {
-  const id = await createTaskAPI(api, `image-api ${Date.now()}`);
+  const id = await createTaskAPI(api, createUniquePrompt("image-api"));
   await waitForTaskState(api, id, "waiting");
 
   // Send a follow-up input that includes an attached image; the fake backend's
@@ -72,7 +79,7 @@ test("UI: screenshot capture attaches a thumbnail which is sent and cleared on s
     };
   });
 
-  const prompt = `screenshot-ui ${Date.now()}`;
+  const prompt = createUniquePrompt("screenshot-ui");
   const id = await createTaskAPI(api, prompt);
   await waitForTaskState(api, id, "waiting");
 

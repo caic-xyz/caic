@@ -1,5 +1,6 @@
 // Shared e2e test helpers: typed API client and utilities.
 import { test as base, expect, type APIRequestContext } from "@playwright/test";
+import { randomUUID } from "node:crypto";
 import { createApiClient, APIError, type FetchFn } from "../sdk/caic/ts/v1/api.gen";
 import type { Harness, Task } from "../sdk/caic/ts/v1/types.gen";
 
@@ -43,6 +44,14 @@ export const test = base.extend<{ api: APIClient }>({
 
 export { expect, APIError };
 export type { Page } from "@playwright/test";
+
+// ---------------------------------------------------------------------------
+// Utility: create a collision-resistant prompt while preserving its test prefix.
+// ---------------------------------------------------------------------------
+
+export function createUniquePrompt(prefix: string): string {
+  return `${prefix} ${randomUUID()}`;
+}
 
 // ---------------------------------------------------------------------------
 // Utility: fill a contenteditable element (Playwright's fill() doesn't

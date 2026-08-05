@@ -35,6 +35,15 @@ type PurgeFocusTarget =
   | { kind: "task"; task: Task }
   | { kind: "prompt" };
 
+type PendingTaskUpdate =
+  | { kind: "patch"; patch: Record<string, unknown> }
+  | { kind: "replace" }
+  | { kind: "delete" };
+
+type TaskRecovery = {
+  updates: PendingTaskUpdate[];
+};
+
 function createAppStore() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -372,6 +381,38 @@ function createAppStore() {
       notifyServiceEvent(task.id, `${task.title} quota is available`, { enabled: hostMode.browserNotificationsEnabled() });
     }
   };
+  const checkAndNotify = (task: Task) => {
+    const needsInput = task.state === "waiting" || task.state === "asking" || task.state === "has_plan";
+    const prevState = prevStates.get(task.id);
+    const prevNeedsInput = prevState === "waiting" || prevState === "asking" || prevState === "has_plan";
+    if (needsInput && prevState === "running") {
+      notifyWaiting(task.id, task.title, { enabled: hostMode.browserNotificationsEnabled() });
+    } else if (!needsInput && prevNeedsInput) {
+      dismissNotification(task.id);
+    }
+  };
+  const applyAuthoritativeTask = (task: Task) => {
+    checkAndNotify(task);
+    prevStates.set(task.id, task.state);
+    upsertTask(task);
+    notifyQuotaRecoveries(tasks());
+  };
+  const applyTaskPatch = (id: string, patch: Record<string, unknown>) => {
+    if (typeof patch["state"] === "string") {
+      const newState = patch["state"] as string;
+      const existing = tasks().find((task) => task.id === id);
+      if (existing) checkAndNotify({ ...existing, state: newState } as Task);
+      prevStates.set(id, newState);
+    }
+    setTasks((prev) => {
+      const idx = prev.findIndex((task) => task.id === id);
+      if (idx < 0) return prev;
+      const next = [...prev];
+      next[idx] = { ...next[idx], ...patch } as Task;
+      return next;
+    });
+    notifyQuotaRecoveries(tasks());
+  };
 
   const updateWellKnownCacheSizes = (sizes: CacheSize[]) => {
     setWellKnownCacheSizes(Object.fromEntries(sizes.map((size) => [size.name, size])));
@@ -429,18 +470,50 @@ function createAppStore() {
   // upsertTask before navigation, so this is a no-op for fresh create/fork.
   // Deletion of the viewed task is handled authoritatively by the SSE "delete"
   // event above.
-  let ensuringTaskID: string | null = null;
+  // Task-list events received after a recovery GET begins are newer than its
+  // response. Queue patches to replay their transitions in order; a snapshot
+  // that includes the task or a complete upsert supersedes the GET and updates
+  // the task directly.
+  const taskRecoveries = new Map<string, TaskRecovery>();
+  const queueTaskUpdate = (id: string, update: PendingTaskUpdate) => {
+    taskRecoveries.get(id)?.updates.push(update);
+  };
   const ensureTask = async (id: string) => {
-    if (ensuringTaskID === id) return;
-    ensuringTaskID = id;
+    if (taskRecoveries.has(id)) return;
+    const recovery: TaskRecovery = { updates: [] };
+    taskRecoveries.set(id, recovery);
     try {
-      upsertTask(await getTask(id));
-    } catch (e) {
-      // Only a definitive not-found is authoritative. Transient errors, 403s,
-      // and 5xx responses keep the route so auth and server state can recover.
-      dismissSelectedTaskOnNotFound(id, e);
+      let task: Task | null = null;
+      let getTaskError: unknown = null;
+      try {
+        task = await getTask(id);
+      } catch (e) {
+        getTaskError = e;
+      }
+      // A newer snapshot or upsert supplied the complete task while this GET
+      // was in flight. Its response is now stale, and later patches were
+      // applied directly after that authoritative event.
+      if (taskRecoveries.get(id) !== recovery) return;
+
+      const updates = recovery.updates;
+      let replayFrom = 0;
+      for (const [index, update] of updates.entries()) {
+        if (update.kind !== "patch") replayFrom = index + 1;
+      }
+      if (task && replayFrom === 0) {
+        applyAuthoritativeTask(task);
+      }
+      for (const update of updates.slice(replayFrom)) {
+        if (update.kind === "patch") applyTaskPatch(id, update.patch);
+      }
+      const latestBoundary = replayFrom === 0 ? null : updates[replayFrom - 1];
+      if (task === null && getTaskError !== null && latestBoundary?.kind !== "replace") {
+        // Only a definitive not-found is authoritative. Transient errors, 403s,
+        // and 5xx responses keep the route so auth and server state can recover.
+        dismissSelectedTaskOnNotFound(id, getTaskError);
+      }
     } finally {
-      if (ensuringTaskID === id) ensuringTaskID = null;
+      if (taskRecoveries.get(id) === recovery) taskRecoveries.delete(id);
     }
   };
   createEffect(() => {
@@ -543,50 +616,44 @@ function createAppStore() {
     function connectTasks() {
       // eslint-disable-next-line solid/reactivity -- globalTaskEvents is an SSE event handler
       taskES = globalTaskEvents((event) => {
-        const checkAndNotify = (t: Task) => {
-          const needsInput = t.state === "waiting" || t.state === "asking" || t.state === "has_plan";
-          const prevState = prevStates.get(t.id);
-          const prevNeedsInput = prevState === "waiting" || prevState === "asking" || prevState === "has_plan";
-          if (needsInput && prevState === "running") {
-            notifyWaiting(t.id, t.title, { enabled: hostMode.browserNotificationsEnabled() });
-          } else if (!needsInput && prevNeedsInput) {
-            dismissNotification(t.id);
-          }
-        };
         if (event.kind === "snapshot" && event.snapshot) {
+          const snapshotByID = new Map(event.snapshot.map((task) => [task.id, task]));
+          for (const id of taskRecoveries.keys()) {
+            if (snapshotByID.has(id)) {
+              // The snapshot is newer than the recovery GET and contains a
+              // complete task. Let later patches update it in place.
+              taskRecoveries.delete(id);
+            } else {
+              queueTaskUpdate(id, { kind: "delete" });
+            }
+          }
           prevStates = new Map(event.snapshot.map((t) => [t.id, t.state]));
           setTasks(event.snapshot);
           notifyQuotaRecoveries(event.snapshot);
         } else if (event.kind === "upsert" && event.upsert) {
-          const t = event.upsert;
-          checkAndNotify(t);
-          prevStates.set(t.id, t.state);
-          upsertTask(t);
-          notifyQuotaRecoveries(tasks());
+          const task = event.upsert;
+          // A complete upsert supersedes a recovery GET. Removing its entry
+          // also makes later patches update this task in place.
+          taskRecoveries.delete(task.id);
+          applyAuthoritativeTask(task);
         } else if (event.kind === "patch" && event.patch) {
           const patch = event.patch as Record<string, unknown>;
           const id = patch["id"] as string;
           if (!id) return;
-          if (typeof patch["state"] === "string") {
-            const newState = patch["state"] as string;
-            const existing = tasks().find((t) => t.id === id);
-            if (existing) {
-              checkAndNotify({ ...existing, state: newState } as Task);
-            }
-            prevStates.set(id, newState);
+          if (taskRecoveries.has(id)) {
+            queueTaskUpdate(id, { kind: "patch", patch });
+            return;
           }
-          setTasks((prev) => {
-            const idx = prev.findIndex((p) => p.id === id);
-            if (idx < 0) return prev;
-            const next = [...prev];
-            next[idx] = { ...next[idx], ...patch } as Task;
-            return next;
-          });
-          notifyQuotaRecoveries(tasks());
+          if (!tasks().some((task) => task.id === id)) {
+            void ensureTask(id);
+            return;
+          }
+          applyTaskPatch(id, patch);
         } else if (event.kind === "delete" && event.delete) {
           // Authoritative removal: if the deleted task is the one being viewed,
           // leave its now-dead detail route.
           if (event.delete === selectedId()) navigate("/", { replace: true });
+          if (taskRecoveries.has(event.delete)) queueTaskUpdate(event.delete, { kind: "delete" });
           prevStates.delete(event.delete);
           setTasks((prev) => prev.filter((t) => t.id !== event.delete));
           notifyQuotaRecoveries(tasks());

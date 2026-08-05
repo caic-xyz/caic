@@ -35,6 +35,20 @@ function makeTask(overrides: Partial<Task> = {}): Task {
   };
 }
 
+function deferred<T>() {
+  let resolve: (value: T | PromiseLike<T>) => void = (_value) => {
+    throw new Error("Deferred promise is not initialized");
+  };
+  let reject: (reason?: unknown) => void = (_reason) => {
+    throw new Error("Deferred promise is not initialized");
+  };
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 // Stub EventSource to prevent real SSE connections.
 // FakeEventSource captures message listeners so tests can push SSE events.
 type MessageListener = (e: { data: string }) => void;
@@ -196,6 +210,145 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+describe("App task-list SSE recovery", () => {
+  it("uses fetched tasks for derived notification and quota recovery bookkeeping", async () => {
+    const blockedTask = makeTask({ id: "recovered", state: "waiting", rateLimit: { blocked: true } });
+    vi.mocked(api.getTask).mockResolvedValue(blockedTask);
+    renderApp();
+
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "patch", patch: { id: "recovered", title: "untrusted partial title", state: "waiting" } });
+
+    await waitFor(() => expect(screen.getByText("do something")).toBeInTheDocument());
+    expect(screen.queryByText("untrusted partial title")).not.toBeInTheDocument();
+
+    dispatchSSE({ kind: "upsert", upsert: makeTask({ id: "recovered", state: "waiting", rateLimit: { blocked: false } }) });
+    dispatchSSE({ kind: "patch", patch: { id: "recovered", state: "running" } });
+    dispatchSSE({ kind: "patch", patch: { id: "recovered", state: "waiting" } });
+
+    await waitFor(() => {
+      expect(notifications.notifyServiceEvent).toHaveBeenCalledWith(
+        "recovered",
+        "do something quota is available",
+        { enabled: true },
+      );
+      expect(notifications.notifyWaiting).toHaveBeenCalledWith(
+        "recovered",
+        "do something",
+        { enabled: true },
+      );
+    });
+  });
+
+  it("replays patches that arrive during unknown-task recovery", async () => {
+    const recoveryFetch = deferred<Task>();
+    const recoveredTask = makeTask({ id: "recovered", title: "authoritative task", state: "running", rateLimit: { blocked: true } });
+    vi.mocked(api.getTask).mockImplementationOnce(() => recoveryFetch.promise);
+    renderApp();
+
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "patch", patch: { id: "recovered", state: "running" } });
+    expect(document.querySelector("[data-task-id='recovered']")).not.toBeInTheDocument();
+
+    dispatchSSE({ kind: "patch", patch: { id: "recovered", state: "waiting", rateLimit: { blocked: true } } });
+    dispatchSSE({ kind: "patch", patch: { id: "recovered", rateLimit: { blocked: false } } });
+    recoveryFetch.resolve(recoveredTask);
+
+    await waitFor(() => expect(document.querySelector("[data-task-id='recovered']")).toHaveTextContent("waiting"));
+    expect(api.getTask).toHaveBeenCalledOnce();
+    expect(notifications.notifyWaiting).toHaveBeenCalledWith("recovered", "authoritative task", { enabled: true });
+    expect(notifications.notifyServiceEvent).toHaveBeenCalledWith(
+      "recovered",
+      "authoritative task quota is available",
+      { enabled: true },
+    );
+  });
+
+  it("does not let recovery fetches overwrite later snapshots", async () => {
+    const recoveryFetch = deferred<Task>();
+    const runningTask = makeTask({ id: "recovered", state: "running" });
+    const snapshotTask = makeTask({ id: "recovered", state: "waiting" });
+    vi.mocked(api.getTask).mockImplementationOnce(() => recoveryFetch.promise);
+    renderApp();
+
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "patch", patch: { id: "recovered", state: "running" } });
+    dispatchSSE({ kind: "snapshot", snapshot: [snapshotTask] });
+    recoveryFetch.resolve(runningTask);
+
+    await waitFor(() => expect(document.querySelector("[data-task-id='recovered']")).toHaveTextContent("waiting"));
+    expect(api.getTask).toHaveBeenCalledOnce();
+  });
+
+  it("applies patches after an upsert supersedes recovery", async () => {
+    const recoveryFetch = deferred<Task>();
+    const authoritativeTask = makeTask({ id: "recovered", title: "authoritative task", state: "running" });
+    vi.mocked(api.getTask).mockImplementationOnce(() => recoveryFetch.promise);
+    renderApp();
+
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "patch", patch: { id: "recovered", state: "running" } });
+    dispatchSSE({ kind: "upsert", upsert: authoritativeTask });
+    dispatchSSE({ kind: "patch", patch: { id: "recovered", state: "waiting" } });
+
+    await waitFor(() => expect(document.querySelector("[data-task-id='recovered']")).toHaveTextContent("waiting"));
+    expect(notifications.notifyWaiting).toHaveBeenCalledWith("recovered", "authoritative task", { enabled: true });
+
+    recoveryFetch.resolve(makeTask({ id: "recovered", state: "running" }));
+    await Promise.resolve();
+    expect(document.querySelector("[data-task-id='recovered']")).toHaveTextContent("waiting");
+  });
+
+  it("replays queued updates when recovery fetches fail", async () => {
+    const snapshotTask = makeTask({ id: "recovered", state: "running" });
+    vi.mocked(api.getTask).mockRejectedValueOnce(apiError(404));
+    renderApp();
+
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "patch", patch: { id: "recovered", state: "running" } });
+    dispatchSSE({ kind: "snapshot", snapshot: [snapshotTask] });
+    dispatchSSE({ kind: "patch", patch: { id: "recovered", state: "waiting" } });
+
+    await waitFor(() => expect(document.querySelector("[data-task-id='recovered']")).toHaveTextContent("waiting"));
+    expect(api.getTask).toHaveBeenCalledOnce();
+  });
+
+  it("dismisses a deep link after a recovery 404 and snapshot absence", async () => {
+    const recoveryFetch = deferred<Task>();
+    vi.mocked(api.getTask).mockImplementationOnce(() => recoveryFetch.promise);
+    const { history } = renderApp("/task/@recovered+gone");
+
+    await waitForTaskEventsSubscription();
+    await waitFor(() => expect(api.getTask).toHaveBeenCalledWith("recovered"));
+    dispatchSSE({ kind: "snapshot", snapshot: [] });
+    recoveryFetch.reject(apiError(404));
+
+    await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  it("fetches interleaved unknown task patches independently", async () => {
+    const firstTask = deferred<Task>();
+    const secondTask = deferred<Task>();
+    vi.mocked(api.getTask)
+      .mockImplementationOnce(() => firstTask.promise)
+      .mockImplementationOnce(() => secondTask.promise);
+    renderApp();
+
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "patch", patch: { id: "first", state: "waiting" } });
+    dispatchSSE({ kind: "patch", patch: { id: "second", state: "waiting" } });
+
+    expect(api.getTask).toHaveBeenCalledTimes(2);
+    expect(api.getTask).toHaveBeenNthCalledWith(1, "first");
+    expect(api.getTask).toHaveBeenNthCalledWith(2, "second");
+
+    firstTask.resolve(makeTask({ id: "first", title: "first authoritative task" }));
+    secondTask.resolve(makeTask({ id: "second", title: "second authoritative task" }));
+    await waitFor(() => expect(screen.getByText("first authoritative task")).toBeInTheDocument());
+    expect(screen.getByText("second authoritative task")).toBeInTheDocument();
+  });
 });
 
 describe("App repo chips: No repository", () => {

@@ -13,6 +13,7 @@ export default defineConfig({
   },
   use: {
     baseURL: "http://localhost:8090",
+    trace: "retain-on-failure",
   },
   projects: [{ name: "chromium", use: { channel: "chrome" } }],
 });

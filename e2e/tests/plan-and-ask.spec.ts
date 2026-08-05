@@ -1,5 +1,12 @@
 // E2E tests for ExitPlanMode "Clear and execute plan" button and AskUserQuestion card.
-import { test, expect, waitForTaskState, fillContentEditable, type APIClient } from "../helpers";
+import {
+  test,
+  expect,
+  waitForTaskState,
+  fillContentEditable,
+  createUniquePrompt,
+  type APIClient,
+} from "../helpers";
 
 // Submit a task via the UI and poll until the task ID is available via the API.
 async function submitAndGetId(
@@ -27,7 +34,7 @@ test("FAKE_PLAN: clear-plan button appears and restarts task", async ({ page, ap
     page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
   ).toBeVisible();
 
-  const prompt = `FAKE_PLAN e2e ${Date.now()}`;
+  const prompt = createUniquePrompt("FAKE_PLAN e2e");
   const taskId = await submitAndGetId(page, api, prompt);
 
   // Wait for the task to reach has_plan state, then load it from the server.
@@ -59,7 +66,7 @@ test("FAKE_ASK: AskUserQuestion card renders, accepts answer, submits", async ({
     page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
   ).toBeVisible();
 
-  const prompt = `FAKE_ASK e2e ${Date.now()}`;
+  const prompt = createUniquePrompt("FAKE_ASK e2e");
   const taskId = await submitAndGetId(page, api, prompt);
 
   // Wait for the task to reach asking state, then load it from the server.

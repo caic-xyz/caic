@@ -1,5 +1,12 @@
 // End-to-end tests for the task lifecycle using a fake backend.
-import { test, expect, waitForTaskState, fillContentEditable, createTaskAPI } from "../helpers";
+import {
+  test,
+  expect,
+  waitForTaskState,
+  fillContentEditable,
+  createTaskAPI,
+  createUniquePrompt,
+} from "../helpers";
 
 test("create task, verify streaming text and result, then purge", async ({ page, api }) => {
   await page.goto("/");
@@ -8,7 +15,7 @@ test("create task, verify streaming text and result, then purge", async ({ page,
   await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
 
   // Use a unique prompt to avoid collisions with parallel tests.
-  const prompt = `e2e lifecycle ${Date.now()}`;
+  const prompt = createUniquePrompt("e2e lifecycle");
 
   // Fill prompt and submit.
   await fillContentEditable(page.getByTestId("prompt-input"), prompt);
