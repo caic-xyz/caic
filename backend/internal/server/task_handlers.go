@@ -349,8 +349,11 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 	first := true
 
 	for {
-		out := h.taskSvc.taskListSnapshot(ctx)
+		// Subscribe before reading the snapshot. If a task changes while the
+		// snapshot is being assembled, this channel remains closed and the next
+		// loop emits the newer state instead of missing the transition.
 		ch := h.taskMgr.Changed()
+		out := h.taskSvc.taskListSnapshot(ctx)
 		repoList := repoListFromSnapshot(h.repoSvc.Snapshot(), h.repoStatus)
 		var newWarnings []serverWarning
 		if h.warnings != nil {
