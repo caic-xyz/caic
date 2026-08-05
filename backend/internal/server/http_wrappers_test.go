@@ -93,7 +93,7 @@ func TestEmitTaskListEvent(t *testing.T) { //nolint:tparallel // UnsupportedDead
 		before := time.Now()
 		errs := make(chan error, 1)
 		go func() {
-			errs <- emitTaskListEvent(t.Context(), w, &v1.TaskListEvent{Kind: "snapshot"})
+			errs <- emitTaskListEvent(t.Context(), w, http.NewResponseController(w), &v1.TaskListEvent{Kind: "snapshot"})
 		}()
 
 		var deadline time.Time
@@ -138,7 +138,7 @@ func TestEmitTaskListEvent(t *testing.T) { //nolint:tparallel // UnsupportedDead
 			writeErr:         want,
 		}
 
-		err := emitTaskListEvent(t.Context(), w, &v1.TaskListEvent{Kind: "snapshot"})
+		err := emitTaskListEvent(t.Context(), w, http.NewResponseController(w), &v1.TaskListEvent{Kind: "snapshot"})
 		if !errors.Is(err, want) {
 			t.Fatalf("emitTaskListEvent error = %v, want %v", err, want)
 		}
@@ -158,7 +158,7 @@ func TestEmitTaskListEvent(t *testing.T) { //nolint:tparallel // UnsupportedDead
 			flushErr:         want,
 		}
 
-		err := emitTaskListEvent(t.Context(), w, &v1.TaskListEvent{Kind: "snapshot"})
+		err := emitTaskListEvent(t.Context(), w, http.NewResponseController(w), &v1.TaskListEvent{Kind: "snapshot"})
 		if !errors.Is(err, want) {
 			t.Errorf("emitTaskListEvent error = %v, want %v", err, want)
 		}
@@ -178,7 +178,7 @@ func TestEmitTaskListEvent(t *testing.T) { //nolint:tparallel // UnsupportedDead
 		t.Cleanup(func() { slog.SetDefault(old) })
 		w := httptest.NewRecorder()
 
-		if err := emitTaskListEvent(t.Context(), w, &v1.TaskListEvent{Kind: "snapshot"}); err != nil {
+		if err := emitTaskListEvent(t.Context(), w, http.NewResponseController(w), &v1.TaskListEvent{Kind: "snapshot"}); err != nil {
 			t.Fatalf("emitTaskListEvent error = %v, want nil", err)
 		}
 		if got := w.Body.String(); got == "" {

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -307,16 +308,19 @@ func (h *taskHandlers) streamHistoryFromDiskWithTracker(out io.Writer, flusher h
 // server-handled mutation fires the changed channel, and falls back to a
 // 2-second ticker to catch workspace-internal state transitions.
 func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeError(w, api.InternalError("streaming not supported"))
-		return
-	}
+	controller := http.NewResponseController(w)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	flusher.Flush()
+	if err := controller.Flush(); err != nil {
+		if errors.Is(err, http.ErrNotSupported) {
+			writeError(w, api.InternalError("streaming not supported"))
+			return
+		}
+		slog.WarnContext(r.Context(), "start task-list SSE stream", "err", err)
+		return
+	}
 
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -360,11 +364,11 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 		}
 
 		if first {
-			if err := emitTaskListEvent(ctx, w, &v1.TaskListEvent{Kind: "snapshot", Snapshot: out}); err != nil {
+			if err := emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{Kind: "snapshot", Snapshot: out}); err != nil {
 				slog.WarnContext(ctx, "marshal task list snapshot", "err", err)
 				return
 			}
-			if err := emitTaskListEvent(ctx, w, &v1.TaskListEvent{Kind: "repos", Repos: *repoList}); err != nil {
+			if err := emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{Kind: "repos", Repos: *repoList}); err != nil {
 				slog.WarnContext(ctx, "marshal repos snapshot", "err", err)
 				return
 			}
@@ -394,7 +398,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 					prevByID[id] = data
 					if prev == nil {
 						// New task: emit full object.
-						if err := emitTaskListEvent(ctx, w, &v1.TaskListEvent{Kind: "upsert", Upsert: &out[i]}); err != nil {
+						if err := emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{Kind: "upsert", Upsert: &out[i]}); err != nil {
 							slog.WarnContext(ctx, "marshal task upsert", "id", id, "err", err)
 							return
 						}
@@ -405,7 +409,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 							slog.WarnContext(ctx, "compute task patch", "id", id, "err", err)
 							continue
 						}
-						if err := emitTaskListEvent(ctx, w, &v1.TaskListEvent{Kind: "patch", Patch: patch}); err != nil {
+						if err := emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{Kind: "patch", Patch: patch}); err != nil {
 							slog.WarnContext(ctx, "marshal task patch", "id", id, "err", err)
 							return
 						}
@@ -415,7 +419,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 			// Emit deletes for removed tasks.
 			for id := range prevByID {
 				if _, ok := currentIDs[id]; !ok {
-					if err := emitTaskListEvent(ctx, w, &v1.TaskListEvent{Kind: "delete", Delete: id}); err != nil {
+					if err := emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{Kind: "delete", Delete: id}); err != nil {
 						slog.WarnContext(ctx, "marshal task delete", "id", id, "err", err)
 						return
 					}
@@ -424,7 +428,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 			}
 			// Emit any new warnings.
 			for _, warn := range newWarnings {
-				if err := emitTaskListEvent(ctx, w, &v1.TaskListEvent{Kind: "warning", Warning: warn.msg}); err != nil {
+				if err := emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{Kind: "warning", Warning: warn.msg}); err != nil {
 					slog.WarnContext(ctx, "marshal warning", "err", err)
 					return
 				}
@@ -434,7 +438,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 			// Emit repos update when default-branch CI status has changed.
 			if !bytes.Equal(reposJSON, prevReposJSON) {
 				prevReposJSON = reposJSON
-				if err := emitTaskListEvent(ctx, w, &v1.TaskListEvent{Kind: "repos", Repos: *repoList}); err != nil {
+				if err := emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{Kind: "repos", Repos: *repoList}); err != nil {
 					slog.WarnContext(ctx, "marshal repos update", "err", err)
 					return
 				}

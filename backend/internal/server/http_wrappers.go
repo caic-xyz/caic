@@ -256,13 +256,12 @@ func computeTaskPatch(oldJSON, newJSON []byte) (map[string]json.RawMessage, erro
 }
 
 // emitTaskListEvent marshals ev and writes it as an SSE message event.
-func emitTaskListEvent(ctx context.Context, w http.ResponseWriter, ev *v1.TaskListEvent) (err error) {
+func emitTaskListEvent(ctx context.Context, w http.ResponseWriter, controller *http.ResponseController, ev *v1.TaskListEvent) (err error) {
 	data, err := json.Marshal(ev)
 	if err != nil {
 		return err
 	}
 
-	controller := http.NewResponseController(w)
 	if err := controller.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		if !errors.Is(err, http.ErrNotSupported) {
 			return fmt.Errorf("write task-list event: %w", err)
