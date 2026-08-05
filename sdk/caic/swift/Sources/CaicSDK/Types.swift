@@ -531,14 +531,20 @@ public struct RepoPrefsResp: Codable {
 /// CacheMappingResp represents a directory mapping for cache/state sharing.
 public struct CacheMappingResp: Codable {
     public let hostPath: String
+    /// ContainerPath is optional; empty uses the matching home-relative HostPath.
     public let containerPath: String
+    /// ResolvedContainerPath is the runtime target after applying the ContainerPath default.
+    public let resolvedContainerPath: String?
     public let enabled: Bool
 }
 
 /// MountMappingResp represents a general host-to-runtime directory mount.
 public struct MountMappingResp: Codable {
     public let hostPath: String
+    /// ContainerPath is optional; empty uses the matching home-relative HostPath.
     public let containerPath: String
+    /// ResolvedContainerPath is the runtime target after applying the ContainerPath default.
+    public let resolvedContainerPath: String?
     public let enabled: Bool
     public let readOnly: Bool
 }
@@ -832,8 +838,8 @@ public struct TaskInfoRepo: Codable {
     public let name: String
     public let baseBranch: String?
     public let branch: String?
-    public let hostPath: String?
-    public let mountedPath: String?
+    public let gitRoot: String?
+    public let containerPath: String?
     public let remoteURL: String?
     public let forge: Forge?
 }
@@ -843,7 +849,7 @@ public struct TaskInfoCacheMount: Codable {
     public let name: String?
     public let description: String?
     public let hostPath: String?
-    public let mountPath: String?
+    public let containerPath: String?
     public let readOnly: Bool?
     public let shallow: Bool?
 }
@@ -851,7 +857,7 @@ public struct TaskInfoCacheMount: Codable {
 /// TaskInfoMount describes a recorded or observed bind mount.
 public struct TaskInfoMount: Codable {
     public let hostPath: String?
-    public let mountPath: String?
+    public let containerPath: String?
     public let readOnly: Bool?
 }
 

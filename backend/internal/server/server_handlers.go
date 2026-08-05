@@ -158,19 +158,35 @@ func (h *serverHandlers) getPreferences(ctx context.Context, _ *api.EmptyReq) (*
 	}
 	cacheMappings := make([]v1.CacheMappingResp, len(prefs.Settings.CacheMappings))
 	for i, m := range prefs.Settings.CacheMappings {
+		target, err := md.ResolveMountTarget(m.HostPath, m.ContainerPath)
+		effectivePath := ""
+		if err != nil {
+			slog.ErrorContext(ctx, "stored cache mapping is invalid", "index", i, "err", err)
+		} else {
+			effectivePath = md.ResolveContainerPath(target)
+		}
 		cacheMappings[i] = v1.CacheMappingResp{
-			HostPath:      m.HostPath,
-			ContainerPath: m.ContainerPath,
-			Enabled:       m.Enabled,
+			HostPath:              m.HostPath,
+			ContainerPath:         m.ContainerPath,
+			ResolvedContainerPath: effectivePath,
+			Enabled:               m.Enabled,
 		}
 	}
 	customMounts := make([]v1.MountMappingResp, len(prefs.Settings.CustomMounts))
 	for i, m := range prefs.Settings.CustomMounts {
+		target, err := md.ResolveMountTarget(m.HostPath, m.ContainerPath)
+		effectivePath := ""
+		if err != nil {
+			slog.ErrorContext(ctx, "stored custom mount is invalid", "index", i, "err", err)
+		} else {
+			effectivePath = md.ResolveContainerPath(target)
+		}
 		customMounts[i] = v1.MountMappingResp{
-			HostPath:      m.HostPath,
-			ContainerPath: m.ContainerPath,
-			Enabled:       m.Enabled,
-			ReadOnly:      m.ReadOnly,
+			HostPath:              m.HostPath,
+			ContainerPath:         m.ContainerPath,
+			ResolvedContainerPath: effectivePath,
+			Enabled:               m.Enabled,
+			ReadOnly:              m.ReadOnly,
 		}
 	}
 	return &v1.PreferencesResp{
@@ -234,7 +250,7 @@ func (h *serverHandlers) updatePreferences(ctx context.Context, req *v1.UpdatePr
 	return h.getPreferences(ctx, nil)
 }
 
-func cacheMountsFromSettings(settings *preferences.Settings) []caicruntime.CacheMount {
+func cacheMountsFromSettings(settings *preferences.Settings) ([]caicruntime.CacheMount, error) {
 	var caches []caicruntime.CacheMount
 	names := slices.Sorted(maps.Keys(md.WellKnownCaches))
 	for _, name := range names {
@@ -243,12 +259,12 @@ func cacheMountsFromSettings(settings *preferences.Settings) []caicruntime.Cache
 		}
 		for _, c := range md.WellKnownCaches[name] {
 			caches = append(caches, caicruntime.CacheMount{
-				Name:        c.Name,
-				Description: c.Description,
-				HostPath:    c.HostPath,
-				MountPath:   c.ContainerPath,
-				ReadOnly:    c.ReadOnly,
-				Shallow:     c.Shallow,
+				Name:          c.Name,
+				Description:   c.Description,
+				HostPath:      c.HostPath,
+				ContainerPath: c.ContainerPath,
+				ReadOnly:      c.ReadOnly,
+				Shallow:       c.Shallow,
 			})
 		}
 	}
@@ -256,28 +272,36 @@ func cacheMountsFromSettings(settings *preferences.Settings) []caicruntime.Cache
 		if !m.Enabled {
 			continue
 		}
+		target, err := md.ResolveMountTarget(m.HostPath, m.ContainerPath)
+		if err != nil {
+			return nil, fmt.Errorf("custom cache %d: %w", i, err)
+		}
 		caches = append(caches, caicruntime.CacheMount{
-			Name:      fmt.Sprintf("custom-cache-%d", i),
-			HostPath:  m.HostPath,
-			MountPath: m.ContainerPath,
+			Name:          fmt.Sprintf("custom-cache-%d", i),
+			HostPath:      m.HostPath,
+			ContainerPath: md.ResolveContainerPath(target),
 		})
 	}
-	return caches
+	return caches, nil
 }
 
-func mountsFromSettings(settings *preferences.Settings) []caicruntime.Mount {
+func mountsFromSettings(settings *preferences.Settings) ([]caicruntime.Mount, error) {
 	mounts := make([]caicruntime.Mount, 0, len(settings.CustomMounts))
-	for _, m := range settings.CustomMounts {
+	for i, m := range settings.CustomMounts {
 		if !m.Enabled {
 			continue
 		}
+		target, err := md.ResolveMountTarget(m.HostPath, m.ContainerPath)
+		if err != nil {
+			return nil, fmt.Errorf("custom mount %d: %w", i, err)
+		}
 		mounts = append(mounts, caicruntime.Mount{
-			HostPath:  m.HostPath,
-			MountPath: m.ContainerPath,
-			ReadOnly:  m.ReadOnly,
+			HostPath:      m.HostPath,
+			ContainerPath: md.ResolveContainerPath(target),
+			ReadOnly:      m.ReadOnly,
 		})
 	}
-	return mounts
+	return mounts, nil
 }
 
 func (h *serverHandlers) listHarnesses(_ context.Context, _ *api.EmptyReq) (*[]v1.HarnessInfo, error) {

@@ -92,6 +92,19 @@ func TestValidate(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+	t.Run("valid_home_relative_default_container_path", func(t *testing.T) {
+		t.Parallel()
+		p := &Preferences{
+			Version: 1,
+			Settings: Settings{
+				CacheMappings: []CacheMapping{{HostPath: "~/.cache/tool", Enabled: true}},
+				CustomMounts:  []MountMapping{{HostPath: "~/.claude", Enabled: true}},
+			},
+		}
+		if err := p.Validate(); err != nil {
+			t.Fatal(err)
+		}
+	})
 	t.Run("cache_mapping_empty_host", func(t *testing.T) {
 		t.Parallel()
 		p := &Preferences{

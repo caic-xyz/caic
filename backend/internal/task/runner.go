@@ -519,12 +519,12 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *run
 	// default when empty.
 	srcBranch := make(map[string]string) // GitRoot -> source instance branch
 	for _, r := range source.RuntimeRepos() {
-		srcBranch[r.HostPath] = r.Branch
+		srcBranch[r.GitRoot] = r.Branch
 	}
 	forkMounts := fork.ReposSnapshot()
 	specs := make([]runtime.ForkRepo, len(forkMounts))
 	for i, r := range forkMounts {
-		spec := runtime.ForkRepo{HostPath: r.GitRoot, MountPath: r.MountedPath, DestPrimary: r.Branch}
+		spec := runtime.ForkRepo{GitRoot: r.GitRoot, ContainerPath: r.ContainerPath, DestPrimary: r.Branch}
 		if b, ok := srcBranch[r.GitRoot]; ok {
 			spec.SourceBranches = []string{b}
 		} else if r.BaseBranch != "" {
@@ -595,8 +595,8 @@ func (r *Runner) branchDiffStat(ctx context.Context, t *Task) (agent.DiffStat, e
 		return nil, errors.New("task has no runtime instance")
 	}
 	repos := t.RuntimeRepos()
-	if len(repos) > 0 && repos[0].HostPath == "" {
-		repos[0].HostPath = r.Workspace.Dir
+	if len(repos) > 0 && repos[0].GitRoot == "" {
+		repos[0].GitRoot = r.Workspace.Dir
 	}
 	return r.Workspace.DiffStat(ctx, id, repos, repowork.DiffFetchRequired, "fetch for branch diff stat")
 }

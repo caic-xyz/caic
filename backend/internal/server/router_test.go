@@ -911,7 +911,7 @@ func TestHandleCreateTask(t *testing.T) {
 		for _, cm := range entry.Task().CacheMounts {
 			switch cm.Name {
 			case "custom-cache-0":
-				gotCustom = cm.HostPath == "/host/custom" && cm.MountPath == "/home/user/.custom"
+				gotCustom = cm.HostPath == "/host/custom" && cm.ContainerPath == "/home/user/.custom"
 			case "npm":
 				gotNPM = true
 			case "go-mod":
@@ -922,10 +922,10 @@ func TestHandleCreateTask(t *testing.T) {
 		}
 		gotCustomMount := false
 		for _, m := range entry.Task().Mounts {
-			if m.HostPath == "/host/work" && m.MountPath == "/workspace/external" && m.ReadOnly {
+			if m.HostPath == "/host/work" && m.ContainerPath == "/workspace/external" && m.ReadOnly {
 				gotCustomMount = true
 			}
-			if m.HostPath == "/host/disabled-work" || m.MountPath == "/workspace/disabled" {
+			if m.HostPath == "/host/disabled-work" || m.ContainerPath == "/workspace/disabled" {
 				t.Errorf("disabled custom mount present: %+v", m)
 			}
 		}
@@ -936,7 +936,7 @@ func TestHandleCreateTask(t *testing.T) {
 			t.Errorf("custom mount missing from %+v", entry.Task().CacheMounts)
 		}
 		for _, cm := range entry.Task().CacheMounts {
-			if cm.HostPath == "/host/disabled-cache" || cm.MountPath == "/home/user/.disabled-cache" {
+			if cm.HostPath == "/host/disabled-cache" || cm.ContainerPath == "/home/user/.disabled-cache" {
 				t.Errorf("disabled custom cache present: %+v", cm)
 			}
 		}
@@ -989,7 +989,7 @@ func TestHandleCreateTask(t *testing.T) {
 		if !info.Recorded.Capabilities.GitHubToken {
 			t.Error("GitHubToken = false, want true")
 		}
-		if len(info.Recorded.Repos) != 1 || info.Recorded.Repos[0].Name != "myrepo" || info.Recorded.Repos[0].HostPath == "" {
+		if len(info.Recorded.Repos) != 1 || info.Recorded.Repos[0].Name != "myrepo" || info.Recorded.Repos[0].GitRoot == "" {
 			t.Errorf("Repos = %+v", info.Recorded.Repos)
 		}
 		if len(info.Recorded.Caches) != 1 || info.Recorded.Caches[0].HostPath != "/host/cache" {

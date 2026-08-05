@@ -1,12 +1,18 @@
 // SettingsForm renders the application settings controls.
 
-import { For, Show, type Accessor, type Setter } from "solid-js";
+import { For, Index, Show, type Accessor, type Setter } from "solid-js";
 
 import type { CacheMappingResp, CacheSize, OAuthGrantResp, MountMappingResp, Platform, RuntimeInfo, UpdatePreferencesReq, VersionResp, WellKnownCachesResp } from "@sdk/types.gen";
 
 import styles from "./SettingsForm.module.css";
 
 type SettingsOverrides = Partial<UpdatePreferencesReq["settings"]>;
+
+function defaultContainerPath(hostPath: string, resolvedContainerPath?: string): string {
+  if (!resolvedContainerPath) return "";
+  if (hostPath === "~" || hostPath.startsWith("~/")) return hostPath;
+  return resolvedContainerPath;
+}
 
 interface SettingsFormProps {
   selectedImage: Accessor<string>;
@@ -26,6 +32,7 @@ interface SettingsFormProps {
   setCacheMappings: Setter<CacheMappingResp[]>;
   customMounts: Accessor<MountMappingResp[]>;
   setCustomMounts: Setter<MountMappingResp[]>;
+  settingsError: Accessor<string>;
   autoFixCI: Accessor<boolean>;
   setAutoFixCI: Setter<boolean>;
   autoFixPR: Accessor<boolean>;
@@ -66,12 +73,12 @@ export default function SettingsForm(props: SettingsFormProps) {
   };
   const updateCacheMapping = (index: number, update: Partial<CacheMappingResp>) => {
     props.setCacheMappings((prev) => prev.map((mapping, i) => (
-      i === index ? { ...mapping, ...update } : mapping
+      i === index ? { ...mapping, ...update, resolvedContainerPath: undefined } : mapping
     )));
   };
   const updateCustomMount = (index: number, update: Partial<MountMappingResp>) => {
     props.setCustomMounts((prev) => prev.map((mount, i) => (
-      i === index ? { ...mount, ...update } : mount
+      i === index ? { ...mount, ...update, resolvedContainerPath: undefined } : mount
     )));
   };
 
@@ -79,6 +86,9 @@ export default function SettingsForm(props: SettingsFormProps) {
     <div class={styles.settingsPage}>
       <div class={styles.settingsPanel}>
         <h2 class={styles.settingsPanelTitle}>Settings</h2>
+        <Show when={props.settingsError()}>
+          <p class={styles.settingsError} role="alert">{props.settingsError()}</p>
+        </Show>
         <div class={styles.settingsSection}>
           <h3 class={styles.settingsSectionTitle}>Container</h3>
           <label class={styles.settingsLabel}>
@@ -177,18 +187,18 @@ export default function SettingsForm(props: SettingsFormProps) {
         </div>
         <div class={styles.settingsSection}>
           <h3 class={styles.settingsSectionTitle}>Custom caches</h3>
-          <p class={styles.settingsDescription}>Persistent host directories mounted into each container for tool caches.</p>
-          <For each={props.cacheMappings()}>
+          <p class={styles.settingsDescription}>Persistent host directories mounted into each container for tool caches. Leave the container path blank to use the same <code>~</code> path.</p>
+          <Index each={props.cacheMappings()}>
             {(mapping, index) => (
-              <div class={styles.cacheMappingRow} data-state={mapping.enabled ? "enabled" : "disabled"}>
+              <div class={styles.cacheMappingRow} data-state={mapping().enabled ? "enabled" : "disabled"} data-testid="cache-mapping-row">
                 <label class={styles.cacheMappingToggle} title="Enable custom cache">
                   <input
                     type="checkbox"
-                    checked={mapping.enabled}
+                    checked={mapping().enabled}
                     onChange={(e) => {
                       const enabled = e.currentTarget.checked;
                       const newMappings = props.cacheMappings().map((item, i) => (
-                        i === index() ? { ...item, enabled } : item
+                        i === index ? { ...item, enabled } : item
                       ));
                       props.setCacheMappings(newMappings);
                       void props.saveSettings({ cacheMappings: newMappings });
@@ -196,32 +206,39 @@ export default function SettingsForm(props: SettingsFormProps) {
                   />
                   <span class={styles.visuallyHidden}>Enable custom cache</span>
                 </label>
+                <span class={`${styles.mappingPathLabel} ${styles.mappingHostLabel}`}>Host path</span>
                 <input
                   type="text"
-                  class={styles.settingsInput}
-                  placeholder="Host path"
-                  value={mapping.hostPath}
-                  onChange={(e) => updateCacheMapping(index(), { hostPath: e.currentTarget.value })}
+                  class={`${styles.settingsInput} ${styles.mappingHostInput}`}
+                  aria-label="Host path"
+                  placeholder="~/.cache/tool"
+                  value={mapping().hostPath}
+                  onInput={(e) => updateCacheMapping(index, { hostPath: e.currentTarget.value })}
                   onBlur={() => {
                     void props.saveSettings();
                   }}
                 />
-                <span class={styles.cacheMappingArrow}>→</span>
+                <span class={styles.cacheMappingArrow} data-testid="mapping-arrow">→</span>
+                <span class={`${styles.mappingPathLabel} ${styles.mappingContainerLabel}`}>Container path</span>
                 <input
                   type="text"
-                  class={styles.settingsInput}
-                  placeholder="Container path"
-                  value={mapping.containerPath}
-                  onChange={(e) => updateCacheMapping(index(), { containerPath: e.currentTarget.value })}
+                  class={`${styles.settingsInput} ${styles.mappingContainerInput}`}
+                  aria-label="Container path"
+                  placeholder={defaultContainerPath(mapping().hostPath, mapping().resolvedContainerPath) || "Container path"}
+                  value={mapping().containerPath}
+                  onInput={(e) => updateCacheMapping(index, { containerPath: e.currentTarget.value })}
                   onBlur={() => {
                     void props.saveSettings();
                   }}
                 />
+                <Show when={mapping().containerPath === "" && defaultContainerPath(mapping().hostPath, mapping().resolvedContainerPath)}>
+                  <span class={styles.mappingPathHint}>Uses {defaultContainerPath(mapping().hostPath, mapping().resolvedContainerPath)} by default</span>
+                </Show>
                 <button
                   type="button"
                   class={styles.cacheMappingRemove}
                   onClick={() => {
-                    const newMappings = props.cacheMappings().filter((_, i) => i !== index());
+                    const newMappings = props.cacheMappings().filter((_, i) => i !== index);
                     props.setCacheMappings(newMappings);
                     void props.saveSettings({ cacheMappings: newMappings });
                   }}
@@ -230,7 +247,7 @@ export default function SettingsForm(props: SettingsFormProps) {
                 </button>
               </div>
             )}
-          </For>
+          </Index>
           <button
             type="button"
             class={styles.settingsButton}
@@ -243,18 +260,18 @@ export default function SettingsForm(props: SettingsFormProps) {
         </div>
         <div class={styles.settingsSection}>
           <h3 class={styles.settingsSectionTitle}>Custom mounts</h3>
-          <p class={styles.settingsDescription}>Additional host directories mounted into each container.</p>
-          <For each={props.customMounts()}>
+          <p class={styles.settingsDescription}>Additional host directories mounted into each container. Leave the container path blank to use the same <code>~</code> path.</p>
+          <Index each={props.customMounts()}>
             {(mount, index) => (
-              <div class={styles.cacheMappingRow} data-state={mount.enabled ? "enabled" : "disabled"}>
+              <div class={styles.cacheMappingRow} data-state={mount().enabled ? "enabled" : "disabled"} data-testid="custom-mount-row">
                 <label class={styles.cacheMappingToggle} title="Enable custom mount">
                   <input
                     type="checkbox"
-                    checked={mount.enabled}
+                    checked={mount().enabled}
                     onChange={(e) => {
                       const enabled = e.currentTarget.checked;
                       const newMounts = props.customMounts().map((item, i) => (
-                        i === index() ? { ...item, enabled } : item
+                        i === index ? { ...item, enabled } : item
                       ));
                       props.setCustomMounts(newMounts);
                       void props.saveSettings({ customMounts: newMounts });
@@ -262,35 +279,42 @@ export default function SettingsForm(props: SettingsFormProps) {
                   />
                   <span class={styles.visuallyHidden}>Enable custom mount</span>
                 </label>
+                <span class={`${styles.mappingPathLabel} ${styles.mappingHostLabel}`}>Host path</span>
                 <input
                   type="text"
-                  class={styles.settingsInput}
-                  placeholder="Host path"
-                  value={mount.hostPath}
-                  onChange={(e) => updateCustomMount(index(), { hostPath: e.currentTarget.value })}
+                  class={`${styles.settingsInput} ${styles.mappingHostInput}`}
+                  aria-label="Host path"
+                  placeholder="~/Documents"
+                  value={mount().hostPath}
+                  onInput={(e) => updateCustomMount(index, { hostPath: e.currentTarget.value })}
                   onBlur={() => {
                     void props.saveSettings();
                   }}
                 />
-                <span class={styles.cacheMappingArrow}>→</span>
+                <span class={styles.cacheMappingArrow} data-testid="mapping-arrow">→</span>
+                <span class={`${styles.mappingPathLabel} ${styles.mappingContainerLabel}`}>Container path</span>
                 <input
                   type="text"
-                  class={styles.settingsInput}
-                  placeholder="Container path"
-                  value={mount.containerPath}
-                  onChange={(e) => updateCustomMount(index(), { containerPath: e.currentTarget.value })}
+                  class={`${styles.settingsInput} ${styles.mappingContainerInput}`}
+                  aria-label="Container path"
+                  placeholder={defaultContainerPath(mount().hostPath, mount().resolvedContainerPath) || "Container path"}
+                  value={mount().containerPath}
+                  onInput={(e) => updateCustomMount(index, { containerPath: e.currentTarget.value })}
                   onBlur={() => {
                     void props.saveSettings();
                   }}
                 />
-                <label class={styles.mountOptionToggle} title="Mount read-only">
+                <Show when={mount().containerPath === "" && defaultContainerPath(mount().hostPath, mount().resolvedContainerPath)}>
+                  <span class={styles.mappingPathHint}>Uses {defaultContainerPath(mount().hostPath, mount().resolvedContainerPath)} by default</span>
+                </Show>
+                <label class={styles.mountOptionToggle} title="Mount read-only" data-testid="mount-read-only">
                   <input
                     type="checkbox"
-                    checked={mount.readOnly ?? false}
+                    checked={mount().readOnly ?? false}
                     onChange={(e) => {
                       const readOnly = e.currentTarget.checked;
                       const newMounts = props.customMounts().map((item, i) => (
-                        i === index() ? { ...item, readOnly } : item
+                        i === index ? { ...item, readOnly } : item
                       ));
                       props.setCustomMounts(newMounts);
                       void props.saveSettings({ customMounts: newMounts });
@@ -302,7 +326,7 @@ export default function SettingsForm(props: SettingsFormProps) {
                   type="button"
                   class={styles.cacheMappingRemove}
                   onClick={() => {
-                    const newMounts = props.customMounts().filter((_, i) => i !== index());
+                    const newMounts = props.customMounts().filter((_, i) => i !== index);
                     props.setCustomMounts(newMounts);
                     void props.saveSettings({ customMounts: newMounts });
                   }}
@@ -311,7 +335,7 @@ export default function SettingsForm(props: SettingsFormProps) {
                 </button>
               </div>
             )}
-          </For>
+          </Index>
           <button
             type="button"
             class={styles.settingsButton}

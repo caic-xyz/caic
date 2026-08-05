@@ -43,15 +43,15 @@ function compareText(a?: string, b?: string): number {
 }
 
 function sortedRepos(repos?: TaskInfoRepo[]): TaskInfoRepo[] | undefined {
-  return repos?.slice().sort((a, b) => compareText(a.name, b.name) || compareText(a.mountedPath, b.mountedPath));
+  return repos?.slice().sort((a, b) => compareText(a.name, b.name) || compareText(a.containerPath, b.containerPath));
 }
 
 function sortedMounts(mounts?: TaskInfoMount[]): TaskInfoMount[] | undefined {
-  return mounts?.slice().sort((a, b) => compareText(a.hostPath, b.hostPath) || compareText(a.mountPath, b.mountPath));
+  return mounts?.slice().sort((a, b) => compareText(a.hostPath, b.hostPath) || compareText(a.containerPath, b.containerPath));
 }
 
 function sortedCaches(caches?: TaskInfoCacheMount[]): TaskInfoCacheMount[] | undefined {
-  return caches?.slice().sort((a, b) => compareText(a.name, b.name) || compareText(a.mountPath, b.mountPath));
+  return caches?.slice().sort((a, b) => compareText(a.name, b.name) || compareText(a.containerPath, b.containerPath));
 }
 
 function runtimeText(recorded?: string, observed?: string): string {
@@ -108,7 +108,7 @@ function MountTable(props: { mounts?: TaskInfoMount[]; empty: string }) {
               {(m) => (
                 <tr>
                   <td class={`${styles.td} ${styles.pathCell}`}>{m.hostPath || "—"}</td>
-                  <td class={`${styles.td} ${styles.pathCell}`}>{m.mountPath || "—"}</td>
+                  <td class={`${styles.td} ${styles.pathCell}`}>{m.containerPath || "—"}</td>
                   <td class={styles.td}>{readOnlyText(m.readOnly)}</td>
                 </tr>
               )}
@@ -137,7 +137,7 @@ function CacheTable(props: { caches?: TaskInfoCacheMount[] }) {
                     <td class={styles.td}>{c.name || "—"}</td>
                     <td class={styles.td}>{c.description || "—"}</td>
                     <td class={`${styles.td} ${styles.pathCell}`}>{c.hostPath || "—"}</td>
-                    <td class={`${styles.td} ${styles.pathCell}`}>{c.mountPath || "—"}</td>
+                    <td class={`${styles.td} ${styles.pathCell}`}>{c.containerPath || "—"}</td>
                     <td class={styles.td}>{flags()}</td>
                   </tr>
                 );
@@ -156,7 +156,7 @@ function RepoTable(props: { repos?: TaskInfoRepo[] }) {
       <div class={styles.tableWrap}>
         <table class={styles.table}>
           <thead>
-            <tr><th class={styles.th}>Name</th><th class={styles.th}>Base</th><th class={styles.th}>Branch</th><th class={styles.th}>Host path</th><th class={styles.th}>Runtime path</th><th class={styles.th}>Remote</th></tr>
+            <tr><th class={styles.th}>Name</th><th class={styles.th}>Base</th><th class={styles.th}>Branch</th><th class={styles.th}>Git root</th><th class={styles.th}>Runtime path</th><th class={styles.th}>Remote</th></tr>
           </thead>
           <tbody>
             <For each={sortedRepos(props.repos)}>
@@ -165,8 +165,8 @@ function RepoTable(props: { repos?: TaskInfoRepo[] }) {
                   <td class={styles.td}>{r.name}</td>
                   <td class={styles.td}>{r.baseBranch || "—"}</td>
                   <td class={styles.td}>{r.branch || "—"}</td>
-                  <td class={`${styles.td} ${styles.pathCell}`}>{r.hostPath || "—"}</td>
-                  <td class={`${styles.td} ${styles.pathCell}`}>{r.mountedPath || "—"}</td>
+                  <td class={`${styles.td} ${styles.pathCell}`}>{r.gitRoot || "—"}</td>
+                  <td class={`${styles.td} ${styles.pathCell}`}>{r.containerPath || "—"}</td>
                   <td class={`${styles.td} ${styles.pathCell}`}>{r.remoteURL || "—"}</td>
                 </tr>
               )}

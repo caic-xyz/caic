@@ -21,7 +21,8 @@ import (
 type CacheMapping struct {
 	// HostPath is the path on the host filesystem to mount.
 	HostPath string `json:"hostPath"`
-	// ContainerPath is the path inside the container where hostPath will be mounted.
+	// ContainerPath is the path inside the container where HostPath will be mounted.
+	// Empty uses the matching home-relative HostPath; md owns the resolution.
 	ContainerPath string `json:"containerPath"`
 	// Enabled controls whether this mapping is passed to new containers.
 	Enabled bool `json:"enabled"`
@@ -31,7 +32,8 @@ type CacheMapping struct {
 type MountMapping struct {
 	// HostPath is the path on the host filesystem to mount.
 	HostPath string `json:"hostPath"`
-	// ContainerPath is the path inside the container where hostPath will be mounted.
+	// ContainerPath is the path inside the container where HostPath will be mounted.
+	// Empty uses the matching home-relative HostPath; md owns the resolution.
 	ContainerPath string `json:"containerPath"`
 	// Enabled controls whether this mapping is passed to new containers.
 	Enabled bool `json:"enabled"`
@@ -79,19 +81,13 @@ func (p *Preferences) Validate() error {
 		seen[r.Path] = struct{}{}
 	}
 	for i, m := range p.Settings.CacheMappings {
-		if m.HostPath == "" {
-			return fmt.Errorf("cacheMappings[%d]: empty hostPath", i)
-		}
-		if m.ContainerPath == "" {
-			return fmt.Errorf("cacheMappings[%d]: empty containerPath", i)
+		if _, err := md.ResolveMountTarget(m.HostPath, m.ContainerPath); err != nil {
+			return fmt.Errorf("cacheMappings[%d]: %w", i, err)
 		}
 	}
 	for i, m := range p.Settings.CustomMounts {
-		if m.HostPath == "" {
-			return fmt.Errorf("customMounts[%d]: empty hostPath", i)
-		}
-		if m.ContainerPath == "" {
-			return fmt.Errorf("customMounts[%d]: empty containerPath", i)
+		if _, err := md.ResolveMountTarget(m.HostPath, m.ContainerPath); err != nil {
+			return fmt.Errorf("customMounts[%d]: %w", i, err)
 		}
 	}
 	if err := p.Settings.ContainerPlatform.Validate(); err != nil {

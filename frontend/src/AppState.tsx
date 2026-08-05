@@ -4,7 +4,7 @@
 import { createContext, createEffect, createSignal, onCleanup, useContext, type JSX } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
 
-import type { Config, Harness, HarnessInfo, Repo, Task, TaskState, UsageResp, ImageData as APIImageData, CacheMappingResp, CacheSize, OAuthGrantResp, MountMappingResp, Platform, RuntimeInfo, WellKnownCachesResp, VersionResp } from "@sdk/types.gen";
+import type { Config, Harness, HarnessInfo, Repo, Task, TaskState, UsageResp, ImageData as APIImageData, CacheMappingResp, CacheSize, OAuthGrantResp, MountMappingResp, Platform, PreferencesResp, RuntimeInfo, WellKnownCachesResp, VersionResp } from "@sdk/types.gen";
 
 import { useHostMode } from "./gomode/HostMode";
 
@@ -79,6 +79,7 @@ function createAppStore() {
   const [wellKnownCacheSizes, setWellKnownCacheSizes] = createSignal<Record<string, CacheSize | undefined>>({});
   const [cacheMappings, setCacheMappings] = createSignal<CacheMappingResp[]>([]);
   const [customMounts, setCustomMounts] = createSignal<MountMappingResp[]>([]);
+  const [settingsError, setSettingsError] = createSignal("");
   const [oauthGrants, setOAuthGrants] = createSignal<OAuthGrantResp[]>([]);
   const [oauthGrantError, setOAuthGrantError] = createSignal("");
   const [revokingOAuthGrantID, setRevokingOAuthGrantID] = createSignal<string | null>(null);
@@ -87,6 +88,8 @@ function createAppStore() {
   const [updateStatus, setUpdateStatus] = createSignal<string>("");
   const [checkingUpdate, setCheckingUpdate] = createSignal(false);
   const [updating, setUpdating] = createSignal(false);
+  let latestSettingsSave = 0;
+  let settingsSaveQueue = Promise.resolve();
 
   createEffect(() => {
     const available = runtimes();
@@ -96,8 +99,8 @@ function createAppStore() {
   });
 
   /** Build the current settings payload for updatePreferences, with optional overrides. */
-  const currentSettings = (overrides: Partial<Parameters<typeof updatePreferences>[0]["settings"]> = {}) => ({
-    settings: {
+  const currentSettings = (overrides: Partial<Parameters<typeof updatePreferences>[0]["settings"]> = {}) => {
+    const settings = {
       autoFixOnCIFailure: autoFixCI(),
       autoFixOnPROpen: autoFixPR(),
       baseImage: selectedImage() || "",
@@ -108,8 +111,15 @@ function createAppStore() {
       cacheMappings: cacheMappings(),
       customMounts: customMounts(),
       ...overrides,
-    },
-  });
+    };
+    return {
+      settings: {
+        ...settings,
+        cacheMappings: settings.cacheMappings.map(({ resolvedContainerPath: _, ...mapping }) => mapping),
+        customMounts: settings.customMounts.map(({ resolvedContainerPath: _, ...mount }) => mount),
+      },
+    };
+  };
 
   // Clone repo dialog state.
   const [cloneOpen, setCloneOpen] = createSignal(false);
@@ -139,6 +149,34 @@ function createAppStore() {
 
   const selectRuntimeName = (runtimeName: string) => {
     setSelectedRuntimeName(runtimeName);
+  };
+
+  const applySettings = (settings: PreferencesResp["settings"]) => {
+    setAutoFixCI(settings.autoFixOnCIFailure);
+    setAutoFixPR(settings.autoFixOnPROpen);
+    setMaxCPUs(settings.maxCPUs ?? 0);
+    setSelectedRuntimeName(settings.runtimeName ?? selectedRuntimeName());
+    setContainerPlatform(settings.containerPlatform ?? "");
+    setWellKnownCaches(settings.wellKnownCaches ?? {});
+    setCacheMappings(settings.cacheMappings ?? []);
+    setCustomMounts(settings.customMounts ?? []);
+  };
+
+  const applyResolvedContainerPaths = (settings: PreferencesResp["settings"]) => {
+    setCacheMappings((current) => current.map((mapping, i) => {
+      const saved = settings.cacheMappings?.[i];
+      if (!saved || saved.hostPath !== mapping.hostPath || saved.containerPath !== mapping.containerPath) {
+        return { ...mapping, resolvedContainerPath: undefined };
+      }
+      return { ...mapping, resolvedContainerPath: saved.resolvedContainerPath };
+    }));
+    setCustomMounts((current) => current.map((mount, i) => {
+      const saved = settings.customMounts?.[i];
+      if (!saved || saved.hostPath !== mount.hostPath || saved.containerPath !== mount.containerPath) {
+        return { ...mount, resolvedContainerPath: undefined };
+      }
+      return { ...mount, resolvedContainerPath: saved.resolvedContainerPath };
+    }));
   };
 
   const applyServerConfig = (config: Config) => {
@@ -461,16 +499,7 @@ function createAppStore() {
         }
         if (prefs?.settings?.baseImage) setSelectedImage(prefs.settings.baseImage);
         if (config) applyServerConfig(config);
-        if (prefs?.settings) {
-          setAutoFixCI(prefs.settings.autoFixOnCIFailure);
-          setAutoFixPR(prefs.settings.autoFixOnPROpen);
-          setMaxCPUs(prefs.settings.maxCPUs ?? 0);
-          setSelectedRuntimeName(prefs.settings.runtimeName ?? selectedRuntimeName());
-          setContainerPlatform(prefs.settings.containerPlatform ?? "");
-          setWellKnownCaches(prefs.settings.wellKnownCaches ?? {});
-          setCacheMappings(prefs.settings.cacheMappings ?? []);
-          setCustomMounts(prefs.settings.customMounts ?? []);
-        }
+        if (prefs?.settings) applySettings(prefs.settings);
         if (usageData) setUsage(usageData);
       } finally {
         setInitializing(false);
@@ -873,8 +902,19 @@ function createAppStore() {
     }
   }
 
-  async function saveSettings(overrides: Partial<Parameters<typeof updatePreferences>[0]["settings"]> = {}) {
-    await updatePreferences(currentSettings(overrides));
+  function saveSettings(overrides: Partial<Parameters<typeof updatePreferences>[0]["settings"]> = {}): Promise<void> {
+    const saveID = ++latestSettingsSave;
+    const settings = currentSettings(overrides);
+    setSettingsError("");
+    settingsSaveQueue = settingsSaveQueue.then(async () => {
+      try {
+        const preferences = await updatePreferences(settings);
+        if (saveID === latestSettingsSave) applyResolvedContainerPaths(preferences.settings);
+      } catch (e: unknown) {
+        if (saveID === latestSettingsSave) setSettingsError(e instanceof Error ? e.message : "Could not save settings");
+      }
+    });
+    return settingsSaveQueue;
   }
 
   async function revokeOAuthClientGrant(grantID: string) {
@@ -964,7 +1004,7 @@ function createAppStore() {
     // settings
     selectedImage, setSelectedImage, containerPlatform, setContainerPlatform,
     maxCPUs, setMaxCPUs, wellKnownCaches, setWellKnownCaches,
-    wellKnownCachesList, wellKnownCacheSizes, cacheMappings, setCacheMappings, customMounts, setCustomMounts,
+    wellKnownCachesList, wellKnownCacheSizes, cacheMappings, setCacheMappings, customMounts, setCustomMounts, settingsError,
     autoFixCI, setAutoFixCI, autoFixPR, setAutoFixPR,
     oauthGrants, oauthGrantError, revokingOAuthGrantID, revokeOAuthClientGrant,
     versionInfo, versionCheckError, checkingUpdate, updating, updateStatus, saveSettings, triggerServerUpdate,

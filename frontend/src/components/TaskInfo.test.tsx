@@ -59,7 +59,7 @@ describe("TaskInfo", () => {
         harness: "claude",
         capabilities: {},
         runtime: { id: "md-test" },
-        caches: [{ name: "npm", hostPath: "~/.npm", mountPath: "/home/user/.npm" }],
+        caches: [{ name: "npm", hostPath: "~/.npm", containerPath: "/home/user/.npm" }],
       },
     });
 

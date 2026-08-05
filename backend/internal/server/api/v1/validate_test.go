@@ -261,7 +261,7 @@ func TestValidate(t *testing.T) {
 			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"cacheMappings":[{"hostPath":"","containerPath":"/cache"}]}}`), &r); err != nil {
 				t.Fatalf("Unmarshal: %v", err)
 			}
-			assertBadRequest(t, r.Validate(), "cacheMappings[0]: hostPath is required")
+			assertBadRequest(t, r.Validate(), "cacheMappings[0]: host path is required")
 		})
 		t.Run("InvalidCustomMount", func(t *testing.T) {
 			t.Parallel()
@@ -269,7 +269,44 @@ func TestValidate(t *testing.T) {
 			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"customMounts":[{"hostPath":"/host","containerPath":""}]}}`), &r); err != nil {
 				t.Fatalf("Unmarshal: %v", err)
 			}
-			assertBadRequest(t, r.Validate(), "customMounts[0]: containerPath is required")
+			assertBadRequest(t, r.Validate(), "customMounts[0]: container path is required")
+		})
+		t.Run("AllowsUnsetHomeRelativeContainerPaths", func(t *testing.T) {
+			t.Parallel()
+			var r UpdatePreferencesReq
+			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"cacheMappings":[{"hostPath":"~/.claude","containerPath":""}],"customMounts":[{"hostPath":"~/.codex","containerPath":""}]}}`), &r); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			if err := r.Validate(); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := r.Settings.CacheMappings[0].ContainerPath; got != "" {
+				t.Errorf("cache containerPath = %q, want unset", got)
+			}
+			if got := r.Settings.CustomMounts[0].ContainerPath; got != "" {
+				t.Errorf("mount containerPath = %q, want unset", got)
+			}
+		})
+		t.Run("InvalidMappingPaths", func(t *testing.T) {
+			t.Parallel()
+			for _, tc := range []struct {
+				name string
+				body string
+				want string
+			}{
+				{"relative host", `{"settings":{"cacheMappings":[{"hostPath":"cache","containerPath":"/cache"}]}}`, "cacheMappings[0]: host path must be absolute or home-relative"},
+				{"host escapes home", `{"settings":{"cacheMappings":[{"hostPath":"~/../../etc","containerPath":"/cache"}]}}`, "cacheMappings[0]: host path must not escape home"},
+				{"relative container", `{"settings":{"customMounts":[{"hostPath":"/host","containerPath":"cache"}]}}`, "customMounts[0]: container path must be absolute or home-relative"},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					var r UpdatePreferencesReq
+					if err := json.Unmarshal([]byte(tc.body), &r); err != nil {
+						t.Fatalf("Unmarshal: %v", err)
+					}
+					assertBadRequest(t, r.Validate(), tc.want)
+				})
+			}
 		})
 		t.Run("UnknownTopLevelField", func(t *testing.T) {
 			t.Parallel()

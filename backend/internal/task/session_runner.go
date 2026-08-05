@@ -10,8 +10,9 @@ import (
 	"log/slog"
 	"path/filepath"
 	"runtime/trace"
-	"strings"
 	"time"
+
+	"github.com/caic-xyz/md"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
@@ -363,15 +364,15 @@ func (r *SessionRunner) backend(name harness.Name) agent.Backend {
 }
 
 // runtimeDir returns the working directory path inside a runtime instance.
-// Uses the task's primary repo MountedPath when available; otherwise falls back
+// Uses the task's primary repo ContainerPath when available; otherwise falls back
 // to computing it from the workspace's Dir basename (legacy). Returns /home/user
 // for no-repo workspaces.
 //
-// TODO(2026-07-01): remove the filepath.Base fallback once all pre-MountedPath
+// TODO(2026-07-01): remove the filepath.Base fallback once all pre-ContainerPath
 // runtime instances have cycled out.
 func (r *SessionRunner) runtimeDir(t *Task) string {
-	if p := t.Primary(); p != nil && p.MountedPath != "" {
-		return strings.Replace(p.MountedPath, "~/", "/home/user/", 1)
+	if p := t.Primary(); p != nil && p.ContainerPath != "" {
+		return md.ResolveContainerPath(p.ContainerPath)
 	}
 	if r.Workspace == nil || r.Workspace.Dir == "" {
 		return "/home/user"

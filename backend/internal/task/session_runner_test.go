@@ -236,7 +236,7 @@ func TestSessionRunner(t *testing.T) {
 			task *Task
 			want string
 		}{
-			{task: &Task{Repos: []RepoMount{{MountedPath: "~/src/caic-xyz/md"}}}, want: "/home/user/src/caic-xyz/md"},
+			{task: &Task{Repos: []RepoMount{{ContainerPath: "~/src/caic-xyz/md"}}}, want: "/home/user/src/caic-xyz/md"},
 			{dir: "/home/maruel/src/caic", want: "/home/user/src/caic"},
 			{dir: "/home/alice/projects/myrepo", want: "/home/user/src/myrepo"},
 			{dir: "/opt/repos/foo", want: "/home/user/src/foo"},

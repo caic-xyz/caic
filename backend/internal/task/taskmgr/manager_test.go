@@ -1090,8 +1090,8 @@ func TestManager(t *testing.T) {
 			if len(repos) != 1 {
 				t.Fatalf("len(Repos) = %d, want 1", len(repos))
 			}
-			if got := repos[0].MountedPath; got != "~/src/repo" {
-				t.Errorf("MountedPath = %q, want %q", got, "~/src/repo")
+			if got := repos[0].ContainerPath; got != "~/src/repo" {
+				t.Errorf("ContainerPath = %q, want %q", got, "~/src/repo")
 			}
 		})
 		t.Run("valid_sets_relative_mounted_path_for_basename_collision", func(t *testing.T) {
@@ -1115,8 +1115,8 @@ func TestManager(t *testing.T) {
 			if len(repos) != 1 {
 				t.Fatalf("len(Repos) = %d, want 1", len(repos))
 			}
-			if got := repos[0].MountedPath; got != "~/src/my/repo" {
-				t.Errorf("MountedPath = %q, want %q", got, "~/src/my/repo")
+			if got := repos[0].ContainerPath; got != "~/src/my/repo" {
+				t.Errorf("ContainerPath = %q, want %q", got, "~/src/my/repo")
 			}
 		})
 		t.Run("valid_sudo_resolution_no_container", func(t *testing.T) {
@@ -1866,8 +1866,8 @@ func TestManager(t *testing.T) {
 					BaseImage:         "ghcr.io/caic/base:v1",
 					ContainerPlatform: "linux/amd64",
 					MaxCPUs:           4,
-					CacheMounts:       []runtime.CacheMount{{Name: "npm", HostPath: "~/.npm", MountPath: "/home/user/.npm", ReadOnly: true}},
-					Mounts:            []runtime.Mount{{HostPath: "/host/work", MountPath: "/workspace/work", ReadOnly: true}},
+					CacheMounts:       []runtime.CacheMount{{Name: "npm", HostPath: "~/.npm", ContainerPath: "/home/user/.npm", ReadOnly: true}},
+					Mounts:            []runtime.Mount{{HostPath: "/host/work", ContainerPath: "/workspace/work", ReadOnly: true}},
 					Model:             "model-1",
 					Effort:            "high",
 					AgentVersion:      "1.2.3",
@@ -2712,8 +2712,8 @@ func TestManager(t *testing.T) {
 			})
 			m.RegisterWorkspace("repo/a", &repowork.Workspace{Dir: "/home/user/src/repo/a", Log: logtest.Logger(t)})
 			instances := []runtime.Instance{
-				{ID: runtime.NewID("test-runtime", "duplicate-one"), State: "exited", Repos: []runtime.Repo{{MountPath: "/home/user/src/repo/a", Branch: "caic-1"}}},
-				{ID: runtime.NewID("test-runtime", "duplicate-two"), State: "exited", Repos: []runtime.Repo{{MountPath: "/home/user/src/repo/a", Branch: "caic-1"}}},
+				{ID: runtime.NewID("test-runtime", "duplicate-one"), State: "exited", Repos: []runtime.Repo{{ContainerPath: "/home/user/src/repo/a", Branch: "caic-1"}}},
+				{ID: runtime.NewID("test-runtime", "duplicate-two"), State: "exited", Repos: []runtime.Repo{{ContainerPath: "/home/user/src/repo/a", Branch: "caic-1"}}},
 			}
 			adopted, err := m.AdoptInstances(t.Context(), []AdoptRepo{{RelPath: "repo/a", AbsPath: "/home/user/src/repo/a"}}, instances, nil)
 			if err == nil || !strings.Contains(err.Error(), "duplicate runtime task ID") {
@@ -2742,7 +2742,7 @@ func TestManager(t *testing.T) {
 			_, err := m.AdoptInstances(t.Context(), []AdoptRepo{{RelPath: "repo/a", AbsPath: "/home/user/src/repo/a"}}, []runtime.Instance{{
 				ID:    runtime.NewID("test-runtime", "metadata-error"),
 				State: "exited",
-				Repos: []runtime.Repo{{HostPath: "/home/user/src/repo/a", Branch: "caic-1", MountPath: "/home/user/src/repo/a"}},
+				Repos: []runtime.Repo{{GitRoot: "/home/user/src/repo/a", Branch: "caic-1", ContainerPath: "/home/user/src/repo/a"}},
 			}}, []*task.LoadedTask{{
 				TaskID:  taskID.String(),
 				Harness: harness.Claude,
@@ -2772,8 +2772,8 @@ func TestManager(t *testing.T) {
 					ID:    runtime.NewID("test-runtime", "md-caic-caic-5"),
 					State: "exited",
 					Repos: []runtime.Repo{
-						{HostPath: "/home/user/src/caic-xyz/caic", Branch: "caic-5", MountPath: "/home/user/src/caic-xyz/caic"},
-						{HostPath: "/home/user/src/caic-xyz/md", Branch: "caic-0", MountPath: "/home/user/src/caic-xyz/md"},
+						{GitRoot: "/home/user/src/caic-xyz/caic", Branch: "caic-5", ContainerPath: "/home/user/src/caic-xyz/caic"},
+						{GitRoot: "/home/user/src/caic-xyz/md", Branch: "caic-0", ContainerPath: "/home/user/src/caic-xyz/md"},
 					},
 				},
 			}, []*task.LoadedTask{{
@@ -2824,7 +2824,7 @@ func TestManager(t *testing.T) {
 
 			_, err := m.AdoptInstances(t.Context(), []AdoptRepo{{RelPath: "repo/a", AbsPath: "/home/user/src/repo/a"}}, []runtime.Instance{{
 				ID: runtime.NewID("test-runtime", "repo-only-match"), State: "exited",
-				Repos: []runtime.Repo{{HostPath: "/home/user/src/repo/a", Branch: "caic-1", MountPath: "/home/user/src/repo/a"}},
+				Repos: []runtime.Repo{{GitRoot: "/home/user/src/repo/a", Branch: "caic-1", ContainerPath: "/home/user/src/repo/a"}},
 			}}, []*task.LoadedTask{{
 				TaskID:  otherTaskID.String(),
 				Repos:   []task.RepoMount{{Name: "repo/a", Branch: "caic-1"}},
@@ -2846,7 +2846,7 @@ func TestManager(t *testing.T) {
 
 			_, err := m.AdoptInstances(t.Context(), []AdoptRepo{{RelPath: "repo/a", AbsPath: "/home/user/src/repo/a"}}, []runtime.Instance{{
 				ID: runtime.NewID("test-runtime", "unknown-harness"), State: "exited",
-				Repos: []runtime.Repo{{HostPath: "/home/user/src/repo/a", Branch: "caic-1", MountPath: "/home/user/src/repo/a"}},
+				Repos: []runtime.Repo{{GitRoot: "/home/user/src/repo/a", Branch: "caic-1", ContainerPath: "/home/user/src/repo/a"}},
 			}}, []*task.LoadedTask{{
 				TaskID:  taskID.String(),
 				Repos:   []task.RepoMount{{Name: "repo/a", Branch: "caic-1"}},
@@ -2902,8 +2902,8 @@ func TestManager(t *testing.T) {
 				BaseImage:         "ghcr.io/caic/base:v1",
 				ContainerPlatform: "linux/amd64",
 				MaxCPUs:           5,
-				CacheMounts:       []agent.MetaCacheMount{{Name: "npm", HostPath: "~/.npm", MountPath: "/home/user/.npm", ReadOnly: true}},
-				Mounts:            []agent.MetaMount{{HostPath: "/host/work", MountPath: "/workspace/work", ReadOnly: true}},
+				CacheMounts:       []agent.MetaCacheMount{{Name: "npm", HostPath: "~/.npm", ContainerPath: "/home/user/.npm", ReadOnly: true}},
+				Mounts:            []agent.MetaMount{{HostPath: "/host/work", ContainerPath: "/workspace/work", ReadOnly: true}},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -2917,7 +2917,7 @@ func TestManager(t *testing.T) {
 			}
 
 			adopted, err := m.AdoptInstances(t.Context(), []AdoptRepo{{RelPath: "repo/a", AbsPath: "/home/user/src/repo/a"}}, []runtime.Instance{
-				{ID: runtime.NewID("test-runtime", "restore-config"), State: "exited", Repos: []runtime.Repo{{HostPath: "/home/user/src/repo/a", Branch: "caic-9", MountPath: "/home/user/src/repo/a"}}},
+				{ID: runtime.NewID("test-runtime", "restore-config"), State: "exited", Repos: []runtime.Repo{{GitRoot: "/home/user/src/repo/a", Branch: "caic-9", ContainerPath: "/home/user/src/repo/a"}}},
 			}, logs)
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
@@ -2982,9 +2982,9 @@ func TestManager(t *testing.T) {
 					ID:    runtime.NewID("test-runtime", "merge-tail"),
 					State: "running",
 					Repos: []runtime.Repo{{
-						HostPath:  "/home/user/src/caic-xyz/caic",
-						Branch:    "caic-12",
-						MountPath: "/home/user/src/caic-xyz/caic",
+						GitRoot:       "/home/user/src/caic-xyz/caic",
+						Branch:        "caic-12",
+						ContainerPath: "/home/user/src/caic-xyz/caic",
 					}},
 				},
 			}, logs)
@@ -3050,9 +3050,9 @@ func TestManager(t *testing.T) {
 					AgentTarget: runtime.ConnectionTarget{SSHHost: "ask-tail"},
 					State:       "running",
 					Repos: []runtime.Repo{{
-						HostPath:  "/home/user/src/repo/a",
-						Branch:    "caic-10",
-						MountPath: "/home/user/src/repo/a",
+						GitRoot:       "/home/user/src/repo/a",
+						Branch:        "caic-10",
+						ContainerPath: "/home/user/src/repo/a",
 					}},
 				},
 			}, []*task.LoadedTask{{
@@ -3124,9 +3124,9 @@ func TestManager(t *testing.T) {
 					ID:    runtime.NewID("test-runtime", "dead-relay"),
 					State: "running",
 					Repos: []runtime.Repo{{
-						HostPath:  "/home/user/src/caic-xyz/caic",
-						Branch:    "caic-7",
-						MountPath: "/home/user/src/caic-xyz/caic",
+						GitRoot:       "/home/user/src/caic-xyz/caic",
+						Branch:        "caic-7",
+						ContainerPath: "/home/user/src/caic-xyz/caic",
 					}},
 				},
 			}, logs)
@@ -3180,9 +3180,9 @@ func TestManager(t *testing.T) {
 					ID:    runtime.NewID("test-runtime", "dead-relay-tail"),
 					State: "running",
 					Repos: []runtime.Repo{{
-						HostPath:  "/home/user/src/caic-xyz/caic",
-						Branch:    "caic-8",
-						MountPath: "/home/user/src/caic-xyz/caic",
+						GitRoot:       "/home/user/src/caic-xyz/caic",
+						Branch:        "caic-8",
+						ContainerPath: "/home/user/src/caic-xyz/caic",
 					}},
 				},
 			}, []*task.LoadedTask{{
@@ -3234,9 +3234,9 @@ func TestManager(t *testing.T) {
 					ID:    runtime.NewID("test-runtime", "stale-tail"),
 					State: "running",
 					Repos: []runtime.Repo{{
-						HostPath:  "/home/user/src/caic-xyz/caic",
-						Branch:    "caic-9",
-						MountPath: "/home/user/src/caic-xyz/caic",
+						GitRoot:       "/home/user/src/caic-xyz/caic",
+						Branch:        "caic-9",
+						ContainerPath: "/home/user/src/caic-xyz/caic",
 					}},
 				},
 			}, []*task.LoadedTask{{
@@ -3300,9 +3300,9 @@ func TestManager(t *testing.T) {
 					ID:    runtime.NewID("test-runtime", "stale-trailer"),
 					State: "exited",
 					Repos: []runtime.Repo{{
-						HostPath:  "/home/user/src/caic-xyz/caic",
-						Branch:    "caic-10",
-						MountPath: "/home/user/src/caic-xyz/caic",
+						GitRoot:       "/home/user/src/caic-xyz/caic",
+						Branch:        "caic-10",
+						ContainerPath: "/home/user/src/caic-xyz/caic",
 					}},
 				},
 			}, loaded)
@@ -3356,7 +3356,7 @@ func TestManager(t *testing.T) {
 					ID:    runtime.NewID("test-runtime", "md-caic-caic-6"),
 					State: "exited",
 					Repos: []runtime.Repo{
-						{HostPath: "/home/user/src/caic-xyz/caic", Branch: "caic-6", MountPath: "/home/user/src/caic-xyz/caic"},
+						{GitRoot: "/home/user/src/caic-xyz/caic", Branch: "caic-6", ContainerPath: "/home/user/src/caic-xyz/caic"},
 					},
 				},
 			}, logs)

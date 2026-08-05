@@ -105,17 +105,17 @@ func (a mdClientAdapter) Inspect(ctx context.Context, id runtime.InstanceID) (*r
 	}
 	mounts := make([]runtime.Mount, len(info.Mounts))
 	for i, m := range info.Mounts {
-		mounts[i] = runtime.Mount{HostPath: m.HostPath, MountPath: m.ContainerPath, ReadOnly: m.ReadOnly}
+		mounts[i] = runtime.Mount{HostPath: m.HostPath, ContainerPath: m.ContainerPath, ReadOnly: m.ReadOnly}
 	}
 	caches := make([]runtime.CacheMount, len(info.Caches))
 	for i, c := range info.Caches {
 		caches[i] = runtime.CacheMount{
-			Name:        c.Name,
-			Description: c.Description,
-			HostPath:    c.HostPath,
-			MountPath:   c.ContainerPath,
-			ReadOnly:    c.ReadOnly,
-			Shallow:     c.Shallow,
+			Name:          c.Name,
+			Description:   c.Description,
+			HostPath:      c.HostPath,
+			ContainerPath: c.ContainerPath,
+			ReadOnly:      c.ReadOnly,
+			Shallow:       c.Shallow,
 		}
 	}
 	inspectID := runtime.ID(info.ID)
@@ -297,7 +297,7 @@ func (b *Backend) Name() runtime.Name { return runtime.Name(b.client.Runtime()) 
 func (b *Backend) Launch(ctx context.Context, repos []runtime.Repo, opts *runtime.StartOptions) (runtime.ID, error) {
 	defer trace.StartRegion(ctx, "container.launch").End()
 	if len(repos) > 0 {
-		b.log.InfoContext(ctx, "md", "phase", "launch", "dir", repos[0].HostPath, "br", repos[0].Branch, "hns", opts.Harness)
+		b.log.InfoContext(ctx, "md", "phase", "launch", "dir", repos[0].GitRoot, "br", repos[0].Branch, "hns", opts.Harness)
 	} else {
 		b.log.InfoContext(ctx, "md", "phase", "launch", "hns", opts.Harness)
 	}
@@ -514,7 +514,7 @@ func (b *Backend) Fork(ctx context.Context, id runtime.ID, opts *runtime.ForkOpt
 	}
 	name := string(localID)
 	if len(opts.Repos) > 0 {
-		b.log.InfoContext(ctx, "md", "phase", "fork", "src", name, "dir", opts.Repos[0].HostPath, "br", opts.Repos[0].DestPrimary)
+		b.log.InfoContext(ctx, "md", "phase", "fork", "src", name, "dir", opts.Repos[0].GitRoot, "br", opts.Repos[0].DestPrimary)
 	}
 	b.log.DebugContext(ctx, "fork starting", "source", name, "repos_count", len(opts.Repos))
 
@@ -531,7 +531,7 @@ func (b *Backend) Fork(ctx context.Context, id runtime.ID, opts *runtime.ForkOpt
 	b.log.DebugContext(ctx, "building fork options", "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "sudo", opts.Sudo)
 	forkRepos := make([]md.ForkRepo, len(opts.Repos))
 	for i, r := range opts.Repos {
-		forkRepos[i] = md.ForkRepo{GitRoot: r.HostPath, SourceBranches: r.SourceBranches, MountedPath: r.MountPath, DestPrimary: r.DestPrimary}
+		forkRepos[i] = md.ForkRepo{GitRoot: r.GitRoot, SourceBranches: r.SourceBranches, ContainerPath: r.ContainerPath, DestPrimary: r.DestPrimary}
 	}
 	forkOpts := &md.ForkOpts{
 		Repos:     forkRepos,
@@ -854,9 +854,9 @@ func toMDRepos(repos []runtime.Repo) []md.Repo {
 			branches = []string{r.Branch}
 		}
 		out[i] = md.Repo{
-			GitRoot:       r.HostPath,
+			GitRoot:       r.GitRoot,
 			Branches:      branches,
-			MountedPath:   r.MountPath,
+			ContainerPath: r.ContainerPath,
 			DefaultRemote: r.Remote,
 			DefaultBranch: r.BaseBranch,
 		}
@@ -880,11 +880,11 @@ func fromMDRepos(repos []md.Repo) []runtime.Repo {
 	for i := range repos {
 		r := &repos[i]
 		out[i] = runtime.Repo{
-			HostPath:   r.GitRoot,
-			MountPath:  r.MountedPath,
-			Branch:     primaryBranch(r),
-			BaseBranch: r.DefaultBranch,
-			Remote:     r.DefaultRemote,
+			GitRoot:       r.GitRoot,
+			ContainerPath: r.ContainerPath,
+			Branch:        primaryBranch(r),
+			BaseBranch:    r.DefaultBranch,
+			Remote:        r.DefaultRemote,
 		}
 	}
 	return out
@@ -920,7 +920,7 @@ func toMDCacheMounts(caches []runtime.CacheMount) []md.CacheMount {
 			Name:          c.Name,
 			Description:   c.Description,
 			HostPath:      c.HostPath,
-			ContainerPath: c.MountPath,
+			ContainerPath: c.ContainerPath,
 			ReadOnly:      c.ReadOnly,
 			Shallow:       c.Shallow,
 		}
@@ -936,7 +936,7 @@ func toMDMounts(mounts []runtime.Mount) []md.Mount {
 	for i, m := range mounts {
 		out[i] = md.Mount{
 			HostPath:      m.HostPath,
-			ContainerPath: m.MountPath,
+			ContainerPath: m.ContainerPath,
 			ReadOnly:      m.ReadOnly,
 		}
 	}

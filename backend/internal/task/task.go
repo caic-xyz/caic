@@ -174,33 +174,33 @@ func (h *SessionHandle) Drain() error {
 // RepoMount describes one repository in a task.
 // Repos[0] is primary; empty slice means no-repo task.
 type RepoMount struct {
-	Name        string // relative path, e.g. "github/caic"
-	BaseBranch  string // branch to fork from; empty = workspace default
-	Branch      string // allocated branch, e.g. "caic-0"
-	GitRoot     string // absolute host path; empty in purged-task entries
-	MountedPath string // mount path inside the runtime instance
+	Name          string // relative path, e.g. "github/caic"
+	BaseBranch    string // branch to fork from; empty = workspace default
+	Branch        string // allocated branch, e.g. "caic-0"
+	GitRoot       string // absolute host path; empty in purged-task entries
+	ContainerPath string // path inside the runtime instance
 }
 
 // ToRuntimeRepo converts a RepoMount to a runtime Repo.
 //
-// When MountedPath is empty, the runtime adapter may populate it from HostPath.
+// When ContainerPath is empty, the runtime adapter may populate it from GitRoot.
 func (r *RepoMount) ToRuntimeRepo() runtime.Repo {
 	return runtime.Repo{
-		HostPath:   r.GitRoot,
-		MountPath:  r.MountedPath,
-		Branch:     r.Branch,
-		BaseBranch: r.BaseBranch,
+		GitRoot:       r.GitRoot,
+		ContainerPath: r.ContainerPath,
+		Branch:        r.Branch,
+		BaseBranch:    r.BaseBranch,
 	}
 }
 
 // RepoMountFromMeta converts a MetaRepo (from JSONL log metadata) to a RepoMount.
 func RepoMountFromMeta(m agent.MetaRepo, gitRoot string) RepoMount {
 	return RepoMount{
-		Name:        m.Name,
-		BaseBranch:  m.BaseBranch,
-		Branch:      m.Branch,
-		MountedPath: m.MountedPath,
-		GitRoot:     gitRoot,
+		Name:          m.Name,
+		BaseBranch:    m.BaseBranch,
+		Branch:        m.Branch,
+		ContainerPath: m.ContainerPath,
+		GitRoot:       gitRoot,
 	}
 }
 

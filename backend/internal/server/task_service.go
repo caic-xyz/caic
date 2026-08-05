@@ -8,12 +8,11 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	pathpkg "path"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/caic-xyz/md"
 	"github.com/caic-xyz/md/git"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -118,13 +117,13 @@ func (s *taskService) getTaskInfo(ctx context.Context, entry *taskmgr.Entry, _ *
 	taskRepos := make([]v1.TaskInfoRepo, 0, len(snap.Repos))
 	for _, repo := range snap.Repos {
 		taskRepos = append(taskRepos, v1.TaskInfoRepo{
-			Name:        repo.Name,
-			BaseBranch:  repo.BaseBranch,
-			Branch:      repo.Branch,
-			HostPath:    repo.GitRoot,
-			MountedPath: repo.MountedPath,
-			RemoteURL:   resolvers.RepoURL(repo.Name),
-			Forge:       resolvers.RepoForge(repo.Name),
+			Name:          repo.Name,
+			BaseBranch:    repo.BaseBranch,
+			Branch:        repo.Branch,
+			GitRoot:       repo.GitRoot,
+			ContainerPath: repo.ContainerPath,
+			RemoteURL:     resolvers.RepoURL(repo.Name),
+			Forge:         resolvers.RepoForge(repo.Name),
 		})
 	}
 
@@ -186,12 +185,12 @@ func taskInfoCaches(in []runtime.CacheMount) []v1.TaskInfoCacheMount {
 	out := make([]v1.TaskInfoCacheMount, len(in))
 	for i, m := range in {
 		out[i] = v1.TaskInfoCacheMount{
-			Name:        m.Name,
-			Description: m.Description,
-			HostPath:    m.HostPath,
-			MountPath:   m.MountPath,
-			ReadOnly:    m.ReadOnly,
-			Shallow:     m.Shallow,
+			Name:          m.Name,
+			Description:   m.Description,
+			HostPath:      m.HostPath,
+			ContainerPath: m.ContainerPath,
+			ReadOnly:      m.ReadOnly,
+			Shallow:       m.Shallow,
 		}
 	}
 	return out
@@ -203,7 +202,7 @@ func taskInfoMounts(in []runtime.Mount) []v1.TaskInfoMount {
 	}
 	out := make([]v1.TaskInfoMount, len(in))
 	for i, m := range in {
-		out[i] = v1.TaskInfoMount{HostPath: m.HostPath, MountPath: m.MountPath, ReadOnly: m.ReadOnly}
+		out[i] = v1.TaskInfoMount{HostPath: m.HostPath, ContainerPath: m.ContainerPath, ReadOnly: m.ReadOnly}
 	}
 	return out
 }
@@ -255,7 +254,7 @@ func taskInfoCompareWarnings(recorded *v1.TaskInfoRecorded, observed *v1.TaskInf
 	}
 	for _, recordedMount := range recorded.Mounts {
 		if !taskInfoMountsContain(hostHome, observed.Mounts, recordedMount) {
-			warnings = append(warnings, fmt.Sprintf("observed mounts do not include recorded mount %s -> %s", recordedMount.HostPath, recordedMount.MountPath))
+			warnings = append(warnings, fmt.Sprintf("observed mounts do not include recorded mount %s -> %s", recordedMount.HostPath, recordedMount.ContainerPath))
 		}
 	}
 	return warnings
@@ -273,50 +272,10 @@ func taskInfoMountsContain(hostHome string, mounts []v1.TaskInfoMount, target v1
 
 func taskInfoNormalizeMount(m v1.TaskInfoMount, hostHome string) v1.TaskInfoMount {
 	return v1.TaskInfoMount{
-		HostPath:  taskInfoNormalizeHostPath(m.HostPath, hostHome),
-		MountPath: taskInfoNormalizeContainerPath(m.MountPath),
-		ReadOnly:  m.ReadOnly,
+		HostPath:      md.ResolveHostPath(m.HostPath, hostHome),
+		ContainerPath: md.ResolveContainerPath(m.ContainerPath),
+		ReadOnly:      m.ReadOnly,
 	}
-}
-
-func taskInfoNormalizeHostPath(p, home string) string {
-	if p == "" {
-		return ""
-	}
-	if home != "" {
-		suffix, ok := taskInfoHomePathSuffix(p, true)
-		if ok {
-			return filepath.ToSlash(filepath.Clean(filepath.Join(home, suffix)))
-		}
-	}
-	return filepath.ToSlash(filepath.Clean(p))
-}
-
-func taskInfoNormalizeContainerPath(p string) string {
-	if p == "" {
-		return ""
-	}
-	suffix, ok := taskInfoHomePathSuffix(p, false)
-	if ok {
-		if suffix == "" {
-			return "/home/user"
-		}
-		return pathpkg.Join("/home/user", suffix)
-	}
-	return pathpkg.Clean(p)
-}
-
-func taskInfoHomePathSuffix(p string, windowsBackslash bool) (string, bool) {
-	if p == "~" {
-		return "", true
-	}
-	if strings.HasPrefix(p, "~/") {
-		return p[2:], true
-	}
-	if windowsBackslash && strings.HasPrefix(p, `~\`) {
-		return p[2:], true
-	}
-	return "", false
 }
 
 func taskInfoTailscaleURL(s *task.Snapshot) string {
@@ -348,6 +307,14 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v
 	}
 
 	runtimeName := s.runtimeNameForCreate(req.RuntimeName, &prefs.Settings)
+	cacheMounts, err := cacheMountsFromSettings(&prefs.Settings)
+	if err != nil {
+		return nil, api.InternalError("resolve cache mappings: " + err.Error())
+	}
+	mounts, err := mountsFromSettings(&prefs.Settings)
+	if err != nil {
+		return nil, api.InternalError("resolve custom mounts: " + err.Error())
+	}
 
 	id, err := s.taskMgr.Create(ctx, taskmgr.CreateParams{
 		OwnerID:             ownerID,
@@ -366,8 +333,8 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v
 		BaseImage:           prefs.Settings.BaseImage,
 		ContainerPlatform:   prefs.Settings.ContainerPlatform.String(),
 		MaxCPUs:             prefs.Settings.MaxCPUs,
-		CacheMounts:         cacheMountsFromSettings(&prefs.Settings),
-		Mounts:              mountsFromSettings(&prefs.Settings),
+		CacheMounts:         cacheMounts,
+		Mounts:              mounts,
 	})
 	if err != nil {
 		return nil, toDTO(err)

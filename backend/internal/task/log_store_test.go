@@ -63,7 +63,7 @@ func TestLogStore(t *testing.T) {
 		tk := &Task{
 			ID:            ksid.NewID(),
 			InitialPrompt: agent.Prompt{Text: "test prompt"},
-			Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0", MountedPath: "~/src/org/repo"}},
+			Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0", ContainerPath: "~/src/org/repo"}},
 			Harness:       harness.Codex,
 			Model:         "model-1",
 			Effort:        "high",
@@ -94,7 +94,7 @@ func TestLogStore(t *testing.T) {
 		if meta.MessageType != "caic_meta" || meta.Version != int(agent.LogVersionV1) || meta.Prompt != "test prompt" || meta.Model != "model-1" || meta.Effort != "high" {
 			t.Fatalf("unexpected metadata: %+v", meta)
 		}
-		if len(meta.Repos) != 1 || meta.Repos[0].MountedPath != "~/src/org/repo" {
+		if len(meta.Repos) != 1 || meta.Repos[0].ContainerPath != "~/src/org/repo" {
 			t.Fatalf("metadata repos = %+v", meta.Repos)
 		}
 

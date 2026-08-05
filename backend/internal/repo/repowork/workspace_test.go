@@ -142,7 +142,7 @@ func TestRepoWorkspace(t *testing.T) {
 		t.Parallel()
 		sc := newRecordingContainer()
 		r := newTestRepoWorkspace(t, "", "/repo", sc)
-		tv := &fakeTaskView{instanceID: runtime.NewID("test-runtime", "ctr-1"), repo: []runtime.Repo{{HostPath: "/repo", Branch: "feature"}}}
+		tv := &fakeTaskView{instanceID: runtime.NewID("test-runtime", "ctr-1"), repo: []runtime.Repo{{GitRoot: "/repo", Branch: "feature"}}}
 		ds := r.BranchDiffStat(t.Context(), tv)
 		if len(sc.fetchIDs) == 0 {
 			t.Error("BranchDiffStat did not call Fetch")
@@ -159,8 +159,8 @@ func TestRepoWorkspace(t *testing.T) {
 		sc := newRecordingContainer()
 		r := newTestRepoWorkspace(t, "", "/home/user/src/caic", sc)
 		tv := &fakeTaskView{instanceID: runtime.NewID("test-runtime", "ctr-2"), repo: []runtime.Repo{
-			{HostPath: "/home/user/src/caic", Branch: "caic-7", MountPath: "/home/user/src/caic"},
-			{HostPath: "/home/user/src/genai", Branch: "caic-0", MountPath: "/home/user/src/genai"},
+			{GitRoot: "/home/user/src/caic", Branch: "caic-7", ContainerPath: "/home/user/src/caic"},
+			{GitRoot: "/home/user/src/genai", Branch: "caic-0", ContainerPath: "/home/user/src/genai"},
 		}}
 
 		ds := r.BranchDiffStat(t.Context(), tv)
@@ -205,8 +205,8 @@ func TestTaskRuntime(t *testing.T) {
 		t.Parallel()
 		r := newTestRepoWorkspace(t, "", "/home/user/src/caic-xyz/caic", nil)
 		tv := &fakeTaskView{instanceID: "ctr-1", repo: []runtime.Repo{
-			{Branch: "caic-7", MountPath: "/home/user/src/caic-xyz/caic"},
-			{Branch: "caic-0", HostPath: "/home/user/src/caic-xyz/md", MountPath: "/home/user/src/caic-xyz/md"},
+			{Branch: "caic-7", ContainerPath: "/home/user/src/caic-xyz/caic"},
+			{Branch: "caic-0", GitRoot: "/home/user/src/caic-xyz/md", ContainerPath: "/home/user/src/caic-xyz/md"},
 		}}
 
 		id, repos, err := r.taskRuntime(tv)
@@ -219,14 +219,14 @@ func TestTaskRuntime(t *testing.T) {
 		if len(repos) != 2 {
 			t.Fatalf("repos len = %d, want 2", len(repos))
 		}
-		if repos[0].HostPath != "/home/user/src/caic-xyz/caic" {
-			t.Errorf("primary HostPath = %q, want workspace dir", repos[0].HostPath)
+		if repos[0].GitRoot != "/home/user/src/caic-xyz/caic" {
+			t.Errorf("primary HostPath = %q, want workspace dir", repos[0].GitRoot)
 		}
-		if repos[0].MountPath != "/home/user/src/caic-xyz/caic" {
-			t.Errorf("primary MountPath = %q, want qualified mount", repos[0].MountPath)
+		if repos[0].ContainerPath != "/home/user/src/caic-xyz/caic" {
+			t.Errorf("primary ContainerPath = %q, want qualified path", repos[0].ContainerPath)
 		}
-		if repos[1].MountPath != "/home/user/src/caic-xyz/md" {
-			t.Errorf("extra MountPath = %q, want qualified mount", repos[1].MountPath)
+		if repos[1].ContainerPath != "/home/user/src/caic-xyz/md" {
+			t.Errorf("extra ContainerPath = %q, want qualified path", repos[1].ContainerPath)
 		}
 	})
 	t.Run("valid_no_repos", func(t *testing.T) {
@@ -293,13 +293,13 @@ func TestDiffContentArgs(t *testing.T) {
 			want: []string{"--src-prefix=", "--dst-prefix=", "--", "main.go"},
 		},
 		"multi repo full diff": {
-			repo:  runtime.Repo{MountPath: "~/src/caic"},
+			repo:  runtime.Repo{ContainerPath: "~/src/caic"},
 			multi: true,
 			want:  []string{"--src-prefix=a/caic/", "--dst-prefix=b/caic/"},
 		},
 		"multi repo path": {
 			path:  "b/main.go",
-			repo:  runtime.Repo{MountPath: "~/src/caic-xyz/caic"},
+			repo:  runtime.Repo{ContainerPath: "~/src/caic-xyz/caic"},
 			multi: true,
 			want:  []string{"--src-prefix=a/caic-xyz/caic/", "--dst-prefix=b/caic-xyz/caic/", "--", "b/main.go"},
 		},
@@ -321,19 +321,19 @@ func TestDiffRepoPrefix(t *testing.T) {
 		want string
 	}{
 		"tilde source mount": {
-			repo: runtime.Repo{MountPath: "~/src/caic"},
+			repo: runtime.Repo{ContainerPath: "~/src/caic"},
 			want: "caic",
 		},
 		"tilde collision mount": {
-			repo: runtime.Repo{MountPath: "~/src/caic-xyz/caic"},
+			repo: runtime.Repo{ContainerPath: "~/src/caic-xyz/caic"},
 			want: "caic-xyz/caic",
 		},
 		"home source mount": {
-			repo: runtime.Repo{MountPath: "/home/user/src/caic-xyz/caic"},
+			repo: runtime.Repo{ContainerPath: "/home/user/src/caic-xyz/caic"},
 			want: "caic-xyz/caic",
 		},
 		"host fallback": {
-			repo: runtime.Repo{HostPath: "/home/user/src/caic"},
+			repo: runtime.Repo{GitRoot: "/home/user/src/caic"},
 			want: "caic",
 		},
 	}

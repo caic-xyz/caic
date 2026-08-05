@@ -55,11 +55,8 @@ func validateRepoSpecs(specs []RepoSpec, field string) error {
 
 func validateCacheMappings(mappings []CacheMappingResp) error {
 	for i, m := range mappings {
-		if m.HostPath == "" {
-			return api.BadRequest(fmt.Sprintf("cacheMappings[%d]: hostPath is required", i))
-		}
-		if m.ContainerPath == "" {
-			return api.BadRequest(fmt.Sprintf("cacheMappings[%d]: containerPath is required", i))
+		if _, err := md.ResolveMountTarget(m.HostPath, m.ContainerPath); err != nil {
+			return api.BadRequest(fmt.Sprintf("cacheMappings[%d]: %s", i, err))
 		}
 	}
 	return nil
@@ -67,11 +64,8 @@ func validateCacheMappings(mappings []CacheMappingResp) error {
 
 func validateMountMappings(mappings []MountMappingResp) error {
 	for i, m := range mappings {
-		if m.HostPath == "" {
-			return api.BadRequest(fmt.Sprintf("customMounts[%d]: hostPath is required", i))
-		}
-		if m.ContainerPath == "" {
-			return api.BadRequest(fmt.Sprintf("customMounts[%d]: containerPath is required", i))
+		if _, err := md.ResolveMountTarget(m.HostPath, m.ContainerPath); err != nil {
+			return api.BadRequest(fmt.Sprintf("customMounts[%d]: %s", i, err))
 		}
 	}
 	return nil

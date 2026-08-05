@@ -20,6 +20,11 @@
   line-height: 1.2;
 }
 
+.settingsError {
+  margin: 0 0 1rem;
+  color: var(--color-error);
+}
+
 .settingsLabel {
   display: flex;
   align-items: center;
@@ -110,10 +115,54 @@
 }
 
 .cacheMappingRow {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1.5rem minmax(0, 1fr) auto minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "toggle host-label . container-label . ."
+    "toggle host-input arrow container-input read-only remove"
+    ". . . container-hint . .";
+  column-gap: 0.5rem;
+  row-gap: 0.25rem;
   align-items: center;
-  gap: 0.5rem;
   margin-bottom: 0.5rem;
+}
+
+.mappingHostLabel {
+  grid-area: host-label;
+}
+
+.mappingHostInput {
+  grid-area: host-input;
+}
+
+.mappingContainerLabel {
+  grid-area: container-label;
+}
+
+.mappingContainerInput {
+  grid-area: container-input;
+}
+
+.mappingPathLabel {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.mappingHostInput,
+.mappingContainerInput {
+  box-sizing: border-box;
+  margin-bottom: 0;
+  min-width: 0;
+}
+
+.mappingPathHint {
+  grid-area: container-hint;
+  display: block;
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
 }
 
 .cacheMappingRow[data-state="disabled"] .settingsInput,
@@ -122,19 +171,19 @@
 }
 
 .cacheMappingToggle {
+  grid-area: toggle;
   display: inline-flex;
   align-items: center;
   cursor: pointer;
-  flex-shrink: 0;
 }
 
 .mountOptionToggle {
+  grid-area: read-only;
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
   color: var(--color-text-secondary);
   cursor: pointer;
-  flex-shrink: 0;
   font-size: 0.85rem;
   white-space: nowrap;
 }
@@ -152,18 +201,18 @@
 }
 
 .cacheMappingArrow {
+  grid-area: arrow;
   color: var(--color-text-secondary);
-  flex-shrink: 0;
 }
 
 .cacheMappingRemove {
+  grid-area: remove;
   background: none;
   border: none;
   font-size: 1.25rem;
   cursor: pointer;
   color: var(--color-text-secondary);
   padding: 0.25rem 0.5rem;
-  flex-shrink: 0;
 }
 
 .cacheMappingRemove:hover {

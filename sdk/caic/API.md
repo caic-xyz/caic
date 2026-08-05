@@ -412,7 +412,8 @@ CacheMappingResp represents a directory mapping for cache/state sharing.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `hostPath` | `string` |  | yes |
-| `containerPath` | `string` |  | yes |
+| `containerPath` | `string` | ContainerPath is optional; empty uses the matching home-relative HostPath. | yes |
+| `resolvedContainerPath` | `string` | ResolvedContainerPath is the runtime target after applying the ContainerPath default. |  |
 | `enabled` | `boolean` |  | yes |
 
 ### MountMappingResp
@@ -422,7 +423,8 @@ MountMappingResp represents a general host-to-runtime directory mount.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `hostPath` | `string` |  | yes |
-| `containerPath` | `string` |  | yes |
+| `containerPath` | `string` | ContainerPath is optional; empty uses the matching home-relative HostPath. | yes |
+| `resolvedContainerPath` | `string` | ResolvedContainerPath is the runtime target after applying the ContainerPath default. |  |
 | `enabled` | `boolean` |  | yes |
 | `readOnly` | `boolean` |  | yes |
 
@@ -754,8 +756,8 @@ TaskInfoRepo describes a repository mounted into a task runtime.
 | `name` | `string` |  | yes |
 | `baseBranch` | `string` |  |  |
 | `branch` | `string` |  |  |
-| `hostPath` | `string` |  |  |
-| `mountedPath` | `string` |  |  |
+| `gitRoot` | `string` |  |  |
+| `containerPath` | `string` |  |  |
 | `remoteURL` | `string` |  |  |
 | `forge` | `Forge` |  |  |
 
@@ -768,7 +770,7 @@ TaskInfoCacheMount describes a recorded cache mount.
 | `name` | `string` |  |  |
 | `description` | `string` |  |  |
 | `hostPath` | `string` |  |  |
-| `mountPath` | `string` |  |  |
+| `containerPath` | `string` |  |  |
 | `readOnly` | `boolean` |  |  |
 | `shallow` | `boolean` |  |  |
 
@@ -779,7 +781,7 @@ TaskInfoMount describes a recorded or observed bind mount.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `hostPath` | `string` |  |  |
-| `mountPath` | `string` |  |  |
+| `containerPath` | `string` |  |  |
 | `readOnly` | `boolean` |  |  |
 
 ### TaskInfoRecorded

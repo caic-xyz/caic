@@ -185,7 +185,7 @@ func writeMetadataHeader(w io.Writer, t *Task) error {
 	repos := t.ReposSnapshot()
 	metaRepos := make([]agent.MetaRepo, len(repos))
 	for i, r := range repos {
-		metaRepos[i] = agent.MetaRepo{Name: r.Name, BaseBranch: r.BaseBranch, Branch: r.Branch, MountedPath: r.MountedPath}
+		metaRepos[i] = agent.MetaRepo{Name: r.Name, BaseBranch: r.BaseBranch, Branch: r.Branch, ContainerPath: r.ContainerPath}
 	}
 	meta := agent.MetaMessage{
 		MessageType:       "caic_meta",

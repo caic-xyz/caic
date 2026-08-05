@@ -83,7 +83,7 @@ func (r *forkLogRuntime) Fork(ctx context.Context, id runtime.ID, opts *runtime.
 // destPrimary returns the captured destination primary branch for hostPath.
 func (r *forkLogRuntime) destPrimary(hostPath string) (string, bool) {
 	for _, rp := range r.capturedRepos {
-		if rp.HostPath == hostPath {
+		if rp.GitRoot == hostPath {
 			return rp.DestPrimary, true
 		}
 	}

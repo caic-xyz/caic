@@ -14,12 +14,12 @@ func metaCacheMountsFromRuntime(in []runtime.CacheMount) []agent.MetaCacheMount 
 	out := make([]agent.MetaCacheMount, len(in))
 	for i, m := range in {
 		out[i] = agent.MetaCacheMount{
-			Name:        m.Name,
-			Description: m.Description,
-			HostPath:    m.HostPath,
-			MountPath:   m.MountPath,
-			ReadOnly:    m.ReadOnly,
-			Shallow:     m.Shallow,
+			Name:          m.Name,
+			Description:   m.Description,
+			HostPath:      m.HostPath,
+			ContainerPath: m.ContainerPath,
+			ReadOnly:      m.ReadOnly,
+			Shallow:       m.Shallow,
 		}
 	}
 	return out
@@ -32,12 +32,12 @@ func runtimeCacheMountsFromMeta(in []agent.MetaCacheMount) []runtime.CacheMount 
 	out := make([]runtime.CacheMount, len(in))
 	for i, m := range in {
 		out[i] = runtime.CacheMount{
-			Name:        m.Name,
-			Description: m.Description,
-			HostPath:    m.HostPath,
-			MountPath:   m.MountPath,
-			ReadOnly:    m.ReadOnly,
-			Shallow:     m.Shallow,
+			Name:          m.Name,
+			Description:   m.Description,
+			HostPath:      m.HostPath,
+			ContainerPath: m.ContainerPath,
+			ReadOnly:      m.ReadOnly,
+			Shallow:       m.Shallow,
 		}
 	}
 	return out
@@ -50,9 +50,9 @@ func metaMountsFromRuntime(in []runtime.Mount) []agent.MetaMount {
 	out := make([]agent.MetaMount, len(in))
 	for i, m := range in {
 		out[i] = agent.MetaMount{
-			HostPath:  m.HostPath,
-			MountPath: m.MountPath,
-			ReadOnly:  m.ReadOnly,
+			HostPath:      m.HostPath,
+			ContainerPath: m.ContainerPath,
+			ReadOnly:      m.ReadOnly,
 		}
 	}
 	return out
@@ -65,9 +65,9 @@ func runtimeMountsFromMeta(in []agent.MetaMount) []runtime.Mount {
 	out := make([]runtime.Mount, len(in))
 	for i, m := range in {
 		out[i] = runtime.Mount{
-			HostPath:  m.HostPath,
-			MountPath: m.MountPath,
-			ReadOnly:  m.ReadOnly,
+			HostPath:      m.HostPath,
+			ContainerPath: m.ContainerPath,
+			ReadOnly:      m.ReadOnly,
 		}
 	}
 	return out

@@ -94,26 +94,26 @@ type resultSummary struct {
 }
 
 type repoMountSummary struct {
-	Name        string `json:"name,omitempty"`
-	BaseBranch  string `json:"baseBranch,omitempty"`
-	Branch      string `json:"branch,omitempty"`
-	GitRoot     string `json:"gitRoot,omitempty"`
-	MountedPath string `json:"mountedPath,omitempty"`
+	Name          string `json:"name,omitempty"`
+	BaseBranch    string `json:"baseBranch,omitempty"`
+	Branch        string `json:"branch,omitempty"`
+	GitRoot       string `json:"gitRoot,omitempty"`
+	ContainerPath string `json:"containerPath,omitempty"`
 }
 
 type cacheMountSummary struct {
-	Name        string `json:"name,omitempty"`
-	Description string `json:"description,omitempty"`
-	HostPath    string `json:"hostPath,omitempty"`
-	MountPath   string `json:"mountPath,omitempty"`
-	ReadOnly    bool   `json:"readOnly,omitempty"`
-	Shallow     bool   `json:"shallow,omitempty"`
+	Name          string `json:"name,omitempty"`
+	Description   string `json:"description,omitempty"`
+	HostPath      string `json:"hostPath,omitempty"`
+	ContainerPath string `json:"containerPath,omitempty"`
+	ReadOnly      bool   `json:"readOnly,omitempty"`
+	Shallow       bool   `json:"shallow,omitempty"`
 }
 
 type mountSummary struct {
-	HostPath  string `json:"hostPath,omitempty"`
-	MountPath string `json:"mountPath,omitempty"`
-	ReadOnly  bool   `json:"readOnly,omitempty"`
+	HostPath      string `json:"hostPath,omitempty"`
+	ContainerPath string `json:"containerPath,omitempty"`
+	ReadOnly      bool   `json:"readOnly,omitempty"`
 }
 
 func logSummaryPath(logPath string) string {
@@ -339,12 +339,12 @@ func cacheMountSummaries(mounts []runtime.CacheMount) []cacheMountSummary {
 	out := make([]cacheMountSummary, len(mounts))
 	for i, m := range mounts {
 		out[i] = cacheMountSummary{
-			Name:        m.Name,
-			Description: m.Description,
-			HostPath:    m.HostPath,
-			MountPath:   m.MountPath,
-			ReadOnly:    m.ReadOnly,
-			Shallow:     m.Shallow,
+			Name:          m.Name,
+			Description:   m.Description,
+			HostPath:      m.HostPath,
+			ContainerPath: m.ContainerPath,
+			ReadOnly:      m.ReadOnly,
+			Shallow:       m.Shallow,
 		}
 	}
 	return out
@@ -357,12 +357,12 @@ func cacheMountsFromSummaries(mounts []cacheMountSummary) []runtime.CacheMount {
 	out := make([]runtime.CacheMount, len(mounts))
 	for i, m := range mounts {
 		out[i] = runtime.CacheMount{
-			Name:        m.Name,
-			Description: m.Description,
-			HostPath:    m.HostPath,
-			MountPath:   m.MountPath,
-			ReadOnly:    m.ReadOnly,
-			Shallow:     m.Shallow,
+			Name:          m.Name,
+			Description:   m.Description,
+			HostPath:      m.HostPath,
+			ContainerPath: m.ContainerPath,
+			ReadOnly:      m.ReadOnly,
+			Shallow:       m.Shallow,
 		}
 	}
 	return out
@@ -375,9 +375,9 @@ func mountSummaries(mounts []runtime.Mount) []mountSummary {
 	out := make([]mountSummary, len(mounts))
 	for i, m := range mounts {
 		out[i] = mountSummary{
-			HostPath:  m.HostPath,
-			MountPath: m.MountPath,
-			ReadOnly:  m.ReadOnly,
+			HostPath:      m.HostPath,
+			ContainerPath: m.ContainerPath,
+			ReadOnly:      m.ReadOnly,
 		}
 	}
 	return out
@@ -390,9 +390,9 @@ func mountsFromSummaries(mounts []mountSummary) []runtime.Mount {
 	out := make([]runtime.Mount, len(mounts))
 	for i, m := range mounts {
 		out[i] = runtime.Mount{
-			HostPath:  m.HostPath,
-			MountPath: m.MountPath,
-			ReadOnly:  m.ReadOnly,
+			HostPath:      m.HostPath,
+			ContainerPath: m.ContainerPath,
+			ReadOnly:      m.ReadOnly,
 		}
 	}
 	return out

@@ -257,8 +257,8 @@ func TestBackend(t *testing.T) {
 	t.Run("Diff", func(t *testing.T) {
 		t.Parallel()
 		ctr := &fakeMDContainer{repo: []md.Repo{
-			{GitRoot: "/home/user/src/caic", Branches: []string{"caic-7"}, MountedPath: "/home/user/src/caic"},
-			{GitRoot: "/home/user/src/genai", Branches: []string{"caic-0"}, MountedPath: "/home/user/src/genai"},
+			{GitRoot: "/home/user/src/caic", Branches: []string{"caic-7"}, ContainerPath: "/home/user/src/caic"},
+			{GitRoot: "/home/user/src/genai", Branches: []string{"caic-0"}, ContainerPath: "/home/user/src/genai"},
 		}}
 		fc := &fakeMDClient{getResult: ctr}
 		b := newTestBackend(fc)
@@ -279,8 +279,8 @@ func TestBackend(t *testing.T) {
 	t.Run("Fetch", func(t *testing.T) {
 		t.Parallel()
 		ctr := &fakeMDContainer{repo: []md.Repo{
-			{GitRoot: "/home/user/src/caic", Branches: []string{"caic-7"}, MountedPath: "/home/user/src/caic"},
-			{GitRoot: "/home/user/src/genai", Branches: []string{"caic-0"}, MountedPath: "/home/user/src/genai"},
+			{GitRoot: "/home/user/src/caic", Branches: []string{"caic-7"}, ContainerPath: "/home/user/src/caic"},
+			{GitRoot: "/home/user/src/genai", Branches: []string{"caic-0"}, ContainerPath: "/home/user/src/genai"},
 		}}
 		fc := &fakeMDClient{getResult: ctr}
 		b := newTestBackend(fc)
@@ -354,7 +354,7 @@ func TestBackend(t *testing.T) {
 
 	t.Run("Purge", func(t *testing.T) {
 		t.Parallel()
-		ctr := &fakeMDContainer{name: "ctr-1", repo: []md.Repo{{GitRoot: "/repo", Branches: []string{"caic-0"}, MountedPath: "/repo"}}}
+		ctr := &fakeMDContainer{name: "ctr-1", repo: []md.Repo{{GitRoot: "/repo", Branches: []string{"caic-0"}, ContainerPath: "/repo"}}}
 		fc := &fakeMDClient{getResult: ctr}
 		b := newTestBackend(fc)
 		if err := b.Purge(t.Context(), "docker:ctr-1"); err != nil {
@@ -373,7 +373,7 @@ func TestBackend(t *testing.T) {
 
 	t.Run("Revive", func(t *testing.T) {
 		t.Parallel()
-		ctr := &fakeMDContainer{name: "ctr-1", vncPort: 5903, repo: []md.Repo{{GitRoot: "/repo", Branches: []string{"caic-0"}, MountedPath: "/repo"}}}
+		ctr := &fakeMDContainer{name: "ctr-1", vncPort: 5903, repo: []md.Repo{{GitRoot: "/repo", Branches: []string{"caic-0"}, ContainerPath: "/repo"}}}
 		fc := &fakeMDClient{getResult: ctr}
 		b := newTestBackend(fc)
 		if err := b.Revive(t.Context(), "docker:ctr-1"); err != nil {
@@ -487,8 +487,8 @@ func TestBackend(t *testing.T) {
 			ContainerPlatform: "linux/amd64",
 			Harness:           harness.Claude,
 			GitHubToken:       "tok",
-			Caches:            []runtime.CacheMount{{Name: "npm", HostPath: "~/.npm", MountPath: "/home/user/.npm"}},
-			Mounts:            []runtime.Mount{{HostPath: "/host/work", MountPath: "/workspace/external", ReadOnly: true}},
+			Caches:            []runtime.CacheMount{{Name: "npm", HostPath: "~/.npm", ContainerPath: "/home/user/.npm"}},
+			Mounts:            []runtime.Mount{{HostPath: "/host/work", ContainerPath: "/workspace/external", ReadOnly: true}},
 		})
 		if err != nil {
 			t.Fatalf("mdStartOpts: %v", err)

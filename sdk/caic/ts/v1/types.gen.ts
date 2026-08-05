@@ -626,14 +626,20 @@ export interface RepoPrefsResp {
 /** CacheMappingResp represents a directory mapping for cache/state sharing. */
 export interface CacheMappingResp {
   hostPath: string;
+  /** ContainerPath is optional; empty uses the matching home-relative HostPath. */
   containerPath: string;
+  /** ResolvedContainerPath is the runtime target after applying the ContainerPath default. */
+  resolvedContainerPath?: string;
   enabled: boolean;
 }
 
 /** MountMappingResp represents a general host-to-runtime directory mount. */
 export interface MountMappingResp {
   hostPath: string;
+  /** ContainerPath is optional; empty uses the matching home-relative HostPath. */
   containerPath: string;
+  /** ResolvedContainerPath is the runtime target after applying the ContainerPath default. */
+  resolvedContainerPath?: string;
   enabled: boolean;
   readOnly: boolean;
 }
@@ -943,8 +949,8 @@ export interface TaskInfoRepo {
   name: string;
   baseBranch?: string;
   branch?: string;
-  hostPath?: string;
-  mountedPath?: string;
+  gitRoot?: string;
+  containerPath?: string;
   remoteURL?: string;
   forge?: Forge;
 }
@@ -954,7 +960,7 @@ export interface TaskInfoCacheMount {
   name?: string;
   description?: string;
   hostPath?: string;
-  mountPath?: string;
+  containerPath?: string;
   readOnly?: boolean;
   shallow?: boolean;
 }
@@ -962,7 +968,7 @@ export interface TaskInfoCacheMount {
 /** TaskInfoMount describes a recorded or observed bind mount. */
 export interface TaskInfoMount {
   hostPath?: string;
-  mountPath?: string;
+  containerPath?: string;
   readOnly?: boolean;
 }
 

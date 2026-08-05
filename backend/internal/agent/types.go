@@ -628,10 +628,10 @@ func (m *ExitMessage) ExitError() string {
 
 // MetaRepo describes one repository entry in a MetaMessage.
 type MetaRepo struct {
-	Name        string `json:"name"`
-	BaseBranch  string `json:"base_branch,omitempty"`
-	Branch      string `json:"branch"`
-	MountedPath string `json:"mounted_path,omitempty"`
+	Name          string `json:"name"`
+	BaseBranch    string `json:"base_branch,omitempty"`
+	Branch        string `json:"branch"`
+	ContainerPath string `json:"containerPath,omitempty"`
 }
 
 // MetaCacheMount describes one cache mount in a MetaMessage.
@@ -639,16 +639,18 @@ type MetaCacheMount struct {
 	Name        string `json:"name,omitempty"`
 	Description string `json:"description,omitempty"`
 	HostPath    string `json:"hostPath,omitempty"`
-	MountPath   string `json:"mountPath,omitempty"`
-	ReadOnly    bool   `json:"readOnly,omitempty"`
-	Shallow     bool   `json:"shallow,omitempty"`
+	// ContainerPath is the resolved target path in the runtime container.
+	ContainerPath string `json:"containerPath,omitempty"`
+	ReadOnly      bool   `json:"readOnly,omitempty"`
+	Shallow       bool   `json:"shallow,omitempty"`
 }
 
 // MetaMount describes one custom bind mount in a MetaMessage.
 type MetaMount struct {
-	HostPath  string `json:"hostPath,omitempty"`
-	MountPath string `json:"mountPath,omitempty"`
-	ReadOnly  bool   `json:"readOnly,omitempty"`
+	HostPath string `json:"hostPath,omitempty"`
+	// ContainerPath is the resolved target path in the runtime container.
+	ContainerPath string `json:"containerPath,omitempty"`
+	ReadOnly      bool   `json:"readOnly,omitempty"`
 }
 
 // LogVersion identifies a physical task-log format.

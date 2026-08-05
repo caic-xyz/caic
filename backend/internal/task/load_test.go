@@ -505,8 +505,8 @@ func TestLoadLogs(t *testing.T) {
 			BaseImage:         "ghcr.io/caic/base:v1",
 			ContainerPlatform: "linux/amd64",
 			MaxCPUs:           6,
-			CacheMounts:       []agent.MetaCacheMount{{Name: "npm", Description: "Node", HostPath: "~/.npm", MountPath: "/home/user/.npm", ReadOnly: true, Shallow: true}},
-			Mounts:            []agent.MetaMount{{HostPath: "/host/work", MountPath: "/workspace/work", ReadOnly: true}},
+			CacheMounts:       []agent.MetaCacheMount{{Name: "npm", Description: "Node", HostPath: "~/.npm", ContainerPath: "/home/user/.npm", ReadOnly: true, Shallow: true}},
+			Mounts:            []agent.MetaMount{{HostPath: "/host/work", ContainerPath: "/workspace/work", ReadOnly: true}},
 		})
 		writeLogFile(t, dir, "a.jsonl", meta)
 

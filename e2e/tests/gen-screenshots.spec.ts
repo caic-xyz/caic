@@ -3,6 +3,7 @@
 // Run with: pnpm exec playwright test --config e2e/playwright.config.ts gen-screenshots
 // Output: e2e/screenshots/frontend/
 import { test, expect, createTaskAPI, waitForTaskState, convertPngsToWebp } from "../helpers";
+import type { Locator } from "@playwright/test";
 import type { Harness } from "../../sdk/caic/ts/v1/types.gen";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -14,6 +15,12 @@ const screenshotDir = path.join(
   "frontend",
 );
 
+async function requiredBox(locator: Locator) {
+  const box = await locator.boundingBox();
+  if (!box) throw new Error("expected visible layout control");
+  return box;
+}
+
 test.describe.configure({ mode: "serial" });
 
 test("generate documentation screenshots", async ({ page, api }) => {
@@ -23,6 +30,48 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await page.goto("/");
 
   // Wait for repos to load.
+  await expect(
+    page
+      .getByTestId("repo-chips")
+      .locator("[data-testid^='chip-label-']")
+      .first(),
+  ).toBeVisible();
+
+  // Screenshot 1: Settings — realistic home-relative mounts with layout checks.
+  await api.updatePreferences({
+    settings: {
+      autoFixOnCIFailure: false,
+      autoFixOnPROpen: false,
+      customMounts: [
+        { hostPath: "~/.claude", containerPath: "", enabled: true, readOnly: false },
+        { hostPath: "~/.cache/huggingface", containerPath: "", enabled: true, readOnly: false },
+      ],
+    },
+  });
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.goto("/settings");
+  const mountRows = page.getByTestId("custom-mount-row");
+  await expect(mountRows).toHaveCount(2);
+  for (let i = 0; i < 2; i++) {
+    const row = mountRows.nth(i);
+    const hostInput = await requiredBox(row.getByLabel("Host path"));
+    const arrow = await requiredBox(row.getByTestId("mapping-arrow"));
+    const containerInput = await requiredBox(row.getByLabel("Container path"));
+    const readOnly = await requiredBox(row.getByTestId("mount-read-only"));
+    const remove = await requiredBox(row.getByRole("button"));
+
+    expect(hostInput.x + hostInput.width).toBeLessThanOrEqual(arrow.x);
+    expect(arrow.x + arrow.width).toBeLessThanOrEqual(containerInput.x);
+    expect(containerInput.x + containerInput.width).toBeLessThanOrEqual(readOnly.x);
+    expect(readOnly.x + readOnly.width).toBeLessThanOrEqual(remove.x);
+    expect(Math.abs(arrow.y + arrow.height / 2 - (containerInput.y + containerInput.height / 2))).toBeLessThanOrEqual(1);
+    expect(Math.abs(readOnly.y + readOnly.height / 2 - (containerInput.y + containerInput.height / 2))).toBeLessThanOrEqual(1);
+  }
+  await page.screenshot({
+    path: path.join(screenshotDir, "settings-mounts.png"),
+  });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
   await expect(
     page
       .getByTestId("repo-chips")

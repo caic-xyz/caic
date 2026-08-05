@@ -92,7 +92,10 @@ func cacheMountsSize(ctx context.Context, home string, mounts []md.CacheMount) (
 		if err := ctx.Err(); err != nil {
 			return total, err
 		}
-		hostPath := resolveCacheHostPath(home, m.HostPath)
+		hostPath := md.ResolveHostPath(m.HostPath, home)
+		if home == "" && md.IsHomeRelativeHostPath(m.HostPath) {
+			hostPath = ""
+		}
 		if hostPath == "" {
 			errs = append(errs, fmt.Errorf("%s: empty host path", m.Name))
 			continue
@@ -133,22 +136,6 @@ func directorySize(ctx context.Context, root string) (int64, error) {
 		return nil
 	})
 	return total, err
-}
-
-func resolveCacheHostPath(home, p string) string {
-	switch {
-	case p == "":
-		return ""
-	case p == "~":
-		return home
-	case strings.HasPrefix(p, "~/"):
-		if home == "" {
-			return ""
-		}
-		return filepath.Join(home, p[2:])
-	default:
-		return filepath.Clean(p)
-	}
 }
 
 // RefreshLoop refreshes well-known cache sizes until ctx is cancelled. It is

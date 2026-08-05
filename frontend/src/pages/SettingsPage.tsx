@@ -26,6 +26,7 @@ export default function SettingsPage() {
         setCacheMappings={s.setCacheMappings}
         customMounts={s.customMounts}
         setCustomMounts={s.setCustomMounts}
+        settingsError={s.settingsError}
         autoFixCI={s.autoFixCI}
         setAutoFixCI={s.setAutoFixCI}
         autoFixPR={s.autoFixPR}

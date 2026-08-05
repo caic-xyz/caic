@@ -302,13 +302,13 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 		return "", badRequestf("%s does not support images", string(p.Harness))
 	}
 
-	// Build RepoMount slice. MountedPath follows the fixed "~/src/<name>"
+	// Build RepoMount slice. ContainerPath follows the fixed "~/src/<name>"
 	// convention used by the instance provisioner. Use the basename unless
 	// another registered repo shares it.
 	mounts := make([]task.RepoMount, len(p.Repos))
 	for i, rs := range p.Repos {
 		r, _ := m.Workspace(rs.Name)
-		mounts[i] = task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: r.Dir, MountedPath: m.mountPathForRepo(rs.Name)}
+		mounts[i] = task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: r.Dir, ContainerPath: m.containerPathForRepo(rs.Name)}
 	}
 
 	t := &task.Task{
@@ -598,7 +598,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 		if !ok {
 			return "", badRequestf("unknown extra repo: %s", rs.Name)
 		}
-		extraMounts = append(extraMounts, task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: er.Dir, MountedPath: m.mountPathForRepo(rs.Name)})
+		extraMounts = append(extraMounts, task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: er.Dir, ContainerPath: m.containerPathForRepo(rs.Name)})
 	}
 
 	mounts := make([]task.RepoMount, len(sourceRepos), len(sourceRepos)+len(extraMounts))
@@ -828,13 +828,13 @@ func primaryBranchForAdoption(ri *AdoptRepo, c *runtime.Instance) (string, bool)
 		return "", false
 	}
 	r := c.Repos[0]
-	if !mountedPathMatchesRepo(r.MountPath, ri) {
+	if !containerPathMatchesRepo(r.ContainerPath, ri) {
 		return "", false
 	}
 	return r.Branch, true
 }
 
-func mountedPathMatchesRepo(mountedPath string, ri *AdoptRepo) bool {
+func containerPathMatchesRepo(containerPath string, ri *AdoptRepo) bool {
 	relPath := filepath.ToSlash(ri.RelPath)
 	baseName := filepath.Base(ri.AbsPath)
 	return slices.Contains([]string{
@@ -844,7 +844,7 @@ func mountedPathMatchesRepo(mountedPath string, ri *AdoptRepo) bool {
 		"/home/user/src/" + baseName,
 		"~/src/" + baseName,
 		baseName,
-	}, mountedPath)
+	}, containerPath)
 }
 
 // needTitleRegen reports whether the adopted task needs an LLM title regeneration.
@@ -1272,7 +1272,7 @@ func managerRuntimeStartTimeout(d time.Duration) time.Duration {
 	return time.Hour
 }
 
-func (m *Manager) mountPathForRepo(relPath string) string {
+func (m *Manager) containerPathForRepo(relPath string) string {
 	base := filepath.Base(relPath)
 	if !m.repoBasenameCollides(relPath) {
 		return "~/src/" + base
@@ -1738,30 +1738,30 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 		if lp != nil {
 			primaryBaseBranch = lp.BaseBranch
 		}
-		// Derive MountedPath from the runtime instance repo metadata.
-		var mountedPath string
+		// Derive ContainerPath from the runtime instance repo metadata.
+		var containerPath string
 		if len(c.Repos) > 0 && c.Repos[0].Branch == branch {
-			mountedPath = c.Repos[0].MountPath
+			containerPath = c.Repos[0].ContainerPath
 		}
-		if mountedPath == "" {
-			mountedPath = m.mountPathForRepo(ri.RelPath)
+		if containerPath == "" {
+			containerPath = m.containerPathForRepo(ri.RelPath)
 		}
-		adoptRepos = []task.RepoMount{{Name: ri.RelPath, BaseBranch: primaryBaseBranch, GitRoot: ri.AbsPath, Branch: branch, MountedPath: mountedPath}}
-		// Build lookup of instance repos by branch for MountedPath.
+		adoptRepos = []task.RepoMount{{Name: ri.RelPath, BaseBranch: primaryBaseBranch, GitRoot: ri.AbsPath, Branch: branch, ContainerPath: containerPath}}
+		// Build lookup of instance repos by branch for ContainerPath.
 		runtimeRepoByBranch := make(map[string]string, len(c.Repos))
 		for _, cr := range c.Repos {
-			runtimeRepoByBranch[cr.Branch] = cr.MountPath
+			runtimeRepoByBranch[cr.Branch] = cr.ContainerPath
 		}
 		for _, lm := range lt.Repos[1:] {
 			gitRoot := ""
 			if er, ok := m.Workspace(lm.Name); ok {
 				gitRoot = er.Dir
 			}
-			mp := runtimeRepoByBranch[lm.Branch]
-			if mp == "" {
-				mp = m.mountPathForRepo(lm.Name)
+			containerPath := runtimeRepoByBranch[lm.Branch]
+			if containerPath == "" {
+				containerPath = m.containerPathForRepo(lm.Name)
 			}
-			adoptRepos = append(adoptRepos, task.RepoMount{Name: lm.Name, BaseBranch: lm.BaseBranch, Branch: lm.Branch, GitRoot: gitRoot, MountedPath: mp})
+			adoptRepos = append(adoptRepos, task.RepoMount{Name: lm.Name, BaseBranch: lm.BaseBranch, Branch: lm.Branch, GitRoot: gitRoot, ContainerPath: containerPath})
 		}
 	}
 

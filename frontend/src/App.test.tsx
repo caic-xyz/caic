@@ -1,7 +1,7 @@
 // Tests for app-shell task creation, repo selection, and harness preferences.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 
 import type { Repo, PreferencesResp, HarnessInfo, Task, ISOTimestamp } from "@sdk/types.gen";
@@ -164,12 +164,12 @@ beforeEach(() => {
     harness: "",
     settings: { baseImage: "" },
   } as unknown as PreferencesResp);
-  vi.mocked(api.updatePreferences).mockResolvedValue({
+  vi.mocked(api.updatePreferences).mockImplementation(async (request) => ({
     repositories: [{ path: "repos/a" }],
     models: {},
     harness: "",
-    settings: { baseImage: "" },
-  } as unknown as PreferencesResp);
+    settings: request.settings,
+  } as PreferencesResp));
   vi.mocked(api.listHarnesses).mockResolvedValue([
     { name: "claude", models: [], supportsImages: false, supportsCompact: false },
   ] as unknown as HarnessInfo[]);
@@ -544,7 +544,7 @@ describe("App repo chips: No repository", () => {
       harness: "",
       settings: {
         baseImage: "",
-        customMounts: [{ hostPath: "/host/data", containerPath: "/container/data", enabled: true, readOnly: false }],
+        customMounts: [{ hostPath: "/host/data", containerPath: "/container/data", resolvedContainerPath: "/container/data", enabled: true, readOnly: false }],
       },
     } as unknown as PreferencesResp);
 
@@ -558,6 +558,80 @@ describe("App repo chips: No repository", () => {
         customMounts: [{ hostPath: "/host/data", containerPath: "/container/data", enabled: true, readOnly: true }],
       }),
     }));
+  });
+
+  it("renders server-derived container-path defaults", async () => {
+    vi.mocked(api.getPreferences).mockResolvedValue({
+      repositories: [],
+      models: {},
+      harness: "",
+      settings: {
+        cacheMappings: [{ hostPath: "~/.cache/example", containerPath: "", resolvedContainerPath: "/home/user/.cache/example", enabled: true }],
+        customMounts: [{ hostPath: "~/Documents", containerPath: "", resolvedContainerPath: "/home/user/Documents", enabled: true, readOnly: false }],
+      },
+    } as unknown as PreferencesResp);
+
+    renderApp("/settings");
+
+    await screen.findByDisplayValue("~/.cache/example");
+    expect(screen.getAllByLabelText("Container path")[0]).toHaveAttribute("placeholder", "~/.cache/example");
+    expect(screen.getByText("Uses ~/.cache/example by default")).toBeInTheDocument();
+    expect(screen.getAllByLabelText("Container path")[1]).toHaveAttribute("placeholder", "~/Documents");
+    expect(screen.getByText("Uses ~/Documents by default")).toBeInTheDocument();
+  });
+
+  it("keeps a customized container path when the host path changes", async () => {
+    const user = userEvent.setup();
+    renderApp("/settings");
+
+    const cacheSection = screen.getByRole("heading", { name: "Custom caches" }).parentElement;
+    if (!cacheSection) throw new Error("Custom caches section is missing");
+    const caches = within(cacheSection);
+    await user.click(caches.getByRole("button", { name: "+ Add mapping" }));
+    await user.type(caches.getByLabelText("Host path"), "~/.cache/example");
+    await user.clear(caches.getByLabelText("Container path"));
+    await user.type(caches.getByLabelText("Container path"), "/var/cache/example");
+    await user.clear(caches.getByLabelText("Host path"));
+    await user.type(caches.getByLabelText("Host path"), "~/.cache/other");
+
+    expect(caches.getByLabelText("Container path")).toHaveValue("/var/cache/example");
+  });
+
+  it("leaves the container path blank for a non-home host path", async () => {
+    const user = userEvent.setup();
+    renderApp("/settings");
+
+    const mountSection = screen.getByRole("heading", { name: "Custom mounts" }).parentElement;
+    if (!mountSection) throw new Error("Custom mounts section is missing");
+    const mounts = within(mountSection);
+    await user.click(mounts.getByRole("button", { name: "+ Add mount" }));
+    await user.type(mounts.getByLabelText("Host path"), "/srv/shared");
+
+    expect(mounts.getByLabelText("Container path")).toHaveAttribute("placeholder", "Container path");
+    expect(mounts.getByLabelText("Container path")).toHaveValue("");
+    await user.clear(mounts.getByLabelText("Host path"));
+    await user.type(mounts.getByLabelText("Host path"), "~/../../etc");
+    expect(mounts.getByLabelText("Container path")).toHaveAttribute("placeholder", "Container path");
+  });
+
+  it("shows mapping validation failures and sends only editable mapping fields", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.updatePreferences).mockRejectedValueOnce(new Error("cacheMappings[0]: host path must be absolute or home-relative"));
+    renderApp("/settings");
+
+    const cacheSection = screen.getByRole("heading", { name: "Custom caches" }).parentElement;
+    if (!cacheSection) throw new Error("Custom caches section is missing");
+    const caches = within(cacheSection);
+    await user.click(caches.getByRole("button", { name: "+ Add mapping" }));
+    await user.type(caches.getByLabelText("Host path"), "cache");
+    await user.tab();
+
+    await waitFor(() => expect(api.updatePreferences).toHaveBeenCalledWith({
+      settings: expect.objectContaining({
+        cacheMappings: [{ hostPath: "cache", containerPath: "", enabled: true }],
+      }),
+    }));
+    expect(screen.getByRole("alert")).toHaveTextContent("cacheMappings[0]: host path must be absolute or home-relative");
   });
 
   it("has no chips after removing the last one", async () => {

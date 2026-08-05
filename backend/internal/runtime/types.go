@@ -93,11 +93,11 @@ type ConnectionTarget struct {
 
 // Repo describes a git repository available to a runtime instance.
 type Repo struct {
-	HostPath   string
-	MountPath  string
-	Branch     string
-	BaseBranch string
-	Remote     string
+	GitRoot       string
+	ContainerPath string
+	Branch        string
+	BaseBranch    string
+	Remote        string
 }
 
 // CacheMount describes a host cache directory made available to a runtime.
@@ -105,16 +105,18 @@ type CacheMount struct {
 	Name        string
 	Description string
 	HostPath    string
-	MountPath   string
-	ReadOnly    bool
-	Shallow     bool
+	// ContainerPath is the resolved target path in the runtime container.
+	ContainerPath string
+	ReadOnly      bool
+	Shallow       bool
 }
 
 // Mount describes a host directory bind-mounted into a runtime.
 type Mount struct {
-	HostPath  string
-	MountPath string
-	ReadOnly  bool
+	HostPath string
+	// ContainerPath is the resolved target path in the runtime container.
+	ContainerPath string
+	ReadOnly      bool
 }
 
 // ConnectionInfo describes connection details returned by a runtime instance.
@@ -216,11 +218,11 @@ type StartOptions struct {
 // ForkRepo describes one repository in a fork: its identity, the branches it
 // carries, and the fork's destination primary branch.
 type ForkRepo struct {
-	// HostPath is the absolute host git repository path (the runtime's GitRoot).
-	HostPath string
-	// MountPath is the container path to mount a new repo at. Used only for repos
+	// GitRoot is the absolute host git repository path (the runtime's GitRoot).
+	GitRoot string
+	// ContainerPath is the container path to mount a new repo at. Used only for repos
 	// not already in the source instance; existing repos keep their mount.
-	MountPath string
+	ContainerPath string
 	// SourceBranches are the branches to carry, primary first. For a repo already
 	// in the source instance these are its current branches; for a new repo they
 	// are the host branches to push (empty defaults to the repo's upstream).

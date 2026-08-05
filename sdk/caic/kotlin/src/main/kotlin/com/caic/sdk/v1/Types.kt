@@ -858,7 +858,10 @@ data class RepoPrefsResp(
 @Serializable
 data class CacheMappingResp(
     val hostPath: String,
+    /** ContainerPath is optional; empty uses the matching home-relative HostPath. */
     val containerPath: String,
+    /** ResolvedContainerPath is the runtime target after applying the ContainerPath default. */
+    val resolvedContainerPath: String? = null,
     val enabled: Boolean,
 )
 
@@ -866,7 +869,10 @@ data class CacheMappingResp(
 @Serializable
 data class MountMappingResp(
     val hostPath: String,
+    /** ContainerPath is optional; empty uses the matching home-relative HostPath. */
     val containerPath: String,
+    /** ResolvedContainerPath is the runtime target after applying the ContainerPath default. */
+    val resolvedContainerPath: String? = null,
     val enabled: Boolean,
     val readOnly: Boolean,
 )
@@ -1183,8 +1189,8 @@ data class TaskInfoRepo(
     val name: String,
     val baseBranch: String? = null,
     val branch: String? = null,
-    val hostPath: String? = null,
-    val mountedPath: String? = null,
+    val gitRoot: String? = null,
+    val containerPath: String? = null,
     @SerialName("remoteURL") val remoteURL: String? = null,
     val forge: Forge? = null,
 )
@@ -1195,7 +1201,7 @@ data class TaskInfoCacheMount(
     val name: String? = null,
     val description: String? = null,
     val hostPath: String? = null,
-    val mountPath: String? = null,
+    val containerPath: String? = null,
     val readOnly: Boolean? = null,
     val shallow: Boolean? = null,
 )
@@ -1204,7 +1210,7 @@ data class TaskInfoCacheMount(
 @Serializable
 data class TaskInfoMount(
     val hostPath: String? = null,
-    val mountPath: String? = null,
+    val containerPath: String? = null,
     val readOnly: Boolean? = null,
 )
 

@@ -23,14 +23,14 @@ func TestTaskInfoCompareWarnings(t *testing.T) {
 
 		recorded := v1.TaskInfoRecorded{
 			Mounts: []v1.TaskInfoMount{{
-				HostPath:  "~/.config/caic",
-				MountPath: "~/.config/caic",
+				HostPath:      "~/.config/caic",
+				ContainerPath: "~/.config/caic",
 			}},
 		}
 		observed := v1.TaskInfoObservedRuntime{
 			Mounts: []v1.TaskInfoMount{{
-				HostPath:  filepath.ToSlash(filepath.Join(home, ".config", "caic")),
-				MountPath: "/home/user/.config/caic",
+				HostPath:      filepath.ToSlash(filepath.Join(home, ".config", "caic")),
+				ContainerPath: "/home/user/.config/caic",
 			}},
 		}
 
@@ -45,14 +45,14 @@ func TestTaskInfoCompareWarnings(t *testing.T) {
 
 		recorded := v1.TaskInfoRecorded{
 			Mounts: []v1.TaskInfoMount{{
-				HostPath:  "~/.config/caic",
-				MountPath: "~/.config/caic",
+				HostPath:      "~/.config/caic",
+				ContainerPath: "~/.config/caic",
 			}},
 		}
 		observed := v1.TaskInfoObservedRuntime{
 			Mounts: []v1.TaskInfoMount{{
-				HostPath:  filepath.ToSlash(filepath.Join(home, ".config", "other")),
-				MountPath: "/home/user/.config/caic",
+				HostPath:      filepath.ToSlash(filepath.Join(home, ".config", "other")),
+				ContainerPath: "/home/user/.config/caic",
 			}},
 		}
 

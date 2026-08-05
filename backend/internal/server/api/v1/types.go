@@ -365,30 +365,30 @@ type TaskInfoCapability struct {
 
 // TaskInfoRepo describes a repository mounted into a task runtime.
 type TaskInfoRepo struct {
-	Name        string `json:"name"`
-	BaseBranch  string `json:"baseBranch,omitempty"`
-	Branch      string `json:"branch,omitempty"`
-	HostPath    string `json:"hostPath,omitempty"`
-	MountedPath string `json:"mountedPath,omitempty"`
-	RemoteURL   string `json:"remoteURL,omitempty"`
-	Forge       Forge  `json:"forge,omitempty"`
+	Name          string `json:"name"`
+	BaseBranch    string `json:"baseBranch,omitempty"`
+	Branch        string `json:"branch,omitempty"`
+	GitRoot       string `json:"gitRoot,omitempty"`
+	ContainerPath string `json:"containerPath,omitempty"`
+	RemoteURL     string `json:"remoteURL,omitempty"`
+	Forge         Forge  `json:"forge,omitempty"`
 }
 
 // TaskInfoCacheMount describes a recorded cache mount.
 type TaskInfoCacheMount struct {
-	Name        string `json:"name,omitempty"`
-	Description string `json:"description,omitempty"`
-	HostPath    string `json:"hostPath,omitempty"`
-	MountPath   string `json:"mountPath,omitempty"`
-	ReadOnly    bool   `json:"readOnly,omitempty"`
-	Shallow     bool   `json:"shallow,omitempty"`
+	Name          string `json:"name,omitempty"`
+	Description   string `json:"description,omitempty"`
+	HostPath      string `json:"hostPath,omitempty"`
+	ContainerPath string `json:"containerPath,omitempty"`
+	ReadOnly      bool   `json:"readOnly,omitempty"`
+	Shallow       bool   `json:"shallow,omitempty"`
 }
 
 // TaskInfoMount describes a recorded or observed bind mount.
 type TaskInfoMount struct {
-	HostPath  string `json:"hostPath,omitempty"`
-	MountPath string `json:"mountPath,omitempty"`
-	ReadOnly  bool   `json:"readOnly,omitempty"`
+	HostPath      string `json:"hostPath,omitempty"`
+	ContainerPath string `json:"containerPath,omitempty"`
+	ReadOnly      bool   `json:"readOnly,omitempty"`
 }
 
 // TaskInfoObservedRuntime describes runtime-observed instance details from the runtime adapter.
@@ -778,17 +778,23 @@ type RepoPrefsResp struct {
 
 // CacheMappingResp represents a directory mapping for cache/state sharing.
 type CacheMappingResp struct {
-	HostPath      string `json:"hostPath"`
+	HostPath string `json:"hostPath"`
+	// ContainerPath is optional; empty uses the matching home-relative HostPath.
 	ContainerPath string `json:"containerPath"`
-	Enabled       bool   `json:"enabled"`
+	// ResolvedContainerPath is the runtime target after applying the ContainerPath default.
+	ResolvedContainerPath string `json:"resolvedContainerPath,omitempty"`
+	Enabled               bool   `json:"enabled"`
 }
 
 // MountMappingResp represents a general host-to-runtime directory mount.
 type MountMappingResp struct {
-	HostPath      string `json:"hostPath"`
+	HostPath string `json:"hostPath"`
+	// ContainerPath is optional; empty uses the matching home-relative HostPath.
 	ContainerPath string `json:"containerPath"`
-	Enabled       bool   `json:"enabled"`
-	ReadOnly      bool   `json:"readOnly"`
+	// ResolvedContainerPath is the runtime target after applying the ContainerPath default.
+	ResolvedContainerPath string `json:"resolvedContainerPath,omitempty"`
+	Enabled               bool   `json:"enabled"`
+	ReadOnly              bool   `json:"readOnly"`
 }
 
 // UserSettings holds user-configurable behavioral settings.

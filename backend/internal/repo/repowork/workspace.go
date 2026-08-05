@@ -139,10 +139,10 @@ func (w *Workspace) SyncToOrigin(ctx context.Context, t TaskView, force bool) (a
 		ref := runtimeRemoteRef(id, branch)
 		repoDS := extractRepoDS(ds, diffRepoPrefix(&repo), multi)
 		safetyCtx, safetyCancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
-		issues, err := CheckSafety(safetyCtx, repo.HostPath, ref, w.BaseBranch, repoDS)
+		issues, err := CheckSafety(safetyCtx, repo.GitRoot, ref, w.BaseBranch, repoDS)
 		safetyCancel()
 		if err != nil {
-			return ds, allIssues, fmt.Errorf("safety check %s: %w", repo.MountPath, err)
+			return ds, allIssues, fmt.Errorf("safety check %s: %w", repo.ContainerPath, err)
 		}
 		allIssues = append(allIssues, issues...)
 	}
@@ -155,10 +155,10 @@ func (w *Workspace) SyncToOrigin(ctx context.Context, t TaskView, force bool) (a
 		branch := repo.Branch
 		ref := runtimeRemoteRef(id, branch)
 		pushCtx, pushCancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
-		checkout := &git.Checkout{Root: repo.HostPath, Logger: w.Log}
+		checkout := &git.Checkout{Root: repo.GitRoot, Logger: w.Log}
 		if err := checkout.PushRef(pushCtx, ref, branch, true); err != nil {
 			pushCancel()
-			return ds, allIssues, fmt.Errorf("push %s to origin: %w", repo.MountPath, err)
+			return ds, allIssues, fmt.Errorf("push %s to origin: %w", repo.ContainerPath, err)
 		}
 		pushCancel()
 	}
@@ -192,10 +192,10 @@ func (w *Workspace) SyncToDefault(ctx context.Context, t TaskView, message strin
 		ref := runtimeRemoteRef(id, branch)
 		repoDS := extractRepoDS(ds, diffRepoPrefix(&repo), multi)
 		safetyCtx, safetyCancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
-		issues, err := CheckSafety(safetyCtx, repo.HostPath, ref, w.BaseBranch, repoDS)
+		issues, err := CheckSafety(safetyCtx, repo.GitRoot, ref, w.BaseBranch, repoDS)
 		safetyCancel()
 		if err != nil {
-			return ds, allIssues, fmt.Errorf("safety check %s: %w", repo.MountPath, err)
+			return ds, allIssues, fmt.Errorf("safety check %s: %w", repo.ContainerPath, err)
 		}
 		allIssues = append(allIssues, issues...)
 	}
@@ -208,10 +208,10 @@ func (w *Workspace) SyncToDefault(ctx context.Context, t TaskView, message strin
 		branch := repo.Branch
 		ref := runtimeRemoteRef(id, branch)
 		squashCtx, squashCancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
-		checkout := &git.Checkout{Root: repo.HostPath, Logger: w.Log}
+		checkout := &git.Checkout{Root: repo.GitRoot, Logger: w.Log}
 		if err := checkout.SquashOnto(squashCtx, ref, w.BaseBranch, message); err != nil {
 			squashCancel()
-			return ds, allIssues, fmt.Errorf("squash %s onto %s: %w", repo.MountPath, w.BaseBranch, err)
+			return ds, allIssues, fmt.Errorf("squash %s onto %s: %w", repo.ContainerPath, w.BaseBranch, err)
 		}
 		squashCancel()
 	}
@@ -240,7 +240,7 @@ func (w *Workspace) DiffContent(ctx context.Context, t TaskView, path string) (s
 		args := diffContentArgs(path, repo, len(repos) > 1)
 		diff, err := w.Runtimes.Diff(ctx, id, i, args...)
 		if err != nil {
-			w.Log.Warn("diff failed", "repo", repo.MountPath, "br", repo.Branch, "err", err)
+			w.Log.Warn("diff failed", "repo", repo.ContainerPath, "br", repo.Branch, "err", err)
 			continue
 		}
 		if diff == "" {
@@ -284,7 +284,7 @@ func (w *Workspace) DeleteUnmodifiedTaskBranches(ctx context.Context, t TaskView
 	defer w.branchMu.Unlock()
 	for i := range repos {
 		repo := &repos[i]
-		dir := repo.HostPath
+		dir := repo.GitRoot
 		if dir == "" && i == 0 {
 			dir = w.Dir
 		}
@@ -398,8 +398,8 @@ func (w *Workspace) taskRuntime(t TaskView) (runtime.ID, []runtime.Repo, error) 
 	if len(repos) == 0 {
 		return id, nil, nil
 	}
-	if repos[0].HostPath == "" {
-		repos[0].HostPath = w.Dir
+	if repos[0].GitRoot == "" {
+		repos[0].GitRoot = w.Dir
 	}
 	return id, repos, nil
 }
@@ -466,7 +466,7 @@ func (w *Workspace) diffStatLocked(ctx context.Context, id runtime.ID, repos []r
 		repo := &repos[i]
 		numstat, err := w.Runtimes.Diff(ctx, id, i, "--numstat")
 		if err != nil {
-			w.Log.Warn("diff numstat failed", "repo", repo.MountPath, "br", repo.Branch, "err", err)
+			w.Log.Warn("diff numstat failed", "repo", repo.ContainerPath, "br", repo.Branch, "err", err)
 			continue
 		}
 		ds := ParseDiffNumstat(numstat)
@@ -627,7 +627,7 @@ func diffRepoPrefix(repo *runtime.Repo) string {
 	if repo == nil {
 		return "repo"
 	}
-	for _, raw := range []string{repo.MountPath, repo.HostPath} {
+	for _, raw := range []string{repo.ContainerPath, repo.GitRoot} {
 		prefix := cleanDiffRepoPrefix(raw)
 		if prefix != "" {
 			return prefix
