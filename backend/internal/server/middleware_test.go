@@ -4,6 +4,7 @@ package server
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,22 @@ import (
 	"github.com/klauspost/compress/gzip"
 	"github.com/klauspost/compress/zstd"
 )
+
+type flushErrorWriteCloser struct {
+	err error
+}
+
+func (w *flushErrorWriteCloser) Write(b []byte) (int, error) {
+	return len(b), nil
+}
+
+func (w *flushErrorWriteCloser) Close() error {
+	return nil
+}
+
+func (w *flushErrorWriteCloser) Flush() error {
+	return w.err
+}
 
 func jsonHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
@@ -48,6 +65,21 @@ func precompressedHandler() http.HandlerFunc {
 
 func TestCompressMiddleware(t *testing.T) {
 	t.Parallel()
+	t.Run("FlushError", func(t *testing.T) {
+		t.Parallel()
+		want := errors.New("encoder flush failed")
+		cw := &compressWriter{
+			ResponseWriter: httptest.NewRecorder(),
+			writer:         &flushErrorWriteCloser{err: want},
+			headerSent:     true,
+		}
+
+		err := http.NewResponseController(cw).Flush()
+		if !errors.Is(err, want) {
+			t.Errorf("Flush error = %v, want %v", err, want)
+		}
+	})
+
 	t.Run("Zstd", func(t *testing.T) {
 		t.Parallel()
 		h := compressMiddleware(jsonHandler())

@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
@@ -255,12 +256,31 @@ func computeTaskPatch(oldJSON, newJSON []byte) (map[string]json.RawMessage, erro
 }
 
 // emitTaskListEvent marshals ev and writes it as an SSE message event.
-func emitTaskListEvent(w http.ResponseWriter, flusher http.Flusher, ev v1.TaskListEvent) error { //nolint:gocritic // struct size grew with Repos field; refactor not worth it
+func emitTaskListEvent(ctx context.Context, w http.ResponseWriter, ev *v1.TaskListEvent) (err error) {
 	data, err := json.Marshal(ev)
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(w, "event: message\ndata: %s\n\n", data)
-	flusher.Flush()
+
+	controller := http.NewResponseController(w)
+	if err := controller.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		if !errors.Is(err, http.ErrNotSupported) {
+			return fmt.Errorf("write task-list event: %w", err)
+		}
+		slog.WarnContext(ctx, "task-list event write deadline unsupported")
+	} else {
+		defer func() {
+			if resetErr := controller.SetWriteDeadline(time.Time{}); resetErr != nil {
+				err = errors.Join(err, fmt.Errorf("write task-list event: %w", resetErr))
+			}
+		}()
+	}
+
+	if _, err := fmt.Fprintf(w, "event: message\ndata: %s\n\n", data); err != nil {
+		return fmt.Errorf("write task-list event: %w", err)
+	}
+	if err := controller.Flush(); err != nil {
+		return fmt.Errorf("write task-list event: %w", err)
+	}
 	return nil
 }

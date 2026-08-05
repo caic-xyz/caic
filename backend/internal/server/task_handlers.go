@@ -22,6 +22,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
@@ -46,6 +47,57 @@ type taskHandlers struct {
 	warnings *WarningStore
 }
 
+// taskEventStream writes one task's ordered SSE event stream.
+type taskEventStream struct {
+	ctx        context.Context
+	w          http.ResponseWriter
+	flusher    http.Flusher
+	controller *http.ResponseController
+	tracker    *v1conv.ToolTimingTracker
+	nextID     int
+}
+
+func (s *taskEventStream) writeMessages(messages []agent.Message, at time.Time) error {
+	for _, msg := range messages {
+		events := s.tracker.ConvertMessage(msg, at)
+		for i := range events {
+			if err := s.writeEvent(&events[i]); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (s *taskEventStream) writeStats(stats []runtime.Stats) error {
+	for i := range stats {
+		ev := v1conv.StatsEvent(&stats[i])
+		if err := s.writeEvent(&ev); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *taskEventStream) writeEvent(ev *v1.EventMessage) error {
+	data, err := v1conv.MarshalEvent(ev)
+	if err != nil {
+		return fmt.Errorf("marshal SSE event: %w", err)
+	}
+	if _, err := fmt.Fprintf(s.w, "event: message\ndata: %s\nid: %d\n\n", data, s.nextID); err != nil {
+		return fmt.Errorf("write SSE event: %w", err)
+	}
+	s.nextID++
+	return nil
+}
+
+func (s *taskEventStream) writeReady() error {
+	if _, err := fmt.Fprint(s.w, "event: ready\ndata: {}\n\n"); err != nil {
+		return fmt.Errorf("write SSE ready event: %w", err)
+	}
+	return nil
+}
+
 func (h *taskHandlers) notifyTaskChange() {
 	h.taskMgr.NotifyTaskChange()
 }
@@ -68,68 +120,66 @@ func (h *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	flusher.Flush()
+	stream := taskEventStream{
+		ctx:        r.Context(),
+		w:          w,
+		flusher:    flusher,
+		controller: http.NewResponseController(w),
+	}
+	if err := stream.controller.Flush(); err != nil {
+		slog.WarnContext(r.Context(), "start task SSE stream", "err", err)
+		return
+	}
 
 	// Terminal tasks have no live channel: replay their history straight from
 	// the on-disk log without materializing it into memory. This keeps server
 	// memory O(1) for the very large logs that previously failed to load.
 	state := entry.Task().GetState()
-	terminal := state == task.StatePurged || state == task.StateCrashed || state == task.StateFailed
 	loadedTask := entry.LoadedTask()
-	if terminal && loadedTask != nil {
+	if isTaskEventTerminal(state) && loadedTask != nil {
 		h.streamHistoryFromDisk(w, flusher, entry)
 		return
 	}
+	if err := h.streamTaskEvents(&stream, entry, state, loadedTask); err != nil {
+		slog.WarnContext(r.Context(), "stream task SSE events", "task", entry.Task().ID, "err", err)
+	}
+}
 
+func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.Entry, state task.State, loadedTask *task.LoadedTask) error {
 	// Lazily load messages for entries that do not have a disk stream path.
 	if loadedTask == nil {
 		h.taskMgr.LoadMessagesOnDemand(entry)
 	}
 
-	ctx := r.Context()
-	history, live, unsub := entry.Task().Subscribe(ctx)
+	history, live, unsub := entry.Task().Subscribe(stream.ctx)
 	defer unsub()
-	statsHistory, statsLive, statsUnsub := entry.Task().SubscribeStats(ctx)
+	statsHistory, statsLive, statsUnsub := entry.Task().SubscribeStats(stream.ctx)
 	defer statsUnsub()
 
-	tracker := v1conv.NewToolTimingTracker(entry.Task().Harness, FormatToolOutput)
-	idx := 0
-
-	writeEvents := func(events []v1.EventMessage) {
-		for i := range events {
-			data, err := v1conv.MarshalEvent(&events[i])
-			if err != nil {
-				slog.WarnContext(ctx, "marshal SSE event", "err", err)
-				continue
-			}
-			_, _ = fmt.Fprintf(w, "event: message\ndata: %s\nid: %d\n\n", data, idx)
-			idx++
-		}
-	}
+	stream.tracker = v1conv.NewToolTimingTracker(entry.Task().Harness, FormatToolOutput)
 
 	now := time.Now()
 	if shouldReplayHistoryFromDisk(state, loadedTask) {
-		if !h.streamReplayStore(w, flusher, entry, &idx) {
-			h.streamHistoryFromDiskWithTracker(w, flusher, entry, tracker, &idx)
+		if !h.streamReplayStore(stream.w, stream.flusher, entry, &stream.nextID) {
+			h.streamHistoryFromDiskWithTracker(stream.w, stream.flusher, entry, stream.tracker, &stream.nextID)
 		}
 	} else {
-		for _, msg := range filterHistoryForReplay(history) {
-			writeEvents(tracker.ConvertMessage(msg, now))
+		if err := stream.writeMessages(filterHistoryForReplay(history), now); err != nil {
+			return err
 		}
 	}
-	for i := range statsHistory {
-		ev := v1conv.StatsEvent(&statsHistory[i])
-		data, err := v1conv.MarshalEvent(&ev)
-		if err == nil {
-			_, _ = fmt.Fprintf(w, "event: message\ndata: %s\nid: %d\n\n", data, idx)
-			idx++
-		}
+	if err := stream.writeStats(statsHistory); err != nil {
+		return err
 	}
-	_, _ = fmt.Fprint(w, "event: ready\ndata: {}\n\n")
-	flusher.Flush()
+	if err := stream.writeReady(); err != nil {
+		return err
+	}
+	if err := stream.controller.Flush(); err != nil {
+		return fmt.Errorf("flush task SSE stream: %w", err)
+	}
 
-	if state == task.StatePurged || state == task.StateCrashed || state == task.StateFailed {
-		return
+	if isTaskEventTerminal(state) {
+		return nil
 	}
 
 	liveCh := live
@@ -141,22 +191,30 @@ func (h *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) 
 				liveCh = nil
 				continue
 			}
-			writeEvents(tracker.ConvertMessage(msg, time.Now()))
-			flusher.Flush()
+			if err := stream.writeMessages([]agent.Message{msg}, time.Now()); err != nil {
+				return err
+			}
+			if err := stream.controller.Flush(); err != nil {
+				return fmt.Errorf("flush task SSE stream: %w", err)
+			}
 		case cs, ok := <-statsCh:
 			if !ok {
 				statsCh = nil
 				continue
 			}
-			ev := v1conv.StatsEvent(&cs)
-			data, err := v1conv.MarshalEvent(&ev)
-			if err == nil {
-				_, _ = fmt.Fprintf(w, "event: message\ndata: %s\nid: %d\n\n", data, idx)
-				idx++
+			if err := stream.writeStats([]runtime.Stats{cs}); err != nil {
+				return err
 			}
-			flusher.Flush()
+			if err := stream.controller.Flush(); err != nil {
+				return fmt.Errorf("flush task SSE stream: %w", err)
+			}
 		}
 	}
+	return nil
+}
+
+func isTaskEventTerminal(state task.State) bool {
+	return state == task.StatePurged || state == task.StateCrashed || state == task.StateFailed
 }
 
 // streamHistoryFromDisk replays a terminal task without subscribing to live
@@ -302,11 +360,11 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 		}
 
 		if first {
-			if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "snapshot", Snapshot: out}); err != nil {
+			if err := emitTaskListEvent(ctx, w, &v1.TaskListEvent{Kind: "snapshot", Snapshot: out}); err != nil {
 				slog.WarnContext(ctx, "marshal task list snapshot", "err", err)
 				return
 			}
-			if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "repos", Repos: *repoList}); err != nil {
+			if err := emitTaskListEvent(ctx, w, &v1.TaskListEvent{Kind: "repos", Repos: *repoList}); err != nil {
 				slog.WarnContext(ctx, "marshal repos snapshot", "err", err)
 				return
 			}
@@ -336,7 +394,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 					prevByID[id] = data
 					if prev == nil {
 						// New task: emit full object.
-						if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "upsert", Upsert: &out[i]}); err != nil {
+						if err := emitTaskListEvent(ctx, w, &v1.TaskListEvent{Kind: "upsert", Upsert: &out[i]}); err != nil {
 							slog.WarnContext(ctx, "marshal task upsert", "id", id, "err", err)
 							return
 						}
@@ -347,7 +405,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 							slog.WarnContext(ctx, "compute task patch", "id", id, "err", err)
 							continue
 						}
-						if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "patch", Patch: patch}); err != nil {
+						if err := emitTaskListEvent(ctx, w, &v1.TaskListEvent{Kind: "patch", Patch: patch}); err != nil {
 							slog.WarnContext(ctx, "marshal task patch", "id", id, "err", err)
 							return
 						}
@@ -357,7 +415,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 			// Emit deletes for removed tasks.
 			for id := range prevByID {
 				if _, ok := currentIDs[id]; !ok {
-					if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "delete", Delete: id}); err != nil {
+					if err := emitTaskListEvent(ctx, w, &v1.TaskListEvent{Kind: "delete", Delete: id}); err != nil {
 						slog.WarnContext(ctx, "marshal task delete", "id", id, "err", err)
 						return
 					}
@@ -366,7 +424,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 			}
 			// Emit any new warnings.
 			for _, warn := range newWarnings {
-				if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "warning", Warning: warn.msg}); err != nil {
+				if err := emitTaskListEvent(ctx, w, &v1.TaskListEvent{Kind: "warning", Warning: warn.msg}); err != nil {
 					slog.WarnContext(ctx, "marshal warning", "err", err)
 					return
 				}
@@ -376,7 +434,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 			// Emit repos update when default-branch CI status has changed.
 			if !bytes.Equal(reposJSON, prevReposJSON) {
 				prevReposJSON = reposJSON
-				if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "repos", Repos: *repoList}); err != nil {
+				if err := emitTaskListEvent(ctx, w, &v1.TaskListEvent{Kind: "repos", Repos: *repoList}); err != nil {
 					slog.WarnContext(ctx, "marshal repos update", "err", err)
 					return
 				}

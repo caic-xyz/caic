@@ -3,6 +3,7 @@
 package server
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/pprof"
@@ -77,15 +78,23 @@ func (cw *compressWriter) Write(b []byte) (int, error) {
 // Flush flushes compressed data to the wire. Calls initOnce so that
 // Content-Encoding is set before the first flush sends headers.
 func (cw *compressWriter) Flush() {
+	_ = cw.FlushError()
+}
+
+// FlushError flushes compressed data to the wire and returns observable
+// compressor or underlying response flush errors.
+func (cw *compressWriter) FlushError() error {
 	cw.initOnce()
+	var err error
 	if cw.writer != nil {
 		if f, ok := cw.writer.(interface{ Flush() error }); ok {
-			_ = f.Flush()
+			err = f.Flush()
 		}
 	}
-	if f, ok := cw.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
+	if flushErr := http.NewResponseController(cw.ResponseWriter).Flush(); flushErr != nil && !errors.Is(flushErr, http.ErrNotSupported) {
+		err = errors.Join(err, flushErr)
 	}
+	return err
 }
 
 // Unwrap returns the underlying ResponseWriter for http.ResponseController.

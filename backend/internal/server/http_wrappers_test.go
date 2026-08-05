@@ -3,13 +3,192 @@
 package server
 
 import (
+	"bytes"
 	"errors"
+	"log/slog"
+	"net"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/server/api"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
+
+type deadlineResponseWriter struct {
+	*httptest.ResponseRecorder
+
+	deadlines []time.Time
+	writeErr  error
+	flushErr  error
+}
+
+func (w *deadlineResponseWriter) Write(b []byte) (int, error) {
+	if w.writeErr != nil {
+		return 0, w.writeErr
+	}
+	return w.ResponseRecorder.Write(b)
+}
+
+func (w *deadlineResponseWriter) Flush() {}
+
+func (w *deadlineResponseWriter) FlushError() error {
+	return w.flushErr
+}
+
+func (w *deadlineResponseWriter) SetWriteDeadline(deadline time.Time) error {
+	w.deadlines = append(w.deadlines, deadline)
+	return nil
+}
+
+type pipeResponseWriter struct {
+	conn net.Conn
+
+	header       http.Header
+	deadlineSet  chan time.Time
+	deadlines    []time.Time
+	writeStarted chan struct{}
+}
+
+func (w *pipeResponseWriter) Header() http.Header {
+	return w.header
+}
+
+func (w *pipeResponseWriter) Write(b []byte) (int, error) {
+	select {
+	case w.writeStarted <- struct{}{}:
+	default:
+	}
+	return w.conn.Write(b)
+}
+
+func (w *pipeResponseWriter) WriteHeader(int) {}
+
+func (w *pipeResponseWriter) Flush() {}
+
+func (w *pipeResponseWriter) SetWriteDeadline(deadline time.Time) error {
+	err := w.conn.SetWriteDeadline(deadline)
+	w.deadlines = append(w.deadlines, deadline)
+	if !deadline.IsZero() {
+		w.deadlineSet <- deadline
+	}
+	return err
+}
+
+func TestEmitTaskListEvent(t *testing.T) { //nolint:tparallel // UnsupportedDeadline mutates the global slog default.
+	t.Run("PipeDeadlineStopsBlockedWrite", func(t *testing.T) {
+		t.Parallel()
+		server, client := net.Pipe()
+		t.Cleanup(func() { _ = server.Close() })
+		t.Cleanup(func() { _ = client.Close() })
+		w := &pipeResponseWriter{
+			conn:         server,
+			header:       make(http.Header),
+			deadlineSet:  make(chan time.Time, 1),
+			writeStarted: make(chan struct{}, 1),
+		}
+		before := time.Now()
+		errs := make(chan error, 1)
+		go func() {
+			errs <- emitTaskListEvent(t.Context(), w, &v1.TaskListEvent{Kind: "snapshot"})
+		}()
+
+		var deadline time.Time
+		select {
+		case deadline = <-w.deadlineSet:
+		case <-time.After(time.Second):
+			t.Fatal("emitTaskListEvent did not set a write deadline")
+		}
+		if got := deadline.Sub(before); got < 4*time.Second || got > 6*time.Second {
+			t.Errorf("write deadline offset = %v, want approximately 5s", got)
+		}
+		select {
+		case <-w.writeStarted:
+		case <-time.After(time.Second):
+			t.Fatal("emitTaskListEvent did not begin writing to the pipe")
+		}
+		if err := server.SetWriteDeadline(time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case err := <-errs:
+			if !strings.Contains(err.Error(), "write task-list event") {
+				t.Errorf("emitTaskListEvent error = %v, want delivery context", err)
+			}
+			netErr, ok := errors.AsType[net.Error](err)
+			if !ok || !netErr.Timeout() {
+				t.Errorf("emitTaskListEvent error = %v, want timeout", err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("blocked pipe write did not return promptly")
+		}
+		if len(w.deadlines) != 2 || !w.deadlines[1].IsZero() {
+			t.Errorf("deadlines = %v, want set then clear", w.deadlines)
+		}
+	})
+
+	t.Run("WriteError", func(t *testing.T) {
+		t.Parallel()
+		want := errors.New("client write failed")
+		w := &deadlineResponseWriter{
+			ResponseRecorder: httptest.NewRecorder(),
+			writeErr:         want,
+		}
+
+		err := emitTaskListEvent(t.Context(), w, &v1.TaskListEvent{Kind: "snapshot"})
+		if !errors.Is(err, want) {
+			t.Fatalf("emitTaskListEvent error = %v, want %v", err, want)
+		}
+		if !strings.Contains(err.Error(), "write task-list event") {
+			t.Errorf("emitTaskListEvent error = %v, want delivery context", err)
+		}
+		if len(w.deadlines) != 2 || !w.deadlines[1].IsZero() {
+			t.Errorf("deadlines = %v, want set then clear", w.deadlines)
+		}
+	})
+
+	t.Run("FlushError", func(t *testing.T) {
+		t.Parallel()
+		want := errors.New("encoder flush failed")
+		w := &deadlineResponseWriter{
+			ResponseRecorder: httptest.NewRecorder(),
+			flushErr:         want,
+		}
+
+		err := emitTaskListEvent(t.Context(), w, &v1.TaskListEvent{Kind: "snapshot"})
+		if !errors.Is(err, want) {
+			t.Errorf("emitTaskListEvent error = %v, want %v", err, want)
+		}
+		if !strings.Contains(err.Error(), "write task-list event") {
+			t.Errorf("emitTaskListEvent error = %v, want delivery context", err)
+		}
+		if len(w.deadlines) != 2 || !w.deadlines[1].IsZero() {
+			t.Errorf("deadlines = %v, want set then clear", w.deadlines)
+		}
+	})
+
+	//nolint:paralleltest // This subtest mutates the global slog default.
+	t.Run("UnsupportedDeadline", func(t *testing.T) {
+		var logs bytes.Buffer
+		old := slog.Default()
+		slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+		t.Cleanup(func() { slog.SetDefault(old) })
+		w := httptest.NewRecorder()
+
+		if err := emitTaskListEvent(t.Context(), w, &v1.TaskListEvent{Kind: "snapshot"}); err != nil {
+			t.Fatalf("emitTaskListEvent error = %v, want nil", err)
+		}
+		if got := w.Body.String(); got == "" {
+			t.Error("event body is empty")
+		}
+		if got := strings.Count(logs.String(), `"msg":"task-list event write deadline unsupported"`); got != 1 {
+			t.Errorf("deadline warning count = %d, want 1; logs = %s", got, logs.String())
+		}
+	})
+}
 
 func TestToDTO(t *testing.T) {
 	t.Parallel()
