@@ -4,8 +4,8 @@ github.com/bahlo/generic-list-go v0.2.0 h1:5sz/EEAK+ls5wF+NeqDpk5+iNdMDXrh3z3nPn
 github.com/bahlo/generic-list-go v0.2.0/go.mod h1:2KvAjgMlE5NNynlg/5iLrrCCZ2+5xWbdbCW3pNTGyYg=
 github.com/buger/jsonparser v1.2.0 h1:4EFcvK1kD4jyj6YqNK6skK6w+y7FHHBR+XBCtxwu/6g=
 github.com/buger/jsonparser v1.2.0/go.mod h1:6RYKKt7H4d4+iWqouImQ9R2FZql3VbhNgx27UK13J/0=
-github.com/caic-xyz/md v0.17.1-0.20260805160931-b21c91635c81 h1:7Uw86hLD7q6zOxstxINN5MIwLaUX/ATUdNx/0SHNzkc=
-github.com/caic-xyz/md v0.17.1-0.20260805160931-b21c91635c81/go.mod h1:+9lF//WR8nga8w2kjyVcfgpsLu2CZhBHjSKkwSm0cAM=
+github.com/caic-xyz/md v0.17.1 h1:m3JruuwRBYzCwMHA58T0O6xelrSzFwdpaqcx7rZu4Yo=
+github.com/caic-xyz/md v0.17.1/go.mod h1:nroG4CyVuTW5HN/hwncdfx0f+ARSVZhTcTKJRgIl76Q=
 github.com/coder/websocket v1.8.14 h1:9L0p0iKiNOibykf283eHkKUHHrpG7f65OE3BhhO7v9g=
 github.com/coder/websocket v1.8.14/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6pumgx0mVg=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
@@ -24,8 +24,8 @@ github.com/klauspost/compress v1.19.0 h1:sXLILfc9jV2QYWkzFOPWStmcUVH2RHEB1JCdY2o
 github.com/klauspost/compress v1.19.0/go.mod h1:cwPg85FWrGar70rWktvGQj8/hthj3wpl0PGDogxkrSQ=
 github.com/lmittmann/tint v1.1.3 h1:Hv4EaHWXQr+GTFnOU4VKf8UvAtZgn0VuKT+G0wFlO3I=
 github.com/lmittmann/tint v1.1.3/go.mod h1:HIS3gSy7qNwGCj+5oRjAutErFBl4BzdQP6cJZ0NfMwE=
-github.com/maruel/genai v0.7.3-0.20260804143146-4214eec71882 h1:9OEwc9LdTuiDTCXh2x0xzyrwr17dSuC9vcYiSZM2Kd8=
-github.com/maruel/genai v0.7.3-0.20260804143146-4214eec71882/go.mod h1:OBZSbzwMWM5zM+V/UjUafRwMLqIx0gwWzCW2oSThOX0=
+github.com/maruel/genai v0.7.3 h1:zqtbo34+vIc91QSMlxjEMqZIOtUA6TD9394S3sytjq0=
+github.com/maruel/genai v0.7.3/go.mod h1:OBZSbzwMWM5zM+V/UjUafRwMLqIx0gwWzCW2oSThOX0=
 github.com/maruel/gopus v0.0.0-20260506115108-4c6355c2de38 h1:B96AE27WGCnXjaItfg9i6bnj7iGs//NPBDz6kMgKYto=
 github.com/maruel/gopus v0.0.0-20260506115108-4c6355c2de38/go.mod h1:k6iNRgw7GovdcpFDalSZhuveD/oFLUU188FrWXdduXc=
 github.com/maruel/httpjson v0.5.2 h1:uMAyE9ajEZOpwFmpF6HCvuGOMLQ5D/9vVEMYaRYYXuc=
