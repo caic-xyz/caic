@@ -212,6 +212,20 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe("App task list loading state", () => {
+  it("shows loading until initial data finishes loading", async () => {
+    renderApp();
+
+    expect(screen.getByText("Loading...")).toBeInTheDocument();
+    expect(screen.queryByText("No tasks yet.")).not.toBeInTheDocument();
+
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [] });
+
+    await waitFor(() => expect(screen.getByText("No tasks yet.")).toBeInTheDocument());
+  });
+});
+
 describe("App task-list SSE recovery", () => {
   it("uses fetched tasks for derived notification and quota recovery bookkeeping", async () => {
     const blockedTask = makeTask({ id: "recovered", state: "waiting", rateLimit: { blocked: true } });

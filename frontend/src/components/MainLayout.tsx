@@ -115,6 +115,7 @@ export default function MainLayout(props: { children?: JSX.Element }) {
       <Layout>
         <TaskList
           tasks={s.tasks}
+          tasksLoading={s.tasksLoading}
           repos={s.repos}
           usage={s.usage}
           selectedId={s.selectedId()}

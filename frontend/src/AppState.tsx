@@ -52,6 +52,7 @@ function createAppStore() {
 
   const [prompt, setPrompt] = createSignal("");
   const [tasks, setTasks] = createSignal<Task[]>([]);
+  const [tasksLoading, setTasksLoading] = createSignal(true);
   const [submitting, setSubmitting] = createSignal(false);
   const [initializing, setInitializing] = createSignal(true);
   const [repos, setRepos] = createSignal<Repo[]>([]);
@@ -629,6 +630,7 @@ function createAppStore() {
           }
           prevStates = new Map(event.snapshot.map((t) => [t.id, t.state]));
           setTasks(event.snapshot);
+          setTasksLoading(false);
           notifyQuotaRecoveries(event.snapshot);
         } else if (event.kind === "upsert" && event.upsert) {
           const task = event.upsert;
@@ -1039,7 +1041,7 @@ function createAppStore() {
     navigate,
     auth,
     // task data + selection
-    tasks, repos, selectedId, selectedTask, taskById, dismissSelectedTaskOnNotFound,
+    tasks, tasksLoading, repos, selectedId, selectedTask, taskById, dismissSelectedTaskOnNotFound,
     // new-task form
     prompt, setPrompt, selectedRepos, setSelectedRepos, selectedModel, setSelectedModel: selectModel,
     selectedEffort, setSelectedEffort: selectEffort, selectedHarness, setSelectedHarness: selectHarness, harnesses,

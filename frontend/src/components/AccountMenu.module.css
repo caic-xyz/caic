@@ -69,6 +69,7 @@
 .dropdownItem {
   display: block;
   width: 100%;
+  box-sizing: border-box;
   padding: 0.4rem 0.75rem;
   font: inherit;
   font-size: 0.85rem;

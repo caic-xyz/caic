@@ -21,7 +21,7 @@ export default function AccountMenu() {
       onOpenChange={setMenuOpen}
       class={styles.userMenu}
       content={
-        <div class={styles.userDropdown}>
+        <div class={styles.userDropdown} data-testid="account-menu">
           <Show when={hasAuth() && auth.user()}>
             <span class={styles.dropdownUser}>{user().username}</span>
           </Show>
