@@ -1,47 +1,39 @@
-// Service worker for caic PWA.
-// Network-first strategy: always prefer fresh content, fall back to cache.
-// Hashed /assets/* files are cached aggressively (immutable).
+// Service worker for caic PWA: caches only immutable hashed assets.
+// SPA documents are personalized and must always come from the network.
 
-const CACHE = "caic-v1";
+const CACHE = "caic-assets-v2";
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (e) => {
   e.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
+      Promise.all(keys.filter((k) => k.startsWith("caic-") && k !== CACHE).map((k) => caches.delete(k)))
     )
   );
 });
 
 self.addEventListener("fetch", (e) => {
+  if (e.request.method !== "GET") return;
+
   const url = new URL(e.request.url);
+  if (url.origin !== self.location.origin || !url.pathname.startsWith("/assets/")) return;
 
-  // Never cache API calls or SSE streams.
-  if (url.pathname.startsWith("/api/")) return;
-
-  // Hashed assets: cache-first (immutable content).
-  if (url.pathname.startsWith("/assets/")) {
-    e.respondWith(
-      caches.open(CACHE).then((cache) =>
-        cache.match(e.request).then(
-          (cached) => cached || fetch(e.request).then((resp) => {
-            cache.put(e.request, resp.clone());
-            return resp;
-          })
-        )
-      )
-    );
-    return;
-  }
-
-  // Everything else: network-first, cache fallback.
+  // Hashed assets are immutable, so they can be safely served cache-first.
   e.respondWith(
-    fetch(e.request)
-      .then((resp) => {
-        const clone = resp.clone();
-        caches.open(CACHE).then((cache) => cache.put(e.request, clone));
-        return resp;
+    caches.open(CACHE).then((cache) =>
+      cache.match(e.request).then((cached) => {
+        if (cached) return cached;
+        return fetch(e.request).then((resp) => {
+          if (!resp.ok) return resp;
+          return cache.put(e.request, resp.clone()).then(
+            () => resp,
+            (error) => {
+              console.warn("Could not cache caic asset", error);
+              return resp;
+            },
+          );
+        });
       })
-      .catch(() => caches.match(e.request).then((cached) => cached || caches.match("/")))
+    )
   );
 });

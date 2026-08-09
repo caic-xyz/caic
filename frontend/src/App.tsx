@@ -1,10 +1,11 @@
-// Application shell: top-level chrome, dialogs, error boundary, Go Mode browser shell, and routed panes.
+// Application shell: top-level chrome, dialogs, diagnostic error boundary, Go Mode browser shell, and routed panes.
 
-import { ErrorBoundary, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, ErrorBoundary, Show, type JSX } from "solid-js";
 
 import GoModeBrowserShell from "./gomode/BrowserShell";
 import { HostModeProvider } from "./gomode/HostMode";
 
+import { currentErrorReport } from "./errorReport";
 import { AppStateProvider, useAppState } from "./AppState";
 import LoginPage from "./pages/LoginPage";
 import AccountMenu from "./components/AccountMenu";
@@ -17,12 +18,41 @@ import styles from "./App.module.css";
 
 /** Fallback UI shown when an ErrorBoundary catches a render error. */
 function ErrorFallback(props: { error: unknown; reset: () => void }) {
+  const [copyError, setCopyError] = createSignal("");
+  const [copied, setCopied] = createSignal(false);
   const message = () => (props.error instanceof Error ? props.error.message : String(props.error));
+  const report = createMemo(() => currentErrorReport(props.error));
+  createEffect(() => console.error("caic frontend ErrorBoundary caught a render error.\n" + report()));
+
+  async function copyDiagnosticDetails() {
+    try {
+      await navigator.clipboard.writeText(report());
+      setCopied(true);
+      setCopyError("");
+    } catch (error) {
+      console.error("Failed to copy caic frontend diagnostic details", error);
+      setCopyError("Could not copy details. Select and copy them below.");
+    }
+  }
+
   return (
     <div class={styles.errorFallback} role="alert" data-testid="error-fallback">
       <p class={styles.errorTitle}>Something went wrong.</p>
       <pre class={styles.errorMessage}>{message()}</pre>
-      <Button variant="gray" onClick={props.reset}>Try again</Button>
+      <div class={styles.errorActions}>
+        <Button type="button" variant="gray" onClick={props.reset}>Try again</Button>
+        <Button type="button" variant="gray" onClick={() => window.location.reload()}>Reload page</Button>
+        <Button type="button" variant="gray" onClick={() => void copyDiagnosticDetails()}>
+          {copied() ? "Copied details" : "Copy diagnostic details"}
+        </Button>
+      </div>
+      <Show when={copyError()}>
+        <p class={styles.errorCopyFailure}>{copyError()}</p>
+      </Show>
+      <details class={styles.errorDetails}>
+        <summary>Technical details</summary>
+        <pre class={styles.errorReport}>{report()}</pre>
+      </details>
     </div>
   );
 }

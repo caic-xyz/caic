@@ -1,4 +1,4 @@
-/* Styles for the App component. */
+/* Styles for the app shell and its diagnostic error fallback. */
 
 .app {
   position: fixed;
@@ -98,6 +98,32 @@
   white-space: pre-wrap;
   overflow-x: auto;
   font-size: 0.85rem;
+}
+
+.errorActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.errorCopyFailure {
+  margin: 0;
+  color: var(--color-danger-text);
+}
+
+.errorDetails {
+  width: 100%;
+}
+
+.errorReport {
+  margin: 0.5rem 0 0;
+  padding: 0.75rem;
+  overflow-x: auto;
+  background: var(--color-surface-variant);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  white-space: pre-wrap;
+  font-size: 0.8rem;
 }
 
 /* Mobile: <=768px */
