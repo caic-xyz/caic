@@ -12,8 +12,8 @@ type FakeEventReplayWriter struct {
 }
 
 // WriteMessage records msg.
-func (f *FakeEventReplayWriter) WriteMessage(msg agent.Message) {
-	f.Messages = append(f.Messages, msg)
+func (f *FakeEventReplayWriter) WriteMessage(msg agent.ParsedMessage) {
+	f.Messages = append(f.Messages, msg.Message)
 }
 
 // Commit records logPath and returns CommitErr.

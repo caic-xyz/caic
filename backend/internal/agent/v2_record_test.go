@@ -67,8 +67,8 @@ func assertV2FixtureRecord(t *testing.T, name, timestamp, nativeBytes, recordByt
 	if err != nil {
 		t.Fatal(err)
 	}
-	if calls != 1 || len(msgs) != 1 || !msgs[0].ProducerTime.Equal(wantTime) {
-		t.Fatalf("calls = %d, messages = %#v, want producer time %v", calls, msgs, wantTime)
+	if msgs.Control || calls != 1 || len(msgs.Messages) != 1 || !msgs.Messages[0].ProducerTime.Equal(wantTime) {
+		t.Fatalf("calls = %d, record = %#v, want producer time %v", calls, msgs, wantTime)
 	}
 }
 
@@ -118,8 +118,8 @@ func TestV2AgentRecord(t *testing.T) {
 					t.Fatal("native payload did not alias the input record")
 				}
 				wantTime := time.Unix(1_700_000_000, 123_000_000).UTC()
-				if len(msgs) != 1 || !msgs[0].ProducerTime.Equal(wantTime) {
-					t.Fatalf("parsed messages = %#v, want producer time %v", msgs, wantTime)
+				if msgs.Control || len(msgs.Messages) != 1 || !msgs.Messages[0].ProducerTime.Equal(wantTime) {
+					t.Fatalf("parsed record = %#v, want producer time %v", msgs, wantTime)
 				}
 			})
 		}
@@ -221,12 +221,12 @@ func TestV2AgentRecord(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(msgs) != 1 {
-			t.Fatalf("meta messages = %#v", msgs)
+		if !msgs.Control || len(msgs.Messages) != 1 {
+			t.Fatalf("meta record = %#v", msgs)
 		}
-		parsedMeta, ok := msgs[0].Message.(*MetaMessage)
+		parsedMeta, ok := msgs.Messages[0].Message.(*MetaMessage)
 		if !ok || parsedMeta.MessageType != "caic_meta" || parsedMeta.Version != 2 {
-			t.Fatalf("meta message = %#v", msgs[0].Message)
+			t.Fatalf("meta message = %#v", msgs.Messages[0].Message)
 		}
 		if _, err := parseV2Record(p, []byte(`{"t":"model_info","context_window":1000000}`)); err != nil {
 			t.Fatal(err)
@@ -235,8 +235,8 @@ func TestV2AgentRecord(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		usage, ok := msgs[0].Message.(*UsageMessage)
-		if !ok || usage.ContextWindow != 1000000 {
+		usage, ok := msgs.Messages[0].Message.(*UsageMessage)
+		if msgs.Control || !ok || usage.ContextWindow != 1000000 {
 			t.Fatalf("usage after t control = %#v", msgs)
 		}
 	})
@@ -260,10 +260,10 @@ func TestV2AgentRecord(t *testing.T) {
 				t.Fatal(err)
 			}
 			wantTime := time.Unix(1, int64(time.Millisecond)).UTC()
-			if len(msgs) != 3 {
-				t.Fatalf("message count = %d, want 3", len(msgs))
+			if msgs.Control || len(msgs.Messages) != 3 {
+				t.Fatalf("record = %#v, want three agent messages", msgs)
 			}
-			for i, msg := range msgs {
+			for i, msg := range msgs.Messages {
 				if !msg.ProducerTime.Equal(wantTime) {
 					t.Fatalf("message %d producer time = %v, want %v", i, msg.ProducerTime, wantTime)
 				}
@@ -283,8 +283,8 @@ func TestV2AgentRecord(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if calls != 1 || len(msgs) != 0 {
-				t.Fatalf("calls = %d, messages = %#v", calls, msgs)
+			if msgs.Control || calls != 1 || len(msgs.Messages) != 0 {
+				t.Fatalf("calls = %d, record = %#v", calls, msgs)
 			}
 		})
 	})
@@ -385,8 +385,8 @@ func TestV2AgentRecord(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if calls != 1 || len(msgs) != 0 {
-			t.Fatalf("calls = %d, messages = %#v, want one callback and no messages", calls, msgs)
+		if msgs.Control || calls != 1 || len(msgs.Messages) != 0 {
+			t.Fatalf("calls = %d, record = %#v, want one callback and no messages", calls, msgs)
 		}
 	})
 
@@ -447,7 +447,7 @@ func TestV2AgentRecord(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(msgs) != 1 || msgs[0].Message != action {
+		if msgs.Control || len(msgs.Messages) != 1 || msgs.Messages[0].Message != action {
 			t.Fatalf("rejected batch changed parser state: %#v", msgs)
 		}
 	})

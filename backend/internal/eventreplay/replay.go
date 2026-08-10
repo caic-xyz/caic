@@ -35,19 +35,25 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
+	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
 // CacheVersion is the schema version of the cached EventMessage JSONL.
 // Bump it whenever event conversion or DTO semantics change so stale caches are
 // ignored rather than served.
-const CacheVersion = 4
+const CacheVersion = 5
 
 // CacheHeader is the first JSONL record of a replay cache. It binds the cache
 // to a specific raw log file so a changed or replaced log invalidates it.
 type CacheHeader struct {
-	Version  int   `json:"v"`
-	LogSize  int64 `json:"logSize"`
-	LogModNs int64 `json:"logModNs"`
+	Version          int              `json:"v"`
+	LogDevice        uint64           `json:"logDevice"`
+	LogInode         uint64           `json:"logInode"`
+	LogSize          int64            `json:"logSize"`
+	LogModNs         int64            `json:"logModNs"`
+	AuthorityVersion agent.LogVersion `json:"authorityVersion"`
+	AuthorityHarness harness.Name     `json:"authorityHarness"`
+	RawHeader        string           `json:"rawHeader"`
 }
 
 // CachePath returns the sidecar cache path for a task log path. The
@@ -310,9 +316,9 @@ func (w *CacheWriter) commitLocked(logPath string) error {
 		_ = os.Remove(w.bodyName)
 	}()
 
-	info, statErr := os.Stat(filepath.Clean(logPath))
-	if statErr != nil {
-		w.werr = errors.Join(w.werr, statErr)
+	proof, proofErr := task.CacheProofForLog(logPath)
+	if proofErr != nil {
+		w.werr = errors.Join(w.werr, proofErr)
 	}
 	if _, err := body.Seek(0, io.SeekStart); err != nil {
 		w.werr = errors.Join(w.werr, err)
@@ -334,9 +340,14 @@ func (w *CacheWriter) commitLocked(logPath string) error {
 		return fmt.Errorf("create replay cache zstd writer: %w", errors.Join(err, closeErr))
 	}
 	header, err := json.Marshal(CacheHeader{
-		Version:  CacheVersion,
-		LogSize:  info.Size(),
-		LogModNs: info.ModTime().UnixNano(),
+		Version:          CacheVersion,
+		LogDevice:        proof.Device,
+		LogInode:         proof.Inode,
+		LogSize:          proof.Size,
+		LogModNs:         proof.ModTimeNs,
+		AuthorityVersion: proof.Version,
+		AuthorityHarness: proof.Harness,
+		RawHeader:        proof.RawHeader,
 	})
 	if err == nil {
 		_, err = enc.Write(append(header, '\n'))
@@ -349,6 +360,14 @@ func (w *CacheWriter) commitLocked(logPath string) error {
 		removeErr := os.Remove(tmpName)
 		return fmt.Errorf("discard partial replay cache %s: %w", w.dst, errors.Join(err, removeErr))
 	}
+	finalProof, err := task.CacheProofForLog(logPath)
+	if err != nil || finalProof != proof {
+		removeErr := os.Remove(tmpName)
+		if err == nil {
+			err = errors.New("raw task log changed while rebuilding replay cache")
+		}
+		return fmt.Errorf("discard replay cache %s: %w", w.dst, errors.Join(err, removeErr))
+	}
 	if err := os.Rename(tmpName, w.dst); err != nil {
 		removeErr := os.Remove(tmpName)
 		return fmt.Errorf("rename replay cache %s: %w", w.dst, errors.Join(err, removeErr))
@@ -357,7 +376,7 @@ func (w *CacheWriter) commitLocked(logPath string) error {
 }
 
 // RegenerateReplay rebuilds the DTO replay sidecar from parsed raw-log messages.
-func RegenerateReplay(logPath string, h harness.Name, msgs iter.Seq2[agent.Message, error]) error {
+func RegenerateReplay(logPath string, h harness.Name, msgs iter.Seq2[agent.ParsedMessage, error]) error {
 	cache, err := NewCacheWriter(logPath)
 	if err != nil {
 		return err
@@ -371,8 +390,12 @@ func RegenerateReplay(logPath string, h harness.Name, msgs iter.Seq2[agent.Messa
 
 	tracker := v1conv.NewToolTimingTracker(h, FormatToolOutput)
 	now := time.Now()
-	emit := func(m agent.Message) {
-		evs := tracker.ConvertMessage(m, now)
+	emit := func(parsed agent.ParsedMessage) {
+		observed := parsed.ProducerTime
+		if observed.IsZero() {
+			observed = now
+		}
+		evs := tracker.ConvertMessage(parsed.Message, observed)
 		for i := range evs {
 			data, err := v1conv.MarshalEvent(&evs[i])
 			if err != nil {
@@ -402,7 +425,7 @@ type MessageWriter struct {
 	mu      sync.Mutex
 	cache   *CacheWriter
 	tracker *v1conv.ToolTimingTracker
-	push    func(agent.Message)
+	push    func(agent.ParsedMessage)
 	flush   func()
 }
 
@@ -416,8 +439,12 @@ func NewMessageWriter(logPath string, h harness.Name) (*MessageWriter, error) {
 		cache:   cache,
 		tracker: v1conv.NewToolTimingTracker(h, FormatToolOutput),
 	}
-	emit := func(m agent.Message) {
-		evs := w.tracker.ConvertMessage(m, time.Now())
+	emit := func(parsed agent.ParsedMessage) {
+		observed := parsed.ProducerTime
+		if observed.IsZero() {
+			observed = time.Now()
+		}
+		evs := w.tracker.ConvertMessage(parsed.Message, observed)
 		for i := range evs {
 			data, err := v1conv.MarshalEvent(&evs[i])
 			if err != nil {
@@ -432,7 +459,7 @@ func NewMessageWriter(logPath string, h harness.Name) (*MessageWriter, error) {
 }
 
 // WriteMessage appends m to the live replay stream after write-time compaction.
-func (w *MessageWriter) WriteMessage(m agent.Message) {
+func (w *MessageWriter) WriteMessage(m agent.ParsedMessage) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.push(m)
@@ -449,8 +476,8 @@ func (w *MessageWriter) Commit(logPath string) error {
 // NewFilter is the streaming replay compactor. It collapses a contiguous run of
 // streaming-delta messages when the matching consolidated message immediately
 // follows, emitting surviving messages in order via emit.
-func NewFilter(emit func(agent.Message)) (push func(agent.Message), flush func()) {
-	var pending []agent.Message
+func NewFilter(emit func(agent.ParsedMessage)) (push func(agent.ParsedMessage), flush func()) {
+	var pending []agent.ParsedMessage
 	cleanTurnComplete := false
 	flush = func() {
 		for _, m := range pending {
@@ -458,18 +485,19 @@ func NewFilter(emit func(agent.Message)) (push func(agent.Message), flush func()
 		}
 		pending = pending[:0]
 	}
-	push = func(m agent.Message) {
+	push = func(parsed agent.ParsedMessage) {
+		m := parsed.Message
 		if exit, ok := m.(*agent.ExitMessage); ok && exit.ExitCode != 0 && cleanTurnComplete {
 			return
 		}
 		if k := deltaKind(m); k != 0 {
-			if len(pending) > 0 && deltaKind(pending[0]) != k {
+			if len(pending) > 0 && deltaKind(pending[0].Message) != k {
 				flush()
 			}
-			pending = append(pending, m)
+			pending = append(pending, parsed)
 			return
 		}
-		if finalKind(m) != 0 && len(pending) > 0 && deltaKind(pending[0]) == finalKind(m) {
+		if finalKind(m) != 0 && len(pending) > 0 && deltaKind(pending[0].Message) == finalKind(m) {
 			pending = pending[:0]
 		} else {
 			flush()
@@ -480,7 +508,7 @@ func NewFilter(emit func(agent.Message)) (push func(agent.Message), flush func()
 		if rm, ok := m.(*agent.ResultMessage); ok {
 			cleanTurnComplete = !rm.IsError
 		}
-		emit(m)
+		emit(parsed)
 	}
 	return push, flush
 }
@@ -536,7 +564,7 @@ func logPathForCache(cachePath string) string {
 }
 
 func openFreshCacheBody(logPath string) (*bufio.Reader, func(), bool) {
-	info, err := os.Stat(filepath.Clean(logPath))
+	proof, err := task.CacheProofForLog(logPath)
 	if err != nil {
 		return nil, nil, false
 	}
@@ -562,7 +590,9 @@ func openFreshCacheBody(logPath string) (*bufio.Reader, func(), bool) {
 		_ = f.Close()
 		return nil, nil, false
 	}
-	if h.Version != CacheVersion || h.LogSize != info.Size() || h.LogModNs != info.ModTime().UnixNano() {
+	if h.Version != CacheVersion || h.LogDevice != proof.Device || h.LogInode != proof.Inode ||
+		h.LogSize != proof.Size || h.LogModNs != proof.ModTimeNs || h.AuthorityVersion != proof.Version ||
+		h.AuthorityHarness != proof.Harness || h.RawHeader != proof.RawHeader {
 		dec.Close()
 		_ = f.Close()
 		return nil, nil, false

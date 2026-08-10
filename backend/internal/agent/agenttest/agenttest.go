@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
 // Parser parses one harness log line into normalized agent messages.
@@ -46,10 +47,18 @@ func ParseJSONL(t testing.TB, path string, parser Parser) []agent.Message {
 	return out
 }
 
-// RunExportDiscussionGolden runs golden-file tests for ExportDiscussion
-// against all .jsonl files in testdata/. newParser typically returns
-// b.NewWire().ParseMessage from the harness backend.
-func RunExportDiscussionGolden(t *testing.T, newParser func() Parser) {
+// NativeParserResolver resolves a harness-native parser after task-log header
+// validation. Its shape lets external harness tests inject task.ExportDiscussion
+// without importing task into this shared test-helper package.
+type NativeParserResolver func(harness.Name) (func([]byte) ([]agent.Message, error), error)
+
+// DiscussionExporter loads and renders one physical task log.
+type DiscussionExporter func(string, NativeParserResolver) (string, error)
+
+// RunExportDiscussionGolden runs golden-file tests for task-owned physical
+// export loading against all .jsonl files in testdata/. newParser typically
+// returns b.NewWire().ParseMessage from the harness backend.
+func RunExportDiscussionGolden(t *testing.T, export DiscussionExporter, newParser func() Parser) {
 	files, err := filepath.Glob("testdata/*.jsonl")
 	if err != nil {
 		t.Fatal(err)
@@ -62,16 +71,9 @@ func RunExportDiscussionGolden(t *testing.T, newParser func() Parser) {
 		base := strings.TrimSuffix(filepath.Base(f), ".jsonl")
 		t.Run(base, func(t *testing.T) {
 			t.Parallel()
-			logFile, err := os.Open(filepath.Clean(f))
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() {
-				if err := logFile.Close(); err != nil {
-					t.Error(err)
-				}
+			got, err := export(f, func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
+				return newParser(), nil
 			})
-			got, err := agent.ExportDiscussion(logFile, f, newParser())
 			if err != nil {
 				t.Fatal(err)
 			}

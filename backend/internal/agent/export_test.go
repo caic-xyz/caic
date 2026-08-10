@@ -1,10 +1,12 @@
-// Tests for ExportDiscussion task-log-to-markdown conversion.
+// Tests parsed task-discussion markdown rendering.
 
 package agent
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"iter"
 	"os"
@@ -19,6 +21,10 @@ import (
 )
 
 type errorReader struct{}
+
+type v1ExportTestLine struct {
+	Type string `json:"type"`
+}
 
 func (errorReader) Read([]byte) (int, error) {
 	return 0, errors.New("read failed")
@@ -38,10 +44,10 @@ func (r *testZstdReadCloser) Close() error {
 	return r.file.Close()
 }
 
-// exportParseFn is a minimal parser for export tests. It recognises the
+// v1ExportParseFn is a minimal parser for export tests. It recognises the
 // message types that ExportDiscussion renders and ignores the rest.
-func exportParseFn(line []byte) ([]Message, error) {
-	var env exportLine
+func v1ExportParseFn(line []byte) ([]Message, error) {
+	var env v1ExportTestLine
 	if err := json.Unmarshal(line, &env); err != nil {
 		return nil, err
 	}
@@ -177,18 +183,66 @@ func openTestLogReader(t *testing.T, path string) io.ReadCloser {
 	return &testZstdReadCloser{dec: d, file: f}
 }
 
-func exportDiscussionPath(t *testing.T, path string) (string, error) {
+func exportDiscussionV1Path(t *testing.T, path string) (string, error) {
 	r := openTestLogReader(t, path)
 	t.Cleanup(func() {
 		if err := r.Close(); err != nil {
 			t.Error(err)
 		}
 	})
-	return ExportDiscussion(r, path, exportParseFn)
+	return exportDiscussionV1Reader(r, path, v1ExportParseFn)
 }
 
-// metaLine returns a caic_meta JSON line with the given prompt and harness.
-func metaLine(prompt, harnessName string) string {
+// exportDiscussionV1Reader is test-only fixture decoding that keeps the agent
+// production renderer independent of physical log loading.
+func exportDiscussionV1Reader(r io.Reader, src string, parseFn func([]byte) ([]Message, error)) (string, error) {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
+	var meta *MetaMessage
+	var result *MetaResultMessage
+	var pr *MetaPRMessage
+	var messages []Message
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		var env v1ExportTestLine
+		if err := json.Unmarshal(line, &env); err != nil {
+			continue
+		}
+		switch env.Type {
+		case "caic_meta":
+			var decoded MetaMessage
+			if json.Unmarshal(line, &decoded) == nil {
+				meta = &decoded
+			}
+		case "caic_result":
+			var decoded MetaResultMessage
+			if json.Unmarshal(line, &decoded) == nil {
+				result = &decoded
+			}
+		case "caic_pr":
+			var decoded MetaPRMessage
+			if json.Unmarshal(line, &decoded) == nil {
+				pr = &decoded
+			}
+		case "caic_diff_stat", "caic_exit", "caic_model_info", "caic_stripped_env", "caic_session", "caic_init", PendingUserActionMessageType:
+		default:
+			parsed, err := parseFn(line)
+			if err == nil {
+				messages = append(messages, parsed...)
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("scan %s: %w", src, err)
+	}
+	if meta == nil {
+		return "", fmt.Errorf("%s: no caic_meta header", src)
+	}
+	return RenderDiscussion(meta, result, pr, messages), nil
+}
+
+// v1MetaLine returns a caic_meta JSON line with the given prompt and harness.
+func v1MetaLine(prompt, harnessName string) string {
 	return `{"type":"caic_meta","version":1,"prompt":` + jsonStr(prompt) + `,"harness":` + jsonStr(harnessName) + `,"repos":[],"started_at":"2025-01-15T10:00:00Z"}`
 }
 
@@ -210,7 +264,7 @@ func TestExportDiscussion(t *testing.T) {
 		t.Run("full_conversation", func(t *testing.T) {
 			t.Parallel()
 			path := writeJSONL(t, []string{
-				metaLine("fix the bug", "pi"),
+				v1MetaLine("fix the bug", "pi"),
 				`{"type":"user_input","text":"fix the bug"}`,
 				`{"type":"thinking","text":"Let me analyze the issue carefully and find the root cause."}`,
 				`{"type":"text","text":"I'll look at the error logs first."}`,
@@ -222,7 +276,7 @@ func TestExportDiscussion(t *testing.T) {
 				`{"type":"caic_result","state":"completed","cost_usd":0.05,"duration":120,"num_turns":3}`,
 			})
 
-			md, err := exportDiscussionPath(t, path)
+			md, err := exportDiscussionV1Path(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -250,10 +304,10 @@ func TestExportDiscussion(t *testing.T) {
 		t.Run("metadata_only", func(t *testing.T) {
 			t.Parallel()
 			path := writeJSONL(t, []string{
-				metaLine("hello", "claude"),
+				v1MetaLine("hello", "claude"),
 			})
 
-			md, err := exportDiscussionPath(t, path)
+			md, err := exportDiscussionV1Path(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -266,13 +320,13 @@ func TestExportDiscussion(t *testing.T) {
 		t.Run("compressed_log", func(t *testing.T) {
 			t.Parallel()
 			path := writeCompressedJSONL(t, seqOf(
-				metaLine("compress me", "pi"),
+				v1MetaLine("compress me", "pi"),
 				`{"type":"user_input","text":"hello"}`,
 				`{"type":"text","text":"done"}`,
 				`{"type":"caic_result","state":"completed"}`,
 			))
 
-			md, err := exportDiscussionPath(t, path)
+			md, err := exportDiscussionV1Path(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -283,12 +337,12 @@ func TestExportDiscussion(t *testing.T) {
 		t.Run("with_PR_info", func(t *testing.T) {
 			t.Parallel()
 			path := writeJSONL(t, []string{
-				metaLine("add feature", "claude"),
+				v1MetaLine("add feature", "claude"),
 				`{"type":"text","text":"done"}`,
 				`{"type":"caic_pr","forge_owner":"octo","forge_repo":"app","forge_pr":42}`,
 			})
 
-			md, err := exportDiscussionPath(t, path)
+			md, err := exportDiscussionV1Path(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -300,7 +354,7 @@ func TestExportDiscussion(t *testing.T) {
 			line := `{"type":"caic_meta","version":1,"prompt":"test","harness":"pi","repos":[],"started_at":"2025-01-15T10:00:00Z","tailscale":true,"display":true}`
 			path := writeJSONL(t, []string{line})
 
-			md, err := exportDiscussionPath(t, path)
+			md, err := exportDiscussionV1Path(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -312,7 +366,7 @@ func TestExportDiscussion(t *testing.T) {
 			line := `{"type":"caic_meta","version":1,"prompt":"test","harness":"pi","repos":[{"name":"app","base_branch":"main","branch":"fix-bug"}],"started_at":"2025-01-15T10:00:00Z"}`
 			path := writeJSONL(t, []string{line})
 
-			md, err := exportDiscussionPath(t, path)
+			md, err := exportDiscussionV1Path(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -322,12 +376,12 @@ func TestExportDiscussion(t *testing.T) {
 		t.Run("with_error_result", func(t *testing.T) {
 			t.Parallel()
 			path := writeJSONL(t, []string{
-				metaLine("task", "pi"),
+				v1MetaLine("task", "pi"),
 				`{"type":"text","text":"something went wrong"}`,
 				`{"type":"caic_result","state":"failed","error":"container died","cost_usd":0.01,"duration":10}`,
 			})
 
-			md, err := exportDiscussionPath(t, path)
+			md, err := exportDiscussionV1Path(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -338,11 +392,11 @@ func TestExportDiscussion(t *testing.T) {
 		t.Run("tool_error", func(t *testing.T) {
 			t.Parallel()
 			path := writeJSONL(t, []string{
-				metaLine("task", "pi"),
+				v1MetaLine("task", "pi"),
 				`{"type":"tool_result","tool_use_id":"t1","error":"command not found"}`,
 			})
 
-			md, err := exportDiscussionPath(t, path)
+			md, err := exportDiscussionV1Path(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -352,12 +406,12 @@ func TestExportDiscussion(t *testing.T) {
 		t.Run("subagent_events", func(t *testing.T) {
 			t.Parallel()
 			path := writeJSONL(t, []string{
-				metaLine("task", "pi"),
+				v1MetaLine("task", "pi"),
 				`{"type":"subagent_start","task_id":"sub1","description":"analyze logs"}`,
 				`{"type":"subagent_end","task_id":"sub1","status":"completed"}`,
 			})
 
-			md, err := exportDiscussionPath(t, path)
+			md, err := exportDiscussionV1Path(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -368,11 +422,11 @@ func TestExportDiscussion(t *testing.T) {
 		t.Run("compaction_boundary", func(t *testing.T) {
 			t.Parallel()
 			path := writeJSONL(t, []string{
-				metaLine("task", "pi"),
+				v1MetaLine("task", "pi"),
 				`{"type":"system","subtype":"compact_boundary"}`,
 			})
 
-			md, err := exportDiscussionPath(t, path)
+			md, err := exportDiscussionV1Path(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -382,14 +436,14 @@ func TestExportDiscussion(t *testing.T) {
 		t.Run("skips_caic_control_records", func(t *testing.T) {
 			t.Parallel()
 			path := writeJSONL(t, []string{
-				metaLine("task", "pi"),
+				v1MetaLine("task", "pi"),
 				`{"type":"caic_diff_stat","diff_stat":[]}`,
 				`{"type":"caic_exit","exit_code":0}`,
 				`{"type":"caic_model_info","context_window":200000}`,
 				`{"type":"text","text":"visible"}`,
 			})
 
-			md, err := exportDiscussionPath(t, path)
+			md, err := exportDiscussionV1Path(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -403,11 +457,11 @@ func TestExportDiscussion(t *testing.T) {
 			t.Parallel()
 			long := strings.Repeat("a", 1000)
 			path := writeJSONL(t, []string{
-				metaLine("task", "pi"),
+				v1MetaLine("task", "pi"),
 				`{"type":"thinking","text":` + jsonStr(long) + `}`,
 			})
 
-			md, err := exportDiscussionPath(t, path)
+			md, err := exportDiscussionV1Path(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -419,11 +473,11 @@ func TestExportDiscussion(t *testing.T) {
 		t.Run("duration_hours", func(t *testing.T) {
 			t.Parallel()
 			path := writeJSONL(t, []string{
-				metaLine("task", "pi"),
+				v1MetaLine("task", "pi"),
 				`{"type":"caic_result","state":"completed","duration":7200}`,
 			})
 
-			md, err := exportDiscussionPath(t, path)
+			md, err := exportDiscussionV1Path(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -433,11 +487,11 @@ func TestExportDiscussion(t *testing.T) {
 		t.Run("duration_seconds", func(t *testing.T) {
 			t.Parallel()
 			path := writeJSONL(t, []string{
-				metaLine("task", "pi"),
+				v1MetaLine("task", "pi"),
 				`{"type":"caic_result","state":"completed","duration":45}`,
 			})
 
-			md, err := exportDiscussionPath(t, path)
+			md, err := exportDiscussionV1Path(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -447,14 +501,14 @@ func TestExportDiscussion(t *testing.T) {
 		t.Run("skips_empty_tool_use", func(t *testing.T) {
 			t.Parallel()
 			path := writeJSONL(t, []string{
-				metaLine("task", "pi"),
+				v1MetaLine("task", "pi"),
 				`{"type":"text","text":"Before"}`,
 				`{"type":"tool_use","id":"t1","name":"Read","input":{}}`,
 				`{"type":"tool_use","id":"t2","name":"Read","input":{"path":"main.go"}}`,
 				`{"type":"text","text":"After"}`,
 			})
 
-			md, err := exportDiscussionPath(t, path)
+			md, err := exportDiscussionV1Path(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -469,12 +523,12 @@ func TestExportDiscussion(t *testing.T) {
 		t.Run("skips_null_tool_use_input", func(t *testing.T) {
 			t.Parallel()
 			path := writeJSONL(t, []string{
-				metaLine("task", "pi"),
+				v1MetaLine("task", "pi"),
 				`{"type":"tool_use","id":"t1","name":"Read","input":null}`,
 				`{"type":"text","text":"done"}`,
 			})
 
-			md, err := exportDiscussionPath(t, path)
+			md, err := exportDiscussionV1Path(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -484,11 +538,11 @@ func TestExportDiscussion(t *testing.T) {
 		t.Run("write_tool_preview", func(t *testing.T) {
 			t.Parallel()
 			path := writeJSONL(t, []string{
-				metaLine("task", "pi"),
+				v1MetaLine("task", "pi"),
 				`{"type":"tool_use","id":"t1","name":"Write","input":{"path":"out.txt","content":"hello world"}}`,
 			})
 
-			md, err := exportDiscussionPath(t, path)
+			md, err := exportDiscussionV1Path(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -499,11 +553,11 @@ func TestExportDiscussion(t *testing.T) {
 		t.Run("read_tool_path", func(t *testing.T) {
 			t.Parallel()
 			path := writeJSONL(t, []string{
-				metaLine("task", "pi"),
+				v1MetaLine("task", "pi"),
 				`{"type":"tool_use","id":"t1","name":"Read","input":{"path":"main.go"}}`,
 			})
 
-			md, err := exportDiscussionPath(t, path)
+			md, err := exportDiscussionV1Path(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -513,11 +567,11 @@ func TestExportDiscussion(t *testing.T) {
 		t.Run("grep_tool_pattern", func(t *testing.T) {
 			t.Parallel()
 			path := writeJSONL(t, []string{
-				metaLine("task", "pi"),
+				v1MetaLine("task", "pi"),
 				`{"type":"tool_use","id":"t1","name":"Grep","input":{"pattern":"TODO","path":"."}}`,
 			})
 
-			md, err := exportDiscussionPath(t, path)
+			md, err := exportDiscussionV1Path(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -532,7 +586,7 @@ func TestExportDiscussion(t *testing.T) {
 				Harness:   harness.Pi,
 				StartedAt: time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
 			}
-			md := renderDiscussion(meta, nil, nil, nil)
+			md := RenderDiscussion(meta, nil, nil, nil)
 			if !strings.Contains(md, "**Title**: My Task Title") {
 				t.Errorf("missing title in output:\n%s", md)
 			}
@@ -544,7 +598,7 @@ func TestExportDiscussion(t *testing.T) {
 
 		t.Run("reader_error", func(t *testing.T) {
 			t.Parallel()
-			_, err := ExportDiscussion(errorReader{}, "broken.jsonl", exportParseFn)
+			_, err := exportDiscussionV1Reader(errorReader{}, "broken.jsonl", v1ExportParseFn)
 			if err == nil {
 				t.Fatal("expected error for reader failure")
 			}
@@ -558,7 +612,7 @@ func TestExportDiscussion(t *testing.T) {
 			path := writeJSONL(t, []string{
 				`{"type":"text","text":"orphan message"}`,
 			})
-			_, err := exportDiscussionPath(t, path)
+			_, err := exportDiscussionV1Path(t, path)
 			if err == nil {
 				t.Fatal("expected error for missing caic_meta")
 			}
@@ -573,7 +627,7 @@ func TestExportDiscussion(t *testing.T) {
 			if err := os.WriteFile(path, []byte(""), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			_, err := exportDiscussionPath(t, path)
+			_, err := exportDiscussionV1Path(t, path)
 			if err == nil {
 				t.Fatal("expected error for empty file")
 			}
@@ -582,12 +636,12 @@ func TestExportDiscussion(t *testing.T) {
 		t.Run("unparseable_lines_skipped", func(t *testing.T) {
 			t.Parallel()
 			path := writeJSONL(t, []string{
-				metaLine("task", "pi"),
+				v1MetaLine("task", "pi"),
 				`{not valid json`,
 				`{"type":"text","text":"visible"}`,
 			})
 
-			md, err := exportDiscussionPath(t, path)
+			md, err := exportDiscussionV1Path(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -555,11 +555,39 @@ func TestLogRecordParser(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if !reflect.DeepEqual(gotV1, gotV2) {
-					t.Fatalf("v1 = %#v, v2 = %#v", gotV1, gotV2)
+				if !gotV1.Control || !gotV2.Control {
+					t.Fatalf("control classification = %t, %t; want true", gotV1.Control, gotV2.Control)
 				}
-				if len(gotV1) != 1 || !gotV1[0].ProducerTime.IsZero() || !gotV2[0].ProducerTime.IsZero() {
-					t.Fatalf("control producer times = %v, %v; want zero", gotV1, gotV2)
+				if !reflect.DeepEqual(gotV1.Messages, gotV2.Messages) {
+					t.Fatalf("v1 = %#v, v2 = %#v", gotV1.Messages, gotV2.Messages)
+				}
+				if len(gotV1.Messages) != 1 || !gotV1.Messages[0].ProducerTime.IsZero() || !gotV2.Messages[0].ProducerTime.IsZero() {
+					t.Fatalf("control producer times = %v, %v; want zero", gotV1.Messages, gotV2.Messages)
+				}
+			})
+		}
+	})
+
+	t.Run("ControlClassificationOnErrors", func(t *testing.T) {
+		t.Parallel()
+		cases := []struct {
+			name    string
+			version LogVersion
+			line    string
+		}{
+			{name: "v1", version: LogVersionV1, line: `{"type":"caic_meta","version":"bad"}`},
+			{name: "v2", version: LogVersionV2, line: `{"t":"model_info","unexpected":true}`},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				p, err := NewLogRecordParser(tc.version, testParseFn)
+				if err != nil {
+					t.Fatal(err)
+				}
+				record, err := p.ParseRecord([]byte(tc.line))
+				if err == nil || !record.Control {
+					t.Fatalf("record = %#v, err = %v; want classified control error", record, err)
 				}
 			})
 		}
@@ -577,16 +605,16 @@ func TestLogRecordParser(t *testing.T) {
 				discriminator = "t"
 			}
 			line := fmt.Sprintf(`{%q:"caic_meta","version":%d,"prompt":"p","repos":[],"harness":"claude"}`, discriminator, version)
-			msgs, err := p.ParseRecord([]byte(line))
+			record, err := p.ParseRecord([]byte(line))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(msgs) != 1 {
-				t.Fatalf("version %d message count = %d", version, len(msgs))
+			if !record.Control || len(record.Messages) != 1 {
+				t.Fatalf("version %d record = %#v", version, record)
 			}
-			meta, ok := msgs[0].Message.(*MetaMessage)
-			if !ok || meta.Version != int(version) || !msgs[0].ProducerTime.IsZero() {
-				t.Fatalf("version %d meta = %#v", version, msgs[0])
+			meta, ok := record.Messages[0].Message.(*MetaMessage)
+			if !ok || meta.Version != int(version) || !record.Messages[0].ProducerTime.IsZero() {
+				t.Fatalf("version %d meta = %#v", version, record.Messages[0])
 			}
 		}
 
@@ -603,13 +631,13 @@ func TestLogRecordParser(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		msgs, err := p.ParseRecord([]byte(`{"type":"caic_init","session_id":"legacy","model":"m","version":"0.9"}`))
+		record, err := p.ParseRecord([]byte(`{"type":"caic_init","session_id":"legacy","model":"m","version":"0.9"}`))
 		if err != nil {
 			t.Fatal(err)
 		}
 		want := []ParsedMessage{{Message: &InitMessage{SessionID: "legacy", Model: "m", Version: "0.9"}}}
-		if !reflect.DeepEqual(msgs, want) {
-			t.Fatalf("legacy session = %#v, want %#v", msgs, want)
+		if !record.Control || !reflect.DeepEqual(record.Messages, want) {
+			t.Fatalf("legacy record = %#v, want messages %#v", record, want)
 		}
 	})
 
@@ -631,7 +659,7 @@ func TestLogRecordParser(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !reflect.DeepEqual(gotV1, gotV2) {
+		if gotV1.Control || !gotV2.Control || !reflect.DeepEqual(gotV1.Messages, gotV2.Messages) {
 			t.Fatalf("v1 = %#v, v2 = %#v", gotV1, gotV2)
 		}
 	})
@@ -650,12 +678,12 @@ func TestLogRecordParser(t *testing.T) {
 			[]byte(`{"type":"caic_future","value":1}`),
 			[]byte(`not-json`),
 		} {
-			msgs, err := p.ParseRecord(line)
+			record, err := p.ParseRecord(line)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !bytes.Equal(got, line) || len(msgs) != 1 {
-				t.Fatalf("native input = %s, messages = %#v", got, msgs)
+			if record.Control || !bytes.Equal(got, line) || len(record.Messages) != 1 {
+				t.Fatalf("native input = %s, record = %#v", got, record)
 			}
 		}
 	})
@@ -673,12 +701,12 @@ func TestLogRecordParser(t *testing.T) {
 		payloads := []string{`{"type":"native","value":1}`, `42`, `true`, `"text"`}
 		for _, payload := range payloads {
 			line := fmt.Sprintf(`{"t":"agent","ts":123.500,"msg":%s}`, payload)
-			msgs, err := p.ParseRecord([]byte(line))
+			record, err := p.ParseRecord([]byte(line))
 			if err != nil {
 				t.Fatalf("payload %s: %v", payload, err)
 			}
-			if len(msgs) != 1 {
-				t.Fatalf("payload %s message count = %d", payload, len(msgs))
+			if record.Control || len(record.Messages) != 1 {
+				t.Fatalf("payload %s record = %#v", payload, record)
 			}
 		}
 		if len(got) != len(payloads) {
@@ -811,23 +839,23 @@ func TestLogRecordParser(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				beforeUsage, ok := before[0].Message.(*UsageMessage)
+				beforeUsage, ok := before.Messages[0].Message.(*UsageMessage)
 				if !ok {
-					t.Fatalf("pre-snapshot message = %T, want *UsageMessage", before[0].Message)
+					t.Fatalf("pre-snapshot message = %T, want *UsageMessage", before.Messages[0].Message)
 				}
 				if beforeUsage.ContextWindow != 0 {
 					t.Fatalf("pre-snapshot context = %d", beforeUsage.ContextWindow)
 				}
-				if msgs, err := p.ParseRecord(fmt.Appendf(nil, `{%q:%q,"context_window":1000000}`, infoDiscriminator, infoType)); err != nil || len(msgs) != 0 {
-					t.Fatalf("model info messages = %#v, err = %v", msgs, err)
+				if record, err := p.ParseRecord(fmt.Appendf(nil, `{%q:%q,"context_window":1000000}`, infoDiscriminator, infoType)); err != nil || !record.Control || len(record.Messages) != 0 {
+					t.Fatalf("model info record = %#v, err = %v", record, err)
 				}
 				after, err := p.ParseRecord([]byte(native(0)))
 				if err != nil {
 					t.Fatal(err)
 				}
-				afterUsage, ok := after[0].Message.(*UsageMessage)
+				afterUsage, ok := after.Messages[0].Message.(*UsageMessage)
 				if !ok {
-					t.Fatalf("post-snapshot message = %T, want *UsageMessage", after[0].Message)
+					t.Fatalf("post-snapshot message = %T, want *UsageMessage", after.Messages[0].Message)
 				}
 				if afterUsage.ContextWindow != 1000000 {
 					t.Fatalf("snapshot context = %d", afterUsage.ContextWindow)
@@ -836,9 +864,9 @@ func TestLogRecordParser(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				nativeUsage, ok := nativeValue[0].Message.(*UsageMessage)
+				nativeUsage, ok := nativeValue.Messages[0].Message.(*UsageMessage)
 				if !ok {
-					t.Fatalf("native-context message = %T, want *UsageMessage", nativeValue[0].Message)
+					t.Fatalf("native-context message = %T, want *UsageMessage", nativeValue.Messages[0].Message)
 				}
 				if nativeUsage.ContextWindow != 200000 {
 					t.Fatalf("native context = %d", nativeUsage.ContextWindow)
@@ -906,11 +934,11 @@ func TestLogRecordParser(t *testing.T) {
 					topLine(second), nativeLine(second),
 					topLine(third), nativeLine(third),
 				} {
-					msgs, err := p.ParseRecord([]byte(line))
+					record, err := p.ParseRecord([]byte(line))
 					if err != nil {
 						t.Fatal(err)
 					}
-					for _, msg := range msgs {
+					for _, msg := range record.Messages {
 						got = append(got, msg.Message)
 					}
 				}
@@ -963,12 +991,12 @@ func TestLogRecordParser(t *testing.T) {
 					t.Fatalf("error = %v, want nil message error", err)
 				}
 				batch = []Message{action}
-				msgs, err := p.ParseRecord(agentLine)
+				record, err := p.ParseRecord(agentLine)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if len(msgs) != 1 || msgs[0].Message != action {
-					t.Fatalf("pending state changed by rejected batch: %#v", msgs)
+				if record.Control || len(record.Messages) != 1 || record.Messages[0].Message != action {
+					t.Fatalf("pending state changed by rejected batch: %#v", record)
 				}
 			})
 		}
@@ -994,12 +1022,12 @@ func TestLogRecordParser(t *testing.T) {
 			}
 			validUsage := &UsageMessage{}
 			batch = []Message{validUsage}
-			msgs, err := p.ParseRecord(agentLine)
+			record, err := p.ParseRecord(agentLine)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(msgs) != 1 || validUsage.ContextWindow != 1000000 {
-				t.Fatalf("context state after rejected batch = %#v", msgs)
+			if record.Control || len(record.Messages) != 1 || validUsage.ContextWindow != 1000000 {
+				t.Fatalf("context state after rejected batch = %#v", record)
 			}
 		})
 	})
@@ -1044,22 +1072,22 @@ func TestLogRecordParser(t *testing.T) {
 			(*ToolResultMessage)(nil),
 			(*TextMessage)(nil),
 		}
-		if len(mixed) != len(wantTypes) {
-			t.Fatalf("mixed messages = %#v", mixed)
+		if mixed.Control || len(mixed.Messages) != len(wantTypes) {
+			t.Fatalf("mixed record = %#v", mixed)
 		}
 		wantTime := time.Unix(123, 250_000_000).UTC()
 		for i, want := range wantTypes {
-			if reflect.TypeOf(mixed[i].Message) != reflect.TypeOf(want) {
-				t.Fatalf("mixed[%d] = %T, want %T", i, mixed[i].Message, want)
+			if reflect.TypeOf(mixed.Messages[i].Message) != reflect.TypeOf(want) {
+				t.Fatalf("mixed[%d] = %T, want %T", i, mixed.Messages[i].Message, want)
 			}
-			if !mixed[i].ProducerTime.Equal(wantTime) {
-				t.Fatalf("mixed[%d] producer time = %v, want %v", i, mixed[i].ProducerTime, wantTime)
+			if !mixed.Messages[i].ProducerTime.Equal(wantTime) {
+				t.Fatalf("mixed[%d] producer time = %v, want %v", i, mixed.Messages[i].ProducerTime, wantTime)
 			}
 		}
-		switch mixed[1].Message.(type) {
+		switch mixed.Messages[1].Message.(type) {
 		case *ToolUseMessage:
 		default:
-			t.Fatalf("unwrapped message = %T, want *ToolUseMessage", mixed[1].Message)
+			t.Fatalf("unwrapped message = %T, want *ToolUseMessage", mixed.Messages[1].Message)
 		}
 
 		v1, err := NewLogRecordParser(LogVersionV1, parseNative)
@@ -1070,10 +1098,10 @@ func TestLogRecordParser(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(legacy) != len(wantTypes) {
-			t.Fatalf("v1 messages = %#v", legacy)
+		if legacy.Control || len(legacy.Messages) != len(wantTypes) {
+			t.Fatalf("v1 record = %#v", legacy)
 		}
-		for i, msg := range legacy {
+		for i, msg := range legacy.Messages {
 			if msg.Message == nil || !msg.ProducerTime.IsZero() {
 				t.Fatalf("v1 message %d = %#v, want non-nil message and zero producer time", i, msg)
 			}
@@ -1083,8 +1111,8 @@ func TestLogRecordParser(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(empty) != 0 {
-			t.Fatalf("empty native result = %#v", empty)
+		if empty.Control || len(empty.Messages) != 0 {
+			t.Fatalf("empty native record = %#v", empty)
 		}
 
 		parsed := ParsedMessage{Message: &TextMessage{Text: "text"}, ProducerTime: wantTime}

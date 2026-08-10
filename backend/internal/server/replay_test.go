@@ -44,9 +44,9 @@ func TestNewReplayFilter(t *testing.T) {
 			t.Parallel()
 			want := filterHistoryForReplay(in)
 			var got []agent.Message
-			push, flush := eventreplay.NewFilter(func(m agent.Message) { got = append(got, m) })
+			push, flush := eventreplay.NewFilter(func(m agent.ParsedMessage) { got = append(got, m.Message) })
 			for _, m := range in {
-				push(m)
+				push(agent.ParsedMessage{Message: m})
 			}
 			flush()
 			if len(got) != len(want) {

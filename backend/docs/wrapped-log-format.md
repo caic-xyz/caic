@@ -152,9 +152,10 @@ only corroborate the header harness: a nonempty runtime/header mismatch fails
 adoption closed, an empty runtime value supplies no fallback, and runtime
 metadata never overwrites the header-derived harness. This is intentionally
 stricter than guessing from runtime metadata or the deployed script.
-`persistent-read-paths` owns exact version-aware authority, physical proof, and
-the fresh-parser construction seam. `persistent-consumer-migration` routes every
-persistent consumer through that foundation. After validating the first header
+`persistent-read-paths` owns the combined exact version-aware authority, physical
+proof, fresh-parser construction, and persistent-consumer migration.
+`persistent-consumer-migration` is its dependent no-new-implementation
+verification/acceptance slice. After validating the first header
 inside a semantic scan, the task layer resolves a fresh native parser for that
 header harness, constructs `NewLogRecordParser` with the already-validated
 `LogVersion`, and passes it every physical record. The record parser neither
@@ -491,7 +492,8 @@ restore, and pure export rendering—explicitly unwrap `.Message` at their own
 boundary. Both `eventreplay.RegenerateReplay` and live
 `eventreplay.MessageWriter.WriteMessage` accept `agent.ParsedMessage`; their
 filtering/compaction pipelines and replay-facing `ToolTimingTracker` entry retain
-the wrapper and inspect `.Message`.
+the wrapper and inspect `.Message`. `ToolTimingTracker` receives the harness from
+the validated snapshot/header, never a runtime value or caller-supplied label.
 
 **Path-specific producer-time conversion invariant.** Every conversion site uses
 a nonzero `ProducerTime` unchanged as the event and timing observation. For a
@@ -501,9 +503,10 @@ zero value, each site preserves its current observation policy:
 uses one fixed observation per replay; and live SSE uses per-message wall clock.
 A writer lifetime never freezes a live per-message fallback. A nonzero harness-
 native duration remains authoritative over a producer-time delta.
-`persistent-consumer-migration` implements this explicit path-specific final
-policy for both writers before either writes cache version 5; version 5 owns that
-final policy and its invalidation. Cached `EventMessage` body encoding does not
+`persistent-read-paths` implements this explicit path-specific final policy for
+both writers before either writes cache version 5; version 5 owns that final
+policy and its invalidation. `persistent-consumer-migration` audits that evidence
+without changing the implementation. Cached `EventMessage` body encoding does not
 change. `live-relay-read-path` only supplies the original live `ProducerTime`
 through the final writer API. `timestamp-cache-semantics` preserves every
 remaining conversion site's existing zero-time policy and remains persistent-
@@ -514,36 +517,26 @@ invariant.
 
 **V1 compatibility-performance invariant.** The accepted favorable combined v1
 live-adoption path preserves correctness and fail-closed behavior and has the
-accepted result of three complete raw-log passes plus one bounded tail. Any phase
-that may run before
-`persistent-consumer-migration` preserves and does not regress that accepted
-favorable-path result; it does not yet owe or claim a universal ceiling.
-`persistent-consumer-migration` owns establishing and proving that every complete
-combined v1 live-adoption path preserves correctness and fail-closed behavior and
-performs at most three complete raw-log passes plus one bounded tail. Its proof
-includes both the favorable adoption benchmark and new native-session/no-top-
-level-session plain/zstd counting coverage exercising the real path. Every phase
-that depends on `persistent-consumer-migration` preserves that universal result.
-Timing, throughput, allocations, and physical reads remain advisory.
-`persistent-read-paths` introduces the fresh-parser factory/snapshot seam and
-proves that every new semantic snapshot path resolves a fresh parser only after
-header validation; it temporarily retains `LoadedTask.SetParser` and its stored
-callback for legacy consumers that `persistent-read-paths` does not migrate.
-`persistent-consumer-migration` migrates every remaining `SetParser` caller to the
-factory, including `backend/internal/task/load_benchmark_test.go` and
+accepted result of three complete raw-log passes plus one bounded tail.
+`persistent-read-paths` owns establishing and proving that every complete combined
+v1 live-adoption path preserves correctness and fail-closed behavior and performs
+at most three complete raw-log passes plus one bounded tail. Its proof includes
+both the favorable adoption benchmark and new native-session/no-top-level-session
+plain/zstd counting coverage exercising the real path. Every later phase preserves
+that universal result. Timing, throughput, allocations, and physical reads remain
+advisory. `persistent-read-paths` also migrates every `SetParser` caller to the
+fresh factory, including `backend/internal/task/load_benchmark_test.go` and
 `backend/internal/server/router_test.go`, then deletes `SetParser` and its stored
-callback with no compatibility adapter. Only `persistent-consumer-migration` may
-mechanically adapt `backend/internal/task/load_benchmark_test.go` for that factory
-migration. `backend/internal/task/load_benchmark_cache_linux_test.go` and
-`backend/internal/task/load_benchmark_cache_other_test.go` contain no `SetParser`
-caller and remain read-only throughout the migration. Fixture generation,
-measured path, pass-count assertions, cache-control logic, and benchmark meaning
-are frozen across all three benchmark sources. `persistent-consumer-migration`
-records pre-migration hashes for all three as content evidence, the narrow main-
-source diff, and post-migration hashes for all three; the helper hashes must be
-unchanged. The old main-source hash remains pre-migration evidence until a fresh
-independent review accepts its mechanical adaptation, after which all three
-sources and their resulting hashes are frozen. No other phase may edit them.
+callback with no compatibility adapter. Only this combined phase may mechanically
+adapt `backend/internal/task/load_benchmark_test.go`; the Linux and other-platform
+cache helpers remain read-only. Fixture generation, measured path, pass-count
+assertions, cache-control logic, and benchmark meaning are frozen across all three
+benchmark sources. The phase records their pre-migration hashes, the narrow
+main-source diff, and post-migration hashes; after independent review accepts the
+mechanical adaptation, all three sources and resulting hashes are frozen. The
+later `persistent-consumer-migration` acceptance slice audits this evidence and
+may recognize retirement of the legacy seam only when the combined Phase 1 gate
+supplies it; it introduces no implementation.
 
 Both sidecars are derived and retain their existing temporary-file completion and
 atomic-rename behavior. Their versioned cache headers carry the required
@@ -709,7 +702,7 @@ persistent-consumer-migration -> pure-harness-parsers
 live-relay-read-path -> pure-harness-parsers
 persistent-consumer-migration -> timestamp-cache-semantics
 live-relay-read-path -> timestamp-cache-semantics
-persistent-read-paths -> versioned-log-sink
+persistent-consumer-migration -> versioned-log-sink
 
 persistent-consumer-migration -> v2-adoption-performance
 versioned-log-sink -> v2-adoption-performance
@@ -726,25 +719,27 @@ v2-producer-cutover -> runtime-adoption-smoke
 ```
 
 The `relay-v2 -> live-relay-read-path` edge is a satisfied prerequisite retained
-to make the accepted relay dependency explicit; `relay-v2` is no longer an
-active phase. The accepted relay, parsed-message metadata, strict fast reader,
-shared fixture, Pi validation, dedicated v1 extraction, and v1 adoption result
-are prerequisites of the active graph. `persistent-read-paths` is the earliest
-active phase and establishes authority/snapshot/cache primitives;
-`persistent-consumer-migration` then routes every persistent consumer through
-them and finalizes both version-5 replay writers before `live-relay-read-path`
-plumbs live parsed metadata into that API. `live-relay-read-path` also consumes
-the accepted latent relay and `relay.ScriptV2`; `versioned-log-sink` waits only
-for the persistent snapshot foundation and may not overlap that work.
-`pure-harness-parsers` and `timestamp-cache-semantics` may run together only after
-both consumer read paths are integrated. `v2-adoption-performance` waits for
-persistent consumer migration and the sink, and both direct-writer migration and
+to make the accepted relay dependency explicit; `relay-v2` is no longer an active
+phase. The accepted relay, parsed-message metadata, strict fast reader, shared
+fixture, Pi validation, dedicated v1 extraction, and v1 adoption result are
+prerequisites of the active graph. `persistent-read-paths` is the earliest active
+combined implementation phase: it establishes authority/snapshot/cache primitives,
+routes every persistent consumer through them, finalizes both version-5 replay
+writers, and deletes the legacy stored-parser seam. Its dependent
+`persistent-consumer-migration` slice independently audits that combined gate and
+accepts the legacy-seam retirement only on its evidence; it adds no implementation.
+Later persistent-consumer dependencies therefore wait for that acceptance slice.
+`versioned-log-sink` also waits for that acceptance slice: it may not start from,
+or treat the combined implementation gate as, acceptance. `pure-harness-parsers`
+and `timestamp-cache-semantics` may run together only after both consumer read
+paths are integrated. `v2-adoption-performance`
+waits for the acceptance slice and the sink, and both direct-writer migration and
 final cutover wait for its hard deterministic gate. Integration remains one phase
 at a time.
 
 ## Active phased rollout
 
-### Phase 1: Establish persistent authority and snapshot foundations
+### Phase 1: Establish and migrate persistent authority and consumers
 
 - **Stable ID:** `persistent-read-paths`
 - **Responsible:** one phase-executor subagent
@@ -752,455 +747,163 @@ at a time.
 - **May run with:** none
 - **Base state:** accepted reader/v1 extraction, fixture, Pi validation,
   `ParsedMessage`, v1-adoption, and latent-relay prerequisites are integrated;
-  apply the global fresh-manifest rule, then refresh loader/export/replay entry
-  points, task/app factory seams, v1 counts, physical identity/cache schemas,
-  runtime/header overwrite, and sensitive-file statistics
-- **VCS authority:** global VCS rule; no fixture recording/regeneration without
-  coordinator approval
-- **Write scope:** the shared physical opener/scanner, authority envelope,
-  snapshot/factory/cache-key plumbing, taskmeta cache, and reopen proof under
-  `backend/internal/task`; resolver wiring in `backend/internal/app/app.go` and
-  `backend/internal/task/taskmgr/manager.go`; the already-requested immutable
-  backend-map/test-helper cleanup in `backend/internal/server/*_test.go`; and
-  adjacent focused tests. The server changes only update test construction and
-  do not migrate a persistent consumer. The three v1 benchmark sources are
-  read-only. No export renderer, event-replay/server consumer, full/session/tail
-  migration, or direct writer is in this phase
-- **Data authority:** apply the global persistent observation invariants. The
-  task-owned scanner alone establishes exact first-header version/harness and
-  validates later meta authority. A nonempty runtime harness may only match it;
-  mismatch fails adoption without mutation. A scan-local parser and
-  `ValidatedLogSnapshot` are derived only after that header and remain bound to
-  the same physical identity/size/nanosecond mtime/validated EOF; this new path
-  never consults the retained legacy stored callback. Taskmeta is a
-  versioned, atomic, rebuildable projection whose cached authority only
-  corroborates the freshly validated raw header
-- **Purpose:** create one feasible task-owned authority, fresh-parser, physical-
-  snapshot, and cache-proof foundation before migrating the independent
-  persistent consumers
-- **Deliverables:** evolve the single task plain/zstd scanner to require the first
-  nonempty record to be exact version-specific `caic_meta`, validate the closed
-  version and nonempty harness, and reject both discriminators or any duplicate
-  discriminator, `version`, or `harness` key on first and later meta records,
-  whether values match or conflict. Later meta records must match all three
-  first-header authority fields before parser delivery. Define the concrete
-  harness-to-fresh-native-parser construction across the persistent-reader
-  integration: it invokes `Backend.NewWire()` only after header validation;
-  unknown/empty harnesses fail. Every new semantic snapshot path uses only that
-  factory after header validation; test that parallel/repeated scans never share
-  parser state or perform a preliminary authority pass. Temporarily retain the
-  existing `LoadedTask.SetParser` and its stored callback only for legacy
-  consumers that this phase leaves unmigrated; `persistent-consumer-migration`
-  owns their migration and deletion, and the benchmark sources remain unchanged.
-  Replace the taskmgr runtime-authoritative overwrite/default with header authority
-  and fail closed on every nonempty mismatch. Introduce the non-persisted physical
-  observation/cache key and `ValidatedLogSnapshot` carrier described globally,
-  including `[]agent.ParsedMessage`; prove EOF and unchanged identity and make it
-  available
-  to later consumers/reopen without duplicating a scanner. Bump taskmeta cache
-  version 2 to 3; on every hit validate the raw first header from the same open
-  file, bind device/inode-equivalent identity, size,
-  nanosecond mtime, and authority, treat cached version/harness as derived checks,
-  rebuild every old entry including unreleased v2 `type`, and preserve atomic
-  replacement. Inventory may remain summary-only and need not construct a native
-  parser; every semantic snapshot does. Preserve ordinary v1 native fallback and
-  accepted bytes
-- **Generated artifacts:** no committed artifacts; taskmeta/cache tests use
-  temporary directories, existing golden recordings are read-only, and no
-  benchmark/profile artifact enters the repository
-- **Change budget:** at most 7 production files and 10 tests, including seven
-  server test files and their helper call sites required by the immutable
-  backend-map cleanup, across the named task/app seams; at most two minimal raw-log
-  fixtures (one exact-`type` v1 and one canonical exact-`t` v2); no public API,
-  legacy-consumer migration, or duplicate scanner framework
-- **Boundary:** inventory/session/tail/export/replay behavior, replay cache version
-  and publication, live relay, and writers stay unchanged until their named
-  phases. Existing legacy consumers continue using `LoadedTask.SetParser` and its
-  stored callback; no new semantic snapshot path may use that legacy seam, and
-  `persistent-consumer-migration` owns migrating every remaining caller and
-  deleting it. This phase exposes the `ParsedMessage` carrier but publishes no
-  new stream; validated snapshots remain unavailable until EOF, and
-  `persistent-consumer-migration` owns the disk spool and delayed SSE
-  publication. Taskmeta remains derived and the snapshot is never serialized. Do
-  not delegate authority to `LogRecordParser`, resolve a parser before header
-  validation, reuse a stateful parser, retain runtime fallback/overwrite, weaken
-  identity/EOF/scanner-size/UTF-8/fail-closed behavior, or regress ordinary v1
-  fallback, bytes, `v1_record.go`, or the accepted favorable-path result governed
-  by the V1 compatibility-performance invariant
-- **Decision checkpoints:** stop for any persisted snapshot/second authority,
-  inability to expose a fresh-parser resolver without an import cycle, inability
-  to bind proof/cache keys to the required physical fields and strict header,
-  runtime metadata becoming a fallback, skipped duplicate-key corruption,
-  fixture rewrite, duplicate scanner, any benchmark-source change, use of the
-  legacy stored callback by a new semantic snapshot path, or pressure to remove
-  `SetParser` before `persistent-consumer-migration` migrates its remaining
-  callers
-- **Validation intent:** on plain and zstd observations prove exact v1 `type` and
-  v2 `t` first/later meta success and fail closed for missing/wrong/both
-  discriminators; duplicate discriminator, `version`, and `harness` keys with
-  same and conflicting values; unknown version; missing harness; later mismatch;
-  truncation; decompressor/scanner error; replacement; and every identity/size/
-  nanosecond-mtime/EOF mismatch. Instrument construction order: header validation,
-  exactly one fresh resolver call, parser construction, authorized bootstrap,
-  same-pass later validation, every-record delivery, final EOF/identity proof;
-  prove no preliminary scan, state reuse, or parser first-position authority.
-  Runtime harness empty/match succeeds only under header authority; every
-  nonempty mismatch fails without mutating `LoadedTask.Harness`. Taskmeta hit,
-  miss, old-v2-`type`, old-version, stale, replacement, corrupt, atomic-write-
-  failure, and raw-header-mismatch tests prove version 3 never bypasses raw
-  authority. Ordinary v1 fallback remains. Run the favorable path without
-  changing its benchmark sources and prove no regression. Foundation plain/zstd
-  cases count complete scans, resolver calls, and native callbacks for this
-  phase's scoped scanner/factory mechanics; this phase does not owe the native-
-  session universal-ceiling proof
-- **Validation commands:** cwd `/home/user/src/caic`: verify the three v1
-  benchmark sources are unchanged, run `go test -tags adoption_benchmark
+  apply the global fresh-manifest rule, then refresh every persistent loader,
+  export/replay/SSE caller, factory/carrier/cache/streaming path, all `SetParser`
+  callers, benchmark hashes/counts, and sensitive-file statistics.
+- **VCS authority:** global VCS rule; no fixture/golden regeneration without
+  coordinator approval.
+- **Write scope:** the combined implementation scope: task plain/zstd
+  opener/scanner, authority envelope, snapshots/factory/cache keys/taskmeta/reopen,
+  inventory/full/session/tail/iterator/adoption consumers, task-owned export and
+  its agent pure-rendering boundary, `agenttest` injected export closure and four
+  external harness export suites, eventreplay regeneration/live writer/cache/filter/
+  spool, v1 conversion, task replay-writer and fake seams, delayed SSE publication,
+  taskmgr, record-trace, app/manager resolver wiring, every remaining `SetParser`
+  caller (including authorized mechanical benchmark/router-test updates), the
+  immutable backend-map server-test cleanup, and adjacent focused tests. The two
+  cache-helper benchmark sources, relay/startup readers, writers/sink, producer
+  cutover, and unrelated producer-time consumers remain out of scope.
+- **Data authority and carrier:** the task-owned scanner alone validates exact
+  first/later version-specific header authority and physical plain/zstd EOF. Only
+  after that header it resolves one fresh `Backend.NewWire()` native parser,
+  constructs `LogRecordParser` with the validated version, and passes every record
+  once; parser authority remains parser-owned only for v1/v2 control
+  classification, with fail-closed controls/v2 parsing and no independent
+  task-level control reprobe. `ValidatedLogSnapshot` is non-persisted and bound to
+  device/inode-equivalent identity, size, nanosecond mtime, validated header, EOF,
+  and unchanged path. It carries `[]agent.ParsedMessage`; consumers explicitly
+  unwrap only at time-irrelevant boundaries. Runtime and cached metadata only
+  corroborate raw authority, never select a parser.
+- **Purpose:** complete the combined persistent read-path implementation now,
+  including all consumer migration, cache/replay/SSE behavior, and legacy seam
+  removal, while preserving the locked parser, authority, carrier, streaming, and
+  V1 performance contracts.
+- **Deliverables:** implement strict first/later `caic_meta` key/version/harness
+  validation; runtime mismatch failure; fresh scan-local parser construction with
+  no preliminary pass/state reuse; identity-bound EOF-complete snapshots; and
+  taskmeta 2-to-3 raw-header-on-hit, atomic derived-cache behavior. Also migrate
+  route inventory, full/session/tail/iteration/adoption/reopen,
+  physical export, replay regeneration and replay-cache hits through that
+  foundation; move physical export into task and leave agent rendering pure;
+  inject the task export closure into `agenttest` from the four external harness
+  test packages; migrate every remaining `SetParser` caller and delete its method
+  and stored callback without an adapter; eliminate the task-level
+  `IsLogControlRecord` predicate and carry version-specific control classification
+  from `LogRecordParser` to its consumers without an independent task reprobe;
+  carry `ParsedMessage` through snapshots, iterators, replay filters/compaction,
+  `RegenerateReplay`, `MessageWriter`, and
+  task's replay seam; apply the path-specific producer-time policy in both replay
+  writers and atomically advance replay cache 4-to-5 without changing cached event
+  bodies. Until `live-relay-read-path`, current live `agent.Message` callers
+  explicitly construct zero-time wrappers. Replay cache hits validate same-observation raw authority and
+  full identity; old/corrupt/mismatched entries miss and rebuild atomically. A miss
+  makes one semantic raw pass into a seekable disk spool, including bounded pending
+  compaction; SSE publishes only after EOF/final unchanged proof and atomic cache
+  commit/reopen, with no partial fallback. Preserve v1 bytes/fallback/`v1_record.go`
+  and prove the universal three-complete-passes-plus-bounded-tail V1 ceiling with
+  favorable and native-session/no-top-level-session plain/zstd coverage.
+- **Generated artifacts:** none committed; caches, spools, fixtures, profiles, and
+  benchmarks use temporary directories and clean failure/cancellation residue.
+- **Change budget:** at most 20 non-`_test.go` files, explicitly including the
+  test-only `backend/internal/agent/agenttest/agenttest.go` helper and
+  `backend/internal/task/tasktest/fake.go` replay test double, and 27 `_test.go`
+  files across the stated seams; at most two minimal raw-log fixtures. The
+  read-only `backend/internal/task/load_benchmark_cache_linux_test.go` and
+  `backend/internal/task/load_benchmark_cache_other_test.go` cache helpers are
+  excluded from both buckets. No public DTO, schema, cached-event body encoding,
+  duplicate scanner, or unrelated refactor is allowed.
+- **Boundary:** private carrier shape is the executor's choice only. It must retain
+  single parser-owned v1/v2 classification, strict fail-closed raw authority and
+  controls/v2 records, physical identity/EOF cache proof, explicit carrier unwrap,
+  no pre-EOF/partial SSE publication, one raw replay pass with bounded-memory
+  disk-spooled tail/replay, v1 compatibility/bytes/fallback, and the V1 ceiling.
+  No serialized snapshot, alternate authority, parser fallback/reuse, raw replay
+  second pass, unbounded buffer, cache-body change, relay/startup migration,
+  sink/writer migration, or non-replay timing change is allowed.
+- **Decision checkpoints:** stop for any import cycle, second authority or persisted
+  snapshot, inability to bind raw header and full identity together, metadata loss
+  before replay conversion, pre-EOF SSE byte, second raw pass/unbounded compaction,
+  duplicate export scanner or `agenttest`→`task` import, incomplete `SetParser`
+  deletion, non-mechanical benchmark change/cache-helper edit, or any weakening of
+  parser authority, V1 fallback, cache proof, or performance ceiling.
+- **Validation intent:** execute the complete combined implementation matrices:
+  plain/zstd authority/key/version/harness/identity/EOF/factory-order coverage;
+  all persistent consumer v1/v2 semantic equivalence, strict malformed-v2 and
+  corruption cases, one native callback/record delivery, carrier and zero/nonzero
+  timing traces, export ownership/import graph, taskmeta-3 and replay-5 old-entry/
+  atomic cache matrices, one-pass bounded-spool/no-pre-EOF-SSE/cancellation cleanup,
+  every former `SetParser` caller absence, and favorable plus native-session pass
+  counts. Record benchmark hashes before/after; only the authorized main-source
+  factory diff may change and both cache helpers remain byte-identical.
+- **Validation commands:** cwd `/home/user/src/caic`: record/verify SHA-256 hashes
+  for all three v1 benchmark sources; run `go test -tags adoption_benchmark
   ./backend/internal/task -run '^$' -bench '^BenchmarkTaskAdoption$' -benchtime=1x
-  -count=1`, and retain the non-regression result; run focused raw-key/authority/
-  order/factory/parallel-state/snapshot/identity/taskmeta/runtime-mismatch/reopen/
-  pass-count tests and `go test
-  ./backend/internal/agent/... ./backend/internal/task/...
-  ./backend/internal/task/taskmgr/... ./backend/internal/app/...`; audit resolver
-  and scanner call sites, snapshot/cache fields and lifetime, and the complete
-  first/later key/version/harness matrix on plain/zstd; run the global stale-
-  format audit over scoped tests/fixtures, then the standard validation footer
-- **Review:** a fresh authority/API/cache reviewer receives the integrated target,
-  fresh manifest, inventory/call graph, exact task/app factory signatures,
-  construction-order and fresh-state instrumentation, runtime mismatch proof,
-  snapshot/cache identity/lifetime proof, full duplicate/mismatch matrix,
-  taskmeta old-entry rebuild and atomicity evidence, v1 compatibility and
-  foundation scan counts, unchanged benchmark-source proof, favorable-path non-
-  regression, the separation between the new factory-only semantic snapshot
-  paths and retained legacy `SetParser` consumers, and exact filesystem delta;
-  require `PASS`
-- **Exit gate:** one task-owned plain/zstd authority scanner rejects every first/
-  later duplicate/both/missing/wrong authority case; the task/app resolver
-  constructs one fresh parser only after header validation and never performs a
-  preliminary authority scan or shares state. Runtime metadata cannot replace the
-  header and nonempty mismatch fails adoption. A non-persisted snapshot/cache key
-  proves device/inode-equivalent identity, size, nanosecond mtime, strict header,
-  EOF, and unchanged path. Taskmeta version 3 validates that raw header on every
-  hit, rebuilds every older entry including unreleased v2 `type`, remains atomic,
-  and never becomes authority. Foundation plain/zstd scan counts prove the scoped
-  scanner/factory mechanics without a preliminary authority pass. The accepted
-  favorable-path result governed by the V1 compatibility-performance invariant
-  does not regress and its benchmark sources are unchanged. New semantic
-  snapshot paths never use the retained legacy `SetParser` callback; existing
-  unmigrated consumers continue to compile until `persistent-consumer-migration`
-  replaces every caller and deletes that seam. This foundation is not dispatchable
-  for consumer migration until independently accepted
-- **Handoff:** report scanner/authority-envelope ownership; full duplicate and
-  mismatch matrix; task/app resolver signatures, call sites, construction
-  order, and state-isolation proof; runtime match/mismatch behavior; snapshot and
-  cache-key fields/lifetime; taskmeta old/new version, raw-header hit proof,
-  old-entry rebuild and atomic failure results; v1 compatibility, foundation scan
-  counts, favorable-path non-regression, and unchanged benchmark-source evidence;
-  the new semantic snapshot paths that use only the fresh factory and the legacy
-  `SetParser` callers deliberately handed to `persistent-consumer-migration`;
-  fixture hashes, audits,
-  exact files/commands/status, `ParsedMessage` carrier
-  shape, confirmation that replay streaming was not changed, and the bounded-
-  spool/delayed-publication requirements handed to the consumer phase
+  -count=1`; run focused authority/order/carrier/export/cache/spool/publication/
+  corruption/identity/native-session tests; run `go test ./backend/internal/agent/...
+  ./backend/internal/task/... ./backend/internal/task/taskmgr/...
+  ./backend/internal/app/... ./backend/internal/eventreplay/... ./backend/internal/server/...
+  ./backend/internal/cmd/record-trace/...`; audit persistent callers, resolver and
+  scanner paths, former `SetParser` references, carrier unwraps, cache fields,
+  replay APIs/wrappers, export imports, spool/SSE counts, and stale format; then
+  run the standard validation footer.
+- **Review:** a fresh authority/API/cache/streaming/performance reviewer receives
+  the integrated target, fresh manifest, caller and carrier traces, factory/EOF/
+  identity evidence, full corruption/cache/SSE matrices, export import proof,
+  `SetParser` deletion audit, all benchmark hashes/counts and mechanical-diff
+  proof, exact filesystem delta, and all commands; require `PASS`.
+- **Exit gate:** all combined implementation deliverables and validation evidence
+  above are present: every persistent consumer uses the one task scanner and fresh
+  post-header parser; `SetParser` and its callback are absent; parser classification
+  remains sole and fail closed; taskmeta 3/replay 5 are atomic derived caches bound
+  to validated raw authority and identity; both replay writers retain
+  `ParsedMessage` and the path-specific policy; export is task-owned/pure-rendered;
+  replay is one-pass, disk-spooled, bounded, EOF/identity-gated and publishes no
+  partial SSE; and v1 compatibility and universal ceiling hold. This combined gate
+  requires fresh independent `PASS` review before Phase 2 acceptance or later
+  persistent-consumer dependencies proceed.
+- **Handoff:** report all migrated entry points, scanner and `SetParser`
+  removals, authority/cache/carrier/export/replay/SSE proofs, complete matrices,
+  benchmark hashes/counts, exact files/commands/status, residual risks, and the
+  evidence for the dependent acceptance slice.
 
-### Phase 2: Migrate persistent log consumers
+### Phase 2: Verify persistent-consumer migration acceptance
 
 - **Stable ID:** `persistent-consumer-migration`
-- **Responsible:** one phase-executor subagent
+- **Responsible:** independent reviewer/acceptance subagent
 - **Depends on:** `persistent-read-paths`
-- **May run with:** none; it changes shared task snapshots, export, replay, and
-  adoption consumers
-- **Base state:** accepted `persistent-read-paths` authority/factory/snapshot/
-  taskmeta-3 foundation is integrated; apply the global fresh-manifest rule, then
-  refresh every persistent caller and metadata-carrier trace, both cache and raw/
-  SSE paths, both replay-writer/tracker/task seams, export-helper/four-suite import
-  graph, every remaining `SetParser` caller, native-session counts, pre-migration
-  benchmark hashes, and sensitive-file statistics
-- **VCS authority:** global VCS rule; no fixture/golden regeneration without
-  coordinator approval
-- **Write scope:** persistent inventory/full/session/tail/iterator and snapshot
-  consumers under `backend/internal/task`; task-owned physical export loading and
-  adjacent pure rendering changes in `backend/internal/agent/export.go`; the
-  injected export-closure helper in
-  `backend/internal/agent/agenttest/agenttest.go`; the external harness suites
-  `backend/internal/agent/claudecode/export_golden_test.go`,
-  `backend/internal/agent/codex/export_golden_test.go`,
-  `backend/internal/agent/pi/export_golden_test.go`, and
-  `backend/internal/agent/opencode/export_golden_test.go`; replay regeneration,
-  live `MessageWriter`, cache, filter, and spool changes in
-  `backend/internal/eventreplay`; final replay producer-time conversion semantics
-  in `backend/internal/server/api/v1conv/events.go` and
-  `backend/internal/server/api/v1conv/events_test.go`; the `EventReplayWriter`
-  carrier seam, explicit current-live zero-time wrapper, and test double in
-  `backend/internal/task/task.go` and `backend/internal/task/tasktest/fake.go`;
-  delayed history publication and direct raw-fallback removal in
-  `backend/internal/server/task_handlers.go`; mechanical factory-call-site
-  updates in `backend/internal/server/router_test.go`; adoption/snapshot reuse in
-  `backend/internal/task/taskmgr`; the existing record-trace export caller; and
-  `backend/internal/task/load_benchmark_test.go`, solely for the mechanical
-  factory migration authorized by the V1 compatibility-performance invariant;
-  plus adjacent focused tests.
-  `backend/internal/task/load_benchmark_cache_linux_test.go` and
-  `backend/internal/task/load_benchmark_cache_other_test.go` are read-only frozen
-  helpers. App factory wiring belongs to the accepted foundation and relay/
-  startup readers remain out of scope
-- **Data authority:** apply the global persistent observation, carrier, cache, and
-  publication invariants. Every semantic read derives a fresh parser and snapshot
-  from its own first header and physical observation. Taskmeta and replay caches
-  must validate that same raw authority and complete physical identity before use;
-  neither cached fields nor runtime metadata select the parser. Task owns all
-  path/open/decompression/authority/EOF work; agent export code is pure
-  rendering. Every legacy stored-parser caller moves to that fresh factory and no
-  stored callback survives. Both replay writers consume the derived
-  `ParsedMessage` carrier and implement the path-specific producer-time
-  conversion invariant before either may identify its output as cache version 5
-- **Purpose:** migrate all persistent consumers onto the accepted foundation,
-  retire the legacy stored-parser seam, and preserve parsed metadata, one-pass
-  fail-closed replay, bounded memory, v1 compatibility, and one shared authority
-  scanner; establish the universal V1
-  compatibility-performance invariant; and implement the named path-specific
-  conversion invariant in both replay writers before cache version 5
-- **Deliverables:** route summary inventory, full-message restore, session
-  metadata, bounded plain/zstd tail, persistent iteration, adoption/reopen
-  snapshot reuse, physical export, replay regeneration, and replay cache hits
-  through the foundation, and migrate the live replay writer API to the final
-  parsed carrier. Migrate every remaining `LoadedTask.SetParser` caller to the
-  accepted factory, including `backend/internal/task/load_test.go`,
-  `backend/internal/task/runner_test.go`,
-  `backend/internal/task/taskmgr/manager.go` and its tests,
-  `backend/internal/task/load_benchmark_test.go`, and both call sites in
-  `backend/internal/server/router_test.go`; then delete `SetParser` and its stored
-  callback without a compatibility adapter. The Linux and other-platform cache
-  helpers contain no caller and remain unchanged. Each semantic scan validates its
-  first header and then resolves exactly one fresh stateful native parser without
-  a preliminary scan; every later meta record is validated before `ParseRecord`,
-  every physical record is delivered once, session/model/control state and
-  pending-action
-  identities are applied, and EOF plus physical identity is proved before the
-  snapshot is usable. Summary-only inventory may use taskmeta version 3 after its
-  mandatory same-observation raw-header check. The public task-level
-  `IsLogControlRecord` predicate is temporary: this phase removes it and makes
-  `LogRecordParser` the sole authority for version-specific control
-  classification, carrying parsed-record classification from the parser to its
-  consumers rather than independently re-probing it during task loading. Keep
-  the v1 and v2 parser implementations and version rules independent behind that
-  parser-owned API.
-
-  Snapshot and iterator APIs carry `[]agent.ParsedMessage` or
-  `iter.Seq2[agent.ParsedMessage, error]`. `RegenerateReplay` accepts the parsed
-  iterator, and `MessageWriter.WriteMessage` plus task's `EventReplayWriter` seam
-  accept one `agent.ParsedMessage` at a time. Full/session/inventory reducers,
-  `LoadedTask.Msgs`, tail restore, and export explicitly unwrap `.Message` only
-  where time is unused. Both replay filtering/compaction paths and the replay-
-  facing `ToolTimingTracker` entry retain the wrapper and inspect `.Message`; the
-  tracker receives the snapshot/header harness rather than a runtime or caller
-  label. Implement the path-specific producer-time conversion invariant for both
-  writers atomically with cache version 5. No reader or consumer re-rounds, and
-  only the derived cache header gains proof fields.
-
-  Until `live-relay-read-path` migrates the relay carrier, every existing live
-  task call site that has only an `agent.Message` explicitly constructs
-  `agent.ParsedMessage{Message: m}` with zero `ProducerTime` before calling the
-  final `EventReplayWriter` API. This temporary, typed v1 bridge is visible at
-  the call site; it does not add an adapter that implements `Message` or infer a
-  timestamp, and its zero value deliberately exercises the live writer's per-
-  message wall-clock branch under the named invariant. Production still selects
-  v1, so `persistent-consumer-migration` is independently landable;
-  `live-relay-read-path` later supplies the original parsed wrapper.
-
-  Move physical export open/decompression/authority/snapshot work into `task` and
-  change all callers, including the record-trace command, to pass validated
-  semantic data to agent-owned pure rendering. Remove the generic-reader scanner
-  from agent rather than duplicating it. Change the shared `agenttest` helper to
-  accept an injected export closure; each of the four named external harness
-  `_test` packages imports `task` and supplies the task-owned physical export
-  reader, while `agenttest` imports neither `task` nor any pathname reader. Bump
-  `eventreplay.CacheVersion` from 4 to 5 only together with the final conversion
-  behavior above in both `RegenerateReplay` and `MessageWriter`; that single bump
-  owns semantic invalidation for producer-time-aware replay while cached
-  `EventMessage` body encoding stays unchanged. Every old replay entry, including
-  an unreleased v2-`type` derivation, misses and rebuilds. Every hit first validates
-  the strict raw first header from the same open physical observation and matches
-  device/inode-equivalent identity, size, nanosecond mtime, version, and harness;
-  cached authority is only a derived check and existing atomic writes remain.
-
-  On a replay miss, make exactly one complete raw semantic pass into the
-  seekable, disk-backed derived spool described globally; pending compaction runs
-  also spill to disk so memory remains bounded. Publish no SSE history until
-  scanner/decompressor EOF and unchanged final physical identity validate, then
-  atomically commit/reopen the derived cache and stream it. Every scan,
-  conversion, identity, EOF, cancellation, or commit failure discards temporary
-  data and emits no history; remove the direct partial raw fallback and make no
-  immediate-first-byte claim.
-
-  Preserve v1 bytes, native fallback, and `v1_record.go`. Add the representative
-  native-session/no-top-level-session plain/zstd counting coverage required by the
-  V1 compatibility-performance invariant, including session discovery, full
-  restore, tail where applicable, and matching reopen; reuse snapshots or an
-  equivalent foundation result so the real path meets the named ceiling
-- **Generated artifacts:** no committed generated caches, spools, recordings,
-  profiles, or benchmarks; cache/spool/pass-count tests use temporary directories
-  and clean cancellation/failure artifacts
-- **Change budget:** at most 13 non-`_test.go` files (including the test-only
-  `agenttest.go` helper, tracker implementation, and task replay test double) and
-  17 `_test.go` files across the named task/agent/eventreplay/v1conv/server/
-  taskmgr/command seams, including the main v1 benchmark source and
-  `backend/internal/server/router_test.go`; the two cache helper sources are
-  read-only and not counted. At most two minimal raw-log fixtures,
-  with native-session pass fixtures generated in temporary directories; no
-  public DTO, cached-event body encoding, duplicate scanner, or unrelated refactor
-- **Boundary:** relay/startup parsing and carrier plumbing, harness-parser cleanup,
-  task-log writers, sink, producer cutover, and non-replay producer-time consumers
-  remain in their named phases. `persistent-consumer-migration` changes shared
-  tracker code only as required to make regeneration and live `MessageWriter`
-  conversion final before cache version 5; other callers retain their current
-  observation source and output until `timestamp-cache-semantics`. The only live-
-  dispatch change is the explicit zero-time `ParsedMessage` wrapper required by
-  the final writer interface; `live-relay-read-path` replaces that bridge with
-  the parsed carrier without changing conversion or cache semantics. Do not
-  serialize snapshots, let cached/runtime metadata establish authority, unwrap
-  before a time-using boundary, publish raw-derived bytes before validated
-  EOF/identity, use a second raw pass or unbounded in-memory replay
-  buffer, change cached-event body encoding, change the main v1 benchmark source
-  beyond its authorized mechanical factory migration, change either read-only
-  cache helper, retain a `SetParser` compatibility adapter, or weaken v1 fallback/
-  bytes
-- **Decision checkpoints:** stop for a consumer that cannot use the task-owned
-  scanner/factory without an import cycle, a metadata carrier that loses
-  `ProducerTime` before replay conversion, cache validation that cannot observe
-  the raw header and full physical identity together, any pre-EOF SSE byte,
-  second raw replay pass, unbounded pending compaction state, export scanner
-  duplication, an `agenttest` to `task` import, inability to inject the task export
-  closure from an external harness `_test` package, inability to make both replay
-  APIs carry `ParsedMessage`, either zero-time branch diverging from the path-
-  specific conversion invariant, any version-5 commit before both conversions are
-  final, any post-version-5 conversion change, violation of the named v1 ceiling,
-  inability to migrate every `SetParser` caller and delete its stored callback,
-  any main benchmark-source change beyond the authorized mechanical factory
-  migration, or any cache-helper change
-- **Validation intent:** prove equivalent v1/v2 inventory, session, full, tail,
-  export, and replay semantic output on plain/zstd, with zero v1 and exact
-  millisecond v2 producer time. Instrument every semantic path for first-header-
-  then-factory order, one fresh parser, no preliminary scan, same-pass segment
-  validation, one native callback per agent, every-record delivery, validated
-  decompressor/scanner EOF, and unchanged physical proof. Exercise the complete
-  duplicate/both/missing discriminator/version/harness and later-mismatch matrix
-  through every affected consumer. Exact failures also cover unknown token/
-  version, v1 `t` meta, v2 `type` meta/control/agent, bare v2 records,
-  noncanonical envelopes, `0.000`, integer/no-fraction timestamps, one/two/four-
-  or-more fractional digits, signs, exponents, redundant leading zeros, overflow/
-  out-of-range time, malformed UTF-8, scanner limit, truncated zstd/plain,
-  replacement, tail fragment without authority, and parser error; readers never
-  round timestamps. V2 `t` controls, session/model state, native messages,
-  pending-action identities, and EOF are validated in one semantic pass.
-
-  Taskmeta hit/miss behavior must remain foundation-correct. Replay version-5
-  hit/miss/old-v2-`type`/old-version/stale/corrupt/header-mismatch/identity-
-  replacement tests prove no raw parser or converter runs on a valid hit only
-  after raw-header validation, while every miss rebuilds atomically. Live-cache
-  tests prove `MessageWriter` uses the same version-5 header/proof and its named
-  path-specific conversion behavior, including old-version replacement and atomic
-  failure. Failure and cancellation tests assert zero SSE history bytes and no
-  spool/temp/cache residue; a large replay fixture proves bounded resident state
-  and one raw pass, and successful delayed publication preserves event
-  order/compaction. Replay
-  tests prove `RegenerateReplay` and `MessageWriter.WriteMessage` both accept and
-  retain `ParsedMessage`, filter on `.Message`, and satisfy the path-specific
-  producer-time conversion invariant. Test each zero-time branch directly: a
-  regeneration run uses one fixed observation, while consecutive live-writer
-  messages use per-message wall-clock observations. Do not assert cross-writer
-  byte identity; compare each path with its own pre-migration v1 behavior. Task
-  live-dispatch tests prove every current `agent.Message` caller explicitly wraps
-  zero time and can use the final writer
-  before the relay carrier migrates. Golden export tests prove task-owned
-  physical reads and agent pure rendering through the injected closure: the
-  shared helper does not import `task`, only the four named external `_test`
-  packages do, all four suites pass without recording changes, and no duplicate
-  scanner/import cycle exists.
-
-  Record before/after hashes for all three v1 benchmark sources, verify the main
-  source's factory adaptation is mechanical and both cache helpers are byte-
-  unchanged, and run the favorable benchmark before and after to prove unchanged
-  fixture generation, measured path, pass assertions, cache control, behavior,
-  and meaning. Run the new native-session plain/zstd
-  counting cases under the V1 compatibility-performance invariant. Audit all
-  former `SetParser` callers, including both router test sites, and prove the Go
-  method, stored callback, and implementation references are absent. V2 full
-  adoption/replay stays one semantic pass with one native parse per agent
-- **Validation commands:** cwd `/home/user/src/caic`: record SHA-256 hashes of all
-  three v1 benchmark sources before migration; after migration verify the narrow
-  main-source diff, unchanged helper hashes, and all three resulting hashes; run
-  `go test -tags adoption_benchmark
-  ./backend/internal/task -run '^$' -bench '^BenchmarkTaskAdoption$' -benchtime=1x
-  -count=1`, and retain the before/after comparison; run focused consumer/order/
-  carrier/export/cache/spool/publication/corruption/identity/native-session
-  counting tests and `go test
-  ./backend/internal/agent/... ./backend/internal/task/...
-  ./backend/internal/task/taskmgr/... ./backend/internal/eventreplay/...
-  ./backend/internal/server/... ./backend/internal/cmd/record-trace/...`; audit
-  the complete persistent caller graph, every former `SetParser` caller and Go
-  stored-callback reference, resolver calls, unwrap sites, physical scanners,
-  cache-header fields, tracker observation/duration/native-precedence branches,
-  both replay API signatures/callers, `EventReplayWriter` wrappers,
-  filter carrier types, export-closure signatures and harness-test imports, spool
-  cleanup, and raw-read/SSE-write counts; run the global stale-format audit over
-  affected readers/tests/fixtures, then the standard validation footer
-- **Review:** a fresh persistent-authority/cache/streaming/performance reviewer
-  receives the integrated target and fresh manifest, before/after caller graph,
-  factory-order/fresh-state evidence, complete former-`SetParser` caller migration
-  and stored-callback deletion, mechanical router-test updates and server
-  validation, all three benchmark sources' before/after hashes, narrow main-only
-  factory diff, byte-unchanged cache helpers, frozen-behavior comparison, and
-  absence of a compatibility adapter; carrier/
-  unwrap trace, task-owned export boundary, injected helper closure and four-
-  suite import/test evidence, both final replay API signatures, filter unwrap
-  sites, path-specific zero-time/nonzero/native-duration proof, current-live
-  explicit wrapper evidence, and each writer's version-5 output comparison to its
-  own baseline; plus the full cache identity/old-entry matrix, one-pass disk-
-  spool and zero-pre-EOF-publication proof, plain/zstd corruption matrix,
-  favorable and native-session pass counts, v2 native-callback counts, memory
-  evidence, exact fixture/filesystem delta, and all commands; require `PASS`
-- **Exit gate:** every named persistent consumer and every former `SetParser`
-  caller uses the sole task scanner and a scan-local fresh parser selected from
-  validated header authority without a preliminary pass. The Go `SetParser`
-  method, its stored callback, and all implementation references are deleted with
-  no compatibility adapter; both
-  mechanically updated router test sites pass server validation. The independently
-  reviewed main benchmark-source migration is mechanical, both cache helpers are
-  unchanged, behavior is unchanged, and all three resulting source hashes are
-  frozen. `RegenerateReplay`,
-  `MessageWriter.WriteMessage`, and task's
-  replay-writer seam carry `ParsedMessage`; their filters inspect `.Message`, and
-  both writers satisfy the path-specific producer-time conversion invariant.
-  Current v1 live callers compile against that final API by explicitly wrapping
-  their `Message` with zero producer time and retaining the live per-message
-  observation branch. Export physical authority is task-owned and agent rendering
-  is pure; its shared golden helper takes the injected task export closure without
-  importing `task`, and all four external harness suites pass unchanged. Taskmeta
-  3 and replay 5 validate raw first-header authority plus full physical identity,
-  rebuild all old entries, and remain atomic; version 5 cannot be committed by
-  either replay writer with any earlier conversion behavior. Replay miss uses one
-  raw pass, bounded RAM/disk spool, delayed publication after EOF/identity, and
-  zero partial
-  output on failure. The V1 compatibility-performance invariant and v2 one-pass/
-  callback requirement hold; all failure matrices, cleanup, and exact scope pass
-- **Handoff:** list every migrated entry point and removed scanner; every former
-  `SetParser` caller, factory replacement, stored-callback/method deletion, and
-  no-adapter audit; both router test updates and server validation; all three
-  benchmark sources' before/after hashes, narrow main-only diff, unchanged helper
-  proof, behavior comparison, independent-review result, and frozen accepted
-  hashes; snapshot use per path; complete
-  `ParsedMessage` carrier/unwrap trace; export ownership/caller changes, injected
-  helper closure signature, four external
-  harness import sites, and golden results; final `RegenerateReplay` and
-  `MessageWriter` signatures, current-live explicit zero-time wrapper sites,
-  filter `.Message` inspections, path-specific timing/native-precedence cases,
-  each writer's version-5 comparison to its own baseline, and the
-  `live-relay-read-path` handoff to supply live producer time without changing the
-  named invariant;
-  taskmeta/replay version and cache identity matrices;
-  spool format/lifetime, raw-pass/memory/pre-EOF publication evidence and failure
-  cleanup; favorable/native-session/v2 performance counts; corruption matrix,
-  fixture hashes, stale-format audits, exact files/commands/status, and risks
+- **May run with:** none; it is the required dependent acceptance slice.
+- **Base state:** Phase 1's combined implementation gate is complete and supplies
+  its fresh manifest, exact delta, validation evidence, and specialist `PASS`
+  review.
+- **VCS authority:** global VCS rule; this slice makes no implementation edits,
+  regenerations, staging, or commits.
+- **Write scope:** no production or test implementation files; audit the integrated
+  Phase 1 target, its evidence, and exact delta only.
+- **Purpose:** independently accept the integrated persistent-consumer migration
+  without adding implementation. Unlike Phase 1's specialist implementation
+  review, this slice verifies that its complete exit-gate evidence is present,
+  consistent with the integrated target, and sufficient to release dependent work.
+- **Acceptance requirements:** confirm the integrated target satisfies every Phase
+  1 exit-gate requirement, and audit the exact delta, changed-path inventory,
+  validation results, benchmark/hash evidence, stale-format audit, and absence of
+  staged or unexpected files. Confirm the independent specialist `PASS` review is
+  present and that no compatibility adapter or second scanner survives. Do not
+  accept legacy-seam retirement from prose or partial evidence.
+- **Validation commands:** review Phase 1's recorded focused tests, full listed Go
+  suite, benchmark/hash evidence, stale-format audit, standard validation footer,
+  fresh manifest, exact scope, and specialist `PASS`; rerun only documented
+  read-only checks needed to resolve a specific evidence gap.
+- **Review:** a named independent persistent-consumer acceptance reviewer audits
+  the integrated target and the complete Phase 1 evidence set, records `PASS` or
+  a blocking gap, and does not duplicate Phase 1's specialist test execution.
+- **Exit gate:** no new implementation is accepted here. This slice passes only if
+  the Phase 1 combined exit gate and the independent acceptance audit both pass;
+  only then is the already-implemented `SetParser` seam retirement accepted and
+  dependent phases, including `versioned-log-sink`, may proceed. Any gap remains
+  with Phase 1 and blocks acceptance.
+- **Handoff:** identify the audited integrated-target evidence, any gap/blocker,
+  legacy-seam retirement decision, exact read-only commands/status, and whether
+  dependent phases may proceed.
 
 ### Phase 3: Route live and startup relay reads
 
@@ -1209,8 +912,9 @@ at a time.
 - **Depends on:** `persistent-consumer-migration`; accepted stable phase
   `relay-v2` is also a satisfied prerequisite
 - **May run with:** none due to overlap across agent launch/read paths
-- **Base state:** accepted `persistent-consumer-migration` (both final replay APIs,
-  named conversion invariant, cache 5, live zero wrappers) and `relay-v2` (latent
+- **Base state:** accepted combined `persistent-read-paths` implementation and
+  `persistent-consumer-migration` acceptance (final replay APIs, named conversion
+  invariant, cache 5, live zero wrappers) and `relay-v2` (latent
   embed, strict reader/fixture, parsed metadata) are integrated; apply the global
   fresh-manifest rule and capture the live-read/handshake/session/task-dispatch/
   replay-writer graph and test baselines
@@ -1238,8 +942,8 @@ at a time.
   while the task forwards the original wrapper—including exact nonzero
   `ProducerTime`—to the already-final `EventReplayWriter.WriteMessage` API.
   Synthetic/backend messages with no physical producer timestamp are wrapped
-  explicitly with zero time. Remove the `persistent-consumer-migration` current-
-  live zero-time bridge only at the point where the original parsed carrier now
+  explicitly with zero time. Remove the `persistent-read-paths` current-live zero-time bridge only at the
+  point where the original parsed carrier now
   arrives; do not add a metadata-to-`Message` adapter.
 
   Every v2 envelope result retains its exact immutable millisecond
@@ -1262,7 +966,7 @@ at a time.
   not implement or be inserted as `Message`. This is carrier plumbing into the
   final `MessageWriter` API, not ownership of tracker, filtering/compaction,
   conversion, event bytes, cache invalidation, or cache version: all remain the
-  accepted `persistent-consumer-migration` behavior at version 5. No alternate v2
+  accepted `persistent-read-paths` behavior at version 5. No alternate v2
   envelope parser, header bump, v2 deployment, sink migration, or harness-parser
   cleanup; v1 bytes and
   the V1 compatibility-performance invariant do not regress
@@ -1296,7 +1000,7 @@ at a time.
   ./backend/internal/eventreplay/... ./backend/internal/server/...`; `python3
   backend/internal/agent/relay/test_relay_v2.py`; audit every live parsed-carrier
   hop and explicit unwrap/zero-wrap site, and prove the
-  `persistent-consumer-migration` eventreplay/tracker/cache implementation and
+  `persistent-read-paths` eventreplay/tracker/cache implementation and
   `CacheVersion` are unchanged; audit live-reader
   tests under stale-format rule 8, then run the standard validation footer; any
   unexpected status or untracked output fails the gate
@@ -1443,7 +1147,7 @@ at a time.
   site-specific zero-time policy under the path-specific conversion invariant,
   fixed-observation in-memory history versus per-message live tests,
   `RegenerateReplay` fixed-per-regeneration regression proof, each replay path's
-  byte identity to its own `persistent-consumer-migration` baseline, unchanged
+  byte identity to its own `persistent-read-paths` baseline, unchanged
   APIs/tracker/replay-5 cache/
   publication, absence of another bump, and fixture delta; require `PASS`
 - **Exit gate:** v1/v2 fixture semantic events are equivalent; v1 parsed values
@@ -1455,13 +1159,13 @@ at a time.
   retains per-message wall clock, with tests preventing homogenization.
   `RegenerateReplay` retains its fixed observation per regeneration through the
   accepted spool/cache path. Both replay APIs and each path's
-  `persistent-consumer-migration` bytes, tracker, replay 5, invalidation, cached
+  `persistent-read-paths` bytes, tracker, replay 5, invalidation, cached
   body, and delayed publication are unchanged. Cache/stale-format audits
   and the V1 compatibility-performance invariant pass; no artifact is committed
 - **Handoff:** report remaining carrier/unwrap sites and named-invariant cases,
   including fixed-observation in-memory history, per-message live SSE tests, and
   `RegenerateReplay` fixed-per-regeneration spool/cache regression proof; each
-  replay path's byte comparison to its `persistent-consumer-migration` baseline;
+  replay path's byte comparison to its `persistent-read-paths` baseline;
   unchanged parsed APIs, tracker, taskmeta 3/replay 5, invalidation, cached body,
   and no-bump proof;
   fixture hashes/discriminators, audits, filesystem delta, commands, and risks
@@ -1470,9 +1174,10 @@ at a time.
 
 - **Stable ID:** `versioned-log-sink`
 - **Responsible:** one phase-executor subagent
-- **Depends on:** `persistent-read-paths`
-- **May run with:** none
-- **Base state:** accepted `persistent-read-paths` is integrated; apply the global
+- **Depends on:** `persistent-consumer-migration`
+- **May run with:** none; it starts only after the dependent acceptance slice.
+- **Base state:** accepted `persistent-read-paths` implementation and
+  `persistent-consumer-migration` acceptance are integrated; apply the global
   fresh-manifest rule and capture same-inode append, direct writes, snapshot
   identity, shared fixture hash, and v1 evidence
 - **VCS authority:** global VCS rule
@@ -1617,7 +1322,7 @@ at a time.
   bytes, native callbacks, fast-reader/adoption envelope-extraction copies, and
   outer unmarshal calls; production fast-path corrections
   within scope; CPU profile/runtime-trace analysis; unchanged frozen
-  `persistent-consumer-migration` v1 benchmark sources and compatibility behavior
+  `persistent-read-paths` v1 benchmark sources and compatibility behavior
 - **Measurement boundary:** one combined v2 iteration must have exactly one
   reader that consumes the complete semantic file through validated EOF,
   including all authority, controls, session state, and native messages; matching
@@ -1639,7 +1344,7 @@ at a time.
   and record a SHA-256 manifest over all three sources externally. Freeze those
   bytes before baseline; after output is invalid unless the manifest still
   matches. Only then may production optimization start. The accepted
-  `persistent-consumer-migration` v1 sources remain frozen
+  `persistent-read-paths` v1 sources remain frozen
 - **Generated artifacts:** the main benchmark uses `//go:build
   v2_adoption_benchmark`; Linux/non-Linux helpers use `//go:build
   v2_adoption_benchmark && linux` and `//go:build v2_adoption_benchmark &&
@@ -1655,7 +1360,7 @@ at a time.
   focused tests in the declared task/taskmgr scope; no relay, parser, sink API,
   accepted fixture, v1 benchmark, API DTO, dependency, or wire-format change
 - **Boundary:** preserve the V1 compatibility-performance invariant and its
-  frozen `persistent-consumer-migration` benchmark sources; do not weaken same-
+  frozen `persistent-read-paths` benchmark sources; do not weaken same-
   inode/snapshot/EOF
   authority, persist a second
   authority, introduce a test-only production hook, broaden the fast reader, or
@@ -1742,7 +1447,7 @@ v2 `type` and every noncanonical timestamp fail closed without reader rounding.
 This copy gate applies only to reader/adoption extraction, never producer
 emission. Identity mismatch and corruption always fail closed. The three v2
 benchmark sources remain immutable; the three v1 sources remain frozen at their
-independently accepted `persistent-consumer-migration` hashes. Timing, allocation,
+independently accepted `persistent-read-paths` hashes. Timing, allocation,
 and physical-read evidence stays advisory. Each phase records source/evidence
 hashes and an absolute external artifact directory, uses
 `-tags v2_adoption_benchmark` for any v2

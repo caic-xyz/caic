@@ -676,7 +676,7 @@ func (t *Task) LogPath() string {
 
 // EventReplayWriter stores backend-neutral replay events beside the raw task log.
 type EventReplayWriter interface {
-	WriteMessage(msg agent.Message)
+	WriteMessage(msg agent.ParsedMessage)
 	Commit(logPath string) error
 }
 
@@ -1890,7 +1890,8 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 		}
 	}
 	if t.eventReplay != nil {
-		t.eventReplay.WriteMessage(m)
+		// Live relay records are still v1 and carry no producer timestamp.
+		t.eventReplay.WriteMessage(agent.ParsedMessage{Message: m})
 	}
 	// Fan out to subscribers (non-blocking). Skip a non-zero exit message that
 	// follows a cleanly completed turn: it is a spurious termination artifact

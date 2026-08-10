@@ -1051,7 +1051,7 @@ func (m *Manager) LoadPurgedTasks(all []*task.LoadedTask) error {
 				continue
 			}
 		}
-		m.setParser(lt)
+		lt.SetNativeParserResolver(m.resolveNativeParser)
 		rt := m.defaultRuntimeName()
 		if lt.RuntimeName != "" {
 			rt = lt.RuntimeName
@@ -1695,7 +1695,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 	if !ok || backend == nil {
 		return nil, fmt.Errorf("unknown harness %q for adopted task %s", lt.Harness, taskID)
 	}
-	m.setParser(lt)
+	lt.SetNativeParserResolver(m.resolveNativeParser)
 	// Check relay liveness.
 	var relayAlive bool
 	var relayMsgs []agent.Message
@@ -2050,14 +2050,6 @@ func refreshAdoptedDiffStat(ctx context.Context, workspace *repowork.Workspace, 
 	}
 	if ds := workspace.BranchDiffStat(ctx, t); len(ds) > 0 {
 		t.SetLiveDiffStat(ds)
-	}
-}
-
-// setParser installs the parser used by legacy streaming consumers.
-func (m *Manager) setParser(lt *task.LoadedTask) {
-	backend := m.backends[lt.Harness]
-	if backend != nil {
-		lt.SetParser(backend.NewWire().ParseMessage)
 	}
 }
 

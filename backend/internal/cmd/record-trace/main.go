@@ -35,6 +35,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/agent/pi"
 	"github.com/caic-xyz/caic/backend/internal/agent/relay"
+	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
 const image = "ghcr.io/caic-xyz/md-user:latest"
@@ -485,11 +486,16 @@ func writeGoldenFile(ctx context.Context, ctr, workDir string, b agent.Backend, 
 
 	// Generate the golden markdown file.
 	mdPath := strings.TrimSuffix(outputPath, ".jsonl") + ".md"
-	md, err := agent.ExportDiscussion(strings.NewReader(sanitized), outputPath, b.NewWire().ParseMessage)
+	md, err := task.ExportDiscussion(outputPath, func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
+		if h != b.Harness() {
+			return nil, fmt.Errorf("golden log harness %q does not match recorder harness %q", h, b.Harness())
+		}
+		return b.NewWire().ParseMessage, nil
+	})
 	if err != nil {
 		return fmt.Errorf("export discussion: %w", err)
 	}
-	if err := os.WriteFile(filepath.Clean(mdPath), []byte(md), 0o600); err != nil { //nolint:gosec // output path is from flag
+	if err := os.WriteFile(filepath.Clean(mdPath), []byte(md), 0o600); err != nil {
 		return fmt.Errorf("write golden md: %w", err)
 	}
 	slog.InfoContext(ctx, "Golden markdown saved", "path", mdPath)

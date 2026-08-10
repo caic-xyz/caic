@@ -225,8 +225,7 @@ func isTaskEventTerminal(state task.State) bool {
 func (h *taskHandlers) streamHistoryFromDisk(w http.ResponseWriter, flusher http.Flusher, entry *taskmgr.Entry) {
 	idx := 0
 	if !h.streamReplayStore(w, flusher, entry, &idx) {
-		tracker := v1conv.NewToolTimingTracker(entry.Task().Harness, FormatToolOutput)
-		h.streamHistoryFromDiskWithTracker(w, flusher, entry, tracker, &idx)
+		return
 	}
 	_, _ = fmt.Fprint(w, "event: ready\ndata: {}\n\n")
 	flusher.Flush()
@@ -274,8 +273,12 @@ func (h *taskHandlers) streamHistoryFromDiskWithTracker(out io.Writer, flusher h
 	}
 	now := time.Now()
 	bytesSinceFlush := 0
-	emit := func(msg agent.Message) {
-		evs := tracker.ConvertMessage(msg, now)
+	emit := func(parsed agent.ParsedMessage) {
+		observed := parsed.ProducerTime
+		if observed.IsZero() {
+			observed = now
+		}
+		evs := tracker.ConvertMessage(parsed.Message, observed)
 		for i := range evs {
 			data, err := v1conv.MarshalEvent(&evs[i])
 			if err != nil {

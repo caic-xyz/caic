@@ -1,91 +1,16 @@
-// Renders an already-open harness-specific task log as markdown.
+// Renders parsed task discussion data as markdown.
 
 package agent
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
-	"io"
 	"strings"
 )
 
-// exportLine is the minimal envelope for routing a JSONL line during export.
-type exportLine struct {
-	Type string `json:"type"`
-}
-
-// ExportDiscussion reads an open task log using the given harness parser and
-// returns a self-contained markdown document. The parser should be a fresh
-// instance from Backend.NewParser() so stateful wire formats can synthesize
-// terminal messages.
-func ExportDiscussion(r io.Reader, src string, parseFn func([]byte) ([]Message, error)) (string, error) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
-
-	var (
-		meta    MetaMessage
-		result  *MetaResultMessage
-		pr      *MetaPRMessage
-		msgs    []Message
-		metaSet bool
-	)
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-
-		var env exportLine
-		if err := json.Unmarshal(line, &env); err != nil {
-			continue
-		}
-
-		switch env.Type {
-		case "caic_meta":
-			var m MetaMessage
-			if err := json.Unmarshal(line, &m); err == nil {
-				meta = m
-				metaSet = true
-			}
-
-		case "caic_result":
-			var m MetaResultMessage
-			if err := json.Unmarshal(line, &m); err == nil {
-				result = &m
-			}
-
-		case "caic_pr":
-			var m MetaPRMessage
-			if err := json.Unmarshal(line, &m); err == nil {
-				pr = &m
-			}
-
-		case "caic_diff_stat", "caic_exit", "caic_model_info", "caic_stripped_env", "caic_session", "caic_init", PendingUserActionMessageType:
-			// Skip internal control records.
-
-		default:
-			parsed, parseErr := parseFn(line)
-			if parseErr != nil {
-				continue
-			}
-			msgs = append(msgs, parsed...)
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("scan %s: %w", src, err)
-	}
-	if !metaSet {
-		return "", fmt.Errorf("%s: no caic_meta header", src)
-	}
-
-	return renderDiscussion(&meta, result, pr, msgs), nil
-}
-
-// renderDiscussion assembles the markdown document from parsed task data.
-func renderDiscussion(meta *MetaMessage, result *MetaResultMessage, pr *MetaPRMessage, msgs []Message) string {
+// RenderDiscussion assembles a self-contained markdown document from task-owned
+// parsed log data. It performs no physical log loading or harness parsing.
+func RenderDiscussion(meta *MetaMessage, result *MetaResultMessage, pr *MetaPRMessage, msgs []Message) string {
 	var b strings.Builder
 
 	b.WriteString("# Task Discussion\n\n")

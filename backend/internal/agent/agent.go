@@ -298,6 +298,13 @@ type LogRecordParser struct {
 	pending       map[pendingActionIdentity]struct{}
 }
 
+// ParsedRecord is a parser-owned semantic task-log record. Control reports
+// whether the version-specific discriminator identifies a caic-owned control.
+type ParsedRecord struct {
+	Messages []ParsedMessage
+	Control  bool
+}
+
 // NewLogRecordParser constructs a parser for an already-validated physical log
 // version. parseNative is called synchronously and must parse and validate the
 // supplied harness-native JSON before returning.
@@ -319,8 +326,9 @@ func NewLogRecordParser(version LogVersion, parseNative func([]byte) ([]Message,
 }
 
 // ParseRecord decodes one physical task-log record according to the parser's
-// exact version.
-func (p *LogRecordParser) ParseRecord(line []byte) ([]ParsedMessage, error) {
+// exact version. Classification belongs to this parser so task-log consumers
+// never duplicate or guess control vocabulary.
+func (p *LogRecordParser) ParseRecord(line []byte) (ParsedRecord, error) {
 	if p.version == LogVersionV2 {
 		return parseV2Record(p, line)
 	}
@@ -386,17 +394,6 @@ type pendingActionIdentity struct {
 	kind      PendingUserActionKind
 	requestID string
 	toolUseID string
-}
-
-// IsLogControlRecord reports whether token identifies a caic control record in
-// the supplied task-log version.
-func IsLogControlRecord(version LogVersion, token string) bool {
-	if version == LogVersionV1 {
-		_, ok := v1LogControlKinds[token]
-		return ok
-	}
-	_, ok := v2LogControlKinds[token]
-	return ok
 }
 
 func (p *LogRecordParser) controlKind(token string) (logControlKind, bool) {

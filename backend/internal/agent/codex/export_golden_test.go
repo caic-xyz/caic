@@ -11,11 +11,14 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
+	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
 func TestExportDiscussionGolden(t *testing.T) {
 	t.Parallel()
-	agenttest.RunExportDiscussionGolden(t, func() agenttest.Parser {
+	agenttest.RunExportDiscussionGolden(t, func(path string, resolver agenttest.NativeParserResolver) (string, error) {
+		return task.ExportDiscussion(path, task.NativeParserResolver(resolver))
+	}, func() agenttest.Parser {
 		return codex.New("", nil).NewWire().ParseMessage
 	})
 }

@@ -27,7 +27,9 @@ import (
 
 func setClaudeParser(tasks []*LoadedTask) {
 	for _, lt := range tasks {
-		lt.SetParser(claudecode.New().NewWire().ParseMessage)
+		lt.SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			return claudecode.New().NewWire().ParseMessage, nil
+		})
 	}
 }
 
@@ -431,7 +433,9 @@ func TestLoadLogs(t *testing.T) {
 				if _, err := loadLogHeader(path); err != nil {
 					t.Fatalf("loadLogHeader: %v", err)
 				}
-				if _, err := loadLogFile(path, claudecode.New().NewWire().ParseMessage); err != nil {
+				if _, err := loadSemanticLogSnapshot(path, func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+					return claudecode.New().NewWire().ParseMessage, nil
+				}); err != nil {
 					t.Fatalf("loadLogFile: %v", err)
 				}
 			})
@@ -459,7 +463,9 @@ func TestLoadLogs(t *testing.T) {
 					if _, err := loadLogHeader(path); err == nil || !strings.Contains(err.Error(), want) {
 						t.Fatalf("loadLogHeader error = %v, want %s", err, want)
 					}
-					if _, err := loadLogFile(path, claudecode.New().NewWire().ParseMessage); err == nil || !strings.Contains(err.Error(), want) {
+					if _, err := loadSemanticLogSnapshot(path, func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+						return claudecode.New().NewWire().ParseMessage, nil
+					}); err == nil || !strings.Contains(err.Error(), want) {
 						t.Fatalf("loadLogFile error = %v, want %s", err, want)
 					}
 				})
@@ -1198,6 +1204,9 @@ func TestLoadLogs(t *testing.T) {
 			t.Fatal(err)
 		}
 		lt := tasks[0]
+		lt.SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			return codex.New("", nil).NewWire().ParseMessage, nil
+		})
 		if lt.SessionID != "thread-old" {
 			t.Fatalf("SessionID = %q after authority scan, want thread-old", lt.SessionID)
 		}
@@ -1265,7 +1274,9 @@ func TestLoadLogs(t *testing.T) {
 			t.Fatal(err)
 		}
 		lt := tasks[0]
-		lt.SetParser(codex.New("", nil).NewWire().ParseMessage)
+		lt.SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			return codex.New("", nil).NewWire().ParseMessage, nil
+		})
 		if err := lt.LoadSessionMetadata(); err != nil {
 			t.Fatal(err)
 		}
@@ -1837,10 +1848,15 @@ func TestTaskAdoptionReadAmplification(t *testing.T) {
 			}
 
 			messageReader, messageCount := openCounted(os.O_RDONLY)
-			if _, err := loadLogFileFromReader(path, func([]byte) ([]agent.Message, error) { return nil, nil }, messageReader, messageCount); err != nil {
+			if _, err := loadSemanticLogSnapshotFromReader(path, messageReader, func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+				return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
+			}); err != nil {
 				t.Fatal(err)
 			}
-			noteRead(messageReader, messageCount)
+			logicalBytes += messageCount.bytes
+			if messageCount.complete {
+				completePasses++
+			}
 
 			reopenReader, reopenCount := openCounted(os.O_RDWR | os.O_APPEND)
 			if err := validateRawLogAppend(reopenCount, reopenReader.file, path, &Task{Harness: harness.Claude}); err != nil {
@@ -2009,7 +2025,7 @@ func TestLoadedTask(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			streamed = append(streamed, m)
+			streamed = append(streamed, m.Message)
 		}
 		if len(streamed) == 0 {
 			t.Fatal("no messages streamed")
@@ -2043,7 +2059,7 @@ func TestLoadedTask(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			streamed = append(streamed, m)
+			streamed = append(streamed, m.Message)
 		}
 		if len(streamed) != 1 {
 			t.Fatalf("streamed %d messages, want 1", len(streamed))
@@ -2085,7 +2101,7 @@ func TestLoadedTask(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			streamed = append(streamed, m)
+			streamed = append(streamed, m.Message)
 		}
 		if len(streamed) != 2 {
 			t.Fatalf("streamed %d messages, want 2", len(streamed))
@@ -2110,7 +2126,9 @@ func TestLoadedTask(t *testing.T) {
 				t.Parallel()
 				path := writePhysicalTestLog(t, compressed, message)
 				lt := &LoadedTask{path: path, Harness: harness.Claude}
-				lt.SetParser(claudecode.New().NewWire().ParseMessage)
+				lt.SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+					return claudecode.New().NewWire().ParseMessage, nil
+				})
 				var gotErr error
 				for _, err := range lt.StreamMessages() {
 					gotErr = errors.Join(gotErr, err)
@@ -2123,12 +2141,14 @@ func TestLoadedTask(t *testing.T) {
 				t.Parallel()
 				path := writePhysicalTestLog(t, compressed, meta, message, mismatch)
 				lt := &LoadedTask{path: path, Harness: harness.Claude}
-				lt.SetParser(claudecode.New().NewWire().ParseMessage)
+				lt.SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+					return claudecode.New().NewWire().ParseMessage, nil
+				})
 				var gotErr error
 				var messages int
 				for msg, err := range lt.StreamMessages() {
 					gotErr = errors.Join(gotErr, err)
-					if msg != nil {
+					if msg.Message != nil {
 						messages++
 					}
 				}
@@ -2143,13 +2163,15 @@ func TestLoadedTask(t *testing.T) {
 				t.Parallel()
 				path := writePhysicalTestLog(t, compressed, "", "  ", meta, message)
 				lt := &LoadedTask{path: path, Harness: harness.Claude}
-				lt.SetParser(claudecode.New().NewWire().ParseMessage)
+				lt.SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+					return claudecode.New().NewWire().ParseMessage, nil
+				})
 				var messages int
 				for msg, err := range lt.StreamMessages() {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if msg != nil {
+					if msg.Message != nil {
 						messages++
 					}
 				}
@@ -2193,7 +2215,9 @@ func TestLoadedTask(t *testing.T) {
 		t.Run("NoPath", func(t *testing.T) {
 			t.Parallel()
 			lt := &LoadedTask{}
-			lt.SetParser(claudecode.New().NewWire().ParseMessage)
+			lt.SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+				return claudecode.New().NewWire().ParseMessage, nil
+			})
 			if err := lt.LoadMessages(); err != nil {
 				t.Fatal(err)
 			}
@@ -2207,12 +2231,12 @@ func TestLoadedTask(t *testing.T) {
 		})
 		t.Run("LoadLogFileNoParser", func(t *testing.T) {
 			t.Parallel()
-			_, err := loadLogFile("/does/not/exist.jsonl", nil)
+			_, err := loadSemanticLogSnapshot("/does/not/exist.jsonl", nil)
 			if err == nil {
-				t.Fatal("expected error when parseFn is nil")
+				t.Fatal("expected error when resolver is nil")
 			}
-			if !strings.Contains(err.Error(), "parseFn is nil") {
-				t.Errorf("error = %q, want parseFn nil error", err.Error())
+			if !strings.Contains(err.Error(), "resolver is nil") {
+				t.Errorf("error = %q, want resolver nil error", err.Error())
 			}
 		})
 		t.Run("StreamNoParser", func(t *testing.T) {
@@ -2335,7 +2359,9 @@ func TestLoadedTask(t *testing.T) {
 		t.Run("AlreadyLoaded", func(t *testing.T) {
 			t.Parallel()
 			lt := &LoadedTask{Msgs: []agent.Message{&agent.TextMessage{Text: "cached"}}}
-			lt.SetParser(claudecode.New().NewWire().ParseMessage)
+			lt.SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+				return claudecode.New().NewWire().ParseMessage, nil
+			})
 			if err := lt.LoadMessagesTail(); err != nil {
 				t.Fatal(err)
 			}

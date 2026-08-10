@@ -123,9 +123,9 @@ func TestReplayCache(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		w.WriteMessage(&agent.TextDeltaMessage{Text: "partial"})
-		w.WriteMessage(&agent.TextMessage{Text: "final"})
-		if err := os.WriteFile(logPath, []byte("raw log\n"), 0o600); err != nil {
+		w.WriteMessage(agent.ParsedMessage{Message: &agent.TextDeltaMessage{Text: "partial"}})
+		w.WriteMessage(agent.ParsedMessage{Message: &agent.TextMessage{Text: "final"}})
+		if err := os.WriteFile(logPath, []byte("{\"type\":\"caic_meta\",\"version\":1,\"harness\":\"claude\",\"prompt\":\"test\"}\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		if err := w.Commit(logPath); err != nil {

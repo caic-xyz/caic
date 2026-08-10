@@ -48,7 +48,9 @@ func (f *adoptionBenchmarkFixture) loadedTask() *LoadedTask {
 		LogSize:    f.size,
 		path:       f.path,
 	}
-	lt.SetParser(claudecode.New().NewWire().ParseMessage)
+	lt.SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+		return claudecode.New().NewWire().ParseMessage, nil
+	})
 	return lt
 }
 
@@ -137,7 +139,9 @@ func BenchmarkTaskAdoption(b *testing.B) {
 						return fmt.Errorf("LoadLogsForTaskIDs returned %d tasks, want 1", len(logs))
 					}
 					lt := logs[0]
-					lt.SetParser(claudecode.New().NewWire().ParseMessage)
+					lt.SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+						return claudecode.New().NewWire().ParseMessage, nil
+					})
 					if lt.SessionID == "" || lt.AgentVersion == "" {
 						if err := lt.LoadSessionMetadata(); err != nil {
 							return err

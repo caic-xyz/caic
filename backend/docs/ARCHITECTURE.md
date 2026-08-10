@@ -120,6 +120,7 @@ graph TD
   pkg_internal_eventreplay --> pkg_internal_agent_harness
   pkg_internal_eventreplay --> pkg_internal_server_api_v1
   pkg_internal_eventreplay --> pkg_internal_server_api_v1conv
+  pkg_internal_eventreplay --> pkg_internal_task
   pkg_internal_forge_forgecache --> pkg_internal_forge
   pkg_internal_forge_forgemgr --> pkg_internal_auth
   pkg_internal_forge_forgemgr --> pkg_internal_bot
@@ -398,10 +399,12 @@ graph TD
   pkg_internal_cmd_record_trace --> pkg_internal_agent_opencode
   pkg_internal_cmd_record_trace --> pkg_internal_agent_pi
   pkg_internal_cmd_record_trace --> pkg_internal_agent_relay
+  pkg_internal_cmd_record_trace --> pkg_internal_task
   pkg_internal_eventreplay --> pkg_internal_agent
   pkg_internal_eventreplay --> pkg_internal_agent_harness
   pkg_internal_eventreplay --> pkg_internal_server_api_v1
   pkg_internal_eventreplay --> pkg_internal_server_api_v1conv
+  pkg_internal_eventreplay --> pkg_internal_task
   pkg_internal_forge_forgecache --> pkg_internal_forge
   pkg_internal_forge_forgemgr --> pkg_internal_auth
   pkg_internal_forge_forgemgr --> pkg_internal_bot
@@ -505,9 +508,9 @@ graph TD
 | `internal/ci` | `internal/agent`, `internal/bot`, `internal/forge`, `internal/forge/forgecache`, `internal/preferences`, `internal/repo/repowork`, `internal/task` |
 | `internal/cmd/gen-api-sdk` | `internal/mcp`, `internal/server/api/v1` |
 | `internal/cmd/mcp-auth-smoke` | `internal/auth`, `internal/forge/forgemgr`, `internal/preferences`, `internal/repo`, `internal/repo/repomgr`, `internal/repo/repowork`, `internal/runtime`, `internal/server`, `internal/server/ipgeo`, `internal/smoketest`, `internal/task/taskmgr` |
-| `internal/cmd/record-trace` | `internal/agent`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/agent/harness`, `internal/agent/opencode`, `internal/agent/pi`, `internal/agent/relay` |
+| `internal/cmd/record-trace` | `internal/agent`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/agent/harness`, `internal/agent/opencode`, `internal/agent/pi`, `internal/agent/relay`, `internal/task` |
 | `internal/cmd/upnp-dump` | None |
-| `internal/eventreplay` | `internal/agent`, `internal/agent/harness`, `internal/server/api/v1`, `internal/server/api/v1conv` |
+| `internal/eventreplay` | `internal/agent`, `internal/agent/harness`, `internal/server/api/v1`, `internal/server/api/v1conv`, `internal/task` |
 | `internal/forge` | None |
 | `internal/forge/forgecache` | `internal/forge` |
 | `internal/forge/forgemgr` | `internal/auth`, `internal/bot`, `internal/forge`, `internal/forge/github`, `internal/forge/gitlab`, `internal/repo` |

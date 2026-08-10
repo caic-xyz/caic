@@ -327,7 +327,9 @@ func TestRunner(t *testing.T) {
 			if len(logs) != 1 {
 				t.Fatalf("loaded %d logs, want 1", len(logs))
 			}
-			logs[0].SetParser(claudecode.New().NewWire().ParseMessage)
+			logs[0].SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+				return claudecode.New().NewWire().ParseMessage, nil
+			})
 			if err := logs[0].LoadMessages(); err != nil {
 				t.Fatal(err)
 			}

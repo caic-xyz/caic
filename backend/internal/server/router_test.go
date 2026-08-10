@@ -1846,7 +1846,9 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		if len(logs) != 1 {
 			t.Fatalf("logs len = %d, want 1", len(logs))
 		}
-		logs[0].SetParser(claudecode.New().NewWire().ParseMessage)
+		logs[0].SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			return claudecode.New().NewWire().ParseMessage, nil
+		})
 
 		tk := &task.Task{ID: taskID, InitialPrompt: agent.Prompt{Text: "fix the bug"}, Harness: harness.Claude}
 		tk.RestoreMessages([]agent.Message{&agent.TextMessage{Text: "fast in-memory history"}})
@@ -1904,7 +1906,9 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		if len(logs) != 1 {
 			t.Fatalf("logs len = %d, want 1", len(logs))
 		}
-		logs[0].SetParser(claudecode.New().NewWire().ParseMessage)
+		logs[0].SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			return claudecode.New().NewWire().ParseMessage, nil
+		})
 
 		tk := &task.Task{
 			ID:            taskID,

@@ -24,42 +24,45 @@ const (
 // parseV2Record validates and decodes one canonical v2 physical record.
 // Agent records use the zero-copy fast path; control records use the general
 // decoder and update parser state before the resulting messages are returned.
-func parseV2Record(p *LogRecordParser, line []byte) ([]ParsedMessage, error) {
+func parseV2Record(p *LogRecordParser, line []byte) (ParsedRecord, error) {
 	if err := validateV2RecordBytes(line); err != nil {
-		return nil, err
+		return ParsedRecord{}, err
 	}
 	if bytes.HasPrefix(line, []byte(v2AgentRecordPrefix)) {
-		return parseV2AgentRecord(p, line)
+		msgs, err := parseV2AgentRecord(p, line)
+		return ParsedRecord{Messages: msgs}, err
 	}
 
 	// Controls are small and retain ordinary decoding. Canonical agent records
 	// take the branch above, so no valid agent envelope reaches this decoder.
 	token, fields, err := decodeV2ControlFields(line)
 	if err != nil {
-		return nil, fmt.Errorf("corrupt v2 log record: decode control discriminator: %w", err)
+		return ParsedRecord{}, fmt.Errorf("corrupt v2 log record: decode control discriminator: %w", err)
 	}
 	if token == "" {
 		if containsV2ControlField(fields, "type") {
-			return nil, errors.New("corrupt v2 log record: unknown top-level field \"type\": top-level type discriminator is not valid in v2")
+			return ParsedRecord{}, errors.New("corrupt v2 log record: unknown top-level field \"type\": top-level type discriminator is not valid in v2")
 		}
-		return nil, errors.New("corrupt v2 log record: missing top-level t")
+		return ParsedRecord{}, errors.New("corrupt v2 log record: missing top-level t")
 	}
 	if token == "agent" {
-		return nil, errors.New("corrupt v2 agent record: noncanonical envelope")
+		return ParsedRecord{}, errors.New("corrupt v2 agent record: noncanonical envelope")
 	}
 	kind, ok := p.controlKind(token)
 	if !ok {
-		return nil, fmt.Errorf("corrupt v2 log record: unknown top-level t %q", token)
+		return ParsedRecord{}, fmt.Errorf("corrupt v2 log record: unknown top-level t %q", token)
 	}
+	record := ParsedRecord{Control: true}
 	if err := validateV2ControlFields(kind, token, fields); err != nil {
-		return nil, err
+		return record, err
 	}
 	msgs, err := parseV2Control(p, kind, token, line)
 	if err != nil {
-		return nil, err
+		return record, err
 	}
 	msgs, err = p.applyMessageState(msgs)
-	return wrapParsedMessages(msgs, time.Time{}), err
+	record.Messages = wrapParsedMessages(msgs, time.Time{})
+	return record, err
 }
 
 func decodeV2ControlFields(line []byte) (token string, fields []string, err error) {

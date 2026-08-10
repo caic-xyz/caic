@@ -1,4 +1,4 @@
-// Microbenchmarks for strict canonical v2 task-log record decoding.
+// Microbenchmarks for strict canonical v2 task-log record decoding through the parser API.
 
 package agent
 
@@ -46,7 +46,7 @@ func BenchmarkV2AgentRecord(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(record) + 1))
 			for b.Loop() {
-				if _, err := parseV2Record(p, record); err != nil {
+				if _, err := p.ParseRecord(record); err != nil {
 					b.Fatal(err)
 				}
 			}

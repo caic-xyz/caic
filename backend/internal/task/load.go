@@ -29,21 +29,16 @@ import (
 // errNotLogFile is returned when a file doesn't contain a valid caic_meta header.
 var errNotLogFile = errors.New("not a caic log file")
 
+// v1TypeEnvelope extracts the legacy v1 control type used by tail metadata scans.
+type v1TypeEnvelope struct {
+	Type string `json:"type"`
+}
+
 // metaKnown is the set of JSON field names recognised by agent.MetaMessage.
 var metaKnown = jsonutil.KnownFields(agent.MetaMessage{})
 
 // resultKnown is the set of JSON field names recognised by agent.MetaResultMessage.
 var resultKnown = jsonutil.KnownFields(agent.MetaResultMessage{})
-
-// typeEnvelope extracts just the "type" field from a JSON line.
-type typeEnvelope struct {
-	Type string `json:"type"`
-}
-
-func decodeTypeEnvelope(line []byte) (typeEnvelope, bool) {
-	var env typeEnvelope
-	return env, json.Unmarshal(line, &env) == nil
-}
 
 type logAuthority struct {
 	Version agent.LogVersion
@@ -82,8 +77,7 @@ type semanticRecord struct {
 }
 
 type tailLogRecord struct {
-	line    []byte
-	control bool
+	line []byte
 }
 
 type physicalLogReader struct {
@@ -116,6 +110,46 @@ func newValidatedLogSnapshot(path string, file *os.File, info os.FileInfo, autho
 		EOFValidated: true,
 		RawHeader:    string(rawHeader),
 	}, nil
+}
+
+// CacheProof is the derived identity and raw header authority used to bind a
+// rebuildable replay sidecar to one physical task log observation.
+type CacheProof struct {
+	Device    uint64
+	Inode     uint64
+	Size      int64
+	ModTimeNs int64
+	Version   agent.LogVersion
+	Harness   harness.Name
+	RawHeader string
+}
+
+// CacheProofForLog validates the raw first header on the same physical file
+// observation whose identity is returned. It is deliberately task-owned so
+// caches cannot select a parser or invent authority from their own metadata.
+func CacheProofForLog(path string) (_ CacheProof, retErr error) {
+	r, err := openPhysicalLogReader(path)
+	if err != nil {
+		return CacheProof{}, err
+	}
+	defer func() {
+		if closeErr := r.Close(); retErr == nil {
+			retErr = closeErr
+		}
+	}()
+	scanner := newPhysicalLogScanner(r.reader, path)
+	if _, err := scanner.ReadHeader(&jsonutil.FieldWarner{}); err != nil {
+		return CacheProof{}, err
+	}
+	info, err := verifyPhysicalLog(path, r.file, r.info)
+	if err != nil {
+		return CacheProof{}, err
+	}
+	identity := physicalFileIdentityFromFile(r.file, info)
+	if !identity.Valid {
+		return CacheProof{}, fmt.Errorf("task log has no stable physical identity: %s", path)
+	}
+	return CacheProof{Device: identity.Device, Inode: identity.Inode, Size: info.Size(), ModTimeNs: info.ModTime().UnixNano(), Version: scanner.authority.Version, Harness: scanner.authority.Harness, RawHeader: string(scanner.headerRaw)}, nil
 }
 
 func validatedSnapshotMatchesFile(snapshot *ValidatedLogSnapshot, path string) bool {
@@ -1035,8 +1069,8 @@ type LoadedTask struct {
 	Msgs              []agent.Message
 	Result            *Result
 
-	path    string                                // Absolute path for lazy message loading via LoadMessages.
-	parseFn func([]byte) ([]agent.Message, error) // Parser for this harness; set by LoadLogs.
+	path     string               // Absolute path for lazy message loading via LoadMessages.
+	resolver NativeParserResolver // Fresh parser factory supplied by the task owner.
 
 	snapshotMu sync.Mutex
 	snapshot   *ValidatedLogSnapshot // Last completed physical validation.
@@ -1111,18 +1145,17 @@ func loadSemanticLogSnapshotFromReader(path string, r *physicalLogReader, resolv
 	if err != nil {
 		return nil, fmt.Errorf("parse task log bootstrap %s: %w", path, err)
 	}
-	appendRecord(bootstrap, true)
+	appendRecord(bootstrap.Messages, bootstrap.Control)
 	for scanner.Scan() {
-		control := agent.IsLogControlRecord(scanner.authority.Version, scanner.Type())
-		parsed, err := parser.ParseRecord(scanner.Bytes())
+		record, err := parser.ParseRecord(scanner.Bytes())
 		if err != nil {
-			if control || scanner.authority.Version == agent.LogVersionV2 {
+			if record.Control || scanner.authority.Version == agent.LogVersionV2 {
 				return nil, fmt.Errorf("parse task log %s: %w", path, err)
 			}
 			slog.Warn("failed to parse message", "err", err, "path", path)
 			continue
 		}
-		appendRecord(parsed, control)
+		appendRecord(record.Messages, record.Control)
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
@@ -1178,16 +1211,15 @@ func loadSemanticSessionMetadata(path string, resolver NativeParserResolver) (_ 
 		if found {
 			continue
 		}
-		control := agent.IsLogControlRecord(scanner.authority.Version, scanner.Type())
-		parsed, err := parser.ParseRecord(scanner.Bytes())
+		record, err := parser.ParseRecord(scanner.Bytes())
 		if err != nil {
-			if control || scanner.authority.Version == agent.LogVersionV2 {
+			if record.Control || scanner.authority.Version == agent.LogVersionV2 {
 				return nil, nil, fmt.Errorf("parse task log %s: %w", path, err)
 			}
 			slog.Warn("failed to parse message", "err", err, "path", path)
 			continue
 		}
-		for _, message := range parsed {
+		for _, message := range record.Messages {
 			if init, ok := message.Message.(*agent.InitMessage); ok {
 				applySessionMetadataMessages(loaded, []agent.Message{init})
 			}
@@ -1206,6 +1238,35 @@ func loadSemanticSessionMetadata(path string, resolver NativeParserResolver) (_ 
 		return nil, nil, err
 	}
 	return loaded, snapshot, nil
+}
+
+// ExportDiscussion loads one physical task log with its header-authorized native
+// parser and renders the resulting task data as markdown.
+func ExportDiscussion(path string, resolver NativeParserResolver) (string, error) {
+	snapshot, err := loadSemanticLogSnapshot(path, resolver)
+	if err != nil {
+		return "", err
+	}
+	var meta *agent.MetaMessage
+	var result *agent.MetaResultMessage
+	var pr *agent.MetaPRMessage
+	messages := make([]agent.Message, 0, len(snapshot.Messages))
+	for _, parsed := range snapshot.Messages {
+		switch message := parsed.Message.(type) {
+		case *agent.MetaMessage:
+			meta = message
+		case *agent.MetaResultMessage:
+			result = message
+		case *agent.MetaPRMessage:
+			pr = message
+		default:
+			messages = append(messages, message)
+		}
+	}
+	if meta == nil {
+		return "", fmt.Errorf("%s: no caic_meta header", path)
+	}
+	return agent.RenderDiscussion(meta, result, pr, messages), nil
 }
 
 func semanticLoadedTask(snapshot *ValidatedLogSnapshot) *LoadedTask {
@@ -1289,20 +1350,20 @@ func loadSemanticTailSnapshot(path string, resolver NativeParserResolver, tailBy
 
 	messages := make([]agent.ParsedMessage, 0)
 	semantic := make([]semanticRecord, 0)
-	appendRecord := func(line []byte, control bool) error {
-		parsed, err := parser.ParseRecord(line)
+	appendRecord := func(line []byte) error {
+		record, err := parser.ParseRecord(line)
 		if err != nil {
-			if control || scanner.authority.Version == agent.LogVersionV2 {
+			if record.Control || scanner.authority.Version == agent.LogVersionV2 {
 				return err
 			}
 			slog.Warn("failed to parse message", "err", err, "path", path)
 			return nil
 		}
-		if len(parsed) == 0 {
+		if len(record.Messages) == 0 {
 			return nil
 		}
-		messages = append(messages, parsed...)
-		semantic = append(semantic, semanticRecord{end: len(messages), control: control})
+		messages = append(messages, record.Messages...)
+		semantic = append(semantic, semanticRecord{end: len(messages), control: record.Control})
 		return nil
 	}
 
@@ -1311,10 +1372,7 @@ func loadSemanticTailSnapshot(path string, resolver NativeParserResolver, tailBy
 		var total int64
 		for scanner.Scan() {
 			line := bytes.Clone(scanner.Bytes())
-			records = append(records, tailLogRecord{
-				line:    line,
-				control: agent.IsLogControlRecord(scanner.authority.Version, scanner.Type()),
-			})
+			records = append(records, tailLogRecord{line: line})
 			total += int64(len(line) + 1)
 			for total > tailBytes && len(records) > 1 {
 				total -= int64(len(records[0].line) + 1)
@@ -1340,11 +1398,7 @@ func loadSemanticTailSnapshot(path string, resolver NativeParserResolver, tailBy
 			if len(line) == 0 {
 				continue
 			}
-			typ, _, err := decodeDiscriminatorProbe(line, scanner.authority.Version)
-			if err != nil {
-				return nil, fmt.Errorf("decode task log tail %s: %w", path, err)
-			}
-			if err := appendRecord(line, agent.IsLogControlRecord(scanner.authority.Version, typ)); err != nil {
+			if err := appendRecord(line); err != nil {
 				return nil, fmt.Errorf("parse task log %s: %w", path, err)
 			}
 		}
@@ -1356,7 +1410,7 @@ func loadSemanticTailSnapshot(path string, resolver NativeParserResolver, tailBy
 		return nil, err
 	}
 	for _, record := range records {
-		if err := appendRecord(record.line, record.control); err != nil {
+		if err := appendRecord(record.line); err != nil {
 			return nil, fmt.Errorf("parse task log %s: %w", path, err)
 		}
 	}
@@ -1484,8 +1538,7 @@ func loadedTaskFromMeta(path, taskID string, meta *agent.MetaMessage, modified t
 
 // LoadLogs scans logDir for task log files and loads task metadata.
 // Only the header and result trailer are parsed; call LoadMessages for
-// full conversation history. Configure the SetParser callback before loading
-// messages.
+// full conversation history after supplying a fresh native parser resolver.
 func LoadLogs(logDir string) ([]*LoadedTask, error) {
 	paths, err := logPaths(logDir, nil)
 	if err != nil {
@@ -1608,33 +1661,21 @@ func taskIDFromLogBase(base string) string {
 	return base
 }
 
-// SetParser sets the parse function for lazy message loading.
-func (lt *LoadedTask) SetParser(fn func([]byte) ([]agent.Message, error)) {
-	lt.parseFn = fn
+// SetNativeParserResolver installs the task-owned fresh native parser factory.
+// The factory is called only after a scan has validated its physical header.
+func (lt *LoadedTask) SetNativeParserResolver(resolver NativeParserResolver) {
+	lt.resolver = resolver
 }
 
 // LoadMessages lazily loads the full conversation messages from the log file.
-// This is a no-op if messages are already loaded. Requires parseFn to be set
-// via SetParser.
 func (lt *LoadedTask) LoadMessages() error {
 	if lt.Msgs != nil || lt.path == "" {
 		return nil
 	}
-	if lt.parseFn == nil {
-		return fmt.Errorf("no parser set for harness %q; call SetParser first", lt.Harness)
+	if lt.resolver == nil {
+		return fmt.Errorf("no parser resolver set for harness %q", lt.Harness)
 	}
-	full, err := loadLogFile(lt.path, lt.parseFn)
-	if err != nil {
-		return err
-	}
-	lt.Msgs = full.Msgs
-	lt.mergeSessionMetadata(full)
-	if full.ForgePR > 0 {
-		lt.ForgeOwner = full.ForgeOwner
-		lt.ForgeRepo = full.ForgeRepo
-		lt.ForgePR = full.ForgePR
-	}
-	return nil
+	return lt.LoadMessagesWithResolver(lt.resolver)
 }
 
 // LoadSessionMetadata scans the log for backend-neutral session metadata.
@@ -1642,12 +1683,10 @@ func (lt *LoadedTask) LoadSessionMetadata() error {
 	if lt.path == "" || (lt.SessionID != "" && lt.AgentVersion != "") {
 		return nil
 	}
-	full, err := loadLogSessionMetadata(lt.path, lt.parseFn)
-	if err != nil {
-		return err
+	if lt.resolver == nil {
+		return fmt.Errorf("no parser resolver set for harness %q", lt.Harness)
 	}
-	lt.mergeSessionMetadata(full)
-	return nil
+	return lt.LoadSessionMetadataWithResolver(lt.resolver)
 }
 
 // maxTailLoadBytes is the maximum number of bytes to read from the tail of a
@@ -1663,54 +1702,79 @@ func (lt *LoadedTask) LoadMessagesTail() error {
 	if lt.Msgs != nil || lt.path == "" {
 		return nil
 	}
-	if lt.parseFn == nil {
-		return fmt.Errorf("no parser set for harness %q; call SetParser first", lt.Harness)
+	if lt.resolver == nil {
+		return fmt.Errorf("no parser resolver set for harness %q", lt.Harness)
 	}
-	// For small plain files, use the regular full load. Compressed files are
-	// measured by compressed bytes on disk, so their decompressed history can be
-	// much larger than LogSize; keep them on the bounded tail path.
-	if !isLogCompressed(lt.path) && lt.LogSize <= maxTailLoadBytes {
-		return lt.LoadMessages()
-	}
-	slog.Info("load: reading tail only", "path", lt.path, "size", lt.LogSize, "tail", maxTailLoadBytes)
-	full, err := loadLogFileTail(lt.path, lt.parseFn, maxTailLoadBytes)
-	if err != nil {
-		return err
-	}
-	lt.Msgs = full.Msgs
-	lt.Title = full.Title
-	lt.State = full.State
-	lt.Result = full.Result
-	lt.mergeSessionMetadata(full)
-	if full.ForgePR > 0 {
-		lt.ForgeOwner = full.ForgeOwner
-		lt.ForgeRepo = full.ForgeRepo
-		lt.ForgePR = full.ForgePR
-	}
-	if !full.LastStateUpdateAt.IsZero() {
-		lt.LastStateUpdateAt = full.LastStateUpdateAt
-	}
-	return nil
+	return lt.LoadMessagesTailWithResolver(lt.resolver)
 }
 
-// StreamMessages streams the task's conversation messages directly from the log
-// file, yielding each in order without materializing them into Msgs. Memory
-// usage is O(1) regardless of log size, so it is the preferred path for
-// replaying terminal tasks to SSE clients without retaining the full history in
-// memory.
-func (lt *LoadedTask) StreamMessages() iter.Seq2[agent.Message, error] {
-	return func(yield func(agent.Message, error) bool) {
+// StreamMessages streams parsed task conversation records directly from the
+// log. It resolves a fresh parser only after validating the header and retains
+// producer timestamps until replay conversion.
+func (lt *LoadedTask) StreamMessages() iter.Seq2[agent.ParsedMessage, error] {
+	return func(yield func(agent.ParsedMessage, error) bool) {
 		if lt.path == "" {
 			return
 		}
-		if lt.parseFn == nil {
-			yield(nil, fmt.Errorf("no parser set for harness %q; call SetParser first", lt.Harness))
+		if lt.resolver == nil {
+			yield(agent.ParsedMessage{}, errors.New("no parser resolver set"))
 			return
 		}
-		for m, e := range streamLogFile(lt.path, lt.replayParser(), 0) {
-			if !yield(m, e) {
-				return
+		r, err := openPhysicalLogReader(lt.path)
+		if err != nil {
+			yield(agent.ParsedMessage{}, err)
+			return
+		}
+		defer func() { _ = r.Close() }()
+		scanner := newPhysicalLogScanner(r.reader, lt.path)
+		if _, err := scanner.ReadHeader(&jsonutil.FieldWarner{}); err != nil {
+			yield(agent.ParsedMessage{}, err)
+			return
+		}
+		native, err := lt.resolver(scanner.authority.Harness)
+		if err != nil {
+			yield(agent.ParsedMessage{}, err)
+			return
+		}
+		parser, err := agent.NewLogRecordParser(scanner.authority.Version, native)
+		if err != nil {
+			yield(agent.ParsedMessage{}, err)
+			return
+		}
+		if _, err := parser.ParseRecord(scanner.headerRaw); err != nil {
+			yield(agent.ParsedMessage{}, err)
+			return
+		}
+		for scanner.Scan() {
+			record, err := parser.ParseRecord(scanner.Bytes())
+			if err != nil {
+				if record.Control || scanner.authority.Version == agent.LogVersionV2 {
+					yield(agent.ParsedMessage{}, err)
+					return
+				}
+				slog.Warn("failed to parse message", "err", err, "path", lt.path)
+				continue
 			}
+			for _, message := range record.Messages {
+				if record.Control {
+					if _, ok := message.Message.(*agent.LogMessage); !ok {
+						continue
+					}
+				}
+				if !yield(message, nil) {
+					return
+				}
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			yield(agent.ParsedMessage{}, err)
+			return
+		}
+		if _, err := verifyPhysicalLog(lt.path, r.file, r.info); err != nil || !scanner.EOFValidated() {
+			if err == nil {
+				err = errors.New("task log did not reach EOF")
+			}
+			yield(agent.ParsedMessage{}, err)
 		}
 	}
 }
@@ -1757,136 +1821,6 @@ func (lt *LoadedTask) mergeSessionMetadata(src *LoadedTask) {
 	}
 	if lt.AgentVersion == "" {
 		lt.AgentVersion = src.AgentVersion
-	}
-}
-
-// replayParser adapts the harness parser for replaying a task *log* file
-// (which interleaves agent messages with the caic_meta header and caic_*
-// control records) rather than raw relay output. It drops the metadata header
-// and caic_* control records — none of which are conversation messages — and
-// parses everything else with parseFn. This mirrors the line handling in
-// loadLogFile.
-func (lt *LoadedTask) replayParser() func([]byte) ([]agent.Message, error) {
-	return func(line []byte) ([]agent.Message, error) {
-		var env typeEnvelope
-		if err := json.Unmarshal(line, &env); err != nil {
-			return nil, nil //nolint:nilerr // malformed/non-object lines are skipped, matching loadLogFile.
-		}
-		switch env.Type {
-		case "caic_meta", "caic_pr", "caic_result", "caic_diff_stat", "caic_session", "caic_init", agent.PendingUserActionMessageType:
-			return nil, nil
-		case "caic_log":
-			m, err := unmarshalProvisioningLog(line)
-			if err != nil {
-				return nil, err
-			}
-			return []agent.Message{m}, nil
-		default:
-			return lt.parseFn(line)
-		}
-	}
-}
-
-func unmarshalProvisioningLog(line []byte) (*agent.LogMessage, error) {
-	var m agent.LogMessage
-	if err := json.Unmarshal(line, &m); err != nil {
-		return nil, err
-	}
-	return &m, nil
-}
-
-// streamLogFile streams parsed messages from a plain or compressed task log.
-func streamLogFile(path string, parseFn func([]byte) ([]agent.Message, error), offset int64) iter.Seq2[agent.Message, error] {
-	return func(yield func(agent.Message, error) bool) {
-		if offset > 0 && isLogCompressed(path) {
-			yield(nil, fmt.Errorf("seek compressed log %s to %d: unsupported", path, offset))
-			return
-		}
-		r, err := openPhysicalLogReader(path)
-		if err != nil {
-			yield(nil, fmt.Errorf("open %s: %w", path, err))
-			return
-		}
-		defer func() { _ = r.Close() }()
-
-		if offset > 0 {
-			if _, err := scanLogAuthority(r.reader, path); err != nil {
-				yield(nil, err)
-				return
-			}
-			if _, err := verifyPhysicalLog(path, r.file, r.info); err != nil {
-				yield(nil, err)
-				return
-			}
-			if _, err := r.file.Seek(offset, io.SeekStart); err != nil {
-				yield(nil, fmt.Errorf("seek %s to %d: %w", path, offset, err))
-				return
-			}
-			for m, e := range yieldLogMessages(r.file, parseFn, true, path) {
-				if !yield(m, e) {
-					return
-				}
-			}
-			return
-		}
-
-		scanner := newPhysicalLogScanner(r.reader, path)
-		if _, err := scanner.ReadHeader(&jsonutil.FieldWarner{}); err != nil {
-			yield(nil, err)
-			return
-		}
-		for scanner.Scan() {
-			line := scanner.Bytes()
-			parsed, parseErr := parseFn(line)
-			if parseErr != nil {
-				slog.Warn("log", "msg", "skipping unparseable output line", "src", path, "err", parseErr)
-				continue
-			}
-			for _, m := range parsed {
-				if !yield(m, nil) {
-					return
-				}
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			yield(nil, err)
-			return
-		}
-		if _, err := verifyPhysicalLog(path, r.file, r.info); err != nil {
-			yield(nil, err)
-		}
-	}
-}
-
-// yieldLogMessages scans JSONL records and yields parsed conversation messages.
-func yieldLogMessages(r io.Reader, parseFn func([]byte) ([]agent.Message, error), skipFirst bool, src string) iter.Seq2[agent.Message, error] {
-	return func(yield func(agent.Message, error) bool) {
-		scanner := bufio.NewScanner(r)
-		scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
-		first := skipFirst
-		for scanner.Scan() {
-			line := scanner.Bytes()
-			if len(line) == 0 {
-				continue
-			}
-			if first {
-				first = false
-				continue
-			}
-			parsed, parseErr := parseFn(line)
-			if parseErr != nil {
-				slog.Warn("log", "msg", "skipping unparseable output line", "src", src, "err", parseErr)
-				continue
-			}
-			for _, m := range parsed {
-				if !yield(m, nil) {
-					return
-				}
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			yield(nil, err)
-		}
 	}
 }
 
@@ -1958,7 +1892,7 @@ func (s *logTailScan) apply(lt *LoadedTask, line []byte) {
 	if !maybeLogTailRecord(line) {
 		return
 	}
-	var typeEnv typeEnvelope
+	var typeEnv v1TypeEnvelope
 	if json.Unmarshal(line, &typeEnv) != nil {
 		return
 	}
@@ -2142,6 +2076,13 @@ func loadCompressedLogHeaderWithOptions(path string, useSummary, storeSummary bo
 			retErr = closeErr
 		}
 	}()
+	return loadCompressedLogHeaderFromReader(path, r, useSummary, storeSummary)
+}
+
+// loadCompressedLogHeaderFromReader is the reader-owned production core used
+// by loadCompressedLogHeaderWithOptions. Keeping it separate lets pass-count
+// tests observe the same zstd scan without changing filesystem authority.
+func loadCompressedLogHeaderFromReader(path string, r *physicalLogReader, useSummary, storeSummary bool) (*LoadedTask, error) {
 	fw := &jsonutil.FieldWarner{}
 	scanner := newPhysicalLogScanner(r.reader, path)
 	meta, err := scanner.ReadHeader(fw)
@@ -2185,194 +2126,6 @@ func loadCompressedLogHeaderWithOptions(path string, useSummary, storeSummary bo
 		}
 	}
 	return lt, nil
-}
-
-// loadLogFile parses a single task log file and requires a message parser.
-// Returns nil if the file has no valid caic_meta header.
-func loadLogFile(path string, parseFn func([]byte) ([]agent.Message, error)) (_ *LoadedTask, retErr error) {
-	if parseFn == nil {
-		return nil, errors.New("load log file: parseFn is nil")
-	}
-	r, err := openPhysicalLogReader(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if closeErr := r.Close(); retErr == nil {
-			retErr = closeErr
-		}
-	}()
-	return loadLogFileFromReader(path, parseFn, r, r.reader)
-}
-
-func loadLogFileFromReader(path string, parseFn func([]byte) ([]agent.Message, error), r *physicalLogReader, source io.Reader) (*LoadedTask, error) {
-	fw := &jsonutil.FieldWarner{}
-	scanner := newPhysicalLogScanner(source, path)
-	meta, err := scanner.ReadHeader(fw)
-	if err != nil {
-		return nil, err
-	}
-	lt := loadedTaskFromMeta(path, "", &meta, r.info.ModTime().UTC(), r.info.Size())
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if err := applyLoadedLogLine(lt, line, parseFn, path); err != nil {
-			return nil, err
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	if _, err := verifyPhysicalLog(path, r.file, r.info); err != nil {
-		return nil, err
-	}
-	return lt, nil
-}
-
-// loadLogFileTail validates header authority across the physical file, then
-// seeks to (size - tailBytes) and parses only the remaining messages. Message
-// retention stays bounded even though authority validation scans every record.
-func loadLogFileTail(path string, parseFn func([]byte) ([]agent.Message, error), tailBytes int64) (_ *LoadedTask, retErr error) {
-	if isLogCompressed(path) {
-		return loadCompressedLogFileTail(path, parseFn, tailBytes)
-	}
-	r, err := openPhysicalLogReader(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if closeErr := r.Close(); retErr == nil {
-			retErr = closeErr
-		}
-	}()
-
-	scanner := newPhysicalLogScanner(r.reader, path)
-	meta, err := scanner.ReadHeader(&jsonutil.FieldWarner{})
-	if err != nil {
-		return nil, err
-	}
-	for scanner.Scan() {
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	lt := loadedTaskFromMeta(path, "", &meta, r.info.ModTime().UTC(), r.info.Size())
-
-	offset := max(int64(0), r.info.Size()-tailBytes)
-	if _, err := r.file.Seek(offset, io.SeekStart); err != nil {
-		return nil, fmt.Errorf("seek %s to %d: %w", path, offset, err)
-	}
-
-	tailScanner := bufio.NewScanner(r.file)
-	tailScanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
-	skipFirst := offset > 0
-	for tailScanner.Scan() {
-		line := tailScanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		if skipFirst {
-			skipFirst = false
-			continue
-		}
-		if err := applyLoadedLogLine(lt, line, parseFn, path); err != nil {
-			return nil, err
-		}
-	}
-	return lt, tailScanner.Err()
-}
-
-// loadCompressedLogFileTail scans a zstd log once and retains only the latest
-// decompressed JSONL records bounded by tailBytes.
-func loadCompressedLogFileTail(path string, parseFn func([]byte) ([]agent.Message, error), tailBytes int64) (_ *LoadedTask, retErr error) {
-	r, err := openPhysicalLogReader(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if closeErr := r.Close(); retErr == nil {
-			retErr = closeErr
-		}
-	}()
-
-	scanner := newPhysicalLogScanner(r.reader, path)
-	meta, err := scanner.ReadHeader(&jsonutil.FieldWarner{})
-	if err != nil {
-		return nil, err
-	}
-	lt := loadedTaskFromMeta(path, "", &meta, r.info.ModTime().UTC(), r.info.Size())
-
-	var lines [][]byte
-	var total int64
-	for scanner.Scan() {
-		line := bytes.Clone(scanner.Bytes())
-		lines = append(lines, line)
-		total += int64(len(line) + 1)
-		for total > tailBytes && len(lines) > 1 {
-			total -= int64(len(lines[0]) + 1)
-			lines = lines[1:]
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	for _, line := range lines {
-		if err := applyLoadedLogLine(lt, line, parseFn, path); err != nil {
-			return nil, err
-		}
-	}
-	return lt, nil
-}
-
-func applyLoadedLogLine(lt *LoadedTask, line []byte, parseFn func([]byte) ([]agent.Message, error), path string) error {
-	envelope, ok := decodeTypeEnvelope(line)
-	if !ok {
-		return nil
-	}
-
-	switch envelope.Type {
-	case "caic_meta":
-		return nil
-	case "caic_session", "caic_init":
-		if lt.LogVersion == agent.LogVersionV1 {
-			applySessionMetadataLine(lt, envelope.Type, line)
-		}
-		return nil
-
-	case "caic_pr":
-		var mp agent.MetaPRMessage
-		if json.Unmarshal(line, &mp) == nil && mp.ForgePR > 0 {
-			lt.ForgeOwner = mp.ForgeOwner
-			lt.ForgeRepo = mp.ForgeRepo
-			lt.ForgePR = mp.ForgePR
-		}
-
-	case "caic_diff_stat":
-		noteDiffStatLine(lt, line)
-
-	case "caic_log":
-		m, err := unmarshalProvisioningLog(line)
-		if err != nil {
-			return fmt.Errorf("invalid caic_log: %w", err)
-		}
-		lt.Msgs = append(lt.Msgs, m)
-
-	case "caic_result":
-		var mr agent.MetaResultMessage
-		if err := json.Unmarshal(line, &mr); err != nil {
-			return fmt.Errorf("invalid caic_result: %w", err)
-		}
-		applyMetaResult(lt, &mr)
-
-	default:
-		parsed, err := parseFn(line)
-		if err != nil {
-			slog.Warn("failed to parse message", "err", err, "path", path)
-			return nil
-		}
-		lt.Msgs = append(lt.Msgs, parsed...)
-	}
-	return nil
 }
 
 // tsToTime converts a Unix epoch float64 (seconds with sub-second precision)
