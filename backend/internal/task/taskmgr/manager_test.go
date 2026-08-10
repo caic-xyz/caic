@@ -462,6 +462,28 @@ func TestManager(t *testing.T) {
 		}
 	})
 
+	t.Run("CopiesBackends", func(t *testing.T) {
+		t.Parallel()
+		var firstCalls, replacementCalls int
+		backends := map[harness.Name]agent.Backend{
+			harness.Claude: &agenttest.FakeBackend{WireFactory: func() agent.WireFormat {
+				firstCalls++
+				return claudecode.New().NewWire()
+			}},
+		}
+		m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: backends})
+		backends[harness.Claude] = &agenttest.FakeBackend{WireFactory: func() agent.WireFormat {
+			replacementCalls++
+			return codex.New("", nil).NewWire()
+		}}
+		if _, err := m.resolveNativeParser(harness.Claude); err != nil {
+			t.Fatalf("resolveNativeParser: %v", err)
+		}
+		if firstCalls != 1 || replacementCalls != 0 {
+			t.Fatalf("wire construction calls = first %d replacement %d, want 1/0", firstCalls, replacementCalls)
+		}
+	})
+
 	t.Run("RateLimitEvents", func(t *testing.T) {
 		t.Parallel()
 		m := newTestManager(t, Config{ServerCtx: t.Context()})
@@ -1805,6 +1827,39 @@ func TestManager(t *testing.T) {
 			m.Insert(tk.ID.String(), e)
 			m.LoadMessagesOnDemand(e)
 		})
+		t.Run("uses_header_resolver", func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "task.jsonl"), []byte(
+				`{"type":"caic_meta","version":1,"prompt":"task","repos":[],"harness":"claude"}`+"\n"+
+					`{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}]}}`+"\n",
+			), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			logs, err := task.LoadLogs(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var wireCalls int
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{
+				harness.Claude: &agenttest.FakeBackend{WireFactory: func() agent.WireFormat {
+					wireCalls++
+					return claudecode.New().NewWire()
+				}},
+			}})
+			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "task"}}
+			entry := newPurgedEntry(tk, &task.Result{State: task.StatePurged}, logs[0])
+			m.LoadMessagesOnDemand(entry)
+			if wireCalls != 1 {
+				t.Fatalf("NewWire calls = %d, want 1", wireCalls)
+			}
+			if len(logs[0].Msgs) != 1 {
+				t.Fatalf("loaded messages = %d, want 1", len(logs[0].Msgs))
+			}
+			if snapshot := logs[0].ValidatedSnapshot(); snapshot == nil || !snapshot.EOFValidated {
+				t.Fatalf("snapshot = %#v, want validated EOF proof", snapshot)
+			}
+		})
 	})
 	t.Run("LoadPurgedTasks", func(t *testing.T) {
 		t.Parallel()
@@ -2508,30 +2563,21 @@ func TestManager(t *testing.T) {
 			}
 		})
 	})
-	t.Run("SetParser", func(t *testing.T) {
+	t.Run("ResolveNativeParser", func(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_with_backend", func(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"claude": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
 			m.RegisterWorkspace("repo/a", &repowork.Workspace{Dir: "", Log: logtest.Logger(t)})
-			lt := &task.LoadedTask{Harness: "claude"}
-			m.setParser(lt)
-			// No panic — setParser succeeded.
+			if _, err := m.resolveNativeParser("claude"); err != nil {
+				t.Fatalf("resolveNativeParser: %v", err)
+			}
 		})
 		t.Run("missing_backend", func(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
-			dir := t.TempDir()
-			if err := os.WriteFile(filepath.Join(dir, "task.jsonl"), []byte(`{"type":"caic_meta","version":1,"prompt":"task","repos":[],"harness":"pi"}`+"\n"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			tasks, err := task.LoadLogs(dir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			m.setParser(tasks[0])
-			if err := tasks[0].LoadMessages(); err == nil || !strings.Contains(err.Error(), "no parser set") {
-				t.Fatalf("LoadMessages error = %v, want missing-parser error", err)
+			if _, err := m.resolveNativeParser("pi"); err == nil || !strings.Contains(err.Error(), "unknown harness") {
+				t.Fatalf("resolveNativeParser error = %v, want unknown-harness error", err)
 			}
 		})
 	})
@@ -3537,10 +3583,13 @@ func TestLastResultText(t *testing.T) {
 
 func TestNeedsTitleRegen(t *testing.T) {
 	t.Parallel()
+	resolver := func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+		return nil, errors.New("unexpected load")
+	}
 	t.Run("valid_no_log", func(t *testing.T) {
 		t.Parallel()
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}}
-		if !needsTitleRegen(tk, nil) {
+		if !needsTitleRegen(tk, nil, resolver) {
 			t.Error("needsTitleRegen should return true when lt is nil")
 		}
 	})
@@ -3548,7 +3597,7 @@ func TestNeedsTitleRegen(t *testing.T) {
 		t.Parallel()
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}}
 		lt := &task.LoadedTask{TaskID: "test", Prompt: "test"}
-		if !needsTitleRegen(tk, lt) {
+		if !needsTitleRegen(tk, lt, resolver) {
 			t.Error("needsTitleRegen should return true when lt.Title is empty")
 		}
 	})
@@ -3566,7 +3615,7 @@ func TestNeedsTitleRegen(t *testing.T) {
 				&agent.ResultMessage{MessageType: "result"},
 			},
 		}
-		if !needsTitleRegen(tk, lt) {
+		if !needsTitleRegen(tk, lt, resolver) {
 			t.Error("needsTitleRegen should return true when restoredResults > logResults")
 		}
 	})
@@ -3583,7 +3632,7 @@ func TestNeedsTitleRegen(t *testing.T) {
 				&agent.ResultMessage{MessageType: "result"},
 			},
 		}
-		if needsTitleRegen(tk, lt) {
+		if needsTitleRegen(tk, lt, resolver) {
 			t.Error("needsTitleRegen should return false when counts match")
 		}
 	})
@@ -3595,7 +3644,7 @@ func TestNeedsTitleRegen(t *testing.T) {
 			Title:   "existing title",
 			LogSize: 200 << 20, // 200 MiB, above maxLogSize
 		}
-		if needsTitleRegen(tk, lt) {
+		if needsTitleRegen(tk, lt, resolver) {
 			t.Error("needsTitleRegen should return false for large logs")
 		}
 	})

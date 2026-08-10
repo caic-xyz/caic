@@ -977,7 +977,13 @@ at a time.
   pending-action
   identities are applied, and EOF plus physical identity is proved before the
   snapshot is usable. Summary-only inventory may use taskmeta version 3 after its
-  mandatory same-observation raw-header check.
+  mandatory same-observation raw-header check. The public task-level
+  `IsLogControlRecord` predicate is temporary: this phase removes it and makes
+  `LogRecordParser` the sole authority for version-specific control
+  classification, carrying parsed-record classification from the parser to its
+  consumers rather than independently re-probing it during task loading. Keep
+  the v1 and v2 parser implementations and version rules independent behind that
+  parser-owned API.
 
   Snapshot and iterator APIs carry `[]agent.ParsedMessage` or
   `iter.Seq2[agent.ParsedMessage, error]`. `RegenerateReplay` accepts the parsed

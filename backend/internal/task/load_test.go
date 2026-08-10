@@ -1443,6 +1443,105 @@ func TestLoadLogs(t *testing.T) {
 
 func TestLoadSemanticLogSnapshot(t *testing.T) {
 	t.Parallel()
+	t.Run("LoadsNativeSessionMetadata", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "task", Harness: harness.Codex,
+		})
+		threadStarted := `{"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"thread-1","cliVersion":"1.0","createdAt":1,"cwd":"/repo","modelProvider":"openai","path":"/repo","preview":"","source":"user","status":{"type":"idle"},"updatedAt":2}}}`
+		writeLogFile(t, dir, "task.jsonl", meta, threadStarted)
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := tasks[0].LoadSessionMetadataWithResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			return codex.New("", nil).NewWire().ParseMessage, nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if tasks[0].SessionID != "thread-1" {
+			t.Errorf("SessionID = %q, want thread-1", tasks[0].SessionID)
+		}
+	})
+	t.Run("SkipsUnparseableNativeRecord", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "task", Harness: harness.Claude,
+		})
+		valid := claudeAssistant(t, map[string]any{"type": "text", "text": "kept"})
+		writeLogFile(t, dir, "task.jsonl", meta, `{"type":"assistant"`, valid)
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := tasks[0].LoadMessagesWithResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			return claudecode.New().NewWire().ParseMessage, nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if len(tasks[0].Msgs) != 1 {
+			t.Fatalf("Msgs = %d, want 1", len(tasks[0].Msgs))
+		}
+	})
+	t.Run("RejectsIncompleteLaterMetaCandidate", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name   string
+			header string
+			record string
+		}{
+			{
+				name:   "v1_type",
+				header: `{"type":"caic_meta","version":1,"prompt":"task","repos":[],"harness":"claude"}`,
+				record: `{"type":"caic_meta"`,
+			},
+			{
+				name:   "v1_t",
+				header: `{"type":"caic_meta","version":1,"prompt":"task","repos":[],"harness":"claude"}`,
+				record: `{"t":"caic_meta"`,
+			},
+			{
+				name:   "v2_type",
+				header: `{"t":"caic_meta","version":2,"prompt":"task","repos":[],"harness":"claude"}`,
+				record: `{"type":"caic_meta"`,
+			},
+			{
+				name:   "v2_t",
+				header: `{"t":"caic_meta","version":2,"prompt":"task","repos":[],"harness":"claude"}`,
+				record: `{"t":"caic_meta"`,
+			},
+		} {
+			for _, record := range []struct {
+				name string
+				line string
+			}{
+				{name: "incomplete", line: tc.record},
+				{name: "trailing", line: tc.record + `} trailing`},
+			} {
+				t.Run(tc.name+"_"+record.name, func(t *testing.T) {
+					t.Parallel()
+					for _, compressed := range []bool{false, true} {
+						format := "plain"
+						if compressed {
+							format = "zstd"
+						}
+						t.Run(format, func(t *testing.T) {
+							t.Parallel()
+							path := writePhysicalTestLog(t, compressed, tc.header, record.line)
+							_, err := loadSemanticLogSnapshot(path, func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+								return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
+							})
+							if err == nil || !strings.Contains(err.Error(), "invalid log segment header") {
+								t.Fatalf("loadSemanticLogSnapshot error = %v, want invalid segment header", err)
+							}
+						})
+					}
+				})
+			}
+		}
+	})
 	t.Run("PlainOrZstd", func(t *testing.T) {
 		t.Parallel()
 		meta := mustJSON(t, agent.MetaMessage{
@@ -2182,8 +2281,14 @@ func TestLoadedTask(t *testing.T) {
 				Harness: "claude",
 				LogSize: maxTailLoadBytes + 1,
 			}
-			lt.SetParser(claudecode.New().NewWire().ParseMessage)
-			if err := lt.LoadMessagesTail(); err != nil {
+			parse := claudecode.New().NewWire().ParseMessage
+			calls := 0
+			if err := lt.LoadMessagesTailWithResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+				return func(line []byte) ([]agent.Message, error) {
+					calls++
+					return parse(line)
+				}, nil
+			}); err != nil {
 				t.Fatal(err)
 			}
 			if lt.State != StatePurged {
@@ -2191,6 +2296,9 @@ func TestLoadedTask(t *testing.T) {
 			}
 			if lt.Result == nil {
 				t.Fatal("Result not restored from tail")
+			}
+			if calls >= int(maxTailLoadBytes/1024)+5 {
+				t.Errorf("parsed %d records, want fewer than the %d records in the full log", calls, int(maxTailLoadBytes/1024)+5)
 			}
 		})
 		t.Run("CompressedTailKeepsBoundedRecentLines", func(t *testing.T) {
@@ -2203,10 +2311,13 @@ func TestLoadedTask(t *testing.T) {
 			writeCompressedLogFile(t, dir, "compressed.jsonl.zst", seqOf(meta, oldMsg, recentMsg, trailer))
 
 			path := filepath.Join(dir, "compressed.jsonl.zst")
-			lt, err := loadLogFileTail(path, claudecode.New().NewWire().ParseMessage, int64(len(recentMsg)+len(trailer)+2))
+			snapshot, err := loadSemanticTailSnapshot(path, func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+				return claudecode.New().NewWire().ParseMessage, nil
+			}, int64(len(recentMsg)+len(trailer)+2))
 			if err != nil {
 				t.Fatal(err)
 			}
+			lt := semanticLoadedTask(snapshot)
 			if lt.Result == nil || lt.State != StatePurged {
 				t.Fatalf("Result = %+v, State = %v", lt.Result, lt.State)
 			}

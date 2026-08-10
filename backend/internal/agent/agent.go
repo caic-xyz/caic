@@ -388,6 +388,17 @@ type pendingActionIdentity struct {
 	toolUseID string
 }
 
+// IsLogControlRecord reports whether token identifies a caic control record in
+// the supplied task-log version.
+func IsLogControlRecord(version LogVersion, token string) bool {
+	if version == LogVersionV1 {
+		_, ok := v1LogControlKinds[token]
+		return ok
+	}
+	_, ok := v2LogControlKinds[token]
+	return ok
+}
+
 func (p *LogRecordParser) controlKind(token string) (logControlKind, bool) {
 	if p.version == LogVersionV1 {
 		kind, ok := v1LogControlKinds[token]

@@ -143,7 +143,7 @@ func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passe
 		cancelServerCtx:     cancelServerCtx,
 		logDir:              cfg.LogDir,
 		cacheDir:            cfg.CacheDir,
-		backends:            cfg.Backends,
+		backends:            maps.Clone(cfg.Backends),
 		eventReplayFactory:  cfg.EventReplayFactory,
 		harnessEnv:          cfg.HarnessEnv,
 		runtimeStartTimeout: managerRuntimeStartTimeout(cfg.RuntimeStartTimeout),
@@ -847,8 +847,8 @@ func containerPathMatchesRepo(containerPath string, ri *AdoptRepo) bool {
 	}, containerPath)
 }
 
-// needTitleRegen reports whether the adopted task needs an LLM title regeneration.
-func needsTitleRegen(t *task.Task, lt *task.LoadedTask) bool {
+// needsTitleRegen reports whether an adopted task needs an LLM title regeneration.
+func needsTitleRegen(t *task.Task, lt *task.LoadedTask, resolver task.NativeParserResolver) bool {
 	if lt == nil || lt.Title == "" {
 		return true
 	}
@@ -859,7 +859,7 @@ func needsTitleRegen(t *task.Task, lt *task.LoadedTask) bool {
 		return false
 	}
 	logResults := 0
-	if err := lt.LoadMessages(); err == nil {
+	if err := lt.LoadMessagesWithResolver(resolver); err == nil {
 		logResults = countResultMessages(lt.Msgs)
 	}
 	restoredResults := countResultMessages(t.Messages())
@@ -1696,7 +1696,6 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 		return nil, fmt.Errorf("unknown harness %q for adopted task %s", lt.Harness, taskID)
 	}
 	m.setParser(lt)
-
 	// Check relay liveness.
 	var relayAlive bool
 	var relayMsgs []agent.Message
@@ -1727,7 +1726,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 		stateUpdatedAt = time.Now().UTC()
 	}
 	if lt.SessionID == "" || lt.AgentVersion == "" {
-		if err := lt.LoadSessionMetadata(); err != nil {
+		if err := lt.LoadSessionMetadataWithResolver(m.resolveNativeParser); err != nil {
 			m.log.WarnContext(ctx, "load session metadata failed", "repo", ri.RelPath, "br", branch, "err", err)
 		}
 	}
@@ -1839,7 +1838,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 	// has the full pre-restart history; the relay tail has any output produced
 	// while the server was down. Merge them by overlap so the UI does not collapse
 	// to the bounded relay tail after a server restart.
-	if err := lt.LoadMessages(); err != nil {
+	if err := lt.LoadMessagesWithResolver(m.resolveNativeParser); err != nil {
 		m.log.WarnContext(ctx, "load messages failed", "repo", ri.RelPath, "br", branch, "err", err)
 	}
 	if len(relayMsgs) > 0 {
@@ -1875,7 +1874,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 	// Full log parse for PR recovery.
 	if t.GetPR() == 0 {
 		if lt.ForgePR == 0 {
-			_ = lt.LoadMessages()
+			_ = lt.LoadMessagesWithResolver(m.resolveNativeParser)
 		}
 		if lt.ForgePR > 0 {
 			t.SetPR(lt.ForgeOwner, lt.ForgeRepo, lt.ForgePR)
@@ -1957,7 +1956,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 		"relay", relayAlive, "state", t.GetState(), "sess", t.GetSessionID())
 
 	// Only regenerate title if a new turn was completed.
-	if needsTitleRegen(t, lt) {
+	if needsTitleRegen(t, lt, m.resolveNativeParser) {
 		go t.GenerateTitle(m.serverCtx) //nolint:contextcheck // fire-and-forget; must outlive adoption
 	}
 
@@ -2054,21 +2053,29 @@ func refreshAdoptedDiffStat(ctx context.Context, workspace *repowork.Workspace, 
 	}
 }
 
-// setParser installs the parser for a loaded task from the manager's immutable
-// backend map.
+// setParser installs the parser used by legacy streaming consumers.
 func (m *Manager) setParser(lt *task.LoadedTask) {
 	backend := m.backends[lt.Harness]
-	if backend == nil {
-		return
+	if backend != nil {
+		lt.SetParser(backend.NewWire().ParseMessage)
 	}
-	lt.SetParser(backend.NewWire().ParseMessage)
+}
+
+// resolveNativeParser constructs one fresh native parser for a validated task
+// log harness.
+func (m *Manager) resolveNativeParser(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
+	backend := m.backends[h]
+	if backend == nil {
+		return nil, fmt.Errorf("unknown harness %q", h)
+	}
+	return backend.NewWire().ParseMessage, nil
 }
 
 // loadTaskMessagesOnDemand triggers lazy message loading for purged tasks.
 func (m *Manager) loadTaskMessagesOnDemand(entry *Entry) {
 	entry.LoadMessagesOnce(func() {
 		lt := entry.LoadedTask()
-		if err := lt.LoadMessagesTail(); err != nil {
+		if err := lt.LoadMessagesTailWithResolver(m.resolveNativeParser); err != nil {
 			m.log.Warn("lazy load messages failed", "task", entry.Task().ID, "err", err)
 			return
 		}
