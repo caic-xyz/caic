@@ -83,3 +83,11 @@ a.providerPill:hover {
     padding: 0.06rem 0.22rem;
   }
 }
+
+@media (max-width: 480px) {
+  .usageRow {
+    order: 1;
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+}

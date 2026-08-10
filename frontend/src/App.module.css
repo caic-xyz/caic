@@ -145,3 +145,10 @@
     display: none;
   }
 }
+
+@media (max-width: 480px) {
+  .navbar {
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
+}

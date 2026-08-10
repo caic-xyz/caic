@@ -84,3 +84,9 @@
 .dropdownItem:hover {
   background: var(--color-bg-hover);
 }
+
+@media (max-width: 480px) {
+  .userMenu {
+    margin-left: auto;
+  }
+}

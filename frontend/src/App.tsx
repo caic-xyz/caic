@@ -75,7 +75,7 @@ function Shell(props: { children?: JSX.Element }) {
   return (
     <Show when={auth.providers().length === 0 || auth.user()} fallback={<LoginPage />}>
       <div class={styles.app}>
-        <div class={styles.navbar}>
+        <header class={styles.navbar}>
           <h1 class={styles.title}>
             <button class={styles.titleButton} type="button" onClick={() => s.navigate("/")}>caic</button>
           </h1>
@@ -83,7 +83,7 @@ function Shell(props: { children?: JSX.Element }) {
           <UsageBadges usage={s.usage} now={s.now} />
           <ConnectionDot connected={s.connected()} />
           <AccountMenu />
-        </div>
+        </header>
 
         <ErrorBoundary fallback={(error, reset) => <ErrorFallback error={error} reset={reset} />}>
           {props.children}
