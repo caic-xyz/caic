@@ -80,7 +80,7 @@ type Config struct {
 	// Runtimes validates runtime selection and dispatches task runtime operations.
 	Runtimes            *runtime.Router
 	Backends            map[harness.Name]agent.Backend
-	EventReplayFactory  func(logPath string) (task.EventReplayWriter, error)
+	EventReplayFactory  task.EventReplayFactory
 	HarnessEnv          map[string][]string
 	RuntimeStartTimeout time.Duration
 	Prefs               *preferences.Store
@@ -103,7 +103,7 @@ type Manager struct {
 	logDir              string
 	cacheDir            string
 	backends            map[harness.Name]agent.Backend
-	eventReplayFactory  func(logPath string) (task.EventReplayWriter, error)
+	eventReplayFactory  task.EventReplayFactory
 	harnessEnv          map[string][]string
 	runtimeStartTimeout time.Duration
 	prefs               *preferences.Store

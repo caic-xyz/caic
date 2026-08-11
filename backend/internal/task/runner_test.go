@@ -808,7 +808,7 @@ func TestRunner(t *testing.T) {
 			backend := &testBackend{FakeBackend: &agenttest.FakeBackend{}}
 			r := newTestRunner(t, workspace, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			replay := &tasktest.FakeEventReplayWriter{}
-			r.Sessions.Logs.EventReplayFactory = func(string) (EventReplayWriter, error) {
+			r.Sessions.Logs.EventReplayFactory = func(string, CacheProof, CacheProofProvider) (EventReplayWriter, error) {
 				return replay, nil
 			}
 			source := &Task{
@@ -913,7 +913,7 @@ func TestRunner(t *testing.T) {
 			workspace := newTestRepoWorkspace(t, "", "", runtimeBackend)
 			r := newTestRunner(t, workspace, nil, t.TempDir())
 			replay := &tasktest.FakeEventReplayWriter{}
-			r.Sessions.Logs.EventReplayFactory = func(string) (EventReplayWriter, error) {
+			r.Sessions.Logs.EventReplayFactory = func(string, CacheProof, CacheProofProvider) (EventReplayWriter, error) {
 				return replay, nil
 			}
 			source := &Task{
@@ -923,10 +923,11 @@ func TestRunner(t *testing.T) {
 			}
 			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
 			fork := &Task{
-				ID:        ksid.NewID(),
-				Harness:   "test",
-				Repos:     []RepoMount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}},
-				StartedAt: time.Now().UTC(),
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "fork prompt"},
+				Harness:       "test",
+				Repos:         []RepoMount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}},
+				StartedAt:     time.Now().UTC(),
 			}
 
 			if _, err := r.ForkTask(t.Context(), source, fork, &runtime.ForkOptions{}, ""); err == nil {
@@ -955,7 +956,7 @@ func TestRunner(t *testing.T) {
 			backend := &agenttest.FakeBackend{}
 			r := newTestRunner(t, workspace, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			replay := &tasktest.FakeEventReplayWriter{}
-			r.Sessions.Logs.EventReplayFactory = func(string) (EventReplayWriter, error) {
+			r.Sessions.Logs.EventReplayFactory = func(string, CacheProof, CacheProofProvider) (EventReplayWriter, error) {
 				return replay, nil
 			}
 			source := &Task{
@@ -965,10 +966,11 @@ func TestRunner(t *testing.T) {
 			}
 			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
 			fork := &Task{
-				ID:        ksid.NewID(),
-				Harness:   "test",
-				Repos:     []RepoMount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}},
-				StartedAt: time.Now().UTC(),
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "fork prompt"},
+				Harness:       "test",
+				Repos:         []RepoMount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}},
+				StartedAt:     time.Now().UTC(),
 			}
 
 			if _, err := r.ForkTask(t.Context(), source, fork, &runtime.ForkOptions{}, ""); err == nil {

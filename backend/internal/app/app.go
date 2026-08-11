@@ -73,6 +73,12 @@ type instanceDiscoveryResult struct {
 	err       error
 }
 
+// newEventReplayWriter gives construction the Reopen observation and reserves
+// the task-owned fresh provider for later replay-cache validation.
+func newEventReplayWriter(path string, initial task.CacheProof, fresh task.CacheProofProvider) (task.EventReplayWriter, error) {
+	return eventreplay.NewMessageWriter(path, task.ReplayCacheProofProvider(initial, fresh))
+}
+
 // Serve starts the HTTP server and closes app-owned resources when serving ends.
 func (a *App) Serve(ctx context.Context, ln net.Listener) (err error) {
 	defer func() { err = errors.Join(err, a.taskMgr.Close()) }()
@@ -262,18 +268,16 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 
 	workspaceRegistry := repowork.NewRegistry(ctx, runtimes)
 	taskMgr := taskmgr.New(taskmgr.Config{
-		ServerCtx:         ctx,
-		LogDir:            logDir,
-		CacheDir:          cfg.Dirs.CacheDir,
-		Runtimes:          runtimes,
-		WorkspaceRegistry: workspaceRegistry,
-		Backends:          agentBackends,
-		EventReplayFactory: func(path string) (task.EventReplayWriter, error) {
-			return eventreplay.NewMessageWriter(path, task.CacheProofForLog)
-		},
-		HarnessEnv: cfg.Agent.HarnessEnv,
-		Prefs:      prefsStore,
-		Provider:   provider,
+		ServerCtx:          ctx,
+		LogDir:             logDir,
+		CacheDir:           cfg.Dirs.CacheDir,
+		Runtimes:           runtimes,
+		WorkspaceRegistry:  workspaceRegistry,
+		Backends:           agentBackends,
+		EventReplayFactory: newEventReplayWriter,
+		HarnessEnv:         cfg.Agent.HarnessEnv,
+		Prefs:              prefsStore,
+		Provider:           provider,
 	})
 	repoService := repomgr.NewService(ctx, absRoot, repo.New(nil), workspaceRegistry)
 	repoStatus := ci.NewRepoStatusStore()

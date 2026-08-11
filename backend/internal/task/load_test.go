@@ -154,13 +154,12 @@ func reopenWithProofReplay(t *testing.T, dir, path string, tk *Task, snapshot *V
 	replay := &tasktest.FakeEventReplayWriter{}
 	store := &LogStore{
 		LogDir: dir,
-		EventReplayFactory: func(logPath string) (EventReplayWriter, error) {
-			proof, err := CacheProofForLog(logPath)
-			if err != nil {
-				return nil, err
+		EventReplayFactory: func(_ string, proof CacheProof, fresh CacheProofProvider) (EventReplayWriter, error) {
+			if proof != snapshot.cacheProof() {
+				return nil, errors.New("Reopen did not retain its initial append proof")
 			}
-			if proof.RawHeader == "" {
-				return nil, errors.New("empty attached replay proof")
+			if fresh == nil {
+				return nil, errors.New("Reopen did not provide a fresh task proof provider")
 			}
 			return replay, nil
 		},
@@ -2173,9 +2172,19 @@ func TestTaskAdoptionReadAmplification(t *testing.T) {
 	control := mustJSON(t, agent.DiffStatMessage{MessageType: "caic_diff_stat", Ts: 1})
 
 	for _, tc := range []struct {
-		name  string
-		lines func(*testing.T) []string
+		name            string
+		topLevelSession bool
+		lines           func(*testing.T) []string
 	}{
+		{
+			name:            "top-level caic session",
+			topLevelSession: true,
+			lines: func(t *testing.T) []string {
+				session := mustJSON(t, agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "adopted-session", AgentVersion: "2.1.0"})
+				message := claudeAssistant(t, map[string]any{"type": "text", "text": "favorable adoption"})
+				return []string{meta, session, message, control, segment}
+			},
+		},
 		{
 			name: "many small lines",
 			lines: func(t *testing.T) []string {
@@ -2265,23 +2274,29 @@ func TestTaskAdoptionReadAmplification(t *testing.T) {
 					t.Fatal(err)
 				}
 				noteHeader()
-				if lt.SessionID != "" || lt.AgentVersion != "" {
-					t.Fatalf("header scan found top-level session metadata: (%q, %q)", lt.SessionID, lt.AgentVersion)
-				}
-
-				sessionReader, noteSession := openCounted()
-				session, _, err := loadSemanticSessionMetadataFromReader(path, sessionReader, func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
-					if h != harness.Claude {
-						t.Fatalf("resolver harness = %q, want %q", h, harness.Claude)
+				if tc.topLevelSession {
+					if lt.SessionID != "adopted-session" || lt.AgentVersion != "2.1.0" {
+						t.Fatalf("header scan session metadata = (%q, %q), want adopted-session/2.1.0", lt.SessionID, lt.AgentVersion)
 					}
-					return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
-				})
-				if err != nil {
-					t.Fatal(err)
-				}
-				noteSession()
-				if session.SessionID != "" || session.AgentVersion != "" {
-					t.Fatalf("parser-empty session metadata = (%q, %q), want empty", session.SessionID, session.AgentVersion)
+				} else {
+					if lt.SessionID != "" || lt.AgentVersion != "" {
+						t.Fatalf("header scan found top-level session metadata: (%q, %q)", lt.SessionID, lt.AgentVersion)
+					}
+
+					sessionReader, noteSession := openCounted()
+					session, _, err := loadSemanticSessionMetadataFromReader(path, sessionReader, func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
+						if h != harness.Claude {
+							t.Fatalf("resolver harness = %q, want %q", h, harness.Claude)
+						}
+						return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					noteSession()
+					if session.SessionID != "" || session.AgentVersion != "" {
+						t.Fatalf("parser-empty session metadata = (%q, %q), want empty", session.SessionID, session.AgentVersion)
+					}
 				}
 
 				messageReader, noteMessages := openCounted()
@@ -2316,12 +2331,16 @@ func TestTaskAdoptionReadAmplification(t *testing.T) {
 					reopenProofBytes = reopenWithProofReplay(t, dir, path, tk, messageSnapshot)
 				}
 
-				if completePasses != 3 {
-					t.Errorf("complete passes = %d, want exactly 3", completePasses)
+				wantCompletePasses := 3
+				if tc.topLevelSession {
+					wantCompletePasses = 2 // inventory/header and semantic message scans
+				}
+				if completePasses != wantCompletePasses {
+					t.Errorf("complete passes = %d, want exactly %d", completePasses, wantCompletePasses)
 				}
 				logicalSize := int64(len(strings.Join(lines, "\n")) + 1)
-				if logicalBytes != 3*logicalSize {
-					t.Errorf("logical bytes = %d, want exactly three complete passes of %d", logicalBytes, logicalSize)
+				if logicalBytes != int64(wantCompletePasses)*logicalSize {
+					t.Errorf("logical bytes = %d, want exactly %d complete passes of %d", logicalBytes, wantCompletePasses, logicalSize)
 				}
 				if !compressed && (reopenProofBytes == 0 || reopenProofBytes > min(int64(64<<10), logicalSize)) {
 					t.Errorf("Reopen proof bytes = %d, want bounded header/identity tail in (0, %d]", reopenProofBytes, min(int64(64<<10), logicalSize))
@@ -3242,9 +3261,15 @@ func TestV1ProductionReadPassMatrix(t *testing.T) {
 		Harness:     harness.Claude,
 	})
 	for _, tc := range []struct {
-		name       string
-		nativeLine string
+		name            string
+		nativeLine      string
+		topLevelSession bool
 	}{
+		{
+			name:            "top-level-caic-session",
+			nativeLine:      mustJSON(t, agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "top-level-session", AgentVersion: "top-level-version"}),
+			topLevelSession: true,
+		},
 		{
 			name:       "native-session",
 			nativeLine: `{"type":"session","session_id":"native-session","version":"native"}`,
@@ -3322,28 +3347,34 @@ func TestV1ProductionReadPassMatrix(t *testing.T) {
 					t.Fatal(err)
 				}
 				closeHeader()
-				if lt.SessionID != "" || lt.AgentVersion != "" {
-					t.Fatalf("header scan treated native record as task session metadata: (%q, %q)", lt.SessionID, lt.AgentVersion)
-				}
-
-				sessionReader, closeSession := openCounted()
 				nativeCalls := 0
-				session, _, err := loadSemanticSessionMetadataFromReader(path, sessionReader, func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
-					if h != harness.Claude {
-						t.Fatalf("resolver harness = %q, want %q", h, harness.Claude)
+				if tc.topLevelSession {
+					if lt.SessionID != "top-level-session" || lt.AgentVersion != "top-level-version" {
+						t.Fatalf("header scan session metadata = (%q, %q), want top-level-session/top-level-version", lt.SessionID, lt.AgentVersion)
 					}
-					return func([]byte) ([]agent.Message, error) {
-						nativeCalls++
-						return []agent.Message{&agent.InitMessage{SessionID: "native-session", Version: "native"}}, nil
-					}, nil
-				})
-				if err != nil {
+				} else {
+					if lt.SessionID != "" || lt.AgentVersion != "" {
+						t.Fatalf("header scan treated native record as task session metadata: (%q, %q)", lt.SessionID, lt.AgentVersion)
+					}
+
+					sessionReader, closeSession := openCounted()
+					session, _, err := loadSemanticSessionMetadataFromReader(path, sessionReader, func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
+						if h != harness.Claude {
+							t.Fatalf("resolver harness = %q, want %q", h, harness.Claude)
+						}
+						return func([]byte) ([]agent.Message, error) {
+							nativeCalls++
+							return []agent.Message{&agent.InitMessage{SessionID: "native-session", Version: "native"}}, nil
+						}, nil
+					})
+					if err != nil {
+						closeSession()
+						t.Fatal(err)
+					}
 					closeSession()
-					t.Fatal(err)
-				}
-				closeSession()
-				if session.SessionID != "native-session" || nativeCalls != 1 {
-					t.Fatalf("session/native calls = (%q, %d), want native-session/1", session.SessionID, nativeCalls)
+					if session.SessionID != "native-session" || nativeCalls != 1 {
+						t.Fatalf("session/native calls = (%q, %d), want native-session/1", session.SessionID, nativeCalls)
+					}
 				}
 
 				messageReader, closeMessages := openCounted()
@@ -3361,18 +3392,23 @@ func TestV1ProductionReadPassMatrix(t *testing.T) {
 					t.Fatal(err)
 				}
 				closeMessages()
+				var reopenProofBytes int64
 				if !compressed {
 					// Adoption passes its completed EOF proof to the task before a
 					// later cleanup Reopen. Reopen must use only a bounded current
 					// header/identity check rather than adding a fourth full pass.
 					// Attach and commit a replay writer after proving the same raw header.
-					reopenWithProofReplay(t, dir, path, tk, messageSnapshot)
+					reopenProofBytes = reopenWithProofReplay(t, dir, path, tk, messageSnapshot)
 				}
-				if nativeCalls != 2 {
-					t.Fatalf("native parser calls = %d, want one session and one message scan", nativeCalls)
-				}
-
+				wantNativeCalls := 2    // one session and one message scan
 				wantCompletePasses := 3 // header, native/no-top session, and semantic scan
+				if tc.topLevelSession {
+					wantNativeCalls = 0
+					wantCompletePasses = 2 // header/inventory and semantic scans
+				}
+				if nativeCalls != wantNativeCalls {
+					t.Fatalf("native parser calls = %d, want %d", nativeCalls, wantNativeCalls)
+				}
 				if completePasses != wantCompletePasses {
 					t.Errorf("complete passes = %d, want %d", completePasses, wantCompletePasses)
 				}
@@ -3381,6 +3417,9 @@ func TestV1ProductionReadPassMatrix(t *testing.T) {
 				}
 				if logicalBytes > 3*logicalSize+min(int64(65536), logicalSize) {
 					t.Errorf("logical bytes = %d, exceeds three complete passes plus bounded tail (%d)", logicalBytes, 3*logicalSize+min(int64(65536), logicalSize))
+				}
+				if !compressed && (reopenProofBytes == 0 || reopenProofBytes > min(int64(64<<10), logicalSize)) {
+					t.Errorf("Reopen proof bytes = %d, want bounded header/identity tail in (0, %d]", reopenProofBytes, min(int64(64<<10), logicalSize))
 				}
 			})
 		}

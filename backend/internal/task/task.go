@@ -688,6 +688,19 @@ func (t *Task) LogPath() string {
 	return t.logPath
 }
 
+// CacheProofForLog returns a fresh bounded proof for path. A retained EOF
+// snapshot may only authorize append growth on the same physical log; it never
+// falls back after an identity, header, or EOF validation failure.
+func (t *Task) CacheProofForLog(path string) (CacheProof, error) {
+	if snapshot := t.logValidationProof(path); snapshot != nil {
+		if proof, ok := cacheProofForAppendFromValidatedSnapshot(snapshot, path); ok {
+			return proof, nil
+		}
+		return CacheProof{}, fmt.Errorf("task log no longer matches retained validated snapshot: %s", path)
+	}
+	return CacheProofForLog(path)
+}
+
 // EventReplayWriter stores backend-neutral replay events beside the raw task log.
 type EventReplayWriter interface {
 	WriteMessage(msg agent.ParsedMessage)
@@ -978,7 +991,7 @@ func (t *Task) WriteToLog(m agent.Message) error {
 	if path == "" {
 		return ErrNoLog
 	}
-	w, err := openTaskLogForAppend(path, t, false)
+	w, _, err := openTaskLogForAppend(path, t, false)
 	if err != nil {
 		return err
 	}

@@ -73,7 +73,7 @@ type adoptionProcessIO struct {
 	readBytes uint64
 }
 
-func BenchmarkTaskAdoption(b *testing.B) {
+func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 	b.StopTimer()
 	fixture := newAdoptionBenchmarkFixture(b)
 	store := &LogStore{LogDir: fixture.dir}

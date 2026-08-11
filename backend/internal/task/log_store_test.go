@@ -25,6 +25,74 @@ func logLines(t *testing.T, path string) []string {
 	return strings.Split(strings.TrimSpace(string(data)), "\n")
 }
 
+func TestTaskCacheProofForLog(t *testing.T) {
+	t.Parallel()
+	newTask := func(t *testing.T) (*Task, string, *ValidatedLogSnapshot) {
+		dir := t.TempDir()
+		tk := &Task{ID: ksid.NewID(), Harness: harness.Codex}
+		path := filepath.Join(dir, taskLogFileName(tk))
+		header := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: int(agent.LogVersionV1), Prompt: "proof", Harness: harness.Codex})
+		if err := os.WriteFile(path, []byte(header+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		snapshot, err := loadSemanticLogSnapshot(path, func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tk.SetLogPath(path)
+		return tk, path, snapshot
+	}
+
+	t.Run("rejects replacement identity", func(t *testing.T) {
+		t.Parallel()
+		tk, path, snapshot := newTask(t)
+		tk.SetLogValidationSnapshot(snapshot)
+		if err := os.Rename(path, path+".old"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(snapshot.RawHeader+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tk.CacheProofForLog(path); err == nil {
+			t.Fatal("replacement identity was accepted by retained task proof")
+		}
+	})
+	t.Run("rejects header mutation", func(t *testing.T) {
+		t.Parallel()
+		tk, path, snapshot := newTask(t)
+		tk.SetLogValidationSnapshot(snapshot)
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mutated := strings.Replace(snapshot.RawHeader, "proof", "other", 1)
+		if len(mutated) != len(snapshot.RawHeader) {
+			t.Fatal("test header mutation changed length")
+		}
+		if err := os.WriteFile(path, []byte(mutated+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tk.CacheProofForLog(path); err == nil {
+			t.Fatal("same-stat header mutation was accepted by retained task proof")
+		}
+	})
+	t.Run("rejects snapshot without EOF", func(t *testing.T) {
+		t.Parallel()
+		tk, path, snapshot := newTask(t)
+		invalid := *snapshot
+		invalid.EOFValidated = false
+		tk.SetLogValidationSnapshot(&invalid)
+		if _, err := tk.CacheProofForLog(path); err == nil {
+			t.Fatal("non-EOF snapshot was accepted by task proof provider")
+		}
+	})
+}
+
 func TestLogStore(t *testing.T) {
 	t.Parallel()
 	t.Run("WriteResultTrailerReasoningTokens", func(t *testing.T) {
@@ -53,7 +121,7 @@ func TestLogStore(t *testing.T) {
 		var gotPath string
 		store := &LogStore{
 			LogDir: t.TempDir(),
-			EventReplayFactory: func(logPath string) (EventReplayWriter, error) {
+			EventReplayFactory: func(logPath string, _ CacheProof, _ CacheProofProvider) (EventReplayWriter, error) {
 				gotPath = logPath
 				return replay, nil
 			},
@@ -253,8 +321,53 @@ func TestLogStore(t *testing.T) {
 		if err := os.WriteFile(path, []byte(header), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if err := validateRawLogAppendSnapshot(path, appendFile, tk, snapshot); err == nil || !strings.Contains(err.Error(), "replaced") {
+		if _, err := validateRawLogAppendSnapshot(path, appendFile, tk, snapshot); err == nil || !strings.Contains(err.Error(), "replaced") {
 			t.Fatalf("snapshot append validation error = %v, want path replacement", err)
+		}
+	})
+	t.Run("ReopenPassesInitialProofAndFreshProvider", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		tk := &Task{ID: ksid.NewID(), Harness: harness.Codex}
+		path := filepath.Join(dir, taskLogFileName(tk))
+		header := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: int(agent.LogVersionV1), Prompt: "test", Harness: harness.Codex}) + "\n"
+		if err := os.WriteFile(path, []byte(header), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		snapshot, err := loadSemanticLogSnapshot(path, func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tk.SetLogPath(path)
+		tk.SetLogValidationSnapshot(snapshot)
+		var initial CacheProof
+		var fresh CacheProofProvider
+		store := &LogStore{LogDir: dir, EventReplayFactory: func(_ string, proof CacheProof, provider CacheProofProvider) (EventReplayWriter, error) {
+			initial = proof
+			fresh = provider
+			return &tasktest.FakeEventReplayWriter{}, nil
+		}}
+		w, err := store.Reopen(tk)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if initial != snapshot.cacheProof() {
+			t.Fatalf("initial replay proof = %#v, want Reopen observation %#v", initial, snapshot.cacheProof())
+		}
+		if fresh == nil {
+			t.Fatal("Reopen did not provide a fresh task proof provider")
+		}
+		proof, err := fresh(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if proof != initial {
+			t.Fatalf("fresh replay proof = %#v, want %#v", proof, initial)
 		}
 	})
 	t.Run("OpenSurfacesReplayFactoryError", func(t *testing.T) {
@@ -262,7 +375,7 @@ func TestLogStore(t *testing.T) {
 		wantErr := errors.New("replay unavailable")
 		store := &LogStore{
 			LogDir: t.TempDir(),
-			EventReplayFactory: func(string) (EventReplayWriter, error) {
+			EventReplayFactory: func(string, CacheProof, CacheProofProvider) (EventReplayWriter, error) {
 				return nil, wantErr
 			},
 		}

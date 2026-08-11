@@ -12,12 +12,33 @@ import (
 	"strings"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
+
+// CacheProofProvider returns a fresh bounded proof for one task log.
+type CacheProofProvider func(string) (CacheProof, error)
+
+// EventReplayFactory creates a replay writer from Reopen's initial append proof
+// and a task-owned provider for later cache validation.
+type EventReplayFactory func(string, CacheProof, CacheProofProvider) (EventReplayWriter, error)
+
+// ReplayCacheProofProvider returns a proof provider that consumes Reopen's
+// initial append observation once before using fresh task-owned proofs.
+func ReplayCacheProofProvider(initial CacheProof, fresh CacheProofProvider) func(string) (CacheProof, error) {
+	usedInitial := false
+	return func(path string) (CacheProof, error) {
+		if !usedInitial {
+			usedInitial = true
+			return initial, nil
+		}
+		return fresh(path)
+	}
+}
 
 // LogStore manages raw task JSONL logs and their companion replay writers.
 type LogStore struct {
 	LogDir             string
-	EventReplayFactory func(logPath string) (EventReplayWriter, error)
+	EventReplayFactory EventReplayFactory
 }
 
 // Open creates a JSONL log segment and writes its metadata header.
@@ -26,14 +47,21 @@ func (s *LogStore) Open(t *Task) (io.WriteCloser, error) {
 		return nil, fmt.Errorf("create log dir: %w", err)
 	}
 	path := filepath.Join(s.LogDir, taskLogFileName(t))
-	w, err := openTaskLogForAppend(path, t, true)
+	w, _, err := openTaskLogForAppend(path, t, true)
 	if err != nil {
 		return nil, err
 	}
 	if err := writeMetadataHeader(w, t); err != nil {
 		return nil, errors.Join(err, w.Close())
 	}
-	if err := s.attachReplay(t, path); err != nil {
+	var proof CacheProof
+	if s.EventReplayFactory != nil {
+		proof, err = t.CacheProofForLog(path)
+		if err != nil {
+			return nil, errors.Join(err, w.Close())
+		}
+	}
+	if err := s.attachReplay(t, path, proof); err != nil {
 		return nil, errors.Join(err, w.Close())
 	}
 	return w, nil
@@ -45,17 +73,17 @@ func (s *LogStore) Reopen(t *Task) (io.WriteCloser, error) {
 		return nil, errors.New("no log dir")
 	}
 	path := filepath.Join(s.LogDir, taskLogFileName(t))
-	w, err := openTaskLogForAppend(path, t, false)
+	w, proof, err := openTaskLogForAppend(path, t, false)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.attachReplay(t, path); err != nil {
+	if err := s.attachReplay(t, path, proof); err != nil {
 		return nil, errors.Join(err, w.Close())
 	}
 	return w, nil
 }
 
-func openTaskLogForAppend(path string, t *Task, create bool) (*taskLogWriter, error) {
+func openTaskLogForAppend(path string, t *Task, create bool) (*taskLogWriter, CacheProof, error) {
 	cleanPath := filepath.Clean(path)
 	if create {
 		w, err := newTaskLogWriter(cleanPath, os.O_CREATE|os.O_EXCL|os.O_RDWR|os.O_APPEND)
@@ -65,47 +93,48 @@ func openTaskLogForAppend(path string, t *Task, create bool) (*taskLogWriter, er
 				_, statErr = verifyPhysicalLog(path, w.file, info)
 			}
 			if statErr != nil {
-				return nil, errors.Join(statErr, w.Close())
+				return nil, CacheProof{}, errors.Join(statErr, w.Close())
 			}
-			return w, nil
+			return w, CacheProof{}, nil
 		}
 		if !os.IsExist(err) {
-			return nil, fmt.Errorf("create log file: %w", err)
+			return nil, CacheProof{}, fmt.Errorf("create log file: %w", err)
 		}
 	}
 
 	w, err := newTaskLogWriter(cleanPath, os.O_RDWR|os.O_APPEND)
 	if err != nil {
-		return nil, err
+		return nil, CacheProof{}, err
 	}
 	if snapshot := t.logValidationProof(cleanPath); snapshot != nil {
-		if err := validateRawLogAppendSnapshot(cleanPath, w.file, t, snapshot); err == nil {
-			return w, nil
+		if proof, snapshotErr := validateRawLogAppendSnapshot(cleanPath, w.file, t, snapshot); snapshotErr == nil {
+			return w, proof, nil
 		}
 	}
-	if err := validateRawLogAppend(w.file, w.file, cleanPath, t); err != nil {
-		return nil, errors.Join(err, w.Close())
+	proof, err := validateRawLogAppend(w.file, w.file, cleanPath, t)
+	if err != nil {
+		return nil, CacheProof{}, errors.Join(err, w.Close())
 	}
-	return w, nil
+	return w, proof, nil
 }
 
 // validateRawLogAppendSnapshot reuses an in-memory EOF validation only after a
 // fresh bounded header and identity observation binds that proof to the open
 // append descriptor and its current path.
-func validateRawLogAppendSnapshot(path string, f *os.File, t *Task, snapshot *ValidatedLogSnapshot) error {
+func validateRawLogAppendSnapshot(path string, f *os.File, t *Task, snapshot *ValidatedLogSnapshot) (CacheProof, error) {
 	if snapshot == nil || !snapshot.EOFValidated || snapshot.Path != filepath.Clean(path) {
-		return errors.New("task log validation snapshot is stale")
+		return CacheProof{}, errors.New("task log validation snapshot is stale")
 	}
 	info, err := f.Stat()
 	if err != nil {
-		return err
+		return CacheProof{}, err
 	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return err
+		return CacheProof{}, err
 	}
 	proof, err := cacheProofFromReader(path, &physicalLogReader{file: f, reader: f, info: info})
 	if err != nil {
-		return fmt.Errorf("validate task log snapshot for append: %w", err)
+		return CacheProof{}, fmt.Errorf("validate task log snapshot for append: %w", err)
 	}
 	if proof != (CacheProof{
 		Device:    snapshot.Device,
@@ -116,39 +145,49 @@ func validateRawLogAppendSnapshot(path string, f *os.File, t *Task, snapshot *Va
 		Harness:   snapshot.Authority.Harness,
 		RawHeader: snapshot.RawHeader,
 	}) {
-		return errors.New("task log validation snapshot is stale")
+		return CacheProof{}, errors.New("task log validation snapshot is stale")
 	}
 	if proof.Version != agent.LogVersionV1 {
-		return fmt.Errorf("append task log: version %d requires versioned log sink", proof.Version)
+		return CacheProof{}, fmt.Errorf("append task log: version %d requires versioned log sink", proof.Version)
 	}
 	if proof.Harness != t.Harness {
-		return fmt.Errorf("append task log: header harness %q does not match task harness %q", proof.Harness, t.Harness)
+		return CacheProof{}, fmt.Errorf("append task log: header harness %q does not match task harness %q", proof.Harness, t.Harness)
 	}
-	return nil
+	return proof, nil
 }
 
-func validateRawLogAppend(source io.ReadSeeker, f *os.File, path string, t *Task) error {
+func validateRawLogAppend(source io.ReadSeeker, f *os.File, path string, t *Task) (CacheProof, error) {
 	info, err := f.Stat()
 	if err != nil {
-		return err
+		return CacheProof{}, err
 	}
 	if _, err := source.Seek(0, io.SeekStart); err != nil {
-		return err
+		return CacheProof{}, err
 	}
-	authority, err := scanLogAuthority(source, path)
+	scanner := newPhysicalLogScanner(source, path)
+	if _, err := scanner.ReadHeader(&jsonutil.FieldWarner{}); err != nil {
+		return CacheProof{}, fmt.Errorf("validate task log for append: %w", err)
+	}
+	for scanner.Scan() {
+	}
+	if err := scanner.Err(); err != nil {
+		return CacheProof{}, fmt.Errorf("validate task log for append: %w", err)
+	}
+	stableInfo, err := verifyPhysicalLog(path, f, info)
 	if err != nil {
-		return fmt.Errorf("validate task log for append: %w", err)
+		return CacheProof{}, fmt.Errorf("validate task log for append: %w", err)
 	}
-	if _, err := verifyPhysicalLog(path, f, info); err != nil {
-		return fmt.Errorf("validate task log for append: %w", err)
+	if scanner.authority.Version != agent.LogVersionV1 {
+		return CacheProof{}, fmt.Errorf("append task log: version %d requires versioned log sink", scanner.authority.Version)
 	}
-	if authority.Version != agent.LogVersionV1 {
-		return fmt.Errorf("append task log: version %d requires versioned log sink", authority.Version)
+	if scanner.authority.Harness != t.Harness {
+		return CacheProof{}, fmt.Errorf("append task log: header harness %q does not match task harness %q", scanner.authority.Harness, t.Harness)
 	}
-	if authority.Harness != t.Harness {
-		return fmt.Errorf("append task log: header harness %q does not match task harness %q", authority.Harness, t.Harness)
+	identity := physicalFileIdentityFromFile(f, stableInfo)
+	if !identity.Valid {
+		return CacheProof{}, fmt.Errorf("task log has no stable physical identity: %s", path)
 	}
-	return nil
+	return CacheProof{Device: identity.Device, Inode: identity.Inode, Size: stableInfo.Size(), ModTimeNs: stableInfo.ModTime().UnixNano(), Version: scanner.authority.Version, Harness: scanner.authority.Harness, RawHeader: string(scanner.headerRaw)}, nil
 }
 
 // WriteResultTrailer appends a MetaResultMessage to the log writer.
@@ -196,12 +235,12 @@ func (*LogStore) WriteContextCleared(w io.Writer) error {
 	return err
 }
 
-func (s *LogStore) attachReplay(t *Task, path string) error {
+func (s *LogStore) attachReplay(t *Task, path string, proof CacheProof) error {
 	t.SetLogPath(path)
 	if s.EventReplayFactory == nil {
 		return nil
 	}
-	w, err := s.EventReplayFactory(path)
+	w, err := s.EventReplayFactory(path, proof, t.CacheProofForLog)
 	if err != nil {
 		return err
 	}
