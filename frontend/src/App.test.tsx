@@ -913,6 +913,34 @@ describe("App repo chips: No repository", () => {
     expect(screen.queryByTestId("fork-dialog")).not.toBeInTheDocument();
   });
 
+  it("keeps a newer task-list SSE update when the create response arrives late", async () => {
+    const user = userEvent.setup();
+    const createResponse = deferred<Task>();
+    vi.mocked(api.createTask).mockReturnValueOnce(createResponse.promise);
+    const { history } = renderApp();
+
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [] });
+    await user.type(screen.getByTestId("prompt-input"), "do something");
+    await user.click(screen.getByTestId("submit-task"));
+    await waitFor(() => expect(api.createTask).toHaveBeenCalledOnce());
+
+    dispatchSSE({
+      kind: "upsert",
+      upsert: makeTask({
+        state: "waiting",
+        stateUpdatedAt: "2026-01-01T00:00:01Z" as ISOTimestamp,
+      }),
+    });
+    createResponse.resolve(makeTask({
+      state: "pending",
+      stateUpdatedAt: "2026-01-01T00:00:00Z" as ISOTimestamp,
+    }));
+
+    await waitFor(() => expect(history.get()).toContain("/task/@task1"));
+    await expect(screen.getByTestId("state-badge")).toHaveTextContent("waiting");
+  });
+
   it("creates task without repos when no chips are selected", async () => {
     const user = userEvent.setup();
     renderApp();

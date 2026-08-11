@@ -266,9 +266,8 @@ function createAppStore() {
     focusPrompt();
   }
 
-  // Insert or replace a task in the store by id, keeping the id-sorted order.
-  // Used both by the SSE upsert handler and to seed a task the client just
-  // created, so its detail view renders without waiting for the SSE round-trip.
+  // Insert or replace an authoritative task-list SSE update by ID, keeping
+  // the id-sorted order.
   const upsertTask = (t: Task) => setTasks((prev) => {
     const idx = prev.findIndex((p) => p.id === t.id);
     if (idx >= 0) {
@@ -276,6 +275,13 @@ function createAppStore() {
       next[idx] = t;
       return next;
     }
+    return [...prev, t].sort((a, b) => (a.id < b.id ? -1 : 1));
+  });
+
+  // Seed a newly-created task only when task-list SSE has not arrived first.
+  // The request response may otherwise overwrite a newer state transition.
+  const seedTask = (t: Task) => setTasks((prev) => {
+    if (prev.some((existing) => existing.id === t.id)) return prev;
     return [...prev, t].sort((a, b) => (a.id < b.id ? -1 : 1));
   });
 
@@ -898,7 +904,7 @@ function createAppStore() {
         sudo: forkSudo(),
         gitHubToken: forkGitHubToken(),
       });
-      upsertTask(resp);
+      seedTask(resp);
       navigate(taskPath(
         resp.id,
         resp.repos?.[0]?.name ?? sourceTask?.repos?.[0]?.name ?? "",
@@ -945,7 +951,7 @@ function createAppStore() {
       setPrefEffort(harness, model, effort);
       setPrompt("");
       setPendingImages([]);
-      upsertTask(data);
+      seedTask(data);
       navigate(taskPath(data.id, selRepos[0]?.path ?? "", "", p));
     } finally {
       setSubmitting(false);
@@ -1026,7 +1032,7 @@ function createAppStore() {
   };
   const fixCI = (repoPath: string) => {
     void botFixCI({ repo: repoPath }).then((data) => {
-      upsertTask(data);
+      seedTask(data);
       navigate(taskPath(data.id, repoPath, "", `Fix CI: ${repoPath}`));
     });
   };

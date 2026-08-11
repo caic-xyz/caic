@@ -27,7 +27,7 @@ test("top header keeps its controls within a narrow viewport", async ({ page }) 
 
   const header = page.locator("header");
   const controls = [
-    page.getByRole("button", { name: "caic" }),
+    page.getByRole("button", { name: "caic", exact: true }),
     page.getByTestId("connection-dot"),
     page.getByRole("button", { name: "Menu" }),
   ];
