@@ -55,12 +55,8 @@ reader and shared fixture now establish the canonical parser contract; the
 accepted persistent-reader foundation migrates task-layer bootstrap and segment
 scanning without transferring that authority into `LogRecordParser`.
 
-For compatibility, breaking-change, and churn review, resolve `origin/main`
-immediately before dispatch and freeze its exact commit as `SHIPPED_BASE` in the
-ephemeral orchestration manifest. Resolve the accepted local foundation as
-`LOCAL_BASE` in that same manifest. Accepted local work is an integration
-prerequisite, not a published contract; implementation that exists only after
-`SHIPPED_BASE` may be reshaped within an approved phase scope.
+Accepted local work is an integration prerequisite, not a published contract.
+Unshipped implementation may be reshaped within its approved phase scope.
 
 The remaining production behavior is still legacy v1:
 
@@ -593,111 +589,14 @@ Forbidden additions and fallbacks:
 - no mixed-format recovery append; and
 - no schema migration or public API field for log version.
 
-## Preflight manifest
+## Format migration audit
 
-The living plan records symbolic prerequisites; exact volatile repository
-execution-base and branch-tip Git identities are ephemeral evidence. This
-restriction does not apply to authoritative dependency pseudo-versions or
-content hashes: those are durable tool/content identities and may remain exactly
-pinned in the plan for reproducibility. The base roles and complete manifest
-must be freshly captured and recorded immediately before each phase dispatch,
-integration, and review:
+Any phase that changes v2 physical records, fixtures, examples, or generated
+physical samples audits its full write scope for the former v2 `type`
+discriminator and six-digit or microsecond timestamp grammar. The only permitted
+matches are exact v1 `type` records, harness-native payload keys, explicit
+corruption inputs, and the audit patterns themselves.
 
-- **Shipped/shared comparison role:** resolve `origin/main` to an exact commit and
-  record it as `SHIPPED_BASE` in the ephemeral orchestration manifest.
-  Compatibility, breaking-change, and combined parser churn use that frozen
-  value, never the later value of a moving `origin/main`.
-- **Local dispatch/integration role:** confirm that the accepted unshipped
-  physical-authority, parsed-message metadata, strict canonical v2 reader and
-  fixture, Pi complete-value validation, dedicated v1 extraction, v1 adoption-
-  performance results, and the separate latent v2 relay plus `relay.ScriptV2`
-  embed and tests are present, including the strict-reader source, tests and
-  microbenchmark plus the three v1 adoption benchmark sources and their evidence
-  under the named V1 compatibility-performance invariant. Then record actual HEAD
-  as `LOCAL_BASE` in the fresh ephemeral manifest. The
-  parser has no production consumers and does not establish a published API
-  contract.
-- **Completed phase role:** after implementation and again after integration,
-  freshly capture and record the exact resulting HEAD as `PHASE_FINAL` in
-  ephemeral status and the phase handoff. Immediately before review, freshly
-  capture and record all three exact values in the reviewer prompt.
-
-Focused and full agent tests, focused changed-path race tests, vet, mandatory
-lint, method placement, diff, and status checks passed for the accepted local
-parser and strict fast reader. The accepted source contract includes strict v2
-control and agent rejection, exact canonical timestamps, a single synchronous
-native callback, bounded zero-copy payload extraction, no outer unmarshal or
-payload-wide pre-scan, dedicated v1 native fallback, and complete same-decoder Pi
-validation before unchanged unknown-event passthrough. The full `agent/...` race
-run still has the pre-existing Pi one-second timeout reproduced at its clean
-comparison base; it is not evidence against the local parser and remains outside
-this rollout. `ParsedMessage` replaced `TimestampMessage` and passed independent
-review. The named v1 invariant also passed fresh review; measurements are above.
-The strict-reader implementation, fixture, tests, microbenchmark, Pi validation,
-dedicated v1 extraction, reviewed v1 benchmark sources, and the separate latent
-v2 relay implementation, embed, and tests are durable prerequisites rather than
-active phases.
-
-- **Expected worktree condition:** clean or limited to the exact user-accepted
-  unshipped rollout delta and the declared writer-owned phase scope; no
-  unexplained staged, untracked, or generated paths
-- **VCS authority:** Subagents must not stage,
-  commit, reset, rebase, merge, or push. No history rewrite, amend, or squash may
-  occur without explicit user authorization. Restore operations require
-  coordinator approval and may touch only executor-created output.
-- **Canonical command cwd:** `/home/user/src/caic`, unless a phase explicitly
-  gives another cwd
-- **Generated artifacts:** none expected for this docs rewrite. Implementation
-  phases must declare any generator and exact output before running it.
-- **Shipped contracts:** no migration, schema, or public API DTO change is
-  approved by this plan.
-- **Sensitive baseline:** freshly capture and record this document and every
-  phase-sensitive file immediately before dispatch, integration, and review.
-
-Global phase rules:
-
-1. One phase-executor subagent owns each phase. One writer may operate in a
-   worktree at a time unless isolated worktrees and the recorded concurrency
-   contract are both in use.
-2. Before dispatch, integration, and review, freshly record exact HEAD, base/
-   upstream and pre-integration commits, status paths, and sensitive-file stats in
-   ephemeral state. Freeze `SHIPPED_BASE`, `LOCAL_BASE`, and `PHASE_FINAL`; never
-   reuse a manifest or moving ref. History or worktree/index changes invalidate
-   it. Durable dependency pseudo-versions and content identities remain pinned.
-3. Focused validation runs first. The **standard phase validation footer** is
-   `make lint-fix`, `make lint-docs`, `git diff --check`, `git diff --cached
-   --exit-code`, `git status --short`, `git ls-files --others
-   --exclude-standard`, and exact-scope verification from the canonical cwd. Every
-   implementation phase runs it; unexpected output fails. When a generator uses
-   `git ls-files`, the coordinator must first obtain a user-owned `git add -N`
-   checkpoint for the exact approved new inputs. This is intent-to-add only:
-   executors and integrators may not stage content, `git diff --cached
-   --exit-code` must stay clean, status must account explicitly for every intent
-   entry, and the user owns later index cleanup, staging, and history.
-4. In serial mode, the active-worktree phase executor is the sole writer; its
-   validated output is already on the integration target, so there is no merge
-   or transfer step. With approved isolated-worktree concurrency, a separately
-   designated integration subagent is the sole target writer and may use only
-   `git apply` to transfer accepted output. It may not stage, commit, merge,
-   reset, rebase, or push; the user owns staging and history. Integrated
-   validation and a fresh read-only `PASS` review are required before removal.
-5. Compatibility and breaking-change review considers only contracts present at
-   frozen `SHIPPED_BASE`. For work built on accepted unshipped local changes,
-   review both `SHIPPED_BASE...PHASE_FINAL` for the final combined change and
-   `LOCAL_BASE...PHASE_FINAL` for the focused phase delta; local-only
-   implementation may be reshaped or deleted inside the phase's exact write
-   scope without churn objections or compatibility adapters.
-6. The plan-maintenance subagent applies learnings, moves unresolved work into a
-   named phase, deletes the accepted leading phase, and renumbers the remainder.
-   Stable IDs never change.
-7. `make check` is required at cutover and final gates. Runtime validation uses
-   the real md/container path, never the fake server or `smoketest` backend.
-8. Every affected phase performs an exhaustive stale-format audit over its full
-   write scope, fixtures, examples, and generated physical samples. Search for v2
-   physical `type` discriminator examples and for the former `[0-9]{6}` /
-   `0.000000` / six-digit / microsecond timestamp grammar and language. Classify
-   every match: only exact v1 `type`, unrelated harness-native payload keys,
-   explicit corruption inputs, and the audit patterns themselves may remain.
 
 ## Dependency graph
 
@@ -753,12 +652,10 @@ remains one phase at a time.
 - **Depends on:** none
 - **May run with:** none; this is the gate for later persistent-consumer work that
   relies on the V1 ceiling.
-- **Base state:** the accepted persistent-reader foundation is integrated; apply
-  the global fresh-manifest rule and capture the exact production app/taskmgr
-  live-adoption and replay-writer attachment graph, existing favorable-path benchmark sources,
-  cache-helper hashes, and plain/zstd native-session/no-top-level-session baselines.
-- **VCS authority:** global VCS rule; no fixture/golden regeneration without
-  coordinator approval.
+- **Base state:** the accepted persistent-reader foundation is integrated; capture
+  the production app/taskmgr live-adoption and replay-writer attachment graph,
+  favorable-path benchmark sources, cache-helper hashes, and plain/zstd
+  native-session/no-top-level-session baselines.
 - **Write scope:** only production replay-writer attachment and pass-accounting
   seams in `backend/internal/task`, `backend/internal/task/taskmgr`, and their
   adjacent focused tests and adoption benchmark/counting sources. The accepted
@@ -812,7 +709,7 @@ remains one phase at a time.
   boundaries, replay-writer attachment, and stale format; then run the standard
   validation footer.
 - **Review:** a fresh independent performance/authority/cache/replay reviewer
-  receives the integrated target, fresh manifest, exact production call graph,
+  receives the integrated target, exact production call graph,
   benchmark source/cache-helper hashes, plain/zstd counter matrix, attachment
   trace, unchanged authority/cache/replay evidence, artifact cleanup, and exact
   delta; require `PASS`.
@@ -837,11 +734,10 @@ remains one phase at a time.
 - **May run with:** none due to overlap across agent launch/read paths
 - **Base state:** the accepted persistent-reader foundation and the
   `v1-replay-attachment-performance` gate (final replay APIs, named conversion
-  invariant, cache 5, live zero wrappers, and the V1 ceiling) and `relay-v2` (latent
-  embed, strict reader/fixture, parsed metadata) are integrated; apply the global
-  fresh-manifest rule and capture the live-read/handshake/session/task-dispatch/
-  replay-writer graph and test baselines
-- **VCS authority:** global VCS rule
+  invariant, cache 5, live zero wrappers, and the V1 ceiling) and `relay-v2`
+  (latent embed, strict reader/fixture, parsed metadata) are integrated; capture
+  the live-read/handshake/session/task-dispatch/replay-writer graph and test
+  baselines
 - **Write scope:** shared relay record reader; `DefaultReadMessages`; agent
   connection/session/options message-channel seams; relay tail/attach; Pi startup
   loops; Codex/OpenCode handshake/custom launch paths; task session channels and
@@ -926,8 +822,8 @@ remains one phase at a time.
   hop and explicit unwrap/zero-wrap site, and prove the
   accepted eventreplay/tracker/cache implementation and `CacheVersion` are
   unchanged; audit live-reader
-  tests under stale-format rule 8, then run the standard validation footer; any
-  unexpected status or untracked output fails the gate
+  tests under the format migration audit; any unexpected status or untracked
+  output fails the gate
 - **Review:** independent concurrency/protocol reviewer inspects the integrated
   reader, all custom launch paths, offsets, log-once evidence, and the complete
   relay-reader/session-channel/task-dispatch/`EventReplayWriter` carrier trace;
@@ -963,9 +859,8 @@ remains one phase at a time.
 - **Responsible:** one phase-executor subagent
 - **Depends on:** `v1-replay-attachment-performance`, `live-relay-read-path`
 - **May run with:** `timestamp-cache-semantics` in an isolated worktree
-- **Base state:** accepted dependencies are integrated; apply the global fresh-
-  manifest rule and baseline each harness parser/test file
-- **VCS authority:** global VCS rule; golden recordings are read-only
+- **Base state:** accepted dependencies are integrated; baseline each harness
+  parser/test file
 - **Write scope:** Claude, Codex, Pi, and OpenCode native parser files/tests plus
   stale parser documentation
 - **Data authority:** native parser state derives only from native payloads;
@@ -988,7 +883,7 @@ remains one phase at a time.
 - **Validation commands:** cwd `/home/user/src/caic`: verify the v1 cache-helper
   hashes remain unchanged and rerun the production-shaped benchmark plus focused
   v1 counting tests, `go test ./backend/internal/agent/... ./backend/internal/task/...`,
-  then the standard validation footer
+  then run the project's required validation
 - **Review:** fresh harness-focused reviewer checks for remaining `caic_` parser
   branches and semantic regressions on integrated target; require `PASS`
 - **Exit gate:** repository audit finds no caic routing in native parsers, all
@@ -1003,11 +898,9 @@ remains one phase at a time.
 - **Responsible:** one phase-executor subagent
 - **Depends on:** `v1-replay-attachment-performance`, `live-relay-read-path`
 - **May run with:** `pure-harness-parsers`
-- **Base state:** accepted dependencies are integrated; apply the global fresh-
-  manifest rule and capture remaining producer-time sites, final replay APIs and
-  named invariant, taskmeta 3/replay 5, each writer's baseline, and fixtures
-- **VCS authority:** global VCS rule; no generated replay recording without
-  approval
+- **Base state:** accepted dependencies are integrated; capture remaining
+  producer-time sites, final replay APIs and named invariant, taskmeta 3/replay
+  5, each writer's baseline, and fixtures
 - **Write scope:** remaining parsed producer-time consumers and API conversion
   call sites outside the accepted persistent-replay path, plus adjacent focused
   tests/minimal fixtures. `ToolTimingTracker` implementation and persistent replay
@@ -1063,11 +956,11 @@ remains one phase at a time.
   ./backend/internal/server/... ./backend/internal/task/...`; audit every zero-
   time conversion site and remaining non-persistent-replay timing carrier/unwrap
   site, including fixed-observation in-memory history and per-message live SSE,
-  plus timing fixtures with the global stale-format audit; compare both accepted
+  plus timing fixtures with the format migration audit; compare both accepted
   replay API signatures,
   regeneration/live conversion event bytes, and cache version before/after,
-  preserving tracker/persistent replay, v1 framing, and native payload usage under
-  rule 8; run the standard validation footer
+  preserving tracker/persistent replay, v1 framing, and native payload usage;
+  then run the project's required validation
 - **Review:** fresh timing reviewer checks remaining carrier/unwrap sites, every
   site-specific zero-time policy under the path-specific conversion invariant,
   fixed-observation in-memory history versus per-message live tests,
@@ -1102,10 +995,8 @@ remains one phase at a time.
 - **Depends on:** `v1-replay-attachment-performance`
 - **May run with:** none; it starts only after the independent V1 performance gate.
 - **Base state:** the accepted persistent-reader foundation and the
-  `v1-replay-attachment-performance` gate are integrated; apply the global fresh-
-  manifest rule and capture same-inode append, direct writes, snapshot identity,
-  shared fixture hash, and v1 evidence
-- **VCS authority:** global VCS rule
+  `v1-replay-attachment-performance` gate are integrated; capture same-inode
+  append, direct writes, snapshot identity, shared fixture hash, and v1 evidence
 - **Write scope:** versioned sink API/implementation in `backend/internal/agent`
   and `backend/internal/task`, minimum reopen constructor plumbing, adjacent
   focused tests, and read-only use of the accepted canonical byte fixture;
@@ -1182,7 +1073,8 @@ remains one phase at a time.
   rerun the production-shaped v1 benchmark and counting cases for the accepted
   non-regression obligation under the compatibility-performance invariant while
   keeping both cache helpers byte-identical; run the global stale-format audit over
-  sink tests/fixtures under rule 8, then the standard validation footer
+  sink tests/fixtures under the format migration audit, then run the project's
+  required validation
 - **Review:** an independent API/authority reviewer receives the integrated target
   and pre-integration base from fresh ephemeral state, snapshot/sink contract,
   O(1) call-count proof, exact mismatch matrix, explicit fallback if any, read-
@@ -1218,16 +1110,9 @@ remains one phase at a time.
 - **May run with:** none
 - **Base state:** accepted dependencies, including the
   `v1-replay-attachment-performance` gate, and fixed reader/snapshot/sink contracts
-  are integrated; apply the global fresh-manifest rule and capture app/taskmgr v2
-  adoption/reopen graphs, fixture/v1 cache-helper hashes and production-path
-  evidence, pass/callback/copy/unmarshal behavior, sensitive-file statistics, and
-  an external artifact directory
-- **VCS authority:** global VCS rule. The coordinator must obtain a user-owned
-  intent-to-add checkpoint for exactly
-  `backend/internal/task/load_v2_benchmark_test.go`,
-  `backend/internal/task/load_v2_benchmark_cache_linux_test.go`, and
-  `backend/internal/task/load_v2_benchmark_cache_other_test.go` before generated-
-  index replay; no staged content is permitted
+  are integrated; capture app/taskmgr v2 adoption/reopen graphs, fixture/v1
+  cache-helper hashes, production-path evidence, pass/callback/copy/unmarshal
+  behavior, sensitive-file statistics, and an external artifact directory
 - **Write scope:** the exact three new build-tagged benchmark/helper sources;
   focused natural-boundary counting/callback tests under
   `backend/internal/task`; exact v2 app/taskmgr adoption and validated-reopen fast
@@ -1336,11 +1221,10 @@ remains one phase at a time.
   into the external directory, then remove them; run focused deterministic and
   corruption tests, `go test ./backend/internal/agent/...
   ./backend/internal/task/...`, accepted v1 compatibility counting tests; audit
-  benchmark generators, fixtures, tests, and samples under stale-format rule 8;
-  run `make lint-fix`, replay the v2 benchmark, then run the standard validation
-  footer
-- **Review:** a fresh performance/authority reviewer receives the integrated
-  target and exact pre-integration base from fresh ephemeral state, exact call
+  benchmark generators, fixtures, tests, and samples under the format migration
+  audit; run `make lint-fix` and replay the v2 benchmark
+- **Review:** a performance/authority reviewer receives the integrated target,
+  exact pre-integration base, exact call
   graph, fixture mix, frozen source/bounded-read manifest, hashed 1 GiB warm/cold
   before/after evidence, deterministic pass/byte/callback/reader-extraction-copy/
   unmarshal counts, profile/trace analysis, mismatch/corruption matrix, cross-
@@ -1388,11 +1272,8 @@ performance invariant.
 - **Depends on:** `versioned-log-sink`, `live-relay-read-path`,
   `pure-harness-parsers`, `v2-adoption-performance`
 - **May run with:** none; it crosses all agent backends and task writers
-- **Base state:** accepted dependencies are integrated; apply the global fresh-
-  manifest rule and capture all physical readers/appends, direct writes, and v1
-  trace hashes
-- **VCS authority:** global VCS rule; no golden recording regeneration without
-  approval
+- **Base state:** accepted dependencies are integrated; capture all physical
+  readers/appends, direct writes, and v1 trace hashes
 - **Write scope:** all `Options.LogW`/task-log callers, backend handshakes,
   prompt/compact/SendRaw, session/model-info/context markers, provisioning,
   trailers, `Task.WriteToLog`, and adjacent tests
@@ -1451,8 +1332,8 @@ performance invariant.
   run focused v1 compatibility counting tests, `go test
   ./backend/internal/agent/... ./backend/internal/task/...`, and `python3
   backend/internal/agent/relay/test_relay.py`; hash/clean external results; audit
-  direct `.Write` calls and migrated writers/tests under stale-format rule 8,
-  then run the standard validation footer
+  direct `.Write` calls and migrated writers/tests under the format migration
+  audit
 - **Review:** fresh cross-backend reviewer receives inventory before/after,
   integrated SHA, v1 trace hashes, per-writer exact `t`-only latent byte evidence,
   raw-observation-to-sink call-contract and no-caller-pre-round audit, canonical
@@ -1484,10 +1365,8 @@ performance invariant.
   `agent-direct-write-migration`, `v2-adoption-performance`
 - **May run with:** none
 - **Base state:** accepted dependencies and the tested latent `relay-v2` embed are
-  integrated; apply the global fresh-manifest rule and capture all production
-  physical entry points, v1/v2 fixture statistics, and accepted 1 GiB adoption
-  benchmark/pass baseline
-- **VCS authority:** global VCS rule; unexpected generated delta fails the phase
+  integrated; capture all production physical entry points, v1/v2 fixture
+  statistics, and the accepted 1 GiB adoption benchmark/pass baseline
 - **Write scope:** new-file header version, single relay selection site, task
   creation/reopen/resume/adoption plumbing, producer vocabulary, and guard tests
 - **Data authority:** a new physical file's exact `t:"caic_meta"`, version 2
@@ -1534,9 +1413,8 @@ performance invariant.
   ./backend/internal/server/...`, `python3
   backend/internal/agent/relay/test_relay.py`, and `python3
   backend/internal/agent/relay/test_relay_v2.py`; hash evidence and clean
-  transient external artifacts; run the global stale-format audit over all
-  physical fixtures/examples/writers under stale-format rule 8; run `make check`,
-  then the standard validation footer
+  transient external artifacts; run the format migration audit over all physical
+  fixtures/examples/writers, then run `make check`
 - **Review:** fresh full-diff reviewer receives pre-integration SHA, authority
   contract, producer inventory, exact fixtures/artifact delta, and all command
   results; require `PASS` before integration acceptance
@@ -1561,10 +1439,8 @@ performance invariant.
 - **Depends on:** `v2-producer-cutover`
 - **May run with:** none
 - **Base state:** accepted `v2-producer-cutover` is integrated but unshipped until
-  release authority confirms it; apply the global fresh-manifest rule and capture
-  md, container, caic binary, and controlled fixture identities
-- **VCS authority:** global VCS rule; runtime containers and temporary logs may be
-  created only under the smoke cleanup contract
+  release authority confirms it; capture md, container, caic binary, and
+  controlled fixture identities
 - **Write scope:** real-runtime smoke test/harness and Makefile target only; no
   product implementation changes
 - **Data authority:** smoke cases use inspected physical headers; runtime labels
@@ -1606,8 +1482,8 @@ performance invariant.
   protocol plus focused v1 compatibility tests; otherwise block/escalate rather
   than shrinking the gate. Hash evidence and clean transient external artifacts;
   run `make smoke-wrapped-log`, `make check`, and rerun `make smoke-wrapped-log`;
-  audit captured samples under stale-format rule 8; run the standard validation
-  footer and verify no runtime, temp, generated, staged, untracked, `coverage.out`,
+  audit captured samples under the format migration audit and verify no runtime,
+  temp, generated, staged, untracked, `coverage.out`,
   or repository performance artifact remains
 - **Review:** fresh runtime/reliability reviewer inspects the integrated smoke
   harness, command logs, physical samples showing canonical `t`/`ts`, exact three-
@@ -1635,8 +1511,6 @@ performance invariant.
 
 ## Completion condition
 
-The rollout is complete only after every phase has been integrated in dependency
-order, independently reviewed clean, validated on the integrated target, removed
-from this active plan by the plan-maintenance subagent, and the real-runtime gate
-has passed. Git history and durable tests/contracts are the changelog; completed
-phase prose is deleted rather than accumulated here.
+The rollout is complete after every dependency-ordered phase meets its exit gate
+and the real-runtime gate passes. Git history and durable tests/contracts are the
+changelog; completed phase prose is deleted rather than accumulated here.
