@@ -228,6 +228,9 @@ func TestV2AgentRecord(t *testing.T) {
 		if !ok || parsedMeta.MessageType != "caic_meta" || parsedMeta.Version != 2 {
 			t.Fatalf("meta message = %#v", msgs.Messages[0].Message)
 		}
+		if _, err := parseV2Record(p, []byte(`{"t":"caic_meta","type":"caic_meta","version":2,"prompt":"p","repos":[],"harness":"claude"}`)); err == nil {
+			t.Fatal("v2 meta accepted the V1 type field")
+		}
 		if _, err := parseV2Record(p, []byte(`{"t":"model_info","context_window":1000000}`)); err != nil {
 			t.Fatal(err)
 		}

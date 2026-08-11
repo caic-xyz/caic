@@ -1548,9 +1548,9 @@ func TestLoadPurgedTasks(t *testing.T) {
 
 	t.Run("PROutsideTailWindow", func(t *testing.T) {
 		t.Parallel()
-		// caic_pr early in the file with >64 KiB of messages after it.
-		// The header-only tail scan cannot see caic_pr; loadPurgedTasks
-		// must still restore it on the Task via LoadMessages.
+		// caic_pr is early in the file with >64 KiB of messages after it.
+		// Full parser traversal derives its metadata, while retained task messages
+		// remain bounded to the tail window.
 		logDir := t.TempDir()
 		meta := mustJSON(t, agent.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "big pr task",
@@ -1587,16 +1587,14 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 		for _, e := range entries {
 			snap := e.Task().Snapshot()
-			// caic_pr is outside the 64 KiB tail window; without full
-			// message parse, PR metadata is not recovered.
-			if snap.ForgePR != 0 {
-				t.Errorf("ForgePR = %d, want 0 (prMsg outside tail window)", snap.ForgePR)
+			if snap.ForgePR != 77 {
+				t.Errorf("ForgePR = %d, want 77", snap.ForgePR)
 			}
-			if snap.ForgeOwner != "" {
-				t.Errorf("ForgeOwner = %q, want empty (prMsg outside tail window)", snap.ForgeOwner)
+			if snap.ForgeOwner != "acme" {
+				t.Errorf("ForgeOwner = %q, want acme", snap.ForgeOwner)
 			}
-			if snap.ForgeRepo != "" {
-				t.Errorf("ForgeRepo = %q, want empty (prMsg outside tail window)", snap.ForgeRepo)
+			if snap.ForgeRepo != "widget" {
+				t.Errorf("ForgeRepo = %q, want widget", snap.ForgeRepo)
 			}
 		}
 	})

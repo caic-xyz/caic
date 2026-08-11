@@ -51,12 +51,10 @@ func TestLogStore(t *testing.T) {
 		t.Parallel()
 		replay := &tasktest.FakeEventReplayWriter{}
 		var gotPath string
-		var gotHarness harness.Name
 		store := &LogStore{
 			LogDir: t.TempDir(),
-			EventReplayFactory: func(logPath string, h harness.Name) (EventReplayWriter, error) {
+			EventReplayFactory: func(logPath string) (EventReplayWriter, error) {
 				gotPath = logPath
-				gotHarness = h
 				return replay, nil
 			},
 		}
@@ -79,10 +77,6 @@ func TestLogStore(t *testing.T) {
 		if gotPath == "" || gotPath != tk.LogPath() {
 			t.Fatalf("replay path = %q, task path = %q", gotPath, tk.LogPath())
 		}
-		if gotHarness != harness.Codex {
-			t.Fatalf("replay harness = %q, want %q", gotHarness, harness.Codex)
-		}
-
 		entries := logLines(t, tk.LogPath())
 		if len(entries) != 1 {
 			t.Fatalf("log lines = %d, want 1", len(entries))
@@ -186,6 +180,14 @@ func TestLogStore(t *testing.T) {
 		if err := os.WriteFile(path, []byte(header), 0o600); err != nil {
 			t.Fatal(err)
 		}
+		snapshot, err := loadSemanticLogSnapshot(path, func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tk.SetLogPath(path)
+		tk.SetLogValidationSnapshot(snapshot)
 		w, err := store.Reopen(tk)
 		if err != nil {
 			t.Fatal(err)
@@ -220,12 +222,47 @@ func TestLogStore(t *testing.T) {
 			t.Fatalf("validated inode = %q, want header plus append", gotValidated)
 		}
 	})
+	t.Run("ReopenSnapshotRejectsPathReplacementBeforeReturn", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		tk := &Task{ID: ksid.NewID(), Harness: harness.Codex}
+		path := filepath.Join(dir, taskLogFileName(tk))
+		header := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta",
+			Version:     int(agent.LogVersionV1),
+			Prompt:      "test",
+			Harness:     harness.Codex,
+		}) + "\n"
+		if err := os.WriteFile(path, []byte(header), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		snapshot, err := loadSemanticLogSnapshot(path, func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		appendFile, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND, 0o600) //nolint:gosec // path is test-controlled.
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = appendFile.Close() })
+		if err := os.Rename(path, path+".validated"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(header), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := validateRawLogAppendSnapshot(path, appendFile, tk, snapshot); err == nil || !strings.Contains(err.Error(), "replaced") {
+			t.Fatalf("snapshot append validation error = %v, want path replacement", err)
+		}
+	})
 	t.Run("OpenSurfacesReplayFactoryError", func(t *testing.T) {
 		t.Parallel()
 		wantErr := errors.New("replay unavailable")
 		store := &LogStore{
 			LogDir: t.TempDir(),
-			EventReplayFactory: func(string, harness.Name) (EventReplayWriter, error) {
+			EventReplayFactory: func(string) (EventReplayWriter, error) {
 				return nil, wantErr
 			},
 		}

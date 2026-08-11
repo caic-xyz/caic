@@ -5,9 +5,12 @@ package task
 import (
 	"bufio"
 	"bytes"
+	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"iter"
 	"log/slog"
@@ -23,22 +26,20 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
+	"github.com/caic-xyz/caic/backend/internal/logproof"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
 // errNotLogFile is returned when a file doesn't contain a valid caic_meta header.
 var errNotLogFile = errors.New("not a caic log file")
 
-// v1TypeEnvelope extracts the legacy v1 control type used by tail metadata scans.
+// v1TypeEnvelope extracts the legacy v1 native-message type used by inventory parsing.
 type v1TypeEnvelope struct {
 	Type string `json:"type"`
 }
 
 // metaKnown is the set of JSON field names recognised by agent.MetaMessage.
 var metaKnown = jsonutil.KnownFields(agent.MetaMessage{})
-
-// resultKnown is the set of JSON field names recognised by agent.MetaResultMessage.
-var resultKnown = jsonutil.KnownFields(agent.MetaResultMessage{})
 
 type logAuthority struct {
 	Version agent.LogVersion
@@ -63,6 +64,13 @@ type ValidatedLogSnapshot struct {
 	EOFValidated bool
 	// RawHeader is an immutable string containing the exact first header bytes.
 	RawHeader string
+	// ContentDigest binds the complete decompressed byte stream observed at EOF.
+	// PrefixDigest is the hash through an earlier retained stream boundary.
+	ContentSize        int64
+	ContentDigest      [sha256.Size]byte
+	ContentDigestValid bool
+	PrefixSize         int64
+	PrefixDigest       [sha256.Size]byte
 	// Messages contains the semantic records parsed during this scan. The slice
 	// is immutable by convention and is populated only by a semantic scan.
 	Messages []agent.ParsedMessage
@@ -74,10 +82,6 @@ type ValidatedLogSnapshot struct {
 type semanticRecord struct {
 	end     int
 	control bool
-}
-
-type tailLogRecord struct {
-	line []byte
 }
 
 type physicalLogReader struct {
@@ -112,21 +116,14 @@ func newValidatedLogSnapshot(path string, file *os.File, info os.FileInfo, autho
 	}, nil
 }
 
-// CacheProof is the derived identity and raw header authority used to bind a
-// rebuildable replay sidecar to one physical task log observation.
-type CacheProof struct {
-	Device    uint64
-	Inode     uint64
-	Size      int64
-	ModTimeNs int64
-	Version   agent.LogVersion
-	Harness   harness.Name
-	RawHeader string
-}
+// CacheProof is the derived identity and raw-header authority used to bind a
+// rebuildable replay sidecar to one physical task-log observation.
+type CacheProof = logproof.CacheProof
 
-// CacheProofForLog validates the raw first header on the same physical file
-// observation whose identity is returned. It is deliberately task-owned so
-// caches cannot select a parser or invent authority from their own metadata.
+// CacheProofForLog reads only the raw first header and physical identity from
+// one stable file observation. Complete scans publish ValidatedLogSnapshots;
+// callers that already hold one should use LoadedTask.CacheProofForLog instead
+// of rescanning a raw log on every replay-cache hit or startup sweep.
 func CacheProofForLog(path string) (_ CacheProof, retErr error) {
 	r, err := openPhysicalLogReader(path)
 	if err != nil {
@@ -137,7 +134,14 @@ func CacheProofForLog(path string) (_ CacheProof, retErr error) {
 			retErr = closeErr
 		}
 	}()
-	scanner := newPhysicalLogScanner(r.reader, path)
+	return cacheProofFromReader(path, r)
+}
+
+// cacheProofFromReader is the bounded header/stat core of CacheProofForLog.
+// It is kept reader-owned so pass-bound tests exercise the production proof
+// without changing task-log filesystem authority.
+func cacheProofFromReader(path string, r *physicalLogReader) (CacheProof, error) {
+	scanner := newPhysicalLogScannerWithBuffer(r.reader, path, 64<<10)
 	if _, err := scanner.ReadHeader(&jsonutil.FieldWarner{}); err != nil {
 		return CacheProof{}, err
 	}
@@ -152,26 +156,73 @@ func CacheProofForLog(path string) (_ CacheProof, retErr error) {
 	return CacheProof{Device: identity.Device, Inode: identity.Inode, Size: info.Size(), ModTimeNs: info.ModTime().UnixNano(), Version: scanner.authority.Version, Harness: scanner.authority.Harness, RawHeader: string(scanner.headerRaw)}, nil
 }
 
-func validatedSnapshotMatchesFile(snapshot *ValidatedLogSnapshot, path string) bool {
+func newValidatedLogSnapshotFromScanner(path string, file *os.File, info os.FileInfo, scanner *physicalLogScanner) (*ValidatedLogSnapshot, error) {
+	snapshot, err := newValidatedLogSnapshot(path, file, info, scanner.authority, scanner.headerRaw, scanner.EOFValidated())
+	if err != nil {
+		return nil, err
+	}
+	scanner.setSnapshotContentProof(snapshot)
+	return snapshot, nil
+}
+
+func cacheProofFromValidatedSnapshot(snapshot *ValidatedLogSnapshot, path string) (CacheProof, bool) {
+	proof, ok := cacheProofFromSnapshotObservation(snapshot, path)
+	return proof, ok && proof == snapshot.cacheProof()
+}
+
+// cacheProofForAppendFromValidatedSnapshot accepts only the same physical log
+// at the snapshot observation or append growth with unchanged header authority.
+// A bounded proof must never fall back to a different retained authority.
+func cacheProofForAppendFromValidatedSnapshot(snapshot *ValidatedLogSnapshot, path string) (CacheProof, bool) {
+	proof, ok := cacheProofFromSnapshotObservation(snapshot, path)
+	return proof, ok && snapshot.allowsAppendProof(proof)
+}
+
+func cacheProofFromSnapshotObservation(snapshot *ValidatedLogSnapshot, path string) (CacheProof, bool) {
 	if snapshot == nil || !snapshot.EOFValidated || snapshot.Path != filepath.Clean(path) {
-		return false
+		return CacheProof{}, false
 	}
-	file, err := os.Open(filepath.Clean(path))
+	// A snapshot proves a prior EOF scan, not the current raw header. Re-read
+	// and strictly decode that header from the same open observation as identity
+	// validation before any cache proof can reuse the snapshot's authority.
+	r, err := openPhysicalLogReader(path)
 	if err != nil {
-		return false
+		return CacheProof{}, false
 	}
-	defer func() { _ = file.Close() }()
-	info, err := file.Stat()
+	defer func() { _ = r.Close() }()
+	proof, err := cacheProofFromReader(path, r)
 	if err != nil {
+		return CacheProof{}, false
+	}
+	return proof, true
+}
+
+func (snapshot *ValidatedLogSnapshot) cacheProof() CacheProof {
+	return CacheProof{
+		Device:    snapshot.Device,
+		Inode:     snapshot.Inode,
+		Size:      snapshot.Size,
+		ModTimeNs: snapshot.ModTimeNs,
+		Version:   snapshot.Authority.Version,
+		Harness:   snapshot.Authority.Harness,
+		RawHeader: snapshot.RawHeader,
+	}
+}
+
+func (snapshot *ValidatedLogSnapshot) allowsAppendProof(current CacheProof) bool {
+	initial := snapshot.cacheProof()
+	if initial.Device != current.Device || initial.Inode != current.Inode ||
+		initial.Version != current.Version || initial.Harness != current.Harness ||
+		initial.RawHeader != current.RawHeader || current.Size < initial.Size {
 		return false
 	}
-	identity := physicalFileIdentityFromFile(file, info)
-	if !identity.Valid || snapshot.Device != identity.Device || snapshot.Inode != identity.Inode ||
-		snapshot.Size != info.Size() || snapshot.ModTimeNs != info.ModTime().UnixNano() {
-		return false
-	}
-	_, err = verifyPhysicalLog(path, file, info)
-	return err == nil
+	return (current.Size > initial.Size && current.ModTimeNs >= initial.ModTimeNs) ||
+		(current.Size == initial.Size && current.ModTimeNs == initial.ModTimeNs)
+}
+
+func validatedSnapshotMatchesFile(snapshot *ValidatedLogSnapshot, path string) bool {
+	proof, ok := cacheProofFromValidatedSnapshot(snapshot, path)
+	return ok && proof == snapshot.cacheProof()
 }
 
 // validationProof returns a copy safe to retain on a LoadedTask.
@@ -187,39 +238,63 @@ func (snapshot *ValidatedLogSnapshot) validationProof() *ValidatedLogSnapshot {
 	return &proof
 }
 
-func rebindSnapshotToFile(path string, source *ValidatedLogSnapshot) (_ *ValidatedLogSnapshot, retErr error) {
-	file, err := os.Open(filepath.Clean(path))
+// rebindCompressedValidatedSnapshotAsCompressed retains a compressed-log
+// snapshot after one decompressor pass reached EOF and the same descriptor
+// still names path. It explicitly treats temporary paths as zstd because their
+// names intentionally do not use the task-log extension.
+func rebindCompressedValidatedSnapshotAsCompressed(path string, source *ValidatedLogSnapshot) (_ *ValidatedLogSnapshot, retErr error) {
+	if source == nil || !source.EOFValidated {
+		return nil, fmt.Errorf("compressed task log has no validated source snapshot: %s", path)
+	}
+	r, err := openPhysicalLogReaderWithCompression(path, true)
 	if err != nil {
 		return nil, err
 	}
 	defer func() {
-		if closeErr := file.Close(); retErr == nil {
+		if closeErr := r.Close(); retErr == nil {
 			retErr = closeErr
 		}
 	}()
-	info, err := file.Stat()
+	scanner := newPhysicalLogScanner(r.reader, path)
+	if _, err := scanner.ReadHeader(&jsonutil.FieldWarner{}); err != nil {
+		return nil, err
+	}
+	for scanner.Scan() {
+	}
+	if err := scanner.Err(); err != nil || !scanner.EOFValidated() {
+		if err == nil {
+			err = errors.New("compressed task log did not reach decompressor EOF")
+		}
+		return nil, err
+	}
+	stableInfo, err := verifyPhysicalLog(path, r.file, r.info)
 	if err != nil {
 		return nil, err
 	}
-	identity := physicalFileIdentityFromFile(file, info)
-	if !identity.Valid {
-		return nil, fmt.Errorf("task log has no stable physical identity: %s", path)
+	if scanner.authority != source.Authority || string(scanner.headerRaw) != source.RawHeader {
+		return nil, errors.New("compressed task log authority differs from source snapshot")
 	}
-	return &ValidatedLogSnapshot{
-		Path:      filepath.Clean(path),
-		Device:    identity.Device,
-		Inode:     identity.Inode,
-		Size:      info.Size(),
-		ModTimeNs: info.ModTime().UnixNano(),
-		Authority: source.Authority,
-		RawHeader: source.RawHeader,
-		Messages:  source.Messages,
-		records:   source.records,
-	}, nil
+	snapshot, err := newValidatedLogSnapshotFromScanner(path, r.file, stableInfo, scanner)
+	if err != nil {
+		return nil, err
+	}
+	snapshot.Messages = source.Messages
+	snapshot.records = source.records
+	return snapshot, nil
 }
 
 func openPhysicalLogReader(path string) (*physicalLogReader, error) {
-	r, err := openLogReader(path)
+	return openPhysicalLogReaderWithCompression(path, isLogCompressed(path))
+}
+
+func openPhysicalLogReaderWithCompression(path string, compressed bool) (*physicalLogReader, error) {
+	var r io.ReadCloser
+	var err error
+	if compressed {
+		r, err = openCompressedLogReader(path)
+	} else {
+		r, err = openLogReader(path)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -261,8 +336,52 @@ func verifyPhysicalLog(path string, f *os.File, expected os.FileInfo) (os.FileIn
 	return current, nil
 }
 
+type contentHashReader struct {
+	reader      io.Reader
+	hash        hash.Hash
+	prefixHash  hash.Hash
+	prefixLimit int64
+	size        int64
+}
+
+func newContentHashReader(reader io.Reader, prefixLimit int64) *contentHashReader {
+	return &contentHashReader{reader: reader, hash: sha256.New(), prefixHash: sha256.New(), prefixLimit: prefixLimit}
+}
+
+func (r *contentHashReader) Read(data []byte) (int, error) {
+	n, err := r.reader.Read(data)
+	if n > 0 {
+		_, _ = r.hash.Write(data[:n])
+		prefixBytes := n
+		if r.prefixLimit >= 0 {
+			remaining := r.prefixLimit - r.size
+			if remaining <= 0 {
+				prefixBytes = 0
+			} else if int64(prefixBytes) > remaining {
+				prefixBytes = int(remaining)
+			}
+		}
+		if prefixBytes > 0 {
+			_, _ = r.prefixHash.Write(data[:prefixBytes])
+		}
+		r.size += int64(n)
+	}
+	return n, err
+}
+
+func (r *contentHashReader) proof() (contentSize int64, contentDigest [sha256.Size]byte, prefixSize int64, prefixDigest [sha256.Size]byte) {
+	copy(contentDigest[:], r.hash.Sum(nil))
+	copy(prefixDigest[:], r.prefixHash.Sum(nil))
+	prefixSize = r.size
+	if r.prefixLimit >= 0 && prefixSize > r.prefixLimit {
+		prefixSize = r.prefixLimit
+	}
+	return r.size, contentDigest, prefixSize, prefixDigest
+}
+
 type physicalLogScanner struct {
 	scanner   *bufio.Scanner
+	content   *contentHashReader
 	src       string
 	authority logAuthority
 	line      []byte
@@ -274,9 +393,22 @@ type physicalLogScanner struct {
 }
 
 func newPhysicalLogScanner(r io.Reader, src string) *physicalLogScanner {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
-	return &physicalLogScanner{scanner: scanner, src: src}
+	return newPhysicalLogScannerWithPrefix(r, src, -1)
+}
+
+func newPhysicalLogScannerWithPrefix(r io.Reader, src string, prefixLimit int64) *physicalLogScanner {
+	return newPhysicalLogScannerWithBufferAndPrefix(r, src, 1<<20, prefixLimit)
+}
+
+func newPhysicalLogScannerWithBuffer(r io.Reader, src string, initialBuffer int) *physicalLogScanner {
+	return newPhysicalLogScannerWithBufferAndPrefix(r, src, initialBuffer, -1)
+}
+
+func newPhysicalLogScannerWithBufferAndPrefix(r io.Reader, src string, initialBuffer int, prefixLimit int64) *physicalLogScanner {
+	content := newContentHashReader(r, prefixLimit)
+	scanner := bufio.NewScanner(content)
+	scanner.Buffer(make([]byte, 0, initialBuffer), 32<<20)
+	return &physicalLogScanner{scanner: scanner, content: content, src: src}
 }
 
 func (s *physicalLogScanner) ReadHeader(fw *jsonutil.FieldWarner) (agent.MetaMessage, error) {
@@ -373,6 +505,14 @@ func (s *physicalLogScanner) Err() error {
 // a scanner or decompressor error.
 func (s *physicalLogScanner) EOFValidated() bool {
 	return s.eof && s.Err() == nil
+}
+
+func (s *physicalLogScanner) setSnapshotContentProof(snapshot *ValidatedLogSnapshot) {
+	if snapshot == nil || !s.EOFValidated() {
+		return
+	}
+	snapshot.ContentSize, snapshot.ContentDigest, snapshot.PrefixSize, snapshot.PrefixDigest = s.content.proof()
+	snapshot.ContentDigestValid = true
 }
 
 var errNotMetaRecord = errors.New("not a caic_meta record")
@@ -971,8 +1111,6 @@ type tailResult struct {
 }
 
 type logTailScan struct {
-	fw *jsonutil.FieldWarner
-
 	lastResultCostUSD  float64
 	lastResultDuration time.Duration
 	lastResultNumTurns int
@@ -1005,32 +1143,6 @@ func applyMetaResult(lt *LoadedTask, mr *agent.MetaResultMessage) {
 	if mr.Error != "" {
 		lt.Result.Err = errors.New(mr.Error)
 	}
-}
-
-// noteDiffStatLine updates lt from a caic_diff_stat record: it marks DiffCreated
-// when the diff is non-empty (sticky, so a later empty diff never clears it) and
-// advances LastStateUpdateAt from the relay timestamp.
-func noteDiffStatLine(lt *LoadedTask, line []byte) {
-	var ds agent.DiffStatMessage
-	if json.Unmarshal(line, &ds) != nil {
-		return
-	}
-	if len(ds.DiffStat) > 0 {
-		lt.DiffCreated = true
-	}
-	if ds.Ts > 0 {
-		if t := tsToTime(ds.Ts); t.After(lt.LastStateUpdateAt) {
-			lt.LastStateUpdateAt = t
-		}
-	}
-}
-
-// TODO: Trim legacyCaicInit after 2026-08 once legacy caic_init logs are old enough to ignore.
-// legacyCaicInit is the OpenCode pre-caic_session session metadata record.
-type legacyCaicInit struct {
-	SessionID string `json:"session_id"`
-	Model     string `json:"model"`
-	Version   string `json:"version"`
 }
 
 // LoadedTask holds the data reconstructed from a single task log file.
@@ -1069,8 +1181,9 @@ type LoadedTask struct {
 	Msgs              []agent.Message
 	Result            *Result
 
-	path     string               // Absolute path for lazy message loading via LoadMessages.
-	resolver NativeParserResolver // Fresh parser factory supplied by the task owner.
+	path           string               // Absolute path for lazy message loading via LoadMessages.
+	resolver       NativeParserResolver // Fresh parser factory supplied by the task owner.
+	messagesLoaded bool                 // A completed semantic scan may validly produce no messages.
 
 	snapshotMu sync.Mutex
 	snapshot   *ValidatedLogSnapshot // Last completed physical validation.
@@ -1098,10 +1211,31 @@ func (lt *LoadedTask) ValidatedSnapshot() *ValidatedLogSnapshot {
 	return lt.snapshot
 }
 
+// CacheProofForLog returns a bounded proof only when the requested log remains
+// the retained physical file with immutable authority and has grown by appends.
+// If no matching snapshot is retained, it uses the bounded header/stat fallback.
+// The raw header remains task-owned authority in both paths.
+func (lt *LoadedTask) CacheProofForLog(path string) (CacheProof, error) {
+	if lt != nil {
+		snapshot := lt.ValidatedSnapshot()
+		if snapshot != nil && snapshot.Path == filepath.Clean(path) {
+			if proof, ok := cacheProofForAppendFromValidatedSnapshot(snapshot, path); ok {
+				return proof, nil
+			}
+			return CacheProof{}, fmt.Errorf("task log no longer matches retained validated snapshot: %s", path)
+		}
+	}
+	return CacheProofForLog(path)
+}
+
 // loadSemanticLogSnapshot validates and semantically parses one task log in a
 // single physical pass. It resolves its native parser only after validating the
 // first header from that same pass.
-func loadSemanticLogSnapshot(path string, resolver NativeParserResolver) (_ *ValidatedLogSnapshot, retErr error) {
+func loadSemanticLogSnapshot(path string, resolver NativeParserResolver) (*ValidatedLogSnapshot, error) {
+	return loadSemanticLogSnapshotWithPrefix(path, resolver, -1)
+}
+
+func loadSemanticLogSnapshotWithPrefix(path string, resolver NativeParserResolver, prefixLimit int64) (_ *ValidatedLogSnapshot, retErr error) {
 	if resolver == nil {
 		return nil, errors.New("native parser resolver is nil")
 	}
@@ -1109,17 +1243,21 @@ func loadSemanticLogSnapshot(path string, resolver NativeParserResolver) (_ *Val
 	if err != nil {
 		return nil, err
 	}
-	return loadSemanticLogSnapshotFromReader(path, r, resolver)
+	return loadSemanticLogSnapshotFromReaderWithPrefix(path, r, resolver, prefixLimit)
 }
 
-func loadSemanticLogSnapshotFromReader(path string, r *physicalLogReader, resolver NativeParserResolver) (_ *ValidatedLogSnapshot, retErr error) {
+func loadSemanticLogSnapshotFromReader(path string, r *physicalLogReader, resolver NativeParserResolver) (*ValidatedLogSnapshot, error) {
+	return loadSemanticLogSnapshotFromReaderWithPrefix(path, r, resolver, -1)
+}
+
+func loadSemanticLogSnapshotFromReaderWithPrefix(path string, r *physicalLogReader, resolver NativeParserResolver, prefixLimit int64) (_ *ValidatedLogSnapshot, retErr error) {
 	defer func() {
 		if closeErr := r.Close(); retErr == nil {
 			retErr = closeErr
 		}
 	}()
 
-	scanner := newPhysicalLogScanner(r.reader, path)
+	scanner := newPhysicalLogScannerWithPrefix(r.reader, path, prefixLimit)
 	if _, err := scanner.ReadHeader(&jsonutil.FieldWarner{}); err != nil {
 		return nil, err
 	}
@@ -1164,7 +1302,7 @@ func loadSemanticLogSnapshotFromReader(path string, r *physicalLogReader, resolv
 	if err != nil {
 		return nil, err
 	}
-	snapshot, err := newValidatedLogSnapshot(path, r.file, stableInfo, scanner.authority, scanner.headerRaw, scanner.EOFValidated())
+	snapshot, err := newValidatedLogSnapshotFromScanner(path, r.file, stableInfo, scanner)
 	if err != nil {
 		return nil, err
 	}
@@ -1174,7 +1312,7 @@ func loadSemanticLogSnapshotFromReader(path string, r *physicalLogReader, resolv
 }
 
 func loadSemanticSnapshot(lt *LoadedTask, resolver NativeParserResolver) (*LoadedTask, *ValidatedLogSnapshot, error) {
-	snapshot, err := loadSemanticLogSnapshot(lt.path, resolver)
+	snapshot, err := loadSemanticLogSnapshotWithPrefix(lt.path, resolver, snapshotPrefixLimit(lt.ValidatedSnapshot()))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1182,18 +1320,30 @@ func loadSemanticSnapshot(lt *LoadedTask, resolver NativeParserResolver) (*Loade
 	return loaded, snapshot.validationProof(), nil
 }
 
-func loadSemanticSessionMetadata(path string, resolver NativeParserResolver) (_ *LoadedTask, _ *ValidatedLogSnapshot, retErr error) {
+func loadSemanticSessionMetadata(path string, resolver NativeParserResolver) (*LoadedTask, *ValidatedLogSnapshot, error) {
+	return loadSemanticSessionMetadataWithPrefix(path, resolver, -1)
+}
+
+func loadSemanticSessionMetadataWithPrefix(path string, resolver NativeParserResolver, prefixLimit int64) (_ *LoadedTask, _ *ValidatedLogSnapshot, retErr error) {
 	r, err := openPhysicalLogReader(path)
 	if err != nil {
 		return nil, nil, err
 	}
+	return loadSemanticSessionMetadataFromReaderWithPrefix(path, r, resolver, prefixLimit)
+}
+
+func loadSemanticSessionMetadataFromReader(path string, r *physicalLogReader, resolver NativeParserResolver) (*LoadedTask, *ValidatedLogSnapshot, error) {
+	return loadSemanticSessionMetadataFromReaderWithPrefix(path, r, resolver, -1)
+}
+
+func loadSemanticSessionMetadataFromReaderWithPrefix(path string, r *physicalLogReader, resolver NativeParserResolver, prefixLimit int64) (_ *LoadedTask, _ *ValidatedLogSnapshot, retErr error) {
 	defer func() {
 		if closeErr := r.Close(); retErr == nil {
 			retErr = closeErr
 		}
 	}()
 
-	scanner := newPhysicalLogScanner(r.reader, path)
+	scanner := newPhysicalLogScannerWithPrefix(r.reader, path, prefixLimit)
 	if _, err := scanner.ReadHeader(&jsonutil.FieldWarner{}); err != nil {
 		return nil, nil, err
 	}
@@ -1206,11 +1356,12 @@ func loadSemanticSessionMetadata(path string, resolver NativeParserResolver) (_ 
 		return nil, nil, fmt.Errorf("construct log parser: %w", err)
 	}
 	loaded := &LoadedTask{LogVersion: scanner.authority.Version}
-	found := false
+	bootstrap, err := parser.ParseRecord(scanner.headerRaw)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse task log bootstrap %s: %w", path, err)
+	}
+	applyParsedSessionMetadata(loaded, bootstrap.Messages)
 	for scanner.Scan() {
-		if found {
-			continue
-		}
 		record, err := parser.ParseRecord(scanner.Bytes())
 		if err != nil {
 			if record.Control || scanner.authority.Version == agent.LogVersionV2 {
@@ -1219,12 +1370,9 @@ func loadSemanticSessionMetadata(path string, resolver NativeParserResolver) (_ 
 			slog.Warn("failed to parse message", "err", err, "path", path)
 			continue
 		}
-		for _, message := range record.Messages {
-			if init, ok := message.Message.(*agent.InitMessage); ok {
-				applySessionMetadataMessages(loaded, []agent.Message{init})
-			}
-		}
-		found = loaded.SessionID != "" && loaded.AgentVersion != ""
+		// Keep parsing every physical record even once the small session result is
+		// complete: parser state and strict v2 validation are scan invariants.
+		applyParsedSessionMetadata(loaded, record.Messages)
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, nil, err
@@ -1233,7 +1381,7 @@ func loadSemanticSessionMetadata(path string, resolver NativeParserResolver) (_ 
 	if err != nil {
 		return nil, nil, err
 	}
-	snapshot, err := newValidatedLogSnapshot(path, r.file, stableInfo, scanner.authority, scanner.headerRaw, scanner.EOFValidated())
+	snapshot, err := newValidatedLogSnapshotFromScanner(path, r.file, stableInfo, scanner)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1280,15 +1428,53 @@ func semanticLoadedTask(snapshot *ValidatedLogSnapshot) *LoadedTask {
 }
 
 func semanticLoadedMessages(loaded *LoadedTask, control bool, messages []agent.ParsedMessage) {
-	if !control {
-		for _, parsed := range messages {
-			if init, ok := parsed.Message.(*agent.InitMessage); ok {
-				applySessionMetadataMessages(loaded, []agent.Message{init})
-			}
-			loaded.Msgs = append(loaded.Msgs, parsed.Message)
+	applyInventoryMetadata(loaded, nil, messages)
+	for _, parsed := range messages {
+		if control && isInventoryMetadataMessage(parsed.Message) {
+			continue
 		}
-		return
+		loaded.Msgs = append(loaded.Msgs, parsed.Message)
 	}
+}
+
+// inventoryResultMetadata is the V1-native result subset needed to backfill an
+// omitted caic_result trailer. It is only emitted by the inventory parser.
+type inventoryResultMetadata struct {
+	tailResult
+}
+
+// Type implements agent.Message.
+func (*inventoryResultMetadata) Type() string { return "inventory_result" }
+
+// parseInventoryNativeMetadata strictly validates native JSON while preserving
+// the V1 inventory scan's generic init/result tail backfill without assigning
+// any harness-specific conversation semantics.
+func parseInventoryNativeMetadata(raw []byte) ([]agent.Message, error) {
+	if !json.Valid(raw) {
+		return nil, errors.New("invalid native JSON value")
+	}
+	var env v1TypeEnvelope
+	if json.Unmarshal(raw, &env) == nil {
+		switch env.Type {
+		case "system":
+			var init tailInit
+			if json.Unmarshal(raw, &init) == nil && init.Subtype == "init" {
+				return []agent.Message{&agent.InitMessage{Model: init.Model, Version: init.Version}}, nil
+			}
+		case "result":
+			var result tailResult
+			if json.Unmarshal(raw, &result) == nil {
+				return []agent.Message{&inventoryResultMetadata{tailResult: result}}, nil
+			}
+		}
+	}
+	return nil, nil
+}
+
+// applyInventoryMetadata updates only task projections available during an
+// inventory scan. It deliberately never appends conversation or control
+// messages, keeping Msgs nil until a later semantic load.
+func applyInventoryMetadata(loaded *LoadedTask, tail *logTailScan, messages []agent.ParsedMessage) {
 	for _, parsed := range messages {
 		switch msg := parsed.Message.(type) {
 		case *agent.InitMessage:
@@ -1310,15 +1496,31 @@ func semanticLoadedMessages(loaded *LoadedTask, control bool, messages []agent.P
 					loaded.LastStateUpdateAt = t
 				}
 			}
-		case *agent.MetaMessage:
-			continue
-		default:
-			loaded.Msgs = append(loaded.Msgs, msg)
+		case *inventoryResultMetadata:
+			if tail != nil {
+				tail.lastResultCostUSD = msg.TotalCostUSD
+				tail.lastResultDuration = time.Duration(msg.DurationMs) * time.Millisecond
+				tail.lastResultNumTurns = msg.NumTurns
+				tail.lastResultUsage = msg.Usage
+			}
 		}
 	}
 }
 
-func loadSemanticTailSnapshot(path string, resolver NativeParserResolver, tailBytes int64) (_ *ValidatedLogSnapshot, retErr error) {
+func isInventoryMetadataMessage(msg agent.Message) bool {
+	switch msg.(type) {
+	case *agent.InitMessage, *agent.MetaMessage, *agent.MetaPRMessage, *agent.MetaResultMessage, *agent.DiffStatMessage, *inventoryResultMetadata:
+		return true
+	default:
+		return false
+	}
+}
+
+func loadSemanticTailSnapshot(path string, resolver NativeParserResolver, tailBytes int64) (*ValidatedLogSnapshot, error) {
+	return loadSemanticTailSnapshotWithPrefix(path, resolver, tailBytes, -1)
+}
+
+func loadSemanticTailSnapshotWithPrefix(path string, resolver NativeParserResolver, tailBytes, prefixLimit int64) (_ *ValidatedLogSnapshot, retErr error) {
 	if resolver == nil {
 		return nil, errors.New("native parser resolver is nil")
 	}
@@ -1332,7 +1534,7 @@ func loadSemanticTailSnapshot(path string, resolver NativeParserResolver, tailBy
 		}
 	}()
 
-	scanner := newPhysicalLogScanner(r.reader, path)
+	scanner := newPhysicalLogScannerWithPrefix(r.reader, path, prefixLimit)
 	if _, err := scanner.ReadHeader(&jsonutil.FieldWarner{}); err != nil {
 		return nil, err
 	}
@@ -1348,86 +1550,60 @@ func loadSemanticTailSnapshot(path string, resolver NativeParserResolver, tailBy
 		return nil, fmt.Errorf("parse task log bootstrap %s: %w", path, err)
 	}
 
-	messages := make([]agent.ParsedMessage, 0)
-	semantic := make([]semanticRecord, 0)
-	appendRecord := func(line []byte) error {
-		record, err := parser.ParseRecord(line)
-		if err != nil {
-			if record.Control || scanner.authority.Version == agent.LogVersionV2 {
-				return err
-			}
-			slog.Warn("failed to parse message", "err", err, "path", path)
-			return nil
-		}
-		if len(record.Messages) == 0 {
-			return nil
-		}
-		messages = append(messages, record.Messages...)
-		semantic = append(semantic, semanticRecord{end: len(messages), control: record.Control})
-		return nil
+	type retainedRecord struct {
+		bytes   int64
+		parsed  []agent.ParsedMessage
+		control bool
 	}
-
-	var records []tailLogRecord
-	if isLogCompressed(path) {
-		var total int64
-		for scanner.Scan() {
-			line := bytes.Clone(scanner.Bytes())
-			records = append(records, tailLogRecord{line: line})
-			total += int64(len(line) + 1)
-			for total > tailBytes && len(records) > 1 {
-				total -= int64(len(records[0].line) + 1)
-				records = records[1:]
+	var retained []retainedRecord
+	var retainedBytes int64
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		record, parseErr := parser.ParseRecord(line)
+		if parseErr != nil {
+			if record.Control || scanner.authority.Version == agent.LogVersionV2 {
+				return nil, fmt.Errorf("parse task log %s: %w", path, parseErr)
 			}
+			slog.Warn("failed to parse message", "err", parseErr, "path", path)
 		}
-	} else {
-		for scanner.Scan() {
+		// The parser always sees every physical record. Keep only the bounded
+		// tail's semantic output; older parsed records are immediately discarded.
+		item := retainedRecord{bytes: int64(len(line) + 1), control: record.Control}
+		if parseErr == nil {
+			item.parsed = record.Messages
 		}
-		offset := max(int64(0), r.info.Size()-tailBytes)
-		if _, err := r.file.Seek(offset, io.SeekStart); err != nil {
-			return nil, fmt.Errorf("seek %s to %d: %w", path, offset, err)
-		}
-		tailScanner := bufio.NewScanner(r.file)
-		tailScanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
-		skipFirst := offset > 0
-		for tailScanner.Scan() {
-			line := tailScanner.Bytes()
-			if skipFirst {
-				skipFirst = false
-				continue
-			}
-			if len(line) == 0 {
-				continue
-			}
-			if err := appendRecord(line); err != nil {
-				return nil, fmt.Errorf("parse task log %s: %w", path, err)
-			}
-		}
-		if err := tailScanner.Err(); err != nil {
-			return nil, err
+		retained = append(retained, item)
+		retainedBytes += item.bytes
+		for retainedBytes > tailBytes && len(retained) > 1 {
+			retainedBytes -= retained[0].bytes
+			retained = retained[1:]
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
-	for _, record := range records {
-		if err := appendRecord(record.line); err != nil {
-			return nil, fmt.Errorf("parse task log %s: %w", path, err)
-		}
-	}
 	stableInfo, err := verifyPhysicalLog(path, r.file, r.info)
 	if err != nil {
 		return nil, err
 	}
-	snapshot, err := newValidatedLogSnapshot(path, r.file, stableInfo, scanner.authority, scanner.headerRaw, scanner.EOFValidated())
+	snapshot, err := newValidatedLogSnapshotFromScanner(path, r.file, stableInfo, scanner)
 	if err != nil {
 		return nil, err
 	}
-	snapshot.Messages = messages
-	snapshot.records = semantic
+	for _, item := range retained {
+		if len(item.parsed) == 0 {
+			continue
+		}
+		snapshot.Messages = append(snapshot.Messages, item.parsed...)
+		snapshot.records = append(snapshot.records, semanticRecord{end: len(snapshot.Messages), control: item.control})
+	}
 	return snapshot, nil
 }
 
-func applySemanticSnapshot(lt, loaded *LoadedTask, snapshot *ValidatedLogSnapshot, messages bool) {
+func applySemanticSnapshot(lt, loaded *LoadedTask, snapshot *ValidatedLogSnapshot, messages bool) error {
+	if err := lt.validateSemanticSnapshotAuthority(snapshot); err != nil {
+		return err
+	}
 	lt.setValidatedSnapshot(snapshot)
 	lt.mergeSessionMetadata(loaded)
 	if loaded.ForgePR > 0 {
@@ -1440,21 +1616,22 @@ func applySemanticSnapshot(lt, loaded *LoadedTask, snapshot *ValidatedLogSnapsho
 	}
 	if messages {
 		lt.Msgs = loaded.Msgs
+		lt.messagesLoaded = true
 	}
+	return nil
 }
 
 // LoadMessagesWithResolver lazily loads full conversation messages with a
 // fresh parser derived from the log's validated header.
 func (lt *LoadedTask) LoadMessagesWithResolver(resolver NativeParserResolver) error {
-	if lt.Msgs != nil || lt.path == "" {
+	if lt.messagesLoaded || lt.Msgs != nil || lt.path == "" {
 		return nil
 	}
 	loaded, snapshot, err := loadSemanticSnapshot(lt, resolver)
 	if err != nil {
 		return err
 	}
-	applySemanticSnapshot(lt, loaded, snapshot, true)
-	return nil
+	return applySemanticSnapshot(lt, loaded, snapshot, true)
 }
 
 // LoadSessionMetadataWithResolver loads session metadata with a fresh parser
@@ -1463,8 +1640,11 @@ func (lt *LoadedTask) LoadSessionMetadataWithResolver(resolver NativeParserResol
 	if lt.path == "" || (lt.SessionID != "" && lt.AgentVersion != "") {
 		return nil
 	}
-	loaded, snapshot, err := loadSemanticSessionMetadata(lt.path, resolver)
+	loaded, snapshot, err := loadSemanticSessionMetadataWithPrefix(lt.path, resolver, snapshotPrefixLimit(lt.ValidatedSnapshot()))
 	if err != nil {
+		return err
+	}
+	if err := lt.validateSemanticSnapshotAuthority(snapshot); err != nil {
 		return err
 	}
 	lt.setValidatedSnapshot(snapshot)
@@ -1475,19 +1655,21 @@ func (lt *LoadedTask) LoadSessionMetadataWithResolver(resolver NativeParserResol
 // LoadMessagesTailWithResolver loads task messages with a fresh parser derived
 // from the log's validated header.
 func (lt *LoadedTask) LoadMessagesTailWithResolver(resolver NativeParserResolver) error {
-	if lt.Msgs != nil || lt.path == "" {
+	if lt.messagesLoaded || lt.Msgs != nil || lt.path == "" {
 		return nil
 	}
 	if !isLogCompressed(lt.path) && lt.LogSize <= maxTailLoadBytes {
 		return lt.LoadMessagesWithResolver(resolver)
 	}
 	slog.Info("load: reading tail only", "path", lt.path, "size", lt.LogSize, "tail", maxTailLoadBytes)
-	snapshot, err := loadSemanticTailSnapshot(lt.path, resolver, maxTailLoadBytes)
+	snapshot, err := loadSemanticTailSnapshotWithPrefix(lt.path, resolver, maxTailLoadBytes, snapshotPrefixLimit(lt.ValidatedSnapshot()))
 	if err != nil {
 		return err
 	}
 	loaded := semanticLoadedTask(snapshot)
-	applySemanticSnapshot(lt, loaded, snapshot.validationProof(), true)
+	if err := applySemanticSnapshot(lt, loaded, snapshot.validationProof(), true); err != nil {
+		return err
+	}
 	if loaded.Title != "" {
 		lt.Title = loaded.Title
 	}
@@ -1708,75 +1890,131 @@ func (lt *LoadedTask) LoadMessagesTail() error {
 	return lt.LoadMessagesTailWithResolver(lt.resolver)
 }
 
-// StreamMessages streams parsed task conversation records directly from the
-// log. It resolves a fresh parser only after validating the header and retains
-// producer timestamps until replay conversion.
-func (lt *LoadedTask) StreamMessages() iter.Seq2[agent.ParsedMessage, error] {
-	return func(yield func(agent.ParsedMessage, error) bool) {
-		if lt.path == "" {
-			return
+// ScanMessagesWithContext parses one raw log through EOF and returns the exact
+// proof for that semantic observation. It is the replay regeneration source;
+// cancellation is checked between records and before every delivered message.
+func (lt *LoadedTask) ScanMessagesWithContext(ctx context.Context, consume func(agent.ParsedMessage) error) (_ CacheProof, retErr error) {
+	if lt.path == "" {
+		return CacheProof{}, errors.New("task has no log path")
+	}
+	if lt.resolver == nil {
+		return CacheProof{}, errors.New("no parser resolver set")
+	}
+	r, err := openPhysicalLogReader(lt.path)
+	if err != nil {
+		return CacheProof{}, err
+	}
+	defer func() {
+		if closeErr := r.Close(); retErr == nil {
+			retErr = closeErr
 		}
-		if lt.resolver == nil {
-			yield(agent.ParsedMessage{}, errors.New("no parser resolver set"))
-			return
+	}()
+	scanner := newPhysicalLogScannerWithPrefix(r.reader, lt.path, snapshotPrefixLimit(lt.ValidatedSnapshot()))
+	if _, err := scanner.ReadHeader(&jsonutil.FieldWarner{}); err != nil {
+		return CacheProof{}, err
+	}
+	native, err := lt.resolver(scanner.authority.Harness)
+	if err != nil {
+		return CacheProof{}, err
+	}
+	parser, err := agent.NewLogRecordParser(scanner.authority.Version, native)
+	if err != nil {
+		return CacheProof{}, err
+	}
+	if _, err := parser.ParseRecord(scanner.headerRaw); err != nil {
+		return CacheProof{}, err
+	}
+	for scanner.Scan() {
+		if err := ctx.Err(); err != nil {
+			return CacheProof{}, err
 		}
-		r, err := openPhysicalLogReader(lt.path)
+		record, err := parser.ParseRecord(scanner.Bytes())
 		if err != nil {
-			yield(agent.ParsedMessage{}, err)
-			return
+			if record.Control || scanner.authority.Version == agent.LogVersionV2 {
+				return CacheProof{}, err
+			}
+			slog.Warn("failed to parse message", "err", err, "path", lt.path)
+			continue
 		}
-		defer func() { _ = r.Close() }()
-		scanner := newPhysicalLogScanner(r.reader, lt.path)
-		if _, err := scanner.ReadHeader(&jsonutil.FieldWarner{}); err != nil {
-			yield(agent.ParsedMessage{}, err)
-			return
-		}
-		native, err := lt.resolver(scanner.authority.Harness)
-		if err != nil {
-			yield(agent.ParsedMessage{}, err)
-			return
-		}
-		parser, err := agent.NewLogRecordParser(scanner.authority.Version, native)
-		if err != nil {
-			yield(agent.ParsedMessage{}, err)
-			return
-		}
-		if _, err := parser.ParseRecord(scanner.headerRaw); err != nil {
-			yield(agent.ParsedMessage{}, err)
-			return
-		}
-		for scanner.Scan() {
-			record, err := parser.ParseRecord(scanner.Bytes())
-			if err != nil {
-				if record.Control || scanner.authority.Version == agent.LogVersionV2 {
-					yield(agent.ParsedMessage{}, err)
-					return
-				}
-				slog.Warn("failed to parse message", "err", err, "path", lt.path)
+		for _, message := range record.Messages {
+			if record.Control && !isReplayControlMessage(message.Message) {
 				continue
 			}
-			for _, message := range record.Messages {
-				if record.Control {
-					if _, ok := message.Message.(*agent.LogMessage); !ok {
-						continue
-					}
-				}
+			if err := ctx.Err(); err != nil {
+				return CacheProof{}, err
+			}
+			if err := consume(message); err != nil {
+				return CacheProof{}, err
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return CacheProof{}, err
+	}
+	stableInfo, err := verifyPhysicalLog(lt.path, r.file, r.info)
+	if err != nil || !scanner.EOFValidated() {
+		if err == nil {
+			err = errors.New("task log did not reach EOF")
+		}
+		return CacheProof{}, err
+	}
+	snapshot, err := newValidatedLogSnapshotFromScanner(lt.path, r.file, stableInfo, scanner)
+	if err != nil {
+		return CacheProof{}, err
+	}
+	if err := lt.validateSemanticSnapshotAuthority(snapshot); err != nil {
+		return CacheProof{}, err
+	}
+	lt.setValidatedSnapshot(snapshot)
+	return snapshot.cacheProof(), nil
+}
+
+// StreamMessages streams parsed task conversation records directly from the
+// log. It retains the legacy iterator API while using the EOF-validating scan.
+func (lt *LoadedTask) StreamMessages() iter.Seq2[agent.ParsedMessage, error] {
+	return func(yield func(agent.ParsedMessage, error) bool) {
+		stopped := errors.New("stream consumer stopped")
+		err := func() error {
+			_, err := lt.ScanMessagesWithContext(context.Background(), func(message agent.ParsedMessage) error {
 				if !yield(message, nil) {
-					return
+					return stopped
 				}
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			yield(agent.ParsedMessage{}, err)
-			return
-		}
-		if _, err := verifyPhysicalLog(lt.path, r.file, r.info); err != nil || !scanner.EOFValidated() {
-			if err == nil {
-				err = errors.New("task log did not reach EOF")
-			}
+				return nil
+			})
+			return err
+		}()
+		if err != nil && !errors.Is(err, stopped) {
 			yield(agent.ParsedMessage{}, err)
 		}
 	}
+}
+
+func snapshotPrefixLimit(snapshot *ValidatedLogSnapshot) int64 {
+	if snapshot == nil || !snapshot.ContentDigestValid {
+		return -1
+	}
+	return snapshot.ContentSize
+}
+
+func (lt *LoadedTask) validateSemanticSnapshotAuthority(snapshot *ValidatedLogSnapshot) error {
+	inventory := lt.ValidatedSnapshot()
+	if inventory == nil {
+		return nil
+	}
+	if inventory.Authority != snapshot.Authority || inventory.RawHeader != snapshot.RawHeader {
+		return fmt.Errorf("task log immutable header changed: %s", lt.path)
+	}
+	if !inventory.allowsAppendProof(snapshot.cacheProof()) {
+		return fmt.Errorf("task log changed outside append growth: %s", lt.path)
+	}
+	if !inventory.ContentDigestValid && snapshot.cacheProof() != inventory.cacheProof() {
+		return fmt.Errorf("task log changed without immutable-prefix proof: %s", lt.path)
+	}
+	if inventory.ContentDigestValid && (!snapshot.ContentDigestValid ||
+		snapshot.PrefixSize != inventory.ContentSize || snapshot.PrefixDigest != inventory.ContentDigest) {
+		return fmt.Errorf("task log immutable prefix changed: %s", lt.path)
+	}
+	return nil
 }
 
 func (lt *LoadedTask) headerMatches(cached *LoadedTask) bool {
@@ -1790,6 +2028,7 @@ func (lt *LoadedTask) headerMatches(cached *LoadedTask) bool {
 		lt.RuntimeName == cached.RuntimeName &&
 		lt.StartedAt.Equal(cached.StartedAt) &&
 		lt.ForgeIssue == cached.ForgeIssue &&
+		lt.ForkedFromTaskID == cached.ForkedFromTaskID &&
 		lt.Tailscale == cached.Tailscale &&
 		lt.USB == cached.USB &&
 		lt.Display == cached.Display &&
@@ -1824,44 +2063,26 @@ func (lt *LoadedTask) mergeSessionMetadata(src *LoadedTask) {
 	}
 }
 
-func applySessionMetadataLine(lt *LoadedTask, typ string, line []byte) bool {
-	switch typ {
-	case "caic_session":
-		var m agent.MetaSessionMessage
-		if json.Unmarshal(line, &m) != nil {
-			return false
+func applyParsedSessionMetadata(lt *LoadedTask, msgs []agent.ParsedMessage) {
+	for _, parsed := range msgs {
+		init, ok := parsed.Message.(*agent.InitMessage)
+		if !ok {
+			continue
 		}
-		if m.SessionID != "" {
-			lt.SessionID = m.SessionID
+		if init.SessionID != "" {
+			lt.SessionID = init.SessionID
 		}
-		if m.Model != "" {
-			lt.Model = m.Model
+		if init.Model != "" {
+			lt.Model = init.Model
 		}
-		if m.AgentVersion != "" {
-			lt.AgentVersion = m.AgentVersion
+		if init.Version != "" {
+			lt.AgentVersion = init.Version
 		}
-		return m.SessionID != "" || m.AgentVersion != ""
-	case "caic_init":
-		var m legacyCaicInit
-		if json.Unmarshal(line, &m) != nil {
-			return false
-		}
-		if m.SessionID != "" {
-			lt.SessionID = m.SessionID
-		}
-		if m.Model != "" {
-			lt.Model = m.Model
-		}
-		if m.Version != "" {
-			lt.AgentVersion = m.Version
-		}
-		return m.SessionID != "" || m.Version != ""
-	default:
-		return false
+		return
 	}
 }
 
-func applySessionMetadataMessages(lt *LoadedTask, msgs []agent.Message) bool {
+func applySessionMetadataMessages(lt *LoadedTask, msgs []agent.Message) {
 	for _, msg := range msgs {
 		init, ok := msg.(*agent.InitMessage)
 		if !ok {
@@ -1876,68 +2097,7 @@ func applySessionMetadataMessages(lt *LoadedTask, msgs []agent.Message) bool {
 		if init.Version != "" {
 			lt.AgentVersion = init.Version
 		}
-		return init.SessionID != "" || init.Version != ""
-	}
-	return false
-}
-
-// maybeLogTailRecord cheaply filters ordinary conversation lines before JSON decoding.
-func maybeLogTailRecord(line []byte) bool {
-	return bytes.Contains(line, []byte(`"caic_`)) ||
-		bytes.Contains(line, []byte(`"system"`)) ||
-		bytes.Contains(line, []byte(`"result"`))
-}
-
-func (s *logTailScan) apply(lt *LoadedTask, line []byte) {
-	if !maybeLogTailRecord(line) {
 		return
-	}
-	var typeEnv v1TypeEnvelope
-	if json.Unmarshal(line, &typeEnv) != nil {
-		return
-	}
-	switch typeEnv.Type {
-	case "caic_session", "caic_init":
-		if lt.LogVersion == agent.LogVersionV1 {
-			applySessionMetadataLine(lt, typeEnv.Type, line)
-		}
-		return
-	case "caic_pr":
-		var mp agent.MetaPRMessage
-		if json.Unmarshal(line, &mp) == nil && mp.ForgePR > 0 {
-			lt.ForgeOwner = mp.ForgeOwner
-			lt.ForgeRepo = mp.ForgeRepo
-			lt.ForgePR = mp.ForgePR
-		}
-	case "caic_diff_stat":
-		noteDiffStatLine(lt, line)
-	case "caic_result":
-		var mr agent.MetaResultMessage
-		if err := json.Unmarshal(line, &mr); err == nil {
-			var raw map[string]json.RawMessage
-			if s.fw != nil && json.Unmarshal(line, &raw) == nil {
-				s.fw.Warn("caic_result", jsonutil.CollectUnknown(raw, resultKnown))
-			}
-			applyMetaResult(lt, &mr)
-		}
-	case "system":
-		var sm tailInit
-		if json.Unmarshal(line, &sm) == nil && sm.Subtype == "init" {
-			if sm.Model != "" {
-				lt.Model = sm.Model
-			}
-			if sm.Version != "" {
-				lt.AgentVersion = sm.Version
-			}
-		}
-	case "result":
-		var rm tailResult
-		if json.Unmarshal(line, &rm) == nil {
-			s.lastResultCostUSD = rm.TotalCostUSD
-			s.lastResultDuration = time.Duration(rm.DurationMs) * time.Millisecond
-			s.lastResultNumTurns = rm.NumTurns
-			s.lastResultUsage = rm.Usage
-		}
 	}
 }
 
@@ -1950,60 +2110,10 @@ func (s *logTailScan) finish(lt *LoadedTask) {
 	}
 }
 
-func loadLogSessionMetadata(path string, parseFn func([]byte) ([]agent.Message, error)) (_ *LoadedTask, retErr error) {
-	r, err := openPhysicalLogReader(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if closeErr := r.Close(); retErr == nil {
-			retErr = closeErr
-		}
-	}()
-
-	scanner := newPhysicalLogScanner(r.reader, path)
-	if _, err := scanner.ReadHeader(&jsonutil.FieldWarner{}); err != nil {
-		return nil, err
-	}
-	lt := &LoadedTask{LogVersion: scanner.authority.Version}
-	found := false
-	for scanner.Scan() {
-		if found {
-			continue
-		}
-		if scanner.authority.Version != agent.LogVersionV1 {
-			continue
-		}
-		line := scanner.Bytes()
-		typ := scanner.Type()
-		if applySessionMetadataLine(lt, typ, line) {
-			found = true
-			continue
-		}
-		if parseFn == nil {
-			continue
-		}
-		msgs, err := parseFn(line)
-		if err == nil && applySessionMetadataMessages(lt, msgs) {
-			found = true
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	if _, err := verifyPhysicalLog(path, r.file, r.info); err != nil {
-		return nil, err
-	}
-	return lt, nil
-}
-
 // loadLogHeader reads the metadata header and result trailer from a task log.
 // It does NOT parse individual messages — call LoadMessages for that. The path
 // is stored for lazy loading.
 func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
-	if isLogCompressed(path) {
-		return loadCompressedLogHeaderWithOptions(path, true, true)
-	}
 	r, err := openPhysicalLogReader(path)
 	if err != nil {
 		return nil, err
@@ -2013,10 +2123,72 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 			retErr = closeErr
 		}
 	}()
-	return loadPlainLogHeader(path, r, r.reader, r.file)
+	return loadLogHeaderFromReader(path, r, true, true)
 }
 
-func loadPlainLogHeader(path string, r *physicalLogReader, source io.Reader, tailSource io.ReaderAt) (*LoadedTask, error) {
+// loadLogHeaderFromReader applies the task-owned header policy to one already
+// opened physical observation. Both plain and compressed production loaders use
+// this transport-neutral core; its options select the taskmeta cache policy.
+func loadLogHeaderFromReader(path string, r *physicalLogReader, useSummary, storeSummary bool) (*LoadedTask, error) {
+	if isLogCompressed(path) {
+		return loadCompressedLogHeader(path, r, useSummary, storeSummary)
+	}
+	return loadPlainLogHeader(path, r, r.reader)
+}
+
+// isReplayControlMessage defines the control records passed through to the
+// replay compactor. These match live Task message delivery; other controls are
+// metadata-only and are deliberately excluded from regenerated replay bodies.
+func isReplayControlMessage(msg agent.Message) bool {
+	switch msg := msg.(type) {
+	case *agent.DiffStatMessage, *agent.ExitMessage, *agent.LogMessage:
+		return true
+	case *agent.SystemMessage:
+		return msg.Subtype == "context_cleared"
+	default:
+		return false
+	}
+}
+
+// scanInventoryRecords projects only inventory metadata through a parser local
+// to this physical scan. ParsedRecord.Control is the sole control classifier
+// for both V1 and V2 logs.
+func scanInventoryRecords(path string, scanner *physicalLogScanner, lt *LoadedTask) error {
+	tail := logTailScan{}
+	parser, err := agent.NewLogRecordParser(scanner.authority.Version, parseInventoryNativeMetadata)
+	if err != nil {
+		return err
+	}
+	bootstrap, err := parser.ParseRecord(scanner.headerRaw)
+	if err != nil {
+		return fmt.Errorf("parse task log bootstrap %s: %w", path, err)
+	}
+	if bootstrap.Control {
+		applyInventoryMetadata(lt, &tail, bootstrap.Messages)
+	}
+	for scanner.Scan() {
+		record, err := parser.ParseRecord(scanner.Bytes())
+		if err != nil {
+			if record.Control || scanner.authority.Version == agent.LogVersionV2 {
+				return fmt.Errorf("parse task log %s: %w", path, err)
+			}
+			slog.Warn("failed to parse message", "err", err, "path", path)
+			continue
+		}
+		if record.Control {
+			applyInventoryMetadata(lt, &tail, record.Messages)
+			continue
+		}
+		applyInventoryMetadata(lt, &tail, record.Messages)
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	tail.finish(lt)
+	return nil
+}
+
+func loadPlainLogHeader(path string, r *physicalLogReader, source io.Reader) (*LoadedTask, error) {
 	fw := &jsonutil.FieldWarner{}
 	scanner := newPhysicalLogScanner(source, path)
 	meta, err := scanner.ReadHeader(fw)
@@ -2028,37 +2200,14 @@ func loadPlainLogHeader(path string, r *physicalLogReader, source io.Reader, tai
 	taskIDStr := taskIDFromLogBase(base)
 	lt := loadedTaskFromMeta(path, taskIDStr, &meta, r.info.ModTime().UTC(), r.info.Size())
 
-	// The authority pass already visits every record. Capture backend-neutral
-	// session snapshots while validating segment headers so live adoption does
-	// not need a second full scan for the usual persisted metadata form.
-	for scanner.Scan() {
-		if scanner.authority.Version == agent.LogVersionV1 {
-			applySessionMetadataLine(lt, scanner.Type(), scanner.Bytes())
-		}
-	}
-	if err := scanner.Err(); err != nil {
+	if err := scanInventoryRecords(path, scanner, lt); err != nil {
 		return nil, err
 	}
-	const tailSize = 65536
-	offset := max(int64(0), r.info.Size()-tailSize)
-	buf := make([]byte, r.info.Size()-offset)
-	n, readErr := tailSource.ReadAt(buf, offset)
-	if readErr != nil && !errors.Is(readErr, io.EOF) {
-		return nil, readErr
-	}
-	tail := logTailScan{fw: fw}
-	for line := range bytes.SplitSeq(buf[:n], []byte("\n")) {
-		line = bytes.TrimSpace(line)
-		if len(line) > 0 && scanner.authority.Version == agent.LogVersionV1 {
-			tail.apply(lt, line)
-		}
-	}
-	tail.finish(lt)
 	stableInfo, err := verifyPhysicalLog(path, r.file, r.info)
 	if err != nil {
 		return nil, err
 	}
-	snapshot, err := newValidatedLogSnapshot(path, r.file, stableInfo, scanner.authority, scanner.headerRaw, scanner.EOFValidated())
+	snapshot, err := newValidatedLogSnapshotFromScanner(path, r.file, stableInfo, scanner)
 	if err != nil {
 		return nil, err
 	}
@@ -2066,23 +2215,7 @@ func loadPlainLogHeader(path string, r *physicalLogReader, source io.Reader, tai
 	return lt, nil
 }
 
-func loadCompressedLogHeaderWithOptions(path string, useSummary, storeSummary bool) (_ *LoadedTask, retErr error) {
-	r, err := openPhysicalLogReader(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if closeErr := r.Close(); retErr == nil {
-			retErr = closeErr
-		}
-	}()
-	return loadCompressedLogHeaderFromReader(path, r, useSummary, storeSummary)
-}
-
-// loadCompressedLogHeaderFromReader is the reader-owned production core used
-// by loadCompressedLogHeaderWithOptions. Keeping it separate lets pass-count
-// tests observe the same zstd scan without changing filesystem authority.
-func loadCompressedLogHeaderFromReader(path string, r *physicalLogReader, useSummary, storeSummary bool) (*LoadedTask, error) {
+func loadCompressedLogHeader(path string, r *physicalLogReader, useSummary, storeSummary bool) (*LoadedTask, error) {
 	fw := &jsonutil.FieldWarner{}
 	scanner := newPhysicalLogScanner(r.reader, path)
 	meta, err := scanner.ReadHeader(fw)
@@ -2090,7 +2223,7 @@ func loadCompressedLogHeaderFromReader(path string, r *physicalLogReader, useSum
 		return nil, err
 	}
 	if useSummary {
-		if lt, ok := loadLogSummary(path, r.file, r.info, scanner.authority, &meta); ok {
+		if lt, ok := loadLogSummary(path, r.file, r.info, scanner.authority, scanner.headerRaw, &meta); ok {
 			return lt, nil
 		}
 	}
@@ -2098,21 +2231,14 @@ func loadCompressedLogHeaderFromReader(path string, r *physicalLogReader, useSum
 	taskIDStr := taskIDFromLogBase(base)
 	lt := loadedTaskFromMeta(path, taskIDStr, &meta, r.info.ModTime().UTC(), r.info.Size())
 
-	tail := logTailScan{fw: fw}
-	for scanner.Scan() {
-		if scanner.authority.Version == agent.LogVersionV1 {
-			tail.apply(lt, scanner.Bytes())
-		}
-	}
-	if err := scanner.Err(); err != nil {
+	if err := scanInventoryRecords(path, scanner, lt); err != nil {
 		return nil, err
 	}
-	tail.finish(lt)
 	stableInfo, err := verifyPhysicalLog(path, r.file, r.info)
 	if err != nil {
 		return nil, err
 	}
-	snapshot, err := newValidatedLogSnapshot(path, r.file, stableInfo, scanner.authority, scanner.headerRaw, scanner.EOFValidated())
+	snapshot, err := newValidatedLogSnapshotFromScanner(path, r.file, stableInfo, scanner)
 	if err != nil {
 		return nil, err
 	}

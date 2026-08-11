@@ -808,7 +808,7 @@ func TestRunner(t *testing.T) {
 			backend := &testBackend{FakeBackend: &agenttest.FakeBackend{}}
 			r := newTestRunner(t, workspace, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			replay := &tasktest.FakeEventReplayWriter{}
-			r.Sessions.Logs.EventReplayFactory = func(string, harness.Name) (EventReplayWriter, error) {
+			r.Sessions.Logs.EventReplayFactory = func(string) (EventReplayWriter, error) {
 				return replay, nil
 			}
 			source := &Task{
@@ -913,7 +913,7 @@ func TestRunner(t *testing.T) {
 			workspace := newTestRepoWorkspace(t, "", "", runtimeBackend)
 			r := newTestRunner(t, workspace, nil, t.TempDir())
 			replay := &tasktest.FakeEventReplayWriter{}
-			r.Sessions.Logs.EventReplayFactory = func(string, harness.Name) (EventReplayWriter, error) {
+			r.Sessions.Logs.EventReplayFactory = func(string) (EventReplayWriter, error) {
 				return replay, nil
 			}
 			source := &Task{
@@ -955,7 +955,7 @@ func TestRunner(t *testing.T) {
 			backend := &agenttest.FakeBackend{}
 			r := newTestRunner(t, workspace, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			replay := &tasktest.FakeEventReplayWriter{}
-			r.Sessions.Logs.EventReplayFactory = func(string, harness.Name) (EventReplayWriter, error) {
+			r.Sessions.Logs.EventReplayFactory = func(string) (EventReplayWriter, error) {
 				return replay, nil
 			}
 			source := &Task{

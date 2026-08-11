@@ -243,7 +243,8 @@ type Task struct {
 	mu                    sync.Mutex
 	runtimeInstanceID     runtime.ID
 	runtimeConnection     runtime.ConnectionTarget
-	logPath               string // Absolute JSONL log path used for appending task metadata.
+	logPath               string                // Absolute JSONL log path used for appending task metadata.
+	logValidationSnapshot *ValidatedLogSnapshot // In-memory EOF proof usable by a same-file Reopen.
 	statsRing             [statsRingSize]runtime.Stats
 	statsLen              int
 	statsHead             int
@@ -664,7 +665,20 @@ func (t *Task) SetRelayOffset(offset int64) {
 func (t *Task) SetLogPath(path string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.logPath != path {
+		t.logValidationSnapshot = nil
+	}
 	t.logPath = path
+}
+
+// SetLogValidationSnapshot retains an in-memory EOF proof for a later Reopen.
+// It is never persisted and must match the task's current log path.
+func (t *Task) SetLogValidationSnapshot(snapshot *ValidatedLogSnapshot) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if snapshot != nil && snapshot.Path == t.logPath {
+		t.logValidationSnapshot = snapshot.validationProof()
+	}
 }
 
 // LogPath returns the JSONL log path used for metadata appends.
@@ -1706,6 +1720,15 @@ func (t *Task) RecordSessionFailure(ctx context.Context, err error) bool {
 		Result:      msg,
 	}, true)
 	return true
+}
+
+func (t *Task) logValidationProof(path string) *ValidatedLogSnapshot {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.logValidationSnapshot == nil || t.logValidationSnapshot.Path != path {
+		return nil
+	}
+	return t.logValidationSnapshot
 }
 
 func (t *Task) setLiveDiffStatLocked(ds agent.DiffStat) {

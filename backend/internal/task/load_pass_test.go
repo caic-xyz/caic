@@ -1,9 +1,10 @@
-// Tests v1 production task-log read-pass bounds for plain and zstd logs.
+// Tests task-log proof paths stay bounded to the raw header rather than rescanning logs.
 
 package task
 
 import (
-	"io"
+	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,150 +15,106 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
-// TestV1ProductionReadPassMatrix covers v1 task-log read-pass bounds across
-// plain and zstd production scan paths.
-func TestV1ProductionReadPassMatrix(t *testing.T) {
+// TestCacheProofFromSnapshotRereadsStrictRawHeader rejects a same-stat raw
+// header replacement before a snapshot can serve as a cache proof.
+func TestCacheProofFromSnapshotRereadsStrictRawHeader(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "task.jsonl")
+	original := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: int(agent.LogVersionV1), Harness: harness.Claude, Prompt: "proof"})
+	if err := os.WriteFile(path, []byte(original+"\n{\"type\":\"assistant\"}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := loadSemanticLogSnapshot(path, func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+		return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := bytes.Replace([]byte(original), []byte(`"proof"`), []byte(`"other"`), 1)
+	if len(changed) != len(original) {
+		t.Fatal("test header mutation changed length")
+	}
+	if err := os.WriteFile(path, append(changed, []byte("\n{\"type\":\"assistant\"}\n")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cacheProofFromValidatedSnapshot(snapshot, path); ok {
+		t.Fatal("snapshot cache proof accepted a raw header replacement with stable identity and stat")
+	}
+}
+
+// TestCacheProofForLogHeaderPassBound exercises the same reader core used by
+// CacheProofForLog with large plain and zstd records after the header. A proof
+// may fill its bounded scanner buffer, but must not validate or read the full
+// raw log on a replay-cache hit.
+func TestCacheProofForLogHeaderPassBound(t *testing.T) {
 	t.Parallel()
 	meta := mustJSON(t, agent.MetaMessage{
 		MessageType: "caic_meta",
 		Version:     int(agent.LogVersionV1),
-		Prompt:      "pass count",
 		Harness:     harness.Claude,
+		Prompt:      "proof bound",
 	})
-	for _, tc := range []struct {
-		name       string
-		nativeLine string
-	}{
-		{
-			name:       "native-session",
-			nativeLine: `{"type":"session","session_id":"native-session","version":"native"}`,
-		},
-		{
-			name:       "no-top-level-session",
-			nativeLine: `{"jsonrpc":"2.0","method":"session/started","params":{"id":"native-session"}}`,
-		},
-	} {
-		for _, compressed := range []bool{false, true} {
-			format := "plain"
-			if compressed {
-				format = "zstd"
-			}
-			t.Run(tc.name+"/"+format, func(t *testing.T) {
-				t.Parallel()
-				dir := t.TempDir()
-				name := "task.jsonl"
-				if compressed {
-					name += ".zst"
-					writeCompressedLogFile(t, dir, name, seqOf(meta, tc.nativeLine))
-				} else {
-					writeLogFile(t, dir, name, meta, tc.nativeLine)
-				}
-				path := filepath.Join(dir, name)
-				logicalSize := int64(len(meta) + len(tc.nativeLine) + 2)
-				var logicalBytes int64
-				completePasses := 0
-
-				openCounted := func() (*physicalLogReader, func()) {
-					file, err := os.Open(filepath.Clean(path))
-					if err != nil {
-						t.Fatal(err)
-					}
-					info, err := file.Stat()
-					if err != nil {
-						_ = file.Close()
-						t.Fatal(err)
-					}
-					if !compressed {
-						counted := &countingLogReader{file: file, size: info.Size()}
-						return &physicalLogReader{file: file, reader: counted, info: info}, func() {
-							_ = counted.Close()
-							logicalBytes += counted.bytes
-							if counted.complete {
-								completePasses++
-							}
-						}
-					}
-					decoder, err := zstd.NewReader(file)
-					if err != nil {
-						_ = file.Close()
-						t.Fatal(err)
-					}
-					counted := &countingReadCloser{reader: decoder, closeFn: func() error {
-						decoder.Close()
-						return file.Close()
-					}}
-					return &physicalLogReader{file: file, reader: counted, info: info}, func() {
-						_ = counted.Close()
-						logicalBytes += counted.bytes
-						if counted.complete {
-							completePasses++
-						}
-					}
-				}
-
-				headerReader, closeHeader := openCounted()
-				var lt *LoadedTask
-				var err error
-				if compressed {
-					lt, err = loadCompressedLogHeaderFromReader(path, headerReader, false, false)
-				} else {
-					tailSource, ok := headerReader.reader.(io.ReaderAt)
-					if !ok {
-						closeHeader()
-						t.Fatal("plain physical reader does not support ReadAt")
-					}
-					lt, err = loadPlainLogHeader(path, headerReader, headerReader.reader, tailSource)
-				}
-				if err != nil {
-					closeHeader()
-					t.Fatal(err)
-				}
-				closeHeader()
-				if lt.SessionID != "" || lt.AgentVersion != "" {
-					t.Fatalf("header scan treated native record as task session metadata: (%q, %q)", lt.SessionID, lt.AgentVersion)
-				}
-
-				messageReader, closeMessages := openCounted()
-				nativeCalls := 0
-				_, err = loadSemanticLogSnapshotFromReader(path, messageReader, func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
-					if h != harness.Claude {
-						t.Fatalf("resolver harness = %q, want %q", h, harness.Claude)
-					}
-					return func(line []byte) ([]agent.Message, error) {
-						nativeCalls++
-						return []agent.Message{&agent.TextMessage{Text: string(line)}}, nil
-					}, nil
-				})
-				if err != nil {
-					closeMessages()
-					t.Fatal(err)
-				}
-				closeMessages()
-				if nativeCalls != 1 {
-					t.Fatalf("native parser calls = %d, want 1", nativeCalls)
-				}
-
-				if !compressed {
-					appendReader, closeAppend := openCounted()
-					appendSource, ok := appendReader.reader.(io.ReadSeeker)
-					if !ok {
-						closeAppend()
-						t.Fatal("plain physical reader does not support seeking")
-					}
-					if err := validateRawLogAppend(appendSource, appendReader.file, path, &Task{Harness: harness.Claude}); err != nil {
-						closeAppend()
-						t.Fatal(err)
-					}
-					closeAppend()
-				}
-
-				if completePasses > 3 {
-					t.Errorf("complete passes = %d, want at most 3", completePasses)
-				}
-				if logicalBytes > 3*logicalSize+min(int64(65536), logicalSize) {
-					t.Errorf("logical bytes = %d, exceeds three complete passes plus bounded tail (%d)", logicalBytes, 3*logicalSize+min(int64(65536), logicalSize))
-				}
-			})
+	record := bytes.Repeat([]byte("x"), 8<<20)
+	for _, compressed := range []bool{false, true} {
+		format := "plain"
+		if compressed {
+			format = "zstd"
 		}
+		t.Run(format, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "task.jsonl")
+			if compressed {
+				path += ".zst"
+			}
+			file, err := os.Create(filepath.Clean(path))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if compressed {
+				enc, createErr := zstd.NewWriter(file)
+				if createErr != nil {
+					_ = file.Close()
+					t.Fatal(createErr)
+				}
+				_, err = enc.Write(append(append([]byte{}, meta...), '\n'))
+				if err == nil {
+					_, err = enc.Write(append(record, '\n'))
+				}
+				err = errors.Join(err, enc.Close(), file.Close())
+			} else {
+				_, err = file.Write(append(append([]byte{}, meta...), '\n'))
+				if err == nil {
+					_, err = file.Write(append(record, '\n'))
+				}
+				err = errors.Join(err, file.Close())
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			opened, err := openPhysicalLogReader(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			counted := &countingReadCloser{reader: opened.reader, closeFn: opened.Close}
+			reader := &physicalLogReader{file: opened.file, reader: counted, info: opened.info}
+			if _, err := cacheProofFromReader(path, reader); err != nil {
+				_ = reader.Close()
+				t.Fatal(err)
+			}
+			if err := reader.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if counted.bytes > 64<<10 {
+				t.Fatalf("CacheProofForLog read %d bytes after a small header, want at most the bounded header scanner buffer", counted.bytes)
+			}
+		})
 	}
 }

@@ -4,11 +4,14 @@ package server
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -21,11 +24,117 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
+type failAfterSSEWriter struct {
+	strings.Builder
+
+	remaining int
+}
+
+func (w *failAfterSSEWriter) Write(data []byte) (int, error) {
+	if w.remaining <= 0 {
+		return 0, os.ErrClosed
+	}
+	if len(data) > w.remaining {
+		n, _ := w.WriteString(string(data[:w.remaining]))
+		w.remaining -= n
+		return n, os.ErrClosed
+	}
+	n, err := w.WriteString(string(data))
+	w.remaining -= n
+	return n, err
+}
+
 func TestReplayCache(t *testing.T) {
 	t.Parallel()
+
+	t.Run("TerminalHistoryRegenerationFailurePublishesExplicitError", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		logPath := filepath.Join(dir, "task.jsonl")
+		if err := os.WriteFile(logPath, []byte("{\"type\":\"caic_meta\",\"version\":1,\"harness\":\"claude\",\"prompt\":\"test\"}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		logs, err := task.LoadLogs(dir)
+		if err != nil || len(logs) != 1 {
+			t.Fatalf("load terminal log = (%#v, %v)", logs, err)
+		}
+		cache, err := eventreplay.NewCacheWriter(logPath, task.CacheProofForLog)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := cache.Commit(logPath); err != nil {
+			t.Fatal(err)
+		}
+		w := httptest.NewRecorder()
+		entry := taskmgr.NewEntry(&task.Task{}, logs[0])
+		(&taskHandlers{}).streamHistoryFromDisk(context.Background(), w, w, entry)
+		if body := w.Body.String(); body != "event: error\ndata: {\"message\":\"task history is unavailable\"}\n\n" {
+			t.Fatalf("terminal unservable replay body = %q, want explicit error", body)
+		}
+	})
+	t.Run("MidStreamWriteFailureDoesNotRegenerateDuplicateHistory", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		logPath := filepath.Join(dir, "task.jsonl")
+		if err := os.WriteFile(logPath, []byte("{\"type\":\"caic_meta\",\"version\":1,\"harness\":\"claude\",\"prompt\":\"test\"}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		logs, err := task.LoadLogs(dir)
+		if err != nil || len(logs) != 1 {
+			t.Fatalf("load log = (%#v, %v)", logs, err)
+		}
+		cache, err := eventreplay.NewCacheWriter(logPath, task.CacheProofForLog)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cache.WriteEventData([]byte(`{"kind":"text","ts":1,"text":{"text":"first"}}`))
+		cache.WriteEventData([]byte(`{"kind":"text","ts":2,"text":{"text":"second"}}`))
+		if err := cache.Commit(logPath); err != nil {
+			t.Fatal(err)
+		}
+		out := &failAfterSSEWriter{remaining: 1}
+		idx := 0
+		err = (&taskHandlers{}).streamReplayStore(context.Background(), out, httptest.NewRecorder(), taskmgr.NewEntry(&task.Task{}, logs[0]), &idx)
+		if err == nil || !strings.Contains(err.Error(), "after history publication") || out.Len() != 1 {
+			t.Fatalf("stream replay = (%v, %q), want one partial write without regeneration", err, out.String())
+		}
+	})
+	t.Run("CancelledReplayDoesNotPublishCachedHistory", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		logPath := filepath.Join(dir, "task.jsonl")
+		if err := os.WriteFile(logPath, []byte("{\"type\":\"caic_meta\",\"version\":1,\"harness\":\"claude\",\"prompt\":\"test\"}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		logs, err := task.LoadLogs(dir)
+		if err != nil || len(logs) != 1 {
+			t.Fatalf("load log = (%#v, %v)", logs, err)
+		}
+		cache, err := eventreplay.NewCacheWriter(logPath, task.CacheProofForLog)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cache.WriteEventData([]byte(`{"kind":"text","ts":1,"text":{"text":"must not publish"}}`))
+		if err := cache.Commit(logPath); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		out := httptest.NewRecorder()
+		idx := 0
+		err = (&taskHandlers{}).streamReplayStore(ctx, out, out, taskmgr.NewEntry(&task.Task{}, logs[0]), &idx)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("stream replay error = %v, want context cancellation", err)
+		}
+		if out.Body.Len() != 0 || idx != 0 {
+			t.Fatalf("cancelled replay published body=%q index=%d", out.Body.String(), idx)
+		}
+	})
+
 	// serveEvents drives handleTaskEvents once and returns the SSE body.
 	serveEvents := func(t *testing.T, s *testRouter, taskID string) string {
 		t.Helper()
@@ -78,6 +187,45 @@ func TestReplayCache(t *testing.T) {
 		return s, taskID
 	}
 
+	t.Run("ContextClearedV1V2RegenerationParity", func(t *testing.T) {
+		t.Parallel()
+		replayEvents := make([][]v1.EventMessage, 0, 2)
+		for _, version := range []agent.LogVersion{agent.LogVersionV1, agent.LogVersionV2} {
+			logDir := t.TempDir()
+			logPath := filepath.Join(logDir, "task.jsonl")
+			var lines []string
+			if version == agent.LogVersionV1 {
+				lines = []string{
+					`{"type":"caic_meta","version":1,"prompt":"test","repos":[],"harness":"claude"}`,
+					`{"type":"system","subtype":"context_cleared"}`,
+					`{"type":"caic_result","state":"purged"}`,
+				}
+			} else {
+				lines = []string{
+					`{"t":"caic_meta","version":2,"prompt":"test","repos":[],"harness":"claude"}`,
+					`{"t":"context_cleared"}`,
+					`{"t":"result","state":"purged"}`,
+				}
+			}
+			if err := os.WriteFile(logPath, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			s, taskID := newServer(t, logDir)
+			body := serveEvents(t, s, taskID)
+			if !strings.Contains(body, `"subtype":"context_cleared"`) {
+				t.Fatalf("v%d replay omitted context_cleared:\n%s", version, body)
+			}
+			events := readReplayCacheEvents(t, eventreplay.CachePath(logPath)).events
+			if len(events) != 1 || events[0].System == nil || events[0].System.Subtype != "context_cleared" {
+				t.Fatalf("v%d replay events = %#v, want one context_cleared system event", version, events)
+			}
+			events[0].Ts = 0 // Replay generation time is not part of v1/v2 record semantics.
+			replayEvents = append(replayEvents, events)
+		}
+		if !reflect.DeepEqual(replayEvents[0], replayEvents[1]) {
+			t.Fatalf("v1/v2 replay events differ:\nv1: %#v\nv2: %#v", replayEvents[0], replayEvents[1])
+		}
+	})
 	t.Run("MissThenHitIsByteIdentical", func(t *testing.T) {
 		t.Parallel()
 		logDir := t.TempDir()
@@ -115,19 +263,16 @@ func TestReplayCache(t *testing.T) {
 		t.Parallel()
 		logDir := t.TempDir()
 		logPath := filepath.Join(logDir, "task.jsonl")
-		if err := os.WriteFile(logPath, nil, 0o600); err != nil {
+		if err := os.WriteFile(logPath, []byte("{\"type\":\"caic_meta\",\"version\":1,\"harness\":\"claude\",\"prompt\":\"test\"}\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 
-		w, err := eventreplay.NewMessageWriter(logPath, harness.Claude)
+		w, err := eventreplay.NewMessageWriter(logPath, task.CacheProofForLog)
 		if err != nil {
 			t.Fatal(err)
 		}
 		w.WriteMessage(agent.ParsedMessage{Message: &agent.TextDeltaMessage{Text: "partial"}})
 		w.WriteMessage(agent.ParsedMessage{Message: &agent.TextMessage{Text: "final"}})
-		if err := os.WriteFile(logPath, []byte("{\"type\":\"caic_meta\",\"version\":1,\"harness\":\"claude\",\"prompt\":\"test\"}\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
 		if err := w.Commit(logPath); err != nil {
 			t.Fatal(err)
 		}
@@ -165,7 +310,7 @@ func TestReplayCache(t *testing.T) {
 		t.Parallel()
 		logDir := t.TempDir()
 		logPath := writePurged(t, logDir, "empty cache raw truth")
-		cache, err := eventreplay.NewCacheWriter(logPath)
+		cache, err := eventreplay.NewCacheWriter(logPath, task.CacheProofForLog)
 		if err != nil {
 			t.Fatal(err)
 		}

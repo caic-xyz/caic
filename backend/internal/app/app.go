@@ -23,7 +23,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
-	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/ci"
@@ -269,8 +268,8 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		Runtimes:          runtimes,
 		WorkspaceRegistry: workspaceRegistry,
 		Backends:          agentBackends,
-		EventReplayFactory: func(path string, h harness.Name) (task.EventReplayWriter, error) {
-			return eventreplay.NewMessageWriter(path, h)
+		EventReplayFactory: func(path string) (task.EventReplayWriter, error) {
+			return eventreplay.NewMessageWriter(path, task.CacheProofForLog)
 		},
 		HarnessEnv: cfg.Agent.HarnessEnv,
 		Prefs:      prefsStore,
@@ -461,7 +460,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 			} else {
 				slog.InfoContext(startupCtx, "compressed terminal task logs", "dur", time.Since(start))
 			}
-			if removed, err := eventreplay.PruneStaleCaches(logDir); err != nil {
+			if removed, err := eventreplay.PruneStaleCaches(logDir, task.CacheProofForLog); err != nil {
 				slog.WarnContext(startupCtx, "prune stale replay caches failed", "err", err)
 			} else if removed > 0 {
 				slog.InfoContext(startupCtx, "pruned stale replay caches", "n", removed)

@@ -19,28 +19,37 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
-func decodeEventType(line []byte) (pi.EventType, *json.Decoder, error) {
+func decodeEventType(line []byte) (pi.EventType, error) {
 	dec := json.NewDecoder(bytes.NewReader(line))
 	if err := consumeObjectStart(dec); err != nil {
-		return "", dec, err
+		return "", err
 	}
+	var typ pi.EventType
+	var foundType bool
 	for dec.More() {
 		key, err := nextObjectKey(dec)
 		if err != nil {
-			return "", dec, err
+			return "", err
 		}
 		if key == "type" {
-			var typ pi.EventType
-			if err := dec.Decode(&typ); err != nil {
-				return "", dec, err
+			var decoded pi.EventType
+			if err := dec.Decode(&decoded); err != nil {
+				return "", err
 			}
-			return typ, dec, nil
+			if !foundType {
+				typ = decoded
+				foundType = true
+			}
+			continue
 		}
 		if err := discardValue(dec); err != nil {
-			return "", dec, err
+			return "", err
 		}
 	}
-	return "", dec, nil
+	if err := validateUnknownEventRemainder(dec); err != nil {
+		return "", err
+	}
+	return typ, nil
 }
 
 func decodeMessageUpdateEvent(line []byte) (pi.MessageUpdateDeltaEvent, error) {
@@ -146,7 +155,7 @@ func validateUnknownEventRemainder(dec *json.Decoder) error {
 //   - UserInputMessage     — prompt command (stdin logged by relay)
 //   - RawMessage           — unrecognised event types
 func parseMessage(line []byte, _ *jsonutil.FieldWarner) ([]agent.Message, error) {
-	typ, dec, err := decodeEventType(line)
+	typ, err := decodeEventType(line)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal probe: %w", err)
 	}
@@ -228,9 +237,6 @@ func parseMessage(line []byte, _ *jsonutil.FieldWarner) ([]agent.Message, error)
 
 	// Unknown event type.
 	if typ != "" {
-		if err := validateUnknownEventRemainder(dec); err != nil {
-			return nil, fmt.Errorf("unmarshal unknown event: %w", err)
-		}
 		return []agent.Message{&agent.RawMessage{
 			MessageType: string(typ),
 			Raw:         append([]byte(nil), line...),

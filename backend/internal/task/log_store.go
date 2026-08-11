@@ -12,13 +12,12 @@ import (
 	"strings"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
 // LogStore manages raw task JSONL logs and their companion replay writers.
 type LogStore struct {
 	LogDir             string
-	EventReplayFactory func(logPath string, h harness.Name) (EventReplayWriter, error)
+	EventReplayFactory func(logPath string) (EventReplayWriter, error)
 }
 
 // Open creates a JSONL log segment and writes its metadata header.
@@ -79,10 +78,53 @@ func openTaskLogForAppend(path string, t *Task, create bool) (*taskLogWriter, er
 	if err != nil {
 		return nil, err
 	}
-	if err := validateRawLogAppend(w.file, w.file, path, t); err != nil {
+	if snapshot := t.logValidationProof(cleanPath); snapshot != nil {
+		if err := validateRawLogAppendSnapshot(cleanPath, w.file, t, snapshot); err == nil {
+			return w, nil
+		}
+	}
+	if err := validateRawLogAppend(w.file, w.file, cleanPath, t); err != nil {
 		return nil, errors.Join(err, w.Close())
 	}
 	return w, nil
+}
+
+// validateRawLogAppendSnapshot reuses an in-memory EOF validation only after a
+// fresh bounded header and identity observation binds that proof to the open
+// append descriptor and its current path.
+func validateRawLogAppendSnapshot(path string, f *os.File, t *Task, snapshot *ValidatedLogSnapshot) error {
+	if snapshot == nil || !snapshot.EOFValidated || snapshot.Path != filepath.Clean(path) {
+		return errors.New("task log validation snapshot is stale")
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	proof, err := cacheProofFromReader(path, &physicalLogReader{file: f, reader: f, info: info})
+	if err != nil {
+		return fmt.Errorf("validate task log snapshot for append: %w", err)
+	}
+	if proof != (CacheProof{
+		Device:    snapshot.Device,
+		Inode:     snapshot.Inode,
+		Size:      snapshot.Size,
+		ModTimeNs: snapshot.ModTimeNs,
+		Version:   snapshot.Authority.Version,
+		Harness:   snapshot.Authority.Harness,
+		RawHeader: snapshot.RawHeader,
+	}) {
+		return errors.New("task log validation snapshot is stale")
+	}
+	if proof.Version != agent.LogVersionV1 {
+		return fmt.Errorf("append task log: version %d requires versioned log sink", proof.Version)
+	}
+	if proof.Harness != t.Harness {
+		return fmt.Errorf("append task log: header harness %q does not match task harness %q", proof.Harness, t.Harness)
+	}
+	return nil
 }
 
 func validateRawLogAppend(source io.ReadSeeker, f *os.File, path string, t *Task) error {
@@ -159,7 +201,7 @@ func (s *LogStore) attachReplay(t *Task, path string) error {
 	if s.EventReplayFactory == nil {
 		return nil
 	}
-	w, err := s.EventReplayFactory(path, t.Harness)
+	w, err := s.EventReplayFactory(path)
 	if err != nil {
 		return err
 	}

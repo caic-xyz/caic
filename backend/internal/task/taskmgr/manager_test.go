@@ -3,6 +3,7 @@
 package taskmgr
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -2900,6 +2901,70 @@ func TestManager(t *testing.T) {
 			}})
 			if err == nil || !strings.Contains(err.Error(), `unknown harness "unknown"`) {
 				t.Fatalf("AdoptInstances error = %v, want unknown-harness error", err)
+			}
+		})
+		t.Run("aborts_before_registration_or_reconnect_on_malformed_control", func(t *testing.T) {
+			t.Parallel()
+			taskID := ksid.NewID()
+			backend := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: harness.Claude, Images: true, ContextLimit: 200_000}}
+			t.Cleanup(backend.stop)
+			fake := &runtimetest.FakeInfo{Meta: map[string]string{
+				"md-agent-semantic-error\x00caic.id":      taskID.String(),
+				"md-agent-semantic-error\x00caic.harness": string(harness.Claude),
+			}}
+			m := newTestManager(t, Config{
+				ServerCtx: t.Context(),
+				LogDir:    t.TempDir(),
+				Runtimes:  newTestRuntime(t, &runtimetest.FakeBackend{}, fake),
+				Backends:  map[harness.Name]agent.Backend{harness.Claude: backend},
+			})
+			m.relay = fakeRelayReader{
+				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) { return true, "alive", nil },
+				readTailFn: func(context.Context, runtime.ConnectionTarget, func([]byte) ([]agent.Message, error), int64) ([]agent.Message, int64, error) {
+					return nil, 0, nil
+				},
+				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
+			}
+
+			meta, err := json.Marshal(agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "semantic error", Harness: harness.Claude})
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(m.logDir, taskID.String()+".jsonl")
+			data := append([]byte(nil), meta...)
+			data = append(data, []byte(`
+{"type":"caic_result","state":123}
+`)...)
+			if err := os.WriteFile(path, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			logs, err := task.LoadLogs(m.logDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			adopted, err := m.AdoptInstances(t.Context(), nil, []runtime.Instance{{
+				ID:    runtime.NewID("test-runtime", "md-agent-semantic-error"),
+				State: "running",
+			}}, logs)
+			if err == nil || !strings.Contains(err.Error(), "task log "+taskID.String()+" not found") {
+				t.Fatalf("AdoptInstances error = %v, want malformed-control log rejection", err)
+			}
+			if adopted != nil || m.Len() != 0 {
+				t.Fatalf("malformed control mutated manager: adopted=%#v len=%d", adopted, m.Len())
+			}
+			after, readErr := os.ReadFile(path) //nolint:gosec // path is test-controlled.
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if !bytes.Equal(after, data) {
+				t.Fatal("malformed control appended to the task log")
+			}
+			backend.mu.Lock()
+			attachCalls := backend.attachCalls
+			backend.mu.Unlock()
+			if attachCalls != 0 {
+				t.Fatalf("relay reconnect calls = %d, want 0", attachCalls)
 			}
 		})
 		t.Run("valid_adopts_qualified_no_repo_instance", func(t *testing.T) {

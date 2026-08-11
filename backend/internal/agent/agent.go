@@ -957,8 +957,8 @@ func ndjsonScanner(r io.Reader) *bufio.Scanner {
 // reported as a terminal (nil, err) pair after the last good message.
 //
 // The reader is consumed lazily one line at a time, so memory usage is O(1)
-// regardless of total size. This is the shared core behind StreamLogFile
-// (disk) and StreamRelay (SSH).
+// regardless of total size. StreamRelay owns the live SSH relay-output stream;
+// this helper only decodes its NDJSON lines.
 func yieldMessages(r io.Reader, parseFn func([]byte) ([]Message, error), skipFirst bool, src string) iter.Seq2[Message, error] {
 	return func(yield func(Message, error) bool) {
 		scanner := ndjsonScanner(r)

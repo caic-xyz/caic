@@ -18,11 +18,13 @@ import (
 	"time"
 
 	"github.com/klauspost/compress/zstd"
+	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/task/tasktest"
 )
 
 func setClaudeParser(tasks []*LoadedTask) {
@@ -144,6 +146,48 @@ func (r *countingReadCloser) Read(p []byte) (int, error) {
 		r.complete = true
 	}
 	return n, err
+}
+
+func reopenWithProofReplay(t *testing.T, dir, path string, tk *Task, snapshot *ValidatedLogSnapshot) int64 {
+	tk.SetLogPath(path)
+	tk.SetLogValidationSnapshot(snapshot)
+	replay := &tasktest.FakeEventReplayWriter{}
+	store := &LogStore{
+		LogDir: dir,
+		EventReplayFactory: func(logPath string) (EventReplayWriter, error) {
+			proof, err := CacheProofForLog(logPath)
+			if err != nil {
+				return nil, err
+			}
+			if proof.RawHeader == "" {
+				return nil, errors.New("empty attached replay proof")
+			}
+			return replay, nil
+		},
+	}
+	w, err := store.Reopen(tk)
+	if err != nil {
+		t.Fatalf("Reopen after adopted scans: %v", err)
+	}
+	appendWriter, ok := w.(*taskLogWriter)
+	if !ok {
+		t.Fatalf("Reopen writer = %T, want *taskLogWriter", w)
+	}
+	proofBytes, err := appendWriter.file.Seek(0, io.SeekCurrent)
+	if err != nil {
+		_ = w.Close()
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close Reopen writer: %v", err)
+	}
+	if err := tk.CommitEventReplay(); err != nil {
+		t.Fatalf("commit attached replay: %v", err)
+	}
+	if len(replay.Commits) != 1 || replay.Commits[0] != path {
+		t.Fatalf("attached replay commits = %q, want %q", replay.Commits, path)
+	}
+	return proofBytes
 }
 
 func (r *countingReadCloser) Close() error {
@@ -401,6 +445,113 @@ func TestLoadLogs(t *testing.T) {
 			t.Fatalf("ForkedFromTaskID = %q, want 3BL0EKDTO000", tasks[0].ForkedFromTaskID)
 		}
 	})
+	t.Run("CompressedSummaryRejectsChangedForkAuthority", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "task.jsonl.zst")
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType:      "caic_meta",
+			Version:          int(agent.LogVersionV1),
+			Prompt:           "forked task",
+			Harness:          harness.Claude,
+			ForkedFromTaskID: "3BL0EKDTO000",
+		})
+		writeCompressedLogFile(t, dir, filepath.Base(path), seqOf(meta))
+		if _, err := LoadLogs(dir); err != nil {
+			t.Fatal(err)
+		}
+		summaryPath := logSummaryPath(path)
+		data, err := os.ReadFile(summaryPath) //nolint:gosec // path is test-controlled.
+		if err != nil {
+			t.Fatal(err)
+		}
+		var summary logSummary
+		if err := json.Unmarshal(data, &summary); err != nil {
+			t.Fatal(err)
+		}
+		summary.Task.ForkedFromTaskID = "forged-parent"
+		data, err = json.Marshal(summary)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(summaryPath, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(tasks) != 1 || tasks[0].ForkedFromTaskID != "3BL0EKDTO000" {
+			t.Fatalf("summary cache accepted forged fork authority: %#v", tasks)
+		}
+	})
+	t.Run("LazySemanticScanRejectsChangedRawHeader", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "task.jsonl")
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta",
+			Version:     int(agent.LogVersionV1),
+			Prompt:      "original",
+			Harness:     harness.Claude,
+		})
+		assistant := claudeAssistant(t, map[string]any{"type": "text", "text": "message"})
+		writeLogFile(t, dir, filepath.Base(path), meta, assistant)
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		changed := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta",
+			Version:     int(agent.LogVersionV1),
+			Prompt:      "changed!",
+			Harness:     harness.Claude,
+		})
+		writeLogFile(t, dir, filepath.Base(path), changed, assistant)
+
+		err = tasks[0].LoadMessagesWithResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			return claudecode.New().NewWire().ParseMessage, nil
+		})
+		if err == nil || !strings.Contains(err.Error(), "immutable header changed") {
+			t.Fatalf("LoadMessagesWithResolver error = %v, want immutable header change", err)
+		}
+		if tasks[0].Msgs != nil || tasks[0].Prompt != "original" {
+			t.Fatalf("changed semantic scan mutated inventory task: %#v", tasks[0])
+		}
+	})
+	t.Run("LazySemanticScanAllowsAppendWithSameRawHeader", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "task.jsonl")
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta",
+			Version:     int(agent.LogVersionV1),
+			Prompt:      "original",
+			Harness:     harness.Claude,
+		})
+		writeLogFile(t, dir, filepath.Base(path), meta)
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // path is test-controlled.
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, writeErr := file.WriteString(claudeAssistant(t, map[string]any{"type": "text", "text": "appended"}) + "\n")
+		if closeErr := file.Close(); writeErr != nil || closeErr != nil {
+			t.Fatalf("append task log = %v, %v", writeErr, closeErr)
+		}
+		if err := tasks[0].LoadMessagesWithResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			return claudecode.New().NewWire().ParseMessage, nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if len(tasks[0].Msgs) != 1 {
+			t.Fatalf("appended semantic messages = %#v, want one message", tasks[0].Msgs)
+		}
+	})
 	t.Run("PhysicalAuthority", func(t *testing.T) {
 		t.Parallel()
 		meta := func(version agent.LogVersion, h harness.Name) string {
@@ -497,6 +648,214 @@ func TestLoadLogs(t *testing.T) {
 		}
 		if tasks[0].State != StatePurged {
 			t.Errorf("State = %v, want %v", tasks[0].State, StatePurged)
+		}
+	})
+	t.Run("V2ControlsMatchV1HeaderSemantics", func(t *testing.T) {
+		t.Parallel()
+		v1Meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: int(agent.LogVersionV1), Prompt: "control task", Harness: harness.Codex,
+		})
+		v2Meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: int(agent.LogVersionV2), Prompt: "control task", Harness: harness.Codex,
+		})
+		v1Lines := []string{
+			v1Meta,
+			mustJSON(t, agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "session-1", Model: "model-1", AgentVersion: "agent-1"}),
+			mustJSON(t, agent.MetaPRMessage{MessageType: "caic_pr", ForgeOwner: "owner", ForgeRepo: "repo", ForgePR: 7}),
+			mustJSON(t, agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: agent.DiffStat{{Path: "main.go", Added: 2, Deleted: 1}}, Ts: 2_000_000_000}),
+			`{"type":"assistant","text":"conversation"}`,
+			mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged", Title: "done", CostUSD: 1.25, Duration: 2.5, NumTurns: 3}),
+		}
+		v2Lines := []string{
+			v2Meta,
+			`{"t":"session","session_id":"session-1","model":"model-1","agent_version":"agent-1"}`,
+			`{"t":"pr","forge_owner":"owner","forge_repo":"repo","forge_pr":7}`,
+			`{"t":"diff_stat","diff_stat":[{"path":"main.go","added":2,"deleted":1}],"ts":2000000000}`,
+			`{"t":"agent","ts":1.000,"msg":{"type":"assistant","text":"conversation"}}`,
+			`{"t":"result","state":"purged","title":"done","cost_usd":1.25,"duration":2.5,"num_turns":3}`,
+		}
+		for _, compressed := range []bool{false, true} {
+			format := "plain"
+			if compressed {
+				format = "zstd"
+			}
+			t.Run(format, func(t *testing.T) {
+				t.Parallel()
+				load := func(t *testing.T, name string, lines []string) *LoadedTask {
+					dir := t.TempDir()
+					if compressed {
+						name += logCompressedExt
+						writeCompressedLogFile(t, dir, name, seqOf(lines...))
+					} else {
+						writeLogFile(t, dir, name, lines...)
+					}
+					loaded, err := loadLogHeader(filepath.Join(dir, name))
+					if err != nil {
+						t.Fatal(err)
+					}
+					return loaded
+				}
+				v1 := load(t, "v1.jsonl", v1Lines)
+				v2 := load(t, "v2.jsonl", v2Lines)
+				if v2.SessionID != v1.SessionID || v2.Model != v1.Model || v2.AgentVersion != v1.AgentVersion {
+					t.Fatalf("session metadata v2 = (%q, %q, %q), v1 = (%q, %q, %q)", v2.SessionID, v2.Model, v2.AgentVersion, v1.SessionID, v1.Model, v1.AgentVersion)
+				}
+				if v2.ForgeOwner != v1.ForgeOwner || v2.ForgeRepo != v1.ForgeRepo || v2.ForgePR != v1.ForgePR {
+					t.Fatalf("PR metadata v2 = (%q, %q, %d), v1 = (%q, %q, %d)", v2.ForgeOwner, v2.ForgeRepo, v2.ForgePR, v1.ForgeOwner, v1.ForgeRepo, v1.ForgePR)
+				}
+				if !v2.DiffCreated || v2.LastStateUpdateAt != v1.LastStateUpdateAt {
+					t.Fatalf("diff metadata v2 = (%t, %v), v1 = (%t, %v)", v2.DiffCreated, v2.LastStateUpdateAt, v1.DiffCreated, v1.LastStateUpdateAt)
+				}
+				if v2.Result == nil || v1.Result == nil || v2.Result.State != v1.Result.State || v2.Result.CostUSD != v1.Result.CostUSD || v2.Result.Duration != v1.Result.Duration || v2.Result.NumTurns != v1.Result.NumTurns {
+					t.Fatalf("result metadata v2 = %#v, v1 = %#v", v2.Result, v1.Result)
+				}
+				for _, loaded := range []*LoadedTask{v1, v2} {
+					if loaded.Msgs != nil {
+						t.Fatalf("inventory messages = %#v, want nil for lazy semantic loading", loaded.Msgs)
+					}
+					calls := 0
+					if err := loaded.LoadMessagesWithResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+						return func(raw []byte) ([]agent.Message, error) {
+							calls++
+							if !json.Valid(raw) {
+								return nil, errors.New("invalid test conversation")
+							}
+							return []agent.Message{&agent.TextMessage{Text: "conversation"}}, nil
+						}, nil
+					}); err != nil {
+						t.Fatal(err)
+					}
+					if calls != 1 || len(loaded.Msgs) != 1 {
+						t.Fatalf("lazy semantic load calls/messages = %d/%#v, want 1/one conversation", calls, loaded.Msgs)
+					}
+				}
+				if compressed {
+					cached, err := loadLogHeader(v2.path)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if cached.SessionID != v2.SessionID || cached.AgentVersion != v2.AgentVersion || cached.ForgePR != v2.ForgePR || cached.DiffCreated != v2.DiffCreated || cached.Result == nil || cached.Result.State != v2.Result.State {
+						t.Fatalf("cached v2 control metadata = %#v, want %#v", cached, v2)
+					}
+					if cached.Msgs != nil {
+						t.Fatalf("cached inventory messages = %#v, want nil", cached.Msgs)
+					}
+				}
+			})
+		}
+	})
+	t.Run("V2NativeTailBackfillMatchesV1", func(t *testing.T) {
+		t.Parallel()
+		v1Meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: int(agent.LogVersionV1), Prompt: "native metadata", Harness: harness.Claude})
+		v2Meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: int(agent.LogVersionV2), Prompt: "native metadata", Harness: harness.Claude})
+		v1Lines := []string{
+			v1Meta,
+			`{"type":"system","subtype":"init","model":"native-model","claude_code_version":"native-version"}`,
+			`{"type":"result","total_cost_usd":1.25,"duration_ms":2500,"num_turns":3,"usage":{"input_tokens":4}}`,
+			`{"type":"caic_result","state":"purged"}`,
+		}
+		v2Lines := []string{
+			v2Meta,
+			`{"t":"agent","ts":1.000,"msg":{"type":"system","subtype":"init","model":"native-model","claude_code_version":"native-version"}}`,
+			`{"t":"agent","ts":2.000,"msg":{"type":"result","total_cost_usd":1.25,"duration_ms":2500,"num_turns":3,"usage":{"input_tokens":4}}}`,
+			`{"t":"result","state":"purged"}`,
+		}
+		for _, compressed := range []bool{false, true} {
+			format := "plain"
+			if compressed {
+				format = "zstd"
+			}
+			t.Run(format, func(t *testing.T) {
+				t.Parallel()
+				load := func(t *testing.T, name string, lines []string) *LoadedTask {
+					dir := t.TempDir()
+					if compressed {
+						name += logCompressedExt
+						writeCompressedLogFile(t, dir, name, seqOf(lines...))
+					} else {
+						writeLogFile(t, dir, name, lines...)
+					}
+					loaded, err := loadLogHeader(filepath.Join(dir, name))
+					if err != nil {
+						t.Fatal(err)
+					}
+					return loaded
+				}
+				v1 := load(t, "v1.jsonl", v1Lines)
+				v2 := load(t, "v2.jsonl", v2Lines)
+				if v2.Model != v1.Model || v2.AgentVersion != v1.AgentVersion {
+					t.Fatalf("native init metadata v2 = (%q, %q), v1 = (%q, %q)", v2.Model, v2.AgentVersion, v1.Model, v1.AgentVersion)
+				}
+				if v2.Result == nil || v1.Result == nil || v2.Result.CostUSD != v1.Result.CostUSD || v2.Result.Duration != v1.Result.Duration || v2.Result.NumTurns != v1.Result.NumTurns || v2.Result.Usage != v1.Result.Usage {
+					t.Fatalf("native result backfill v2 = %#v, v1 = %#v", v2.Result, v1.Result)
+				}
+				if v2.Msgs != nil {
+					t.Fatalf("inventory messages = %#v, want nil", v2.Msgs)
+				}
+			})
+		}
+	})
+	t.Run("MalformedControlsFailClosed", func(t *testing.T) {
+		t.Parallel()
+		for _, version := range []agent.LogVersion{agent.LogVersionV1, agent.LogVersionV2} {
+			meta := mustJSON(t, agent.MetaMessage{
+				MessageType: "caic_meta", Version: int(version), Prompt: "control task", Harness: harness.Codex,
+			})
+			for _, tc := range []struct {
+				name string
+				v1   string
+				v2   string
+			}{
+				{name: "session", v1: `{"type":"caic_session","session_id":1}`, v2: `{"t":"session","session_id":"session-1","bogus":true}`},
+				{name: "PR", v1: `{"type":"caic_pr","forge_pr":"bad"}`, v2: `{"t":"pr","forge_pr":7,"bogus":true}`},
+				{name: "diff", v1: `{"type":"caic_diff_stat","diff_stat":true}`, v2: `{"t":"diff_stat","diff_stat":[],"bogus":true}`},
+				{name: "result", v1: `{"type":"caic_result","state":"purged","cost_usd":"bad"}`, v2: `{"t":"result","state":"purged","bogus":true}`},
+			} {
+				control := tc.v1
+				if version == agent.LogVersionV2 {
+					control = tc.v2
+				}
+				for _, compressed := range []bool{false, true} {
+					format := "plain"
+					if compressed {
+						format = "zstd"
+					}
+					t.Run(fmt.Sprintf("v%d/%s/%s", version, format, tc.name), func(t *testing.T) {
+						t.Parallel()
+						path := writePhysicalTestLog(t, compressed, meta, control)
+						if _, err := loadLogHeader(path); err == nil {
+							t.Fatal("loadLogHeader accepted malformed control")
+						}
+					})
+				}
+			}
+		}
+	})
+
+	t.Run("V2MalformedNativeMessagesFailClosed", func(t *testing.T) {
+		t.Parallel()
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: int(agent.LogVersionV2), Prompt: "native task", Harness: harness.Codex,
+		})
+		for _, compressed := range []bool{false, true} {
+			format := "plain"
+			if compressed {
+				format = "zstd"
+			}
+			t.Run(format, func(t *testing.T) {
+				t.Parallel()
+				path := writePhysicalTestLog(t, compressed, meta, `{"t":"agent","ts":1700000000.123,"msg":{"type":"assistant"} trailing}`)
+				if _, err := loadLogHeader(path); err == nil || !strings.Contains(err.Error(), "invalid native JSON value") {
+					t.Fatalf("loadLogHeader error = %v, want malformed v2 native message rejection", err)
+				}
+				tasks, err := LoadLogs(filepath.Dir(path))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(tasks) != 0 {
+					t.Fatalf("persistent inventory accepted malformed v2 native message: %#v", tasks)
+				}
+			})
 		}
 	})
 	t.Run("LaunchConfigMetadata", func(t *testing.T) {
@@ -644,6 +1003,17 @@ func TestLoadLogs(t *testing.T) {
 		if _, err := os.Stat(logSummaryPath(path)); err != nil {
 			t.Fatalf("summary cache was not written: %v", err)
 		}
+		summaryData, err := os.ReadFile(logSummaryPath(path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var summary logSummary
+		if err := json.Unmarshal(summaryData, &summary); err != nil {
+			t.Fatal(err)
+		}
+		if summary.Version != 3 {
+			t.Fatalf("taskmeta version = %d, want 3", summary.Version)
+		}
 		info, err := os.Stat(path)
 		if err != nil {
 			t.Fatal(err)
@@ -659,8 +1029,8 @@ func TestLoadLogs(t *testing.T) {
 		if second[0].Prompt != "cached" || second[0].State != StatePurged || second[0].ForkedFromTaskID != "3BL0EKDTO000" {
 			t.Fatalf("cached task = prompt %q state %v parent %q, want cached/purged/3BL0EKDTO000", second[0].Prompt, second[0].State, second[0].ForkedFromTaskID)
 		}
-		if second[0].ValidatedSnapshot() != nil {
-			t.Fatal("inventory cache hit published a snapshot without a current EOF proof")
+		if snapshot := second[0].ValidatedSnapshot(); snapshot == nil || !snapshot.EOFValidated || snapshot.RawHeader != meta {
+			t.Fatalf("inventory cache hit snapshot = %#v, want current summary-backed EOF proof", snapshot)
 		}
 
 		replacementDir := t.TempDir()
@@ -1122,12 +1492,20 @@ func TestLoadLogs(t *testing.T) {
 
 		parsedNative := false
 		parseNativeSession := func(line []byte) ([]agent.Message, error) {
+			if len(line) == 0 {
+				return nil, errors.New("empty native record")
+			}
 			if bytes.Contains(line, []byte(`"type":"session"`)) {
 				parsedNative = true
 			}
 			return []agent.Message{&agent.TextMessage{Text: "native session record"}}, nil
 		}
-		lt, err := loadLogSessionMetadata(path, parseNativeSession)
+		lt, _, err := loadSemanticSessionMetadata(path, func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			if h != harness.Claude {
+				t.Fatalf("resolver harness = %q, want claude", h)
+			}
+			return parseNativeSession, nil
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1147,22 +1525,21 @@ func TestLoadLogs(t *testing.T) {
 		caicInit := `{"t":"caic_init","session_id":"wrong-init","model":"wrong-model","version":"wrong-version"}`
 		path := writePhysicalTestLog(t, false, meta, caicSession, caicInit)
 
-		parseAlias := func([]byte) ([]agent.Message, error) {
-			return []agent.Message{&agent.InitMessage{SessionID: "wrong-parser", Version: "wrong-parser"}}, nil
-		}
-		lt, err := loadLogSessionMetadata(path, parseAlias)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if lt.SessionID != "" || lt.AgentVersion != "" || lt.Model != "" {
-			t.Fatalf("v2 alias metadata = (%q, %q, %q), want empty", lt.SessionID, lt.AgentVersion, lt.Model)
+		_, _, err := loadSemanticSessionMetadata(path, func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			if h != harness.Claude {
+				t.Fatalf("resolver harness = %q, want claude", h)
+			}
+			return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
+		})
+		if err == nil || !strings.Contains(err.Error(), "unknown top-level t") {
+			t.Fatalf("v2 caic_session alias error = %v, want strict unknown-token rejection", err)
 		}
 		tasks, err := LoadLogs(filepath.Dir(path))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(tasks) != 1 || tasks[0].SessionID != "" || tasks[0].AgentVersion != "" || tasks[0].Model != "" {
-			t.Fatalf("loaded v2 alias metadata = %#v, want empty session metadata", tasks)
+		if len(tasks) != 0 {
+			t.Fatalf("persistent inventory accepted malformed v2 controls: %#v", tasks)
 		}
 	})
 	t.Run("AgentVersionMetadataWithoutSession", func(t *testing.T) {
@@ -1234,21 +1611,27 @@ func TestLoadLogs(t *testing.T) {
 			t.Run(format+" missing header", func(t *testing.T) {
 				t.Parallel()
 				path := writePhysicalTestLog(t, compressed, session)
-				if _, err := loadLogSessionMetadata(path, nil); err == nil || !strings.Contains(err.Error(), "invalid first log header") {
+				if _, _, err := loadSemanticSessionMetadata(path, func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+					return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
+				}); err == nil || !strings.Contains(err.Error(), "invalid first log header") {
 					t.Fatalf("error = %v, want invalid first header", err)
 				}
 			})
 			t.Run(format+" mixed authority after metadata", func(t *testing.T) {
 				t.Parallel()
 				path := writePhysicalTestLog(t, compressed, meta, session, mismatch)
-				if _, err := loadLogSessionMetadata(path, nil); err == nil || !strings.Contains(err.Error(), "wrong t discriminator") {
+				if _, _, err := loadSemanticSessionMetadata(path, func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+					return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
+				}); err == nil || !strings.Contains(err.Error(), "wrong t discriminator") {
 					t.Fatalf("error = %v, want wrong t discriminator", err)
 				}
 			})
 			t.Run(format+" leading empty lines", func(t *testing.T) {
 				t.Parallel()
 				path := writePhysicalTestLog(t, compressed, "", "  ", meta, session)
-				lt, err := loadLogSessionMetadata(path, nil)
+				lt, _, err := loadSemanticSessionMetadata(path, func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+					return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
+				})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1405,14 +1788,15 @@ func TestLoadLogs(t *testing.T) {
 	})
 	t.Run("PROutsideTailWindow", func(t *testing.T) {
 		t.Parallel()
-		// caic_pr early in the file, followed by >64 KiB of messages,
-		// so the header-only tail scan cannot see it.
+		// caic_pr is early in the file, followed by >64 KiB of messages.
+		// Full parser traversal derives its metadata even though tail messages
+		// remain bounded.
 		dir := t.TempDir()
 		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "big task", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-3"}}, Harness: "claude"})
 		prMsg := mustJSON(t, agent.MetaPRMessage{MessageType: "caic_pr", ForgeOwner: "acme", ForgeRepo: "widget", ForgePR: 77})
 
 		// Build lines: header, caic_pr, then enough assistant messages
-		// to push caic_pr beyond the 64 KiB tail window.
+		// to place caic_pr outside the retained tail window.
 		lines := make([]string, 0, 83)
 		lines = append(lines, meta, prMsg)
 		bigText := string(make([]byte, 1024)) // 1 KiB of null bytes per message
@@ -1431,11 +1815,17 @@ func TestLoadLogs(t *testing.T) {
 			t.Fatalf("len = %d, want 1", len(tasks))
 		}
 		lt := tasks[0]
-		// Header-only parse misses caic_pr (outside 64 KiB tail).
-		if lt.ForgePR != 0 {
-			t.Fatalf("expected header-only parse to miss caic_pr outside tail window, got ForgePR=%d", lt.ForgePR)
+		// The full traversal derives PR metadata before tail messages are retained.
+		if lt.ForgePR != 77 {
+			t.Fatalf("ForgePR = %d, want 77", lt.ForgePR)
 		}
-		// Full parse via LoadMessages must recover the PR.
+		if lt.ForgeOwner != "acme" {
+			t.Fatalf("ForgeOwner = %q, want acme", lt.ForgeOwner)
+		}
+		if lt.ForgeRepo != "widget" {
+			t.Fatalf("ForgeRepo = %q, want widget", lt.ForgeRepo)
+		}
+		// Full parse via LoadMessages retains the same PR metadata.
 		setClaudeParser(tasks)
 		if err := lt.LoadMessages(); err != nil {
 			t.Fatal(err)
@@ -1637,10 +2027,11 @@ func TestLoadSemanticLogSnapshot(t *testing.T) {
 	t.Run("V2AgentRecords", func(t *testing.T) {
 		t.Parallel()
 		meta := mustJSON(t, agent.MetaMessage{
-			MessageType: "caic_meta",
-			Version:     int(agent.LogVersionV2),
-			Prompt:      "v2 snapshot",
-			Harness:     harness.Codex,
+			MessageType:      "caic_meta",
+			Version:          int(agent.LogVersionV2),
+			Prompt:           "v2 snapshot",
+			Harness:          harness.Codex,
+			ForkedFromTaskID: "3BL0EKDTO000",
 		})
 		native := `{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}]}}`
 		agentRecord := `{"t":"agent","ts":1700000000.123,"msg":` + native + `}`
@@ -1655,9 +2046,9 @@ func TestLoadSemanticLogSnapshot(t *testing.T) {
 				name := "v2" + logPlainExt
 				if compressed {
 					name = "v2" + logCompressedExt
-					writeCompressedLogFile(t, dir, name, seqOf(meta, agentRecord))
+					writeCompressedLogFile(t, dir, name, seqOf(meta, agentRecord, meta))
 				} else {
-					writeLogFile(t, dir, name, meta, agentRecord)
+					writeLogFile(t, dir, name, meta, agentRecord, meta)
 				}
 
 				var factoryCalls, nativeCalls int
@@ -1681,12 +2072,18 @@ func TestLoadSemanticLogSnapshot(t *testing.T) {
 				if factoryCalls != 1 || nativeCalls != 1 {
 					t.Fatalf("factory calls = %d, native calls = %d, want 1/1", factoryCalls, nativeCalls)
 				}
-				if len(snapshot.Messages) != 2 {
-					t.Fatalf("snapshot messages = %#v, want bootstrap and agent message", snapshot.Messages)
+				if len(snapshot.Messages) != 3 {
+					t.Fatalf("snapshot messages = %#v, want bootstrap, agent message, and segment", snapshot.Messages)
+				}
+				for _, index := range []int{0, 2} {
+					parsed, ok := snapshot.Messages[index].Message.(*agent.MetaMessage)
+					if !ok || parsed.ForkedFromTaskID != "3BL0EKDTO000" {
+						t.Fatalf("metadata record %d = %#v, want forked_from_task_id", index, snapshot.Messages[index].Message)
+					}
 				}
 				wantTime := time.Unix(1700000000, 123000000).UTC()
-				if !snapshot.Messages[0].ProducerTime.IsZero() || !snapshot.Messages[1].ProducerTime.Equal(wantTime) {
-					t.Fatalf("producer times = %v, %v, want zero/%v", snapshot.Messages[0].ProducerTime, snapshot.Messages[1].ProducerTime, wantTime)
+				if !snapshot.Messages[0].ProducerTime.IsZero() || !snapshot.Messages[1].ProducerTime.Equal(wantTime) || !snapshot.Messages[2].ProducerTime.IsZero() {
+					t.Fatalf("producer times = %v, %v, %v, want zero/%v/zero", snapshot.Messages[0].ProducerTime, snapshot.Messages[1].ProducerTime, snapshot.Messages[2].ProducerTime, wantTime)
 				}
 			})
 		}
@@ -1772,11 +2169,6 @@ func TestTaskAdoptionReadAmplification(t *testing.T) {
 		Prompt:      "adopt",
 		Harness:     harness.Claude,
 	})
-	session := mustJSON(t, agent.MetaSessionMessage{
-		MessageType:  "caic_session",
-		SessionID:    "session-1",
-		AgentVersion: "1.2.3",
-	})
 	segment := meta
 	control := mustJSON(t, agent.DiffStatMessage{MessageType: "caic_diff_stat", Ts: 1})
 
@@ -1787,7 +2179,7 @@ func TestTaskAdoptionReadAmplification(t *testing.T) {
 		{
 			name: "many small lines",
 			lines: func(t *testing.T) []string {
-				lines := []string{meta, session}
+				lines := []string{meta}
 				message := claudeAssistant(t, map[string]any{"type": "text", "text": "small delta"})
 				for i := range 8192 {
 					lines = append(lines, message)
@@ -1802,85 +2194,140 @@ func TestTaskAdoptionReadAmplification(t *testing.T) {
 			name: "large tool output",
 			lines: func(t *testing.T) []string {
 				large := claudeAssistant(t, map[string]any{"type": "text", "text": strings.Repeat("tool output ", 256<<10)})
-				return []string{meta, session, large, control, segment, large}
+				return []string{meta, large, control, segment, large}
 			},
 		},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			dir := t.TempDir()
-			path := filepath.Join(dir, "task-org-repo-caic-0.jsonl")
-			writeLogFile(t, dir, filepath.Base(path), tc.lines(t)...)
+		for _, compressed := range []bool{false, true} {
+			format := "plain"
+			if compressed {
+				format = "zstd"
+			}
+			t.Run(tc.name+"/"+format, func(t *testing.T) {
+				t.Parallel()
+				dir := t.TempDir()
+				lines := tc.lines(t)
+				tk := &Task{ID: ksid.NewID(), Harness: harness.Claude}
+				name := taskLogFileName(tk)
+				if compressed {
+					name += logCompressedExt
+					writeCompressedLogFile(t, dir, name, seqOf(lines...))
+				} else {
+					writeLogFile(t, dir, name, lines...)
+				}
+				path := filepath.Join(dir, name)
 
-			var logicalBytes int64
-			completePasses := 0
-			openCounted := func(flags int) (*physicalLogReader, *countingLogReader) {
-				file, err := os.OpenFile(filepath.Clean(path), flags, 0o600)
+				var logicalBytes int64
+				completePasses := 0
+				openCounted := func() (*physicalLogReader, func()) {
+					file, err := os.Open(filepath.Clean(path))
+					if err != nil {
+						t.Fatal(err)
+					}
+					info, err := file.Stat()
+					if err != nil {
+						_ = file.Close()
+						t.Fatal(err)
+					}
+					if !compressed {
+						counted := &countingLogReader{file: file, size: info.Size()}
+						return &physicalLogReader{file: file, reader: counted, info: info}, func() {
+							logicalBytes += counted.bytes
+							if counted.complete {
+								completePasses++
+							}
+						}
+					}
+					decoder, err := zstd.NewReader(file)
+					if err != nil {
+						_ = file.Close()
+						t.Fatal(err)
+					}
+					counted := &countingReadCloser{reader: decoder, closeFn: func() error {
+						decoder.Close()
+						return file.Close()
+					}}
+					return &physicalLogReader{file: file, reader: counted, info: info}, func() {
+						logicalBytes += counted.bytes
+						if counted.complete {
+							completePasses++
+						}
+					}
+				}
+
+				headerReader, noteHeader := openCounted()
+				lt, err := loadLogHeaderFromReader(path, headerReader, false, false)
+				if err != nil {
+					_ = headerReader.Close()
+					t.Fatal(err)
+				}
+				if err := headerReader.Close(); err != nil {
+					t.Fatal(err)
+				}
+				noteHeader()
+				if lt.SessionID != "" || lt.AgentVersion != "" {
+					t.Fatalf("header scan found top-level session metadata: (%q, %q)", lt.SessionID, lt.AgentVersion)
+				}
+
+				sessionReader, noteSession := openCounted()
+				session, _, err := loadSemanticSessionMetadataFromReader(path, sessionReader, func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
+					if h != harness.Claude {
+						t.Fatalf("resolver harness = %q, want %q", h, harness.Claude)
+					}
+					return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
+				})
 				if err != nil {
 					t.Fatal(err)
 				}
-				info, err := file.Stat()
+				noteSession()
+				if session.SessionID != "" || session.AgentVersion != "" {
+					t.Fatalf("parser-empty session metadata = (%q, %q), want empty", session.SessionID, session.AgentVersion)
+				}
+
+				messageReader, noteMessages := openCounted()
+				messageSnapshot, err := loadSemanticLogSnapshotFromReader(path, messageReader, func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
+					if h != harness.Claude {
+						t.Fatalf("resolver harness = %q, want %q", h, harness.Claude)
+					}
+					return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
+				})
 				if err != nil {
-					_ = file.Close()
 					t.Fatal(err)
 				}
-				counted := &countingLogReader{file: file, size: info.Size()}
-				return &physicalLogReader{file: file, reader: counted, info: info}, counted
-			}
-			noteRead := func(r *physicalLogReader, counted *countingLogReader) {
-				if err := r.Close(); err != nil {
+				noteMessages()
+				if err := applySemanticSnapshot(lt, semanticLoadedTask(messageSnapshot), messageSnapshot.validationProof(), true); err != nil {
 					t.Fatal(err)
 				}
-				logicalBytes += counted.bytes
-				if counted.complete {
-					completePasses++
+				if lt.Msgs != nil {
+					t.Fatalf("parser-empty message scan = %#v, want nil", lt.Msgs)
 				}
-			}
+				if err := lt.LoadMessagesWithResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+					t.Fatal("parser-empty semantic scan was repeated")
+					return nil, errors.New("parser-empty semantic scan repeated")
+				}); err != nil {
+					t.Fatal(err)
+				}
+				var reopenProofBytes int64
+				if !compressed {
+					// Adoption gives Reopen the completed semantic proof, so its append
+					// validation remains a bounded header/identity read rather than a
+					// fourth complete pass. Measure that production append descriptor,
+					// not an injected reader.
+					reopenProofBytes = reopenWithProofReplay(t, dir, path, tk, messageSnapshot)
+				}
 
-			headerReader, headerCount := openCounted(os.O_RDONLY)
-			lt, err := loadPlainLogHeader(path, headerReader, headerCount, headerCount)
-			if err != nil {
-				t.Fatal(err)
-			}
-			noteRead(headerReader, headerCount)
-			if lt.SessionID == "" || lt.AgentVersion == "" {
-				t.Fatal("authority scan did not capture complete session metadata")
-			}
-
-			messageReader, messageCount := openCounted(os.O_RDONLY)
-			if _, err := loadSemanticLogSnapshotFromReader(path, messageReader, func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-				return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
-			}); err != nil {
-				t.Fatal(err)
-			}
-			logicalBytes += messageCount.bytes
-			if messageCount.complete {
-				completePasses++
-			}
-
-			reopenReader, reopenCount := openCounted(os.O_RDWR | os.O_APPEND)
-			if err := validateRawLogAppend(reopenCount, reopenReader.file, path, &Task{Harness: harness.Claude}); err != nil {
-				t.Fatal(err)
-			}
-			noteRead(reopenReader, reopenCount)
-
-			info, err := os.Stat(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			wantBytes := 3*info.Size() + min(int64(65536), info.Size())
-			if logicalBytes != wantBytes {
-				t.Errorf("logical bytes = %d, want %d", logicalBytes, wantBytes)
-			}
-			if completePasses != 3 {
-				t.Errorf("complete passes = %d, want 3", completePasses)
-			}
-			wantAmplification := float64(wantBytes) / float64(info.Size())
-			gotAmplification := float64(logicalBytes) / float64(info.Size())
-			if gotAmplification != wantAmplification {
-				t.Errorf("read amplification = %.6f, want %.6f", gotAmplification, wantAmplification)
-			}
-		})
+				if completePasses != 3 {
+					t.Errorf("complete passes = %d, want exactly 3", completePasses)
+				}
+				logicalSize := int64(len(strings.Join(lines, "\n")) + 1)
+				if logicalBytes != 3*logicalSize {
+					t.Errorf("logical bytes = %d, want exactly three complete passes of %d", logicalBytes, logicalSize)
+				}
+				if !compressed && (reopenProofBytes == 0 || reopenProofBytes > min(int64(64<<10), logicalSize)) {
+					t.Errorf("Reopen proof bytes = %d, want bounded header/identity tail in (0, %d]", reopenProofBytes, min(int64(64<<10), logicalSize))
+				}
+			})
+		}
 	}
 }
 
@@ -1915,19 +2362,19 @@ func TestCompressTerminalLogs(t *testing.T) {
 		if _, err := os.Stat(compressedPath); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := os.Stat(logSummaryPath(compressedPath)); !os.IsNotExist(err) {
-			t.Fatalf("summary cache stat = %v, want pending EOF proof", err)
-		}
 		if !isLogCompressed(tasks[0].LogPath()) {
 			t.Fatalf("LogPath = %q, want compressed path", tasks[0].LogPath())
 		}
 		compressedSnapshot := tasks[0].ValidatedSnapshot()
-		if compressedSnapshot == nil || len(compressedSnapshot.Messages) != len(snapshot.Messages) {
+		if compressedSnapshot == nil || !compressedSnapshot.EOFValidated || len(compressedSnapshot.Messages) != len(snapshot.Messages) {
 			got := 0
 			if compressedSnapshot != nil {
 				got = len(compressedSnapshot.Messages)
 			}
-			t.Fatalf("compressed snapshot messages = %d, want %d", got, len(snapshot.Messages))
+			t.Fatalf("compressed snapshot messages = %d, want EOF-validated %d", got, len(snapshot.Messages))
+		}
+		if _, err := tasks[0].CacheProofForLog(compressedPath); err != nil {
+			t.Fatalf("compressed replay proof after validation: %v", err)
 		}
 		reloaded, err := LoadLogs(dir)
 		if err != nil {
@@ -1948,6 +2395,50 @@ func TestCompressTerminalLogs(t *testing.T) {
 		}
 		if len(tasks[0].Msgs) != 1 {
 			t.Errorf("Msgs len = %d, want 1", len(tasks[0].Msgs))
+		}
+	})
+
+	t.Run("IgnoresCrashTemporaryOutput", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		tmp := compressedLogTempPath(filepath.Join(dir, "t.jsonl"))
+		if IsLogName(filepath.Base(tmp)) {
+			t.Fatalf("temporary compressed name %q is in the task-log namespace", filepath.Base(tmp))
+		}
+		if err := os.WriteFile(tmp, []byte("interrupted compression"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatalf("LoadLogs with crash temporary output = %v", err)
+		}
+		if len(tasks) != 0 {
+			t.Fatalf("LoadLogs with crash temporary output = %d tasks, want 0", len(tasks))
+		}
+	})
+
+	t.Run("KeepsSourceWhenTemporaryAuthorityValidationFails", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "task", Harness: harness.Claude})
+		path := filepath.Join(dir, "t.jsonl")
+		writeLogFile(t, dir, filepath.Base(path), meta)
+		snapshot, err := loadSemanticLogSnapshot(path, func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			return claudecode.New().NewWire().ParseMessage, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		invalid := *snapshot
+		invalid.Authority.Version = agent.LogVersionV2
+		if _, _, err := compressLogFileWithSnapshot(path, &invalid); err == nil || !strings.Contains(err.Error(), "authority differs") {
+			t.Fatalf("compressLogFileWithSnapshot error = %v, want temporary authority validation failure", err)
+		}
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("plain log stat = %v, want source preserved", err)
+		}
+		if _, err := os.Stat(compressedLogPath(path)); !os.IsNotExist(err) {
+			t.Fatalf("compressed log stat = %v, want no promoted output", err)
 		}
 	})
 
@@ -1985,6 +2476,149 @@ func TestCompressTerminalLogs(t *testing.T) {
 	})
 }
 
+func TestCompressLogFileTransactionFailures(t *testing.T) {
+	t.Parallel()
+	const sourceContents = "task log contents\n"
+	newSource := func(t *testing.T) (string, string, string) {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "task.jsonl")
+		if err := os.WriteFile(path, []byte(sourceContents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path, compressedLogPath(path), compressedLogTempPath(path)
+	}
+	assertSourcePreserved := func(t *testing.T, path string) {
+		t.Helper()
+		got, err := os.ReadFile(path) //nolint:gosec // path is test-controlled.
+		if err != nil {
+			t.Fatalf("source read = %v, want preserved source", err)
+		}
+		if string(got) != sourceContents {
+			t.Fatalf("source contents = %q, want %q", got, sourceContents)
+		}
+	}
+	assertNotExist := func(t *testing.T, path string) {
+		t.Helper()
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("stat %q = %v, want os.ErrNotExist", path, err)
+		}
+	}
+	newOps := func() compressionFileOps {
+		return compressionFileOps{stat: os.Stat, rename: os.Rename, remove: os.Remove}
+	}
+
+	t.Run("FinalSourceValidation", func(t *testing.T) {
+		t.Parallel()
+		path, dst, tmp := newSource(t)
+		ops := newOps()
+		promoted := false
+		ops.rename = func(oldPath, newPath string) error {
+			err := os.Rename(oldPath, newPath)
+			promoted = err == nil
+			return err
+		}
+		ops.stat = func(name string) (os.FileInfo, error) {
+			if name == path && promoted {
+				return nil, errors.New("forced final source validation failure")
+			}
+			return os.Stat(name)
+		}
+
+		if _, _, err := compressLogFileWithSnapshotAndOps(path, nil, ops); err == nil || !strings.Contains(err.Error(), "forced final source validation failure") {
+			t.Fatalf("compression error = %v, want final source validation failure", err)
+		}
+		assertSourcePreserved(t, path)
+		assertNotExist(t, dst)
+		assertNotExist(t, tmp)
+	})
+
+	t.Run("DestinationValidation", func(t *testing.T) {
+		t.Parallel()
+		path, dst, tmp := newSource(t)
+		ops := newOps()
+		destinationStats := 0
+		ops.stat = func(name string) (os.FileInfo, error) {
+			if name == dst {
+				destinationStats++
+				if destinationStats == 1 {
+					return nil, errors.New("forced destination validation failure")
+				}
+			}
+			return os.Stat(name)
+		}
+
+		if _, _, err := compressLogFileWithSnapshotAndOps(path, nil, ops); err == nil || !strings.Contains(err.Error(), "forced destination validation failure") {
+			t.Fatalf("compression error = %v, want destination validation failure", err)
+		}
+		assertSourcePreserved(t, path)
+		assertNotExist(t, dst)
+		assertNotExist(t, tmp)
+	})
+
+	t.Run("DestinationIdentity", func(t *testing.T) {
+		t.Parallel()
+		path, dst, tmp := newSource(t)
+		ops := newOps()
+		destinationStats := 0
+		const replacement = "replacement log"
+		var promoted *os.File
+		ops.stat = func(name string) (os.FileInfo, error) {
+			if name == dst {
+				destinationStats++
+				if destinationStats == 1 {
+					var err error
+					promoted, err = os.Open(dst) //nolint:gosec // path is test-controlled.
+					if err != nil {
+						return nil, err
+					}
+					if err := os.Remove(dst); err != nil {
+						return nil, err
+					}
+					if err := os.WriteFile(dst, []byte(replacement), 0o600); err != nil {
+						return nil, err
+					}
+				}
+			}
+			return os.Stat(name)
+		}
+
+		if _, _, err := compressLogFileWithSnapshotAndOps(path, nil, ops); err == nil || !strings.Contains(err.Error(), "identity changed") {
+			t.Fatalf("compression error = %v, want destination identity failure", err)
+		}
+		if err := promoted.Close(); err != nil {
+			t.Fatal(err)
+		}
+		assertSourcePreserved(t, path)
+		got, err := os.ReadFile(dst) //nolint:gosec // path is test-controlled.
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != replacement {
+			t.Fatalf("replacement destination = %q, want %q", got, replacement)
+		}
+		assertNotExist(t, tmp)
+	})
+
+	t.Run("SourceRemoval", func(t *testing.T) {
+		t.Parallel()
+		path, dst, tmp := newSource(t)
+		ops := newOps()
+		ops.remove = func(name string) error {
+			if name == path {
+				return errors.New("forced source removal failure")
+			}
+			return os.Remove(name)
+		}
+
+		if _, _, err := compressLogFileWithSnapshotAndOps(path, nil, ops); err == nil || !strings.Contains(err.Error(), "forced source removal failure") {
+			t.Fatalf("compression error = %v, want source removal failure", err)
+		}
+		assertSourcePreserved(t, path)
+		assertNotExist(t, dst)
+		assertNotExist(t, tmp)
+	})
+}
+
 func TestTsToTime(t *testing.T) {
 	t.Parallel()
 	// 1735689600.5 = 2025-01-01T00:00:00.5Z (exact in float64).
@@ -2003,6 +2637,91 @@ func TestTsToTime(t *testing.T) {
 
 func TestLoadedTask(t *testing.T) {
 	t.Parallel()
+	t.Run("replay_proofs_and_scans_require_snapshot_append_authority", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "task.jsonl")
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: int(agent.LogVersionV1), Prompt: "authority", Harness: harness.Claude})
+		first := claudeAssistant(t, map[string]any{"type": "text", "text": "first"})
+		second := claudeAssistant(t, map[string]any{"type": "text", "text": "second"})
+		writeLogFile(t, dir, filepath.Base(path), meta, first)
+		tasks, err := LoadLogs(dir)
+		if err != nil || len(tasks) != 1 {
+			t.Fatalf("LoadLogs = %d tasks, %v", len(tasks), err)
+		}
+		lt := tasks[0]
+		lt.SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			return claudecode.New().NewWire().ParseMessage, nil
+		})
+		initial := lt.ValidatedSnapshot()
+		if initial == nil {
+			t.Fatal("inventory load did not retain a validation snapshot")
+		}
+		if _, err := lt.CacheProofForLog(path); err != nil {
+			t.Fatalf("initial replay proof: %v", err)
+		}
+
+		file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // path is test-controlled.
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, writeErr := file.WriteString(second + "\n")
+		if closeErr := file.Close(); writeErr != nil || closeErr != nil {
+			t.Fatalf("append raw log = %v, %v", writeErr, closeErr)
+		}
+		proof, err := lt.CacheProofForLog(path)
+		if err != nil || proof.Size <= initial.Size {
+			t.Fatalf("append replay proof = %+v, %v; want larger valid proof", proof, err)
+		}
+		if _, err := lt.ScanMessagesWithContext(t.Context(), func(agent.ParsedMessage) error { return nil }); err != nil {
+			t.Fatalf("append replay scan: %v", err)
+		}
+		retained := lt.ValidatedSnapshot()
+		if retained == nil || retained.Size != proof.Size {
+			t.Fatalf("retained append snapshot = %#v, want size %d", retained, proof.Size)
+		}
+
+		forgedFirst := claudeAssistant(t, map[string]any{"type": "text", "text": "bogus"})
+		third := claudeAssistant(t, map[string]any{"type": "text", "text": "third"})
+		writeLogFile(t, dir, filepath.Base(path), meta, forgedFirst, second, third)
+		if _, err := lt.ScanMessagesWithContext(t.Context(), func(agent.ParsedMessage) error { return nil }); err == nil || !strings.Contains(err.Error(), "immutable prefix changed") {
+			t.Fatalf("replay scan error = %v, want immutable-prefix rejection", err)
+		}
+		if got := lt.ValidatedSnapshot(); got != retained {
+			t.Fatal("immutable-prefix rejection replaced retained snapshot")
+		}
+		writeLogFile(t, dir, filepath.Base(path), meta, first, second)
+
+		contents, err := os.ReadFile(path) //nolint:gosec // path is test-controlled.
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, contents, 0o600); err != nil { //nolint:gosec // path is test-controlled.
+			t.Fatal(err)
+		}
+		future := time.Now().Add(time.Hour)
+		if err := os.Chtimes(path, future, future); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := lt.CacheProofForLog(path); err == nil {
+			t.Fatal("replay proof accepted same-size mutation outside append growth")
+		}
+		if _, err := lt.ScanMessagesWithContext(t.Context(), func(agent.ParsedMessage) error { return nil }); err == nil || !strings.Contains(err.Error(), "outside append growth") {
+			t.Fatalf("replay scan error = %v, want append-growth rejection", err)
+		}
+		if got := lt.ValidatedSnapshot(); got != retained {
+			t.Fatal("rejected replay scan replaced retained snapshot")
+		}
+
+		changedHeader := strings.Replace(meta, "{", "{ ", 1)
+		writeLogFile(t, dir, filepath.Base(path), changedHeader, first, second)
+		if _, err := lt.CacheProofForLog(path); err == nil {
+			t.Fatal("replay proof fallback accepted changed raw header")
+		}
+		if _, err := lt.ScanMessagesWithContext(t.Context(), func(agent.ParsedMessage) error { return nil }); err == nil || !strings.Contains(err.Error(), "immutable header changed") {
+			t.Fatalf("replay scan error = %v, want immutable-header rejection", err)
+		}
+	})
 	t.Run("StreamMessages", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
@@ -2077,6 +2796,45 @@ func TestLoadedTask(t *testing.T) {
 		loaded, ok := tasks[0].Msgs[0].(*agent.LogMessage)
 		if !ok || loaded.Line != "creating runtime" {
 			t.Fatalf("loaded message = %#v, want provisioning log", tasks[0].Msgs[0])
+		}
+	})
+
+	t.Run("ScanMessagesIncludesReplayControls", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: int(agent.LogVersionV2), Prompt: "replay controls", Harness: harness.Claude})
+		writeLogFile(t, dir, "t.jsonl", meta,
+			`{"t":"exit","exit_code":2,"error":"failed"}`,
+			`{"t":"log","line":"provisioning"}`,
+			`{"t":"context_cleared"}`,
+		)
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lt := tasks[0]
+		lt.SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
+		})
+		var replayed []string
+		if _, err := lt.ScanMessagesWithContext(t.Context(), func(parsed agent.ParsedMessage) error {
+			replayed = append(replayed, parsed.Message.Type())
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if want := []string{"caic_exit", "log", "system"}; !slices.Equal(replayed, want) {
+			t.Fatalf("replay controls = %q, want %q", replayed, want)
+		}
+		if err := lt.LoadMessages(); err != nil {
+			t.Fatal(err)
+		}
+		loaded := make([]string, 0, len(lt.Msgs))
+		for _, message := range lt.Msgs {
+			loaded = append(loaded, message.Type())
+		}
+		if !slices.Equal(replayed, loaded) {
+			t.Fatalf("replay controls = %q, live semantic controls = %q", replayed, loaded)
 		}
 	})
 
@@ -2321,8 +3079,8 @@ func TestLoadedTask(t *testing.T) {
 			if lt.Result == nil {
 				t.Fatal("Result not restored from tail")
 			}
-			if calls >= int(maxTailLoadBytes/1024)+5 {
-				t.Errorf("parsed %d records, want fewer than the %d records in the full log", calls, int(maxTailLoadBytes/1024)+5)
+			if want := int(maxTailLoadBytes/1024) + 5; calls != want {
+				t.Errorf("parsed %d records, want every one of %d physical native records", calls, want)
 			}
 		})
 		t.Run("CompressedTailKeepsBoundedRecentLines", func(t *testing.T) {
@@ -2391,5 +3149,240 @@ func TestParseState(t *testing.T) {
 				t.Errorf("parseState(%q) = %v, want %v", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestExportDiscussionUsesValidatedPhysicalReader(t *testing.T) {
+	t.Parallel()
+	meta := mustJSON(t, agent.MetaMessage{
+		MessageType: "caic_meta",
+		Version:     int(agent.LogVersionV1),
+		Prompt:      "export this",
+		Harness:     harness.Claude,
+	})
+	for _, compressed := range []bool{false, true} {
+		format := "plain"
+		if compressed {
+			format = "zstd"
+		}
+		t.Run(format, func(t *testing.T) {
+			t.Parallel()
+			path := writePhysicalTestLog(t, compressed, meta, `{"type":"text","text":"visible"}`)
+			markdown, err := ExportDiscussion(path, func(got harness.Name) (func([]byte) ([]agent.Message, error), error) {
+				if got != harness.Claude {
+					t.Fatalf("resolver harness = %q, want claude", got)
+				}
+				return func(line []byte) ([]agent.Message, error) {
+					var raw struct {
+						Text string `json:"text"`
+					}
+					if err := json.Unmarshal(line, &raw); err != nil {
+						return nil, err
+					}
+					return []agent.Message{&agent.TextMessage{Text: raw.Text}}, nil
+				}, nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(markdown, "**Prompt**: export this") || !strings.Contains(markdown, "## Assistant\n\nvisible") {
+				t.Fatalf("exported discussion = %q", markdown)
+			}
+		})
+	}
+}
+
+func TestSemanticSessionAndTailParseEveryNativeRecord(t *testing.T) {
+	t.Parallel()
+	meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: int(agent.LogVersionV1), Harness: harness.Claude, Prompt: "parse all"})
+	path := writePhysicalTestLog(t, false, meta,
+		`{"type":"assistant","n":1}`, `{"type":"assistant","n":2}`, `{"type":"assistant","n":3}`)
+	resolver := func(calls *int) NativeParserResolver {
+		return func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			if h != harness.Claude {
+				t.Fatalf("resolver harness = %q, want claude", h)
+			}
+			return func([]byte) ([]agent.Message, error) {
+				*calls++
+				return []agent.Message{&agent.InitMessage{SessionID: "native", Version: "v"}}, nil
+			}, nil
+		}
+	}
+	sessionCalls := 0
+	if _, _, err := loadSemanticSessionMetadata(path, resolver(&sessionCalls)); err != nil {
+		t.Fatal(err)
+	}
+	if sessionCalls != 3 {
+		t.Fatalf("session native parser calls = %d, want every 3 physical records", sessionCalls)
+	}
+	tailCalls := 0
+	if _, err := loadSemanticTailSnapshot(path, resolver(&tailCalls), 1<<20); err != nil {
+		t.Fatal(err)
+	}
+	if tailCalls != 3 {
+		t.Fatalf("tail native parser calls = %d, want every 3 physical records", tailCalls)
+	}
+
+	v2Meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: int(agent.LogVersionV2), Harness: harness.Claude, Prompt: "strict"})
+	v2Path := writePhysicalTestLog(t, false, v2Meta,
+		`{"t":"caic_session","session_id":"session","agent_version":"v"}`, `{"t":"unknown"}`)
+	if _, _, err := loadSemanticSessionMetadata(v2Path, func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+		return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
+	}); err == nil || !strings.Contains(err.Error(), "unknown top-level t") {
+		t.Fatalf("v2 session scan error = %v, want later strict parser rejection", err)
+	}
+}
+
+func TestV1ProductionReadPassMatrix(t *testing.T) {
+	t.Parallel()
+	meta := mustJSON(t, agent.MetaMessage{
+		MessageType: "caic_meta",
+		Version:     int(agent.LogVersionV1),
+		Prompt:      "pass count",
+		Harness:     harness.Claude,
+	})
+	for _, tc := range []struct {
+		name       string
+		nativeLine string
+	}{
+		{
+			name:       "native-session",
+			nativeLine: `{"type":"session","session_id":"native-session","version":"native"}`,
+		},
+		{
+			name:       "no-top-level-session",
+			nativeLine: `{"jsonrpc":"2.0","method":"session/started","params":{"id":"native-session"}}`,
+		},
+	} {
+		for _, compressed := range []bool{false, true} {
+			format := "plain"
+			if compressed {
+				format = "zstd"
+			}
+			t.Run(tc.name+"/"+format, func(t *testing.T) {
+				t.Parallel()
+				dir := t.TempDir()
+				tk := &Task{ID: ksid.NewID(), Harness: harness.Claude}
+				name := taskLogFileName(tk)
+				if compressed {
+					name += ".zst"
+					writeCompressedLogFile(t, dir, name, seqOf(meta, tc.nativeLine))
+				} else {
+					writeLogFile(t, dir, name, meta, tc.nativeLine)
+				}
+				path := filepath.Join(dir, name)
+				logicalSize := int64(len(meta) + len(tc.nativeLine) + 2)
+				var logicalBytes int64
+				completePasses := 0
+
+				openCounted := func() (*physicalLogReader, func()) {
+					file, err := os.Open(filepath.Clean(path))
+					if err != nil {
+						t.Fatal(err)
+					}
+					info, err := file.Stat()
+					if err != nil {
+						_ = file.Close()
+						t.Fatal(err)
+					}
+					if !compressed {
+						counted := &countingLogReader{file: file, size: info.Size()}
+						return &physicalLogReader{file: file, reader: counted, info: info}, func() {
+							_ = counted.Close()
+							logicalBytes += counted.bytes
+							if counted.complete {
+								completePasses++
+							}
+						}
+					}
+					decoder, err := zstd.NewReader(file)
+					if err != nil {
+						_ = file.Close()
+						t.Fatal(err)
+					}
+					counted := &countingReadCloser{reader: decoder, closeFn: func() error {
+						decoder.Close()
+						return file.Close()
+					}}
+					return &physicalLogReader{file: file, reader: counted, info: info}, func() {
+						_ = counted.Close()
+						logicalBytes += counted.bytes
+						if counted.complete {
+							completePasses++
+						}
+					}
+				}
+
+				headerReader, closeHeader := openCounted()
+				var lt *LoadedTask
+				var err error
+				lt, err = loadLogHeaderFromReader(path, headerReader, false, false)
+				if err != nil {
+					closeHeader()
+					t.Fatal(err)
+				}
+				closeHeader()
+				if lt.SessionID != "" || lt.AgentVersion != "" {
+					t.Fatalf("header scan treated native record as task session metadata: (%q, %q)", lt.SessionID, lt.AgentVersion)
+				}
+
+				sessionReader, closeSession := openCounted()
+				nativeCalls := 0
+				session, _, err := loadSemanticSessionMetadataFromReader(path, sessionReader, func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
+					if h != harness.Claude {
+						t.Fatalf("resolver harness = %q, want %q", h, harness.Claude)
+					}
+					return func([]byte) ([]agent.Message, error) {
+						nativeCalls++
+						return []agent.Message{&agent.InitMessage{SessionID: "native-session", Version: "native"}}, nil
+					}, nil
+				})
+				if err != nil {
+					closeSession()
+					t.Fatal(err)
+				}
+				closeSession()
+				if session.SessionID != "native-session" || nativeCalls != 1 {
+					t.Fatalf("session/native calls = (%q, %d), want native-session/1", session.SessionID, nativeCalls)
+				}
+
+				messageReader, closeMessages := openCounted()
+				messageSnapshot, err := loadSemanticLogSnapshotFromReader(path, messageReader, func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
+					if h != harness.Claude {
+						t.Fatalf("resolver harness = %q, want %q", h, harness.Claude)
+					}
+					return func(line []byte) ([]agent.Message, error) {
+						nativeCalls++
+						return []agent.Message{&agent.TextMessage{Text: string(line)}}, nil
+					}, nil
+				})
+				if err != nil {
+					closeMessages()
+					t.Fatal(err)
+				}
+				closeMessages()
+				if !compressed {
+					// Adoption passes its completed EOF proof to the task before a
+					// later cleanup Reopen. Reopen must use only a bounded current
+					// header/identity check rather than adding a fourth full pass.
+					// Attach and commit a replay writer after proving the same raw header.
+					reopenWithProofReplay(t, dir, path, tk, messageSnapshot)
+				}
+				if nativeCalls != 2 {
+					t.Fatalf("native parser calls = %d, want one session and one message scan", nativeCalls)
+				}
+
+				wantCompletePasses := 3 // header, native/no-top session, and semantic scan
+				if completePasses != wantCompletePasses {
+					t.Errorf("complete passes = %d, want %d", completePasses, wantCompletePasses)
+				}
+				if logicalBytes < int64(completePasses)*logicalSize {
+					t.Errorf("logical bytes = %d, less than %d completed passes of %d", logicalBytes, completePasses, logicalSize)
+				}
+				if logicalBytes > 3*logicalSize+min(int64(65536), logicalSize) {
+					t.Errorf("logical bytes = %d, exceeds three complete passes plus bounded tail (%d)", logicalBytes, 3*logicalSize+min(int64(65536), logicalSize))
+				}
+			})
+		}
 	}
 }

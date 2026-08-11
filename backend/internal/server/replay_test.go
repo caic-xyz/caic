@@ -9,57 +9,9 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
 )
-
-func TestNewReplayFilter(t *testing.T) {
-	t.Parallel()
-	// eventreplay.NewFilter is the streaming form of filterHistoryForReplay; it
-	// must produce the same surviving messages, in order, for any sequence.
-	td := func() agent.Message { return &agent.TextDeltaMessage{} }
-	tf := func() agent.Message { return &agent.TextMessage{} }
-	hd := func() agent.Message { return &agent.ThinkingDeltaMessage{} }
-	hf := func() agent.Message { return &agent.ThinkingMessage{} }
-	tool := func() agent.Message { return &agent.ToolUseMessage{} }
-	tod := func() agent.Message { return &agent.ToolOutputDeltaMessage{ToolUseID: "t1", Delta: "x"} }
-	tr := func() agent.Message { return &agent.ToolResultMessage{ToolUseID: "t1"} }
-
-	cases := map[string][]agent.Message{
-		"deltas then final":              {td(), td(), tf()},
-		"deltas no final":                {td(), td()},
-		"thinking run":                   {hd(), hf()},
-		"mixed delta kinds":              {td(), hd(), hf()},
-		"tool breaks run":                {td(), tool(), tf()},
-		"final without deltas":           {tf()},
-		"empty":                          {},
-		"trailing run then text":         {tf(), td(), td()},
-		"tool output deltas then result": {tod(), tod(), tr()},
-		"tool output deltas no result":   {tod(), tod()},
-		"tool result without deltas":     {tr()},
-	}
-	for name, in := range cases {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			want := filterHistoryForReplay(in)
-			var got []agent.Message
-			push, flush := eventreplay.NewFilter(func(m agent.ParsedMessage) { got = append(got, m.Message) })
-			for _, m := range in {
-				push(agent.ParsedMessage{Message: m})
-			}
-			flush()
-			if len(got) != len(want) {
-				t.Fatalf("got %d messages, want %d", len(got), len(want))
-			}
-			for i := range want {
-				if got[i] != want[i] {
-					t.Errorf("message %d: got %T, want %T", i, got[i], want[i])
-				}
-			}
-		})
-	}
-}
 
 func TestGenericConvertInitHasHarness(t *testing.T) {
 	t.Parallel()

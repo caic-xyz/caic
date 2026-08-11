@@ -3,45 +3,17 @@
 package agent
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
-	"iter"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/klauspost/compress/zstd"
-
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
-type errorReader struct{}
-
 type v1ExportTestLine struct {
 	Type string `json:"type"`
-}
-
-func (errorReader) Read([]byte) (int, error) {
-	return 0, errors.New("read failed")
-}
-
-type testZstdReadCloser struct {
-	dec  *zstd.Decoder
-	file *os.File
-}
-
-func (r *testZstdReadCloser) Read(p []byte) (int, error) {
-	return r.dec.Read(p)
-}
-
-func (r *testZstdReadCloser) Close() error {
-	r.dec.Close()
-	return r.file.Close()
 }
 
 // v1ExportParseFn is a minimal parser for export tests. It recognises the
@@ -120,123 +92,49 @@ func v1ExportParseFn(line []byte) ([]Message, error) {
 	}
 }
 
-// writeJSONL writes lines to a temp JSONL file and returns its path.
-func writeJSONL(t *testing.T, lines []string) string {
-	path := filepath.Join(t.TempDir(), "test.jsonl")
-	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return path
+// v1ExportFixture is an in-memory renderer fixture. Physical-log export is
+// covered through task.ExportDiscussion; renderer tests keep only their
+// harness-neutral input messages here.
+func v1ExportFixture(lines []string) []string {
+	return lines
 }
 
-func seqOf(lines ...string) iter.Seq[[]byte] {
-	return func(yield func([]byte) bool) {
-		for _, line := range lines {
-			if !yield([]byte(line)) {
-				return
-			}
-		}
-	}
-}
-
-func writeCompressedJSONL(t *testing.T, lines iter.Seq[[]byte]) string {
-	compressed := filepath.Join(t.TempDir(), "test.jsonl.zst")
-	out, err := os.OpenFile(filepath.Clean(compressed), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	enc, err := zstd.NewWriter(out)
-	if err != nil {
-		_ = out.Close()
-		t.Fatal(err)
-	}
-	var writeErr error
-	for line := range lines {
-		if _, err := enc.Write(line); err != nil {
-			writeErr = err
-			break
-		}
-		if _, err := enc.Write([]byte("\n")); err != nil {
-			writeErr = err
-			break
-		}
-	}
-	if err := errors.Join(writeErr, enc.Close(), out.Close()); err != nil {
-		t.Fatal(err)
-	}
-	return compressed
-}
-
-func openTestLogReader(t *testing.T, path string) io.ReadCloser {
-	f, err := os.Open(filepath.Clean(path))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasSuffix(path, ".zst") {
-		return f
-	}
-	d, err := zstd.NewReader(f)
-	if err != nil {
-		_ = f.Close()
-		t.Fatal(err)
-	}
-	return &testZstdReadCloser{dec: d, file: f}
-}
-
-func exportDiscussionV1Path(t *testing.T, path string) (string, error) {
-	r := openTestLogReader(t, path)
-	t.Cleanup(func() {
-		if err := r.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	return exportDiscussionV1Reader(r, path, v1ExportParseFn)
-}
-
-// exportDiscussionV1Reader is test-only fixture decoding that keeps the agent
-// production renderer independent of physical log loading.
-func exportDiscussionV1Reader(r io.Reader, src string, parseFn func([]byte) ([]Message, error)) (string, error) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
+func renderDiscussionV1Fixture(lines []string) (string, error) {
 	var meta *MetaMessage
 	var result *MetaResultMessage
 	var pr *MetaPRMessage
 	var messages []Message
-	for scanner.Scan() {
-		line := scanner.Bytes()
+	for _, line := range lines {
 		var env v1ExportTestLine
-		if err := json.Unmarshal(line, &env); err != nil {
+		if json.Unmarshal([]byte(line), &env) != nil {
 			continue
 		}
 		switch env.Type {
 		case "caic_meta":
 			var decoded MetaMessage
-			if json.Unmarshal(line, &decoded) == nil {
+			if json.Unmarshal([]byte(line), &decoded) == nil {
 				meta = &decoded
 			}
 		case "caic_result":
 			var decoded MetaResultMessage
-			if json.Unmarshal(line, &decoded) == nil {
+			if json.Unmarshal([]byte(line), &decoded) == nil {
 				result = &decoded
 			}
 		case "caic_pr":
 			var decoded MetaPRMessage
-			if json.Unmarshal(line, &decoded) == nil {
+			if json.Unmarshal([]byte(line), &decoded) == nil {
 				pr = &decoded
 			}
 		case "caic_diff_stat", "caic_exit", "caic_model_info", "caic_stripped_env", "caic_session", "caic_init", PendingUserActionMessageType:
 		default:
-			parsed, err := parseFn(line)
+			parsed, err := v1ExportParseFn([]byte(line))
 			if err == nil {
 				messages = append(messages, parsed...)
 			}
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("scan %s: %w", src, err)
-	}
 	if meta == nil {
-		return "", fmt.Errorf("%s: no caic_meta header", src)
+		return "", errors.New("no caic_meta header")
 	}
 	return RenderDiscussion(meta, result, pr, messages), nil
 }
@@ -255,7 +153,7 @@ func jsonStr(s string) string {
 	return string(b)
 }
 
-func TestExportDiscussion(t *testing.T) {
+func TestRenderDiscussion(t *testing.T) {
 	t.Parallel()
 
 	t.Run("valid", func(t *testing.T) {
@@ -263,7 +161,7 @@ func TestExportDiscussion(t *testing.T) {
 
 		t.Run("full_conversation", func(t *testing.T) {
 			t.Parallel()
-			path := writeJSONL(t, []string{
+			lines := v1ExportFixture([]string{
 				v1MetaLine("fix the bug", "pi"),
 				`{"type":"user_input","text":"fix the bug"}`,
 				`{"type":"thinking","text":"Let me analyze the issue carefully and find the root cause."}`,
@@ -276,7 +174,7 @@ func TestExportDiscussion(t *testing.T) {
 				`{"type":"caic_result","state":"completed","cost_usd":0.05,"duration":120,"num_turns":3}`,
 			})
 
-			md, err := exportDiscussionV1Path(t, path)
+			md, err := renderDiscussionV1Fixture(lines)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -303,11 +201,11 @@ func TestExportDiscussion(t *testing.T) {
 
 		t.Run("metadata_only", func(t *testing.T) {
 			t.Parallel()
-			path := writeJSONL(t, []string{
+			lines := v1ExportFixture([]string{
 				v1MetaLine("hello", "claude"),
 			})
 
-			md, err := exportDiscussionV1Path(t, path)
+			md, err := renderDiscussionV1Fixture(lines)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -317,32 +215,15 @@ func TestExportDiscussion(t *testing.T) {
 			assertContains(t, md, "---")
 		})
 
-		t.Run("compressed_log", func(t *testing.T) {
-			t.Parallel()
-			path := writeCompressedJSONL(t, seqOf(
-				v1MetaLine("compress me", "pi"),
-				`{"type":"user_input","text":"hello"}`,
-				`{"type":"text","text":"done"}`,
-				`{"type":"caic_result","state":"completed"}`,
-			))
-
-			md, err := exportDiscussionV1Path(t, path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertContains(t, md, "**Prompt**: compress me")
-			assertContains(t, md, "## Assistant\n\ndone")
-		})
-
 		t.Run("with_PR_info", func(t *testing.T) {
 			t.Parallel()
-			path := writeJSONL(t, []string{
+			lines := v1ExportFixture([]string{
 				v1MetaLine("add feature", "claude"),
 				`{"type":"text","text":"done"}`,
 				`{"type":"caic_pr","forge_owner":"octo","forge_repo":"app","forge_pr":42}`,
 			})
 
-			md, err := exportDiscussionV1Path(t, path)
+			md, err := renderDiscussionV1Fixture(lines)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -352,9 +233,9 @@ func TestExportDiscussion(t *testing.T) {
 		t.Run("with_flags", func(t *testing.T) {
 			t.Parallel()
 			line := `{"type":"caic_meta","version":1,"prompt":"test","harness":"pi","repos":[],"started_at":"2025-01-15T10:00:00Z","tailscale":true,"display":true}`
-			path := writeJSONL(t, []string{line})
+			lines := v1ExportFixture([]string{line})
 
-			md, err := exportDiscussionV1Path(t, path)
+			md, err := renderDiscussionV1Fixture(lines)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -364,9 +245,9 @@ func TestExportDiscussion(t *testing.T) {
 		t.Run("with_repos", func(t *testing.T) {
 			t.Parallel()
 			line := `{"type":"caic_meta","version":1,"prompt":"test","harness":"pi","repos":[{"name":"app","base_branch":"main","branch":"fix-bug"}],"started_at":"2025-01-15T10:00:00Z"}`
-			path := writeJSONL(t, []string{line})
+			lines := v1ExportFixture([]string{line})
 
-			md, err := exportDiscussionV1Path(t, path)
+			md, err := renderDiscussionV1Fixture(lines)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -375,13 +256,13 @@ func TestExportDiscussion(t *testing.T) {
 
 		t.Run("with_error_result", func(t *testing.T) {
 			t.Parallel()
-			path := writeJSONL(t, []string{
+			lines := v1ExportFixture([]string{
 				v1MetaLine("task", "pi"),
 				`{"type":"text","text":"something went wrong"}`,
 				`{"type":"caic_result","state":"failed","error":"container died","cost_usd":0.01,"duration":10}`,
 			})
 
-			md, err := exportDiscussionV1Path(t, path)
+			md, err := renderDiscussionV1Fixture(lines)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -391,12 +272,12 @@ func TestExportDiscussion(t *testing.T) {
 
 		t.Run("tool_error", func(t *testing.T) {
 			t.Parallel()
-			path := writeJSONL(t, []string{
+			lines := v1ExportFixture([]string{
 				v1MetaLine("task", "pi"),
 				`{"type":"tool_result","tool_use_id":"t1","error":"command not found"}`,
 			})
 
-			md, err := exportDiscussionV1Path(t, path)
+			md, err := renderDiscussionV1Fixture(lines)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -405,13 +286,13 @@ func TestExportDiscussion(t *testing.T) {
 
 		t.Run("subagent_events", func(t *testing.T) {
 			t.Parallel()
-			path := writeJSONL(t, []string{
+			lines := v1ExportFixture([]string{
 				v1MetaLine("task", "pi"),
 				`{"type":"subagent_start","task_id":"sub1","description":"analyze logs"}`,
 				`{"type":"subagent_end","task_id":"sub1","status":"completed"}`,
 			})
 
-			md, err := exportDiscussionV1Path(t, path)
+			md, err := renderDiscussionV1Fixture(lines)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -421,12 +302,12 @@ func TestExportDiscussion(t *testing.T) {
 
 		t.Run("compaction_boundary", func(t *testing.T) {
 			t.Parallel()
-			path := writeJSONL(t, []string{
+			lines := v1ExportFixture([]string{
 				v1MetaLine("task", "pi"),
 				`{"type":"system","subtype":"compact_boundary"}`,
 			})
 
-			md, err := exportDiscussionV1Path(t, path)
+			md, err := renderDiscussionV1Fixture(lines)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -435,7 +316,7 @@ func TestExportDiscussion(t *testing.T) {
 
 		t.Run("skips_caic_control_records", func(t *testing.T) {
 			t.Parallel()
-			path := writeJSONL(t, []string{
+			lines := v1ExportFixture([]string{
 				v1MetaLine("task", "pi"),
 				`{"type":"caic_diff_stat","diff_stat":[]}`,
 				`{"type":"caic_exit","exit_code":0}`,
@@ -443,7 +324,7 @@ func TestExportDiscussion(t *testing.T) {
 				`{"type":"text","text":"visible"}`,
 			})
 
-			md, err := exportDiscussionV1Path(t, path)
+			md, err := renderDiscussionV1Fixture(lines)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -456,12 +337,12 @@ func TestExportDiscussion(t *testing.T) {
 		t.Run("thinking_truncated", func(t *testing.T) {
 			t.Parallel()
 			long := strings.Repeat("a", 1000)
-			path := writeJSONL(t, []string{
+			lines := v1ExportFixture([]string{
 				v1MetaLine("task", "pi"),
 				`{"type":"thinking","text":` + jsonStr(long) + `}`,
 			})
 
-			md, err := exportDiscussionV1Path(t, path)
+			md, err := renderDiscussionV1Fixture(lines)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -472,12 +353,12 @@ func TestExportDiscussion(t *testing.T) {
 
 		t.Run("duration_hours", func(t *testing.T) {
 			t.Parallel()
-			path := writeJSONL(t, []string{
+			lines := v1ExportFixture([]string{
 				v1MetaLine("task", "pi"),
 				`{"type":"caic_result","state":"completed","duration":7200}`,
 			})
 
-			md, err := exportDiscussionV1Path(t, path)
+			md, err := renderDiscussionV1Fixture(lines)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -486,12 +367,12 @@ func TestExportDiscussion(t *testing.T) {
 
 		t.Run("duration_seconds", func(t *testing.T) {
 			t.Parallel()
-			path := writeJSONL(t, []string{
+			lines := v1ExportFixture([]string{
 				v1MetaLine("task", "pi"),
 				`{"type":"caic_result","state":"completed","duration":45}`,
 			})
 
-			md, err := exportDiscussionV1Path(t, path)
+			md, err := renderDiscussionV1Fixture(lines)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -500,7 +381,7 @@ func TestExportDiscussion(t *testing.T) {
 
 		t.Run("skips_empty_tool_use", func(t *testing.T) {
 			t.Parallel()
-			path := writeJSONL(t, []string{
+			lines := v1ExportFixture([]string{
 				v1MetaLine("task", "pi"),
 				`{"type":"text","text":"Before"}`,
 				`{"type":"tool_use","id":"t1","name":"Read","input":{}}`,
@@ -508,7 +389,7 @@ func TestExportDiscussion(t *testing.T) {
 				`{"type":"text","text":"After"}`,
 			})
 
-			md, err := exportDiscussionV1Path(t, path)
+			md, err := renderDiscussionV1Fixture(lines)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -522,13 +403,13 @@ func TestExportDiscussion(t *testing.T) {
 
 		t.Run("skips_null_tool_use_input", func(t *testing.T) {
 			t.Parallel()
-			path := writeJSONL(t, []string{
+			lines := v1ExportFixture([]string{
 				v1MetaLine("task", "pi"),
 				`{"type":"tool_use","id":"t1","name":"Read","input":null}`,
 				`{"type":"text","text":"done"}`,
 			})
 
-			md, err := exportDiscussionV1Path(t, path)
+			md, err := renderDiscussionV1Fixture(lines)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -537,12 +418,12 @@ func TestExportDiscussion(t *testing.T) {
 
 		t.Run("write_tool_preview", func(t *testing.T) {
 			t.Parallel()
-			path := writeJSONL(t, []string{
+			lines := v1ExportFixture([]string{
 				v1MetaLine("task", "pi"),
 				`{"type":"tool_use","id":"t1","name":"Write","input":{"path":"out.txt","content":"hello world"}}`,
 			})
 
-			md, err := exportDiscussionV1Path(t, path)
+			md, err := renderDiscussionV1Fixture(lines)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -552,12 +433,12 @@ func TestExportDiscussion(t *testing.T) {
 
 		t.Run("read_tool_path", func(t *testing.T) {
 			t.Parallel()
-			path := writeJSONL(t, []string{
+			lines := v1ExportFixture([]string{
 				v1MetaLine("task", "pi"),
 				`{"type":"tool_use","id":"t1","name":"Read","input":{"path":"main.go"}}`,
 			})
 
-			md, err := exportDiscussionV1Path(t, path)
+			md, err := renderDiscussionV1Fixture(lines)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -566,12 +447,12 @@ func TestExportDiscussion(t *testing.T) {
 
 		t.Run("grep_tool_pattern", func(t *testing.T) {
 			t.Parallel()
-			path := writeJSONL(t, []string{
+			lines := v1ExportFixture([]string{
 				v1MetaLine("task", "pi"),
 				`{"type":"tool_use","id":"t1","name":"Grep","input":{"pattern":"TODO","path":"."}}`,
 			})
 
-			md, err := exportDiscussionV1Path(t, path)
+			md, err := renderDiscussionV1Fixture(lines)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -596,23 +477,12 @@ func TestExportDiscussion(t *testing.T) {
 	t.Run("error", func(t *testing.T) {
 		t.Parallel()
 
-		t.Run("reader_error", func(t *testing.T) {
-			t.Parallel()
-			_, err := exportDiscussionV1Reader(errorReader{}, "broken.jsonl", v1ExportParseFn)
-			if err == nil {
-				t.Fatal("expected error for reader failure")
-			}
-			if !strings.Contains(err.Error(), "scan broken.jsonl") {
-				t.Errorf("error = %q, want it to mention 'scan broken.jsonl'", err.Error())
-			}
-		})
-
 		t.Run("no_caic_meta_header", func(t *testing.T) {
 			t.Parallel()
-			path := writeJSONL(t, []string{
+			lines := v1ExportFixture([]string{
 				`{"type":"text","text":"orphan message"}`,
 			})
-			_, err := exportDiscussionV1Path(t, path)
+			_, err := renderDiscussionV1Fixture(lines)
 			if err == nil {
 				t.Fatal("expected error for missing caic_meta")
 			}
@@ -621,13 +491,9 @@ func TestExportDiscussion(t *testing.T) {
 			}
 		})
 
-		t.Run("empty_file", func(t *testing.T) {
+		t.Run("empty_fixture", func(t *testing.T) {
 			t.Parallel()
-			path := filepath.Join(t.TempDir(), "empty.jsonl")
-			if err := os.WriteFile(path, []byte(""), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			_, err := exportDiscussionV1Path(t, path)
+			_, err := renderDiscussionV1Fixture(nil)
 			if err == nil {
 				t.Fatal("expected error for empty file")
 			}
@@ -635,13 +501,13 @@ func TestExportDiscussion(t *testing.T) {
 
 		t.Run("unparseable_lines_skipped", func(t *testing.T) {
 			t.Parallel()
-			path := writeJSONL(t, []string{
+			lines := v1ExportFixture([]string{
 				v1MetaLine("task", "pi"),
 				`{not valid json`,
 				`{"type":"text","text":"visible"}`,
 			})
 
-			md, err := exportDiscussionV1Path(t, path)
+			md, err := renderDiscussionV1Fixture(lines)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -443,7 +443,7 @@ func (w *piWireFormat) WriteCompact(wr io.Writer, instructions string, logW io.W
 //   - agent_end: emits ResultMessage with usage + duration.
 //   - turn_end: emits UsageMessage from turn's assistant message.
 func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
-	typ, _, err := decodeEventType(line)
+	typ, err := decodeEventType(line)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal probe: %w", err)
 	}
@@ -454,7 +454,10 @@ func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	// to the harness hardcoded default of 200k.
 	if typ == "caic_model_info" {
 		var info caicModelInfo
-		if err := json.Unmarshal(line, &info); err == nil && info.ContextWindow > 0 {
+		if err := json.Unmarshal(line, &info); err != nil {
+			return nil, fmt.Errorf("unmarshal caic_model_info: %w", err)
+		}
+		if info.ContextWindow > 0 {
 			w.modelCtxWindow = info.ContextWindow
 		}
 		return nil, nil

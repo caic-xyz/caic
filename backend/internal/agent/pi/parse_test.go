@@ -864,6 +864,57 @@ func TestParseMessage(t *testing.T) {
 	})
 }
 
+func TestPiWireRejectsMalformedJSONBeforeEarlyReturns(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		line string
+	}{
+		{name: "agent_start lifecycle", line: `{"type":"agent_start"} true`},
+		{name: "turn_start lifecycle", line: `{"type":"turn_start"} true`},
+		{name: "compact command", line: `{"type":"compact"} true`},
+		{name: "caic_model_info type error", line: `{"type":"caic_model_info","context_window":"invalid"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if msgs, err := New("", nil).NewWire().ParseMessage([]byte(tc.line)); err == nil {
+				t.Fatalf("ParseMessage(%q) = %#v, want error", tc.line, msgs)
+			}
+		})
+	}
+}
+
+func TestV2RecordPiParserRejectsMalformedAgentEnvelope(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		record string
+	}{
+		{name: "extra field", record: `{"t":"agent","ts":1.000,"msg":{"type":"caic_model_info","context_window":1},"extra":true}`},
+		{name: "duplicate msg", record: `{"t":"agent","ts":1.000,"msg":{"type":"caic_model_info","context_window":1},"msg":{"type":"caic_model_info","context_window":2}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			calls := 0
+			parser, err := agent.NewLogRecordParser(agent.LogVersionV2, func(line []byte) ([]agent.Message, error) {
+				calls++
+				return New("", nil).NewWire().ParseMessage(line)
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := parser.ParseRecord([]byte(tc.record)); err == nil {
+				t.Fatal("v2 record accepted a malformed agent envelope")
+			}
+			if calls != 1 {
+				t.Fatalf("Pi parser calls = %d, want 1", calls)
+			}
+		})
+	}
+}
+
 func TestParsePromptCmd(t *testing.T) {
 	t.Parallel()
 

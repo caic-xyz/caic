@@ -12,7 +12,11 @@ import (
 	"strconv"
 	"time"
 	"unicode/utf8"
+
+	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
+
+var v2MetaMessageFields = jsonutil.KnownFields(MetaMessage{})
 
 const (
 	v2AgentRecordPrefix   = `{"t":"agent","ts":`
@@ -140,10 +144,10 @@ func v2ControlFieldAllowed(kind logControlKind, field string) bool {
 	}
 	switch kind {
 	case logControlMeta:
-		switch field {
-		case "baseImage", "cacheMounts", "containerPlatform", "display", "effort", "forge_issue", "gitHubToken", "harness", "maxCPUs", "model", "mounts", "prompt", "repos", "runtimeName", "started_at", "sudo", "tailscale", "title", "usb", "version":
-			return true
-		}
+		// V2 substitutes the canonical t discriminator for MetaMessage's V1
+		// type field; every remaining allowed key comes from MetaMessage itself.
+		_, known := v2MetaMessageFields[field]
+		return field != "type" && known
 	case logControlDiffStat:
 		return field == "diff_stat" || field == "ts"
 	case logControlExit:
@@ -247,7 +251,6 @@ func parseV2AgentRecord(p *LogRecordParser, line []byte) ([]ParsedMessage, error
 	if bytes.Equal(msg, []byte("null")) {
 		return nil, errors.New("corrupt v2 agent record: null msg")
 	}
-
 	// msg aliases the scanner-owned record and is valid only for this
 	// synchronous callback. The native parser must not retain it.
 	msgs, err := p.parseAndApplyNative(msg)

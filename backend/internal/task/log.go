@@ -3,6 +3,8 @@
 package task
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -95,80 +97,207 @@ func compressedLogPath(path string) string {
 	return path + ".zst"
 }
 
-// openLogReader opens a plain or zstd-compressed task log for reading.
-func openLogReader(path string) (io.ReadCloser, error) {
-	f, err := os.Open(filepath.Clean(path))
-	if err != nil {
-		return nil, err
-	}
-	if !isLogCompressed(path) {
-		return f, nil
-	}
-	d, err := zstd.NewReader(f)
-	if err != nil {
-		return nil, errors.Join(err, f.Close())
-	}
-	return &zstdReadCloser{dec: d, file: f}, nil
+// compressedLogTempPath returns a temporary compressed path outside the task-log namespace.
+func compressedLogTempPath(path string) string {
+	return compressedLogPath(path) + ".tmp"
 }
 
-// compressLogFile atomically replaces a plain task log with a zstd copy.
+// openLogReader opens a plain or zstd-compressed task log for reading.
+func openLogReader(path string) (io.ReadCloser, error) {
+	if isLogCompressed(path) {
+		return openCompressedLogReader(path)
+	}
+	return os.Open(filepath.Clean(path))
+}
+
+// compressLogFile atomically replaces a plain task log with a verified zstd
+// copy. It is intentionally usable by live terminal cleanup, which has no
+// retained semantic snapshot.
 func compressLogFile(path string) (string, error) {
+	compressed, _, err := compressLogFileWithSnapshot(path, nil)
+	return compressed, err
+}
+
+// compressionFileOps isolates the rename transaction for focused failure tests.
+type compressionFileOps struct {
+	stat   func(string) (os.FileInfo, error)
+	rename func(string, string) error
+	remove func(string) error
+}
+
+var standardCompressionFileOps = compressionFileOps{
+	stat:   os.Stat,
+	rename: os.Rename,
+	remove: os.Remove,
+}
+
+// compressLogFileWithSnapshot validates a complete temporary zstd stream and,
+// when available, its semantic authority before removing the plain source.
+func compressLogFileWithSnapshot(path string, source *ValidatedLogSnapshot) (string, *ValidatedLogSnapshot, error) {
+	return compressLogFileWithSnapshotAndOps(path, source, standardCompressionFileOps)
+}
+
+func compressLogFileWithSnapshotAndOps(path string, source *ValidatedLogSnapshot, ops compressionFileOps) (string, *ValidatedLogSnapshot, error) {
 	if path == "" || isLogCompressed(path) {
-		return path, nil
+		return path, source, nil
 	}
 	if !strings.HasSuffix(path, logPlainExt) {
-		return "", fmt.Errorf("not a task log path: %s", path)
+		return "", nil, fmt.Errorf("not a task log path: %s", path)
 	}
-	info, err := os.Stat(filepath.Clean(path))
+	info, err := ops.stat(filepath.Clean(path))
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	dst := compressedLogPath(path)
-	tmp := dst + ".tmp"
-	if err := os.Remove(tmp); err != nil && !os.IsNotExist(err) {
-		return "", fmt.Errorf("remove stale temp compressed log: %w", err)
+	tmp := compressedLogTempPath(path)
+	if err := ops.remove(tmp); err != nil && !os.IsNotExist(err) {
+		return "", nil, fmt.Errorf("remove stale temp compressed log: %w", err)
 	}
 
 	in, err := os.Open(filepath.Clean(path))
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	out, err := os.OpenFile(filepath.Clean(tmp), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
-		return "", errors.Join(err, in.Close())
+		return "", nil, errors.Join(err, in.Close())
 	}
 	enc, err := zstd.NewWriter(out)
 	if err != nil {
-		return "", errors.Join(err, in.Close(), out.Close())
+		return "", nil, errors.Join(err, in.Close(), out.Close())
 	}
-
-	_, copyErr := io.Copy(enc, in)
+	var sourceSize int64
+	var sourceHash []byte
+	var copyErr error
+	if source == nil {
+		digest := sha256.New()
+		sourceSize, copyErr = io.Copy(io.MultiWriter(enc, digest), in)
+		sourceHash = digest.Sum(nil)
+	} else {
+		sourceSize, copyErr = io.Copy(enc, in)
+	}
 	closeErr := errors.Join(enc.Close(), out.Close(), in.Close())
 	if err := errors.Join(copyErr, closeErr); err != nil {
-		_ = os.Remove(tmp)
-		return "", err
+		_ = ops.remove(tmp)
+		return "", nil, err
 	}
-	current, err := os.Stat(filepath.Clean(path))
-	if err != nil {
-		_ = os.Remove(tmp)
-		return "", err
-	}
-	if !os.SameFile(info, current) || current.Size() != info.Size() || current.ModTime().UnixNano() != info.ModTime().UnixNano() {
-		_ = os.Remove(tmp)
-		return "", fmt.Errorf("task log changed while compressing: %s", path)
+	if err := verifyUnchangedCompressedLogSource(path, info, ops.stat, "while compressing"); err != nil {
+		_ = ops.remove(tmp)
+		return "", nil, err
 	}
 	if err := os.Chtimes(tmp, info.ModTime(), info.ModTime()); err != nil {
-		_ = os.Remove(tmp)
-		return "", fmt.Errorf("set compressed log mtime: %w", err)
+		_ = ops.remove(tmp)
+		return "", nil, fmt.Errorf("set compressed log mtime: %w", err)
 	}
-	if err := os.Rename(tmp, dst); err != nil {
-		_ = os.Remove(tmp)
-		return "", fmt.Errorf("rename compressed log: %w", err)
+	var compressedSnapshot *ValidatedLogSnapshot
+	if source == nil {
+		if err := validateCompressedLogCopy(tmp, sourceSize, sourceHash); err != nil {
+			_ = ops.remove(tmp)
+			return "", nil, fmt.Errorf("validate temporary compressed log: %w", err)
+		}
+	} else {
+		compressedSnapshot, err = rebindCompressedValidatedSnapshotAsCompressed(tmp, source)
+		if err != nil {
+			_ = ops.remove(tmp)
+			return "", nil, fmt.Errorf("validate temporary compressed task log: %w", err)
+		}
+		if !source.ContentDigestValid || compressedSnapshot.ContentSize != source.ContentSize || compressedSnapshot.ContentDigest != source.ContentDigest {
+			_ = ops.remove(tmp)
+			return "", nil, errors.New("temporary compressed log content differs from source snapshot")
+		}
 	}
-	if err := os.Remove(path); err != nil {
-		return "", fmt.Errorf("remove plain log after compression: %w", err)
+	tmpInfo, err := ops.stat(tmp)
+	if err != nil {
+		_ = ops.remove(tmp)
+		return "", nil, fmt.Errorf("stat temporary compressed log: %w", err)
 	}
-	return dst, nil
+	// Validate the source immediately before publication so ordinary source
+	// changes cannot leave a compressed replacement visible.
+	if err := verifyUnchangedCompressedLogSource(path, info, ops.stat, "before replacing source"); err != nil {
+		_ = ops.remove(tmp)
+		return "", nil, err
+	}
+	if err := ops.rename(tmp, dst); err != nil {
+		_ = ops.remove(tmp)
+		return "", nil, fmt.Errorf("rename compressed log: %w", err)
+	}
+	if err := validatePromotedCompressedLog(dst, tmpInfo, ops.stat); err != nil {
+		return "", nil, errors.Join(err, removePromotedCompressedLog(dst, tmpInfo, ops))
+	}
+	// A source replacement can still race the rename. Once publication has
+	// happened, remove only the file whose identity was recorded for tmp.
+	if err := verifyUnchangedCompressedLogSource(path, info, ops.stat, "before replacing source"); err != nil {
+		return "", nil, errors.Join(err, removePromotedCompressedLog(dst, tmpInfo, ops))
+	}
+	if err := ops.remove(path); err != nil {
+		return "", nil, errors.Join(fmt.Errorf("remove plain log after compression: %w", err), removePromotedCompressedLog(dst, tmpInfo, ops))
+	}
+	if compressedSnapshot != nil {
+		compressedSnapshot.Path = filepath.Clean(dst)
+	}
+	return dst, compressedSnapshot, nil
+}
+
+func verifyUnchangedCompressedLogSource(path string, expected os.FileInfo, stat func(string) (os.FileInfo, error), stage string) error {
+	current, err := stat(filepath.Clean(path))
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(expected, current) || current.Size() != expected.Size() || current.ModTime().UnixNano() != expected.ModTime().UnixNano() {
+		return fmt.Errorf("task log changed %s: %s", stage, path)
+	}
+	return nil
+}
+
+func validatePromotedCompressedLog(path string, temporary os.FileInfo, stat func(string) (os.FileInfo, error)) error {
+	current, err := stat(path)
+	if err != nil {
+		return fmt.Errorf("stat promoted compressed log: %w", err)
+	}
+	if !os.SameFile(temporary, current) {
+		return fmt.Errorf("promoted compressed log identity changed: %s", path)
+	}
+	return nil
+}
+
+// removePromotedCompressedLog removes a failed transaction's destination only
+// after proving it still has the temporary file's recorded identity.
+func removePromotedCompressedLog(path string, temporary os.FileInfo, ops compressionFileOps) error {
+	if err := validatePromotedCompressedLog(path, temporary, ops.stat); err != nil {
+		return err
+	}
+	if err := ops.remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove promoted compressed log: %w", err)
+	}
+	return nil
+}
+
+// validateCompressedLogCopy proves that the temporary compressed descriptor
+// reaches zstd EOF and exactly reproduces the bytes copied from the source.
+func validateCompressedLogCopy(path string, wantSize int64, wantHash []byte) (retErr error) {
+	r, err := openCompressedLogReader(path)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := r.Close(); retErr == nil {
+			retErr = closeErr
+		}
+	}()
+	info, err := r.file.Stat()
+	if err != nil {
+		return err
+	}
+	digest := sha256.New()
+	size, err := io.Copy(digest, r)
+	if err != nil {
+		return err
+	}
+	if size != wantSize || !bytes.Equal(digest.Sum(nil), wantHash) {
+		return errors.New("compressed log content differs from source")
+	}
+	_, err = verifyPhysicalLog(path, r.file, info)
+	return err
 }
 
 // compressibleLogState reports whether a task state has no resumable log use.
@@ -192,23 +321,13 @@ func CompressTerminalLogs(logs []*LoadedTask) error {
 			errs = append(errs, fmt.Errorf("task log %s has no current validated snapshot", lt.path))
 			continue
 		}
-		compressed, err := compressLogFile(lt.path)
+		compressed, compressedSnapshot, err := compressLogFileWithSnapshot(lt.path, snapshot)
 		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
 		lt.path = compressed
-		if info, statErr := os.Stat(compressed); statErr == nil {
-			lt.LogSize = info.Size()
-		}
-		// Compression copied the already validated source bytes. Rebind the
-		// semantic carrier to the new identity, but leave EOF proof pending until
-		// a reader observes the compressed stream's EOF.
-		compressedSnapshot, snapshotErr := rebindSnapshotToFile(compressed, snapshot)
-		if snapshotErr != nil {
-			errs = append(errs, fmt.Errorf("validate compressed task identity: %w", snapshotErr))
-			continue
-		}
+		lt.LogSize = compressedSnapshot.Size
 		lt.setValidatedSnapshot(compressedSnapshot)
 	}
 	return errors.Join(errs...)
@@ -228,4 +347,17 @@ func (r *zstdReadCloser) Read(p []byte) (int, error) {
 func (r *zstdReadCloser) Close() error {
 	r.dec.Close()
 	return r.file.Close()
+}
+
+// openCompressedLogReader opens path as zstd regardless of its filename.
+func openCompressedLogReader(path string) (*zstdReadCloser, error) {
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return nil, err
+	}
+	d, err := zstd.NewReader(f)
+	if err != nil {
+		return nil, errors.Join(err, f.Close())
+	}
+	return &zstdReadCloser{dec: d, file: f}, nil
 }

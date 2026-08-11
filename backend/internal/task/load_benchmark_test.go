@@ -150,7 +150,10 @@ func BenchmarkTaskAdoption(b *testing.B) {
 					if err := lt.LoadMessages(); err != nil {
 						return err
 					}
-					w, err := store.Reopen(fixture.task())
+					task := fixture.task()
+					task.SetLogPath(lt.LogPath())
+					task.SetLogValidationSnapshot(lt.ValidatedSnapshot())
+					w, err := store.Reopen(task)
 					if err != nil {
 						return err
 					}

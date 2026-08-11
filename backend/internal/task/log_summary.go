@@ -121,10 +121,10 @@ func logSummaryPath(logPath string) string {
 }
 
 // loadLogSummary returns a LoadedTask reconstructed from a sidecar bound to
-// the already-open physical log. The sidecar's prior EOF proof permits this
-// inventory-only hit, but no current validated snapshot is published until a
-// semantic scan reaches EOF on the current reader.
-func loadLogSummary(logPath string, file *os.File, info os.FileInfo, authority logAuthority, meta *agent.MetaMessage) (*LoadedTask, bool) {
+// the already-open physical log. The summary's completed EOF proof, current
+// identity match, and freshly decoded raw header together re-establish a
+// stat-only ValidatedLogSnapshot for replay-cache proof reuse.
+func loadLogSummary(logPath string, file *os.File, info os.FileInfo, authority logAuthority, rawHeader []byte, meta *agent.MetaMessage) (*LoadedTask, bool) {
 	identity := physicalFileIdentityFromFile(file, info)
 	if !identity.Valid {
 		return nil, false
@@ -158,6 +158,11 @@ func loadLogSummary(logPath string, file *os.File, info os.FileInfo, authority l
 		return nil, false
 	}
 	cached.LogSize = validatedInfo.Size()
+	snapshot, err := newValidatedLogSnapshot(logPath, file, validatedInfo, authority, rawHeader, true)
+	if err != nil {
+		return nil, false
+	}
+	cached.setValidatedSnapshot(snapshot)
 	return cached, true
 }
 

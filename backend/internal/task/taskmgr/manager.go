@@ -80,7 +80,7 @@ type Config struct {
 	// Runtimes validates runtime selection and dispatches task runtime operations.
 	Runtimes            *runtime.Router
 	Backends            map[harness.Name]agent.Backend
-	EventReplayFactory  func(logPath string, h harness.Name) (task.EventReplayWriter, error)
+	EventReplayFactory  func(logPath string) (task.EventReplayWriter, error)
 	HarnessEnv          map[string][]string
 	RuntimeStartTimeout time.Duration
 	Prefs               *preferences.Store
@@ -103,7 +103,7 @@ type Manager struct {
 	logDir              string
 	cacheDir            string
 	backends            map[harness.Name]agent.Backend
-	eventReplayFactory  func(logPath string, h harness.Name) (task.EventReplayWriter, error)
+	eventReplayFactory  func(logPath string) (task.EventReplayWriter, error)
 	harnessEnv          map[string][]string
 	runtimeStartTimeout time.Duration
 	prefs               *preferences.Store
@@ -1824,6 +1824,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 		t.SetTitle(prompt)
 	}
 	t.SetLogPath(lt.LogPath())
+	t.SetLogValidationSnapshot(lt.ValidatedSnapshot())
 
 	foundPRFromLog := false
 	switch {
@@ -1837,10 +1838,12 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 	// Restore messages from both the local log and the relay tail. The local log
 	// has the full pre-restart history; the relay tail has any output produced
 	// while the server was down. Merge them by overlap so the UI does not collapse
-	// to the bounded relay tail after a server restart.
+	// to the bounded relay tail after a server restart. Fail closed: a malformed
+	// persistent history must not attach a live task with untrusted state.
 	if err := lt.LoadMessagesWithResolver(m.resolveNativeParser); err != nil {
-		m.log.WarnContext(ctx, "load messages failed", "repo", ri.RelPath, "br", branch, "err", err)
+		return nil, fmt.Errorf("load messages for adopted task %s: %w", taskID, err)
 	}
+	t.SetLogValidationSnapshot(lt.ValidatedSnapshot())
 	if len(relayMsgs) > 0 {
 		msgs := relayMsgs
 		if len(lt.Msgs) > 0 {
@@ -1871,11 +1874,8 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 		t.SetStateAt(lt.State, stateUpdatedAt)
 	}
 
-	// Full log parse for PR recovery.
+	// The validated full parse above may have recovered PR metadata.
 	if t.GetPR() == 0 {
-		if lt.ForgePR == 0 {
-			_ = lt.LoadMessagesWithResolver(m.resolveNativeParser)
-		}
 		if lt.ForgePR > 0 {
 			t.SetPR(lt.ForgeOwner, lt.ForgeRepo, lt.ForgePR)
 			foundPRFromLog = true
