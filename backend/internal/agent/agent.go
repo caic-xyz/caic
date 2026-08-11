@@ -51,6 +51,7 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -86,9 +87,11 @@ type Options struct {
 	// protocol state such as keepalive, auto-allow, or environment control
 	// messages.
 	PendingUserActions []PendingUserAction
-	MsgCh              chan<- Message // Receives parsed messages from the agent.
-	LogW               io.Writer      // Raw wire-format log; use io.Discard if unused.
-	StripEnv           []string       // Env var names for relay to strip from subprocess and emit as caic_stripped_env.
+	// LogVersion is the validated physical relay record version.
+	LogVersion LogVersion
+	MsgCh      chan<- ParsedMessage // Receives parsed physical records from the agent.
+	LogW       io.Writer            // Raw wire-format log; use io.Discard if unused.
+	StripEnv   []string             // Env var names for relay to strip from subprocess and emit as caic_stripped_env.
 }
 
 // WireFormat defines the wire protocol for a backend's stdin/stdout
@@ -124,7 +127,7 @@ type Conn interface {
 	// ReadMessages runs the message read loop: reads NDJSON lines from r,
 	// parses them, writes raw lines to the log, and forwards parsed messages
 	// to msgCh.
-	ReadMessages(r io.Reader, msgCh chan<- Message) error
+	ReadMessages(r io.Reader, msgCh chan<- ParsedMessage) error
 	// SendStop sends the null-byte sentinel to trigger graceful agent shutdown.
 	// Best-effort: returns when ctx is done if the write blocks.
 	SendStop(ctx context.Context)
@@ -134,15 +137,21 @@ type Conn interface {
 
 // conn is the default Conn implementation.
 type conn struct {
-	stdin io.WriteCloser
-	logW  io.Writer
-	wire  WireFormat
-	mu    sync.Mutex // serializes stdin writes
+	stdin   io.WriteCloser
+	logW    io.Writer
+	version LogVersion
+	wire    WireFormat
+	mu      sync.Mutex // serializes stdin writes
 }
 
 // NewConn creates a Conn from an stdin pipe, log writer, and wire format.
 func NewConn(stdin io.WriteCloser, logW io.Writer, wire WireFormat) Conn {
-	return &conn{stdin: stdin, logW: logW, wire: wire}
+	return NewVersionedConn(stdin, logW, LogVersionV1, wire)
+}
+
+// NewVersionedConn creates a connection for the caller-validated physical log version.
+func NewVersionedConn(stdin io.WriteCloser, logW io.Writer, version LogVersion, wire WireFormat) Conn {
+	return &conn{stdin: stdin, logW: logW, version: version, wire: wire}
 }
 
 func (c *conn) SendPrompt(p Prompt) error {
@@ -171,8 +180,8 @@ func (c *conn) SendCompact(instructions string) error {
 	return cc.WriteCompact(c.stdin, instructions, c.logW)
 }
 
-func (c *conn) ReadMessages(r io.Reader, msgCh chan<- Message) error {
-	return DefaultReadMessages(r, func(m Message) { msgCh <- m }, c.logW, c.wire.ParseMessage)
+func (c *conn) ReadMessages(r io.Reader, msgCh chan<- ParsedMessage) error {
+	return DefaultReadVersionedMessages(r, func(m ParsedMessage) { msgCh <- m }, c.logW, c.version, c.wire.ParseMessage)
 }
 
 func (c *conn) SendStop(ctx context.Context) {
@@ -213,7 +222,7 @@ type Session struct {
 //
 // Error priority: parse errors take precedence over wait errors, since a
 // parse error indicates corrupted output while the process may still exit 0.
-func NewSession(cmd *exec.Cmd, c Conn, stdout io.Reader, msgCh chan<- Message, log *slog.Logger) *Session {
+func NewSession(cmd *exec.Cmd, c Conn, stdout io.Reader, msgCh chan<- ParsedMessage, log *slog.Logger) *Session {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -303,6 +312,81 @@ type LogRecordParser struct {
 type ParsedRecord struct {
 	Messages []ParsedMessage
 	Control  bool
+}
+
+// RelayRecordReader reads one physical relay record at a time. Agent payloads
+// are returned as their unchanged native JSON; caic controls are returned only
+// as parsed controls and never presented as native handshake data. logW is the
+// caller's explicit persistence policy: use io.Discard for unpersisted reads.
+type RelayRecordReader struct {
+	r      *bufio.Reader
+	parser *LogRecordParser
+	logW   io.Writer
+	native []byte
+}
+
+// NewRelayRecordReader creates a version-aware physical relay reader. version
+// must be the caller-validated task-log version.
+func NewRelayRecordReader(r io.Reader, version LogVersion, logW io.Writer) (*RelayRecordReader, error) {
+	br, ok := r.(*bufio.Reader)
+	if !ok {
+		br = bufio.NewReaderSize(r, 1<<20)
+	}
+	reader := &RelayRecordReader{r: br, logW: logW}
+	parser, err := NewLogRecordParser(version, func(line []byte) ([]Message, error) {
+		reader.native = append(reader.native[:0], line...)
+		return nil, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	reader.parser = parser
+	return reader, nil
+}
+
+// Reader returns the buffered source positioned after records consumed by ReadRecord.
+func (r *RelayRecordReader) Reader() *bufio.Reader {
+	return r.r
+}
+
+// ReadRecord reads the next non-empty physical relay record. It persists the
+// original encoded bytes once according to the reader's policy before strict
+// parsing. Native is non-nil only for an agent payload; controls are separate.
+func (r *RelayRecordReader) ReadRecord() (native []byte, controls []ParsedMessage, err error) {
+	for {
+		encoded, readErr := readNDJSONRecord(r.r)
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				return nil, nil, readErr
+			}
+			return nil, nil, fmt.Errorf("read relay record: %w", readErr)
+		}
+		line := encoded[:len(encoded)-1]
+		if len(line) == 0 {
+			continue
+		}
+		r.native = r.native[:0]
+		if r.parser.version == LogVersionV1 {
+			if _, writeErr := r.logW.Write(encoded); writeErr != nil {
+				return nil, nil, fmt.Errorf("write log: %w", writeErr)
+			}
+		}
+		parsed, parseErr := r.parser.ParseRecord(line)
+		if parseErr != nil {
+			return nil, nil, parseErr
+		}
+		if r.parser.version == LogVersionV2 {
+			if _, writeErr := r.logW.Write(encoded); writeErr != nil {
+				return nil, nil, fmt.Errorf("write log: %w", writeErr)
+			}
+		}
+		if len(r.native) > 0 {
+			return slices.Clone(r.native), nil, nil
+		}
+		if parsed.Control {
+			return nil, parsed.Messages, nil
+		}
+	}
 }
 
 // NewLogRecordParser constructs a parser for an already-validated physical log
@@ -560,44 +644,56 @@ func messageIsNil(msg Message) bool {
 	}
 }
 
-// DefaultReadMessages is the standard message read loop. It reads NDJSON lines
-// from r, parses them via parseFn, writes each raw line to logW, and forwards
-// parsed messages via dispatch.
-//
-// Conn wrappers that override ReadMessages can call this for delegation with a
-// custom dispatch function.
-func DefaultReadMessages(r io.Reader, dispatch func(Message), logW io.Writer, parseFn func([]byte) ([]Message, error)) error {
-	scanner := bufio.NewScanner(r)
-	// 32 MiB max line: user input with base64 images can produce very long NDJSON lines.
-	scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
+// DefaultReadMessages retains the v1 Message callback used by legacy Conn
+// wrappers. New physical relay readers must use DefaultReadVersionedMessages.
+func DefaultReadMessages(r io.Reader, dispatch func(Message), logW io.Writer, parseNative func([]byte) ([]Message, error)) error {
+	return DefaultReadVersionedMessages(r, func(m ParsedMessage) { dispatch(m.Message) }, logW, LogVersionV1, parseNative)
+}
 
+// DefaultReadVersionedMessages reads physical relay records, persists each
+// exactly once, and forwards the parser's original ParsedMessage wrappers.
+func DefaultReadVersionedMessages(r io.Reader, dispatch func(ParsedMessage), logW io.Writer, version LogVersion, parseNative func([]byte) ([]Message, error)) error {
+	parser, err := NewLogRecordParser(version, parseNative)
+	if err != nil {
+		return fmt.Errorf("construct relay record parser: %w", err)
+	}
+	reader := bufio.NewReaderSize(r, 1<<20)
 	slog.Debug("reading agent stdout")
 	var n int
-	for scanner.Scan() {
-		line := scanner.Bytes()
+	for {
+		record, readErr := readNDJSONRecord(reader)
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			return fmt.Errorf("read agent record: %w", readErr)
+		}
+		line := record[:len(record)-1]
 		if len(line) == 0 {
 			continue
 		}
 		n++
-		record := append(append([]byte(nil), line...), '\n')
-		if _, err := logW.Write(record); err != nil {
-			return fmt.Errorf("write log: %w", err)
+		parsed, err := parser.ParseRecord(line)
+		if version == LogVersionV2 && err != nil {
+			return fmt.Errorf("parse v2 relay record: %w", err)
 		}
-		msgs, err := parseFn(line)
+		if _, writeErr := logW.Write(record); writeErr != nil {
+			return fmt.Errorf("write log: %w", writeErr)
+		}
 		if err != nil {
 			slog.Warn("unparseable message", "err", err, "line", string(line))
-			dispatch(&ParseErrorMessage{Err: err.Error(), Line: string(line)})
+			dispatch(ParsedMessage{Message: &ParseErrorMessage{Err: err.Error(), Line: string(line)}})
 			continue
 		}
-		for _, msg := range msgs {
+		for _, msg := range parsed.Messages {
 			if n <= 3 {
-				slog.Debug("parsed message", "n", n, "type", fmt.Sprintf("%T", msg))
+				slog.Debug("parsed message", "n", n, "type", fmt.Sprintf("%T", msg.Message))
 			}
 			dispatch(msg)
 		}
 	}
-	slog.Debug("read loop done", "n", n, "err", scanner.Err())
-	return scanner.Err()
+	slog.Debug("read loop done", "n", n)
+	return nil
 }
 
 // Relay paths inside the container.
@@ -609,8 +705,19 @@ const (
 	RelayLogPath    = RelayDir + "/relay.log"
 )
 
-// DeployRelay uploads the relay script into the runtime target. Idempotent.
-func DeployRelay(ctx context.Context, target runtime.ConnectionTarget) error {
+// RelayScript selects the embedded script for a validated log version.
+func RelayScript(version LogVersion) ([]byte, error) {
+	if err := version.Validate(); err != nil {
+		return nil, err
+	}
+	if version == LogVersionV2 {
+		return relay.ScriptV2, nil
+	}
+	return relay.Script, nil
+}
+
+// DeployRelay uploads the selected relay script into the runtime target. Idempotent.
+func DeployRelay(ctx context.Context, target runtime.ConnectionTarget, version LogVersion) error {
 	if target.SSHHost == "" {
 		return errors.New("agent connection target missing SSH host")
 	}
@@ -618,7 +725,11 @@ func DeployRelay(ctx context.Context, target runtime.ConnectionTarget) error {
 	// shell, so a single string works correctly as a shell command.
 	cmd := exec.CommandContext(ctx, "ssh", target.SSHHost, //nolint:gosec // target is not user-controlled
 		"mkdir -p "+RelayDir+" && cat > "+RelayScriptPath)
-	cmd.Stdin = bytes.NewReader(relay.Script)
+	script, err := RelayScript(version)
+	if err != nil {
+		return err
+	}
+	cmd.Stdin = bytes.NewReader(script)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("deploy relay: %w: %s", err, out)
 	}
@@ -790,7 +901,10 @@ func PrepareRelay(ctx context.Context, opts *Options, agentArgs []string) (*Rela
 		return nil, errors.New("agent connection target missing SSH host")
 	}
 	tStart := time.Now()
-	if err := DeployRelay(ctx, opts.Target); err != nil {
+	if err := opts.LogVersion.Validate(); err != nil {
+		return nil, fmt.Errorf("relay log version: %w", err)
+	}
+	if err := DeployRelay(ctx, opts.Target, opts.LogVersion); err != nil {
 		return nil, err
 	}
 	slog.DebugContext(ctx, "startup", "phase", "deploy_relay", "target", sshHost, "dur", time.Since(tStart))
@@ -828,7 +942,7 @@ func StartRelay(ctx context.Context, opts *Options, agentArgs []string, wire Wir
 	if err != nil {
 		return nil, err
 	}
-	return StartSession(rp, NewConn(rp.Stdin, opts.LogW, wire), opts)
+	return StartSession(rp, NewVersionedConn(rp.Stdin, opts.LogW, opts.LogVersion, wire), opts)
 }
 
 // StartSession creates a Session from a RelayProcess and Conn, sends the
@@ -879,19 +993,101 @@ func RelayOutputSize(ctx context.Context, container string) (int64, error) {
 // container and returns the parsed messages plus the total file size (for
 // RelayOffset). It streams the SSH output directly, so memory usage is O(1)
 // and no multi-GB transfer occurs during adoption.
-func ReadRelayTail(ctx context.Context, container string, parseFn func([]byte) ([]Message, error), maxBytes int64) (msgs []Message, size int64, err error) {
-	// Get total file size — instant stat call.
+func ReadRelayTail(ctx context.Context, container string, parser *LogRecordParser, maxBytes int64) (msgs []ParsedMessage, size int64, err error) {
 	size, err = RelayOutputSize(ctx, container)
 	if err != nil {
 		return nil, 0, err
 	}
-	for m, e := range StreamRelay(ctx, container, parseFn, maxBytes, size) {
-		if e != nil {
-			return msgs, size, e
-		}
-		msgs = append(msgs, m)
+	cmd, start := relaySnapshotCommand(ctx, container, maxBytes, size)
+	skipFirst, err := relayTailNeedsLeadingSkip(ctx, container, start)
+	if err != nil {
+		return nil, start, err
 	}
-	return msgs, size, nil
+	pipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, start, fmt.Errorf("relay stdout pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, start, fmt.Errorf("start relay read: %w", err)
+	}
+	msgs, offset, readErr := readRelayTailRecords(pipe, parser, start, skipFirst, container)
+	if readErr != nil {
+		_ = cmd.Wait()
+		return msgs, offset, readErr
+	}
+	if err := cmd.Wait(); err != nil {
+		return msgs, offset, fmt.Errorf("relay read: %w", err)
+	}
+	return msgs, offset, nil
+}
+
+// readRelayTailRecords parses one stat-bounded relay snapshot and returns the
+// exact physical offset consumed, including a skipped partial tail record.
+func readRelayTailRecords(r io.Reader, parser *LogRecordParser, start int64, skipFirst bool, src string) (msgs []ParsedMessage, offset int64, err error) {
+	reader := bufio.NewReaderSize(r, 1<<20)
+	offset = start
+	for {
+		record, readErr := readNDJSONRecord(reader)
+		offset += int64(len(record))
+		if errors.Is(readErr, io.EOF) {
+			return msgs, offset, nil
+		}
+		if errors.Is(readErr, io.ErrUnexpectedEOF) {
+			return msgs, offset - int64(len(record)), nil
+		}
+		if readErr != nil {
+			return msgs, offset, fmt.Errorf("read relay record: %w", readErr)
+		}
+		line := record[:len(record)-1]
+		if skipFirst {
+			skipFirst = false
+			continue
+		}
+		if len(line) == 0 {
+			continue
+		}
+		parsed, parseErr := parser.ParseRecord(line)
+		if parseErr != nil {
+			if parser.version == LogVersionV2 || parsed.Control {
+				return msgs, offset, fmt.Errorf("parse relay record: %w", parseErr)
+			}
+			slog.Warn("relay", "msg", "skipping unparseable output line", "src", src, "err", parseErr)
+			continue
+		}
+		msgs = append(msgs, parsed.Messages...)
+	}
+}
+
+func tailNeedsLeadingSkip(start int64, previous byte) bool {
+	return start > 0 && previous != '\n'
+}
+
+// relayTailNeedsLeadingSkip reports whether a tail begins mid-record.
+func relayTailNeedsLeadingSkip(ctx context.Context, container string, start int64) (bool, error) {
+	if start == 0 {
+		return false, nil
+	}
+	command := fmt.Sprintf("dd if=%s bs=1 skip=%d count=1 status=none", RelayOutputPath, start-1)
+	out, err := sshCmd(ctx, container, command).Output()
+	if err != nil {
+		return false, fmt.Errorf("read relay tail boundary: %w", err)
+	}
+	if len(out) != 1 {
+		return false, fmt.Errorf("read relay tail boundary: got %d bytes", len(out))
+	}
+	return tailNeedsLeadingSkip(start, out[0]), nil
+}
+
+// relaySnapshotCommand bounds a relay read to the size observed by stat. The
+// returned start is the physical output-file offset of the transferred bytes.
+func relaySnapshotCommand(ctx context.Context, container string, tailBytes, size int64) (cmd *exec.Cmd, start int64) {
+	if tailBytes > 0 && size > tailBytes {
+		start := size - tailBytes
+		command := fmt.Sprintf("head -c %d %s | tail -c %d", size, RelayOutputPath, tailBytes)
+		return sshCmd(ctx, container, command), start
+	}
+	command := fmt.Sprintf("head -c %d %s", size, RelayOutputPath)
+	return sshCmd(ctx, container, command), 0
 }
 
 // StreamRelay streams NDJSON messages from the relay output.jsonl in the
@@ -902,26 +1098,25 @@ func ReadRelayTail(ctx context.Context, container string, parseFn func([]byte) (
 // The SSH stdout is read incrementally, so memory usage is O(1) regardless of
 // file size. If the consumer stops early the ssh process is killed and reaped,
 // so no process leaks per abandoned reader.
-func StreamRelay(ctx context.Context, container string, parseFn func([]byte) ([]Message, error), tailBytes, size int64) iter.Seq2[Message, error] {
-	return func(yield func(Message, error) bool) {
-		tailed := tailBytes > 0 && size > tailBytes
-		var cmd *exec.Cmd
-		if tailed {
-			cmd = sshCmd(ctx, container, "tail", "-c", strconv.FormatInt(tailBytes, 10), RelayOutputPath)
-		} else {
-			cmd = sshCmd(ctx, container, "cat", RelayOutputPath)
+func StreamRelay(ctx context.Context, container string, parser *LogRecordParser, tailBytes, size int64) iter.Seq2[ParsedMessage, error] {
+	return func(yield func(ParsedMessage, error) bool) {
+		cmd, start := relaySnapshotCommand(ctx, container, tailBytes, size)
+		tailed, boundaryErr := relayTailNeedsLeadingSkip(ctx, container, start)
+		if boundaryErr != nil {
+			yield(ParsedMessage{}, boundaryErr)
+			return
 		}
 		pipe, err := cmd.StdoutPipe()
 		if err != nil {
-			yield(nil, fmt.Errorf("relay stdout pipe: %w", err))
+			yield(ParsedMessage{}, fmt.Errorf("relay stdout pipe: %w", err))
 			return
 		}
 		if err := cmd.Start(); err != nil {
-			yield(nil, fmt.Errorf("start relay read: %w", err))
+			yield(ParsedMessage{}, fmt.Errorf("start relay read: %w", err))
 			return
 		}
 		broke := false
-		for m, e := range yieldMessages(pipe, parseFn, tailed, container) {
+		for m, e := range yieldMessages(pipe, parser, tailed, container) {
 			if !yield(m, e) {
 				broke = true
 				break
@@ -935,23 +1130,42 @@ func StreamRelay(ctx context.Context, container string, parseFn func([]byte) ([]
 			return
 		}
 		if err := cmd.Wait(); err != nil {
-			yield(nil, fmt.Errorf("relay read: %w", err))
+			yield(ParsedMessage{}, fmt.Errorf("relay read: %w", err))
 		}
 	}
 }
 
-// ndjsonScanner returns a bufio.Scanner configured for relay and log NDJSON.
-// Lines can be large: user input with base64 images produces multi-MB records,
-// so the buffer is capped at 32 MiB.
-func ndjsonScanner(r io.Reader) *bufio.Scanner {
-	s := bufio.NewScanner(r)
-	s.Buffer(make([]byte, 0, 1<<20), 32<<20)
-	return s
+const maxNDJSONRecordLen = 32 << 20
+
+// readNDJSONRecord reads one LF-terminated physical record without inventing a
+// delimiter. It retains the prior 32 MiB maximum line limit.
+func readNDJSONRecord(r *bufio.Reader) ([]byte, error) {
+	var record []byte
+	for {
+		fragment, err := r.ReadSlice('\n')
+		record = append(record, fragment...)
+		if len(record) > maxNDJSONRecordLen {
+			return record, fmt.Errorf("NDJSON record exceeds %d bytes", maxNDJSONRecordLen)
+		}
+		switch {
+		case err == nil:
+			return record, nil
+		case errors.Is(err, bufio.ErrBufferFull):
+			continue
+		case errors.Is(err, io.EOF):
+			if len(record) == 0 {
+				return nil, io.EOF
+			}
+			return record, io.ErrUnexpectedEOF
+		default:
+			return nil, err
+		}
+	}
 }
 
 // yieldMessages parses NDJSON from r, yielding each parsed message in order.
 //
-// When skipFirst is set the first non-empty line is dropped — it is a partial
+// When skipFirst is set the first physical record is dropped — it is a partial
 // record left by tailing or seeking into the middle of a file. Unparseable
 // lines are logged (tagged with src) and skipped. A scanner read error is
 // reported as a terminal (nil, err) pair after the last good message.
@@ -959,32 +1173,41 @@ func ndjsonScanner(r io.Reader) *bufio.Scanner {
 // The reader is consumed lazily one line at a time, so memory usage is O(1)
 // regardless of total size. StreamRelay owns the live SSH relay-output stream;
 // this helper only decodes its NDJSON lines.
-func yieldMessages(r io.Reader, parseFn func([]byte) ([]Message, error), skipFirst bool, src string) iter.Seq2[Message, error] {
-	return func(yield func(Message, error) bool) {
-		scanner := ndjsonScanner(r)
+func yieldMessages(r io.Reader, parser *LogRecordParser, skipFirst bool, src string) iter.Seq2[ParsedMessage, error] {
+	return func(yield func(ParsedMessage, error) bool) {
+		reader := bufio.NewReaderSize(r, 1<<20)
 		first := skipFirst
-		for scanner.Scan() {
-			line := scanner.Bytes()
-			if len(line) == 0 {
-				continue
+		for {
+			encoded, readErr := readNDJSONRecord(reader)
+			if errors.Is(readErr, io.EOF) {
+				return
 			}
+			if readErr != nil {
+				yield(ParsedMessage{}, readErr)
+				return
+			}
+			line := encoded[:len(encoded)-1]
 			if first {
 				first = false
 				continue
 			}
-			parsed, parseErr := parseFn(line)
+			if len(line) == 0 {
+				continue
+			}
+			record, parseErr := parser.ParseRecord(line)
 			if parseErr != nil {
+				if parser.version == LogVersionV2 || record.Control {
+					yield(ParsedMessage{}, fmt.Errorf("parse relay record: %w", parseErr))
+					return
+				}
 				slog.Warn("relay", "msg", "skipping unparseable output line", "src", src, "err", parseErr)
 				continue
 			}
-			for _, m := range parsed {
+			for _, m := range record.Messages {
 				if !yield(m, nil) {
 					return
 				}
 			}
-		}
-		if err := scanner.Err(); err != nil {
-			yield(nil, err)
 		}
 	}
 }
@@ -1013,7 +1236,10 @@ func AttachRelaySession(ctx context.Context, opts *Options, wire WireFormat, wra
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
-	c := NewConn(stdin, opts.LogW, wire)
+	if err := opts.LogVersion.Validate(); err != nil {
+		return nil, fmt.Errorf("relay log version: %w", err)
+	}
+	c := NewVersionedConn(stdin, opts.LogW, opts.LogVersion, wire)
 	if wrap != nil {
 		c, err = wrap(c)
 		if err != nil {

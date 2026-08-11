@@ -129,7 +129,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if err != nil {
 		return nil, err
 	}
-	c := agent.Conn(&controlConn{Conn: agent.NewConn(rp.Stdin, opts.LogW, b)})
+	c := agent.Conn(&controlConn{Conn: agent.NewVersionedConn(rp.Stdin, opts.LogW, opts.LogVersion, b)})
 	return agent.StartSession(rp, c, opts)
 }
 

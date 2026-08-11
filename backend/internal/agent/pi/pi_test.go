@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -158,8 +159,11 @@ func TestWaitForResponse(t *testing.T) {
 
 	t.Run("caic_exit surfaces relay stderr", func(t *testing.T) {
 		t.Parallel()
-		r := bufio.NewReader(bytes.NewBufferString(`{"type":"caic_exit","exit_code":2,"error":"Unknown option: --approve"}` + "\n"))
-		_, err := waitForResponse(r, "set_model", nil)
+		r, err := agent.NewRelayRecordReader(bytes.NewBufferString(`{"type":"caic_exit","exit_code":2,"error":"Unknown option: --approve"}`+"\n"), agent.LogVersionV1, io.Discard)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = waitForResponse(r, "set_model")
 		if err == nil {
 			t.Fatal("waitForResponse returned nil error")
 		}
@@ -168,6 +172,25 @@ func TestWaitForResponse(t *testing.T) {
 		}
 		if _, ok := errors.AsType[*piProcessExitError](err); !ok {
 			t.Fatalf("errors.AsType[*piProcessExitError](%v) = (_, false), want (_, true)", err)
+		}
+	})
+	t.Run("v2 response is persisted once", func(t *testing.T) {
+		t.Parallel()
+		line := `{"t":"agent","ts":1.000,"msg":{"type":"response","command":"set_model","success":true,"data":{}}}`
+		var log bytes.Buffer
+		records, err := agent.NewRelayRecordReader(strings.NewReader(line+"\n"), agent.LogVersionV2, &log)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := waitForResponse(records, "set_model")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.Command != "set_model" || !resp.Success {
+			t.Fatalf("response = %#v", resp)
+		}
+		if log.String() != line+"\n" {
+			t.Fatalf("persisted record = %q", log.String())
 		}
 	})
 }
@@ -191,7 +214,11 @@ func TestReapPiProcessExit(t *testing.T) {
 		_ = stdin.Close()
 	})
 
-	_, err = waitForResponse(bufio.NewReader(stdout), "set_model", nil)
+	records, recordsErr := agent.NewRelayRecordReader(stdout, agent.LogVersionV1, io.Discard)
+	if recordsErr != nil {
+		t.Fatal(recordsErr)
+	}
+	_, err = waitForResponse(records, "set_model")
 	if err == nil {
 		t.Fatal("waitForResponse returned nil error")
 	}
@@ -221,14 +248,15 @@ func TestBackendStart(t *testing.T) {
 	t.Setenv("PATH", dir)
 	t.Setenv("PI_SSH_HELPER_DIR", dir)
 
-	msgs := make(chan agent.Message, 1)
+	msgs := make(chan agent.ParsedMessage, 1)
 	log := &bytes.Buffer{}
 	sess, err := New("", nil).Start(t.Context(), &agent.Options{
-		Target: runtime.ConnectionTarget{SSHHost: "task"},
-		Dir:    "/workspace",
-		Model:  "openai-codex/gpt-5.6-terra",
-		MsgCh:  msgs,
-		LogW:   log,
+		Target:     runtime.ConnectionTarget{SSHHost: "task"},
+		Dir:        "/workspace",
+		Model:      "openai-codex/gpt-5.6-terra",
+		LogVersion: agent.LogVersionV1,
+		MsgCh:      msgs,
+		LogW:       log,
 	})
 	if err != nil {
 		t.Fatalf("Start: %v", err)

@@ -156,15 +156,18 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		return nil, err
 	}
 
+	records, err := agent.NewRelayRecordReader(rp.Stdout, opts.LogVersion, opts.LogW)
+	if err != nil {
+		return nil, fmt.Errorf("pi: construct relay reader: %w", err)
+	}
+
 	// Pre-prompt commands: set_model and set_thinking_level. We must wait
 	// for each response before sending the next.
-	var br *bufio.Reader
 	if opts.Model != "" {
 		if err := writeSetModel(rp.Stdin, opts.Model, opts.LogW); err != nil {
 			return nil, fmt.Errorf("pi: write set_model: %w", err)
 		}
-		br = bufio.NewReaderSize(rp.Stdout, 1<<20)
-		resp, err := waitForResponse(br, pi.CmdSetModel, opts.LogW)
+		resp, err := waitForResponse(records, pi.CmdSetModel)
 		if err != nil {
 			err = reapPiProcessExit(rp, err)
 			return nil, fmt.Errorf("pi: set_model %s: %w", opts.Model, err)
@@ -185,31 +188,23 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 				return nil, fmt.Errorf("write caic_model_info: %w", err)
 			}
 		}
-		rp.Stdout = br // hand the buffered reader to the next command
 	}
 	if opts.Effort != "" {
 		if err := writeSetThinking(rp.Stdin, opts.Effort, opts.LogW); err != nil {
 			return nil, fmt.Errorf("pi: write set_thinking_level: %w", err)
 		}
-		if br == nil {
-			br = bufio.NewReaderSize(rp.Stdout, 1<<20)
-		}
-		if _, err := waitForResponse(br, pi.CmdSetThinking, opts.LogW); err != nil {
+		if _, err := waitForResponse(records, pi.CmdSetThinking); err != nil {
 			err = reapPiProcessExit(rp, err)
 			return nil, fmt.Errorf("pi: set_thinking_level %s: %w", opts.Effort, err)
 		}
-		rp.Stdout = br
 	}
 
 	sessionID := ""
 	if err := writeGetState(rp.Stdin, opts.LogW); err != nil {
 		slog.WarnContext(ctx, "pi: write get_state failed", "err", err)
 	} else {
-		if br == nil {
-			br = bufio.NewReaderSize(rp.Stdout, 1<<20)
-		}
 		stateCtx, stateCancel := context.WithTimeout(ctx, 10*time.Second)
-		resp, err := waitForResponseContext(stateCtx, br, pi.CmdGetState, opts.LogW, func() {
+		resp, err := waitForResponseContext(stateCtx, records, pi.CmdGetState, func() {
 			_ = rp.Cmd.Process.Kill()
 		})
 		stateCancel()
@@ -230,12 +225,12 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 				sessionID = state.SessionID
 			}
 		}
-		rp.Stdout = br
 	}
+	rp.Stdout = records.Reader()
 	wire.sessionID = sessionID
 
 	if sessionID != "" {
-		opts.MsgCh <- &agent.MetaSessionMessage{MessageType: "caic_session", SessionID: sessionID}
+		opts.MsgCh <- agent.ParsedMessage{Message: &agent.MetaSessionMessage{MessageType: "caic_session", SessionID: sessionID}}
 		if err := agent.WriteMetaSession(opts.LogW, &agent.InitMessage{SessionID: sessionID}); err != nil {
 			_ = rp.Cmd.Process.Kill()
 			_ = rp.Cmd.Wait()
@@ -243,7 +238,7 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		}
 	}
 
-	c := newPiConn(rp.Stdin, opts.LogW, wire)
+	c := newPiConn(rp.Stdin, opts.LogW, opts.LogVersion, wire)
 	sess, err := agent.StartSession(rp, c, opts)
 	if err != nil {
 		return nil, err
@@ -315,33 +310,38 @@ type caicModelInfo struct {
 type piConn struct {
 	agent.Conn
 
-	logW io.Writer
-	wire *piWireFormat
+	logW    io.Writer
+	version agent.LogVersion
+	wire    *piWireFormat
 }
 
 // newPiConn creates a piConn wrapping a standard Conn.
-func newPiConn(stdin io.WriteCloser, logW io.Writer, wire *piWireFormat) *piConn {
+func newPiConn(stdin io.WriteCloser, logW io.Writer, version agent.LogVersion, wire *piWireFormat) *piConn {
 	return &piConn{
-		Conn: agent.NewConn(stdin, logW, wire),
-		logW: logW,
-		wire: wire,
+		Conn:    agent.NewVersionedConn(stdin, logW, version, wire),
+		logW:    logW,
+		version: version,
+		wire:    wire,
 	}
 }
 
 // ReadMessages overrides the default read loop to intercept extension_ui_request
 // messages and auto-respond before forwarding them to the message channel.
-func (c *piConn) ReadMessages(r io.Reader, msgCh chan<- agent.Message) error {
-	return agent.DefaultReadMessages(r, func(m agent.Message) {
+func (c *piConn) ReadMessages(r io.Reader, msgCh chan<- agent.ParsedMessage) error {
+	return agent.DefaultReadVersionedMessages(r, func(parsed agent.ParsedMessage) {
+		m := parsed.Message
 		// Intercept extension UI requests.
-		if raw, ok := m.(*agent.RawMessage); ok && raw.MessageType == string(pi.EventExtensionUI) {
+		if raw, ok := m.(*agent.RawMessage); ok && strings.HasPrefix(raw.MessageType, "response:") {
+			return
+		} else if ok && raw.MessageType == string(pi.EventExtensionUI) {
 			if err := handleExtensionUI(c.Conn, raw.Raw); err != nil {
 				slog.Warn("pi: extension_ui_request auto-response failed", "err", err)
 			}
 			// Don't forward to msgCh — these are internal.
 			return
 		}
-		msgCh <- m
-	}, c.logW, c.wire.ParseMessage)
+		msgCh <- parsed
+	}, c.logW, c.version, c.wire.ParseMessage)
 }
 
 // handleExtensionUI auto-responds to an extension UI request. For confirm
@@ -753,35 +753,25 @@ func reapPiProcessExit(rp *agent.RelayProcess, err error) error {
 	return err
 }
 
-// waitForResponse reads JSONL lines from r until a response for the given
-// command is found. Returns the full response envelope. Lines are logged to
-// logW. Non-response events are discarded (Pi should not emit any before the
-// first prompt).
-func waitForResponse(r *bufio.Reader, cmd pi.CommandType, logW io.Writer) (pi.Response, error) {
+// waitForResponse consumes physical records until it receives the requested
+// native Pi response. Relay controls bypass the native response parser.
+func waitForResponse(r *agent.RelayRecordReader, cmd pi.CommandType) (pi.Response, error) {
 	for {
-		line, err := r.ReadBytes('\n')
+		line, controls, err := r.ReadRecord()
 		if err != nil {
 			return pi.Response{}, fmt.Errorf("read response for %s: %w", cmd, err)
 		}
-		if logW != nil {
-			_, _ = logW.Write(line)
-		}
-		var probe pi.LineProbe
-		if json.Unmarshal(line, &probe) != nil {
-			continue
-		}
-		if probe.Type == "caic_exit" {
-			var exit agent.ExitMessage
-			if json.Unmarshal(line, &exit) == nil && exit.ExitCode != 0 {
-				return pi.Response{}, &piProcessExitError{exit: exit}
+		for _, control := range controls {
+			if exit, ok := control.Message.(*agent.ExitMessage); ok && exit.ExitCode != 0 {
+				return pi.Response{}, &piProcessExitError{exit: *exit}
 			}
 		}
-		if probe.Type != pi.EventResponse {
+		if len(line) == 0 {
 			continue
 		}
 		var resp pi.Response
-		if json.Unmarshal(line, &resp) != nil {
-			continue
+		if err := json.Unmarshal(line, &resp); err != nil {
+			return pi.Response{}, fmt.Errorf("decode response for %s: %w", cmd, err)
 		}
 		if resp.Command != cmd {
 			continue
@@ -793,14 +783,14 @@ func waitForResponse(r *bufio.Reader, cmd pi.CommandType, logW io.Writer) (pi.Re
 	}
 }
 
-func waitForResponseContext(ctx context.Context, r *bufio.Reader, cmd pi.CommandType, logW io.Writer, onTimeout func()) (pi.Response, error) {
+func waitForResponseContext(ctx context.Context, r *agent.RelayRecordReader, cmd pi.CommandType, onTimeout func()) (pi.Response, error) {
 	type result struct {
 		resp pi.Response
 		err  error
 	}
 	ch := make(chan result, 1)
 	go func() {
-		resp, err := waitForResponse(r, cmd, logW)
+		resp, err := waitForResponse(r, cmd)
 		ch <- result{resp: resp, err: err}
 	}()
 	select {

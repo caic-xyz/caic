@@ -36,7 +36,7 @@ func (*failingConn) SendRaw([]byte) error { return nil }
 
 func (*failingConn) SendCompact(string) error { return nil }
 
-func (*failingConn) ReadMessages(io.Reader, chan<- agent.Message) error { return nil }
+func (*failingConn) ReadMessages(io.Reader, chan<- agent.ParsedMessage) error { return nil }
 
 func (*failingConn) SendStop(context.Context) {}
 
@@ -421,7 +421,7 @@ func TestTask(t *testing.T) {
 				t.Fatal(err)
 			}
 			sendErr := errors.New("delivery failed")
-			s := agent.NewSession(cmd, &failingConn{err: sendErr}, stdout, make(chan agent.Message, 256), nil)
+			s := agent.NewSession(cmd, &failingConn{err: sendErr}, stdout, make(chan agent.ParsedMessage, 256), nil)
 			t.Cleanup(func() {
 				cmdCancel()
 				_ = s.Wait()
@@ -480,7 +480,7 @@ func TestTask(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.Message, 256), nil)
+			s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), nil)
 			tk.AttachSession(&SessionHandle{Session: s})
 			defer func() { _ = stdin.Close(); _ = s.Wait() }()
 
@@ -585,7 +585,7 @@ func TestTask(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.Message, 256), nil)
+			s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), nil)
 			tk.AttachSession(&SessionHandle{Session: s})
 			defer func() { _ = stdin.Close(); _ = s.Wait() }()
 
@@ -644,7 +644,7 @@ func TestTask(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.Message, 256), nil)
+			s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), nil)
 			<-s.Done()
 			tk.AttachSession(&SessionHandle{Session: s})
 			err = tk.SendInput(t.Context(), agent.Prompt{Text: "hello"})
@@ -679,7 +679,7 @@ func TestTask(t *testing.T) {
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
-		s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.Message, 256), nil)
+		s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), nil)
 		h := &SessionHandle{Session: s}
 		tk.AttachSession(h)
 
@@ -2637,7 +2637,7 @@ func TestTask(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.Message, 256), nil)
+			s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), nil)
 			<-s.Done()
 			tk.AttachSession(&SessionHandle{Session: s})
 			err := tk.SendCompact(t.Context(), "compact now")
@@ -2722,8 +2722,8 @@ func TestSessionHandle(t *testing.T) {
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
-		s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.Message, 256), nil)
-		ch := make(chan agent.Message)
+		s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), nil)
+		ch := make(chan agent.ParsedMessage)
 		done := make(chan struct{})
 		go func() {
 			for range ch {
@@ -2743,7 +2743,7 @@ func TestSessionHandle(t *testing.T) {
 	t.Run("CloseMsgCh", func(t *testing.T) {
 		t.Parallel()
 		for range 2 {
-			h := &SessionHandle{MsgCh: make(chan agent.Message)}
+			h := &SessionHandle{MsgCh: make(chan agent.ParsedMessage)}
 			h.CloseMsgCh()
 		}
 	})

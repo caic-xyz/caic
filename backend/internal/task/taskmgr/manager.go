@@ -43,7 +43,7 @@ var errTaskNotFound = &Error{Kind: KindNotFound, Msg: "task not found"}
 
 type relayReader interface {
 	Status(ctx context.Context, target runtime.ConnectionTarget) (bool, string, error)
-	ReadTail(ctx context.Context, target runtime.ConnectionTarget, parseFn func([]byte) ([]agent.Message, error), maxBytes int64) ([]agent.Message, int64, error)
+	ReadTail(ctx context.Context, target runtime.ConnectionTarget, parser *agent.LogRecordParser, maxBytes int64) ([]agent.ParsedMessage, int64, error)
 	ReadLog(ctx context.Context, target runtime.ConnectionTarget, maxBytes int) string
 }
 
@@ -56,11 +56,11 @@ func (agentRelayReader) Status(ctx context.Context, target runtime.ConnectionTar
 	return agent.RelayStatus(ctx, target.SSHHost)
 }
 
-func (agentRelayReader) ReadTail(ctx context.Context, target runtime.ConnectionTarget, parseFn func([]byte) ([]agent.Message, error), maxBytes int64) (msgs []agent.Message, size int64, err error) {
+func (agentRelayReader) ReadTail(ctx context.Context, target runtime.ConnectionTarget, parser *agent.LogRecordParser, maxBytes int64) (msgs []agent.ParsedMessage, size int64, err error) {
 	if target.SSHHost == "" {
 		return nil, 0, errors.New("agent connection target missing SSH host")
 	}
-	return agent.ReadRelayTail(ctx, target.SSHHost, parseFn, maxBytes)
+	return agent.ReadRelayTail(ctx, target.SSHHost, parser, maxBytes)
 }
 
 func (agentRelayReader) ReadLog(ctx context.Context, target runtime.ConnectionTarget, maxBytes int) string {
@@ -1703,9 +1703,10 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 	lt.SetNativeParserResolver(m.resolveNativeParser)
 	// Check relay liveness.
 	var relayAlive bool
-	var relayMsgs []agent.Message
+	var relayRecords []agent.ParsedMessage
 	var relaySize int64
 	var relayDiag string
+	var relaySnapshotRead bool
 	relayTarget := c.AgentTarget
 	if !isExited {
 		var relayErr error
@@ -1713,12 +1714,22 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 		if relayErr != nil {
 			m.log.WarnContext(ctx, "relay", "msg", "check failed during adopt", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", relayErr, "diag", relayDiag)
 		}
+		version := lt.LogVersion
+		if version == 0 {
+			version = agent.LogVersionV1
+		}
+		parser, parserErr := agent.NewLogRecordParser(version, backend.NewWire().ParseMessage)
+		if parserErr != nil {
+			return nil, fmt.Errorf("construct relay parser: %w", parserErr)
+		}
 		readCtx, readCancel := context.WithTimeout(ctx, 30*time.Second)
-		relayMsgs, relaySize, relayErr = m.relay.ReadTail(readCtx, relayTarget, backend.NewWire().ParseMessage, 10<<20) // 10 MiB tail
+		relayRecords, relaySize, relayErr = m.relay.ReadTail(readCtx, relayTarget, parser, 10<<20) // 10 MiB tail
 		readCancel()
 		if relayErr != nil {
 			m.log.WarnContext(ctx, "relay", "msg", "read output failed", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", relayErr)
 			relayAlive = false
+		} else {
+			relaySnapshotRead = true
 		}
 	}
 
@@ -1809,6 +1820,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 		Sudo:              c.Sudo,
 		VNCPort:           c.VNCPort,
 		Provider:          m.provider,
+		LogVersion:        lt.LogVersion,
 		ForgeIssue:        forgeIssue,
 	}
 	t.SetRuntimeConnectionInfo(c.ID, c.AgentTarget, c.TailscaleFQDN, "", c.VNCPort)
@@ -1830,6 +1842,9 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 	}
 	t.SetLogPath(lt.LogPath())
 	t.SetLogValidationSnapshot(lt.ValidatedSnapshot())
+	if relaySnapshotRead {
+		t.SetRelayOffset(relaySize)
+	}
 
 	foundPRFromLog := false
 	switch {
@@ -1849,15 +1864,18 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 		return nil, fmt.Errorf("load messages for adopted task %s: %w", taskID, err)
 	}
 	t.SetLogValidationSnapshot(lt.ValidatedSnapshot())
-	if len(relayMsgs) > 0 {
+	if len(relayRecords) > 0 {
+		relayMsgs := make([]agent.Message, len(relayRecords))
+		for i, parsed := range relayRecords {
+			relayMsgs[i] = parsed.Message
+		}
 		msgs := relayMsgs
 		if len(lt.Msgs) > 0 {
 			msgs = mergeLogAndRelayMessages(lt.Msgs, relayMsgs)
 		}
 		t.RestoreMessages(msgs)
 		applyLoadedSessionMetadata(t, lt)
-		t.SetRelayOffset(relaySize)
-		m.log.DebugContext(ctx, "relay", "msg", "restored from", "repo", ri.RelPath, "br", branch, "instance", c.ID, "alive", relayAlive, "msgs", len(msgs), "relayMsgs", len(relayMsgs))
+		m.log.DebugContext(ctx, "relay", "msg", "restored from", "repo", ri.RelPath, "br", branch, "instance", c.ID, "alive", relayAlive, "msgs", len(msgs), "relayMsgs", len(relayRecords))
 	} else if len(lt.Msgs) > 0 {
 		t.RestoreMessages(lt.Msgs)
 		applyLoadedSessionMetadata(t, lt)

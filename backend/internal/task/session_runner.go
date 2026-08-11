@@ -98,6 +98,7 @@ func (r *SessionRunner) Reconnect(ctx context.Context, t *Task, skipSideEffects 
 		ResumeSessionID:    sessionID,
 		Effort:             t.Effort,
 		PendingUserActions: t.PendingUserActions(),
+		LogVersion:         t.RelayLogVersion(),
 		MsgCh:              msgCh,
 		LogW:               logW,
 	})
@@ -195,6 +196,7 @@ func (r *SessionRunner) startSessionWithLog(ctx context.Context, t *Task, prompt
 		Model:         t.Model,
 		Effort:        t.Effort,
 		InitialPrompt: prompt,
+		LogVersion:    t.RelayLogVersion(),
 		MsgCh:         msgCh,
 		LogW:          logW,
 	})
@@ -267,12 +269,13 @@ func (r *SessionRunner) replaceSession(ctx context.Context, t *Task, prompt agen
 	tlog.Info(mode.logMessage(), "hns", t.Harness)
 	target := t.RuntimeConnectionTarget()
 	opts := &agent.Options{
-		Target: target,
-		Dir:    r.runtimeDir(t),
-		Model:  t.Model,
-		Effort: t.Effort,
-		MsgCh:  msgCh,
-		LogW:   logW,
+		Target:     target,
+		Dir:        r.runtimeDir(t),
+		Model:      t.Model,
+		Effort:     t.Effort,
+		LogVersion: t.RelayLogVersion(),
+		MsgCh:      msgCh,
+		LogW:       logW,
 	}
 	if mode == replaceSessionRestart {
 		opts.InitialPrompt = prompt
@@ -301,18 +304,19 @@ func (r *SessionRunner) replaceSession(ctx context.Context, t *Task, prompt agen
 
 // startMessageDispatch starts a goroutine that reads from msgCh, dispatches to
 // t.addMessage, and reports task state transitions.
-func (r *SessionRunner) startMessageDispatch(ctx context.Context, t *Task, skipSideEffects bool) (msgCh chan agent.Message, dispatchDone <-chan struct{}) {
+func (r *SessionRunner) startMessageDispatch(ctx context.Context, t *Task, skipSideEffects bool) (msgCh chan agent.ParsedMessage, dispatchDone <-chan struct{}) {
 	// Capture all repos outside the goroutine to avoid races.
 	allRepos := t.RuntimeRepos()
 	instanceID := t.RuntimeInstanceID()
-	msgCh = make(chan agent.Message, 256)
+	msgCh = make(chan agent.ParsedMessage, 256)
 	done := make(chan struct{})
 	dispatchDone = done
 	go func() {
 		defer close(done)
 		// Track tool_use IDs from ToolUseMessage that may mutate files.
 		pendingMutating := make(map[string]struct{})
-		for m := range msgCh {
+		for parsed := range msgCh {
+			m := parsed.Message
 			emitToolDiff := false
 			switch msg := m.(type) {
 			case *agent.ToolUseMessage:
@@ -330,7 +334,7 @@ func (r *SessionRunner) startMessageDispatch(ctx context.Context, t *Task, skipS
 					msg.DiffStat = ds
 				}
 			}
-			if t.addMessage(ctx, m, skipSideEffects) && r.NotifyTaskChange != nil {
+			if t.addParsedMessage(ctx, parsed, skipSideEffects) && r.NotifyTaskChange != nil {
 				r.NotifyTaskChange()
 			}
 			if emitToolDiff {

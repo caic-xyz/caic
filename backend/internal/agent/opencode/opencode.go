@@ -4,7 +4,6 @@ package opencode
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -59,11 +58,11 @@ func New(cacheDir string, envVars []string) *Backend {
 // replaces the original stdout for subsequent reads.
 func (b *Backend) RecordHandshake(ctx context.Context, stdin io.Writer, stdout io.Reader, model string) (agent.WireFormat, io.Reader, error) {
 	br := bufio.NewReaderSize(stdout, 1<<16)
-	hs, err := handshake(ctx, stdin, br, &agent.Options{Dir: "/workspace", Model: model})
+	hs, continuation, err := handshake(ctx, stdin, br, &agent.Options{Dir: "/workspace", Model: model, LogVersion: agent.LogVersionV1})
 	if err != nil {
 		return nil, nil, err
 	}
-	return hs.wire, br, nil
+	return hs.wire, continuation, nil
 }
 
 // ModelInventory implements agent.Backend.
@@ -91,7 +90,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if sshHost == "" {
 		return nil, errors.New("agent connection target missing SSH host")
 	}
-	if err := agent.DeployRelay(ctx, opts.Target); err != nil {
+	if err := agent.DeployRelay(ctx, opts.Target, opts.LogVersion); err != nil {
 		return nil, err
 	}
 
@@ -120,15 +119,15 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	// without losing buffered bytes for the session's readMessages goroutine.
 	br := bufio.NewReaderSize(stdout, 1<<16)
 
-	hs, err := handshake(ctx, stdin, br, opts)
+	hs, continuation, err := handshake(ctx, stdin, br, opts)
 	if err != nil {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 		return nil, fmt.Errorf("opencode handshake: %w", err)
 	}
 	log := slog.With("target", sshHost)
-	c := agent.NewConn(stdin, opts.LogW, hs.wire)
-	s := agent.NewSession(cmd, c, br, opts.MsgCh, log)
+	c := agent.NewVersionedConn(stdin, opts.LogW, opts.LogVersion, hs.wire)
+	s := agent.NewSession(cmd, c, continuation, opts.MsgCh, log)
 
 	// Emit InitMessage so the task captures session ID, model, and version.
 	initMsg := &agent.InitMessage{
@@ -136,7 +135,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		Model:     hs.currentModel,
 		Version:   hs.agentVersion,
 	}
-	opts.MsgCh <- initMsg
+	opts.MsgCh <- agent.ParsedMessage{Message: initMsg}
 	if err := agent.WriteMetaSession(opts.LogW, initMsg); err != nil {
 		return nil, fmt.Errorf("write session metadata: %w", err)
 	}
@@ -415,11 +414,15 @@ type handshakeResult struct {
 
 // handshake performs the ACP initialize → session/new sequence and returns
 // a handshakeResult with the wireFormat, model list, and agent metadata.
-func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts *agent.Options) (*handshakeResult, error) {
+func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts *agent.Options) (*handshakeResult, *bufio.Reader, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	w := &wireFormat{fw: &jsonutil.FieldWarner{}}
+	records, err := agent.NewRelayRecordReader(stdout, opts.LogVersion, io.Discard)
+	if err != nil {
+		return nil, nil, fmt.Errorf("construct relay reader: %w", err)
+	}
 	res := &handshakeResult{wire: w}
 
 	// 1. Send initialize request.
@@ -431,7 +434,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 		ClientInfo: opencode.ClientInfo{Name: "caic", Title: "caic", Version: "1.0.0"},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("marshal initialize params: %w", err)
+		return nil, nil, fmt.Errorf("marshal initialize params: %w", err)
 	}
 	initReq := opencode.JSONRPCRequest{
 		JSONRPC: "2.0",
@@ -440,13 +443,13 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 		Params:  initParams,
 	}
 	if err := writeJSON(stdin, initReq); err != nil {
-		return nil, fmt.Errorf("write initialize: %w", err)
+		return nil, nil, fmt.Errorf("write initialize: %w", err)
 	}
 
 	// Read initialize response.
-	initResp, err := readJSONRPCResponse(ctx, stdout)
+	initResp, err := readJSONRPCResponse(ctx, records)
 	if err != nil {
-		return nil, fmt.Errorf("read initialize response: %w", err)
+		return nil, nil, fmt.Errorf("read initialize response: %w", err)
 	}
 
 	// Extract capabilities and agent info.
@@ -463,7 +466,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	if opts.ResumeSessionID != "" {
 		params, err := marshalParams(opencode.SessionLoadParams{SessionID: opts.ResumeSessionID, Cwd: opts.Dir, McpServers: []opencode.MCPServer{}})
 		if err != nil {
-			return nil, fmt.Errorf("marshal session/load params: %w", err)
+			return nil, nil, fmt.Errorf("marshal session/load params: %w", err)
 		}
 		sessionReq = opencode.JSONRPCRequest{
 			JSONRPC: "2.0",
@@ -474,7 +477,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	} else {
 		params, err := marshalParams(opencode.SessionNewParams{Cwd: opts.Dir, McpServers: []opencode.MCPServer{}})
 		if err != nil {
-			return nil, fmt.Errorf("marshal session/new params: %w", err)
+			return nil, nil, fmt.Errorf("marshal session/new params: %w", err)
 		}
 		sessionReq = opencode.JSONRPCRequest{
 			JSONRPC: "2.0",
@@ -484,19 +487,19 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 		}
 	}
 	if err := writeJSON(stdin, sessionReq); err != nil {
-		return nil, fmt.Errorf("write session/new: %w", err)
+		return nil, nil, fmt.Errorf("write session/new: %w", err)
 	}
 
 	// Read session response.
-	resp, err := readJSONRPCResponse(ctx, stdout)
+	resp, err := readJSONRPCResponse(ctx, records)
 	if err != nil {
-		return nil, fmt.Errorf("read session response: %w", err)
+		return nil, nil, fmt.Errorf("read session response: %w", err)
 	}
 
 	// Extract session ID and models from result.
 	var snResult opencode.SessionNewResult
 	if err := json.Unmarshal(resp.Result, &snResult); err != nil {
-		return nil, fmt.Errorf("parse session result: %w", err)
+		return nil, nil, fmt.Errorf("parse session result: %w", err)
 	}
 	if snResult.SessionID != "" {
 		w.sessionID = snResult.SessionID
@@ -505,7 +508,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 		w.sessionID = opts.ResumeSessionID
 	}
 	if w.sessionID == "" {
-		return nil, errors.New("session response missing sessionId")
+		return nil, nil, errors.New("session response missing sessionId")
 	}
 	res.setModels(snResult.Models)
 	res.setConfigOptions(snResult.ConfigOptions)
@@ -520,21 +523,21 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	}
 	if model != "" && model != res.currentModel {
 		hasModelConfig := res.configOption(opencode.ConfigOptionModel) != nil
-		selected, err := res.setSessionModel(ctx, stdin, stdout, model)
+		selected, err := res.setSessionModel(ctx, stdin, records, model)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if selected && !hasModelConfig {
 			res.currentModel = model
 		}
 	}
 	if opts.Effort != "" {
-		if err := res.setSessionConfigOption(ctx, stdin, stdout, opencode.ConfigOptionEffort, opts.Effort); err != nil {
-			return nil, err
+		if err := res.setSessionConfigOption(ctx, stdin, records, opencode.ConfigOptionEffort, opts.Effort); err != nil {
+			return nil, nil, err
 		}
 	}
 
-	return res, nil
+	return res, records.Reader(), nil
 }
 
 func (res *handshakeResult) setModels(models opencode.ModelsInfo) {
@@ -557,9 +560,9 @@ func (res *handshakeResult) configOption(id opencode.ConfigOptionID) *opencode.S
 	return nil
 }
 
-func (res *handshakeResult) setSessionModel(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, model string) (bool, error) {
+func (res *handshakeResult) setSessionModel(ctx context.Context, stdin io.Writer, records *agent.RelayRecordReader, model string) (bool, error) {
 	if res.configOption(opencode.ConfigOptionModel) != nil {
-		if err := res.setSessionConfigOption(ctx, stdin, stdout, opencode.ConfigOptionModel, model); err != nil {
+		if err := res.setSessionConfigOption(ctx, stdin, records, opencode.ConfigOptionModel, model); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -573,14 +576,17 @@ func (res *handshakeResult) setSessionModel(ctx context.Context, stdin io.Writer
 	}); err != nil {
 		return false, fmt.Errorf("write session/set_model: %w", err)
 	}
-	if _, err := readJSONRPCResponse(ctx, stdout); err != nil {
+	if _, err := readJSONRPCResponse(ctx, records); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return false, err
+		}
 		slog.WarnContext(ctx, "opencode: session/set_model failed, using default model", "err", err, "model", model)
 		return false, nil
 	}
 	return true, nil
 }
 
-func (res *handshakeResult) setSessionConfigOption(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, id opencode.ConfigOptionID, value string) error {
+func (res *handshakeResult) setSessionConfigOption(ctx context.Context, stdin io.Writer, records *agent.RelayRecordReader, id opencode.ConfigOptionID, value string) error {
 	option := res.configOption(id)
 	if option == nil {
 		return fmt.Errorf("opencode ACP does not expose %q for the selected model", id)
@@ -600,7 +606,7 @@ func (res *handshakeResult) setSessionConfigOption(ctx context.Context, stdin io
 	}); err != nil {
 		return fmt.Errorf("write session/set_config_option: %w", err)
 	}
-	resp, err := readJSONRPCResponse(ctx, stdout)
+	resp, err := readJSONRPCResponse(ctx, records)
 	if err != nil {
 		return fmt.Errorf("read session/set_config_option response: %w", err)
 	}
@@ -671,7 +677,7 @@ func writeJSON(w io.Writer, v any) error {
 // readJSONRPCResponse reads lines from r until it finds a JSON-RPC response
 // (has "id" field). Notifications encountered during the handshake are logged
 // and skipped.
-func readJSONRPCResponse(ctx context.Context, r *bufio.Reader) (*opencode.JSONRPCMessage, error) {
+func readJSONRPCResponse(ctx context.Context, r *agent.RelayRecordReader) (*opencode.JSONRPCMessage, error) {
 	type result struct {
 		msg *opencode.JSONRPCMessage
 		err error
@@ -679,12 +685,17 @@ func readJSONRPCResponse(ctx context.Context, r *bufio.Reader) (*opencode.JSONRP
 	ch := make(chan result, 1)
 	go func() {
 		for {
-			line, err := r.ReadBytes('\n')
+			line, controls, err := r.ReadRecord()
 			if err != nil {
 				ch <- result{nil, fmt.Errorf("read response: %w", err)}
 				return
 			}
-			line = bytes.TrimSpace(line)
+			for _, control := range controls {
+				if exit, ok := control.Message.(*agent.ExitMessage); ok && exit.ExitCode != 0 {
+					ch <- result{nil, errors.New(exit.ExitError())}
+					return
+				}
+			}
 			if len(line) == 0 {
 				continue
 			}

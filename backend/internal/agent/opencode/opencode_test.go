@@ -5,7 +5,10 @@ package opencode
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -62,6 +65,16 @@ func TestSetModelInventory(t *testing.T) {
 	}
 }
 
+func v2Records(native string) string {
+	var records strings.Builder
+	for line := range strings.SplitSeq(strings.TrimSpace(native), "\n") {
+		records.WriteString(`{"t":"agent","ts":1.000,"msg":`)
+		records.WriteString(line)
+		records.WriteString("}\n")
+	}
+	return records.String()
+}
+
 func TestHandshake(t *testing.T) {
 	t.Parallel()
 
@@ -77,7 +90,7 @@ func TestHandshake(t *testing.T) {
 			`{"jsonrpc":"2.0","id":4,"result":{"configOptions":[{"id":"model","type":"select","currentValue":"openai/gpt-5","options":[{"value":"anthropic/claude-sonnet-4"},{"value":"openai/gpt-5"}]},{"id":"effort","type":"select","currentValue":"high","options":[{"value":"low"},{"value":"high"}]},{"id":"mode","type":"select","currentValue":"build","options":[{"value":"build"},{"value":"plan"}]}]}}`,
 		}, "\n") + "\n"))
 
-		hs, err := handshake(t.Context(), &stdin, stdout, &agent.Options{Dir: "/workspace", Model: selectedModel, Effort: "high"})
+		hs, _, err := handshake(t.Context(), &stdin, stdout, &agent.Options{Dir: "/workspace", Model: selectedModel, Effort: "high", LogVersion: agent.LogVersionV1})
 		if err != nil {
 			t.Fatalf("handshake: %v", err)
 		}
@@ -113,6 +126,21 @@ func TestHandshake(t *testing.T) {
 		}
 	})
 
+	t.Run("v2_agent_envelopes", func(t *testing.T) {
+		t.Parallel()
+		const responses = `{"jsonrpc":"2.0","id":1,"result":{}}
+{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1","models":{"currentModelId":"openai/gpt-5"}}}
+`
+		var stdin bytes.Buffer
+		hs, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(v2Records(responses))), &agent.Options{Dir: "/workspace", LogVersion: agent.LogVersionV2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hs.wire.sessionID != "session-1" || hs.currentModel != "openai/gpt-5" {
+			t.Fatalf("v2 handshake = session=%q model=%q", hs.wire.sessionID, hs.currentModel)
+		}
+	})
+
 	t.Run("retains default model when legacy selection fails", func(t *testing.T) {
 		t.Parallel()
 
@@ -124,7 +152,7 @@ func TestHandshake(t *testing.T) {
 			`{"jsonrpc":"2.0","id":3,"error":{"code":-32601,"message":"method not found"}}`,
 		}, "\n") + "\n"))
 
-		hs, err := handshake(t.Context(), &stdin, stdout, &agent.Options{Dir: "/workspace", Model: "openai/gpt-5"})
+		hs, _, err := handshake(t.Context(), &stdin, stdout, &agent.Options{Dir: "/workspace", Model: "openai/gpt-5", LogVersion: agent.LogVersionV1})
 		if err != nil {
 			t.Fatalf("handshake: %v", err)
 		}
@@ -132,6 +160,55 @@ func TestHandshake(t *testing.T) {
 			t.Fatalf("current model = %q, want default %q after failed selection", hs.currentModel, defaultModel)
 		}
 	})
+}
+
+func TestHandshakeContinuation(t *testing.T) {
+	t.Parallel()
+	const native = `{"jsonrpc":"2.0","id":1,"result":{}}
+{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1","models":{"currentModelId":"openai/gpt-5"}}}
+`
+	const notification = `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1","update":{}}}`
+	for _, tc := range []struct {
+		name    string
+		version agent.LogVersion
+		input   string
+		want    string
+	}{
+		{name: "v1", version: agent.LogVersionV1, input: native + notification + "\n", want: notification + "\n"},
+		{name: "v2", version: agent.LogVersionV2, input: v2Records(native + notification), want: `{"t":"agent","ts":1.000,"msg":` + notification + "}\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var stdin bytes.Buffer
+			_, continuation, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(tc.input)), &agent.Options{Dir: "/workspace", LogVersion: tc.version})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := continuation.ReadBytes('\n')
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tc.want {
+				t.Fatalf("continuation = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLegacyModelSelectionCancellation(t *testing.T) {
+	t.Parallel()
+	reader, writer := io.Pipe()
+	t.Cleanup(func() { _ = writer.Close() })
+	records, err := agent.NewRelayRecordReader(reader, agent.LogVersionV1, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	res := &handshakeResult{wire: &wireFormat{sessionID: "s"}}
+	if _, err := res.setSessionModel(ctx, io.Discard, records, "openai/gpt-5"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("setSessionModel error = %v, want context canceled", err)
+	}
 }
 
 func TestHandshakeResultSetConfigOptions(t *testing.T) {

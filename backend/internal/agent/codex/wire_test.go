@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"io"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -129,8 +130,12 @@ func TestFetchModels(t *testing.T) {
 {"id":2,"result":{"data":[{"id":"gpt-5.4","supportedReasoningEfforts":[{"reasoningEffort":"minimal"},{"reasoningEffort":"high"}]},{"id":"gpt-5.3-codex","supportedReasoningEfforts":[{"reasoningEffort":"low"}]}],"nextCursor":null}}
 `
 		var stdin bytes.Buffer
+		records, err := agent.NewRelayRecordReader(strings.NewReader(responses), agent.LogVersionV1, io.Discard)
+		if err != nil {
+			t.Fatal(err)
+		}
 		var nextID atomic.Int64
-		models, err := fetchModelsFromAppServer(t.Context(), &stdin, bufio.NewReader(strings.NewReader(responses)), &nextID)
+		models, err := fetchModelsFromAppServer(t.Context(), &stdin, records, &nextID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -156,6 +161,16 @@ func TestFetchModels(t *testing.T) {
 	})
 }
 
+func v2Records(native string) string {
+	var records strings.Builder
+	for line := range strings.SplitSeq(strings.TrimSpace(native), "\n") {
+		records.WriteString(`{"t":"agent","ts":1.000,"msg":`)
+		records.WriteString(line)
+		records.WriteString("}\n")
+	}
+	return records.String()
+}
+
 func TestHandshake(t *testing.T) {
 	t.Parallel()
 	t.Run("model_list_params", func(t *testing.T) {
@@ -165,7 +180,7 @@ func TestHandshake(t *testing.T) {
 {"id":3,"result":{"thread":{"id":"thread_1","cliVersion":"0.133.0"}}}
 `
 		var stdin bytes.Buffer
-		w, models, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(responses)), &agent.Options{Dir: "/repo", Model: "gpt-5.4"})
+		w, models, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(responses)), &agent.Options{Dir: "/repo", Model: "gpt-5.4", LogVersion: agent.LogVersionV1})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -202,6 +217,75 @@ func TestHandshake(t *testing.T) {
 			t.Fatalf("model/list params = %s, want {}", data)
 		}
 	})
+	t.Run("v2_agent_envelopes", func(t *testing.T) {
+		t.Parallel()
+		const responses = `{"id":1,"result":{"userAgent":"caic/0.1"}}
+{"id":2,"result":{"data":[{"id":"gpt-5.4"}],"nextCursor":null}}
+{"id":3,"result":{"thread":{"id":"thread_1","cliVersion":"0.133.0"}}}
+`
+		var stdin bytes.Buffer
+		w, models, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(v2Records(responses))), &agent.Options{Dir: "/repo", Model: "gpt-5.4", LogVersion: agent.LogVersionV2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if w.threadID != "thread_1" || w.agentVersion != "0.133.0" || len(models) != 1 {
+			t.Fatalf("v2 handshake = thread=%q version=%q models=%v", w.threadID, w.agentVersion, models)
+		}
+	})
+}
+
+func TestHandshakeContinuation(t *testing.T) {
+	t.Parallel()
+	const native = `{"id":1,"result":{"userAgent":"caic/0.1"}}
+{"id":2,"result":{"data":[{"id":"gpt-5.4"}],"nextCursor":null}}
+{"id":3,"result":{"thread":{"id":"thread_1","cliVersion":"0.133.0"}}}
+`
+	const notification = `{"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"next","cliVersion":"1.0"}}}`
+	for _, tc := range []struct {
+		name    string
+		version agent.LogVersion
+		input   string
+		want    string
+	}{
+		{name: "v1", version: agent.LogVersionV1, input: native + notification + "\n", want: notification + "\n"},
+		{name: "v2", version: agent.LogVersionV2, input: v2Records(native + notification), want: `{"t":"agent","ts":1.000,"msg":` + notification + "}\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var stdin bytes.Buffer
+			_, _, continuation, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(tc.input)), &agent.Options{Dir: "/repo", LogVersion: tc.version})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := continuation.ReadBytes('\n')
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tc.want {
+				t.Fatalf("continuation = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRecordHandshakeContinuation(t *testing.T) {
+	t.Parallel()
+	const responses = `{"id":1,"result":{"userAgent":"caic/0.1"}}
+{"id":2,"result":{"data":[{"id":"gpt-5.4"}],"nextCursor":null}}
+{"id":3,"result":{"thread":{"id":"thread_1","cliVersion":"0.133.0"}}}
+{"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"next","cliVersion":"1.0"}}}
+`
+	_, continuation, err := New("", nil).RecordHandshake(t.Context(), io.Discard, strings.NewReader(responses), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	line, err := bufio.NewReader(continuation).ReadBytes('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(line), `"thread/started"`) {
+		t.Fatalf("continuation = %q", line)
+	}
 }
 
 func TestThreadStartedNotification(t *testing.T) {

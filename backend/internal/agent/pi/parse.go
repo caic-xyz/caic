@@ -408,7 +408,10 @@ func parseResponse(line []byte) ([]agent.Message, error) {
 			Raw:         append([]byte(nil), line...),
 		}}, nil
 	}
-	return nil, nil
+	return []agent.Message{&agent.RawMessage{
+		MessageType: "response:" + string(resp.Command),
+		Raw:         append([]byte(nil), line...),
+	}}, nil
 }
 
 func newToolUseMessage(id, rawName, name string, input json.RawMessage) *agent.ToolUseMessage {

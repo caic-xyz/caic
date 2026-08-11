@@ -5,6 +5,7 @@ package agent
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -300,7 +301,7 @@ func TestSession(t *testing.T) {
 		slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, nil)))
 		defer slog.SetDefault(oldDefault)
 
-		msgCh := make(chan Message, 16)
+		msgCh := make(chan ParsedMessage, 16)
 		s := NewSession(cmd, NewConn(stdin, io.Discard, testWire{}), stdout, msgCh, nil)
 
 		if err := cmd.Process.Kill(); err != nil {
@@ -361,7 +362,7 @@ func TestReadMessages(t *testing.T) {
 			`{"type":"assistant","message":{"model":"m","id":"i","role":"assistant","content":[{"type":"text","text":"hi"}],"usage":{}},"session_id":"s","uuid":"u"}`,
 			`{"type":"result","subtype":"success","is_error":false,"duration_ms":100,"num_turns":1,"result":"hi","session_id":"s","total_cost_usd":0.01,"usage":{},"uuid":"u"}`,
 		}
-		input := strings.Join(lines, "\n")
+		input := strings.Join(lines, "\n") + "\n"
 
 		ch := make(chan Message, 16)
 		if err := DefaultReadMessages(strings.NewReader(input), func(m Message) { ch <- m }, io.Discard, testParseFn); err != nil {
@@ -387,7 +388,7 @@ func TestReadMessages(t *testing.T) {
 			`{"type":"assistant","message":{"model":"m","id":"i","role":"assistant","content":[{"type":"text","text":"hello"}],"usage":{}},"session_id":"s","uuid":"u"}`,
 			`{"type":"result","subtype":"success","is_error":false,"duration_ms":100,"num_turns":1,"result":"hello","session_id":"s","total_cost_usd":0.01,"usage":{},"uuid":"u"}`,
 		}
-		input := strings.Join(lines, "\n")
+		input := strings.Join(lines, "\n") + "\n"
 
 		ch := make(chan Message, 16)
 		if err := DefaultReadMessages(strings.NewReader(input), func(m Message) { ch <- m }, io.Discard, testParseFn); err != nil {
@@ -416,7 +417,7 @@ func TestReadMessages(t *testing.T) {
 			`{"type":"system","subtype":"init","cwd":"/","session_id":"s","tools":[],"model":"m","claude_code_version":"1","uuid":"u"}`,
 			`{"type":"result","subtype":"success","is_error":false,"duration_ms":100,"num_turns":1,"result":"ok","session_id":"s","total_cost_usd":0.01,"usage":{},"uuid":"u"}`,
 		}
-		input := strings.Join(lines, "\n")
+		input := strings.Join(lines, "\n") + "\n"
 
 		var buf bytes.Buffer
 		if err := DefaultReadMessages(strings.NewReader(input), func(Message) {}, &buf, testParseFn); err != nil {
@@ -427,6 +428,162 @@ func TestReadMessages(t *testing.T) {
 		for _, line := range lines {
 			if !strings.Contains(logged, line+"\n") {
 				t.Errorf("log missing line: %s", line)
+			}
+		}
+	})
+	t.Run("rejects unterminated physical records", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name    string
+			version LogVersion
+			input   string
+		}{
+			{name: "v1", version: LogVersionV1, input: `{"type":"system","subtype":"init"}`},
+			{name: "v2", version: LogVersionV2, input: `{"t":"agent","ts":1.000,"msg":{}}`},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				stdinR, stdinW := io.Pipe()
+				t.Cleanup(func() { _ = stdinR.Close() })
+				var log bytes.Buffer
+				got := make(chan ParsedMessage, 1)
+				conn := NewVersionedConn(stdinW, &log, tc.version, testWire{})
+				err := conn.ReadMessages(strings.NewReader(tc.input), got)
+				if !errors.Is(err, io.ErrUnexpectedEOF) {
+					t.Fatalf("ReadMessages error = %v, want unexpected EOF", err)
+				}
+				if log.Len() != 0 || len(got) != 0 {
+					t.Fatalf("persisted=%q dispatched=%d", log.String(), len(got))
+				}
+			})
+		}
+	})
+	t.Run("v2 structural corruption is not persisted", func(t *testing.T) {
+		t.Parallel()
+		var log bytes.Buffer
+		var got []ParsedMessage
+		err := DefaultReadVersionedMessages(strings.NewReader(`{"t":"agent","time":1.000,"msg":{}}`+"\n"), func(msg ParsedMessage) {
+			got = append(got, msg)
+		}, &log, LogVersionV2, func([]byte) ([]Message, error) {
+			return []Message{&TextMessage{}}, nil
+		})
+		if err == nil || log.Len() != 0 || len(got) != 0 {
+			t.Fatalf("err=%v persisted=%d dispatched=%d", err, log.Len(), len(got))
+		}
+	})
+}
+
+func TestRelayRecordReader(t *testing.T) {
+	t.Parallel()
+	t.Run("rejects unterminated record without persistence", func(t *testing.T) {
+		t.Parallel()
+		var log bytes.Buffer
+		reader, err := NewRelayRecordReader(strings.NewReader(`{"type":"system","subtype":"init"}`), LogVersionV1, &log)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := reader.ReadRecord(); !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Fatalf("ReadRecord error = %v, want unexpected EOF", err)
+		}
+		if log.Len() != 0 {
+			t.Fatalf("persisted truncated record = %q", log.String())
+		}
+	})
+}
+
+func TestReadRelayTailRecords(t *testing.T) {
+	t.Parallel()
+	const complete = `{"type":"system","subtype":"init"}`
+	full := "old\npartial" + "\n" + complete + "\n"
+	tail := "rtial\n" + complete + "\n"
+	start := int64(len(full) - len(tail))
+	parser, err := NewLogRecordParser(LogVersionV1, func([]byte) ([]Message, error) {
+		return []Message{&TextMessage{Text: "tail"}}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgs, offset, err := readRelayTailRecords(strings.NewReader(tail), parser, start, true, "ctr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("messages = %#v", msgs)
+	}
+	msg, ok := msgs[0].Message.(*TextMessage)
+	if !ok || msg.Text != "tail" {
+		t.Fatalf("messages = %#v", msgs)
+	}
+	if offset != int64(len(full)) {
+		t.Fatalf("offset = %d, want snapshot boundary %d", offset, len(full))
+	}
+	if got := full[offset:]; got != "" {
+		t.Fatalf("attach remainder before append = %q, want empty", got)
+	}
+	appended := `{"type":"system","subtype":"status"}` + "\n"
+	if got := (full + appended)[offset:]; got != appended {
+		t.Fatalf("attach remainder after append = %q, want only appended %q", got, appended)
+	}
+	if !tailNeedsLeadingSkip(start, 'x') || tailNeedsLeadingSkip(start, '\n') || tailNeedsLeadingSkip(0, 'x') {
+		t.Fatal("tail boundary classification is wrong")
+	}
+	t.Run("leading empty record is not a partial fragment", func(t *testing.T) {
+		t.Parallel()
+		parser, err := NewLogRecordParser(LogVersionV1, func([]byte) ([]Message, error) {
+			return []Message{&TextMessage{Text: "complete"}}, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		msgs, offset, err := readRelayTailRecords(strings.NewReader("\n"+complete+"\n"), parser, 10, false, "ctr")
+		if err != nil || len(msgs) != 1 || offset != 10+int64(len("\n"+complete+"\n")) {
+			t.Fatalf("leading empty tail = msgs:%#v offset:%d err:%v", msgs, offset, err)
+		}
+	})
+	t.Run("start at prior record LF retains following complete record", func(t *testing.T) {
+		t.Parallel()
+		parser, err := NewLogRecordParser(LogVersionV1, func([]byte) ([]Message, error) {
+			return []Message{&TextMessage{Text: "complete"}}, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tail := "\n" + complete + "\n"
+		msgs, offset, err := readRelayTailRecords(strings.NewReader(tail), parser, 10, true, "ctr")
+		if err != nil || len(msgs) != 1 || offset != 10+int64(len(tail)) {
+			t.Fatalf("LF-boundary tail = msgs:%#v offset:%d err:%v", msgs, offset, err)
+		}
+	})
+	t.Run("trailing fragment remains for attach", func(t *testing.T) {
+		t.Parallel()
+		parser, err := NewLogRecordParser(LogVersionV1, func([]byte) ([]Message, error) {
+			return []Message{&TextMessage{Text: "complete"}}, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		completeRecord := complete + "\n"
+		msgs, offset, err := readRelayTailRecords(strings.NewReader(completeRecord+`{"partial":true}`), parser, 0, false, "ctr")
+		if err != nil || len(msgs) != 1 || offset != int64(len(completeRecord)) {
+			t.Fatalf("trailing fragment = msgs:%#v offset:%d err:%v", msgs, offset, err)
+		}
+	})
+	t.Run("v2 corruption and oversized records do not persist", func(t *testing.T) {
+		t.Parallel()
+		for _, input := range []string{
+			`{"t":"agent","time":1.000,"msg":{}}` + "\n",
+			`{"t":"agent","ts":1.000,"msg":"` + strings.Repeat("x", maxNDJSONRecordLen) + `"}` + "\n",
+		} {
+			var log bytes.Buffer
+			reader, err := NewRelayRecordReader(strings.NewReader(input), LogVersionV2, &log)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := reader.ReadRecord(); err == nil {
+				t.Fatal("ReadRecord error = nil")
+			}
+			if log.Len() != 0 {
+				t.Fatalf("persisted invalid v2 = %d bytes", log.Len())
 			}
 		}
 	})
@@ -441,18 +598,22 @@ func TestYieldMessages(t *testing.T) {
 	}
 	collect := func(content string, skipFirst bool) ([]Message, error) {
 		var msgs []Message
-		for m, e := range yieldMessages(strings.NewReader(content), testParseFn, skipFirst, "ctr") {
+		parser, err := NewLogRecordParser(LogVersionV1, testParseFn)
+		if err != nil {
+			return nil, err
+		}
+		for m, e := range yieldMessages(strings.NewReader(content), parser, skipFirst, "ctr") {
 			if e != nil {
 				return msgs, e
 			}
-			msgs = append(msgs, m)
+			msgs = append(msgs, m.Message)
 		}
 		return msgs, nil
 	}
 
 	t.Run("Full", func(t *testing.T) {
 		t.Parallel()
-		msgs, err := collect(strings.Join(lines, "\n"), false)
+		msgs, err := collect(strings.Join(lines, "\n")+"\n", false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -465,12 +626,26 @@ func TestYieldMessages(t *testing.T) {
 		t.Parallel()
 		// Simulate a tail that cut the first record mid-line: the partial
 		// fragment must be dropped, the remaining valid records kept.
-		msgs, err := collect(`ssage":{"model"...truncated`+"\n"+strings.Join(lines[1:], "\n"), true)
+		msgs, err := collect(`ssage":{"model"...truncated`+"\n"+strings.Join(lines[1:], "\n")+"\n", true)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if len(msgs) != 2 {
 			t.Errorf("message count = %d, want 2", len(msgs))
+		}
+	})
+
+	t.Run("SkipFirstPriorRecordLF", func(t *testing.T) {
+		t.Parallel()
+		// A tail can start at the LF ending the prior record. Consume that
+		// empty physical record as the partial fragment, retaining every
+		// following complete record.
+		msgs, err := collect("\n"+strings.Join(lines, "\n")+"\n", true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != len(lines) {
+			t.Errorf("message count = %d, want %d", len(msgs), len(lines))
 		}
 	})
 }

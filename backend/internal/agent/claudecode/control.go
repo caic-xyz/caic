@@ -88,21 +88,21 @@ func (c *controlConn) SendPrompt(p agent.Prompt) error {
 	return nil
 }
 
-func (c *controlConn) ReadMessages(r io.Reader, msgCh chan<- agent.Message) error {
-	proxy := make(chan agent.Message, 1)
+func (c *controlConn) ReadMessages(r io.Reader, msgCh chan<- agent.ParsedMessage) error {
+	proxy := make(chan agent.ParsedMessage, 1)
 	errc := make(chan error, 1)
 	go func() {
 		defer close(errc)
 		var controlErr error
-		for m := range proxy {
-			handled, err := c.handleControlMessage(m)
+		for parsed := range proxy {
+			handled, err := c.handleControlMessage(parsed.Message)
 			if err != nil && controlErr == nil {
 				controlErr = err
 			}
 			if controlErr != nil || handled {
 				continue
 			}
-			msgCh <- m
+			msgCh <- parsed
 		}
 		if controlErr != nil {
 			errc <- controlErr

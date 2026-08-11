@@ -7,7 +7,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,6 +21,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/backend/internal/task/tasktest"
 )
 
 func TestSessionRunner(t *testing.T) {
@@ -256,6 +259,67 @@ func TestSessionRunner(t *testing.T) {
 
 	t.Run("StartMessageDispatch", func(t *testing.T) {
 		t.Parallel()
+		t.Run("ProducerTimeCarrier", func(t *testing.T) {
+			t.Parallel()
+			r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "/repo", nil), "", nil)
+			tk := &Task{}
+			writer := &tasktest.FakeEventReplayWriter{}
+			tk.StartEventReplay(writer)
+			_, sub, unsub := tk.Subscribe(t.Context())
+			defer unsub()
+			msgCh, done := r.startMessageDispatch(t.Context(), tk, false)
+			opts := agent.Options{LogVersion: agent.LogVersionV2, MsgCh: msgCh}
+			wantTime := time.Unix(1, 234*int64(time.Millisecond)).UTC()
+			var v2Message agent.Message
+			cmd := exec.CommandContext(t.Context(), "python3", "-c", "import sys; print(sys.argv[1])", `{"t":"agent","ts":1.234,"msg":{}}`)
+			stdin, err := cmd.StdinPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			stdout, err := cmd.StdoutPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			session := agent.NewSession(cmd, agent.NewVersionedConn(stdin, io.Discard, opts.LogVersion, &testWire{parse: func([]byte) ([]agent.Message, error) {
+				v2Message = &agent.TextMessage{Text: "v2"}
+				return []agent.Message{v2Message}, nil
+			}}), stdout, opts.MsgCh, nil)
+			if err := session.Wait(); err != nil {
+				t.Fatal(err)
+			}
+			if got := <-sub; got != v2Message {
+				t.Fatalf("subscriber message = %T, want original %T", got, v2Message)
+			}
+			var v1 agent.ParsedMessage
+			err = agent.DefaultReadVersionedMessages(strings.NewReader(`{"event":"legacy"}`+"\n"), func(parsed agent.ParsedMessage) {
+				v1 = parsed
+				opts.MsgCh <- parsed
+			}, io.Discard, agent.LogVersionV1, func([]byte) ([]agent.Message, error) {
+				return []agent.Message{&agent.TextMessage{Text: "v1"}}, nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !v1.ProducerTime.IsZero() {
+				t.Fatalf("v1 producer time = %v, want zero", v1.ProducerTime)
+			}
+			<-sub
+			close(msgCh)
+			<-done
+			tk.addMessage(t.Context(), &agent.TextMessage{Text: "synthetic"}, false)
+			if len(writer.ParsedMessages) != 3 {
+				t.Fatalf("writer messages = %d, want 3", len(writer.ParsedMessages))
+			}
+			if got := writer.ParsedMessages[0]; !got.ProducerTime.Equal(wantTime) || got.Message != v2Message {
+				t.Fatalf("writer v2 = %#v, want original wrapper", got)
+			}
+			if !writer.ParsedMessages[1].ProducerTime.IsZero() || !writer.ParsedMessages[2].ProducerTime.IsZero() {
+				t.Fatalf("v1/synthetic producer times = %v, %v, want zero", writer.ParsedMessages[1].ProducerTime, writer.ParsedMessages[2].ProducerTime)
+			}
+		})
 		t.Run("ResultMessage", func(t *testing.T) {
 			t.Parallel()
 			stub := &fetchRecorder{FakeBackend: testContainer()}
@@ -272,7 +336,7 @@ func TestSessionRunner(t *testing.T) {
 			msgCh, _ := r.startMessageDispatch(t.Context(), tk, false)
 
 			rm := &agent.ResultMessage{MessageType: "result"}
-			msgCh <- rm
+			msgCh <- agent.ParsedMessage{Message: rm}
 			close(msgCh)
 
 			// Wait for the dispatched message.
@@ -320,18 +384,18 @@ func TestSessionRunner(t *testing.T) {
 
 					// Send a ToolUseMessage with a mutating tool.
 					toolID := "tool_edit_1"
-					msgCh <- &agent.ToolUseMessage{
+					msgCh <- agent.ParsedMessage{Message: &agent.ToolUseMessage{
 						ToolUseID: toolID,
 						Name:      tool,
 						Input:     json.RawMessage(`{}`),
-					}
+					}}
 					// Drain the tool_use message from the subscriber.
 					recvMsg(t, ch)
 
 					// Send the tool result.
-					msgCh <- &agent.ToolResultMessage{
+					msgCh <- agent.ParsedMessage{Message: &agent.ToolResultMessage{
 						ToolUseID: toolID,
-					}
+					}}
 
 					msg := recvMsg(t, ch)
 					if _, ok := msg.(*agent.ToolResultMessage); !ok {
@@ -367,16 +431,16 @@ func TestSessionRunner(t *testing.T) {
 			msgCh, _ := r.startMessageDispatch(t.Context(), tk, false)
 
 			toolID := "tool_read_1"
-			msgCh <- &agent.ToolUseMessage{
+			msgCh <- agent.ParsedMessage{Message: &agent.ToolUseMessage{
 				ToolUseID: toolID,
 				Name:      "Read",
 				Input:     json.RawMessage(`{}`),
-			}
+			}}
 			recvMsg(t, ch) // drain tool_use
 
-			msgCh <- &agent.ToolResultMessage{
+			msgCh <- agent.ParsedMessage{Message: &agent.ToolResultMessage{
 				ToolUseID: toolID,
-			}
+			}}
 			// Only expect the ToolResultMessage, no DiffStatMessage.
 			msg := recvMsg(t, ch)
 			if _, ok := msg.(*agent.DiffStatMessage); ok {
@@ -403,11 +467,11 @@ func TestSessionRunner(t *testing.T) {
 
 			// Send a mutating tool use + result and a ResultMessage.
 			toolID := "tool_edit_1"
-			msgCh <- &agent.ToolUseMessage{ToolUseID: toolID, Name: "Edit", Input: json.RawMessage(`{}`)}
+			msgCh <- agent.ParsedMessage{Message: &agent.ToolUseMessage{ToolUseID: toolID, Name: "Edit", Input: json.RawMessage(`{}`)}}
 			recvMsg(t, ch)
-			msgCh <- &agent.ToolResultMessage{ToolUseID: toolID}
+			msgCh <- agent.ParsedMessage{Message: &agent.ToolResultMessage{ToolUseID: toolID}}
 			recvMsg(t, ch)
-			msgCh <- &agent.ResultMessage{MessageType: "result"}
+			msgCh <- agent.ParsedMessage{Message: &agent.ResultMessage{MessageType: "result"}}
 			recvMsg(t, ch)
 			close(msgCh)
 			<-done
@@ -433,7 +497,7 @@ func TestSessionRunner(t *testing.T) {
 				{Text: "third"},
 			}
 			for _, m := range msgs {
-				msgCh <- m
+				msgCh <- agent.ParsedMessage{Message: m}
 			}
 			close(msgCh)
 			<-done
@@ -532,7 +596,7 @@ func TestSessionRunner(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		msgCh := make(chan agent.Message, 16)
+		msgCh := make(chan agent.ParsedMessage, 16)
 		session, err := backend.Start(t.Context(), &agent.Options{MsgCh: msgCh, LogW: logW})
 		if err != nil {
 			t.Fatal(err)

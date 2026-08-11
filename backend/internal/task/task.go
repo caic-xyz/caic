@@ -124,7 +124,7 @@ func (s State) String() string {
 // DispatchDone is closed when the dispatch goroutine exits after MsgCh is closed.
 type SessionHandle struct {
 	Session      *agent.Session
-	MsgCh        chan agent.Message
+	MsgCh        chan agent.ParsedMessage
 	DispatchDone <-chan struct{}
 	LogW         io.WriteCloser
 	closeMsgCh   sync.Once
@@ -227,6 +227,7 @@ type Task struct {
 	ForgeIssue        int                  // Originating issue number for bot comment callbacks; 0 = none.
 	ForkedFromTaskID  ksid.ID              // Parent task ID when created by fork; zero otherwise.
 	Provider          genai.Provider
+	LogVersion        agent.LogVersion // Physical relay record version; zero selects production v1.
 
 	// Mutable task metadata. These fields are populated at construction, setup, or
 	// adoption. After a task is published in the Manager registry, access them
@@ -679,6 +680,14 @@ func (t *Task) SetLogValidationSnapshot(snapshot *ValidatedLogSnapshot) {
 	if snapshot != nil && snapshot.Path == t.logPath {
 		t.logValidationSnapshot = snapshot.validationProof()
 	}
+}
+
+// RelayLogVersion returns the immutable physical relay version for the task.
+func (t *Task) RelayLogVersion() agent.LogVersion {
+	if t.LogVersion == 0 {
+		return agent.LogVersionV1
+	}
+	return t.LogVersion
 }
 
 // LogPath returns the JSONL log path used for metadata appends.
@@ -1769,12 +1778,15 @@ func (t *Task) recordStartupFailure(ctx context.Context, err error) {
 	t.addMessage(ctx, &agent.LogMessage{Line: "Task startup failed: " + err.Error()}, false)
 }
 
-// addMessage records a message under the mutex and fans conversation events out
-// to subscribers. Metadata-only messages update task fields without entering the
-// visible message history. Conversation messages also update state transitions
-// and cost/duration accumulation. It reports whether the message changed task
-// state.
-func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen bool) (stateChanged bool) {
+// addMessage records a synthetic server message with an explicit zero producer time.
+func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen bool) {
+	t.addParsedMessage(ctx, agent.ParsedMessage{Message: m}, skipTitleGen)
+}
+
+// addParsedMessage records one physical relay record and retains its wrapper for
+// the replay writer while task state and subscribers consume its Message.
+func (t *Task) addParsedMessage(ctx context.Context, parsed agent.ParsedMessage, skipTitleGen bool) (stateChanged bool) {
+	m := parsed.Message
 	t.mu.Lock()
 	initialState := t.state
 	defer func() {
@@ -1931,8 +1943,7 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 		}
 	}
 	if t.eventReplay != nil {
-		// Live relay records are still v1 and carry no producer timestamp.
-		t.eventReplay.WriteMessage(agent.ParsedMessage{Message: m})
+		t.eventReplay.WriteMessage(parsed)
 	}
 	// Fan out to subscribers (non-blocking). Skip a non-zero exit message that
 	// follows a cleanly completed turn: it is a spurious termination artifact

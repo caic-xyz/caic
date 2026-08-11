@@ -3,7 +3,6 @@ package codex
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -83,11 +82,11 @@ func (b *Backend) SetModelInventory(inventory agent.ModelInventory) {
 // (initialize → initialized → thread/start) for golden-file trace recording.
 func (b *Backend) RecordHandshake(ctx context.Context, stdin io.Writer, stdout io.Reader, model string) (agent.WireFormat, io.Reader, error) {
 	br := bufio.NewReaderSize(stdout, 1<<16)
-	wire, _, err := handshake(ctx, stdin, br, &agent.Options{Dir: "/workspace", Model: model})
+	wire, _, continuation, err := handshake(ctx, stdin, br, &agent.Options{Dir: "/workspace", Model: model, LogVersion: agent.LogVersionV1})
 	if err != nil {
 		return nil, nil, err
 	}
-	return wire, br, nil
+	return wire, continuation, nil
 }
 
 // Start launches a Codex CLI app-server process via the relay daemon in the
@@ -101,7 +100,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if sshHost == "" {
 		return nil, errors.New("agent connection target missing SSH host")
 	}
-	if err := agent.DeployRelay(ctx, opts.Target); err != nil {
+	if err := agent.DeployRelay(ctx, opts.Target, opts.LogVersion); err != nil {
 		return nil, err
 	}
 	// TODO: re-enable once widget plugin is fixed for codex
@@ -134,7 +133,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	// without losing buffered bytes for the session's readMessages goroutine.
 	br := bufio.NewReaderSize(stdout, 1<<16)
 
-	wire, models, err := handshake(ctx, stdin, br, opts)
+	wire, models, continuation, err := handshake(ctx, stdin, br, opts)
 	if err != nil {
 		// Kill the process on handshake failure.
 		_ = cmd.Process.Kill()
@@ -146,7 +145,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	}
 	wire.suppressUserInput = true
 	initMsg := &agent.InitMessage{SessionID: wire.threadID, Model: opts.Model, Version: wire.agentVersion}
-	opts.MsgCh <- initMsg
+	opts.MsgCh <- agent.ParsedMessage{Message: initMsg}
 	if err := agent.WriteMetaSession(opts.LogW, initMsg); err != nil {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
@@ -154,7 +153,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	}
 
 	log := slog.With("target", sshHost)
-	s := agent.NewSession(cmd, agent.NewConn(stdin, opts.LogW, wire), br, opts.MsgCh, log)
+	s := agent.NewSession(cmd, agent.NewVersionedConn(stdin, opts.LogW, opts.LogVersion, wire), continuation, opts.MsgCh, log)
 	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
 		if err := s.SendPrompt(opts.InitialPrompt); err != nil {
 			_ = s.Close()
@@ -217,7 +216,11 @@ func fetchModelInfo(ctx context.Context, target runtime.ConnectionTarget, extraE
 	}()
 
 	nextID := atomic.Int64{}
-	models, err := fetchModelsFromAppServer(ctx, stdin, bufio.NewReaderSize(stdout, 1<<16), &nextID)
+	records, err := agent.NewRelayRecordReader(stdout, agent.LogVersionV1, io.Discard)
+	if err != nil {
+		return nil, fmt.Errorf("construct model-list reader: %w", err)
+	}
+	models, err := fetchModelsFromAppServer(ctx, stdin, records, &nextID)
 	if err != nil {
 		return nil, fmt.Errorf("codex model/list: %w", err)
 	}
@@ -443,15 +446,19 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 // handshake performs the JSON-RPC initialize → initialized → model/list →
 // thread/start (or thread/resume) sequence and returns a wireFormat with the
 // thread ID set, plus model metadata from model/list.
-func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts *agent.Options) (*wireFormat, []codex.ModelInfo, error) {
+func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts *agent.Options) (*wireFormat, []codex.ModelInfo, *bufio.Reader, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	w := &wireFormat{effort: opts.Effort, fw: &jsonutil.FieldWarner{}}
-
-	models, err := fetchModelsFromAppServer(ctx, stdin, stdout, &w.nextID)
+	records, err := agent.NewRelayRecordReader(stdout, opts.LogVersion, io.Discard)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, fmt.Errorf("construct relay reader: %w", err)
+	}
+
+	models, err := fetchModelsFromAppServer(ctx, stdin, records, &w.nextID)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 
 	// 4. Send thread/start or thread/resume.
@@ -459,7 +466,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	if opts.ResumeSessionID != "" {
 		params, err := marshalParams(codex.ThreadResumeParams{ThreadID: opts.ResumeSessionID})
 		if err != nil {
-			return nil, nil, fmt.Errorf("marshal thread/resume params: %w", err)
+			return nil, nil, nil, fmt.Errorf("marshal thread/resume params: %w", err)
 		}
 		threadReq = codex.JSONRPCRequest{
 			JSONRPC: "2.0",
@@ -470,7 +477,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	} else {
 		params, err := marshalParams(codex.ThreadStartParams{Model: opts.Model})
 		if err != nil {
-			return nil, nil, fmt.Errorf("marshal thread/start params: %w", err)
+			return nil, nil, nil, fmt.Errorf("marshal thread/start params: %w", err)
 		}
 		threadReq = codex.JSONRPCRequest{
 			JSONRPC: "2.0",
@@ -480,29 +487,29 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 		}
 	}
 	if err := writeJSON(stdin, threadReq); err != nil {
-		return nil, nil, fmt.Errorf("write thread/start: %w", err)
+		return nil, nil, nil, fmt.Errorf("write thread/start: %w", err)
 	}
 
 	// Read thread/start response — contains the thread info.
-	resp, err := readJSONRPCResponse(ctx, stdout)
+	resp, err := readJSONRPCResponse(ctx, records)
 	if err != nil {
-		return nil, nil, fmt.Errorf("read thread/start response: %w", err)
+		return nil, nil, nil, fmt.Errorf("read thread/start response: %w", err)
 	}
 
 	// Extract thread ID from the response result.
 	var result codex.ThreadStartResult
 	if err := json.Unmarshal(resp.Result, &result); err != nil {
-		return nil, nil, fmt.Errorf("parse thread/start result: %w", err)
+		return nil, nil, nil, fmt.Errorf("parse thread/start result: %w", err)
 	}
 	if result.Thread.ID == "" {
-		return nil, nil, errors.New("thread/start response missing thread.id")
+		return nil, nil, nil, errors.New("thread/start response missing thread.id")
 	}
 	w.threadID = result.Thread.ID
 	w.agentVersion = result.Thread.CLIVersion
-	return w, models, nil
+	return w, models, records.Reader(), nil
 }
 
-func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, nextID *atomic.Int64) ([]codex.ModelInfo, error) {
+func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, records *agent.RelayRecordReader, nextID *atomic.Int64) ([]codex.ModelInfo, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -548,7 +555,7 @@ func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, stdout *bufi
 	}
 
 	// Read initialize response.
-	if _, err := readJSONRPCResponse(ctx, stdout); err != nil {
+	if _, err := readJSONRPCResponse(ctx, records); err != nil {
 		return nil, fmt.Errorf("read initialize response: %w", err)
 	}
 
@@ -566,7 +573,7 @@ func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, stdout *bufi
 	if err := writeJSON(stdin, codex.JSONRPCRequest{JSONRPC: "2.0", ID: nextID.Add(1), Method: "model/list", Params: mlParams}); err != nil {
 		return nil, fmt.Errorf("write model/list: %w", err)
 	}
-	mlResp, err := readJSONRPCResponse(ctx, stdout)
+	mlResp, err := readJSONRPCResponse(ctx, records)
 	if err != nil {
 		return nil, fmt.Errorf("read model/list response: %w", err)
 	}
@@ -608,7 +615,7 @@ func writeJSON(w io.Writer, v any) error {
 // readJSONRPCResponse reads lines from r until it finds a JSON-RPC response
 // (has "id" field). Notifications encountered during the handshake are logged
 // and skipped. It returns an error if ctx is cancelled before a response arrives.
-func readJSONRPCResponse(ctx context.Context, r *bufio.Reader) (*codex.JSONRPCMessage, error) {
+func readJSONRPCResponse(ctx context.Context, r *agent.RelayRecordReader) (*codex.JSONRPCMessage, error) {
 	type result struct {
 		msg *codex.JSONRPCMessage
 		err error
@@ -616,12 +623,17 @@ func readJSONRPCResponse(ctx context.Context, r *bufio.Reader) (*codex.JSONRPCMe
 	ch := make(chan result, 1)
 	go func() {
 		for {
-			line, err := r.ReadBytes('\n')
+			line, controls, err := r.ReadRecord()
 			if err != nil {
 				ch <- result{nil, fmt.Errorf("read response: %w", err)}
 				return
 			}
-			line = bytes.TrimSpace(line)
+			for _, control := range controls {
+				if exit, ok := control.Message.(*agent.ExitMessage); ok && exit.ExitCode != 0 {
+					ch <- result{nil, errors.New(exit.ExitError())}
+					return
+				}
+			}
 			if len(line) == 0 {
 				continue
 			}

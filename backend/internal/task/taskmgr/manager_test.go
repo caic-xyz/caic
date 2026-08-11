@@ -89,16 +89,24 @@ func newTestRuntime(t testing.TB, lc runtime.Lifecycle, info testRuntimeInfo) *r
 
 type fakeRelayReader struct {
 	statusFn   func(context.Context, runtime.ConnectionTarget) (bool, string, error)
-	readTailFn func(context.Context, runtime.ConnectionTarget, func([]byte) ([]agent.Message, error), int64) ([]agent.Message, int64, error)
+	readTailFn func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) ([]agent.ParsedMessage, int64, error)
 	readLogFn  func(context.Context, runtime.ConnectionTarget, int) string
+}
+
+func relayParsed(msgs ...agent.Message) []agent.ParsedMessage {
+	parsed := make([]agent.ParsedMessage, len(msgs))
+	for i, msg := range msgs {
+		parsed[i] = agent.ParsedMessage{Message: msg}
+	}
+	return parsed
 }
 
 func (f fakeRelayReader) Status(ctx context.Context, target runtime.ConnectionTarget) (alive bool, diag string, err error) {
 	return f.statusFn(ctx, target)
 }
 
-func (f fakeRelayReader) ReadTail(ctx context.Context, target runtime.ConnectionTarget, parseFn func([]byte) ([]agent.Message, error), maxBytes int64) (msgs []agent.Message, size int64, err error) {
-	return f.readTailFn(ctx, target, parseFn, maxBytes)
+func (f fakeRelayReader) ReadTail(ctx context.Context, target runtime.ConnectionTarget, parser *agent.LogRecordParser, maxBytes int64) (msgs []agent.ParsedMessage, size int64, err error) {
+	return f.readTailFn(ctx, target, parser, maxBytes)
 }
 
 func (f fakeRelayReader) ReadLog(ctx context.Context, target runtime.ConnectionTarget, maxBytes int) string {
@@ -212,7 +220,7 @@ func (*reconnectInputConn) SendRaw([]byte) error { return nil }
 
 func (*reconnectInputConn) SendCompact(string) error { return errors.New("compact not supported") }
 
-func (*reconnectInputConn) ReadMessages(r io.Reader, _ chan<- agent.Message) error {
+func (*reconnectInputConn) ReadMessages(r io.Reader, _ chan<- agent.ParsedMessage) error {
 	_, err := io.Copy(io.Discard, r)
 	return err
 }
@@ -1521,7 +1529,7 @@ func TestManager(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, codex.New("", nil).NewWire()), stdout, make(chan agent.Message, 256), nil)
+			s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, codex.New("", nil).NewWire()), stdout, make(chan agent.ParsedMessage, 256), nil)
 			t.Cleanup(func() {
 				cmdCancel()
 				_ = s.Wait()
@@ -2536,7 +2544,7 @@ func TestManager(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			msgCh := make(chan agent.Message, 1)
+			msgCh := make(chan agent.ParsedMessage, 1)
 			dispatchDone := make(chan struct{})
 			close(dispatchDone)
 			s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, codex.New("", nil).NewWire()), stdout, msgCh, nil)
@@ -2579,7 +2587,7 @@ func TestManager(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			msgCh := make(chan agent.Message, 1)
+			msgCh := make(chan agent.ParsedMessage, 1)
 			dispatchDone := make(chan struct{})
 			close(dispatchDone)
 			s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, codex.New("", nil).NewWire()), stdout, msgCh, nil)
@@ -2970,7 +2978,7 @@ func TestManager(t *testing.T) {
 			})
 			m.relay = fakeRelayReader{
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) { return true, "alive", nil },
-				readTailFn: func(context.Context, runtime.ConnectionTarget, func([]byte) ([]agent.Message, error), int64) ([]agent.Message, int64, error) {
+				readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) ([]agent.ParsedMessage, int64, error) {
 					return nil, 0, nil
 				},
 				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
@@ -3109,8 +3117,8 @@ func TestManager(t *testing.T) {
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 					return true, "alive", nil
 				},
-				readTailFn: func(context.Context, runtime.ConnectionTarget, func([]byte) ([]agent.Message, error), int64) ([]agent.Message, int64, error) {
-					return []agent.Message{&agent.TextMessage{Text: "during restart"}}, 128, nil
+				readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) ([]agent.ParsedMessage, int64, error) {
+					return relayParsed(&agent.TextMessage{Text: "during restart"}), 128, nil
 				},
 				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
 			}
@@ -3155,6 +3163,9 @@ func TestManager(t *testing.T) {
 			if len(adopted) != 1 {
 				t.Fatalf("adopted len = %d, want 1", len(adopted))
 			}
+			if got := adopted[0].Task.RelayOffsetValue(); got != 128 {
+				t.Fatalf("RelayOffset = %d, want 128", got)
+			}
 			texts := textMessages(adopted[0].Task.Messages())
 			if !slices.Contains(texts, "before restart") || !slices.Contains(texts, "during restart") {
 				t.Fatalf("messages = %#v, want disk history plus relay tail", texts)
@@ -3179,8 +3190,8 @@ func TestManager(t *testing.T) {
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 					return true, "alive", nil
 				},
-				readTailFn: func(context.Context, runtime.ConnectionTarget, func([]byte) ([]agent.Message, error), int64) ([]agent.Message, int64, error) {
-					return []agent.Message{
+				readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) ([]agent.ParsedMessage, int64, error) {
+					return relayParsed(
 						&agent.AskMessage{
 							ToolUseID: "toolu-1",
 							Questions: []agent.AskQuestion{{Question: "Which?"}},
@@ -3197,7 +3208,7 @@ func TestManager(t *testing.T) {
 							},
 						},
 						&agent.ResultMessage{MessageType: "result"},
-					}, 599440, nil
+					), 599440, nil
 				},
 				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
 			}
@@ -3327,8 +3338,8 @@ func TestManager(t *testing.T) {
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 					return false, "dead", nil
 				},
-				readTailFn: func(context.Context, runtime.ConnectionTarget, func([]byte) ([]agent.Message, error), int64) ([]agent.Message, int64, error) {
-					return []agent.Message{&agent.ExitMessage{ExitCode: 2, Error: "Unknown option: --approve"}}, 128, nil
+				readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) ([]agent.ParsedMessage, int64, error) {
+					return relayParsed(&agent.ExitMessage{ExitCode: 2, Error: "Unknown option: --approve"}), 128, nil
 				},
 				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "relay exited" },
 			}
@@ -3377,12 +3388,12 @@ func TestManager(t *testing.T) {
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 					return false, "dead", nil
 				},
-				readTailFn: func(context.Context, runtime.ConnectionTarget, func([]byte) ([]agent.Message, error), int64) ([]agent.Message, int64, error) {
-					return []agent.Message{
+				readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) ([]agent.ParsedMessage, int64, error) {
+					return relayParsed(
 						&agent.InitMessage{SessionID: "new-session"},
 						&agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done"},
 						&agent.ExitMessage{ExitCode: 2, Error: "stale crash"},
-					}, 256, nil
+					), 256, nil
 				},
 				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "relay exited" },
 			}

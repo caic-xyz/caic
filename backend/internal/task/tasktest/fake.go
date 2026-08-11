@@ -5,14 +5,16 @@ import "github.com/caic-xyz/caic/backend/internal/agent"
 
 // FakeEventReplayWriter is a task.EventReplayWriter test double.
 type FakeEventReplayWriter struct {
-	Messages []agent.Message
-	Commits  []string
+	Messages       []agent.Message
+	ParsedMessages []agent.ParsedMessage
+	Commits        []string
 
 	CommitErr error
 }
 
 // WriteMessage records msg.
 func (f *FakeEventReplayWriter) WriteMessage(msg agent.ParsedMessage) {
+	f.ParsedMessages = append(f.ParsedMessages, msg)
 	f.Messages = append(f.Messages, msg.Message)
 }
 

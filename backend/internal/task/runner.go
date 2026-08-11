@@ -117,7 +117,7 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 
 	// 2. Start the agent session.
 	t.SetState(StateStarting)
-	var msgCh chan agent.Message
+	var msgCh chan agent.ParsedMessage
 	var dispatchDone <-chan struct{}
 	{
 		region := trace.StartRegion(ctx, "dispatch-init")
@@ -136,6 +136,7 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 		Model:         t.Model,
 		Effort:        t.Effort,
 		InitialPrompt: t.InitialPrompt,
+		LogVersion:    t.RelayLogVersion(),
 		MsgCh:         msgCh,
 		LogW:          logW,
 	})
@@ -455,6 +456,7 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 		Model:           t.Model,
 		Effort:          t.Effort,
 		ResumeSessionID: t.GetSessionID(),
+		LogVersion:      t.RelayLogVersion(),
 		MsgCh:           msgCh,
 		LogW:            logW,
 	})
