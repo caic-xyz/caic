@@ -791,8 +791,8 @@ func (b *Backend) mdStartOpts(c mdContainer, opts *runtime.StartOptions) (*md.St
 	}
 	var extraEnv []string
 	// Prevent agents from spawning interactive editors (neovim, vim, etc.)
-	// during git commit, git mergetool, or any command invoking $EDITOR.
-	extraEnv = append(extraEnv, "EDITOR=true")
+	// during git commit, git mergetool, or any command invoking $EDITOR or $GIT_EDITOR.
+	extraEnv = append(extraEnv, "EDITOR=true", "GIT_EDITOR=true")
 	extraEnv = append(extraEnv, b.HarnessEnv[string(opts.Harness)]...)
 	if opts.GitHubToken != "" {
 		extraEnv = append(extraEnv, "GITHUB_TOKEN="+opts.GitHubToken)

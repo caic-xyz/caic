@@ -445,6 +445,9 @@ func TestBackend(t *testing.T) {
 		if !slices.Contains(opts.ExtraEnv, "EDITOR=true") {
 			t.Errorf("ExtraEnv missing EDITOR=true: %v", opts.ExtraEnv)
 		}
+		if !slices.Contains(opts.ExtraEnv, "GIT_EDITOR=true") {
+			t.Errorf("ExtraEnv missing GIT_EDITOR=true: %v", opts.ExtraEnv)
+		}
 		if !slices.Contains(opts.ExtraEnv, "FOO=bar") {
 			t.Errorf("ExtraEnv missing harness env FOO=bar: %v", opts.ExtraEnv)
 		}
