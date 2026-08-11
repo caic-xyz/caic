@@ -2563,6 +2563,56 @@ func TestManager(t *testing.T) {
 				t.Fatalf("instance ssh-failed status = %v, want stopped", got)
 			}
 		})
+		t.Run("server_shutdown_preserves_task_and_instance", func(t *testing.T) {
+			t.Parallel()
+			serverCtx, cancelServer := context.WithCancel(t.Context())
+			t.Cleanup(cancelServer)
+			cmd := exec.CommandContext(t.Context(), "sh", "-c", "sleep 30")
+			stdin, err := cmd.StdinPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			stdout, err := cmd.StdoutPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			msgCh := make(chan agent.Message, 1)
+			dispatchDone := make(chan struct{})
+			close(dispatchDone)
+			s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, codex.New("", nil).NewWire()), stdout, msgCh, nil)
+			h := &task.SessionHandle{Session: s, MsgCh: msgCh, DispatchDone: dispatchDone}
+			runtimeBackend := &runtimetest.FakeBackend{}
+			instanceID, err := runtimeBackend.Launch(t.Context(), nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
+			tk.SetRuntimeConnectionInfo(instanceID, runtime.ConnectionTarget{SSHHost: "ssh-restart"}, "", "", 0)
+			tk.SetState(task.StateRunning)
+			tk.AttachSession(h)
+			entry := NewEntry(tk, nil)
+			m := newTestManager(t, Config{ServerCtx: serverCtx, Runtimes: newTestRuntime(t, runtimeBackend, nil)})
+
+			m.watchSession(entry, &repowork.Workspace{Dir: "", Log: logtest.Logger(t)}, h)
+			cancelServer()
+			if err := cmd.Process.Kill(); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-entry.Done():
+				t.Fatal("server shutdown finished the task")
+			case <-time.After(100 * time.Millisecond):
+			}
+			if got := tk.GetState(); got != task.StateRunning {
+				t.Fatalf("state = %v, want running", got)
+			}
+			if got := runtimeBackend.Status(instanceID); got != runtimetest.StatusRunning {
+				t.Fatalf("instance %s status = %v, want running", instanceID, got)
+			}
+		})
 	})
 	t.Run("ResolveNativeParser", func(t *testing.T) {
 		t.Parallel()

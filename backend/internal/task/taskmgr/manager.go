@@ -2091,6 +2091,11 @@ func (m *Manager) watchSession(entry *Entry, workspace *repowork.Workspace, h *t
 		done := h.Session.Done()
 		select {
 		case <-done:
+			// Server shutdown terminates the local SSH session, but its relay and
+			// container must remain available for adoption after restart.
+			if m.serverCtx.Err() != nil {
+				return
+			}
 			// Session died. Check if this handle is still the task's current handle.
 			current := t.SessionDone()
 			if current != done {
@@ -2175,6 +2180,7 @@ func (m *Manager) watchSession(entry *Entry, workspace *repowork.Workspace, h *t
 			}
 			m.NotifyTaskChange()
 		case <-entry.Done():
+		case <-m.serverCtx.Done():
 		}
 	}()
 }

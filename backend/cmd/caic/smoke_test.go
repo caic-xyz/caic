@@ -11,6 +11,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -34,7 +35,8 @@ import (
 // container, run a deterministic agent through the relay over SSH, and
 // exercise the task lifecycle.
 func TestSmoke(t *testing.T) {
-	baseURL := startSmokeServer(t)
+	smoke := startSmokeServer(t)
+	baseURL := smoke.baseURL
 
 	// --- API endpoints ---
 
@@ -146,6 +148,25 @@ func TestSmoke(t *testing.T) {
 		}
 		t.Logf("task %s reached 'waiting'", taskID)
 
+		t.Run("ServerRestart", func(t *testing.T) {
+			runtimeID := task.Runtime.ID
+			baseURL = smoke.restart()
+
+			restored := waitForTaskState(taskID, "waiting")
+			if restored.Runtime.ID != runtimeID {
+				t.Errorf("task %s: runtime ID = %q after restart, want %q", taskID, restored.Runtime.ID, runtimeID)
+			}
+
+			const resumePrompt = "resume after server restart"
+			postJSON(t, baseURL, "/api/caic/v1/tasks/"+taskID+"/input", v1.InputReq{
+				Prompt: v1.Prompt{Text: resumePrompt},
+			}, nil)
+			task = waitForTaskState(taskID, "waiting")
+			if task.NumTurns != 2 {
+				t.Errorf("task %s: NumTurns = %d after restart, want 2; error=%q", taskID, task.NumTurns, task.Error)
+			}
+		})
+
 		disableSudo := false
 		forkReq := v1.ForkTaskReq{
 			Prompt: v1.Prompt{Text: "fork smoke test " + fmt.Sprint(time.Now().UnixNano())},
@@ -226,11 +247,79 @@ func TestSmoke(t *testing.T) {
 	})
 }
 
-// startSmokeServer starts the caic HTTP server with the real runtime backend
-// and returns the base URL.
-func startSmokeServer(t *testing.T) string {
-	ctx, cancel := context.WithCancel(t.Context())
-	t.Cleanup(cancel)
+type smokeServer struct {
+	t       *testing.T
+	rootDir string
+	cfg     *server.Config
+
+	addr    string
+	baseURL string
+	cancel  context.CancelFunc
+	done    chan error
+}
+
+func (s *smokeServer) close() {
+	s.stop()
+}
+
+func (s *smokeServer) restart() string {
+	s.stop()
+	s.start()
+	return s.baseURL
+}
+
+func (s *smokeServer) start() {
+	ctx, cancel := context.WithCancel(s.t.Context())
+	addr := s.addr
+	if addr == "" {
+		addr = "127.0.0.1:0"
+	}
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", addr)
+	if err != nil {
+		cancel()
+		s.t.Fatalf("listen: %v", err)
+	}
+
+	srv, err := app.New(ctx, s.rootDir, s.cfg)
+	if err != nil {
+		cancel()
+		if closeErr := ln.Close(); closeErr != nil {
+			s.t.Fatalf("close listener after server.New failure: %v", closeErr)
+		}
+		s.t.Fatalf("server.New: %v", err)
+	}
+
+	s.addr = ln.Addr().String()
+	s.baseURL = "http://" + s.addr
+	s.cancel = cancel
+	s.done = make(chan error, 1)
+	go func() {
+		s.done <- srv.Serve(ctx, ln)
+	}()
+	if err := waitForReady(ctx, s.baseURL); err != nil {
+		s.stop()
+		s.t.Fatalf("server not ready: %v", err)
+	}
+}
+
+func (s *smokeServer) stop() {
+	if s.cancel == nil {
+		return
+	}
+	s.cancel()
+	err := <-s.done
+	s.cancel = nil
+	s.done = nil
+	if err != nil && !errors.Is(err, context.Canceled) {
+		s.t.Errorf("server.Serve: %v", err)
+	}
+}
+
+// startSmokeServer creates an isolated real-runtime smoke fixture and starts
+// its initial server instance.
+func startSmokeServer(t *testing.T) *smokeServer {
+	ctx := t.Context()
 
 	// Create isolated temp dirs for config, cache, and md state.
 	tmpDir := t.TempDir()
@@ -255,7 +344,6 @@ func startSmokeServer(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("init smoke repos: %v", err)
 	}
-	rootDir := filepath.Dir(clone)
 
 	// Pre-populate harness model cache so startup does not launch unrelated
 	// model-refresh containers. The task below still launches a real md
@@ -267,53 +355,31 @@ func startSmokeServer(t *testing.T) string {
 	// Use a deterministic no-LLM agent, but run it inside the real md
 	// container through the normal relay over SSH.
 	sb := smoketest.NewSmokeBackend()
-	cfg := &server.Config{
-		Dirs: server.DirsConfig{
-			ConfigDir: configDir,
-			CacheDir:  cacheDir,
-		},
-		Runtime: server.RuntimeConfig{
-			SkipWarmup: true,
-		},
-		Agent: server.AgentConfig{
-			Backends: map[harness.Name]agent.Backend{sb.Harness(): sb},
-		},
-		LLM: server.LLMConfig{
-			Disable: true,
-		},
-		IPGeo: server.IPGeoConfig{
-			Allowlist: "0.0.0.0/0,::/0",
+	s := &smokeServer{
+		t:       t,
+		rootDir: filepath.Dir(clone),
+		cfg: &server.Config{
+			Dirs: server.DirsConfig{
+				ConfigDir: configDir,
+				CacheDir:  cacheDir,
+			},
+			Runtime: server.RuntimeConfig{
+				SkipWarmup: true,
+			},
+			Agent: server.AgentConfig{
+				Backends: map[harness.Name]agent.Backend{sb.Harness(): sb},
+			},
+			LLM: server.LLMConfig{
+				Disable: true,
+			},
+			IPGeo: server.IPGeoConfig{
+				Allowlist: "0.0.0.0/0,::/0",
+			},
 		},
 	}
-
-	// Listen on a random port.
-	var lc net.ListenConfig
-	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	addr := ln.Addr().String()
-
-	srv, err := app.New(ctx, rootDir, cfg)
-	if err != nil {
-		ln.Close()
-		t.Fatalf("server.New: %v", err)
-	}
-
-	// Start serving in background.
-	go func() {
-		if err := srv.Serve(ctx, ln); err != nil && ctx.Err() == nil {
-			t.Errorf("server.Serve: %v", err)
-		}
-	}()
-
-	// Wait for the server to be ready.
-	baseURL := "http://" + addr
-	if err := waitForReady(ctx, baseURL); err != nil {
-		cancel()
-		t.Fatalf("server not ready: %v", err)
-	}
-	return baseURL
+	t.Cleanup(s.close)
+	s.start()
+	return s
 }
 
 // waitForReady polls GET /api/caic/v1/server/config until it returns 200.
