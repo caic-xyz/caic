@@ -7,6 +7,36 @@ import (
 	"time"
 )
 
+func TestSignalCommand(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		got, err := signalCommand(123, "SIGTERM")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != "kill -s SIGTERM 123" {
+			t.Errorf("signalCommand() = %q, want %q", got, "kill -s SIGTERM 123")
+		}
+	})
+
+	t.Run("invalid", func(t *testing.T) {
+		t.Parallel()
+		for _, tt := range []struct {
+			pid int
+			sig string
+		}{
+			{0, "SIGTERM"},
+			{123, "SIGINT"},
+		} {
+			if _, err := signalCommand(tt.pid, tt.sig); err == nil {
+				t.Errorf("signalCommand(%d, %q) succeeded, want error", tt.pid, tt.sig)
+			}
+		}
+	})
+}
+
 func TestParsePSOutput(t *testing.T) {
 	t.Parallel()
 	startedAt := time.Date(2026, time.March, 20, 10, 28, 30, 0, time.UTC)

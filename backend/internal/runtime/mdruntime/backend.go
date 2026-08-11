@@ -55,7 +55,6 @@ type mdContainer interface {
 	Revive(ctx context.Context, stdout, stderr io.Writer) error
 	Fork(ctx context.Context, stdout, stderr io.Writer, opts *md.ForkOpts) (mdContainer, error)
 	SSHCommand(opts []string, cmd string) []string
-	Signal(ctx context.Context, pid int, sig string) error
 }
 
 var (
@@ -261,10 +260,6 @@ func (a mdContainerAdapter) Fork(ctx context.Context, stdout, stderr io.Writer, 
 
 func (a mdContainerAdapter) SSHCommand(opts []string, cmd string) []string {
 	return a.c.SSHCommand(opts, cmd)
-}
-
-func (a mdContainerAdapter) Signal(ctx context.Context, pid int, sig string) error {
-	return a.c.Signal(ctx, pid, sig)
 }
 
 // Backend adapts *md.Client to runtime.Lifecycle.
@@ -620,7 +615,18 @@ func (b *Backend) Signal(ctx context.Context, id runtime.ID, pid int, sig string
 	if err != nil {
 		return err
 	}
-	return ct.Signal(ctx, pid, sig)
+	command, err := signalCommand(pid, sig)
+	if err != nil {
+		return err
+	}
+	sshArgs := ct.SSHCommand(nil, command)
+	b.log.DebugContext(ctx, "ssh", "cmd", sshArgs)
+	cmd := exec.CommandContext(ctx, sshArgs[0], sshArgs[1:]...) //nolint:gosec // SSH target and command are derived from the md container.
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("signal %s pid %d in container %s: %w (output: %s)", sig, pid, ct.Name(), err, out)
+	}
+	return nil
 }
 
 // List returns known runtime instances.

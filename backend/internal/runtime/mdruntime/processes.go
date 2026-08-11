@@ -14,6 +14,18 @@ import (
 
 const processCommand = "LC_ALL=C TZ=UTC ps -eo pid,ppid,pgrp,user,stat,pri,ni,nlwp,%cpu,%mem,rss,cputimes,lstart,args --no-headers"
 
+func signalCommand(pid int, sig string) (string, error) {
+	if pid < 1 {
+		return "", fmt.Errorf("pid must be positive, got %d", pid)
+	}
+	switch sig {
+	case "SIGKILL", "SIGTERM":
+		return fmt.Sprintf("kill -s %s %d", sig, pid), nil
+	default:
+		return "", fmt.Errorf("unsupported signal %q", sig)
+	}
+}
+
 // parsePSOutput parses ps output. The last column (args) may contain spaces;
 // the first seventeen fields are whitespace-separated and the remainder is the command.
 func parsePSOutput(out string) ([]runtime.ProcessInfo, error) {

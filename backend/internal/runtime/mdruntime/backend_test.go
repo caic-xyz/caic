@@ -34,14 +34,10 @@ type fakeMDContainer struct {
 	forkErr     error
 	agentMounts []md.Mount
 	agentErr    error
-	signalErr   error
 
-	calls       []string
-	agentPaths  []md.AgentPaths
-	forkOpts    *md.ForkOpts
-	signalCalls int
-	signalPID   int
-	signalSig   string
+	calls      []string
+	agentPaths []md.AgentPaths
+	forkOpts   *md.ForkOpts
 }
 
 func (f *fakeMDContainer) Name() string     { return f.name }
@@ -109,13 +105,6 @@ func (f *fakeMDContainer) Fork(_ context.Context, _, _ io.Writer, opts *md.ForkO
 		return nil, f.forkErr
 	}
 	return f.forkResult, nil
-}
-
-func (f *fakeMDContainer) Signal(_ context.Context, pid int, sig string) error {
-	f.signalCalls++
-	f.signalPID = pid
-	f.signalSig = sig
-	return f.signalErr
 }
 
 // fakeMDClient is a fake mdClient handing out preconfigured containers.
@@ -433,20 +422,6 @@ func TestBackend(t *testing.T) {
 				t.Errorf("Get calls = %d name = %q, want 1 c", fc.getCalls, fc.getName)
 			}
 		})
-	})
-
-	t.Run("Signal", func(t *testing.T) {
-		t.Parallel()
-		ctr := &fakeMDContainer{}
-		fc := &fakeMDClient{}
-		b := newTestBackend(fc)
-		b.containers["ctr"] = ctr
-		if err := b.Signal(t.Context(), "docker:ctr", 123, "SIGTERM"); err != nil {
-			t.Fatalf("Signal: %v", err)
-		}
-		if ctr.signalCalls != 1 || ctr.signalPID != 123 || ctr.signalSig != "SIGTERM" || fc.getCalls != 0 {
-			t.Fatalf("signal = calls %d pid %d sig %q getCalls %d", ctr.signalCalls, ctr.signalPID, ctr.signalSig, fc.getCalls)
-		}
 	})
 
 	t.Run("mdStartOpts", func(t *testing.T) {
