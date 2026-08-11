@@ -1134,16 +1134,33 @@ export interface DiffResp {
 
 /** ProcessInfo describes a single process running inside a task runtime instance. */
 export interface ProcessInfo {
+  /** PID is the process ID. */
   pid: number /* int */;
+  /** PPID is the parent process ID. */
   ppid: number /* int */;
+  /** PGRP is the process group ID. */
+  pgrp: number /* int */;
+  /** User is the effective user name. */
   user: string;
-  /** Single-character state: R, S, D, Z, T, etc. */
+  /** State is the process state and modifiers reported by the runtime. */
   state: string;
+  /** Priority is the kernel scheduling priority. */
+  priority: number /* int */;
+  /** Nice is the process niceness value. */
+  nice: number /* int */;
+  /** Threads is the number of threads in the process. */
+  threads: number /* int */;
+  /** CPU is the percentage of CPU capacity used at the time of inspection. */
   cpu: number /* float64 */;
+  /** Mem is the percentage of physical memory used at the time of inspection. */
   mem: number /* float64 */;
-  /** Cumulative CPU time. */
-  time: string;
-  /** Full command line. */
+  /** RSSBytes is the resident set size in bytes. */
+  rssBytes: number /* uint64 */;
+  /** CPUTime is the cumulative user and system CPU time in nanoseconds. */
+  cpuTime: number /* int64 */;
+  /** StartedAt is when the process started. */
+  startedAt: ISOTimestamp;
+  /** Command is the full command line reported by the runtime. */
   command: string;
 }
 

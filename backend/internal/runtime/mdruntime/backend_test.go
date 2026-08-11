@@ -34,22 +34,22 @@ type fakeMDContainer struct {
 	forkErr     error
 	agentMounts []md.Mount
 	agentErr    error
-	processes   []md.ProcessInfo
-	processErr  error
 	signalErr   error
 
-	calls        []string
-	agentPaths   []md.AgentPaths
-	forkOpts     *md.ForkOpts
-	processCalls int
-	signalCalls  int
-	signalPID    int
-	signalSig    string
+	calls       []string
+	agentPaths  []md.AgentPaths
+	forkOpts    *md.ForkOpts
+	signalCalls int
+	signalPID   int
+	signalSig   string
 }
 
 func (f *fakeMDContainer) Name() string     { return f.name }
 func (f *fakeMDContainer) SetName(n string) { f.name = n }
 func (f *fakeMDContainer) VNCPort() int32   { return f.vncPort }
+func (*fakeMDContainer) SSHCommand([]string, string) []string {
+	return nil
+}
 func (f *fakeMDContainer) Repos() []md.Repo { return f.repo }
 
 func (f *fakeMDContainer) AgentMounts(paths ...md.AgentPaths) ([]md.Mount, error) {
@@ -109,14 +109,6 @@ func (f *fakeMDContainer) Fork(_ context.Context, _, _ io.Writer, opts *md.ForkO
 		return nil, f.forkErr
 	}
 	return f.forkResult, nil
-}
-
-func (f *fakeMDContainer) Processes(context.Context) ([]md.ProcessInfo, error) {
-	f.processCalls++
-	if f.processErr != nil {
-		return nil, f.processErr
-	}
-	return slices.Clone(f.processes), nil
 }
 
 func (f *fakeMDContainer) Signal(_ context.Context, pid int, sig string) error {
@@ -441,24 +433,6 @@ func TestBackend(t *testing.T) {
 				t.Errorf("Get calls = %d name = %q, want 1 c", fc.getCalls, fc.getName)
 			}
 		})
-	})
-
-	t.Run("Processes", func(t *testing.T) {
-		t.Parallel()
-		ctr := &fakeMDContainer{processes: []md.ProcessInfo{{PID: 7, Command: "agent"}}}
-		fc := &fakeMDClient{}
-		b := newTestBackend(fc)
-		b.containers["ctr"] = ctr
-		procs, err := b.Processes(t.Context(), "docker:ctr")
-		if err != nil {
-			t.Fatalf("Processes: %v", err)
-		}
-		if len(procs) != 1 || procs[0].PID != 7 || procs[0].Command != "agent" {
-			t.Fatalf("Processes = %+v, want agent process", procs)
-		}
-		if ctr.processCalls != 1 || fc.getCalls != 0 {
-			t.Fatalf("process calls = %d getCalls = %d, want cached container and no Get", ctr.processCalls, fc.getCalls)
-		}
 	})
 
 	t.Run("Signal", func(t *testing.T) {

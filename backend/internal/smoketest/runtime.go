@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	stdruntime "runtime"
 	"strings"
+	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
@@ -202,15 +203,16 @@ func runGit(ctx context.Context, args ...string) error {
 //	          gcc(301)
 //	        ps(202)
 func fakeProcesses() []runtime.ProcessInfo {
+	now := time.Now()
 	return []runtime.ProcessInfo{
-		{PID: 1, PPID: 0, User: "root", State: "S", CPU: 0.0, Mem: 0.1, Time: "0:00", Command: "/sbin/init"},
-		{PID: 42, PPID: 1, User: "root", State: "S", CPU: 0.0, Mem: 0.2, Time: "0:01", Command: "sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups"},
-		{PID: 99, PPID: 42, User: "root", State: "S", CPU: 0.0, Mem: 0.3, Time: "0:00", Command: "sshd: user [priv]"},
-		{PID: 100, PPID: 99, User: "user", State: "S", CPU: 0.1, Mem: 0.5, Time: "0:02", Command: "-bash"},
-		{PID: 200, PPID: 100, User: "user", State: "R", CPU: 45.2, Mem: 12.3, Time: "1:23", Command: "node /home/user/.npm/_npx/abc123/node_modules/.bin/claude --dangerously-skip-permissions"},
-		{PID: 201, PPID: 100, User: "user", State: "S", CPU: 0.0, Mem: 0.1, Time: "0:00", Command: "make -j$(nproc)"},
-		{PID: 300, PPID: 201, User: "user", State: "R", CPU: 98.7, Mem: 5.6, Time: "0:45", Command: "/usr/lib/gcc/x86_64-linux-gnu/14/cc1 -quiet -Iinclude -D_FORTIFY_SOURCE=2 src/main.c -o /tmp/ccXyz.s"},
-		{PID: 301, PPID: 201, User: "user", State: "R", CPU: 97.1, Mem: 4.8, Time: "0:42", Command: "/usr/lib/gcc/x86_64-linux-gnu/14/cc1 -quiet -Iinclude -D_FORTIFY_SOURCE=2 src/parser.c -o /tmp/ccAbc.s"},
-		{PID: 202, PPID: 100, User: "user", State: "R", CPU: 0.3, Mem: 0.1, Time: "0:00", Command: "ps -eo pid,ppid,user,stat,%cpu,%mem,time,args"},
+		{PID: 1, PPID: 0, PGRP: 1, User: "root", State: "S", Priority: 19, Threads: 1, CPU: 0.0, Mem: 0.1, RSSBytes: 1_048_576, CPUTime: 0, StartedAt: now.Add(-2 * time.Hour), Command: "/sbin/init"},
+		{PID: 42, PPID: 1, PGRP: 42, User: "root", State: "S", Priority: 19, Threads: 1, CPU: 0.0, Mem: 0.2, RSSBytes: 2_097_152, CPUTime: time.Second, StartedAt: now.Add(-1*time.Hour - 59*time.Minute - 55*time.Second), Command: "sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups"},
+		{PID: 99, PPID: 42, PGRP: 42, User: "root", State: "S", Priority: 19, Threads: 1, CPU: 0.0, Mem: 0.3, RSSBytes: 3_145_728, CPUTime: 0, StartedAt: now.Add(-1*time.Hour - 59*time.Minute - 50*time.Second), Command: "sshd: user [priv]"},
+		{PID: 100, PPID: 99, PGRP: 100, User: "user", State: "S", Priority: 19, Threads: 1, CPU: 0.1, Mem: 0.5, RSSBytes: 5_242_880, CPUTime: 2 * time.Second, StartedAt: now.Add(-1*time.Hour - 59*time.Minute - 40*time.Second), Command: "-bash"},
+		{PID: 200, PPID: 100, PGRP: 100, User: "user", State: "R", Priority: 19, Threads: 5, CPU: 45.2, Mem: 12.3, RSSBytes: 128_974_848, CPUTime: time.Minute + 23*time.Second, StartedAt: now.Add(-1*time.Hour - 58*time.Minute - 40*time.Second), Command: "node /home/user/.npm/_npx/abc123/node_modules/.bin/claude --dangerously-skip-permissions"},
+		{PID: 201, PPID: 100, PGRP: 100, User: "user", State: "S", Priority: 19, Threads: 1, CPU: 0.0, Mem: 0.1, RSSBytes: 1_048_576, CPUTime: 0, StartedAt: now.Add(-45 * time.Second), Command: "make -j$(nproc)"},
+		{PID: 300, PPID: 201, PGRP: 100, User: "user", State: "R", Priority: 19, Threads: 1, CPU: 98.7, Mem: 5.6, RSSBytes: 58_720_256, CPUTime: 45 * time.Second, StartedAt: now.Add(-42 * time.Second), Command: "/usr/lib/gcc/x86_64-linux-gnu/14/cc1 -quiet -Iinclude -D_FORTIFY_SOURCE=2 src/main.c -o /tmp/ccXyz.s"},
+		{PID: 301, PPID: 201, PGRP: 100, User: "user", State: "R", Priority: 19, Threads: 1, CPU: 97.1, Mem: 4.8, RSSBytes: 50_331_648, CPUTime: 42 * time.Second, StartedAt: now.Add(-39 * time.Second), Command: "/usr/lib/gcc/x86_64-linux-gnu/14/cc1 -quiet -Iinclude -D_FORTIFY_SOURCE=2 src/parser.c -o /tmp/ccAbc.s"},
+		{PID: 202, PPID: 100, PGRP: 100, User: "user", State: "R", Priority: 19, Threads: 1, CPU: 0.3, Mem: 0.1, RSSBytes: 1_048_576, CPUTime: 0, StartedAt: now, Command: "ps -eo pid,ppid,pgrp,user,stat,pri,ni,nlwp,%cpu,%mem,rss,time,lstart,args"},
 	}
 }

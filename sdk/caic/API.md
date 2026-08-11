@@ -1317,14 +1317,20 @@ ProcessInfo describes a single process running inside a task runtime instance.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `pid` | `int` |  | yes |
-| `ppid` | `int` |  | yes |
-| `user` | `string` |  | yes |
-| `state` | `string` | Single-character state: R, S, D, Z, T, etc. | yes |
-| `cpu` | `float64` |  | yes |
-| `mem` | `float64` |  | yes |
-| `time` | `string` | Cumulative CPU time. | yes |
-| `command` | `string` | Full command line. | yes |
+| `pid` | `int` | PID is the process ID. | yes |
+| `ppid` | `int` | PPID is the parent process ID. | yes |
+| `pgrp` | `int` | PGRP is the process group ID. | yes |
+| `user` | `string` | User is the effective user name. | yes |
+| `state` | `string` | State is the process state and modifiers reported by the runtime. | yes |
+| `priority` | `int` | Priority is the kernel scheduling priority. | yes |
+| `nice` | `int` | Nice is the process niceness value. | yes |
+| `threads` | `int` | Threads is the number of threads in the process. | yes |
+| `cpu` | `float64` | CPU is the percentage of CPU capacity used at the time of inspection. | yes |
+| `mem` | `float64` | Mem is the percentage of physical memory used at the time of inspection. | yes |
+| `rssBytes` | `uint64` | RSSBytes is the resident set size in bytes. | yes |
+| `cpuTime` | `int64` | CPUTime is the cumulative user and system CPU time in nanoseconds. | yes |
+| `startedAt` | `ISOTimestamp` | StartedAt is when the process started. | yes |
+| `command` | `string` | Command is the full command line reported by the runtime. | yes |
 
 ### ProcessListResp
 

@@ -9,6 +9,8 @@ import (
 	"io"
 	"iter"
 	"log/slog"
+	"maps"
+	"os/exec"
 	"runtime/trace"
 	"slices"
 	"sync"
@@ -52,7 +54,7 @@ type mdContainer interface {
 	Purge(ctx context.Context, stdout, stderr io.Writer) error
 	Revive(ctx context.Context, stdout, stderr io.Writer) error
 	Fork(ctx context.Context, stdout, stderr io.Writer, opts *md.ForkOpts) (mdContainer, error)
-	Processes(ctx context.Context) ([]md.ProcessInfo, error)
+	SSHCommand(opts []string, cmd string) []string
 	Signal(ctx context.Context, pid int, sig string) error
 }
 
@@ -181,7 +183,10 @@ func (a mdClientAdapter) Metadata(ctx context.Context, id runtime.InstanceID, _ 
 	if err != nil {
 		return nil, err
 	}
-	return cloneLabelMap(ct.Labels), nil
+	if len(ct.Labels) == 0 {
+		return map[string]string{}, nil
+	}
+	return maps.Clone(ct.Labels), nil
 }
 
 func (a mdClientAdapter) WatchEvents(ctx context.Context, filter runtime.EventFilter) (<-chan runtime.Event, error) {
@@ -254,8 +259,8 @@ func (a mdContainerAdapter) Fork(ctx context.Context, stdout, stderr io.Writer, 
 	return mdContainerAdapter{f}, nil
 }
 
-func (a mdContainerAdapter) Processes(ctx context.Context) ([]md.ProcessInfo, error) {
-	return a.c.Processes(ctx)
+func (a mdContainerAdapter) SSHCommand(opts []string, cmd string) []string {
+	return a.c.SSHCommand(opts, cmd)
 }
 
 func (a mdContainerAdapter) Signal(ctx context.Context, pid int, sig string) error {
@@ -595,11 +600,14 @@ func (b *Backend) Processes(ctx context.Context, id runtime.ID) ([]runtime.Proce
 	if err != nil {
 		return nil, err
 	}
-	procs, err := ct.Processes(ctx)
+	sshArgs := ct.SSHCommand(nil, processCommand)
+	b.log.DebugContext(ctx, "ssh", "cmd", sshArgs)
+	cmd := exec.CommandContext(ctx, sshArgs[0], sshArgs[1:]...) //nolint:gosec // SSH target and command are derived from the md container.
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ps in container %s: %w (output: %s)", ct.Name(), err, out)
 	}
-	return fromMDProcessInfos(procs), nil
+	return parsePSOutput(string(out))
 }
 
 // Signal sends a signal to a process inside the runtime instance.
@@ -818,7 +826,11 @@ func (b *Backend) rememberLabelMap(id runtime.ID, labels map[string]string) {
 	if b.labels == nil {
 		b.labels = make(map[runtime.ID]map[string]string)
 	}
-	b.labels[id] = cloneLabelMap(labels)
+	if len(labels) == 0 {
+		b.labels[id] = nil
+		return
+	}
+	b.labels[id] = maps.Clone(labels)
 }
 
 func (b *Backend) cachedLabel(id runtime.ID, key string) (string, bool) {
@@ -885,26 +897,6 @@ func fromMDRepos(repos []md.Repo) []runtime.Repo {
 			Branch:        primaryBranch(r),
 			BaseBranch:    r.DefaultBranch,
 			Remote:        r.DefaultRemote,
-		}
-	}
-	return out
-}
-
-func fromMDProcessInfos(procs []md.ProcessInfo) []runtime.ProcessInfo {
-	if len(procs) == 0 {
-		return nil
-	}
-	out := make([]runtime.ProcessInfo, len(procs))
-	for i, p := range procs {
-		out[i] = runtime.ProcessInfo{
-			PID:     p.PID,
-			PPID:    p.PPID,
-			User:    p.User,
-			State:   p.State,
-			CPU:     p.CPU,
-			Mem:     p.Mem,
-			Time:    p.Time,
-			Command: p.Command,
 		}
 	}
 	return out

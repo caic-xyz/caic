@@ -156,13 +156,33 @@ type InstanceInspect struct {
 
 // ProcessInfo describes a single process running inside a runtime instance.
 type ProcessInfo struct {
-	PID     int
-	PPID    int
-	User    string
-	State   string
-	CPU     float64
-	Mem     float64
-	Time    string
+	// PID is the process ID.
+	PID int
+	// PPID is the parent process ID.
+	PPID int
+	// PGRP is the process group ID.
+	PGRP int
+	// User is the effective user name.
+	User string
+	// State is the process state and modifiers reported by the runtime.
+	State string
+	// Priority is the kernel scheduling priority.
+	Priority int
+	// Nice is the process niceness value.
+	Nice int
+	// Threads is the number of threads in the process.
+	Threads int
+	// CPU is the percentage of CPU capacity used at the time of inspection.
+	CPU float64
+	// Mem is the percentage of physical memory used at the time of inspection.
+	Mem float64
+	// RSSBytes is the resident set size in bytes.
+	RSSBytes uint64
+	// CPUTime is the cumulative user and system CPU time consumed by the process.
+	CPUTime time.Duration
+	// StartedAt is when the process started.
+	StartedAt time.Time
+	// Command is the full command line reported by the runtime.
 	Command string
 }
 

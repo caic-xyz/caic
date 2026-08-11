@@ -1,14 +1,40 @@
 // Tests for the process tree builder used by ProcessDetail.
 
-import { describe, it, expect } from "vitest";
+import { render, screen } from "@solidjs/testing-library";
+import { describe, it, expect, vi } from "vitest";
 
-import type { ProcessInfo } from "@sdk/types.gen";
+import type { ISOTimestamp, ProcessInfo } from "@sdk/types.gen";
 
-import { buildTree } from "./ProcessDetail";
+import { getTaskProcesses } from "../api";
+import { buildTree, default as ProcessDetail } from "./ProcessDetail";
 import type { ProcessNode } from "./ProcessDetail";
 
+vi.mock("@solidjs/router", () => ({
+  useNavigate: () => vi.fn(),
+}));
+
+vi.mock("../api", () => ({
+  getTaskProcesses: vi.fn(),
+  signalProcess: vi.fn(),
+}));
+
 function p(pid: number, ppid: number, command: string): ProcessInfo {
-  return { pid, ppid, user: "user", state: "S", cpu: 0, mem: 0, time: "0:00", command };
+  return {
+    pid,
+    ppid,
+    pgrp: ppid,
+    user: "user",
+    state: "S",
+    priority: 20,
+    nice: 0,
+    threads: 1,
+    cpu: 0,
+    mem: 0,
+    rssBytes: 0,
+    cpuTime: 0,
+    startedAt: new Date().toISOString() as ISOTimestamp,
+    command,
+  };
 }
 
 function flattenTree(roots: ProcessNode[], depth = 0): { pid: number; depth: number }[] {
@@ -19,6 +45,18 @@ function flattenTree(roots: ProcessNode[], depth = 0): { pid: number; depth: num
   }
   return result;
 }
+
+describe("ProcessDetail", () => {
+  it("renders each process age", async () => {
+    const process = p(1, 0, "bash");
+    process.startedAt = new Date(Date.now() - 90_000).toISOString() as ISOTimestamp;
+    vi.mocked(getTaskProcesses).mockResolvedValue({ processes: [process] });
+
+    render(() => <ProcessDetail taskId="task-1" repo="repo" branch="main" taskPath="/task/task-1" />);
+
+    expect(await screen.findByText("1m 30s")).toBeInTheDocument();
+  });
+});
 
 describe("buildTree", () => {
   it("returns empty array for empty input", () => {
@@ -107,7 +145,9 @@ describe("buildTree", () => {
     procs[0].state = "R";
     procs[0].cpu = 12.5;
     procs[0].mem = 3.2;
-    procs[0].time = "1:23";
+    procs[0].cpuTime = 83_000_000_000;
+    procs[0].rssBytes = 2_097_152;
+    procs[0].startedAt = "2026-03-20T10:30:00Z" as ISOTimestamp;
     const tree = buildTree(procs);
     const node = tree[0];
     expect(node.pid).toBe(5);
@@ -116,7 +156,9 @@ describe("buildTree", () => {
     expect(node.state).toBe("R");
     expect(node.cpu).toBe(12.5);
     expect(node.mem).toBe(3.2);
-    expect(node.time).toBe("1:23");
+    expect(node.cpuTime).toBe(83_000_000_000);
+    expect(node.rssBytes).toBe(2_097_152);
+    expect(node.startedAt).toBe("2026-03-20T10:30:00Z");
     expect(node.command).toBe("myprocess");
   });
 

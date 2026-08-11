@@ -734,14 +734,34 @@ type DiffResp struct {
 
 // ProcessInfo describes a single process running inside a task runtime instance.
 type ProcessInfo struct {
-	PID     int     `json:"pid"`
-	PPID    int     `json:"ppid"`
-	User    string  `json:"user"`
-	State   string  `json:"state"` // Single-character state: R, S, D, Z, T, etc.
-	CPU     float64 `json:"cpu"`
-	Mem     float64 `json:"mem"`
-	Time    string  `json:"time"`    // Cumulative CPU time.
-	Command string  `json:"command"` // Full command line.
+	// PID is the process ID.
+	PID int `json:"pid"`
+	// PPID is the parent process ID.
+	PPID int `json:"ppid"`
+	// PGRP is the process group ID.
+	PGRP int `json:"pgrp"`
+	// User is the effective user name.
+	User string `json:"user"`
+	// State is the process state and modifiers reported by the runtime.
+	State string `json:"state"`
+	// Priority is the kernel scheduling priority.
+	Priority int `json:"priority"`
+	// Nice is the process niceness value.
+	Nice int `json:"nice"`
+	// Threads is the number of threads in the process.
+	Threads int `json:"threads"`
+	// CPU is the percentage of CPU capacity used at the time of inspection.
+	CPU float64 `json:"cpu"`
+	// Mem is the percentage of physical memory used at the time of inspection.
+	Mem float64 `json:"mem"`
+	// RSSBytes is the resident set size in bytes.
+	RSSBytes uint64 `json:"rssBytes"`
+	// CPUTime is the cumulative user and system CPU time in nanoseconds.
+	CPUTime time.Duration `json:"cpuTime"`
+	// StartedAt is when the process started.
+	StartedAt time.Time `json:"startedAt"`
+	// Command is the full command line reported by the runtime.
+	Command string `json:"command"`
 }
 
 // ProcessListResp is the response for GET /api/caic/v1/tasks/{id}/processes.

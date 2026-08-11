@@ -170,16 +170,23 @@ func ForgeCheck(c *forge.Check) v1.ForgeCheck {
 // ProcessInfos converts runtime process info to API DTOs.
 func ProcessInfos(procs []runtime.ProcessInfo) []v1.ProcessInfo {
 	out := make([]v1.ProcessInfo, len(procs))
-	for i, p := range procs {
+	for i := range procs {
+		p := &procs[i]
 		out[i] = v1.ProcessInfo{
-			PID:     p.PID,
-			PPID:    p.PPID,
-			User:    p.User,
-			State:   p.State,
-			CPU:     p.CPU,
-			Mem:     p.Mem,
-			Time:    p.Time,
-			Command: p.Command,
+			PID:       p.PID,
+			PPID:      p.PPID,
+			PGRP:      p.PGRP,
+			User:      p.User,
+			State:     p.State,
+			Priority:  p.Priority,
+			Nice:      p.Nice,
+			Threads:   p.Threads,
+			CPU:       p.CPU,
+			Mem:       p.Mem,
+			RSSBytes:  p.RSSBytes,
+			CPUTime:   p.CPUTime,
+			StartedAt: p.StartedAt,
+			Command:   p.Command,
 		}
 	}
 	return out

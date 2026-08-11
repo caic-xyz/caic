@@ -11,6 +11,7 @@ import ExpandIcon from "@material-symbols/svg-400/outlined/expand.svg?solid";
 import type { ProcessInfo } from "@sdk/types.gen";
 
 import { getTaskProcesses, signalProcess } from "../api";
+import { formatBytes, formatElapsed, formatTime } from "../formatting";
 import styles from "./ProcessDetail.module.css";
 
 // ProcessNode extends ProcessInfo with a children list for tree rendering.
@@ -64,6 +65,7 @@ interface RowProps {
   collapsed: CollapsedSet;
   toggleCollapsed: (pid: number) => void;
   signallingPid: () => number | null;
+  now: () => number;
   onSignal: (pid: number, sig: "SIGTERM" | "SIGKILL") => void;
 }
 
@@ -111,12 +113,21 @@ function ProcessRow(props: RowProps) {
           </div>
         </td>
         <td class={styles.td}>{props.node.pid}</td>
+        <td class={styles.td}>{props.node.ppid}</td>
+        <td class={styles.td}>{props.node.pgrp}</td>
+        <td class={styles.td}>{props.node.user}</td>
         <td class={styles.td}>
           <span class={styles.state} style={{ color: stateColor(props.node.state) }}>{props.node.state}</span>
         </td>
+        <td class={styles.td}>{props.node.priority}</td>
+        <td class={styles.td}>{props.node.nice}</td>
+        <td class={styles.td}>{props.node.threads}</td>
         <td class={styles.td}>{props.node.cpu.toFixed(1)}</td>
         <td class={styles.td}>{props.node.mem.toFixed(1)}</td>
-        <td class={styles.td}>{props.node.time}</td>
+        <td class={styles.td}>{formatBytes(props.node.rssBytes)}</td>
+        <td class={styles.td}>{formatElapsed(props.node.cpuTime / 1_000_000)}</td>
+        <td class={styles.td}>{formatTime(props.node.startedAt)}</td>
+        <td class={styles.td}>{formatElapsed(props.now() - new Date(props.node.startedAt).getTime())}</td>
         <td class={`${styles.td} ${styles.cmd}`}>{props.node.command}</td>
       </tr>
       <Show when={hasChildren() && !isCollapsed()}>
@@ -128,6 +139,7 @@ function ProcessRow(props: RowProps) {
               collapsed={props.collapsed}
               toggleCollapsed={props.toggleCollapsed}
               signallingPid={props.signallingPid}
+              now={props.now}
               onSignal={props.onSignal}
             />
           )}
@@ -143,6 +155,7 @@ export default function ProcessDetail(props: Props) {
   const [error, setError] = createSignal<string | null>(null);
   const [loading, setLoading] = createSignal(true);
   const [signallingPid, setSignallingPid] = createSignal<number | null>(null);
+  const [now, setNow] = createSignal(Date.now());
   const [collapsed, setCollapsed] = createSignal<Set<number>>(new Set());
 
   const tree = createMemo(() => {
@@ -187,7 +200,11 @@ export default function ProcessDetail(props: Props) {
       if (e.key === "Escape") navigate(props.taskPath);
     };
     document.addEventListener("keydown", onKey);
-    onCleanup(() => document.removeEventListener("keydown", onKey));
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    onCleanup(() => {
+      clearInterval(interval);
+      document.removeEventListener("keydown", onKey);
+    });
   });
 
   const handleSignal = async (pid: number, sig: "SIGTERM" | "SIGKILL") => {
@@ -235,10 +252,19 @@ export default function ProcessDetail(props: Props) {
                     <tr>
                       <th class={`${styles.th} ${styles.actionsHdr}`}>ACTIONS</th>
                       <th class={styles.th}>PID</th>
+                      <th class={styles.th}>PPID</th>
+                      <th class={styles.th}>PGRP</th>
+                      <th class={styles.th}>USER</th>
                       <th class={styles.th}>S</th>
+                      <th class={styles.th}>PRI</th>
+                      <th class={styles.th}>NI</th>
+                      <th class={styles.th}>THREADS</th>
                       <th class={styles.th}>CPU</th>
                       <th class={styles.th}>MEM</th>
-                      <th class={styles.th}>TIME</th>
+                      <th class={styles.th}>RSS</th>
+                      <th class={styles.th}>CPU TIME</th>
+                      <th class={styles.th}>STARTED</th>
+                      <th class={styles.th}>AGE</th>
                       <th class={styles.th}>COMMAND</th>
                     </tr>
                   </thead>
@@ -251,6 +277,7 @@ export default function ProcessDetail(props: Props) {
                           collapsed={collapsed()}
                           toggleCollapsed={toggleCollapsed}
                           signallingPid={signallingPid}
+                          now={now}
                           onSignal={handleSignal}
                         />
                       )}

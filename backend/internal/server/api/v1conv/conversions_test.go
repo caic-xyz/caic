@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
@@ -67,6 +68,47 @@ func TestTask(t *testing.T) {
 			t.Errorf("ForkedFromTaskID = %s, want %s", got.ForkedFromTaskID, parentID)
 		}
 	})
+}
+
+func TestProcessInfos(t *testing.T) {
+	t.Parallel()
+
+	startedAt := time.Date(2026, time.March, 20, 10, 30, 0, 0, time.UTC)
+	got := ProcessInfos([]runtime.ProcessInfo{{
+		PID:       42,
+		PPID:      1,
+		PGRP:      42,
+		User:      "user",
+		State:     "S",
+		Priority:  20,
+		Nice:      5,
+		Threads:   3,
+		CPU:       1.5,
+		Mem:       2.5,
+		RSSBytes:  2_097_152,
+		CPUTime:   3 * time.Second,
+		StartedAt: startedAt,
+		Command:   "agent run",
+	}})
+	want := []v1.ProcessInfo{{
+		PID:       42,
+		PPID:      1,
+		PGRP:      42,
+		User:      "user",
+		State:     "S",
+		Priority:  20,
+		Nice:      5,
+		Threads:   3,
+		CPU:       1.5,
+		Mem:       2.5,
+		RSSBytes:  2_097_152,
+		CPUTime:   3 * time.Second,
+		StartedAt: startedAt,
+		Command:   "agent run",
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ProcessInfos() = %#v, want %#v", got, want)
+	}
 }
 
 func TestProviderQuota(t *testing.T) {

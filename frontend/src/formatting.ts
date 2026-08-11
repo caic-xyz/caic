@@ -29,6 +29,22 @@ export function formatDuration(seconds: number): string {
   return `${seconds.toFixed(1)}s`;
 }
 
+export function formatBytes(bytes: number): string {
+  const units = ["B", "KiB", "MiB", "GiB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
+}
+
+export function formatTime(timestamp: string): string {
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime()) ? timestamp : date.toLocaleString();
+}
+
 // Formats an elapsed duration given in milliseconds.
 //
 // Call formatElapsed(seconds * 1000) for API durations.

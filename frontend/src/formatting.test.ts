@@ -2,7 +2,19 @@
 
 import { describe, expect, it } from "vitest";
 
-import { stateColor, toolCallDetail } from "./formatting";
+import { formatBytes, formatElapsed, stateColor, toolCallDetail } from "./formatting";
+
+describe("formatBytes", () => {
+  it("formats resident memory using binary units", () => {
+    expect(formatBytes(2_097_152)).toBe("2.0 MiB");
+  });
+});
+
+describe("formatElapsed", () => {
+  it("formats process age in whole seconds", () => {
+    expect(formatElapsed(90_000)).toBe("1m 30s");
+  });
+});
 
 describe("stateColor", () => {
   it("uses green for busy task states", () => {

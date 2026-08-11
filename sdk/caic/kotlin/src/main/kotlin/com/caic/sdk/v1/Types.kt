@@ -1657,16 +1657,33 @@ data class DiffResp(val diff: String)
 /** ProcessInfo describes a single process running inside a task runtime instance. */
 @Serializable
 data class ProcessInfo(
+    /** PID is the process ID. */
     val pid: Int,
+    /** PPID is the parent process ID. */
     val ppid: Int,
+    /** PGRP is the process group ID. */
+    val pgrp: Int,
+    /** User is the effective user name. */
     val user: String,
-    /** Single-character state: R, S, D, Z, T, etc. */
+    /** State is the process state and modifiers reported by the runtime. */
     val state: String,
+    /** Priority is the kernel scheduling priority. */
+    val priority: Int,
+    /** Nice is the process niceness value. */
+    val nice: Int,
+    /** Threads is the number of threads in the process. */
+    val threads: Int,
+    /** CPU is the percentage of CPU capacity used at the time of inspection. */
     val cpu: Double,
+    /** Mem is the percentage of physical memory used at the time of inspection. */
     val mem: Double,
-    /** Cumulative CPU time. */
-    val time: String,
-    /** Full command line. */
+    /** RSSBytes is the resident set size in bytes. */
+    val rssBytes: Long,
+    /** CPUTime is the cumulative user and system CPU time in nanoseconds. */
+    val cpuTime: Long,
+    /** StartedAt is when the process started. */
+    val startedAt: Instant,
+    /** Command is the full command line reported by the runtime. */
     val command: String,
 )
 

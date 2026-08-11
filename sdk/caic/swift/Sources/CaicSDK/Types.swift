@@ -1289,16 +1289,33 @@ public struct DiffResp: Codable {
 
 /// ProcessInfo describes a single process running inside a task runtime instance.
 public struct ProcessInfo: Codable {
+    /// PID is the process ID.
     public let pid: Int
+    /// PPID is the parent process ID.
     public let ppid: Int
+    /// PGRP is the process group ID.
+    public let pgrp: Int
+    /// User is the effective user name.
     public let user: String
-    /// Single-character state: R, S, D, Z, T, etc.
+    /// State is the process state and modifiers reported by the runtime.
     public let state: String
+    /// Priority is the kernel scheduling priority.
+    public let priority: Int
+    /// Nice is the process niceness value.
+    public let nice: Int
+    /// Threads is the number of threads in the process.
+    public let threads: Int
+    /// CPU is the percentage of CPU capacity used at the time of inspection.
     public let cpu: Double
+    /// Mem is the percentage of physical memory used at the time of inspection.
     public let mem: Double
-    /// Cumulative CPU time.
-    public let time: String
-    /// Full command line.
+    /// RSSBytes is the resident set size in bytes.
+    public let rssBytes: Int
+    /// CPUTime is the cumulative user and system CPU time in nanoseconds.
+    public let cpuTime: Int
+    /// StartedAt is when the process started.
+    public let startedAt: ISOTimestamp
+    /// Command is the full command line reported by the runtime.
     public let command: String
 }
 
