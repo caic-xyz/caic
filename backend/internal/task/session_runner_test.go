@@ -260,6 +260,8 @@ func TestSessionRunner(t *testing.T) {
 			t.Parallel()
 			stub := &fetchRecorder{FakeBackend: testContainer()}
 			r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "/repo", stub), "", nil)
+			changed := make(chan struct{}, 1)
+			r.NotifyTaskChange = func() { changed <- struct{}{} }
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
@@ -289,6 +291,14 @@ func TestSessionRunner(t *testing.T) {
 			}
 			if !stub.fetched.Load() {
 				t.Error("Fetch was not called on result message")
+			}
+			select {
+			case <-changed:
+				if state := tk.GetState(); state != StateWaiting {
+					t.Errorf("state = %s, want %s", state, StateWaiting)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for task state change notification")
 			}
 		})
 

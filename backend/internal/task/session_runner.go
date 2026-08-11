@@ -1,4 +1,4 @@
-// SessionRunner owns agent session lifecycle and message dispatch for tasks.
+// SessionRunner owns agent session lifecycle, message dispatch, and state-change notification for tasks.
 
 package task
 
@@ -25,6 +25,9 @@ type SessionRunner struct {
 	Backends  map[harness.Name]agent.Backend
 	Logs      *LogStore
 	Workspace *repowork.Workspace
+
+	// NotifyTaskChange is called after a dispatched agent message changes task state.
+	NotifyTaskChange func()
 }
 
 // Reconnect reattaches to a running relay, or starts a new agent session
@@ -296,8 +299,8 @@ func (r *SessionRunner) replaceSession(ctx context.Context, t *Task, prompt agen
 	return h, nil
 }
 
-// startMessageDispatch starts a goroutine that reads from msgCh and dispatches
-// to t.addMessage.
+// startMessageDispatch starts a goroutine that reads from msgCh, dispatches to
+// t.addMessage, and reports task state transitions.
 func (r *SessionRunner) startMessageDispatch(ctx context.Context, t *Task, skipSideEffects bool) (msgCh chan agent.Message, dispatchDone <-chan struct{}) {
 	// Capture all repos outside the goroutine to avoid races.
 	allRepos := t.RuntimeRepos()
@@ -327,7 +330,9 @@ func (r *SessionRunner) startMessageDispatch(ctx context.Context, t *Task, skipS
 					msg.DiffStat = ds
 				}
 			}
-			t.addMessage(ctx, m, skipSideEffects)
+			if t.addMessage(ctx, m, skipSideEffects) && r.NotifyTaskChange != nil {
+				r.NotifyTaskChange()
+			}
 			if emitToolDiff {
 				r.emitDiffStatBranch(ctx, t, instanceID, allRepos)
 			}

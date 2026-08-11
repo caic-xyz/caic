@@ -1258,7 +1258,12 @@ func (m *Manager) logStore() *task.LogStore {
 }
 
 func (m *Manager) sessions(r *repowork.Workspace) *task.SessionRunner {
-	return &task.SessionRunner{Backends: m.backends, Workspace: r, Logs: m.logStore()}
+	return &task.SessionRunner{
+		Backends:         m.backends,
+		Logs:             m.logStore(),
+		Workspace:        r,
+		NotifyTaskChange: m.NotifyTaskChange,
+	}
 }
 
 func (m *Manager) runner(r *repowork.Workspace) *task.Runner {

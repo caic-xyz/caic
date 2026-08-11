@@ -1759,10 +1759,15 @@ func (t *Task) recordStartupFailure(ctx context.Context, err error) {
 // addMessage records a message under the mutex and fans conversation events out
 // to subscribers. Metadata-only messages update task fields without entering the
 // visible message history. Conversation messages also update state transitions
-// and cost/duration accumulation.
-func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen bool) {
+// and cost/duration accumulation. It reports whether the message changed task
+// state.
+func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen bool) (stateChanged bool) {
 	t.mu.Lock()
-	defer t.mu.Unlock()
+	initialState := t.state
+	defer func() {
+		stateChanged = t.state != initialState
+		t.mu.Unlock()
+	}()
 	if meta, ok := m.(*agent.MetaSessionMessage); ok {
 		if meta.SessionID != "" {
 			t.sessionID = meta.SessionID
@@ -1773,7 +1778,7 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 		if meta.Model != "" && t.reportedModel == "" {
 			t.reportedModel = meta.Model
 		}
-		return
+		return stateChanged
 	}
 	t.msgs = append(t.msgs, m)
 	if rateLimit, ok := m.(*agent.RateLimitMessage); ok {
@@ -1922,7 +1927,7 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 	// persisted replay, so the live stream must match to avoid a transient
 	// "Parse error" that disappears when the task log is reloaded.
 	if exit, ok := m.(*agent.ExitMessage); ok && exit.ExitCode != 0 && t.lastExitError == "" {
-		return
+		return stateChanged
 	}
 	for i := 0; i < len(t.subs); i++ {
 		select {
@@ -1934,6 +1939,7 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 			i--
 		}
 	}
+	return stateChanged
 }
 
 func rateLimitFromMessage(m *agent.RateLimitMessage) RateLimit {
