@@ -2156,7 +2156,7 @@ func (m *Manager) watchSession(entry *Entry, workspace *repowork.Workspace, h *t
 					if err := writeTaskResultTrailer(t, result); err != nil {
 						m.log.WarnContext(m.serverCtx, "write crashed task trailer failed", append(attrs, "err", err)...)
 					}
-					if err := t.CommitEventReplay(); err != nil {
+					if err := t.CommitEventReplay(m.serverCtx); err != nil {
 						m.log.WarnContext(m.serverCtx, "commit event replay failed", append(attrs, "err", err)...)
 					}
 				} else if t.RecordSessionFailure(m.serverCtx, sessionErr) {
@@ -2179,7 +2179,7 @@ func (m *Manager) watchSession(entry *Entry, workspace *repowork.Workspace, h *t
 					if err := writeTaskResultTrailer(t, result); err != nil {
 						m.log.WarnContext(m.serverCtx, "write failed task trailer failed", append(attrs, "err", err)...)
 					}
-					if err := t.CommitEventReplay(); err != nil {
+					if err := t.CommitEventReplay(m.serverCtx); err != nil {
 						m.log.WarnContext(m.serverCtx, "commit event replay failed", append(attrs, "err", err)...)
 					}
 				}
@@ -2192,7 +2192,7 @@ func (m *Manager) watchSession(entry *Entry, workspace *repowork.Workspace, h *t
 				// handling in task.go). The CAS only fires from Running, so
 				// it is a no-op once addMessage has already moved the state.
 				t.SetStateIf(task.StateRunning, task.StateWaiting)
-				if err := t.CommitEventReplay(); err != nil {
+				if err := t.CommitEventReplay(m.serverCtx); err != nil {
 					m.log.WarnContext(m.serverCtx, "commit event replay failed", append(attrs, "err", err)...)
 				}
 			}

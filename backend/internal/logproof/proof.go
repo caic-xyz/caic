@@ -10,11 +10,11 @@ import (
 // task log. The producer owns validation; cache consumers compare proofs but
 // never infer harness authority from their own metadata.
 type CacheProof struct {
-	Device    uint64
-	Inode     uint64
-	Size      int64
-	ModTimeNs int64
-	Version   agent.LogVersion
-	Harness   harness.Name
-	RawHeader string
+	Device    uint64           `json:"device"`
+	Inode     uint64           `json:"inode"`
+	Size      int64            `json:"size"`
+	ModTimeNs int64            `json:"modTimeNs"`
+	Version   agent.LogVersion `json:"version"`
+	Harness   harness.Name     `json:"harness"`
+	RawHeader string           `json:"rawHeader"`
 }

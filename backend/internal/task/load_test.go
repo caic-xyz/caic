@@ -180,7 +180,7 @@ func reopenWithProofReplay(t *testing.T, dir, path string, tk *Task, snapshot *V
 	if err := w.Close(); err != nil {
 		t.Fatalf("close Reopen writer: %v", err)
 	}
-	if err := tk.CommitEventReplay(); err != nil {
+	if err := tk.CommitEventReplay(t.Context()); err != nil {
 		t.Fatalf("commit attached replay: %v", err)
 	}
 	if len(replay.Commits) != 1 || replay.Commits[0] != path {
@@ -465,11 +465,11 @@ func TestLoadLogs(t *testing.T) {
 			t.Fatal(err)
 		}
 		var summary logSummary
-		if err := json.Unmarshal(data, &summary); err != nil {
+		if err := json.Unmarshal(data, &summary); err != nil { //nolint:musttag // LoadedTask is intentionally the direct sidecar projection.
 			t.Fatal(err)
 		}
 		summary.Task.ForkedFromTaskID = "forged-parent"
-		data, err = json.Marshal(summary)
+		data, err = json.Marshal(summary) //nolint:musttag // LoadedTask is intentionally the direct sidecar projection.
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -986,7 +986,7 @@ func TestLoadLogs(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "a.jsonl.zst")
 		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "cached", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude", ForkedFromTaskID: "3BL0EKDTO000"})
-		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged", Error: "persisted failure"})
 		writeCompressedLogFile(t, dir, "a.jsonl.zst", seqOf(meta, trailer))
 
 		first, err := LoadLogs(dir)
@@ -1007,11 +1007,17 @@ func TestLoadLogs(t *testing.T) {
 			t.Fatal(err)
 		}
 		var summary logSummary
-		if err := json.Unmarshal(summaryData, &summary); err != nil {
+		if err := json.Unmarshal(summaryData, &summary); err != nil { //nolint:musttag // LoadedTask is intentionally the direct sidecar projection.
 			t.Fatal(err)
 		}
-		if summary.Version != 3 {
-			t.Fatalf("taskmeta version = %d, want 3", summary.Version)
+		if summary.Version != logSummaryVersion {
+			t.Fatalf("taskmeta version = %d, want %d", summary.Version, logSummaryVersion)
+		}
+		if summary.Task == nil || len(summary.Task.Msgs) != 0 {
+			t.Fatalf("taskmeta retained message history: %#v", summary.Task)
+		}
+		if snapshot := first[0].ValidatedSnapshot(); snapshot == nil || summary.Proof != snapshot.cacheProof() {
+			t.Fatalf("taskmeta proof = %#v, want shared snapshot proof %#v", summary.Proof, snapshot)
 		}
 		info, err := os.Stat(path)
 		if err != nil {
@@ -1027,6 +1033,9 @@ func TestLoadLogs(t *testing.T) {
 		}
 		if second[0].Prompt != "cached" || second[0].State != StatePurged || second[0].ForkedFromTaskID != "3BL0EKDTO000" {
 			t.Fatalf("cached task = prompt %q state %v parent %q, want cached/purged/3BL0EKDTO000", second[0].Prompt, second[0].State, second[0].ForkedFromTaskID)
+		}
+		if second[0].Result == nil || second[0].Result.Err == nil || second[0].Result.Err.Error() != "persisted failure" {
+			t.Fatalf("cached result error = %#v, want persisted failure", second[0].Result)
 		}
 		if snapshot := second[0].ValidatedSnapshot(); snapshot == nil || !snapshot.EOFValidated || snapshot.RawHeader != meta {
 			t.Fatalf("inventory cache hit snapshot = %#v, want current summary-backed EOF proof", snapshot)
@@ -1174,28 +1183,28 @@ func TestLoadLogs(t *testing.T) {
 						t.Fatal(err)
 					}
 					var summary logSummary
-					if err := json.Unmarshal(data, &summary); err != nil {
+					if err := json.Unmarshal(data, &summary); err != nil { //nolint:musttag // LoadedTask is intentionally the direct sidecar projection.
 						t.Fatal(err)
 					}
 					switch mutation {
 					case "old":
 						summary.Version--
 					case "stale-size":
-						summary.LogSize++
+						summary.Proof.Size++
 					case "stale-mtime":
-						summary.LogModNs--
+						summary.Proof.ModTimeNs--
 					case "stale-authority":
-						summary.AuthorityHarness = harness.Claude
+						summary.Proof.Harness = harness.Claude
 					case "stale-device":
-						summary.LogDevice++
+						summary.Proof.Device++
 					case "stale-inode":
-						summary.LogInode++
+						summary.Proof.Inode++
 					case "stale-prompt":
 						summary.Task.Prompt = "tampered"
 					case "eof":
-						summary.EOFValidated = false
+						summary.Proof = CacheProof{}
 					}
-					data, err = json.Marshal(summary)
+					data, err = json.Marshal(summary) //nolint:musttag // LoadedTask is intentionally the direct sidecar projection.
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -1216,7 +1225,7 @@ func TestLoadLogs(t *testing.T) {
 					t.Fatal(err)
 				}
 				var rebuilt logSummary
-				if err := json.Unmarshal(data, &rebuilt); err != nil {
+				if err := json.Unmarshal(data, &rebuilt); err != nil { //nolint:musttag // LoadedTask is intentionally the direct sidecar projection.
 					t.Fatal(err)
 				}
 				if rebuilt.Version != logSummaryVersion || rebuilt.Task.LogVersion != agent.LogVersionV2 || rebuilt.Task.Harness != harness.Codex {

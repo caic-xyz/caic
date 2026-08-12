@@ -44,7 +44,7 @@ import (
 // CacheVersion is the schema version of the cached EventMessage JSONL.
 // Bump it whenever event conversion or DTO semantics change so stale caches are
 // ignored rather than served.
-const CacheVersion = 5
+const CacheVersion = 6
 
 // maxReplayRecordBytes bounds memory consumed by one untrusted cache JSONL
 // record. Oversized records invalidate the entire derived cache.
@@ -65,15 +65,9 @@ type ReplaySource func(context.Context, func(agent.ParsedMessage) error) (logpro
 // CacheHeader is the first JSONL record of a replay cache. It binds the cache
 // to a specific raw log file so a changed or replaced log invalidates it.
 type CacheHeader struct {
-	Version          int              `json:"v"`
-	LogDevice        uint64           `json:"logDevice"`
-	LogInode         uint64           `json:"logInode"`
-	LogSize          int64            `json:"logSize"`
-	LogModNs         int64            `json:"logModNs"`
-	AuthorityVersion agent.LogVersion `json:"authorityVersion"`
-	AuthorityHarness harness.Name     `json:"authorityHarness"`
-	RawHeader        string           `json:"rawHeader"`
-	Empty            bool             `json:"empty,omitempty"`
+	Version int                 `json:"v"`
+	Proof   logproof.CacheProof `json:"proof"`
+	Empty   bool                `json:"empty,omitempty"`
 }
 
 // CachePath returns the sidecar cache path for a task log path. The
@@ -377,12 +371,6 @@ func (w *CacheWriter) WriteEventDataBytes(data []byte) {
 	}
 }
 
-// Commit finalizes an independently constructed cache with the current raw
-// observation. Replay regeneration uses CommitExact instead.
-func (w *CacheWriter) Commit(logPath string) error {
-	return w.CommitContext(context.Background(), logPath)
-}
-
 // CommitContext finalizes an independently constructed cache unless ctx is
 // cancelled while its body is copied, compressed, or published.
 func (w *CacheWriter) CommitContext(ctx context.Context, logPath string) error {
@@ -392,12 +380,6 @@ func (w *CacheWriter) CommitContext(ctx context.Context, logPath string) error {
 		return err
 	}
 	return w.CommitExactContext(ctx, logPath, proof)
-}
-
-// CommitExact finalizes a regenerated cache only if the raw log still exactly
-// matches the proof returned by the completed semantic scan.
-func (w *CacheWriter) CommitExact(logPath string, proof logproof.CacheProof) error {
-	return w.CommitExactContext(context.Background(), logPath, proof)
 }
 
 // CommitExactContext finalizes a regenerated cache only while ctx remains
@@ -418,10 +400,10 @@ func (w *CacheWriter) Abort() {
 // commitAppend permits only append growth after the raw observation from which
 // the seeded replay cache was validated. Identity and header authority remain
 // immutable; a same-size mtime mutation is rejected.
-func (w *CacheWriter) commitAppend(logPath string, proof logproof.CacheProof) error {
+func (w *CacheWriter) commitAppendContext(ctx context.Context, logPath string, proof logproof.CacheProof) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.commitLocked(context.Background(), logPath, proof, true)
+	return w.commitLocked(ctx, logPath, proof, true)
 }
 
 func (w *CacheWriter) seedFromFreshCache(logPath string) (bool, error) {
@@ -482,6 +464,12 @@ func (w *CacheWriter) recordError(err error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.werr = errors.Join(w.werr, err)
+}
+
+func (w *CacheWriter) error() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.werr
 }
 
 func (w *CacheWriter) abortLocked() {
@@ -550,15 +538,9 @@ func (w *CacheWriter) commitLocked(ctx context.Context, logPath string, expected
 		return fmt.Errorf("create replay cache zstd writer: %w", errors.Join(err, closeErr))
 	}
 	header, err := json.Marshal(CacheHeader{
-		Version:          CacheVersion,
-		LogDevice:        publicationProof.Device,
-		LogInode:         publicationProof.Inode,
-		LogSize:          publicationProof.Size,
-		LogModNs:         publicationProof.ModTimeNs,
-		AuthorityVersion: publicationProof.Version,
-		AuthorityHarness: publicationProof.Harness,
-		RawHeader:        publicationProof.RawHeader,
-		Empty:            empty && w.allowEmpty,
+		Version: CacheVersion,
+		Proof:   publicationProof,
+		Empty:   empty && w.allowEmpty,
 	})
 	if err == nil {
 		_, err = enc.Write(append(header, '\n'))
@@ -672,37 +654,41 @@ type MessageWriter struct {
 	filter *replayDiskFilter
 }
 
-// NewMessageWriter creates a live EventMessage replay writer for logPath. The
-// physical header is the only harness authority for timing conversion.
-func NewMessageWriter(logPath string, prove ProofProvider) (*MessageWriter, error) {
+// NewMessageWriter creates a live EventMessage replay writer from the exact
+// append proof observed by the task log owner. Later validation always uses
+// prove; construction never needs a stateful proof adapter.
+func NewMessageWriter(logPath string, initial logproof.CacheProof, prove ProofProvider) (*MessageWriter, error) {
 	if strings.HasSuffix(logPath, ".jsonl.zst") {
 		return nil, errors.New("live replay append does not support compressed task logs")
 	}
-	proof, err := resolveProof(logPath, prove)
-	if err != nil {
-		return nil, fmt.Errorf("prove replay log authority: %w", err)
-	}
-	cache, err := newAppendCacheWriter(logPath, proof, prove)
+	cache, err := newAppendCacheWriter(logPath, initial, prove)
 	if err != nil {
 		return nil, err
 	}
-	return &MessageWriter{cache: cache, filter: newReplayDiskFilter(cache, proof.Harness, time.Now, false)}, nil
+	return &MessageWriter{cache: cache, filter: newReplayDiskFilter(cache, initial.Harness, time.Now, false)}, nil
 }
 
 // WriteMessage appends m to the live replay stream after write-time compaction.
-func (w *MessageWriter) WriteMessage(m agent.ParsedMessage) {
+func (w *MessageWriter) WriteMessage(ctx context.Context, m agent.ParsedMessage) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.filter.push(m)
+	if err := w.filter.pushContext(ctx, m); err != nil {
+		return err
+	}
+	return w.cache.error()
 }
 
 // Commit flushes any buffered delta tail and commits the underlying cache.
-func (w *MessageWriter) Commit(logPath string) error {
+func (w *MessageWriter) Commit(ctx context.Context, logPath string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.filter.flush()
+	if err := w.filter.flushContext(ctx); err != nil {
+		w.filter.close()
+		w.cache.Abort()
+		return err
+	}
 	w.filter.close()
-	return w.cache.commitAppend(logPath, w.cache.seedProof)
+	return w.cache.commitAppendContext(ctx, logPath, w.cache.seedProof)
 }
 
 const maxPendingReplayBytes = 64 << 10
@@ -839,14 +825,6 @@ func (f *replayDiskFilter) flushPendingContext(ctx context.Context) error {
 	return ctx.Err()
 }
 
-func (f *replayDiskFilter) flushPending() {
-	_ = f.flushPendingContext(context.Background())
-}
-
-func (f *replayDiskFilter) push(parsed agent.ParsedMessage) {
-	_ = f.pushContext(context.Background(), parsed)
-}
-
 func (f *replayDiskFilter) pushContext(ctx context.Context, parsed agent.ParsedMessage) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -879,10 +857,6 @@ func (f *replayDiskFilter) pushContext(ctx context.Context, parsed agent.ParsedM
 	}
 	f.emit(parsed)
 	return ctx.Err()
-}
-
-func (f *replayDiskFilter) flush() {
-	f.flushPending()
 }
 
 func (f *replayDiskFilter) flushContext(ctx context.Context) error {
@@ -1426,10 +1400,7 @@ func readCacheHeader(br *replayRecordReader, proof logproof.CacheProof) (CacheHe
 	if err := decoder.Decode(&h); err != nil || requireJSONEOF(decoder) != nil {
 		return CacheHeader{}, false
 	}
-	ok := h.Version == CacheVersion && h.LogDevice == proof.Device && h.LogInode == proof.Inode && h.LogSize == proof.Size &&
-		h.LogModNs == proof.ModTimeNs && h.AuthorityVersion == proof.Version &&
-		h.AuthorityHarness == proof.Harness && h.RawHeader == proof.RawHeader
-	return h, ok
+	return h, h.Version == CacheVersion && h.Proof == proof
 }
 
 // openReplayBody opens one sidecar descriptor and decoder at its header.

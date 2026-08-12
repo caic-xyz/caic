@@ -48,6 +48,14 @@ func (w *failAfterSSEWriter) Write(data []byte) (int, error) {
 	return n, err
 }
 
+func newLiveReplayWriter(logPath string, prove eventreplay.ProofProvider) (*eventreplay.MessageWriter, error) {
+	proof, err := prove(logPath)
+	if err != nil {
+		return nil, err
+	}
+	return eventreplay.NewMessageWriter(logPath, proof, prove)
+}
+
 func TestReplayCache(t *testing.T) {
 	t.Parallel()
 
@@ -66,12 +74,12 @@ func TestReplayCache(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := cache.Commit(logPath); err != nil {
+		if err := cache.CommitContext(t.Context(), logPath); err != nil {
 			t.Fatal(err)
 		}
 		w := httptest.NewRecorder()
 		entry := taskmgr.NewEntry(&task.Task{}, logs[0])
-		(&taskHandlers{}).streamHistoryFromDisk(context.Background(), w, w, entry)
+		(&taskHandlers{}).streamHistoryFromDisk(t.Context(), w, w, entry)
 		if body := w.Body.String(); body != "event: error\ndata: {\"message\":\"task history is unavailable\"}\n\n" {
 			t.Fatalf("terminal unservable replay body = %q, want explicit error", body)
 		}
@@ -93,12 +101,12 @@ func TestReplayCache(t *testing.T) {
 		}
 		cache.WriteEventData([]byte(`{"kind":"text","ts":1,"text":{"text":"first"}}`))
 		cache.WriteEventData([]byte(`{"kind":"text","ts":2,"text":{"text":"second"}}`))
-		if err := cache.Commit(logPath); err != nil {
+		if err := cache.CommitContext(t.Context(), logPath); err != nil {
 			t.Fatal(err)
 		}
 		out := &failAfterSSEWriter{remaining: 1}
 		idx := 0
-		err = (&taskHandlers{}).streamReplayStore(context.Background(), out, httptest.NewRecorder(), taskmgr.NewEntry(&task.Task{}, logs[0]), &idx)
+		err = (&taskHandlers{}).streamReplayStore(t.Context(), out, httptest.NewRecorder(), taskmgr.NewEntry(&task.Task{}, logs[0]), &idx)
 		if err == nil || !strings.Contains(err.Error(), "after history publication") || out.Len() != 1 {
 			t.Fatalf("stream replay = (%v, %q), want one partial write without regeneration", err, out.String())
 		}
@@ -119,10 +127,10 @@ func TestReplayCache(t *testing.T) {
 			t.Fatal(err)
 		}
 		cache.WriteEventData([]byte(`{"kind":"text","ts":1,"text":{"text":"must not publish"}}`))
-		if err := cache.Commit(logPath); err != nil {
+		if err := cache.CommitContext(t.Context(), logPath); err != nil {
 			t.Fatal(err)
 		}
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 		out := httptest.NewRecorder()
 		idx := 0
@@ -267,13 +275,17 @@ func TestReplayCache(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		w, err := eventreplay.NewMessageWriter(logPath, task.CacheProofForLog)
+		w, err := newLiveReplayWriter(logPath, task.CacheProofForLog)
 		if err != nil {
 			t.Fatal(err)
 		}
-		w.WriteMessage(agent.ParsedMessage{Message: &agent.TextDeltaMessage{Text: "partial"}})
-		w.WriteMessage(agent.ParsedMessage{Message: &agent.TextMessage{Text: "final"}})
-		if err := w.Commit(logPath); err != nil {
+		if err := w.WriteMessage(t.Context(), agent.ParsedMessage{Message: &agent.TextDeltaMessage{Text: "partial"}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.WriteMessage(t.Context(), agent.ParsedMessage{Message: &agent.TextMessage{Text: "final"}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Commit(t.Context(), logPath); err != nil {
 			t.Fatal(err)
 		}
 
@@ -314,7 +326,7 @@ func TestReplayCache(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := cache.Commit(logPath); err != nil {
+		if err := cache.CommitContext(t.Context(), logPath); err != nil {
 			t.Fatal(err)
 		}
 		s, taskID := newServer(t, logDir)

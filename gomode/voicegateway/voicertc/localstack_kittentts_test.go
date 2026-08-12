@@ -147,11 +147,11 @@ func TestKittenTTSAdapterHelperProcess(t *testing.T) { //nolint:paralleltest // 
 	mode := args[len(args)-1]
 	switch mode {
 	case "valid":
-		kittenTTSHelperServe(false, false)
+		kittenTTSHelperServe(t, false, false)
 	case "concurrent":
-		kittenTTSHelperServe(false, true)
+		kittenTTSHelperServe(t, false, true)
 	case "error":
-		kittenTTSHelperServe(true, false)
+		kittenTTSHelperServe(t, true, false)
 	case "startup-error":
 		fmt.Println(`{"kind":"error","error":"missing model"}`)
 	default:
@@ -173,7 +173,7 @@ func kittenTTSTestCommand(mode string) kittenTTSCommandFactory {
 	}
 }
 
-func kittenTTSHelperServe(alwaysFail, requireConcurrent bool) {
+func kittenTTSHelperServe(t *testing.T, alwaysFail, requireConcurrent bool) {
 	var active atomic.Int32
 	var maxActive atomic.Int32
 	mux := http.NewServeMux()
@@ -211,7 +211,7 @@ func kittenTTSHelperServe(alwaysFail, requireConcurrent bool) {
 		writeKittenTTSStream(w, []byte{3, 4})
 	})
 	var lc net.ListenConfig
-	ln, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
+	ln, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		fmt.Printf(`{"kind":"error","error":%q}`+"\n", err.Error())
 		os.Exit(1)

@@ -28,58 +28,9 @@ Across all phases:
   instead of adding aliases, fallbacks, or parallel implementations.
 - Each phase deletes the paths it replaces. Do not land an unused abstraction or
   retain a raw compatibility path for a later cleanup phase.
-- Production continues creating v1 logs until Phase 4.
+- Production continues creating v1 logs until cut-over.
 
-### Phase 1 — unify-log-reading: Use one record-decoding path
-
-- **Scope:** task-log scans and plain/zstd loading in
-  [`task/load.go`](../internal/task/load.go); relay decoders in
-  [`agent/agent.go`](../internal/agent/agent.go); harness parser boundaries; and
-  replay conversion in
-  [`eventreplay/replay.go`](../internal/eventreplay/replay.go).
-- **Preserve:** segment validation, plain and zstd support, relay byte offsets and
-  persistence policy, pending-action deduplication, strict-v2 errors, and nonzero
-  producer time plus each path's existing zero-time policy.
-- **Verify:** repository audit finds one production task-record scan policy, one
-  relay record decoder, and one replay conversion/marshal path; legacy default
-  readers and harness-level caic control routing are gone. Full loads, session
-  metadata, bounded tails, inventory, replay regeneration, live sessions,
-  handshakes, and attach preserve their existing semantics. Timestamp,
-  corruption, relay-byte, and pass-count tests show no extra full-log scan; v2
-  records satisfy the linked canonical contract; and `go test
-  ./backend/internal/agent/... ./backend/internal/task/...
-  ./backend/internal/eventreplay/... ./backend/internal/server/...`, `python3
-  backend/internal/agent/relay/test_relay.py`, and `python3
-  backend/internal/agent/relay/test_relay_v2.py` pass.
-
-### Phase 2 — simplify-log-derived-state: Use one proof and replay-cache path
-
-- **Scope:** validation snapshots and proof comparison in
-  [`task/load.go`](../internal/task/load.go), taskmeta projection in
-  [`task/log_summary.go`](../internal/task/log_summary.go), live and regenerated
-  replay writing in
-  [`eventreplay/replay.go`](../internal/eventreplay/replay.go), task-owned replay
-  lifecycle in [`task/task.go`](../internal/task/task.go) and
-  [`task/runner.go`](../internal/task/runner.go), replay publication in
-  [`server/task_handlers.go`](../internal/server/task_handlers.go), and replay
-  construction and pruning in [`app/app.go`](../internal/app/app.go).
-- **Preserve:** descriptor/path identity, authoritative header comparison, EOF
-  validation, immutable-prefix checks, atomic sidecar publication, and bounded
-  replay compaction. A version or physical-proof mismatch makes a derived
-  sidecar a miss; it is never accepted or repaired as authority.
-- **Verify:** retained validation proof contains no semantic task history;
-  snapshot, taskmeta, and replay validation share one physical-proof contract;
-  and taskmeta has no second hand-maintained mirror of task fields. Live and
-  regenerated replay use one error-returning write/flush/commit path with caller
-  context, without `context.Background()` wrappers or discarded flush errors.
-  Deleting and rebuilding either sidecar yields the same loaded-task semantics
-  and replay event bodies as a full raw-log scan. Stale-sidecar, replacement,
-  truncation, mutation, compression, cancellation, and pass-count tests pass
-  without adding a full-log scan to cache hits or validated reopen; `go test
-  ./backend/internal/task/... ./backend/internal/eventreplay/...
-  ./backend/internal/server/... ./backend/internal/app/...` passes.
-
-### Phase 3 — unify-log-writing: Use one task-log append path
+### Phase 1 — unify-log-writing: Use one task-log append path
 
 - **Scope:** replace `Options.LogW`, `SessionHandle.LogW`, free raw-write helpers,
   and both branches of `Task.WriteToLog` with one header-authoritative append
@@ -100,7 +51,7 @@ Across all phases:
   and `go test ./backend/internal/agent/... ./backend/internal/task/...
   ./backend/internal/eventreplay/...` passes.
 
-### Phase 4 — cut-over-to-v2: Enable v2 and prove restart behavior
+### Phase 2 — cut-over-to-v2: Enable v2 and prove restart behavior
 
 - **Scope:** the new-file header default, relay selection, task creation,
   reopen/resume/adoption, caller-supplied version plumbing, and the real-runtime

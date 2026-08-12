@@ -8,112 +8,25 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/backend/internal/logproof"
 )
 
 const (
-	logSummaryVersion = 3
+	logSummaryVersion = 4
 	logSummaryExt     = ".taskmeta.json"
 )
 
 // logSummary is the on-disk sidecar for compressed task-log metadata.
 //
-// It records complete physical identity, derived authority, and validated EOF
-// proof. When those values match the current zstd log, startup can
-// reconstruct LoadedTask metadata without streaming the whole compressed file.
+// Proof is the same physical-log contract used by replay sidecars. Task is a
+// direct LoadedTask projection rather than a separately maintained mirror;
+// LoadedTask's JSON form excludes message history and runtime-only state.
 type logSummary struct {
-	Version          int               `json:"v"`
-	LogDevice        uint64            `json:"logDevice"`
-	LogInode         uint64            `json:"logInode"`
-	LogSize          int64             `json:"logSize"`
-	LogModNs         int64             `json:"logModNs"`
-	AuthorityVersion agent.LogVersion  `json:"authorityVersion"`
-	AuthorityHarness harness.Name      `json:"authorityHarness"`
-	EOFValidated     bool              `json:"eofValidated"`
-	Task             loadedTaskSummary `json:"task"`
-}
-
-func (summary *logSummary) matches(identity physicalFileIdentity, info os.FileInfo, authority logAuthority) bool {
-	return summary.Version == logSummaryVersion &&
-		summary.LogDevice == identity.Device &&
-		summary.LogInode == identity.Inode &&
-		summary.LogSize == info.Size() &&
-		summary.LogModNs == info.ModTime().UnixNano() &&
-		summary.AuthorityVersion == authority.Version &&
-		summary.AuthorityHarness == authority.Harness &&
-		summary.EOFValidated
-}
-
-type loadedTaskSummary struct {
-	TaskID            string              `json:"taskID,omitempty"`
-	Prompt            string              `json:"prompt,omitempty"`
-	Title             string              `json:"title,omitempty"`
-	Repos             []repoMountSummary  `json:"repos,omitempty"`
-	LogVersion        agent.LogVersion    `json:"logVersion,omitempty"`
-	Harness           harness.Name        `json:"harness,omitempty"`
-	RuntimeName       runtime.Name        `json:"runtimeName,omitempty"`
-	StartedAt         time.Time           `json:"startedAt,omitzero"`
-	LastStateUpdateAt time.Time           `json:"lastStateUpdateAt,omitzero"`
-	State             string              `json:"state,omitempty"`
-	ForgeIssue        int                 `json:"forgeIssue,omitempty"`
-	ForkedFromTaskID  string              `json:"forkedFromTaskID,omitempty"`
-	ForgeOwner        string              `json:"forgeOwner,omitempty"`
-	ForgeRepo         string              `json:"forgeRepo,omitempty"`
-	ForgePR           int                 `json:"forgePR,omitempty"`
-	Tailscale         bool                `json:"tailscale,omitempty"`
-	USB               bool                `json:"usb,omitempty"`
-	Display           bool                `json:"display,omitempty"`
-	Sudo              bool                `json:"sudo,omitempty"`
-	GitHubToken       bool                `json:"gitHubToken,omitempty"`
-	BaseImage         string              `json:"baseImage,omitempty"`
-	ContainerPlatform string              `json:"containerPlatform,omitempty"`
-	MaxCPUs           int                 `json:"maxCPUs,omitempty"`
-	CacheMounts       []cacheMountSummary `json:"cacheMounts,omitempty"`
-	Mounts            []mountSummary      `json:"mounts,omitempty"`
-	Model             string              `json:"model,omitempty"`
-	Effort            string              `json:"effort,omitempty"`
-	SessionID         string              `json:"sessionID,omitempty"`
-	AgentVersion      string              `json:"agentVersion,omitempty"`
-	DiffCreated       bool                `json:"diffCreated,omitempty"`
-	Result            *resultSummary      `json:"result,omitempty"`
-}
-
-type resultSummary struct {
-	State       string         `json:"state,omitempty"`
-	DiffStat    agent.DiffStat `json:"diffStat,omitempty"`
-	CostUSD     float64        `json:"costUSD,omitempty"`
-	DurationNs  int64          `json:"durationNs,omitempty"`
-	NumTurns    int            `json:"numTurns,omitempty"`
-	Usage       agent.Usage    `json:"usage,omitzero"`
-	AgentResult string         `json:"agentResult,omitempty"`
-	Err         string         `json:"err,omitempty"`
-}
-
-type repoMountSummary struct {
-	Name          string `json:"name,omitempty"`
-	BaseBranch    string `json:"baseBranch,omitempty"`
-	Branch        string `json:"branch,omitempty"`
-	GitRoot       string `json:"gitRoot,omitempty"`
-	ContainerPath string `json:"containerPath,omitempty"`
-}
-
-type cacheMountSummary struct {
-	Name          string `json:"name,omitempty"`
-	Description   string `json:"description,omitempty"`
-	HostPath      string `json:"hostPath,omitempty"`
-	ContainerPath string `json:"containerPath,omitempty"`
-	ReadOnly      bool   `json:"readOnly,omitempty"`
-	Shallow       bool   `json:"shallow,omitempty"`
-}
-
-type mountSummary struct {
-	HostPath      string `json:"hostPath,omitempty"`
-	ContainerPath string `json:"containerPath,omitempty"`
-	ReadOnly      bool   `json:"readOnly,omitempty"`
+	Version int                 `json:"v"`
+	Proof   logproof.CacheProof `json:"proof"`
+	Task    *LoadedTask         `json:"task"`
 }
 
 func logSummaryPath(logPath string) string {
@@ -137,11 +50,20 @@ func loadLogSummary(logPath string, file *os.File, info os.FileInfo, authority l
 		return nil, false
 	}
 	var summary logSummary
-	if err := json.Unmarshal(data, &summary); err != nil {
+	if err := json.Unmarshal(data, &summary); err != nil { //nolint:musttag // LoadedTask is intentionally the direct sidecar projection.
 		slog.Warn("task log summary: invalid cache", "path", logSummaryPath(logPath), "err", err)
 		return nil, false
 	}
-	if !summary.matches(identity, info, authority) {
+	proof := CacheProof{
+		Device:    identity.Device,
+		Inode:     identity.Inode,
+		Size:      info.Size(),
+		ModTimeNs: info.ModTime().UnixNano(),
+		Version:   authority.Version,
+		Harness:   authority.Harness,
+		RawHeader: string(rawHeader),
+	}
+	if summary.Version != logSummaryVersion || summary.Proof != proof || summary.Task == nil {
 		return nil, false
 	}
 	if err := summary.Task.LogVersion.Validate(); err != nil || summary.Task.Harness == "" ||
@@ -149,7 +71,7 @@ func loadLogSummary(logPath string, file *os.File, info os.FileInfo, authority l
 		return nil, false
 	}
 	header := loadedTaskFromMeta(logPath, taskIDFromLogBase(trimLogExt(filepath.Base(logPath))), meta, info.ModTime().UTC(), info.Size())
-	cached := summary.Task.toLoadedTask(logPath, info.Size())
+	cached := summary.Task
 	if !header.headerMatches(cached) {
 		return nil, false
 	}
@@ -157,6 +79,10 @@ func loadLogSummary(logPath string, file *os.File, info os.FileInfo, authority l
 	if err != nil {
 		return nil, false
 	}
+	cached.path = logPath
+	cached.resolver = nil
+	cached.Msgs = nil
+	cached.messagesLoaded = false
 	cached.LogSize = validatedInfo.Size()
 	snapshot, err := newValidatedLogSnapshot(logPath, file, validatedInfo, authority, rawHeader, true)
 	if err != nil {
@@ -209,18 +135,10 @@ func storeLogSummaryForFile(lt *LoadedTask, file *os.File, info os.FileInfo) err
 		snapshot.Authority.Harness != lt.Harness {
 		return errors.New("task log summary: missing validated snapshot")
 	}
-	summary := logSummary{
-		Version:          logSummaryVersion,
-		LogDevice:        snapshot.Device,
-		LogInode:         snapshot.Inode,
-		LogSize:          stableInfo.Size(),
-		LogModNs:         stableInfo.ModTime().UnixNano(),
-		AuthorityVersion: snapshot.Authority.Version,
-		AuthorityHarness: snapshot.Authority.Harness,
-		EOFValidated:     snapshot.EOFValidated,
-		Task:             loadedTaskSummaryFrom(lt),
-	}
-	data, err := json.Marshal(summary)
+	// LoadedTask's JSON form excludes Msgs and all unexported runtime state, so
+	// it is the complete persisted projection without copying its mutexes.
+	summary := logSummary{Version: logSummaryVersion, Proof: snapshot.cacheProof(), Task: lt}
+	data, err := json.Marshal(summary) //nolint:musttag // LoadedTask is intentionally the direct sidecar projection.
 	if err != nil {
 		return err
 	}
@@ -239,204 +157,4 @@ func storeLogSummaryForFile(lt *LoadedTask, file *os.File, info os.FileInfo) err
 		return errors.Join(err, os.Remove(path))
 	}
 	return nil
-}
-
-func loadedTaskSummaryFrom(lt *LoadedTask) loadedTaskSummary {
-	return loadedTaskSummary{
-		TaskID:            lt.TaskID,
-		Prompt:            lt.Prompt,
-		Title:             lt.Title,
-		Repos:             repoMountSummaries(lt.Repos),
-		LogVersion:        lt.LogVersion,
-		Harness:           lt.Harness,
-		RuntimeName:       lt.RuntimeName,
-		StartedAt:         lt.StartedAt,
-		LastStateUpdateAt: lt.LastStateUpdateAt,
-		State:             lt.State.String(),
-		ForgeIssue:        lt.ForgeIssue,
-		ForkedFromTaskID:  lt.ForkedFromTaskID,
-		ForgeOwner:        lt.ForgeOwner,
-		ForgeRepo:         lt.ForgeRepo,
-		ForgePR:           lt.ForgePR,
-		Tailscale:         lt.Tailscale,
-		USB:               lt.USB,
-		Display:           lt.Display,
-		Sudo:              lt.Sudo,
-		GitHubToken:       lt.GitHubToken,
-		BaseImage:         lt.BaseImage,
-		ContainerPlatform: lt.ContainerPlatform,
-		MaxCPUs:           lt.MaxCPUs,
-		CacheMounts:       cacheMountSummaries(lt.CacheMounts),
-		Mounts:            mountSummaries(lt.Mounts),
-		Model:             lt.Model,
-		Effort:            lt.Effort,
-		SessionID:         lt.SessionID,
-		AgentVersion:      lt.AgentVersion,
-		DiffCreated:       lt.DiffCreated,
-		Result:            resultSummaryFrom(lt.Result),
-	}
-}
-
-func (s *loadedTaskSummary) toLoadedTask(path string, size int64) *LoadedTask {
-	return &LoadedTask{
-		path:              path,
-		TaskID:            s.TaskID,
-		Prompt:            s.Prompt,
-		Title:             s.Title,
-		Repos:             repoMountsFromSummaries(s.Repos),
-		LogVersion:        s.LogVersion,
-		Harness:           s.Harness,
-		RuntimeName:       s.RuntimeName,
-		StartedAt:         s.StartedAt,
-		LastStateUpdateAt: s.LastStateUpdateAt,
-		State:             parseState(s.State),
-		ForgeIssue:        s.ForgeIssue,
-		ForkedFromTaskID:  s.ForkedFromTaskID,
-		ForgeOwner:        s.ForgeOwner,
-		ForgeRepo:         s.ForgeRepo,
-		ForgePR:           s.ForgePR,
-		Tailscale:         s.Tailscale,
-		USB:               s.USB,
-		Display:           s.Display,
-		Sudo:              s.Sudo,
-		GitHubToken:       s.GitHubToken,
-		BaseImage:         s.BaseImage,
-		ContainerPlatform: s.ContainerPlatform,
-		MaxCPUs:           s.MaxCPUs,
-		CacheMounts:       cacheMountsFromSummaries(s.CacheMounts),
-		Mounts:            mountsFromSummaries(s.Mounts),
-		Model:             s.Model,
-		Effort:            s.Effort,
-		SessionID:         s.SessionID,
-		AgentVersion:      s.AgentVersion,
-		LogSize:           size,
-		DiffCreated:       s.DiffCreated,
-		Result:            s.Result.toResult(),
-	}
-}
-
-func repoMountSummaries(repos []RepoMount) []repoMountSummary {
-	if len(repos) == 0 {
-		return nil
-	}
-	out := make([]repoMountSummary, len(repos))
-	for i, r := range repos {
-		out[i] = repoMountSummary(r)
-	}
-	return out
-}
-
-func repoMountsFromSummaries(repos []repoMountSummary) []RepoMount {
-	if len(repos) == 0 {
-		return nil
-	}
-	out := make([]RepoMount, len(repos))
-	for i, r := range repos {
-		out[i] = RepoMount(r)
-	}
-	return out
-}
-
-func cacheMountSummaries(mounts []runtime.CacheMount) []cacheMountSummary {
-	if len(mounts) == 0 {
-		return nil
-	}
-	out := make([]cacheMountSummary, len(mounts))
-	for i, m := range mounts {
-		out[i] = cacheMountSummary{
-			Name:          m.Name,
-			Description:   m.Description,
-			HostPath:      m.HostPath,
-			ContainerPath: m.ContainerPath,
-			ReadOnly:      m.ReadOnly,
-			Shallow:       m.Shallow,
-		}
-	}
-	return out
-}
-
-func cacheMountsFromSummaries(mounts []cacheMountSummary) []runtime.CacheMount {
-	if len(mounts) == 0 {
-		return nil
-	}
-	out := make([]runtime.CacheMount, len(mounts))
-	for i, m := range mounts {
-		out[i] = runtime.CacheMount{
-			Name:          m.Name,
-			Description:   m.Description,
-			HostPath:      m.HostPath,
-			ContainerPath: m.ContainerPath,
-			ReadOnly:      m.ReadOnly,
-			Shallow:       m.Shallow,
-		}
-	}
-	return out
-}
-
-func mountSummaries(mounts []runtime.Mount) []mountSummary {
-	if len(mounts) == 0 {
-		return nil
-	}
-	out := make([]mountSummary, len(mounts))
-	for i, m := range mounts {
-		out[i] = mountSummary{
-			HostPath:      m.HostPath,
-			ContainerPath: m.ContainerPath,
-			ReadOnly:      m.ReadOnly,
-		}
-	}
-	return out
-}
-
-func mountsFromSummaries(mounts []mountSummary) []runtime.Mount {
-	if len(mounts) == 0 {
-		return nil
-	}
-	out := make([]runtime.Mount, len(mounts))
-	for i, m := range mounts {
-		out[i] = runtime.Mount{
-			HostPath:      m.HostPath,
-			ContainerPath: m.ContainerPath,
-			ReadOnly:      m.ReadOnly,
-		}
-	}
-	return out
-}
-
-func resultSummaryFrom(r *Result) *resultSummary {
-	if r == nil {
-		return nil
-	}
-	summary := &resultSummary{
-		State:       r.State.String(),
-		DiffStat:    r.DiffStat,
-		CostUSD:     r.CostUSD,
-		DurationNs:  int64(r.Duration),
-		NumTurns:    r.NumTurns,
-		Usage:       r.Usage,
-		AgentResult: r.AgentResult,
-	}
-	if r.Err != nil {
-		summary.Err = r.Err.Error()
-	}
-	return summary
-}
-
-func (s *resultSummary) toResult() *Result {
-	if s == nil {
-		return nil
-	}
-	result := &Result{
-		State:       parseState(s.State),
-		DiffStat:    s.DiffStat,
-		CostUSD:     s.CostUSD,
-		Duration:    time.Duration(s.DurationNs),
-		NumTurns:    s.NumTurns,
-		Usage:       s.Usage,
-		AgentResult: s.AgentResult,
-	}
-	if s.Err != "" {
-		result.Err = errors.New(s.Err)
-	}
-	return result
 }

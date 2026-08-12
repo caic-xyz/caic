@@ -22,19 +22,6 @@ type CacheProofProvider func(string) (CacheProof, error)
 // and a task-owned provider for later cache validation.
 type EventReplayFactory func(string, CacheProof, CacheProofProvider) (EventReplayWriter, error)
 
-// ReplayCacheProofProvider returns a proof provider that consumes Reopen's
-// initial append observation once before using fresh task-owned proofs.
-func ReplayCacheProofProvider(initial CacheProof, fresh CacheProofProvider) func(string) (CacheProof, error) {
-	usedInitial := false
-	return func(path string) (CacheProof, error) {
-		if !usedInitial {
-			usedInitial = true
-			return initial, nil
-		}
-		return fresh(path)
-	}
-}
-
 // LogStore manages raw task JSONL logs and their companion replay writers.
 type LogStore struct {
 	LogDir             string

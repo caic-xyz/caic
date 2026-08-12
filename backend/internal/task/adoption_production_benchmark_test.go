@@ -72,7 +72,7 @@ func BenchmarkTaskAdoption(b *testing.B) {
 // productionEventReplayFactory mirrors the application factory through the
 // task-owned proof provider so the benchmark follows production sequencing.
 func productionEventReplayFactory(path string, initial task.CacheProof, fresh task.CacheProofProvider) (task.EventReplayWriter, error) {
-	return eventreplay.NewMessageWriter(path, task.ReplayCacheProofProvider(initial, fresh))
+	return eventreplay.NewMessageWriter(path, initial, fresh)
 }
 
 func writeProductionAdoptionFixture(b *testing.B, path string) {

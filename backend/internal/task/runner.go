@@ -8,6 +8,7 @@ package task
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -50,7 +51,42 @@ type Result struct {
 	NumTurns    int
 	Usage       agent.Usage
 	AgentResult string
-	Err         error
+	Err         error `json:"-"`
+}
+
+type persistedResult Result
+
+// MarshalJSON preserves Result's error text in rebuildable task metadata.
+func (r *Result) MarshalJSON() ([]byte, error) {
+	if r == nil {
+		return []byte("null"), nil
+	}
+	errText := ""
+	if r.Err != nil {
+		errText = r.Err.Error()
+	}
+	return json.Marshal(struct {
+		persistedResult
+
+		Error string `json:"error,omitempty"`
+	}{persistedResult: persistedResult(*r), Error: errText})
+}
+
+// UnmarshalJSON restores Result's persisted error text from task metadata.
+func (r *Result) UnmarshalJSON(data []byte) error {
+	var decoded struct {
+		persistedResult
+
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*r = Result(decoded.persistedResult)
+	if decoded.Error != "" {
+		r.Err = errors.New(decoded.Error)
+	}
+	return nil
 }
 
 // Runner is the high-level task lifecycle orchestrator. It coordinates
@@ -299,7 +335,7 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 			}
 		}
 	}
-	if err := t.CommitEventReplay(); err != nil {
+	if err := t.CommitEventReplay(ctx); err != nil {
 		tlog.WarnContext(ctx, "commit event replay failed", "err", err)
 	}
 	tlog.InfoContext(ctx, "cleanup done", "dur", time.Since(start).Round(time.Millisecond),
@@ -366,7 +402,7 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 		if h != nil && h.LogW != nil {
 			_ = h.LogW.Close()
 		}
-		if err := t.CommitEventReplay(); err != nil {
+		if err := t.CommitEventReplay(ctx); err != nil {
 			tlog.WarnContext(ctx, "commit event replay failed", "err", err)
 		}
 		tlog.InfoContext(ctx, "stop abandoned", "state", t.GetState())
@@ -395,7 +431,7 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 	if logW != nil {
 		_ = logW.Close()
 	}
-	if err := t.CommitEventReplay(); err != nil {
+	if err := t.CommitEventReplay(ctx); err != nil {
 		tlog.WarnContext(ctx, "commit event replay failed", "err", err)
 	}
 	tlog.InfoContext(ctx, "stop done", "dur", time.Since(start).Round(time.Millisecond),
@@ -714,7 +750,7 @@ func (r *Runner) finishStartupFailure(ctx context.Context, t *Task, logW io.Writ
 	res := Result{State: StateFailed, Err: startupErr}
 	trailerErr := r.Sessions.Logs.WriteResultTrailer(logW, t.Title(), &res)
 	closeErr := logW.Close()
-	commitErr := t.CommitEventReplay()
+	commitErr := t.CommitEventReplay(ctx)
 	return errors.Join(startupErr, writeErr, trailerErr, closeErr, commitErr)
 }
 

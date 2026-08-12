@@ -1,7 +1,11 @@
 // Package tasktest provides shared test doubles for task package seams.
 package tasktest
 
-import "github.com/caic-xyz/caic/backend/internal/agent"
+import (
+	"context"
+
+	"github.com/caic-xyz/caic/backend/internal/agent"
+)
 
 // FakeEventReplayWriter is a task.EventReplayWriter test double.
 type FakeEventReplayWriter struct {
@@ -10,16 +14,18 @@ type FakeEventReplayWriter struct {
 	Commits        []string
 
 	CommitErr error
+	WriteErr  error
 }
 
 // WriteMessage records msg.
-func (f *FakeEventReplayWriter) WriteMessage(msg agent.ParsedMessage) {
+func (f *FakeEventReplayWriter) WriteMessage(_ context.Context, msg agent.ParsedMessage) error {
 	f.ParsedMessages = append(f.ParsedMessages, msg)
 	f.Messages = append(f.Messages, msg.Message)
+	return f.WriteErr
 }
 
 // Commit records logPath and returns CommitErr.
-func (f *FakeEventReplayWriter) Commit(logPath string) error {
+func (f *FakeEventReplayWriter) Commit(_ context.Context, logPath string) error {
 	f.Commits = append(f.Commits, logPath)
 	return f.CommitErr
 }

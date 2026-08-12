@@ -1176,9 +1176,9 @@ type LoadedTask struct {
 	Effort            string
 	SessionID         string // Backend-native session/thread ID required to resume stateful harnesses.
 	AgentVersion      string
-	LogSize           int64 // Byte size of the log file on disk; populated by LoadLogs.
-	DiffCreated       bool  // True if any non-empty diff was recorded in the log; sticky across the run.
-	Msgs              []agent.Message
+	LogSize           int64           // Byte size of the log file on disk; populated by LoadLogs.
+	DiffCreated       bool            // True if any non-empty diff was recorded in the log; sticky across the run.
+	Msgs              []agent.Message `json:"-"`
 	Result            *Result
 
 	path           string               // Absolute path for lazy message loading via LoadMessages.

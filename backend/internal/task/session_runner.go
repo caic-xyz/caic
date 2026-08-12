@@ -334,7 +334,11 @@ func (r *SessionRunner) startMessageDispatch(ctx context.Context, t *Task, skipS
 					msg.DiffStat = ds
 				}
 			}
-			if t.addParsedMessage(ctx, parsed, skipSideEffects) && r.NotifyTaskChange != nil {
+			stateChanged, replayErr := t.addParsedMessage(ctx, parsed, skipSideEffects)
+			if replayErr != nil {
+				r.Workspace.Log.ErrorContext(ctx, "write event replay", "err", replayErr)
+			}
+			if stateChanged && r.NotifyTaskChange != nil {
 				r.NotifyTaskChange()
 			}
 			if emitToolDiff {

@@ -46,7 +46,7 @@ func TestNewEventReplayWriterProofCalls(t *testing.T) {
 		if freshCalls != 0 {
 			t.Fatalf("fresh proof calls during construction = %d, want 0", freshCalls)
 		}
-		if err := writer.Commit(path); err == nil {
+		if err := writer.Commit(t.Context(), path); err == nil {
 			t.Fatal("Commit accepted a fresh-proof failure")
 		}
 		if freshCalls == 0 {
@@ -65,7 +65,7 @@ func TestNewEventReplayWriterProofCalls(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := writer.Commit(path); err != nil {
+		if err := writer.Commit(t.Context(), path); err != nil {
 			t.Fatal(err)
 		}
 		if freshCalls != 2 {
