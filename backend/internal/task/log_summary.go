@@ -20,9 +20,11 @@ const (
 
 // logSummary is the on-disk sidecar for compressed task-log metadata.
 //
-// Proof is the same physical-log contract used by replay sidecars. Task is a
-// direct LoadedTask projection rather than a separately maintained mirror;
-// LoadedTask's JSON form excludes message history and runtime-only state.
+// Corpus-scale task loading depends on these sidecars: without a valid summary,
+// inventory must scan and decompress the entire log. Proof is the same
+// physical-log contract used by replay sidecars. Task is a direct LoadedTask
+// projection rather than a separately maintained mirror; LoadedTask's JSON form
+// excludes message history and runtime-only state.
 type logSummary struct {
 	Version int                 `json:"v"`
 	Proof   logproof.CacheProof `json:"proof"`

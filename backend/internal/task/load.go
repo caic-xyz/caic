@@ -1719,7 +1719,8 @@ func loadedTaskFromMeta(path, taskID string, meta *agent.MetaMessage, modified t
 }
 
 // LoadLogs scans logDir for task log files and loads task metadata.
-// Only the header and result trailer are parsed; call LoadMessages for
+// Invalid or corrupt logs are skipped so one historical file cannot prevent
+// startup. Only the header and result trailer are parsed; call LoadMessages for
 // full conversation history after supplying a fresh native parser resolver.
 func LoadLogs(logDir string) ([]*LoadedTask, error) {
 	paths, err := logPaths(logDir, nil)
@@ -1850,6 +1851,8 @@ func (lt *LoadedTask) SetNativeParserResolver(resolver NativeParserResolver) {
 }
 
 // LoadMessages lazily loads the full conversation messages from the log file.
+// This is an EOF scan of the complete physical log and can be expensive for
+// large historical sessions; use LoadMessagesTail for interactive loading.
 func (lt *LoadedTask) LoadMessages() error {
 	if lt.Msgs != nil || lt.path == "" {
 		return nil
