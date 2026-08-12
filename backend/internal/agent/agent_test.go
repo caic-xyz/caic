@@ -19,7 +19,13 @@ import (
 // testWire implements WireFormat for testing.
 type testWire struct{}
 
-type testLogSink struct{ bytes.Buffer }
+type testLogSink struct {
+	bytes.Buffer
+
+	Version LogVersion
+}
+
+func (s *testLogSink) LogVersion() LogVersion { return s.Version }
 
 func (s *testLogSink) AppendNative(data []byte) error {
 	_, err := s.Write(data)
@@ -27,7 +33,7 @@ func (s *testLogSink) AppendNative(data []byte) error {
 }
 
 func (s *testLogSink) AppendMessage(m Message) error {
-	data, err := MarshalLogMessage(LogVersionV1, m)
+	data, err := MarshalLogMessage(s.LogVersion(), m)
 	if err != nil {
 		return err
 	}
@@ -170,7 +176,7 @@ func TestSession(t *testing.T) {
 		stdoutR, stdoutW := io.Pipe()
 
 		s := &Session{
-			Conn: NewConn(stdinW, DiscardLogSink, LogVersionV1, testWire{}),
+			Conn: NewConn(stdinW, DiscardLogSink{Version: LogVersionV1}, testWire{}),
 			done: make(chan struct{}),
 		}
 
@@ -178,7 +184,7 @@ func TestSession(t *testing.T) {
 
 		go func() {
 			defer close(s.done)
-			if parseErr := DefaultReadMessages(stdoutR, func(m ParsedMessage) { msgCh <- m.Message }, DiscardLogSink, LogVersionV1, testParseFn); parseErr != nil {
+			if parseErr := DefaultReadMessages(stdoutR, func(m ParsedMessage) { msgCh <- m.Message }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn); parseErr != nil {
 				s.err = parseErr
 			}
 		}()
@@ -243,14 +249,41 @@ func TestSession(t *testing.T) {
 			t.Errorf("result = %q, want %q", gotResult.Result, "ok")
 		}
 	})
+	t.Run("PlainTextWritePrompt", func(t *testing.T) {
+		t.Parallel()
+		var stdin bytes.Buffer
+		log := &testLogSink{Version: LogVersionV2}
+		if err := PlainTextWritePrompt(&stdin, Prompt{Text: "hello"}, log); err != nil {
+			t.Fatal(err)
+		}
+		if got := stdin.String(); got != "hello\n" {
+			t.Errorf("stdin = %q, want hello\\n", got)
+		}
+		parser, err := NewLogRecordParser(LogVersionV2, func([]byte) ([]Message, error) { return nil, nil })
+		if err != nil {
+			t.Fatal(err)
+		}
+		record, err := parser.ParseRecord(bytes.TrimSuffix(log.Bytes(), []byte{'\n'}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(record.Messages) != 1 {
+			t.Fatalf("messages = %d, want 1", len(record.Messages))
+		}
+		input, ok := record.Messages[0].Message.(*UserInputMessage)
+		if !ok || input.Text != "hello" {
+			t.Errorf("message = %#v, want user input hello", record.Messages[0].Message)
+		}
+	})
+
 	t.Run("SendRaw", func(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
 			stdinR, stdinW := io.Pipe()
-			logBuf := &testLogSink{}
+			logBuf := &testLogSink{Version: LogVersionV2}
 			s := &Session{
-				Conn: NewConn(stdinW, logBuf, LogVersionV1, testWire{}),
+				Conn: NewConn(stdinW, logBuf, testWire{}),
 				done: make(chan struct{}),
 			}
 
@@ -270,8 +303,15 @@ func TestSession(t *testing.T) {
 			if !strings.Contains(got, `"FOO":"bar"`) {
 				t.Errorf("stdin missing payload: %s", got)
 			}
-			if !strings.Contains(logBuf.String(), `"FOO":"bar"`) {
-				t.Errorf("log missing payload: %s", logBuf.String())
+			var record struct {
+				Type string          `json:"t"`
+				Msg  json.RawMessage `json:"msg"`
+			}
+			if err := json.Unmarshal(logBuf.Bytes(), &record); err != nil {
+				t.Fatal(err)
+			}
+			if record.Type != "agent" || !bytes.Equal(record.Msg, bytes.TrimSuffix(payload, []byte{'\n'})) {
+				t.Errorf("log record = %#v, want canonical agent envelope for %s", record, payload)
 			}
 		})
 		t.Run("error", func(t *testing.T) {
@@ -279,7 +319,7 @@ func TestSession(t *testing.T) {
 			stdinR, stdinW := io.Pipe()
 			_ = stdinR.Close()
 			s := &Session{
-				Conn: NewConn(stdinW, DiscardLogSink, LogVersionV1, testWire{}),
+				Conn: NewConn(stdinW, DiscardLogSink{Version: LogVersionV1}, testWire{}),
 				done: make(chan struct{}),
 			}
 			if err := s.SendRaw([]byte("data\n")); err == nil {
@@ -292,7 +332,7 @@ func TestSession(t *testing.T) {
 		stdinR, stdinW := io.Pipe()
 		go func() { _, _ = io.Copy(io.Discard, stdinR) }()
 		s := &Session{
-			Conn: NewConn(stdinW, DiscardLogSink, LogVersionV1, testWire{}),
+			Conn: NewConn(stdinW, DiscardLogSink{Version: LogVersionV1}, testWire{}),
 			done: make(chan struct{}),
 		}
 		_ = s.Close()
@@ -318,7 +358,7 @@ func TestSession(t *testing.T) {
 		defer slog.SetDefault(oldDefault)
 
 		msgCh := make(chan ParsedMessage, 16)
-		s := NewSession(cmd, NewConn(stdin, DiscardLogSink, LogVersionV1, testWire{}), stdout, msgCh, nil)
+		s := NewSession(cmd, NewConn(stdin, DiscardLogSink{Version: LogVersionV1}, testWire{}), stdout, msgCh, nil)
 
 		if err := cmd.Process.Kill(); err != nil {
 			t.Fatal(err)
@@ -344,7 +384,7 @@ func TestAppendNativeRecord(t *testing.T) {
 
 	t.Run("V2TerminatesWithLF", func(t *testing.T) {
 		t.Parallel()
-		log := &testLogSink{}
+		log := &testLogSink{Version: LogVersionV2}
 		if err := AppendNativeRecord(log, LogVersionV2, []byte(`{"type":"response"}`)); err != nil {
 			t.Fatal(err)
 		}
@@ -363,7 +403,7 @@ func TestWriteMetaSession(t *testing.T) {
 
 	t.Run("VersionWithoutSession", func(t *testing.T) {
 		t.Parallel()
-		buf := &testLogSink{}
+		buf := &testLogSink{Version: LogVersionV1}
 		if err := WriteMetaSession(buf, &InitMessage{Model: "m", Version: "1.2.3"}); err != nil {
 			t.Fatal(err)
 		}
@@ -378,7 +418,7 @@ func TestWriteMetaSession(t *testing.T) {
 
 	t.Run("EmptyIgnored", func(t *testing.T) {
 		t.Parallel()
-		buf := &testLogSink{}
+		buf := &testLogSink{Version: LogVersionV2}
 		if err := WriteMetaSession(buf, &InitMessage{}); err != nil {
 			t.Fatal(err)
 		}
@@ -400,7 +440,7 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n") + "\n"
 
 		ch := make(chan Message, 16)
-		if err := DefaultReadMessages(strings.NewReader(input), func(m ParsedMessage) { ch <- m.Message }, DiscardLogSink, LogVersionV1, testParseFn); err != nil {
+		if err := DefaultReadMessages(strings.NewReader(input), func(m ParsedMessage) { ch <- m.Message }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn); err != nil {
 			t.Fatal(err)
 		}
 		close(ch)
@@ -426,7 +466,7 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n") + "\n"
 
 		ch := make(chan Message, 16)
-		if err := DefaultReadMessages(strings.NewReader(input), func(m ParsedMessage) { ch <- m.Message }, DiscardLogSink, LogVersionV1, testParseFn); err != nil {
+		if err := DefaultReadMessages(strings.NewReader(input), func(m ParsedMessage) { ch <- m.Message }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn); err != nil {
 			t.Fatal(err)
 		}
 		close(ch)
@@ -454,7 +494,7 @@ func TestReadMessages(t *testing.T) {
 		}
 		input := strings.Join(lines, "\n") + "\n"
 
-		buf := &testLogSink{}
+		buf := &testLogSink{Version: LogVersionV1}
 		if err := DefaultReadMessages(strings.NewReader(input), func(ParsedMessage) {}, buf, LogVersionV1, testParseFn); err != nil {
 			t.Fatal(err)
 		}
@@ -482,7 +522,7 @@ func TestReadMessages(t *testing.T) {
 				t.Cleanup(func() { _ = stdinR.Close() })
 				var log bytes.Buffer
 				got := make(chan ParsedMessage, 1)
-				conn := NewConn(stdinW, &testLogSink{}, tc.version, testWire{})
+				conn := NewConn(stdinW, &testLogSink{Version: tc.version}, testWire{})
 				err := conn.ReadMessages(strings.NewReader(tc.input), got)
 				if !errors.Is(err, io.ErrUnexpectedEOF) {
 					t.Fatalf("ReadMessages error = %v, want unexpected EOF", err)
@@ -499,7 +539,7 @@ func TestReadMessages(t *testing.T) {
 		var got []ParsedMessage
 		err := DefaultReadMessages(strings.NewReader(`{"t":"agent","time":1.000,"msg":{}}`+"\n"), func(msg ParsedMessage) {
 			got = append(got, msg)
-		}, &testLogSink{}, LogVersionV2, func([]byte) ([]Message, error) {
+		}, &testLogSink{Version: LogVersionV2}, LogVersionV2, func([]byte) ([]Message, error) {
 			return []Message{&TextMessage{}}, nil
 		})
 		if err == nil || log.Len() != 0 || len(got) != 0 {
@@ -513,7 +553,7 @@ func TestRelayRecordReader(t *testing.T) {
 	t.Run("rejects unterminated record without persistence", func(t *testing.T) {
 		t.Parallel()
 		var log bytes.Buffer
-		reader, err := NewRelayRecordReader(strings.NewReader(`{"type":"system","subtype":"init"}`), LogVersionV1, &testLogSink{})
+		reader, err := NewRelayRecordReader(strings.NewReader(`{"type":"system","subtype":"init"}`), LogVersionV1, &testLogSink{Version: LogVersionV1})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -610,7 +650,7 @@ func TestReadRelayTailRecords(t *testing.T) {
 			`{"t":"agent","ts":1.000,"msg":"` + strings.Repeat("x", maxNDJSONRecordLen) + `"}` + "\n",
 		} {
 			var log bytes.Buffer
-			reader, err := NewRelayRecordReader(strings.NewReader(input), LogVersionV2, &testLogSink{})
+			reader, err := NewRelayRecordReader(strings.NewReader(input), LogVersionV2, &testLogSink{Version: LogVersionV2})
 			if err != nil {
 				t.Fatal(err)
 			}

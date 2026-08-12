@@ -736,19 +736,31 @@ func (m *MetaSessionMessage) Type() string { return "caic_session" }
 // log authority. Native records are already encoded physical records; semantic
 // messages are backend controls encoded according to the owned log version.
 type LogSink interface {
+	LogVersion() LogVersion
 	AppendNative(data []byte) error
 	AppendMessage(message Message) error
 	Close() error
 }
 
-type discardLogSink struct{}
-
-func (discardLogSink) AppendNative([]byte) error   { return nil }
-func (discardLogSink) AppendMessage(Message) error { return nil }
-func (discardLogSink) Close() error                { return nil }
-
 // DiscardLogSink ignores task-log records for non-persistent agent operations.
-var DiscardLogSink LogSink = discardLogSink{}
+// Version must be set to the physical record version represented by the caller.
+type DiscardLogSink struct {
+	Version LogVersion
+}
+
+// LogVersion returns the physical record version represented by the discarded records.
+func (s DiscardLogSink) LogVersion() LogVersion { return s.Version }
+
+// AppendNative discards one native physical record.
+func (DiscardLogSink) AppendNative([]byte) error { return nil }
+
+// AppendMessage discards one caic control record.
+func (DiscardLogSink) AppendMessage(Message) error { return nil }
+
+// Close releases no resources.
+func (DiscardLogSink) Close() error { return nil }
+
+var _ LogSink = DiscardLogSink{}
 
 // AppendNativeRecord appends a native record in the exact physical format.
 func AppendNativeRecord(log LogSink, version LogVersion, data []byte) error {
@@ -883,8 +895,12 @@ func v2ControlToken(m Message) (string, error) {
 		return "result", nil
 	case PendingUserActionMessageType:
 		return "pending_user_action", nil
-	case "caic_log":
+	case "log":
 		return "log", nil
+	case "text":
+		return "text", nil
+	case "user_input":
+		return "user_input", nil
 	case "system":
 		if m, ok := m.(*SystemMessage); ok && m.Subtype == "context_cleared" {
 			return "context_cleared", nil

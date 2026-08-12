@@ -180,6 +180,16 @@ func v2ControlFieldAllowed(kind logControlKind, field string) bool {
 		return field == "line"
 	case logControlContextCleared:
 		return false
+	case logControlText:
+		switch field {
+		case "phase", "text":
+			return true
+		}
+	case logControlUserInput:
+		switch field {
+		case "images", "text":
+			return true
+		}
 	case logControlLegacyInit:
 		return false
 	}

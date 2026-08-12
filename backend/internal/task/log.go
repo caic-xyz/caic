@@ -50,6 +50,9 @@ func newTaskLogWriter(path string, flags int) (*taskLogWriter, error) {
 	return &taskLogWriter{file: f, version: agent.LogVersionV1}, nil
 }
 
+// LogVersion returns the physical record version owned by the task log.
+func (w *taskLogWriter) LogVersion() agent.LogVersion { return w.version }
+
 // AppendNative appends one complete encoded native physical record.
 func (w *taskLogWriter) AppendNative(data []byte) error {
 	w.mu.Lock()

@@ -87,11 +87,9 @@ type Options struct {
 	// protocol state such as keepalive, auto-allow, or environment control
 	// messages.
 	PendingUserActions []PendingUserAction
-	// LogVersion is the validated physical relay record version.
-	LogVersion LogVersion
-	MsgCh      chan<- ParsedMessage // Receives parsed physical records from the agent.
-	Log        LogSink              // Non-nil task-owned physical task-log authority; use DiscardLogSink when persistence is unnecessary.
-	StripEnv   []string             // Env var names for relay to strip from subprocess and emit as caic_stripped_env.
+	MsgCh              chan<- ParsedMessage // Receives parsed physical records from the agent.
+	Log                LogSink              // Non-nil task-owned physical task-log authority; use DiscardLogSink{Version: version} when persistence is unnecessary.
+	StripEnv           []string             // Env var names for relay to strip from subprocess and emit as caic_stripped_env.
 }
 
 // WireFormat defines the wire protocol for a backend's stdin/stdout
@@ -144,10 +142,10 @@ type conn struct {
 	mu      sync.Mutex // serializes stdin writes
 }
 
-// NewConn creates a connection for the caller-validated physical log version.
-// log must be non-nil; use DiscardLogSink when persistence is unnecessary.
-func NewConn(stdin io.WriteCloser, log LogSink, version LogVersion, wire WireFormat) Conn {
-	return &conn{stdin: stdin, log: log, version: version, wire: wire}
+// NewConn creates a connection using the task log's physical record version.
+// log must be non-nil; use DiscardLogSink{Version: version} when persistence is unnecessary.
+func NewConn(stdin io.WriteCloser, log LogSink, wire WireFormat) Conn {
+	return &conn{stdin: stdin, log: log, version: log.LogVersion(), wire: wire}
 }
 
 func (c *conn) SendPrompt(p Prompt) error {
@@ -162,7 +160,7 @@ func (c *conn) SendRaw(data []byte) error {
 	if _, err := c.stdin.Write(data); err != nil {
 		return err
 	}
-	return c.log.AppendNative(data)
+	return AppendNativeRecord(c.log, c.version, data)
 }
 
 func (c *conn) SendCompact(instructions string) error {
@@ -322,7 +320,7 @@ type RelayRecordReader struct {
 
 // NewRelayRecordReader creates a version-aware physical relay reader. version
 // must be the caller-validated task-log version. log must be non-nil; use
-// DiscardLogSink when persistence is unnecessary.
+// DiscardLogSink{Version: version} when persistence is unnecessary.
 func NewRelayRecordReader(r io.Reader, version LogVersion, log LogSink) (*RelayRecordReader, error) {
 	br, ok := r.(*bufio.Reader)
 	if !ok {
@@ -430,6 +428,8 @@ const (
 	logControlPendingUserAction
 	logControlProvisioningLog
 	logControlContextCleared
+	logControlText
+	logControlUserInput
 )
 
 var v1LogControlKinds = map[string]logControlKind{
@@ -458,6 +458,8 @@ var v2LogControlKinds = map[string]logControlKind{
 	"pending_user_action": logControlPendingUserAction,
 	"log":                 logControlProvisioningLog,
 	"context_cleared":     logControlContextCleared,
+	"text":                logControlText,
+	"user_input":          logControlUserInput,
 }
 
 type modelInfoLogRecord struct {
@@ -571,6 +573,18 @@ func (p *LogRecordParser) parseControl(kind logControlKind, token string, line [
 		return []Message{&m}, nil
 	case logControlContextCleared:
 		return []Message{&SystemMessage{MessageType: "system", Subtype: "context_cleared"}}, nil
+	case logControlText:
+		var m TextMessage
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, fmt.Errorf("decode %s: %w", token, err)
+		}
+		return []Message{&m}, nil
+	case logControlUserInput:
+		var m UserInputMessage
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, fmt.Errorf("decode %s: %w", token, err)
+		}
+		return []Message{&m}, nil
 	default:
 		return nil, fmt.Errorf("decode %s: unknown control kind %d", token, kind)
 	}
@@ -912,16 +926,17 @@ func PrepareRelay(ctx context.Context, opts *Options, agentArgs []string) (*Rela
 		return nil, errors.New("agent connection target missing SSH host")
 	}
 	tStart := time.Now()
-	if err := opts.LogVersion.Validate(); err != nil {
+	version := opts.Log.LogVersion()
+	if err := version.Validate(); err != nil {
 		return nil, fmt.Errorf("relay log version: %w", err)
 	}
-	if err := DeployRelay(ctx, opts.Target, opts.LogVersion); err != nil {
+	if err := DeployRelay(ctx, opts.Target, version); err != nil {
 		return nil, err
 	}
 	slog.DebugContext(ctx, "startup", "phase", "deploy_relay", "target", sshHost, "dur", time.Since(tStart))
 
-	sshArgs := make([]string, 0, 7+2*len(opts.StripEnv)+len(agentArgs))
-	sshArgs = append(sshArgs, sshHost, "python3", RelayScriptPath, "serve-attach", "--dir", opts.Dir)
+	sshArgs := make([]string, 0, 8+2*len(opts.StripEnv)+len(agentArgs))
+	sshArgs = append(sshArgs, sshHost, "python3", RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--no-log-stdin")
 	for _, key := range opts.StripEnv {
 		sshArgs = append(sshArgs, "--strip-env", key)
 	}
@@ -953,7 +968,7 @@ func StartRelay(ctx context.Context, opts *Options, agentArgs []string, wire Wir
 	if err != nil {
 		return nil, err
 	}
-	return StartSession(rp, NewConn(rp.Stdin, opts.Log, opts.LogVersion, wire), opts)
+	return StartSession(rp, NewConn(rp.Stdin, opts.Log, wire), opts)
 }
 
 // StartSession creates a Session from a RelayProcess and Conn, sends the
@@ -1247,10 +1262,10 @@ func AttachRelaySession(ctx context.Context, opts *Options, wire WireFormat, wra
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
-	if err := opts.LogVersion.Validate(); err != nil {
+	if err := opts.Log.LogVersion().Validate(); err != nil {
 		return nil, fmt.Errorf("relay log version: %w", err)
 	}
-	c := NewConn(stdin, opts.Log, opts.LogVersion, wire)
+	c := NewConn(stdin, opts.Log, wire)
 	if wrap != nil {
 		c, err = wrap(c)
 		if err != nil {

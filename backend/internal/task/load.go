@@ -1004,16 +1004,20 @@ func decodeAuthorityMeta(line []byte, fw *jsonutil.FieldWarner) (agent.MetaMessa
 		return agent.MetaMessage{}, logAuthority{}, err
 	}
 	authority.Harness = harness.Name(h)
+	if authority.Version == agent.LogVersionV2 {
+		delete(obj.fields, "t")
+		obj.fields["type"] = []byte(`"caic_meta"`)
+		line, err = json.Marshal(obj.fields)
+		if err != nil {
+			return agent.MetaMessage{}, logAuthority{}, err
+		}
+	}
 	var meta agent.MetaMessage
 	if err := json.Unmarshal(line, &meta); err != nil {
 		return agent.MetaMessage{}, logAuthority{}, err
 	}
-	meta.MessageType = "caic_meta"
 	if err := meta.Validate(); err != nil {
 		return agent.MetaMessage{}, logAuthority{}, err
-	}
-	if authority.Version == agent.LogVersionV2 {
-		delete(obj.fields, "t")
 	}
 	unknown := jsonutil.CollectUnknown(obj.fields, metaKnown)
 	if authority.Version == agent.LogVersionV2 && len(unknown) > 0 {

@@ -1,10 +1,9 @@
 # Wrapped task-log v2 rollout
 
-Finish v2 adoption while reducing the log implementation to one record-decoding
-policy and one task-log append path with one owner for physical-log authority.
-Existing v1 logs keep their bytes and behavior; new logs move to strict v2 only
-after duplicate scanners, parsers, proof carriers, and raw append routes are
-removed.
+Investigate and eliminate independently observable runtime log-integrity and
+cleanup failures while preserving the completed v2 task-log cutover. Existing
+v1 logs keep their bytes and behavior; corrupt or untrusted logs continue to
+fail closed.
 
 The canonical v2 agent-record contract is owned by
 [`v2_record_test.go`](../internal/agent/v2_record_test.go),
@@ -28,23 +27,34 @@ Across all phases:
   instead of adding aliases, fallbacks, or parallel implementations.
 - Each phase deletes the paths it replaces. Do not land an unused abstraction or
   retain a raw compatibility path for a later cleanup phase.
-- Production continues creating v1 logs until cut-over.
+- Production creates v2 logs. Existing logs continue according to their
+  validated header authority.
 
-### Phase 1 — cut-over-to-v2: Enable v2 and prove restart behavior
+### Phase 1 — snapshot-authority: Explain and resolve replay snapshot mismatches
 
-- **Scope:** the new-file header default, relay selection, task creation,
-  reopen/resume/adoption, caller-supplied version plumbing, and the real-runtime
-  wrapped-log smoke test.
-- **Preserve:** existing v1 files always resume as v1; existing files are never
-  rewritten or repaired.
-- **Verify:** new files contain only canonical v2 records, and the shared log
-  owner supplies the immutable header version to relay selection, readers, and
-  writers; `Options.LogVersion`, zero-as-v1 defaults, and other caller-supplied
-  version paths are removed. Existing v1 and v2 tasks survive live and
-  dead-relay restart without mixed records or duplicate input. Cutover tests
-  cover missing-header and mismatched-version files. `go test
-  ./backend/internal/agent/... ./backend/internal/task/...
-  ./backend/internal/eventreplay/... ./backend/internal/server/...`, `python3
-  backend/internal/agent/relay/test_relay.py`, `python3
-  backend/internal/agent/relay/test_relay_v2.py`, and `make smoke` pass with
-  deterministic cleanup.
+- **Scope:** task-log validation snapshots, replay-cache regeneration, and their
+  focused fixtures/tests.
+- **Preserve:** a changed, replaced, or corrupt task log never gains replay
+  authority from a stale in-memory snapshot.
+- **Verify:** a reproducible test distinguishes safe append growth from each
+  rejected mutation; the observed mismatch has a documented cause and either a
+  safe recovery path or an actionable terminal error.
+
+### Phase 2 — replay-spool-lifecycle: Establish replay sidecar ownership and cleanup
+
+- **Scope:** replay cache body-file creation, publication, abort, and startup
+  cleanup behavior.
+- **Preserve:** a live replay writer is never removed, and incomplete or
+  unproven replay data is never published.
+- **Verify:** focused lifecycle tests show when a body file is expected, ensure
+  completed/aborted writers leave no stale spool, and clean only safely
+  identifiable abandoned spools on restart.
+
+### Phase 3 — smoke-runtime-cleanup: Make real-runtime smoke resources self-cleaning
+
+- **Scope:** smoke-test server/container lifecycle, cancellation, and test
+  cleanup.
+- **Preserve:** smoke continues to exercise the real `md` and relay runtime;
+  cleanup never selects containers outside its own fixture.
+- **Verify:** normal completion, setup failure, and cancellation leave no
+  smoke-owned containers or persistent user cache state.

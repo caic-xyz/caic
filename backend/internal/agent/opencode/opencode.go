@@ -58,7 +58,8 @@ func New(cacheDir string, envVars []string) *Backend {
 // replaces the original stdout for subsequent reads.
 func (b *Backend) RecordHandshake(ctx context.Context, stdin io.Writer, stdout io.Reader, model string) (agent.WireFormat, io.Reader, error) {
 	br := bufio.NewReaderSize(stdout, 1<<16)
-	hs, continuation, err := handshake(ctx, stdin, br, &agent.Options{Dir: "/workspace", Model: model, LogVersion: agent.LogVersionV1})
+	log := agent.DiscardLogSink{Version: agent.LogVersionV1}
+	hs, continuation, err := handshake(ctx, stdin, br, &agent.Options{Dir: "/workspace", Model: model, Log: log})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -90,7 +91,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if sshHost == "" {
 		return nil, errors.New("agent connection target missing SSH host")
 	}
-	if err := agent.DeployRelay(ctx, opts.Target, opts.LogVersion); err != nil {
+	if err := agent.DeployRelay(ctx, opts.Target, opts.Log.LogVersion()); err != nil {
 		return nil, err
 	}
 
@@ -150,7 +151,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	}
 
 	log := slog.With("target", sshHost)
-	c := agent.NewConn(stdin, opts.Log, opts.LogVersion, hs.wire)
+	c := agent.NewConn(stdin, opts.Log, hs.wire)
 	s := agent.NewSession(cmd, c, continuation, opts.MsgCh, log)
 	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
 		if err := s.SendPrompt(opts.InitialPrompt); err != nil {
@@ -431,7 +432,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	defer cancel()
 
 	w := &wireFormat{fw: &jsonutil.FieldWarner{}}
-	records, err := agent.NewRelayRecordReader(stdout, opts.LogVersion, agent.DiscardLogSink)
+	records, err := agent.NewRelayRecordReader(stdout, opts.Log.LogVersion(), agent.DiscardLogSink{Version: opts.Log.LogVersion()})
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct relay reader: %w", err)
 	}

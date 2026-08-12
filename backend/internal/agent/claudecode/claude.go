@@ -129,7 +129,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if err != nil {
 		return nil, err
 	}
-	c := agent.Conn(&controlConn{Conn: agent.NewConn(rp.Stdin, opts.Log, opts.LogVersion, b)})
+	c := agent.Conn(&controlConn{Conn: agent.NewConn(rp.Stdin, opts.Log, b)})
 	return agent.StartSession(rp, c, opts)
 }
 
@@ -162,7 +162,7 @@ func (*Backend) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) erro
 	if _, err := w.Write(data); err != nil {
 		return err
 	}
-	return log.AppendNative(data)
+	return agent.AppendNativeRecord(log, log.LogVersion(), data)
 }
 
 // AgentArgs implements agent.Backend.

@@ -125,7 +125,7 @@ func (b *instantExitBackend) Start(ctx context.Context, opts *agent.Options) (*a
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return agent.NewSession(cmd, agent.NewConn(stdin, opts.Log, agent.LogVersionV1, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, opts.MsgCh, nil), nil
+	return agent.NewSession(cmd, agent.NewConn(stdin, opts.Log, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, opts.MsgCh, nil), nil
 }
 
 func caic0BranchExists(t *testing.T, dir string) bool {
@@ -190,7 +190,7 @@ func TestRunner(t *testing.T) {
 		_, ch, unsub := tk.Subscribe(t.Context())
 		t.Cleanup(unsub)
 
-		persisted := &testLogSink{}
+		persisted := &agenttest.LogSink{Version: agent.LogVersionV2}
 		w := &provisioningWriter{ctx: t.Context(), t: tk, log: persisted}
 
 		n, err := w.Write([]byte("hel"))
@@ -239,7 +239,7 @@ func TestRunner(t *testing.T) {
 		if lm, ok := msg2.(*agent.LogMessage); !ok || lm.Line != "line2" {
 			t.Errorf("msg2 = %+v", msg2)
 		}
-		if got := persisted.String(); !strings.Contains(got, `{"type":"caic_log","line":"hello"}`) || !strings.Contains(got, `{"type":"caic_log","line":"line2"}`) {
+		if got := persisted.String(); !strings.Contains(got, `{"line":"hello","t":"log"}`) || !strings.Contains(got, `{"line":"line2","t":"log"}`) {
 			t.Errorf("persisted logs = %q", got)
 		}
 
@@ -266,7 +266,7 @@ func TestRunner(t *testing.T) {
 			t.Fatal("duplicate message after second flush")
 		default:
 		}
-		if got := persisted.String(); !strings.Contains(got, `{"type":"caic_log","line":"final line"}`) {
+		if got := persisted.String(); !strings.Contains(got, `{"line":"final line","t":"log"}`) {
 			t.Errorf("persisted logs = %q", got)
 		}
 	})
@@ -844,12 +844,12 @@ func TestRunner(t *testing.T) {
 				t.Errorf("Fork received repos = %v, want an entry for /src/caic", runtimeBackend.capturedRepos)
 			}
 			logs := strings.Join(logLines(t, fork.LogPath()), "\n")
-			first := strings.Index(logs, `{"type":"caic_log","line":"fork setup complete"}`)
-			last := strings.Index(logs, `{"type":"caic_log","line":"final setup line"}`)
+			first := strings.Index(logs, `{"line":"fork setup complete","t":"log"}`)
+			last := strings.Index(logs, `{"line":"final setup line","t":"log"}`)
 			if first < 0 || last <= first {
 				t.Errorf("persisted setup logs missing or out of order: %q", logs)
 			}
-			if got := strings.Count(logs, `"type":"caic_meta"`); got != 1 {
+			if got := strings.Count(logs, `"t":"caic_meta"`); got != 1 {
 				t.Errorf("metadata header count = %d, want 1", got)
 			}
 			if len(replay.Messages) < 2 {
@@ -941,7 +941,7 @@ func TestRunner(t *testing.T) {
 					t.Errorf("persisted log does not contain %q: %s", want, logs)
 				}
 			}
-			if !strings.Contains(logs, `"type":"caic_result"`) {
+			if !strings.Contains(logs, `"t":"result"`) {
 				t.Errorf("persisted log has no result trailer: %s", logs)
 			}
 			if got := len(replay.Commits); got != 1 {

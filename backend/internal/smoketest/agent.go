@@ -65,7 +65,7 @@ func (b *FakeBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Se
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	s := agent.NewSession(cmd, agent.NewConn(stdin, opts.Log, opts.LogVersion, b), stdout, opts.MsgCh, nil)
+	s := agent.NewSession(cmd, agent.NewConn(stdin, opts.Log, b), stdout, opts.MsgCh, nil)
 	if opts.InitialPrompt.Text != "" {
 		if err := s.SendPrompt(opts.InitialPrompt); err != nil {
 			_ = s.Close()

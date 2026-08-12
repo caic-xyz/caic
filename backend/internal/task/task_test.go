@@ -20,6 +20,7 @@ import (
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/forge"
@@ -480,7 +481,7 @@ func TestTask(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink, agent.LogVersionV1, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), nil)
+			s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), nil)
 			tk.AttachSession(&SessionHandle{Session: s})
 			defer func() { _ = stdin.Close(); _ = s.Wait() }()
 
@@ -585,7 +586,7 @@ func TestTask(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink, agent.LogVersionV1, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), nil)
+			s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), nil)
 			tk.AttachSession(&SessionHandle{Session: s})
 			defer func() { _ = stdin.Close(); _ = s.Wait() }()
 
@@ -644,7 +645,7 @@ func TestTask(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink, agent.LogVersionV1, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), nil)
+			s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), nil)
 			<-s.Done()
 			tk.AttachSession(&SessionHandle{Session: s})
 			err = tk.SendInput(t.Context(), agent.Prompt{Text: "hello"})
@@ -679,7 +680,7 @@ func TestTask(t *testing.T) {
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
-		s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink, agent.LogVersionV1, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), nil)
+		s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), nil)
 		h := &SessionHandle{Session: s}
 		tk.AttachSession(h)
 
@@ -2429,14 +2430,14 @@ func TestTask(t *testing.T) {
 		t.Run("WithSession", func(t *testing.T) {
 			t.Parallel()
 			tk := &Task{}
-			buf := &testLogSink{}
+			buf := &agenttest.LogSink{Version: agent.LogVersionV2}
 			h := &SessionHandle{Log: buf}
 			tk.AttachSession(h)
-			if err := tk.WriteToLog(&agent.TextMessage{Text: "hello"}); err != nil {
+			if err := tk.WriteToLog(&agent.LogMessage{MessageType: "caic_log", Line: "hello"}); err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(buf.String(), `"text"`) {
-				t.Errorf("log buffer = %q, want text message", buf.String())
+			if !strings.Contains(buf.String(), `"t":"log"`) {
+				t.Errorf("log buffer = %q, want log message", buf.String())
 			}
 		})
 		t.Run("ReopensPersistedLogWithSession", func(t *testing.T) {
@@ -2644,7 +2645,7 @@ func TestTask(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink, agent.LogVersionV1, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), nil)
+			s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), nil)
 			<-s.Done()
 			tk.AttachSession(&SessionHandle{Session: s})
 			err := tk.SendCompact(t.Context(), "compact now")
@@ -2724,7 +2725,7 @@ func TestSessionHandle(t *testing.T) {
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
-		s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink, agent.LogVersionV1, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), nil)
+		s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), nil)
 		ch := make(chan agent.ParsedMessage)
 		done := make(chan struct{})
 		go func() {

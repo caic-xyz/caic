@@ -82,7 +82,8 @@ func (b *Backend) SetModelInventory(inventory agent.ModelInventory) {
 // (initialize → initialized → thread/start) for golden-file trace recording.
 func (b *Backend) RecordHandshake(ctx context.Context, stdin io.Writer, stdout io.Reader, model string) (agent.WireFormat, io.Reader, error) {
 	br := bufio.NewReaderSize(stdout, 1<<16)
-	wire, _, continuation, err := handshake(ctx, stdin, br, &agent.Options{Dir: "/workspace", Model: model, LogVersion: agent.LogVersionV1})
+	log := agent.DiscardLogSink{Version: agent.LogVersionV1}
+	wire, _, continuation, err := handshake(ctx, stdin, br, &agent.Options{Dir: "/workspace", Model: model, Log: log})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -100,7 +101,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if sshHost == "" {
 		return nil, errors.New("agent connection target missing SSH host")
 	}
-	if err := agent.DeployRelay(ctx, opts.Target, opts.LogVersion); err != nil {
+	if err := agent.DeployRelay(ctx, opts.Target, opts.Log.LogVersion()); err != nil {
 		return nil, err
 	}
 	// TODO: re-enable once widget plugin is fixed for codex
@@ -153,7 +154,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	}
 
 	log := slog.With("target", sshHost)
-	s := agent.NewSession(cmd, agent.NewConn(stdin, opts.Log, opts.LogVersion, wire), continuation, opts.MsgCh, log)
+	s := agent.NewSession(cmd, agent.NewConn(stdin, opts.Log, wire), continuation, opts.MsgCh, log)
 	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
 		if err := s.SendPrompt(opts.InitialPrompt); err != nil {
 			_ = s.Close()
@@ -216,7 +217,7 @@ func fetchModelInfo(ctx context.Context, target runtime.ConnectionTarget, extraE
 	}()
 
 	nextID := atomic.Int64{}
-	records, err := agent.NewRelayRecordReader(stdout, agent.LogVersionV1, agent.DiscardLogSink)
+	records, err := agent.NewRelayRecordReader(stdout, agent.LogVersionV1, agent.DiscardLogSink{Version: agent.LogVersionV1})
 	if err != nil {
 		return nil, fmt.Errorf("construct model-list reader: %w", err)
 	}
@@ -451,7 +452,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	defer cancel()
 
 	w := &wireFormat{effort: opts.Effort, fw: &jsonutil.FieldWarner{}}
-	records, err := agent.NewRelayRecordReader(stdout, opts.LogVersion, agent.DiscardLogSink)
+	records, err := agent.NewRelayRecordReader(stdout, opts.Log.LogVersion(), agent.DiscardLogSink{Version: opts.Log.LogVersion()})
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("construct relay reader: %w", err)
 	}

@@ -27,22 +27,24 @@ type LogStore struct {
 	EventReplayFactory EventReplayFactory
 }
 
-// Open creates a JSONL log segment and writes its metadata header.
+// Open creates a JSONL log segment with a v2 metadata header, or reopens an
+// existing segment without rewriting its header.
 func (s *LogStore) Open(t *Task) (agent.LogSink, error) {
 	if err := os.MkdirAll(s.LogDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create log dir: %w", err)
 	}
 	path := filepath.Join(s.LogDir, taskLogFileName(t))
-	w, _, err := openTaskLogForAppend(path, t, true)
+	w, proof, created, err := openTaskLogForAppend(path, t, true)
 	if err != nil {
 		return nil, err
 	}
-	w.version = t.RelayLogVersion()
-	if err := writeMetadataHeader(w, t); err != nil {
-		return nil, errors.Join(err, w.Close())
+	if created {
+		w.version = agent.LogVersionV2
+		if err := writeMetadataHeader(w, t); err != nil {
+			return nil, errors.Join(err, w.Close())
+		}
 	}
-	var proof CacheProof
-	if s.EventReplayFactory != nil {
+	if s.EventReplayFactory != nil && created {
 		proof, err = t.CacheProofForLog(path)
 		if err != nil {
 			return nil, errors.Join(err, w.Close())
@@ -61,7 +63,7 @@ func (s *LogStore) Reopen(t *Task) (agent.LogSink, error) {
 		return nil, err
 	}
 
-	w, proof, err := openTaskLogForAppend(path, t, false)
+	w, proof, _, err := openTaskLogForAppend(path, t, false)
 	if err != nil {
 		return nil, err
 	}
@@ -71,41 +73,41 @@ func (s *LogStore) Reopen(t *Task) (agent.LogSink, error) {
 	return w, nil
 }
 
-func openTaskLogForAppend(path string, t *Task, create bool) (*taskLogWriter, CacheProof, error) {
+func openTaskLogForAppend(path string, t *Task, create bool) (w *taskLogWriter, proof CacheProof, created bool, err error) {
 	cleanPath := filepath.Clean(path)
 	if create {
-		w, err := newTaskLogWriter(cleanPath, os.O_CREATE|os.O_EXCL|os.O_RDWR|os.O_APPEND)
+		w, err = newTaskLogWriter(cleanPath, os.O_CREATE|os.O_EXCL|os.O_RDWR|os.O_APPEND)
 		if err == nil {
 			info, statErr := w.file.Stat()
 			if statErr == nil {
 				_, statErr = verifyPhysicalLog(path, w.file, info)
 			}
 			if statErr != nil {
-				return nil, CacheProof{}, errors.Join(statErr, w.Close())
+				return nil, CacheProof{}, false, errors.Join(statErr, w.Close())
 			}
-			return w, CacheProof{}, nil
+			return w, CacheProof{}, true, nil
 		}
 		if !os.IsExist(err) {
-			return nil, CacheProof{}, fmt.Errorf("create log file: %w", err)
+			return nil, CacheProof{}, false, fmt.Errorf("create log file: %w", err)
 		}
 	}
 
-	w, err := newTaskLogWriter(cleanPath, os.O_RDWR|os.O_APPEND)
+	w, err = newTaskLogWriter(cleanPath, os.O_RDWR|os.O_APPEND)
 	if err != nil {
-		return nil, CacheProof{}, err
+		return nil, CacheProof{}, false, err
 	}
 	if snapshot := t.logValidationProof(cleanPath); snapshot != nil {
 		if proof, snapshotErr := validateRawLogAppendSnapshot(cleanPath, w.file, t, snapshot); snapshotErr == nil {
 			w.version = proof.Version
-			return w, proof, nil
+			return w, proof, false, nil
 		}
 	}
-	proof, err := validateRawLogAppend(w.file, w.file, cleanPath, t)
+	proof, err = validateRawLogAppend(w.file, w.file, cleanPath, t)
 	if err != nil {
-		return nil, CacheProof{}, errors.Join(err, w.Close())
+		return nil, CacheProof{}, false, errors.Join(err, w.Close())
 	}
 	w.version = proof.Version
-	return w, proof, nil
+	return w, proof, false, nil
 }
 
 // validateRawLogAppendSnapshot reuses an in-memory EOF validation only after a
@@ -271,7 +273,7 @@ func writeMetadataHeader(log agent.LogSink, t *Task) error {
 	}
 	meta := agent.MetaMessage{
 		MessageType:       "caic_meta",
-		Version:           1,
+		Version:           int(log.LogVersion()),
 		Prompt:            t.InitialPrompt.Text,
 		Title:             t.Title(),
 		Repos:             metaRepos,

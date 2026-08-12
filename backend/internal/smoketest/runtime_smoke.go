@@ -52,7 +52,8 @@ func NewSmokeBackend() *SmokeBackend {
 	return b
 }
 
-// Start deploys the smoke agent into the container and starts it via relay.
+// Start deploys the smoke agent into the container and starts it via a relay
+// that relies on WritePrompt to record its plain-text input.
 func (b *SmokeBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	if err := deploySmokeAgent(ctx, opts.Target); err != nil {
 		return nil, err

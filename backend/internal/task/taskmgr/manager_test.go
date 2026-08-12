@@ -1554,7 +1554,7 @@ func TestManager(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink, agent.LogVersionV1, codex.New("", nil).NewWire()), stdout, make(chan agent.ParsedMessage, 256), nil)
+			s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, codex.New("", nil).NewWire()), stdout, make(chan agent.ParsedMessage, 256), nil)
 			t.Cleanup(func() {
 				cmdCancel()
 				_ = s.Wait()
@@ -2572,7 +2572,7 @@ func TestManager(t *testing.T) {
 			msgCh := make(chan agent.ParsedMessage, 1)
 			dispatchDone := make(chan struct{})
 			close(dispatchDone)
-			s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink, agent.LogVersionV1, codex.New("", nil).NewWire()), stdout, msgCh, nil)
+			s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, codex.New("", nil).NewWire()), stdout, msgCh, nil)
 			h := &task.SessionHandle{Session: s, MsgCh: msgCh, DispatchDone: dispatchDone}
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ssh-failed"), runtime.ConnectionTarget{SSHHost: "ssh-failed"}, "", "", 0)
@@ -2615,7 +2615,7 @@ func TestManager(t *testing.T) {
 			msgCh := make(chan agent.ParsedMessage, 1)
 			dispatchDone := make(chan struct{})
 			close(dispatchDone)
-			s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink, agent.LogVersionV1, codex.New("", nil).NewWire()), stdout, msgCh, nil)
+			s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, codex.New("", nil).NewWire()), stdout, msgCh, nil)
 			h := &task.SessionHandle{Session: s, MsgCh: msgCh, DispatchDone: dispatchDone}
 			runtimeBackend := &runtimetest.FakeBackend{}
 			instanceID, err := runtimeBackend.Launch(t.Context(), nil, nil)
@@ -3253,9 +3253,10 @@ func TestManager(t *testing.T) {
 					}},
 				},
 			}, []*task.LoadedTask{{
-				TaskID:  taskID.String(),
-				Harness: "reconnect",
-				Repos:   []task.RepoMount{{Name: "repo/a", Branch: "caic-10"}},
+				TaskID:     taskID.String(),
+				Harness:    "reconnect",
+				LogVersion: agent.LogVersionV1,
+				Repos:      []task.RepoMount{{Name: "repo/a", Branch: "caic-10"}},
 			}})
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
@@ -3383,9 +3384,10 @@ func TestManager(t *testing.T) {
 					}},
 				},
 			}, []*task.LoadedTask{{
-				TaskID:  taskID.String(),
-				Harness: harness.Claude,
-				Repos:   []task.RepoMount{{Name: "caic-xyz/caic", Branch: "caic-8"}},
+				TaskID:     taskID.String(),
+				Harness:    harness.Claude,
+				LogVersion: agent.LogVersionV1,
+				Repos:      []task.RepoMount{{Name: "caic-xyz/caic", Branch: "caic-8"}},
 			}})
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
@@ -3437,9 +3439,10 @@ func TestManager(t *testing.T) {
 					}},
 				},
 			}, []*task.LoadedTask{{
-				TaskID:  taskID.String(),
-				Harness: harness.Claude,
-				Repos:   []task.RepoMount{{Name: "caic-xyz/caic", Branch: "caic-9"}},
+				TaskID:     taskID.String(),
+				Harness:    harness.Claude,
+				LogVersion: agent.LogVersionV1,
+				Repos:      []task.RepoMount{{Name: "caic-xyz/caic", Branch: "caic-9"}},
 			}})
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)

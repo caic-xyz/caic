@@ -20,26 +20,10 @@ import (
 	genaipi "github.com/maruel/genai/providers/pi"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
-
-type testLogSink struct{ bytes.Buffer }
-
-func (s *testLogSink) AppendNative(data []byte) error {
-	_, err := s.Write(data)
-	return err
-}
-
-func (s *testLogSink) AppendMessage(m agent.Message) error {
-	data, err := agent.MarshalLogMessage(agent.LogVersionV1, m)
-	if err != nil {
-		return err
-	}
-	return s.AppendNative(append(data, '\n'))
-}
-
-func (*testLogSink) Close() error { return nil }
 
 const piSSHHelperEnv = "GO_WANT_PI_SSH_HELPER"
 
@@ -175,7 +159,7 @@ func TestWaitForResponse(t *testing.T) {
 
 	t.Run("caic_exit surfaces relay stderr", func(t *testing.T) {
 		t.Parallel()
-		r, err := agent.NewRelayRecordReader(bytes.NewBufferString(`{"type":"caic_exit","exit_code":2,"error":"Unknown option: --approve"}`+"\n"), agent.LogVersionV1, agent.DiscardLogSink)
+		r, err := agent.NewRelayRecordReader(bytes.NewBufferString(`{"type":"caic_exit","exit_code":2,"error":"Unknown option: --approve"}`+"\n"), agent.LogVersionV1, agent.DiscardLogSink{Version: agent.LogVersionV1})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -193,7 +177,7 @@ func TestWaitForResponse(t *testing.T) {
 	t.Run("v2 response is persisted once", func(t *testing.T) {
 		t.Parallel()
 		line := `{"t":"agent","ts":1.000,"msg":{"type":"response","command":"set_model","success":true,"data":{}}}`
-		var log testLogSink
+		log := agenttest.LogSink{Version: agent.LogVersionV2}
 		records, err := agent.NewRelayRecordReader(strings.NewReader(line+"\n"), agent.LogVersionV2, &log)
 		if err != nil {
 			t.Fatal(err)
@@ -230,7 +214,7 @@ func TestReapPiProcessExit(t *testing.T) {
 		_ = stdin.Close()
 	})
 
-	records, recordsErr := agent.NewRelayRecordReader(stdout, agent.LogVersionV1, agent.DiscardLogSink)
+	records, recordsErr := agent.NewRelayRecordReader(stdout, agent.LogVersionV1, agent.DiscardLogSink{Version: agent.LogVersionV1})
 	if recordsErr != nil {
 		t.Fatal(recordsErr)
 	}
@@ -265,14 +249,13 @@ func TestBackendStart(t *testing.T) {
 	t.Setenv("PI_SSH_HELPER_DIR", dir)
 
 	msgs := make(chan agent.ParsedMessage, 1)
-	log := &testLogSink{}
+	log := &agenttest.LogSink{Version: agent.LogVersionV1}
 	sess, err := New("", nil).Start(t.Context(), &agent.Options{
-		Target:     runtime.ConnectionTarget{SSHHost: "task"},
-		Dir:        "/workspace",
-		Model:      "openai-codex/gpt-5.6-terra",
-		LogVersion: agent.LogVersionV1,
-		MsgCh:      msgs,
-		Log:        log,
+		Target: runtime.ConnectionTarget{SSHHost: "task"},
+		Dir:    "/workspace",
+		Model:  "openai-codex/gpt-5.6-terra",
+		MsgCh:  msgs,
+		Log:    log,
 	})
 	if err != nil {
 		t.Fatalf("Start: %v", err)

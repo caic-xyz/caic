@@ -19,6 +19,7 @@ import (
 	genaiopencode "github.com/maruel/genai/providers/opencode"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
@@ -94,7 +95,7 @@ func TestHandshake(t *testing.T) {
 			`{"jsonrpc":"2.0","id":4,"result":{"configOptions":[{"id":"model","type":"select","currentValue":"openai/gpt-5","options":[{"value":"anthropic/claude-sonnet-4"},{"value":"openai/gpt-5"}]},{"id":"effort","type":"select","currentValue":"high","options":[{"value":"low"},{"value":"high"}]},{"id":"mode","type":"select","currentValue":"build","options":[{"value":"build"},{"value":"plan"}]}]}}`,
 		}, "\n") + "\n"))
 
-		hs, _, err := handshake(t.Context(), &stdin, stdout, &agent.Options{Dir: "/workspace", Model: selectedModel, Effort: "high", LogVersion: agent.LogVersionV1})
+		hs, _, err := handshake(t.Context(), &stdin, stdout, &agent.Options{Dir: "/workspace", Model: selectedModel, Effort: "high", Log: &agenttest.LogSink{Version: agent.LogVersionV1}})
 		if err != nil {
 			t.Fatalf("handshake: %v", err)
 		}
@@ -136,7 +137,7 @@ func TestHandshake(t *testing.T) {
 {"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1","models":{"currentModelId":"openai/gpt-5"}}}
 `
 		var stdin bytes.Buffer
-		hs, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(v2Records(responses))), &agent.Options{Dir: "/workspace", LogVersion: agent.LogVersionV2})
+		hs, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(v2Records(responses))), &agent.Options{Dir: "/workspace", Log: &agenttest.LogSink{Version: agent.LogVersionV2}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -156,7 +157,7 @@ func TestHandshake(t *testing.T) {
 			`{"jsonrpc":"2.0","id":3,"error":{"code":-32601,"message":"method not found"}}`,
 		}, "\n") + "\n"))
 
-		hs, _, err := handshake(t.Context(), &stdin, stdout, &agent.Options{Dir: "/workspace", Model: "openai/gpt-5", LogVersion: agent.LogVersionV1})
+		hs, _, err := handshake(t.Context(), &stdin, stdout, &agent.Options{Dir: "/workspace", Model: "openai/gpt-5", Log: &agenttest.LogSink{Version: agent.LogVersionV1}})
 		if err != nil {
 			t.Fatalf("handshake: %v", err)
 		}
@@ -184,7 +185,7 @@ func TestHandshakeContinuation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			var stdin bytes.Buffer
-			_, continuation, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(tc.input)), &agent.Options{Dir: "/workspace", LogVersion: tc.version})
+			_, continuation, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(tc.input)), &agent.Options{Dir: "/workspace", Log: &agenttest.LogSink{Version: tc.version}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -203,7 +204,7 @@ func TestLegacyModelSelectionCancellation(t *testing.T) {
 	t.Parallel()
 	reader, writer := io.Pipe()
 	t.Cleanup(func() { _ = writer.Close() })
-	records, err := agent.NewRelayRecordReader(reader, agent.LogVersionV1, agent.DiscardLogSink)
+	records, err := agent.NewRelayRecordReader(reader, agent.LogVersionV1, agent.DiscardLogSink{Version: agent.LogVersionV1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +243,8 @@ func TestHandshakeResultSetConfigOptions(t *testing.T) {
 
 type failingLogSink struct{}
 
-func (failingLogSink) AppendNative([]byte) error { return nil }
+func (failingLogSink) LogVersion() agent.LogVersion { return agent.LogVersionV1 }
+func (failingLogSink) AppendNative([]byte) error    { return nil }
 func (failingLogSink) AppendMessage(agent.Message) error {
 	return errors.New("persist session metadata")
 }
@@ -291,11 +293,10 @@ exit 1
 	t.Cleanup(cancel)
 	backend := New("", nil)
 	_, err := backend.Start(ctx, &agent.Options{
-		Target:     runtime.ConnectionTarget{SSHHost: "task"},
-		Dir:        "/workspace",
-		LogVersion: agent.LogVersionV1,
-		MsgCh:      make(chan agent.ParsedMessage, 1),
-		Log:        failingLogSink{},
+		Target: runtime.ConnectionTarget{SSHHost: "task"},
+		Dir:    "/workspace",
+		MsgCh:  make(chan agent.ParsedMessage, 1),
+		Log:    failingLogSink{},
 	})
 	if err == nil || !strings.Contains(err.Error(), "write session metadata") {
 		t.Fatalf("Start error = %v, want metadata failure", err)

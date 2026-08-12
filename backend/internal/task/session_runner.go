@@ -97,7 +97,6 @@ func (r *SessionRunner) Reconnect(ctx context.Context, t *Task, skipSideEffects 
 		ResumeSessionID:    sessionID,
 		Effort:             t.Effort,
 		PendingUserActions: t.PendingUserActions(),
-		LogVersion:         t.RelayLogVersion(),
 		MsgCh:              msgCh,
 		Log:                log,
 	})
@@ -195,7 +194,6 @@ func (r *SessionRunner) startSessionWithLog(ctx context.Context, t *Task, prompt
 		Model:         t.Model,
 		Effort:        t.Effort,
 		InitialPrompt: prompt,
-		LogVersion:    t.RelayLogVersion(),
 		MsgCh:         msgCh,
 		Log:           log,
 	})
@@ -275,13 +273,12 @@ func (r *SessionRunner) replaceSession(ctx context.Context, t *Task, prompt agen
 	tlog.Info(mode.logMessage(), "hns", t.Harness)
 	target := t.RuntimeConnectionTarget()
 	opts := &agent.Options{
-		Target:     target,
-		Dir:        r.runtimeDir(t),
-		Model:      t.Model,
-		Effort:     t.Effort,
-		LogVersion: t.RelayLogVersion(),
-		MsgCh:      msgCh,
-		Log:        log,
+		Target: target,
+		Dir:    r.runtimeDir(t),
+		Model:  t.Model,
+		Effort: t.Effort,
+		MsgCh:  msgCh,
+		Log:    log,
 	}
 	if mode == replaceSessionRestart {
 		opts.InitialPrompt = prompt

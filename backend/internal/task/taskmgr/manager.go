@@ -1717,11 +1717,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 		if relayErr != nil {
 			m.log.WarnContext(ctx, "relay", "msg", "check failed during adopt", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", relayErr, "diag", relayDiag)
 		}
-		version := lt.LogVersion
-		if version == 0 {
-			version = agent.LogVersionV1
-		}
-		parser, parserErr := agent.NewLogRecordParser(version, backend.NewWire().ParseMessage)
+		parser, parserErr := agent.NewLogRecordParser(lt.LogVersion, backend.NewWire().ParseMessage)
 		if parserErr != nil {
 			return nil, fmt.Errorf("construct relay parser: %w", parserErr)
 		}
@@ -1823,7 +1819,6 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 		Sudo:              c.Sudo,
 		VNCPort:           c.VNCPort,
 		Provider:          m.provider,
-		LogVersion:        lt.LogVersion,
 		ForgeIssue:        forgeIssue,
 	}
 	t.SetRuntimeConnectionInfo(c.ID, c.AgentTarget, c.TailscaleFQDN, "", c.VNCPort)

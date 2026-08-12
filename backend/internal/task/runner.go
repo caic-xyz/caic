@@ -171,7 +171,6 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 		Model:         t.Model,
 		Effort:        t.Effort,
 		InitialPrompt: t.InitialPrompt,
-		LogVersion:    t.RelayLogVersion(),
 		MsgCh:         msgCh,
 		Log:           log,
 	})
@@ -491,7 +490,6 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 		Model:           t.Model,
 		Effort:          t.Effort,
 		ResumeSessionID: t.GetSessionID(),
-		LogVersion:      t.RelayLogVersion(),
 		MsgCh:           msgCh,
 		Log:             log,
 	})

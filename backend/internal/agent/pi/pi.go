@@ -156,7 +156,7 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		return nil, err
 	}
 
-	records, err := agent.NewRelayRecordReader(rp.Stdout, opts.LogVersion, opts.Log)
+	records, err := agent.NewRelayRecordReader(rp.Stdout, opts.Log.LogVersion(), opts.Log)
 	if err != nil {
 		return nil, fmt.Errorf("pi: construct relay reader: %w", err)
 	}
@@ -234,7 +234,7 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		}
 	}
 
-	c := newPiConn(rp.Stdin, opts.Log, opts.LogVersion, wire)
+	c := newPiConn(rp.Stdin, opts.Log, wire)
 	sess, err := agent.StartSession(rp, c, opts)
 	if err != nil {
 		return nil, err
@@ -299,11 +299,11 @@ type piConn struct {
 }
 
 // newPiConn creates a piConn wrapping a standard Conn.
-func newPiConn(stdin io.WriteCloser, log agent.LogSink, version agent.LogVersion, wire *piWireFormat) *piConn {
+func newPiConn(stdin io.WriteCloser, log agent.LogSink, wire *piWireFormat) *piConn {
 	return &piConn{
-		Conn:    agent.NewConn(stdin, log, version, wire),
+		Conn:    agent.NewConn(stdin, log, wire),
 		log:     log,
-		version: version,
+		version: log.LogVersion(),
 		wire:    wire,
 	}
 }
@@ -955,7 +955,7 @@ func writeJSONLine(w io.Writer, v any, log agent.LogSink) error {
 	if _, err := w.Write(data); err != nil {
 		return err
 	}
-	if err := log.AppendNative(data); err != nil {
+	if err := agent.AppendNativeRecord(log, log.LogVersion(), data); err != nil {
 		return err
 	}
 	return nil

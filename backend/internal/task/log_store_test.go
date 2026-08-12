@@ -13,6 +13,7 @@ import (
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/task/tasktest"
 )
@@ -97,7 +98,7 @@ func TestLogStore(t *testing.T) {
 	t.Parallel()
 	t.Run("WriteResultTrailerReasoningTokens", func(t *testing.T) {
 		t.Parallel()
-		b := &testLogSink{}
+		b := &agenttest.LogSink{Version: agent.LogVersionV2}
 		res := &Result{
 			State: StateWaiting,
 			Usage: agent.Usage{
@@ -149,11 +150,18 @@ func TestLogStore(t *testing.T) {
 		if len(entries) != 1 {
 			t.Fatalf("log lines = %d, want 1", len(entries))
 		}
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(entries[0]), &raw); err != nil {
+			t.Fatal(err)
+		}
+		if string(raw["t"]) != `"caic_meta"` {
+			t.Fatalf("metadata discriminator = %s, want caic_meta", raw["t"])
+		}
 		var meta agent.MetaMessage
 		if err := json.Unmarshal([]byte(entries[0]), &meta); err != nil {
 			t.Fatal(err)
 		}
-		if meta.MessageType != "caic_meta" || meta.Version != int(agent.LogVersionV1) || meta.Prompt != "test prompt" || meta.Model != "model-1" || meta.Effort != "high" {
+		if meta.Version != int(agent.LogVersionV2) || meta.Prompt != "test prompt" || meta.Model != "model-1" || meta.Effort != "high" {
 			t.Fatalf("unexpected metadata: %+v", meta)
 		}
 		if len(meta.Repos) != 1 || meta.Repos[0].ContainerPath != "~/src/org/repo" {
@@ -163,6 +171,57 @@ func TestLogStore(t *testing.T) {
 		tk.addMessage(t.Context(), &agent.TextMessage{Text: "hello"}, false)
 		if len(replay.Messages) != 1 {
 			t.Fatalf("replay messages = %d, want 1", len(replay.Messages))
+		}
+	})
+	t.Run("OpenPreservesExistingLogAuthority", func(t *testing.T) {
+		t.Parallel()
+		store := &LogStore{LogDir: t.TempDir()}
+		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Codex}
+		first, err := store.Open(tk)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := first.Close(); err != nil {
+			t.Fatal(err)
+		}
+		second, err := store.Open(tk)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := second.LogVersion(); got != agent.LogVersionV2 {
+			t.Fatalf("LogVersion = %d, want %d", got, agent.LogVersionV2)
+		}
+		if err := second.Close(); err != nil {
+			t.Fatal(err)
+		}
+		entries := logLines(t, tk.LogPath())
+		if len(entries) != 1 {
+			t.Fatalf("log lines = %d, want unchanged header", len(entries))
+		}
+	})
+	t.Run("OpenCreatesCanonicalV2Log", func(t *testing.T) {
+		t.Parallel()
+		store := &LogStore{LogDir: t.TempDir()}
+		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Codex}
+		log, err := store.Open(tk)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := log.LogVersion(); got != agent.LogVersionV2 {
+			t.Fatalf("LogVersion = %d, want %d", got, agent.LogVersionV2)
+		}
+		if err := log.AppendMessage(&agent.MetaPRMessage{MessageType: "caic_pr", ForgeOwner: "acme", ForgeRepo: "repo", ForgePR: 1}); err != nil {
+			t.Fatal(err)
+		}
+		if err := log.Close(); err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.ReadFile(tk.LogPath())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(got), `"t":"caic_meta"`) || !strings.Contains(string(got), `"t":"pr"`) {
+			t.Fatalf("v2 log = %s, want canonical metadata and control", got)
 		}
 	})
 	t.Run("ReopenPreservesV2Authority", func(t *testing.T) {
@@ -185,6 +244,9 @@ func TestLogStore(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if got := log.LogVersion(); got != agent.LogVersionV2 {
+			t.Fatalf("LogVersion = %d, want %d", got, agent.LogVersionV2)
+		}
 		if err := log.AppendMessage(&agent.MetaPRMessage{MessageType: "caic_pr", ForgeOwner: "acme", ForgeRepo: "repo", ForgePR: 1}); err != nil {
 			t.Fatal(err)
 		}
@@ -197,6 +259,37 @@ func TestLogStore(t *testing.T) {
 		}
 		if !strings.Contains(string(got), `"t":"pr"`) {
 			t.Fatalf("v2 log = %s, want canonical pr control", got)
+		}
+	})
+	t.Run("ReopenPreservesV1Authority", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		store := &LogStore{LogDir: dir}
+		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Codex}
+		path := filepath.Join(dir, taskLogFileName(tk))
+		header := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: int(agent.LogVersionV1), Prompt: "test", Harness: harness.Codex}) + "\n"
+		if err := os.WriteFile(path, []byte(header), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		log, err := store.Reopen(tk)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := log.LogVersion(); got != agent.LogVersionV1 {
+			t.Fatalf("LogVersion = %d, want %d", got, agent.LogVersionV1)
+		}
+		if err := log.AppendMessage(&agent.MetaPRMessage{MessageType: "caic_pr", ForgeOwner: "acme", ForgeRepo: "repo", ForgePR: 1}); err != nil {
+			t.Fatal(err)
+		}
+		if err := log.Close(); err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.ReadFile(path) //nolint:gosec // path is test-controlled.
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(got), `"type":"caic_pr"`) {
+			t.Fatalf("v1 log = %s, want legacy pr control", got)
 		}
 	})
 	t.Run("ReopenRejectsHarnessMismatch", func(t *testing.T) {

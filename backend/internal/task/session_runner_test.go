@@ -215,7 +215,7 @@ func TestSessionRunner(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := strings.Count(string(data), `"type":"caic_meta"`); got != 1 {
+			if got := strings.Count(string(data), `"t":"caic_meta"`); got != 1 {
 				t.Errorf("caic_meta count = %d, want 1", got)
 			}
 		})
@@ -267,7 +267,8 @@ func TestSessionRunner(t *testing.T) {
 			_, sub, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 			msgCh, done := r.startMessageDispatch(t.Context(), tk, false)
-			opts := agent.Options{LogVersion: agent.LogVersionV2, MsgCh: msgCh, Log: agent.DiscardLogSink}
+			log := &agenttest.LogSink{Version: agent.LogVersionV2}
+			opts := agent.Options{MsgCh: msgCh, Log: log}
 			wantTime := time.Unix(1, 234*int64(time.Millisecond)).UTC()
 			var v2Message agent.Message
 			cmd := exec.CommandContext(t.Context(), "python3", "-c", "import sys; print(sys.argv[1])", `{"t":"agent","ts":1.234,"msg":{}}`)
@@ -282,7 +283,7 @@ func TestSessionRunner(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			session := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink, opts.LogVersion, &testWire{parse: func([]byte) ([]agent.Message, error) {
+			session := agent.NewSession(cmd, agent.NewConn(stdin, log, &testWire{parse: func([]byte) ([]agent.Message, error) {
 				v2Message = &agent.TextMessage{Text: "v2"}
 				return []agent.Message{v2Message}, nil
 			}}), stdout, opts.MsgCh, nil)
@@ -296,7 +297,7 @@ func TestSessionRunner(t *testing.T) {
 			err = agent.DefaultReadMessages(strings.NewReader(`{"event":"legacy"}`+"\n"), func(parsed agent.ParsedMessage) {
 				v1 = parsed
 				opts.MsgCh <- parsed
-			}, agent.DiscardLogSink, agent.LogVersionV1, func([]byte) ([]agent.Message, error) {
+			}, agent.DiscardLogSink{Version: agent.LogVersionV1}, agent.LogVersionV1, func([]byte) ([]agent.Message, error) {
 				return []agent.Message{&agent.TextMessage{Text: "v1"}}, nil
 			})
 			if err != nil {

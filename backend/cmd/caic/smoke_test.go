@@ -1,4 +1,4 @@
-// Runtime smoke test for the caic server with a real md container.
+// Runtime smoke test for the caic server with a real md container and v2 task logs.
 
 // Copyright 2026 Marc-Antoine Ruel. All Rights Reserved. Use of this
 // source code is governed by the Apache v2 license that can be found in the
@@ -147,6 +147,38 @@ func TestSmoke(t *testing.T) {
 			t.Fatalf("task %s: NumTurns = %d, want 1; error=%q", taskID, task.NumTurns, task.Error)
 		}
 		t.Logf("task %s reached 'waiting'", taskID)
+
+		logDir := filepath.Join(smoke.cfg.Dirs.CacheDir, "tasks")
+		entries, err := os.ReadDir(logDir)
+		if err != nil {
+			t.Fatalf("read task logs: %v", err)
+		}
+		var logPath string
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), taskID+"-") && strings.HasSuffix(entry.Name(), ".jsonl") {
+				logPath = filepath.Join(logDir, entry.Name())
+				break
+			}
+		}
+		if logPath == "" {
+			t.Fatalf("task %s has no raw log in %s", taskID, logDir)
+		}
+		logData, err := os.ReadFile(logPath)
+		if err != nil {
+			t.Fatalf("read task log: %v", err)
+		}
+		for i, line := range strings.FieldsFunc(string(logData), func(r rune) bool { return r == '\n' }) {
+			var record map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(line), &record); err != nil {
+				t.Fatalf("decode task log line %d: %v", i+1, err)
+			}
+			if string(record["t"]) == "" {
+				t.Fatalf("task log line %d has no v2 discriminator: %s", i+1, line)
+			}
+			if i == 0 && (string(record["t"]) != `"caic_meta"` || string(record["version"]) != "2") {
+				t.Fatalf("task log header = %s, want v2 caic_meta", line)
+			}
+		}
 
 		t.Run("ServerRestart", func(t *testing.T) {
 			runtimeID := task.Runtime.ID

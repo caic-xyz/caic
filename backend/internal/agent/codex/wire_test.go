@@ -17,6 +17,7 @@ import (
 	"github.com/maruel/genai/providers/codex"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
@@ -130,7 +131,7 @@ func TestFetchModels(t *testing.T) {
 {"id":2,"result":{"data":[{"id":"gpt-5.4","supportedReasoningEfforts":[{"reasoningEffort":"minimal"},{"reasoningEffort":"high"}]},{"id":"gpt-5.3-codex","supportedReasoningEfforts":[{"reasoningEffort":"low"}]}],"nextCursor":null}}
 `
 		var stdin bytes.Buffer
-		records, err := agent.NewRelayRecordReader(strings.NewReader(responses), agent.LogVersionV1, agent.DiscardLogSink)
+		records, err := agent.NewRelayRecordReader(strings.NewReader(responses), agent.LogVersionV1, agent.DiscardLogSink{Version: agent.LogVersionV1})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -180,7 +181,7 @@ func TestHandshake(t *testing.T) {
 {"id":3,"result":{"thread":{"id":"thread_1","cliVersion":"0.133.0"}}}
 `
 		var stdin bytes.Buffer
-		w, models, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(responses)), &agent.Options{Dir: "/repo", Model: "gpt-5.4", LogVersion: agent.LogVersionV1})
+		w, models, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(responses)), &agent.Options{Dir: "/repo", Model: "gpt-5.4", Log: &agenttest.LogSink{Version: agent.LogVersionV1}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -224,7 +225,7 @@ func TestHandshake(t *testing.T) {
 {"id":3,"result":{"thread":{"id":"thread_1","cliVersion":"0.133.0"}}}
 `
 		var stdin bytes.Buffer
-		w, models, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(v2Records(responses))), &agent.Options{Dir: "/repo", Model: "gpt-5.4", LogVersion: agent.LogVersionV2})
+		w, models, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(v2Records(responses))), &agent.Options{Dir: "/repo", Model: "gpt-5.4", Log: &agenttest.LogSink{Version: agent.LogVersionV2}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -240,7 +241,7 @@ func TestWireFormatCompactCommand(t *testing.T) {
 	wire := &wireFormat{threadID: "thread-1"}
 	var stdin bytes.Buffer
 	var compact agent.CompactCommand = wire
-	if err := compact.WriteCompact(&stdin, "", agent.DiscardLogSink); err != nil {
+	if err := compact.WriteCompact(&stdin, "", agent.DiscardLogSink{Version: agent.LogVersionV1}); err != nil {
 		t.Fatal(err)
 	}
 	var request codex.JSONRPCRequest
@@ -271,7 +272,7 @@ func TestHandshakeContinuation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			var stdin bytes.Buffer
-			_, _, continuation, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(tc.input)), &agent.Options{Dir: "/repo", LogVersion: tc.version})
+			_, _, continuation, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(tc.input)), &agent.Options{Dir: "/repo", Log: &agenttest.LogSink{Version: tc.version}})
 			if err != nil {
 				t.Fatal(err)
 			}

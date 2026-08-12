@@ -226,7 +226,6 @@ type Task struct {
 	ForgeIssue        int                  // Originating issue number for bot comment callbacks; 0 = none.
 	ForkedFromTaskID  ksid.ID              // Parent task ID when created by fork; zero otherwise.
 	Provider          genai.Provider
-	LogVersion        agent.LogVersion // Physical relay record version; zero selects production v1.
 
 	// Mutable task metadata. These fields are populated at construction, setup, or
 	// adoption. After a task is published in the Manager registry, access them
@@ -679,14 +678,6 @@ func (t *Task) SetLogValidationSnapshot(snapshot *ValidatedLogSnapshot) {
 	if snapshot != nil && snapshot.Path == t.logPath {
 		t.logValidationSnapshot = snapshot.validationProof()
 	}
-}
-
-// RelayLogVersion returns the immutable physical relay version for the task.
-func (t *Task) RelayLogVersion() agent.LogVersion {
-	if t.LogVersion == 0 {
-		return agent.LogVersionV1
-	}
-	return t.LogVersion
 }
 
 // LogPath returns the JSONL log path used for metadata appends.
