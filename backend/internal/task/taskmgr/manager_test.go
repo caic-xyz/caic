@@ -78,6 +78,21 @@ func newTestManager(t testing.TB, cfg Config) *Manager { //nolint:gocritic // Co
 	return New(cfg)
 }
 
+func awaitTaskCleanup(t *testing.T, m *Manager, id string) {
+	t.Cleanup(func() {
+		e, ok := m.GetEntry(id)
+		if !ok {
+			t.Errorf("task entry %q not found", id)
+			return
+		}
+		select {
+		case <-e.Done():
+		case <-time.After(time.Second):
+			t.Errorf("task %q did not finish", id)
+		}
+	})
+}
+
 func newTestRuntime(t testing.TB, lc runtime.Lifecycle, info testRuntimeInfo) *runtime.Router {
 	var sys runtime.System = &testRuntimeSystem{Lifecycle: lc}
 	if info != nil {
@@ -1112,6 +1127,7 @@ func TestManager(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Create: %v", err)
 			}
+			awaitTaskCleanup(t, m, id)
 			e, ok := m.GetEntry(id)
 			if !ok {
 				t.Fatal("entry not found after Create")
@@ -1140,6 +1156,7 @@ func TestManager(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Create: %v", err)
 			}
+			awaitTaskCleanup(t, m, id)
 			e, ok := m.GetEntry(id)
 			if !ok {
 				t.Fatal("entry not found after Create")
@@ -1169,6 +1186,7 @@ func TestManager(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Create: %v", err)
 			}
+			awaitTaskCleanup(t, m, id)
 			e, _ := m.GetEntry(id)
 			if !e.Task().Sudo {
 				t.Error("Sudo flag not propagated to task")
@@ -1190,6 +1208,7 @@ func TestManager(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Create: %v", err)
 			}
+			awaitTaskCleanup(t, m, id)
 			e, _ := m.GetEntry(id)
 			snap := e.Task().Snapshot()
 			if snap.ForgeIssue != 17 {
@@ -1211,6 +1230,7 @@ func TestManager(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Create: %v", err)
 			}
+			awaitTaskCleanup(t, m, id)
 			e, _ := m.GetEntry(id)
 			snap := e.Task().Snapshot()
 			if snap.ForgeIssue != 0 || snap.ForgeOwner != "" || snap.ForgeRepo != "" {
@@ -1279,6 +1299,7 @@ func TestManager(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Fork: %v", err)
 			}
+			awaitTaskCleanup(t, m, id)
 			e, ok := m.GetEntry(id)
 			if !ok {
 				t.Fatal("fork entry not found")
@@ -1344,6 +1365,7 @@ func TestManager(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Fork: %v", err)
 			}
+			awaitTaskCleanup(t, m, id)
 			e, _ := m.GetEntry(id)
 			metadata := task.MakeMetadata(e.Task())
 			if metadata[runtime.MetadataTaskID] != e.Task().ID.String() {
