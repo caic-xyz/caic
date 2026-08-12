@@ -69,6 +69,9 @@ func (f *metadataErrorInfo) Metadata(ctx context.Context, id runtime.ID, key run
 }
 
 func newTestManager(t testing.TB, cfg Config) *Manager { //nolint:gocritic // Config mirrors New's value bag in tests.
+	if cfg.LogDir == "" {
+		cfg.LogDir = t.TempDir()
+	}
 	if cfg.Runtimes == nil {
 		cfg.Runtimes = newTestRuntime(t, &runtimetest.FakeBackend{}, nil)
 	}
@@ -1529,7 +1532,7 @@ func TestManager(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, codex.New("", nil).NewWire()), stdout, make(chan agent.ParsedMessage, 256), nil)
+			s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink, agent.LogVersionV1, codex.New("", nil).NewWire()), stdout, make(chan agent.ParsedMessage, 256), nil)
 			t.Cleanup(func() {
 				cmdCancel()
 				_ = s.Wait()
@@ -2547,7 +2550,7 @@ func TestManager(t *testing.T) {
 			msgCh := make(chan agent.ParsedMessage, 1)
 			dispatchDone := make(chan struct{})
 			close(dispatchDone)
-			s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, codex.New("", nil).NewWire()), stdout, msgCh, nil)
+			s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink, agent.LogVersionV1, codex.New("", nil).NewWire()), stdout, msgCh, nil)
 			h := &task.SessionHandle{Session: s, MsgCh: msgCh, DispatchDone: dispatchDone}
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ssh-failed"), runtime.ConnectionTarget{SSHHost: "ssh-failed"}, "", "", 0)
@@ -2590,7 +2593,7 @@ func TestManager(t *testing.T) {
 			msgCh := make(chan agent.ParsedMessage, 1)
 			dispatchDone := make(chan struct{})
 			close(dispatchDone)
-			s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, codex.New("", nil).NewWire()), stdout, msgCh, nil)
+			s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink, agent.LogVersionV1, codex.New("", nil).NewWire()), stdout, msgCh, nil)
 			h := &task.SessionHandle{Session: s, MsgCh: msgCh, DispatchDone: dispatchDone}
 			runtimeBackend := &runtimetest.FakeBackend{}
 			instanceID, err := runtimeBackend.Launch(t.Context(), nil, nil)

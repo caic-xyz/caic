@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"path/filepath"
 	"runtime/trace"
@@ -72,7 +71,7 @@ func (r *SessionRunner) Reconnect(ctx context.Context, t *Task, skipSideEffects 
 	// Reconnect resumes an existing session, so append only after Reopen
 	// validates the existing file's authoritative header. A missing or corrupt
 	// log must not be replaced because the running relay's format is unknown.
-	logW, err := r.Logs.Reopen(t)
+	log, err := r.Logs.Reopen(t)
 	if err != nil {
 		close(msgCh)
 		<-dispatchDone
@@ -100,10 +99,10 @@ func (r *SessionRunner) Reconnect(ctx context.Context, t *Task, skipSideEffects 
 		PendingUserActions: t.PendingUserActions(),
 		LogVersion:         t.RelayLogVersion(),
 		MsgCh:              msgCh,
-		LogW:               logW,
+		Log:                log,
 	})
 	if err != nil {
-		_ = logW.Close()
+		_ = log.Close()
 		close(msgCh)
 		<-dispatchDone
 		t.SetState(StateWaiting)
@@ -111,7 +110,7 @@ func (r *SessionRunner) Reconnect(ctx context.Context, t *Task, skipSideEffects 
 		return nil, fmt.Errorf("reconnect: %w", err)
 	}
 
-	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, LogW: logW}
+	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log}
 	t.AttachSession(h)
 	return h, nil
 }
@@ -125,7 +124,7 @@ func (r *SessionRunner) EnsureSession(ctx context.Context, t *Task, h *SessionHa
 		// Session exited immediately (agent was already done).
 		t.DetachSession()
 		err := h.Drain()
-		_ = h.LogW.Close()
+		_ = h.Log.Close()
 		tlog.Info("attached session exited, starting idle relay", "err", err)
 		if s := t.GetState(); s == StateStopping || s == StateStopped || s == StatePurged {
 			return nil, fmt.Errorf("task is %s", s)
@@ -148,13 +147,13 @@ func (r *SessionRunner) StartSession(ctx context.Context, t *Task, prompt agent.
 	if t.RuntimeInstanceID() == "" {
 		return nil, errors.New("no instance")
 	}
-	logW, err := r.Logs.Open(t)
+	log, err := r.Logs.Open(t)
 	if err != nil {
 		return nil, err
 	}
-	h, err := r.startSessionWithLog(ctx, t, prompt, logW)
+	h, err := r.startSessionWithLog(ctx, t, prompt, log)
 	if err != nil {
-		return nil, errors.Join(err, logW.Close())
+		return nil, errors.Join(err, log.Close())
 	}
 	return h, nil
 }
@@ -173,7 +172,7 @@ func (r *SessionRunner) ClearContextSession(ctx context.Context, t *Task) (*Sess
 	return r.replaceSession(ctx, t, agent.Prompt{}, replaceSessionClearContext)
 }
 
-func (r *SessionRunner) startSessionWithLog(ctx context.Context, t *Task, prompt agent.Prompt, logW io.WriteCloser) (*SessionHandle, error) {
+func (r *SessionRunner) startSessionWithLog(ctx context.Context, t *Task, prompt agent.Prompt, log agent.LogSink) (*SessionHandle, error) {
 	ctx, task := trace.NewTask(ctx, "task.start-session:"+t.ID.String())
 	defer task.End()
 
@@ -198,7 +197,7 @@ func (r *SessionRunner) startSessionWithLog(ctx context.Context, t *Task, prompt
 		InitialPrompt: prompt,
 		LogVersion:    t.RelayLogVersion(),
 		MsgCh:         msgCh,
-		LogW:          logW,
+		Log:           log,
 	})
 	if err != nil {
 		close(msgCh)
@@ -207,7 +206,7 @@ func (r *SessionRunner) startSessionWithLog(ctx context.Context, t *Task, prompt
 		return nil, err
 	}
 
-	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, LogW: logW}
+	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log}
 	t.AttachSession(h)
 	if prompt.Text != "" || len(prompt.Images) > 0 {
 		t.addMessage(ctx, syntheticUserInput(prompt), false)
@@ -217,6 +216,9 @@ func (r *SessionRunner) startSessionWithLog(ctx context.Context, t *Task, prompt
 }
 
 func (r *SessionRunner) replaceSession(ctx context.Context, t *Task, prompt agent.Prompt, mode replaceSessionMode) (*SessionHandle, error) {
+	if r.Workspace == nil {
+		return nil, errors.New("task workspace is unavailable")
+	}
 	traceName := "task.clear-context:"
 	if mode == replaceSessionRestart {
 		traceName = "task.restart:"
@@ -236,9 +238,9 @@ func (r *SessionRunner) replaceSession(ctx context.Context, t *Task, prompt agen
 	if oldH != nil {
 		oldH.CloseMsgCh()
 		<-oldH.DispatchDone
-		if oldH.LogW != nil {
-			err := r.Logs.WriteContextCleared(oldH.LogW)
-			err = errors.Join(err, oldH.LogW.Close())
+		if oldH.Log != nil {
+			err := r.Logs.WriteContextCleared(oldH.Log)
+			err = errors.Join(err, oldH.Log.Close())
 			if err != nil {
 				t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
 				return nil, fmt.Errorf("write context cleared: %w", err)
@@ -250,7 +252,7 @@ func (r *SessionRunner) replaceSession(ctx context.Context, t *Task, prompt agen
 	t.ClearMessages(ctx)
 
 	// Open new log segment.
-	logW, err := r.Logs.Open(t)
+	log, err := r.Logs.Open(t)
 	if err != nil {
 		t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
 		return nil, fmt.Errorf("open log: %w", err)
@@ -265,7 +267,11 @@ func (r *SessionRunner) replaceSession(ctx context.Context, t *Task, prompt agen
 		branch = p.Branch
 	}
 	instanceID := t.RuntimeInstanceID()
-	tlog := r.Workspace.Log.With("br", branch, "instance", instanceID)
+	tlog := r.Workspace.Log
+	if tlog == nil {
+		tlog = slog.Default()
+	}
+	tlog = tlog.With("br", branch, "instance", instanceID)
 	tlog.Info(mode.logMessage(), "hns", t.Harness)
 	target := t.RuntimeConnectionTarget()
 	opts := &agent.Options{
@@ -275,21 +281,29 @@ func (r *SessionRunner) replaceSession(ctx context.Context, t *Task, prompt agen
 		Effort:     t.Effort,
 		LogVersion: t.RelayLogVersion(),
 		MsgCh:      msgCh,
-		LogW:       logW,
+		Log:        log,
 	}
 	if mode == replaceSessionRestart {
 		opts.InitialPrompt = prompt
 	}
-	session, err := r.backend(t.Harness).Start(ctx, opts)
+	backend := r.backend(t.Harness)
+	if backend == nil {
+		_ = log.Close()
+		close(msgCh)
+		<-dispatchDone
+		t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
+		return nil, fmt.Errorf("unknown harness %q", t.Harness)
+	}
+	session, err := backend.Start(ctx, opts)
 	if err != nil {
-		_ = logW.Close()
+		_ = log.Close()
 		close(msgCh)
 		<-dispatchDone
 		t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
 		return nil, fmt.Errorf("start session: %w", err)
 	}
 
-	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, LogW: logW}
+	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log}
 	t.AttachSession(h)
 	if mode == replaceSessionRestart {
 		t.addMessage(ctx, syntheticUserInput(prompt), false)
@@ -336,7 +350,7 @@ func (r *SessionRunner) startMessageDispatch(ctx context.Context, t *Task, skipS
 			}
 			stateChanged, replayErr := t.addParsedMessage(ctx, parsed, skipSideEffects)
 			if replayErr != nil {
-				r.Workspace.Log.ErrorContext(ctx, "write event replay", "err", replayErr)
+				slog.ErrorContext(ctx, "write event replay", "err", replayErr)
 			}
 			if stateChanged && r.NotifyTaskChange != nil {
 				r.NotifyTaskChange()

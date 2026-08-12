@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"slices"
 	"strings"
@@ -126,7 +125,7 @@ type SessionHandle struct {
 	Session      *agent.Session
 	MsgCh        chan agent.ParsedMessage
 	DispatchDone <-chan struct{}
-	LogW         io.WriteCloser
+	Log          agent.LogSink
 	closeMsgCh   sync.Once
 }
 
@@ -982,30 +981,18 @@ func (t *Task) GetPR() int {
 	return t.forgePR
 }
 
-// WriteToLog appends a JSON-encoded message to the task's JSONL log file.
+// WriteToLog appends one backend-owned control through the active task log.
 func (t *Task) WriteToLog(m agent.Message) error {
 	t.mu.Lock()
-	h := t.handle
-	path := t.logPath
+	var log agent.LogSink
+	if t.handle != nil {
+		log = t.handle.Log
+	}
 	t.mu.Unlock()
-	data, err := agent.MarshalMessage(m)
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	if h != nil && h.LogW != nil {
-		_, err = h.LogW.Write(data)
-		return err
-	}
-	if path == "" {
+	if log == nil {
 		return ErrNoLog
 	}
-	w, _, err := openTaskLogForAppend(path, t, false)
-	if err != nil {
-		return err
-	}
-	_, writeErr := w.Write(data)
-	return errors.Join(writeErr, w.Close())
+	return log.AppendMessage(m)
 }
 
 // SetCIStatus updates the ciStatus and ciChecks fields under the mutex.
@@ -1393,7 +1380,7 @@ func (t *Task) CloseAndDetachSession(ctx context.Context) *SessionHandle {
 // exit gracefully. Returns the detached handle (nil if no session was
 // attached) and any error from the graceful stop, e.g. a timeout. Used by
 // callers (Cleanup, StopTask) that need the handle afterward to reuse its
-// LogW for a trailer, or to Drain it once other teardown steps complete.
+// Log for a trailer, or to Drain it once other teardown steps complete.
 func (t *Task) GracefulStopSession(ctx context.Context, timeout time.Duration) (*SessionHandle, error) {
 	h := t.DetachSession()
 	if h == nil {

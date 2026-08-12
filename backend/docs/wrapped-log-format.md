@@ -30,28 +30,7 @@ Across all phases:
   retain a raw compatibility path for a later cleanup phase.
 - Production continues creating v1 logs until cut-over.
 
-### Phase 1 — unify-log-writing: Use one task-log append path
-
-- **Scope:** replace `Options.LogW`, `SessionHandle.LogW`, free raw-write helpers,
-  and both branches of `Task.WriteToLog` with one header-authoritative append
-  owner; consolidate reopen validation and replay attachment; and migrate every
-  backend write of native records and controls, including the Codex/OpenCode
-  session-metadata handoff and metadata-write failure cleanup.
-- **Preserve:** serialized writes, relay persistence semantics, pending-action
-  uniqueness, and the existing handshake protocol. A matching validated snapshot
-  keeps reopen validation bounded to identity and header proof; without one,
-  reopen validates the complete log through EOF.
-- **Verify:** repository audit finds no task-log `io.Writer`, path-based raw
-  append bypass, separate snapshot versus fallback validator, stateful one-use
-  replay-proof adapter, or divergent Codex/OpenCode metadata-write path. A failed
-  session-metadata write terminates and reaps the relay process, and metadata is
-  persisted before the session is returned. V1 golden bytes are unchanged,
-  latent v2 writes match the linked fixture, mixed-version writes fail before
-  emission, native input and handshake metadata are each persisted exactly once,
-  and `go test ./backend/internal/agent/... ./backend/internal/task/...
-  ./backend/internal/eventreplay/...` passes.
-
-### Phase 2 — cut-over-to-v2: Enable v2 and prove restart behavior
+### Phase 1 — cut-over-to-v2: Enable v2 and prove restart behavior
 
 - **Scope:** the new-file header default, relay selection, task creation,
   reopen/resume/adoption, caller-supplied version plumbing, and the real-runtime

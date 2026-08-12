@@ -41,8 +41,8 @@ func NewFakeBackend() *FakeBackend {
 //
 // The fake Python agent reads lines from stdin and matches keywords; it does
 // not parse JSON input.
-func (*FakeBackend) WritePrompt(w io.Writer, p agent.Prompt, logW io.Writer) error {
-	return agent.PlainTextWritePrompt(w, p, logW)
+func (*FakeBackend) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) error {
+	return agent.PlainTextWritePrompt(w, p, log)
 }
 
 // ParseMessage decodes a single flat NDJSON line from the fake agent.
@@ -65,7 +65,7 @@ func (b *FakeBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Se
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	s := agent.NewSession(cmd, agent.NewVersionedConn(stdin, opts.LogW, opts.LogVersion, b), stdout, opts.MsgCh, nil)
+	s := agent.NewSession(cmd, agent.NewConn(stdin, opts.Log, opts.LogVersion, b), stdout, opts.MsgCh, nil)
 	if opts.InitialPrompt.Text != "" {
 		if err := s.SendPrompt(opts.InitialPrompt); err != nil {
 			_ = s.Close()

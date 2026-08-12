@@ -17,14 +17,24 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
+type testLogSink struct{ bytes.Buffer }
+
+func (s *testLogSink) AppendNative(data []byte) error {
+	_, err := s.Write(data)
+	return err
+}
+
+func (*testLogSink) AppendMessage(agent.Message) error { return nil }
+func (*testLogSink) Close() error                      { return nil }
+
 func TestWritePrompt(t *testing.T) {
 	t.Parallel()
 	t.Run("TextOnly", func(t *testing.T) {
 		t.Parallel()
 		var buf bytes.Buffer
-		var logBuf bytes.Buffer
+		logBuf := &testLogSink{}
 		var b Backend
-		if err := b.WritePrompt(&buf, agent.Prompt{Text: "hello"}, &logBuf); err != nil {
+		if err := b.WritePrompt(&buf, agent.Prompt{Text: "hello"}, logBuf); err != nil {
 			t.Fatal(err)
 		}
 		if buf.String() != logBuf.String() {
@@ -42,7 +52,7 @@ func TestWritePrompt(t *testing.T) {
 		images := []agent.ImageData{
 			{MediaType: "image/png", Data: "iVBOR..."},
 		}
-		if err := b.WritePrompt(&buf, agent.Prompt{Text: "describe this", Images: images}, io.Discard); err != nil {
+		if err := b.WritePrompt(&buf, agent.Prompt{Text: "describe this", Images: images}, agent.DiscardLogSink); err != nil {
 			t.Fatal(err)
 		}
 		// Content must be an array of content blocks, not a string.
@@ -88,7 +98,7 @@ func TestWritePrompt(t *testing.T) {
 		images := []agent.ImageData{
 			{MediaType: "image/jpeg", Data: "/9j/..."},
 		}
-		if err := b.WritePrompt(&buf, agent.Prompt{Images: images}, io.Discard); err != nil {
+		if err := b.WritePrompt(&buf, agent.Prompt{Images: images}, agent.DiscardLogSink); err != nil {
 			t.Fatal(err)
 		}
 		var msg struct {

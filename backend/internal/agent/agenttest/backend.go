@@ -88,7 +88,7 @@ func (f *FakeBackend) ContextWindowLimit(string) int {
 type noopWire struct{}
 
 // WritePrompt implements agent.WireFormat.
-func (noopWire) WritePrompt(io.Writer, agent.Prompt, io.Writer) error { return nil }
+func (noopWire) WritePrompt(io.Writer, agent.Prompt, agent.LogSink) error { return nil }
 
 // ParseMessage implements agent.WireFormat.
 func (noopWire) ParseMessage([]byte) ([]agent.Message, error) { return nil, nil }

@@ -76,8 +76,8 @@ func (*SmokeBackend) NewWire() agent.WireFormat {
 }
 
 // WritePrompt writes the prompt as plain text.
-func (*SmokeBackend) WritePrompt(w io.Writer, p agent.Prompt, logW io.Writer) error {
-	return agent.PlainTextWritePrompt(w, p, logW)
+func (*SmokeBackend) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) error {
+	return agent.PlainTextWritePrompt(w, p, log)
 }
 
 // ParseMessage decodes one smoke-agent NDJSON line.

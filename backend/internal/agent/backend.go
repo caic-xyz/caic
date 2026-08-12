@@ -16,7 +16,7 @@ import (
 // remains agent-agnostic.
 type Backend interface {
 	// Start launches the agent at the configured target. Parsed messages are
-	// forwarded to opts.MsgCh; opts.LogW receives raw wire-format lines.
+	// forwarded to opts.MsgCh; opts.Log owns persisted task-log records.
 	Start(ctx context.Context, opts *Options) (*Session, error)
 
 	// AttachRelay connects to an already-running relay daemon in the
@@ -118,7 +118,7 @@ type HarnessArgs struct {
 // PrePromptWriter is implemented by backends that send initialization
 // commands to stdin before the first user prompt (e.g. Pi's set_model).
 type PrePromptWriter interface {
-	WritePrePrompt(w io.Writer, model string, logW io.Writer) error
+	WritePrePrompt(w io.Writer, model string, log LogSink) error
 }
 
 // RecordHandshaker is implemented by backends that perform a bidirectional

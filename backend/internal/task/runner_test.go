@@ -4,7 +4,6 @@
 package task
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -126,7 +125,7 @@ func (b *instantExitBackend) Start(ctx context.Context, opts *agent.Options) (*a
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return agent.NewSession(cmd, agent.NewConn(stdin, opts.LogW, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, opts.MsgCh, nil), nil
+	return agent.NewSession(cmd, agent.NewConn(stdin, opts.Log, agent.LogVersionV1, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, opts.MsgCh, nil), nil
 }
 
 func caic0BranchExists(t *testing.T, dir string) bool {
@@ -191,8 +190,8 @@ func TestRunner(t *testing.T) {
 		_, ch, unsub := tk.Subscribe(t.Context())
 		t.Cleanup(unsub)
 
-		var persisted bytes.Buffer
-		w := &provisioningWriter{ctx: t.Context(), t: tk, logW: &persisted}
+		persisted := &testLogSink{}
+		w := &provisioningWriter{ctx: t.Context(), t: tk, log: persisted}
 
 		n, err := w.Write([]byte("hel"))
 		if err != nil {
@@ -296,7 +295,7 @@ func TestRunner(t *testing.T) {
 			stopCancel()
 			h.CloseMsgCh()
 			<-h.DispatchDone
-			_ = h.LogW.Close()
+			_ = h.Log.Close()
 
 			if backend.capturedOpts.Model != "model-1" {
 				t.Errorf("Model = %q, want model-1", backend.capturedOpts.Model)
@@ -831,7 +830,7 @@ func TestRunner(t *testing.T) {
 			}
 			t.Cleanup(func() {
 				fork.CloseAndDetachSession(t.Context())
-				_ = h.LogW.Close()
+				_ = h.Log.Close()
 			})
 
 			// Readable "<id>-<repo>-<branch>" name, computed at Open from the
@@ -893,7 +892,7 @@ func TestRunner(t *testing.T) {
 			}
 			t.Cleanup(func() {
 				fork.CloseAndDetachSession(t.Context())
-				_ = h.LogW.Close()
+				_ = h.Log.Close()
 			})
 
 			// Each repo is pinned to its own branch, not both to the primary's.

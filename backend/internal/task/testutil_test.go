@@ -47,7 +47,7 @@ func (b *testBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Se
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return agent.NewSession(cmd, agent.NewConn(stdin, opts.LogW, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, opts.MsgCh, nil), nil
+	return agent.NewSession(cmd, agent.NewConn(stdin, opts.Log, agent.LogVersionV1, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, opts.MsgCh, nil), nil
 }
 
 type attachCaptureBackend struct {
@@ -70,7 +70,7 @@ func (b *attachCaptureBackend) AttachRelay(ctx context.Context, opts *agent.Opti
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return agent.NewSession(cmd, agent.NewConn(stdin, opts.LogW, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, opts.MsgCh, nil), nil
+	return agent.NewSession(cmd, agent.NewConn(stdin, opts.Log, agent.LogVersionV1, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, opts.MsgCh, nil), nil
 }
 
 // testWire implements agent.WireFormat for testing.
@@ -78,7 +78,7 @@ type testWire struct {
 	parse func([]byte) ([]agent.Message, error)
 }
 
-func (*testWire) WritePrompt(w io.Writer, p agent.Prompt, logW io.Writer) error {
+func (*testWire) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) error {
 	msg := struct {
 		Type    string `json:"type"`
 		Message struct {
@@ -96,10 +96,7 @@ func (*testWire) WritePrompt(w io.Writer, p agent.Prompt, logW io.Writer) error 
 	if _, err := w.Write(data); err != nil {
 		return err
 	}
-	if logW != nil {
-		_, _ = logW.Write(data)
-	}
-	return nil
+	return log.AppendNative(data)
 }
 
 func (w *testWire) ParseMessage(line []byte) ([]agent.Message, error) {

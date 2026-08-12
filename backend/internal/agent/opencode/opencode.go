@@ -125,10 +125,6 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		_ = cmd.Wait()
 		return nil, fmt.Errorf("opencode handshake: %w", err)
 	}
-	log := slog.With("target", sshHost)
-	c := agent.NewVersionedConn(stdin, opts.LogW, opts.LogVersion, hs.wire)
-	s := agent.NewSession(cmd, c, continuation, opts.MsgCh, log)
-
 	// Emit InitMessage so the task captures session ID, model, and version.
 	initMsg := &agent.InitMessage{
 		SessionID: hs.wire.sessionID,
@@ -136,10 +132,26 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		Version:   hs.agentVersion,
 	}
 	opts.MsgCh <- agent.ParsedMessage{Message: initMsg}
-	if err := agent.WriteMetaSession(opts.LogW, initMsg); err != nil {
-		return nil, fmt.Errorf("write session metadata: %w", err)
+	if err := agent.WriteMetaSession(opts.Log, initMsg); err != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		shutdownErr := agent.StopRelay(shutdownCtx, opts.Target)
+		closeErr := stdin.Close()
+		waitCh := make(chan error, 1)
+		go func() { waitCh <- cmd.Wait() }()
+		var waitErr error
+		select {
+		case waitErr = <-waitCh:
+		case <-shutdownCtx.Done():
+			_ = cmd.Process.Kill()
+			waitErr = <-waitCh
+		}
+		return nil, fmt.Errorf("write session metadata: %w", errors.Join(err, shutdownErr, closeErr, waitErr))
 	}
 
+	log := slog.With("target", sshHost)
+	c := agent.NewConn(stdin, opts.Log, opts.LogVersion, hs.wire)
+	s := agent.NewSession(cmd, c, continuation, opts.MsgCh, log)
 	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
 		if err := s.SendPrompt(opts.InitialPrompt); err != nil {
 			_ = s.Close()
@@ -204,7 +216,7 @@ type wireFormat struct {
 }
 
 // WritePrompt sends a session/prompt JSON-RPC request to begin a new turn.
-func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer) error {
+func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, log agent.LogSink) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.sessionID == "" {
@@ -241,8 +253,8 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer) e
 
 // WriteCompact implements agent.CompactCommand by sending /compact as a prompt.
 // OpenCode recognizes this as a slash command via session/prompt.
-func (w *wireFormat) WriteCompact(wr io.Writer, _ string, logW io.Writer) error {
-	return w.WritePrompt(wr, agent.Prompt{Text: "/compact"}, logW)
+func (w *wireFormat) WriteCompact(wr io.Writer, _ string, log agent.LogSink) error {
+	return w.WritePrompt(wr, agent.Prompt{Text: "/compact"}, log)
 }
 
 // ParseMessage wraps the package-level parseMessage with interceptions:
@@ -419,7 +431,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	defer cancel()
 
 	w := &wireFormat{fw: &jsonutil.FieldWarner{}}
-	records, err := agent.NewRelayRecordReader(stdout, opts.LogVersion, io.Discard)
+	records, err := agent.NewRelayRecordReader(stdout, opts.LogVersion, agent.DiscardLogSink)
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct relay reader: %w", err)
 	}

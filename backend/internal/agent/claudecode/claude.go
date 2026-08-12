@@ -129,13 +129,13 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if err != nil {
 		return nil, err
 	}
-	c := agent.Conn(&controlConn{Conn: agent.NewVersionedConn(rp.Stdin, opts.LogW, opts.LogVersion, b)})
+	c := agent.Conn(&controlConn{Conn: agent.NewConn(rp.Stdin, opts.Log, opts.LogVersion, b)})
 	return agent.StartSession(rp, c, opts)
 }
 
 // WritePrompt writes a single user message in Claude Code's stdin format.
 // When images are provided, content is emitted as an array of content blocks.
-func (*Backend) WritePrompt(w io.Writer, p agent.Prompt, logW io.Writer) error {
+func (*Backend) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) error {
 	var blocks []claudecode.InputContentBlock
 	for _, img := range p.Images {
 		blocks = append(blocks, claudecode.InputContentBlock{
@@ -162,8 +162,7 @@ func (*Backend) WritePrompt(w io.Writer, p agent.Prompt, logW io.Writer) error {
 	if _, err := w.Write(data); err != nil {
 		return err
 	}
-	_, err = logW.Write(data)
-	return err
+	return log.AppendNative(data)
 }
 
 // AgentArgs implements agent.Backend.
@@ -209,12 +208,12 @@ func (*Backend) NewWire() agent.WireFormat {
 
 // WriteCompact implements agent.CompactCommand by sending /compact as a user
 // message. Claude Code recognizes this as a slash command in -p mode.
-func (b *Backend) WriteCompact(w io.Writer, instructions string, logW io.Writer) error {
+func (b *Backend) WriteCompact(w io.Writer, instructions string, log agent.LogSink) error {
 	text := "/compact"
 	if instructions != "" {
 		text = "/compact " + instructions
 	}
-	return b.WritePrompt(w, agent.Prompt{Text: text}, logW)
+	return b.WritePrompt(w, agent.Prompt{Text: text}, log)
 }
 
 // hasOAuth reports whether Claude Code has an OAuth session configured

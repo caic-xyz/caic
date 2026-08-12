@@ -14,6 +14,8 @@ import (
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
+
+	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
 // ErrNoLog reports that a task has no active or persisted log to append to.
@@ -29,21 +31,14 @@ func IsLogName(name string) bool {
 	return strings.HasSuffix(name, logPlainExt) || strings.HasSuffix(name, logCompressedExt)
 }
 
-// taskLogWriter is needed for now because task log ownership is currently
-// split across several components: agent.Conn writes raw harness output, RepoWorkspace
-// writes lifecycle metadata, Task.WriteToLog writes task metadata, harnesses
-// write synthetic records through opts.LogW, and adoption restores enough state
-// to write metadata again later.
-//
-// That shared ownership means the active log writer must at least provide a
-// clear concurrency contract: JSONL appends from session output and server-side
-// metadata are serialized through one writer, and close is idempotent across
-// converging lifecycle paths. The cleaner design is a single TaskLog/LogStore
-// owner with explicit append methods instead of handing out raw io.WriteClosers.
+// taskLogWriter owns serialized physical appends to one task log. Callers
+// provide either complete native records or semantic caic controls; raw file
+// writes never escape this type.
 type taskLogWriter struct {
-	mu     sync.Mutex
-	file   *os.File
-	closed bool
+	mu      sync.Mutex
+	file    *os.File
+	version agent.LogVersion
+	closed  bool
 }
 
 // newTaskLogWriter opens a serialized append writer for an active task log.
@@ -52,17 +47,36 @@ func newTaskLogWriter(path string, flags int) (*taskLogWriter, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &taskLogWriter{file: f}, nil
+	return &taskLogWriter{file: f, version: agent.LogVersionV1}, nil
 }
 
-// Write serializes writes to the underlying task log file.
-func (w *taskLogWriter) Write(p []byte) (int, error) {
+// AppendNative appends one complete encoded native physical record.
+func (w *taskLogWriter) AppendNative(data []byte) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.closed {
-		return 0, os.ErrClosed
+		return os.ErrClosed
 	}
-	return w.file.Write(p)
+	if len(data) == 0 || data[len(data)-1] != '\n' {
+		return errors.New("task log native record is not LF-terminated")
+	}
+	n, err := w.file.Write(data)
+	if err != nil {
+		return err
+	}
+	if n != len(data) {
+		return io.ErrShortWrite
+	}
+	return nil
+}
+
+// AppendMessage encodes and appends one backend-owned control record.
+func (w *taskLogWriter) AppendMessage(m agent.Message) error {
+	data, err := agent.MarshalLogMessage(w.version, m)
+	if err != nil {
+		return err
+	}
+	return w.AppendNative(append(data, '\n'))
 }
 
 // Close closes the underlying task log file once.

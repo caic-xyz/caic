@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,6 +23,23 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
+
+type testLogSink struct{ bytes.Buffer }
+
+func (s *testLogSink) AppendNative(data []byte) error {
+	_, err := s.Write(data)
+	return err
+}
+
+func (s *testLogSink) AppendMessage(m agent.Message) error {
+	data, err := agent.MarshalLogMessage(agent.LogVersionV1, m)
+	if err != nil {
+		return err
+	}
+	return s.AppendNative(append(data, '\n'))
+}
+
+func (*testLogSink) Close() error { return nil }
 
 const piSSHHelperEnv = "GO_WANT_PI_SSH_HELPER"
 
@@ -159,7 +175,7 @@ func TestWaitForResponse(t *testing.T) {
 
 	t.Run("caic_exit surfaces relay stderr", func(t *testing.T) {
 		t.Parallel()
-		r, err := agent.NewRelayRecordReader(bytes.NewBufferString(`{"type":"caic_exit","exit_code":2,"error":"Unknown option: --approve"}`+"\n"), agent.LogVersionV1, io.Discard)
+		r, err := agent.NewRelayRecordReader(bytes.NewBufferString(`{"type":"caic_exit","exit_code":2,"error":"Unknown option: --approve"}`+"\n"), agent.LogVersionV1, agent.DiscardLogSink)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -177,7 +193,7 @@ func TestWaitForResponse(t *testing.T) {
 	t.Run("v2 response is persisted once", func(t *testing.T) {
 		t.Parallel()
 		line := `{"t":"agent","ts":1.000,"msg":{"type":"response","command":"set_model","success":true,"data":{}}}`
-		var log bytes.Buffer
+		var log testLogSink
 		records, err := agent.NewRelayRecordReader(strings.NewReader(line+"\n"), agent.LogVersionV2, &log)
 		if err != nil {
 			t.Fatal(err)
@@ -214,7 +230,7 @@ func TestReapPiProcessExit(t *testing.T) {
 		_ = stdin.Close()
 	})
 
-	records, recordsErr := agent.NewRelayRecordReader(stdout, agent.LogVersionV1, io.Discard)
+	records, recordsErr := agent.NewRelayRecordReader(stdout, agent.LogVersionV1, agent.DiscardLogSink)
 	if recordsErr != nil {
 		t.Fatal(recordsErr)
 	}
@@ -249,14 +265,14 @@ func TestBackendStart(t *testing.T) {
 	t.Setenv("PI_SSH_HELPER_DIR", dir)
 
 	msgs := make(chan agent.ParsedMessage, 1)
-	log := &bytes.Buffer{}
+	log := &testLogSink{}
 	sess, err := New("", nil).Start(t.Context(), &agent.Options{
 		Target:     runtime.ConnectionTarget{SSHHost: "task"},
 		Dir:        "/workspace",
 		Model:      "openai-codex/gpt-5.6-terra",
 		LogVersion: agent.LogVersionV1,
 		MsgCh:      msgs,
-		LogW:       log,
+		Log:        log,
 	})
 	if err != nil {
 		t.Fatalf("Start: %v", err)

@@ -3,10 +3,10 @@
 package agent
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -732,23 +732,64 @@ type MetaSessionMessage struct {
 // Type implements Message.
 func (m *MetaSessionMessage) Type() string { return "caic_session" }
 
-// WriteMetaSession writes a caic_session control record for init metadata to w.
-func WriteMetaSession(w io.Writer, init *InitMessage) error {
-	if w == nil || init == nil || (init.SessionID == "" && init.Model == "" && init.Version == "") {
+// LogSink appends complete task-log records through the task-owned physical
+// log authority. Native records are already encoded physical records; semantic
+// messages are backend controls encoded according to the owned log version.
+type LogSink interface {
+	AppendNative(data []byte) error
+	AppendMessage(message Message) error
+	Close() error
+}
+
+type discardLogSink struct{}
+
+func (discardLogSink) AppendNative([]byte) error   { return nil }
+func (discardLogSink) AppendMessage(Message) error { return nil }
+func (discardLogSink) Close() error                { return nil }
+
+// DiscardLogSink ignores task-log records for non-persistent agent operations.
+var DiscardLogSink LogSink = discardLogSink{}
+
+// AppendNativeRecord appends a native record in the exact physical format.
+func AppendNativeRecord(log LogSink, version LogVersion, data []byte) error {
+	if err := version.Validate(); err != nil {
+		return err
+	}
+	data = bytes.TrimSuffix(data, []byte{'\n'})
+	if len(data) == 0 {
 		return nil
 	}
-	data, err := json.Marshal(&MetaSessionMessage{
+	if version == LogVersionV2 {
+		ts := time.Now().UTC()
+		data = fmt.Appendf(nil, `{"t":"agent","ts":%d.%03d,"msg":%s}`, ts.Unix(), ts.Nanosecond()/int(time.Millisecond), data)
+		data = append(data, '\n')
+	} else {
+		data = append(data, '\n')
+	}
+	return log.AppendNative(data)
+}
+
+// WriteMetaSession appends a caic_session control record for init metadata.
+func WriteMetaSession(log LogSink, init *InitMessage) error {
+	if init.SessionID == "" && init.Model == "" && init.Version == "" {
+		return nil
+	}
+	return log.AppendMessage(&MetaSessionMessage{
 		MessageType:  "caic_session",
 		SessionID:    init.SessionID,
 		Model:        init.Model,
 		AgentVersion: init.Version,
 	})
-	if err != nil {
-		return err
-	}
-	_, err = w.Write(append(data, '\n'))
-	return err
 }
+
+// ModelInfoMessage records a harness-reported context window for replay.
+type ModelInfoMessage struct {
+	MessageType   string `json:"type"`
+	ContextWindow int64  `json:"context_window"`
+}
+
+// Type implements Message.
+func (m *ModelInfoMessage) Type() string { return "caic_model_info" }
 
 // MetaResultMessage is appended as the last line of a JSONL log file when a
 // task reaches a terminal state.
@@ -792,4 +833,62 @@ func MarshalMessage(m Message) ([]byte, error) {
 		return rm.Raw, nil
 	}
 	return json.Marshal(m)
+}
+
+// MarshalLogMessage encodes one semantic backend control record for version.
+func MarshalLogMessage(version LogVersion, m Message) ([]byte, error) {
+	if err := version.Validate(); err != nil {
+		return nil, err
+	}
+	if _, ok := m.(*RawMessage); ok {
+		return nil, errors.New("raw messages must be appended as native records")
+	}
+	data, err := MarshalMessage(m)
+	if err != nil || version == LogVersionV1 {
+		return data, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return nil, err
+	}
+	delete(fields, "type")
+	token, err := v2ControlToken(m)
+	if err != nil {
+		return nil, err
+	}
+	fields["t"], err = json.Marshal(token)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(fields)
+}
+
+func v2ControlToken(m Message) (string, error) {
+	switch m.Type() {
+	case "caic_meta":
+		return "caic_meta", nil
+	case "caic_diff_stat":
+		return "diff_stat", nil
+	case "caic_exit":
+		return "exit", nil
+	case "caic_stripped_env":
+		return "stripped_env", nil
+	case "caic_session":
+		return "session", nil
+	case "caic_model_info":
+		return "model_info", nil
+	case "caic_pr":
+		return "pr", nil
+	case "caic_result":
+		return "result", nil
+	case PendingUserActionMessageType:
+		return "pending_user_action", nil
+	case "caic_log":
+		return "log", nil
+	case "system":
+		if m, ok := m.(*SystemMessage); ok && m.Subtype == "context_cleared" {
+			return "context_cleared", nil
+		}
+	}
+	return "", fmt.Errorf("message type %q is not a task-log control", m.Type())
 }

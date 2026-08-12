@@ -782,7 +782,7 @@ func TestWireFormat(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{threadID: "t1"}
 		var buf bytes.Buffer
-		if err := w.WritePrompt(&buf, agent.Prompt{Text: "fix the bug"}, nil); err != nil {
+		if err := w.WritePrompt(&buf, agent.Prompt{Text: "fix the bug"}, agent.DiscardLogSink); err != nil {
 			t.Fatal(err)
 		}
 		var req map[string]any
@@ -821,7 +821,7 @@ func TestWireFormat(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{threadID: "t1", effort: "high"}
 		var buf bytes.Buffer
-		if err := w.WritePrompt(&buf, agent.Prompt{Text: "fix the bug"}, nil); err != nil {
+		if err := w.WritePrompt(&buf, agent.Prompt{Text: "fix the bug"}, agent.DiscardLogSink); err != nil {
 			t.Fatal(err)
 		}
 		var req map[string]any
@@ -843,7 +843,7 @@ func TestWireFormat(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{}
 		var buf bytes.Buffer
-		err := w.WritePrompt(&buf, agent.Prompt{Text: "hello"}, nil)
+		err := w.WritePrompt(&buf, agent.Prompt{Text: "hello"}, agent.DiscardLogSink)
 		if err == nil {
 			t.Fatal("expected error for missing thread ID")
 		}

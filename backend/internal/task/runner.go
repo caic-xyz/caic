@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"runtime/trace"
 	"strings"
@@ -129,7 +128,7 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 	// The Manager has already assigned every repo's branch name (the branch itself
 	// is created below, concurrently with launch), so the log can open with the
 	// durable, branch-derived filename and persist output from its first line.
-	logW, err := r.Sessions.Logs.Open(t)
+	log, err := r.Sessions.Logs.Open(t)
 	if err != nil {
 		t.recordStartupFailure(ctx, err)
 		return nil, err
@@ -139,10 +138,10 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 	// 1. Create branch (serialized) + start instance (concurrent).
 	r.Workspace.Log.Info("setup task")
 	region := trace.StartRegion(ctx, "setup")
-	sr, err := r.setup(ctx, t, MakeMetadata(t), resolvedGitHubToken, logW)
+	sr, err := r.setup(ctx, t, MakeMetadata(t), resolvedGitHubToken, log)
 	region.End()
 	if err != nil {
-		return nil, r.finishStartupFailure(ctx, t, logW, err)
+		return nil, r.finishStartupFailure(ctx, t, log, err)
 	}
 	t.SetRuntimeConnectionInfo(sr.InstanceID, sr.AgentTarget, sr.TailscaleFQDN, sr.TailscaleAuthURL, r.Workspace.Runtimes.VNCPort(ctx, sr.InstanceID))
 	var primaryBranch string
@@ -174,18 +173,18 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 		InitialPrompt: t.InitialPrompt,
 		LogVersion:    t.RelayLogVersion(),
 		MsgCh:         msgCh,
-		LogW:          logW,
+		Log:           log,
 	})
 	region.End()
 	if err != nil {
 		close(msgCh)
 		<-dispatchDone
 		tlog.Error("session start failed", "err", err)
-		return nil, r.finishStartupFailure(ctx, t, logW, err)
+		return nil, r.finishStartupFailure(ctx, t, log, err)
 	}
 
 	// Store handle so SendInput can reach it.
-	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, LogW: logW}
+	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log}
 	t.AttachSession(h)
 
 	t.addMessage(ctx, syntheticUserInput(t.InitialPrompt), false)
@@ -211,7 +210,7 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 //  3. Set task state to reason (StatePurged or StateFailed).
 //  4. Purge the instance (stop + remove + cleanup git remotes/runtime config).
 //  5. If graceful wait timed out, drain session now (runtime connection severed).
-//  6. Close msgCh and logW, write log trailer.
+//  6. Close msgCh and log, write log trailer.
 //  7. Build and return Result.
 func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 	ctx, task := trace.NewTask(ctx, "task.cleanup:"+t.ID.String())
@@ -303,27 +302,27 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 	if reason == StatePurged && runtimeRemovedOrAbsent && branchConfirmedEmpty {
 		r.Workspace.DeleteUnmodifiedTaskBranches(ctx, t)
 	}
-	var logW io.WriteCloser
+	var log agent.LogSink
 	if h != nil {
-		logW = h.LogW
+		log = h.Log
 	} else {
-		// Task was stopped before purge: the session handle (and its LogW) was
+		// Task was stopped before purge: the session handle (and its Log) was
 		// released by StopTask. Reopen the log for appending so we can write
 		// the caic_result trailer; without it the task would load as "failed"
 		// on the next server restart instead of "purged".
 		tlog.DebugContext(ctx, "cleanup: no session handle, reopening log for trailer")
 		var reopenErr error
-		logW, reopenErr = r.Sessions.Logs.Reopen(t)
+		log, reopenErr = r.Sessions.Logs.Reopen(t)
 		if reopenErr != nil {
 			tlog.WarnContext(ctx, "reopen log for trailer failed", "err", reopenErr)
 		}
 	}
-	trailerErr := r.Sessions.Logs.WriteResultTrailer(logW, t.Title(), &res)
+	trailerErr := r.Sessions.Logs.WriteResultTrailer(log, t.Title(), &res)
 	if trailerErr != nil {
 		tlog.WarnContext(ctx, "write log trailer failed", "err", trailerErr)
 	}
-	if logW != nil {
-		closeErr := logW.Close()
+	if log != nil {
+		closeErr := log.Close()
 		if closeErr != nil {
 			tlog.WarnContext(ctx, "close log failed", "err", closeErr)
 		} else {
@@ -399,8 +398,8 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 	}
 
 	if _, changed := t.SetStateUnless(StateStopped, StatePurging, StatePurged, StateCrashed, StateFailed); !changed {
-		if h != nil && h.LogW != nil {
-			_ = h.LogW.Close()
+		if h != nil && h.Log != nil {
+			_ = h.Log.Close()
 		}
 		if err := t.CommitEventReplay(ctx); err != nil {
 			tlog.WarnContext(ctx, "commit event replay failed", "err", err)
@@ -421,15 +420,15 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 	if ds := t.LiveDiffStat(); len(ds) > 0 {
 		res.DiffStat = ds
 	}
-	var logW io.WriteCloser
+	var log agent.LogSink
 	if h != nil {
-		logW = h.LogW
+		log = h.Log
 	}
-	if err := r.Sessions.Logs.WriteResultTrailer(logW, t.Title(), &res); err != nil {
+	if err := r.Sessions.Logs.WriteResultTrailer(log, t.Title(), &res); err != nil {
 		tlog.WarnContext(ctx, "write log trailer failed", "err", err)
 	}
-	if logW != nil {
-		_ = logW.Close()
+	if log != nil {
+		_ = log.Close()
 	}
 	if err := t.CommitEventReplay(ctx); err != nil {
 		tlog.WarnContext(ctx, "commit event replay failed", "err", err)
@@ -476,7 +475,7 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 	tlog.Info("resuming session after revive", "sess", t.GetSessionID())
 
 	msgCh, dispatchDone := r.Sessions.startMessageDispatch(ctx, t, true)
-	logW, err := r.Sessions.Logs.Open(t)
+	log, err := r.Sessions.Logs.Open(t)
 	if err != nil {
 		close(msgCh)
 		<-dispatchDone
@@ -494,17 +493,17 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 		ResumeSessionID: t.GetSessionID(),
 		LogVersion:      t.RelayLogVersion(),
 		MsgCh:           msgCh,
-		LogW:            logW,
+		Log:             log,
 	})
 	if err != nil {
-		_ = logW.Close()
+		_ = log.Close()
 		close(msgCh)
 		<-dispatchDone
 		t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
 		return nil, fmt.Errorf("resume session after revive: %w", err)
 	}
 
-	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, LogW: logW}
+	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log}
 	t.AttachSession(h)
 
 	// 3. If --resume exits immediately (previous session was complete),
@@ -572,7 +571,7 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *run
 	}
 	forkOpts.Repos = specs
 
-	logW, err := r.Sessions.Logs.Open(fork)
+	log, err := r.Sessions.Logs.Open(fork)
 	if err != nil {
 		fork.recordStartupFailure(ctx, err)
 		return nil, err
@@ -583,7 +582,7 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *run
 	// straight to the already-open log.
 	tlog.Info("forking instance", "br", forkBranch)
 	tlog.Debug("workspace", "msg", "calling instance.Fork", "source", sourceInstanceID, "harness", forkOpts.Harness, "tailscale", forkOpts.Tailscale, "usb", forkOpts.USB, "display", forkOpts.Display, "sudo", forkOpts.Sudo, "gitHubToken", fork.GitHubTokenEnabled())
-	provisioningLog := &provisioningWriter{ctx: ctx, t: fork, logW: logW}
+	provisioningLog := &provisioningWriter{ctx: ctx, t: fork, log: log}
 	forkOpts.LogWriter = provisioningLog
 	forkName, forkConn, forkRepos, err := r.Workspace.Runtimes.Fork(ctx, sourceInstanceID, forkOpts)
 	if flushErr := provisioningLog.Flush(); flushErr != nil {
@@ -591,7 +590,7 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *run
 	}
 	if err != nil {
 		tlog.Error("workspace", "msg", "instance.Fork failed", "source", sourceInstanceID, "err", err)
-		return nil, r.finishStartupFailure(ctx, fork, logW, fmt.Errorf("fork instance: %w", err))
+		return nil, r.finishStartupFailure(ctx, fork, log, fmt.Errorf("fork instance: %w", err))
 	}
 	tlog.Debug("workspace", "msg", "instance.Fork succeeded", "source", sourceInstanceID, "fork", forkName)
 	fork.SetRuntimeConnectionInfo(forkName, forkConn.AgentTarget, "", "", r.Workspace.Runtimes.VNCPort(ctx, forkName))
@@ -615,10 +614,10 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *run
 	// 3. Start a fresh agent session with the fork prompt.
 	// No --resume: the fork gets its own session ID and clean message history.
 	fork.SetState(StateStarting)
-	h, err := r.Sessions.startSessionWithLog(ctx, fork, fork.InitialPrompt, logW)
+	h, err := r.Sessions.startSessionWithLog(ctx, fork, fork.InitialPrompt, log)
 	if err != nil {
 		startupErr := fmt.Errorf("start session on fork: %w", err)
-		return nil, r.finishStartupFailure(ctx, fork, logW, startupErr)
+		return nil, r.finishStartupFailure(ctx, fork, log, startupErr)
 	}
 	tlog.Info("fork session running", "instance", forkName)
 	return h, nil
@@ -643,7 +642,7 @@ func (r *Runner) branchDiffStat(ctx context.Context, t *Task) (agent.DiffStat, e
 // git branch concurrently, then completes instance startup (Phase B).
 // Phase A (runtime launch) and git fetch+branch-create overlap, cutting the
 // branch-allocation time off the critical path.
-func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, resolvedGitHubToken string, logW io.Writer) (setupResult, error) {
+func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, resolvedGitHubToken string, log agent.LogSink) (setupResult, error) {
 	t.SetState(StateProvisioning)
 	detached := context.WithoutCancel(ctx)
 	var primaryBranch string
@@ -659,7 +658,7 @@ func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, 
 	if runtimeName == "" {
 		runtimeName = r.Workspace.Runtimes.Runtimes[0].Name()
 	}
-	provisioningLog := &provisioningWriter{ctx: ctx, t: t, logW: logW}
+	provisioningLog := &provisioningWriter{ctx: ctx, t: t, log: log}
 	opts := &runtime.StartOptions{
 		RuntimeName:       runtimeName,
 		Metadata:          metadata,
@@ -741,37 +740,17 @@ func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, 
 
 // finishStartupFailure records a startup error in the task log and finalizes
 // its event replay so the failure survives a server restart.
-func (r *Runner) finishStartupFailure(ctx context.Context, t *Task, logW io.WriteCloser, startupErr error) error {
+func (r *Runner) finishStartupFailure(ctx context.Context, t *Task, log agent.LogSink, startupErr error) error {
 	failure := &agent.LogMessage{MessageType: "caic_log", Line: "Task startup failed: " + startupErr.Error()}
-	writeErr := appendTaskLogMessage(logW, failure)
+	writeErr := log.AppendMessage(failure)
 	t.SetState(StateFailed)
 	t.addMessage(ctx, failure, false)
 
 	res := Result{State: StateFailed, Err: startupErr}
-	trailerErr := r.Sessions.Logs.WriteResultTrailer(logW, t.Title(), &res)
-	closeErr := logW.Close()
+	trailerErr := r.Sessions.Logs.WriteResultTrailer(log, t.Title(), &res)
+	closeErr := log.Close()
 	commitErr := t.CommitEventReplay(ctx)
 	return errors.Join(startupErr, writeErr, trailerErr, closeErr, commitErr)
-}
-
-// appendTaskLogMessage appends a backend-neutral task message to an open task log.
-func appendTaskLogMessage(w io.Writer, m agent.Message) error {
-	if w == nil {
-		return ErrNoLog
-	}
-	data, err := agent.MarshalMessage(m)
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	n, err := w.Write(data)
-	if err != nil {
-		return err
-	}
-	if n != len(data) {
-		return io.ErrShortWrite
-	}
-	return nil
 }
 
 // logRelayDiag reads the relay daemon's relay.log from the instance and logs
@@ -801,9 +780,9 @@ type setupResult struct {
 // provisioningWriter is an io.Writer that converts line-by-line output from the
 // instance backend into LogMessage events stored on the task for SSE streaming.
 type provisioningWriter struct {
-	ctx  context.Context
-	t    *Task
-	logW io.Writer
+	ctx context.Context
+	t   *Task
+	log agent.LogSink
 
 	mu  sync.Mutex
 	buf []byte
@@ -843,8 +822,8 @@ func (w *provisioningWriter) Flush() error {
 
 func (w *provisioningWriter) emitLineLocked(line string) error {
 	m := &agent.LogMessage{MessageType: "caic_log", Line: line}
-	if w.logW != nil {
-		if err := appendTaskLogMessage(w.logW, m); err != nil {
+	if w.log != nil {
+		if err := w.log.AppendMessage(m); err != nil {
 			return err
 		}
 	}

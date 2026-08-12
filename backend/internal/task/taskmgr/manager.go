@@ -473,6 +473,9 @@ func (m *Manager) ClearContext(ctx context.Context, entry *Entry) error {
 		return conflict("task is not waiting or asking")
 	}
 	workspace := m.resolveWorkspace(t)
+	if workspace == nil {
+		return internalErr(errors.New("task workspace is unavailable"), "clear context")
+	}
 	h, err := m.sessions(workspace).ClearContextSession(m.serverCtx, t) //nolint:contextcheck // intentionally using server context
 	if err != nil {
 		return internalErr(err, "clear context")
@@ -1957,7 +1960,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 			Err:         resultErr,
 		}
 		entry.Finish(result)
-		if err := writeTaskResultTrailer(t, result); err != nil {
+		if err := m.logStore().WriteTaskResultTrailer(t, result); err != nil {
 			m.log.WarnContext(ctx, "write adopted result trailer failed", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", err)
 		}
 	}
@@ -2044,27 +2047,6 @@ func (m *Manager) runtimeTaskID(ctx context.Context, id runtime.ID) (string, err
 	return m.Runtimes.Metadata(ctx, id, runtime.MetadataLegacyTaskID)
 }
 
-func writeTaskResultTrailer(t *task.Task, r *task.Result) error {
-	msg := &agent.MetaResultMessage{
-		MessageType:              "caic_result",
-		State:                    r.State.String(),
-		Title:                    t.Title(),
-		CostUSD:                  r.CostUSD,
-		Duration:                 r.Duration.Seconds(),
-		NumTurns:                 r.NumTurns,
-		InputTokens:              r.Usage.InputTokens,
-		OutputTokens:             r.Usage.OutputTokens,
-		CacheCreationInputTokens: r.Usage.CacheCreationInputTokens,
-		CacheReadInputTokens:     r.Usage.CacheReadInputTokens,
-		DiffStat:                 r.DiffStat,
-		AgentResult:              r.AgentResult,
-	}
-	if r.Err != nil {
-		msg.Error = r.Err.Error()
-	}
-	return t.WriteToLog(msg)
-}
-
 func refreshAdoptedDiffStat(ctx context.Context, workspace *repowork.Workspace, t *task.Task) {
 	switch t.GetState() {
 	case task.StateWaiting, task.StateAsking, task.StateHasPlan:
@@ -2123,8 +2105,8 @@ func (m *Manager) watchSession(entry *Entry, workspace *repowork.Workspace, h *t
 			sessionErr := h.Session.Wait()
 			h.CloseMsgCh()
 			<-h.DispatchDone
-			if h.LogW != nil {
-				_ = h.LogW.Close()
+			if h.Log != nil {
+				_ = h.Log.Close()
 			}
 			watchPrimaryName := ""
 			watchPrimaryBranch := ""
@@ -2153,7 +2135,7 @@ func (m *Manager) watchSession(entry *Entry, workspace *repowork.Workspace, h *t
 						Err:         crashErr,
 					}
 					entry.Finish(result)
-					if err := writeTaskResultTrailer(t, result); err != nil {
+					if err := m.logStore().WriteTaskResultTrailer(t, result); err != nil {
 						m.log.WarnContext(m.serverCtx, "write crashed task trailer failed", append(attrs, "err", err)...)
 					}
 					if err := t.CommitEventReplay(m.serverCtx); err != nil {
@@ -2176,7 +2158,7 @@ func (m *Manager) watchSession(entry *Entry, workspace *repowork.Workspace, h *t
 						Err:         failureErr,
 					}
 					entry.Finish(result)
-					if err := writeTaskResultTrailer(t, result); err != nil {
+					if err := m.logStore().WriteTaskResultTrailer(t, result); err != nil {
 						m.log.WarnContext(m.serverCtx, "write failed task trailer failed", append(attrs, "err", err)...)
 					}
 					if err := t.CommitEventReplay(m.serverCtx); err != nil {

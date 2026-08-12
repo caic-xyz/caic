@@ -9,13 +9,17 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	genaiopencode "github.com/maruel/genai/providers/opencode"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
 func TestParseModels(t *testing.T) {
@@ -199,7 +203,7 @@ func TestLegacyModelSelectionCancellation(t *testing.T) {
 	t.Parallel()
 	reader, writer := io.Pipe()
 	t.Cleanup(func() { _ = writer.Close() })
-	records, err := agent.NewRelayRecordReader(reader, agent.LogVersionV1, io.Discard)
+	records, err := agent.NewRelayRecordReader(reader, agent.LogVersionV1, agent.DiscardLogSink)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,5 +237,78 @@ func TestHandshakeResultSetConfigOptions(t *testing.T) {
 	}
 	if got := res.configOption(genaiopencode.ConfigOptionEffort); got == nil || len(got.Options) != 2 || got.Options[0].Value != "minimal" || got.Options[1].Value != "high" {
 		t.Fatalf("effort option = %#v, want minimal and high", got)
+	}
+}
+
+type failingLogSink struct{}
+
+func (failingLogSink) AppendNative([]byte) error { return nil }
+func (failingLogSink) AppendMessage(agent.Message) error {
+	return errors.New("persist session metadata")
+}
+func (failingLogSink) Close() error { return nil }
+
+func TestStartReapsRelayOnMetadataFailure(t *testing.T) {
+	dir := t.TempDir()
+	pidPath := filepath.Join(dir, "relay.pid")
+	sshPath := filepath.Join(dir, "ssh")
+	script := `#!/bin/sh
+case "$2" in
+  mkdir*) cat >/dev/null ; exit 0 ;;
+esac
+for arg in "$@"; do
+  case "$arg" in
+  serve-attach)
+    /bin/sleep 600 </dev/null >/dev/null 2>&1 &
+    relay=$!
+    echo "$relay" > "$CAIC_OPENCODE_RELAY_PID"
+    IFS= read -r _
+    printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"agentInfo":{"version":"1.0"}}}'
+    IFS= read -r _
+    printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1"}}'
+    while IFS= read -r _; do :; done
+    kill "$relay" 2>/dev/null
+    wait "$relay" 2>/dev/null
+    echo reaped > "$CAIC_OPENCODE_RELAY_PID.reaped"
+    exit 0
+    ;;
+  attach)
+    IFS= read -r _
+    kill "$(cat "$CAIC_OPENCODE_RELAY_PID")"
+    exit 0
+    ;;
+  esac
+done
+exit 1
+`
+	if err := os.WriteFile(sshPath, []byte(script), 0o700); err != nil { //nolint:gosec // test helper must be executable.
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	t.Setenv("CAIC_OPENCODE_RELAY_PID", pidPath)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	t.Cleanup(cancel)
+	backend := New("", nil)
+	_, err := backend.Start(ctx, &agent.Options{
+		Target:     runtime.ConnectionTarget{SSHHost: "task"},
+		Dir:        "/workspace",
+		LogVersion: agent.LogVersionV1,
+		MsgCh:      make(chan agent.ParsedMessage, 1),
+		Log:        failingLogSink{},
+	})
+	if err == nil || !strings.Contains(err.Error(), "write session metadata") {
+		t.Fatalf("Start error = %v, want metadata failure", err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		data, err := os.ReadFile(pidPath + ".reaped") //nolint:gosec // test-controlled helper path.
+		if err == nil && strings.TrimSpace(string(data)) == "reaped" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("relay daemon was not reaped after metadata failure: %v", err)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }

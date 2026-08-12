@@ -307,14 +307,14 @@ func startRelayAgent(ctx context.Context, ctr string, b agent.Backend, model, bi
 func sendCommands(stdin io.WriteCloser, b agent.Backend, model, promptText string, wire agent.WireFormat) error {
 	if wire == nil {
 		if pp, ok := b.(agent.PrePromptWriter); ok {
-			if err := pp.WritePrePrompt(stdin, model, io.Discard); err != nil {
+			if err := pp.WritePrePrompt(stdin, model, agent.DiscardLogSink); err != nil {
 				return err
 			}
 		}
 		wire = b.NewWire()
 	}
 	slog.Info("Sending prompt", "text", fmt.Sprintf("%.60s...", promptText))
-	return wire.WritePrompt(stdin, agent.Prompt{Text: promptText}, io.Discard)
+	return wire.WritePrompt(stdin, agent.Prompt{Text: promptText}, agent.DiscardLogSink)
 }
 
 // waitAndShutdown watches for a ResultMessage, then sends the null-byte sentinel and waits.

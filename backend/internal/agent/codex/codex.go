@@ -146,14 +146,14 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	wire.suppressUserInput = true
 	initMsg := &agent.InitMessage{SessionID: wire.threadID, Model: opts.Model, Version: wire.agentVersion}
 	opts.MsgCh <- agent.ParsedMessage{Message: initMsg}
-	if err := agent.WriteMetaSession(opts.LogW, initMsg); err != nil {
+	if err := agent.WriteMetaSession(opts.Log, initMsg); err != nil {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 		return nil, fmt.Errorf("write session metadata: %w", err)
 	}
 
 	log := slog.With("target", sshHost)
-	s := agent.NewSession(cmd, agent.NewVersionedConn(stdin, opts.LogW, opts.LogVersion, wire), continuation, opts.MsgCh, log)
+	s := agent.NewSession(cmd, agent.NewConn(stdin, opts.Log, opts.LogVersion, wire), continuation, opts.MsgCh, log)
 	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
 		if err := s.SendPrompt(opts.InitialPrompt); err != nil {
 			_ = s.Close()
@@ -216,7 +216,7 @@ func fetchModelInfo(ctx context.Context, target runtime.ConnectionTarget, extraE
 	}()
 
 	nextID := atomic.Int64{}
-	records, err := agent.NewRelayRecordReader(stdout, agent.LogVersionV1, io.Discard)
+	records, err := agent.NewRelayRecordReader(stdout, agent.LogVersionV1, agent.DiscardLogSink)
 	if err != nil {
 		return nil, fmt.Errorf("construct model-list reader: %w", err)
 	}
@@ -313,7 +313,7 @@ type wireFormat struct {
 
 // WritePrompt sends a turn/start JSON-RPC request to begin a new turn with
 // the given user message. Images are sent as data URL items after the text item.
-func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer) error {
+func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, log agent.LogSink) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.threadID == "" {
@@ -349,7 +349,7 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer) e
 
 // WriteCompact implements agent.CompactCommand by sending a thread/compact/start
 // JSON-RPC request. Codex compacts the context window for the current thread.
-func (w *wireFormat) WriteCompact(wr io.Writer, _ string, _ io.Writer) error {
+func (w *wireFormat) WriteCompact(wr io.Writer, _ string, _ agent.LogSink) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.threadID == "" {
@@ -451,7 +451,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	defer cancel()
 
 	w := &wireFormat{effort: opts.Effort, fw: &jsonutil.FieldWarner{}}
-	records, err := agent.NewRelayRecordReader(stdout, opts.LogVersion, io.Discard)
+	records, err := agent.NewRelayRecordReader(stdout, opts.LogVersion, agent.DiscardLogSink)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("construct relay reader: %w", err)
 	}

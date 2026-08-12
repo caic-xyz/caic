@@ -19,7 +19,24 @@ import (
 // testWire implements WireFormat for testing.
 type testWire struct{}
 
-func (testWire) WritePrompt(w io.Writer, p Prompt, logW io.Writer) error {
+type testLogSink struct{ bytes.Buffer }
+
+func (s *testLogSink) AppendNative(data []byte) error {
+	_, err := s.Write(data)
+	return err
+}
+
+func (s *testLogSink) AppendMessage(m Message) error {
+	data, err := MarshalLogMessage(LogVersionV1, m)
+	if err != nil {
+		return err
+	}
+	return s.AppendNative(append(data, '\n'))
+}
+
+func (*testLogSink) Close() error { return nil }
+
+func (testWire) WritePrompt(w io.Writer, p Prompt, log LogSink) error {
 	msg := struct {
 		Type    string `json:"type"`
 		Message struct {
@@ -37,8 +54,7 @@ func (testWire) WritePrompt(w io.Writer, p Prompt, logW io.Writer) error {
 	if _, err := w.Write(data); err != nil {
 		return err
 	}
-	_, err = logW.Write(data)
-	return err
+	return AppendNativeRecord(log, LogVersionV1, data)
 }
 
 // testParseFn is a minimal Claude-format parser for testing. It avoids
@@ -154,7 +170,7 @@ func TestSession(t *testing.T) {
 		stdoutR, stdoutW := io.Pipe()
 
 		s := &Session{
-			Conn: NewConn(stdinW, io.Discard, testWire{}),
+			Conn: NewConn(stdinW, DiscardLogSink, LogVersionV1, testWire{}),
 			done: make(chan struct{}),
 		}
 
@@ -162,7 +178,7 @@ func TestSession(t *testing.T) {
 
 		go func() {
 			defer close(s.done)
-			if parseErr := DefaultReadMessages(stdoutR, func(m Message) { msgCh <- m }, io.Discard, testParseFn); parseErr != nil {
+			if parseErr := DefaultReadMessages(stdoutR, func(m ParsedMessage) { msgCh <- m.Message }, DiscardLogSink, LogVersionV1, testParseFn); parseErr != nil {
 				s.err = parseErr
 			}
 		}()
@@ -232,9 +248,9 @@ func TestSession(t *testing.T) {
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
 			stdinR, stdinW := io.Pipe()
-			var logBuf bytes.Buffer
+			logBuf := &testLogSink{}
 			s := &Session{
-				Conn: NewConn(stdinW, &logBuf, testWire{}),
+				Conn: NewConn(stdinW, logBuf, LogVersionV1, testWire{}),
 				done: make(chan struct{}),
 			}
 
@@ -263,7 +279,7 @@ func TestSession(t *testing.T) {
 			stdinR, stdinW := io.Pipe()
 			_ = stdinR.Close()
 			s := &Session{
-				Conn: NewConn(stdinW, io.Discard, testWire{}),
+				Conn: NewConn(stdinW, DiscardLogSink, LogVersionV1, testWire{}),
 				done: make(chan struct{}),
 			}
 			if err := s.SendRaw([]byte("data\n")); err == nil {
@@ -276,7 +292,7 @@ func TestSession(t *testing.T) {
 		stdinR, stdinW := io.Pipe()
 		go func() { _, _ = io.Copy(io.Discard, stdinR) }()
 		s := &Session{
-			Conn: NewConn(stdinW, io.Discard, testWire{}),
+			Conn: NewConn(stdinW, DiscardLogSink, LogVersionV1, testWire{}),
 			done: make(chan struct{}),
 		}
 		_ = s.Close()
@@ -302,7 +318,7 @@ func TestSession(t *testing.T) {
 		defer slog.SetDefault(oldDefault)
 
 		msgCh := make(chan ParsedMessage, 16)
-		s := NewSession(cmd, NewConn(stdin, io.Discard, testWire{}), stdout, msgCh, nil)
+		s := NewSession(cmd, NewConn(stdin, DiscardLogSink, LogVersionV1, testWire{}), stdout, msgCh, nil)
 
 		if err := cmd.Process.Kill(); err != nil {
 			t.Fatal(err)
@@ -323,13 +339,32 @@ func TestSession(t *testing.T) {
 	})
 }
 
+func TestAppendNativeRecord(t *testing.T) {
+	t.Parallel()
+
+	t.Run("V2TerminatesWithLF", func(t *testing.T) {
+		t.Parallel()
+		log := &testLogSink{}
+		if err := AppendNativeRecord(log, LogVersionV2, []byte(`{"type":"response"}`)); err != nil {
+			t.Fatal(err)
+		}
+		got := log.Bytes()
+		if got[len(got)-1] != '\n' || bytes.Contains(got, []byte(`\\n`)) {
+			t.Fatalf("v2 record = %q, want one real LF terminator", got)
+		}
+		if !bytes.HasPrefix(got, []byte(`{"t":"agent","ts":`)) || !bytes.HasSuffix(got, append([]byte(`"msg":{"type":"response"}}`), '\n')) {
+			t.Fatalf("v2 record = %q, want canonical agent envelope", got)
+		}
+	})
+}
+
 func TestWriteMetaSession(t *testing.T) {
 	t.Parallel()
 
 	t.Run("VersionWithoutSession", func(t *testing.T) {
 		t.Parallel()
-		var buf bytes.Buffer
-		if err := WriteMetaSession(&buf, &InitMessage{Model: "m", Version: "1.2.3"}); err != nil {
+		buf := &testLogSink{}
+		if err := WriteMetaSession(buf, &InitMessage{Model: "m", Version: "1.2.3"}); err != nil {
 			t.Fatal(err)
 		}
 		var got MetaSessionMessage
@@ -343,8 +378,8 @@ func TestWriteMetaSession(t *testing.T) {
 
 	t.Run("EmptyIgnored", func(t *testing.T) {
 		t.Parallel()
-		var buf bytes.Buffer
-		if err := WriteMetaSession(&buf, &InitMessage{}); err != nil {
+		buf := &testLogSink{}
+		if err := WriteMetaSession(buf, &InitMessage{}); err != nil {
 			t.Fatal(err)
 		}
 		if buf.Len() != 0 {
@@ -365,7 +400,7 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n") + "\n"
 
 		ch := make(chan Message, 16)
-		if err := DefaultReadMessages(strings.NewReader(input), func(m Message) { ch <- m }, io.Discard, testParseFn); err != nil {
+		if err := DefaultReadMessages(strings.NewReader(input), func(m ParsedMessage) { ch <- m.Message }, DiscardLogSink, LogVersionV1, testParseFn); err != nil {
 			t.Fatal(err)
 		}
 		close(ch)
@@ -391,7 +426,7 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n") + "\n"
 
 		ch := make(chan Message, 16)
-		if err := DefaultReadMessages(strings.NewReader(input), func(m Message) { ch <- m }, io.Discard, testParseFn); err != nil {
+		if err := DefaultReadMessages(strings.NewReader(input), func(m ParsedMessage) { ch <- m.Message }, DiscardLogSink, LogVersionV1, testParseFn); err != nil {
 			t.Fatal(err)
 		}
 		close(ch)
@@ -419,8 +454,8 @@ func TestReadMessages(t *testing.T) {
 		}
 		input := strings.Join(lines, "\n") + "\n"
 
-		var buf bytes.Buffer
-		if err := DefaultReadMessages(strings.NewReader(input), func(Message) {}, &buf, testParseFn); err != nil {
+		buf := &testLogSink{}
+		if err := DefaultReadMessages(strings.NewReader(input), func(ParsedMessage) {}, buf, LogVersionV1, testParseFn); err != nil {
 			t.Fatal(err)
 		}
 
@@ -447,7 +482,7 @@ func TestReadMessages(t *testing.T) {
 				t.Cleanup(func() { _ = stdinR.Close() })
 				var log bytes.Buffer
 				got := make(chan ParsedMessage, 1)
-				conn := NewVersionedConn(stdinW, &log, tc.version, testWire{})
+				conn := NewConn(stdinW, &testLogSink{}, tc.version, testWire{})
 				err := conn.ReadMessages(strings.NewReader(tc.input), got)
 				if !errors.Is(err, io.ErrUnexpectedEOF) {
 					t.Fatalf("ReadMessages error = %v, want unexpected EOF", err)
@@ -462,9 +497,9 @@ func TestReadMessages(t *testing.T) {
 		t.Parallel()
 		var log bytes.Buffer
 		var got []ParsedMessage
-		err := DefaultReadVersionedMessages(strings.NewReader(`{"t":"agent","time":1.000,"msg":{}}`+"\n"), func(msg ParsedMessage) {
+		err := DefaultReadMessages(strings.NewReader(`{"t":"agent","time":1.000,"msg":{}}`+"\n"), func(msg ParsedMessage) {
 			got = append(got, msg)
-		}, &log, LogVersionV2, func([]byte) ([]Message, error) {
+		}, &testLogSink{}, LogVersionV2, func([]byte) ([]Message, error) {
 			return []Message{&TextMessage{}}, nil
 		})
 		if err == nil || log.Len() != 0 || len(got) != 0 {
@@ -478,7 +513,7 @@ func TestRelayRecordReader(t *testing.T) {
 	t.Run("rejects unterminated record without persistence", func(t *testing.T) {
 		t.Parallel()
 		var log bytes.Buffer
-		reader, err := NewRelayRecordReader(strings.NewReader(`{"type":"system","subtype":"init"}`), LogVersionV1, &log)
+		reader, err := NewRelayRecordReader(strings.NewReader(`{"type":"system","subtype":"init"}`), LogVersionV1, &testLogSink{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -575,7 +610,7 @@ func TestReadRelayTailRecords(t *testing.T) {
 			`{"t":"agent","ts":1.000,"msg":"` + strings.Repeat("x", maxNDJSONRecordLen) + `"}` + "\n",
 		} {
 			var log bytes.Buffer
-			reader, err := NewRelayRecordReader(strings.NewReader(input), LogVersionV2, &log)
+			reader, err := NewRelayRecordReader(strings.NewReader(input), LogVersionV2, &testLogSink{})
 			if err != nil {
 				t.Fatal(err)
 			}

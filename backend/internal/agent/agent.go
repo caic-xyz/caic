@@ -90,7 +90,7 @@ type Options struct {
 	// LogVersion is the validated physical relay record version.
 	LogVersion LogVersion
 	MsgCh      chan<- ParsedMessage // Receives parsed physical records from the agent.
-	LogW       io.Writer            // Raw wire-format log; use io.Discard if unused.
+	Log        LogSink              // Non-nil task-owned physical task-log authority; use DiscardLogSink when persistence is unnecessary.
 	StripEnv   []string             // Env var names for relay to strip from subprocess and emit as caic_stripped_env.
 }
 
@@ -100,7 +100,7 @@ type Options struct {
 type WireFormat interface {
 	// WritePrompt writes a user prompt to the agent's stdin in the
 	// backend's wire format. logW receives a copy.
-	WritePrompt(w io.Writer, p Prompt, logW io.Writer) error
+	WritePrompt(w io.Writer, p Prompt, log LogSink) error
 
 	// ParseMessage decodes a single NDJSON line into one or more typed
 	// Messages. A single wire line may produce multiple semantic messages.
@@ -111,7 +111,7 @@ type WireFormat interface {
 // support context compaction. The server checks for this capability to
 // conditionally enable the compact button in the UI.
 type CompactCommand interface {
-	WriteCompact(w io.Writer, instructions string, logW io.Writer) error
+	WriteCompact(w io.Writer, instructions string, log LogSink) error
 }
 
 // Conn handles wire-format I/O for a single agent session. It is safe for
@@ -138,26 +138,22 @@ type Conn interface {
 // conn is the default Conn implementation.
 type conn struct {
 	stdin   io.WriteCloser
-	logW    io.Writer
+	log     LogSink
 	version LogVersion
 	wire    WireFormat
 	mu      sync.Mutex // serializes stdin writes
 }
 
-// NewConn creates a Conn from an stdin pipe, log writer, and wire format.
-func NewConn(stdin io.WriteCloser, logW io.Writer, wire WireFormat) Conn {
-	return NewVersionedConn(stdin, logW, LogVersionV1, wire)
-}
-
-// NewVersionedConn creates a connection for the caller-validated physical log version.
-func NewVersionedConn(stdin io.WriteCloser, logW io.Writer, version LogVersion, wire WireFormat) Conn {
-	return &conn{stdin: stdin, logW: logW, version: version, wire: wire}
+// NewConn creates a connection for the caller-validated physical log version.
+// log must be non-nil; use DiscardLogSink when persistence is unnecessary.
+func NewConn(stdin io.WriteCloser, log LogSink, version LogVersion, wire WireFormat) Conn {
+	return &conn{stdin: stdin, log: log, version: version, wire: wire}
 }
 
 func (c *conn) SendPrompt(p Prompt) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.wire.WritePrompt(c.stdin, p, c.logW)
+	return c.wire.WritePrompt(c.stdin, p, c.log)
 }
 
 func (c *conn) SendRaw(data []byte) error {
@@ -166,8 +162,7 @@ func (c *conn) SendRaw(data []byte) error {
 	if _, err := c.stdin.Write(data); err != nil {
 		return err
 	}
-	_, err := c.logW.Write(data)
-	return err
+	return c.log.AppendNative(data)
 }
 
 func (c *conn) SendCompact(instructions string) error {
@@ -177,11 +172,11 @@ func (c *conn) SendCompact(instructions string) error {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return cc.WriteCompact(c.stdin, instructions, c.logW)
+	return cc.WriteCompact(c.stdin, instructions, c.log)
 }
 
 func (c *conn) ReadMessages(r io.Reader, msgCh chan<- ParsedMessage) error {
-	return DefaultReadVersionedMessages(r, func(m ParsedMessage) { msgCh <- m }, c.logW, c.version, c.wire.ParseMessage)
+	return DefaultReadMessages(r, func(m ParsedMessage) { msgCh <- m }, c.log, c.version, c.wire.ParseMessage)
 }
 
 func (c *conn) SendStop(ctx context.Context) {
@@ -321,18 +316,19 @@ type ParsedRecord struct {
 type RelayRecordReader struct {
 	r      *bufio.Reader
 	parser *LogRecordParser
-	logW   io.Writer
+	log    LogSink
 	native []byte
 }
 
 // NewRelayRecordReader creates a version-aware physical relay reader. version
-// must be the caller-validated task-log version.
-func NewRelayRecordReader(r io.Reader, version LogVersion, logW io.Writer) (*RelayRecordReader, error) {
+// must be the caller-validated task-log version. log must be non-nil; use
+// DiscardLogSink when persistence is unnecessary.
+func NewRelayRecordReader(r io.Reader, version LogVersion, log LogSink) (*RelayRecordReader, error) {
 	br, ok := r.(*bufio.Reader)
 	if !ok {
 		br = bufio.NewReaderSize(r, 1<<20)
 	}
-	reader := &RelayRecordReader{r: br, logW: logW}
+	reader := &RelayRecordReader{r: br, log: log}
 	parser, err := NewLogRecordParser(version, func(line []byte) ([]Message, error) {
 		reader.native = append(reader.native[:0], line...)
 		return nil, nil
@@ -367,7 +363,7 @@ func (r *RelayRecordReader) ReadRecord() (native []byte, controls []ParsedMessag
 		}
 		r.native = r.native[:0]
 		if r.parser.version == LogVersionV1 {
-			if _, writeErr := r.logW.Write(encoded); writeErr != nil {
+			if writeErr := r.log.AppendNative(encoded); writeErr != nil {
 				return nil, nil, fmt.Errorf("write log: %w", writeErr)
 			}
 		}
@@ -376,7 +372,7 @@ func (r *RelayRecordReader) ReadRecord() (native []byte, controls []ParsedMessag
 			return nil, nil, parseErr
 		}
 		if r.parser.version == LogVersionV2 {
-			if _, writeErr := r.logW.Write(encoded); writeErr != nil {
+			if writeErr := r.log.AppendNative(encoded); writeErr != nil {
 				return nil, nil, fmt.Errorf("write log: %w", writeErr)
 			}
 		}
@@ -644,15 +640,9 @@ func messageIsNil(msg Message) bool {
 	}
 }
 
-// DefaultReadMessages retains the v1 Message callback used by legacy Conn
-// wrappers. New physical relay readers must use DefaultReadVersionedMessages.
-func DefaultReadMessages(r io.Reader, dispatch func(Message), logW io.Writer, parseNative func([]byte) ([]Message, error)) error {
-	return DefaultReadVersionedMessages(r, func(m ParsedMessage) { dispatch(m.Message) }, logW, LogVersionV1, parseNative)
-}
-
-// DefaultReadVersionedMessages reads physical relay records, persists each
+// DefaultReadMessages reads physical relay records, persists each
 // exactly once, and forwards the parser's original ParsedMessage wrappers.
-func DefaultReadVersionedMessages(r io.Reader, dispatch func(ParsedMessage), logW io.Writer, version LogVersion, parseNative func([]byte) ([]Message, error)) error {
+func DefaultReadMessages(r io.Reader, dispatch func(ParsedMessage), log LogSink, version LogVersion, parseNative func([]byte) ([]Message, error)) error {
 	parser, err := NewLogRecordParser(version, parseNative)
 	if err != nil {
 		return fmt.Errorf("construct relay record parser: %w", err)
@@ -677,7 +667,7 @@ func DefaultReadVersionedMessages(r io.Reader, dispatch func(ParsedMessage), log
 		if version == LogVersionV2 && err != nil {
 			return fmt.Errorf("parse v2 relay record: %w", err)
 		}
-		if _, writeErr := logW.Write(record); writeErr != nil {
+		if writeErr := log.AppendNative(record); writeErr != nil {
 			return fmt.Errorf("write log: %w", writeErr)
 		}
 		if err != nil {
@@ -777,6 +767,27 @@ func DeployEmbeddedDir(ctx context.Context, container string, fsys fs.FS, target
 		return fmt.Errorf("deploy %s: %w: %s", targetDir, err, out)
 	}
 	return nil
+}
+
+// StopRelay sends the relay shutdown sentinel through a fresh attachment and
+// waits for the attach client to exit. It terminates the persistent relay and
+// its agent subprocess without treating an SSH disconnect as a shutdown.
+func StopRelay(ctx context.Context, target runtime.ConnectionTarget) error {
+	if target.SSHHost == "" {
+		return errors.New("agent connection target missing SSH host")
+	}
+	cmd := sshCmd(ctx, target.SSHHost, "python3", RelayScriptPath, "attach")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("relay shutdown stdin pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("relay shutdown attach: %w", err)
+	}
+	_, writeErr := stdin.Write([]byte{0, '\n'})
+	closeErr := stdin.Close()
+	waitErr := cmd.Wait()
+	return errors.Join(writeErr, closeErr, waitErr)
 }
 
 // CleanRelayState removes the relay state directory in the container so that
@@ -942,7 +953,7 @@ func StartRelay(ctx context.Context, opts *Options, agentArgs []string, wire Wir
 	if err != nil {
 		return nil, err
 	}
-	return StartSession(rp, NewVersionedConn(rp.Stdin, opts.LogW, opts.LogVersion, wire), opts)
+	return StartSession(rp, NewConn(rp.Stdin, opts.Log, opts.LogVersion, wire), opts)
 }
 
 // StartSession creates a Session from a RelayProcess and Conn, sends the
@@ -1239,7 +1250,7 @@ func AttachRelaySession(ctx context.Context, opts *Options, wire WireFormat, wra
 	if err := opts.LogVersion.Validate(); err != nil {
 		return nil, fmt.Errorf("relay log version: %w", err)
 	}
-	c := NewVersionedConn(stdin, opts.LogW, opts.LogVersion, wire)
+	c := NewConn(stdin, opts.Log, opts.LogVersion, wire)
 	if wrap != nil {
 		c, err = wrap(c)
 		if err != nil {
@@ -1257,20 +1268,12 @@ func AttachRelaySession(ctx context.Context, opts *Options, wire WireFormat, wra
 
 // PlainTextWritePrompt writes a user prompt as a plain text line on stdin
 // and logs it as NDJSON.
-func PlainTextWritePrompt(w io.Writer, p Prompt, logW io.Writer) error {
+func PlainTextWritePrompt(w io.Writer, p Prompt, log LogSink) error {
 	data := []byte(p.Text + "\n")
 	if _, err := w.Write(data); err != nil {
 		return err
 	}
-	entry, err := json.Marshal(map[string]string{
-		"type":    "user_input",
-		"content": p.Text,
-	})
-	if err != nil {
-		return err
-	}
-	_, err = logW.Write(append(entry, '\n'))
-	return err
+	return log.AppendMessage(&UserInputMessage{Text: p.Text})
 }
 
 // isSignalExit reports whether err indicates the process was killed by a

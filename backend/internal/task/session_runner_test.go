@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -124,7 +123,7 @@ func TestSessionRunner(t *testing.T) {
 			if _, err := r.Reconnect(t.Context(), tk, true); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("Reconnect error = %v, want os.ErrNotExist", err)
 			}
-			if backend.capturedAttachOpts.LogW != nil {
+			if backend.capturedAttachOpts.Log != nil {
 				t.Fatal("AttachRelay called without authoritative local log")
 			}
 			if tk.LogPath() != "" {
@@ -153,7 +152,7 @@ func TestSessionRunner(t *testing.T) {
 			}
 			defer func() { _ = w.Close() }()
 			// Write something and close.
-			_, _ = w.Write([]byte("test\n"))
+			_ = w.AppendNative([]byte("test\n"))
 			_ = w.Close()
 
 			entries, err := os.ReadDir(logDir)
@@ -268,7 +267,7 @@ func TestSessionRunner(t *testing.T) {
 			_, sub, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 			msgCh, done := r.startMessageDispatch(t.Context(), tk, false)
-			opts := agent.Options{LogVersion: agent.LogVersionV2, MsgCh: msgCh}
+			opts := agent.Options{LogVersion: agent.LogVersionV2, MsgCh: msgCh, Log: agent.DiscardLogSink}
 			wantTime := time.Unix(1, 234*int64(time.Millisecond)).UTC()
 			var v2Message agent.Message
 			cmd := exec.CommandContext(t.Context(), "python3", "-c", "import sys; print(sys.argv[1])", `{"t":"agent","ts":1.234,"msg":{}}`)
@@ -283,7 +282,7 @@ func TestSessionRunner(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			session := agent.NewSession(cmd, agent.NewVersionedConn(stdin, io.Discard, opts.LogVersion, &testWire{parse: func([]byte) ([]agent.Message, error) {
+			session := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink, opts.LogVersion, &testWire{parse: func([]byte) ([]agent.Message, error) {
 				v2Message = &agent.TextMessage{Text: "v2"}
 				return []agent.Message{v2Message}, nil
 			}}), stdout, opts.MsgCh, nil)
@@ -294,10 +293,10 @@ func TestSessionRunner(t *testing.T) {
 				t.Fatalf("subscriber message = %T, want original %T", got, v2Message)
 			}
 			var v1 agent.ParsedMessage
-			err = agent.DefaultReadVersionedMessages(strings.NewReader(`{"event":"legacy"}`+"\n"), func(parsed agent.ParsedMessage) {
+			err = agent.DefaultReadMessages(strings.NewReader(`{"event":"legacy"}`+"\n"), func(parsed agent.ParsedMessage) {
 				v1 = parsed
 				opts.MsgCh <- parsed
-			}, io.Discard, agent.LogVersionV1, func([]byte) ([]agent.Message, error) {
+			}, agent.DiscardLogSink, agent.LogVersionV1, func([]byte) ([]agent.Message, error) {
 				return []agent.Message{&agent.TextMessage{Text: "v1"}}, nil
 			})
 			if err != nil {
@@ -597,13 +596,13 @@ func TestSessionRunner(t *testing.T) {
 			t.Fatal(err)
 		}
 		msgCh := make(chan agent.ParsedMessage, 16)
-		session, err := backend.Start(t.Context(), &agent.Options{MsgCh: msgCh, LogW: logW})
+		session, err := backend.Start(t.Context(), &agent.Options{MsgCh: msgCh, Log: logW})
 		if err != nil {
 			t.Fatal(err)
 		}
 		alreadyDone := make(chan struct{})
 		close(alreadyDone)
-		h1 := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: alreadyDone, LogW: logW}
+		h1 := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: alreadyDone, Log: logW}
 		tk.AttachSession(h1)
 		tk.SetState(StateRunning)
 

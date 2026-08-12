@@ -130,7 +130,7 @@ func TestFetchModels(t *testing.T) {
 {"id":2,"result":{"data":[{"id":"gpt-5.4","supportedReasoningEfforts":[{"reasoningEffort":"minimal"},{"reasoningEffort":"high"}]},{"id":"gpt-5.3-codex","supportedReasoningEfforts":[{"reasoningEffort":"low"}]}],"nextCursor":null}}
 `
 		var stdin bytes.Buffer
-		records, err := agent.NewRelayRecordReader(strings.NewReader(responses), agent.LogVersionV1, io.Discard)
+		records, err := agent.NewRelayRecordReader(strings.NewReader(responses), agent.LogVersionV1, agent.DiscardLogSink)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -232,6 +232,24 @@ func TestHandshake(t *testing.T) {
 			t.Fatalf("v2 handshake = thread=%q version=%q models=%v", w.threadID, w.agentVersion, models)
 		}
 	})
+}
+
+func TestWireFormatCompactCommand(t *testing.T) {
+	t.Parallel()
+
+	wire := &wireFormat{threadID: "thread-1"}
+	var stdin bytes.Buffer
+	var compact agent.CompactCommand = wire
+	if err := compact.WriteCompact(&stdin, "", agent.DiscardLogSink); err != nil {
+		t.Fatal(err)
+	}
+	var request codex.JSONRPCRequest
+	if err := json.Unmarshal(bytes.TrimSpace(stdin.Bytes()), &request); err != nil {
+		t.Fatal(err)
+	}
+	if request.Method != "thread/compact/start" {
+		t.Fatalf("compact method = %q, want thread/compact/start", request.Method)
+	}
 }
 
 func TestHandshakeContinuation(t *testing.T) {

@@ -3,7 +3,6 @@
 package task
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -29,7 +28,7 @@ type LogStore struct {
 }
 
 // Open creates a JSONL log segment and writes its metadata header.
-func (s *LogStore) Open(t *Task) (io.WriteCloser, error) {
+func (s *LogStore) Open(t *Task) (agent.LogSink, error) {
 	if err := os.MkdirAll(s.LogDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create log dir: %w", err)
 	}
@@ -38,6 +37,7 @@ func (s *LogStore) Open(t *Task) (io.WriteCloser, error) {
 	if err != nil {
 		return nil, err
 	}
+	w.version = t.RelayLogVersion()
 	if err := writeMetadataHeader(w, t); err != nil {
 		return nil, errors.Join(err, w.Close())
 	}
@@ -54,12 +54,13 @@ func (s *LogStore) Open(t *Task) (io.WriteCloser, error) {
 	return w, nil
 }
 
-// Reopen validates and opens an existing v1 JSONL log for appending without a header.
-func (s *LogStore) Reopen(t *Task) (io.WriteCloser, error) {
-	if s.LogDir == "" {
-		return nil, errors.New("no log dir")
+// Reopen validates and opens an existing task log for appending without a header.
+func (s *LogStore) Reopen(t *Task) (agent.LogSink, error) {
+	path, err := s.reopenPath(t)
+	if err != nil {
+		return nil, err
 	}
-	path := filepath.Join(s.LogDir, taskLogFileName(t))
+
 	w, proof, err := openTaskLogForAppend(path, t, false)
 	if err != nil {
 		return nil, err
@@ -95,6 +96,7 @@ func openTaskLogForAppend(path string, t *Task, create bool) (*taskLogWriter, Ca
 	}
 	if snapshot := t.logValidationProof(cleanPath); snapshot != nil {
 		if proof, snapshotErr := validateRawLogAppendSnapshot(cleanPath, w.file, t, snapshot); snapshotErr == nil {
+			w.version = proof.Version
 			return w, proof, nil
 		}
 	}
@@ -102,6 +104,7 @@ func openTaskLogForAppend(path string, t *Task, create bool) (*taskLogWriter, Ca
 	if err != nil {
 		return nil, CacheProof{}, errors.Join(err, w.Close())
 	}
+	w.version = proof.Version
 	return w, proof, nil
 }
 
@@ -134,9 +137,6 @@ func validateRawLogAppendSnapshot(path string, f *os.File, t *Task, snapshot *Va
 	}) {
 		return CacheProof{}, errors.New("task log validation snapshot is stale")
 	}
-	if proof.Version != agent.LogVersionV1 {
-		return CacheProof{}, fmt.Errorf("append task log: version %d requires versioned log sink", proof.Version)
-	}
 	if proof.Harness != t.Harness {
 		return CacheProof{}, fmt.Errorf("append task log: header harness %q does not match task harness %q", proof.Harness, t.Harness)
 	}
@@ -164,9 +164,6 @@ func validateRawLogAppend(source io.ReadSeeker, f *os.File, path string, t *Task
 	if err != nil {
 		return CacheProof{}, fmt.Errorf("validate task log for append: %w", err)
 	}
-	if scanner.authority.Version != agent.LogVersionV1 {
-		return CacheProof{}, fmt.Errorf("append task log: version %d requires versioned log sink", scanner.authority.Version)
-	}
 	if scanner.authority.Harness != t.Harness {
 		return CacheProof{}, fmt.Errorf("append task log: header harness %q does not match task harness %q", scanner.authority.Harness, t.Harness)
 	}
@@ -177,12 +174,27 @@ func validateRawLogAppend(source io.ReadSeeker, f *os.File, path string, t *Task
 	return CacheProof{Device: identity.Device, Inode: identity.Inode, Size: stableInfo.Size(), ModTimeNs: stableInfo.ModTime().UnixNano(), Version: scanner.authority.Version, Harness: scanner.authority.Harness, RawHeader: string(scanner.headerRaw)}, nil
 }
 
-// WriteResultTrailer appends a MetaResultMessage to the log writer.
-func (*LogStore) WriteResultTrailer(w io.Writer, title string, res *Result) error {
-	if w == nil {
+// WriteResultTrailer appends a MetaResultMessage to an active task log.
+func (*LogStore) WriteResultTrailer(log agent.LogSink, title string, res *Result) error {
+	if log == nil {
 		return ErrNoLog
 	}
-	mr := agent.MetaResultMessage{
+	return log.AppendMessage(resultTrailer(title, res))
+}
+
+// WriteTaskResultTrailer reopens a task log, appends its terminal result, and
+// closes the scoped log owner. It is for terminal and adoption paths without
+// an active session-owned log.
+func (s *LogStore) WriteTaskResultTrailer(t *Task, res *Result) error {
+	log, err := s.Reopen(t)
+	if err != nil {
+		return err
+	}
+	return errors.Join(log.AppendMessage(resultTrailer(t.Title(), res)), log.Close())
+}
+
+func resultTrailer(title string, res *Result) *agent.MetaResultMessage {
+	mr := &agent.MetaResultMessage{
 		MessageType:              "caic_result",
 		State:                    res.State.String(),
 		Title:                    title,
@@ -200,26 +212,28 @@ func (*LogStore) WriteResultTrailer(w io.Writer, title string, res *Result) erro
 	if res.Err != nil {
 		mr.Error = res.Err.Error()
 	}
-	data, err := json.Marshal(mr)
-	if err != nil {
-		return err
-	}
-	_, err = w.Write(append(data, '\n'))
-	return err
+	return mr
 }
 
-// WriteContextCleared appends a context_cleared system message to the log writer.
-func (*LogStore) WriteContextCleared(w io.Writer) error {
-	if w == nil {
+// WriteContextCleared appends a context_cleared system message to the task log.
+func (*LogStore) WriteContextCleared(log agent.LogSink) error {
+	if log == nil {
 		return ErrNoLog
 	}
-	msg := syntheticContextCleared()
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return err
+	return log.AppendMessage(syntheticContextCleared())
+}
+
+// reopenPath uses the task's previously validated path when available. Logs
+// loaded during adoption may not use the current filename convention, so the
+// validated path is the authoritative identity for a scoped terminal append.
+func (s *LogStore) reopenPath(t *Task) (string, error) {
+	if path := t.LogPath(); path != "" {
+		return path, nil
 	}
-	_, err = w.Write(append(data, '\n'))
-	return err
+	if s.LogDir == "" {
+		return "", errors.New("no log dir")
+	}
+	return filepath.Join(s.LogDir, taskLogFileName(t)), nil
 }
 
 func (s *LogStore) attachReplay(t *Task, path string, proof CacheProof) error {
@@ -249,7 +263,7 @@ func taskLogFileName(t *Task) string {
 	return t.ID.String() + "-" + safeRepo + "-" + safeBranch + ".jsonl"
 }
 
-func writeMetadataHeader(w io.Writer, t *Task) error {
+func writeMetadataHeader(log agent.LogSink, t *Task) error {
 	repos := t.ReposSnapshot()
 	metaRepos := make([]agent.MetaRepo, len(repos))
 	for i, r := range repos {
@@ -279,11 +293,7 @@ func writeMetadataHeader(w io.Writer, t *Task) error {
 		CacheMounts:       metaCacheMountsFromRuntime(t.CacheMounts),
 		Mounts:            metaMountsFromRuntime(t.Mounts),
 	}
-	data, err := json.Marshal(meta)
-	if err != nil {
-		return fmt.Errorf("marshal log metadata: %w", err)
-	}
-	if _, err := w.Write(append(data, '\n')); err != nil {
+	if err := log.AppendMessage(&meta); err != nil {
 		return fmt.Errorf("write log metadata: %w", err)
 	}
 	return nil

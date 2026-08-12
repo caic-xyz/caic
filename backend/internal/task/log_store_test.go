@@ -97,18 +97,18 @@ func TestLogStore(t *testing.T) {
 	t.Parallel()
 	t.Run("WriteResultTrailerReasoningTokens", func(t *testing.T) {
 		t.Parallel()
-		var b strings.Builder
+		b := &testLogSink{}
 		res := &Result{
 			State: StateWaiting,
 			Usage: agent.Usage{
 				ReasoningOutputTokens: 123,
 			},
 		}
-		if err := (&LogStore{}).WriteResultTrailer(&b, "title", res); err != nil {
+		if err := (&LogStore{}).WriteResultTrailer(b, "title", res); err != nil {
 			t.Fatal(err)
 		}
 		var got agent.MetaResultMessage
-		if err := json.Unmarshal([]byte(b.String()), &got); err != nil {
+		if err := json.Unmarshal(b.Bytes(), &got); err != nil {
 			t.Fatal(err)
 		}
 		if got.ReasoningOutputTokens != 123 {
@@ -165,7 +165,7 @@ func TestLogStore(t *testing.T) {
 			t.Fatalf("replay messages = %d, want 1", len(replay.Messages))
 		}
 	})
-	t.Run("ReopenRejectsV2WithoutMutation", func(t *testing.T) {
+	t.Run("ReopenPreservesV2Authority", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		store := &LogStore{LogDir: dir}
@@ -176,29 +176,27 @@ func TestLogStore(t *testing.T) {
 			Harness:       harness.Codex,
 		}
 		path := filepath.Join(dir, taskLogFileName(tk))
-		line := mustJSON(t, agent.MetaMessage{
-			MessageType: "caic_meta",
-			Version:     int(agent.LogVersionV2),
-			Prompt:      "test",
-			Repos:       []agent.MetaRepo{{Name: "org/repo", Branch: "caic-0"}},
-			Harness:     harness.Codex,
-		}) + "\n"
+		line := `{"t":"caic_meta","version":2,"prompt":"test","repos":[{"name":"org/repo","branch":"caic-0"}],"harness":"codex"}` + "\n"
 		if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
 			t.Fatal(err)
 		}
 
-		if _, err := store.Reopen(tk); err == nil || !strings.Contains(err.Error(), "requires versioned log sink") {
-			t.Fatalf("Reopen error = %v, want v2 sink error", err)
+		log, err := store.Reopen(tk)
+		if err != nil {
+			t.Fatal(err)
 		}
-		if _, err := store.Open(tk); err == nil || !strings.Contains(err.Error(), "requires versioned log sink") {
-			t.Fatalf("Open error = %v, want v2 sink error", err)
+		if err := log.AppendMessage(&agent.MetaPRMessage{MessageType: "caic_pr", ForgeOwner: "acme", ForgeRepo: "repo", ForgePR: 1}); err != nil {
+			t.Fatal(err)
+		}
+		if err := log.Close(); err != nil {
+			t.Fatal(err)
 		}
 		got, err := os.ReadFile(path) //nolint:gosec // path is test-controlled.
 		if err != nil {
 			t.Fatal(err)
 		}
-		if string(got) != line {
-			t.Fatalf("v2 log mutated:\n%s", got)
+		if !strings.Contains(string(got), `"t":"pr"`) {
+			t.Fatalf("v2 log = %s, want canonical pr control", got)
 		}
 	})
 	t.Run("ReopenRejectsHarnessMismatch", func(t *testing.T) {
@@ -269,7 +267,7 @@ func TestLogStore(t *testing.T) {
 			t.Fatal(err)
 		}
 		const appendLine = "{\"type\":\"caic_result\",\"state\":\"waiting\"}\n"
-		if _, err := w.Write([]byte(appendLine)); err != nil {
+		if err := w.AppendNative([]byte(appendLine)); err != nil {
 			t.Fatal(err)
 		}
 		if err := w.Close(); err != nil {
