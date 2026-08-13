@@ -327,21 +327,25 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 	if trailerErr != nil {
 		tlog.WarnContext(ctx, "write log trailer failed", "err", trailerErr)
 	}
+	closeErr := error(nil)
 	if log != nil {
-		closeErr := log.Close()
+		closeErr = log.Close()
 		if closeErr != nil {
 			tlog.WarnContext(ctx, "close log failed", "err", closeErr)
 		} else {
 			tlog.DebugContext(ctx, "cleanup: log trailer written and closed")
 		}
-		if trailerErr == nil && closeErr == nil {
-			if err := t.compressLogIfDone(reason); err != nil {
-				tlog.WarnContext(ctx, "compress task log failed", "err", err)
-			}
-		}
 	}
+	// The live writer was attached to the uncompressed log. Commit it before
+	// terminal compression replaces that file, otherwise its append proof sees
+	// a different physical log and correctly rejects the cache.
 	if err := t.CommitEventReplay(ctx); err != nil {
 		tlog.WarnContext(ctx, "commit event replay failed", "err", err)
+	}
+	if log != nil && trailerErr == nil && closeErr == nil {
+		if err := t.compressLogIfDone(reason); err != nil {
+			tlog.WarnContext(ctx, "compress task log failed", "err", err)
+		}
 	}
 	tlog.InfoContext(ctx, "cleanup done", "dur", time.Since(start).Round(time.Millisecond),
 		"cost", res.CostUSD, "turns", res.NumTurns, "reason", reason)

@@ -157,6 +157,9 @@ func TestLogStore(t *testing.T) {
 		if gotPath == "" || gotPath != tk.LogPath() {
 			t.Fatalf("replay path = %q, task path = %q", gotPath, tk.LogPath())
 		}
+		if _, err := CacheProofForLog(tk.LogPath()); err != nil {
+			t.Fatalf("replay proof = %v, want fresh-log proof", err)
+		}
 		entries := logLines(t, tk.LogPath())
 		if len(entries) != 1 {
 			t.Fatalf("log lines = %d, want 1", len(entries))

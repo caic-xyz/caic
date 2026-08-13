@@ -594,6 +594,38 @@ func TestRunner(t *testing.T) {
 			}
 		})
 
+		t.Run("CommitsReplayBeforeCompression", func(t *testing.T) {
+			t.Parallel()
+			logDir := t.TempDir()
+			clone := initTestRepo(t, "main")
+			workspace := newTestRepoWorkspace(t, "main", clone, nil)
+			r := newTestRunner(t, workspace, nil, logDir)
+			replay := &tasktest.FakeEventReplayWriter{}
+			r.Sessions.Logs.EventReplayFactory = func(string, CacheProof, CacheProofProvider) (EventReplayWriter, error) {
+				return replay, nil
+			}
+			tk := &Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "test"},
+				Harness:       harness.Claude,
+				Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
+			}
+			log, err := r.Sessions.Logs.Open(tk)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := log.AppendMessage(&agent.LogMessage{MessageType: "caic_log", Line: "live output"}); err != nil {
+				t.Fatal(err)
+			}
+
+			r.Cleanup(t.Context(), tk, StatePurged)
+
+			want := filepath.Join(logDir, tk.ID.String()+"-org-repo-caic-0.jsonl")
+			if got := replay.Commits; len(got) != 1 || got[0] != want {
+				t.Errorf("replay commits = %q, want %q", got, want)
+			}
+		})
+
 		t.Run("UsesLiveDiffStat", func(t *testing.T) {
 			t.Parallel()
 			clone := initTestRepo(t, "main")

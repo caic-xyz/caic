@@ -18,8 +18,13 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
-// ErrNoLog reports that a task has no active or persisted log to append to.
-var ErrNoLog = errors.New("no task log")
+var (
+	// ErrNoLog reports that a task has no active or persisted log to append to.
+	ErrNoLog = errors.New("no task log")
+	// ErrNoLiveReplayCache reports that a live replay writer cannot safely
+	// extend the current raw log without a complete derived cache.
+	ErrNoLiveReplayCache = errors.New("no complete live replay cache")
+)
 
 const (
 	logPlainExt      = ".jsonl"

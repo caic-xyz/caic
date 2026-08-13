@@ -50,7 +50,13 @@ const CacheVersion = 6
 // record. Oversized records invalidate the entire derived cache.
 const maxReplayRecordBytes = 32 << 20
 
-var errReplayRecordTooLarge = errors.New("replay cache record exceeds size limit")
+var (
+	errReplayRecordTooLarge = errors.New("replay cache record exceeds size limit")
+
+	// ErrNoCompleteCache reports that a nonempty log has no valid replay cache
+	// from which a live writer can safely append.
+	ErrNoCompleteCache = errors.New("existing log has no complete replay cache to append to")
+)
 
 // ProofProvider returns a raw-header and identity observation. It is injected
 // by the task layer so eventreplay can compare cache identity without importing
@@ -335,7 +341,8 @@ func newAppendCacheWriter(logPath string, proof logproof.CacheProof, prove Proof
 		// history to seed. Any additional raw record requires a complete cache so
 		// reopening cannot publish a partial replay.
 		if info.Size() != int64(len(proof.RawHeader)+1) {
-			w.werr = errors.New("existing log has no complete replay cache to append to")
+			w.Abort()
+			return nil, ErrNoCompleteCache
 		}
 	}
 	return w, nil

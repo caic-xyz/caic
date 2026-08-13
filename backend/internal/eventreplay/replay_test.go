@@ -223,14 +223,11 @@ func TestCacheWriter(t *testing.T) {
 			}
 		}
 		writer, err := newMessageWriterForProof(logPath, localCacheProof)
-		if err != nil {
-			t.Fatal(err)
+		if !errors.Is(err, ErrNoCompleteCache) {
+			t.Fatalf("NewMessageWriter error = %v, want rejected invalid seed", err)
 		}
-		if err := writer.WriteMessage(t.Context(), agent.ParsedMessage{Message: &agent.TextMessage{Text: "must not append"}}); err == nil || !strings.Contains(err.Error(), "no complete replay cache") {
-			t.Fatalf("WriteMessage error = %v, want rejected invalid seed", err)
-		}
-		if err := writer.Commit(t.Context(), logPath); err == nil || !strings.Contains(err.Error(), "no complete replay cache") {
-			t.Fatalf("Commit error = %v, want rejected invalid seed", err)
+		if writer != nil {
+			t.Fatal("NewMessageWriter returned a writer for an invalid seed")
 		}
 	})
 

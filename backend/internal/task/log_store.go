@@ -45,7 +45,7 @@ func (s *LogStore) Open(t *Task) (agent.LogSink, error) {
 		}
 	}
 	if s.EventReplayFactory != nil && created {
-		proof, err = t.CacheProofForLog(path)
+		proof, err = CacheProofForLog(path)
 		if err != nil {
 			return nil, errors.Join(err, w.Close())
 		}
@@ -243,7 +243,10 @@ func (s *LogStore) attachReplay(t *Task, path string, proof CacheProof) error {
 	if s.EventReplayFactory == nil {
 		return nil
 	}
-	w, err := s.EventReplayFactory(path, proof, t.CacheProofForLog)
+	w, err := s.EventReplayFactory(path, proof, CacheProofForLog)
+	if errors.Is(err, ErrNoLiveReplayCache) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}

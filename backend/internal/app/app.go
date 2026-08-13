@@ -76,7 +76,11 @@ type instanceDiscoveryResult struct {
 // newEventReplayWriter gives construction the Reopen observation while later
 // replay-cache validation uses the task-owned fresh proof provider.
 func newEventReplayWriter(path string, initial task.CacheProof, fresh task.CacheProofProvider) (task.EventReplayWriter, error) {
-	return eventreplay.NewMessageWriter(path, initial, eventreplay.ProofProvider(fresh))
+	writer, err := eventreplay.NewMessageWriter(path, initial, eventreplay.ProofProvider(fresh))
+	if errors.Is(err, eventreplay.ErrNoCompleteCache) {
+		return nil, task.ErrNoLiveReplayCache
+	}
+	return writer, err
 }
 
 // Serve starts the HTTP server and closes app-owned resources when serving ends.
