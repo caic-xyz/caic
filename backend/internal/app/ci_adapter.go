@@ -40,9 +40,7 @@ func (a *ciAdapter) NotifyTaskChange() {
 
 // EmitWarning delivers a CI warning to connected SSE clients.
 func (a *ciAdapter) EmitWarning(msg string) {
-	if a.warnings != nil {
-		a.warnings.Emit(msg)
-	}
+	a.warnings.Emit(msg)
 }
 
 // GitHubApp returns the GitHub App client for forge operations.

@@ -369,9 +369,6 @@ func (h *serverHandlers) listCaches(_ context.Context, _ *api.EmptyReq) (*v1.Wel
 }
 
 func (h *serverHandlers) getCacheSizes(_ context.Context, _ *api.EmptyReq) (*v1.CacheSizesResp, error) {
-	if h.cacheSizes == nil {
-		return &v1.CacheSizesResp{}, nil
-	}
 	return &v1.CacheSizesResp{WellKnown: h.cacheSizes.Snapshot()}, nil
 }
 

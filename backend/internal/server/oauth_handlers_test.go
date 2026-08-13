@@ -410,7 +410,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 	backend := &mdruntime.Backend{}
 	runtimeRouter := newTestRuntime(t, backend)
 	workspaceRegistry := repowork.NewRegistry(t.Context(), nil)
-	taskMgr := taskmgr.New(taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, WorkspaceRegistry: workspaceRegistry})
+	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, WorkspaceRegistry: workspaceRegistry})
 	repoSvc := repomgr.NewService(t.Context(), "", repo.New(nil), workspaceRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
@@ -430,6 +430,8 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 		Preferences:                prefs,
 		IPGeoChecker:               checker,
 		ForgeMgr:                   forgeManager,
+		Warnings:                   NewWarningStore(taskMgr),
+		CacheSizes:                 NewCacheSizeStore(),
 		AuthStore:                  store,
 		SessionSecret:              []byte("0123456789abcdef0123456789abcdef"),
 		HostState:                  auth.NewHostState("https://caic.example.com"),

@@ -558,7 +558,7 @@ func TestRunner(t *testing.T) {
 			tk.SetState(StateStopped)
 
 			// Create a pre-existing log file (written by StopTask scenario).
-			logW, err := r.Sessions.Logs.Open(tk)
+			logW, err := r.Sessions.logs.Open(tk)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -601,7 +601,7 @@ func TestRunner(t *testing.T) {
 			workspace := newTestRepoWorkspace(t, "main", clone, nil)
 			r := newTestRunner(t, workspace, nil, logDir)
 			replay := &tasktest.FakeEventReplayWriter{}
-			r.Sessions.Logs.EventReplayFactory = func(string, CacheProof, CacheProofProvider) (EventReplayWriter, error) {
+			r.Sessions.logs.EventReplayFactory = func(string, CacheProof, CacheProofProvider) (EventReplayWriter, error) {
 				return replay, nil
 			}
 			tk := &Task{
@@ -610,7 +610,7 @@ func TestRunner(t *testing.T) {
 				Harness:       harness.Claude,
 				Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
 			}
-			log, err := r.Sessions.Logs.Open(tk)
+			log, err := r.Sessions.logs.Open(tk)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -876,7 +876,7 @@ func TestRunner(t *testing.T) {
 			backend := &testBackend{FakeBackend: &agenttest.FakeBackend{}}
 			r := newTestRunner(t, workspace, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			replay := &tasktest.FakeEventReplayWriter{}
-			r.Sessions.Logs.EventReplayFactory = func(string, CacheProof, CacheProofProvider) (EventReplayWriter, error) {
+			r.Sessions.logs.EventReplayFactory = func(string, CacheProof, CacheProofProvider) (EventReplayWriter, error) {
 				return replay, nil
 			}
 			source := &Task{
@@ -981,7 +981,7 @@ func TestRunner(t *testing.T) {
 			workspace := newTestRepoWorkspace(t, "", "", runtimeBackend)
 			r := newTestRunner(t, workspace, nil, t.TempDir())
 			replay := &tasktest.FakeEventReplayWriter{}
-			r.Sessions.Logs.EventReplayFactory = func(string, CacheProof, CacheProofProvider) (EventReplayWriter, error) {
+			r.Sessions.logs.EventReplayFactory = func(string, CacheProof, CacheProofProvider) (EventReplayWriter, error) {
 				return replay, nil
 			}
 			source := &Task{
@@ -1024,7 +1024,7 @@ func TestRunner(t *testing.T) {
 			backend := &agenttest.FakeBackend{}
 			r := newTestRunner(t, workspace, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			replay := &tasktest.FakeEventReplayWriter{}
-			r.Sessions.Logs.EventReplayFactory = func(string, CacheProof, CacheProofProvider) (EventReplayWriter, error) {
+			r.Sessions.logs.EventReplayFactory = func(string, CacheProof, CacheProofProvider) (EventReplayWriter, error) {
 				return replay, nil
 			}
 			source := &Task{

@@ -489,7 +489,7 @@ func minimalRouter(t *testing.T) *testRouter {
 	backend := &mdruntime.Backend{}
 	runtimeRouter := newTestRuntime(t, backend)
 	workspaceRegistry := repowork.NewRegistry(ctx, nil)
-	taskMgr := taskmgr.New(taskmgr.Config{ServerCtx: ctx, Runtimes: runtimeRouter, WorkspaceRegistry: workspaceRegistry})
+	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: ctx, Runtimes: runtimeRouter, WorkspaceRegistry: workspaceRegistry})
 	repoSvc := repomgr.NewService(t.Context(), "", repo.New(nil), workspaceRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 	fm := forgemgr.New("", "", nil)
@@ -504,6 +504,8 @@ func minimalRouter(t *testing.T) *testRouter {
 		CICache:     cache,
 		ForgeMgr:    fm,
 		CIService:   ciService,
+		Warnings:    NewWarningStore(taskMgr),
+		CacheSizes:  NewCacheSizeStore(),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

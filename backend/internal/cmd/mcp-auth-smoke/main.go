@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
+	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
@@ -175,7 +176,10 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 		return "", "", nil, err
 	}
 	workspaceRegistry := repowork.NewRegistry(ctx, nil)
-	taskMgr := taskmgr.New(taskmgr.Config{ServerCtx: ctx, Runtimes: runtimeRouter, WorkspaceRegistry: workspaceRegistry})
+	taskMgr, err := taskmgr.New(taskmgr.Config{ServerCtx: ctx, Runtimes: runtimeRouter, WorkspaceRegistry: workspaceRegistry})
+	if err != nil {
+		return "", "", nil, fmt.Errorf("task manager: %w", err)
+	}
 	repoSvc := repomgr.NewService(ctx, "", repo.New(nil), workspaceRegistry)
 	prefs, err := preferences.Open(filepath.Join(stateDir, "preferences.json"))
 	if err != nil {
@@ -196,11 +200,14 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 	}
 	router, err := server.New(ctx, server.Dependencies{
 		RepoSvc:       repoSvc,
+		RepoStatus:    ci.NewRepoStatusStore(),
 		Runtimes:      runtimeRouter,
 		TaskMgr:       taskMgr,
 		Preferences:   prefs,
 		IPGeoChecker:  checker,
 		ForgeMgr:      forgemgr.New("", "", nil),
+		Warnings:      server.NewWarningStore(taskMgr),
+		CacheSizes:    server.NewCacheSizeStore(),
 		AuthStore:     store,
 		SessionSecret: secret,
 	})

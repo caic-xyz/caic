@@ -408,6 +408,15 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 	if d.RepoStatus == nil {
 		return nil, errors.New("repo status store is required")
 	}
+	if d.ForgeMgr == nil {
+		return nil, errors.New("forge manager is required")
+	}
+	if d.Warnings == nil {
+		return nil, errors.New("warning store is required")
+	}
+	if d.CacheSizes == nil {
+		return nil, errors.New("cache size store is required")
+	}
 	voice := &voiceHandlers{bridge: d.VoiceBridge, gateway: d.VoiceGateway}
 	voiceMetadata := voice.metadata()
 	goModeSettings := newGoModeSettings(voiceMetadata, d.AuthStore != nil)

@@ -271,7 +271,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	}
 
 	workspaceRegistry := repowork.NewRegistry(ctx, runtimes)
-	taskMgr := taskmgr.New(taskmgr.Config{
+	taskMgr, err := taskmgr.New(taskmgr.Config{
 		ServerCtx:          ctx,
 		LogDir:             logDir,
 		CacheDir:           cfg.Dirs.CacheDir,
@@ -281,9 +281,11 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		EventReplayFactory: newEventReplayWriter,
 		HarnessEnv:         cfg.Agent.HarnessEnv,
 		RuntimeMetadata:    cfg.Runtime.Metadata,
-		Prefs:              prefsStore,
 		Provider:           provider,
 	})
+	if err != nil {
+		return nil, fmt.Errorf("task manager: %w", err)
+	}
 	// Replay spool cleanup is safe only before caic creates live replay writers.
 	// Compression also replaces log paths, so finish maintenance before task
 	// adoption can expose any task to a replay request.

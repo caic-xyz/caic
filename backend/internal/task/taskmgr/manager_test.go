@@ -75,7 +75,14 @@ func newTestManager(t testing.TB, cfg Config) *Manager { //nolint:gocritic // Co
 	if cfg.Runtimes == nil {
 		cfg.Runtimes = newTestRuntime(t, &runtimetest.FakeBackend{}, nil)
 	}
-	return New(cfg)
+	if cfg.WorkspaceRegistry == nil {
+		cfg.WorkspaceRegistry = repowork.NewRegistry(cfg.ServerCtx, cfg.Runtimes)
+	}
+	m, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return m
 }
 
 func awaitTaskCleanup(t *testing.T, m *Manager, id string) {
@@ -374,6 +381,26 @@ func TestMergeLogAndRelayMessages(t *testing.T) {
 
 func TestNew(t *testing.T) {
 	t.Parallel()
+	t.Run("requires construction dependencies", func(t *testing.T) {
+		t.Parallel()
+		runtimes := newTestRuntime(t, &runtimetest.FakeBackend{}, nil)
+		for _, tc := range []struct {
+			name string
+			cfg  Config
+			want string
+		}{
+			{name: "server context", want: "task manager server context is required"},
+			{name: "runtime router", cfg: Config{ServerCtx: t.Context()}, want: "task manager runtime router is required"},
+			{name: "workspace registry", cfg: Config{ServerCtx: t.Context(), Runtimes: runtimes}, want: "task manager workspace registry is required"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				if _, err := New(tc.cfg); err == nil || err.Error() != tc.want {
+					t.Fatalf("New() error = %v, want %q", err, tc.want)
+				}
+			})
+		}
+	})
 	t.Run("valid", func(t *testing.T) {
 		t.Parallel()
 		cfg := Config{ServerCtx: t.Context()}
@@ -405,14 +432,18 @@ func TestNew(t *testing.T) {
 			t.Fatal(err)
 		}
 		cfg := Config{
-			ServerCtx:  t.Context(),
-			LogDir:     "/tmp/logs",
-			CacheDir:   "/tmp/cache",
-			Runtimes:   router,
-			Backends:   map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}},
-			HarnessEnv: map[string][]string{string(harness.Codex): {"CODEX_HOME=/tmp/codex"}},
+			ServerCtx:         t.Context(),
+			LogDir:            "/tmp/logs",
+			CacheDir:          "/tmp/cache",
+			Runtimes:          router,
+			Backends:          map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}},
+			HarnessEnv:        map[string][]string{string(harness.Codex): {"CODEX_HOME=/tmp/codex"}},
+			WorkspaceRegistry: repowork.NewRegistry(t.Context(), router),
 		}
-		m := New(cfg)
+		m, err := New(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
 		r, ok := m.Workspace("")
 		if !ok {
 			t.Fatal("no-repo workspace not registered")

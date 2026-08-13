@@ -130,7 +130,7 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 	// The Manager has already assigned every repo's branch name (the branch itself
 	// is created below, concurrently with launch), so the log can open with the
 	// durable, branch-derived filename and persist output from its first line.
-	log, err := r.Sessions.Logs.Open(t)
+	log, err := r.Sessions.logs.Open(t)
 	if err != nil {
 		t.recordStartupFailure(ctx, err)
 		return nil, err
@@ -172,7 +172,7 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 	tlog.Info("starting session", "hns", t.Harness)
 	region = trace.StartRegion(ctx, "agent-session")
 	target := sr.AgentTarget
-	session, err := r.Sessions.backend(t.Harness).Start(ctx, &agent.Options{
+	session, err := r.Sessions.backends[t.Harness].Start(ctx, &agent.Options{
 		Target:        target,
 		Dir:           r.Sessions.runtimeDir(t),
 		Model:         t.Model,
@@ -318,12 +318,12 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 		// on the next server restart instead of "purged".
 		tlog.DebugContext(ctx, "cleanup: no session handle, reopening log for trailer")
 		var reopenErr error
-		log, reopenErr = r.Sessions.Logs.Reopen(t)
+		log, reopenErr = r.Sessions.logs.Reopen(t)
 		if reopenErr != nil {
 			tlog.WarnContext(ctx, "reopen log for trailer failed", "err", reopenErr)
 		}
 	}
-	trailerErr := r.Sessions.Logs.WriteResultTrailer(log, t.Title(), &res)
+	trailerErr := r.Sessions.logs.WriteResultTrailer(log, t.Title(), &res)
 	if trailerErr != nil {
 		tlog.WarnContext(ctx, "write log trailer failed", "err", trailerErr)
 	}
@@ -434,7 +434,7 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 	if h != nil {
 		log = h.Log
 	}
-	if err := r.Sessions.Logs.WriteResultTrailer(log, t.Title(), &res); err != nil {
+	if err := r.Sessions.logs.WriteResultTrailer(log, t.Title(), &res); err != nil {
 		tlog.WarnContext(ctx, "write log trailer failed", "err", err)
 	}
 	if log != nil {
@@ -485,7 +485,7 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 	tlog.Info("resuming session after revive", "sess", t.GetSessionID())
 
 	msgCh, dispatchDone := r.Sessions.startMessageDispatch(ctx, t, true)
-	log, err := r.Sessions.Logs.Open(t)
+	log, err := r.Sessions.logs.Open(t)
 	if err != nil {
 		close(msgCh)
 		<-dispatchDone
@@ -495,7 +495,7 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 
 	t.SetState(StateRunning)
 	target := t.RuntimeConnectionTarget()
-	session, err := r.Sessions.backend(t.Harness).Start(ctx, &agent.Options{
+	session, err := r.Sessions.backends[t.Harness].Start(ctx, &agent.Options{
 		Target:          target,
 		Dir:             r.Sessions.runtimeDir(t),
 		Model:           t.Model,
@@ -587,7 +587,7 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *run
 	maps.Copy(metadata, MakeMetadata(fork))
 	forkOpts.Metadata = metadata
 
-	log, err := r.Sessions.Logs.Open(fork)
+	log, err := r.Sessions.logs.Open(fork)
 	if err != nil {
 		fork.recordStartupFailure(ctx, err)
 		return nil, err
@@ -763,7 +763,7 @@ func (r *Runner) finishStartupFailure(ctx context.Context, t *Task, log agent.Lo
 	t.addMessage(ctx, failure, false)
 
 	res := Result{State: StateFailed, Err: startupErr}
-	trailerErr := r.Sessions.Logs.WriteResultTrailer(log, t.Title(), &res)
+	trailerErr := r.Sessions.logs.WriteResultTrailer(log, t.Title(), &res)
 	closeErr := log.Close()
 	commitErr := t.CommitEventReplay(ctx)
 	return errors.Join(startupErr, writeErr, trailerErr, closeErr, commitErr)

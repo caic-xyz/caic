@@ -10,16 +10,17 @@ import (
 
 // Entry is a single registered task plus its mutable lifecycle state.
 //
-// Concurrency: the task pointer, loadedTask pointer, cleanupOnce, and
-// loadedTaskOnce are immutable references after construction (the values they
-// point to may mutate, but the pointers themselves don't); result, done,
-// doneClosed, and monitorBranch are guarded by mu and must only be accessed
-// through methods. Code outside this package never touches the fields directly.
+// Concurrency: task and loadedTask are immutable references after construction.
+// result, done, doneClosed, cleanupOnce, and monitorBranch are guarded by mu
+// and must only be accessed through methods. Code outside this package never
+// touches the fields directly.
 type Entry struct {
 	// Immutable.
-	task           *task.Task
-	loadedTask     *task.LoadedTask
-	loadedTaskOnce *sync.Once
+	task       *task.Task
+	loadedTask *task.LoadedTask
+
+	// Guards lazy message loading for a persisted task.
+	loadedTaskOnce sync.Once
 
 	// Guarded by mu.
 	mu            sync.Mutex
@@ -27,17 +28,15 @@ type Entry struct {
 	done          chan struct{}
 	doneClosed    bool
 	monitorBranch string
-	cleanupOnce   *sync.Once
+	cleanupOnce   sync.Once
 }
 
 // NewEntry creates an Entry. done is fresh; result is nil.
 func NewEntry(t *task.Task, lt *task.LoadedTask) *Entry {
 	return &Entry{
-		task:           t,
-		loadedTask:     lt,
-		done:           make(chan struct{}),
-		cleanupOnce:    new(sync.Once),
-		loadedTaskOnce: new(sync.Once),
+		task:       t,
+		loadedTask: lt,
+		done:       make(chan struct{}),
 	}
 }
 
@@ -47,13 +46,11 @@ func newPurgedEntry(t *task.Task, r *task.Result, lt *task.LoadedTask) *Entry {
 	done := make(chan struct{})
 	close(done)
 	return &Entry{
-		task:           t,
-		loadedTask:     lt,
-		loadedTaskOnce: new(sync.Once),
-		result:         r,
-		done:           done,
-		doneClosed:     true,
-		cleanupOnce:    new(sync.Once),
+		task:       t,
+		loadedTask: lt,
+		result:     r,
+		done:       done,
+		doneClosed: true,
 	}
 }
 
@@ -137,7 +134,7 @@ func (e *Entry) Finish(r *task.Result) {
 // against racing Stop/Purge calls.
 func (e *Entry) Cleanup(fn func()) {
 	e.mu.Lock()
-	once := e.cleanupOnce
+	once := &e.cleanupOnce
 	e.mu.Unlock()
 	once.Do(fn)
 }
@@ -150,7 +147,7 @@ func (e *Entry) Reset() {
 	e.done = make(chan struct{})
 	e.doneClosed = false
 	e.result = nil
-	e.cleanupOnce = new(sync.Once)
+	e.cleanupOnce = sync.Once{}
 	e.mu.Unlock()
 }
 

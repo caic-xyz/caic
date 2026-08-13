@@ -138,8 +138,5 @@ func (c *botClient) resolveGitHubContainerToken(ctx context.Context, enabled boo
 	if u, ok := auth.UserFromContext(ctx); ok && u.Provider == auth.ProviderGitHub && u.AccessToken != "" {
 		return u.AccessToken
 	}
-	if c.forgeMgr != nil {
-		return c.forgeMgr.GitHubToken()
-	}
-	return ""
+	return c.forgeMgr.GitHubToken()
 }

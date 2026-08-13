@@ -31,7 +31,6 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -84,20 +83,17 @@ type Config struct {
 	HarnessEnv          map[string][]string
 	RuntimeMetadata     runtime.Metadata
 	RuntimeStartTimeout time.Duration
-	Prefs               *preferences.Store
 	Provider            genai.Provider // nil-safe
 	WorkspaceRegistry   *repowork.Registry
-	QuotaTracker        *quotausage.Tracker
 }
 
 // Manager owns task lifecycle state, instance adoption, session watching, and
 // stats streaming.
 type Manager struct {
-	Runtimes *runtime.Router
-	// QuotaTracker holds canonical quota updates received from tasks.
+	// Immutable.
+	Runtimes     *runtime.Router
 	QuotaTracker *quotausage.Tracker
 
-	// Immutable.
 	log                 *slog.Logger
 	serverCtx           context.Context // lifetime of the Manager; for goroutines that outlive requests
 	cancelServerCtx     context.CancelFunc
@@ -108,7 +104,6 @@ type Manager struct {
 	harnessEnv          map[string][]string
 	runtimeMetadata     runtime.Metadata
 	runtimeStartTimeout time.Duration
-	prefs               *preferences.Store
 	provider            genai.Provider
 	workspaceRegistry   *repowork.Registry
 	relay               relayReader
@@ -126,21 +121,22 @@ type Manager struct {
 
 // New creates a Manager. A no-repo workspace is always registered.
 // Register each repo workspace in the configured WorkspaceRegistry, then Start.
-func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passed once at construction
+func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value bag passed once at construction
+	if cfg.ServerCtx == nil {
+		return nil, errors.New("task manager server context is required")
+	}
+	if cfg.Runtimes == nil {
+		return nil, errors.New("task manager runtime router is required")
+	}
+	if cfg.WorkspaceRegistry == nil {
+		return nil, errors.New("task manager workspace registry is required")
+	}
 	log := slog.Default().With(slog.String("cmp", "taskmgr"))
 	serverCtx, cancelServerCtx := context.WithCancel(cfg.ServerCtx)
-	workspaceRegistry := cfg.WorkspaceRegistry
-	if workspaceRegistry == nil {
-		workspaceRegistry = repowork.NewRegistry(cfg.ServerCtx, cfg.Runtimes)
-	}
-	quotaTracker := cfg.QuotaTracker
-	if quotaTracker == nil {
-		quotaTracker = quotausage.NewTracker()
-	}
 	m := &Manager{
-		log:                 log,
 		Runtimes:            cfg.Runtimes,
-		QuotaTracker:        quotaTracker,
+		QuotaTracker:        quotausage.NewTracker(),
+		log:                 log,
 		serverCtx:           serverCtx,
 		cancelServerCtx:     cancelServerCtx,
 		logDir:              cfg.LogDir,
@@ -150,21 +146,20 @@ func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passe
 		harnessEnv:          cfg.HarnessEnv,
 		runtimeMetadata:     maps.Clone(cfg.RuntimeMetadata),
 		runtimeStartTimeout: managerRuntimeStartTimeout(cfg.RuntimeStartTimeout),
-		prefs:               cfg.Prefs,
 		provider:            cfg.Provider,
-		workspaceRegistry:   workspaceRegistry,
+		workspaceRegistry:   cfg.WorkspaceRegistry,
 		relay:               agentRelayReader{},
 		tasks:               make(map[string]*Entry),
 		changed:             make(chan struct{}),
 	}
-	if _, ok := workspaceRegistry.Workspace(""); !ok {
-		workspaceRegistry.RegisterWorkspace("", &repowork.Workspace{
+	if _, ok := m.workspaceRegistry.Workspace(""); !ok {
+		m.workspaceRegistry.RegisterWorkspace("", &repowork.Workspace{
 			GitTimeout: time.Minute,
 			Runtimes:   cfg.Runtimes,
 			Log:        m.log.With(slog.String("repo", "(none)")),
 		})
 	}
-	return m
+	return m, nil
 }
 
 // Close stops quota-event watchers and waits for their live task subscriptions
@@ -1269,12 +1264,7 @@ func (m *Manager) logStore() *task.LogStore {
 }
 
 func (m *Manager) sessions(r *repowork.Workspace) *task.SessionRunner {
-	return &task.SessionRunner{
-		Backends:         m.backends,
-		Logs:             m.logStore(),
-		Workspace:        r,
-		NotifyTaskChange: m.NotifyTaskChange,
-	}
+	return task.NewSessionRunner(m.backends, m.logStore(), r, m.NotifyTaskChange)
 }
 
 func (m *Manager) runner(r *repowork.Workspace) *task.Runner {

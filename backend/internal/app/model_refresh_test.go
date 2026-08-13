@@ -11,6 +11,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
@@ -28,7 +29,7 @@ func TestRefreshHarnessModels(t *testing.T) {
 		inventory := &modelRefreshInventory{}
 		router := newModelRefreshRouter(t, runtimeBackend, inventory)
 		fetcher := &modelFetchBackend{FakeBackend: &agenttest.FakeBackend{}, harness: fetchHarness, inventory: agent.ModelInventory{Models: []agent.Model{{ID: "z-model"}, {ID: "a-model"}}}}
-		taskMgr := newModelRefreshTestManager(t.Context(), router, map[harness.Name]agent.Backend{
+		taskMgr := newModelRefreshTestManager(t, router, map[harness.Name]agent.Backend{
 			fetchHarness: fetcher,
 			"plain":      &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}},
 		})
@@ -73,7 +74,7 @@ func TestRefreshHarnessModels(t *testing.T) {
 			harness:     fetchHarness,
 			inventory:   agent.ModelInventory{Models: []agent.Model{{ID: "openai/gpt-5", EffortOptions: []string{"low", "high"}}}},
 		}
-		taskMgr := newModelRefreshTestManager(t.Context(), router, map[harness.Name]agent.Backend{fetchHarness: fetcher})
+		taskMgr := newModelRefreshTestManager(t, router, map[harness.Name]agent.Backend{fetchHarness: fetcher})
 
 		refreshHarnessModels(t.Context(), cacheDir, router, taskMgr, env)
 
@@ -93,7 +94,7 @@ func TestRefreshHarnessModels(t *testing.T) {
 		inventory := &modelRefreshInventory{}
 		router := newModelRefreshRouter(t, runtimeBackend, inventory)
 		fetcher := &modelFetchBackend{FakeBackend: &agenttest.FakeBackend{}, harness: fetchHarness, inventory: agent.ModelInventory{Models: []agent.Model{{ID: "new-model"}}}}
-		taskMgr := newModelRefreshTestManager(t.Context(), router, map[harness.Name]agent.Backend{
+		taskMgr := newModelRefreshTestManager(t, router, map[harness.Name]agent.Backend{
 			fetchHarness: fetcher,
 		})
 
@@ -126,7 +127,7 @@ func TestRefreshHarnessModels(t *testing.T) {
 		}
 		router := newModelRefreshRouter(t, runtimeBackend, inventory)
 		fetcher := &modelFetchBackend{FakeBackend: &agenttest.FakeBackend{}, harness: fetchHarness, inventory: agent.ModelInventory{Models: []agent.Model{{ID: "new-model"}}}}
-		taskMgr := newModelRefreshTestManager(t.Context(), router, map[harness.Name]agent.Backend{
+		taskMgr := newModelRefreshTestManager(t, router, map[harness.Name]agent.Backend{
 			fetchHarness: fetcher,
 		})
 
@@ -141,12 +142,17 @@ func TestRefreshHarnessModels(t *testing.T) {
 	})
 }
 
-func newModelRefreshTestManager(ctx context.Context, router *runtime.Router, backends map[harness.Name]agent.Backend) *taskmgr.Manager {
-	return taskmgr.New(taskmgr.Config{
-		ServerCtx: ctx,
-		Runtimes:  router,
-		Backends:  backends,
+func newModelRefreshTestManager(t testing.TB, router *runtime.Router, backends map[harness.Name]agent.Backend) *taskmgr.Manager {
+	m, err := taskmgr.New(taskmgr.Config{
+		ServerCtx:         t.Context(),
+		Runtimes:          router,
+		Backends:          backends,
+		WorkspaceRegistry: repowork.NewRegistry(t.Context(), router),
 	})
+	if err != nil {
+		t.Fatalf("taskmgr.New: %v", err)
+	}
+	return m
 }
 
 func newModelRefreshRouter(t *testing.T, runtimeBackend runtime.Lifecycle, inventory runtime.Inventory) *runtime.Router {

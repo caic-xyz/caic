@@ -107,6 +107,14 @@ func newTestRuntime(t testing.TB, lifecycle runtime.Lifecycle) *runtime.Router {
 	return router
 }
 
+func newTestTaskManager(t testing.TB, cfg taskmgr.Config) *taskmgr.Manager { //nolint:gocritic // Config mirrors New's value bag in tests.
+	m, err := taskmgr.New(cfg)
+	if err != nil {
+		t.Fatalf("taskmgr.New: %v", err)
+	}
+	return m
+}
+
 func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testRouter {
 	checker, err := ipgeo.NewChecker(t.Context(), "0.0.0.0/0,::/0", "", "")
 	if err != nil {
@@ -115,7 +123,7 @@ func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testR
 	backend := &runtimetest.FakeBackend{}
 	runtimeRouter := newTestRuntime(t, backend)
 	workspaceRegistry := repowork.NewRegistry(t.Context(), runtimeRouter)
-	taskMgr := taskmgr.New(taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Backends: backends, WorkspaceRegistry: workspaceRegistry})
+	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Backends: backends, WorkspaceRegistry: workspaceRegistry})
 	repoSvc := repomgr.NewService(t.Context(), "", repo.New(nil), workspaceRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
@@ -128,6 +136,8 @@ func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testR
 		Preferences:  prefs,
 		IPGeoChecker: checker,
 		ForgeMgr:     forgeManager,
+		Warnings:     NewWarningStore(taskMgr),
+		CacheSizes:   NewCacheSizeStore(),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -146,7 +156,7 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 	backend := &runtimetest.FakeBackend{}
 	runtimeRouter := newTestRuntime(t, backend)
 	workspaceRegistry := repowork.NewRegistry(t.Context(), runtimeRouter)
-	taskMgr := taskmgr.New(taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, WorkspaceRegistry: workspaceRegistry})
+	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, WorkspaceRegistry: workspaceRegistry})
 	repoSvc := repomgr.NewService(t.Context(), "", repo.New(nil), workspaceRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
@@ -159,6 +169,8 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 		Preferences:                prefs,
 		IPGeoChecker:               checker,
 		ForgeMgr:                   forgeManager,
+		Warnings:                   NewWarningStore(taskMgr),
+		CacheSizes:                 NewCacheSizeStore(),
 		AuthStore:                  authStore,
 		OAuthPrivateKeyPEM:         testMCPOAuthSigningKeyPEM(t),
 		OAuthRefreshTokenStorePath: refreshTokenPath,
@@ -184,6 +196,21 @@ func testTaskHandlers(s *testRouter) *taskHandlers {
 
 func TestNew(t *testing.T) {
 	t.Parallel()
+	validDependencies := func(t *testing.T) Dependencies {
+		runtimeRouter := newTestRuntime(t, &runtimetest.FakeBackend{})
+		workspaceRegistry := repowork.NewRegistry(t.Context(), runtimeRouter)
+		taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, WorkspaceRegistry: workspaceRegistry})
+		return Dependencies{
+			RepoSvc:     repomgr.NewService(t.Context(), "", repo.New(nil), workspaceRegistry),
+			RepoStatus:  ci.NewRepoStatusStore(),
+			Runtimes:    runtimeRouter,
+			TaskMgr:     taskMgr,
+			Preferences: newTestPrefs(t),
+			ForgeMgr:    forgemgr.New("", "", nil),
+			Warnings:    NewWarningStore(taskMgr),
+			CacheSizes:  NewCacheSizeStore(),
+		}
+	}
 
 	t.Run("missing runtime", func(t *testing.T) {
 		t.Parallel()
@@ -198,7 +225,7 @@ func TestNew(t *testing.T) {
 		workspaceRegistry := repowork.NewRegistry(t.Context(), runtimeRouter)
 		_, err := New(t.Context(), Dependencies{
 			Runtimes:    runtimeRouter,
-			TaskMgr:     taskmgr.New(taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, WorkspaceRegistry: workspaceRegistry}),
+			TaskMgr:     newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, WorkspaceRegistry: workspaceRegistry}),
 			Preferences: newTestPrefs(t),
 			RepoStatus:  ci.NewRepoStatusStore(),
 		})
@@ -214,11 +241,45 @@ func TestNew(t *testing.T) {
 		_, err := New(t.Context(), Dependencies{
 			RepoSvc:     repomgr.NewService(t.Context(), "", repo.New(nil), workspaceRegistry),
 			Runtimes:    runtimeRouter,
-			TaskMgr:     taskmgr.New(taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, WorkspaceRegistry: workspaceRegistry}),
+			TaskMgr:     newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, WorkspaceRegistry: workspaceRegistry}),
 			Preferences: newTestPrefs(t),
 		})
 		if err == nil || err.Error() != "repo status store is required" {
 			t.Fatalf("New() error = %v, want repo status store required", err)
+		}
+	})
+
+	t.Run("missing forge manager", func(t *testing.T) {
+		t.Parallel()
+		runtimeRouter := newTestRuntime(t, &runtimetest.FakeBackend{})
+		workspaceRegistry := repowork.NewRegistry(t.Context(), runtimeRouter)
+		_, err := New(t.Context(), Dependencies{
+			RepoSvc:     repomgr.NewService(t.Context(), "", repo.New(nil), workspaceRegistry),
+			RepoStatus:  ci.NewRepoStatusStore(),
+			Runtimes:    runtimeRouter,
+			TaskMgr:     newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, WorkspaceRegistry: workspaceRegistry}),
+			Preferences: newTestPrefs(t),
+		})
+		if err == nil || err.Error() != "forge manager is required" {
+			t.Fatalf("New() error = %v, want forge manager required", err)
+		}
+	})
+
+	t.Run("missing warning store", func(t *testing.T) {
+		t.Parallel()
+		d := validDependencies(t)
+		d.Warnings = nil
+		if _, err := New(t.Context(), d); err == nil || err.Error() != "warning store is required" {
+			t.Fatalf("New() error = %v, want warning store required", err)
+		}
+	})
+
+	t.Run("missing cache size store", func(t *testing.T) {
+		t.Parallel()
+		d := validDependencies(t)
+		d.CacheSizes = nil
+		if _, err := New(t.Context(), d); err == nil || err.Error() != "cache size store is required" {
+			t.Fatalf("New() error = %v, want cache size store required", err)
 		}
 	})
 }
@@ -349,7 +410,7 @@ func newWorkspaceConstructionTestServer(t *testing.T, root string) workspaceCons
 	logDir := filepath.Join(t.TempDir(), "logs")
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	workspaceRegistry := repowork.NewRegistry(t.Context(), runtimeRouter)
-	taskMgr := taskmgr.New(taskmgr.Config{
+	taskMgr := newTestTaskManager(t, taskmgr.Config{
 		ServerCtx:         t.Context(),
 		LogDir:            logDir,
 		CacheDir:          cacheDir,
@@ -368,6 +429,8 @@ func newWorkspaceConstructionTestServer(t *testing.T, root string) workspaceCons
 		TaskMgr:     taskMgr,
 		Preferences: prefs,
 		ForgeMgr:    forgemgr.New("", "", nil),
+		Warnings:    NewWarningStore(taskMgr),
+		CacheSizes:  NewCacheSizeStore(),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1391,7 +1454,8 @@ func TestLoadPurgedTasks(t *testing.T) {
 			t.Fatalf("len(entries) = %d, want 1", len(entries))
 		}
 		for _, e := range entries {
-			j := v1conv.Task(t.Context(), e, testTaskHandlers(s).taskSvc.taskResolvers())
+			h := testTaskHandlers(s)
+			j := v1conv.Task(t.Context(), e, newTaskResolvers(h.taskSvc.taskMgr, h.taskSvc.repoMgr, h.taskSvc.authStore))
 			if j.CostUSD != 1.23 {
 				t.Errorf("CostUSD = %f, want 1.23", j.CostUSD)
 			}
@@ -1444,7 +1508,8 @@ func TestLoadPurgedTasks(t *testing.T) {
 			t.Fatalf("len(entries) = %d, want 1", len(entries))
 		}
 		for _, e := range entries {
-			j := v1conv.Task(t.Context(), e, testTaskHandlers(s).taskSvc.taskResolvers())
+			h := testTaskHandlers(s)
+			j := v1conv.Task(t.Context(), e, newTaskResolvers(h.taskSvc.taskMgr, h.taskSvc.repoMgr, h.taskSvc.authStore))
 			if j.CostUSD != 0.42 {
 				t.Errorf("CostUSD = %f, want 0.42 (should be backfilled from ResultMessage)", j.CostUSD)
 			}

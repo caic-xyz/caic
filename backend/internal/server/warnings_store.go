@@ -58,9 +58,7 @@ func (w *WarningStore) Emit(msg string) {
 		w.warnings = w.warnings[len(w.warnings)-maxWarnings:]
 	}
 	w.mu.Unlock()
-	if w.taskMgr != nil {
-		w.taskMgr.NotifyTaskChange()
-	}
+	w.taskMgr.NotifyTaskChange()
 }
 
 // Since returns all warnings with a timestamp after t.

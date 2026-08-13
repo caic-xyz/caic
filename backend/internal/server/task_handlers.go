@@ -373,10 +373,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 		ch := h.taskMgr.Changed()
 		out := h.taskSvc.taskListSnapshot(ctx)
 		repoList := repoListFromSnapshot(h.repoSvc.Snapshot(), h.repoStatus)
-		var newWarnings []serverWarning
-		if h.warnings != nil {
-			newWarnings = h.warnings.Since(lastWarnTime)
-		}
+		var newWarnings = h.warnings.Since(lastWarnTime)
 
 		reposJSON, err := json.Marshal(repoList)
 		if err != nil {
@@ -562,6 +559,7 @@ func (h *taskHandlers) handleVNCWebSocket(w http.ResponseWriter, r *http.Request
 
 // getTask looks up a task by the {id} path parameter.
 // When auth is enabled, returns 403 if the task belongs to a different user.
+// It implements taskEntryResolver for route wrappers that require task lookup.
 func (h *taskHandlers) getTask(r *http.Request) (*taskmgr.Entry, error) {
 	return taskEntryFromRequest(r, h.taskMgr, h.authStore)
 }

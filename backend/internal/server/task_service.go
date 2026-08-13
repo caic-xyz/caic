@@ -92,7 +92,7 @@ func (s *taskService) taskListSnapshot(ctx context.Context) []v1.Task {
 		if ownerID != "" && e.Task().OwnerID != "" && e.Task().OwnerID != ownerID {
 			return true
 		}
-		out = append(out, v1conv.Task(ctx, e, s.taskResolvers()))
+		out = append(out, v1conv.Task(ctx, e, newTaskResolvers(s.taskMgr, s.repoMgr, s.authStore)))
 		return true
 	})
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -104,7 +104,7 @@ func (s *taskService) taskListSnapshot(ctx context.Context) []v1.Task {
 // check and initial state without depending on the eventually-consistent task
 // list snapshot.
 func (s *taskService) getTask(ctx context.Context, entry *taskmgr.Entry, _ *api.EmptyReq) (*v1.Task, error) {
-	dto := v1conv.Task(ctx, entry, s.taskResolvers())
+	dto := v1conv.Task(ctx, entry, newTaskResolvers(s.taskMgr, s.repoMgr, s.authStore))
 	return &dto, nil
 }
 
@@ -112,7 +112,7 @@ func (s *taskService) getTask(ctx context.Context, entry *taskmgr.Entry, _ *api.
 func (s *taskService) getTaskInfo(ctx context.Context, entry *taskmgr.Entry, _ *api.EmptyReq) (*v1.TaskInfo, error) {
 	t := entry.Task()
 	snap := t.Snapshot()
-	resolvers := s.taskResolvers()
+	resolvers := newTaskResolvers(s.taskMgr, s.repoMgr, s.authStore)
 
 	taskRepos := make([]v1.TaskInfoRepo, 0, len(snap.Repos))
 	for _, repo := range snap.Repos {
@@ -382,7 +382,7 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v
 
 	// Return the full task so clients can seed their store and render the detail
 	// view immediately, without waiting for the SSE upsert to deliver it.
-	dto := v1conv.Task(ctx, entry, s.taskResolvers())
+	dto := v1conv.Task(ctx, entry, newTaskResolvers(s.taskMgr, s.repoMgr, s.authStore))
 	return &dto, nil
 }
 
@@ -561,7 +561,7 @@ func (s *taskService) forkTask(ctx context.Context, entry *taskmgr.Entry, req *v
 	if !ok {
 		return nil, api.InternalError("forked task not found")
 	}
-	dto := v1conv.Task(ctx, forkEntry, s.taskResolvers())
+	dto := v1conv.Task(ctx, forkEntry, newTaskResolvers(s.taskMgr, s.repoMgr, s.authStore))
 	return &dto, nil
 }
 
@@ -665,14 +665,7 @@ func (s *taskService) resolveGitHubContainerToken(ctx context.Context, enabled b
 	if u, ok := auth.UserFromContext(ctx); ok && u.Provider == auth.ProviderGitHub && u.AccessToken != "" {
 		return u.AccessToken
 	}
-	if s.forgeMgr != nil {
-		return s.forgeMgr.GitHubToken()
-	}
-	return ""
-}
-
-func (s *taskService) taskResolvers() v1conv.TaskResolvers {
-	return newTaskResolvers(s.taskMgr, s.repoMgr, s.authStore)
+	return s.forgeMgr.GitHubToken()
 }
 
 // newTaskResolvers builds the resolver set used to convert task entries into API

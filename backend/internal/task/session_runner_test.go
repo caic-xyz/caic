@@ -59,7 +59,7 @@ func TestSessionRunner(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "test"},
 				Harness:       "test",
 			}
-			logW, err := r.Logs.Open(tk)
+			logW, err := r.logs.Open(tk)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -325,7 +325,7 @@ func TestSessionRunner(t *testing.T) {
 			stub := &fetchRecorder{FakeBackend: testContainer()}
 			r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "/repo", stub), "", nil)
 			changed := make(chan struct{}, 1)
-			r.NotifyTaskChange = func() { changed <- struct{}{} }
+			r.notifyTaskChange = func() { changed <- struct{}{} }
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)

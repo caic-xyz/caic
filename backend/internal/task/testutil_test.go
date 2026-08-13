@@ -107,7 +107,7 @@ func newTestSessionRunner(t *testing.T, workspace *repowork.Workspace, logDir st
 	if workspace == nil {
 		workspace = &repowork.Workspace{GitTimeout: time.Minute, Log: logtest.Logger(t)}
 	}
-	return &SessionRunner{Backends: backends, Workspace: workspace, Logs: &LogStore{LogDir: logDir}}
+	return NewSessionRunner(backends, &LogStore{LogDir: logDir}, workspace, func() {})
 }
 
 // testContainer returns a fake runtime whose Diff reports a fixed one-file
