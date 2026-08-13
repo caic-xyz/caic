@@ -95,13 +95,12 @@ type Manager struct {
 	QuotaTracker *quotausage.Tracker
 	Backends     map[harness.Name]agent.Backend
 	Workspaces   *repowork.Registry
+	Logs         task.LogStore
 
 	log                 *slog.Logger
 	serverCtx           context.Context // lifetime of the Manager; for goroutines that outlive requests
 	cancelServerCtx     context.CancelFunc
-	logDir              string
 	cacheDir            string
-	eventReplayFactory  task.EventReplayFactory
 	harnessEnv          map[string][]string
 	runtimeMetadata     runtime.Metadata
 	runtimeStartTimeout time.Duration
@@ -139,10 +138,9 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 		log:                 log,
 		serverCtx:           serverCtx,
 		cancelServerCtx:     cancelServerCtx,
-		logDir:              cfg.LogDir,
 		cacheDir:            cfg.CacheDir,
 		Backends:            maps.Clone(cfg.Backends),
-		eventReplayFactory:  cfg.EventReplayFactory,
+		Logs:                task.LogStore{LogDir: cfg.LogDir, EventReplayFactory: cfg.EventReplayFactory},
 		harnessEnv:          cfg.HarnessEnv,
 		runtimeMetadata:     maps.Clone(cfg.RuntimeMetadata),
 		runtimeStartTimeout: managerRuntimeStartTimeout(cfg.RuntimeStartTimeout),
@@ -1029,7 +1027,7 @@ func (m *Manager) LoadPurgedTasks(all []*task.LoadedTask) error {
 			}
 		}
 		lt.SetNativeParserResolver(m.resolveNativeParser)
-		rt := m.defaultRuntimeName()
+		rt := m.Runtimes.Runtimes[0].Name()
 		if lt.RuntimeName != "" {
 			rt = lt.RuntimeName
 		} else {
@@ -1230,14 +1228,10 @@ func (m *Manager) reconnectForInput(entry *Entry) error {
 	return nil
 }
 
-func (m *Manager) logStore() *task.LogStore {
-	return &task.LogStore{LogDir: m.logDir, EventReplayFactory: m.eventReplayFactory}
-}
-
 func (m *Manager) sessions(r *repowork.Workspace) *task.SessionRunner {
 	return &task.SessionRunner{
 		Backends:         m.Backends,
-		Logs:             m.logStore(),
+		Logs:             m.Logs,
 		Workspace:        r,
 		NotifyTaskChange: m.NotifyTaskChange,
 	}
@@ -1368,10 +1362,6 @@ func (m *Manager) activeStatsIDs() (ids []runtime.ID, changed <-chan struct{}) {
 		ids = append(ids, name)
 	}
 	return ids, m.changed
-}
-
-func (m *Manager) defaultRuntimeName() runtime.Name {
-	return m.Runtimes.Runtimes[0].Name()
 }
 
 func resolveRuntimeName(router *runtime.Router, id runtime.Name) (runtime.Name, error) {
@@ -1754,7 +1744,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 	}
 
 	forgeIssue := lt.ForgeIssue
-	rt := m.defaultRuntimeName()
+	rt := m.Runtimes.Runtimes[0].Name()
 	var forkedFromTaskID ksid.ID
 	if lt.RuntimeName != "" {
 		rt = lt.RuntimeName
@@ -1929,7 +1919,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 			Err:         resultErr,
 		}
 		entry.Finish(result)
-		if err := m.logStore().WriteTaskResultTrailer(t, result); err != nil {
+		if err := m.Logs.WriteTaskResultTrailer(t, result); err != nil {
 			m.log.WarnContext(ctx, "write adopted result trailer failed", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", err)
 		}
 	}
@@ -2104,7 +2094,7 @@ func (m *Manager) watchSession(entry *Entry, workspace *repowork.Workspace, h *t
 						Err:         crashErr,
 					}
 					entry.Finish(result)
-					if err := m.logStore().WriteTaskResultTrailer(t, result); err != nil {
+					if err := m.Logs.WriteTaskResultTrailer(t, result); err != nil {
 						m.log.WarnContext(m.serverCtx, "write crashed task trailer failed", append(attrs, "err", err)...)
 					}
 					if err := t.CommitEventReplay(m.serverCtx); err != nil {
@@ -2127,7 +2117,7 @@ func (m *Manager) watchSession(entry *Entry, workspace *repowork.Workspace, h *t
 						Err:         failureErr,
 					}
 					entry.Finish(result)
-					if err := m.logStore().WriteTaskResultTrailer(t, result); err != nil {
+					if err := m.Logs.WriteTaskResultTrailer(t, result); err != nil {
 						m.log.WarnContext(m.serverCtx, "write failed task trailer failed", append(attrs, "err", err)...)
 					}
 					if err := t.CommitEventReplay(m.serverCtx); err != nil {

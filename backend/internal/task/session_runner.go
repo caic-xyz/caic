@@ -23,7 +23,7 @@ import (
 type SessionRunner struct {
 	// Immutable.
 	Backends         map[harness.Name]agent.Backend
-	Logs             *LogStore
+	Logs             LogStore
 	Workspace        *repowork.Workspace
 	NotifyTaskChange func()
 }

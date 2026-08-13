@@ -455,7 +455,7 @@ func newTestRepoWatcher(t *testing.T, root string, s *testRouter) *repomgr.Watch
 	return repomgr.NewWatcher(&repomgr.WatcherConfig{
 		Ctx:     t.Context(),
 		AbsRoot: root,
-		Repos:   func() []repo.Info { return testWatchedRepos(s.repoSvc) },
+		Repos:   s.repoSvc.Repos.Snapshot,
 		RelPath: s.repoSvc.RelPath,
 		WorkspaceExists: func(relPath string) bool {
 			_, ok := s.repoSvc.Workspaces.Workspace(relPath)
@@ -474,19 +474,6 @@ func newTestRepoWatcher(t *testing.T, root string, s *testRouter) *repomgr.Watch
 		},
 		OnRemoved: s.repoSvc.DeregisterWorkspace,
 	})
-}
-
-func testWatchedRepos(repoService *repomgr.Service) []repo.Info {
-	snap := repoService.Repos.Snapshot()
-	out := make([]repo.Info, len(snap))
-	for i := range snap {
-		out[i] = repo.Info{
-			RelPath:    snap[i].RelPath,
-			AbsPath:    snap[i].AbsPath,
-			BaseBranch: snap[i].BaseBranch,
-		}
-	}
-	return out
 }
 
 func initCloneSourceRepo(t *testing.T) string {

@@ -15,7 +15,7 @@ func newRepoWatcher(ctx context.Context, absRoot string, repoService *repomgr.Se
 	return repomgr.NewWatcher(&repomgr.WatcherConfig{
 		Ctx:     ctx,
 		AbsRoot: absRoot,
-		Repos:   func() []repo.Info { return watchedRepos(repoService) },
+		Repos:   repoService.Repos.Snapshot,
 		RelPath: repoService.RelPath,
 		WorkspaceExists: func(relPath string) bool {
 			_, ok := repoService.Workspaces.Workspace(relPath)
@@ -26,19 +26,6 @@ func newRepoWatcher(ctx context.Context, absRoot string, repoService *repomgr.Se
 		},
 		OnRemoved: repoService.DeregisterWorkspace,
 	})
-}
-
-func watchedRepos(repoService *repomgr.Service) []repo.Info {
-	snap := repoService.Repos.Snapshot()
-	out := make([]repo.Info, len(snap))
-	for i := range snap {
-		out[i] = repo.Info{
-			RelPath:    snap[i].RelPath,
-			AbsPath:    snap[i].AbsPath,
-			BaseBranch: snap[i].BaseBranch,
-		}
-	}
-	return out
 }
 
 func registerDiscoveredRepo(ctx context.Context, repoService *repomgr.Service, repoStatus *ci.RepoStatusStore, abs string) {

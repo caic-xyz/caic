@@ -448,8 +448,8 @@ func TestNew(t *testing.T) {
 		if !ok {
 			t.Fatal("no-repo workspace not registered")
 		}
-		if m.logDir != cfg.LogDir || m.cacheDir != cfg.CacheDir {
-			t.Fatalf("manager dirs = log %q cache %q, want log %q cache %q", m.logDir, m.cacheDir, cfg.LogDir, cfg.CacheDir)
+		if m.Logs.LogDir != cfg.LogDir || m.cacheDir != cfg.CacheDir {
+			t.Fatalf("manager dirs = log %q cache %q, want log %q cache %q", m.Logs.LogDir, m.cacheDir, cfg.LogDir, cfg.CacheDir)
 		}
 		if r.Runtimes != cfg.Runtimes {
 			t.Fatal("workspace instance backend was not wired")
@@ -3044,7 +3044,7 @@ func TestManager(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			path := filepath.Join(m.logDir, taskID.String()+".jsonl")
+			path := filepath.Join(m.Logs.LogDir, taskID.String()+".jsonl")
 			data := append([]byte(nil), meta...)
 			data = append(data, []byte(`
 {"type":"caic_result","state":123}
@@ -3052,7 +3052,7 @@ func TestManager(t *testing.T) {
 			if err := os.WriteFile(path, data, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			logs, err := task.LoadLogs(m.logDir)
+			logs, err := task.LoadLogs(m.Logs.LogDir)
 			if err != nil {
 				t.Fatal(err)
 			}
