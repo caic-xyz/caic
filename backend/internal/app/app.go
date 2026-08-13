@@ -279,6 +279,41 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		Prefs:              prefsStore,
 		Provider:           provider,
 	})
+	// Replay spool cleanup is safe only before caic creates live replay writers.
+	// Compression also replaces log paths, so finish maintenance before task
+	// adoption can expose any task to a replay request.
+	err = func() error {
+		startupCtx, tk := trace.NewTask(ctx, "prepare-purged-task-logs")
+		defer tk.End()
+		start := time.Now()
+		logs, err := task.LoadLogs(logDir)
+		if err != nil {
+			return fmt.Errorf("load logs: %w", err)
+		}
+		slog.InfoContext(startupCtx, "loaded task log headers", "n", len(logs), "dur", time.Since(start))
+		start = time.Now()
+		if err := task.CompressTerminalLogs(logs); err != nil {
+			slog.WarnContext(startupCtx, "compress terminal task logs failed", "err", err)
+		} else {
+			slog.InfoContext(startupCtx, "compressed terminal task logs", "dur", time.Since(start))
+		}
+		if removed, err := eventreplay.PruneStaleCaches(logDir, task.CacheProofForLog); err != nil {
+			slog.WarnContext(startupCtx, "prune stale replay caches failed", "err", err)
+		} else if removed > 0 {
+			slog.InfoContext(startupCtx, "pruned stale replay caches", "n", removed)
+		}
+		start = time.Now()
+		if err := taskMgr.LoadPurgedTasks(logs); err != nil {
+			slog.ErrorContext(startupCtx, "load purged tasks failed", "err", err)
+		} else {
+			slog.InfoContext(startupCtx, "loaded purged task entries", "dur", time.Since(start))
+		}
+		return nil
+	}()
+	if err != nil {
+		return nil, err
+	}
+
 	repoService := repomgr.NewService(ctx, absRoot, repo.New(nil), workspaceRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 
@@ -442,37 +477,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 			newRepoWatcher(ctx, absRoot, repoService, repoStatus).Watch()
 			return nil
 		},
-		func(ctx context.Context) error {
-			startupCtx, tk := trace.NewTask(ctx, "load-purged-tasks")
-			defer tk.End()
-			trace.Log(startupCtx, "startup", "load-purged-tasks: begin")
-			start := time.Now()
-			logs, err := task.LoadLogs(logDir)
-			if err != nil {
-				return fmt.Errorf("load logs: %w", err)
-			}
-			slog.InfoContext(startupCtx, "loaded task log headers", "n", len(logs), "dur", time.Since(start))
-			start = time.Now()
-			if err := taskMgr.LoadPurgedTasks(logs); err != nil {
-				slog.ErrorContext(startupCtx, "load purged tasks failed", "err", err)
-			} else {
-				slog.InfoContext(startupCtx, "loaded purged task entries", "dur", time.Since(start))
-			}
-			start = time.Now()
-			if err := task.CompressTerminalLogs(logs); err != nil {
-				slog.WarnContext(startupCtx, "compress terminal task logs failed", "err", err)
-			} else {
-				slog.InfoContext(startupCtx, "compressed terminal task logs", "dur", time.Since(start))
-			}
-			if removed, err := eventreplay.PruneStaleCaches(logDir, task.CacheProofForLog); err != nil {
-				slog.WarnContext(startupCtx, "prune stale replay caches failed", "err", err)
-			} else if removed > 0 {
-				slog.InfoContext(startupCtx, "pruned stale replay caches", "n", removed)
-			}
-			return nil
-		},
 	)
-
 	return &App{Server: s, voiceBridge: voiceBridge, backgroundTasks: backgroundTasks, taskMgr: taskMgr}, nil
 }
 

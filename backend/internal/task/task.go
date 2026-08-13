@@ -692,10 +692,7 @@ func (t *Task) LogPath() string {
 // falls back after an identity, header, or EOF validation failure.
 func (t *Task) CacheProofForLog(path string) (CacheProof, error) {
 	if snapshot := t.logValidationProof(path); snapshot != nil {
-		if proof, ok := cacheProofForAppendFromValidatedSnapshot(snapshot, path); ok {
-			return proof, nil
-		}
-		return CacheProof{}, fmt.Errorf("task log no longer matches retained validated snapshot: %s", path)
+		return cacheProofForAppendFromValidatedSnapshot(snapshot, path)
 	}
 	return CacheProofForLog(path)
 }

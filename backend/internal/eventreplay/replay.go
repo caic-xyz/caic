@@ -78,7 +78,8 @@ func CachePath(logPath string) string {
 }
 
 // PruneStaleCaches removes replay sidecars that no longer match a raw task log.
-// It also removes orphaned temp files left by interrupted cache writes.
+// It also removes orphaned temp files left by interrupted cache writes. Callers
+// must exclude live replay writers for logDir while pruning.
 func PruneStaleCaches(logDir string, prove ProofProvider) (int, error) {
 	entries, err := os.ReadDir(logDir)
 	if err != nil {

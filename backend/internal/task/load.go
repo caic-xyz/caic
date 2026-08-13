@@ -33,6 +33,10 @@ import (
 // errNotLogFile is returned when a file doesn't contain a valid caic_meta header.
 var errNotLogFile = errors.New("not a caic log file")
 
+// ErrRetainedSnapshotMismatch reports a verified task-log observation that no
+// longer has the authority retained by an earlier completed scan.
+var ErrRetainedSnapshotMismatch = errors.New("task log no longer matches retained validated snapshot")
+
 // v1TypeEnvelope extracts the legacy v1 native-message type used by inventory parsing.
 type v1TypeEnvelope struct {
 	Type string `json:"type"`
@@ -166,35 +170,45 @@ func newValidatedLogSnapshotFromScanner(path string, file *os.File, info os.File
 }
 
 func cacheProofFromValidatedSnapshot(snapshot *ValidatedLogSnapshot, path string) (CacheProof, bool) {
-	proof, ok := cacheProofFromSnapshotObservation(snapshot, path)
-	return proof, ok && proof == snapshot.cacheProof()
+	proof, err := cacheProofFromSnapshotObservation(snapshot, path)
+	return proof, err == nil && proof == snapshot.cacheProof()
 }
 
 // cacheProofForAppendFromValidatedSnapshot accepts only the same physical log
 // at the snapshot observation or append growth with unchanged header authority.
 // A bounded proof must never fall back to a different retained authority.
-func cacheProofForAppendFromValidatedSnapshot(snapshot *ValidatedLogSnapshot, path string) (CacheProof, bool) {
-	proof, ok := cacheProofFromSnapshotObservation(snapshot, path)
-	return proof, ok && snapshot.allowsAppendProof(proof)
+func cacheProofForAppendFromValidatedSnapshot(snapshot *ValidatedLogSnapshot, path string) (CacheProof, error) {
+	proof, err := cacheProofFromSnapshotObservation(snapshot, path)
+	if err != nil {
+		return CacheProof{}, err
+	}
+	if !snapshot.allowsAppendProof(proof) {
+		return CacheProof{}, fmt.Errorf("%w: %s", ErrRetainedSnapshotMismatch, path)
+	}
+	return proof, nil
 }
 
-func cacheProofFromSnapshotObservation(snapshot *ValidatedLogSnapshot, path string) (CacheProof, bool) {
+func cacheProofFromSnapshotObservation(snapshot *ValidatedLogSnapshot, path string) (_ CacheProof, retErr error) {
 	if snapshot == nil || !snapshot.EOFValidated || snapshot.Path != filepath.Clean(path) {
-		return CacheProof{}, false
+		return CacheProof{}, fmt.Errorf("%w: %s", ErrRetainedSnapshotMismatch, path)
 	}
 	// A snapshot proves a prior EOF scan, not the current raw header. Re-read
 	// and strictly decode that header from the same open observation as identity
 	// validation before any cache proof can reuse the snapshot's authority.
 	r, err := openPhysicalLogReader(path)
 	if err != nil {
-		return CacheProof{}, false
+		return CacheProof{}, fmt.Errorf("observe task log against retained snapshot: %w", err)
 	}
-	defer func() { _ = r.Close() }()
+	defer func() {
+		if closeErr := r.Close(); retErr == nil && closeErr != nil {
+			retErr = fmt.Errorf("observe task log against retained snapshot: %w", closeErr)
+		}
+	}()
 	proof, err := cacheProofFromReader(path, r)
 	if err != nil {
-		return CacheProof{}, false
+		return CacheProof{}, fmt.Errorf("observe task log against retained snapshot: %w", err)
 	}
-	return proof, true
+	return proof, nil
 }
 
 func (snapshot *ValidatedLogSnapshot) cacheProof() CacheProof {
@@ -1223,10 +1237,7 @@ func (lt *LoadedTask) CacheProofForLog(path string) (CacheProof, error) {
 	if lt != nil {
 		snapshot := lt.ValidatedSnapshot()
 		if snapshot != nil && snapshot.Path == filepath.Clean(path) {
-			if proof, ok := cacheProofForAppendFromValidatedSnapshot(snapshot, path); ok {
-				return proof, nil
-			}
-			return CacheProof{}, fmt.Errorf("task log no longer matches retained validated snapshot: %s", path)
+			return cacheProofForAppendFromValidatedSnapshot(snapshot, path)
 		}
 	}
 	return CacheProofForLog(path)

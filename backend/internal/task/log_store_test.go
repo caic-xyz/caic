@@ -56,8 +56,19 @@ func TestTaskCacheProofForLog(t *testing.T) {
 		if err := os.WriteFile(path, []byte(snapshot.RawHeader+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := tk.CacheProofForLog(path); err == nil {
-			t.Fatal("replacement identity was accepted by retained task proof")
+		if _, err := tk.CacheProofForLog(path); !errors.Is(err, ErrRetainedSnapshotMismatch) {
+			t.Fatalf("replacement proof error = %v, want retained-snapshot mismatch", err)
+		}
+	})
+	t.Run("reports observation failure separately", func(t *testing.T) {
+		t.Parallel()
+		tk, path, snapshot := newTask(t)
+		tk.SetLogValidationSnapshot(snapshot)
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tk.CacheProofForLog(path); err == nil || errors.Is(err, ErrRetainedSnapshotMismatch) || !strings.Contains(err.Error(), "observe task log against retained snapshot") {
+			t.Fatalf("missing log proof error = %v, want observation failure", err)
 		}
 	})
 	t.Run("rejects header mutation", func(t *testing.T) {

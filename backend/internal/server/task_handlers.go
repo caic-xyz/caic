@@ -242,7 +242,11 @@ func isTaskEventTerminal(state task.State) bool {
 func (h *taskHandlers) streamHistoryFromDisk(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, entry *taskmgr.Entry) {
 	idx := 0
 	if err := h.streamReplayStore(ctx, w, flusher, entry, &idx); err != nil {
-		slog.Warn("stream terminal replay", "task", entry.Task().ID, "err", err)
+		if errors.Is(err, task.ErrRetainedSnapshotMismatch) {
+			slog.Warn("stream terminal replay: task log changed since validation", "task", entry.Task().ID, "err", err)
+		} else {
+			slog.Warn("stream terminal replay: could not verify task log", "task", entry.Task().ID, "err", err)
+		}
 		if ctx.Err() == nil {
 			writeReplayHistoryError(w, flusher)
 		}

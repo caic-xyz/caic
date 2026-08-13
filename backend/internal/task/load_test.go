@@ -2731,8 +2731,8 @@ func TestLoadedTask(t *testing.T) {
 		if err := os.Chtimes(path, future, future); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := lt.CacheProofForLog(path); err == nil {
-			t.Fatal("replay proof accepted same-size mutation outside append growth")
+		if _, err := lt.CacheProofForLog(path); !errors.Is(err, ErrRetainedSnapshotMismatch) {
+			t.Fatalf("same-size mutation proof error = %v, want retained-snapshot mismatch", err)
 		}
 		if _, err := lt.ScanMessagesWithContext(t.Context(), func(agent.ParsedMessage) error { return nil }); err == nil || !strings.Contains(err.Error(), "outside append growth") {
 			t.Fatalf("replay scan error = %v, want append-growth rejection", err)
@@ -2743,8 +2743,8 @@ func TestLoadedTask(t *testing.T) {
 
 		changedHeader := strings.Replace(meta, "{", "{ ", 1)
 		writeLogFile(t, dir, filepath.Base(path), changedHeader, first, second)
-		if _, err := lt.CacheProofForLog(path); err == nil {
-			t.Fatal("replay proof fallback accepted changed raw header")
+		if _, err := lt.CacheProofForLog(path); !errors.Is(err, ErrRetainedSnapshotMismatch) {
+			t.Fatalf("changed-header proof error = %v, want retained-snapshot mismatch", err)
 		}
 		if _, err := lt.ScanMessagesWithContext(t.Context(), func(agent.ParsedMessage) error { return nil }); err == nil || !strings.Contains(err.Error(), "immutable header changed") {
 			t.Fatalf("replay scan error = %v, want immutable-header rejection", err)
