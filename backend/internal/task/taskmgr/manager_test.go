@@ -78,6 +78,9 @@ func newTestManager(t testing.TB, cfg Config) *Manager { //nolint:gocritic // Co
 	if cfg.Workspaces == nil {
 		cfg.Workspaces = repowork.NewRegistry(cfg.ServerCtx, cfg.Runtimes)
 	}
+	if cfg.RuntimeStartTimeout == 0 {
+		cfg.RuntimeStartTimeout = time.Hour
+	}
 	m, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -392,6 +395,7 @@ func TestNew(t *testing.T) {
 			{name: "server context", want: "task manager server context is required"},
 			{name: "runtime router", cfg: Config{ServerCtx: t.Context()}, want: "task manager runtime router is required"},
 			{name: "workspace registry", cfg: Config{ServerCtx: t.Context(), Runtimes: runtimes}, want: "task manager workspace registry is required"},
+			{name: "runtime start timeout", cfg: Config{ServerCtx: t.Context(), Runtimes: runtimes, Workspaces: repowork.NewRegistry(t.Context(), runtimes)}, want: "task manager runtime start timeout is required"},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
@@ -432,13 +436,14 @@ func TestNew(t *testing.T) {
 			t.Fatal(err)
 		}
 		cfg := Config{
-			ServerCtx:  t.Context(),
-			LogDir:     "/tmp/logs",
-			CacheDir:   "/tmp/cache",
-			Runtimes:   router,
-			Backends:   map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}},
-			HarnessEnv: map[string][]string{string(harness.Codex): {"CODEX_HOME=/tmp/codex"}},
-			Workspaces: repowork.NewRegistry(t.Context(), router),
+			ServerCtx:           t.Context(),
+			LogDir:              "/tmp/logs",
+			CacheDir:            "/tmp/cache",
+			Runtimes:            router,
+			Backends:            map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}},
+			HarnessEnv:          map[string][]string{string(harness.Codex): {"CODEX_HOME=/tmp/codex"}},
+			Workspaces:          repowork.NewRegistry(t.Context(), router),
+			RuntimeStartTimeout: time.Hour,
 		}
 		m, err := New(cfg)
 		if err != nil {
@@ -1906,12 +1911,15 @@ func TestManager(t *testing.T) {
 				t.Fatal(err)
 			}
 			var wireCalls int
-			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{
-				harness.Claude: &agenttest.FakeBackend{WireFactory: func() agent.WireFormat {
-					wireCalls++
-					return claudecode.New().NewWire()
-				}},
-			}})
+			m := newTestManager(t, Config{
+				ServerCtx: t.Context(),
+				Backends: map[harness.Name]agent.Backend{
+					harness.Claude: &agenttest.FakeBackend{WireFactory: func() agent.WireFormat {
+						wireCalls++
+						return claudecode.New().NewWire()
+					}},
+				},
+			})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "task"}}
 			entry := newPurgedEntry(tk, &task.Result{State: task.StatePurged}, logs[0])
 			m.LoadMessagesOnDemand(entry)

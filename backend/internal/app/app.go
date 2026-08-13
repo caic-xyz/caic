@@ -272,16 +272,17 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 
 	workspaceRegistry := repowork.NewRegistry(ctx, runtimes)
 	taskMgr, err := taskmgr.New(taskmgr.Config{
-		ServerCtx:          ctx,
-		LogDir:             logDir,
-		CacheDir:           cfg.Dirs.CacheDir,
-		Runtimes:           runtimes,
-		Workspaces:         workspaceRegistry,
-		Backends:           agentBackends,
-		EventReplayFactory: newEventReplayWriter,
-		HarnessEnv:         cfg.Agent.HarnessEnv,
-		RuntimeMetadata:    cfg.Runtime.Metadata,
-		Provider:           provider,
+		ServerCtx:           ctx,
+		LogDir:              logDir,
+		CacheDir:            cfg.Dirs.CacheDir,
+		Runtimes:            runtimes,
+		Workspaces:          workspaceRegistry,
+		Backends:            agentBackends,
+		EventReplayFactory:  newEventReplayWriter,
+		HarnessEnv:          cfg.Agent.HarnessEnv,
+		RuntimeMetadata:     cfg.Runtime.Metadata,
+		RuntimeStartTimeout: time.Hour,
+		Provider:            provider,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("task manager: %w", err)

@@ -108,6 +108,9 @@ func newTestRuntime(t testing.TB, lifecycle runtime.Lifecycle) *runtime.Router {
 }
 
 func newTestTaskManager(t testing.TB, cfg taskmgr.Config) *taskmgr.Manager { //nolint:gocritic // Config mirrors New's value bag in tests.
+	if cfg.RuntimeStartTimeout == 0 {
+		cfg.RuntimeStartTimeout = time.Hour
+	}
 	m, err := taskmgr.New(cfg)
 	if err != nil {
 		t.Fatalf("taskmgr.New: %v", err)

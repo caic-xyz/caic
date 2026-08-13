@@ -142,9 +142,6 @@ func (s *Service) RelPath(abs string) string {
 
 // RegisterWorkspace adds a discovered repo and registers its workspace.
 func (s *Service) RegisterWorkspace(r *InitResult, onMove func(repo.Move)) repo.Move {
-	if r == nil || r.Workspace == nil {
-		return repo.Move{}
-	}
 	move := s.Repos.Add(&r.Info)
 	s.Workspaces.RegisterWorkspace(r.Info.RelPath, r.Workspace)
 	if move.Moved() && onMove != nil {

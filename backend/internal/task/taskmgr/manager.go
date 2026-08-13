@@ -130,6 +130,9 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 	if cfg.Workspaces == nil {
 		return nil, errors.New("task manager workspace registry is required")
 	}
+	if cfg.RuntimeStartTimeout <= 0 {
+		return nil, errors.New("task manager runtime start timeout is required")
+	}
 	log := slog.Default().With(slog.String("cmp", "taskmgr"))
 	serverCtx, cancelServerCtx := context.WithCancel(cfg.ServerCtx)
 	m := &Manager{
@@ -143,7 +146,7 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 		Logs:                task.LogStore{LogDir: cfg.LogDir, EventReplayFactory: cfg.EventReplayFactory},
 		harnessEnv:          cfg.HarnessEnv,
 		runtimeMetadata:     maps.Clone(cfg.RuntimeMetadata),
-		runtimeStartTimeout: managerRuntimeStartTimeout(cfg.RuntimeStartTimeout),
+		runtimeStartTimeout: cfg.RuntimeStartTimeout,
 		provider:            cfg.Provider,
 		Workspaces:          cfg.Workspaces,
 		relay:               agentRelayReader{},
@@ -1239,13 +1242,6 @@ func (m *Manager) sessions(r *repowork.Workspace) *task.SessionRunner {
 
 func (m *Manager) runner(r *repowork.Workspace) *task.Runner {
 	return &task.Runner{Workspace: r, Sessions: m.sessions(r), RuntimeMetadata: m.runtimeMetadata, RuntimeStartTimeout: m.runtimeStartTimeout}
-}
-
-func managerRuntimeStartTimeout(d time.Duration) time.Duration {
-	if d != 0 {
-		return d
-	}
-	return time.Hour
 }
 
 func (m *Manager) containerPathForRepo(relPath string) string {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
@@ -144,10 +145,11 @@ func TestRefreshHarnessModels(t *testing.T) {
 
 func newModelRefreshTestManager(t testing.TB, router *runtime.Router, backends map[harness.Name]agent.Backend) *taskmgr.Manager {
 	m, err := taskmgr.New(taskmgr.Config{
-		ServerCtx:  t.Context(),
-		Runtimes:   router,
-		Backends:   backends,
-		Workspaces: repowork.NewRegistry(t.Context(), router),
+		ServerCtx:           t.Context(),
+		Runtimes:            router,
+		Backends:            backends,
+		Workspaces:          repowork.NewRegistry(t.Context(), router),
+		RuntimeStartTimeout: time.Hour,
 	})
 	if err != nil {
 		t.Fatalf("taskmgr.New: %v", err)
