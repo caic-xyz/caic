@@ -161,7 +161,6 @@ graph TD
   pkg_internal_server --> pkg_internal_preferences
   pkg_internal_server --> pkg_internal_repo
   pkg_internal_server --> pkg_internal_repo_repomgr
-  pkg_internal_server --> pkg_internal_repo_repowork
   pkg_internal_server --> pkg_internal_runtime
   pkg_internal_server --> pkg_internal_server_api
   pkg_internal_server --> pkg_internal_server_api_v1
@@ -453,7 +452,6 @@ graph TD
   pkg_internal_server --> pkg_internal_preferences
   pkg_internal_server --> pkg_internal_repo
   pkg_internal_server --> pkg_internal_repo_repomgr
-  pkg_internal_server --> pkg_internal_repo_repowork
   pkg_internal_server --> pkg_internal_runtime
   pkg_internal_server --> pkg_internal_server_api
   pkg_internal_server --> pkg_internal_server_api_v1
@@ -539,7 +537,7 @@ graph TD
 | `internal/runtime` | `internal/agent/harness` |
 | `internal/runtime/mdruntime` | `internal/agent/harness`, `internal/runtime` |
 | `internal/runtime/runtimetest` | `internal/runtime` |
-| `internal/server` | `frontend`, `internal/agent`, `internal/agent/harness`, `internal/auth`, `internal/autoupdate`, `internal/bot`, `internal/ci`, `internal/eventreplay`, `internal/forge`, `internal/forge/forgecache`, `internal/forge/forgemgr`, `internal/forge/github`, `internal/forge/gitlab`, `internal/httplog`, `internal/mcp`, `internal/preferences`, `internal/repo`, `internal/repo/repomgr`, `internal/repo/repowork`, `internal/runtime`, `internal/server/api`, `internal/server/api/v1`, `internal/server/api/v1conv`, `internal/server/ipgeo`, `internal/task`, `internal/task/taskmgr`, `internal/usage` |
+| `internal/server` | `frontend`, `internal/agent`, `internal/agent/harness`, `internal/auth`, `internal/autoupdate`, `internal/bot`, `internal/ci`, `internal/eventreplay`, `internal/forge`, `internal/forge/forgecache`, `internal/forge/forgemgr`, `internal/forge/github`, `internal/forge/gitlab`, `internal/httplog`, `internal/mcp`, `internal/preferences`, `internal/repo`, `internal/repo/repomgr`, `internal/runtime`, `internal/server/api`, `internal/server/api/v1`, `internal/server/api/v1conv`, `internal/server/ipgeo`, `internal/task`, `internal/task/taskmgr`, `internal/usage` |
 | `internal/server/api` | None |
 | `internal/server/api/v1` | `internal/server/api` |
 | `internal/server/api/v1conv` | `internal/agent`, `internal/agent/harness`, `internal/forge`, `internal/repo/repowork`, `internal/runtime`, `internal/server/api/v1`, `internal/task`, `internal/task/taskmgr`, `internal/usage` |

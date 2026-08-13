@@ -629,7 +629,7 @@ func (s *taskService) syncTask(ctx context.Context, entry *taskmgr.Entry, req *v
 		syncPrimaryBranch = p.Branch
 	}
 	if resp.Status != "blocked" {
-		if info, ok := s.repoMgr.InfoFor(syncPrimaryName); ok {
+		if info, ok := s.repoMgr.Repos.InfoFor(syncPrimaryName); ok {
 			if f := s.forgeMgr.ForgeForInfo(ctx, &info); f != nil {
 				ciInfo := ci.RepoInfo{
 					RelPath:    info.RelPath,
@@ -675,13 +675,13 @@ func (s *taskService) resolveGitHubContainerToken(ctx context.Context, enabled b
 func newTaskResolvers(taskMgr *taskmgr.Manager, repoSvc *repomgr.Service, authStore *auth.Store) v1conv.TaskResolvers {
 	return v1conv.TaskResolvers{
 		RepoURL: func(rel string) string {
-			if info, ok := repoSvc.InfoFor(rel); ok {
+			if info, ok := repoSvc.Repos.InfoFor(rel); ok {
 				return git.RemoteToHTTPS(info.Remote)
 			}
 			return ""
 		},
 		RepoForge: func(rel string) v1.Forge {
-			if info, ok := repoSvc.InfoFor(rel); ok {
+			if info, ok := repoSvc.Repos.InfoFor(rel); ok {
 				return v1.Forge(info.ForgeKind)
 			}
 			return ""
@@ -700,7 +700,7 @@ func newTaskResolvers(taskMgr *taskmgr.Manager, repoSvc *repomgr.Service, authSt
 			if _, ok := taskMgr.Workspace(repo); !ok {
 				return 0
 			}
-			b := taskMgr.Backends()[harnessName]
+			b := taskMgr.Backends[harnessName]
 			if b == nil {
 				return 0
 			}

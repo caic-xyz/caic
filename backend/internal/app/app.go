@@ -321,7 +321,10 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		return nil, err
 	}
 
-	repoService := repomgr.NewService(ctx, absRoot, repo.New(nil), workspaceRegistry)
+	repoService, err := repomgr.NewService(absRoot, repo.New(nil), workspaceRegistry)
+	if err != nil {
+		return nil, fmt.Errorf("repository service: %w", err)
+	}
 	repoStatus := ci.NewRepoStatusStore()
 
 	// Long-lived forge automation, owned by app and routed to by the HTTP layer.
@@ -419,7 +422,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	phase3.End()
 
 	phase4 := trace.StartRegion(ctx, "adopt-runtime-instances")
-	adopted, err := taskMgr.AdoptInstances(ctx, adoptionRepos(repoService.Snapshot()), instanceRes.instances, liveLogs)
+	adopted, err := taskMgr.AdoptInstances(ctx, adoptionRepos(repoService.Repos.Snapshot()), instanceRes.instances, liveLogs)
 	if err != nil {
 		slog.ErrorContext(ctx, "adopt runtime instances failed; affected instances will remain unmanaged", "err", err)
 	}

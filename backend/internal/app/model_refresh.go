@@ -67,7 +67,7 @@ func refreshHarnessModels(ctx context.Context, cacheDir string, router *runtime.
 	cache := agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
 
 	fetchers := map[harness.Name]agent.ModelFetcher{}
-	for h, b := range taskMgr.Backends() {
+	for h, b := range taskMgr.Backends {
 		if f, ok := b.(agent.ModelFetcher); ok {
 			fetchers[h] = f
 		}
@@ -155,7 +155,7 @@ func refreshOneHarness(
 		slog.WarnContext(ctx, "model refresh: fetch failed", "harness", h, "err", err)
 		return
 	}
-	if b, ok := taskMgr.Backends()[h]; ok {
+	if b, ok := taskMgr.Backends[h]; ok {
 		b.SetModelInventory(inventory)
 	}
 	cache.SetModelInventory(h, inventory, agent.APIKeyHash(env))

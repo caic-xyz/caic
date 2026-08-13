@@ -26,7 +26,7 @@ func newRepoWatcher(ctx context.Context, absRoot string, repoService *repomgr.Se
 }
 
 func watchedRepos(repoService *repomgr.Service) []repo.Info {
-	snap := repoService.Snapshot()
+	snap := repoService.Repos.Snapshot()
 	out := make([]repo.Info, len(snap))
 	for i := range snap {
 		out[i] = repo.Info{

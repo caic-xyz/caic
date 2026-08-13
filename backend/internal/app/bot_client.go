@@ -33,7 +33,7 @@ func (c *botClient) ResolveRepo(forgeFullName string) *bot.RepoInfo {
 	if !ok {
 		return nil
 	}
-	info, found := c.repoSvc.ByForge(owner, repo)
+	info, found := c.repoSvc.Repos.ByForge(owner, repo)
 	if !found {
 		return nil
 	}
@@ -50,7 +50,7 @@ func (c *botClient) CreateTask(ctx context.Context, req bot.TaskRequest) (string
 	if _, ok := c.taskMgr.Workspace(req.Repo); !ok {
 		return "", fmt.Errorf("workspace not found for repo %s", req.Repo)
 	}
-	backends := c.taskMgr.Backends()
+	backends := c.taskMgr.Backends
 	// Pick harness: prefer Claude if available, otherwise the
 	// lexicographically first available harness. Sorting keeps the choice
 	// deterministic regardless of map iteration order.
@@ -68,7 +68,7 @@ func (c *botClient) CreateTask(ctx context.Context, req bot.TaskRequest) (string
 	// commenter. Only relevant for issue-triggered tasks.
 	var ownerResolved, repoResolved string
 	if req.IssueNumber > 0 {
-		if info, ok := c.repoSvc.InfoFor(req.Repo); ok && info.ForgeOwner != "" {
+		if info, ok := c.repoSvc.Repos.InfoFor(req.Repo); ok && info.ForgeOwner != "" {
 			ownerResolved = info.ForgeOwner
 			repoResolved = info.ForgeRepo
 		}

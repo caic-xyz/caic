@@ -309,7 +309,7 @@ func annotateTool(spec mcp.ToolSpec, annotations mcp.ToolAnnotations) mcp.ToolSp
 
 func (m *mcpRegistry) currentTasksAndRepos(ctx context.Context) ([]v1.Task, []v1.Repo) {
 	taskList := m.taskSvc.taskListSnapshot(ctx)
-	repoList := repoListFromSnapshot(m.serverConfig.repoSvc.Snapshot(), m.serverConfig.repoStatus)
+	repoList := repoListFromSnapshot(m.serverConfig.repoSvc.Repos.Snapshot(), m.serverConfig.repoStatus)
 	return taskList, *repoList
 }
 

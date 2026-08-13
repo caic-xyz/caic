@@ -93,13 +93,13 @@ type Manager struct {
 	// Immutable.
 	Runtimes     *runtime.Router
 	QuotaTracker *quotausage.Tracker
+	Backends     map[harness.Name]agent.Backend
 
 	log                 *slog.Logger
 	serverCtx           context.Context // lifetime of the Manager; for goroutines that outlive requests
 	cancelServerCtx     context.CancelFunc
 	logDir              string
 	cacheDir            string
-	backends            map[harness.Name]agent.Backend
 	eventReplayFactory  task.EventReplayFactory
 	harnessEnv          map[string][]string
 	runtimeMetadata     runtime.Metadata
@@ -141,7 +141,7 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 		cancelServerCtx:     cancelServerCtx,
 		logDir:              cfg.LogDir,
 		cacheDir:            cfg.CacheDir,
-		backends:            maps.Clone(cfg.Backends),
+		Backends:            maps.Clone(cfg.Backends),
 		eventReplayFactory:  cfg.EventReplayFactory,
 		harnessEnv:          cfg.HarnessEnv,
 		runtimeMetadata:     maps.Clone(cfg.RuntimeMetadata),
@@ -202,11 +202,6 @@ func (m *Manager) RangeWorkspaces(fn func(relPath string, r *repowork.Workspace)
 // UnregisterWorkspace removes the repo workspace registered for relPath.
 func (m *Manager) UnregisterWorkspace(relPath string) {
 	m.workspaceRegistry.UnregisterWorkspace(relPath)
-}
-
-// Backends returns a copy of the configured agent backend map.
-func (m *Manager) Backends() map[harness.Name]agent.Backend {
-	return maps.Clone(m.backends)
 }
 
 // Insert registers a pre-built entry. Production task creation goes through
@@ -287,7 +282,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 		return "", err
 	}
 
-	backend, ok := m.backends[p.Harness]
+	backend, ok := m.Backends[p.Harness]
 	if !ok {
 		return "", badRequestf("unknown harness: %s", string(p.Harness))
 	}
@@ -497,7 +492,7 @@ func (m *Manager) Compact(ctx context.Context, entry *Entry, instructions string
 func (m *Manager) SendInput(ctx context.Context, entry *Entry, prompt agent.Prompt) error {
 	// Validate image support.
 	if len(prompt.Images) > 0 {
-		if b := m.backends[entry.task.Harness]; b != nil && !b.SupportsImages() {
+		if b := m.Backends[entry.task.Harness]; b != nil && !b.SupportsImages() {
 			return badRequestf("%s does not support images", string(entry.task.Harness))
 		}
 	}
@@ -564,7 +559,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 	forkEffort := source.Effort
 	if p.Harness != "" {
 		forkHarness = p.Harness
-		backend, ok := m.backends[forkHarness]
+		backend, ok := m.Backends[forkHarness]
 		if !ok {
 			return "", badRequestf("unknown harness: %s", string(p.Harness))
 		}
@@ -574,7 +569,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 		forkModel = p.Model
 		forkEffort = p.Effort
 	} else if p.Model != "" {
-		backend, ok := m.backends[forkHarness]
+		backend, ok := m.Backends[forkHarness]
 		if !ok {
 			return "", badRequestf("unknown harness: %s", string(source.Harness))
 		}
@@ -1264,7 +1259,12 @@ func (m *Manager) logStore() *task.LogStore {
 }
 
 func (m *Manager) sessions(r *repowork.Workspace) *task.SessionRunner {
-	return task.NewSessionRunner(m.backends, m.logStore(), r, m.NotifyTaskChange)
+	return &task.SessionRunner{
+		Backends:         m.Backends,
+		Logs:             m.logStore(),
+		Workspace:        r,
+		NotifyTaskChange: m.NotifyTaskChange,
+	}
 }
 
 func (m *Manager) runner(r *repowork.Workspace) *task.Runner {
@@ -1697,7 +1697,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 	if runtimeHarness != "" && runtimeHarness != lt.Harness {
 		return nil, fmt.Errorf("runtime harness %q does not match task log harness %q", runtimeHarness, lt.Harness)
 	}
-	backend, ok := m.backends[lt.Harness]
+	backend, ok := m.Backends[lt.Harness]
 	if !ok || backend == nil {
 		return nil, fmt.Errorf("unknown harness %q for adopted task %s", lt.Harness, taskID)
 	}
@@ -2054,7 +2054,7 @@ func refreshAdoptedDiffStat(ctx context.Context, workspace *repowork.Workspace, 
 // resolveNativeParser constructs one fresh native parser for a validated task
 // log harness.
 func (m *Manager) resolveNativeParser(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
-	backend := m.backends[h]
+	backend := m.Backends[h]
 	if backend == nil {
 		return nil, fmt.Errorf("unknown harness %q", h)
 	}

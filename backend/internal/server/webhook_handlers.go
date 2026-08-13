@@ -229,7 +229,7 @@ func (h *WebhookHandlers) webhookOnCI(ctx context.Context, kind forge.Kind, owne
 	}
 
 	affected := h.taskMgr.FindTasksMonitoringBranch(owner, repoName)
-	affectedRepoPaths := h.repoStatus.PathsAtSHA(repoRefs(h.repoSvc.Snapshot()), owner, repoName, sha)
+	affectedRepoPaths := h.repoStatus.PathsAtSHA(repoRefs(h.repoSvc.Repos.Snapshot()), owner, repoName, sha)
 
 	if len(affected) == 0 && len(affectedRepoPaths) == 0 {
 		return
@@ -548,7 +548,7 @@ func (h *WebhookHandlers) repoByForge(fullName string) (repo.Info, bool) {
 	if !ok {
 		return repo.Info{}, false
 	}
-	return h.repoSvc.ByForge(owner, repoName)
+	return h.repoSvc.Repos.ByForge(owner, repoName)
 }
 
 func repoRefs(snap []repo.Info) []ci.RepoRef {

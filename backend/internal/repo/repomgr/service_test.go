@@ -17,7 +17,11 @@ func TestServiceChanged(t *testing.T) {
 	t.Run("registerWorkspace invokes move hook before notifying", func(t *testing.T) {
 		t.Parallel()
 
-		s := NewService(t.Context(), "", repo.New([]repo.Info{{RelPath: "old", AbsPath: "/repo"}}), nil)
+		workspaces := repowork.NewRegistry(t.Context(), nil)
+		s, err := NewService("", repo.New([]repo.Info{{RelPath: "old", AbsPath: "/repo"}}), workspaces)
+		if err != nil {
+			t.Fatal(err)
+		}
 		workspace := &repowork.Workspace{
 			BaseBranch: "main",
 			Dir:        "/repo",
@@ -46,4 +50,16 @@ func TestServiceChanged(t *testing.T) {
 			t.Fatal("Changed channel was not closed")
 		}
 	})
+}
+
+func TestNewServiceRequiresDependencies(t *testing.T) {
+	t.Parallel()
+
+	workspaces := repowork.NewRegistry(t.Context(), nil)
+	if _, err := NewService("", nil, workspaces); err == nil || err.Error() != "repository registry is required" {
+		t.Fatalf("NewService() error = %v, want repository registry is required", err)
+	}
+	if _, err := NewService("", repo.New(nil), nil); err == nil || err.Error() != "workspace registry is required" {
+		t.Fatalf("NewService() error = %v, want workspace registry is required", err)
+	}
 }

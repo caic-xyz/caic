@@ -4,6 +4,7 @@ package repomgr
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -58,10 +59,11 @@ type InitResult struct {
 // Service owns managed repository metadata and workspace registration.
 type Service struct {
 	// Immutable.
-	log        *slog.Logger
-	absRoot    string
-	registry   *repo.Registry
-	workspaces *repowork.Registry
+	Repos      *repo.Registry
+	Workspaces *repowork.Registry
+
+	log     *slog.Logger
+	absRoot string
 
 	// Guarded by mu.
 	mu      sync.Mutex
@@ -69,25 +71,20 @@ type Service struct {
 }
 
 // NewService creates a repository service.
-func NewService(ctx context.Context, absRoot string, registry *repo.Registry, workspaces *repowork.Registry) *Service {
-	if registry == nil {
-		registry = repo.New(nil)
+func NewService(absRoot string, repos *repo.Registry, workspaces *repowork.Registry) (*Service, error) {
+	if repos == nil {
+		return nil, errors.New("repository registry is required")
 	}
 	if workspaces == nil {
-		workspaces = repowork.NewRegistry(ctx, nil)
+		return nil, errors.New("workspace registry is required")
 	}
 	return &Service{
+		Repos:      repos,
+		Workspaces: workspaces,
 		log:        slog.Default().With(slog.String("cmp", "reposvc")),
 		absRoot:    absRoot,
-		registry:   registry,
-		workspaces: workspaces,
 		changed:    make(chan struct{}),
-	}
-}
-
-// Registry returns the service repository registry.
-func (s *Service) Registry() *repo.Registry {
-	return s.registry
+	}, nil
 }
 
 // Changed returns a channel that is closed when repository metadata changes.
@@ -148,8 +145,8 @@ func (s *Service) RegisterWorkspace(r *InitResult, onMove func(repo.Move)) repo.
 	if r == nil || r.Workspace == nil {
 		return repo.Move{}
 	}
-	move := s.registry.Add(&r.Info)
-	s.workspaces.RegisterWorkspace(r.Info.RelPath, r.Workspace)
+	move := s.Repos.Add(&r.Info)
+	s.Workspaces.RegisterWorkspace(r.Info.RelPath, r.Workspace)
 	if move.Moved() && onMove != nil {
 		onMove(move)
 	}
@@ -159,35 +156,20 @@ func (s *Service) RegisterWorkspace(r *InitResult, onMove func(repo.Move)) repo.
 
 // DeregisterWorkspace removes a repo and unregisters its workspace.
 func (s *Service) DeregisterWorkspace(relPath string) {
-	removed := s.registry.RemoveMatching(func(r repo.Info) bool {
+	removed := s.Repos.RemoveMatching(func(r repo.Info) bool {
 		return r.RelPath == relPath
 	})
 	for _, rel := range removed {
-		s.workspaces.UnregisterWorkspace(rel)
+		s.Workspaces.UnregisterWorkspace(rel)
 	}
 	if len(removed) > 0 {
 		s.notifyChanged()
 	}
 }
 
-// Snapshot returns the current managed repository snapshot.
-func (s *Service) Snapshot() []repo.Info {
-	return s.registry.Snapshot()
-}
-
-// InfoFor returns the current managed repository for relPath.
-func (s *Service) InfoFor(relPath string) (repo.Info, bool) {
-	return s.registry.InfoFor(relPath)
-}
-
-// ByForge returns the current managed repository for a forge owner/repo pair.
-func (s *Service) ByForge(owner, repoName string) (repo.Info, bool) {
-	return s.registry.ByForge(owner, repoName)
-}
-
 // WorkspaceRegistered reports whether a workspace is registered for relPath.
 func (s *Service) WorkspaceRegistered(relPath string) bool {
-	_, ok := s.workspaces.Workspace(relPath)
+	_, ok := s.Workspaces.Workspace(relPath)
 	return ok
 }
 
@@ -213,13 +195,13 @@ func (s *Service) Clone(ctx context.Context, req CloneRequest) (repo.Info, error
 	if _, err := os.Stat(absTarget); err == nil {
 		return repo.Info{}, repoError(ErrorConflict, "directory already exists: "+targetPath)
 	}
-	if _, ok := s.workspaces.Workspace(targetPath); ok {
+	if _, ok := s.Workspaces.Workspace(targetPath); ok {
 		return repo.Info{}, repoError(ErrorConflict, "repo already registered: "+targetPath)
 	}
 
 	bn := filepath.Base(targetPath)
 	var basenameConflict string
-	s.workspaces.RangeWorkspaces(func(rel string, _ *repowork.Workspace) bool {
+	s.Workspaces.RangeWorkspaces(func(rel string, _ *repowork.Workspace) bool {
 		if rel != "" && filepath.Base(rel) == bn && rel != targetPath {
 			basenameConflict = rel
 			return false
@@ -266,8 +248,8 @@ func (s *Service) Clone(ctx context.Context, req CloneRequest) (repo.Info, error
 		Log:        s.log.With(slog.String("repo", info.RelPath)),
 	}
 	info.ForgeKind, info.ForgeOwner, info.ForgeRepo = parseForgeRemote(ctx, s.log, remote)
-	s.registry.Add(&info)
-	s.workspaces.RegisterWorkspace(targetPath, workspace)
+	s.Repos.Add(&info)
+	s.Workspaces.RegisterWorkspace(targetPath, workspace)
 	s.notifyChanged()
 	s.log.InfoContext(ctx, "cloned repo", "url", req.URL, "path", targetPath)
 

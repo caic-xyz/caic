@@ -18,8 +18,6 @@ import (
 	"github.com/caic-xyz/md"
 	"github.com/caic-xyz/md/git"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/ci"
@@ -27,20 +25,13 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
-	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	caicruntime "github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/oauth/oauthclient"
 )
-
-type serverTaskManager interface {
-	Backends() map[harness.Name]agent.Backend
-	RangeWorkspaces(fn func(relPath string, r *repowork.Workspace) bool)
-	Workspace(relPath string) (*repowork.Workspace, bool)
-	RegisterWorkspace(relPath string, r *repowork.Workspace)
-}
 
 type serverHandlers struct {
 	serverCtx          context.Context
@@ -50,7 +41,7 @@ type serverHandlers struct {
 	prefs              *preferences.Store
 	repoSvc            *repomgr.Service
 	repoStatus         *ci.RepoStatusStore
-	taskMgr            serverTaskManager
+	taskMgr            *taskmgr.Manager
 	cacheSizes         *CacheSizeStore
 	authStore          *auth.Store
 	githubOAuth        *oauthclient.ProviderConfig
@@ -305,7 +296,7 @@ func mountsFromSettings(settings *preferences.Settings) ([]caicruntime.Mount, er
 }
 
 func (h *serverHandlers) listHarnesses(_ context.Context, _ *api.EmptyReq) (*[]v1.HarnessInfo, error) {
-	backends := h.taskMgr.Backends()
+	backends := h.taskMgr.Backends
 	out := make([]v1.HarnessInfo, 0, len(backends))
 	for h, b := range backends {
 		inventory := b.ModelInventory()
@@ -373,7 +364,7 @@ func (h *serverHandlers) getCacheSizes(_ context.Context, _ *api.EmptyReq) (*v1.
 }
 
 func (h *serverHandlers) listRepos(_ context.Context, _ *api.EmptyReq) (*[]v1.Repo, error) {
-	return repoListFromSnapshot(h.repoSvc.Snapshot(), h.repoStatus), nil
+	return repoListFromSnapshot(h.repoSvc.Repos.Snapshot(), h.repoStatus), nil
 }
 
 func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.Request) {
@@ -382,7 +373,7 @@ func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.R
 		writeError(w, api.BadRequest("repo is required"))
 		return
 	}
-	info, ok := h.repoSvc.InfoFor(repoPath)
+	info, ok := h.repoSvc.Repos.InfoFor(repoPath)
 	if !ok {
 		writeError(w, api.NotFound("repo not found"))
 		return

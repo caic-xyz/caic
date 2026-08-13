@@ -21,22 +21,11 @@ import (
 
 // SessionRunner manages agent sessions and dispatches backend messages into tasks.
 type SessionRunner struct {
-	backends         map[harness.Name]agent.Backend
-	logs             *LogStore
-	workspace        *repowork.Workspace
-	notifyTaskChange func()
-}
-
-// NewSessionRunner creates a session runner with the dependencies shared by a
-// task workspace. notifyTaskChange is called after a dispatched agent message
-// changes task state.
-func NewSessionRunner(backends map[harness.Name]agent.Backend, logs *LogStore, workspace *repowork.Workspace, notifyTaskChange func()) *SessionRunner {
-	return &SessionRunner{
-		backends:         backends,
-		logs:             logs,
-		workspace:        workspace,
-		notifyTaskChange: notifyTaskChange,
-	}
+	// Immutable.
+	Backends         map[harness.Name]agent.Backend
+	Logs             *LogStore
+	Workspace        *repowork.Workspace
+	NotifyTaskChange func()
 }
 
 // Reconnect reattaches to a running relay, or starts a new agent session
@@ -81,7 +70,7 @@ func (r *SessionRunner) Reconnect(ctx context.Context, t *Task, skipSideEffects 
 	// Reconnect resumes an existing session, so append only after Reopen
 	// validates the existing file's authoritative header. A missing or corrupt
 	// log must not be replaced because the running relay's format is unknown.
-	log, err := r.logs.Reopen(t)
+	log, err := r.Logs.Reopen(t)
 	if err != nil {
 		close(msgCh)
 		<-dispatchDone
@@ -101,7 +90,7 @@ func (r *SessionRunner) Reconnect(ctx context.Context, t *Task, skipSideEffects 
 		t.SetState(StateRunning)
 	}
 	target := t.RuntimeConnectionTarget()
-	session, err := r.backends[t.Harness].AttachRelay(ctx, &agent.Options{
+	session, err := r.Backends[t.Harness].AttachRelay(ctx, &agent.Options{
 		Target:             target,
 		RelayOffset:        t.RelayOffsetValue(),
 		ResumeSessionID:    sessionID,
@@ -115,7 +104,7 @@ func (r *SessionRunner) Reconnect(ctx context.Context, t *Task, skipSideEffects 
 		close(msgCh)
 		<-dispatchDone
 		t.SetState(StateWaiting)
-		r.workspace.Log.Error("attach relay failed", "br", primaryBranch, "instance", instanceID, "err", err)
+		r.Workspace.Log.Error("attach relay failed", "br", primaryBranch, "instance", instanceID, "err", err)
 		return nil, fmt.Errorf("reconnect: %w", err)
 	}
 
@@ -156,7 +145,7 @@ func (r *SessionRunner) StartSession(ctx context.Context, t *Task, prompt agent.
 	if t.RuntimeInstanceID() == "" {
 		return nil, errors.New("no instance")
 	}
-	log, err := r.logs.Open(t)
+	log, err := r.Logs.Open(t)
 	if err != nil {
 		return nil, err
 	}
@@ -193,12 +182,12 @@ func (r *SessionRunner) startSessionWithLog(ctx context.Context, t *Task, prompt
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
 	}
-	tlog := r.workspace.Log.With("br", primaryBranch, "instance", instanceID)
+	tlog := r.Workspace.Log.With("br", primaryBranch, "instance", instanceID)
 
 	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false)
 	tlog.Info("starting session", "hns", t.Harness)
 	target := t.RuntimeConnectionTarget()
-	session, err := r.backends[t.Harness].Start(ctx, &agent.Options{
+	session, err := r.Backends[t.Harness].Start(ctx, &agent.Options{
 		Target:        target,
 		Dir:           r.runtimeDir(t),
 		Model:         t.Model,
@@ -244,7 +233,7 @@ func (r *SessionRunner) replaceSession(ctx context.Context, t *Task, prompt agen
 		oldH.CloseMsgCh()
 		<-oldH.DispatchDone
 		if oldH.Log != nil {
-			err := r.logs.WriteContextCleared(oldH.Log)
+			err := r.Logs.WriteContextCleared(oldH.Log)
 			err = errors.Join(err, oldH.Log.Close())
 			if err != nil {
 				t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
@@ -257,7 +246,7 @@ func (r *SessionRunner) replaceSession(ctx context.Context, t *Task, prompt agen
 	t.ClearMessages(ctx)
 
 	// Open new log segment.
-	log, err := r.logs.Open(t)
+	log, err := r.Logs.Open(t)
 	if err != nil {
 		t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
 		return nil, fmt.Errorf("open log: %w", err)
@@ -272,7 +261,7 @@ func (r *SessionRunner) replaceSession(ctx context.Context, t *Task, prompt agen
 		branch = p.Branch
 	}
 	instanceID := t.RuntimeInstanceID()
-	tlog := r.workspace.Log
+	tlog := r.Workspace.Log
 	if tlog == nil {
 		tlog = slog.Default()
 	}
@@ -290,7 +279,7 @@ func (r *SessionRunner) replaceSession(ctx context.Context, t *Task, prompt agen
 	if mode == replaceSessionRestart {
 		opts.InitialPrompt = prompt
 	}
-	backend := r.backends[t.Harness]
+	backend := r.Backends[t.Harness]
 	if backend == nil {
 		_ = log.Close()
 		close(msgCh)
@@ -344,11 +333,11 @@ func (r *SessionRunner) startMessageDispatch(ctx context.Context, t *Task, skipS
 			case *agent.ToolResultMessage:
 				if _, ok := pendingMutating[msg.ToolUseID]; ok {
 					delete(pendingMutating, msg.ToolUseID)
-					emitToolDiff = !skipSideEffects && r.workspace.Runtimes != nil && r.workspace.Dir != ""
+					emitToolDiff = !skipSideEffects && r.Workspace.Runtimes != nil && r.Workspace.Dir != ""
 				}
 			case *agent.ResultMessage:
-				if !skipSideEffects && r.workspace.Runtimes != nil && r.workspace.Dir != "" {
-					ds, _ := r.workspace.DiffStat(ctx, instanceID, allRepos, repowork.DiffFetchBestEffort, "")
+				if !skipSideEffects && r.Workspace.Runtimes != nil && r.Workspace.Dir != "" {
+					ds, _ := r.Workspace.DiffStat(ctx, instanceID, allRepos, repowork.DiffFetchBestEffort, "")
 					msg.DiffStat = ds
 				}
 			}
@@ -357,7 +346,7 @@ func (r *SessionRunner) startMessageDispatch(ctx context.Context, t *Task, skipS
 				slog.ErrorContext(ctx, "write event replay", "err", replayErr)
 			}
 			if stateChanged {
-				r.notifyTaskChange()
+				r.NotifyTaskChange()
 			}
 			if emitToolDiff {
 				r.emitDiffStatBranch(ctx, t, instanceID, allRepos)
@@ -380,7 +369,7 @@ var mutatingTools = map[string]struct{}{
 // without fetching from the instance. This keeps live UI diff stats fresh during
 // a running turn without triggering md fetch side effects.
 func (r *SessionRunner) emitDiffStatBranch(ctx context.Context, t *Task, id runtime.ID, repos []runtime.Repo) {
-	ds, _ := r.workspace.DiffStat(ctx, id, repos, repowork.DiffWithoutFetch, "")
+	ds, _ := r.Workspace.DiffStat(ctx, id, repos, repowork.DiffWithoutFetch, "")
 	if len(ds) == 0 {
 		return
 	}
@@ -401,10 +390,10 @@ func (r *SessionRunner) runtimeDir(t *Task) string {
 	if p := t.Primary(); p != nil && p.ContainerPath != "" {
 		return md.ResolveContainerPath(p.ContainerPath)
 	}
-	if r.workspace.Dir == "" {
+	if r.Workspace.Dir == "" {
 		return "/home/user"
 	}
-	return "/home/user/src/" + filepath.Base(r.workspace.Dir)
+	return "/home/user/src/" + filepath.Base(r.Workspace.Dir)
 }
 
 type replaceSessionMode int

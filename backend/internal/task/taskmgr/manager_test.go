@@ -457,7 +457,7 @@ func TestNew(t *testing.T) {
 		if len(m.harnessEnv[string(harness.Codex)]) != 1 || m.harnessEnv[string(harness.Codex)][0] != "CODEX_HOME=/tmp/codex" {
 			t.Fatalf("HarnessEnv = %#v, want configured codex env", m.harnessEnv)
 		}
-		if len(m.Backends()) == 0 {
+		if len(m.Backends) == 0 {
 			t.Fatal("manager backends were not initialized")
 		}
 	})

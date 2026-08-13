@@ -58,7 +58,7 @@ func (b *testCIBackend) SetTaskMonitorBranch(entry ci.TaskEntry, branch string) 
 }
 
 func (b *testCIBackend) RepoInfoFor(relPath string) ci.RepoInfo {
-	r, ok := b.repoSvc.InfoFor(relPath)
+	r, ok := b.repoSvc.Repos.InfoFor(relPath)
 	if !ok {
 		return ci.RepoInfo{}
 	}
@@ -167,7 +167,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 	t.Run("updates CI status when SHA matches HEAD", func(t *testing.T) {
 		t.Parallel()
 		s := minimalRouter(t)
-		s.repoSvc.Registry().Add(&repo.Info{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"})
+		s.repoSvc.Repos.Add(&repo.Info{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"})
 		s.forgeMgr.SetGitHubApp(&stubAppClient{forgeClient: &stubForge{headSHA: "abc123", checkRuns: successRuns}})
 
 		s.webhooks.handleCheckSuiteEvent(t.Context(), &github.CheckSuiteEvent{
@@ -190,7 +190,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 	t.Run("ignores out-of-order delivery when SHA is not HEAD", func(t *testing.T) {
 		t.Parallel()
 		s := minimalRouter(t)
-		s.repoSvc.Registry().Add(&repo.Info{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"})
+		s.repoSvc.Repos.Add(&repo.Info{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"})
 		// HEAD is now "newsha"; the webhook carries "oldsha".
 		s.forgeMgr.SetGitHubApp(&stubAppClient{forgeClient: &stubForge{headSHA: "newsha", checkRuns: failureRuns}})
 
@@ -490,7 +490,7 @@ func minimalRouter(t *testing.T) *testRouter {
 	runtimeRouter := newTestRuntime(t, backend)
 	workspaceRegistry := repowork.NewRegistry(ctx, nil)
 	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: ctx, Runtimes: runtimeRouter, WorkspaceRegistry: workspaceRegistry})
-	repoSvc := repomgr.NewService(t.Context(), "", repo.New(nil), workspaceRegistry)
+	repoSvc := newTestRepoService(t, "", repo.New(nil), workspaceRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 	fm := forgemgr.New("", "", nil)
 	prefs := newTestPrefs(t)

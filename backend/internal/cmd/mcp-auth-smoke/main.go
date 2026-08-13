@@ -180,7 +180,10 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 	if err != nil {
 		return "", "", nil, fmt.Errorf("task manager: %w", err)
 	}
-	repoSvc := repomgr.NewService(ctx, "", repo.New(nil), workspaceRegistry)
+	repoSvc, err := repomgr.NewService("", repo.New(nil), workspaceRegistry)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("repository service: %w", err)
+	}
 	prefs, err := preferences.Open(filepath.Join(stateDir, "preferences.json"))
 	if err != nil {
 		return "", "", nil, err

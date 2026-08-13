@@ -73,7 +73,7 @@ func (a *ciAdapter) SetTaskMonitorBranch(entry ci.TaskEntry, branch string) {
 
 // RepoInfoFor returns CI-level repo info for relPath.
 func (a *ciAdapter) RepoInfoFor(relPath string) ci.RepoInfo {
-	r, ok := a.repoMgr.InfoFor(relPath)
+	r, ok := a.repoMgr.Repos.InfoFor(relPath)
 	if !ok {
 		return ci.RepoInfo{}
 	}
@@ -99,7 +99,7 @@ func (a *ciAdapter) ListActiveRepos() []ci.RepoInfo {
 		return true
 	})
 	var out []ci.RepoInfo
-	snap := a.repoMgr.Snapshot()
+	snap := a.repoMgr.Repos.Snapshot()
 	for i := range snap {
 		r := &snap[i]
 		if r.ForgeOwner == "" {
