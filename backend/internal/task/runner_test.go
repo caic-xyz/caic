@@ -6,6 +6,7 @@ package task
 import (
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -40,6 +41,17 @@ type testRuntimeSystem struct {
 
 func (*testRuntimeSystem) Name() runtime.Name { return "test-runtime" }
 
+type metadataRuntime struct {
+	*runtimetest.FakeBackend
+
+	metadata runtime.Metadata
+}
+
+func (r *metadataRuntime) Launch(ctx context.Context, repos []runtime.Repo, opts *runtime.StartOptions) (runtime.ID, error) {
+	r.metadata = maps.Clone(opts.Metadata)
+	return r.FakeBackend.Launch(ctx, repos, opts)
+}
+
 type setupLogFailureRuntime struct {
 	*runtimetest.FakeBackend
 }
@@ -55,11 +67,13 @@ type forkLogRuntime struct {
 	*runtimetest.FakeBackend
 
 	forkErr       error
+	metadata      runtime.Metadata
 	capturedRepos []runtime.ForkRepo // opts.Repos seen by Fork.
 }
 
 func (r *forkLogRuntime) Fork(ctx context.Context, id runtime.ID, opts *runtime.ForkOptions) (runtime.ID, runtime.ConnectionInfo, []runtime.Repo, error) {
 	r.capturedRepos = opts.Repos
+	r.metadata = maps.Clone(opts.Metadata)
 	if _, err := opts.LogWriter.Write([]byte("fork setup complete\nfinal setup line")); err != nil {
 		return "", runtime.ConnectionInfo{}, nil, err
 	}
@@ -157,6 +171,7 @@ func TestRunner(t *testing.T) {
 			if len(metadata) != 3 {
 				t.Fatalf("len = %d, want 3", len(metadata))
 			}
+
 			if metadata[runtime.MetadataTaskID] != tk.ID.String() {
 				t.Errorf("metadata[%s] = %q", runtime.MetadataTaskID, metadata[runtime.MetadataTaskID])
 			}
@@ -182,6 +197,28 @@ func TestRunner(t *testing.T) {
 				t.Errorf("metadata[%s] = %q, want true", runtime.MetadataGitHubToken, metadata[runtime.MetadataGitHubToken])
 			}
 		})
+	})
+	t.Run("StartPreservesTaskMetadata", func(t *testing.T) {
+		t.Parallel()
+		runtimeBackend := &metadataRuntime{FakeBackend: &runtimetest.FakeBackend{}}
+		workspace := newTestRepoWorkspace(t, "", "", runtimeBackend)
+		r := newTestRunner(t, workspace, map[harness.Name]agent.Backend{"test": &instantExitBackend{}}, t.TempDir())
+		r.RuntimeMetadata = runtime.Metadata{runtime.MetadataSmokeRun: "run-token", runtime.MetadataTaskID: "wrong"}
+		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Harness: "test", StartedAt: time.Now().UTC()}
+		h, err := r.Start(t.Context(), tk, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if h == nil {
+			t.Fatal("Start returned nil handle")
+		}
+		if got := runtimeBackend.metadata[runtime.MetadataSmokeRun]; got != "run-token" {
+			t.Errorf("metadata[%s] = %q, want run-token", runtime.MetadataSmokeRun, got)
+		}
+		if got := runtimeBackend.metadata[runtime.MetadataTaskID]; got != tk.ID.String() {
+			t.Errorf("metadata[%s] = %q, want task ID", runtime.MetadataTaskID, got)
+		}
+		_ = h.Session.Close()
 	})
 
 	t.Run("ProvisioningWriter", func(t *testing.T) {
@@ -987,6 +1024,30 @@ func TestRunner(t *testing.T) {
 			if got := len(replay.Commits); got != 1 {
 				t.Errorf("replay commit count = %d, want 1", got)
 			}
+		})
+		t.Run("preserves configured metadata on fork", func(t *testing.T) {
+			t.Parallel()
+			runtimeBackend := &forkLogRuntime{FakeBackend: &runtimetest.FakeBackend{}}
+			workspace := newTestRepoWorkspace(t, "", "", runtimeBackend)
+			r := newTestRunner(t, workspace, map[harness.Name]agent.Backend{"test": &instantExitBackend{}}, t.TempDir())
+			r.RuntimeMetadata = runtime.Metadata{runtime.MetadataSmokeRun: "run-token", runtime.MetadataTaskID: "wrong"}
+			source := &Task{ID: ksid.NewID(), Harness: "test"}
+			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
+			fork := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "fork"}, Harness: "test", StartedAt: time.Now().UTC()}
+			h, err := r.ForkTask(t.Context(), source, fork, &runtime.ForkOptions{}, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if h == nil {
+				t.Fatal("ForkTask returned nil handle")
+			}
+			if got := runtimeBackend.metadata[runtime.MetadataSmokeRun]; got != "run-token" {
+				t.Errorf("metadata[%s] = %q, want run-token", runtime.MetadataSmokeRun, got)
+			}
+			if got := runtimeBackend.metadata[runtime.MetadataTaskID]; got != fork.ID.String() {
+				t.Errorf("metadata[%s] = %q, want fork ID", runtime.MetadataTaskID, got)
+			}
+			_ = h.Session.Close()
 		})
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()

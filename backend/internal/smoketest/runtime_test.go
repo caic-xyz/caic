@@ -3,6 +3,8 @@
 package smoketest
 
 import (
+	"context"
+	"errors"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -10,6 +12,60 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
+
+func TestCleanupSmokeRunContainers(t *testing.T) {
+	t.Parallel()
+
+	t.Run("removes_only_containers_returned_by_run_label_filter", func(t *testing.T) {
+		t.Parallel()
+		var calls [][]string
+		run := func(_ context.Context, name string, args ...string) ([]byte, error) {
+			calls = append(calls, append([]string{name}, args...))
+			if len(calls) == 1 {
+				return []byte("owned-1\nowned-2\n"), nil
+			}
+			return nil, nil
+		}
+		if err := cleanupSmokeRunContainers(t.Context(), "podman", "unique-run", run); err != nil {
+			t.Fatal(err)
+		}
+		want := [][]string{
+			{"podman", "container", "ls", "-aq", "--filter", "label=caic.smoke_run=unique-run"},
+			{"podman", "container", "rm", "-f", "owned-1", "owned-2"},
+		}
+		if len(calls) != len(want) {
+			t.Fatalf("command count = %d, want %d: %q", len(calls), len(want), calls)
+		}
+		for i := range calls {
+			if !slices.Equal(calls[i], want[i]) {
+				t.Fatalf("command %d = %q, want %q", i, calls[i], want[i])
+			}
+		}
+	})
+	t.Run("empty_result_does_not_remove", func(t *testing.T) {
+		t.Parallel()
+		calls := 0
+		run := func(context.Context, string, ...string) ([]byte, error) {
+			calls++
+			return nil, nil
+		}
+		if err := cleanupSmokeRunContainers(t.Context(), "podman", "unique-run", run); err != nil {
+			t.Fatal(err)
+		}
+		if calls != 1 {
+			t.Fatalf("commands = %d, want only list", calls)
+		}
+	})
+	t.Run("rejects_missing_ownership_boundary", func(t *testing.T) {
+		t.Parallel()
+		err := cleanupSmokeRunContainers(t.Context(), "", "", func(context.Context, string, ...string) ([]byte, error) {
+			return nil, errors.New("must not run")
+		})
+		if err == nil {
+			t.Fatal("missing runtime and run token were accepted")
+		}
+	})
+}
 
 func TestInitHarnessCache(t *testing.T) {
 	t.Parallel()

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"runtime/trace"
 	"strings"
 	"sync"
@@ -102,6 +103,7 @@ type Runner struct {
 	// t.RuntimeRepos() through the runtime backend, keyed by repo index.
 	Workspace           *repowork.Workspace
 	Sessions            *SessionRunner
+	RuntimeMetadata     runtime.Metadata
 	RuntimeStartTimeout time.Duration // Timeout for instance start (image pull). Must be non-zero.
 }
 
@@ -138,7 +140,12 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 	// 1. Create branch (serialized) + start instance (concurrent).
 	r.Workspace.Log.Info("setup task")
 	region := trace.StartRegion(ctx, "setup")
-	sr, err := r.setup(ctx, t, MakeMetadata(t), resolvedGitHubToken, log)
+	metadata := maps.Clone(r.RuntimeMetadata)
+	if metadata == nil {
+		metadata = runtime.Metadata{}
+	}
+	maps.Copy(metadata, MakeMetadata(t))
+	sr, err := r.setup(ctx, t, metadata, resolvedGitHubToken, log)
 	region.End()
 	if err != nil {
 		return nil, r.finishStartupFailure(ctx, t, log, err)
@@ -568,6 +575,13 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *run
 		specs[i] = spec
 	}
 	forkOpts.Repos = specs
+	metadata := maps.Clone(r.RuntimeMetadata)
+	if metadata == nil {
+		metadata = runtime.Metadata{}
+	}
+	maps.Copy(metadata, forkOpts.Metadata)
+	maps.Copy(metadata, MakeMetadata(fork))
+	forkOpts.Metadata = metadata
 
 	log, err := r.Sessions.Logs.Open(fork)
 	if err != nil {

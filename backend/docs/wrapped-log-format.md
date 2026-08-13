@@ -29,6 +29,9 @@ Across all phases:
   retain a raw compatibility path for a later cleanup phase.
 - Production creates v2 logs. Existing logs continue according to their
   validated header authority.
+- **Acceptance:** run the focused tests for the changed log lifecycle and
+  `make frontend-e2e`; the latter verifies the fake harness emits and consumes
+  the same v2 physical task-log records as production.
 
 ### Phase 1 — snapshot-authority: Explain and resolve replay snapshot mismatches
 

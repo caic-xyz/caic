@@ -384,6 +384,11 @@ func startSmokeServer(t *testing.T) *smokeServer {
 		t.Fatalf("init harness cache: %v", err)
 	}
 
+	runToken, err := smoketest.NewSmokeRunToken()
+	if err != nil {
+		t.Fatalf("create smoke run token: %v", err)
+	}
+
 	// Use a deterministic no-LLM agent, but run it inside the real md
 	// container through the normal relay over SSH.
 	sb := smoketest.NewSmokeBackend()
@@ -397,6 +402,7 @@ func startSmokeServer(t *testing.T) *smokeServer {
 			},
 			Runtime: server.RuntimeConfig{
 				SkipWarmup: true,
+				Metadata:   runtime.Metadata{runtime.MetadataSmokeRun: runToken},
 			},
 			Agent: server.AgentConfig{
 				Backends: map[harness.Name]agent.Backend{sb.Harness(): sb},
@@ -410,6 +416,14 @@ func startSmokeServer(t *testing.T) *smokeServer {
 		},
 	}
 	t.Cleanup(s.close)
+	t.Cleanup(func() {
+		s.stop()
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 2*time.Minute)
+		defer cancel()
+		if err := smoketest.CleanupSmokeRunContainers(ctx, smoketest.SmokeRuntime(), runToken); err != nil {
+			t.Errorf("cleanup smoke containers: %v", err)
+		}
+	})
 	s.start()
 	return s
 }

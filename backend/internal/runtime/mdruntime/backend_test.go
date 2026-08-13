@@ -432,7 +432,7 @@ func TestBackend(t *testing.T) {
 		b := newTestBackend(&fakeMDClient{})
 		b.HarnessEnv = map[string][]string{string(harness.Claude): {"FOO=bar"}}
 		opts, err := b.mdStartOpts(fc, &runtime.StartOptions{
-			Metadata:          runtime.Metadata{runtime.MetadataTaskID: "task-1"},
+			Metadata:          runtime.Metadata{runtime.MetadataTaskID: "task-1", runtime.MetadataSmokeRun: "run-token"},
 			ContainerPlatform: "linux/amd64",
 			Harness:           harness.Claude,
 			GitHubToken:       "tok",
@@ -455,7 +455,10 @@ func TestBackend(t *testing.T) {
 			t.Errorf("ExtraEnv missing GITHUB_TOKEN=tok: %v", opts.ExtraEnv)
 		}
 		if !slices.Contains(opts.Labels, string(runtime.MetadataTaskID)+"=task-1") {
-			t.Errorf("Labels missing passthrough: %v", opts.Labels)
+			t.Errorf("Labels missing task ID: %v", opts.Labels)
+		}
+		if !slices.Contains(opts.Labels, string(runtime.MetadataSmokeRun)+"=run-token") {
+			t.Errorf("Labels missing smoke run: %v", opts.Labels)
 		}
 		if opts.BaseImage == "" {
 			t.Error("BaseImage should default when BaseImage empty")

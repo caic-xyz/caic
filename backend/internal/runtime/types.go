@@ -23,6 +23,7 @@ const (
 	MetadataGitHubToken       MetadataKey = "caic.githubToken" //nolint:gosec // Metadata key for a boolean flag, not a credential.
 	MetadataModelRefresh      MetadataKey = "caic.modelRefresh"
 	MetadataDisplayCapability MetadataKey = "md.display"
+	MetadataSmokeRun          MetadataKey = "caic.smoke_run"
 )
 
 // Metadata stores runtime-neutral metadata for an instance.

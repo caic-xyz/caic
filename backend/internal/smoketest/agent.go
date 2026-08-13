@@ -19,7 +19,7 @@ import (
 var fakeScript []byte
 
 // FakeBackend implements agent.Backend using a Python subprocess that cycles
-// through canned responses in a flat NDJSON wire format.
+// through canned responses carried in canonical v2 task-log envelopes.
 type FakeBackend struct {
 	agent.Base
 }

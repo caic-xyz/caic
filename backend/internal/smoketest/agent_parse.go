@@ -1,5 +1,6 @@
-// Flat NDJSON parser for the fake agent. Each line is a JSON object whose
-// "type" field maps directly to an agent.Message type.
+// Parser for flat fake-agent messages carried inside v2 task-log envelopes.
+// Each message is a JSON object whose "type" field maps directly to an
+// agent.Message type.
 
 package smoketest
 

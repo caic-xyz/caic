@@ -276,6 +276,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		Backends:           agentBackends,
 		EventReplayFactory: newEventReplayWriter,
 		HarnessEnv:         cfg.Agent.HarnessEnv,
+		RuntimeMetadata:    cfg.Runtime.Metadata,
 		Prefs:              prefsStore,
 		Provider:           provider,
 	})

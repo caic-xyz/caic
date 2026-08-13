@@ -82,6 +82,7 @@ type Config struct {
 	Backends            map[harness.Name]agent.Backend
 	EventReplayFactory  task.EventReplayFactory
 	HarnessEnv          map[string][]string
+	RuntimeMetadata     runtime.Metadata
 	RuntimeStartTimeout time.Duration
 	Prefs               *preferences.Store
 	Provider            genai.Provider // nil-safe
@@ -105,6 +106,7 @@ type Manager struct {
 	backends            map[harness.Name]agent.Backend
 	eventReplayFactory  task.EventReplayFactory
 	harnessEnv          map[string][]string
+	runtimeMetadata     runtime.Metadata
 	runtimeStartTimeout time.Duration
 	prefs               *preferences.Store
 	provider            genai.Provider
@@ -146,6 +148,7 @@ func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passe
 		backends:            maps.Clone(cfg.Backends),
 		eventReplayFactory:  cfg.EventReplayFactory,
 		harnessEnv:          cfg.HarnessEnv,
+		runtimeMetadata:     maps.Clone(cfg.RuntimeMetadata),
 		runtimeStartTimeout: managerRuntimeStartTimeout(cfg.RuntimeStartTimeout),
 		prefs:               cfg.Prefs,
 		provider:            cfg.Provider,
@@ -654,13 +657,18 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 			extraEnv = append(extraEnv, "GITHUB_TOKEN="+ghToken)
 		}
 
+		metadata := maps.Clone(m.runtimeMetadata)
+		if metadata == nil {
+			metadata = runtime.Metadata{}
+		}
+		maps.Copy(metadata, task.MakeMetadata(t))
 		forkOpts := &runtime.ForkOptions{
 			RuntimeName: source.RuntimeName,
 			Display:     p.Display,
 			Tailscale:   p.Tailscale,
 			USB:         p.USB,
 			Sudo:        p.Sudo,
-			Metadata:    task.MakeMetadata(t),
+			Metadata:    metadata,
 			Harness:     forkHarness,
 			ExtraEnv:    extraEnv,
 			Mounts:      slices.Clone(source.Mounts),
@@ -1270,7 +1278,7 @@ func (m *Manager) sessions(r *repowork.Workspace) *task.SessionRunner {
 }
 
 func (m *Manager) runner(r *repowork.Workspace) *task.Runner {
-	return &task.Runner{Workspace: r, Sessions: m.sessions(r), RuntimeStartTimeout: m.runtimeStartTimeout}
+	return &task.Runner{Workspace: r, Sessions: m.sessions(r), RuntimeMetadata: m.runtimeMetadata, RuntimeStartTimeout: m.runtimeStartTimeout}
 }
 
 func managerRuntimeStartTimeout(d time.Duration) time.Duration {

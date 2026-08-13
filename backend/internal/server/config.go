@@ -79,8 +79,9 @@ type DirsConfig struct {
 
 // RuntimeConfig selects and configures task runtime provisioning.
 type RuntimeConfig struct {
-	TailscaleAPIKey string         // required for Tailscale networking inside runtime instances
-	System          runtime.System // optional runtime override for smoke/e2e tests
+	TailscaleAPIKey string           // required for Tailscale networking inside runtime instances
+	System          runtime.System   // optional runtime override for smoke/e2e tests
+	Metadata        runtime.Metadata // optional runtime metadata added to every created instance
 	// SkipWarmup skips base-image warmup at startup. Used by e2e fake mode to
 	// avoid pulling Docker images that aren't needed for testing.
 	SkipWarmup bool

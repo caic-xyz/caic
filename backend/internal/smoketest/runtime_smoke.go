@@ -5,6 +5,8 @@ package smoketest
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,6 +33,53 @@ func SmokeRuntime() string {
 		return "podman"
 	}
 	return "docker"
+}
+
+// NewSmokeRunToken returns a cryptographically random label value unique to
+// one smoke-test fixture.
+func NewSmokeRunToken() (string, error) {
+	data := make([]byte, 16)
+	if _, err := rand.Read(data); err != nil {
+		return "", fmt.Errorf("generate smoke run token: %w", err)
+	}
+	return hex.EncodeToString(data), nil
+}
+
+// CleanupSmokeRunContainers force-removes every container bearing runToken.
+// The generated token is the ownership boundary: this never selects ordinary
+// caic or user containers.
+func CleanupSmokeRunContainers(ctx context.Context, runtimeName, runToken string) error {
+	return cleanupSmokeRunContainers(ctx, runtimeName, runToken, runSmokeCommand)
+}
+
+type smokeCommand func(context.Context, string, ...string) ([]byte, error)
+
+func cleanupSmokeRunContainers(ctx context.Context, runtimeName, runToken string, run smokeCommand) error {
+	if runtimeName == "" || runToken == "" {
+		return errors.New("smoke container cleanup requires runtime and run token")
+	}
+	filter := "label=" + string(runtime.MetadataSmokeRun) + "=" + runToken
+	out, err := run(ctx, runtimeName, "container", "ls", "-aq", "--filter", filter)
+	if err != nil {
+		return fmt.Errorf("list smoke containers: %w", err)
+	}
+	ids := bytes.Fields(out)
+	if len(ids) == 0 {
+		return nil
+	}
+	args := make([]string, 0, len(ids)+3)
+	args = append(args, "container", "rm", "-f")
+	for _, id := range ids {
+		args = append(args, string(id))
+	}
+	if _, err := run(ctx, runtimeName, args...); err != nil {
+		return fmt.Errorf("remove smoke containers: %w", err)
+	}
+	return nil
+}
+
+func runSmokeCommand(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, name, args...).CombinedOutput() //nolint:gosec // test-controlled runtime and generated run-token filter.
 }
 
 // SmokeBackend is a deterministic no-LLM agent backend that runs inside the

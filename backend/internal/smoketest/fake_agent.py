@@ -1,8 +1,8 @@
-# Fake agent that emits deterministic e2e scenarios as flat NDJSON messages.
+# Fake agent emits deterministic e2e scenarios in canonical v2 log envelopes.
 #
-# Each output line is a JSON object whose "type" field maps directly to an
-# agent.Message type (init, text, text_delta, tool_use, ask, widget,
-# widget_delta, tool_result, result).  No nested envelopes.
+# Each envelope's message is a flat object whose "type" field maps directly to
+# an agent.Message type (init, text, text_delta, tool_use, ask, widget,
+# widget_delta, tool_result, result).
 #
 # Reads plain text from stdin (one prompt per line), responds with streaming
 # text deltas followed by complete messages.  Exits on EOF or null-byte
@@ -423,7 +423,13 @@ DEMO_SCENARIOS = [
 
 
 def emit(obj: dict) -> None:
-    sys.stdout.write(json.dumps(obj, separators=(",", ":")) + "\n")
+    # Task logs are v2: native harness output is wrapped in the canonical
+    # envelope before the Go reader validates and records it.
+    timestamp_ms = int(time.time() * 1000)
+    envelope = '{{"t":"agent","ts":{}.{:03d},"msg":{}}}'.format(
+        timestamp_ms // 1000, timestamp_ms % 1000, json.dumps(obj, separators=(",", ":"))
+    )
+    sys.stdout.write(envelope + "\n")
     sys.stdout.flush()
 
 
