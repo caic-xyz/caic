@@ -13,11 +13,14 @@ import (
 
 func newRepoWatcher(ctx context.Context, absRoot string, repoService *repomgr.Service, repoStatus *ci.RepoStatusStore) *repomgr.Watcher {
 	return repomgr.NewWatcher(&repomgr.WatcherConfig{
-		Ctx:             ctx,
-		AbsRoot:         absRoot,
-		Repos:           func() []repo.Info { return watchedRepos(repoService) },
-		RelPath:         repoService.RelPath,
-		WorkspaceExists: repoService.WorkspaceRegistered,
+		Ctx:     ctx,
+		AbsRoot: absRoot,
+		Repos:   func() []repo.Info { return watchedRepos(repoService) },
+		RelPath: repoService.RelPath,
+		WorkspaceExists: func(relPath string) bool {
+			_, ok := repoService.Workspaces.Workspace(relPath)
+			return ok
+		},
 		OnDiscovered: func(ctx context.Context, abs string) {
 			registerDiscoveredRepo(ctx, repoService, repoStatus, abs)
 		},
@@ -44,7 +47,7 @@ func registerDiscoveredRepo(ctx context.Context, repoService *repomgr.Service, r
 		slog.WarnContext(ctx, "new repo: discovery failed", "path", abs, "err", err)
 		return
 	}
-	if repoService.WorkspaceRegistered(result.Info.RelPath) {
+	if _, ok := repoService.Workspaces.Workspace(result.Info.RelPath); ok {
 		return
 	}
 	repoService.RegisterWorkspace(&result, moveRepoStatus(repoStatus))

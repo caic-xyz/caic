@@ -84,7 +84,7 @@ type Config struct {
 	RuntimeMetadata     runtime.Metadata
 	RuntimeStartTimeout time.Duration
 	Provider            genai.Provider // nil-safe
-	WorkspaceRegistry   *repowork.Registry
+	Workspaces          *repowork.Registry
 }
 
 // Manager owns task lifecycle state, instance adoption, session watching, and
@@ -94,6 +94,7 @@ type Manager struct {
 	Runtimes     *runtime.Router
 	QuotaTracker *quotausage.Tracker
 	Backends     map[harness.Name]agent.Backend
+	Workspaces   *repowork.Registry
 
 	log                 *slog.Logger
 	serverCtx           context.Context // lifetime of the Manager; for goroutines that outlive requests
@@ -105,7 +106,6 @@ type Manager struct {
 	runtimeMetadata     runtime.Metadata
 	runtimeStartTimeout time.Duration
 	provider            genai.Provider
-	workspaceRegistry   *repowork.Registry
 	relay               relayReader
 
 	// Guarded by quotaWatchMu.
@@ -120,7 +120,7 @@ type Manager struct {
 }
 
 // New creates a Manager. A no-repo workspace is always registered.
-// Register each repo workspace in the configured WorkspaceRegistry, then Start.
+// Register each repo workspace in Workspaces, then Start.
 func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value bag passed once at construction
 	if cfg.ServerCtx == nil {
 		return nil, errors.New("task manager server context is required")
@@ -128,7 +128,7 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 	if cfg.Runtimes == nil {
 		return nil, errors.New("task manager runtime router is required")
 	}
-	if cfg.WorkspaceRegistry == nil {
+	if cfg.Workspaces == nil {
 		return nil, errors.New("task manager workspace registry is required")
 	}
 	log := slog.Default().With(slog.String("cmp", "taskmgr"))
@@ -147,13 +147,13 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 		runtimeMetadata:     maps.Clone(cfg.RuntimeMetadata),
 		runtimeStartTimeout: managerRuntimeStartTimeout(cfg.RuntimeStartTimeout),
 		provider:            cfg.Provider,
-		workspaceRegistry:   cfg.WorkspaceRegistry,
+		Workspaces:          cfg.Workspaces,
 		relay:               agentRelayReader{},
 		tasks:               make(map[string]*Entry),
 		changed:             make(chan struct{}),
 	}
-	if _, ok := m.workspaceRegistry.Workspace(""); !ok {
-		m.workspaceRegistry.RegisterWorkspace("", &repowork.Workspace{
+	if _, ok := m.Workspaces.Workspace(""); !ok {
+		m.Workspaces.RegisterWorkspace("", &repowork.Workspace{
 			GitTimeout: time.Minute,
 			Runtimes:   cfg.Runtimes,
 			Log:        m.log.With(slog.String("repo", "(none)")),
@@ -178,30 +178,6 @@ func (m *Manager) Close() error {
 func (m *Manager) Start() {
 	go m.watchRuntimeEvents(m.serverCtx)
 	go m.watchStats(m.serverCtx)
-}
-
-// RegisterWorkspace registers a task repo workspace keyed by relPath.
-// "" registers the no-repo workspace.
-func (m *Manager) RegisterWorkspace(relPath string, r *repowork.Workspace) {
-	m.workspaceRegistry.RegisterWorkspace(relPath, r)
-}
-
-// Workspace returns the repo workspace for relPath, or nil.
-func (m *Manager) Workspace(relPath string) (*repowork.Workspace, bool) {
-	return m.workspaceRegistry.Workspace(relPath)
-}
-
-// RangeWorkspaces iterates over every registered repo workspace. It snapshots
-// the registry and invokes fn unlocked, so fn may safely call back into the
-// Manager. The workspace set is a point-in-time snapshot. Stops iteration if fn
-// returns false.
-func (m *Manager) RangeWorkspaces(fn func(relPath string, r *repowork.Workspace) bool) {
-	m.workspaceRegistry.RangeWorkspaces(fn)
-}
-
-// UnregisterWorkspace removes the repo workspace registered for relPath.
-func (m *Manager) UnregisterWorkspace(relPath string) {
-	m.workspaceRegistry.UnregisterWorkspace(relPath)
 }
 
 // Insert registers a pre-built entry. Production task creation goes through
@@ -259,20 +235,20 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 	// Resolve primary workspace.
 	var primaryWorkspace *repowork.Workspace
 	if len(p.Repos) > 0 {
-		r, ok := m.Workspace(p.Repos[0].Name)
+		r, ok := m.Workspaces.Workspace(p.Repos[0].Name)
 		if !ok {
 			return "", badRequestf("unknown repo: %s", p.Repos[0].Name)
 		}
 		primaryWorkspace = r
 	} else {
 		// New() always registers the no-repo "" workspace, so this never fails.
-		primaryWorkspace, _ = m.Workspace("")
+		primaryWorkspace, _ = m.Workspaces.Workspace("")
 	}
 
 	// Validate that every extra repo has a registered workspace (branches are
 	// allocated later, in one pass, by allocateBranches).
 	for _, rs := range p.Repos[min(1, len(p.Repos)):] {
-		if _, ok := m.Workspace(rs.Name); !ok {
+		if _, ok := m.Workspaces.Workspace(rs.Name); !ok {
 			return "", badRequestf("unknown extra repo: %s", rs.Name)
 		}
 	}
@@ -300,7 +276,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 	// another registered repo shares it.
 	mounts := make([]task.RepoMount, len(p.Repos))
 	for i, rs := range p.Repos {
-		r, _ := m.Workspace(rs.Name)
+		r, _ := m.Workspaces.Workspace(rs.Name)
 		mounts[i] = task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: r.Dir, ContainerPath: m.containerPathForRepo(rs.Name)}
 	}
 
@@ -590,7 +566,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 		if _, overlap := sourceRepoNames[rs.Name]; overlap {
 			return "", badRequestf("extraRepos contains repo already in source task: %s", rs.Name)
 		}
-		er, ok := m.Workspace(rs.Name)
+		er, ok := m.Workspaces.Workspace(rs.Name)
 		if !ok {
 			return "", badRequestf("unknown extra repo: %s", rs.Name)
 		}
@@ -696,7 +672,7 @@ func (m *Manager) EffectiveBaseBranch(t *task.Task) string {
 	if p.BaseBranch != "" {
 		return p.BaseBranch
 	}
-	if workspace, ok := m.Workspace(p.Name); ok {
+	if workspace, ok := m.Workspaces.Workspace(p.Name); ok {
 		return workspace.BaseBranch
 	}
 	return ""
@@ -764,7 +740,7 @@ func (m *Manager) AdoptInstances(ctx context.Context, adoptRepos []AdoptRepo, in
 
 	for i := range adoptRepos {
 		ri := &adoptRepos[i]
-		workspace, _ := m.Workspace(ri.RelPath)
+		workspace, _ := m.Workspaces.Workspace(ri.RelPath)
 		if workspace == nil {
 			continue
 		}
@@ -797,7 +773,7 @@ func (m *Manager) AdoptInstances(ctx context.Context, adoptRepos []AdoptRepo, in
 	wg.Wait()
 
 	// Adopt no-repo runtime instances.
-	if noRepoWorkspace, ok := m.Workspace(""); ok {
+	if noRepoWorkspace, ok := m.Workspaces.Workspace(""); ok {
 		for i := range instances {
 			c := &instances[i]
 			if claimed[c.ID] || !strings.HasPrefix(string(c.ID.InstanceID()), "md-agent-") {
@@ -1184,7 +1160,7 @@ func (m *Manager) resolveAdoptionTaskIDs(ctx context.Context, adoptRepos []Adopt
 	candidates := make(map[runtime.ID]bool, len(instances))
 	for i := range adoptRepos {
 		ri := &adoptRepos[i]
-		workspace, _ := m.Workspace(ri.RelPath)
+		workspace, _ := m.Workspaces.Workspace(ri.RelPath)
 		if workspace == nil {
 			continue
 		}
@@ -1194,7 +1170,7 @@ func (m *Manager) resolveAdoptionTaskIDs(ctx context.Context, adoptRepos []Adopt
 			}
 		}
 	}
-	if noRepoWorkspace, ok := m.Workspace(""); ok && noRepoWorkspace != nil {
+	if noRepoWorkspace, ok := m.Workspaces.Workspace(""); ok && noRepoWorkspace != nil {
 		for i := range instances {
 			if strings.HasPrefix(string(instances[i].ID.InstanceID()), "md-agent-") {
 				candidates[instances[i].ID] = true
@@ -1289,7 +1265,7 @@ func (m *Manager) containerPathForRepo(relPath string) string {
 func (m *Manager) repoBasenameCollides(relPath string) bool {
 	base := filepath.Base(relPath)
 	collides := false
-	m.RangeWorkspaces(func(other string, _ *repowork.Workspace) bool {
+	m.Workspaces.RangeWorkspaces(func(other string, _ *repowork.Workspace) bool {
 		if other != "" && other != relPath && filepath.Base(other) == base {
 			collides = true
 			return false
@@ -1308,7 +1284,7 @@ func (m *Manager) repoBasenameCollides(relPath string) bool {
 // their own workspace.
 func (m *Manager) allocateBranches(ctx context.Context, t *task.Task, mounts []task.RepoMount, reserveOnly int) error {
 	for i := range mounts {
-		ws, ok := m.Workspace(mounts[i].Name)
+		ws, ok := m.Workspaces.Workspace(mounts[i].Name)
 		if !ok {
 			return fmt.Errorf("repo %q is not registered", mounts[i].Name)
 		}
@@ -1595,7 +1571,7 @@ func (m *Manager) resolveWorkspace(t *task.Task) *repowork.Workspace {
 	if p := t.Primary(); p != nil {
 		key = p.Name
 	}
-	r, _ := m.Workspace(key)
+	r, _ := m.Workspaces.Workspace(key)
 	return r
 }
 
@@ -1766,7 +1742,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 		}
 		for _, lm := range lt.Repos[1:] {
 			gitRoot := ""
-			if er, ok := m.Workspace(lm.Name); ok {
+			if er, ok := m.Workspaces.Workspace(lm.Name); ok {
 				gitRoot = er.Dir
 			}
 			containerPath := runtimeRepoByBranch[lm.Branch]

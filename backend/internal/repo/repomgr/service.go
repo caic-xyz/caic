@@ -167,12 +167,6 @@ func (s *Service) DeregisterWorkspace(relPath string) {
 	}
 }
 
-// WorkspaceRegistered reports whether a workspace is registered for relPath.
-func (s *Service) WorkspaceRegistered(relPath string) bool {
-	_, ok := s.Workspaces.Workspace(relPath)
-	return ok
-}
-
 // Clone clones a repository, registers its metadata, and wires its workspace.
 func (s *Service) Clone(ctx context.Context, req CloneRequest) (repo.Info, error) {
 	targetPath := req.Path

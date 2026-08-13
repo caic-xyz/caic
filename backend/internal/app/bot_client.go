@@ -47,7 +47,7 @@ func (c *botClient) ResolveRepo(forgeFullName string) *bot.RepoInfo {
 
 // CreateTask creates and starts a task for bot-driven automation.
 func (c *botClient) CreateTask(ctx context.Context, req bot.TaskRequest) (string, error) {
-	if _, ok := c.taskMgr.Workspace(req.Repo); !ok {
+	if _, ok := c.taskMgr.Workspaces.Workspace(req.Repo); !ok {
 		return "", fmt.Errorf("workspace not found for repo %s", req.Repo)
 	}
 	backends := c.taskMgr.Backends

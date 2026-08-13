@@ -176,7 +176,7 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 		return "", "", nil, err
 	}
 	workspaceRegistry := repowork.NewRegistry(ctx, nil)
-	taskMgr, err := taskmgr.New(taskmgr.Config{ServerCtx: ctx, Runtimes: runtimeRouter, WorkspaceRegistry: workspaceRegistry})
+	taskMgr, err := taskmgr.New(taskmgr.Config{ServerCtx: ctx, Runtimes: runtimeRouter, Workspaces: workspaceRegistry})
 	if err != nil {
 		return "", "", nil, fmt.Errorf("task manager: %w", err)
 	}

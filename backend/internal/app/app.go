@@ -276,7 +276,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		LogDir:             logDir,
 		CacheDir:           cfg.Dirs.CacheDir,
 		Runtimes:           runtimes,
-		WorkspaceRegistry:  workspaceRegistry,
+		Workspaces:         workspaceRegistry,
 		Backends:           agentBackends,
 		EventReplayFactory: newEventReplayWriter,
 		HarnessEnv:         cfg.Agent.HarnessEnv,

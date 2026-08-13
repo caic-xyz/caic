@@ -144,10 +144,10 @@ func TestRefreshHarnessModels(t *testing.T) {
 
 func newModelRefreshTestManager(t testing.TB, router *runtime.Router, backends map[harness.Name]agent.Backend) *taskmgr.Manager {
 	m, err := taskmgr.New(taskmgr.Config{
-		ServerCtx:         t.Context(),
-		Runtimes:          router,
-		Backends:          backends,
-		WorkspaceRegistry: repowork.NewRegistry(t.Context(), router),
+		ServerCtx:  t.Context(),
+		Runtimes:   router,
+		Backends:   backends,
+		Workspaces: repowork.NewRegistry(t.Context(), router),
 	})
 	if err != nil {
 		t.Fatalf("taskmgr.New: %v", err)

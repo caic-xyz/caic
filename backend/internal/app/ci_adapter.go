@@ -63,7 +63,7 @@ func (a *ciAdapter) CreateTask(ctx context.Context, req bot.TaskRequest) (string
 
 // GetWorkspace returns the task workspace for relPath.
 func (a *ciAdapter) GetWorkspace(relPath string) (*repowork.Workspace, bool) {
-	return a.taskMgr.Workspace(relPath)
+	return a.taskMgr.Workspaces.Workspace(relPath)
 }
 
 // SetTaskMonitorBranch sets the CI monitor branch on a task entry.
