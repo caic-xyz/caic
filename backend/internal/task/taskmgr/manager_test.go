@@ -418,12 +418,8 @@ func TestNew(t *testing.T) {
 		if m.Len() != 0 {
 			t.Errorf("Len() = %d after New, want 0", m.Len())
 		}
-		r, ok := m.Checkouts.Checkout("")
-		if !ok {
-			t.Fatal("no-repo checkout not registered")
-		}
-		if r == nil {
-			t.Fatal("no-repo checkout is nil")
+		if _, ok := m.Checkouts.Checkout(""); ok {
+			t.Fatal("registry contains no-repo checkout")
 		}
 		select {
 		case <-m.Changed():
@@ -453,15 +449,8 @@ func TestNew(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		r, ok := m.Checkouts.Checkout("")
-		if !ok {
-			t.Fatal("no-repo checkout not registered")
-		}
 		if m.Logs.LogDir != cfg.LogDir || m.cacheDir != cfg.CacheDir {
 			t.Fatalf("manager dirs = log %q cache %q, want log %q cache %q", m.Logs.LogDir, m.cacheDir, cfg.LogDir, cfg.CacheDir)
-		}
-		if r.Runtimes != cfg.Runtimes {
-			t.Fatal("checkout instance backend was not wired")
 		}
 		if len(m.harnessEnv[string(harness.Codex)]) != 1 || m.harnessEnv[string(harness.Codex)][0] != "CODEX_HOME=/tmp/codex" {
 			t.Fatalf("HarnessEnv = %#v, want configured codex env", m.harnessEnv)
@@ -655,9 +644,10 @@ func TestManager(t *testing.T) {
 		done := make(chan struct{})
 		go func() {
 			m.Range(func(_ string, _ *Entry) bool {
-				_, _ = m.Checkouts.Checkout("")
+				_, _ = m.Checkouts.Checkout("repo")
 				return true
 			})
+			m.Checkouts.RegisterCheckout("repo", &repo.Checkout{Log: logtest.Logger(t)})
 			for range m.Checkouts.Checkouts() {
 				_, _ = m.GetEntry(tk.ID.String())
 			}
@@ -926,8 +916,8 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			got := m.resolveCheckout(tk)
-			if got == nil {
-				t.Fatal("resolveCheckout returned nil for no-repo task")
+			if got != nil {
+				t.Fatal("resolveCheckout returned a checkout for no-repo task")
 			}
 		})
 	})
@@ -1974,7 +1964,7 @@ func TestManager(t *testing.T) {
 		t.Run("valid_creates_entries", func(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
-			m.Checkouts.RegisterCheckout("repo/a", &repo.Checkout{Dir: "", Log: logtest.Logger(t)})
+			m.Checkouts.RegisterCheckout("repo/a", &repo.Checkout{Dir: t.TempDir(), Log: logtest.Logger(t)})
 			now := time.Now().UTC()
 			id := ksid.NewID()
 			all := []*task.LoadedTask{
@@ -2653,7 +2643,7 @@ func TestManager(t *testing.T) {
 			runtimeBackend := &runtimetest.FakeBackend{}
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, runtimeBackend, nil)})
 
-			m.watchSession(entry, &repo.Checkout{Dir: "", Log: logtest.Logger(t)}, h)
+			m.watchSession(entry, nil, h)
 
 			select {
 			case <-entry.Done():
@@ -2700,7 +2690,7 @@ func TestManager(t *testing.T) {
 			entry := NewEntry(tk, nil)
 			m := newTestManager(t, Config{ServerCtx: serverCtx, Runtimes: newTestRuntime(t, runtimeBackend, nil)})
 
-			m.watchSession(entry, &repo.Checkout{Dir: "", Log: logtest.Logger(t)}, h)
+			m.watchSession(entry, nil, h)
 			cancelServer()
 			if err := cmd.Process.Kill(); err != nil {
 				t.Fatal(err)
@@ -2723,7 +2713,6 @@ func TestManager(t *testing.T) {
 		t.Run("valid_with_backend", func(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"claude": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
-			m.Checkouts.RegisterCheckout("repo/a", &repo.Checkout{Dir: "", Log: logtest.Logger(t)})
 			if _, err := m.resolveNativeParser("claude"); err != nil {
 				t.Fatalf("resolveNativeParser: %v", err)
 			}

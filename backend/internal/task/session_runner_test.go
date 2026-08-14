@@ -407,7 +407,7 @@ func TestSessionRunner(t *testing.T) {
 		t.Run("NonMutatingToolNoDiffStat", func(t *testing.T) {
 			t.Parallel()
 			stub := &fetchRecorder{FakeBackend: testContainer()}
-			r := newTestSessionRunner(t, newTestCheckout(t, "", "", stub), "", nil)
+			r := newTestSessionRunner(t, newTestCheckout(t, "", t.TempDir(), stub), "", nil)
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
@@ -514,7 +514,7 @@ func TestSessionRunner(t *testing.T) {
 				logDir := t.TempDir()
 				backend := &testBackend{FakeBackend: &agenttest.FakeBackend{}}
 
-				r := newTestSessionRunner(t, newTestCheckout(t, "", "", testContainer()), logDir, map[harness.Name]agent.Backend{"test": backend})
+				r := newTestSessionRunner(t, newTestCheckout(t, "", t.TempDir(), testContainer()), logDir, map[harness.Name]agent.Backend{"test": backend})
 
 				tk := &Task{
 					ID:            ksid.NewID(),
@@ -567,7 +567,7 @@ func TestSessionRunner(t *testing.T) {
 		logDir := t.TempDir()
 		backend := &testBackend{FakeBackend: &agenttest.FakeBackend{}}
 
-		r := newTestSessionRunner(t, newTestCheckout(t, "", "", testContainer()), logDir, map[harness.Name]agent.Backend{"test": backend})
+		r := newTestSessionRunner(t, newTestCheckout(t, "", t.TempDir(), testContainer()), logDir, map[harness.Name]agent.Backend{"test": backend})
 
 		tk := &Task{
 			ID:            ksid.NewID(),

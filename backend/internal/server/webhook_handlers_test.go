@@ -167,7 +167,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 	t.Run("updates CI status when SHA matches HEAD", func(t *testing.T) {
 		t.Parallel()
 		s := minimalRouter(t)
-		s.repoSvc.Repositories.Register(&repo.Repository{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"}, &repo.Checkout{})
+		s.repoSvc.Repositories.Register(&repo.Repository{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"}, newRouterTestCheckout(t, t.TempDir()))
 		s.forgeMgr.SetGitHubApp(&stubAppClient{forgeClient: &stubForge{headSHA: "abc123", checkRuns: successRuns}})
 
 		s.webhooks.handleCheckSuiteEvent(t.Context(), &github.CheckSuiteEvent{
@@ -190,7 +190,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 	t.Run("ignores out-of-order delivery when SHA is not HEAD", func(t *testing.T) {
 		t.Parallel()
 		s := minimalRouter(t)
-		s.repoSvc.Repositories.Register(&repo.Repository{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"}, &repo.Checkout{})
+		s.repoSvc.Repositories.Register(&repo.Repository{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"}, newRouterTestCheckout(t, t.TempDir()))
 		// HEAD is now "newsha"; the webhook carries "oldsha".
 		s.forgeMgr.SetGitHubApp(&stubAppClient{forgeClient: &stubForge{headSHA: "newsha", checkRuns: failureRuns}})
 

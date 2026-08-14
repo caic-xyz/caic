@@ -104,10 +104,11 @@ func (w *testWire) ParseMessage(line []byte) ([]agent.Message, error) {
 }
 
 func newTestSessionRunner(t *testing.T, checkout *repo.Checkout, logDir string, backends map[harness.Name]agent.Backend) *SessionRunner {
-	if checkout == nil {
-		checkout = &repo.Checkout{GitTimeout: time.Minute, Log: logtest.Logger(t)}
+	var runtimes *runtime.Router
+	if checkout != nil {
+		runtimes = checkout.Runtimes
 	}
-	return &SessionRunner{Backends: backends, Logs: LogStore{LogDir: logDir}, Checkout: checkout, NotifyTaskChange: func() {}}
+	return &SessionRunner{Backends: backends, Logs: LogStore{LogDir: logDir}, Runtimes: runtimes, Log: logtest.Logger(t), Checkout: checkout, NotifyTaskChange: func() {}}
 }
 
 // testContainer returns a fake runtime whose Diff reports a fixed one-file

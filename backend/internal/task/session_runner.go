@@ -24,7 +24,9 @@ type SessionRunner struct {
 	// Immutable.
 	Backends         map[harness.Name]agent.Backend
 	Logs             LogStore
-	Checkout         *repo.Checkout
+	Runtimes         *runtime.Router
+	Log              *slog.Logger
+	Checkout         *repo.Checkout // nil for no-repository tasks
 	NotifyTaskChange func()
 }
 
@@ -104,7 +106,7 @@ func (r *SessionRunner) Reconnect(ctx context.Context, t *Task, skipSideEffects 
 		close(msgCh)
 		<-dispatchDone
 		t.SetState(StateWaiting)
-		r.Checkout.Log.Error("attach relay failed", "br", primaryBranch, "instance", instanceID, "err", err)
+		r.Log.Error("attach relay failed", "br", primaryBranch, "instance", instanceID, "err", err)
 		return nil, fmt.Errorf("reconnect: %w", err)
 	}
 
@@ -182,7 +184,7 @@ func (r *SessionRunner) startSessionWithLog(ctx context.Context, t *Task, prompt
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
 	}
-	tlog := r.Checkout.Log.With("br", primaryBranch, "instance", instanceID)
+	tlog := r.Log.With("br", primaryBranch, "instance", instanceID)
 
 	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false)
 	tlog.Info("starting session", "hns", t.Harness)
@@ -261,7 +263,7 @@ func (r *SessionRunner) replaceSession(ctx context.Context, t *Task, prompt agen
 		branch = p.Branch
 	}
 	instanceID := t.RuntimeInstanceID()
-	tlog := r.Checkout.Log
+	tlog := r.Log
 	if tlog == nil {
 		tlog = slog.Default()
 	}
@@ -333,10 +335,10 @@ func (r *SessionRunner) startMessageDispatch(ctx context.Context, t *Task, skipS
 			case *agent.ToolResultMessage:
 				if _, ok := pendingMutating[msg.ToolUseID]; ok {
 					delete(pendingMutating, msg.ToolUseID)
-					emitToolDiff = !skipSideEffects && r.Checkout.Runtimes != nil && r.Checkout.Dir != ""
+					emitToolDiff = !skipSideEffects && r.Runtimes != nil && r.Checkout != nil
 				}
 			case *agent.ResultMessage:
-				if !skipSideEffects && r.Checkout.Runtimes != nil && r.Checkout.Dir != "" {
+				if !skipSideEffects && r.Runtimes != nil && r.Checkout != nil {
 					ds, _ := r.Checkout.DiffStat(ctx, instanceID, allRepos, repo.DiffFetchBestEffort, "")
 					msg.DiffStat = ds
 				}
@@ -366,6 +368,9 @@ var mutatingTools = map[string]struct{}{
 // without fetching from the instance. This keeps live UI diff stats fresh during
 // a running turn without triggering md fetch side effects.
 func (r *SessionRunner) emitDiffStatBranch(ctx context.Context, t *Task, id runtime.ID, repos []runtime.Repo) {
+	if r.Checkout == nil {
+		return
+	}
 	ds, _ := r.Checkout.DiffStat(ctx, id, repos, repo.DiffWithoutFetch, "")
 	if len(ds) == 0 {
 		return
@@ -387,7 +392,7 @@ func (r *SessionRunner) runtimeDir(t *Task) string {
 	if p := t.Primary(); p != nil && p.ContainerPath != "" {
 		return md.ResolveContainerPath(p.ContainerPath)
 	}
-	if r.Checkout.Dir == "" {
+	if r.Checkout == nil {
 		return "/home/user"
 	}
 	return "/home/user/src/" + filepath.Base(r.Checkout.Dir)

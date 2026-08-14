@@ -127,31 +127,52 @@ func (r *forkLogRuntime) destPrimary(hostPath string) (string, bool) {
 }
 
 func newTestCheckout(t *testing.T, baseBranch, dir string, backend runtime.Lifecycle) *repo.Checkout {
-	var rt *runtime.Router
-	if backend != nil {
-		var err error
-		rt, err = runtime.NewRouter([]runtime.System{&testRuntimeSystem{Lifecycle: backend}})
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
 	return &repo.Checkout{
 		BaseBranch: baseBranch,
 		Dir:        dir,
 		RepoName:   filepath.Base(dir),
 		GitTimeout: time.Minute,
-		Runtimes:   rt,
+		Runtimes:   newTestRuntimeRouter(t, backend),
 		Log:        logtest.Logger(t),
 	}
 }
 
+func newTestRuntimeRouter(t *testing.T, backend runtime.Lifecycle) *runtime.Router {
+	if backend == nil {
+		return nil
+	}
+	rt, err := runtime.NewRouter([]runtime.System{&testRuntimeSystem{Lifecycle: backend}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rt
+}
+
 func newTestRunner(t *testing.T, checkout *repo.Checkout, backends map[harness.Name]agent.Backend, logDir string) *Runner {
+	var runtimes *runtime.Router
+	log := logtest.Logger(t)
+	if checkout != nil {
+		runtimes = checkout.Runtimes
+		log = checkout.Log
+	}
 	return &Runner{
+		Runtimes:            runtimes,
+		Log:                 log,
 		Checkout:            checkout,
 		Sessions:            newTestSessionRunner(t, checkout, logDir, backends),
 		RuntimeStartTimeout: time.Hour,
 		OnTerminalLogClosed: func(context.Context, *Task, State) {},
 	}
+}
+
+func newTestRunnerWithRuntime(t *testing.T, backend runtime.Lifecycle, backends map[harness.Name]agent.Backend, logDir string) *Runner {
+	r := newTestRunner(t, nil, backends, logDir)
+	if backend == nil {
+		return r
+	}
+	r.Runtimes = newTestRuntimeRouter(t, backend)
+	r.Sessions.Runtimes = r.Runtimes
+	return r
 }
 
 func (b *instantExitBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
@@ -225,8 +246,7 @@ func TestRunner(t *testing.T) {
 	t.Run("StartPreservesTaskMetadata", func(t *testing.T) {
 		t.Parallel()
 		runtimeBackend := &metadataRuntime{FakeBackend: &runtimetest.FakeBackend{}}
-		checkout := newTestCheckout(t, "", "", runtimeBackend)
-		r := newTestRunner(t, checkout, map[harness.Name]agent.Backend{"test": &instantExitBackend{}}, t.TempDir())
+		r := newTestRunnerWithRuntime(t, runtimeBackend, map[harness.Name]agent.Backend{"test": &instantExitBackend{}}, t.TempDir())
 		r.RuntimeMetadata = runtime.Metadata{runtime.MetadataSmokeRun: "run-token", runtime.MetadataTaskID: "wrong"}
 		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Harness: "test", StartedAt: time.Now().UTC()}
 		h, err := r.Start(t.Context(), tk, "")
@@ -337,8 +357,7 @@ func TestRunner(t *testing.T) {
 		t.Run("PassesModelAndEffort", func(t *testing.T) {
 			t.Parallel()
 			backend := &testBackend{FakeBackend: &agenttest.FakeBackend{}}
-			checkout := newTestCheckout(t, "", "", testContainer())
-			r := newTestRunner(t, checkout, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
+			r := newTestRunnerWithRuntime(t, testContainer(), map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -368,8 +387,7 @@ func TestRunner(t *testing.T) {
 		t.Run("PersistsSetupLogsOnFailure", func(t *testing.T) {
 			t.Parallel()
 			logDir := t.TempDir()
-			checkout := newTestCheckout(t, "", "", &setupLogFailureRuntime{FakeBackend: &runtimetest.FakeBackend{}})
-			r := newTestRunner(t, checkout, nil, logDir)
+			r := newTestRunnerWithRuntime(t, &setupLogFailureRuntime{FakeBackend: &runtimetest.FakeBackend{}}, nil, logDir)
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -407,8 +425,7 @@ func TestRunner(t *testing.T) {
 		t.Run("SurfacesSetupFailure", func(t *testing.T) {
 			t.Parallel()
 			launchErr := errors.New("invalid context name cache-custom-mount:~/.cache/caic: invalid reference format")
-			checkout := newTestCheckout(t, "", "", &runtimetest.FakeBackend{LaunchErr: launchErr})
-			r := newTestRunner(t, checkout, nil, t.TempDir())
+			r := newTestRunnerWithRuntime(t, &runtimetest.FakeBackend{LaunchErr: launchErr}, nil, t.TempDir())
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -790,8 +807,7 @@ func TestRunner(t *testing.T) {
 			t.Run(state.String(), func(t *testing.T) {
 				t.Parallel()
 				stub := testContainer()
-				checkout := newTestCheckout(t, "", "", stub)
-				r := newTestRunner(t, checkout, nil, "")
+				r := newTestRunnerWithRuntime(t, stub, nil, "")
 				tk := &Task{
 					ID:            ksid.NewID(),
 					InitialPrompt: agent.Prompt{Text: "test"},
@@ -817,8 +833,7 @@ func TestRunner(t *testing.T) {
 			t.Parallel()
 			t.Run("no_runtime", func(t *testing.T) {
 				t.Parallel()
-				checkout := newTestCheckout(t, "", "", nil)
-				r := newTestRunner(t, checkout, nil, "")
+				r := newTestRunnerWithRuntime(t, nil, nil, "")
 				tk := &Task{ID: ksid.NewID()}
 				if _, err := r.ReviveTask(t.Context(), tk); err == nil {
 					t.Fatal("want error")
@@ -826,8 +841,7 @@ func TestRunner(t *testing.T) {
 			})
 			t.Run("no_instance", func(t *testing.T) {
 				t.Parallel()
-				checkout := newTestCheckout(t, "", "", testContainer())
-				r := newTestRunner(t, checkout, nil, "")
+				r := newTestRunnerWithRuntime(t, testContainer(), nil, "")
 				tk := &Task{ID: ksid.NewID()}
 				if _, err := r.ReviveTask(t.Context(), tk); err == nil {
 					t.Fatal("want error")
@@ -835,8 +849,7 @@ func TestRunner(t *testing.T) {
 			})
 			t.Run("wrong_state", func(t *testing.T) {
 				t.Parallel()
-				checkout := newTestCheckout(t, "", "", testContainer())
-				r := newTestRunner(t, checkout, nil, "")
+				r := newTestRunnerWithRuntime(t, testContainer(), nil, "")
 				tk := &Task{ID: ksid.NewID()}
 				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 				tk.SetState(StateRunning)
@@ -874,8 +887,7 @@ func TestRunner(t *testing.T) {
 				t.Run(tc.name, func(t *testing.T) {
 					t.Parallel()
 					logDir := t.TempDir()
-					checkout := newTestCheckout(t, "", "", tc.runtime)
-					r := newTestRunner(t, checkout, tc.backends, logDir)
+					r := newTestRunnerWithRuntime(t, tc.runtime, tc.backends, logDir)
 					tk := &Task{
 						ID:            ksid.NewID(),
 						InitialPrompt: agent.Prompt{Text: "test"},
@@ -922,9 +934,8 @@ func TestRunner(t *testing.T) {
 		})
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
-			checkout := newTestCheckout(t, "", "", testContainer())
 			backend := &instantExitBackend{}
-			r := newTestRunner(t, checkout, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
+			r := newTestRunnerWithRuntime(t, testContainer(), map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -955,8 +966,7 @@ func TestRunner(t *testing.T) {
 			t.Parallel()
 			t.Run("no_runtime", func(t *testing.T) {
 				t.Parallel()
-				checkout := newTestCheckout(t, "", "", nil)
-				r := newTestRunner(t, checkout, nil, "")
+				r := newTestRunnerWithRuntime(t, nil, nil, "")
 				source := &Task{ID: ksid.NewID()}
 				fork := &Task{ID: ksid.NewID()}
 				if _, err := r.ForkTask(t.Context(), source, fork, &runtime.ForkOptions{}, ""); err == nil {
@@ -965,8 +975,7 @@ func TestRunner(t *testing.T) {
 			})
 			t.Run("no_source_instance", func(t *testing.T) {
 				t.Parallel()
-				checkout := newTestCheckout(t, "", "", testContainer())
-				r := newTestRunner(t, checkout, nil, "")
+				r := newTestRunnerWithRuntime(t, testContainer(), nil, "")
 				source := &Task{ID: ksid.NewID()}
 				fork := &Task{ID: ksid.NewID()}
 				if _, err := r.ForkTask(t.Context(), source, fork, &runtime.ForkOptions{}, ""); err == nil {
@@ -977,9 +986,8 @@ func TestRunner(t *testing.T) {
 		t.Run("persists_setup_logs", func(t *testing.T) {
 			t.Parallel()
 			runtimeBackend := &forkLogRuntime{FakeBackend: testContainer()}
-			checkout := newTestCheckout(t, "", "", runtimeBackend)
 			backend := &testBackend{FakeBackend: &agenttest.FakeBackend{}}
-			r := newTestRunner(t, checkout, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
+			r := newTestRunnerWithRuntime(t, runtimeBackend, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			source := &Task{
 				ID:      ksid.NewID(),
 				Harness: "test",
@@ -1026,9 +1034,8 @@ func TestRunner(t *testing.T) {
 		t.Run("pins_each_repo_to_its_own_branch", func(t *testing.T) {
 			t.Parallel()
 			runtimeBackend := &forkLogRuntime{FakeBackend: testContainer()}
-			checkout := newTestCheckout(t, "", "", runtimeBackend)
 			backend := &testBackend{FakeBackend: &agenttest.FakeBackend{}}
-			r := newTestRunner(t, checkout, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
+			r := newTestRunnerWithRuntime(t, runtimeBackend, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			source := &Task{
 				ID:      ksid.NewID(),
 				Harness: "test",
@@ -1070,8 +1077,7 @@ func TestRunner(t *testing.T) {
 				FakeBackend: testContainer(),
 				forkErr:     errors.New("fork failed"),
 			}
-			checkout := newTestCheckout(t, "", "", runtimeBackend)
-			r := newTestRunner(t, checkout, nil, t.TempDir())
+			r := newTestRunnerWithRuntime(t, runtimeBackend, nil, t.TempDir())
 			source := &Task{
 				ID:      ksid.NewID(),
 				Harness: "test",
@@ -1105,9 +1111,8 @@ func TestRunner(t *testing.T) {
 		t.Run("persists_setup_logs_on_session_failure", func(t *testing.T) {
 			t.Parallel()
 			runtimeBackend := &forkLogRuntime{FakeBackend: testContainer()}
-			checkout := newTestCheckout(t, "", "", runtimeBackend)
 			backend := &agenttest.FakeBackend{}
-			r := newTestRunner(t, checkout, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
+			r := newTestRunnerWithRuntime(t, runtimeBackend, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			source := &Task{
 				ID:      ksid.NewID(),
 				Harness: "test",
@@ -1138,8 +1143,7 @@ func TestRunner(t *testing.T) {
 		t.Run("preserves configured metadata on fork", func(t *testing.T) {
 			t.Parallel()
 			runtimeBackend := &forkLogRuntime{FakeBackend: &runtimetest.FakeBackend{}}
-			checkout := newTestCheckout(t, "", "", runtimeBackend)
-			r := newTestRunner(t, checkout, map[harness.Name]agent.Backend{"test": &instantExitBackend{}}, t.TempDir())
+			r := newTestRunnerWithRuntime(t, runtimeBackend, map[harness.Name]agent.Backend{"test": &instantExitBackend{}}, t.TempDir())
 			r.RuntimeMetadata = runtime.Metadata{runtime.MetadataSmokeRun: "run-token", runtime.MetadataTaskID: "wrong"}
 			source := &Task{ID: ksid.NewID(), Harness: "test"}
 			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
@@ -1161,9 +1165,8 @@ func TestRunner(t *testing.T) {
 		})
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
-			checkout := newTestCheckout(t, "", "", testContainer())
 			backend := &instantExitBackend{}
-			r := newTestRunner(t, checkout, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
+			r := newTestRunnerWithRuntime(t, testContainer(), map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			source := &Task{ID: ksid.NewID(), Harness: "test"}
 			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
 			fork := &Task{

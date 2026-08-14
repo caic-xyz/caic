@@ -185,16 +185,9 @@ func TestCheckout(t *testing.T) {
 	})
 	t.Run("BranchDiffStatNoContainer", func(t *testing.T) {
 		t.Parallel()
-		r := newTestCheckout(t, "", "", nil)
+		r := newTestCheckout(t, "", t.TempDir(), nil)
 		if ds := r.BranchDiffStat(t.Context(), &fakeTaskView{}); ds != nil {
 			t.Errorf("BranchDiffStat with no instance = %+v, want nil", ds)
-		}
-	})
-	t.Run("BranchDiffStatNoDir", func(t *testing.T) {
-		t.Parallel()
-		r := newTestCheckout(t, "", "", &runtimetest.FakeBackend{})
-		if ds := r.BranchDiffStat(t.Context(), &fakeTaskView{}); ds != nil {
-			t.Errorf("BranchDiffStat with no dir = %+v, want nil", ds)
 		}
 	})
 }
@@ -246,7 +239,7 @@ func TestTaskRuntime(t *testing.T) {
 	})
 	t.Run("error_no_instance", func(t *testing.T) {
 		t.Parallel()
-		if _, _, err := newTestCheckout(t, "", "", nil).taskRuntime(&fakeTaskView{}); err == nil {
+		if _, _, err := newTestCheckout(t, "", t.TempDir(), nil).taskRuntime(&fakeTaskView{}); err == nil {
 			t.Fatal("want error")
 		}
 	})

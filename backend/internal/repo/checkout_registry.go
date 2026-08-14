@@ -88,9 +88,8 @@ func (r *Registry) Register(repository *Repository, checkout *Checkout) Move {
 	return Move{}
 }
 
-// RegisterCheckout registers checkout-only state for tests and no-repository
-// execution. Managed repositories must use Register so identity and checkout
-// state change together.
+// RegisterCheckout registers checkout-only state for tests. Managed
+// repositories must use Register so identity and checkout state change together.
 func (r *Registry) RegisterCheckout(relPath string, checkout *Checkout) {
 	checkout.RepoName = relPath
 	checkout.Runtimes = r.runtimes

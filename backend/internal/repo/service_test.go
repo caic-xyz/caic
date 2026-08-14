@@ -16,7 +16,7 @@ func TestServiceChanged(t *testing.T) {
 		t.Parallel()
 
 		repositories := NewRegistry(t.Context(), nil)
-		repositories.Register(&Repository{RelPath: "old", AbsPath: "/repo"}, &Checkout{})
+		repositories.Register(&Repository{RelPath: "old", AbsPath: "/repo"}, &Checkout{Dir: t.TempDir(), GitTimeout: time.Minute, Log: logtest.Logger(t)})
 		s, err := NewService("", repositories)
 		if err != nil {
 			t.Fatal(err)

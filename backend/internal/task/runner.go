@@ -94,6 +94,10 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 // to implement Start, Cleanup, StopTask, ReviveTask, and ForkTask. It holds no
 // low-level git, log, or message reducer details itself.
 type Runner struct {
+	// Immutable.
+	Runtimes *runtime.Router
+	Log      *slog.Logger
+
 	// Checkout is the task's primary repo checkout: it owns branch allocation
 	// for repo 0, the shared runtime backend, and git config (timeout, logger).
 	// It is a single value, not a slice, because a Checkout is a per-repo,
@@ -101,7 +105,7 @@ type Runner struct {
 	// per-task list. Extra repos' branches are allocated by the Manager on their
 	// own checkouts before Start; multi-repo diff/sync then fans out from
 	// t.RuntimeRepos() through the runtime backend, keyed by repo index.
-	Checkout            *repo.Checkout
+	Checkout            *repo.Checkout // nil for no-repository tasks
 	Sessions            *SessionRunner
 	RuntimeMetadata     runtime.Metadata
 	RuntimeStartTimeout time.Duration // Timeout for instance start (image pull). Must be non-zero.
@@ -128,7 +132,7 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 	ctx, task := trace.NewTask(ctx, "task.start:"+t.ID.String())
 	defer task.End()
 
-	if r.Checkout.Dir != "" {
+	if r.Checkout != nil {
 		t.SetState(StateBranching)
 	}
 	// The Manager has already assigned every repo's branch name (the branch itself
@@ -142,7 +146,7 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 
 	tStart := time.Now()
 	// 1. Create branch (serialized) + start instance (concurrent).
-	r.Checkout.Log.Info("setup task")
+	r.Log.Info("setup task")
 	region := trace.StartRegion(ctx, "setup")
 	metadata := maps.Clone(r.RuntimeMetadata)
 	if metadata == nil {
@@ -154,12 +158,12 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 	if err != nil {
 		return nil, r.finishStartupFailure(ctx, t, log, err)
 	}
-	t.SetRuntimeConnectionInfo(sr.InstanceID, sr.AgentTarget, sr.TailscaleFQDN, sr.TailscaleAuthURL, r.Checkout.Runtimes.VNCPort(ctx, sr.InstanceID))
+	t.SetRuntimeConnectionInfo(sr.InstanceID, sr.AgentTarget, sr.TailscaleFQDN, sr.TailscaleAuthURL, r.Runtimes.VNCPort(ctx, sr.InstanceID))
 	var primaryBranch string
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
 	}
-	r.Checkout.Log.Info("checkout", "msg", "ready", "br", primaryBranch, "instance", sr.InstanceID, "dur", time.Since(tStart))
+	r.Log.Info("checkout", "msg", "ready", "br", primaryBranch, "instance", sr.InstanceID, "dur", time.Since(tStart))
 
 	// 2. Start the agent session.
 	t.SetState(StateStarting)
@@ -172,7 +176,7 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 	}
 
 	tSession := time.Now()
-	tlog := r.Checkout.Log.With("br", primaryBranch, "instance", sr.InstanceID)
+	tlog := r.Log.With("br", primaryBranch, "instance", sr.InstanceID)
 	tlog.Info("starting session", "hns", t.Harness)
 	region = trace.StartRegion(ctx, "agent-session")
 	target := sr.AgentTarget
@@ -232,7 +236,7 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
 	}
-	tlog := r.Checkout.Log.With("br", primaryBranch, "instance", name)
+	tlog := r.Log.With("br", primaryBranch, "instance", name)
 	tlog.InfoContext(ctx, "cleanup starting", "reason", reason, "state", t.GetState(), "has_session", t.HasSession())
 
 	// Graceful shutdown: send stop sentinel so the relay sends SIGINT.
@@ -255,7 +259,7 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 	// authorize deletion: unsynced work lives only in the container's branch, and
 	// the host branch's own commit count says nothing about it.
 	branchConfirmedEmpty := false
-	if reason == StatePurged && !t.DiffCreated() && name != "" && r.Checkout.Dir != "" {
+	if reason == StatePurged && !t.DiffCreated() && name != "" && r.Checkout != nil {
 		ds, err := r.branchDiffStat(ctx, t)
 		switch {
 		case err != nil:
@@ -273,8 +277,12 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 	if name != "" {
 		tlog.InfoContext(ctx, "cleanup: purging instance")
 		pStart := time.Now()
-		purgeCtx, purgeCancel := context.WithTimeout(context.WithoutCancel(ctx), r.Checkout.GitTimeout)
-		err := r.Checkout.Runtimes.Purge(purgeCtx, name)
+		timeout := time.Minute
+		if r.Checkout != nil {
+			timeout = r.Checkout.GitTimeout
+		}
+		purgeCtx, purgeCancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+		err := r.Runtimes.Purge(purgeCtx, name)
 		purgeCancel()
 		if err != nil {
 			tlog.WarnContext(ctx, "purge instance failed", "err", err, "dur", time.Since(pStart).Round(time.Millisecond))
@@ -310,7 +318,9 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 		res.DiffStat = ds
 	}
 	if reason == StatePurged && runtimeRemovedOrAbsent && branchConfirmedEmpty {
-		r.Checkout.DeleteUnmodifiedTaskBranches(ctx, t)
+		if r.Checkout != nil {
+			r.Checkout.DeleteUnmodifiedTaskBranches(ctx, t)
+		}
 	}
 	var log agent.LogSink
 	if h != nil {
@@ -365,7 +375,7 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
 	}
-	tlog := r.Checkout.Log.With("br", primaryBranch, "instance", name)
+	tlog := r.Log.With("br", primaryBranch, "instance", name)
 	tlog.InfoContext(ctx, "stop starting", "state", t.GetState())
 	if _, changed := t.SetStateUnless(StateStopping, StatePurging, StatePurged, StateCrashed, StateFailed, StateStopped); !changed {
 		tlog.InfoContext(ctx, "stop skipped", "state", t.GetState())
@@ -387,7 +397,7 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 	tlog.InfoContext(ctx, "stop: stopping instance")
 	if name != "" {
 		cStart := time.Now()
-		if err := r.Checkout.Runtimes.Stop(ctx, name); err != nil {
+		if err := r.Runtimes.Stop(ctx, name); err != nil {
 			tlog.WarnContext(ctx, "stop: instance Stop failed", "err", err, "dur", time.Since(cStart).Round(time.Millisecond))
 		} else {
 			tlog.DebugContext(ctx, "stop: instance Stop succeeded", "dur", time.Since(cStart).Round(time.Millisecond))
@@ -463,7 +473,7 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
 	}
-	tlog := r.Checkout.Log.With("br", primaryBranch, "instance", instanceID)
+	tlog := r.Log.With("br", primaryBranch, "instance", instanceID)
 
 	// 1. Revive the instance.
 	if state, changed := t.SetStateIfAny(StateProvisioning, StateStopped, StateCrashed, StateProvisioning); !changed {
@@ -471,12 +481,12 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 	}
 	tlog.Info("reviving instance")
 	tlog.Debug("checkout", "msg", "calling instance.Revive")
-	if err := r.Checkout.Runtimes.Revive(ctx, instanceID); err != nil {
+	if err := r.Runtimes.Revive(ctx, instanceID); err != nil {
 		tlog.Error("checkout", "msg", "Revive failed", "err", err)
 		return nil, r.finishReviveFailure(ctx, t, fmt.Errorf("revive instance: %w", err), nil)
 	}
 	tlog.Debug("checkout", "msg", "Revive succeeded", "instance", instanceID)
-	t.SetVNCPort(r.Checkout.Runtimes.VNCPort(ctx, instanceID))
+	t.SetVNCPort(r.Runtimes.VNCPort(ctx, instanceID))
 
 	// 2. Start a new relay with --resume to continue the previous session.
 	// skipSideEffects=true: --resume replays all historical messages and
@@ -521,8 +531,10 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 	}
 
 	// 4. Compute host-side diff stat once.
-	if ds := r.Checkout.BranchDiffStat(ctx, t); len(ds) > 0 {
-		t.SetLiveDiffStat(ds)
+	if r.Checkout != nil {
+		if ds := r.Checkout.BranchDiffStat(ctx, t); len(ds) > 0 {
+			t.SetLiveDiffStat(ds)
+		}
 	}
 	tlog.Info("agent ready after revive", "state", t.GetState())
 	return h, nil
@@ -545,7 +557,7 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *run
 	if p := source.Primary(); p != nil {
 		sourcePrimaryBranch = p.Branch
 	}
-	tlog := r.Checkout.Log.With("src_br", sourcePrimaryBranch, "src_instance", sourceInstanceID)
+	tlog := r.Log.With("src_br", sourcePrimaryBranch, "src_instance", sourceInstanceID)
 
 	// Every fork branch — primary and extras alike — was assigned by the Manager
 	// before ForkTask, so the log can open with a correct metadata header up
@@ -597,7 +609,7 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *run
 	tlog.Debug("checkout", "msg", "calling instance.Fork", "source", sourceInstanceID, "harness", forkOpts.Harness, "tailscale", forkOpts.Tailscale, "usb", forkOpts.USB, "display", forkOpts.Display, "sudo", forkOpts.Sudo, "gitHubToken", fork.GitHubTokenEnabled())
 	provisioningLog := &provisioningWriter{ctx: ctx, t: fork, log: log}
 	forkOpts.LogWriter = provisioningLog
-	forkName, forkConn, forkRepos, err := r.Checkout.Runtimes.Fork(ctx, sourceInstanceID, forkOpts)
+	forkName, forkConn, forkRepos, err := r.Runtimes.Fork(ctx, sourceInstanceID, forkOpts)
 	if flushErr := provisioningLog.Flush(); flushErr != nil {
 		err = errors.Join(err, flushErr)
 	}
@@ -606,7 +618,7 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *run
 		return nil, r.finishStartupFailure(ctx, fork, log, fmt.Errorf("fork instance: %w", err))
 	}
 	tlog.Debug("checkout", "msg", "instance.Fork succeeded", "source", sourceInstanceID, "fork", forkName)
-	fork.SetRuntimeConnectionInfo(forkName, forkConn.AgentTarget, "", "", r.Checkout.Runtimes.VNCPort(ctx, forkName))
+	fork.SetRuntimeConnectionInfo(forkName, forkConn.AgentTarget, "", "", r.Runtimes.VNCPort(ctx, forkName))
 	for i := range fork.ReposSnapshot() {
 		if i < len(forkRepos) {
 			fork.SetRepoBranch(i, forkRepos[i].Branch)
@@ -637,7 +649,7 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *run
 }
 
 func (r *Runner) branchDiffStat(ctx context.Context, t *Task) (agent.DiffStat, error) {
-	if r.Checkout.Dir == "" {
+	if r.Checkout == nil {
 		return nil, nil
 	}
 	id := t.RuntimeInstanceID()
@@ -662,14 +674,14 @@ func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, 
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
 	}
-	r.Checkout.Log.Info("starting instance", "br", primaryBranch, "img", t.BaseImage, "platform", t.ContainerPlatform, "hns", t.Harness, "ts", t.Tailscale, "usb", t.USB, "dpy", t.Display, "sudo", t.Sudo, "gitHubToken", t.GitHubTokenEnabled())
+	r.Log.Info("starting instance", "br", primaryBranch, "img", t.BaseImage, "platform", t.ContainerPlatform, "hns", t.Harness, "ts", t.Tailscale, "usb", t.USB, "dpy", t.Display, "sudo", t.Sudo, "gitHubToken", t.GitHubTokenEnabled())
 	tContainer := time.Now()
 	startCtx, startCancel := context.WithTimeout(detached, r.RuntimeStartTimeout)
 	defer startCancel()
 
 	runtimeName := t.RuntimeName
 	if runtimeName == "" {
-		runtimeName = r.Checkout.Runtimes.Runtimes[0].Name()
+		runtimeName = r.Runtimes.Runtimes[0].Name()
 	}
 	provisioningLog := &provisioningWriter{ctx: ctx, t: t, log: log}
 	opts := &runtime.StartOptions{
@@ -692,57 +704,57 @@ func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, 
 	// Phase A: runtime launch + connection config. Branch creation runs concurrently so
 	// git fetch overlaps with instance connection startup.
 	var repos []runtime.Repo
-	if r.Checkout.Dir != "" {
+	if r.Checkout != nil {
 		repos = t.RuntimeRepos()
 	}
 	var instanceID runtime.ID
-	r.Checkout.Log.Debug("checkout", "msg", "provisioning phase A: launching instance and creating branch", "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "sudo", opts.Sudo, "repos_count", len(repos))
+	r.Log.Debug("checkout", "msg", "provisioning phase A: launching instance and creating branch", "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "sudo", opts.Sudo, "repos_count", len(repos))
 	eg, egCtx := errgroup.WithContext(startCtx)
 	eg.Go(func() error {
 		defer trace.StartRegion(egCtx, "instance-launch").End()
-		r.Checkout.Log.Debug("checkout", "msg", "calling instance.Launch", "branch", primaryBranch)
-		id, err := r.Checkout.Runtimes.Launch(egCtx, repos, opts)
+		r.Log.Debug("checkout", "msg", "calling instance.Launch", "branch", primaryBranch)
+		id, err := r.Runtimes.Launch(egCtx, repos, opts)
 		if err != nil {
-			r.Checkout.Log.Error("checkout", "msg", "instance.Launch failed", "branch", primaryBranch, "err", err)
+			r.Log.Error("checkout", "msg", "instance.Launch failed", "branch", primaryBranch, "err", err)
 			return err
 		}
-		r.Checkout.Log.Debug("checkout", "msg", "instance.Launch succeeded", "instance", id)
+		r.Log.Debug("checkout", "msg", "instance.Launch succeeded", "instance", id)
 		instanceID = id
 		return nil
 	})
-	if r.Checkout.Dir != "" {
+	if r.Checkout != nil {
 		eg.Go(func() error {
 			defer trace.StartRegion(egCtx, "branch-create").End()
-			r.Checkout.Log.Debug("checkout", "msg", "fetching and creating branch", "branch", primaryBranch)
+			r.Log.Debug("checkout", "msg", "fetching and creating branch", "branch", primaryBranch)
 			err := r.Checkout.FetchAndCreateBranch(egCtx, t, primaryBranch)
 			if err != nil {
-				r.Checkout.Log.Error("checkout", "msg", "fetchAndCreateBranch failed", "branch", primaryBranch, "err", err)
+				r.Log.Error("checkout", "msg", "fetchAndCreateBranch failed", "branch", primaryBranch, "err", err)
 			} else {
-				r.Checkout.Log.Debug("checkout", "msg", "fetchAndCreateBranch succeeded", "branch", primaryBranch)
+				r.Log.Debug("checkout", "msg", "fetchAndCreateBranch succeeded", "branch", primaryBranch)
 			}
 			return err
 		})
 	}
-	r.Checkout.Log.Debug("checkout", "msg", "waiting for phase A errgroup")
+	r.Log.Debug("checkout", "msg", "waiting for phase A errgroup")
 	if err := eg.Wait(); err != nil {
 		return setupResult{}, errors.Join(err, provisioningLog.Flush())
 	}
 	if err := provisioningLog.Flush(); err != nil {
 		return setupResult{}, err
 	}
-	r.Checkout.Log.Debug("checkout", "msg", "phase A complete", "instance", instanceID)
+	r.Log.Debug("checkout", "msg", "phase A complete", "instance", instanceID)
 
 	// Phase B: wait for runtime connection + push (branch now exists locally).
-	r.Checkout.Log.Debug("checkout", "msg", "provisioning phase B: connecting to instance", "instance", instanceID)
-	conn, err := r.Checkout.Runtimes.Connect(startCtx, instanceID, opts)
+	r.Log.Debug("checkout", "msg", "provisioning phase B: connecting to instance", "instance", instanceID)
+	conn, err := r.Runtimes.Connect(startCtx, instanceID, opts)
 	if err != nil {
-		r.Checkout.Log.Error("checkout", "msg", "instance.Connect failed", "instance", instanceID, "err", err)
+		r.Log.Error("checkout", "msg", "instance.Connect failed", "instance", instanceID, "err", err)
 		return setupResult{}, errors.Join(fmt.Errorf("start instance: %w", err), provisioningLog.Flush())
 	}
 	if err := provisioningLog.Flush(); err != nil {
 		return setupResult{}, err
 	}
-	r.Checkout.Log.Info("checkout", "msg", "started", "br", primaryBranch, "dur", time.Since(tContainer), "instance", instanceID, "fqdn", conn.TailscaleFQDN)
+	r.Log.Info("checkout", "msg", "started", "br", primaryBranch, "dur", time.Since(tContainer), "instance", instanceID, "fqdn", conn.TailscaleFQDN)
 	return setupResult{
 		InstanceID:       instanceID,
 		AgentTarget:      conn.AgentTarget,

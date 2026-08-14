@@ -75,7 +75,7 @@ type Checkout struct {
 	// Immutable.
 	BaseBranch string
 	Dir        string          // Absolute path to the git repository.
-	RepoName   string          // Relative repo path (e.g. "github/caic"); empty for no-repo checkouts.
+	RepoName   string          // Relative repo path (e.g. "github/caic").
 	GitTimeout time.Duration   // Timeout for git/instance ops. Must be non-zero.
 	Runtimes   *runtime.Router // Runtime provides runtime instance and repo diff/sync operations.
 	Log        *slog.Logger
@@ -84,12 +84,8 @@ type Checkout struct {
 	nextID   int        // Next branch sequence number (protected by branchMu).
 }
 
-// Init sets nextID past existing caic-* branches. It is a no-op for the
-// explicit no-repository checkout.
+// Init sets nextID past existing caic-* branches.
 func (w *Checkout) Init(ctx context.Context) error {
-	if w.Dir == "" {
-		return nil
-	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
 	defer cancel()
 	w.branchMu.Lock()
@@ -117,9 +113,6 @@ func (w *Checkout) AllocateBranch(ctx context.Context) (string, error) {
 // combined diff stat across all repos and any safety issues found. Safety is
 // checked per-repo; when force is false, issues in any repo block the push.
 func (w *Checkout) SyncToOrigin(ctx context.Context, t TaskView, force bool) (agent.DiffStat, []SafetyIssue, error) {
-	if w.Dir == "" {
-		return nil, nil, errors.New("sync is not supported for no-repo tasks")
-	}
 	id, repos, err := w.taskRuntime(t)
 	if err != nil {
 		return nil, nil, err
@@ -170,9 +163,6 @@ func (w *Checkout) SyncToOrigin(ctx context.Context, t TaskView, force bool) (ag
 // issues always block (no force override). The commit message is built from the
 // task title.
 func (w *Checkout) SyncToDefault(ctx context.Context, t TaskView, message string) (agent.DiffStat, []SafetyIssue, error) {
-	if w.Dir == "" {
-		return nil, nil, errors.New("sync is not supported for no-repo tasks")
-	}
 	id, repos, err := w.taskRuntime(t)
 	if err != nil {
 		return nil, nil, err
@@ -223,9 +213,6 @@ func (w *Checkout) SyncToDefault(ctx context.Context, t TaskView, message string
 // with `<repoName>/` so the frontend can distinguish changes from different
 // repos. Holds branchMu during diff.
 func (w *Checkout) DiffContent(ctx context.Context, t TaskView, path string) (string, error) {
-	if w.Dir == "" {
-		return "", errors.New("diff is not supported for no-repo tasks")
-	}
 	id, repos, err := w.taskRuntime(t)
 	if err != nil {
 		return "", err
@@ -256,7 +243,7 @@ func (w *Checkout) DiffContent(ctx context.Context, t TaskView, path string) (st
 // uncommitted changes, this captures the full branch diff relative to the base.
 // Used by adoptOne to restore the diff stat after server restart.
 func (w *Checkout) BranchDiffStat(ctx context.Context, t TaskView) agent.DiffStat {
-	if w.Runtimes == nil || w.Dir == "" {
+	if w.Runtimes == nil {
 		return nil
 	}
 	id, repos, err := w.taskRuntime(t)
@@ -275,7 +262,7 @@ func (w *Checkout) BranchDiffStat(ctx context.Context, t TaskView) agent.DiffSta
 // DeleteUnmodifiedTaskBranches deletes generated task branches that never diverged from their base.
 func (w *Checkout) DeleteUnmodifiedTaskBranches(ctx context.Context, t TaskView) {
 	repos := t.RuntimeRepos()
-	if len(repos) == 0 || w.Dir == "" {
+	if len(repos) == 0 {
 		return
 	}
 	gitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
@@ -365,9 +352,6 @@ const (
 // DiffStat optionally fetches from the instance, then returns the combined
 // per-repo diff stat (git diff --numstat).
 func (w *Checkout) DiffStat(ctx context.Context, id runtime.ID, repos []runtime.Repo, fetchMode DiffFetchMode, fetchLogMsg string) (agent.DiffStat, error) {
-	if w.Dir == "" {
-		return nil, nil
-	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
 	defer cancel()
 	w.branchMu.Lock()
@@ -455,12 +439,9 @@ func (w *Checkout) effectiveBaseBranch(t TaskView) string {
 
 // diffStatLocked runs Diff("--numstat") on each repo and returns the combined
 // diff stat. File paths are prefixed with `<repoName>/` when there are multiple
-// repos so the frontend can distinguish changes per repo. Returns nil for
-// no-repo checkouts (dir == ""). The caller must hold branchMu.
+// repos so the frontend can distinguish changes per repo. The caller must hold
+// branchMu.
 func (w *Checkout) diffStatLocked(ctx context.Context, id runtime.ID, repos []runtime.Repo) agent.DiffStat {
-	if w.Dir == "" {
-		return nil
-	}
 	var result agent.DiffStat
 	for i := range repos {
 		repo := &repos[i]

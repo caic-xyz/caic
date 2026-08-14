@@ -119,8 +119,7 @@ type Manager struct {
 	changed chan struct{} // closed on mutation, replaced under mu
 }
 
-// New creates a Manager. A no-repo checkout is always registered.
-// Register each repo checkout in Checkouts, then Start.
+// New creates a Manager. Register each repo checkout in Checkouts, then Start.
 func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value bag passed once at construction
 	if cfg.ServerCtx == nil {
 		return nil, errors.New("task manager server context is required")
@@ -157,13 +156,6 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 		relay:               agentRelayReader{},
 		tasks:               make(map[string]*Entry),
 		changed:             make(chan struct{}),
-	}
-	if _, ok := m.Checkouts.Checkout(""); !ok {
-		m.Checkouts.RegisterCheckout("", &repo.Checkout{
-			GitTimeout: time.Minute,
-			Runtimes:   cfg.Runtimes,
-			Log:        m.log.With(slog.String("repo", "(none)")),
-		})
 	}
 	return m, nil
 }
@@ -247,8 +239,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 		}
 		primaryCheckout = r
 	} else {
-		// New() always registers the no-repo "" checkout, so this never fails.
-		primaryCheckout, _ = m.Checkouts.Checkout("")
+		primaryCheckout = nil
 	}
 
 	// Validate that every extra repo has a registered checkout (branches are
@@ -781,29 +772,27 @@ func (m *Manager) AdoptInstances(ctx context.Context, adoptRepos []AdoptRepo, in
 	wg.Wait()
 
 	// Adopt no-repo runtime instances.
-	if noRepoCheckout, ok := m.Checkouts.Checkout(""); ok {
-		for i := range instances {
-			c := &instances[i]
-			if claimed[c.ID] || !strings.HasPrefix(string(c.ID.InstanceID()), "md-agent-") {
-				continue
-			}
-			taskIDVal, metadataResolved := resolvedTaskIDs[c.ID]
-			wg.Go(func() {
-				at, err := m.adoptOne(ctx, AdoptRepo{}, noRepoCheckout, c, "", taskIDVal, metadataResolved, branchIDs, allLogs)
-				if err != nil {
-					mu.Lock()
-					errs = append(errs, err)
-					mu.Unlock()
-				}
-				if at != nil {
-					mu.Lock()
-					adopted = append(adopted, *at)
-					mu.Unlock()
-				}
-			})
+	for i := range instances {
+		c := &instances[i]
+		if claimed[c.ID] || !strings.HasPrefix(string(c.ID.InstanceID()), "md-agent-") {
+			continue
 		}
-		wg.Wait()
+		taskIDVal, metadataResolved := resolvedTaskIDs[c.ID]
+		wg.Go(func() {
+			at, err := m.adoptOne(ctx, AdoptRepo{}, nil, c, "", taskIDVal, metadataResolved, branchIDs, allLogs)
+			if err != nil {
+				mu.Lock()
+				errs = append(errs, err)
+				mu.Unlock()
+			}
+			if at != nil {
+				mu.Lock()
+				adopted = append(adopted, *at)
+				mu.Unlock()
+			}
+		})
 	}
+	wg.Wait()
 
 	return adopted, errors.Join(errs...)
 }
@@ -1121,6 +1110,9 @@ func (m *Manager) Sync(ctx context.Context, entry *Entry, target SyncTarget, for
 	}
 
 	checkout := m.resolveCheckout(t)
+	if checkout == nil {
+		return nil, badRequestf("task has no checkout")
+	}
 	syncPrimaryBranch := ""
 	if p := t.Primary(); p != nil {
 		syncPrimaryBranch = p.Branch
@@ -1178,11 +1170,9 @@ func (m *Manager) resolveAdoptionTaskIDs(ctx context.Context, adoptRepos []Adopt
 			}
 		}
 	}
-	if noRepoCheckout, ok := m.Checkouts.Checkout(""); ok && noRepoCheckout != nil {
-		for i := range instances {
-			if strings.HasPrefix(string(instances[i].ID.InstanceID()), "md-agent-") {
-				candidates[instances[i].ID] = true
-			}
+	for i := range instances {
+		if strings.HasPrefix(string(instances[i].ID.InstanceID()), "md-agent-") {
+			candidates[instances[i].ID] = true
 		}
 	}
 
@@ -1242,6 +1232,8 @@ func (m *Manager) sessions(r *repo.Checkout) *task.SessionRunner {
 	return &task.SessionRunner{
 		Backends:         m.Backends,
 		Logs:             m.Logs,
+		Runtimes:         m.Runtimes,
+		Log:              m.log,
 		Checkout:         r,
 		NotifyTaskChange: m.NotifyTaskChange,
 	}
@@ -1249,6 +1241,8 @@ func (m *Manager) sessions(r *repo.Checkout) *task.SessionRunner {
 
 func (m *Manager) runner(r *repo.Checkout) *task.Runner {
 	return &task.Runner{
+		Runtimes:            m.Runtimes,
+		Log:                 m.log,
 		Checkout:            r,
 		Sessions:            m.sessions(r),
 		RuntimeMetadata:     m.runtimeMetadata,
@@ -1561,16 +1555,13 @@ func (m *Manager) taskChanged() {
 	m.changed = make(chan struct{})
 }
 
-// resolveCheckout returns the repo checkout for a task's primary repo, or the
-// always-present no-repo checkout. Both are guaranteed non-nil: New()
-// registers "", and callers must register repo-specific checkouts.
+// resolveCheckout returns the checkout for a task's primary repo, if any.
 func (m *Manager) resolveCheckout(t *task.Task) *repo.Checkout {
-	key := ""
 	if p := t.Primary(); p != nil {
-		key = p.Name
+		r, _ := m.Checkouts.Checkout(p.Name)
+		return r
 	}
-	r, _ := m.Checkouts.Checkout(key)
-	return r
+	return nil
 }
 
 func applyLoadedSessionMetadata(t *task.Task, lt *task.LoadedTask) {
