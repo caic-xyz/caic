@@ -118,7 +118,6 @@ graph TD
   pkg_internal_app --> pkg_internal_usage
   pkg_internal_app -.-> pkg_internal_agent_agenttest
   pkg_internal_app -.-> pkg_internal_runtime_runtimetest
-  pkg_internal_auth --> pkg_internal_forge
   pkg_internal_autoupdate --> pkg_internal_forge_github
   pkg_internal_bot --> pkg_internal_forge
   pkg_internal_bot --> pkg_internal_task
@@ -438,7 +437,6 @@ graph TD
   pkg_internal_app --> pkg_internal_usage
   pkg_internal_app -.-> pkg_internal_agent_agenttest
   pkg_internal_app -.-> pkg_internal_runtime_runtimetest
-  pkg_internal_auth --> pkg_internal_forge
   pkg_internal_autoupdate --> pkg_internal_forge_github
   pkg_internal_bot --> pkg_internal_forge
   pkg_internal_bot --> pkg_internal_task
@@ -583,7 +581,7 @@ graph TD
 | `internal/agent/pi` | `internal/agent`, `internal/agent/harness`, `internal/jsonutil`, `internal/runtime` | `internal/agent/agenttest`, `internal/task` |
 | `internal/agent/relay` | None | None |
 | `internal/app` | `internal/agent`, `internal/agent/backends`, `internal/agent/harness`, `internal/auth`, `internal/bot`, `internal/ci`, `internal/forge`, `internal/forge/forgecache`, `internal/forge/forgemgr`, `internal/forge/github`, `internal/preferences`, `internal/repo`, `internal/runtime`, `internal/runtime/mdruntime`, `internal/server`, `internal/server/ipgeo`, `internal/task`, `internal/task/taskmgr`, `internal/usage` | `internal/agent/agenttest`, `internal/runtime/runtimetest` |
-| `internal/auth` | `internal/forge` | None |
+| `internal/auth` | None | None |
 | `internal/autoupdate` | `internal/forge/github` | None |
 | `internal/bot` | `internal/forge`, `internal/task` | None |
 | `internal/ci` | `internal/agent`, `internal/forge`, `internal/forge/forgecache`, `internal/preferences`, `internal/repo`, `internal/task` | None |

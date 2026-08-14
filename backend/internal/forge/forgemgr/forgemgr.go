@@ -123,14 +123,13 @@ func (m *Manager) ForgeForInfo(ctx context.Context, info *repo.Repository) forge
 // Config.Validate ensures these two modes are never mixed.
 // Returns nil if no token is available.
 func (m *Manager) ForgeFor(ctx context.Context, kind forge.Kind) forge.Forge {
-	if u, ok := auth.UserFromContext(ctx); ok && u.AccessToken != "" {
-		if fk, isForge := u.Provider.Forge(); isForge && fk == kind {
-			switch kind {
-			case forge.KindGitHub:
-				return github.NewClient(u.AccessToken, m.githubOAuthThrottle(u.ID))
-			case forge.KindGitLab:
-				return gitlab.NewClient(u.AccessToken, m.gitlabOAuthThrottle(u.ID))
-			}
+	provider, isOAuthForge := providerForForge(kind)
+	if u, ok := auth.UserFromContext(ctx); ok && u.AccessToken != "" && isOAuthForge && u.Provider == provider {
+		switch kind {
+		case forge.KindGitHub:
+			return github.NewClient(u.AccessToken, m.githubOAuthThrottle(u.ID))
+		case forge.KindGitLab:
+			return gitlab.NewClient(u.AccessToken, m.gitlabOAuthThrottle(u.ID))
 		}
 	}
 	switch kind {
@@ -144,6 +143,18 @@ func (m *Manager) ForgeFor(ctx context.Context, kind forge.Kind) forge.Forge {
 		}
 	}
 	return nil
+}
+
+// providerForForge returns the OAuth provider that supplies a token for kind.
+func providerForForge(kind forge.Kind) (auth.Provider, bool) {
+	switch kind {
+	case forge.KindGitHub:
+		return auth.ProviderGitHub, true
+	case forge.KindGitLab:
+		return auth.ProviderGitLab, true
+	default:
+		return "", false
+	}
 }
 
 // StoreInstallationID caches the GitHub App installation ID for the given owner.
