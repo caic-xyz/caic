@@ -2,7 +2,7 @@
 import { test as base, expect, type APIRequestContext } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { createApiClient, APIError, type FetchFn } from "../sdk/caic/ts/v1/api.gen";
-import type { Harness, Task } from "../sdk/caic/ts/v1/types.gen";
+import type { Task } from "../sdk/caic/ts/v1/types.gen";
 
 // ---------------------------------------------------------------------------
 // Adapt Playwright's APIRequestContext to the SDK's FetchFn interface.
@@ -85,9 +85,7 @@ export async function createTaskAPI(
   const resp = await api.createTask({
     initialPrompt: { text: prompt },
     repos: [{ name: repos[0].path }],
-    // HarnessInfo.name is a free-form string server-side: the fake backend
-    // serves "fake", which is outside the Harness enum.
-    harness: harnesses[0].name as Harness,
+    harness: harnesses[0].name,
   });
   expect(resp.id).toBeTruthy();
   return resp.id;

@@ -78,7 +78,7 @@ func TestSmoke(t *testing.T) {
 		}
 		found := false
 		for _, h := range harnesses {
-			if h.Name == string(harness.Codex) {
+			if h.Name == v1.HarnessCodex {
 				found = true
 			}
 		}

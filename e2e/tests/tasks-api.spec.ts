@@ -6,7 +6,7 @@ test("create task and reach waiting state via API", async ({ api }) => {
 
   // The fake agent completes one turn then the task enters waiting state.
   const task = await waitForTaskState(api, id, "waiting");
-  expect(task.harness).toBe("fake");
+  expect(task.harness).toBe("claude");
   expect(task.numTurns).toBeGreaterThanOrEqual(1);
 });
 

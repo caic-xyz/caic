@@ -518,7 +518,7 @@ HarnessInfo is the JSON representation of an available harness.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `name` | `string` |  | yes |
+| `name` | `Harness` |  | yes |
 | `models` | `Model[]` |  | yes |
 | `supportsImages` | `boolean` |  | yes |
 | `supportsCompact` | `boolean` |  | yes |

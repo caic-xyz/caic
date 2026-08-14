@@ -4,7 +4,6 @@
 // Output: e2e/screenshots/frontend/
 import { test, expect, createTaskAPI, waitForTaskState, convertPngsToWebp } from "../helpers";
 import type { Locator } from "@playwright/test";
-import type { Harness } from "../../sdk/caic/ts/v1/types.gen";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -235,7 +234,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   const vncResp = await api.createTask({
     initialPrompt: { text: "Show the VNC display" },
     repos: [{ name: repos[0].path }],
-    harness: harnesses[0].name as Harness,
+    harness: harnesses[0].name,
     display: true,
   });
   await waitForTaskState(api, vncResp.id, "waiting", 30_000);

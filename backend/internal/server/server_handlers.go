@@ -322,6 +322,10 @@ func (h *serverHandlers) listHarnesses(_ context.Context, _ *api.EmptyReq) (*[]v
 	backends := h.taskMgr.Backends
 	out := make([]v1.HarnessInfo, 0, len(backends))
 	for h, b := range backends {
+		name, err := apiconv.Harness(h)
+		if err != nil {
+			return nil, fmt.Errorf("convert available harness %q: %w", h, err)
+		}
 		inventory := b.ModelInventory()
 		models := make([]v1.Model, 0, len(inventory.Models))
 		for _, model := range inventory.Models {
@@ -331,14 +335,14 @@ func (h *serverHandlers) listHarnesses(_ context.Context, _ *api.EmptyReq) (*[]v
 			})
 		}
 		out = append(out, v1.HarnessInfo{
-			Name:            string(h),
+			Name:            name,
 			Models:          models,
 			SupportsImages:  b.SupportsImages(),
 			SupportsCompact: b.SupportsCompact(),
 		})
 	}
 	slices.SortFunc(out, func(a, b v1.HarnessInfo) int {
-		return strings.Compare(a.Name, b.Name)
+		return strings.Compare(string(a.Name), string(b.Name))
 	})
 	return &out, nil
 }

@@ -3,8 +3,9 @@ import { test, expect, createTaskAPI, waitForTaskState, APIError } from "../help
 import type { Harness } from "../../sdk/caic/ts/v1/types.gen";
 
 test("POST /api/caic/v1/tasks with missing prompt returns 400", async ({ api }) => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const err = await api.createTask({ harness: "fake" } as any).catch((e: unknown) => e);
+  const err = await api
+    .createTask({ harness: "claude" } as unknown as Parameters<typeof api.createTask>[0])
+    .catch((e: unknown) => e);
   expect(err).toBeInstanceOf(APIError);
   expect((err as APIError).status).toBe(400);
   expect((err as APIError).code).toBeTruthy();
@@ -12,7 +13,7 @@ test("POST /api/caic/v1/tasks with missing prompt returns 400", async ({ api }) 
 
 test("POST /api/caic/v1/tasks with unknown repo returns 400", async ({ api }) => {
   const err = await api
-    .createTask({ initialPrompt: { text: "hello" }, repos: [{ name: "nonexistent" }], harness: "fake" as Harness })
+    .createTask({ initialPrompt: { text: "hello" }, repos: [{ name: "nonexistent" }], harness: "claude" })
     .catch((e: unknown) => e);
   expect(err).toBeInstanceOf(APIError);
   expect((err as APIError).status).toBe(400);

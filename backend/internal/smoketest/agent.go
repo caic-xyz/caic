@@ -11,6 +11,7 @@ import (
 	"os/exec"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
 // fakeScript is the fake agent that cycles through jokes in Claude Code streaming JSON format.
@@ -26,10 +27,10 @@ type FakeBackend struct {
 
 var _ agent.Backend = (*FakeBackend)(nil)
 
-// NewFakeBackend creates a fake backend for smoke and e2e testing.
+// NewFakeBackend creates a Claude-compatible fake backend for smoke and e2e testing.
 func NewFakeBackend() *FakeBackend {
 	return &FakeBackend{Base: agent.Base{
-		HarnessID:     "fake",
+		HarnessID:     harness.Claude,
 		Inventory:     agent.ModelInventory{Models: []agent.Model{{ID: "fake-model"}}},
 		Images:        true,
 		Compact:       true,

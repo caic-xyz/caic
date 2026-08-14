@@ -963,7 +963,7 @@ data class Model(val id: String, val effortOptions: List<String>)
 /** HarnessInfo is the JSON representation of an available harness. */
 @Serializable
 data class HarnessInfo(
-    val name: String,
+    val name: Harness,
     val models: List<Model>,
     val supportsImages: Boolean,
     val supportsCompact: Boolean,

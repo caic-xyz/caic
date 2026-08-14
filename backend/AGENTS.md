@@ -7,6 +7,13 @@ Go backend for caic. Packages under `internal/` are private.
 - Pass `context.Context` through all call chains.
 - Use subtests (`t.Run`) to group related test cases under a single `Test*` function.
 
+## API Verification
+
+Any change to an API DTO, route, handler, or API conversion must run both
+`make lint-frontend` and `make frontend-e2e`. The first checks TypeScript and
+ESLint against the generated SDK; the second verifies the browser-facing API
+contract against the fake backend.
+
 ## Container Adoption
 
 Adopted containers (preexisting containers found on server restart) have the relay running inside them. This

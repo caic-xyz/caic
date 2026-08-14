@@ -730,7 +730,7 @@ export interface Model {
 
 /** HarnessInfo is the JSON representation of an available harness. */
 export interface HarnessInfo {
-  name: string;
+  name: Harness;
   models: Model[];
   supportsImages: boolean;
   supportsCompact: boolean;

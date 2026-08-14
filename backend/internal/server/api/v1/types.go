@@ -57,7 +57,7 @@ const (
 
 // HarnessInfo is the JSON representation of an available harness.
 type HarnessInfo struct {
-	Name            string  `json:"name"`
+	Name            Harness `json:"name"`
 	Models          []Model `json:"models"`
 	SupportsImages  bool    `json:"supportsImages"`
 	SupportsCompact bool    `json:"supportsCompact"`

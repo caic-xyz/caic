@@ -623,7 +623,7 @@ public struct Model: Codable {
 
 /// HarnessInfo is the JSON representation of an available harness.
 public struct HarnessInfo: Codable {
-    public let name: String
+    public let name: Harness
     public let models: [Model]
     public let supportsImages: Bool
     public let supportsCompact: Bool

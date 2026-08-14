@@ -401,8 +401,7 @@ func (m *mcpRegistry) handleTaskCreate(ctx context.Context, args mcpTaskCreateAr
 	if len(args.Repos) == 0 {
 		return mcp.ToolError[mcpTaskCreatedOutput]("Missing required parameter: repos")
 	}
-	harness := m.resolveTaskCreateHarness(ctx, args.Harness)
-	apiHarness, err := apiconv.ParseHarness(harness)
+	apiHarness, err := m.resolveTaskCreateHarness(ctx, args.Harness)
 	if err != nil {
 		return mcp.ToolError[mcpTaskCreatedOutput](err.Error())
 	}
@@ -444,23 +443,26 @@ func (m *mcpRegistry) handleTaskCreate(ctx context.Context, args mcpTaskCreateAr
 	return mcp.TypedToolResult(mcpTaskCreatedOutput{Result: "Created task: " + title, TaskID: resp.ID.String()})
 }
 
-func (m *mcpRegistry) resolveTaskCreateHarness(ctx context.Context, harness string) string {
+func (m *mcpRegistry) resolveTaskCreateHarness(ctx context.Context, harness string) (v1.Harness, error) {
 	if harness != "" {
-		return harness
+		return apiconv.ParseHarness(harness)
 	}
 	prefs := m.serverConfig.prefs.Get(userIDFromCtx(ctx))
 	if prefs.Harness != "" {
-		return prefs.Harness
+		return apiconv.ParseHarness(prefs.Harness)
 	}
 	return m.firstHarness(ctx)
 }
 
-func (m *mcpRegistry) firstHarness(ctx context.Context) string {
+func (m *mcpRegistry) firstHarness(ctx context.Context) (v1.Harness, error) {
 	harnesses, err := m.serverConfig.listHarnesses(ctx, nil)
-	if err != nil || harnesses == nil || len(*harnesses) == 0 {
-		return ""
+	if err != nil {
+		return "", fmt.Errorf("list available harnesses: %w", err)
 	}
-	return (*harnesses)[0].Name
+	if harnesses == nil || len(*harnesses) == 0 {
+		return "", errors.New("no available harnesses")
+	}
+	return (*harnesses)[0].Name, nil
 }
 
 type mcpTaskNumberArgs struct {

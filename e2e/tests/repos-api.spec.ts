@@ -9,10 +9,10 @@ test("list repos returns the fake repo", async ({ api }) => {
   expect(repo.baseBranch.name).toBe("main");
 });
 
-test("list harnesses returns the fake harness", async ({ api }) => {
+test("list harnesses returns the Claude-compatible fake harness", async ({ api }) => {
   const harnesses = await api.listHarnesses();
   expect(harnesses.length).toBeGreaterThan(0);
-  const fake = harnesses.find((h) => h.name === "fake");
-  expect(fake).toBeTruthy();
-  expect(fake!.models.map((m) => m.id)).toContain("fake-model");
+  const claude = harnesses.find((h) => h.name === "claude");
+  expect(claude).toBeTruthy();
+  expect(claude!.models.map((m) => m.id)).toContain("fake-model");
 });
