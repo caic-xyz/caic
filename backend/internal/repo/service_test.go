@@ -1,28 +1,27 @@
 // Tests for repository service notifications.
 
-package repomgr
+package repo
 
 import (
 	"testing"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/logtest"
-	"github.com/caic-xyz/caic/backend/internal/repo"
-	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 )
 
 func TestServiceChanged(t *testing.T) {
 	t.Parallel()
 
-	t.Run("registerWorkspace invokes move hook before notifying", func(t *testing.T) {
+	t.Run("registerCheckout invokes move hook before notifying", func(t *testing.T) {
 		t.Parallel()
 
-		workspaces := repowork.NewRegistry(t.Context(), nil)
-		s, err := NewService("", repo.New([]repo.Info{{RelPath: "old", AbsPath: "/repo"}}), workspaces)
+		repositories := NewRegistry(t.Context(), nil)
+		repositories.Register(&Repository{RelPath: "old", AbsPath: "/repo"}, &Checkout{})
+		s, err := NewService("", repositories)
 		if err != nil {
 			t.Fatal(err)
 		}
-		workspace := &repowork.Workspace{
+		checkout := &Checkout{
 			BaseBranch: "main",
 			Dir:        "/repo",
 			RepoName:   "repo",
@@ -31,7 +30,7 @@ func TestServiceChanged(t *testing.T) {
 		}
 		ch := s.Changed()
 		var sawNotifyBeforeHook bool
-		move := s.RegisterWorkspace(&InitResult{Info: repo.Info{RelPath: "new", AbsPath: "/repo"}, Workspace: workspace}, func(repo.Move) {
+		move := s.RegisterCheckout(&InitResult{Repository: Repository{RelPath: "new", AbsPath: "/repo"}, Checkout: checkout}, func(Move) {
 			select {
 			case <-ch:
 				sawNotifyBeforeHook = true
@@ -55,11 +54,7 @@ func TestServiceChanged(t *testing.T) {
 func TestNewServiceRequiresDependencies(t *testing.T) {
 	t.Parallel()
 
-	workspaces := repowork.NewRegistry(t.Context(), nil)
-	if _, err := NewService("", nil, workspaces); err == nil || err.Error() != "repository registry is required" {
+	if _, err := NewService("", nil); err == nil || err.Error() != "repository registry is required" {
 		t.Fatalf("NewService() error = %v, want repository registry is required", err)
-	}
-	if _, err := NewService("", repo.New(nil), nil); err == nil || err.Error() != "workspace registry is required" {
-		t.Fatalf("NewService() error = %v, want workspace registry is required", err)
 	}
 }

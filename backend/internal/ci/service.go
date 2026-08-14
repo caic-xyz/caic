@@ -312,14 +312,14 @@ func (svc *Service) autoResync(ctx context.Context, entry TaskEntry, f forge.For
 		svc.log.WarnContext(ctx, "no primary repo", "task", t.ID)
 		return
 	}
-	workspace, ok := svc.backend.GetWorkspace(p.Name)
+	checkout, ok := svc.backend.GetCheckout(p.Name)
 	if !ok {
-		svc.log.WarnContext(ctx, "no workspace", "task", t.ID)
+		svc.log.WarnContext(ctx, "no checkout", "task", t.ID)
 		return
 	}
 
 	svc.log.InfoContext(ctx, "syncing branch", "task", t.ID, "br", p.Branch)
-	if _, _, err := workspace.SyncToOrigin(ctx, t, false); err != nil {
+	if _, _, err := checkout.SyncToOrigin(ctx, t, false); err != nil {
 		svc.log.WarnContext(ctx, "sync failed", "task", t.ID, "err", err)
 		return
 	}

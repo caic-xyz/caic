@@ -1,6 +1,6 @@
-// Service manages repository metadata, workspace registration, and change notifications.
+// Service discovers, clones, and registers repositories and their checkouts.
 
-package repomgr
+package repo
 
 import (
 	"context"
@@ -18,8 +18,6 @@ import (
 	"github.com/caic-xyz/md/git"
 
 	"github.com/caic-xyz/caic/backend/internal/forge"
-	"github.com/caic-xyz/caic/backend/internal/repo"
-	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 )
 
 // ErrorKind classifies repository service errors for API adapters.
@@ -49,18 +47,16 @@ type CloneRequest struct {
 	Depth int
 }
 
-// InitResult holds the outcome of initialising a single newly-discovered
-// repository.
+// InitResult holds one discovered repository and its initialized checkout.
 type InitResult struct {
-	Info      repo.Info
-	Workspace *repowork.Workspace
+	Repository Repository
+	Checkout   *Checkout
 }
 
-// Service owns managed repository metadata and workspace registration.
+// Service discovers and clones repositories into one checkout registry.
 type Service struct {
 	// Immutable.
-	Repos      *repo.Registry
-	Workspaces *repowork.Registry
+	Repositories *Registry
 
 	log     *slog.Logger
 	absRoot string
@@ -71,19 +67,15 @@ type Service struct {
 }
 
 // NewService creates a repository service.
-func NewService(absRoot string, repos *repo.Registry, workspaces *repowork.Registry) (*Service, error) {
-	if repos == nil {
+func NewService(absRoot string, repositories *Registry) (*Service, error) {
+	if repositories == nil {
 		return nil, errors.New("repository registry is required")
 	}
-	if workspaces == nil {
-		return nil, errors.New("workspace registry is required")
-	}
 	return &Service{
-		Repos:      repos,
-		Workspaces: workspaces,
-		log:        slog.Default().With(slog.String("cmp", "reposvc")),
-		absRoot:    absRoot,
-		changed:    make(chan struct{}),
+		Repositories: repositories,
+		log:          slog.Default().With(slog.String("cmp", "reposvc")),
+		absRoot:      absRoot,
+		changed:      make(chan struct{}),
 	}, nil
 }
 
@@ -94,21 +86,21 @@ func (s *Service) Changed() <-chan struct{} {
 	return s.changed
 }
 
-// DiscoverWorkspace discovers repo metadata and creates its task workspace.
-func (s *Service) DiscoverWorkspace(ctx context.Context, abs string) (InitResult, error) {
+// DiscoverCheckout discovers repo metadata and creates its task checkout.
+func (s *Service) DiscoverCheckout(ctx context.Context, abs string) (InitResult, error) {
 	rel := s.RelPath(abs)
-	checkout := &git.Checkout{Root: abs, Logger: s.log}
-	remoteName, err := checkout.DefaultRemote(ctx)
+	gitCheckout := &git.Checkout{Root: abs, Logger: s.log}
+	remoteName, err := gitCheckout.DefaultRemote(ctx)
 	if err != nil {
 		return InitResult{}, fmt.Errorf("cannot determine default remote: %w", err)
 	}
-	branch, err := checkout.DefaultBranch(ctx, remoteName)
+	branch, err := gitCheckout.DefaultBranch(ctx, remoteName)
 	if err != nil {
 		return InitResult{}, fmt.Errorf("cannot determine default branch: %w", err)
 	}
-	remote := checkout.RemoteOriginURL(ctx)
+	remote := gitCheckout.RemoteOriginURL(ctx)
 	forgeKind, forgeOwner, forgeRepo := parseForgeRemote(ctx, s.log, remote)
-	info := repo.Info{
+	info := Repository{
 		RelPath:          rel,
 		AbsPath:          abs,
 		BaseBranch:       branch,
@@ -118,14 +110,14 @@ func (s *Service) DiscoverWorkspace(ctx context.Context, abs string) (InitResult
 		ForgeOwner:       forgeOwner,
 		ForgeRepo:        forgeRepo,
 	}
-	workspace := &repowork.Workspace{
+	checkout := &Checkout{
 		BaseBranch: info.BaseBranch,
 		Dir:        info.AbsPath,
 		RepoName:   info.RelPath,
 		GitTimeout: time.Minute,
 		Log:        s.log.With(slog.String("repo", info.RelPath)),
 	}
-	return InitResult{Info: info, Workspace: workspace}, nil
+	return InitResult{Repository: info, Checkout: checkout}, nil
 }
 
 // RelPath returns abs as a path relative to the repository root.
@@ -140,10 +132,9 @@ func (s *Service) RelPath(abs string) string {
 	return rel
 }
 
-// RegisterWorkspace adds a discovered repo and registers its workspace.
-func (s *Service) RegisterWorkspace(r *InitResult, onMove func(repo.Move)) repo.Move {
-	move := s.Repos.Add(&r.Info)
-	s.Workspaces.RegisterWorkspace(r.Info.RelPath, r.Workspace)
+// RegisterCheckout adds a discovered repository and checkout atomically.
+func (s *Service) RegisterCheckout(r *InitResult, onMove func(Move)) Move {
+	move := s.Repositories.Register(&r.Repository, r.Checkout)
 	if move.Moved() && onMove != nil {
 		onMove(move)
 	}
@@ -151,56 +142,49 @@ func (s *Service) RegisterWorkspace(r *InitResult, onMove func(repo.Move)) repo.
 	return move
 }
 
-// DeregisterWorkspace removes a repo and unregisters its workspace.
-func (s *Service) DeregisterWorkspace(relPath string) {
-	removed := s.Repos.RemoveMatching(func(r repo.Info) bool {
-		return r.RelPath == relPath
-	})
-	for _, rel := range removed {
-		s.Workspaces.UnregisterWorkspace(rel)
-	}
-	if len(removed) > 0 {
+// DeregisterCheckout removes a repository and its current checkout.
+func (s *Service) DeregisterCheckout(relPath string) {
+	if s.Repositories.Remove(relPath) {
 		s.notifyChanged()
 	}
 }
 
-// Clone clones a repository, registers its metadata, and wires its workspace.
-func (s *Service) Clone(ctx context.Context, req CloneRequest) (repo.Info, error) {
+// Clone clones a repository, registers its metadata, and wires its checkout.
+func (s *Service) Clone(ctx context.Context, req CloneRequest) (Repository, error) {
 	targetPath := req.Path
 	if targetPath == "" {
 		base := filepath.Base(req.URL)
 		base = strings.TrimSuffix(base, ".git")
 		if base == "" || base == "." || base == "/" {
-			return repo.Info{}, repoError(ErrorBadRequest, "cannot derive repo name from URL; specify path explicitly")
+			return Repository{}, repoError(ErrorBadRequest, "cannot derive repo name from URL; specify path explicitly")
 		}
 		targetPath = base
 	}
 
 	absTarget := filepath.Join(s.absRoot, targetPath)
 	if rel, err := filepath.Rel(s.absRoot, absTarget); err != nil || strings.HasPrefix(rel, "..") {
-		return repo.Info{}, repoError(ErrorBadRequest, "path escapes root directory")
+		return Repository{}, repoError(ErrorBadRequest, "path escapes root directory")
 	} else {
 		targetPath = rel
 	}
 
 	if _, err := os.Stat(absTarget); err == nil {
-		return repo.Info{}, repoError(ErrorConflict, "directory already exists: "+targetPath)
+		return Repository{}, repoError(ErrorConflict, "directory already exists: "+targetPath)
 	}
-	if _, ok := s.Workspaces.Workspace(targetPath); ok {
-		return repo.Info{}, repoError(ErrorConflict, "repo already registered: "+targetPath)
+	if _, ok := s.Repositories.Checkout(targetPath); ok {
+		return Repository{}, repoError(ErrorConflict, "repo already registered: "+targetPath)
 	}
 
 	bn := filepath.Base(targetPath)
 	var basenameConflict string
-	s.Workspaces.RangeWorkspaces(func(rel string, _ *repowork.Workspace) bool {
-		if rel != "" && filepath.Base(rel) == bn && rel != targetPath {
-			basenameConflict = rel
-			return false
+	for checkout := range s.Repositories.Checkouts() {
+		if checkout.RepoName != "" && filepath.Base(checkout.RepoName) == bn && checkout.RepoName != targetPath {
+			basenameConflict = checkout.RepoName
+			break
 		}
-		return true
-	})
+	}
 	if basenameConflict != "" {
-		return repo.Info{}, repoError(ErrorConflict, "repo basename conflicts with existing: "+basenameConflict)
+		return Repository{}, repoError(ErrorConflict, "repo basename conflicts with existing: "+basenameConflict)
 	}
 
 	depth := req.Depth
@@ -215,23 +199,23 @@ func (s *Service) Clone(ctx context.Context, req CloneRequest) (repo.Info, error
 	if out, err := cmd.CombinedOutput(); err != nil {
 		_ = os.RemoveAll(absTarget)
 		s.log.WarnContext(ctx, "git clone failed", "url", req.URL, "err", err, "out", string(out))
-		return repo.Info{}, repoError(ErrorInternal, "git clone failed: "+err.Error())
+		return Repository{}, repoError(ErrorInternal, "git clone failed: "+err.Error())
 	}
 
-	checkout := &git.Checkout{Root: absTarget, Logger: s.log}
-	remoteName, err := checkout.DefaultRemote(ctx)
+	gitCheckout := &git.Checkout{Root: absTarget, Logger: s.log}
+	remoteName, err := gitCheckout.DefaultRemote(ctx)
 	if err != nil {
 		_ = os.RemoveAll(absTarget)
-		return repo.Info{}, repoError(ErrorInternal, "cannot determine default remote: "+err.Error())
+		return Repository{}, repoError(ErrorInternal, "cannot determine default remote: "+err.Error())
 	}
-	branch, err := checkout.DefaultBranch(ctx, remoteName)
+	branch, err := gitCheckout.DefaultBranch(ctx, remoteName)
 	if err != nil {
 		_ = os.RemoveAll(absTarget)
-		return repo.Info{}, repoError(ErrorInternal, "cannot determine default branch: "+err.Error())
+		return Repository{}, repoError(ErrorInternal, "cannot determine default branch: "+err.Error())
 	}
-	remote := checkout.RemoteOriginURL(ctx)
-	info := repo.Info{RelPath: targetPath, AbsPath: absTarget, BaseBranch: branch, BaseBranchRemote: remoteName, Remote: remote}
-	workspace := &repowork.Workspace{
+	remote := gitCheckout.RemoteOriginURL(ctx)
+	info := Repository{RelPath: targetPath, AbsPath: absTarget, BaseBranch: branch, BaseBranchRemote: remoteName, Remote: remote}
+	checkout := &Checkout{
 		BaseBranch: info.BaseBranch,
 		Dir:        info.AbsPath,
 		RepoName:   info.RelPath,
@@ -239,8 +223,7 @@ func (s *Service) Clone(ctx context.Context, req CloneRequest) (repo.Info, error
 		Log:        s.log.With(slog.String("repo", info.RelPath)),
 	}
 	info.ForgeKind, info.ForgeOwner, info.ForgeRepo = parseForgeRemote(ctx, s.log, remote)
-	s.Repos.Add(&info)
-	s.Workspaces.RegisterWorkspace(targetPath, workspace)
+	s.Repositories.Register(&info, checkout)
 	s.notifyChanged()
 	s.log.InfoContext(ctx, "cloned repo", "url", req.URL, "path", targetPath)
 

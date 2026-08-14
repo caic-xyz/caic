@@ -121,7 +121,7 @@ func mainImpl() error {
 }
 
 func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv string, sc scenario, outputPath, model string) error {
-	workDir, err := setupWorkspace()
+	workDir, err := setupCheckout()
 	if err != nil {
 		return err
 	}
@@ -175,8 +175,8 @@ func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv string, sc scen
 	return writeGoldenFile(ctx, ctr, workDir, b, sc.prompt, outputPath)
 }
 
-// setupWorkspace creates a temp directory with a sample main.go for the agent.
-func setupWorkspace() (string, error) {
+// setupCheckout creates a temp directory with a sample main.go for the agent.
+func setupCheckout() (string, error) {
 	workDir, err := os.MkdirTemp("", "caic-record-")
 	if err != nil {
 		return "", err

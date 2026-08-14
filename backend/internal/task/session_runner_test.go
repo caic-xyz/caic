@@ -243,7 +243,7 @@ func TestSessionRunner(t *testing.T) {
 			{dir: "/opt/repos/foo", want: "/home/user/src/foo"},
 		}
 		for _, tc := range tests {
-			r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", tc.dir, nil), "", nil)
+			r := newTestSessionRunner(t, newTestCheckout(t, "", tc.dir, nil), "", nil)
 			tk := tc.task
 			if tk == nil {
 				tk = &Task{}
@@ -259,7 +259,7 @@ func TestSessionRunner(t *testing.T) {
 		t.Parallel()
 		t.Run("ProducerTimeCarrier", func(t *testing.T) {
 			t.Parallel()
-			r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "/repo", nil), "", nil)
+			r := newTestSessionRunner(t, newTestCheckout(t, "", "/repo", nil), "", nil)
 			tk := &Task{}
 			_, sub, unsub := tk.Subscribe(t.Context())
 			defer unsub()
@@ -310,7 +310,7 @@ func TestSessionRunner(t *testing.T) {
 		t.Run("ResultMessage", func(t *testing.T) {
 			t.Parallel()
 			stub := &fetchRecorder{FakeBackend: testContainer()}
-			r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "/repo", stub), "", nil)
+			r := newTestSessionRunner(t, newTestCheckout(t, "", "/repo", stub), "", nil)
 			changed := make(chan struct{}, 1)
 			r.NotifyTaskChange = func() { changed <- struct{}{} }
 
@@ -359,7 +359,7 @@ func TestSessionRunner(t *testing.T) {
 				t.Run(tool, func(t *testing.T) {
 					t.Parallel()
 					stub := &fetchRecorder{FakeBackend: testContainer()}
-					r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "/repo", stub), "", nil)
+					r := newTestSessionRunner(t, newTestCheckout(t, "", "/repo", stub), "", nil)
 
 					tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
 					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
@@ -407,7 +407,7 @@ func TestSessionRunner(t *testing.T) {
 		t.Run("NonMutatingToolNoDiffStat", func(t *testing.T) {
 			t.Parallel()
 			stub := &fetchRecorder{FakeBackend: testContainer()}
-			r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "", stub), "", nil)
+			r := newTestSessionRunner(t, newTestCheckout(t, "", "", stub), "", nil)
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
@@ -442,7 +442,7 @@ func TestSessionRunner(t *testing.T) {
 		t.Run("SkipSideEffects", func(t *testing.T) {
 			t.Parallel()
 			stub := &fetchRecorder{FakeBackend: testContainer()}
-			r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "/repo", stub), "", nil)
+			r := newTestSessionRunner(t, newTestCheckout(t, "", "/repo", stub), "", nil)
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
@@ -514,7 +514,7 @@ func TestSessionRunner(t *testing.T) {
 				logDir := t.TempDir()
 				backend := &testBackend{FakeBackend: &agenttest.FakeBackend{}}
 
-				r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "", testContainer()), logDir, map[harness.Name]agent.Backend{"test": backend})
+				r := newTestSessionRunner(t, newTestCheckout(t, "", "", testContainer()), logDir, map[harness.Name]agent.Backend{"test": backend})
 
 				tk := &Task{
 					ID:            ksid.NewID(),
@@ -567,7 +567,7 @@ func TestSessionRunner(t *testing.T) {
 		logDir := t.TempDir()
 		backend := &testBackend{FakeBackend: &agenttest.FakeBackend{}}
 
-		r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "", testContainer()), logDir, map[harness.Name]agent.Backend{"test": backend})
+		r := newTestSessionRunner(t, newTestCheckout(t, "", "", testContainer()), logDir, map[harness.Name]agent.Backend{"test": backend})
 
 		tk := &Task{
 			ID:            ksid.NewID(),
@@ -578,7 +578,7 @@ func TestSessionRunner(t *testing.T) {
 		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "fake-instance"), runtime.ConnectionTarget{SSHHost: "fake-instance"}, "", "", 0)
 
 		// Create an initial session with a log writer by using the backend
-		// directly (RepoWorkspace.Start needs a instance backend).
+		// directly (Checkout.Start needs a instance backend).
 		logW, err := (&LogStore{LogDir: logDir}).Open(tk)
 		if err != nil {
 			t.Fatal(err)

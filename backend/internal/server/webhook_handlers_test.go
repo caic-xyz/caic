@@ -24,8 +24,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/gitlab"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
-	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
-	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
@@ -34,7 +32,7 @@ import (
 // testCIBackend is a minimal ci.Backend wired to a repo/task store, sufficient
 // for webhook handler tests that drive CI status updates through ci.Service.
 type testCIBackend struct {
-	repoSvc    *repomgr.Service
+	repoSvc    *repo.Service
 	repoStatus *ci.RepoStatusStore
 	taskMgr    *taskmgr.Manager
 	forgeMgr   *forgemgr.Manager
@@ -44,15 +42,15 @@ type testCIBackend struct {
 func (b *testCIBackend) GitHubApp() ci.GitHubAppClient { return b.forgeMgr.GitHubApp() }
 
 func (b *testCIBackend) ForgeForInfo(ctx context.Context, info *ci.RepoInfo) forge.Forge {
-	return b.forgeMgr.ForgeForInfo(ctx, &repo.Info{ForgeKind: info.ForgeKind, ForgeOwner: info.ForgeOwner, ForgeRepo: info.ForgeRepo})
+	return b.forgeMgr.ForgeForInfo(ctx, &repo.Repository{ForgeKind: info.ForgeKind, ForgeOwner: info.ForgeOwner, ForgeRepo: info.ForgeRepo})
 }
 
 func (b *testCIBackend) CreateTask(context.Context, task.CreateRequest) (string, error) {
 	return "", nil
 }
 
-func (b *testCIBackend) GetWorkspace(relPath string) (*repowork.Workspace, bool) {
-	return b.taskMgr.Workspaces.Workspace(relPath)
+func (b *testCIBackend) GetCheckout(relPath string) (*repo.Checkout, bool) {
+	return b.taskMgr.Checkouts.Checkout(relPath)
 }
 
 func (b *testCIBackend) SetTaskMonitorBranch(entry ci.TaskEntry, branch string) {
@@ -60,7 +58,7 @@ func (b *testCIBackend) SetTaskMonitorBranch(entry ci.TaskEntry, branch string) 
 }
 
 func (b *testCIBackend) RepoInfoFor(relPath string) ci.RepoInfo {
-	r, ok := b.repoSvc.Repos.InfoFor(relPath)
+	r, ok := b.repoSvc.Repositories.Repository(relPath)
 	if !ok {
 		return ci.RepoInfo{}
 	}
@@ -169,7 +167,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 	t.Run("updates CI status when SHA matches HEAD", func(t *testing.T) {
 		t.Parallel()
 		s := minimalRouter(t)
-		s.repoSvc.Repos.Add(&repo.Info{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"})
+		s.repoSvc.Repositories.Register(&repo.Repository{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"}, &repo.Checkout{})
 		s.forgeMgr.SetGitHubApp(&stubAppClient{forgeClient: &stubForge{headSHA: "abc123", checkRuns: successRuns}})
 
 		s.webhooks.handleCheckSuiteEvent(t.Context(), &github.CheckSuiteEvent{
@@ -192,7 +190,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 	t.Run("ignores out-of-order delivery when SHA is not HEAD", func(t *testing.T) {
 		t.Parallel()
 		s := minimalRouter(t)
-		s.repoSvc.Repos.Add(&repo.Info{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"})
+		s.repoSvc.Repositories.Register(&repo.Repository{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"}, &repo.Checkout{})
 		// HEAD is now "newsha"; the webhook carries "oldsha".
 		s.forgeMgr.SetGitHubApp(&stubAppClient{forgeClient: &stubForge{headSHA: "newsha", checkRuns: failureRuns}})
 
@@ -490,9 +488,9 @@ func minimalRouter(t *testing.T) *testRouter {
 	ctx := t.Context()
 	backend := &mdruntime.Backend{}
 	runtimeRouter := newTestRuntime(t, backend)
-	workspaceRegistry := repowork.NewRegistry(ctx, nil)
-	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: ctx, Runtimes: runtimeRouter, Workspaces: workspaceRegistry})
-	repoSvc := newTestRepoService(t, "", repo.New(nil), workspaceRegistry)
+	checkoutRegistry := repo.NewRegistry(ctx, nil)
+	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: ctx, Runtimes: runtimeRouter, Checkouts: checkoutRegistry})
+	repoSvc := newTestRepoService(t, "", checkoutRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 	fm := forgemgr.New("", "", nil)
 	prefs := newTestPrefs(t)

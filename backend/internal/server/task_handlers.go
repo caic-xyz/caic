@@ -22,7 +22,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
-	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
@@ -39,7 +39,7 @@ import (
 type taskHandlers struct {
 	replay     *ReplayPublisher
 	taskMgr    *taskmgr.Manager
-	repoSvc    *repomgr.Service
+	repoSvc    *repo.Service
 	repoStatus *ci.RepoStatusStore
 	forgeMgr   *forgemgr.Manager
 	ciSvc      *ci.Service
@@ -325,7 +325,7 @@ func shouldReplayHistoryFromDisk(state task.State, lt *task.LoadedTask) bool {
 // iteration it sends a full snapshot; thereafter it sends only upsert/delete
 // events for changed or removed tasks. It pushes immediately when a
 // server-handled mutation fires the changed channel, and falls back to a
-// 2-second ticker to catch workspace-internal state transitions.
+// 2-second ticker to catch checkout-internal state transitions.
 func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 	controller := http.NewResponseController(w)
 
@@ -373,7 +373,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 		// loop emits the newer state instead of missing the transition.
 		ch := h.taskMgr.Changed()
 		out := h.taskSvc.taskListSnapshot(ctx)
-		repoList := repoListFromSnapshot(h.repoSvc.Repos.Snapshot(), h.repoStatus)
+		repoList := repoListFromSnapshot(h.repoSvc.Repositories.Repositories(), h.repoStatus)
 		var newWarnings = h.warnings.Since(lastWarnTime)
 
 		reposJSON, err := json.Marshal(repoList)

@@ -24,8 +24,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
-	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
-	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
@@ -179,18 +177,18 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 	if err != nil {
 		return "", "", nil, err
 	}
-	workspaceRegistry := repowork.NewRegistry(ctx, nil)
+	checkoutRegistry := repo.NewRegistry(ctx, nil)
 	taskMgr, err := taskmgr.New(taskmgr.Config{
 		ServerCtx:           ctx,
 		Runtimes:            runtimeRouter,
-		Workspaces:          workspaceRegistry,
+		Checkouts:           checkoutRegistry,
 		RuntimeStartTimeout: time.Hour,
 		TerminalReplay:      replayPublisher.Publish,
 	})
 	if err != nil {
 		return "", "", nil, fmt.Errorf("task manager: %w", err)
 	}
-	repoSvc, err := repomgr.NewService("", repo.New(nil), workspaceRegistry)
+	repoSvc, err := repo.NewService("", checkoutRegistry)
 	if err != nil {
 		return "", "", nil, fmt.Errorf("repository service: %w", err)
 	}

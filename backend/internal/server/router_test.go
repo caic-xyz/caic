@@ -33,8 +33,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
-	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
-	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
@@ -68,8 +66,8 @@ func newTestPrefs(t testing.TB) *preferences.Store {
 // testRouter bundles a Router with the dependencies tests poke directly. The
 // production Router exposes these only through handler concerns; the wrapper
 // keeps test access ergonomic without re-adding fields to Router.
-func newRouterTestWorkspace(t testing.TB, baseBranch, dir string) *repowork.Workspace {
-	return &repowork.Workspace{
+func newRouterTestCheckout(t testing.TB, baseBranch, dir string) *repo.Checkout {
+	return &repo.Checkout{
 		BaseBranch: baseBranch,
 		Dir:        dir,
 		RepoName:   filepath.Base(dir),
@@ -82,7 +80,7 @@ type testRouter struct {
 	*Router
 
 	taskMgr               *taskmgr.Manager
-	repoSvc               *repomgr.Service
+	repoSvc               *repo.Service
 	repoStatus            *ci.RepoStatusStore
 	prefs                 *preferences.Store
 	forgeMgr              *forgemgr.Manager
@@ -122,10 +120,10 @@ func newTestTaskManager(t testing.TB, cfg taskmgr.Config) *taskmgr.Manager { //n
 	return m
 }
 
-func newTestRepoService(t testing.TB, absRoot string, repos *repo.Registry, workspaces *repowork.Registry) *repomgr.Service {
-	s, err := repomgr.NewService(absRoot, repos, workspaces)
+func newTestRepoService(t testing.TB, absRoot string, repositories *repo.Registry) *repo.Service {
+	s, err := repo.NewService(absRoot, repositories)
 	if err != nil {
-		t.Fatalf("repomgr.NewService: %v", err)
+		t.Fatalf("repo.NewService: %v", err)
 	}
 	return s
 }
@@ -145,9 +143,9 @@ func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testR
 	}
 	backend := &runtimetest.FakeBackend{}
 	runtimeRouter := newTestRuntime(t, backend)
-	workspaceRegistry := repowork.NewRegistry(t.Context(), runtimeRouter)
-	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Backends: backends, Workspaces: workspaceRegistry})
-	repoSvc := newTestRepoService(t, "", repo.New(nil), workspaceRegistry)
+	checkoutRegistry := repo.NewRegistry(t.Context(), runtimeRouter)
+	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Backends: backends, Checkouts: checkoutRegistry})
+	repoSvc := newTestRepoService(t, "", checkoutRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
 	forgeManager := forgemgr.New("", "", nil)
@@ -179,9 +177,9 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 	}
 	backend := &runtimetest.FakeBackend{}
 	runtimeRouter := newTestRuntime(t, backend)
-	workspaceRegistry := repowork.NewRegistry(t.Context(), runtimeRouter)
-	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Workspaces: workspaceRegistry})
-	repoSvc := newTestRepoService(t, "", repo.New(nil), workspaceRegistry)
+	checkoutRegistry := repo.NewRegistry(t.Context(), runtimeRouter)
+	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry})
+	repoSvc := newTestRepoService(t, "", checkoutRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
 	forgeManager := forgemgr.New("", "", nil)
@@ -223,10 +221,10 @@ func TestNew(t *testing.T) {
 	t.Parallel()
 	validDependencies := func(t *testing.T) Dependencies {
 		runtimeRouter := newTestRuntime(t, &runtimetest.FakeBackend{})
-		workspaceRegistry := repowork.NewRegistry(t.Context(), runtimeRouter)
-		taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Workspaces: workspaceRegistry})
+		checkoutRegistry := repo.NewRegistry(t.Context(), runtimeRouter)
+		taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry})
 		return Dependencies{
-			RepoSvc:         newTestRepoService(t, "", repo.New(nil), workspaceRegistry),
+			RepoSvc:         newTestRepoService(t, "", checkoutRegistry),
 			RepoStatus:      ci.NewRepoStatusStore(),
 			Runtimes:        runtimeRouter,
 			TaskMgr:         taskMgr,
@@ -248,10 +246,10 @@ func TestNew(t *testing.T) {
 	t.Run("missing repos", func(t *testing.T) {
 		t.Parallel()
 		runtimeRouter := newTestRuntime(t, &runtimetest.FakeBackend{})
-		workspaceRegistry := repowork.NewRegistry(t.Context(), runtimeRouter)
+		checkoutRegistry := repo.NewRegistry(t.Context(), runtimeRouter)
 		_, err := New(t.Context(), Dependencies{
 			Runtimes:    runtimeRouter,
-			TaskMgr:     newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Workspaces: workspaceRegistry}),
+			TaskMgr:     newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry}),
 			Preferences: newTestPrefs(t),
 			RepoStatus:  ci.NewRepoStatusStore(),
 		})
@@ -263,11 +261,11 @@ func TestNew(t *testing.T) {
 	t.Run("missing repo status", func(t *testing.T) {
 		t.Parallel()
 		runtimeRouter := newTestRuntime(t, &runtimetest.FakeBackend{})
-		workspaceRegistry := repowork.NewRegistry(t.Context(), runtimeRouter)
+		checkoutRegistry := repo.NewRegistry(t.Context(), runtimeRouter)
 		_, err := New(t.Context(), Dependencies{
-			RepoSvc:     newTestRepoService(t, "", repo.New(nil), workspaceRegistry),
+			RepoSvc:     newTestRepoService(t, "", checkoutRegistry),
 			Runtimes:    runtimeRouter,
-			TaskMgr:     newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Workspaces: workspaceRegistry}),
+			TaskMgr:     newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry}),
 			Preferences: newTestPrefs(t),
 		})
 		if err == nil || err.Error() != "repo status store is required" {
@@ -278,12 +276,12 @@ func TestNew(t *testing.T) {
 	t.Run("missing forge manager", func(t *testing.T) {
 		t.Parallel()
 		runtimeRouter := newTestRuntime(t, &runtimetest.FakeBackend{})
-		workspaceRegistry := repowork.NewRegistry(t.Context(), runtimeRouter)
+		checkoutRegistry := repo.NewRegistry(t.Context(), runtimeRouter)
 		_, err := New(t.Context(), Dependencies{
-			RepoSvc:     newTestRepoService(t, "", repo.New(nil), workspaceRegistry),
+			RepoSvc:     newTestRepoService(t, "", checkoutRegistry),
 			RepoStatus:  ci.NewRepoStatusStore(),
 			Runtimes:    runtimeRouter,
-			TaskMgr:     newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Workspaces: workspaceRegistry}),
+			TaskMgr:     newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry}),
 			Preferences: newTestPrefs(t),
 		})
 		if err == nil || err.Error() != "forge manager is required" {
@@ -421,21 +419,21 @@ func loadPurgedTasksForTest(s *testRouter, logDir string) error {
 	return s.taskMgr.LoadPurgedTasks(logs)
 }
 
-type workspaceConstructionTestFixture struct {
+type checkoutConstructionTestFixture struct {
 	server   *testRouter
 	logDir   string
 	cacheDir string
 	runtimes *runtime.Router
 }
 
-func newWorkspaceConstructionTestServer(t *testing.T, root string) workspaceConstructionTestFixture {
+func newCheckoutConstructionTestServer(t *testing.T, root string) checkoutConstructionTestFixture {
 	harnessEnv := map[string][]string{string(harness.Codex): {"CODEX_HOME=/tmp/codex"}}
 	backend := &mdruntime.Backend{HarnessEnv: harnessEnv}
 	runtimeRouter := newTestRuntime(t, backend)
 	backends := map[harness.Name]agent.Backend{harness.Codex: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}}
 	logDir := filepath.Join(t.TempDir(), "logs")
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	workspaceRegistry := repowork.NewRegistry(t.Context(), runtimeRouter)
+	checkoutRegistry := repo.NewRegistry(t.Context(), runtimeRouter)
 	taskMgr := newTestTaskManager(t, taskmgr.Config{
 		ServerCtx:  t.Context(),
 		LogDir:     logDir,
@@ -443,9 +441,9 @@ func newWorkspaceConstructionTestServer(t *testing.T, root string) workspaceCons
 		Runtimes:   runtimeRouter,
 		Backends:   backends,
 		HarnessEnv: harnessEnv,
-		Workspaces: workspaceRegistry,
+		Checkouts:  checkoutRegistry,
 	})
-	repoSvc := newTestRepoService(t, root, repo.New(nil), workspaceRegistry)
+	repoSvc := newTestRepoService(t, root, checkoutRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
 	s, err := New(t.Context(), Dependencies{
@@ -462,7 +460,7 @@ func newWorkspaceConstructionTestServer(t *testing.T, root string) workspaceCons
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return workspaceConstructionTestFixture{
+	return checkoutConstructionTestFixture{
 		server:   &testRouter{Router: s, taskMgr: taskMgr, repoSvc: repoSvc, repoStatus: repoStatus, prefs: prefs},
 		logDir:   logDir,
 		cacheDir: cacheDir,
@@ -470,28 +468,28 @@ func newWorkspaceConstructionTestServer(t *testing.T, root string) workspaceCons
 	}
 }
 
-func newTestRepoWatcher(t *testing.T, root string, s *testRouter) *repomgr.Watcher {
-	return repomgr.NewWatcher(&repomgr.WatcherConfig{
+func newTestRepoWatcher(t *testing.T, root string, s *testRouter) *repo.Watcher {
+	return repo.NewWatcher(&repo.WatcherConfig{
 		Ctx:     t.Context(),
 		AbsRoot: root,
-		Repos:   s.repoSvc.Repos.Snapshot,
+		Repos:   s.repoSvc.Repositories.Repositories,
 		RelPath: s.repoSvc.RelPath,
-		WorkspaceExists: func(relPath string) bool {
-			_, ok := s.repoSvc.Workspaces.Workspace(relPath)
+		CheckoutExists: func(relPath string) bool {
+			_, ok := s.repoSvc.Repositories.Checkout(relPath)
 			return ok
 		},
 		OnDiscovered: func(ctx context.Context, abs string) {
-			result, err := s.repoSvc.DiscoverWorkspace(ctx, abs)
+			result, err := s.repoSvc.DiscoverCheckout(ctx, abs)
 			if err != nil {
-				t.Errorf("DiscoverWorkspace(%q): %v", abs, err)
+				t.Errorf("DiscoverCheckout(%q): %v", abs, err)
 				return
 			}
-			if _, ok := s.repoSvc.Workspaces.Workspace(result.Info.RelPath); ok {
+			if _, ok := s.repoSvc.Repositories.Checkout(result.Repository.RelPath); ok {
 				return
 			}
-			s.repoSvc.RegisterWorkspace(&result, nil)
+			s.repoSvc.RegisterCheckout(&result, nil)
 		},
-		OnRemoved: s.repoSvc.DeregisterWorkspace,
+		OnRemoved: s.repoSvc.DeregisterCheckout,
 	})
 }
 
@@ -521,11 +519,11 @@ func runServerGit(t *testing.T, dir string, args ...string) {
 func TestCloneRepo(t *testing.T) {
 	t.Parallel()
 
-	t.Run("valid workspace construction and watcher overlap", func(t *testing.T) {
+	t.Run("valid checkout construction and watcher overlap", func(t *testing.T) {
 		t.Parallel()
 		root := t.TempDir()
 		source := initCloneSourceRepo(t)
-		fixture := newWorkspaceConstructionTestServer(t, root)
+		fixture := newCheckoutConstructionTestServer(t, root)
 		s := fixture.server
 
 		clonedRepo, err := s.serverHandlers.cloneRepo(t.Context(), &v1.CloneRepoReq{URL: source, Path: "./cloned"})
@@ -535,33 +533,33 @@ func TestCloneRepo(t *testing.T) {
 		if clonedRepo.Path != "cloned" {
 			t.Fatalf("repo path = %q, want cloned", clonedRepo.Path)
 		}
-		workspace, ok := s.taskMgr.Workspaces.Workspace("cloned")
+		checkout, ok := s.taskMgr.Checkouts.Checkout("cloned")
 		if !ok {
-			t.Fatal("cloned workspace not registered")
+			t.Fatal("cloned checkout not registered")
 		}
-		if workspace.RepoName != "cloned" {
-			t.Fatalf("RepoName = %q, want cloned", workspace.RepoName)
+		if checkout.RepoName != "cloned" {
+			t.Fatalf("RepoName = %q, want cloned", checkout.RepoName)
 		}
-		if workspace.Dir != filepath.Join(root, "cloned") {
-			t.Fatalf("Dir = %q, want cloned path", workspace.Dir)
+		if checkout.Dir != filepath.Join(root, "cloned") {
+			t.Fatalf("Dir = %q, want cloned path", checkout.Dir)
 		}
-		if workspace.Runtimes != fixture.runtimes {
-			t.Fatal("workspace instance backend was not wired")
+		if checkout.Runtimes != fixture.runtimes {
+			t.Fatal("checkout instance backend was not wired")
 		}
 		if len(s.taskMgr.Backends) == 0 {
 			t.Fatal("manager backends were not initialized")
 		}
 
 		newTestRepoWatcher(t, root, s).SyncReposInDir(t.Context(), root)
-		if got := s.repoSvc.Repos.Snapshot(); len(got) != 1 || got[0].RelPath != "cloned" {
+		if got := s.repoSvc.Repositories.Repositories(); len(got) != 1 || got[0].RelPath != "cloned" {
 			t.Fatalf("repo registry after watcher sync = %+v, want one cloned repo", got)
 		}
-		after, ok := s.taskMgr.Workspaces.Workspace("cloned")
+		after, ok := s.taskMgr.Checkouts.Checkout("cloned")
 		if !ok {
-			t.Fatal("workspace disappeared after watcher sync")
+			t.Fatal("checkout disappeared after watcher sync")
 		}
-		if after != workspace {
-			t.Fatal("watcher replaced an already registered clone workspace")
+		if after != checkout {
+			t.Fatal("watcher replaced an already registered clone checkout")
 		}
 	})
 
@@ -575,7 +573,7 @@ func TestCloneRepo(t *testing.T) {
 		if err := os.RemoveAll(submodule); err != nil {
 			t.Fatalf("remove submodule source: %v", err)
 		}
-		s := newWorkspaceConstructionTestServer(t, root).server
+		s := newCheckoutConstructionTestServer(t, root).server
 
 		if _, err := s.serverHandlers.cloneRepo(t.Context(), &v1.CloneRepoReq{URL: parent, Path: "broken"}); err == nil {
 			t.Fatal("cloneRepo succeeded, want submodule clone failure")
@@ -583,11 +581,11 @@ func TestCloneRepo(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(root, "broken")); !os.IsNotExist(err) {
 			t.Fatalf("partial clone path still exists: %v", err)
 		}
-		if got := s.repoSvc.Repos.Snapshot(); len(got) != 0 {
+		if got := s.repoSvc.Repositories.Repositories(); len(got) != 0 {
 			t.Fatalf("repo registry = %+v, want empty after failed clone", got)
 		}
-		if _, ok := s.taskMgr.Workspaces.Workspace("broken"); ok {
-			t.Fatal("failed clone registered an workspace")
+		if _, ok := s.taskMgr.Checkouts.Checkout("broken"); ok {
+			t.Fatal("failed clone registered an checkout")
 		}
 	})
 }
@@ -732,7 +730,7 @@ func TestHandlePurge(t *testing.T) {
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
 		tk.SetState(task.StateWaiting)
 		s := newTestRouter(t, nil)
-		s.taskMgr.Workspaces.RegisterWorkspace("r", newRouterTestWorkspace(t, "main", t.TempDir()))
+		s.taskMgr.Checkouts.RegisterCheckout("r", newRouterTestCheckout(t, "main", t.TempDir()))
 		insertTestTask(t, s, "t1", tk)
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks/t1/purge", http.NoBody)
@@ -760,7 +758,7 @@ func TestHandlePurge(t *testing.T) {
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
 		tk.SetState(task.StateRunning)
 		s := newTestRouter(t, nil)
-		s.taskMgr.Workspaces.RegisterWorkspace("r", newRouterTestWorkspace(t, "main", t.TempDir()))
+		s.taskMgr.Checkouts.RegisterCheckout("r", newRouterTestCheckout(t, "main", t.TempDir()))
 		insertTestTask(t, s, "t1", tk)
 
 		// Use an already-cancelled context to simulate shutdown scenario
@@ -783,7 +781,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("ReturnsID", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
-		s.taskMgr.Workspaces.RegisterWorkspace("myrepo", newRouterTestWorkspace(t, "main", t.TempDir()))
+		s.taskMgr.Checkouts.RegisterCheckout("myrepo", newRouterTestCheckout(t, "main", t.TempDir()))
 		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test task"},"repos":[{"name":"myrepo"}],"harness":"claude","model":"m1"}`)
@@ -847,7 +845,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("UnknownHarness", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		s.taskMgr.Workspaces.RegisterWorkspace("myrepo", newRouterTestWorkspace(t, "main", t.TempDir()))
+		s.taskMgr.Checkouts.RegisterCheckout("myrepo", newRouterTestCheckout(t, "main", t.TempDir()))
 		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"nonexistent"}`)
@@ -870,7 +868,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("InvalidModel", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Codex: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
-		s.taskMgr.Workspaces.RegisterWorkspace("myrepo", newRouterTestWorkspace(t, "main", t.TempDir()))
+		s.taskMgr.Checkouts.RegisterCheckout("myrepo", newRouterTestCheckout(t, "main", t.TempDir()))
 		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"codex","model":"nonexistent"}`)
@@ -893,7 +891,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("WithImage", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
-		s.taskMgr.Workspaces.RegisterWorkspace("myrepo", newRouterTestWorkspace(t, "main", t.TempDir()))
+		s.taskMgr.Checkouts.RegisterCheckout("myrepo", newRouterTestCheckout(t, "main", t.TempDir()))
 		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
 		// Set docker image in user preferences.
@@ -936,7 +934,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("WithCachePreferences", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
-		s.taskMgr.Workspaces.RegisterWorkspace("myrepo", newRouterTestWorkspace(t, "main", t.TempDir()))
+		s.taskMgr.Checkouts.RegisterCheckout("myrepo", newRouterTestCheckout(t, "main", t.TempDir()))
 		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
 			p.Settings.WellKnownCaches = map[string]bool{"go-mod": false, "npm": true}
 			p.Settings.CacheMappings = []preferences.CacheMapping{
@@ -1011,7 +1009,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("TaskInfo", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
-		s.taskMgr.Workspaces.RegisterWorkspace("myrepo", newRouterTestWorkspace(t, "main", t.TempDir()))
+		s.taskMgr.Checkouts.RegisterCheckout("myrepo", newRouterTestCheckout(t, "main", t.TempDir()))
 		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
 			p.Settings.BaseImage = "ghcr.io/my/image:v1"
 			p.Settings.ContainerPlatform = "linux/amd64"
@@ -1065,7 +1063,7 @@ func TestHandleCreateTask(t *testing.T) {
 		// Regression: creating a task with no repos panicked with
 		// "makeslice: cap out of range" because len(req.Repos)-1 == -1.
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
-		s.taskMgr.Workspaces.RegisterWorkspace("", newRouterTestWorkspace(t, "", ""))
+		s.taskMgr.Checkouts.RegisterCheckout("", newRouterTestCheckout(t, "", ""))
 		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"no repo task"},"harness":"claude","model":"m1","effort":"high"}`)
@@ -1098,7 +1096,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("StaleSavedRuntimeUsesDefault", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}})
-		s.taskMgr.Workspaces.RegisterWorkspace("", newRouterTestWorkspace(t, "", ""))
+		s.taskMgr.Checkouts.RegisterCheckout("", newRouterTestCheckout(t, "", ""))
 		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
 			p.Settings.RuntimeName = "ghost"
 		}); err != nil {
@@ -1123,7 +1121,7 @@ func TestHandleCreateTask(t *testing.T) {
 		}
 	})
 
-	t.Run("NoRepoWorkspaceNoBackend", func(t *testing.T) {
+	t.Run("NoRepoCheckoutNoBackend", func(t *testing.T) {
 		t.Parallel()
 		// Creating a no-repo task with no registered harness backends returns
 		// a clear 400 instead of panicking.
@@ -1230,10 +1228,10 @@ func TestSignalProcess(t *testing.T) {
 func TestHandleListRepos(t *testing.T) {
 	t.Parallel()
 	s := newTestRouter(t, nil)
-	s.repoSvc = newTestRepoService(t, "", repo.New([]repo.Info{
-		{RelPath: "org/repoA", AbsPath: "/src/org/repoA", BaseBranch: "main"},
-		{RelPath: "repoB", AbsPath: "/src/repoB", BaseBranch: "develop"},
-	}), repowork.NewRegistry(t.Context(), nil))
+	repositories := repo.NewRegistry(t.Context(), nil)
+	repositories.Register(&repo.Repository{RelPath: "org/repoA", AbsPath: "/src/org/repoA", BaseBranch: "main"}, &repo.Checkout{})
+	repositories.Register(&repo.Repository{RelPath: "repoB", AbsPath: "/src/repoB", BaseBranch: "develop"}, &repo.Checkout{})
+	s.repoSvc = newTestRepoService(t, "", repositories)
 	s.serverHandlers.repoSvc = s.repoSvc
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/server/repos", http.NoBody)

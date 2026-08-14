@@ -1,6 +1,6 @@
 // Validates task preconditions to prevent unsafe or unintended agent runs.
 
-package repowork
+package repo
 
 import (
 	"bufio"

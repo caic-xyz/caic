@@ -8,37 +8,36 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/repo"
-	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
 )
 
-func newRepoWatcher(ctx context.Context, absRoot string, repoService *repomgr.Service, repoStatus *ci.RepoStatusStore) *repomgr.Watcher {
-	return repomgr.NewWatcher(&repomgr.WatcherConfig{
+func newRepoWatcher(ctx context.Context, absRoot string, repoService *repo.Service, repoStatus *ci.RepoStatusStore) *repo.Watcher {
+	return repo.NewWatcher(&repo.WatcherConfig{
 		Ctx:     ctx,
 		AbsRoot: absRoot,
-		Repos:   repoService.Repos.Snapshot,
+		Repos:   repoService.Repositories.Repositories,
 		RelPath: repoService.RelPath,
-		WorkspaceExists: func(relPath string) bool {
-			_, ok := repoService.Workspaces.Workspace(relPath)
+		CheckoutExists: func(relPath string) bool {
+			_, ok := repoService.Repositories.Checkout(relPath)
 			return ok
 		},
 		OnDiscovered: func(ctx context.Context, abs string) {
 			registerDiscoveredRepo(ctx, repoService, repoStatus, abs)
 		},
-		OnRemoved: repoService.DeregisterWorkspace,
+		OnRemoved: repoService.DeregisterCheckout,
 	})
 }
 
-func registerDiscoveredRepo(ctx context.Context, repoService *repomgr.Service, repoStatus *ci.RepoStatusStore, abs string) {
-	result, err := repoService.DiscoverWorkspace(ctx, abs)
+func registerDiscoveredRepo(ctx context.Context, repoService *repo.Service, repoStatus *ci.RepoStatusStore, abs string) {
+	result, err := repoService.DiscoverCheckout(ctx, abs)
 	if err != nil {
 		slog.WarnContext(ctx, "new repo: discovery failed", "path", abs, "err", err)
 		return
 	}
-	if _, ok := repoService.Workspaces.Workspace(result.Info.RelPath); ok {
+	if _, ok := repoService.Repositories.Checkout(result.Repository.RelPath); ok {
 		return
 	}
-	repoService.RegisterWorkspace(&result, moveRepoStatus(repoStatus))
-	slog.InfoContext(ctx, "discovered new repo", "path", result.Info.RelPath, "br", result.Info.BaseBranch)
+	repoService.RegisterCheckout(&result, moveRepoStatus(repoStatus))
+	slog.InfoContext(ctx, "discovered new repo", "path", result.Repository.RelPath, "br", result.Repository.BaseBranch)
 }
 
 func moveRepoStatus(repoStatus *ci.RepoStatusStore) func(repo.Move) {

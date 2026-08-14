@@ -78,7 +78,7 @@ format (Go 1.26 limitation). Only `trace.Log` / `trace.Logf` calls appear as
 | `POST /tasks/{id}/fork` goroutine | `trace.NewTask` | `task.fork:{src}->{dst}` |
 | `watchSession` goroutine | `trace.NewTask` | `session.watch:{id}` |
 
-### Task runner and workspace operations (`backend/internal/task/runner.go`, `backend/internal/task/repo_workspace.go`)
+### Task runner and checkout operations (`backend/internal/task/runner.go`, `backend/internal/repo/checkout.go`)
 
 | Method | Type | Name |
 |---|---|---|

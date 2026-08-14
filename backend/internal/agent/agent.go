@@ -4,7 +4,7 @@
 // # Message dispatch
 //
 // Conn.ReadMessages reads agent stdout and forwards parsed messages to
-// Options.MsgCh. The task workspace drains this channel in a separate
+// Options.MsgCh. The task checkout drains this channel in a separate
 // goroutine (startMessageDispatch) that performs blocking side-effects: git
 // fetch, diff stat, branch locking. The channel decouples the fast reader
 // from these slow operations — without it, a blocked git fetch would
@@ -22,7 +22,7 @@
 //
 // Flow 1 — One task is purged (user action or container death):
 //
-//	Server calls RepoWorkspace.Cleanup → Session.Stop writes \x00\n then closes
+//	Server calls Checkout.Cleanup → Session.Stop writes \x00\n then closes
 //	stdin → attach_client forwards sentinel through Unix socket, sees stdin
 //	EOF, exits → _client_reader sets shutdown_event → _shutdown_watchdog
 //	closes proc.stdin, sends SIGINT, escalates to SIGTERM/SIGKILL →

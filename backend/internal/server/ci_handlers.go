@@ -16,7 +16,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
-	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -34,7 +34,7 @@ type taskCreator interface {
 
 type ciHandlers struct {
 	taskMgr    *taskmgr.Manager
-	repoSvc    *repomgr.Service
+	repoSvc    *repo.Service
 	repoStatus *ci.RepoStatusStore
 	forgeMgr   *forgemgr.Manager
 	provider   genai.Provider
@@ -57,7 +57,7 @@ func (h *ciHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 	if p := t.Primary(); p != nil {
 		ciPrimaryName = p.Name
 	}
-	info, ok := h.repoSvc.Repos.InfoFor(ciPrimaryName)
+	info, ok := h.repoSvc.Repositories.Repository(ciPrimaryName)
 	if !ok {
 		writeError(w, api.BadRequest("no repo info found"))
 		return
@@ -110,7 +110,7 @@ func (h *ciHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 // It fetches CI logs via the forge, builds a rich prompt using ci.FailureSummary,
 // and creates a new agent task — the same path as the automated maybeAutoFix.
 func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Task, error) {
-	info, ok := h.repoSvc.Repos.InfoFor(req.Repo)
+	info, ok := h.repoSvc.Repositories.Repository(req.Repo)
 	if !ok {
 		return nil, api.BadRequest("repo not found")
 	}
@@ -180,7 +180,7 @@ func (h *ciHandlers) fixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.Status
 	if primary == nil {
 		return nil, api.BadRequest("task has no primary repo")
 	}
-	info, ok := h.repoSvc.Repos.InfoFor(primary.Name)
+	info, ok := h.repoSvc.Repositories.Repository(primary.Name)
 	if !ok {
 		return nil, api.BadRequest("repo not found")
 	}

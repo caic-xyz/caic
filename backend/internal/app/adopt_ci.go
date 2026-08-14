@@ -10,7 +10,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
-	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
@@ -21,12 +21,12 @@ type adoptedTaskWiring struct {
 	ciService *ci.Service
 	forgeMgr  *forgemgr.Manager
 	taskMgr   *taskmgr.Manager
-	repoSvc   *repomgr.Service
+	repoSvc   *repo.Service
 }
 
 // WireCIMonitoring sets up CI monitoring for an adopted task that has a PR.
 func (w *adoptedTaskWiring) WireCIMonitoring(ctx context.Context, at *taskmgr.AdoptedTask) {
-	ri, ok := w.repoSvc.Repos.InfoFor(at.RelPath)
+	ri, ok := w.repoSvc.Repositories.Repository(at.RelPath)
 	if !ok {
 		return
 	}
@@ -54,7 +54,7 @@ func (w *adoptedTaskWiring) WireCIMonitoring(ctx context.Context, at *taskmgr.Ad
 
 // LookupExternalPRForTask queries the forge for a PR matching the task's branch.
 func (w *adoptedTaskWiring) LookupExternalPRForTask(ctx context.Context, at *taskmgr.AdoptedTask) {
-	ri, ok := w.repoSvc.Repos.InfoFor(at.RelPath)
+	ri, ok := w.repoSvc.Repositories.Repository(at.RelPath)
 	if !ok {
 		return
 	}

@@ -31,8 +31,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
-	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
-	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/server"
@@ -263,13 +261,13 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		mdRuntimes[i].backend.Provider = provider
 	}
 
-	workspaceRegistry := repowork.NewRegistry(ctx, runtimes)
+	checkoutRegistry := repo.NewRegistry(ctx, runtimes)
 	taskMgr, err := taskmgr.New(taskmgr.Config{
 		ServerCtx:           ctx,
 		LogDir:              logDir,
 		CacheDir:            cfg.Dirs.CacheDir,
 		Runtimes:            runtimes,
-		Workspaces:          workspaceRegistry,
+		Checkouts:           checkoutRegistry,
 		Backends:            agentBackends,
 		HarnessEnv:          cfg.Agent.HarnessEnv,
 		RuntimeMetadata:     cfg.Runtime.Metadata,
@@ -314,7 +312,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		return nil, err
 	}
 
-	repoService, err := repomgr.NewService(absRoot, repo.New(nil), workspaceRegistry)
+	repoService, err := repo.NewService(absRoot, checkoutRegistry)
 	if err != nil {
 		return nil, fmt.Errorf("repository service: %w", err)
 	}
@@ -387,23 +385,23 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		return nil, err
 	}
 
-	results := make([]repomgr.InitResult, len(repoRes.paths))
+	results := make([]repo.InitResult, len(repoRes.paths))
 	var wg sync.WaitGroup
 	for i, abs := range repoRes.paths {
 		wg.Go(func() {
-			defer trace.StartRegion(ctx, "repo-workspace-init").End()
-			result, err := repoService.DiscoverWorkspace(ctx, abs)
+			defer trace.StartRegion(ctx, "repo-checkout-init").End()
+			result, err := repoService.DiscoverCheckout(ctx, abs)
 			if err != nil {
 				slog.WarnContext(ctx, "skipping repo", "path", abs, "err", err)
 				return
 			}
 			results[i] = result
-			slog.DebugContext(ctx, "discovered repo", "path", result.Info.RelPath, "br", result.Info.BaseBranch)
+			slog.DebugContext(ctx, "discovered repo", "path", result.Repository.RelPath, "br", result.Repository.BaseBranch)
 		})
 	}
 	wg.Wait()
 	for i := range results {
-		repoService.RegisterWorkspace(&results[i], moveRepoStatus(repoStatus))
+		repoService.RegisterCheckout(&results[i], moveRepoStatus(repoStatus))
 	}
 
 	taskMgr.Start()
@@ -416,7 +414,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	phase3.End()
 
 	phase4 := trace.StartRegion(ctx, "adopt-runtime-instances")
-	adopted, err := taskMgr.AdoptInstances(ctx, adoptionRepos(repoService.Repos.Snapshot()), instanceRes.instances, liveLogs)
+	adopted, err := taskMgr.AdoptInstances(ctx, adoptionRepos(repoService.Repositories.Repositories()), instanceRes.instances, liveLogs)
 	if err != nil {
 		slog.ErrorContext(ctx, "adopt runtime instances failed; affected instances will remain unmanaged", "err", err)
 	}
@@ -522,7 +520,7 @@ func initRuntimeSystem(ctx context.Context, cfg *server.Config) (*runtime.Router
 	return runtimeRouter, mdRuntimes, nil
 }
 
-func adoptionRepos(in []repo.Info) []taskmgr.AdoptRepo {
+func adoptionRepos(in []repo.Repository) []taskmgr.AdoptRepo {
 	out := make([]taskmgr.AdoptRepo, len(in))
 	for i := range in {
 		r := &in[i]

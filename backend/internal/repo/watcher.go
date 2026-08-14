@@ -1,5 +1,6 @@
-// Package repomgr manages discovered git repositories and their task workspaces.
-package repomgr
+// Watcher reconciles filesystem discovery with the repository registry.
+
+package repo
 
 import (
 	"context"
@@ -11,8 +12,6 @@ import (
 	"time"
 
 	"github.com/caic-xyz/md/git"
-
-	"github.com/caic-xyz/caic/backend/internal/repo"
 )
 
 // DiscoveryDepth is the maximum directory levels below AbsRoot that
@@ -25,29 +24,29 @@ type WatcherConfig struct {
 	Ctx     context.Context
 	AbsRoot string
 	// TODO: I'm unhappy with this design.
-	Repos           func() []repo.Info
-	RelPath         func(string) string
-	WorkspaceExists func(string) bool
-	OnDiscovered    func(context.Context, string)
-	OnRemoved       func(string)
-	Interval        time.Duration
-	MaxDepth        int
+	Repos          func() []Repository
+	RelPath        func(string) string
+	CheckoutExists func(string) bool
+	OnDiscovered   func(context.Context, string)
+	OnRemoved      func(string)
+	Interval       time.Duration
+	MaxDepth       int
 }
 
-// Watcher polls the repository root and reconciles the workspace registry.
+// Watcher polls the repository root and reconciles current checkouts.
 type Watcher struct {
 	// Immutable.
 	log     *slog.Logger
 	ctx     context.Context
 	absRoot string
 	// TODO: I'm unhappy with this design.
-	repos           func() []repo.Info
-	relPath         func(string) string
-	workspaceExists func(string) bool
-	onDiscovered    func(context.Context, string)
-	onRemoved       func(string)
-	interval        time.Duration
-	maxDepth        int
+	repos          func() []Repository
+	relPath        func(string) string
+	checkoutExists func(string) bool
+	onDiscovered   func(context.Context, string)
+	onRemoved      func(string)
+	interval       time.Duration
+	maxDepth       int
 }
 
 // NewWatcher creates a repository watcher.
@@ -60,9 +59,9 @@ func NewWatcher(c *WatcherConfig) *Watcher {
 	if maxDepth == 0 {
 		maxDepth = DiscoveryDepth
 	}
-	workspaceExists := c.WorkspaceExists
-	if workspaceExists == nil {
-		workspaceExists = func(string) bool { return false }
+	checkoutExists := c.CheckoutExists
+	if checkoutExists == nil {
+		checkoutExists = func(string) bool { return false }
 	}
 	onDiscovered := c.OnDiscovered
 	if onDiscovered == nil {
@@ -73,16 +72,16 @@ func NewWatcher(c *WatcherConfig) *Watcher {
 		onRemoved = func(string) {}
 	}
 	return &Watcher{
-		log:             slog.Default().With(slog.String("cmp", "repo-watcher"), slog.String("root", c.AbsRoot)),
-		ctx:             c.Ctx,
-		absRoot:         c.AbsRoot,
-		repos:           c.Repos,
-		relPath:         c.RelPath,
-		workspaceExists: workspaceExists,
-		onDiscovered:    onDiscovered,
-		onRemoved:       onRemoved,
-		interval:        interval,
-		maxDepth:        maxDepth,
+		log:            slog.Default().With(slog.String("cmp", "repo-watcher"), slog.String("root", c.AbsRoot)),
+		ctx:            c.Ctx,
+		absRoot:        c.AbsRoot,
+		repos:          c.Repos,
+		relPath:        c.RelPath,
+		checkoutExists: checkoutExists,
+		onDiscovered:   onDiscovered,
+		onRemoved:      onRemoved,
+		interval:       interval,
+		maxDepth:       maxDepth,
 	}
 }
 
@@ -143,7 +142,7 @@ func (w *Watcher) SyncReposInDir(ctx context.Context, dir string) {
 	for _, abs := range newPaths {
 		wg.Go(func() {
 			rel := w.relPath(abs)
-			if w.workspaceExists(rel) {
+			if w.checkoutExists(rel) {
 				return
 			}
 			w.onDiscovered(ctx, abs)

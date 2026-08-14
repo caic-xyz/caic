@@ -21,7 +21,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
-	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
@@ -43,7 +43,7 @@ type taskService struct {
 	ctx       context.Context
 	taskMgr   *taskmgr.Manager
 	prefs     *preferences.Store
-	repoMgr   *repomgr.Service
+	repoMgr   *repo.Service
 	forgeMgr  *forgemgr.Manager
 	ciSvc     *ci.Service
 	authStore *auth.Store
@@ -105,13 +105,13 @@ func (s *taskService) taskListSnapshot(ctx context.Context) []v1.Task {
 }
 
 // taskDTO resolves server-owned task data before projecting it to the API.
-func taskDTO(ctx context.Context, entry *taskmgr.Entry, taskMgr *taskmgr.Manager, repoSvc *repomgr.Service, authStore *auth.Store) (v1.Task, error) {
+func taskDTO(ctx context.Context, entry *taskmgr.Entry, taskMgr *taskmgr.Manager, repoSvc *repo.Service, authStore *auth.Store) (v1.Task, error) {
 	t := entry.Task()
 	snap := t.Snapshot()
 
 	repos := make([]v1.TaskRepo, len(snap.Repos))
 	for i, repo := range snap.Repos {
-		if info, ok := repoSvc.Repos.InfoFor(repo.Name); ok {
+		if info, ok := repoSvc.Repositories.Repository(repo.Name); ok {
 			forgeKind, err := apiconv.RepoForge(info.ForgeKind)
 			if err != nil {
 				return v1.Task{}, fmt.Errorf("task %s repo %q forge: %w", t.ID, repo.Name, err)
@@ -134,7 +134,7 @@ func taskDTO(ctx context.Context, entry *taskmgr.Entry, taskMgr *taskmgr.Manager
 	var contextWindowLimit int
 	if snap.ContextWindowLimit == 0 {
 		if primary := t.Primary(); primary != nil {
-			if _, ok := taskMgr.Workspaces.Workspace(primary.Name); ok {
+			if _, ok := taskMgr.Checkouts.Checkout(primary.Name); ok {
 				if b := taskMgr.Backends[t.Harness]; b != nil {
 					contextWindowLimit = b.ContextWindowLimit(snap.Model)
 				}
@@ -180,7 +180,7 @@ func (s *taskService) getTaskInfo(ctx context.Context, entry *taskmgr.Entry, _ *
 	for _, repo := range snap.Repos {
 		var remoteURL string
 		var forgeKind v1.Forge
-		if info, ok := s.repoMgr.Repos.InfoFor(repo.Name); ok {
+		if info, ok := s.repoMgr.Repositories.Repository(repo.Name); ok {
 			remoteURL = git.RemoteToHTTPS(info.Remote)
 			var err error
 			forgeKind, err = apiconv.RepoForge(info.ForgeKind)
@@ -685,11 +685,11 @@ func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, path s
 	if p := t.Primary(); p != nil {
 		diffPrimaryName = p.Name
 	}
-	workspace, ok := s.taskMgr.Workspaces.Workspace(diffPrimaryName)
+	checkout, ok := s.taskMgr.Checkouts.Checkout(diffPrimaryName)
 	if !ok {
 		return nil, api.InternalError("unknown repo")
 	}
-	diff, err := workspace.DiffContent(ctx, t, path)
+	diff, err := checkout.DiffContent(ctx, t, path)
 	if err != nil {
 		return nil, api.InternalError(err.Error())
 	}
@@ -725,7 +725,7 @@ func (s *taskService) syncTask(ctx context.Context, entry *taskmgr.Entry, req *v
 		syncPrimaryBranch = p.Branch
 	}
 	if resp.Status != "blocked" {
-		if info, ok := s.repoMgr.Repos.InfoFor(syncPrimaryName); ok {
+		if info, ok := s.repoMgr.Repositories.Repository(syncPrimaryName); ok {
 			if f := s.forgeMgr.ForgeForInfo(ctx, &info); f != nil {
 				ciInfo := ci.RepoInfo{
 					RelPath:    info.RelPath,

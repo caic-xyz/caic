@@ -23,7 +23,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/repo"
-	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
@@ -408,9 +407,9 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 	}
 	backend := &mdruntime.Backend{}
 	runtimeRouter := newTestRuntime(t, backend)
-	workspaceRegistry := repowork.NewRegistry(t.Context(), nil)
-	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Workspaces: workspaceRegistry})
-	repoSvc := newTestRepoService(t, "", repo.New(nil), workspaceRegistry)
+	checkoutRegistry := repo.NewRegistry(t.Context(), nil)
+	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry})
+	repoSvc := newTestRepoService(t, "", checkoutRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
 	forgeManager := forgemgr.New("", "", nil)

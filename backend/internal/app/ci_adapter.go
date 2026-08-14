@@ -11,8 +11,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
-	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
-	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
@@ -24,7 +22,7 @@ type ciTaskCreator interface {
 
 // ciAdapter adapts caic stores and managers to ci.Backend.
 type ciAdapter struct {
-	repoMgr     *repomgr.Service
+	repoMgr     *repo.Service
 	repoStatus  *ci.RepoStatusStore
 	taskMgr     *taskmgr.Manager
 	forgeMgr    *forgemgr.Manager
@@ -48,7 +46,7 @@ func (a *ciAdapter) GitHubApp() ci.GitHubAppClient { return a.forgeMgr.GitHubApp
 
 // ForgeForInfo returns a forge client for the given RepoInfo.
 func (a *ciAdapter) ForgeForInfo(ctx context.Context, info *ci.RepoInfo) forge.Forge {
-	r := &repo.Info{
+	r := &repo.Repository{
 		ForgeKind:  info.ForgeKind,
 		ForgeOwner: info.ForgeOwner,
 		ForgeRepo:  info.ForgeRepo,
@@ -61,9 +59,9 @@ func (a *ciAdapter) CreateTask(ctx context.Context, req task.CreateRequest) (str
 	return a.taskCreator.CreateTask(ctx, req)
 }
 
-// GetWorkspace returns the task workspace for relPath.
-func (a *ciAdapter) GetWorkspace(relPath string) (*repowork.Workspace, bool) {
-	return a.taskMgr.Workspaces.Workspace(relPath)
+// GetCheckout returns the task checkout for relPath.
+func (a *ciAdapter) GetCheckout(relPath string) (*repo.Checkout, bool) {
+	return a.taskMgr.Checkouts.Checkout(relPath)
 }
 
 // SetTaskMonitorBranch sets the CI monitor branch on a task entry.
@@ -73,7 +71,7 @@ func (a *ciAdapter) SetTaskMonitorBranch(entry ci.TaskEntry, branch string) {
 
 // RepoInfoFor returns CI-level repo info for relPath.
 func (a *ciAdapter) RepoInfoFor(relPath string) ci.RepoInfo {
-	r, ok := a.repoMgr.Repos.InfoFor(relPath)
+	r, ok := a.repoMgr.Repositories.Repository(relPath)
 	if !ok {
 		return ci.RepoInfo{}
 	}
@@ -99,7 +97,7 @@ func (a *ciAdapter) ListActiveRepos() []ci.RepoInfo {
 		return true
 	})
 	var out []ci.RepoInfo
-	snap := a.repoMgr.Repos.Snapshot()
+	snap := a.repoMgr.Repositories.Repositories()
 	for i := range snap {
 		r := &snap[i]
 		if r.ForgeOwner == "" {

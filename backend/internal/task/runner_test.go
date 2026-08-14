@@ -21,7 +21,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/logtest"
-	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 )
@@ -126,7 +126,7 @@ func (r *forkLogRuntime) destPrimary(hostPath string) (string, bool) {
 	return "", false
 }
 
-func newTestRepoWorkspace(t *testing.T, baseBranch, dir string, backend runtime.Lifecycle) *repowork.Workspace {
+func newTestCheckout(t *testing.T, baseBranch, dir string, backend runtime.Lifecycle) *repo.Checkout {
 	var rt *runtime.Router
 	if backend != nil {
 		var err error
@@ -135,7 +135,7 @@ func newTestRepoWorkspace(t *testing.T, baseBranch, dir string, backend runtime.
 			t.Fatal(err)
 		}
 	}
-	return &repowork.Workspace{
+	return &repo.Checkout{
 		BaseBranch: baseBranch,
 		Dir:        dir,
 		RepoName:   filepath.Base(dir),
@@ -145,10 +145,10 @@ func newTestRepoWorkspace(t *testing.T, baseBranch, dir string, backend runtime.
 	}
 }
 
-func newTestRunner(t *testing.T, workspace *repowork.Workspace, backends map[harness.Name]agent.Backend, logDir string) *Runner {
+func newTestRunner(t *testing.T, checkout *repo.Checkout, backends map[harness.Name]agent.Backend, logDir string) *Runner {
 	return &Runner{
-		Workspace:           workspace,
-		Sessions:            newTestSessionRunner(t, workspace, logDir, backends),
+		Checkout:            checkout,
+		Sessions:            newTestSessionRunner(t, checkout, logDir, backends),
 		RuntimeStartTimeout: time.Hour,
 		OnTerminalLogClosed: func(context.Context, *Task, State) {},
 	}
@@ -225,8 +225,8 @@ func TestRunner(t *testing.T) {
 	t.Run("StartPreservesTaskMetadata", func(t *testing.T) {
 		t.Parallel()
 		runtimeBackend := &metadataRuntime{FakeBackend: &runtimetest.FakeBackend{}}
-		workspace := newTestRepoWorkspace(t, "", "", runtimeBackend)
-		r := newTestRunner(t, workspace, map[harness.Name]agent.Backend{"test": &instantExitBackend{}}, t.TempDir())
+		checkout := newTestCheckout(t, "", "", runtimeBackend)
+		r := newTestRunner(t, checkout, map[harness.Name]agent.Backend{"test": &instantExitBackend{}}, t.TempDir())
 		r.RuntimeMetadata = runtime.Metadata{runtime.MetadataSmokeRun: "run-token", runtime.MetadataTaskID: "wrong"}
 		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Harness: "test", StartedAt: time.Now().UTC()}
 		h, err := r.Start(t.Context(), tk, "")
@@ -337,8 +337,8 @@ func TestRunner(t *testing.T) {
 		t.Run("PassesModelAndEffort", func(t *testing.T) {
 			t.Parallel()
 			backend := &testBackend{FakeBackend: &agenttest.FakeBackend{}}
-			workspace := newTestRepoWorkspace(t, "", "", testContainer())
-			r := newTestRunner(t, workspace, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
+			checkout := newTestCheckout(t, "", "", testContainer())
+			r := newTestRunner(t, checkout, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -368,8 +368,8 @@ func TestRunner(t *testing.T) {
 		t.Run("PersistsSetupLogsOnFailure", func(t *testing.T) {
 			t.Parallel()
 			logDir := t.TempDir()
-			workspace := newTestRepoWorkspace(t, "", "", &setupLogFailureRuntime{FakeBackend: &runtimetest.FakeBackend{}})
-			r := newTestRunner(t, workspace, nil, logDir)
+			checkout := newTestCheckout(t, "", "", &setupLogFailureRuntime{FakeBackend: &runtimetest.FakeBackend{}})
+			r := newTestRunner(t, checkout, nil, logDir)
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -407,8 +407,8 @@ func TestRunner(t *testing.T) {
 		t.Run("SurfacesSetupFailure", func(t *testing.T) {
 			t.Parallel()
 			launchErr := errors.New("invalid context name cache-custom-mount:~/.cache/caic: invalid reference format")
-			workspace := newTestRepoWorkspace(t, "", "", &runtimetest.FakeBackend{LaunchErr: launchErr})
-			r := newTestRunner(t, workspace, nil, t.TempDir())
+			checkout := newTestCheckout(t, "", "", &runtimetest.FakeBackend{LaunchErr: launchErr})
+			r := newTestRunner(t, checkout, nil, t.TempDir())
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -440,7 +440,7 @@ func TestRunner(t *testing.T) {
 		t.Run("CustomBaseBranch", func(t *testing.T) {
 			t.Parallel()
 			// Verify that setup creates the task branch from t.BaseBranch
-			// when it differs from the workspace's default BaseBranch.
+			// when it differs from the checkout's default BaseBranch.
 			clone := initTestRepo(t, "main")
 			// Create a feature branch on origin with a distinct commit.
 			runGit(t, clone, "checkout", "-b", "feature")
@@ -454,8 +454,8 @@ func TestRunner(t *testing.T) {
 
 			logDir := t.TempDir()
 			stub := testContainer()
-			workspace := newTestRepoWorkspace(t, "main", clone, stub)
-			r := newTestRunner(t, workspace, nil, logDir)
+			checkout := newTestCheckout(t, "main", clone, stub)
+			r := newTestRunner(t, checkout, nil, logDir)
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -463,7 +463,7 @@ func TestRunner(t *testing.T) {
 				Harness:       harness.Claude,
 			}
 
-			tk.SetRepoBranch(0, workspace.ReserveBranchName())
+			tk.SetRepoBranch(0, checkout.ReserveBranchName())
 			if _, err := r.setup(t.Context(), tk, nil, "", nil); err != nil {
 				t.Fatal(err)
 			}
@@ -494,8 +494,8 @@ func TestRunner(t *testing.T) {
 
 			logDir := t.TempDir()
 			stub := testContainer()
-			workspace := newTestRepoWorkspace(t, "main", clone, stub)
-			r := newTestRunner(t, workspace, nil, logDir)
+			checkout := newTestCheckout(t, "main", clone, stub)
+			r := newTestRunner(t, checkout, nil, logDir)
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -503,7 +503,7 @@ func TestRunner(t *testing.T) {
 				Harness:       harness.Claude,
 			}
 
-			tk.SetRepoBranch(0, workspace.ReserveBranchName())
+			tk.SetRepoBranch(0, checkout.ReserveBranchName())
 			if _, err := r.setup(t.Context(), tk, nil, "", nil); err != nil {
 				t.Fatal(err)
 			}
@@ -528,8 +528,8 @@ func TestRunner(t *testing.T) {
 			// live stats were restored from log messages. Cleanup should fall back to
 			// LiveStats for the result cost.
 			clone := initTestRepo(t, "main")
-			workspace := newTestRepoWorkspace(t, "main", clone, nil)
-			r := newTestRunner(t, workspace, nil, "")
+			checkout := newTestCheckout(t, "main", clone, nil)
+			r := newTestRunner(t, checkout, nil, "")
 
 			tk := &Task{
 				ID:            ksid.NewID(),
@@ -570,8 +570,8 @@ func TestRunner(t *testing.T) {
 			// task loads as "purged" (not "failed") on the next server restart.
 			logDir := t.TempDir()
 			clone := initTestRepo(t, "main")
-			workspace := newTestRepoWorkspace(t, "main", clone, nil)
-			r := newTestRunner(t, workspace, nil, logDir)
+			checkout := newTestCheckout(t, "main", clone, nil)
+			r := newTestRunner(t, checkout, nil, logDir)
 
 			tk := &Task{
 				ID:            ksid.NewID(),
@@ -622,8 +622,8 @@ func TestRunner(t *testing.T) {
 			t.Parallel()
 			logDir := t.TempDir()
 			clone := initTestRepo(t, "main")
-			workspace := newTestRepoWorkspace(t, "main", clone, nil)
-			r := newTestRunner(t, workspace, nil, logDir)
+			checkout := newTestCheckout(t, "main", clone, nil)
+			r := newTestRunner(t, checkout, nil, logDir)
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -659,8 +659,8 @@ func TestRunner(t *testing.T) {
 		t.Run("UsesLiveDiffStat", func(t *testing.T) {
 			t.Parallel()
 			clone := initTestRepo(t, "main")
-			workspace := newTestRepoWorkspace(t, "main", clone, nil)
-			r := newTestRunner(t, workspace, nil, "")
+			checkout := newTestCheckout(t, "main", clone, nil)
+			r := newTestRunner(t, checkout, nil, "")
 
 			tk := &Task{
 				ID:            ksid.NewID(),
@@ -693,8 +693,8 @@ func TestRunner(t *testing.T) {
 			t.Parallel()
 			clone := initTestRepo(t, "main")
 			runGit(t, clone, "branch", "caic-0", "origin/main")
-			workspace := newTestRepoWorkspace(t, "main", clone, &runtimetest.FakeBackend{})
-			r := newTestRunner(t, workspace, nil, "")
+			checkout := newTestCheckout(t, "main", clone, &runtimetest.FakeBackend{})
+			r := newTestRunner(t, checkout, nil, "")
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -714,8 +714,8 @@ func TestRunner(t *testing.T) {
 			t.Parallel()
 			clone := initTestRepo(t, "main")
 			runGit(t, clone, "branch", "caic-0", "origin/main")
-			workspace := newTestRepoWorkspace(t, "main", clone, testContainer())
-			r := newTestRunner(t, workspace, nil, "")
+			checkout := newTestCheckout(t, "main", clone, testContainer())
+			r := newTestRunner(t, checkout, nil, "")
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -735,8 +735,8 @@ func TestRunner(t *testing.T) {
 			t.Parallel()
 			clone := initTestRepo(t, "main")
 			runGit(t, clone, "branch", "caic-0", "origin/main")
-			workspace := newTestRepoWorkspace(t, "main", clone, &runtimetest.FakeBackend{})
-			r := newTestRunner(t, workspace, nil, "")
+			checkout := newTestCheckout(t, "main", clone, &runtimetest.FakeBackend{})
+			r := newTestRunner(t, checkout, nil, "")
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -766,8 +766,8 @@ func TestRunner(t *testing.T) {
 			runGit(t, clone, "add", ".")
 			runGit(t, clone, "commit", "-m", "host change")
 			runGit(t, clone, "checkout", "main")
-			workspace := newTestRepoWorkspace(t, "main", clone, &runtimetest.FakeBackend{})
-			r := newTestRunner(t, workspace, nil, "")
+			checkout := newTestCheckout(t, "main", clone, &runtimetest.FakeBackend{})
+			r := newTestRunner(t, checkout, nil, "")
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -790,8 +790,8 @@ func TestRunner(t *testing.T) {
 			t.Run(state.String(), func(t *testing.T) {
 				t.Parallel()
 				stub := testContainer()
-				workspace := newTestRepoWorkspace(t, "", "", stub)
-				r := newTestRunner(t, workspace, nil, "")
+				checkout := newTestCheckout(t, "", "", stub)
+				r := newTestRunner(t, checkout, nil, "")
 				tk := &Task{
 					ID:            ksid.NewID(),
 					InitialPrompt: agent.Prompt{Text: "test"},
@@ -817,8 +817,8 @@ func TestRunner(t *testing.T) {
 			t.Parallel()
 			t.Run("no_runtime", func(t *testing.T) {
 				t.Parallel()
-				workspace := newTestRepoWorkspace(t, "", "", nil)
-				r := newTestRunner(t, workspace, nil, "")
+				checkout := newTestCheckout(t, "", "", nil)
+				r := newTestRunner(t, checkout, nil, "")
 				tk := &Task{ID: ksid.NewID()}
 				if _, err := r.ReviveTask(t.Context(), tk); err == nil {
 					t.Fatal("want error")
@@ -826,8 +826,8 @@ func TestRunner(t *testing.T) {
 			})
 			t.Run("no_instance", func(t *testing.T) {
 				t.Parallel()
-				workspace := newTestRepoWorkspace(t, "", "", testContainer())
-				r := newTestRunner(t, workspace, nil, "")
+				checkout := newTestCheckout(t, "", "", testContainer())
+				r := newTestRunner(t, checkout, nil, "")
 				tk := &Task{ID: ksid.NewID()}
 				if _, err := r.ReviveTask(t.Context(), tk); err == nil {
 					t.Fatal("want error")
@@ -835,8 +835,8 @@ func TestRunner(t *testing.T) {
 			})
 			t.Run("wrong_state", func(t *testing.T) {
 				t.Parallel()
-				workspace := newTestRepoWorkspace(t, "", "", testContainer())
-				r := newTestRunner(t, workspace, nil, "")
+				checkout := newTestCheckout(t, "", "", testContainer())
+				r := newTestRunner(t, checkout, nil, "")
 				tk := &Task{ID: ksid.NewID()}
 				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 				tk.SetState(StateRunning)
@@ -874,8 +874,8 @@ func TestRunner(t *testing.T) {
 				t.Run(tc.name, func(t *testing.T) {
 					t.Parallel()
 					logDir := t.TempDir()
-					workspace := newTestRepoWorkspace(t, "", "", tc.runtime)
-					r := newTestRunner(t, workspace, tc.backends, logDir)
+					checkout := newTestCheckout(t, "", "", tc.runtime)
+					r := newTestRunner(t, checkout, tc.backends, logDir)
 					tk := &Task{
 						ID:            ksid.NewID(),
 						InitialPrompt: agent.Prompt{Text: "test"},
@@ -922,9 +922,9 @@ func TestRunner(t *testing.T) {
 		})
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
-			workspace := newTestRepoWorkspace(t, "", "", testContainer())
+			checkout := newTestCheckout(t, "", "", testContainer())
 			backend := &instantExitBackend{}
-			r := newTestRunner(t, workspace, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
+			r := newTestRunner(t, checkout, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
@@ -955,8 +955,8 @@ func TestRunner(t *testing.T) {
 			t.Parallel()
 			t.Run("no_runtime", func(t *testing.T) {
 				t.Parallel()
-				workspace := newTestRepoWorkspace(t, "", "", nil)
-				r := newTestRunner(t, workspace, nil, "")
+				checkout := newTestCheckout(t, "", "", nil)
+				r := newTestRunner(t, checkout, nil, "")
 				source := &Task{ID: ksid.NewID()}
 				fork := &Task{ID: ksid.NewID()}
 				if _, err := r.ForkTask(t.Context(), source, fork, &runtime.ForkOptions{}, ""); err == nil {
@@ -965,8 +965,8 @@ func TestRunner(t *testing.T) {
 			})
 			t.Run("no_source_instance", func(t *testing.T) {
 				t.Parallel()
-				workspace := newTestRepoWorkspace(t, "", "", testContainer())
-				r := newTestRunner(t, workspace, nil, "")
+				checkout := newTestCheckout(t, "", "", testContainer())
+				r := newTestRunner(t, checkout, nil, "")
 				source := &Task{ID: ksid.NewID()}
 				fork := &Task{ID: ksid.NewID()}
 				if _, err := r.ForkTask(t.Context(), source, fork, &runtime.ForkOptions{}, ""); err == nil {
@@ -977,9 +977,9 @@ func TestRunner(t *testing.T) {
 		t.Run("persists_setup_logs", func(t *testing.T) {
 			t.Parallel()
 			runtimeBackend := &forkLogRuntime{FakeBackend: testContainer()}
-			workspace := newTestRepoWorkspace(t, "", "", runtimeBackend)
+			checkout := newTestCheckout(t, "", "", runtimeBackend)
 			backend := &testBackend{FakeBackend: &agenttest.FakeBackend{}}
-			r := newTestRunner(t, workspace, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
+			r := newTestRunner(t, checkout, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			source := &Task{
 				ID:      ksid.NewID(),
 				Harness: "test",
@@ -1026,9 +1026,9 @@ func TestRunner(t *testing.T) {
 		t.Run("pins_each_repo_to_its_own_branch", func(t *testing.T) {
 			t.Parallel()
 			runtimeBackend := &forkLogRuntime{FakeBackend: testContainer()}
-			workspace := newTestRepoWorkspace(t, "", "", runtimeBackend)
+			checkout := newTestCheckout(t, "", "", runtimeBackend)
 			backend := &testBackend{FakeBackend: &agenttest.FakeBackend{}}
-			r := newTestRunner(t, workspace, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
+			r := newTestRunner(t, checkout, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			source := &Task{
 				ID:      ksid.NewID(),
 				Harness: "test",
@@ -1036,7 +1036,7 @@ func TestRunner(t *testing.T) {
 			}
 			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
 			// Primary repo plus an extra repo whose branch the caller already
-			// allocated from its own workspace (a different number than primary).
+			// allocated from its own checkout (a different number than primary).
 			fork := &Task{
 				ID:      ksid.NewID(),
 				Harness: "test",
@@ -1070,8 +1070,8 @@ func TestRunner(t *testing.T) {
 				FakeBackend: testContainer(),
 				forkErr:     errors.New("fork failed"),
 			}
-			workspace := newTestRepoWorkspace(t, "", "", runtimeBackend)
-			r := newTestRunner(t, workspace, nil, t.TempDir())
+			checkout := newTestCheckout(t, "", "", runtimeBackend)
+			r := newTestRunner(t, checkout, nil, t.TempDir())
 			source := &Task{
 				ID:      ksid.NewID(),
 				Harness: "test",
@@ -1105,9 +1105,9 @@ func TestRunner(t *testing.T) {
 		t.Run("persists_setup_logs_on_session_failure", func(t *testing.T) {
 			t.Parallel()
 			runtimeBackend := &forkLogRuntime{FakeBackend: testContainer()}
-			workspace := newTestRepoWorkspace(t, "", "", runtimeBackend)
+			checkout := newTestCheckout(t, "", "", runtimeBackend)
 			backend := &agenttest.FakeBackend{}
-			r := newTestRunner(t, workspace, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
+			r := newTestRunner(t, checkout, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			source := &Task{
 				ID:      ksid.NewID(),
 				Harness: "test",
@@ -1138,8 +1138,8 @@ func TestRunner(t *testing.T) {
 		t.Run("preserves configured metadata on fork", func(t *testing.T) {
 			t.Parallel()
 			runtimeBackend := &forkLogRuntime{FakeBackend: &runtimetest.FakeBackend{}}
-			workspace := newTestRepoWorkspace(t, "", "", runtimeBackend)
-			r := newTestRunner(t, workspace, map[harness.Name]agent.Backend{"test": &instantExitBackend{}}, t.TempDir())
+			checkout := newTestCheckout(t, "", "", runtimeBackend)
+			r := newTestRunner(t, checkout, map[harness.Name]agent.Backend{"test": &instantExitBackend{}}, t.TempDir())
 			r.RuntimeMetadata = runtime.Metadata{runtime.MetadataSmokeRun: "run-token", runtime.MetadataTaskID: "wrong"}
 			source := &Task{ID: ksid.NewID(), Harness: "test"}
 			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
@@ -1161,9 +1161,9 @@ func TestRunner(t *testing.T) {
 		})
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
-			workspace := newTestRepoWorkspace(t, "", "", testContainer())
+			checkout := newTestCheckout(t, "", "", testContainer())
 			backend := &instantExitBackend{}
-			r := newTestRunner(t, workspace, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
+			r := newTestRunner(t, checkout, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			source := &Task{ID: ksid.NewID(), Harness: "test"}
 			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
 			fork := &Task{

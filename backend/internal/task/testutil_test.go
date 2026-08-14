@@ -21,7 +21,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/logtest"
-	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 )
@@ -103,11 +103,11 @@ func (w *testWire) ParseMessage(line []byte) ([]agent.Message, error) {
 	return w.parse(line)
 }
 
-func newTestSessionRunner(t *testing.T, workspace *repowork.Workspace, logDir string, backends map[harness.Name]agent.Backend) *SessionRunner {
-	if workspace == nil {
-		workspace = &repowork.Workspace{GitTimeout: time.Minute, Log: logtest.Logger(t)}
+func newTestSessionRunner(t *testing.T, checkout *repo.Checkout, logDir string, backends map[harness.Name]agent.Backend) *SessionRunner {
+	if checkout == nil {
+		checkout = &repo.Checkout{GitTimeout: time.Minute, Log: logtest.Logger(t)}
 	}
-	return &SessionRunner{Backends: backends, Logs: LogStore{LogDir: logDir}, Workspace: workspace, NotifyTaskChange: func() {}}
+	return &SessionRunner{Backends: backends, Logs: LogStore{LogDir: logDir}, Checkout: checkout, NotifyTaskChange: func() {}}
 }
 
 // testContainer returns a fake runtime whose Diff reports a fixed one-file

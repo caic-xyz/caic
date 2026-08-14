@@ -23,7 +23,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/httplog"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
-	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
@@ -348,7 +348,7 @@ func hostIsLoopback(host string) bool {
 // (internal/app) owns the lifetime of the long-lived automation services
 // (Bot, CIService, and their adapters); the router only routes requests to them.
 type Dependencies struct {
-	RepoSvc                    *repomgr.Service
+	RepoSvc                    *repo.Service
 	RepoStatus                 *ci.RepoStatusStore
 	Tailscale                  bool
 	Preferences                *preferences.Store

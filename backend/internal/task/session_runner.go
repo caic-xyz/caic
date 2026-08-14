@@ -15,7 +15,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
@@ -24,7 +24,7 @@ type SessionRunner struct {
 	// Immutable.
 	Backends         map[harness.Name]agent.Backend
 	Logs             LogStore
-	Workspace        *repowork.Workspace
+	Checkout         *repo.Checkout
 	NotifyTaskChange func()
 }
 
@@ -104,7 +104,7 @@ func (r *SessionRunner) Reconnect(ctx context.Context, t *Task, skipSideEffects 
 		close(msgCh)
 		<-dispatchDone
 		t.SetState(StateWaiting)
-		r.Workspace.Log.Error("attach relay failed", "br", primaryBranch, "instance", instanceID, "err", err)
+		r.Checkout.Log.Error("attach relay failed", "br", primaryBranch, "instance", instanceID, "err", err)
 		return nil, fmt.Errorf("reconnect: %w", err)
 	}
 
@@ -182,7 +182,7 @@ func (r *SessionRunner) startSessionWithLog(ctx context.Context, t *Task, prompt
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
 	}
-	tlog := r.Workspace.Log.With("br", primaryBranch, "instance", instanceID)
+	tlog := r.Checkout.Log.With("br", primaryBranch, "instance", instanceID)
 
 	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false)
 	tlog.Info("starting session", "hns", t.Harness)
@@ -261,7 +261,7 @@ func (r *SessionRunner) replaceSession(ctx context.Context, t *Task, prompt agen
 		branch = p.Branch
 	}
 	instanceID := t.RuntimeInstanceID()
-	tlog := r.Workspace.Log
+	tlog := r.Checkout.Log
 	if tlog == nil {
 		tlog = slog.Default()
 	}
@@ -333,11 +333,11 @@ func (r *SessionRunner) startMessageDispatch(ctx context.Context, t *Task, skipS
 			case *agent.ToolResultMessage:
 				if _, ok := pendingMutating[msg.ToolUseID]; ok {
 					delete(pendingMutating, msg.ToolUseID)
-					emitToolDiff = !skipSideEffects && r.Workspace.Runtimes != nil && r.Workspace.Dir != ""
+					emitToolDiff = !skipSideEffects && r.Checkout.Runtimes != nil && r.Checkout.Dir != ""
 				}
 			case *agent.ResultMessage:
-				if !skipSideEffects && r.Workspace.Runtimes != nil && r.Workspace.Dir != "" {
-					ds, _ := r.Workspace.DiffStat(ctx, instanceID, allRepos, repowork.DiffFetchBestEffort, "")
+				if !skipSideEffects && r.Checkout.Runtimes != nil && r.Checkout.Dir != "" {
+					ds, _ := r.Checkout.DiffStat(ctx, instanceID, allRepos, repo.DiffFetchBestEffort, "")
 					msg.DiffStat = ds
 				}
 			}
@@ -366,7 +366,7 @@ var mutatingTools = map[string]struct{}{
 // without fetching from the instance. This keeps live UI diff stats fresh during
 // a running turn without triggering md fetch side effects.
 func (r *SessionRunner) emitDiffStatBranch(ctx context.Context, t *Task, id runtime.ID, repos []runtime.Repo) {
-	ds, _ := r.Workspace.DiffStat(ctx, id, repos, repowork.DiffWithoutFetch, "")
+	ds, _ := r.Checkout.DiffStat(ctx, id, repos, repo.DiffWithoutFetch, "")
 	if len(ds) == 0 {
 		return
 	}
@@ -378,8 +378,8 @@ func (r *SessionRunner) emitDiffStatBranch(ctx context.Context, t *Task, id runt
 
 // runtimeDir returns the working directory path inside a runtime instance.
 // Uses the task's primary repo ContainerPath when available; otherwise falls back
-// to computing it from the workspace's Dir basename (legacy). Returns /home/user
-// for no-repo workspaces.
+// to computing it from the checkout's Dir basename (legacy). Returns /home/user
+// for no-repo checkouts.
 //
 // TODO(2026-07-01): remove the filepath.Base fallback once all pre-ContainerPath
 // runtime instances have cycled out.
@@ -387,10 +387,10 @@ func (r *SessionRunner) runtimeDir(t *Task) string {
 	if p := t.Primary(); p != nil && p.ContainerPath != "" {
 		return md.ResolveContainerPath(p.ContainerPath)
 	}
-	if r.Workspace.Dir == "" {
+	if r.Checkout.Dir == "" {
 		return "/home/user"
 	}
-	return "/home/user/src/" + filepath.Base(r.Workspace.Dir)
+	return "/home/user/src/" + filepath.Base(r.Checkout.Dir)
 }
 
 type replaceSessionMode int

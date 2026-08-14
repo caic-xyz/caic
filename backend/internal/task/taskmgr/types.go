@@ -7,7 +7,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
@@ -40,7 +40,7 @@ type CreateParams struct {
 	Mounts            []runtime.Mount      // resolved runtime bind mounts
 
 	// ResolvedGitHubToken is the actual token string, resolved by the caller in
-	// the request ctx; passed to workspace.Start. The caller resolves it (preferring
+	// the request ctx; passed to checkout.Start. The caller resolves it (preferring
 	// the logged-in user's OAuth token) because the Manager's serverCtx carries
 	// no user identity.
 	ResolvedGitHubToken string
@@ -56,7 +56,7 @@ type CreateParams struct {
 // CreateRepo describes a repo to mount in the new task.
 type CreateRepo struct {
 	Name       string // relative path
-	BaseBranch string // empty = workspace default
+	BaseBranch string // empty = checkout default
 }
 
 // ForkParams bundles fork task creation parameters.
@@ -78,7 +78,7 @@ type ForkParams struct {
 	Sudo        bool // resolved override
 
 	// ResolvedGitHubToken is the actual token string, resolved by the caller in
-	// the request ctx; passed to workspace.ForkTask. The caller resolves it
+	// the request ctx; passed to checkout.ForkTask. The caller resolves it
 	// (preferring the logged-in user's OAuth token) because the Manager's
 	// serverCtx carries no user identity.
 	ResolvedGitHubToken string
@@ -134,5 +134,5 @@ type SyncResult struct {
 	Status       string // "synced", "empty", "blocked"
 	Branch       string
 	DiffStat     agent.DiffStat
-	SafetyIssues []repowork.SafetyIssue
+	SafetyIssues []repo.SafetyIssue
 }

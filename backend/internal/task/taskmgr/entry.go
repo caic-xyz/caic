@@ -142,7 +142,7 @@ func (e *Entry) Finish(r *task.Result) {
 	e.mu.Unlock()
 }
 
-// Cleanup runs fn exactly once per incarnation. Used to guard workspace.Cleanup
+// Cleanup runs fn exactly once per incarnation. Used to guard checkout.Cleanup
 // against racing Stop/Purge calls.
 func (e *Entry) Cleanup(fn func()) {
 	e.mu.Lock()

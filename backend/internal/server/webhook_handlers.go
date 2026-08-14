@@ -21,7 +21,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/gitlab"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
-	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
@@ -44,7 +43,7 @@ type WebhookHandlers struct {
 	ciCache    *forgecache.Cache
 	forgeMgr   *forgemgr.Manager
 	taskMgr    *taskmgr.Manager
-	repoSvc    *repomgr.Service
+	repoSvc    *repo.Service
 	repoStatus *ci.RepoStatusStore
 	prefs      *preferences.Store
 }
@@ -229,7 +228,7 @@ func (h *WebhookHandlers) webhookOnCI(ctx context.Context, kind forge.Kind, owne
 	}
 
 	affected := h.taskMgr.FindTasksMonitoringBranch(owner, repoName)
-	affectedRepoPaths := h.repoStatus.PathsAtSHA(repoRefs(h.repoSvc.Repos.Snapshot()), owner, repoName, sha)
+	affectedRepoPaths := h.repoStatus.PathsAtSHA(repoRefs(h.repoSvc.Repositories.Repositories()), owner, repoName, sha)
 
 	if len(affected) == 0 && len(affectedRepoPaths) == 0 {
 		return
@@ -543,15 +542,15 @@ func (h *WebhookHandlers) storeInstallationIDFromFullName(fullName string, id in
 }
 
 // repoByForge returns a copy of the RepoInfo whose forge matches "owner/repo".
-func (h *WebhookHandlers) repoByForge(fullName string) (repo.Info, bool) {
+func (h *WebhookHandlers) repoByForge(fullName string) (repo.Repository, bool) {
 	owner, repoName, ok := strings.Cut(fullName, "/")
 	if !ok {
-		return repo.Info{}, false
+		return repo.Repository{}, false
 	}
-	return h.repoSvc.Repos.ByForge(owner, repoName)
+	return h.repoSvc.Repositories.RepositoryByForge(owner, repoName)
 }
 
-func repoRefs(snap []repo.Info) []ci.RepoRef {
+func repoRefs(snap []repo.Repository) []ci.RepoRef {
 	refs := make([]ci.RepoRef, len(snap))
 	for i := range snap {
 		refs[i] = ci.RepoRef{RelPath: snap[i].RelPath, ForgeOwner: snap[i].ForgeOwner, ForgeRepo: snap[i].ForgeRepo}

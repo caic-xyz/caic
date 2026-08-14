@@ -1,6 +1,6 @@
-// Package repowork owns repo-level branch allocation, git sync, safety
-// checks, and runtime diff operations.
-package repowork
+// Checkout owns local git, branch allocation, safety checks, and runtime diff operations.
+
+package repo
 
 import (
 	"context"
@@ -60,7 +60,7 @@ func ParseDiffNumstat(numstat string) agent.DiffStat {
 	return files
 }
 
-// TaskView is the read/write surface Workspace needs from a task.
+// TaskView is the read/write surface Checkout needs from a task.
 // *task.Task satisfies it structurally.
 type TaskView interface {
 	RuntimeInstanceID() runtime.ID
@@ -69,13 +69,13 @@ type TaskView interface {
 	PrimaryBaseBranch() string // "" when no primary/override
 }
 
-// Workspace holds one repo's config and serializes branch/git/fetch/diff
-// operations across every task backed by that repo.
-type Workspace struct {
-	// Immutable
+// Checkout owns one current local checkout and serializes its branch, git,
+// fetch, and diff operations across tasks using it.
+type Checkout struct {
+	// Immutable.
 	BaseBranch string
 	Dir        string          // Absolute path to the git repository.
-	RepoName   string          // Relative repo path (e.g. "github/caic"); empty for no-repo workspaces.
+	RepoName   string          // Relative repo path (e.g. "github/caic"); empty for no-repo checkouts.
 	GitTimeout time.Duration   // Timeout for git/instance ops. Must be non-zero.
 	Runtimes   *runtime.Router // Runtime provides runtime instance and repo diff/sync operations.
 	Log        *slog.Logger
@@ -84,9 +84,9 @@ type Workspace struct {
 	nextID   int        // Next branch sequence number (protected by branchMu).
 }
 
-// Init sets nextID past any existing caic-* branches so that restarts don't
-// waste attempts on branches that already exist. No-op for no-repo workspaces.
-func (w *Workspace) Init(ctx context.Context) error {
+// Init sets nextID past existing caic-* branches. It is a no-op for the
+// explicit no-repository checkout.
+func (w *Checkout) Init(ctx context.Context) error {
 	if w.Dir == "" {
 		return nil
 	}
@@ -104,10 +104,10 @@ func (w *Workspace) Init(ctx context.Context) error {
 	return nil
 }
 
-// AllocateBranch allocates a caic-N branch for this workspace's repo using the
-// workspace's base branch. Used by the server to allocate branches for extra
+// AllocateBranch allocates a caic-N branch for this checkout's repo using the
+// checkout's base branch. Used by the server to allocate branches for extra
 // repos before starting an instance.
-func (w *Workspace) AllocateBranch(ctx context.Context) (string, error) {
+func (w *Checkout) AllocateBranch(ctx context.Context) (string, error) {
 	w.branchMu.Lock()
 	defer w.branchMu.Unlock()
 	return w.allocateBranchLocked(ctx, nil)
@@ -116,7 +116,7 @@ func (w *Workspace) AllocateBranch(ctx context.Context) (string, error) {
 // SyncToOrigin pushes each repo's task branch to origin and returns the
 // combined diff stat across all repos and any safety issues found. Safety is
 // checked per-repo; when force is false, issues in any repo block the push.
-func (w *Workspace) SyncToOrigin(ctx context.Context, t TaskView, force bool) (agent.DiffStat, []SafetyIssue, error) {
+func (w *Checkout) SyncToOrigin(ctx context.Context, t TaskView, force bool) (agent.DiffStat, []SafetyIssue, error) {
 	if w.Dir == "" {
 		return nil, nil, errors.New("sync is not supported for no-repo tasks")
 	}
@@ -169,7 +169,7 @@ func (w *Workspace) SyncToOrigin(ctx context.Context, t TaskView, force bool) (a
 // and squash-pushes each repo's task branch onto its default branch. Safety
 // issues always block (no force override). The commit message is built from the
 // task title.
-func (w *Workspace) SyncToDefault(ctx context.Context, t TaskView, message string) (agent.DiffStat, []SafetyIssue, error) {
+func (w *Checkout) SyncToDefault(ctx context.Context, t TaskView, message string) (agent.DiffStat, []SafetyIssue, error) {
 	if w.Dir == "" {
 		return nil, nil, errors.New("sync is not supported for no-repo tasks")
 	}
@@ -222,7 +222,7 @@ func (w *Workspace) SyncToDefault(ctx context.Context, t TaskView, message strin
 // to a single file path. When there are multiple repos, file paths are prefixed
 // with `<repoName>/` so the frontend can distinguish changes from different
 // repos. Holds branchMu during diff.
-func (w *Workspace) DiffContent(ctx context.Context, t TaskView, path string) (string, error) {
+func (w *Checkout) DiffContent(ctx context.Context, t TaskView, path string) (string, error) {
 	if w.Dir == "" {
 		return "", errors.New("diff is not supported for no-repo tasks")
 	}
@@ -255,7 +255,7 @@ func (w *Workspace) DiffContent(ctx context.Context, t TaskView, path string) (s
 // stat (md diff --numstat). Unlike the relay's diff_watcher which only tracks
 // uncommitted changes, this captures the full branch diff relative to the base.
 // Used by adoptOne to restore the diff stat after server restart.
-func (w *Workspace) BranchDiffStat(ctx context.Context, t TaskView) agent.DiffStat {
+func (w *Checkout) BranchDiffStat(ctx context.Context, t TaskView) agent.DiffStat {
 	if w.Runtimes == nil || w.Dir == "" {
 		return nil
 	}
@@ -273,7 +273,7 @@ func (w *Workspace) BranchDiffStat(ctx context.Context, t TaskView) agent.DiffSt
 }
 
 // DeleteUnmodifiedTaskBranches deletes generated task branches that never diverged from their base.
-func (w *Workspace) DeleteUnmodifiedTaskBranches(ctx context.Context, t TaskView) {
+func (w *Checkout) DeleteUnmodifiedTaskBranches(ctx context.Context, t TaskView) {
 	repos := t.RuntimeRepos()
 	if len(repos) == 0 || w.Dir == "" {
 		return
@@ -317,7 +317,7 @@ func (w *Workspace) DeleteUnmodifiedTaskBranches(ctx context.Context, t TaskView
 // ReserveBranchName reserves and returns the next branch name ("caic-N") without
 // touching git (under branchMu, ~µs). The branch itself is created later — by the
 // runtime when forking, or by FetchAndCreateBranch for a fresh task.
-func (w *Workspace) ReserveBranchName() string {
+func (w *Checkout) ReserveBranchName() string {
 	w.branchMu.Lock()
 	defer w.branchMu.Unlock()
 	name := fmt.Sprintf("caic-%d", w.nextID)
@@ -328,7 +328,7 @@ func (w *Workspace) ReserveBranchName() string {
 // FetchAndCreateBranch fetches origin and creates the given branch from the
 // resolved base. Acquires branchMu to serialize git operations across concurrent
 // task setups on the same repo.
-func (w *Workspace) FetchAndCreateBranch(ctx context.Context, t TaskView, branch string) error {
+func (w *Checkout) FetchAndCreateBranch(ctx context.Context, t TaskView, branch string) error {
 	w.branchMu.Lock()
 	defer w.branchMu.Unlock()
 	gitCtx, gitCancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
@@ -364,7 +364,7 @@ const (
 
 // DiffStat optionally fetches from the instance, then returns the combined
 // per-repo diff stat (git diff --numstat).
-func (w *Workspace) DiffStat(ctx context.Context, id runtime.ID, repos []runtime.Repo, fetchMode DiffFetchMode, fetchLogMsg string) (agent.DiffStat, error) {
+func (w *Checkout) DiffStat(ctx context.Context, id runtime.ID, repos []runtime.Repo, fetchMode DiffFetchMode, fetchLogMsg string) (agent.DiffStat, error) {
 	if w.Dir == "" {
 		return nil, nil
 	}
@@ -386,7 +386,7 @@ func (w *Workspace) DiffStat(ctx context.Context, id runtime.ID, repos []runtime
 	return w.diffStatLocked(ctx, id, repos), nil
 }
 
-func (w *Workspace) taskRuntime(t TaskView) (runtime.ID, []runtime.Repo, error) {
+func (w *Checkout) taskRuntime(t TaskView) (runtime.ID, []runtime.Repo, error) {
 	if t == nil {
 		return "", nil, errors.New("task is nil")
 	}
@@ -406,7 +406,7 @@ func (w *Workspace) taskRuntime(t TaskView) (runtime.ID, []runtime.Repo, error) 
 
 // allocateBranchLocked fetches origin, resolves the start point, and creates
 // the task branch. Must be called under branchMu.
-func (w *Workspace) allocateBranchLocked(ctx context.Context, t TaskView) (string, error) {
+func (w *Checkout) allocateBranchLocked(ctx context.Context, t TaskView) (string, error) {
 	detached := context.WithoutCancel(ctx)
 	gitCtx, gitCancel := context.WithTimeout(detached, w.GitTimeout)
 	defer gitCancel()
@@ -444,7 +444,7 @@ func (w *Workspace) allocateBranchLocked(ctx context.Context, t TaskView) (strin
 	return branch, nil
 }
 
-func (w *Workspace) effectiveBaseBranch(t TaskView) string {
+func (w *Checkout) effectiveBaseBranch(t TaskView) string {
 	if t != nil {
 		if b := t.PrimaryBaseBranch(); b != "" {
 			return b
@@ -456,8 +456,8 @@ func (w *Workspace) effectiveBaseBranch(t TaskView) string {
 // diffStatLocked runs Diff("--numstat") on each repo and returns the combined
 // diff stat. File paths are prefixed with `<repoName>/` when there are multiple
 // repos so the frontend can distinguish changes per repo. Returns nil for
-// no-repo workspaces (dir == ""). The caller must hold branchMu.
-func (w *Workspace) diffStatLocked(ctx context.Context, id runtime.ID, repos []runtime.Repo) agent.DiffStat {
+// no-repo checkouts (dir == ""). The caller must hold branchMu.
+func (w *Checkout) diffStatLocked(ctx context.Context, id runtime.ID, repos []runtime.Repo) agent.DiffStat {
 	if w.Dir == "" {
 		return nil
 	}

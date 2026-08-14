@@ -38,7 +38,7 @@ type Backend interface {
 
 	// SetModelInventory replaces the models and per-model configuration.
 	// The server uses it to push dynamically discovered inventories into all
-	// workspace backends.
+	// checkout backends.
 	SetModelInventory(inventory ModelInventory)
 
 	// SupportsImages reports whether this backend accepts image content blocks.

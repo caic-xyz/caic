@@ -24,7 +24,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
-	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
 	caicruntime "github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
@@ -39,7 +38,7 @@ type serverHandlers struct {
 	tailscaleAvailable bool
 	forgeMgr           *forgemgr.Manager
 	prefs              *preferences.Store
-	repoSvc            *repomgr.Service
+	repoSvc            *repo.Service
 	repoStatus         *ci.RepoStatusStore
 	taskMgr            *taskmgr.Manager
 	cacheSizes         *CacheSizeStore
@@ -391,7 +390,7 @@ func (h *serverHandlers) getCacheSizes(_ context.Context, _ *api.EmptyReq) (*v1.
 }
 
 func (h *serverHandlers) listRepos(_ context.Context, _ *api.EmptyReq) (*[]v1.Repo, error) {
-	return repoListFromSnapshot(h.repoSvc.Repos.Snapshot(), h.repoStatus), nil
+	return repoListFromSnapshot(h.repoSvc.Repositories.Repositories(), h.repoStatus), nil
 }
 
 func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.Request) {
@@ -400,7 +399,7 @@ func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.R
 		writeError(w, api.BadRequest("repo is required"))
 		return
 	}
-	info, ok := h.repoSvc.Repos.InfoFor(repoPath)
+	info, ok := h.repoSvc.Repositories.Repository(repoPath)
 	if !ok {
 		writeError(w, api.NotFound("repo not found"))
 		return
@@ -444,16 +443,16 @@ func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.R
 }
 
 func (h *serverHandlers) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo, error) {
-	info, err := h.repoSvc.Clone(ctx, repomgr.CloneRequest{URL: req.URL, Path: req.Path, Depth: req.Depth})
+	info, err := h.repoSvc.Clone(ctx, repo.CloneRequest{URL: req.URL, Path: req.Path, Depth: req.Depth})
 	if err != nil {
-		repoErr, ok := errors.AsType[*repomgr.Error](err)
+		repoErr, ok := errors.AsType[*repo.Error](err)
 		if !ok {
 			return nil, api.InternalError(err.Error())
 		}
 		switch repoErr.Kind {
-		case repomgr.ErrorBadRequest:
+		case repo.ErrorBadRequest:
 			return nil, api.BadRequest(repoErr.Message)
-		case repomgr.ErrorConflict:
+		case repo.ErrorConflict:
 			return nil, api.Conflict(repoErr.Message)
 		default:
 			return nil, api.InternalError(repoErr.Message)
@@ -472,7 +471,7 @@ func (h *serverHandlers) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*
 	}, nil
 }
 
-func repoListFromSnapshot(snap []repo.Info, repoStatus *ci.RepoStatusStore) *[]v1.Repo {
+func repoListFromSnapshot(snap []repo.Repository, repoStatus *ci.RepoStatusStore) *[]v1.Repo {
 	out := make([]v1.Repo, len(snap))
 	for i := range snap {
 		out[i] = repoDTO(&snap[i], repoStatus)
@@ -480,7 +479,7 @@ func repoListFromSnapshot(snap []repo.Info, repoStatus *ci.RepoStatusStore) *[]v
 	return &out
 }
 
-func repoDTO(info *repo.Info, repoStatus *ci.RepoStatusStore) v1.Repo {
+func repoDTO(info *repo.Repository, repoStatus *ci.RepoStatusStore) v1.Repo {
 	forgeKind, err := apiconv.RepoForge(info.ForgeKind)
 	if err != nil {
 		slog.Error("convert repository forge", "repo", info.RelPath, "err", err)

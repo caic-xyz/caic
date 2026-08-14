@@ -113,7 +113,7 @@ func purgeStaleModelRefreshInstances(ctx context.Context, router *runtime.Router
 }
 
 // refreshOneHarness launches a temporary runtime instance, fetches an
-// inventory, and updates the cache and all workspace backends.
+// inventory, and updates the cache and all checkout backends.
 func refreshOneHarness(
 	ctx context.Context,
 	cache *agent.HarnessCache,

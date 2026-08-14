@@ -1,6 +1,6 @@
-// Tests for Workspace: branch allocation, git sync, and diff operations.
+// Tests for Checkout: branch allocation, git sync, and diff operations.
 
-package repowork
+package repo
 
 import (
 	"context"
@@ -23,8 +23,8 @@ import (
 )
 
 // fakeTaskView is a minimal TaskView implementation for tests. It cannot be
-// replaced with *task.Task: internal/task imports internal/repowork, so a
-// test in package repowork importing internal/task would create an import
+// replaced with *task.Task: internal/task imports internal/repo, so a
+// test in package repo importing internal/task would create an import
 // cycle.
 type fakeTaskView struct {
 	instanceID runtime.ID
@@ -53,7 +53,7 @@ func TestRuntimeRemoteRef(t *testing.T) {
 	}
 }
 
-func newTestRepoWorkspace(t *testing.T, baseBranch, dir string, backend runtime.Lifecycle) *Workspace {
+func newTestCheckout(t *testing.T, baseBranch, dir string, backend runtime.Lifecycle) *Checkout {
 	var rt *runtime.Router
 	if backend != nil {
 		var err error
@@ -62,7 +62,7 @@ func newTestRepoWorkspace(t *testing.T, baseBranch, dir string, backend runtime.
 			t.Fatal(err)
 		}
 	}
-	return &Workspace{
+	return &Checkout{
 		BaseBranch: baseBranch,
 		Dir:        dir,
 		RepoName:   filepath.Base(dir),
@@ -72,14 +72,14 @@ func newTestRepoWorkspace(t *testing.T, baseBranch, dir string, backend runtime.
 	}
 }
 
-func TestRepoWorkspace(t *testing.T) {
+func TestCheckout(t *testing.T) {
 	t.Parallel()
 	t.Run("Init", func(t *testing.T) {
 		t.Parallel()
 		t.Run("Basic", func(t *testing.T) {
 			t.Parallel()
 			clone := initTestRepo(t, "main")
-			r := newTestRepoWorkspace(t, "main", clone, nil)
+			r := newTestCheckout(t, "main", clone, nil)
 			if err := r.Init(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -96,7 +96,7 @@ func TestRepoWorkspace(t *testing.T) {
 			runGit(t, clone, "branch", "caic-3")
 			runGit(t, clone, "push", "origin", "caic-3")
 
-			r := newTestRepoWorkspace(t, "main", clone, nil)
+			r := newTestCheckout(t, "main", clone, nil)
 			if err := r.Init(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -113,7 +113,7 @@ func TestRepoWorkspace(t *testing.T) {
 			// Do NOT push — simulates a stopped task whose branch was
 			// never synced to origin.
 
-			r := newTestRepoWorkspace(t, "main", clone, nil)
+			r := newTestCheckout(t, "main", clone, nil)
 			if err := r.Init(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -128,7 +128,7 @@ func TestRepoWorkspace(t *testing.T) {
 			runGit(t, clone, "branch", "foo-caic-9")
 			runGit(t, clone, "branch", "caic-2")
 
-			r := newTestRepoWorkspace(t, "main", clone, nil)
+			r := newTestCheckout(t, "main", clone, nil)
 			if err := r.Init(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -141,7 +141,7 @@ func TestRepoWorkspace(t *testing.T) {
 	t.Run("BranchDiffStat", func(t *testing.T) {
 		t.Parallel()
 		sc := newRecordingContainer()
-		r := newTestRepoWorkspace(t, "", "/repo", sc)
+		r := newTestCheckout(t, "", "/repo", sc)
 		tv := &fakeTaskView{instanceID: runtime.NewID("test-runtime", "ctr-1"), repo: []runtime.Repo{{GitRoot: "/repo", Branch: "feature"}}}
 		ds := r.BranchDiffStat(t.Context(), tv)
 		if len(sc.fetchIDs) == 0 {
@@ -157,7 +157,7 @@ func TestRepoWorkspace(t *testing.T) {
 	t.Run("BranchDiffStatMultiRepoUsesInstanceID", func(t *testing.T) {
 		t.Parallel()
 		sc := newRecordingContainer()
-		r := newTestRepoWorkspace(t, "", "/home/user/src/caic", sc)
+		r := newTestCheckout(t, "", "/home/user/src/caic", sc)
 		tv := &fakeTaskView{instanceID: runtime.NewID("test-runtime", "ctr-2"), repo: []runtime.Repo{
 			{GitRoot: "/home/user/src/caic", Branch: "caic-7", ContainerPath: "/home/user/src/caic"},
 			{GitRoot: "/home/user/src/genai", Branch: "caic-0", ContainerPath: "/home/user/src/genai"},
@@ -185,14 +185,14 @@ func TestRepoWorkspace(t *testing.T) {
 	})
 	t.Run("BranchDiffStatNoContainer", func(t *testing.T) {
 		t.Parallel()
-		r := newTestRepoWorkspace(t, "", "", nil)
+		r := newTestCheckout(t, "", "", nil)
 		if ds := r.BranchDiffStat(t.Context(), &fakeTaskView{}); ds != nil {
 			t.Errorf("BranchDiffStat with no instance = %+v, want nil", ds)
 		}
 	})
 	t.Run("BranchDiffStatNoDir", func(t *testing.T) {
 		t.Parallel()
-		r := newTestRepoWorkspace(t, "", "", &runtimetest.FakeBackend{})
+		r := newTestCheckout(t, "", "", &runtimetest.FakeBackend{})
 		if ds := r.BranchDiffStat(t.Context(), &fakeTaskView{}); ds != nil {
 			t.Errorf("BranchDiffStat with no dir = %+v, want nil", ds)
 		}
@@ -203,7 +203,7 @@ func TestTaskRuntime(t *testing.T) {
 	t.Parallel()
 	t.Run("valid_preserves_mounted_path", func(t *testing.T) {
 		t.Parallel()
-		r := newTestRepoWorkspace(t, "", "/home/user/src/caic-xyz/caic", nil)
+		r := newTestCheckout(t, "", "/home/user/src/caic-xyz/caic", nil)
 		tv := &fakeTaskView{instanceID: "ctr-1", repo: []runtime.Repo{
 			{Branch: "caic-7", ContainerPath: "/home/user/src/caic-xyz/caic"},
 			{Branch: "caic-0", GitRoot: "/home/user/src/caic-xyz/md", ContainerPath: "/home/user/src/caic-xyz/md"},
@@ -220,7 +220,7 @@ func TestTaskRuntime(t *testing.T) {
 			t.Fatalf("repos len = %d, want 2", len(repos))
 		}
 		if repos[0].GitRoot != "/home/user/src/caic-xyz/caic" {
-			t.Errorf("primary HostPath = %q, want workspace dir", repos[0].GitRoot)
+			t.Errorf("primary HostPath = %q, want checkout dir", repos[0].GitRoot)
 		}
 		if repos[0].ContainerPath != "/home/user/src/caic-xyz/caic" {
 			t.Errorf("primary ContainerPath = %q, want qualified path", repos[0].ContainerPath)
@@ -231,7 +231,7 @@ func TestTaskRuntime(t *testing.T) {
 	})
 	t.Run("valid_no_repos", func(t *testing.T) {
 		t.Parallel()
-		r := newTestRepoWorkspace(t, "", "/repo", nil)
+		r := newTestCheckout(t, "", "/repo", nil)
 		tv := &fakeTaskView{instanceID: "ctr-1"}
 		id, repos, err := r.taskRuntime(tv)
 		if err != nil {
@@ -246,7 +246,7 @@ func TestTaskRuntime(t *testing.T) {
 	})
 	t.Run("error_no_instance", func(t *testing.T) {
 		t.Parallel()
-		if _, _, err := newTestRepoWorkspace(t, "", "", nil).taskRuntime(&fakeTaskView{}); err == nil {
+		if _, _, err := newTestCheckout(t, "", "", nil).taskRuntime(&fakeTaskView{}); err == nil {
 			t.Fatal("want error")
 		}
 	})

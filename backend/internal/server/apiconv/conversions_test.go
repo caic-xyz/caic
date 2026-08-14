@@ -10,7 +10,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/forge"
-	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -247,7 +247,7 @@ func TestSafetyIssues(t *testing.T) {
 	if got := SafetyIssues(nil); got != nil {
 		t.Errorf("SafetyIssues(nil) = %#v, want nil", got)
 	}
-	issues := []repowork.SafetyIssue{{File: "secret.env", Kind: "secret", Detail: "possible credential"}}
+	issues := []repo.SafetyIssue{{File: "secret.env", Kind: "secret", Detail: "possible credential"}}
 	want := []v1.SafetyIssue{{File: "secret.env", Kind: "secret", Detail: "possible credential"}}
 	if got := SafetyIssues(issues); !reflect.DeepEqual(got, want) {
 		t.Errorf("SafetyIssues() = %#v, want %#v", got, want)

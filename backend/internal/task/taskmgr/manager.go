@@ -2,7 +2,7 @@
 // session watching, stats streaming, and instance adoption.
 //
 // It sits between the HTTP adapter (internal/server) and the domain layer
-// (internal/task): task.Task / repowork.Workspace are domain types, while
+// (internal/task): task.Task / repo.Checkout are domain types, while
 // taskmgr.Manager is the orchestration layer built on top of them.
 //
 // Two contexts coexist here. Methods accept a request-scoped ctx that is
@@ -31,7 +31,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	quotausage "github.com/caic-xyz/caic/backend/internal/usage"
@@ -83,7 +83,7 @@ type Config struct {
 	RuntimeMetadata     runtime.Metadata
 	RuntimeStartTimeout time.Duration
 	Provider            genai.Provider // nil-safe
-	Workspaces          *repowork.Registry
+	Checkouts           *repo.Registry
 	TerminalReplay      TerminalReplayPublisher
 }
 
@@ -94,7 +94,7 @@ type Manager struct {
 	Runtimes     *runtime.Router
 	QuotaTracker *quotausage.Tracker
 	Backends     map[harness.Name]agent.Backend
-	Workspaces   *repowork.Registry
+	Checkouts    *repo.Registry
 	Logs         task.LogStore
 
 	log                 *slog.Logger
@@ -119,8 +119,8 @@ type Manager struct {
 	changed chan struct{} // closed on mutation, replaced under mu
 }
 
-// New creates a Manager. A no-repo workspace is always registered.
-// Register each repo workspace in Workspaces, then Start.
+// New creates a Manager. A no-repo checkout is always registered.
+// Register each repo checkout in Checkouts, then Start.
 func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value bag passed once at construction
 	if cfg.ServerCtx == nil {
 		return nil, errors.New("task manager server context is required")
@@ -128,8 +128,8 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 	if cfg.Runtimes == nil {
 		return nil, errors.New("task manager runtime router is required")
 	}
-	if cfg.Workspaces == nil {
-		return nil, errors.New("task manager workspace registry is required")
+	if cfg.Checkouts == nil {
+		return nil, errors.New("task manager checkout registry is required")
 	}
 	if cfg.RuntimeStartTimeout <= 0 {
 		return nil, errors.New("task manager runtime start timeout is required")
@@ -153,13 +153,13 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 		runtimeStartTimeout: cfg.RuntimeStartTimeout,
 		provider:            cfg.Provider,
 		terminalReplay:      cfg.TerminalReplay,
-		Workspaces:          cfg.Workspaces,
+		Checkouts:           cfg.Checkouts,
 		relay:               agentRelayReader{},
 		tasks:               make(map[string]*Entry),
 		changed:             make(chan struct{}),
 	}
-	if _, ok := m.Workspaces.Workspace(""); !ok {
-		m.Workspaces.RegisterWorkspace("", &repowork.Workspace{
+	if _, ok := m.Checkouts.Checkout(""); !ok {
+		m.Checkouts.RegisterCheckout("", &repo.Checkout{
 			GitTimeout: time.Minute,
 			Runtimes:   cfg.Runtimes,
 			Log:        m.log.With(slog.String("repo", "(none)")),
@@ -180,7 +180,7 @@ func (m *Manager) Close() error {
 }
 
 // Start launches background goroutines: instance event watching and stats streaming.
-// Must be called once after New, after workspaces have been registered.
+// Must be called once after New, after checkouts have been registered.
 func (m *Manager) Start() {
 	go m.watchRuntimeEvents(m.serverCtx)
 	go m.watchStats(m.serverCtx)
@@ -188,14 +188,14 @@ func (m *Manager) Start() {
 
 // Insert registers a pre-built entry. Production task creation goes through
 // Create/Fork; Insert is retained for tests (in internal/tasks and
-// internal/server) that seed the registry without a real workspace.
+// internal/server) that seed the registry without a real checkout.
 func (m *Manager) Insert(id string, entry *Entry) {
 	m.insertEntry(id, entry)
 }
 
 // Range iterates over every registered entry. It snapshots the registry under
 // m.mu and invokes fn unlocked, so fn may safely call back into the Manager
-// (e.g. RepoWorkspace). The entry set is a point-in-time snapshot; Entry pointers are
+// (e.g. Checkout). The entry set is a point-in-time snapshot; Entry pointers are
 // stable and carry their own locking. Stops iteration if fn returns false.
 func (m *Manager) Range(fn func(id string, e *Entry) bool) {
 	m.mu.Lock()
@@ -238,23 +238,23 @@ func (m *Manager) Changed() <-chan struct{} {
 
 // Create handles the HTTP task creation path.
 func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { //nolint:gocritic // CreateParams is a request-shaped value bag
-	// Resolve primary workspace.
-	var primaryWorkspace *repowork.Workspace
+	// Resolve primary checkout.
+	var primaryCheckout *repo.Checkout
 	if len(p.Repos) > 0 {
-		r, ok := m.Workspaces.Workspace(p.Repos[0].Name)
+		r, ok := m.Checkouts.Checkout(p.Repos[0].Name)
 		if !ok {
 			return "", badRequestf("unknown repo: %s", p.Repos[0].Name)
 		}
-		primaryWorkspace = r
+		primaryCheckout = r
 	} else {
-		// New() always registers the no-repo "" workspace, so this never fails.
-		primaryWorkspace, _ = m.Workspaces.Workspace("")
+		// New() always registers the no-repo "" checkout, so this never fails.
+		primaryCheckout, _ = m.Checkouts.Checkout("")
 	}
 
-	// Validate that every extra repo has a registered workspace (branches are
+	// Validate that every extra repo has a registered checkout (branches are
 	// allocated later, in one pass, by allocateBranches).
 	for _, rs := range p.Repos[min(1, len(p.Repos)):] {
-		if _, ok := m.Workspaces.Workspace(rs.Name); !ok {
+		if _, ok := m.Checkouts.Checkout(rs.Name); !ok {
 			return "", badRequestf("unknown extra repo: %s", rs.Name)
 		}
 	}
@@ -282,7 +282,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 	// another registered repo shares it.
 	mounts := make([]task.RepoMount, len(p.Repos))
 	for i, rs := range p.Repos {
-		r, _ := m.Workspaces.Workspace(rs.Name)
+		r, _ := m.Checkouts.Checkout(rs.Name)
 		mounts[i] = task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: r.Dir, ContainerPath: m.containerPathForRepo(rs.Name)}
 	}
 
@@ -331,7 +331,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 
 		ghToken := p.ResolvedGitHubToken
 
-		h, err := m.runner(primaryWorkspace).Start(m.serverCtx, t, ghToken)
+		h, err := m.runner(primaryCheckout).Start(m.serverCtx, t, ghToken)
 		if err != nil {
 			entry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "start task")})
 			m.publishTerminalReplay(m.serverCtx, entry)
@@ -342,7 +342,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 			t.SetSudoPassword(m.SudoPassword(m.serverCtx, t))
 		}
 		m.NotifyTaskChange()
-		m.watchSession(entry, primaryWorkspace, h)
+		m.watchSession(entry, primaryCheckout, h)
 	}()
 	return t.ID.String(), nil
 }
@@ -356,10 +356,10 @@ func (m *Manager) Purge(ctx context.Context, entry *Entry) error {
 		return conflict("task is not running, waiting, stopped, or crashed")
 	}
 	m.NotifyTaskChange()
-	workspace := m.resolveWorkspace(entry.task)
+	checkout := m.resolveCheckout(entry.task)
 	m.log.InfoContext(ctx, "purge requested", "task", entry.task.ID, "instance", entry.task.RuntimeInstanceID(), "state", state)
 	go func() {
-		m.cleanupTask(entry, workspace, task.StatePurged)
+		m.cleanupTask(entry, checkout, task.StatePurged)
 		m.log.InfoContext(m.serverCtx, "purge completed", "task", entry.task.ID, "final_state", entry.task.GetState())
 	}()
 	return nil
@@ -373,10 +373,10 @@ func (m *Manager) Stop(ctx context.Context, entry *Entry) error {
 		return conflict("task is not running or waiting")
 	}
 	m.NotifyTaskChange()
-	workspace := m.resolveWorkspace(entry.task)
+	checkout := m.resolveCheckout(entry.task)
 	m.log.InfoContext(ctx, "stop requested", "task", entry.task.ID, "instance", entry.task.RuntimeInstanceID(), "state", state)
 	go func() {
-		m.runner(workspace).StopTask(m.serverCtx, entry.task)
+		m.runner(checkout).StopTask(m.serverCtx, entry.task)
 		m.log.InfoContext(m.serverCtx, "stop completed", "task", entry.task.ID, "instance", entry.task.RuntimeInstanceID(), "final_state", entry.task.GetState())
 		m.NotifyTaskChange()
 	}()
@@ -388,13 +388,13 @@ func (m *Manager) Revive(ctx context.Context, entry *Entry) error {
 	if _, changed := entry.task.SetStateIfAny(task.StateProvisioning, task.StateStopped, task.StateCrashed); !changed {
 		return conflict("task is not stopped or crashed")
 	}
-	workspace := m.resolveWorkspace(entry.task)
+	checkout := m.resolveCheckout(entry.task)
 	entry.Reset()
 	m.NotifyTaskChange()
 	go func() { //nolint:contextcheck // background goroutine roots its own trace task on serverCtx
 		ctx, tk := trace.NewTask(m.serverCtx, "task.revive:"+entry.task.ID.String())
 		defer tk.End()
-		h, err := m.runner(workspace).ReviveTask(ctx, entry.task)
+		h, err := m.runner(checkout).ReviveTask(ctx, entry.task)
 		if err != nil {
 			m.log.WarnContext(ctx, "revive failed", "task", entry.task.ID, "err", err)
 			entry.task.SetState(task.StateFailed)
@@ -403,7 +403,7 @@ func (m *Manager) Revive(ctx context.Context, entry *Entry) error {
 			return
 		}
 		m.NotifyTaskChange()
-		m.watchSession(entry, workspace, h)
+		m.watchSession(entry, checkout, h)
 	}()
 	return nil
 }
@@ -432,12 +432,12 @@ func (m *Manager) Restart(ctx context.Context, entry *Entry, prompt agent.Prompt
 			return &Error{Kind: KindBadRequest, Msg: "no prompt provided and failed to read plan from instance", Err: err}
 		}
 	}
-	workspace := m.resolveWorkspace(t)
-	h, err := m.sessions(workspace).RestartSession(m.serverCtx, t, prompt) //nolint:contextcheck // intentionally using server context
+	checkout := m.resolveCheckout(t)
+	h, err := m.sessions(checkout).RestartSession(m.serverCtx, t, prompt) //nolint:contextcheck // intentionally using server context
 	if err != nil {
 		return internalErr(err, "restart session")
 	}
-	m.watchSession(entry, workspace, h)
+	m.watchSession(entry, checkout, h)
 	m.NotifyTaskChange()
 	return nil
 }
@@ -448,15 +448,15 @@ func (m *Manager) ClearContext(ctx context.Context, entry *Entry) error {
 	if _, changed := t.SetStateIfAny(task.StateStarting, task.StateWaiting, task.StateAsking, task.StateHasPlan); !changed {
 		return conflict("task is not waiting or asking")
 	}
-	workspace := m.resolveWorkspace(t)
-	if workspace == nil {
-		return internalErr(errors.New("task workspace is unavailable"), "clear context")
+	checkout := m.resolveCheckout(t)
+	if checkout == nil {
+		return internalErr(errors.New("task checkout is unavailable"), "clear context")
 	}
-	h, err := m.sessions(workspace).ClearContextSession(m.serverCtx, t) //nolint:contextcheck // intentionally using server context
+	h, err := m.sessions(checkout).ClearContextSession(m.serverCtx, t) //nolint:contextcheck // intentionally using server context
 	if err != nil {
 		return internalErr(err, "clear context")
 	}
-	m.watchSession(entry, workspace, h)
+	m.watchSession(entry, checkout, h)
 	m.NotifyTaskChange()
 	return nil
 }
@@ -534,7 +534,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 		return "", badRequestf("cannot fork a no-repo task")
 	}
 
-	workspace := m.resolveWorkspace(source)
+	checkout := m.resolveCheckout(source)
 
 	// Resolve harness and model.
 	forkHarness := source.Harness
@@ -573,7 +573,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 		if _, overlap := sourceRepoNames[rs.Name]; overlap {
 			return "", badRequestf("extraRepos contains repo already in source task: %s", rs.Name)
 		}
-		er, ok := m.Workspaces.Workspace(rs.Name)
+		er, ok := m.Checkouts.Checkout(rs.Name)
 		if !ok {
 			return "", badRequestf("unknown extra repo: %s", rs.Name)
 		}
@@ -647,7 +647,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 			Mounts:      slices.Clone(source.Mounts),
 			MaxCPUs:     source.MaxCPUs,
 		}
-		h, err := m.runner(workspace).ForkTask(ctx, source, t, forkOpts, ghToken)
+		h, err := m.runner(checkout).ForkTask(ctx, source, t, forkOpts, ghToken)
 		if err != nil {
 			forkEntry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "fork task")})
 			m.publishTerminalReplay(ctx, forkEntry)
@@ -658,7 +658,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 			t.SetSudoPassword(m.SudoPassword(m.serverCtx, t))
 		}
 		m.NotifyTaskChange()
-		m.watchSession(forkEntry, workspace, h)
+		m.watchSession(forkEntry, checkout, h)
 	}()
 	return t.ID.String(), nil
 }
@@ -680,8 +680,8 @@ func (m *Manager) EffectiveBaseBranch(t *task.Task) string {
 	if p.BaseBranch != "" {
 		return p.BaseBranch
 	}
-	if workspace, ok := m.Workspaces.Workspace(p.Name); ok {
-		return workspace.BaseBranch
+	if checkout, ok := m.Checkouts.Checkout(p.Name); ok {
+		return checkout.BaseBranch
 	}
 	return ""
 }
@@ -748,8 +748,8 @@ func (m *Manager) AdoptInstances(ctx context.Context, adoptRepos []AdoptRepo, in
 
 	for i := range adoptRepos {
 		ri := &adoptRepos[i]
-		workspace, _ := m.Workspaces.Workspace(ri.RelPath)
-		if workspace == nil {
+		checkout, _ := m.Checkouts.Checkout(ri.RelPath)
+		if checkout == nil {
 			continue
 		}
 		for i := range instances {
@@ -764,7 +764,7 @@ func (m *Manager) AdoptInstances(ctx context.Context, adoptRepos []AdoptRepo, in
 			claimed[c.ID] = true
 			taskIDVal, metadataResolved := resolvedTaskIDs[c.ID]
 			wg.Go(func() {
-				at, err := m.adoptOne(ctx, *ri, workspace, c, branch, taskIDVal, metadataResolved, branchIDs, allLogs)
+				at, err := m.adoptOne(ctx, *ri, checkout, c, branch, taskIDVal, metadataResolved, branchIDs, allLogs)
 				if err != nil {
 					mu.Lock()
 					errs = append(errs, err)
@@ -781,7 +781,7 @@ func (m *Manager) AdoptInstances(ctx context.Context, adoptRepos []AdoptRepo, in
 	wg.Wait()
 
 	// Adopt no-repo runtime instances.
-	if noRepoWorkspace, ok := m.Workspaces.Workspace(""); ok {
+	if noRepoCheckout, ok := m.Checkouts.Checkout(""); ok {
 		for i := range instances {
 			c := &instances[i]
 			if claimed[c.ID] || !strings.HasPrefix(string(c.ID.InstanceID()), "md-agent-") {
@@ -789,7 +789,7 @@ func (m *Manager) AdoptInstances(ctx context.Context, adoptRepos []AdoptRepo, in
 			}
 			taskIDVal, metadataResolved := resolvedTaskIDs[c.ID]
 			wg.Go(func() {
-				at, err := m.adoptOne(ctx, AdoptRepo{}, noRepoWorkspace, c, "", taskIDVal, metadataResolved, branchIDs, allLogs)
+				at, err := m.adoptOne(ctx, AdoptRepo{}, noRepoCheckout, c, "", taskIDVal, metadataResolved, branchIDs, allLogs)
 				if err != nil {
 					mu.Lock()
 					errs = append(errs, err)
@@ -864,7 +864,7 @@ func countResultMessages(msgs []agent.Message) int {
 
 // FindTasksMonitoringBranch returns all entries that match the given forge owner/repo
 // and have a monitor branch set.
-func (m *Manager) FindTasksMonitoringBranch(owner, repo string) []*Entry {
+func (m *Manager) FindTasksMonitoringBranch(owner, repoName string) []*Entry {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []*Entry
@@ -873,7 +873,7 @@ func (m *Manager) FindTasksMonitoringBranch(owner, repo string) []*Entry {
 			continue
 		}
 		snap := e.task.Snapshot()
-		if snap.ForgeOwner == owner && snap.ForgeRepo == repo {
+		if snap.ForgeOwner == owner && snap.ForgeRepo == repoName {
 			if p := e.task.Primary(); p != nil && p.Branch == e.MonitorBranch() {
 				out = append(out, e)
 			}
@@ -883,13 +883,13 @@ func (m *Manager) FindTasksMonitoringBranch(owner, repo string) []*Entry {
 }
 
 // FindTasksByPR returns all entries matching the given forge owner/repo and PR number.
-func (m *Manager) FindTasksByPR(owner, repo string, prNumber int) []*Entry {
+func (m *Manager) FindTasksByPR(owner, repoName string, prNumber int) []*Entry {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []*Entry
 	for _, e := range m.tasks {
 		snap := e.task.Snapshot()
-		if snap.ForgeOwner == owner && snap.ForgeRepo == repo && snap.ForgePR == prNumber {
+		if snap.ForgeOwner == owner && snap.ForgeRepo == repoName && snap.ForgePR == prNumber {
 			out = append(out, e)
 		}
 	}
@@ -898,13 +898,13 @@ func (m *Manager) FindTasksByPR(owner, repo string, prNumber int) []*Entry {
 
 // FindTasksMatchingBranch returns all entries for a forge owner/repo where the
 // primary repo branch matches the given branch.
-func (m *Manager) FindTasksMatchingBranch(owner, repo, branch string) []*Entry {
+func (m *Manager) FindTasksMatchingBranch(owner, repoName, branch string) []*Entry {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []*Entry
 	for _, e := range m.tasks {
 		snap := e.task.Snapshot()
-		if snap.ForgeOwner == owner && snap.ForgeRepo == repo {
+		if snap.ForgeOwner == owner && snap.ForgeRepo == repoName {
 			if p := e.task.Primary(); p != nil && p.Branch == branch {
 				out = append(out, e)
 			}
@@ -1101,8 +1101,8 @@ func (m *Manager) LoadPurgedTasks(all []*task.LoadedTask) error {
 }
 
 // Cleanup is the exported variant of cleanupTask, idempotent per incarnation.
-func (m *Manager) Cleanup(entry *Entry, workspace *repowork.Workspace, reason task.State) {
-	m.cleanupTask(entry, workspace, reason)
+func (m *Manager) Cleanup(entry *Entry, checkout *repo.Checkout, reason task.State) {
+	m.cleanupTask(entry, checkout, reason)
 }
 
 // LoadMessagesOnDemand triggers lazy message loading for purged tasks.
@@ -1120,7 +1120,7 @@ func (m *Manager) Sync(ctx context.Context, entry *Entry, target SyncTarget, for
 		return nil, conflict("task is in a terminal state")
 	}
 
-	workspace := m.resolveWorkspace(t)
+	checkout := m.resolveCheckout(t)
 	syncPrimaryBranch := ""
 	if p := t.Primary(); p != nil {
 		syncPrimaryBranch = p.Branch
@@ -1130,12 +1130,12 @@ func (m *Manager) Sync(ctx context.Context, entry *Entry, target SyncTarget, for
 		if force {
 			return nil, badRequestf("force is not supported for default-branch sync")
 		}
-		baseBranch := workspace.BaseBranch
+		baseBranch := checkout.BaseBranch
 		message := t.Title()
 		if message == "" {
 			message = t.InitialPrompt.Text
 		}
-		ds, issues, err := workspace.SyncToDefault(ctx, t, message)
+		ds, issues, err := checkout.SyncToDefault(ctx, t, message)
 		if err != nil {
 			return nil, internalErr(err, "sync to default")
 		}
@@ -1149,7 +1149,7 @@ func (m *Manager) Sync(ctx context.Context, entry *Entry, target SyncTarget, for
 	}
 
 	// Default: push to the task's own branch.
-	ds, issues, err := workspace.SyncToOrigin(ctx, t, force)
+	ds, issues, err := checkout.SyncToOrigin(ctx, t, force)
 	if err != nil {
 		return nil, internalErr(err, "sync to origin")
 	}
@@ -1162,14 +1162,14 @@ func (m *Manager) Sync(ctx context.Context, entry *Entry, target SyncTarget, for
 	return &SyncResult{Status: status, Branch: syncPrimaryBranch, DiffStat: ds, SafetyIssues: issues}, nil
 }
 
-// resolveAdoptionTaskIDs selects instances for configured workspaces, reads
+// resolveAdoptionTaskIDs selects instances for configured checkouts, reads
 // their task IDs, and rejects candidates with unavailable or duplicate IDs.
 func (m *Manager) resolveAdoptionTaskIDs(ctx context.Context, adoptRepos []AdoptRepo, instances []runtime.Instance) (resolved map[runtime.ID]string, rejected map[runtime.ID]bool, retErr error) {
 	candidates := make(map[runtime.ID]bool, len(instances))
 	for i := range adoptRepos {
 		ri := &adoptRepos[i]
-		workspace, _ := m.Workspaces.Workspace(ri.RelPath)
-		if workspace == nil {
+		checkout, _ := m.Checkouts.Checkout(ri.RelPath)
+		if checkout == nil {
 			continue
 		}
 		for j := range instances {
@@ -1178,7 +1178,7 @@ func (m *Manager) resolveAdoptionTaskIDs(ctx context.Context, adoptRepos []Adopt
 			}
 		}
 	}
-	if noRepoWorkspace, ok := m.Workspaces.Workspace(""); ok && noRepoWorkspace != nil {
+	if noRepoCheckout, ok := m.Checkouts.Checkout(""); ok && noRepoCheckout != nil {
 		for i := range instances {
 			if strings.HasPrefix(string(instances[i].ID.InstanceID()), "md-agent-") {
 				candidates[instances[i].ID] = true
@@ -1221,8 +1221,8 @@ func (m *Manager) reconnectForInput(entry *Entry) error {
 	if t.HasSession() {
 		return nil
 	}
-	workspace := m.resolveWorkspace(t)
-	h, err := m.sessions(workspace).Reconnect(m.serverCtx, t, false)
+	checkout := m.resolveCheckout(t)
+	h, err := m.sessions(checkout).Reconnect(m.serverCtx, t, false)
 	if err != nil {
 		if t.HasSession() {
 			return nil
@@ -1230,26 +1230,26 @@ func (m *Manager) reconnectForInput(entry *Entry) error {
 		return err
 	}
 	tlog := m.log.With("task", t.ID, "instance", t.RuntimeInstanceID())
-	h, err = m.sessions(workspace).EnsureSession(m.serverCtx, t, h, tlog)
+	h, err = m.sessions(checkout).EnsureSession(m.serverCtx, t, h, tlog)
 	if err != nil {
 		return err
 	}
-	m.watchSession(entry, workspace, h)
+	m.watchSession(entry, checkout, h)
 	return nil
 }
 
-func (m *Manager) sessions(r *repowork.Workspace) *task.SessionRunner {
+func (m *Manager) sessions(r *repo.Checkout) *task.SessionRunner {
 	return &task.SessionRunner{
 		Backends:         m.Backends,
 		Logs:             m.Logs,
-		Workspace:        r,
+		Checkout:         r,
 		NotifyTaskChange: m.NotifyTaskChange,
 	}
 }
 
-func (m *Manager) runner(r *repowork.Workspace) *task.Runner {
+func (m *Manager) runner(r *repo.Checkout) *task.Runner {
 	return &task.Runner{
-		Workspace:           r,
+		Checkout:            r,
 		Sessions:            m.sessions(r),
 		RuntimeMetadata:     m.runtimeMetadata,
 		RuntimeStartTimeout: m.runtimeStartTimeout,
@@ -1268,13 +1268,12 @@ func (m *Manager) containerPathForRepo(relPath string) string {
 func (m *Manager) repoBasenameCollides(relPath string) bool {
 	base := filepath.Base(relPath)
 	collides := false
-	m.Workspaces.RangeWorkspaces(func(other string, _ *repowork.Workspace) bool {
-		if other != "" && other != relPath && filepath.Base(other) == base {
+	for checkout := range m.Checkouts.Checkouts() {
+		if checkout.RepoName != "" && checkout.RepoName != relPath && filepath.Base(checkout.RepoName) == base {
 			collides = true
-			return false
+			break
 		}
-		return true
-	})
+	}
 	return collides
 }
 
@@ -1284,10 +1283,10 @@ func (m *Manager) repoBasenameCollides(relPath string) bool {
 // (by md.Fork for a fork's source repos, or by the runner concurrently with
 // launch for a fresh task's primary), so they only need a name reserved.
 // mounts[reserveOnly:] are new to the host, so their branch is created here from
-// their own workspace.
+// their own checkout.
 func (m *Manager) allocateBranches(ctx context.Context, t *task.Task, mounts []task.RepoMount, reserveOnly int) error {
 	for i := range mounts {
-		ws, ok := m.Workspaces.Workspace(mounts[i].Name)
+		ws, ok := m.Checkouts.Checkout(mounts[i].Name)
 		if !ok {
 			return fmt.Errorf("repo %q is not registered", mounts[i].Name)
 		}
@@ -1562,15 +1561,15 @@ func (m *Manager) taskChanged() {
 	m.changed = make(chan struct{})
 }
 
-// resolveWorkspace returns the repo workspace for a task's primary repo, or the
-// always-present no-repo workspace. Both are guaranteed non-nil: New()
-// registers "", and callers must register repo-specific workspaces.
-func (m *Manager) resolveWorkspace(t *task.Task) *repowork.Workspace {
+// resolveCheckout returns the repo checkout for a task's primary repo, or the
+// always-present no-repo checkout. Both are guaranteed non-nil: New()
+// registers "", and callers must register repo-specific checkouts.
+func (m *Manager) resolveCheckout(t *task.Task) *repo.Checkout {
 	key := ""
 	if p := t.Primary(); p != nil {
 		key = p.Name
 	}
-	r, _ := m.Workspaces.Workspace(key)
+	r, _ := m.Checkouts.Checkout(key)
 	return r
 }
 
@@ -1597,7 +1596,7 @@ func mergeLogAndRelayMessages(logMsgs, relayMsgs []agent.Message) []agent.Messag
 }
 
 // adoptOne investigates a single runtime instance and registers it as a task.
-func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowork.Workspace, c *runtime.Instance, branch, taskIDVal string, metadataResolved bool, branchIDs map[string][]string, allLogs []*task.LoadedTask) (*AdoptedTask, error) { //nolint:gocritic // massive function from existing code; refactor deferred
+func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Checkout, c *runtime.Instance, branch, taskIDVal string, metadataResolved bool, branchIDs map[string][]string, allLogs []*task.LoadedTask) (*AdoptedTask, error) { //nolint:gocritic // massive function from existing code; refactor deferred
 	ctx, adoptTask := trace.NewTask(ctx, "adopt-instance")
 	defer adoptTask.End()
 	trace.Logf(ctx, "instance", "%s repo=%s branch=%s", c.ID, ri.RelPath, branch)
@@ -1741,7 +1740,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 		}
 		for _, lm := range lt.Repos[1:] {
 			gitRoot := ""
-			if er, ok := m.Workspaces.Workspace(lm.Name); ok {
+			if er, ok := m.Checkouts.Checkout(lm.Name); ok {
 				gitRoot = er.Dir
 			}
 			containerPath := runtimeRepoByBranch[lm.Branch]
@@ -1961,14 +1960,14 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 	if t.GetState() != task.StateStopped && relayAlive {
 		m.log.DebugContext(ctx, "instance", "msg", "auto-reconnect starting", "repo", ri.RelPath, "br", branch, "instance", c.ID)
 		tlog := m.log.With("repo", ri.RelPath, "br", branch, "instance", t.RuntimeInstanceID())
-		h, err := m.sessions(workspace).Reconnect(m.serverCtx, t, true) //nolint:contextcheck // adopted sessions must outlive startup/adoption.
+		h, err := m.sessions(checkout).Reconnect(m.serverCtx, t, true) //nolint:contextcheck // adopted sessions must outlive startup/adoption.
 		if err != nil {
 			tlog.Warn("auto-reconnect failed", "err", err)
 			m.NotifyTaskChange()
 			return &AdoptedTask{Entry: entry, Task: t, RelPath: ri.RelPath, ForgeKind: ri.ForgeKind, ForgeOwner: ri.ForgeOwner, ForgeRepo: ri.ForgeRepo, Branch: branch, FoundPRFromLog: foundPRFromLog}, nil
 		}
 		go func() {
-			h, err = m.sessions(workspace).EnsureSession(m.serverCtx, t, h, tlog)
+			h, err = m.sessions(checkout).EnsureSession(m.serverCtx, t, h, tlog)
 			if err != nil {
 				tlog.Warn("ensure session failed", "err", err)
 				t.SetState(task.StateWaiting)
@@ -1977,9 +1976,9 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, workspace *repowor
 			}
 			tlog.Debug("auto-reconnect succeeded")
 			t.SetVNCPort(m.Runtimes.VNCPort(m.serverCtx, t.RuntimeInstanceID()))
-			refreshAdoptedDiffStat(m.serverCtx, workspace, t)
+			refreshAdoptedDiffStat(m.serverCtx, checkout, t)
 			m.NotifyTaskChange()
-			m.watchSession(entry, workspace, h)
+			m.watchSession(entry, checkout, h)
 		}()
 	} else if !relayAlive && t.GetState() != task.StateStopped && t.GetState() != task.StateCrashed && t.GetState() != task.StateFailed {
 		m.log.ErrorContext(ctx, "relay dead, stopping instance",
@@ -2015,13 +2014,13 @@ func (m *Manager) runtimeTaskID(ctx context.Context, id runtime.ID) (string, err
 	return m.Runtimes.Metadata(ctx, id, runtime.MetadataLegacyTaskID)
 }
 
-func refreshAdoptedDiffStat(ctx context.Context, workspace *repowork.Workspace, t *task.Task) {
+func refreshAdoptedDiffStat(ctx context.Context, checkout *repo.Checkout, t *task.Task) {
 	switch t.GetState() {
 	case task.StateWaiting, task.StateAsking, task.StateHasPlan:
 	default:
 		return
 	}
-	if ds := workspace.BranchDiffStat(ctx, t); len(ds) > 0 {
+	if ds := checkout.BranchDiffStat(ctx, t); len(ds) > 0 {
 		t.SetLiveDiffStat(ds)
 	}
 }
@@ -2095,7 +2094,7 @@ func (m *Manager) loadTerminalReplaySource(t *task.Task) (*task.LoadedTask, erro
 
 // watchSession monitors a single active session. Clean session exits move the
 // task to StateWaiting; SSH/session errors fail the task and stop the instance.
-func (m *Manager) watchSession(entry *Entry, workspace *repowork.Workspace, h *task.SessionHandle) {
+func (m *Manager) watchSession(entry *Entry, checkout *repo.Checkout, h *task.SessionHandle) {
 	go func() {
 		t := entry.Task()
 		traceCtx, tk := trace.NewTask(m.serverCtx, "session.watch:"+t.ID.String())
@@ -2131,7 +2130,7 @@ func (m *Manager) watchSession(entry *Entry, workspace *repowork.Workspace, h *t
 			if sessionErr != nil {
 				m.log.WarnContext(m.serverCtx, "session exited with error", append(attrs, "err", sessionErr)...)
 				if t.RecordSessionCrash(m.serverCtx, sessionErr) {
-					m.stopFailedSessionInstance(workspace, t, attrs)
+					m.stopFailedSessionInstance(checkout, t, attrs)
 					crashErr := sessionErr
 					if exitErr := t.LastExitError(); exitErr != "" {
 						crashErr = errors.New(exitErr)
@@ -2191,7 +2190,7 @@ func (m *Manager) watchSession(entry *Entry, workspace *repowork.Workspace, h *t
 	}()
 }
 
-func (m *Manager) stopFailedSessionInstance(_ *repowork.Workspace, t *task.Task, attrs []any) {
+func (m *Manager) stopFailedSessionInstance(_ *repo.Checkout, t *task.Task, attrs []any) {
 	id := t.RuntimeInstanceID()
 	if id == "" {
 		return
@@ -2201,12 +2200,12 @@ func (m *Manager) stopFailedSessionInstance(_ *repowork.Workspace, t *task.Task,
 	}
 }
 
-// cleanupTask runs workspace.Cleanup exactly once per task.
-func (m *Manager) cleanupTask(entry *Entry, workspace *repowork.Workspace, reason task.State) {
+// cleanupTask runs checkout.Cleanup exactly once per task.
+func (m *Manager) cleanupTask(entry *Entry, checkout *repo.Checkout, reason task.State) {
 	entry.Cleanup(func() {
 		start := time.Now()
 		t := entry.Task()
-		result := m.runner(workspace).Cleanup(m.serverCtx, t, reason)
+		result := m.runner(checkout).Cleanup(m.serverCtx, t, reason)
 		elapsed := time.Since(start).Round(time.Millisecond)
 		if result.Err != nil {
 			m.log.ErrorContext(m.serverCtx, "cleanup failed", "task", t.ID, "reason", reason, "dur", elapsed, "err", result.Err)

@@ -16,14 +16,14 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
-	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
 // botClient adapts task and forge stores to bot.Client.
 type botClient struct {
-	repoSvc  *repomgr.Service
+	repoSvc  *repo.Service
 	taskMgr  *taskmgr.Manager
 	forgeMgr *forgemgr.Manager
 }
@@ -31,11 +31,11 @@ type botClient struct {
 // ResolveRepo maps a forge full name ("owner/repo") to repo info.
 // Returns nil if the forge name does not match any managed repo.
 func (c *botClient) ResolveRepo(forgeFullName string) *bot.RepoInfo {
-	owner, repo, ok := strings.Cut(forgeFullName, "/")
+	owner, repoName, ok := strings.Cut(forgeFullName, "/")
 	if !ok {
 		return nil
 	}
-	info, found := c.repoSvc.Repos.ByForge(owner, repo)
+	info, found := c.repoSvc.Repositories.RepositoryByForge(owner, repoName)
 	if !found {
 		return nil
 	}
@@ -49,8 +49,8 @@ func (c *botClient) ResolveRepo(forgeFullName string) *bot.RepoInfo {
 
 // CreateTask creates and starts a task for bot-driven automation.
 func (c *botClient) CreateTask(ctx context.Context, req task.CreateRequest) (string, error) {
-	if _, ok := c.taskMgr.Workspaces.Workspace(req.Repo); !ok {
-		return "", fmt.Errorf("workspace not found for repo %s", req.Repo)
+	if _, ok := c.taskMgr.Checkouts.Checkout(req.Repo); !ok {
+		return "", fmt.Errorf("checkout not found for repo %s", req.Repo)
 	}
 	backends := c.taskMgr.Backends
 	// Pick harness: prefer Claude if available, otherwise the
@@ -70,7 +70,7 @@ func (c *botClient) CreateTask(ctx context.Context, req task.CreateRequest) (str
 	// commenter. Only relevant for issue-triggered tasks.
 	var ownerResolved, repoResolved string
 	if req.ForgeIssue > 0 {
-		if info, ok := c.repoSvc.Repos.InfoFor(req.Repo); ok && info.ForgeOwner != "" {
+		if info, ok := c.repoSvc.Repositories.Repository(req.Repo); ok && info.ForgeOwner != "" {
 			ownerResolved = info.ForgeOwner
 			repoResolved = info.ForgeRepo
 		}

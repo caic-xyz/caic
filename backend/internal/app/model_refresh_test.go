@@ -12,7 +12,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -149,7 +149,7 @@ func newModelRefreshTestManager(t testing.TB, router *runtime.Router, backends m
 		ServerCtx:           t.Context(),
 		Runtimes:            router,
 		Backends:            backends,
-		Workspaces:          repowork.NewRegistry(t.Context(), router),
+		Checkouts:           repo.NewRegistry(t.Context(), router),
 		RuntimeStartTimeout: time.Hour,
 		TerminalReplay:      func(context.Context, *task.LoadedTask) error { return nil },
 	})

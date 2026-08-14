@@ -8,7 +8,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/forge"
-	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -162,7 +162,7 @@ func RepoForge(k forge.Kind) (v1.Forge, error) {
 }
 
 // SafetyIssues converts task safety issues to API DTOs.
-func SafetyIssues(issues []repowork.SafetyIssue) []v1.SafetyIssue {
+func SafetyIssues(issues []repo.SafetyIssue) []v1.SafetyIssue {
 	if len(issues) == 0 {
 		return nil
 	}

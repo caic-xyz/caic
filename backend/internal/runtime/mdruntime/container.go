@@ -69,7 +69,7 @@ func InstancesFromMD(ctx context.Context, mdContainers []*md.Container) []runtim
 	return out
 }
 
-// SlogWriter is an io.Writer that logs each complete line via slog.Info.
+// SlogWriter is an io.Writer that logs each complete line via slog.Repository.
 // Use it instead of io.Discard so md output is captured in structured logs.
 type SlogWriter struct {
 	// Phase labels the log entries (e.g. "launch", "warmup").
