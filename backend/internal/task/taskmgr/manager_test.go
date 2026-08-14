@@ -24,6 +24,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	"github.com/caic-xyz/caic/backend/internal/logtest"
 	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -2526,17 +2527,34 @@ func TestManager(t *testing.T) {
 				t.Fatal("failed revive did not close done")
 			}
 		})
-		t.Run("error_failure_closes_done_and_publishes_result", func(t *testing.T) {
+		t.Run("error_failure_closes_done_and_reloads_terminal_replay", func(t *testing.T) {
 			t.Parallel()
 			releaseRevive := make(chan struct{})
 			fake := &blockingReviveBackend{FakeBackend: &runtimetest.FakeBackend{}, release: releaseRevive}
-			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, fake, nil)})
+			m := newTestManager(t, Config{
+				ServerCtx: t.Context(),
+				Runtimes:  newTestRuntime(t, fake, nil),
+				Backends: map[harness.Name]agent.Backend{
+					harness.Claude: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire},
+				},
+			})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
+				Harness:       harness.Claude,
 			}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(task.StateStopped)
+			log, err := m.Logs.Open(tk)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := m.Logs.WriteResultTrailer(log, tk.Title(), &task.Result{State: task.StateStopped}); err != nil {
+				t.Fatal(err)
+			}
+			if err := log.Close(); err != nil {
+				t.Fatal(err)
+			}
 			entry := NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), entry)
 
@@ -2569,6 +2587,15 @@ func TestManager(t *testing.T) {
 			if result == nil || result.State != task.StateFailed || result.Err == nil {
 				t.Fatalf("Result = %v, want failed result with error", result)
 			}
+			loaded := entry.LoadedTask()
+			if loaded == nil {
+				t.Fatal("failed revive did not retain the terminal replay source")
+			}
+			cache, ok := eventreplay.OpenReplay(loaded.LogPath(), loaded.CacheProofForLog)
+			if !ok {
+				t.Fatal("failed revive did not publish the terminal replay cache")
+			}
+			t.Cleanup(cache.Close)
 		})
 	})
 	t.Run("SendInput_Images", func(t *testing.T) {

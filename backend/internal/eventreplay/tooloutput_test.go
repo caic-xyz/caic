@@ -1,6 +1,6 @@
-// Tests for tooloutput.go
+// Tests tool-output formatting for replay and live SSE conversion.
 
-package server
+package eventreplay
 
 import (
 	"encoding/json"

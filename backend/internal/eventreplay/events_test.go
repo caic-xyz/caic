@@ -1,6 +1,6 @@
 // Tests for agent event to API event conversion.
 
-package v1conv
+package eventreplay
 
 import (
 	"testing"

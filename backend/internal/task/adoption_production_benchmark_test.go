@@ -1,4 +1,4 @@
-// Benchmarks the production-attached combined V1 live-adoption replay path.
+// Benchmarks V1 task-log adoption and bounded reopen validation.
 //go:build adoption_benchmark
 
 package task_test
@@ -17,7 +17,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
@@ -27,7 +26,7 @@ func BenchmarkTaskAdoption(b *testing.B) {
 	id := ksid.NewID()
 	path := filepath.Join(dir, id.String()+"-org-repo-caic-0.jsonl")
 	writeProductionAdoptionFixture(b, path)
-	store := &task.LogStore{LogDir: dir, EventReplayFactory: productionEventReplayFactory}
+	store := &task.LogStore{LogDir: dir}
 
 	b.ResetTimer()
 	b.StartTimer()
@@ -67,12 +66,6 @@ func BenchmarkTaskAdoption(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
-}
-
-// productionEventReplayFactory mirrors the application factory through the
-// task-owned proof provider so the benchmark follows production sequencing.
-func productionEventReplayFactory(path string, initial task.CacheProof, fresh task.CacheProofProvider) (task.EventReplayWriter, error) {
-	return eventreplay.NewMessageWriter(path, initial, fresh)
 }
 
 func writeProductionAdoptionFixture(b *testing.B, path string) {

@@ -341,10 +341,7 @@ func (r *SessionRunner) startMessageDispatch(ctx context.Context, t *Task, skipS
 					msg.DiffStat = ds
 				}
 			}
-			stateChanged, replayErr := t.addParsedMessage(ctx, parsed, skipSideEffects)
-			if replayErr != nil {
-				slog.ErrorContext(ctx, "write event replay", "err", replayErr)
-			}
+			stateChanged := t.addParsedMessage(ctx, parsed, skipSideEffects)
 			if stateChanged {
 				r.NotifyTaskChange()
 			}

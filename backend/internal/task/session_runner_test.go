@@ -20,7 +20,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
-	"github.com/caic-xyz/caic/backend/internal/task/tasktest"
 )
 
 func TestSessionRunner(t *testing.T) {
@@ -262,14 +261,11 @@ func TestSessionRunner(t *testing.T) {
 			t.Parallel()
 			r := newTestSessionRunner(t, newTestRepoWorkspace(t, "", "/repo", nil), "", nil)
 			tk := &Task{}
-			writer := &tasktest.FakeEventReplayWriter{}
-			tk.StartEventReplay(writer)
 			_, sub, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 			msgCh, done := r.startMessageDispatch(t.Context(), tk, false)
 			log := &agenttest.LogSink{Version: agent.LogVersionV2}
 			opts := agent.Options{MsgCh: msgCh, Log: log}
-			wantTime := time.Unix(1, 234*int64(time.Millisecond)).UTC()
 			var v2Message agent.Message
 			cmd := exec.CommandContext(t.Context(), "python3", "-c", "import sys; print(sys.argv[1])", `{"t":"agent","ts":1.234,"msg":{}}`)
 			stdin, err := cmd.StdinPipe()
@@ -310,15 +306,6 @@ func TestSessionRunner(t *testing.T) {
 			close(msgCh)
 			<-done
 			tk.addMessage(t.Context(), &agent.TextMessage{Text: "synthetic"}, false)
-			if len(writer.ParsedMessages) != 3 {
-				t.Fatalf("writer messages = %d, want 3", len(writer.ParsedMessages))
-			}
-			if got := writer.ParsedMessages[0]; !got.ProducerTime.Equal(wantTime) || got.Message != v2Message {
-				t.Fatalf("writer v2 = %#v, want original wrapper", got)
-			}
-			if !writer.ParsedMessages[1].ProducerTime.IsZero() || !writer.ParsedMessages[2].ProducerTime.IsZero() {
-				t.Fatalf("v1/synthetic producer times = %v, %v, want zero", writer.ParsedMessages[1].ProducerTime, writer.ParsedMessages[2].ProducerTime)
-			}
 		})
 		t.Run("ResultMessage", func(t *testing.T) {
 			t.Parallel()

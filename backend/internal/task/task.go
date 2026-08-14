@@ -260,14 +260,13 @@ type Task struct {
 	inPlanMode            bool      // True while the agent is in plan mode (between EnterPlanMode and ExitPlanMode).
 	title                 string    // LLM-generated short title; set via SetTitle.
 	msgs                  []agent.Message
-	subs                  []*sub            // active SSE subscribers
-	rateLimitSubs         []*rateLimitSub   // active lossless quota subscribers
-	handle                *SessionHandle    // current active session; nil when no session is attached
-	eventReplay           EventReplayWriter // live DTO replay writer; nil when no log is open
-	priorCostUSD          float64           // accumulated cost from all cleared sessions
-	priorNumTurns         int               // accumulated turns from all cleared sessions
-	priorDuration         time.Duration     // accumulated duration from all cleared sessions
-	turnStartedAt         time.Time         // when the current running turn started; zero when not running
+	subs                  []*sub          // active SSE subscribers
+	rateLimitSubs         []*rateLimitSub // active lossless quota subscribers
+	handle                *SessionHandle  // current active session; nil when no session is attached
+	priorCostUSD          float64         // accumulated cost from all cleared sessions
+	priorNumTurns         int             // accumulated turns from all cleared sessions
+	priorDuration         time.Duration   // accumulated duration from all cleared sessions
+	turnStartedAt         time.Time       // when the current running turn started; zero when not running
 	liveCostUSD           float64
 	liveNumTurns          int
 	liveDuration          time.Duration
@@ -695,37 +694,6 @@ func (t *Task) CacheProofForLog(path string) (CacheProof, error) {
 		return cacheProofForAppendFromValidatedSnapshot(snapshot, path)
 	}
 	return CacheProofForLog(path)
-}
-
-// EventReplayWriter stores backend-neutral replay events beside the raw task log.
-type EventReplayWriter interface {
-	WriteMessage(ctx context.Context, message agent.ParsedMessage) error
-	Commit(ctx context.Context, logPath string) error
-}
-
-// StartEventReplay attaches a live DTO replay writer if one is not already active.
-func (t *Task) StartEventReplay(w EventReplayWriter) {
-	if w == nil {
-		return
-	}
-	t.mu.Lock()
-	if t.eventReplay == nil {
-		t.eventReplay = w
-	}
-	t.mu.Unlock()
-}
-
-// CommitEventReplay finalizes and detaches the live DTO replay writer.
-func (t *Task) CommitEventReplay(ctx context.Context) error {
-	t.mu.Lock()
-	w := t.eventReplay
-	path := t.logPath
-	t.eventReplay = nil
-	t.mu.Unlock()
-	if w == nil {
-		return nil
-	}
-	return w.Commit(ctx, path)
 }
 
 // SudoLookupState returns the sudo lookup inputs and cached password.
@@ -1755,14 +1723,12 @@ func (t *Task) recordStartupFailure(ctx context.Context, err error) {
 
 // addMessage records a synthetic server message with an explicit zero producer time.
 func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen bool) {
-	if _, err := t.addParsedMessage(ctx, agent.ParsedMessage{Message: m}, skipTitleGen); err != nil {
-		slog.ErrorContext(ctx, "write event replay", "err", err)
-	}
+	t.addParsedMessage(ctx, agent.ParsedMessage{Message: m}, skipTitleGen)
 }
 
-// addParsedMessage records one physical relay record and retains its wrapper for
-// the replay writer while task state and subscribers consume its Message.
-func (t *Task) addParsedMessage(ctx context.Context, parsed agent.ParsedMessage, skipTitleGen bool) (stateChanged bool, retErr error) {
+// addParsedMessage records one physical relay record while task state and
+// subscribers consume its Message.
+func (t *Task) addParsedMessage(ctx context.Context, parsed agent.ParsedMessage, skipTitleGen bool) (stateChanged bool) {
 	m := parsed.Message
 	t.mu.Lock()
 	initialState := t.state
@@ -1780,7 +1746,7 @@ func (t *Task) addParsedMessage(ctx context.Context, parsed agent.ParsedMessage,
 		if meta.Model != "" && t.reportedModel == "" {
 			t.reportedModel = meta.Model
 		}
-		return stateChanged, retErr
+		return stateChanged
 	}
 	t.msgs = append(t.msgs, m)
 	if rateLimit, ok := m.(*agent.RateLimitMessage); ok {
@@ -1919,16 +1885,13 @@ func (t *Task) addParsedMessage(ctx context.Context, parsed agent.ParsedMessage,
 			go t.GenerateTitle(ctx)
 		}
 	}
-	if t.eventReplay != nil {
-		retErr = t.eventReplay.WriteMessage(ctx, parsed)
-	}
 	// Fan out to subscribers (non-blocking). Skip a non-zero exit message that
 	// follows a cleanly completed turn: it is a spurious termination artifact
 	// (e.g. SIGINT from a user-requested stop) and is already dropped from the
 	// persisted replay, so the live stream must match to avoid a transient
 	// "Parse error" that disappears when the task log is reloaded.
 	if exit, ok := m.(*agent.ExitMessage); ok && exit.ExitCode != 0 && t.lastExitError == "" {
-		return stateChanged, retErr
+		return stateChanged
 	}
 	for i := 0; i < len(t.subs); i++ {
 		select {
@@ -1940,7 +1903,7 @@ func (t *Task) addParsedMessage(ctx context.Context, parsed agent.ParsedMessage,
 			i--
 		}
 	}
-	return stateChanged, retErr
+	return stateChanged
 }
 
 func rateLimitFromMessage(m *agent.RateLimitMessage) RateLimit {

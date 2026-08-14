@@ -9,13 +9,13 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
 )
 
 func TestGenericConvertInitHasHarness(t *testing.T) {
 	t.Parallel()
-	gt := v1conv.NewToolTimingTracker(harness.Claude, FormatToolOutput)
+	gt := eventreplay.NewToolTimingTracker(harness.Claude, eventreplay.FormatToolOutput)
 	msg := &agent.InitMessage{
 		Model:     "claude-opus-4-6",
 		Version:   "2.1.34",
@@ -48,7 +48,7 @@ func TestGenericConvertInitHasHarness(t *testing.T) {
 
 func TestGenericAskUserQuestionIsAsk(t *testing.T) {
 	t.Parallel()
-	gt := v1conv.NewToolTimingTracker(harness.Claude, FormatToolOutput)
+	gt := eventreplay.NewToolTimingTracker(harness.Claude, eventreplay.FormatToolOutput)
 	msg := &agent.AskMessage{
 		ToolUseID: "ask_1",
 		Questions: []agent.AskQuestion{
@@ -83,7 +83,7 @@ func TestGenericAskUserQuestionIsAsk(t *testing.T) {
 
 func TestGenericTodoWriteIsTodo(t *testing.T) {
 	t.Parallel()
-	gt := v1conv.NewToolTimingTracker(harness.Claude, FormatToolOutput)
+	gt := eventreplay.NewToolTimingTracker(harness.Claude, eventreplay.FormatToolOutput)
 	msg := &agent.TodoMessage{
 		ToolUseID: "todo_1",
 		Todos: []agent.TodoItem{
@@ -114,7 +114,7 @@ func TestGenericTodoWriteIsTodo(t *testing.T) {
 
 func TestGenericToolTiming(t *testing.T) {
 	t.Parallel()
-	gt := v1conv.NewToolTimingTracker(harness.Claude, FormatToolOutput)
+	gt := eventreplay.NewToolTimingTracker(harness.Claude, eventreplay.FormatToolOutput)
 	t0 := time.Now()
 	t1 := t0.Add(500 * time.Millisecond)
 
@@ -139,7 +139,7 @@ func TestGenericToolTiming(t *testing.T) {
 
 func TestGenericConvertTextAndUsage(t *testing.T) {
 	t.Parallel()
-	gt := v1conv.NewToolTimingTracker(harness.Codex, FormatToolOutput)
+	gt := eventreplay.NewToolTimingTracker(harness.Codex, eventreplay.FormatToolOutput)
 
 	textMsg := &agent.TextMessage{Text: "hello"}
 	usageMsg := &agent.UsageMessage{
@@ -168,7 +168,7 @@ func TestGenericConvertTextAndUsage(t *testing.T) {
 
 func TestGenericConvertResult(t *testing.T) {
 	t.Parallel()
-	gt := v1conv.NewToolTimingTracker(harness.Claude, FormatToolOutput)
+	gt := eventreplay.NewToolTimingTracker(harness.Claude, eventreplay.FormatToolOutput)
 	msg := &agent.ResultMessage{
 		MessageType:  "result",
 		Subtype:      "success",
@@ -192,7 +192,7 @@ func TestGenericConvertResult(t *testing.T) {
 
 func TestGenericConvertStreamEvent(t *testing.T) {
 	t.Parallel()
-	gt := v1conv.NewToolTimingTracker(harness.Claude, FormatToolOutput)
+	gt := eventreplay.NewToolTimingTracker(harness.Claude, eventreplay.FormatToolOutput)
 	msg := &agent.TextDeltaMessage{Text: "Hi"}
 	events := gt.ConvertMessage(msg, time.Now())
 	if len(events) != 1 {
@@ -208,7 +208,7 @@ func TestGenericConvertStreamEvent(t *testing.T) {
 
 func TestGenericConvertUserInput(t *testing.T) {
 	t.Parallel()
-	gt := v1conv.NewToolTimingTracker(harness.Claude, FormatToolOutput)
+	gt := eventreplay.NewToolTimingTracker(harness.Claude, eventreplay.FormatToolOutput)
 	msg := &agent.UserInputMessage{
 		Text: "hello agent",
 	}
@@ -226,7 +226,7 @@ func TestGenericConvertUserInput(t *testing.T) {
 
 func TestGenericConvertSystemMessage(t *testing.T) {
 	t.Parallel()
-	gt := v1conv.NewToolTimingTracker(harness.Claude, FormatToolOutput)
+	gt := eventreplay.NewToolTimingTracker(harness.Claude, eventreplay.FormatToolOutput)
 	msg := &agent.SystemMessage{
 		MessageType: "system",
 		Subtype:     "status",
@@ -242,7 +242,7 @@ func TestGenericConvertSystemMessage(t *testing.T) {
 
 func TestGenericConvertThinking(t *testing.T) {
 	t.Parallel()
-	gt := v1conv.NewToolTimingTracker(harness.Claude, FormatToolOutput)
+	gt := eventreplay.NewToolTimingTracker(harness.Claude, eventreplay.FormatToolOutput)
 	msg := &agent.ThinkingMessage{Text: "let me think..."}
 	events := gt.ConvertMessage(msg, time.Now())
 	if len(events) != 1 {
@@ -304,7 +304,7 @@ func TestGenericConvertSubagentEvents(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			gt := v1conv.NewToolTimingTracker(harness.Claude, FormatToolOutput)
+			gt := eventreplay.NewToolTimingTracker(harness.Claude, eventreplay.FormatToolOutput)
 			events := gt.ConvertMessage(tt.msg, time.Now())
 			if len(events) != 1 {
 				t.Fatalf("got %d events, want 1", len(events))
@@ -319,7 +319,7 @@ func TestGenericConvertSubagentEvents(t *testing.T) {
 
 func TestGenericConvertRawMessageFiltered(t *testing.T) {
 	t.Parallel()
-	gt := v1conv.NewToolTimingTracker(harness.Claude, FormatToolOutput)
+	gt := eventreplay.NewToolTimingTracker(harness.Claude, eventreplay.FormatToolOutput)
 	msg := &agent.RawMessage{
 		MessageType: "tool_progress",
 		Raw:         []byte(`{"type":"tool_progress"}`),
@@ -334,7 +334,7 @@ func TestToolInputTruncation(t *testing.T) {
 	t.Parallel()
 	t.Run("SmallInputPassedThrough", func(t *testing.T) {
 		t.Parallel()
-		gt := v1conv.NewToolTimingTracker(harness.Claude, FormatToolOutput)
+		gt := eventreplay.NewToolTimingTracker(harness.Claude, eventreplay.FormatToolOutput)
 		msg := &agent.ToolUseMessage{ToolUseID: "t1", Name: "Read", Input: json.RawMessage(`{"file_path":"/etc/hosts"}`)}
 		events := gt.ConvertMessage(msg, time.Now())
 		if len(events) != 1 {
@@ -349,8 +349,8 @@ func TestToolInputTruncation(t *testing.T) {
 	})
 	t.Run("LargeInputTruncated", func(t *testing.T) {
 		t.Parallel()
-		gt := v1conv.NewToolTimingTracker(harness.Claude, FormatToolOutput)
-		largeContent := make([]byte, v1conv.InputTruncateThreshold+1)
+		gt := eventreplay.NewToolTimingTracker(harness.Claude, eventreplay.FormatToolOutput)
+		largeContent := make([]byte, eventreplay.InputTruncateThreshold+1)
 		for i := range largeContent {
 			largeContent[i] = 'x'
 		}
@@ -369,7 +369,7 @@ func TestToolInputTruncation(t *testing.T) {
 	})
 	t.Run("BackgroundTrue", func(t *testing.T) {
 		t.Parallel()
-		gt := v1conv.NewToolTimingTracker(harness.Claude, FormatToolOutput)
+		gt := eventreplay.NewToolTimingTracker(harness.Claude, eventreplay.FormatToolOutput)
 		msg := &agent.ToolUseMessage{ToolUseID: "t3", Name: "Bash", Input: json.RawMessage(`{"command":"sleep 60","run_in_background":true}`)}
 		events := gt.ConvertMessage(msg, time.Now())
 		if len(events) != 1 {
@@ -381,7 +381,7 @@ func TestToolInputTruncation(t *testing.T) {
 	})
 	t.Run("BackgroundAbsent", func(t *testing.T) {
 		t.Parallel()
-		gt := v1conv.NewToolTimingTracker(harness.Claude, FormatToolOutput)
+		gt := eventreplay.NewToolTimingTracker(harness.Claude, eventreplay.FormatToolOutput)
 		msg := &agent.ToolUseMessage{ToolUseID: "t4", Name: "Bash", Input: json.RawMessage(`{"command":"ls"}`)}
 		events := gt.ConvertMessage(msg, time.Now())
 		if len(events) != 1 {
@@ -393,7 +393,7 @@ func TestToolInputTruncation(t *testing.T) {
 	})
 	t.Run("BackgroundAgentTool", func(t *testing.T) {
 		t.Parallel()
-		gt := v1conv.NewToolTimingTracker(harness.Claude, FormatToolOutput)
+		gt := eventreplay.NewToolTimingTracker(harness.Claude, eventreplay.FormatToolOutput)
 		msg := &agent.ToolUseMessage{ToolUseID: "t5", Name: "Agent", Input: json.RawMessage(`{"prompt":"search","run_in_background":true}`)}
 		events := gt.ConvertMessage(msg, time.Now())
 		if len(events) != 1 {
@@ -407,7 +407,7 @@ func TestToolInputTruncation(t *testing.T) {
 
 func TestGenericConvertWidget(t *testing.T) {
 	t.Parallel()
-	gt := v1conv.NewToolTimingTracker(harness.Claude, FormatToolOutput)
+	gt := eventreplay.NewToolTimingTracker(harness.Claude, eventreplay.FormatToolOutput)
 	msg := &agent.WidgetMessage{
 		ToolUseID: "wid_1",
 		Title:     "Chart",
@@ -437,7 +437,7 @@ func TestGenericConvertWidget(t *testing.T) {
 
 func TestGenericConvertWidgetDelta(t *testing.T) {
 	t.Parallel()
-	gt := v1conv.NewToolTimingTracker(harness.Claude, FormatToolOutput)
+	gt := eventreplay.NewToolTimingTracker(harness.Claude, eventreplay.FormatToolOutput)
 	msg := &agent.WidgetDeltaMessage{
 		ToolUseID: "wid_2",
 		Delta:     "<h1>Hel",

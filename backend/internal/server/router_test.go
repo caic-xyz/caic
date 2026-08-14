@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,6 +27,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
+	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/logtest"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
@@ -1982,6 +1984,9 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		}
 		tk.RestoreMessages([]agent.Message{&agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done"}})
 		tk.SetState(task.StateStopped)
+		if _, err := os.Stat(eventreplay.CachePath(logs[0].LogPath())); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("replay sidecar before stopped history request = %v, want absent", err)
+		}
 
 		s := newTestRouter(t, nil)
 		s.taskMgr.Insert(taskID.String(), taskmgr.NewEntry(tk, logs[0]))
@@ -2002,6 +2007,9 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		}
 		if strings.Contains(body, "stale crash") {
 			t.Fatalf("stale relay exit leaked into SSE body:\n%s", body)
+		}
+		if _, err := os.Stat(eventreplay.CachePath(logs[0].LogPath())); err != nil {
+			t.Fatalf("replay sidecar after stopped history request = %v, want regenerated cache", err)
 		}
 	})
 

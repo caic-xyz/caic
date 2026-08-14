@@ -48,14 +48,6 @@ func (w *failAfterSSEWriter) Write(data []byte) (int, error) {
 	return n, err
 }
 
-func newLiveReplayWriter(logPath string, prove eventreplay.ProofProvider) (*eventreplay.MessageWriter, error) {
-	proof, err := prove(logPath)
-	if err != nil {
-		return nil, err
-	}
-	return eventreplay.NewMessageWriter(logPath, proof, prove)
-}
-
 func TestReplayCache(t *testing.T) {
 	t.Parallel()
 
@@ -264,37 +256,6 @@ func TestReplayCache(t *testing.T) {
 			if !strings.Contains(second, want) {
 				t.Fatalf("cached body missing %q:\n%s", want, second)
 			}
-		}
-	})
-
-	t.Run("LiveWriterCompactsEventMessages", func(t *testing.T) {
-		t.Parallel()
-		logDir := t.TempDir()
-		logPath := filepath.Join(logDir, "task.jsonl")
-		if err := os.WriteFile(logPath, []byte("{\"type\":\"caic_meta\",\"version\":1,\"harness\":\"claude\",\"prompt\":\"test\"}\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-
-		w, err := newLiveReplayWriter(logPath, task.CacheProofForLog)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := w.WriteMessage(t.Context(), agent.ParsedMessage{Message: &agent.TextDeltaMessage{Text: "partial"}}); err != nil {
-			t.Fatal(err)
-		}
-		if err := w.WriteMessage(t.Context(), agent.ParsedMessage{Message: &agent.TextMessage{Text: "final"}}); err != nil {
-			t.Fatal(err)
-		}
-		if err := w.Commit(t.Context(), logPath); err != nil {
-			t.Fatal(err)
-		}
-
-		contents := readReplayCacheEvents(t, eventreplay.CachePath(logPath))
-		if len(contents.events) != 1 {
-			t.Fatalf("cache event count = %d, want 1: %#v", len(contents.events), contents.events)
-		}
-		if contents.events[0].Kind != v1.EventKindText || contents.events[0].Text == nil || contents.events[0].Text.Text != "final" {
-			t.Fatalf("cache event = %#v, want final text", contents.events[0])
 		}
 	})
 

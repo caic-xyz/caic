@@ -24,7 +24,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
-	"github.com/caic-xyz/caic/backend/internal/task/tasktest"
 )
 
 // instantExitBackend embeds testBackend but spawns a process that exits
@@ -32,6 +31,30 @@ import (
 // already-done branch don't have to wait out its 10-second liveness timer.
 type instantExitBackend struct {
 	testBackend
+}
+
+// reviveEnsureFailureBackend lets the resumed session exit, then rejects the
+// idle replacement started by EnsureSession.
+type reviveEnsureFailureBackend struct {
+	instantExitBackend
+
+	starts int
+}
+
+func (b *reviveEnsureFailureBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	b.starts++
+	if b.starts > 1 {
+		return nil, errors.New("idle session start failed")
+	}
+	return b.instantExitBackend.Start(ctx, opts)
+}
+
+type reviveFailureRuntime struct {
+	*runtimetest.FakeBackend
+}
+
+func (*reviveFailureRuntime) Revive(context.Context, runtime.ID) error {
+	return errors.New("runtime revive failed")
 }
 
 type testRuntimeSystem struct {
@@ -594,21 +617,24 @@ func TestRunner(t *testing.T) {
 			}
 		})
 
-		t.Run("CommitsReplayBeforeCompression", func(t *testing.T) {
+		t.Run("PublishesReplayAfterCompression", func(t *testing.T) {
 			t.Parallel()
 			logDir := t.TempDir()
 			clone := initTestRepo(t, "main")
 			workspace := newTestRepoWorkspace(t, "main", clone, nil)
 			r := newTestRunner(t, workspace, nil, logDir)
-			replay := &tasktest.FakeEventReplayWriter{}
-			r.Sessions.Logs.EventReplayFactory = func(string, CacheProof, CacheProofProvider) (EventReplayWriter, error) {
-				return replay, nil
-			}
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
 				Harness:       harness.Claude,
 				Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
+			}
+			published := false
+			r.OnTerminalLogClosed = func(_ context.Context, got *Task, state State) {
+				if got != tk || state != StatePurged || !isLogCompressed(got.LogPath()) {
+					t.Fatal("terminal replay callback did not receive the final compressed log")
+				}
+				published = true
 			}
 			log, err := r.Sessions.Logs.Open(tk)
 			if err != nil {
@@ -619,10 +645,13 @@ func TestRunner(t *testing.T) {
 			}
 
 			r.Cleanup(t.Context(), tk, StatePurged)
+			if !published {
+				t.Fatal("terminal replay callback was not invoked after compression")
+			}
 
 			want := filepath.Join(logDir, tk.ID.String()+"-org-repo-caic-0.jsonl")
-			if got := replay.Commits; len(got) != 1 || got[0] != want {
-				t.Errorf("replay commits = %q, want %q", got, want)
+			if _, err := os.Stat(want); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("uncompressed log after cleanup = %v, want absent", err)
 			}
 		})
 
@@ -815,6 +844,81 @@ func TestRunner(t *testing.T) {
 				}
 			})
 		})
+		t.Run("failure_persists_terminal_log", func(t *testing.T) {
+			t.Parallel()
+			for _, tc := range []struct {
+				name     string
+				runtime  runtime.Lifecycle
+				backends map[harness.Name]agent.Backend
+			}{
+				{
+					name:    "runtime_revive",
+					runtime: &reviveFailureRuntime{FakeBackend: &runtimetest.FakeBackend{}},
+				},
+				{
+					name:    "session_start",
+					runtime: testContainer(),
+					backends: map[harness.Name]agent.Backend{
+						"test": &agenttest.FakeBackend{},
+					},
+				},
+				{
+					name:    "ensure_session",
+					runtime: testContainer(),
+					backends: map[harness.Name]agent.Backend{
+						"test": &reviveEnsureFailureBackend{},
+					},
+				},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					logDir := t.TempDir()
+					workspace := newTestRepoWorkspace(t, "", "", tc.runtime)
+					r := newTestRunner(t, workspace, tc.backends, logDir)
+					tk := &Task{
+						ID:            ksid.NewID(),
+						InitialPrompt: agent.Prompt{Text: "test"},
+						Harness:       "test",
+					}
+					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+					tk.SetState(StateStopped)
+					log, err := r.Sessions.Logs.Open(tk)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := r.Sessions.Logs.WriteResultTrailer(log, tk.Title(), &Result{State: StateStopped}); err != nil {
+						t.Fatal(err)
+					}
+					if err := log.Close(); err != nil {
+						t.Fatal(err)
+					}
+					published := 0
+					r.OnTerminalLogClosed = func(_ context.Context, got *Task, state State) {
+						if got != tk || state != StateFailed || !isLogCompressed(got.LogPath()) {
+							t.Fatal("replay callback did not receive the final failed log")
+						}
+						published++
+					}
+
+					if _, err := r.ReviveTask(t.Context(), tk); err == nil {
+						t.Fatal("ReviveTask succeeded, want failure")
+					}
+					if published != 1 {
+						t.Fatalf("terminal replay callbacks = %d, want 1", published)
+					}
+					loaded, err := LoadLogs(logDir)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if len(loaded) != 1 || loaded[0].Result == nil || loaded[0].Result.State != StateFailed {
+						t.Fatalf("loaded terminal result = %+v, want failed trailer", loaded)
+					}
+					if !isLogCompressed(loaded[0].LogPath()) {
+						t.Fatalf("final log = %q, want compressed", loaded[0].LogPath())
+					}
+				})
+			}
+		})
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
 			workspace := newTestRepoWorkspace(t, "", "", testContainer())
@@ -875,10 +979,6 @@ func TestRunner(t *testing.T) {
 			workspace := newTestRepoWorkspace(t, "", "", runtimeBackend)
 			backend := &testBackend{FakeBackend: &agenttest.FakeBackend{}}
 			r := newTestRunner(t, workspace, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
-			replay := &tasktest.FakeEventReplayWriter{}
-			r.Sessions.Logs.EventReplayFactory = func(string, CacheProof, CacheProofProvider) (EventReplayWriter, error) {
-				return replay, nil
-			}
 			source := &Task{
 				ID:      ksid.NewID(),
 				Harness: "test",
@@ -920,15 +1020,6 @@ func TestRunner(t *testing.T) {
 			}
 			if got := strings.Count(logs, `"t":"caic_meta"`); got != 1 {
 				t.Errorf("metadata header count = %d, want 1", got)
-			}
-			if len(replay.Messages) < 2 {
-				t.Fatalf("replay has %d messages, want setup logs", len(replay.Messages))
-			}
-			for i, want := range []string{"fork setup complete", "final setup line"} {
-				log, ok := replay.Messages[i].(*agent.LogMessage)
-				if !ok || log.Line != want {
-					t.Errorf("replay message[%d] = %#v, want log %q", i, replay.Messages[i], want)
-				}
 			}
 		})
 		t.Run("pins_each_repo_to_its_own_branch", func(t *testing.T) {
@@ -980,10 +1071,6 @@ func TestRunner(t *testing.T) {
 			}
 			workspace := newTestRepoWorkspace(t, "", "", runtimeBackend)
 			r := newTestRunner(t, workspace, nil, t.TempDir())
-			replay := &tasktest.FakeEventReplayWriter{}
-			r.Sessions.Logs.EventReplayFactory = func(string, CacheProof, CacheProofProvider) (EventReplayWriter, error) {
-				return replay, nil
-			}
 			source := &Task{
 				ID:      ksid.NewID(),
 				Harness: "test",
@@ -1013,9 +1100,6 @@ func TestRunner(t *testing.T) {
 			if !strings.Contains(logs, `"t":"result"`) {
 				t.Errorf("persisted log has no result trailer: %s", logs)
 			}
-			if got := len(replay.Commits); got != 1 {
-				t.Errorf("replay commit count = %d, want 1", got)
-			}
 		})
 		t.Run("persists_setup_logs_on_session_failure", func(t *testing.T) {
 			t.Parallel()
@@ -1023,10 +1107,6 @@ func TestRunner(t *testing.T) {
 			workspace := newTestRepoWorkspace(t, "", "", runtimeBackend)
 			backend := &agenttest.FakeBackend{}
 			r := newTestRunner(t, workspace, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
-			replay := &tasktest.FakeEventReplayWriter{}
-			r.Sessions.Logs.EventReplayFactory = func(string, CacheProof, CacheProofProvider) (EventReplayWriter, error) {
-				return replay, nil
-			}
 			source := &Task{
 				ID:      ksid.NewID(),
 				Harness: "test",
@@ -1052,9 +1132,6 @@ func TestRunner(t *testing.T) {
 				if !strings.Contains(logs, want) {
 					t.Errorf("persisted log does not contain %q: %s", want, logs)
 				}
-			}
-			if got := len(replay.Commits); got != 1 {
-				t.Errorf("replay commit count = %d, want 1", got)
 			}
 		})
 		t.Run("preserves configured metadata on fork", func(t *testing.T) {

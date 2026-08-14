@@ -8,6 +8,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
@@ -127,13 +128,13 @@ func Task(ctx context.Context, e *taskmgr.Entry, r TaskResolvers) v1.Task {
 		out.ContextWindowLimit = r.ContextWindowLimit(primaryName, t.Harness, snap.Model)
 	}
 	if e.Result() != nil {
-		out.DiffStat = DiffStat(e.Result().DiffStat)
+		out.DiffStat = eventreplay.DiffStat(e.Result().DiffStat)
 		out.Result = e.Result().AgentResult
 		if e.Result().Err != nil {
 			out.Error = e.Result().Err.Error()
 		}
 	} else {
-		out.DiffStat = DiffStat(snap.DiffStat)
+		out.DiffStat = eventreplay.DiffStat(snap.DiffStat)
 	}
 	out.ForgeOwner = snap.ForgeOwner
 	out.ForgeRepo = snap.ForgeRepo

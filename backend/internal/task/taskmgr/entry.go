@@ -10,10 +10,10 @@ import (
 
 // Entry is a single registered task plus its mutable lifecycle state.
 //
-// Concurrency: task and loadedTask are immutable references after construction.
-// result, done, doneClosed, cleanupOnce, and monitorBranch are guarded by mu
-// and must only be accessed through methods. Code outside this package never
-// touches the fields directly.
+// Concurrency: task is immutable after construction. loadedTask, result, done,
+// doneClosed, cleanupOnce, and monitorBranch are guarded by mu and must only be
+// accessed through methods. Code outside this package never touches the fields
+// directly.
 type Entry struct {
 	// Immutable.
 	task       *task.Task
@@ -58,8 +58,20 @@ func newPurgedEntry(t *task.Task, r *task.Result, lt *task.LoadedTask) *Entry {
 // concurrency-safe via its own internal locking.
 func (e *Entry) Task() *task.Task { return e.task }
 
-// LoadedTask returns the on-disk log handle for tasks restored from disk, or nil.
-func (e *Entry) LoadedTask() *task.LoadedTask { return e.loadedTask }
+// LoadedTask returns the on-disk log handle, or nil before a task log has been
+// validated for disk replay.
+func (e *Entry) LoadedTask() *task.LoadedTask {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.loadedTask
+}
+
+// SetLoadedTask records a freshly validated on-disk log handle for disk replay.
+func (e *Entry) SetLoadedTask(lt *task.LoadedTask) {
+	e.mu.Lock()
+	e.loadedTask = lt
+	e.mu.Unlock()
+}
 
 // Done returns the channel that closes when the task reaches a terminal
 // state. After Reset (Revive), this returns a fresh channel; goroutines that
@@ -155,7 +167,7 @@ func (e *Entry) Reset() {
 // purged task. fn must perform the actual load (and any side effect such as
 // RestoreMessages); the once is owned by the Entry.
 func (e *Entry) LoadMessagesOnce(fn func()) {
-	if e.loadedTask == nil {
+	if e.LoadedTask() == nil {
 		return
 	}
 	e.loadedTaskOnce.Do(fn)

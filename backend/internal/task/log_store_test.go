@@ -1,4 +1,4 @@
-// Tests for LogStore log segment creation, trailers, and replay attachment.
+// Tests for LogStore log segment creation, trailers, and sidecar-free reopening.
 
 package task
 
@@ -15,7 +15,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/task/tasktest"
 )
 
 func logLines(t *testing.T, path string) []string {
@@ -127,17 +126,9 @@ func TestLogStore(t *testing.T) {
 			t.Errorf("ReasoningOutputTokens = %d, want 123", got.ReasoningOutputTokens)
 		}
 	})
-	t.Run("OpenAttachesReplayAndWritesMetadata", func(t *testing.T) {
+	t.Run("OpenWritesMetadataWithoutReplaySidecar", func(t *testing.T) {
 		t.Parallel()
-		replay := &tasktest.FakeEventReplayWriter{}
-		var gotPath string
-		store := &LogStore{
-			LogDir: t.TempDir(),
-			EventReplayFactory: func(logPath string, _ CacheProof, _ CacheProofProvider) (EventReplayWriter, error) {
-				gotPath = logPath
-				return replay, nil
-			},
-		}
+		store := &LogStore{LogDir: t.TempDir()}
 		tk := &Task{
 			ID:            ksid.NewID(),
 			InitialPrompt: agent.Prompt{Text: "test prompt"},
@@ -154,11 +145,8 @@ func TestLogStore(t *testing.T) {
 		if err := w.Close(); err != nil {
 			t.Fatal(err)
 		}
-		if gotPath == "" || gotPath != tk.LogPath() {
-			t.Fatalf("replay path = %q, task path = %q", gotPath, tk.LogPath())
-		}
-		if _, err := CacheProofForLog(tk.LogPath()); err != nil {
-			t.Fatalf("replay proof = %v, want fresh-log proof", err)
+		if _, err := os.Stat(strings.TrimSuffix(tk.LogPath(), ".jsonl") + ".events.zst"); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("replay sidecar after Open = %v, want absent", err)
 		}
 		entries := logLines(t, tk.LogPath())
 		if len(entries) != 1 {
@@ -183,8 +171,8 @@ func TestLogStore(t *testing.T) {
 		}
 
 		tk.addMessage(t.Context(), &agent.TextMessage{Text: "hello"}, false)
-		if len(replay.Messages) != 1 {
-			t.Fatalf("replay messages = %d, want 1", len(replay.Messages))
+		if _, err := os.Stat(strings.TrimSuffix(tk.LogPath(), ".jsonl") + ".events.zst"); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("replay sidecar after active message = %v, want absent", err)
 		}
 	})
 	t.Run("OpenPreservesExistingLogAuthority", func(t *testing.T) {
@@ -430,7 +418,7 @@ func TestLogStore(t *testing.T) {
 			t.Fatalf("snapshot append validation error = %v, want path replacement", err)
 		}
 	})
-	t.Run("ReopenPassesInitialProofAndFreshProvider", func(t *testing.T) {
+	t.Run("ReopenDoesNotCreateReplaySidecar", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		tk := &Task{ID: ksid.NewID(), Harness: harness.Codex}
@@ -439,59 +427,16 @@ func TestLogStore(t *testing.T) {
 		if err := os.WriteFile(path, []byte(header), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		snapshot, err := loadSemanticLogSnapshot(path, func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-			return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
 		tk.SetLogPath(path)
-		tk.SetLogValidationSnapshot(snapshot)
-		var initial CacheProof
-		var fresh CacheProofProvider
-		store := &LogStore{LogDir: dir, EventReplayFactory: func(_ string, proof CacheProof, provider CacheProofProvider) (EventReplayWriter, error) {
-			initial = proof
-			fresh = provider
-			return &tasktest.FakeEventReplayWriter{}, nil
-		}}
-		w, err := store.Reopen(tk)
+		w, err := (&LogStore{LogDir: dir}).Reopen(tk)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if err := w.Close(); err != nil {
 			t.Fatal(err)
 		}
-		if initial != snapshot.cacheProof() {
-			t.Fatalf("initial replay proof = %#v, want Reopen observation %#v", initial, snapshot.cacheProof())
-		}
-		if fresh == nil {
-			t.Fatal("Reopen did not provide a fresh task proof provider")
-		}
-		proof, err := fresh(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if proof != initial {
-			t.Fatalf("fresh replay proof = %#v, want %#v", proof, initial)
-		}
-	})
-	t.Run("OpenSurfacesReplayFactoryError", func(t *testing.T) {
-		t.Parallel()
-		wantErr := errors.New("replay unavailable")
-		store := &LogStore{
-			LogDir: t.TempDir(),
-			EventReplayFactory: func(string, CacheProof, CacheProofProvider) (EventReplayWriter, error) {
-				return nil, wantErr
-			},
-		}
-		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test prompt"}, Harness: harness.Codex}
-
-		w, err := store.Open(tk)
-		if w != nil {
-			t.Fatal("Open returned writer with replay factory error")
-		}
-		if !errors.Is(err, wantErr) {
-			t.Fatalf("Open error = %v, want %v", err, wantErr)
+		if _, err := os.Stat(strings.TrimSuffix(path, ".jsonl") + ".events.zst"); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("replay sidecar after Reopen = %v, want absent", err)
 		}
 	})
 }

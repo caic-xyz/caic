@@ -31,6 +31,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -79,7 +80,6 @@ type Config struct {
 	// Runtimes validates runtime selection and dispatches task runtime operations.
 	Runtimes            *runtime.Router
 	Backends            map[harness.Name]agent.Backend
-	EventReplayFactory  task.EventReplayFactory
 	HarnessEnv          map[string][]string
 	RuntimeMetadata     runtime.Metadata
 	RuntimeStartTimeout time.Duration
@@ -143,7 +143,7 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 		cancelServerCtx:     cancelServerCtx,
 		cacheDir:            cfg.CacheDir,
 		Backends:            maps.Clone(cfg.Backends),
-		Logs:                task.LogStore{LogDir: cfg.LogDir, EventReplayFactory: cfg.EventReplayFactory},
+		Logs:                task.LogStore{LogDir: cfg.LogDir},
 		harnessEnv:          cfg.HarnessEnv,
 		runtimeMetadata:     maps.Clone(cfg.RuntimeMetadata),
 		runtimeStartTimeout: cfg.RuntimeStartTimeout,
@@ -329,6 +329,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 		h, err := m.runner(primaryWorkspace).Start(m.serverCtx, t, ghToken)
 		if err != nil {
 			entry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "start task")})
+			m.publishTerminalReplay(m.serverCtx, entry)
 			m.NotifyTaskChange()
 			return
 		}
@@ -644,6 +645,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 		h, err := m.runner(workspace).ForkTask(ctx, source, t, forkOpts, ghToken)
 		if err != nil {
 			forkEntry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "fork task")})
+			m.publishTerminalReplay(ctx, forkEntry)
 			m.NotifyTaskChange()
 			return
 		}
@@ -1241,7 +1243,13 @@ func (m *Manager) sessions(r *repowork.Workspace) *task.SessionRunner {
 }
 
 func (m *Manager) runner(r *repowork.Workspace) *task.Runner {
-	return &task.Runner{Workspace: r, Sessions: m.sessions(r), RuntimeMetadata: m.runtimeMetadata, RuntimeStartTimeout: m.runtimeStartTimeout}
+	return &task.Runner{
+		Workspace:           r,
+		Sessions:            m.sessions(r),
+		RuntimeMetadata:     m.runtimeMetadata,
+		RuntimeStartTimeout: m.runtimeStartTimeout,
+		OnTerminalLogClosed: m.publishTerminalReplayForTask,
+	}
 }
 
 func (m *Manager) containerPathForRepo(relPath string) string {
@@ -2035,6 +2043,52 @@ func (m *Manager) loadTaskMessagesOnDemand(entry *Entry) {
 	})
 }
 
+// publishTerminalReplay creates a replay cache from a new EOF-validated log
+// scan and records the source so terminal requests can fall back to a later
+// regeneration. It runs only after the terminal trailer's writer is closed;
+// failed cache publication is non-fatal because the raw log remains authority.
+func (m *Manager) publishTerminalReplayForTask(ctx context.Context, t *task.Task, _ task.State) {
+	entry, ok := m.GetEntry(t.ID.String())
+	if !ok {
+		m.log.WarnContext(ctx, "terminal replay entry is unavailable", "task", t.ID)
+		return
+	}
+	m.publishTerminalReplay(ctx, entry)
+}
+
+func (m *Manager) publishTerminalReplay(ctx context.Context, entry *Entry) {
+	lt, err := m.regenerateTerminalReplay(ctx, entry.Task())
+	if lt != nil {
+		entry.SetLoadedTask(lt)
+	}
+	if err != nil {
+		m.log.WarnContext(ctx, "regenerate terminal replay cache failed", "task", entry.Task().ID, "err", err)
+	}
+}
+
+// regenerateTerminalReplay reloads a completed task log, validates it through
+// EOF, and publishes its rebuildable replay cache. The loaded log remains
+// usable as an on-demand replay source if cache publication fails.
+func (m *Manager) regenerateTerminalReplay(ctx context.Context, t *task.Task) (*task.LoadedTask, error) {
+	path := t.LogPath()
+	if path == "" {
+		return nil, errors.New("terminal task has no log path")
+	}
+	loaded, err := task.LoadLogsForTaskIDs(filepath.Dir(path), []string{t.ID.String()})
+	if err != nil {
+		return nil, err
+	}
+	if len(loaded) != 1 {
+		return nil, fmt.Errorf("terminal task %s has %d matching logs", t.ID, len(loaded))
+	}
+	lt := loaded[0]
+	lt.SetNativeParserResolver(m.resolveNativeParser)
+	if err := eventreplay.RegenerateReplay(ctx, lt.LogPath(), lt.CacheProofForLog, lt.ScanMessagesWithContext); err != nil {
+		return lt, err
+	}
+	return lt, nil
+}
+
 // watchSession monitors a single active session. Clean session exits move the
 // task to StateWaiting; SSH/session errors fail the task and stop the instance.
 func (m *Manager) watchSession(entry *Entry, workspace *repowork.Workspace, h *task.SessionHandle) {
@@ -2093,9 +2147,7 @@ func (m *Manager) watchSession(entry *Entry, workspace *repowork.Workspace, h *t
 					if err := m.Logs.WriteTaskResultTrailer(t, result); err != nil {
 						m.log.WarnContext(m.serverCtx, "write crashed task trailer failed", append(attrs, "err", err)...)
 					}
-					if err := t.CommitEventReplay(m.serverCtx); err != nil {
-						m.log.WarnContext(m.serverCtx, "commit event replay failed", append(attrs, "err", err)...)
-					}
+					m.publishTerminalReplay(m.serverCtx, entry)
 				} else if t.RecordSessionFailure(m.serverCtx, sessionErr) {
 					failureErr := sessionErr
 					if exitErr := t.LastExitError(); exitErr != "" {
@@ -2116,9 +2168,7 @@ func (m *Manager) watchSession(entry *Entry, workspace *repowork.Workspace, h *t
 					if err := m.Logs.WriteTaskResultTrailer(t, result); err != nil {
 						m.log.WarnContext(m.serverCtx, "write failed task trailer failed", append(attrs, "err", err)...)
 					}
-					if err := t.CommitEventReplay(m.serverCtx); err != nil {
-						m.log.WarnContext(m.serverCtx, "commit event replay failed", append(attrs, "err", err)...)
-					}
+					m.publishTerminalReplay(m.serverCtx, entry)
 				}
 			} else {
 				m.log.InfoContext(m.serverCtx, "session exited", attrs...)
@@ -2129,9 +2179,6 @@ func (m *Manager) watchSession(entry *Entry, workspace *repowork.Workspace, h *t
 				// handling in task.go). The CAS only fires from Running, so
 				// it is a no-op once addMessage has already moved the state.
 				t.SetStateIf(task.StateRunning, task.StateWaiting)
-				if err := t.CommitEventReplay(m.serverCtx); err != nil {
-					m.log.WarnContext(m.serverCtx, "commit event replay failed", append(attrs, "err", err)...)
-				}
 			}
 			m.NotifyTaskChange()
 		case <-entry.Done():

@@ -24,7 +24,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/task/tasktest"
 )
 
 func setClaudeParser(tasks []*LoadedTask) {
@@ -151,20 +150,7 @@ func (r *countingReadCloser) Read(p []byte) (int, error) {
 func reopenWithProofReplay(t *testing.T, dir, path string, tk *Task, snapshot *ValidatedLogSnapshot) int64 {
 	tk.SetLogPath(path)
 	tk.SetLogValidationSnapshot(snapshot)
-	replay := &tasktest.FakeEventReplayWriter{}
-	store := &LogStore{
-		LogDir: dir,
-		EventReplayFactory: func(_ string, proof CacheProof, fresh CacheProofProvider) (EventReplayWriter, error) {
-			if proof != snapshot.cacheProof() {
-				return nil, errors.New("Reopen did not retain its initial append proof")
-			}
-			if fresh == nil {
-				return nil, errors.New("Reopen did not provide a fresh task proof provider")
-			}
-			return replay, nil
-		},
-	}
-	w, err := store.Reopen(tk)
+	w, err := (&LogStore{LogDir: dir}).Reopen(tk)
 	if err != nil {
 		t.Fatalf("Reopen after adopted scans: %v", err)
 	}
@@ -179,12 +165,6 @@ func reopenWithProofReplay(t *testing.T, dir, path string, tk *Task, snapshot *V
 	}
 	if err := w.Close(); err != nil {
 		t.Fatalf("close Reopen writer: %v", err)
-	}
-	if err := tk.CommitEventReplay(t.Context()); err != nil {
-		t.Fatalf("commit attached replay: %v", err)
-	}
-	if len(replay.Commits) != 1 || replay.Commits[0] != path {
-		t.Fatalf("attached replay commits = %q, want %q", replay.Commits, path)
 	}
 	return proofBytes
 }
@@ -3406,7 +3386,7 @@ func TestV1ProductionReadPassMatrix(t *testing.T) {
 					// Adoption passes its completed EOF proof to the task before a
 					// later cleanup Reopen. Reopen must use only a bounded current
 					// header/identity check rather than adding a fourth full pass.
-					// Attach and commit a replay writer after proving the same raw header.
+					// Reopen after proving the same raw header.
 					reopenProofBytes = reopenWithProofReplay(t, dir, path, tk, messageSnapshot)
 				}
 				wantNativeCalls := 2    // one session and one message scan

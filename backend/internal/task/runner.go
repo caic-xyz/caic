@@ -105,6 +105,10 @@ type Runner struct {
 	Sessions            *SessionRunner
 	RuntimeMetadata     runtime.Metadata
 	RuntimeStartTimeout time.Duration // Timeout for instance start (image pull). Must be non-zero.
+	// OnTerminalLogClosed runs once after the terminal trailer is durably closed
+	// and the raw log has reached its final identity. Failed and purged logs are
+	// compressed before the callback; stopped logs remain plain.
+	OnTerminalLogClosed func(context.Context, *Task, State)
 }
 
 // Start performs branch/instance setup, starts the agent session, and sends
@@ -336,15 +340,11 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 			tlog.DebugContext(ctx, "cleanup: log trailer written and closed")
 		}
 	}
-	// The live writer was attached to the uncompressed log. Commit it before
-	// terminal compression replaces that file, otherwise its append proof sees
-	// a different physical log and correctly rejects the cache.
-	if err := t.CommitEventReplay(ctx); err != nil {
-		tlog.WarnContext(ctx, "commit event replay failed", "err", err)
-	}
 	if log != nil && trailerErr == nil && closeErr == nil {
 		if err := t.compressLogIfDone(reason); err != nil {
 			tlog.WarnContext(ctx, "compress task log failed", "err", err)
+		} else {
+			r.publishTerminalLog(ctx, t, reason)
 		}
 	}
 	tlog.InfoContext(ctx, "cleanup done", "dur", time.Since(start).Round(time.Millisecond),
@@ -411,9 +411,6 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 		if h != nil && h.Log != nil {
 			_ = h.Log.Close()
 		}
-		if err := t.CommitEventReplay(ctx); err != nil {
-			tlog.WarnContext(ctx, "commit event replay failed", "err", err)
-		}
 		tlog.InfoContext(ctx, "stop abandoned", "state", t.GetState())
 		return
 	}
@@ -434,14 +431,19 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 	if h != nil {
 		log = h.Log
 	}
-	if err := r.Sessions.Logs.WriteResultTrailer(log, t.Title(), &res); err != nil {
-		tlog.WarnContext(ctx, "write log trailer failed", "err", err)
+	trailerErr := r.Sessions.Logs.WriteResultTrailer(log, t.Title(), &res)
+	if trailerErr != nil {
+		tlog.WarnContext(ctx, "write log trailer failed", "err", trailerErr)
 	}
+	var closeErr error
 	if log != nil {
-		_ = log.Close()
+		closeErr = log.Close()
+		if closeErr != nil {
+			tlog.WarnContext(ctx, "close log failed", "err", closeErr)
+		}
 	}
-	if err := t.CommitEventReplay(ctx); err != nil {
-		tlog.WarnContext(ctx, "commit event replay failed", "err", err)
+	if log != nil && trailerErr == nil && closeErr == nil {
+		r.publishTerminalLog(ctx, t, StateStopped)
 	}
 	tlog.InfoContext(ctx, "stop done", "dur", time.Since(start).Round(time.Millisecond),
 		"cost", res.CostUSD, "turns", res.NumTurns)
@@ -471,8 +473,7 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 	tlog.Debug("workspace", "msg", "calling instance.Revive")
 	if err := r.Workspace.Runtimes.Revive(ctx, instanceID); err != nil {
 		tlog.Error("workspace", "msg", "Revive failed", "err", err)
-		t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
-		return nil, fmt.Errorf("revive instance: %w", err)
+		return nil, r.finishReviveFailure(ctx, t, fmt.Errorf("revive instance: %w", err), nil)
 	}
 	tlog.Debug("workspace", "msg", "Revive succeeded", "instance", instanceID)
 	t.SetVNCPort(r.Workspace.Runtimes.VNCPort(ctx, instanceID))
@@ -489,8 +490,7 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 	if err != nil {
 		close(msgCh)
 		<-dispatchDone
-		t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
-		return nil, fmt.Errorf("open log: %w", err)
+		return nil, r.finishReviveFailure(ctx, t, fmt.Errorf("open log: %w", err), nil)
 	}
 
 	t.SetState(StateRunning)
@@ -505,11 +505,9 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 		Log:             log,
 	})
 	if err != nil {
-		_ = log.Close()
 		close(msgCh)
 		<-dispatchDone
-		t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
-		return nil, fmt.Errorf("resume session after revive: %w", err)
+		return nil, r.finishReviveFailure(ctx, t, fmt.Errorf("resume session after revive: %w", err), log)
 	}
 
 	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log}
@@ -519,8 +517,7 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 	// start a fresh idle relay so the task can accept new prompts.
 	h, err = r.Sessions.EnsureSession(ctx, t, h, tlog)
 	if err != nil {
-		t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
-		return nil, err
+		return nil, r.finishReviveFailure(ctx, t, err, nil)
 	}
 
 	// 4. Compute host-side diff stat once.
@@ -754,8 +751,50 @@ func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, 
 	}, nil
 }
 
-// finishStartupFailure records a startup error in the task log and finalizes
-// its event replay so the failure survives a server restart.
+// publishTerminalLog notifies the lifecycle layer after a terminal log has its
+// final raw-file identity, so a replay cache can bind its authority proof once.
+func (r *Runner) publishTerminalLog(ctx context.Context, t *Task, state State) {
+	if r.OnTerminalLogClosed != nil {
+		r.OnTerminalLogClosed(ctx, t, state)
+	}
+}
+
+// finishReviveFailure records a failed revive result in the task log. A revive
+// may fail before opening a session log, after opening one, or while replacing
+// an immediately-exited resumed session; in every case the final trailer is
+// appended to a validated log and the non-revivable log is compressed before
+// lifecycle cache publication.
+func (r *Runner) finishReviveFailure(ctx context.Context, t *Task, reviveErr error, log agent.LogSink) error {
+	t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
+	if h := t.CloseAndDetachSession(context.WithoutCancel(ctx)); h != nil {
+		h.CloseMsgCh()
+		<-h.DispatchDone
+		if log == nil {
+			log = h.Log
+		}
+	}
+	var reopenErr error
+	if log == nil {
+		log, reopenErr = r.Sessions.Logs.Reopen(t)
+	}
+	if log == nil {
+		return errors.Join(reviveErr, reopenErr)
+	}
+	res := Result{State: StateFailed, Err: reviveErr}
+	trailerErr := r.Sessions.Logs.WriteResultTrailer(log, t.Title(), &res)
+	closeErr := log.Close()
+	if trailerErr == nil && closeErr == nil {
+		compressErr := t.compressLogIfDone(StateFailed)
+		if compressErr == nil {
+			r.publishTerminalLog(ctx, t, StateFailed)
+		}
+		return errors.Join(reviveErr, compressErr)
+	}
+	return errors.Join(reviveErr, trailerErr, closeErr)
+}
+
+// finishStartupFailure records a startup error in the task log so the failure
+// survives a server restart.
 func (r *Runner) finishStartupFailure(ctx context.Context, t *Task, log agent.LogSink, startupErr error) error {
 	failure := &agent.LogMessage{MessageType: "caic_log", Line: "Task startup failed: " + startupErr.Error()}
 	writeErr := log.AppendMessage(failure)
@@ -765,8 +804,7 @@ func (r *Runner) finishStartupFailure(ctx context.Context, t *Task, log agent.Lo
 	res := Result{State: StateFailed, Err: startupErr}
 	trailerErr := r.Sessions.Logs.WriteResultTrailer(log, t.Title(), &res)
 	closeErr := log.Close()
-	commitErr := t.CommitEventReplay(ctx)
-	return errors.Join(startupErr, writeErr, trailerErr, closeErr, commitErr)
+	return errors.Join(startupErr, writeErr, trailerErr, closeErr)
 }
 
 // logRelayDiag reads the relay daemon's relay.log from the instance and logs

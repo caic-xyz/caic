@@ -63,7 +63,7 @@ type taskEventStream struct {
 	w          http.ResponseWriter
 	flusher    http.Flusher
 	controller *http.ResponseController
-	tracker    *v1conv.ToolTimingTracker
+	tracker    *eventreplay.ToolTimingTracker
 	nextID     int
 }
 
@@ -90,7 +90,7 @@ func (s *taskEventStream) writeStats(stats []runtime.Stats) error {
 }
 
 func (s *taskEventStream) writeEvent(ev *v1.EventMessage) error {
-	data, err := v1conv.MarshalEvent(ev)
+	data, err := eventreplay.MarshalEvent(ev)
 	if err != nil {
 		return fmt.Errorf("marshal SSE event: %w", err)
 	}
@@ -170,7 +170,7 @@ func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.
 	statsHistory, statsLive, statsUnsub := entry.Task().SubscribeStats(stream.ctx)
 	defer statsUnsub()
 
-	stream.tracker = v1conv.NewToolTimingTracker(entry.Task().Harness, FormatToolOutput)
+	stream.tracker = eventreplay.NewToolTimingTracker(entry.Task().Harness, eventreplay.FormatToolOutput)
 
 	now := time.Now()
 	if shouldReplayHistoryFromDisk(state, loadedTask) {

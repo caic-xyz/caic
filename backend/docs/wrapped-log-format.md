@@ -43,15 +43,17 @@ Across all phases:
   rejected mutation; the observed mismatch has a documented cause and either a
   safe recovery path or an actionable terminal error.
 
-### Phase 2 — replay-spool-lifecycle: Establish replay sidecar ownership and cleanup
+### Phase 2 — derived-replay-publication: Establish replay cache publication and cleanup
 
-- **Scope:** replay cache body-file creation, publication, abort, and startup
-  cleanup behavior.
-- **Preserve:** a live replay writer is never removed, and incomplete or
-  unproven replay data is never published.
-- **Verify:** focused lifecycle tests show when a body file is expected, ensure
-  completed/aborted writers leave no stale spool, and clean only safely
-  identifiable abandoned spools on restart.
+- **Scope:** terminal and on-demand replay regeneration, cache body-file
+  creation, publication, abort, and startup cleanup behavior.
+- **Preserve:** terminal cache publication follows a fresh validated raw-log
+  scan; incomplete or unproven replay data is never published. Active tasks use
+  their in-memory stream and never own a replay sidecar writer.
+- **Verify:** focused lifecycle tests cover terminal cache publication and cache
+  misses; cancellation, source mutation, and completed/aborted regeneration
+  leave no stale derived artifact. Startup removes only safely identifiable
+  abandoned temporary files.
 
 ### Phase 3 — smoke-runtime-cleanup: Make real-runtime smoke resources self-cleaning
 

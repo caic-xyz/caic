@@ -73,16 +73,6 @@ type instanceDiscoveryResult struct {
 	err       error
 }
 
-// newEventReplayWriter gives construction the Reopen observation while later
-// replay-cache validation uses the task-owned fresh proof provider.
-func newEventReplayWriter(path string, initial task.CacheProof, fresh task.CacheProofProvider) (task.EventReplayWriter, error) {
-	writer, err := eventreplay.NewMessageWriter(path, initial, eventreplay.ProofProvider(fresh))
-	if errors.Is(err, eventreplay.ErrNoCompleteCache) {
-		return nil, task.ErrNoLiveReplayCache
-	}
-	return writer, err
-}
-
 // Serve starts the HTTP server and closes app-owned resources when serving ends.
 func (a *App) Serve(ctx context.Context, ln net.Listener) (err error) {
 	defer func() { err = errors.Join(err, a.taskMgr.Close()) }()
@@ -278,7 +268,6 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		Runtimes:            runtimes,
 		Workspaces:          workspaceRegistry,
 		Backends:            agentBackends,
-		EventReplayFactory:  newEventReplayWriter,
 		HarnessEnv:          cfg.Agent.HarnessEnv,
 		RuntimeMetadata:     cfg.Runtime.Metadata,
 		RuntimeStartTimeout: time.Hour,
@@ -287,9 +276,8 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	if err != nil {
 		return nil, fmt.Errorf("task manager: %w", err)
 	}
-	// Replay spool cleanup is safe only before caic creates live replay writers.
-	// Compression also replaces log paths, so finish maintenance before task
-	// adoption can expose any task to a replay request.
+	// Compression replaces log paths, so finish maintenance before task adoption
+	// can expose any task to a replay request.
 	err = func() error {
 		startupCtx, tk := trace.NewTask(ctx, "prepare-purged-task-logs")
 		defer tk.End()

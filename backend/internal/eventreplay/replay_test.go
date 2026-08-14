@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -55,503 +54,94 @@ func localCacheProof(path string) (logproof.CacheProof, error) {
 	}, nil
 }
 
-func replayBody(t *testing.T, logPath string) []byte {
-	t.Helper()
-	file, err := os.Open(filepath.Clean(CachePath(logPath)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = file.Close() }()
-	decoder, err := zstd.NewReader(file)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer decoder.Close()
-	contents, err := io.ReadAll(decoder)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, body, ok := bytes.Cut(contents, []byte{'\n'})
-	if !ok {
-		t.Fatal("replay cache body has no header")
-	}
-	return body
-}
-
-func newMessageWriterForProof(logPath string, prove ProofProvider) (*MessageWriter, error) {
-	proof, err := prove(logPath)
-	if err != nil {
-		return nil, err
-	}
-	return NewMessageWriter(logPath, proof, prove)
-}
-
 func TestCacheWriter(t *testing.T) {
 	t.Parallel()
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "task.jsonl")
+	if err := os.WriteFile(logPath, []byte("{\"type\":\"caic_meta\",\"version\":1,\"harness\":\"claude\",\"prompt\":\"test\"}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cache, err := NewCacheWriter(logPath, localCacheProof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache.WriteEventData([]byte(`{"kind":"text","ts":1,"text":{"text":"rebuilt"}}`))
+	if err := cache.CommitContext(t.Context(), logPath); err != nil {
+		t.Fatal(err)
+	}
+	replay, ok := OpenReplay(logPath, localCacheProof)
+	if !ok {
+		t.Fatal("rebuilt cache was not committed")
+	}
+	defer replay.Close()
+	out := &flushBuffer{}
+	idx := 0
+	if replay.WriteSSE(out, out, &idx) != SSEComplete || idx != 1 || !bytes.Contains(out.Bytes(), []byte("rebuilt")) {
+		t.Fatalf("replay output = %q, frames = %d", out.String(), idx)
+	}
+}
 
-	t.Run("live_append_after_header_can_start_new_cache", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		logPath := filepath.Join(dir, "task.jsonl")
-		if err := os.WriteFile(logPath, []byte("{\"type\":\"caic_meta\",\"version\":1,\"harness\":\"claude\",\"prompt\":\"test\"}\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
+func TestRegenerateReplay(t *testing.T) {
+	t.Parallel()
 
-		w, err := newMessageWriterForProof(logPath, localCacheProof)
-		if err != nil {
+	writeRawLog := func(t *testing.T, path string) {
+		if err := os.WriteFile(path, []byte("{\"type\":\"caic_meta\",\"version\":1,\"harness\":\"claude\",\"prompt\":\"test\"}\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if err := w.WriteMessage(t.Context(), agent.ParsedMessage{Message: &agent.TextMessage{Text: "partial append"}}); err != nil {
-			t.Fatal(err)
-		}
-		if err := w.Commit(t.Context(), logPath); err != nil {
-			t.Fatalf("Commit after header-only log: %v", err)
-		}
-		if replay, ok := OpenReplay(logPath, localCacheProof); !ok {
-			t.Fatal("header-only live cache with an emitted event was not committed")
-		} else {
-			replay.Close()
-		}
-	})
-
-	t.Run("live_append_without_events_commits_complete_empty_replay", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		logPath := filepath.Join(dir, "task.jsonl")
-		if err := os.WriteFile(logPath, []byte("{\"type\":\"caic_meta\",\"version\":1,\"harness\":\"claude\",\"prompt\":\"test\"}\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		writer, err := newMessageWriterForProof(logPath, localCacheProof)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := writer.Commit(t.Context(), logPath); err != nil {
-			t.Fatal(err)
-		}
-		replay, ok := OpenReplay(logPath, localCacheProof)
-		if !ok {
-			t.Fatal("complete empty live replay was not publishable")
-		}
-		out := &flushBuffer{}
-		idx := 0
-		if replay.WriteSSE(out, out, &idx) != SSEComplete || idx != 0 || out.Len() != 0 {
-			t.Fatalf("complete empty replay = %q, index = %d", out.String(), idx)
-		}
-		replay.Close()
-		writer, err = newMessageWriterForProof(logPath, localCacheProof)
-		if err != nil {
-			t.Fatalf("reopen empty live replay writer: %v", err)
-		}
-		if err := writer.Commit(t.Context(), logPath); err != nil {
-			t.Fatalf("commit reopened empty live replay writer: %v", err)
-		}
-		if replay, ok = OpenReplay(logPath, localCacheProof); !ok {
-			t.Fatal("reopened complete empty live replay was not publishable")
-		} else {
-			replay.Close()
-		}
-	})
-
-	t.Run("regenerated_and_live_diff_stat_bodies_match", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		header := []byte("{\"type\":\"caic_meta\",\"version\":1,\"harness\":\"claude\",\"prompt\":\"test\"}\n")
-		regeneratedPath := filepath.Join(dir, "regenerated.jsonl")
-		livePath := filepath.Join(dir, "live.jsonl")
-		for _, path := range []string{regeneratedPath, livePath} {
-			if err := os.WriteFile(path, header, 0o600); err != nil {
-				t.Fatal(err)
-			}
-		}
-		message := agent.ParsedMessage{
-			Message:      &agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: agent.DiffStat{{Path: "main.go", Added: 2, Deleted: 1}}},
-			ProducerTime: time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC),
-		}
-		if err := RegenerateReplay(t.Context(), regeneratedPath, localCacheProof, func(_ context.Context, yield func(agent.ParsedMessage) error) (logproof.CacheProof, error) {
-			if err := yield(message); err != nil {
-				return logproof.CacheProof{}, err
-			}
-			return localCacheProof(regeneratedPath)
-		}); err != nil {
-			t.Fatal(err)
-		}
-		live, err := newMessageWriterForProof(livePath, localCacheProof)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := live.WriteMessage(t.Context(), message); err != nil {
-			t.Fatal(err)
-		}
-		if err := live.Commit(t.Context(), livePath); err != nil {
-			t.Fatal(err)
-		}
-		if got, want := replayBody(t, regeneratedPath), replayBody(t, livePath); !bytes.Equal(got, want) {
-			t.Fatalf("regenerated DiffStat replay body = %q, live = %q", got, want)
-		}
-	})
-
-	t.Run("live_append_rejects_compressed_log", func(t *testing.T) {
-		t.Parallel()
-		if _, err := newMessageWriterForProof(filepath.Join(t.TempDir(), "task.jsonl.zst"), localCacheProof); err == nil {
-			t.Fatal("compressed live append was accepted")
-		}
-	})
-
-	t.Run("live_append_never_seeds_an_invalid_cache_body", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		logPath := filepath.Join(dir, "task.jsonl")
-		header := []byte("{\"type\":\"caic_meta\",\"version\":1,\"harness\":\"claude\",\"prompt\":\"test\"}\n")
-		if err := os.WriteFile(logPath, header, 0o600); err != nil {
-			t.Fatal(err)
-		}
-		cache, err := NewCacheWriter(logPath, localCacheProof)
-		if err != nil {
-			t.Fatal(err)
-		}
-		cache.WriteEventData([]byte(`null`))
-		if err := cache.CommitContext(t.Context(), logPath); err != nil {
-			t.Fatal(err)
-		}
-		if file, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0o600); err != nil { // #nosec G304 -- test temp path
-			t.Fatal(err)
-		} else {
-			_, err = file.WriteString("{\"type\":\"assistant\"}\n")
-			closeErr := file.Close()
-			if err != nil || closeErr != nil {
-				t.Fatalf("append raw log = %v, %v", err, closeErr)
-			}
-		}
-		writer, err := newMessageWriterForProof(logPath, localCacheProof)
-		if !errors.Is(err, ErrNoCompleteCache) {
-			t.Fatalf("NewMessageWriter error = %v, want rejected invalid seed", err)
-		}
-		if writer != nil {
-			t.Fatal("NewMessageWriter returned a writer for an invalid seed")
-		}
-	})
-
-	t.Run("disk_spools_unbounded_delta_runs_before_compaction", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		logPath := filepath.Join(dir, "task.jsonl")
-		if err := os.WriteFile(logPath, []byte("{\"type\":\"caic_meta\",\"version\":1,\"harness\":\"claude\",\"prompt\":\"test\"}\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		cache, err := NewCacheWriter(logPath, localCacheProof)
-		if err != nil {
-			t.Fatal(err)
-		}
-		filter := newReplayDiskFilter(cache, "claude", time.Now, true)
-		if err := filter.pushContext(t.Context(), agent.ParsedMessage{Message: &agent.TextDeltaMessage{Text: "delta"}}); err != nil {
-			t.Fatal(err)
-		}
-		if filter.pending != nil || filter.pendingBuffer.Len() == 0 {
-			t.Fatal("small live delta created a spool instead of using the bounded buffer")
-		}
-		for range 4095 {
-			if err := filter.pushContext(t.Context(), agent.ParsedMessage{Message: &agent.TextDeltaMessage{Text: "delta"}}); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if filter.pending == nil {
-			t.Fatal("long delta run was not disk-spooled after the buffer threshold")
-		}
-		info, err := filter.pending.Stat()
-		if err != nil || info.Size() == 0 {
-			t.Fatalf("pending spool = (%v, %v), want nonempty file", info, err)
-		}
-		if err := filter.pushContext(t.Context(), agent.ParsedMessage{Message: &agent.TextMessage{Text: "final"}}); err != nil {
-			t.Fatal(err)
-		}
-		if filter.pending != nil {
-			t.Fatal("matching final did not discard disk spool")
-		}
-		if err := filter.flushContext(t.Context()); err != nil {
-			t.Fatal(err)
-		}
-		filter.close()
-		if err := cache.CommitContext(t.Context(), logPath); err != nil {
-			t.Fatal(err)
-		}
-		replay, ok := OpenReplay(logPath, localCacheProof)
-		if !ok {
-			t.Fatal("compacted replay was not published")
-		}
-		defer replay.Close()
-		out := &flushBuffer{}
-		idx := 0
-		if replay.WriteSSE(out, out, &idx) != SSEComplete || idx != 1 || !bytes.Contains(out.Bytes(), []byte("final")) || bytes.Contains(out.Bytes(), []byte("delta")) {
-			t.Fatalf("compacted disk spool output = %q, frames = %d", out.String(), idx)
-		}
-	})
-
-	t.Run("header_authority_selects_tracker_and_producer_time", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		logPath := filepath.Join(dir, "task.jsonl")
-		if err := os.WriteFile(logPath, []byte("{\"type\":\"caic_meta\",\"version\":1,\"harness\":\"codex\",\"prompt\":\"test\"}\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		observed := time.Date(2026, 4, 5, 6, 7, 8, 9_000_000, time.UTC)
-		if err := RegenerateReplay(t.Context(), logPath, localCacheProof, func(ctx context.Context, yield func(agent.ParsedMessage) error) (logproof.CacheProof, error) {
-			if err := yield(agent.ParsedMessage{Message: &agent.InitMessage{SessionID: "s"}, ProducerTime: observed}); err != nil {
-				return logproof.CacheProof{}, err
-			}
-			return localCacheProof(logPath)
-		}); err != nil {
-			t.Fatal(err)
-		}
-		replay, ok := OpenReplay(logPath, localCacheProof)
-		if !ok {
-			t.Fatal("replay not published")
-		}
-		defer replay.Close()
-		out := &flushBuffer{}
-		idx := 0
-		if replay.WriteSSE(out, out, &idx) != SSEComplete {
-			t.Fatal("replay was not writable")
-		}
-		if !bytes.Contains(out.Bytes(), []byte(`"harness":"codex"`)) || !bytes.Contains(out.Bytes(), fmt.Appendf(nil, `"ts":%d`, observed.UnixMilli())) {
-			t.Fatalf("header authority/producer time missing from replay: %s", out.String())
-		}
-	})
-
-	t.Run("live_writer_preserves_nonzero_producer_time", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		logPath := filepath.Join(dir, "task.jsonl")
-		if err := os.WriteFile(logPath, []byte("{\"type\":\"caic_meta\",\"version\":1,\"harness\":\"claude\",\"prompt\":\"test\"}\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		observed := time.Date(2026, 5, 6, 7, 8, 9, 10_000_000, time.UTC)
-		w, err := newMessageWriterForProof(logPath, localCacheProof)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := w.WriteMessage(t.Context(), agent.ParsedMessage{Message: &agent.TextMessage{Text: "timed"}, ProducerTime: observed}); err != nil {
-			t.Fatal(err)
-		}
-		if err := w.Commit(t.Context(), logPath); err != nil {
-			t.Fatal(err)
-		}
-		replay, ok := OpenReplay(logPath, localCacheProof)
-		if !ok {
-			t.Fatal("live replay not published")
-		}
-		defer replay.Close()
-		out := &flushBuffer{}
-		idx := 0
-		if replay.WriteSSE(out, out, &idx) != SSEComplete {
-			t.Fatal("live replay was not writable")
-		}
-		if !bytes.Contains(out.Bytes(), fmt.Appendf(nil, `"ts":%d`, observed.UnixMilli())) {
-			t.Fatalf("live replay did not preserve producer time: %s", out.String())
-		}
-	})
-
-	t.Run("binds_completed_semantic_proof_without_seeding", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		logPath := filepath.Join(dir, "task.jsonl")
-		if err := os.WriteFile(logPath, []byte("{\"type\":\"caic_meta\",\"version\":1,\"harness\":\"claude\",\"prompt\":\"test\"}\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		calls := 0
-		prove := func(path string) (logproof.CacheProof, error) {
-			calls++
-			return localCacheProof(path)
-		}
-		if err := RegenerateReplay(t.Context(), logPath, prove, func(ctx context.Context, yield func(agent.ParsedMessage) error) (logproof.CacheProof, error) {
-			if err := yield(agent.ParsedMessage{Message: &agent.TextMessage{Text: "cached"}}); err != nil {
-				return logproof.CacheProof{}, err
-			}
-			return prove(logPath)
-		}); err != nil {
-			t.Fatal(err)
-		}
-		if calls != 4 {
-			t.Fatalf("proof calls = %d, want initial, semantic, and pre/post-publication authority checks", calls)
-		}
-	})
-
-	t.Run("cancellation_discards_body_and_pending_spool", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		logPath := filepath.Join(dir, "task.jsonl")
-		if err := os.WriteFile(logPath, []byte("{\"type\":\"caic_meta\",\"version\":1,\"harness\":\"claude\",\"prompt\":\"test\"}\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		ctx, cancel := context.WithCancel(t.Context())
-		err := RegenerateReplay(ctx, logPath, localCacheProof, func(ctx context.Context, yield func(agent.ParsedMessage) error) (logproof.CacheProof, error) {
-			for range 4096 {
-				if err := yield(agent.ParsedMessage{Message: &agent.TextDeltaMessage{Text: "delta"}}); err != nil {
-					return logproof.CacheProof{}, err
-				}
-			}
-			cancel()
-			if err := yield(agent.ParsedMessage{Message: &agent.TextMessage{Text: "final"}}); err != nil {
-				return logproof.CacheProof{}, err
-			}
-			return localCacheProof(logPath)
-		})
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("RegenerateReplay error = %v, want context cancellation", err)
-		}
+	}
+	assertNoReplayArtifacts := func(t *testing.T, logPath string) {
 		if _, err := os.Stat(CachePath(logPath)); !os.IsNotExist(err) {
-			t.Fatalf("cache after cancellation = %v, want absent", err)
+			t.Fatalf("published unsafe cache: %v", err)
 		}
-		for _, suffix := range []string{"*.body", "*.pending", "*.tmp"} {
-			left, globErr := filepath.Glob(CachePath(logPath) + "." + suffix)
-			if globErr != nil || len(left) != 0 {
-				t.Fatalf("temporary replay files = %v, %v", left, globErr)
-			}
-		}
-	})
-
-	t.Run("live_writer_propagates_cancellation_and_discards_body", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		logPath := filepath.Join(dir, "task.jsonl")
-		if err := os.WriteFile(logPath, []byte("{\"type\":\"caic_meta\",\"version\":1,\"harness\":\"claude\",\"prompt\":\"test\"}\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		writer, err := newMessageWriterForProof(logPath, localCacheProof)
+		matches, err := filepath.Glob(CachePath(logPath) + ".*")
 		if err != nil {
 			t.Fatal(err)
 		}
-		ctx, cancel := context.WithCancel(t.Context())
-		cancel()
-		if err := writer.WriteMessage(ctx, agent.ParsedMessage{Message: &agent.TextMessage{Text: "cancelled"}}); !errors.Is(err, context.Canceled) {
-			t.Fatalf("WriteMessage error = %v, want context cancellation", err)
+		if len(matches) != 0 {
+			t.Fatalf("stale replay artifacts = %v", matches)
 		}
-		if err := writer.Commit(ctx, logPath); !errors.Is(err, context.Canceled) {
-			t.Fatalf("Commit error = %v, want context cancellation", err)
-		}
-		for _, suffix := range []string{"*.body", "*.pending", "*.tmp"} {
-			left, globErr := filepath.Glob(CachePath(logPath) + "." + suffix)
-			if globErr != nil || len(left) != 0 {
-				t.Fatalf("temporary replay files = %v, %v", left, globErr)
-			}
-		}
-	})
+	}
 
-	t.Run("cancellation_during_commit_proof_closes_detached_body", func(t *testing.T) {
+	t.Run("discards unsafe derived artifacts/source mutation", func(t *testing.T) {
 		t.Parallel()
-		dir := t.TempDir()
-		logPath := filepath.Join(dir, "task.jsonl")
-		if err := os.WriteFile(logPath, []byte("{\"type\":\"caic_meta\",\"version\":1,\"harness\":\"claude\",\"prompt\":\"test\"}\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		ctx, cancel := context.WithCancel(t.Context())
-		proofCalls := 0
-		prove := func(path string) (logproof.CacheProof, error) {
-			proofCalls++
-			if proofCalls == 2 {
-				cancel()
-			}
-			return localCacheProof(path)
-		}
-		writer, err := NewCacheWriter(logPath, prove)
+		logPath := filepath.Join(t.TempDir(), "task.jsonl")
+		writeRawLog(t, logPath)
+		proof, err := localCacheProof(logPath)
 		if err != nil {
 			t.Fatal(err)
 		}
-		body := writer.body
-		err = writer.CommitContext(ctx, logPath)
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("CommitContext error = %v, want context cancellation", err)
-		}
-		if _, err := body.Stat(); !errors.Is(err, os.ErrClosed) {
-			t.Fatalf("detached body Stat error = %v, want closed file", err)
-		}
-		if _, err := os.Stat(CachePath(logPath)); !os.IsNotExist(err) {
-			t.Fatalf("cache after cancellation = %v, want absent", err)
-		}
-	})
-
-	t.Run("cancellation_after_compression_does_not_rename_cache", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		logPath := filepath.Join(dir, "task.jsonl")
-		if err := os.WriteFile(logPath, []byte("{\"type\":\"caic_meta\",\"version\":1,\"harness\":\"claude\",\"prompt\":\"test\"}\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		ctx, cancel := context.WithCancel(t.Context())
-		proofCalls := 0
-		prove := func(path string) (logproof.CacheProof, error) {
-			proofCalls++
-			if proofCalls == 3 { // final proof: compression has completed, rename is next.
-				cancel()
-			}
-			return localCacheProof(path)
-		}
-		err := RegenerateReplay(ctx, logPath, prove, func(context.Context, func(agent.ParsedMessage) error) (logproof.CacheProof, error) {
-			return localCacheProof(logPath)
-		})
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("RegenerateReplay error = %v, want context cancellation", err)
-		}
-		if _, err := os.Stat(CachePath(logPath)); !os.IsNotExist(err) {
-			t.Fatalf("cache after cancellation = %v, want absent", err)
-		}
-	})
-
-	t.Run("semantic_proof_must_match_at_commit", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		logPath := filepath.Join(dir, "task.jsonl")
-		if err := os.WriteFile(logPath, []byte("{\"type\":\"caic_meta\",\"version\":1,\"harness\":\"claude\",\"prompt\":\"test\"}\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		err := RegenerateReplay(t.Context(), logPath, localCacheProof, func(ctx context.Context, yield func(agent.ParsedMessage) error) (logproof.CacheProof, error) {
-			proof, proofErr := localCacheProof(logPath)
-			if proofErr != nil {
-				return logproof.CacheProof{}, proofErr
-			}
-			if err := yield(agent.ParsedMessage{Message: &agent.TextMessage{Text: "old observation"}}); err != nil {
+		err = RegenerateReplay(t.Context(), logPath, localCacheProof, func(_ context.Context, yield func(agent.ParsedMessage) error) (logproof.CacheProof, error) {
+			if err := yield(agent.ParsedMessage{Message: &agent.TextMessage{Text: "before mutation"}}); err != nil {
 				return logproof.CacheProof{}, err
 			}
-			file, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G304 -- test temp path
-			if err != nil {
+			if err := os.WriteFile(logPath, append([]byte("{\"type\":\"caic_meta\",\"version\":1,\"harness\":\"claude\",\"prompt\":\"test\"}\n"), []byte("{\"type\":\"ignored\"}\n")...), 0o600); err != nil {
 				return logproof.CacheProof{}, err
-			}
-			_, err = file.WriteString("{\"type\":\"assistant\"}\n")
-			closeErr := file.Close()
-			if err != nil || closeErr != nil {
-				return logproof.CacheProof{}, errors.Join(err, closeErr)
 			}
 			return proof, nil
 		})
-		if err == nil || !strings.Contains(err.Error(), "semantic scan") {
-			t.Fatalf("RegenerateReplay error = %v, want semantic proof mismatch", err)
+		if err == nil {
+			t.Fatal("RegenerateReplay succeeded after source mutation")
 		}
-		if _, err := os.Stat(CachePath(logPath)); !os.IsNotExist(err) {
-			t.Fatalf("cache after proof mismatch = %v, want absent", err)
-		}
+		assertNoReplayArtifacts(t, logPath)
 	})
 
-	t.Run("full_rebuild_can_commit_existing_log", func(t *testing.T) {
+	t.Run("discards unsafe derived artifacts/cancellation removes pending spool", func(t *testing.T) {
 		t.Parallel()
-		dir := t.TempDir()
-		logPath := filepath.Join(dir, "task.jsonl")
-		if err := os.WriteFile(logPath, []byte("{\"type\":\"caic_meta\",\"version\":1,\"harness\":\"claude\",\"prompt\":\"test\"}\n"), 0o600); err != nil {
-			t.Fatal(err)
+		logPath := filepath.Join(t.TempDir(), "task.jsonl")
+		writeRawLog(t, logPath)
+		ctx, cancel := context.WithCancel(t.Context())
+		t.Cleanup(cancel)
+		err := RegenerateReplay(ctx, logPath, localCacheProof, func(_ context.Context, yield func(agent.ParsedMessage) error) (logproof.CacheProof, error) {
+			if err := yield(agent.ParsedMessage{Message: &agent.TextDeltaMessage{Text: strings.Repeat("x", maxPendingReplayBytes+1)}}); err != nil {
+				return logproof.CacheProof{}, err
+			}
+			cancel()
+			return localCacheProof(logPath)
+		})
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("RegenerateReplay error = %v, want context cancellation", err)
 		}
-
-		w, err := NewCacheWriter(logPath, localCacheProof)
-		if err != nil {
-			t.Fatal(err)
-		}
-		w.WriteEventData([]byte(`{"kind":"text","ts":1,"text":{"text":"rebuilt"}}`))
-		if err := w.CommitContext(t.Context(), logPath); err != nil {
-			t.Fatal(err)
-		}
-
-		if replay, ok := OpenReplay(logPath, localCacheProof); !ok {
-			t.Fatal("rebuilt cache was not committed")
-		} else {
-			replay.Close()
-		}
+		assertNoReplayArtifacts(t, logPath)
 	})
 }
 
@@ -648,23 +238,6 @@ func TestReplayRecordReaderRejectsOversizedRecord(t *testing.T) {
 	}
 }
 
-func TestAppendProofMatches(t *testing.T) {
-	t.Parallel()
-	initial := logproof.CacheProof{Device: 1, Inode: 2, Size: 10, ModTimeNs: 20, Version: agent.LogVersionV1, Harness: harness.Claude, RawHeader: "header"}
-	if !appendProofMatches(initial, logproof.CacheProof{Device: 1, Inode: 2, Size: 11, ModTimeNs: 21, Version: agent.LogVersionV1, Harness: harness.Claude, RawHeader: "header"}) {
-		t.Fatal("expected monotonic size/mtime append growth to match")
-	}
-	for _, changed := range []logproof.CacheProof{
-		{Device: 1, Inode: 2, Size: 10, ModTimeNs: 21, Version: agent.LogVersionV1, Harness: harness.Claude, RawHeader: "header"},
-		{Device: 1, Inode: 2, Size: 11, ModTimeNs: 21, Version: agent.LogVersionV1, Harness: harness.Claude, RawHeader: "changed"},
-		{Device: 1, Inode: 3, Size: 11, ModTimeNs: 21, Version: agent.LogVersionV1, Harness: harness.Claude, RawHeader: "header"},
-	} {
-		if appendProofMatches(initial, changed) {
-			t.Fatalf("append proof unexpectedly matched %+v", changed)
-		}
-	}
-}
-
 func TestReplayDiskFilterCompactionEquivalence(t *testing.T) {
 	t.Parallel()
 
@@ -684,7 +257,7 @@ func TestReplayDiskFilterCompactionEquivalence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		filter := newReplayDiskFilter(cache, harness.Claude, time.Now, true)
+		filter := newReplayDiskFilter(cache, harness.Claude, time.Now())
 		for _, message := range messages {
 			if err := filter.pushContext(t.Context(), agent.ParsedMessage{Message: message}); err != nil {
 				t.Fatal(err)

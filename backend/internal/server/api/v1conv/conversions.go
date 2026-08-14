@@ -105,18 +105,6 @@ func SafetyIssues(issues []repowork.SafetyIssue) []v1.SafetyIssue {
 	return out
 }
 
-// DiffStat converts an agent diff stat to an API DTO.
-func DiffStat(ds agent.DiffStat) v1.DiffStat {
-	if len(ds) == 0 {
-		return nil
-	}
-	out := make(v1.DiffStat, len(ds))
-	for i, f := range ds {
-		out[i] = v1.DiffFileStat{Path: f.Path, Added: f.Added, Deleted: f.Deleted, Binary: f.Binary}
-	}
-	return out
-}
-
 // ProviderQuota converts a provider quota snapshot to an API DTO.
 func ProviderQuota(q *usage.ProviderQuota) v1.ProviderQuota {
 	if q == nil {

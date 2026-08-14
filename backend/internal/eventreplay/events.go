@@ -1,6 +1,6 @@
 // Agent event conversions from backend messages to API v1 SSE DTOs.
 
-package v1conv
+package eventreplay
 
 import (
 	"encoding/json"
@@ -326,6 +326,18 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 	default:
 		return nil
 	}
+}
+
+// DiffStat converts an agent diff stat to an API DTO.
+func DiffStat(ds agent.DiffStat) v1.DiffStat {
+	if len(ds) == 0 {
+		return nil
+	}
+	out := make(v1.DiffStat, len(ds))
+	for i, f := range ds {
+		out[i] = v1.DiffFileStat{Path: f.Path, Added: f.Added, Deleted: f.Deleted, Binary: f.Binary}
+	}
+	return out
 }
 
 // AskQuestions converts agent ask questions to API DTOs.
