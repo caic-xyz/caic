@@ -16,7 +16,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
@@ -28,6 +27,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
 	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
@@ -47,7 +47,9 @@ func (b *testCIBackend) ForgeForInfo(ctx context.Context, info *ci.RepoInfo) for
 	return b.forgeMgr.ForgeForInfo(ctx, &repo.Info{ForgeKind: info.ForgeKind, ForgeOwner: info.ForgeOwner, ForgeRepo: info.ForgeRepo})
 }
 
-func (b *testCIBackend) CreateTask(context.Context, bot.TaskRequest) (string, error) { return "", nil }
+func (b *testCIBackend) CreateTask(context.Context, task.CreateRequest) (string, error) {
+	return "", nil
+}
 
 func (b *testCIBackend) GetWorkspace(relPath string) (*repowork.Workspace, bool) {
 	return b.taskMgr.Workspaces.Workspace(relPath)

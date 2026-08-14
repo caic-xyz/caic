@@ -376,7 +376,7 @@ type Dependencies struct {
 	// App-owned automation services, routed to by HTTP handlers and webhooks.
 	Bot        *bot.Bot
 	CIService  *ci.Service
-	TaskClient bot.Client // creates bot-driven tasks for manual CI repair
+	TaskClient taskCreator // creates tasks for manual CI repair
 	Warnings   *WarningStore
 	CacheSizes *CacheSizeStore
 	FakeCI     FakeCIHook // optional fake CI simulation hook for smoke/e2e tests

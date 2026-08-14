@@ -12,7 +12,6 @@ import (
 	"github.com/maruel/genai"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -102,7 +101,7 @@ func (svc *Service) MonitorCI(ctx context.Context, entry TaskEntry, f forge.Forg
 		}
 		svc.log.InfoContext(ctx, "initial check runs", "task", t.ID, "runs", len(runs))
 		if len(runs) > 0 {
-			result, done := bot.EvaluateCheckRuns(owner, repo, runs)
+			result, done := EvaluateCheckRuns(owner, repo, runs)
 			if done {
 				if err := svc.cache.Put(owner, repo, sha, result); err != nil {
 					svc.log.WarnContext(ctx, "cache write failed", "err", err)
@@ -111,7 +110,7 @@ func (svc *Service) MonitorCI(ctx context.Context, entry TaskEntry, f forge.Forg
 				svc.ApplyMonitorCIResult(ctx, entry, f, owner, repo, sha, result)
 				return
 			}
-			status := bot.InterimCIStatus(runs)
+			status := InterimCIStatus(runs)
 			svc.log.InfoContext(ctx, "interim status via GitHub App", "task", t.ID, "status", status, "checks", len(result.Checks))
 			t.SetCIStatus(status, result.Checks)
 			svc.backend.NotifyTaskChange()
@@ -135,9 +134,9 @@ func (svc *Service) MonitorCI(ctx context.Context, entry TaskEntry, f forge.Forg
 		if len(runs) == 0 {
 			return false
 		}
-		result, done := bot.EvaluateCheckRuns(owner, repo, runs)
+		result, done := EvaluateCheckRuns(owner, repo, runs)
 		if !done {
-			status := bot.InterimCIStatus(runs)
+			status := InterimCIStatus(runs)
 			t.SetCIStatus(status, result.Checks)
 			svc.backend.NotifyTaskChange()
 			return false
@@ -194,7 +193,7 @@ func (svc *Service) ApplyMonitorCIResult(ctx context.Context, entry TaskEntry, f
 	var summary string
 	if result.Status == forge.CIStatusFailure {
 		ciStatus = forge.CIStatusFailure
-		summary = bot.FailureSummary(ctx, f, svc.provider, result)
+		summary = FailureSummary(ctx, f, svc.provider, result)
 	} else {
 		// CI passed — attempt a squash merge.
 		snap := t.Snapshot()
@@ -366,7 +365,7 @@ func (svc *Service) maybeAutoFix(ctx context.Context, t *task.Task, f forge.Forg
 	}
 	prompt += fmt.Sprintf(". Please fix the failing CI checks on branch %q and push the fix:\n\n%s", primary.Branch, ciSummary)
 	svc.log.InfoContext(ctx, "creating auto-fix task", "repo", primary.Name, "pr", snap.ForgePR, "branch", primary.Branch)
-	if _, err := svc.backend.CreateTask(ctx, bot.TaskRequest{Repo: repo.RelPath, Prompt: prompt, OwnerID: t.OwnerID}); err != nil {
+	if _, err := svc.backend.CreateTask(ctx, task.CreateRequest{Repo: repo.RelPath, Prompt: prompt, OwnerID: t.OwnerID}); err != nil {
 		svc.log.WarnContext(ctx, "create auto-fix task", "repo", primary.Name, "err", err)
 	}
 }
@@ -399,10 +398,10 @@ func (svc *Service) pollRepoCIOnce(ctx context.Context, info RepoInfo, f forge.F
 	if len(runs) == 0 {
 		return
 	}
-	result, done := bot.EvaluateCheckRuns(info.ForgeOwner, info.ForgeRepo, runs)
+	result, done := EvaluateCheckRuns(info.ForgeOwner, info.ForgeRepo, runs)
 	if !done {
 		// Still in progress — show failure early if any check already failed.
-		interimStatus := bot.InterimCIStatus(runs)
+		interimStatus := InterimCIStatus(runs)
 		repoStatus := forge.CIStatusPending
 		if interimStatus == forge.CIStatusFailure {
 			repoStatus = forge.CIStatusFailure

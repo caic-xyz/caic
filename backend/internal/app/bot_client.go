@@ -17,6 +17,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
@@ -47,7 +48,7 @@ func (c *botClient) ResolveRepo(forgeFullName string) *bot.RepoInfo {
 }
 
 // CreateTask creates and starts a task for bot-driven automation.
-func (c *botClient) CreateTask(ctx context.Context, req bot.TaskRequest) (string, error) {
+func (c *botClient) CreateTask(ctx context.Context, req task.CreateRequest) (string, error) {
 	if _, ok := c.taskMgr.Workspaces.Workspace(req.Repo); !ok {
 		return "", fmt.Errorf("workspace not found for repo %s", req.Repo)
 	}
@@ -68,7 +69,7 @@ func (c *botClient) CreateTask(ctx context.Context, req bot.TaskRequest) (string
 	// Resolve the forge owner/repo so ListPendingBotTasks can resolve the
 	// commenter. Only relevant for issue-triggered tasks.
 	var ownerResolved, repoResolved string
-	if req.IssueNumber > 0 {
+	if req.ForgeIssue > 0 {
 		if info, ok := c.repoSvc.Repos.InfoFor(req.Repo); ok && info.ForgeOwner != "" {
 			ownerResolved = info.ForgeOwner
 			repoResolved = info.ForgeRepo
@@ -87,7 +88,7 @@ func (c *botClient) CreateTask(ctx context.Context, req bot.TaskRequest) (string
 		Harness:             selectedHarness,
 		GitHubToken:         true,
 		ResolvedGitHubToken: ghToken,
-		ForgeIssue:          req.IssueNumber,
+		ForgeIssue:          req.ForgeIssue,
 		ForgeOwner:          ownerResolved,
 		ForgeRepo:           repoResolved,
 	})

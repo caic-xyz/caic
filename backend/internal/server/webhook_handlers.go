@@ -244,12 +244,12 @@ func (h *WebhookHandlers) webhookOnCI(ctx context.Context, kind forge.Kind, owne
 		return
 	}
 
-	result, done := bot.EvaluateCheckRuns(owner, repoName, runs)
+	result, done := ci.EvaluateCheckRuns(owner, repoName, runs)
 
 	// Pre-compute interim status once for all affected tasks/repos.
 	var interimStatus forge.CIStatus
 	if !done {
-		interimStatus = bot.InterimCIStatus(runs)
+		interimStatus = ci.InterimCIStatus(runs)
 	}
 
 	for _, e := range affected {
@@ -502,7 +502,7 @@ func (h *WebhookHandlers) handleCheckSuiteEvent(ctx context.Context, ev *github.
 		slog.WarnContext(ctx, "handleCheckSuiteEvent: get check-runs", "sha", sha, "err", err)
 		return
 	}
-	result, done := bot.EvaluateCheckRuns(repoInfo.ForgeOwner, repoInfo.ForgeRepo, runs)
+	result, done := ci.EvaluateCheckRuns(repoInfo.ForgeOwner, repoInfo.ForgeRepo, runs)
 	if !done {
 		return
 	}

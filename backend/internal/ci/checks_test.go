@@ -1,6 +1,6 @@
-// Tests for CI check run evaluation logic in the bot.
+// Tests for CI check run evaluation logic.
 
-package bot
+package ci
 
 import (
 	"testing"
@@ -105,32 +105,6 @@ func TestInterimCIStatus(t *testing.T) {
 		status := InterimCIStatus(runs)
 		if status != forge.CIStatusFailure {
 			t.Errorf("got %q, want %q", status, forge.CIStatusFailure)
-		}
-	})
-}
-
-func TestCheckFromRun(t *testing.T) {
-	t.Parallel()
-	t.Run("preserves timing", func(t *testing.T) {
-		t.Parallel()
-		now := time.Now()
-		completed := now.Add(time.Minute)
-		run := forge.CheckRun{
-			Name: "build", Status: forge.CheckRunStatusCompleted,
-			Conclusion: forge.CheckRunConclusionSuccess, StartedAt: now, CompletedAt: completed,
-		}
-		c := forge.CheckFromRun("o", "r", &run)
-		if c.StartedAt.IsZero() {
-			t.Error("startedAt should be set")
-		}
-		if c.CompletedAt.IsZero() {
-			t.Error("completedAt should be set")
-		}
-		if c.Status != forge.CheckRunStatusCompleted {
-			t.Errorf("status = %q, want completed", c.Status)
-		}
-		if c.Owner != "o" || c.Repo != "r" {
-			t.Errorf("owner/repo = %s/%s, want o/r", c.Owner, c.Repo)
 		}
 	})
 }

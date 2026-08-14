@@ -22,6 +22,14 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
+// CreateRequest describes an automated task creation request for one managed repository.
+type CreateRequest struct {
+	Repo       string
+	Prompt     string
+	OwnerID    string
+	ForgeIssue int
+}
+
 const statsRingSize = 60
 
 type statsSub struct {

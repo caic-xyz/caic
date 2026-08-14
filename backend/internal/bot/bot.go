@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/caic-xyz/caic/backend/internal/forge"
+	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
 // RepoInfo is the forge identity of a managed repository, returned by Client.ResolveRepo.
@@ -52,14 +53,6 @@ type CommentEvent struct {
 	CommentURL    string
 }
 
-// TaskRequest holds the parameters for creating a task via the API.
-type TaskRequest struct {
-	Repo        string // repo relative path
-	Prompt      string
-	OwnerID     string
-	IssueNumber int // originating issue/PR number for completion comment callbacks
-}
-
 // PendingBotTask describes a non-terminal task with a forge issue callback.
 // Used by ResumePendingComments to re-attach watchers after restart.
 type PendingBotTask struct {
@@ -76,7 +69,7 @@ type Client interface {
 	// Returns nil if the forge name does not match any managed repo.
 	ResolveRepo(forgeFullName string) *RepoInfo
 	// CreateTask creates a new task and returns its ID.
-	CreateTask(ctx context.Context, req TaskRequest) (string, error)
+	CreateTask(ctx context.Context, req task.CreateRequest) (string, error)
 	// WatchTaskCompletion blocks until the task reaches a terminal state,
 	// then returns the final state name and agent result text.
 	WatchTaskCompletion(ctx context.Context, taskID string) (state string, result string, err error)
@@ -175,11 +168,11 @@ func (b *Bot) postTaskComment(ctx context.Context, commenter forge.Commenter, ow
 }
 
 func (b *Bot) dispatch(ctx context.Context, repo *RepoInfo, prompt string, commenter forge.Commenter, issueNumber int, ownerID string) {
-	taskID, err := b.client.CreateTask(ctx, TaskRequest{
-		Repo:        repo.RelPath,
-		Prompt:      prompt,
-		OwnerID:     ownerID,
-		IssueNumber: issueNumber,
+	taskID, err := b.client.CreateTask(ctx, task.CreateRequest{
+		Repo:       repo.RelPath,
+		Prompt:     prompt,
+		OwnerID:    ownerID,
+		ForgeIssue: issueNumber,
 	})
 	if err != nil {
 		b.log.WarnContext(ctx, "create task failed", "repo", repo.RelPath, "err", err)

@@ -1,6 +1,6 @@
-// CI check-run evaluation and failure summary building for bot-driven CI workflows.
+// CI check-run evaluation and failure summary building.
 
-package bot
+package ci
 
 import (
 	"context"

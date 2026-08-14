@@ -5,6 +5,7 @@ package forge
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestReadLog(t *testing.T) {
@@ -44,6 +45,32 @@ func TestReadLog(t *testing.T) {
 		want := "Bold cleared"
 		if got != want {
 			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+}
+
+func TestCheckFromRun(t *testing.T) {
+	t.Parallel()
+	t.Run("preserves timing", func(t *testing.T) {
+		t.Parallel()
+		now := time.Now()
+		completed := now.Add(time.Minute)
+		run := CheckRun{
+			Name: "build", Status: CheckRunStatusCompleted,
+			Conclusion: CheckRunConclusionSuccess, StartedAt: now, CompletedAt: completed,
+		}
+		c := CheckFromRun("o", "r", &run)
+		if c.StartedAt.IsZero() {
+			t.Error("startedAt should be set")
+		}
+		if c.CompletedAt.IsZero() {
+			t.Error("completedAt should be set")
+		}
+		if c.Status != CheckRunStatusCompleted {
+			t.Errorf("status = %q, want completed", c.Status)
+		}
+		if c.Owner != "o" || c.Repo != "r" {
+			t.Errorf("owner/repo = %s/%s, want o/r", c.Owner, c.Repo)
 		}
 	})
 }

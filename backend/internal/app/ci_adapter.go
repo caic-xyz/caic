@@ -5,7 +5,6 @@ package app
 import (
 	"context"
 
-	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
@@ -15,11 +14,12 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
 	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/server"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
 type ciTaskCreator interface {
-	CreateTask(ctx context.Context, req bot.TaskRequest) (string, error)
+	CreateTask(ctx context.Context, req task.CreateRequest) (string, error)
 }
 
 // ciAdapter adapts caic stores and managers to ci.Backend.
@@ -56,8 +56,8 @@ func (a *ciAdapter) ForgeForInfo(ctx context.Context, info *ci.RepoInfo) forge.F
 	return a.forgeMgr.ForgeForInfo(ctx, r)
 }
 
-// CreateTask creates a bot-style task for CI auto-fix.
-func (a *ciAdapter) CreateTask(ctx context.Context, req bot.TaskRequest) (string, error) {
+// CreateTask creates an automated task for CI auto-fix.
+func (a *ciAdapter) CreateTask(ctx context.Context, req task.CreateRequest) (string, error) {
 	return a.taskCreator.CreateTask(ctx, req)
 }
 

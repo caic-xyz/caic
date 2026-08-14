@@ -12,7 +12,6 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
@@ -20,6 +19,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
@@ -28,13 +28,17 @@ import (
 // It is an HTTP concern object: it translates API requests into repository,
 // forge, bot task, and agent-session operations without retaining a back-reference
 // to Router.
+type taskCreator interface {
+	CreateTask(ctx context.Context, req task.CreateRequest) (string, error)
+}
+
 type ciHandlers struct {
 	taskMgr    *taskmgr.Manager
 	repoSvc    *repomgr.Service
 	repoStatus *ci.RepoStatusStore
 	forgeMgr   *forgemgr.Manager
 	provider   genai.Provider
-	taskClient bot.Client
+	taskClient taskCreator
 	authStore  *auth.Store
 }
 
@@ -103,7 +107,7 @@ func (h *ciHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 }
 
 // fixCI creates a task to fix failing CI on a repo's default branch.
-// It fetches CI logs via the forge, builds a rich prompt using bot.FailureSummary,
+// It fetches CI logs via the forge, builds a rich prompt using ci.FailureSummary,
 // and creates a new agent task — the same path as the automated maybeAutoFix.
 func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Task, error) {
 	info, ok := h.repoSvc.Repos.InfoFor(req.Repo)
@@ -120,7 +124,7 @@ func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Task, 
 		return nil, api.BadRequest("no CI failure on default branch")
 	}
 
-	// Convert stored DTO checks back to forge.Check for bot.FailureSummary.
+	// Convert stored DTO checks back to forge.Check for ci.FailureSummary.
 	checks := make([]forge.Check, len(state.Checks))
 	for i := range state.Checks {
 		c := &state.Checks[i]
@@ -138,13 +142,13 @@ func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Task, 
 		}
 	}
 	result := forgecache.Result{Status: forge.CIStatusFailure, Checks: checks}
-	summary := bot.FailureSummary(ctx, f, h.provider, result)
+	summary := ci.FailureSummary(ctx, f, h.provider, result)
 
 	var ownerID string
 	if u, ok := auth.UserFromContext(ctx); ok {
 		ownerID = u.ID
 	}
-	taskIDStr, err := h.taskClient.CreateTask(ctx, bot.TaskRequest{Repo: info.RelPath, Prompt: summary, OwnerID: ownerID})
+	taskIDStr, err := h.taskClient.CreateTask(ctx, task.CreateRequest{Repo: info.RelPath, Prompt: summary, OwnerID: ownerID})
 	if err != nil {
 		return nil, fmt.Errorf("create task: %w", err)
 	}
@@ -161,7 +165,7 @@ func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Task, 
 
 // fixPR injects a fix-PR command into an existing task's agent session.
 // It fetches CI logs via the forge using the task's existing CI checks,
-// builds a rich prompt using bot.FailureSummary, and sends it as input to the task.
+// builds a rich prompt using ci.FailureSummary, and sends it as input to the task.
 func (h *ciHandlers) fixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.StatusResp, error) {
 	entry, ok := h.taskMgr.GetEntry(req.TaskID)
 	if !ok {
@@ -195,11 +199,11 @@ func (h *ciHandlers) fixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.Status
 		if runsErr != nil {
 			return nil, fmt.Errorf("get check runs: %w", runsErr)
 		}
-		result, _ := bot.EvaluateCheckRuns(snap.ForgeOwner, snap.ForgeRepo, runs)
+		result, _ := ci.EvaluateCheckRuns(snap.ForgeOwner, snap.ForgeRepo, runs)
 		checks = result.Checks
 	}
 	result := forgecache.Result{Status: forge.CIStatusFailure, Checks: checks}
-	summary := bot.FailureSummary(ctx, f, h.provider, result)
+	summary := ci.FailureSummary(ctx, f, h.provider, result)
 
 	prURL := f.PRURL(snap.ForgeOwner, snap.ForgeRepo, snap.ForgePR)
 	prompt := fmt.Sprintf("CI failed on PR #%d", snap.ForgePR)

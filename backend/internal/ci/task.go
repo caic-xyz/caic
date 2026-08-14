@@ -7,7 +7,6 @@ import (
 	"slices"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
@@ -49,7 +48,7 @@ type Backend interface {
 	ForgeForInfo(ctx context.Context, info *RepoInfo) forge.Forge
 
 	// Tasks.
-	CreateTask(ctx context.Context, req bot.TaskRequest) (string, error)
+	CreateTask(ctx context.Context, req task.CreateRequest) (string, error)
 	GetWorkspace(relPath string) (*repowork.Workspace, bool)
 	SetTaskMonitorBranch(entry TaskEntry, branch string)
 
