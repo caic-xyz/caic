@@ -150,6 +150,7 @@ func newTestRunner(t *testing.T, workspace *repowork.Workspace, backends map[har
 		Workspace:           workspace,
 		Sessions:            newTestSessionRunner(t, workspace, logDir, backends),
 		RuntimeStartTimeout: time.Hour,
+		OnTerminalLogClosed: func(context.Context, *Task, State) {},
 	}
 }
 

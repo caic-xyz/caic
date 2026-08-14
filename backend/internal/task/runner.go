@@ -754,9 +754,7 @@ func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, 
 // publishTerminalLog notifies the lifecycle layer after a terminal log has its
 // final raw-file identity, so a replay cache can bind its authority proof once.
 func (r *Runner) publishTerminalLog(ctx context.Context, t *Task, state State) {
-	if r.OnTerminalLogClosed != nil {
-		r.OnTerminalLogClosed(ctx, t, state)
-	}
+	r.OnTerminalLogClosed(ctx, t, state)
 }
 
 // finishReviveFailure records a failed revive result in the task log. A revive
