@@ -17,6 +17,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	"github.com/caic-xyz/caic/backend/internal/logproof"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
 type bridgeBuffer struct {
@@ -44,6 +45,55 @@ func bridgeProof(path string) (logproof.CacheProof, error) {
 		Harness:   harness.Claude,
 		RawHeader: string(header),
 	}, nil
+}
+
+func TestReplayPublisherOpen(t *testing.T) {
+	t.Parallel()
+	logDir := t.TempDir()
+	logPath := filepath.Join(logDir, "task.jsonl")
+	if err := os.WriteFile(logPath, []byte("{\"type\":\"caic_meta\",\"version\":1,\"harness\":\"claude\",\"prompt\":\"test\"}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	logs, err := task.LoadLogs(logDir)
+	if err != nil || len(logs) != 1 {
+		t.Fatalf("LoadLogs = (%#v, %v), want one log", logs, err)
+	}
+	lt := logs[0]
+	writeCache := func(t *testing.T, text string) {
+		cache, err := eventreplay.NewCacheWriter(logPath, filepath.Join(logDir, ".replay-tmp"), lt.CacheProofForLog, replayFormat)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cache.WriteData([]byte(`{"kind":"text","ts":1,"text":{"text":"` + text + `"}}`))
+		if err := cache.CommitContext(t.Context(), logPath); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeCache(t, "original")
+	publisher, err := NewReplayPublisher(filepath.Join(logDir, ".replay-tmp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, ok := publisher.Open(lt)
+	if !ok {
+		t.Fatal("cold publisher open = false")
+	}
+	first.Close()
+	if len(publisher.trusted) != 1 {
+		t.Fatalf("trusted replay entries = %d, want 1", len(publisher.trusted))
+	}
+
+	writeCache(t, "replacement")
+	replay, ok := publisher.Open(lt)
+	if !ok {
+		t.Fatal("publisher open rejected replacement")
+	}
+	t.Cleanup(replay.Close)
+	out := &bridgeBuffer{}
+	idx := 0
+	if replay.WriteSSE(out, out, &idx) != eventreplay.SSEComplete || !bytes.Contains(out.Bytes(), []byte("replacement")) || bytes.Contains(out.Bytes(), []byte("original")) {
+		t.Fatalf("replacement replay = %q", out.String())
+	}
 }
 
 func TestReplayPublisherPrune(t *testing.T) {

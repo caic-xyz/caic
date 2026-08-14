@@ -276,8 +276,7 @@ func (h *taskHandlers) streamReplayStore(ctx context.Context, w io.Writer, flush
 	if lt == nil || lt.LogPath() == "" {
 		return errors.New("task has no replayable log")
 	}
-	logPath := lt.LogPath()
-	if replay, ok := eventreplay.OpenReplay(logPath, lt.CacheProofForLog, replayFormat); ok {
+	if replay, ok := h.replay.Open(lt); ok {
 		if err := ctx.Err(); err != nil {
 			replay.Close()
 			return err
@@ -296,7 +295,7 @@ func (h *taskHandlers) streamReplayStore(ctx context.Context, w io.Writer, flush
 	if err := h.replay.regenerate(ctx, lt); err != nil {
 		return fmt.Errorf("regenerate replay cache: %w", err)
 	}
-	replay, ok := eventreplay.OpenReplay(logPath, lt.CacheProofForLog, replayFormat)
+	replay, ok := h.replay.Open(lt)
 	if !ok {
 		return errors.New("regenerated replay cache was not publishable")
 	}

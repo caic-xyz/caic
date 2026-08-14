@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -35,6 +37,14 @@ func resolveReplayProof(logPath string, prove eventreplay.ProofProvider) (logpro
 // logs so publication remains an atomic rename.
 type ReplayPublisher struct {
 	tempDir string
+
+	mu      sync.Mutex
+	trusted map[string]trustedReplay
+}
+
+type trustedReplay struct {
+	proof    logproof.CacheProof
+	identity eventreplay.CacheIdentity
 }
 
 // NewReplayPublisher creates a replay publisher with an owned temporary
@@ -46,13 +56,42 @@ func NewReplayPublisher(tempDir string) (*ReplayPublisher, error) {
 	if err := os.MkdirAll(tempDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create replay temporary directory: %w", err)
 	}
-	return &ReplayPublisher{tempDir: tempDir}, nil
+	return &ReplayPublisher{tempDir: tempDir, trusted: make(map[string]trustedReplay)}, nil
 }
 
 // Publish publishes the derived replay cache for a closed, EOF-validated task
 // log. The raw task log remains authoritative when it fails.
 func (p *ReplayPublisher) Publish(ctx context.Context, lt *task.LoadedTask) error {
 	return p.regenerate(ctx, lt)
+}
+
+// Open returns an SSE-ready replay sidecar. Every request observes the exact
+// raw-log proof. An admitted matching sidecar checks only its opened file
+// identity and header; otherwise the cold path fully validates it before
+// admission.
+func (p *ReplayPublisher) Open(lt *task.LoadedTask) (*eventreplay.Replay, bool) {
+	if lt == nil || lt.LogPath() == "" {
+		return nil, false
+	}
+	logPath := filepath.Clean(lt.LogPath())
+	proof, err := resolveReplayProof(logPath, lt.CacheProofForLog)
+	if err != nil {
+		return nil, false
+	}
+	if trusted, ok := p.loadTrusted(logPath); ok {
+		if trusted.proof == proof {
+			if replay, ok := eventreplay.OpenTrustedReplay(logPath, proof, lt.CacheProofForLog, replayFormat, trusted.identity); ok {
+				return replay, true
+			}
+		}
+		p.forget(logPath)
+	}
+	replay, ok := eventreplay.OpenReplayWithProof(logPath, proof, lt.CacheProofForLog, replayFormat)
+	if !ok {
+		return nil, false
+	}
+	p.admit(logPath, proof, replay.CacheIdentity())
+	return replay, true
 }
 
 // Prune removes stale replay caches and interrupted artifacts from this
@@ -63,6 +102,25 @@ func (p *ReplayPublisher) Prune(logDir string, prove eventreplay.ProofProvider) 
 	return removed, errors.Join(tempErr, cacheErr)
 }
 
+func (p *ReplayPublisher) loadTrusted(logPath string) (trustedReplay, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	trusted, ok := p.trusted[filepath.Clean(logPath)]
+	return trusted, ok
+}
+
+func (p *ReplayPublisher) admit(logPath string, proof logproof.CacheProof, identity eventreplay.CacheIdentity) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.trusted[filepath.Clean(logPath)] = trustedReplay{proof: proof, identity: identity}
+}
+
+func (p *ReplayPublisher) forget(logPath string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.trusted, filepath.Clean(logPath))
+}
+
 // regenerate rebuilds the v1 replay sidecar from one completed task-log scan.
 // Cancellation leaves neither a replay cache nor a disk spool.
 func (p *ReplayPublisher) regenerate(ctx context.Context, lt *task.LoadedTask) error {
@@ -70,6 +128,7 @@ func (p *ReplayPublisher) regenerate(ctx context.Context, lt *task.LoadedTask) e
 }
 
 func (p *ReplayPublisher) regenerateSource(ctx context.Context, logPath string, prove eventreplay.ProofProvider, source replaySource) error {
+	p.forget(logPath)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -115,6 +174,12 @@ func (p *ReplayPublisher) regenerateSource(ctx context.Context, logPath string, 
 		return err
 	}
 	committed = true
+	identity, err := eventreplay.CacheIdentityForLog(logPath)
+	if err != nil {
+		p.forget(logPath)
+		return nil
+	}
+	p.admit(logPath, proof, identity)
 	return nil
 }
 

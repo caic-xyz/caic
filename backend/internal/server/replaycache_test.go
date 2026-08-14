@@ -259,17 +259,21 @@ func TestReplayCache(t *testing.T) {
 		}
 	})
 
-	t.Run("CorruptCacheRegeneratesFromRaw", func(t *testing.T) {
+	t.Run("CorruptCacheAfterFreshPublisherRegeneratesFromRaw", func(t *testing.T) {
 		t.Parallel()
 		logDir := t.TempDir()
 		logPath := writePurged(t, logDir, "raw truth")
 		cachePath := eventreplay.CachePath(logPath)
+		s, taskID := newServer(t, logDir)
+		if body := serveEvents(t, s, taskID); !strings.Contains(body, "raw truth") {
+			t.Fatalf("initial body missing raw content:\n%s", body)
+		}
 		if err := os.WriteFile(cachePath, []byte("not zstd"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		s, taskID := newServer(t, logDir)
 
-		body := serveEvents(t, s, taskID)
+		freshServer, freshTaskID := newServer(t, logDir)
+		body := serveEvents(t, freshServer, freshTaskID)
 		if !strings.Contains(body, "raw truth") {
 			t.Fatalf("body missing regenerated raw content:\n%s", body)
 		}

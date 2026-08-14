@@ -129,6 +129,122 @@ func TestCacheWriter(t *testing.T) {
 	})
 }
 
+func TestOpenTrustedReplay(t *testing.T) {
+	t.Parallel()
+	newCache := func(t *testing.T, body ...string) string {
+		logPath := filepath.Join(t.TempDir(), "task.jsonl")
+		if err := os.WriteFile(logPath, []byte(`{"type":"caic_meta"}`+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cache, err := NewCacheWriter(logPath, filepath.Join(filepath.Dir(logPath), ".replay-tmp"), localCacheProof, testFormat)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range body {
+			cache.WriteData([]byte(line))
+		}
+		if err := cache.CommitContext(t.Context(), logPath); err != nil {
+			t.Fatal(err)
+		}
+		return logPath
+	}
+
+	t.Run("skips body validation after cold admission", func(t *testing.T) {
+		t.Parallel()
+		logPath := newCache(t, `{"kind":"first"}`, `{"kind":"second"}`)
+		validations := 0
+		format := Format{Version: CacheVersion, ValidateLine: func(line []byte) error {
+			validations++
+			if !json.Valid(line) {
+				return errors.New("invalid test record")
+			}
+			return nil
+		}}
+		cold, ok := OpenReplay(logPath, localCacheProof, format)
+		if !ok {
+			t.Fatal("cold OpenReplay = false")
+		}
+		identity := cold.CacheIdentity()
+		cold.Close()
+		if validations != 2 {
+			t.Fatalf("cold validations = %d, want 2", validations)
+		}
+		proof, err := localCacheProof(logPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		validations = 0
+		warm, ok := OpenTrustedReplay(logPath, proof, localCacheProof, format, identity)
+		if !ok {
+			t.Fatal("warm OpenTrustedReplay = false")
+		}
+		t.Cleanup(warm.Close)
+		out := &flushBuffer{}
+		idx := 0
+		if warm.WriteSSE(out, out, &idx) != SSEComplete || idx != 2 {
+			t.Fatalf("warm WriteSSE = (%q, %d), want two records", out.String(), idx)
+		}
+		if validations != 0 {
+			t.Fatalf("warm validations = %d, want 0", validations)
+		}
+	})
+
+	t.Run("replacement falls back to cold validation", func(t *testing.T) {
+		t.Parallel()
+		logPath := newCache(t, `{"kind":"original"}`)
+		cold, ok := OpenReplay(logPath, localCacheProof, testFormat)
+		if !ok {
+			t.Fatal("initial OpenReplay = false")
+		}
+		identity := cold.CacheIdentity()
+		cold.Close()
+		cache, err := NewCacheWriter(logPath, filepath.Join(filepath.Dir(logPath), ".replay-tmp"), localCacheProof, testFormat)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cache.WriteData([]byte(`{"kind":"replacement"}`))
+		if err := cache.CommitContext(t.Context(), logPath); err != nil {
+			t.Fatal(err)
+		}
+		proof, err := localCacheProof(logPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if replay, ok := OpenTrustedReplay(logPath, proof, localCacheProof, testFormat, identity); ok {
+			replay.Close()
+			t.Fatal("trusted open accepted replaced cache")
+		}
+		replay, ok := OpenReplayWithProof(logPath, proof, localCacheProof, testFormat)
+		if !ok {
+			t.Fatal("cold open rejected replacement")
+		}
+		t.Cleanup(replay.Close)
+	})
+
+	t.Run("rechecks raw proof before streaming", func(t *testing.T) {
+		t.Parallel()
+		logPath := newCache(t, `{"kind":"record"}`)
+		cold, ok := OpenReplay(logPath, localCacheProof, testFormat)
+		if !ok {
+			t.Fatal("initial OpenReplay = false")
+		}
+		identity := cold.CacheIdentity()
+		cold.Close()
+		proof, err := localCacheProof(logPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		changedProof := proof
+		changedProof.Size++
+		if replay, ok := OpenTrustedReplay(logPath, proof, func(string) (logproof.CacheProof, error) {
+			return changedProof, nil
+		}, testFormat, identity); ok {
+			replay.Close()
+			t.Fatal("trusted open accepted changed raw proof")
+		}
+	})
+}
+
 func TestReadCacheHeaderStrictSchema(t *testing.T) {
 	t.Parallel()
 	proof := logproof.CacheProof{

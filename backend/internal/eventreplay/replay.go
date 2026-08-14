@@ -1,9 +1,9 @@
 // Package eventreplay stores proof-bound replay sidecars served through SSE.
 //
 // A sidecar (<task>.events.zst) is replaceable derived data: its header binds a
-// caller-provided line format to the authoritative raw-log identity. Storage
-// validates every record through EOF before streaming it as "data: <line>" SSE
-// frames, without knowing the raw-log parser or API schema.
+// caller-provided line format to the authoritative raw-log identity. Cold opens
+// validate every record through EOF; trusted warm opens verify the same sidecar
+// identity and header, then stream its body once without reparsing it.
 package eventreplay
 
 import (
@@ -56,6 +56,40 @@ type CacheHeader struct {
 	Version int                 `json:"v"`
 	Proof   logproof.CacheProof `json:"proof"`
 	Empty   bool                `json:"empty,omitempty"`
+}
+
+// CacheIdentity identifies one replay-sidecar file object. It is obtained from
+// an open descriptor so a trusted open never follows a path-only admission.
+type CacheIdentity struct {
+	info      os.FileInfo
+	size      int64
+	modTimeNs int64
+}
+
+func (i CacheIdentity) matches(other CacheIdentity) bool {
+	return i.info != nil && other.info != nil &&
+		os.SameFile(i.info, other.info) &&
+		i.size == other.size && i.modTimeNs == other.modTimeNs
+}
+
+func cacheIdentityForFile(file *os.File) (CacheIdentity, error) {
+	info, err := file.Stat()
+	if err != nil {
+		return CacheIdentity{}, err
+	}
+	return CacheIdentity{info: info, size: info.Size(), modTimeNs: info.ModTime().UnixNano()}, nil
+}
+
+// CacheIdentityForLog returns the current replay-sidecar identity. A caller
+// must still pass it to OpenTrustedReplay, which opens and compares the file
+// descriptor before serving any data.
+func CacheIdentityForLog(logPath string) (CacheIdentity, error) {
+	file, err := os.Open(filepath.Clean(CachePath(logPath)))
+	if err != nil {
+		return CacheIdentity{}, err
+	}
+	identity, identityErr := cacheIdentityForFile(file)
+	return identity, errors.Join(identityErr, file.Close())
 }
 
 // CachePath returns the sidecar cache path for a task log path. The
@@ -150,14 +184,15 @@ func PruneTemporaryArtifacts(tempDir string) error {
 
 // Replay is one validated, open replay sidecar.
 type Replay struct {
-	logPath string
-	proof   logproof.CacheProof
-	prove   ProofProvider
-	format  Format
-	file    *os.File
-	decoder *zstd.Decoder
-	br      *replayRecordReader
-	empty   bool
+	logPath  string
+	proof    logproof.CacheProof
+	prove    ProofProvider
+	format   Format
+	file     *os.File
+	decoder  *zstd.Decoder
+	br       *replayRecordReader
+	empty    bool
+	identity CacheIdentity
 }
 
 // SSEWriteResult distinguishes an untouched writer from a completed replay and
@@ -185,17 +220,69 @@ func OpenReplay(logPath string, prove ProofProvider, format Format) (*Replay, bo
 	if err != nil {
 		return nil, false
 	}
+	return OpenReplayWithProof(logPath, proof, prove, format)
+}
+
+// OpenReplayWithProof fully validates a sidecar for an already-observed raw-log
+// proof. The final proof observation before publication still prevents a raw-log
+// change between validation and streaming.
+func OpenReplayWithProof(logPath string, proof logproof.CacheProof, prove ProofProvider, format Format) (*Replay, bool) {
+	if !format.valid() {
+		return nil, false
+	}
 	file, decoder, br, err := openReplayBody(logPath)
 	if err != nil {
 		return nil, false
 	}
+	identity, err := cacheIdentityForFile(file)
+	if err != nil {
+		decoder.Close()
+		_ = file.Close()
+		return nil, false
+	}
 	header, ok := readCacheHeader(br, proof, format)
-	r := &Replay{logPath: logPath, proof: proof, prove: prove, format: format, file: file, decoder: decoder, br: br, empty: header.Empty}
+	r := &Replay{logPath: logPath, proof: proof, prove: prove, format: format, file: file, decoder: decoder, br: br, empty: header.Empty, identity: identity}
 	if !ok || !r.validateForPublication() {
 		r.Close()
 		return nil, false
 	}
 	return r, true
+}
+
+// OpenTrustedReplay opens the previously admitted sidecar descriptor, verifies
+// its identity and header, then rechecks raw authority before leaving the body
+// unread for one-pass SSE output. Admission is the caller's responsibility;
+// this intentionally does not parse or validate body records.
+func OpenTrustedReplay(logPath string, proof logproof.CacheProof, prove ProofProvider, format Format, expected CacheIdentity) (*Replay, bool) {
+	if !format.valid() {
+		return nil, false
+	}
+	file, decoder, br, err := openReplayBody(logPath)
+	if err != nil {
+		return nil, false
+	}
+	identity, err := cacheIdentityForFile(file)
+	if err != nil || !expected.matches(identity) {
+		decoder.Close()
+		_ = file.Close()
+		return nil, false
+	}
+	header, ok := readCacheHeader(br, proof, format)
+	r := &Replay{logPath: logPath, proof: proof, format: format, file: file, decoder: decoder, br: br, empty: header.Empty, identity: identity}
+	finalProof, proveErr := resolveProof(logPath, prove)
+	if !ok || proveErr != nil || finalProof != proof {
+		r.Close()
+		return nil, false
+	}
+	return r, true
+}
+
+// CacheIdentity returns the identity from this replay's open descriptor.
+func (r *Replay) CacheIdentity() CacheIdentity {
+	if r == nil {
+		return CacheIdentity{}
+	}
+	return r.identity
 }
 
 // Close releases the replay file and decoder.
