@@ -1,4 +1,4 @@
-// Runtime smoke test for the caic server with a real md container and v2 task logs.
+// Runtime smoke test for the caic server's real md lifecycle and terminal replay caches.
 
 // Copyright 2026 Marc-Antoine Ruel. All Rights Reserved. Use of this
 // source code is governed by the Apache v2 license that can be found in the
@@ -25,6 +25,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/app"
+	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
@@ -251,6 +252,71 @@ func TestSmoke(t *testing.T) {
 		}
 		purgeCancel()
 		t.Logf("task %s reached 'purged'", taskID)
+
+		t.Run("TerminalReplayRestart", func(t *testing.T) {
+			entries, err := os.ReadDir(logDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var terminalLog string
+			for _, entry := range entries {
+				if strings.HasPrefix(entry.Name(), taskID+"-") && strings.HasSuffix(entry.Name(), ".jsonl.zst") {
+					terminalLog = filepath.Join(logDir, entry.Name())
+					break
+				}
+			}
+			if terminalLog == "" {
+				t.Fatalf("purged task %s has no compressed terminal log", taskID)
+			}
+			cachePath := eventreplay.CachePath(terminalLog)
+			if _, err := os.Stat(cachePath); err != nil {
+				t.Fatalf("terminal replay cache was not published: %v", err)
+			}
+			if err := os.Remove(cachePath); err != nil {
+				t.Fatal(err)
+			}
+			interrupted := filepath.Join(logDir, ".replay-tmp", "interrupted.pending")
+			if err := os.WriteFile(interrupted, []byte("incomplete"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			baseURL = smoke.restart()
+			waitForTaskState(taskID, "purged")
+			if _, err := os.Stat(interrupted); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("startup did not remove replay temporary artifact: %v", err)
+			}
+
+			history := func() string {
+				req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, baseURL+"/api/caic/v1/tasks/"+taskID+"/raw_events", http.NoBody)
+				if err != nil {
+					t.Fatal(err)
+				}
+				resp, err := http.DefaultClient.Do(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				data, readErr := io.ReadAll(resp.Body)
+				closeErr := resp.Body.Close()
+				if readErr != nil {
+					t.Fatal(readErr)
+				}
+				if closeErr != nil {
+					t.Fatal(closeErr)
+				}
+				if resp.StatusCode != http.StatusOK {
+					t.Fatalf("terminal replay status = %d, body = %q", resp.StatusCode, data)
+				}
+				return string(data)
+			}
+			first := history()
+			if _, err := os.Stat(eventreplay.CachePath(terminalLog)); err != nil {
+				t.Fatalf("terminal replay cache was not rebuilt: %v", err)
+			}
+			second := history()
+			if first != second || !strings.Contains(first, "event: ready") {
+				t.Fatalf("terminal replay miss/hit mismatch:\nfirst:\n%s\nsecond:\n%s", first, second)
+			}
+		})
 	})
 
 	// --- Frontend serving ---

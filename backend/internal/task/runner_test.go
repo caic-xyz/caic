@@ -652,6 +652,13 @@ func TestRunner(t *testing.T) {
 				if got != tk || state != StatePurged || !isLogCompressed(got.LogPath()) {
 					t.Fatal("terminal replay callback did not receive the final compressed log")
 				}
+				loaded, err := LoadLogs(logDir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(loaded) != 1 || loaded[0].Result == nil || loaded[0].Result.State != StatePurged {
+					t.Fatalf("terminal replay callback log = %#v, want closed purged trailer", loaded)
+				}
 				published = true
 			}
 			log, err := r.Sessions.Logs.Open(tk)

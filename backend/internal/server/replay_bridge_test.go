@@ -144,6 +144,34 @@ func TestRegenerateReplay(t *testing.T) {
 		assertNoArtifacts(t, path)
 	})
 
+	t.Run("source failure after pending spool is restart-safe", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(t.TempDir(), "task.jsonl")
+		writeRawLog(t, path)
+		publisher := newPublisher(t, path)
+		sourceErr := errors.New("source failed")
+		err := publisher.regenerateSource(t.Context(), path, bridgeProof, func(_ context.Context, yield func(agent.ParsedMessage) error) (logproof.CacheProof, error) {
+			if err := yield(agent.ParsedMessage{Message: &agent.TextDeltaMessage{Text: strings.Repeat("x", maxPendingReplayBytes+1)}}); err != nil {
+				return logproof.CacheProof{}, err
+			}
+			return logproof.CacheProof{}, sourceErr
+		})
+		if !errors.Is(err, sourceErr) {
+			t.Fatalf("regenerateReplaySource error = %v, want source failure", err)
+		}
+		assertNoArtifacts(t, path)
+		// Model an interrupted process after the source failure has cleaned up.
+		// Startup pruning owns artifacts left by a later process interruption.
+		tempPath := filepath.Join(filepath.Dir(path), ".replay-tmp", "interrupted.pending")
+		if err := os.WriteFile(tempPath, []byte("incomplete"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := publisher.Prune(filepath.Dir(path), bridgeProof); err != nil {
+			t.Fatal(err)
+		}
+		assertNoArtifacts(t, path)
+	})
+
 	t.Run("compacts superseded deltas", func(t *testing.T) {
 		t.Parallel()
 		path := filepath.Join(t.TempDir(), "task.jsonl")
