@@ -1127,7 +1127,7 @@ func (m *Manager) Sync(ctx context.Context, entry *Entry, target SyncTarget, for
 		if message == "" {
 			message = t.InitialPrompt.Text
 		}
-		ds, issues, err := checkout.SyncToDefault(ctx, t, message)
+		ds, issues, err := checkout.SyncToDefault(ctx, m.log, m.Runtimes, t, message)
 		if err != nil {
 			return nil, internalErr(err, "sync to default")
 		}
@@ -1141,7 +1141,7 @@ func (m *Manager) Sync(ctx context.Context, entry *Entry, target SyncTarget, for
 	}
 
 	// Default: push to the task's own branch.
-	ds, issues, err := checkout.SyncToOrigin(ctx, t, force)
+	ds, issues, err := checkout.SyncToOrigin(ctx, m.log, m.Runtimes, t, force)
 	if err != nil {
 		return nil, internalErr(err, "sync to origin")
 	}
@@ -1220,7 +1220,7 @@ func (m *Manager) reconnectForInput(entry *Entry) error {
 		return err
 	}
 	tlog := m.log.With("task", t.ID, "instance", t.RuntimeInstanceID())
-	h, err = m.sessions(checkout).EnsureSession(m.serverCtx, t, h, tlog)
+	h, err = m.sessions(checkout).EnsureSession(m.serverCtx, tlog, t, h)
 	if err != nil {
 		return err
 	}
@@ -1288,7 +1288,7 @@ func (m *Manager) allocateBranches(ctx context.Context, t *task.Task, mounts []t
 			t.SetRepoBranch(i, ws.ReserveBranchName())
 			continue
 		}
-		branch, err := ws.AllocateBranch(ctx)
+		branch, err := ws.AllocateBranch(ctx, m.log)
 		if err != nil {
 			return fmt.Errorf("allocate branch for %s: %w", mounts[i].Name, err)
 		}
@@ -1958,7 +1958,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 			return &AdoptedTask{Entry: entry, Task: t, RelPath: ri.RelPath, ForgeKind: ri.ForgeKind, ForgeOwner: ri.ForgeOwner, ForgeRepo: ri.ForgeRepo, Branch: branch, FoundPRFromLog: foundPRFromLog}, nil
 		}
 		go func() {
-			h, err = m.sessions(checkout).EnsureSession(m.serverCtx, t, h, tlog)
+			h, err = m.sessions(checkout).EnsureSession(m.serverCtx, tlog, t, h)
 			if err != nil {
 				tlog.Warn("ensure session failed", "err", err)
 				t.SetState(task.StateWaiting)
@@ -1967,7 +1967,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 			}
 			tlog.Debug("auto-reconnect succeeded")
 			t.SetVNCPort(m.Runtimes.VNCPort(m.serverCtx, t.RuntimeInstanceID()))
-			refreshAdoptedDiffStat(m.serverCtx, checkout, t)
+			refreshAdoptedDiffStat(m.serverCtx, m.log, checkout, m.Runtimes, t)
 			m.NotifyTaskChange()
 			m.watchSession(entry, checkout, h)
 		}()
@@ -2005,13 +2005,13 @@ func (m *Manager) runtimeTaskID(ctx context.Context, id runtime.ID) (string, err
 	return m.Runtimes.Metadata(ctx, id, runtime.MetadataLegacyTaskID)
 }
 
-func refreshAdoptedDiffStat(ctx context.Context, checkout *repo.Checkout, t *task.Task) {
+func refreshAdoptedDiffStat(ctx context.Context, log *slog.Logger, checkout *repo.Checkout, runtimes *runtime.Router, t *task.Task) {
 	switch t.GetState() {
 	case task.StateWaiting, task.StateAsking, task.StateHasPlan:
 	default:
 		return
 	}
-	if ds := checkout.BranchDiffStat(ctx, t); len(ds) > 0 {
+	if ds := checkout.BranchDiffStat(ctx, log, runtimes, t); len(ds) > 0 {
 		t.SetLiveDiffStat(ds)
 	}
 }

@@ -5,8 +5,6 @@ package repo
 import (
 	"testing"
 	"time"
-
-	"github.com/caic-xyz/caic/backend/internal/logtest"
 )
 
 func TestServiceChanged(t *testing.T) {
@@ -15,8 +13,8 @@ func TestServiceChanged(t *testing.T) {
 	t.Run("registerCheckout invokes move hook before notifying", func(t *testing.T) {
 		t.Parallel()
 
-		repositories := NewRegistry(t.Context(), nil)
-		repositories.Register(&Repository{RelPath: "old", AbsPath: "/repo"}, &Checkout{Dir: t.TempDir(), GitTimeout: time.Minute, Log: logtest.Logger(t)})
+		repositories := NewRegistry()
+		repositories.Register(&Repository{RelPath: "old", AbsPath: "/repo"}, &Checkout{Dir: t.TempDir(), GitTimeout: time.Minute})
 		s, err := NewService("", repositories)
 		if err != nil {
 			t.Fatal(err)
@@ -26,7 +24,6 @@ func TestServiceChanged(t *testing.T) {
 			Dir:        "/repo",
 			RepoName:   "repo",
 			GitTimeout: time.Minute,
-			Log:        logtest.Logger(t),
 		}
 		ch := s.Changed()
 		var sawNotifyBeforeHook bool

@@ -4,14 +4,12 @@ package repo
 
 import (
 	"testing"
-
-	"github.com/caic-xyz/caic/backend/internal/logtest"
 )
 
 func TestRegistry(t *testing.T) {
 	t.Parallel()
-	r := NewRegistry(t.Context(), nil)
-	c := &Checkout{Dir: "/repos/app", Log: logtest.Logger(t)}
+	r := NewRegistry()
+	c := &Checkout{Dir: "/repos/app"}
 	r.Register(&Repository{RelPath: "app", AbsPath: "/repos/app", ForgeOwner: "org", ForgeRepo: "app"}, c)
 	if got, ok := r.Repository("app"); !ok || got.AbsPath != "/repos/app" {
 		t.Fatalf("Repository() = %#v, %v", got, ok)

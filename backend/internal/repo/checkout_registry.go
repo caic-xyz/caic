@@ -3,30 +3,24 @@
 package repo
 
 import (
-	"context"
 	"iter"
 	"slices"
 	"strings"
 	"sync"
-
-	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
 // Registry owns the known repository set and the current checkout for each
 // repository. Registration updates both collections while holding one lock, so
 // callers cannot observe a known repository without its current checkout.
 type Registry struct {
-	serverCtx context.Context
-	runtimes  *runtime.Router
-
 	mu           sync.Mutex
 	repositories []Repository
 	checkouts    map[string]*Checkout
 }
 
 // NewRegistry creates an empty repository registry.
-func NewRegistry(ctx context.Context, runtimes *runtime.Router) *Registry {
-	return &Registry{serverCtx: ctx, runtimes: runtimes, checkouts: make(map[string]*Checkout)}
+func NewRegistry() *Registry {
+	return &Registry{checkouts: make(map[string]*Checkout)}
 }
 
 // Repository returns immutable metadata for the checkout at relPath.
@@ -64,7 +58,6 @@ func (r *Registry) Repositories() []Repository {
 // Register adds or replaces a known repository and its current checkout.
 func (r *Registry) Register(repository *Repository, checkout *Checkout) Move {
 	checkout.RepoName = repository.RelPath
-	checkout.Runtimes = r.runtimes
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for i := range r.repositories {
@@ -88,7 +81,6 @@ func (r *Registry) Register(repository *Repository, checkout *Checkout) Move {
 // repositories must use Register so identity and checkout state change together.
 func (r *Registry) RegisterCheckout(relPath string, checkout *Checkout) {
 	checkout.RepoName = relPath
-	checkout.Runtimes = r.runtimes
 	r.mu.Lock()
 	r.checkouts[relPath] = checkout
 	r.mu.Unlock()

@@ -261,7 +261,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		mdRuntimes[i].backend.Provider = provider
 	}
 
-	checkoutRegistry := repo.NewRegistry(ctx, runtimes)
+	checkoutRegistry := repo.NewRegistry()
 	taskMgr, err := taskmgr.New(taskmgr.Config{
 		ServerCtx:           ctx,
 		LogDir:              logDir,

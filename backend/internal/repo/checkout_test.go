@@ -53,26 +53,24 @@ func TestRuntimeRemoteRef(t *testing.T) {
 	}
 }
 
-func newTestCheckout(t *testing.T, dir string, backend runtime.Lifecycle) *Checkout {
-	var rt *runtime.Router
-	if backend != nil {
-		var err error
-		rt, err = runtime.NewRouter([]runtime.System{&testRuntimeSystem{Lifecycle: backend}})
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
+func newTestCheckout(dir string) *Checkout {
 	return &Checkout{
 		Dir:        dir,
 		RepoName:   filepath.Base(dir),
 		GitTimeout: time.Minute,
-		Runtimes:   rt,
-		Log:        logtest.Logger(t),
 	}
 }
 
+func newTestRuntime(t *testing.T, backend runtime.Lifecycle) *runtime.Router {
+	runtimes, err := runtime.NewRouter([]runtime.System{&testRuntimeSystem{Lifecycle: backend}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return runtimes
+}
+
 func newInitializedTestCheckout(t *testing.T, dir string) *Checkout {
-	checkout, err := NewCheckout(t.Context(), dir, "main", nil, logtest.Logger(t))
+	checkout, err := NewCheckout(t.Context(), logtest.Logger(t), dir, "main")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,10 +131,10 @@ func TestCheckout(t *testing.T) {
 		})
 		t.Run("error", func(t *testing.T) {
 			t.Parallel()
-			if _, err := NewCheckout(t.Context(), "", "main", nil, logtest.Logger(t)); err == nil {
+			if _, err := NewCheckout(t.Context(), logtest.Logger(t), "", "main"); err == nil {
 				t.Fatal("want directory error")
 			}
-			if _, err := NewCheckout(t.Context(), t.TempDir(), "main", nil, nil); err == nil {
+			if _, err := NewCheckout(t.Context(), nil, t.TempDir(), "main"); err == nil {
 				t.Fatal("want logger error")
 			}
 		})
@@ -145,9 +143,9 @@ func TestCheckout(t *testing.T) {
 	t.Run("BranchDiffStat", func(t *testing.T) {
 		t.Parallel()
 		sc := newRecordingContainer()
-		r := newTestCheckout(t, "/repo", sc)
+		r := newTestCheckout("/repo")
 		tv := &fakeTaskView{instanceID: runtime.NewID("test-runtime", "ctr-1"), repo: []runtime.Repo{{GitRoot: "/repo", Branch: "feature"}}}
-		ds := r.BranchDiffStat(t.Context(), tv)
+		ds := r.BranchDiffStat(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), tv)
 		if len(sc.fetchIDs) == 0 {
 			t.Error("BranchDiffStat did not call Fetch")
 		}
@@ -161,13 +159,13 @@ func TestCheckout(t *testing.T) {
 	t.Run("BranchDiffStatMultiRepoUsesInstanceID", func(t *testing.T) {
 		t.Parallel()
 		sc := newRecordingContainer()
-		r := newTestCheckout(t, "/home/user/src/caic", sc)
+		r := newTestCheckout("/home/user/src/caic")
 		tv := &fakeTaskView{instanceID: runtime.NewID("test-runtime", "ctr-2"), repo: []runtime.Repo{
 			{GitRoot: "/home/user/src/caic", Branch: "caic-7", ContainerPath: "/home/user/src/caic"},
 			{GitRoot: "/home/user/src/genai", Branch: "caic-0", ContainerPath: "/home/user/src/genai"},
 		}}
 
-		ds := r.BranchDiffStat(t.Context(), tv)
+		ds := r.BranchDiffStat(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), tv)
 
 		if len(ds) != 2 {
 			t.Fatalf("BranchDiffStat len = %d, want 2", len(ds))
@@ -189,8 +187,8 @@ func TestCheckout(t *testing.T) {
 	})
 	t.Run("BranchDiffStatNoContainer", func(t *testing.T) {
 		t.Parallel()
-		r := newTestCheckout(t, t.TempDir(), nil)
-		if ds := r.BranchDiffStat(t.Context(), &fakeTaskView{}); ds != nil {
+		r := newTestCheckout(t.TempDir())
+		if ds := r.BranchDiffStat(t.Context(), logtest.Logger(t), nil, &fakeTaskView{}); ds != nil {
 			t.Errorf("BranchDiffStat with no instance = %+v, want nil", ds)
 		}
 	})
@@ -200,7 +198,7 @@ func TestTaskRuntime(t *testing.T) {
 	t.Parallel()
 	t.Run("valid_preserves_mounted_path", func(t *testing.T) {
 		t.Parallel()
-		r := newTestCheckout(t, "/home/user/src/caic-xyz/caic", nil)
+		r := newTestCheckout("/home/user/src/caic-xyz/caic")
 		tv := &fakeTaskView{instanceID: "ctr-1", repo: []runtime.Repo{
 			{Branch: "caic-7", ContainerPath: "/home/user/src/caic-xyz/caic"},
 			{Branch: "caic-0", GitRoot: "/home/user/src/caic-xyz/md", ContainerPath: "/home/user/src/caic-xyz/md"},
@@ -228,7 +226,7 @@ func TestTaskRuntime(t *testing.T) {
 	})
 	t.Run("valid_no_repos", func(t *testing.T) {
 		t.Parallel()
-		r := newTestCheckout(t, "/repo", nil)
+		r := newTestCheckout("/repo")
 		tv := &fakeTaskView{instanceID: "ctr-1"}
 		id, repos, err := r.taskRuntime(tv)
 		if err != nil {
@@ -243,7 +241,7 @@ func TestTaskRuntime(t *testing.T) {
 	})
 	t.Run("error_no_instance", func(t *testing.T) {
 		t.Parallel()
-		if _, _, err := newTestCheckout(t, t.TempDir(), nil).taskRuntime(&fakeTaskView{}); err == nil {
+		if _, _, err := newTestCheckout(t.TempDir()).taskRuntime(&fakeTaskView{}); err == nil {
 			t.Fatal("want error")
 		}
 	})

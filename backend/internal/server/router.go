@@ -508,6 +508,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		pprof:            d.Pprof,
 		ipgeoChecker:     d.IPGeoChecker,
 	}
+	svc.log = s.log.With("cmp", "tasks")
 
 	// OAuth server — only when auth is configured.
 	if d.AuthStore != nil {

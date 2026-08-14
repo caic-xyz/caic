@@ -105,8 +105,8 @@ func (w *testWire) ParseMessage(line []byte) ([]agent.Message, error) {
 
 func newTestSessionRunner(t *testing.T, checkout *repo.Checkout, logDir string, backends map[harness.Name]agent.Backend) *SessionRunner {
 	var runtimes *runtime.Router
-	if checkout != nil {
-		runtimes = checkout.Runtimes
+	if value, ok := testCheckoutRuntimes.Load(checkout); ok {
+		runtimes, _ = value.(*runtime.Router)
 	}
 	return &SessionRunner{Backends: backends, Logs: LogStore{LogDir: logDir}, Runtimes: runtimes, Log: logtest.Logger(t), Checkout: checkout, NotifyTaskChange: func() {}}
 }

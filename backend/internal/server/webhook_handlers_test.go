@@ -24,6 +24,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/gitlab"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
@@ -52,6 +53,8 @@ func (b *testCIBackend) CreateTask(context.Context, task.CreateRequest) (string,
 func (b *testCIBackend) GetCheckout(relPath string) (*repo.Checkout, bool) {
 	return b.taskMgr.Checkouts.Checkout(relPath)
 }
+
+func (b *testCIBackend) RuntimeRouter() *runtime.Router { return b.taskMgr.Runtimes }
 
 func (b *testCIBackend) SetTaskMonitorBranch(entry ci.TaskEntry, branch string) {
 	entry.SetMonitorBranch(branch)
@@ -167,7 +170,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 	t.Run("updates CI status when SHA matches HEAD", func(t *testing.T) {
 		t.Parallel()
 		s := minimalRouter(t)
-		s.repoSvc.Repositories.Register(&repo.Repository{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"}, newRouterTestCheckout(t, t.TempDir()))
+		s.repoSvc.Repositories.Register(&repo.Repository{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"}, newRouterTestCheckout(t.TempDir()))
 		s.forgeMgr.SetGitHubApp(&stubAppClient{forgeClient: &stubForge{headSHA: "abc123", checkRuns: successRuns}})
 
 		s.webhooks.handleCheckSuiteEvent(t.Context(), &github.CheckSuiteEvent{
@@ -190,7 +193,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 	t.Run("ignores out-of-order delivery when SHA is not HEAD", func(t *testing.T) {
 		t.Parallel()
 		s := minimalRouter(t)
-		s.repoSvc.Repositories.Register(&repo.Repository{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"}, newRouterTestCheckout(t, t.TempDir()))
+		s.repoSvc.Repositories.Register(&repo.Repository{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"}, newRouterTestCheckout(t.TempDir()))
 		// HEAD is now "newsha"; the webhook carries "oldsha".
 		s.forgeMgr.SetGitHubApp(&stubAppClient{forgeClient: &stubForge{headSHA: "newsha", checkRuns: failureRuns}})
 
@@ -488,7 +491,7 @@ func minimalRouter(t *testing.T) *testRouter {
 	ctx := t.Context()
 	backend := &mdruntime.Backend{}
 	runtimeRouter := newTestRuntime(t, backend)
-	checkoutRegistry := repo.NewRegistry(ctx, nil)
+	checkoutRegistry := repo.NewRegistry()
 	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: ctx, Runtimes: runtimeRouter, Checkouts: checkoutRegistry})
 	repoSvc := newTestRepoService(t, "", checkoutRegistry)
 	repoStatus := ci.NewRepoStatusStore()

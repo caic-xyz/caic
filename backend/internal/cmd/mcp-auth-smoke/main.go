@@ -177,7 +177,7 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 	if err != nil {
 		return "", "", nil, err
 	}
-	checkoutRegistry := repo.NewRegistry(ctx, nil)
+	checkoutRegistry := repo.NewRegistry()
 	taskMgr, err := taskmgr.New(taskmgr.Config{
 		ServerCtx:           ctx,
 		Runtimes:            runtimeRouter,

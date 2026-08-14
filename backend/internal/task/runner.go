@@ -319,7 +319,7 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 	}
 	if reason == StatePurged && runtimeRemovedOrAbsent && branchConfirmedEmpty {
 		if r.Checkout != nil {
-			r.Checkout.DeleteUnmodifiedTaskBranches(ctx, t)
+			r.Checkout.DeleteUnmodifiedTaskBranches(ctx, r.Log, t)
 		}
 	}
 	var log agent.LogSink
@@ -525,14 +525,14 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 
 	// 3. If --resume exits immediately (previous session was complete),
 	// start a fresh idle relay so the task can accept new prompts.
-	h, err = r.Sessions.EnsureSession(ctx, t, h, tlog)
+	h, err = r.Sessions.EnsureSession(ctx, tlog, t, h)
 	if err != nil {
 		return nil, r.finishReviveFailure(ctx, t, err, nil)
 	}
 
 	// 4. Compute host-side diff stat once.
 	if r.Checkout != nil {
-		if ds := r.Checkout.BranchDiffStat(ctx, t); len(ds) > 0 {
+		if ds := r.Checkout.BranchDiffStat(ctx, r.Log, r.Runtimes, t); len(ds) > 0 {
 			t.SetLiveDiffStat(ds)
 		}
 	}
@@ -660,7 +660,8 @@ func (r *Runner) branchDiffStat(ctx context.Context, t *Task) (agent.DiffStat, e
 	if len(repos) > 0 && repos[0].GitRoot == "" {
 		repos[0].GitRoot = r.Checkout.Dir
 	}
-	return r.Checkout.DiffStat(ctx, id, repos, repo.DiffFetchRequired, "fetch for branch diff stat")
+	r.Log.With("repo", r.Checkout.RepoName).InfoContext(ctx, "fetch for branch diff stat", "repos", len(repos))
+	return r.Checkout.DiffStat(ctx, r.Log, r.Runtimes, id, repos, repo.DiffFetchRequired)
 }
 
 // setup reserves a branch name, starts the instance (Phase A) and creates the
@@ -726,7 +727,7 @@ func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, 
 		eg.Go(func() error {
 			defer trace.StartRegion(egCtx, "branch-create").End()
 			r.Log.Debug("checkout", "msg", "fetching and creating branch", "branch", primaryBranch)
-			err := r.Checkout.FetchAndCreateBranch(egCtx, t, primaryBranch)
+			err := r.Checkout.FetchAndCreateBranch(egCtx, r.Log, t, primaryBranch)
 			if err != nil {
 				r.Log.Error("checkout", "msg", "fetchAndCreateBranch failed", "branch", primaryBranch, "err", err)
 			} else {

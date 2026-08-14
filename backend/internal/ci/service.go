@@ -319,7 +319,7 @@ func (svc *Service) autoResync(ctx context.Context, entry TaskEntry, f forge.For
 	}
 
 	svc.log.InfoContext(ctx, "syncing branch", "task", t.ID, "br", p.Branch)
-	if _, _, err := checkout.SyncToOrigin(ctx, t, false); err != nil {
+	if _, _, err := checkout.SyncToOrigin(ctx, svc.log, svc.backend.RuntimeRouter(), t, false); err != nil {
 		svc.log.WarnContext(ctx, "sync failed", "task", t.ID, "err", err)
 		return
 	}

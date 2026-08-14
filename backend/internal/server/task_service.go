@@ -41,6 +41,7 @@ type FakeCIHook func(ctx context.Context, t *task.Task)
 // server route code stays focused on protocol concerns.
 type taskService struct {
 	ctx       context.Context
+	log       *slog.Logger
 	taskMgr   *taskmgr.Manager
 	prefs     *preferences.Store
 	repoMgr   *repo.Service
@@ -689,7 +690,7 @@ func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, path s
 	if !ok {
 		return nil, api.InternalError("unknown repo")
 	}
-	diff, err := checkout.DiffContent(ctx, t, path)
+	diff, err := checkout.DiffContent(ctx, s.log, s.runtimes, t, path)
 	if err != nil {
 		return nil, api.InternalError(err.Error())
 	}

@@ -118,7 +118,7 @@ func (r *SessionRunner) Reconnect(ctx context.Context, t *Task, skipSideEffects 
 // EnsureSession waits briefly for h to confirm it's alive. If the session
 // exits within 10 seconds (agent had already finished), it detaches and
 // starts a fresh idle relay so the task can accept new prompts.
-func (r *SessionRunner) EnsureSession(ctx context.Context, t *Task, h *SessionHandle, tlog *slog.Logger) (*SessionHandle, error) {
+func (r *SessionRunner) EnsureSession(ctx context.Context, tlog *slog.Logger, t *Task, h *SessionHandle) (*SessionHandle, error) {
 	select {
 	case <-h.Done():
 		// Session exited immediately (agent was already done).
@@ -339,7 +339,7 @@ func (r *SessionRunner) startMessageDispatch(ctx context.Context, t *Task, skipS
 				}
 			case *agent.ResultMessage:
 				if !skipSideEffects && r.Runtimes != nil && r.Checkout != nil {
-					ds, _ := r.Checkout.DiffStat(ctx, instanceID, allRepos, repo.DiffFetchBestEffort, "")
+					ds, _ := r.Checkout.DiffStat(ctx, r.Log, r.Runtimes, instanceID, allRepos, repo.DiffFetchBestEffort)
 					msg.DiffStat = ds
 				}
 			}
@@ -371,7 +371,7 @@ func (r *SessionRunner) emitDiffStatBranch(ctx context.Context, t *Task, id runt
 	if r.Checkout == nil {
 		return
 	}
-	ds, _ := r.Checkout.DiffStat(ctx, id, repos, repo.DiffWithoutFetch, "")
+	ds, _ := r.Checkout.DiffStat(ctx, r.Log, r.Runtimes, id, repos, repo.DiffWithoutFetch)
 	if len(ds) == 0 {
 		return
 	}

@@ -149,7 +149,7 @@ func newModelRefreshTestManager(t testing.TB, router *runtime.Router, backends m
 		ServerCtx:           t.Context(),
 		Runtimes:            router,
 		Backends:            backends,
-		Checkouts:           repo.NewRegistry(t.Context(), router),
+		Checkouts:           repo.NewRegistry(),
 		RuntimeStartTimeout: time.Hour,
 		TerminalReplay:      func(context.Context, *task.LoadedTask) error { return nil },
 	})

@@ -11,6 +11,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
@@ -63,6 +64,9 @@ func (a *ciAdapter) CreateTask(ctx context.Context, req task.CreateRequest) (str
 func (a *ciAdapter) GetCheckout(relPath string) (*repo.Checkout, bool) {
 	return a.taskMgr.Checkouts.Checkout(relPath)
 }
+
+// RuntimeRouter returns the task runtime router.
+func (a *ciAdapter) RuntimeRouter() *runtime.Router { return a.taskMgr.Runtimes }
 
 // SetTaskMonitorBranch sets the CI monitor branch on a task entry.
 func (a *ciAdapter) SetTaskMonitorBranch(entry ci.TaskEntry, branch string) {

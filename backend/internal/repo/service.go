@@ -110,7 +110,7 @@ func (s *Service) DiscoverCheckout(ctx context.Context, abs string) (InitResult,
 		ForgeOwner:       forgeOwner,
 		ForgeRepo:        forgeRepo,
 	}
-	checkout, err := NewCheckout(ctx, info.AbsPath, info.BaseBranch, s.Repositories.runtimes, s.log.With(slog.String("repo", info.RelPath)))
+	checkout, err := NewCheckout(ctx, s.log.With(slog.String("repo", info.RelPath)), info.AbsPath, info.BaseBranch)
 	if err != nil {
 		return InitResult{}, fmt.Errorf("initialize checkout: %w", err)
 	}
@@ -212,7 +212,7 @@ func (s *Service) Clone(ctx context.Context, req CloneRequest) (Repository, erro
 	}
 	remote := gitCheckout.RemoteOriginURL(ctx)
 	info := Repository{RelPath: targetPath, AbsPath: absTarget, BaseBranch: branch, BaseBranchRemote: remoteName, Remote: remote}
-	checkout, err := NewCheckout(ctx, info.AbsPath, info.BaseBranch, s.Repositories.runtimes, s.log.With(slog.String("repo", info.RelPath)))
+	checkout, err := NewCheckout(ctx, s.log.With(slog.String("repo", info.RelPath)), info.AbsPath, info.BaseBranch)
 	if err != nil {
 		_ = os.RemoveAll(absTarget)
 		return Repository{}, repoError(ErrorInternal, "initialize checkout: "+err.Error())

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -61,6 +62,8 @@ type testRuntimeSystem struct {
 	runtime.Lifecycle
 	runtimetest.FakeInfo
 }
+
+var testCheckoutRuntimes sync.Map
 
 func (*testRuntimeSystem) Name() runtime.Name { return "test-runtime" }
 
@@ -127,14 +130,14 @@ func (r *forkLogRuntime) destPrimary(hostPath string) (string, bool) {
 }
 
 func newTestCheckout(t *testing.T, baseBranch, dir string, backend runtime.Lifecycle) *repo.Checkout {
-	return &repo.Checkout{
+	checkout := &repo.Checkout{
 		BaseBranch: baseBranch,
 		Dir:        dir,
 		RepoName:   filepath.Base(dir),
 		GitTimeout: time.Minute,
-		Runtimes:   newTestRuntimeRouter(t, backend),
-		Log:        logtest.Logger(t),
 	}
+	testCheckoutRuntimes.Store(checkout, newTestRuntimeRouter(t, backend))
+	return checkout
 }
 
 func newTestRuntimeRouter(t *testing.T, backend runtime.Lifecycle) *runtime.Router {
@@ -150,14 +153,12 @@ func newTestRuntimeRouter(t *testing.T, backend runtime.Lifecycle) *runtime.Rout
 
 func newTestRunner(t *testing.T, checkout *repo.Checkout, backends map[harness.Name]agent.Backend, logDir string) *Runner {
 	var runtimes *runtime.Router
-	log := logtest.Logger(t)
-	if checkout != nil {
-		runtimes = checkout.Runtimes
-		log = checkout.Log
+	if value, ok := testCheckoutRuntimes.Load(checkout); ok {
+		runtimes, _ = value.(*runtime.Router)
 	}
 	return &Runner{
 		Runtimes:            runtimes,
-		Log:                 log,
+		Log:                 logtest.Logger(t),
 		Checkout:            checkout,
 		Sessions:            newTestSessionRunner(t, checkout, logDir, backends),
 		RuntimeStartTimeout: time.Hour,

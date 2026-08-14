@@ -11,6 +11,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
@@ -50,6 +51,7 @@ type Backend interface {
 	// Tasks.
 	CreateTask(ctx context.Context, req task.CreateRequest) (string, error)
 	GetCheckout(relPath string) (*repo.Checkout, bool)
+	RuntimeRouter() *runtime.Router
 	SetTaskMonitorBranch(entry TaskEntry, branch string)
 
 	// Repos.

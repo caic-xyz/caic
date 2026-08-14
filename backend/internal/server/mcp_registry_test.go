@@ -172,7 +172,7 @@ func newMCPTaskCreateTestRouter(t *testing.T) *testRouter {
 		harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "claude-default"}}}, WireFactory: claudecode.New().NewWire},
 		harness.Pi:     &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "pi-default"}}}, WireFactory: claudecode.New().NewWire},
 	})
-	s.taskMgr.Checkouts.RegisterCheckout("myrepo", newRouterTestCheckout(t, t.TempDir()))
+	s.taskMgr.Checkouts.RegisterCheckout("myrepo", newRouterTestCheckout(t.TempDir()))
 	return s
 }
 
