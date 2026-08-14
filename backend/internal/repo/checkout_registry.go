@@ -5,7 +5,6 @@ package repo
 import (
 	"context"
 	"iter"
-	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -66,9 +65,6 @@ func (r *Registry) Repositories() []Repository {
 func (r *Registry) Register(repository *Repository, checkout *Checkout) Move {
 	checkout.RepoName = repository.RelPath
 	checkout.Runtimes = r.runtimes
-	if err := checkout.Init(r.serverCtx); err != nil {
-		slog.WarnContext(r.serverCtx, "repo checkout init failed", "repo", repository.RelPath, "err", err)
-	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for i := range r.repositories {
@@ -93,9 +89,6 @@ func (r *Registry) Register(repository *Repository, checkout *Checkout) Move {
 func (r *Registry) RegisterCheckout(relPath string, checkout *Checkout) {
 	checkout.RepoName = relPath
 	checkout.Runtimes = r.runtimes
-	if err := checkout.Init(r.serverCtx); err != nil {
-		slog.WarnContext(r.serverCtx, "repo checkout init failed", "repo", relPath, "err", err)
-	}
 	r.mu.Lock()
 	r.checkouts[relPath] = checkout
 	r.mu.Unlock()

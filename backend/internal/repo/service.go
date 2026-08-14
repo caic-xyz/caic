@@ -110,12 +110,9 @@ func (s *Service) DiscoverCheckout(ctx context.Context, abs string) (InitResult,
 		ForgeOwner:       forgeOwner,
 		ForgeRepo:        forgeRepo,
 	}
-	checkout := &Checkout{
-		BaseBranch: info.BaseBranch,
-		Dir:        info.AbsPath,
-		RepoName:   info.RelPath,
-		GitTimeout: time.Minute,
-		Log:        s.log.With(slog.String("repo", info.RelPath)),
+	checkout, err := NewCheckout(ctx, info.AbsPath, info.BaseBranch, s.Repositories.runtimes, s.log.With(slog.String("repo", info.RelPath)))
+	if err != nil {
+		return InitResult{}, fmt.Errorf("initialize checkout: %w", err)
 	}
 	return InitResult{Repository: info, Checkout: checkout}, nil
 }
@@ -215,12 +212,10 @@ func (s *Service) Clone(ctx context.Context, req CloneRequest) (Repository, erro
 	}
 	remote := gitCheckout.RemoteOriginURL(ctx)
 	info := Repository{RelPath: targetPath, AbsPath: absTarget, BaseBranch: branch, BaseBranchRemote: remoteName, Remote: remote}
-	checkout := &Checkout{
-		BaseBranch: info.BaseBranch,
-		Dir:        info.AbsPath,
-		RepoName:   info.RelPath,
-		GitTimeout: time.Minute,
-		Log:        s.log.With(slog.String("repo", info.RelPath)),
+	checkout, err := NewCheckout(ctx, info.AbsPath, info.BaseBranch, s.Repositories.runtimes, s.log.With(slog.String("repo", info.RelPath)))
+	if err != nil {
+		_ = os.RemoveAll(absTarget)
+		return Repository{}, repoError(ErrorInternal, "initialize checkout: "+err.Error())
 	}
 	info.ForgeKind, info.ForgeOwner, info.ForgeRepo = parseForgeRemote(ctx, s.log, remote)
 	s.Repositories.Register(&info, checkout)

@@ -84,20 +84,29 @@ type Checkout struct {
 	nextID   int        // Next branch sequence number (protected by branchMu).
 }
 
-// Init sets nextID past existing caic-* branches.
-func (w *Checkout) Init(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
+// NewCheckout creates the initialized checkout at dir.
+func NewCheckout(ctx context.Context, dir, baseBranch string, runtimes *runtime.Router, log *slog.Logger) (*Checkout, error) {
+	if dir == "" {
+		return nil, errors.New("checkout directory is required")
+	}
+	if log == nil {
+		return nil, errors.New("checkout logger is required")
+	}
+	checkout := &Checkout{
+		BaseBranch: baseBranch,
+		Dir:        dir,
+		GitTimeout: time.Minute,
+		Runtimes:   runtimes,
+		Log:        log,
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkout.GitTimeout)
 	defer cancel()
-	w.branchMu.Lock()
-	defer w.branchMu.Unlock()
-	highest, err := maxBranchSeqNum(ctx, w.Dir, w.Log)
+	highest, err := maxBranchSeqNum(ctx, checkout.Dir, checkout.Log)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if highest >= w.nextID {
-		w.nextID = highest + 1
-	}
-	return nil
+	checkout.nextID = highest + 1
+	return checkout, nil
 }
 
 // AllocateBranch allocates a caic-N branch for this checkout's repo using the

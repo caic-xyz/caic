@@ -53,7 +53,7 @@ func TestRuntimeRemoteRef(t *testing.T) {
 	}
 }
 
-func newTestCheckout(t *testing.T, baseBranch, dir string, backend runtime.Lifecycle) *Checkout {
+func newTestCheckout(t *testing.T, dir string, backend runtime.Lifecycle) *Checkout {
 	var rt *runtime.Router
 	if backend != nil {
 		var err error
@@ -63,7 +63,6 @@ func newTestCheckout(t *testing.T, baseBranch, dir string, backend runtime.Lifec
 		}
 	}
 	return &Checkout{
-		BaseBranch: baseBranch,
 		Dir:        dir,
 		RepoName:   filepath.Base(dir),
 		GitTimeout: time.Minute,
@@ -72,17 +71,22 @@ func newTestCheckout(t *testing.T, baseBranch, dir string, backend runtime.Lifec
 	}
 }
 
+func newInitializedTestCheckout(t *testing.T, dir string) *Checkout {
+	checkout, err := NewCheckout(t.Context(), dir, "main", nil, logtest.Logger(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return checkout
+}
+
 func TestCheckout(t *testing.T) {
 	t.Parallel()
-	t.Run("Init", func(t *testing.T) {
+	t.Run("NewCheckout", func(t *testing.T) {
 		t.Parallel()
 		t.Run("Basic", func(t *testing.T) {
 			t.Parallel()
 			clone := initTestRepo(t, "main")
-			r := newTestCheckout(t, "main", clone, nil)
-			if err := r.Init(t.Context()); err != nil {
-				t.Fatal(err)
-			}
+			r := newInitializedTestCheckout(t, clone)
 			if r.nextID != 0 {
 				t.Errorf("nextID = %d, want 0", r.nextID)
 			}
@@ -96,10 +100,7 @@ func TestCheckout(t *testing.T) {
 			runGit(t, clone, "branch", "caic-3")
 			runGit(t, clone, "push", "origin", "caic-3")
 
-			r := newTestCheckout(t, "main", clone, nil)
-			if err := r.Init(t.Context()); err != nil {
-				t.Fatal(err)
-			}
+			r := newInitializedTestCheckout(t, clone)
 			if r.nextID != 4 {
 				t.Errorf("nextID = %d, want 4", r.nextID)
 			}
@@ -113,10 +114,7 @@ func TestCheckout(t *testing.T) {
 			// Do NOT push — simulates a stopped task whose branch was
 			// never synced to origin.
 
-			r := newTestCheckout(t, "main", clone, nil)
-			if err := r.Init(t.Context()); err != nil {
-				t.Fatal(err)
-			}
+			r := newInitializedTestCheckout(t, clone)
 			if r.nextID != 6 {
 				t.Errorf("nextID = %d, want 6", r.nextID)
 			}
@@ -128,12 +126,18 @@ func TestCheckout(t *testing.T) {
 			runGit(t, clone, "branch", "foo-caic-9")
 			runGit(t, clone, "branch", "caic-2")
 
-			r := newTestCheckout(t, "main", clone, nil)
-			if err := r.Init(t.Context()); err != nil {
-				t.Fatal(err)
-			}
+			r := newInitializedTestCheckout(t, clone)
 			if r.nextID != 3 {
 				t.Errorf("nextID = %d, want 3", r.nextID)
+			}
+		})
+		t.Run("error", func(t *testing.T) {
+			t.Parallel()
+			if _, err := NewCheckout(t.Context(), "", "main", nil, logtest.Logger(t)); err == nil {
+				t.Fatal("want directory error")
+			}
+			if _, err := NewCheckout(t.Context(), t.TempDir(), "main", nil, nil); err == nil {
+				t.Fatal("want logger error")
 			}
 		})
 	})
@@ -141,7 +145,7 @@ func TestCheckout(t *testing.T) {
 	t.Run("BranchDiffStat", func(t *testing.T) {
 		t.Parallel()
 		sc := newRecordingContainer()
-		r := newTestCheckout(t, "", "/repo", sc)
+		r := newTestCheckout(t, "/repo", sc)
 		tv := &fakeTaskView{instanceID: runtime.NewID("test-runtime", "ctr-1"), repo: []runtime.Repo{{GitRoot: "/repo", Branch: "feature"}}}
 		ds := r.BranchDiffStat(t.Context(), tv)
 		if len(sc.fetchIDs) == 0 {
@@ -157,7 +161,7 @@ func TestCheckout(t *testing.T) {
 	t.Run("BranchDiffStatMultiRepoUsesInstanceID", func(t *testing.T) {
 		t.Parallel()
 		sc := newRecordingContainer()
-		r := newTestCheckout(t, "", "/home/user/src/caic", sc)
+		r := newTestCheckout(t, "/home/user/src/caic", sc)
 		tv := &fakeTaskView{instanceID: runtime.NewID("test-runtime", "ctr-2"), repo: []runtime.Repo{
 			{GitRoot: "/home/user/src/caic", Branch: "caic-7", ContainerPath: "/home/user/src/caic"},
 			{GitRoot: "/home/user/src/genai", Branch: "caic-0", ContainerPath: "/home/user/src/genai"},
@@ -185,7 +189,7 @@ func TestCheckout(t *testing.T) {
 	})
 	t.Run("BranchDiffStatNoContainer", func(t *testing.T) {
 		t.Parallel()
-		r := newTestCheckout(t, "", t.TempDir(), nil)
+		r := newTestCheckout(t, t.TempDir(), nil)
 		if ds := r.BranchDiffStat(t.Context(), &fakeTaskView{}); ds != nil {
 			t.Errorf("BranchDiffStat with no instance = %+v, want nil", ds)
 		}
@@ -196,7 +200,7 @@ func TestTaskRuntime(t *testing.T) {
 	t.Parallel()
 	t.Run("valid_preserves_mounted_path", func(t *testing.T) {
 		t.Parallel()
-		r := newTestCheckout(t, "", "/home/user/src/caic-xyz/caic", nil)
+		r := newTestCheckout(t, "/home/user/src/caic-xyz/caic", nil)
 		tv := &fakeTaskView{instanceID: "ctr-1", repo: []runtime.Repo{
 			{Branch: "caic-7", ContainerPath: "/home/user/src/caic-xyz/caic"},
 			{Branch: "caic-0", GitRoot: "/home/user/src/caic-xyz/md", ContainerPath: "/home/user/src/caic-xyz/md"},
@@ -224,7 +228,7 @@ func TestTaskRuntime(t *testing.T) {
 	})
 	t.Run("valid_no_repos", func(t *testing.T) {
 		t.Parallel()
-		r := newTestCheckout(t, "", "/repo", nil)
+		r := newTestCheckout(t, "/repo", nil)
 		tv := &fakeTaskView{instanceID: "ctr-1"}
 		id, repos, err := r.taskRuntime(tv)
 		if err != nil {
@@ -239,7 +243,7 @@ func TestTaskRuntime(t *testing.T) {
 	})
 	t.Run("error_no_instance", func(t *testing.T) {
 		t.Parallel()
-		if _, _, err := newTestCheckout(t, "", t.TempDir(), nil).taskRuntime(&fakeTaskView{}); err == nil {
+		if _, _, err := newTestCheckout(t, t.TempDir(), nil).taskRuntime(&fakeTaskView{}); err == nil {
 			t.Fatal("want error")
 		}
 	})
