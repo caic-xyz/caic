@@ -93,7 +93,7 @@ func (s *taskService) taskListSnapshot(ctx context.Context) []v1.Task {
 		if ownerID != "" && e.Task().OwnerID != "" && e.Task().OwnerID != ownerID {
 			return true
 		}
-		dto, err := apiconv.Task(ctx, e, newTaskResolvers(s.taskMgr, s.repoMgr, s.authStore))
+		dto, err := taskDTO(ctx, e, s.taskMgr, s.repoMgr, s.authStore)
 		if err != nil {
 			slog.ErrorContext(ctx, "convert task", "task", e.Task().ID, "err", err)
 			return true
@@ -105,12 +105,68 @@ func (s *taskService) taskListSnapshot(ctx context.Context) []v1.Task {
 	return out
 }
 
+// taskDTO resolves server-owned task data before projecting it to the API.
+func taskDTO(ctx context.Context, entry *taskmgr.Entry, taskMgr *taskmgr.Manager, repoSvc *repomgr.Service, authStore *auth.Store) (v1.Task, error) {
+	t := entry.Task()
+	snap := t.Snapshot()
+
+	repos := make([]v1.TaskRepo, len(snap.Repos))
+	for i, repo := range snap.Repos {
+		if info, ok := repoSvc.Repos.InfoFor(repo.Name); ok {
+			forgeKind, err := apiconv.RepoForge(info.ForgeKind)
+			if err != nil {
+				return v1.Task{}, fmt.Errorf("task %s repo %q forge: %w", t.ID, repo.Name, err)
+			}
+			repos[i] = v1.TaskRepo{
+				Name:       repo.Name,
+				BaseBranch: repo.BaseBranch,
+				Branch:     repo.Branch,
+				RemoteURL:  git.RemoteToHTTPS(info.Remote),
+				Forge:      forgeKind,
+			}
+			continue
+		}
+		repos[i] = v1.TaskRepo{Name: repo.Name, BaseBranch: repo.BaseBranch, Branch: repo.Branch}
+	}
+	if len(repos) == 0 {
+		repos = nil
+	}
+
+	var contextWindowLimit int
+	if snap.ContextWindowLimit == 0 {
+		if primary := t.Primary(); primary != nil {
+			if _, ok := taskMgr.Workspaces.Workspace(primary.Name); ok {
+				if b := taskMgr.Backends[t.Harness]; b != nil {
+					contextWindowLimit = b.ContextWindowLimit(snap.Model)
+				}
+			}
+		}
+	}
+
+	var owner string
+	if authStore != nil && t.OwnerID != "" {
+		if u, ok := authStore.FindByID(t.OwnerID); ok {
+			owner = u.Username
+		}
+	}
+
+	return apiconv.Task(&apiconv.TaskInput{
+		Task:               t,
+		Snapshot:           snap,
+		Result:             entry.Result(),
+		Repos:              repos,
+		SudoPassword:       taskMgr.SudoPassword(ctx, t),
+		ContextWindowLimit: contextWindowLimit,
+		Owner:              owner,
+	})
+}
+
 // getTask returns a single task by id. The route resolves the entry (404 for
 // unknown ids, 403 across owners), giving clients an authoritative existence
 // check and initial state without depending on the eventually-consistent task
 // list snapshot.
 func (s *taskService) getTask(ctx context.Context, entry *taskmgr.Entry, _ *api.EmptyReq) (*v1.Task, error) {
-	dto, err := apiconv.Task(ctx, entry, newTaskResolvers(s.taskMgr, s.repoMgr, s.authStore))
+	dto, err := taskDTO(ctx, entry, s.taskMgr, s.repoMgr, s.authStore)
 	if err != nil {
 		return nil, api.InternalError(err.Error())
 	}
@@ -121,13 +177,17 @@ func (s *taskService) getTask(ctx context.Context, entry *taskmgr.Entry, _ *api.
 func (s *taskService) getTaskInfo(ctx context.Context, entry *taskmgr.Entry, _ *api.EmptyReq) (*v1.TaskInfo, error) {
 	t := entry.Task()
 	snap := t.Snapshot()
-	resolvers := newTaskResolvers(s.taskMgr, s.repoMgr, s.authStore)
-
 	taskRepos := make([]v1.TaskInfoRepo, 0, len(snap.Repos))
 	for _, repo := range snap.Repos {
-		forgeKind, err := resolvers.RepoForge(repo.Name)
-		if err != nil {
-			return nil, api.InternalError(err.Error())
+		var remoteURL string
+		var forgeKind v1.Forge
+		if info, ok := s.repoMgr.Repos.InfoFor(repo.Name); ok {
+			remoteURL = git.RemoteToHTTPS(info.Remote)
+			var err error
+			forgeKind, err = apiconv.RepoForge(info.ForgeKind)
+			if err != nil {
+				return nil, api.InternalError(err.Error())
+			}
 		}
 		taskRepos = append(taskRepos, v1.TaskInfoRepo{
 			Name:          repo.Name,
@@ -135,7 +195,7 @@ func (s *taskService) getTaskInfo(ctx context.Context, entry *taskmgr.Entry, _ *
 			Branch:        repo.Branch,
 			GitRoot:       repo.GitRoot,
 			ContainerPath: repo.ContainerPath,
-			RemoteURL:     resolvers.RepoURL(repo.Name),
+			RemoteURL:     remoteURL,
 			Forge:         forgeKind,
 		})
 	}
@@ -407,7 +467,7 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v
 
 	// Return the full task so clients can seed their store and render the detail
 	// view immediately, without waiting for the SSE upsert to deliver it.
-	dto, err := apiconv.Task(ctx, entry, newTaskResolvers(s.taskMgr, s.repoMgr, s.authStore))
+	dto, err := taskDTO(ctx, entry, s.taskMgr, s.repoMgr, s.authStore)
 	if err != nil {
 		return nil, api.InternalError(err.Error())
 	}
@@ -595,7 +655,7 @@ func (s *taskService) forkTask(ctx context.Context, entry *taskmgr.Entry, req *v
 	if !ok {
 		return nil, api.InternalError("forked task not found")
 	}
-	dto, err := apiconv.Task(ctx, forkEntry, newTaskResolvers(s.taskMgr, s.repoMgr, s.authStore))
+	dto, err := taskDTO(ctx, forkEntry, s.taskMgr, s.repoMgr, s.authStore)
 	if err != nil {
 		return nil, api.InternalError(err.Error())
 	}
@@ -703,45 +763,4 @@ func (s *taskService) resolveGitHubContainerToken(ctx context.Context, enabled b
 		return u.AccessToken
 	}
 	return s.forgeMgr.GitHubToken()
-}
-
-// newTaskResolvers builds the resolver set used to convert task entries into API
-// DTOs. It is a free function so any HTTP concern object that creates a task
-// (task and CI handlers) can assemble the full Task DTO it returns to clients
-// from the same shared dependencies.
-func newTaskResolvers(taskMgr *taskmgr.Manager, repoSvc *repomgr.Service, authStore *auth.Store) apiconv.TaskResolvers {
-	return apiconv.TaskResolvers{
-		RepoURL: func(rel string) string {
-			if info, ok := repoSvc.Repos.InfoFor(rel); ok {
-				return git.RemoteToHTTPS(info.Remote)
-			}
-			return ""
-		},
-		RepoForge: func(rel string) (v1.Forge, error) {
-			if info, ok := repoSvc.Repos.InfoFor(rel); ok {
-				return apiconv.RepoForge(info.ForgeKind)
-			}
-			return "", nil
-		},
-		SudoPassword: taskMgr.SudoPassword,
-		OwnerName: func(ownerID string) string {
-			if authStore == nil || ownerID == "" {
-				return ""
-			}
-			if u, ok := authStore.FindByID(ownerID); ok {
-				return u.Username
-			}
-			return ""
-		},
-		ContextWindowLimit: func(repo string, harnessName harness.Name, model string) int {
-			if _, ok := taskMgr.Workspaces.Workspace(repo); !ok {
-				return 0
-			}
-			b := taskMgr.Backends[harnessName]
-			if b == nil {
-				return 0
-			}
-			return b.ContextWindowLimit(model)
-		},
-	}
 }

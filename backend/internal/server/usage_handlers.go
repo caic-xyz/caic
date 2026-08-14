@@ -78,7 +78,7 @@ func (h *usageHandlers) handleGetUsage(w http.ResponseWriter, r *http.Request) {
 // aggregation plus per-provider quota data from each registered fetcher.
 func (h *usageHandlers) buildResp(ctx context.Context) v1.UsageResp {
 	now := time.Now()
-	local := apiconv.LocalUsage(h.taskMgr, now)
+	local := localUsage(h.taskMgr, now)
 
 	resp := v1.UsageResp{Local: local}
 	detached := context.WithoutCancel(ctx)
@@ -102,6 +102,24 @@ func (h *usageHandlers) buildResp(ctx context.Context) v1.UsageResp {
 		resp.Providers = append(resp.Providers, out)
 	}
 	return resp
+}
+
+// localUsage resolves manager-backed task usage before converting it to an API DTO.
+func localUsage(mgr *taskmgr.Manager, now time.Time) v1.LocalUsage {
+	inputs := make([]apiconv.LocalUsageInput, 0)
+	mgr.Range(func(_ string, e *taskmgr.Entry) bool {
+		t := e.Task()
+		input := apiconv.LocalUsageInput{StartedAt: t.StartedAt}
+		if result := e.Result(); result != nil {
+			input.CostUSD = result.CostUSD
+			input.Usage = result.Usage
+		} else {
+			input.CostUSD, _, _, input.Usage, _ = t.LiveStats()
+		}
+		inputs = append(inputs, input)
+		return true
+	})
+	return apiconv.LocalUsage(inputs, now)
 }
 
 // routes returns the handler for usage quota snapshots and the usage SSE

@@ -14,7 +14,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/maruel/ksid"
 )
@@ -309,7 +308,7 @@ func TestTask(t *testing.T) {
 			IsUsingOverage: true,
 		}})
 
-		got, err := Task(t.Context(), taskmgr.NewEntry(tk, nil), TaskResolvers{})
+		got, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -337,7 +336,7 @@ func TestTask(t *testing.T) {
 			},
 		})
 
-		gotTask, err := Task(t.Context(), taskmgr.NewEntry(tk, nil), TaskResolvers{})
+		gotTask, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -351,7 +350,7 @@ func TestTask(t *testing.T) {
 		parentID := ksid.NewID()
 		tk := &task.Task{ID: ksid.NewID(), Harness: harness.Claude, ForkedFromTaskID: parentID}
 
-		got, err := Task(t.Context(), taskmgr.NewEntry(tk, nil), TaskResolvers{})
+		got, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})
 		if err != nil {
 			t.Fatal(err)
 		}

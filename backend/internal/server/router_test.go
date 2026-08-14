@@ -40,7 +40,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
@@ -1438,7 +1437,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 		for _, e := range entries {
 			h := testTaskHandlers(s)
-			j, err := apiconv.Task(t.Context(), e, newTaskResolvers(h.taskSvc.taskMgr, h.taskSvc.repoMgr, h.taskSvc.authStore))
+			j, err := taskDTO(t.Context(), e, h.taskSvc.taskMgr, h.taskSvc.repoMgr, h.taskSvc.authStore)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1495,7 +1494,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 		for _, e := range entries {
 			h := testTaskHandlers(s)
-			j, err := apiconv.Task(t.Context(), e, newTaskResolvers(h.taskSvc.taskMgr, h.taskSvc.repoMgr, h.taskSvc.authStore))
+			j, err := taskDTO(t.Context(), e, h.taskSvc.taskMgr, h.taskSvc.repoMgr, h.taskSvc.authStore)
 			if err != nil {
 				t.Fatal(err)
 			}

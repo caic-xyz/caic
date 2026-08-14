@@ -7,7 +7,6 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
 // localUsageWindows defines the rolling time windows for local cost aggregation.
@@ -20,39 +19,35 @@ var localUsageWindows = []struct {
 	{24 * time.Hour, "24h"},
 }
 
-// LocalUsage aggregates task cost and token usage within rolling time windows
-// across all tasks.
-//
-// For running tasks without a final result, the current live stats are used.
-func LocalUsage(mgr *taskmgr.Manager, now time.Time) v1.LocalUsage {
+// LocalUsageInput is a task's resolved local-usage contribution.
+type LocalUsageInput struct {
+	StartedAt time.Time
+	CostUSD   float64
+	Usage     agent.Usage
+}
+
+// LocalUsage aggregates resolved task cost and token usage within rolling time
+// windows.
+func LocalUsage(inputs []LocalUsageInput, now time.Time) v1.LocalUsage {
 	out := v1.LocalUsage{
 		Windows: make([]v1.LocalWindow, len(localUsageWindows)),
 	}
 	for i, w := range localUsageWindows {
 		out.Windows[i] = v1.LocalWindow{Duration: w.label}
 	}
-	mgr.Range(func(_ string, e *taskmgr.Entry) bool {
-		t := e.Task()
-		if t.StartedAt.IsZero() {
-			return true
+	for _, input := range inputs {
+		if input.StartedAt.IsZero() {
+			continue
 		}
-		var costUSD float64
-		var usage agent.Usage
-		if r := e.Result(); r != nil {
-			costUSD = r.CostUSD
-			usage = r.Usage
-		} else {
-			costUSD, _, _, usage, _ = t.LiveStats()
-		}
+		usage := input.Usage
 		totalInput := usage.InputTokens + usage.CacheCreationInputTokens + usage.CacheReadInputTokens
 		for i, w := range localUsageWindows {
-			if t.StartedAt.After(now.Add(-w.duration)) {
-				out.Windows[i].CostUSD += costUSD
+			if input.StartedAt.After(now.Add(-w.duration)) {
+				out.Windows[i].CostUSD += input.CostUSD
 				out.Windows[i].InputTokens += totalInput
 				out.Windows[i].OutputTokens += usage.OutputTokens
 			}
 		}
-		return true
-	})
+	}
 	return out
 }
