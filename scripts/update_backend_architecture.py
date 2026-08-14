@@ -3,7 +3,7 @@
 # Use of this source code is governed under the Apache License, Version 2.0
 # that can be found in the LICENSE file.
 
-"""Update generated backend architecture dependency diagrams."""
+"""Update backend architecture diagrams from production and unit-test imports."""
 
 import argparse
 import json
@@ -26,6 +26,20 @@ class Package:
     import_path: str
     path: str
     imports: tuple[str, ...]
+    test_imports: tuple[str, ...]
+
+    @property
+    def all_imports(self) -> tuple[str, ...]:
+        return self.imports + self.test_imports
+
+
+@dataclass(frozen=True)
+class GoPackage:
+    directory: Path
+    import_path: str
+    imports: tuple[str, ...]
+    test_imports: tuple[str, ...]
+    x_test_imports: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -62,10 +76,10 @@ def run(args: list[str]) -> str:
     return result.stdout
 
 
-def read_json_stream(raw: str) -> list[dict[str, object]]:
+def read_json_stream(raw: str) -> list[GoPackage]:
     decoder = json.JSONDecoder()
     pos = 0
-    values = []
+    packages = []
     while pos < len(raw):
         match = re.search(r"\S", raw[pos:])
         if not match:
@@ -74,46 +88,69 @@ def read_json_stream(raw: str) -> list[dict[str, object]]:
         value, pos = decoder.raw_decode(raw, pos)
         if not isinstance(value, dict):
             raise ValueError("go list -json returned a non-object JSON value")
-        values.append(value)
-    return values
+        packages.append(go_package_from_json(value))
+    return packages
+
+
+def go_package_from_json(value: dict[str, object]) -> GoPackage:
+    directory = value.get("Dir")
+    import_path = value.get("ImportPath")
+    if not isinstance(directory, str) or not isinstance(import_path, str):
+        raise ValueError("go list -json package is missing Dir or ImportPath")
+    return GoPackage(
+        directory=Path(directory),
+        import_path=import_path,
+        imports=json_string_list(value, "Imports"),
+        test_imports=json_string_list(value, "TestImports"),
+        x_test_imports=json_string_list(value, "XTestImports"),
+    )
+
+
+def json_string_list(value: dict[str, object], field: str) -> tuple[str, ...]:
+    raw_values = value.get(field, [])
+    if not isinstance(raw_values, list) or not all(isinstance(item, str) for item in raw_values):
+        raise ValueError(f"go list -json package field {field} is not a string list")
+    return tuple(raw_values)
 
 
 def backend_packages() -> list[Package]:
     raw = run(["go", "list", "-json", "./backend/..."])
-    values = read_json_stream(raw)
+    go_packages = read_json_stream(raw)
     backend_root = ROOT / "backend"
     paths_by_import = {}
-    for value in values:
-        package_dir = Path(str(value["Dir"])).resolve()
+    for package in go_packages:
+        package_dir = package.directory.resolve()
         try:
             package_path = package_dir.relative_to(backend_root).as_posix()
         except ValueError:
             continue
-        paths_by_import[str(value["ImportPath"])] = package_path
+        paths_by_import[package.import_path] = package_path
 
     packages = []
-    for value in values:
-        import_path = str(value["ImportPath"])
+    for go_package in go_packages:
+        import_path = go_package.import_path
         package_path = paths_by_import.get(import_path)
         if package_path is None:
             continue
-        imports = tuple(
-            sorted(
-                {
-                    paths_by_import[dep]
-                    for dep in value.get("Imports", [])
-                    if isinstance(dep, str) and dep in paths_by_import
-                }
-            )
+        imports = backend_import_paths(go_package.imports, paths_by_import)
+        test_imports = tuple(
+            dep
+            for dep in backend_import_paths(go_package.test_imports + go_package.x_test_imports, paths_by_import)
+            if dep != package_path and dep not in imports
         )
         packages.append(
             Package(
                 import_path=import_path,
                 path=package_path,
                 imports=imports,
+                test_imports=test_imports,
             )
         )
     return sorted(packages, key=lambda package: package.path)
+
+
+def backend_import_paths(imports: tuple[str, ...], paths_by_import: dict[str, str]) -> tuple[str, ...]:
+    return tuple(sorted({paths_by_import[dep] for dep in imports if dep in paths_by_import}))
 
 
 def node_id(package_path: str) -> str:
@@ -132,7 +169,7 @@ def dependency_closure(packages_by_path: dict[str, Package], roots: set[str]) ->
         if path in seen:
             continue
         seen.add(path)
-        pending.extend(dep for dep in packages_by_path[path].imports if dep not in seen)
+        pending.extend(dep for dep in packages_by_path[path].all_imports if dep not in seen)
     return seen
 
 
@@ -158,6 +195,9 @@ def edge_lines(packages: list[Package], included: set[str]) -> list[str]:
         for dep in package.imports:
             if dep in included:
                 lines.append(f"  {node_id(package.path)} --> {node_id(dep)}")
+        for dep in package.test_imports:
+            if dep in included:
+                lines.append(f"  {node_id(package.path)} -.-> {node_id(dep)}")
     return lines
 
 
@@ -199,12 +239,13 @@ def render_table(packages: list[Package]) -> list[str]:
     lines = [
         "## Package Dependencies",
         "",
-        "| Package | Direct backend dependencies |",
-        "|---|---|",
+        "| Package | Production backend dependencies | Test-only backend dependencies |",
+        "|---|---|---|",
     ]
     for package in packages:
-        deps = ", ".join(f"`{dep}`" for dep in package.imports) if package.imports else "None"
-        lines.append(f"| `{package.path}` | {deps} |")
+        imports = ", ".join(f"`{dep}`" for dep in package.imports) if package.imports else "None"
+        test_imports = ", ".join(f"`{dep}`" for dep in package.test_imports) if package.test_imports else "None"
+        lines.append(f"| `{package.path}` | {imports} | {test_imports} |")
     lines.append("")
     return lines
 
@@ -222,10 +263,10 @@ def render_generated_section(packages: list[Package]) -> str:
         "## Generated Package Dependencies",
         "",
         "This section is generated by `scripts/update_backend_architecture.py`.",
-        "It uses direct package imports from `go list -json ./backend/...`.",
+        "It uses production and test package imports from `go list -json ./backend/...`.",
         "",
-        "Arrows point from the importing package to the package it imports. External",
-        "dependencies are omitted.",
+        "Arrows point from the importing package to the package it imports. Dashed",
+        "arrows are test-only imports. External dependencies are omitted.",
         "",
     ]
     lines.extend(render_graph("Runtime Spine", packages, runtime_spine_paths))
