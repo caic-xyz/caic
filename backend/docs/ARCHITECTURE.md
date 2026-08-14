@@ -53,7 +53,7 @@ graph TD
   pkg_internal_server["internal/server"]
   pkg_internal_server_api["internal/server/api"]
   pkg_internal_server_api_v1["internal/server/api/v1"]
-  pkg_internal_server_api_v1conv["internal/server/api/v1conv"]
+  pkg_internal_server_apiconv["internal/server/apiconv"]
   pkg_internal_server_ipgeo["internal/server/ipgeo"]
   pkg_internal_task["internal/task"]
   pkg_internal_task_taskmgr["internal/task/taskmgr"]
@@ -186,7 +186,7 @@ graph TD
   pkg_internal_server --> pkg_internal_runtime
   pkg_internal_server --> pkg_internal_server_api
   pkg_internal_server --> pkg_internal_server_api_v1
-  pkg_internal_server --> pkg_internal_server_api_v1conv
+  pkg_internal_server --> pkg_internal_server_apiconv
   pkg_internal_server --> pkg_internal_server_ipgeo
   pkg_internal_server --> pkg_internal_task
   pkg_internal_server --> pkg_internal_task_taskmgr
@@ -200,16 +200,16 @@ graph TD
   pkg_internal_server -.-> pkg_internal_runtime_mdruntime
   pkg_internal_server -.-> pkg_internal_runtime_runtimetest
   pkg_internal_server_api_v1 --> pkg_internal_server_api
-  pkg_internal_server_api_v1conv --> pkg_internal_agent
-  pkg_internal_server_api_v1conv --> pkg_internal_agent_harness
-  pkg_internal_server_api_v1conv --> pkg_internal_eventreplay
-  pkg_internal_server_api_v1conv --> pkg_internal_forge
-  pkg_internal_server_api_v1conv --> pkg_internal_repo_repowork
-  pkg_internal_server_api_v1conv --> pkg_internal_runtime
-  pkg_internal_server_api_v1conv --> pkg_internal_server_api_v1
-  pkg_internal_server_api_v1conv --> pkg_internal_task
-  pkg_internal_server_api_v1conv --> pkg_internal_task_taskmgr
-  pkg_internal_server_api_v1conv --> pkg_internal_usage
+  pkg_internal_server_apiconv --> pkg_internal_agent
+  pkg_internal_server_apiconv --> pkg_internal_agent_harness
+  pkg_internal_server_apiconv --> pkg_internal_eventreplay
+  pkg_internal_server_apiconv --> pkg_internal_forge
+  pkg_internal_server_apiconv --> pkg_internal_repo_repowork
+  pkg_internal_server_apiconv --> pkg_internal_runtime
+  pkg_internal_server_apiconv --> pkg_internal_server_api_v1
+  pkg_internal_server_apiconv --> pkg_internal_task
+  pkg_internal_server_apiconv --> pkg_internal_task_taskmgr
+  pkg_internal_server_apiconv --> pkg_internal_usage
   pkg_internal_task --> pkg_internal_agent
   pkg_internal_task --> pkg_internal_agent_harness
   pkg_internal_task --> pkg_internal_forge
@@ -359,7 +359,7 @@ graph TD
     pkg_internal_server["internal/server"]
     pkg_internal_server_api["internal/server/api"]
     pkg_internal_server_api_v1["internal/server/api/v1"]
-    pkg_internal_server_api_v1conv["internal/server/api/v1conv"]
+    pkg_internal_server_apiconv["internal/server/apiconv"]
     pkg_internal_server_ipgeo["internal/server/ipgeo"]
   end
 
@@ -545,7 +545,7 @@ graph TD
   pkg_internal_server --> pkg_internal_runtime
   pkg_internal_server --> pkg_internal_server_api
   pkg_internal_server --> pkg_internal_server_api_v1
-  pkg_internal_server --> pkg_internal_server_api_v1conv
+  pkg_internal_server --> pkg_internal_server_apiconv
   pkg_internal_server --> pkg_internal_server_ipgeo
   pkg_internal_server --> pkg_internal_task
   pkg_internal_server --> pkg_internal_task_taskmgr
@@ -559,16 +559,16 @@ graph TD
   pkg_internal_server -.-> pkg_internal_runtime_mdruntime
   pkg_internal_server -.-> pkg_internal_runtime_runtimetest
   pkg_internal_server_api_v1 --> pkg_internal_server_api
-  pkg_internal_server_api_v1conv --> pkg_internal_agent
-  pkg_internal_server_api_v1conv --> pkg_internal_agent_harness
-  pkg_internal_server_api_v1conv --> pkg_internal_eventreplay
-  pkg_internal_server_api_v1conv --> pkg_internal_forge
-  pkg_internal_server_api_v1conv --> pkg_internal_repo_repowork
-  pkg_internal_server_api_v1conv --> pkg_internal_runtime
-  pkg_internal_server_api_v1conv --> pkg_internal_server_api_v1
-  pkg_internal_server_api_v1conv --> pkg_internal_task
-  pkg_internal_server_api_v1conv --> pkg_internal_task_taskmgr
-  pkg_internal_server_api_v1conv --> pkg_internal_usage
+  pkg_internal_server_apiconv --> pkg_internal_agent
+  pkg_internal_server_apiconv --> pkg_internal_agent_harness
+  pkg_internal_server_apiconv --> pkg_internal_eventreplay
+  pkg_internal_server_apiconv --> pkg_internal_forge
+  pkg_internal_server_apiconv --> pkg_internal_repo_repowork
+  pkg_internal_server_apiconv --> pkg_internal_runtime
+  pkg_internal_server_apiconv --> pkg_internal_server_api_v1
+  pkg_internal_server_apiconv --> pkg_internal_task
+  pkg_internal_server_apiconv --> pkg_internal_task_taskmgr
+  pkg_internal_server_apiconv --> pkg_internal_usage
   pkg_internal_smoketest --> pkg_internal_agent
   pkg_internal_smoketest --> pkg_internal_agent_harness
   pkg_internal_smoketest --> pkg_internal_forge
@@ -647,10 +647,10 @@ graph TD
 | `internal/runtime` | `internal/agent/harness` | `internal/runtime/runtimetest` |
 | `internal/runtime/mdruntime` | `internal/agent/harness`, `internal/runtime` | None |
 | `internal/runtime/runtimetest` | `internal/runtime` | None |
-| `internal/server` | `frontend`, `internal/agent`, `internal/agent/harness`, `internal/auth`, `internal/autoupdate`, `internal/bot`, `internal/ci`, `internal/eventreplay`, `internal/forge`, `internal/forge/forgecache`, `internal/forge/forgemgr`, `internal/forge/github`, `internal/forge/gitlab`, `internal/httplog`, `internal/mcp`, `internal/preferences`, `internal/repo`, `internal/repo/repomgr`, `internal/runtime`, `internal/server/api`, `internal/server/api/v1`, `internal/server/api/v1conv`, `internal/server/ipgeo`, `internal/task`, `internal/task/taskmgr`, `internal/usage` | `internal/agent/agenttest`, `internal/agent/claudecode`, `internal/agent/pi`, `internal/logtest`, `internal/mcp/mcptest`, `internal/repo/repowork`, `internal/runtime/mdruntime`, `internal/runtime/runtimetest` |
+| `internal/server` | `frontend`, `internal/agent`, `internal/agent/harness`, `internal/auth`, `internal/autoupdate`, `internal/bot`, `internal/ci`, `internal/eventreplay`, `internal/forge`, `internal/forge/forgecache`, `internal/forge/forgemgr`, `internal/forge/github`, `internal/forge/gitlab`, `internal/httplog`, `internal/mcp`, `internal/preferences`, `internal/repo`, `internal/repo/repomgr`, `internal/runtime`, `internal/server/api`, `internal/server/api/v1`, `internal/server/apiconv`, `internal/server/ipgeo`, `internal/task`, `internal/task/taskmgr`, `internal/usage` | `internal/agent/agenttest`, `internal/agent/claudecode`, `internal/agent/pi`, `internal/logtest`, `internal/mcp/mcptest`, `internal/repo/repowork`, `internal/runtime/mdruntime`, `internal/runtime/runtimetest` |
 | `internal/server/api` | None | None |
 | `internal/server/api/v1` | `internal/server/api` | None |
-| `internal/server/api/v1conv` | `internal/agent`, `internal/agent/harness`, `internal/eventreplay`, `internal/forge`, `internal/repo/repowork`, `internal/runtime`, `internal/server/api/v1`, `internal/task`, `internal/task/taskmgr`, `internal/usage` | None |
+| `internal/server/apiconv` | `internal/agent`, `internal/agent/harness`, `internal/eventreplay`, `internal/forge`, `internal/repo/repowork`, `internal/runtime`, `internal/server/api/v1`, `internal/task`, `internal/task/taskmgr`, `internal/usage` | None |
 | `internal/server/ipgeo` | None | None |
 | `internal/smoketest` | `internal/agent`, `internal/agent/harness`, `internal/forge`, `internal/runtime`, `internal/task`, `internal/usage` | None |
 | `internal/task` | `internal/agent`, `internal/agent/harness`, `internal/forge`, `internal/jsonutil`, `internal/logproof`, `internal/repo/repowork`, `internal/runtime` | `internal/agent/agenttest`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/logtest`, `internal/runtime/runtimetest` |

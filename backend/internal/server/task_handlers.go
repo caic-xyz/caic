@@ -26,7 +26,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
+	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
@@ -81,7 +81,7 @@ func (s *taskEventStream) writeMessages(messages []agent.Message, at time.Time) 
 
 func (s *taskEventStream) writeStats(stats []runtime.Stats) error {
 	for i := range stats {
-		ev := v1conv.StatsEvent(&stats[i])
+		ev := apiconv.StatsEvent(&stats[i])
 		if err := s.writeEvent(&ev); err != nil {
 			return err
 		}

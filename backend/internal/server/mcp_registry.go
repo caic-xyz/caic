@@ -21,6 +21,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	providerusage "github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/oauth"
@@ -401,10 +402,14 @@ func (m *mcpRegistry) handleTaskCreate(ctx context.Context, args mcpTaskCreateAr
 		return mcp.ToolError[mcpTaskCreatedOutput]("Missing required parameter: repos")
 	}
 	harness := m.resolveTaskCreateHarness(ctx, args.Harness)
+	apiHarness, err := apiconv.ParseHarness(harness)
+	if err != nil {
+		return mcp.ToolError[mcpTaskCreatedOutput](err.Error())
+	}
 	req := &v1.CreateTaskReq{
 		InitialPrompt: v1.Prompt{Text: args.Prompt},
 		Repos:         make([]v1.RepoSpec, len(args.Repos)),
-		Harness:       v1.Harness(harness),
+		Harness:       apiHarness,
 		Model:         args.Model,
 		Effort:        args.Effort,
 		RuntimeName:   args.RuntimeName,
@@ -611,7 +616,15 @@ func (m *mcpRegistry) handleTaskFork(ctx context.Context, args mcpTaskForkArgs) 
 	if args.Prompt == "" {
 		return mcp.ToolError[mcpTaskForkOutput]("Missing required parameter: prompt")
 	}
-	req := &v1.ForkTaskReq{Prompt: v1.Prompt{Text: args.Prompt}, Harness: v1.Harness(args.Harness), Model: args.Model}
+	var harness v1.Harness
+	if args.Harness != "" {
+		var err error
+		harness, err = apiconv.ParseHarness(args.Harness)
+		if err != nil {
+			return mcp.ToolError[mcpTaskForkOutput](err.Error())
+		}
+	}
+	req := &v1.ForkTaskReq{Prompt: v1.Prompt{Text: args.Prompt}, Harness: harness, Model: args.Model}
 	if err := req.Validate(); err != nil {
 		return domainToolError[mcpTaskForkOutput](err)
 	}

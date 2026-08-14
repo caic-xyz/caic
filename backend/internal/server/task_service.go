@@ -26,7 +26,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
+	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
@@ -93,7 +93,12 @@ func (s *taskService) taskListSnapshot(ctx context.Context) []v1.Task {
 		if ownerID != "" && e.Task().OwnerID != "" && e.Task().OwnerID != ownerID {
 			return true
 		}
-		out = append(out, v1conv.Task(ctx, e, newTaskResolvers(s.taskMgr, s.repoMgr, s.authStore)))
+		dto, err := apiconv.Task(ctx, e, newTaskResolvers(s.taskMgr, s.repoMgr, s.authStore))
+		if err != nil {
+			slog.ErrorContext(ctx, "convert task", "task", e.Task().ID, "err", err)
+			return true
+		}
+		out = append(out, dto)
 		return true
 	})
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -105,7 +110,10 @@ func (s *taskService) taskListSnapshot(ctx context.Context) []v1.Task {
 // check and initial state without depending on the eventually-consistent task
 // list snapshot.
 func (s *taskService) getTask(ctx context.Context, entry *taskmgr.Entry, _ *api.EmptyReq) (*v1.Task, error) {
-	dto := v1conv.Task(ctx, entry, newTaskResolvers(s.taskMgr, s.repoMgr, s.authStore))
+	dto, err := apiconv.Task(ctx, entry, newTaskResolvers(s.taskMgr, s.repoMgr, s.authStore))
+	if err != nil {
+		return nil, api.InternalError(err.Error())
+	}
 	return &dto, nil
 }
 
@@ -117,6 +125,10 @@ func (s *taskService) getTaskInfo(ctx context.Context, entry *taskmgr.Entry, _ *
 
 	taskRepos := make([]v1.TaskInfoRepo, 0, len(snap.Repos))
 	for _, repo := range snap.Repos {
+		forgeKind, err := resolvers.RepoForge(repo.Name)
+		if err != nil {
+			return nil, api.InternalError(err.Error())
+		}
 		taskRepos = append(taskRepos, v1.TaskInfoRepo{
 			Name:          repo.Name,
 			BaseBranch:    repo.BaseBranch,
@@ -124,19 +136,27 @@ func (s *taskService) getTaskInfo(ctx context.Context, entry *taskmgr.Entry, _ *
 			GitRoot:       repo.GitRoot,
 			ContainerPath: repo.ContainerPath,
 			RemoteURL:     resolvers.RepoURL(repo.Name),
-			Forge:         resolvers.RepoForge(repo.Name),
+			Forge:         forgeKind,
 		})
 	}
 
+	state, err := apiconv.TaskState(snap.State)
+	if err != nil {
+		return nil, api.InternalError(err.Error())
+	}
+	harnessName, err := apiconv.Harness(t.Harness)
+	if err != nil {
+		return nil, api.InternalError(err.Error())
+	}
 	containerOS, containerCPUArchitecture := taskInfoOSArch(t.ContainerPlatform)
 	info := &v1.TaskInfo{
 		ID: t.ID,
 		Recorded: v1.TaskInfoRecorded{
-			State:                    v1conv.TaskState(ctx, snap.State),
+			State:                    state,
 			ForkedFromTaskID:         t.ForkedFromTaskID,
 			StartedAt:                t.StartedAt,
 			StateUpdatedAt:           snap.StateUpdatedAt,
-			Harness:                  v1conv.Harness(t.Harness),
+			Harness:                  harnessName,
 			Model:                    snap.Model,
 			Effort:                   t.Effort,
 			AgentVersion:             snap.AgentVersion,
@@ -317,11 +337,15 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v
 		return nil, api.InternalError("resolve custom mounts: " + err.Error())
 	}
 
+	harnessName, err := apiconv.AgentHarness(req.Harness)
+	if err != nil {
+		return nil, api.BadRequest(err.Error())
+	}
 	id, err := s.taskMgr.Create(ctx, taskmgr.CreateParams{
 		OwnerID:             ownerID,
-		Prompt:              v1conv.PromptToAgent(req.InitialPrompt),
+		Prompt:              apiconv.PromptToAgent(req.InitialPrompt),
 		Repos:               taskRepos,
-		Harness:             v1conv.AgentHarness(req.Harness),
+		Harness:             harnessName,
 		Model:               req.Model,
 		Effort:              req.Effort,
 		Tailscale:           req.Tailscale,
@@ -383,7 +407,10 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v
 
 	// Return the full task so clients can seed their store and render the detail
 	// view immediately, without waiting for the SSE upsert to deliver it.
-	dto := v1conv.Task(ctx, entry, newTaskResolvers(s.taskMgr, s.repoMgr, s.authStore))
+	dto, err := apiconv.Task(ctx, entry, newTaskResolvers(s.taskMgr, s.repoMgr, s.authStore))
+	if err != nil {
+		return nil, api.InternalError(err.Error())
+	}
 	return &dto, nil
 }
 
@@ -415,7 +442,7 @@ const (
 // SSH round-trip may outlive a cancelled HTTP request, and we want the log line
 // regardless.
 func (s *taskService) sendInput(ctx context.Context, entry *taskmgr.Entry, req *v1.InputReq) (*v1.StatusResp, error) {
-	err := s.taskMgr.SendInput(ctx, entry, v1conv.PromptToAgent(req.Prompt))
+	err := s.taskMgr.SendInput(ctx, entry, apiconv.PromptToAgent(req.Prompt))
 	if err == nil {
 		return &v1.StatusResp{Status: "sent"}, nil
 	}
@@ -459,7 +486,7 @@ func (s *taskService) sendInput(ctx context.Context, entry *taskmgr.Entry, req *
 }
 
 func (s *taskService) restartTask(ctx context.Context, entry *taskmgr.Entry, req *v1.RestartReq) (*v1.StatusResp, error) {
-	if err := s.taskMgr.Restart(ctx, entry, v1conv.PromptToAgent(req.Prompt)); err != nil {
+	if err := s.taskMgr.Restart(ctx, entry, apiconv.PromptToAgent(req.Prompt)); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "restarted"}, nil
@@ -508,9 +535,15 @@ func (s *taskService) forkTask(ctx context.Context, entry *taskmgr.Entry, req *v
 		ownerID = u.ID
 	}
 
-	var selectedHarness harness.Name
+	var (
+		selectedHarness harness.Name
+		err             error
+	)
 	if req.Harness != "" {
-		selectedHarness = v1conv.AgentHarness(req.Harness)
+		selectedHarness, err = apiconv.AgentHarness(req.Harness)
+		if err != nil {
+			return nil, api.BadRequest(err.Error())
+		}
 	}
 
 	extraRepos := make([]taskmgr.ForkRepo, len(req.ExtraRepos))
@@ -542,7 +575,7 @@ func (s *taskService) forkTask(ctx context.Context, entry *taskmgr.Entry, req *v
 
 	newID, err := s.taskMgr.Fork(ctx, entry, taskmgr.ForkParams{
 		OwnerID:             ownerID,
-		Prompt:              v1conv.PromptToAgent(req.Prompt),
+		Prompt:              apiconv.PromptToAgent(req.Prompt),
 		Harness:             selectedHarness,
 		Model:               req.Model,
 		Effort:              req.Effort,
@@ -562,7 +595,10 @@ func (s *taskService) forkTask(ctx context.Context, entry *taskmgr.Entry, req *v
 	if !ok {
 		return nil, api.InternalError("forked task not found")
 	}
-	dto := v1conv.Task(ctx, forkEntry, newTaskResolvers(s.taskMgr, s.repoMgr, s.authStore))
+	dto, err := apiconv.Task(ctx, forkEntry, newTaskResolvers(s.taskMgr, s.repoMgr, s.authStore))
+	if err != nil {
+		return nil, api.InternalError(err.Error())
+	}
 	return &dto, nil
 }
 
@@ -615,7 +651,7 @@ func (s *taskService) syncTask(ctx context.Context, entry *taskmgr.Entry, req *v
 		Status:       res.Status,
 		Branch:       res.Branch,
 		DiffStat:     eventreplay.DiffStat(res.DiffStat),
-		SafetyIssues: v1conv.SafetyIssues(res.SafetyIssues),
+		SafetyIssues: apiconv.SafetyIssues(res.SafetyIssues),
 	}
 
 	// Default-branch sync never starts a PR flow.
@@ -673,19 +709,19 @@ func (s *taskService) resolveGitHubContainerToken(ctx context.Context, enabled b
 // DTOs. It is a free function so any HTTP concern object that creates a task
 // (task and CI handlers) can assemble the full Task DTO it returns to clients
 // from the same shared dependencies.
-func newTaskResolvers(taskMgr *taskmgr.Manager, repoSvc *repomgr.Service, authStore *auth.Store) v1conv.TaskResolvers {
-	return v1conv.TaskResolvers{
+func newTaskResolvers(taskMgr *taskmgr.Manager, repoSvc *repomgr.Service, authStore *auth.Store) apiconv.TaskResolvers {
+	return apiconv.TaskResolvers{
 		RepoURL: func(rel string) string {
 			if info, ok := repoSvc.Repos.InfoFor(rel); ok {
 				return git.RemoteToHTTPS(info.Remote)
 			}
 			return ""
 		},
-		RepoForge: func(rel string) v1.Forge {
+		RepoForge: func(rel string) (v1.Forge, error) {
 			if info, ok := repoSvc.Repos.InfoFor(rel); ok {
-				return v1.Forge(info.ForgeKind)
+				return apiconv.RepoForge(info.ForgeKind)
 			}
-			return ""
+			return "", nil
 		},
 		SudoPassword: taskMgr.SudoPassword,
 		OwnerName: func(ownerID string) string {

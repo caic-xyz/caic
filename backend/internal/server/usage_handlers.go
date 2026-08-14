@@ -14,7 +14,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
+	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
@@ -78,7 +78,7 @@ func (h *usageHandlers) handleGetUsage(w http.ResponseWriter, r *http.Request) {
 // aggregation plus per-provider quota data from each registered fetcher.
 func (h *usageHandlers) buildResp(ctx context.Context) v1.UsageResp {
 	now := time.Now()
-	local := v1conv.LocalUsage(h.taskMgr, now)
+	local := apiconv.LocalUsage(h.taskMgr, now)
 
 	resp := v1.UsageResp{Local: local}
 	detached := context.WithoutCancel(ctx)
@@ -92,7 +92,11 @@ func (h *usageHandlers) buildResp(ctx context.Context) v1.UsageResp {
 	}
 	mergedQuotas := h.quotaTracker.Merge(providerQuotas, now)
 	for i := range mergedQuotas {
-		out := v1conv.ProviderQuota(&mergedQuotas[i])
+		out, err := apiconv.ProviderQuota(&mergedQuotas[i])
+		if err != nil {
+			slog.ErrorContext(ctx, "convert provider quota", "provider", mergedQuotas[i].Provider, "err", err)
+			continue
+		}
 		out.LogoURL = "/logos/" + string(out.Provider) + ".svg"
 		out.UsageURL = usageURLs[agent.QuotaProvider(out.Provider)]
 		resp.Providers = append(resp.Providers, out)

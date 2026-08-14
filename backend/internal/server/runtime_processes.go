@@ -12,7 +12,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
+	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
@@ -42,7 +42,7 @@ func (h *runtimeProcessHandlers) HandleGetProcesses(w http.ResponseWriter, r *ht
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(v1.ProcessListResp{Processes: v1conv.ProcessInfos(procs)}); err != nil {
+	if err := json.NewEncoder(w).Encode(v1.ProcessListResp{Processes: apiconv.ProcessInfos(procs)}); err != nil {
 		slog.WarnContext(r.Context(), "encode process list response", "err", err)
 	}
 }

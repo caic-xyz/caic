@@ -20,7 +20,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
+	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
@@ -153,7 +153,10 @@ func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Task, 
 	if !ok {
 		return nil, api.InternalError("created task not found")
 	}
-	dto := v1conv.Task(ctx, entry, newTaskResolvers(h.taskMgr, h.repoSvc, h.authStore))
+	dto, err := apiconv.Task(ctx, entry, newTaskResolvers(h.taskMgr, h.repoSvc, h.authStore))
+	if err != nil {
+		return nil, api.InternalError(err.Error())
+	}
 	return &dto, nil
 }
 

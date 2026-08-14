@@ -1,6 +1,6 @@
 // Local task cost aggregation for usage reporting.
 
-package v1conv
+package apiconv
 
 import (
 	"time"

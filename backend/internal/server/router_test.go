@@ -40,7 +40,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
+	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
@@ -772,7 +772,7 @@ func TestHandleCreateTask(t *testing.T) {
 		s.taskMgr.Workspaces.RegisterWorkspace("myrepo", newRouterTestWorkspace(t, "main", t.TempDir()))
 		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
-		body := strings.NewReader(`{"initialPrompt":{"text":"test task"},"repos":[{"name":"myrepo"}],"harness":"claude"}`)
+		body := strings.NewReader(`{"initialPrompt":{"text":"test task"},"repos":[{"name":"myrepo"}],"harness":"claude","model":"m1"}`)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
 		w := httptest.NewRecorder()
 		handler(w, req)
@@ -786,6 +786,9 @@ func TestHandleCreateTask(t *testing.T) {
 		}
 		if resp.ID == 0 {
 			t.Error("response has zero 'id' field")
+		}
+		if resp.Model != "m1" {
+			t.Errorf("model = %q, want m1", resp.Model)
 		}
 	})
 
@@ -852,11 +855,11 @@ func TestHandleCreateTask(t *testing.T) {
 
 	t.Run("InvalidModel", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t, map[harness.Name]agent.Backend{"stub": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Codex: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
 		s.taskMgr.Workspaces.RegisterWorkspace("myrepo", newRouterTestWorkspace(t, "main", t.TempDir()))
 		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
-		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"stub","model":"nonexistent"}`)
+		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"codex","model":"nonexistent"}`)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
 		w := httptest.NewRecorder()
 		handler(w, req)
@@ -870,29 +873,6 @@ func TestHandleCreateTask(t *testing.T) {
 		}
 		if !strings.Contains(e.Message, "nonexistent") {
 			t.Errorf("message = %q, want it to mention the invalid model", e.Message)
-		}
-	})
-
-	t.Run("ValidModel", func(t *testing.T) {
-		t.Parallel()
-		s := newTestRouter(t, map[harness.Name]agent.Backend{"stub": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
-		s.taskMgr.Workspaces.RegisterWorkspace("myrepo", newRouterTestWorkspace(t, "main", t.TempDir()))
-		handler := handle(testTaskHandlers(s).taskSvc.createTask)
-
-		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"stub","model":"m1"}`)
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
-		w := httptest.NewRecorder()
-		handler(w, req)
-
-		if w.Code != http.StatusOK {
-			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
-		}
-		var resp v1.Task
-		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-			t.Fatal(err)
-		}
-		if resp.ID == 0 {
-			t.Error("response has zero 'id' field")
 		}
 	})
 
@@ -1458,7 +1438,10 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 		for _, e := range entries {
 			h := testTaskHandlers(s)
-			j := v1conv.Task(t.Context(), e, newTaskResolvers(h.taskSvc.taskMgr, h.taskSvc.repoMgr, h.taskSvc.authStore))
+			j, err := apiconv.Task(t.Context(), e, newTaskResolvers(h.taskSvc.taskMgr, h.taskSvc.repoMgr, h.taskSvc.authStore))
+			if err != nil {
+				t.Fatal(err)
+			}
 			if j.CostUSD != 1.23 {
 				t.Errorf("CostUSD = %f, want 1.23", j.CostUSD)
 			}
@@ -1512,7 +1495,10 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 		for _, e := range entries {
 			h := testTaskHandlers(s)
-			j := v1conv.Task(t.Context(), e, newTaskResolvers(h.taskSvc.taskMgr, h.taskSvc.repoMgr, h.taskSvc.authStore))
+			j, err := apiconv.Task(t.Context(), e, newTaskResolvers(h.taskSvc.taskMgr, h.taskSvc.repoMgr, h.taskSvc.authStore))
+			if err != nil {
+				t.Fatal(err)
+			}
 			if j.CostUSD != 0.42 {
 				t.Errorf("CostUSD = %f, want 0.42 (should be backfilled from ResultMessage)", j.CostUSD)
 			}
