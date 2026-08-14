@@ -239,6 +239,18 @@ func ForgeCheck(c *forge.Check) (v1.ForgeCheck, error) {
 	}, nil
 }
 
+// DiffStat converts an agent diff stat to an API DTO.
+func DiffStat(ds agent.DiffStat) v1.DiffStat {
+	if len(ds) == 0 {
+		return nil
+	}
+	out := make(v1.DiffStat, len(ds))
+	for i, f := range ds {
+		out[i] = v1.DiffFileStat{Path: f.Path, Added: f.Added, Deleted: f.Deleted, Binary: f.Binary}
+	}
+	return out
+}
+
 func quotaProvider(p agent.QuotaProvider) (v1.QuotaProvider, error) {
 	switch p {
 	case agent.QuotaProviderAnthropic:

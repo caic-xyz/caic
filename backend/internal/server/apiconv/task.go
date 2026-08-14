@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
@@ -124,13 +123,13 @@ func Task(in *TaskInput) (v1.Task, error) {
 		out.ContextWindowLimit = in.ContextWindowLimit
 	}
 	if result != nil {
-		out.DiffStat = eventreplay.DiffStat(result.DiffStat)
+		out.DiffStat = DiffStat(result.DiffStat)
 		out.Result = result.AgentResult
 		if result.Err != nil {
 			out.Error = result.Err.Error()
 		}
 	} else {
-		out.DiffStat = eventreplay.DiffStat(snap.DiffStat)
+		out.DiffStat = DiffStat(snap.DiffStat)
 	}
 	out.ForgeOwner = snap.ForgeOwner
 	out.ForgeRepo = snap.ForgeRepo

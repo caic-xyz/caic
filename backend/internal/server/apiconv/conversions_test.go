@@ -109,6 +109,19 @@ func TestCIStatus(t *testing.T) {
 	}
 }
 
+func TestDiffStat(t *testing.T) {
+	t.Parallel()
+
+	if got := DiffStat(nil); got != nil {
+		t.Errorf("DiffStat(nil) = %#v, want nil", got)
+	}
+	diff := agent.DiffStat{{Path: "main.go", Added: 3, Deleted: 1, Binary: true}}
+	want := v1.DiffStat{{Path: "main.go", Added: 3, Deleted: 1, Binary: true}}
+	if got := DiffStat(diff); !reflect.DeepEqual(got, want) {
+		t.Errorf("DiffStat() = %#v, want %#v", got, want)
+	}
+}
+
 func TestForgePRState(t *testing.T) {
 	t.Parallel()
 
