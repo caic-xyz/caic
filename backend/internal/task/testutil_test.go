@@ -1,6 +1,5 @@
-// Shared test doubles and fixtures for the task package's Runner and
-// SessionRunner tests: fake agent backends, a fake runtime.Lifecycle, and git
-// test-repo helpers.
+// Shared task test doubles and fixtures: fake agent backends, a fake runtime
+// lifecycle, and git test-repo helpers.
 
 package task
 
@@ -19,9 +18,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
-	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/logtest"
-	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 )
@@ -101,14 +97,6 @@ func (*testWire) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) err
 
 func (w *testWire) ParseMessage(line []byte) ([]agent.Message, error) {
 	return w.parse(line)
-}
-
-func newTestSessionRunner(t *testing.T, checkout *repo.Checkout, logDir string, backends map[harness.Name]agent.Backend) *SessionRunner {
-	var runtimes *runtime.Router
-	if value, ok := testCheckoutRuntimes.Load(checkout); ok {
-		runtimes, _ = value.(*runtime.Router)
-	}
-	return &SessionRunner{Backends: backends, Logs: LogStore{LogDir: logDir}, Runtimes: runtimes, Log: logtest.Logger(t), Checkout: checkout, NotifyTaskChange: func() {}}
 }
 
 // testContainer returns a fake runtime whose Diff reports a fixed one-file

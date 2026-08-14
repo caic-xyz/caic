@@ -424,7 +424,7 @@ func (m *Manager) Restart(ctx context.Context, entry *Entry, prompt agent.Prompt
 		}
 	}
 	checkout := m.resolveCheckout(t)
-	h, err := m.sessions(checkout).RestartSession(m.serverCtx, t, prompt) //nolint:contextcheck // intentionally using server context
+	h, err := m.runner(checkout).RestartSession(m.serverCtx, t, prompt) //nolint:contextcheck // intentionally using server context
 	if err != nil {
 		return internalErr(err, "restart session")
 	}
@@ -443,7 +443,7 @@ func (m *Manager) ClearContext(ctx context.Context, entry *Entry) error {
 	if checkout == nil {
 		return internalErr(errors.New("task checkout is unavailable"), "clear context")
 	}
-	h, err := m.sessions(checkout).ClearContextSession(m.serverCtx, t) //nolint:contextcheck // intentionally using server context
+	h, err := m.runner(checkout).ClearContextSession(m.serverCtx, t) //nolint:contextcheck // intentionally using server context
 	if err != nil {
 		return internalErr(err, "clear context")
 	}
@@ -1212,7 +1212,8 @@ func (m *Manager) reconnectForInput(entry *Entry) error {
 		return nil
 	}
 	checkout := m.resolveCheckout(t)
-	h, err := m.sessions(checkout).Reconnect(m.serverCtx, t, false)
+	runner := m.runner(checkout)
+	h, err := runner.Reconnect(m.serverCtx, t, false)
 	if err != nil {
 		if t.HasSession() {
 			return nil
@@ -1220,7 +1221,7 @@ func (m *Manager) reconnectForInput(entry *Entry) error {
 		return err
 	}
 	tlog := m.log.With("task", t.ID, "instance", t.RuntimeInstanceID())
-	h, err = m.sessions(checkout).EnsureSession(m.serverCtx, tlog, t, h)
+	h, err = runner.EnsureSession(m.serverCtx, tlog, t, h)
 	if err != nil {
 		return err
 	}
@@ -1228,23 +1229,14 @@ func (m *Manager) reconnectForInput(entry *Entry) error {
 	return nil
 }
 
-func (m *Manager) sessions(r *repo.Checkout) *task.SessionRunner {
-	return &task.SessionRunner{
-		Backends:         m.Backends,
-		Logs:             m.Logs,
-		Runtimes:         m.Runtimes,
-		Log:              m.log,
-		Checkout:         r,
-		NotifyTaskChange: m.NotifyTaskChange,
-	}
-}
-
 func (m *Manager) runner(r *repo.Checkout) *task.Runner {
 	return &task.Runner{
+		Backends:            m.Backends,
+		Logs:                m.Logs,
 		Runtimes:            m.Runtimes,
 		Log:                 m.log,
+		NotifyTaskChange:    m.NotifyTaskChange,
 		Checkout:            r,
-		Sessions:            m.sessions(r),
 		RuntimeMetadata:     m.runtimeMetadata,
 		RuntimeStartTimeout: m.runtimeStartTimeout,
 		OnTerminalLogClosed: m.publishTerminalReplayForTask,
@@ -1951,14 +1943,15 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 	if t.GetState() != task.StateStopped && relayAlive {
 		m.log.DebugContext(ctx, "instance", "msg", "auto-reconnect starting", "repo", ri.RelPath, "br", branch, "instance", c.ID)
 		tlog := m.log.With("repo", ri.RelPath, "br", branch, "instance", t.RuntimeInstanceID())
-		h, err := m.sessions(checkout).Reconnect(m.serverCtx, t, true) //nolint:contextcheck // adopted sessions must outlive startup/adoption.
+		runner := m.runner(checkout)
+		h, err := runner.Reconnect(m.serverCtx, t, true) //nolint:contextcheck // adopted sessions must outlive startup/adoption.
 		if err != nil {
 			tlog.Warn("auto-reconnect failed", "err", err)
 			m.NotifyTaskChange()
 			return &AdoptedTask{Entry: entry, Task: t, RelPath: ri.RelPath, ForgeKind: ri.ForgeKind, ForgeOwner: ri.ForgeOwner, ForgeRepo: ri.ForgeRepo, Branch: branch, FoundPRFromLog: foundPRFromLog}, nil
 		}
 		go func() {
-			h, err = m.sessions(checkout).EnsureSession(m.serverCtx, tlog, t, h)
+			h, err = runner.EnsureSession(m.serverCtx, tlog, t, h)
 			if err != nil {
 				tlog.Warn("ensure session failed", "err", err)
 				t.SetState(task.StateWaiting)
