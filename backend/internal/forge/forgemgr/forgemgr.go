@@ -12,7 +12,6 @@ import (
 	"github.com/maruel/roundtrippers"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/forge/gitlab"
@@ -167,10 +166,10 @@ func (m *Manager) InstallationID(owner string) int64 {
 	return id
 }
 
-// CommenterFor returns a bot.Commenter for posting comments via the GitHub App
+// CommenterFor returns a forge.Commenter for posting comments via the GitHub App
 // (when installationID is non-zero) or the configured PAT, or nil if neither
 // is available.
-func (m *Manager) CommenterFor(installationID int64) bot.Commenter {
+func (m *Manager) CommenterFor(installationID int64) forge.Commenter {
 	if m.githubApp != nil && installationID != 0 {
 		return &appInstallCommenter{app: m.githubApp, installationID: installationID}
 	}
@@ -219,7 +218,7 @@ func (m *Manager) gitlabOAuthThrottle(userID string) http.RoundTripper {
 	return t
 }
 
-// appInstallCommenter adapts GitHubAppClient.PostComment to bot.Commenter by
+// appInstallCommenter adapts GitHubAppClient.PostComment to forge.Commenter by
 // binding a fixed installation ID.
 type appInstallCommenter struct {
 	app            GitHubAppClient

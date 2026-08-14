@@ -134,6 +134,11 @@ const (
 	PRStateMerged PRState = "merged"
 )
 
+// Commenter posts a comment on an issue or merge request.
+type Commenter interface {
+	PostComment(ctx context.Context, owner, repo string, issueNumber int, body string) error
+}
+
 // Forge is the interface for interacting with a code hosting forge.
 type Forge interface {
 	// CreatePR creates a pull/merge request and returns its metadata.

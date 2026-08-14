@@ -14,6 +14,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/bot"
+	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
@@ -118,7 +119,7 @@ func (c *botClient) ListPendingBotTasks() []bot.PendingBotTask {
 }
 
 // ResolveCommenter returns a forge commenter for an owner.
-func (c *botClient) ResolveCommenter(ctx context.Context, owner string) bot.Commenter {
+func (c *botClient) ResolveCommenter(ctx context.Context, owner string) forge.Commenter {
 	installID := c.forgeMgr.InstallationID(owner)
 	if installID == 0 && c.forgeMgr.GitHubApp() != nil {
 		// Try to discover the installation ID via the API.

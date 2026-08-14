@@ -136,7 +136,6 @@ graph TD
   pkg_internal_eventreplay --> pkg_internal_logproof
   pkg_internal_forge_forgecache --> pkg_internal_forge
   pkg_internal_forge_forgemgr --> pkg_internal_auth
-  pkg_internal_forge_forgemgr --> pkg_internal_bot
   pkg_internal_forge_forgemgr --> pkg_internal_forge
   pkg_internal_forge_forgemgr --> pkg_internal_forge_github
   pkg_internal_forge_forgemgr --> pkg_internal_forge_gitlab
@@ -489,7 +488,6 @@ graph TD
   pkg_internal_eventreplay --> pkg_internal_logproof
   pkg_internal_forge_forgecache --> pkg_internal_forge
   pkg_internal_forge_forgemgr --> pkg_internal_auth
-  pkg_internal_forge_forgemgr --> pkg_internal_bot
   pkg_internal_forge_forgemgr --> pkg_internal_forge
   pkg_internal_forge_forgemgr --> pkg_internal_forge_github
   pkg_internal_forge_forgemgr --> pkg_internal_forge_gitlab
@@ -619,7 +617,7 @@ graph TD
 | `internal/eventreplay` | `internal/logproof` | None |
 | `internal/forge` | None | None |
 | `internal/forge/forgecache` | `internal/forge` | None |
-| `internal/forge/forgemgr` | `internal/auth`, `internal/bot`, `internal/forge`, `internal/forge/github`, `internal/forge/gitlab`, `internal/repo` | None |
+| `internal/forge/forgemgr` | `internal/auth`, `internal/forge`, `internal/forge/github`, `internal/forge/gitlab`, `internal/repo` | None |
 | `internal/forge/github` | `internal/forge` | None |
 | `internal/forge/gitlab` | `internal/forge` | None |
 | `internal/httplog` | None | None |

@@ -60,11 +60,6 @@ type TaskRequest struct {
 	IssueNumber int // originating issue/PR number for completion comment callbacks
 }
 
-// Commenter posts a comment on an issue or merge request.
-type Commenter interface {
-	PostComment(ctx context.Context, owner, repo string, issueNumber int, body string) error
-}
-
 // PendingBotTask describes a non-terminal task with a forge issue callback.
 // Used by ResumePendingComments to re-attach watchers after restart.
 type PendingBotTask struct {
@@ -87,8 +82,8 @@ type Client interface {
 	WatchTaskCompletion(ctx context.Context, taskID string) (state string, result string, err error)
 	// ListPendingBotTasks returns non-terminal tasks that have a ForgeIssue set.
 	ListPendingBotTasks() []PendingBotTask
-	// ResolveCommenter returns a Commenter for the given forge owner, or nil.
-	ResolveCommenter(ctx context.Context, owner string) Commenter
+	// ResolveCommenter returns a forge.Commenter for the given forge owner, or nil.
+	ResolveCommenter(ctx context.Context, owner string) forge.Commenter
 }
 
 // Bot handles forge event-driven task automation.
@@ -123,7 +118,7 @@ func (b *Bot) ResumePendingComments() {
 
 // OnIssueOpened creates a task when an issue with the "caic" label is opened.
 // commenter is used to post a completion comment; may be nil.
-func (b *Bot) OnIssueOpened(ctx context.Context, ev *IssueEvent, commenter Commenter) {
+func (b *Bot) OnIssueOpened(ctx context.Context, ev *IssueEvent, commenter forge.Commenter) {
 	hasCaicLabel := slices.Contains(ev.Labels, "caic")
 	if !hasCaicLabel {
 		return
@@ -152,7 +147,7 @@ func (b *Bot) OnPROpened(ctx context.Context, ev *PREvent) {
 
 // OnIssueComment creates a task when @caic is mentioned in a comment.
 // commenter is used to post a completion comment; may be nil.
-func (b *Bot) OnIssueComment(ctx context.Context, ev CommentEvent, commenter Commenter) {
+func (b *Bot) OnIssueComment(ctx context.Context, ev CommentEvent, commenter forge.Commenter) {
 	if !strings.Contains(ev.CommentBody, "@caic") {
 		return
 	}
@@ -167,7 +162,7 @@ func (b *Bot) OnIssueComment(ctx context.Context, ev CommentEvent, commenter Com
 }
 
 // postTaskComment posts a completion comment on the originating issue or PR.
-func (b *Bot) postTaskComment(ctx context.Context, commenter Commenter, owner, repo string, issueNumber int, state, agentResult string) {
+func (b *Bot) postTaskComment(ctx context.Context, commenter forge.Commenter, owner, repo string, issueNumber int, state, agentResult string) {
 	var body string
 	if agentResult != "" {
 		body = fmt.Sprintf("caic task completed (state: %s)\n\n%s", state, agentResult)
@@ -179,7 +174,7 @@ func (b *Bot) postTaskComment(ctx context.Context, commenter Commenter, owner, r
 	}
 }
 
-func (b *Bot) dispatch(ctx context.Context, repo *RepoInfo, prompt string, commenter Commenter, issueNumber int, ownerID string) {
+func (b *Bot) dispatch(ctx context.Context, repo *RepoInfo, prompt string, commenter forge.Commenter, issueNumber int, ownerID string) {
 	taskID, err := b.client.CreateTask(ctx, TaskRequest{
 		Repo:        repo.RelPath,
 		Prompt:      prompt,
@@ -197,7 +192,7 @@ func (b *Bot) dispatch(ctx context.Context, repo *RepoInfo, prompt string, comme
 }
 
 // watchAndComment blocks until the task completes, then posts a comment.
-func (b *Bot) watchAndComment(taskID string, commenter Commenter, owner, repo string, issueNumber int) {
+func (b *Bot) watchAndComment(taskID string, commenter forge.Commenter, owner, repo string, issueNumber int) {
 	state, result, err := b.client.WatchTaskCompletion(b.ctx, taskID)
 	if err != nil {
 		b.log.WarnContext(b.ctx, "watch task failed", "id", taskID, "err", err)
