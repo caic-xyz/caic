@@ -1,6 +1,6 @@
 // Tool display normalization for API event conversion.
 
-package eventreplay
+package apiconv
 
 import (
 	"encoding/json"

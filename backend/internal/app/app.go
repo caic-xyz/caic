@@ -26,7 +26,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/ci"
-	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
@@ -104,6 +103,10 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		return nil, fmt.Errorf("create cache directory: %w", err)
 	}
 	logDir := filepath.Join(cfg.Dirs.CacheDir, "tasks")
+	replayPublisher, err := server.NewReplayPublisher(filepath.Join(logDir, ".replay-tmp"))
+	if err != nil {
+		return nil, err
+	}
 
 	absRoot, err := filepath.Abs(rootDir)
 	if err != nil {
@@ -272,6 +275,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		RuntimeMetadata:     cfg.Runtime.Metadata,
 		RuntimeStartTimeout: time.Hour,
 		Provider:            provider,
+		TerminalReplay:      replayPublisher.Publish,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("task manager: %w", err)
@@ -293,7 +297,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		} else {
 			slog.InfoContext(startupCtx, "compressed terminal task logs", "dur", time.Since(start))
 		}
-		if removed, err := eventreplay.PruneStaleCaches(logDir, task.CacheProofForLog); err != nil {
+		if removed, err := replayPublisher.Prune(logDir, task.CacheProofForLog); err != nil {
 			slog.WarnContext(startupCtx, "prune stale replay caches failed", "err", err)
 		} else if removed > 0 {
 			slog.InfoContext(startupCtx, "pruned stale replay caches", "n", removed)
@@ -362,6 +366,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		CICache:                    cache,
 		Runtimes:                   runtimes,
 		TaskMgr:                    taskMgr,
+		ReplayPublisher:            replayPublisher,
 		Provider:                   provider,
 		IPGeoChecker:               ipgeoChecker,
 		Bot:                        botService,

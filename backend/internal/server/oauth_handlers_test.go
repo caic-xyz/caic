@@ -426,6 +426,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 		RepoStatus:                 repoStatus,
 		Runtimes:                   runtimeRouter,
 		TaskMgr:                    taskMgr,
+		ReplayPublisher:            newTestReplayPublisher(t),
 		Preferences:                prefs,
 		IPGeoChecker:               checker,
 		ForgeMgr:                   forgeManager,

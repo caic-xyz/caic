@@ -31,7 +31,6 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -85,6 +84,7 @@ type Config struct {
 	RuntimeStartTimeout time.Duration
 	Provider            genai.Provider // nil-safe
 	Workspaces          *repowork.Registry
+	TerminalReplay      TerminalReplayPublisher
 }
 
 // Manager owns task lifecycle state, instance adoption, session watching, and
@@ -105,6 +105,7 @@ type Manager struct {
 	runtimeMetadata     runtime.Metadata
 	runtimeStartTimeout time.Duration
 	provider            genai.Provider
+	terminalReplay      TerminalReplayPublisher
 	relay               relayReader
 
 	// Guarded by quotaWatchMu.
@@ -133,6 +134,9 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 	if cfg.RuntimeStartTimeout <= 0 {
 		return nil, errors.New("task manager runtime start timeout is required")
 	}
+	if cfg.TerminalReplay == nil {
+		return nil, errors.New("task manager terminal replay publisher is required")
+	}
 	log := slog.Default().With(slog.String("cmp", "taskmgr"))
 	serverCtx, cancelServerCtx := context.WithCancel(cfg.ServerCtx)
 	m := &Manager{
@@ -148,6 +152,7 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 		runtimeMetadata:     maps.Clone(cfg.RuntimeMetadata),
 		runtimeStartTimeout: cfg.RuntimeStartTimeout,
 		provider:            cfg.Provider,
+		terminalReplay:      cfg.TerminalReplay,
 		Workspaces:          cfg.Workspaces,
 		relay:               agentRelayReader{},
 		tasks:               make(map[string]*Entry),
@@ -2057,19 +2062,21 @@ func (m *Manager) publishTerminalReplayForTask(ctx context.Context, t *task.Task
 }
 
 func (m *Manager) publishTerminalReplay(ctx context.Context, entry *Entry) {
-	lt, err := m.regenerateTerminalReplay(ctx, entry.Task())
+	lt, err := m.loadTerminalReplaySource(entry.Task())
 	if lt != nil {
 		entry.SetLoadedTask(lt)
+	}
+	if err == nil {
+		err = m.terminalReplay(ctx, lt)
 	}
 	if err != nil {
 		m.log.WarnContext(ctx, "regenerate terminal replay cache failed", "task", entry.Task().ID, "err", err)
 	}
 }
 
-// regenerateTerminalReplay reloads a completed task log, validates it through
-// EOF, and publishes its rebuildable replay cache. The loaded log remains
-// usable as an on-demand replay source if cache publication fails.
-func (m *Manager) regenerateTerminalReplay(ctx context.Context, t *task.Task) (*task.LoadedTask, error) {
+// loadTerminalReplaySource reloads and validates a completed task log through
+// EOF. The returned source remains usable for a later replay-cache retry.
+func (m *Manager) loadTerminalReplaySource(t *task.Task) (*task.LoadedTask, error) {
 	path := t.LogPath()
 	if path == "" {
 		return nil, errors.New("terminal task has no log path")
@@ -2083,9 +2090,6 @@ func (m *Manager) regenerateTerminalReplay(ctx context.Context, t *task.Task) (*
 	}
 	lt := loaded[0]
 	lt.SetNativeParserResolver(m.resolveNativeParser)
-	if err := eventreplay.RegenerateReplay(ctx, lt.LogPath(), lt.CacheProofForLog, lt.ScanMessagesWithContext); err != nil {
-		return lt, err
-	}
 	return lt, nil
 }
 

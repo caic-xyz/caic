@@ -3,7 +3,6 @@
 package taskmgr
 
 import (
-	"bytes"
 	"context"
 	"strings"
 	"testing"
@@ -15,15 +14,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
-
-type replayBuffer struct {
-	bytes.Buffer
-}
-
-func (*replayBuffer) Flush() {}
 
 func TestPublishTerminalReplayPublishesLocalTaskCache(t *testing.T) {
 	t.Parallel()
@@ -77,8 +69,13 @@ func TestPublishTerminalReplayPublishesLocalTaskCache(t *testing.T) {
 				tk.SetLogPath(terminal[0].LogPath())
 			}
 
+			published := false
 			m := newTestManager(t, Config{
 				ServerCtx: t.Context(),
+				TerminalReplay: func(ctx context.Context, lt *task.LoadedTask) error {
+					published = lt != nil
+					return ctx.Err()
+				},
 				Backends: map[harness.Name]agent.Backend{
 					harness.Claude: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire},
 				},
@@ -98,22 +95,8 @@ func TestPublishTerminalReplayPublishesLocalTaskCache(t *testing.T) {
 			if tc.state != task.StateStopped && !strings.HasSuffix(loaded.LogPath(), ".zst") {
 				t.Fatalf("final replay log = %q, want compressed log", loaded.LogPath())
 			}
-			replay, ok := eventreplay.OpenReplay(loaded.LogPath(), loaded.CacheProofForLog)
-			if tc.cancelled {
-				if ok {
-					t.Cleanup(replay.Close)
-					t.Fatal("cancelled terminal replay cache was published")
-				}
-				return
-			}
-			if !ok {
-				t.Fatal("local terminal task replay cache was not published")
-			}
-			t.Cleanup(replay.Close)
-			out := &replayBuffer{}
-			idx := 0
-			if replay.WriteSSE(out, out, &idx) != eventreplay.SSEComplete || !bytes.Contains(out.Bytes(), []byte("local task")) {
-				t.Fatalf("terminal replay = %q, index = %d", out.String(), idx)
+			if !published {
+				t.Fatal("local terminal task did not invoke its replay publisher")
 			}
 		})
 	}

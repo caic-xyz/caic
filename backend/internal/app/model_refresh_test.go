@@ -15,6 +15,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
@@ -150,6 +151,7 @@ func newModelRefreshTestManager(t testing.TB, router *runtime.Router, backends m
 		Backends:            backends,
 		Workspaces:          repowork.NewRegistry(t.Context(), router),
 		RuntimeStartTimeout: time.Hour,
+		TerminalReplay:      func(context.Context, *task.LoadedTask) error { return nil },
 	})
 	if err != nil {
 		t.Fatalf("taskmgr.New: %v", err)

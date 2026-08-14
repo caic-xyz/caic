@@ -19,7 +19,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
-	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo/repomgr"
@@ -710,7 +709,7 @@ func (s *taskService) syncTask(ctx context.Context, entry *taskmgr.Entry, req *v
 	resp := &v1.SyncResp{
 		Status:       res.Status,
 		Branch:       res.Branch,
-		DiffStat:     eventreplay.DiffStat(res.DiffStat),
+		DiffStat:     apiconv.DiffStat(res.DiffStat),
 		SafetyIssues: apiconv.SafetyIssues(res.SafetyIssues),
 	}
 

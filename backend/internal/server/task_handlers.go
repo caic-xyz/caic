@@ -37,6 +37,7 @@ import (
 // raw HTTP response writing. Task command orchestration and DTO assembly belong
 // to taskService.
 type taskHandlers struct {
+	replay     *ReplayPublisher
 	taskMgr    *taskmgr.Manager
 	repoSvc    *repomgr.Service
 	repoStatus *ci.RepoStatusStore
@@ -63,7 +64,7 @@ type taskEventStream struct {
 	w          http.ResponseWriter
 	flusher    http.Flusher
 	controller *http.ResponseController
-	tracker    *eventreplay.ToolTimingTracker
+	tracker    *apiconv.ToolTimingTracker
 	nextID     int
 }
 
@@ -90,7 +91,7 @@ func (s *taskEventStream) writeStats(stats []runtime.Stats) error {
 }
 
 func (s *taskEventStream) writeEvent(ev *v1.EventMessage) error {
-	data, err := eventreplay.MarshalEvent(ev)
+	data, err := apiconv.MarshalEvent(ev)
 	if err != nil {
 		return fmt.Errorf("marshal SSE event: %w", err)
 	}
@@ -170,7 +171,7 @@ func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.
 	statsHistory, statsLive, statsUnsub := entry.Task().SubscribeStats(stream.ctx)
 	defer statsUnsub()
 
-	stream.tracker = eventreplay.NewToolTimingTracker(entry.Task().Harness, eventreplay.FormatToolOutput)
+	stream.tracker = apiconv.NewToolTimingTracker(entry.Task().Harness, apiconv.FormatToolOutput)
 
 	now := time.Now()
 	if shouldReplayHistoryFromDisk(state, loadedTask) {
@@ -276,7 +277,7 @@ func (h *taskHandlers) streamReplayStore(ctx context.Context, w io.Writer, flush
 		return errors.New("task has no replayable log")
 	}
 	logPath := lt.LogPath()
-	if replay, ok := eventreplay.OpenReplay(logPath, lt.CacheProofForLog); ok {
+	if replay, ok := eventreplay.OpenReplay(logPath, lt.CacheProofForLog, replayFormat); ok {
 		if err := ctx.Err(); err != nil {
 			replay.Close()
 			return err
@@ -292,10 +293,10 @@ func (h *taskHandlers) streamReplayStore(ctx context.Context, w io.Writer, flush
 			// No bytes reached the client, so a full regeneration can start at ID 0.
 		}
 	}
-	if err := eventreplay.RegenerateReplay(ctx, logPath, lt.CacheProofForLog, lt.ScanMessagesWithContext); err != nil {
+	if err := h.replay.regenerate(ctx, lt); err != nil {
 		return fmt.Errorf("regenerate replay cache: %w", err)
 	}
-	replay, ok := eventreplay.OpenReplay(logPath, lt.CacheProofForLog)
+	replay, ok := eventreplay.OpenReplay(logPath, lt.CacheProofForLog, replayFormat)
 	if !ok {
 		return errors.New("regenerated replay cache was not publishable")
 	}

@@ -112,6 +112,9 @@ func newTestTaskManager(t testing.TB, cfg taskmgr.Config) *taskmgr.Manager { //n
 	if cfg.RuntimeStartTimeout == 0 {
 		cfg.RuntimeStartTimeout = time.Hour
 	}
+	if cfg.TerminalReplay == nil {
+		cfg.TerminalReplay = func(context.Context, *task.LoadedTask) error { return nil }
+	}
 	m, err := taskmgr.New(cfg)
 	if err != nil {
 		t.Fatalf("taskmgr.New: %v", err)
@@ -125,6 +128,14 @@ func newTestRepoService(t testing.TB, absRoot string, repos *repo.Registry, work
 		t.Fatalf("repomgr.NewService: %v", err)
 	}
 	return s
+}
+
+func newTestReplayPublisher(t testing.TB) *ReplayPublisher {
+	publisher, err := NewReplayPublisher(filepath.Join(t.TempDir(), ".replay-tmp"))
+	if err != nil {
+		t.Fatalf("NewReplayPublisher: %v", err)
+	}
+	return publisher
 }
 
 func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testRouter {
@@ -141,15 +152,16 @@ func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testR
 	prefs := newTestPrefs(t)
 	forgeManager := forgemgr.New("", "", nil)
 	s, err := New(t.Context(), Dependencies{
-		RepoSvc:      repoSvc,
-		RepoStatus:   repoStatus,
-		Runtimes:     runtimeRouter,
-		TaskMgr:      taskMgr,
-		Preferences:  prefs,
-		IPGeoChecker: checker,
-		ForgeMgr:     forgeManager,
-		Warnings:     NewWarningStore(taskMgr),
-		CacheSizes:   NewCacheSizeStore(),
+		RepoSvc:         repoSvc,
+		RepoStatus:      repoStatus,
+		Runtimes:        runtimeRouter,
+		TaskMgr:         taskMgr,
+		ReplayPublisher: newTestReplayPublisher(t),
+		Preferences:     prefs,
+		IPGeoChecker:    checker,
+		ForgeMgr:        forgeManager,
+		Warnings:        NewWarningStore(taskMgr),
+		CacheSizes:      NewCacheSizeStore(),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -178,6 +190,7 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 		RepoStatus:                 repoStatus,
 		Runtimes:                   runtimeRouter,
 		TaskMgr:                    taskMgr,
+		ReplayPublisher:            newTestReplayPublisher(t),
 		Preferences:                prefs,
 		IPGeoChecker:               checker,
 		ForgeMgr:                   forgeManager,
@@ -213,14 +226,15 @@ func TestNew(t *testing.T) {
 		workspaceRegistry := repowork.NewRegistry(t.Context(), runtimeRouter)
 		taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Workspaces: workspaceRegistry})
 		return Dependencies{
-			RepoSvc:     newTestRepoService(t, "", repo.New(nil), workspaceRegistry),
-			RepoStatus:  ci.NewRepoStatusStore(),
-			Runtimes:    runtimeRouter,
-			TaskMgr:     taskMgr,
-			Preferences: newTestPrefs(t),
-			ForgeMgr:    forgemgr.New("", "", nil),
-			Warnings:    NewWarningStore(taskMgr),
-			CacheSizes:  NewCacheSizeStore(),
+			RepoSvc:         newTestRepoService(t, "", repo.New(nil), workspaceRegistry),
+			RepoStatus:      ci.NewRepoStatusStore(),
+			Runtimes:        runtimeRouter,
+			TaskMgr:         taskMgr,
+			ReplayPublisher: newTestReplayPublisher(t),
+			Preferences:     newTestPrefs(t),
+			ForgeMgr:        forgemgr.New("", "", nil),
+			Warnings:        NewWarningStore(taskMgr),
+			CacheSizes:      NewCacheSizeStore(),
 		}
 	}
 
@@ -435,14 +449,15 @@ func newWorkspaceConstructionTestServer(t *testing.T, root string) workspaceCons
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
 	s, err := New(t.Context(), Dependencies{
-		RepoSvc:     repoSvc,
-		RepoStatus:  repoStatus,
-		Runtimes:    runtimeRouter,
-		TaskMgr:     taskMgr,
-		Preferences: prefs,
-		ForgeMgr:    forgemgr.New("", "", nil),
-		Warnings:    NewWarningStore(taskMgr),
-		CacheSizes:  NewCacheSizeStore(),
+		RepoSvc:         repoSvc,
+		RepoStatus:      repoStatus,
+		Runtimes:        runtimeRouter,
+		TaskMgr:         taskMgr,
+		ReplayPublisher: newTestReplayPublisher(t),
+		Preferences:     prefs,
+		ForgeMgr:        forgemgr.New("", "", nil),
+		Warnings:        NewWarningStore(taskMgr),
+		CacheSizes:      NewCacheSizeStore(),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

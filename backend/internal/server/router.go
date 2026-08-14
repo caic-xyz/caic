@@ -369,6 +369,7 @@ type Dependencies struct {
 	CICache                    *forgecache.Cache
 	Runtimes                   *runtime.Router
 	TaskMgr                    *taskmgr.Manager
+	ReplayPublisher            *ReplayPublisher
 	Provider                   genai.Provider
 	IPGeoChecker               *ipgeo.Checker
 
@@ -416,6 +417,9 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 	}
 	if d.CacheSizes == nil {
 		return nil, errors.New("cache size store is required")
+	}
+	if d.ReplayPublisher == nil {
+		return nil, errors.New("replay publisher is required")
 	}
 	voice := &voiceHandlers{bridge: d.VoiceBridge, gateway: d.VoiceGateway}
 	voiceMetadata := voice.metadata()
@@ -485,6 +489,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 			voiceGateway:       voiceMetadata,
 		},
 		taskHandlers: &taskHandlers{
+			replay:     d.ReplayPublisher,
 			taskMgr:    d.TaskMgr,
 			repoSvc:    d.RepoSvc,
 			repoStatus: d.RepoStatus,

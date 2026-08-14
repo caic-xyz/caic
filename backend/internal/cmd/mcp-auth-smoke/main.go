@@ -166,6 +166,10 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return "", "", nil, err
 	}
+	replayPublisher, err := server.NewReplayPublisher(filepath.Join(stateDir, "replay-tmp"))
+	if err != nil {
+		return "", "", nil, err
+	}
 	checker, err := ipgeo.NewChecker(ctx, "0.0.0.0/0,::/0", "", "")
 	if err != nil {
 		return "", "", nil, err
@@ -176,7 +180,13 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 		return "", "", nil, err
 	}
 	workspaceRegistry := repowork.NewRegistry(ctx, nil)
-	taskMgr, err := taskmgr.New(taskmgr.Config{ServerCtx: ctx, Runtimes: runtimeRouter, Workspaces: workspaceRegistry, RuntimeStartTimeout: time.Hour})
+	taskMgr, err := taskmgr.New(taskmgr.Config{
+		ServerCtx:           ctx,
+		Runtimes:            runtimeRouter,
+		Workspaces:          workspaceRegistry,
+		RuntimeStartTimeout: time.Hour,
+		TerminalReplay:      replayPublisher.Publish,
+	})
 	if err != nil {
 		return "", "", nil, fmt.Errorf("task manager: %w", err)
 	}
@@ -202,17 +212,18 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 		return "", "", nil, err
 	}
 	router, err := server.New(ctx, server.Dependencies{
-		RepoSvc:       repoSvc,
-		RepoStatus:    ci.NewRepoStatusStore(),
-		Runtimes:      runtimeRouter,
-		TaskMgr:       taskMgr,
-		Preferences:   prefs,
-		IPGeoChecker:  checker,
-		ForgeMgr:      forgemgr.New("", "", nil),
-		Warnings:      server.NewWarningStore(taskMgr),
-		CacheSizes:    server.NewCacheSizeStore(),
-		AuthStore:     store,
-		SessionSecret: secret,
+		RepoSvc:         repoSvc,
+		RepoStatus:      ci.NewRepoStatusStore(),
+		Runtimes:        runtimeRouter,
+		TaskMgr:         taskMgr,
+		ReplayPublisher: replayPublisher,
+		Preferences:     prefs,
+		IPGeoChecker:    checker,
+		ForgeMgr:        forgemgr.New("", "", nil),
+		Warnings:        server.NewWarningStore(taskMgr),
+		CacheSizes:      server.NewCacheSizeStore(),
+		AuthStore:       store,
+		SessionSecret:   secret,
 	})
 	if err != nil {
 		return "", "", nil, err

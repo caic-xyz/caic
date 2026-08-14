@@ -1,17 +1,9 @@
-// Package eventreplay stores the compact replay format served by task SSE.
+// Package eventreplay stores proof-bound replay sidecars served through SSE.
 //
-// Task persistence has two files with different jobs:
-//   - the raw task log (<task>.jsonl[.zst]) is the source of truth. It contains
-//     harness-native NDJSON interleaved with caic control records and is kept so
-//     parser and converter bugs can be fixed by regenerating derived data.
-//   - the replay sidecar (<task>.events.zst) is a rebuildable cache of
-//     v1.EventMessage JSONL. Once its header matches the raw log identity, the
-//     body is validated as EventMessage JSONL through EOF, then streamed as
-//     "data: <line>" SSE frames without harness parsing or DTO conversion.
-//
-// Harnesses still write their native wire format. Replay generation deliberately
-// keeps the pipeline as harness wire -> agent.Message -> v1.EventMessage so API
-// DTO churn cannot corrupt the raw record and stale sidecars can be regenerated.
+// A sidecar (<task>.events.zst) is replaceable derived data: its header binds a
+// caller-provided line format to the authoritative raw-log identity. Storage
+// validates every record through EOF before streaming it as "data: <line>" SSE
+// frames, without knowing the raw-log parser or API schema.
 package eventreplay
 
 import (
@@ -30,38 +22,33 @@ import (
 	"reflect"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/klauspost/compress/zstd"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/logproof"
-	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 )
 
-// CacheVersion is the schema version of the cached EventMessage JSONL.
-// Bump it whenever event conversion or DTO semantics change so stale caches are
-// ignored rather than served.
-const CacheVersion = 6
+// Format defines the versioned line schema of one replay sidecar.
+//
+// ValidateLine must reject every line that cannot safely be served as an SSE
+// data frame. Version must be positive.
+type Format struct {
+	Version      int
+	ValidateLine func([]byte) error
+}
 
-// maxReplayRecordBytes bounds memory consumed by one untrusted cache JSONL
-// record. Oversized records invalidate the entire derived cache.
 const maxReplayRecordBytes = 32 << 20
 
-var (
-	errReplayRecordTooLarge = errors.New("replay cache record exceeds size limit")
-)
+var errReplayRecordTooLarge = errors.New("replay cache record exceeds size limit")
+
+func (f Format) valid() bool {
+	return f.Version > 0 && f.ValidateLine != nil
+}
 
 // ProofProvider returns a raw-header and identity observation. It is injected
 // by the task layer so eventreplay can compare cache identity without importing
 // or reimplementing task-log validation.
 type ProofProvider func(string) (logproof.CacheProof, error)
-
-// ReplaySource scans one raw log through EOF, passing parsed conversation
-// messages to yield, and returns the completed scan's proof. A replay body is
-// committed only when that exact proof still names the raw log.
-type ReplaySource func(context.Context, func(agent.ParsedMessage) error) (logproof.CacheProof, error)
 
 // CacheHeader is the first JSONL record of a replay cache. It binds the cache
 // to a specific raw log file so a changed or replaced log invalidates it.
@@ -80,7 +67,10 @@ func CachePath(logPath string) string {
 
 // PruneStaleCaches removes replay sidecars that no longer match a raw task log.
 // It also removes orphaned temp files left by interrupted cache regeneration.
-func PruneStaleCaches(logDir string, prove ProofProvider) (int, error) {
+func PruneStaleCaches(logDir string, prove ProofProvider, format Format) (int, error) {
+	if !format.valid() {
+		return 0, errors.New("replay cache format is invalid")
+	}
 	entries, err := os.ReadDir(logDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -114,7 +104,7 @@ func PruneStaleCaches(logDir string, prove ProofProvider) (int, error) {
 			continue
 		}
 		if logPath != "" {
-			_, closeFn, freshness := freshCacheBody(logPath, prove)
+			_, closeFn, freshness := freshCacheBody(logPath, prove, format)
 			if closeFn != nil {
 				closeFn()
 			}
@@ -139,11 +129,31 @@ func PruneStaleCaches(logDir string, prove ProofProvider) (int, error) {
 	return removed, errors.Join(errs...)
 }
 
-// Replay is one validated, open EventMessage JSONL replay sidecar.
+// PruneTemporaryArtifacts removes interrupted build artifacts from a dedicated
+// replay temporary directory.
+func PruneTemporaryArtifacts(tempDir string) error {
+	entries, err := os.ReadDir(tempDir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, entry := range entries {
+		if err := os.RemoveAll(filepath.Join(tempDir, entry.Name())); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// Replay is one validated, open replay sidecar.
 type Replay struct {
 	logPath string
 	proof   logproof.CacheProof
 	prove   ProofProvider
+	format  Format
 	file    *os.File
 	decoder *zstd.Decoder
 	br      *replayRecordReader
@@ -167,7 +177,10 @@ const (
 // OpenReplay opens, validates through EOF, and rewinds one replay file identity
 // for publication. It intentionally never validates one sidecar file and serves
 // a separately opened replacement.
-func OpenReplay(logPath string, prove ProofProvider) (*Replay, bool) {
+func OpenReplay(logPath string, prove ProofProvider, format Format) (*Replay, bool) {
+	if !format.valid() {
+		return nil, false
+	}
 	proof, err := resolveProof(logPath, prove)
 	if err != nil {
 		return nil, false
@@ -176,8 +189,8 @@ func OpenReplay(logPath string, prove ProofProvider) (*Replay, bool) {
 	if err != nil {
 		return nil, false
 	}
-	header, ok := readCacheHeader(br, proof)
-	r := &Replay{logPath: logPath, proof: proof, prove: prove, file: file, decoder: decoder, br: br, empty: header.Empty}
+	header, ok := readCacheHeader(br, proof, format)
+	r := &Replay{logPath: logPath, proof: proof, prove: prove, format: format, file: file, decoder: decoder, br: br, empty: header.Empty}
 	if !ok || !r.validateForPublication() {
 		r.Close()
 		return nil, false
@@ -200,10 +213,10 @@ func (r *Replay) Close() {
 	}
 }
 
-// WriteSSE streams cached EventMessage JSONL as SSE, starting at *idx and
-// updating it for callers that append stats or ready events afterward. The body
-// is trusted after OpenReplay's same-file EOF EventMessage validation, so each
-// line is copied directly into a data frame without JSON decoding.
+// WriteSSE streams cached records as SSE, starting at *idx and updating it for
+// callers that append stats or ready events afterward. The body is trusted
+// after OpenReplay's same-file EOF validation, so each line is copied directly
+// into a data frame without decoding.
 func (r *Replay) WriteSSE(w io.Writer, flusher http.Flusher, idx *int) SSEWriteResult {
 	if r == nil || r.br == nil {
 		return SSEUnpublished
@@ -263,8 +276,8 @@ func (r *Replay) validateForPublication() bool {
 		if len(line) == 0 {
 			continue
 		}
-		if err := validateReplayEventLine(line); err != nil {
-			slog.Warn("replay cache: invalid EventMessage", "path", CachePath(r.logPath), "err", err)
+		if err := r.format.ValidateLine(line); err != nil {
+			slog.Warn("replay cache: invalid body", "path", CachePath(r.logPath), "err", err)
 			return false
 		}
 		hasBody = true
@@ -288,16 +301,34 @@ func (r *Replay) validateForPublication() bool {
 	}
 	r.decoder = decoder
 	r.br = newReplayRecordReader(decoder)
-	header, ok := readCacheHeader(r.br, r.proof)
+	header, ok := readCacheHeader(r.br, r.proof, r.format)
 	return ok && header.Empty == r.empty
 }
 
-// CacheWriter accumulates EventMessage JSONL body bytes and commits them with a
+// Spool is a cache-owned temporary file for a bridge that needs to defer
+// writing a bounded sequence of cache records.
+type Spool struct {
+	file *os.File
+}
+
+// Write appends data to the spool.
+func (s *Spool) Write(data []byte) (int, error) {
+	return s.file.Write(data)
+}
+
+// Discard closes and removes the spool.
+func (s *Spool) Discard() error {
+	return errors.Join(s.file.Close(), os.Remove(s.file.Name()))
+}
+
+// CacheWriter accumulates validated-format body bytes and commits them with a
 // final header bound to the final raw log identity.
 type CacheWriter struct {
 	bodyName   string
 	dst        string
+	tempDir    string
 	prove      ProofProvider
+	format     Format
 	allowEmpty bool
 
 	mu   sync.Mutex
@@ -305,29 +336,37 @@ type CacheWriter struct {
 	werr error
 }
 
-// NewCacheWriter opens an empty temp EventMessage body file for a complete
-// regeneration. Full rebuilds never seed from a prior derived cache.
-func NewCacheWriter(logPath string, prove ProofProvider) (*CacheWriter, error) {
+// NewCacheWriter opens an empty temp body file for a complete regeneration.
+// Full rebuilds never seed from a prior derived cache.
+func NewCacheWriter(logPath, tempDir string, prove ProofProvider, format Format) (*CacheWriter, error) {
+	if !format.valid() {
+		return nil, errors.New("replay cache format is invalid")
+	}
+	if tempDir == "" {
+		return nil, errors.New("replay cache temporary directory is required")
+	}
+	if err := os.MkdirAll(tempDir, 0o700); err != nil {
+		return nil, fmt.Errorf("create replay cache temporary directory: %w", err)
+	}
 	dst := CachePath(logPath)
-	body, err := os.CreateTemp(filepath.Dir(dst), filepath.Base(dst)+".*.body")
+	body, err := os.CreateTemp(tempDir, filepath.Base(dst)+".*.body")
 	if err != nil {
 		return nil, fmt.Errorf("create replay cache temp: %w", err)
 	}
-	return &CacheWriter{body: body, bodyName: body.Name(), dst: dst, prove: prove}, nil
+	return &CacheWriter{body: body, bodyName: body.Name(), dst: dst, tempDir: tempDir, prove: prove, format: format}, nil
 }
 
-// WriteEventData appends a marshaled EventMessage JSON object to the cache,
-// recording the first error so Commit can discard a partial cache.
-func (w *CacheWriter) WriteEventData(data []byte) {
+// WriteData appends one validated line to the cache, recording the first error
+// so Commit can discard a partial cache.
+func (w *CacheWriter) WriteData(data []byte) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.writeLineLocked(data)
 }
 
-// WriteEventDataBytes appends already newline-delimited event records from the
-// bounded compactor buffer. The bytes were marshaled before buffering and are
-// never used for an untrusted cache read.
-func (w *CacheWriter) WriteEventDataBytes(data []byte) {
+// WriteDataBytes appends already newline-delimited validated records from a
+// bounded bridge buffer. They are never used for an untrusted cache read.
+func (w *CacheWriter) WriteDataBytes(data []byte) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.werr != nil || w.body == nil || len(data) == 0 {
@@ -357,11 +396,64 @@ func (w *CacheWriter) CommitExactContext(ctx context.Context, logPath string, pr
 	return w.commitLocked(ctx, logPath, proof)
 }
 
+// AllowEmpty permits committing a completed scan that emitted no body lines.
+func (w *CacheWriter) AllowEmpty() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.allowEmpty = true
+}
+
 // Abort discards an uncommitted cache body.
 func (w *CacheWriter) Abort() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.abortLocked()
+}
+
+// NewSpool creates a cache-owned temporary spool.
+func (w *CacheWriter) NewSpool() (*Spool, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.body == nil {
+		return nil, errors.New("replay cache writer is closed")
+	}
+	file, err := os.CreateTemp(w.tempDir, filepath.Base(w.dst)+".*.pending")
+	if err != nil {
+		return nil, fmt.Errorf("create replay pending spool: %w", err)
+	}
+	return &Spool{file: file}, nil
+}
+
+// AppendSpool copies a completed spool into the cache body.
+func (w *CacheWriter) AppendSpool(ctx context.Context, spool *Spool) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.werr != nil || w.body == nil {
+		return w.werr
+	}
+	if err := ctx.Err(); err != nil {
+		w.werr = errors.Join(w.werr, err)
+		return err
+	}
+	if _, err := spool.file.Seek(0, io.SeekStart); err != nil {
+		w.werr = err
+		return err
+	}
+	if err := copyWithContext(ctx, w.body, spool.file); err != nil {
+		w.werr = errors.Join(w.werr, err)
+		return err
+	}
+	return nil
+}
+
+// RecordError prevents publication after a bridge write failure.
+func (w *CacheWriter) RecordError(err error) {
+	if err == nil {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.werr = errors.Join(w.werr, err)
 }
 
 func (w *CacheWriter) writeLineLocked(data []byte) {
@@ -375,39 +467,6 @@ func (w *CacheWriter) writeLineLocked(data []byte) {
 	if _, err := w.body.Write([]byte{'\n'}); err != nil {
 		w.werr = err
 	}
-}
-
-// appendPending atomically moves a completed compaction run from its temporary
-// disk spool into the cache body. It is called only after the run can no longer
-// be superseded by its matching final message.
-func (w *CacheWriter) appendPending(ctx context.Context, pending *os.File) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.werr != nil || w.body == nil {
-		return w.werr
-	}
-	if err := ctx.Err(); err != nil {
-		w.werr = errors.Join(w.werr, err)
-		return err
-	}
-	if _, err := pending.Seek(0, io.SeekStart); err != nil {
-		w.werr = err
-		return err
-	}
-	if err := copyWithContext(ctx, w.body, pending); err != nil {
-		w.werr = errors.Join(w.werr, err)
-		return err
-	}
-	return nil
-}
-
-func (w *CacheWriter) recordError(err error) {
-	if err == nil {
-		return
-	}
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.werr = errors.Join(w.werr, err)
 }
 
 func (w *CacheWriter) abortLocked() {
@@ -462,7 +521,7 @@ func (w *CacheWriter) commitLocked(ctx context.Context, logPath string, expected
 		closeErr := closeBody()
 		return fmt.Errorf("discard partial replay cache %s: %w", w.dst, errors.Join(err, closeErr))
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(w.dst), filepath.Base(w.dst)+".*.tmp")
+	tmp, err := os.CreateTemp(w.tempDir, filepath.Base(w.dst)+".*.tmp")
 	if err != nil {
 		closeErr := closeBody()
 		return fmt.Errorf("create replay cache commit temp: %w", errors.Join(err, closeErr))
@@ -474,7 +533,7 @@ func (w *CacheWriter) commitLocked(ctx context.Context, logPath string, expected
 		return fmt.Errorf("create replay cache zstd writer: %w", errors.Join(err, closeErr))
 	}
 	header, err := json.Marshal(CacheHeader{
-		Version: CacheVersion,
+		Version: w.format.Version,
 		Proof:   publicationProof,
 		Empty:   empty && w.allowEmpty,
 	})
@@ -528,228 +587,6 @@ func (w *CacheWriter) commitLocked(ctx context.Context, logPath string, expected
 	return nil
 }
 
-// RegenerateReplay rebuilds the DTO replay sidecar from one completed semantic
-// raw-log scan. Cancellation leaves neither a replay cache nor a disk spool.
-func RegenerateReplay(ctx context.Context, logPath string, prove ProofProvider, source ReplaySource) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	initialProof, err := resolveProof(logPath, prove)
-	if err != nil {
-		return fmt.Errorf("prove replay log authority: %w", err)
-	}
-	cache, err := NewCacheWriter(logPath, prove)
-	if err != nil {
-		return err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			cache.Abort()
-		}
-	}()
-	filter := newReplayDiskFilter(cache, initialProof.Harness, time.Now())
-	defer filter.close()
-	proof, err := source(ctx, func(msg agent.ParsedMessage) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		return filter.pushContext(ctx, msg)
-	})
-	if err != nil {
-		return err
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if initialProof.Version != proof.Version || initialProof.Harness != proof.Harness || initialProof.RawHeader != proof.RawHeader {
-		return errors.New("raw task log authority changed during replay scan")
-	}
-	if err := filter.flushContext(ctx); err != nil {
-		return err
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	cache.allowEmpty = true
-	if err := cache.CommitExactContext(ctx, logPath, proof); err != nil {
-		return err
-	}
-	committed = true
-	return nil
-}
-
-const maxPendingReplayBytes = 64 << 10
-
-// replayDiskFilter compacts a regeneration scan. It keeps small delta runs in
-// a fixed-size memory buffer and spills only a run that exceeds
-// maxPendingReplayBytes. A matching completed message discards pending output;
-// every other boundary copies it to the cache in event order.
-type replayDiskFilter struct {
-	cache             *CacheWriter
-	tracker           *ToolTimingTracker
-	fixedNow          time.Time
-	pendingBuffer     bytes.Buffer
-	pending           *os.File
-	pendingName       string
-	pendingKind       int
-	pendingToolUseID  string
-	cleanTurnComplete bool
-}
-
-func newReplayDiskFilter(cache *CacheWriter, h harness.Name, observed time.Time) *replayDiskFilter {
-	return &replayDiskFilter{
-		cache:    cache,
-		tracker:  NewToolTimingTracker(h, FormatToolOutput),
-		fixedNow: observed,
-	}
-}
-
-// Write buffers a small delta run and creates a disk spool only once the fixed
-// memory limit is exceeded.
-func (f *replayDiskFilter) Write(data []byte) (int, error) {
-	if f.pending != nil {
-		return f.pending.Write(data)
-	}
-	if f.pendingBuffer.Len()+len(data) <= maxPendingReplayBytes {
-		return f.pendingBuffer.Write(data)
-	}
-	pending, err := os.CreateTemp(filepath.Dir(f.cache.dst), filepath.Base(f.cache.dst)+".*.pending")
-	if err != nil {
-		f.cache.recordError(fmt.Errorf("create replay pending spool: %w", err))
-		return 0, err
-	}
-	f.pending, f.pendingName = pending, pending.Name()
-	if _, err := pending.Write(f.pendingBuffer.Bytes()); err != nil {
-		f.cache.recordError(fmt.Errorf("spill replay pending buffer: %w", err))
-		return 0, err
-	}
-	f.pendingBuffer.Reset()
-	return pending.Write(data)
-}
-
-func (f *replayDiskFilter) observation(parsed agent.ParsedMessage) time.Time {
-	if !parsed.ProducerTime.IsZero() {
-		return parsed.ProducerTime
-	}
-	return f.fixedNow
-}
-
-func (f *replayDiskFilter) writeConverted(dst io.Writer, parsed agent.ParsedMessage) {
-	evs := f.tracker.ConvertMessage(parsed.Message, f.observation(parsed))
-	for i := range evs {
-		data, err := MarshalEvent(&evs[i])
-		if err != nil {
-			f.cache.recordError(fmt.Errorf("marshal replay event: %w", err))
-			return
-		}
-		if _, err := dst.Write(data); err != nil {
-			f.cache.recordError(fmt.Errorf("write replay event: %w", err))
-			return
-		}
-		if _, err := dst.Write([]byte{'\n'}); err != nil {
-			f.cache.recordError(fmt.Errorf("write replay event terminator: %w", err))
-			return
-		}
-	}
-}
-
-func (f *replayDiskFilter) emit(parsed agent.ParsedMessage) {
-	// CacheWriter owns its body synchronization. Convert one bounded semantic
-	// record at a time to retain the scanner's record-size memory ceiling.
-	evs := f.tracker.ConvertMessage(parsed.Message, f.observation(parsed))
-	for i := range evs {
-		data, err := MarshalEvent(&evs[i])
-		if err != nil {
-			f.cache.recordError(fmt.Errorf("marshal replay event: %w", err))
-			return
-		}
-		f.cache.WriteEventData(data)
-	}
-}
-
-func (f *replayDiskFilter) startPending(kind int, toolUseID string) {
-	if f.pendingKind == 0 {
-		f.pendingKind = kind
-		f.pendingToolUseID = toolUseID
-	}
-}
-
-func (f *replayDiskFilter) discardPending() {
-	if f.pending != nil {
-		if err := f.pending.Close(); err != nil {
-			f.cache.recordError(err)
-		}
-		if err := os.Remove(f.pendingName); err != nil && !os.IsNotExist(err) {
-			f.cache.recordError(err)
-		}
-	}
-	f.pendingBuffer.Reset()
-	f.pending, f.pendingName, f.pendingKind, f.pendingToolUseID = nil, "", 0, ""
-}
-
-func (f *replayDiskFilter) flushPendingContext(ctx context.Context) error {
-	if f.pendingKind == 0 {
-		return nil
-	}
-	defer f.discardPending()
-	if f.pending != nil {
-		return f.cache.appendPending(ctx, f.pending)
-	}
-	if err := ctx.Err(); err != nil {
-		f.cache.recordError(err)
-		return err
-	}
-	if f.pendingBuffer.Len() > 0 {
-		f.cache.WriteEventDataBytes(f.pendingBuffer.Bytes())
-	}
-	return ctx.Err()
-}
-
-func (f *replayDiskFilter) pushContext(ctx context.Context, parsed agent.ParsedMessage) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	m := parsed.Message
-	if exit, ok := m.(*agent.ExitMessage); ok && exit.ExitCode != 0 && f.cleanTurnComplete {
-		return nil
-	}
-	if kind := deltaKind(m); kind != 0 {
-		toolUseID := deltaToolUseID(m)
-		if f.pendingKind != 0 && (f.pendingKind != kind || f.pendingToolUseID != toolUseID) {
-			if err := f.flushPendingContext(ctx); err != nil {
-				return err
-			}
-		}
-		f.startPending(kind, toolUseID)
-		f.writeConverted(f, parsed)
-		return ctx.Err()
-	}
-	if finalKind(m) != 0 && f.pendingKind != 0 && f.pendingKind == finalKind(m) && f.pendingToolUseID == finalToolUseID(m) {
-		f.discardPending()
-	} else if err := f.flushPendingContext(ctx); err != nil {
-		return err
-	}
-	if clearsExit(m) {
-		f.cleanTurnComplete = false
-	}
-	if rm, ok := m.(*agent.ResultMessage); ok {
-		f.cleanTurnComplete = !rm.IsError
-	}
-	f.emit(parsed)
-	return ctx.Err()
-}
-
-func (f *replayDiskFilter) flushContext(ctx context.Context) error {
-	return f.flushPendingContext(ctx)
-}
-
-func (f *replayDiskFilter) close() {
-	f.discardPending()
-}
-
-// copyWithContext copies in bounded chunks so cancellation stops cache seeding,
-// compaction, and compression before a derived file can be published.
 func copyWithContext(ctx context.Context, dst io.Writer, src io.Reader) error {
 	buf := make([]byte, 64<<10)
 	for {
@@ -886,15 +723,15 @@ func resolveProof(logPath string, prove ProofProvider) (logproof.CacheProof, err
 // freshCacheBody distinguishes a definitive stale sidecar from an observation
 // that could not establish raw authority. Callers may rebuild on either, but
 // pruning must never delete the latter.
-func freshCacheBody(logPath string, prove ProofProvider) (*replayRecordReader, func(), cacheFreshness) {
+func freshCacheBody(logPath string, prove ProofProvider, format Format) (*replayRecordReader, func(), cacheFreshness) {
 	proof, err := resolveProof(logPath, prove)
 	if err != nil {
 		return nil, nil, cacheUnverifiable
 	}
-	return freshCacheBodyWithProof(logPath, proof)
+	return freshCacheBodyWithProof(logPath, proof, format)
 }
 
-func freshCacheBodyWithProof(logPath string, proof logproof.CacheProof) (*replayRecordReader, func(), cacheFreshness) {
+func freshCacheBodyWithProof(logPath string, proof logproof.CacheProof, format Format) (*replayRecordReader, func(), cacheFreshness) {
 	file, decoder, br, err := openReplayBody(logPath)
 	if err != nil {
 		return nil, nil, cacheStale
@@ -903,8 +740,8 @@ func freshCacheBodyWithProof(logPath string, proof logproof.CacheProof) (*replay
 		decoder.Close()
 		_ = file.Close()
 	}
-	header, ok := readCacheHeader(br, proof)
-	if !ok || !cacheBodyEOFValid(br, header.Empty) {
+	header, ok := readCacheHeader(br, proof, format)
+	if !ok || !cacheBodyEOFValid(br, header.Empty, format) {
 		closeFn()
 		return nil, nil, cacheStale
 	}
@@ -919,17 +756,17 @@ func freshCacheBodyWithProof(logPath string, proof logproof.CacheProof) (*replay
 		return nil, nil, cacheStale
 	}
 	br = newReplayRecordReader(decoder)
-	if _, ok := readCacheHeader(br, proof); !ok {
+	if _, ok := readCacheHeader(br, proof, format); !ok {
 		closeFn()
 		return nil, nil, cacheStale
 	}
 	return br, closeFn, cacheFresh
 }
 
-// cacheBodyEOFValid verifies decompression and every EventMessage line through
+// cacheBodyEOFValid verifies decompression and every formatted record through
 // EOF before a cache can remain fresh for pruning. A valid header alone is
-// never sufficient authority for an eventful cache.
-func cacheBodyEOFValid(br *replayRecordReader, empty bool) bool {
+// never sufficient authority for a nonempty cache.
+func cacheBodyEOFValid(br *replayRecordReader, empty bool, format Format) bool {
 	hasBody := false
 	for {
 		line, err := br.ReadRecord()
@@ -940,107 +777,16 @@ func cacheBodyEOFValid(br *replayRecordReader, empty bool) bool {
 		if len(line) == 0 {
 			continue
 		}
-		if validateReplayEventLine(line) != nil {
+		if format.ValidateLine(line) != nil {
 			return false
 		}
 		hasBody = true
 	}
 }
 
-// validateReplayEventLine accepts exactly one recognized EventMessage payload
-// matching its kind. Cache readers must reject JSON values that Unmarshal can
-// otherwise silently coerce into a zero-value EventMessage.
-func validateReplayEventLine(line []byte) error {
-	if err := validateReplayJSON(line, reflect.TypeFor[v1.EventMessage]()); err != nil {
-		return fmt.Errorf("invalid EventMessage schema: %w", err)
-	}
-	decoder := json.NewDecoder(bytes.NewReader(line))
-	decoder.DisallowUnknownFields()
-	var event v1.EventMessage
-	if err := decoder.Decode(&event); err != nil {
-		return err
-	}
-	if err := requireJSONEOF(decoder); err != nil {
-		return err
-	}
-	payloads := 0
-	for _, payload := range []bool{
-		event.Init != nil, event.Text != nil, event.TextDelta != nil,
-		event.ToolUse != nil, event.ToolResult != nil, event.Ask != nil,
-		event.Usage != nil, event.Result != nil, event.System != nil,
-		event.UserInput != nil, event.Todo != nil, event.DiffStat != nil,
-		event.Error != nil, event.Thinking != nil, event.ThinkingDelta != nil,
-		event.SubagentStart != nil, event.SubagentEnd != nil, event.Log != nil,
-		event.ToolOutputDelta != nil, event.Widget != nil, event.WidgetDelta != nil,
-		event.RateLimit != nil, event.Stats != nil,
-	} {
-		if payload {
-			payloads++
-		}
-	}
-	if payloads != 1 {
-		return errors.New("EventMessage must contain exactly one payload")
-	}
-	var validPayload bool
-	switch event.Kind {
-	case v1.EventKindInit:
-		validPayload = event.Init != nil
-	case v1.EventKindText:
-		validPayload = event.Text != nil
-	case v1.EventKindTextDelta:
-		validPayload = event.TextDelta != nil
-	case v1.EventKindToolUse:
-		validPayload = event.ToolUse != nil
-	case v1.EventKindToolResult:
-		validPayload = event.ToolResult != nil
-	case v1.EventKindAsk:
-		validPayload = event.Ask != nil
-	case v1.EventKindUsage:
-		validPayload = event.Usage != nil
-	case v1.EventKindResult:
-		validPayload = event.Result != nil
-	case v1.EventKindSystem:
-		validPayload = event.System != nil
-	case v1.EventKindUserInput:
-		validPayload = event.UserInput != nil
-	case v1.EventKindTodo:
-		validPayload = event.Todo != nil
-	case v1.EventKindDiffStat:
-		validPayload = event.DiffStat != nil
-	case v1.EventKindError:
-		validPayload = event.Error != nil
-	case v1.EventKindThinking:
-		validPayload = event.Thinking != nil
-	case v1.EventKindThinkingDelta:
-		validPayload = event.ThinkingDelta != nil
-	case v1.EventKindSubagentStart:
-		validPayload = event.SubagentStart != nil
-	case v1.EventKindSubagentEnd:
-		validPayload = event.SubagentEnd != nil
-	case v1.EventKindLog:
-		validPayload = event.Log != nil
-	case v1.EventKindToolOutputDelta:
-		validPayload = event.ToolOutputDelta != nil
-	case v1.EventKindWidget:
-		validPayload = event.Widget != nil
-	case v1.EventKindWidgetDelta:
-		validPayload = event.WidgetDelta != nil
-	case v1.EventKindRateLimit:
-		validPayload = event.RateLimit != nil
-	case v1.EventKindStats:
-		validPayload = event.Stats != nil
-	default:
-		return fmt.Errorf("unknown EventMessage kind %q", event.Kind)
-	}
-	if !validPayload {
-		return fmt.Errorf("EventMessage kind %q has mismatched payload", event.Kind)
-	}
-	return nil
-}
-
-// validateReplayJSON recursively enforces the emitted EventMessage schema.
+// validateReplayJSON recursively enforces the strict replay-header schema.
 // encoding/json accepts unknown and duplicate object keys, so cache validation
-// must inspect every nested object before decoding it into the public DTO.
+// inspects every nested object before decoding it into the header type.
 var (
 	jsonRawMessageType  = reflect.TypeFor[json.RawMessage]()
 	jsonUnmarshalerType = reflect.TypeFor[json.Unmarshaler]()
@@ -1257,7 +1003,7 @@ func requireJSONEOF(decoder *json.Decoder) error {
 	return nil
 }
 
-func readCacheHeader(br *replayRecordReader, proof logproof.CacheProof) (CacheHeader, bool) {
+func readCacheHeader(br *replayRecordReader, proof logproof.CacheProof, format Format) (CacheHeader, bool) {
 	headerLine, err := br.ReadRecord()
 	if err != nil {
 		return CacheHeader{}, false
@@ -1271,7 +1017,7 @@ func readCacheHeader(br *replayRecordReader, proof logproof.CacheProof) (CacheHe
 	if err := decoder.Decode(&h); err != nil || requireJSONEOF(decoder) != nil {
 		return CacheHeader{}, false
 	}
-	return h, h.Version == CacheVersion && h.Proof == proof
+	return h, h.Version == format.Version && h.Proof == proof
 }
 
 // openReplayBody opens one sidecar descriptor and decoder at its header.
@@ -1286,102 +1032,4 @@ func openReplayBody(logPath string) (*os.File, *zstd.Decoder, *replayRecordReade
 		return nil, nil, nil, err
 	}
 	return file, decoder, newReplayRecordReader(decoder), nil
-}
-
-func deltaKind(m agent.Message) int {
-	switch m.(type) {
-	case *agent.TextDeltaMessage:
-		return 1
-	case *agent.ThinkingDeltaMessage:
-		return 2
-	case *agent.WidgetDeltaMessage:
-		return 3
-	case *agent.ToolOutputDeltaMessage:
-		return 4
-	}
-	return 0
-}
-
-func deltaToolUseID(m agent.Message) string {
-	if delta, ok := m.(*agent.ToolOutputDeltaMessage); ok {
-		return delta.ToolUseID
-	}
-	return ""
-}
-
-func finalToolUseID(m agent.Message) string {
-	if result, ok := m.(*agent.ToolResultMessage); ok {
-		return result.ToolUseID
-	}
-	return ""
-}
-
-func finalKind(m agent.Message) int {
-	switch m.(type) {
-	case *agent.TextMessage:
-		return 1
-	case *agent.ThinkingMessage:
-		return 2
-	case *agent.WidgetMessage:
-		return 3
-	case *agent.ToolResultMessage:
-		return 4
-	}
-	return 0
-}
-
-func clearsExit(m agent.Message) bool {
-	switch m := m.(type) {
-	case *agent.ExitMessage, *agent.DiffStatMessage, *agent.RawMessage,
-		*agent.ParseErrorMessage, *agent.LogMessage, *agent.StrippedEnvMessage:
-		return false
-	case *agent.ResultMessage:
-		return !m.IsError
-	default:
-		return true
-	}
-}
-
-// FormatToolOutput analyzes a tool output string and returns its content type
-// along with an optional formatted version.
-func FormatToolOutput(raw string) (contentType v1.ToolOutputContentType, formatted string) {
-	if raw == "" {
-		return v1.ToolOutputText, ""
-	}
-	if ct, formatted := formatAsJSON(raw); ct != "" {
-		return ct, formatted
-	}
-	if looksLikeMarkdown(raw) {
-		return v1.ToolOutputMarkdown, ""
-	}
-	return v1.ToolOutputText, ""
-}
-
-func formatAsJSON(raw string) (ct v1.ToolOutputContentType, formatted string) {
-	trimmed := strings.TrimSpace(raw)
-	if !strings.HasPrefix(trimmed, "{") || !strings.HasSuffix(trimmed, "}") {
-		if !strings.HasPrefix(trimmed, "[") || !strings.HasSuffix(trimmed, "]") {
-			return "", ""
-		}
-	}
-
-	var v any
-	if err := json.Unmarshal([]byte(raw), &v); err != nil {
-		return "", ""
-	}
-	formattedBytes, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return "", ""
-	}
-	return v1.ToolOutputJSON, string(formattedBytes)
-}
-
-func looksLikeMarkdown(text string) bool {
-	trimmed := strings.TrimSpace(text)
-	return strings.HasPrefix(trimmed, "#") ||
-		strings.HasPrefix(trimmed, "- ") ||
-		strings.HasPrefix(trimmed, "* ") ||
-		strings.HasPrefix(trimmed, "+ ") ||
-		strings.Contains(trimmed, "```") ||
-		strings.Contains(trimmed, "\n")
 }

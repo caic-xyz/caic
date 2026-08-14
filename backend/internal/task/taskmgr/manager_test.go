@@ -24,7 +24,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	"github.com/caic-xyz/caic/backend/internal/logtest"
 	"github.com/caic-xyz/caic/backend/internal/repo/repowork"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -81,6 +80,9 @@ func newTestManager(t testing.TB, cfg Config) *Manager { //nolint:gocritic // Co
 	}
 	if cfg.RuntimeStartTimeout == 0 {
 		cfg.RuntimeStartTimeout = time.Hour
+	}
+	if cfg.TerminalReplay == nil {
+		cfg.TerminalReplay = func(context.Context, *task.LoadedTask) error { return nil }
 	}
 	m, err := New(cfg)
 	if err != nil {
@@ -445,6 +447,7 @@ func TestNew(t *testing.T) {
 			HarnessEnv:          map[string][]string{string(harness.Codex): {"CODEX_HOME=/tmp/codex"}},
 			Workspaces:          repowork.NewRegistry(t.Context(), router),
 			RuntimeStartTimeout: time.Hour,
+			TerminalReplay:      func(context.Context, *task.LoadedTask) error { return nil },
 		}
 		m, err := New(cfg)
 		if err != nil {
@@ -2530,12 +2533,17 @@ func TestManager(t *testing.T) {
 		t.Run("error_failure_closes_done_and_reloads_terminal_replay", func(t *testing.T) {
 			t.Parallel()
 			releaseRevive := make(chan struct{})
+			published := false
 			fake := &blockingReviveBackend{FakeBackend: &runtimetest.FakeBackend{}, release: releaseRevive}
 			m := newTestManager(t, Config{
 				ServerCtx: t.Context(),
 				Runtimes:  newTestRuntime(t, fake, nil),
 				Backends: map[harness.Name]agent.Backend{
 					harness.Claude: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire},
+				},
+				TerminalReplay: func(context.Context, *task.LoadedTask) error {
+					published = true
+					return nil
 				},
 			})
 			tk := &task.Task{
@@ -2591,11 +2599,9 @@ func TestManager(t *testing.T) {
 			if loaded == nil {
 				t.Fatal("failed revive did not retain the terminal replay source")
 			}
-			cache, ok := eventreplay.OpenReplay(loaded.LogPath(), loaded.CacheProofForLog)
-			if !ok {
-				t.Fatal("failed revive did not publish the terminal replay cache")
+			if !published {
+				t.Fatal("failed revive did not invoke the terminal replay publisher")
 			}
-			t.Cleanup(cache.Close)
 		})
 	})
 	t.Run("SendInput_Images", func(t *testing.T) {

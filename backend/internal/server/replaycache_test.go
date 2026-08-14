@@ -62,7 +62,7 @@ func TestReplayCache(t *testing.T) {
 		if err != nil || len(logs) != 1 {
 			t.Fatalf("load terminal log = (%#v, %v)", logs, err)
 		}
-		cache, err := eventreplay.NewCacheWriter(logPath, task.CacheProofForLog)
+		cache, err := eventreplay.NewCacheWriter(logPath, filepath.Join(filepath.Dir(logPath), ".replay-tmp"), task.CacheProofForLog, replayFormat)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -71,7 +71,7 @@ func TestReplayCache(t *testing.T) {
 		}
 		w := httptest.NewRecorder()
 		entry := taskmgr.NewEntry(&task.Task{}, logs[0])
-		(&taskHandlers{}).streamHistoryFromDisk(t.Context(), w, w, entry)
+		(&taskHandlers{replay: newTestReplayPublisher(t)}).streamHistoryFromDisk(t.Context(), w, w, entry)
 		if body := w.Body.String(); body != "event: error\ndata: {\"message\":\"task history is unavailable\"}\n\n" {
 			t.Fatalf("terminal unservable replay body = %q, want explicit error", body)
 		}
@@ -87,18 +87,18 @@ func TestReplayCache(t *testing.T) {
 		if err != nil || len(logs) != 1 {
 			t.Fatalf("load log = (%#v, %v)", logs, err)
 		}
-		cache, err := eventreplay.NewCacheWriter(logPath, task.CacheProofForLog)
+		cache, err := eventreplay.NewCacheWriter(logPath, filepath.Join(filepath.Dir(logPath), ".replay-tmp"), task.CacheProofForLog, replayFormat)
 		if err != nil {
 			t.Fatal(err)
 		}
-		cache.WriteEventData([]byte(`{"kind":"text","ts":1,"text":{"text":"first"}}`))
-		cache.WriteEventData([]byte(`{"kind":"text","ts":2,"text":{"text":"second"}}`))
+		cache.WriteData([]byte(`{"kind":"text","ts":1,"text":{"text":"first"}}`))
+		cache.WriteData([]byte(`{"kind":"text","ts":2,"text":{"text":"second"}}`))
 		if err := cache.CommitContext(t.Context(), logPath); err != nil {
 			t.Fatal(err)
 		}
 		out := &failAfterSSEWriter{remaining: 1}
 		idx := 0
-		err = (&taskHandlers{}).streamReplayStore(t.Context(), out, httptest.NewRecorder(), taskmgr.NewEntry(&task.Task{}, logs[0]), &idx)
+		err = (&taskHandlers{replay: newTestReplayPublisher(t)}).streamReplayStore(t.Context(), out, httptest.NewRecorder(), taskmgr.NewEntry(&task.Task{}, logs[0]), &idx)
 		if err == nil || !strings.Contains(err.Error(), "after history publication") || out.Len() != 1 {
 			t.Fatalf("stream replay = (%v, %q), want one partial write without regeneration", err, out.String())
 		}
@@ -114,11 +114,11 @@ func TestReplayCache(t *testing.T) {
 		if err != nil || len(logs) != 1 {
 			t.Fatalf("load log = (%#v, %v)", logs, err)
 		}
-		cache, err := eventreplay.NewCacheWriter(logPath, task.CacheProofForLog)
+		cache, err := eventreplay.NewCacheWriter(logPath, filepath.Join(filepath.Dir(logPath), ".replay-tmp"), task.CacheProofForLog, replayFormat)
 		if err != nil {
 			t.Fatal(err)
 		}
-		cache.WriteEventData([]byte(`{"kind":"text","ts":1,"text":{"text":"must not publish"}}`))
+		cache.WriteData([]byte(`{"kind":"text","ts":1,"text":{"text":"must not publish"}}`))
 		if err := cache.CommitContext(t.Context(), logPath); err != nil {
 			t.Fatal(err)
 		}
@@ -126,7 +126,7 @@ func TestReplayCache(t *testing.T) {
 		cancel()
 		out := httptest.NewRecorder()
 		idx := 0
-		err = (&taskHandlers{}).streamReplayStore(ctx, out, out, taskmgr.NewEntry(&task.Task{}, logs[0]), &idx)
+		err = (&taskHandlers{replay: newTestReplayPublisher(t)}).streamReplayStore(ctx, out, out, taskmgr.NewEntry(&task.Task{}, logs[0]), &idx)
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("stream replay error = %v, want context cancellation", err)
 		}
@@ -283,7 +283,7 @@ func TestReplayCache(t *testing.T) {
 		t.Parallel()
 		logDir := t.TempDir()
 		logPath := writePurged(t, logDir, "empty cache raw truth")
-		cache, err := eventreplay.NewCacheWriter(logPath, task.CacheProofForLog)
+		cache, err := eventreplay.NewCacheWriter(logPath, filepath.Join(filepath.Dir(logPath), ".replay-tmp"), task.CacheProofForLog, replayFormat)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -357,8 +357,8 @@ func readReplayCacheEvents(t *testing.T, path string) replayCacheContents {
 	if err := json.Unmarshal(sc.Bytes(), &header); err != nil {
 		t.Fatal(err)
 	}
-	if header.Version != eventreplay.CacheVersion {
-		t.Fatalf("cache version = %d, want %d", header.Version, eventreplay.CacheVersion)
+	if header.Version != replayCacheVersion {
+		t.Fatalf("cache version = %d, want %d", header.Version, replayCacheVersion)
 	}
 
 	var events []v1.EventMessage

@@ -1,10 +1,16 @@
 // Agent event conversions from backend messages to API v1 SSE DTOs.
 
-package eventreplay
+package apiconv
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"maps"
+	"reflect"
+	"strings"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -328,18 +334,6 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 	}
 }
 
-// DiffStat converts an agent diff stat to an API DTO.
-func DiffStat(ds agent.DiffStat) v1.DiffStat {
-	if len(ds) == 0 {
-		return nil
-	}
-	out := make(v1.DiffStat, len(ds))
-	for i, f := range ds {
-		out[i] = v1.DiffFileStat{Path: f.Path, Added: f.Added, Deleted: f.Deleted, Binary: f.Binary}
-	}
-	return out
-}
-
 // AskQuestions converts agent ask questions to API DTOs.
 func AskQuestions(qs []agent.AskQuestion) []v1.AskQuestion {
 	if len(qs) == 0 {
@@ -381,4 +375,314 @@ func MarshalEvent(ev *v1.EventMessage) ([]byte, error) {
 // toolInputProbe extracts run_in_background from a tool's raw JSON input.
 type toolInputProbe struct {
 	RunInBackground bool `json:"run_in_background"`
+}
+
+// ValidateEventJSON accepts exactly one recognized EventMessage payload
+// matching its kind. Cache readers must reject JSON values that Unmarshal can
+// otherwise silently coerce into a zero-value EventMessage.
+func ValidateEventJSON(line []byte) error {
+	if err := validateReplayJSON(line, reflect.TypeFor[v1.EventMessage]()); err != nil {
+		return fmt.Errorf("invalid EventMessage schema: %w", err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(line))
+	decoder.DisallowUnknownFields()
+	var event v1.EventMessage
+	if err := decoder.Decode(&event); err != nil {
+		return err
+	}
+	if err := requireJSONEOF(decoder); err != nil {
+		return err
+	}
+	payloads := 0
+	for _, payload := range []bool{
+		event.Init != nil, event.Text != nil, event.TextDelta != nil,
+		event.ToolUse != nil, event.ToolResult != nil, event.Ask != nil,
+		event.Usage != nil, event.Result != nil, event.System != nil,
+		event.UserInput != nil, event.Todo != nil, event.DiffStat != nil,
+		event.Error != nil, event.Thinking != nil, event.ThinkingDelta != nil,
+		event.SubagentStart != nil, event.SubagentEnd != nil, event.Log != nil,
+		event.ToolOutputDelta != nil, event.Widget != nil, event.WidgetDelta != nil,
+		event.RateLimit != nil, event.Stats != nil,
+	} {
+		if payload {
+			payloads++
+		}
+	}
+	if payloads != 1 {
+		return errors.New("EventMessage must contain exactly one payload")
+	}
+	var validPayload bool
+	switch event.Kind {
+	case v1.EventKindInit:
+		validPayload = event.Init != nil
+	case v1.EventKindText:
+		validPayload = event.Text != nil
+	case v1.EventKindTextDelta:
+		validPayload = event.TextDelta != nil
+	case v1.EventKindToolUse:
+		validPayload = event.ToolUse != nil
+	case v1.EventKindToolResult:
+		validPayload = event.ToolResult != nil
+	case v1.EventKindAsk:
+		validPayload = event.Ask != nil
+	case v1.EventKindUsage:
+		validPayload = event.Usage != nil
+	case v1.EventKindResult:
+		validPayload = event.Result != nil
+	case v1.EventKindSystem:
+		validPayload = event.System != nil
+	case v1.EventKindUserInput:
+		validPayload = event.UserInput != nil
+	case v1.EventKindTodo:
+		validPayload = event.Todo != nil
+	case v1.EventKindDiffStat:
+		validPayload = event.DiffStat != nil
+	case v1.EventKindError:
+		validPayload = event.Error != nil
+	case v1.EventKindThinking:
+		validPayload = event.Thinking != nil
+	case v1.EventKindThinkingDelta:
+		validPayload = event.ThinkingDelta != nil
+	case v1.EventKindSubagentStart:
+		validPayload = event.SubagentStart != nil
+	case v1.EventKindSubagentEnd:
+		validPayload = event.SubagentEnd != nil
+	case v1.EventKindLog:
+		validPayload = event.Log != nil
+	case v1.EventKindToolOutputDelta:
+		validPayload = event.ToolOutputDelta != nil
+	case v1.EventKindWidget:
+		validPayload = event.Widget != nil
+	case v1.EventKindWidgetDelta:
+		validPayload = event.WidgetDelta != nil
+	case v1.EventKindRateLimit:
+		validPayload = event.RateLimit != nil
+	case v1.EventKindStats:
+		validPayload = event.Stats != nil
+	default:
+		return fmt.Errorf("unknown EventMessage kind %q", event.Kind)
+	}
+	if !validPayload {
+		return fmt.Errorf("EventMessage kind %q has mismatched payload", event.Kind)
+	}
+	return nil
+}
+
+// validateReplayJSON recursively enforces the emitted EventMessage schema.
+// encoding/json accepts unknown and duplicate object keys, so cache validation
+// must inspect every nested object before decoding it into the public DTO.
+var (
+	jsonRawMessageType  = reflect.TypeFor[json.RawMessage]()
+	jsonUnmarshalerType = reflect.TypeFor[json.Unmarshaler]()
+)
+
+func validateReplayJSON(data []byte, typ reflect.Type) error {
+	if !json.Valid(data) {
+		return errors.New("invalid JSON")
+	}
+	typ = indirectJSONType(typ)
+	if typ == jsonRawMessageType || reflect.PointerTo(typ).Implements(jsonUnmarshalerType) {
+		return validateReplayJSONUnknown(data)
+	}
+	if isJSONScalarType(typ) {
+		if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+			return errors.New("scalar field must not be JSON null")
+		}
+		if err := json.Unmarshal(data, reflect.New(typ).Interface()); err != nil {
+			return err
+		}
+		return nil
+	}
+	if typ.Kind() == reflect.Struct {
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(data, &object); err != nil {
+			return errors.New("must be a JSON object")
+		}
+		if object == nil {
+			return errors.New("must be a JSON object")
+		}
+		fields := jsonSchemaFields(typ)
+		seen, err := jsonObjectKeys(data)
+		if err != nil {
+			return err
+		}
+		for _, key := range seen {
+			field, ok := fields[key]
+			if !ok {
+				return fmt.Errorf("unknown field %q", key)
+			}
+			if err := validateReplayJSON(object[key], field.typ); err != nil {
+				return fmt.Errorf("field %q: %w", key, err)
+			}
+		}
+		for name, field := range fields {
+			if field.required {
+				if _, ok := object[name]; !ok {
+					return fmt.Errorf("missing required field %q", name)
+				}
+			}
+		}
+		return nil
+	}
+	switch typ.Kind() { //nolint:exhaustive // primitives have no nested keys.
+	case reflect.Slice, reflect.Array:
+		var values []json.RawMessage
+		if err := json.Unmarshal(data, &values); err != nil {
+			return err
+		}
+		for _, value := range values {
+			if err := validateReplayJSON(value, typ.Elem()); err != nil {
+				return err
+			}
+		}
+	case reflect.Map, reflect.Interface:
+		return validateReplayJSONUnknown(data)
+	}
+	return nil
+}
+
+type replayJSONField struct {
+	typ      reflect.Type
+	required bool
+}
+
+func jsonSchemaFields(typ reflect.Type) map[string]replayJSONField {
+	fields := make(map[string]replayJSONField)
+	for field := range typ.Fields() {
+		if field.Anonymous {
+			maps.Copy(fields, jsonSchemaFields(indirectJSONType(field.Type)))
+			continue
+		}
+		tag := field.Tag.Get("json")
+		name, options, _ := strings.Cut(tag, ",")
+		if name == "" || name == "-" {
+			continue
+		}
+		fields[name] = replayJSONField{
+			typ:      field.Type,
+			required: !strings.Contains(options, "omitempty") && !strings.Contains(options, "omitzero"),
+		}
+	}
+	return fields
+}
+
+func indirectJSONType(typ reflect.Type) reflect.Type {
+	for typ.Kind() == reflect.Pointer {
+		typ = typ.Elem()
+	}
+	return typ
+}
+
+func isJSONScalarType(typ reflect.Type) bool {
+	switch typ.Kind() {
+	case reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
+		reflect.Float32, reflect.Float64, reflect.String:
+		return true
+	default:
+		return false
+	}
+}
+
+// jsonObjectKeys returns object keys while detecting duplicates. Values remain
+// raw so their own nested schemas can be checked by validateReplayJSON.
+func jsonObjectKeys(data []byte) ([]string, error) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	token, err := decoder.Token()
+	if err != nil {
+		return nil, err
+	}
+	if delimiter, ok := token.(json.Delim); !ok || delimiter != '{' {
+		return nil, errors.New("must be a JSON object")
+	}
+	keys := make([]string, 0)
+	present := make(map[string]struct{})
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return nil, err
+		}
+		key, ok := token.(string)
+		if !ok {
+			return nil, errors.New("invalid JSON object key")
+		}
+		if _, duplicate := present[key]; duplicate {
+			return nil, fmt.Errorf("duplicate field %q", key)
+		}
+		present[key] = struct{}{}
+		keys = append(keys, key)
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := decoder.Token(); err != nil {
+		return nil, err
+	}
+	return keys, requireJSONEOF(decoder)
+}
+
+// validateReplayJSONUnknown permits arbitrary raw input values while still
+// rejecting duplicate keys at every nested object level.
+func validateReplayJSONUnknown(data []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	if err := validateReplayJSONValue(decoder); err != nil {
+		return err
+	}
+	return requireJSONEOF(decoder)
+}
+
+func validateReplayJSONValue(decoder *json.Decoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	delimiter, isDelimiter := token.(json.Delim)
+	if !isDelimiter {
+		return nil
+	}
+	switch delimiter {
+	case '{':
+		present := make(map[string]struct{})
+		for decoder.More() {
+			token, err := decoder.Token()
+			if err != nil {
+				return err
+			}
+			key, ok := token.(string)
+			if !ok {
+				return errors.New("invalid JSON object key")
+			}
+			if _, duplicate := present[key]; duplicate {
+				return fmt.Errorf("duplicate field %q", key)
+			}
+			present[key] = struct{}{}
+			if err := validateReplayJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+		_, err = decoder.Token()
+		return err
+	case '[':
+		for decoder.More() {
+			if err := validateReplayJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+		_, err = decoder.Token()
+		return err
+	default:
+		return errors.New("invalid JSON delimiter")
+	}
+}
+
+func requireJSONEOF(decoder *json.Decoder) error {
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("multiple JSON values")
+		}
+		return err
+	}
+	return nil
 }

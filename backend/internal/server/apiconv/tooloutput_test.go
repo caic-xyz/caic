@@ -1,6 +1,6 @@
 // Tests tool-output formatting for replay and live SSE conversion.
 
-package eventreplay
+package apiconv
 
 import (
 	"encoding/json"
