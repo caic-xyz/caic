@@ -239,14 +239,6 @@ func TestValidate(t *testing.T) {
 			}
 			assertBadRequest(t, r.Validate(), "settings is required")
 		})
-		t.Run("UnknownCache", func(t *testing.T) {
-			t.Parallel()
-			var r UpdatePreferencesReq
-			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"wellKnownCaches":{"bogus":true}}}`), &r); err != nil {
-				t.Fatalf("Unmarshal: %v", err)
-			}
-			assertBadRequest(t, r.Validate(), "unknown cache: bogus")
-		})
 		t.Run("InvalidPlatform", func(t *testing.T) {
 			t.Parallel()
 			var r UpdatePreferencesReq
@@ -254,22 +246,6 @@ func TestValidate(t *testing.T) {
 				t.Fatalf("Unmarshal: %v", err)
 			}
 			assertBadRequest(t, r.Validate(), `unsupported platform "linux/386"; use linux/amd64 or linux/arm64`)
-		})
-		t.Run("InvalidCacheMapping", func(t *testing.T) {
-			t.Parallel()
-			var r UpdatePreferencesReq
-			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"cacheMappings":[{"hostPath":"","containerPath":"/cache"}]}}`), &r); err != nil {
-				t.Fatalf("Unmarshal: %v", err)
-			}
-			assertBadRequest(t, r.Validate(), "cacheMappings[0]: host path is required")
-		})
-		t.Run("InvalidCustomMount", func(t *testing.T) {
-			t.Parallel()
-			var r UpdatePreferencesReq
-			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"customMounts":[{"hostPath":"/host","containerPath":""}]}}`), &r); err != nil {
-				t.Fatalf("Unmarshal: %v", err)
-			}
-			assertBadRequest(t, r.Validate(), "customMounts[0]: container path is required")
 		})
 		t.Run("AllowsUnsetHomeRelativeContainerPaths", func(t *testing.T) {
 			t.Parallel()
@@ -285,27 +261,6 @@ func TestValidate(t *testing.T) {
 			}
 			if got := r.Settings.CustomMounts[0].ContainerPath; got != "" {
 				t.Errorf("mount containerPath = %q, want unset", got)
-			}
-		})
-		t.Run("InvalidMappingPaths", func(t *testing.T) {
-			t.Parallel()
-			for _, tc := range []struct {
-				name string
-				body string
-				want string
-			}{
-				{"relative host", `{"settings":{"cacheMappings":[{"hostPath":"cache","containerPath":"/cache"}]}}`, "cacheMappings[0]: host path must be absolute or home-relative"},
-				{"host escapes home", `{"settings":{"cacheMappings":[{"hostPath":"~/../../etc","containerPath":"/cache"}]}}`, "cacheMappings[0]: host path must not escape home"},
-				{"relative container", `{"settings":{"customMounts":[{"hostPath":"/host","containerPath":"cache"}]}}`, "customMounts[0]: container path must be absolute or home-relative"},
-			} {
-				t.Run(tc.name, func(t *testing.T) {
-					t.Parallel()
-					var r UpdatePreferencesReq
-					if err := json.Unmarshal([]byte(tc.body), &r); err != nil {
-						t.Fatalf("Unmarshal: %v", err)
-					}
-					assertBadRequest(t, r.Validate(), tc.want)
-				})
 			}
 		})
 		t.Run("UnknownTopLevelField", func(t *testing.T) {

@@ -200,6 +200,9 @@ func (h *serverHandlers) getPreferences(ctx context.Context, _ *api.EmptyReq) (*
 }
 
 func (h *serverHandlers) updatePreferences(ctx context.Context, req *v1.UpdatePreferencesReq) (*v1.PreferencesResp, error) {
+	if err := validatePreferenceSettings(&req.Settings); err != nil {
+		return nil, err
+	}
 	if req.Settings.RuntimeName != "" {
 		if _, ok := h.runtimes.ByName[caicruntime.Name(req.Settings.RuntimeName)]; !ok {
 			return nil, api.BadRequest(fmt.Sprintf("unknown runtime %q", req.Settings.RuntimeName))
@@ -239,6 +242,26 @@ func (h *serverHandlers) updatePreferences(ctx context.Context, req *v1.UpdatePr
 	}
 	// Return the updated preferences.
 	return h.getPreferences(ctx, nil)
+}
+
+// validatePreferenceSettings verifies settings that require runtime-owned data.
+func validatePreferenceSettings(settings *v1.UserSettings) error {
+	for name := range settings.WellKnownCaches {
+		if _, ok := md.WellKnownCaches[name]; !ok {
+			return api.BadRequest("unknown cache: " + name)
+		}
+	}
+	for i, m := range settings.CacheMappings {
+		if _, err := md.ResolveMountTarget(m.HostPath, m.ContainerPath); err != nil {
+			return api.BadRequest(fmt.Sprintf("cacheMappings[%d]: %s", i, err))
+		}
+	}
+	for i, m := range settings.CustomMounts {
+		if _, err := md.ResolveMountTarget(m.HostPath, m.ContainerPath); err != nil {
+			return api.BadRequest(fmt.Sprintf("customMounts[%d]: %s", i, err))
+		}
+	}
+	return nil
 }
 
 func cacheMountsFromSettings(settings *preferences.Settings) ([]caicruntime.CacheMount, error) {

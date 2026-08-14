@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"regexp"
 
-	"github.com/caic-xyz/md"
-
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 )
 
@@ -29,13 +27,11 @@ const (
 var pathSegmentRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 func validateContainerPlatform(platform Platform) error {
-	if platform == PlatformDefault {
+	switch platform {
+	case PlatformDefault, PlatformLinuxAMD64, PlatformLinuxARM64:
 		return nil
 	}
-	if err := md.Platform(platform).Validate(); err != nil {
-		return api.BadRequest(fmt.Sprintf("unsupported platform %q; use linux/amd64 or linux/arm64", platform))
-	}
-	return nil
+	return api.BadRequest(fmt.Sprintf("unsupported platform %q; use linux/amd64 or linux/arm64", platform))
 }
 
 // validateRepoSpecs checks that each RepoSpec has a non-empty name and no duplicates.
@@ -49,24 +45,6 @@ func validateRepoSpecs(specs []RepoSpec, field string) error {
 			return api.BadRequest(field + " contains duplicate name: " + rs.Name)
 		}
 		seen[rs.Name] = struct{}{}
-	}
-	return nil
-}
-
-func validateCacheMappings(mappings []CacheMappingResp) error {
-	for i, m := range mappings {
-		if _, err := md.ResolveMountTarget(m.HostPath, m.ContainerPath); err != nil {
-			return api.BadRequest(fmt.Sprintf("cacheMappings[%d]: %s", i, err))
-		}
-	}
-	return nil
-}
-
-func validateMountMappings(mappings []MountMappingResp) error {
-	for i, m := range mappings {
-		if _, err := md.ResolveMountTarget(m.HostPath, m.ContainerPath); err != nil {
-			return api.BadRequest(fmt.Sprintf("customMounts[%d]: %s", i, err))
-		}
 	}
 	return nil
 }

@@ -1,17 +1,20 @@
-// Tests server configuration, preference handlers, and runtime settings mappings.
+// Tests server configuration, API contract parity, preference handlers, and runtime settings mappings.
 
 package server
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 )
 
 func TestServerHandlersListHarnesses(t *testing.T) {
@@ -81,6 +84,90 @@ func TestSettingsMountsResolveContainerPaths(t *testing.T) {
 		settings = &preferences.Settings{CustomMounts: []preferences.MountMapping{{HostPath: "cache", ContainerPath: "/cache", Enabled: true}}}
 		if _, err := mountsFromSettings(settings); err == nil || !strings.Contains(err.Error(), "custom mount 0: host path must be absolute or home-relative") {
 			t.Fatalf("mountsFromSettings() error = %v, want indexed invalid host path", err)
+		}
+	})
+}
+
+func TestValidatePreferenceSettings(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		settings v1.UserSettings
+		want     string
+	}{
+		{
+			name:     "unknown cache",
+			settings: v1.UserSettings{WellKnownCaches: map[string]bool{"bogus": true}},
+			want:     "unknown cache: bogus",
+		},
+		{
+			name:     "invalid cache mapping",
+			settings: v1.UserSettings{CacheMappings: []v1.CacheMappingResp{{HostPath: "", ContainerPath: "/cache"}}},
+			want:     "cacheMappings[0]: host path is required",
+		},
+		{
+			name:     "invalid custom mount",
+			settings: v1.UserSettings{CustomMounts: []v1.MountMappingResp{{HostPath: "/host", ContainerPath: ""}}},
+			want:     "customMounts[0]: container path is required",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := validatePreferenceSettings(&tc.settings)
+			apiErr, ok := errors.AsType[*api.Error](err)
+			if !ok {
+				t.Fatalf("error = %T, want *api.Error", err)
+			}
+			if apiErr.Error() != tc.want {
+				t.Errorf("error = %q, want %q", apiErr, tc.want)
+			}
+		})
+	}
+}
+
+func TestServerAPIV1EnumParity(t *testing.T) {
+	t.Parallel()
+
+	t.Run("harnesses", func(t *testing.T) {
+		t.Parallel()
+		want := map[v1.Harness]harness.Name{
+			v1.HarnessClaude:   harness.Claude,
+			v1.HarnessCodex:    harness.Codex,
+			v1.HarnessOpenCode: harness.OpenCode,
+			v1.HarnessPi:       harness.Pi,
+		}
+		got := make(map[harness.Name]struct{}, len(want))
+		for dtoHarness, agentHarness := range want {
+			if string(dtoHarness) != string(agentHarness) {
+				t.Errorf("DTO harness %q does not match agent harness %q", dtoHarness, agentHarness)
+			}
+			got[agentHarness] = struct{}{}
+		}
+		for _, agentHarness := range []harness.Name{harness.Claude, harness.Codex, harness.OpenCode, harness.Pi} {
+			if _, ok := got[agentHarness]; !ok {
+				t.Errorf("agent harness %q is missing from the v1 API", agentHarness)
+			}
+		}
+	})
+
+	t.Run("forges", func(t *testing.T) {
+		t.Parallel()
+		want := map[v1.Forge]forge.Kind{
+			v1.ForgeGitHub: forge.KindGitHub,
+			v1.ForgeGitLab: forge.KindGitLab,
+		}
+		got := make(map[forge.Kind]struct{}, len(want))
+		for dtoForge, forgeKind := range want {
+			if string(dtoForge) != string(forgeKind) {
+				t.Errorf("DTO forge %q does not match forge kind %q", dtoForge, forgeKind)
+			}
+			got[forgeKind] = struct{}{}
+		}
+		for _, forgeKind := range []forge.Kind{forge.KindGitHub, forge.KindGitLab} {
+			if _, ok := got[forgeKind]; !ok {
+				t.Errorf("forge kind %q is missing from the v1 API", forgeKind)
+			}
 		}
 	})
 }

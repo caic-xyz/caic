@@ -15,8 +15,6 @@ import (
 
 	"github.com/maruel/ksid"
 
-	"github.com/caic-xyz/md"
-
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 )
 
@@ -887,23 +885,12 @@ func (r *UpdatePreferencesReq) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Validate checks that the complete settings object is present and references valid cache names.
+// Validate checks that the complete settings object is present and has a supported platform.
 func (r *UpdatePreferencesReq) Validate() error {
 	if !r.settingsSet {
 		return api.BadRequest("settings is required")
 	}
-	for name := range r.Settings.WellKnownCaches {
-		if _, ok := md.WellKnownCaches[name]; !ok {
-			return api.BadRequest("unknown cache: " + name)
-		}
-	}
 	if err := validateContainerPlatform(r.Settings.ContainerPlatform); err != nil {
-		return err
-	}
-	if err := validateCacheMappings(r.Settings.CacheMappings); err != nil {
-		return err
-	}
-	if err := validateMountMappings(r.Settings.CustomMounts); err != nil {
 		return err
 	}
 	return nil
