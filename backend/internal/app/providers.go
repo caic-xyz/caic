@@ -1,4 +1,4 @@
-// Provider detection for usage and title-generation services.
+// Provider setup for usage, title generation, and forge OAuth tokens.
 
 package app
 
@@ -11,6 +11,9 @@ import (
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers"
 
+	"github.com/caic-xyz/caic/backend/internal/auth"
+	"github.com/caic-xyz/caic/backend/internal/forge"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
@@ -153,4 +156,26 @@ var apiKeyUsageFetchers = []struct {
 	{provider: "deepseek", factory: func(key string) usage.ProviderFetcher { return usage.NewDeepSeekFetcher(key) }},
 	{provider: "openrouter", factory: func(key string) usage.ProviderFetcher { return usage.NewOpenRouterFetcher(key) }},
 	{provider: "xiaomi", factory: func(key string) usage.ProviderFetcher { return usage.NewXiaomiFetcher(key) }},
+}
+
+// authForgeTokenSource adapts authenticated request users to forge OAuth tokens.
+type authForgeTokenSource struct{}
+
+func (authForgeTokenSource) TokenFor(ctx context.Context, kind forge.Kind) (forgemgr.OAuthToken, bool) {
+	u, ok := auth.UserFromContext(ctx)
+	if !ok || u.AccessToken == "" || !providerMatchesForge(u.Provider, kind) {
+		return forgemgr.OAuthToken{}, false
+	}
+	return forgemgr.OAuthToken{AccessToken: u.AccessToken, UserID: u.ID}, true
+}
+
+func providerMatchesForge(provider auth.Provider, kind forge.Kind) bool {
+	switch kind {
+	case forge.KindGitHub:
+		return provider == auth.ProviderGitHub
+	case forge.KindGitLab:
+		return provider == auth.ProviderGitLab
+	default:
+		return false
+	}
 }

@@ -3,11 +3,18 @@
 package forgemgr
 
 import (
+	"context"
 	"testing"
 
-	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 )
+
+type fakeOAuthTokenSource map[forge.Kind]OAuthToken
+
+func (s fakeOAuthTokenSource) TokenFor(_ context.Context, kind forge.Kind) (OAuthToken, bool) {
+	token, ok := s[kind]
+	return token, ok
+}
 
 func TestManager(t *testing.T) {
 	t.Parallel()
@@ -15,7 +22,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("PAT", func(t *testing.T) {
 			t.Parallel()
-			m := New("pat-token", "", nil)
+			m := New("pat-token", "", nil, NoOAuthTokenSource())
 			if f := m.ForgeFor(t.Context(), forge.KindGitHub); f == nil {
 				t.Fatal("ForgeFor returned nil with PAT set")
 			}
@@ -23,34 +30,22 @@ func TestManager(t *testing.T) {
 
 		t.Run("no token returns nil", func(t *testing.T) {
 			t.Parallel()
-			m := New("", "", nil)
+			m := New("", "", nil, NoOAuthTokenSource())
 			if f := m.ForgeFor(t.Context(), forge.KindGitHub); f != nil {
 				t.Fatal("ForgeFor should return nil when no tokens available")
 			}
 		})
 
-		t.Run("OAuth provider must match forge", func(t *testing.T) {
+		t.Run("OAuth token source", func(t *testing.T) {
 			t.Parallel()
-			cases := []struct {
-				provider auth.Provider
-				kind     forge.Kind
-				other    forge.Kind
-			}{
-				{provider: auth.ProviderGitHub, kind: forge.KindGitHub, other: forge.KindGitLab},
-				{provider: auth.ProviderGitLab, kind: forge.KindGitLab, other: forge.KindGitHub},
+			m := New("", "", nil, fakeOAuthTokenSource{
+				forge.KindGitHub: {AccessToken: t.Name(), UserID: "github-user"},
+			})
+			if f := m.ForgeFor(t.Context(), forge.KindGitHub); f == nil {
+				t.Fatal("ForgeFor returned nil for OAuth token")
 			}
-			for _, tc := range cases {
-				t.Run(string(tc.provider), func(t *testing.T) {
-					t.Parallel()
-					m := New("", "", nil)
-					ctx := auth.NewContext(t.Context(), &auth.User{Provider: tc.provider, AccessToken: t.Name()})
-					if f := m.ForgeFor(ctx, tc.kind); f == nil {
-						t.Fatal("ForgeFor returned nil for matching OAuth provider")
-					}
-					if f := m.ForgeFor(ctx, tc.other); f != nil {
-						t.Fatal("ForgeFor returned a client for mismatched OAuth provider")
-					}
-				})
+			if f := m.ForgeFor(t.Context(), forge.KindGitLab); f != nil {
+				t.Fatal("ForgeFor returned a client without an OAuth token")
 			}
 		})
 	})

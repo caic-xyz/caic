@@ -1,4 +1,4 @@
-// Tests for provider detection and title-generation LLM provider setup.
+// Tests provider setup and auth-to-forge token adaptation.
 
 package app
 
@@ -7,7 +7,46 @@ import (
 	"testing"
 
 	"github.com/maruel/genai"
+
+	"github.com/caic-xyz/caic/backend/internal/auth"
+	"github.com/caic-xyz/caic/backend/internal/forge"
 )
+
+func TestAuthForgeTokenSource(t *testing.T) {
+	t.Parallel()
+	source := authForgeTokenSource{}
+	t.Run("matching provider", func(t *testing.T) {
+		t.Parallel()
+		ctx := auth.NewContext(t.Context(), &auth.User{ID: "user", Provider: auth.ProviderGitHub, AccessToken: t.Name()})
+		token, ok := source.TokenFor(ctx, forge.KindGitHub)
+		if !ok {
+			t.Fatal("TokenFor returned no token")
+		}
+		if token.AccessToken != t.Name() || token.UserID != "user" {
+			t.Errorf("token = %#v, want request user token", token)
+		}
+	})
+
+	t.Run("mismatched provider", func(t *testing.T) {
+		t.Parallel()
+		ctx := auth.NewContext(t.Context(), &auth.User{Provider: auth.ProviderGitHub, AccessToken: t.Name()})
+		if _, ok := source.TokenFor(ctx, forge.KindGitLab); ok {
+			t.Fatal("TokenFor returned a token for mismatched forge")
+		}
+	})
+
+	t.Run("GitLab provider", func(t *testing.T) {
+		t.Parallel()
+		ctx := auth.NewContext(t.Context(), &auth.User{ID: "gitlab-user", Provider: auth.ProviderGitLab, AccessToken: t.Name()})
+		token, ok := source.TokenFor(ctx, forge.KindGitLab)
+		if !ok {
+			t.Fatal("TokenFor returned no GitLab token")
+		}
+		if token.AccessToken != t.Name() || token.UserID != "gitlab-user" {
+			t.Errorf("token = %#v, want request user token", token)
+		}
+	})
+}
 
 func TestAppendProviderAPIKey(t *testing.T) {
 	t.Parallel()

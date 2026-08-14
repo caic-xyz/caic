@@ -247,7 +247,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		}
 	}
 
-	forgeManager := forgemgr.New(cfg.GitHub.Token, cfg.GitLab.Token, nil)
+	forgeManager := forgemgr.New(cfg.GitHub.Token, cfg.GitLab.Token, nil, authForgeTokenSource{})
 	if cfg.GitHub.AppID != 0 && len(cfg.GitHub.AppPrivateKeyPEM) > 0 {
 		app, err := github.NewAppClient(cfg.GitHub.AppID, cfg.GitHub.AppPrivateKeyPEM, forgeManager.GitHubAppThrottle())
 		if err != nil {

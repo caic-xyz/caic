@@ -412,7 +412,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 	repoSvc := newTestRepoService(t, "", checkoutRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
-	forgeManager := forgemgr.New("", "", nil)
+	forgeManager := forgemgr.New("", "", nil, forgemgr.NoOAuthTokenSource())
 
 	auditPath := ""
 	if len(auditLogPath) > 0 {

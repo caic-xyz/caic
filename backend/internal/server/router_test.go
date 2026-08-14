@@ -148,7 +148,7 @@ func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testR
 	repoSvc := newTestRepoService(t, "", checkoutRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
-	forgeManager := forgemgr.New("", "", nil)
+	forgeManager := forgemgr.New("", "", nil, forgemgr.NoOAuthTokenSource())
 	s, err := New(t.Context(), Dependencies{
 		RepoSvc:         repoSvc,
 		RepoStatus:      repoStatus,
@@ -182,7 +182,7 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 	repoSvc := newTestRepoService(t, "", checkoutRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
-	forgeManager := forgemgr.New("", "", nil)
+	forgeManager := forgemgr.New("", "", nil, forgemgr.NoOAuthTokenSource())
 	s, err := New(t.Context(), Dependencies{
 		RepoSvc:                    repoSvc,
 		RepoStatus:                 repoStatus,
@@ -230,7 +230,7 @@ func TestNew(t *testing.T) {
 			TaskMgr:         taskMgr,
 			ReplayPublisher: newTestReplayPublisher(t),
 			Preferences:     newTestPrefs(t),
-			ForgeMgr:        forgemgr.New("", "", nil),
+			ForgeMgr:        forgemgr.New("", "", nil, forgemgr.NoOAuthTokenSource()),
 			Warnings:        NewWarningStore(taskMgr),
 			CacheSizes:      NewCacheSizeStore(),
 		}
@@ -453,7 +453,7 @@ func newCheckoutConstructionTestServer(t *testing.T, root string) checkoutConstr
 		TaskMgr:         taskMgr,
 		ReplayPublisher: newTestReplayPublisher(t),
 		Preferences:     prefs,
-		ForgeMgr:        forgemgr.New("", "", nil),
+		ForgeMgr:        forgemgr.New("", "", nil, forgemgr.NoOAuthTokenSource()),
 		Warnings:        NewWarningStore(taskMgr),
 		CacheSizes:      NewCacheSizeStore(),
 	})

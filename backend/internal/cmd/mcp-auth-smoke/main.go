@@ -217,7 +217,7 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 		ReplayPublisher: replayPublisher,
 		Preferences:     prefs,
 		IPGeoChecker:    checker,
-		ForgeMgr:        forgemgr.New("", "", nil),
+		ForgeMgr:        forgemgr.New("", "", nil, forgemgr.NoOAuthTokenSource()),
 		Warnings:        server.NewWarningStore(taskMgr),
 		CacheSizes:      server.NewCacheSizeStore(),
 		AuthStore:       store,

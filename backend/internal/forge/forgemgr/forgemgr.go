@@ -11,7 +11,6 @@ import (
 
 	"github.com/maruel/roundtrippers"
 
-	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/forge/gitlab"
@@ -27,6 +26,28 @@ type GitHubAppClient interface {
 	PostComment(ctx context.Context, installationID int64, owner, repo string, issueNumber int, body string) error
 }
 
+// OAuthToken identifies a user-scoped OAuth token for forge API requests.
+type OAuthToken struct {
+	AccessToken string
+	UserID      string
+}
+
+// OAuthTokenSource resolves a user-scoped OAuth token for a forge kind.
+// It returns false when the request has no matching token.
+type OAuthTokenSource interface {
+	TokenFor(ctx context.Context, kind forge.Kind) (OAuthToken, bool)
+}
+
+type noOAuthTokenSource struct{}
+
+func (noOAuthTokenSource) TokenFor(context.Context, forge.Kind) (OAuthToken, bool) {
+	return OAuthToken{}, false
+}
+
+// NoOAuthTokenSource returns a source for deployments that use only PATs or a
+// GitHub App.
+func NoOAuthTokenSource() OAuthTokenSource { return noOAuthTokenSource{} }
+
 // Manager resolves forge clients for repos, manages per-user rate-limit
 // throttles, and caches GitHub App installation IDs.
 type Manager struct {
@@ -34,6 +55,7 @@ type Manager struct {
 	log         *slog.Logger
 	githubToken string
 	gitlabToken string
+	oauthTokens OAuthTokenSource
 
 	// Set during startup before the manager serves requests.
 	githubApp GitHubAppClient // nil when GitHub App not configured
@@ -48,14 +70,18 @@ type Manager struct {
 	githubInstallations  map[string]int64 // owner (lowercase) → installation ID; -1 = not installed
 }
 
-// New creates a forge manager for the configured forge tokens and optional
-// GitHub App client.
-func New(githubToken, gitlabToken string, githubApp GitHubAppClient) *Manager {
+// New creates a forge manager for configured forge tokens, an optional GitHub
+// App client, and a user-scoped OAuth token source.
+func New(githubToken, gitlabToken string, githubApp GitHubAppClient, oauthTokens OAuthTokenSource) *Manager {
+	if oauthTokens == nil {
+		panic("OAuth token source is required")
+	}
 	return &Manager{
 		log:                  slog.Default().With(slog.String("cmp", "forgemgr")),
 		githubToken:          githubToken,
 		gitlabToken:          gitlabToken,
 		githubApp:            githubApp,
+		oauthTokens:          oauthTokens,
 		githubOAuthThrottles: make(map[string]http.RoundTripper),
 		githubPATThrottle:    newThrottle(),
 		githubAppThrottle:    newThrottle(),
@@ -118,18 +144,17 @@ func (m *Manager) ForgeForInfo(ctx context.Context, info *repo.Repository) forge
 }
 
 // ForgeFor returns a Forge client for the given kind.
-// In OAuth mode the authenticated user's access token is used.
-// In PAT mode (no OAuth) the global token is used.
+// A user-scoped OAuth token returned by the configured source takes priority
+// over the global PAT.
 // Config.Validate ensures these two modes are never mixed.
 // Returns nil if no token is available.
 func (m *Manager) ForgeFor(ctx context.Context, kind forge.Kind) forge.Forge {
-	provider, isOAuthForge := providerForForge(kind)
-	if u, ok := auth.UserFromContext(ctx); ok && u.AccessToken != "" && isOAuthForge && u.Provider == provider {
+	if token, ok := m.oauthTokens.TokenFor(ctx, kind); ok && token.AccessToken != "" {
 		switch kind {
 		case forge.KindGitHub:
-			return github.NewClient(u.AccessToken, m.githubOAuthThrottle(u.ID))
+			return github.NewClient(token.AccessToken, m.githubOAuthThrottle(token.UserID))
 		case forge.KindGitLab:
-			return gitlab.NewClient(u.AccessToken, m.gitlabOAuthThrottle(u.ID))
+			return gitlab.NewClient(token.AccessToken, m.gitlabOAuthThrottle(token.UserID))
 		}
 	}
 	switch kind {
@@ -143,18 +168,6 @@ func (m *Manager) ForgeFor(ctx context.Context, kind forge.Kind) forge.Forge {
 		}
 	}
 	return nil
-}
-
-// providerForForge returns the OAuth provider that supplies a token for kind.
-func providerForForge(kind forge.Kind) (auth.Provider, bool) {
-	switch kind {
-	case forge.KindGitHub:
-		return auth.ProviderGitHub, true
-	case forge.KindGitLab:
-		return auth.ProviderGitLab, true
-	default:
-		return "", false
-	}
 }
 
 // StoreInstallationID caches the GitHub App installation ID for the given owner.

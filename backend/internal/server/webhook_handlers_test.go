@@ -492,7 +492,7 @@ func minimalRouter(t *testing.T) *testRouter {
 	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: ctx, Runtimes: runtimeRouter, Checkouts: checkoutRegistry})
 	repoSvc := newTestRepoService(t, "", checkoutRegistry)
 	repoStatus := ci.NewRepoStatusStore()
-	fm := forgemgr.New("", "", nil)
+	fm := forgemgr.New("", "", nil, forgemgr.NoOAuthTokenSource())
 	prefs := newTestPrefs(t)
 	ciService := ci.NewService(cache, nil, &testCIBackend{repoSvc: repoSvc, repoStatus: repoStatus, taskMgr: taskMgr, forgeMgr: fm, prefs: prefs})
 	s, err := New(ctx, Dependencies{
