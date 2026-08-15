@@ -59,32 +59,6 @@ func TestRepoStatusStore(t *testing.T) {
 		}
 	})
 
-	t.Run("move migrates status", func(t *testing.T) {
-		t.Parallel()
-		s := NewRepoStatusStore()
-		s.SetResultIfChanged("", "root-sha", forgecache.Result{Status: forge.CIStatusFailure})
-		s.SetResultIfChanged("a", "sha", forgecache.Result{Status: forge.CIStatusSuccess})
-		ch := s.Changed()
-		s.Move("a", "nested/a")
-		if _, ok := s.StatusFor("a"); ok {
-			t.Fatal("old relpath still has status")
-		}
-		st, ok := s.StatusFor("nested/a")
-		if !ok || st.Status != forge.CIStatusSuccess {
-			t.Fatalf("moved status = %+v, ok=%v", st, ok)
-		}
-		select {
-		case <-ch:
-		default:
-			t.Fatal("Changed channel was not closed by Move")
-		}
-		s.Move("", "root")
-		st, ok = s.StatusFor("root")
-		if !ok || st.Status != forge.CIStatusFailure || st.HeadSHA != "root-sha" {
-			t.Fatalf("root moved status = %+v, ok=%v", st, ok)
-		}
-	})
-
 	t.Run("paths at SHA matches repo refs", func(t *testing.T) {
 		t.Parallel()
 		s := NewRepoStatusStore()

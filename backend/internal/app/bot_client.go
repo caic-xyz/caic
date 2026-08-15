@@ -28,22 +28,37 @@ type botClient struct {
 	forgeMgr *forgemgr.Manager
 }
 
-// ResolveRepo maps a forge full name ("owner/repo") to repo info.
-// Returns nil if the forge name does not match any managed repo.
+// ResolveRepo maps a forge full name ("owner/repo") to local repo info.
+//
+// It returns nil when the repository is unknown, has no checkout, or has more
+// than one checkout because bot task creation requires one unambiguous path.
 func (c *botClient) ResolveRepo(forgeFullName string) *bot.RepoInfo {
 	owner, repoName, ok := strings.Cut(forgeFullName, "/")
 	if !ok {
 		return nil
 	}
-	info, found := c.repoSvc.Repositories.RepositoryByForge(owner, repoName)
+	repository, found := c.repoSvc.Repositories.RepositoryByForge(owner, repoName)
 	if !found {
 		return nil
 	}
+	var checkout *repo.Checkout
+	for candidate := range c.repoSvc.Repositories.Checkouts() {
+		if candidate.Repository != repository {
+			continue
+		}
+		if checkout != nil {
+			return nil
+		}
+		checkout = candidate
+	}
+	if checkout == nil {
+		return nil
+	}
 	return &bot.RepoInfo{
-		RelPath:    info.RelPath,
-		ForgeKind:  info.ForgeKind,
-		ForgeOwner: info.ForgeOwner,
-		ForgeRepo:  info.ForgeRepo,
+		RelPath:    checkout.RelPath,
+		ForgeKind:  repository.ForgeKind,
+		ForgeOwner: repository.ForgeOwner,
+		ForgeRepo:  repository.ForgeRepo,
 	}
 }
 
@@ -70,9 +85,9 @@ func (c *botClient) CreateTask(ctx context.Context, req task.CreateRequest) (str
 	// commenter. Only relevant for issue-triggered tasks.
 	var ownerResolved, repoResolved string
 	if req.ForgeIssue > 0 {
-		if info, ok := c.repoSvc.Repositories.Repository(req.Repo); ok && info.ForgeOwner != "" {
-			ownerResolved = info.ForgeOwner
-			repoResolved = info.ForgeRepo
+		if checkout, ok := c.repoSvc.Repositories.Checkout(req.Repo); ok && checkout.Repository != nil && checkout.Repository.ForgeOwner != "" {
+			ownerResolved = checkout.Repository.ForgeOwner
+			repoResolved = checkout.Repository.ForgeRepo
 		}
 	}
 

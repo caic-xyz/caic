@@ -56,7 +56,7 @@ func TestRuntimeRemoteRef(t *testing.T) {
 func newTestCheckout(dir string) *Checkout {
 	return &Checkout{
 		Dir:        dir,
-		RepoName:   filepath.Base(dir),
+		RelPath:    filepath.Base(dir),
 		GitTimeout: time.Minute,
 	}
 }

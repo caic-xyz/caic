@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"iter"
 	"log/slog"
 	"net"
 	"net/http"
@@ -385,9 +386,9 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		return nil, err
 	}
 
-	results := make([]repo.InitResult, len(repoRes.paths))
+	checkouts := make(chan *repo.Checkout, len(repoRes.paths))
 	var wg sync.WaitGroup
-	for i, abs := range repoRes.paths {
+	for _, abs := range repoRes.paths {
 		wg.Go(func() {
 			defer trace.StartRegion(ctx, "repo-checkout-init").End()
 			result, err := repoService.DiscoverCheckout(ctx, abs)
@@ -395,13 +396,16 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 				slog.WarnContext(ctx, "skipping repo", "path", abs, "err", err)
 				return
 			}
-			results[i] = result
-			slog.DebugContext(ctx, "discovered repo", "path", result.Repository.RelPath, "br", result.Repository.BaseBranch)
+			checkouts <- result
+			slog.DebugContext(ctx, "discovered repo", "path", result.RelPath, "br", result.BaseBranch)
 		})
 	}
 	wg.Wait()
-	for i := range results {
-		repoService.RegisterCheckout(&results[i], moveRepoStatus(repoStatus))
+	close(checkouts)
+	for checkout := range checkouts {
+		if err := repoService.RegisterCheckout(checkout); err != nil {
+			slog.WarnContext(ctx, "skipping duplicate checkout", "path", checkout.RelPath, "err", err)
+		}
 	}
 
 	taskMgr.Start()
@@ -414,7 +418,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	phase3.End()
 
 	phase4 := trace.StartRegion(ctx, "adopt-runtime-instances")
-	adopted, err := taskMgr.AdoptInstances(ctx, adoptionRepos(repoService.Repositories.Repositories()), instanceRes.instances, liveLogs)
+	adopted, err := taskMgr.AdoptInstances(ctx, adoptionRepos(repoService.Repositories.Checkouts()), instanceRes.instances, liveLogs)
 	if err != nil {
 		slog.ErrorContext(ctx, "adopt runtime instances failed; affected instances will remain unmanaged", "err", err)
 	}
@@ -476,7 +480,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 			return nil
 		},
 		func(ctx context.Context) error {
-			newRepoWatcher(ctx, absRoot, repoService, repoStatus).Watch()
+			newRepoWatcher(ctx, absRoot, repoService, repoStatus).watch()
 			return nil
 		},
 	)
@@ -520,17 +524,16 @@ func initRuntimeSystem(ctx context.Context, cfg *server.Config) (*runtime.Router
 	return runtimeRouter, mdRuntimes, nil
 }
 
-func adoptionRepos(in []repo.Repository) []taskmgr.AdoptRepo {
-	out := make([]taskmgr.AdoptRepo, len(in))
-	for i := range in {
-		r := &in[i]
-		out[i] = taskmgr.AdoptRepo{
-			RelPath:    r.RelPath,
-			AbsPath:    r.AbsPath,
-			ForgeKind:  string(r.ForgeKind),
-			ForgeOwner: r.ForgeOwner,
-			ForgeRepo:  r.ForgeRepo,
+func adoptionRepos(in iter.Seq[*repo.Checkout]) []taskmgr.AdoptRepo {
+	var out []taskmgr.AdoptRepo
+	for checkout := range in {
+		adopt := taskmgr.AdoptRepo{RelPath: checkout.RelPath, AbsPath: checkout.Dir}
+		if checkout.Repository != nil {
+			adopt.ForgeKind = string(checkout.Repository.ForgeKind)
+			adopt.ForgeOwner = checkout.Repository.ForgeOwner
+			adopt.ForgeRepo = checkout.Repository.ForgeRepo
 		}
+		out = append(out, adopt)
 	}
 	return out
 }

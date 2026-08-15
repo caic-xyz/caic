@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"log/slog"
 	"maps"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/ci"
+	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
@@ -390,7 +392,7 @@ func (h *serverHandlers) getCacheSizes(_ context.Context, _ *api.EmptyReq) (*v1.
 }
 
 func (h *serverHandlers) listRepos(_ context.Context, _ *api.EmptyReq) (*[]v1.Repo, error) {
-	return repoListFromSnapshot(h.repoSvc.Repositories.Repositories(), h.repoStatus), nil
+	return repoListFromSnapshot(h.repoSvc.Repositories.Checkouts(), h.repoStatus), nil
 }
 
 func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.Request) {
@@ -399,12 +401,12 @@ func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.R
 		writeError(w, api.BadRequest("repo is required"))
 		return
 	}
-	info, ok := h.repoSvc.Repositories.Repository(repoPath)
+	info, ok := h.repoSvc.Repositories.Checkout(repoPath)
 	if !ok {
 		writeError(w, api.NotFound("repo not found"))
 		return
 	}
-	absPath := info.AbsPath
+	absPath := info.Dir
 	ctx := r.Context()
 	checkout := &git.Checkout{Root: absPath, Logger: slog.Default()}
 	// Fetch local branches.
@@ -458,7 +460,13 @@ func (h *serverHandlers) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*
 			return nil, api.InternalError(repoErr.Message)
 		}
 	}
-	forgeKind, err := apiconv.RepoForge(info.ForgeKind)
+	var remote string
+	var kind forge.Kind
+	if info.Repository != nil {
+		remote = info.Repository.Remote
+		kind = info.Repository.ForgeKind
+	}
+	forgeKind, err := apiconv.RepoForge(kind)
 	if err != nil {
 		return nil, api.InternalError(err.Error())
 	}
@@ -466,36 +474,42 @@ func (h *serverHandlers) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*
 		Path:       info.RelPath,
 		Branch:     info.BaseBranch,
 		BaseBranch: v1.BranchInfo{Name: info.BaseBranch, Remote: info.BaseBranchRemote},
-		RemoteURL:  git.RemoteToHTTPS(info.Remote),
+		RemoteURL:  git.RemoteToHTTPS(remote),
 		Forge:      forgeKind,
 	}, nil
 }
 
-func repoListFromSnapshot(snap []repo.Repository, repoStatus *ci.RepoStatusStore) *[]v1.Repo {
-	out := make([]v1.Repo, len(snap))
-	for i := range snap {
-		out[i] = repoDTO(&snap[i], repoStatus)
+func repoListFromSnapshot(snap iter.Seq[*repo.Checkout], repoStatus *ci.RepoStatusStore) *[]v1.Repo {
+	var out []v1.Repo
+	for checkout := range snap {
+		out = append(out, repoDTO(checkout, repoStatus))
 	}
 	return &out
 }
 
-func repoDTO(info *repo.Repository, repoStatus *ci.RepoStatusStore) v1.Repo {
-	forgeKind, err := apiconv.RepoForge(info.ForgeKind)
+func repoDTO(checkout *repo.Checkout, repoStatus *ci.RepoStatusStore) v1.Repo {
+	var remote string
+	var kind forge.Kind
+	if checkout.Repository != nil {
+		remote = checkout.Repository.Remote
+		kind = checkout.Repository.ForgeKind
+	}
+	forgeKind, err := apiconv.RepoForge(kind)
 	if err != nil {
-		slog.Error("convert repository forge", "repo", info.RelPath, "err", err)
+		slog.Error("convert repository forge", "repo", checkout.RelPath, "err", err)
 	}
 	dto := v1.Repo{
-		Path:       info.RelPath,
-		Branch:     info.BaseBranch,
-		BaseBranch: v1.BranchInfo{Name: info.BaseBranch, Remote: info.BaseBranchRemote},
-		RemoteURL:  git.RemoteToHTTPS(info.Remote),
+		Path:       checkout.RelPath,
+		Branch:     checkout.BaseBranch,
+		BaseBranch: v1.BranchInfo{Name: checkout.BaseBranch, Remote: checkout.BaseBranchRemote},
+		RemoteURL:  git.RemoteToHTTPS(remote),
 		Forge:      forgeKind,
 	}
 	if repoStatus != nil {
-		if status, ok := repoStatus.StatusFor(info.RelPath); ok {
+		if status, ok := repoStatus.StatusFor(checkout.RelPath); ok {
 			ciStatus, err := apiconv.CIStatus(status.Status)
 			if err != nil {
-				slog.Error("convert repository CI status", "repo", info.RelPath, "err", err)
+				slog.Error("convert repository CI status", "repo", checkout.RelPath, "err", err)
 			} else {
 				dto.CI = ciStatus
 			}
@@ -503,7 +517,7 @@ func repoDTO(info *repo.Repository, repoStatus *ci.RepoStatusStore) v1.Repo {
 			for i := range status.Checks {
 				check, err := apiconv.ForgeCheck(&status.Checks[i])
 				if err != nil {
-					slog.Error("convert repository CI check", "repo", info.RelPath, "err", err)
+					slog.Error("convert repository CI check", "repo", checkout.RelPath, "err", err)
 					continue
 				}
 				dto.CIChecks = append(dto.CIChecks, check)

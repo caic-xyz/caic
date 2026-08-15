@@ -5,43 +5,156 @@ package app
 import (
 	"context"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/caic-xyz/md/git"
 
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 )
 
-func newRepoWatcher(ctx context.Context, absRoot string, repoService *repo.Service, repoStatus *ci.RepoStatusStore) *repo.Watcher {
-	return repo.NewWatcher(&repo.WatcherConfig{
-		Ctx:     ctx,
-		AbsRoot: absRoot,
-		Repos:   repoService.Repositories.Repositories,
-		RelPath: repoService.RelPath,
-		CheckoutExists: func(relPath string) bool {
-			_, ok := repoService.Repositories.Checkout(relPath)
-			return ok
-		},
-		OnDiscovered: func(ctx context.Context, abs string) {
-			registerDiscoveredRepo(ctx, repoService, repoStatus, abs)
-		},
-		OnRemoved: repoService.DeregisterCheckout,
-	})
+const repoWatcherInterval = 30 * time.Second
+
+// repoWatcher reconciles local checkouts below the app's repository root.
+type repoWatcher struct {
+	log        *slog.Logger
+	ctx        context.Context
+	absRoot    string
+	repoSvc    *repo.Service
+	repoStatus *ci.RepoStatusStore
 }
 
-func registerDiscoveredRepo(ctx context.Context, repoService *repo.Service, repoStatus *ci.RepoStatusStore, abs string) {
-	result, err := repoService.DiscoverCheckout(ctx, abs)
+func newRepoWatcher(ctx context.Context, absRoot string, repoService *repo.Service, repoStatus *ci.RepoStatusStore) *repoWatcher {
+	return &repoWatcher{
+		log:        slog.With("cmp", "repo-watcher", "root", absRoot),
+		ctx:        ctx,
+		absRoot:    absRoot,
+		repoSvc:    repoService,
+		repoStatus: repoStatus,
+	}
+}
+
+func (w *repoWatcher) watch() {
+	mtimes := make(map[string]time.Time)
+	ticker := time.NewTicker(repoWatcherInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			w.poll(w.ctx, mtimes)
+		case <-w.ctx.Done():
+			return
+		}
+	}
+}
+
+func (w *repoWatcher) syncReposInDir(ctx context.Context, dir string) {
+	paths, err := git.DiscoverCheckouts(dir, 1)
+	if err != nil {
+		w.log.WarnContext(ctx, "repo scan failed", "dir", dir, "err", err)
+		return
+	}
+	current := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		current[path] = struct{}{}
+	}
+
+	registered := make(map[string]struct{})
+	for checkout := range w.repoSvc.Repositories.Checkouts() {
+		registered[checkout.Dir] = struct{}{}
+		if filepath.Dir(checkout.Dir) != dir {
+			continue
+		}
+		if _, ok := current[checkout.Dir]; ok {
+			continue
+		}
+		w.repoSvc.UnregisterCheckout(checkout.RelPath)
+		w.log.InfoContext(ctx, "unregistered removed checkout", "path", checkout.RelPath)
+	}
+
+	var wg sync.WaitGroup
+	for _, abs := range paths {
+		if _, ok := registered[abs]; ok {
+			continue
+		}
+		wg.Go(func() { w.register(ctx, abs) })
+	}
+	wg.Wait()
+}
+
+func (w *repoWatcher) register(ctx context.Context, abs string) {
+	checkout, err := w.repoSvc.DiscoverCheckout(ctx, abs)
 	if err != nil {
 		slog.WarnContext(ctx, "new repo: discovery failed", "path", abs, "err", err)
 		return
 	}
-	if _, ok := repoService.Repositories.Checkout(result.Repository.RelPath); ok {
+	if _, ok := w.repoSvc.Repositories.Checkout(checkout.RelPath); ok {
 		return
 	}
-	repoService.RegisterCheckout(&result, moveRepoStatus(repoStatus))
-	slog.InfoContext(ctx, "discovered new repo", "path", result.Repository.RelPath, "br", result.Repository.BaseBranch)
+	if err := w.repoSvc.RegisterCheckout(checkout); err != nil {
+		w.log.WarnContext(ctx, "register checkout failed", "path", checkout.RelPath, "err", err)
+		return
+	}
+	w.log.InfoContext(ctx, "discovered new repo", "path", checkout.RelPath, "br", checkout.BaseBranch)
 }
 
-func moveRepoStatus(repoStatus *ci.RepoStatusStore) func(repo.Move) {
-	return func(move repo.Move) {
-		repoStatus.Move(move.OldRel, move.NewRel)
+func (w *repoWatcher) poll(ctx context.Context, mtimes map[string]time.Time) {
+	dirs := collectRepoWatchDirs(ctx, w.log, w.absRoot, repoDiscoveryDepth-1)
+	dirSet := make(map[string]struct{}, len(dirs))
+	for _, dir := range dirs {
+		dirSet[dir] = struct{}{}
 	}
+	for dir := range mtimes {
+		if _, ok := dirSet[dir]; !ok {
+			delete(mtimes, dir)
+			w.unregisterUnder(ctx, dir)
+		}
+	}
+	for _, dir := range dirs {
+		info, err := os.Stat(dir)
+		if err != nil {
+			delete(mtimes, dir)
+			w.unregisterUnder(ctx, dir)
+			continue
+		}
+		if !info.ModTime().After(mtimes[dir]) {
+			continue
+		}
+		mtimes[dir] = info.ModTime()
+		w.syncReposInDir(ctx, dir)
+	}
+}
+
+func (w *repoWatcher) unregisterUnder(ctx context.Context, dir string) {
+	prefix := dir + string(filepath.Separator)
+	for checkout := range w.repoSvc.Repositories.Checkouts() {
+		if !strings.HasPrefix(checkout.Dir, prefix) {
+			continue
+		}
+		w.repoSvc.UnregisterCheckout(checkout.RelPath)
+		w.log.InfoContext(ctx, "unregistered removed checkout", "path", checkout.RelPath)
+	}
+}
+
+func collectRepoWatchDirs(ctx context.Context, log *slog.Logger, root string, maxDepth int) []string {
+	dirs := []string{root}
+	if maxDepth <= 0 {
+		return dirs
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		log.DebugContext(ctx, "watch dirs: read dir failed", "path", root, "err", err)
+		return dirs
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		dirs = append(dirs, collectRepoWatchDirs(ctx, log, filepath.Join(root, entry.Name()), maxDepth-1)...)
+	}
+	return dirs
 }

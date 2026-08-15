@@ -75,16 +75,16 @@ func (a *ciAdapter) SetTaskMonitorBranch(entry ci.TaskEntry, branch string) {
 
 // RepoInfoFor returns CI-level repo info for relPath.
 func (a *ciAdapter) RepoInfoFor(relPath string) ci.RepoInfo {
-	r, ok := a.repoMgr.Repositories.Repository(relPath)
-	if !ok {
+	checkout, ok := a.repoMgr.Repositories.Checkout(relPath)
+	if !ok || checkout.Repository == nil {
 		return ci.RepoInfo{}
 	}
 	return ci.RepoInfo{
-		RelPath:    r.RelPath,
-		BaseBranch: r.BaseBranch,
-		ForgeKind:  r.ForgeKind,
-		ForgeOwner: r.ForgeOwner,
-		ForgeRepo:  r.ForgeRepo,
+		RelPath:    checkout.RelPath,
+		BaseBranch: checkout.BaseBranch,
+		ForgeKind:  checkout.Repository.ForgeKind,
+		ForgeOwner: checkout.Repository.ForgeOwner,
+		ForgeRepo:  checkout.Repository.ForgeRepo,
 	}
 }
 
@@ -101,21 +101,19 @@ func (a *ciAdapter) ListActiveRepos() []ci.RepoInfo {
 		return true
 	})
 	var out []ci.RepoInfo
-	snap := a.repoMgr.Repositories.Repositories()
-	for i := range snap {
-		r := &snap[i]
-		if r.ForgeOwner == "" {
+	for checkout := range a.repoMgr.Repositories.Checkouts() {
+		if checkout.Repository == nil || checkout.Repository.ForgeOwner == "" {
 			continue
 		}
-		if _, ok := active[r.RelPath]; !ok {
+		if _, ok := active[checkout.RelPath]; !ok {
 			continue
 		}
 		out = append(out, ci.RepoInfo{
-			RelPath:    r.RelPath,
-			BaseBranch: r.BaseBranch,
-			ForgeKind:  r.ForgeKind,
-			ForgeOwner: r.ForgeOwner,
-			ForgeRepo:  r.ForgeRepo,
+			RelPath:    checkout.RelPath,
+			BaseBranch: checkout.BaseBranch,
+			ForgeKind:  checkout.Repository.ForgeKind,
+			ForgeOwner: checkout.Repository.ForgeOwner,
+			ForgeRepo:  checkout.Repository.ForgeRepo,
 		})
 	}
 	return out

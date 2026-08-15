@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"io"
+	"iter"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -228,7 +229,7 @@ func (h *WebhookHandlers) webhookOnCI(ctx context.Context, kind forge.Kind, owne
 	}
 
 	affected := h.taskMgr.FindTasksMonitoringBranch(owner, repoName)
-	affectedRepoPaths := h.repoStatus.PathsAtSHA(repoRefs(h.repoSvc.Repositories.Repositories()), owner, repoName, sha)
+	affectedRepoPaths := h.repoStatus.PathsAtSHA(repoRefs(h.repoSvc.Repositories.Checkouts()), owner, repoName, sha)
 
 	if len(affected) == 0 && len(affectedRepoPaths) == 0 {
 		return
@@ -509,17 +510,19 @@ func (h *WebhookHandlers) handleCheckSuiteEvent(ctx context.Context, ev *github.
 		slog.WarnContext(ctx, "handleCheckSuiteEvent: cache put", "err", err)
 	}
 
-	// Update default-branch CI status only when this SHA is still the HEAD of
-	// the default branch. Webhooks may arrive out of order, so an older commit's
-	// check suite could complete after a newer one's; skipping stale events
-	// prevents the displayed CI status from regressing.
-	if ev.CheckSuite.HeadBranch == repoInfo.BaseBranch || repoInfo.BaseBranch == "" {
-		headSHA, err := client.GetDefaultBranchSHA(ctx, repoInfo.ForgeOwner, repoInfo.ForgeRepo, repoInfo.BaseBranch)
+	for checkout := range h.repoSvc.Repositories.Checkouts() {
+		if checkout.Repository != repoInfo {
+			continue
+		}
+		if ev.CheckSuite.HeadBranch != checkout.BaseBranch && checkout.BaseBranch != "" {
+			continue
+		}
+		headSHA, err := client.GetDefaultBranchSHA(ctx, repoInfo.ForgeOwner, repoInfo.ForgeRepo, checkout.BaseBranch)
 		switch {
 		case err != nil:
-			slog.WarnContext(ctx, "handleCheckSuiteEvent: get HEAD SHA", "repo", repoInfo.RelPath, "err", err)
+			slog.WarnContext(ctx, "handleCheckSuiteEvent: get HEAD SHA", "repo", checkout.RelPath, "err", err)
 		case headSHA == sha:
-			h.ciService.SetRepoCIStatus(repoInfo.RelPath, sha, forgecache.Result{Status: result.Status, Checks: result.Checks})
+			h.ciService.SetRepoCIStatus(checkout.RelPath, sha, forgecache.Result{Status: result.Status, Checks: result.Checks})
 		default:
 			slog.DebugContext(ctx, "handleCheckSuiteEvent: ignoring stale check suite", "sha", sha, "head", headSHA)
 		}
@@ -541,19 +544,22 @@ func (h *WebhookHandlers) storeInstallationIDFromFullName(fullName string, id in
 	}
 }
 
-// repoByForge returns a copy of the RepoInfo whose forge matches "owner/repo".
-func (h *WebhookHandlers) repoByForge(fullName string) (repo.Repository, bool) {
+// repoByForge returns the known repository whose forge name matches "owner/repo".
+func (h *WebhookHandlers) repoByForge(fullName string) (*repo.Repository, bool) {
 	owner, repoName, ok := strings.Cut(fullName, "/")
 	if !ok {
-		return repo.Repository{}, false
+		return nil, false
 	}
 	return h.repoSvc.Repositories.RepositoryByForge(owner, repoName)
 }
 
-func repoRefs(snap []repo.Repository) []ci.RepoRef {
-	refs := make([]ci.RepoRef, len(snap))
-	for i := range snap {
-		refs[i] = ci.RepoRef{RelPath: snap[i].RelPath, ForgeOwner: snap[i].ForgeOwner, ForgeRepo: snap[i].ForgeRepo}
+func repoRefs(snap iter.Seq[*repo.Checkout]) []ci.RepoRef {
+	var refs []ci.RepoRef
+	for checkout := range snap {
+		if checkout.Repository == nil {
+			continue
+		}
+		refs = append(refs, ci.RepoRef{RelPath: checkout.RelPath, ForgeOwner: checkout.Repository.ForgeOwner, ForgeRepo: checkout.Repository.ForgeRepo})
 	}
 	return refs
 }

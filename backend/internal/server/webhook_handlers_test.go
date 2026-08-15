@@ -61,11 +61,11 @@ func (b *testCIBackend) SetTaskMonitorBranch(entry ci.TaskEntry, branch string) 
 }
 
 func (b *testCIBackend) RepoInfoFor(relPath string) ci.RepoInfo {
-	r, ok := b.repoSvc.Repositories.Repository(relPath)
-	if !ok {
+	checkout, ok := b.repoSvc.Repositories.Checkout(relPath)
+	if !ok || checkout.Repository == nil {
 		return ci.RepoInfo{}
 	}
-	return ci.RepoInfo{RelPath: r.RelPath, BaseBranch: r.BaseBranch, ForgeKind: r.ForgeKind, ForgeOwner: r.ForgeOwner, ForgeRepo: r.ForgeRepo}
+	return ci.RepoInfo{RelPath: checkout.RelPath, BaseBranch: checkout.BaseBranch, ForgeKind: checkout.Repository.ForgeKind, ForgeOwner: checkout.Repository.ForgeOwner, ForgeRepo: checkout.Repository.ForgeRepo}
 }
 
 func (b *testCIBackend) ListActiveRepos() []ci.RepoInfo { return nil }
@@ -170,7 +170,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 	t.Run("updates CI status when SHA matches HEAD", func(t *testing.T) {
 		t.Parallel()
 		s := minimalRouter(t)
-		s.repoSvc.Repositories.Register(&repo.Repository{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"}, newRouterTestCheckout(t.TempDir()))
+		registerRouterCheckout(t, s.repoSvc.Repositories, "org/repo", &repo.Checkout{Dir: t.TempDir(), BaseBranch: "main", Repository: &repo.Repository{ForgeOwner: "org", ForgeRepo: "repo"}})
 		s.forgeMgr.SetGitHubApp(&stubAppClient{forgeClient: &stubForge{headSHA: "abc123", checkRuns: successRuns}})
 
 		s.webhooks.handleCheckSuiteEvent(t.Context(), &github.CheckSuiteEvent{
@@ -193,7 +193,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 	t.Run("ignores out-of-order delivery when SHA is not HEAD", func(t *testing.T) {
 		t.Parallel()
 		s := minimalRouter(t)
-		s.repoSvc.Repositories.Register(&repo.Repository{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"}, newRouterTestCheckout(t.TempDir()))
+		registerRouterCheckout(t, s.repoSvc.Repositories, "org/repo", &repo.Checkout{Dir: t.TempDir(), BaseBranch: "main", Repository: &repo.Repository{ForgeOwner: "org", ForgeRepo: "repo"}})
 		// HEAD is now "newsha"; the webhook carries "oldsha".
 		s.forgeMgr.SetGitHubApp(&stubAppClient{forgeClient: &stubForge{headSHA: "newsha", checkRuns: failureRuns}})
 

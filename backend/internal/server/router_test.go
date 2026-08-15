@@ -69,8 +69,18 @@ func newRouterTestCheckout(dir string) *repo.Checkout {
 	return &repo.Checkout{
 		BaseBranch: "main",
 		Dir:        dir,
-		RepoName:   filepath.Base(dir),
+		RelPath:    filepath.Base(dir),
 		GitTimeout: time.Minute,
+	}
+}
+
+func registerRouterCheckout(t testing.TB, registry *repo.Registry, relPath string, checkout *repo.Checkout) {
+	if checkout.Repository != nil {
+		checkout.Repository = registry.RegisterRepository(*checkout.Repository)
+	}
+	checkout.RelPath = relPath
+	if err := registry.RegisterCheckout(checkout); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -466,31 +476,6 @@ func newCheckoutConstructionTestServer(t *testing.T, root string) checkoutConstr
 	}
 }
 
-func newTestRepoWatcher(t *testing.T, root string, s *testRouter) *repo.Watcher {
-	return repo.NewWatcher(&repo.WatcherConfig{
-		Ctx:     t.Context(),
-		AbsRoot: root,
-		Repos:   s.repoSvc.Repositories.Repositories,
-		RelPath: s.repoSvc.RelPath,
-		CheckoutExists: func(relPath string) bool {
-			_, ok := s.repoSvc.Repositories.Checkout(relPath)
-			return ok
-		},
-		OnDiscovered: func(ctx context.Context, abs string) {
-			result, err := s.repoSvc.DiscoverCheckout(ctx, abs)
-			if err != nil {
-				t.Errorf("DiscoverCheckout(%q): %v", abs, err)
-				return
-			}
-			if _, ok := s.repoSvc.Repositories.Checkout(result.Repository.RelPath); ok {
-				return
-			}
-			s.repoSvc.RegisterCheckout(&result, nil)
-		},
-		OnRemoved: s.repoSvc.DeregisterCheckout,
-	})
-}
-
 func initCloneSourceRepo(t *testing.T) string {
 	repoPath := filepath.Join(t.TempDir(), "source")
 	runServerGit(t, "", "init", repoPath)
@@ -517,7 +502,7 @@ func runServerGit(t *testing.T, dir string, args ...string) {
 func TestCloneRepo(t *testing.T) {
 	t.Parallel()
 
-	t.Run("valid checkout construction and watcher overlap", func(t *testing.T) {
+	t.Run("valid checkout construction", func(t *testing.T) {
 		t.Parallel()
 		root := t.TempDir()
 		source := initCloneSourceRepo(t)
@@ -535,8 +520,8 @@ func TestCloneRepo(t *testing.T) {
 		if !ok {
 			t.Fatal("cloned checkout not registered")
 		}
-		if checkout.RepoName != "cloned" {
-			t.Fatalf("RepoName = %q, want cloned", checkout.RepoName)
+		if checkout.RelPath != "cloned" {
+			t.Fatalf("RelPath = %q, want cloned", checkout.RelPath)
 		}
 		if checkout.Dir != filepath.Join(root, "cloned") {
 			t.Fatalf("Dir = %q, want cloned path", checkout.Dir)
@@ -545,8 +530,7 @@ func TestCloneRepo(t *testing.T) {
 			t.Fatal("manager backends were not initialized")
 		}
 
-		newTestRepoWatcher(t, root, s).SyncReposInDir(t.Context(), root)
-		if got := s.repoSvc.Repositories.Repositories(); len(got) != 1 || got[0].RelPath != "cloned" {
+		if got := s.repoSvc.Repositories.Repositories(); len(got) != 1 {
 			t.Fatalf("repo registry after watcher sync = %+v, want one cloned repo", got)
 		}
 		after, ok := s.taskMgr.Checkouts.Checkout("cloned")
@@ -725,7 +709,7 @@ func TestHandlePurge(t *testing.T) {
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
 		tk.SetState(task.StateWaiting)
 		s := newTestRouter(t, nil)
-		s.taskMgr.Checkouts.RegisterCheckout("r", newRouterTestCheckout(t.TempDir()))
+		registerRouterCheckout(t, s.taskMgr.Checkouts, "r", newRouterTestCheckout(t.TempDir()))
 		insertTestTask(t, s, "t1", tk)
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks/t1/purge", http.NoBody)
@@ -753,7 +737,7 @@ func TestHandlePurge(t *testing.T) {
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
 		tk.SetState(task.StateRunning)
 		s := newTestRouter(t, nil)
-		s.taskMgr.Checkouts.RegisterCheckout("r", newRouterTestCheckout(t.TempDir()))
+		registerRouterCheckout(t, s.taskMgr.Checkouts, "r", newRouterTestCheckout(t.TempDir()))
 		insertTestTask(t, s, "t1", tk)
 
 		// Use an already-cancelled context to simulate shutdown scenario
@@ -776,7 +760,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("ReturnsID", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
-		s.taskMgr.Checkouts.RegisterCheckout("myrepo", newRouterTestCheckout(t.TempDir()))
+		registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
 		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test task"},"repos":[{"name":"myrepo"}],"harness":"claude","model":"m1"}`)
@@ -840,7 +824,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("UnknownHarness", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		s.taskMgr.Checkouts.RegisterCheckout("myrepo", newRouterTestCheckout(t.TempDir()))
+		registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
 		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"nonexistent"}`)
@@ -863,7 +847,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("InvalidModel", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Codex: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
-		s.taskMgr.Checkouts.RegisterCheckout("myrepo", newRouterTestCheckout(t.TempDir()))
+		registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
 		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"codex","model":"nonexistent"}`)
@@ -886,7 +870,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("WithImage", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
-		s.taskMgr.Checkouts.RegisterCheckout("myrepo", newRouterTestCheckout(t.TempDir()))
+		registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
 		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
 		// Set docker image in user preferences.
@@ -929,7 +913,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("WithCachePreferences", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
-		s.taskMgr.Checkouts.RegisterCheckout("myrepo", newRouterTestCheckout(t.TempDir()))
+		registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
 		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
 			p.Settings.WellKnownCaches = map[string]bool{"go-mod": false, "npm": true}
 			p.Settings.CacheMappings = []preferences.CacheMapping{
@@ -1004,7 +988,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("TaskInfo", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
-		s.taskMgr.Checkouts.RegisterCheckout("myrepo", newRouterTestCheckout(t.TempDir()))
+		registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
 		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
 			p.Settings.BaseImage = "ghcr.io/my/image:v1"
 			p.Settings.ContainerPlatform = "linux/amd64"
@@ -1222,8 +1206,8 @@ func TestHandleListRepos(t *testing.T) {
 	t.Parallel()
 	s := newTestRouter(t, nil)
 	repositories := repo.NewRegistry()
-	repositories.Register(&repo.Repository{RelPath: "org/repoA", AbsPath: "/src/org/repoA", BaseBranch: "main"}, newRouterTestCheckout(t.TempDir()))
-	repositories.Register(&repo.Repository{RelPath: "repoB", AbsPath: "/src/repoB", BaseBranch: "develop"}, newRouterTestCheckout(t.TempDir()))
+	registerRouterCheckout(t, repositories, "org/repoA", &repo.Checkout{Dir: "/src/org/repoA", BaseBranch: "main"})
+	registerRouterCheckout(t, repositories, "repoB", &repo.Checkout{Dir: "/src/repoB", BaseBranch: "develop"})
 	s.repoSvc = newTestRepoService(t, "", repositories)
 	s.serverHandlers.repoSvc = s.repoSvc
 

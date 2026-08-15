@@ -1,6 +1,6 @@
 // Tests for the background repo watcher's directory-collection helper.
 
-package repo
+package app
 
 import (
 	"log/slog"
@@ -22,7 +22,7 @@ func TestCollectWatchDirs(t *testing.T) {
 			".hidden",
 		})
 
-		dirs := collectWatchDirs(t.Context(), slog.Default(), root, 3)
+		dirs := collectRepoWatchDirs(t.Context(), slog.With("cmp", "test"), root, 3)
 
 		want := []string{
 			root,
@@ -32,7 +32,7 @@ func TestCollectWatchDirs(t *testing.T) {
 		slices.Sort(dirs)
 		slices.Sort(want)
 		if !slices.Equal(dirs, want) {
-			t.Fatalf("collectWatchDirs:\n got: %v\nwant: %v", dirs, want)
+			t.Fatalf("collectRepoWatchDirs:\n got: %v\nwant: %v", dirs, want)
 		}
 	})
 
@@ -41,7 +41,7 @@ func TestCollectWatchDirs(t *testing.T) {
 		root := t.TempDir()
 		makeDirs(t, root, []string{"a/b/c/d"})
 
-		dirs := collectWatchDirs(t.Context(), slog.Default(), root, 2)
+		dirs := collectRepoWatchDirs(t.Context(), slog.With("cmp", "test"), root, 2)
 
 		want := []string{
 			root,
@@ -51,7 +51,7 @@ func TestCollectWatchDirs(t *testing.T) {
 		slices.Sort(dirs)
 		slices.Sort(want)
 		if !slices.Equal(dirs, want) {
-			t.Fatalf("collectWatchDirs:\n got: %v\nwant: %v", dirs, want)
+			t.Fatalf("collectRepoWatchDirs:\n got: %v\nwant: %v", dirs, want)
 		}
 	})
 }

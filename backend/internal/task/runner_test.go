@@ -135,7 +135,7 @@ func newTestCheckout(t *testing.T, baseBranch, dir string, backend runtime.Lifec
 	checkout := &repo.Checkout{
 		BaseBranch: baseBranch,
 		Dir:        dir,
-		RepoName:   filepath.Base(dir),
+		RelPath:    filepath.Base(dir),
 		GitTimeout: time.Minute,
 	}
 	testCheckoutRuntimes.Store(checkout, newTestRuntimeRouter(t, backend))

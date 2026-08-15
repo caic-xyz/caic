@@ -73,10 +73,12 @@ type TaskView interface {
 // fetch, and diff operations across tasks using it.
 type Checkout struct {
 	// Immutable.
-	BaseBranch string
-	Dir        string        // Absolute path to the git repository.
-	RepoName   string        // Relative repo path (e.g. "github/caic").
-	GitTimeout time.Duration // Timeout for git/instance ops. Must be non-zero.
+	Repository       *Repository
+	RelPath          string
+	Dir              string
+	BaseBranch       string
+	BaseBranchRemote string
+	GitTimeout       time.Duration
 
 	branchMu sync.Mutex // Serializes branch creation (nextID + git branch) to avoid duplicate names.
 	nextID   int        // Next branch sequence number (protected by branchMu).
@@ -123,7 +125,7 @@ func (w *Checkout) SyncToOrigin(ctx context.Context, log *slog.Logger, runtimes 
 		return nil, nil, err
 	}
 	region := trace.StartRegion(ctx, "sync-fetch")
-	log = log.With("repo", w.RepoName)
+	log = log.With("repo", w.RelPath)
 	log.InfoContext(ctx, "fetch", "repos", len(repos))
 	ds, err := w.DiffStat(ctx, log, runtimes, id, repos, DiffFetchRequired)
 	region.End()
@@ -175,7 +177,7 @@ func (w *Checkout) SyncToDefault(ctx context.Context, log *slog.Logger, runtimes
 		return nil, nil, err
 	}
 	region := trace.StartRegion(ctx, "sync-default-fetch")
-	log = log.With("repo", w.RepoName)
+	log = log.With("repo", w.RelPath)
 	log.InfoContext(ctx, "fetch for default sync", "repos", len(repos))
 	ds, err := w.DiffStat(ctx, log, runtimes, id, repos, DiffFetchRequired)
 	region.End()
@@ -222,7 +224,7 @@ func (w *Checkout) SyncToDefault(ctx context.Context, log *slog.Logger, runtimes
 // with `<repoName>/` so the frontend can distinguish changes from different
 // repos. Holds branchMu during diff.
 func (w *Checkout) DiffContent(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, t TaskView, path string) (string, error) {
-	log = log.With("repo", w.RepoName)
+	log = log.With("repo", w.RelPath)
 	id, repos, err := w.taskRuntime(t)
 	if err != nil {
 		return "", err
@@ -253,7 +255,7 @@ func (w *Checkout) DiffContent(ctx context.Context, log *slog.Logger, runtimes *
 // uncommitted changes, this captures the full branch diff relative to the base.
 // Used by adoptOne to restore the diff stat after server restart.
 func (w *Checkout) BranchDiffStat(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, t TaskView) agent.DiffStat {
-	log = log.With("repo", w.RepoName)
+	log = log.With("repo", w.RelPath)
 	id, repos, err := w.taskRuntime(t)
 	if err != nil {
 		log.Warn("resolve task runtime for branch diff stat failed", "err", err)
@@ -270,7 +272,7 @@ func (w *Checkout) BranchDiffStat(ctx context.Context, log *slog.Logger, runtime
 
 // DeleteUnmodifiedTaskBranches deletes generated task branches that never diverged from their base.
 func (w *Checkout) DeleteUnmodifiedTaskBranches(ctx context.Context, log *slog.Logger, t TaskView) {
-	log = log.With("repo", w.RepoName)
+	log = log.With("repo", w.RelPath)
 	repos := t.RuntimeRepos()
 	if len(repos) == 0 {
 		return
@@ -326,7 +328,7 @@ func (w *Checkout) ReserveBranchName() string {
 // resolved base. Acquires branchMu to serialize git operations across concurrent
 // task setups on the same repo.
 func (w *Checkout) FetchAndCreateBranch(ctx context.Context, log *slog.Logger, t TaskView, branch string) error {
-	log = log.With("repo", w.RepoName)
+	log = log.With("repo", w.RelPath)
 	w.branchMu.Lock()
 	defer w.branchMu.Unlock()
 	gitCtx, gitCancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
@@ -363,7 +365,7 @@ const (
 // DiffStat optionally fetches from the instance, then returns the combined
 // per-repo diff stat (git diff --numstat).
 func (w *Checkout) DiffStat(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, id runtime.ID, repos []runtime.Repo, fetchMode DiffFetchMode) (agent.DiffStat, error) {
-	log = log.With("repo", w.RepoName)
+	log = log.With("repo", w.RelPath)
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
 	defer cancel()
 	w.branchMu.Lock()

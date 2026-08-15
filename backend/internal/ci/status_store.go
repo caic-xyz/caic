@@ -70,22 +70,6 @@ func (s *RepoStatusStore) SetResultIfChanged(rel, sha string, result forgecache.
 	return true
 }
 
-// Move migrates cached status from oldRel to newRel when a repo relpath changes.
-func (s *RepoStatusStore) Move(oldRel, newRel string) {
-	if oldRel == newRel {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	st, ok := s.status[oldRel]
-	if !ok {
-		return
-	}
-	delete(s.status, oldRel)
-	s.status[newRel] = st
-	s.notifyChangedLocked()
-}
-
 // PathsAtSHA returns repo paths whose cached default-branch status has sha.
 func (s *RepoStatusStore) PathsAtSHA(repos []RepoRef, owner, repo, sha string) []string {
 	s.mu.RLock()

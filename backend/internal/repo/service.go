@@ -47,12 +47,6 @@ type CloneRequest struct {
 	Depth int
 }
 
-// InitResult holds one discovered repository and its initialized checkout.
-type InitResult struct {
-	Repository Repository
-	Checkout   *Checkout
-}
-
 // Service discovers and clones repositories into one checkout registry.
 type Service struct {
 	// Immutable.
@@ -86,35 +80,30 @@ func (s *Service) Changed() <-chan struct{} {
 	return s.changed
 }
 
-// DiscoverCheckout discovers repo metadata and creates its task checkout.
-func (s *Service) DiscoverCheckout(ctx context.Context, abs string) (InitResult, error) {
+// DiscoverCheckout discovers one local checkout.
+func (s *Service) DiscoverCheckout(ctx context.Context, abs string) (*Checkout, error) {
 	rel := s.RelPath(abs)
 	gitCheckout := &git.Checkout{Root: abs, Logger: s.log}
 	remoteName, err := gitCheckout.DefaultRemote(ctx)
 	if err != nil {
-		return InitResult{}, fmt.Errorf("cannot determine default remote: %w", err)
+		return nil, fmt.Errorf("cannot determine default remote: %w", err)
 	}
 	branch, err := gitCheckout.DefaultBranch(ctx, remoteName)
 	if err != nil {
-		return InitResult{}, fmt.Errorf("cannot determine default branch: %w", err)
+		return nil, fmt.Errorf("cannot determine default branch: %w", err)
 	}
 	remote := gitCheckout.RemoteOriginURL(ctx)
 	forgeKind, forgeOwner, forgeRepo := parseForgeRemote(ctx, s.log, remote)
-	info := Repository{
-		RelPath:          rel,
-		AbsPath:          abs,
-		BaseBranch:       branch,
-		BaseBranchRemote: remoteName,
-		Remote:           remote,
-		ForgeKind:        forgeKind,
-		ForgeOwner:       forgeOwner,
-		ForgeRepo:        forgeRepo,
-	}
-	checkout, err := NewCheckout(ctx, s.log.With(slog.String("repo", info.RelPath)), info.AbsPath, info.BaseBranch)
+	checkout, err := NewCheckout(ctx, s.log.With(slog.String("repo", rel)), abs, branch)
 	if err != nil {
-		return InitResult{}, fmt.Errorf("initialize checkout: %w", err)
+		return nil, fmt.Errorf("initialize checkout: %w", err)
 	}
-	return InitResult{Repository: info, Checkout: checkout}, nil
+	if remote != "" {
+		checkout.Repository = s.Repositories.RegisterRepository(Repository{Remote: remote, ForgeKind: forgeKind, ForgeOwner: forgeOwner, ForgeRepo: forgeRepo})
+	}
+	checkout.RelPath = rel
+	checkout.BaseBranchRemote = remoteName
+	return checkout, nil
 }
 
 // RelPath returns abs as a path relative to the repository root.
@@ -129,59 +118,58 @@ func (s *Service) RelPath(abs string) string {
 	return rel
 }
 
-// RegisterCheckout adds a discovered repository and checkout atomically.
-func (s *Service) RegisterCheckout(r *InitResult, onMove func(Move)) Move {
-	move := s.Repositories.Register(&r.Repository, r.Checkout)
-	if move.Moved() && onMove != nil {
-		onMove(move)
+// RegisterCheckout records a discovered local checkout.
+func (s *Service) RegisterCheckout(checkout *Checkout) error {
+	if err := s.Repositories.RegisterCheckout(checkout); err != nil {
+		return err
 	}
 	s.notifyChanged()
-	return move
+	return nil
 }
 
-// DeregisterCheckout removes a repository and its current checkout.
-func (s *Service) DeregisterCheckout(relPath string) {
-	if s.Repositories.Remove(relPath) {
+// UnregisterCheckout removes a current local checkout from the registry.
+func (s *Service) UnregisterCheckout(relPath string) {
+	if s.Repositories.UnregisterCheckout(relPath) {
 		s.notifyChanged()
 	}
 }
 
-// Clone clones a repository, registers its metadata, and wires its checkout.
-func (s *Service) Clone(ctx context.Context, req CloneRequest) (Repository, error) {
+// Clone clones and registers a local checkout.
+func (s *Service) Clone(ctx context.Context, req CloneRequest) (*Checkout, error) {
 	targetPath := req.Path
 	if targetPath == "" {
 		base := filepath.Base(req.URL)
 		base = strings.TrimSuffix(base, ".git")
 		if base == "" || base == "." || base == "/" {
-			return Repository{}, repoError(ErrorBadRequest, "cannot derive repo name from URL; specify path explicitly")
+			return nil, repoError(ErrorBadRequest, "cannot derive repo name from URL; specify path explicitly")
 		}
 		targetPath = base
 	}
 
 	absTarget := filepath.Join(s.absRoot, targetPath)
 	if rel, err := filepath.Rel(s.absRoot, absTarget); err != nil || strings.HasPrefix(rel, "..") {
-		return Repository{}, repoError(ErrorBadRequest, "path escapes root directory")
+		return nil, repoError(ErrorBadRequest, "path escapes root directory")
 	} else {
 		targetPath = rel
 	}
 
 	if _, err := os.Stat(absTarget); err == nil {
-		return Repository{}, repoError(ErrorConflict, "directory already exists: "+targetPath)
+		return nil, repoError(ErrorConflict, "directory already exists: "+targetPath)
 	}
 	if _, ok := s.Repositories.Checkout(targetPath); ok {
-		return Repository{}, repoError(ErrorConflict, "repo already registered: "+targetPath)
+		return nil, repoError(ErrorConflict, "repo already registered: "+targetPath)
 	}
 
 	bn := filepath.Base(targetPath)
 	var basenameConflict string
 	for checkout := range s.Repositories.Checkouts() {
-		if checkout.RepoName != "" && filepath.Base(checkout.RepoName) == bn && checkout.RepoName != targetPath {
-			basenameConflict = checkout.RepoName
+		if checkout.RelPath != "" && filepath.Base(checkout.RelPath) == bn && checkout.RelPath != targetPath {
+			basenameConflict = checkout.RelPath
 			break
 		}
 	}
 	if basenameConflict != "" {
-		return Repository{}, repoError(ErrorConflict, "repo basename conflicts with existing: "+basenameConflict)
+		return nil, repoError(ErrorConflict, "repo basename conflicts with existing: "+basenameConflict)
 	}
 
 	depth := req.Depth
@@ -196,33 +184,39 @@ func (s *Service) Clone(ctx context.Context, req CloneRequest) (Repository, erro
 	if out, err := cmd.CombinedOutput(); err != nil {
 		_ = os.RemoveAll(absTarget)
 		s.log.WarnContext(ctx, "git clone failed", "url", req.URL, "err", err, "out", string(out))
-		return Repository{}, repoError(ErrorInternal, "git clone failed: "+err.Error())
+		return nil, repoError(ErrorInternal, "git clone failed: "+err.Error())
 	}
 
 	gitCheckout := &git.Checkout{Root: absTarget, Logger: s.log}
 	remoteName, err := gitCheckout.DefaultRemote(ctx)
 	if err != nil {
 		_ = os.RemoveAll(absTarget)
-		return Repository{}, repoError(ErrorInternal, "cannot determine default remote: "+err.Error())
+		return nil, repoError(ErrorInternal, "cannot determine default remote: "+err.Error())
 	}
 	branch, err := gitCheckout.DefaultBranch(ctx, remoteName)
 	if err != nil {
 		_ = os.RemoveAll(absTarget)
-		return Repository{}, repoError(ErrorInternal, "cannot determine default branch: "+err.Error())
+		return nil, repoError(ErrorInternal, "cannot determine default branch: "+err.Error())
 	}
 	remote := gitCheckout.RemoteOriginURL(ctx)
-	info := Repository{RelPath: targetPath, AbsPath: absTarget, BaseBranch: branch, BaseBranchRemote: remoteName, Remote: remote}
-	checkout, err := NewCheckout(ctx, s.log.With(slog.String("repo", info.RelPath)), info.AbsPath, info.BaseBranch)
+	checkout, err := NewCheckout(ctx, s.log.With(slog.String("repo", targetPath)), absTarget, branch)
 	if err != nil {
 		_ = os.RemoveAll(absTarget)
-		return Repository{}, repoError(ErrorInternal, "initialize checkout: "+err.Error())
+		return nil, repoError(ErrorInternal, "initialize checkout: "+err.Error())
 	}
-	info.ForgeKind, info.ForgeOwner, info.ForgeRepo = parseForgeRemote(ctx, s.log, remote)
-	s.Repositories.Register(&info, checkout)
-	s.notifyChanged()
+	forgeKind, forgeOwner, forgeRepo := parseForgeRemote(ctx, s.log, remote)
+	if remote != "" {
+		checkout.Repository = s.Repositories.RegisterRepository(Repository{Remote: remote, ForgeKind: forgeKind, ForgeOwner: forgeOwner, ForgeRepo: forgeRepo})
+	}
+	checkout.RelPath = targetPath
+	checkout.BaseBranchRemote = remoteName
+	if err := s.RegisterCheckout(checkout); err != nil {
+		_ = os.RemoveAll(absTarget)
+		return nil, repoError(ErrorConflict, err.Error())
+	}
 	s.log.InfoContext(ctx, "cloned repo", "url", req.URL, "path", targetPath)
 
-	return info, nil
+	return checkout, nil
 }
 
 func (s *Service) notifyChanged() {

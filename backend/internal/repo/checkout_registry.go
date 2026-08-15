@@ -3,109 +3,94 @@
 package repo
 
 import (
+	"errors"
+	"fmt"
 	"iter"
 	"slices"
 	"strings"
 	"sync"
 )
 
-// Registry owns the known repository set and the current checkout for each
-// repository. Registration updates both collections while holding one lock, so
-// callers cannot observe a known repository without its current checkout.
+// Registry owns known repositories and their current local checkouts.
 type Registry struct {
 	mu           sync.Mutex
-	repositories []Repository
+	repositories map[string]*Repository
 	checkouts    map[string]*Checkout
 }
 
 // NewRegistry creates an empty repository registry.
 func NewRegistry() *Registry {
-	return &Registry{checkouts: make(map[string]*Checkout)}
+	return &Registry{
+		repositories: make(map[string]*Repository),
+		checkouts:    make(map[string]*Checkout),
+	}
 }
 
-// Repository returns immutable metadata for the checkout at relPath.
-func (r *Registry) Repository(relPath string) (Repository, bool) {
+// RegisterRepository records a repository and returns its canonical identity.
+func (r *Registry) RegisterRepository(repository Repository) *Repository {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for i := range r.repositories {
-		if r.repositories[i].RelPath == relPath {
-			return r.repositories[i], true
-		}
-	}
-	return Repository{}, false
+	return r.registerRepositoryLocked(repository)
 }
 
-// RepositoryByForge returns known metadata whose forge name matches owner/repo.
-func (r *Registry) RepositoryByForge(owner, name string) (Repository, bool) {
+// RepositoryByForge returns the known repository whose forge name matches owner/repo.
+func (r *Registry) RepositoryByForge(owner, name string) (*Repository, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for i := range r.repositories {
-		repo := r.repositories[i]
-		if strings.EqualFold(repo.ForgeOwner, owner) && strings.EqualFold(repo.ForgeRepo, name) {
-			return repo, true
+	for _, repository := range r.repositories {
+		if strings.EqualFold(repository.ForgeOwner, owner) && strings.EqualFold(repository.ForgeRepo, name) {
+			return repository, true
 		}
 	}
-	return Repository{}, false
+	return nil, false
 }
 
 // Repositories returns a snapshot of all known repositories.
-func (r *Registry) Repositories() []Repository {
+func (r *Registry) Repositories() []*Repository {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return slices.Clone(r.repositories)
-}
-
-// Register adds or replaces a known repository and its current checkout.
-func (r *Registry) Register(repository *Repository, checkout *Checkout) Move {
-	checkout.RepoName = repository.RelPath
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for i := range r.repositories {
-		if r.repositories[i].RelPath != repository.RelPath && r.repositories[i].AbsPath != repository.AbsPath {
-			continue
-		}
-		oldRel := r.repositories[i].RelPath
-		if oldRel != repository.RelPath {
-			delete(r.checkouts, oldRel)
-		}
-		r.repositories[i] = *repository
-		r.checkouts[repository.RelPath] = checkout
-		return Move{OldRel: oldRel, NewRel: repository.RelPath}
+	repositories := make([]*Repository, 0, len(r.repositories))
+	for _, repository := range r.repositories {
+		repositories = append(repositories, repository)
 	}
-	r.repositories = append(r.repositories, *repository)
-	r.checkouts[repository.RelPath] = checkout
-	return Move{}
+	slices.SortFunc(repositories, func(a, b *Repository) int {
+		return strings.Compare(a.key(), b.key())
+	})
+	return repositories
 }
 
-// RegisterCheckout registers checkout-only state for tests. Managed
-// repositories must use Register so identity and checkout state change together.
-func (r *Registry) RegisterCheckout(relPath string, checkout *Checkout) {
-	checkout.RepoName = relPath
-	r.mu.Lock()
-	r.checkouts[relPath] = checkout
-	r.mu.Unlock()
-}
-
-// Remove removes the known repository and current checkout at relPath.
-func (r *Registry) Remove(relPath string) bool {
+// RegisterCheckout records a new local checkout.
+//
+// A checkout with a repository must point to the canonical value previously
+// returned by RegisterRepository.
+func (r *Registry) RegisterCheckout(checkout *Checkout) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for i := range r.repositories {
-		if r.repositories[i].RelPath != relPath {
-			continue
-		}
-		r.repositories = slices.Delete(r.repositories, i, i+1)
-		delete(r.checkouts, relPath)
-		return true
+	if checkout.Repository != nil && r.repositories[checkout.Repository.key()] != checkout.Repository {
+		return errors.New("checkout repository is not registered")
 	}
-	return false
+	if _, ok := r.checkouts[checkout.RelPath]; ok {
+		return fmt.Errorf("checkout already registered at %q", checkout.RelPath)
+	}
+	for _, registered := range r.checkouts {
+		if registered.Dir == checkout.Dir {
+			return fmt.Errorf("checkout directory already registered at %q", checkout.Dir)
+		}
+	}
+	r.checkouts[checkout.RelPath] = checkout
+	return nil
 }
 
-// UnregisterCheckout removes checkout-only state.
-func (r *Registry) UnregisterCheckout(relPath string) {
+// UnregisterCheckout removes the current checkout at relPath from the registry.
+// It does not remove files or the associated repository.
+func (r *Registry) UnregisterCheckout(relPath string) bool {
 	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.checkouts[relPath]; !ok {
+		return false
+	}
 	delete(r.checkouts, relPath)
-	r.mu.Unlock()
+	return true
 }
 
 // Checkout returns the current checkout for relPath.
@@ -126,10 +111,22 @@ func (r *Registry) Checkouts() iter.Seq[*Checkout] {
 			checkouts = append(checkouts, checkout)
 		}
 		r.mu.Unlock()
+		slices.SortFunc(checkouts, func(a, b *Checkout) int {
+			return strings.Compare(a.RelPath, b.RelPath)
+		})
 		for _, checkout := range checkouts {
 			if !yield(checkout) {
 				return
 			}
 		}
 	}
+}
+
+func (r *Registry) registerRepositoryLocked(repository Repository) *Repository {
+	key := repository.key()
+	if existing, ok := r.repositories[key]; ok {
+		return existing
+	}
+	r.repositories[key] = &repository
+	return &repository
 }

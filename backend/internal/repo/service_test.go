@@ -2,19 +2,15 @@
 
 package repo
 
-import (
-	"testing"
-	"time"
-)
+import "testing"
 
 func TestServiceChanged(t *testing.T) {
 	t.Parallel()
 
-	t.Run("registerCheckout invokes move hook before notifying", func(t *testing.T) {
+	t.Run("registerCheckout notifies", func(t *testing.T) {
 		t.Parallel()
 
 		repositories := NewRegistry()
-		repositories.Register(&Repository{RelPath: "old", AbsPath: "/repo"}, &Checkout{Dir: t.TempDir(), GitTimeout: time.Minute})
 		s, err := NewService("", repositories)
 		if err != nil {
 			t.Fatal(err)
@@ -22,23 +18,11 @@ func TestServiceChanged(t *testing.T) {
 		checkout := &Checkout{
 			BaseBranch: "main",
 			Dir:        "/repo",
-			RepoName:   "repo",
-			GitTimeout: time.Minute,
+			RelPath:    "repo",
 		}
 		ch := s.Changed()
-		var sawNotifyBeforeHook bool
-		move := s.RegisterCheckout(&InitResult{Repository: Repository{RelPath: "new", AbsPath: "/repo"}, Checkout: checkout}, func(Move) {
-			select {
-			case <-ch:
-				sawNotifyBeforeHook = true
-			default:
-			}
-		})
-		if !move.Moved() || move.OldRel != "old" || move.NewRel != "new" {
-			t.Fatalf("move = %+v, want old -> new", move)
-		}
-		if sawNotifyBeforeHook {
-			t.Fatal("Changed channel closed before move hook ran")
+		if err := s.RegisterCheckout(checkout); err != nil {
+			t.Fatal(err)
 		}
 		select {
 		case <-ch:

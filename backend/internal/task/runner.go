@@ -805,7 +805,7 @@ func (r *Runner) branchDiffStat(ctx context.Context, t *Task) (agent.DiffStat, e
 	if len(repos) > 0 && repos[0].GitRoot == "" {
 		repos[0].GitRoot = r.Checkout.Dir
 	}
-	r.Log.With("repo", r.Checkout.RepoName).InfoContext(ctx, "fetch for branch diff stat", "repos", len(repos))
+	r.Log.With("repo", r.Checkout.RelPath).InfoContext(ctx, "fetch for branch diff stat", "repos", len(repos))
 	return r.Checkout.DiffStat(ctx, r.Log, r.Runtimes, id, repos, repo.DiffFetchRequired)
 }
 

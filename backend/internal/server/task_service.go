@@ -112,8 +112,8 @@ func taskDTO(ctx context.Context, entry *taskmgr.Entry, taskMgr *taskmgr.Manager
 
 	repos := make([]v1.TaskRepo, len(snap.Repos))
 	for i, repo := range snap.Repos {
-		if info, ok := repoSvc.Repositories.Repository(repo.Name); ok {
-			forgeKind, err := apiconv.RepoForge(info.ForgeKind)
+		if checkout, ok := repoSvc.Repositories.Checkout(repo.Name); ok && checkout.Repository != nil {
+			forgeKind, err := apiconv.RepoForge(checkout.Repository.ForgeKind)
 			if err != nil {
 				return v1.Task{}, fmt.Errorf("task %s repo %q forge: %w", t.ID, repo.Name, err)
 			}
@@ -121,7 +121,7 @@ func taskDTO(ctx context.Context, entry *taskmgr.Entry, taskMgr *taskmgr.Manager
 				Name:       repo.Name,
 				BaseBranch: repo.BaseBranch,
 				Branch:     repo.Branch,
-				RemoteURL:  git.RemoteToHTTPS(info.Remote),
+				RemoteURL:  git.RemoteToHTTPS(checkout.Repository.Remote),
 				Forge:      forgeKind,
 			}
 			continue
@@ -181,10 +181,10 @@ func (s *taskService) getTaskInfo(ctx context.Context, entry *taskmgr.Entry, _ *
 	for _, repo := range snap.Repos {
 		var remoteURL string
 		var forgeKind v1.Forge
-		if info, ok := s.repoMgr.Repositories.Repository(repo.Name); ok {
-			remoteURL = git.RemoteToHTTPS(info.Remote)
+		if checkout, ok := s.repoMgr.Repositories.Checkout(repo.Name); ok && checkout.Repository != nil {
+			remoteURL = git.RemoteToHTTPS(checkout.Repository.Remote)
 			var err error
-			forgeKind, err = apiconv.RepoForge(info.ForgeKind)
+			forgeKind, err = apiconv.RepoForge(checkout.Repository.ForgeKind)
 			if err != nil {
 				return nil, api.InternalError(err.Error())
 			}
@@ -726,23 +726,23 @@ func (s *taskService) syncTask(ctx context.Context, entry *taskmgr.Entry, req *v
 		syncPrimaryBranch = p.Branch
 	}
 	if resp.Status != "blocked" {
-		if info, ok := s.repoMgr.Repositories.Repository(syncPrimaryName); ok {
-			if f := s.forgeMgr.ForgeForInfo(ctx, &info); f != nil {
+		if checkout, ok := s.repoMgr.Repositories.Checkout(syncPrimaryName); ok && checkout.Repository != nil {
+			if f := s.forgeMgr.ForgeForInfo(ctx, checkout.Repository); f != nil {
 				ciInfo := ci.RepoInfo{
-					RelPath:    info.RelPath,
-					BaseBranch: info.BaseBranch,
-					ForgeKind:  info.ForgeKind,
-					ForgeOwner: info.ForgeOwner,
-					ForgeRepo:  info.ForgeRepo,
+					RelPath:    checkout.RelPath,
+					BaseBranch: checkout.BaseBranch,
+					ForgeKind:  checkout.Repository.ForgeKind,
+					ForgeOwner: checkout.Repository.ForgeOwner,
+					ForgeRepo:  checkout.Repository.ForgeRepo,
 				}
 				prNumber, err := s.ciSvc.StartPRFlow(ctx, entry, f, &ciInfo, syncPrimaryBranch, s.taskMgr.EffectiveBaseBranch(t))
 				if err != nil {
-					slog.WarnContext(ctx, "sync: create PR", "repo", info.ForgeRepo, "branch", syncPrimaryBranch, "err", err)
+					slog.WarnContext(ctx, "sync: create PR", "repo", checkout.Repository.ForgeRepo, "branch", syncPrimaryBranch, "err", err)
 				} else {
 					resp.PRNumber = prNumber
 				}
 			} else {
-				slog.WarnContext(ctx, "sync: no forge client available, skipping PR flow", "repo", syncPrimaryName, "forge", info.ForgeKind)
+				slog.WarnContext(ctx, "sync: no forge client available, skipping PR flow", "repo", syncPrimaryName, "forge", checkout.Repository.ForgeKind)
 			}
 		} else {
 			slog.WarnContext(ctx, "sync: repo not found in server list, skipping PR flow", "repo", syncPrimaryName)

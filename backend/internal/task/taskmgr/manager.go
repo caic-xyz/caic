@@ -1255,7 +1255,7 @@ func (m *Manager) repoBasenameCollides(relPath string) bool {
 	base := filepath.Base(relPath)
 	collides := false
 	for checkout := range m.Checkouts.Checkouts() {
-		if checkout.RepoName != "" && checkout.RepoName != relPath && filepath.Base(checkout.RepoName) == base {
+		if checkout.RelPath != "" && checkout.RelPath != relPath && filepath.Base(checkout.RelPath) == base {
 			collides = true
 			break
 		}

@@ -57,12 +57,12 @@ func (h *ciHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 	if p := t.Primary(); p != nil {
 		ciPrimaryName = p.Name
 	}
-	info, ok := h.repoSvc.Repositories.Repository(ciPrimaryName)
-	if !ok {
+	checkout, ok := h.repoSvc.Repositories.Checkout(ciPrimaryName)
+	if !ok || checkout.Repository == nil {
 		writeError(w, api.BadRequest("no repo info found"))
 		return
 	}
-	f := h.forgeMgr.ForgeForInfo(r.Context(), &info)
+	f := h.forgeMgr.ForgeForInfo(r.Context(), checkout.Repository)
 	if f == nil {
 		writeError(w, api.BadRequest("no forge token configured for this repo"))
 		return
@@ -110,11 +110,11 @@ func (h *ciHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 // It fetches CI logs via the forge, builds a rich prompt using ci.FailureSummary,
 // and creates a new agent task — the same path as the automated maybeAutoFix.
 func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Task, error) {
-	info, ok := h.repoSvc.Repositories.Repository(req.Repo)
-	if !ok {
+	checkout, ok := h.repoSvc.Repositories.Checkout(req.Repo)
+	if !ok || checkout.Repository == nil {
 		return nil, api.BadRequest("repo not found")
 	}
-	f := h.forgeMgr.ForgeForInfo(ctx, &info)
+	f := h.forgeMgr.ForgeForInfo(ctx, checkout.Repository)
 	if f == nil {
 		return nil, api.BadRequest("no forge token configured for this repo")
 	}
@@ -148,7 +148,7 @@ func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Task, 
 	if u, ok := auth.UserFromContext(ctx); ok {
 		ownerID = u.ID
 	}
-	taskIDStr, err := h.taskClient.CreateTask(ctx, task.CreateRequest{Repo: info.RelPath, Prompt: summary, OwnerID: ownerID})
+	taskIDStr, err := h.taskClient.CreateTask(ctx, task.CreateRequest{Repo: checkout.RelPath, Prompt: summary, OwnerID: ownerID})
 	if err != nil {
 		return nil, fmt.Errorf("create task: %w", err)
 	}
@@ -180,11 +180,11 @@ func (h *ciHandlers) fixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.Status
 	if primary == nil {
 		return nil, api.BadRequest("task has no primary repo")
 	}
-	info, ok := h.repoSvc.Repositories.Repository(primary.Name)
-	if !ok {
+	checkout, ok := h.repoSvc.Repositories.Checkout(primary.Name)
+	if !ok || checkout.Repository == nil {
 		return nil, api.BadRequest("repo not found")
 	}
-	f := h.forgeMgr.ForgeForInfo(ctx, &info)
+	f := h.forgeMgr.ForgeForInfo(ctx, checkout.Repository)
 	if f == nil {
 		return nil, api.BadRequest("no forge token configured for this repo")
 	}

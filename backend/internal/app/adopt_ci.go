@@ -26,11 +26,11 @@ type adoptedTaskWiring struct {
 
 // WireCIMonitoring sets up CI monitoring for an adopted task that has a PR.
 func (w *adoptedTaskWiring) WireCIMonitoring(ctx context.Context, at *taskmgr.AdoptedTask) {
-	ri, ok := w.repoSvc.Repositories.Repository(at.RelPath)
-	if !ok {
+	checkout, ok := w.repoSvc.Repositories.Checkout(at.RelPath)
+	if !ok || checkout.Repository == nil {
 		return
 	}
-	f := w.forgeMgr.ForgeForInfo(ctx, &ri)
+	f := w.forgeMgr.ForgeForInfo(ctx, checkout.Repository)
 	if f == nil && w.authStore != nil {
 		if u, ok := w.authStore.FindByProvider(auth.Provider(at.ForgeKind)); ok {
 			f = w.forgeMgr.ForgeFor(auth.NewContext(ctx, &u), forge.Kind(at.ForgeKind))
@@ -54,11 +54,11 @@ func (w *adoptedTaskWiring) WireCIMonitoring(ctx context.Context, at *taskmgr.Ad
 
 // LookupExternalPRForTask queries the forge for a PR matching the task's branch.
 func (w *adoptedTaskWiring) LookupExternalPRForTask(ctx context.Context, at *taskmgr.AdoptedTask) {
-	ri, ok := w.repoSvc.Repositories.Repository(at.RelPath)
-	if !ok {
+	checkout, ok := w.repoSvc.Repositories.Checkout(at.RelPath)
+	if !ok || checkout.Repository == nil {
 		return
 	}
-	f := w.forgeMgr.ForgeForInfo(ctx, &ri)
+	f := w.forgeMgr.ForgeForInfo(ctx, checkout.Repository)
 	if f == nil && w.authStore != nil {
 		if u, ok := w.authStore.FindByProvider(auth.Provider(at.ForgeKind)); ok {
 			f = w.forgeMgr.ForgeFor(auth.NewContext(ctx, &u), forge.Kind(at.ForgeKind))
