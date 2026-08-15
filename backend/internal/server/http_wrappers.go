@@ -293,7 +293,7 @@ type httpLoggerKey struct{}
 func httpLogger(ctx context.Context) *slog.Logger {
 	log, ok := ctx.Value(httpLoggerKey{}).(*slog.Logger)
 	if !ok {
-		return slog.New(slog.DiscardHandler)
+		panic("HTTP logger missing from request context")
 	}
 	return log
 }

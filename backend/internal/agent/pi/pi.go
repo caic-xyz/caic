@@ -88,6 +88,9 @@ func (b *Backend) SetModelInventory(inventory agent.ModelInventory) {
 // Start launches a Pi RPC process via the relay daemon. If Pi exits while
 // starting, it updates Pi once and retries the launch.
 func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	if opts.Logger == nil {
+		return nil, errors.New("opts.Logger is required")
+	}
 	sess, err := b.start(ctx, opts)
 	if err == nil {
 		return sess, nil
@@ -96,7 +99,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		return nil, err
 	}
 
-	slog.WarnContext(ctx, "pi: startup failed; updating and retrying", "err", err)
+	opts.Logger.WarnContext(ctx, "pi: startup failed; updating and retrying", "err", err)
 	if logErr := writeStartupLog(opts.Log, "Pi startup failed; running pi update --all ..."); logErr != nil {
 		return nil, errors.Join(err, logErr)
 	}
@@ -197,7 +200,7 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 
 	sessionID := ""
 	if err := writeGetState(rp.Stdin, opts.Log); err != nil {
-		slog.WarnContext(ctx, "pi: write get_state failed", "err", err)
+		opts.Logger.WarnContext(ctx, "pi: write get_state failed", "err", err)
 	} else {
 		stateCtx, stateCancel := context.WithTimeout(ctx, 10*time.Second)
 		resp, err := waitForResponseContext(stateCtx, records, pi.CmdGetState, func() {
@@ -212,11 +215,11 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 			if _, ok := errors.AsType[*piProcessExitError](err); ok {
 				return nil, fmt.Errorf("pi: get_state: %w", reapPiProcessExit(rp, err))
 			}
-			slog.WarnContext(ctx, "pi: get_state failed", "err", err)
+			opts.Logger.WarnContext(ctx, "pi: get_state failed", "err", err)
 		} else {
 			var state pi.StateData
 			if err := json.Unmarshal(resp.Data, &state); err != nil {
-				slog.WarnContext(ctx, "pi: parse get_state failed", "err", err)
+				opts.Logger.WarnContext(ctx, "pi: parse get_state failed", "err", err)
 			} else {
 				sessionID = state.SessionID
 			}
@@ -234,8 +237,8 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		}
 	}
 
-	c := newPiConn(rp.Stdin, opts.Log, wire)
-	sess, err := agent.StartSession(rp, c, opts)
+	c := newPiConn(ctx, opts.Logger, rp.Stdin, opts.Log, wire)
+	sess, err := agent.StartSession(ctx, rp, c, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -293,15 +296,19 @@ type caicModelInfo struct {
 type piConn struct {
 	agent.Conn
 
+	ctx     context.Context
+	logger  *slog.Logger
 	log     agent.LogSink
 	version agent.LogVersion
 	wire    *piWireFormat
 }
 
 // newPiConn creates a piConn wrapping a standard Conn.
-func newPiConn(stdin io.WriteCloser, log agent.LogSink, wire *piWireFormat) *piConn {
+func newPiConn(ctx context.Context, logger *slog.Logger, stdin io.WriteCloser, log agent.LogSink, wire *piWireFormat) *piConn {
 	return &piConn{
-		Conn:    agent.NewConn(stdin, log, wire),
+		Conn:    agent.NewConn(ctx, logger, stdin, log, wire),
+		ctx:     ctx,
+		logger:  logger,
 		log:     log,
 		version: log.LogVersion(),
 		wire:    wire,
@@ -311,14 +318,14 @@ func newPiConn(stdin io.WriteCloser, log agent.LogSink, wire *piWireFormat) *piC
 // ReadMessages overrides the default read loop to intercept extension_ui_request
 // messages and auto-respond before forwarding them to the message channel.
 func (c *piConn) ReadMessages(r io.Reader, msgCh chan<- agent.ParsedMessage) error {
-	return agent.DefaultReadMessages(r, func(parsed agent.ParsedMessage) {
+	return agent.DefaultReadMessages(c.ctx, c.logger, r, func(parsed agent.ParsedMessage) {
 		m := parsed.Message
 		// Intercept extension UI requests.
 		if raw, ok := m.(*agent.RawMessage); ok && strings.HasPrefix(raw.MessageType, "response:") {
 			return
 		} else if ok && raw.MessageType == string(pi.EventExtensionUI) {
 			if err := handleExtensionUI(c.Conn, raw.Raw); err != nil {
-				slog.Warn("pi: extension_ui_request auto-response failed", "err", err)
+				c.logger.WarnContext(c.ctx, "pi: extension_ui_request auto-response failed", "err", err)
 			}
 			// Don't forward to msgCh — these are internal.
 			return

@@ -19,6 +19,8 @@ import (
 // testWire implements WireFormat for testing.
 type testWire struct{}
 
+func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
+
 type testLogSink struct {
 	bytes.Buffer
 
@@ -176,7 +178,7 @@ func TestSession(t *testing.T) {
 		stdoutR, stdoutW := io.Pipe()
 
 		s := &Session{
-			Conn: NewConn(stdinW, DiscardLogSink{Version: LogVersionV1}, testWire{}),
+			Conn: NewConn(t.Context(), testLogger(), stdinW, DiscardLogSink{Version: LogVersionV1}, testWire{}),
 			done: make(chan struct{}),
 		}
 
@@ -184,7 +186,7 @@ func TestSession(t *testing.T) {
 
 		go func() {
 			defer close(s.done)
-			if parseErr := DefaultReadMessages(stdoutR, func(m ParsedMessage) { msgCh <- m.Message }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn); parseErr != nil {
+			if parseErr := DefaultReadMessages(t.Context(), testLogger(), stdoutR, func(m ParsedMessage) { msgCh <- m.Message }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn); parseErr != nil {
 				s.err = parseErr
 			}
 		}()
@@ -283,7 +285,7 @@ func TestSession(t *testing.T) {
 			stdinR, stdinW := io.Pipe()
 			logBuf := &testLogSink{Version: LogVersionV2}
 			s := &Session{
-				Conn: NewConn(stdinW, logBuf, testWire{}),
+				Conn: NewConn(t.Context(), testLogger(), stdinW, logBuf, testWire{}),
 				done: make(chan struct{}),
 			}
 
@@ -319,7 +321,7 @@ func TestSession(t *testing.T) {
 			stdinR, stdinW := io.Pipe()
 			_ = stdinR.Close()
 			s := &Session{
-				Conn: NewConn(stdinW, DiscardLogSink{Version: LogVersionV1}, testWire{}),
+				Conn: NewConn(t.Context(), testLogger(), stdinW, DiscardLogSink{Version: LogVersionV1}, testWire{}),
 				done: make(chan struct{}),
 			}
 			if err := s.SendRaw([]byte("data\n")); err == nil {
@@ -332,7 +334,7 @@ func TestSession(t *testing.T) {
 		stdinR, stdinW := io.Pipe()
 		go func() { _, _ = io.Copy(io.Discard, stdinR) }()
 		s := &Session{
-			Conn: NewConn(stdinW, DiscardLogSink{Version: LogVersionV1}, testWire{}),
+			Conn: NewConn(t.Context(), testLogger(), stdinW, DiscardLogSink{Version: LogVersionV1}, testWire{}),
 			done: make(chan struct{}),
 		}
 		_ = s.Close()
@@ -353,12 +355,10 @@ func TestSession(t *testing.T) {
 		}
 
 		var logBuf bytes.Buffer
-		oldDefault := slog.Default()
-		slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, nil)))
-		defer slog.SetDefault(oldDefault)
+		log := slog.New(slog.NewTextHandler(&logBuf, nil))
 
 		msgCh := make(chan ParsedMessage, 16)
-		s := NewSession(cmd, NewConn(stdin, DiscardLogSink{Version: LogVersionV1}, testWire{}), stdout, msgCh, nil)
+		s := NewSession(t.Context(), cmd, NewConn(t.Context(), log, stdin, DiscardLogSink{Version: LogVersionV1}, testWire{}), stdout, msgCh, log)
 
 		if err := cmd.Process.Kill(); err != nil {
 			t.Fatal(err)
@@ -440,7 +440,7 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n") + "\n"
 
 		ch := make(chan Message, 16)
-		if err := DefaultReadMessages(strings.NewReader(input), func(m ParsedMessage) { ch <- m.Message }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn); err != nil {
+		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(m ParsedMessage) { ch <- m.Message }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn); err != nil {
 			t.Fatal(err)
 		}
 		close(ch)
@@ -466,7 +466,7 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n") + "\n"
 
 		ch := make(chan Message, 16)
-		if err := DefaultReadMessages(strings.NewReader(input), func(m ParsedMessage) { ch <- m.Message }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn); err != nil {
+		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(m ParsedMessage) { ch <- m.Message }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn); err != nil {
 			t.Fatal(err)
 		}
 		close(ch)
@@ -495,7 +495,7 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n") + "\n"
 
 		buf := &testLogSink{Version: LogVersionV1}
-		if err := DefaultReadMessages(strings.NewReader(input), func(ParsedMessage) {}, buf, LogVersionV1, testParseFn); err != nil {
+		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(ParsedMessage) {}, buf, LogVersionV1, testParseFn); err != nil {
 			t.Fatal(err)
 		}
 
@@ -522,7 +522,7 @@ func TestReadMessages(t *testing.T) {
 				t.Cleanup(func() { _ = stdinR.Close() })
 				var log bytes.Buffer
 				got := make(chan ParsedMessage, 1)
-				conn := NewConn(stdinW, &testLogSink{Version: tc.version}, testWire{})
+				conn := NewConn(t.Context(), testLogger(), stdinW, &testLogSink{Version: tc.version}, testWire{})
 				err := conn.ReadMessages(strings.NewReader(tc.input), got)
 				if !errors.Is(err, io.ErrUnexpectedEOF) {
 					t.Fatalf("ReadMessages error = %v, want unexpected EOF", err)
@@ -537,7 +537,7 @@ func TestReadMessages(t *testing.T) {
 		t.Parallel()
 		var log bytes.Buffer
 		var got []ParsedMessage
-		err := DefaultReadMessages(strings.NewReader(`{"t":"agent","time":1.000,"msg":{}}`+"\n"), func(msg ParsedMessage) {
+		err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(`{"t":"agent","time":1.000,"msg":{}}`+"\n"), func(msg ParsedMessage) {
 			got = append(got, msg)
 		}, &testLogSink{Version: LogVersionV2}, LogVersionV2, func([]byte) ([]Message, error) {
 			return []Message{&TextMessage{}}, nil

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,6 +31,8 @@ import (
 type failingConn struct {
 	err error
 }
+
+func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 func (c *failingConn) SendPrompt(agent.Prompt) error { return c.err }
 
@@ -448,7 +451,7 @@ func TestTask(t *testing.T) {
 				t.Fatal(err)
 			}
 			sendErr := errors.New("delivery failed")
-			s := agent.NewSession(cmd, &failingConn{err: sendErr}, stdout, make(chan agent.ParsedMessage, 256), nil)
+			s := agent.NewSession(t.Context(), cmd, &failingConn{err: sendErr}, stdout, make(chan agent.ParsedMessage, 256), testLogger())
 			t.Cleanup(func() {
 				cmdCancel()
 				_ = s.Wait()
@@ -507,7 +510,7 @@ func TestTask(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), nil)
+			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testLogger(), stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), testLogger())
 			tk.AttachSession(&SessionHandle{Session: s})
 			defer func() { _ = stdin.Close(); _ = s.Wait() }()
 
@@ -612,7 +615,7 @@ func TestTask(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), nil)
+			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testLogger(), stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), testLogger())
 			tk.AttachSession(&SessionHandle{Session: s})
 			defer func() { _ = stdin.Close(); _ = s.Wait() }()
 
@@ -671,7 +674,7 @@ func TestTask(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), nil)
+			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testLogger(), stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), testLogger())
 			<-s.Done()
 			tk.AttachSession(&SessionHandle{Session: s})
 			err = tk.SendInput(t.Context(), agent.Prompt{Text: "hello"})
@@ -706,7 +709,7 @@ func TestTask(t *testing.T) {
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
-		s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), nil)
+		s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testLogger(), stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), testLogger())
 		h := &SessionHandle{Session: s}
 		tk.AttachSession(h)
 
@@ -2692,7 +2695,7 @@ func TestTask(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), nil)
+			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testLogger(), stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), testLogger())
 			<-s.Done()
 			tk.AttachSession(&SessionHandle{Session: s})
 			err := tk.SendCompact(t.Context(), "compact now")
@@ -2772,7 +2775,7 @@ func TestSessionHandle(t *testing.T) {
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
-		s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), nil)
+		s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testLogger(), stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.ParsedMessage, 256), testLogger())
 		ch := make(chan agent.ParsedMessage)
 		done := make(chan struct{})
 		go func() {

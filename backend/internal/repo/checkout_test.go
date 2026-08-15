@@ -62,7 +62,7 @@ func newTestCheckout(dir string) *Checkout {
 }
 
 func newTestRuntime(t *testing.T, backend runtime.Lifecycle) *runtime.Router {
-	runtimes, err := runtime.NewRouter([]runtime.System{&testRuntimeSystem{Lifecycle: backend}})
+	runtimes, err := runtime.NewRouter(logtest.Logger(t), []runtime.System{&testRuntimeSystem{Lifecycle: backend}})
 	if err != nil {
 		t.Fatal(err)
 	}

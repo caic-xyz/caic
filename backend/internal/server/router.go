@@ -258,7 +258,7 @@ func (r *Router) buildHandler() (http.Handler, error) {
 		inner = r.hostState.Middleware(inner)
 	}
 	inner = r.ipgeoMiddleware(inner)
-	inner = httplog.Handler{Handler: inner, Attrs: r.httpLogAttrs}
+	inner = httplog.Handler{Handler: inner, Logger: r.log, Attrs: r.httpLogAttrs}
 	inner = httpLogContextMiddleware(r.log, inner)
 	return inner, nil
 }

@@ -169,7 +169,7 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 		return "", "", nil, err
 	}
 	backend := smoketest.NewRuntimeBackend(0)
-	runtimeRouter, err := runtime.NewRouter([]runtime.System{backend})
+	runtimeRouter, err := runtime.NewRouter(slog.New(slog.NewTextHandler(os.Stderr, nil)), []runtime.System{backend})
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -208,7 +208,7 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 		TaskMgr:       taskMgr,
 		Preferences:   prefs,
 		IPGeoChecker:  checker,
-		ForgeMgr:      forgemgr.New("", "", nil, forgemgr.NoOAuthTokenSource()),
+		ForgeMgr:      forgemgr.New(slog.New(slog.NewTextHandler(os.Stderr, nil)), "", "", nil, forgemgr.NoOAuthTokenSource()),
 		Warnings:      server.NewWarningStore(taskMgr),
 		CacheSizes:    server.NewCacheSizeStore(slog.New(slog.NewTextHandler(os.Stderr, nil))),
 		AuthStore:     store,

@@ -72,12 +72,15 @@ type Manager struct {
 
 // New creates a forge manager for configured forge tokens, an optional GitHub
 // App client, and a user-scoped OAuth token source.
-func New(githubToken, gitlabToken string, githubApp GitHubAppClient, oauthTokens OAuthTokenSource) *Manager {
+func New(log *slog.Logger, githubToken, gitlabToken string, githubApp GitHubAppClient, oauthTokens OAuthTokenSource) *Manager {
+	if log == nil {
+		panic("logger is required")
+	}
 	if oauthTokens == nil {
 		panic("OAuth token source is required")
 	}
 	return &Manager{
-		log:                  slog.Default().With(slog.String("cmp", "forgemgr")),
+		log:                  log.With("cmp", "forgemgr"),
 		githubToken:          githubToken,
 		gitlabToken:          gitlabToken,
 		githubApp:            githubApp,

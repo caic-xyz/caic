@@ -29,9 +29,12 @@ type Service struct {
 
 // NewService creates a CI service.
 // All arguments must be non-nil.
-func NewService(cache *forgecache.Cache, provider genai.Provider, backend Backend) *Service {
+func NewService(log *slog.Logger, cache *forgecache.Cache, provider genai.Provider, backend Backend) *Service {
+	if log == nil {
+		panic("logger is required")
+	}
 	return &Service{
-		log:      slog.Default().With(slog.String("cmp", "ci")),
+		log:      log.With("cmp", "ci"),
 		cache:    cache,
 		provider: provider,
 		backend:  backend,
@@ -193,7 +196,7 @@ func (svc *Service) ApplyMonitorCIResult(ctx context.Context, entry TaskEntry, f
 	var summary string
 	if result.Status == forge.CIStatusFailure {
 		ciStatus = forge.CIStatusFailure
-		summary = FailureSummary(ctx, f, svc.provider, result)
+		summary = FailureSummary(ctx, svc.log, f, svc.provider, result)
 	} else {
 		// CI passed — attempt a squash merge.
 		snap := t.Snapshot()

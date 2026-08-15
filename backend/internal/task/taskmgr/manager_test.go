@@ -118,7 +118,7 @@ func newTestRuntime(t testing.TB, lc runtime.Lifecycle, info testRuntimeInfo) *r
 	if info != nil {
 		sys = testRuntimeInfoSystem{Lifecycle: lc, Monitor: info, Inventory: info, PrivilegeInfo: info}
 	}
-	router, err := runtime.NewRouter([]runtime.System{sys})
+	router, err := runtime.NewRouter(slog.New(slog.DiscardHandler), []runtime.System{sys})
 	if err != nil {
 		t.Fatalf("runtime.NewRouter: %v", err)
 	}
@@ -231,7 +231,7 @@ func (b *reconnectInputBackend) AttachRelay(ctx context.Context, opts *agent.Opt
 		return nil, err
 	}
 	c := &reconnectInputConn{backend: b, cancel: cancel}
-	session := agent.NewSession(cmd, c, stdout, opts.MsgCh, nil)
+	session := agent.NewSession(ctx, cmd, c, stdout, opts.MsgCh, opts.Logger)
 	b.mu.Lock()
 	b.attachCalls++
 	b.opts = opts
@@ -452,7 +452,7 @@ func TestNew(t *testing.T) {
 	t.Run("no-repo checkout is fully constructed", func(t *testing.T) {
 		t.Parallel()
 		backend := &mdruntime.Backend{}
-		router, err := runtime.NewRouter([]runtime.System{&testRuntimeSystem{Lifecycle: backend}})
+		router, err := runtime.NewRouter(slog.New(slog.DiscardHandler), []runtime.System{&testRuntimeSystem{Lifecycle: backend}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1662,7 +1662,8 @@ func TestManager(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, codex.New("", nil).NewWire()), stdout, make(chan agent.ParsedMessage, 256), nil)
+			log := slog.New(slog.DiscardHandler)
+			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), log, stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, codex.New("", nil).NewWire()), stdout, make(chan agent.ParsedMessage, 256), log)
 			t.Cleanup(func() {
 				cmdCancel()
 				_ = s.Wait()
@@ -2700,7 +2701,8 @@ func TestManager(t *testing.T) {
 			msgCh := make(chan agent.ParsedMessage, 1)
 			dispatchDone := make(chan struct{})
 			close(dispatchDone)
-			s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, codex.New("", nil).NewWire()), stdout, msgCh, nil)
+			log := slog.New(slog.DiscardHandler)
+			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), log, stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, codex.New("", nil).NewWire()), stdout, msgCh, log)
 			h := &task.SessionHandle{Session: s, MsgCh: msgCh, DispatchDone: dispatchDone}
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ssh-failed"), runtime.ConnectionTarget{SSHHost: "ssh-failed"}, "", "", 0)
@@ -2744,7 +2746,8 @@ func TestManager(t *testing.T) {
 			msgCh := make(chan agent.ParsedMessage, 1)
 			dispatchDone := make(chan struct{})
 			close(dispatchDone)
-			s := agent.NewSession(cmd, agent.NewConn(stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, codex.New("", nil).NewWire()), stdout, msgCh, nil)
+			log := slog.New(slog.DiscardHandler)
+			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), log, stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, codex.New("", nil).NewWire()), stdout, msgCh, log)
 			h := &task.SessionHandle{Session: s, MsgCh: msgCh, DispatchDone: dispatchDone}
 			runtimeBackend := &runtimetest.FakeBackend{}
 			instanceID, err := runtimeBackend.Launch(t.Context(), nil, nil)

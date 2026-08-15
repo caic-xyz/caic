@@ -4,10 +4,13 @@ package forgemgr
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/forge"
 )
+
+func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 type fakeOAuthTokenSource map[forge.Kind]OAuthToken
 
@@ -22,7 +25,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("PAT", func(t *testing.T) {
 			t.Parallel()
-			m := New("pat-token", "", nil, NoOAuthTokenSource())
+			m := New(testLogger(), "pat-token", "", nil, NoOAuthTokenSource())
 			if f := m.ForgeFor(t.Context(), forge.KindGitHub); f == nil {
 				t.Fatal("ForgeFor returned nil with PAT set")
 			}
@@ -30,7 +33,7 @@ func TestManager(t *testing.T) {
 
 		t.Run("no token returns nil", func(t *testing.T) {
 			t.Parallel()
-			m := New("", "", nil, NoOAuthTokenSource())
+			m := New(testLogger(), "", "", nil, NoOAuthTokenSource())
 			if f := m.ForgeFor(t.Context(), forge.KindGitHub); f != nil {
 				t.Fatal("ForgeFor should return nil when no tokens available")
 			}
@@ -38,7 +41,7 @@ func TestManager(t *testing.T) {
 
 		t.Run("OAuth token source", func(t *testing.T) {
 			t.Parallel()
-			m := New("", "", nil, fakeOAuthTokenSource{
+			m := New(testLogger(), "", "", nil, fakeOAuthTokenSource{
 				forge.KindGitHub: {AccessToken: t.Name(), UserID: "github-user"},
 			})
 			if f := m.ForgeFor(t.Context(), forge.KindGitHub); f == nil {

@@ -43,7 +43,7 @@ func (b *testBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Se
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return agent.NewSession(cmd, agent.NewConn(stdin, opts.Log, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, opts.MsgCh, nil), nil
+	return agent.NewSession(ctx, cmd, agent.NewConn(ctx, opts.Logger, stdin, opts.Log, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, opts.MsgCh, opts.Logger), nil
 }
 
 type attachCaptureBackend struct {
@@ -66,7 +66,7 @@ func (b *attachCaptureBackend) AttachRelay(ctx context.Context, opts *agent.Opti
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return agent.NewSession(cmd, agent.NewConn(stdin, opts.Log, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, opts.MsgCh, nil), nil
+	return agent.NewSession(ctx, cmd, agent.NewConn(ctx, opts.Logger, stdin, opts.Log, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, opts.MsgCh, opts.Logger), nil
 }
 
 // testWire implements agent.WireFormat for testing.

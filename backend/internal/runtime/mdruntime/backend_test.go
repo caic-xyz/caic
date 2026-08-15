@@ -179,7 +179,7 @@ func (*fakeMDClient) SudoPassword(context.Context, runtime.InstanceID) (string, 
 }
 
 func newTestBackend(c mdClient) *Backend {
-	return &Backend{log: slog.Default(), client: c, containers: make(map[string]mdContainer), vncPorts: make(map[string]int32)}
+	return &Backend{log: slog.New(slog.DiscardHandler), client: c, containers: make(map[string]mdContainer), vncPorts: make(map[string]int32)}
 }
 
 func TestBackend(t *testing.T) {

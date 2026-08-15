@@ -89,8 +89,11 @@ type Bot struct {
 
 // New returns a Bot backed by the given client.
 // ctx must be the server-lifetime context (outlives individual requests).
-func New(ctx context.Context, c Client) *Bot {
-	return &Bot{log: slog.Default().With(slog.String("cmp", "bot")), ctx: ctx, client: c}
+func New(ctx context.Context, log *slog.Logger, c Client) *Bot {
+	if log == nil {
+		panic("logger is required")
+	}
+	return &Bot{log: log.With("cmp", "bot"), ctx: ctx, client: c}
 }
 
 // ResumePendingComments re-attaches watchAndComment goroutines for tasks

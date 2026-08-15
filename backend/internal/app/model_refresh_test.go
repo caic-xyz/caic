@@ -160,7 +160,7 @@ func newModelRefreshTestManager(t testing.TB, router *runtime.Router, backends m
 }
 
 func newModelRefreshRouter(t *testing.T, runtimeBackend runtime.Lifecycle, inventory runtime.Inventory) *runtime.Router {
-	router, err := runtime.NewRouter([]runtime.System{&modelRefreshSystem{Lifecycle: runtimeBackend, Inventory: inventory}})
+	router, err := runtime.NewRouter(slog.New(slog.DiscardHandler), []runtime.System{&modelRefreshSystem{Lifecycle: runtimeBackend, Inventory: inventory}})
 	if err != nil {
 		t.Fatal(err)
 	}

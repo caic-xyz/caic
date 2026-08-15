@@ -16,6 +16,9 @@ import (
 type Router struct {
 	Runtimes []System
 	ByName   map[Name]System
+
+	// Immutable.
+	log *slog.Logger
 }
 
 type statsStream struct {
@@ -34,10 +37,14 @@ type eventWatch struct {
 }
 
 // NewRouter creates a runtime router.
-func NewRouter(runtimes []System) (*Router, error) {
+func NewRouter(log *slog.Logger, runtimes []System) (*Router, error) {
+	if log == nil {
+		return nil, errors.New("logger is required")
+	}
 	r := &Router{
 		Runtimes: slices.Clone(runtimes),
 		ByName:   make(map[Name]System, len(runtimes)),
+		log:      log.With("cmp", "runtime"),
 	}
 	if len(r.Runtimes) == 0 {
 		return nil, errors.New("no runtimes configured")
@@ -296,7 +303,7 @@ func (r *Router) List(ctx context.Context) ([]Instance, error) {
 		return nil, errors.Join(errs...)
 	}
 	for _, err := range errs {
-		slog.WarnContext(ctx, "runtime inventory failed", "err", err)
+		r.log.WarnContext(ctx, "runtime inventory failed", "err", err)
 	}
 	return out, nil
 }

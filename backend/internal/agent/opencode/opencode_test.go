@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -293,6 +294,7 @@ exit 1
 	t.Cleanup(cancel)
 	backend := New("", nil)
 	_, err := backend.Start(ctx, &agent.Options{
+		Logger: slog.New(slog.DiscardHandler),
 		Target: runtime.ConnectionTarget{SSHHost: "task"},
 		Dir:    "/workspace",
 		MsgCh:  make(chan agent.ParsedMessage, 1),

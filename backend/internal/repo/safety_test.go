@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/logtest"
 )
 
 func TestCheckSafety(t *testing.T) {
@@ -31,7 +32,7 @@ func TestCheckSafety(t *testing.T) {
 		runGit(t, clone, "commit", "-m", "add binary")
 
 		ds := agent.DiffStat{{Path: "big.bin", Binary: true}}
-		issues, err := CheckSafety(ctx, clone, "caic-0", "main", ds)
+		issues, err := CheckSafety(ctx, logtest.Logger(t), clone, "caic-0", "main", ds)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -60,7 +61,7 @@ func TestCheckSafety(t *testing.T) {
 		runGit(t, clone, "commit", "-m", "add small binary")
 
 		ds := agent.DiffStat{{Path: "small.bin", Binary: true}}
-		issues, err := CheckSafety(ctx, clone, "caic-0", "main", ds)
+		issues, err := CheckSafety(ctx, logtest.Logger(t), clone, "caic-0", "main", ds)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -82,7 +83,7 @@ func TestCheckSafety(t *testing.T) {
 		runGit(t, clone, "add", "config.go")
 		runGit(t, clone, "commit", "-m", "add config")
 
-		issues, err := CheckSafety(ctx, clone, "caic-0", "main", nil)
+		issues, err := CheckSafety(ctx, logtest.Logger(t), clone, "caic-0", "main", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -110,7 +111,7 @@ func TestCheckSafety(t *testing.T) {
 		runGit(t, clone, "add", "key.pem")
 		runGit(t, clone, "commit", "-m", "add key")
 
-		issues, err := CheckSafety(ctx, clone, "caic-0", "main", nil)
+		issues, err := CheckSafety(ctx, logtest.Logger(t), clone, "caic-0", "main", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -135,7 +136,7 @@ func TestCheckSafety(t *testing.T) {
 		runGit(t, clone, "add", "app.conf")
 		runGit(t, clone, "commit", "-m", "add config")
 
-		issues, err := CheckSafety(ctx, clone, "caic-0", "main", nil)
+		issues, err := CheckSafety(ctx, logtest.Logger(t), clone, "caic-0", "main", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -169,7 +170,7 @@ func TestCheckSafety(t *testing.T) {
 
 		// Using the bare branch name would fail (the old bug).
 		ref := "refs/remotes/md-caic-0/caic-0"
-		issues, err := CheckSafety(ctx, clone, ref, "main", nil)
+		issues, err := CheckSafety(ctx, logtest.Logger(t), clone, ref, "main", nil)
 		if err != nil {
 			t.Fatalf("CheckSafety with remote ref failed: %v", err)
 		}
@@ -191,7 +192,7 @@ func TestCheckSafety(t *testing.T) {
 		runGit(t, clone, "commit", "-m", "add clean")
 
 		ds := agent.DiffStat{{Path: "clean.go", Added: 1}}
-		issues, err := CheckSafety(ctx, clone, "caic-0", "main", ds)
+		issues, err := CheckSafety(ctx, logtest.Logger(t), clone, "caic-0", "main", ds)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -236,7 +237,7 @@ func TestScanDiffForSecrets_Deduplication(t *testing.T) {
 	runGit(t, clone, "add", "keys.go")
 	runGit(t, clone, "commit", "-m", "add keys")
 
-	issues, err := scanDiffForSecrets(ctx, clone, "caic-0", "main")
+	issues, err := scanDiffForSecrets(ctx, logtest.Logger(t), clone, "caic-0", "main")
 	if err != nil {
 		t.Fatal(err)
 	}

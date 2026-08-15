@@ -75,6 +75,7 @@ type Prompt struct {
 
 // Options configures an agent session launch.
 type Options struct {
+	Logger          *slog.Logger // Non-nil session logger.
 	Target          runtime.ConnectionTarget
 	Dir             string // Working directory inside the runtime.
 	Model           string // Model alias ("opus", "sonnet", "haiku", "fable") or full ID. Empty = default.
@@ -135,6 +136,8 @@ type Conn interface {
 
 // conn is the default Conn implementation.
 type conn struct {
+	ctx     context.Context
+	logger  *slog.Logger
 	stdin   io.WriteCloser
 	log     LogSink
 	version LogVersion
@@ -143,9 +146,13 @@ type conn struct {
 }
 
 // NewConn creates a connection using the task log's physical record version.
-// log must be non-nil; use DiscardLogSink{Version: version} when persistence is unnecessary.
-func NewConn(stdin io.WriteCloser, log LogSink, wire WireFormat) Conn {
-	return &conn{stdin: stdin, log: log, version: log.LogVersion(), wire: wire}
+// log and sink must be non-nil; use DiscardLogSink{Version: version} when
+// persistence is unnecessary.
+func NewConn(ctx context.Context, log *slog.Logger, stdin io.WriteCloser, sink LogSink, wire WireFormat) Conn {
+	if log == nil {
+		panic("logger is required")
+	}
+	return &conn{ctx: ctx, logger: log, stdin: stdin, log: sink, version: sink.LogVersion(), wire: wire}
 }
 
 func (c *conn) SendPrompt(p Prompt) error {
@@ -174,7 +181,7 @@ func (c *conn) SendCompact(instructions string) error {
 }
 
 func (c *conn) ReadMessages(r io.Reader, msgCh chan<- ParsedMessage) error {
-	return DefaultReadMessages(r, func(m ParsedMessage) { msgCh <- m }, c.log, c.version, c.wire.ParseMessage)
+	return DefaultReadMessages(c.ctx, c.logger, r, func(m ParsedMessage) { msgCh <- m }, c.log, c.version, c.wire.ParseMessage)
 }
 
 func (c *conn) SendStop(ctx context.Context) {
@@ -215,9 +222,9 @@ type Session struct {
 //
 // Error priority: parse errors take precedence over wait errors, since a
 // parse error indicates corrupted output while the process may still exit 0.
-func NewSession(cmd *exec.Cmd, c Conn, stdout io.Reader, msgCh chan<- ParsedMessage, log *slog.Logger) *Session {
+func NewSession(ctx context.Context, cmd *exec.Cmd, c Conn, stdout io.Reader, msgCh chan<- ParsedMessage, log *slog.Logger) *Session {
 	if log == nil {
-		log = slog.Default()
+		panic("logger is required")
 	}
 	s := &Session{
 		Conn: c,
@@ -233,18 +240,18 @@ func NewSession(cmd *exec.Cmd, c Conn, stdout io.Reader, msgCh chan<- ParsedMess
 		switch {
 		case parseErr != nil:
 			s.err = fmt.Errorf("parse: %w", parseErr)
-			log.Error("session parse error", "err", parseErr)
+			log.ErrorContext(ctx, "session parse error", "err", parseErr)
 		case waitErr != nil:
 			s.err = fmt.Errorf("agent exited: %w", waitErr)
 			// Signal-based exits (SIGKILL, SIGTERM) are expected when
 			// containers are purged. Log at Info, not Error.
 			if isSignalExit(waitErr) {
-				log.Info("session killed", "err", waitErr)
+				log.InfoContext(ctx, "session killed", "err", waitErr)
 			} else {
-				log.Warn("session exit error", "err", waitErr)
+				log.WarnContext(ctx, "session exit error", "err", waitErr)
 			}
 		default:
-			log.Info("session done")
+			log.InfoContext(ctx, "session done")
 		}
 	}()
 
@@ -632,13 +639,16 @@ func messageIsNil(msg Message) bool {
 
 // DefaultReadMessages reads physical relay records, persists each
 // exactly once, and forwards the parser's original ParsedMessage wrappers.
-func DefaultReadMessages(r io.Reader, dispatch func(ParsedMessage), log LogSink, version LogVersion, parseNative func([]byte) ([]Message, error)) error {
+func DefaultReadMessages(ctx context.Context, log *slog.Logger, r io.Reader, dispatch func(ParsedMessage), sink LogSink, version LogVersion, parseNative func([]byte) ([]Message, error)) error {
+	if log == nil {
+		return errors.New("logger is required")
+	}
 	parser, err := NewLogRecordParser(version, parseNative)
 	if err != nil {
 		return fmt.Errorf("construct relay record parser: %w", err)
 	}
 	reader := bufio.NewReaderSize(r, 1<<20)
-	slog.Debug("reading agent stdout")
+	log.DebugContext(ctx, "reading agent stdout")
 	var n int
 	for {
 		record, readErr := readNDJSONRecord(reader)
@@ -657,22 +667,22 @@ func DefaultReadMessages(r io.Reader, dispatch func(ParsedMessage), log LogSink,
 		if version == LogVersionV2 && err != nil {
 			return fmt.Errorf("parse v2 relay record: %w", err)
 		}
-		if writeErr := log.AppendNative(record); writeErr != nil {
+		if writeErr := sink.AppendNative(record); writeErr != nil {
 			return fmt.Errorf("write log: %w", writeErr)
 		}
 		if err != nil {
-			slog.Warn("unparseable message", "err", err, "line", string(line))
+			log.WarnContext(ctx, "unparseable message", "err", err, "line", string(line))
 			dispatch(ParsedMessage{Message: &ParseErrorMessage{Err: err.Error(), Line: string(line)}})
 			continue
 		}
 		for _, msg := range parsed.Messages {
 			if n <= 3 {
-				slog.Debug("parsed message", "n", n, "type", fmt.Sprintf("%T", msg.Message))
+				log.DebugContext(ctx, "parsed message", "n", n, "type", fmt.Sprintf("%T", msg.Message))
 			}
 			dispatch(msg)
 		}
 	}
-	slog.Debug("read loop done", "n", n)
+	log.DebugContext(ctx, "read loop done", "n", n)
 	return nil
 }
 
@@ -863,9 +873,12 @@ func ReadPlan(ctx context.Context, container, planFile string) (string, error) {
 // SlogWriter is an io.Writer that logs each line via slog.Warn. It is used
 // as cmd.Stderr for SSH relay subprocesses across all backends.
 type SlogWriter struct {
+	Context   context.Context
+	Logger    *slog.Logger
 	Prefix    string
 	Container string
-	buf       []byte
+
+	buf []byte
 }
 
 func (w *SlogWriter) Write(p []byte) (int, error) {
@@ -878,7 +891,7 @@ func (w *SlogWriter) Write(p []byte) (int, error) {
 		line := string(bytes.TrimSpace(w.buf[:i]))
 		w.buf = w.buf[i+1:]
 		if line != "" {
-			slog.Warn("stderr", "src", w.Prefix, "ctr", w.Container, "line", line)
+			w.Logger.WarnContext(w.Context, "stderr", "src", w.Prefix, "ctr", w.Container, "line", line)
 		}
 	}
 	return len(p), nil
@@ -894,6 +907,9 @@ type RelayProcess struct {
 // PrepareRelay deploys the relay script and starts the SSH serve-attach
 // process. The caller creates a Conn and Session from the returned process.
 func PrepareRelay(ctx context.Context, opts *Options, agentArgs []string) (*RelayProcess, error) {
+	if opts.Logger == nil {
+		return nil, errors.New("opts.Logger is required")
+	}
 	if opts.Dir == "" {
 		return nil, errors.New("opts.Dir is required")
 	}
@@ -909,7 +925,7 @@ func PrepareRelay(ctx context.Context, opts *Options, agentArgs []string) (*Rela
 	if err := DeployRelay(ctx, opts.Target, version); err != nil {
 		return nil, err
 	}
-	slog.DebugContext(ctx, "startup", "phase", "deploy_relay", "target", sshHost, "dur", time.Since(tStart))
+	opts.Logger.DebugContext(ctx, "startup", "phase", "deploy_relay", "target", sshHost, "dur", time.Since(tStart))
 
 	sshArgs := make([]string, 0, 8+2*len(opts.StripEnv)+len(agentArgs))
 	sshArgs = append(sshArgs, sshHost, "python3", RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--no-log-stdin")
@@ -919,7 +935,7 @@ func PrepareRelay(ctx context.Context, opts *Options, agentArgs []string) (*Rela
 	sshArgs = append(sshArgs, "--")
 	sshArgs = append(sshArgs, agentArgs...)
 
-	slog.DebugContext(ctx, "relay", "msg", "launch", "target", sshHost, "args", agentArgs)
+	opts.Logger.DebugContext(ctx, "relay", "msg", "launch", "target", sshHost, "args", agentArgs)
 	cmd := exec.CommandContext(ctx, "ssh", sshArgs...) //nolint:gosec // args are not user-controlled.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -929,11 +945,11 @@ func PrepareRelay(ctx context.Context, opts *Options, agentArgs []string) (*Rela
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
-	cmd.Stderr = &SlogWriter{Prefix: "relay serve-attach", Container: sshHost}
+	cmd.Stderr = &SlogWriter{Context: ctx, Logger: opts.Logger, Prefix: "relay serve-attach", Container: sshHost}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start relay: %w", err)
 	}
-	slog.InfoContext(ctx, "startup", "phase", "relay_started", "target", sshHost, "dur", time.Since(tStart))
+	opts.Logger.InfoContext(ctx, "startup", "phase", "relay_started", "target", sshHost, "dur", time.Since(tStart))
 	return &RelayProcess{Cmd: cmd, Stdin: stdin, Stdout: stdout}, nil
 }
 
@@ -944,18 +960,21 @@ func StartRelay(ctx context.Context, opts *Options, agentArgs []string, wire Wir
 	if err != nil {
 		return nil, err
 	}
-	return StartSession(rp, NewConn(rp.Stdin, opts.Log, wire), opts)
+	return StartSession(ctx, rp, NewConn(ctx, opts.Logger, rp.Stdin, opts.Log, wire), opts)
 }
 
 // StartSession creates a Session from a RelayProcess and Conn, sends the
 // initial prompt if present, and returns the session.
-func StartSession(rp *RelayProcess, c Conn, opts *Options) (*Session, error) {
+func StartSession(ctx context.Context, rp *RelayProcess, c Conn, opts *Options) (*Session, error) {
 	sshHost := opts.Target.SSHHost
 	if sshHost == "" {
 		return nil, errors.New("agent connection target missing SSH host")
 	}
-	log := slog.With("target", sshHost)
-	s := NewSession(rp.Cmd, c, rp.Stdout, opts.MsgCh, log)
+	if opts.Logger == nil {
+		return nil, errors.New("opts.Logger is required")
+	}
+	log := opts.Logger.With("target", sshHost)
+	s := NewSession(ctx, rp.Cmd, c, rp.Stdout, opts.MsgCh, log)
 	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
 		if err := s.SendPrompt(opts.InitialPrompt); err != nil {
 			_ = s.Close()
@@ -1241,20 +1260,23 @@ func AttachRelaySession(ctx context.Context, opts *Options, wire WireFormat, wra
 	if err := opts.Log.LogVersion().Validate(); err != nil {
 		return nil, fmt.Errorf("relay log version: %w", err)
 	}
-	c := NewConn(stdin, opts.Log, wire)
+	c := NewConn(ctx, opts.Logger, stdin, opts.Log, wire)
 	if wrap != nil {
 		c, err = wrap(c)
 		if err != nil {
 			return nil, err
 		}
 	}
-	cmd.Stderr = &SlogWriter{Prefix: "relay attach", Container: sshHost}
+	if opts.Logger == nil {
+		return nil, errors.New("opts.Logger is required")
+	}
+	cmd.Stderr = &SlogWriter{Context: ctx, Logger: opts.Logger, Prefix: "relay attach", Container: sshHost}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("attach relay: %w", err)
 	}
 
-	log := slog.With("target", sshHost)
-	return NewSession(cmd, c, stdout, opts.MsgCh, log), nil
+	log := opts.Logger.With("target", sshHost)
+	return NewSession(ctx, cmd, c, stdout, opts.MsgCh, log), nil
 }
 
 // PlainTextWritePrompt writes a user prompt as a plain text line on stdin

@@ -5,6 +5,7 @@ package mdruntime
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"os/exec"
 
@@ -27,8 +28,11 @@ func AvailableRuntimeNames() []string {
 
 // New creates an md.Client for the md runtime adapter.
 // runtimeName selects the container runtime ("docker" or "podman"); empty means auto-detect.
-func New(tailscaleAPIKey, githubToken, runtimeName string) (*md.Client, error) {
-	logger := slog.Default()
+func New(ctx context.Context, log *slog.Logger, tailscaleAPIKey, githubToken, runtimeName string) (*md.Client, error) {
+	if log == nil {
+		return nil, errors.New("logger is required")
+	}
+	logger := log.With("cmp", "md")
 	var containerRuntime containers.Runtime
 	if runtimeName != "" {
 		var err error
@@ -37,7 +41,7 @@ func New(tailscaleAPIKey, githubToken, runtimeName string) (*md.Client, error) {
 			return nil, err
 		}
 	}
-	c, err := md.New(logger, containerRuntime, &SlogWriter{Phase: "init"})
+	c, err := md.New(logger, containerRuntime, &SlogWriter{Context: ctx, Logger: logger, Phase: "init"})
 	if err != nil {
 		return nil, err
 	}
@@ -72,9 +76,12 @@ func InstancesFromMD(ctx context.Context, mdContainers []*md.Container) []runtim
 // SlogWriter is an io.Writer that logs each complete line via slog.Repository.
 // Use it instead of io.Discard so md output is captured in structured logs.
 type SlogWriter struct {
+	Context context.Context
+	Logger  *slog.Logger
 	// Phase labels the log entries (e.g. "launch", "warmup").
 	Phase string
-	buf   []byte
+
+	buf []byte
 }
 
 // Write logs complete non-empty lines from p and buffers incomplete tails.
@@ -88,7 +95,7 @@ func (w *SlogWriter) Write(p []byte) (int, error) {
 		line := string(bytes.TrimSpace(w.buf[:i]))
 		w.buf = w.buf[i+1:]
 		if line != "" {
-			slog.Info("md", "phase", w.Phase, "msg", line)
+			w.Logger.InfoContext(w.Context, "md", "phase", w.Phase, "msg", line)
 		}
 	}
 	return len(p), nil

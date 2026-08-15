@@ -129,8 +129,8 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if err != nil {
 		return nil, err
 	}
-	c := agent.Conn(&controlConn{Conn: agent.NewConn(rp.Stdin, opts.Log, b)})
-	return agent.StartSession(rp, c, opts)
+	c := agent.Conn(&controlConn{Conn: agent.NewConn(ctx, opts.Logger, rp.Stdin, opts.Log, b)})
+	return agent.StartSession(ctx, rp, c, opts)
 }
 
 // WritePrompt writes a single user message in Claude Code's stdin format.

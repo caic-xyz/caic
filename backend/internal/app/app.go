@@ -232,7 +232,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		}
 	}
 
-	forgeManager := forgemgr.New(cfg.GitHub.Token, cfg.GitLab.Token, nil, authForgeTokenSource{})
+	forgeManager := forgemgr.New(log, cfg.GitHub.Token, cfg.GitLab.Token, nil, authForgeTokenSource{})
 	if cfg.GitHub.AppID != 0 && len(cfg.GitHub.AppPrivateKeyPEM) > 0 {
 		app, err := github.NewAppClient(cfg.GitHub.AppID, cfg.GitHub.AppPrivateKeyPEM, forgeManager.GitHubAppThrottle())
 		if err != nil {
@@ -331,8 +331,8 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		warnings:    warnings,
 		taskCreator: botClient,
 	}
-	ciService := ci.NewService(cache, provider, ciAdapter)
-	botService := bot.New(ctx, botClient)
+	ciService := ci.NewService(log, cache, provider, ciAdapter)
+	botService := bot.New(ctx, log, botClient)
 
 	ipgeoChecker, err := ipgeo.NewChecker(ctx, log.With("cmp", "ipgeo"), cfg.IPGeo.Allowlist, cfg.IPGeo.DB, cfg.Dirs.CacheDir)
 	if err != nil {
@@ -539,7 +539,7 @@ func cleanupLegacyReplayArtifacts(logDir string) error {
 
 func initRuntimeSystem(ctx context.Context, log *slog.Logger, cfg *server.Config) (*runtime.Router, []mdRuntime, error) {
 	if cfg.Runtime.System != nil {
-		runtimeRouter, err := runtime.NewRouter([]runtime.System{cfg.Runtime.System})
+		runtimeRouter, err := runtime.NewRouter(log, []runtime.System{cfg.Runtime.System})
 		if err != nil {
 			return nil, nil, fmt.Errorf("init fake runtime router: %w", err)
 		}
@@ -549,12 +549,12 @@ func initRuntimeSystem(ctx context.Context, log *slog.Logger, cfg *server.Config
 	var mdRuntimes []mdRuntime
 	var runtimes []runtime.System
 	for _, name := range mdruntime.AvailableRuntimeNames() {
-		mdClient, err := mdruntime.New(cfg.Runtime.TailscaleAPIKey, cfg.GitHub.Token, name)
+		mdClient, err := mdruntime.New(ctx, log, cfg.Runtime.TailscaleAPIKey, cfg.GitHub.Token, name)
 		if err != nil {
 			return nil, nil, fmt.Errorf("init %s md runtime adapter: %w", name, err)
 		}
 		mdClient.DigestCacheTTL = warmupInterval
-		backend := mdruntime.NewBackend(mdClient)
+		backend := mdruntime.NewBackend(log, mdClient)
 		backend.HarnessEnv = cfg.Agent.HarnessEnv
 		if _, err := backend.List(ctx); err != nil {
 			log.WarnContext(ctx, "container runtime unavailable", "runtime", name, "err", err)
@@ -567,7 +567,7 @@ func initRuntimeSystem(ctx context.Context, log *slog.Logger, cfg *server.Config
 		return nil, nil, errors.New("no container runtime available: install docker or podman")
 	}
 
-	runtimeRouter, err := runtime.NewRouter(runtimes)
+	runtimeRouter, err := runtime.NewRouter(log, runtimes)
 	if err != nil {
 		return nil, nil, fmt.Errorf("init runtime router: %w", err)
 	}

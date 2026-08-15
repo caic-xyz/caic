@@ -36,7 +36,7 @@ func mainImpl(args []string) error {
 		return err
 	}
 
-	initLogging(*logLevel)
+	log := initLogging(*logLevel)
 
 	cfg, err := voicegateway.LoadConfig(*configPath)
 	if err != nil {
@@ -59,7 +59,7 @@ func mainImpl(args []string) error {
 	geminiAPIKey := os.Getenv("GEMINI_API_KEY")
 	var bridge *voicertc.Bridge
 	if cfg.Backend == voicegateway.BackendGeminiLive && geminiAPIKey == "" {
-		slog.WarnContext(ctx, "voice media disabled", "reason", "GEMINI_API_KEY is not configured")
+		log.WarnContext(ctx, "voice media disabled", "reason", "GEMINI_API_KEY is not configured")
 	} else {
 		bridge, err = voicertc.NewBridge(ctx, &cfg, geminiAPIKey, cfg.Server.WebRTCUDPPort)
 		if err != nil {
@@ -74,7 +74,7 @@ func mainImpl(args []string) error {
 	}
 	srv := &http.Server{
 		Addr:              cfg.Server.HTTP,
-		Handler:           httplog.Handler{Handler: handler},
+		Handler:           httplog.Handler{Handler: handler, Logger: log},
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -86,7 +86,7 @@ func mainImpl(args []string) error {
 		shutCancel()
 	}()
 
-	slog.InfoContext(ctx, "voice-gateway", "http", cfg.Server.HTTP, "udp", cfg.Server.WebRTCUDPPort, "config", *configPath)
+	log.InfoContext(ctx, "voice-gateway", "http", cfg.Server.HTTP, "udp", cfg.Server.WebRTCUDPPort, "config", *configPath)
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
@@ -103,7 +103,7 @@ func validateStandaloneConfig(cfg *voicegateway.Config) error {
 	return nil
 }
 
-func initLogging(level string) {
+func initLogging(level string) *slog.Logger {
 	ll := &slog.LevelVar{}
 	switch level {
 	case "debug":
@@ -113,11 +113,13 @@ func initLogging(level string) {
 	case "error":
 		ll.Set(slog.LevelError)
 	}
-	slog.SetDefault(slog.New(tint.NewHandler(colorable.NewColorable(os.Stderr), &tint.Options{
+	l := slog.New(tint.NewHandler(colorable.NewColorable(os.Stderr), &tint.Options{
 		Level:      ll,
 		TimeFormat: "15:04:05.000",
 		NoColor:    !isatty.IsTerminal(os.Stderr.Fd()),
-	})))
+	}))
+	slog.SetDefault(l)
+	return l
 }
 
 func envDefault(name, def string) string {

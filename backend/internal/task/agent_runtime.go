@@ -177,6 +177,7 @@ func (r *AgentRuntime) Reconnect(ctx context.Context, t *Task, skipSideEffects b
 	}
 	target := t.RuntimeConnectionTarget()
 	session, err := r.Backends[t.Harness].AttachRelay(ctx, &agent.Options{
+		Logger:             r.Log,
 		Target:             target,
 		RelayOffset:        t.RelayOffsetValue(),
 		ResumeSessionID:    sessionID,
@@ -322,6 +323,7 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 	region = trace.StartRegion(ctx, "agent-session")
 	target := sr.AgentTarget
 	session, err := r.Backends[t.Harness].Start(ctx, &agent.Options{
+		Logger:        r.Log,
 		Target:        target,
 		Dir:           r.runtimeDir(t),
 		Model:         t.Model,
@@ -639,6 +641,7 @@ func (r *AgentRuntime) ReviveTask(ctx context.Context, t *Task) (*SessionHandle,
 	t.SetState(StateRunning)
 	target := t.RuntimeConnectionTarget()
 	session, err := r.Backends[t.Harness].Start(ctx, &agent.Options{
+		Logger:          r.Log,
 		Target:          target,
 		Dir:             r.runtimeDir(t),
 		Model:           t.Model,
@@ -975,6 +978,7 @@ func (r *AgentRuntime) startSessionWithLog(ctx context.Context, t *Task, prompt 
 	tlog.Info("starting session", "hns", t.Harness)
 	target := t.RuntimeConnectionTarget()
 	session, err := r.Backends[t.Harness].Start(ctx, &agent.Options{
+		Logger:        r.Log,
 		Target:        target,
 		Dir:           r.runtimeDir(t),
 		Model:         t.Model,
@@ -1052,6 +1056,7 @@ func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent
 	tlog.Info(mode.logMessage(), "hns", t.Harness)
 	target := t.RuntimeConnectionTarget()
 	opts := &agent.Options{
+		Logger: r.Log,
 		Target: target,
 		Dir:    r.runtimeDir(t),
 		Model:  t.Model,

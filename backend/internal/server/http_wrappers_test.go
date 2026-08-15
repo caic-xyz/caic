@@ -82,7 +82,8 @@ func (w *pipeResponseWriter) SetWriteDeadline(deadline time.Time) error {
 	return err
 }
 
-func TestEmitTaskListEvent(t *testing.T) { //nolint:tparallel // UnsupportedDeadline mutates the global slog default.
+func TestEmitTaskListEvent(t *testing.T) {
+	t.Parallel()
 	t.Run("PipeDeadlineStopsBlockedWrite", func(t *testing.T) {
 		t.Parallel()
 		server, client := net.Pipe()

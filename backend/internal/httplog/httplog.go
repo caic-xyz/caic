@@ -36,9 +36,8 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) log(ctx context.Context, r *http.Request, rw *recordingWriter, d time.Duration) {
-	logger := h.Logger
-	if logger == nil {
-		logger = slog.Default()
+	if h.Logger == nil {
+		panic("logger is required")
 	}
 	status := rw.statusCode()
 	level := slog.LevelInfo
@@ -60,7 +59,7 @@ func (h Handler) log(ctx context.Context, r *http.Request, rw *recordingWriter, 
 	if h.Attrs != nil {
 		attrs = append(attrs, h.Attrs(r)...)
 	}
-	logger.LogAttrs(ctx, level, "http", attrs...)
+	h.Logger.LogAttrs(ctx, level, "http", attrs...)
 }
 
 // recordingWriter wraps http.ResponseWriter to capture status code and response size.

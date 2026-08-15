@@ -280,8 +280,11 @@ type Backend struct {
 }
 
 // NewBackend creates a Backend wrapping the given md client.
-func NewBackend(client *md.Client) *Backend {
-	log := slog.Default().With(slog.String("cmp", "md"), slog.String("runtime", client.Runtime.Name()))
+func NewBackend(log *slog.Logger, client *md.Client) *Backend {
+	if log == nil {
+		panic("logger is required")
+	}
+	log = log.With("cmp", "md", "runtime", client.Runtime.Name())
 	return &Backend{
 		log:        log,
 		client:     mdClientAdapter{log: log, c: client},
@@ -316,7 +319,7 @@ func (b *Backend) Launch(ctx context.Context, repos []runtime.Repo, opts *runtim
 	if err != nil {
 		return "", err
 	}
-	stdout, stderr := logWriters(opts.LogWriter, "launch")
+	stdout, stderr := b.logWriters(ctx, opts.LogWriter, "launch")
 	b.log.DebugContext(ctx, "launching")
 	if err := c.Launch(ctx, stdout, stderr, mdOpts); err != nil {
 		b.log.ErrorContext(ctx, "launch failed", "err", err)
@@ -368,7 +371,7 @@ func (b *Backend) Connect(ctx context.Context, id runtime.ID, opts *runtime.Star
 	if err != nil {
 		return runtime.ConnectionInfo{}, err
 	}
-	stdout, stderr := logWriters(opts.LogWriter, "connect")
+	stdout, stderr := b.logWriters(ctx, opts.LogWriter, "connect")
 	b.log.DebugContext(ctx, "calling connect", "ctr", name)
 	sr, err := c.Connect(ctx, stdout, stderr, mdOpts)
 	if err != nil {
@@ -402,7 +405,7 @@ func (b *Backend) Diff(ctx context.Context, id runtime.ID, repoIdx int, args ...
 	repo := &repos[repoIdx]
 	b.log.DebugContext(ctx, "md diff", "ctr", name, "dir", repo.GitRoot, "br", primaryBranch(repo), "args", args)
 	var stdout bytes.Buffer
-	if err := ct.Diff(ctx, &stdout, &SlogWriter{Phase: "diff"}, repoIdx, args); err != nil {
+	if err := ct.Diff(ctx, &stdout, &SlogWriter{Context: ctx, Logger: b.log, Phase: "diff"}, repoIdx, args); err != nil {
 		return "", err
 	}
 	return stdout.String(), nil
@@ -425,7 +428,7 @@ func (b *Backend) Fetch(ctx context.Context, id runtime.ID) error {
 		b.log.DebugContext(ctx, "md fetch", "ctr", name, "dir", repos[0].GitRoot, "br", primaryBranch(&repos[0]))
 	}
 	for i := range repos {
-		if err := ct.Fetch(ctx, &SlogWriter{Phase: "fetch"}, &SlogWriter{Phase: "fetch"}, i, b.Provider); err != nil {
+		if err := ct.Fetch(ctx, &SlogWriter{Context: ctx, Logger: b.log, Phase: "fetch"}, &SlogWriter{Context: ctx, Logger: b.log, Phase: "fetch"}, i, b.Provider); err != nil {
 			return err
 		}
 	}
@@ -466,7 +469,7 @@ func (b *Backend) Purge(ctx context.Context, id runtime.ID) error {
 	} else {
 		b.log.InfoContext(ctx, "md purge", "name", name)
 	}
-	if err := ct.Purge(ctx, &SlogWriter{Phase: "purge"}, &SlogWriter{Phase: "purge"}); err != nil {
+	if err := ct.Purge(ctx, &SlogWriter{Context: ctx, Logger: b.log, Phase: "purge"}, &SlogWriter{Context: ctx, Logger: b.log, Phase: "purge"}); err != nil {
 		return err
 	}
 	b.forgetContainer(name)
@@ -493,7 +496,7 @@ func (b *Backend) Revive(ctx context.Context, id runtime.ID) error {
 	}
 	b.log.DebugContext(ctx, "revive starting", "ctr", name, "repos_count", len(ctRepos))
 	b.log.DebugContext(ctx, "calling revive", "ctr", name)
-	if err = ct.Revive(ctx, &SlogWriter{Phase: "revive"}, &SlogWriter{Phase: "revive"}); err != nil {
+	if err = ct.Revive(ctx, &SlogWriter{Context: ctx, Logger: b.log, Phase: "revive"}, &SlogWriter{Context: ctx, Logger: b.log, Phase: "revive"}); err != nil {
 		b.log.ErrorContext(ctx, "revive failed", "ctr", name, "err", err)
 		return err
 	}
@@ -544,7 +547,7 @@ func (b *Backend) Fork(ctx context.Context, id runtime.ID, opts *runtime.ForkOpt
 		Mounts:    mounts,
 		MaxCPUs:   maxCPUsOrDefault(opts.MaxCPUs),
 	}
-	stdout, stderr := logWriters(opts.LogWriter, "fork")
+	stdout, stderr := b.logWriters(ctx, opts.LogWriter, "fork")
 	b.log.DebugContext(ctx, "calling fork", "source", name)
 	forked, err := ct.Fork(ctx, stdout, stderr, forkOpts)
 	if err != nil {
@@ -954,8 +957,8 @@ func metadataLabels(metadata runtime.Metadata) []string {
 }
 
 // logWriters returns stdout and stderr writers for md task operations.
-func logWriters(w io.Writer, phase string) (stdout, stderr io.Writer) {
-	return w, &SlogWriter{Phase: phase}
+func (b *Backend) logWriters(ctx context.Context, w io.Writer, phase string) (stdout, stderr io.Writer) {
+	return w, &SlogWriter{Context: ctx, Logger: b.log, Phase: phase}
 }
 
 // maxCPUsOrDefault returns cpus if non-zero, otherwise [md.DefaultMaxCPUs].

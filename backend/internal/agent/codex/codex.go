@@ -115,7 +115,10 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	sshArgs = append(sshArgs, sshHost, "python3", agent.RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--no-log-stdin", "--")
 	sshArgs = append(sshArgs, codexArgs...)
 
-	slog.DebugContext(ctx, "relay", "msg", "launch", "target", sshHost, "args", codexArgs)
+	if opts.Logger == nil {
+		return nil, errors.New("opts.Logger is required")
+	}
+	opts.Logger.DebugContext(ctx, "relay", "msg", "launch", "target", sshHost, "args", codexArgs)
 	cmd := exec.CommandContext(ctx, "ssh", sshArgs...) //nolint:gosec // args are not user-controlled.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -125,7 +128,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
-	cmd.Stderr = &agent.SlogWriter{Prefix: "relay serve-attach", Container: sshHost}
+	cmd.Stderr = &agent.SlogWriter{Context: ctx, Logger: opts.Logger, Prefix: "relay serve-attach", Container: sshHost}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start relay: %w", err)
 	}
@@ -153,8 +156,8 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		return nil, fmt.Errorf("write session metadata: %w", err)
 	}
 
-	log := slog.With("target", sshHost)
-	s := agent.NewSession(cmd, agent.NewConn(stdin, opts.Log, wire), continuation, opts.MsgCh, log)
+	log := opts.Logger.With("target", sshHost)
+	s := agent.NewSession(ctx, cmd, agent.NewConn(ctx, log, stdin, opts.Log, wire), continuation, opts.MsgCh, log)
 	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
 		if err := s.SendPrompt(opts.InitialPrompt); err != nil {
 			_ = s.Close()

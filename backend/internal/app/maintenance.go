@@ -31,7 +31,7 @@ func warmupImages(ctx context.Context, log *slog.Logger, client *md.Client, pref
 			}
 		}
 		for _, img := range images {
-			w := &mdruntime.SlogWriter{Phase: "warmup"}
+			w := &mdruntime.SlogWriter{Context: ctx, Logger: log, Phase: "warmup"}
 			built, err := client.Warmup(ctx, w, w, &md.WarmupOpts{
 				BaseImage: img.BaseImage,
 				Platform:  img.Platform,

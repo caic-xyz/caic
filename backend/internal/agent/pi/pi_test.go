@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -251,6 +252,7 @@ func TestBackendStart(t *testing.T) {
 	msgs := make(chan agent.ParsedMessage, 1)
 	log := &agenttest.LogSink{Version: agent.LogVersionV1}
 	sess, err := New("", nil).Start(t.Context(), &agent.Options{
+		Logger: slog.New(slog.DiscardHandler),
 		Target: runtime.ConnectionTarget{SSHHost: "task"},
 		Dir:    "/workspace",
 		Model:  "openai-codex/gpt-5.6-terra",

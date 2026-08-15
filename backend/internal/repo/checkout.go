@@ -141,7 +141,7 @@ func (w *Checkout) SyncToOrigin(ctx context.Context, log *slog.Logger, runtimes 
 		ref := runtimeRemoteRef(id, branch)
 		repoDS := extractRepoDS(ds, diffRepoPrefix(&repo), multi)
 		safetyCtx, safetyCancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
-		issues, err := CheckSafety(safetyCtx, repo.GitRoot, ref, w.BaseBranch, repoDS)
+		issues, err := CheckSafety(safetyCtx, log, repo.GitRoot, ref, w.BaseBranch, repoDS)
 		safetyCancel()
 		if err != nil {
 			return ds, allIssues, fmt.Errorf("safety check %s: %w", repo.ContainerPath, err)
@@ -193,7 +193,7 @@ func (w *Checkout) SyncToDefault(ctx context.Context, log *slog.Logger, runtimes
 		ref := runtimeRemoteRef(id, branch)
 		repoDS := extractRepoDS(ds, diffRepoPrefix(&repo), multi)
 		safetyCtx, safetyCancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
-		issues, err := CheckSafety(safetyCtx, repo.GitRoot, ref, w.BaseBranch, repoDS)
+		issues, err := CheckSafety(safetyCtx, log, repo.GitRoot, ref, w.BaseBranch, repoDS)
 		safetyCancel()
 		if err != nil {
 			return ds, allIssues, fmt.Errorf("safety check %s: %w", repo.ContainerPath, err)

@@ -7,12 +7,15 @@ import (
 	"errors"
 	"io"
 	"iter"
+	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 )
+
+func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 func TestRouter(t *testing.T) {
 	t.Parallel()
@@ -43,7 +46,7 @@ func TestRouter(t *testing.T) {
 		t.Parallel()
 		docker := newRouterFakeBackend("docker")
 		podman := newRouterFakeBackend("podman")
-		router, err := runtime.NewRouter([]runtime.System{docker, podman})
+		router, err := runtime.NewRouter(testLogger(), []runtime.System{docker, podman})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -83,7 +86,7 @@ func TestRouter(t *testing.T) {
 	t.Run("rejects unqualified instance IDs", func(t *testing.T) {
 		t.Parallel()
 		backend := newRouterFakeBackend("docker")
-		router, err := runtime.NewRouter([]runtime.System{backend})
+		router, err := runtime.NewRouter(testLogger(), []runtime.System{backend})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -95,7 +98,7 @@ func TestRouter(t *testing.T) {
 	t.Run("rejects cross runtime fork", func(t *testing.T) {
 		t.Parallel()
 		backend := newRouterFakeBackend("docker")
-		router, err := runtime.NewRouter([]runtime.System{backend, newRouterFakeBackend("podman")})
+		router, err := runtime.NewRouter(testLogger(), []runtime.System{backend, newRouterFakeBackend("podman")})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -109,7 +112,7 @@ func TestRouter(t *testing.T) {
 		t.Parallel()
 		events := make(chan runtime.Event, 1)
 		ctxDone := make(chan struct{})
-		router, err := runtime.NewRouter([]runtime.System{
+		router, err := runtime.NewRouter(testLogger(), []runtime.System{
 			&routerEventSystem{FakeBackend: runtimetest.FakeBackend{RuntimeName: "docker"}, routerEventMonitor: routerEventMonitor{events: events, ctxDone: ctxDone}},
 			&routerEventSystem{FakeBackend: runtimetest.FakeBackend{RuntimeName: "podman"}, routerEventMonitor: routerEventMonitor{err: errors.New("boom")}},
 		})

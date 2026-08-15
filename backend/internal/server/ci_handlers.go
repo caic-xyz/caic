@@ -143,7 +143,7 @@ func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Task, 
 		}
 	}
 	result := forgecache.Result{Status: forge.CIStatusFailure, Checks: checks}
-	summary := ci.FailureSummary(ctx, f, h.provider, result)
+	summary := ci.FailureSummary(ctx, h.log, f, h.provider, result)
 
 	var ownerID string
 	if u, ok := auth.UserFromContext(ctx); ok {
@@ -204,7 +204,7 @@ func (h *ciHandlers) fixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.Status
 		checks = result.Checks
 	}
 	result := forgecache.Result{Status: forge.CIStatusFailure, Checks: checks}
-	summary := ci.FailureSummary(ctx, f, h.provider, result)
+	summary := ci.FailureSummary(ctx, h.log, f, h.provider, result)
 
 	prURL := f.PRURL(snap.ForgeOwner, snap.ForgeRepo, snap.ForgePR)
 	prompt := fmt.Sprintf("CI failed on PR #%d", snap.ForgePR)

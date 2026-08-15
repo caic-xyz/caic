@@ -54,8 +54,11 @@ func InterimCIStatus(runs []forge.CheckRun) forge.CIStatus {
 // It fetches the log for each failing check, optionally summarises large logs
 // via the LLM provider, and formats the result with job URLs and log excerpts.
 // provider may be nil (LLM summarisation is skipped).
-func FailureSummary(ctx context.Context, f forge.Forge, provider genai.Provider, result forgecache.Result) string {
-	logs := enrichFailingChecks(ctx, f, provider, result.Checks)
+func FailureSummary(ctx context.Context, log *slog.Logger, f forge.Forge, provider genai.Provider, result forgecache.Result) string {
+	if log == nil {
+		panic("logger is required")
+	}
+	logs := enrichFailingChecks(ctx, log, f, provider, result.Checks)
 
 	var sb strings.Builder
 	numFailed := 0
@@ -91,7 +94,7 @@ func FailureSummary(ctx context.Context, f forge.Forge, provider genai.Provider,
 // check. Labels are stored on the Check (mutating the slice in place); logs
 // are returned keyed by JobID. The LLM provider (may be nil) is used to
 // summarise logs that exceed 16 KB.
-func enrichFailingChecks(ctx context.Context, f forge.Forge, provider genai.Provider, checks []forge.Check) map[int64]string {
+func enrichFailingChecks(ctx context.Context, log *slog.Logger, f forge.Forge, provider genai.Provider, checks []forge.Check) map[int64]string {
 	const summarizeAbove = 16_000   // ask LLM to summarize logs larger than this
 	const summaryMaxChars = 100_000 // truncate input to LLM
 	logs := make(map[int64]string)
@@ -105,18 +108,18 @@ func enrichFailingChecks(ctx context.Context, f forge.Forge, provider genai.Prov
 			if labels, err := f.GetJobLabels(ctx, c.Owner, c.Repo, c.JobID); err == nil {
 				c.Labels = labels
 			} else {
-				slog.WarnContext(ctx, "enrichFailingChecks: get labels", "job", c.JobID, "check", c.Name, "err", err)
+				log.WarnContext(ctx, "enrichFailingChecks: get labels", "job", c.JobID, "check", c.Name, "err", err)
 			}
 		}
 		// Fetch log.
 		logText, err := f.GetJobLog(ctx, c.Owner, c.Repo, c.JobID, true)
 		if err != nil {
-			slog.WarnContext(ctx, "enrichFailingChecks: get log", "job", c.JobID, "check", c.Name, "err", err)
+			log.WarnContext(ctx, "enrichFailingChecks: get log", "job", c.JobID, "check", c.Name, "err", err)
 			continue
 		}
 		// Summarize with LLM when the log is still large.
 		if provider != nil && len(logText) > summarizeAbove {
-			if summary := summarizeCILog(ctx, provider, c.Name, logText, summaryMaxChars); summary != "" {
+			if summary := summarizeCILog(ctx, log, provider, c.Name, logText, summaryMaxChars); summary != "" {
 				logs[c.JobID] = summary
 				continue
 			}
@@ -133,7 +136,7 @@ Return plain text, no markdown.`
 
 // summarizeCILog asks the LLM to extract the meaningful error from a large CI log.
 // Returns empty string on failure so the caller can fall back to the raw log.
-func summarizeCILog(ctx context.Context, provider genai.Provider, checkName, logText string, maxChars int) string {
+func summarizeCILog(ctx context.Context, log *slog.Logger, provider genai.Provider, checkName, logText string, maxChars int) string {
 	if len(logText) > maxChars {
 		logText = logText[len(logText)-maxChars:]
 	}
@@ -143,7 +146,7 @@ func summarizeCILog(ctx context.Context, provider genai.Provider, checkName, log
 		&genai.GenOptionText{SystemPrompt: ciLogSummaryPrompt},
 	)
 	if err != nil {
-		slog.WarnContext(ctx, "summarizeCILog: LLM call failed", "check", checkName, "err", err)
+		log.WarnContext(ctx, "summarizeCILog: LLM call failed", "check", checkName, "err", err)
 		return ""
 	}
 	return res.String()

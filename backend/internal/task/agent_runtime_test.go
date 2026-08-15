@@ -146,7 +146,7 @@ func newTestRuntimeRouter(t *testing.T, backend runtime.Lifecycle) *runtime.Rout
 	if backend == nil {
 		return nil
 	}
-	rt, err := runtime.NewRouter([]runtime.System{&testRuntimeSystem{Lifecycle: backend}})
+	rt, err := runtime.NewRouter(logtest.Logger(t), []runtime.System{&testRuntimeSystem{Lifecycle: backend}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func (b *instantExitBackend) Start(ctx context.Context, opts *agent.Options) (*a
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return agent.NewSession(cmd, agent.NewConn(stdin, opts.Log, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, opts.MsgCh, nil), nil
+	return agent.NewSession(ctx, cmd, agent.NewConn(ctx, opts.Logger, stdin, opts.Log, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, opts.MsgCh, opts.Logger), nil
 }
 
 func caic0BranchExists(t *testing.T, dir string) bool {
@@ -1389,7 +1389,7 @@ func testRunnerSessions(t *testing.T) {
 			defer unsub()
 			msgCh, done := r.startMessageDispatch(t.Context(), tk, false)
 			log := &agenttest.LogSink{Version: agent.LogVersionV2}
-			opts := agent.Options{MsgCh: msgCh, Log: log}
+			opts := agent.Options{Logger: logtest.Logger(t), MsgCh: msgCh, Log: log}
 			var v2Message agent.Message
 			cmd := exec.CommandContext(t.Context(), "python3", "-c", "import sys; print(sys.argv[1])", `{"t":"agent","ts":1.234,"msg":{}}`)
 			stdin, err := cmd.StdinPipe()
@@ -1403,10 +1403,10 @@ func testRunnerSessions(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			session := agent.NewSession(cmd, agent.NewConn(stdin, log, &testWire{parse: func([]byte) ([]agent.Message, error) {
+			session := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), logtest.Logger(t), stdin, log, &testWire{parse: func([]byte) ([]agent.Message, error) {
 				v2Message = &agent.TextMessage{Text: "v2"}
 				return []agent.Message{v2Message}, nil
-			}}), stdout, opts.MsgCh, nil)
+			}}), stdout, opts.MsgCh, logtest.Logger(t))
 			if err := session.Wait(); err != nil {
 				t.Fatal(err)
 			}
@@ -1414,7 +1414,7 @@ func testRunnerSessions(t *testing.T) {
 				t.Fatalf("subscriber message = %T, want original %T", got, v2Message)
 			}
 			var v1 agent.ParsedMessage
-			err = agent.DefaultReadMessages(strings.NewReader(`{"event":"legacy"}`+"\n"), func(parsed agent.ParsedMessage) {
+			err = agent.DefaultReadMessages(t.Context(), logtest.Logger(t), strings.NewReader(`{"event":"legacy"}`+"\n"), func(parsed agent.ParsedMessage) {
 				v1 = parsed
 				opts.MsgCh <- parsed
 			}, agent.DiscardLogSink{Version: agent.LogVersionV1}, agent.LogVersionV1, func([]byte) ([]agent.Message, error) {
@@ -1708,7 +1708,7 @@ func testRunnerSessions(t *testing.T) {
 			t.Fatal(err)
 		}
 		msgCh := make(chan agent.ParsedMessage, 16)
-		session, err := backend.Start(t.Context(), &agent.Options{MsgCh: msgCh, Log: logW})
+		session, err := backend.Start(t.Context(), &agent.Options{Logger: logtest.Logger(t), MsgCh: msgCh, Log: logW})
 		if err != nil {
 			t.Fatal(err)
 		}
