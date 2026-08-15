@@ -13,19 +13,24 @@ func TestRegistry(t *testing.T) {
 	t.Parallel()
 	r := NewRegistry()
 	repository := r.RegisterRepository(Repository{ForgeKind: forge.KindGitHub, ForgeOwner: "org", ForgeRepo: "app"})
-	c := &Checkout{Dir: "/repos/app", RelPath: "app", Repository: repository}
+	if _, ok := r.RepositoryByForge("org", "app"); !ok {
+		t.Fatal("repository-only entry was not registered")
+	}
+	c := &Checkout{Dir: "/repos/app", RelPath: "app", Repository: &Repository{ForgeKind: forge.KindGitHub, ForgeOwner: "ORG", ForgeRepo: "APP"}}
+	changed := r.Changed()
 	if err := r.RegisterCheckout(c); err != nil {
 		t.Fatal(err)
 	}
-	secondRepository := r.RegisterRepository(Repository{ForgeKind: forge.KindGitHub, ForgeOwner: "ORG", ForgeRepo: "APP"})
-	second := &Checkout{Dir: "/repos/app-copy", RelPath: "app-copy", Repository: secondRepository}
+	select {
+	case <-changed:
+	default:
+		t.Fatal("RegisterCheckout did not notify")
+	}
+	second := &Checkout{Dir: "/repos/app-copy", RelPath: "app-copy", Repository: &Repository{ForgeKind: forge.KindGitHub, ForgeOwner: "ORG", ForgeRepo: "APP"}}
 	if err := r.RegisterCheckout(second); err != nil {
 		t.Fatal(err)
 	}
-	if second.Repository != repository {
-		t.Fatal("RegisterRepository did not canonicalize Repository")
-	}
-	if got, ok := r.Checkout("app"); !ok || got != c {
+	if got, ok := r.Checkout("app"); !ok || got != c || got.Repository != repository {
 		t.Fatalf("Checkout() = %p, %v", got, ok)
 	}
 	checkouts := slices.Collect(r.Checkouts())
@@ -44,16 +49,19 @@ func TestRegistry(t *testing.T) {
 	if got := r.Repositories(); len(got) != 1 || got[0] != repository {
 		t.Fatalf("Repositories() = %#v", got)
 	}
-	if got := slices.Collect(r.Checkouts()); len(got) != 1 || got[0] != second {
+	if got := slices.Collect(r.Checkouts()); len(got) != 1 || got[0] != second || got[0].Repository != repository {
 		t.Fatalf("Checkouts() after removal = %#v", got)
 	}
+	changed = r.Changed()
 	if err := r.RegisterCheckout(&Checkout{Dir: "/repos/other", RelPath: "app-copy"}); err == nil || err.Error() != `checkout already registered at "app-copy"` {
 		t.Fatalf("duplicate path error = %v", err)
 	}
 	if err := r.RegisterCheckout(&Checkout{Dir: "/repos/app-copy", RelPath: "other"}); err == nil || err.Error() != `checkout directory already registered at "/repos/app-copy"` {
 		t.Fatalf("duplicate directory error = %v", err)
 	}
-	if err := r.RegisterCheckout(&Checkout{Dir: "/repos/unregistered", RelPath: "unregistered", Repository: &Repository{ForgeKind: forge.KindGitHub, ForgeOwner: "org", ForgeRepo: "unregistered"}}); err == nil || err.Error() != "checkout repository is not registered" {
-		t.Fatalf("unregistered repository error = %v", err)
+	select {
+	case <-changed:
+		t.Fatal("failed registration notified")
+	default:
 	}
 }

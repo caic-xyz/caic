@@ -3,7 +3,6 @@
 package repo
 
 import (
-	"errors"
 	"fmt"
 	"iter"
 	"slices"
@@ -16,6 +15,7 @@ type Registry struct {
 	mu           sync.Mutex
 	repositories map[string]*Repository
 	checkouts    map[string]*Checkout
+	changed      chan struct{}
 }
 
 // NewRegistry creates an empty repository registry.
@@ -23,6 +23,7 @@ func NewRegistry() *Registry {
 	return &Registry{
 		repositories: make(map[string]*Repository),
 		checkouts:    make(map[string]*Checkout),
+		changed:      make(chan struct{}),
 	}
 }
 
@@ -30,7 +31,19 @@ func NewRegistry() *Registry {
 func (r *Registry) RegisterRepository(repository Repository) *Repository {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.registerRepositoryLocked(repository)
+	registered, changed := r.registerRepositoryLocked(repository)
+	if changed {
+		r.notifyChangedLocked()
+	}
+	return registered
+}
+
+// Changed returns a channel that closes whenever known repository or checkout
+// membership changes.
+func (r *Registry) Changed() <-chan struct{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.changed
 }
 
 // RepositoryByForge returns the known repository whose forge name matches owner/repo.
@@ -59,16 +72,11 @@ func (r *Registry) Repositories() []*Repository {
 	return repositories
 }
 
-// RegisterCheckout records a new local checkout.
-//
-// A checkout with a repository must point to the canonical value previously
-// returned by RegisterRepository.
+// RegisterCheckout records a new local checkout. A referenced repository is
+// canonicalized and registered as part of the same mutation.
 func (r *Registry) RegisterCheckout(checkout *Checkout) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if checkout.Repository != nil && r.repositories[checkout.Repository.key()] != checkout.Repository {
-		return errors.New("checkout repository is not registered")
-	}
 	if _, ok := r.checkouts[checkout.RelPath]; ok {
 		return fmt.Errorf("checkout already registered at %q", checkout.RelPath)
 	}
@@ -77,7 +85,11 @@ func (r *Registry) RegisterCheckout(checkout *Checkout) error {
 			return fmt.Errorf("checkout directory already registered at %q", checkout.Dir)
 		}
 	}
+	if checkout.Repository != nil {
+		checkout.Repository, _ = r.registerRepositoryLocked(*checkout.Repository)
+	}
 	r.checkouts[checkout.RelPath] = checkout
+	r.notifyChangedLocked()
 	return nil
 }
 
@@ -90,6 +102,7 @@ func (r *Registry) UnregisterCheckout(relPath string) bool {
 		return false
 	}
 	delete(r.checkouts, relPath)
+	r.notifyChangedLocked()
 	return true
 }
 
@@ -122,11 +135,16 @@ func (r *Registry) Checkouts() iter.Seq[*Checkout] {
 	}
 }
 
-func (r *Registry) registerRepositoryLocked(repository Repository) *Repository {
+func (r *Registry) registerRepositoryLocked(repository Repository) (*Repository, bool) {
 	key := repository.key()
 	if existing, ok := r.repositories[key]; ok {
-		return existing
+		return existing, false
 	}
 	r.repositories[key] = &repository
-	return &repository
+	return &repository, true
+}
+
+func (r *Registry) notifyChangedLocked() {
+	close(r.changed)
+	r.changed = make(chan struct{})
 }

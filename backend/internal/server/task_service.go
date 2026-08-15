@@ -44,7 +44,7 @@ type taskService struct {
 	log       *slog.Logger
 	taskMgr   *taskmgr.Manager
 	prefs     *preferences.Store
-	repoMgr   *repo.Service
+	checkouts *repo.Registry
 	forgeMgr  *forgemgr.Manager
 	ciSvc     *ci.Service
 	authStore *auth.Store
@@ -93,7 +93,7 @@ func (s *taskService) taskListSnapshot(ctx context.Context) []v1.Task {
 		if ownerID != "" && e.Task().OwnerID != "" && e.Task().OwnerID != ownerID {
 			return true
 		}
-		dto, err := taskDTO(ctx, e, s.taskMgr, s.repoMgr, s.authStore)
+		dto, err := taskDTO(ctx, e, s.taskMgr, s.checkouts, s.authStore)
 		if err != nil {
 			slog.ErrorContext(ctx, "convert task", "task", e.Task().ID, "err", err)
 			return true
@@ -106,13 +106,13 @@ func (s *taskService) taskListSnapshot(ctx context.Context) []v1.Task {
 }
 
 // taskDTO resolves server-owned task data before projecting it to the API.
-func taskDTO(ctx context.Context, entry *taskmgr.Entry, taskMgr *taskmgr.Manager, repoSvc *repo.Service, authStore *auth.Store) (v1.Task, error) {
+func taskDTO(ctx context.Context, entry *taskmgr.Entry, taskMgr *taskmgr.Manager, checkouts *repo.Registry, authStore *auth.Store) (v1.Task, error) {
 	t := entry.Task()
 	snap := t.Snapshot()
 
 	repos := make([]v1.TaskRepo, len(snap.Repos))
 	for i, repo := range snap.Repos {
-		if checkout, ok := repoSvc.Repositories.Checkout(repo.Name); ok && checkout.Repository != nil {
+		if checkout, ok := checkouts.Checkout(repo.Name); ok && checkout.Repository != nil {
 			forgeKind, err := apiconv.RepoForge(checkout.Repository.ForgeKind)
 			if err != nil {
 				return v1.Task{}, fmt.Errorf("task %s repo %q forge: %w", t.ID, repo.Name, err)
@@ -166,7 +166,7 @@ func taskDTO(ctx context.Context, entry *taskmgr.Entry, taskMgr *taskmgr.Manager
 // check and initial state without depending on the eventually-consistent task
 // list snapshot.
 func (s *taskService) getTask(ctx context.Context, entry *taskmgr.Entry, _ *api.EmptyReq) (*v1.Task, error) {
-	dto, err := taskDTO(ctx, entry, s.taskMgr, s.repoMgr, s.authStore)
+	dto, err := taskDTO(ctx, entry, s.taskMgr, s.checkouts, s.authStore)
 	if err != nil {
 		return nil, api.InternalError(err.Error())
 	}
@@ -181,7 +181,7 @@ func (s *taskService) getTaskInfo(ctx context.Context, entry *taskmgr.Entry, _ *
 	for _, repo := range snap.Repos {
 		var remoteURL string
 		var forgeKind v1.Forge
-		if checkout, ok := s.repoMgr.Repositories.Checkout(repo.Name); ok && checkout.Repository != nil {
+		if checkout, ok := s.checkouts.Checkout(repo.Name); ok && checkout.Repository != nil {
 			remoteURL = git.RemoteToHTTPS(checkout.Repository.Remote)
 			var err error
 			forgeKind, err = apiconv.RepoForge(checkout.Repository.ForgeKind)
@@ -467,7 +467,7 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v
 
 	// Return the full task so clients can seed their store and render the detail
 	// view immediately, without waiting for the SSE upsert to deliver it.
-	dto, err := taskDTO(ctx, entry, s.taskMgr, s.repoMgr, s.authStore)
+	dto, err := taskDTO(ctx, entry, s.taskMgr, s.checkouts, s.authStore)
 	if err != nil {
 		return nil, api.InternalError(err.Error())
 	}
@@ -655,7 +655,7 @@ func (s *taskService) forkTask(ctx context.Context, entry *taskmgr.Entry, req *v
 	if !ok {
 		return nil, api.InternalError("forked task not found")
 	}
-	dto, err := taskDTO(ctx, forkEntry, s.taskMgr, s.repoMgr, s.authStore)
+	dto, err := taskDTO(ctx, forkEntry, s.taskMgr, s.checkouts, s.authStore)
 	if err != nil {
 		return nil, api.InternalError(err.Error())
 	}
@@ -726,7 +726,7 @@ func (s *taskService) syncTask(ctx context.Context, entry *taskmgr.Entry, req *v
 		syncPrimaryBranch = p.Branch
 	}
 	if resp.Status != "blocked" {
-		if checkout, ok := s.repoMgr.Repositories.Checkout(syncPrimaryName); ok && checkout.Repository != nil {
+		if checkout, ok := s.checkouts.Checkout(syncPrimaryName); ok && checkout.Repository != nil {
 			if f := s.forgeMgr.ForgeForInfo(ctx, checkout.Repository); f != nil {
 				ciInfo := ci.RepoInfo{
 					RelPath:    checkout.RelPath,

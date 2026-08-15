@@ -219,7 +219,7 @@ func (m *mcpRegistry) SubscribeResourceUpdates(ctx context.Context, filter mcp.S
 				if !yield(sources.repoUpdate(), nil) {
 					return
 				}
-				repoC = m.serverConfig.repoSvc.Changed()
+				repoC = m.serverConfig.checkouts.Changed()
 			case <-repoStatusC:
 				if !yield(sources.repoUpdate(), nil) {
 					return
@@ -310,7 +310,7 @@ func annotateTool(spec mcp.ToolSpec, annotations mcp.ToolAnnotations) mcp.ToolSp
 
 func (m *mcpRegistry) currentTasksAndRepos(ctx context.Context) ([]v1.Task, []v1.Repo) {
 	taskList := m.taskSvc.taskListSnapshot(ctx)
-	repoList := repoListFromSnapshot(m.serverConfig.repoSvc.Repositories.Checkouts(), m.serverConfig.repoStatus)
+	repoList := repoListFromSnapshot(m.serverConfig.checkouts.Checkouts(), m.serverConfig.repoStatus)
 	return taskList, *repoList
 }
 
@@ -324,7 +324,7 @@ func (m *mcpRegistry) subscriptionSources(filter mcp.SubscriptionFilter) (subscr
 			sources.taskC = m.taskSvc.taskMgr.Changed()
 			sources.taskResourceURIs = append(sources.taskResourceURIs, uri)
 		case uri == "caic://repos" || strings.HasPrefix(uri, "caic://repos/"):
-			sources.repoC = m.serverConfig.repoSvc.Changed()
+			sources.repoC = m.serverConfig.checkouts.Changed()
 			sources.repoStatusC = m.serverConfig.repoStatus.Changed()
 			sources.repoResourceURIs = append(sources.repoResourceURIs, uri)
 		case uri == "gomode://items":
@@ -342,7 +342,7 @@ func (m *mcpRegistry) subscriptionSources(filter mcp.SubscriptionFilter) (subscr
 	if filter.ResourcesListChanged {
 		hasFilter = true
 		sources.taskC = m.taskSvc.taskMgr.Changed()
-		sources.repoC = m.serverConfig.repoSvc.Changed()
+		sources.repoC = m.serverConfig.checkouts.Changed()
 		sources.repoStatusC = m.serverConfig.repoStatus.Changed()
 		sources.resourcesListChanged = true
 	}

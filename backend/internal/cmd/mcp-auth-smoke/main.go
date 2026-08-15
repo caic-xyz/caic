@@ -183,10 +183,6 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 	if err != nil {
 		return "", "", nil, fmt.Errorf("task manager: %w", err)
 	}
-	repoSvc, err := repo.NewService("", checkoutRegistry)
-	if err != nil {
-		return "", "", nil, fmt.Errorf("repository service: %w", err)
-	}
 	prefs, err := preferences.Open(filepath.Join(stateDir, "preferences.json"))
 	if err != nil {
 		return "", "", nil, err
@@ -205,7 +201,7 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 		return "", "", nil, err
 	}
 	router, err := server.New(ctx, server.Dependencies{
-		RepoSvc:       repoSvc,
+		Checkouts:     checkoutRegistry,
 		RepoStatus:    ci.NewRepoStatusStore(),
 		Runtimes:      runtimeRouter,
 		TaskMgr:       taskMgr,

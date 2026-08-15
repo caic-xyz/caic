@@ -348,7 +348,8 @@ func hostIsLoopback(host string) bool {
 // (internal/app) owns the lifetime of the long-lived automation services
 // (Bot, CIService, and their adapters); the router only routes requests to them.
 type Dependencies struct {
-	RepoSvc                    *repo.Service
+	Checkouts                  *repo.Registry
+	CheckoutRoot               string
 	RepoStatus                 *ci.RepoStatusStore
 	Tailscale                  bool
 	Preferences                *preferences.Store
@@ -399,8 +400,8 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 	if d.TaskMgr == nil {
 		return nil, errors.New("task manager is required")
 	}
-	if d.RepoSvc == nil {
-		return nil, errors.New("repos service is required")
+	if d.Checkouts == nil {
+		return nil, errors.New("checkout registry is required")
 	}
 	if d.Preferences == nil {
 		return nil, errors.New("preferences store is required")
@@ -429,7 +430,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		ctx:       ctx,
 		taskMgr:   d.TaskMgr,
 		prefs:     d.Preferences,
-		repoMgr:   d.RepoSvc,
+		checkouts: d.Checkouts,
 		forgeMgr:  d.ForgeMgr,
 		ciSvc:     d.CIService,
 		authStore: d.AuthStore,
@@ -440,7 +441,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 	rateLimiter := newRateLimiter(120, time.Minute)
 
 	s := &Router{
-		log: slog.Default().With(slog.String("cmp", "server")),
+		log: slog.With("cmp", "server"),
 		ctx: ctx,
 		authHandlers: &authHandlers{
 			store:              d.AuthStore,
@@ -455,7 +456,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		},
 		ciHandlers: &ciHandlers{
 			taskMgr:    d.TaskMgr,
-			repoSvc:    d.RepoSvc,
+			checkouts:  d.Checkouts,
 			repoStatus: d.RepoStatus,
 			forgeMgr:   d.ForgeMgr,
 			provider:   d.Provider,
@@ -469,12 +470,14 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 			authEnabled: d.AuthStore != nil,
 		},
 		serverHandlers: &serverHandlers{
+			log:                slog.With("cmp", "server", "handler", "server"),
 			serverCtx:          ctx,
 			runtimes:           d.Runtimes,
 			tailscaleAvailable: d.Tailscale,
 			forgeMgr:           d.ForgeMgr,
 			prefs:              d.Preferences,
-			repoSvc:            d.RepoSvc,
+			checkouts:          d.Checkouts,
+			checkoutRoot:       d.CheckoutRoot,
 			repoStatus:         d.RepoStatus,
 			taskMgr:            d.TaskMgr,
 			cacheSizes:         d.CacheSizes,
@@ -486,7 +489,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		},
 		taskHandlers: &taskHandlers{
 			taskMgr:    d.TaskMgr,
-			repoSvc:    d.RepoSvc,
+			checkouts:  d.Checkouts,
 			repoStatus: d.RepoStatus,
 			forgeMgr:   d.ForgeMgr,
 			ciSvc:      d.CIService,
@@ -560,7 +563,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		ciCache:          d.CICache,
 		forgeMgr:         d.ForgeMgr,
 		taskMgr:          d.TaskMgr,
-		repoSvc:          d.RepoSvc,
+		checkouts:        d.Checkouts,
 		repoStatus:       d.RepoStatus,
 		prefs:            d.Preferences,
 	}

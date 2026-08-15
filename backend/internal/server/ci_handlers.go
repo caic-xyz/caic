@@ -34,7 +34,7 @@ type taskCreator interface {
 
 type ciHandlers struct {
 	taskMgr    *taskmgr.Manager
-	repoSvc    *repo.Service
+	checkouts  *repo.Registry
 	repoStatus *ci.RepoStatusStore
 	forgeMgr   *forgemgr.Manager
 	provider   genai.Provider
@@ -57,7 +57,7 @@ func (h *ciHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 	if p := t.Primary(); p != nil {
 		ciPrimaryName = p.Name
 	}
-	checkout, ok := h.repoSvc.Repositories.Checkout(ciPrimaryName)
+	checkout, ok := h.checkouts.Checkout(ciPrimaryName)
 	if !ok || checkout.Repository == nil {
 		writeError(w, api.BadRequest("no repo info found"))
 		return
@@ -110,7 +110,7 @@ func (h *ciHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 // It fetches CI logs via the forge, builds a rich prompt using ci.FailureSummary,
 // and creates a new agent task — the same path as the automated maybeAutoFix.
 func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Task, error) {
-	checkout, ok := h.repoSvc.Repositories.Checkout(req.Repo)
+	checkout, ok := h.checkouts.Checkout(req.Repo)
 	if !ok || checkout.Repository == nil {
 		return nil, api.BadRequest("repo not found")
 	}
@@ -156,7 +156,7 @@ func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Task, 
 	if !ok {
 		return nil, api.InternalError("created task not found")
 	}
-	dto, err := taskDTO(ctx, entry, h.taskMgr, h.repoSvc, h.authStore)
+	dto, err := taskDTO(ctx, entry, h.taskMgr, h.checkouts, h.authStore)
 	if err != nil {
 		return nil, api.InternalError(err.Error())
 	}
@@ -180,7 +180,7 @@ func (h *ciHandlers) fixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.Status
 	if primary == nil {
 		return nil, api.BadRequest("task has no primary repo")
 	}
-	checkout, ok := h.repoSvc.Repositories.Checkout(primary.Name)
+	checkout, ok := h.checkouts.Checkout(primary.Name)
 	if !ok || checkout.Repository == nil {
 		return nil, api.BadRequest("repo not found")
 	}

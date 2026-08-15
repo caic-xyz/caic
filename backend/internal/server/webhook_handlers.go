@@ -44,7 +44,7 @@ type WebhookHandlers struct {
 	ciCache    *forgecache.Cache
 	forgeMgr   *forgemgr.Manager
 	taskMgr    *taskmgr.Manager
-	repoSvc    *repo.Service
+	checkouts  *repo.Registry
 	repoStatus *ci.RepoStatusStore
 	prefs      *preferences.Store
 }
@@ -229,7 +229,7 @@ func (h *WebhookHandlers) webhookOnCI(ctx context.Context, kind forge.Kind, owne
 	}
 
 	affected := h.taskMgr.FindTasksMonitoringBranch(owner, repoName)
-	affectedRepoPaths := h.repoStatus.PathsAtSHA(repoRefs(h.repoSvc.Repositories.Checkouts()), owner, repoName, sha)
+	affectedRepoPaths := h.repoStatus.PathsAtSHA(repoRefs(h.checkouts.Checkouts()), owner, repoName, sha)
 
 	if len(affected) == 0 && len(affectedRepoPaths) == 0 {
 		return
@@ -510,7 +510,7 @@ func (h *WebhookHandlers) handleCheckSuiteEvent(ctx context.Context, ev *github.
 		slog.WarnContext(ctx, "handleCheckSuiteEvent: cache put", "err", err)
 	}
 
-	for checkout := range h.repoSvc.Repositories.Checkouts() {
+	for checkout := range h.checkouts.Checkouts() {
 		if checkout.Repository != repoInfo {
 			continue
 		}
@@ -550,7 +550,7 @@ func (h *WebhookHandlers) repoByForge(fullName string) (*repo.Repository, bool) 
 	if !ok {
 		return nil, false
 	}
-	return h.repoSvc.Repositories.RepositoryByForge(owner, repoName)
+	return h.checkouts.RepositoryByForge(owner, repoName)
 }
 
 func repoRefs(snap iter.Seq[*repo.Checkout]) []ci.RepoRef {

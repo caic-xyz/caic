@@ -103,7 +103,7 @@ type testRouter struct {
 	*Router
 
 	taskMgr               *taskmgr.Manager
-	repoSvc               *repo.Service
+	checkouts             *repo.Registry
 	repoStatus            *ci.RepoStatusStore
 	prefs                 *preferences.Store
 	forgeMgr              *forgemgr.Manager
@@ -140,14 +140,6 @@ func newTestTaskManager(t testing.TB, cfg taskmgr.Config) *taskmgr.Manager { //n
 	return m
 }
 
-func newTestRepoService(t testing.TB, absRoot string, repositories *repo.Registry) *repo.Service {
-	s, err := repo.NewService(absRoot, repositories)
-	if err != nil {
-		t.Fatalf("repo.NewService: %v", err)
-	}
-	return s
-}
-
 func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testRouter {
 	checker, err := ipgeo.NewChecker(t.Context(), "0.0.0.0/0,::/0", "", "")
 	if err != nil {
@@ -157,12 +149,11 @@ func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testR
 	runtimeRouter := newTestRuntime(t, backend)
 	checkoutRegistry := repo.NewRegistry()
 	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Backends: backends, Checkouts: checkoutRegistry})
-	repoSvc := newTestRepoService(t, "", checkoutRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
 	forgeManager := forgemgr.New("", "", nil, forgemgr.NoOAuthTokenSource())
 	s, err := New(t.Context(), Dependencies{
-		RepoSvc:      repoSvc,
+		Checkouts:    checkoutRegistry,
 		RepoStatus:   repoStatus,
 		Runtimes:     runtimeRouter,
 		TaskMgr:      taskMgr,
@@ -175,7 +166,7 @@ func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testR
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return &testRouter{Router: s, taskMgr: taskMgr, repoSvc: repoSvc, repoStatus: repoStatus, prefs: prefs, forgeMgr: forgeManager}
+	return &testRouter{Router: s, taskMgr: taskMgr, checkouts: checkoutRegistry, repoStatus: repoStatus, prefs: prefs, forgeMgr: forgeManager}
 }
 
 // newTestRouterWithAuthHost creates a Router with an auth store, suitable for
@@ -190,12 +181,11 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 	runtimeRouter := newTestRuntime(t, backend)
 	checkoutRegistry := repo.NewRegistry()
 	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry})
-	repoSvc := newTestRepoService(t, "", checkoutRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
 	forgeManager := forgemgr.New("", "", nil, forgemgr.NoOAuthTokenSource())
 	s, err := New(t.Context(), Dependencies{
-		RepoSvc:                    repoSvc,
+		Checkouts:                  checkoutRegistry,
 		RepoStatus:                 repoStatus,
 		Runtimes:                   runtimeRouter,
 		TaskMgr:                    taskMgr,
@@ -212,7 +202,7 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return &testRouter{Router: s, taskMgr: taskMgr, repoSvc: repoSvc, repoStatus: repoStatus, prefs: prefs, forgeMgr: forgeManager, oauthRefreshTokenPath: refreshTokenPath}
+	return &testRouter{Router: s, taskMgr: taskMgr, checkouts: checkoutRegistry, repoStatus: repoStatus, prefs: prefs, forgeMgr: forgeManager, oauthRefreshTokenPath: refreshTokenPath}
 }
 
 // newTestOAuthRouter creates a Router configured with OAuth host state and a
@@ -234,7 +224,7 @@ func TestNew(t *testing.T) {
 		checkoutRegistry := repo.NewRegistry()
 		taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry})
 		return Dependencies{
-			RepoSvc:     newTestRepoService(t, "", checkoutRegistry),
+			Checkouts:   checkoutRegistry,
 			RepoStatus:  ci.NewRepoStatusStore(),
 			Runtimes:    runtimeRouter,
 			TaskMgr:     taskMgr,
@@ -262,8 +252,8 @@ func TestNew(t *testing.T) {
 			Preferences: newTestPrefs(t),
 			RepoStatus:  ci.NewRepoStatusStore(),
 		})
-		if err == nil || err.Error() != "repos service is required" {
-			t.Fatalf("New() error = %v, want repos service required", err)
+		if err == nil || err.Error() != "checkout registry is required" {
+			t.Fatalf("New() error = %v, want checkout registry required", err)
 		}
 	})
 
@@ -272,7 +262,7 @@ func TestNew(t *testing.T) {
 		runtimeRouter := newTestRuntime(t, &runtimetest.FakeBackend{})
 		checkoutRegistry := repo.NewRegistry()
 		_, err := New(t.Context(), Dependencies{
-			RepoSvc:     newTestRepoService(t, "", checkoutRegistry),
+			Checkouts:   checkoutRegistry,
 			Runtimes:    runtimeRouter,
 			TaskMgr:     newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry}),
 			Preferences: newTestPrefs(t),
@@ -287,7 +277,7 @@ func TestNew(t *testing.T) {
 		runtimeRouter := newTestRuntime(t, &runtimetest.FakeBackend{})
 		checkoutRegistry := repo.NewRegistry()
 		_, err := New(t.Context(), Dependencies{
-			RepoSvc:     newTestRepoService(t, "", checkoutRegistry),
+			Checkouts:   checkoutRegistry,
 			RepoStatus:  ci.NewRepoStatusStore(),
 			Runtimes:    runtimeRouter,
 			TaskMgr:     newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry}),
@@ -452,24 +442,24 @@ func newCheckoutConstructionTestServer(t *testing.T, root string) checkoutConstr
 		HarnessEnv: harnessEnv,
 		Checkouts:  checkoutRegistry,
 	})
-	repoSvc := newTestRepoService(t, root, checkoutRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
 	s, err := New(t.Context(), Dependencies{
-		RepoSvc:     repoSvc,
-		RepoStatus:  repoStatus,
-		Runtimes:    runtimeRouter,
-		TaskMgr:     taskMgr,
-		Preferences: prefs,
-		ForgeMgr:    forgemgr.New("", "", nil, forgemgr.NoOAuthTokenSource()),
-		Warnings:    NewWarningStore(taskMgr),
-		CacheSizes:  NewCacheSizeStore(),
+		Checkouts:    checkoutRegistry,
+		CheckoutRoot: root,
+		RepoStatus:   repoStatus,
+		Runtimes:     runtimeRouter,
+		TaskMgr:      taskMgr,
+		Preferences:  prefs,
+		ForgeMgr:     forgemgr.New("", "", nil, forgemgr.NoOAuthTokenSource()),
+		Warnings:     NewWarningStore(taskMgr),
+		CacheSizes:   NewCacheSizeStore(),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	return checkoutConstructionTestFixture{
-		server:   &testRouter{Router: s, taskMgr: taskMgr, repoSvc: repoSvc, repoStatus: repoStatus, prefs: prefs},
+		server:   &testRouter{Router: s, taskMgr: taskMgr, checkouts: checkoutRegistry, repoStatus: repoStatus, prefs: prefs},
 		logDir:   logDir,
 		cacheDir: cacheDir,
 		runtimes: runtimeRouter,
@@ -530,7 +520,7 @@ func TestCloneRepo(t *testing.T) {
 			t.Fatal("manager backends were not initialized")
 		}
 
-		if got := s.repoSvc.Repositories.Repositories(); len(got) != 1 {
+		if got := s.checkouts.Repositories(); len(got) != 1 {
 			t.Fatalf("repo registry after watcher sync = %+v, want one cloned repo", got)
 		}
 		after, ok := s.taskMgr.Checkouts.Checkout("cloned")
@@ -560,7 +550,7 @@ func TestCloneRepo(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(root, "broken")); !os.IsNotExist(err) {
 			t.Fatalf("partial clone path still exists: %v", err)
 		}
-		if got := s.repoSvc.Repositories.Repositories(); len(got) != 0 {
+		if got := s.checkouts.Repositories(); len(got) != 0 {
 			t.Fatalf("repo registry = %+v, want empty after failed clone", got)
 		}
 		if _, ok := s.taskMgr.Checkouts.Checkout("broken"); ok {
@@ -1208,8 +1198,8 @@ func TestHandleListRepos(t *testing.T) {
 	repositories := repo.NewRegistry()
 	registerRouterCheckout(t, repositories, "org/repoA", &repo.Checkout{Dir: "/src/org/repoA", BaseBranch: "main"})
 	registerRouterCheckout(t, repositories, "repoB", &repo.Checkout{Dir: "/src/repoB", BaseBranch: "develop"})
-	s.repoSvc = newTestRepoService(t, "", repositories)
-	s.serverHandlers.repoSvc = s.repoSvc
+	s.checkouts = repositories
+	s.serverHandlers.checkouts = repositories
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/server/repos", http.NoBody)
 	w := httptest.NewRecorder()
@@ -1427,7 +1417,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 		for _, e := range entries {
 			h := testTaskHandlers(s)
-			j, err := taskDTO(t.Context(), e, h.taskSvc.taskMgr, h.taskSvc.repoMgr, h.taskSvc.authStore)
+			j, err := taskDTO(t.Context(), e, h.taskSvc.taskMgr, h.taskSvc.checkouts, h.taskSvc.authStore)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1484,7 +1474,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 		for _, e := range entries {
 			h := testTaskHandlers(s)
-			j, err := taskDTO(t.Context(), e, h.taskSvc.taskMgr, h.taskSvc.repoMgr, h.taskSvc.authStore)
+			j, err := taskDTO(t.Context(), e, h.taskSvc.taskMgr, h.taskSvc.checkouts, h.taskSvc.authStore)
 			if err != nil {
 				t.Fatal(err)
 			}

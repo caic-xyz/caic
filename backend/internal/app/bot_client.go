@@ -23,9 +23,9 @@ import (
 
 // botClient adapts task and forge stores to bot.Client.
 type botClient struct {
-	repoSvc  *repo.Service
-	taskMgr  *taskmgr.Manager
-	forgeMgr *forgemgr.Manager
+	checkouts *repo.Registry
+	taskMgr   *taskmgr.Manager
+	forgeMgr  *forgemgr.Manager
 }
 
 // ResolveRepo maps a forge full name ("owner/repo") to local repo info.
@@ -37,12 +37,12 @@ func (c *botClient) ResolveRepo(forgeFullName string) *bot.RepoInfo {
 	if !ok {
 		return nil
 	}
-	repository, found := c.repoSvc.Repositories.RepositoryByForge(owner, repoName)
+	repository, found := c.checkouts.RepositoryByForge(owner, repoName)
 	if !found {
 		return nil
 	}
 	var checkout *repo.Checkout
-	for candidate := range c.repoSvc.Repositories.Checkouts() {
+	for candidate := range c.checkouts.Checkouts() {
 		if candidate.Repository != repository {
 			continue
 		}
@@ -85,7 +85,7 @@ func (c *botClient) CreateTask(ctx context.Context, req task.CreateRequest) (str
 	// commenter. Only relevant for issue-triggered tasks.
 	var ownerResolved, repoResolved string
 	if req.ForgeIssue > 0 {
-		if checkout, ok := c.repoSvc.Repositories.Checkout(req.Repo); ok && checkout.Repository != nil && checkout.Repository.ForgeOwner != "" {
+		if checkout, ok := c.checkouts.Checkout(req.Repo); ok && checkout.Repository != nil && checkout.Repository.ForgeOwner != "" {
 			ownerResolved = checkout.Repository.ForgeOwner
 			repoResolved = checkout.Repository.ForgeRepo
 		}

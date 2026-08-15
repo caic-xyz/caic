@@ -55,6 +55,36 @@ func TestMCPHandlers(t *testing.T) {
 		return w, resp
 	}
 
+	t.Run("repositoryChangeNotification", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		registry := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: s.taskHandlers.taskSvc}
+		ctx, cancel := context.WithCancel(t.Context())
+		t.Cleanup(cancel)
+		updates, err := registry.SubscribeResourceUpdates(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{"caic://repos"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		updateC := make(chan mcp.ResourceUpdate, 1)
+		go func() {
+			for update, iterErr := range updates {
+				if iterErr == nil {
+					updateC <- update
+				}
+				return
+			}
+		}()
+		registerRouterCheckout(t, s.checkouts, "repo", newRouterTestCheckout(t.TempDir()))
+		select {
+		case update := <-updateC:
+			if !slices.Equal(update.ResourceURIs, []string{"caic://repos"}) {
+				t.Errorf("ResourceURIs = %v, want [caic://repos]", update.ResourceURIs)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("repository registration did not notify MCP subscribers")
+		}
+	})
+
 	t.Run("disabledLeavesEndpointUnregistered", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)

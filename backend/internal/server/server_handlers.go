@@ -4,13 +4,13 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"iter"
 	"log/slog"
 	"maps"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -35,12 +35,14 @@ import (
 )
 
 type serverHandlers struct {
+	log                *slog.Logger
 	serverCtx          context.Context
 	runtimes           *caicruntime.Router
 	tailscaleAvailable bool
 	forgeMgr           *forgemgr.Manager
 	prefs              *preferences.Store
-	repoSvc            *repo.Service
+	checkouts          *repo.Registry
+	checkoutRoot       string
 	repoStatus         *ci.RepoStatusStore
 	taskMgr            *taskmgr.Manager
 	cacheSizes         *CacheSizeStore
@@ -392,7 +394,7 @@ func (h *serverHandlers) getCacheSizes(_ context.Context, _ *api.EmptyReq) (*v1.
 }
 
 func (h *serverHandlers) listRepos(_ context.Context, _ *api.EmptyReq) (*[]v1.Repo, error) {
-	return repoListFromSnapshot(h.repoSvc.Repositories.Checkouts(), h.repoStatus), nil
+	return repoListFromSnapshot(h.checkouts.Checkouts(), h.repoStatus), nil
 }
 
 func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.Request) {
@@ -401,14 +403,14 @@ func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.R
 		writeError(w, api.BadRequest("repo is required"))
 		return
 	}
-	info, ok := h.repoSvc.Repositories.Checkout(repoPath)
+	info, ok := h.checkouts.Checkout(repoPath)
 	if !ok {
 		writeError(w, api.NotFound("repo not found"))
 		return
 	}
 	absPath := info.Dir
 	ctx := r.Context()
-	checkout := &git.Checkout{Root: absPath, Logger: slog.Default()}
+	checkout := &git.Checkout{Root: absPath, Logger: h.log.With("repo", repoPath)}
 	// Fetch local branches.
 	localPairs, err := checkout.ListBranches(ctx, "")
 	if err != nil {
@@ -445,21 +447,22 @@ func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.R
 }
 
 func (h *serverHandlers) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo, error) {
-	info, err := h.repoSvc.Clone(ctx, repo.CloneRequest{URL: req.URL, Path: req.Path, Depth: req.Depth})
+	target, err := cloneTarget(h.checkoutRoot, req.URL, req.Path, h.checkouts)
 	if err != nil {
-		repoErr, ok := errors.AsType[*repo.Error](err)
-		if !ok {
-			return nil, api.InternalError(err.Error())
-		}
-		switch repoErr.Kind {
-		case repo.ErrorBadRequest:
-			return nil, api.BadRequest(repoErr.Message)
-		case repo.ErrorConflict:
-			return nil, api.Conflict(repoErr.Message)
-		default:
-			return nil, api.InternalError(repoErr.Message)
-		}
+		return nil, err
 	}
+	info, err := repo.Clone(ctx, h.log.With("repo", target.relPath), req.URL, target.dir, req.Depth)
+	if err != nil {
+		return nil, api.InternalError(err.Error())
+	}
+	info.RelPath = target.relPath
+	if err := h.checkouts.RegisterCheckout(info); err != nil {
+		if removeErr := os.RemoveAll(target.dir); removeErr != nil {
+			return nil, api.InternalError(fmt.Sprintf("register checkout: %v; remove checkout: %v", err, removeErr))
+		}
+		return nil, api.Conflict(err.Error())
+	}
+	h.log.InfoContext(ctx, "cloned repo", "url", req.URL, "path", target.relPath)
 	var remote string
 	var kind forge.Kind
 	if info.Repository != nil {
@@ -477,6 +480,43 @@ func (h *serverHandlers) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*
 		RemoteURL:  git.RemoteToHTTPS(remote),
 		Forge:      forgeKind,
 	}, nil
+}
+
+type cloneTargetPath struct {
+	relPath string
+	dir     string
+}
+
+func cloneTarget(root, url, path string, checkouts *repo.Registry) (cloneTargetPath, error) {
+	if root == "" {
+		return cloneTargetPath{}, api.InternalError("checkout root is not configured")
+	}
+	if path == "" {
+		path = strings.TrimSuffix(filepath.Base(url), ".git")
+		if path == "" || path == "." || path == string(filepath.Separator) {
+			return cloneTargetPath{}, api.BadRequest("cannot derive repo name from URL; specify path explicitly")
+		}
+	}
+	dir := filepath.Join(root, path)
+	relPath, err := filepath.Rel(root, dir)
+	if err != nil || relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) {
+		return cloneTargetPath{}, api.BadRequest("path escapes root directory")
+	}
+	if _, err := os.Stat(dir); err == nil {
+		return cloneTargetPath{}, api.Conflict("directory already exists: " + relPath)
+	} else if !os.IsNotExist(err) {
+		return cloneTargetPath{}, api.InternalError("stat clone directory: " + err.Error())
+	}
+	if _, ok := checkouts.Checkout(relPath); ok {
+		return cloneTargetPath{}, api.Conflict("repo already registered: " + relPath)
+	}
+	base := filepath.Base(relPath)
+	for checkout := range checkouts.Checkouts() {
+		if checkout.RelPath != "" && filepath.Base(checkout.RelPath) == base && checkout.RelPath != relPath {
+			return cloneTargetPath{}, api.Conflict("repo basename conflicts with existing: " + checkout.RelPath)
+		}
+	}
+	return cloneTargetPath{relPath: relPath, dir: dir}, nil
 }
 
 func repoListFromSnapshot(snap iter.Seq[*repo.Checkout], repoStatus *ci.RepoStatusStore) *[]v1.Repo {

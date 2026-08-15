@@ -409,7 +409,6 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 	runtimeRouter := newTestRuntime(t, backend)
 	checkoutRegistry := repo.NewRegistry()
 	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry})
-	repoSvc := newTestRepoService(t, "", checkoutRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
 	forgeManager := forgemgr.New("", "", nil, forgemgr.NoOAuthTokenSource())
@@ -421,7 +420,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 
 	refreshTokenPath := t.TempDir() + "/mcp_oauth_refresh_tokens.json"
 	s, err := New(t.Context(), Dependencies{
-		RepoSvc:                    repoSvc,
+		Checkouts:                  checkoutRegistry,
 		RepoStatus:                 repoStatus,
 		Runtimes:                   runtimeRouter,
 		TaskMgr:                    taskMgr,
@@ -440,7 +439,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	tr := &testRouter{Router: s, taskMgr: taskMgr, repoSvc: repoSvc, repoStatus: repoStatus, prefs: prefs, forgeMgr: forgeManager, oauthRefreshTokenPath: refreshTokenPath}
+	tr := &testRouter{Router: s, taskMgr: taskMgr, checkouts: checkoutRegistry, repoStatus: repoStatus, prefs: prefs, forgeMgr: forgeManager, oauthRefreshTokenPath: refreshTokenPath}
 
 	// Re-export authStore for restart tests that need to share refresh tokens.
 	tr.authStore = store

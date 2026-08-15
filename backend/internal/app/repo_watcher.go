@@ -24,16 +24,16 @@ type repoWatcher struct {
 	log        *slog.Logger
 	ctx        context.Context
 	absRoot    string
-	repoSvc    *repo.Service
+	checkouts  *repo.Registry
 	repoStatus *ci.RepoStatusStore
 }
 
-func newRepoWatcher(ctx context.Context, absRoot string, repoService *repo.Service, repoStatus *ci.RepoStatusStore) *repoWatcher {
+func newRepoWatcher(ctx context.Context, absRoot string, checkouts *repo.Registry, repoStatus *ci.RepoStatusStore) *repoWatcher {
 	return &repoWatcher{
 		log:        slog.With("cmp", "repo-watcher", "root", absRoot),
 		ctx:        ctx,
 		absRoot:    absRoot,
-		repoSvc:    repoService,
+		checkouts:  checkouts,
 		repoStatus: repoStatus,
 	}
 }
@@ -64,7 +64,7 @@ func (w *repoWatcher) syncReposInDir(ctx context.Context, dir string) {
 	}
 
 	registered := make(map[string]struct{})
-	for checkout := range w.repoSvc.Repositories.Checkouts() {
+	for checkout := range w.checkouts.Checkouts() {
 		registered[checkout.Dir] = struct{}{}
 		if filepath.Dir(checkout.Dir) != dir {
 			continue
@@ -72,7 +72,7 @@ func (w *repoWatcher) syncReposInDir(ctx context.Context, dir string) {
 		if _, ok := current[checkout.Dir]; ok {
 			continue
 		}
-		w.repoSvc.UnregisterCheckout(checkout.RelPath)
+		w.checkouts.UnregisterCheckout(checkout.RelPath)
 		w.log.InfoContext(ctx, "unregistered removed checkout", "path", checkout.RelPath)
 	}
 
@@ -87,15 +87,16 @@ func (w *repoWatcher) syncReposInDir(ctx context.Context, dir string) {
 }
 
 func (w *repoWatcher) register(ctx context.Context, abs string) {
-	checkout, err := w.repoSvc.DiscoverCheckout(ctx, abs)
+	checkout, err := repo.DiscoverCheckout(ctx, w.log.With("path", abs), abs)
 	if err != nil {
-		slog.WarnContext(ctx, "new repo: discovery failed", "path", abs, "err", err)
+		w.log.WarnContext(ctx, "new repo: discovery failed", "path", abs, "err", err)
 		return
 	}
-	if _, ok := w.repoSvc.Repositories.Checkout(checkout.RelPath); ok {
+	checkout.RelPath = checkoutRelPath(w.absRoot, abs)
+	if _, ok := w.checkouts.Checkout(checkout.RelPath); ok {
 		return
 	}
-	if err := w.repoSvc.RegisterCheckout(checkout); err != nil {
+	if err := w.checkouts.RegisterCheckout(checkout); err != nil {
 		w.log.WarnContext(ctx, "register checkout failed", "path", checkout.RelPath, "err", err)
 		return
 	}
@@ -131,11 +132,11 @@ func (w *repoWatcher) poll(ctx context.Context, mtimes map[string]time.Time) {
 
 func (w *repoWatcher) unregisterUnder(ctx context.Context, dir string) {
 	prefix := dir + string(filepath.Separator)
-	for checkout := range w.repoSvc.Repositories.Checkouts() {
+	for checkout := range w.checkouts.Checkouts() {
 		if !strings.HasPrefix(checkout.Dir, prefix) {
 			continue
 		}
-		w.repoSvc.UnregisterCheckout(checkout.RelPath)
+		w.checkouts.UnregisterCheckout(checkout.RelPath)
 		w.log.InfoContext(ctx, "unregistered removed checkout", "path", checkout.RelPath)
 	}
 }

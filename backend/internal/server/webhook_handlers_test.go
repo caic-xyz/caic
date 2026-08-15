@@ -33,7 +33,7 @@ import (
 // testCIBackend is a minimal ci.Backend wired to a repo/task store, sufficient
 // for webhook handler tests that drive CI status updates through ci.Service.
 type testCIBackend struct {
-	repoSvc    *repo.Service
+	checkouts  *repo.Registry
 	repoStatus *ci.RepoStatusStore
 	taskMgr    *taskmgr.Manager
 	forgeMgr   *forgemgr.Manager
@@ -61,7 +61,7 @@ func (b *testCIBackend) SetTaskMonitorBranch(entry ci.TaskEntry, branch string) 
 }
 
 func (b *testCIBackend) RepoInfoFor(relPath string) ci.RepoInfo {
-	checkout, ok := b.repoSvc.Repositories.Checkout(relPath)
+	checkout, ok := b.checkouts.Checkout(relPath)
 	if !ok || checkout.Repository == nil {
 		return ci.RepoInfo{}
 	}
@@ -170,7 +170,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 	t.Run("updates CI status when SHA matches HEAD", func(t *testing.T) {
 		t.Parallel()
 		s := minimalRouter(t)
-		registerRouterCheckout(t, s.repoSvc.Repositories, "org/repo", &repo.Checkout{Dir: t.TempDir(), BaseBranch: "main", Repository: &repo.Repository{ForgeOwner: "org", ForgeRepo: "repo"}})
+		registerRouterCheckout(t, s.checkouts, "org/repo", &repo.Checkout{Dir: t.TempDir(), BaseBranch: "main", Repository: &repo.Repository{ForgeOwner: "org", ForgeRepo: "repo"}})
 		s.forgeMgr.SetGitHubApp(&stubAppClient{forgeClient: &stubForge{headSHA: "abc123", checkRuns: successRuns}})
 
 		s.webhooks.handleCheckSuiteEvent(t.Context(), &github.CheckSuiteEvent{
@@ -193,7 +193,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 	t.Run("ignores out-of-order delivery when SHA is not HEAD", func(t *testing.T) {
 		t.Parallel()
 		s := minimalRouter(t)
-		registerRouterCheckout(t, s.repoSvc.Repositories, "org/repo", &repo.Checkout{Dir: t.TempDir(), BaseBranch: "main", Repository: &repo.Repository{ForgeOwner: "org", ForgeRepo: "repo"}})
+		registerRouterCheckout(t, s.checkouts, "org/repo", &repo.Checkout{Dir: t.TempDir(), BaseBranch: "main", Repository: &repo.Repository{ForgeOwner: "org", ForgeRepo: "repo"}})
 		// HEAD is now "newsha"; the webhook carries "oldsha".
 		s.forgeMgr.SetGitHubApp(&stubAppClient{forgeClient: &stubForge{headSHA: "newsha", checkRuns: failureRuns}})
 
@@ -493,13 +493,12 @@ func minimalRouter(t *testing.T) *testRouter {
 	runtimeRouter := newTestRuntime(t, backend)
 	checkoutRegistry := repo.NewRegistry()
 	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: ctx, Runtimes: runtimeRouter, Checkouts: checkoutRegistry})
-	repoSvc := newTestRepoService(t, "", checkoutRegistry)
 	repoStatus := ci.NewRepoStatusStore()
 	fm := forgemgr.New("", "", nil, forgemgr.NoOAuthTokenSource())
 	prefs := newTestPrefs(t)
-	ciService := ci.NewService(cache, nil, &testCIBackend{repoSvc: repoSvc, repoStatus: repoStatus, taskMgr: taskMgr, forgeMgr: fm, prefs: prefs})
+	ciService := ci.NewService(cache, nil, &testCIBackend{checkouts: checkoutRegistry, repoStatus: repoStatus, taskMgr: taskMgr, forgeMgr: fm, prefs: prefs})
 	s, err := New(ctx, Dependencies{
-		RepoSvc:     repoSvc,
+		Checkouts:   checkoutRegistry,
 		RepoStatus:  repoStatus,
 		Runtimes:    runtimeRouter,
 		TaskMgr:     taskMgr,
@@ -513,5 +512,5 @@ func minimalRouter(t *testing.T) *testRouter {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return &testRouter{Router: s, taskMgr: taskMgr, repoSvc: repoSvc, repoStatus: repoStatus, prefs: prefs, forgeMgr: fm}
+	return &testRouter{Router: s, taskMgr: taskMgr, checkouts: checkoutRegistry, repoStatus: repoStatus, prefs: prefs, forgeMgr: fm}
 }

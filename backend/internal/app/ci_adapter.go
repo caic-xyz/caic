@@ -23,7 +23,7 @@ type ciTaskCreator interface {
 
 // ciAdapter adapts caic stores and managers to ci.Backend.
 type ciAdapter struct {
-	repoMgr     *repo.Service
+	checkouts   *repo.Registry
 	repoStatus  *ci.RepoStatusStore
 	taskMgr     *taskmgr.Manager
 	forgeMgr    *forgemgr.Manager
@@ -75,7 +75,7 @@ func (a *ciAdapter) SetTaskMonitorBranch(entry ci.TaskEntry, branch string) {
 
 // RepoInfoFor returns CI-level repo info for relPath.
 func (a *ciAdapter) RepoInfoFor(relPath string) ci.RepoInfo {
-	checkout, ok := a.repoMgr.Repositories.Checkout(relPath)
+	checkout, ok := a.checkouts.Checkout(relPath)
 	if !ok || checkout.Repository == nil {
 		return ci.RepoInfo{}
 	}
@@ -101,7 +101,7 @@ func (a *ciAdapter) ListActiveRepos() []ci.RepoInfo {
 		return true
 	})
 	var out []ci.RepoInfo
-	for checkout := range a.repoMgr.Repositories.Checkouts() {
+	for checkout := range a.checkouts.Checkouts() {
 		if checkout.Repository == nil || checkout.Repository.ForgeOwner == "" {
 			continue
 		}

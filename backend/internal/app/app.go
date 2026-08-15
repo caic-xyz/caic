@@ -304,18 +304,14 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		return nil, err
 	}
 
-	repoService, err := repo.NewService(absRoot, checkoutRegistry)
-	if err != nil {
-		return nil, fmt.Errorf("repository service: %w", err)
-	}
 	repoStatus := ci.NewRepoStatusStore()
 
 	// Long-lived forge automation, owned by app and routed to by the HTTP layer.
 	warnings := server.NewWarningStore(taskMgr)
 	cacheSizes := server.NewCacheSizeStore()
-	botClient := &botClient{repoSvc: repoService, taskMgr: taskMgr, forgeMgr: forgeManager}
+	botClient := &botClient{checkouts: checkoutRegistry, taskMgr: taskMgr, forgeMgr: forgeManager}
 	ciAdapter := &ciAdapter{
-		repoMgr:     repoService,
+		checkouts:   checkoutRegistry,
 		repoStatus:  repoStatus,
 		taskMgr:     taskMgr,
 		forgeMgr:    forgeManager,
@@ -335,7 +331,8 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	}
 
 	s, err := server.New(ctx, server.Dependencies{
-		RepoSvc:                    repoService,
+		Checkouts:                  checkoutRegistry,
+		CheckoutRoot:               absRoot,
 		RepoStatus:                 repoStatus,
 		Tailscale:                  cfg.Runtime.TailscaleAPIKey != "",
 		Preferences:                prefsStore,
@@ -381,11 +378,12 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	for _, abs := range repoRes.paths {
 		wg.Go(func() {
 			defer trace.StartRegion(ctx, "repo-checkout-init").End()
-			result, err := repoService.DiscoverCheckout(ctx, abs)
+			result, err := repo.DiscoverCheckout(ctx, slog.With("cmp", "repo-discovery", "path", abs), abs)
 			if err != nil {
 				slog.WarnContext(ctx, "skipping repo", "path", abs, "err", err)
 				return
 			}
+			result.RelPath = checkoutRelPath(absRoot, abs)
 			checkouts <- result
 			slog.DebugContext(ctx, "discovered repo", "path", result.RelPath, "br", result.BaseBranch)
 		})
@@ -393,7 +391,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	wg.Wait()
 	close(checkouts)
 	for checkout := range checkouts {
-		if err := repoService.RegisterCheckout(checkout); err != nil {
+		if err := checkoutRegistry.RegisterCheckout(checkout); err != nil {
 			slog.WarnContext(ctx, "skipping duplicate checkout", "path", checkout.RelPath, "err", err)
 		}
 	}
@@ -477,11 +475,22 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 			return nil
 		},
 		func(ctx context.Context) error {
-			newRepoWatcher(ctx, absRoot, repoService, repoStatus).watch()
+			newRepoWatcher(ctx, absRoot, checkoutRegistry, repoStatus).watch()
 			return nil
 		},
 	)
 	return &App{Server: s, voiceBridge: voiceBridge, backgroundTasks: backgroundTasks, taskMgr: taskMgr}, nil
+}
+
+func checkoutRelPath(root, dir string) string {
+	rel, err := filepath.Rel(root, dir)
+	if err != nil {
+		return filepath.Base(dir)
+	}
+	if rel == "." {
+		return ""
+	}
+	return rel
 }
 
 // cleanupLegacyReplayArtifacts removes obsolete derived files left by older

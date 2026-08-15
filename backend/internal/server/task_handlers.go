@@ -37,7 +37,7 @@ import (
 // to taskService.
 type taskHandlers struct {
 	taskMgr    *taskmgr.Manager
-	repoSvc    *repo.Service
+	checkouts  *repo.Registry
 	repoStatus *ci.RepoStatusStore
 	forgeMgr   *forgemgr.Manager
 	ciSvc      *ci.Service
@@ -395,7 +395,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 		// loop emits the newer state instead of missing the transition.
 		ch := h.taskMgr.Changed()
 		out := h.taskSvc.taskListSnapshot(ctx)
-		repoList := repoListFromSnapshot(h.repoSvc.Repositories.Checkouts(), h.repoStatus)
+		repoList := repoListFromSnapshot(h.checkouts.Checkouts(), h.repoStatus)
 		var newWarnings = h.warnings.Since(lastWarnTime)
 
 		reposJSON, err := json.Marshal(repoList)
