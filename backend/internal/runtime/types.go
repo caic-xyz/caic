@@ -207,9 +207,26 @@ type StatsSample struct {
 	Stats      Stats
 }
 
-// Event describes a runtime lifecycle event.
+// EventKind identifies a runtime lifecycle event.
+type EventKind string
+
+const (
+	// EventDestroy reports that an instance was removed and cannot be revived.
+	EventDestroy EventKind = "destroy"
+	// EventDie reports that an instance stopped.
+	EventDie EventKind = "die"
+	// EventOOM reports that the runtime killed an instance for exceeding memory.
+	EventOOM EventKind = "oom"
+	// EventRestart reports that a previously stopped instance restarted.
+	EventRestart EventKind = "restart"
+	// EventStart reports that a previously stopped instance started.
+	EventStart EventKind = "start"
+)
+
+// Event describes one runtime lifecycle transition.
 type Event struct {
 	InstanceID ID
+	Kind       EventKind
 }
 
 // StartOptions holds optional flags for runtime instance startup.

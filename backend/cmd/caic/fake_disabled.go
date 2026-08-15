@@ -7,12 +7,13 @@ package main
 import (
 	"context"
 	"errors"
+	"log/slog"
 
 	"github.com/caic-xyz/caic/backend/internal/server"
 )
 
 const isFakeMode = false
 
-func serveFake(ctx context.Context, addr string, cfg *server.Config, traceFile string) error {
+func serveFake(ctx context.Context, log *slog.Logger, addr string, cfg *server.Config, traceFile string) error {
 	return errors.New("fake mode is not enabled in this build; use -tags e2e")
 }

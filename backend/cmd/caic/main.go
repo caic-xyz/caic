@@ -158,7 +158,7 @@ Flags:
 		}
 	}
 
-	initLogging(logLevel, tc.Debug.NoLogTime)
+	log := initLogging(logLevel, tc.Debug.NoLogTime)
 
 	// File-based profiling: CPU, heap, and execution trace.
 	if tc.Debug.CPUProfile != "" {
@@ -211,7 +211,7 @@ Flags:
 		return err
 	}
 	if isFakeMode {
-		return serveFake(ctx, addr, cfg, *traceFlag)
+		return serveFake(ctx, log, addr, cfg, *traceFlag)
 	}
 	addr = localizeAddr(addr)
 
@@ -239,7 +239,7 @@ Flags:
 			go autoupdate.Run(ctx, github.NewClient(cfg.GitHub.Token, http.DefaultTransport), sched)
 		}
 	}
-	return serveHTTP(ctx, ln, root, cfg)
+	return serveHTTP(ctx, log, ln, root, cfg)
 }
 
 // roundDur rounds d to 3 significant digits.
@@ -258,7 +258,7 @@ func roundDur(d time.Duration) time.Duration {
 // initLogging configures slog with tint for colored, concise output.
 // Timestamps are omitted when noLogTime is true, and zero-value
 // attributes are dropped.
-func initLogging(level string, noLogTime bool) {
+func initLogging(level string, noLogTime bool) *slog.Logger {
 	ll := &slog.LevelVar{}
 	switch level {
 	case "debug":
@@ -271,7 +271,7 @@ func initLogging(level string, noLogTime bool) {
 		ll.Set(slog.LevelError)
 	}
 	homeDir, _ := os.UserHomeDir()
-	slog.SetDefault(slog.New(tint.NewHandler(colorable.NewColorable(os.Stderr), &tint.Options{
+	log := slog.New(tint.NewHandler(colorable.NewColorable(os.Stderr), &tint.Options{
 		Level:      ll,
 		TimeFormat: "15:04:05.000",
 		NoColor:    !isatty.IsTerminal(os.Stderr.Fd()),
@@ -310,11 +310,13 @@ func initLogging(level string, noLogTime bool) {
 			}
 			return a
 		},
-	})))
+	}))
+	slog.SetDefault(log)
+	return log
 }
 
-func serveHTTP(ctx context.Context, ln net.Listener, rootDir string, cfg *server.Config) error {
-	srv, err := app.New(ctx, rootDir, cfg)
+func serveHTTP(ctx context.Context, log *slog.Logger, ln net.Listener, rootDir string, cfg *server.Config) error {
+	srv, err := app.New(ctx, log, rootDir, cfg)
 	if err != nil {
 		return err
 	}

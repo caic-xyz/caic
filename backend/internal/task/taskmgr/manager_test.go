@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,6 +76,9 @@ func (f *metadataErrorInfo) Metadata(ctx context.Context, id runtime.ID, key run
 }
 
 func newTestManager(t testing.TB, cfg Config) *Manager { //nolint:gocritic // Config mirrors New's value bag in tests.
+	if cfg.Log == nil {
+		cfg.Log = slog.New(slog.DiscardHandler)
+	}
 	if cfg.LogDir == "" {
 		cfg.LogDir = t.TempDir()
 	}
@@ -416,6 +420,7 @@ func TestNew(t *testing.T) {
 			{name: "runtime router", cfg: Config{ServerCtx: t.Context()}, want: "task manager runtime router is required"},
 			{name: "checkout registry", cfg: Config{ServerCtx: t.Context(), Runtimes: runtimes}, want: "task manager checkout registry is required"},
 			{name: "runtime start timeout", cfg: Config{ServerCtx: t.Context(), Runtimes: runtimes, Checkouts: repo.NewRegistry()}, want: "task manager runtime start timeout is required"},
+			{name: "logger", cfg: Config{ServerCtx: t.Context(), Runtimes: runtimes, Checkouts: repo.NewRegistry(), RuntimeStartTimeout: time.Hour}, want: "task manager logger is required"},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
@@ -453,6 +458,7 @@ func TestNew(t *testing.T) {
 		}
 		cfg := Config{
 			ServerCtx:           t.Context(),
+			Log:                 slog.New(slog.DiscardHandler),
 			LogDir:              "/tmp/logs",
 			CacheDir:            "/tmp/cache",
 			Runtimes:            router,
@@ -1866,7 +1872,7 @@ func TestManager(t *testing.T) {
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-dead"), runtime.ConnectionTarget{SSHHost: "ctr-dead"}, "", "", 0)
 			tk.SetState(task.StateRunning)
 			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
-			m.handleRuntimeInstanceExit(runtime.NewID("test-runtime", "ctr-dead"))
+			m.handleRuntimeInstanceExit(t.Context(), runtime.NewID("test-runtime", "ctr-dead"))
 			if got := tk.GetState(); got != task.StateStopped {
 				t.Errorf("state = %v, want StateStopped", got)
 			}
@@ -1881,7 +1887,7 @@ func TestManager(t *testing.T) {
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-purged"), runtime.ConnectionTarget{SSHHost: "ctr-purged"}, "", "", 0)
 			tk.SetState(task.StatePurged)
 			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
-			m.handleRuntimeInstanceExit(runtime.NewID("test-runtime", "ctr-purged"))
+			m.handleRuntimeInstanceExit(t.Context(), runtime.NewID("test-runtime", "ctr-purged"))
 			if got := tk.GetState(); got != task.StatePurged {
 				t.Errorf("state = %v (should stay Purged)", got)
 			}
@@ -1899,7 +1905,7 @@ func TestManager(t *testing.T) {
 			// mid-purge and race the cleanup goroutine.
 			tk.SetState(task.StatePurging)
 			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
-			m.handleRuntimeInstanceExit(runtime.NewID("test-runtime", "ctr-purging"))
+			m.handleRuntimeInstanceExit(t.Context(), runtime.NewID("test-runtime", "ctr-purging"))
 			if got := tk.GetState(); got != task.StatePurging {
 				t.Errorf("state = %v (should stay Purging)", got)
 			}
@@ -1914,7 +1920,7 @@ func TestManager(t *testing.T) {
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-stopping"), runtime.ConnectionTarget{SSHHost: "ctr-stopping"}, "", "", 0)
 			tk.SetState(task.StateStopping)
 			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
-			m.handleRuntimeInstanceExit(runtime.NewID("test-runtime", "ctr-stopping"))
+			m.handleRuntimeInstanceExit(t.Context(), runtime.NewID("test-runtime", "ctr-stopping"))
 			if got := tk.GetState(); got != task.StateStopping {
 				t.Errorf("state = %v (should stay Stopping)", got)
 			}
@@ -1929,7 +1935,7 @@ func TestManager(t *testing.T) {
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-stopped"), runtime.ConnectionTarget{SSHHost: "ctr-stopped"}, "", "", 0)
 			tk.SetState(task.StateStopped)
 			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
-			m.handleRuntimeInstanceExit(runtime.NewID("test-runtime", "ctr-stopped"))
+			m.handleRuntimeInstanceExit(t.Context(), runtime.NewID("test-runtime", "ctr-stopped"))
 			if got := tk.GetState(); got != task.StateStopped {
 				t.Errorf("state = %v (should stay Stopped)", got)
 			}
@@ -1944,7 +1950,7 @@ func TestManager(t *testing.T) {
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-alive"), runtime.ConnectionTarget{SSHHost: "ctr-alive"}, "", "", 0)
 			tk.SetState(task.StateRunning)
 			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
-			m.handleRuntimeInstanceExit(runtime.NewID("test-runtime", "ctr-other"))
+			m.handleRuntimeInstanceExit(t.Context(), runtime.NewID("test-runtime", "ctr-other"))
 			if got := tk.GetState(); got != task.StateRunning {
 				t.Errorf("state = %v (should stay Running)", got)
 			}
@@ -3762,6 +3768,56 @@ func TestManager(t *testing.T) {
 
 	t.Run("watchRuntimeEvents", func(t *testing.T) {
 		t.Parallel()
+		t.Run("buffers_before_import", func(t *testing.T) {
+			t.Parallel()
+			events := make(chan runtime.Event, 1)
+			fake := &runtimetest.FakeInfo{Events: events}
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake)})
+			t.Cleanup(func() { _ = m.Close() })
+			if err := m.BeginImport(); err != nil {
+				t.Fatal(err)
+			}
+
+			events <- runtime.Event{InstanceID: "ctr-import", Kind: runtime.EventDie}
+			deadline := time.Now().Add(time.Second)
+			for {
+				m.eventMu.Lock()
+				buffered := len(m.pendingRuntimeEvents)
+				m.eventMu.Unlock()
+				if buffered == 1 {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("runtime event was not buffered")
+				}
+				time.Sleep(time.Millisecond)
+			}
+
+			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-import"), runtime.ConnectionTarget{SSHHost: "ctr-import"}, "", "", 0)
+			tk.SetState(task.StateRunning)
+			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+			if _, err := m.ImportInstances(t.Context(), []runtime.Instance{}, nil); err != nil {
+				t.Fatal(err)
+			}
+			if got := tk.GetState(); got != task.StateStopped {
+				t.Fatalf("state = %v, want StateStopped", got)
+			}
+		})
+		t.Run("unavailable_at_startup", func(t *testing.T) {
+			t.Parallel()
+			fake := &runtimetest.FakeInfo{WatchErr: errors.New("unavailable")}
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake)})
+			if err := m.BeginImport(); err == nil {
+				t.Fatal("BeginImport succeeded, want runtime event watch error")
+			}
+			m.eventMu.Lock()
+			importing := m.importing
+			m.eventMu.Unlock()
+			if importing {
+				t.Fatal("startup import remained fenced after event subscription failed")
+			}
+		})
 		t.Run("valid_dispatches_death", func(t *testing.T) {
 			t.Parallel()
 			events := make(chan runtime.Event, 1)
@@ -3777,10 +3833,10 @@ func TestManager(t *testing.T) {
 			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
 
 			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
-			go m.watchRuntimeEvents(ctx)
+			t.Cleanup(cancel)
+			go m.watchRuntimeEvents(ctx, nil)
 
-			events <- runtime.Event{InstanceID: "ctr-dead"}
+			events <- runtime.Event{InstanceID: "ctr-dead", Kind: runtime.EventDie}
 
 			// Wait for the state transition rather than sleeping a fixed duration.
 			deadline := time.Now().Add(2 * time.Second)
@@ -3790,6 +3846,58 @@ func TestManager(t *testing.T) {
 				}
 				time.Sleep(time.Millisecond)
 			}
+		})
+		t.Run("lifecycle_kinds", func(t *testing.T) {
+			t.Parallel()
+			t.Run("start_restores_stopped_task", func(t *testing.T) {
+				t.Parallel()
+				m := newTestManager(t, Config{ServerCtx: t.Context()})
+				tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}, Harness: "fake"}
+				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-start"), runtime.ConnectionTarget{SSHHost: "ctr-start"}, "", "", 0)
+				tk.SetState(task.StateStopped)
+				m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+				m.handleRuntimeEvent(t.Context(), runtime.Event{InstanceID: runtime.NewID("test-runtime", "ctr-start"), Kind: runtime.EventStart})
+				if got := tk.GetState(); got != task.StateWaiting {
+					t.Fatalf("state = %v, want StateWaiting", got)
+				}
+			})
+			t.Run("destroy_keeps_purged_task", func(t *testing.T) {
+				t.Parallel()
+				m := newTestManager(t, Config{ServerCtx: t.Context()})
+				tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
+				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-purged"), runtime.ConnectionTarget{SSHHost: "ctr-purged"}, "", "", 0)
+				tk.SetState(task.StatePurged)
+				m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+				m.handleRuntimeEvent(t.Context(), runtime.Event{InstanceID: runtime.NewID("test-runtime", "ctr-purged"), Kind: runtime.EventDestroy})
+				if got := tk.GetState(); got != task.StatePurged {
+					t.Fatalf("state = %v, want StatePurged", got)
+				}
+			})
+			t.Run("oom_prevents_later_death_from_hiding_cause", func(t *testing.T) {
+				t.Parallel()
+				m := newTestManager(t, Config{ServerCtx: t.Context()})
+				tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
+				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-oom"), runtime.ConnectionTarget{SSHHost: "ctr-oom"}, "", "", 0)
+				tk.SetState(task.StateRunning)
+				m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+				m.handleRuntimeEvent(t.Context(), runtime.Event{InstanceID: runtime.NewID("test-runtime", "ctr-oom"), Kind: runtime.EventOOM})
+				m.handleRuntimeEvent(t.Context(), runtime.Event{InstanceID: runtime.NewID("test-runtime", "ctr-oom"), Kind: runtime.EventDie})
+				if got := tk.GetState(); got != task.StateCrashed {
+					t.Fatalf("state = %v, want StateCrashed", got)
+				}
+			})
+			t.Run("unknown_is_ignored", func(t *testing.T) {
+				t.Parallel()
+				m := newTestManager(t, Config{ServerCtx: t.Context()})
+				tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
+				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-unknown"), runtime.ConnectionTarget{SSHHost: "ctr-unknown"}, "", "", 0)
+				tk.SetState(task.StateRunning)
+				m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+				m.handleRuntimeEvent(t.Context(), runtime.Event{InstanceID: runtime.NewID("test-runtime", "ctr-unknown"), Kind: "unknown"})
+				if got := tk.GetState(); got != task.StateRunning {
+					t.Fatalf("state = %v, want StateRunning", got)
+				}
+			})
 		})
 	})
 }

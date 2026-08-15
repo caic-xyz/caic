@@ -87,7 +87,10 @@ func (a *App) Serve(ctx context.Context, ln net.Listener) (err error) {
 }
 
 // New creates the caic backend server application.
-func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) {
+func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Config) (*App, error) {
+	if log == nil {
+		return nil, errors.New("logger is required")
+	}
 	if cfg.Dirs.ConfigDir == "" {
 		return nil, errors.New("ConfigDir is required")
 	}
@@ -118,29 +121,12 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	}
 
 	repoCh := make(chan repoDiscoveryResult, 1)
-	instanceCh := make(chan instanceDiscoveryResult, 1)
 
 	go func() {
 		defer trace.StartRegion(ctx, "discover-repos").End()
 		paths, err := git.DiscoverCheckouts(rootDir, repoDiscoveryDepth)
 		repoCh <- repoDiscoveryResult{paths, err}
 	}()
-	go func() {
-		defer trace.StartRegion(ctx, "list-runtime-instances").End()
-		instances, err := runtimes.List(ctx)
-		instanceCh <- instanceDiscoveryResult{instances, err}
-	}()
-
-	repoRes := <-repoCh
-	instanceRes := <-instanceCh
-
-	if repoRes.err != nil {
-		return nil, fmt.Errorf("discover repos: %w", repoRes.err)
-	}
-	if instanceRes.err != nil {
-		return nil, fmt.Errorf("list runtime instances: %w", instanceRes.err)
-	}
-
 	settings, err := loadSettings(filepath.Join(cfg.Dirs.ConfigDir, "settings.json"))
 	if err != nil {
 		return nil, fmt.Errorf("load settings: %w", err)
@@ -262,6 +248,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	checkoutRegistry := repo.NewRegistry()
 	taskMgr, err := taskmgr.New(taskmgr.Config{
 		ServerCtx:           ctx,
+		Log:                 log,
 		LogDir:              logDir,
 		CacheDir:            cfg.Dirs.CacheDir,
 		Runtimes:            runtimes,
@@ -275,6 +262,21 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	if err != nil {
 		return nil, fmt.Errorf("task manager: %w", err)
 	}
+	keepTaskMgr := false
+	defer func() {
+		if !keepTaskMgr {
+			_ = taskMgr.Close()
+		}
+	}()
+	if err := taskMgr.BeginImport(); err != nil {
+		slog.WarnContext(ctx, "runtime event watch unavailable during startup", "err", err)
+	}
+	instanceCh := make(chan instanceDiscoveryResult, 1)
+	go func() {
+		defer trace.StartRegion(ctx, "list-runtime-instances").End()
+		instances, err := runtimes.List(ctx)
+		instanceCh <- instanceDiscoveryResult{instances, err}
+	}()
 	// Compression replaces log paths, so finish maintenance before task import
 	// can expose any task to a replay request.
 	err = func() error {
@@ -302,6 +304,15 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	}()
 	if err != nil {
 		return nil, err
+	}
+
+	repoRes := <-repoCh
+	if repoRes.err != nil {
+		return nil, fmt.Errorf("discover repos: %w", repoRes.err)
+	}
+	instanceRes := <-instanceCh
+	if instanceRes.err != nil {
+		return nil, fmt.Errorf("list runtime instances: %w", instanceRes.err)
 	}
 
 	repoStatus := ci.NewRepoStatusStore()
@@ -396,8 +407,6 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		}
 	}
 
-	taskMgr.Start()
-
 	phase3 := trace.StartRegion(ctx, "load-live-task-logs")
 	liveLogs, err := loadRuntimeTaskLogs(ctx, logDir, runtimes, instanceRes.instances)
 	if err != nil {
@@ -410,6 +419,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	if err != nil {
 		slog.ErrorContext(ctx, "import runtime instances failed; affected instances will remain unmanaged", "err", err)
 	}
+	taskMgr.Start()
 	backgroundTasks := []backgroundTask{}
 	importWiring := &importedTaskWiring{
 		authStore: authStore,
@@ -479,6 +489,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 			return nil
 		},
 	)
+	keepTaskMgr = true
 	return &App{Server: s, voiceBridge: voiceBridge, backgroundTasks: backgroundTasks, taskMgr: taskMgr}, nil
 }
 

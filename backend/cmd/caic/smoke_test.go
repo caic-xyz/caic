@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -351,7 +352,7 @@ func (s *smokeServer) start() {
 		s.t.Fatalf("listen: %v", err)
 	}
 
-	srv, err := app.New(ctx, s.rootDir, s.cfg)
+	srv, err := app.New(ctx, slog.New(slog.NewTextHandler(io.Discard, nil)), s.rootDir, s.cfg)
 	if err != nil {
 		cancel()
 		if closeErr := ln.Close(); closeErr != nil {

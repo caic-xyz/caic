@@ -204,7 +204,7 @@ func (a mdClientAdapter) WatchEvents(ctx context.Context, filter runtime.EventFi
 				return
 			}
 			select {
-			case out <- runtime.Event{InstanceID: runtime.ID(ev.Name)}:
+			case out <- runtime.Event{InstanceID: runtime.ID(ev.Name), Kind: runtime.EventDie}:
 			case <-ctx.Done():
 				return
 			}

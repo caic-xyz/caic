@@ -24,7 +24,7 @@ const isFakeMode = true
 
 // serveFake starts the HTTP server with fake container/agent ops and a temp
 // git repo. Used for e2e testing without md CLI or SSH.
-func serveFake(ctx context.Context, addr string, cfg *server.Config, traceFile string) (retErr error) {
+func serveFake(ctx context.Context, log *slog.Logger, addr string, cfg *server.Config, traceFile string) (retErr error) {
 	addr = localizeAddr(addr)
 
 	// Always create a temp git repo; fake mode doesn't use real repos.
@@ -113,7 +113,7 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config, traceFile s
 	}
 	defer ln.Close()
 
-	srv, err := app.New(ctx, rootDir, cfg)
+	srv, err := app.New(ctx, log, rootDir, cfg)
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}

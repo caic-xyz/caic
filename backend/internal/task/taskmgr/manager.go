@@ -73,6 +73,7 @@ type Config struct {
 	// ServerCtx tracks the Manager's own lifetime. Used as the parent for
 	// background goroutines that must survive individual requests.
 	ServerCtx context.Context
+	Log       *slog.Logger
 	LogDir    string
 	CacheDir  string
 	// Runtimes validates runtime selection and dispatches task runtime operations.
@@ -105,6 +106,12 @@ type Manager struct {
 	provider            genai.Provider
 	relay               relayReader
 
+	// Guarded by eventMu.
+	eventMu              sync.Mutex
+	eventWatchStarted    bool
+	importing            bool
+	pendingRuntimeEvents []runtime.Event
+
 	// Guarded by quotaWatchMu.
 	quotaWatchMu     sync.Mutex
 	quotaWatchers    sync.WaitGroup
@@ -132,12 +139,14 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 	if cfg.RuntimeStartTimeout <= 0 {
 		return nil, errors.New("task manager runtime start timeout is required")
 	}
-	log := slog.Default().With(slog.String("cmp", "taskmgr"))
+	if cfg.Log == nil {
+		return nil, errors.New("task manager logger is required")
+	}
 	serverCtx, cancelServerCtx := context.WithCancel(cfg.ServerCtx)
 	m := &Manager{
 		Runtimes:            cfg.Runtimes,
 		QuotaTracker:        quotausage.NewTracker(),
-		log:                 log,
+		log:                 cfg.Log.With("cmp", "taskmgr"),
 		serverCtx:           serverCtx,
 		cancelServerCtx:     cancelServerCtx,
 		cacheDir:            cfg.CacheDir,
@@ -173,10 +182,35 @@ func (m *Manager) Close() error {
 	return nil
 }
 
-// Start launches background goroutines: instance event watching and stats streaming.
-// Must be called once after New, after checkouts have been registered.
+// BeginImport subscribes to runtime events before startup inventory is listed.
+// ImportInstances applies any buffered events after it registers the snapshot.
+func (m *Manager) BeginImport() error {
+	m.eventMu.Lock()
+	defer m.eventMu.Unlock()
+	if m.eventWatchStarted {
+		return errors.New("runtime event watch already started")
+	}
+	m.importing = true
+	events, err := m.Runtimes.WatchEvents(m.serverCtx, runtime.EventFilter{MetadataKey: runtime.MetadataLegacyTaskID})
+	if err != nil {
+		m.importing = false
+		return fmt.Errorf("watch runtime events: %w", err)
+	}
+	m.eventWatchStarted = true
+	m.background.Go(func() { m.watchRuntimeEvents(m.serverCtx, events) })
+	return nil
+}
+
+// Start launches the runtime event and stats watchers. BeginImport may start
+// the event watcher first to fence startup inventory from incoming events.
 func (m *Manager) Start() {
-	m.background.Go(func() { m.watchRuntimeEvents(m.serverCtx) })
+	m.eventMu.Lock()
+	watchStarted := m.eventWatchStarted
+	m.eventWatchStarted = true
+	m.eventMu.Unlock()
+	if !watchStarted {
+		m.background.Go(func() { m.watchRuntimeEvents(m.serverCtx, nil) })
+	}
 	m.background.Go(func() { m.watchStats(m.serverCtx) })
 }
 
@@ -406,6 +440,7 @@ func (m *Manager) SetTaskMonitorBranch(entry *Entry, branch string) {
 
 // ImportInstances registers preexisting runtime instances as tasks.
 func (m *Manager) ImportInstances(ctx context.Context, instances []runtime.Instance, allLogs []*task.LoadedTask) ([]*Entry, error) {
+	defer m.completeRuntimeImport(ctx)
 	if instances == nil {
 		return nil, nil
 	}
@@ -1026,30 +1061,43 @@ func statsStateActive(st task.State) bool {
 	}
 }
 
-// watchRuntimeEvents listens for runtime instance exit events and triggers
-// cleanup for the corresponding task.
-func (m *Manager) watchRuntimeEvents(ctx context.Context) {
+// watchRuntimeEvents reconnects the runtime event stream after interruption.
+func (m *Manager) watchRuntimeEvents(ctx context.Context, events <-chan runtime.Event) {
 	for {
-		ch, err := m.Runtimes.WatchEvents(ctx, runtime.EventFilter{MetadataKey: runtime.MetadataLegacyTaskID})
-		if err != nil {
-			if ctx.Err() != nil {
-				return
+		if events == nil {
+			var err error
+			events, err = m.Runtimes.WatchEvents(ctx, runtime.EventFilter{MetadataKey: runtime.MetadataLegacyTaskID})
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				m.log.WarnContext(ctx, "runtime events failed, retrying in 5s", "err", err)
+				select {
+				case <-time.After(5 * time.Second):
+					continue
+				case <-ctx.Done():
+					return
+				}
 			}
-			m.log.WarnContext(ctx, "runtime events failed, retrying in 5s", "err", err)
+		}
+		streamEnded := false
+		for !streamEnded {
 			select {
-			case <-time.After(5 * time.Second):
-				continue
+			case event, ok := <-events:
+				if !ok {
+					streamEnded = true
+					continue
+				}
+				m.handleRuntimeEvent(ctx, event)
 			case <-ctx.Done():
 				return
 			}
-		}
-		for ev := range ch {
-			m.handleRuntimeInstanceExit(ev.InstanceID)
 		}
 		if ctx.Err() != nil {
 			return
 		}
 		m.log.WarnContext(ctx, "runtime events stream ended, reconnecting in 5s")
+		events = nil
 		select {
 		case <-time.After(5 * time.Second):
 		case <-ctx.Done():
@@ -1058,18 +1106,72 @@ func (m *Manager) watchRuntimeEvents(ctx context.Context) {
 	}
 }
 
-// handleRuntimeInstanceExit looks up a task by runtime instance name and archives it.
-func (m *Manager) handleRuntimeInstanceExit(instanceID runtime.ID) {
+func (m *Manager) completeRuntimeImport(ctx context.Context) {
+	for {
+		m.eventMu.Lock()
+		if !m.importing {
+			m.eventMu.Unlock()
+			return
+		}
+		events := m.pendingRuntimeEvents
+		m.pendingRuntimeEvents = nil
+		if len(events) == 0 {
+			m.importing = false
+			m.eventMu.Unlock()
+			return
+		}
+		m.eventMu.Unlock()
+		for _, event := range events {
+			m.applyRuntimeEvent(ctx, event)
+		}
+	}
+}
+
+func (m *Manager) handleRuntimeEvent(ctx context.Context, event runtime.Event) {
+	if event.InstanceID == "" || event.Kind == "" {
+		m.log.WarnContext(ctx, "ignoring malformed runtime event", "instance", event.InstanceID, "kind", event.Kind)
+		return
+	}
+	m.eventMu.Lock()
+	if m.importing {
+		m.pendingRuntimeEvents = append(m.pendingRuntimeEvents, event)
+		m.eventMu.Unlock()
+		return
+	}
+	m.eventMu.Unlock()
+	m.applyRuntimeEvent(ctx, event)
+}
+
+func (m *Manager) applyRuntimeEvent(ctx context.Context, event runtime.Event) {
+	switch event.Kind {
+	case runtime.EventDie:
+		m.handleRuntimeInstanceExit(ctx, event.InstanceID)
+	case runtime.EventDestroy:
+		m.handleRuntimeDestroy(ctx, event.InstanceID)
+	case runtime.EventOOM:
+		m.handleRuntimeOOM(ctx, event.InstanceID)
+	case runtime.EventRestart, runtime.EventStart:
+		m.handleRuntimeStart(event.InstanceID) //nolint:contextcheck // reconnection must outlive event handling.
+	default:
+		m.log.WarnContext(ctx, "ignoring unknown runtime event", "instance", event.InstanceID, "kind", event.Kind)
+	}
+}
+
+func (m *Manager) entryForRuntime(instanceID runtime.ID) *Entry {
 	m.mu.Lock()
-	var found *Entry
+	defer m.mu.Unlock()
 	for _, e := range m.tasks {
 		if e.task.RuntimeInstanceID() != instanceID {
 			continue
 		}
-		found = e
-		break
+		return e
 	}
-	m.mu.Unlock()
+	return nil
+}
+
+// handleRuntimeInstanceExit archives a stopped runtime instance.
+func (m *Manager) handleRuntimeInstanceExit(ctx context.Context, instanceID runtime.ID) {
+	found := m.entryForRuntime(instanceID)
 	if found == nil {
 		return
 	}
@@ -1091,8 +1193,50 @@ func (m *Manager) handleRuntimeInstanceExit(instanceID runtime.ID) {
 	if p := t.Primary(); p != nil {
 		deathBranch = p.Branch
 	}
-	m.log.Info("instance", "msg", "died, archiving as stopped", "instance", instanceID, "task", t.ID, "br", deathBranch, "prev_state", prevState)
+	m.log.InfoContext(ctx, "instance died, archiving as stopped", "instance", instanceID, "task", t.ID, "br", deathBranch, "prev_state", prevState)
 	t.DetachSession()
+	m.NotifyTaskChange()
+}
+
+func (m *Manager) handleRuntimeDestroy(ctx context.Context, instanceID runtime.ID) {
+	entry := m.entryForRuntime(instanceID)
+	if entry == nil {
+		return
+	}
+	t := entry.Task()
+	if _, changed := t.SetStateUnless(task.StateFailed, task.StatePurged, task.StatePurging, task.StateFailed, task.StateStopping); !changed {
+		return
+	}
+	err := errors.New("runtime instance was destroyed")
+	t.DetachSession()
+	entry.Finish(&task.Result{State: task.StateFailed, Err: err})
+	m.log.WarnContext(ctx, "runtime instance destroyed", "instance", instanceID, "task", t.ID)
+	m.NotifyTaskChange()
+}
+
+func (m *Manager) handleRuntimeOOM(ctx context.Context, instanceID runtime.ID) {
+	entry := m.entryForRuntime(instanceID)
+	if entry == nil {
+		return
+	}
+	t := entry.Task()
+	if !t.RecordSessionCrash(ctx, errors.New("runtime instance ran out of memory")) {
+		return
+	}
+	m.log.WarnContext(ctx, "runtime instance ran out of memory", "instance", instanceID, "task", t.ID)
+	m.NotifyTaskChange()
+}
+
+func (m *Manager) handleRuntimeStart(instanceID runtime.ID) {
+	entry := m.entryForRuntime(instanceID)
+	if entry == nil {
+		return
+	}
+	t := entry.Task()
+	if _, changed := t.SetStateIfAny(task.StateWaiting, task.StateStopped); !changed {
+		return
+	}
+	entry.Lifecycle.reconnectImportedSession()
 	m.NotifyTaskChange()
 }
 

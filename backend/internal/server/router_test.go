@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -130,6 +131,9 @@ func newTestRuntime(t testing.TB, lifecycle runtime.Lifecycle) *runtime.Router {
 }
 
 func newTestTaskManager(t testing.TB, cfg taskmgr.Config) *taskmgr.Manager { //nolint:gocritic // Config mirrors New's value bag in tests.
+	if cfg.Log == nil {
+		cfg.Log = slog.New(slog.DiscardHandler)
+	}
 	if cfg.RuntimeStartTimeout == 0 {
 		cfg.RuntimeStartTimeout = time.Hour
 	}
