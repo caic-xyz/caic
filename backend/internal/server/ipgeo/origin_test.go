@@ -61,7 +61,7 @@ func TestNewCheckerOpenAI(t *testing.T) {
 	dir := t.TempDir()
 	writeOriginCache(t, dir, "openai", time.Now(), []string{"20.0.53.96/28", "104.211.73.128/28"})
 
-	c, err := NewChecker(t.Context(), "local,tailscale,openai", "", dir)
+	c, err := NewChecker(t.Context(), testLogger(), "local,tailscale,openai", "", dir)
 	if err != nil {
 		t.Fatalf("NewChecker: %v", err)
 	}

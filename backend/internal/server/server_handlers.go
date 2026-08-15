@@ -53,10 +53,10 @@ type serverHandlers struct {
 	voiceGateway       v1.VoiceGatewayMetadata
 }
 
-func (h *serverHandlers) getConfig(_ context.Context, _ *api.EmptyReq) (*v1.Config, error) {
+func (h *serverHandlers) getConfig(ctx context.Context, _ *api.EmptyReq) (*v1.Config, error) {
 	displayName, err := os.Hostname()
 	if err != nil {
-		slog.Warn("failed to get hostname", "err", err)
+		h.log.WarnContext(ctx, "failed to get hostname", "err", err)
 	}
 	displayName, _, _ = strings.Cut(displayName, ".")
 	cfg := &v1.Config{
@@ -130,9 +130,9 @@ func (h *serverHandlers) triggerUpdate(ctx context.Context, _ *api.EmptyReq) (*v
 		return &v1.UpdateResp{Status: "already_up_to_date"}, nil
 	}
 	go func() {
-		slog.InfoContext(h.serverCtx, "update triggered by user", "current", current, "latest", latest)
+		h.log.InfoContext(h.serverCtx, "update triggered by user", "current", current, "latest", latest)
 		if err := autoupdate.CheckAndUpdate(h.serverCtx, gh); err != nil {
-			slog.WarnContext(h.serverCtx, "background update failed", "err", err)
+			h.log.WarnContext(h.serverCtx, "background update failed", "err", err)
 		}
 	}()
 	return &v1.UpdateResp{Status: "started"}, nil
@@ -155,7 +155,7 @@ func (h *serverHandlers) getPreferences(ctx context.Context, _ *api.EmptyReq) (*
 		target, err := md.ResolveMountTarget(m.HostPath, m.ContainerPath)
 		effectivePath := ""
 		if err != nil {
-			slog.ErrorContext(ctx, "stored cache mapping is invalid", "index", i, "err", err)
+			h.log.ErrorContext(ctx, "stored cache mapping is invalid", "index", i, "err", err)
 		} else {
 			effectivePath = md.ResolveContainerPath(target)
 		}
@@ -171,7 +171,7 @@ func (h *serverHandlers) getPreferences(ctx context.Context, _ *api.EmptyReq) (*
 		target, err := md.ResolveMountTarget(m.HostPath, m.ContainerPath)
 		effectivePath := ""
 		if err != nil {
-			slog.ErrorContext(ctx, "stored custom mount is invalid", "index", i, "err", err)
+			h.log.ErrorContext(ctx, "stored custom mount is invalid", "index", i, "err", err)
 		} else {
 			effectivePath = md.ResolveContainerPath(target)
 		}
@@ -394,18 +394,18 @@ func (h *serverHandlers) getCacheSizes(_ context.Context, _ *api.EmptyReq) (*v1.
 }
 
 func (h *serverHandlers) listRepos(_ context.Context, _ *api.EmptyReq) (*[]v1.Repo, error) {
-	return repoListFromSnapshot(h.checkouts.Checkouts(), h.repoStatus), nil
+	return repoListFromSnapshot(h.log, h.checkouts.Checkouts(), h.repoStatus), nil
 }
 
 func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.Request) {
 	repoPath := r.URL.Query().Get("repo")
 	if repoPath == "" {
-		writeError(w, api.BadRequest("repo is required"))
+		writeError(r.Context(), w, api.BadRequest("repo is required"))
 		return
 	}
 	info, ok := h.checkouts.Checkout(repoPath)
 	if !ok {
-		writeError(w, api.NotFound("repo not found"))
+		writeError(r.Context(), w, api.NotFound("repo not found"))
 		return
 	}
 	absPath := info.Dir
@@ -414,7 +414,7 @@ func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.R
 	// Fetch local branches.
 	localPairs, err := checkout.ListBranches(ctx, "")
 	if err != nil {
-		slog.WarnContext(ctx, "list local branches failed", "repo", repoPath, "err", err)
+		h.log.WarnContext(ctx, "list local branches failed", "repo", repoPath, "err", err)
 	}
 	seen := make(map[string]struct{}, len(localPairs))
 	branches := make([]v1.BranchInfo, 0, len(localPairs))
@@ -425,7 +425,7 @@ func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.R
 	// Fetch remote branches from all remotes.
 	remoteList, err := checkout.RunGit(ctx, "remote")
 	if err != nil {
-		slog.WarnContext(ctx, "list remotes failed", "repo", repoPath, "err", err)
+		h.log.WarnContext(ctx, "list remotes failed", "repo", repoPath, "err", err)
 	}
 	for remote := range strings.SplitSeq(remoteList, "\n") {
 		if remote == "" {
@@ -433,7 +433,7 @@ func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.R
 		}
 		remotePairs, err := checkout.ListBranches(ctx, remote)
 		if err != nil {
-			slog.WarnContext(ctx, "list remote branches failed", "repo", repoPath, "remote", remote, "err", err)
+			h.log.WarnContext(ctx, "list remote branches failed", "repo", repoPath, "remote", remote, "err", err)
 			continue
 		}
 		for _, p := range remotePairs {
@@ -443,7 +443,7 @@ func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.R
 			}
 		}
 	}
-	writeJSONResponse(w, &v1.RepoBranchesResp{Branches: branches}, nil)
+	writeJSONResponse(r.Context(), w, &v1.RepoBranchesResp{Branches: branches}, nil)
 }
 
 func (h *serverHandlers) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo, error) {
@@ -519,15 +519,15 @@ func cloneTarget(root, url, path string, checkouts *repo.Registry) (cloneTargetP
 	return cloneTargetPath{relPath: relPath, dir: dir}, nil
 }
 
-func repoListFromSnapshot(snap iter.Seq[*repo.Checkout], repoStatus *ci.RepoStatusStore) *[]v1.Repo {
+func repoListFromSnapshot(log *slog.Logger, snap iter.Seq[*repo.Checkout], repoStatus *ci.RepoStatusStore) *[]v1.Repo {
 	var out []v1.Repo
 	for checkout := range snap {
-		out = append(out, repoDTO(checkout, repoStatus))
+		out = append(out, repoDTO(log, checkout, repoStatus))
 	}
 	return &out
 }
 
-func repoDTO(checkout *repo.Checkout, repoStatus *ci.RepoStatusStore) v1.Repo {
+func repoDTO(log *slog.Logger, checkout *repo.Checkout, repoStatus *ci.RepoStatusStore) v1.Repo {
 	var remote string
 	var kind forge.Kind
 	if checkout.Repository != nil {
@@ -536,7 +536,7 @@ func repoDTO(checkout *repo.Checkout, repoStatus *ci.RepoStatusStore) v1.Repo {
 	}
 	forgeKind, err := apiconv.RepoForge(kind)
 	if err != nil {
-		slog.Error("convert repository forge", "repo", checkout.RelPath, "err", err)
+		log.Error("convert repository forge", "repo", checkout.RelPath, "err", err)
 	}
 	dto := v1.Repo{
 		Path:       checkout.RelPath,
@@ -549,7 +549,7 @@ func repoDTO(checkout *repo.Checkout, repoStatus *ci.RepoStatusStore) v1.Repo {
 		if status, ok := repoStatus.StatusFor(checkout.RelPath); ok {
 			ciStatus, err := apiconv.CIStatus(status.Status)
 			if err != nil {
-				slog.Error("convert repository CI status", "repo", checkout.RelPath, "err", err)
+				log.Error("convert repository CI status", "repo", checkout.RelPath, "err", err)
 			} else {
 				dto.CI = ciStatus
 			}
@@ -557,7 +557,7 @@ func repoDTO(checkout *repo.Checkout, repoStatus *ci.RepoStatusStore) v1.Repo {
 			for i := range status.Checks {
 				check, err := apiconv.ForgeCheck(&status.Checks[i])
 				if err != nil {
-					slog.Error("convert repository CI check", "repo", checkout.RelPath, "err", err)
+					log.Error("convert repository CI check", "repo", checkout.RelPath, "err", err)
 					continue
 				}
 				dto.CIChecks = append(dto.CIChecks, check)

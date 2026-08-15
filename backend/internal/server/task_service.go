@@ -95,7 +95,7 @@ func (s *taskService) taskListSnapshot(ctx context.Context) []v1.Task {
 		}
 		dto, err := taskDTO(ctx, e, s.taskMgr, s.checkouts, s.authStore)
 		if err != nil {
-			slog.ErrorContext(ctx, "convert task", "task", e.Task().ID, "err", err)
+			s.log.ErrorContext(ctx, "convert task", "task", e.Task().ID, "err", err)
 			return true
 		}
 		out = append(out, dto)
@@ -533,8 +533,7 @@ func (s *taskService) sendInput(ctx context.Context, entry *taskmgr.Entry, req *
 	if p := t.Primary(); p != nil {
 		primaryBranchLog = p.Branch
 	}
-	slog.WarnContext(ctx, "no active session",
-		"task", t.ID,
+	s.log.WarnContext(ctx, "no active session", "task", t.ID,
 		"br", primaryBranchLog,
 		"instance", instanceID,
 		"state", taskState,
@@ -737,15 +736,15 @@ func (s *taskService) syncTask(ctx context.Context, entry *taskmgr.Entry, req *v
 				}
 				prNumber, err := s.ciSvc.StartPRFlow(ctx, entry, f, &ciInfo, syncPrimaryBranch, s.taskMgr.EffectiveBaseBranch(t))
 				if err != nil {
-					slog.WarnContext(ctx, "sync: create PR", "repo", checkout.Repository.ForgeRepo, "branch", syncPrimaryBranch, "err", err)
+					s.log.WarnContext(ctx, "create PR", "task", t.ID, "repo", checkout.Repository.ForgeRepo, "branch", syncPrimaryBranch, "err", err)
 				} else {
 					resp.PRNumber = prNumber
 				}
 			} else {
-				slog.WarnContext(ctx, "sync: no forge client available, skipping PR flow", "repo", syncPrimaryName, "forge", checkout.Repository.ForgeKind)
+				s.log.WarnContext(ctx, "no forge client available; skipping PR flow", "task", t.ID, "repo", syncPrimaryName, "forge", checkout.Repository.ForgeKind)
 			}
 		} else {
-			slog.WarnContext(ctx, "sync: repo not found in server list, skipping PR flow", "repo", syncPrimaryName)
+			s.log.WarnContext(ctx, "repo not found in server list; skipping PR flow", "task", t.ID, "repo", syncPrimaryName)
 		}
 	}
 	return resp, nil

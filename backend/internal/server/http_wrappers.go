@@ -41,11 +41,11 @@ func handle[In any, PtrIn interface {
 		}
 		populatePathParams(r, in)
 		if err := in.Validate(); err != nil {
-			writeError(w, err)
+			writeError(r.Context(), w, err)
 			return
 		}
 		out, err := fn(r.Context(), in)
-		writeJSONResponse(w, out, err)
+		writeJSONResponse(r.Context(), w, out, err)
 	}
 }
 
@@ -63,7 +63,7 @@ func handleWithTask[In any, PtrIn interface {
 	return func(w http.ResponseWriter, r *http.Request) {
 		entry, err := resolver.getTask(r)
 		if err != nil {
-			writeError(w, err)
+			writeError(r.Context(), w, err)
 			return
 		}
 		in := PtrIn(new(In))
@@ -72,14 +72,14 @@ func handleWithTask[In any, PtrIn interface {
 		}
 		populatePathParams(r, in)
 		if err := in.Validate(); err != nil {
-			writeError(w, err)
+			writeError(r.Context(), w, err)
 			return
 		}
 		out, err := fn(r.Context(), entry, in)
 		if err == nil {
 			resolver.notifyTaskChange()
 		}
-		writeJSONResponse(w, out, err)
+		writeJSONResponse(r.Context(), w, out, err)
 	}
 }
 
@@ -128,7 +128,7 @@ func readAndDecodeBody[In any](w http.ResponseWriter, r *http.Request, input *In
 		err = err2
 	}
 	if err != nil {
-		writeError(w, api.BadRequest("failed to read request body"))
+		writeError(r.Context(), w, api.BadRequest("failed to read request body"))
 		return false
 	}
 	if len(body) == 0 {
@@ -137,8 +137,8 @@ func readAndDecodeBody[In any](w http.ResponseWriter, r *http.Request, input *In
 	d := json.NewDecoder(bytes.NewReader(body))
 	d.DisallowUnknownFields()
 	if err := d.Decode(input); err != nil {
-		slog.ErrorContext(r.Context(), "failed to decode request body", "err", err)
-		writeError(w, api.BadRequest("invalid request body"))
+		httpLogger(r.Context()).ErrorContext(r.Context(), "failed to decode request body", "err", err)
+		writeError(r.Context(), w, api.BadRequest("invalid request body"))
 		return false
 	}
 	return true
@@ -181,7 +181,7 @@ func populatePathParams(r *http.Request, input any) {
 // writeError writes a structured JSON error response. If err implements
 // api.ErrorWithStatus, the HTTP status, error code and details are taken from
 // it; otherwise 500 is used.
-func writeError(w http.ResponseWriter, err error) {
+func writeError(ctx context.Context, w http.ResponseWriter, err error) {
 	statusCode := http.StatusInternalServerError
 	code := api.CodeInternalError
 	var details map[string]any
@@ -197,28 +197,28 @@ func writeError(w http.ResponseWriter, err error) {
 		details = voiceEWS.Details()
 	}
 
-	slog.Error("handler error", "err", err, "statusCode", statusCode, "code", code)
+	httpLogger(ctx).ErrorContext(ctx, "handler error", "err", err, "status_code", statusCode, "code", code)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	resp := api.ErrorResponse{
 		Error:   api.ErrorDetails{Code: code, Message: err.Error()},
 		Details: details,
 	}
-	if encErr := json.NewEncoder(w).Encode(resp); encErr != nil {
-		slog.Warn("failed to encode error response", "err", encErr)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		httpLogger(ctx).WarnContext(ctx, "encode error response", "err", err)
 	}
 }
 
 // writeJSONResponse writes a JSON success response or a structured error
 // response, unifying both paths into a single call.
-func writeJSONResponse[Out any](w http.ResponseWriter, output *Out, err error) {
+func writeJSONResponse[Out any](ctx context.Context, w http.ResponseWriter, output *Out, err error) {
 	if err != nil {
-		writeError(w, err)
+		writeError(ctx, w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(output); encErr != nil {
-		slog.Warn("failed to encode JSON response", "err", encErr)
+	if err := json.NewEncoder(w).Encode(output); err != nil {
+		httpLogger(ctx).WarnContext(ctx, "encode JSON response", "err", err)
 	}
 }
 
@@ -270,7 +270,7 @@ func emitTaskListEvent(ctx context.Context, w http.ResponseWriter, controller *h
 		if !errors.Is(err, http.ErrNotSupported) {
 			return fmt.Errorf("write task-list event: %w", err)
 		}
-		slog.WarnContext(ctx, "task-list event write deadline unsupported")
+		httpLogger(ctx).WarnContext(ctx, "task-list event write deadline unsupported")
 	} else {
 		defer func() {
 			if resetErr := controller.SetWriteDeadline(time.Time{}); resetErr != nil {
@@ -286,4 +286,14 @@ func emitTaskListEvent(ctx context.Context, w http.ResponseWriter, controller *h
 		return fmt.Errorf("write task-list event: %w", err)
 	}
 	return nil
+}
+
+type httpLoggerKey struct{}
+
+func httpLogger(ctx context.Context) *slog.Logger {
+	log, ok := ctx.Value(httpLoggerKey{}).(*slog.Logger)
+	if !ok {
+		return slog.New(slog.DiscardHandler)
+	}
+	return log
 }

@@ -33,6 +33,7 @@ type taskCreator interface {
 }
 
 type ciHandlers struct {
+	log        *slog.Logger
 	taskMgr    *taskmgr.Manager
 	checkouts  *repo.Registry
 	repoStatus *ci.RepoStatusStore
@@ -48,7 +49,7 @@ type ciHandlers struct {
 func (h *ciHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 	entry, err := taskEntryFromRequest(r, h.taskMgr, h.authStore)
 	if err != nil {
-		writeError(w, err)
+		writeError(r.Context(), w, err)
 		return
 	}
 	t := entry.Task()
@@ -59,23 +60,23 @@ func (h *ciHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 	}
 	checkout, ok := h.checkouts.Checkout(ciPrimaryName)
 	if !ok || checkout.Repository == nil {
-		writeError(w, api.BadRequest("no repo info found"))
+		writeError(r.Context(), w, api.BadRequest("no repo info found"))
 		return
 	}
 	f := h.forgeMgr.ForgeForInfo(r.Context(), checkout.Repository)
 	if f == nil {
-		writeError(w, api.BadRequest("no forge token configured for this repo"))
+		writeError(r.Context(), w, api.BadRequest("no forge token configured for this repo"))
 		return
 	}
 
 	jobIDStr := r.URL.Query().Get("jobID")
 	if jobIDStr == "" {
-		writeError(w, api.BadRequest("jobID query parameter is required"))
+		writeError(r.Context(), w, api.BadRequest("jobID query parameter is required"))
 		return
 	}
 	var jobID int64
 	if _, scanErr := fmt.Sscanf(jobIDStr, "%d", &jobID); scanErr != nil || jobID <= 0 {
-		writeError(w, api.BadRequest("invalid jobID"))
+		writeError(r.Context(), w, api.BadRequest("invalid jobID"))
 		return
 	}
 
@@ -88,13 +89,13 @@ func (h *ciHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if check == nil {
-		writeError(w, api.NotFound("no CI check with that jobID"))
+		writeError(r.Context(), w, api.NotFound("no CI check with that jobID"))
 		return
 	}
 
 	jobLog, logErr := f.GetJobLog(r.Context(), check.Owner, check.Repo, jobID, false)
 	if logErr != nil {
-		slog.WarnContext(r.Context(), "getTaskCILog: fetch job log", "task", t.ID, "jobID", jobID, "err", logErr)
+		h.log.WarnContext(r.Context(), "fetch CI job log", "task", t.ID, "job", jobID, "err", logErr)
 		jobLog = "(log unavailable: " + logErr.Error() + ")"
 	}
 
@@ -103,7 +104,7 @@ func (h *ciHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprintf(w, "Step: %s\n\n%s", check.Name, jobLog)
 		return
 	}
-	writeJSONResponse(w, &v1.CILogResp{StepName: check.Name, Log: jobLog}, nil)
+	writeJSONResponse(r.Context(), w, &v1.CILogResp{StepName: check.Name, Log: jobLog}, nil)
 }
 
 // fixCI creates a task to fix failing CI on a repo's default branch.

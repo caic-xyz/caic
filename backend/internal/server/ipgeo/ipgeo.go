@@ -98,7 +98,10 @@ func Open(dbPath string) (*Checker, error) {
 // automatically. Results are cached under cacheDir for 24 hours; stale cache
 // entries are used when refresh fails. Fetch failures are logged as warnings and
 // do not abort startup.
-func NewChecker(ctx context.Context, allowlistStr, dbPath, cacheDir string) (*Checker, error) {
+func NewChecker(ctx context.Context, log *slog.Logger, allowlistStr, dbPath, cacheDir string) (*Checker, error) {
+	if log == nil {
+		return nil, errors.New("logger is required")
+	}
 	al, err := parseAllowlist(allowlistStr)
 	if err != nil {
 		return nil, fmt.Errorf("allowlist: %w", err)
@@ -114,12 +117,12 @@ func NewChecker(ctx context.Context, allowlistStr, dbPath, cacheDir string) (*Ch
 			return nil, err
 		}
 	}
-	cache := loadOriginCache(ctx, cacheDir)
+	cache := loadOriginCache(ctx, log, cacheDir)
 	for _, source := range defaultOriginSources(defaultGitHubMetaURL) {
 		if source.Cacheable() && !al.allowed(source.Name()) {
 			continue
 		}
-		prefixes := resolveOriginPrefixes(ctx, cache, source)
+		prefixes := resolveOriginPrefixes(ctx, log, cache, source)
 		for _, p := range prefixes {
 			c.resolvers = append(c.resolvers, namedPrefix{name: source.Name(), prefix: p.Masked()})
 		}
@@ -257,23 +260,23 @@ func (a *allowlist) needsDB() bool {
 	return false
 }
 
-func loadOriginCache(ctx context.Context, cacheDir string) *originCache {
+func loadOriginCache(ctx context.Context, log *slog.Logger, cacheDir string) *originCache {
 	if cacheDir == "" {
 		return nil
 	}
 	cache, err := openOriginCache(filepath.Join(cacheDir, "ip-origins.json"))
 	if err != nil {
-		slog.WarnContext(ctx, "failed to load IP origin cache", "err", err)
+		log.WarnContext(ctx, "failed to load IP origin cache", "err", err)
 		return nil
 	}
 	return cache
 }
 
-func resolveOriginPrefixes(ctx context.Context, cache *originCache, source OriginSource) []netip.Prefix {
+func resolveOriginPrefixes(ctx context.Context, log *slog.Logger, cache *originCache, source OriginSource) []netip.Prefix {
 	if !source.Cacheable() {
 		prefixes, err := source.Prefixes(ctx)
 		if err != nil {
-			slog.WarnContext(ctx, "failed to resolve static IP origin", "origin", source.Name(), "err", err)
+			log.WarnContext(ctx, "failed to resolve static IP origin", "origin", source.Name(), "err", err)
 			return nil
 		}
 		return prefixes
@@ -289,21 +292,21 @@ func resolveOriginPrefixes(ctx context.Context, cache *originCache, source Origi
 	if err == nil {
 		if cache != nil {
 			if err := cache.set(source.Name(), prefixes); err != nil {
-				slog.WarnContext(ctx, "failed to update IP origin cache", "origin", source.Name(), "err", err)
+				log.WarnContext(ctx, "failed to update IP origin cache", "origin", source.Name(), "err", err)
 			}
 		}
 		return prefixes
 	}
 	if cache != nil {
 		if prefixes, ok := cache.stale(source.Name()); ok {
-			slog.WarnContext(ctx, "failed to refresh IP origin; using stale cache", "origin", source.Name(), "err", err)
+			log.WarnContext(ctx, "failed to refresh IP origin; using stale cache", "origin", source.Name(), "err", err)
 			return prefixes
 		}
 	}
 	if len(prefixes) > 0 {
-		slog.WarnContext(ctx, "partially fetched IP origin; using uncached partial prefixes", "origin", source.Name(), "err", err)
+		log.WarnContext(ctx, "partially fetched IP origin; using uncached partial prefixes", "origin", source.Name(), "err", err)
 		return prefixes
 	}
-	slog.WarnContext(ctx, "failed to fetch IP origin; origin IPs will not be auto-allowed", "origin", source.Name(), "err", err)
+	log.WarnContext(ctx, "failed to fetch IP origin; origin IPs will not be auto-allowed", "origin", source.Name(), "err", err)
 	return nil
 }

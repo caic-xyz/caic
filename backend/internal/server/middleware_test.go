@@ -318,7 +318,7 @@ func TestDecompressMiddleware(t *testing.T) {
 	t.Run("Unsupported", func(t *testing.T) {
 		t.Parallel()
 		h := decompressMiddleware(echoHandler())
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", bytes.NewReader([]byte("data")))
+		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/", bytes.NewReader([]byte("data")))
 		req.Header.Set("Content-Encoding", "deflate")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)

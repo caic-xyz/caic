@@ -4,12 +4,17 @@ package ipgeo
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"testing"
 	"time"
 )
+
+func testLogger() *slog.Logger {
+	return slog.New(slog.DiscardHandler)
+}
 
 type countingResolver struct {
 	name   string
@@ -76,7 +81,7 @@ func TestCheckOrigin(t *testing.T) {
 	t.Parallel()
 	t.Run("special addresses", func(t *testing.T) {
 		t.Parallel()
-		c, err := NewChecker(t.Context(), "local,tailscale", "", "")
+		c, err := NewChecker(t.Context(), testLogger(), "local,tailscale", "", "")
 		if err != nil {
 			t.Fatalf("NewChecker: %v", err)
 		}
@@ -112,7 +117,7 @@ func TestCheckOrigin(t *testing.T) {
 	})
 	t.Run("named CIDR groups", func(t *testing.T) {
 		t.Parallel()
-		c, err := NewChecker(t.Context(), "local,tailscale,anthropic", "", "")
+		c, err := NewChecker(t.Context(), testLogger(), "local,tailscale,anthropic", "", "")
 		if err != nil {
 			t.Fatalf("NewChecker: %v", err)
 		}
@@ -160,7 +165,7 @@ func TestCheckOrigin(t *testing.T) {
 	})
 	t.Run("returns allowed origin", func(t *testing.T) {
 		t.Parallel()
-		c, err := NewChecker(t.Context(), "local", "", "")
+		c, err := NewChecker(t.Context(), testLogger(), "local", "", "")
 		if err != nil {
 			t.Fatalf("NewChecker: %v", err)
 		}
@@ -171,7 +176,7 @@ func TestCheckOrigin(t *testing.T) {
 	})
 	t.Run("returns blocked origin", func(t *testing.T) {
 		t.Parallel()
-		c, err := NewChecker(t.Context(), "tailscale", "", "")
+		c, err := NewChecker(t.Context(), testLogger(), "tailscale", "", "")
 		if err != nil {
 			t.Fatalf("NewChecker: %v", err)
 		}
@@ -342,7 +347,7 @@ func TestNewChecker(t *testing.T) {
 
 	t.Run("anthropic in allowlist uses static CIDR", func(t *testing.T) {
 		t.Parallel()
-		c, err := NewChecker(t.Context(), "local,tailscale,anthropic", "", "")
+		c, err := NewChecker(t.Context(), testLogger(), "local,tailscale,anthropic", "", "")
 		if err != nil {
 			t.Fatalf("NewChecker: %v", err)
 		}
@@ -354,7 +359,7 @@ func TestNewChecker(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		writeOriginCache(t, dir, "github", time.Now(), []string{"192.30.252.0/22", "185.199.108.0/22"})
-		c, err := NewChecker(t.Context(), "local,tailscale,github", "", dir)
+		c, err := NewChecker(t.Context(), testLogger(), "local,tailscale,github", "", dir)
 		if err != nil {
 			t.Fatalf("NewChecker: %v", err)
 		}
@@ -367,7 +372,7 @@ func TestNewChecker(t *testing.T) {
 	})
 	t.Run("github not in allowlist skips fetch", func(t *testing.T) {
 		t.Parallel()
-		c, err := NewChecker(t.Context(), "local,tailscale", "", "")
+		c, err := NewChecker(t.Context(), testLogger(), "local,tailscale", "", "")
 		if err != nil {
 			t.Fatalf("NewChecker: %v", err)
 		}
@@ -379,13 +384,13 @@ func TestNewChecker(t *testing.T) {
 	t.Run("fetch failure is non-fatal", func(t *testing.T) {
 		t.Parallel()
 		source := &testOriginSource{name: "github", err: errors.New("offline"), cacheable: true}
-		if prefixes := resolveOriginPrefixes(t.Context(), nil, source); len(prefixes) != 0 {
+		if prefixes := resolveOriginPrefixes(t.Context(), testLogger(), nil, source); len(prefixes) != 0 {
 			t.Errorf("resolveOriginPrefixes returned %v, want none", prefixes)
 		}
 	})
 	t.Run("country code without DB returns error", func(t *testing.T) {
 		t.Parallel()
-		if _, err := NewChecker(t.Context(), "CA", "", ""); err == nil {
+		if _, err := NewChecker(t.Context(), testLogger(), "CA", "", ""); err == nil {
 			t.Error("expected error when country code given without DB path")
 		}
 	})

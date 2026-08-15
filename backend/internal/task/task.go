@@ -1626,8 +1626,9 @@ func (t *Task) SetAgentVersion(v string) {
 }
 
 // GenerateTitle asks the LLM for a short title from the prompt and any result
-// messages. No-op when the provider is unconfigured.
-func (t *Task) GenerateTitle(ctx context.Context) {
+// messages, logging through the task-scoped log. No-op when the provider is
+// unconfigured.
+func (t *Task) GenerateTitle(ctx context.Context, log *slog.Logger) {
 	if t.Provider == nil {
 		return
 	}
@@ -1659,18 +1660,18 @@ func (t *Task) GenerateTitle(ctx context.Context) {
 		genai.Messages{genai.NewTextMessage(input)},
 		&genai.GenOptionText{SystemPrompt: titleSystemPrompt},
 	)
-	d := time.Since(start).Round(time.Millisecond)
+	dur := time.Since(start).Round(time.Millisecond)
 	if err != nil {
-		slog.WarnContext(ctx, "title failed", "task", t.ID, "err", err, "d", d)
+		log.WarnContext(ctx, "title failed", "err", err, "dur", dur)
 		return
 	}
 	// Strip surrounding quotes if the model adds them despite instructions.
 	title := strings.Trim(strings.TrimSpace(res.String()), "\"'`")
 	if title == "" {
-		slog.WarnContext(ctx, "title", "task", t.ID, "d", d, "msg", "empty")
+		log.WarnContext(ctx, "title empty", "dur", dur)
 		return
 	}
-	slog.InfoContext(ctx, "title", "task", t.ID, "title", title, "d", d)
+	log.InfoContext(ctx, "title generated", "title", title, "dur", dur)
 	t.SetTitle(title)
 }
 
@@ -1731,7 +1732,6 @@ func (t *Task) setState(s State) {
 	}
 	t.state = s
 	t.stateUpdatedAt = time.Now().UTC()
-	slog.Debug("instance", "state", s, "task", t.ID, "instance", t.runtimeInstanceID)
 }
 
 func (t *Task) recordStartupFailure(ctx context.Context, err error) {
@@ -1740,13 +1740,13 @@ func (t *Task) recordStartupFailure(ctx context.Context, err error) {
 }
 
 // addMessage records a synthetic server message with an explicit zero producer time.
-func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen bool) {
-	t.addParsedMessage(ctx, agent.ParsedMessage{Message: m}, skipTitleGen)
+func (t *Task) addMessage(_ context.Context, m agent.Message, skipTitleGen bool) {
+	t.addParsedMessage(agent.ParsedMessage{Message: m}, skipTitleGen)
 }
 
 // addParsedMessage records one physical relay record while task state and
 // subscribers consume its Message.
-func (t *Task) addParsedMessage(ctx context.Context, parsed agent.ParsedMessage, skipTitleGen bool) (stateChanged bool) {
+func (t *Task) addParsedMessage(parsed agent.ParsedMessage, skipTitleGen bool) (stateChanged, generateTitle bool) {
 	m := parsed.Message
 	t.mu.Lock()
 	initialState := t.state
@@ -1764,7 +1764,7 @@ func (t *Task) addParsedMessage(ctx context.Context, parsed agent.ParsedMessage,
 		if meta.Model != "" && t.reportedModel == "" {
 			t.reportedModel = meta.Model
 		}
-		return stateChanged
+		return stateChanged, generateTitle
 	}
 	t.msgs = append(t.msgs, m)
 	if rateLimit, ok := m.(*agent.RateLimitMessage); ok {
@@ -1900,7 +1900,7 @@ func (t *Task) addParsedMessage(ctx context.Context, parsed agent.ParsedMessage,
 			}
 		}
 		if !skipTitleGen {
-			go t.GenerateTitle(ctx)
+			generateTitle = true
 		}
 	}
 	// Fan out to subscribers (non-blocking). Skip a non-zero exit message that
@@ -1909,7 +1909,7 @@ func (t *Task) addParsedMessage(ctx context.Context, parsed agent.ParsedMessage,
 	// persisted replay, so the live stream must match to avoid a transient
 	// "Parse error" that disappears when the task log is reloaded.
 	if exit, ok := m.(*agent.ExitMessage); ok && exit.ExitCode != 0 && t.lastExitError == "" {
-		return stateChanged
+		return stateChanged, generateTitle
 	}
 	for i := 0; i < len(t.subs); i++ {
 		select {
@@ -1921,7 +1921,7 @@ func (t *Task) addParsedMessage(ctx context.Context, parsed agent.ParsedMessage,
 			i--
 		}
 	}
-	return stateChanged
+	return stateChanged, generateTitle
 }
 
 func rateLimitFromMessage(m *agent.RateLimitMessage) RateLimit {

@@ -36,6 +36,7 @@ import (
 // raw HTTP response writing. Task command orchestration and DTO assembly belong
 // to taskService.
 type taskHandlers struct {
+	log        *slog.Logger
 	taskMgr    *taskmgr.Manager
 	checkouts  *repo.Registry
 	repoStatus *ci.RepoStatusStore
@@ -117,13 +118,14 @@ func (h *taskHandlers) notifyTaskChange() {
 func (h *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 	entry, err := h.getTask(r)
 	if err != nil {
-		writeError(w, err)
+		writeError(r.Context(), w, err)
 		return
 	}
+	log := h.log.With("task", entry.Task().ID)
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		writeError(w, api.InternalError("streaming not supported"))
+		writeError(r.Context(), w, api.InternalError("streaming not supported"))
 		return
 	}
 
@@ -137,7 +139,7 @@ func (h *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) 
 		controller: http.NewResponseController(w),
 	}
 	if err := stream.controller.Flush(); err != nil {
-		slog.WarnContext(r.Context(), "start task SSE stream", "err", err)
+		log.WarnContext(r.Context(), "start SSE stream", "err", err)
 		return
 	}
 
@@ -149,7 +151,7 @@ func (h *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) 
 		var sourceErr error
 		loadedTask, sourceErr = h.taskMgr.HistorySource(entry)
 		if sourceErr != nil {
-			slog.WarnContext(r.Context(), "load task SSE history source", "task", entry.Task().ID, "err", sourceErr)
+			log.WarnContext(r.Context(), "load SSE history source", "err", sourceErr)
 			if state != task.StateStopped && r.Context().Err() == nil {
 				writeReplayHistoryError(w, flusher)
 			}
@@ -159,24 +161,24 @@ func (h *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) 
 	if isTaskEventTerminal(state) && loadedTask != nil && entry.Task().LogPath() != "" {
 		stream.tracker = apiconv.NewToolTimingTracker(entry.Task().Harness, apiconv.FormatToolOutput)
 		if err := h.streamHistoryFromDisk(&stream, entry, loadedTask); err != nil {
-			slog.WarnContext(r.Context(), "stream terminal task SSE history", "task", entry.Task().ID, "err", err)
+			log.WarnContext(r.Context(), "stream terminal SSE history", "err", err)
 			if r.Context().Err() == nil {
 				writeReplayHistoryError(w, flusher)
 			}
 			return
 		}
 		if err := stream.writeReady(); err != nil {
-			slog.WarnContext(r.Context(), "write terminal task SSE ready", "task", entry.Task().ID, "err", err)
+			log.WarnContext(r.Context(), "write terminal SSE ready", "err", err)
 			return
 		}
 		if err := stream.controller.Flush(); err != nil {
-			slog.WarnContext(r.Context(), "flush terminal task SSE stream", "task", entry.Task().ID, "err", err)
+			log.WarnContext(r.Context(), "flush terminal SSE stream", "err", err)
 		}
 		return
 	}
 
 	if err := h.streamTaskEvents(&stream, entry, state, loadedTask); err != nil {
-		slog.WarnContext(r.Context(), "stream task SSE events", "task", entry.Task().ID, "err", err)
+		log.WarnContext(r.Context(), "stream SSE events", "err", err)
 		var historyErr *historyLoadError
 		// A stopped task can be revived while its raw log is being scanned.
 		// That scan is intentionally invalidated by growth; close so the client
@@ -356,10 +358,10 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("Connection", "keep-alive")
 	if err := controller.Flush(); err != nil {
 		if errors.Is(err, http.ErrNotSupported) {
-			writeError(w, api.InternalError("streaming not supported"))
+			writeError(r.Context(), w, api.InternalError("streaming not supported"))
 			return
 		}
-		slog.WarnContext(r.Context(), "start task-list SSE stream", "err", err)
+		h.log.WarnContext(r.Context(), "start task-list SSE stream", "err", err)
 		return
 	}
 
@@ -395,28 +397,28 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 		// loop emits the newer state instead of missing the transition.
 		ch := h.taskMgr.Changed()
 		out := h.taskSvc.taskListSnapshot(ctx)
-		repoList := repoListFromSnapshot(h.checkouts.Checkouts(), h.repoStatus)
+		repoList := repoListFromSnapshot(h.log, h.checkouts.Checkouts(), h.repoStatus)
 		var newWarnings = h.warnings.Since(lastWarnTime)
 
 		reposJSON, err := json.Marshal(repoList)
 		if err != nil {
-			slog.WarnContext(ctx, "marshal repos", "err", err)
+			h.log.WarnContext(ctx, "marshal repos", "err", err)
 			return
 		}
 
 		if first {
 			if err := emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{Kind: "snapshot", Snapshot: out}); err != nil {
-				slog.WarnContext(ctx, "marshal task list snapshot", "err", err)
+				h.log.WarnContext(ctx, "marshal task list snapshot", "err", err)
 				return
 			}
 			if err := emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{Kind: "repos", Repos: *repoList}); err != nil {
-				slog.WarnContext(ctx, "marshal repos snapshot", "err", err)
+				h.log.WarnContext(ctx, "marshal repos snapshot", "err", err)
 				return
 			}
 			for i := range out {
 				data, err := json.Marshal(&out[i])
 				if err != nil {
-					slog.WarnContext(ctx, "marshal task entry", "err", err)
+					h.log.WarnContext(ctx, "marshal task entry", "task", out[i].ID, "err", err)
 					continue
 				}
 				prevByID[out[i].ID.String()] = data
@@ -431,7 +433,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 				currentIDs[id] = struct{}{}
 				data, err := json.Marshal(&out[i])
 				if err != nil {
-					slog.WarnContext(ctx, "marshal task", "id", id, "err", err)
+					h.log.WarnContext(ctx, "marshal task", "task", id, "err", err)
 					continue
 				}
 				if !bytes.Equal(data, prevByID[id]) {
@@ -440,18 +442,18 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 					if prev == nil {
 						// New task: emit full object.
 						if err := emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{Kind: "upsert", Upsert: &out[i]}); err != nil {
-							slog.WarnContext(ctx, "marshal task upsert", "id", id, "err", err)
+							h.log.WarnContext(ctx, "marshal task upsert", "task", id, "err", err)
 							return
 						}
 					} else {
 						// Existing task changed: emit only the diff.
 						patch, err := computeTaskPatch(prev, data)
 						if err != nil {
-							slog.WarnContext(ctx, "compute task patch", "id", id, "err", err)
+							h.log.WarnContext(ctx, "compute task patch", "task", id, "err", err)
 							continue
 						}
 						if err := emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{Kind: "patch", Patch: patch}); err != nil {
-							slog.WarnContext(ctx, "marshal task patch", "id", id, "err", err)
+							h.log.WarnContext(ctx, "marshal task patch", "task", id, "err", err)
 							return
 						}
 					}
@@ -461,7 +463,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 			for id := range prevByID {
 				if _, ok := currentIDs[id]; !ok {
 					if err := emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{Kind: "delete", Delete: id}); err != nil {
-						slog.WarnContext(ctx, "marshal task delete", "id", id, "err", err)
+						h.log.WarnContext(ctx, "marshal task delete", "task", id, "err", err)
 						return
 					}
 					delete(prevByID, id)
@@ -470,7 +472,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 			// Emit any new warnings.
 			for _, warn := range newWarnings {
 				if err := emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{Kind: "warning", Warning: warn.msg}); err != nil {
-					slog.WarnContext(ctx, "marshal warning", "err", err)
+					h.log.WarnContext(ctx, "marshal warning", "err", err)
 					return
 				}
 				lastWarnTime = warn.ts
@@ -480,7 +482,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 			if !bytes.Equal(reposJSON, prevReposJSON) {
 				prevReposJSON = reposJSON
 				if err := emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{Kind: "repos", Repos: *repoList}); err != nil {
-					slog.WarnContext(ctx, "marshal repos update", "err", err)
+					h.log.WarnContext(ctx, "marshal repos update", "err", err)
 					return
 				}
 			}
@@ -503,21 +505,21 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 func (h *taskHandlers) handleTaskToolInput(w http.ResponseWriter, r *http.Request) {
 	entry, err := h.getTask(r)
 	if err != nil {
-		writeError(w, err)
+		writeError(r.Context(), w, err)
 		return
 	}
 	resp, err := h.taskSvc.taskToolInput(r.Context(), entry, r.PathValue("toolUseID"))
-	writeJSONResponse(w, resp, err)
+	writeJSONResponse(r.Context(), w, resp, err)
 }
 
 func (h *taskHandlers) handleGetDiff(w http.ResponseWriter, r *http.Request) {
 	entry, err := h.getTask(r)
 	if err != nil {
-		writeError(w, err)
+		writeError(r.Context(), w, err)
 		return
 	}
 	resp, err := h.taskSvc.taskDiff(r.Context(), entry, r.URL.Query().Get("path"))
-	writeJSONResponse(w, resp, err)
+	writeJSONResponse(r.Context(), w, resp, err)
 }
 
 // handleVNCWebSocket proxies a WebSocket connection to the instance's VNC
@@ -525,24 +527,25 @@ func (h *taskHandlers) handleGetDiff(w http.ResponseWriter, r *http.Request) {
 func (h *taskHandlers) handleVNCWebSocket(w http.ResponseWriter, r *http.Request) {
 	entry, err := h.getTask(r)
 	if err != nil {
-		writeError(w, err)
+		writeError(r.Context(), w, err)
 		return
 	}
 	t := entry.Task()
+	log := h.log.With("task", t.ID)
 	snap := t.Snapshot()
 	if snap.RuntimeInstanceID == "" || snap.VNCPort == 0 {
-		writeError(w, api.BadRequest("task has no VNC display"))
+		writeError(r.Context(), w, api.BadRequest("task has no VNC display"))
 		return
 	}
-	slog.InfoContext(r.Context(), "vnc proxy start", "task", t.ID, "instance", snap.RuntimeInstanceID, "port", snap.VNCPort)
+	log.InfoContext(r.Context(), "VNC proxy start", "instance", snap.RuntimeInstanceID, "port", snap.VNCPort)
 	vncAddr := fmt.Sprintf("127.0.0.1:%d", snap.VNCPort)
 
 	var d net.Dialer
 	d.Timeout = 10 * time.Second
 	vncConn, err := d.DialContext(r.Context(), "tcp", vncAddr)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "vnc websocket: dial failed", "addr", vncAddr, "err", err)
-		writeError(w, api.InternalError("cannot reach instance VNC"))
+		log.ErrorContext(r.Context(), "dial VNC websocket", "addr", vncAddr, "err", err)
+		writeError(r.Context(), w, api.InternalError("cannot reach instance VNC"))
 		return
 	}
 	defer func() { _ = vncConn.Close() }()
@@ -551,7 +554,7 @@ func (h *taskHandlers) handleVNCWebSocket(w http.ResponseWriter, r *http.Request
 		InsecureSkipVerify: true, // same-origin, no Origin check needed
 	})
 	if err != nil {
-		slog.WarnContext(r.Context(), "vnc websocket: accept failed", "task", t.ID, "err", err)
+		log.WarnContext(r.Context(), "accept VNC websocket", "err", err)
 		return
 	}
 	defer func() { _ = wsConn.Close(websocket.StatusNormalClosure, "") }()
@@ -566,18 +569,18 @@ func (h *taskHandlers) handleVNCWebSocket(w http.ResponseWriter, r *http.Request
 		for {
 			_, buf, err := wsConn.Read(ctx)
 			if err != nil {
-				slog.DebugContext(ctx, "vnc ws→tcp done", "task", t.ID, "err", err)
+				log.DebugContext(ctx, "VNC websocket to TCP done", "err", err)
 				return
 			}
 			if _, err := vncConn.Write(buf); err != nil {
-				slog.DebugContext(ctx, "vnc ws→tcp write failed", "task", t.ID, "err", err)
+				log.DebugContext(ctx, "VNC websocket to TCP write failed", "err", err)
 				return
 			}
 		}
 	}()
 	n, cpErr := io.Copy(wsNetConn{wsConn, ctx}, vncConn)
 	written.Store(n)
-	slog.InfoContext(ctx, "vnc proxy done", "task", t.ID, "vnc→ws_bytes", n, "err", cpErr)
+	log.InfoContext(ctx, "VNC proxy done", "vnc_to_ws_bytes", n, "err", cpErr)
 }
 
 // getTask looks up a task by the {id} path parameter.

@@ -528,5 +528,6 @@ func (r *Lifecycle) cleanup(ctx context.Context, reason task.State) {
 }
 
 func (r *Lifecycle) generateTitle() {
-	r.wg.Go(func() { r.entry.Task().GenerateTitle(r.ctx) })
+	t := r.entry.Task()
+	r.wg.Go(func() { t.GenerateTitle(r.ctx, r.manager.log.With("task", t.ID)) })
 }

@@ -229,7 +229,7 @@ func (m *Manager) NewEntry(t *task.Task, lt *task.LoadedTask) *Entry {
 			Backends:            m.Backends,
 			Logs:                m.Logs,
 			Runtimes:            m.Runtimes,
-			Log:                 m.log,
+			Log:                 m.log.With("task", t.ID),
 			NotifyTaskChange:    m.NotifyTaskChange,
 			Checkout:            m.resolveCheckout(t),
 			RuntimeMetadata:     m.runtimeMetadata,

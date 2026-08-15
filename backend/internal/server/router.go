@@ -259,7 +259,7 @@ func (r *Router) buildHandler() (http.Handler, error) {
 	}
 	inner = r.ipgeoMiddleware(inner)
 	inner = httplog.Handler{Handler: inner, Attrs: r.httpLogAttrs}
-	inner = httpLogContextMiddleware(inner)
+	inner = httpLogContextMiddleware(r.log, inner)
 	return inner, nil
 }
 
@@ -291,10 +291,11 @@ func (r *Router) ipgeoMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func httpLogContextMiddleware(next http.Handler) http.Handler {
+func httpLogContextMiddleware(log *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logCtx := &httpLogContext{clientIP: ipgeo.GetClientIP(r)}
-		r = r.WithContext(context.WithValue(r.Context(), httpLogContextKey{}, logCtx))
+		ctx := context.WithValue(r.Context(), httpLogContextKey{}, logCtx)
+		r = r.WithContext(context.WithValue(ctx, httpLoggerKey{}, log))
 		next.ServeHTTP(w, r)
 	})
 }
@@ -393,7 +394,10 @@ type Dependencies struct {
 // New creates a new HTTP router from already-assembled dependencies. It wires
 // the injected services into HTTP handler concerns and the webhook endpoint; it
 // does not construct or own application services.
-func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocritic // Dependencies is a startup value bag.
+func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error) { //nolint:gocritic // Dependencies is a startup value bag.
+	if log == nil {
+		return nil, errors.New("logger is required")
+	}
 	if d.Runtimes == nil {
 		return nil, errors.New("runtime is required")
 	}
@@ -418,6 +422,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 	if d.CacheSizes == nil {
 		return nil, errors.New("cache size store is required")
 	}
+	log = log.With("cmp", "server")
 	voice := &voiceHandlers{bridge: d.VoiceBridge, gateway: d.VoiceGateway}
 	voiceMetadata := voice.metadata()
 	goModeSettings := newGoModeSettings(voiceMetadata, d.AuthStore != nil)
@@ -437,13 +442,14 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		fakeCI:    d.FakeCI,
 		runtimes:  d.Runtimes,
 	}
-	audit := &auditStore{path: d.AuditLogPath}
+	audit := &auditStore{log: log.With("scope", "audit"), path: d.AuditLogPath}
 	rateLimiter := newRateLimiter(120, time.Minute)
 
 	s := &Router{
-		log: slog.With("cmp", "server"),
+		log: log,
 		ctx: ctx,
 		authHandlers: &authHandlers{
+			log:                log.With("handler", "auth"),
 			store:              d.AuthStore,
 			sessionSecret:      d.SessionSecret,
 			hostState:          d.HostState,
@@ -455,6 +461,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 			googleAllowedUsers: d.GoogleAllowedUsers,
 		},
 		ciHandlers: &ciHandlers{
+			log:        log.With("handler", "ci"),
 			taskMgr:    d.TaskMgr,
 			checkouts:  d.Checkouts,
 			repoStatus: d.RepoStatus,
@@ -465,12 +472,13 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		},
 		goModeHandler: goModeHandler,
 		runtimeProcesses: &runtimeProcessHandlers{
+			log:         log.With("handler", "runtime-processes"),
 			taskMgr:     d.TaskMgr,
 			runtimes:    d.Runtimes,
 			authEnabled: d.AuthStore != nil,
 		},
 		serverHandlers: &serverHandlers{
-			log:                slog.With("cmp", "server", "handler", "server"),
+			log:                log.With("handler", "server"),
 			serverCtx:          ctx,
 			runtimes:           d.Runtimes,
 			tailscaleAvailable: d.Tailscale,
@@ -488,6 +496,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 			voiceGateway:       voiceMetadata,
 		},
 		taskHandlers: &taskHandlers{
+			log:        log.With("handler", "tasks"),
 			taskMgr:    d.TaskMgr,
 			checkouts:  d.Checkouts,
 			repoStatus: d.RepoStatus,
@@ -497,7 +506,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 			warnings:   d.Warnings,
 			taskSvc:    svc,
 		},
-		usageHandlers:    &usageHandlers{taskMgr: d.TaskMgr, fetchers: d.UsageFetchers, quotaTracker: d.TaskMgr.QuotaTracker},
+		usageHandlers:    &usageHandlers{log: log.With("handler", "usage"), taskMgr: d.TaskMgr, fetchers: d.UsageFetchers, quotaTracker: d.TaskMgr.QuotaTracker},
 		voiceHandlers:    voice,
 		webFetchHandlers: webFetch,
 		authStore:        d.AuthStore,
@@ -506,7 +515,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		pprof:            d.Pprof,
 		ipgeoChecker:     d.IPGeoChecker,
 	}
-	svc.log = s.log.With("cmp", "tasks")
+	svc.log = s.log.With("handler", "tasks")
 
 	// OAuth server — only when auth is configured.
 	if d.AuthStore != nil {
@@ -554,6 +563,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 	// The webhook concern owns the forge webhook secrets and the GitHub App
 	// owner allowlist, and dispatches to the app-owned bot and CI service.
 	s.webhooks = &WebhookHandlers{
+		log:              log.With("handler", "webhook"),
 		serverCtx:        ctx,
 		githubSecret:     d.GitHubWebhookSecret,
 		gitlabSecret:     d.GitLabWebhookSecret,

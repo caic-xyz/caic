@@ -37,7 +37,7 @@ func TestOriginCache(t *testing.T) {
 		dir := t.TempDir()
 		writeOriginCache(t, dir, "github", time.Now(), []string{"203.0.113.0/24"})
 
-		c, err := NewChecker(t.Context(), "github", "", dir)
+		c, err := NewChecker(t.Context(), testLogger(), "github", "", dir)
 		if err != nil {
 			t.Fatalf("NewChecker: %v", err)
 		}
@@ -103,7 +103,7 @@ func resolveTestOriginPrefixes(t *testing.T, dir string, source OriginSource) []
 	if err != nil {
 		t.Fatalf("openOriginCache: %v", err)
 	}
-	prefixes := resolveOriginPrefixes(t.Context(), cache, source)
+	prefixes := resolveOriginPrefixes(t.Context(), testLogger(), cache, source)
 	if len(prefixes) == 0 {
 		t.Fatal("resolveOriginPrefixes returned no prefixes")
 	}

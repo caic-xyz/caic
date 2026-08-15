@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"iter"
-	"log/slog"
 	"maps"
 	"os"
 	"path/filepath"
@@ -953,7 +952,6 @@ func loadSemanticLog(path string, resolver NativeParserResolver) (_ *semanticLog
 			if record.Control || scanner.authority.Version == agent.LogVersionV2 {
 				return nil, fmt.Errorf("parse task log %s: %w", path, err)
 			}
-			slog.Warn("failed to parse message", "err", err, "path", path)
 			continue
 		}
 		appendRecord(record)
@@ -1007,7 +1005,6 @@ func loadSemanticSessionMetadata(path string, resolver NativeParserResolver) (_ 
 			if record.Control || scanner.authority.Version == agent.LogVersionV2 {
 				return fmt.Errorf("parse task log %s: %w", path, err)
 			}
-			slog.Warn("failed to parse message", "err", err, "path", path)
 			return nil
 		}
 		applyParsedSessionMetadata(loaded, record.Messages)
@@ -1072,7 +1069,6 @@ func loadSemanticTail(path string, resolver NativeParserResolver, tailBytes int6
 			if record.Control || scanner.authority.Version == agent.LogVersionV2 {
 				return nil, fmt.Errorf("parse task log %s: %w", path, err)
 			}
-			slog.Warn("failed to parse message", "err", err, "path", path)
 		}
 		retained = append(retained, retainedSemanticRecord{
 			bytes:  int64(len(scanner.Bytes()) + 1),
@@ -1442,8 +1438,6 @@ func loadLogsFromPaths(paths []string, strict bool) ([]*LoadedTask, error) {
 		if r.err != nil {
 			if strict {
 				errs = append(errs, fmt.Errorf("load task log %s: %w", paths[i], r.err))
-			} else if !errors.Is(r.err, errNotLogFile) {
-				slog.Warn("skipping log file", "file", filepath.Base(paths[i]), "err", r.err)
 			}
 			continue
 		}
@@ -1734,7 +1728,6 @@ func scanInventoryRecords(path string, scanner *physicalLogScanner, lt *LoadedTa
 			if record.Control || scanner.authority.Version == agent.LogVersionV2 {
 				return fmt.Errorf("parse task log %s: %w", path, err)
 			}
-			slog.Warn("failed to parse message", "err", err, "path", path)
 			continue
 		}
 		if record.Control {

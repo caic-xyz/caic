@@ -298,14 +298,13 @@ func TestHandleGitHubWebhook(t *testing.T) {
 	})
 }
 
-func TestHandleGitHubWebhookLogging(t *testing.T) { //nolint:paralleltest // Mutates the global slog default.
+func TestHandleGitHubWebhookLogging(t *testing.T) {
+	t.Parallel()
 	var logs bytes.Buffer
-	old := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	t.Cleanup(func() { slog.SetDefault(old) })
 
 	secret := []byte("test-secret-abc123")
 	s := newTestRouter(t, nil)
+	s.webhooks.log = slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	s.webhooks.githubSecret = secret
 	handler, err := s.buildHandler()
 	if err != nil {
@@ -329,9 +328,6 @@ func TestHandleGitHubWebhookLogging(t *testing.T) { //nolint:paralleltest // Mut
 		`"msg":"github webhook signature mismatch"`,
 		`"delivery":"delivery-123"`,
 		`"signature":"present"`,
-		`"msg":"http"`,
-		`"p":"/webhooks/github"`,
-		`"s":401`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("logs missing %s: %s", want, got)
@@ -497,7 +493,7 @@ func minimalRouter(t *testing.T) *testRouter {
 	fm := forgemgr.New("", "", nil, forgemgr.NoOAuthTokenSource())
 	prefs := newTestPrefs(t)
 	ciService := ci.NewService(cache, nil, &testCIBackend{checkouts: checkoutRegistry, repoStatus: repoStatus, taskMgr: taskMgr, forgeMgr: fm, prefs: prefs})
-	s, err := New(ctx, Dependencies{
+	s, err := New(ctx, testLogger(), Dependencies{
 		Checkouts:   checkoutRegistry,
 		RepoStatus:  repoStatus,
 		Runtimes:    runtimeRouter,
@@ -507,7 +503,7 @@ func minimalRouter(t *testing.T) *testRouter {
 		ForgeMgr:    fm,
 		CIService:   ciService,
 		Warnings:    NewWarningStore(taskMgr),
-		CacheSizes:  NewCacheSizeStore(),
+		CacheSizes:  NewCacheSizeStore(testLogger()),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

@@ -20,6 +20,7 @@ import (
 )
 
 type usageHandlers struct {
+	log          *slog.Logger
 	taskMgr      *taskmgr.Manager
 	fetchers     []usage.ProviderFetcher
 	quotaTracker *usage.Tracker
@@ -31,7 +32,7 @@ type usageHandlers struct {
 func (h *usageHandlers) handleEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		writeError(w, api.InternalError("streaming not supported"))
+		writeError(r.Context(), w, api.InternalError("streaming not supported"))
 		return
 	}
 
@@ -70,7 +71,7 @@ func (h *usageHandlers) handleGetUsage(w http.ResponseWriter, r *http.Request) {
 	resp := h.buildResp(r.Context())
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		slog.WarnContext(r.Context(), "encode usage response", "err", err)
+		h.log.WarnContext(r.Context(), "encode usage response", "err", err)
 	}
 }
 
@@ -94,7 +95,7 @@ func (h *usageHandlers) buildResp(ctx context.Context) v1.UsageResp {
 	for i := range mergedQuotas {
 		out, err := apiconv.ProviderQuota(&mergedQuotas[i])
 		if err != nil {
-			slog.ErrorContext(ctx, "convert provider quota", "provider", mergedQuotas[i].Provider, "err", err)
+			h.log.ErrorContext(ctx, "convert provider quota", "provider", mergedQuotas[i].Provider, "err", err)
 			continue
 		}
 		out.LogoURL = "/logos/" + string(out.Provider) + ".svg"

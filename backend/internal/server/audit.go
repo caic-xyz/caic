@@ -17,6 +17,7 @@ import (
 )
 
 type auditStore struct {
+	log  *slog.Logger
 	path string
 
 	mu     sync.Mutex
@@ -62,10 +63,10 @@ func (a *auditStore) record(ctx context.Context, e *auditEvent) {
 	a.mu.Lock()
 	a.events = append(a.events, *e)
 	if err := a.persistLocked(e); err != nil {
-		slog.WarnContext(ctx, "persist audit", "err", err)
+		a.log.WarnContext(ctx, "persist audit", "err", err)
 	}
 	a.mu.Unlock()
-	slog.InfoContext(ctx, "audit", "operation", e.Operation, "name", e.Name, "decision", e.Decision, "status", e.Status, "userID", e.UserID)
+	a.log.InfoContext(ctx, "audit", "operation", e.Operation, "name", e.Name, "decision", e.Decision, "status", e.Status, "userID", e.UserID)
 }
 
 func (a *auditStore) snapshot() []auditEvent {

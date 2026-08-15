@@ -20,7 +20,7 @@ type settings struct {
 	OAuthKeyID         string `json:"mcpOAuthKeyID,omitempty"`
 }
 
-func loadSettings(path string) (*settings, error) {
+func loadSettings(log *slog.Logger, path string) (*settings, error) {
 	var s settings
 	if data, err := os.ReadFile(path); err == nil { //nolint:gosec // G304: internal config path
 		if err := json.Unmarshal(data, &s); err != nil {
@@ -49,7 +49,7 @@ func loadSettings(path string) (*settings, error) {
 
 	if dirty {
 		if err := writeSettingsAtomic(path, &s); err != nil {
-			slog.Warn("could not persist settings", "path", path, "err", err)
+			log.Warn("could not persist settings", "path", path, "err", err)
 		}
 	}
 	return &s, nil

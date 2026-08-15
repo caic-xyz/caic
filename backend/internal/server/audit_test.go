@@ -19,7 +19,7 @@ func TestAuditStore(t *testing.T) {
 		t.Parallel()
 
 		path := filepath.Join(t.TempDir(), "mcp_audit.jsonl")
-		store := &auditStore{path: path}
+		store := &auditStore{log: testLogger(), path: path}
 		store.record(t.Context(), &auditEvent{Operation: "tools/call", Name: "tasks_list", Decision: "allow", Status: "ok"})
 
 		events := readAuditEvents(t, path)
@@ -52,7 +52,7 @@ func TestAuditStore(t *testing.T) {
 		t.Parallel()
 
 		path := filepath.Join(t.TempDir(), "mcp_audit.jsonl")
-		store := &auditStore{path: path}
+		store := &auditStore{log: testLogger(), path: path}
 		store.record(t.Context(), &auditEvent{Operation: "tools/call", Name: "task_create", Args: auditArgsSummary(json.RawMessage(`{"prompt":"TOKEN=secret"}`)), Decision: "missing required MCP scope: caic:tasks.write", Status: "blocked"})
 
 		events := readAuditEvents(t, path)
@@ -74,7 +74,7 @@ func TestAuditStore(t *testing.T) {
 		if err := os.Mkdir(path, 0o700); err != nil {
 			t.Fatalf("Mkdir: %v", err)
 		}
-		store := &auditStore{path: path}
+		store := &auditStore{log: testLogger(), path: path}
 		user := &auth.User{ID: "usr_1", Username: "alice"}
 		store.record(auth.NewContext(t.Context(), user), &auditEvent{Operation: "resources/read", Name: "caic://tasks", Decision: "allow", Status: "ok"})
 

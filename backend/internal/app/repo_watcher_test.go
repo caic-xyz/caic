@@ -22,7 +22,7 @@ func TestCollectWatchDirs(t *testing.T) {
 			".hidden",
 		})
 
-		dirs := collectRepoWatchDirs(t.Context(), slog.With("cmp", "test"), root, 3)
+		dirs := collectRepoWatchDirs(t.Context(), slog.New(slog.DiscardHandler).With("cmp", "test"), root, 3)
 
 		want := []string{
 			root,
@@ -41,7 +41,7 @@ func TestCollectWatchDirs(t *testing.T) {
 		root := t.TempDir()
 		makeDirs(t, root, []string{"a/b/c/d"})
 
-		dirs := collectRepoWatchDirs(t.Context(), slog.With("cmp", "test"), root, 2)
+		dirs := collectRepoWatchDirs(t.Context(), slog.New(slog.DiscardHandler).With("cmp", "test"), root, 2)
 
 		want := []string{
 			root,

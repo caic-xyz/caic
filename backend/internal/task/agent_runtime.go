@@ -793,7 +793,7 @@ func (r *AgentRuntime) branchDiffStat(ctx context.Context, t *Task) (agent.DiffS
 	if len(repos) > 0 && repos[0].GitRoot == "" {
 		repos[0].GitRoot = r.Checkout.Dir
 	}
-	r.Log.With("repo", r.Checkout.RelPath).InfoContext(ctx, "fetch for branch diff stat", "repos", len(repos))
+	r.Log.InfoContext(ctx, "fetch for branch diff stat", "repo", r.Checkout.RelPath, "repos", len(repos))
 	return r.Checkout.DiffStat(ctx, r.Log, r.Runtimes, id, repos, repo.DiffFetchRequired)
 }
 
@@ -1124,9 +1124,12 @@ func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipSi
 					msg.DiffStat = ds
 				}
 			}
-			stateChanged := t.addParsedMessage(ctx, parsed, skipSideEffects)
+			stateChanged, generateTitle := t.addParsedMessage(parsed, skipSideEffects)
 			if stateChanged {
 				r.NotifyTaskChange()
+			}
+			if generateTitle {
+				go t.GenerateTitle(ctx, r.Log)
 			}
 			if emitToolDiff {
 				r.emitDiffStatBranch(ctx, t, instanceID, allRepos)

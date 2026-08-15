@@ -164,7 +164,7 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return "", "", nil, err
 	}
-	checker, err := ipgeo.NewChecker(ctx, "0.0.0.0/0,::/0", "", "")
+	checker, err := ipgeo.NewChecker(ctx, slog.New(slog.NewTextHandler(os.Stderr, nil)), "0.0.0.0/0,::/0", "", "")
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -201,7 +201,7 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 	if err != nil {
 		return "", "", nil, err
 	}
-	router, err := server.New(ctx, server.Dependencies{
+	router, err := server.New(ctx, slog.New(slog.NewTextHandler(os.Stderr, nil)), server.Dependencies{
 		Checkouts:     checkoutRegistry,
 		RepoStatus:    ci.NewRepoStatusStore(),
 		Runtimes:      runtimeRouter,
@@ -210,7 +210,7 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 		IPGeoChecker:  checker,
 		ForgeMgr:      forgemgr.New("", "", nil, forgemgr.NoOAuthTokenSource()),
 		Warnings:      server.NewWarningStore(taskMgr),
-		CacheSizes:    server.NewCacheSizeStore(),
+		CacheSizes:    server.NewCacheSizeStore(slog.New(slog.NewTextHandler(os.Stderr, nil))),
 		AuthStore:     store,
 		SessionSecret: secret,
 	})

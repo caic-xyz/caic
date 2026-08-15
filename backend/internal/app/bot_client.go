@@ -23,6 +23,7 @@ import (
 
 // botClient adapts task and forge stores to bot.Client.
 type botClient struct {
+	log       *slog.Logger
 	checkouts *repo.Registry
 	taskMgr   *taskmgr.Manager
 	forgeMgr  *forgemgr.Manager
@@ -110,7 +111,7 @@ func (c *botClient) CreateTask(ctx context.Context, req task.CreateRequest) (str
 	if err != nil {
 		return "", err
 	}
-	slog.InfoContext(ctx, "bot task created", "id", id, "repo", req.Repo, "harness", selectedHarness)
+	c.log.InfoContext(ctx, "bot task created", "task", id, "checkout", req.Repo, "harness", selectedHarness)
 	return id, nil
 }
 

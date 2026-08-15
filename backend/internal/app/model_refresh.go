@@ -21,8 +21,8 @@ import (
 
 // watchHarnessModelCache refreshes stale model caches at startup, then watches
 // harnesses.json for deletion and regenerates it on demand.
-func watchHarnessModelCache(ctx context.Context, cacheDir string, router *runtime.Router, taskMgr *taskmgr.Manager, harnessEnv map[string][]string) error {
-	refreshHarnessModels(ctx, cacheDir, router, taskMgr, harnessEnv)
+func watchHarnessModelCache(ctx context.Context, log *slog.Logger, cacheDir string, router *runtime.Router, taskMgr *taskmgr.Manager, harnessEnv map[string][]string) error {
+	refreshHarnessModels(ctx, log, cacheDir, router, taskMgr, harnessEnv)
 
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -47,13 +47,13 @@ func watchHarnessModelCache(ctx context.Context, cacheDir string, router *runtim
 			if !event.Has(fsnotify.Remove) && !event.Has(fsnotify.Rename) {
 				continue
 			}
-			slog.InfoContext(ctx, "model cache deleted, regenerating", "path", cachePath)
-			refreshHarnessModels(ctx, cacheDir, router, taskMgr, harnessEnv)
+			log.InfoContext(ctx, "cache deleted, regenerating", "path", cachePath)
+			refreshHarnessModels(ctx, log, cacheDir, router, taskMgr, harnessEnv)
 		case err, ok := <-watcher.Errors:
 			if !ok {
 				return nil
 			}
-			slog.WarnContext(ctx, "model refresh: cache watcher error", "err", err)
+			log.WarnContext(ctx, "cache watcher error", "err", err)
 		case <-ctx.Done():
 			return nil
 		}
@@ -62,8 +62,8 @@ func watchHarnessModelCache(ctx context.Context, cacheDir string, router *runtim
 
 // refreshHarnessModels checks if any harness caches are stale and refreshes
 // them by launching a temporary runtime instance.
-func refreshHarnessModels(ctx context.Context, cacheDir string, router *runtime.Router, taskMgr *taskmgr.Manager, harnessEnv map[string][]string) {
-	purgeStaleModelRefreshInstances(ctx, router)
+func refreshHarnessModels(ctx context.Context, log *slog.Logger, cacheDir string, router *runtime.Router, taskMgr *taskmgr.Manager, harnessEnv map[string][]string) {
+	purgeStaleModelRefreshInstances(ctx, log, router)
 	cache := agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
 
 	fetchers := map[harness.Name]agent.ModelFetcher{}
@@ -79,23 +79,23 @@ func refreshHarnessModels(ctx context.Context, cacheDir string, router *runtime.
 		if fresh {
 			continue
 		}
-		refreshOneHarness(ctx, cache, router, taskMgr, h, fetchers[h], env)
+		refreshOneHarness(ctx, log, cache, router, taskMgr, h, fetchers[h], env)
 	}
 }
 
 // purgeStaleModelRefreshInstances removes temporary model-refresh runtimes left
 // behind by a previous server exit.
-func purgeStaleModelRefreshInstances(ctx context.Context, router *runtime.Router) {
+func purgeStaleModelRefreshInstances(ctx context.Context, log *slog.Logger, router *runtime.Router) {
 	instances, err := router.List(ctx)
 	if err != nil {
-		slog.WarnContext(ctx, "model refresh: stale instance scan failed", "err", err)
+		log.WarnContext(ctx, "stale instance scan failed", "err", err)
 		return
 	}
 	for i := range instances {
 		id := instances[i].ID
 		value, err := router.Metadata(ctx, id, runtime.MetadataModelRefresh)
 		if err != nil {
-			slog.WarnContext(ctx, "model refresh: metadata read failed", "instance", id, "err", err)
+			log.WarnContext(ctx, "metadata read failed", "instance", id, "err", err)
 			continue
 		}
 		if value != "true" {
@@ -105,10 +105,10 @@ func purgeStaleModelRefreshInstances(ctx context.Context, router *runtime.Router
 		err = router.Purge(purgeCtx, id)
 		cancel()
 		if err != nil {
-			slog.WarnContext(ctx, "model refresh: stale instance purge failed", "instance", id, "err", err)
+			log.WarnContext(ctx, "stale instance purge failed", "instance", id, "err", err)
 			continue
 		}
-		slog.InfoContext(ctx, "model refresh: purged stale instance", "instance", id)
+		log.InfoContext(ctx, "purged stale instance", "instance", id)
 	}
 }
 
@@ -116,6 +116,7 @@ func purgeStaleModelRefreshInstances(ctx context.Context, router *runtime.Router
 // inventory, and updates the cache and all checkout backends.
 func refreshOneHarness(
 	ctx context.Context,
+	log *slog.Logger,
 	cache *agent.HarnessCache,
 	router *runtime.Router,
 	taskMgr *taskmgr.Manager,
@@ -123,11 +124,11 @@ func refreshOneHarness(
 	fetcher agent.ModelFetcher,
 	env []string,
 ) {
-	slog.InfoContext(ctx, "model cache stale, fetching", "harness", h)
+	log.InfoContext(ctx, "model cache stale, fetching", "harness", h)
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
-	w := phaseLogWriter{phase: "model-refresh"}
+	w := phaseLogWriter{log: log}
 	name, err := router.Launch(ctx, nil, &runtime.StartOptions{
 		RuntimeName: router.Runtimes[0].Name(),
 		Metadata: runtime.Metadata{
@@ -137,36 +138,36 @@ func refreshOneHarness(
 		LogWriter: w,
 	})
 	if err != nil {
-		slog.WarnContext(ctx, "model refresh: launch failed", "harness", h, "err", err)
+		log.WarnContext(ctx, "launch failed", "harness", h, "err", err)
 		return
 	}
 	defer func() {
 		if err := router.Purge(context.WithoutCancel(ctx), name); err != nil {
-			slog.WarnContext(ctx, "model refresh: purge failed", "harness", h, "instance", name, "err", err)
+			log.WarnContext(ctx, "purge failed", "harness", h, "instance", name, "err", err)
 		}
 	}()
 	conn, err := router.Connect(ctx, name, &runtime.StartOptions{Harness: h, LogWriter: w})
 	if err != nil {
-		slog.WarnContext(ctx, "model refresh: connect failed", "harness", h, "err", err)
+		log.WarnContext(ctx, "connect failed", "harness", h, "err", err)
 		return
 	}
 	inventory, err := fetcher.FetchModelInventory(ctx, conn.AgentTarget, env)
 	if err != nil {
-		slog.WarnContext(ctx, "model refresh: fetch failed", "harness", h, "err", err)
+		log.WarnContext(ctx, "fetch failed", "harness", h, "err", err)
 		return
 	}
 	if b, ok := taskMgr.Backends[h]; ok {
 		b.SetModelInventory(inventory)
 	}
 	cache.SetModelInventory(h, inventory, agent.APIKeyHash(env))
-	slog.InfoContext(ctx, "model cache refreshed", "harness", h, "count", len(inventory.Models))
+	log.InfoContext(ctx, "model cache refreshed", "harness", h, "count", len(inventory.Models))
 }
 
 type phaseLogWriter struct {
-	phase string
+	log *slog.Logger
 }
 
 func (w phaseLogWriter) Write(p []byte) (int, error) {
-	slog.Info(w.phase, "out", string(p))
+	w.log.Info("runtime output", "out", string(p))
 	return len(p), nil
 }

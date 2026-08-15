@@ -36,7 +36,7 @@ func TestRefreshHarnessModels(t *testing.T) {
 			"plain":      &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}},
 		})
 
-		refreshHarnessModels(t.Context(), cacheDir, router, taskMgr, env)
+		refreshHarnessModels(t.Context(), slog.New(slog.DiscardHandler), cacheDir, router, taskMgr, env)
 
 		if runtimeBackend.launches != 1 || runtimeBackend.connects != 1 || runtimeBackend.purges != 1 {
 			t.Fatalf("runtime calls = launch %d connect %d purge %d, want 1 each", runtimeBackend.launches, runtimeBackend.connects, runtimeBackend.purges)
@@ -78,7 +78,7 @@ func TestRefreshHarnessModels(t *testing.T) {
 		}
 		taskMgr := newModelRefreshTestManager(t, router, map[harness.Name]agent.Backend{fetchHarness: fetcher})
 
-		refreshHarnessModels(t.Context(), cacheDir, router, taskMgr, env)
+		refreshHarnessModels(t.Context(), slog.New(slog.DiscardHandler), cacheDir, router, taskMgr, env)
 
 		cached, fresh := agent.OpenHarnessCache(cacheDir+"/harnesses.json").ModelInventory(fetchHarness, agent.APIKeyHash(env[string(fetchHarness)]))
 		if !fresh || len(cached.Models) != 1 || !slices.Equal(cached.Models[0].EffortOptions, []string{"low", "high"}) {
@@ -100,7 +100,7 @@ func TestRefreshHarnessModels(t *testing.T) {
 			fetchHarness: fetcher,
 		})
 
-		refreshHarnessModels(t.Context(), cacheDir, router, taskMgr, nil)
+		refreshHarnessModels(t.Context(), slog.New(slog.DiscardHandler), cacheDir, router, taskMgr, nil)
 
 		if runtimeBackend.launches != 0 {
 			t.Fatalf("launches = %d, want 0 for fresh cache", runtimeBackend.launches)
@@ -133,7 +133,7 @@ func TestRefreshHarnessModels(t *testing.T) {
 			fetchHarness: fetcher,
 		})
 
-		refreshHarnessModels(t.Context(), cacheDir, router, taskMgr, nil)
+		refreshHarnessModels(t.Context(), slog.New(slog.DiscardHandler), cacheDir, router, taskMgr, nil)
 
 		if !slices.Equal(runtimeBackend.purgedIDs, []runtime.ID{"test-runtime:stale-refresh"}) {
 			t.Fatalf("purged IDs = %v, want stale-refresh", runtimeBackend.purgedIDs)

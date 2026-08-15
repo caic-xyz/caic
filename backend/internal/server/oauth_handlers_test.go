@@ -401,7 +401,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 		t.Fatalf("upsert user: %v", err)
 	}
 
-	checker, err := ipgeo.NewChecker(t.Context(), "0.0.0.0/0,::/0", "", "")
+	checker, err := ipgeo.NewChecker(t.Context(), testLogger(), "0.0.0.0/0,::/0", "", "")
 	if err != nil {
 		t.Fatalf("ipgeo.NewChecker: %v", err)
 	}
@@ -419,7 +419,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 	}
 
 	refreshTokenPath := t.TempDir() + "/mcp_oauth_refresh_tokens.json"
-	s, err := New(t.Context(), Dependencies{
+	s, err := New(t.Context(), testLogger(), Dependencies{
 		Checkouts:                  checkoutRegistry,
 		RepoStatus:                 repoStatus,
 		Runtimes:                   runtimeRouter,
@@ -428,7 +428,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 		IPGeoChecker:               checker,
 		ForgeMgr:                   forgeManager,
 		Warnings:                   NewWarningStore(taskMgr),
-		CacheSizes:                 NewCacheSizeStore(),
+		CacheSizes:                 NewCacheSizeStore(testLogger()),
 		AuthStore:                  store,
 		SessionSecret:              []byte("0123456789abcdef0123456789abcdef"),
 		HostState:                  auth.NewHostState("https://caic.example.com"),

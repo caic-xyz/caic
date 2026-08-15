@@ -18,6 +18,7 @@ import (
 
 // runtimeProcessHandlers handles task runtime process routes.
 type runtimeProcessHandlers struct {
+	log         *slog.Logger
 	taskMgr     *taskmgr.Manager
 	runtimes    *runtime.Router
 	authEnabled bool
@@ -27,23 +28,23 @@ type runtimeProcessHandlers struct {
 func (h *runtimeProcessHandlers) HandleGetProcesses(w http.ResponseWriter, r *http.Request) {
 	entry, err := h.getTask(r)
 	if err != nil {
-		writeError(w, err)
+		writeError(r.Context(), w, err)
 		return
 	}
 	t := entry.Task()
 	instanceID := t.RuntimeInstanceID()
 	if instanceID == "" {
-		writeError(w, api.Conflict("task has no instance"))
+		writeError(r.Context(), w, api.Conflict("task has no instance"))
 		return
 	}
 	procs, err := h.runtimes.Processes(r.Context(), instanceID)
 	if err != nil {
-		writeError(w, api.InternalError(err.Error()))
+		writeError(r.Context(), w, api.InternalError(err.Error()))
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(v1.ProcessListResp{Processes: apiconv.ProcessInfos(procs)}); err != nil {
-		slog.WarnContext(r.Context(), "encode process list response", "err", err)
+		h.log.WarnContext(r.Context(), "encode process list response", "task", t.ID, "err", err)
 	}
 }
 
@@ -51,7 +52,7 @@ func (h *runtimeProcessHandlers) HandleGetProcesses(w http.ResponseWriter, r *ht
 func (h *runtimeProcessHandlers) HandleSignalProcess(w http.ResponseWriter, r *http.Request) {
 	entry, err := h.getTask(r)
 	if err != nil {
-		writeError(w, err)
+		writeError(r.Context(), w, err)
 		return
 	}
 	req := &v1.SignalProcessReq{}
@@ -60,14 +61,14 @@ func (h *runtimeProcessHandlers) HandleSignalProcess(w http.ResponseWriter, r *h
 	}
 	populatePathParams(r, req)
 	if err := req.Validate(); err != nil {
-		writeError(w, err)
+		writeError(r.Context(), w, err)
 		return
 	}
 	resp, err := h.signalProcess(r.Context(), entry, req)
 	if err == nil {
 		h.taskMgr.NotifyTaskChange()
 	}
-	writeJSONResponse(w, resp, err)
+	writeJSONResponse(r.Context(), w, resp, err)
 }
 
 func (h *runtimeProcessHandlers) signalProcess(ctx context.Context, entry *taskmgr.Entry, req *v1.SignalProcessReq) (*v1.StatusResp, error) {
@@ -79,7 +80,7 @@ func (h *runtimeProcessHandlers) signalProcess(ctx context.Context, entry *taskm
 	if err := h.runtimes.Signal(ctx, instanceID, req.PID, req.Signal); err != nil {
 		return nil, api.InternalError(err.Error())
 	}
-	slog.InfoContext(ctx, "signal sent", "task", t.ID, "instance", instanceID, "pid", req.PID, "signal", req.Signal)
+	h.log.InfoContext(ctx, "signal sent", "task", t.ID, "instance", instanceID, "pid", req.PID, "signal", req.Signal)
 	return &v1.StatusResp{Status: "signalled"}, nil
 }
 

@@ -27,6 +27,7 @@ const (
 )
 
 type authHandlers struct {
+	log           *slog.Logger
 	store         *auth.Store
 	sessionSecret []byte
 	hostState     *auth.HostState
@@ -74,28 +75,28 @@ func (h *authHandlers) handleStart(provider string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg := h.oauthFor(provider)
 		if cfg == nil || cfg.RedirectURI(r) == "" {
-			writeError(w, api.NotFound("provider"))
+			writeError(r.Context(), w, api.NotFound("provider"))
 			return
 		}
 		returnMode := r.URL.Query().Get("return")
 		next := r.URL.Query().Get("next")
 		if returnMode != "" && returnMode != "app" {
-			writeError(w, api.BadRequest("return must be empty or \"app\""))
+			writeError(r.Context(), w, api.BadRequest("return must be empty or \"app\""))
 			return
 		}
 		if returnMode == "app" && next != "" {
-			writeError(w, api.BadRequest("next is only valid for web login"))
+			writeError(r.Context(), w, api.BadRequest("next is only valid for web login"))
 			return
 		}
 		if next != "" && !validWebRedirectPath(next) {
-			writeError(w, api.BadRequest("next must be a same-origin absolute path"))
+			writeError(r.Context(), w, api.BadRequest("next must be a same-origin absolute path"))
 			return
 		}
 
 		state, err := oauthserver.GenerateState()
 		if err != nil {
-			slog.WarnContext(r.Context(), "generate oauth state", "err", err)
-			writeError(w, api.InternalError("generate state"))
+			h.log.WarnContext(r.Context(), "generate oauth state", "err", err)
+			writeError(r.Context(), w, api.InternalError("generate state"))
 			return
 		}
 		// Prefix state with redirect target so the callback knows where to go.
@@ -126,7 +127,7 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg := h.oauthFor(provider)
 		if cfg == nil || cfg.RedirectURI(r) == "" {
-			writeError(w, api.NotFound("provider"))
+			writeError(r.Context(), w, api.NotFound("provider"))
 			return
 		}
 
@@ -144,12 +145,12 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 		// Validate state cookie.
 		stateCookie, err := r.Cookie(auth.StateCookieName)
 		if err != nil {
-			writeError(w, api.BadRequest("missing state cookie"))
+			writeError(r.Context(), w, api.BadRequest("missing state cookie"))
 			return
 		}
 		fullState, ok := oauthserver.ValidateState(stateCookie.Value, h.sessionSecret)
 		if !ok {
-			writeError(w, api.BadRequest("invalid state"))
+			writeError(r.Context(), w, api.BadRequest("invalid state"))
 			return
 		}
 
@@ -161,19 +162,19 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 		// we originally sent in AuthURL, so compare against fullState directly.
 		qState := r.URL.Query().Get("state")
 		if qState != fullState {
-			writeError(w, api.BadRequest("state mismatch"))
+			writeError(r.Context(), w, api.BadRequest("state mismatch"))
 			return
 		}
 
 		// Check for error from provider.
 		if oauthErr := r.URL.Query().Get("error"); oauthErr != "" {
-			writeError(w, api.BadRequest("oauth error: "+oauthErr))
+			writeError(r.Context(), w, api.BadRequest("oauth error: "+oauthErr))
 			return
 		}
 
 		code := r.URL.Query().Get("code")
 		if code == "" {
-			writeError(w, api.BadRequest("missing code"))
+			writeError(r.Context(), w, api.BadRequest("missing code"))
 			return
 		}
 
@@ -182,24 +183,24 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 		// HMAC-signed state.
 		token, err := oauthclient.ExchangeCode(r.Context(), cfg.OAuthClientConfig(r), code, "")
 		if err != nil {
-			slog.WarnContext(r.Context(), "oauth exchange", "provider", provider, "err", err)
-			writeError(w, api.InternalError("token exchange failed"))
+			h.log.WarnContext(r.Context(), "oauth exchange", "provider", provider, "err", err)
+			writeError(r.Context(), w, api.InternalError("token exchange failed"))
 			return
 		}
 
 		// Fetch user identity from the provider's userinfo endpoint.
 		providerID, username, avatarURL, err := cfg.FetchUser(r.Context(), token.AccessToken)
 		if err != nil {
-			slog.WarnContext(r.Context(), "oauth userinfo", "provider", provider, "err", err)
-			writeError(w, api.InternalError("userinfo failed"))
+			h.log.WarnContext(r.Context(), "oauth userinfo", "provider", provider, "err", err)
+			writeError(r.Context(), w, api.InternalError("userinfo failed"))
 			return
 		}
 
 		// Check allowlist.
 		if allowed := h.allowedUsersFor(provider); allowed != nil {
 			if !slices.Contains(allowed, strings.ToLower(username)) {
-				slog.WarnContext(r.Context(), "user not in allowlist", "provider", provider, "username", username)
-				writeError(w, api.Forbidden("user "+username+" is not in the "+provider+" allowlist"))
+				h.log.WarnContext(r.Context(), "user not in allowlist", "provider", provider, "username", username)
+				writeError(r.Context(), w, api.Forbidden("user "+username+" is not in the "+provider+" allowlist"))
 				return
 			}
 		}
@@ -215,16 +216,16 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 			TokenExpiry:  token.Expiry,
 		})
 		if err != nil {
-			slog.WarnContext(r.Context(), "upsert user", "err", err)
-			writeError(w, api.InternalError("save user"))
+			h.log.WarnContext(r.Context(), "upsert user", "err", err)
+			writeError(r.Context(), w, api.InternalError("save user"))
 			return
 		}
 
 		// Issue JWT.
 		jwt, err := auth.IssueToken(&u, h.sessionSecret, sessionTTL)
 		if err != nil {
-			slog.WarnContext(r.Context(), "issue token", "err", err)
-			writeError(w, api.InternalError("issue token"))
+			h.log.WarnContext(r.Context(), "issue token", "err", err)
+			writeError(r.Context(), w, api.InternalError("issue token"))
 			return
 		}
 
@@ -255,10 +256,10 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 func (h *authHandlers) handleGetMe(w http.ResponseWriter, r *http.Request) {
 	u, ok := auth.UserFromContext(r.Context())
 	if !ok {
-		writeError(w, api.NotFound("user"))
+		writeError(r.Context(), w, api.NotFound("user"))
 		return
 	}
-	writeJSONResponse(w, &v1.UserResp{
+	writeJSONResponse(r.Context(), w, &v1.UserResp{
 		ID:        u.ID,
 		Provider:  string(u.Provider),
 		Username:  u.Username,
@@ -283,7 +284,7 @@ func (h *authHandlers) refreshTokenRefresher() auth.TokenRefresher {
 		}
 		token, err := oauthclient.RefreshAccessToken(ctx, ocfg, u.RefreshToken)
 		if err != nil {
-			slog.WarnContext(ctx, "token refresh failed", "provider", u.Provider, "user", u.ID, "err", err)
+			h.log.WarnContext(ctx, "token refresh failed", "provider", u.Provider, "user", u.ID, "err", err)
 			return nil
 		}
 		u.AccessToken = token.AccessToken
@@ -292,7 +293,7 @@ func (h *authHandlers) refreshTokenRefresher() auth.TokenRefresher {
 			u.RefreshToken = token.RefreshToken
 		}
 		if updated, err := h.store.UpsertUser(u); err != nil {
-			slog.WarnContext(ctx, "token refresh upsert failed", "user", u.ID, "err", err)
+			h.log.WarnContext(ctx, "token refresh upsert failed", "user", u.ID, "err", err)
 			return nil
 		} else {
 			return &updated
@@ -311,7 +312,7 @@ func (h *authHandlers) handleLogout(w http.ResponseWriter, r *http.Request) {
 		Secure:   h.useSecureCookies(r),
 		Path:     "/",
 	})
-	writeJSONResponse(w, &v1.StatusResp{Status: "ok"}, nil)
+	writeJSONResponse(r.Context(), w, &v1.StatusResp{Status: "ok"}, nil)
 }
 
 // allowedUsersFor returns the allowlist for the named provider, or nil.

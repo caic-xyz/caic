@@ -31,10 +31,10 @@ type CacheSizeStore struct {
 }
 
 // NewCacheSizeStore creates an empty cache size store.
-func NewCacheSizeStore() *CacheSizeStore {
+func NewCacheSizeStore(log *slog.Logger) *CacheSizeStore {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		slog.Warn("cache size: cannot resolve user home", "err", err)
+		log.Warn("cache size: cannot resolve user home", "err", err)
 	}
 	return &CacheSizeStore{
 		home:  home,

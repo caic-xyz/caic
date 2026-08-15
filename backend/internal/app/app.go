@@ -91,6 +91,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	if log == nil {
 		return nil, errors.New("logger is required")
 	}
+	appLog := log.With("cmp", "app")
 	if cfg.Dirs.ConfigDir == "" {
 		return nil, errors.New("ConfigDir is required")
 	}
@@ -115,7 +116,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	ctx, startTask := trace.NewTask(ctx, "server.startup")
 	defer startTask.End()
 
-	runtimes, mdRuntimes, err := initRuntimeSystem(ctx, cfg)
+	runtimes, mdRuntimes, err := initRuntimeSystem(ctx, appLog, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +128,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		paths, err := git.DiscoverCheckouts(rootDir, repoDiscoveryDepth)
 		repoCh <- repoDiscoveryResult{paths, err}
 	}()
-	settings, err := loadSettings(filepath.Join(cfg.Dirs.ConfigDir, "settings.json"))
+	settings, err := loadSettings(appLog, filepath.Join(cfg.Dirs.ConfigDir, "settings.json"))
 	if err != nil {
 		return nil, fmt.Errorf("load settings: %w", err)
 	}
@@ -140,9 +141,9 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		hostState = auth.NewHostState(cfg.Auth.ExternalURL)
 	}
 
-	slog.InfoContext(ctx, "github", "pat", auth.MaskedToken(cfg.GitHub.Token), "oauth", auth.MaskedToken(cfg.GitHub.OAuthClientID))
-	slog.InfoContext(ctx, "gitlab", "pat", auth.MaskedToken(cfg.GitLab.Token), "oauth", auth.MaskedToken(cfg.GitLab.OAuthClientID))
-	slog.InfoContext(ctx, "google", "oauth", auth.MaskedToken(cfg.Google.OAuthClientID))
+	appLog.InfoContext(ctx, "github", "pat", auth.MaskedToken(cfg.GitHub.Token), "oauth", auth.MaskedToken(cfg.GitHub.OAuthClientID))
+	appLog.InfoContext(ctx, "gitlab", "pat", auth.MaskedToken(cfg.GitLab.Token), "oauth", auth.MaskedToken(cfg.GitLab.OAuthClientID))
+	appLog.InfoContext(ctx, "google", "oauth", auth.MaskedToken(cfg.Google.OAuthClientID))
 
 	var authStore *auth.Store
 	var sessionSecret []byte
@@ -210,7 +211,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	}
 	cache, err := forgecache.Open(filepath.Join(cfg.Dirs.CacheDir, "ci_results.json"))
 	if err != nil {
-		slog.WarnContext(ctx, "cannot open CI cache; falling back to in-memory", "err", err)
+		appLog.WarnContext(ctx, "cannot open CI cache; falling back to in-memory", "err", err)
 		cache, _ = forgecache.Open("")
 	}
 
@@ -222,7 +223,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		switch {
 		case port < 0:
 		case voiceCfg.Backend == voicegateway.BackendGeminiLive && key == "":
-			slog.InfoContext(ctx, "voice bridge disabled: GEMINI_API_KEY not set")
+			appLog.InfoContext(ctx, "voice bridge disabled: GEMINI_API_KEY not set")
 		default:
 			voiceBridge, err = voicertc.NewBridge(ctx, &voiceCfg, key, port)
 			if err != nil {
@@ -240,7 +241,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		forgeManager.SetGitHubApp(app)
 	}
 
-	provider := initProvider(ctx, cfg)
+	provider := initProvider(ctx, appLog, cfg)
 	for i := range mdRuntimes {
 		mdRuntimes[i].backend.Provider = provider
 	}
@@ -269,7 +270,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		}
 	}()
 	if err := taskMgr.BeginImport(); err != nil {
-		slog.WarnContext(ctx, "runtime event watch unavailable during startup", "err", err)
+		appLog.WarnContext(ctx, "runtime event watch unavailable during startup", "err", err)
 	}
 	instanceCh := make(chan instanceDiscoveryResult, 1)
 	go func() {
@@ -287,18 +288,18 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		if err != nil {
 			return fmt.Errorf("load logs: %w", err)
 		}
-		slog.InfoContext(startupCtx, "loaded task log headers", "n", len(logs), "dur", time.Since(start))
+		appLog.InfoContext(startupCtx, "loaded task log headers", "n", len(logs), "dur", time.Since(start))
 		start = time.Now()
 		if err := taskMgr.Logs.CompressTerminalLogs(logs); err != nil {
-			slog.WarnContext(startupCtx, "compress terminal task logs failed", "err", err)
+			appLog.WarnContext(startupCtx, "compress terminal task logs failed", "err", err)
 		} else {
-			slog.InfoContext(startupCtx, "compressed terminal task logs", "dur", time.Since(start))
+			appLog.InfoContext(startupCtx, "compressed terminal task logs", "dur", time.Since(start))
 		}
 		start = time.Now()
 		if err := taskMgr.LoadPurgedTasks(logs); err != nil {
-			slog.ErrorContext(startupCtx, "load purged tasks failed", "err", err)
+			appLog.ErrorContext(startupCtx, "load purged tasks failed", "err", err)
 		} else {
-			slog.InfoContext(startupCtx, "loaded purged task entries", "dur", time.Since(start))
+			appLog.InfoContext(startupCtx, "loaded purged task entries", "dur", time.Since(start))
 		}
 		return nil
 	}()
@@ -319,8 +320,8 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 
 	// Long-lived forge automation, owned by app and routed to by the HTTP layer.
 	warnings := server.NewWarningStore(taskMgr)
-	cacheSizes := server.NewCacheSizeStore()
-	botClient := &botClient{checkouts: checkoutRegistry, taskMgr: taskMgr, forgeMgr: forgeManager}
+	cacheSizes := server.NewCacheSizeStore(log.With("cmp", "cache-sizes"))
+	botClient := &botClient{log: log.With("cmp", "bot"), checkouts: checkoutRegistry, taskMgr: taskMgr, forgeMgr: forgeManager}
 	ciAdapter := &ciAdapter{
 		checkouts:   checkoutRegistry,
 		repoStatus:  repoStatus,
@@ -333,15 +334,15 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	ciService := ci.NewService(cache, provider, ciAdapter)
 	botService := bot.New(ctx, botClient)
 
-	ipgeoChecker, err := ipgeo.NewChecker(ctx, cfg.IPGeo.Allowlist, cfg.IPGeo.DB, cfg.Dirs.CacheDir)
+	ipgeoChecker, err := ipgeo.NewChecker(ctx, log.With("cmp", "ipgeo"), cfg.IPGeo.Allowlist, cfg.IPGeo.DB, cfg.Dirs.CacheDir)
 	if err != nil {
 		return nil, fmt.Errorf("ipgeo: %w", err)
 	}
 	if cfg.IPGeo.DB != "" {
-		slog.InfoContext(ctx, "ipgeo", "path", cfg.IPGeo.DB, "list", cfg.IPGeo.Allowlist)
+		appLog.InfoContext(ctx, "ipgeo", "path", cfg.IPGeo.DB, "list", cfg.IPGeo.Allowlist)
 	}
 
-	s, err := server.New(ctx, server.Dependencies{
+	s, err := server.New(ctx, log, server.Dependencies{
 		Checkouts:                  checkoutRegistry,
 		CheckoutRoot:               absRoot,
 		RepoStatus:                 repoStatus,
@@ -357,7 +358,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		GitLabOAuth:                gitlabOAuth,
 		GoogleOAuth:                googleOAuth,
 		HostState:                  hostState,
-		UsageFetchers:              usageFetchers(cfg, ctx),
+		UsageFetchers:              usageFetchers(ctx, appLog, cfg),
 		VoiceBridge:                voiceBridge,
 		VoiceGateway:               cfg.Voice.Gateway,
 		ForgeMgr:                   forgeManager,
@@ -389,39 +390,41 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	for _, abs := range repoRes.paths {
 		wg.Go(func() {
 			defer trace.StartRegion(ctx, "repo-checkout-init").End()
-			result, err := repo.DiscoverCheckout(ctx, slog.With("cmp", "repo-discovery", "path", abs), abs)
+			repoLog := appLog.With("phase", "repo-discovery", "path", abs)
+			result, err := repo.DiscoverCheckout(ctx, repoLog, abs)
 			if err != nil {
-				slog.WarnContext(ctx, "skipping repo", "path", abs, "err", err)
+				repoLog.WarnContext(ctx, "skipping repo", "err", err)
 				return
 			}
 			result.RelPath = checkoutRelPath(absRoot, abs)
 			checkouts <- result
-			slog.DebugContext(ctx, "discovered repo", "path", result.RelPath, "br", result.BaseBranch)
+			repoLog.DebugContext(ctx, "discovered repo", "checkout", result.RelPath, "br", result.BaseBranch)
 		})
 	}
 	wg.Wait()
 	close(checkouts)
 	for checkout := range checkouts {
 		if err := checkoutRegistry.RegisterCheckout(checkout); err != nil {
-			slog.WarnContext(ctx, "skipping duplicate checkout", "path", checkout.RelPath, "err", err)
+			appLog.WarnContext(ctx, "skipping duplicate checkout", "checkout", checkout.RelPath, "err", err)
 		}
 	}
 
 	phase3 := trace.StartRegion(ctx, "load-live-task-logs")
 	liveLogs, err := loadRuntimeTaskLogs(ctx, logDir, runtimes, instanceRes.instances)
 	if err != nil {
-		slog.WarnContext(ctx, "load live task logs failed; affected instances will not be imported", "err", err)
+		appLog.WarnContext(ctx, "load live task logs failed; affected instances will not be imported", "err", err)
 	}
 	phase3.End()
 
 	phase4 := trace.StartRegion(ctx, "import-runtime-instances")
 	imported, err := taskMgr.ImportInstances(ctx, instanceRes.instances, liveLogs)
 	if err != nil {
-		slog.ErrorContext(ctx, "import runtime instances failed; affected instances will remain unmanaged", "err", err)
+		appLog.ErrorContext(ctx, "import runtime instances failed; affected instances will remain unmanaged", "err", err)
 	}
 	taskMgr.Start()
 	backgroundTasks := []backgroundTask{}
 	importWiring := &importedTaskWiring{
+		log:       log.With("cmp", "import-ci"),
 		authStore: authStore,
 		ciService: ciService,
 		forgeMgr:  forgeManager,
@@ -463,7 +466,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 			trace.Log(ctx, "startup", "warmup-images: begin")
 			var errs []error
 			for i := range mdRuntimes {
-				if err := warmupImages(ctx, mdRuntimes[i].client, prefsStore); err != nil {
+				if err := warmupImages(ctx, log.With("cmp", "warmup"), mdRuntimes[i].client, prefsStore); err != nil {
 					errs = append(errs, err)
 				}
 			}
@@ -475,7 +478,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 			_, tk := trace.NewTask(ctx, "watch-harness-model-cache")
 			defer tk.End()
 			trace.Log(ctx, "startup", "watch-harness-model-cache: begin")
-			return watchHarnessModelCache(ctx, cfg.Dirs.CacheDir, runtimes, taskMgr, cfg.Agent.HarnessEnv)
+			return watchHarnessModelCache(ctx, log.With("cmp", "model-refresh"), cfg.Dirs.CacheDir, runtimes, taskMgr, cfg.Agent.HarnessEnv)
 		},
 		func(ctx context.Context) error {
 			_, tk := trace.NewTask(ctx, "refresh-cache-sizes")
@@ -485,7 +488,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 			return nil
 		},
 		func(ctx context.Context) error {
-			newRepoWatcher(ctx, absRoot, checkoutRegistry, repoStatus).watch()
+			newRepoWatcher(ctx, log.With("cmp", "repo-watcher"), absRoot, checkoutRegistry, repoStatus).watch()
 			return nil
 		},
 	)
@@ -534,7 +537,7 @@ func cleanupLegacyReplayArtifacts(logDir string) error {
 	return nil
 }
 
-func initRuntimeSystem(ctx context.Context, cfg *server.Config) (*runtime.Router, []mdRuntime, error) {
+func initRuntimeSystem(ctx context.Context, log *slog.Logger, cfg *server.Config) (*runtime.Router, []mdRuntime, error) {
 	if cfg.Runtime.System != nil {
 		runtimeRouter, err := runtime.NewRouter([]runtime.System{cfg.Runtime.System})
 		if err != nil {
@@ -554,7 +557,7 @@ func initRuntimeSystem(ctx context.Context, cfg *server.Config) (*runtime.Router
 		backend := mdruntime.NewBackend(mdClient)
 		backend.HarnessEnv = cfg.Agent.HarnessEnv
 		if _, err := backend.List(ctx); err != nil {
-			slog.WarnContext(ctx, "container runtime unavailable", "runtime", name, "err", err)
+			log.WarnContext(ctx, "container runtime unavailable", "runtime", name, "err", err)
 			continue
 		}
 		mdRuntimes = append(mdRuntimes, mdRuntime{client: mdClient, backend: backend})
@@ -607,12 +610,12 @@ func runtimeTaskID(ctx context.Context, inventory *runtime.Router, id runtime.ID
 	return value, nil
 }
 
-func initProvider(ctx context.Context, cfg *server.Config) genai.Provider {
+func initProvider(ctx context.Context, log *slog.Logger, cfg *server.Config) genai.Provider {
 	llmProvider := cfg.LLM.Provider
 	if !cfg.LLM.Disable && llmProvider == "" {
-		llmProvider = autoDetectLLMProvider(ctx, cfg.Agent.CoreEnv)
+		llmProvider = autoDetectLLMProvider(ctx, log, cfg.Agent.CoreEnv)
 		if llmProvider != "" {
-			slog.InfoContext(ctx, "auto-detected LLM provider", "prov", llmProvider)
+			log.InfoContext(ctx, "auto-detected LLM provider", "prov", llmProvider)
 		}
 	}
 
@@ -621,7 +624,7 @@ func initProvider(ctx context.Context, cfg *server.Config) genai.Provider {
 	}
 	c, ok := providers.All[llmProvider]
 	if !ok || c.Factory == nil {
-		slog.WarnContext(ctx, "unknown LLM provider for title generation", "prov", llmProvider)
+		log.WarnContext(ctx, "unknown LLM provider for title generation", "prov", llmProvider)
 		return nil
 	}
 	var opts []genai.ProviderOption
@@ -633,9 +636,9 @@ func initProvider(ctx context.Context, cfg *server.Config) genai.Provider {
 	opts = appendProviderAPIKey(opts, llmProvider, cfg.Agent.CoreEnv)
 	p, err := c.Factory(ctx, opts...)
 	if err != nil {
-		slog.WarnContext(ctx, "LLM provider init failed", "prov", llmProvider, "err", err)
+		log.WarnContext(ctx, "LLM provider init failed", "prov", llmProvider, "err", err)
 		return nil
 	}
-	slog.InfoContext(ctx, "title", "prov", p.Name(), "mdl", p.ModelID())
+	log.InfoContext(ctx, "title provider initialized", "prov", p.Name(), "mdl", p.ModelID())
 	return p
 }

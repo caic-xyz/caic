@@ -144,8 +144,10 @@ func newTestTaskManager(t testing.TB, cfg taskmgr.Config) *taskmgr.Manager { //n
 	return m
 }
 
+func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
+
 func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testRouter {
-	checker, err := ipgeo.NewChecker(t.Context(), "0.0.0.0/0,::/0", "", "")
+	checker, err := ipgeo.NewChecker(t.Context(), testLogger(), "0.0.0.0/0,::/0", "", "")
 	if err != nil {
 		t.Fatalf("ipgeo.NewChecker: %v", err)
 	}
@@ -156,7 +158,7 @@ func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testR
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
 	forgeManager := forgemgr.New("", "", nil, forgemgr.NoOAuthTokenSource())
-	s, err := New(t.Context(), Dependencies{
+	s, err := New(t.Context(), testLogger(), Dependencies{
 		Checkouts:    checkoutRegistry,
 		RepoStatus:   repoStatus,
 		Runtimes:     runtimeRouter,
@@ -165,7 +167,7 @@ func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testR
 		IPGeoChecker: checker,
 		ForgeMgr:     forgeManager,
 		Warnings:     NewWarningStore(taskMgr),
-		CacheSizes:   NewCacheSizeStore(),
+		CacheSizes:   NewCacheSizeStore(testLogger()),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -177,7 +179,7 @@ func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testR
 // OAuth tests that need s.oauthServer to be non-nil at construction time.
 // If refreshTokenPath is non-empty, it is used as the OAuth refresh token store.
 func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshTokenPath string, hostState *auth.HostState) *testRouter {
-	checker, err := ipgeo.NewChecker(t.Context(), "0.0.0.0/0,::/0", "", "")
+	checker, err := ipgeo.NewChecker(t.Context(), testLogger(), "0.0.0.0/0,::/0", "", "")
 	if err != nil {
 		t.Fatalf("ipgeo.NewChecker: %v", err)
 	}
@@ -188,7 +190,7 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
 	forgeManager := forgemgr.New("", "", nil, forgemgr.NoOAuthTokenSource())
-	s, err := New(t.Context(), Dependencies{
+	s, err := New(t.Context(), testLogger(), Dependencies{
 		Checkouts:                  checkoutRegistry,
 		RepoStatus:                 repoStatus,
 		Runtimes:                   runtimeRouter,
@@ -197,7 +199,7 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 		IPGeoChecker:               checker,
 		ForgeMgr:                   forgeManager,
 		Warnings:                   NewWarningStore(taskMgr),
-		CacheSizes:                 NewCacheSizeStore(),
+		CacheSizes:                 NewCacheSizeStore(testLogger()),
 		AuthStore:                  authStore,
 		OAuthPrivateKeyPEM:         testMCPOAuthSigningKeyPEM(t),
 		OAuthRefreshTokenStorePath: refreshTokenPath,
@@ -235,13 +237,13 @@ func TestNew(t *testing.T) {
 			Preferences: newTestPrefs(t),
 			ForgeMgr:    forgemgr.New("", "", nil, forgemgr.NoOAuthTokenSource()),
 			Warnings:    NewWarningStore(taskMgr),
-			CacheSizes:  NewCacheSizeStore(),
+			CacheSizes:  NewCacheSizeStore(testLogger()),
 		}
 	}
 
 	t.Run("missing runtime", func(t *testing.T) {
 		t.Parallel()
-		if _, err := New(t.Context(), Dependencies{}); err == nil {
+		if _, err := New(t.Context(), testLogger(), Dependencies{}); err == nil {
 			t.Fatal("New() error = nil, want runtime required")
 		}
 	})
@@ -250,7 +252,7 @@ func TestNew(t *testing.T) {
 		t.Parallel()
 		runtimeRouter := newTestRuntime(t, &runtimetest.FakeBackend{})
 		checkoutRegistry := repo.NewRegistry()
-		_, err := New(t.Context(), Dependencies{
+		_, err := New(t.Context(), testLogger(), Dependencies{
 			Runtimes:    runtimeRouter,
 			TaskMgr:     newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry}),
 			Preferences: newTestPrefs(t),
@@ -265,7 +267,7 @@ func TestNew(t *testing.T) {
 		t.Parallel()
 		runtimeRouter := newTestRuntime(t, &runtimetest.FakeBackend{})
 		checkoutRegistry := repo.NewRegistry()
-		_, err := New(t.Context(), Dependencies{
+		_, err := New(t.Context(), testLogger(), Dependencies{
 			Checkouts:   checkoutRegistry,
 			Runtimes:    runtimeRouter,
 			TaskMgr:     newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry}),
@@ -280,7 +282,7 @@ func TestNew(t *testing.T) {
 		t.Parallel()
 		runtimeRouter := newTestRuntime(t, &runtimetest.FakeBackend{})
 		checkoutRegistry := repo.NewRegistry()
-		_, err := New(t.Context(), Dependencies{
+		_, err := New(t.Context(), testLogger(), Dependencies{
 			Checkouts:   checkoutRegistry,
 			RepoStatus:  ci.NewRepoStatusStore(),
 			Runtimes:    runtimeRouter,
@@ -296,7 +298,7 @@ func TestNew(t *testing.T) {
 		t.Parallel()
 		d := validDependencies(t)
 		d.Warnings = nil
-		if _, err := New(t.Context(), d); err == nil || err.Error() != "warning store is required" {
+		if _, err := New(t.Context(), testLogger(), d); err == nil || err.Error() != "warning store is required" {
 			t.Fatalf("New() error = %v, want warning store required", err)
 		}
 	})
@@ -305,7 +307,7 @@ func TestNew(t *testing.T) {
 		t.Parallel()
 		d := validDependencies(t)
 		d.CacheSizes = nil
-		if _, err := New(t.Context(), d); err == nil || err.Error() != "cache size store is required" {
+		if _, err := New(t.Context(), testLogger(), d); err == nil || err.Error() != "cache size store is required" {
 			t.Fatalf("New() error = %v, want cache size store required", err)
 		}
 	})
@@ -448,7 +450,7 @@ func newCheckoutConstructionTestServer(t *testing.T, root string) checkoutConstr
 	})
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
-	s, err := New(t.Context(), Dependencies{
+	s, err := New(t.Context(), testLogger(), Dependencies{
 		Checkouts:    checkoutRegistry,
 		CheckoutRoot: root,
 		RepoStatus:   repoStatus,
@@ -457,7 +459,7 @@ func newCheckoutConstructionTestServer(t *testing.T, root string) checkoutConstr
 		Preferences:  prefs,
 		ForgeMgr:     forgemgr.New("", "", nil, forgemgr.NoOAuthTokenSource()),
 		Warnings:     NewWarningStore(taskMgr),
-		CacheSizes:   NewCacheSizeStore(),
+		CacheSizes:   NewCacheSizeStore(testLogger()),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1140,6 +1142,7 @@ func TestSignalProcess(t *testing.T) {
 		insertTestTask(t, s, "t1", tk)
 		backend := &runtimetest.FakeBackend{}
 		processes := &runtimeProcessHandlers{
+			log:         testLogger(),
 			taskMgr:     s.taskMgr,
 			runtimes:    newTestRuntime(t, backend),
 			authEnabled: false,
@@ -1168,6 +1171,7 @@ func TestSignalProcess(t *testing.T) {
 		insertTestTask(t, s, "t1", tk)
 		backend := &runtimetest.FakeBackend{}
 		processes := &runtimeProcessHandlers{
+			log:         testLogger(),
 			taskMgr:     s.taskMgr,
 			runtimes:    newTestRuntime(t, backend),
 			authEnabled: false,
@@ -2336,7 +2340,7 @@ func TestBuildHandler(t *testing.T) {
 	t.Run("blocked origin error includes IP and category", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		checker, err := ipgeo.NewChecker(t.Context(), "tailscale", "", "")
+		checker, err := ipgeo.NewChecker(t.Context(), testLogger(), "tailscale", "", "")
 		if err != nil {
 			t.Fatalf("ipgeo.NewChecker: %v", err)
 		}

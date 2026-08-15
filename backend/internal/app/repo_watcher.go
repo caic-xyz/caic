@@ -28,9 +28,9 @@ type repoWatcher struct {
 	repoStatus *ci.RepoStatusStore
 }
 
-func newRepoWatcher(ctx context.Context, absRoot string, checkouts *repo.Registry, repoStatus *ci.RepoStatusStore) *repoWatcher {
+func newRepoWatcher(ctx context.Context, log *slog.Logger, absRoot string, checkouts *repo.Registry, repoStatus *ci.RepoStatusStore) *repoWatcher {
 	return &repoWatcher{
-		log:        slog.With("cmp", "repo-watcher", "root", absRoot),
+		log:        log.With("root", absRoot),
 		ctx:        ctx,
 		absRoot:    absRoot,
 		checkouts:  checkouts,

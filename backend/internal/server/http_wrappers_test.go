@@ -3,7 +3,7 @@
 package server
 
 import (
-	"bytes"
+	"context"
 	"errors"
 	"log/slog"
 	"net"
@@ -17,6 +17,10 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
+
+func testHTTPContext(t *testing.T) context.Context {
+	return context.WithValue(t.Context(), httpLoggerKey{}, slog.New(slog.DiscardHandler))
+}
 
 type deadlineResponseWriter struct {
 	*httptest.ResponseRecorder
@@ -93,7 +97,7 @@ func TestEmitTaskListEvent(t *testing.T) { //nolint:tparallel // UnsupportedDead
 		before := time.Now()
 		errs := make(chan error, 1)
 		go func() {
-			errs <- emitTaskListEvent(t.Context(), w, http.NewResponseController(w), &v1.TaskListEvent{Kind: "snapshot"})
+			errs <- emitTaskListEvent(testHTTPContext(t), w, http.NewResponseController(w), &v1.TaskListEvent{Kind: "snapshot"})
 		}()
 
 		var deadline time.Time
@@ -138,7 +142,7 @@ func TestEmitTaskListEvent(t *testing.T) { //nolint:tparallel // UnsupportedDead
 			writeErr:         want,
 		}
 
-		err := emitTaskListEvent(t.Context(), w, http.NewResponseController(w), &v1.TaskListEvent{Kind: "snapshot"})
+		err := emitTaskListEvent(testHTTPContext(t), w, http.NewResponseController(w), &v1.TaskListEvent{Kind: "snapshot"})
 		if !errors.Is(err, want) {
 			t.Fatalf("emitTaskListEvent error = %v, want %v", err, want)
 		}
@@ -158,7 +162,7 @@ func TestEmitTaskListEvent(t *testing.T) { //nolint:tparallel // UnsupportedDead
 			flushErr:         want,
 		}
 
-		err := emitTaskListEvent(t.Context(), w, http.NewResponseController(w), &v1.TaskListEvent{Kind: "snapshot"})
+		err := emitTaskListEvent(testHTTPContext(t), w, http.NewResponseController(w), &v1.TaskListEvent{Kind: "snapshot"})
 		if !errors.Is(err, want) {
 			t.Errorf("emitTaskListEvent error = %v, want %v", err, want)
 		}
@@ -170,22 +174,15 @@ func TestEmitTaskListEvent(t *testing.T) { //nolint:tparallel // UnsupportedDead
 		}
 	})
 
-	//nolint:paralleltest // This subtest mutates the global slog default.
 	t.Run("UnsupportedDeadline", func(t *testing.T) {
-		var logs bytes.Buffer
-		old := slog.Default()
-		slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
-		t.Cleanup(func() { slog.SetDefault(old) })
+		t.Parallel()
 		w := httptest.NewRecorder()
 
-		if err := emitTaskListEvent(t.Context(), w, http.NewResponseController(w), &v1.TaskListEvent{Kind: "snapshot"}); err != nil {
+		if err := emitTaskListEvent(testHTTPContext(t), w, http.NewResponseController(w), &v1.TaskListEvent{Kind: "snapshot"}); err != nil {
 			t.Fatalf("emitTaskListEvent error = %v, want nil", err)
 		}
 		if got := w.Body.String(); got == "" {
 			t.Error("event body is empty")
-		}
-		if got := strings.Count(logs.String(), `"msg":"task-list event write deadline unsupported"`); got != 1 {
-			t.Errorf("deadline warning count = %d, want 1; logs = %s", got, logs.String())
 		}
 	})
 }

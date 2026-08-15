@@ -34,6 +34,7 @@ const maxWebhookBodyBytes = 10 << 20 // 10 MB
 // GitHub App owner allowlist; the bot and CI service it dispatches to are
 // app-owned automation services injected at construction.
 type WebhookHandlers struct {
+	log              *slog.Logger
 	serverCtx        context.Context // dispatch context that outlives individual webhook requests
 	githubSecret     []byte          // nil when the GitHub webhook is not configured
 	gitlabSecret     []byte          // nil when the GitLab webhook is not configured
@@ -65,7 +66,7 @@ func (h *WebhookHandlers) HandleGitHub(w http.ResponseWriter, r *http.Request) {
 	delivery := r.Header.Get("X-Github-Delivery")
 	sig := r.Header.Get("X-Hub-Signature-256")
 	if err := github.VerifySignature(h.githubSecret, body, sig); err != nil {
-		slog.WarnContext(r.Context(), "github webhook signature mismatch",
+		h.log.WarnContext(r.Context(), "github webhook signature mismatch",
 			"event", event,
 			"delivery", delivery,
 			"body_bytes", len(body),
@@ -74,7 +75,7 @@ func (h *WebhookHandlers) HandleGitHub(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "signature verification failed", http.StatusUnauthorized)
 		return
 	}
-	slog.InfoContext(r.Context(), "github webhook", "event", event, "delivery", delivery)
+	h.log.InfoContext(r.Context(), "github webhook", "event", event, "delivery", delivery)
 	switch event {
 	case "issues":
 		var ev github.IssuesEvent
@@ -237,7 +238,7 @@ func (h *WebhookHandlers) webhookOnCI(ctx context.Context, kind forge.Kind, owne
 
 	runs, err := f.GetCheckRuns(ctx, owner, repoName, sha)
 	if err != nil {
-		slog.WarnContext(ctx, "webhookOnCI: get check-runs", "owner", owner, "repo", repoName, "sha", sha[:min(7, len(sha))], "err", err)
+		h.log.WarnContext(ctx, "get CI check runs", "repo", owner+"/"+repoName, "sha", sha[:min(7, len(sha))], "err", err)
 		return
 	}
 	if len(runs) == 0 {
@@ -259,7 +260,7 @@ func (h *WebhookHandlers) webhookOnCI(ctx context.Context, kind forge.Kind, owne
 			continue
 		}
 		if err := h.ciCache.Put(owner, repoName, sha, result); err != nil {
-			slog.WarnContext(ctx, "webhookOnCI: cache put", "err", err)
+			h.log.WarnContext(ctx, "cache CI status", "err", err)
 		}
 		h.ciService.ApplyMonitorCIResult(ctx, e, f, owner, repoName, sha, result)
 	}
@@ -274,7 +275,7 @@ func (h *WebhookHandlers) webhookOnCI(ctx context.Context, kind forge.Kind, owne
 			continue
 		}
 		if err := h.ciCache.Put(owner, repoName, sha, result); err != nil {
-			slog.WarnContext(ctx, "webhookOnCI: cache put", "err", err)
+			h.log.WarnContext(ctx, "cache CI checks", "err", err)
 		}
 		h.ciService.SetRepoCIStatus(relPath, sha, forgecache.Result{Status: result.Status, Checks: result.Checks})
 	}
@@ -356,8 +357,7 @@ func (h *WebhookHandlers) handlePRForExistingTask(ctx context.Context, ev *githu
 		snap := entry.Task().Snapshot()
 		if snap.ForgePR == 0 {
 			// Task has no PR yet — set the PR info.
-			slog.InfoContext(ctx, "webhook: associating external PR with existing task",
-				"task", entry.Task().ID, "repo", owner+"/"+repoName, "br", branch, "pr", prNumber)
+			h.log.InfoContext(ctx, "associating external PR", "task", entry.Task().ID, "repo", owner+"/"+repoName, "br", branch, "pr", prNumber)
 			entry.Task().SetPR(owner, repoName, prNumber)
 			// Start CI monitoring.
 			if ri, ok := h.repoByForge(owner + "/" + repoName); ok {
@@ -369,8 +369,7 @@ func (h *WebhookHandlers) handlePRForExistingTask(ctx context.Context, ev *githu
 			}
 		} else if snap.ForgePR == prNumber && ev.Action == "synchronize" {
 			// PR already exists, but new commits were pushed — restart CI monitoring.
-			slog.InfoContext(ctx, "webhook: restarting CI monitor for PR",
-				"task", entry.Task().ID, "repo", owner+"/"+repoName, "br", branch, "pr", prNumber, "sha", sha[:min(7, len(sha))])
+			h.log.InfoContext(ctx, "restarting CI monitor", "task", entry.Task().ID, "repo", owner+"/"+repoName, "br", branch, "pr", prNumber, "sha", sha[:min(7, len(sha))])
 			if ri, ok := h.repoByForge(owner + "/" + repoName); ok {
 				go h.ciService.MonitorCI(ctx, entry, h.forgeMgr.ForgeFor(ctx, ri.ForgeKind), owner, repoName, sha)
 			}
@@ -395,7 +394,7 @@ func (h *WebhookHandlers) handlePRClosedEvent(ev *github.PullRequestEvent) {
 		} else {
 			state = forge.PRStateClosed
 		}
-		slog.Info("webhook: PR closed/merged", "task", entry.Task().ID, "repo", owner+"/"+repoName, "pr", prNumber, "state", state)
+		h.log.Info("PR closed or merged", "task", entry.Task().ID, "repo", owner+"/"+repoName, "pr", prNumber, "state", state)
 		entry.Task().SetPRState(state)
 		h.taskMgr.NotifyTaskChange()
 	}
@@ -410,7 +409,7 @@ func (h *WebhookHandlers) handlePRReopenedEvent(ev *github.PullRequestEvent) {
 	prNumber := ev.PullRequest.Number
 
 	for _, entry := range h.taskMgr.FindTasksByPR(owner, repoName, prNumber) {
-		slog.Info("webhook: PR reopened", "task", entry.Task().ID, "repo", owner+"/"+repoName, "pr", prNumber)
+		h.log.Info("PR reopened", "task", entry.Task().ID, "repo", owner+"/"+repoName, "pr", prNumber)
 		entry.Task().SetPRState(forge.PRStateOpen)
 		h.taskMgr.NotifyTaskChange()
 	}
@@ -433,7 +432,7 @@ func (h *WebhookHandlers) handleGitLabMergeRequestEvent(ev *gitlab.MergeRequestE
 				state = forge.PRStateClosed
 			}
 		}
-		slog.Info("webhook: GitLab MR state", "task", entry.Task().ID, "repo", owner+"/"+repoName, "mr", mrIID, "state", state)
+		h.log.Info("GitLab merge request state", "task", entry.Task().ID, "repo", owner+"/"+repoName, "mr", mrIID, "state", state)
 		entry.Task().SetPRState(state)
 		h.taskMgr.NotifyTaskChange()
 	}
@@ -471,9 +470,9 @@ func (h *WebhookHandlers) handleInstallationEvent(ctx context.Context, ev *githu
 		h.forgeMgr.StoreInstallationID(login, ev.Installation.ID)
 		return
 	}
-	slog.WarnContext(ctx, "github app: rejecting installation from non-allowed owner", "owner", login, "installation_id", ev.Installation.ID)
+	h.log.WarnContext(ctx, "rejecting GitHub App installation from non-allowed owner", "owner", login, "installation_id", ev.Installation.ID)
 	if err := h.forgeMgr.GitHubApp().DeleteInstallation(ctx, ev.Installation.ID); err != nil {
-		slog.WarnContext(ctx, "github app: delete installation failed", "owner", login, "err", err)
+		h.log.WarnContext(ctx, "delete GitHub App installation", "owner", login, "err", err)
 	}
 }
 
@@ -493,13 +492,13 @@ func (h *WebhookHandlers) handleCheckSuiteEvent(ctx context.Context, ev *github.
 	sha := ev.CheckSuite.HeadSHA
 	client, err := h.forgeMgr.GitHubApp().ForgeClient(ctx, ev.Installation.ID)
 	if err != nil {
-		slog.WarnContext(ctx, "handleCheckSuiteEvent: forge client", "err", err)
+		h.log.WarnContext(ctx, "resolve forge client for check suite", "err", err)
 		return
 	}
 
 	runs, err := client.GetCheckRuns(ctx, repoInfo.ForgeOwner, repoInfo.ForgeRepo, sha)
 	if err != nil {
-		slog.WarnContext(ctx, "handleCheckSuiteEvent: get check-runs", "sha", sha, "err", err)
+		h.log.WarnContext(ctx, "get check suite runs", "sha", sha, "err", err)
 		return
 	}
 	result, done := ci.EvaluateCheckRuns(repoInfo.ForgeOwner, repoInfo.ForgeRepo, runs)
@@ -507,7 +506,7 @@ func (h *WebhookHandlers) handleCheckSuiteEvent(ctx context.Context, ev *github.
 		return
 	}
 	if err := h.ciCache.Put(repoInfo.ForgeOwner, repoInfo.ForgeRepo, sha, result); err != nil {
-		slog.WarnContext(ctx, "handleCheckSuiteEvent: cache put", "err", err)
+		h.log.WarnContext(ctx, "cache check suite", "err", err)
 	}
 
 	for checkout := range h.checkouts.Checkouts() {
@@ -520,11 +519,11 @@ func (h *WebhookHandlers) handleCheckSuiteEvent(ctx context.Context, ev *github.
 		headSHA, err := client.GetDefaultBranchSHA(ctx, repoInfo.ForgeOwner, repoInfo.ForgeRepo, checkout.BaseBranch)
 		switch {
 		case err != nil:
-			slog.WarnContext(ctx, "handleCheckSuiteEvent: get HEAD SHA", "repo", checkout.RelPath, "err", err)
+			h.log.WarnContext(ctx, "get checkout HEAD SHA", "repo", checkout.RelPath, "err", err)
 		case headSHA == sha:
 			h.ciService.SetRepoCIStatus(checkout.RelPath, sha, forgecache.Result{Status: result.Status, Checks: result.Checks})
 		default:
-			slog.DebugContext(ctx, "handleCheckSuiteEvent: ignoring stale check suite", "sha", sha, "head", headSHA)
+			h.log.DebugContext(ctx, "ignoring stale check suite", "sha", sha, "head", headSHA)
 		}
 	}
 

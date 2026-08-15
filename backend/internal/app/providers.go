@@ -20,14 +20,14 @@ import (
 
 // usageFetchers returns cfg.UsageFetchers when non-nil (fake/e2e), otherwise
 // auto-detects providers from the environment.
-func usageFetchers(cfg *server.Config, ctx context.Context) []usage.ProviderFetcher {
+func usageFetchers(ctx context.Context, log *slog.Logger, cfg *server.Config) []usage.ProviderFetcher {
 	if cfg.UsageFetchers != nil {
 		return cfg.UsageFetchers
 	}
-	return detectProviders(ctx, cfg.Agent.CoreEnv, cfg.Agent.HarnessEnv)
+	return detectProviders(ctx, log, cfg.Agent.CoreEnv, cfg.Agent.HarnessEnv)
 }
 
-func detectProviders(ctx context.Context, coreEnv map[string]string, harnessEnv map[string][]string) []usage.ProviderFetcher {
+func detectProviders(ctx context.Context, log *slog.Logger, coreEnv map[string]string, harnessEnv map[string][]string) []usage.ProviderFetcher {
 	var fetchers []usage.ProviderFetcher
 
 	if f := usage.NewClaudeCodeFetcher(ctx); f != nil {
@@ -47,11 +47,11 @@ func detectProviders(ctx context.Context, coreEnv map[string]string, harnessEnv 
 		}
 	}
 
-	slog.InfoContext(ctx, "provider usage fetchers", "count", len(fetchers))
+	log.InfoContext(ctx, "provider usage fetchers", "count", len(fetchers))
 	return fetchers
 }
 
-func autoDetectLLMProvider(ctx context.Context, coreEnv map[string]string) string {
+func autoDetectLLMProvider(ctx context.Context, log *slog.Logger, coreEnv map[string]string) string {
 	preferred := []string{
 		"codex",
 		"opencode",
@@ -59,19 +59,19 @@ func autoDetectLLMProvider(ctx context.Context, coreEnv map[string]string) strin
 		"pi",
 	}
 	for _, name := range preferred {
-		if pingProvider(ctx, name, coreEnv) {
+		if pingProvider(ctx, log, name, coreEnv) {
 			return name
 		}
 	}
 	for name := range providers.All {
-		if pingProvider(ctx, name, coreEnv) {
+		if pingProvider(ctx, log, name, coreEnv) {
 			return name
 		}
 	}
 	return ""
 }
 
-func pingProvider(ctx context.Context, name string, coreEnv map[string]string) bool {
+func pingProvider(ctx context.Context, log *slog.Logger, name string, coreEnv map[string]string) bool {
 	c, ok := providers.All[name]
 	if !ok || c.Factory == nil {
 		return false
@@ -80,16 +80,16 @@ func pingProvider(ctx context.Context, name string, coreEnv map[string]string) b
 	opts = appendProviderAPIKey(opts, name, coreEnv)
 	p, err := c.Factory(ctx, opts...)
 	if err != nil {
-		slog.DebugContext(ctx, "provider factory failed", "prov", name, "err", err)
+		log.DebugContext(ctx, "provider factory failed", "prov", name, "err", err)
 		return false
 	}
 	if pinger, ok := p.(genai.ProviderPing); ok {
 		if err := pinger.Ping(ctx); err != nil {
-			slog.DebugContext(ctx, "provider ping failed", "prov", name, "err", err)
+			log.DebugContext(ctx, "provider ping failed", "prov", name, "err", err)
 			return false
 		}
 	}
-	slog.InfoContext(ctx, "provider detected", "prov", name)
+	log.InfoContext(ctx, "provider detected", "prov", name)
 	return true
 }
 
