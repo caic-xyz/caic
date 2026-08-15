@@ -24,7 +24,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/logtest"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
@@ -2972,7 +2971,7 @@ func TestManager(t *testing.T) {
 				{ID: runtime.NewID("test-runtime", "duplicate-one"), State: "exited", Repos: []runtime.Repo{{ContainerPath: "/home/user/src/repo/a", Branch: "caic-1"}}},
 				{ID: runtime.NewID("test-runtime", "duplicate-two"), State: "exited", Repos: []runtime.Repo{{ContainerPath: "/home/user/src/repo/a", Branch: "caic-1"}}},
 			}
-			adopted, err := m.AdoptInstances(t.Context(), []AdoptRepo{{RelPath: "repo/a", AbsPath: "/home/user/src/repo/a"}}, instances, nil)
+			adopted, err := m.ImportInstances(t.Context(), instances, nil)
 			if err == nil || !strings.Contains(err.Error(), "duplicate runtime task ID") {
 				t.Fatalf("AdoptInstances error = %v, want duplicate-task-ID error", err)
 			}
@@ -2996,7 +2995,7 @@ func TestManager(t *testing.T) {
 				Backends:  map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{}},
 			})
 			registerCheckout(t, m.Checkouts, "repo/a", &repo.Checkout{Dir: "/home/user/src/repo/a"})
-			_, err := m.AdoptInstances(t.Context(), []AdoptRepo{{RelPath: "repo/a", AbsPath: "/home/user/src/repo/a"}}, []runtime.Instance{{
+			_, err := m.ImportInstances(t.Context(), []runtime.Instance{{
 				ID:    runtime.NewID("test-runtime", "metadata-error"),
 				State: "exited",
 				Repos: []runtime.Repo{{GitRoot: "/home/user/src/repo/a", Branch: "caic-1", ContainerPath: "/home/user/src/repo/a"}},
@@ -3005,6 +3004,7 @@ func TestManager(t *testing.T) {
 				Harness: harness.Claude,
 				Repos:   []task.RepoMount{{Name: "repo/a", Branch: "caic-1"}},
 			}})
+
 			if err == nil || !strings.Contains(err.Error(), "harness metadata unavailable") {
 				t.Fatalf("AdoptInstances error = %v, want harness metadata error", err)
 			}
@@ -3021,41 +3021,42 @@ func TestManager(t *testing.T) {
 			registerCheckout(t, m.Checkouts, "caic-xyz/caic", &repo.Checkout{Dir: "/home/user/src/caic-xyz/caic"})
 			registerCheckout(t, m.Checkouts, "caic-xyz/md", &repo.Checkout{Dir: "/home/user/src/caic-xyz/md"})
 
-			adopted, err := m.AdoptInstances(t.Context(), []AdoptRepo{
-				{RelPath: "caic-xyz/caic", AbsPath: "/home/user/src/caic-xyz/caic"},
-				{RelPath: "caic-xyz/md", AbsPath: "/home/user/src/caic-xyz/md"},
-			}, []runtime.Instance{
-				{
-					ID:    runtime.NewID("test-runtime", "md-caic-caic-5"),
-					State: "exited",
-					Repos: []runtime.Repo{
-						{GitRoot: "/home/user/src/caic-xyz/caic", Branch: "caic-5", ContainerPath: "/home/user/src/caic-xyz/caic"},
-						{GitRoot: "/home/user/src/caic-xyz/md", Branch: "caic-0", ContainerPath: "/home/user/src/caic-xyz/md"},
+			adopted, err := m.ImportInstances(t.Context(),
+
+				[]runtime.Instance{
+					{
+						ID:    runtime.NewID("test-runtime", "md-caic-caic-5"),
+						State: "exited",
+						Repos: []runtime.Repo{
+							{GitRoot: "/home/user/src/caic-xyz/caic", Branch: "caic-5", ContainerPath: "/home/user/src/caic-xyz/caic"},
+							{GitRoot: "/home/user/src/caic-xyz/md", Branch: "caic-0", ContainerPath: "/home/user/src/caic-xyz/md"},
+						},
 					},
-				},
-			}, []*task.LoadedTask{{
-				TaskID:  taskID.String(),
-				Harness: harness.Claude,
-				Repos:   []task.RepoMount{{Name: "caic-xyz/caic", Branch: "caic-5"}},
-				Msgs: []agent.Message{&agent.RateLimitMessage{
-					Status:        agent.RateLimitStatusRejected,
-					ResetsAt:      resetAt,
-					QuotaProvider: agent.QuotaProviderClaudeCode,
-					QuotaWindow:   "five_hour",
-					Utilization:   1,
-				}},
-			}})
+				}, []*task.LoadedTask{{
+					TaskID:  taskID.String(),
+					Harness: harness.Claude,
+					Repos:   []task.RepoMount{{Name: "caic-xyz/caic", Branch: "caic-5"}},
+					Msgs: []agent.Message{&agent.RateLimitMessage{
+						Status:        agent.RateLimitStatusRejected,
+						ResetsAt:      resetAt,
+						QuotaProvider: agent.QuotaProviderClaudeCode,
+						QuotaWindow:   "five_hour",
+						Utilization:   1,
+					}},
+				}})
+
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
 			}
 			if len(adopted) != 1 {
 				t.Fatalf("adopted len = %d, want 1", len(adopted))
 			}
-			if adopted[0].RelPath != "caic-xyz/caic" {
-				t.Errorf("adopted RelPath = %q, want caic-xyz/caic", adopted[0].RelPath)
+			primary := adopted[0].Task().Primary()
+			if primary == nil || primary.Name != "caic-xyz/caic" {
+				t.Errorf("primary repo = %#v, want caic-xyz/caic", primary)
 			}
-			if adopted[0].Branch != "caic-5" {
-				t.Errorf("adopted Branch = %q, want caic-5", adopted[0].Branch)
+			if primary == nil || primary.Branch != "caic-5" {
+				t.Errorf("primary branch = %#v, want caic-5", primary)
 			}
 			if m.Len() != 1 {
 				t.Errorf("manager Len = %d, want 1", m.Len())
@@ -3079,7 +3080,7 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
 			registerCheckout(t, m.Checkouts, "repo/a", &repo.Checkout{Dir: "/home/user/src/repo/a"})
 
-			_, err := m.AdoptInstances(t.Context(), []AdoptRepo{{RelPath: "repo/a", AbsPath: "/home/user/src/repo/a"}}, []runtime.Instance{{
+			_, err := m.ImportInstances(t.Context(), []runtime.Instance{{
 				ID: runtime.NewID("test-runtime", "repo-only-match"), State: "exited",
 				Repos: []runtime.Repo{{GitRoot: "/home/user/src/repo/a", Branch: "caic-1", ContainerPath: "/home/user/src/repo/a"}},
 			}}, []*task.LoadedTask{{
@@ -3087,6 +3088,7 @@ func TestManager(t *testing.T) {
 				Repos:   []task.RepoMount{{Name: "repo/a", Branch: "caic-1"}},
 				Harness: harness.Claude,
 			}})
+
 			if err == nil || !strings.Contains(err.Error(), "task log "+taskID.String()+" not found") {
 				t.Fatalf("AdoptInstances error = %v, want missing exact task log", err)
 			}
@@ -3101,7 +3103,7 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{}})
 			registerCheckout(t, m.Checkouts, "repo/a", &repo.Checkout{Dir: "/home/user/src/repo/a"})
 
-			_, err := m.AdoptInstances(t.Context(), []AdoptRepo{{RelPath: "repo/a", AbsPath: "/home/user/src/repo/a"}}, []runtime.Instance{{
+			_, err := m.ImportInstances(t.Context(), []runtime.Instance{{
 				ID: runtime.NewID("test-runtime", "unknown-harness"), State: "exited",
 				Repos: []runtime.Repo{{GitRoot: "/home/user/src/repo/a", Branch: "caic-1", ContainerPath: "/home/user/src/repo/a"}},
 			}}, []*task.LoadedTask{{
@@ -3109,6 +3111,7 @@ func TestManager(t *testing.T) {
 				Repos:   []task.RepoMount{{Name: "repo/a", Branch: "caic-1"}},
 				Harness: "unknown",
 			}})
+
 			if err == nil || !strings.Contains(err.Error(), `unknown harness "unknown"`) {
 				t.Fatalf("AdoptInstances error = %v, want unknown-harness error", err)
 			}
@@ -3153,10 +3156,11 @@ func TestManager(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			adopted, err := m.AdoptInstances(t.Context(), nil, []runtime.Instance{{
+			adopted, err := m.ImportInstances(t.Context(), []runtime.Instance{{
 				ID:    runtime.NewID("test-runtime", "md-agent-semantic-error"),
 				State: "running",
 			}}, logs)
+
 			if err == nil || !strings.Contains(err.Error(), "task log "+taskID.String()+" not found") {
 				t.Fatalf("AdoptInstances error = %v, want malformed-control log rejection", err)
 			}
@@ -3187,20 +3191,21 @@ func TestManager(t *testing.T) {
 			}}
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
 
-			adopted, err := m.AdoptInstances(t.Context(), nil, []runtime.Instance{{ID: instanceID, State: "exited"}}, []*task.LoadedTask{{
+			adopted, err := m.ImportInstances(t.Context(), []runtime.Instance{{ID: instanceID, State: "exited"}}, []*task.LoadedTask{{
 				TaskID: taskID.String(), Harness: harness.Claude,
 			}})
+
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
 			}
 			if len(adopted) != 1 {
 				t.Fatalf("adopted len = %d, want 1", len(adopted))
 			}
-			if adopted[0].Task.ID != taskID {
-				t.Fatalf("adopted task ID = %s, want %s", adopted[0].Task.ID, taskID)
+			if adopted[0].Task().ID != taskID {
+				t.Fatalf("adopted task ID = %s, want %s", adopted[0].Task().ID, taskID)
 			}
-			if adopted[0].RelPath != "" {
-				t.Fatalf("adopted RelPath = %q, want no repo", adopted[0].RelPath)
+			if adopted[0].Task().Primary() != nil {
+				t.Fatalf("primary repo = %#v, want none", adopted[0].Task().Primary())
 			}
 		})
 		t.Run("valid_restores_launch_config_from_log", func(t *testing.T) {
@@ -3237,16 +3242,17 @@ func TestManager(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			adopted, err := m.AdoptInstances(t.Context(), []AdoptRepo{{RelPath: "repo/a", AbsPath: "/home/user/src/repo/a"}}, []runtime.Instance{
+			adopted, err := m.ImportInstances(t.Context(), []runtime.Instance{
 				{ID: runtime.NewID("test-runtime", "restore-config"), State: "exited", Repos: []runtime.Repo{{GitRoot: "/home/user/src/repo/a", Branch: "caic-9", ContainerPath: "/home/user/src/repo/a"}}},
 			}, logs)
+
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
 			}
 			if len(adopted) != 1 {
 				t.Fatalf("adopted len = %d, want 1", len(adopted))
 			}
-			got := adopted[0].Task
+			got := adopted[0].Task()
 			if got.BaseImage != "ghcr.io/caic/base:v1" || got.ContainerPlatform != "linux/amd64" || got.MaxCPUs != 5 {
 				t.Fatalf("launch config = image %q platform %q cpus %d", got.BaseImage, got.ContainerPlatform, got.MaxCPUs)
 			}
@@ -3296,29 +3302,30 @@ func TestManager(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			adopted, err := m.AdoptInstances(t.Context(), []AdoptRepo{
-				{RelPath: "caic-xyz/caic", AbsPath: "/home/user/src/caic-xyz/caic"},
-			}, []runtime.Instance{
-				{
-					ID:    runtime.NewID("test-runtime", "merge-tail"),
-					State: "running",
-					Repos: []runtime.Repo{{
-						GitRoot:       "/home/user/src/caic-xyz/caic",
-						Branch:        "caic-12",
-						ContainerPath: "/home/user/src/caic-xyz/caic",
-					}},
-				},
-			}, logs)
+			adopted, err := m.ImportInstances(t.Context(),
+
+				[]runtime.Instance{
+					{
+						ID:    runtime.NewID("test-runtime", "merge-tail"),
+						State: "running",
+						Repos: []runtime.Repo{{
+							GitRoot:       "/home/user/src/caic-xyz/caic",
+							Branch:        "caic-12",
+							ContainerPath: "/home/user/src/caic-xyz/caic",
+						}},
+					},
+				}, logs)
+
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
 			}
 			if len(adopted) != 1 {
 				t.Fatalf("adopted len = %d, want 1", len(adopted))
 			}
-			if got := adopted[0].Task.RelayOffsetValue(); got != 128 {
+			if got := adopted[0].Task().RelayOffsetValue(); got != 128 {
 				t.Fatalf("RelayOffset = %d, want 128", got)
 			}
-			texts := textMessages(adopted[0].Task.Messages())
+			texts := textMessages(adopted[0].Task().Messages())
 			if !slices.Contains(texts, "before restart") || !slices.Contains(texts, "during restart") {
 				t.Fatalf("messages = %#v, want disk history plus relay tail", texts)
 			}
@@ -3366,25 +3373,26 @@ func TestManager(t *testing.T) {
 			}
 			registerCheckout(t, m.Checkouts, "repo/a", &repo.Checkout{Dir: "/home/user/src/repo/a"})
 
-			adopted, err := m.AdoptInstances(t.Context(), []AdoptRepo{
-				{RelPath: "repo/a", AbsPath: "/home/user/src/repo/a"},
-			}, []runtime.Instance{
-				{
-					ID:          runtime.NewID("test-runtime", "ask-tail"),
-					AgentTarget: runtime.ConnectionTarget{SSHHost: "ask-tail"},
-					State:       "running",
-					Repos: []runtime.Repo{{
-						GitRoot:       "/home/user/src/repo/a",
-						Branch:        "caic-10",
-						ContainerPath: "/home/user/src/repo/a",
-					}},
-				},
-			}, []*task.LoadedTask{{
-				TaskID:     taskID.String(),
-				Harness:    "reconnect",
-				LogVersion: agent.LogVersionV1,
-				Repos:      []task.RepoMount{{Name: "repo/a", Branch: "caic-10"}},
-			}})
+			adopted, err := m.ImportInstances(t.Context(),
+
+				[]runtime.Instance{
+					{
+						ID:          runtime.NewID("test-runtime", "ask-tail"),
+						AgentTarget: runtime.ConnectionTarget{SSHHost: "ask-tail"},
+						State:       "running",
+						Repos: []runtime.Repo{{
+							GitRoot:       "/home/user/src/repo/a",
+							Branch:        "caic-10",
+							ContainerPath: "/home/user/src/repo/a",
+						}},
+					},
+				}, []*task.LoadedTask{{
+					TaskID:     taskID.String(),
+					Harness:    "reconnect",
+					LogVersion: agent.LogVersionV1,
+					Repos:      []task.RepoMount{{Name: "repo/a", Branch: "caic-10"}},
+				}})
+
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
 			}
@@ -3402,11 +3410,11 @@ func TestManager(t *testing.T) {
 			if opts != nil {
 				t.Fatalf("AttachRelay opts = %#v, want nil", opts)
 			}
-			if adopted[0].Task.HasSession() {
+			if adopted[0].Task().HasSession() {
 				t.Fatal("adopted task attached without authoritative local log")
 			}
-			if adopted[0].Task.LogPath() != "" {
-				t.Fatalf("replacement LogPath = %q, want empty", adopted[0].Task.LogPath())
+			if adopted[0].Task().LogPath() != "" {
+				t.Fatalf("replacement LogPath = %q, want empty", adopted[0].Task().LogPath())
 			}
 		})
 		t.Run("valid_dead_relay_exit_error_crashes_adopted_task", func(t *testing.T) {
@@ -3442,32 +3450,33 @@ func TestManager(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			adopted, err := m.AdoptInstances(ctx, []AdoptRepo{
-				{RelPath: "caic-xyz/caic", AbsPath: "/home/user/src/caic-xyz/caic"},
-			}, []runtime.Instance{
-				{
-					ID:    runtime.NewID("test-runtime", "dead-relay"),
-					State: "running",
-					Repos: []runtime.Repo{{
-						GitRoot:       "/home/user/src/caic-xyz/caic",
-						Branch:        "caic-7",
-						ContainerPath: "/home/user/src/caic-xyz/caic",
-					}},
-				},
-			}, logs)
+			adopted, err := m.ImportInstances(ctx,
+
+				[]runtime.Instance{
+					{
+						ID:    runtime.NewID("test-runtime", "dead-relay"),
+						State: "running",
+						Repos: []runtime.Repo{{
+							GitRoot:       "/home/user/src/caic-xyz/caic",
+							Branch:        "caic-7",
+							ContainerPath: "/home/user/src/caic-xyz/caic",
+						}},
+					},
+				}, logs)
+
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
 			}
 			if len(adopted) != 1 {
 				t.Fatalf("adopted len = %d, want 1", len(adopted))
 			}
-			if got := adopted[0].Task.GetState(); got != task.StateCrashed {
+			if got := adopted[0].Task().GetState(); got != task.StateCrashed {
 				t.Errorf("state = %v, want crashed", got)
 			}
-			if adopted[0].Entry.Result() == nil {
+			if adopted[0].Result() == nil {
 				t.Fatal("entry result is nil")
 			}
-			if err := adopted[0].Entry.Result().Err; err == nil || !strings.Contains(err.Error(), "Unknown option: --approve") {
+			if err := adopted[0].Result().Err; err == nil || !strings.Contains(err.Error(), "Unknown option: --approve") {
 				t.Fatalf("result err = %v, want relay stderr", err)
 			}
 			persisted, err := os.ReadFile(logPath) //nolint:gosec // test-controlled temp path
@@ -3498,34 +3507,35 @@ func TestManager(t *testing.T) {
 			}
 			registerCheckout(t, m.Checkouts, "caic-xyz/caic", &repo.Checkout{Dir: "/home/user/src/caic-xyz/caic"})
 
-			adopted, err := m.AdoptInstances(t.Context(), []AdoptRepo{
-				{RelPath: "caic-xyz/caic", AbsPath: "/home/user/src/caic-xyz/caic"},
-			}, []runtime.Instance{
-				{
-					ID:    runtime.NewID("test-runtime", "dead-relay-tail"),
-					State: "running",
-					Repos: []runtime.Repo{{
-						GitRoot:       "/home/user/src/caic-xyz/caic",
-						Branch:        "caic-8",
-						ContainerPath: "/home/user/src/caic-xyz/caic",
-					}},
-				},
-			}, []*task.LoadedTask{{
-				TaskID:     taskID.String(),
-				Harness:    harness.Claude,
-				LogVersion: agent.LogVersionV1,
-				Repos:      []task.RepoMount{{Name: "caic-xyz/caic", Branch: "caic-8"}},
-			}})
+			adopted, err := m.ImportInstances(t.Context(),
+
+				[]runtime.Instance{
+					{
+						ID:    runtime.NewID("test-runtime", "dead-relay-tail"),
+						State: "running",
+						Repos: []runtime.Repo{{
+							GitRoot:       "/home/user/src/caic-xyz/caic",
+							Branch:        "caic-8",
+							ContainerPath: "/home/user/src/caic-xyz/caic",
+						}},
+					},
+				}, []*task.LoadedTask{{
+					TaskID:     taskID.String(),
+					Harness:    harness.Claude,
+					LogVersion: agent.LogVersionV1,
+					Repos:      []task.RepoMount{{Name: "caic-xyz/caic", Branch: "caic-8"}},
+				}})
+
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
 			}
 			if len(adopted) != 1 {
 				t.Fatalf("adopted len = %d, want 1", len(adopted))
 			}
-			if got := adopted[0].Task.GetState(); got != task.StateCrashed {
+			if got := adopted[0].Task().GetState(); got != task.StateCrashed {
 				t.Fatalf("state = %v, want crashed", got)
 			}
-			if err := adopted[0].Entry.Result().Err; err == nil || !strings.Contains(err.Error(), "Unknown option: --approve") {
+			if err := adopted[0].Result().Err; err == nil || !strings.Contains(err.Error(), "Unknown option: --approve") {
 				t.Fatalf("result err = %v, want relay stderr", err)
 			}
 		})
@@ -3553,38 +3563,39 @@ func TestManager(t *testing.T) {
 			}
 			registerCheckout(t, m.Checkouts, "caic-xyz/caic", &repo.Checkout{Dir: "/home/user/src/caic-xyz/caic"})
 
-			adopted, err := m.AdoptInstances(t.Context(), []AdoptRepo{
-				{RelPath: "caic-xyz/caic", AbsPath: "/home/user/src/caic-xyz/caic"},
-			}, []runtime.Instance{
-				{
-					ID:    runtime.NewID("test-runtime", "stale-tail"),
-					State: "running",
-					Repos: []runtime.Repo{{
-						GitRoot:       "/home/user/src/caic-xyz/caic",
-						Branch:        "caic-9",
-						ContainerPath: "/home/user/src/caic-xyz/caic",
-					}},
-				},
-			}, []*task.LoadedTask{{
-				TaskID:     taskID.String(),
-				Harness:    harness.Claude,
-				LogVersion: agent.LogVersionV1,
-				Repos:      []task.RepoMount{{Name: "caic-xyz/caic", Branch: "caic-9"}},
-			}})
+			adopted, err := m.ImportInstances(t.Context(),
+
+				[]runtime.Instance{
+					{
+						ID:    runtime.NewID("test-runtime", "stale-tail"),
+						State: "running",
+						Repos: []runtime.Repo{{
+							GitRoot:       "/home/user/src/caic-xyz/caic",
+							Branch:        "caic-9",
+							ContainerPath: "/home/user/src/caic-xyz/caic",
+						}},
+					},
+				}, []*task.LoadedTask{{
+					TaskID:     taskID.String(),
+					Harness:    harness.Claude,
+					LogVersion: agent.LogVersionV1,
+					Repos:      []task.RepoMount{{Name: "caic-xyz/caic", Branch: "caic-9"}},
+				}})
+
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
 			}
 			if len(adopted) != 1 {
 				t.Fatalf("adopted len = %d, want 1", len(adopted))
 			}
-			if got := adopted[0].Task.GetState(); got != task.StateStopped {
+			if got := adopted[0].Task().GetState(); got != task.StateStopped {
 				t.Fatalf("state = %v, want stopped", got)
 			}
-			if got := adopted[0].Task.LastExitError(); got != "" {
+			if got := adopted[0].Task().LastExitError(); got != "" {
 				t.Fatalf("LastExitError = %q, want stale error cleared", got)
 			}
-			if adopted[0].Entry.Result() != nil {
-				t.Fatalf("entry result = %#v, want nil", adopted[0].Entry.Result())
+			if adopted[0].Result() != nil {
+				t.Fatalf("entry result = %#v, want nil", adopted[0].Result())
 			}
 		})
 		t.Run("valid_stale_crashed_trailer_does_not_crash_adopted_task", func(t *testing.T) {
@@ -3620,29 +3631,30 @@ func TestManager(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			adopted, err := m.AdoptInstances(t.Context(), []AdoptRepo{
-				{RelPath: "caic-xyz/caic", AbsPath: "/home/user/src/caic-xyz/caic"},
-			}, []runtime.Instance{
-				{
-					ID:    runtime.NewID("test-runtime", "stale-trailer"),
-					State: "exited",
-					Repos: []runtime.Repo{{
-						GitRoot:       "/home/user/src/caic-xyz/caic",
-						Branch:        "caic-10",
-						ContainerPath: "/home/user/src/caic-xyz/caic",
-					}},
-				},
-			}, loaded)
+			adopted, err := m.ImportInstances(t.Context(),
+
+				[]runtime.Instance{
+					{
+						ID:    runtime.NewID("test-runtime", "stale-trailer"),
+						State: "exited",
+						Repos: []runtime.Repo{{
+							GitRoot:       "/home/user/src/caic-xyz/caic",
+							Branch:        "caic-10",
+							ContainerPath: "/home/user/src/caic-xyz/caic",
+						}},
+					},
+				}, loaded)
+
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
 			}
 			if len(adopted) != 1 {
 				t.Fatalf("adopted len = %d, want 1", len(adopted))
 			}
-			if got := adopted[0].Task.GetState(); got != task.StateStopped {
+			if got := adopted[0].Task().GetState(); got != task.StateStopped {
 				t.Fatalf("state = %v, want stopped", got)
 			}
-			if got := adopted[0].Task.LastExitError(); got != "" {
+			if got := adopted[0].Task().LastExitError(); got != "" {
 				t.Fatalf("LastExitError = %q, want stale error cleared", got)
 			}
 		})
@@ -3676,24 +3688,25 @@ func TestManager(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			adopted, err := m.AdoptInstances(t.Context(), []AdoptRepo{
-				{RelPath: "caic-xyz/caic", AbsPath: "/home/user/src/caic-xyz/caic"},
-			}, []runtime.Instance{
-				{
-					ID:    runtime.NewID("test-runtime", "md-caic-caic-6"),
-					State: "exited",
-					Repos: []runtime.Repo{
-						{GitRoot: "/home/user/src/caic-xyz/caic", Branch: "caic-6", ContainerPath: "/home/user/src/caic-xyz/caic"},
+			adopted, err := m.ImportInstances(t.Context(),
+
+				[]runtime.Instance{
+					{
+						ID:    runtime.NewID("test-runtime", "md-caic-caic-6"),
+						State: "exited",
+						Repos: []runtime.Repo{
+							{GitRoot: "/home/user/src/caic-xyz/caic", Branch: "caic-6", ContainerPath: "/home/user/src/caic-xyz/caic"},
+						},
 					},
-				},
-			}, logs)
+				}, logs)
+
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
 			}
 			if len(adopted) != 1 {
 				t.Fatalf("adopted len = %d, want 1", len(adopted))
 			}
-			if got := adopted[0].Task.GetSessionID(); got != "thread-from-started" {
+			if got := adopted[0].Task().GetSessionID(); got != "thread-from-started" {
 				t.Errorf("SessionID = %q, want thread-from-started", got)
 			}
 		})
@@ -3926,49 +3939,6 @@ func TestNeedsTitleRegen(t *testing.T) {
 		}
 		if needsTitleRegen(tk, lt, resolver) {
 			t.Error("needsTitleRegen should return false for large logs")
-		}
-	})
-}
-
-func TestRefreshAdoptedDiffStat(t *testing.T) {
-	t.Parallel()
-	t.Run("valid_waiting_fetches_branch_diff", func(t *testing.T) {
-		t.Parallel()
-		fake := &runtimetest.FakeBackend{DiffOutput: "5\t1\tmain.go\n"}
-		checkout := &repo.Checkout{
-			Dir:        "/repo",
-			RelPath:    "repo",
-			GitTimeout: time.Minute,
-		}
-		tk := &task.Task{Repos: []task.RepoMount{{GitRoot: "/repo", Branch: "caic-0"}}}
-		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-		tk.SetState(task.StateWaiting)
-
-		refreshAdoptedDiffStat(t.Context(), logtest.Logger(t), checkout, newTestRuntime(t, fake, nil), tk)
-
-		// A populated DiffStat is the observable indication the fetch-then-diff path ran.
-		ds := tk.Snapshot().DiffStat
-		if len(ds) != 1 || ds[0].Path != "main.go" || ds[0].Added != 5 || ds[0].Deleted != 1 {
-			t.Errorf("DiffStat = %+v, want [{main.go 5 1}]", ds)
-		}
-	})
-	t.Run("valid_running_skips_branch_diff", func(t *testing.T) {
-		t.Parallel()
-		fake := &runtimetest.FakeBackend{DiffOutput: "5\t1\tmain.go\n"}
-		checkout := &repo.Checkout{
-			Dir:        "/repo",
-			RelPath:    "repo",
-			GitTimeout: time.Minute,
-		}
-		tk := &task.Task{Repos: []task.RepoMount{{GitRoot: "/repo", Branch: "caic-0"}}}
-		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-		tk.SetState(task.StateRunning)
-
-		refreshAdoptedDiffStat(t.Context(), logtest.Logger(t), checkout, newTestRuntime(t, fake, nil), tk)
-
-		// An empty DiffStat is the observable indication the diff path was skipped.
-		if ds := tk.Snapshot().DiffStat; len(ds) != 0 {
-			t.Errorf("DiffStat = %+v, want empty", ds)
 		}
 	})
 }

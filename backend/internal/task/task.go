@@ -54,7 +54,7 @@ func (s *statsSub) close() { s.once.Do(func() { close(s.ch) }) }
 //     Stopping/Stopped, Purging/Purged) follow instance/session setup and
 //     teardown, not message content.
 //  3. Recovery — Task.RecordSessionCrash/RecordSessionFailure and the
-//     adoption-time state inference in RestoreMessages and Manager's adopt
+//     import-time state inference in RestoreMessages and Manager's import
 //     path. These run when a session dies unexpectedly or when state must be
 //     inferred from a log/relay tail rather than observed live.
 //
@@ -236,7 +236,7 @@ type Task struct {
 	Provider          genai.Provider
 
 	// Mutable task metadata. These fields are populated at construction, setup, or
-	// adoption. After a task is published in the Manager registry, access them
+	// import. After a task is published in the Manager registry, access them
 	// through Task methods so readers and async lifecycle goroutines synchronize.
 	Repos            []RepoMount // index 0 = primary; empty = no-repo
 	TailscaleFQDN    string      // Tailscale FQDN assigned to the instance (empty if not available).
@@ -741,7 +741,7 @@ func (t *Task) SetState(s State) {
 }
 
 // SetStateAt updates the state under the mutex with an explicit timestamp.
-// Used during adoption to preserve the original transition time.
+// Used during import to preserve the original transition time.
 func (t *Task) SetStateAt(s State, at time.Time) {
 	t.mu.Lock()
 	if s != StateRunning {
@@ -753,7 +753,7 @@ func (t *Task) SetStateAt(s State, at time.Time) {
 }
 
 // SetTurnStartedAt sets the turn start time if the task is currently running.
-// Called during adoption to estimate when the current mid-turn started.
+// Called during import to estimate when the current mid-turn started.
 func (t *Task) SetTurnStartedAt(at time.Time) {
 	t.mu.Lock()
 	if t.state == StateRunning {
@@ -902,7 +902,7 @@ func (t *Task) DiffCreated() bool {
 }
 
 // MarkDiffCreated records that a non-empty diff was observed, without a diff
-// stat payload. Adoption uses it to restore the persisted DiffCreated flag from
+// stat payload. Import uses it to restore the persisted DiffCreated flag from
 // the log summary, so the signal survives a restart even when message replay is
 // skipped or the relay's last diff was empty. The flag is sticky and never
 // cleared here.
@@ -912,7 +912,7 @@ func (t *Task) MarkDiffCreated() {
 	t.diffCreated = true
 }
 
-// SetLiveDiffStat overwrites the live diff stat. Used by adoptOne to set
+// SetLiveDiffStat overwrites the live diff stat. Used by task import to set
 // the host-side branch diff after RestoreMessages, because the relay's
 // diff_watcher only tracks uncommitted changes (git diff HEAD) which
 // becomes empty after the agent commits.
@@ -1121,9 +1121,9 @@ func (t *Task) PendingUserActions() []agent.PendingUserAction {
 //   - Trailing ResultMessage (no ask) → StateWaiting
 //   - No trailing ResultMessage → state unchanged (agent was mid-output)
 //
-// Called during both log loading (loadPurgedTasks) and instance adoption
-// (adoptOne). For adoption, the caller must handle the case where state
-// remains StateRunning with no relay alive — see adoptOne.
+// Called during both log loading (loadPurgedTasks) and instance import
+// (task import). For import, the caller must handle the case where state
+// remains StateRunning with no relay alive.
 func (t *Task) RestoreMessages(msgs []agent.Message) {
 	t.mu.Lock()
 	defer t.mu.Unlock()

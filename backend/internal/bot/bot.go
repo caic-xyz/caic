@@ -94,7 +94,7 @@ func New(ctx context.Context, c Client) *Bot {
 }
 
 // ResumePendingComments re-attaches watchAndComment goroutines for tasks
-// that were created by the bot before a server restart. Call after adoption
+// that were created by the bot before a server restart. Call after import
 // is complete and the task map is populated.
 func (b *Bot) ResumePendingComments() {
 	pending := b.client.ListPendingBotTasks()

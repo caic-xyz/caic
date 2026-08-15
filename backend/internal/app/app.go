@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"iter"
 	"log/slog"
 	"net"
 	"net/http"
@@ -276,7 +275,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	if err != nil {
 		return nil, fmt.Errorf("task manager: %w", err)
 	}
-	// Compression replaces log paths, so finish maintenance before task adoption
+	// Compression replaces log paths, so finish maintenance before task import
 	// can expose any task to a replay request.
 	err = func() error {
 		startupCtx, tk := trace.NewTask(ctx, "prepare-purged-task-logs")
@@ -404,34 +403,41 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	phase3 := trace.StartRegion(ctx, "load-live-task-logs")
 	liveLogs, err := loadRuntimeTaskLogs(ctx, logDir, runtimes, instanceRes.instances)
 	if err != nil {
-		slog.WarnContext(ctx, "load live task logs failed; affected instances will not be adopted", "err", err)
+		slog.WarnContext(ctx, "load live task logs failed; affected instances will not be imported", "err", err)
 	}
 	phase3.End()
 
-	phase4 := trace.StartRegion(ctx, "adopt-runtime-instances")
-	adopted, err := taskMgr.AdoptInstances(ctx, adoptionRepos(repoService.Repositories.Checkouts()), instanceRes.instances, liveLogs)
+	phase4 := trace.StartRegion(ctx, "import-runtime-instances")
+	imported, err := taskMgr.ImportInstances(ctx, instanceRes.instances, liveLogs)
 	if err != nil {
-		slog.ErrorContext(ctx, "adopt runtime instances failed; affected instances will remain unmanaged", "err", err)
+		slog.ErrorContext(ctx, "import runtime instances failed; affected instances will remain unmanaged", "err", err)
 	}
 	backgroundTasks := []backgroundTask{}
-	adoption := &adoptedTaskWiring{
+	importWiring := &importedTaskWiring{
 		authStore: authStore,
 		ciService: ciService,
 		forgeMgr:  forgeManager,
 		taskMgr:   taskMgr,
-		repoSvc:   repoService,
 	}
-	for i := range adopted {
-		at := &adopted[i]
-		if at.ForgeOwner != "" && at.Task.GetPR() > 0 && at.ForgeKind != "" {
+	for _, entry := range imported {
+		t := entry.Task()
+		primary := t.Primary()
+		if primary == nil {
+			continue
+		}
+		checkout, ok := taskMgr.Checkouts.Checkout(primary.Name)
+		if !ok || checkout.Repository == nil {
+			continue
+		}
+		if t.GetPR() > 0 {
 			backgroundTasks = append(backgroundTasks, func(ctx context.Context) error {
-				adoption.WireCIMonitoring(ctx, at)
+				importWiring.WireCIMonitoring(ctx, entry, checkout)
 				return nil
 			})
 		}
-		if at.Task.ForgeIssue == 0 && at.Task.GetPR() == 0 && at.ForgeOwner != "" && at.Branch != "" && at.ForgeKind != "" {
+		if t.ForgeIssue == 0 && t.GetPR() == 0 && primary.Branch != "" {
 			backgroundTasks = append(backgroundTasks, func(ctx context.Context) error {
-				adoption.LookupExternalPRForTask(ctx, at)
+				importWiring.LookupExternalPRForTask(ctx, entry, checkout)
 				return nil
 			})
 		}
@@ -543,20 +549,6 @@ func initRuntimeSystem(ctx context.Context, cfg *server.Config) (*runtime.Router
 		return nil, nil, fmt.Errorf("init runtime router: %w", err)
 	}
 	return runtimeRouter, mdRuntimes, nil
-}
-
-func adoptionRepos(in iter.Seq[*repo.Checkout]) []taskmgr.AdoptRepo {
-	var out []taskmgr.AdoptRepo
-	for checkout := range in {
-		adopt := taskmgr.AdoptRepo{RelPath: checkout.RelPath, AbsPath: checkout.Dir}
-		if checkout.Repository != nil {
-			adopt.ForgeKind = string(checkout.Repository.ForgeKind)
-			adopt.ForgeOwner = checkout.Repository.ForgeOwner
-			adopt.ForgeRepo = checkout.Repository.ForgeRepo
-		}
-		out = append(out, adopt)
-	}
-	return out
 }
 
 func loadRuntimeTaskLogs(ctx context.Context, logDir string, inventory *runtime.Router, instances []runtime.Instance) ([]*task.LoadedTask, error) {

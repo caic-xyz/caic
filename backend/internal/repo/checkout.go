@@ -253,7 +253,7 @@ func (w *Checkout) DiffContent(ctx context.Context, log *slog.Logger, runtimes *
 // BranchDiffStat fetches from the instance and returns the per-repo branch diff
 // stat (md diff --numstat). Unlike the relay's diff_watcher which only tracks
 // uncommitted changes, this captures the full branch diff relative to the base.
-// Used by adoptOne to restore the diff stat after server restart.
+// Used by task-manager import to restore the diff stat after server restart.
 func (w *Checkout) BranchDiffStat(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, t TaskView) agent.DiffStat {
 	log = log.With("repo", w.RelPath)
 	id, repos, err := w.taskRuntime(t)

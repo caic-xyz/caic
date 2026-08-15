@@ -357,7 +357,7 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 //
 // This is only called for intentional purge (user action or instance
 // death), never during backend restart. On restart, the relay daemon stays
-// alive and the server reconnects via adoptOne → Reconnect.
+// alive and the server reconnects during task import.
 //
 // Steps:
 //  1. Detach the session handle from the task.

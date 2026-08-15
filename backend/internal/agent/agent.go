@@ -32,7 +32,7 @@
 //
 //	SSH connections are severed → attach_client sees stdin EOF and disconnects
 //	(no \x00 sent) → relay daemon + agent keep running → on restart, server
-//	discovers the container via adoptOne(), reads output.jsonl to restore
+//	discovers the container during task import, reads output.jsonl to restore
 //	conversation state, and calls relay.py attach --offset N to reconnect.
 package agent
 
@@ -994,7 +994,7 @@ func RelayOutputSize(ctx context.Context, container string) (int64, error) {
 // ReadRelayTail reads only the tail of the relay output.jsonl from the
 // container and returns the parsed messages plus the total file size (for
 // RelayOffset). It streams the SSH output directly, so memory usage is O(1)
-// and no multi-GB transfer occurs during adoption.
+// and no multi-GB transfer occurs during runtime import.
 func ReadRelayTail(ctx context.Context, container string, parser *LogRecordParser, maxBytes int64) (msgs []ParsedMessage, size int64, err error) {
 	size, err = RelayOutputSize(ctx, container)
 	if err != nil {

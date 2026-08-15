@@ -1,5 +1,5 @@
 // Package taskmgr owns task registry state, creation, stats streaming, and
-// runtime-instance adoption.
+// runtime-instance import.
 //
 // It sits between the HTTP adapter (internal/server) and the domain layer
 // (internal/task): task.Task / repo.Checkout are domain types, Manager owns
@@ -85,7 +85,7 @@ type Config struct {
 	Checkouts           *repo.Registry
 }
 
-// Manager owns task lifecycle state, instance adoption, session watching, and
+// Manager owns task lifecycle state, runtime import, session watching, and
 // stats streaming.
 type Manager struct {
 	// Immutable.
@@ -404,14 +404,12 @@ func (m *Manager) SetTaskMonitorBranch(entry *Entry, branch string) {
 	entry.SetMonitorBranch(branch)
 }
 
-// AdoptInstances discovers preexisting runtime instances and creates task entries
-// for them. Returns the list of adopted tasks so the caller (Server) can wire
-// up forge/CI post-adoption.
-func (m *Manager) AdoptInstances(ctx context.Context, adoptRepos []AdoptRepo, instances []runtime.Instance, allLogs []*task.LoadedTask) ([]AdoptedTask, error) {
+// ImportInstances registers preexisting runtime instances as tasks.
+func (m *Manager) ImportInstances(ctx context.Context, instances []runtime.Instance, allLogs []*task.LoadedTask) ([]*Entry, error) {
 	if instances == nil {
 		return nil, nil
 	}
-	resolvedTaskIDs, rejected, validationErr := m.resolveAdoptionTaskIDs(ctx, adoptRepos, instances)
+	resolvedTaskIDs, rejected, validationErr := m.resolveImportTaskIDs(ctx, instances)
 
 	// Map repo+branch loaded from purged task logs to their ID.
 	branchIDs := make(map[string][]string)
@@ -429,39 +427,34 @@ func (m *Manager) AdoptInstances(ctx context.Context, adoptRepos []AdoptRepo, in
 	if validationErr != nil {
 		errs = append(errs, validationErr)
 	}
-	var adopted []AdoptedTask
+	var entries []*Entry
 	claimed := make(map[runtime.ID]bool, len(instances))
 	for id := range rejected {
 		claimed[id] = true
 	}
 
-	for i := range adoptRepos {
-		ri := &adoptRepos[i]
-		checkout, _ := m.Checkouts.Checkout(ri.RelPath)
-		if checkout == nil {
-			continue
-		}
+	for checkout := range m.Checkouts.Checkouts() {
 		for i := range instances {
 			c := &instances[i]
 			if claimed[c.ID] {
 				continue
 			}
-			branch, matched := primaryBranchForAdoption(ri, c)
+			branch, matched := primaryBranchForImport(checkout, c)
 			if !matched {
 				continue
 			}
 			claimed[c.ID] = true
 			taskIDVal, metadataResolved := resolvedTaskIDs[c.ID]
 			wg.Go(func() {
-				at, err := m.adoptOne(ctx, *ri, checkout, c, branch, taskIDVal, metadataResolved, branchIDs, allLogs)
+				entry, err := m.importInstance(ctx, checkout, c, branch, taskIDVal, metadataResolved, branchIDs, allLogs)
 				if err != nil {
 					mu.Lock()
 					errs = append(errs, err)
 					mu.Unlock()
 				}
-				if at != nil {
+				if entry != nil {
 					mu.Lock()
-					adopted = append(adopted, *at)
+					entries = append(entries, entry)
 					mu.Unlock()
 				}
 			})
@@ -469,7 +462,7 @@ func (m *Manager) AdoptInstances(ctx context.Context, adoptRepos []AdoptRepo, in
 	}
 	wg.Wait()
 
-	// Adopt no-repo runtime instances.
+	// Import no-repo runtime instances.
 	for i := range instances {
 		c := &instances[i]
 		if claimed[c.ID] || !strings.HasPrefix(string(c.ID.InstanceID()), "md-agent-") {
@@ -477,38 +470,38 @@ func (m *Manager) AdoptInstances(ctx context.Context, adoptRepos []AdoptRepo, in
 		}
 		taskIDVal, metadataResolved := resolvedTaskIDs[c.ID]
 		wg.Go(func() {
-			at, err := m.adoptOne(ctx, AdoptRepo{}, nil, c, "", taskIDVal, metadataResolved, branchIDs, allLogs)
+			entry, err := m.importInstance(ctx, nil, c, "", taskIDVal, metadataResolved, branchIDs, allLogs)
 			if err != nil {
 				mu.Lock()
 				errs = append(errs, err)
 				mu.Unlock()
 			}
-			if at != nil {
+			if entry != nil {
 				mu.Lock()
-				adopted = append(adopted, *at)
+				entries = append(entries, entry)
 				mu.Unlock()
 			}
 		})
 	}
 	wg.Wait()
 
-	return adopted, errors.Join(errs...)
+	return entries, errors.Join(errs...)
 }
 
-func primaryBranchForAdoption(ri *AdoptRepo, c *runtime.Instance) (string, bool) {
+func primaryBranchForImport(checkout *repo.Checkout, c *runtime.Instance) (string, bool) {
 	if len(c.Repos) == 0 {
 		return "", false
 	}
 	r := c.Repos[0]
-	if !containerPathMatchesRepo(r.ContainerPath, ri) {
+	if !containerPathMatchesRepo(r.ContainerPath, checkout) {
 		return "", false
 	}
 	return r.Branch, true
 }
 
-func containerPathMatchesRepo(containerPath string, ri *AdoptRepo) bool {
-	relPath := filepath.ToSlash(ri.RelPath)
-	baseName := filepath.Base(ri.AbsPath)
+func containerPathMatchesRepo(containerPath string, checkout *repo.Checkout) bool {
+	relPath := filepath.ToSlash(checkout.RelPath)
+	baseName := filepath.Base(checkout.Dir)
 	return slices.Contains([]string{
 		"/home/user/src/" + relPath,
 		"~/src/" + relPath,
@@ -519,7 +512,7 @@ func containerPathMatchesRepo(containerPath string, ri *AdoptRepo) bool {
 	}, containerPath)
 }
 
-// needsTitleRegen reports whether an adopted task needs an LLM title regeneration.
+// needsTitleRegen reports whether an imported task needs an LLM title regeneration.
 func needsTitleRegen(t *task.Task, lt *task.LoadedTask, resolver task.NativeParserResolver) bool {
 	if lt == nil || lt.Title == "" {
 		return true
@@ -811,18 +804,13 @@ func (m *Manager) HistorySource(entry *Entry) (*task.LoadedTask, error) {
 	return loaded, nil
 }
 
-// resolveAdoptionTaskIDs selects instances for configured checkouts, reads
+// resolveImportTaskIDs selects instances for configured checkouts, reads
 // their task IDs, and rejects candidates with unavailable or duplicate IDs.
-func (m *Manager) resolveAdoptionTaskIDs(ctx context.Context, adoptRepos []AdoptRepo, instances []runtime.Instance) (resolved map[runtime.ID]string, rejected map[runtime.ID]bool, retErr error) {
+func (m *Manager) resolveImportTaskIDs(ctx context.Context, instances []runtime.Instance) (resolved map[runtime.ID]string, rejected map[runtime.ID]bool, retErr error) {
 	candidates := make(map[runtime.ID]bool, len(instances))
-	for i := range adoptRepos {
-		ri := &adoptRepos[i]
-		checkout, _ := m.Checkouts.Checkout(ri.RelPath)
-		if checkout == nil {
-			continue
-		}
+	for checkout := range m.Checkouts.Checkouts() {
 		for j := range instances {
-			if _, matched := primaryBranchForAdoption(ri, &instances[j]); matched {
+			if _, matched := primaryBranchForImport(checkout, &instances[j]); matched {
 				candidates[instances[j].ID] = true
 			}
 		}
@@ -1186,7 +1174,7 @@ func applyLoadedSessionMetadata(t *task.Task, lt *task.LoadedTask) {
 }
 
 // mergeLogAndRelayMessages joins durable log history with the relay tail read
-// during adoption.
+// during import.
 //
 // The durable log contains the full pre-restart history. The relay tail contains
 // output produced while caic was down, plus some overlapping history. Pi replay
@@ -1196,13 +1184,17 @@ func mergeLogAndRelayMessages(logMsgs, relayMsgs []agent.Message) []agent.Messag
 	return newLogRelayMessageMerger(logMsgs).merge(relayMsgs)
 }
 
-// adoptOne investigates a single runtime instance and registers it as a task.
-func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Checkout, c *runtime.Instance, branch, taskIDVal string, metadataResolved bool, branchIDs map[string][]string, allLogs []*task.LoadedTask) (*AdoptedTask, error) { //nolint:gocritic // massive function from existing code; refactor deferred
-	ctx, adoptTask := trace.NewTask(ctx, "adopt-instance")
-	defer adoptTask.End()
-	trace.Logf(ctx, "instance", "%s repo=%s branch=%s", c.ID, ri.RelPath, branch)
+// importInstance investigates a single runtime instance and registers it as a task.
+func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c *runtime.Instance, branch, taskIDVal string, metadataResolved bool, branchIDs map[string][]string, allLogs []*task.LoadedTask) (*Entry, error) {
+	ctx, importTask := trace.NewTask(ctx, "import-instance")
+	defer importTask.End()
+	relPath := ""
+	if checkout != nil {
+		relPath = checkout.RelPath
+	}
+	trace.Logf(ctx, "instance", "%s repo=%s branch=%s", c.ID, relPath, branch)
 
-	// Only adopt runtime instances that caic started. MetadataTaskID is set at
+	// Only import runtime instances that caic started. MetadataTaskID is set at
 	// creation and is the authoritative proof of ownership.
 	if !metadataResolved {
 		var err error
@@ -1212,7 +1204,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 		}
 	}
 	if taskIDVal == "" {
-		m.log.InfoContext(ctx, "instance", "msg", "skipping non-caic", "repo", ri.RelPath, "instance", c.ID, "br", branch)
+		m.log.InfoContext(ctx, "instance", "msg", "skipping non-caic", "repo", relPath, "instance", c.ID, "br", branch)
 		return nil, nil //nolint:nilnil // non-caic runtime instances are intentionally skipped
 	}
 	taskID, err := ksid.Parse(taskIDVal)
@@ -1222,7 +1214,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 
 	isExited := c.State == "exited"
 	if isExited {
-		m.log.InfoContext(ctx, "instance", "msg", "adopting exited instance as stopped", "instance", c.ID, "br", branch)
+		m.log.InfoContext(ctx, "instance", "msg", "importing exited instance as stopped", "instance", c.ID, "br", branch)
 	}
 
 	// Find the log file for this task.
@@ -1241,12 +1233,12 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 	}
 	lt := matchingLogs[0]
 	lp := lt.Primary()
-	if branch == "" && ri.RelPath == "" {
+	if branch == "" && relPath == "" {
 		if lp != nil {
 			return nil, fmt.Errorf("task log %s has repo %q but runtime has no repo", taskID, lp.Name)
 		}
-	} else if lp == nil || lp.Name != ri.RelPath || lp.Branch != branch {
-		return nil, fmt.Errorf("task log %s does not match runtime repo %q branch %q", taskID, ri.RelPath, branch)
+	} else if lp == nil || lp.Name != relPath || lp.Branch != branch {
+		return nil, fmt.Errorf("task log %s does not match runtime repo %q branch %q", taskID, relPath, branch)
 	}
 
 	prompt := branch
@@ -1274,7 +1266,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 	}
 	backend, ok := m.Backends[lt.Harness]
 	if !ok || backend == nil {
-		return nil, fmt.Errorf("unknown harness %q for adopted task %s", lt.Harness, taskID)
+		return nil, fmt.Errorf("unknown harness %q for imported task %s", lt.Harness, taskID)
 	}
 	lt.SetNativeParserResolver(m.resolveNativeParser)
 	// Check relay liveness.
@@ -1288,7 +1280,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 		var relayErr error
 		relayAlive, relayDiag, relayErr = m.relay.Status(ctx, relayTarget)
 		if relayErr != nil {
-			m.log.WarnContext(ctx, "relay", "msg", "check failed during adopt", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", relayErr, "diag", relayDiag)
+			m.log.WarnContext(ctx, "relay", "msg", "check failed during import", "repo", relPath, "br", branch, "instance", c.ID, "err", relayErr, "diag", relayDiag)
 		}
 		parser, parserErr := agent.NewLogRecordParser(lt.LogVersion, backend.NewWire().ParseMessage)
 		if parserErr != nil {
@@ -1298,7 +1290,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 		relayRecords, relaySize, relayErr = m.relay.ReadTail(readCtx, relayTarget, parser, 10<<20) // 10 MiB tail
 		readCancel()
 		if relayErr != nil {
-			m.log.WarnContext(ctx, "relay", "msg", "read output failed", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", relayErr)
+			m.log.WarnContext(ctx, "relay", "msg", "read output failed", "repo", relPath, "br", branch, "instance", c.ID, "err", relayErr)
 			relayAlive = false
 		} else {
 			relaySnapshotRead = true
@@ -1315,12 +1307,12 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 	}
 	if lt.SessionID == "" || lt.AgentVersion == "" {
 		if err := lt.LoadSessionMetadataWithResolver(m.resolveNativeParser); err != nil {
-			m.log.WarnContext(ctx, "load session metadata failed", "repo", ri.RelPath, "br", branch, "err", err)
+			m.log.WarnContext(ctx, "load session metadata failed", "repo", relPath, "br", branch, "err", err)
 		}
 	}
 
-	var adoptRepos []task.RepoMount
-	if ri.RelPath != "" {
+	var mounts []task.RepoMount
+	if relPath != "" {
 		primaryBaseBranch := ""
 		if lp != nil {
 			primaryBaseBranch = lp.BaseBranch
@@ -1331,9 +1323,9 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 			containerPath = c.Repos[0].ContainerPath
 		}
 		if containerPath == "" {
-			containerPath = m.containerPathForRepo(ri.RelPath)
+			containerPath = m.containerPathForRepo(relPath)
 		}
-		adoptRepos = []task.RepoMount{{Name: ri.RelPath, BaseBranch: primaryBaseBranch, GitRoot: ri.AbsPath, Branch: branch, ContainerPath: containerPath}}
+		mounts = []task.RepoMount{{Name: relPath, BaseBranch: primaryBaseBranch, GitRoot: checkout.Dir, Branch: branch, ContainerPath: containerPath}}
 		// Build lookup of instance repos by branch for ContainerPath.
 		runtimeRepoByBranch := make(map[string]string, len(c.Repos))
 		for _, cr := range c.Repos {
@@ -1348,7 +1340,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 			if containerPath == "" {
 				containerPath = m.containerPathForRepo(lm.Name)
 			}
-			adoptRepos = append(adoptRepos, task.RepoMount{Name: lm.Name, BaseBranch: lm.BaseBranch, Branch: lm.Branch, GitRoot: gitRoot, ContainerPath: containerPath})
+			mounts = append(mounts, task.RepoMount{Name: lm.Name, BaseBranch: lm.BaseBranch, Branch: lm.Branch, GitRoot: gitRoot, ContainerPath: containerPath})
 		}
 	}
 
@@ -1363,7 +1355,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 	if lt.ForkedFromTaskID != "" {
 		forkedFromTaskID, err = ksid.Parse(lt.ForkedFromTaskID)
 		if err != nil {
-			return nil, fmt.Errorf("adopt task %q: invalid forkedFromTaskID %q: %w", taskID.String(), lt.ForkedFromTaskID, err)
+			return nil, fmt.Errorf("import task %q: invalid forkedFromTaskID %q: %w", taskID.String(), lt.ForkedFromTaskID, err)
 		}
 	}
 	if c.ID.RuntimeName() != "" {
@@ -1373,7 +1365,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 	t := &task.Task{
 		ID:                taskID,
 		InitialPrompt:     agent.Prompt{Text: prompt},
-		Repos:             adoptRepos,
+		Repos:             mounts,
 		Harness:           lt.Harness,
 		Model:             lt.Model,
 		Effort:            lt.Effort,
@@ -1417,13 +1409,11 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 		t.SetRelayOffset(relaySize)
 	}
 
-	foundPRFromLog := false
 	switch {
 	case lt.ForgePR > 0:
 		t.SetPR(lt.ForgeOwner, lt.ForgeRepo, lt.ForgePR)
-		foundPRFromLog = true
-	case forgeIssue > 0 && ri.ForgeOwner != "":
-		t.SetPR(ri.ForgeOwner, ri.ForgeRepo, 0)
+	case forgeIssue > 0 && checkout != nil && checkout.Repository != nil:
+		t.SetPR(checkout.Repository.ForgeOwner, checkout.Repository.ForgeRepo, 0)
 	}
 
 	// Restore messages from both the local log and the relay tail. The local log
@@ -1432,7 +1422,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 	// to the bounded relay tail after a server restart. Fail closed: a malformed
 	// persistent history must not attach a live task with untrusted state.
 	if err := lt.LoadMessagesWithResolver(m.resolveNativeParser); err != nil {
-		return nil, fmt.Errorf("load messages for adopted task %s: %w", taskID, err)
+		return nil, fmt.Errorf("load messages for imported task %s: %w", taskID, err)
 	}
 	t.SetLogValidationSnapshot(lt.ValidatedSnapshot())
 	if len(relayRecords) > 0 {
@@ -1446,11 +1436,11 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 		}
 		t.RestoreMessages(msgs)
 		applyLoadedSessionMetadata(t, lt)
-		m.log.DebugContext(ctx, "relay", "msg", "restored from", "repo", ri.RelPath, "br", branch, "instance", c.ID, "alive", relayAlive, "msgs", len(msgs), "relayMsgs", len(relayRecords))
+		m.log.DebugContext(ctx, "relay", "msg", "restored from", "repo", relPath, "br", branch, "instance", c.ID, "alive", relayAlive, "msgs", len(msgs), "relayMsgs", len(relayRecords))
 	} else if len(lt.Msgs) > 0 {
 		t.RestoreMessages(lt.Msgs)
 		applyLoadedSessionMetadata(t, lt)
-		m.log.WarnContext(ctx, "relay", "msg", "restored from log", "repo", ri.RelPath, "br", branch, "instance", c.ID, "msgs", len(lt.Msgs))
+		m.log.WarnContext(ctx, "relay", "msg", "restored from log", "repo", relPath, "br", branch, "instance", c.ID, "msgs", len(lt.Msgs))
 	}
 	applyLoadedSessionMetadata(t, lt)
 	// Restore the persisted diff signal. RestoreMessages recomputes diffCreated
@@ -1472,7 +1462,6 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 	if t.GetPR() == 0 {
 		if lt.ForgePR > 0 {
 			t.SetPR(lt.ForgeOwner, lt.ForgeRepo, lt.ForgePR)
-			foundPRFromLog = true
 		}
 	}
 
@@ -1483,7 +1472,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 	if isExited {
 		if t.GetState() != task.StateCrashed {
 			if t.LastExitError() != "" {
-				t.RecordSessionCrash(ctx, errors.New("agent subprocess exited before adoption"))
+				t.RecordSessionCrash(ctx, errors.New("agent subprocess exited before import"))
 			} else {
 				t.SetState(task.StateStopped)
 			}
@@ -1493,16 +1482,16 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 		if relayLog != "" {
 			m.log.WarnContext(ctx, "relay", "msg", "log from dead relay", "instance", c.ID, "br", branch, "diag", relayDiag, "log", relayLog)
 		}
-		trace.Logf(ctx, "adopt", "%s: relay-dead", c.ID)
+		trace.Logf(ctx, "import", "%s: relay-dead", c.ID)
 		if t.LastExitError() != "" {
-			t.RecordSessionCrash(ctx, errors.New("relay exited before adoption"))
-			if err := m.Runtimes.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // adoption must outlive request
-				m.log.ErrorContext(ctx, "stop failed after adopted relay crash", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", err)
+			t.RecordSessionCrash(ctx, errors.New("relay exited before import"))
+			if err := m.Runtimes.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // import must outlive request
+				m.log.ErrorContext(ctx, "stop failed after imported relay crash", "repo", relPath, "br", branch, "instance", c.ID, "err", err)
 			}
 		} else if t.GetState() == task.StateRunning {
 			t.SetStateAt(task.StateWaiting, stateUpdatedAt)
 			m.log.WarnContext(ctx, "relay", "msg", "dead, marking waiting",
-				"repo", ri.RelPath, "br", branch, "instance", c.ID,
+				"repo", relPath, "br", branch, "instance", c.ID,
 				"sess", t.GetSessionID(), "msgs", len(t.Messages()))
 		}
 	}
@@ -1529,14 +1518,14 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 		}
 		entry.Finish(result)
 		if err := m.Logs.WriteTaskResultTrailer(t, result); err != nil {
-			m.log.WarnContext(ctx, "write adopted result trailer failed", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", err)
+			m.log.WarnContext(ctx, "write imported result trailer failed", "repo", relPath, "br", branch, "instance", c.ID, "err", err)
 		}
 	}
 
-	// Register entry, replacing stale log entries.
+	// Register the entry, replacing stale log entries for the same branch.
 	m.mu.Lock()
-	if ri.RelPath != "" || branch != "" {
-		for _, oldID := range branchIDs[ri.RelPath+"\x00"+branch] {
+	if relPath != "" || branch != "" {
+		for _, oldID := range branchIDs[relPath+"\x00"+branch] {
 			delete(m.tasks, oldID)
 		}
 	}
@@ -1545,8 +1534,8 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 	m.mu.Unlock()
 	m.watchRateLimitEvents(t)
 
-	m.log.InfoContext(ctx, "instance", "msg", "adopted",
-		"repo", ri.RelPath, "instance", c.ID, "br", branch,
+	m.log.InfoContext(ctx, "instance", "msg", "imported",
+		"repo", relPath, "instance", c.ID, "br", branch,
 		"relay", relayAlive, "state", t.GetState(), "sess", t.GetSessionID())
 
 	// Only regenerate title if a new turn was completed.
@@ -1554,55 +1543,24 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 		entry.Lifecycle.generateTitle()
 	}
 
-	// Auto-reconnect immediately so adopted live tasks can accept input as
+	// Auto-reconnect immediately so imported live tasks can accept input as
 	// soon as startup returns. EnsureSession may still replace an already-exited
 	// attach in the background, but the attach itself must not race the first
 	// user reply after restart.
 	if t.GetState() != task.StateStopped && relayAlive {
-		m.log.DebugContext(ctx, "instance", "msg", "auto-reconnect starting", "repo", ri.RelPath, "br", branch, "instance", c.ID)
-		tlog := m.log.With("repo", ri.RelPath, "br", branch, "instance", t.RuntimeInstanceID())
-		lifecycle := entry.Lifecycle
-		h, err := lifecycle.agentRuntime.Reconnect(lifecycle.ctx, t, true) //nolint:contextcheck // adopted session must survive startup but stop with its lifecycle
-		if err != nil {
-			tlog.Warn("auto-reconnect failed", "err", err)
-			m.NotifyTaskChange()
-			return &AdoptedTask{Entry: entry, Task: t, RelPath: ri.RelPath, ForgeKind: ri.ForgeKind, ForgeOwner: ri.ForgeOwner, ForgeRepo: ri.ForgeRepo, Branch: branch, FoundPRFromLog: foundPRFromLog}, nil
-		}
-		lifecycle.wg.Go(func() { //nolint:contextcheck // adopted session watcher uses the Manager lifetime.
-			h, err = lifecycle.agentRuntime.EnsureSession(lifecycle.ctx, tlog, t, h)
-			if err != nil {
-				tlog.Warn("ensure session failed", "err", err)
-				t.SetState(task.StateWaiting)
-				m.NotifyTaskChange()
-				return
-			}
-			tlog.Debug("auto-reconnect succeeded")
-			t.SetVNCPort(m.Runtimes.VNCPort(lifecycle.ctx, t.RuntimeInstanceID()))
-			refreshAdoptedDiffStat(lifecycle.ctx, m.log, checkout, m.Runtimes, t)
-			m.NotifyTaskChange()
-			lifecycle.watchSession(h)
-		})
+		entry.Lifecycle.reconnectImportedSession() //nolint:contextcheck // imported watcher uses the Manager lifetime.
 	} else if !relayAlive && t.GetState() != task.StateStopped && t.GetState() != task.StateCrashed && t.GetState() != task.StateFailed {
 		m.log.ErrorContext(ctx, "relay dead, stopping instance",
-			"repo", ri.RelPath, "br", branch, "instance", c.ID,
+			"repo", relPath, "br", branch, "instance", c.ID,
 			"state", t.GetState())
 		t.SetState(task.StateStopping)
-		if err := m.Runtimes.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // adoption must outlive request
-			m.log.ErrorContext(ctx, "stop failed", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", err)
+		if err := m.Runtimes.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // import must outlive request
+			m.log.ErrorContext(ctx, "stop failed", "repo", relPath, "br", branch, "instance", c.ID, "err", err)
 		}
 		t.SetState(task.StateStopped)
 	}
 
-	return &AdoptedTask{
-		Entry:          entry,
-		Task:           t,
-		RelPath:        ri.RelPath,
-		ForgeKind:      ri.ForgeKind,
-		ForgeOwner:     ri.ForgeOwner,
-		ForgeRepo:      ri.ForgeRepo,
-		Branch:         branch,
-		FoundPRFromLog: foundPRFromLog,
-	}, nil
+	return entry, nil
 }
 
 func (m *Manager) runtimeTaskID(ctx context.Context, id runtime.ID) (string, error) {
@@ -1614,17 +1572,6 @@ func (m *Manager) runtimeTaskID(ctx context.Context, id runtime.ID) (string, err
 		return value, nil
 	}
 	return m.Runtimes.Metadata(ctx, id, runtime.MetadataLegacyTaskID)
-}
-
-func refreshAdoptedDiffStat(ctx context.Context, log *slog.Logger, checkout *repo.Checkout, runtimes *runtime.Router, t *task.Task) {
-	switch t.GetState() {
-	case task.StateWaiting, task.StateAsking, task.StateHasPlan:
-	default:
-		return
-	}
-	if ds := checkout.BranchDiffStat(ctx, log, runtimes, t); len(ds) > 0 {
-		t.SetLiveDiffStat(ds)
-	}
 }
 
 // resolveNativeParser constructs one fresh native parser for a validated task
@@ -1649,7 +1596,7 @@ func (m *Manager) loadTaskMessagesOnDemand(entry *Entry) {
 	})
 }
 
-// logRelayMessageMerger owns the adoption-time overlap rules for disk-log
+// logRelayMessageMerger owns the import-time overlap rules for disk-log
 // messages and relay-tail messages.
 type logRelayMessageMerger struct {
 	logMsgs    []agent.Message
@@ -1747,7 +1694,7 @@ func (m *logRelayMessageMerger) messagesEquivalent(a, b agent.Message) bool {
 		bb := *bv
 		// Pi derives duration and turn count from parser/session-local state. The
 		// same completed turn can therefore have different values when parsed from
-		// the durable log and from the relay tail during restart adoption.
+		// the durable log and from the relay tail during restart import.
 		aa.DurationMs = 0
 		bb.DurationMs = 0
 		aa.DurationAPIMs = 0

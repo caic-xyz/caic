@@ -174,7 +174,7 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		}
 		if cw := parseModelContextWindow(&resp); cw > 0 {
 			wire.modelCtxWindow = cw
-			// Persist to relay output so replay/adoption restores the
+			// Persist to relay output so replay/import restores the
 			// context window (otherwise it falls back to the harness
 			// hardcoded default of 200k).
 			if err := opts.Log.AppendMessage(&agent.ModelInfoMessage{
@@ -437,7 +437,7 @@ func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	}
 
 	// Restore model context window from synthetic caic_model_info line
-	// written during Start. This ensures replay/adoption correctly
+	// written during Start. This ensures replay/import correctly
 	// reports the model's real context window instead of falling back
 	// to the harness hardcoded default of 200k.
 	if typ == "caic_model_info" {

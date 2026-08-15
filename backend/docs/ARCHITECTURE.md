@@ -204,7 +204,6 @@ graph TD
   pkg_internal_task_taskmgr -.-> pkg_internal_agent_agenttest
   pkg_internal_task_taskmgr -.-> pkg_internal_agent_claudecode
   pkg_internal_task_taskmgr -.-> pkg_internal_agent_codex
-  pkg_internal_task_taskmgr -.-> pkg_internal_logtest
   pkg_internal_task_taskmgr -.-> pkg_internal_runtime_mdruntime
   pkg_internal_task_taskmgr -.-> pkg_internal_runtime_runtimetest
   pkg_internal_usage --> pkg_internal_agent
@@ -536,7 +535,6 @@ graph TD
   pkg_internal_task_taskmgr -.-> pkg_internal_agent_agenttest
   pkg_internal_task_taskmgr -.-> pkg_internal_agent_claudecode
   pkg_internal_task_taskmgr -.-> pkg_internal_agent_codex
-  pkg_internal_task_taskmgr -.-> pkg_internal_logtest
   pkg_internal_task_taskmgr -.-> pkg_internal_runtime_mdruntime
   pkg_internal_task_taskmgr -.-> pkg_internal_runtime_runtimetest
   pkg_internal_usage --> pkg_internal_agent
@@ -589,7 +587,7 @@ graph TD
 | `internal/server/ipgeo` | None | None |
 | `internal/smoketest` | `internal/agent`, `internal/agent/harness`, `internal/forge`, `internal/runtime`, `internal/task`, `internal/usage` | None |
 | `internal/task` | `internal/agent`, `internal/agent/harness`, `internal/forge`, `internal/jsonutil`, `internal/repo`, `internal/runtime` | `internal/agent/agenttest`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/logtest`, `internal/runtime/runtimetest` |
-| `internal/task/taskmgr` | `internal/agent`, `internal/agent/harness`, `internal/repo`, `internal/runtime`, `internal/task`, `internal/usage` | `internal/agent/agenttest`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/logtest`, `internal/runtime/mdruntime`, `internal/runtime/runtimetest` |
+| `internal/task/taskmgr` | `internal/agent`, `internal/agent/harness`, `internal/repo`, `internal/runtime`, `internal/task`, `internal/usage` | `internal/agent/agenttest`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/runtime/mdruntime`, `internal/runtime/runtimetest` |
 | `internal/usage` | `internal/agent` | None |
 <!-- END GENERATED PACKAGE DEPENDENCIES -->
 

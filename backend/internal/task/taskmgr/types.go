@@ -7,7 +7,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
-	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
 // CreateParams bundles the HTTP path's task-creation parameters.
@@ -81,27 +80,6 @@ type ForkParams struct {
 type ForkRepo struct {
 	Name       string
 	BaseBranch string
-}
-
-// AdoptRepo describes a repo known to the manager for runtime instance adoption.
-type AdoptRepo struct {
-	RelPath    string
-	AbsPath    string
-	ForgeKind  string
-	ForgeOwner string
-	ForgeRepo  string
-}
-
-// AdoptedTask holds the result of adopting a single runtime instance.
-type AdoptedTask struct {
-	Entry          *Entry
-	Task           *task.Task
-	RelPath        string
-	ForgeKind      string
-	ForgeOwner     string
-	ForgeRepo      string
-	Branch         string
-	FoundPRFromLog bool
 }
 
 // BotPendingTask is returned by ListPendingBotTasks.

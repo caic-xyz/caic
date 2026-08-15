@@ -167,7 +167,7 @@ func (*LogStore) WriteResultTrailer(log agent.LogSink, title string, res *Result
 }
 
 // WriteTaskResultTrailer reopens a task log, appends its terminal result, and
-// closes the scoped log owner. It is for terminal and adoption paths without
+// closes the scoped log owner. It is for terminal and import paths without
 // an active session-owned log.
 func (s *LogStore) WriteTaskResultTrailer(t *Task, res *Result) error {
 	log, err := s.Reopen(t)
@@ -208,7 +208,7 @@ func (*LogStore) WriteContextCleared(log agent.LogSink) error {
 }
 
 // reopenPath uses the task's previously validated path when available. Logs
-// loaded during adoption may not use the current filename convention, so the
+// loaded during import may not use the current filename convention, so the
 // validated path is the authoritative identity for a scoped terminal append.
 func (s *LogStore) reopenPath(t *Task) (string, error) {
 	if path := t.LogPath(); path != "" {

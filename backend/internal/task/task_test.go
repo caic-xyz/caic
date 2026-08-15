@@ -1144,7 +1144,7 @@ func TestTask(t *testing.T) {
 		// The ResultMessage.DiffStat (host-side branch diff) is set
 		// in-memory by startMessageDispatch and NOT persisted to the
 		// relay output, so RestoreMessages only sees the empty relay
-		// diff. Callers (adoptOne) must compute the host-side diff stat
+		// diff. Runtime import must compute the host-side diff stat
 		// separately after RestoreMessages.
 		t.Run("EmptyRelayDiffAfterCommit", func(t *testing.T) {
 			t.Parallel()

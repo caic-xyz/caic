@@ -394,6 +394,43 @@ func (r *Lifecycle) reconnectForInput() error {
 	return nil
 }
 
+// reconnectImportedSession restores a session for a live runtime imported at startup.
+func (r *Lifecycle) reconnectImportedSession() {
+	t := r.entry.Task()
+	primary := t.Primary()
+	repoName := ""
+	branch := ""
+	if primary != nil {
+		repoName = primary.Name
+		branch = primary.Branch
+	}
+	tlog := r.manager.log.With("repo", repoName, "br", branch, "instance", t.RuntimeInstanceID())
+	h, err := r.agentRuntime.Reconnect(r.ctx, t, true)
+	if err != nil {
+		tlog.Warn("auto-reconnect failed", "err", err)
+		r.manager.NotifyTaskChange()
+		return
+	}
+	r.wg.Go(func() {
+		h, err = r.agentRuntime.EnsureSession(r.ctx, tlog, t, h)
+		if err != nil {
+			tlog.Warn("ensure session failed", "err", err)
+			t.SetState(task.StateWaiting)
+			r.manager.NotifyTaskChange()
+			return
+		}
+		tlog.Debug("auto-reconnect succeeded")
+		t.SetVNCPort(r.manager.Runtimes.VNCPort(r.ctx, t.RuntimeInstanceID()))
+		if checkout := r.agentRuntime.Checkout; checkout != nil && (t.GetState() == task.StateWaiting || t.GetState() == task.StateAsking || t.GetState() == task.StateHasPlan) {
+			if ds := checkout.BranchDiffStat(r.ctx, r.manager.log, r.manager.Runtimes, t); len(ds) > 0 {
+				t.SetLiveDiffStat(ds)
+			}
+		}
+		r.manager.NotifyTaskChange()
+		r.watchSession(h)
+	})
+}
+
 // watchSession monitors the active session. A clean exit leaves the task
 // waiting; an error records a terminal result and stops the runtime.
 //

@@ -1709,7 +1709,7 @@ func LoadLogs(logDir string) ([]*LoadedTask, error) {
 
 // LoadLogsForTaskIDs loads metadata for logs whose parsed filename task ID
 // matches one of taskIDs. It avoids parsing unrelated purged task logs during
-// startup adoption of live runtime instances.
+// startup import of live runtime instances.
 func LoadLogsForTaskIDs(logDir string, taskIDs []string) ([]*LoadedTask, error) {
 	ids := make(map[string]struct{}, len(taskIDs))
 	for _, id := range taskIDs {
