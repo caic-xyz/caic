@@ -48,6 +48,10 @@ func (w *failAfterSSEWriter) Write(data []byte) (int, error) {
 	return n, err
 }
 
+func newReplayEntry(t *testing.T, lt *task.LoadedTask) *taskmgr.Entry {
+	return newTestRouter(t, nil).taskMgr.NewEntry(&task.Task{}, lt)
+}
+
 func TestReplayCache(t *testing.T) {
 	t.Parallel()
 
@@ -70,7 +74,7 @@ func TestReplayCache(t *testing.T) {
 			t.Fatal(err)
 		}
 		w := httptest.NewRecorder()
-		entry := taskmgr.NewEntry(&task.Task{}, logs[0])
+		entry := newReplayEntry(t, logs[0])
 		(&taskHandlers{replay: newTestReplayPublisher(t)}).streamHistoryFromDisk(t.Context(), w, w, entry)
 		if body := w.Body.String(); body != "event: error\ndata: {\"message\":\"task history is unavailable\"}\n\n" {
 			t.Fatalf("terminal unservable replay body = %q, want explicit error", body)
@@ -98,7 +102,7 @@ func TestReplayCache(t *testing.T) {
 		}
 		out := &failAfterSSEWriter{remaining: 1}
 		idx := 0
-		err = (&taskHandlers{replay: newTestReplayPublisher(t)}).streamReplayStore(t.Context(), out, httptest.NewRecorder(), taskmgr.NewEntry(&task.Task{}, logs[0]), &idx)
+		err = (&taskHandlers{replay: newTestReplayPublisher(t)}).streamReplayStore(t.Context(), out, httptest.NewRecorder(), newReplayEntry(t, logs[0]), &idx)
 		if err == nil || !strings.Contains(err.Error(), "after history publication") || out.Len() != 1 {
 			t.Fatalf("stream replay = (%v, %q), want one partial write without regeneration", err, out.String())
 		}
@@ -126,7 +130,7 @@ func TestReplayCache(t *testing.T) {
 		cancel()
 		out := httptest.NewRecorder()
 		idx := 0
-		err = (&taskHandlers{replay: newTestReplayPublisher(t)}).streamReplayStore(ctx, out, out, taskmgr.NewEntry(&task.Task{}, logs[0]), &idx)
+		err = (&taskHandlers{replay: newTestReplayPublisher(t)}).streamReplayStore(ctx, out, out, newReplayEntry(t, logs[0]), &idx)
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("stream replay error = %v, want context cancellation", err)
 		}

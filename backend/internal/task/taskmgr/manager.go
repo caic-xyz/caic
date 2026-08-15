@@ -1,15 +1,14 @@
-// Package taskmgr orchestrates task lifecycle management: creation, execution,
-// session watching, stats streaming, and instance adoption.
+// Package taskmgr owns task registry state, creation, stats streaming, and
+// runtime-instance adoption.
 //
 // It sits between the HTTP adapter (internal/server) and the domain layer
-// (internal/task): task.Task / repo.Checkout are domain types, while
-// taskmgr.Manager is the orchestration layer built on top of them.
+// (internal/task): task.Task / repo.Checkout are domain types, Manager owns
+// their registry state, and Lifecycle performs operations for one task.
 //
 // Two contexts coexist here. Methods accept a request-scoped ctx that is
 // honored for synchronous work (state checks, logging). Background goroutines
-// that must outlive any single request (session watchers, stats poller, fire-
-// and-forget title generation) use serverCtx instead — it tracks the lifetime
-// of the Manager itself.
+// that must outlive any single request use serverCtx instead — it tracks the
+// lifetime of the Manager itself.
 package taskmgr
 
 import (
@@ -113,6 +112,8 @@ type Manager struct {
 	quotaWatchers    sync.WaitGroup
 	quotaWatchClosed bool
 
+	background sync.WaitGroup
+
 	// Guarded by mu.
 	mu      sync.Mutex
 	tasks   map[string]*Entry
@@ -160,22 +161,55 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 	return m, nil
 }
 
-// Close stops quota-event watchers and waits for their live task subscriptions
-// to close. It currently always returns nil.
+// Close stops background work and waits for task lifecycles and all Manager
+// watchers to finish. It currently always returns nil.
 func (m *Manager) Close() error {
 	m.quotaWatchMu.Lock()
 	m.quotaWatchClosed = true
 	m.cancelServerCtx()
 	m.quotaWatchMu.Unlock()
+	m.Range(func(_ string, e *Entry) bool {
+		if e.Lifecycle != nil {
+			_ = e.Lifecycle.Close()
+		}
+		return true
+	})
 	m.quotaWatchers.Wait()
+	m.background.Wait()
 	return nil
 }
 
 // Start launches background goroutines: instance event watching and stats streaming.
 // Must be called once after New, after checkouts have been registered.
 func (m *Manager) Start() {
-	go m.watchRuntimeEvents(m.serverCtx)
-	go m.watchStats(m.serverCtx)
+	m.background.Go(func() { m.watchRuntimeEvents(m.serverCtx) })
+	m.background.Go(func() { m.watchStats(m.serverCtx) })
+}
+
+// NewEntry creates an unregistered entry with its immutable lifecycle.
+func (m *Manager) NewEntry(t *task.Task, lt *task.LoadedTask) *Entry {
+	e := &Entry{
+		task:       t,
+		loadedTask: lt,
+		done:       make(chan struct{}),
+	}
+	e.Lifecycle = &Lifecycle{
+		manager: m,
+		entry:   e,
+		ctx:     context.WithoutCancel(m.serverCtx),
+		agentRuntime: task.AgentRuntime{
+			Backends:            m.Backends,
+			Logs:                m.Logs,
+			Runtimes:            m.Runtimes,
+			Log:                 m.log,
+			NotifyTaskChange:    m.NotifyTaskChange,
+			Checkout:            m.resolveCheckout(t),
+			RuntimeMetadata:     m.runtimeMetadata,
+			RuntimeStartTimeout: m.runtimeStartTimeout,
+			OnTerminalLogClosed: m.publishTerminalReplayForTask,
+		},
+	}
+	return e
 }
 
 // Insert registers a pre-built entry. Production task creation goes through
@@ -231,15 +265,11 @@ func (m *Manager) Changed() <-chan struct{} {
 // Create handles the HTTP task creation path.
 func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { //nolint:gocritic // CreateParams is a request-shaped value bag
 	// Resolve primary checkout.
-	var primaryCheckout *repo.Checkout
 	if len(p.Repos) > 0 {
-		r, ok := m.Checkouts.Checkout(p.Repos[0].Name)
+		_, ok := m.Checkouts.Checkout(p.Repos[0].Name)
 		if !ok {
 			return "", badRequestf("unknown repo: %s", p.Repos[0].Name)
 		}
-		primaryCheckout = r
-	} else {
-		primaryCheckout = nil
 	}
 
 	// Validate that every extra repo has a registered checkout (branches are
@@ -305,16 +335,16 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 		t.SetPR(p.ForgeOwner, p.ForgeRepo, 0)
 	}
 	t.SetTitle(p.Prompt.Text)
-	go t.GenerateTitle(m.serverCtx) //nolint:contextcheck // fire-and-forget; must outlive request
-	entry := NewEntry(t, nil)
+	entry := m.NewEntry(t, nil)
 
 	m.insertEntry(t.ID.String(), entry)
+	entry.Lifecycle.generateTitle()
 
-	// Run in background using server context.
-	go func() {
-		// The primary's branch is created by the runner concurrently with instance
+	// Run setup under the lifecycle context.
+	entry.Lifecycle.wg.Go(func() {
+		// The primary's branch is created by the agent runtime concurrently with instance
 		// launch, so it only needs a name reserved; extras are created here.
-		if err := m.allocateBranches(m.serverCtx, t, mounts, 1); err != nil {
+		if err := m.allocateBranches(entry.Lifecycle.ctx, t, mounts, 1); err != nil {
 			entry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "allocate branch")})
 			m.NotifyTaskChange()
 			return
@@ -322,335 +352,10 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 
 		ghToken := p.ResolvedGitHubToken
 
-		h, err := m.runner(primaryCheckout).Start(m.serverCtx, t, ghToken)
-		if err != nil {
-			entry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "start task")})
-			m.publishTerminalReplay(m.serverCtx, entry)
-			m.NotifyTaskChange()
+		if err := entry.Lifecycle.Start(entry.Lifecycle.ctx, ghToken); err != nil {
 			return
 		}
-		if t.Sudo {
-			t.SetSudoPassword(m.SudoPassword(m.serverCtx, t))
-		}
-		m.NotifyTaskChange()
-		m.watchSession(entry, primaryCheckout, h)
-	}()
-	return t.ID.String(), nil
-}
-
-// Purge transitions a task to purging.
-func (m *Manager) Purge(ctx context.Context, entry *Entry) error {
-	state, changed := entry.task.SetStateIfAny(task.StatePurging,
-		task.StateWaiting, task.StateAsking, task.StateHasPlan,
-		task.StateRunning, task.StateStopping, task.StateStopped, task.StateCrashed)
-	if !changed {
-		return conflict("task is not running, waiting, stopped, or crashed")
-	}
-	m.NotifyTaskChange()
-	checkout := m.resolveCheckout(entry.task)
-	m.log.InfoContext(ctx, "purge requested", "task", entry.task.ID, "instance", entry.task.RuntimeInstanceID(), "state", state)
-	go func() {
-		m.cleanupTask(entry, checkout, task.StatePurged)
-		m.log.InfoContext(m.serverCtx, "purge completed", "task", entry.task.ID, "final_state", entry.task.GetState())
-	}()
-	return nil
-}
-
-// Stop transitions a task to stopping.
-func (m *Manager) Stop(ctx context.Context, entry *Entry) error {
-	state, changed := entry.task.SetStateIfAny(task.StateStopping,
-		task.StateWaiting, task.StateAsking, task.StateHasPlan, task.StateRunning)
-	if !changed {
-		return conflict("task is not running or waiting")
-	}
-	m.NotifyTaskChange()
-	checkout := m.resolveCheckout(entry.task)
-	m.log.InfoContext(ctx, "stop requested", "task", entry.task.ID, "instance", entry.task.RuntimeInstanceID(), "state", state)
-	go func() {
-		m.runner(checkout).StopTask(m.serverCtx, entry.task)
-		m.log.InfoContext(m.serverCtx, "stop completed", "task", entry.task.ID, "instance", entry.task.RuntimeInstanceID(), "final_state", entry.task.GetState())
-		m.NotifyTaskChange()
-	}()
-	return nil
-}
-
-// Revive restarts a stopped or crashed task.
-func (m *Manager) Revive(ctx context.Context, entry *Entry) error {
-	if _, changed := entry.task.SetStateIfAny(task.StateProvisioning, task.StateStopped, task.StateCrashed); !changed {
-		return conflict("task is not stopped or crashed")
-	}
-	checkout := m.resolveCheckout(entry.task)
-	entry.Reset()
-	m.NotifyTaskChange()
-	go func() { //nolint:contextcheck // background goroutine roots its own trace task on serverCtx
-		ctx, tk := trace.NewTask(m.serverCtx, "task.revive:"+entry.task.ID.String())
-		defer tk.End()
-		h, err := m.runner(checkout).ReviveTask(ctx, entry.task)
-		if err != nil {
-			m.log.WarnContext(ctx, "revive failed", "task", entry.task.ID, "err", err)
-			entry.task.SetState(task.StateFailed)
-			entry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "revive task")})
-			m.NotifyTaskChange()
-			return
-		}
-		m.NotifyTaskChange()
-		m.watchSession(entry, checkout, h)
-	}()
-	return nil
-}
-
-// Restart restarts the agent session with a new prompt.
-func (m *Manager) Restart(ctx context.Context, entry *Entry, prompt agent.Prompt) error {
-	t := entry.task
-	prevState, changed := t.SetStateIfAny(task.StateStarting, task.StateWaiting, task.StateAsking, task.StateHasPlan)
-	if !changed {
-		return conflict("task is not waiting or asking")
-	}
-	if prompt.Text == "" {
-		// No prompt provided: fall back to the plan file from the instance.
-		target := t.RuntimeConnectionTarget()
-		sshHost := target.SSHHost
-		var err error
-		if sshHost != "" {
-			var plan string
-			plan, err = agent.ReadPlan(m.serverCtx, sshHost, t.GetPlanFile()) //nolint:contextcheck // intentionally using server context
-			prompt.Text = plan
-		} else {
-			err = errors.New("agent connection target missing SSH host")
-		}
-		if err != nil {
-			t.SetStateIf(task.StateStarting, prevState)
-			return &Error{Kind: KindBadRequest, Msg: "no prompt provided and failed to read plan from instance", Err: err}
-		}
-	}
-	checkout := m.resolveCheckout(t)
-	h, err := m.runner(checkout).RestartSession(m.serverCtx, t, prompt) //nolint:contextcheck // intentionally using server context
-	if err != nil {
-		return internalErr(err, "restart session")
-	}
-	m.watchSession(entry, checkout, h)
-	m.NotifyTaskChange()
-	return nil
-}
-
-// ClearContext clears the agent session context.
-func (m *Manager) ClearContext(ctx context.Context, entry *Entry) error {
-	t := entry.task
-	if _, changed := t.SetStateIfAny(task.StateStarting, task.StateWaiting, task.StateAsking, task.StateHasPlan); !changed {
-		return conflict("task is not waiting or asking")
-	}
-	checkout := m.resolveCheckout(t)
-	if checkout == nil {
-		return internalErr(errors.New("task checkout is unavailable"), "clear context")
-	}
-	h, err := m.runner(checkout).ClearContextSession(m.serverCtx, t) //nolint:contextcheck // intentionally using server context
-	if err != nil {
-		return internalErr(err, "clear context")
-	}
-	m.watchSession(entry, checkout, h)
-	m.NotifyTaskChange()
-	return nil
-}
-
-// Compact compacts the agent session context.
-func (m *Manager) Compact(ctx context.Context, entry *Entry, instructions string) error {
-	if err := entry.task.SendCompact(ctx, instructions); err != nil {
-		// SendCompact fails when there's no active session to compact; the
-		// HTTP layer surfaces this as a 409 conflict.
-		return conflictErr(err, "no active session to compact")
-	}
-	return nil
-}
-
-// SendInput forwards user input to the agent session.
-func (m *Manager) SendInput(ctx context.Context, entry *Entry, prompt agent.Prompt) error {
-	// Validate image support.
-	if len(prompt.Images) > 0 {
-		if b := m.Backends[entry.task.Harness]; b != nil && !b.SupportsImages() {
-			return badRequestf("%s does not support images", string(entry.task.Harness))
-		}
-	}
-	if err := entry.task.SendInput(ctx, prompt); err != nil {
-		if !errors.Is(err, task.ErrNoActiveSession) {
-			return conflictErr(err, "send input")
-		}
-		var failedReconnect error
-		if reconnectErr := m.reconnectForInput(entry); reconnectErr == nil {
-			if retryErr := entry.task.SendInput(ctx, prompt); retryErr == nil {
-				return nil
-			} else if !errors.Is(retryErr, task.ErrNoActiveSession) {
-				return conflictErr(retryErr, "send input")
-			} else {
-				err = retryErr
-			}
-		} else {
-			failedReconnect = reconnectErr
-			t := entry.task
-			m.log.WarnContext(ctx, "reconnect before send input failed",
-				"task", t.ID,
-				"instance", t.RuntimeInstanceID(),
-				"state", t.GetState(),
-				"err", reconnectErr,
-			)
-		}
-		t := entry.task
-		taskState := t.GetState()
-		m.log.WarnContext(ctx, "no active session",
-			"task", t.ID,
-			"instance", t.RuntimeInstanceID(),
-			"state", taskState,
-		)
-		// Wrap so the handler can detect the no-session condition via
-		// errors.Is while preserving the task diagnostic and any reconnect
-		// failure.
-		return &NoSessionError{Err: err, ReconnectErr: failedReconnect}
-	}
-	return nil
-}
-
-// Fork creates a new task from a source task's retained instance.
-func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (string, error) { //nolint:gocritic // ForkParams is a request-shaped value bag
-	source := sourceEntry.task
-	state := source.GetState()
-	switch state {
-	case task.StateRunning, task.StateWaiting, task.StateAsking, task.StateHasPlan, task.StateStopped, task.StateCrashed:
-	default:
-		return "", conflict("task must be active, stopped, or crashed to fork")
-	}
-	if source.RuntimeInstanceID() == "" {
-		return "", conflict("task has no instance")
-	}
-	sourceRepos := source.ReposSnapshot()
-	if len(sourceRepos) == 0 {
-		return "", badRequestf("cannot fork a no-repo task")
-	}
-
-	checkout := m.resolveCheckout(source)
-
-	// Resolve harness and model.
-	forkHarness := source.Harness
-	forkModel := source.Model
-	forkEffort := source.Effort
-	if p.Harness != "" {
-		forkHarness = p.Harness
-		backend, ok := m.Backends[forkHarness]
-		if !ok {
-			return "", badRequestf("unknown harness: %s", string(p.Harness))
-		}
-		if p.Model != "" && !slices.Contains(backend.ModelInventory().IDs(), p.Model) {
-			return "", badRequestf("unsupported model for %s: %s", string(p.Harness), p.Model)
-		}
-		forkModel = p.Model
-		forkEffort = p.Effort
-	} else if p.Model != "" {
-		backend, ok := m.Backends[forkHarness]
-		if !ok {
-			return "", badRequestf("unknown harness: %s", string(source.Harness))
-		}
-		if !slices.Contains(backend.ModelInventory().IDs(), p.Model) {
-			return "", badRequestf("unsupported model for %s: %s", string(source.Harness), p.Model)
-		}
-		forkModel = p.Model
-		forkEffort = p.Effort
-	}
-
-	// Build mounts.
-	sourceRepoNames := make(map[string]struct{}, len(sourceRepos))
-	for _, r := range sourceRepos {
-		sourceRepoNames[r.Name] = struct{}{}
-	}
-	var extraMounts []task.RepoMount
-	for _, rs := range p.ExtraRepos {
-		if _, overlap := sourceRepoNames[rs.Name]; overlap {
-			return "", badRequestf("extraRepos contains repo already in source task: %s", rs.Name)
-		}
-		er, ok := m.Checkouts.Checkout(rs.Name)
-		if !ok {
-			return "", badRequestf("unknown extra repo: %s", rs.Name)
-		}
-		extraMounts = append(extraMounts, task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: er.Dir, ContainerPath: m.containerPathForRepo(rs.Name)})
-	}
-
-	mounts := make([]task.RepoMount, len(sourceRepos), len(sourceRepos)+len(extraMounts))
-	copy(mounts, sourceRepos)
-	mounts = append(mounts, extraMounts...)
-
-	t := &task.Task{
-		ID:                ksid.NewID(),
-		InitialPrompt:     p.Prompt,
-		Repos:             mounts,
-		Harness:           forkHarness,
-		Model:             forkModel,
-		Effort:            forkEffort,
-		RuntimeName:       source.RuntimeName,
-		BaseImage:         source.BaseImage,
-		ContainerPlatform: source.ContainerPlatform,
-		MaxCPUs:           source.MaxCPUs,
-		CacheMounts:       slices.Clone(source.CacheMounts),
-		Mounts:            slices.Clone(source.Mounts),
-		GitHubToken:       p.GitHubToken,
-		Tailscale:         p.Tailscale,
-		USB:               p.USB,
-		Display:           p.Display,
-		Sudo:              p.Sudo,
-		StartedAt:         time.Now().UTC(),
-		OwnerID:           p.OwnerID,
-		ForkedFromTaskID:  source.ID,
-		Provider:          m.provider,
-	}
-	t.SetTitle(p.Prompt.Text)
-	go t.GenerateTitle(m.serverCtx) //nolint:contextcheck // fire-and-forget; must outlive request
-	forkEntry := NewEntry(t, nil)
-
-	m.insertEntry(t.ID.String(), forkEntry)
-
-	go func() { //nolint:contextcheck // background goroutine roots its own trace task on serverCtx
-		ctx, tk := trace.NewTask(m.serverCtx, "task.fork:"+source.ID.String()+"->"+t.ID.String())
-		defer tk.End()
-
-		if err := m.allocateBranches(ctx, t, mounts, len(sourceRepos)); err != nil {
-			forkEntry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "allocate fork branch")})
-			m.NotifyTaskChange()
-			return
-		}
-
-		ghToken := p.ResolvedGitHubToken
-
-		var extraEnv []string
-		if ghToken != "" {
-			extraEnv = append(extraEnv, "GITHUB_TOKEN="+ghToken)
-		}
-
-		metadata := maps.Clone(m.runtimeMetadata)
-		if metadata == nil {
-			metadata = runtime.Metadata{}
-		}
-		maps.Copy(metadata, task.MakeMetadata(t))
-		forkOpts := &runtime.ForkOptions{
-			RuntimeName: source.RuntimeName,
-			Display:     p.Display,
-			Tailscale:   p.Tailscale,
-			USB:         p.USB,
-			Sudo:        p.Sudo,
-			Metadata:    metadata,
-			Harness:     forkHarness,
-			ExtraEnv:    extraEnv,
-			Mounts:      slices.Clone(source.Mounts),
-			MaxCPUs:     source.MaxCPUs,
-		}
-		h, err := m.runner(checkout).ForkTask(ctx, source, t, forkOpts, ghToken)
-		if err != nil {
-			forkEntry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "fork task")})
-			m.publishTerminalReplay(ctx, forkEntry)
-			m.NotifyTaskChange()
-			return
-		}
-		if t.Sudo {
-			t.SetSudoPassword(m.SudoPassword(m.serverCtx, t))
-		}
-		m.NotifyTaskChange()
-		m.watchSession(forkEntry, checkout, h)
-	}()
+	})
 	return t.ID.String(), nil
 }
 
@@ -1079,7 +784,9 @@ func (m *Manager) LoadPurgedTasks(all []*task.LoadedTask) error {
 		if lt.ForgePR > 0 {
 			t.SetPR(lt.ForgeOwner, lt.ForgeRepo, lt.ForgePR)
 		}
-		m.tasks[t.ID.String()] = newPurgedEntry(t, lt.Result, lt)
+		entry := m.NewEntry(t, lt)
+		entry.Finish(lt.Result)
+		m.tasks[t.ID.String()] = entry
 		loaded++
 	}
 	if loaded > 0 {
@@ -1089,69 +796,9 @@ func (m *Manager) LoadPurgedTasks(all []*task.LoadedTask) error {
 	return nil
 }
 
-// Cleanup is the exported variant of cleanupTask, idempotent per incarnation.
-func (m *Manager) Cleanup(entry *Entry, checkout *repo.Checkout, reason task.State) {
-	m.cleanupTask(entry, checkout, reason)
-}
-
 // LoadMessagesOnDemand triggers lazy message loading for purged tasks.
 func (m *Manager) LoadMessagesOnDemand(entry *Entry) {
 	m.loadTaskMessagesOnDemand(entry)
-}
-
-// Sync performs git push operations. It does NOT start the PR flow.
-func (m *Manager) Sync(ctx context.Context, entry *Entry, target SyncTarget, force bool) (*SyncResult, error) {
-	t := entry.task
-	switch t.GetState() { //nolint:exhaustive // only terminal/blocked states are relevant
-	case task.StatePending:
-		return nil, conflict("task has no instance yet")
-	case task.StateStopping, task.StateStopped, task.StatePurging, task.StateCrashed, task.StateFailed, task.StatePurged:
-		return nil, conflict("task is in a terminal state")
-	}
-
-	checkout := m.resolveCheckout(t)
-	if checkout == nil {
-		return nil, badRequestf("task has no checkout")
-	}
-	syncPrimaryBranch := ""
-	if p := t.Primary(); p != nil {
-		syncPrimaryBranch = p.Branch
-	}
-
-	if target == SyncTargetDefault {
-		if force {
-			return nil, badRequestf("force is not supported for default-branch sync")
-		}
-		baseBranch := checkout.BaseBranch
-		message := t.Title()
-		if message == "" {
-			message = t.InitialPrompt.Text
-		}
-		ds, issues, err := checkout.SyncToDefault(ctx, m.log, m.Runtimes, t, message)
-		if err != nil {
-			return nil, internalErr(err, "sync to default")
-		}
-		status := "synced"
-		if len(ds) == 0 {
-			status = "empty"
-		} else if len(issues) > 0 {
-			status = "blocked"
-		}
-		return &SyncResult{Status: status, Branch: baseBranch, DiffStat: ds, SafetyIssues: issues}, nil
-	}
-
-	// Default: push to the task's own branch.
-	ds, issues, err := checkout.SyncToOrigin(ctx, m.log, m.Runtimes, t, force)
-	if err != nil {
-		return nil, internalErr(err, "sync to origin")
-	}
-	status := "synced"
-	if len(ds) == 0 {
-		status = "empty"
-	} else if len(issues) > 0 && !force {
-		status = "blocked"
-	}
-	return &SyncResult{Status: status, Branch: syncPrimaryBranch, DiffStat: ds, SafetyIssues: issues}, nil
 }
 
 // resolveAdoptionTaskIDs selects instances for configured checkouts, reads
@@ -1206,43 +853,6 @@ func (m *Manager) resolveAdoptionTaskIDs(ctx context.Context, adoptRepos []Adopt
 	return resolved, rejected, errors.Join(errs...)
 }
 
-func (m *Manager) reconnectForInput(entry *Entry) error {
-	t := entry.task
-	if t.HasSession() {
-		return nil
-	}
-	checkout := m.resolveCheckout(t)
-	runner := m.runner(checkout)
-	h, err := runner.Reconnect(m.serverCtx, t, false)
-	if err != nil {
-		if t.HasSession() {
-			return nil
-		}
-		return err
-	}
-	tlog := m.log.With("task", t.ID, "instance", t.RuntimeInstanceID())
-	h, err = runner.EnsureSession(m.serverCtx, tlog, t, h)
-	if err != nil {
-		return err
-	}
-	m.watchSession(entry, checkout, h)
-	return nil
-}
-
-func (m *Manager) runner(r *repo.Checkout) *task.Runner {
-	return &task.Runner{
-		Backends:            m.Backends,
-		Logs:                m.Logs,
-		Runtimes:            m.Runtimes,
-		Log:                 m.log,
-		NotifyTaskChange:    m.NotifyTaskChange,
-		Checkout:            r,
-		RuntimeMetadata:     m.runtimeMetadata,
-		RuntimeStartTimeout: m.runtimeStartTimeout,
-		OnTerminalLogClosed: m.publishTerminalReplayForTask,
-	}
-}
-
 func (m *Manager) containerPathForRepo(relPath string) string {
 	base := filepath.Base(relPath)
 	if !m.repoBasenameCollides(relPath) {
@@ -1266,7 +876,7 @@ func (m *Manager) repoBasenameCollides(relPath string) bool {
 // allocateBranches assigns every repo of a task its own branch name, uniformly —
 // the Manager owns branch-name allocation for all repos, with no special case for
 // the primary. mounts[:reserveOnly] are repos whose branch is created elsewhere
-// (by md.Fork for a fork's source repos, or by the runner concurrently with
+// (by md.Fork for a fork's source repos, or by the agent runtime concurrently with
 // launch for a fresh task's primary), so they only need a name reserved.
 // mounts[reserveOnly:] are new to the host, so their branch is created here from
 // their own checkout.
@@ -1421,35 +1031,33 @@ func statsStateActive(st task.State) bool {
 // watchRuntimeEvents listens for runtime instance exit events and triggers
 // cleanup for the corresponding task.
 func (m *Manager) watchRuntimeEvents(ctx context.Context) {
-	go func() {
-		for {
-			ch, err := m.Runtimes.WatchEvents(ctx, runtime.EventFilter{MetadataKey: runtime.MetadataLegacyTaskID})
-			if err != nil {
-				if ctx.Err() != nil {
-					return
-				}
-				m.log.WarnContext(ctx, "runtime events failed, retrying in 5s", "err", err)
-				select {
-				case <-time.After(5 * time.Second):
-					continue
-				case <-ctx.Done():
-					return
-				}
-			}
-			for ev := range ch {
-				m.handleRuntimeInstanceExit(ev.InstanceID)
-			}
+	for {
+		ch, err := m.Runtimes.WatchEvents(ctx, runtime.EventFilter{MetadataKey: runtime.MetadataLegacyTaskID})
+		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
-			m.log.WarnContext(ctx, "runtime events stream ended, reconnecting in 5s")
+			m.log.WarnContext(ctx, "runtime events failed, retrying in 5s", "err", err)
 			select {
 			case <-time.After(5 * time.Second):
+				continue
 			case <-ctx.Done():
 				return
 			}
 		}
-	}()
+		for ev := range ch {
+			m.handleRuntimeInstanceExit(ev.InstanceID)
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		m.log.WarnContext(ctx, "runtime events stream ended, reconnecting in 5s")
+		select {
+		case <-time.After(5 * time.Second):
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // handleRuntimeInstanceExit looks up a task by runtime instance name and archives it.
@@ -1889,7 +1497,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 		}
 	}
 
-	entry := NewEntry(t, lt)
+	entry := m.NewEntry(t, lt)
 	if t.GetState() == task.StateCrashed || t.GetState() == task.StateFailed {
 		resultErr := errors.New("agent session failed")
 		if t.GetState() == task.StateCrashed {
@@ -1933,7 +1541,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 
 	// Only regenerate title if a new turn was completed.
 	if needsTitleRegen(t, lt, m.resolveNativeParser) {
-		go t.GenerateTitle(m.serverCtx) //nolint:contextcheck // fire-and-forget; must outlive adoption
+		entry.Lifecycle.generateTitle()
 	}
 
 	// Auto-reconnect immediately so adopted live tasks can accept input as
@@ -1943,15 +1551,15 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 	if t.GetState() != task.StateStopped && relayAlive {
 		m.log.DebugContext(ctx, "instance", "msg", "auto-reconnect starting", "repo", ri.RelPath, "br", branch, "instance", c.ID)
 		tlog := m.log.With("repo", ri.RelPath, "br", branch, "instance", t.RuntimeInstanceID())
-		runner := m.runner(checkout)
-		h, err := runner.Reconnect(m.serverCtx, t, true) //nolint:contextcheck // adopted sessions must outlive startup/adoption.
+		lifecycle := entry.Lifecycle
+		h, err := lifecycle.agentRuntime.Reconnect(lifecycle.ctx, t, true) //nolint:contextcheck // adopted session must survive startup but stop with its lifecycle
 		if err != nil {
 			tlog.Warn("auto-reconnect failed", "err", err)
 			m.NotifyTaskChange()
 			return &AdoptedTask{Entry: entry, Task: t, RelPath: ri.RelPath, ForgeKind: ri.ForgeKind, ForgeOwner: ri.ForgeOwner, ForgeRepo: ri.ForgeRepo, Branch: branch, FoundPRFromLog: foundPRFromLog}, nil
 		}
-		go func() {
-			h, err = runner.EnsureSession(m.serverCtx, tlog, t, h)
+		lifecycle.wg.Go(func() { //nolint:contextcheck // adopted session watcher uses the Manager lifetime.
+			h, err = lifecycle.agentRuntime.EnsureSession(lifecycle.ctx, tlog, t, h)
 			if err != nil {
 				tlog.Warn("ensure session failed", "err", err)
 				t.SetState(task.StateWaiting)
@@ -1959,11 +1567,11 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, checkout *repo.Che
 				return
 			}
 			tlog.Debug("auto-reconnect succeeded")
-			t.SetVNCPort(m.Runtimes.VNCPort(m.serverCtx, t.RuntimeInstanceID()))
-			refreshAdoptedDiffStat(m.serverCtx, m.log, checkout, m.Runtimes, t)
+			t.SetVNCPort(m.Runtimes.VNCPort(lifecycle.ctx, t.RuntimeInstanceID()))
+			refreshAdoptedDiffStat(lifecycle.ctx, m.log, checkout, m.Runtimes, t)
 			m.NotifyTaskChange()
-			m.watchSession(entry, checkout, h)
-		}()
+			lifecycle.watchSession(h)
+		})
 	} else if !relayAlive && t.GetState() != task.StateStopped && t.GetState() != task.StateCrashed && t.GetState() != task.StateFailed {
 		m.log.ErrorContext(ctx, "relay dead, stopping instance",
 			"repo", ri.RelPath, "br", branch, "instance", c.ID,
@@ -2074,132 +1682,6 @@ func (m *Manager) loadTerminalReplaySource(t *task.Task) (*task.LoadedTask, erro
 	lt := loaded[0]
 	lt.SetNativeParserResolver(m.resolveNativeParser)
 	return lt, nil
-}
-
-// watchSession monitors a single active session. Clean session exits move the
-// task to StateWaiting; SSH/session errors fail the task and stop the instance.
-func (m *Manager) watchSession(entry *Entry, checkout *repo.Checkout, h *task.SessionHandle) {
-	go func() {
-		t := entry.Task()
-		traceCtx, tk := trace.NewTask(m.serverCtx, "session.watch:"+t.ID.String())
-		defer tk.End()
-		_ = traceCtx
-		done := h.Session.Done()
-		select {
-		case <-done:
-			// Server shutdown terminates the local SSH session, but its relay and
-			// container must remain available for adoption after restart.
-			if m.serverCtx.Err() != nil {
-				return
-			}
-			// Session died. Check if this handle is still the task's current handle.
-			current := t.SessionDone()
-			if current != done {
-				return
-			}
-			t.DetachSession()
-			sessionErr := h.Session.Wait()
-			h.CloseMsgCh()
-			<-h.DispatchDone
-			if h.Log != nil {
-				_ = h.Log.Close()
-			}
-			watchPrimaryName := ""
-			watchPrimaryBranch := ""
-			if p := t.Primary(); p != nil {
-				watchPrimaryName = p.Name
-				watchPrimaryBranch = p.Branch
-			}
-			attrs := []any{"repo", watchPrimaryName, "br", watchPrimaryBranch, "instance", t.RuntimeInstanceID()}
-			if sessionErr != nil {
-				m.log.WarnContext(m.serverCtx, "session exited with error", append(attrs, "err", sessionErr)...)
-				if t.RecordSessionCrash(m.serverCtx, sessionErr) {
-					m.stopFailedSessionInstance(checkout, t, attrs)
-					crashErr := sessionErr
-					if exitErr := t.LastExitError(); exitErr != "" {
-						crashErr = errors.New(exitErr)
-					}
-					costUSD, numTurns, duration, usage, _ := t.LiveStats()
-					result := &task.Result{
-						State:       task.StateCrashed,
-						DiffStat:    t.LiveDiffStat(),
-						CostUSD:     costUSD,
-						Duration:    duration,
-						NumTurns:    numTurns,
-						Usage:       usage,
-						AgentResult: t.LastAgentResult(),
-						Err:         crashErr,
-					}
-					entry.Finish(result)
-					if err := m.Logs.WriteTaskResultTrailer(t, result); err != nil {
-						m.log.WarnContext(m.serverCtx, "write crashed task trailer failed", append(attrs, "err", err)...)
-					}
-					m.publishTerminalReplay(m.serverCtx, entry)
-				} else if t.RecordSessionFailure(m.serverCtx, sessionErr) {
-					failureErr := sessionErr
-					if exitErr := t.LastExitError(); exitErr != "" {
-						failureErr = errors.New(exitErr)
-					}
-					costUSD, numTurns, duration, usage, _ := t.LiveStats()
-					result := &task.Result{
-						State:       task.StateFailed,
-						DiffStat:    t.LiveDiffStat(),
-						CostUSD:     costUSD,
-						Duration:    duration,
-						NumTurns:    numTurns,
-						Usage:       usage,
-						AgentResult: t.LastAgentResult(),
-						Err:         failureErr,
-					}
-					entry.Finish(result)
-					if err := m.Logs.WriteTaskResultTrailer(t, result); err != nil {
-						m.log.WarnContext(m.serverCtx, "write failed task trailer failed", append(attrs, "err", err)...)
-					}
-					m.publishTerminalReplay(m.serverCtx, entry)
-				}
-			} else {
-				m.log.InfoContext(m.serverCtx, "session exited", attrs...)
-				// Race with Task.addMessage: a clean relay exit reaches here
-				// concurrently with the dispatch goroutine processing the
-				// final ResultMessage (which also targets Waiting/Asking/
-				// HasPlan; see the comment at addMessage's ResultMessage
-				// handling in task.go). The CAS only fires from Running, so
-				// it is a no-op once addMessage has already moved the state.
-				t.SetStateIf(task.StateRunning, task.StateWaiting)
-			}
-			m.NotifyTaskChange()
-		case <-entry.Done():
-		case <-m.serverCtx.Done():
-		}
-	}()
-}
-
-func (m *Manager) stopFailedSessionInstance(_ *repo.Checkout, t *task.Task, attrs []any) {
-	id := t.RuntimeInstanceID()
-	if id == "" {
-		return
-	}
-	if err := m.Runtimes.Stop(m.serverCtx, id); err != nil {
-		m.log.ErrorContext(m.serverCtx, "stop failed after session error", append(attrs, "err", err)...)
-	}
-}
-
-// cleanupTask runs checkout.Cleanup exactly once per task.
-func (m *Manager) cleanupTask(entry *Entry, checkout *repo.Checkout, reason task.State) {
-	entry.Cleanup(func() {
-		start := time.Now()
-		t := entry.Task()
-		result := m.runner(checkout).Cleanup(m.serverCtx, t, reason)
-		elapsed := time.Since(start).Round(time.Millisecond)
-		if result.Err != nil {
-			m.log.ErrorContext(m.serverCtx, "cleanup failed", "task", t.ID, "reason", reason, "dur", elapsed, "err", result.Err)
-		} else {
-			m.log.InfoContext(m.serverCtx, "cleanup done", "task", t.ID, "reason", reason, "dur", elapsed,
-				"cost", result.CostUSD, "turns", result.NumTurns, "final_state", result.State)
-		}
-		entry.Finish(&result)
-		m.NotifyTaskChange()
-	})
 }
 
 // logRelayMessageMerger owns the adoption-time overlap rules for disk-log

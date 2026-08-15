@@ -1,4 +1,4 @@
-// Tests for Manager and standalone helpers.
+// Tests task manager registry and lifecycle behavior.
 
 package taskmgr
 
@@ -160,6 +160,20 @@ type blockingStopBackend struct {
 	started  chan struct{}
 	returned chan struct{}
 	release  chan struct{}
+}
+
+// blockedStopBackend ignores cancellation until the test releases it.
+type blockedStopBackend struct {
+	*runtimetest.FakeBackend
+
+	started chan struct{}
+	release chan struct{}
+}
+
+func (b *blockedStopBackend) Stop(context.Context, runtime.ID) error {
+	close(b.started)
+	<-b.release
+	return nil
 }
 
 func (b *blockingStopBackend) Stop(ctx context.Context, id runtime.ID) error {
@@ -495,7 +509,7 @@ func TestManager(t *testing.T) {
 			QuotaWindow:   "five_hour",
 			Utilization:   1,
 		}})
-		m.Insert(tk.ID.String(), NewEntry(tk, nil))
+		m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
 		_, live, unsubscribe := tk.Subscribe(m.serverCtx)
 		t.Cleanup(unsubscribe)
 		_, rateLimitLive, _ := tk.SubscribeRateLimits(m.serverCtx)
@@ -519,6 +533,46 @@ func TestManager(t *testing.T) {
 			}
 		case <-time.After(time.Second):
 			t.Fatal("rate-limit subscription did not close after Manager.Close")
+		}
+	})
+
+	t.Run("Close waits for lifecycle", func(t *testing.T) {
+		t.Parallel()
+		backend := &blockedStopBackend{
+			FakeBackend: &runtimetest.FakeBackend{},
+			started:     make(chan struct{}),
+			release:     make(chan struct{}, 1),
+		}
+		m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, backend, nil)})
+		tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}
+		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+		tk.SetState(task.StateRunning)
+		entry := m.NewEntry(tk, nil)
+		m.Insert(tk.ID.String(), entry)
+		if err := entry.Lifecycle.Stop(t.Context()); err != nil {
+			t.Fatalf("Stop() = %v", err)
+		}
+		select {
+		case <-backend.started:
+		case <-time.After(time.Second):
+			t.Fatal("Stop did not reach the runtime backend")
+		}
+
+		closed := make(chan error, 1)
+		go func() { closed <- m.Close() }()
+		select {
+		case err := <-closed:
+			t.Fatalf("Close() returned before lifecycle stopped: %v", err)
+		case <-time.After(50 * time.Millisecond):
+		}
+		backend.release <- struct{}{}
+		select {
+		case err := <-closed:
+			if err != nil {
+				t.Fatalf("Close() = %v", err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("Close() did not wait for lifecycle completion")
 		}
 	})
 
@@ -565,7 +619,7 @@ func TestManager(t *testing.T) {
 				Utilization:   0.91,
 			},
 		})
-		m.Insert(tk.ID.String(), NewEntry(tk, nil))
+		m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
 
 		quotas := m.QuotaTracker.Merge(nil, now)
 		if len(quotas) != 1 || len(quotas[0].RateLimits) != 2 {
@@ -617,7 +671,7 @@ func TestManager(t *testing.T) {
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
 			}
-			e := NewEntry(tk, nil)
+			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
 			got, ok := m.GetEntry(tk.ID.String())
 			if !ok || got != e {
@@ -637,6 +691,28 @@ func TestManager(t *testing.T) {
 		})
 	})
 
+	t.Run("NewEntry", func(t *testing.T) {
+		t.Parallel()
+		m := newTestManager(t, Config{ServerCtx: t.Context()})
+		tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}
+		e := m.NewEntry(tk, nil)
+		if e.Task() != tk {
+			t.Fatal("Task() returned wrong pointer")
+		}
+		if e.LoadedTask() != nil || e.Result() != nil {
+			t.Fatal("new entry has mutable state")
+		}
+		select {
+		case <-e.Done():
+			t.Fatal("new entry is already done")
+		default:
+		}
+		m.Insert(tk.ID.String(), e)
+		if got, want := e.Lifecycle, e.Lifecycle; got != want {
+			t.Fatal("Lifecycle allocated a new coordinator")
+		}
+	})
+
 	// Regression: Manager.Range and Registry.Checkouts must iterate
 	// unlocked so callers may re-enter their owner. Holding either lock during
 	// iteration self-deadlocks the whole server (caught only by e2e before).
@@ -644,7 +720,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		m := newTestManager(t, Config{ServerCtx: t.Context()})
 		tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
-		m.Insert(tk.ID.String(), NewEntry(tk, nil))
+		m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
 		done := make(chan struct{})
 		go func() {
 			m.Range(func(_ string, _ *Entry) bool {
@@ -670,7 +746,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			for range 5 {
-				m.Insert(ksid.NewID().String(), NewEntry(&task.Task{
+				m.Insert(ksid.NewID().String(), m.NewEntry(&task.Task{
 					ID:            ksid.NewID(),
 					InitialPrompt: agent.Prompt{Text: "test"},
 				}, nil))
@@ -688,7 +764,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			for range 5 {
-				m.Insert(ksid.NewID().String(), NewEntry(&task.Task{
+				m.Insert(ksid.NewID().String(), m.NewEntry(&task.Task{
 					ID:            ksid.NewID(),
 					InitialPrompt: agent.Prompt{Text: "test"},
 				}, nil))
@@ -710,7 +786,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			oldCh := m.Changed()
-			m.Insert(ksid.NewID().String(), NewEntry(&task.Task{
+			m.Insert(ksid.NewID().String(), m.NewEntry(&task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
 			}, nil))
@@ -748,7 +824,7 @@ func TestManager(t *testing.T) {
 				Repos:         []task.RepoMount{{Name: "my/repo", Branch: "caic-1"}},
 			}
 			tk.SetPR("acme", "magic", 42)
-			m.Insert(tk.ID.String(), NewEntry(tk, nil))
+			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
 			found := m.FindTasksByPR("acme", "magic", 42)
 			if len(found) != 1 {
 				t.Fatalf("FindTasksByPR returned %d entries, want 1", len(found))
@@ -766,7 +842,7 @@ func TestManager(t *testing.T) {
 				Repos:         []task.RepoMount{{Name: "my/repo", Branch: "caic-1"}},
 			}
 			tk.SetPR("acme", "magic", 42)
-			m.Insert(tk.ID.String(), NewEntry(tk, nil))
+			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
 			found := m.FindTasksByPR("other", "repo", 42)
 			if len(found) != 0 {
 				t.Errorf("FindTasksByPR returned %d entries for wrong owner, want 0", len(found))
@@ -785,7 +861,7 @@ func TestManager(t *testing.T) {
 				Repos:         []task.RepoMount{{Name: "my/repo", Branch: "caic-1"}},
 			}
 			tk.SetPR("acme", "magic", 0)
-			m.Insert(tk.ID.String(), NewEntry(tk, nil))
+			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
 			found := m.FindTasksMatchingBranch("acme", "magic", "caic-1")
 			if len(found) != 1 {
 				t.Fatalf("FindTasksMatchingBranch returned %d entries, want 1", len(found))
@@ -800,7 +876,7 @@ func TestManager(t *testing.T) {
 				Repos:         []task.RepoMount{{Name: "my/repo", Branch: "caic-1"}},
 			}
 			tk.SetPR("acme", "magic", 0)
-			m.Insert(tk.ID.String(), NewEntry(tk, nil))
+			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
 			found := m.FindTasksMatchingBranch("acme", "magic", "caic-2")
 			if len(found) != 0 {
 				t.Errorf("FindTasksMatchingBranch returned %d entries for wrong branch, want 0", len(found))
@@ -819,7 +895,7 @@ func TestManager(t *testing.T) {
 				Repos:         []task.RepoMount{{Name: "my/repo", Branch: "caic-1"}},
 			}
 			tk.SetPR("acme", "magic", 0)
-			e := NewEntry(tk, nil)
+			e := m.NewEntry(tk, nil)
 			e.SetMonitorBranch("caic-1")
 			m.Insert(tk.ID.String(), e)
 			found := m.FindTasksMonitoringBranch("acme", "magic")
@@ -836,7 +912,7 @@ func TestManager(t *testing.T) {
 				Repos:         []task.RepoMount{{Name: "my/repo", Branch: "caic-1"}},
 			}
 			tk.SetPR("acme", "magic", 0)
-			m.Insert(tk.ID.String(), NewEntry(tk, nil))
+			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
 			found := m.FindTasksMonitoringBranch("acme", "magic")
 			if len(found) != 0 {
 				t.Errorf("FindTasksMonitoringBranch returned %d entries without monitor branch, want 0", len(found))
@@ -857,7 +933,7 @@ func TestManager(t *testing.T) {
 			}
 			tk.SetPR("acme", "magic", 0)
 			tk.SetState(task.StateRunning)
-			m.Insert(tk.ID.String(), NewEntry(tk, nil))
+			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
 			pending := m.ListPendingBotTasks()
 			if len(pending) != 1 {
 				t.Fatalf("ListPendingBotTasks returned %d tasks, want 1", len(pending))
@@ -874,7 +950,7 @@ func TestManager(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "test"},
 			}
 			tk.SetState(task.StateRunning)
-			m.Insert(tk.ID.String(), NewEntry(tk, nil))
+			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
 			pending := m.ListPendingBotTasks()
 			if len(pending) != 0 {
 				t.Errorf("ListPendingBotTasks returned %d tasks without ForgeIssue, want 0", len(pending))
@@ -890,7 +966,7 @@ func TestManager(t *testing.T) {
 					ForgeIssue:    1,
 				}
 				tk.SetState(st)
-				m.Insert(tk.ID.String(), NewEntry(tk, nil))
+				m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
 			}
 			pending := m.ListPendingBotTasks()
 			if len(pending) != 0 {
@@ -999,7 +1075,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}
-			e := NewEntry(tk, nil)
+			e := m.NewEntry(tk, nil)
 			m.SetTaskMonitorBranch(e, "caic-1")
 			if e.MonitorBranch() != "caic-1" {
 				t.Errorf("MonitorBranch = %q, want %q", e.MonitorBranch(), "caic-1")
@@ -1017,7 +1093,7 @@ func TestManager(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "test"},
 			}
 			tk.SetState(task.StateStopped)
-			m.Insert(tk.ID.String(), NewEntry(tk, nil))
+			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
 			state, result, err := m.WatchTaskCompletion(t.Context(), tk.ID.String())
 			if err != nil {
 				t.Fatalf("WatchTaskCompletion error: %v", err)
@@ -1049,7 +1125,7 @@ func TestManager(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "test"},
 			}
 			tk.SetState(task.StateRunning)
-			m.Insert(tk.ID.String(), NewEntry(tk, nil))
+			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
 			go func() {
 				time.Sleep(50 * time.Millisecond)
 				tk.SetState(task.StateStopped)
@@ -1071,7 +1147,7 @@ func TestManager(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "test"},
 			}
 			tk.SetState(task.StateRunning)
-			m.Insert(tk.ID.String(), NewEntry(tk, nil))
+			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
 			ctx, cancel := context.WithCancel(t.Context())
 			cancel()
 			_, _, err := m.WatchTaskCompletion(ctx, tk.ID.String())
@@ -1093,18 +1169,18 @@ func TestManager(t *testing.T) {
 			want  ErrorKind
 			call  func(m *Manager, e *Entry) error
 		}
-		stop := func(m *Manager, e *Entry) error { return m.Stop(t.Context(), e) }
-		revive := func(m *Manager, e *Entry) error { return m.Revive(t.Context(), e) }
+		stop := func(m *Manager, e *Entry) error { return e.Lifecycle.Stop(t.Context()) }
+		revive := func(m *Manager, e *Entry) error { return e.Lifecycle.Revive() }
 		syncOrigin := func(m *Manager, e *Entry) error {
-			_, err := m.Sync(t.Context(), e, SyncTargetOrigin, false)
+			_, err := e.Lifecycle.Sync(t.Context(), SyncTargetOrigin, false)
 			return err
 		}
 		syncForceDefault := func(m *Manager, e *Entry) error {
-			_, err := m.Sync(t.Context(), e, SyncTargetDefault, true)
+			_, err := e.Lifecycle.Sync(t.Context(), SyncTargetDefault, true)
 			return err
 		}
 		fork := func(m *Manager, e *Entry) error {
-			_, err := m.Fork(t.Context(), e, ForkParams{})
+			_, err := e.Lifecycle.Fork(t.Context(), ForkParams{})
 			return err
 		}
 		cases := []tc{
@@ -1120,7 +1196,7 @@ func TestManager(t *testing.T) {
 				m := newTestManager(t, Config{ServerCtx: t.Context()})
 				tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}
 				tk.SetState(c.state)
-				e := NewEntry(tk, nil)
+				e := m.NewEntry(tk, nil)
 				m.Insert(tk.ID.String(), e)
 				err := c.call(m, e)
 				if err == nil {
@@ -1313,14 +1389,14 @@ func TestManager(t *testing.T) {
 			}
 			src.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "md-agent-src"), runtime.ConnectionTarget{SSHHost: "md-agent-src"}, "", "", 0)
 			src.SetState(task.StateWaiting)
-			e := NewEntry(src, nil)
+			e := m.NewEntry(src, nil)
 			m.Insert(src.ID.String(), e)
 			return m, e
 		}
 		t.Run("valid_resolved_overrides_and_max_cpus", func(t *testing.T) {
 			t.Parallel()
 			m, src := newForkManager(t)
-			id, err := m.Fork(t.Context(), src, ForkParams{
+			id, err := src.Lifecycle.Fork(t.Context(), ForkParams{
 				Prompt:    agent.Prompt{Text: "fork"},
 				Tailscale: true,
 				USB:       true,
@@ -1351,7 +1427,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m, src := newForkManager(t)
 			src.Task().SetState(task.StateStopped)
-			id, err := m.Fork(t.Context(), src, ForkParams{Prompt: agent.Prompt{Text: "fork"}})
+			id, err := src.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}})
 			if err != nil {
 				t.Fatalf("Fork: %v", err)
 			}
@@ -1372,7 +1448,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m, src := newForkManager(t)
 			src.Task().SetState(task.StateCrashed)
-			id, err := m.Fork(t.Context(), src, ForkParams{Prompt: agent.Prompt{Text: "fork"}})
+			id, err := src.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}})
 			if err != nil {
 				t.Fatalf("Fork: %v", err)
 			}
@@ -1392,7 +1468,7 @@ func TestManager(t *testing.T) {
 		t.Run("valid_metadata_matches_task", func(t *testing.T) {
 			t.Parallel()
 			m, src := newForkManager(t)
-			id, err := m.Fork(t.Context(), src, ForkParams{Prompt: agent.Prompt{Text: "fork"}})
+			id, err := src.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}})
 			if err != nil {
 				t.Fatalf("Fork: %v", err)
 			}
@@ -1405,8 +1481,8 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error_extra_repo_overlap", func(t *testing.T) {
 			t.Parallel()
-			m, src := newForkManager(t)
-			_, err := m.Fork(t.Context(), src, ForkParams{
+			_, src := newForkManager(t)
+			_, err := src.Lifecycle.Fork(t.Context(), ForkParams{
 				Prompt:     agent.Prompt{Text: "fork"},
 				ExtraRepos: []ForkRepo{{Name: "my/repo"}},
 			})
@@ -1428,9 +1504,9 @@ func TestManager(t *testing.T) {
 			}
 			src.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "md-agent-src"), runtime.ConnectionTarget{SSHHost: "md-agent-src"}, "", "", 0)
 			src.SetState(task.StateWaiting)
-			e := NewEntry(src, nil)
+			e := m.NewEntry(src, nil)
 			m.Insert(src.ID.String(), e)
-			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}})
+			_, err := e.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
@@ -1447,9 +1523,9 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetState(task.StateWaiting)
-			e := NewEntry(tk, nil)
+			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
-			err := m.Restart(t.Context(), e, agent.Prompt{})
+			err := e.Lifecycle.Restart(t.Context(), agent.Prompt{})
 			te, ok := errors.AsType[*Error](err)
 			if !ok {
 				t.Fatalf("err %v is not a *Error", err)
@@ -1463,9 +1539,9 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetState(task.StateStopped)
-			e := NewEntry(tk, nil)
+			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
-			err := m.Restart(t.Context(), e, agent.Prompt{Text: "go"})
+			err := e.Lifecycle.Restart(t.Context(), agent.Prompt{Text: "go"})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindConflict {
 				t.Fatalf("err = %v, want KindConflict", err)
@@ -1483,9 +1559,9 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetState(task.StateWaiting)
-			e := NewEntry(tk, nil)
+			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
-			err := m.SendInput(t.Context(), e, agent.Prompt{Text: "go"})
+			err := e.Lifecycle.SendInput(t.Context(), agent.Prompt{Text: "go"})
 			if err == nil {
 				t.Fatal("expected error from SendInput with no session")
 			}
@@ -1538,10 +1614,10 @@ func TestManager(t *testing.T) {
 			if err := logW.Close(); err != nil {
 				t.Fatal(err)
 			}
-			e := NewEntry(tk, nil)
+			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
 
-			if err := m.SendInput(t.Context(), e, agent.Prompt{Text: "A"}); err != nil {
+			if err := e.Lifecycle.SendInput(t.Context(), agent.Prompt{Text: "A"}); err != nil {
 				t.Fatal(err)
 			}
 
@@ -1592,9 +1668,9 @@ func TestManager(t *testing.T) {
 			})
 			tk.AttachSession(&task.SessionHandle{Session: s})
 
-			e := NewEntry(tk, nil)
+			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
-			err = m.SendInput(t.Context(), e, agent.Prompt{Text: "go"})
+			err = e.Lifecycle.SendInput(t.Context(), agent.Prompt{Text: "go"})
 			if err == nil {
 				t.Fatal("expected delivery error")
 			}
@@ -1630,7 +1706,7 @@ func TestManager(t *testing.T) {
 				}
 				id := tk.ID.String()
 				wg.Go(func() {
-					m.Insert(id, NewEntry(tk, nil))
+					m.Insert(id, m.NewEntry(tk, nil))
 				})
 			}
 			for range 5 {
@@ -1662,9 +1738,9 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetState(task.StateStopped)
-			e := NewEntry(tk, nil)
+			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
-			err := m.ClearContext(t.Context(), e)
+			err := e.Lifecycle.ClearContext()
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindConflict {
 				t.Fatalf("err = %v, want KindConflict", err)
@@ -1675,9 +1751,9 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetState(task.StateWaiting)
-			e := NewEntry(tk, nil)
+			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
-			err := m.ClearContext(t.Context(), e)
+			err := e.Lifecycle.ClearContext()
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindInternal {
 				t.Fatalf("err = %v, want KindInternal", err)
@@ -1691,9 +1767,9 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetState(task.StateWaiting)
-			e := NewEntry(tk, nil)
+			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
-			err := m.Compact(t.Context(), e, "shorten")
+			err := e.Lifecycle.Compact(t.Context(), "shorten")
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindConflict {
 				t.Fatalf("err = %v, want KindConflict", err)
@@ -1794,7 +1870,7 @@ func TestManager(t *testing.T) {
 			}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-dead"), runtime.ConnectionTarget{SSHHost: "ctr-dead"}, "", "", 0)
 			tk.SetState(task.StateRunning)
-			m.Insert(tk.ID.String(), NewEntry(tk, nil))
+			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
 			m.handleRuntimeInstanceExit(runtime.NewID("test-runtime", "ctr-dead"))
 			if got := tk.GetState(); got != task.StateStopped {
 				t.Errorf("state = %v, want StateStopped", got)
@@ -1809,7 +1885,7 @@ func TestManager(t *testing.T) {
 			}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-purged"), runtime.ConnectionTarget{SSHHost: "ctr-purged"}, "", "", 0)
 			tk.SetState(task.StatePurged)
-			m.Insert(tk.ID.String(), NewEntry(tk, nil))
+			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
 			m.handleRuntimeInstanceExit(runtime.NewID("test-runtime", "ctr-purged"))
 			if got := tk.GetState(); got != task.StatePurged {
 				t.Errorf("state = %v (should stay Purged)", got)
@@ -1827,7 +1903,7 @@ func TestManager(t *testing.T) {
 			// event handled here. Acting on it would flap the task to Stopped
 			// mid-purge and race the cleanup goroutine.
 			tk.SetState(task.StatePurging)
-			m.Insert(tk.ID.String(), NewEntry(tk, nil))
+			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
 			m.handleRuntimeInstanceExit(runtime.NewID("test-runtime", "ctr-purging"))
 			if got := tk.GetState(); got != task.StatePurging {
 				t.Errorf("state = %v (should stay Purging)", got)
@@ -1842,7 +1918,7 @@ func TestManager(t *testing.T) {
 			}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-stopping"), runtime.ConnectionTarget{SSHHost: "ctr-stopping"}, "", "", 0)
 			tk.SetState(task.StateStopping)
-			m.Insert(tk.ID.String(), NewEntry(tk, nil))
+			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
 			m.handleRuntimeInstanceExit(runtime.NewID("test-runtime", "ctr-stopping"))
 			if got := tk.GetState(); got != task.StateStopping {
 				t.Errorf("state = %v (should stay Stopping)", got)
@@ -1857,7 +1933,7 @@ func TestManager(t *testing.T) {
 			}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-stopped"), runtime.ConnectionTarget{SSHHost: "ctr-stopped"}, "", "", 0)
 			tk.SetState(task.StateStopped)
-			m.Insert(tk.ID.String(), NewEntry(tk, nil))
+			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
 			m.handleRuntimeInstanceExit(runtime.NewID("test-runtime", "ctr-stopped"))
 			if got := tk.GetState(); got != task.StateStopped {
 				t.Errorf("state = %v (should stay Stopped)", got)
@@ -1872,7 +1948,7 @@ func TestManager(t *testing.T) {
 			}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-alive"), runtime.ConnectionTarget{SSHHost: "ctr-alive"}, "", "", 0)
 			tk.SetState(task.StateRunning)
-			m.Insert(tk.ID.String(), NewEntry(tk, nil))
+			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
 			m.handleRuntimeInstanceExit(runtime.NewID("test-runtime", "ctr-other"))
 			if got := tk.GetState(); got != task.StateRunning {
 				t.Errorf("state = %v (should stay Running)", got)
@@ -1888,7 +1964,7 @@ func TestManager(t *testing.T) {
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 			}
-			e := NewEntry(tk, nil)
+			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
 			m.LoadMessagesOnDemand(e)
 		})
@@ -1916,7 +1992,7 @@ func TestManager(t *testing.T) {
 				},
 			})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "task"}}
-			entry := newPurgedEntry(tk, &task.Result{State: task.StatePurged}, logs[0])
+			entry := newTestPurgedEntry(t, tk, &task.Result{State: task.StatePurged}, logs[0])
 			m.LoadMessagesOnDemand(entry)
 			if wireCalls != 1 {
 				t.Fatalf("NewWire calls = %d, want 1", wireCalls)
@@ -2009,6 +2085,9 @@ func TestManager(t *testing.T) {
 			e, ok := m.GetEntry(id.String())
 			if !ok {
 				t.Fatal("entry not found for expected ID")
+			}
+			if e.Lifecycle == nil {
+				t.Fatal("persisted entry has no lifecycle")
 			}
 			tk := e.Task()
 			if tk.Tailscale != true || tk.USB != true || tk.Display != true {
@@ -2227,7 +2306,7 @@ func TestManager(t *testing.T) {
 				Repos:         []task.RepoMount{{Name: "repo/a", Branch: "caic-live"}},
 			}
 			active.SetTitle("active")
-			m.Insert(activeID.String(), NewEntry(active, nil))
+			m.Insert(activeID.String(), m.NewEntry(active, nil))
 			duplicateBranchID := ksid.NewID()
 			keptID := ksid.NewID()
 			all := []*task.LoadedTask{
@@ -2278,9 +2357,9 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetState(task.StatePending)
-			e := NewEntry(tk, nil)
+			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
-			_, err := m.Sync(t.Context(), e, SyncTargetOrigin, false)
+			_, err := e.Lifecycle.Sync(t.Context(), SyncTargetOrigin, false)
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindConflict {
 				t.Fatalf("err = %v, want KindConflict", err)
@@ -2291,9 +2370,9 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetState(task.StatePurging)
-			e := NewEntry(tk, nil)
+			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
-			_, err := m.Sync(t.Context(), e, SyncTargetOrigin, false)
+			_, err := e.Lifecycle.Sync(t.Context(), SyncTargetOrigin, false)
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindConflict {
 				t.Fatalf("err = %v, want KindConflict", err)
@@ -2304,9 +2383,9 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetState(task.StateProvisioning)
-			e := NewEntry(tk, nil)
+			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
-			_, err := m.Sync(t.Context(), e, SyncTargetOrigin, false)
+			_, err := e.Lifecycle.Sync(t.Context(), SyncTargetOrigin, false)
 			if err == nil {
 				t.Fatal("expected error for provisioning task without instance")
 			}
@@ -2316,9 +2395,9 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetState(task.StateRunning)
-			e := NewEntry(tk, nil)
+			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
-			_, err := m.Sync(t.Context(), e, SyncTargetDefault, true)
+			_, err := e.Lifecycle.Sync(t.Context(), SyncTargetDefault, true)
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
@@ -2332,9 +2411,9 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetState(task.StatePurged)
-			e := NewEntry(tk, nil)
+			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
-			err := m.Purge(t.Context(), e)
+			err := e.Lifecycle.Purge(t.Context())
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindConflict {
 				t.Fatalf("err = %v, want KindConflict", err)
@@ -2347,11 +2426,11 @@ func TestManager(t *testing.T) {
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(task.StateCrashed)
-			entry := NewEntry(tk, nil)
+			entry := m.NewEntry(tk, nil)
 			entry.Finish(&task.Result{State: task.StateCrashed, Err: errors.New("agent crashed")})
 			m.Insert(tk.ID.String(), entry)
 
-			if err := m.Purge(t.Context(), entry); err != nil {
+			if err := entry.Lifecycle.Purge(t.Context()); err != nil {
 				t.Fatalf("Purge: %v", err)
 			}
 			purgeDeadline := time.Now().Add(time.Second)
@@ -2387,10 +2466,10 @@ func TestManager(t *testing.T) {
 			}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(task.StateRunning)
-			entry := NewEntry(tk, nil)
+			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), entry)
 
-			if err := m.Stop(t.Context(), entry); err != nil {
+			if err := entry.Lifecycle.Stop(t.Context()); err != nil {
 				t.Fatalf("Stop: %v", err)
 			}
 			select {
@@ -2399,7 +2478,7 @@ func TestManager(t *testing.T) {
 				t.Fatal("StopTask did not reach backend Stop")
 			}
 
-			if err := m.Purge(t.Context(), entry); err != nil {
+			if err := entry.Lifecycle.Purge(t.Context()); err != nil {
 				t.Fatalf("Purge: %v", err)
 			}
 			select {
@@ -2439,9 +2518,9 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetState(task.StateStopped)
-			e := NewEntry(tk, nil)
+			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
-			err := m.Stop(t.Context(), e)
+			err := e.Lifecycle.Stop(t.Context())
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindConflict {
 				t.Fatalf("err = %v, want KindConflict", err)
@@ -2458,10 +2537,10 @@ func TestManager(t *testing.T) {
 			}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(task.StateRunning)
-			entry := NewEntry(tk, nil)
+			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), entry)
 
-			if err := m.Stop(t.Context(), entry); err != nil {
+			if err := entry.Lifecycle.Stop(t.Context()); err != nil {
 				t.Fatalf("Stop: %v", err)
 			}
 
@@ -2486,9 +2565,9 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
 			tk.SetState(task.StateRunning)
-			e := NewEntry(tk, nil)
+			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
-			err := m.Revive(t.Context(), e)
+			err := e.Lifecycle.Revive()
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindConflict {
 				t.Fatalf("err = %v, want KindConflict", err)
@@ -2505,10 +2584,10 @@ func TestManager(t *testing.T) {
 			}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(task.StateCrashed)
-			entry := NewEntry(tk, nil)
+			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), entry)
 
-			if err := m.Revive(t.Context(), entry); err != nil {
+			if err := entry.Lifecycle.Revive(); err != nil {
 				t.Fatalf("Revive: %v", err)
 			}
 			if got := tk.GetState(); got != task.StateProvisioning {
@@ -2554,11 +2633,11 @@ func TestManager(t *testing.T) {
 			if err := log.Close(); err != nil {
 				t.Fatal(err)
 			}
-			entry := NewEntry(tk, nil)
+			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), entry)
 
 			firstChanged := m.Changed()
-			if err := m.Revive(t.Context(), entry); err != nil {
+			if err := entry.Lifecycle.Revive(); err != nil {
 				t.Fatalf("Revive: %v", err)
 			}
 			select {
@@ -2608,9 +2687,9 @@ func TestManager(t *testing.T) {
 				Harness:       "fake",
 			}
 			tk.SetState(task.StateWaiting)
-			e := NewEntry(tk, nil)
+			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
-			err := m.SendInput(t.Context(), e, agent.Prompt{Text: "go", Images: []agent.ImageData{{}}})
+			err := e.Lifecycle.SendInput(t.Context(), agent.Prompt{Text: "go", Images: []agent.ImageData{{}}})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
@@ -2641,11 +2720,12 @@ func TestManager(t *testing.T) {
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ssh-failed"), runtime.ConnectionTarget{SSHHost: "ssh-failed"}, "", "", 0)
 			tk.SetState(task.StateRunning)
 			tk.AttachSession(h)
-			entry := NewEntry(tk, nil)
 			runtimeBackend := &runtimetest.FakeBackend{}
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, runtimeBackend, nil)})
+			entry := m.NewEntry(tk, nil)
+			m.Insert(tk.ID.String(), entry)
 
-			m.watchSession(entry, nil, h)
+			entry.Lifecycle.watchSession(h)
 
 			select {
 			case <-entry.Done():
@@ -2689,10 +2769,11 @@ func TestManager(t *testing.T) {
 			tk.SetRuntimeConnectionInfo(instanceID, runtime.ConnectionTarget{SSHHost: "ssh-restart"}, "", "", 0)
 			tk.SetState(task.StateRunning)
 			tk.AttachSession(h)
-			entry := NewEntry(tk, nil)
 			m := newTestManager(t, Config{ServerCtx: serverCtx, Runtimes: newTestRuntime(t, runtimeBackend, nil)})
+			entry := m.NewEntry(tk, nil)
+			m.Insert(tk.ID.String(), entry)
 
-			m.watchSession(entry, nil, h)
+			entry.Lifecycle.watchSession(h)
 			cancelServer()
 			if err := cmd.Process.Kill(); err != nil {
 				t.Fatal(err)
@@ -2737,7 +2818,7 @@ func TestManager(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "x"},
 			}
 			lt := &task.LoadedTask{TaskID: tk.ID.String()}
-			e := newPurgedEntry(tk, &task.Result{State: task.StatePurged}, lt)
+			e := newTestPurgedEntry(t, tk, &task.Result{State: task.StatePurged}, lt)
 			m.Insert(tk.ID.String(), e)
 			// LoadMessagesOnce triggers the fn but LoadMessages will fail
 			// (no log file); this exercises the LoadMessagesOnce path.
@@ -2794,8 +2875,8 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 
 		// forkSetup creates a Manager with an checkout for "repo/a" and a source
-		// task in StateWaiting. Returns the Manager and the source Entry.
-		forkSetup := func(t *testing.T, sourceHarness harness.Name, backends map[harness.Name]agent.Backend) (*Manager, *Entry) {
+		// task in StateWaiting. Returns the source Entry.
+		forkSetup := func(t *testing.T, sourceHarness harness.Name, backends map[harness.Name]agent.Backend) *Entry {
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: backends})
 			r := &repo.Checkout{Dir: "/tmp/repo"}
 			registerCheckout(t, m.Checkouts, "repo/a", r)
@@ -2807,17 +2888,17 @@ func TestManager(t *testing.T) {
 			}
 			src.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "md-agent-src"), runtime.ConnectionTarget{SSHHost: "md-agent-src"}, "", "", 0)
 			src.SetState(task.StateWaiting)
-			e := NewEntry(src, nil)
+			e := m.NewEntry(src, nil)
 			m.Insert(src.ID.String(), e)
-			return m, e
+			return e
 		}
 
 		defaultBackends := map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}
 
 		t.Run("error_unknown_harness", func(t *testing.T) {
 			t.Parallel()
-			m, e := forkSetup(t, "fake", defaultBackends)
-			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}, Harness: "bogus"})
+			e := forkSetup(t, "fake", defaultBackends)
+			_, err := e.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}, Harness: "bogus"})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
@@ -2825,8 +2906,8 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error_unsupported_model", func(t *testing.T) {
 			t.Parallel()
-			m, e := forkSetup(t, "fake", defaultBackends)
-			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}, Model: "unsupported"})
+			e := forkSetup(t, "fake", defaultBackends)
+			_, err := e.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}, Model: "unsupported"})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
@@ -2838,8 +2919,8 @@ func TestManager(t *testing.T) {
 				"fake":  &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire},
 				"fake2": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m2"}}}, WireFactory: claudecode.New().NewWire},
 			}
-			m, e := forkSetup(t, "fake", backends)
-			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}, Harness: "fake2", Model: "unsupported"})
+			e := forkSetup(t, "fake", backends)
+			_, err := e.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}, Harness: "fake2", Model: "unsupported"})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
@@ -2847,10 +2928,10 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error_no_container", func(t *testing.T) {
 			t.Parallel()
-			m, e := forkSetup(t, "fake", defaultBackends)
+			e := forkSetup(t, "fake", defaultBackends)
 			// Overwrite the instance to empty.
 			e.Task().SetRuntimeConnectionInfo("", runtime.ConnectionTarget{SSHHost: ""}, "", "", 0)
-			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}})
+			_, err := e.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindConflict {
 				t.Fatalf("err = %v, want KindConflict", err)
@@ -2858,9 +2939,9 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error_wrong_state", func(t *testing.T) {
 			t.Parallel()
-			m, e := forkSetup(t, "fake", defaultBackends)
+			e := forkSetup(t, "fake", defaultBackends)
 			e.Task().SetState(task.StateProvisioning)
-			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}})
+			_, err := e.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindConflict {
 				t.Fatalf("err = %v, want KindConflict", err)
@@ -2868,8 +2949,8 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error_unknown_extra_repo", func(t *testing.T) {
 			t.Parallel()
-			m, e := forkSetup(t, "fake", defaultBackends)
-			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}, ExtraRepos: []ForkRepo{{Name: "ghost"}}})
+			e := forkSetup(t, "fake", defaultBackends)
+			_, err := e.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}, ExtraRepos: []ForkRepo{{Name: "ghost"}}})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
@@ -2877,8 +2958,8 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error_unknown_harness_when_model_set", func(t *testing.T) {
 			t.Parallel()
-			m, e := forkSetup(t, "bogus", defaultBackends)
-			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}, Model: "m1"})
+			e := forkSetup(t, "bogus", defaultBackends)
+			_, err := e.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}, Model: "m1"})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
@@ -3650,7 +3731,7 @@ func TestManager(t *testing.T) {
 		}
 		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 		tk.SetState(task.StateRunning)
-		m.Insert(tk.ID.String(), NewEntry(tk, nil))
+		m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
 
 		go m.watchStats(ctx)
 		select {
@@ -3696,16 +3777,15 @@ func TestManager(t *testing.T) {
 			}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-dead"), runtime.ConnectionTarget{SSHHost: "ctr-dead"}, "", "", 0)
 			tk.SetState(task.StateRunning)
-			m.Insert(tk.ID.String(), NewEntry(tk, nil))
+			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
 
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			m.watchRuntimeEvents(ctx)
+			go m.watchRuntimeEvents(ctx)
 
 			events <- runtime.Event{InstanceID: "ctr-dead"}
 
-			// The watcher dispatches on its own goroutine; wait for the state
-			// transition rather than sleeping a fixed duration.
+			// Wait for the state transition rather than sleeping a fixed duration.
 			deadline := time.Now().Add(2 * time.Second)
 			for tk.GetState() != task.StateStopped {
 				if time.Now().After(deadline) {

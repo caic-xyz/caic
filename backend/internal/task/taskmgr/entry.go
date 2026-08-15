@@ -10,48 +10,27 @@ import (
 
 // Entry is a single registered task plus its mutable lifecycle state.
 //
-// Concurrency: task is immutable after construction. loadedTask, result, done,
-// doneClosed, cleanupOnce, and monitorBranch are guarded by mu and must only be
-// accessed through methods. Code outside this package never touches the fields
-// directly.
+// Concurrency: task and lifecycle are immutable after registration. loadedTask,
+// result, done, doneClosed, cleanupOnce, and monitorBranch are guarded by mu
+// and must only be accessed through methods. Code outside this package never
+// touches the fields directly.
 type Entry struct {
 	// Immutable.
-	task       *task.Task
-	loadedTask *task.LoadedTask
+	Lifecycle *Lifecycle
+
+	task *task.Task
 
 	// Guards lazy message loading for a persisted task.
 	loadedTaskOnce sync.Once
 
 	// Guarded by mu.
 	mu            sync.Mutex
+	loadedTask    *task.LoadedTask
 	result        *task.Result
 	done          chan struct{}
 	doneClosed    bool
 	monitorBranch string
 	cleanupOnce   sync.Once
-}
-
-// NewEntry creates an Entry. done is fresh; result is nil.
-func NewEntry(t *task.Task, lt *task.LoadedTask) *Entry {
-	return &Entry{
-		task:       t,
-		loadedTask: lt,
-		done:       make(chan struct{}),
-	}
-}
-
-// newPurgedEntry creates an Entry for a purged task loaded from disk. done is
-// pre-closed, result is set, and loadedTask is wired for lazy message loading.
-func newPurgedEntry(t *task.Task, r *task.Result, lt *task.LoadedTask) *Entry {
-	done := make(chan struct{})
-	close(done)
-	return &Entry{
-		task:       t,
-		loadedTask: lt,
-		result:     r,
-		done:       done,
-		doneClosed: true,
-	}
 }
 
 // Task returns the underlying task. The returned *task.Task is itself

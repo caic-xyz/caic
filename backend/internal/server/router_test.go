@@ -399,7 +399,7 @@ func TestLoginCallbackPublic(t *testing.T) {
 // entry.Task().ID.String() find the same entry (in production the two always
 // coincide because Insert keys on t.ID.String()).
 func insertTestTask(t *testing.T, s *testRouter, id string, tk *task.Task) *taskmgr.Entry { //nolint:unparam // id is constant today; keep generic
-	e := taskmgr.NewEntry(tk, nil)
+	e := s.taskMgr.NewEntry(tk, nil)
 	s.taskMgr.Insert(id, e)
 	if taskID := tk.ID.String(); taskID != id {
 		s.taskMgr.Insert(taskID, e)
@@ -1896,7 +1896,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		tk.SetState(task.StateRunning)
 
 		s := newTestRouter(t, nil)
-		s.taskMgr.Insert(taskID.String(), taskmgr.NewEntry(tk, logs[0]))
+		s.taskMgr.Insert(taskID.String(), s.taskMgr.NewEntry(tk, logs[0]))
 
 		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 		defer cancel()
@@ -1964,7 +1964,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		}
 
 		s := newTestRouter(t, nil)
-		s.taskMgr.Insert(taskID.String(), taskmgr.NewEntry(tk, logs[0]))
+		s.taskMgr.Insert(taskID.String(), s.taskMgr.NewEntry(tk, logs[0]))
 
 		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 		defer cancel()

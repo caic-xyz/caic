@@ -100,7 +100,7 @@ func (w *testWire) ParseMessage(line []byte) ([]agent.Message, error) {
 }
 
 // testContainer returns a fake runtime whose Diff reports a fixed one-file
-// numstat, matching the diff the runner/session tests parse.
+// numstat, matching the diff the agent-runtime/session tests parse.
 func testContainer() *runtimetest.FakeBackend {
 	return &runtimetest.FakeBackend{DiffOutput: "5\t1\tmain.go\n"}
 }

@@ -80,7 +80,7 @@ func TestPublishTerminalReplayPublishesLocalTaskCache(t *testing.T) {
 					harness.Claude: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire},
 				},
 			})
-			entry := NewEntry(tk, nil)
+			entry := m.NewEntry(tk, nil)
 			ctx := t.Context()
 			if tc.cancelled {
 				var cancel context.CancelFunc

@@ -502,7 +502,7 @@ const (
 // SSH round-trip may outlive a cancelled HTTP request, and we want the log line
 // regardless.
 func (s *taskService) sendInput(ctx context.Context, entry *taskmgr.Entry, req *v1.InputReq) (*v1.StatusResp, error) {
-	err := s.taskMgr.SendInput(ctx, entry, apiconv.PromptToAgent(req.Prompt))
+	err := entry.Lifecycle.SendInput(ctx, apiconv.PromptToAgent(req.Prompt))
 	if err == nil {
 		return &v1.StatusResp{Status: "sent"}, nil
 	}
@@ -546,42 +546,42 @@ func (s *taskService) sendInput(ctx context.Context, entry *taskmgr.Entry, req *
 }
 
 func (s *taskService) restartTask(ctx context.Context, entry *taskmgr.Entry, req *v1.RestartReq) (*v1.StatusResp, error) {
-	if err := s.taskMgr.Restart(ctx, entry, apiconv.PromptToAgent(req.Prompt)); err != nil {
+	if err := entry.Lifecycle.Restart(ctx, apiconv.PromptToAgent(req.Prompt)); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "restarted"}, nil
 }
 
 func (s *taskService) clearContext(ctx context.Context, entry *taskmgr.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
-	if err := s.taskMgr.ClearContext(ctx, entry); err != nil {
+	if err := entry.Lifecycle.ClearContext(); err != nil { //nolint:contextcheck // Lifecycle owns its Manager-lifetime watcher.
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "cleared"}, nil
 }
 
 func (s *taskService) compactContext(ctx context.Context, entry *taskmgr.Entry, req *v1.CompactReq) (*v1.StatusResp, error) {
-	if err := s.taskMgr.Compact(ctx, entry, req.Instructions); err != nil {
+	if err := entry.Lifecycle.Compact(ctx, req.Instructions); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "compacting"}, nil
 }
 
 func (s *taskService) stopTask(ctx context.Context, entry *taskmgr.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
-	if err := s.taskMgr.Stop(ctx, entry); err != nil {
+	if err := entry.Lifecycle.Stop(ctx); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "stopping"}, nil
 }
 
 func (s *taskService) purgeTask(ctx context.Context, entry *taskmgr.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
-	if err := s.taskMgr.Purge(ctx, entry); err != nil {
+	if err := entry.Lifecycle.Purge(ctx); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "purging"}, nil
 }
 
 func (s *taskService) reviveTask(ctx context.Context, entry *taskmgr.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
-	if err := s.taskMgr.Revive(ctx, entry); err != nil {
+	if err := entry.Lifecycle.Revive(); err != nil { //nolint:contextcheck // Lifecycle owns the revive context.
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "provisioning"}, nil
@@ -633,7 +633,7 @@ func (s *taskService) forkTask(ctx context.Context, entry *taskmgr.Entry, req *v
 		sudo = *req.Sudo
 	}
 
-	newID, err := s.taskMgr.Fork(ctx, entry, taskmgr.ForkParams{
+	newID, err := entry.Lifecycle.Fork(ctx, taskmgr.ForkParams{
 		OwnerID:             ownerID,
 		Prompt:              apiconv.PromptToAgent(req.Prompt),
 		Harness:             selectedHarness,
@@ -703,7 +703,7 @@ func (s *taskService) syncTask(ctx context.Context, entry *taskmgr.Entry, req *v
 	if req.Target == v1.SyncTargetDefault {
 		target = taskmgr.SyncTargetDefault
 	}
-	res, err := s.taskMgr.Sync(ctx, entry, target, req.Force)
+	res, err := entry.Lifecycle.Sync(ctx, target, req.Force)
 	if err != nil {
 		return nil, toDTO(err)
 	}
