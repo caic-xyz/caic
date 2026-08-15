@@ -126,6 +126,11 @@ func (s State) String() string {
 	}
 }
 
+// IsTerminal reports whether the task cannot be revived.
+func (s State) IsTerminal() bool {
+	return s == StateFailed || s == StatePurged
+}
+
 // SessionHandle bundles the resources associated with an active agent session:
 // the SSH session, the message dispatch channel, and the log writer.
 // DispatchDone is closed when the dispatch goroutine exits after MsgCh is closed.
@@ -250,8 +255,7 @@ type Task struct {
 	mu                    sync.Mutex
 	runtimeInstanceID     runtime.ID
 	runtimeConnection     runtime.ConnectionTarget
-	logPath               string                // Absolute JSONL log path used for appending task metadata.
-	logValidationSnapshot *ValidatedLogSnapshot // In-memory EOF validation usable by a same-file Reopen.
+	logPath               string // Absolute JSONL log path used for appending task metadata.
 	statsRing             [statsRingSize]runtime.Stats
 	statsLen              int
 	statsHead             int
@@ -671,20 +675,7 @@ func (t *Task) SetRelayOffset(offset int64) {
 func (t *Task) SetLogPath(path string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.logPath != path {
-		t.logValidationSnapshot = nil
-	}
 	t.logPath = path
-}
-
-// SetLogValidationSnapshot retains an in-memory EOF validation for a later Reopen.
-// It is never persisted and must match the task's current log path.
-func (t *Task) SetLogValidationSnapshot(snapshot *ValidatedLogSnapshot) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if snapshot != nil && snapshot.Path == t.logPath {
-		t.logValidationSnapshot = snapshot.validationSnapshot()
-	}
 }
 
 // LogPath returns the JSONL log path used for metadata appends.
@@ -1723,15 +1714,6 @@ func (t *Task) RecordSessionFailure(ctx context.Context, err error) bool {
 	return true
 }
 
-func (t *Task) logValidationSnapshotForPath(path string) *ValidatedLogSnapshot {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.logValidationSnapshot == nil || t.logValidationSnapshot.Path != path {
-		return nil
-	}
-	return t.logValidationSnapshot
-}
-
 func (t *Task) setLiveDiffStatLocked(ds agent.DiffStat) {
 	t.liveDiffStat = ds
 	if len(ds) > 0 {
@@ -2036,24 +2018,6 @@ func (t *Task) trackToolUse(tu *agent.ToolUseMessage) {
 			}
 		}
 	}
-}
-
-// compressLogIfDone compresses the task log after a terminal non-revivable state.
-func (t *Task) compressLogIfDone(s State) error {
-	if !compressibleLogState(s) {
-		return nil
-	}
-	t.mu.Lock()
-	path := t.logPath
-	t.mu.Unlock()
-	compressed, err := compressLogFile(path)
-	if err != nil {
-		return err
-	}
-	if compressed != path {
-		t.SetLogPath(compressed)
-	}
-	return nil
 }
 
 // syntheticContextCleared creates a SystemMessage marking a context-clear

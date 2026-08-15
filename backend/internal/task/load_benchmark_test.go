@@ -152,7 +152,6 @@ func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 					}
 					task := fixture.task()
 					task.SetLogPath(lt.LogPath())
-					task.SetLogValidationSnapshot(lt.ValidatedSnapshot())
 					w, err := store.Reopen(task)
 					if err != nil {
 						return err

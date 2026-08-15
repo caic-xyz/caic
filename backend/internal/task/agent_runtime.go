@@ -482,18 +482,15 @@ func (r *AgentRuntime) Cleanup(ctx context.Context, t *Task, reason State) Resul
 	if trailerErr != nil {
 		tlog.WarnContext(ctx, "write log trailer failed", "err", trailerErr)
 	}
-	closeErr := error(nil)
 	if log != nil {
-		closeErr = log.Close()
-		if closeErr != nil {
-			tlog.WarnContext(ctx, "close log failed", "err", closeErr)
+		if trailerErr != nil {
+			if err := log.Close(); err != nil {
+				tlog.WarnContext(ctx, "close log failed", "err", err)
+			}
+		} else if err := r.Logs.Compress(t, log, reason); err != nil {
+			tlog.WarnContext(ctx, "compress task log failed", "err", err)
 		} else {
 			tlog.DebugContext(ctx, "cleanup: log trailer written and closed")
-		}
-	}
-	if log != nil && trailerErr == nil && closeErr == nil {
-		if err := t.compressLogIfDone(reason); err != nil {
-			tlog.WarnContext(ctx, "compress task log failed", "err", err)
 		}
 	}
 	tlog.InfoContext(ctx, "cleanup done", "dur", time.Since(start).Round(time.Millisecond),
@@ -923,11 +920,10 @@ func (r *AgentRuntime) finishReviveFailure(ctx context.Context, t *Task, reviveE
 	}
 	res := Result{State: StateFailed, Err: reviveErr}
 	trailerErr := r.Logs.WriteResultTrailer(log, t.Title(), &res)
-	closeErr := log.Close()
-	if trailerErr == nil && closeErr == nil {
-		return errors.Join(reviveErr, t.compressLogIfDone(StateFailed))
+	if trailerErr != nil {
+		return errors.Join(reviveErr, trailerErr, log.Close())
 	}
-	return errors.Join(reviveErr, trailerErr, closeErr)
+	return errors.Join(reviveErr, r.Logs.Compress(t, log, StateFailed))
 }
 
 // finishStartupFailure records a startup error in the task log so the failure
@@ -940,8 +936,10 @@ func (r *AgentRuntime) finishStartupFailure(ctx context.Context, t *Task, log ag
 
 	res := Result{State: StateFailed, Err: startupErr}
 	trailerErr := r.Logs.WriteResultTrailer(log, t.Title(), &res)
-	closeErr := log.Close()
-	return errors.Join(startupErr, writeErr, trailerErr, closeErr)
+	if writeErr != nil || trailerErr != nil {
+		return errors.Join(startupErr, writeErr, trailerErr, log.Close())
+	}
+	return errors.Join(startupErr, r.Logs.Compress(t, log, StateFailed))
 }
 
 // logRelayDiag reads the relay daemon's relay.log from the instance and logs

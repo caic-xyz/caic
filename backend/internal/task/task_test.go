@@ -2837,6 +2837,23 @@ func TestState(t *testing.T) {
 			}
 		}
 	})
+	t.Run("IsTerminal", func(t *testing.T) {
+		t.Parallel()
+		for _, tt := range []struct {
+			state State
+			want  bool
+		}{
+			{StateFailed, true},
+			{StatePurged, true},
+			{StateCrashed, false},
+			{StateStopped, false},
+			{StateRunning, false},
+		} {
+			if got := tt.state.IsTerminal(); got != tt.want {
+				t.Errorf("State(%d).IsTerminal() = %t, want %t", tt.state, got, tt.want)
+			}
+		}
+	})
 	t.Run("SetStateIf", func(t *testing.T) {
 		t.Parallel()
 		t.Run("Match", func(t *testing.T) {

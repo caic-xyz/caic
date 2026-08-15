@@ -1,4 +1,4 @@
-// Benchmarks V1 task-log adoption and bounded reopen validation.
+// Benchmarks V1 task-log adoption and header-validated reopen.
 //go:build adoption_benchmark
 
 package task_test
@@ -57,7 +57,6 @@ func BenchmarkTaskAdoption(b *testing.B) {
 			Harness:       harness.Claude,
 		}
 		tk.SetLogPath(lt.LogPath())
-		tk.SetLogValidationSnapshot(lt.ValidatedSnapshot())
 		w, err := store.Reopen(tk)
 		if err != nil {
 			b.Fatal(err)

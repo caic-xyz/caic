@@ -1548,7 +1548,6 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		t.SetTitle(prompt)
 	}
 	t.SetLogPath(lt.LogPath())
-	t.SetLogValidationSnapshot(lt.ValidatedSnapshot())
 	if relaySnapshotRead {
 		t.SetRelayOffset(relaySize)
 	}
@@ -1568,7 +1567,6 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	if err := lt.LoadMessagesWithResolver(m.resolveNativeParser); err != nil {
 		return nil, fmt.Errorf("load messages for imported task %s: %w", taskID, err)
 	}
-	t.SetLogValidationSnapshot(lt.ValidatedSnapshot())
 	if len(relayRecords) > 0 {
 		relayMsgs := make([]agent.Message, len(relayRecords))
 		for i, parsed := range relayRecords {

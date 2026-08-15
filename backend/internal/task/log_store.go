@@ -1,4 +1,4 @@
-// LogStore owns task log segments, metadata headers, and trailers.
+// LogStore owns task log segments, metadata headers, trailers, and terminal compression.
 
 package task
 
@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/klauspost/compress/zstd"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
@@ -60,102 +62,45 @@ func openTaskLogForAppend(path string, t *Task, create bool) (w *taskLogWriter, 
 	if create {
 		w, err = newTaskLogWriter(cleanPath, os.O_CREATE|os.O_EXCL|os.O_RDWR|os.O_APPEND)
 		if err == nil {
-			info, statErr := w.file.Stat()
-			if statErr == nil {
-				_, statErr = verifyPhysicalLog(path, w.file, info)
-			}
-			if statErr != nil {
-				return nil, false, errors.Join(statErr, w.Close())
-			}
 			return w, true, nil
 		}
 		if !os.IsExist(err) {
 			return nil, false, fmt.Errorf("create log file: %w", err)
 		}
 	}
-
 	w, err = newTaskLogWriter(cleanPath, os.O_RDWR|os.O_APPEND)
 	if err != nil {
 		return nil, false, err
 	}
-	if snapshot := t.logValidationSnapshotForPath(cleanPath); snapshot != nil {
-		if observation, snapshotErr := validateRawLogAppendSnapshot(cleanPath, w.file, t, snapshot); snapshotErr == nil {
-			w.version = observation.Version
-			return w, false, nil
-		}
-	}
-	observation, err := validateRawLogAppend(w.file, w.file, cleanPath, t)
+	version, err := validateRawLogAppend(w.file, cleanPath, t)
 	if err != nil {
 		return nil, false, errors.Join(err, w.Close())
 	}
-	w.version = observation.Version
+	w.version = version
 	return w, false, nil
 }
 
-// validateRawLogAppendSnapshot reuses an in-memory EOF validation only after a
-// fresh bounded header and identity observation binds that validation to the open
-// append descriptor and its current path.
-func validateRawLogAppendSnapshot(path string, f *os.File, t *Task, snapshot *ValidatedLogSnapshot) (logObservation, error) {
-	if snapshot == nil || !snapshot.EOFValidated || snapshot.Path != filepath.Clean(path) {
-		return logObservation{}, errors.New("task log validation snapshot is stale")
-	}
-	info, err := f.Stat()
-	if err != nil {
-		return logObservation{}, err
-	}
+// validateRawLogAppend validates the immutable header needed to safely select
+// the append encoding. caic owns task-log writes, so reopening does not rescan
+// historical records.
+func validateRawLogAppend(f *os.File, path string, t *Task) (agent.LogVersion, error) {
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return logObservation{}, err
+		return 0, err
 	}
-	observation, err := logObservationFromReader(path, &physicalLogReader{file: f, reader: f, info: info})
-	if err != nil {
-		return logObservation{}, fmt.Errorf("validate task log snapshot for append: %w", err)
-	}
-	if observation != (logObservation{
-		Device:    snapshot.Device,
-		Inode:     snapshot.Inode,
-		Size:      snapshot.Size,
-		ModTimeNs: snapshot.ModTimeNs,
-		Version:   snapshot.Authority.Version,
-		Harness:   snapshot.Authority.Harness,
-		RawHeader: snapshot.RawHeader,
-	}) {
-		return logObservation{}, errors.New("task log validation snapshot is stale")
-	}
-	if observation.Harness != t.Harness {
-		return logObservation{}, fmt.Errorf("append task log: header harness %q does not match task harness %q", observation.Harness, t.Harness)
-	}
-	return observation, nil
-}
-
-func validateRawLogAppend(source io.ReadSeeker, f *os.File, path string, t *Task) (logObservation, error) {
-	info, err := f.Stat()
-	if err != nil {
-		return logObservation{}, err
-	}
-	if _, err := source.Seek(0, io.SeekStart); err != nil {
-		return logObservation{}, err
-	}
-	scanner := newPhysicalLogScanner(source, path)
+	scanner := newPhysicalLogScanner(f, path)
 	if _, err := scanner.ReadHeader(&jsonutil.FieldWarner{}); err != nil {
-		return logObservation{}, fmt.Errorf("validate task log for append: %w", err)
-	}
-	for scanner.Scan() {
-	}
-	if err := scanner.Err(); err != nil {
-		return logObservation{}, fmt.Errorf("validate task log for append: %w", err)
-	}
-	stableInfo, err := verifyPhysicalLog(path, f, info)
-	if err != nil {
-		return logObservation{}, fmt.Errorf("validate task log for append: %w", err)
+		return 0, fmt.Errorf("validate task log for append: %w", err)
 	}
 	if scanner.authority.Harness != t.Harness {
-		return logObservation{}, fmt.Errorf("append task log: header harness %q does not match task harness %q", scanner.authority.Harness, t.Harness)
+		return 0, fmt.Errorf("append task log: header harness %q does not match task harness %q", scanner.authority.Harness, t.Harness)
 	}
-	identity := physicalFileIdentityFromFile(f, stableInfo)
-	if !identity.Valid {
-		return logObservation{}, fmt.Errorf("task log has no stable physical identity: %s", path)
+	if err := scanner.authority.Version.Validate(); err != nil {
+		return 0, fmt.Errorf("validate task log for append: %w", err)
 	}
-	return logObservation{Device: identity.Device, Inode: identity.Inode, Size: stableInfo.Size(), ModTimeNs: stableInfo.ModTime().UnixNano(), Version: scanner.authority.Version, Harness: scanner.authority.Harness, RawHeader: string(scanner.headerRaw)}, nil
+	if _, err := f.Seek(0, io.SeekEnd); err != nil {
+		return 0, err
+	}
+	return scanner.authority.Version, nil
 }
 
 // WriteResultTrailer appends a MetaResultMessage to an active task log.
@@ -207,9 +152,110 @@ func (*LogStore) WriteContextCleared(log agent.LogSink) error {
 	return log.AppendMessage(syntheticContextCleared())
 }
 
-// reopenPath uses the task's previously validated path when available. Logs
-// loaded during import may not use the current filename convention, so the
-// validated path is the authoritative identity for a scoped terminal append.
+// Compress closes log and compresses t's log only when state is non-revivable.
+// Closing the live writer first ensures the compressed source contains every
+// completed append. A failed compression leaves the plain source for retry.
+func (s *LogStore) Compress(t *Task, log agent.LogSink, state State) error {
+	if log != nil {
+		if err := log.Close(); err != nil {
+			return fmt.Errorf("close task log before compression: %w", err)
+		}
+	}
+	if !state.IsTerminal() {
+		return nil
+	}
+	path := t.LogPath()
+	compressed, err := s.compressPath(path)
+	if err != nil {
+		return err
+	}
+	if compressed != path {
+		t.SetLogPath(compressed)
+	}
+	return nil
+}
+
+// CompressTerminalLogs compresses loaded non-revivable task logs during startup.
+// Plain sources take precedence over interrupted plain-and-compressed pairs, so
+// a retry always compresses the authoritative plain source.
+func (s *LogStore) CompressTerminalLogs(logs []*LoadedTask) error {
+	var errs []error
+	for _, lt := range logs {
+		if lt == nil || !lt.State.IsTerminal() || isLogCompressed(lt.path) {
+			continue
+		}
+		compressed, err := s.compressPath(lt.path)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		lt.path = compressed
+		info, err := os.Stat(compressed)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("stat compressed task log: %w", err))
+			continue
+		}
+		lt.LogSize = info.Size()
+	}
+	return errors.Join(errs...)
+}
+
+// compressPath atomically replaces a plain terminal task log with its zstd
+// representation. A failed compression leaves the source log intact.
+func (*LogStore) compressPath(path string) (string, error) {
+	if path == "" || isLogCompressed(path) {
+		return path, nil
+	}
+	if !strings.HasSuffix(path, logPlainExt) {
+		return "", fmt.Errorf("not a task log path: %s", path)
+	}
+	info, err := os.Stat(filepath.Clean(path))
+	if err != nil {
+		return "", err
+	}
+	tmp := compressedLogTempPath(path)
+	if err := os.Remove(tmp); err != nil && !os.IsNotExist(err) {
+		return "", fmt.Errorf("remove stale temp compressed log: %w", err)
+	}
+	in, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return "", err
+	}
+	out, err := os.OpenFile(filepath.Clean(tmp), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return "", errors.Join(err, in.Close())
+	}
+	enc, err := zstd.NewWriter(out)
+	if err != nil {
+		return "", errors.Join(err, in.Close(), out.Close())
+	}
+	_, copyErr := io.Copy(enc, in)
+	closeErr := errors.Join(enc.Close(), out.Close(), in.Close())
+	if err := errors.Join(copyErr, closeErr); err != nil {
+		_ = os.Remove(tmp)
+		return "", err
+	}
+	if err := os.Chtimes(tmp, info.ModTime(), info.ModTime()); err != nil {
+		_ = os.Remove(tmp)
+		return "", fmt.Errorf("set compressed log mtime: %w", err)
+	}
+	dst := compressedLogPath(path)
+	if err := os.Rename(tmp, dst); err != nil {
+		_ = os.Remove(tmp)
+		return "", fmt.Errorf("rename compressed log: %w", err)
+	}
+	if err := os.Remove(path); err != nil {
+		return "", errors.Join(
+			fmt.Errorf("remove plain log after compression: %w", err),
+			os.Remove(dst),
+		)
+	}
+	return dst, nil
+}
+
+// reopenPath uses a task's retained log path when available. Imported logs
+// may not use the current filename convention, so that path selects the log
+// for a scoped terminal append.
 func (s *LogStore) reopenPath(t *Task) (string, error) {
 	if path := t.LogPath(); path != "" {
 		return path, nil

@@ -39,14 +39,12 @@ func TestRealTaskLogCorpus(t *testing.T) {
 	if len(tasks) == 0 {
 		t.Fatal("LoadLogs returned no task logs")
 	}
-	for _, task := range tasks {
-		snapshot := task.ValidatedSnapshot()
-		if snapshot == nil {
-			t.Errorf("load %s: no validated snapshot", filepath.Base(task.LogPath()))
-			continue
+	for _, loaded := range tasks {
+		if loaded.LogPath() == "" {
+			t.Fatal("loaded task has no log path")
 		}
-		if snapshot.Authority.Version != task.LogVersion {
-			t.Errorf("load %s: snapshot version %d, want %d", filepath.Base(task.LogPath()), snapshot.Authority.Version, task.LogVersion)
+		if err := loaded.LogVersion.Validate(); err != nil {
+			t.Fatalf("loaded task %s has invalid log version: %v", loaded.TaskID, err)
 		}
 	}
 	t.Logf("loaded logs=%d candidates=%d physical-bytes=%d source=%s", len(tasks), len(paths), bytes, source)

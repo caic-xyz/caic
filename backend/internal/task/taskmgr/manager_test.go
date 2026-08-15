@@ -2001,9 +2001,6 @@ func TestManager(t *testing.T) {
 			if len(logs[0].Msgs) != 1 {
 				t.Fatalf("loaded messages = %d, want 1", len(logs[0].Msgs))
 			}
-			if snapshot := logs[0].ValidatedSnapshot(); snapshot == nil || !snapshot.EOFValidated {
-				t.Fatalf("snapshot = %#v, want validated EOF snapshot", snapshot)
-			}
 		})
 	})
 	t.Run("LoadPurgedTasks", func(t *testing.T) {

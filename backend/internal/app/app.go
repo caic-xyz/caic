@@ -277,8 +277,8 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		instances, err := runtimes.List(ctx)
 		instanceCh <- instanceDiscoveryResult{instances, err}
 	}()
-	// Compression replaces log paths, so finish maintenance before task import
-	// can expose any task to a replay request.
+	// Compression replaces log paths, so finish maintenance before task import can
+	// expose any task to a replay request.
 	err = func() error {
 		startupCtx, tk := trace.NewTask(ctx, "prepare-purged-task-logs")
 		defer tk.End()
@@ -289,7 +289,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		}
 		slog.InfoContext(startupCtx, "loaded task log headers", "n", len(logs), "dur", time.Since(start))
 		start = time.Now()
-		if err := task.CompressTerminalLogs(logs); err != nil {
+		if err := taskMgr.Logs.CompressTerminalLogs(logs); err != nil {
 			slog.WarnContext(startupCtx, "compress terminal task logs failed", "err", err)
 		} else {
 			slog.InfoContext(startupCtx, "compressed terminal task logs", "dur", time.Since(start))

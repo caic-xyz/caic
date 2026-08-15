@@ -4,6 +4,8 @@ package task
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,9 +19,17 @@ import (
 )
 
 func logLines(t *testing.T, path string) []string {
-	data, err := os.ReadFile(path) //nolint:gosec // path is test-controlled.
+	r, err := openLogReader(path)
 	if err != nil {
 		t.Fatal(err)
+	}
+	data, readErr := io.ReadAll(r)
+	closeErr := r.Close()
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if closeErr != nil {
+		t.Fatal(closeErr)
 	}
 	return strings.Split(strings.TrimSpace(string(data)), "\n")
 }
@@ -44,6 +54,28 @@ func TestLogStore(t *testing.T) {
 		}
 		if got.ReasoningOutputTokens != 123 {
 			t.Errorf("ReasoningOutputTokens = %d, want 123", got.ReasoningOutputTokens)
+		}
+	})
+	t.Run("CompressClosesWriterBeforeCompression", func(t *testing.T) {
+		t.Parallel()
+		store := &LogStore{LogDir: t.TempDir()}
+		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Codex}
+		log, err := store.Open(tk)
+		if err != nil {
+			t.Fatal(err)
+		}
+		plainPath := tk.LogPath()
+		if err := store.Compress(tk, log, StateFailed); err != nil {
+			t.Fatal(err)
+		}
+		if !isLogCompressed(tk.LogPath()) {
+			t.Fatalf("compressed log path = %q, want compressed", tk.LogPath())
+		}
+		if _, err := os.Stat(plainPath); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("plain log stat = %v, want os.ErrNotExist", err)
+		}
+		if err := log.AppendMessage(&agent.LogMessage{MessageType: "caic_log", Line: "after compression"}); !errors.Is(err, os.ErrClosed) {
+			t.Fatalf("append after compression error = %v, want os.ErrClosed", err)
 		}
 	})
 	t.Run("OpenWritesMetadata", func(t *testing.T) {
@@ -232,104 +264,7 @@ func TestLogStore(t *testing.T) {
 			t.Fatalf("Reopen error = %v, want harness mismatch", err)
 		}
 	})
-	t.Run("ReopenWritesValidatedInodeAfterPathReplacement", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		store := &LogStore{LogDir: dir}
-		tk := &Task{
-			ID:            ksid.NewID(),
-			InitialPrompt: agent.Prompt{Text: "test"},
-			Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
-			Harness:       harness.Codex,
-		}
-		path := filepath.Join(dir, taskLogFileName(tk))
-		header := mustJSON(t, agent.MetaMessage{
-			MessageType: "caic_meta",
-			Version:     int(agent.LogVersionV1),
-			Prompt:      "test",
-			Repos:       []agent.MetaRepo{{Name: "org/repo", Branch: "caic-0"}},
-			Harness:     harness.Codex,
-		}) + "\n"
-		if err := os.WriteFile(path, []byte(header), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		snapshot, err := loadSemanticLogSnapshot(path, func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-			return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		tk.SetLogPath(path)
-		tk.SetLogValidationSnapshot(snapshot)
-		w, err := store.Reopen(tk)
-		if err != nil {
-			t.Fatal(err)
-		}
-		validatedPath := path + ".validated"
-		if err := os.Rename(path, validatedPath); err != nil {
-			t.Fatal(err)
-		}
-		const replacement = "unvalidated replacement\n"
-		if err := os.WriteFile(path, []byte(replacement), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		const appendLine = "{\"type\":\"caic_result\",\"state\":\"waiting\"}\n"
-		if err := w.AppendNative([]byte(appendLine)); err != nil {
-			t.Fatal(err)
-		}
-		if err := w.Close(); err != nil {
-			t.Fatal(err)
-		}
-		gotReplacement, err := os.ReadFile(path) //nolint:gosec // path is test-controlled.
-		if err != nil {
-			t.Fatal(err)
-		}
-		if string(gotReplacement) != replacement {
-			t.Fatalf("replacement was mutated: %q", gotReplacement)
-		}
-		gotValidated, err := os.ReadFile(validatedPath) //nolint:gosec // path is test-controlled.
-		if err != nil {
-			t.Fatal(err)
-		}
-		if string(gotValidated) != header+appendLine {
-			t.Fatalf("validated inode = %q, want header plus append", gotValidated)
-		}
-	})
-	t.Run("ReopenSnapshotRejectsPathReplacementBeforeReturn", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		tk := &Task{ID: ksid.NewID(), Harness: harness.Codex}
-		path := filepath.Join(dir, taskLogFileName(tk))
-		header := mustJSON(t, agent.MetaMessage{
-			MessageType: "caic_meta",
-			Version:     int(agent.LogVersionV1),
-			Prompt:      "test",
-			Harness:     harness.Codex,
-		}) + "\n"
-		if err := os.WriteFile(path, []byte(header), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		snapshot, err := loadSemanticLogSnapshot(path, func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-			return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		appendFile, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND, 0o600) //nolint:gosec // path is test-controlled.
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = appendFile.Close() })
-		if err := os.Rename(path, path+".validated"); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(header), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := validateRawLogAppendSnapshot(path, appendFile, tk, snapshot); err == nil || !strings.Contains(err.Error(), "replaced") {
-			t.Fatalf("snapshot append validation error = %v, want path replacement", err)
-		}
-	})
+
 	t.Run("Reopen", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
