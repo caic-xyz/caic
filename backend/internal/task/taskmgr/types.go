@@ -3,19 +3,12 @@
 package taskmgr
 
 import (
-	"context"
-
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
-
-// TerminalReplayPublisher publishes a derived replay cache from an EOF-validated
-// terminal task-log source. It is required because terminal publication is part
-// of Manager's lifecycle contract; cache failure remains non-fatal to the task.
-type TerminalReplayPublisher func(context.Context, *task.LoadedTask) error
 
 // CreateParams bundles the HTTP path's task-creation parameters.
 // The caller (Server) reads docker image, GitHub token access, and per-repo

@@ -1,4 +1,4 @@
-// Tests task-log proof paths stay bounded to the raw header rather than rescanning logs.
+// Tests task-log observation paths stay bounded to the raw header rather than rescanning logs.
 
 package task
 
@@ -15,12 +15,12 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
-// TestCacheProofFromSnapshotRereadsStrictRawHeader rejects a same-stat raw
-// header replacement before a snapshot can serve as a cache proof.
-func TestCacheProofFromSnapshotRereadsStrictRawHeader(t *testing.T) {
+// TestLogObservationFromSnapshotRereadsStrictRawHeader rejects a same-stat raw
+// header replacement before a retained snapshot can be reused.
+func TestLogObservationFromSnapshotRereadsStrictRawHeader(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "task.jsonl")
-	original := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: int(agent.LogVersionV1), Harness: harness.Claude, Prompt: "proof"})
+	original := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: int(agent.LogVersionV1), Harness: harness.Claude, Prompt: "bound"})
 	if err := os.WriteFile(path, []byte(original+"\n{\"type\":\"assistant\"}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestCacheProofFromSnapshotRereadsStrictRawHeader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	changed := bytes.Replace([]byte(original), []byte(`"proof"`), []byte(`"other"`), 1)
+	changed := bytes.Replace([]byte(original), []byte(`"bound"`), []byte(`"other"`), 1)
 	if len(changed) != len(original) {
 		t.Fatal("test header mutation changed length")
 	}
@@ -44,22 +44,22 @@ func TestCacheProofFromSnapshotRereadsStrictRawHeader(t *testing.T) {
 	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := cacheProofFromValidatedSnapshot(snapshot, path); ok {
-		t.Fatal("snapshot cache proof accepted a raw header replacement with stable identity and stat")
+	if _, ok := logObservationFromValidatedSnapshot(snapshot, path); ok {
+		t.Fatal("retained snapshot accepted a raw header replacement with stable identity and stat")
 	}
 }
 
-// TestCacheProofForLogHeaderPassBound exercises the same reader core used by
-// CacheProofForLog with large plain and zstd records after the header. A proof
-// may fill its bounded scanner buffer, but must not validate or read the full
-// raw log on a replay-cache hit.
-func TestCacheProofForLogHeaderPassBound(t *testing.T) {
+// TestLogObservationHeaderPassBound exercises the bounded reader core with
+// large plain and zstd records after the header. The
+// bounded scanner may fill its buffer, but must not validate or read the full
+// raw log during an append validation.
+func TestLogObservationHeaderPassBound(t *testing.T) {
 	t.Parallel()
 	meta := mustJSON(t, agent.MetaMessage{
 		MessageType: "caic_meta",
 		Version:     int(agent.LogVersionV1),
 		Harness:     harness.Claude,
-		Prompt:      "proof bound",
+		Prompt:      "validated header",
 	})
 	record := bytes.Repeat([]byte("x"), 8<<20)
 	for _, compressed := range []bool{false, true} {
@@ -105,7 +105,7 @@ func TestCacheProofForLogHeaderPassBound(t *testing.T) {
 			}
 			counted := &countingReadCloser{reader: opened.reader, closeFn: opened.Close}
 			reader := &physicalLogReader{file: opened.file, reader: counted, info: opened.info}
-			if _, err := cacheProofFromReader(path, reader); err != nil {
+			if _, err := logObservationFromReader(path, reader); err != nil {
 				_ = reader.Close()
 				t.Fatal(err)
 			}
@@ -113,7 +113,7 @@ func TestCacheProofForLogHeaderPassBound(t *testing.T) {
 				t.Fatal(err)
 			}
 			if counted.bytes > 64<<10 {
-				t.Fatalf("CacheProofForLog read %d bytes after a small header, want at most the bounded header scanner buffer", counted.bytes)
+				t.Fatalf("logObservationForLog read %d bytes after a small header, want at most the bounded header scanner buffer", counted.bytes)
 			}
 		})
 	}

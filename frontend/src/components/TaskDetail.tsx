@@ -412,6 +412,9 @@ export default function TaskDetail(props: Props) {
     let timer: ReturnType<typeof setTimeout> | null = null;
     let delay = 500;
     let live = false;
+    // A named server history error is terminal for this connection lifecycle.
+    // Do not replace its explicit error with reconnect churn until this effect resets.
+    let historyFailed = false;
     let replaceOnNextFlush = true;
     let liveFlushTimer: ReturnType<typeof setTimeout> | null = null;
     let connectionGeneration = 0;
@@ -464,10 +467,11 @@ export default function TaskDetail(props: Props) {
     }
 
     function connect() {
+      if (historyFailed) return;
       closeConnection();
       replaceOnNextFlush = true;
       const generation = ++connectionGeneration;
-      const nextES = taskEventStream(
+      const startedES = taskEventStream(
         id,
         (ev) => {
           if (generation !== connectionGeneration) return;
@@ -487,13 +491,26 @@ export default function TaskDetail(props: Props) {
           // Render replayed history in one pass before switching to live turn-boundary flushing.
           flushPendingEvents();
           live = true;
+
         },
         () => {
           if (generation === connectionGeneration) delay = 500;
         },
+        (historyError) => {
+          if (generation !== connectionGeneration) return;
+          historyFailed = true;
+          connectionGeneration += 1;
+          clearReconnectTimer();
+          clearLiveFlushTimer();
+          pendingEvents = [];
+          live = false;
+          startedES.close();
+          if (es === startedES) es = null;
+          untrack(() => props.onError(`Task history error: ${historyError.message}`));
+        },
       );
-      es = nextES;
-      nextES.onerror = () => {
+      es = startedES;
+      startedES.onerror = () => {
         if (generation !== connectionGeneration) return;
         const wasLive = live;
         if (wasLive) flushPendingEvents();
@@ -502,7 +519,7 @@ export default function TaskDetail(props: Props) {
           pendingEvents = [];
         }
         connectionGeneration += 1;
-        nextES.close();
+        startedES.close();
         es = null;
         live = false;
         const st = props.taskState;
@@ -517,7 +534,7 @@ export default function TaskDetail(props: Props) {
     }
 
     function reconnectWhenAvailable() {
-      if (document.hidden || !navigator.onLine || es !== null) return;
+      if (historyFailed || document.hidden || !navigator.onLine || es !== null) return;
       delay = 500;
       connect();
     }

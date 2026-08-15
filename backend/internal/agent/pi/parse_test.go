@@ -5,6 +5,7 @@ package pi
 import (
 	"bytes"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -468,6 +469,34 @@ func TestBackendNewWire(t *testing.T) {
 		}
 		if len(msgs3) != 0 {
 			t.Fatalf("update3: got %d messages, want 0 (empty delta filtered)", len(msgs3))
+		}
+	})
+
+	t.Run("tool output tracking is bounded and evicted on completion", func(t *testing.T) {
+		t.Parallel()
+		wire := &piWireFormat{}
+		update := func(id string) []byte {
+			return []byte(`{"type":"tool_execution_update","toolCallId":"` + id + `","partialResult":{"content":[{"type":"text","text":"x"}]}}`)
+		}
+		for i := range maxTrackedToolOutputs {
+			if _, err := wire.ParseMessage(update("tool-" + strconv.Itoa(i))); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if got := len(wire.toolOutputLen); got != maxTrackedToolOutputs {
+			t.Fatalf("tracked tool outputs = %d, want %d", got, maxTrackedToolOutputs)
+		}
+		if _, err := wire.ParseMessage(update("overflow")); err != nil {
+			t.Fatal(err)
+		}
+		if got := len(wire.toolOutputLen); got != 1 {
+			t.Fatalf("tracked tool outputs after reset = %d, want 1", got)
+		}
+		if _, err := wire.ParseMessage([]byte(`{"type":"tool_execution_end","toolCallId":"overflow"}`)); err != nil {
+			t.Fatal(err)
+		}
+		if got := len(wire.toolOutputLen); got != 0 {
+			t.Fatalf("tracked tool outputs after result = %d, want 0", got)
 		}
 	})
 

@@ -20,7 +20,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
-	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -37,7 +36,6 @@ import (
 // raw HTTP response writing. Task command orchestration and DTO assembly belong
 // to taskService.
 type taskHandlers struct {
-	replay     *ReplayPublisher
 	taskMgr    *taskmgr.Manager
 	repoSvc    *repo.Service
 	repoStatus *ci.RepoStatusStore
@@ -60,12 +58,12 @@ func (e *historyLoadError) Unwrap() error { return e.err }
 
 // taskEventStream writes one task's ordered SSE event stream.
 type taskEventStream struct {
-	ctx        context.Context
-	w          http.ResponseWriter
-	flusher    http.Flusher
-	controller *http.ResponseController
-	tracker    *apiconv.ToolTimingTracker
-	nextID     int
+	ctx          context.Context
+	w            http.ResponseWriter
+	flusher      http.Flusher
+	controller   *http.ResponseController
+	tracker      *apiconv.ToolTimingTracker
+	writtenBytes int
 }
 
 func (s *taskEventStream) writeMessages(messages []agent.Message, at time.Time) error {
@@ -95,10 +93,11 @@ func (s *taskEventStream) writeEvent(ev *v1.EventMessage) error {
 	if err != nil {
 		return fmt.Errorf("marshal SSE event: %w", err)
 	}
-	if _, err := fmt.Fprintf(s.w, "event: message\ndata: %s\nid: %d\n\n", data, s.nextID); err != nil {
+	n, err := fmt.Fprintf(s.w, "event: message\ndata: %s\n\n", data)
+	if err != nil {
 		return fmt.Errorf("write SSE event: %w", err)
 	}
-	s.nextID++
+	s.writtenBytes += n
 	return nil
 }
 
@@ -142,19 +141,48 @@ func (h *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Terminal tasks have no live channel: replay their history straight from
-	// the on-disk log without materializing it into memory. This keeps server
-	// memory O(1) for the very large logs that previously failed to load.
+	// Terminal tasks have no live channel. Stream their parsed raw-log history
+	// directly, keeping memory bounded even for very large task logs.
 	state := entry.Task().GetState()
 	loadedTask := entry.LoadedTask()
-	if isTaskEventTerminal(state) && loadedTask != nil {
-		h.streamHistoryFromDisk(r.Context(), w, flusher, entry)
+	if isTaskEventTerminal(state) || state == task.StateStopped {
+		var sourceErr error
+		loadedTask, sourceErr = h.taskMgr.HistorySource(entry)
+		if sourceErr != nil {
+			slog.WarnContext(r.Context(), "load task SSE history source", "task", entry.Task().ID, "err", sourceErr)
+			if state != task.StateStopped && r.Context().Err() == nil {
+				writeReplayHistoryError(w, flusher)
+			}
+			return
+		}
+	}
+	if isTaskEventTerminal(state) && loadedTask != nil && entry.Task().LogPath() != "" {
+		stream.tracker = apiconv.NewToolTimingTracker(entry.Task().Harness, apiconv.FormatToolOutput)
+		if err := h.streamHistoryFromDisk(&stream, entry, loadedTask); err != nil {
+			slog.WarnContext(r.Context(), "stream terminal task SSE history", "task", entry.Task().ID, "err", err)
+			if r.Context().Err() == nil {
+				writeReplayHistoryError(w, flusher)
+			}
+			return
+		}
+		if err := stream.writeReady(); err != nil {
+			slog.WarnContext(r.Context(), "write terminal task SSE ready", "task", entry.Task().ID, "err", err)
+			return
+		}
+		if err := stream.controller.Flush(); err != nil {
+			slog.WarnContext(r.Context(), "flush terminal task SSE stream", "task", entry.Task().ID, "err", err)
+		}
 		return
 	}
+
 	if err := h.streamTaskEvents(&stream, entry, state, loadedTask); err != nil {
 		slog.WarnContext(r.Context(), "stream task SSE events", "task", entry.Task().ID, "err", err)
 		var historyErr *historyLoadError
-		if r.Context().Err() == nil && errors.As(err, &historyErr) {
+		// A stopped task can be revived while its raw log is being scanned.
+		// That scan is intentionally invalidated by growth; close so the client
+		// reconnects against the new lifecycle rather than publishing a terminal
+		// history failure. Terminal raw-log corruption remains explicit below.
+		if state != task.StateStopped && r.Context().Err() == nil && errors.As(err, &historyErr) {
 			writeReplayHistoryError(w, flusher)
 		}
 	}
@@ -166,21 +194,39 @@ func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.
 		h.taskMgr.LoadMessagesOnDemand(entry)
 	}
 
-	history, live, unsub := entry.Task().Subscribe(stream.ctx)
+	rawHistory := shouldReplayHistoryFromDisk(state, loadedTask)
+	var history []agent.Message
+	var statsHistory []runtime.Stats
+	var live <-chan agent.Message
+	var statsLive <-chan runtime.Stats
+	var unsub, statsUnsub func()
+	if rawHistory {
+		// Subscribe before scanning so a revive's new live output is buffered,
+		// but do not copy stale in-memory messages or stats: raw disk is the
+		// authoritative history for this stopped incarnation.
+		live, unsub = entry.Task().SubscribeLiveMessages(stream.ctx)
+		statsLive, statsUnsub = entry.Task().SubscribeLiveStats(stream.ctx)
+	} else {
+		history, live, unsub = entry.Task().Subscribe(stream.ctx)
+		statsHistory, statsLive, statsUnsub = entry.Task().SubscribeStats(stream.ctx)
+	}
 	defer unsub()
-	statsHistory, statsLive, statsUnsub := entry.Task().SubscribeStats(stream.ctx)
 	defer statsUnsub()
 
 	stream.tracker = apiconv.NewToolTimingTracker(entry.Task().Harness, apiconv.FormatToolOutput)
 
 	now := time.Now()
-	if shouldReplayHistoryFromDisk(state, loadedTask) {
-		// A stopped task has no reliable live history source. Its disk history is
-		// published only through the EOF- and identity-gated replay store; a
-		// failed rebuild returns an explicit stream error rather than a misleading
-		// empty ready conversation.
-		if err := h.streamReplayStore(stream.ctx, stream.w, stream.flusher, entry, &stream.nextID); err != nil {
+	if rawHistory {
+		// A stopped task no longer has reliable in-memory history. Parse and
+		// stream its raw log directly rather than building a derived cache.
+		if err := h.streamHistoryFromDisk(stream, entry, loadedTask); err != nil {
 			return &historyLoadError{err: err}
+		}
+		// Revive may begin while the stopped incarnation is being scanned. Do
+		// not publish ready or buffered live events from that new incarnation;
+		// close so the client reconnects against its current lifecycle.
+		if entry.Task().GetState() != state {
+			return nil
 		}
 	} else {
 		if err := stream.writeMessages(filterHistoryForReplay(history), now); err != nil {
@@ -236,25 +282,50 @@ func isTaskEventTerminal(state task.State) bool {
 	return state == task.StatePurged || state == task.StateCrashed || state == task.StateFailed
 }
 
-// streamHistoryFromDisk replays a terminal task without subscribing to live
-// messages. It prefers the EventMessage sidecar: validated zstd JSONL lines are
-// copied straight into SSE frames. Raw-log parsing is only the cold fallback used
-// to regenerate a missing or stale sidecar.
-func (h *taskHandlers) streamHistoryFromDisk(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, entry *taskmgr.Entry) {
-	idx := 0
-	if err := h.streamReplayStore(ctx, w, flusher, entry, &idx); err != nil {
-		if errors.Is(err, task.ErrRetainedSnapshotMismatch) {
-			slog.Warn("stream terminal replay: task log changed since validation", "task", entry.Task().ID, "err", err)
-		} else {
-			slog.Warn("stream terminal replay: could not verify task log", "task", entry.Task().ID, "err", err)
-		}
-		if ctx.Err() == nil {
-			writeReplayHistoryError(w, flusher)
-		}
-		return
+// streamHistoryFromDisk parses and writes history one message at a time. The
+// parser validates the scan through EOF while the stream emits incremental SSE
+// frames, so task history is never retained as a derived cache or full slice.
+func (h *taskHandlers) streamHistoryFromDisk(stream *taskEventStream, entry *taskmgr.Entry, lt *task.LoadedTask) error {
+	if lt == nil || lt.LogPath() == "" {
+		return errors.New("task has no replayable log")
 	}
-	_, _ = fmt.Fprint(w, "event: ready\ndata: {}\n\n")
-	flusher.Flush()
+	if stream.tracker == nil {
+		stream.tracker = apiconv.NewToolTimingTracker(entry.Task().Harness, apiconv.FormatToolOutput)
+	}
+	const historyFlushBytes = 64 << 10
+	lastFlushBytes := stream.writtenBytes
+	cleanTurnComplete := false
+	emit := func(parsed agent.ParsedMessage) error {
+		message := parsed.Message
+		if exit, ok := message.(*agent.ExitMessage); ok && exit.ExitCode != 0 && cleanTurnComplete {
+			return nil
+		}
+		if replayClearsExit(message) {
+			cleanTurnComplete = false
+		}
+		if result, ok := message.(*agent.ResultMessage); ok {
+			cleanTurnComplete = !result.IsError
+		}
+		at := parsed.ProducerTime
+		if at.IsZero() {
+			at = time.Now()
+		}
+		if err := stream.writeMessages([]agent.Message{message}, at); err != nil {
+			return err
+		}
+		if stream.writtenBytes-lastFlushBytes >= historyFlushBytes {
+			if err := stream.controller.Flush(); err != nil {
+				return fmt.Errorf("flush task history SSE stream: %w", err)
+			}
+			lastFlushBytes = stream.writtenBytes
+		}
+		return nil
+	}
+	_, err := lt.ScanMessagesWithContext(stream.ctx, emit)
+	if err != nil {
+		return fmt.Errorf("stream raw task history: %w", err)
+	}
+	return nil
 }
 
 func writeReplayHistoryError(w io.Writer, flusher http.Flusher) {
@@ -268,56 +339,8 @@ func writeReplayHistoryError(w io.Writer, flusher http.Flusher) {
 	flusher.Flush()
 }
 
-// streamReplayStore serves the rebuildable DTO sidecar, regenerating it from
-// the raw log on a miss. A successful cache hit never invokes a harness parser
-// or DTO converter; it only decompresses lines and frames them as SSE.
-func (h *taskHandlers) streamReplayStore(ctx context.Context, w io.Writer, flusher http.Flusher, entry *taskmgr.Entry, idx *int) error {
-	lt := entry.LoadedTask()
-	if lt == nil || lt.LogPath() == "" {
-		return errors.New("task has no replayable log")
-	}
-	if replay, ok := h.replay.Open(lt); ok {
-		if err := ctx.Err(); err != nil {
-			replay.Close()
-			return err
-		}
-		result := replay.WriteSSE(w, flusher, idx)
-		replay.Close()
-		switch result {
-		case eventreplay.SSEComplete:
-			return nil
-		case eventreplay.SSEPartial:
-			return errors.New("replay SSE write failed after history publication")
-		case eventreplay.SSEUnpublished:
-			// No bytes reached the client, so a full regeneration can start at ID 0.
-		}
-	}
-	if err := h.replay.regenerate(ctx, lt); err != nil {
-		return fmt.Errorf("regenerate replay cache: %w", err)
-	}
-	replay, ok := h.replay.Open(lt)
-	if !ok {
-		return errors.New("regenerated replay cache was not publishable")
-	}
-	defer replay.Close()
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	switch replay.WriteSSE(w, flusher, idx) {
-	case eventreplay.SSEComplete:
-		return nil
-	case eventreplay.SSEPartial:
-		return errors.New("regenerated replay SSE write failed after history publication")
-	default:
-		return errors.New("regenerated replay cache could not be published")
-	}
-}
-
 func shouldReplayHistoryFromDisk(state task.State, lt *task.LoadedTask) bool {
-	if lt == nil {
-		return false
-	}
-	return state == task.StateStopped
+	return state == task.StateStopped && lt != nil && lt.LogPath() != ""
 }
 
 // handleTaskListEvents streams patch events for the task list as SSE. On first

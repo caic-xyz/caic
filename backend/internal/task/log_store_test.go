@@ -1,10 +1,9 @@
-// Tests for LogStore log segment creation, trailers, and sidecar-free reopening.
+// Tests for LogStore log segment creation, trailers, and validated reopening.
 
 package task
 
 import (
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,85 +22,6 @@ func logLines(t *testing.T, path string) []string {
 		t.Fatal(err)
 	}
 	return strings.Split(strings.TrimSpace(string(data)), "\n")
-}
-
-func TestTaskCacheProofForLog(t *testing.T) {
-	t.Parallel()
-	newTask := func(t *testing.T) (*Task, string, *ValidatedLogSnapshot) {
-		dir := t.TempDir()
-		tk := &Task{ID: ksid.NewID(), Harness: harness.Codex}
-		path := filepath.Join(dir, taskLogFileName(tk))
-		header := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: int(agent.LogVersionV1), Prompt: "proof", Harness: harness.Codex})
-		if err := os.WriteFile(path, []byte(header+"\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		snapshot, err := loadSemanticLogSnapshot(path, func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-			return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		tk.SetLogPath(path)
-		return tk, path, snapshot
-	}
-
-	t.Run("rejects replacement identity", func(t *testing.T) {
-		t.Parallel()
-		tk, path, snapshot := newTask(t)
-		tk.SetLogValidationSnapshot(snapshot)
-		if err := os.Rename(path, path+".old"); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(snapshot.RawHeader+"\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tk.CacheProofForLog(path); !errors.Is(err, ErrRetainedSnapshotMismatch) {
-			t.Fatalf("replacement proof error = %v, want retained-snapshot mismatch", err)
-		}
-	})
-	t.Run("reports observation failure separately", func(t *testing.T) {
-		t.Parallel()
-		tk, path, snapshot := newTask(t)
-		tk.SetLogValidationSnapshot(snapshot)
-		if err := os.Remove(path); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tk.CacheProofForLog(path); err == nil || errors.Is(err, ErrRetainedSnapshotMismatch) || !strings.Contains(err.Error(), "observe task log against retained snapshot") {
-			t.Fatalf("missing log proof error = %v, want observation failure", err)
-		}
-	})
-	t.Run("rejects header mutation", func(t *testing.T) {
-		t.Parallel()
-		tk, path, snapshot := newTask(t)
-		tk.SetLogValidationSnapshot(snapshot)
-		info, err := os.Stat(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		mutated := strings.Replace(snapshot.RawHeader, "proof", "other", 1)
-		if len(mutated) != len(snapshot.RawHeader) {
-			t.Fatal("test header mutation changed length")
-		}
-		if err := os.WriteFile(path, []byte(mutated+"\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tk.CacheProofForLog(path); err == nil {
-			t.Fatal("same-stat header mutation was accepted by retained task proof")
-		}
-	})
-	t.Run("rejects snapshot without EOF", func(t *testing.T) {
-		t.Parallel()
-		tk, path, snapshot := newTask(t)
-		invalid := *snapshot
-		invalid.EOFValidated = false
-		tk.SetLogValidationSnapshot(&invalid)
-		if _, err := tk.CacheProofForLog(path); err == nil {
-			t.Fatal("non-EOF snapshot was accepted by task proof provider")
-		}
-	})
 }
 
 func TestLogStore(t *testing.T) {
@@ -126,7 +46,7 @@ func TestLogStore(t *testing.T) {
 			t.Errorf("ReasoningOutputTokens = %d, want 123", got.ReasoningOutputTokens)
 		}
 	})
-	t.Run("OpenWritesMetadataWithoutReplaySidecar", func(t *testing.T) {
+	t.Run("OpenWritesMetadata", func(t *testing.T) {
 		t.Parallel()
 		store := &LogStore{LogDir: t.TempDir()}
 		tk := &Task{
@@ -144,9 +64,6 @@ func TestLogStore(t *testing.T) {
 		}
 		if err := w.Close(); err != nil {
 			t.Fatal(err)
-		}
-		if _, err := os.Stat(strings.TrimSuffix(tk.LogPath(), ".jsonl") + ".events.zst"); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("replay sidecar after Open = %v, want absent", err)
 		}
 		entries := logLines(t, tk.LogPath())
 		if len(entries) != 1 {
@@ -168,11 +85,6 @@ func TestLogStore(t *testing.T) {
 		}
 		if len(meta.Repos) != 1 || meta.Repos[0].ContainerPath != "~/src/org/repo" {
 			t.Fatalf("metadata repos = %+v", meta.Repos)
-		}
-
-		tk.addMessage(t.Context(), &agent.TextMessage{Text: "hello"}, false)
-		if _, err := os.Stat(strings.TrimSuffix(tk.LogPath(), ".jsonl") + ".events.zst"); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("replay sidecar after active message = %v, want absent", err)
 		}
 	})
 	t.Run("OpenPreservesExistingLogAuthority", func(t *testing.T) {
@@ -418,7 +330,7 @@ func TestLogStore(t *testing.T) {
 			t.Fatalf("snapshot append validation error = %v, want path replacement", err)
 		}
 	})
-	t.Run("ReopenDoesNotCreateReplaySidecar", func(t *testing.T) {
+	t.Run("Reopen", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		tk := &Task{ID: ksid.NewID(), Harness: harness.Codex}
@@ -434,9 +346,6 @@ func TestLogStore(t *testing.T) {
 		}
 		if err := w.Close(); err != nil {
 			t.Fatal(err)
-		}
-		if _, err := os.Stat(strings.TrimSuffix(path, ".jsonl") + ".events.zst"); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("replay sidecar after Reopen = %v, want absent", err)
 		}
 	})
 }

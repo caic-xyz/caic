@@ -88,9 +88,6 @@ func newTestManager(t testing.TB, cfg Config) *Manager { //nolint:gocritic // Co
 	if cfg.RuntimeStartTimeout == 0 {
 		cfg.RuntimeStartTimeout = time.Hour
 	}
-	if cfg.TerminalReplay == nil {
-		cfg.TerminalReplay = func(context.Context, *task.LoadedTask) error { return nil }
-	}
 	m, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -464,7 +461,6 @@ func TestNew(t *testing.T) {
 			HarnessEnv:          map[string][]string{string(harness.Codex): {"CODEX_HOME=/tmp/codex"}},
 			Checkouts:           repo.NewRegistry(),
 			RuntimeStartTimeout: time.Hour,
-			TerminalReplay:      func(context.Context, *task.LoadedTask) error { return nil },
 		}
 		m, err := New(cfg)
 		if err != nil {
@@ -2001,7 +1997,7 @@ func TestManager(t *testing.T) {
 				t.Fatalf("loaded messages = %d, want 1", len(logs[0].Msgs))
 			}
 			if snapshot := logs[0].ValidatedSnapshot(); snapshot == nil || !snapshot.EOFValidated {
-				t.Fatalf("snapshot = %#v, want validated EOF proof", snapshot)
+				t.Fatalf("snapshot = %#v, want validated EOF snapshot", snapshot)
 			}
 		})
 	})
@@ -2600,20 +2596,15 @@ func TestManager(t *testing.T) {
 				t.Fatal("failed revive did not close done")
 			}
 		})
-		t.Run("error_failure_closes_done_and_reloads_terminal_replay", func(t *testing.T) {
+		t.Run("error_failure_closes_done", func(t *testing.T) {
 			t.Parallel()
 			releaseRevive := make(chan struct{})
-			published := false
 			fake := &blockingReviveBackend{FakeBackend: &runtimetest.FakeBackend{}, release: releaseRevive}
 			m := newTestManager(t, Config{
 				ServerCtx: t.Context(),
 				Runtimes:  newTestRuntime(t, fake, nil),
 				Backends: map[harness.Name]agent.Backend{
 					harness.Claude: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire},
-				},
-				TerminalReplay: func(context.Context, *task.LoadedTask) error {
-					published = true
-					return nil
 				},
 			})
 			tk := &task.Task{
@@ -2664,13 +2655,6 @@ func TestManager(t *testing.T) {
 			result := entry.Result()
 			if result == nil || result.State != task.StateFailed || result.Err == nil {
 				t.Fatalf("Result = %v, want failed result with error", result)
-			}
-			loaded := entry.LoadedTask()
-			if loaded == nil {
-				t.Fatal("failed revive did not retain the terminal replay source")
-			}
-			if !published {
-				t.Fatal("failed revive did not invoke the terminal replay publisher")
 			}
 		})
 	})
@@ -3962,7 +3946,7 @@ func TestRefreshAdoptedDiffStat(t *testing.T) {
 
 		refreshAdoptedDiffStat(t.Context(), logtest.Logger(t), checkout, newTestRuntime(t, fake, nil), tk)
 
-		// A populated DiffStat is the observable proof the fetch-then-diff path ran.
+		// A populated DiffStat is the observable indication the fetch-then-diff path ran.
 		ds := tk.Snapshot().DiffStat
 		if len(ds) != 1 || ds[0].Path != "main.go" || ds[0].Added != 5 || ds[0].Deleted != 1 {
 			t.Errorf("DiffStat = %+v, want [{main.go 5 1}]", ds)
@@ -3982,7 +3966,7 @@ func TestRefreshAdoptedDiffStat(t *testing.T) {
 
 		refreshAdoptedDiffStat(t.Context(), logtest.Logger(t), checkout, newTestRuntime(t, fake, nil), tk)
 
-		// An empty DiffStat is the observable proof the diff path was skipped.
+		// An empty DiffStat is the observable indication the diff path was skipped.
 		if ds := tk.Snapshot().DiffStat; len(ds) != 0 {
 			t.Errorf("DiffStat = %+v, want empty", ds)
 		}

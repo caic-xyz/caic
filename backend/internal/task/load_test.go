@@ -147,7 +147,7 @@ func (r *countingReadCloser) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func reopenWithProofReplay(t *testing.T, dir, path string, tk *Task, snapshot *ValidatedLogSnapshot) int64 {
+func reopenWithBoundedReopen(t *testing.T, dir, path string, tk *Task, snapshot *ValidatedLogSnapshot) int64 {
 	tk.SetLogPath(path)
 	tk.SetLogValidationSnapshot(snapshot)
 	w, err := (&LogStore{LogDir: dir}).Reopen(tk)
@@ -158,7 +158,7 @@ func reopenWithProofReplay(t *testing.T, dir, path string, tk *Task, snapshot *V
 	if !ok {
 		t.Fatalf("Reopen writer = %T, want *taskLogWriter", w)
 	}
-	proofBytes, err := appendWriter.file.Seek(0, io.SeekCurrent)
+	validationBytes, err := appendWriter.file.Seek(0, io.SeekCurrent)
 	if err != nil {
 		_ = w.Close()
 		t.Fatal(err)
@@ -166,7 +166,7 @@ func reopenWithProofReplay(t *testing.T, dir, path string, tk *Task, snapshot *V
 	if err := w.Close(); err != nil {
 		t.Fatalf("close Reopen writer: %v", err)
 	}
-	return proofBytes
+	return validationBytes
 }
 
 func (r *countingReadCloser) Close() error {
@@ -424,47 +424,7 @@ func TestLoadLogs(t *testing.T) {
 			t.Fatalf("ForkedFromTaskID = %q, want 3BL0EKDTO000", tasks[0].ForkedFromTaskID)
 		}
 	})
-	t.Run("CompressedSummaryRejectsChangedForkAuthority", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		path := filepath.Join(dir, "task.jsonl.zst")
-		meta := mustJSON(t, agent.MetaMessage{
-			MessageType:      "caic_meta",
-			Version:          int(agent.LogVersionV1),
-			Prompt:           "forked task",
-			Harness:          harness.Claude,
-			ForkedFromTaskID: "3BL0EKDTO000",
-		})
-		writeCompressedLogFile(t, dir, filepath.Base(path), seqOf(meta))
-		if _, err := LoadLogs(dir); err != nil {
-			t.Fatal(err)
-		}
-		summaryPath := logSummaryPath(path)
-		data, err := os.ReadFile(summaryPath) //nolint:gosec // path is test-controlled.
-		if err != nil {
-			t.Fatal(err)
-		}
-		var summary logSummary
-		if err := json.Unmarshal(data, &summary); err != nil { //nolint:musttag // LoadedTask is intentionally the direct sidecar projection.
-			t.Fatal(err)
-		}
-		summary.Task.ForkedFromTaskID = "forged-parent"
-		data, err = json.Marshal(summary) //nolint:musttag // LoadedTask is intentionally the direct sidecar projection.
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(summaryPath, data, 0o600); err != nil {
-			t.Fatal(err)
-		}
 
-		tasks, err := LoadLogs(dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(tasks) != 1 || tasks[0].ForkedFromTaskID != "3BL0EKDTO000" {
-			t.Fatalf("summary cache accepted forged fork authority: %#v", tasks)
-		}
-	})
 	t.Run("LazySemanticScanRejectsChangedRawHeader", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
@@ -961,259 +921,7 @@ func TestLoadLogs(t *testing.T) {
 			t.Errorf("LogPath = %q, want compressed path", lt.LogPath())
 		}
 	})
-	t.Run("CompressedSummaryCache", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		path := filepath.Join(dir, "a.jsonl.zst")
-		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "cached", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude", ForkedFromTaskID: "3BL0EKDTO000"})
-		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged", Error: "persisted failure"})
-		writeCompressedLogFile(t, dir, "a.jsonl.zst", seqOf(meta, trailer))
 
-		first, err := LoadLogs(dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(first) != 1 {
-			t.Fatalf("len(first) = %d, want 1", len(first))
-		}
-		if first[0].LogVersion != agent.LogVersionV1 {
-			t.Fatalf("LogVersion = %d, want 1", first[0].LogVersion)
-		}
-		if _, err := os.Stat(logSummaryPath(path)); err != nil {
-			t.Fatalf("summary cache was not written: %v", err)
-		}
-		summaryData, err := os.ReadFile(logSummaryPath(path))
-		if err != nil {
-			t.Fatal(err)
-		}
-		var summary logSummary
-		if err := json.Unmarshal(summaryData, &summary); err != nil { //nolint:musttag // LoadedTask is intentionally the direct sidecar projection.
-			t.Fatal(err)
-		}
-		if summary.Version != logSummaryVersion {
-			t.Fatalf("taskmeta version = %d, want %d", summary.Version, logSummaryVersion)
-		}
-		if summary.Task == nil || len(summary.Task.Msgs) != 0 {
-			t.Fatalf("taskmeta retained message history: %#v", summary.Task)
-		}
-		if snapshot := first[0].ValidatedSnapshot(); snapshot == nil || summary.Proof != snapshot.cacheProof() {
-			t.Fatalf("taskmeta proof = %#v, want shared snapshot proof %#v", summary.Proof, snapshot)
-		}
-		info, err := os.Stat(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		second, err := LoadLogs(dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(second) != 1 {
-			t.Fatalf("len(second) = %d, want 1", len(second))
-		}
-		if second[0].Prompt != "cached" || second[0].State != StatePurged || second[0].ForkedFromTaskID != "3BL0EKDTO000" {
-			t.Fatalf("cached task = prompt %q state %v parent %q, want cached/purged/3BL0EKDTO000", second[0].Prompt, second[0].State, second[0].ForkedFromTaskID)
-		}
-		if second[0].Result == nil || second[0].Result.Err == nil || second[0].Result.Err.Error() != "persisted failure" {
-			t.Fatalf("cached result error = %#v, want persisted failure", second[0].Result)
-		}
-		if snapshot := second[0].ValidatedSnapshot(); snapshot == nil || !snapshot.EOFValidated || snapshot.RawHeader != meta {
-			t.Fatalf("inventory cache hit snapshot = %#v, want current summary-backed EOF proof", snapshot)
-		}
-
-		replacementDir := t.TempDir()
-		var replacement []byte
-		replacementPrompt := ""
-		for _, prompt := range []string{"newval", "reload", "replcd", "freshx"} {
-			candidateName := prompt + ".jsonl.zst"
-			candidateMeta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: prompt, Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude", ForkedFromTaskID: "3BL0EKDTO000"})
-			writeCompressedLogFile(t, replacementDir, candidateName, seqOf(candidateMeta, trailer))
-			candidate, readErr := os.ReadFile(filepath.Join(replacementDir, candidateName)) //nolint:gosec // path is test-controlled.
-			if readErr != nil {
-				t.Fatal(readErr)
-			}
-			if len(candidate) == int(info.Size()) {
-				replacement = candidate
-				replacementPrompt = prompt
-				break
-			}
-		}
-		if replacement == nil {
-			t.Fatal("could not construct a same-size compressed replacement")
-		}
-		if err := os.WriteFile(path, replacement, 0o600); err != nil { //nolint:gosec // path is test-controlled.
-			t.Fatal(err)
-		}
-		if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
-			t.Fatal(err)
-		}
-		rebuilt, err := LoadLogs(dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(rebuilt) != 1 || rebuilt[0].Prompt != replacementPrompt {
-			t.Fatalf("same-size same-mtime rewrite = %+v, want rebuilt prompt %q", rebuilt, replacementPrompt)
-		}
-		if rebuilt[0].ValidatedSnapshot() == nil {
-			t.Fatal("rebuilt compressed log has no validated snapshot")
-		}
-	})
-	t.Run("CompressedSummaryRejectsReplacementBeforePublish", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		path := filepath.Join(dir, "a.jsonl.zst")
-		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "physical", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Claude})
-		writeCompressedLogFile(t, dir, "a.jsonl.zst", seqOf(meta))
-		tasks, err := LoadLogs(dir)
-		if err != nil || len(tasks) != 1 {
-			t.Fatalf("LoadLogs = %d tasks, %v", len(tasks), err)
-		}
-		if err := os.Remove(logSummaryPath(path)); err != nil {
-			t.Fatal(err)
-		}
-		file, err := os.Open(path) //nolint:gosec // path is test-controlled.
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			if err := file.Close(); err != nil {
-				t.Error(err)
-			}
-		})
-		info, err := file.Stat()
-		if err != nil {
-			t.Fatal(err)
-		}
-		moved := path + ".moved"
-		if err := os.Rename(path, moved); err != nil {
-			t.Fatal(err)
-		}
-		data, err := os.ReadFile(moved) //nolint:gosec // path is test-controlled.
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, data, 0o600); err != nil { //nolint:gosec // path is test-controlled.
-			t.Fatal(err)
-		}
-		if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
-			t.Fatal(err)
-		}
-		if err := storeLogSummaryForFile(tasks[0], file, info); err == nil || !strings.Contains(err.Error(), "replaced") {
-			t.Fatalf("storeLogSummaryForFile error = %v, want replacement", err)
-		}
-		if _, err := os.Stat(logSummaryPath(path)); !os.IsNotExist(err) {
-			t.Fatalf("summary exists after replacement: %v", err)
-		}
-	})
-	t.Run("CompressedSummaryAtomicWriteFailure", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		path := filepath.Join(dir, "a.jsonl.zst")
-		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "atomic", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Claude})
-		writeCompressedLogFile(t, dir, filepath.Base(path), seqOf(meta))
-		tasks, err := LoadLogs(dir)
-		if err != nil || len(tasks) != 1 {
-			t.Fatalf("LoadLogs = %d tasks, %v", len(tasks), err)
-		}
-		summaryPath := logSummaryPath(path)
-		before, err := os.ReadFile(summaryPath) //nolint:gosec // path is test-controlled.
-		if err != nil {
-			t.Fatal(err)
-		}
-		tmp := summaryPath + ".tmp"
-		if err := os.Mkdir(tmp, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := storeLogSummary(tasks[0]); err == nil {
-			t.Fatal("storeLogSummary error = nil, want atomic temp-file failure")
-		}
-		after, err := os.ReadFile(summaryPath) //nolint:gosec // path is test-controlled.
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(after, before) {
-			t.Fatal("summary changed after atomic write failure")
-		}
-	})
-	t.Run("CompressedSummaryCacheRebuild", func(t *testing.T) {
-		t.Parallel()
-		for _, mutation := range []string{"missing", "corrupt", "old", "stale-size", "stale-mtime", "stale-authority", "stale-device", "stale-inode", "stale-prompt", "eof"} {
-			t.Run(mutation, func(t *testing.T) {
-				t.Parallel()
-				dir := t.TempDir()
-				path := filepath.Join(dir, "a.jsonl.zst")
-				meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 2, Prompt: "physical", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Codex})
-				writeCompressedLogFile(t, dir, "a.jsonl.zst", seqOf(meta))
-				if tasks, err := LoadLogs(dir); err != nil || len(tasks) != 1 {
-					t.Fatalf("initial LoadLogs = %d tasks, %v", len(tasks), err)
-				}
-				summaryPath := logSummaryPath(path)
-				switch mutation {
-				case "missing":
-					if err := os.Remove(summaryPath); err != nil {
-						t.Fatal(err)
-					}
-				case "corrupt":
-					if err := os.WriteFile(summaryPath, []byte("{"), 0o600); err != nil {
-						t.Fatal(err)
-					}
-				case "old", "stale-size", "stale-mtime", "stale-authority", "stale-device", "stale-inode", "stale-prompt", "eof":
-					data, err := os.ReadFile(summaryPath) //nolint:gosec // path is test-controlled.
-					if err != nil {
-						t.Fatal(err)
-					}
-					var summary logSummary
-					if err := json.Unmarshal(data, &summary); err != nil { //nolint:musttag // LoadedTask is intentionally the direct sidecar projection.
-						t.Fatal(err)
-					}
-					switch mutation {
-					case "old":
-						summary.Version--
-					case "stale-size":
-						summary.Proof.Size++
-					case "stale-mtime":
-						summary.Proof.ModTimeNs--
-					case "stale-authority":
-						summary.Proof.Harness = harness.Claude
-					case "stale-device":
-						summary.Proof.Device++
-					case "stale-inode":
-						summary.Proof.Inode++
-					case "stale-prompt":
-						summary.Task.Prompt = "tampered"
-					case "eof":
-						summary.Proof = CacheProof{}
-					}
-					data, err = json.Marshal(summary) //nolint:musttag // LoadedTask is intentionally the direct sidecar projection.
-					if err != nil {
-						t.Fatal(err)
-					}
-					if err := os.WriteFile(summaryPath, data, 0o600); err != nil {
-						t.Fatal(err)
-					}
-				}
-
-				tasks, err := LoadLogs(dir)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if len(tasks) != 1 || tasks[0].Prompt != "physical" || tasks[0].LogVersion != agent.LogVersionV2 || tasks[0].Harness != harness.Codex {
-					t.Fatalf("rebuilt task = %+v", tasks)
-				}
-				data, err := os.ReadFile(summaryPath) //nolint:gosec // path is test-controlled.
-				if err != nil {
-					t.Fatal(err)
-				}
-				var rebuilt logSummary
-				if err := json.Unmarshal(data, &rebuilt); err != nil { //nolint:musttag // LoadedTask is intentionally the direct sidecar projection.
-					t.Fatal(err)
-				}
-				if rebuilt.Version != logSummaryVersion || rebuilt.Task.LogVersion != agent.LogVersionV2 || rebuilt.Task.Harness != harness.Codex {
-					t.Fatalf("rebuilt summary = %+v", rebuilt)
-				}
-			})
-		}
-	})
 	t.Run("PreferCompressedDuplicate", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
@@ -1980,7 +1688,7 @@ func TestLoadSemanticLogSnapshot(t *testing.T) {
 					t.Fatalf("snapshot messages = %#v, want bootstrap and one text message", snapshot.Messages)
 				}
 				if !snapshot.EOFValidated || snapshot.RawHeader != meta {
-					t.Fatalf("snapshot proof = %#v, want validated exact header", snapshot)
+					t.Fatalf("snapshot validation = %#v, want validated exact header", snapshot)
 				}
 			})
 		}
@@ -2254,7 +1962,7 @@ func TestTaskAdoptionReadAmplification(t *testing.T) {
 				}
 
 				headerReader, noteHeader := openCounted()
-				lt, err := loadLogHeaderFromReader(path, headerReader, false, false)
+				lt, err := loadLogHeaderFromReader(path, headerReader)
 				if err != nil {
 					_ = headerReader.Close()
 					t.Fatal(err)
@@ -2299,7 +2007,7 @@ func TestTaskAdoptionReadAmplification(t *testing.T) {
 					t.Fatal(err)
 				}
 				noteMessages()
-				if err := applySemanticSnapshot(lt, semanticLoadedTask(messageSnapshot), messageSnapshot.validationProof(), true); err != nil {
+				if err := applySemanticSnapshot(lt, semanticLoadedTask(messageSnapshot), messageSnapshot.validationSnapshot(), true); err != nil {
 					t.Fatal(err)
 				}
 				if lt.Msgs != nil {
@@ -2311,13 +2019,13 @@ func TestTaskAdoptionReadAmplification(t *testing.T) {
 				}); err != nil {
 					t.Fatal(err)
 				}
-				var reopenProofBytes int64
+				var reopenValidationBytes int64
 				if !compressed {
-					// Adoption gives Reopen the completed semantic proof, so its append
+					// Adoption gives Reopen the completed semantic validation, so its append
 					// validation remains a bounded header/identity read rather than a
 					// fourth complete pass. Measure that production append descriptor,
 					// not an injected reader.
-					reopenProofBytes = reopenWithProofReplay(t, dir, path, tk, messageSnapshot)
+					reopenValidationBytes = reopenWithBoundedReopen(t, dir, path, tk, messageSnapshot)
 				}
 
 				wantCompletePasses := 3
@@ -2331,8 +2039,8 @@ func TestTaskAdoptionReadAmplification(t *testing.T) {
 				if logicalBytes != int64(wantCompletePasses)*logicalSize {
 					t.Errorf("logical bytes = %d, want exactly %d complete passes of %d", logicalBytes, wantCompletePasses, logicalSize)
 				}
-				if !compressed && (reopenProofBytes == 0 || reopenProofBytes > min(int64(64<<10), logicalSize)) {
-					t.Errorf("Reopen proof bytes = %d, want bounded header/identity tail in (0, %d]", reopenProofBytes, min(int64(64<<10), logicalSize))
+				if !compressed && (reopenValidationBytes == 0 || reopenValidationBytes > min(int64(64<<10), logicalSize)) {
+					t.Errorf("Reopen validation bytes = %d, want bounded header/identity tail in (0, %d]", reopenValidationBytes, min(int64(64<<10), logicalSize))
 				}
 			})
 		}
@@ -2381,9 +2089,6 @@ func TestCompressTerminalLogs(t *testing.T) {
 			}
 			t.Fatalf("compressed snapshot messages = %d, want EOF-validated %d", got, len(snapshot.Messages))
 		}
-		if _, err := tasks[0].CacheProofForLog(compressedPath); err != nil {
-			t.Fatalf("compressed replay proof after validation: %v", err)
-		}
 		reloaded, err := LoadLogs(dir)
 		if err != nil {
 			t.Fatal(err)
@@ -2393,9 +2098,6 @@ func TestCompressTerminalLogs(t *testing.T) {
 		}
 		if reloaded[0].RuntimeName != "docker" {
 			t.Fatalf("reloaded RuntimeName = %q, want docker", reloaded[0].RuntimeName)
-		}
-		if _, err := os.Stat(logSummaryPath(compressedPath)); err != nil {
-			t.Fatalf("summary cache after compressed scan: %v", err)
 		}
 		setClaudeParser(tasks)
 		if err := tasks[0].LoadMessages(); err != nil {
@@ -2645,7 +2347,7 @@ func TestTsToTime(t *testing.T) {
 
 func TestLoadedTask(t *testing.T) {
 	t.Parallel()
-	t.Run("replay_proofs_and_scans_require_snapshot_append_authority", func(t *testing.T) {
+	t.Run("snapshot_scans_require_append_authority", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		path := filepath.Join(dir, "task.jsonl")
@@ -2665,9 +2367,6 @@ func TestLoadedTask(t *testing.T) {
 		if initial == nil {
 			t.Fatal("inventory load did not retain a validation snapshot")
 		}
-		if _, err := lt.CacheProofForLog(path); err != nil {
-			t.Fatalf("initial replay proof: %v", err)
-		}
 
 		file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // path is test-controlled.
 		if err != nil {
@@ -2677,16 +2376,12 @@ func TestLoadedTask(t *testing.T) {
 		if closeErr := file.Close(); writeErr != nil || closeErr != nil {
 			t.Fatalf("append raw log = %v, %v", writeErr, closeErr)
 		}
-		proof, err := lt.CacheProofForLog(path)
-		if err != nil || proof.Size <= initial.Size {
-			t.Fatalf("append replay proof = %+v, %v; want larger valid proof", proof, err)
-		}
 		if _, err := lt.ScanMessagesWithContext(t.Context(), func(agent.ParsedMessage) error { return nil }); err != nil {
 			t.Fatalf("append replay scan: %v", err)
 		}
 		retained := lt.ValidatedSnapshot()
-		if retained == nil || retained.Size != proof.Size {
-			t.Fatalf("retained append snapshot = %#v, want size %d", retained, proof.Size)
+		if retained == nil || retained.Size <= initial.Size {
+			t.Fatalf("retained append snapshot = %#v, want size greater than %d", retained, initial.Size)
 		}
 
 		forgedFirst := claudeAssistant(t, map[string]any{"type": "text", "text": "bogus"})
@@ -2711,9 +2406,6 @@ func TestLoadedTask(t *testing.T) {
 		if err := os.Chtimes(path, future, future); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := lt.CacheProofForLog(path); !errors.Is(err, ErrRetainedSnapshotMismatch) {
-			t.Fatalf("same-size mutation proof error = %v, want retained-snapshot mismatch", err)
-		}
 		if _, err := lt.ScanMessagesWithContext(t.Context(), func(agent.ParsedMessage) error { return nil }); err == nil || !strings.Contains(err.Error(), "outside append growth") {
 			t.Fatalf("replay scan error = %v, want append-growth rejection", err)
 		}
@@ -2723,9 +2415,6 @@ func TestLoadedTask(t *testing.T) {
 
 		changedHeader := strings.Replace(meta, "{", "{ ", 1)
 		writeLogFile(t, dir, filepath.Base(path), changedHeader, first, second)
-		if _, err := lt.CacheProofForLog(path); !errors.Is(err, ErrRetainedSnapshotMismatch) {
-			t.Fatalf("changed-header proof error = %v, want retained-snapshot mismatch", err)
-		}
 		if _, err := lt.ScanMessagesWithContext(t.Context(), func(agent.ParsedMessage) error { return nil }); err == nil || !strings.Contains(err.Error(), "immutable header changed") {
 			t.Fatalf("replay scan error = %v, want immutable-header rejection", err)
 		}
@@ -3330,7 +3019,7 @@ func TestV1ProductionReadPassMatrix(t *testing.T) {
 				headerReader, closeHeader := openCounted()
 				var lt *LoadedTask
 				var err error
-				lt, err = loadLogHeaderFromReader(path, headerReader, false, false)
+				lt, err = loadLogHeaderFromReader(path, headerReader)
 				if err != nil {
 					closeHeader()
 					t.Fatal(err)
@@ -3381,13 +3070,13 @@ func TestV1ProductionReadPassMatrix(t *testing.T) {
 					t.Fatal(err)
 				}
 				closeMessages()
-				var reopenProofBytes int64
+				var reopenValidationBytes int64
 				if !compressed {
-					// Adoption passes its completed EOF proof to the task before a
+					// Adoption passes its completed EOF validation to the task before a
 					// later cleanup Reopen. Reopen must use only a bounded current
 					// header/identity check rather than adding a fourth full pass.
 					// Reopen after proving the same raw header.
-					reopenProofBytes = reopenWithProofReplay(t, dir, path, tk, messageSnapshot)
+					reopenValidationBytes = reopenWithBoundedReopen(t, dir, path, tk, messageSnapshot)
 				}
 				wantNativeCalls := 2    // one session and one message scan
 				wantCompletePasses := 3 // header, native/no-top session, and semantic scan
@@ -3407,8 +3096,8 @@ func TestV1ProductionReadPassMatrix(t *testing.T) {
 				if logicalBytes > 3*logicalSize+min(int64(65536), logicalSize) {
 					t.Errorf("logical bytes = %d, exceeds three complete passes plus bounded tail (%d)", logicalBytes, 3*logicalSize+min(int64(65536), logicalSize))
 				}
-				if !compressed && (reopenProofBytes == 0 || reopenProofBytes > min(int64(64<<10), logicalSize)) {
-					t.Errorf("Reopen proof bytes = %d, want bounded header/identity tail in (0, %d]", reopenProofBytes, min(int64(64<<10), logicalSize))
+				if !compressed && (reopenValidationBytes == 0 || reopenValidationBytes > min(int64(64<<10), logicalSize)) {
+					t.Errorf("Reopen validation bytes = %d, want bounded header/identity tail in (0, %d]", reopenValidationBytes, min(int64(64<<10), logicalSize))
 				}
 			})
 		}

@@ -347,6 +347,61 @@ describe("SSE connection", () => {
     }
   });
 
+
+
+
+
+  it("reports terminal history errors and does not retry after the native error", () => {
+    const created: FakeES[] = [];
+    let historyError: ((error: { message: string }) => void) | undefined;
+    vi.mocked(taskEventStream).mockImplementation((_id, _cb, _onError, _onReady, _onOpen, onHistoryError) => {
+      historyError = onHistoryError;
+      const fakeES: FakeES = {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      };
+      created.push(fakeES);
+      return fakeES as unknown as EventSource;
+    });
+    const onError = vi.fn();
+
+    renderTaskDetail({ onError });
+    if (!historyError) throw new Error("history error callback not captured");
+    historyError({ message: "task history is unavailable" });
+
+    expect(onError).toHaveBeenCalledWith("Task history error: task history is unavailable");
+    expect(created[0].close).toHaveBeenCalledOnce();
+    if (!created[0].onerror) throw new Error("onerror not set");
+    created[0].onerror(new Event("error"));
+    vi.advanceTimersByTime(60_000);
+    // Resuming visibility or network connectivity must not reconnect after the
+    // server explicitly reported that this task's history is unavailable.
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("online"));
+    expect(created).toHaveLength(1);
+  });
+
+  it("replaces a nonterminal EventSource after an error", () => {
+    const origRandom = Math.random;
+    Math.random = () => 0.5;
+    try {
+      const created: FakeES[] = [];
+      makeSyncReadyMock(created);
+
+      renderTaskDetail({ taskState: "stopped" });
+      const es = created[0];
+      if (!es.onerror) throw new Error("onerror not set");
+      es.onerror(new Event("error"));
+
+      expect(es.close).toHaveBeenCalledOnce();
+      vi.advanceTimersByTime(800);
+      expect(created).toHaveLength(2);
+    } finally {
+      Math.random = origRandom;
+    }
+  });
+
   it("reconnects on mobile resume and replays prompts missed while hidden", () => {
     let hidden = false;
     vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden);
@@ -503,29 +558,7 @@ describe("SSE connection", () => {
     expect(document.body.textContent).toContain("replayed output");
   });
 
-  it("renders fast terminal replay when ready fires before taskEventStream returns", () => {
-    // Regression: TaskDetail used to attach the "ready" listener after
-    // taskEventStream returned. A fast terminal SSE replay could finish before
-    // that listener was registered, so buffered history was dropped and only
-    // the initial prompt remained visible.
-    const created: FakeES[] = [];
-    vi.mocked(taskEventStream).mockImplementation((_id, cb, _onError, onReady) => {
-      (cb as (ev: EventMessage) => void)({ kind: "textDelta", ts: 1, textDelta: { text: "purged history" } });
-      onReady?.();
-      const fakeES: FakeES = {
-        addEventListener: vi.fn(),
-        close: vi.fn(),
-        onerror: null,
-      };
-      created.push(fakeES);
-      return fakeES as unknown as EventSource;
-    });
 
-    renderTaskDetail({ taskState: "purged", initialPrompt: "initial prompt" });
-
-    expect(document.body.textContent).toContain("purged history");
-    expect(document.body.textContent).toContain("initial prompt");
-  });
 
   it("live textDelta events render before the turn ends", () => {
     // Regression: initial task detail streaming must show output while the

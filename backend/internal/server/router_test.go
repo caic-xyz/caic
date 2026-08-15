@@ -3,9 +3,9 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,7 +27,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
-	"github.com/caic-xyz/caic/backend/internal/eventreplay"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
@@ -44,6 +43,22 @@ import (
 	"github.com/caic-xyz/caic/gomode/voicegateway/voicertc"
 	"github.com/caic-xyz/caic/oauth/oauthclient"
 )
+
+type reviveDuringStoppedScanWriter struct {
+	*httptest.ResponseRecorder
+
+	revived bool
+	revive  func()
+}
+
+func (w *reviveDuringStoppedScanWriter) Write(data []byte) (int, error) {
+	n, err := w.ResponseRecorder.Write(data)
+	if !w.revived && bytes.Contains(data, []byte("event: message")) {
+		w.revived = true
+		w.revive()
+	}
+	return n, err
+}
 
 func decodeError(t *testing.T, w *httptest.ResponseRecorder) api.ErrorDetails {
 	var resp api.ErrorResponse
@@ -118,9 +133,6 @@ func newTestTaskManager(t testing.TB, cfg taskmgr.Config) *taskmgr.Manager { //n
 	if cfg.RuntimeStartTimeout == 0 {
 		cfg.RuntimeStartTimeout = time.Hour
 	}
-	if cfg.TerminalReplay == nil {
-		cfg.TerminalReplay = func(context.Context, *task.LoadedTask) error { return nil }
-	}
 	m, err := taskmgr.New(cfg)
 	if err != nil {
 		t.Fatalf("taskmgr.New: %v", err)
@@ -134,14 +146,6 @@ func newTestRepoService(t testing.TB, absRoot string, repositories *repo.Registr
 		t.Fatalf("repo.NewService: %v", err)
 	}
 	return s
-}
-
-func newTestReplayPublisher(t testing.TB) *ReplayPublisher {
-	publisher, err := NewReplayPublisher(filepath.Join(t.TempDir(), ".replay-tmp"))
-	if err != nil {
-		t.Fatalf("NewReplayPublisher: %v", err)
-	}
-	return publisher
 }
 
 func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testRouter {
@@ -158,16 +162,15 @@ func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testR
 	prefs := newTestPrefs(t)
 	forgeManager := forgemgr.New("", "", nil, forgemgr.NoOAuthTokenSource())
 	s, err := New(t.Context(), Dependencies{
-		RepoSvc:         repoSvc,
-		RepoStatus:      repoStatus,
-		Runtimes:        runtimeRouter,
-		TaskMgr:         taskMgr,
-		ReplayPublisher: newTestReplayPublisher(t),
-		Preferences:     prefs,
-		IPGeoChecker:    checker,
-		ForgeMgr:        forgeManager,
-		Warnings:        NewWarningStore(taskMgr),
-		CacheSizes:      NewCacheSizeStore(),
+		RepoSvc:      repoSvc,
+		RepoStatus:   repoStatus,
+		Runtimes:     runtimeRouter,
+		TaskMgr:      taskMgr,
+		Preferences:  prefs,
+		IPGeoChecker: checker,
+		ForgeMgr:     forgeManager,
+		Warnings:     NewWarningStore(taskMgr),
+		CacheSizes:   NewCacheSizeStore(),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -196,7 +199,6 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 		RepoStatus:                 repoStatus,
 		Runtimes:                   runtimeRouter,
 		TaskMgr:                    taskMgr,
-		ReplayPublisher:            newTestReplayPublisher(t),
 		Preferences:                prefs,
 		IPGeoChecker:               checker,
 		ForgeMgr:                   forgeManager,
@@ -232,15 +234,14 @@ func TestNew(t *testing.T) {
 		checkoutRegistry := repo.NewRegistry()
 		taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry})
 		return Dependencies{
-			RepoSvc:         newTestRepoService(t, "", checkoutRegistry),
-			RepoStatus:      ci.NewRepoStatusStore(),
-			Runtimes:        runtimeRouter,
-			TaskMgr:         taskMgr,
-			ReplayPublisher: newTestReplayPublisher(t),
-			Preferences:     newTestPrefs(t),
-			ForgeMgr:        forgemgr.New("", "", nil, forgemgr.NoOAuthTokenSource()),
-			Warnings:        NewWarningStore(taskMgr),
-			CacheSizes:      NewCacheSizeStore(),
+			RepoSvc:     newTestRepoService(t, "", checkoutRegistry),
+			RepoStatus:  ci.NewRepoStatusStore(),
+			Runtimes:    runtimeRouter,
+			TaskMgr:     taskMgr,
+			Preferences: newTestPrefs(t),
+			ForgeMgr:    forgemgr.New("", "", nil, forgemgr.NoOAuthTokenSource()),
+			Warnings:    NewWarningStore(taskMgr),
+			CacheSizes:  NewCacheSizeStore(),
 		}
 	}
 
@@ -455,15 +456,14 @@ func newCheckoutConstructionTestServer(t *testing.T, root string) checkoutConstr
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
 	s, err := New(t.Context(), Dependencies{
-		RepoSvc:         repoSvc,
-		RepoStatus:      repoStatus,
-		Runtimes:        runtimeRouter,
-		TaskMgr:         taskMgr,
-		ReplayPublisher: newTestReplayPublisher(t),
-		Preferences:     prefs,
-		ForgeMgr:        forgemgr.New("", "", nil, forgemgr.NoOAuthTokenSource()),
-		Warnings:        NewWarningStore(taskMgr),
-		CacheSizes:      NewCacheSizeStore(),
+		RepoSvc:     repoSvc,
+		RepoStatus:  repoStatus,
+		Runtimes:    runtimeRouter,
+		TaskMgr:     taskMgr,
+		Preferences: prefs,
+		ForgeMgr:    forgemgr.New("", "", nil, forgemgr.NoOAuthTokenSource()),
+		Warnings:    NewWarningStore(taskMgr),
+		CacheSizes:  NewCacheSizeStore(),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1861,6 +1861,156 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		if !strings.Contains(body, "I found the bug") {
 			t.Error("expected text message 'I found the bug' to be replayed for purged task")
 		}
+		if strings.Contains(body, "\nid:") {
+			t.Errorf("task SSE body unexpectedly has event IDs:\n%s", body)
+		}
+	})
+
+	t.Run("PurgedV1ParseFailureEmitsErrorWithoutReady", func(t *testing.T) {
+		t.Parallel()
+		logDir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "fix the bug",
+			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		})
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		writeLogFile(t, logDir, "task.jsonl", meta, `not-json`, trailer)
+
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}})
+		if err := loadPurgedTasksForTest(s, logDir); err != nil {
+			t.Fatal(err)
+		}
+		var taskID string
+		s.taskMgr.Range(func(id string, _ *taskmgr.Entry) bool {
+			taskID = id
+			return false
+		})
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID+"/raw_events", http.NoBody)
+		req.SetPathValue("id", taskID)
+		w := httptest.NewRecorder()
+		testTaskHandlers(s).handleTaskEvents(w, req)
+		body := w.Body.String()
+		if !strings.Contains(body, "event: error") || !strings.Contains(body, "task history is unavailable") {
+			t.Fatalf("history failure body = %q, want error event", body)
+		}
+		if strings.Contains(body, "event: ready") {
+			t.Fatalf("history failure body unexpectedly contains ready: %q", body)
+		}
+	})
+
+	t.Run("StoppedHistoryFailureClosesUntilRevivedReconnect", func(t *testing.T) {
+		t.Parallel()
+		logDir := t.TempDir()
+		taskID := ksid.NewID()
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "fix the bug",
+			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Claude,
+			StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		})
+		path := filepath.Join(logDir, taskID.String()+".jsonl")
+		writeLogFile(t, logDir, taskID.String()+".jsonl", meta, `not-json`)
+
+		tk := &task.Task{ID: taskID, InitialPrompt: agent.Prompt{Text: "fix the bug"}, Harness: harness.Claude}
+		tk.SetLogPath(path)
+		tk.SetState(task.StateStopped)
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}})
+		s.taskMgr.Insert(taskID.String(), s.taskMgr.NewEntry(tk, nil))
+
+		stoppedReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+		stoppedReq.SetPathValue("id", taskID.String())
+		stoppedWriter := httptest.NewRecorder()
+		testTaskHandlers(s).handleTaskEvents(stoppedWriter, stoppedReq)
+		if body := stoppedWriter.Body.String(); strings.Contains(body, "event: error") || strings.Contains(body, "event: ready") {
+			t.Fatalf("stopped scan should close for retry, got %q", body)
+		}
+
+		// A new incarnation reconnects through the normal live-history path;
+		// it must not be held behind the stopped scan's old parse failure.
+		tk.RestoreMessages([]agent.Message{&agent.TextMessage{Text: "revived live history"}})
+		tk.SetState(task.StateRunning)
+		ctx, cancel := context.WithCancel(t.Context())
+		t.Cleanup(cancel)
+		time.AfterFunc(20*time.Millisecond, cancel)
+		revivedReq := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+		revivedReq.SetPathValue("id", taskID.String())
+		revivedWriter := httptest.NewRecorder()
+		testTaskHandlers(s).handleTaskEvents(revivedWriter, revivedReq)
+		body := revivedWriter.Body.String()
+		if !strings.Contains(body, "revived live history") || !strings.Contains(body, "event: ready") {
+			t.Fatalf("revived reconnect body = %q, want live history and ready", body)
+		}
+		if strings.Contains(body, "event: error") {
+			t.Fatalf("revived reconnect body unexpectedly has history error: %q", body)
+		}
+	})
+
+	t.Run("StoppedScanRevivedBeforeReadyClosesForRetry", func(t *testing.T) {
+		t.Parallel()
+		logDir := t.TempDir()
+		taskID := ksid.NewID()
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "fix the bug", Harness: harness.Claude,
+			StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		})
+		message := mustJSON(t, map[string]any{
+			"type": "assistant",
+			"message": map[string]any{
+				"model":   "claude-opus-4-6",
+				"content": []map[string]any{{"type": "text", "text": "stopped history"}},
+				"usage":   map[string]any{},
+			},
+		})
+		path := filepath.Join(logDir, taskID.String()+".jsonl")
+		writeLogFile(t, logDir, taskID.String()+".jsonl", meta, message)
+
+		tk := &task.Task{ID: taskID, InitialPrompt: agent.Prompt{Text: "fix the bug"}, Harness: harness.Claude}
+		tk.SetLogPath(path)
+		tk.SetState(task.StateStopped)
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire}})
+		s.taskMgr.Insert(taskID.String(), s.taskMgr.NewEntry(tk, nil))
+
+		recorder := httptest.NewRecorder()
+		w := &reviveDuringStoppedScanWriter{ResponseRecorder: recorder, revive: func() {
+			tk.SetState(task.StateRunning)
+			tk.RestoreMessages([]agent.Message{&agent.TextMessage{Text: "revived live event"}})
+		}}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+		req.SetPathValue("id", taskID.String())
+		testTaskHandlers(s).handleTaskEvents(w, req)
+
+		body := recorder.Body.String()
+		if !strings.Contains(body, "stopped history") {
+			t.Fatalf("history body = %q, want stopped history", body)
+		}
+		if strings.Contains(body, "event: ready") || strings.Contains(body, "revived live event") {
+			t.Fatalf("revived stopped scan published new lifecycle events: %q", body)
+		}
+	})
+
+	t.Run("TerminalTaskWithoutLogPathUsesInMemoryHistory", func(t *testing.T) {
+		t.Parallel()
+		taskID := ksid.NewID()
+		tk := &task.Task{ID: taskID, InitialPrompt: agent.Prompt{Text: "fix the bug"}, Harness: harness.Claude}
+		tk.RestoreMessages([]agent.Message{&agent.TextMessage{Text: "retained in-memory history"}})
+		tk.SetState(task.StateFailed)
+
+		s := newTestRouter(t, nil)
+		insertTestTask(t, s, taskID.String(), tk)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+		req.SetPathValue("id", taskID.String())
+		w := httptest.NewRecorder()
+		testTaskHandlers(s).handleTaskEvents(w, req)
+
+		body := w.Body.String()
+		if !strings.Contains(body, "retained in-memory history") {
+			t.Fatalf("history body = %q, want retained in-memory message", body)
+		}
+		if !strings.Contains(body, "event: ready") {
+			t.Fatalf("history body = %q, want ready event", body)
+		}
+		if strings.Contains(body, "event: error") {
+			t.Fatalf("history body = %q, unexpectedly contains error event", body)
+		}
 	})
 
 	t.Run("AdoptedRunningTaskEventsUseInMemoryHistory", func(t *testing.T) {
@@ -1958,12 +2108,9 @@ func TestHandleTaskRawEvents(t *testing.T) {
 			Harness:       harness.Claude,
 		}
 		tk.RestoreMessages([]agent.Message{&agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done"}})
+		tk.SetLogPath(logs[0].LogPath())
 		tk.SetState(task.StateStopped)
-		if _, err := os.Stat(eventreplay.CachePath(logs[0].LogPath())); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("replay sidecar before stopped history request = %v, want absent", err)
-		}
-
-		s := newTestRouter(t, nil)
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}})
 		s.taskMgr.Insert(taskID.String(), s.taskMgr.NewEntry(tk, logs[0]))
 
 		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
@@ -1982,9 +2129,6 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		}
 		if strings.Contains(body, "stale crash") {
 			t.Fatalf("stale relay exit leaked into SSE body:\n%s", body)
-		}
-		if _, err := os.Stat(eventreplay.CachePath(logs[0].LogPath())); err != nil {
-			t.Fatalf("replay sidecar after stopped history request = %v, want regenerated cache", err)
 		}
 	})
 
@@ -2059,6 +2203,9 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		}
 		if !strings.Contains(body, "Hello world") {
 			t.Error("expected text message 'Hello world' to be replayed for purged task")
+		}
+		if !strings.Contains(body, `"kind":"textDelta"`) {
+			t.Error("expected raw disk history to retain text delta events")
 		}
 	})
 }

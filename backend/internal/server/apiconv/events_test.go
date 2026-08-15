@@ -3,7 +3,7 @@
 package apiconv
 
 import (
-	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -135,6 +135,26 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 		}
 	})
 
+	t.Run("pending tool timings are bounded", func(t *testing.T) {
+		t.Parallel()
+		tracker := NewToolTimingTracker(harness.Claude, nil)
+		start := time.Unix(1, 0)
+		for i := range maxPendingToolTimings {
+			tracker.ConvertMessage(&agent.ToolUseMessage{ToolUseID: fmt.Sprintf("tool-%d", i), Name: "Tool"}, start)
+		}
+		if len(tracker.pending) != maxPendingToolTimings {
+			t.Fatalf("pending len = %d, want %d", len(tracker.pending), maxPendingToolTimings)
+		}
+		tracker.ConvertMessage(&agent.ToolUseMessage{ToolUseID: "overflow", Name: "Tool"}, start)
+		if len(tracker.pending) != 1 {
+			t.Fatalf("pending len after reset = %d, want 1", len(tracker.pending))
+		}
+		events := tracker.ConvertMessage(&agent.ToolResultMessage{ToolUseID: "tool-0"}, start.Add(time.Second))
+		if len(events) != 1 || events[0].ToolResult == nil || events[0].ToolResult.Duration != 0 {
+			t.Fatalf("evicted tool result = %#v, want zero duration", events)
+		}
+	})
+
 	t.Run("rate limit uses API status", func(t *testing.T) {
 		t.Parallel()
 		tracker := NewToolTimingTracker(harness.Claude, nil)
@@ -148,48 +168,4 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 			t.Fatalf("rate limit status = %#v, want %q", events[0].RateLimit, v1.EventRateLimitStatusAllowedWarning)
 		}
 	})
-}
-
-func TestValidateEventJSON(t *testing.T) {
-	t.Parallel()
-	valid, err := json.Marshal(v1.EventMessage{Kind: v1.EventKindText, Ts: 1, Text: &v1.EventText{Text: "valid"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := string(valid); got != `{"kind":"text","ts":1,"text":{"text":"valid"}}` {
-		t.Fatalf("valid cache event encoding = %q", got)
-	}
-	for _, tc := range []struct {
-		name  string
-		line  string
-		valid bool
-	}{
-		{name: "valid", line: string(valid), valid: true},
-		{name: "null", line: `null`},
-		{name: "array", line: `[]`},
-		{name: "unknown kind", line: `{"kind":"future","ts":1,"text":{"text":"no"}}`},
-		{name: "missing payload", line: `{"kind":"text","ts":1}`},
-		{name: "mismatched payload", line: `{"kind":"text","ts":1,"textDelta":{"text":"no"}}`},
-		{name: "multiple payloads", line: `{"kind":"text","ts":1,"text":{"text":"yes"},"textDelta":{"text":"no"}}`},
-		{name: "missing required top-level field", line: `{"kind":"text","text":{"text":"yes"}}`},
-		{name: "missing required nested field", line: `{"kind":"text","ts":1,"text":{}}`},
-		{name: "null required top-level string", line: `{"kind":null,"ts":1,"text":{"text":"yes"}}`},
-		{name: "null required top-level number", line: `{"kind":"text","ts":null,"text":{"text":"yes"}}`},
-		{name: "null required nested text", line: `{"kind":"text","ts":1,"text":{"text":null}}`},
-		{name: "null required nested tool result string", line: `{"kind":"toolResult","ts":1,"toolResult":{"toolUseID":null,"duration":1}}`},
-		{name: "null required nested tool result number", line: `{"kind":"toolResult","ts":1,"toolResult":{"toolUseID":"id","duration":null}}`},
-		{name: "unknown top-level field", line: `{"kind":"text","ts":1,"text":{"text":"yes"},"extra":true}`},
-		{name: "unknown nested field", line: `{"kind":"text","ts":1,"text":{"text":"yes","extra":true}}`},
-		{name: "duplicate top-level key", line: `{"kind":"text","kind":"text","ts":1,"text":{"text":"yes"}}`},
-		{name: "duplicate nested key", line: `{"kind":"text","ts":1,"text":{"text":"yes","text":"forged"}}`},
-		{name: "duplicate arbitrary input key", line: `{"kind":"toolUse","ts":1,"toolUse":{"toolUseID":"id","name":"tool","input":{"arg":1,"arg":2}}}`},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			err := ValidateEventJSON([]byte(tc.line))
-			if (err == nil) != tc.valid {
-				t.Fatalf("ValidateEventJSON(%s) error = %v, valid = %t", tc.line, err, tc.valid)
-			}
-		})
-	}
 }

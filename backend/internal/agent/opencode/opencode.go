@@ -200,6 +200,11 @@ type caicInit struct {
 	Version   string `json:"version,omitzero"`
 }
 
+// maxAccumulatedOutputBytes bounds synthetic final-message state. Streaming
+// deltas are already persisted independently, so an overflow disables the
+// synthetic final rather than retaining an incomplete duplicate.
+const maxAccumulatedOutputBytes = 1 << 20
+
 // wireFormat implements agent.WireFormat for the ACP JSON-RPC protocol.
 // It holds per-session state: the session ID, a request ID counter,
 // accumulated token usage, and image support flag.
@@ -207,13 +212,15 @@ type wireFormat struct {
 	sessionID     string // Set during handshake; read-only after.
 	supportsImage bool   // Set during handshake; read-only after.
 
-	mu          sync.Mutex
-	nextID      int64
-	promptReqID int64 // JSON-RPC ID of the current session/prompt request.
-	totalUsage  agent.Usage
-	textAccum   strings.Builder // Accumulated text from agent_message_chunk.
-	thinkAccum  strings.Builder // Accumulated text from agent_thought_chunk.
-	fw          *jsonutil.FieldWarner
+	mu            sync.Mutex
+	nextID        int64
+	promptReqID   int64 // JSON-RPC ID of the current session/prompt request.
+	totalUsage    agent.Usage
+	textAccum     strings.Builder // Accumulated text from agent_message_chunk.
+	thinkAccum    strings.Builder // Accumulated text from agent_thought_chunk.
+	textOverflow  bool
+	thinkOverflow bool
+	fw            *jsonutil.FieldWarner
 }
 
 // WritePrompt sends a session/prompt JSON-RPC request to begin a new turn.
@@ -225,8 +232,7 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, log agent.LogSink
 	}
 	id := w.allocIDLocked()
 	w.promptReqID = id
-	w.textAccum.Reset()
-	w.thinkAccum.Reset()
+	w.resetAccumulatedOutputLocked()
 	content := make([]opencode.PromptContent, 0, 1+len(p.Images))
 	content = append(content, opencode.PromptContent{Type: opencode.ContentText, Text: p.Text})
 	if w.supportsImage {
@@ -326,11 +332,11 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		switch m := msg.(type) {
 		case *agent.TextDeltaMessage:
 			w.mu.Lock()
-			w.textAccum.WriteString(m.Text)
+			appendAccumulatedOutput(&w.textAccum, &w.textOverflow, m.Text)
 			w.mu.Unlock()
 		case *agent.ThinkingDeltaMessage:
 			w.mu.Lock()
-			w.thinkAccum.WriteString(m.Text)
+			appendAccumulatedOutput(&w.thinkAccum, &w.thinkOverflow, m.Text)
 			w.mu.Unlock()
 		}
 	}
@@ -341,8 +347,23 @@ func (w *wireFormat) notePromptRequest(id int64) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.promptReqID = id
+	w.resetAccumulatedOutputLocked()
+}
+
+func (w *wireFormat) resetAccumulatedOutputLocked() {
 	w.textAccum.Reset()
 	w.thinkAccum.Reset()
+	w.textOverflow = false
+	w.thinkOverflow = false
+}
+
+func appendAccumulatedOutput(builder *strings.Builder, overflow *bool, text string) {
+	if *overflow || len(text) > maxAccumulatedOutputBytes-builder.Len() {
+		builder.Reset()
+		*overflow = true
+		return
+	}
+	builder.WriteString(text)
 }
 
 func isPromptResultResponse(line []byte) bool {
@@ -404,14 +425,13 @@ func (w *wireFormat) handlePromptResponseLocked(line []byte) ([]agent.Message, e
 	}
 	w.totalUsage = agent.Usage{}
 	var msgs []agent.Message
-	if w.thinkAccum.Len() > 0 {
+	if !w.thinkOverflow && w.thinkAccum.Len() > 0 {
 		msgs = append(msgs, &agent.ThinkingMessage{Text: w.thinkAccum.String()})
-		w.thinkAccum.Reset()
 	}
-	if w.textAccum.Len() > 0 {
+	if !w.textOverflow && w.textAccum.Len() > 0 {
 		msgs = append(msgs, &agent.TextMessage{Text: w.textAccum.String()})
-		w.textAccum.Reset()
 	}
+	w.resetAccumulatedOutputLocked()
 	w.mu.Unlock()
 	msgs = append(msgs, rm)
 	return msgs, nil

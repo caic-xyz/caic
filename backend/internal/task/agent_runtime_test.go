@@ -166,7 +166,6 @@ func newTestAgentRuntime(t *testing.T, checkout *repo.Checkout, logDir string, b
 		NotifyTaskChange:    func() {},
 		Checkout:            checkout,
 		RuntimeStartTimeout: time.Hour,
-		OnTerminalLogClosed: func(context.Context, *Task, State) {},
 	}
 }
 
@@ -640,51 +639,6 @@ func TestRunner(t *testing.T) {
 			}
 		})
 
-		t.Run("PublishesReplayAfterCompression", func(t *testing.T) {
-			t.Parallel()
-			logDir := t.TempDir()
-			clone := initTestRepo(t, "main")
-			checkout := newTestCheckout(t, "main", clone, nil)
-			r := newTestAgentRuntime(t, checkout, logDir, nil)
-			tk := &Task{
-				ID:            ksid.NewID(),
-				InitialPrompt: agent.Prompt{Text: "test"},
-				Harness:       harness.Claude,
-				Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
-			}
-			published := false
-			r.OnTerminalLogClosed = func(_ context.Context, got *Task, state State) {
-				if got != tk || state != StatePurged || !isLogCompressed(got.LogPath()) {
-					t.Fatal("terminal replay callback did not receive the final compressed log")
-				}
-				loaded, err := LoadLogs(logDir)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if len(loaded) != 1 || loaded[0].Result == nil || loaded[0].Result.State != StatePurged {
-					t.Fatalf("terminal replay callback log = %#v, want closed purged trailer", loaded)
-				}
-				published = true
-			}
-			log, err := r.Logs.Open(tk)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := log.AppendMessage(&agent.LogMessage{MessageType: "caic_log", Line: "live output"}); err != nil {
-				t.Fatal(err)
-			}
-
-			r.Cleanup(t.Context(), tk, StatePurged)
-			if !published {
-				t.Fatal("terminal replay callback was not invoked after compression")
-			}
-
-			want := filepath.Join(logDir, tk.ID.String()+"-org-repo-caic-0.jsonl")
-			if _, err := os.Stat(want); !errors.Is(err, os.ErrNotExist) {
-				t.Errorf("uncompressed log after cleanup = %v, want absent", err)
-			}
-		})
-
 		t.Run("UsesLiveDiffStat", func(t *testing.T) {
 			t.Parallel()
 			clone := initTestRepo(t, "main")
@@ -917,19 +871,8 @@ func TestRunner(t *testing.T) {
 					if err := log.Close(); err != nil {
 						t.Fatal(err)
 					}
-					published := 0
-					r.OnTerminalLogClosed = func(_ context.Context, got *Task, state State) {
-						if got != tk || state != StateFailed || !isLogCompressed(got.LogPath()) {
-							t.Fatal("replay callback did not receive the final failed log")
-						}
-						published++
-					}
-
 					if _, err := r.ReviveTask(t.Context(), tk); err == nil {
 						t.Fatal("ReviveTask succeeded, want failure")
-					}
-					if published != 1 {
-						t.Fatalf("terminal replay callbacks = %d, want 1", published)
 					}
 					loaded, err := LoadLogs(logDir)
 					if err != nil {

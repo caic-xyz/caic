@@ -102,11 +102,9 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		return nil, fmt.Errorf("create cache directory: %w", err)
 	}
 	logDir := filepath.Join(cfg.Dirs.CacheDir, "tasks")
-	replayPublisher, err := server.NewReplayPublisher(filepath.Join(logDir, ".replay-tmp"))
-	if err != nil {
-		return nil, err
+	if err := cleanupLegacyReplayArtifacts(logDir); err != nil {
+		return nil, fmt.Errorf("remove legacy replay artifacts: %w", err)
 	}
-
 	absRoot, err := filepath.Abs(rootDir)
 	if err != nil {
 		return nil, err
@@ -274,7 +272,6 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		RuntimeMetadata:     cfg.Runtime.Metadata,
 		RuntimeStartTimeout: time.Hour,
 		Provider:            provider,
-		TerminalReplay:      replayPublisher.Publish,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("task manager: %w", err)
@@ -295,11 +292,6 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 			slog.WarnContext(startupCtx, "compress terminal task logs failed", "err", err)
 		} else {
 			slog.InfoContext(startupCtx, "compressed terminal task logs", "dur", time.Since(start))
-		}
-		if removed, err := replayPublisher.Prune(logDir, task.CacheProofForLog); err != nil {
-			slog.WarnContext(startupCtx, "prune stale replay caches failed", "err", err)
-		} else if removed > 0 {
-			slog.InfoContext(startupCtx, "pruned stale replay caches", "n", removed)
 		}
 		start = time.Now()
 		if err := taskMgr.LoadPurgedTasks(logs); err != nil {
@@ -365,7 +357,6 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		CICache:                    cache,
 		Runtimes:                   runtimes,
 		TaskMgr:                    taskMgr,
-		ReplayPublisher:            replayPublisher,
 		Provider:                   provider,
 		IPGeoChecker:               ipgeoChecker,
 		Bot:                        botService,
@@ -485,6 +476,36 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		},
 	)
 	return &App{Server: s, voiceBridge: voiceBridge, backgroundTasks: backgroundTasks, taskMgr: taskMgr}, nil
+}
+
+// cleanupLegacyReplayArtifacts removes obsolete derived files left by older
+// releases. It is a one-time startup upgrade and removes only the known top-level
+// temporary directory.
+func cleanupLegacyReplayArtifacts(logDir string) error {
+	entries, err := os.ReadDir(logDir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		path := filepath.Join(logDir, name)
+		if name == ".replay-tmp" {
+			if err := os.RemoveAll(path); err != nil {
+				return err
+			}
+			continue
+		}
+		if entry.IsDir() || (!strings.HasSuffix(name, ".events.zst") && !strings.HasSuffix(name, ".taskmeta.json")) {
+			continue
+		}
+		if err := os.Remove(path); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func initRuntimeSystem(ctx context.Context, cfg *server.Config) (*runtime.Router, []mdRuntime, error) {

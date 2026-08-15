@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -67,32 +66,14 @@ func BenchmarkRealTaskLogCorpus(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	b.Run("LoadLogsWithoutSummaries", func(b *testing.B) {
-		b.ReportAllocs()
-		b.SetBytes(bytes)
-		b.ResetTimer()
-		for range b.N {
-			if err := removeRealTaskLogSummaries(dir); err != nil {
-				b.Fatal(err)
-			}
-			if _, err := LoadLogs(dir); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
-	b.Run("LoadLogsWithSummaries", func(b *testing.B) {
+	b.ReportAllocs()
+	b.SetBytes(bytes)
+	b.ResetTimer()
+	for range b.N {
 		if _, err := LoadLogs(dir); err != nil {
 			b.Fatal(err)
 		}
-		b.ReportAllocs()
-		b.SetBytes(bytes)
-		b.ResetTimer()
-		for range b.N {
-			if _, err := LoadLogs(dir); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
+	}
 }
 
 func realTaskLogSource() (string, error) {
@@ -134,20 +115,4 @@ func copyRealTaskLogCorpus(source, destination string) (int64, error) {
 		bytes += int64(len(data))
 	}
 	return bytes, nil
-}
-
-func removeRealTaskLogSummaries(dir string) error {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".taskmeta.json") {
-			continue
-		}
-		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil {
-			return err
-		}
-	}
-	return nil
 }

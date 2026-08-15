@@ -297,7 +297,6 @@ type LogRecordParser struct {
 	version       LogVersion
 	parseNative   func([]byte) ([]Message, error)
 	contextWindow int
-	pending       map[pendingActionIdentity]struct{}
 }
 
 // ParsedRecord is a parser-owned semantic task-log record. Control reports
@@ -396,11 +395,7 @@ func NewLogRecordParser(version LogVersion, parseNative func([]byte) ([]Message,
 	if parseNative == nil {
 		return nil, errors.New("native message parser is nil")
 	}
-	return &LogRecordParser{
-		version:     version,
-		parseNative: parseNative,
-		pending:     make(map[pendingActionIdentity]struct{}),
-	}, nil
+	return &LogRecordParser{version: version, parseNative: parseNative}, nil
 }
 
 // ParseRecord decodes one physical task-log record according to the parser's
@@ -470,12 +465,6 @@ type legacyInitLogRecord struct {
 	SessionID string `json:"session_id"`
 	Model     string `json:"model"`
 	Version   string `json:"version"`
-}
-
-type pendingActionIdentity struct {
-	kind      PendingUserActionKind
-	requestID string
-	toolUseID string
 }
 
 func (p *LogRecordParser) controlKind(token string) (logControlKind, bool) {
@@ -620,21 +609,8 @@ func (p *LogRecordParser) applyMessageState(msgs []Message) ([]Message, error) {
 	}
 	out := make([]Message, 0, len(msgs))
 	for _, msg := range msgs {
-		switch m := msg.(type) {
-		case *UsageMessage:
-			if m.ContextWindow == 0 && p.contextWindow > 0 {
-				m.ContextWindow = p.contextWindow
-			}
-		case *PendingUserActionMessage:
-			identity := pendingActionIdentity{
-				kind:      m.Action.Kind,
-				requestID: m.Action.RequestID,
-				toolUseID: m.Action.ToolUseID,
-			}
-			if _, exists := p.pending[identity]; exists {
-				continue
-			}
-			p.pending[identity] = struct{}{}
+		if m, ok := msg.(*UsageMessage); ok && m.ContextWindow == 0 && p.contextWindow > 0 {
+			m.ContextWindow = p.contextWindow
 		}
 		out = append(out, msg)
 	}

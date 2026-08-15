@@ -368,6 +368,10 @@ func handleExtensionUI(conn agent.Conn, raw []byte) error {
 	}
 }
 
+// maxTrackedToolOutputs bounds per-tool incremental output state while parsing
+// direct task history or a long-running Pi session.
+const maxTrackedToolOutputs = 1024
+
 // piWireFormat implements agent.WireFormat and agent.CompactCommand for Pi's
 // type-dispatched JSONL protocol. It holds per-session state: a start time for
 // duration tracking and a turn counter incremented by handleTurnEnd.
@@ -394,6 +398,7 @@ func (w *piWireFormat) WritePrompt(wr io.Writer, p agent.Prompt, log agent.LogSi
 	w.mu.Lock()
 	w.startTime = time.Now()
 	w.numTurns = 0
+	w.toolOutputLen = nil
 	w.mu.Unlock()
 
 	cmd := pi.PromptCmd{
@@ -489,22 +494,31 @@ func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	// For tool output deltas, compute incremental deltas since Pi's
 	// tool_execution_update events carry the full accumulated output.
 	for _, msg := range msgs {
-		m, ok := msg.(*agent.ToolOutputDeltaMessage)
-		if !ok {
-			continue
+		switch m := msg.(type) {
+		case *agent.ToolOutputDeltaMessage:
+			w.mu.Lock()
+			if w.toolOutputLen == nil {
+				w.toolOutputLen = make(map[string]int)
+			}
+			prev, found := w.toolOutputLen[m.ToolUseID]
+			if !found && len(w.toolOutputLen) == maxTrackedToolOutputs {
+				// An interrupted stream can leave arbitrary tool IDs unfinished.
+				// Drop old offsets rather than retaining unbounded parser state.
+				clear(w.toolOutputLen)
+				prev = 0
+			}
+			if prev < len(m.Delta) {
+				m.Delta = m.Delta[prev:]
+				w.toolOutputLen[m.ToolUseID] = prev + len(m.Delta)
+			} else {
+				m.Delta = ""
+			}
+			w.mu.Unlock()
+		case *agent.ToolResultMessage:
+			w.mu.Lock()
+			delete(w.toolOutputLen, m.ToolUseID)
+			w.mu.Unlock()
 		}
-		w.mu.Lock()
-		if w.toolOutputLen == nil {
-			w.toolOutputLen = make(map[string]int)
-		}
-		prev := w.toolOutputLen[m.ToolUseID]
-		if prev < len(m.Delta) {
-			m.Delta = m.Delta[prev:]
-			w.toolOutputLen[m.ToolUseID] = prev + len(m.Delta)
-		} else {
-			m.Delta = ""
-		}
-		w.mu.Unlock()
 	}
 	// Filter out empty messages after incremental delta computation.
 	n := 0

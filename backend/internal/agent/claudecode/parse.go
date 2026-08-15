@@ -65,10 +65,15 @@ func unmarshalOutput(data []byte, v any, name string, fw *jsonutil.FieldWarner) 
 	return nil
 }
 
+const (
+	maxTrackedWidgetBlocks     = 64
+	maxBufferedWidgetJSONBytes = 1 << 20
+)
+
 // WidgetTracker tracks which content block indices are widget tools during
 // streaming, enabling input_json_delta events to be emitted as WidgetDeltaMessage.
-// It also accumulates partial JSON for each widget block so that the widget_code
-// field can be extracted incrementally.
+// It bounds both tracked blocks and aggregate partial JSON so malformed streams
+// cannot retain unbounded parser state.
 type WidgetTracker struct {
 	// activeWidgets maps content block index → toolUseID for blocks whose
 	// tool name is in agent.WidgetToolNames.
@@ -78,9 +83,11 @@ type WidgetTracker struct {
 	// lastHTMLLen maps content block index → length of HTML already emitted,
 	// so only new bytes are sent as deltas.
 	lastHTMLLen map[int]int
-	// exceeded maps content block index → true when accumulated HTML exceeds
-	// agent.MaxWidgetHTMLBytes. No further deltas are emitted.
+	// exceeded maps content block index → true when accumulated HTML or JSON
+	// exceeds its limit. No further deltas are emitted.
 	exceeded map[int]struct{}
+	// bufferedJSONBytes is the aggregate size of accum values.
+	bufferedJSONBytes int
 }
 
 // NewWidgetTracker creates a new WidgetTracker.
@@ -93,6 +100,18 @@ func NewWidgetTracker() *WidgetTracker {
 	}
 }
 
+func (wt *WidgetTracker) forgetAccum(index int) {
+	wt.bufferedJSONBytes -= len(wt.accum[index])
+	delete(wt.accum, index)
+}
+
+func (wt *WidgetTracker) forget(index int) {
+	wt.forgetAccum(index)
+	delete(wt.activeWidgets, index)
+	delete(wt.lastHTMLLen, index)
+	delete(wt.exceeded, index)
+}
+
 // handleStreamEvent processes a stream event and returns widget messages if
 // the event belongs to a tracked widget block. Returns (nil, false) if the
 // event is not widget-related and should be handled by the normal path.
@@ -101,7 +120,10 @@ func (wt *WidgetTracker) handleStreamEvent(w *claudecode.OutputStreamEventMsg) (
 	case "content_block_start":
 		cb := w.Event.ContentBlock
 		if cb.Type == "tool_use" && func() bool { _, ok := agent.WidgetToolNames[cb.Name]; return ok }() {
-			wt.activeWidgets[w.Event.Index] = cb.ID
+			wt.forget(w.Event.Index)
+			if len(wt.activeWidgets) < maxTrackedWidgetBlocks {
+				wt.activeWidgets[w.Event.Index] = cb.ID
+			}
 		}
 		return nil, false
 	case "content_block_delta":
@@ -113,10 +135,18 @@ func (wt *WidgetTracker) handleStreamEvent(w *claudecode.OutputStreamEventMsg) (
 			if _, ok := wt.exceeded[w.Event.Index]; ok {
 				return nil, true // absorbed but no emission
 			}
-			wt.accum[w.Event.Index] += w.Event.Delta.PartialJSON
+			partial := w.Event.Delta.PartialJSON
+			if len(partial) > maxBufferedWidgetJSONBytes-wt.bufferedJSONBytes {
+				wt.exceeded[w.Event.Index] = struct{}{}
+				wt.forgetAccum(w.Event.Index)
+				return nil, true
+			}
+			wt.accum[w.Event.Index] += partial
+			wt.bufferedJSONBytes += len(partial)
 			html := extractPartialWidgetCode(wt.accum[w.Event.Index])
 			if len(html) > agent.MaxWidgetHTMLBytes {
 				wt.exceeded[w.Event.Index] = struct{}{}
+				wt.forgetAccum(w.Event.Index)
 				return nil, true
 			}
 			prevLen := wt.lastHTMLLen[w.Event.Index]
@@ -133,10 +163,7 @@ func (wt *WidgetTracker) handleStreamEvent(w *claudecode.OutputStreamEventMsg) (
 		return nil, false
 	case "content_block_stop":
 		if _, ok := wt.activeWidgets[w.Event.Index]; ok {
-			delete(wt.activeWidgets, w.Event.Index)
-			delete(wt.accum, w.Event.Index)
-			delete(wt.lastHTMLLen, w.Event.Index)
-			delete(wt.exceeded, w.Event.Index)
+			wt.forget(w.Event.Index)
 			return nil, true
 		}
 		return nil, false

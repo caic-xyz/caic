@@ -251,7 +251,7 @@ type Task struct {
 	runtimeInstanceID     runtime.ID
 	runtimeConnection     runtime.ConnectionTarget
 	logPath               string                // Absolute JSONL log path used for appending task metadata.
-	logValidationSnapshot *ValidatedLogSnapshot // In-memory EOF proof usable by a same-file Reopen.
+	logValidationSnapshot *ValidatedLogSnapshot // In-memory EOF validation usable by a same-file Reopen.
 	statsRing             [statsRingSize]runtime.Stats
 	statsLen              int
 	statsHead             int
@@ -677,13 +677,13 @@ func (t *Task) SetLogPath(path string) {
 	t.logPath = path
 }
 
-// SetLogValidationSnapshot retains an in-memory EOF proof for a later Reopen.
+// SetLogValidationSnapshot retains an in-memory EOF validation for a later Reopen.
 // It is never persisted and must match the task's current log path.
 func (t *Task) SetLogValidationSnapshot(snapshot *ValidatedLogSnapshot) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if snapshot != nil && snapshot.Path == t.logPath {
-		t.logValidationSnapshot = snapshot.validationProof()
+		t.logValidationSnapshot = snapshot.validationSnapshot()
 	}
 }
 
@@ -694,14 +694,15 @@ func (t *Task) LogPath() string {
 	return t.logPath
 }
 
-// CacheProofForLog returns a fresh bounded proof for path. A retained EOF
-// snapshot may only authorize append growth on the same physical log; it never
-// falls back after an identity, header, or EOF validation failure.
-func (t *Task) CacheProofForLog(path string) (CacheProof, error) {
-	if snapshot := t.logValidationProof(path); snapshot != nil {
-		return cacheProofForAppendFromValidatedSnapshot(snapshot, path)
+// LoadHistorySource opens this task's current raw log only far enough to
+// validate and decode its metadata header. Callers must provide a native parser
+// before using the returned source for its one semantic history scan.
+func (t *Task) LoadHistorySource() (*LoadedTask, error) {
+	path := t.LogPath()
+	if path == "" {
+		return nil, ErrNoLog
 	}
-	return CacheProofForLog(path)
+	return loadHistorySourceHeader(path)
 }
 
 // SudoLookupState returns the sudo lookup inputs and cached password.
@@ -1391,6 +1392,21 @@ func (t *Task) Subscribe(ctx context.Context) (history []agent.Message, live <-c
 	t.subs = append(t.subs, s)
 	t.mu.Unlock()
 
+	return history, s.ch, unsubscribeMessages(t, ctx, s)
+}
+
+// SubscribeLiveMessages returns only messages produced after subscription. It
+// avoids copying retained task history for consumers with another authoritative
+// history source, such as a stopped task's raw log.
+func (t *Task) SubscribeLiveMessages(ctx context.Context) (live <-chan agent.Message, unsubFn func()) {
+	s := &sub{ch: make(chan agent.Message, 256)}
+	t.mu.Lock()
+	t.subs = append(t.subs, s)
+	t.mu.Unlock()
+	return s.ch, unsubscribeMessages(t, ctx, s)
+}
+
+func unsubscribeMessages(t *Task, ctx context.Context, s *sub) func() {
 	unsub := func() {
 		t.mu.Lock()
 		defer t.mu.Unlock()
@@ -1401,15 +1417,13 @@ func (t *Task) Subscribe(ctx context.Context) (history []agent.Message, live <-c
 			}
 		}
 	}
-
 	// Close channel when context is done.
 	go func() {
 		<-ctx.Done()
 		unsub()
 		s.close()
 	}()
-
-	return history, s.ch, unsub
+	return unsub
 }
 
 // SubscribeRateLimits returns historical quota messages and a lossless stream
@@ -1480,6 +1494,20 @@ func (t *Task) SubscribeStats(ctx context.Context) (history []runtime.Stats, liv
 	}
 	t.statsSubs = append(t.statsSubs, s)
 	t.mu.Unlock()
+	return history, s.ch, unsubscribeStats(t, ctx, s)
+}
+
+// SubscribeLiveStats returns only stats produced after subscription. It avoids
+// allocating a ring-buffer snapshot when raw disk history is authoritative.
+func (t *Task) SubscribeLiveStats(ctx context.Context) (live <-chan runtime.Stats, unsubFn func()) {
+	s := &statsSub{ch: make(chan runtime.Stats, 64)}
+	t.mu.Lock()
+	t.statsSubs = append(t.statsSubs, s)
+	t.mu.Unlock()
+	return s.ch, unsubscribeStats(t, ctx, s)
+}
+
+func unsubscribeStats(t *Task, ctx context.Context, s *statsSub) func() {
 	unsub := func() {
 		t.mu.Lock()
 		defer t.mu.Unlock()
@@ -1495,7 +1523,7 @@ func (t *Task) SubscribeStats(ctx context.Context) (history []runtime.Stats, liv
 		unsub()
 		s.close()
 	}()
-	return history, s.ch, unsub
+	return unsub
 }
 
 // SessionStatus describes why SendInput could not deliver a message.
@@ -1695,7 +1723,7 @@ func (t *Task) RecordSessionFailure(ctx context.Context, err error) bool {
 	return true
 }
 
-func (t *Task) logValidationProof(path string) *ValidatedLogSnapshot {
+func (t *Task) logValidationSnapshotForPath(path string) *ValidatedLogSnapshot {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.logValidationSnapshot == nil || t.logValidationSnapshot.Path != path {

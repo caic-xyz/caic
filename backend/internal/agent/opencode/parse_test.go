@@ -957,6 +957,48 @@ func TestWireFormatPromptResponse(t *testing.T) {
 			t.Fatalf("msgs[2] type = %T, want *agent.ResultMessage", msgs[2])
 		}
 	})
+
+	t.Run("AccumulationOverflowKeepsStreamingHistoryAuthoritative", func(t *testing.T) {
+		t.Parallel()
+		w := &wireFormat{promptReqID: 10}
+		chunk := func(text string) []byte {
+			return mustJSON(t, map[string]any{
+				"jsonrpc": "2.0",
+				"method":  "session/update",
+				"params": map[string]any{
+					"sessionId": "ses_1",
+					"update": map[string]any{
+						"sessionUpdate": "agent_message_chunk",
+						"content":       map[string]any{"type": "text", "text": text},
+					},
+				},
+			})
+		}
+		for _, text := range []string{strings.Repeat("x", maxAccumulatedOutputBytes), "y"} {
+			msgs, err := w.ParseMessage(chunk(text))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(msgs) != 1 {
+				t.Fatalf("streaming chunk messages = %d, want 1", len(msgs))
+			}
+		}
+		response := mustJSON(t, map[string]any{
+			"jsonrpc": "2.0",
+			"id":      10,
+			"result":  map[string]any{"stopReason": "end_turn"},
+		})
+		msgs, err := w.ParseMessage(response)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("overflow response messages = %d, want result only", len(msgs))
+		}
+		if _, ok := msgs[0].(*agent.ResultMessage); !ok {
+			t.Fatalf("overflow response message = %T, want *agent.ResultMessage", msgs[0])
+		}
+	})
 }
 
 // mustJSON marshals v to []byte, failing the test on error.

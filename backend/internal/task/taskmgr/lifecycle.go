@@ -190,7 +190,6 @@ func (r *Lifecycle) Start(ctx context.Context, resolvedGitHubToken string) error
 	h, err := r.agentRuntime.Start(ctx, t, resolvedGitHubToken)
 	if err != nil {
 		r.entry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "start task")})
-		r.manager.publishTerminalReplay(ctx, r.entry)
 		r.manager.NotifyTaskChange()
 		return err
 	}
@@ -312,7 +311,6 @@ func (r *Lifecycle) Fork(ctx context.Context, p ForkParams) (string, error) { //
 		h, err := r.agentRuntime.ForkTask(ctx, source, t, forkOpts, p.ResolvedGitHubToken)
 		if err != nil {
 			forkEntry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "fork task")})
-			r.manager.publishTerminalReplay(ctx, forkEntry)
 			r.manager.NotifyTaskChange()
 			return
 		}
@@ -443,7 +441,6 @@ func (r *Lifecycle) watchSession(h *task.SessionHandle) {
 					if err := r.manager.Logs.WriteTaskResultTrailer(t, result); err != nil {
 						r.manager.log.WarnContext(ctx, "write crashed task trailer failed", append(attrs, "err", err)...)
 					}
-					r.manager.publishTerminalReplay(ctx, r.entry)
 				} else if t.RecordSessionFailure(ctx, sessionErr) {
 					failureErr := sessionErr
 					if exitErr := t.LastExitError(); exitErr != "" {
@@ -455,7 +452,6 @@ func (r *Lifecycle) watchSession(h *task.SessionHandle) {
 					if err := r.manager.Logs.WriteTaskResultTrailer(t, result); err != nil {
 						r.manager.log.WarnContext(ctx, "write failed task trailer failed", append(attrs, "err", err)...)
 					}
-					r.manager.publishTerminalReplay(ctx, r.entry)
 				}
 			} else {
 				r.manager.log.InfoContext(ctx, "session exited", attrs...)

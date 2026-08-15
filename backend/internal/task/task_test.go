@@ -403,6 +403,32 @@ func TestTask(t *testing.T) {
 				t.Fatal("timed out waiting for live message")
 			}
 		})
+		t.Run("LiveOnlyDoesNotReplayHistory", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.addMessage(t.Context(), &agent.TextMessage{Text: "old"}, false)
+			ch, unsub := tk.SubscribeLiveMessages(t.Context())
+			defer unsub()
+
+			select {
+			case got := <-ch:
+				t.Fatalf("unexpected historical message %q", got.Type())
+			default:
+			}
+			tk.addMessage(t.Context(), &agent.TextMessage{Text: "new"}, false)
+			select {
+			case got := <-ch:
+				text, ok := got.(*agent.TextMessage)
+				if !ok {
+					t.Fatalf("message = %T, want *agent.TextMessage", got)
+				}
+				if text.Text != "new" {
+					t.Fatalf("message = %q, want new", text.Text)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for live message")
+			}
+		})
 	})
 
 	t.Run("SendInput", func(t *testing.T) {
@@ -2615,6 +2641,27 @@ func TestTask(t *testing.T) {
 			}
 			if history[len(history)-1].CPUPerc != 64.0 {
 				t.Errorf("history[last].CPUPerc = %v, want 64.0", history[len(history)-1].CPUPerc)
+			}
+		})
+		t.Run("LiveOnlyDoesNotReplayRing", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{}
+			tk.PushStats(&runtime.Stats{CPUPerc: 50})
+			live, unsub := tk.SubscribeLiveStats(t.Context())
+			defer unsub()
+			select {
+			case got := <-live:
+				t.Fatalf("unexpected historical stat: %+v", got)
+			default:
+			}
+			tk.PushStats(&runtime.Stats{CPUPerc: 75})
+			select {
+			case got := <-live:
+				if got.CPUPerc != 75 {
+					t.Fatalf("live CPU = %v, want 75", got.CPUPerc)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for live stats")
 			}
 		})
 	})

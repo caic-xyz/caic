@@ -112,10 +112,6 @@ type AgentRuntime struct {
 	Checkout            *repo.Checkout // nil for no-repository tasks
 	RuntimeMetadata     runtime.Metadata
 	RuntimeStartTimeout time.Duration // Timeout for instance start (image pull). Must be non-zero.
-	// OnTerminalLogClosed runs once after the terminal trailer is durably closed
-	// and the raw log has reached its final identity. Failed and purged logs are
-	// compressed before the callback; stopped logs remain plain.
-	OnTerminalLogClosed func(context.Context, *Task, State)
 }
 
 // Reconnect reattaches to a running relay, or starts a new agent session
@@ -498,8 +494,6 @@ func (r *AgentRuntime) Cleanup(ctx context.Context, t *Task, reason State) Resul
 	if log != nil && trailerErr == nil && closeErr == nil {
 		if err := t.compressLogIfDone(reason); err != nil {
 			tlog.WarnContext(ctx, "compress task log failed", "err", err)
-		} else {
-			r.publishTerminalLog(ctx, t, reason)
 		}
 	}
 	tlog.InfoContext(ctx, "cleanup done", "dur", time.Since(start).Round(time.Millisecond),
@@ -596,9 +590,6 @@ func (r *AgentRuntime) StopTask(ctx context.Context, t *Task) {
 		if closeErr != nil {
 			tlog.WarnContext(ctx, "close log failed", "err", closeErr)
 		}
-	}
-	if log != nil && trailerErr == nil && closeErr == nil {
-		r.publishTerminalLog(ctx, t, StateStopped)
 	}
 	tlog.InfoContext(ctx, "stop done", "dur", time.Since(start).Round(time.Millisecond),
 		"cost", res.CostUSD, "turns", res.NumTurns)
@@ -909,12 +900,6 @@ func (r *AgentRuntime) setup(ctx context.Context, t *Task, metadata runtime.Meta
 	}, nil
 }
 
-// publishTerminalLog notifies the lifecycle layer after a terminal log has its
-// final raw-file identity, so a replay cache can bind its authority proof once.
-func (r *AgentRuntime) publishTerminalLog(ctx context.Context, t *Task, state State) {
-	r.OnTerminalLogClosed(ctx, t, state)
-}
-
 // finishReviveFailure records a failed revive result in the task log. A revive
 // may fail before opening a session log, after opening one, or while replacing
 // an immediately-exited resumed session; in every case the final trailer is
@@ -940,11 +925,7 @@ func (r *AgentRuntime) finishReviveFailure(ctx context.Context, t *Task, reviveE
 	trailerErr := r.Logs.WriteResultTrailer(log, t.Title(), &res)
 	closeErr := log.Close()
 	if trailerErr == nil && closeErr == nil {
-		compressErr := t.compressLogIfDone(StateFailed)
-		if compressErr == nil {
-			r.publishTerminalLog(ctx, t, StateFailed)
-		}
-		return errors.Join(reviveErr, compressErr)
+		return errors.Join(reviveErr, t.compressLogIfDone(StateFailed))
 	}
 	return errors.Join(reviveErr, trailerErr, closeErr)
 }

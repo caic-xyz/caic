@@ -503,6 +503,19 @@ func TestFilterHistoryForReplay(t *testing.T) {
 			t.Fatalf("got %d messages, want 2", len(got))
 		}
 	})
+	t.Run("KeepsDeltasBeforeResultWithoutCompleteFinal", func(t *testing.T) {
+		t.Parallel()
+		msgs := []agent.Message{
+			&agent.TextDeltaMessage{Text: "delivered "},
+			&agent.TextDeltaMessage{Text: "history"},
+			&agent.ResultMessage{MessageType: "result"},
+		}
+		got := filterHistoryForReplay(msgs)
+		if len(got) != len(msgs) {
+			t.Fatalf("got %d messages, want all %d when no complete text final exists", len(got), len(msgs))
+		}
+	})
+
 	t.Run("PreservesOtherMessages", func(t *testing.T) {
 		t.Parallel()
 		msgs := []agent.Message{

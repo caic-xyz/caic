@@ -4,6 +4,7 @@ package claudecode
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -15,6 +16,69 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
+
+func TestWidgetTrackerBounds(t *testing.T) {
+	t.Parallel()
+
+	stream := func(t *testing.T, wt *WidgetTracker, event map[string]any) {
+		t.Helper()
+		line, err := json.Marshal(map[string]any{"type": "stream_event", "event": event})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := parseMessageWithTracker(line, wt, &jsonutil.FieldWarner{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	start := func(t *testing.T, wt *WidgetTracker, index int) {
+		t.Helper()
+		stream(t, wt, map[string]any{
+			"type": "content_block_start", "index": index,
+			"content_block": map[string]any{"type": "tool_use", "id": fmt.Sprintf("widget-%d", index), "name": "show_widget"},
+		})
+	}
+
+	t.Run("tracked blocks", func(t *testing.T) {
+		t.Parallel()
+		wt := NewWidgetTracker()
+		for index := range maxTrackedWidgetBlocks + 8 {
+			start(t, wt, index)
+		}
+		if len(wt.activeWidgets) != maxTrackedWidgetBlocks {
+			t.Fatalf("tracked blocks = %d, want %d", len(wt.activeWidgets), maxTrackedWidgetBlocks)
+		}
+		if len(wt.accum) != 0 || len(wt.lastHTMLLen) != 0 || len(wt.exceeded) != 0 {
+			t.Fatalf("unexpected state before deltas: %+v", wt)
+		}
+	})
+
+	t.Run("aggregate JSON", func(t *testing.T) {
+		t.Parallel()
+		wt := NewWidgetTracker()
+		start(t, wt, 0)
+		stream(t, wt, map[string]any{
+			"type": "content_block_delta", "index": 0,
+			"delta": map[string]any{"type": "input_json_delta", "partial_json": strings.Repeat("x", maxBufferedWidgetJSONBytes)},
+		})
+		if wt.bufferedJSONBytes != maxBufferedWidgetJSONBytes {
+			t.Fatalf("buffered JSON = %d, want %d", wt.bufferedJSONBytes, maxBufferedWidgetJSONBytes)
+		}
+		stream(t, wt, map[string]any{
+			"type": "content_block_delta", "index": 0,
+			"delta": map[string]any{"type": "input_json_delta", "partial_json": "x"},
+		})
+		if wt.bufferedJSONBytes != 0 || len(wt.accum) != 0 {
+			t.Fatalf("over-limit JSON retained %d bytes in %#v", wt.bufferedJSONBytes, wt.accum)
+		}
+		if _, ok := wt.exceeded[0]; !ok {
+			t.Fatal("over-limit widget was not marked exceeded")
+		}
+		stream(t, wt, map[string]any{"type": "content_block_stop", "index": 0})
+		if len(wt.activeWidgets) != 0 || len(wt.exceeded) != 0 || wt.bufferedJSONBytes != 0 {
+			t.Fatalf("stop did not release state: %+v", wt)
+		}
+	})
+}
 
 func TestAPIMessage(t *testing.T) {
 	t.Parallel()

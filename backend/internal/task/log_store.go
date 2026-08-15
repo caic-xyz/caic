@@ -78,39 +78,39 @@ func openTaskLogForAppend(path string, t *Task, create bool) (w *taskLogWriter, 
 	if err != nil {
 		return nil, false, err
 	}
-	if snapshot := t.logValidationProof(cleanPath); snapshot != nil {
-		if proof, snapshotErr := validateRawLogAppendSnapshot(cleanPath, w.file, t, snapshot); snapshotErr == nil {
-			w.version = proof.Version
+	if snapshot := t.logValidationSnapshotForPath(cleanPath); snapshot != nil {
+		if observation, snapshotErr := validateRawLogAppendSnapshot(cleanPath, w.file, t, snapshot); snapshotErr == nil {
+			w.version = observation.Version
 			return w, false, nil
 		}
 	}
-	proof, err := validateRawLogAppend(w.file, w.file, cleanPath, t)
+	observation, err := validateRawLogAppend(w.file, w.file, cleanPath, t)
 	if err != nil {
 		return nil, false, errors.Join(err, w.Close())
 	}
-	w.version = proof.Version
+	w.version = observation.Version
 	return w, false, nil
 }
 
 // validateRawLogAppendSnapshot reuses an in-memory EOF validation only after a
-// fresh bounded header and identity observation binds that proof to the open
+// fresh bounded header and identity observation binds that validation to the open
 // append descriptor and its current path.
-func validateRawLogAppendSnapshot(path string, f *os.File, t *Task, snapshot *ValidatedLogSnapshot) (CacheProof, error) {
+func validateRawLogAppendSnapshot(path string, f *os.File, t *Task, snapshot *ValidatedLogSnapshot) (logObservation, error) {
 	if snapshot == nil || !snapshot.EOFValidated || snapshot.Path != filepath.Clean(path) {
-		return CacheProof{}, errors.New("task log validation snapshot is stale")
+		return logObservation{}, errors.New("task log validation snapshot is stale")
 	}
 	info, err := f.Stat()
 	if err != nil {
-		return CacheProof{}, err
+		return logObservation{}, err
 	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return CacheProof{}, err
+		return logObservation{}, err
 	}
-	proof, err := cacheProofFromReader(path, &physicalLogReader{file: f, reader: f, info: info})
+	observation, err := logObservationFromReader(path, &physicalLogReader{file: f, reader: f, info: info})
 	if err != nil {
-		return CacheProof{}, fmt.Errorf("validate task log snapshot for append: %w", err)
+		return logObservation{}, fmt.Errorf("validate task log snapshot for append: %w", err)
 	}
-	if proof != (CacheProof{
+	if observation != (logObservation{
 		Device:    snapshot.Device,
 		Inode:     snapshot.Inode,
 		Size:      snapshot.Size,
@@ -119,43 +119,43 @@ func validateRawLogAppendSnapshot(path string, f *os.File, t *Task, snapshot *Va
 		Harness:   snapshot.Authority.Harness,
 		RawHeader: snapshot.RawHeader,
 	}) {
-		return CacheProof{}, errors.New("task log validation snapshot is stale")
+		return logObservation{}, errors.New("task log validation snapshot is stale")
 	}
-	if proof.Harness != t.Harness {
-		return CacheProof{}, fmt.Errorf("append task log: header harness %q does not match task harness %q", proof.Harness, t.Harness)
+	if observation.Harness != t.Harness {
+		return logObservation{}, fmt.Errorf("append task log: header harness %q does not match task harness %q", observation.Harness, t.Harness)
 	}
-	return proof, nil
+	return observation, nil
 }
 
-func validateRawLogAppend(source io.ReadSeeker, f *os.File, path string, t *Task) (CacheProof, error) {
+func validateRawLogAppend(source io.ReadSeeker, f *os.File, path string, t *Task) (logObservation, error) {
 	info, err := f.Stat()
 	if err != nil {
-		return CacheProof{}, err
+		return logObservation{}, err
 	}
 	if _, err := source.Seek(0, io.SeekStart); err != nil {
-		return CacheProof{}, err
+		return logObservation{}, err
 	}
 	scanner := newPhysicalLogScanner(source, path)
 	if _, err := scanner.ReadHeader(&jsonutil.FieldWarner{}); err != nil {
-		return CacheProof{}, fmt.Errorf("validate task log for append: %w", err)
+		return logObservation{}, fmt.Errorf("validate task log for append: %w", err)
 	}
 	for scanner.Scan() {
 	}
 	if err := scanner.Err(); err != nil {
-		return CacheProof{}, fmt.Errorf("validate task log for append: %w", err)
+		return logObservation{}, fmt.Errorf("validate task log for append: %w", err)
 	}
 	stableInfo, err := verifyPhysicalLog(path, f, info)
 	if err != nil {
-		return CacheProof{}, fmt.Errorf("validate task log for append: %w", err)
+		return logObservation{}, fmt.Errorf("validate task log for append: %w", err)
 	}
 	if scanner.authority.Harness != t.Harness {
-		return CacheProof{}, fmt.Errorf("append task log: header harness %q does not match task harness %q", scanner.authority.Harness, t.Harness)
+		return logObservation{}, fmt.Errorf("append task log: header harness %q does not match task harness %q", scanner.authority.Harness, t.Harness)
 	}
 	identity := physicalFileIdentityFromFile(f, stableInfo)
 	if !identity.Valid {
-		return CacheProof{}, fmt.Errorf("task log has no stable physical identity: %s", path)
+		return logObservation{}, fmt.Errorf("task log has no stable physical identity: %s", path)
 	}
-	return CacheProof{Device: identity.Device, Inode: identity.Inode, Size: stableInfo.Size(), ModTimeNs: stableInfo.ModTime().UnixNano(), Version: scanner.authority.Version, Harness: scanner.authority.Harness, RawHeader: string(scanner.headerRaw)}, nil
+	return logObservation{Device: identity.Device, Inode: identity.Inode, Size: stableInfo.Size(), ModTimeNs: stableInfo.ModTime().UnixNano(), Version: scanner.authority.Version, Harness: scanner.authority.Harness, RawHeader: string(scanner.headerRaw)}, nil
 }
 
 // WriteResultTrailer appends a MetaResultMessage to an active task log.

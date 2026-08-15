@@ -83,7 +83,6 @@ type Config struct {
 	RuntimeStartTimeout time.Duration
 	Provider            genai.Provider // nil-safe
 	Checkouts           *repo.Registry
-	TerminalReplay      TerminalReplayPublisher
 }
 
 // Manager owns task lifecycle state, instance adoption, session watching, and
@@ -104,7 +103,6 @@ type Manager struct {
 	runtimeMetadata     runtime.Metadata
 	runtimeStartTimeout time.Duration
 	provider            genai.Provider
-	terminalReplay      TerminalReplayPublisher
 	relay               relayReader
 
 	// Guarded by quotaWatchMu.
@@ -134,9 +132,6 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 	if cfg.RuntimeStartTimeout <= 0 {
 		return nil, errors.New("task manager runtime start timeout is required")
 	}
-	if cfg.TerminalReplay == nil {
-		return nil, errors.New("task manager terminal replay publisher is required")
-	}
 	log := slog.Default().With(slog.String("cmp", "taskmgr"))
 	serverCtx, cancelServerCtx := context.WithCancel(cfg.ServerCtx)
 	m := &Manager{
@@ -152,7 +147,6 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 		runtimeMetadata:     maps.Clone(cfg.RuntimeMetadata),
 		runtimeStartTimeout: cfg.RuntimeStartTimeout,
 		provider:            cfg.Provider,
-		terminalReplay:      cfg.TerminalReplay,
 		Checkouts:           cfg.Checkouts,
 		relay:               agentRelayReader{},
 		tasks:               make(map[string]*Entry),
@@ -206,7 +200,6 @@ func (m *Manager) NewEntry(t *task.Task, lt *task.LoadedTask) *Entry {
 			Checkout:            m.resolveCheckout(t),
 			RuntimeMetadata:     m.runtimeMetadata,
 			RuntimeStartTimeout: m.runtimeStartTimeout,
-			OnTerminalLogClosed: m.publishTerminalReplayForTask,
 		},
 	}
 	return e
@@ -799,6 +792,23 @@ func (m *Manager) LoadPurgedTasks(all []*task.LoadedTask) error {
 // LoadMessagesOnDemand triggers lazy message loading for purged tasks.
 func (m *Manager) LoadMessagesOnDemand(entry *Entry) {
 	m.loadTaskMessagesOnDemand(entry)
+}
+
+// HistorySource opens a header-only raw-log reader for stopped or terminal history.
+func (m *Manager) HistorySource(entry *Entry) (*task.LoadedTask, error) {
+	if entry == nil {
+		return nil, errors.New("task history entry is nil")
+	}
+	if entry.Task().LogPath() == "" {
+		return entry.LoadedTask(), nil
+	}
+	loaded, err := entry.Task().LoadHistorySource()
+	if err != nil {
+		return nil, fmt.Errorf("load task history source: %w", err)
+	}
+	loaded.SetNativeParserResolver(m.resolveNativeParser)
+	entry.SetLoadedTask(loaded)
+	return loaded, nil
 }
 
 // resolveAdoptionTaskIDs selects instances for configured checkouts, reads
@@ -1637,51 +1647,6 @@ func (m *Manager) loadTaskMessagesOnDemand(entry *Entry) {
 		}
 		entry.Task().RestoreMessages(lt.Msgs)
 	})
-}
-
-// publishTerminalReplay creates a replay cache from a new EOF-validated log
-// scan and records the source so terminal requests can fall back to a later
-// regeneration. It runs only after the terminal trailer's writer is closed;
-// failed cache publication is non-fatal because the raw log remains authority.
-func (m *Manager) publishTerminalReplayForTask(ctx context.Context, t *task.Task, _ task.State) {
-	entry, ok := m.GetEntry(t.ID.String())
-	if !ok {
-		m.log.WarnContext(ctx, "terminal replay entry is unavailable", "task", t.ID)
-		return
-	}
-	m.publishTerminalReplay(ctx, entry)
-}
-
-func (m *Manager) publishTerminalReplay(ctx context.Context, entry *Entry) {
-	lt, err := m.loadTerminalReplaySource(entry.Task())
-	if lt != nil {
-		entry.SetLoadedTask(lt)
-	}
-	if err == nil {
-		err = m.terminalReplay(ctx, lt)
-	}
-	if err != nil {
-		m.log.WarnContext(ctx, "regenerate terminal replay cache failed", "task", entry.Task().ID, "err", err)
-	}
-}
-
-// loadTerminalReplaySource reloads and validates a completed task log through
-// EOF. The returned source remains usable for a later replay-cache retry.
-func (m *Manager) loadTerminalReplaySource(t *task.Task) (*task.LoadedTask, error) {
-	path := t.LogPath()
-	if path == "" {
-		return nil, errors.New("terminal task has no log path")
-	}
-	loaded, err := task.LoadLogsForTaskIDs(filepath.Dir(path), []string{t.ID.String()})
-	if err != nil {
-		return nil, err
-	}
-	if len(loaded) != 1 {
-		return nil, fmt.Errorf("terminal task %s has %d matching logs", t.ID, len(loaded))
-	}
-	lt := loaded[0]
-	lt.SetNativeParserResolver(m.resolveNativeParser)
-	return lt, nil
 }
 
 // logRelayMessageMerger owns the adoption-time overlap rules for disk-log
