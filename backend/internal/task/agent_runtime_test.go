@@ -1431,7 +1431,7 @@ func testRunnerSessions(t *testing.T) {
 			<-done
 			tk.addMessage(t.Context(), &agent.TextMessage{Text: "synthetic"}, false)
 		})
-		t.Run("ResultMessage", func(t *testing.T) {
+		t.Run("ResultMessageEmitsDiffStatWithoutFetch", func(t *testing.T) {
 			t.Parallel()
 			stub := &fetchRecorder{FakeBackend: testContainer()}
 			r := newTestAgentRuntime(t, newTestCheckout(t, "", "/repo", stub), "", nil)
@@ -1464,8 +1464,8 @@ func testRunnerSessions(t *testing.T) {
 			case <-timeout:
 				t.Fatal("timed out waiting for message")
 			}
-			if !stub.fetched.Load() {
-				t.Error("Fetch was not called on result message")
+			if stub.fetched.Load() {
+				t.Error("Fetch was called on result message")
 			}
 			select {
 			case <-changed:

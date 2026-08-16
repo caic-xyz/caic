@@ -146,11 +146,8 @@ func TestCheckout(t *testing.T) {
 		r := newTestCheckout("/repo")
 		tv := &fakeTaskView{instanceID: runtime.NewID("test-runtime", "ctr-1"), repo: []runtime.Repo{{GitRoot: "/repo", Branch: "feature"}}}
 		ds := r.BranchDiffStat(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), tv)
-		if len(sc.fetchIDs) == 0 {
-			t.Error("BranchDiffStat did not call Fetch")
-		}
-		if len(sc.fetchIDs) != 1 || sc.fetchIDs[0] != "test-runtime:ctr-1" {
-			t.Errorf("fetch IDs = %v, want [test-runtime:ctr-1]", sc.fetchIDs)
+		if len(sc.fetchIDs) != 0 {
+			t.Errorf("BranchDiffStat called Fetch %d times, want 0", len(sc.fetchIDs))
 		}
 		if len(ds) != 1 || ds[0].Path != "main.go" || ds[0].Added != 5 || ds[0].Deleted != 1 {
 			t.Errorf("BranchDiffStat = %+v, want [{main.go +5 -1}]", ds)
@@ -343,8 +340,9 @@ func TestDiffRepoPrefix(t *testing.T) {
 }
 
 // recordingContainer is a fake runtime whose Diff reports a fixed one-file
-// numstat and which records the Fetch/Diff calls BranchDiffStat makes, so tests
-// can assert per-repo diffing by instance id and repo index.
+// numstat and which records Fetch/Diff calls, so tests can assert per-repo
+// diffing by instance id and repo index, and that BranchDiffStat does not
+// fetch.
 type recordingContainer struct {
 	*runtimetest.FakeBackend
 

@@ -796,8 +796,8 @@ func (r *AgentRuntime) branchDiffStat(ctx context.Context, t *Task) (agent.DiffS
 	if len(repos) > 0 && repos[0].GitRoot == "" {
 		repos[0].GitRoot = r.Checkout.Dir
 	}
-	r.Log.InfoContext(ctx, "fetch for branch diff stat", "repo", r.Checkout.RelPath, "repos", len(repos))
-	return r.Checkout.DiffStat(ctx, r.Log, r.Runtimes, id, repos, repo.DiffFetchRequired)
+	r.Log.InfoContext(ctx, "branch diff stat for purge verification", "repo", r.Checkout.RelPath, "repos", len(repos))
+	return r.Checkout.DiffStat(ctx, r.Log, r.Runtimes, id, repos)
 }
 
 // setup reserves a branch name, starts the instance (Phase A) and creates the
@@ -1125,7 +1125,7 @@ func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipSi
 				}
 			case *agent.ResultMessage:
 				if !skipSideEffects && r.Runtimes != nil && r.Checkout != nil {
-					ds, _ := r.Checkout.DiffStat(ctx, r.Log, r.Runtimes, instanceID, allRepos, repo.DiffFetchBestEffort)
+					ds, _ := r.Checkout.DiffStat(ctx, r.Log, r.Runtimes, instanceID, allRepos)
 					msg.DiffStat = ds
 				}
 			}
@@ -1144,14 +1144,13 @@ func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipSi
 	return msgCh, dispatchDone
 }
 
-// emitDiffStatBranch emits a DiffStatMessage from the current instance diff
-// without fetching from the instance. This keeps live UI diff stats fresh during
-// a running turn without triggering md fetch side effects.
+// emitDiffStatBranch emits a DiffStatMessage from the current in-container
+// diff. This keeps live UI diff stats fresh during a running turn.
 func (r *AgentRuntime) emitDiffStatBranch(ctx context.Context, t *Task, id runtime.ID, repos []runtime.Repo) {
 	if r.Checkout == nil {
 		return
 	}
-	ds, _ := r.Checkout.DiffStat(ctx, r.Log, r.Runtimes, id, repos, repo.DiffWithoutFetch)
+	ds, _ := r.Checkout.DiffStat(ctx, r.Log, r.Runtimes, id, repos)
 	if len(ds) == 0 {
 		return
 	}

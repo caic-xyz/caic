@@ -116,9 +116,10 @@ func (w *Checkout) AllocateBranch(ctx context.Context, log *slog.Logger) (string
 	return w.allocateBranchLocked(ctx, log, nil)
 }
 
-// SyncToOrigin pushes each repo's task branch to origin and returns the
-// combined diff stat across all repos and any safety issues found. Safety is
-// checked per-repo; when force is false, issues in any repo block the push.
+// SyncToOrigin fetches the instance to refresh the host tracking refs, then
+// pushes each repo's task branch to origin and returns the combined diff stat
+// and any safety issues found. Safety is checked per-repo; when force is
+// false, issues in any repo block the push.
 func (w *Checkout) SyncToOrigin(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, t TaskView, force bool) (agent.DiffStat, []SafetyIssue, error) {
 	id, repos, err := w.taskRuntime(t)
 	if err != nil {
@@ -127,10 +128,18 @@ func (w *Checkout) SyncToOrigin(ctx context.Context, log *slog.Logger, runtimes 
 	region := trace.StartRegion(ctx, "sync-fetch")
 	log = log.With("repo", w.RelPath)
 	log.InfoContext(ctx, "fetch", "repos", len(repos))
-	ds, err := w.DiffStat(ctx, log, runtimes, id, repos, DiffFetchRequired)
+	// The safety scan and push below operate on the host tracking refs, so
+	// refresh them first. A failed fetch must abort: pushing a stale ref
+	// would silently drop work done since the last fetch.
+	fetchCtx, fetchCancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
+	err = runtimes.Fetch(fetchCtx, id)
+	fetchCancel()
+	// Per-repo diff failures are already logged; the stat only feeds the
+	// result report, so the sync proceeds regardless.
+	ds, _ := w.DiffStat(ctx, log, runtimes, id, repos)
 	region.End()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("fetch: %w", err)
 	}
 
 	// Phase 1: safety check each repo, collect all issues.
@@ -179,10 +188,18 @@ func (w *Checkout) SyncToDefault(ctx context.Context, log *slog.Logger, runtimes
 	region := trace.StartRegion(ctx, "sync-default-fetch")
 	log = log.With("repo", w.RelPath)
 	log.InfoContext(ctx, "fetch for default sync", "repos", len(repos))
-	ds, err := w.DiffStat(ctx, log, runtimes, id, repos, DiffFetchRequired)
+	// The squash below operates on the host tracking refs, so refresh them
+	// first. A failed fetch must abort: squashing a stale ref would silently
+	// drop work done since the last fetch.
+	fetchCtx, fetchCancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
+	err = runtimes.Fetch(fetchCtx, id)
+	fetchCancel()
+	// Per-repo diff failures are already logged; the stat only feeds the
+	// result report, so the sync proceeds regardless.
+	ds, _ := w.DiffStat(ctx, log, runtimes, id, repos)
 	region.End()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("fetch: %w", err)
 	}
 
 	// Phase 1: safety check each repo, collect all issues.
@@ -250,10 +267,11 @@ func (w *Checkout) DiffContent(ctx context.Context, log *slog.Logger, runtimes *
 	return buf.String(), nil
 }
 
-// BranchDiffStat fetches from the instance and returns the per-repo branch diff
-// stat (md diff --numstat). Unlike the relay's diff_watcher which only tracks
-// uncommitted changes, this captures the full branch diff relative to the base.
-// Used by task-manager import to restore the diff stat after server restart.
+// BranchDiffStat returns the per-repo branch diff stat (md diff --numstat)
+// computed in the instance. Unlike the relay's diff_watcher which only tracks
+// uncommitted changes, this captures the full branch diff relative to the
+// base. Used by task-manager import to restore the diff stat after server
+// restart.
 func (w *Checkout) BranchDiffStat(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, t TaskView) agent.DiffStat {
 	log = log.With("repo", w.RelPath)
 	id, repos, err := w.taskRuntime(t)
@@ -261,10 +279,9 @@ func (w *Checkout) BranchDiffStat(ctx context.Context, log *slog.Logger, runtime
 		log.Warn("resolve task runtime for branch diff stat failed", "err", err)
 		return nil
 	}
-	log.InfoContext(ctx, "fetch for branch diff stat", "repos", len(repos))
-	ds, err := w.DiffStat(ctx, log, runtimes, id, repos, DiffFetchRequired)
+	ds, err := w.DiffStat(ctx, log, runtimes, id, repos)
 	if err != nil {
-		log.Warn("fetch for branch diff stat failed", "err", err)
+		log.Warn("branch diff stat failed", "err", err)
 		return nil
 	}
 	return ds
@@ -349,36 +366,15 @@ func (w *Checkout) FetchAndCreateBranch(ctx context.Context, log *slog.Logger, t
 	return nil
 }
 
-// DiffFetchMode controls whether DiffStat fetches from the runtime instance
-// before computing the diff.
-type DiffFetchMode int
-
-const (
-	// DiffWithoutFetch computes the diff stat without fetching first.
-	DiffWithoutFetch DiffFetchMode = iota
-	// DiffFetchBestEffort fetches first but tolerates fetch failures.
-	DiffFetchBestEffort
-	// DiffFetchRequired fetches first and fails if the fetch fails.
-	DiffFetchRequired
-)
-
-// DiffStat optionally fetches from the instance, then returns the combined
-// per-repo diff stat (git diff --numstat).
-func (w *Checkout) DiffStat(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, id runtime.ID, repos []runtime.Repo, fetchMode DiffFetchMode) (agent.DiffStat, error) {
+// DiffStat returns the combined per-repo diff stat (git diff --numstat)
+// computed in the instance. It returns an error if any repo's diff fails.
+func (w *Checkout) DiffStat(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, id runtime.ID, repos []runtime.Repo) (agent.DiffStat, error) {
 	log = log.With("repo", w.RelPath)
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
 	defer cancel()
 	w.branchMu.Lock()
 	defer w.branchMu.Unlock()
-	if fetchMode != DiffWithoutFetch {
-		if err := runtimes.Fetch(ctx, id); err != nil {
-			if fetchMode == DiffFetchRequired {
-				return nil, err
-			}
-			log.Warn("fetch on result failed", "err", err)
-		}
-	}
-	return w.diffStatLocked(ctx, log, runtimes, id, repos), nil
+	return w.diffStatLocked(ctx, log, runtimes, id, repos)
 }
 
 func (w *Checkout) taskRuntime(t TaskView) (runtime.ID, []runtime.Repo, error) {
@@ -451,14 +447,16 @@ func (w *Checkout) effectiveBaseBranch(t TaskView) string {
 // diffStatLocked runs Diff("--numstat") on each repo and returns the combined
 // diff stat. File paths are prefixed with `<repoName>/` when there are multiple
 // repos so the frontend can distinguish changes per repo. The caller must hold
-// branchMu.
-func (w *Checkout) diffStatLocked(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, id runtime.ID, repos []runtime.Repo) agent.DiffStat {
+// branchMu. It returns an error if any repo's diff fails.
+func (w *Checkout) diffStatLocked(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, id runtime.ID, repos []runtime.Repo) (agent.DiffStat, error) {
 	var result agent.DiffStat
+	var errs []error
 	for i := range repos {
 		repo := &repos[i]
 		numstat, err := runtimes.Diff(ctx, id, i, "--numstat")
 		if err != nil {
 			log.Warn("diff numstat failed", "repo", repo.ContainerPath, "br", repo.Branch, "err", err)
+			errs = append(errs, err)
 			continue
 		}
 		ds := ParseDiffNumstat(numstat)
@@ -470,7 +468,7 @@ func (w *Checkout) diffStatLocked(ctx context.Context, log *slog.Logger, runtime
 		}
 		result = append(result, ds...)
 	}
-	return result
+	return result, errors.Join(errs...)
 }
 
 // maxBranchSeqNum finds the highest sequence number N among all local and
