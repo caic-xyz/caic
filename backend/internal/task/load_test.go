@@ -1494,6 +1494,28 @@ func TestLoadLogs(t *testing.T) {
 	})
 }
 
+func TestLoadLogsManyFiles(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	line := mustJSON(t, agent.MetaMessage{
+		MessageType: "caic_meta",
+		Version:     int(agent.LogVersionV1),
+		Prompt:      "task",
+		Harness:     harness.Claude,
+	})
+	for i := range 512 {
+		writeLogFile(t, dir, fmt.Sprintf("task-%03d.jsonl", i), line)
+	}
+
+	loaded, err := LoadLogs(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != 512 {
+		t.Fatalf("loaded %d task logs, want 512", len(loaded))
+	}
+}
+
 func TestTsToTime(t *testing.T) {
 	t.Parallel()
 	// 1735689600.5 = 2025-01-01T00:00:00.5Z (exact in float64).

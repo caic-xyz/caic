@@ -22,7 +22,7 @@ Restart=always
 RestartSec=1s
 
 # --- Resource Limits ---
-CPUQuota=200%
+CPUQuota=800%
 MemoryMax=4G
 MemoryHigh=3G
 

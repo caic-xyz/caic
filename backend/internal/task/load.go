@@ -14,6 +14,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -32,6 +33,10 @@ var errNotLogFile = errors.New("not a caic log file")
 // maxTailLoadBytes is the maximum retained physical-record suffix for
 // interactive loading of a large task log.
 const maxTailLoadBytes = 64 << 20
+
+// maxParallelLogHeaderLoads bounds the transient memory and file handles
+// needed while scanning a large persisted task-log directory.
+const maxParallelLogHeaderLoads = 8
 
 // v1TypeEnvelope extracts the legacy v1 native-message type used by inventory parsing.
 type v1TypeEnvelope struct {
@@ -1367,19 +1372,28 @@ func logPaths(logDir string, taskIDs map[string]struct{}) ([]string, error) {
 }
 
 func loadLogsFromPaths(paths []string, strict bool) ([]*LoadedTask, error) {
-	// Parse headers in parallel — each file is independent.
+	// Parse headers concurrently, but retain only a bounded number of scanner
+	// buffers and decompressor/file handles when a cache has many old logs.
 	type result struct {
 		lt  *LoadedTask
 		err error
 	}
 	results := make([]result, len(paths))
+	workers := min(len(paths), max(goruntime.GOMAXPROCS(0), 1), maxParallelLogHeaderLoads)
+	jobs := make(chan int)
 	var wg sync.WaitGroup
-	for i, p := range paths {
+	for range workers {
 		wg.Go(func() {
-			lt, err := loadLogHeader(p)
-			results[i] = result{lt, err}
+			for i := range jobs {
+				lt, err := loadLogHeader(paths[i])
+				results[i] = result{lt, err}
+			}
 		})
 	}
+	for i := range paths {
+		jobs <- i
+	}
+	close(jobs)
 	wg.Wait()
 
 	var tasks []*LoadedTask
