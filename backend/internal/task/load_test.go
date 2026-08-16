@@ -4,6 +4,7 @@ package task
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -187,6 +188,41 @@ func TestLoadSemanticTail(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestScanPhysicalLogHeaderOnlyAndEOFValidation(t *testing.T) {
+	t.Parallel()
+	path := writePhysicalTestLog(t, false, mustJSON(t, agent.MetaMessage{
+		MessageType: "caic_meta",
+		Version:     int(agent.LogVersionV1),
+		Prompt:      "header only",
+		Harness:     harness.Claude,
+	}))
+
+	t.Run("HeaderOnly", func(t *testing.T) {
+		t.Parallel()
+		var got agent.MetaMessage
+		err := scanPhysicalLog(path, false, func(_ os.FileInfo, _ *physicalLogScanner, meta agent.MetaMessage) error {
+			got = meta
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Prompt != "header only" {
+			t.Errorf("header prompt = %q, want %q", got.Prompt, "header only")
+		}
+	})
+
+	t.Run("RequiresEOF", func(t *testing.T) {
+		t.Parallel()
+		err := scanPhysicalLog(path, true, func(_ os.FileInfo, _ *physicalLogScanner, _ agent.MetaMessage) error {
+			return nil
+		})
+		if err == nil || !strings.Contains(err.Error(), "did not reach EOF") {
+			t.Fatalf("scanPhysicalLog error = %v, want EOF validation error", err)
+		}
+	})
 }
 
 func TestReadLogAuthority(t *testing.T) {
@@ -1495,7 +1531,7 @@ func TestLoadedTask(t *testing.T) {
 		lt := tasks[0]
 
 		var streamed []agent.Message
-		for m, e := range lt.StreamMessages() {
+		for m, e := range lt.StreamMessages(t.Context()) {
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -1514,6 +1550,73 @@ func TestLoadedTask(t *testing.T) {
 		}
 	})
 
+	t.Run("StreamMessagesCancellation", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "stream task", Harness: harness.Claude})
+		first := claudeAssistant(t, map[string]any{"type": "text", "text": "first"})
+		second := claudeAssistant(t, map[string]any{"type": "text", "text": "second"})
+		writeLogFile(t, dir, "t.jsonl", meta, first, second)
+
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		setClaudeParser(tasks)
+		ctx, cancel := context.WithCancel(t.Context())
+		t.Cleanup(cancel)
+		var messages int
+		var gotErr error
+		for message, err := range tasks[0].StreamMessages(ctx) {
+			if err != nil {
+				gotErr = err
+				continue
+			}
+			messages++
+			cancel()
+			if message.Message == nil {
+				t.Fatal("streamed nil message")
+			}
+		}
+		if messages != 1 {
+			t.Fatalf("streamed %d messages, want 1", messages)
+		}
+		if !errors.Is(gotErr, context.Canceled) {
+			t.Fatalf("stream error = %v, want context.Canceled", gotErr)
+		}
+	})
+
+	t.Run("StreamMessagesStopsWhenConsumerReturns", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "stream task", Harness: harness.Claude})
+		writeLogFile(t, dir, "t.jsonl", meta,
+			`{"type":"assistant","message":{"content":[]}}`,
+			`{"type":"assistant","message":{"content":[]}}`,
+		)
+
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		calls := 0
+		tasks[0].SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			return func([]byte) ([]agent.Message, error) {
+				calls++
+				return []agent.Message{&agent.TextMessage{Text: "message"}}, nil
+			}, nil
+		})
+		for _, err := range tasks[0].StreamMessages(t.Context()) {
+			if err != nil {
+				t.Fatal(err)
+			}
+			break
+		}
+		if calls != 1 {
+			t.Fatalf("native parser calls = %d, want 1", calls)
+		}
+	})
+
 	t.Run("StreamMessagesIncludesProvisioningLogs", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
@@ -1529,7 +1632,7 @@ func TestLoadedTask(t *testing.T) {
 		setClaudeParser(tasks)
 
 		var streamed []agent.Message
-		for m, e := range tasks[0].StreamMessages() {
+		for m, e := range tasks[0].StreamMessages(t.Context()) {
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -1554,7 +1657,7 @@ func TestLoadedTask(t *testing.T) {
 		}
 	})
 
-	t.Run("ScanMessagesIncludesReplayControls", func(t *testing.T) {
+	t.Run("StreamMessagesIncludesReplayControls", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: int(agent.LogVersionV2), Prompt: "replay controls", Harness: harness.Claude})
@@ -1572,11 +1675,11 @@ func TestLoadedTask(t *testing.T) {
 			return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
 		})
 		var replayed []string
-		if err := lt.ScanMessagesWithContext(t.Context(), func(parsed agent.ParsedMessage) error {
+		for parsed, err := range lt.StreamMessages(t.Context()) {
+			if err != nil {
+				t.Fatal(err)
+			}
 			replayed = append(replayed, parsed.Message.Type())
-			return nil
-		}); err != nil {
-			t.Fatal(err)
 		}
 		if want := []string{"caic_exit", "log", "system"}; !slices.Equal(replayed, want) {
 			t.Fatalf("replay controls = %q, want %q", replayed, want)
@@ -1610,7 +1713,7 @@ func TestLoadedTask(t *testing.T) {
 		lt := tasks[0]
 
 		var streamed []agent.Message
-		for m, e := range lt.StreamMessages() {
+		for m, e := range lt.StreamMessages(t.Context()) {
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -1643,7 +1746,7 @@ func TestLoadedTask(t *testing.T) {
 					return claudecode.New().NewWire().ParseMessage, nil
 				})
 				var gotErr error
-				for _, err := range lt.StreamMessages() {
+				for _, err := range lt.StreamMessages(t.Context()) {
 					gotErr = errors.Join(gotErr, err)
 				}
 				if gotErr == nil || !strings.Contains(gotErr.Error(), "invalid first log header") {
@@ -1659,7 +1762,7 @@ func TestLoadedTask(t *testing.T) {
 				})
 				var gotErr error
 				var messages int
-				for msg, err := range lt.StreamMessages() {
+				for msg, err := range lt.StreamMessages(t.Context()) {
 					gotErr = errors.Join(gotErr, err)
 					if msg.Message != nil {
 						messages++
@@ -1680,7 +1783,7 @@ func TestLoadedTask(t *testing.T) {
 					return claudecode.New().NewWire().ParseMessage, nil
 				})
 				var messages int
-				for msg, err := range lt.StreamMessages() {
+				for msg, err := range lt.StreamMessages(t.Context()) {
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -1756,7 +1859,7 @@ func TestLoadedTask(t *testing.T) {
 			t.Parallel()
 			lt := &LoadedTask{path: "/does/not/exist.jsonl"}
 			var gotErr bool
-			for _, e := range lt.StreamMessages() {
+			for _, e := range lt.StreamMessages(t.Context()) {
 				if e != nil {
 					gotErr = true
 				}

@@ -68,37 +68,6 @@ type retainedSemanticRecord struct {
 	parsed bool
 }
 
-type physicalLogReader struct {
-	reader io.ReadCloser
-	info   os.FileInfo
-}
-
-func openPhysicalLogReader(path string) (*physicalLogReader, error) {
-	return openPhysicalLogReaderWithCompression(path, isLogCompressed(path))
-}
-
-func openPhysicalLogReaderWithCompression(path string, compressed bool) (*physicalLogReader, error) {
-	var r io.ReadCloser
-	var err error
-	if compressed {
-		r, err = openCompressedLogReader(path)
-	} else {
-		r, err = openLogReader(path)
-	}
-	if err != nil {
-		return nil, err
-	}
-	info, err := os.Stat(filepath.Clean(path))
-	if err != nil {
-		return nil, errors.Join(err, r.Close())
-	}
-	return &physicalLogReader{reader: r, info: info}, nil
-}
-
-func (r *physicalLogReader) Close() error {
-	return r.reader.Close()
-}
-
 type physicalLogScanner struct {
 	scanner   *bufio.Scanner
 	src       string
@@ -215,6 +184,37 @@ func (s *physicalLogScanner) Err() error {
 // a scanner or decompressor error.
 func (s *physicalLogScanner) EOFValidated() bool {
 	return s.eof && s.Err() == nil
+}
+
+// scanPhysicalLog opens one task log, reads its header, and closes it after
+// scan returns. Full scans must consume scanner through EOF before returning.
+func scanPhysicalLog(path string, validateEOF bool, scan func(os.FileInfo, *physicalLogScanner, agent.MetaMessage) error) (retErr error) {
+	r, err := openLogReader(path)
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(filepath.Clean(path))
+	if err != nil {
+		return errors.Join(err, r.Close())
+	}
+	defer func() {
+		if closeErr := r.Close(); retErr == nil {
+			retErr = closeErr
+		}
+	}()
+
+	scanner := newPhysicalLogScanner(r, path)
+	meta, err := scanner.ReadHeader(&jsonutil.FieldWarner{})
+	if err != nil {
+		return err
+	}
+	if err := scan(info, scanner, meta); err != nil {
+		return err
+	}
+	if validateEOF && !scanner.EOFValidated() {
+		return errors.New("task log did not reach EOF")
+	}
+	return nil
 }
 
 var errNotMetaRecord = errors.New("not a caic_meta record")
@@ -778,27 +778,14 @@ func decodeSegmentMeta(line []byte, version agent.LogVersion) (string, agent.Met
 	return typ, agent.MetaMessage{}, errNotMetaRecord
 }
 
-func readLogAuthority(path string) (_ logAuthority, retErr error) {
-	r, err := openPhysicalLogReader(path)
-	if err != nil {
-		return logAuthority{}, err
-	}
-	defer func() {
-		if closeErr := r.Close(); retErr == nil {
-			retErr = closeErr
+func readLogAuthority(path string) (authority logAuthority, retErr error) {
+	retErr = scanPhysicalLog(path, false, func(_ os.FileInfo, scanner *physicalLogScanner, _ agent.MetaMessage) error {
+		for scanner.Scan() {
 		}
-	}()
-	return scanLogAuthority(r.reader, path)
-}
-
-func scanLogAuthority(r io.Reader, src string) (logAuthority, error) {
-	scanner := newPhysicalLogScanner(r, src)
-	if _, err := scanner.ReadHeader(&jsonutil.FieldWarner{}); err != nil {
-		return logAuthority{}, err
-	}
-	for scanner.Scan() {
-	}
-	return scanner.authority, scanner.Err()
+		authority = scanner.authority
+		return scanner.Err()
+	})
+	return authority, retErr
 }
 
 // tailInit is the subset of a system/init message parsed from the tail scan.
@@ -908,59 +895,46 @@ func (lt *LoadedTask) LogPath() string {
 
 // loadSemanticLog parses one complete task log with a fresh parser selected
 // by its metadata header.
-func loadSemanticLog(path string, resolver NativeParserResolver) (_ *semanticLog, retErr error) {
+func loadSemanticLog(path string, resolver NativeParserResolver) (out *semanticLog, retErr error) {
 	if resolver == nil {
 		return nil, errors.New("native parser resolver is nil")
 	}
-	r, err := openPhysicalLogReader(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if closeErr := r.Close(); retErr == nil {
-			retErr = closeErr
-		}
-	}()
-	scanner := newPhysicalLogScanner(r.reader, path)
-	if _, err := scanner.ReadHeader(&jsonutil.FieldWarner{}); err != nil {
-		return nil, err
-	}
-	native, err := resolver(scanner.authority.Harness)
-	if err != nil {
-		return nil, fmt.Errorf("resolve native parser for harness %q: %w", scanner.authority.Harness, err)
-	}
-	parser, err := agent.NewLogRecordParser(scanner.authority.Version, native)
-	if err != nil {
-		return nil, fmt.Errorf("construct log parser: %w", err)
-	}
-	out := &semanticLog{authority: scanner.authority}
-	appendRecord := func(record agent.ParsedRecord) {
-		if len(record.Messages) == 0 {
-			return
-		}
-		out.messages = append(out.messages, record.Messages...)
-		out.records = append(out.records, semanticRecord{end: len(out.messages), control: record.Control})
-	}
-	record, err := parser.ParseRecord(scanner.headerRaw)
-	if err != nil {
-		return nil, fmt.Errorf("parse task log bootstrap %s: %w", path, err)
-	}
-	appendRecord(record)
-	for scanner.Scan() {
-		record, err := parser.ParseRecord(scanner.Bytes())
+	retErr = scanPhysicalLog(path, true, func(_ os.FileInfo, scanner *physicalLogScanner, _ agent.MetaMessage) error {
+		native, err := resolver(scanner.authority.Harness)
 		if err != nil {
-			if record.Control || scanner.authority.Version == agent.LogVersionV2 {
-				return nil, fmt.Errorf("parse task log %s: %w", path, err)
+			return fmt.Errorf("resolve native parser for harness %q: %w", scanner.authority.Harness, err)
+		}
+		parser, err := agent.NewLogRecordParser(scanner.authority.Version, native)
+		if err != nil {
+			return fmt.Errorf("construct log parser: %w", err)
+		}
+		out = &semanticLog{authority: scanner.authority}
+		appendRecord := func(record agent.ParsedRecord) {
+			if len(record.Messages) == 0 {
+				return
 			}
-			continue
+			out.messages = append(out.messages, record.Messages...)
+			out.records = append(out.records, semanticRecord{end: len(out.messages), control: record.Control})
+		}
+		record, err := parser.ParseRecord(scanner.headerRaw)
+		if err != nil {
+			return fmt.Errorf("parse task log bootstrap %s: %w", path, err)
 		}
 		appendRecord(record)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	if !scanner.EOFValidated() {
-		return nil, errors.New("task log did not reach EOF")
+		for scanner.Scan() {
+			record, err := parser.ParseRecord(scanner.Bytes())
+			if err != nil {
+				if record.Control || scanner.authority.Version == agent.LogVersionV2 {
+					return fmt.Errorf("parse task log %s: %w", path, err)
+				}
+				continue
+			}
+			appendRecord(record)
+		}
+		return scanner.Err()
+	})
+	if retErr != nil {
+		return nil, retErr
 	}
 	return out, nil
 }
@@ -973,130 +947,106 @@ func loadSemanticTask(path string, resolver NativeParserResolver) (*LoadedTask, 
 	return semanticLoadedTask(log), nil
 }
 
-func loadSemanticSessionMetadata(path string, resolver NativeParserResolver) (_ *LoadedTask, retErr error) {
+func loadSemanticSessionMetadata(path string, resolver NativeParserResolver) (loaded *LoadedTask, retErr error) {
 	if resolver == nil {
 		return nil, errors.New("native parser resolver is nil")
 	}
-	r, err := openPhysicalLogReader(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if closeErr := r.Close(); retErr == nil {
-			retErr = closeErr
-		}
-	}()
-
-	scanner := newPhysicalLogScanner(r.reader, path)
-	if _, err := scanner.ReadHeader(&jsonutil.FieldWarner{}); err != nil {
-		return nil, err
-	}
-	native, err := resolver(scanner.authority.Harness)
-	if err != nil {
-		return nil, fmt.Errorf("resolve native parser for harness %q: %w", scanner.authority.Harness, err)
-	}
-	parser, err := agent.NewLogRecordParser(scanner.authority.Version, native)
-	if err != nil {
-		return nil, fmt.Errorf("construct log parser: %w", err)
-	}
-	loaded := &LoadedTask{LogVersion: scanner.authority.Version}
-	apply := func(record agent.ParsedRecord, err error) error {
+	retErr = scanPhysicalLog(path, true, func(_ os.FileInfo, scanner *physicalLogScanner, _ agent.MetaMessage) error {
+		native, err := resolver(scanner.authority.Harness)
 		if err != nil {
-			if record.Control || scanner.authority.Version == agent.LogVersionV2 {
-				return fmt.Errorf("parse task log %s: %w", path, err)
+			return fmt.Errorf("resolve native parser for harness %q: %w", scanner.authority.Harness, err)
+		}
+		parser, err := agent.NewLogRecordParser(scanner.authority.Version, native)
+		if err != nil {
+			return fmt.Errorf("construct log parser: %w", err)
+		}
+		loaded = &LoadedTask{LogVersion: scanner.authority.Version}
+		apply := func(record agent.ParsedRecord, err error) error {
+			if err != nil {
+				if record.Control || scanner.authority.Version == agent.LogVersionV2 {
+					return fmt.Errorf("parse task log %s: %w", path, err)
+				}
+				return nil
 			}
+			applyParsedSessionMetadata(loaded, record.Messages)
 			return nil
 		}
-		applyParsedSessionMetadata(loaded, record.Messages)
-		return nil
-	}
-	record, err := parser.ParseRecord(scanner.headerRaw)
-	if err := apply(record, err); err != nil {
-		return nil, err
-	}
-	for scanner.Scan() {
-		record, err := parser.ParseRecord(scanner.Bytes())
+		record, err := parser.ParseRecord(scanner.headerRaw)
 		if err := apply(record, err); err != nil {
-			return nil, err
+			return err
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	if !scanner.EOFValidated() {
-		return nil, errors.New("task log did not reach EOF")
+		for scanner.Scan() {
+			record, err := parser.ParseRecord(scanner.Bytes())
+			if err := apply(record, err); err != nil {
+				return err
+			}
+		}
+		return scanner.Err()
+	})
+	if retErr != nil {
+		return nil, retErr
 	}
 	return loaded, nil
 }
 
 // loadSemanticTail parses the complete physical log with one ordered parser
 // while retaining only a bounded suffix of semantic records.
-func loadSemanticTail(path string, resolver NativeParserResolver, tailBytes int64) (_ *LoadedTask, retErr error) {
+func loadSemanticTail(path string, resolver NativeParserResolver, tailBytes int64) (loaded *LoadedTask, retErr error) {
 	if resolver == nil {
 		return nil, errors.New("native parser resolver is nil")
 	}
-	r, err := openPhysicalLogReader(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if closeErr := r.Close(); retErr == nil {
-			retErr = closeErr
-		}
-	}()
-
-	scanner := newPhysicalLogScanner(r.reader, path)
-	if _, err := scanner.ReadHeader(&jsonutil.FieldWarner{}); err != nil {
-		return nil, err
-	}
-	native, err := resolver(scanner.authority.Harness)
-	if err != nil {
-		return nil, fmt.Errorf("resolve native parser for harness %q: %w", scanner.authority.Harness, err)
-	}
-	parser, err := agent.NewLogRecordParser(scanner.authority.Version, native)
-	if err != nil {
-		return nil, fmt.Errorf("construct log parser: %w", err)
-	}
-	if _, err := parser.ParseRecord(scanner.headerRaw); err != nil {
-		return nil, fmt.Errorf("parse task log bootstrap %s: %w", path, err)
-	}
-
-	var retained []retainedSemanticRecord
-	var retainedBytes int64
-	for scanner.Scan() {
-		record, err := parser.ParseRecord(scanner.Bytes())
+	retErr = scanPhysicalLog(path, true, func(_ os.FileInfo, scanner *physicalLogScanner, _ agent.MetaMessage) error {
+		native, err := resolver(scanner.authority.Harness)
 		if err != nil {
-			if record.Control || scanner.authority.Version == agent.LogVersionV2 {
-				return nil, fmt.Errorf("parse task log %s: %w", path, err)
+			return fmt.Errorf("resolve native parser for harness %q: %w", scanner.authority.Harness, err)
+		}
+		parser, err := agent.NewLogRecordParser(scanner.authority.Version, native)
+		if err != nil {
+			return fmt.Errorf("construct log parser: %w", err)
+		}
+		if _, err := parser.ParseRecord(scanner.headerRaw); err != nil {
+			return fmt.Errorf("parse task log bootstrap %s: %w", path, err)
+		}
+
+		var retained []retainedSemanticRecord
+		var retainedBytes int64
+		for scanner.Scan() {
+			record, err := parser.ParseRecord(scanner.Bytes())
+			if err != nil {
+				if record.Control || scanner.authority.Version == agent.LogVersionV2 {
+					return fmt.Errorf("parse task log %s: %w", path, err)
+				}
+			}
+			retained = append(retained, retainedSemanticRecord{
+				bytes:  int64(len(scanner.Bytes()) + 1),
+				record: record,
+				parsed: err == nil,
+			})
+			retainedBytes += int64(len(scanner.Bytes()) + 1)
+			for retainedBytes > tailBytes && len(retained) > 1 {
+				retainedBytes -= retained[0].bytes
+				retained = retained[1:]
 			}
 		}
-		retained = append(retained, retainedSemanticRecord{
-			bytes:  int64(len(scanner.Bytes()) + 1),
-			record: record,
-			parsed: err == nil,
-		})
-		retainedBytes += int64(len(scanner.Bytes()) + 1)
-		for retainedBytes > tailBytes && len(retained) > 1 {
-			retainedBytes -= retained[0].bytes
-			retained = retained[1:]
+		if err := scanner.Err(); err != nil {
+			return err
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	if !scanner.EOFValidated() {
-		return nil, errors.New("task log did not reach EOF")
-	}
 
-	log := &semanticLog{authority: scanner.authority}
-	for _, item := range retained {
-		if !item.parsed || len(item.record.Messages) == 0 {
-			continue
+		log := &semanticLog{authority: scanner.authority}
+		for _, item := range retained {
+			if !item.parsed || len(item.record.Messages) == 0 {
+				continue
+			}
+			log.messages = append(log.messages, item.record.Messages...)
+			log.records = append(log.records, semanticRecord{end: len(log.messages), control: item.record.Control})
 		}
-		log.messages = append(log.messages, item.record.Messages...)
-		log.records = append(log.records, semanticRecord{end: len(log.messages), control: item.record.Control})
+		loaded = semanticLoadedTask(log)
+		return nil
+	})
+	if retErr != nil {
+		return nil, retErr
 	}
-	return semanticLoadedTask(log), nil
+	return loaded, nil
 }
 
 // ExportDiscussion loads one physical task log with its header-authorized native
@@ -1499,83 +1449,55 @@ func (lt *LoadedTask) LoadMessagesTail() error {
 	return lt.LoadMessagesTailWithResolver(lt.resolver)
 }
 
-// ScanMessagesWithContext parses one raw log through EOF. It streams direct
-// task history; cancellation is checked between records and before delivery.
-func (lt *LoadedTask) ScanMessagesWithContext(ctx context.Context, consume func(agent.ParsedMessage) error) (retErr error) {
-	if lt.path == "" {
-		return errors.New("task has no log path")
-	}
-	if lt.resolver == nil {
-		return errors.New("no parser resolver set")
-	}
-	r, err := openPhysicalLogReader(lt.path)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if closeErr := r.Close(); retErr == nil {
-			retErr = closeErr
-		}
-	}()
-	scanner := newPhysicalLogScanner(r.reader, lt.path)
-	if _, err := scanner.ReadHeader(&jsonutil.FieldWarner{}); err != nil {
-		return err
-	}
-	native, err := lt.resolver(scanner.authority.Harness)
-	if err != nil {
-		return err
-	}
-	parser, err := agent.NewLogRecordParser(scanner.authority.Version, native)
-	if err != nil {
-		return err
-	}
-	if _, err := parser.ParseRecord(scanner.headerRaw); err != nil {
-		return err
-	}
-	for scanner.Scan() {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		record, err := parser.ParseRecord(scanner.Bytes())
-		if err != nil {
-			return err
-		}
-		for _, message := range record.Messages {
-			if record.Control && !isHistoryStreamControlMessage(message.Message) {
-				continue
-			}
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			if err := consume(message); err != nil {
-				return err
-			}
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return err
-	}
-	if !scanner.EOFValidated() {
-		return errors.New("task log did not reach EOF")
-	}
-	return nil
-}
+var errTaskLogStreamStopped = errors.New("task log stream consumer stopped")
 
 // StreamMessages streams parsed task conversation records directly from the
-// log. It retains the legacy iterator API while using the EOF-validating scan.
-func (lt *LoadedTask) StreamMessages() iter.Seq2[agent.ParsedMessage, error] {
+// log. Cancellation is checked between records and before delivery.
+func (lt *LoadedTask) StreamMessages(ctx context.Context) iter.Seq2[agent.ParsedMessage, error] {
 	return func(yield func(agent.ParsedMessage, error) bool) {
-		stopped := errors.New("stream consumer stopped")
-		err := func() error {
-			err := lt.ScanMessagesWithContext(context.Background(), func(message agent.ParsedMessage) error {
-				if !yield(message, nil) {
-					return stopped
+		if lt.path == "" {
+			yield(agent.ParsedMessage{}, errors.New("task has no log path"))
+			return
+		}
+		if lt.resolver == nil {
+			yield(agent.ParsedMessage{}, errors.New("no parser resolver set"))
+			return
+		}
+		err := scanPhysicalLog(lt.path, true, func(_ os.FileInfo, scanner *physicalLogScanner, _ agent.MetaMessage) error {
+			native, err := lt.resolver(scanner.authority.Harness)
+			if err != nil {
+				return err
+			}
+			parser, err := agent.NewLogRecordParser(scanner.authority.Version, native)
+			if err != nil {
+				return err
+			}
+			if _, err := parser.ParseRecord(scanner.headerRaw); err != nil {
+				return err
+			}
+			for scanner.Scan() {
+				if err := ctx.Err(); err != nil {
+					return err
 				}
-				return nil
-			})
-			return err
-		}()
-		if err != nil && !errors.Is(err, stopped) {
+				record, err := parser.ParseRecord(scanner.Bytes())
+				if err != nil {
+					return err
+				}
+				for _, message := range record.Messages {
+					if record.Control && !isHistoryStreamControlMessage(message.Message) {
+						continue
+					}
+					if err := ctx.Err(); err != nil {
+						return err
+					}
+					if !yield(message, nil) {
+						return errTaskLogStreamStopped
+					}
+				}
+			}
+			return scanner.Err()
+		})
+		if err != nil && !errors.Is(err, errTaskLogStreamStopped) {
 			yield(agent.ParsedMessage{}, err)
 		}
 	}
@@ -1647,50 +1569,31 @@ func (s *logTailScan) finish(lt *LoadedTask) {
 // raw history source. It intentionally does not scan inventory records or
 // validate EOF: the caller's subsequent semantic stream performs that one full
 // scan and validation.
-func loadHistorySourceHeader(path string) (_ *LoadedTask, retErr error) {
-	r, err := openPhysicalLogReader(path)
-	if err != nil {
-		return nil, err
+func loadHistorySourceHeader(path string) (loaded *LoadedTask, retErr error) {
+	retErr = scanPhysicalLog(path, false, func(info os.FileInfo, _ *physicalLogScanner, meta agent.MetaMessage) error {
+		base := trimLogExt(filepath.Base(path))
+		loaded = loadedTaskFromMeta(path, taskIDFromLogBase(base), &meta, info.ModTime().UTC(), info.Size())
+		return nil
+	})
+	if retErr != nil {
+		return nil, retErr
 	}
-	defer func() {
-		if closeErr := r.Close(); retErr == nil {
-			retErr = closeErr
-		}
-	}()
-	scanner := newPhysicalLogScanner(r.reader, path)
-	meta, err := scanner.ReadHeader(&jsonutil.FieldWarner{})
-	if err != nil {
-		return nil, err
-	}
-	base := trimLogExt(filepath.Base(path))
-	return loadedTaskFromMeta(path, taskIDFromLogBase(base), &meta, r.info.ModTime().UTC(), r.info.Size()), nil
+	return loaded, nil
 }
 
 // loadLogHeader reads the metadata header and result trailer from a task log.
 // It does NOT parse individual messages — call LoadMessages for that. The path
 // is stored for lazy loading.
-func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
-	r, err := openPhysicalLogReader(path)
-	if err != nil {
-		return nil, err
+func loadLogHeader(path string) (loaded *LoadedTask, retErr error) {
+	retErr = scanPhysicalLog(path, false, func(info os.FileInfo, scanner *physicalLogScanner, meta agent.MetaMessage) error {
+		base := trimLogExt(filepath.Base(path))
+		loaded = loadedTaskFromMeta(path, taskIDFromLogBase(base), &meta, info.ModTime().UTC(), info.Size())
+		return scanInventoryRecords(path, scanner, loaded)
+	})
+	if retErr != nil {
+		return nil, retErr
 	}
-	defer func() {
-		if closeErr := r.Close(); retErr == nil {
-			retErr = closeErr
-		}
-	}()
-	fw := &jsonutil.FieldWarner{}
-	scanner := newPhysicalLogScanner(r.reader, path)
-	meta, err := scanner.ReadHeader(fw)
-	if err != nil {
-		return nil, err
-	}
-	base := trimLogExt(filepath.Base(path))
-	lt := loadedTaskFromMeta(path, taskIDFromLogBase(base), &meta, r.info.ModTime().UTC(), r.info.Size())
-	if err := scanInventoryRecords(path, scanner, lt); err != nil {
-		return nil, err
-	}
-	return lt, nil
+	return loaded, nil
 }
 
 // isHistoryStreamControlMessage reports controls delivered alongside native

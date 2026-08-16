@@ -323,9 +323,13 @@ func (h *taskHandlers) streamHistoryFromDisk(stream *taskEventStream, entry *tas
 		}
 		return nil
 	}
-	err := lt.ScanMessagesWithContext(stream.ctx, emit)
-	if err != nil {
-		return fmt.Errorf("stream raw task history: %w", err)
+	for parsed, err := range lt.StreamMessages(stream.ctx) {
+		if err != nil {
+			return fmt.Errorf("stream raw task history: %w", err)
+		}
+		if err := emit(parsed); err != nil {
+			return err
+		}
 	}
 	return nil
 }
