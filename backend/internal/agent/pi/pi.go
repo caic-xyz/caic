@@ -396,6 +396,8 @@ type piWireFormat struct {
 	// we track the previous length to emit only the new portion.
 	toolOutputLen map[string]int
 
+	// fw warns on unknown JSON fields during live parsing; nil for replay
+	// (see NewWire), which skips the scan for large-history performance.
 	fw *jsonutil.FieldWarner
 }
 
@@ -479,7 +481,7 @@ func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	}
 
 	if typ == pi.EventMessageUpdate {
-		ev, err := decodeMessageUpdateEvent(line)
+		ev, err := decodeMessageUpdateEvent(line, w.fw)
 		if err != nil {
 			return nil, fmt.Errorf("unmarshal message_update: %w", err)
 		}
@@ -493,7 +495,7 @@ func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		}
 	}
 
-	msgs, err := parseMessage(line, w.fw)
+	msgs, err := parseMessageTyped(w.fw, typ, line)
 	if err != nil {
 		return nil, err
 	}
@@ -558,7 +560,7 @@ func (w *piWireFormat) handleDone(ev *pi.MessageUpdateDeltaEvent) ([]agent.Messa
 // of sending every token fragment back to clients.
 func (w *piWireFormat) handleMessageEnd(line []byte) ([]agent.Message, error) {
 	var ev pi.MessageEndEvent
-	if err := json.Unmarshal(line, &ev); err != nil {
+	if err := unmarshalEvent(line, &ev, "MessageEndEvent", w.fw); err != nil {
 		return nil, fmt.Errorf("unmarshal message_end: %w", err)
 	}
 	if ev.Message.StopReason == pi.StopReasonError {
@@ -594,7 +596,7 @@ func messagesFromAgentMessage(msg *pi.AgentMessage) []agent.Message {
 // the first message_start event that contains a non-empty model field.
 func (w *piWireFormat) handleMessageStart(line []byte) ([]agent.Message, error) {
 	var ev pi.MessageStartEvent
-	if err := json.Unmarshal(line, &ev); err != nil {
+	if err := unmarshalEvent(line, &ev, "MessageStartEvent", w.fw); err != nil {
 		return nil, fmt.Errorf("unmarshal message_start: %w", err)
 	}
 	if ev.Message.Model == "" {
@@ -668,7 +670,7 @@ func isQuotaError(errMsg string) bool {
 // a ResultMessage with usage and duration.
 func (w *piWireFormat) handleAgentEnd(line []byte) ([]agent.Message, error) {
 	var ev pi.AgentEndEvent
-	if err := json.Unmarshal(line, &ev); err != nil {
+	if err := unmarshalEvent(line, &ev, "AgentEndEvent", w.fw); err != nil {
 		return nil, fmt.Errorf("unmarshal agent_end: %w", err)
 	}
 
@@ -711,7 +713,7 @@ func (w *piWireFormat) handleAgentEnd(line []byte) ([]agent.Message, error) {
 // increments the turn counter consumed by handleAgentEnd.
 func (w *piWireFormat) handleTurnEnd(line []byte) ([]agent.Message, error) {
 	var ev pi.TurnEndEvent
-	if err := json.Unmarshal(line, &ev); err != nil {
+	if err := unmarshalEvent(line, &ev, "TurnEndEvent", w.fw); err != nil {
 		return nil, fmt.Errorf("unmarshal turn_end: %w", err)
 	}
 	w.mu.Lock()

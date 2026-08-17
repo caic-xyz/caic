@@ -807,7 +807,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("ResultUsesPendingReasoningTokens", func(t *testing.T) {
 		t.Parallel()
-		b := New()
+		b := newWireFormat()
 		lines := []string{
 			`{"type":"system","subtype":"thinking_tokens","estimated_tokens":138,"estimated_tokens_delta":88,"uuid":"u1","session_id":"s1"}`,
 			`{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"input_tokens":2,"output_tokens":192,"cache_read_input_tokens":409477,"output_tokens_details":{"thinking_tokens":49}}},"uuid":"u1","session_id":"s1","parent_tool_use_id":null}`,
@@ -836,7 +836,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("ResultUsesEstimatedReasoningTokensWhenActualMissing", func(t *testing.T) {
 		t.Parallel()
-		b := New()
+		b := newWireFormat()
 		lines := []string{
 			`{"type":"system","subtype":"thinking_tokens","estimated_tokens":50,"estimated_tokens_delta":50,"uuid":"u1","session_id":"s1"}`,
 			`{"type":"system","subtype":"thinking_tokens","estimated_tokens":150,"estimated_tokens_delta":100,"uuid":"u2","session_id":"s1"}`,

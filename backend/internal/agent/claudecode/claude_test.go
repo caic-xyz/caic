@@ -24,7 +24,7 @@ func TestWritePrompt(t *testing.T) {
 		t.Parallel()
 		var buf bytes.Buffer
 		logBuf := &agenttest.LogSink{Version: agent.LogVersionV2}
-		var b Backend
+		var b wireFormat
 		if err := b.WritePrompt(&buf, agent.Prompt{Text: "hello"}, logBuf); err != nil {
 			t.Fatal(err)
 		}
@@ -39,7 +39,7 @@ func TestWritePrompt(t *testing.T) {
 	t.Run("WithImages", func(t *testing.T) {
 		t.Parallel()
 		var buf bytes.Buffer
-		var b Backend
+		var b wireFormat
 		images := []agent.ImageData{
 			{MediaType: "image/png", Data: "iVBOR..."},
 		}
@@ -85,7 +85,7 @@ func TestWritePrompt(t *testing.T) {
 	t.Run("ImagesOnly", func(t *testing.T) {
 		t.Parallel()
 		var buf bytes.Buffer
-		var b Backend
+		var b wireFormat
 		images := []agent.ImageData{
 			{MediaType: "image/jpeg", Data: "/9j/..."},
 		}
@@ -214,6 +214,41 @@ func TestBackend(t *testing.T) {
 		want := []string{"fable", "opus", "sonnet", "haiku"}
 		if !slices.Equal(got, want) {
 			t.Fatalf("ModelInventory().IDs() = %v, want %v", got, want)
+		}
+	})
+
+	// Backend is registered once per process (backends.Default) and shared by
+	// every concurrent Claude Code task. It must not double as a WireFormat:
+	// Start/AttachRelay have to build a fresh per-session wireFormat instead of
+	// reusing the shared Backend, or reasoning-token accounting and widget
+	// tracking would race and leak between unrelated concurrent tasks.
+	t.Run("BackendIsNotAWireFormat", func(t *testing.T) {
+		t.Parallel()
+		if _, ok := agent.Backend(New()).(agent.WireFormat); ok {
+			t.Fatal("Backend must not implement WireFormat")
+		}
+	})
+
+	t.Run("SessionsFromSameBackendDoNotShareState", func(t *testing.T) {
+		t.Parallel()
+		b := New()
+		w1 := b.NewWire()
+		w2 := b.NewWire()
+		// Feed a thinking-tokens estimate into w1's session only.
+		if _, err := w1.ParseMessage([]byte(`{"type":"system","subtype":"thinking_tokens","estimated_tokens":50,"estimated_tokens_delta":50,"uuid":"u1","session_id":"s1"}`)); err != nil {
+			t.Fatal(err)
+		}
+		resultLine := []byte(`{"type":"result","subtype":"success","is_error":false,"duration_ms":1,"num_turns":1,"result":"done","total_cost_usd":0,"usage":{"input_tokens":1,"output_tokens":1}}`)
+		msgs, err := w2.ParseMessage(resultLine)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m, ok := msgs[0].(*agent.ResultMessage)
+		if !ok {
+			t.Fatalf("got %T, want *agent.ResultMessage", msgs[0])
+		}
+		if m.Usage.ReasoningOutputTokens != 0 {
+			t.Errorf("w2 leaked w1's pending reasoning estimate: ReasoningOutputTokens = %d, want 0", m.Usage.ReasoningOutputTokens)
 		}
 	})
 }

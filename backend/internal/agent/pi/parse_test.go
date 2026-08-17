@@ -14,6 +14,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
+	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
 func TestNew(t *testing.T) {
@@ -177,7 +178,7 @@ func TestNew(t *testing.T) {
 		t.Run("subagent spawn emits start and tool use", func(t *testing.T) {
 			t.Parallel()
 			line := []byte(`{"type":"tool_execution_start","toolCallId":"c1","toolName":"subagent","args":{"agent":"reviewer","task":"Review"}}`)
-			msgs, err := parseToolExecStart(line)
+			msgs, err := parseToolExecStart(&jsonutil.FieldWarner{}, line)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -202,7 +203,7 @@ func TestNew(t *testing.T) {
 		t.Run("subagent introspection emits only tool use", func(t *testing.T) {
 			t.Parallel()
 			line := []byte(`{"type":"tool_execution_start","toolCallId":"c2","toolName":"subagent","args":{"action":"list"}}`)
-			msgs, err := parseToolExecStart(line)
+			msgs, err := parseToolExecStart(&jsonutil.FieldWarner{}, line)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -216,7 +217,7 @@ func TestNew(t *testing.T) {
 		t.Run("regular tool emits only tool use", func(t *testing.T) {
 			t.Parallel()
 			line := []byte(`{"type":"tool_execution_start","toolCallId":"c3","toolName":"bash","args":{"command":"ls"}}`)
-			msgs, err := parseToolExecStart(line)
+			msgs, err := parseToolExecStart(&jsonutil.FieldWarner{}, line)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -230,7 +231,7 @@ func TestNew(t *testing.T) {
 		t.Run("subagent success emits end, output, and result", func(t *testing.T) {
 			t.Parallel()
 			line := []byte(`{"type":"tool_execution_end","toolCallId":"c1","toolName":"subagent","result":{"content":[{"type":"text","text":"2/2 succeeded\n\nfindings"}]},"isError":false}`)
-			msgs, err := parseToolExecEnd(line)
+			msgs, err := parseToolExecEnd(&jsonutil.FieldWarner{}, line)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -249,7 +250,7 @@ func TestNew(t *testing.T) {
 		t.Run("subagent failure emits end and error result without output", func(t *testing.T) {
 			t.Parallel()
 			line := []byte(`{"type":"tool_execution_end","toolCallId":"c1","toolName":"subagent","result":{"content":[{"type":"text","text":"❌ failed"}]},"isError":true}`)
-			msgs, err := parseToolExecEnd(line)
+			msgs, err := parseToolExecEnd(&jsonutil.FieldWarner{}, line)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -268,7 +269,7 @@ func TestNew(t *testing.T) {
 		t.Run("regular tool emits only result", func(t *testing.T) {
 			t.Parallel()
 			line := []byte(`{"type":"tool_execution_end","toolCallId":"c1","toolName":"bash","result":{"content":[{"type":"text","text":"ok"}]},"isError":false}`)
-			msgs, err := parseToolExecEnd(line)
+			msgs, err := parseToolExecEnd(&jsonutil.FieldWarner{}, line)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -848,13 +849,25 @@ func TestWireFormatDurationTracking(t *testing.T) {
 	})
 }
 
+// parseMessage decodes the event type and dispatches on it, mirroring what
+// production callers (piWireFormat.ParseMessage) do with the type they've
+// already extracted. Kept test-local since production has no need for a
+// decode-then-dispatch entry point of its own.
+func parseMessage(line []byte) ([]agent.Message, error) {
+	typ, err := decodeEventType(line)
+	if err != nil {
+		return nil, err
+	}
+	return parseMessageTyped(&jsonutil.FieldWarner{}, typ, line)
+}
+
 func TestParseMessage(t *testing.T) {
 	t.Parallel()
 
 	t.Run("valid", func(t *testing.T) {
 		t.Parallel()
 		line := []byte("{\"type\":\"future\",\"payload\":{\"items\":[1,{\"text\":\"escaped \\\"value\\\"\"}]}} \t\r\n")
-		msgs, err := parseMessage(line, nil)
+		msgs, err := parseMessage(line)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -884,11 +897,70 @@ func TestParseMessage(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				msgs, err := parseMessage([]byte(tc.line), nil)
+				msgs, err := parseMessage([]byte(tc.line))
 				if err == nil {
 					t.Fatalf("parseMessage(%q) = %#v, want error", tc.line, msgs)
 				}
 			})
+		}
+	})
+}
+
+// TestFieldWarnerUnknownFieldsForwardCompat verifies that a live FieldWarner
+// (as used for real relay sessions, unlike NewWire's replay path) tolerates
+// fields the Pi harness emits that our structs don't declare: parsing must
+// still succeed and known fields must still be extracted. This is what lets
+// us notice new Pi protocol fields via logs instead of silently dropping them.
+func TestFieldWarnerUnknownFieldsForwardCompat(t *testing.T) {
+	t.Parallel()
+
+	t.Run("tool_execution_end", func(t *testing.T) {
+		t.Parallel()
+		line := []byte(`{"type":"tool_execution_end","toolCallId":"c1","toolName":"bash","result":{"content":[{"type":"text","text":"ok"}]},"isError":false,"brandNewField":"surprise"}`)
+		msgs, err := parseToolExecEnd(&jsonutil.FieldWarner{}, line)
+		if err != nil {
+			t.Fatalf("unknown field caused error: %v", err)
+		}
+		res, ok := msgs[0].(*agent.ToolResultMessage)
+		if !ok || res.ToolUseID != "c1" {
+			t.Fatalf("got %#v, want ToolResultMessage for c1", msgs[0])
+		}
+	})
+
+	t.Run("message_end via live wire", func(t *testing.T) {
+		t.Parallel()
+		w := &piWireFormat{fw: &jsonutil.FieldWarner{}}
+		line := []byte(`{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"final text"}],"stopReason":"stop"},"brandNewField":"surprise"}`)
+		msgs, err := w.ParseMessage(line)
+		if err != nil {
+			t.Fatalf("unknown field caused error: %v", err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		text, ok := msgs[0].(*agent.TextMessage)
+		if !ok || text.Text != "final text" {
+			t.Fatalf("got %#v, want TextMessage(final text)", msgs[0])
+		}
+	})
+
+	t.Run("message_update assistantMessageEvent", func(t *testing.T) {
+		t.Parallel()
+		w := &piWireFormat{fw: &jsonutil.FieldWarner{}}
+		// The top-level "message" field is deliberately unscanned (see
+		// decodeMessageUpdateEvent) since Pi resends it in full on every delta;
+		// an unknown field there must still be silently ignored, not warned.
+		line := []byte(`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"hi","brandNewField":"surprise"},"message":{"unrelatedFutureField":true}}`)
+		msgs, err := w.ParseMessage(line)
+		if err != nil {
+			t.Fatalf("unknown field caused error: %v", err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		delta, ok := msgs[0].(*agent.TextDeltaMessage)
+		if !ok || delta.Text != "hi" {
+			t.Fatalf("got %#v, want TextDeltaMessage(hi)", msgs[0])
 		}
 	})
 }
@@ -950,7 +1022,7 @@ func TestParsePromptCmd(t *testing.T) {
 	t.Run("text prompt", func(t *testing.T) {
 		t.Parallel()
 		line := []byte(`{"type":"prompt","message":"fix the bug"}`)
-		msgs, err := parseMessage(line, nil)
+		msgs, err := parseMessage(line)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -969,7 +1041,7 @@ func TestParsePromptCmd(t *testing.T) {
 	t.Run("prompt with images", func(t *testing.T) {
 		t.Parallel()
 		line := []byte(`{"type":"prompt","message":"describe this","images":[{"type":"image","mimeType":"image/png","data":"abc123"}]}`)
-		msgs, err := parseMessage(line, nil)
+		msgs, err := parseMessage(line)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -997,7 +1069,7 @@ func TestParsePromptCmd(t *testing.T) {
 	t.Run("compact command is skipped", func(t *testing.T) {
 		t.Parallel()
 		line := []byte(`{"type":"compact","customInstructions":"summarize"}`)
-		msgs, err := parseMessage(line, nil)
+		msgs, err := parseMessage(line)
 		if err != nil {
 			t.Fatal(err)
 		}
