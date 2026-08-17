@@ -29,13 +29,14 @@ var _ agent.Backend = (*FakeBackend)(nil)
 
 // NewFakeBackend creates a Claude-compatible fake backend for smoke and e2e testing.
 func NewFakeBackend() *FakeBackend {
-	return &FakeBackend{Base: agent.Base{
+	b := &FakeBackend{Base: agent.Base{
 		HarnessID:     harness.Claude,
-		Inventory:     agent.ModelInventory{Models: []agent.Model{{ID: "fake-model"}}},
 		Images:        true,
 		Compact:       true,
 		ContextWindow: 180_000,
 	}}
+	b.SetModelInventory(agent.ModelInventory{Models: []agent.Model{{ID: "fake-model"}}})
+	return b
 }
 
 // WritePrompt writes the prompt as plain text.

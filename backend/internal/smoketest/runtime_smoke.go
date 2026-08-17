@@ -95,9 +95,9 @@ func NewSmokeBackend() *SmokeBackend {
 	b := &SmokeBackend{}
 	b.Base = agent.Base{
 		HarnessID:     harness.Codex,
-		Inventory:     agent.ModelInventory{Models: []agent.Model{{ID: "smoke-model"}}},
 		ContextWindow: 200_000,
 	}
+	b.SetModelInventory(agent.ModelInventory{Models: []agent.Model{{ID: "smoke-model"}}})
 	return b
 }
 

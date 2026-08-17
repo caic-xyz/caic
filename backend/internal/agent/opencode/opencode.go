@@ -28,9 +28,6 @@ import (
 // protocol.
 type Backend struct {
 	agent.Base
-
-	mu        sync.Mutex
-	inventory agent.ModelInventory
 }
 
 var (
@@ -66,18 +63,10 @@ func (b *Backend) RecordHandshake(ctx context.Context, stdin io.Writer, stdout i
 	return hs.wire, continuation, nil
 }
 
-// ModelInventory implements agent.Backend.
-func (b *Backend) ModelInventory() agent.ModelInventory {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.inventory
-}
-
-// SetModelInventory implements agent.Backend.
+// SetModelInventory implements agent.Backend, normalizing model names before
+// storing them via the embedded Base (which owns the concurrency-safe storage).
 func (b *Backend) SetModelInventory(inventory agent.ModelInventory) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.inventory = agent.ModelInventory{Models: normalizeModels(inventory.Models)}
+	b.Base.SetModelInventory(agent.ModelInventory{Models: normalizeModels(inventory.Models)})
 }
 
 // Start launches an OpenCode ACP process via the relay daemon in the given

@@ -31,9 +31,6 @@ import (
 // JSON-RPC 2.0 protocol.
 type Backend struct {
 	agent.Base
-
-	mu        sync.Mutex
-	inventory agent.ModelInventory
 }
 
 var (
@@ -55,14 +52,8 @@ func New(cacheDir string, envVars []string) *Backend {
 	return b
 }
 
-// ModelInventory implements agent.Backend.
-func (b *Backend) ModelInventory() agent.ModelInventory {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.inventory
-}
-
-// SetModelInventory implements agent.Backend.
+// SetModelInventory implements agent.Backend, sorting models before storing
+// them via the embedded Base (which owns the concurrency-safe storage).
 func (b *Backend) SetModelInventory(inventory agent.ModelInventory) {
 	byID := make(map[string]agent.Model, len(inventory.Models))
 	for _, model := range inventory.Models {
@@ -73,9 +64,7 @@ func (b *Backend) SetModelInventory(inventory agent.ModelInventory) {
 	for _, id := range ids {
 		sorted = append(sorted, byID[id])
 	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.inventory = agent.ModelInventory{Models: sorted}
+	b.Base.SetModelInventory(agent.ModelInventory{Models: sorted})
 }
 
 // RecordHandshake performs the codex app-server JSON-RPC handshake

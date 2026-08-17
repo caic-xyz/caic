@@ -5,6 +5,7 @@ package agent
 import (
 	"context"
 	"io"
+	"sync"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -133,23 +134,43 @@ type RecordHandshaker interface {
 // Base provides default implementations for metadata-only Backend methods.
 // Embed it in backend-specific types to inherit the boilerplate. Each backend
 // must implement Start and AttachRelay itself using the package-level helpers
-// (StartRelay, AttachRelaySession).
+// (StartRelay, AttachRelaySession). Base is registered once per process and
+// shared across every concurrent task for its harness (see backends.Default),
+// so ModelInventory/SetModelInventory guard the inventory with a mutex: a
+// background refresh (SetModelInventory) and concurrent request handlers
+// (ModelInventory) can run at the same time. ModelInventory itself is treated
+// as immutable once set, so the mutex only needs to guard a pointer swap, not
+// the read.
 type Base struct {
 	HarnessID     harness.Name
-	Inventory     ModelInventory
 	Images        bool
 	ContextWindow int
 	Compact       bool
+
+	mu        sync.Mutex
+	inventory *ModelInventory
 }
 
 // Harness implements Backend.
 func (b *Base) Harness() harness.Name { return b.HarnessID }
 
 // ModelInventory implements Backend.
-func (b *Base) ModelInventory() ModelInventory { return b.Inventory }
+func (b *Base) ModelInventory() ModelInventory {
+	b.mu.Lock()
+	inv := b.inventory
+	b.mu.Unlock()
+	if inv == nil {
+		return ModelInventory{}
+	}
+	return *inv
+}
 
 // SetModelInventory implements Backend.
-func (b *Base) SetModelInventory(inventory ModelInventory) { b.Inventory = inventory }
+func (b *Base) SetModelInventory(inventory ModelInventory) {
+	b.mu.Lock()
+	b.inventory = &inventory
+	b.mu.Unlock()
+}
 
 // SupportsImages implements Backend.
 func (b *Base) SupportsImages() bool { return b.Images }
