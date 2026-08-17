@@ -182,6 +182,121 @@ describe("groupMessages", () => {
     expect(groups[0].events.some((e) => e.kind === "textDelta")).toBe(true);
   });
 
+  it("final thinking and text consolidate with their deltas (Pi message_end)", () => {
+    // Pi streams thinking and text deltas, then emits the consolidated
+    // thinking and text at message_end, before tool_execution_start emits the
+    // ToolUse. The final events must land in the same group as their deltas so
+    // the renderer shows each once, and the tool must not split the group.
+    const events: EventMessage[] = [
+      { kind: "thinkingDelta", ts: 1, thinkingDelta: { text: "thinking " } },
+      { kind: "textDelta", ts: 2, textDelta: { text: "Running tests. " } },
+      { kind: "thinking", ts: 3, thinking: { text: "FINAL THINKING" } },
+      { kind: "text", ts: 4, text: { text: "FINAL TEXT" } },
+      toolUseEvent("t1", "Bash"),
+      toolResultEvent("t1"),
+    ];
+    const groups = groupMessages(events);
+    expect(groups).toHaveLength(2);
+    const textGroup = groups[0];
+    expect(textGroup.kind).toBe("text");
+    // Final events consolidated into the delta group (not a second group).
+    expect(textGroup.events.some((e) => e.kind === "thinkingDelta")).toBe(true);
+    expect(textGroup.events.some((e) => e.kind === "thinking")).toBe(true);
+    expect(textGroup.events.some((e) => e.kind === "textDelta")).toBe(true);
+    expect(textGroup.events.some((e) => e.kind === "text")).toBe(true);
+    // Tool stays in its own group, no duplicate tool card.
+    const toolGroup = groups[1];
+    expect(toolGroup.kind).toBe("action");
+    expect(toolGroup.toolCalls).toHaveLength(1);
+
+    // Incremental grouping matches full grouping as the final events land.
+    const grouper = new IncrementalMessageGrouper();
+    let inc = grouper.group(events.slice(0, 2));
+    expect(inc).toEqual(groupMessages(events.slice(0, 2)));
+    inc = grouper.group(events);
+    expect(inc).toEqual(groupMessages(events));
+    expect(inc).toHaveLength(2);
+    expect(inc[0].kind).toBe("text");
+  });
+
+  it("consecutive thinking across a tool loop coalesces into one group", () => {
+    // Tool-loop agents (e.g. Pi + Qwen) emit thinking, a blank text line, and
+    // tool calls on every turn. Thinking from consecutive turns coalesces into
+    // one thinking-only group at the first thinking position, blank text
+    // groups are dropped, and tool calls keep their own group.
+    const isThinking = (e: EventMessage) => e.kind === "thinking" || e.kind === "thinkingDelta";
+    const turn = (base: number, id: string): EventMessage[] => [
+      { kind: "thinkingDelta", ts: base, thinkingDelta: { text: `think ${id} ` } },
+      { kind: "textDelta", ts: base + 1, textDelta: { text: "\n" } },
+      { kind: "thinking", ts: base + 2, thinking: { text: `THINK ${id}` } },
+      { kind: "text", ts: base + 3, text: { text: "\n" } },
+      toolUseEvent(id, "Bash"),
+      toolResultEvent(id),
+      usageEvent(),
+    ];
+    const events: EventMessage[] = [...turn(1, "t1"), ...turn(10, "t2"), ...turn(20, "t3"), resultEvent()];
+    const groups = groupMessages(events);
+    expect(groups).toHaveLength(3);
+    const holder = groups[0];
+    expect(holder.kind).toBe("action");
+    expect(holder.toolCalls).toHaveLength(0);
+    expect(holder.events.filter(isThinking)).toHaveLength(6);
+    // The holder's first event is the run's first thinking event, so the
+    // card's open state (keyed by first event ts) survives regrouping.
+    expect(holder.events[0].ts).toBe(1);
+    const toolGroup = groups[1];
+    expect(toolGroup.kind).toBe("action");
+    expect(toolGroup.toolCalls).toHaveLength(3);
+    expect(toolGroup.events.some(isThinking)).toBe(false);
+    expect(groups[2].kind).toBe("other");
+  });
+
+  it("real text breaks the thinking coalescing chain", () => {
+    // Thinking separated only by tool calls coalesces; a group with real model
+    // text ends the chain, and thinking after it starts a fresh group. A run
+    // with a single thinking group renders unchanged.
+    const isThinking = (e: EventMessage) => e.kind === "thinking" || e.kind === "thinkingDelta";
+    const blankTurn = (base: number, id: string): EventMessage[] => [
+      { kind: "thinkingDelta", ts: base, thinkingDelta: { text: `think ${id} ` } },
+      { kind: "textDelta", ts: base + 1, textDelta: { text: "\n" } },
+      { kind: "thinking", ts: base + 2, thinking: { text: `THINK ${id}` } },
+      { kind: "text", ts: base + 3, text: { text: "\n" } },
+      toolUseEvent(id, "Bash"),
+      toolResultEvent(id),
+      usageEvent(),
+    ];
+    const events: EventMessage[] = [
+      ...blankTurn(1, "t1"),
+      { kind: "thinkingDelta", ts: 11, thinkingDelta: { text: "think t2 " } },
+      { kind: "textDelta", ts: 12, textDelta: { text: "I read the file." } },
+      { kind: "thinking", ts: 13, thinking: { text: "THINK t2" } },
+      { kind: "text", ts: 14, text: { text: "I read the file." } },
+      toolUseEvent("t2", "Bash"),
+      toolResultEvent("t2"),
+      usageEvent(),
+      ...blankTurn(21, "t3"),
+      resultEvent(),
+    ];
+    const groups = groupMessages(events);
+    expect(groups).toHaveLength(5);
+    // Holder: turn 1 and turn 2 thinking (turn 2's thinking precedes its text).
+    expect(groups[0].kind).toBe("action");
+    expect(groups[0].toolCalls).toHaveLength(0);
+    expect(groups[0].events.filter(isThinking)).toHaveLength(4);
+    expect(groups[1].toolCalls).toHaveLength(3);
+    expect(groups[2].kind).toBe("text");
+    expect(groups[2].events.findLast((e) => e.kind === "text")?.text?.text).toBe("I read the file.");
+    expect(groups[2].events.some(isThinking)).toBe(false);
+    // Turn 3 has no coalescing partner: stays its own thinking+text group.
+    expect(groups[3].kind).toBe("text");
+    expect(groups[3].events.filter(isThinking)).toHaveLength(2);
+
+    // Incremental grouping converges to the coalesced shape.
+    const grouper = new IncrementalMessageGrouper();
+    const inc = grouper.group(events);
+    expect(inc).toEqual(groups);
+  });
+
   it("incremental grouping keeps streaming thinking presentation stable", () => {
     const toolThenThinking = [
       toolUseEvent("t1", "Read"),

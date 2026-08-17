@@ -216,10 +216,18 @@ export function groupMessages(msgs: EventMessage[]): MessageGroup[] {
         // Metadata-only; stats are handled by StatsIcon component.
         break;
       case "thinking": {
-        // A final thinking event replaces any preceding thinkingDelta in the same action group.
+        // A final thinking event replaces any preceding thinkingDelta: either
+        // in its thinking-only action group, or in the text group that absorbed
+        // it while the message was still streaming. The text group must not be
+        // finalized yet (no final text event), so a non-streamed thinking block
+        // from a later message starts its own group instead of bleeding into
+        // the previous message. Pi streams thinking and text deltas, then
+        // emits the consolidated thinking and text at message_end.
         const last = lastGroup();
-        if (last && last.kind === "action" && last.toolCalls.length === 0 &&
-            last.events.some((e) => e.kind === "thinkingDelta")) {
+        if (last && last.toolCalls.length === 0 &&
+            last.events.some((e) => e.kind === "thinkingDelta") &&
+            (last.kind === "action" ||
+             (last.kind === "text" && !last.events.some((e) => e.kind === "text")))) {
           last.events.push(ev);
         } else {
           groups.push({ kind: "action", events: [ev], toolCalls: [] });
@@ -396,14 +404,87 @@ export function groupMessages(msgs: EventMessage[]): MessageGroup[] {
     merged.push(g);
   }
 
+  // Coalesce thinking within a run. A run is a stretch of groups containing
+  // no boundary (other, ask, userInput) and no real model text. When a run
+  // holds thinking in more than one group — e.g. a long tool loop where each
+  // turn emits thinking plus a blank text line — the thinking events
+  // consolidate into one thinking-only group at the run's first thinking
+  // position, so the UI shows one collapsed card instead of one per turn.
+  // Tool calls and whitespace-only text do not break a run; a group with
+  // real text ends the run after its leading thinking. Whitespace-only text
+  // groups are dropped.
+  const isThinkingEv = (e: EventMessage) => e.kind === "thinking" || e.kind === "thinkingDelta";
+  const renderedText = (g: MessageGroup) => {
+    const final = g.events.findLast((e) => e.kind === "text");
+    if (final) return final.text?.text ?? "";
+    return g.events.filter((e) => e.kind === "textDelta").map((e) => e.textDelta?.text ?? "").join("");
+  };
+  const droppableText = (g: MessageGroup) =>
+    g.kind === "text" && renderedText(g).trim() === "" &&
+    g.events.every((e) => e.kind === "text" || e.kind === "textDelta" || isThinkingEv(e));
+
+  const finalGroups: MessageGroup[] = [];
+  let holder: MessageGroup | undefined;
+  let pendingIdx = -1;
+  const resetRun = () => { holder = undefined; pendingIdx = -1; };
+
+  for (const g of merged) {
+    if (g.kind !== "text" && g.kind !== "action") {
+      resetRun();
+      finalGroups.push(g);
+      continue;
+    }
+    const think = g.events.filter(isThinkingEv);
+    if (think.length === 0) {
+      if (droppableText(g)) continue;
+      if (g.kind === "text" && renderedText(g).trim() !== "") resetRun();
+      finalGroups.push(g);
+      continue;
+    }
+    const hasRealText = g.kind === "text" && renderedText(g).trim() !== "";
+    const rest = g.events.filter((e) => !isThinkingEv(e));
+    const pushRest = () => {
+      if (rest.length > 0 && !droppableText(g)) finalGroups.push({ ...g, events: rest });
+    };
+    if (holder) {
+      holder.events.push(...think);
+      pushRest();
+    } else if (pendingIdx >= 0) {
+      // Second thinking group in the run: promote the first group's thinking
+      // into a new holder at the first position; the first group's remainder
+      // (e.g. its tool calls) stays right after the holder.
+      const firstIdx = pendingIdx;
+      const first = finalGroups[firstIdx];
+      const fRest = first.events.filter((e) => !isThinkingEv(e));
+      const h: MessageGroup = {
+        kind: "action",
+        events: [...first.events.filter(isThinkingEv), ...think],
+        toolCalls: [],
+      };
+      finalGroups[firstIdx] = h;
+      holder = h;
+      pendingIdx = -1;
+      if (fRest.length > 0 && !droppableText(first)) {
+        finalGroups.splice(firstIdx + 1, 0, { ...first, events: fRest });
+      }
+      pushRest();
+    } else {
+      // First thinking group of the run: keep in place until a second
+      // thinking group arrives, so single-thinking runs render unchanged.
+      pendingIdx = finalGroups.length;
+      finalGroups.push(g);
+    }
+    if (hasRealText) resetRun();
+  }
+
   // Mark tool calls as implicitly done when later events prove completion.
   // Within a group, every non-last non-background call is done (the agent
   // moved on to the next call). Entire non-last groups are fully done.
-  const lastActionGroupIdx = merged.findLastIndex((g) => g.kind === "action" && g.toolCalls.length > 0);
-  for (let i = 0; i < merged.length; i++) {
-    const g = merged[i];
+  const lastActionGroupIdx = finalGroups.findLastIndex((g) => g.kind === "action" && g.toolCalls.length > 0);
+  for (let i = 0; i < finalGroups.length; i++) {
+    const g = finalGroups[i];
     if (g.kind !== "action" || g.toolCalls.length === 0) continue;
-    if (i < lastActionGroupIdx || i < merged.length - 1) {
+    if (i < lastActionGroupIdx || i < finalGroups.length - 1) {
       for (const tc of g.toolCalls) tc.done = true;
     } else {
       // Last action group: mark all but the final non-background call as done.
@@ -412,7 +493,7 @@ export function groupMessages(msgs: EventMessage[]): MessageGroup[] {
       }
     }
   }
-  return merged;
+  return finalGroups;
 }
 
 // Incremental wrapper around groupMessages. Each instance owns one stream's

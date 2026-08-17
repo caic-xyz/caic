@@ -25,9 +25,13 @@ Wire types and protocol documentation live in `github.com/maruel/genai/providers
 |-----------------------|--------------------|
 | `message_update` (`text_delta`) | TextDeltaMessage |
 | `message_update` (`thinking_delta`) | ThinkingDeltaMessage |
-| `message_update` (`toolcall_start`) | ToolUseMessage |
+| `message_update` (`toolcall_start`) | (skipped — no arguments yet; ToolUse comes from `tool_execution_start`) |
 | `message_end` | TextMessage / ThinkingMessage consolidated from final assistant content |
 | `tool_execution_start` | ToolUseMessage (+ SubagentStartMessage for subagent spawns) |
+
+`toolcall_start` must stay skipped: it precedes `message_end` and would split
+the message's streaming deltas from its consolidated content in the frontend
+(duplicated assistant text) and duplicate the tool card.
 | `tool_execution_end` | ToolResultMessage (+ SubagentEndMessage and result output for subagents) |
 | `agent_end` | ResultMessage (with usage, duration, numTurns) |
 | `turn_end` | UsageMessage (also increments turn counter) |

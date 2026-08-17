@@ -192,7 +192,7 @@ func validateUnknownEventRemainder(dec *json.Decoder) error {
 // Emitted agent.Message types:
 //   - TextDeltaMessage     — message_update (text_delta)
 //   - ThinkingDeltaMessage — message_update (thinking_delta)
-//   - ToolUseMessage       — message_update (toolcall_start) or tool_execution_start
+//   - ToolUseMessage       — tool_execution_start
 //   - ToolResultMessage    — tool_execution_end
 //   - ToolOutputDeltaMessage — tool_execution_update
 //   - DiffStatMessage      — caic_diff_stat injection
@@ -302,30 +302,14 @@ func messagesFromMessageUpdateDelta(delta *pi.MessageUpdateDelta, line []byte) (
 	case pi.DeltaThinkDelta:
 		return []agent.Message{&agent.ThinkingDeltaMessage{Text: delta.Delta}}, nil
 
-	case pi.DeltaToolStart:
-		if delta.ToolCall == nil {
-			return nil, nil
-		}
-		name := normalizeToolName(delta.ToolCall.Name)
-
-		// Marshal tool arguments as JSON for the input field.
-		var input json.RawMessage
-		if delta.ToolCall.Arguments != nil {
-			var err error
-			input, err = json.Marshal(delta.ToolCall.Arguments)
-			if err != nil {
-				return nil, fmt.Errorf("marshal tool call arguments: %w", err)
-			}
-		}
-
-		if _, ok := agent.WidgetToolNames[name]; ok {
-			return []agent.Message{agent.NewWidgetMessage(delta.ToolCall.ID, input)}, nil
-		}
-		return []agent.Message{newToolUseMessage(delta.ToolCall.ID, delta.ToolCall.Name, name, input)}, nil
-
 	case pi.DeltaTextStart, pi.DeltaTextEnd, pi.DeltaThinkStart, pi.DeltaThinkEnd,
-		pi.DeltaToolDelta, pi.DeltaToolEnd, pi.DeltaStart:
-		// Boundary markers; skip.
+		pi.DeltaToolStart, pi.DeltaToolDelta, pi.DeltaToolEnd, pi.DeltaStart:
+		// Boundary markers; skip. DeltaToolStart is deliberately not a ToolUse
+		// source: it precedes message_end (which emits the consolidated text
+		// and thinking) and carries no arguments, so emitting it here would
+		// split the message's content across UI groups (duplicated assistant
+		// text) and duplicate the tool card that tool_execution_start — the
+		// authoritative source, with full arguments — already provides.
 		return nil, nil
 
 	case pi.DeltaDone, pi.DeltaError:
