@@ -1516,6 +1516,27 @@ func TestLoadLogsManyFiles(t *testing.T) {
 	}
 }
 
+func TestNeedsV1InventoryParse(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		typ  string
+		want bool
+	}{
+		{typ: "assistant"},
+		{typ: "result", want: true},
+		{typ: "system", want: true},
+		{typ: "caic_result", want: true},
+		{typ: agent.PendingUserActionMessageType, want: true},
+	} {
+		t.Run(tc.typ, func(t *testing.T) {
+			t.Parallel()
+			if got := needsV1InventoryParse(tc.typ); got != tc.want {
+				t.Errorf("needsV1InventoryParse(%q) = %t, want %t", tc.typ, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestTsToTime(t *testing.T) {
 	t.Parallel()
 	// 1735689600.5 = 2025-01-01T00:00:00.5Z (exact in float64).

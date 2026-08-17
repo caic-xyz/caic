@@ -280,6 +280,9 @@ func decodeDiscriminatorProbe(line []byte, version agent.LogVersion) (typ string
 					tValue = value
 					tMeta = tMeta || value == "caic_meta"
 				}
+				if value != "caic_meta" && !bytes.Contains(line[valueEnd:], []byte(`"caic_meta"`)) {
+					return result(nil)
+				}
 			}
 		}
 		i = skipJSONWhitespace(line, valueEnd)
@@ -1640,6 +1643,9 @@ func scanInventoryRecords(path string, scanner *physicalLogScanner, lt *LoadedTa
 		applyInventoryMetadata(lt, &tail, bootstrap.Messages)
 	}
 	for scanner.Scan() {
+		if scanner.authority.Version == agent.LogVersionV1 && !needsV1InventoryParse(scanner.Type()) {
+			continue
+		}
 		record, err := parser.ParseRecord(scanner.Bytes())
 		if err != nil {
 			if record.Control || scanner.authority.Version == agent.LogVersionV2 {
@@ -1658,6 +1664,12 @@ func scanInventoryRecords(path string, scanner *physicalLogScanner, lt *LoadedTa
 	}
 	tail.finish(lt)
 	return nil
+}
+
+// needsV1InventoryParse reports whether a legacy record can affect startup
+// task metadata. Ordinary native conversation records are intentionally lazy.
+func needsV1InventoryParse(typ string) bool {
+	return typ == "system" || typ == "result" || typ == agent.PendingUserActionMessageType || strings.HasPrefix(typ, "caic_")
 }
 
 // tsToTime converts a Unix epoch float64 (seconds with sub-second precision)

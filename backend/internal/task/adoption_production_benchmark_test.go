@@ -1,5 +1,4 @@
 // Benchmarks V1 task-log adoption and header-validated reopen.
-//go:build adoption_benchmark
 
 package task_test
 

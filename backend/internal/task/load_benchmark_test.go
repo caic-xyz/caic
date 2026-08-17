@@ -1,5 +1,4 @@
 // Benchmarks realistic warm and cold task-log adoption scans.
-//go:build adoption_benchmark
 
 package task
 
@@ -78,6 +77,17 @@ func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 	fixture := newAdoptionBenchmarkFixture(b)
 	store := &LogStore{LogDir: fixture.dir}
 	operations := []adoptionBenchmarkOperation{
+		{
+			name: "LoadLogHeader",
+			prepare: func() func() error {
+				return func() error {
+					if _, err := loadLogHeader(fixture.path); err != nil {
+						return err
+					}
+					return nil
+				}
+			},
+		},
 		{
 			name: "LoadLogs",
 			prepare: func() func() error {
@@ -164,7 +174,6 @@ func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 
 	b.ReportMetric(float64(fixture.size), "fixture-bytes")
 	for _, op := range operations {
-		op := op
 		b.Run(op.name, func(b *testing.B) {
 			b.Run("warm", func(b *testing.B) {
 				runAdoptionSubbenchmark(b, fixture, op, false)

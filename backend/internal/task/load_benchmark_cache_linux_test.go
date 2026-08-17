@@ -1,5 +1,5 @@
 // Provides Linux page-cache eviction for task adoption benchmarks.
-//go:build adoption_benchmark && linux
+//go:build linux
 
 package task
 
@@ -24,7 +24,7 @@ func prepareColdAdoptionFixture(path string) (retErr error) {
 		return fmt.Errorf("sync fixture: %w", err)
 	}
 	if err := unix.Fadvise(int(f.Fd()), 0, 0, unix.FADV_DONTNEED); err != nil {
-		return fmt.Errorf("%w: fadvise DONTNEED: %v", errAdoptionColdUnsupported, err)
+		return fmt.Errorf("%w: fadvise DONTNEED: %w", errAdoptionColdUnsupported, err)
 	}
 	return nil
 }

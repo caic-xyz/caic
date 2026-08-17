@@ -1,6 +1,6 @@
-# Build, test, lint, and development workflow targets for the full stack (Go backend, TypeScript frontend, Android).
+# Build, benchmark, test, lint, and development workflow targets for the full stack (Go backend, TypeScript frontend, Android).
 
-.PHONY: help build check fake-dev test smoke smoke-voice coverage lint lint-go lint-frontend lint-python lint-binaries lint-fix lint-docs refresh-generated generate-sdks git-hooks frontend-build frontend-dev upgrade frontend-e2e android-sdk android-check android-push-gomode android-e2e android-setup-emulator android-start-emulator android-stop-emulator
+.PHONY: help benchmark build check fake-dev test smoke smoke-voice coverage lint lint-go lint-frontend lint-python lint-binaries lint-fix lint-docs refresh-generated generate-sdks git-hooks frontend-build frontend-dev upgrade frontend-e2e android-sdk android-check android-push-gomode android-e2e android-setup-emulator android-start-emulator android-stop-emulator
 
 FRONTEND_STAMP=node_modules/.stamp
 HTTP?=:2242
@@ -18,6 +18,7 @@ help:
 	@echo "caic - Manage multiple coding agents"
 	@echo ""
 	@echo "Available targets:"
+	@echo "  make benchmark              - Run Go benchmarks"
 	@echo "  make check                  - Refresh generated files, build, lint, and test (non-Android)"
 	@echo "  make lint-fix               - Fix linting issues (Go + frontend + Python + binaries + file indexes)"
 	@echo "  make build                  - Build Go server (includes frontend build)"
@@ -54,6 +55,9 @@ build: frontend-build
 	@go install -trimpath -ldflags="-s -w -buildid=" ./backend/cmd/...
 
 check: refresh-generated build lint test
+
+benchmark:
+	@go test ./... -run '^$$' -bench . -benchmem
 
 fake-dev: frontend-build
 	@./scripts/run-dev.py --http $(HTTP) --fake
