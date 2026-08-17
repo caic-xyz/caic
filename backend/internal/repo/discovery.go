@@ -18,7 +18,9 @@ import (
 
 // DiscoverCheckout reads a local checkout's git configuration. The returned
 // checkout has an unregistered repository identity when it has a remote.
-func DiscoverCheckout(ctx context.Context, log *slog.Logger, dir string) (*Checkout, error) {
+// liveBranches are branch names taken from currently running containers
+// mapped to dir; see NewCheckout.
+func DiscoverCheckout(ctx context.Context, log *slog.Logger, dir string, liveBranches []string) (*Checkout, error) {
 	gitCheckout := &git.Checkout{Root: dir, Logger: log}
 	remoteName, err := gitCheckout.DefaultRemote(ctx)
 	if err != nil {
@@ -29,7 +31,7 @@ func DiscoverCheckout(ctx context.Context, log *slog.Logger, dir string) (*Check
 		return nil, fmt.Errorf("determine default branch: %w", err)
 	}
 	remote := gitCheckout.RemoteOriginURL(ctx)
-	checkout, err := NewCheckout(ctx, log, dir, branch)
+	checkout, err := NewCheckout(ctx, log, dir, branch, liveBranches)
 	if err != nil {
 		return nil, fmt.Errorf("initialize checkout: %w", err)
 	}
@@ -58,7 +60,8 @@ func Clone(ctx context.Context, log *slog.Logger, url, dir string, depth int) (*
 		log.WarnContext(ctx, "git clone failed", "url", url, "err", err, "out", string(out))
 		return nil, fmt.Errorf("git clone: %w", err)
 	}
-	checkout, err := DiscoverCheckout(ctx, log, dir)
+	// A freshly cloned repo can't yet have a running container mapped to it.
+	checkout, err := DiscoverCheckout(ctx, log, dir, nil)
 	if err == nil {
 		return checkout, nil
 	}

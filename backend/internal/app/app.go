@@ -385,13 +385,14 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		return nil, err
 	}
 
+	liveBranches := repo.LiveBranchesByRoot(instanceRes.instances)
 	checkouts := make(chan *repo.Checkout, len(repoRes.paths))
 	var wg sync.WaitGroup
 	for _, abs := range repoRes.paths {
 		wg.Go(func() {
 			defer trace.StartRegion(ctx, "repo-checkout-init").End()
 			repoLog := appLog.With("phase", "repo-discovery", "path", abs)
-			result, err := repo.DiscoverCheckout(ctx, repoLog, abs)
+			result, err := repo.DiscoverCheckout(ctx, repoLog, abs, liveBranches[abs])
 			if err != nil {
 				repoLog.WarnContext(ctx, "skipping repo", "err", err)
 				return
@@ -488,7 +489,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 			return nil
 		},
 		func(ctx context.Context) error {
-			newRepoWatcher(ctx, log.With("cmp", "repo-watcher"), absRoot, checkoutRegistry, repoStatus).watch()
+			newRepoWatcher(ctx, log.With("cmp", "repo-watcher"), absRoot, checkoutRegistry, repoStatus, runtimes).watch()
 			return nil
 		},
 	)

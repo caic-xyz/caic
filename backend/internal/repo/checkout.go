@@ -60,6 +60,21 @@ func ParseDiffNumstat(numstat string) agent.DiffStat {
 	return files
 }
 
+// LiveBranchesByRoot groups the branch names of instances by their repo's
+// GitRoot, for use as the liveBranches argument to NewCheckout/DiscoverCheckout.
+func LiveBranchesByRoot(instances []runtime.Instance) map[string][]string {
+	byRoot := make(map[string][]string)
+	for i := range instances {
+		for _, r := range instances[i].Repos {
+			if r.GitRoot == "" || r.Branch == "" {
+				continue
+			}
+			byRoot[r.GitRoot] = append(byRoot[r.GitRoot], r.Branch)
+		}
+	}
+	return byRoot
+}
+
 // TaskView is the read/write surface Checkout needs from a task.
 // *task.Task satisfies it structurally.
 type TaskView interface {
@@ -84,8 +99,12 @@ type Checkout struct {
 	nextID   int        // Next branch sequence number (protected by branchMu).
 }
 
-// NewCheckout creates the initialized checkout at dir.
-func NewCheckout(ctx context.Context, log *slog.Logger, dir, baseBranch string) (*Checkout, error) {
+// NewCheckout creates the initialized checkout at dir. liveBranches are
+// branch names ("caic-N") taken from currently running containers mapped to
+// dir; pass the container-derived branches for this repo so a container
+// whose branch never made it into git (e.g. a launch that failed mid-setup)
+// still reserves its sequence number. See maxBranchSeqNum.
+func NewCheckout(ctx context.Context, log *slog.Logger, dir, baseBranch string, liveBranches []string) (*Checkout, error) {
 	if dir == "" {
 		return nil, errors.New("checkout directory is required")
 	}
@@ -99,7 +118,7 @@ func NewCheckout(ctx context.Context, log *slog.Logger, dir, baseBranch string) 
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkout.GitTimeout)
 	defer cancel()
-	highest, err := maxBranchSeqNum(ctx, log, checkout.Dir)
+	highest, err := maxBranchSeqNum(ctx, log, checkout.Dir, liveBranches)
 	if err != nil {
 		return nil, err
 	}
@@ -472,8 +491,15 @@ func (w *Checkout) diffStatLocked(ctx context.Context, log *slog.Logger, runtime
 }
 
 // maxBranchSeqNum finds the highest sequence number N among all local and
-// remote branches matching "caic-N". Returns -1 if no matching branches exist.
-func maxBranchSeqNum(ctx context.Context, log *slog.Logger, dir string) (int, error) {
+// remote branches matching "caic-N", plus liveBranches (branch names taken
+// from currently running containers for this repo). liveBranches covers
+// branches that a container already holds but that never made it into dir's
+// git refs — e.g. a task whose container launch failed after the branch
+// name was decided but before "git branch" ran. Relying on git alone would
+// let the next allocation reissue that same name, producing two containers
+// mapped to the same repo+branch (see checkRepoOverlap in the md package).
+// Returns -1 if no matching name exists.
+func maxBranchSeqNum(ctx context.Context, log *slog.Logger, dir string, liveBranches []string) (int, error) {
 	checkout := &git.Checkout{Root: dir, Logger: log}
 	remotes := []string{""}
 	if out, err := checkout.RunGit(ctx, "remote"); err == nil && out != "" {
@@ -501,6 +527,11 @@ func maxBranchSeqNum(ctx context.Context, log *slog.Logger, dir string) (int, er
 			if n, ok := caicBranchNumber(name); ok && n > highest {
 				highest = n
 			}
+		}
+	}
+	for _, name := range liveBranches {
+		if n, ok := caicBranchNumber(name); ok && n > highest {
+			highest = n
 		}
 	}
 	return highest, nil

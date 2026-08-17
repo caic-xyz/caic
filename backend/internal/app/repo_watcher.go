@@ -15,6 +15,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/repo"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
 const repoWatcherInterval = 30 * time.Second
@@ -26,15 +27,17 @@ type repoWatcher struct {
 	absRoot    string
 	checkouts  *repo.Registry
 	repoStatus *ci.RepoStatusStore
+	runtimes   *runtime.Router
 }
 
-func newRepoWatcher(ctx context.Context, log *slog.Logger, absRoot string, checkouts *repo.Registry, repoStatus *ci.RepoStatusStore) *repoWatcher {
+func newRepoWatcher(ctx context.Context, log *slog.Logger, absRoot string, checkouts *repo.Registry, repoStatus *ci.RepoStatusStore, runtimes *runtime.Router) *repoWatcher {
 	return &repoWatcher{
 		log:        log.With("root", absRoot),
 		ctx:        ctx,
 		absRoot:    absRoot,
 		checkouts:  checkouts,
 		repoStatus: repoStatus,
+		runtimes:   runtimes,
 	}
 }
 
@@ -87,7 +90,13 @@ func (w *repoWatcher) syncReposInDir(ctx context.Context, dir string) {
 }
 
 func (w *repoWatcher) register(ctx context.Context, abs string) {
-	checkout, err := repo.DiscoverCheckout(ctx, w.log.With("path", abs), abs)
+	var liveBranches []string
+	if instances, err := w.runtimes.List(ctx); err != nil {
+		w.log.WarnContext(ctx, "list runtime instances failed; branch numbering may collide with a running container", "path", abs, "err", err)
+	} else {
+		liveBranches = repo.LiveBranchesByRoot(instances)[abs]
+	}
+	checkout, err := repo.DiscoverCheckout(ctx, w.log.With("path", abs), abs, liveBranches)
 	if err != nil {
 		w.log.WarnContext(ctx, "new repo: discovery failed", "path", abs, "err", err)
 		return

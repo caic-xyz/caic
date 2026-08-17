@@ -44,6 +44,34 @@ func (f *fakeTaskView) RuntimeRepos() []runtime.Repo       { return f.repo }
 func (f *fakeTaskView) SetRepoBranch(i int, branch string) { f.repo[i].Branch = branch }
 func (f *fakeTaskView) PrimaryBaseBranch() string          { return f.baseBranch }
 
+func TestLiveBranchesByRoot(t *testing.T) {
+	t.Parallel()
+	instances := []runtime.Instance{
+		{Repos: []runtime.Repo{
+			{GitRoot: "/home/user/src/genai", Branch: "caic-5"},
+			{GitRoot: "/home/user/src/caic", Branch: "caic-2"},
+		}},
+		{Repos: []runtime.Repo{
+			{GitRoot: "/home/user/src/genai", Branch: "caic-4"},
+			{GitRoot: "", Branch: "caic-9"},               // no repo: ignored.
+			{GitRoot: "/home/user/src/other", Branch: ""}, // unset branch: ignored.
+		}},
+	}
+	got := LiveBranchesByRoot(instances)
+	want := map[string][]string{
+		"/home/user/src/genai": {"caic-5", "caic-4"},
+		"/home/user/src/caic":  {"caic-2"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("LiveBranchesByRoot() = %+v, want %+v", got, want)
+	}
+	for root, branches := range want {
+		if !slices.Equal(got[root], branches) {
+			t.Errorf("LiveBranchesByRoot()[%q] = %v, want %v", root, got[root], branches)
+		}
+	}
+}
+
 func TestRuntimeRemoteRef(t *testing.T) {
 	t.Parallel()
 	got := runtimeRemoteRef(runtime.NewID("docker", "md-agent-1"), "caic-1")
@@ -70,7 +98,11 @@ func newTestRuntime(t *testing.T, backend runtime.Lifecycle) *runtime.Router {
 }
 
 func newInitializedTestCheckout(t *testing.T, dir string) *Checkout {
-	checkout, err := NewCheckout(t.Context(), logtest.Logger(t), dir, "main")
+	return newInitializedTestCheckoutWithLiveBranches(t, dir, nil)
+}
+
+func newInitializedTestCheckoutWithLiveBranches(t *testing.T, dir string, liveBranches []string) *Checkout {
+	checkout, err := NewCheckout(t.Context(), logtest.Logger(t), dir, "main", liveBranches)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,12 +161,27 @@ func TestCheckout(t *testing.T) {
 				t.Errorf("nextID = %d, want 3", r.nextID)
 			}
 		})
+		t.Run("AccountsForLiveContainerBranches", func(t *testing.T) {
+			t.Parallel()
+			// A branch a running container already holds may never have made
+			// it into git (e.g. its "git branch" step failed after the name
+			// was decided). It must still reserve its sequence number, or the
+			// next allocation would reissue the same name to a second
+			// container. See checkRepoOverlap in the md package.
+			clone := initTestRepo(t, "main")
+			runGit(t, clone, "branch", "caic-1")
+
+			r := newInitializedTestCheckoutWithLiveBranches(t, clone, []string{"caic-5"})
+			if r.nextID != 6 {
+				t.Errorf("nextID = %d, want 6", r.nextID)
+			}
+		})
 		t.Run("error", func(t *testing.T) {
 			t.Parallel()
-			if _, err := NewCheckout(t.Context(), logtest.Logger(t), "", "main"); err == nil {
+			if _, err := NewCheckout(t.Context(), logtest.Logger(t), "", "main", nil); err == nil {
 				t.Fatal("want directory error")
 			}
-			if _, err := NewCheckout(t.Context(), nil, t.TempDir(), "main"); err == nil {
+			if _, err := NewCheckout(t.Context(), nil, t.TempDir(), "main", nil); err == nil {
 				t.Fatal("want logger error")
 			}
 		})
