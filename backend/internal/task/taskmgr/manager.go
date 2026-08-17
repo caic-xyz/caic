@@ -1054,7 +1054,7 @@ func (m *Manager) pushStatsSample(sample *runtime.StatsSample) {
 
 func statsStateActive(st task.State) bool {
 	switch st {
-	case task.StatePurged, task.StateFailed, task.StateCrashed, task.StateStopped, task.StateStopping:
+	case task.StatePurged, task.StateFailed, task.StateCrashed, task.StateStopped, task.StateStopping, task.StatePurging:
 		return false
 	default:
 		return true
