@@ -4,14 +4,14 @@ go 1.26.5
 
 require (
 	github.com/andybalholm/brotli v1.2.2
-	github.com/caic-xyz/md v0.17.1
+	github.com/caic-xyz/md v0.17.2
 	github.com/coder/websocket v1.8.14
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/huin/goupnp v1.3.0
 	github.com/invopop/jsonschema v0.14.0
 	github.com/klauspost/compress v1.19.0
 	github.com/lmittmann/tint v1.1.3
-	github.com/maruel/genai v0.7.3
+	github.com/maruel/genai v0.7.4
 	github.com/maruel/gopus v0.0.0-20260506115108-4c6355c2de38
 	github.com/maruel/ksid v0.1.1
 	github.com/maruel/roundtrippers v0.5.0
