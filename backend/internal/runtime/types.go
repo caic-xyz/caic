@@ -102,22 +102,24 @@ type Repo struct {
 }
 
 // CacheMount describes a host cache directory made available to a runtime.
+//
+// Is serialized as task metadata to disk. Is not used for HTTP wire protocol.
 type CacheMount struct {
-	Name        string
-	Description string
-	HostPath    string
-	// ContainerPath is the resolved target path in the runtime container.
-	ContainerPath string
-	ReadOnly      bool
-	Shallow       bool
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	HostPath      string `json:"host_path"`
+	ContainerPath string `json:"container_path"` // Resolved target path in the runtime container.
+	ReadOnly      bool   `json:"read_only"`
+	Shallow       bool   `json:"shallow"`
 }
 
 // Mount describes a host directory bind-mounted into a runtime.
+//
+// Is serialized as task metadata to disk. Is not used for HTTP wire protocol.
 type Mount struct {
-	HostPath string
-	// ContainerPath is the resolved target path in the runtime container.
-	ContainerPath string
-	ReadOnly      bool
+	HostPath      string `json:"host_path"`
+	ContainerPath string `json:"container_path"` // Resolved target path in the runtime container.
+	ReadOnly      bool   `json:"read_only"`
 }
 
 // ConnectionInfo describes connection details returned by a runtime instance.

@@ -222,8 +222,10 @@ func scanPhysicalLog(path string, validateEOF bool, scan func(os.FileInfo, *phys
 	return nil
 }
 
-var errNotMetaRecord = errors.New("not a caic_meta record")
-var errDuplicateRawKey = errors.New("duplicate raw key")
+var (
+	errNotMetaRecord   = errors.New("not a caic_meta record")
+	errDuplicateRawKey = errors.New("duplicate raw key")
+)
 
 // decodeDiscriminatorProbe cheaply identifies caic_meta candidates before the
 // allocation-heavy raw-object decoder validates their authority fields.
@@ -847,45 +849,46 @@ func applyMetaResult(lt *LoadedTask, mr *agent.MetaResultMessage) {
 }
 
 // LoadedTask holds the data reconstructed from a single task log file.
+//
+// Is serialized as task metadata to disk. Is not used for HTTP wire protocol.
 type LoadedTask struct {
-	TaskID            string // Task ID parsed from log filename; empty if unparseable.
-	Prompt            string
-	Title             string
-	Repos             []RepoMount // GitRoot will be empty for purged tasks loaded from logs.
-	LogVersion        agent.LogVersion
-	Harness           harness.Name
-	StartedAt         time.Time
-	LastStateUpdateAt time.Time // Latest relay ts from caic_diff_stat records, falling back to log file mtime.
-	State             State
-	ForgeIssue        int // Originating issue number for bot comment callbacks.
-	ForkedFromTaskID  string
-	ForgeOwner        string
-	ForgeRepo         string
-	ForgePR           int // PR number created during the task; 0 if none.
-	Tailscale         bool
-	USB               bool
-	Display           bool
-	Sudo              bool
-	GitHubToken       bool
-	RuntimeName       runtime.Name
-	BaseImage         string
-	ContainerPlatform string
-	MaxCPUs           int
-	CacheMounts       []runtime.CacheMount
-	Mounts            []runtime.Mount
-	Model             string
-	Effort            string
-	SessionID         string // Backend-native session/thread ID required to resume stateful harnesses.
-	AgentVersion      string
-	LogSize           int64           // Byte size of the log file on disk; populated by LoadLogs.
-	DiffCreated       bool            // True if any non-empty diff was recorded in the log; sticky across the run.
-	Msgs              []agent.Message `json:"-"`
-	Result            *Result
+	TaskID            string               `json:"task_id"` // Task ID parsed from log filename; empty if unparseable.
+	Prompt            string               `json:"prompt"`
+	Title             string               `json:"title"`
+	Repos             []RepoMount          `json:"repos"` // GitRoot will be empty for purged tasks loaded from logs.
+	LogVersion        agent.LogVersion     `json:"log_version"`
+	Harness           harness.Name         `json:"harness"`
+	StartedAt         time.Time            `json:"started_at"`
+	LastStateUpdateAt time.Time            `json:"last_state_update_at"` // Latest relay ts from caic_diff_stat records, falling back to log file mtime.
+	State             State                `json:"state"`
+	ForgeIssue        int                  `json:"forge_issue"` // Originating issue number for bot comment callbacks.
+	ForkedFromTaskID  string               `json:"forked_from_task_id"`
+	ForgeOwner        string               `json:"forge_owner"`
+	ForgeRepo         string               `json:"forge_repo"`
+	ForgePR           int                  `json:"forge_pr"` // PR number created during the task; 0 if none.
+	Tailscale         bool                 `json:"tailscale"`
+	USB               bool                 `json:"usb"`
+	Display           bool                 `json:"display"`
+	Sudo              bool                 `json:"sudo"`
+	GitHubToken       bool                 `json:"github_token"`
+	RuntimeName       runtime.Name         `json:"runtime_name"`
+	BaseImage         string               `json:"base_image"`
+	ContainerPlatform string               `json:"container_platform"`
+	MaxCPUs           int                  `json:"max_cpus"`
+	CacheMounts       []runtime.CacheMount `json:"cache_mounts"`
+	Mounts            []runtime.Mount      `json:"mounts"`
+	Model             string               `json:"model"`
+	Effort            string               `json:"effort"`
+	SessionID         string               `json:"session_id"` // Backend-native session/thread ID required to resume stateful harnesses.
+	AgentVersion      string               `json:"agent_version"`
+	LogSize           int64                `json:"log_size"`     // Byte size of the log file on disk; populated by LoadLogs.
+	DiffCreated       bool                 `json:"diff_created"` // True if any non-empty diff was recorded in the log; sticky across the run.
+	Result            *Result              `json:"result"`
+	Msgs              []agent.Message      `json:"-"`
 
 	path           string               // Absolute path for lazy message loading via LoadMessages.
 	resolver       NativeParserResolver // Fresh parser factory supplied by the task owner.
 	messagesLoaded bool                 // A completed semantic scan may validly produce no messages.
-
 }
 
 // Primary returns a pointer to the primary RepoMount (Repos[0]), or nil for no-repo tasks.

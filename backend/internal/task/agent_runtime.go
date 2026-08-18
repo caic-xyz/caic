@@ -44,15 +44,17 @@ func MakeMetadata(t *Task) runtime.Metadata {
 }
 
 // Result holds the outcome of a completed task.
+//
+// Is serialized as task metadata to disk. Is not used for HTTP wire protocol.
 type Result struct {
-	State       State
-	DiffStat    agent.DiffStat
-	CostUSD     float64
-	Duration    time.Duration
-	NumTurns    int
-	Usage       agent.Usage
-	AgentResult string
-	Err         error `json:"-"`
+	State       State          `json:"state"`
+	DiffStat    agent.DiffStat `json:"diff_stat"`
+	CostUSD     float64        `json:"cost_usd"`
+	Duration    time.Duration  `json:"duration"`
+	NumTurns    int            `json:"num_turns"`
+	Usage       agent.Usage    `json:"usage"`
+	AgentResult string         `json:"agent_result"`
+	Err         error          `json:"-"`
 }
 
 type persistedResult Result

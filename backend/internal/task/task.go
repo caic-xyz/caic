@@ -184,13 +184,14 @@ func (h *SessionHandle) Drain() error {
 }
 
 // RepoMount describes one repository in a task.
-// Repos[0] is primary; empty slice means no-repo task.
+//
+// Is serialized as task metadata to disk. Is not used for HTTP wire protocol.
 type RepoMount struct {
-	Name          string // relative path, e.g. "github/caic"
-	BaseBranch    string // branch to fork from; empty = checkout default
-	Branch        string // allocated branch, e.g. "caic-0"
-	GitRoot       string // absolute host path; empty in purged-task entries
-	ContainerPath string // path inside the runtime instance
+	Name          string `json:"name"`           // relative path, e.g. "github/caic"
+	BaseBranch    string `json:"base_branch"`    // branch to fork from; empty = checkout default
+	Branch        string `json:"branch"`         // allocated branch, e.g. "caic-0"
+	GitRoot       string `json:"git_root"`       // absolute host path; empty in purged-task entries
+	ContainerPath string `json:"container_path"` // path inside the runtime instance
 }
 
 // ToRuntimeRepo converts a RepoMount to a runtime Repo.
