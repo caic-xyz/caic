@@ -1426,6 +1426,35 @@ func TestManager(t *testing.T) {
 				t.Errorf("ForkedFromTaskID = %s, want %s", tk.ForkedFromTaskID, src.Task().ID)
 			}
 		})
+		t.Run("does_not_corrupt_source_log_path", func(t *testing.T) {
+			// Regression test: the fork goroutine must open and track its own
+			// log through forkEntry's AgentRuntime, not the source's. Using the
+			// source's AgentRuntime makes AgentRuntime.LogPathStore record the
+			// fork's log path against the source entry, so the source later
+			// fails to reopen its own log (e.g. to write its terminal result
+			// trailer on stop/purge).
+			t.Parallel()
+			m, src := newForkManager(t)
+			if got := src.LogPath(); got != "" {
+				t.Fatalf("source log path = %q before fork, want empty", got)
+			}
+			id, err := src.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}})
+			if err != nil {
+				t.Fatalf("Fork: %v", err)
+			}
+			fork, ok := m.GetEntry(id)
+			if !ok {
+				t.Fatal("fork entry not found")
+			}
+			select {
+			case <-fork.Done():
+			case <-time.After(time.Second):
+				t.Fatal("fork did not finish")
+			}
+			if got := src.LogPath(); got != "" {
+				t.Errorf("source log path = %q after fork, want empty (fork must not write to the source entry's log path)", got)
+			}
+		})
 		t.Run("valid_stopped_source", func(t *testing.T) {
 			t.Parallel()
 			m, src := newForkManager(t)

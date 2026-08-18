@@ -308,7 +308,7 @@ func (r *Lifecycle) Fork(ctx context.Context, p ForkParams) (string, error) { //
 		if p.ResolvedGitHubToken != "" {
 			forkOpts.ExtraEnv = []string{"GITHUB_TOKEN=" + p.ResolvedGitHubToken}
 		}
-		h, err := r.agentRuntime.ForkTask(ctx, source, t, forkOpts, p.ResolvedGitHubToken)
+		h, err := forkEntry.Lifecycle.agentRuntime.ForkTask(ctx, source, t, forkOpts, p.ResolvedGitHubToken)
 		if err != nil {
 			forkEntry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "fork task")})
 			r.manager.NotifyTaskChange()
