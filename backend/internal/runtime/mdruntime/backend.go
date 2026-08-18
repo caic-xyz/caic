@@ -543,9 +543,13 @@ func (b *Backend) Fork(ctx context.Context, id runtime.ID, opts *runtime.ForkOpt
 		USB:       opts.USB,
 		Sudo:      opts.Sudo,
 		Labels:    metadataLabels(opts.Metadata),
-		ExtraEnv:  opts.ExtraEnv,
-		Mounts:    mounts,
-		MaxCPUs:   maxCPUsOrDefault(opts.MaxCPUs),
+		// baseExtraEnv keeps forks consistent with new instances: the forked
+		// container's ~/.env is rewritten from scratch, so the target harness's
+		// config env (e.g. its API keys) must be re-injected here. opts.ExtraEnv
+		// stays last so caller-set vars (e.g. GITHUB_TOKEN) win on conflict.
+		ExtraEnv: append(b.baseExtraEnv(opts.Harness), opts.ExtraEnv...),
+		Mounts:   mounts,
+		MaxCPUs:  maxCPUsOrDefault(opts.MaxCPUs),
 	}
 	stdout, stderr := b.logWriters(ctx, opts.LogWriter, "fork")
 	b.log.DebugContext(ctx, "calling fork", "source", name)
@@ -782,6 +786,17 @@ var harnessMap = map[harness.Name]md.Harness{
 	harness.Pi:       md.HarnessPi,
 }
 
+// baseExtraEnv returns the ~/.env entries every instance gets: the editor
+// guards (preventing agents from spawning interactive editors during git
+// commit, git mergetool, or any command invoking $EDITOR or $GIT_EDITOR)
+// and the per-harness env vars from config.
+func (b *Backend) baseExtraEnv(h harness.Name) []string {
+	harnessEnv := b.HarnessEnv[string(h)]
+	env := make([]string, 0, 2+len(harnessEnv))
+	env = append(env, "EDITOR=true", "GIT_EDITOR=true")
+	return append(env, harnessEnv...)
+}
+
 // mdStartOpts builds the md.StartOpts for a given harness and task options.
 func (b *Backend) mdStartOpts(c mdContainer, opts *runtime.StartOptions) (*md.StartOpts, error) {
 	image := opts.BaseImage
@@ -792,11 +807,7 @@ func (b *Backend) mdStartOpts(c mdContainer, opts *runtime.StartOptions) (*md.St
 	if err != nil {
 		return nil, err
 	}
-	var extraEnv []string
-	// Prevent agents from spawning interactive editors (neovim, vim, etc.)
-	// during git commit, git mergetool, or any command invoking $EDITOR or $GIT_EDITOR.
-	extraEnv = append(extraEnv, "EDITOR=true", "GIT_EDITOR=true")
-	extraEnv = append(extraEnv, b.HarnessEnv[string(opts.Harness)]...)
+	extraEnv := b.baseExtraEnv(opts.Harness)
 	if opts.GitHubToken != "" {
 		extraEnv = append(extraEnv, "GITHUB_TOKEN="+opts.GitHubToken)
 	}

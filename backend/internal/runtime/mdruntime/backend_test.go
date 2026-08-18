@@ -402,6 +402,34 @@ func TestBackend(t *testing.T) {
 		}
 	})
 
+	t.Run("Fork extraEnv", func(t *testing.T) {
+		t.Parallel()
+		src := &fakeMDContainer{forkResult: &fakeMDContainer{name: "fork-1"}}
+		b := newTestBackend(&fakeMDClient{getResult: src})
+		b.HarnessEnv = map[string][]string{string(harness.Claude): {"FOO=bar"}}
+		_, _, _, err := b.Fork(t.Context(), "docker:src", &runtime.ForkOptions{
+			Harness:  harness.Claude,
+			ExtraEnv: []string{"GITHUB_TOKEN=tok"},
+		})
+		if err != nil {
+			t.Fatalf("Fork: %v", err)
+		}
+		if src.forkOpts == nil {
+			t.Fatal("Fork options not recorded")
+		}
+		for _, want := range []string{"EDITOR=true", "GIT_EDITOR=true", "FOO=bar", "GITHUB_TOKEN=tok"} {
+			if !slices.Contains(src.forkOpts.ExtraEnv, want) {
+				t.Errorf("ExtraEnv missing %s: %v", want, src.forkOpts.ExtraEnv)
+			}
+		}
+		// Caller-set vars must come after the harness env so they win on conflict.
+		for i, e := range src.forkOpts.ExtraEnv {
+			if e == "FOO=bar" && !slices.Contains(src.forkOpts.ExtraEnv[i+1:], "GITHUB_TOKEN=tok") {
+				t.Errorf("ExtraEnv order: GITHUB_TOKEN must follow FOO=bar: %v", src.forkOpts.ExtraEnv)
+			}
+		}
+	})
+
 	t.Run("VNCPort", func(t *testing.T) {
 		t.Run("valid cached", func(t *testing.T) {
 			t.Parallel()

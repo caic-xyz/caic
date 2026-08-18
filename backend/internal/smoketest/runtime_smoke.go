@@ -82,6 +82,15 @@ func runSmokeCommand(ctx context.Context, name string, args ...string) ([]byte, 
 	return exec.CommandContext(ctx, name, args...).CombinedOutput() //nolint:gosec // test-controlled runtime and generated run-token filter.
 }
 
+// ContainerFile returns the contents of path inside a smoke container.
+func ContainerFile(ctx context.Context, runtimeName, container, path string) (string, error) {
+	out, err := runSmokeCommand(ctx, runtimeName, "container", "exec", container, "cat", path)
+	if err != nil {
+		return "", fmt.Errorf("read %s from %s: %w: %s", path, container, err, out)
+	}
+	return string(out), nil
+}
+
 // SmokeBackend is a deterministic no-LLM agent backend that runs inside the
 // real md container through the normal relay over SSH.
 type SmokeBackend struct {
@@ -90,11 +99,11 @@ type SmokeBackend struct {
 
 var _ agent.Backend = (*SmokeBackend)(nil)
 
-// NewSmokeBackend creates the deterministic relay-backed smoke agent.
-func NewSmokeBackend() *SmokeBackend {
+// NewSmokeBackend creates the deterministic relay-backed smoke agent for h.
+func NewSmokeBackend(h harness.Name) *SmokeBackend {
 	b := &SmokeBackend{}
 	b.Base = agent.Base{
-		HarnessID:     harness.Codex,
+		HarnessID:     h,
 		ContextWindow: 200_000,
 	}
 	b.SetModelInventory(agent.ModelInventory{Models: []agent.Model{{ID: "smoke-model"}}})
@@ -121,8 +130,8 @@ func (*SmokeBackend) AgentArgs(agent.HarnessArgs) []string {
 }
 
 // NewWire implements agent.Backend.
-func (*SmokeBackend) NewWire() agent.WireFormat {
-	return NewSmokeBackend()
+func (b *SmokeBackend) NewWire() agent.WireFormat {
+	return b
 }
 
 // WritePrompt writes the prompt as plain text.

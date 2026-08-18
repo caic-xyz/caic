@@ -91,11 +91,8 @@ func TestSmoke(t *testing.T) {
 	// --- Task lifecycle ---
 
 	t.Run("TaskLifecycle", func(t *testing.T) {
-		// Get available repos and harnesses.
 		var repos []v1.Repo
 		getJSON(t, baseURL, "/api/caic/v1/server/repos", &repos)
-		var harnesses []v1.HarnessInfo
-		getJSON(t, baseURL, "/api/caic/v1/server/harnesses", &harnesses)
 
 		var prefs v1.PreferencesResp
 		getJSON(t, baseURL, "/api/caic/v1/server/preferences", &prefs)
@@ -103,12 +100,12 @@ func TestSmoke(t *testing.T) {
 		prefs.Settings.CacheMappings = nil
 		postJSON(t, baseURL, "/api/caic/v1/server/preferences", v1.UpdatePreferencesReq{Settings: prefs.Settings}, &prefs)
 
-		// Create a task.
+		// Create a task on codex so the fork below switches harness (codex -> pi).
 		initialPrompt := "smoke test " + fmt.Sprint(time.Now().UnixNano())
 		createReq := v1.CreateTaskReq{
 			InitialPrompt: v1.Prompt{Text: initialPrompt},
 			Repos:         []v1.RepoSpec{{Name: repos[0].Path}},
-			Harness:       v1.Harness(harnesses[0].Name),
+			Harness:       v1.HarnessCodex,
 			RuntimeName:   smoketest.SmokeRuntime(),
 		}
 		var createResp v1.Task
@@ -203,8 +200,11 @@ func TestSmoke(t *testing.T) {
 
 		disableSudo := false
 		forkReq := v1.ForkTaskReq{
-			Prompt: v1.Prompt{Text: "fork smoke test " + fmt.Sprint(time.Now().UnixNano())},
-			Sudo:   &disableSudo,
+			// Switch harness on the fork so the test verifies the target
+			// harness's env is injected, not the source harness's.
+			Prompt:  v1.Prompt{Text: "fork smoke test " + fmt.Sprint(time.Now().UnixNano())},
+			Harness: v1.HarnessPi,
+			Sudo:    &disableSudo,
 		}
 		var forkResp v1.Task
 		postJSON(t, baseURL, "/api/caic/v1/tasks/"+taskID+"/fork", forkReq, &forkResp)
@@ -221,6 +221,29 @@ func TestSmoke(t *testing.T) {
 		forkRuntimeID := runtime.ID(forkTask.Runtime.ID)
 		if forkRuntimeID == "" {
 			t.Fatalf("fork task %s has no runtime ID before purge", forkID)
+		}
+
+		// The fork's ~/.env is rewritten from scratch by md, so the target
+		// harness's env vars from config must be re-injected into the fork,
+		// and the source harness's vars must not survive the rewrite. The two
+		// harnesses use distinct marker values, so a fork that kept (or only
+		// re-injected) the source harness's env fails one of the checks below.
+		for _, c := range []struct {
+			name, id, want, absent string
+		}{
+			{"source", string(runtime.ID(task.Runtime.ID).InstanceID()), smoke.runToken + "-codex", smoke.runToken + "-pi"},
+			{"fork", string(forkRuntimeID.InstanceID()), smoke.runToken + "-pi", smoke.runToken + "-codex"},
+		} {
+			env, err := smoketest.ContainerFile(t.Context(), smoketest.SmokeRuntime(), c.id, "/home/user/.env")
+			if err != nil {
+				t.Fatalf("read %s container .env: %v", c.name, err)
+			}
+			if !strings.Contains(env, c.want) {
+				t.Fatalf("%s container /home/user/.env missing harness env %s:\n%s", c.name, c.want, env)
+			}
+			if strings.Contains(env, c.absent) {
+				t.Fatalf("%s container /home/user/.env has other harness's env %s:\n%s", c.name, c.absent, env)
+			}
 		}
 		postJSON(t, baseURL, "/api/caic/v1/tasks/"+forkID+"/stop", nil, nil)
 		waitForTaskState(forkID, "stopped")
@@ -319,9 +342,10 @@ func TestSmoke(t *testing.T) {
 }
 
 type smokeServer struct {
-	t       *testing.T
-	rootDir string
-	cfg     *server.Config
+	t        *testing.T
+	rootDir  string
+	cfg      *server.Config
+	runToken string
 
 	addr    string
 	baseURL string
@@ -430,10 +454,12 @@ func startSmokeServer(t *testing.T) *smokeServer {
 
 	// Use a deterministic no-LLM agent, but run it inside the real md
 	// container through the normal relay over SSH.
-	sb := smoketest.NewSmokeBackend()
+	sb := smoketest.NewSmokeBackend(harness.Codex)
+	sbFork := smoketest.NewSmokeBackend(harness.Pi)
 	s := &smokeServer{
-		t:       t,
-		rootDir: filepath.Dir(clone),
+		t:        t,
+		rootDir:  filepath.Dir(clone),
+		runToken: runToken,
 		cfg: &server.Config{
 			Dirs: server.DirsConfig{
 				ConfigDir: configDir,
@@ -444,7 +470,14 @@ func startSmokeServer(t *testing.T) *smokeServer {
 				Metadata:   runtime.Metadata{runtime.MetadataSmokeRun: runToken},
 			},
 			Agent: server.AgentConfig{
-				Backends: map[harness.Name]agent.Backend{sb.Harness(): sb},
+				Backends: map[harness.Name]agent.Backend{sb.Harness(): sb, sbFork.Harness(): sbFork},
+				HarnessEnv: map[string][]string{
+					// Re-injected into each instance's ~/.env; the fork section of
+					// the test verifies the fork gets the target harness's marker
+					// after md rewrites ~/.env.
+					string(sb.Harness()):     {"CAIC_SMOKE_FORK_ENV=" + runToken + "-codex"},
+					string(sbFork.Harness()): {"CAIC_SMOKE_FORK_ENV=" + runToken + "-pi"},
+				},
 			},
 			LLM: server.LLMConfig{
 				Disable: true,
