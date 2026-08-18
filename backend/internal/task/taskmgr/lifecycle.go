@@ -475,7 +475,7 @@ func (r *Lifecycle) watchSession(h *task.SessionHandle) {
 					costUSD, numTurns, duration, usage, _ := t.LiveStats()
 					result := &task.Result{State: task.StateCrashed, DiffStat: t.LiveDiffStat(), CostUSD: costUSD, Duration: duration, NumTurns: numTurns, Usage: usage, AgentResult: t.LastAgentResult(), Err: crashErr}
 					r.entry.Finish(result)
-					if err := r.manager.Logs.WriteTaskResultTrailer(t, result); err != nil {
+					if err := r.manager.writeTaskResultTrailer(r.entry, result); err != nil {
 						r.manager.log.WarnContext(ctx, "write crashed task trailer failed", append(attrs, "err", err)...)
 					}
 				} else if t.RecordSessionFailure(ctx, sessionErr) {
@@ -486,7 +486,7 @@ func (r *Lifecycle) watchSession(h *task.SessionHandle) {
 					costUSD, numTurns, duration, usage, _ := t.LiveStats()
 					result := &task.Result{State: task.StateFailed, DiffStat: t.LiveDiffStat(), CostUSD: costUSD, Duration: duration, NumTurns: numTurns, Usage: usage, AgentResult: t.LastAgentResult(), Err: failureErr}
 					r.entry.Finish(result)
-					if err := r.manager.Logs.WriteTaskResultTrailer(t, result); err != nil {
+					if err := r.manager.writeTaskResultTrailer(r.entry, result); err != nil {
 						r.manager.log.WarnContext(ctx, "write failed task trailer failed", append(attrs, "err", err)...)
 					}
 				}

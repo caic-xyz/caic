@@ -74,8 +74,8 @@ type Config struct {
 	// background goroutines that must survive individual requests.
 	ServerCtx context.Context
 	Log       *slog.Logger
-	LogDir    string
-	CacheDir  string
+	// CacheDir stores task-manager data and task logs. It must be non-empty.
+	CacheDir string
 	// Runtimes validates runtime selection and dispatches task runtime operations.
 	Runtimes            *runtime.Router
 	Backends            map[harness.Name]agent.Backend
@@ -130,6 +130,9 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 	if cfg.ServerCtx == nil {
 		return nil, errors.New("task manager server context is required")
 	}
+	if cfg.CacheDir == "" {
+		return nil, errors.New("task manager cache directory is required")
+	}
 	if cfg.Runtimes == nil {
 		return nil, errors.New("task manager runtime router is required")
 	}
@@ -151,7 +154,7 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 		cancelServerCtx:     cancelServerCtx,
 		cacheDir:            cfg.CacheDir,
 		Backends:            maps.Clone(cfg.Backends),
-		Logs:                task.LogStore{LogDir: cfg.LogDir},
+		Logs:                task.LogStore{LogDir: filepath.Join(cfg.CacheDir, "tasks")},
 		harnessEnv:          cfg.HarnessEnv,
 		runtimeMetadata:     maps.Clone(cfg.RuntimeMetadata),
 		runtimeStartTimeout: cfg.RuntimeStartTimeout,
@@ -216,9 +219,14 @@ func (m *Manager) Start() {
 
 // NewEntry creates an unregistered entry with its immutable lifecycle.
 func (m *Manager) NewEntry(t *task.Task, lt *task.LoadedTask) *Entry {
+	logPath := ""
+	if lt != nil {
+		logPath = lt.LogPath()
+	}
 	e := &Entry{
 		task:       t,
 		loadedTask: lt,
+		logPath:    logPath,
 		done:       make(chan struct{}),
 	}
 	e.Lifecycle = &Lifecycle{
@@ -228,6 +236,7 @@ func (m *Manager) NewEntry(t *task.Task, lt *task.LoadedTask) *Entry {
 		agentRuntime: task.AgentRuntime{
 			Backends:            m.Backends,
 			Logs:                m.Logs,
+			LogPathStore:        e,
 			Runtimes:            m.Runtimes,
 			Log:                 m.log.With("task", t.ID),
 			NotifyTaskChange:    m.NotifyTaskChange,
@@ -791,9 +800,6 @@ func (m *Manager) LoadPurgedTasks(all []*task.LoadedTask) error {
 		if lt.SessionID != "" || lt.AgentVersion != "" {
 			t.SetSessionMetadata(lt.SessionID, "", lt.AgentVersion)
 		}
-		if lt.LogPath() != "" {
-			t.SetLogPath(lt.LogPath())
-		}
 		if lt.Title != "" {
 			t.SetTitle(lt.Title)
 		} else {
@@ -827,16 +833,32 @@ func (m *Manager) HistorySource(entry *Entry) (*task.LoadedTask, error) {
 	if entry == nil {
 		return nil, errors.New("task history entry is nil")
 	}
-	if entry.Task().LogPath() == "" {
+	path := entry.LogPath()
+	if path == "" {
 		return entry.LoadedTask(), nil
 	}
-	loaded, err := entry.Task().LoadHistorySource()
+	loaded, err := task.LoadHistorySource(path)
 	if err != nil {
 		return nil, fmt.Errorf("load task history source: %w", err)
 	}
 	loaded.SetNativeParserResolver(m.resolveNativeParser)
 	entry.SetLoadedTask(loaded)
 	return loaded, nil
+}
+
+func (m *Manager) writeTaskResultTrailer(entry *Entry, res *task.Result) error {
+	t := entry.Task()
+	path := entry.LogPath()
+	if path == "" {
+		path = filepath.Join(m.Logs.LogDir, t.LogFilename())
+	}
+	header := t.LogHeader()
+	log, err := m.Logs.Reopen(path, &header)
+	if err != nil {
+		return err
+	}
+	entry.SetLogPath(path)
+	return errors.Join(m.Logs.WriteResultTrailer(log, t.Title(), res), log.Close())
 }
 
 // resolveImportTaskIDs selects instances for configured checkouts, reads
@@ -1547,7 +1569,6 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	} else {
 		t.SetTitle(prompt)
 	}
-	t.SetLogPath(lt.LogPath())
 	if relaySnapshotRead {
 		t.SetRelayOffset(relaySize)
 	}
@@ -1659,7 +1680,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 			Err:         resultErr,
 		}
 		entry.Finish(result)
-		if err := m.Logs.WriteTaskResultTrailer(t, result); err != nil {
+		if err := m.writeTaskResultTrailer(entry, result); err != nil {
 			m.log.WarnContext(ctx, "write imported result trailer failed", "repo", relPath, "br", branch, "instance", c.ID, "err", err)
 		}
 	}

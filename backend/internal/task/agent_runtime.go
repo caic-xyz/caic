@@ -101,12 +101,19 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// LogPathStore owns the physical task-log location for one lifecycle.
+type LogPathStore interface {
+	LogPath() string
+	SetLogPath(path string)
+}
+
 // AgentRuntime owns task runtime setup, agent sessions, log persistence, message
 // dispatch, cleanup, restart, reconnect, revive, and fork operations.
 type AgentRuntime struct {
 	// Immutable.
 	Backends         map[harness.Name]agent.Backend
 	Logs             LogStore
+	LogPathStore     LogPathStore
 	Runtimes         *runtime.Router
 	Log              *slog.Logger
 	NotifyTaskChange func()
@@ -158,7 +165,7 @@ func (r *AgentRuntime) Reconnect(ctx context.Context, t *Task, skipSideEffects b
 	// Reconnect resumes an existing session, so append only after Reopen
 	// validates the existing file's authoritative header. A missing or corrupt
 	// log must not be replaced because the running relay's format is unknown.
-	log, err := r.Logs.Reopen(t)
+	log, err := r.reopenLog(t)
 	if err != nil {
 		close(msgCh)
 		<-dispatchDone
@@ -234,7 +241,7 @@ func (r *AgentRuntime) StartSession(ctx context.Context, t *Task, prompt agent.P
 	if t.RuntimeInstanceID() == "" {
 		return nil, errors.New("no instance")
 	}
-	log, err := r.Logs.Open(t)
+	log, err := r.openLog(t)
 	if err != nil {
 		return nil, err
 	}
@@ -282,7 +289,7 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 	// The Manager has already assigned every repo's branch name (the branch itself
 	// is created below, concurrently with launch), so the log can open with the
 	// durable, branch-derived filename and persist output from its first line.
-	log, err := r.Logs.Open(t)
+	log, err := r.openLog(t)
 	if err != nil {
 		t.recordStartupFailure(ctx, err)
 		return nil, err
@@ -477,7 +484,7 @@ func (r *AgentRuntime) Cleanup(ctx context.Context, t *Task, reason State) Resul
 		// on the next server restart instead of "purged".
 		tlog.DebugContext(ctx, "cleanup: no session handle, reopening log for trailer")
 		var reopenErr error
-		log, reopenErr = r.Logs.Reopen(t)
+		log, reopenErr = r.reopenLog(t)
 		if reopenErr != nil {
 			tlog.WarnContext(ctx, "reopen log for trailer failed", "err", reopenErr)
 		}
@@ -491,7 +498,7 @@ func (r *AgentRuntime) Cleanup(ctx context.Context, t *Task, reason State) Resul
 			if err := log.Close(); err != nil {
 				tlog.WarnContext(ctx, "close log failed", "err", err)
 			}
-		} else if err := r.Logs.Compress(t, log, reason); err != nil {
+		} else if err := r.compressLog(log, reason); err != nil {
 			tlog.WarnContext(ctx, "compress task log failed", "err", err)
 		} else {
 			tlog.DebugContext(ctx, "cleanup: log trailer written and closed")
@@ -633,7 +640,7 @@ func (r *AgentRuntime) ReviveTask(ctx context.Context, t *Task) (*SessionHandle,
 	tlog.Info("resuming session after revive", "sess", t.GetSessionID())
 
 	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, true)
-	log, err := r.Logs.Open(t)
+	log, err := r.openLog(t)
 	if err != nil {
 		close(msgCh)
 		<-dispatchDone
@@ -734,7 +741,7 @@ func (r *AgentRuntime) ForkTask(ctx context.Context, source, fork *Task, forkOpt
 	maps.Copy(metadata, MakeMetadata(fork))
 	forkOpts.Metadata = metadata
 
-	log, err := r.Logs.Open(fork)
+	log, err := r.openLog(fork)
 	if err != nil {
 		fork.recordStartupFailure(ctx, err)
 		return nil, err
@@ -784,6 +791,40 @@ func (r *AgentRuntime) ForkTask(ctx context.Context, source, fork *Task, forkOpt
 	}
 	tlog.Info("fork session running", "instance", forkName)
 	return h, nil
+}
+
+func (r *AgentRuntime) openLog(t *Task) (agent.LogSink, error) {
+	path := filepath.Join(r.Logs.LogDir, t.LogFilename())
+	header := t.LogHeader()
+	log, err := r.Logs.Open(path, &header)
+	if err != nil {
+		return nil, err
+	}
+	r.LogPathStore.SetLogPath(path)
+	return log, nil
+}
+
+func (r *AgentRuntime) reopenLog(t *Task) (agent.LogSink, error) {
+	path := r.LogPathStore.LogPath()
+	if path == "" {
+		path = filepath.Join(r.Logs.LogDir, t.LogFilename())
+	}
+	header := t.LogHeader()
+	log, err := r.Logs.Reopen(path, &header)
+	if err != nil {
+		return nil, err
+	}
+	r.LogPathStore.SetLogPath(path)
+	return log, nil
+}
+
+func (r *AgentRuntime) compressLog(log agent.LogSink, state State) error {
+	path, err := r.Logs.Compress(r.LogPathStore.LogPath(), log, state)
+	if err != nil {
+		return err
+	}
+	r.LogPathStore.SetLogPath(path)
+	return nil
 }
 
 func (r *AgentRuntime) branchDiffStat(ctx context.Context, t *Task) (agent.DiffStat, error) {
@@ -918,7 +959,7 @@ func (r *AgentRuntime) finishReviveFailure(ctx context.Context, t *Task, reviveE
 	}
 	var reopenErr error
 	if log == nil {
-		log, reopenErr = r.Logs.Reopen(t)
+		log, reopenErr = r.reopenLog(t)
 	}
 	if log == nil {
 		return errors.Join(reviveErr, reopenErr)
@@ -928,7 +969,7 @@ func (r *AgentRuntime) finishReviveFailure(ctx context.Context, t *Task, reviveE
 	if trailerErr != nil {
 		return errors.Join(reviveErr, trailerErr, log.Close())
 	}
-	return errors.Join(reviveErr, r.Logs.Compress(t, log, StateFailed))
+	return errors.Join(reviveErr, r.compressLog(log, StateFailed))
 }
 
 // finishStartupFailure records a startup error in the task log so the failure
@@ -944,7 +985,7 @@ func (r *AgentRuntime) finishStartupFailure(ctx context.Context, t *Task, log ag
 	if writeErr != nil || trailerErr != nil {
 		return errors.Join(startupErr, writeErr, trailerErr, log.Close())
 	}
-	return errors.Join(startupErr, r.Logs.Compress(t, log, StateFailed))
+	return errors.Join(startupErr, r.compressLog(log, StateFailed))
 }
 
 // logRelayDiag reads the relay daemon's relay.log from the instance and logs
@@ -1039,7 +1080,7 @@ func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent
 	t.ClearMessages(ctx)
 
 	// Open new log segment.
-	log, err := r.Logs.Open(t)
+	log, err := r.openLog(t)
 	if err != nil {
 		t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
 		return nil, fmt.Errorf("open log: %w", err)

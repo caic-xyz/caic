@@ -250,7 +250,6 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	taskMgr, err := taskmgr.New(taskmgr.Config{
 		ServerCtx:           ctx,
 		Log:                 log,
-		LogDir:              logDir,
 		CacheDir:            cfg.Dirs.CacheDir,
 		Runtimes:            runtimes,
 		Checkouts:           checkoutRegistry,

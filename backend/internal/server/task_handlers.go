@@ -158,7 +158,7 @@ func (h *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	if isTaskEventTerminal(state) && loadedTask != nil && entry.Task().LogPath() != "" {
+	if isTaskEventTerminal(state) && loadedTask != nil && entry.LogPath() != "" {
 		stream.tracker = apiconv.NewToolTimingTracker(entry.Task().Harness, apiconv.FormatToolOutput)
 		if err := h.streamHistoryFromDisk(&stream, entry, loadedTask); err != nil {
 			log.WarnContext(r.Context(), "stream terminal SSE history", "err", err)

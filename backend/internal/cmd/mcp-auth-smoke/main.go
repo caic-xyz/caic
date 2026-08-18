@@ -177,6 +177,7 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 	taskMgr, err := taskmgr.New(taskmgr.Config{
 		ServerCtx:           ctx,
 		Log:                 slog.New(slog.NewTextHandler(os.Stderr, nil)),
+		CacheDir:            stateDir,
 		Runtimes:            runtimeRouter,
 		Checkouts:           checkoutRegistry,
 		RuntimeStartTimeout: time.Hour,

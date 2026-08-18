@@ -153,6 +153,23 @@ func newTestRuntimeRouter(t *testing.T, backend runtime.Lifecycle) *runtime.Rout
 	return rt
 }
 
+type testLogPathStore struct {
+	mu   sync.Mutex
+	path string
+}
+
+func (s *testLogPathStore) SetLogPath(path string) {
+	s.mu.Lock()
+	s.path = path
+	s.mu.Unlock()
+}
+
+func (s *testLogPathStore) LogPath() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.path
+}
+
 func newTestAgentRuntime(t *testing.T, checkout *repo.Checkout, logDir string, backends map[harness.Name]agent.Backend) *AgentRuntime {
 	var runtimes *runtime.Router
 	if value, ok := testCheckoutRuntimes.Load(checkout); ok {
@@ -161,6 +178,7 @@ func newTestAgentRuntime(t *testing.T, checkout *repo.Checkout, logDir string, b
 	return &AgentRuntime{
 		Backends:            backends,
 		Logs:                LogStore{LogDir: logDir},
+		LogPathStore:        &testLogPathStore{},
 		Runtimes:            runtimes,
 		Log:                 logtest.Logger(t),
 		NotifyTaskChange:    func() {},
@@ -603,7 +621,7 @@ func TestRunner(t *testing.T) {
 			tk.SetState(StateStopped)
 
 			// Create a pre-existing log file (written by StopTask scenario).
-			logW, err := r.Logs.Open(tk)
+			logW, err := r.openLog(tk)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -861,7 +879,7 @@ func TestRunner(t *testing.T) {
 					}
 					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 					tk.SetState(StateStopped)
-					log, err := r.Logs.Open(tk)
+					log, err := r.openLog(tk)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -968,7 +986,7 @@ func TestRunner(t *testing.T) {
 
 			// Readable "<id>-<repo>-<branch>" name, computed at Open from the
 			// pinned branch and stable afterward (matches a later Reopen).
-			if got, want := filepath.Base(fork.LogPath()), taskLogFileName(fork); got != want {
+			if got, want := filepath.Base(r.LogPathStore.LogPath()), fork.LogFilename(); got != want {
 				t.Errorf("log filename = %q, want %q", got, want)
 			}
 			// The fork's primary branch is pinned before Fork and handed to the
@@ -976,7 +994,7 @@ func TestRunner(t *testing.T) {
 			if _, ok := runtimeBackend.destPrimary("/src/caic"); !ok {
 				t.Errorf("Fork received repos = %v, want an entry for /src/caic", runtimeBackend.capturedRepos)
 			}
-			logs := strings.Join(logLines(t, fork.LogPath()), "\n")
+			logs := strings.Join(logLines(t, r.LogPathStore.LogPath()), "\n")
 			first := strings.Index(logs, `{"line":"fork setup complete","t":"log"}`)
 			last := strings.Index(logs, `{"line":"final setup line","t":"log"}`)
 			if first < 0 || last <= first {
@@ -1053,7 +1071,7 @@ func TestRunner(t *testing.T) {
 			if got := fork.GetState(); got != StateFailed {
 				t.Errorf("state = %s, want failed", got)
 			}
-			logs := strings.Join(logLines(t, fork.LogPath()), "\n")
+			logs := strings.Join(logLines(t, r.LogPathStore.LogPath()), "\n")
 			for _, want := range []string{"fork setup complete", "final setup line", "Task startup failed: fork instance: fork failed"} {
 				if !strings.Contains(logs, want) {
 					t.Errorf("persisted log does not contain %q: %s", want, logs)
@@ -1088,7 +1106,7 @@ func TestRunner(t *testing.T) {
 			if got := fork.GetState(); got != StateFailed {
 				t.Errorf("state = %s, want failed", got)
 			}
-			logs := strings.Join(logLines(t, fork.LogPath()), "\n")
+			logs := strings.Join(logLines(t, r.LogPathStore.LogPath()), "\n")
 			for _, want := range []string{"fork setup complete", "final setup line", "Task startup failed: start session on fork"} {
 				if !strings.Contains(logs, want) {
 					t.Errorf("persisted log does not contain %q: %s", want, logs)
@@ -1182,7 +1200,7 @@ func testRunnerSessions(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "test"},
 				Harness:       "test",
 			}
-			logW, err := r.Logs.Open(tk)
+			logW, err := r.openLog(tk)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1249,8 +1267,8 @@ func testRunnerSessions(t *testing.T) {
 			if backend.capturedAttachOpts.Log != nil {
 				t.Fatal("AttachRelay called without authoritative local log")
 			}
-			if tk.LogPath() != "" {
-				t.Fatalf("LogPath = %q, want empty", tk.LogPath())
+			if r.LogPathStore.LogPath() != "" {
+				t.Fatalf("LogPath = %q, want empty", r.LogPathStore.LogPath())
 			}
 		})
 	})
@@ -1269,7 +1287,7 @@ func testRunnerSessions(t *testing.T) {
 				Model:         "model-1",
 				Effort:        "high",
 			}
-			w, err := store.Open(tk)
+			w, err := openTaskLog(store, tk)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1317,7 +1335,7 @@ func testRunnerSessions(t *testing.T) {
 			tk.Harness = harness.Claude
 
 			// Initial Start writes the header.
-			w, err := store.Open(tk)
+			w, err := openTaskLog(store, tk)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1326,7 +1344,7 @@ func testRunnerSessions(t *testing.T) {
 			// Several reconnects (simulating repeated server restarts) append
 			// without writing a new header.
 			for range 3 {
-				w, err := store.Reopen(tk)
+				w, err := reopenTaskLog(store, tk, "")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1348,7 +1366,7 @@ func testRunnerSessions(t *testing.T) {
 			// header because a reconnect cannot infer the running relay format.
 			store := &LogStore{LogDir: filepath.Join(t.TempDir(), "logs")}
 			tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Name: "org/repo", Branch: "caic-0"}}, Harness: harness.Claude}
-			if _, err := store.Reopen(tk); !errors.Is(err, os.ErrNotExist) {
+			if _, err := reopenTaskLog(store, tk, ""); !errors.Is(err, os.ErrNotExist) {
 				t.Errorf("Reopen err = %v, want os.ErrNotExist", err)
 			}
 		})
@@ -1703,7 +1721,7 @@ func testRunnerSessions(t *testing.T) {
 
 		// Create an initial session with a log writer by using the backend
 		// directly (Checkout.Start needs a instance backend).
-		logW, err := (&LogStore{LogDir: logDir}).Open(tk)
+		logW, err := openTaskLog(&LogStore{LogDir: logDir}, tk)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -18,6 +18,40 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
+type testTaskLog struct {
+	agent.LogSink
+
+	path string
+}
+
+func openTaskLog(s *LogStore, tk *Task) (*testTaskLog, error) {
+	if s.LogDir == "" {
+		return nil, errors.New("no log dir")
+	}
+	path := filepath.Join(s.LogDir, tk.LogFilename())
+	header := tk.LogHeader()
+	log, err := s.Open(path, &header)
+	if err != nil {
+		return nil, err
+	}
+	return &testTaskLog{LogSink: log, path: path}, nil
+}
+
+func reopenTaskLog(s *LogStore, tk *Task, path string) (*testTaskLog, error) {
+	if path == "" {
+		if s.LogDir == "" {
+			return nil, errors.New("no log dir")
+		}
+		path = filepath.Join(s.LogDir, tk.LogFilename())
+	}
+	header := tk.LogHeader()
+	log, err := s.Reopen(path, &header)
+	if err != nil {
+		return nil, err
+	}
+	return &testTaskLog{LogSink: log, path: path}, nil
+}
+
 func logLines(t *testing.T, path string) []string {
 	r, err := openLogReader(path)
 	if err != nil {
@@ -60,16 +94,18 @@ func TestLogStore(t *testing.T) {
 		t.Parallel()
 		store := &LogStore{LogDir: t.TempDir()}
 		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Codex}
-		log, err := store.Open(tk)
+		log, err := openTaskLog(store, tk)
 		if err != nil {
 			t.Fatal(err)
 		}
-		plainPath := tk.LogPath()
-		if err := store.Compress(tk, log, StateFailed); err != nil {
+		plainPath := log.path
+		compressed, err := store.Compress(log.path, log, StateFailed)
+		if err != nil {
 			t.Fatal(err)
 		}
-		if !isLogCompressed(tk.LogPath()) {
-			t.Fatalf("compressed log path = %q, want compressed", tk.LogPath())
+		log.path = compressed
+		if !isLogCompressed(log.path) {
+			t.Fatalf("compressed log path = %q, want compressed", log.path)
 		}
 		if _, err := os.Stat(plainPath); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("plain log stat = %v, want os.ErrNotExist", err)
@@ -90,14 +126,14 @@ func TestLogStore(t *testing.T) {
 			Effort:        "high",
 		}
 
-		w, err := store.Open(tk)
+		w, err := openTaskLog(store, tk)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if err := w.Close(); err != nil {
 			t.Fatal(err)
 		}
-		entries := logLines(t, tk.LogPath())
+		entries := logLines(t, w.path)
 		if len(entries) != 1 {
 			t.Fatalf("log lines = %d, want 1", len(entries))
 		}
@@ -123,14 +159,14 @@ func TestLogStore(t *testing.T) {
 		t.Parallel()
 		store := &LogStore{LogDir: t.TempDir()}
 		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Codex}
-		first, err := store.Open(tk)
+		first, err := openTaskLog(store, tk)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if err := first.Close(); err != nil {
 			t.Fatal(err)
 		}
-		second, err := store.Open(tk)
+		second, err := openTaskLog(store, tk)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -140,7 +176,7 @@ func TestLogStore(t *testing.T) {
 		if err := second.Close(); err != nil {
 			t.Fatal(err)
 		}
-		entries := logLines(t, tk.LogPath())
+		entries := logLines(t, second.path)
 		if len(entries) != 1 {
 			t.Fatalf("log lines = %d, want unchanged header", len(entries))
 		}
@@ -149,7 +185,7 @@ func TestLogStore(t *testing.T) {
 		t.Parallel()
 		store := &LogStore{LogDir: t.TempDir()}
 		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Codex}
-		log, err := store.Open(tk)
+		log, err := openTaskLog(store, tk)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -162,7 +198,7 @@ func TestLogStore(t *testing.T) {
 		if err := log.Close(); err != nil {
 			t.Fatal(err)
 		}
-		got, err := os.ReadFile(tk.LogPath())
+		got, err := os.ReadFile(log.path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -180,13 +216,13 @@ func TestLogStore(t *testing.T) {
 			Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
 			Harness:       harness.Codex,
 		}
-		path := filepath.Join(dir, taskLogFileName(tk))
+		path := filepath.Join(dir, tk.LogFilename())
 		line := `{"t":"caic_meta","version":2,"prompt":"test","repos":[{"name":"org/repo","branch":"caic-0"}],"harness":"codex"}` + "\n"
 		if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
 			t.Fatal(err)
 		}
 
-		log, err := store.Reopen(tk)
+		log, err := reopenTaskLog(store, tk, path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -212,12 +248,12 @@ func TestLogStore(t *testing.T) {
 		dir := t.TempDir()
 		store := &LogStore{LogDir: dir}
 		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Codex}
-		path := filepath.Join(dir, taskLogFileName(tk))
+		path := filepath.Join(dir, tk.LogFilename())
 		header := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: int(agent.LogVersionV1), Prompt: "test", Harness: harness.Codex}) + "\n"
 		if err := os.WriteFile(path, []byte(header), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		log, err := store.Reopen(tk)
+		log, err := reopenTaskLog(store, tk, path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -248,7 +284,7 @@ func TestLogStore(t *testing.T) {
 			Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
 			Harness:       harness.Codex,
 		}
-		path := filepath.Join(dir, taskLogFileName(tk))
+		path := filepath.Join(dir, tk.LogFilename())
 		line := mustJSON(t, agent.MetaMessage{
 			MessageType: "caic_meta",
 			Version:     int(agent.LogVersionV1),
@@ -260,7 +296,7 @@ func TestLogStore(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if _, err := store.Reopen(tk); err == nil || !strings.Contains(err.Error(), "does not match") {
+		if _, err := reopenTaskLog(store, tk, path); err == nil || !strings.Contains(err.Error(), "does not match") {
 			t.Fatalf("Reopen error = %v, want harness mismatch", err)
 		}
 	})
@@ -269,13 +305,12 @@ func TestLogStore(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		tk := &Task{ID: ksid.NewID(), Harness: harness.Codex}
-		path := filepath.Join(dir, taskLogFileName(tk))
+		path := filepath.Join(dir, tk.LogFilename())
 		header := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: int(agent.LogVersionV1), Prompt: "test", Harness: harness.Codex}) + "\n"
 		if err := os.WriteFile(path, []byte(header), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		tk.SetLogPath(path)
-		w, err := (&LogStore{LogDir: dir}).Reopen(tk)
+		w, err := reopenTaskLog(&LogStore{LogDir: dir}, tk, path)
 		if err != nil {
 			t.Fatal(err)
 		}

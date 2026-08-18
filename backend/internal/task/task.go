@@ -256,7 +256,6 @@ type Task struct {
 	mu                    sync.Mutex
 	runtimeInstanceID     runtime.ID
 	runtimeConnection     runtime.ConnectionTarget
-	logPath               string // Absolute JSONL log path used for appending task metadata.
 	statsRing             [statsRingSize]runtime.Stats
 	statsLen              int
 	statsHead             int
@@ -672,25 +671,53 @@ func (t *Task) SetRelayOffset(offset int64) {
 	t.RelayOffset = offset
 }
 
-// SetLogPath records the JSONL log path used for metadata appends.
-func (t *Task) SetLogPath(path string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.logPath = path
+// LogFilename returns the canonical filename for a new task-log segment.
+func (t *Task) LogFilename() string {
+	safeRepo := ""
+	safeBranch := ""
+	if p := t.Primary(); p != nil {
+		safeRepo = strings.ReplaceAll(p.Name, "/", "-")
+		safeBranch = strings.ReplaceAll(p.Branch, "/", "-")
+	}
+	return t.ID.String() + "-" + safeRepo + "-" + safeBranch + ".jsonl"
 }
 
-// LogPath returns the JSONL log path used for metadata appends.
-func (t *Task) LogPath() string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.logPath
+// LogHeader builds the immutable metadata header for a new task-log segment.
+func (t *Task) LogHeader() agent.MetaMessage {
+	repos := t.ReposSnapshot()
+	metaRepos := make([]agent.MetaRepo, len(repos))
+	for i, r := range repos {
+		metaRepos[i] = agent.MetaRepo{Name: r.Name, BaseBranch: r.BaseBranch, Branch: r.Branch, ContainerPath: r.ContainerPath}
+	}
+	return agent.MetaMessage{
+		MessageType:       "caic_meta",
+		Prompt:            t.InitialPrompt.Text,
+		Title:             t.Title(),
+		Repos:             metaRepos,
+		Harness:           t.Harness,
+		Model:             t.Model,
+		Effort:            t.Effort,
+		StartedAt:         t.StartedAt,
+		ForgeIssue:        t.ForgeIssue,
+		ForkedFromTaskID:  t.ForkedFromTaskID.String(),
+		Tailscale:         t.Tailscale,
+		USB:               t.USB,
+		Display:           t.Display,
+		Sudo:              t.Sudo,
+		GitHubToken:       t.GitHubTokenEnabled(),
+		RuntimeName:       string(t.RuntimeName),
+		BaseImage:         t.BaseImage,
+		ContainerPlatform: t.ContainerPlatform,
+		MaxCPUs:           t.MaxCPUs,
+		CacheMounts:       metaCacheMountsFromRuntime(t.CacheMounts),
+		Mounts:            metaMountsFromRuntime(t.Mounts),
+	}
 }
 
-// LoadHistorySource opens this task's current raw log only far enough to
-// validate and decode its metadata header. Callers must provide a native parser
-// before using the returned source for its one semantic history scan.
-func (t *Task) LoadHistorySource() (*LoadedTask, error) {
-	path := t.LogPath()
+// LoadHistorySource opens path only far enough to validate and decode its
+// metadata header. Callers must provide a native parser before using the
+// returned source for its one semantic history scan.
+func LoadHistorySource(path string) (*LoadedTask, error) {
 	if path == "" {
 		return nil, ErrNoLog
 	}

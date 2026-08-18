@@ -134,6 +134,9 @@ func newTestTaskManager(t testing.TB, cfg taskmgr.Config) *taskmgr.Manager { //n
 	if cfg.Log == nil {
 		cfg.Log = slog.New(slog.DiscardHandler)
 	}
+	if cfg.CacheDir == "" {
+		cfg.CacheDir = t.TempDir()
+	}
 	if cfg.RuntimeStartTimeout == 0 {
 		cfg.RuntimeStartTimeout = time.Hour
 	}
@@ -141,6 +144,11 @@ func newTestTaskManager(t testing.TB, cfg taskmgr.Config) *taskmgr.Manager { //n
 	if err != nil {
 		t.Fatalf("taskmgr.New: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := m.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	return m
 }
 
@@ -436,12 +444,11 @@ func newCheckoutConstructionTestServer(t *testing.T, root string) checkoutConstr
 	backend := &mdruntime.Backend{HarnessEnv: harnessEnv}
 	runtimeRouter := newTestRuntime(t, backend)
 	backends := map[harness.Name]agent.Backend{harness.Codex: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}}
-	logDir := filepath.Join(t.TempDir(), "logs")
-	cacheDir := filepath.Join(t.TempDir(), "cache")
+	cacheDir := t.TempDir()
+	logDir := filepath.Join(cacheDir, "tasks")
 	checkoutRegistry := repo.NewRegistry()
 	taskMgr := newTestTaskManager(t, taskmgr.Config{
 		ServerCtx:  t.Context(),
-		LogDir:     logDir,
 		CacheDir:   cacheDir,
 		Runtimes:   runtimeRouter,
 		Backends:   backends,
@@ -1909,10 +1916,11 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		writeLogFile(t, logDir, taskID.String()+".jsonl", meta, `not-json`)
 
 		tk := &task.Task{ID: taskID, InitialPrompt: agent.Prompt{Text: "fix the bug"}, Harness: harness.Claude}
-		tk.SetLogPath(path)
 		tk.SetState(task.StateStopped)
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}})
-		s.taskMgr.Insert(taskID.String(), s.taskMgr.NewEntry(tk, nil))
+		entry := s.taskMgr.NewEntry(tk, nil)
+		entry.SetLogPath(path)
+		s.taskMgr.Insert(taskID.String(), entry)
 
 		stoppedReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
 		stoppedReq.SetPathValue("id", taskID.String())
@@ -1962,10 +1970,11 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		writeLogFile(t, logDir, taskID.String()+".jsonl", meta, message)
 
 		tk := &task.Task{ID: taskID, InitialPrompt: agent.Prompt{Text: "fix the bug"}, Harness: harness.Claude}
-		tk.SetLogPath(path)
 		tk.SetState(task.StateStopped)
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire}})
-		s.taskMgr.Insert(taskID.String(), s.taskMgr.NewEntry(tk, nil))
+		entry := s.taskMgr.NewEntry(tk, nil)
+		entry.SetLogPath(path)
+		s.taskMgr.Insert(taskID.String(), entry)
 
 		recorder := httptest.NewRecorder()
 		w := &reviveDuringStoppedScanWriter{ResponseRecorder: recorder, revive: func() {
@@ -2106,7 +2115,6 @@ func TestHandleTaskRawEvents(t *testing.T) {
 			Harness:       harness.Claude,
 		}
 		tk.RestoreMessages([]agent.Message{&agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done"}})
-		tk.SetLogPath(logs[0].LogPath())
 		tk.SetState(task.StateStopped)
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}})
 		s.taskMgr.Insert(taskID.String(), s.taskMgr.NewEntry(tk, logs[0]))

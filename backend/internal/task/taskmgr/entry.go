@@ -26,6 +26,7 @@ type Entry struct {
 	// Guarded by mu.
 	mu            sync.Mutex
 	loadedTask    *task.LoadedTask
+	logPath       string
 	result        *task.Result
 	done          chan struct{}
 	doneClosed    bool
@@ -49,7 +50,26 @@ func (e *Entry) LoadedTask() *task.LoadedTask {
 func (e *Entry) SetLoadedTask(lt *task.LoadedTask) {
 	e.mu.Lock()
 	e.loadedTask = lt
+	if lt != nil {
+		e.logPath = lt.LogPath()
+	}
 	e.mu.Unlock()
+}
+
+// SetLogPath records the physical log location for this task lifecycle.
+func (e *Entry) SetLogPath(path string) {
+	e.mu.Lock()
+	e.logPath = path
+	e.mu.Unlock()
+}
+
+// LogPath returns the physical log location for this task lifecycle. It is
+// empty until a local log opens successfully, or when adoption cannot establish
+// an authoritative local log.
+func (e *Entry) LogPath() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.logPath
 }
 
 // Done returns the channel that closes when the task reaches a terminal

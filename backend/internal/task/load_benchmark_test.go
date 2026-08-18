@@ -129,7 +129,7 @@ func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 			prepare: func() func() error {
 				task := fixture.task()
 				return func() error {
-					w, err := store.Reopen(task)
+					w, err := reopenTaskLog(store, task, "")
 					if err != nil {
 						return err
 					}
@@ -161,8 +161,7 @@ func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 						return err
 					}
 					task := fixture.task()
-					task.SetLogPath(lt.LogPath())
-					w, err := store.Reopen(task)
+					w, err := reopenTaskLog(store, task, lt.LogPath())
 					if err != nil {
 						return err
 					}

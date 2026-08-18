@@ -41,6 +41,18 @@ func TestEntry(t *testing.T) {
 		})
 	})
 
+	t.Run("LogPath", func(t *testing.T) {
+		t.Parallel()
+		e := newTestEntry(t, &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}})
+		if e.LogPath() != "" {
+			t.Errorf("LogPath() = %q, want empty", e.LogPath())
+		}
+		e.SetLogPath("/tmp/task.jsonl")
+		if e.LogPath() != "/tmp/task.jsonl" {
+			t.Errorf("LogPath() = %q, want /tmp/task.jsonl", e.LogPath())
+		}
+	})
+
 	t.Run("Done", func(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {

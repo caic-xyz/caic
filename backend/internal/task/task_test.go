@@ -2473,7 +2473,7 @@ func TestTask(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
 			tk := &Task{ID: ksid.NewID(), Harness: "claude"}
-			path := filepath.Join(dir, taskLogFileName(tk))
+			path := filepath.Join(dir, tk.LogFilename())
 			header, err := json.Marshal(agent.MetaMessage{
 				MessageType: "caic_meta",
 				Version:     int(agent.LogVersionV1),
@@ -2494,7 +2494,7 @@ func TestTask(t *testing.T) {
 				ForgeRepo:   "widget",
 				ForgePR:     42,
 			}
-			log, err := (&LogStore{LogDir: dir}).Reopen(tk)
+			log, err := reopenTaskLog(&LogStore{LogDir: dir}, tk, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2562,7 +2562,6 @@ func TestTask(t *testing.T) {
 						}
 					}
 					tk := &Task{ID: ksid.NewID(), Harness: "claude"}
-					tk.SetLogPath(path)
 					if err := tk.WriteToLog(&agent.TextMessage{Text: "hello"}); err == nil {
 						t.Fatal("WriteToLog error = nil")
 					}
@@ -2585,7 +2584,6 @@ func TestTask(t *testing.T) {
 		t.Run("ReturnsAppendError", func(t *testing.T) {
 			t.Parallel()
 			tk := &Task{ID: ksid.NewID()}
-			tk.SetLogPath(filepath.Join(t.TempDir(), "missing", "task.jsonl"))
 			if err := tk.WriteToLog(&agent.TextMessage{Text: "hello"}); err == nil {
 				t.Fatal("WriteToLog err = nil, want append error")
 			}

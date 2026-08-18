@@ -55,8 +55,8 @@ func BenchmarkTaskAdoption(b *testing.B) {
 			Repos:         []task.RepoMount{{Name: "org/repo", Branch: "caic-0"}},
 			Harness:       harness.Claude,
 		}
-		tk.SetLogPath(lt.LogPath())
-		w, err := store.Reopen(tk)
+		header := tk.LogHeader()
+		w, err := store.Reopen(lt.LogPath(), &header)
 		if err != nil {
 			b.Fatal(err)
 		}

@@ -148,6 +148,7 @@ func newModelRefreshTestManager(t testing.TB, router *runtime.Router, backends m
 	m, err := taskmgr.New(taskmgr.Config{
 		ServerCtx:           t.Context(),
 		Log:                 slog.New(slog.DiscardHandler),
+		CacheDir:            t.TempDir(),
 		Runtimes:            router,
 		Backends:            backends,
 		Checkouts:           repo.NewRegistry(),
