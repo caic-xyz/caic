@@ -29,6 +29,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/smoketest"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
 const smokeSessionTTL = 30 * 24 * time.Hour
@@ -177,7 +178,7 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 	taskMgr, err := taskmgr.New(taskmgr.Config{
 		ServerCtx:           ctx,
 		Log:                 slog.New(slog.NewTextHandler(os.Stderr, nil)),
-		CacheDir:            stateDir,
+		LogStore:            taskslog.NewStore(filepath.Join(stateDir, "tasks")),
 		Runtimes:            runtimeRouter,
 		Checkouts:           checkoutRegistry,
 		RuntimeStartTimeout: time.Hour,

@@ -390,7 +390,7 @@ func TestReadLogAuthority(t *testing.T) {
 	})
 }
 
-func TestLoadLogs(t *testing.T) {
+func TestStoreLoad(t *testing.T) {
 	t.Parallel()
 	t.Run("ForkedFromTaskIDMetadata", func(t *testing.T) {
 		t.Parallel()
@@ -403,7 +403,7 @@ func TestLoadLogs(t *testing.T) {
 			ForkedFromTaskID: "3BL0EKDTO000",
 		}))
 
-		tasks, err := LoadLogs(filepath.Dir(path))
+		tasks, err := storeFor(filepath.Dir(path)).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -426,7 +426,7 @@ func TestLoadLogs(t *testing.T) {
 			Harness:     harness.Claude,
 		})
 		writeLogFile(t, dir, filepath.Base(path), meta)
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -531,7 +531,7 @@ func TestLoadLogs(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -743,7 +743,7 @@ func TestLoadLogs(t *testing.T) {
 				if _, err := loadLogHeader(path); err == nil || !strings.Contains(err.Error(), "invalid native JSON value") {
 					t.Fatalf("loadLogHeader error = %v, want malformed v2 native message rejection", err)
 				}
-				tasks, err := LoadLogs(filepath.Dir(path))
+				tasks, err := storeFor(filepath.Dir(path)).Load()
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -770,7 +770,7 @@ func TestLoadLogs(t *testing.T) {
 		})
 		writeLogFile(t, dir, "a.jsonl", meta)
 
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -797,7 +797,7 @@ func TestLoadLogs(t *testing.T) {
 		emptyDiff := mustJSON(t, agent.DiffStatMessage{MessageType: "caic_diff_stat", Ts: 2})
 		writeLogFile(t, dir, "a.jsonl", meta, withDiff, emptyDiff)
 
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -815,7 +815,7 @@ func TestLoadLogs(t *testing.T) {
 		emptyDiff := mustJSON(t, agent.DiffStatMessage{MessageType: "caic_diff_stat", Ts: 1})
 		writeLogFile(t, dir, "a.jsonl", meta, emptyDiff)
 
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -833,7 +833,7 @@ func TestLoadLogs(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged", ReasoningOutputTokens: 123})
 		writeLogFile(t, dir, "a.jsonl", meta, trailer)
 
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -856,7 +856,7 @@ func TestLoadLogs(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeCompressedLogFile(t, dir, "a.jsonl.zst", seqOf(meta, asst, prMsg, trailer))
 
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -887,7 +887,7 @@ func TestLoadLogs(t *testing.T) {
 		writeCompressedLogFile(t, dir, "a.jsonl.zst", seqOf(compressedMeta, trailer))
 		writeLogFile(t, dir, "a.jsonl", plainMeta, trailer)
 
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -906,7 +906,7 @@ func TestLoadLogs(t *testing.T) {
 		writeLogFile(t, dir, "live1-repo-branch.jsonl", wantedMeta)
 		writeLogFile(t, dir, "live10-repo-branch.jsonl", unrelatedMeta)
 
-		tasks, err := LoadLogsForTaskIDs(dir, []string{"live1"})
+		tasks, err := storeFor(dir).LoadForTaskIDs([]string{"live1"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -919,22 +919,22 @@ func TestLoadLogs(t *testing.T) {
 	})
 	t.Run("ForTaskIDsMissing", func(t *testing.T) {
 		t.Parallel()
-		if _, err := LoadLogsForTaskIDs(t.TempDir(), []string{"missing"}); err == nil || !strings.Contains(err.Error(), "missing task logs") {
-			t.Fatalf("LoadLogsForTaskIDs error = %v, want missing-log error", err)
+		if _, err := storeFor(t.TempDir()).LoadForTaskIDs([]string{"missing"}); err == nil || !strings.Contains(err.Error(), "missing task logs") {
+			t.Fatalf("LoadForTaskIDs error = %v, want missing-log error", err)
 		}
 	})
 	t.Run("ForTaskIDsInvalid", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		writeLogFile(t, dir, "broken-repo-branch.jsonl", `{"type":"assistant"}`)
-		_, err := LoadLogsForTaskIDs(dir, []string{"broken"})
+		_, err := storeFor(dir).LoadForTaskIDs([]string{"broken"})
 		if err == nil || !strings.Contains(err.Error(), "load task log") {
-			t.Fatalf("LoadLogsForTaskIDs error = %v, want invalid-log error", err)
+			t.Fatalf("LoadForTaskIDs error = %v, want invalid-log error", err)
 		}
 	})
 	t.Run("NotExist", func(t *testing.T) {
 		t.Parallel()
-		tasks, err := LoadLogs(filepath.Join(t.TempDir(), "nope"))
+		tasks, err := storeFor(filepath.Join(t.TempDir(), "nope")).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -947,7 +947,7 @@ func TestLoadLogs(t *testing.T) {
 		dir := t.TempDir()
 		writeLogFile(t, dir, "bad.jsonl", `{"type":"not_meta"}`)
 
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -968,7 +968,7 @@ func TestLoadLogs(t *testing.T) {
 		asst2 := claudeAssistant(t, map[string]any{"type": "text", "text": "world"})
 		writeLogFile(t, dir, "b.jsonl", meta2, init2, asst2)
 
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1014,7 +1014,7 @@ func TestLoadLogs(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeLogFile(t, dir, "feat.jsonl", meta, trailer)
 
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1054,7 +1054,7 @@ func TestLoadLogs(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeLogFile(t, dir, "plain.jsonl", meta, trailer)
 
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1080,7 +1080,7 @@ func TestLoadLogs(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeLogFile(t, dir, "partial.jsonl", meta, trailer)
 
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1111,7 +1111,7 @@ func TestLoadLogs(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "stopped"})
 		writeLogFile(t, dir, "session.jsonl", meta, session, trailer)
 
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1186,7 +1186,7 @@ func TestLoadLogs(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "unknown top-level t") {
 			t.Fatalf("v2 caic_session alias error = %v, want strict unknown-token rejection", err)
 		}
-		tasks, err := LoadLogs(filepath.Dir(path))
+		tasks, err := storeFor(filepath.Dir(path)).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1205,7 +1205,7 @@ func TestLoadLogs(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "stopped"})
 		writeLogFile(t, dir, "pi.jsonl", meta, session, trailer)
 
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1228,7 +1228,7 @@ func TestLoadLogs(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "stopped"})
 		writeLogFile(t, dir, "long.jsonl", meta, session, large, trailer)
 
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1304,7 +1304,7 @@ func TestLoadLogs(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "stopped"})
 		writeLogFile(t, dir, "legacy-codex.jsonl", meta, init, trailer)
 
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1330,7 +1330,7 @@ func TestLoadLogs(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "stopped"})
 		writeLogFile(t, dir, "legacy.jsonl", meta, init, trailer)
 
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1361,7 +1361,7 @@ func TestLoadLogs(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeLogFile(t, dir, "task.jsonl", meta, planWrite, cleared, meta2, asst2, trailer)
 
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1392,7 +1392,7 @@ func TestLoadLogs(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeLogFile(t, dir, "1-r-caic-1.jsonl", meta, prMsg, trailer)
 
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1419,7 +1419,7 @@ func TestLoadLogs(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeLogFile(t, dir, "2-r-caic-2.jsonl", meta, asst, prMsg, trailer)
 
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1458,7 +1458,7 @@ func TestLoadLogs(t *testing.T) {
 		lines = append(lines, trailer)
 		writeLogFile(t, dir, "3-r-caic-3.jsonl", lines...)
 
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1493,7 +1493,7 @@ func TestLoadLogs(t *testing.T) {
 	})
 }
 
-func TestLoadLogsManyFiles(t *testing.T) {
+func TestStoreLoadManyFiles(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	line := mustJSON(t, agent.MetaMessage{
@@ -1506,7 +1506,7 @@ func TestLoadLogsManyFiles(t *testing.T) {
 		writeLogFile(t, dir, fmt.Sprintf("task-%03d.jsonl", i), line)
 	}
 
-	loaded, err := LoadLogs(dir)
+	loaded, err := storeFor(dir).Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1565,7 +1565,7 @@ func TestLoadedTask(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "waiting"})
 		writeLogFile(t, dir, "t.jsonl", meta, a1, pr, a2, trailer)
 
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1600,7 +1600,7 @@ func TestLoadedTask(t *testing.T) {
 		second := claudeAssistant(t, map[string]any{"type": "text", "text": "second"})
 		writeLogFile(t, dir, "t.jsonl", meta, first, second)
 
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1637,7 +1637,7 @@ func TestLoadedTask(t *testing.T) {
 			`{"type":"assistant","message":{"content":[]}}`,
 		)
 
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1667,7 +1667,7 @@ func TestLoadedTask(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "failed"})
 		writeLogFile(t, dir, "t.jsonl", meta, setupLog, trailer)
 
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1708,7 +1708,7 @@ func TestLoadedTask(t *testing.T) {
 			`{"t":"log","line":"provisioning"}`,
 			`{"t":"context_cleared"}`,
 		)
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1747,7 +1747,7 @@ func TestLoadedTask(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "waiting"})
 		writeCompressedLogFile(t, dir, "t.jsonl.zst", seqOf(meta, a1, a2, trailer))
 
-		tasks, err := LoadLogs(dir)
+		tasks, err := storeFor(dir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}

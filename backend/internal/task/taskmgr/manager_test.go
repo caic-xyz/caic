@@ -80,8 +80,8 @@ func newTestManager(t testing.TB, cfg Config) *Manager { //nolint:gocritic // Co
 	if cfg.Log == nil {
 		cfg.Log = slog.New(slog.DiscardHandler)
 	}
-	if cfg.CacheDir == "" {
-		cfg.CacheDir = t.TempDir()
+	if cfg.LogStore == nil {
+		cfg.LogStore = taskslog.NewStore(filepath.Join(t.TempDir(), "tasks"))
 	}
 	if cfg.Runtimes == nil {
 		cfg.Runtimes = newTestRuntime(t, &runtimetest.FakeBackend{}, nil)
@@ -419,11 +419,11 @@ func TestNew(t *testing.T) {
 			want string
 		}{
 			{name: "server context", want: "task manager server context is required"},
-			{name: "cache directory", cfg: Config{ServerCtx: t.Context()}, want: "task manager cache directory is required"},
-			{name: "runtime router", cfg: Config{ServerCtx: t.Context(), CacheDir: cacheDir}, want: "task manager runtime router is required"},
-			{name: "checkout registry", cfg: Config{ServerCtx: t.Context(), CacheDir: cacheDir, Runtimes: runtimes}, want: "task manager checkout registry is required"},
-			{name: "runtime start timeout", cfg: Config{ServerCtx: t.Context(), CacheDir: cacheDir, Runtimes: runtimes, Checkouts: repo.NewRegistry()}, want: "task manager runtime start timeout is required"},
-			{name: "logger", cfg: Config{ServerCtx: t.Context(), CacheDir: cacheDir, Runtimes: runtimes, Checkouts: repo.NewRegistry(), RuntimeStartTimeout: time.Hour}, want: "task manager logger is required"},
+			{name: "task log store", cfg: Config{ServerCtx: t.Context()}, want: "task manager task log store is required"},
+			{name: "runtime router", cfg: Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(filepath.Join(cacheDir, "tasks"))}, want: "task manager runtime router is required"},
+			{name: "checkout registry", cfg: Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(filepath.Join(cacheDir, "tasks")), Runtimes: runtimes}, want: "task manager checkout registry is required"},
+			{name: "runtime start timeout", cfg: Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(filepath.Join(cacheDir, "tasks")), Runtimes: runtimes, Checkouts: repo.NewRegistry()}, want: "task manager runtime start timeout is required"},
+			{name: "logger", cfg: Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(filepath.Join(cacheDir, "tasks")), Runtimes: runtimes, Checkouts: repo.NewRegistry(), RuntimeStartTimeout: time.Hour}, want: "task manager logger is required"},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
@@ -463,7 +463,7 @@ func TestNew(t *testing.T) {
 		cfg := Config{
 			ServerCtx:           t.Context(),
 			Log:                 slog.New(slog.DiscardHandler),
-			CacheDir:            cacheDir,
+			LogStore:            taskslog.NewStore(filepath.Join(cacheDir, "tasks")),
 			Runtimes:            router,
 			Backends:            map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}},
 			HarnessEnv:          map[string][]string{string(harness.Codex): {"CODEX_HOME=/tmp/codex"}},
@@ -474,8 +474,8 @@ func TestNew(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if m.Logs.LogDir != filepath.Join(cfg.CacheDir, "tasks") || m.cacheDir != cfg.CacheDir {
-			t.Fatalf("manager dirs = log %q cache %q, want log %q cache %q", m.Logs.LogDir, m.cacheDir, filepath.Join(cfg.CacheDir, "tasks"), cfg.CacheDir)
+		if m.logStore != cfg.LogStore {
+			t.Fatal("manager does not share the configured task log store")
 		}
 		if len(m.harnessEnv[string(harness.Codex)]) != 1 || m.harnessEnv[string(harness.Codex)][0] != "CODEX_HOME=/tmp/codex" {
 			t.Fatalf("HarnessEnv = %#v, want configured codex env", m.harnessEnv)
@@ -1553,7 +1553,7 @@ func TestManager(t *testing.T) {
 			logDir := filepath.Join(cacheDir, "tasks")
 			m := newTestManager(t, Config{
 				ServerCtx: t.Context(),
-				CacheDir:  cacheDir,
+				LogStore:  taskslog.NewStore(filepath.Join(cacheDir, "tasks")),
 				Backends:  map[harness.Name]agent.Backend{"reconnect": backend},
 			})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "reconnect", "")
@@ -1577,7 +1577,7 @@ func TestManager(t *testing.T) {
 				},
 				&agent.ResultMessage{MessageType: "result"},
 			})
-			logW, path, err := (&taskslog.Writer{LogDir: logDir}).Open(tk.LogFilename(), tk.LogHeader())
+			logW, path, err := (&taskslog.Store{LogDir: logDir}).Open(tk.LogFilename(), tk.LogHeader())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1910,7 +1910,7 @@ func TestManager(t *testing.T) {
 			), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			logs, err := taskslog.LoadLogs(dir)
+			logs, err := taskslog.NewStore(dir).Load()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2101,7 +2101,7 @@ func TestManager(t *testing.T) {
 			if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			logs, err := taskslog.LoadLogs(dir)
+			logs, err := taskslog.NewStore(dir).Load()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2534,11 +2534,11 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Claude, "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateStopped)
-			log, path, err := m.Logs.Open(tk.LogFilename(), tk.LogHeader())
+			log, path, err := m.logStore.Open(tk.LogFilename(), tk.LogHeader())
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := m.Logs.WriteResultTrailer(log, tk.Title(), &taskslog.Result{State: taskslog.StateStopped}); err != nil {
+			if err := m.logStore.WriteResultTrailer(log, tk.Title(), &taskslog.Result{State: taskslog.StateStopped}); err != nil {
 				t.Fatal(err)
 			}
 			if err := log.Close(); err != nil {
@@ -2957,7 +2957,6 @@ func TestManager(t *testing.T) {
 						Utilization:   1,
 					}},
 				}})
-
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
 			}
@@ -3055,10 +3054,10 @@ func TestManager(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := os.MkdirAll(m.Logs.LogDir, 0o700); err != nil {
+			if err := os.MkdirAll(m.logStore.LogDir, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			path := filepath.Join(m.Logs.LogDir, taskID.String()+".jsonl")
+			path := filepath.Join(m.logStore.LogDir, taskID.String()+".jsonl")
 			data := append([]byte(nil), meta...)
 			data = append(data, []byte(`
 {"type":"caic_result","state":123}
@@ -3066,7 +3065,7 @@ func TestManager(t *testing.T) {
 			if err := os.WriteFile(path, data, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			logs, err := taskslog.LoadLogs(m.Logs.LogDir)
+			logs, err := m.logStore.Load()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3109,7 +3108,6 @@ func TestManager(t *testing.T) {
 			adopted, err := m.ImportInstances(t.Context(), []runtime.Instance{{ID: instanceID, State: "exited"}}, []*taskslog.LoadedTask{{
 				TaskID: taskID.String(), Harness: harness.Claude, Prompt: "test",
 			}})
-
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
 			}
@@ -3131,7 +3129,7 @@ func TestManager(t *testing.T) {
 				"restore-config\x00caic.harness": string(harness.Claude),
 			}}
 			cacheDir := t.TempDir()
-			m := newTestManager(t, Config{ServerCtx: t.Context(), CacheDir: cacheDir, Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(filepath.Join(cacheDir, "tasks")), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
 			registerCheckout(t, m.Checkouts, "repo/a", &repo.Checkout{Dir: "/home/user/src/repo/a"})
 
 			logDir := filepath.Join(cacheDir, "tasks")
@@ -3156,7 +3154,7 @@ func TestManager(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(logDir, taskID.String()+"-repo-a-caic-9.jsonl"), append(meta, '\n'), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			logs, err := taskslog.LoadLogs(logDir)
+			logs, err := taskslog.NewStore(logDir).Load()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3164,7 +3162,6 @@ func TestManager(t *testing.T) {
 			adopted, err := m.ImportInstances(t.Context(), []runtime.Instance{
 				{ID: runtime.NewID("test-runtime", "restore-config"), State: "exited", Repos: []runtime.Repo{{GitRoot: "/home/user/src/repo/a", Branch: "caic-9", ContainerPath: "/home/user/src/repo/a"}}},
 			}, logs)
-
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
 			}
@@ -3190,7 +3187,7 @@ func TestManager(t *testing.T) {
 				"merge-tail\x00caic.harness": string(harness.Claude),
 			}}
 			cacheDir := t.TempDir()
-			m := newTestManager(t, Config{ServerCtx: t.Context(), CacheDir: cacheDir, Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(filepath.Join(cacheDir, "tasks")), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
 			m.relay = fakeRelayReader{
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 					return true, "alive", nil
@@ -3220,7 +3217,7 @@ func TestManager(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(logDir, taskID.String()+".jsonl"), []byte(string(meta)+"\n"+diskMsg+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			logs, err := taskslog.LoadLogs(logDir)
+			logs, err := taskslog.NewStore(logDir).Load()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3238,7 +3235,6 @@ func TestManager(t *testing.T) {
 						}},
 					},
 				}, logs)
-
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
 			}
@@ -3314,7 +3310,6 @@ func TestManager(t *testing.T) {
 					LogVersion: agent.LogVersionV1,
 					Repos:      []taskslog.RepoMount{{Name: "repo/a", Branch: "caic-10"}},
 				}})
-
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
 			}
@@ -3349,7 +3344,7 @@ func TestManager(t *testing.T) {
 				"dead-relay\x00caic.harness": string(harness.Claude),
 			}}
 			cacheDir := t.TempDir()
-			m := newTestManager(t, Config{ServerCtx: t.Context(), CacheDir: cacheDir, Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(filepath.Join(cacheDir, "tasks")), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
 			registerCheckout(t, m.Checkouts, "caic-xyz/caic", &repo.Checkout{Dir: "/home/user/src/caic-xyz/caic"})
 
 			logDir := filepath.Join(cacheDir, "tasks")
@@ -3371,7 +3366,7 @@ func TestManager(t *testing.T) {
 			if err := os.WriteFile(logPath, []byte(body), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			logs, err := taskslog.LoadLogs(logDir)
+			logs, err := taskslog.NewStore(logDir).Load()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3389,7 +3384,6 @@ func TestManager(t *testing.T) {
 						}},
 					},
 				}, logs)
-
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
 			}
@@ -3451,7 +3445,6 @@ func TestManager(t *testing.T) {
 					LogVersion: agent.LogVersionV1,
 					Repos:      []taskslog.RepoMount{{Name: "caic-xyz/caic", Branch: "caic-8"}},
 				}})
-
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
 			}
@@ -3507,7 +3500,6 @@ func TestManager(t *testing.T) {
 					LogVersion: agent.LogVersionV1,
 					Repos:      []taskslog.RepoMount{{Name: "caic-xyz/caic", Branch: "caic-9"}},
 				}})
-
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
 			}
@@ -3532,7 +3524,7 @@ func TestManager(t *testing.T) {
 				"stale-trailer\x00caic.harness": string(harness.Claude),
 			}}
 			cacheDir := t.TempDir()
-			m := newTestManager(t, Config{ServerCtx: t.Context(), CacheDir: cacheDir, Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(filepath.Join(cacheDir, "tasks")), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
 			registerCheckout(t, m.Checkouts, "caic-xyz/caic", &repo.Checkout{Dir: "/home/user/src/caic-xyz/caic"})
 
 			logDir := filepath.Join(cacheDir, "tasks")
@@ -3556,7 +3548,7 @@ func TestManager(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(logDir, taskID.String()+".jsonl"), []byte(logs), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			loaded, err := taskslog.LoadLogs(logDir)
+			loaded, err := taskslog.NewStore(logDir).Load()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3574,7 +3566,6 @@ func TestManager(t *testing.T) {
 						}},
 					},
 				}, loaded)
-
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
 			}
@@ -3596,7 +3587,7 @@ func TestManager(t *testing.T) {
 				"md-caic-caic-6\x00caic.harness": string(harness.Codex),
 			}}
 			cacheDir := t.TempDir()
-			m := newTestManager(t, Config{ServerCtx: t.Context(), CacheDir: cacheDir, Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Codex: codex.New("", nil)}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(filepath.Join(cacheDir, "tasks")), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Codex: codex.New("", nil)}})
 			registerCheckout(t, m.Checkouts, "caic-xyz/caic", &repo.Checkout{Dir: "/home/user/src/caic-xyz/caic"})
 
 			logDir := filepath.Join(cacheDir, "tasks")
@@ -3617,7 +3608,7 @@ func TestManager(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(logDir, taskID.String()+".jsonl"), []byte(string(meta)+"\n"+init+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			logs, err := taskslog.LoadLogs(logDir)
+			logs, err := taskslog.NewStore(logDir).Load()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3633,7 +3624,6 @@ func TestManager(t *testing.T) {
 						},
 					},
 				}, logs)
-
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
 			}

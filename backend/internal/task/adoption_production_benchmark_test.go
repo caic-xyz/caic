@@ -35,17 +35,17 @@ func BenchmarkTaskAdoption(b *testing.B) {
 	name := id.String() + "-org-repo-caic-0.jsonl"
 	path := filepath.Join(dir, name)
 	writeProductionAdoptionFixture(b, path)
-	store := &taskslog.Writer{LogDir: dir}
+	store := &taskslog.Store{LogDir: dir}
 
 	b.ResetTimer()
 	b.StartTimer()
 	for range b.N {
-		logs, err := taskslog.LoadLogsForTaskIDs(dir, []string{id.String()})
+		logs, err := store.LoadForTaskIDs([]string{id.String()})
 		if err != nil {
 			b.Fatal(err)
 		}
 		if len(logs) != 1 {
-			b.Fatalf("LoadLogsForTaskIDs returned %d tasks, want 1", len(logs))
+			b.Fatalf("Store.LoadForTaskIDs returned %d tasks, want 1", len(logs))
 		}
 		lt := logs[0]
 		lt.SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {

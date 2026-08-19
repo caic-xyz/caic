@@ -17,6 +17,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
 func TestRefreshHarnessModels(t *testing.T) {
@@ -148,7 +149,7 @@ func newModelRefreshTestManager(t testing.TB, router *runtime.Router, backends m
 	m, err := taskmgr.New(taskmgr.Config{
 		ServerCtx:           t.Context(),
 		Log:                 slog.New(slog.DiscardHandler),
-		CacheDir:            t.TempDir(),
+		LogStore:            taskslog.NewStore(t.TempDir()),
 		Runtimes:            router,
 		Backends:            backends,
 		Checkouts:           repo.NewRegistry(),

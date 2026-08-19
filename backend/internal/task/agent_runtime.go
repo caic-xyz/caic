@@ -57,7 +57,7 @@ var mutatingTools = map[string]struct{}{
 type AgentRuntime struct {
 	// Immutable.
 	Backends         map[harness.Name]agent.Backend
-	Logs             taskslog.Writer
+	LogStore         *taskslog.Store
 	LogPath          *taskslog.Path
 	Runtimes         *runtime.Router
 	Log              *slog.Logger
@@ -434,7 +434,7 @@ func (r *AgentRuntime) Cleanup(ctx context.Context, t *Task, reason taskslog.Sta
 			tlog.WarnContext(ctx, "reopen log for trailer failed", "err", reopenErr)
 		}
 	}
-	trailerErr := r.Logs.WriteResultTrailer(log, t.Title(), &res)
+	trailerErr := r.LogStore.WriteResultTrailer(log, t.Title(), &res)
 	if trailerErr != nil {
 		tlog.WarnContext(ctx, "write log trailer failed", "err", trailerErr)
 	}
@@ -533,7 +533,7 @@ func (r *AgentRuntime) StopTask(ctx context.Context, t *Task) {
 	if h != nil {
 		log = h.Log
 	}
-	trailerErr := r.Logs.WriteResultTrailer(log, t.Title(), &res)
+	trailerErr := r.LogStore.WriteResultTrailer(log, t.Title(), &res)
 	if trailerErr != nil {
 		tlog.WarnContext(ctx, "write log trailer failed", "err", trailerErr)
 	}
@@ -739,7 +739,7 @@ func (r *AgentRuntime) ForkTask(ctx context.Context, source, fork *Task, forkOpt
 }
 
 func (r *AgentRuntime) openLog(t *Task) (agent.LogSink, error) {
-	log, path, err := r.Logs.Open(t.LogFilename(), t.LogHeader())
+	log, path, err := r.LogStore.Open(t.LogFilename(), t.LogHeader())
 	if err != nil {
 		return nil, err
 	}
@@ -755,7 +755,7 @@ func (r *AgentRuntime) reopenLog(t *Task) (agent.LogSink, error) {
 	if path := r.LogPath.Get(); path != "" {
 		name = filepath.Base(path)
 	}
-	log, path, err := r.Logs.Reopen(name, t.LogHeader())
+	log, path, err := r.LogStore.Reopen(name, t.LogHeader())
 	if err != nil {
 		return nil, err
 	}
@@ -764,7 +764,7 @@ func (r *AgentRuntime) reopenLog(t *Task) (agent.LogSink, error) {
 }
 
 func (r *AgentRuntime) compressLog(log agent.LogSink, state taskslog.State) error {
-	path, err := r.Logs.Compress(r.LogPath.Get(), log, state)
+	path, err := r.LogStore.Compress(r.LogPath.Get(), log, state)
 	if err != nil {
 		return err
 	}
@@ -910,7 +910,7 @@ func (r *AgentRuntime) finishReviveFailure(ctx context.Context, t *Task, reviveE
 		return errors.Join(reviveErr, reopenErr)
 	}
 	res := taskslog.Result{State: taskslog.StateFailed, Err: reviveErr}
-	trailerErr := r.Logs.WriteResultTrailer(log, t.Title(), &res)
+	trailerErr := r.LogStore.WriteResultTrailer(log, t.Title(), &res)
 	if trailerErr != nil {
 		return errors.Join(reviveErr, trailerErr, log.Close())
 	}
@@ -926,7 +926,7 @@ func (r *AgentRuntime) finishStartupFailure(ctx context.Context, t *Task, log ag
 	t.addMessage(ctx, failure, false)
 
 	res := taskslog.Result{State: taskslog.StateFailed, Err: startupErr}
-	trailerErr := r.Logs.WriteResultTrailer(log, t.Title(), &res)
+	trailerErr := r.LogStore.WriteResultTrailer(log, t.Title(), &res)
 	if writeErr != nil || trailerErr != nil {
 		return errors.Join(startupErr, writeErr, trailerErr, log.Close())
 	}
@@ -1012,7 +1012,7 @@ func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent
 		oldH.CloseMsgCh()
 		<-oldH.DispatchDone
 		if oldH.Log != nil {
-			err := r.Logs.WriteContextCleared(oldH.Log)
+			err := r.LogStore.WriteContextCleared(oldH.Log)
 			err = errors.Join(err, oldH.Log.Close())
 			if err != nil {
 				t.SetStateUnless(taskslog.StateFailed, taskslog.StatePurging, taskslog.StatePurged, taskslog.StateStopping, taskslog.StateStopped)

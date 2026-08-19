@@ -881,7 +881,7 @@ type LoadedTask struct {
 	Effort            string               `json:"effort"`
 	SessionID         string               `json:"session_id"` // Backend-native session/thread ID required to resume stateful harnesses.
 	AgentVersion      string               `json:"agent_version"`
-	LogSize           int64                `json:"log_size"`     // Byte size of the log file on disk; populated by LoadLogs.
+	LogSize           int64                `json:"log_size"`     // Byte size of the log file on disk; populated by Store.Load.
 	DiffCreated       bool                 `json:"diff_created"` // True if any non-empty diff was recorded in the log; sticky across the run.
 	Result            *Result              `json:"result"`
 	Msgs              []agent.Message      `json:"-"`
@@ -1292,54 +1292,6 @@ func loadedTaskFromMeta(path, taskID string, meta *agent.MetaMessage, modified t
 		Mounts:            runtimeMountsFromMeta(meta.Mounts),
 		LogSize:           size,
 	}
-}
-
-// LoadLogs scans logDir for task log files and loads task metadata.
-// Invalid or corrupt logs are skipped so one historical file cannot prevent
-// startup. Only the header and result trailer are parsed; call LoadMessages for
-// full conversation history after supplying a fresh native parser resolver.
-func LoadLogs(logDir string) ([]*LoadedTask, error) {
-	paths, err := logPaths(logDir, nil)
-	if err != nil {
-		return nil, err
-	}
-	return loadLogsFromPaths(paths, false)
-}
-
-// LoadLogsForTaskIDs loads metadata for logs whose parsed filename task ID
-// matches one of taskIDs. It avoids parsing unrelated purged task logs during
-// startup import of live runtime instances.
-func LoadLogsForTaskIDs(logDir string, taskIDs []string) ([]*LoadedTask, error) {
-	ids := make(map[string]struct{}, len(taskIDs))
-	for _, id := range taskIDs {
-		if id != "" {
-			ids[id] = struct{}{}
-		}
-	}
-	if len(ids) == 0 {
-		return nil, nil
-	}
-	paths, err := logPaths(logDir, ids)
-	if err != nil {
-		return nil, err
-	}
-	found := make(map[string]struct{}, len(paths))
-	for _, path := range paths {
-		found[taskIDFromLogBase(trimLogExt(filepath.Base(path)))] = struct{}{}
-	}
-	missing := make([]string, 0)
-	for id := range ids {
-		if _, ok := found[id]; !ok {
-			missing = append(missing, id)
-		}
-	}
-	slices.Sort(missing)
-
-	tasks, loadErr := loadLogsFromPaths(paths, true)
-	if len(missing) > 0 {
-		loadErr = errors.Join(loadErr, fmt.Errorf("missing task logs for IDs: %s", strings.Join(missing, ", ")))
-	}
-	return tasks, loadErr
 }
 
 func logPaths(logDir string, taskIDs map[string]struct{}) ([]string, error) {

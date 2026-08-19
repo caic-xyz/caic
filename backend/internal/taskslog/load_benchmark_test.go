@@ -71,7 +71,7 @@ type adoptionProcessIO struct {
 func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 	b.StopTimer()
 	fixture := newAdoptionBenchmarkFixture(b)
-	store := &Writer{LogDir: fixture.dir}
+	store := &Store{LogDir: fixture.dir}
 	operations := []adoptionBenchmarkOperation{
 		{
 			name: "LoadLogHeader",
@@ -85,15 +85,15 @@ func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 			},
 		},
 		{
-			name: "LoadLogs",
+			name: "StoreLoad",
 			prepare: func() func() error {
 				return func() error {
-					logs, err := LoadLogs(fixture.dir)
+					logs, err := storeFor(fixture.dir).Load()
 					if err != nil {
 						return err
 					}
 					if len(logs) != 1 {
-						return fmt.Errorf("LoadLogs returned %d tasks, want 1", len(logs))
+						return fmt.Errorf("Store.Load returned %d tasks, want 1", len(logs))
 					}
 					return nil
 				}
@@ -121,7 +121,7 @@ func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 			},
 		},
 		{
-			name: "WriterReopen",
+			name: "StoreReopen",
 			prepare: func() func() error {
 				return func() error {
 					w, _, err := store.Reopen(fixture.name, fixture.header())
@@ -136,12 +136,12 @@ func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 			name: "CombinedLiveAdoption",
 			prepare: func() func() error {
 				return func() error {
-					logs, err := LoadLogsForTaskIDs(fixture.dir, []string{fixture.id.String()})
+					logs, err := storeFor(fixture.dir).LoadForTaskIDs([]string{fixture.id.String()})
 					if err != nil {
 						return err
 					}
 					if len(logs) != 1 {
-						return fmt.Errorf("LoadLogsForTaskIDs returned %d tasks, want 1", len(logs))
+						return fmt.Errorf("Store.LoadForTaskIDs returned %d tasks, want 1", len(logs))
 					}
 					lt := logs[0]
 					lt.SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {

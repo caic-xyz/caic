@@ -135,8 +135,8 @@ func newTestTaskManager(t testing.TB, cfg taskmgr.Config) *taskmgr.Manager { //n
 	if cfg.Log == nil {
 		cfg.Log = slog.New(slog.DiscardHandler)
 	}
-	if cfg.CacheDir == "" {
-		cfg.CacheDir = t.TempDir()
+	if cfg.LogStore == nil {
+		cfg.LogStore = taskslog.NewStore(filepath.Join(t.TempDir(), "tasks"))
 	}
 	if cfg.RuntimeStartTimeout == 0 {
 		cfg.RuntimeStartTimeout = time.Hour
@@ -434,7 +434,7 @@ func testEntries(s *testRouter) []*taskmgr.Entry {
 // the manager. Replaces the deleted Server.loadPurgedTasks helper.
 func loadPurgedTasksForTest(s *testRouter, logDir string) error {
 	store := taskslog.NewStore(logDir)
-	logs, err := store.LoadPlain()
+	logs, err := store.Load()
 	if err != nil {
 		return err
 	}
@@ -458,7 +458,7 @@ func newCheckoutConstructionTestServer(t *testing.T, root string) checkoutConstr
 	checkoutRegistry := repo.NewRegistry()
 	taskMgr := newTestTaskManager(t, taskmgr.Config{
 		ServerCtx:  t.Context(),
-		CacheDir:   cacheDir,
+		LogStore:   taskslog.NewStore(logDir),
 		Runtimes:   runtimeRouter,
 		Backends:   backends,
 		HarnessEnv: harnessEnv,
@@ -2050,7 +2050,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 			},
 		})
 		writeLogFile(t, logDir, taskID.String()+".jsonl", meta, diskMsg)
-		logs, err := taskslog.LoadLogs(logDir)
+		logs, err := taskslog.NewStore(logDir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2110,7 +2110,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		result := mustJSON(t, agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done"})
 		staleExit := `{"type":"caic_exit","exit_code":2,"error":"stale crash"}`
 		writeLogFile(t, logDir, taskID.String()+".jsonl", meta, initMsg, early, result, staleExit)
-		logs, err := taskslog.LoadLogs(logDir)
+		logs, err := taskslog.NewStore(logDir).Load()
 		if err != nil {
 			t.Fatal(err)
 		}

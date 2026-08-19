@@ -75,8 +75,9 @@ type Config struct {
 	// background goroutines that must survive individual requests.
 	ServerCtx context.Context
 	Log       *slog.Logger
-	// CacheDir stores task-manager data and task logs. It must be non-empty.
-	CacheDir string
+	// LogStore is the task-log directory the Manager appends task logs to. It
+	// must be non-nil.
+	LogStore *taskslog.Store
 	// Runtimes validates runtime selection and dispatches task runtime operations.
 	Runtimes            *runtime.Router
 	Backends            map[harness.Name]agent.Backend
@@ -95,12 +96,11 @@ type Manager struct {
 	QuotaTracker *quotausage.Tracker
 	Backends     map[harness.Name]agent.Backend
 	Checkouts    *repo.Registry
-	Logs         taskslog.Writer
 
 	log                 *slog.Logger
 	serverCtx           context.Context // lifetime of the Manager; for goroutines that outlive requests
 	cancelServerCtx     context.CancelFunc
-	cacheDir            string
+	logStore            *taskslog.Store
 	harnessEnv          map[string][]string
 	runtimeMetadata     runtime.Metadata
 	runtimeStartTimeout time.Duration
@@ -131,8 +131,8 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 	if cfg.ServerCtx == nil {
 		return nil, errors.New("task manager server context is required")
 	}
-	if cfg.CacheDir == "" {
-		return nil, errors.New("task manager cache directory is required")
+	if cfg.LogStore == nil {
+		return nil, errors.New("task manager task log store is required")
 	}
 	if cfg.Runtimes == nil {
 		return nil, errors.New("task manager runtime router is required")
@@ -153,9 +153,8 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 		log:                 cfg.Log.With("cmp", "taskmgr"),
 		serverCtx:           serverCtx,
 		cancelServerCtx:     cancelServerCtx,
-		cacheDir:            cfg.CacheDir,
 		Backends:            maps.Clone(cfg.Backends),
-		Logs:                taskslog.Writer{LogDir: filepath.Join(cfg.CacheDir, "tasks")},
+		logStore:            cfg.LogStore,
 		harnessEnv:          cfg.HarnessEnv,
 		runtimeMetadata:     maps.Clone(cfg.RuntimeMetadata),
 		runtimeStartTimeout: cfg.RuntimeStartTimeout,
@@ -234,7 +233,7 @@ func (m *Manager) NewEntry(t *task.Task, lt *taskslog.LoadedTask) *Entry {
 		ctx:     context.WithoutCancel(m.serverCtx),
 		agentRuntime: task.AgentRuntime{
 			Backends:            m.Backends,
-			Logs:                m.Logs,
+			LogStore:            m.logStore,
 			LogPath:             &e.LogPath,
 			Runtimes:            m.Runtimes,
 			Log:                 m.log.With("task", t.ID),
@@ -815,12 +814,12 @@ func (m *Manager) writeTaskResultTrailer(entry *Entry, res *taskslog.Result) err
 	if path := entry.LogPath.Get(); path != "" {
 		name = filepath.Base(path)
 	}
-	log, path, err := m.Logs.Reopen(name, t.LogHeader())
+	log, path, err := m.logStore.Reopen(name, t.LogHeader())
 	if err != nil {
 		return err
 	}
 	entry.LogPath.Set(path)
-	return errors.Join(m.Logs.WriteResultTrailer(log, t.Title(), res), log.Close())
+	return errors.Join(m.logStore.WriteResultTrailer(log, t.Title(), res), log.Close())
 }
 
 // resolveImportTaskIDs selects instances for configured checkouts, reads

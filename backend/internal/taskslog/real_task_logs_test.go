@@ -32,12 +32,12 @@ func TestRealTaskLogCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tasks, err := LoadLogs(dir)
+	tasks, err := storeFor(dir).Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(tasks) == 0 {
-		t.Fatal("LoadLogs returned no task logs")
+		t.Fatal("Store.Load returned no task logs")
 	}
 	for _, loaded := range tasks {
 		if loaded.LogPath() == "" {
@@ -68,7 +68,7 @@ func BenchmarkRealTaskLogCorpus(b *testing.B) {
 	b.SetBytes(bytes)
 	b.ResetTimer()
 	for range b.N {
-		if _, err := LoadLogs(dir); err != nil {
+		if _, err := storeFor(dir).Load(); err != nil {
 			b.Fatal(err)
 		}
 	}
