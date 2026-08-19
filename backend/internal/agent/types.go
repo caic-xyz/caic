@@ -64,6 +64,11 @@ type SystemMessage struct {
 // Type implements Message.
 func (m *SystemMessage) Type() string { return "system" }
 
+// ContextCleared creates the persisted context-clear system marker.
+func ContextCleared() *SystemMessage {
+	return &SystemMessage{MessageType: "system", Subtype: "context_cleared"}
+}
+
 // TextMessage is emitted when the agent produces text output.
 type TextMessage struct {
 	Text  string `json:"text"`

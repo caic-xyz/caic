@@ -568,7 +568,7 @@ func (p *LogRecordParser) parseControl(kind logControlKind, token string, line [
 		m.MessageType = "caic_log"
 		return []Message{&m}, nil
 	case logControlContextCleared:
-		return []Message{&SystemMessage{MessageType: "system", Subtype: "context_cleared"}}, nil
+		return []Message{ContextCleared()}, nil
 	case logControlText:
 		var m TextMessage
 		if err := json.Unmarshal(line, &m); err != nil {

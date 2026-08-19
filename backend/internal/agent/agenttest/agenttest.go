@@ -48,7 +48,7 @@ func ParseJSONL(t testing.TB, path string, parser Parser) []agent.Message {
 }
 
 // NativeParserResolver resolves a harness-native parser after task-log header
-// validation. Its shape lets external harness tests inject task.ExportDiscussion
+// validation. Its shape lets external harness tests inject taskslog.ExportDiscussion
 // without importing task into this shared test-helper package.
 type NativeParserResolver func(harness.Name) (func([]byte) ([]agent.Message, error), error)
 

@@ -11,13 +11,13 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
-	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
 func TestExportDiscussionGolden(t *testing.T) {
 	t.Parallel()
 	agenttest.RunExportDiscussionGolden(t, func(path string, resolver agenttest.NativeParserResolver) (string, error) {
-		return task.ExportDiscussion(path, task.NativeParserResolver(resolver))
+		return taskslog.ExportDiscussion(path, taskslog.NativeParserResolver(resolver))
 	}, func() agenttest.Parser {
 		return opencode.New("", nil).NewWire().ParseMessage
 	})

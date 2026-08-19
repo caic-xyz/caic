@@ -17,20 +17,22 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
 func BenchmarkTaskAdoption(b *testing.B) {
 	b.StopTimer()
 	dir := b.TempDir()
 	id := ksid.NewID()
-	path := filepath.Join(dir, id.String()+"-org-repo-caic-0.jsonl")
+	name := id.String() + "-org-repo-caic-0.jsonl"
+	path := filepath.Join(dir, name)
 	writeProductionAdoptionFixture(b, path)
-	store := &task.LogStore{LogDir: dir}
+	store := &taskslog.Writer{LogDir: dir}
 
 	b.ResetTimer()
 	b.StartTimer()
 	for range b.N {
-		logs, err := task.LoadLogsForTaskIDs(dir, []string{id.String()})
+		logs, err := taskslog.LoadLogsForTaskIDs(dir, []string{id.String()})
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -52,11 +54,10 @@ func BenchmarkTaskAdoption(b *testing.B) {
 		tk := &task.Task{
 			ID:            id,
 			InitialPrompt: agent.Prompt{Text: "benchmark adoption"},
-			Repos:         []task.RepoMount{{Name: "org/repo", Branch: "caic-0"}},
+			Repos:         []taskslog.RepoMount{{Name: "org/repo", Branch: "caic-0"}},
 			Harness:       harness.Claude,
 		}
-		header := tk.LogHeader()
-		w, err := store.Reopen(lt.LogPath(), &header)
+		w, _, err := store.Reopen(name, tk.LogHeader())
 		if err != nil {
 			b.Fatal(err)
 		}

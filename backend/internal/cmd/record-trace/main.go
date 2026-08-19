@@ -35,7 +35,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/agent/pi"
 	"github.com/caic-xyz/caic/backend/internal/agent/relay"
-	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
 const image = "ghcr.io/caic-xyz/md-user:latest"
@@ -486,7 +486,7 @@ func writeGoldenFile(ctx context.Context, ctr, workDir string, b agent.Backend, 
 
 	// Generate the golden markdown file.
 	mdPath := strings.TrimSuffix(outputPath, ".jsonl") + ".md"
-	md, err := task.ExportDiscussion(outputPath, func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
+	md, err := taskslog.ExportDiscussion(outputPath, func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
 		if h != b.Harness() {
 			return nil, fmt.Errorf("golden log harness %q does not match recorder harness %q", h, b.Harness())
 		}

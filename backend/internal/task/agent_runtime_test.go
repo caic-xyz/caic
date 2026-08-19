@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"maps"
 	"os"
 	"os/exec"
@@ -17,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -27,6 +29,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
 // instantExitBackend embeds testBackend but spawns a process that exits
@@ -153,23 +156,6 @@ func newTestRuntimeRouter(t *testing.T, backend runtime.Lifecycle) *runtime.Rout
 	return rt
 }
 
-type testLogPathStore struct {
-	mu   sync.Mutex
-	path string
-}
-
-func (s *testLogPathStore) SetLogPath(path string) {
-	s.mu.Lock()
-	s.path = path
-	s.mu.Unlock()
-}
-
-func (s *testLogPathStore) LogPath() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.path
-}
-
 func newTestAgentRuntime(t *testing.T, checkout *repo.Checkout, logDir string, backends map[harness.Name]agent.Backend) *AgentRuntime {
 	var runtimes *runtime.Router
 	if value, ok := testCheckoutRuntimes.Load(checkout); ok {
@@ -177,8 +163,8 @@ func newTestAgentRuntime(t *testing.T, checkout *repo.Checkout, logDir string, b
 	}
 	return &AgentRuntime{
 		Backends:            backends,
-		Logs:                LogStore{LogDir: logDir},
-		LogPathStore:        &testLogPathStore{},
+		Logs:                taskslog.Writer{LogDir: logDir},
+		LogPath:             &taskslog.Path{},
 		Runtimes:            runtimes,
 		Log:                 logtest.Logger(t),
 		NotifyTaskChange:    func() {},
@@ -194,6 +180,44 @@ func newTestAgentRuntimeWithRuntime(t *testing.T, backend runtime.Lifecycle, bac
 	}
 	r.Runtimes = newTestRuntimeRouter(t, backend)
 	return r
+}
+
+func openTaskLog(s *taskslog.Writer, tk *Task) (agent.LogSink, error) {
+	log, _, err := s.Open(tk.LogFilename(), tk.LogHeader())
+	return log, err
+}
+
+func reopenTaskLog(s *taskslog.Writer, tk *Task, path string) (agent.LogSink, error) {
+	name := tk.LogFilename()
+	if path != "" {
+		name = filepath.Base(path)
+	}
+	log, _, err := s.Reopen(name, tk.LogHeader())
+	return log, err
+}
+
+func logLines(t *testing.T, path string) []string {
+	t.Helper()
+	file, err := os.Open(path) //nolint:gosec // path is test-controlled.
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = file.Close() })
+	var reader io.Reader = file
+	var decoder *zstd.Decoder
+	if strings.HasSuffix(path, ".zst") {
+		decoder, err = zstd.NewReader(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer decoder.Close()
+		reader = decoder
+	}
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Split(strings.TrimSpace(string(data)), "\n")
 }
 
 func (b *instantExitBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
@@ -420,7 +444,7 @@ func TestRunner(t *testing.T) {
 			if _, err := r.Start(t.Context(), tk, ""); err == nil {
 				t.Fatal("want launch error")
 			}
-			logs, err := LoadLogs(logDir)
+			logs, err := taskslog.LoadLogs(logDir)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -460,8 +484,8 @@ func TestRunner(t *testing.T) {
 			if _, err := r.Start(t.Context(), tk, ""); err == nil {
 				t.Fatal("want launch error")
 			}
-			if got := tk.GetState(); got != StateFailed {
-				t.Errorf("state = %v, want %v", got, StateFailed)
+			if got := tk.GetState(); got != taskslog.StateFailed {
+				t.Errorf("state = %v, want %v", got, taskslog.StateFailed)
 			}
 			msg := recvMsg(t, ch)
 			lm, ok := msg.(*agent.LogMessage)
@@ -498,7 +522,7 @@ func TestRunner(t *testing.T) {
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
-				Repos:         []RepoMount{{Name: "org/repo", BaseBranch: "feature"}},
+				Repos:         []taskslog.RepoMount{{Name: "org/repo", BaseBranch: "feature"}},
 				Harness:       harness.Claude,
 			}
 
@@ -538,7 +562,7 @@ func TestRunner(t *testing.T) {
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
-				Repos:         []RepoMount{{Name: "org/repo", BaseBranch: "local-only"}},
+				Repos:         []taskslog.RepoMount{{Name: "org/repo", BaseBranch: "local-only"}},
 				Harness:       harness.Claude,
 			}
 
@@ -573,9 +597,9 @@ func TestRunner(t *testing.T) {
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
-				Repos:         []RepoMount{{Name: "org/repo", Branch: "main"}},
+				Repos:         []taskslog.RepoMount{{Name: "org/repo", Branch: "main"}},
 			}
-			tk.SetState(StateRunning)
+			tk.SetState(taskslog.StateRunning)
 
 			// Restore messages with cost info (simulates RestoreMessages from logs).
 			tk.RestoreMessages([]agent.Message{
@@ -587,9 +611,9 @@ func TestRunner(t *testing.T) {
 				},
 			})
 
-			result := r.Cleanup(t.Context(), tk, StatePurged)
-			if result.State != StatePurged {
-				t.Errorf("state = %v, want %v", result.State, StatePurged)
+			result := r.Cleanup(t.Context(), tk, taskslog.StatePurged)
+			if result.State != taskslog.StatePurged {
+				t.Errorf("state = %v, want %v", result.State, taskslog.StatePurged)
 			}
 			if result.CostUSD != 0.42 {
 				t.Errorf("CostUSD = %f, want 0.42", result.CostUSD)
@@ -615,10 +639,10 @@ func TestRunner(t *testing.T) {
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
-				Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
+				Repos:         []taskslog.RepoMount{{Name: "org/repo", Branch: "caic-0"}},
 				Harness:       harness.Claude,
 			}
-			tk.SetState(StateStopped)
+			tk.SetState(taskslog.StateStopped)
 
 			// Create a pre-existing log file (written by StopTask scenario).
 			logW, err := r.openLog(tk)
@@ -628,7 +652,7 @@ func TestRunner(t *testing.T) {
 			_ = logW.Close()
 
 			// Purge the stopped task — should reopen the log and write the trailer.
-			r.Cleanup(t.Context(), tk, StatePurged)
+			r.Cleanup(t.Context(), tk, taskslog.StatePurged)
 
 			plainPath := filepath.Join(logDir, tk.ID.String()+"-org-repo-caic-0.jsonl")
 			if _, err := os.Stat(plainPath); !os.IsNotExist(err) {
@@ -639,20 +663,20 @@ func TestRunner(t *testing.T) {
 			}
 
 			// Load the log and verify the trailer was written.
-			lt, err := LoadLogs(logDir)
+			lt, err := taskslog.LoadLogs(logDir)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if len(lt) != 1 {
 				t.Fatalf("LoadLogs returned %d tasks, want 1", len(lt))
 			}
-			if lt[0].State != StatePurged {
+			if lt[0].State != taskslog.StatePurged {
 				t.Errorf("state = %v, want StatePurged", lt[0].State)
 			}
 			if lt[0].Result == nil {
 				t.Fatal("Result is nil, want caic_result trailer")
 			}
-			if lt[0].Result.State != StatePurged {
+			if lt[0].Result.State != taskslog.StatePurged {
 				t.Errorf("Result.State = %v, want StatePurged", lt[0].Result.State)
 			}
 		})
@@ -666,9 +690,9 @@ func TestRunner(t *testing.T) {
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
-				Repos:         []RepoMount{{Name: "org/repo", Branch: "main"}},
+				Repos:         []taskslog.RepoMount{{Name: "org/repo", Branch: "main"}},
 			}
-			tk.SetState(StateRunning)
+			tk.SetState(taskslog.StateRunning)
 
 			// Restore messages including a DiffStatMessage (simulates relay output).
 			tk.RestoreMessages([]agent.Message{
@@ -681,7 +705,7 @@ func TestRunner(t *testing.T) {
 				},
 			})
 
-			result := r.Cleanup(t.Context(), tk, StatePurged)
+			result := r.Cleanup(t.Context(), tk, taskslog.StatePurged)
 			if len(result.DiffStat) != 2 {
 				t.Fatalf("DiffStat has %d entries, want 2", len(result.DiffStat))
 			}
@@ -699,12 +723,12 @@ func TestRunner(t *testing.T) {
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
-				Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0", GitRoot: clone}},
+				Repos:         []taskslog.RepoMount{{Name: "org/repo", Branch: "caic-0", GitRoot: clone}},
 			}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(StateStopped)
+			tk.SetState(taskslog.StateStopped)
 
-			r.Cleanup(t.Context(), tk, StatePurged)
+			r.Cleanup(t.Context(), tk, taskslog.StatePurged)
 
 			if caic0BranchExists(t, clone) {
 				t.Fatal("caic-0 still exists, want deleted")
@@ -720,12 +744,12 @@ func TestRunner(t *testing.T) {
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
-				Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0", GitRoot: clone}},
+				Repos:         []taskslog.RepoMount{{Name: "org/repo", Branch: "caic-0", GitRoot: clone}},
 			}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(StateStopped)
+			tk.SetState(taskslog.StateStopped)
 
-			r.Cleanup(t.Context(), tk, StatePurged)
+			r.Cleanup(t.Context(), tk, taskslog.StatePurged)
 
 			if !caic0BranchExists(t, clone) {
 				t.Fatal("caic-0 was deleted, want preserved")
@@ -741,16 +765,16 @@ func TestRunner(t *testing.T) {
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
-				Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0", GitRoot: clone}},
+				Repos:         []taskslog.RepoMount{{Name: "org/repo", Branch: "caic-0", GitRoot: clone}},
 			}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(StateStopped)
+			tk.SetState(taskslog.StateStopped)
 			tk.RestoreMessages([]agent.Message{
 				&agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: agent.DiffStat{{Path: "main.go", Added: 1}}},
 				&agent.DiffStatMessage{MessageType: "caic_diff_stat"},
 			})
 
-			r.Cleanup(t.Context(), tk, StatePurged)
+			r.Cleanup(t.Context(), tk, taskslog.StatePurged)
 
 			if !caic0BranchExists(t, clone) {
 				t.Fatal("caic-0 was deleted, want preserved")
@@ -772,12 +796,12 @@ func TestRunner(t *testing.T) {
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
-				Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0", GitRoot: clone}},
+				Repos:         []taskslog.RepoMount{{Name: "org/repo", Branch: "caic-0", GitRoot: clone}},
 			}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(StateStopped)
+			tk.SetState(taskslog.StateStopped)
 
-			r.Cleanup(t.Context(), tk, StatePurged)
+			r.Cleanup(t.Context(), tk, taskslog.StatePurged)
 
 			if !caic0BranchExists(t, clone) {
 				t.Fatal("caic-0 was deleted, want preserved")
@@ -787,7 +811,7 @@ func TestRunner(t *testing.T) {
 
 	t.Run("StopTask", func(t *testing.T) {
 		t.Parallel()
-		for _, state := range []State{StatePurging, StatePurged, StateCrashed, StateFailed} {
+		for _, state := range []taskslog.State{taskslog.StatePurging, taskslog.StatePurged, taskslog.StateCrashed, taskslog.StateFailed} {
 			t.Run(state.String(), func(t *testing.T) {
 				t.Parallel()
 				stub := testContainer()
@@ -836,7 +860,7 @@ func TestRunner(t *testing.T) {
 				r := newTestAgentRuntimeWithRuntime(t, testContainer(), nil, "")
 				tk := &Task{ID: ksid.NewID()}
 				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-				tk.SetState(StateRunning)
+				tk.SetState(taskslog.StateRunning)
 				if _, err := r.ReviveTask(t.Context(), tk); err == nil {
 					t.Fatal("want error")
 				}
@@ -878,12 +902,12 @@ func TestRunner(t *testing.T) {
 						Harness:       "test",
 					}
 					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-					tk.SetState(StateStopped)
+					tk.SetState(taskslog.StateStopped)
 					log, err := r.openLog(tk)
 					if err != nil {
 						t.Fatal(err)
 					}
-					if err := r.Logs.WriteResultTrailer(log, tk.Title(), &Result{State: StateStopped}); err != nil {
+					if err := r.Logs.WriteResultTrailer(log, tk.Title(), &taskslog.Result{State: taskslog.StateStopped}); err != nil {
 						t.Fatal(err)
 					}
 					if err := log.Close(); err != nil {
@@ -892,14 +916,14 @@ func TestRunner(t *testing.T) {
 					if _, err := r.ReviveTask(t.Context(), tk); err == nil {
 						t.Fatal("ReviveTask succeeded, want failure")
 					}
-					loaded, err := LoadLogs(logDir)
+					loaded, err := taskslog.LoadLogs(logDir)
 					if err != nil {
 						t.Fatal(err)
 					}
-					if len(loaded) != 1 || loaded[0].Result == nil || loaded[0].Result.State != StateFailed {
+					if len(loaded) != 1 || loaded[0].Result == nil || loaded[0].Result.State != taskslog.StateFailed {
 						t.Fatalf("loaded terminal result = %+v, want failed trailer", loaded)
 					}
-					if !isLogCompressed(loaded[0].LogPath()) {
+					if !strings.HasSuffix(loaded[0].LogPath(), ".zst") {
 						t.Fatalf("final log = %q, want compressed", loaded[0].LogPath())
 					}
 				})
@@ -915,7 +939,7 @@ func TestRunner(t *testing.T) {
 				Harness:       "test",
 			}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(StateStopped)
+			tk.SetState(taskslog.StateStopped)
 
 			h, err := r.ReviveTask(t.Context(), tk)
 			if err != nil {
@@ -926,8 +950,8 @@ func TestRunner(t *testing.T) {
 			}
 			// The instantly-exiting session makes EnsureSession replace it with a
 			// fresh idle relay; the task is left waiting for new input.
-			if got := tk.GetState(); got != StateWaiting {
-				t.Errorf("state = %v, want %v", got, StateWaiting)
+			if got := tk.GetState(); got != taskslog.StateWaiting {
+				t.Errorf("state = %v, want %v", got, taskslog.StateWaiting)
 			}
 			tk.CloseAndDetachSession(t.Context())
 		})
@@ -964,14 +988,14 @@ func TestRunner(t *testing.T) {
 			source := &Task{
 				ID:      ksid.NewID(),
 				Harness: "test",
-				Repos:   []RepoMount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}},
+				Repos:   []taskslog.RepoMount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}},
 			}
 			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
 			fork := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "fork prompt"},
 				Harness:       "test",
-				Repos:         []RepoMount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}},
+				Repos:         []taskslog.RepoMount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}},
 				StartedAt:     time.Now().UTC(),
 			}
 
@@ -986,7 +1010,7 @@ func TestRunner(t *testing.T) {
 
 			// Readable "<id>-<repo>-<branch>" name, computed at Open from the
 			// pinned branch and stable afterward (matches a later Reopen).
-			if got, want := filepath.Base(r.LogPathStore.LogPath()), fork.LogFilename(); got != want {
+			if got, want := filepath.Base(r.LogPath.Get()), fork.LogFilename(); got != want {
 				t.Errorf("log filename = %q, want %q", got, want)
 			}
 			// The fork's primary branch is pinned before Fork and handed to the
@@ -994,7 +1018,7 @@ func TestRunner(t *testing.T) {
 			if _, ok := runtimeBackend.destPrimary("/src/caic"); !ok {
 				t.Errorf("Fork received repos = %v, want an entry for /src/caic", runtimeBackend.capturedRepos)
 			}
-			logs := strings.Join(logLines(t, r.LogPathStore.LogPath()), "\n")
+			logs := strings.Join(logLines(t, r.LogPath.Get()), "\n")
 			first := strings.Index(logs, `{"line":"fork setup complete","t":"log"}`)
 			last := strings.Index(logs, `{"line":"final setup line","t":"log"}`)
 			if first < 0 || last <= first {
@@ -1012,7 +1036,7 @@ func TestRunner(t *testing.T) {
 			source := &Task{
 				ID:      ksid.NewID(),
 				Harness: "test",
-				Repos:   []RepoMount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic-3"}},
+				Repos:   []taskslog.RepoMount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic-3"}},
 			}
 			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
 			// Primary repo plus an extra repo whose branch the caller already
@@ -1020,7 +1044,7 @@ func TestRunner(t *testing.T) {
 			fork := &Task{
 				ID:      ksid.NewID(),
 				Harness: "test",
-				Repos: []RepoMount{
+				Repos: []taskslog.RepoMount{
 					{Name: "caic", GitRoot: "/src/caic", Branch: "caic-3"},
 					{Name: "other", GitRoot: "/src/other", Branch: "caic-9"},
 				},
@@ -1054,24 +1078,24 @@ func TestRunner(t *testing.T) {
 			source := &Task{
 				ID:      ksid.NewID(),
 				Harness: "test",
-				Repos:   []RepoMount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}},
+				Repos:   []taskslog.RepoMount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}},
 			}
 			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
 			fork := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "fork prompt"},
 				Harness:       "test",
-				Repos:         []RepoMount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}},
+				Repos:         []taskslog.RepoMount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}},
 				StartedAt:     time.Now().UTC(),
 			}
 
 			if _, err := r.ForkTask(t.Context(), source, fork, &runtime.ForkOptions{}, ""); err == nil {
 				t.Fatal("want fork error")
 			}
-			if got := fork.GetState(); got != StateFailed {
+			if got := fork.GetState(); got != taskslog.StateFailed {
 				t.Errorf("state = %s, want failed", got)
 			}
-			logs := strings.Join(logLines(t, r.LogPathStore.LogPath()), "\n")
+			logs := strings.Join(logLines(t, r.LogPath.Get()), "\n")
 			for _, want := range []string{"fork setup complete", "final setup line", "Task startup failed: fork instance: fork failed"} {
 				if !strings.Contains(logs, want) {
 					t.Errorf("persisted log does not contain %q: %s", want, logs)
@@ -1089,24 +1113,24 @@ func TestRunner(t *testing.T) {
 			source := &Task{
 				ID:      ksid.NewID(),
 				Harness: "test",
-				Repos:   []RepoMount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}},
+				Repos:   []taskslog.RepoMount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}},
 			}
 			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
 			fork := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "fork prompt"},
 				Harness:       "test",
-				Repos:         []RepoMount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}},
+				Repos:         []taskslog.RepoMount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}},
 				StartedAt:     time.Now().UTC(),
 			}
 
 			if _, err := r.ForkTask(t.Context(), source, fork, &runtime.ForkOptions{}, ""); err == nil {
 				t.Fatal("want session start error")
 			}
-			if got := fork.GetState(); got != StateFailed {
+			if got := fork.GetState(); got != taskslog.StateFailed {
 				t.Errorf("state = %s, want failed", got)
 			}
-			logs := strings.Join(logLines(t, r.LogPathStore.LogPath()), "\n")
+			logs := strings.Join(logLines(t, r.LogPath.Get()), "\n")
 			for _, want := range []string{"fork setup complete", "final setup line", "Task startup failed: start session on fork"} {
 				if !strings.Contains(logs, want) {
 					t.Errorf("persisted log does not contain %q: %s", want, logs)
@@ -1158,8 +1182,8 @@ func TestRunner(t *testing.T) {
 			if fork.RuntimeInstanceID() != runtime.NewID("test-runtime", "fake-fork") {
 				t.Errorf("fork instance = %q, want test-runtime:fake-fork", fork.RuntimeInstanceID())
 			}
-			if got := fork.GetState(); got != StateRunning {
-				t.Errorf("state = %v, want %v", got, StateRunning)
+			if got := fork.GetState(); got != taskslog.StateRunning {
+				t.Errorf("state = %v, want %v", got, taskslog.StateRunning)
 			}
 			fork.CloseAndDetachSession(t.Context())
 		})
@@ -1180,7 +1204,7 @@ func testRunnerSessions(t *testing.T) {
 						Harness:       harness,
 					}
 					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-					tk.SetState(StateRunning)
+					tk.SetState(taskslog.StateRunning)
 					_, err := r.Reconnect(t.Context(), tk, true)
 					if err == nil {
 						t.Fatal("Reconnect returned nil error")
@@ -1208,7 +1232,7 @@ func testRunnerSessions(t *testing.T) {
 				t.Fatal(err)
 			}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(StateRunning)
+			tk.SetState(taskslog.StateRunning)
 			tk.RestoreMessages([]agent.Message{
 				&agent.AskMessage{
 					ToolUseID: "toolu-1",
@@ -1259,7 +1283,7 @@ func testRunnerSessions(t *testing.T) {
 			r := newTestAgentRuntime(t, nil, filepath.Join(t.TempDir(), "logs"), map[harness.Name]agent.Backend{"test": backend})
 			tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Harness: "test"}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(StateRunning)
+			tk.SetState(taskslog.StateRunning)
 
 			if _, err := r.Reconnect(t.Context(), tk, true); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("Reconnect error = %v, want os.ErrNotExist", err)
@@ -1267,23 +1291,23 @@ func testRunnerSessions(t *testing.T) {
 			if backend.capturedAttachOpts.Log != nil {
 				t.Fatal("AttachRelay called without authoritative local log")
 			}
-			if r.LogPathStore.LogPath() != "" {
-				t.Fatalf("LogPath = %q, want empty", r.LogPathStore.LogPath())
+			if r.LogPath.Get() != "" {
+				t.Fatalf("LogPath = %q, want empty", r.LogPath.Get())
 			}
 		})
 	})
 
-	t.Run("LogStore", func(t *testing.T) {
+	t.Run("Writer", func(t *testing.T) {
 		t.Parallel()
 		t.Run("CreatesFile", func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
 			logDir := filepath.Join(dir, "logs")
-			store := &LogStore{LogDir: logDir}
+			store := &taskslog.Writer{LogDir: logDir}
 			tk := &Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
-				Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
+				Repos:         []taskslog.RepoMount{{Name: "org/repo", Branch: "caic-0"}},
 				Model:         "model-1",
 				Effort:        "high",
 			}
@@ -1329,8 +1353,8 @@ func testRunnerSessions(t *testing.T) {
 			// caic_meta header. Otherwise every server restart that re-adopts
 			// a running instance duplicates the header.
 			logDir := filepath.Join(t.TempDir(), "logs")
-			store := &LogStore{LogDir: logDir}
-			tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Name: "org/repo", Branch: "caic-0"}}}
+			store := &taskslog.Writer{LogDir: logDir}
+			tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Repos: []taskslog.RepoMount{{Name: "org/repo", Branch: "caic-0"}}}
 
 			tk.Harness = harness.Claude
 
@@ -1364,8 +1388,8 @@ func testRunnerSessions(t *testing.T) {
 			t.Parallel()
 			// Reopen must report os.ErrNotExist without creating a replacement
 			// header because a reconnect cannot infer the running relay format.
-			store := &LogStore{LogDir: filepath.Join(t.TempDir(), "logs")}
-			tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Name: "org/repo", Branch: "caic-0"}}, Harness: harness.Claude}
+			store := &taskslog.Writer{LogDir: filepath.Join(t.TempDir(), "logs")}
+			tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Repos: []taskslog.RepoMount{{Name: "org/repo", Branch: "caic-0"}}, Harness: harness.Claude}
 			if _, err := reopenTaskLog(store, tk, ""); !errors.Is(err, os.ErrNotExist) {
 				t.Errorf("Reopen err = %v, want os.ErrNotExist", err)
 			}
@@ -1379,7 +1403,7 @@ func testRunnerSessions(t *testing.T) {
 			task *Task
 			want string
 		}{
-			{task: &Task{Repos: []RepoMount{{ContainerPath: "~/src/caic-xyz/md"}}}, want: "/home/user/src/caic-xyz/md"},
+			{task: &Task{Repos: []taskslog.RepoMount{{ContainerPath: "~/src/caic-xyz/md"}}}, want: "/home/user/src/caic-xyz/md"},
 			{dir: "/home/maruel/src/caic", want: "/home/user/src/caic"},
 			{dir: "/home/alice/projects/myrepo", want: "/home/user/src/myrepo"},
 			{dir: "/opt/repos/foo", want: "/home/user/src/foo"},
@@ -1456,9 +1480,9 @@ func testRunnerSessions(t *testing.T) {
 			changed := make(chan struct{}, 1)
 			r.NotifyTaskChange = func() { changed <- struct{}{} }
 
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []taskslog.RepoMount{{Branch: "caic-0"}}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(StateRunning)
+			tk.SetState(taskslog.StateRunning)
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 
@@ -1487,8 +1511,8 @@ func testRunnerSessions(t *testing.T) {
 			}
 			select {
 			case <-changed:
-				if state := tk.GetState(); state != StateWaiting {
-					t.Errorf("state = %s, want %s", state, StateWaiting)
+				if state := tk.GetState(); state != taskslog.StateWaiting {
+					t.Errorf("state = %s, want %s", state, taskslog.StateWaiting)
 				}
 			case <-time.After(time.Second):
 				t.Fatal("timed out waiting for task state change notification")
@@ -1503,9 +1527,9 @@ func testRunnerSessions(t *testing.T) {
 					stub := &fetchRecorder{FakeBackend: testContainer()}
 					r := newTestAgentRuntime(t, newTestCheckout(t, "", "/repo", stub), "", nil)
 
-					tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
+					tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []taskslog.RepoMount{{Branch: "caic-0"}}}
 					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-					tk.SetState(StateRunning)
+					tk.SetState(taskslog.StateRunning)
 					_, ch, unsub := tk.Subscribe(t.Context())
 					defer unsub()
 
@@ -1551,9 +1575,9 @@ func testRunnerSessions(t *testing.T) {
 			stub := &fetchRecorder{FakeBackend: testContainer()}
 			r := newTestAgentRuntime(t, newTestCheckout(t, "", t.TempDir(), stub), "", nil)
 
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []taskslog.RepoMount{{Branch: "caic-0"}}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(StateRunning)
+			tk.SetState(taskslog.StateRunning)
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 
@@ -1586,9 +1610,9 @@ func testRunnerSessions(t *testing.T) {
 			stub := &fetchRecorder{FakeBackend: testContainer()}
 			r := newTestAgentRuntime(t, newTestCheckout(t, "", "/repo", stub), "", nil)
 
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []taskslog.RepoMount{{Branch: "caic-0"}}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(StateRunning)
+			tk.SetState(taskslog.StateRunning)
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 
@@ -1615,7 +1639,7 @@ func testRunnerSessions(t *testing.T) {
 			r := newTestAgentRuntime(t, nil, "", nil)
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
-			tk.SetState(StateRunning)
+			tk.SetState(taskslog.StateRunning)
 
 			msgCh, done := r.startMessageDispatch(t.Context(), tk, false)
 
@@ -1650,7 +1674,7 @@ func testRunnerSessions(t *testing.T) {
 
 	t.Run("RestartSession", func(t *testing.T) {
 		t.Parallel()
-		for _, startState := range []State{StateWaiting, StateAsking, StateHasPlan} {
+		for _, startState := range []taskslog.State{taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan} {
 			t.Run(startState.String(), func(t *testing.T) {
 				t.Parallel()
 				logDir := t.TempDir()
@@ -1661,7 +1685,7 @@ func testRunnerSessions(t *testing.T) {
 				tk := &Task{
 					ID:            ksid.NewID(),
 					InitialPrompt: agent.Prompt{Text: "old prompt"},
-					Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
+					Repos:         []taskslog.RepoMount{{Name: "org/repo", Branch: "caic-0"}},
 					Harness:       "test",
 				}
 				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "fake-instance"), runtime.ConnectionTarget{SSHHost: "fake-instance"}, "", "", 0)
@@ -1674,8 +1698,8 @@ func testRunnerSessions(t *testing.T) {
 				if h == nil {
 					t.Fatal("RestartSession returned nil handle")
 				}
-				if tk.GetState() != StateRunning {
-					t.Errorf("state = %v, want %v", tk.GetState(), StateRunning)
+				if tk.GetState() != taskslog.StateRunning {
+					t.Errorf("state = %v, want %v", tk.GetState(), taskslog.StateRunning)
 				}
 				if tk.InitialPrompt.Text != "old prompt" {
 					t.Errorf("Prompt.Text = %q, want %q (must not be mutated by RestartSession)", tk.InitialPrompt.Text, "old prompt")
@@ -1714,14 +1738,14 @@ func testRunnerSessions(t *testing.T) {
 		tk := &Task{
 			ID:            ksid.NewID(),
 			InitialPrompt: agent.Prompt{Text: "test"},
-			Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
+			Repos:         []taskslog.RepoMount{{Name: "org/repo", Branch: "caic-0"}},
 			Harness:       "test",
 		}
 		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "fake-instance"), runtime.ConnectionTarget{SSHHost: "fake-instance"}, "", "", 0)
 
 		// Create an initial session with a log writer by using the backend
 		// directly (Checkout.Start needs a instance backend).
-		logW, err := openTaskLog(&LogStore{LogDir: logDir}, tk)
+		logW, err := openTaskLog(&taskslog.Writer{LogDir: logDir}, tk)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1734,7 +1758,7 @@ func testRunnerSessions(t *testing.T) {
 		close(alreadyDone)
 		h1 := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: alreadyDone, Log: logW}
 		tk.AttachSession(h1)
-		tk.SetState(StateRunning)
+		tk.SetState(taskslog.StateRunning)
 
 		// Simulate the agent writing a plan file.
 		tk.addMessage(t.Context(), &agent.ToolUseMessage{
@@ -1747,7 +1771,7 @@ func testRunnerSessions(t *testing.T) {
 
 		// Gracefully end the first session so we can restart.
 		_ = h1.GracefulStop(t.Context(), 5*time.Second)
-		tk.SetState(StateWaiting)
+		tk.SetState(taskslog.StateWaiting)
 
 		// Restart: should write context_cleared to the log before closing it.
 		h2, err := r.RestartSession(t.Context(), tk, agent.Prompt{Text: "execute plan"})

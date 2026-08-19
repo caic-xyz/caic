@@ -1,6 +1,6 @@
 // Tests for task loading and configuration resolution.
 
-package task
+package taskslog
 
 import (
 	"bytes"
@@ -1373,16 +1373,15 @@ func TestLoadLogs(t *testing.T) {
 		if err := lt.LoadMessages(); err != nil {
 			t.Fatal(err)
 		}
-		// After restore, plan state must be empty because context_cleared resets it.
-		tk := &Task{InitialPrompt: agent.Prompt{Text: lt.Prompt}}
-		tk.SetState(StateRunning)
-		tk.RestoreMessages(lt.Msgs)
-		snap := tk.Snapshot()
-		if snap.InPlanMode {
-			t.Error("InPlanMode = true, want false")
+		// The context-clear marker remains present for Task to apply during restoration.
+		found := false
+		for _, message := range lt.Msgs {
+			if marker, ok := message.(*agent.SystemMessage); ok && marker.Subtype == "context_cleared" {
+				found = true
+			}
 		}
-		if snap.PlanContent != "" {
-			t.Errorf("PlanContent = %q, want empty", snap.PlanContent)
+		if !found {
+			t.Error("context-cleared marker missing from loaded messages")
 		}
 	})
 	t.Run("PRHeaderOnly", func(t *testing.T) {

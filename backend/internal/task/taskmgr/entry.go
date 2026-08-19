@@ -6,14 +6,15 @@ import (
 	"sync"
 
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
 // Entry is a single registered task plus its mutable lifecycle state.
 //
-// Concurrency: task and lifecycle are immutable after registration. loadedTask,
-// result, done, doneClosed, cleanupOnce, and monitorBranch are guarded by mu
-// and must only be accessed through methods. Code outside this package never
-// touches the fields directly.
+// Concurrency: task and lifecycle are immutable after registration. LogPath
+// manages its own synchronization. loadedTask, result, done, doneClosed,
+// cleanupOnce, and monitorBranch are guarded by mu and must only be accessed
+// through methods.
 type Entry struct {
 	// Immutable.
 	Lifecycle *Lifecycle
@@ -24,10 +25,12 @@ type Entry struct {
 	loadedTaskOnce sync.Once
 
 	// Guarded by mu.
-	mu            sync.Mutex
-	loadedTask    *task.LoadedTask
-	logPath       string
-	result        *task.Result
+	mu         sync.Mutex
+	loadedTask *taskslog.LoadedTask
+	result     *taskslog.Result
+
+	// LogPath owns the current physical log path for this entry lifecycle.
+	LogPath       taskslog.Path
 	done          chan struct{}
 	doneClosed    bool
 	monitorBranch string
@@ -40,36 +43,20 @@ func (e *Entry) Task() *task.Task { return e.task }
 
 // LoadedTask returns the on-disk log handle, or nil before a task log has been
 // validated for disk replay.
-func (e *Entry) LoadedTask() *task.LoadedTask {
+func (e *Entry) LoadedTask() *taskslog.LoadedTask {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.loadedTask
 }
 
 // SetLoadedTask records a freshly validated on-disk log handle for disk replay.
-func (e *Entry) SetLoadedTask(lt *task.LoadedTask) {
+func (e *Entry) SetLoadedTask(lt *taskslog.LoadedTask) {
 	e.mu.Lock()
 	e.loadedTask = lt
 	if lt != nil {
-		e.logPath = lt.LogPath()
+		e.LogPath.Set(lt.LogPath())
 	}
 	e.mu.Unlock()
-}
-
-// SetLogPath records the physical log location for this task lifecycle.
-func (e *Entry) SetLogPath(path string) {
-	e.mu.Lock()
-	e.logPath = path
-	e.mu.Unlock()
-}
-
-// LogPath returns the physical log location for this task lifecycle. It is
-// empty until a local log opens successfully, or when adoption cannot establish
-// an authoritative local log.
-func (e *Entry) LogPath() string {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.logPath
 }
 
 // Done returns the channel that closes when the task reaches a terminal
@@ -82,14 +69,14 @@ func (e *Entry) Done() <-chan struct{} {
 }
 
 // Result returns the completion result, or nil if the task hasn't completed.
-func (e *Entry) Result() *task.Result {
+func (e *Entry) Result() *taskslog.Result {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.result
 }
 
 // SetResult records the completion result.
-func (e *Entry) SetResult(r *task.Result) {
+func (e *Entry) SetResult(r *taskslog.Result) {
 	e.mu.Lock()
 	e.result = r
 	e.mu.Unlock()
@@ -131,7 +118,7 @@ func (e *Entry) CloseDone() {
 // set-result-then-close ordering correct by construction rather than relying on
 // callers sequencing SetResult and CloseDone. If another terminal path already
 // closed done, Finish only refreshes the result.
-func (e *Entry) Finish(r *task.Result) {
+func (e *Entry) Finish(r *taskslog.Result) {
 	e.mu.Lock()
 	e.result = r
 	if !e.doneClosed {

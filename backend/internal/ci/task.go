@@ -13,6 +13,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
 // GitHubAppClient provides forge operations scoped to a GitHub App installation.
@@ -37,8 +38,8 @@ type TaskEntry interface {
 	Task() *task.Task
 	MonitorBranch() string
 	SetMonitorBranch(branch string)
-	SetResult(result *task.Result)
-	Result() *task.Result
+	SetResult(result *taskslog.Result)
+	Result() *taskslog.Result
 	CloseDone()
 }
 

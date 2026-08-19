@@ -9,6 +9,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
 func newTestEntry(t *testing.T, tk *task.Task) *Entry {
@@ -16,7 +17,7 @@ func newTestEntry(t *testing.T, tk *task.Task) *Entry {
 	return m.NewEntry(tk, nil)
 }
 
-func newTestPurgedEntry(t *testing.T, tk *task.Task, r *task.Result, lt *task.LoadedTask) *Entry {
+func newTestPurgedEntry(t *testing.T, tk *task.Task, r *taskslog.Result, lt *taskslog.LoadedTask) *Entry {
 	m := newTestManager(t, Config{ServerCtx: t.Context()})
 	e := m.NewEntry(tk, lt)
 	e.Finish(r)
@@ -33,7 +34,7 @@ func TestEntry(t *testing.T) {
 			if e.Result() != nil {
 				t.Error("Result() should be nil initially")
 			}
-			r := &task.Result{State: task.StateFailed}
+			r := &taskslog.Result{State: taskslog.StateFailed}
 			e.SetResult(r)
 			if e.Result() != r {
 				t.Error("Result() returned wrong pointer after SetResult")
@@ -44,12 +45,12 @@ func TestEntry(t *testing.T) {
 	t.Run("LogPath", func(t *testing.T) {
 		t.Parallel()
 		e := newTestEntry(t, &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}})
-		if e.LogPath() != "" {
-			t.Errorf("LogPath() = %q, want empty", e.LogPath())
+		if e.LogPath.Get() != "" {
+			t.Errorf("LogPath() = %q, want empty", e.LogPath.Get())
 		}
-		e.SetLogPath("/tmp/task.jsonl")
-		if e.LogPath() != "/tmp/task.jsonl" {
-			t.Errorf("LogPath() = %q, want /tmp/task.jsonl", e.LogPath())
+		e.LogPath.Set("/tmp/task.jsonl")
+		if e.LogPath.Get() != "/tmp/task.jsonl" {
+			t.Errorf("LogPath() = %q, want /tmp/task.jsonl", e.LogPath.Get())
 		}
 	})
 
@@ -86,7 +87,7 @@ func TestEntry(t *testing.T) {
 		t.Run("valid_closes_and_sets_result", func(t *testing.T) {
 			t.Parallel()
 			e := newTestEntry(t, &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}})
-			r := &task.Result{State: task.StateFailed}
+			r := &taskslog.Result{State: taskslog.StateFailed}
 			e.Finish(r)
 			select {
 			case <-e.Done():
@@ -100,8 +101,8 @@ func TestEntry(t *testing.T) {
 		t.Run("valid_after_finished", func(t *testing.T) {
 			t.Parallel()
 			e := newTestEntry(t, &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}})
-			first := &task.Result{State: task.StateCrashed}
-			second := &task.Result{State: task.StatePurged}
+			first := &taskslog.Result{State: taskslog.StateCrashed}
+			second := &taskslog.Result{State: taskslog.StatePurged}
 			e.Finish(first)
 			e.Finish(second)
 			if e.Result() != second {
@@ -165,8 +166,8 @@ func TestEntry(t *testing.T) {
 		t.Run("valid_exactly_once", func(t *testing.T) {
 			t.Parallel()
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}
-			lt := &task.LoadedTask{TaskID: tk.ID.String()}
-			e := newTestPurgedEntry(t, tk, &task.Result{State: task.StatePurged}, lt)
+			lt := &taskslog.LoadedTask{TaskID: tk.ID.String()}
+			e := newTestPurgedEntry(t, tk, &taskslog.Result{State: taskslog.StatePurged}, lt)
 			var n int
 			e.LoadMessagesOnce(func() { n++ })
 			e.LoadMessagesOnce(func() { n++ })

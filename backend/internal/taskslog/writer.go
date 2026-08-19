@@ -1,6 +1,6 @@
-// LogStore owns task log segments, metadata headers, trailers, and terminal compression.
+// Writer owns task log segments, metadata headers, trailers, and terminal compression.
 
-package task
+package taskslog
 
 import (
 	"errors"
@@ -16,37 +16,49 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
-// LogStore manages raw task JSONL logs.
-type LogStore struct {
+// Writer manages raw task JSONL logs.
+type Writer struct {
 	LogDir string
 }
 
 // Open creates a JSONL log segment with a v2 metadata header, or reopens an
-// existing segment without rewriting its header.
-func (s *LogStore) Open(path string, header *agent.MetaMessage) (agent.LogSink, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		return nil, fmt.Errorf("create log dir: %w", err)
+// existing segment without rewriting its header. name must be a base
+// filename (no path separators or "."/".." elements); Open resolves it under
+// LogDir and returns the resolved path.
+func (s *Writer) Open(name string, header *agent.MetaMessage) (agent.LogSink, string, error) {
+	path, err := s.resolveName(name)
+	if err != nil {
+		return nil, "", err
+	}
+	if err := os.MkdirAll(s.LogDir, 0o750); err != nil {
+		return nil, "", fmt.Errorf("create log dir: %w", err)
 	}
 	w, created, err := openTaskLogForAppend(path, header, true)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if created {
 		w.version = agent.LogVersionV2
 		if err := writeMetadataHeader(w, header); err != nil {
-			return nil, errors.Join(err, w.Close())
+			return nil, "", errors.Join(err, w.Close())
 		}
 	}
-	return w, nil
+	return w, path, nil
 }
 
-// Reopen validates and opens an existing task log for appending without a header.
-func (s *LogStore) Reopen(path string, header *agent.MetaMessage) (agent.LogSink, error) {
+// Reopen validates and opens an existing task log for appending without a
+// header. name must be a base filename (no path separators or "."/".."
+// elements); Reopen resolves it under LogDir and returns the resolved path.
+func (s *Writer) Reopen(name string, header *agent.MetaMessage) (agent.LogSink, string, error) {
+	path, err := s.resolveName(name)
+	if err != nil {
+		return nil, "", err
+	}
 	w, _, err := openTaskLogForAppend(path, header, false)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return w, nil
+	return w, path, nil
 }
 
 func openTaskLogForAppend(path string, header *agent.MetaMessage, create bool) (w *taskLogWriter, created bool, err error) {
@@ -96,7 +108,7 @@ func validateRawLogAppend(f *os.File, path string, header *agent.MetaMessage) (a
 }
 
 // WriteResultTrailer appends a MetaResultMessage to an active task log.
-func (*LogStore) WriteResultTrailer(log agent.LogSink, title string, res *Result) error {
+func (*Writer) WriteResultTrailer(log agent.LogSink, title string, res *Result) error {
 	if log == nil {
 		return ErrNoLog
 	}
@@ -126,17 +138,17 @@ func resultTrailer(title string, res *Result) *agent.MetaResultMessage {
 }
 
 // WriteContextCleared appends a context_cleared system message to the task log.
-func (*LogStore) WriteContextCleared(log agent.LogSink) error {
+func (*Writer) WriteContextCleared(log agent.LogSink) error {
 	if log == nil {
 		return ErrNoLog
 	}
-	return log.AppendMessage(syntheticContextCleared())
+	return log.AppendMessage(agent.ContextCleared())
 }
 
 // Compress closes log and compresses path only when state is non-revivable.
 // Closing the live writer first ensures the compressed source contains every
 // completed append. A failed compression leaves the plain source for retry.
-func (s *LogStore) Compress(path string, log agent.LogSink, state State) (string, error) {
+func (s *Writer) Compress(path string, log agent.LogSink, state State) (string, error) {
 	if log != nil {
 		if err := log.Close(); err != nil {
 			return path, fmt.Errorf("close task log before compression: %w", err)
@@ -151,7 +163,7 @@ func (s *LogStore) Compress(path string, log agent.LogSink, state State) (string
 // CompressTerminalLogs compresses loaded non-revivable task logs during startup.
 // Plain sources take precedence over interrupted plain-and-compressed pairs, so
 // a retry always compresses the authoritative plain source.
-func (s *LogStore) CompressTerminalLogs(logs []*LoadedTask) error {
+func (s *Writer) CompressTerminalLogs(logs []*LoadedTask) error {
 	var errs []error
 	for _, lt := range logs {
 		if lt == nil || !lt.State.IsTerminal() || isLogCompressed(lt.path) {
@@ -173,9 +185,19 @@ func (s *LogStore) CompressTerminalLogs(logs []*LoadedTask) error {
 	return errors.Join(errs...)
 }
 
+// resolveName validates name is a plain task-log filename and joins it under
+// LogDir, denying any path that escapes it (separators, "..", or absolute
+// paths).
+func (s *Writer) resolveName(name string) (string, error) {
+	if name == "" || name == "." || name == ".." || filepath.Base(name) != name {
+		return "", fmt.Errorf("task log name must be a base filename, got %q", name)
+	}
+	return filepath.Join(s.LogDir, name), nil
+}
+
 // compressPath atomically replaces a plain terminal task log with its zstd
 // representation. A failed compression leaves the source log intact.
-func (*LogStore) compressPath(path string) (string, error) {
+func (*Writer) compressPath(path string) (string, error) {
 	if path == "" || isLogCompressed(path) {
 		return path, nil
 	}

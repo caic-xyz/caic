@@ -1,6 +1,6 @@
 // Benchmarks realistic warm and cold task-log adoption scans.
 
-package task
+package taskslog
 
 import (
 	"bufio"
@@ -34,6 +34,7 @@ var errAdoptionColdUnsupported = errors.New("cold task-adoption benchmark unsupp
 
 type adoptionBenchmarkFixture struct {
 	dir  string
+	name string
 	path string
 	size int64
 	id   ksid.ID
@@ -53,13 +54,8 @@ func (f *adoptionBenchmarkFixture) loadedTask() *LoadedTask {
 	return lt
 }
 
-func (f *adoptionBenchmarkFixture) task() *Task {
-	return &Task{
-		ID:            f.id,
-		InitialPrompt: agent.Prompt{Text: "benchmark adoption"},
-		Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
-		Harness:       harness.Claude,
-	}
+func (f *adoptionBenchmarkFixture) header() *agent.MetaMessage {
+	return &agent.MetaMessage{Prompt: "benchmark adoption", Repos: []agent.MetaRepo{{Name: "org/repo", Branch: "caic-0"}}, Harness: harness.Claude}
 }
 
 type adoptionBenchmarkOperation struct {
@@ -75,7 +71,7 @@ type adoptionProcessIO struct {
 func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 	b.StopTimer()
 	fixture := newAdoptionBenchmarkFixture(b)
-	store := &LogStore{LogDir: fixture.dir}
+	store := &Writer{LogDir: fixture.dir}
 	operations := []adoptionBenchmarkOperation{
 		{
 			name: "LoadLogHeader",
@@ -125,11 +121,10 @@ func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 			},
 		},
 		{
-			name: "LogStoreReopen",
+			name: "WriterReopen",
 			prepare: func() func() error {
-				task := fixture.task()
 				return func() error {
-					w, err := reopenTaskLog(store, task, "")
+					w, _, err := store.Reopen(fixture.name, fixture.header())
 					if err != nil {
 						return err
 					}
@@ -160,8 +155,7 @@ func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 					if err := lt.LoadMessages(); err != nil {
 						return err
 					}
-					task := fixture.task()
-					w, err := reopenTaskLog(store, task, lt.LogPath())
+					w, _, err := store.Reopen(fixture.name, fixture.header())
 					if err != nil {
 						return err
 					}
@@ -235,7 +229,8 @@ func newAdoptionBenchmarkFixture(b *testing.B) *adoptionBenchmarkFixture {
 	target := adoptionBenchmarkBytes(b)
 	dir := b.TempDir()
 	id := ksid.NewID()
-	path := filepath.Join(dir, id.String()+"-org-repo-caic-0.jsonl")
+	name := id.String() + "-org-repo-caic-0.jsonl"
+	path := filepath.Join(dir, name)
 	f, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		b.Fatal(err)
@@ -308,7 +303,7 @@ func newAdoptionBenchmarkFixture(b *testing.B) *adoptionBenchmarkFixture {
 		b.Fatalf("fixture size = %d, want %d", info.Size(), target)
 	}
 	b.Logf("fixture=%s bytes=%d mix=small-deltas,normal-events,large-tool-output,controls,repeated-segment-headers", path, target)
-	return &adoptionBenchmarkFixture{dir: dir, path: path, size: target, id: id}
+	return &adoptionBenchmarkFixture{dir: dir, name: name, path: path, size: target, id: id}
 }
 
 func benchmarkAdoptionRecords(header []byte) [][]byte {

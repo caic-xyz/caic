@@ -35,8 +35,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
-	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/gomode/voicegateway"
 	"github.com/caic-xyz/caic/gomode/voicegateway/voicertc"
 	"github.com/caic-xyz/caic/oauth/oauthclient"
@@ -279,23 +279,25 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	}()
 	// Compression replaces log paths, so finish maintenance before task import can
 	// expose any task to a replay request.
+	logStore := taskslog.NewStore(logDir)
 	err = func() error {
 		startupCtx, tk := trace.NewTask(ctx, "prepare-purged-task-logs")
 		defer tk.End()
 		start := time.Now()
-		logs, err := task.LoadLogs(logDir)
+		logs, err := logStore.LoadPlain()
 		if err != nil {
 			return fmt.Errorf("load logs: %w", err)
 		}
 		appLog.InfoContext(startupCtx, "loaded task log headers", "n", len(logs), "dur", time.Since(start))
 		start = time.Now()
-		if err := taskMgr.Logs.CompressTerminalLogs(logs); err != nil {
+		if err := logStore.CompressTerminal(logs); err != nil {
 			appLog.WarnContext(startupCtx, "compress terminal task logs failed", "err", err)
 		} else {
 			appLog.InfoContext(startupCtx, "compressed terminal task logs", "dur", time.Since(start))
 		}
 		start = time.Now()
-		if err := taskMgr.LoadPurgedTasks(logs); err != nil {
+		settled := logStore.Settled(logs, time.Now())
+		if err := taskMgr.LoadPurgedTasks(settled); err != nil {
 			appLog.ErrorContext(startupCtx, "load purged tasks failed", "err", err)
 		} else {
 			appLog.InfoContext(startupCtx, "loaded purged task entries", "dur", time.Since(start))
@@ -574,7 +576,7 @@ func initRuntimeSystem(ctx context.Context, log *slog.Logger, cfg *server.Config
 	return runtimeRouter, mdRuntimes, nil
 }
 
-func loadRuntimeTaskLogs(ctx context.Context, logDir string, inventory *runtime.Router, instances []runtime.Instance) ([]*task.LoadedTask, error) {
+func loadRuntimeTaskLogs(ctx context.Context, logDir string, inventory *runtime.Router, instances []runtime.Instance) ([]*taskslog.LoadedTask, error) {
 	ids := make([]string, 0, len(instances))
 	var errs []error
 	for i := range instances {
@@ -588,7 +590,7 @@ func loadRuntimeTaskLogs(ctx context.Context, logDir string, inventory *runtime.
 		}
 		ids = append(ids, id)
 	}
-	logs, err := task.LoadLogsForTaskIDs(logDir, ids)
+	logs, err := taskslog.LoadLogsForTaskIDs(logDir, ids)
 	if err != nil {
 		errs = append(errs, err)
 	}

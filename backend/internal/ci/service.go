@@ -15,6 +15,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
 // Service orchestrates CI monitoring, auto-fix loops, and PR creation for
@@ -167,7 +168,7 @@ func (svc *Service) MonitorCI(ctx context.Context, entry TaskEntry, f forge.Forg
 		case <-ticker.C:
 		}
 		st := t.GetState()
-		if st != task.StateWaiting && st != task.StateAsking && st != task.StateHasPlan {
+		if st != taskslog.StateWaiting && st != taskslog.StateAsking && st != taskslog.StateHasPlan {
 			return
 		}
 		if checkOnce() {
@@ -306,7 +307,7 @@ func (svc *Service) autoResync(ctx context.Context, entry TaskEntry, f forge.For
 
 	// Only proceed if the task is still waiting for input (agent finished cleanly).
 	st := t.GetState()
-	if st != task.StateWaiting && st != task.StateAsking {
+	if st != taskslog.StateWaiting && st != taskslog.StateAsking {
 		return
 	}
 

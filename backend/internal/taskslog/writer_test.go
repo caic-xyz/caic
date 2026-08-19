@@ -1,6 +1,6 @@
-// Tests for LogStore log segment creation, trailers, and validated reopening.
+// Tests for Writer log segment creation, trailers, and validated reopening.
 
-package task
+package taskslog
 
 import (
 	"encoding/json"
@@ -18,38 +18,61 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
+type testTask struct {
+	ID            ksid.ID
+	InitialPrompt agent.Prompt
+	Repos         []RepoMount
+	Harness       harness.Name
+	Model         string
+	Effort        string
+}
+
+func (t *testTask) logFilename() string {
+	repo, branch := "", ""
+	if len(t.Repos) > 0 {
+		repo = strings.ReplaceAll(t.Repos[0].Name, "/", "-")
+		branch = strings.ReplaceAll(t.Repos[0].Branch, "/", "-")
+	}
+	return t.ID.String() + "-" + repo + "-" + branch + ".jsonl"
+}
+
+func (t *testTask) logHeader() *agent.MetaMessage {
+	repos := make([]agent.MetaRepo, len(t.Repos))
+	for i, repo := range t.Repos {
+		repos[i] = agent.MetaRepo{Name: repo.Name, BaseBranch: repo.BaseBranch, Branch: repo.Branch, ContainerPath: repo.ContainerPath}
+	}
+	return &agent.MetaMessage{MessageType: "caic_meta", Prompt: t.InitialPrompt.Text, Repos: repos, Harness: t.Harness, Model: t.Model, Effort: t.Effort}
+}
+
 type testTaskLog struct {
 	agent.LogSink
 
 	path string
 }
 
-func openTaskLog(s *LogStore, tk *Task) (*testTaskLog, error) {
+func openTaskLog(s *Writer, tk *testTask) (*testTaskLog, error) {
 	if s.LogDir == "" {
 		return nil, errors.New("no log dir")
 	}
-	path := filepath.Join(s.LogDir, tk.LogFilename())
-	header := tk.LogHeader()
-	log, err := s.Open(path, &header)
+	log, path, err := s.Open(tk.logFilename(), tk.logHeader())
 	if err != nil {
 		return nil, err
 	}
 	return &testTaskLog{LogSink: log, path: path}, nil
 }
 
-func reopenTaskLog(s *LogStore, tk *Task, path string) (*testTaskLog, error) {
-	if path == "" {
-		if s.LogDir == "" {
-			return nil, errors.New("no log dir")
-		}
-		path = filepath.Join(s.LogDir, tk.LogFilename())
+func reopenTaskLog(s *Writer, tk *testTask, path string) (*testTaskLog, error) {
+	name := tk.logFilename()
+	if path != "" {
+		name = filepath.Base(path)
+	} else if s.LogDir == "" {
+		return nil, errors.New("no log dir")
 	}
-	header := tk.LogHeader()
-	log, err := s.Reopen(path, &header)
+	log, resolved, err := s.Reopen(name, tk.logHeader())
 	if err != nil {
 		return nil, err
 	}
-	return &testTaskLog{LogSink: log, path: path}, nil
+	return &testTaskLog{LogSink: log, path: resolved}, nil
 }
 
 func logLines(t *testing.T, path string) []string {
@@ -68,7 +91,7 @@ func logLines(t *testing.T, path string) []string {
 	return strings.Split(strings.TrimSpace(string(data)), "\n")
 }
 
-func TestLogStore(t *testing.T) {
+func TestWriter(t *testing.T) {
 	t.Parallel()
 	t.Run("WriteResultTrailerReasoningTokens", func(t *testing.T) {
 		t.Parallel()
@@ -79,7 +102,7 @@ func TestLogStore(t *testing.T) {
 				ReasoningOutputTokens: 123,
 			},
 		}
-		if err := (&LogStore{}).WriteResultTrailer(b, "title", res); err != nil {
+		if err := (&Writer{}).WriteResultTrailer(b, "title", res); err != nil {
 			t.Fatal(err)
 		}
 		var got agent.MetaResultMessage
@@ -92,8 +115,8 @@ func TestLogStore(t *testing.T) {
 	})
 	t.Run("CompressClosesWriterBeforeCompression", func(t *testing.T) {
 		t.Parallel()
-		store := &LogStore{LogDir: t.TempDir()}
-		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Codex}
+		store := &Writer{LogDir: t.TempDir()}
+		tk := &testTask{InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Codex}
 		log, err := openTaskLog(store, tk)
 		if err != nil {
 			t.Fatal(err)
@@ -116,8 +139,8 @@ func TestLogStore(t *testing.T) {
 	})
 	t.Run("OpenWritesMetadata", func(t *testing.T) {
 		t.Parallel()
-		store := &LogStore{LogDir: t.TempDir()}
-		tk := &Task{
+		store := &Writer{LogDir: t.TempDir()}
+		tk := &testTask{
 			ID:            ksid.NewID(),
 			InitialPrompt: agent.Prompt{Text: "test prompt"},
 			Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0", ContainerPath: "~/src/org/repo"}},
@@ -155,10 +178,30 @@ func TestLogStore(t *testing.T) {
 			t.Fatalf("metadata repos = %+v", meta.Repos)
 		}
 	})
+	t.Run("OpenRejectsNonBaseFilename", func(t *testing.T) {
+		t.Parallel()
+		store := &Writer{LogDir: t.TempDir()}
+		header := agent.MetaMessage{MessageType: "caic_meta", Harness: harness.Codex}
+		for _, name := range []string{"", ".", "..", "/etc/passwd", "sub/task.jsonl", "../task.jsonl"} {
+			if _, _, err := store.Open(name, &header); err == nil {
+				t.Errorf("Open(%q) = nil error, want rejection", name)
+			}
+		}
+	})
+	t.Run("ReopenRejectsNonBaseFilename", func(t *testing.T) {
+		t.Parallel()
+		store := &Writer{LogDir: t.TempDir()}
+		header := agent.MetaMessage{MessageType: "caic_meta", Harness: harness.Codex}
+		for _, name := range []string{"", ".", "..", "/etc/passwd", "sub/task.jsonl", "../task.jsonl"} {
+			if _, _, err := store.Reopen(name, &header); err == nil {
+				t.Errorf("Reopen(%q) = nil error, want rejection", name)
+			}
+		}
+	})
 	t.Run("OpenPreservesExistingLogAuthority", func(t *testing.T) {
 		t.Parallel()
-		store := &LogStore{LogDir: t.TempDir()}
-		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Codex}
+		store := &Writer{LogDir: t.TempDir()}
+		tk := &testTask{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Codex}
 		first, err := openTaskLog(store, tk)
 		if err != nil {
 			t.Fatal(err)
@@ -183,8 +226,8 @@ func TestLogStore(t *testing.T) {
 	})
 	t.Run("OpenCreatesCanonicalV2Log", func(t *testing.T) {
 		t.Parallel()
-		store := &LogStore{LogDir: t.TempDir()}
-		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Codex}
+		store := &Writer{LogDir: t.TempDir()}
+		tk := &testTask{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Codex}
 		log, err := openTaskLog(store, tk)
 		if err != nil {
 			t.Fatal(err)
@@ -209,14 +252,14 @@ func TestLogStore(t *testing.T) {
 	t.Run("ReopenPreservesV2Authority", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
-		store := &LogStore{LogDir: dir}
-		tk := &Task{
+		store := &Writer{LogDir: dir}
+		tk := &testTask{
 			ID:            ksid.NewID(),
 			InitialPrompt: agent.Prompt{Text: "test"},
 			Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
 			Harness:       harness.Codex,
 		}
-		path := filepath.Join(dir, tk.LogFilename())
+		path := filepath.Join(dir, tk.logFilename())
 		line := `{"t":"caic_meta","version":2,"prompt":"test","repos":[{"name":"org/repo","branch":"caic-0"}],"harness":"codex"}` + "\n"
 		if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
 			t.Fatal(err)
@@ -246,9 +289,9 @@ func TestLogStore(t *testing.T) {
 	t.Run("ReopenPreservesV1Authority", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
-		store := &LogStore{LogDir: dir}
-		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Codex}
-		path := filepath.Join(dir, tk.LogFilename())
+		store := &Writer{LogDir: dir}
+		tk := &testTask{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Codex}
+		path := filepath.Join(dir, tk.logFilename())
 		header := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: int(agent.LogVersionV1), Prompt: "test", Harness: harness.Codex}) + "\n"
 		if err := os.WriteFile(path, []byte(header), 0o600); err != nil {
 			t.Fatal(err)
@@ -277,14 +320,14 @@ func TestLogStore(t *testing.T) {
 	t.Run("ReopenRejectsHarnessMismatch", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
-		store := &LogStore{LogDir: dir}
-		tk := &Task{
+		store := &Writer{LogDir: dir}
+		tk := &testTask{
 			ID:            ksid.NewID(),
 			InitialPrompt: agent.Prompt{Text: "test"},
 			Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
 			Harness:       harness.Codex,
 		}
-		path := filepath.Join(dir, tk.LogFilename())
+		path := filepath.Join(dir, tk.logFilename())
 		line := mustJSON(t, agent.MetaMessage{
 			MessageType: "caic_meta",
 			Version:     int(agent.LogVersionV1),
@@ -304,13 +347,13 @@ func TestLogStore(t *testing.T) {
 	t.Run("Reopen", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
-		tk := &Task{ID: ksid.NewID(), Harness: harness.Codex}
-		path := filepath.Join(dir, tk.LogFilename())
+		tk := &testTask{ID: ksid.NewID(), Harness: harness.Codex}
+		path := filepath.Join(dir, tk.logFilename())
 		header := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: int(agent.LogVersionV1), Prompt: "test", Harness: harness.Codex}) + "\n"
 		if err := os.WriteFile(path, []byte(header), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		w, err := reopenTaskLog(&LogStore{LogDir: dir}, tk, path)
+		w, err := reopenTaskLog(&Writer{LogDir: dir}, tk, path)
 		if err != nil {
 			t.Fatal(err)
 		}

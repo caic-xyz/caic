@@ -11,7 +11,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
 
@@ -75,43 +75,43 @@ func AgentHarness(h v1.Harness) (harness.Name, error) {
 	}
 }
 
-// TaskState converts task.State to v1.TaskState.
-func TaskState(s task.State) (v1.TaskState, error) {
+// TaskState converts taskslog.State to v1.TaskState.
+func TaskState(s taskslog.State) (v1.TaskState, error) {
 	switch s {
-	case task.StatePending:
+	case taskslog.StatePending:
 		return v1.TaskStatePending, nil
-	case task.StateBranching:
+	case taskslog.StateBranching:
 		return v1.TaskStateBranching, nil
-	case task.StateProvisioning:
+	case taskslog.StateProvisioning:
 		return v1.TaskStateProvisioning, nil
-	case task.StateStarting:
+	case taskslog.StateStarting:
 		return v1.TaskStateStarting, nil
-	case task.StateRunning:
+	case taskslog.StateRunning:
 		return v1.TaskStateRunning, nil
-	case task.StateWaiting:
+	case taskslog.StateWaiting:
 		return v1.TaskStateWaiting, nil
-	case task.StateAsking:
+	case taskslog.StateAsking:
 		return v1.TaskStateAsking, nil
-	case task.StateHasPlan:
+	case taskslog.StateHasPlan:
 		return v1.TaskStateHasPlan, nil
-	case task.StatePulling:
+	case taskslog.StatePulling:
 		return v1.TaskStatePulling, nil
-	case task.StatePushing:
+	case taskslog.StatePushing:
 		return v1.TaskStatePushing, nil
-	case task.StateStopping:
+	case taskslog.StateStopping:
 		return v1.TaskStateStopping, nil
-	case task.StateStopped:
+	case taskslog.StateStopped:
 		return v1.TaskStateStopped, nil
-	case task.StatePurging:
+	case taskslog.StatePurging:
 		return v1.TaskStatePurging, nil
-	case task.StateCrashed:
+	case taskslog.StateCrashed:
 		return v1.TaskStateCrashed, nil
-	case task.StateFailed:
+	case taskslog.StateFailed:
 		return v1.TaskStateFailed, nil
-	case task.StatePurged:
+	case taskslog.StatePurged:
 		return v1.TaskStatePurged, nil
 	default:
-		return "", fmt.Errorf("unsupported task state %d", s)
+		return "", fmt.Errorf("unsupported task state %q", string(s))
 	}
 }
 

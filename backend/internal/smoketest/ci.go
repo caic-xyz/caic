@@ -8,6 +8,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
 // SimulateCI polls until the task reaches a reviewable state, then sets a
@@ -21,9 +22,9 @@ func SimulateCI(ctx context.Context, t *task.Task) {
 		case <-time.After(100 * time.Millisecond):
 		}
 		switch t.GetState() {
-		case task.StateWaiting, task.StateAsking, task.StateHasPlan:
+		case taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan:
 			goto ready
-		case task.StatePurged, task.StateFailed:
+		case taskslog.StatePurged, taskslog.StateFailed:
 			return
 		default:
 		}

@@ -93,7 +93,7 @@ func v1ExportParseFn(line []byte) ([]Message, error) {
 }
 
 // v1ExportFixture is an in-memory renderer fixture. Physical-log export is
-// covered through task.ExportDiscussion; renderer tests keep only their
+// covered through taskslog.ExportDiscussion; renderer tests keep only their
 // harness-neutral input messages here.
 func v1ExportFixture(lines []string) []string {
 	return lines

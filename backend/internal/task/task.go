@@ -20,6 +20,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
 // CreateRequest describes an automated task creation request for one managed repository.
@@ -38,98 +39,6 @@ type statsSub struct {
 }
 
 func (s *statsSub) close() { s.once.Do(func() { close(s.ch) }) }
-
-// State represents the lifecycle state of a task.
-//
-// Transitions are written from three places, each owning a distinct class of
-// transition:
-//
-//  1. Message-driven — Task.addMessage. Running→Waiting/Asking/HasPlan when a
-//     ResultMessage or AskMessage arrives, and the reverse (Waiting/Asking/
-//     HasPlan→Running) when the agent starts producing output again. This is
-//     the only writer that reacts to conversation content.
-//  2. Lifecycle — Checkout and Manager, driven by provisioning and explicit user
-//     commands (Start, Stop, Purge, Revive, Restart, ClearContext, fork).
-//     These transitions (Pending→Branching→Provisioning→Starting→Running,
-//     Stopping/Stopped, Purging/Purged) follow instance/session setup and
-//     teardown, not message content.
-//  3. Recovery — Task.RecordSessionCrash/RecordSessionFailure and the
-//     import-time state inference in RestoreMessages and Manager's import
-//     path. These run when a session dies unexpectedly or when state must be
-//     inferred from a log/relay tail rather than observed live.
-//
-// A few transitions are legitimately reachable from more than one category
-// (e.g. Running→Waiting from both message-driven addMessage and lifecycle
-// watchSession — see the comment at the addMessage ResultMessage handling and
-// at Manager.watchSession); those keep a CAS (SetStateIf/SetStateIfAny/
-// SetStateUnless) to make the race safe rather than trying to eliminate the
-// second writer.
-type State int
-
-// Task lifecycle states.
-const (
-	StatePending      State = iota
-	StateBranching          // Creating git branch.
-	StateProvisioning       // Starting runtime instance.
-	StateStarting           // Launching agent session.
-	StateRunning            // Agent is executing.
-	StateWaiting            // Agent completed a turn, awaiting user input or purge.
-	StateAsking             // Agent asked a question (AskUserQuestion), needs answer.
-	StateHasPlan            // Agent finished planning (ExitPlanMode with plan content), awaiting approval.
-	StatePulling            // Pulling changes from instance.
-	StatePushing            // Pushing to origin.
-	StateStopping           // Graceful stop in progress (instance being stopped, preserved for revival).
-	StateStopped            // Runtime stopped but not deleted; can be revived.
-	StatePurging            // User requested purge; cleanup in progress.
-	StateCrashed            // Agent session crashed; runtime is stopped and can be revived.
-	StateFailed             // Failed at some stage and cannot be recovered automatically.
-	StatePurged             // Runtime deleted, task is final.
-)
-
-// String returns the API and log representation of the task state.
-func (s State) String() string {
-	switch s {
-	case StatePending:
-		return "pending"
-	case StateBranching:
-		return "branching"
-	case StateProvisioning:
-		return "provisioning"
-	case StateStarting:
-		return "starting"
-	case StateRunning:
-		return "running"
-	case StateWaiting:
-		return "waiting"
-	case StateAsking:
-		return "asking"
-	case StateHasPlan:
-		return "has_plan"
-	case StatePulling:
-		return "pulling"
-	case StatePushing:
-		return "pushing"
-	case StateStopping:
-		return "stopping"
-	case StateStopped:
-		return "stopped"
-	case StatePurging:
-		return "purging"
-	case StateCrashed:
-		return "crashed"
-	case StateFailed:
-		return "failed"
-	case StatePurged:
-		return "purged"
-	default:
-		return "unknown"
-	}
-}
-
-// IsTerminal reports whether the task cannot be revived.
-func (s State) IsTerminal() bool {
-	return s == StateFailed || s == StatePurged
-}
 
 // SessionHandle bundles the resources associated with an active agent session:
 // the SSH session, the message dispatch channel, and the log writer.
@@ -183,40 +92,6 @@ func (h *SessionHandle) Drain() error {
 	return err
 }
 
-// RepoMount describes one repository in a task.
-//
-// Is serialized as task metadata to disk. Is not used for HTTP wire protocol.
-type RepoMount struct {
-	Name          string `json:"name"`           // relative path, e.g. "github/caic"
-	BaseBranch    string `json:"base_branch"`    // branch to fork from; empty = checkout default
-	Branch        string `json:"branch"`         // allocated branch, e.g. "caic-0"
-	GitRoot       string `json:"git_root"`       // absolute host path; empty in purged-task entries
-	ContainerPath string `json:"container_path"` // path inside the runtime instance
-}
-
-// ToRuntimeRepo converts a RepoMount to a runtime Repo.
-//
-// When ContainerPath is empty, the runtime adapter may populate it from GitRoot.
-func (r *RepoMount) ToRuntimeRepo() runtime.Repo {
-	return runtime.Repo{
-		GitRoot:       r.GitRoot,
-		ContainerPath: r.ContainerPath,
-		Branch:        r.Branch,
-		BaseBranch:    r.BaseBranch,
-	}
-}
-
-// RepoMountFromMeta converts a MetaRepo (from JSONL log metadata) to a RepoMount.
-func RepoMountFromMeta(m agent.MetaRepo, gitRoot string) RepoMount {
-	return RepoMount{
-		Name:          m.Name,
-		BaseBranch:    m.BaseBranch,
-		Branch:        m.Branch,
-		ContainerPath: m.ContainerPath,
-		GitRoot:       gitRoot,
-	}
-}
-
 // Task represents a single unit of work.
 type Task struct {
 	// Immutable fields — set at creation, never modified.
@@ -244,13 +119,13 @@ type Task struct {
 	// Mutable task metadata. These fields are populated at construction, setup, or
 	// import. After a task is published in the Manager registry, access them
 	// through Task methods so readers and async lifecycle goroutines synchronize.
-	Repos            []RepoMount // index 0 = primary; empty = no-repo
-	TailscaleFQDN    string      // Tailscale FQDN assigned to the instance (empty if not available).
-	TailscaleAuthURL string      // Tailscale browser auth URL when no pre-auth key was available.
-	RelayOffset      int64       // Bytes received from relay output.jsonl, for reconnect.
-	SudoPassword     string      // Random sudo password; empty if sudo is not enabled.
-	VNCPort          int         // VNC WebSocket port inside the instance (0 = no VNC). Set during launch.
-	GitHubToken      bool        // Inject GitHub token into the instance's environment.
+	Repos            []taskslog.RepoMount // index 0 = primary; empty = no-repo
+	TailscaleFQDN    string               // Tailscale FQDN assigned to the instance (empty if not available).
+	TailscaleAuthURL string               // Tailscale browser auth URL when no pre-auth key was available.
+	RelayOffset      int64                // Bytes received from relay output.jsonl, for reconnect.
+	SudoPassword     string               // Random sudo password; empty if sudo is not enabled.
+	VNCPort          int                  // VNC WebSocket port inside the instance (0 = no VNC). Set during launch.
+	GitHubToken      bool                 // Inject GitHub token into the instance's environment.
 
 	// mu protects mutable task metadata above and all fields below.
 	mu                    sync.Mutex
@@ -260,7 +135,7 @@ type Task struct {
 	statsLen              int
 	statsHead             int
 	statsSubs             []*statsSub
-	state                 State
+	state                 taskslog.State
 	stateUpdatedAt        time.Time // UTC timestamp of the last state transition.
 	sessionID             string    // Agent session ID, captured from InitMessage.
 	reportedModel         string    // Model reported by InitMessage (may differ from Model).
@@ -297,14 +172,6 @@ type Task struct {
 	ciChecks              []forge.Check
 	rateLimit             RateLimit                    // Active task quota block resolved across provider windows.
 	rateLimits            map[quotaWindowKey]RateLimit // Latest quota status for each provider window.
-}
-
-// Primary returns a pointer to the primary RepoMount (Repos[0]), or nil for no-repo tasks.
-func syntheticContextCleared() *agent.SystemMessage {
-	return &agent.SystemMessage{
-		MessageType: "system",
-		Subtype:     "context_cleared",
-	}
 }
 
 // AttachSession stores a SessionHandle on the task. The caller must not hold
@@ -573,7 +440,7 @@ func computeCost(totalCostUSD float64, u agent.Usage) float64 {
 const titleSystemPrompt = "Summarize this coding task conversation in 3-8 words as a short title. Reply with ONLY the title, no quotes."
 
 // Primary returns a copy of the primary RepoMount (Repos[0]), or nil for no-repo tasks.
-func (t *Task) Primary() *RepoMount {
+func (t *Task) Primary() *taskslog.RepoMount {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if len(t.Repos) == 0 {
@@ -612,10 +479,10 @@ func (t *Task) ExtraRuntimeRepos() []runtime.Repo {
 }
 
 // ReposSnapshot returns a copy of the task repo mounts.
-func (t *Task) ReposSnapshot() []RepoMount {
+func (t *Task) ReposSnapshot() []taskslog.RepoMount {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return append([]RepoMount(nil), t.Repos...)
+	return append([]taskslog.RepoMount(nil), t.Repos...)
 }
 
 // SetRepoBranch updates the branch for a repo by index.
@@ -683,13 +550,13 @@ func (t *Task) LogFilename() string {
 }
 
 // LogHeader builds the immutable metadata header for a new task-log segment.
-func (t *Task) LogHeader() agent.MetaMessage {
+func (t *Task) LogHeader() *agent.MetaMessage {
 	repos := t.ReposSnapshot()
 	metaRepos := make([]agent.MetaRepo, len(repos))
 	for i, r := range repos {
 		metaRepos[i] = agent.MetaRepo{Name: r.Name, BaseBranch: r.BaseBranch, Branch: r.Branch, ContainerPath: r.ContainerPath}
 	}
-	return agent.MetaMessage{
+	return &agent.MetaMessage{
 		MessageType:       "caic_meta",
 		Prompt:            t.InitialPrompt.Text,
 		Title:             t.Title(),
@@ -712,16 +579,6 @@ func (t *Task) LogHeader() agent.MetaMessage {
 		CacheMounts:       metaCacheMountsFromRuntime(t.CacheMounts),
 		Mounts:            metaMountsFromRuntime(t.Mounts),
 	}
-}
-
-// LoadHistorySource opens path only far enough to validate and decode its
-// metadata header. Callers must provide a native parser before using the
-// returned source for its one semantic history scan.
-func LoadHistorySource(path string) (*LoadedTask, error) {
-	if path == "" {
-		return nil, ErrNoLog
-	}
-	return loadHistorySourceHeader(path)
 }
 
 // SudoLookupState returns the sudo lookup inputs and cached password.
@@ -753,7 +610,7 @@ func (t *Task) SetGitHubTokenEnabled(enabled bool) {
 }
 
 // SetState updates the state under the mutex and records the transition time.
-func (t *Task) SetState(s State) {
+func (t *Task) SetState(s taskslog.State) {
 	t.mu.Lock()
 	t.setState(s)
 	t.mu.Unlock()
@@ -761,9 +618,9 @@ func (t *Task) SetState(s State) {
 
 // SetStateAt updates the state under the mutex with an explicit timestamp.
 // Used during import to preserve the original transition time.
-func (t *Task) SetStateAt(s State, at time.Time) {
+func (t *Task) SetStateAt(s taskslog.State, at time.Time) {
 	t.mu.Lock()
-	if s != StateRunning {
+	if s != taskslog.StateRunning {
 		t.turnStartedAt = time.Time{}
 	}
 	t.state = s
@@ -775,7 +632,7 @@ func (t *Task) SetStateAt(s State, at time.Time) {
 // Called during import to estimate when the current mid-turn started.
 func (t *Task) SetTurnStartedAt(at time.Time) {
 	t.mu.Lock()
-	if t.state == StateRunning {
+	if t.state == taskslog.StateRunning {
 		t.turnStartedAt = at
 	}
 	t.mu.Unlock()
@@ -783,7 +640,7 @@ func (t *Task) SetTurnStartedAt(at time.Time) {
 
 // SetStateIf atomically transitions the state to next only if the current
 // state equals expected. Returns true if the transition occurred.
-func (t *Task) SetStateIf(expected, next State) bool {
+func (t *Task) SetStateIf(expected, next taskslog.State) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.state != expected {
@@ -796,7 +653,7 @@ func (t *Task) SetStateIf(expected, next State) bool {
 // SetStateIfAny atomically transitions the state to next only if the current
 // state is one of allowed. Returns the previous state and whether the
 // transition occurred.
-func (t *Task) SetStateIfAny(next State, allowed ...State) (prev State, changed bool) {
+func (t *Task) SetStateIfAny(next taskslog.State, allowed ...taskslog.State) (prev taskslog.State, changed bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	prev = t.state
@@ -812,7 +669,7 @@ func (t *Task) SetStateIfAny(next State, allowed ...State) (prev State, changed 
 // previous state and whether the transition occurred. Performing the guard and
 // the transition under a single lock closes the check-then-set race that a
 // separate GetState/SetState pair leaves open against concurrent transitions.
-func (t *Task) SetStateUnless(next State, excluded ...State) (prev State, changed bool) {
+func (t *Task) SetStateUnless(next taskslog.State, excluded ...taskslog.State) (prev taskslog.State, changed bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	prev = t.state
@@ -824,7 +681,7 @@ func (t *Task) SetStateUnless(next State, excluded ...State) (prev State, change
 }
 
 // GetState returns the current state under the mutex.
-func (t *Task) GetState() State {
+func (t *Task) GetState() taskslog.State {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.state
@@ -974,7 +831,7 @@ func (t *Task) WriteToLog(m agent.Message) error {
 	}
 	t.mu.Unlock()
 	if log == nil {
-		return ErrNoLog
+		return taskslog.ErrNoLog
 	}
 	return log.AppendMessage(m)
 }
@@ -998,10 +855,10 @@ func (t *Task) Title() string {
 // server to build API responses without data races on fields that
 // addMessage/RestoreMessages modify concurrently.
 type Snapshot struct {
-	State              State
+	State              taskslog.State
 	StateUpdatedAt     time.Time
 	TurnStartedAt      time.Time // non-zero only while state is Running
-	Repos              []RepoMount
+	Repos              []taskslog.RepoMount
 	RuntimeName        runtime.Name
 	RuntimeInstanceID  runtime.ID
 	Tailscale          bool
@@ -1073,7 +930,7 @@ func (t *Task) Snapshot() Snapshot {
 		State:              t.state,
 		StateUpdatedAt:     t.stateUpdatedAt,
 		TurnStartedAt:      t.turnStartedAt,
-		Repos:              append([]RepoMount(nil), t.Repos...),
+		Repos:              append([]taskslog.RepoMount(nil), t.Repos...),
 		RuntimeName:        t.RuntimeName,
 		RuntimeInstanceID:  t.runtimeInstanceID,
 		Tailscale:          t.Tailscale,
@@ -1301,18 +1158,18 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 	// diff stats that can appear after the ResultMessage.
 	// Only override non-terminal states — purged/crashed/failed tasks loaded
 	// from logs must keep their recorded state.
-	if len(msgs) > 0 && t.state != StatePurged && t.state != StateCrashed && t.state != StateFailed && t.state != StatePurging {
+	if len(msgs) > 0 && t.state != taskslog.StatePurged && t.state != taskslog.StateCrashed && t.state != taskslog.StateFailed && t.state != taskslog.StatePurging {
 		if lastAgentMessage(msgs) != nil {
 			switch {
 			case lastTurnHasUnansweredAsk(msgs):
-				t.setState(StateAsking)
+				t.setState(taskslog.StateAsking)
 			case lastTurnHasExitPlan(msgs) && t.planContent != "":
-				t.setState(StateHasPlan)
+				t.setState(taskslog.StateHasPlan)
 			default:
-				t.setState(StateWaiting)
+				t.setState(taskslog.StateWaiting)
 			}
 		} else if lastTurnHasUnansweredAsk(msgs) {
-			t.setState(StateAsking)
+			t.setState(taskslog.StateAsking)
 		}
 	}
 }
@@ -1378,7 +1235,7 @@ func (t *Task) GracefulStopSession(ctx context.Context, timeout time.Duration) (
 // stream and resets live stats. Message history is preserved so that SSE
 // subscribers (including reconnecting clients) can see the full timeline.
 func (t *Task) ClearMessages(ctx context.Context) {
-	t.addMessage(ctx, syntheticContextCleared(), false)
+	t.addMessage(ctx, agent.ContextCleared(), false)
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -1598,8 +1455,8 @@ func (t *Task) SendInput(ctx context.Context, p agent.Prompt) error {
 	if err := h.Session.SendPrompt(p); err != nil {
 		return err
 	}
-	if state == StateWaiting || state == StateAsking || state == StateHasPlan {
-		t.SetStateIfAny(StateRunning, StateWaiting, StateAsking, StateHasPlan)
+	if state == taskslog.StateWaiting || state == taskslog.StateAsking || state == taskslog.StateHasPlan {
+		t.SetStateIfAny(taskslog.StateRunning, taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan)
 		// Plan content is preserved — the UI hides naturally while the
 		// task is Running (isWaiting is false). When the agent finishes,
 		// the plan reappears (original or updated via Write/Edit).
@@ -1707,7 +1564,7 @@ func (t *Task) GenerateTitle(ctx context.Context, log *slog.Logger) {
 // user-visible error result. It returns false if the task is no longer in a
 // state owned by a recoverable agent session.
 func (t *Task) RecordSessionCrash(ctx context.Context, err error) bool {
-	if _, changed := t.SetStateIfAny(StateCrashed, StateRunning, StateWaiting, StateAsking, StateHasPlan); !changed {
+	if _, changed := t.SetStateIfAny(taskslog.StateCrashed, taskslog.StateRunning, taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan); !changed {
 		return false
 	}
 	msg := "Agent session crashed: " + err.Error()
@@ -1727,7 +1584,7 @@ func (t *Task) RecordSessionCrash(ctx context.Context, err error) bool {
 // user-visible error result. It returns false if the task is no longer in a
 // startup state.
 func (t *Task) RecordSessionFailure(ctx context.Context, err error) bool {
-	if _, changed := t.SetStateIfAny(StateFailed, StateStarting); !changed {
+	if _, changed := t.SetStateIfAny(taskslog.StateFailed, taskslog.StateStarting); !changed {
 		return false
 	}
 	msg := "Agent session failed: " + err.Error()
@@ -1752,10 +1609,10 @@ func (t *Task) setLiveDiffStatLocked(ds agent.DiffStat) {
 
 // setState updates the state and records the transition time. The caller must
 // hold t.mu when called from a locked context, or ensure exclusive access.
-func (t *Task) setState(s State) {
-	if s == StateRunning && t.state != StateRunning {
+func (t *Task) setState(s taskslog.State) {
+	if s == taskslog.StateRunning && t.state != taskslog.StateRunning {
 		t.turnStartedAt = time.Now().UTC()
-	} else if s != StateRunning {
+	} else if s != taskslog.StateRunning {
 		t.turnStartedAt = time.Time{}
 	}
 	t.state = s
@@ -1763,7 +1620,7 @@ func (t *Task) setState(s State) {
 }
 
 func (t *Task) recordStartupFailure(ctx context.Context, err error) {
-	t.SetState(StateFailed)
+	t.SetState(taskslog.StateFailed)
 	t.addMessage(ctx, &agent.LogMessage{Line: "Task startup failed: " + err.Error()}, false)
 }
 
@@ -1859,15 +1716,15 @@ func (t *Task) addParsedMessage(parsed agent.ParsedMessage, skipTitleGen bool) (
 	//     SetState on the main goroutine).
 	switch m.(type) {
 	case *agent.AskMessage:
-		if t.state == StateStarting || t.state == StateRunning || t.state == StateWaiting || t.state == StateHasPlan {
-			t.setState(StateAsking)
+		if t.state == taskslog.StateStarting || t.state == taskslog.StateRunning || t.state == taskslog.StateWaiting || t.state == taskslog.StateHasPlan {
+			t.setState(taskslog.StateAsking)
 		}
 	case *agent.TextMessage, *agent.ToolUseMessage, *agent.TodoMessage:
-		if t.state == StateStarting || t.state == StateWaiting || t.state == StateAsking || t.state == StateHasPlan {
-			if t.state == StateAsking && lastTurnHasUnansweredAsk(t.msgs) {
+		if t.state == taskslog.StateStarting || t.state == taskslog.StateWaiting || t.state == taskslog.StateAsking || t.state == taskslog.StateHasPlan {
+			if t.state == taskslog.StateAsking && lastTurnHasUnansweredAsk(t.msgs) {
 				break
 			}
-			t.setState(StateRunning)
+			t.setState(taskslog.StateRunning)
 		}
 	}
 	// Update live diff stat from relay polling.
@@ -1917,14 +1774,14 @@ func (t *Task) addParsedMessage(parsed agent.ParsedMessage, skipTitleGen bool) (
 		// we still need to distinguish Waiting from Asking/HasPlan.
 		// StateStarting is also handled: the agent subprocess may
 		// produce a result before Checkout.Start calls SetState(Running).
-		if t.state == StateRunning || t.state == StateStarting || t.state == StateWaiting || t.state == StateAsking {
+		if t.state == taskslog.StateRunning || t.state == taskslog.StateStarting || t.state == taskslog.StateWaiting || t.state == taskslog.StateAsking {
 			switch {
 			case lastTurnHasUnansweredAsk(t.msgs):
-				t.setState(StateAsking)
+				t.setState(taskslog.StateAsking)
 			case lastTurnHasExitPlan(t.msgs) && t.planContent != "":
-				t.setState(StateHasPlan)
+				t.setState(taskslog.StateHasPlan)
 			default:
-				t.setState(StateWaiting)
+				t.setState(taskslog.StateWaiting)
 			}
 		}
 		if !skipTitleGen {
@@ -2047,7 +1904,3 @@ func (t *Task) trackToolUse(tu *agent.ToolUseMessage) {
 		}
 	}
 }
-
-// syntheticContextCleared creates a SystemMessage marking a context-clear
-// boundary. Injected into the message stream so SSE subscribers see the
-// marker before history is wiped.

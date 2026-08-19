@@ -26,8 +26,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
-	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
 // taskHandlers owns task HTTP protocol concerns.
@@ -147,18 +147,18 @@ func (h *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) 
 	// directly, keeping memory bounded even for very large task logs.
 	state := entry.Task().GetState()
 	loadedTask := entry.LoadedTask()
-	if isTaskEventTerminal(state) || state == task.StateStopped {
+	if isTaskEventTerminal(state) || state == taskslog.StateStopped {
 		var sourceErr error
 		loadedTask, sourceErr = h.taskMgr.HistorySource(entry)
 		if sourceErr != nil {
 			log.WarnContext(r.Context(), "load SSE history source", "err", sourceErr)
-			if state != task.StateStopped && r.Context().Err() == nil {
+			if state != taskslog.StateStopped && r.Context().Err() == nil {
 				writeReplayHistoryError(w, flusher)
 			}
 			return
 		}
 	}
-	if isTaskEventTerminal(state) && loadedTask != nil && entry.LogPath() != "" {
+	if isTaskEventTerminal(state) && loadedTask != nil && entry.LogPath.Get() != "" {
 		stream.tracker = apiconv.NewToolTimingTracker(entry.Task().Harness, apiconv.FormatToolOutput)
 		if err := h.streamHistoryFromDisk(&stream, entry, loadedTask); err != nil {
 			log.WarnContext(r.Context(), "stream terminal SSE history", "err", err)
@@ -184,13 +184,13 @@ func (h *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) 
 		// That scan is intentionally invalidated by growth; close so the client
 		// reconnects against the new lifecycle rather than publishing a terminal
 		// history failure. Terminal raw-log corruption remains explicit below.
-		if state != task.StateStopped && r.Context().Err() == nil && errors.As(err, &historyErr) {
+		if state != taskslog.StateStopped && r.Context().Err() == nil && errors.As(err, &historyErr) {
 			writeReplayHistoryError(w, flusher)
 		}
 	}
 }
 
-func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.Entry, state task.State, loadedTask *task.LoadedTask) error {
+func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.Entry, state taskslog.State, loadedTask *taskslog.LoadedTask) error {
 	// Lazily load messages for entries that do not have a disk stream path.
 	if loadedTask == nil {
 		h.taskMgr.LoadMessagesOnDemand(entry)
@@ -280,14 +280,14 @@ func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.
 	return nil
 }
 
-func isTaskEventTerminal(state task.State) bool {
-	return state == task.StatePurged || state == task.StateCrashed || state == task.StateFailed
+func isTaskEventTerminal(state taskslog.State) bool {
+	return state == taskslog.StatePurged || state == taskslog.StateCrashed || state == taskslog.StateFailed
 }
 
 // streamHistoryFromDisk parses and writes history one message at a time. The
 // parser validates the scan through EOF while the stream emits incremental SSE
 // frames, so task history is never retained as a derived cache or full slice.
-func (h *taskHandlers) streamHistoryFromDisk(stream *taskEventStream, entry *taskmgr.Entry, lt *task.LoadedTask) error {
+func (h *taskHandlers) streamHistoryFromDisk(stream *taskEventStream, entry *taskmgr.Entry, lt *taskslog.LoadedTask) error {
 	if lt == nil || lt.LogPath() == "" {
 		return errors.New("task has no replayable log")
 	}
@@ -345,8 +345,8 @@ func writeReplayHistoryError(w io.Writer, flusher http.Flusher) {
 	flusher.Flush()
 }
 
-func shouldReplayHistoryFromDisk(state task.State, lt *task.LoadedTask) bool {
-	return state == task.StateStopped && lt != nil && lt.LogPath() != ""
+func shouldReplayHistoryFromDisk(state taskslog.State, lt *taskslog.LoadedTask) bool {
+	return state == taskslog.StateStopped && lt != nil && lt.LogPath() != ""
 }
 
 // handleTaskListEvents streams patch events for the task list as SSE. On first

@@ -1,6 +1,6 @@
-// Serialized task log writer, metadata append, and compression helpers.
+// Package taskslog owns task-log persistence, compression, and replay loading.
 
-package task
+package taskslog
 
 import (
 	"errors"
@@ -124,6 +124,16 @@ func openLogReader(path string) (io.ReadCloser, error) {
 	return os.Open(filepath.Clean(path))
 }
 
+var zstdDecodeDummy = strings.NewReader("")
+
+var zstdDecoderPool = sync.Pool{New: func() any {
+	decoder, err := zstd.NewReader(zstdDecodeDummy)
+	if err != nil {
+		panic(err)
+	}
+	return decoder
+}}
+
 type zstdReadCloser struct {
 	dec  *zstd.Decoder
 	file *os.File
@@ -136,7 +146,11 @@ func (r *zstdReadCloser) Read(p []byte) (int, error) {
 
 // Close releases the zstd decoder and closes the backing file.
 func (r *zstdReadCloser) Close() error {
-	r.dec.Close()
+	// Reset detaches the file before returning the reusable decoder to the pool.
+	if err := r.dec.Reset(nil); err != nil {
+		return errors.Join(err, r.file.Close())
+	}
+	zstdDecoderPool.Put(r.dec)
 	return r.file.Close()
 }
 
@@ -146,8 +160,12 @@ func openCompressedLogReader(path string) (*zstdReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	d, err := zstd.NewReader(f)
-	if err != nil {
+	d, ok := zstdDecoderPool.Get().(*zstd.Decoder)
+	if !ok {
+		panic("taskslog zstd decoder pool contains an invalid value")
+	}
+	if err := d.Reset(f); err != nil {
+		zstdDecoderPool.Put(d)
 		return nil, errors.Join(err, f.Close())
 	}
 	return &zstdReadCloser{dec: d, file: f}, nil

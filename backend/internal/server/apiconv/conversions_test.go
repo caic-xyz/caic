@@ -14,6 +14,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/maruel/ksid"
 )
@@ -276,36 +277,36 @@ func TestTaskState(t *testing.T) {
 	t.Parallel()
 
 	for _, test := range []struct {
-		state task.State
+		state taskslog.State
 		want  v1.TaskState
 	}{
-		{task.StatePending, v1.TaskStatePending},
-		{task.StateBranching, v1.TaskStateBranching},
-		{task.StateProvisioning, v1.TaskStateProvisioning},
-		{task.StateStarting, v1.TaskStateStarting},
-		{task.StateRunning, v1.TaskStateRunning},
-		{task.StateWaiting, v1.TaskStateWaiting},
-		{task.StateAsking, v1.TaskStateAsking},
-		{task.StateHasPlan, v1.TaskStateHasPlan},
-		{task.StatePulling, v1.TaskStatePulling},
-		{task.StatePushing, v1.TaskStatePushing},
-		{task.StateStopping, v1.TaskStateStopping},
-		{task.StateStopped, v1.TaskStateStopped},
-		{task.StatePurging, v1.TaskStatePurging},
-		{task.StateCrashed, v1.TaskStateCrashed},
-		{task.StateFailed, v1.TaskStateFailed},
-		{task.StatePurged, v1.TaskStatePurged},
+		{taskslog.StatePending, v1.TaskStatePending},
+		{taskslog.StateBranching, v1.TaskStateBranching},
+		{taskslog.StateProvisioning, v1.TaskStateProvisioning},
+		{taskslog.StateStarting, v1.TaskStateStarting},
+		{taskslog.StateRunning, v1.TaskStateRunning},
+		{taskslog.StateWaiting, v1.TaskStateWaiting},
+		{taskslog.StateAsking, v1.TaskStateAsking},
+		{taskslog.StateHasPlan, v1.TaskStateHasPlan},
+		{taskslog.StatePulling, v1.TaskStatePulling},
+		{taskslog.StatePushing, v1.TaskStatePushing},
+		{taskslog.StateStopping, v1.TaskStateStopping},
+		{taskslog.StateStopped, v1.TaskStateStopped},
+		{taskslog.StatePurging, v1.TaskStatePurging},
+		{taskslog.StateCrashed, v1.TaskStateCrashed},
+		{taskslog.StateFailed, v1.TaskStateFailed},
+		{taskslog.StatePurged, v1.TaskStatePurged},
 	} {
 		got, err := TaskState(test.state)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if got != test.want {
-			t.Errorf("TaskState(%d) = %q, want %q", test.state, got, test.want)
+			t.Errorf("TaskState(%q) = %q, want %q", test.state, got, test.want)
 		}
 	}
-	if _, err := TaskState(task.State(999)); err == nil {
-		t.Error("TaskState(999) error = nil, want error")
+	if _, err := TaskState(taskslog.State("bogus")); err == nil {
+		t.Error("TaskState(bogus) error = nil, want error")
 	}
 }
 
@@ -314,6 +315,7 @@ func TestTask(t *testing.T) {
 	t.Run("OverageDoesNotBlock", func(t *testing.T) {
 		t.Parallel()
 		tk := &task.Task{Harness: harness.Claude}
+		tk.SetState(taskslog.StatePending)
 		tk.RestoreMessages([]agent.Message{&agent.RateLimitMessage{
 			Status:         "rejected",
 			ResetsAt:       time.Now().Add(time.Hour),
@@ -334,6 +336,7 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		now := time.Now()
 		tk := &task.Task{Harness: harness.Claude}
+		tk.SetState(taskslog.StatePending)
 		tk.RestoreMessages([]agent.Message{
 			&agent.RateLimitMessage{
 				Status:        agent.RateLimitStatusRejected,
@@ -362,6 +365,7 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		parentID := ksid.NewID()
 		tk := &task.Task{ID: ksid.NewID(), Harness: harness.Claude, ForkedFromTaskID: parentID}
+		tk.SetState(taskslog.StatePending)
 
 		got, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})
 		if err != nil {

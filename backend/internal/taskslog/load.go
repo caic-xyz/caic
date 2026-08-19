@@ -1,6 +1,6 @@
-// Loads task definitions from disk and resolves their configurations.
+// Task-log loading reconstructs persisted task metadata and messages from disk.
 
-package task
+package taskslog
 
 import (
 	"bufio"
@@ -1585,22 +1585,6 @@ func (s *logTailScan) finish(lt *LoadedTask) {
 	}
 }
 
-// loadHistorySourceHeader reads only the metadata header needed to create a
-// raw history source. It intentionally does not scan inventory records or
-// validate EOF: the caller's subsequent semantic stream performs that one full
-// scan and validation.
-func loadHistorySourceHeader(path string) (loaded *LoadedTask, retErr error) {
-	retErr = scanPhysicalLog(path, false, func(info os.FileInfo, _ *physicalLogScanner, meta agent.MetaMessage) error {
-		base := trimLogExt(filepath.Base(path))
-		loaded = loadedTaskFromMeta(path, taskIDFromLogBase(base), &meta, info.ModTime().UTC(), info.Size())
-		return nil
-	})
-	if retErr != nil {
-		return nil, retErr
-	}
-	return loaded, nil
-}
-
 // loadLogHeader reads the metadata header and result trailer from a task log.
 // It does NOT parse individual messages — call LoadMessages for that. The path
 // is stored for lazy loading.
@@ -1683,42 +1667,35 @@ func tsToTime(ts float64) time.Time {
 	return time.Unix(sec, nsec).UTC()
 }
 
-// parseState converts a state string back to a State value.
+// parseState converts a persisted state string back to a State value.
+// An unrecognized value (corrupt or from a newer version) is treated as
+// failed rather than rejected, so one bad historical log cannot block startup.
 func parseState(s string) State {
-	switch s {
-	case "pending":
-		return StatePending
-	case "branching":
-		return StateBranching
-	case "provisioning":
-		return StateProvisioning
-	case "starting":
-		return StateStarting
-	case "running":
-		return StateRunning
-	case "waiting":
-		return StateWaiting
-	case "asking":
-		return StateAsking
-	case "has_plan":
-		return StateHasPlan
-	case "pulling":
-		return StatePulling
-	case "pushing":
-		return StatePushing
-	case "stopping":
-		return StateStopping
-	case "stopped":
-		return StateStopped
-	case "purging":
-		return StatePurging
-	case "crashed":
-		return StateCrashed
-	case "failed":
-		return StateFailed
-	case "purged", "terminated": // "terminated" is for backward compat with pre-rename logs; remove once old logs age out
+	if s == "terminated" { // backward compat with pre-rename logs; remove once old logs age out
 		return StatePurged
-	default:
+	}
+	state := State(s)
+	if state.Validate() != nil {
 		return StateFailed
 	}
+	return state
+}
+
+// LoadHistorySource validates and loads only a log header for history
+// streaming. It intentionally does not scan inventory records or validate
+// EOF: the caller's subsequent semantic stream performs that one full scan
+// and validation.
+func LoadHistorySource(path string) (loaded *LoadedTask, retErr error) {
+	if path == "" {
+		return nil, ErrNoLog
+	}
+	retErr = scanPhysicalLog(path, false, func(info os.FileInfo, _ *physicalLogScanner, meta agent.MetaMessage) error {
+		base := trimLogExt(filepath.Base(path))
+		loaded = loadedTaskFromMeta(path, taskIDFromLogBase(base), &meta, info.ModTime().UTC(), info.Size())
+		return nil
+	})
+	if retErr != nil {
+		return nil, retErr
+	}
+	return loaded, nil
 }

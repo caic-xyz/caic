@@ -1,6 +1,6 @@
-// Tests LogStore task-log compression and terminal-log selection.
+// Tests Writer task-log compression and terminal-log selection.
 
-package task
+package taskslog
 
 import (
 	"io"
@@ -13,7 +13,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
-func TestLogStoreCompressPath(t *testing.T) {
+func TestWriterCompressPath(t *testing.T) {
 	t.Parallel()
 	t.Run("Success", func(t *testing.T) {
 		t.Parallel()
@@ -23,7 +23,7 @@ func TestLogStoreCompressPath(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		compressed, err := (&LogStore{}).compressPath(path)
+		compressed, err := (&Writer{}).compressPath(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -61,7 +61,7 @@ func TestLogStoreCompressPath(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if _, err := (&LogStore{}).compressPath(path); err == nil {
+		if _, err := (&Writer{}).compressPath(path); err == nil {
 			t.Fatal("compressPath returned nil error")
 		}
 		data, err := os.ReadFile(path) //nolint:gosec // path is test-controlled.
@@ -77,7 +77,7 @@ func TestLogStoreCompressPath(t *testing.T) {
 	})
 }
 
-func TestLogStoreCompressTerminalLogs(t *testing.T) {
+func TestWriterCompressTerminalLogs(t *testing.T) {
 	t.Parallel()
 	t.Run("CompressesPurged", func(t *testing.T) {
 		t.Parallel()
@@ -91,7 +91,7 @@ func TestLogStoreCompressTerminalLogs(t *testing.T) {
 			t.Fatal(err)
 		}
 		logs := []*LoadedTask{{path: path, State: StatePurged}}
-		if err := (&LogStore{LogDir: dir}).CompressTerminalLogs(logs); err != nil {
+		if err := (&Writer{LogDir: dir}).CompressTerminalLogs(logs); err != nil {
 			t.Fatal(err)
 		}
 		if logs[0].LogPath() != compressedLogPath(path) {
@@ -126,7 +126,7 @@ func TestLogStoreCompressTerminalLogs(t *testing.T) {
 		if err := os.WriteFile(path, []byte("stale source\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := (&LogStore{}).compressPath(path); err != nil {
+		if _, err := (&Writer{}).compressPath(path); err != nil {
 			t.Fatal(err)
 		}
 		const contents = "authoritative source\n"
@@ -141,7 +141,7 @@ func TestLogStoreCompressTerminalLogs(t *testing.T) {
 			t.Fatalf("log paths = %q, want plain source %q", paths, path)
 		}
 		logs := []*LoadedTask{{path: path, State: StatePurged}}
-		if err := (&LogStore{LogDir: dir}).CompressTerminalLogs(logs); err != nil {
+		if err := (&Writer{LogDir: dir}).CompressTerminalLogs(logs); err != nil {
 			t.Fatal(err)
 		}
 		r, err := openLogReader(logs[0].LogPath())
@@ -171,7 +171,7 @@ func TestLogStoreCompressTerminalLogs(t *testing.T) {
 			t.Fatal(err)
 		}
 		logs := []*LoadedTask{{path: path, State: StateStopped}}
-		if err := (&LogStore{LogDir: filepath.Dir(path)}).CompressTerminalLogs(logs); err != nil {
+		if err := (&Writer{LogDir: filepath.Dir(path)}).CompressTerminalLogs(logs); err != nil {
 			t.Fatal(err)
 		}
 		if logs[0].LogPath() != path {

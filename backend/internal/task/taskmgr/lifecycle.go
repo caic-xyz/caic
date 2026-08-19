@@ -17,6 +17,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
 // Lifecycle coordinates state transitions, session watching, and user
@@ -40,16 +41,16 @@ func (r *Lifecycle) Close() error {
 // Purge transitions the task to purging and removes its runtime resources.
 func (r *Lifecycle) Purge(ctx context.Context) error {
 	t := r.entry.Task()
-	state, changed := t.SetStateIfAny(task.StatePurging,
-		task.StateWaiting, task.StateAsking, task.StateHasPlan,
-		task.StateRunning, task.StateStopping, task.StateStopped, task.StateCrashed)
+	state, changed := t.SetStateIfAny(taskslog.StatePurging,
+		taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan,
+		taskslog.StateRunning, taskslog.StateStopping, taskslog.StateStopped, taskslog.StateCrashed)
 	if !changed {
 		return conflict("task is not running, waiting, stopped, or crashed")
 	}
 	r.manager.NotifyTaskChange()
 	r.manager.log.InfoContext(ctx, "purge requested", "task", t.ID, "instance", t.RuntimeInstanceID(), "state", state)
 	r.wg.Go(func() {
-		r.cleanup(r.ctx, task.StatePurged)
+		r.cleanup(r.ctx, taskslog.StatePurged)
 		r.manager.log.InfoContext(r.ctx, "purge completed", "task", t.ID, "final_state", t.GetState())
 	})
 	return nil
@@ -58,8 +59,8 @@ func (r *Lifecycle) Purge(ctx context.Context) error {
 // Stop transitions the task to stopping and stops its runtime without purging it.
 func (r *Lifecycle) Stop(ctx context.Context) error {
 	t := r.entry.Task()
-	state, changed := t.SetStateIfAny(task.StateStopping,
-		task.StateWaiting, task.StateAsking, task.StateHasPlan, task.StateRunning)
+	state, changed := t.SetStateIfAny(taskslog.StateStopping,
+		taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan, taskslog.StateRunning)
 	if !changed {
 		return conflict("task is not running or waiting")
 	}
@@ -76,7 +77,7 @@ func (r *Lifecycle) Stop(ctx context.Context) error {
 // Revive restarts a stopped or crashed task.
 func (r *Lifecycle) Revive() error {
 	t := r.entry.Task()
-	if _, changed := t.SetStateIfAny(task.StateProvisioning, task.StateStopped, task.StateCrashed); !changed {
+	if _, changed := t.SetStateIfAny(taskslog.StateProvisioning, taskslog.StateStopped, taskslog.StateCrashed); !changed {
 		return conflict("task is not stopped or crashed")
 	}
 	r.entry.Reset()
@@ -87,8 +88,8 @@ func (r *Lifecycle) Revive() error {
 		h, err := r.agentRuntime.ReviveTask(ctx, t)
 		if err != nil {
 			r.manager.log.WarnContext(ctx, "revive failed", "task", t.ID, "err", err)
-			t.SetState(task.StateFailed)
-			r.entry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "revive task")})
+			t.SetState(taskslog.StateFailed)
+			r.entry.Finish(&taskslog.Result{State: taskslog.StateFailed, Err: internalErr(err, "revive task")})
 			r.manager.NotifyTaskChange()
 			return
 		}
@@ -101,7 +102,7 @@ func (r *Lifecycle) Revive() error {
 // Restart starts a fresh agent session with prompt.
 func (r *Lifecycle) Restart(ctx context.Context, prompt agent.Prompt) error {
 	t := r.entry.Task()
-	prevState, changed := t.SetStateIfAny(task.StateStarting, task.StateWaiting, task.StateAsking, task.StateHasPlan)
+	prevState, changed := t.SetStateIfAny(taskslog.StateStarting, taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan)
 	if !changed {
 		return conflict("task is not waiting or asking")
 	}
@@ -114,7 +115,7 @@ func (r *Lifecycle) Restart(ctx context.Context, prompt agent.Prompt) error {
 			err = errors.New("agent connection target missing SSH host")
 		}
 		if err != nil {
-			t.SetStateIf(task.StateStarting, prevState)
+			t.SetStateIf(taskslog.StateStarting, prevState)
 			return &Error{Kind: KindBadRequest, Msg: "no prompt provided and failed to read plan from instance", Err: err}
 		}
 	}
@@ -130,7 +131,7 @@ func (r *Lifecycle) Restart(ctx context.Context, prompt agent.Prompt) error {
 // ClearContext starts a fresh idle agent session.
 func (r *Lifecycle) ClearContext() error {
 	t := r.entry.Task()
-	if _, changed := t.SetStateIfAny(task.StateStarting, task.StateWaiting, task.StateAsking, task.StateHasPlan); !changed {
+	if _, changed := t.SetStateIfAny(taskslog.StateStarting, taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan); !changed {
 		return conflict("task is not waiting or asking")
 	}
 	if r.agentRuntime.Checkout == nil {
@@ -189,7 +190,7 @@ func (r *Lifecycle) Start(ctx context.Context, resolvedGitHubToken string) error
 	t := r.entry.Task()
 	h, err := r.agentRuntime.Start(ctx, t, resolvedGitHubToken)
 	if err != nil {
-		r.entry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "start task")})
+		r.entry.Finish(&taskslog.Result{State: taskslog.StateFailed, Err: internalErr(err, "start task")})
 		r.manager.NotifyTaskChange()
 		return err
 	}
@@ -206,7 +207,7 @@ func (r *Lifecycle) Fork(ctx context.Context, p ForkParams) (string, error) { //
 	source := r.entry.Task()
 	state := source.GetState()
 	switch state {
-	case task.StateRunning, task.StateWaiting, task.StateAsking, task.StateHasPlan, task.StateStopped, task.StateCrashed:
+	case taskslog.StateRunning, taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan, taskslog.StateStopped, taskslog.StateCrashed:
 	default:
 		return "", conflict("task must be active, stopped, or crashed to fork")
 	}
@@ -248,7 +249,7 @@ func (r *Lifecycle) Fork(ctx context.Context, p ForkParams) (string, error) { //
 	for _, repoMount := range sourceRepos {
 		sourceRepoNames[repoMount.Name] = struct{}{}
 	}
-	var extraMounts []task.RepoMount
+	var extraMounts []taskslog.RepoMount
 	for _, rs := range p.ExtraRepos {
 		if _, overlap := sourceRepoNames[rs.Name]; overlap {
 			return "", badRequestf("extraRepos contains repo already in source task: %s", rs.Name)
@@ -257,10 +258,10 @@ func (r *Lifecycle) Fork(ctx context.Context, p ForkParams) (string, error) { //
 		if !ok {
 			return "", badRequestf("unknown extra repo: %s", rs.Name)
 		}
-		extraMounts = append(extraMounts, task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: checkout.Dir, ContainerPath: r.manager.containerPathForRepo(rs.Name)})
+		extraMounts = append(extraMounts, taskslog.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: checkout.Dir, ContainerPath: r.manager.containerPathForRepo(rs.Name)})
 	}
 
-	mounts := make([]task.RepoMount, len(sourceRepos), len(sourceRepos)+len(extraMounts))
+	mounts := make([]taskslog.RepoMount, len(sourceRepos), len(sourceRepos)+len(extraMounts))
 	copy(mounts, sourceRepos)
 	mounts = append(mounts, extraMounts...)
 	t := &task.Task{
@@ -287,6 +288,9 @@ func (r *Lifecycle) Fork(ctx context.Context, p ForkParams) (string, error) { //
 		Provider:          r.manager.provider,
 	}
 	t.SetTitle(p.Prompt.Text)
+	// State has no meaningful zero value; set it explicitly before the fork
+	// is registered and becomes visible to readers.
+	t.SetState(taskslog.StatePending)
 	forkEntry := r.manager.NewEntry(t, nil)
 	r.manager.insertEntry(t.ID.String(), forkEntry)
 	forkEntry.Lifecycle.generateTitle()
@@ -295,7 +299,7 @@ func (r *Lifecycle) Fork(ctx context.Context, p ForkParams) (string, error) { //
 		ctx, tk := trace.NewTask(forkEntry.Lifecycle.ctx, "task.fork:"+source.ID.String()+"->"+t.ID.String())
 		defer tk.End()
 		if err := r.manager.allocateBranches(ctx, t, mounts, len(sourceRepos)); err != nil {
-			forkEntry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "allocate fork branch")})
+			forkEntry.Finish(&taskslog.Result{State: taskslog.StateFailed, Err: internalErr(err, "allocate fork branch")})
 			r.manager.NotifyTaskChange()
 			return
 		}
@@ -310,7 +314,7 @@ func (r *Lifecycle) Fork(ctx context.Context, p ForkParams) (string, error) { //
 		}
 		h, err := forkEntry.Lifecycle.agentRuntime.ForkTask(ctx, source, t, forkOpts, p.ResolvedGitHubToken)
 		if err != nil {
-			forkEntry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "fork task")})
+			forkEntry.Finish(&taskslog.Result{State: taskslog.StateFailed, Err: internalErr(err, "fork task")})
 			r.manager.NotifyTaskChange()
 			return
 		}
@@ -326,11 +330,13 @@ func (r *Lifecycle) Fork(ctx context.Context, p ForkParams) (string, error) { //
 // Sync pushes the task branch to its configured origin or default branch.
 func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*SyncResult, error) {
 	t := r.entry.Task()
-	switch t.GetState() { //nolint:exhaustive // only terminal/blocked states are relevant
-	case task.StatePending:
+	switch t.GetState() {
+	case taskslog.StatePending:
 		return nil, conflict("task has no instance yet")
-	case task.StateStopping, task.StateStopped, task.StatePurging, task.StateCrashed, task.StateFailed, task.StatePurged:
+	case taskslog.StateStopping, taskslog.StateStopped, taskslog.StatePurging, taskslog.StateCrashed, taskslog.StateFailed, taskslog.StatePurged:
 		return nil, conflict("task is in a terminal state")
+	case taskslog.StateBranching, taskslog.StateProvisioning, taskslog.StateStarting, taskslog.StateRunning, taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan, taskslog.StatePulling, taskslog.StatePushing:
+		// Syncable states; continue below.
 	}
 	checkout := r.agentRuntime.Checkout
 	if checkout == nil {
@@ -415,13 +421,13 @@ func (r *Lifecycle) reconnectImportedSession() {
 		h, err = r.agentRuntime.EnsureSession(r.ctx, tlog, t, h)
 		if err != nil {
 			tlog.Warn("ensure session failed", "err", err)
-			t.SetState(task.StateWaiting)
+			t.SetState(taskslog.StateWaiting)
 			r.manager.NotifyTaskChange()
 			return
 		}
 		tlog.Debug("auto-reconnect succeeded")
 		t.SetVNCPort(r.manager.Runtimes.VNCPort(r.ctx, t.RuntimeInstanceID()))
-		if checkout := r.agentRuntime.Checkout; checkout != nil && (t.GetState() == task.StateWaiting || t.GetState() == task.StateAsking || t.GetState() == task.StateHasPlan) {
+		if checkout := r.agentRuntime.Checkout; checkout != nil && (t.GetState() == taskslog.StateWaiting || t.GetState() == taskslog.StateAsking || t.GetState() == taskslog.StateHasPlan) {
 			if ds := checkout.BranchDiffStat(r.ctx, r.manager.log, r.manager.Runtimes, t); len(ds) > 0 {
 				t.SetLiveDiffStat(ds)
 			}
@@ -473,7 +479,7 @@ func (r *Lifecycle) watchSession(h *task.SessionHandle) {
 						crashErr = errors.New(exitErr)
 					}
 					costUSD, numTurns, duration, usage, _ := t.LiveStats()
-					result := &task.Result{State: task.StateCrashed, DiffStat: t.LiveDiffStat(), CostUSD: costUSD, Duration: duration, NumTurns: numTurns, Usage: usage, AgentResult: t.LastAgentResult(), Err: crashErr}
+					result := &taskslog.Result{State: taskslog.StateCrashed, DiffStat: t.LiveDiffStat(), CostUSD: costUSD, Duration: duration, NumTurns: numTurns, Usage: usage, AgentResult: t.LastAgentResult(), Err: crashErr}
 					r.entry.Finish(result)
 					if err := r.manager.writeTaskResultTrailer(r.entry, result); err != nil {
 						r.manager.log.WarnContext(ctx, "write crashed task trailer failed", append(attrs, "err", err)...)
@@ -484,7 +490,7 @@ func (r *Lifecycle) watchSession(h *task.SessionHandle) {
 						failureErr = errors.New(exitErr)
 					}
 					costUSD, numTurns, duration, usage, _ := t.LiveStats()
-					result := &task.Result{State: task.StateFailed, DiffStat: t.LiveDiffStat(), CostUSD: costUSD, Duration: duration, NumTurns: numTurns, Usage: usage, AgentResult: t.LastAgentResult(), Err: failureErr}
+					result := &taskslog.Result{State: taskslog.StateFailed, DiffStat: t.LiveDiffStat(), CostUSD: costUSD, Duration: duration, NumTurns: numTurns, Usage: usage, AgentResult: t.LastAgentResult(), Err: failureErr}
 					r.entry.Finish(result)
 					if err := r.manager.writeTaskResultTrailer(r.entry, result); err != nil {
 						r.manager.log.WarnContext(ctx, "write failed task trailer failed", append(attrs, "err", err)...)
@@ -492,7 +498,7 @@ func (r *Lifecycle) watchSession(h *task.SessionHandle) {
 				}
 			} else {
 				r.manager.log.InfoContext(ctx, "session exited", attrs...)
-				t.SetStateIf(task.StateRunning, task.StateWaiting)
+				t.SetStateIf(taskslog.StateRunning, taskslog.StateWaiting)
 			}
 			r.manager.NotifyTaskChange()
 		case <-r.entry.Done():
@@ -511,7 +517,7 @@ func (r *Lifecycle) stopFailedSessionInstance(ctx context.Context, t *task.Task,
 	}
 }
 
-func (r *Lifecycle) cleanup(ctx context.Context, reason task.State) {
+func (r *Lifecycle) cleanup(ctx context.Context, reason taskslog.State) {
 	r.entry.Cleanup(func() {
 		start := time.Now()
 		t := r.entry.Task()

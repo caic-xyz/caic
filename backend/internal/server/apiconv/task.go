@@ -9,13 +9,14 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
 // TaskInput is the complete server-resolved task state needed for an API DTO.
 type TaskInput struct {
 	Task               *task.Task
 	Snapshot           task.Snapshot
-	Result             *task.Result
+	Result             *taskslog.Result
 	Repos              []v1.TaskRepo
 	SudoPassword       string
 	ContextWindowLimit int

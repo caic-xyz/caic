@@ -40,6 +40,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/gomode"
 	"github.com/caic-xyz/caic/gomode/voicegateway/voicertc"
 	"github.com/caic-xyz/caic/oauth/oauthclient"
@@ -425,11 +426,12 @@ func testEntries(s *testRouter) []*taskmgr.Entry {
 // loadPurgedTasksForTest reads logs from disk and registers purged tasks via
 // the manager. Replaces the deleted Server.loadPurgedTasks helper.
 func loadPurgedTasksForTest(s *testRouter, logDir string) error {
-	logs, err := task.LoadLogs(logDir)
+	store := taskslog.NewStore(logDir)
+	logs, err := store.LoadPlain()
 	if err != nil {
 		return err
 	}
-	return s.taskMgr.LoadPurgedTasks(logs)
+	return s.taskMgr.LoadPurgedTasks(store.Settled(logs, time.Now()))
 }
 
 type checkoutConstructionTestFixture struct {
@@ -652,7 +654,7 @@ func TestHandleTaskInput(t *testing.T) {
 }
 
 // testRestart is a helper for TestHandleRestart subtests.
-func testRestart(t *testing.T, state task.State, bodyJSON string, wantStatus int, wantCode api.ErrorCode) {
+func testRestart(t *testing.T, state taskslog.State, bodyJSON string, wantStatus int, wantCode api.ErrorCode) {
 	s := newTestRouter(t, nil)
 	tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}}
 	tk.SetState(state)
@@ -676,12 +678,12 @@ func TestHandleRestart(t *testing.T) {
 	t.Parallel()
 	t.Run("NotWaiting", func(t *testing.T) {
 		t.Parallel()
-		testRestart(t, task.StateRunning, `{"prompt":{"text":"new plan"}}`, http.StatusConflict, api.CodeConflict)
+		testRestart(t, taskslog.StateRunning, `{"prompt":{"text":"new plan"}}`, http.StatusConflict, api.CodeConflict)
 	})
 
 	t.Run("EmptyPrompt", func(t *testing.T) {
 		t.Parallel()
-		testRestart(t, task.StateWaiting, `{"prompt":{"text":""}}`, http.StatusBadRequest, api.CodeBadRequest)
+		testRestart(t, taskslog.StateWaiting, `{"prompt":{"text":""}}`, http.StatusBadRequest, api.CodeBadRequest)
 	})
 }
 
@@ -709,8 +711,8 @@ func TestHandlePurge(t *testing.T) {
 
 	t.Run("Waiting", func(t *testing.T) {
 		t.Parallel()
-		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
-		tk.SetState(task.StateWaiting)
+		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []taskslog.RepoMount{{Name: "r"}}}
+		tk.SetState(taskslog.StateWaiting)
 		s := newTestRouter(t, nil)
 		registerRouterCheckout(t, s.taskMgr.Checkouts, "r", newRouterTestCheckout(t.TempDir()))
 		insertTestTask(t, s, "t1", tk)
@@ -737,8 +739,8 @@ func TestHandlePurge(t *testing.T) {
 
 	t.Run("CancelledContext", func(t *testing.T) {
 		t.Parallel()
-		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
-		tk.SetState(task.StateRunning)
+		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []taskslog.RepoMount{{Name: "r"}}}
+		tk.SetState(taskslog.StateRunning)
 		s := newTestRouter(t, nil)
 		registerRouterCheckout(t, s.taskMgr.Checkouts, "r", newRouterTestCheckout(t.TempDir()))
 		insertTestTask(t, s, "t1", tk)
@@ -1144,7 +1146,7 @@ func TestSignalProcess(t *testing.T) {
 	t.Run("strictDecodeRejectsUnknownField", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
+		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []taskslog.RepoMount{{Name: "r"}}}
 		tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", "", 0)
 		insertTestTask(t, s, "t1", tk)
 		backend := &runtimetest.FakeBackend{}
@@ -1173,7 +1175,7 @@ func TestSignalProcess(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
+		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []taskslog.RepoMount{{Name: "r"}}}
 		tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", "", 0)
 		insertTestTask(t, s, "t1", tk)
 		backend := &runtimetest.FakeBackend{}
@@ -1916,10 +1918,10 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		writeLogFile(t, logDir, taskID.String()+".jsonl", meta, `not-json`)
 
 		tk := &task.Task{ID: taskID, InitialPrompt: agent.Prompt{Text: "fix the bug"}, Harness: harness.Claude}
-		tk.SetState(task.StateStopped)
+		tk.SetState(taskslog.StateStopped)
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}})
 		entry := s.taskMgr.NewEntry(tk, nil)
-		entry.SetLogPath(path)
+		entry.LogPath.Set(path)
 		s.taskMgr.Insert(taskID.String(), entry)
 
 		stoppedReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
@@ -1933,7 +1935,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		// A new incarnation reconnects through the normal live-history path;
 		// it must not be held behind the stopped scan's old parse failure.
 		tk.RestoreMessages([]agent.Message{&agent.TextMessage{Text: "revived live history"}})
-		tk.SetState(task.StateRunning)
+		tk.SetState(taskslog.StateRunning)
 		ctx, cancel := context.WithCancel(t.Context())
 		t.Cleanup(cancel)
 		time.AfterFunc(20*time.Millisecond, cancel)
@@ -1970,15 +1972,15 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		writeLogFile(t, logDir, taskID.String()+".jsonl", meta, message)
 
 		tk := &task.Task{ID: taskID, InitialPrompt: agent.Prompt{Text: "fix the bug"}, Harness: harness.Claude}
-		tk.SetState(task.StateStopped)
+		tk.SetState(taskslog.StateStopped)
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire}})
 		entry := s.taskMgr.NewEntry(tk, nil)
-		entry.SetLogPath(path)
+		entry.LogPath.Set(path)
 		s.taskMgr.Insert(taskID.String(), entry)
 
 		recorder := httptest.NewRecorder()
 		w := &reviveDuringStoppedScanWriter{ResponseRecorder: recorder, revive: func() {
-			tk.SetState(task.StateRunning)
+			tk.SetState(taskslog.StateRunning)
 			tk.RestoreMessages([]agent.Message{&agent.TextMessage{Text: "revived live event"}})
 		}}
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
@@ -1999,7 +2001,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		taskID := ksid.NewID()
 		tk := &task.Task{ID: taskID, InitialPrompt: agent.Prompt{Text: "fix the bug"}, Harness: harness.Claude}
 		tk.RestoreMessages([]agent.Message{&agent.TextMessage{Text: "retained in-memory history"}})
-		tk.SetState(task.StateFailed)
+		tk.SetState(taskslog.StateFailed)
 
 		s := newTestRouter(t, nil)
 		insertTestTask(t, s, taskID.String(), tk)
@@ -2037,7 +2039,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 			},
 		})
 		writeLogFile(t, logDir, taskID.String()+".jsonl", meta, diskMsg)
-		logs, err := task.LoadLogs(logDir)
+		logs, err := taskslog.LoadLogs(logDir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2050,7 +2052,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 
 		tk := &task.Task{ID: taskID, InitialPrompt: agent.Prompt{Text: "fix the bug"}, Harness: harness.Claude}
 		tk.RestoreMessages([]agent.Message{&agent.TextMessage{Text: "fast in-memory history"}})
-		tk.SetState(task.StateRunning)
+		tk.SetState(taskslog.StateRunning)
 
 		s := newTestRouter(t, nil)
 		s.taskMgr.Insert(taskID.String(), s.taskMgr.NewEntry(tk, logs[0]))
@@ -2097,7 +2099,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		result := mustJSON(t, agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done"})
 		staleExit := `{"type":"caic_exit","exit_code":2,"error":"stale crash"}`
 		writeLogFile(t, logDir, taskID.String()+".jsonl", meta, initMsg, early, result, staleExit)
-		logs, err := task.LoadLogs(logDir)
+		logs, err := taskslog.LoadLogs(logDir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2111,11 +2113,11 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		tk := &task.Task{
 			ID:            taskID,
 			InitialPrompt: agent.Prompt{Text: "fix the bug"},
-			Repos:         []task.RepoMount{{Name: "r", Branch: "caic-0"}},
+			Repos:         []taskslog.RepoMount{{Name: "r", Branch: "caic-0"}},
 			Harness:       harness.Claude,
 		}
 		tk.RestoreMessages([]agent.Message{&agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done"}})
-		tk.SetState(task.StateStopped)
+		tk.SetState(taskslog.StateStopped)
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}})
 		s.taskMgr.Insert(taskID.String(), s.taskMgr.NewEntry(tk, logs[0]))
 

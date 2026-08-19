@@ -24,6 +24,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/mcp/mcptest"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/oauth"
 )
 
@@ -167,7 +168,9 @@ func TestMCPHandlers(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
 		id := ksid.NewID()
-		insertTestTask(t, s, id.String(), &task.Task{ID: id, InitialPrompt: agent.Prompt{Text: "ship voice prompt"}, Harness: harness.Claude})
+		tk := &task.Task{ID: id, InitialPrompt: agent.Prompt{Text: "ship voice prompt"}, Harness: harness.Claude}
+		tk.SetState(taskslog.StatePending)
+		insertTestTask(t, s, id.String(), tk)
 		_, resp := postMCP(t, s.mcpHandlers.protocol, "server/discover", "", mcpRequestJSON("server/discover", `{}`))
 		if resp.Error != nil {
 			t.Fatalf("error = %#v", resp.Error)
@@ -387,7 +390,7 @@ func TestMCPHandlers(t *testing.T) {
 		id := ksid.NewID()
 		tk := &task.Task{ID: id, InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Claude}
 		tk.SetTitle("Fix tests")
-		tk.SetState(task.StateWaiting)
+		tk.SetState(taskslog.StateWaiting)
 		insertTestTask(t, s, id.String(), tk)
 
 		body := mcpRequestJSON("tools/call", `"name":"tasks_list","arguments":{},"inputResponses":{},"requestState":"retry-state"`)

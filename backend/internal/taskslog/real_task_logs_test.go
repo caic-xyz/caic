@@ -1,7 +1,7 @@
 // Tests and benchmarks the local caic task-log corpus without modifying its source.
 //go:build real_task_logs
 
-package task
+package taskslog
 
 import (
 	"fmt"
@@ -15,7 +15,7 @@ const realTaskLogDirEnv = "CAIC_REAL_TASK_LOG_DIR"
 // TestRealTaskLogCorpus verifies that the production loader accepts every
 // copied log it recognizes and skips corrupt historical files. It is disabled
 // by default because the corpus is large. Run it with: go test
-// -tags=real_task_logs ./backend/internal/task -run '^TestRealTaskLogCorpus$'
+// -tags=real_task_logs ./backend/internal/taskslog -run '^TestRealTaskLogCorpus$'
 // -timeout=10m.
 func TestRealTaskLogCorpus(t *testing.T) {
 	source, err := realTaskLogSource()
@@ -52,7 +52,7 @@ func TestRealTaskLogCorpus(t *testing.T) {
 
 // BenchmarkRealTaskLogCorpus measures inventory loading of a copied production
 // task-log corpus. It is disabled by default; run it with: go test
-// -tags=real_task_logs ./backend/internal/task -run '^$' -bench
+// -tags=real_task_logs ./backend/internal/taskslog -run '^$' -bench
 // '^BenchmarkRealTaskLogCorpus$' -benchtime=1x -timeout=10m.
 func BenchmarkRealTaskLogCorpus(b *testing.B) {
 	source, err := realTaskLogSource()
