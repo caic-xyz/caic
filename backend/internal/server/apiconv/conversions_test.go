@@ -19,6 +19,14 @@ import (
 	"github.com/maruel/ksid"
 )
 
+func mustNewTask(t testing.TB, id ksid.ID, prompt agent.Prompt) *task.Task {
+	tk, err := task.NewTask(id, prompt, harness.Claude, "", "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tk
+}
+
 func TestAgentHarness(t *testing.T) {
 	t.Parallel()
 
@@ -314,7 +322,7 @@ func TestTask(t *testing.T) {
 	t.Parallel()
 	t.Run("OverageDoesNotBlock", func(t *testing.T) {
 		t.Parallel()
-		tk := &task.Task{Harness: harness.Claude}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
 		tk.SetState(taskslog.StatePending)
 		tk.RestoreMessages([]agent.Message{&agent.RateLimitMessage{
 			Status:         "rejected",
@@ -335,7 +343,7 @@ func TestTask(t *testing.T) {
 	t.Run("RetainsBlockAcrossQuotaWindows", func(t *testing.T) {
 		t.Parallel()
 		now := time.Now()
-		tk := &task.Task{Harness: harness.Claude}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
 		tk.SetState(taskslog.StatePending)
 		tk.RestoreMessages([]agent.Message{
 			&agent.RateLimitMessage{
@@ -364,7 +372,8 @@ func TestTask(t *testing.T) {
 	t.Run("IncludesForkOrigin", func(t *testing.T) {
 		t.Parallel()
 		parentID := ksid.NewID()
-		tk := &task.Task{ID: ksid.NewID(), Harness: harness.Claude, ForkedFromTaskID: parentID}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
+		tk.ForkedFromTaskID = parentID
 		tk.SetState(taskslog.StatePending)
 
 		got, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})

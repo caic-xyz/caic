@@ -342,37 +342,27 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 		mounts[i] = taskslog.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: r.Dir, ContainerPath: m.containerPathForRepo(rs.Name)}
 	}
 
-	t := &task.Task{
-		ID:                ksid.NewID(),
-		InitialPrompt:     p.Prompt,
-		Repos:             mounts,
-		Harness:           p.Harness,
-		Model:             p.Model,
-		Effort:            p.Effort,
-		RuntimeName:       runtimeName,
-		BaseImage:         p.BaseImage,
-		ContainerPlatform: p.ContainerPlatform,
-		MaxCPUs:           p.MaxCPUs,
-		CacheMounts:       slices.Clone(p.CacheMounts),
-		Mounts:            slices.Clone(p.Mounts),
-		GitHubToken:       p.GitHubToken,
-		Tailscale:         p.Tailscale,
-		USB:               p.USB,
-		Display:           p.Display,
-		Sudo:              p.Sudo,
-		StartedAt:         time.Now().UTC(),
-		OwnerID:           p.OwnerID,
-		Provider:          m.provider,
+	t, err := task.NewTask(ksid.NewID(), p.Prompt, p.Harness, p.Model, p.Effort, p.BaseImage, p.ContainerPlatform, "")
+	if err != nil {
+		return "", badRequestf("%v", err)
 	}
+	t.Repos = mounts
+	t.RuntimeName = runtimeName
+	t.MaxCPUs = p.MaxCPUs
+	t.CacheMounts = slices.Clone(p.CacheMounts)
+	t.Mounts = slices.Clone(p.Mounts)
+	t.GitHubToken = p.GitHubToken
+	t.Tailscale = p.Tailscale
+	t.USB = p.USB
+	t.Display = p.Display
+	t.Sudo = p.Sudo
+	t.OwnerID = p.OwnerID
+	t.Provider = m.provider
 	t.ForgeIssue = p.ForgeIssue
 	if p.ForgeOwner != "" {
 		// Set forge owner/repo so ListPendingBotTasks can resolve the commenter.
 		t.SetPR(p.ForgeOwner, p.ForgeRepo, 0)
 	}
-	t.SetTitle(p.Prompt.Text)
-	// State has no meaningful zero value; set it explicitly before the task
-	// is registered and becomes visible to readers.
-	t.SetState(taskslog.StatePending)
 	entry := m.NewEntry(t, nil)
 
 	m.insertEntry(t.ID.String(), entry)
@@ -755,35 +745,26 @@ func (m *Manager) LoadPurgedTasks(purged []*taskslog.LoadedTask) error {
 				return fmt.Errorf("load purged task %q: invalid forkedFromTaskID %q: %w", lt.TaskID, lt.ForkedFromTaskID, err)
 			}
 		}
-		t := &task.Task{
-			ID:                taskID,
-			InitialPrompt:     agent.Prompt{Text: lt.Prompt},
-			RuntimeName:       rt,
-			Model:             lt.Model,
-			Effort:            lt.Effort,
-			Repos:             lt.Repos,
-			Harness:           lt.Harness,
-			BaseImage:         lt.BaseImage,
-			ContainerPlatform: lt.ContainerPlatform,
-			MaxCPUs:           lt.MaxCPUs,
-			CacheMounts:       slices.Clone(lt.CacheMounts),
-			Mounts:            slices.Clone(lt.Mounts),
-			StartedAt:         lt.StartedAt,
-			ForkedFromTaskID:  forkedFromTaskID,
-			Tailscale:         lt.Tailscale,
-			USB:               lt.USB,
-			Display:           lt.Display,
-			Sudo:              lt.Sudo,
-			GitHubToken:       lt.GitHubToken,
+		t, err := task.NewTask(taskID, agent.Prompt{Text: lt.Prompt}, lt.Harness, lt.Model, lt.Effort, lt.BaseImage, lt.ContainerPlatform, lt.Title)
+		if err != nil {
+			m.log.Warn("skipping purged task with invalid metadata", "task", lt.TaskID, "err", err)
+			continue
 		}
+		t.RuntimeName = rt
+		t.Repos = lt.Repos
+		t.MaxCPUs = lt.MaxCPUs
+		t.CacheMounts = slices.Clone(lt.CacheMounts)
+		t.Mounts = slices.Clone(lt.Mounts)
+		t.StartedAt = lt.StartedAt
+		t.ForkedFromTaskID = forkedFromTaskID
+		t.Tailscale = lt.Tailscale
+		t.USB = lt.USB
+		t.Display = lt.Display
+		t.Sudo = lt.Sudo
+		t.GitHubToken = lt.GitHubToken
 		t.SetStateAt(lt.State, lt.LastStateUpdateAt)
 		if lt.SessionID != "" || lt.AgentVersion != "" {
 			t.SetSessionMetadata(lt.SessionID, "", lt.AgentVersion)
-		}
-		if lt.Title != "" {
-			t.SetTitle(lt.Title)
-		} else {
-			t.SetTitle(lt.Prompt)
 		}
 		if lt.State == taskslog.StateRunning {
 			t.SetState(taskslog.StateFailed)
@@ -1358,6 +1339,9 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	if err != nil {
 		return nil, fmt.Errorf("parse caic metadata %q on %s: %w", taskIDVal, c.ID, err)
 	}
+	if taskID == 0 {
+		return nil, fmt.Errorf("caic metadata %q on %s parsed to a zero task ID", taskIDVal, c.ID)
+	}
 
 	isExited := c.State == "exited"
 	if isExited {
@@ -1509,30 +1493,25 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		rt = c.ID.RuntimeName()
 	}
 
-	t := &task.Task{
-		ID:                taskID,
-		InitialPrompt:     agent.Prompt{Text: prompt},
-		Repos:             mounts,
-		Harness:           lt.Harness,
-		Model:             lt.Model,
-		Effort:            lt.Effort,
-		RuntimeName:       rt,
-		BaseImage:         lt.BaseImage,
-		ContainerPlatform: lt.ContainerPlatform,
-		MaxCPUs:           lt.MaxCPUs,
-		CacheMounts:       lt.CacheMounts,
-		Mounts:            lt.Mounts,
-		StartedAt:         startedAt,
-		ForkedFromTaskID:  forkedFromTaskID,
-		Tailscale:         c.Tailscale,
-		TailscaleFQDN:     c.TailscaleFQDN,
-		USB:               c.USB,
-		Display:           c.Display,
-		Sudo:              c.Sudo,
-		VNCPort:           c.VNCPort,
-		Provider:          m.provider,
-		ForgeIssue:        forgeIssue,
+	t, err := task.NewTask(taskID, agent.Prompt{Text: prompt}, lt.Harness, lt.Model, lt.Effort, lt.BaseImage, lt.ContainerPlatform, lt.Title)
+	if err != nil {
+		return nil, fmt.Errorf("import task %q: %w", taskID.String(), err)
 	}
+	t.Repos = mounts
+	t.RuntimeName = rt
+	t.MaxCPUs = lt.MaxCPUs
+	t.CacheMounts = lt.CacheMounts
+	t.Mounts = lt.Mounts
+	t.StartedAt = startedAt
+	t.ForkedFromTaskID = forkedFromTaskID
+	t.Tailscale = c.Tailscale
+	t.TailscaleFQDN = c.TailscaleFQDN
+	t.USB = c.USB
+	t.Display = c.Display
+	t.Sudo = c.Sudo
+	t.VNCPort = c.VNCPort
+	t.Provider = m.provider
+	t.ForgeIssue = forgeIssue
 	t.SetRuntimeConnectionInfo(c.ID, c.AgentTarget, c.TailscaleFQDN, "", c.VNCPort)
 	// Restore GitHub token flag from log trailer (primary) or runtime metadata (fallback).
 	gtLabel, _ := m.Runtimes.Metadata(ctx, c.ID, runtime.MetadataGitHubToken)
@@ -1544,11 +1523,6 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		if pw, err := m.Runtimes.SudoPassword(ctx, c.ID); err == nil {
 			t.SetSudoPassword(pw)
 		}
-	}
-	if lt.Title != "" {
-		t.SetTitle(lt.Title)
-	} else {
-		t.SetTitle(prompt)
 	}
 	if relaySnapshotRead {
 		t.SetRelayOffset(relaySize)

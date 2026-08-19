@@ -23,7 +23,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/mcp/mcptest"
-	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/oauth"
 )
@@ -168,9 +167,8 @@ func TestMCPHandlers(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
 		id := ksid.NewID()
-		tk := &task.Task{ID: id, InitialPrompt: agent.Prompt{Text: "ship voice prompt"}, Harness: harness.Claude}
-		tk.SetState(taskslog.StatePending)
-		insertTestTask(t, s, id.String(), tk)
+		tk := mustNewTask(t, id, agent.Prompt{Text: "ship voice prompt"}, harness.Claude)
+		insertTestTask(s, id.String(), tk)
 		_, resp := postMCP(t, s.mcpHandlers.protocol, "server/discover", "", mcpRequestJSON("server/discover", `{}`))
 		if resp.Error != nil {
 			t.Fatalf("error = %#v", resp.Error)
@@ -183,7 +181,7 @@ func TestMCPHandlers(t *testing.T) {
 		if !ok {
 			t.Fatalf("instructions type = %T", result["instructions"])
 		}
-		for _, want := range []string{"[Current tasks at session start]", "Task #1", id.String()} {
+		for _, want := range []string{"[Current tasks at session start]", "Task #1", "ship voice prompt"} {
 			if !strings.Contains(instructions, want) {
 				t.Fatalf("instructions missing %q: %q", want, instructions)
 			}
@@ -388,10 +386,10 @@ func TestMCPHandlers(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
 		id := ksid.NewID()
-		tk := &task.Task{ID: id, InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Claude}
+		tk := mustNewTask(t, id, agent.Prompt{Text: "test"}, harness.Claude)
 		tk.SetTitle("Fix tests")
 		tk.SetState(taskslog.StateWaiting)
-		insertTestTask(t, s, id.String(), tk)
+		insertTestTask(s, id.String(), tk)
 
 		body := mcpRequestJSON("tools/call", `"name":"tasks_list","arguments":{},"inputResponses":{},"requestState":"retry-state"`)
 		body = strings.Replace(body, `"io.modelcontextprotocol/clientCapabilities":{}`, `"io.modelcontextprotocol/clientCapabilities":{},"example.com/clientTrace":"trace-1"`, 1)

@@ -15,12 +15,26 @@ import (
 	"testing"
 	"time"
 
+	"github.com/maruel/ksid"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 )
+
+// mustNewTask calls NewTask and fails t if it returns an error. baseImage,
+// containerPlatform, and title are hardcoded empty: no test in this package
+// needs a non-default value.
+func mustNewTask(t testing.TB, id ksid.ID, prompt agent.Prompt, h harness.Name, model, effort string) *Task {
+	tk, err := NewTask(id, prompt, h, model, effort, "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tk
+}
 
 // testBackend implements agent.Backend for tests. It launches a process that
 // reads one line from stdin then exits. capturedCtx records the context passed

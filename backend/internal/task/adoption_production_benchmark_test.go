@@ -20,6 +20,14 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
+func mustNewTask(t testing.TB, id ksid.ID, prompt agent.Prompt) *task.Task {
+	tk, err := task.NewTask(id, prompt, harness.Claude, "", "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tk
+}
+
 func BenchmarkTaskAdoption(b *testing.B) {
 	b.StopTimer()
 	dir := b.TempDir()
@@ -51,12 +59,8 @@ func BenchmarkTaskAdoption(b *testing.B) {
 		if err := lt.LoadMessages(); err != nil {
 			b.Fatal(err)
 		}
-		tk := &task.Task{
-			ID:            id,
-			InitialPrompt: agent.Prompt{Text: "benchmark adoption"},
-			Repos:         []taskslog.RepoMount{{Name: "org/repo", Branch: "caic-0"}},
-			Harness:       harness.Claude,
-		}
+		tk := mustNewTask(b, id, agent.Prompt{Text: "benchmark adoption"})
+		tk.Repos = []taskslog.RepoMount{{Name: "org/repo", Branch: "caic-0"}}
 		w, _, err := store.Reopen(name, tk.LogHeader())
 		if err != nil {
 			b.Fatal(err)

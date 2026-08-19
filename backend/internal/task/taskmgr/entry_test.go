@@ -8,9 +8,18 @@ import (
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
+
+func mustNewTask(t testing.TB, id ksid.ID, prompt agent.Prompt, h harness.Name, model string) *task.Task {
+	tk, err := task.NewTask(id, prompt, h, model, "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tk
+}
 
 func newTestEntry(t *testing.T, tk *task.Task) *Entry {
 	m := newTestManager(t, Config{ServerCtx: t.Context()})
@@ -30,7 +39,7 @@ func TestEntry(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
-			e := newTestEntry(t, &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}})
+			e := newTestEntry(t, mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""))
 			if e.Result() != nil {
 				t.Error("Result() should be nil initially")
 			}
@@ -44,7 +53,7 @@ func TestEntry(t *testing.T) {
 
 	t.Run("LogPath", func(t *testing.T) {
 		t.Parallel()
-		e := newTestEntry(t, &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}})
+		e := newTestEntry(t, mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""))
 		if e.LogPath.Get() != "" {
 			t.Errorf("LogPath() = %q, want empty", e.LogPath.Get())
 		}
@@ -58,7 +67,7 @@ func TestEntry(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
-			e := newTestEntry(t, &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}})
+			e := newTestEntry(t, mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""))
 			e.CloseDone()
 			select {
 			case <-e.Done():
@@ -68,7 +77,7 @@ func TestEntry(t *testing.T) {
 		})
 		t.Run("reset_reopens", func(t *testing.T) {
 			t.Parallel()
-			e := newTestEntry(t, &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}})
+			e := newTestEntry(t, mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""))
 			e.CloseDone()
 			e.Reset()
 			select {
@@ -86,7 +95,7 @@ func TestEntry(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_closes_and_sets_result", func(t *testing.T) {
 			t.Parallel()
-			e := newTestEntry(t, &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}})
+			e := newTestEntry(t, mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""))
 			r := &taskslog.Result{State: taskslog.StateFailed}
 			e.Finish(r)
 			select {
@@ -100,7 +109,7 @@ func TestEntry(t *testing.T) {
 		})
 		t.Run("valid_after_finished", func(t *testing.T) {
 			t.Parallel()
-			e := newTestEntry(t, &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}})
+			e := newTestEntry(t, mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""))
 			first := &taskslog.Result{State: taskslog.StateCrashed}
 			second := &taskslog.Result{State: taskslog.StatePurged}
 			e.Finish(first)
@@ -120,7 +129,7 @@ func TestEntry(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_exactly_once", func(t *testing.T) {
 			t.Parallel()
-			e := newTestEntry(t, &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}})
+			e := newTestEntry(t, mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""))
 			var n int
 			e.Cleanup(func() { n++ })
 			e.Cleanup(func() { n++ })
@@ -130,7 +139,7 @@ func TestEntry(t *testing.T) {
 		})
 		t.Run("valid_after_reset", func(t *testing.T) {
 			t.Parallel()
-			e := newTestEntry(t, &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}})
+			e := newTestEntry(t, mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""))
 			var n int
 			e.Cleanup(func() { n++ })
 			e.Reset()
@@ -145,7 +154,7 @@ func TestEntry(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
-			e := newTestEntry(t, &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}})
+			e := newTestEntry(t, mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""))
 			if e.MonitorBranch() != "" {
 				t.Error("MonitorBranch() should be empty initially")
 			}
@@ -160,12 +169,12 @@ func TestEntry(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_no_loaded_task", func(t *testing.T) {
 			t.Parallel()
-			e := newTestEntry(t, &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}})
+			e := newTestEntry(t, mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""))
 			e.LoadMessagesOnce(func() { t.Error("should not be called without LoadedTask") })
 		})
 		t.Run("valid_exactly_once", func(t *testing.T) {
 			t.Parallel()
-			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 			lt := &taskslog.LoadedTask{TaskID: tk.ID.String()}
 			e := newTestPurgedEntry(t, tk, &taskslog.Result{State: taskslog.StatePurged}, lt)
 			var n int

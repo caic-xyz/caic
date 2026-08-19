@@ -174,8 +174,34 @@ type Task struct {
 	rateLimits            map[quotaWindowKey]RateLimit // Latest quota status for each provider window.
 }
 
-// AttachSession stores a SessionHandle on the task. The caller must not hold
-// t.mu.
+// NewTask creates a task with a valid ID, a pending state, and prompt.
+func NewTask(id ksid.ID, prompt agent.Prompt, h harness.Name, model, effort, baseImage, containerPlatform, title string) (*Task, error) {
+	if id == 0 {
+		return nil, errors.New("task: NewTask requires a non-zero ID")
+	}
+	if prompt.Text == "" && len(prompt.Images) == 0 {
+		return nil, errors.New("task: NewTask requires a prompt with text or images")
+	}
+	t := &Task{
+		ID:                id,
+		InitialPrompt:     prompt,
+		Harness:           h,
+		Model:             model,
+		Effort:            effort,
+		BaseImage:         baseImage,
+		ContainerPlatform: containerPlatform,
+		StartedAt:         time.Now().UTC(),
+	}
+	t.SetState(taskslog.StatePending)
+	if title == "" {
+		title = prompt.Text
+	}
+	t.SetTitle(title)
+	return t, nil
+}
+
+// syntheticUserInput builds the UserInputMessage recorded in the task log for
+// a prompt that wasn't itself parsed from agent output.
 func syntheticUserInput(p agent.Prompt) *agent.UserInputMessage {
 	var images []agent.ImageData
 	if len(p.Images) > 0 {

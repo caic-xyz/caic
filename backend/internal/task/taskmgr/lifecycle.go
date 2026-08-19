@@ -264,33 +264,23 @@ func (r *Lifecycle) Fork(ctx context.Context, p ForkParams) (string, error) { //
 	mounts := make([]taskslog.RepoMount, len(sourceRepos), len(sourceRepos)+len(extraMounts))
 	copy(mounts, sourceRepos)
 	mounts = append(mounts, extraMounts...)
-	t := &task.Task{
-		ID:                ksid.NewID(),
-		InitialPrompt:     p.Prompt,
-		Repos:             mounts,
-		Harness:           forkHarness,
-		Model:             forkModel,
-		Effort:            forkEffort,
-		RuntimeName:       source.RuntimeName,
-		BaseImage:         source.BaseImage,
-		ContainerPlatform: source.ContainerPlatform,
-		MaxCPUs:           source.MaxCPUs,
-		CacheMounts:       slices.Clone(source.CacheMounts),
-		Mounts:            slices.Clone(source.Mounts),
-		GitHubToken:       p.GitHubToken,
-		Tailscale:         p.Tailscale,
-		USB:               p.USB,
-		Display:           p.Display,
-		Sudo:              p.Sudo,
-		StartedAt:         time.Now().UTC(),
-		OwnerID:           p.OwnerID,
-		ForkedFromTaskID:  source.ID,
-		Provider:          r.manager.provider,
+	t, err := task.NewTask(ksid.NewID(), p.Prompt, forkHarness, forkModel, forkEffort, source.BaseImage, source.ContainerPlatform, "")
+	if err != nil {
+		return "", badRequestf("%v", err)
 	}
-	t.SetTitle(p.Prompt.Text)
-	// State has no meaningful zero value; set it explicitly before the fork
-	// is registered and becomes visible to readers.
-	t.SetState(taskslog.StatePending)
+	t.Repos = mounts
+	t.RuntimeName = source.RuntimeName
+	t.MaxCPUs = source.MaxCPUs
+	t.CacheMounts = slices.Clone(source.CacheMounts)
+	t.Mounts = slices.Clone(source.Mounts)
+	t.GitHubToken = p.GitHubToken
+	t.Tailscale = p.Tailscale
+	t.USB = p.USB
+	t.Display = p.Display
+	t.Sudo = p.Sudo
+	t.OwnerID = p.OwnerID
+	t.ForkedFromTaskID = source.ID
+	t.Provider = r.manager.provider
 	forkEntry := r.manager.NewEntry(t, nil)
 	r.manager.insertEntry(t.ID.String(), forkEntry)
 	forkEntry.Lifecycle.generateTitle()

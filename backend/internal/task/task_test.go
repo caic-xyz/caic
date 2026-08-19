@@ -78,7 +78,7 @@ func TestTask(t *testing.T) {
 			QuotaLabel:    "Anthropic",
 			QuotaWindow:   "5h",
 		}
-		tk := &Task{}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		tk.addMessage(t.Context(), message, false)
 		snapshot := tk.Snapshot()
 		if snapshot.RateLimit.Status != "rejected" {
@@ -111,7 +111,7 @@ func TestTask(t *testing.T) {
 	})
 	t.Run("SubscribeRateLimits", func(t *testing.T) {
 		t.Parallel()
-		tk := &Task{}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		historical := &agent.RateLimitMessage{Status: agent.RateLimitStatusAllowed, QuotaProvider: agent.QuotaProviderClaudeCode, QuotaWindow: "5h"}
 		tk.addMessage(t.Context(), historical, false)
 		history, live, _ := tk.SubscribeRateLimits(t.Context())
@@ -135,17 +135,14 @@ func TestTask(t *testing.T) {
 	})
 	t.Run("ConcurrentMetadataSnapshots", func(t *testing.T) {
 		t.Parallel()
-		tk := &Task{
-			ID:            ksid.NewID(),
-			InitialPrompt: agent.Prompt{Text: "test"},
-			Repos: []taskslog.RepoMount{
-				{Name: "org/repo", Branch: "main"},
-				{Name: "org/extra", Branch: "main"},
-			},
-			Tailscale:   true,
-			Sudo:        true,
-			GitHubToken: true,
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		tk.Repos = []taskslog.RepoMount{
+			{Name: "org/repo", Branch: "main"},
+			{Name: "org/extra", Branch: "main"},
 		}
+		tk.Tailscale = true
+		tk.Sudo = true
+		tk.GitHubToken = true
 
 		const iterations = 1000
 		start := make(chan struct{})
@@ -200,7 +197,7 @@ func TestTask(t *testing.T) {
 	})
 	t.Run("RestoreMessagesCapturesExitError", func(t *testing.T) {
 		t.Parallel()
-		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		tk.RestoreMessages([]agent.Message{&agent.ExitMessage{ExitCode: 2, Error: "Unknown option: --approve"}})
 		if got := tk.LastExitError(); got != "Unknown option: --approve" {
 			t.Errorf("LastExitError = %q, want relay stderr", got)
@@ -208,7 +205,7 @@ func TestTask(t *testing.T) {
 	})
 	t.Run("RestoreMessagesClearsStaleExitErrorOnLaterSessionActivity", func(t *testing.T) {
 		t.Parallel()
-		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		tk.RestoreMessages([]agent.Message{
 			&agent.ExitMessage{ExitCode: 2, Error: "stale crash"},
 			&agent.InitMessage{SessionID: "new-session"},
@@ -220,7 +217,7 @@ func TestTask(t *testing.T) {
 	})
 	t.Run("RestoreMessagesIgnoresTrailingExitAfterSuccessfulTurn", func(t *testing.T) {
 		t.Parallel()
-		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		tk.SetState(taskslog.StateRunning)
 		tk.RestoreMessages([]agent.Message{
 			&agent.InitMessage{SessionID: "session"},
@@ -240,7 +237,7 @@ func TestTask(t *testing.T) {
 		// from a user-requested stop, exit code -2) must not be fanned out to
 		// live SSE subscribers: it is a spurious termination artifact already
 		// dropped from the persisted replay, so the live stream must match.
-		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		tk.SetState(taskslog.StateRunning)
 		_, ch, unsub := tk.Subscribe(t.Context())
 		defer unsub()
@@ -260,7 +257,7 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		// A non-zero exit with no preceding clean result is a genuine
 		// interruption and must still reach live subscribers.
-		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		tk.SetState(taskslog.StateRunning)
 		_, ch, unsub := tk.Subscribe(t.Context())
 		defer unsub()
@@ -273,7 +270,7 @@ func TestTask(t *testing.T) {
 	})
 	t.Run("RecordSessionFailure", func(t *testing.T) {
 		t.Parallel()
-		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		tk.SetState(taskslog.StateStarting)
 		tk.addMessage(t.Context(), &agent.ExitMessage{ExitCode: 2, Error: "Unknown option: --approve"}, true)
 
@@ -294,7 +291,7 @@ func TestTask(t *testing.T) {
 			// Regression test: if the fan-out drops a slow subscriber
 			// (buffer full) and closes its channel, the context-done
 			// goroutine must not panic on a double close.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			ctx, cancel := context.WithCancel(t.Context())
 			_, ch, unsub := tk.Subscribe(ctx)
 			defer unsub()
@@ -317,7 +314,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("Replay", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			// Add messages before subscribing.
 			msg1 := &agent.SystemMessage{MessageType: "system", Subtype: "status"}
 			msg2 := &agent.TextMessage{Text: "hello"}
@@ -340,7 +337,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("ReplayLargeHistory", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			// Add more messages than any reasonable channel buffer to verify no deadlock.
 			const n = 1000
 			for range n {
@@ -357,7 +354,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("MultipleListeners", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.addMessage(t.Context(), &agent.SystemMessage{MessageType: "system", Subtype: "init"}, false)
 
 			// Start two subscribers.
@@ -388,7 +385,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("Live", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
@@ -409,7 +406,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("LiveOnlyDoesNotReplayHistory", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.addMessage(t.Context(), &agent.TextMessage{Text: "old"}, false)
 			ch, unsub := tk.SubscribeLiveMessages(t.Context())
 			defer unsub()
@@ -439,7 +436,7 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		t.Run("error_delivery_failure_preserves_waiting_state", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateWaiting)
 
 			cmdCtx, cmdCancel := context.WithCancel(t.Context())
@@ -476,7 +473,7 @@ func TestTask(t *testing.T) {
 			// "Clear and execute plan"), planContent must be preserved
 			// so the plan UI reappears after the agent finishes. The
 			// UI hides naturally while the task is Running.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			// Simulate: agent entered plan mode, wrote a plan, exited.
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
@@ -531,7 +528,7 @@ func TestTask(t *testing.T) {
 			// When the agent uses the Edit tool on a plan file, the
 			// in-memory planContent must be updated so the UI shows
 			// the revised plan.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			// Agent writes the initial plan.
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
@@ -553,7 +550,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("EditReplaceAll", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu1", Name: "Write",
@@ -570,7 +567,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("EditIgnoresNonPlanFile", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu1", Name: "Write",
@@ -590,7 +587,7 @@ func TestTask(t *testing.T) {
 			t.Parallel()
 			// Core regression test: user rejects plan and asks for
 			// improvement, agent edits the plan file.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu1", Name: "Write",
@@ -640,7 +637,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("NoSession", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateWaiting)
 			err := tk.SendInput(t.Context(), agent.Prompt{Text: "hello"})
 			if err == nil {
@@ -659,7 +656,7 @@ func TestTask(t *testing.T) {
 			// Simulate a session that has already finished (e.g. relay
 			// subprocess exited). SendInput should detect it and return
 			// "no active session" without changing state.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateWaiting)
 			cmdCtx, cmdCancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cmdCancel()
@@ -694,7 +691,7 @@ func TestTask(t *testing.T) {
 
 	t.Run("AttachDetachSession", func(t *testing.T) {
 		t.Parallel()
-		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		if tk.SessionDone() != nil {
 			t.Error("SessionDone() should be nil when no session attached")
 		}
@@ -736,7 +733,7 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		t.Run("TransitionsToWaiting", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			result := &agent.ResultMessage{MessageType: "result"}
 			tk.addMessage(t.Context(), result, false)
@@ -746,7 +743,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("TransitionsToAsking", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			// Add an AskMessage.
 			tk.addMessage(t.Context(), &agent.AskMessage{
@@ -759,7 +756,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("AnsweredAskTransitionsToWaiting", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			tk.addMessage(t.Context(), &agent.AskMessage{
 				ToolUseID: "ask1",
@@ -773,7 +770,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("ErroredAskResultStaysAsking", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			tk.addMessage(t.Context(), &agent.AskMessage{
 				ToolUseID: "ask1",
@@ -794,7 +791,7 @@ func TestTask(t *testing.T) {
 			// assistant snapshots per turn. AskUserQuestion appears in an
 			// earlier snapshot while the final one is text-only. The state
 			// machine must scan all messages in the turn.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			tk.addMessage(t.Context(), &agent.TextMessage{Text: "I need to ask you something."}, false)
 			tk.addMessage(t.Context(), &agent.AskMessage{
@@ -817,7 +814,7 @@ func TestTask(t *testing.T) {
 			// When the agent starts producing output while the task is
 			// waiting (e.g. relay reconnect after server restart), the
 			// state should transition back to running.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateWaiting)
 			tk.addMessage(t.Context(), &agent.TextMessage{Text: "output"}, false)
 			if tk.GetState() != taskslog.StateRunning {
@@ -826,7 +823,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("ToolUseMessageTransitionsAskingToRunning", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateAsking)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{ToolUseID: "tu1", Name: "Read"}, false)
 			if tk.GetState() != taskslog.StateRunning {
@@ -838,7 +835,7 @@ func TestTask(t *testing.T) {
 			// When watchSession sets Waiting before the ResultMessage is
 			// processed, the ResultMessage should still detect
 			// AskMessage and correct the state to Asking.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			tk.addMessage(t.Context(), &agent.AskMessage{
 				ToolUseID: "ask1",
@@ -855,7 +852,7 @@ func TestTask(t *testing.T) {
 		t.Run("TransitionsToHasPlan", func(t *testing.T) {
 			t.Parallel()
 			// ExitPlanMode + plan content + ResultMessage → StateHasPlan.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu1", Name: "Write",
@@ -872,7 +869,7 @@ func TestTask(t *testing.T) {
 		t.Run("AskingTakesPriorityOverHasPlan", func(t *testing.T) {
 			t.Parallel()
 			// Both AskMessage and ExitPlanMode in same turn → StateAsking.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu1", Name: "Write",
@@ -893,7 +890,7 @@ func TestTask(t *testing.T) {
 		t.Run("NoHasPlanWithoutPlanContent", func(t *testing.T) {
 			t.Parallel()
 			// ExitPlanMode without plan content → StateWaiting.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu1", Name: "ExitPlanMode",
@@ -907,7 +904,7 @@ func TestTask(t *testing.T) {
 			t.Parallel()
 			// trackToolUse must snapshot planContent onto the ExitPlanMode
 			// ToolUseMessage so the SSE converter can include it.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu1", Name: "Write",
@@ -923,7 +920,7 @@ func TestTask(t *testing.T) {
 			t.Parallel()
 			// When a second ExitPlanMode arrives, the first one's PlanContent
 			// must be cleared so the frontend doesn't list the stale plan.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu1", Name: "Write",
@@ -953,7 +950,7 @@ func TestTask(t *testing.T) {
 		t.Run("HasPlanToRunningOnText", func(t *testing.T) {
 			t.Parallel()
 			// TextMessage while HasPlan → Running.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateHasPlan)
 			tk.addMessage(t.Context(), &agent.TextMessage{Text: "output"}, false)
 			if tk.GetState() != taskslog.StateRunning {
@@ -966,7 +963,7 @@ func TestTask(t *testing.T) {
 			// Checkout.Start calls SetState(Running), StateStarting
 			// must transition to Running so the subsequent
 			// ResultMessage can transition further.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateStarting)
 			tk.addMessage(t.Context(), &agent.TextMessage{Text: "output"}, false)
 			if tk.GetState() != taskslog.StateRunning {
@@ -975,7 +972,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("EmptyResultUsesTurnText", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			tk.addMessage(t.Context(), &agent.TextMessage{Text: "I checked the files."}, false)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{ToolUseID: "tu1", Name: "Read"}, false)
@@ -993,7 +990,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("EmptyResultStopsAtThinking", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			tk.addMessage(t.Context(), &agent.TextMessage{Text: "before thinking"}, false)
 			tk.addMessage(t.Context(), &agent.ThinkingMessage{Text: "private chain"}, false)
@@ -1007,7 +1004,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("NonEmptyResultIsPreserved", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			tk.addMessage(t.Context(), &agent.TextMessage{Text: "intermediate"}, false)
 
@@ -1023,7 +1020,7 @@ func TestTask(t *testing.T) {
 			// setup states (except StateStarting, which is
 			// tested separately above).
 			for _, state := range []taskslog.State{taskslog.StatePending, taskslog.StateBranching, taskslog.StateProvisioning, taskslog.StatePurging, taskslog.StateCrashed, taskslog.StateFailed, taskslog.StatePurged} {
-				tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 				tk.SetState(state)
 				tk.addMessage(t.Context(), &agent.TextMessage{Text: "output"}, false)
 				if tk.GetState() != state {
@@ -1037,7 +1034,7 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		t.Run("DiffStatMessage", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			ds := agent.DiffStat{
 				{Path: "main.go", Added: 10, Deleted: 3},
@@ -1067,7 +1064,7 @@ func TestTask(t *testing.T) {
 
 		t.Run("ResultMessageUpdatesLiveDiffStat", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			tk.addMessage(t.Context(), &agent.ResultMessage{
 				MessageType: "result",
@@ -1084,7 +1081,7 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		t.Run("DiffStatMessage", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StatePurged)
 			tk.RestoreMessages([]agent.Message{
 				&agent.DiffStatMessage{
@@ -1105,7 +1102,7 @@ func TestTask(t *testing.T) {
 
 		t.Run("ResultMessageAfterDiffStat", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StatePurged)
 			tk.RestoreMessages([]agent.Message{
 				&agent.DiffStatMessage{
@@ -1125,7 +1122,7 @@ func TestTask(t *testing.T) {
 
 		t.Run("DiffStatAfterResult", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StatePurged)
 			tk.RestoreMessages([]agent.Message{
 				&agent.ResultMessage{
@@ -1152,7 +1149,7 @@ func TestTask(t *testing.T) {
 		// separately after RestoreMessages.
 		t.Run("EmptyRelayDiffAfterCommit", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			// Simulate relay output: ResultMessage without DiffStat
 			// (host-side mutation not persisted) followed by an empty
@@ -1184,7 +1181,7 @@ func TestTask(t *testing.T) {
 
 	t.Run("LiveUsageCumulative", func(t *testing.T) {
 		t.Parallel()
-		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		tk.SetState(taskslog.StateRunning)
 		tk.addMessage(t.Context(), &agent.ResultMessage{
 			MessageType: "result",
@@ -1224,7 +1221,7 @@ func TestTask(t *testing.T) {
 
 	t.Run("RestoreMessagesUsageCumulative", func(t *testing.T) {
 		t.Parallel()
-		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		tk.SetState(taskslog.StatePurged)
 		tk.RestoreMessages([]agent.Message{
 			&agent.ResultMessage{
@@ -1264,7 +1261,7 @@ func TestTask(t *testing.T) {
 		// Cost, turns, and duration must accumulate across sessions separated
 		// by ClearMessages. computeCost uses TotalCostUSD as the base and adds
 		// the cache-read surcharge.
-		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		tk.SetState(taskslog.StateRunning)
 		// Session 1: TotalCostUSD = $10.00.
 		tk.addMessage(t.Context(), &agent.ResultMessage{
@@ -1298,7 +1295,7 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		// Multiple result events within a single session (no ClearMessages/compact_boundary)
 		// must accumulate duration rather than overwriting with only the last invocation's value.
-		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		tk.SetState(taskslog.StateRunning)
 		tk.addMessage(t.Context(), &agent.ResultMessage{
 			MessageType: "result",
@@ -1329,7 +1326,7 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		// Regression: ClearMessages used += (double-count) instead of = assignment.
 		// Verify cost is correct after two ClearMessages calls.
-		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		tk.SetState(taskslog.StateRunning)
 		// Session 1: $75.
 		tk.addMessage(t.Context(), &agent.ResultMessage{
@@ -1366,7 +1363,7 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		// RestoreMessages (reloadFromMsgs) must accumulate DurationMs across
 		// multiple result events within a single session.
-		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		tk.SetState(taskslog.StatePurged)
 		tk.RestoreMessages([]agent.Message{
 			&agent.ResultMessage{MessageType: "result", NumTurns: 1, DurationMs: 946943},
@@ -1387,7 +1384,7 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		// RestoreMessages must sum cost/turns/duration across context_cleared
 		// boundaries, mirroring the live path.
-		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		tk.SetState(taskslog.StatePurged)
 		tk.RestoreMessages([]agent.Message{
 			// Session 1: TotalCostUSD = $10.00.
@@ -1424,7 +1421,7 @@ func TestTask(t *testing.T) {
 		// computeCost must add the surcharge on top of TotalCostUSD.
 		// Setup: TotalCostUSD = $1.50 from 100K input tokens (price = $0.000015/tok).
 		// Cache read surcharge = 10M × 0.10 × $0.000015 = $15.00.
-		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		tk.SetState(taskslog.StateRunning)
 		tk.addMessage(t.Context(), &agent.ResultMessage{
 			MessageType:  "result",
@@ -1446,7 +1443,7 @@ func TestTask(t *testing.T) {
 		// Claude Code's subsequent ResultMessages. Stats must be accumulated
 		// across the boundary, just like context_cleared.
 		newTask := func() *Task {
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			return tk
 		}
@@ -1501,7 +1498,7 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		t.Run("ResetsPlanState", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			// Simulate an agent entering plan mode and writing a plan file.
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
@@ -1536,7 +1533,7 @@ func TestTask(t *testing.T) {
 			t.Parallel()
 			// After ClearMessages (restart), the agent may re-enter plan mode
 			// and write to .claude/plans/. The plan must not resurface.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			// Original plan.
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
@@ -1577,7 +1574,7 @@ func TestTask(t *testing.T) {
 			t.Parallel()
 			// After ClearMessages the ExitPlanMode message's PlanContent in
 			// history must be erased so new subscribers don't see stale plans.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			exitMsg := &agent.ToolUseMessage{ToolUseID: "tu2", Name: "ExitPlanMode"}
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
@@ -1600,7 +1597,7 @@ func TestTask(t *testing.T) {
 			t.Parallel()
 			// After the restart turn completes, a subsequent user-initiated turn
 			// must be able to produce a plan again.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu1", Name: "Write",
@@ -1634,7 +1631,7 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		t.Run("Basic", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			msgs := []agent.Message{
 				&agent.InitMessage{SessionID: "sess-123"},
@@ -1655,7 +1652,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("InfersAsking", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			msgs := []agent.Message{
 				&agent.InitMessage{SessionID: "s1"},
@@ -1672,7 +1669,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("InfersAskingWithoutResult", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			msgs := []agent.Message{
 				&agent.InitMessage{SessionID: "s1"},
@@ -1688,7 +1685,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("AnsweredAskInfersWaiting", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			msgs := []agent.Message{
 				&agent.AskMessage{
@@ -1705,7 +1702,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("ErroredAskInfersAsking", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			msgs := []agent.Message{
 				&agent.AskMessage{
@@ -1722,7 +1719,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("InfersHasPlan", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			msgs := []agent.Message{
 				&agent.ToolUseMessage{
@@ -1741,7 +1738,7 @@ func TestTask(t *testing.T) {
 			t.Parallel()
 			// The relay emits DiffStatMessage after the ResultMessage.
 			// RestoreMessages should skip it and still infer Waiting.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			msgs := []agent.Message{
 				&agent.TextMessage{Text: "hello"},
@@ -1758,7 +1755,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("NoResultKeepsState", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			msgs := []agent.Message{
 				&agent.InitMessage{SessionID: "s1"},
@@ -1773,7 +1770,7 @@ func TestTask(t *testing.T) {
 		t.Run("TerminalStatePreserved", func(t *testing.T) {
 			t.Parallel()
 			for _, state := range []taskslog.State{taskslog.StatePurged, taskslog.StateCrashed, taskslog.StateFailed, taskslog.StatePurging} {
-				tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 				tk.SetState(state)
 				msgs := []agent.Message{
 					&agent.TextMessage{Text: "hello"},
@@ -1787,7 +1784,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("UsesLastSessionID", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			msgs := []agent.Message{
 				&agent.InitMessage{SessionID: "old"},
 				&agent.TextMessage{Text: "hello"},
@@ -1801,7 +1798,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("RestoresPlanFile", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			msgs := []agent.Message{
 				&agent.ToolUseMessage{
@@ -1817,7 +1814,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("RestoresInPlanMode", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			msgs := []agent.Message{
 				&agent.ToolUseMessage{ToolUseID: "tu1", Name: "EnterPlanMode"},
@@ -1837,7 +1834,7 @@ func TestTask(t *testing.T) {
 			}
 
 			// Without ExitPlanMode, should stay in plan mode.
-			tk2 := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk2 := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk2.SetState(taskslog.StateRunning)
 			tk2.RestoreMessages(msgs[:1])
 			if !tk2.Snapshot().InPlanMode {
@@ -1849,7 +1846,7 @@ func TestTask(t *testing.T) {
 			// Simulates relay output containing a plan, then a context_cleared
 			// marker (from ClearMessages on restart), then a new session without
 			// a plan. RestoreMessages must not carry over the stale plan.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			msgs := []agent.Message{
 				&agent.ToolUseMessage{ToolUseID: "tu1", Name: "EnterPlanMode"},
@@ -1881,7 +1878,7 @@ func TestTask(t *testing.T) {
 			// After "Clear and execute plan", the agent may re-enter plan mode
 			// and write to .claude/plans/ during execution. The dismissed plan
 			// must not resurface when the turn completes.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			msgs := []agent.Message{
 				// Original plan.
@@ -1915,7 +1912,7 @@ func TestTask(t *testing.T) {
 			t.Parallel()
 			// context_cleared in history must zero PlanContent on preceding
 			// ExitPlanMode events so new subscribers see no stale plan.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			exitMsg1 := &agent.ToolUseMessage{ToolUseID: "tu2", Name: "ExitPlanMode"}
 			msgs := []agent.Message{
@@ -1938,7 +1935,7 @@ func TestTask(t *testing.T) {
 			t.Parallel()
 			// When a plan is updated (two ExitPlanMode without context_cleared),
 			// only the latest ExitPlanMode should retain its PlanContent.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			exitMsg1 := &agent.ToolUseMessage{ToolUseID: "tu2", Name: "ExitPlanMode"}
 			exitMsg2 := &agent.ToolUseMessage{ToolUseID: "tu5", Name: "ExitPlanMode"}
@@ -1969,7 +1966,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("Subscribe", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			msgs := []agent.Message{
 				&agent.TextMessage{Text: "msg1"},
 				&agent.TextMessage{Text: "msg2"},
@@ -1986,7 +1983,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("EmptyResultUsesRestoredTurnText", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			msgs := []agent.Message{
 				&agent.UserInputMessage{Text: "first"},
 				&agent.TextMessage{Text: "first result"},
@@ -2010,7 +2007,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("EmptyResultStopsAtRestoredThinking", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			msgs := []agent.Message{
 				&agent.UserInputMessage{Text: "test"},
 				&agent.TextMessage{Text: "before thinking"},
@@ -2035,24 +2032,26 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		t.Run("NoRepos", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			if extra := tk.ExtraRuntimeRepos(); extra != nil {
 				t.Fatalf("ExtraRuntimeRepos with no repos = %+v, want nil", extra)
 			}
 		})
 		t.Run("OneRepo", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{Repos: []taskslog.RepoMount{{Name: "a/b", Branch: "caic-0", GitRoot: "/foo"}}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+			tk.Repos = []taskslog.RepoMount{{Name: "a/b", Branch: "caic-0", GitRoot: "/foo"}}
 			if extra := tk.ExtraRuntimeRepos(); extra != nil {
 				t.Fatalf("ExtraRuntimeRepos with one repo = %+v, want nil", extra)
 			}
 		})
 		t.Run("MultipleRepos", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{Repos: []taskslog.RepoMount{
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+			tk.Repos = []taskslog.RepoMount{
 				{Name: "a/b", Branch: "caic-0", GitRoot: "/foo"},
 				{Name: "c/d", Branch: "caic-1", GitRoot: "/bar"},
-			}}
+			}
 			extra := tk.ExtraRuntimeRepos()
 			if len(extra) != 1 {
 				t.Fatalf("ExtraRuntimeRepos len = %d, want 1", len(extra))
@@ -2065,7 +2064,7 @@ func TestTask(t *testing.T) {
 
 	t.Run("SetStateAt", func(t *testing.T) {
 		t.Parallel()
-		tk := &Task{}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 		tk.SetStateAt(taskslog.StateRunning, now)
 		if tk.GetState() != taskslog.StateRunning {
@@ -2084,7 +2083,7 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		t.Run("Running", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			now := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
 			tk.SetTurnStartedAt(now)
@@ -2094,7 +2093,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("NonRunning", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateWaiting)
 			now := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
 			tk.SetTurnStartedAt(now)
@@ -2108,14 +2107,14 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		t.Run("FallbackToModel", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{Model: "gpt-4"}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "gpt-4", "")
 			if got := tk.GetModel(); got != "gpt-4" {
 				t.Errorf("GetModel = %q, want %q", got, "gpt-4")
 			}
 		})
 		t.Run("UsesReportedModel", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{Model: "gpt-4"}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "gpt-4", "")
 			tk.addMessage(t.Context(), &agent.InitMessage{SessionID: "s1", Model: "claude-3-opus"}, false)
 			if got := tk.GetModel(); got != "claude-3-opus" {
 				t.Errorf("GetModel = %q, want %q", got, "claude-3-opus")
@@ -2127,7 +2126,7 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		t.Run("AddMessageRecordsVersionWithoutSession", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.addMessage(t.Context(), &agent.InitMessage{Version: "1.2.3"}, false)
 			if snap := tk.Snapshot(); snap.AgentVersion != "1.2.3" {
 				t.Errorf("AgentVersion = %q, want 1.2.3", snap.AgentVersion)
@@ -2135,7 +2134,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("RestoreMessagesRecordsVersionWithoutSession", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.RestoreMessages([]agent.Message{&agent.InitMessage{Version: "1.2.3"}})
 			if snap := tk.Snapshot(); snap.AgentVersion != "1.2.3" {
 				t.Errorf("AgentVersion = %q, want 1.2.3", snap.AgentVersion)
@@ -2143,7 +2142,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("EmptyInitDoesNotClearVersion", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.addMessage(t.Context(), &agent.InitMessage{Version: "1.2.3"}, false)
 			tk.addMessage(t.Context(), &agent.InitMessage{SessionID: "s1"}, false)
 			if snap := tk.Snapshot(); snap.AgentVersion != "1.2.3" {
@@ -2152,7 +2151,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("MetaSessionRecordsVersionWithoutConversationMessage", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.addMessage(t.Context(), &agent.MetaSessionMessage{MessageType: "caic_session", AgentVersion: "1.2.3"}, false)
 			if snap := tk.Snapshot(); snap.AgentVersion != "1.2.3" {
 				t.Errorf("AgentVersion = %q, want 1.2.3", snap.AgentVersion)
@@ -2165,7 +2164,7 @@ func TestTask(t *testing.T) {
 
 	t.Run("SetPR", func(t *testing.T) {
 		t.Parallel()
-		tk := &Task{}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		tk.SetPR("octocat", "hello-world", 42)
 		if got := tk.GetPR(); got != 42 {
 			t.Errorf("GetPR = %d, want 42", got)
@@ -2187,7 +2186,7 @@ func TestTask(t *testing.T) {
 
 	t.Run("SetPRState", func(t *testing.T) {
 		t.Parallel()
-		tk := &Task{}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		tk.SetPR("octocat", "hello-world", 42)
 		tk.SetPRState(forge.PRStateClosed)
 		snap := tk.Snapshot()
@@ -2198,7 +2197,7 @@ func TestTask(t *testing.T) {
 
 	t.Run("SetCIStatus", func(t *testing.T) {
 		t.Parallel()
-		tk := &Task{}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		checks := []forge.Check{{Name: "lint", Status: "success"}}
 		tk.SetCIStatus(forge.CIStatusPending, checks)
 		snap := tk.Snapshot()
@@ -2214,7 +2213,7 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		t.Run("SetsTitle", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetTitle("hello")
 			if tk.Title() != "hello" {
 				t.Errorf("Title = %q, want %q", tk.Title(), "hello")
@@ -2222,7 +2221,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("EmptyIgnored", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetTitle("first")
 			tk.SetTitle("")
 			if tk.Title() != "first" {
@@ -2233,7 +2232,7 @@ func TestTask(t *testing.T) {
 
 	t.Run("SetAgentVersion", func(t *testing.T) {
 		t.Parallel()
-		tk := &Task{}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		tk.SetAgentVersion("2.0.0")
 		snap := tk.Snapshot()
 		if snap.AgentVersion != "2.0.0" {
@@ -2242,7 +2241,7 @@ func TestTask(t *testing.T) {
 	})
 	t.Run("SetSessionMetadata", func(t *testing.T) {
 		t.Parallel()
-		tk := &Task{Model: "requested"}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "requested", "")
 		tk.SetSessionMetadata("session-1", "reported", "2.0.0")
 		if got := tk.GetSessionID(); got != "session-1" {
 			t.Errorf("SessionID = %q, want session-1", got)
@@ -2260,7 +2259,7 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		t.Run("RestoresCurrentAsk", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.RestoreMessages([]agent.Message{
 				&agent.AskMessage{
 					ToolUseID: "toolu-1",
@@ -2299,7 +2298,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("DedupesDuplicatedRestoredAsk", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.RestoreMessages([]agent.Message{
 				&agent.AskMessage{
 					ToolUseID: "toolu-1",
@@ -2347,7 +2346,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("RestoresMultipleCurrentAsks", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.RestoreMessages([]agent.Message{
 				&agent.AskMessage{
 					ToolUseID: "toolu-1",
@@ -2392,7 +2391,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("AnsweredAskIsClosed", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.RestoreMessages([]agent.Message{
 				&agent.AskMessage{
 					ToolUseID: "toolu-1",
@@ -2419,7 +2418,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("PreviousTurnAskIsIgnored", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.RestoreMessages([]agent.Message{
 				&agent.AskMessage{
 					ToolUseID: "toolu-1",
@@ -2451,7 +2450,7 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		t.Run("NoSession", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			err := tk.WriteToLog(&agent.TextMessage{Text: "hello"})
 			if !errors.Is(err, taskslog.ErrNoLog) {
 				t.Fatalf("WriteToLog err = %v, want ErrNoLog", err)
@@ -2459,7 +2458,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("WithSession", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			buf := &agenttest.LogSink{Version: agent.LogVersionV2}
 			h := &SessionHandle{Log: buf}
 			tk.AttachSession(h)
@@ -2473,7 +2472,7 @@ func TestTask(t *testing.T) {
 		t.Run("ReopensPersistedLogWithSession", func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
-			tk := &Task{ID: ksid.NewID(), Harness: "claude"}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "claude", "", "")
 			path := filepath.Join(dir, tk.LogFilename())
 			header, err := json.Marshal(agent.MetaMessage{
 				MessageType: "caic_meta",
@@ -2562,7 +2561,7 @@ func TestTask(t *testing.T) {
 							t.Fatal(err)
 						}
 					}
-					tk := &Task{ID: ksid.NewID(), Harness: "claude"}
+					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "claude", "", "")
 					if err := tk.WriteToLog(&agent.TextMessage{Text: "hello"}); err == nil {
 						t.Fatal("WriteToLog error = nil")
 					}
@@ -2584,7 +2583,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("ReturnsAppendError", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{ID: ksid.NewID()}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			if err := tk.WriteToLog(&agent.TextMessage{Text: "hello"}); err == nil {
 				t.Fatal("WriteToLog err = nil, want append error")
 			}
@@ -2595,7 +2594,7 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		t.Run("SubscribeStats", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.PushStats(&runtime.Stats{CPUPerc: 50.0, MemUsed: 1024})
 			tk.PushStats(&runtime.Stats{CPUPerc: 75.0, MemUsed: 2048})
 
@@ -2627,7 +2626,7 @@ func TestTask(t *testing.T) {
 
 		t.Run("RingOverflow", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			for i := range 65 {
 				tk.PushStats(&runtime.Stats{CPUPerc: float64(i)})
 			}
@@ -2647,7 +2646,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("LiveOnlyDoesNotReplayRing", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.PushStats(&runtime.Stats{CPUPerc: 50})
 			live, unsub := tk.SubscribeLiveStats(t.Context())
 			defer unsub()
@@ -2672,7 +2671,7 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		t.Run("NoSession", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateWaiting)
 			err := tk.SendCompact(t.Context(), "compact now")
 			if err == nil {
@@ -2684,7 +2683,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("DeadSession", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateWaiting)
 			cmdCtx, cmdCancel := context.WithTimeout(t.Context(), 5*time.Second)
 			t.Cleanup(cmdCancel)
@@ -2814,7 +2813,7 @@ func TestState(t *testing.T) {
 		t.Parallel()
 		t.Run("Match", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			if !tk.SetStateIf(taskslog.StateRunning, taskslog.StateWaiting) {
 				t.Fatal("SetStateIf returned false when state matched")
@@ -2825,7 +2824,7 @@ func TestState(t *testing.T) {
 		})
 		t.Run("Mismatch", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateAsking)
 			if tk.SetStateIf(taskslog.StateRunning, taskslog.StateWaiting) {
 				t.Fatal("SetStateIf returned true when state did not match")
@@ -2839,7 +2838,7 @@ func TestState(t *testing.T) {
 		t.Parallel()
 		t.Run("Transitions", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			prev, changed := tk.SetStateUnless(taskslog.StateStopped, taskslog.StatePurged, taskslog.StateStopping)
 			if !changed {
@@ -2854,7 +2853,7 @@ func TestState(t *testing.T) {
 		})
 		t.Run("Excluded", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StatePurging)
 			prev, changed := tk.SetStateUnless(taskslog.StateStopped, taskslog.StatePurging, taskslog.StateStopping)
 			if changed {
@@ -2872,7 +2871,7 @@ func TestState(t *testing.T) {
 		t.Parallel()
 		t.Run("Transitions", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateAsking)
 			prev, changed := tk.SetStateIfAny(taskslog.StateStarting, taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan)
 			if !changed {
@@ -2887,7 +2886,7 @@ func TestState(t *testing.T) {
 		})
 		t.Run("Rejected", func(t *testing.T) {
 			t.Parallel()
-			tk := &Task{}
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StatePurging)
 			prev, changed := tk.SetStateIfAny(taskslog.StateStopping, taskslog.StateWaiting, taskslog.StateRunning)
 			if changed {

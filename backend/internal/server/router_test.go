@@ -399,18 +399,25 @@ func TestLoginCallbackPublic(t *testing.T) {
 	}
 }
 
+func mustNewTask(t testing.TB, id ksid.ID, prompt agent.Prompt, h harness.Name) *task.Task {
+	tk, err := task.NewTask(id, prompt, h, "", "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tk
+}
+
 // insertTestTask registers a task in the test server's manager and returns the
 // entry. It registers the entry under the supplied path id as well as the
 // task's own ID string, so handlers that re-resolve via the Manager by
 // entry.Task().ID.String() find the same entry (in production the two always
 // coincide because Insert keys on t.ID.String()).
-func insertTestTask(t *testing.T, s *testRouter, id string, tk *task.Task) *taskmgr.Entry { //nolint:unparam // id is constant today; keep generic
+func insertTestTask(s *testRouter, id string, tk *task.Task) {
 	e := s.taskMgr.NewEntry(tk, nil)
 	s.taskMgr.Insert(id, e)
 	if taskID := tk.ID.String(); taskID != id {
 		s.taskMgr.Insert(taskID, e)
 	}
-	return e
 }
 
 // testEntries returns a snapshot of every registered task entry (test-only).
@@ -635,7 +642,7 @@ func TestHandleTaskInput(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			s := newTestRouter(t, nil)
-			insertTestTask(t, s, "t1", &task.Task{InitialPrompt: agent.Prompt{Text: "test"}})
+			insertTestTask(s, "t1", mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, ""))
 
 			body := strings.NewReader(tt.bodyJSON)
 			req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks/t1/input", body)
@@ -656,9 +663,9 @@ func TestHandleTaskInput(t *testing.T) {
 // testRestart is a helper for TestHandleRestart subtests.
 func testRestart(t *testing.T, state taskslog.State, bodyJSON string, wantStatus int, wantCode api.ErrorCode) {
 	s := newTestRouter(t, nil)
-	tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}}
+	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
 	tk.SetState(state)
-	insertTestTask(t, s, "t1", tk)
+	insertTestTask(s, "t1", tk)
 
 	body := strings.NewReader(bodyJSON)
 	req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks/t1/restart", body)
@@ -692,9 +699,9 @@ func TestHandlePurge(t *testing.T) {
 	t.Run("NotWaiting", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
 		// StatePending is the zero value, but set explicitly for clarity.
-		insertTestTask(t, s, "t1", tk)
+		insertTestTask(s, "t1", tk)
 
 		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks/t1/purge", http.NoBody)
 		req.SetPathValue("id", "t1")
@@ -711,11 +718,12 @@ func TestHandlePurge(t *testing.T) {
 
 	t.Run("Waiting", func(t *testing.T) {
 		t.Parallel()
-		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []taskslog.RepoMount{{Name: "r"}}}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
+		tk.Repos = []taskslog.RepoMount{{Name: "r"}}
 		tk.SetState(taskslog.StateWaiting)
 		s := newTestRouter(t, nil)
 		registerRouterCheckout(t, s.taskMgr.Checkouts, "r", newRouterTestCheckout(t.TempDir()))
-		insertTestTask(t, s, "t1", tk)
+		insertTestTask(s, "t1", tk)
 
 		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks/t1/purge", http.NoBody)
 		req.SetPathValue("id", "t1")
@@ -739,11 +747,12 @@ func TestHandlePurge(t *testing.T) {
 
 	t.Run("CancelledContext", func(t *testing.T) {
 		t.Parallel()
-		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []taskslog.RepoMount{{Name: "r"}}}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
+		tk.Repos = []taskslog.RepoMount{{Name: "r"}}
 		tk.SetState(taskslog.StateRunning)
 		s := newTestRouter(t, nil)
 		registerRouterCheckout(t, s.taskMgr.Checkouts, "r", newRouterTestCheckout(t.TempDir()))
-		insertTestTask(t, s, "t1", tk)
+		insertTestTask(s, "t1", tk)
 
 		// Use an already-cancelled context to simulate shutdown scenario
 		// where BaseContext is cancelled before the handler completes.
@@ -1146,9 +1155,10 @@ func TestSignalProcess(t *testing.T) {
 	t.Run("strictDecodeRejectsUnknownField", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []taskslog.RepoMount{{Name: "r"}}}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
+		tk.Repos = []taskslog.RepoMount{{Name: "r"}}
 		tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", "", 0)
-		insertTestTask(t, s, "t1", tk)
+		insertTestTask(s, "t1", tk)
 		backend := &runtimetest.FakeBackend{}
 		processes := &runtimeProcessHandlers{
 			log:         testLogger(),
@@ -1175,9 +1185,10 @@ func TestSignalProcess(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []taskslog.RepoMount{{Name: "r"}}}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
+		tk.Repos = []taskslog.RepoMount{{Name: "r"}}
 		tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", "", 0)
-		insertTestTask(t, s, "t1", tk)
+		insertTestTask(s, "t1", tk)
 		backend := &runtimetest.FakeBackend{}
 		processes := &runtimeProcessHandlers{
 			log:         testLogger(),
@@ -1917,7 +1928,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		path := filepath.Join(logDir, taskID.String()+".jsonl")
 		writeLogFile(t, logDir, taskID.String()+".jsonl", meta, `not-json`)
 
-		tk := &task.Task{ID: taskID, InitialPrompt: agent.Prompt{Text: "fix the bug"}, Harness: harness.Claude}
+		tk := mustNewTask(t, taskID, agent.Prompt{Text: "fix the bug"}, harness.Claude)
 		tk.SetState(taskslog.StateStopped)
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}})
 		entry := s.taskMgr.NewEntry(tk, nil)
@@ -1971,7 +1982,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		path := filepath.Join(logDir, taskID.String()+".jsonl")
 		writeLogFile(t, logDir, taskID.String()+".jsonl", meta, message)
 
-		tk := &task.Task{ID: taskID, InitialPrompt: agent.Prompt{Text: "fix the bug"}, Harness: harness.Claude}
+		tk := mustNewTask(t, taskID, agent.Prompt{Text: "fix the bug"}, harness.Claude)
 		tk.SetState(taskslog.StateStopped)
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire}})
 		entry := s.taskMgr.NewEntry(tk, nil)
@@ -1999,12 +2010,12 @@ func TestHandleTaskRawEvents(t *testing.T) {
 	t.Run("TerminalTaskWithoutLogPathUsesInMemoryHistory", func(t *testing.T) {
 		t.Parallel()
 		taskID := ksid.NewID()
-		tk := &task.Task{ID: taskID, InitialPrompt: agent.Prompt{Text: "fix the bug"}, Harness: harness.Claude}
+		tk := mustNewTask(t, taskID, agent.Prompt{Text: "fix the bug"}, harness.Claude)
 		tk.RestoreMessages([]agent.Message{&agent.TextMessage{Text: "retained in-memory history"}})
 		tk.SetState(taskslog.StateFailed)
 
 		s := newTestRouter(t, nil)
-		insertTestTask(t, s, taskID.String(), tk)
+		insertTestTask(s, taskID.String(), tk)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
 		req.SetPathValue("id", taskID.String())
 		w := httptest.NewRecorder()
@@ -2050,7 +2061,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 			return claudecode.New().NewWire().ParseMessage, nil
 		})
 
-		tk := &task.Task{ID: taskID, InitialPrompt: agent.Prompt{Text: "fix the bug"}, Harness: harness.Claude}
+		tk := mustNewTask(t, taskID, agent.Prompt{Text: "fix the bug"}, harness.Claude)
 		tk.RestoreMessages([]agent.Message{&agent.TextMessage{Text: "fast in-memory history"}})
 		tk.SetState(taskslog.StateRunning)
 
@@ -2110,12 +2121,8 @@ func TestHandleTaskRawEvents(t *testing.T) {
 			return claudecode.New().NewWire().ParseMessage, nil
 		})
 
-		tk := &task.Task{
-			ID:            taskID,
-			InitialPrompt: agent.Prompt{Text: "fix the bug"},
-			Repos:         []taskslog.RepoMount{{Name: "r", Branch: "caic-0"}},
-			Harness:       harness.Claude,
-		}
+		tk := mustNewTask(t, taskID, agent.Prompt{Text: "fix the bug"}, harness.Claude)
+		tk.Repos = []taskslog.RepoMount{{Name: "r", Branch: "caic-0"}}
 		tk.RestoreMessages([]agent.Message{&agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done"}})
 		tk.SetState(taskslog.StateStopped)
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}})
