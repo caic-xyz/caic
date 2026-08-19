@@ -996,6 +996,7 @@ func (h *Handler) handleSubscription(ctx context.Context, w http.ResponseWriter,
 	lastResources, lastResourceContents := h.subscriptionSnapshot(ctx, p.Notifications)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	if err := writeMCPNotification(stream, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodSubscriptionsAcknowledged, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), Notifications: &p.Notifications}}); err != nil {

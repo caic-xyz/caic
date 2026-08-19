@@ -132,6 +132,7 @@ func (h *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
 	stream := taskEventStream{
 		ctx:        r.Context(),
 		w:          w,
@@ -360,6 +361,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
 	if err := controller.Flush(); err != nil {
 		if errors.Is(err, http.ErrNotSupported) {
 			writeError(r.Context(), w, api.InternalError("streaming not supported"))
@@ -402,7 +404,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 		ch := h.taskMgr.Changed()
 		out := h.taskSvc.taskListSnapshot(ctx)
 		repoList := repoListFromSnapshot(h.log, h.checkouts.Checkouts(), h.repoStatus)
-		var newWarnings = h.warnings.Since(lastWarnTime)
+		newWarnings := h.warnings.Since(lastWarnTime)
 
 		reposJSON, err := json.Marshal(repoList)
 		if err != nil {
