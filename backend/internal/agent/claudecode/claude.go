@@ -82,6 +82,48 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	return msgs, nil
 }
 
+// WritePrompt writes a single user message in Claude Code's stdin format.
+// When images are provided, content is emitted as an array of content blocks.
+func (*wireFormat) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) error {
+	var blocks []claudecode.InputContentBlock
+	for _, img := range p.Images {
+		blocks = append(blocks, claudecode.InputContentBlock{
+			Type: "image",
+			Source: anthropic.Source{
+				Type:      "base64",
+				MediaType: img.MediaType,
+				Data:      img.Data,
+			},
+		})
+	}
+	if p.Text != "" {
+		blocks = append(blocks, claudecode.InputContentBlock{Type: "text", Text: p.Text})
+	}
+	msg := claudecode.InputUserMsg{
+		Type:    claudecode.InputUser,
+		Message: claudecode.InputUserContent{Role: "user", Content: blocks},
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	if _, err := w.Write(data); err != nil {
+		return err
+	}
+	return agent.AppendNativeRecord(log, log.LogVersion(), data)
+}
+
+// WriteCompact implements agent.CompactCommand by sending /compact as a user
+// message. Claude Code recognizes this as a slash command in -p mode.
+func (w *wireFormat) WriteCompact(wr io.Writer, instructions string, log agent.LogSink) error {
+	text := "/compact"
+	if instructions != "" {
+		text = "/compact " + instructions
+	}
+	return w.WritePrompt(wr, agent.Prompt{Text: text}, log)
+}
+
 var claudeEffortOptions = []string{
 	claudecode.EffortLow,
 	claudecode.EffortMedium,
@@ -149,38 +191,6 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	return agent.StartSession(ctx, rp, c, opts)
 }
 
-// WritePrompt writes a single user message in Claude Code's stdin format.
-// When images are provided, content is emitted as an array of content blocks.
-func (*wireFormat) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) error {
-	var blocks []claudecode.InputContentBlock
-	for _, img := range p.Images {
-		blocks = append(blocks, claudecode.InputContentBlock{
-			Type: "image",
-			Source: anthropic.Source{
-				Type:      "base64",
-				MediaType: img.MediaType,
-				Data:      img.Data,
-			},
-		})
-	}
-	if p.Text != "" {
-		blocks = append(blocks, claudecode.InputContentBlock{Type: "text", Text: p.Text})
-	}
-	msg := claudecode.InputUserMsg{
-		Type:    claudecode.InputUser,
-		Message: claudecode.InputUserContent{Role: "user", Content: blocks},
-	}
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	if _, err := w.Write(data); err != nil {
-		return err
-	}
-	return agent.AppendNativeRecord(log, log.LogVersion(), data)
-}
-
 // AgentArgs implements agent.Backend.
 func (*Backend) AgentArgs(a agent.HarnessArgs) []string {
 	args := []string{
@@ -220,16 +230,6 @@ func (*Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Se
 func (*Backend) NewWire() agent.WireFormat {
 	// Log replay can parse large histories; skip development-only unknown-field scans.
 	return &wireFormat{widgetTracker: NewWidgetTracker()}
-}
-
-// WriteCompact implements agent.CompactCommand by sending /compact as a user
-// message. Claude Code recognizes this as a slash command in -p mode.
-func (w *wireFormat) WriteCompact(wr io.Writer, instructions string, log agent.LogSink) error {
-	text := "/compact"
-	if instructions != "" {
-		text = "/compact " + instructions
-	}
-	return w.WritePrompt(wr, agent.Prompt{Text: text}, log)
 }
 
 // hasOAuth reports whether Claude Code has an OAuth session configured
