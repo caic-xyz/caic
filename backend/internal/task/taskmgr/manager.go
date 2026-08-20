@@ -37,9 +37,6 @@ import (
 	quotausage "github.com/caic-xyz/caic/backend/internal/usage"
 )
 
-// errTaskNotFound is returned when a task ID doesn't exist.
-var errTaskNotFound = &Error{Kind: KindNotFound, Msg: "task not found"}
-
 type relayReader interface {
 	Status(ctx context.Context, target runtime.ConnectionTarget) (bool, string, error)
 	ReadTail(ctx context.Context, target runtime.ConnectionTarget, parser *agent.LogRecordParser, maxBytes int64) ([]agent.ParsedMessage, int64, error)

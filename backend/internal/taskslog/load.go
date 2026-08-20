@@ -788,16 +788,6 @@ func decodeSegmentMeta(line []byte, version agent.LogVersion) (string, agent.Met
 	return typ, agent.MetaMessage{}, errNotMetaRecord
 }
 
-func readLogAuthority(path string) (authority logAuthority, retErr error) {
-	retErr = scanPhysicalLog(path, false, func(_ os.FileInfo, scanner *physicalLogScanner, _ agent.MetaMessage) error {
-		for scanner.Scan() {
-		}
-		authority = scanner.authority
-		return scanner.Err()
-	})
-	return authority, retErr
-}
-
 // tailInit is the subset of a system/init message parsed from the tail scan.
 type tailInit struct {
 	Subtype string `json:"subtype"`

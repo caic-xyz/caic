@@ -17,6 +17,13 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
+// parseMessage decodes a single Claude Code NDJSON line without widget
+// tracking. Used only by tests; production streaming uses
+// parseMessageWithTracker directly.
+func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
+	return parseMessageWithTracker(line, nil, fw)
+}
+
 func TestWidgetTrackerBounds(t *testing.T) {
 	t.Parallel()
 

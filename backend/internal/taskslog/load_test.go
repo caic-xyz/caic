@@ -225,6 +225,18 @@ func TestScanPhysicalLogHeaderOnlyAndEOFValidation(t *testing.T) {
 	})
 }
 
+// readLogAuthority scans a physical log and returns its authority. Used
+// only by tests: production loads determine authority via the scanner.
+func readLogAuthority(path string) (authority logAuthority, retErr error) {
+	retErr = scanPhysicalLog(path, false, func(_ os.FileInfo, scanner *physicalLogScanner, _ agent.MetaMessage) error {
+		for scanner.Scan() {
+		}
+		authority = scanner.authority
+		return scanner.Err()
+	})
+	return authority, retErr
+}
+
 func TestReadLogAuthority(t *testing.T) {
 	t.Parallel()
 	meta := func(t *testing.T, version int, h harness.Name) string {

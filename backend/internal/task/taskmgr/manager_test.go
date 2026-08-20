@@ -3965,6 +3965,10 @@ func TestNeedsTitleRegen(t *testing.T) {
 	})
 }
 
+// errTaskNotFound is a test fixture for the not-found error shape.
+// Production builds not-found errors with notFoundf.
+var errTaskNotFound = &Error{Kind: KindNotFound, Msg: "task not found"}
+
 func TestErrTaskNotFound(t *testing.T) {
 	t.Parallel()
 	t.Run("valid", func(t *testing.T) {
