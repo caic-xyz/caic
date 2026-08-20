@@ -60,8 +60,8 @@ export function formatElapsed(ms: number): string {
 export function tokenColor(current: number, limit: number): string {
   if (limit <= 0) return "inherit";
   const ratio = current / limit;
-  if (ratio >= 0.9) return "#dc3545";
-  if (ratio >= 0.75) return "#d4a017";
+  if (ratio >= 0.9) return "var(--color-danger)";
+  if (ratio >= 0.75) return "var(--color-warning-text)";
   return "inherit";
 }
 
@@ -74,24 +74,24 @@ export function stateColor(state: TaskState): string {
     case "pending":
     case "pulling":
     case "pushing":
-      return "#d4edda";
+      return "var(--color-state-active-bg)";
     case "asking":
-      return "#cce5ff";
+      return "var(--color-state-asking-bg)";
     case "has_plan":
-      return "#ede9fe";
+      return "var(--color-state-plan-bg)";
     case "crashed":
-      return "#ffe0d6";
+      return "var(--color-state-crashed-bg)";
     case "failed":
-      return "#f8d7da";
+      return "var(--color-state-failed-bg)";
     case "purging":
     case "stopping":
-      return "#fde2c8";
+      return "var(--color-state-stopping-bg)";
     case "purged":
-      return "#e2e3e5";
+      return "var(--color-state-purged-bg)";
     case "stopped":
-      return "#c8daf0";
+      return "var(--color-state-stopped-bg)";
     case "waiting":
-      return "#fff3cd";
+      return "var(--color-state-waiting-bg)";
   }
 }
 
@@ -102,19 +102,9 @@ export function isCacheStale(nowMs: number, cacheExpiresAt?: string): boolean {
   return expiresMs > 0 && nowMs > expiresMs;
 }
 
-/** Blend a hex color toward a target hex by `amount` (0–1). */
-function blendHex(hex: string, target: string, amount: number): string {
-  const ch = (s: string, i: number) => parseInt(s.slice(i, i + 2), 16);
-  const mix = (a: number, t: number) => Math.round(a + (t - a) * amount);
-  const r = mix(ch(hex, 1), ch(target, 1));
-  const g = mix(ch(hex, 3), ch(target, 3));
-  const bl = mix(ch(hex, 5), ch(target, 5));
-  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${bl.toString(16).padStart(2, "0")}`;
-}
-
 /** Returns a redder variant of the state color when the cache is stale. */
 export function staleStateColor(state: TaskState): string {
-  return blendHex(stateColor(state), "#dc3545", 0.25);
+  return `color-mix(in srgb, ${stateColor(state)} 75%, var(--color-danger))`;
 }
 
 function pathFromInput(input: Record<string, unknown>): string {

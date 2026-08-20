@@ -1,31 +1,45 @@
 /* Global resets and design tokens for the web frontend. */
 
 :root {
-  /* Primary action (buttons, focus rings) */
+  /* Filled primary controls and their foreground. */
   --color-primary: #4a90d9;
   --color-primary-hover: #357abd;
+  --color-on-primary: #fff;
+  --color-on-primary-spinner-track: rgba(255, 255, 255, 0.4);
+
+  /* Primary tints for drag targets and focus indicators over existing surfaces. */
+  --color-primary-drop-bg: color-mix(in srgb, var(--color-primary) 5%, transparent);
+  --color-primary-focus-ring: color-mix(in srgb, var(--color-primary) 20%, transparent);
   --color-primary-ring: rgba(74, 144, 217, 0.3);
+
+  /* Low-emphasis primary containers and their readable foreground. */
   --color-primary-container: #f0f6ff;
-  --color-on-primary-container: #1a3a5c;
+  --color-primary-container-hover: #d5e3f0;
+  --color-primary-border: #b8d0ea;
+  --color-on-primary-container: #2f4f6e;
 
   /* Links */
   --color-link: #0366d6;
 
-  /* Success */
+  /* Success controls plus paired status background and text. */
   --color-success: #28a745;
   --color-success-hover: #218838;
+  --color-success-spinner-track: color-mix(in srgb, var(--color-success) 30%, transparent);
   --color-success-bg: #d4edda;
   --color-success-text: #155724;
 
-  /* Danger */
+  /* Danger controls, validation surfaces, and foregrounds for light or dark surfaces. */
   --color-danger: #dc3545;
   --color-danger-hover: #c82333;
+  --color-danger-spinner-track: color-mix(in srgb, var(--color-danger) 30%, transparent);
   --color-danger-bg: #f8d7da;
+  --color-danger-surface: #fff0f0;
   --color-danger-text: #721c24;
   --color-danger-border: #f5c6cb;
+  --color-danger-on-dark: #f87171;
   --color-error: #c00;
 
-  /* Warning */
+  /* Paired warning background, border, and text. */
   --color-warning-bg: #fff3cd;
   --color-warning-border: #ffc107;
   --color-warning-text: #856404;
@@ -38,8 +52,9 @@
   --color-secondary: #6c757d;
   --color-secondary-container: #f8f9fa;
 
-  /* Plan mode (purple) */
+  /* Plan mode and thinking (purple) */
   --color-plan: #7c3aed;
+  --color-thinking-border: #9b8fd4;
   --color-plan-bg: #ede9fe;
   --color-plan-surface: #f5f3ff;
   --color-plan-border: #ddd6fe;
@@ -48,9 +63,31 @@
   --color-feature-badge-bg: #dfeefa;
   --color-feature-badge-fg: #2563eb;
 
-  /* Surface (chip backgrounds, vs. primary fill) */
+  /* Task badge backgrounds returned by formatting.ts; distinct states stay visually distinct. */
+  --color-state-active-bg: var(--color-success-bg);
+  --color-state-asking-bg: #cce5ff;
+  --color-state-plan-bg: var(--color-plan-bg);
+  --color-state-crashed-bg: #ffe0d6;
+  --color-state-failed-bg: var(--color-danger-bg);
+  --color-state-stopping-bg: #fde2c8;
+  --color-state-purged-bg: #e2e3e5;
+  --color-state-stopped-bg: #c8daf0;
+  --color-state-waiting-bg: var(--color-warning-bg);
+
+  /* Low-emphasis chip and disabled-state surface. */
   --color-surface-variant: #e8e8e8;
-  --color-on-primary: #ffffff;
+
+  /* Dark controls and media surfaces with their foreground hierarchy. */
+  --color-bg-inverse: #2a2a2a;
+  --color-bg-media: #000;
+  --color-bg-media-panel: #1a1a1a;
+  /* Opaque stop for the task-list edge-fade mask; its hue is irrelevant. */
+  --color-mask-opaque: #000;
+  --color-on-inverse: #fff;
+  --color-on-inverse-muted: #ccc;
+  --color-on-inverse-disabled: #666;
+  --color-on-inverse-hover: rgba(255, 255, 255, 0.1);
+  --color-on-inverse-hover-strong: rgba(255, 255, 255, 0.15);
 
   /* Text scale (dark → light) */
   --color-text-secondary: #555;
@@ -59,33 +96,49 @@
   --color-text-muted: #888;
   --color-text-faint: #999;
 
-  /* Surface backgrounds */
-  /* RGB triplet for gradients that need alpha stops. */
+  /* Application and elevated surfaces. The channel triplet supports alpha gradient stops. */
   --color-bg-app-rgb: 255 255 255;
+  --color-bg-elevated: rgb(var(--color-bg-app-rgb));
   --color-bg-input: #f0f0f0;
   --color-bg-input-hover: #e4e4e4;
   --color-bg-hover: #eee;
   --color-bg-code: #e8e8e8;
   --color-bg-surface: #fafafa;
+  /* Toast and tooltip aliases currently share one inverse popup palette. */
   --color-toast-bg: #333;
   --color-on-toast: #fff;
+  --color-tooltip-bg: var(--color-toast-bg);
+  --color-on-tooltip: var(--color-on-toast);
 
   /* Borders */
   --color-border: #ddd;
   --color-border-light: #e0e0e0;
   --color-border-medium: #ccc;
+  --color-border-strong: #444;
+
+  /* Content wash, modal scrim, and media scrim, from lightest to strongest. */
+  --color-overlay-soft: rgba(0, 0, 0, 0.05);
+  --color-overlay: rgba(0, 0, 0, 0.5);
+  --color-overlay-strong: rgba(0, 0, 0, 0.6);
+
+  /* Popup, menu/toast, and modal shadow colors, ordered by elevation. */
+  --color-shadow-sm: rgba(0, 0, 0, 0.12);
+  --color-shadow-md: rgba(0, 0, 0, 0.18);
+  --color-shadow-lg: rgba(0, 0, 0, 0.24);
 
   /* Selection */
   --color-selected: #007bff;
 
-  /* User message tint */
+  /* User messages and nested session controls use progressively stronger blue tints. */
   --color-user-msg-bg: #dbe9f9;
+  --color-session-bg: #c9d6e4;
+  --color-session-bg-hover: #b5c8dc;
 
   /* Widget */
   --color-widget-border: var(--color-border-medium);
   --color-widget-bg: var(--color-bg-surface);
 
-  /* Diff summary counts */
+  /* Added, deleted, and binary file-count text in diff summaries. */
   --color-diff-added: #22863a;
   --color-diff-deleted: #cb2431;
   --color-diff-binary: #6a737d;
@@ -148,7 +201,7 @@ body {
   padding: 0.6rem 1.25rem;
   border-radius: var(--radius-md);
   background: var(--color-primary);
-  color: #fff;
+  color: var(--color-on-primary);
   font-size: 0.95rem;
   font-weight: 500;
   text-decoration: none;

@@ -12,11 +12,11 @@
   position: fixed;
   inset: 0;
   z-index: 100;
-  background: #000;
+  background: var(--color-bg-media);
 }
 
 .fullscreen .header {
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--color-overlay-strong);
   position: absolute;
   top: 0;
   left: 0;
@@ -31,20 +31,20 @@
 }
 
 .fullscreen .backBtn {
-  color: #ccc;
+  color: var(--color-on-inverse-muted);
 }
 
 .fullscreen .backBtn:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--color-on-inverse-hover-strong);
 }
 
 .fullscreen .headerRepo,
 .fullscreen .headerBranch {
-  color: #ccc;
+  color: var(--color-on-inverse-muted);
 }
 
 .fullscreen .headerBranch {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--color-on-inverse-hover);
 }
 
 .header {

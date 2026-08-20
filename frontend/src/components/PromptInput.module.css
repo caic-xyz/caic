@@ -10,7 +10,7 @@
   outline: 2px dashed var(--color-primary);
   outline-offset: -2px;
   border-radius: var(--radius-lg);
-  background: rgba(74, 144, 217, 0.05);
+  background: var(--color-primary-drop-bg);
 }
 
 .row {
@@ -93,8 +93,8 @@
   position: absolute;
   top: 0;
   right: 0;
-  background: rgba(0, 0, 0, 0.5);
-  color: white;
+  background: var(--color-overlay);
+  color: var(--color-on-inverse);
   border: none;
   cursor: pointer;
   font-size: 0.75rem;
@@ -111,12 +111,12 @@
   position: absolute;
   bottom: calc(100% + 4px);
   right: 0;
-  background: #2a2a2a;
-  border: 1px solid #444;
+  background: var(--color-bg-inverse);
+  border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-xl);
   padding: 4px 0;
   min-width: 150px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 12px var(--color-shadow-lg);
   z-index: 10;
 }
 
@@ -133,14 +133,14 @@
   padding: 0.45rem 0.75rem;
   background: none;
   border: none;
-  color: #e0e0e0;
+  color: var(--color-on-inverse-muted);
   cursor: pointer;
   font-size: 0.85rem;
   white-space: nowrap;
 }
 
 .menuItem:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--color-on-inverse-hover);
 }
 
 .menuItem svg {

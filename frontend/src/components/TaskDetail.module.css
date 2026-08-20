@@ -136,8 +136,8 @@ a.headerPR:hover {
   display: block;
   width: 100%;
   padding: 0.25rem 0.5rem;
-  color: #4a6785;
-  background: #e4eaf1;
+  color: var(--color-on-primary-container);
+  background: var(--color-primary-container);
   border: none;
   border-radius: var(--radius-md);
   cursor: pointer;
@@ -157,7 +157,7 @@ a.headerPR:hover {
 
 .taskSetup:hover .taskSetupTitle,
 .taskSetup[open] .taskSetupTitle {
-  background: #d5e3f0;
+  background: var(--color-primary-container-hover);
 }
 
 .taskSetup[open] .taskSetupTitle::before {
@@ -234,7 +234,7 @@ a.headerPR:hover {
   font-size: 0.8rem;
   text-align: center;
   margin: 1rem 0;
-  border-top: 1px solid #444;
+  border-top: 1px solid var(--color-border-strong);
   padding-top: 0.5rem;
 }
 
@@ -603,7 +603,7 @@ a.headerPR:hover {
   background: var(--color-bg-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 12px var(--color-shadow-md);
   padding: 0.35rem 0;
   font-size: 0.75rem;
 }
@@ -672,7 +672,7 @@ a.ciStatus:hover {
   padding: 0.15rem 0.5rem;
   border-radius: var(--radius-sm);
   background: var(--color-danger);
-  color: #fff;
+  color: var(--color-on-primary);
   border: none;
   cursor: pointer;
   flex-shrink: 0;
@@ -715,7 +715,7 @@ a.ciStatus:hover {
 .resultDiffStat {
   margin: 0.25rem 0 0;
   padding: 0.4rem 0.6rem;
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--color-overlay-soft);
   border-radius: var(--radius-sm);
   font-size: 0.8rem;
   line-height: 1.5;
@@ -785,7 +785,7 @@ a.ciStatus:hover {
   background: var(--color-bg-code);
   border-radius: var(--radius-md);
   padding: 0.25rem 0.5rem;
-  border-left: 2px solid #9b8fd4;
+  border-left: 2px solid var(--color-thinking-border);
 }
 
 .thinkingBlock summary {
@@ -925,13 +925,13 @@ a.ciStatus:hover {
   width: 100%;
   margin-top: 0.35rem;
   margin-bottom: 0.35rem;
-  background: #e4eaf1;
+  background: var(--color-primary-container);
   border: none;
   border-radius: var(--radius-md);
   padding: 0.25rem 0.5rem;
   cursor: pointer;
   font-size: 0.8rem;
-  color: #4a6785;
+  color: var(--color-on-primary-container);
   text-align: left;
 }
 
@@ -942,11 +942,11 @@ a.ciStatus:hover {
 }
 
 .elidedTurn:hover {
-  background: #d5e3f0;
+  background: var(--color-primary-container-hover);
 }
 
 .elidedTurnExpanded {
-  background: #d5e3f0;
+  background: var(--color-primary-container-hover);
   margin-bottom: 0.1rem;
 }
 
@@ -976,14 +976,14 @@ a.ciStatus:hover {
   display: block;
   width: 100%;
   margin-bottom: 0.4rem;
-  background: #c9d6e4;
+  background: var(--color-session-bg);
   border: none;
   border-radius: var(--radius-md);
   padding: 0.3rem 0.6rem;
   cursor: pointer;
   font-size: 0.8rem;
   font-weight: 500;
-  color: #2f4f6e;
+  color: var(--color-on-primary-container);
   text-align: left;
 }
 
@@ -994,11 +994,11 @@ a.ciStatus:hover {
 }
 
 .sessionElided:hover {
-  background: #b5c8dc;
+  background: var(--color-session-bg-hover);
 }
 
 .sessionElidedExpanded {
-  background: #b5c8dc;
+  background: var(--color-session-bg-hover);
   margin-bottom: 0.1rem;
 }
 
@@ -1024,7 +1024,7 @@ a.ciStatus:hover {
 
 .toolDone {
   margin-right: 0.3em;
-  color: #4a4;
+  color: var(--color-success);
   font-weight: bold;
   font-size: 0.85em;
 }
@@ -1064,7 +1064,7 @@ a.ciStatus:hover {
   max-height: 150px;
   overflow: auto;
   color: var(--color-error);
-  background: #fff0f0;
+  background: var(--color-danger-surface);
   padding: 0.25rem 0.5rem;
   border-radius: var(--radius-sm);
 }
@@ -1092,7 +1092,7 @@ a.ciStatus:hover {
 }
 
 .loadInputBtn:hover:not(:disabled) {
-  background: var(--color-bg-hover, #e8e8e8);
+  background: var(--color-bg-hover);
   color: var(--color-text-secondary);
 }
 
@@ -1112,12 +1112,12 @@ a.ciStatus:hover {
   padding: 0.75rem;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  background: #f8f9fa;
+  background: var(--color-secondary-container);
 }
 
 .askGroupActive {
   border-color: var(--color-primary);
-  background: #f0f6ff;
+  background: var(--color-primary-container);
 }
 
 .askQuestion {
@@ -1154,7 +1154,7 @@ a.ciStatus:hover {
   border: 1px solid var(--color-border-medium);
   border-radius: var(--radius-lg);
   padding: 0.35rem 0.6rem;
-  background: white;
+  background: var(--color-bg-elevated);
   cursor: pointer;
   font-size: 0.8rem;
   text-align: left;
@@ -1202,7 +1202,7 @@ a.ciStatus:hover {
   border: none;
   border-radius: var(--radius-md);
   background: var(--color-primary);
-  color: white;
+  color: var(--color-on-primary);
   cursor: pointer;
   font-size: 0.85rem;
 }
@@ -1228,7 +1228,7 @@ a.ciStatus:hover {
   max-width: min(100%, 720px);
   height: auto;
   border-radius: var(--radius-md);
-  border: 1px solid #b8d0ea;
+  border: 1px solid var(--color-primary-border);
 }
 
 .safetyWarning {
@@ -1278,7 +1278,7 @@ a.ciStatus:hover {
 }
 
 .contextMenuToggle:hover:not(:disabled) {
-  background: #e0e0e0;
+  background: var(--color-border-light);
 }
 
 .contextMenuToggle:disabled {

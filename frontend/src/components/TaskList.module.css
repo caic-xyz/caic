@@ -15,8 +15,8 @@
   min-height: 0;
   opacity: 1;
   /* Fade only the bottom edge of the scroll viewport. */
-  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - var(--task-list-bottom-fade)), transparent);
-  mask-image: linear-gradient(to bottom, black calc(100% - var(--task-list-bottom-fade)), transparent);
+  -webkit-mask-image: linear-gradient(to bottom, var(--color-mask-opaque) calc(100% - var(--task-list-bottom-fade)), transparent);
+  mask-image: linear-gradient(to bottom, var(--color-mask-opaque) calc(100% - var(--task-list-bottom-fade)), transparent);
   transition: width 150ms ease-out, opacity 150ms ease-out;
 }
 
@@ -149,7 +149,7 @@
 
 .fixCIBtn:hover {
   background: var(--color-danger);
-  color: white;
+  color: var(--color-on-primary);
 }
 
 .autoBadge {

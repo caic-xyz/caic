@@ -52,7 +52,7 @@
 .fullscreenOverlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--color-overlay-strong);
   display: flex;
   flex-direction: column;
   z-index: 1000;
@@ -89,5 +89,5 @@
   border: none;
   flex: 1;
   width: 100%;
-  background: #fff;
+  background: var(--color-bg-elevated);
 }

@@ -63,11 +63,11 @@
 }
 
 .dotConnected {
-  background: #4caf50;
+  background: var(--color-success);
 }
 
 .dotDisconnected {
-  background: #f44336;
+  background: var(--color-danger);
 }
 
 .errorFallback {

@@ -6,8 +6,8 @@
 
 .popup {
   position: fixed;
-  background: #333;
-  color: #fff;
+  background: var(--color-tooltip-bg);
+  color: var(--color-on-tooltip);
   font-size: 0.75rem;
   line-height: 1.3;
   padding: 0.3rem 0.5rem;

@@ -26,7 +26,7 @@
   background: var(--color-toast-bg);
   color: var(--color-on-toast);
   font-size: 0.85rem;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 4px 12px var(--color-shadow-md);
   pointer-events: auto;
   animation: toastIn 200ms ease-out;
 }

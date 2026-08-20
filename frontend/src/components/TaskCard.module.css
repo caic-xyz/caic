@@ -248,7 +248,7 @@
 }
 
 .purgeIcon:hover:not(:disabled) {
-  color: #a71d2a;
+  color: var(--color-danger-hover);
 }
 
 .reviveIcon:hover:not(:disabled) {
@@ -271,12 +271,12 @@
 }
 
 .purgeSpinner {
-  border: 2px solid rgba(220, 53, 69, 0.3);
+  border: 2px solid var(--color-danger-spinner-track);
   border-top-color: var(--color-danger);
 }
 
 .reviveSpinner {
-  border: 2px solid rgba(40, 167, 69, 0.3);
+  border: 2px solid var(--color-success-spinner-track);
   border-top-color: var(--color-success);
 }
 

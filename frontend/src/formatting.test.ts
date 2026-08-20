@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { formatBytes, formatElapsed, stateColor, toolCallDetail } from "./formatting";
+import { formatBytes, formatElapsed, staleStateColor, stateColor, toolCallDetail } from "./formatting";
 
 describe("formatBytes", () => {
   it("formats resident memory using binary units", () => {
@@ -29,13 +29,25 @@ describe("stateColor", () => {
     ] as const;
 
     for (const state of busyStates) {
-      expect(stateColor(state)).toBe("#d4edda");
+      expect(stateColor(state)).toBe("var(--color-state-active-bg)");
     }
   });
 
-  it("keeps stopping and purging orange", () => {
-    expect(stateColor("stopping")).toBe("#fde2c8");
-    expect(stateColor("purging")).toBe("#fde2c8");
+  it("uses the teardown tint for stopping and purging", () => {
+    expect(stateColor("stopping")).toBe("var(--color-state-stopping-bg)");
+    expect(stateColor("purging")).toBe("var(--color-state-stopping-bg)");
+  });
+
+  it("keeps distinct failure and attention states", () => {
+    expect(stateColor("crashed")).toBe("var(--color-state-crashed-bg)");
+    expect(stateColor("failed")).toBe("var(--color-state-failed-bg)");
+    expect(stateColor("waiting")).toBe("var(--color-state-waiting-bg)");
+  });
+
+  it("mixes stale states toward danger", () => {
+    expect(staleStateColor("running")).toBe(
+      "color-mix(in srgb, var(--color-state-active-bg) 75%, var(--color-danger))",
+    );
   });
 });
 

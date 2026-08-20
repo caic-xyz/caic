@@ -1,104 +1,115 @@
 # SolidJS Web Frontend
 
-SolidJS web UI for caic. Built with Vite, outputs to `../backend/frontend/dist/`.
+SolidJS web UI for caic. Vite builds into `backend/frontend/dist/`.
 
-## Build
+## Required Validation
 
-Run `make build` after any frontend file change.
-`make build` rewrites tracked `backend/frontend/dist/*.br`; keep those changes
-when frontend or generated TypeScript changes affect the bundle hash.
+Run `make build` after every frontend change. Keep regenerated tracked
+`backend/frontend/dist/*.br` assets.
 
-## Stack
+Use:
 
-- SolidJS for reactivity
-- Vite for bundling
-- TypeScript with strict mode
-- ESLint with solid plugin
-- Vitest + @solidjs/testing-library for unit tests
-
-For up-to-date SolidJS information, `git clone https://github.com/solidjs/solid-docs`
-rather than relying on potentially stale knowledge.
+```bash
+pnpm test:coverage
+pnpm typecheck
+```
 
 ## Testing
 
-Unit tests use Vitest with jsdom and `@solidjs/testing-library`. Test files
-live next to their source as `*.test.tsx` or `*.test.ts`.
+Prefer semantic queries for user-visible interactions. Use stable
+`data-testid` contracts for internal component identities that should survive
+copy and layout changes.
+
+Query portal-rendered content through `screen`.
+
+Components using router hooks require router context or a router mock. Prefer a
+shared test helper over repeating router mocks.
+
+## Styling and Theming
+
+The frontend currently ships one light application theme. Design tokens provide
+a stable semantic boundary for future themes; do not add component-level theme
+branches prematurely.
+
+### Token Ownership
+
+- Put application-wide tokens in `src/global.css`.
+- Put component-specific tokens in the owning CSS Module.
+- Put document-specific tokens in the owning HTML document.
+- Local tokens are visible only within their owning source file.
+- `WidgetShell.html` is a separate document and cannot inherit application
+  tokens from the parent page.
+
+### Token Design
+
+Name tokens by semantic role, not by their current color:
+
+- Prefer `--color-danger`, `--color-bg-elevated`, and `--color-on-primary`.
+- Avoid names such as `--color-red`, `--light-gray`, or value-based names.
+- Pair filled surfaces with explicit foreground tokens where contrast matters.
+- Keep semantically different roles separate even when they currently share a
+  value.
+- Use aliases only when two roles are intentionally coupled.
+- Derive translucent variants from their base token with `color-mix()` instead
+  of duplicating RGB channels.
+
+### Surface Hierarchy
+
+Use the existing surface families consistently:
+
+- Application background: page canvas.
+- Surface: inset cards and content regions.
+- Elevated surface: menus, dialogs, and popups.
+- Input surface: editable controls and their hover state.
+- Inverse/media surface: dark controls, camera, and VNC content.
+
+Do not use border tokens as backgrounds or foreground tokens on unrelated
+surface families solely because their current values match.
+
+### States and Interaction
+
+Use explicit tokens for hover, focus, selected, disabled, success, warning, and
+danger states. Preserve visual distinctions between task states unless a
+product change intentionally combines them.
+
+Focus indicators must remain visible and must not rely only on a color change.
+Background/foreground pairs should maintain accessible contrast.
+
+### Theme Changes
+
+Implement a future application theme by overriding shared semantic tokens at a
+top-level theme selector. Do not duplicate component rules for each theme.
+
+Separate documents such as `WidgetShell.html` require their own token overrides
+and explicit theme propagation.
+
+### Enforcement
+
+Direct color values are allowed only in CSS custom-property declarations.
+Property values must consume variables with `var(...)`.
+
+Use `var(--radius-*)` for standard border radii. Percentage radii and
+component-specific geometry are allowed when they express shape rather than a
+design-system radius.
+
+Run after styling changes:
 
 ```bash
-pnpm test:coverage  # single run with coverage report
-pnpm test:watch     # watch mode
+python3 scripts/lint_css_vars.py
+make build
 ```
 
-- Render components with `render(() => <Comp />)`.
-- Prefer role-based queries (`getByRole`, `getByText`) over test IDs.
-- Use `@testing-library/user-event` for interactions.
-- `@testing-library/jest-dom` matchers are available globally.
+## Widget Sandbox
 
-### Query strategy
+`WidgetCard.tsx` hosts the sandboxed iframe. `WidgetShell.html` owns the iframe
+document, CSP, local styles, and runtime script.
 
-Use semantic queries whenever the element represents a user-visible interaction:
-- **`getByRole("button", { name: "Send" })`** — buttons with stable labels
-- **`getByLabelText(...)`** — form fields with associated labels
-- **`getByText(...)`** — visible text content
-
-Use `data-testid` + `getByTestId(...)` for **internal component contracts**
-(repo chips, clone dialogs, SSE-connected UI) where the element identity must
-survive copy changes, layout refactors, and style rewrites. Testids are an
-explicit stability contract between tests and components — use them without
-guilt for developer-facing test targets.
-
-### Portal content
-
-If a component uses `<Portal>`, query the portal-rendered content with the
-`screen` export instead of destructuring from `render()`:
-
-```tsx
-import { render, screen } from "@solidjs/testing-library";
-
-render(() => <Comp />);
-expect(screen.getByText("portal content")).toBeInTheDocument();
-```
-
-### Router tests
-
-Components that use `useNavigate`, `useLocation`, or `<A>` need a router
-context. Mock `@solidjs/router` with `vi.mock` to provide stubs:
-
-```tsx
-const navigateMock = vi.fn();
-vi.mock("@solidjs/router", () => ({
-  useNavigate: () => navigateMock,
-  useLocation: () => ({ pathname: "/test-path" }),
-  A: (props: Record<string, unknown>) => (
-    <a href={props.href as string} onClick={(e) => { e.preventDefault(); navigateMock(props.href); }}>
-      {props.children}
-    </a>
-  ),
-}));
-```
-
-The `location` render option only works for actual `<Route>` components, not
-for arbitrary components that consume router hooks. When testing a `<Route>`
-component directly, use `render(() => <Route ... />, { location: "/path" })`
-with `findBy*` queries (router is lazily loaded).
-
-## Styling
-
-CSS Modules with design tokens defined as CSS custom properties in `src/global.css`.
-Use `var(--color-*)` and `var(--radius-*)` variables instead of hardcoded hex colors
-or pixel radii. Add new tokens to `:root` in `global.css` when introducing new colors.
+Do not add `allow-same-origin` to an iframe that also permits scripts.
 
 ## Mobile
 
-No back-navigation button is needed on mobile — the browser's swipe gesture
-and back button handle it. Do not add a back arrow to the task detail header.
-
-## Development
-
-```bash
-make frontend-dev   # Vite dev server on :5173, proxies /api to :2242
-make fake-dev       # Build + run Go server with fake backend on :2242
-```
+Do not add a back button to the mobile task-detail header. Browser and platform
+navigation own that behavior.
 
 <!-- BEGIN FILE INDEX -->
 ## File Index

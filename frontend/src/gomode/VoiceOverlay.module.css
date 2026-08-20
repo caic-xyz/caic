@@ -153,7 +153,7 @@
   padding: 0.3rem 0.75rem;
   font: inherit;
   font-size: 0.85rem;
-  border: 1px solid #ccc;
+  border: 1px solid var(--color-border-medium);
   border-radius: var(--radius-md);
   background: none;
   color: inherit;
@@ -168,7 +168,7 @@
 
 .actionButtonPrimary {
   background: var(--color-primary);
-  color: #fff;
+  color: var(--color-on-primary);
   border-color: var(--color-primary);
 }
 

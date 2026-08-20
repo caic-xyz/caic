@@ -3,9 +3,9 @@
 .dialog {
   border: none;
   border-radius: var(--radius-xl);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.24);
+  box-shadow: 0 12px 40px var(--color-shadow-lg);
 }
 
 .dialog::backdrop {
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--color-overlay);
 }

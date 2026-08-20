@@ -62,7 +62,7 @@ a.providerPill:hover {
 .red    { background: var(--color-danger-bg);  color: var(--color-danger-text);  }
 
 .disabled {
-  background: #e2e3e5;
+  background: var(--color-surface-variant);
   color: var(--color-gray);
   text-decoration: line-through;
 }
