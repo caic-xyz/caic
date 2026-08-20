@@ -561,8 +561,11 @@ func TestTask(t *testing.T) {
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","old_string":"TODO","new_string":"DONE","replace_all":true}`),
 			}, false)
 			snap := tk.Snapshot()
-			if snap.PlanContent != "DONE\nDONE\n" {
-				t.Errorf("PlanContent = %q after replace_all Edit, want %q", snap.PlanContent, "DONE\nDONE\n")
+			// The repeated "DONE" is the point of the test: replace_all rewrites
+			// both occurrences. dupword's autofix deletes the second one.
+			want := "DONE\nDONE\n" //nolint:dupword // intentional repetition
+			if snap.PlanContent != want {
+				t.Errorf("PlanContent = %q after replace_all Edit, want %q", snap.PlanContent, want)
 			}
 		})
 		t.Run("EditIgnoresNonPlanFile", func(t *testing.T) {

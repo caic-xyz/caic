@@ -8,7 +8,6 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -98,9 +97,9 @@ func (s *AccessTokenService) RotateKey() (string, error) {
 	return s.RotateKeyWithAlg("ES256")
 }
 
-// RotateKeyWithAlg generates a new key of the specified algorithm ("RS256" or
-// "ES256") in the active set and makes it the current signing key.
-// Returns the new KID.
+// RotateKeyWithAlg generates a new key for the specified algorithm ("RS256",
+// "ES256", "ES384" or "ES512") in the active set and makes it the current
+// signing key. Returns the new KID.
 func (s *AccessTokenService) RotateKeyWithAlg(alg string) (string, error) {
 	var sk signingKey
 	switch alg {
@@ -110,12 +109,18 @@ func (s *AccessTokenService) RotateKeyWithAlg(alg string) (string, error) {
 			return "", fmt.Errorf("generate oauth rotate rsa key: %w", err)
 		}
 		sk = signingKey{key: rsaKey, alg: "RS256"}
-	case "ES256":
-		ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	case "ES256", "ES384", "ES512":
+		// RFC 7518 §3.4 pairs each ES* alg with exactly one curve.
+		curve := map[string]elliptic.Curve{
+			"ES256": elliptic.P256(),
+			"ES384": elliptic.P384(),
+			"ES512": elliptic.P521(),
+		}[alg]
+		ecKey, err := ecdsa.GenerateKey(curve, rand.Reader)
 		if err != nil {
 			return "", fmt.Errorf("generate oauth rotate ec key: %w", err)
 		}
-		sk = signingKey{key: ecKey, alg: "ES256"}
+		sk = signingKey{key: ecKey, alg: alg}
 	default:
 		return "", fmt.Errorf("unsupported key algorithm: %q", alg)
 	}
@@ -234,9 +239,8 @@ func (s *AccessTokenService) issueAccessTokenAt(claims *oauth.AccessTokenClaims,
 		return "", err
 	}
 	signingInput := base64.RawURLEncoding.EncodeToString(headerJSON) + "." + base64.RawURLEncoding.EncodeToString(payloadJSON)
-	digest := sha256.Sum256([]byte(signingInput))
 	sk := s.keys[s.currentKID]
-	signature, err := sign(sk.key, digest[:])
+	signature, err := signJWS(sk.alg, sk.key, []byte(signingInput))
 	if err != nil {
 		return "", err
 	}
@@ -268,8 +272,7 @@ func (s *AccessTokenService) parseAndVerifyJWT(raw string) (parsedToken, error) 
 		return parsedToken{}, fmt.Errorf("decode token signature: %w", err)
 	}
 	signingInput := parts[0] + "." + parts[1]
-	digest := sha256.Sum256([]byte(signingInput))
-	if err := verify(keyInfo.key.Public(), digest[:], signature); err != nil {
+	if err := verifyJWS(keyInfo.key.Public(), keyInfo.alg, []byte(signingInput), signature); err != nil {
 		return parsedToken{}, errors.New("invalid token signature")
 	}
 	payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
@@ -339,35 +342,6 @@ func randomToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(raw[:]), nil
 }
 
-// sign signs a digest with the given key. The algorithm is implied by the key
-// type: RSA uses PKCS1v15 SHA-256, ECDSA uses ASN.1.
-func sign(pub crypto.Signer, digest []byte) ([]byte, error) {
-	switch key := pub.(type) {
-	case *rsa.PrivateKey:
-		return rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, digest)
-	case *ecdsa.PrivateKey:
-		return ecdsa.SignASN1(rand.Reader, key, digest)
-	default:
-		return nil, fmt.Errorf("unsupported signing key type: %T", pub)
-	}
-}
-
-// verify verifies a signature against a public key. The algorithm is implied
-// by the key type: RSA uses PKCS1v15 SHA-256, ECDSA uses ASN.1.
-func verify(pub crypto.PublicKey, digest, signature []byte) error {
-	switch key := pub.(type) {
-	case *rsa.PublicKey:
-		return rsa.VerifyPKCS1v15(key, crypto.SHA256, digest, signature)
-	case *ecdsa.PublicKey:
-		if !ecdsa.VerifyASN1(key, digest, signature) {
-			return errors.New("ecdsa signature verification failed")
-		}
-		return nil
-	default:
-		return fmt.Errorf("unsupported public key type: %T", pub)
-	}
-}
-
 // accessTokenKey parses a PEM-encoded key and returns it as a crypto.Signer
 // with its JWS algorithm.
 func accessTokenKey(keyPEM []byte) (crypto.Signer, string, error) {
@@ -381,7 +355,11 @@ func accessTokenKey(keyPEM []byte) (crypto.Signer, string, error) {
 		if !ok {
 			return nil, "", fmt.Errorf("key type %T does not implement crypto.Signer", key)
 		}
-		return signer, keyAlg(key), nil
+		alg, err := keyAlg(key)
+		if err != nil {
+			return nil, "", err
+		}
+		return signer, alg, nil
 	}
 	// Fall back to PKCS1 RSA.
 	key, err := x509.ParsePKCS1PrivateKey(block.Bytes)
@@ -392,13 +370,18 @@ func accessTokenKey(keyPEM []byte) (crypto.Signer, string, error) {
 }
 
 // keyAlg returns the JWS algorithm name for a key.
-func keyAlg(key any) string {
-	switch key.(type) {
+//
+// EC keys take the alg their curve mandates (RFC 7518 §3.4), so a P-384 key is
+// ES384 rather than the ES256 a curve-blind mapping would report.
+func keyAlg(key any) (string, error) {
+	switch k := key.(type) {
 	case *rsa.PrivateKey, *rsa.PublicKey:
-		return "RS256"
-	case *ecdsa.PrivateKey, *ecdsa.PublicKey:
-		return "ES256"
+		return "RS256", nil
+	case *ecdsa.PrivateKey:
+		return ecdsaAlg(k.Curve)
+	case *ecdsa.PublicKey:
+		return ecdsaAlg(k.Curve)
 	default:
-		return ""
+		return "", fmt.Errorf("unsupported signing key type: %T", key)
 	}
 }

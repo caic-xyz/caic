@@ -5,6 +5,7 @@ package oauth
 
 import (
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
@@ -241,16 +242,29 @@ func RSAJWK(kid string, pub *rsa.PublicKey) JWK {
 	}
 }
 
-// ECJWK returns an ECDSA P-256 signing key in JWK form.
+// ECJWK returns an ECDSA signing key in JWK form.
+//
+// crv and alg follow the key's curve (RFC 7518 §3.4, §6.2.1.1). Reporting a
+// fixed P-256/ES256 would mislabel a P-384 or P-521 key and make every
+// published coordinate unparseable to a conforming client.
 func ECJWK(kid string, pub *ecdsa.PublicKey) JWK {
 	raw, _ := pub.Bytes()
 	keySize := (len(raw) - 1) / 2
+	var crv, alg string
+	switch pub.Curve {
+	case elliptic.P384():
+		crv, alg = "P-384", "ES384"
+	case elliptic.P521():
+		crv, alg = "P-521", "ES512"
+	default:
+		crv, alg = "P-256", "ES256"
+	}
 	return JWK{
 		Kty: "EC",
 		Use: "sig",
-		Alg: "ES256",
+		Alg: alg,
 		Kid: kid,
-		Crv: "P-256",
+		Crv: crv,
 		X:   base64.RawURLEncoding.EncodeToString(raw[1 : 1+keySize]),
 		Y:   base64.RawURLEncoding.EncodeToString(raw[1+keySize:]),
 	}

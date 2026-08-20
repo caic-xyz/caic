@@ -9,8 +9,10 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/asn1"
 	"encoding/base64"
 	"encoding/pem"
+	"math/big"
 	"net/http"
 	"strings"
 	"testing"
@@ -519,6 +521,97 @@ func TestAccessTokenService(t *testing.T) {
 
 		if _, err := NewAccessTokenService(nil, "kid-empty", time.Hour); err == nil {
 			t.Fatal("NewAccessTokenService(nil) = nil error, want error")
+		}
+	})
+
+	t.Run("ES token signature is raw R||S", func(t *testing.T) {
+		t.Parallel()
+
+		// RFC 7518 §3.4: the ES* signature is a fixed-size R||S concatenation, not
+		// ASN.1/DER. These tokens are verified by third parties through the
+		// published JWKS, so the wire format is part of the contract.
+		for _, tc := range []struct {
+			alg     string
+			sigSize int
+			crv     string
+		}{
+			{"ES256", 64, "P-256"},
+			{"ES384", 96, "P-384"},
+			{"ES512", 132, "P-521"},
+		} {
+			svc := newTestAccessTokenService(t, "")
+			kid, err := svc.RotateKeyWithAlg(tc.alg)
+			if err != nil {
+				t.Fatalf("RotateKeyWithAlg(%s): %v", tc.alg, err)
+			}
+			token, err := svc.IssueAccessToken(issuer, user, audience, scope, "grant-"+tc.alg)
+			if err != nil {
+				t.Fatalf("IssueAccessToken(%s): %v", tc.alg, err)
+			}
+			parts := strings.Split(token, ".")
+			sig, err := base64.RawURLEncoding.DecodeString(parts[2])
+			if err != nil {
+				t.Fatalf("decode %s signature: %v", tc.alg, err)
+			}
+			if len(sig) != tc.sigSize {
+				t.Errorf("%s signature = %d bytes, want %d (raw R||S, not DER)", tc.alg, len(sig), tc.sigSize)
+			}
+			// A DER signature starts with the SEQUENCE tag 0x30; raw R||S must not
+			// be parseable as one.
+			if _, err := asn1.Unmarshal(sig, &struct{ R, S *big.Int }{}); err == nil {
+				t.Errorf("%s signature parsed as ASN.1 DER, want raw R||S", tc.alg)
+			}
+			// The published JWK must name the curve the key actually uses.
+			var found bool
+			for _, jwk := range svc.JWK() {
+				if jwk.Kid != kid {
+					continue
+				}
+				found = true
+				if jwk.Crv != tc.crv || jwk.Alg != tc.alg {
+					t.Errorf("%s jwk = crv %q alg %q, want %q/%q", tc.alg, jwk.Crv, jwk.Alg, tc.crv, tc.alg)
+				}
+			}
+			if !found {
+				t.Errorf("%s: kid %q missing from JWKS", tc.alg, kid)
+			}
+			if _, err := svc.VerifyAccessToken(token, issuer, audience, time.Now(),
+				func(string, time.Time) (bool, string, error) { return true, "test-client-1", nil },
+				&tokenTestSession{user: user}); err != nil {
+				t.Errorf("VerifyAccessToken(%s): %v", tc.alg, err)
+			}
+		}
+	})
+
+	t.Run("EC PEM key takes its curve's alg", func(t *testing.T) {
+		t.Parallel()
+
+		// A curve-blind mapping reported ES256 for every EC key, mislabelling the
+		// token header and JWKS for P-384/P-521 (RFC 7518 §3.4).
+		for _, tc := range []struct {
+			curve elliptic.Curve
+			alg   string
+		}{
+			{elliptic.P256(), "ES256"},
+			{elliptic.P384(), "ES384"},
+			{elliptic.P521(), "ES512"},
+		} {
+			ecKey, err := ecdsa.GenerateKey(tc.curve, rand.Reader)
+			if err != nil {
+				t.Fatalf("generate %s key: %v", tc.alg, err)
+			}
+			pkcs8DER, err := x509.MarshalPKCS8PrivateKey(ecKey)
+			if err != nil {
+				t.Fatalf("marshal pkcs8: %v", err)
+			}
+			keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: pkcs8DER})
+			svc, err := NewAccessTokenService(keyPEM, "pem-kid", time.Hour)
+			if err != nil {
+				t.Fatalf("NewAccessTokenService(%s): %v", tc.alg, err)
+			}
+			if got := svc.keys["pem-kid"].alg; got != tc.alg {
+				t.Errorf("%s PEM key alg = %q, want %q", tc.curve.Params().Name, got, tc.alg)
+			}
 		}
 	})
 }

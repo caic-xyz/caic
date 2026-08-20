@@ -76,7 +76,7 @@ func (fw *FieldWarner) warnValue(ctx string, v reflect.Value) {
 			if f.Type == overflowType && f.Anonymous {
 				// Found an embedded Overflow — warn its Extra.
 				extra := fv.FieldByName("Extra")
-				if m, ok := extra.Interface().(map[string]json.RawMessage); ok {
+				if m, ok := reflect.TypeAssert[map[string]json.RawMessage](extra); ok {
 					fw.Warn(ctx, m)
 				}
 				continue

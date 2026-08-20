@@ -19,7 +19,7 @@ import (
 // Transitions are written by message processing, lifecycle operations, and
 // recovery. A few transitions are reachable from more than one source, so task
 // code uses compare-and-swap helpers to keep them race-safe.
-type State string //nolint:recvcheck // UnmarshalJSON requires a pointer receiver; Validate/String/IsTerminal use value receivers so they work on the untyped State constants
+type State string
 
 // Task lifecycle states.
 const (

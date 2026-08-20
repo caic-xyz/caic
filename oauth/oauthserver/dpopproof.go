@@ -6,7 +6,6 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
-	"crypto/elliptic"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -99,11 +98,11 @@ func DPoPProof(r *http.Request) (*DPoPHeader, *DPoPClaims, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("decode dpop proof signature: %w", err)
 	}
-	pub, _, err := jwkPublicKey(&header.JWK, header.Alg)
+	pub, err := jwkPublicKey(&header.JWK, header.Alg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse dpop proof jwk: %w", err)
 	}
-	if err := verifyJWTSignature(pub, []byte(signingInput), signature); err != nil {
+	if err := verifyJWS(pub, header.Alg, []byte(signingInput), signature); err != nil {
 		return nil, nil, fmt.Errorf("verify dpop proof signature: %w", err)
 	}
 
@@ -193,79 +192,83 @@ const (
 	maxRSAModulusBits = 8192
 )
 
-// jwkPublicKey converts a oauth.JWK to a Go public key and hash algorithm.
+// jwkPublicKey converts a oauth.JWK to a Go public key.
 //
 // alg is the JOSE "alg" from the proof header; it must agree with the oauth.JWK key
 // type per RFC 9449 §4.3, otherwise the proof is rejected.
-func jwkPublicKey(jwk *oauth.JWK, alg string) (crypto.PublicKey, crypto.Hash, error) {
+func jwkPublicKey(jwk *oauth.JWK, alg string) (crypto.PublicKey, error) {
 	if err := checkAlgKeyType(alg, jwk); err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	switch jwk.Kty {
 	case "RSA":
 		n, err := base64.RawURLEncoding.DecodeString(jwk.N)
 		if err != nil {
-			return nil, 0, fmt.Errorf("decode rsa n: %w", err)
+			return nil, fmt.Errorf("decode rsa n: %w", err)
 		}
 		e, err := base64.RawURLEncoding.DecodeString(jwk.E)
 		if err != nil {
-			return nil, 0, fmt.Errorf("decode rsa e: %w", err)
+			return nil, fmt.Errorf("decode rsa e: %w", err)
 		}
 		modulus := new(big.Int).SetBytes(n)
 		if bits := modulus.BitLen(); bits < minRSAModulusBits || bits > maxRSAModulusBits {
-			return nil, 0, fmt.Errorf("rsa modulus %d bits is outside allowed range [%d, %d]", bits, minRSAModulusBits, maxRSAModulusBits)
+			return nil, fmt.Errorf("rsa modulus %d bits is outside allowed range [%d, %d]", bits, minRSAModulusBits, maxRSAModulusBits)
 		}
 		pub := &rsa.PublicKey{
 			N: modulus,
 			E: int(new(big.Int).SetBytes(e).Int64()),
 		}
-		return pub, crypto.SHA256, nil
+		return pub, nil
 	case "EC":
 		if jwk.X == "" || jwk.Y == "" || jwk.Crv == "" {
-			return nil, 0, errors.New("ec jwk missing x, y, or crv")
+			return nil, errors.New("ec jwk missing x, y, or crv")
 		}
 		x, err := base64.RawURLEncoding.DecodeString(jwk.X)
 		if err != nil {
-			return nil, 0, fmt.Errorf("decode ec x: %w", err)
+			return nil, fmt.Errorf("decode ec x: %w", err)
 		}
 		y, err := base64.RawURLEncoding.DecodeString(jwk.Y)
 		if err != nil {
-			return nil, 0, fmt.Errorf("decode ec y: %w", err)
+			return nil, fmt.Errorf("decode ec y: %w", err)
 		}
-		var curve elliptic.Curve
-		switch jwk.Crv {
-		case "P-256":
-			curve = elliptic.P256()
-		case "P-384":
-			curve = elliptic.P384()
-		case "P-521":
-			curve = elliptic.P521()
-		default:
-			return nil, 0, fmt.Errorf("unsupported ec curve: %s", jwk.Crv)
+		curve, err := ecdsaCurve(jwk.Crv)
+		if err != nil {
+			return nil, err
 		}
-		pub := &ecdsa.PublicKey{
-			Curve: curve,
-			X:     new(big.Int).SetBytes(x),
-			Y:     new(big.Int).SetBytes(y),
+		// RFC 7518 §6.2.1.2 requires x and y to be the full coordinate size for the
+		// curve, so reject short or padded encodings instead of silently fixing them.
+		size := coordinateSize(curve)
+		if len(x) != size || len(y) != size {
+			return nil, fmt.Errorf("ec jwk coordinates must be %d bytes for %s", size, jwk.Crv)
 		}
-		return pub, crypto.SHA256, nil
+		// Uncompressed SEC 1 point: 0x04 || x || y. ParseUncompressedPublicKey also
+		// checks the point is on the curve.
+		point := make([]byte, 0, 1+2*size)
+		point = append(point, 4)
+		point = append(point, x...)
+		point = append(point, y...)
+		pub, err := ecdsa.ParseUncompressedPublicKey(curve, point)
+		if err != nil {
+			return nil, fmt.Errorf("parse ec public key: %w", err)
+		}
+		return pub, nil
 	case "OKP":
 		if jwk.Crv != "Ed25519" {
-			return nil, 0, fmt.Errorf("unsupported okp curve: %s", jwk.Crv)
+			return nil, fmt.Errorf("unsupported okp curve: %s", jwk.Crv)
 		}
 		if jwk.X == "" {
-			return nil, 0, errors.New("okp jwk missing x")
+			return nil, errors.New("okp jwk missing x")
 		}
 		x, err := base64.RawURLEncoding.DecodeString(jwk.X)
 		if err != nil {
-			return nil, 0, fmt.Errorf("decode okp x: %w", err)
+			return nil, fmt.Errorf("decode okp x: %w", err)
 		}
 		if len(x) != ed25519.PublicKeySize {
-			return nil, 0, fmt.Errorf("ed25519 key has wrong size: %d", len(x))
+			return nil, fmt.Errorf("ed25519 key has wrong size: %d", len(x))
 		}
-		return ed25519.PublicKey(x), crypto.Hash(0), nil
+		return ed25519.PublicKey(x), nil
 	default:
-		return nil, 0, fmt.Errorf("unsupported jwk key type: %s", jwk.Kty)
+		return nil, fmt.Errorf("unsupported jwk key type: %s", jwk.Kty)
 	}
 }
 
@@ -291,30 +294,6 @@ func checkAlgKeyType(alg string, jwk *oauth.JWK) error {
 		return fmt.Errorf("unsupported jwk key type: %s", jwk.Kty)
 	}
 	return fmt.Errorf("dpop proof alg %q does not match jwk key type %q/%q", alg, jwk.Kty, jwk.Crv)
-}
-
-// verifyJWTSignature verifies a JWT signature against a public key.
-// The algorithm is implied by the public key type: RSA uses PKCS1v15 SHA-256,
-// ECDSA uses ASN.1 SHA-256, Ed25519 uses the raw message.
-func verifyJWTSignature(pub crypto.PublicKey, signingInput, signature []byte) error {
-	switch key := pub.(type) {
-	case *rsa.PublicKey:
-		if len(signature) < 1 {
-			return errors.New("rsa signature too short")
-		}
-		digest := sha256.Sum256(signingInput)
-		return verify(pub, digest[:], signature)
-	case *ecdsa.PublicKey:
-		digest := sha256.Sum256(signingInput)
-		return verify(pub, digest[:], signature)
-	case ed25519.PublicKey:
-		if !ed25519.Verify(key, signingInput, signature) {
-			return errors.New("ed25519 signature verification failed")
-		}
-		return nil
-	default:
-		return fmt.Errorf("unsupported public key type: %T", pub)
-	}
 }
 
 // isAsymmetricAlg returns true if alg denotes an asymmetric signing algorithm.

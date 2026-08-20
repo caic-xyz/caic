@@ -2251,6 +2251,73 @@ func TestDPoP(t *testing.T) {
 			t.Fatalf("Ed25519/EdDSA: %v", err)
 		}
 	})
+
+	t.Run("every advertised alg verifies", func(t *testing.T) {
+		t.Parallel()
+
+		// isAsymmetricAlg accepts all of these, so each must actually verify a
+		// conforming signature: the digest follows alg (RFC 7518 §3.1), PS* is
+		// PSS not PKCS1v15 (§3.5), and ES* is raw R||S not ASN.1 (§3.4).
+		rsaKey, rsaJWK := testDPoPRSAKeyPair(t)
+		for _, alg := range []string{"RS256", "RS384", "RS512", "PS256", "PS384", "PS512"} {
+			proof := makeDPoPProofSigned(t, alg, rsaKey, rsaJWK)
+			if _, _, err := DPoPProof(httpDPoPRequest(t, proof)); err != nil {
+				t.Errorf("%s: %v", alg, err)
+			}
+		}
+		for _, tc := range []struct {
+			alg   string
+			curve elliptic.Curve
+			crv   string
+		}{
+			{"ES256", elliptic.P256(), "P-256"},
+			{"ES384", elliptic.P384(), "P-384"},
+			{"ES512", elliptic.P521(), "P-521"},
+		} {
+			ecKey, ecJWK := testDPoPECKeyPair(t, tc.curve, tc.crv)
+			proof := makeDPoPProofSigned(t, tc.alg, ecKey, ecJWK)
+			if _, _, err := DPoPProof(httpDPoPRequest(t, proof)); err != nil {
+				t.Errorf("%s: %v", tc.alg, err)
+			}
+		}
+	})
+
+	t.Run("ecdsa asn.1 signature is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		// RFC 7518 §3.4 mandates raw R||S. A DER-encoded signature is the shape a
+		// naive implementation emits; it must not be accepted.
+		ecKey, ecJWK := testDPoPECKeyPair(t, elliptic.P256(), "P-256")
+		proof := makeDPoPProofSigned(t, "ES256", ecKey, ecJWK)
+		parts := strings.Split(proof, ".")
+		digest := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
+		der, err := ecdsa.SignASN1(rand.Reader, ecKey, digest[:])
+		if err != nil {
+			t.Fatalf("sign asn.1: %v", err)
+		}
+		tampered := parts[0] + "." + parts[1] + "." + base64.RawURLEncoding.EncodeToString(der)
+		if _, _, err := DPoPProof(httpDPoPRequest(t, tampered)); err == nil {
+			t.Fatal("asn.1 ecdsa signature: want error, got nil")
+		}
+	})
+
+	t.Run("ec jwk coordinates must be curve sized", func(t *testing.T) {
+		t.Parallel()
+
+		// RFC 7518 §6.2.1.2 fixes the octet length, and an off-curve point must
+		// not reach verification at all.
+		_, ecJWK := testDPoPECKeyPair(t, elliptic.P256(), "P-256")
+		short := *ecJWK
+		short.X = base64.RawURLEncoding.EncodeToString([]byte{1, 2, 3})
+		if _, _, err := DPoPProof(httpDPoPRequest(t, makeUnsignedDPoPProof(t, "ES256", &short))); err == nil {
+			t.Fatal("short ec x: want error, got nil")
+		}
+		offCurve := *ecJWK
+		offCurve.Y = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+		if _, _, err := DPoPProof(httpDPoPRequest(t, makeUnsignedDPoPProof(t, "ES256", &offCurve))); err == nil {
+			t.Fatal("off-curve ec point: want error, got nil")
+		}
+	})
 }
 
 // testDPoPRSAKeyPair generates an RSA key pair for DPoP proof tests.
@@ -2387,16 +2454,9 @@ func makeDPoPProofSigned(t *testing.T, alg string, signer crypto.Signer, jwk *oa
 	}
 	parts := base64.RawURLEncoding.EncodeToString(headerJSON) + "." + base64.RawURLEncoding.EncodeToString(claimsJSON)
 
-	var signature []byte
-	switch key := signer.(type) {
-	case ed25519.PrivateKey:
-		signature = ed25519.Sign(key, []byte(parts))
-	default:
-		digest := sha256.Sum256([]byte(parts))
-		signature, err = sign(signer, digest[:])
-		if err != nil {
-			t.Fatalf("sign dpop proof: %v", err)
-		}
+	signature, err := signJWS(alg, signer, []byte(parts))
+	if err != nil {
+		t.Fatalf("sign dpop proof: %v", err)
 	}
 	return parts + "." + base64.RawURLEncoding.EncodeToString(signature)
 }
