@@ -20,6 +20,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
+func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
+
 func TestRefreshHarnessModels(t *testing.T) {
 	t.Parallel()
 
@@ -149,7 +151,7 @@ func newModelRefreshTestManager(t testing.TB, router *runtime.Router, backends m
 	m, err := taskmgr.New(taskmgr.Config{
 		ServerCtx:           t.Context(),
 		Log:                 slog.New(slog.DiscardHandler),
-		LogStore:            taskslog.NewStore(t.TempDir()),
+		LogStore:            taskslog.NewStore(testLogger(), t.TempDir()),
 		Runtimes:            router,
 		Backends:            backends,
 		Checkouts:           repo.NewRegistry(),

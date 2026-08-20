@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"log/slog"
 	"maps"
 	"os"
 	"path/filepath"
@@ -894,6 +895,160 @@ func (lt *LoadedTask) LogPath() string {
 	return lt.path
 }
 
+// LoadMessagesWithResolver lazily loads full conversation messages with a
+// fresh parser derived from the log header.
+func (lt *LoadedTask) LoadMessagesWithResolver(resolver NativeParserResolver) error {
+	if lt.messagesLoaded || lt.Msgs != nil || lt.path == "" {
+		return nil
+	}
+	loaded, err := loadSemanticTask(lt.path, resolver)
+	if err != nil {
+		return err
+	}
+	applySemanticTask(lt, loaded, true)
+	return nil
+}
+
+// LoadSessionMetadataWithResolver loads session metadata with a fresh parser
+// derived from the log header.
+func (lt *LoadedTask) LoadSessionMetadataWithResolver(resolver NativeParserResolver) error {
+	if lt.path == "" || (lt.SessionID != "" && lt.AgentVersion != "") {
+		return nil
+	}
+	loaded, err := loadSemanticSessionMetadata(lt.path, resolver)
+	if err != nil {
+		return err
+	}
+	lt.mergeSessionMetadata(loaded)
+	return nil
+}
+
+// LoadMessagesTailWithResolver parses the complete source with one ordered
+// parser while retaining only a bounded recent suffix for interactive loading.
+func (lt *LoadedTask) LoadMessagesTailWithResolver(resolver NativeParserResolver) error {
+	if lt.messagesLoaded || lt.Msgs != nil || lt.path == "" {
+		return nil
+	}
+	if !isLogCompressed(lt.path) && lt.LogSize <= maxTailLoadBytes {
+		return lt.LoadMessagesWithResolver(resolver)
+	}
+	loaded, err := loadSemanticTail(lt.path, resolver, maxTailLoadBytes)
+	if err != nil {
+		return err
+	}
+	applySemanticTask(lt, loaded, true)
+	return nil
+}
+
+// SetNativeParserResolver installs the task-owned fresh native parser factory.
+// The factory is called only after a scan has validated its physical header.
+func (lt *LoadedTask) SetNativeParserResolver(resolver NativeParserResolver) {
+	lt.resolver = resolver
+}
+
+// LoadMessages lazily loads the full conversation messages from the log file.
+// This is an EOF scan of the complete physical log and can be expensive for
+// large historical sessions; use LoadMessagesTail for interactive loading.
+func (lt *LoadedTask) LoadMessages() error {
+	if lt.Msgs != nil || lt.path == "" {
+		return nil
+	}
+	if lt.resolver == nil {
+		return fmt.Errorf("no parser resolver set for harness %q", lt.Harness)
+	}
+	return lt.LoadMessagesWithResolver(lt.resolver)
+}
+
+// LoadSessionMetadata scans the log for backend-neutral session metadata.
+func (lt *LoadedTask) LoadSessionMetadata() error {
+	if lt.path == "" || (lt.SessionID != "" && lt.AgentVersion != "") {
+		return nil
+	}
+	if lt.resolver == nil {
+		return fmt.Errorf("no parser resolver set for harness %q", lt.Harness)
+	}
+	return lt.LoadSessionMetadataWithResolver(lt.resolver)
+}
+
+// LoadMessagesTail loads a bounded suffix of messages from a large log while
+// still parsing every record in order to preserve parser state.
+func (lt *LoadedTask) LoadMessagesTail() error {
+	if lt.Msgs != nil || lt.path == "" {
+		return nil
+	}
+	if lt.resolver == nil {
+		return fmt.Errorf("no parser resolver set for harness %q", lt.Harness)
+	}
+	return lt.LoadMessagesTailWithResolver(lt.resolver)
+}
+
+// StreamMessages streams parsed task conversation records directly from the
+// log. Cancellation is checked between records and before delivery.
+func (lt *LoadedTask) StreamMessages(ctx context.Context) iter.Seq2[agent.ParsedMessage, error] {
+	return func(yield func(agent.ParsedMessage, error) bool) {
+		if lt.path == "" {
+			yield(agent.ParsedMessage{}, errors.New("task has no log path"))
+			return
+		}
+		if lt.resolver == nil {
+			yield(agent.ParsedMessage{}, errors.New("no parser resolver set"))
+			return
+		}
+		err := scanPhysicalLog(lt.path, true, func(_ os.FileInfo, scanner *physicalLogScanner, _ agent.MetaMessage) error {
+			native, err := lt.resolver(scanner.authority.Harness)
+			if err != nil {
+				return err
+			}
+			parser, err := agent.NewLogRecordParser(scanner.authority.Version, native)
+			if err != nil {
+				return err
+			}
+			if _, err := parser.ParseRecord(scanner.headerRaw); err != nil {
+				return err
+			}
+			for scanner.Scan() {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				record, err := parser.ParseRecord(scanner.Bytes())
+				if err != nil {
+					return err
+				}
+				for _, message := range record.Messages {
+					if record.Control && !isHistoryStreamControlMessage(message.Message) {
+						continue
+					}
+					if err := ctx.Err(); err != nil {
+						return err
+					}
+					if !yield(message, nil) {
+						return errTaskLogStreamStopped
+					}
+				}
+			}
+			return scanner.Err()
+		})
+		if err != nil && !errors.Is(err, errTaskLogStreamStopped) {
+			yield(agent.ParsedMessage{}, err)
+		}
+	}
+}
+
+func (lt *LoadedTask) mergeSessionMetadata(src *LoadedTask) {
+	if src == nil {
+		return
+	}
+	if lt.SessionID == "" {
+		lt.SessionID = src.SessionID
+	}
+	if lt.Model == "" {
+		lt.Model = src.Model
+	}
+	if lt.AgentVersion == "" {
+		lt.AgentVersion = src.AgentVersion
+	}
+}
+
 // loadSemanticLog parses one complete task log with a fresh parser selected
 // by its metadata header.
 func loadSemanticLog(path string, resolver NativeParserResolver) (out *semanticLog, retErr error) {
@@ -1204,51 +1359,6 @@ func applySemanticTask(lt, loaded *LoadedTask, messages bool) {
 	}
 }
 
-// LoadMessagesWithResolver lazily loads full conversation messages with a
-// fresh parser derived from the log header.
-func (lt *LoadedTask) LoadMessagesWithResolver(resolver NativeParserResolver) error {
-	if lt.messagesLoaded || lt.Msgs != nil || lt.path == "" {
-		return nil
-	}
-	loaded, err := loadSemanticTask(lt.path, resolver)
-	if err != nil {
-		return err
-	}
-	applySemanticTask(lt, loaded, true)
-	return nil
-}
-
-// LoadSessionMetadataWithResolver loads session metadata with a fresh parser
-// derived from the log header.
-func (lt *LoadedTask) LoadSessionMetadataWithResolver(resolver NativeParserResolver) error {
-	if lt.path == "" || (lt.SessionID != "" && lt.AgentVersion != "") {
-		return nil
-	}
-	loaded, err := loadSemanticSessionMetadata(lt.path, resolver)
-	if err != nil {
-		return err
-	}
-	lt.mergeSessionMetadata(loaded)
-	return nil
-}
-
-// LoadMessagesTailWithResolver parses the complete source with one ordered
-// parser while retaining only a bounded recent suffix for interactive loading.
-func (lt *LoadedTask) LoadMessagesTailWithResolver(resolver NativeParserResolver) error {
-	if lt.messagesLoaded || lt.Msgs != nil || lt.path == "" {
-		return nil
-	}
-	if !isLogCompressed(lt.path) && lt.LogSize <= maxTailLoadBytes {
-		return lt.LoadMessagesWithResolver(resolver)
-	}
-	loaded, err := loadSemanticTail(lt.path, resolver, maxTailLoadBytes)
-	if err != nil {
-		return err
-	}
-	applySemanticTask(lt, loaded, true)
-	return nil
-}
-
 func loadedTaskFromMeta(path, taskID string, meta *agent.MetaMessage, modified time.Time, size int64) *LoadedTask {
 	repos := make([]RepoMount, len(meta.Repos))
 	for i, mr := range meta.Repos {
@@ -1284,7 +1394,87 @@ func loadedTaskFromMeta(path, taskID string, meta *agent.MetaMessage, modified t
 	}
 }
 
-func logPaths(logDir string, taskIDs map[string]struct{}) ([]string, error) {
+// capSettledPaths keeps the newest limitPerRepo log paths per repo (by mtime).
+// Each repo is read from the cheap first-line header (or its cache), bounded to
+// maxParallelLogHeaderLoads concurrent reads so a large cache does not blow up
+// transient memory; the caller then fully decodes only the kept paths.
+func capSettledPaths(log *slog.Logger, paths []string, limitPerRepo int) []string {
+	type cand struct {
+		path  string
+		repo  string
+		mtime time.Time
+	}
+	cands := make([]cand, len(paths))
+	workers := min(len(paths), max(goruntime.GOMAXPROCS(0), 1), maxParallelLogHeaderLoads)
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Go(func() {
+			for i := range jobs {
+				info, err := os.Stat(paths[i])
+				var mtime time.Time
+				if info != nil {
+					mtime = info.ModTime().UTC()
+				} else if err != nil && !os.IsNotExist(err) {
+					// A stat failure leaves mtime zero, which sorts the path
+					// oldest and can drop it under the cap; surface the cause.
+					log.Warn("stat settled task log for capping", "path", paths[i], "err", err)
+				}
+				cands[i] = cand{path: paths[i], repo: repoFromHeader(log, paths[i]), mtime: mtime}
+			}
+		})
+	}
+	for i := range paths {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+
+	// Stable: equal mtimes (batch writes, copied files) must keep the
+	// deterministic ReadDir order instead of an arbitrary sort outcome.
+	slices.SortStableFunc(cands, func(a, b cand) int { return b.mtime.Compare(a.mtime) })
+	perRepo := make(map[string]int)
+	kept := make([]string, 0, len(cands))
+	for _, c := range cands {
+		if perRepo[c.repo] < limitPerRepo {
+			perRepo[c.repo]++
+			kept = append(kept, c.path)
+		}
+	}
+	return kept
+}
+
+// repoFromHeader returns the primary repo name for a task log, from the header
+// cache when present and otherwise the cheap first-line header. It is used to
+// cap settled logs per repo without a full decode.
+func repoFromHeader(log *slog.Logger, path string) string {
+	if lt, ok := readHeaderCache(path); ok {
+		return primaryRepoName(lt)
+	}
+	lt, err := loadLogMetaHeader(path)
+	if err != nil {
+		// Unattributable logs share the "" bucket with no-repo tasks; surface
+		// the cause instead of silently consuming that bucket's cap slots.
+		log.Warn("read task-log header for repo attribution", "path", path, "err", err)
+		return ""
+	}
+	return primaryRepoName(lt)
+}
+
+func primaryRepoName(lt *LoadedTask) string {
+	if p := lt.Primary(); p != nil {
+		return p.Name
+	}
+	return ""
+}
+
+// logPaths lists task log paths in logDir restricted to one storage form
+// (plain or compressed) and an optional mtime age cutoff. When taskIDs is
+// non-empty only matching task IDs are returned. For the compressed form, a base
+// that also has a plain source is skipped so the plain source stays
+// authoritative after an interrupted compression. When cutoff is non-zero,
+// logs with an mtime older than cutoff are skipped before any decode.
+func logPaths(log *slog.Logger, logDir string, taskIDs map[string]struct{}, compressed bool, cutoff time.Time) ([]string, error) {
 	entries, err := os.ReadDir(logDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1293,33 +1483,62 @@ func logPaths(logDir string, taskIDs map[string]struct{}) ([]string, error) {
 		return nil, err
 	}
 
-	// Filter to task log files. If both forms exist after interrupted terminal
-	// compression, the plain source remains authoritative and is retried.
-	pathsByBase := make(map[string]string)
+	// Plain sources take precedence over interrupted plain-and-compressed
+	// pairs, so compute the plain bases first. logBases tracks every log base
+	// (either form) so orphaned header caches can be reaped below.
+	plainBases := make(map[string]struct{})
+	logBases := make(map[string]struct{}, len(entries))
 	for _, e := range entries {
 		if e.IsDir() || !IsLogName(e.Name()) {
 			continue
 		}
 		base := trimLogExt(e.Name())
-		if taskIDs != nil {
+		logBases[base] = struct{}{}
+		if !isLogCompressed(e.Name()) {
+			plainBases[base] = struct{}{}
+		}
+	}
+
+	reapHeaderCaches(logDir, entries, logBases)
+
+	paths := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || !IsLogName(e.Name()) || isLogCompressed(e.Name()) != compressed {
+			continue
+		}
+		base := trimLogExt(e.Name())
+		if len(taskIDs) > 0 {
 			if _, ok := taskIDs[taskIDFromLogBase(base)]; !ok {
 				continue
 			}
 		}
-		path := filepath.Join(logDir, e.Name())
-		if prev := pathsByBase[base]; prev == "" || (!isLogCompressed(path) && isLogCompressed(prev)) {
-			pathsByBase[base] = path
+		if compressed {
+			if _, ok := plainBases[base]; ok {
+				continue
+			}
 		}
-	}
-	paths := make([]string, 0, len(pathsByBase))
-	for _, p := range pathsByBase {
-		paths = append(paths, p)
+		if !cutoff.IsZero() {
+			info, err := e.Info()
+			if err != nil {
+				// Fail open: a stat failure keeps the log (an extra decode) but
+				// stays visible, so a directory the scan cannot stat into does
+				// not silently disable cutoff trimming. A log that vanished
+				// between ReadDir and stat (concurrent purge or settle) is
+				// routine, so it fails open without a warning.
+				if !os.IsNotExist(err) {
+					log.Warn("stat task log during scan", "path", filepath.Join(logDir, e.Name()), "err", err)
+				}
+			} else if info.ModTime().UTC().Before(cutoff) {
+				continue
+			}
+		}
+		paths = append(paths, filepath.Join(logDir, e.Name()))
 	}
 	slices.Sort(paths)
 	return paths, nil
 }
 
-func loadLogsFromPaths(paths []string, strict bool) ([]*LoadedTask, error) {
+func loadLogsFromPaths(log *slog.Logger, paths []string, strict, cacheHeader bool) ([]*LoadedTask, error) {
 	// Parse headers concurrently, but retain only a bounded number of scanner
 	// buffers and decompressor/file handles when a cache has many old logs.
 	type result struct {
@@ -1333,7 +1552,7 @@ func loadLogsFromPaths(paths []string, strict bool) ([]*LoadedTask, error) {
 	for range workers {
 		wg.Go(func() {
 			for i := range jobs {
-				lt, err := loadLogHeader(paths[i])
+				lt, err := loadLogHeader(log, paths[i], cacheHeader)
 				results[i] = result{lt, err}
 			}
 		})
@@ -1369,116 +1588,7 @@ func taskIDFromLogBase(base string) string {
 	return base
 }
 
-// SetNativeParserResolver installs the task-owned fresh native parser factory.
-// The factory is called only after a scan has validated its physical header.
-func (lt *LoadedTask) SetNativeParserResolver(resolver NativeParserResolver) {
-	lt.resolver = resolver
-}
-
-// LoadMessages lazily loads the full conversation messages from the log file.
-// This is an EOF scan of the complete physical log and can be expensive for
-// large historical sessions; use LoadMessagesTail for interactive loading.
-func (lt *LoadedTask) LoadMessages() error {
-	if lt.Msgs != nil || lt.path == "" {
-		return nil
-	}
-	if lt.resolver == nil {
-		return fmt.Errorf("no parser resolver set for harness %q", lt.Harness)
-	}
-	return lt.LoadMessagesWithResolver(lt.resolver)
-}
-
-// LoadSessionMetadata scans the log for backend-neutral session metadata.
-func (lt *LoadedTask) LoadSessionMetadata() error {
-	if lt.path == "" || (lt.SessionID != "" && lt.AgentVersion != "") {
-		return nil
-	}
-	if lt.resolver == nil {
-		return fmt.Errorf("no parser resolver set for harness %q", lt.Harness)
-	}
-	return lt.LoadSessionMetadataWithResolver(lt.resolver)
-}
-
-// LoadMessagesTail loads a bounded suffix of messages from a large log while
-// still parsing every record in order to preserve parser state.
-func (lt *LoadedTask) LoadMessagesTail() error {
-	if lt.Msgs != nil || lt.path == "" {
-		return nil
-	}
-	if lt.resolver == nil {
-		return fmt.Errorf("no parser resolver set for harness %q", lt.Harness)
-	}
-	return lt.LoadMessagesTailWithResolver(lt.resolver)
-}
-
 var errTaskLogStreamStopped = errors.New("task log stream consumer stopped")
-
-// StreamMessages streams parsed task conversation records directly from the
-// log. Cancellation is checked between records and before delivery.
-func (lt *LoadedTask) StreamMessages(ctx context.Context) iter.Seq2[agent.ParsedMessage, error] {
-	return func(yield func(agent.ParsedMessage, error) bool) {
-		if lt.path == "" {
-			yield(agent.ParsedMessage{}, errors.New("task has no log path"))
-			return
-		}
-		if lt.resolver == nil {
-			yield(agent.ParsedMessage{}, errors.New("no parser resolver set"))
-			return
-		}
-		err := scanPhysicalLog(lt.path, true, func(_ os.FileInfo, scanner *physicalLogScanner, _ agent.MetaMessage) error {
-			native, err := lt.resolver(scanner.authority.Harness)
-			if err != nil {
-				return err
-			}
-			parser, err := agent.NewLogRecordParser(scanner.authority.Version, native)
-			if err != nil {
-				return err
-			}
-			if _, err := parser.ParseRecord(scanner.headerRaw); err != nil {
-				return err
-			}
-			for scanner.Scan() {
-				if err := ctx.Err(); err != nil {
-					return err
-				}
-				record, err := parser.ParseRecord(scanner.Bytes())
-				if err != nil {
-					return err
-				}
-				for _, message := range record.Messages {
-					if record.Control && !isHistoryStreamControlMessage(message.Message) {
-						continue
-					}
-					if err := ctx.Err(); err != nil {
-						return err
-					}
-					if !yield(message, nil) {
-						return errTaskLogStreamStopped
-					}
-				}
-			}
-			return scanner.Err()
-		})
-		if err != nil && !errors.Is(err, errTaskLogStreamStopped) {
-			yield(agent.ParsedMessage{}, err)
-		}
-	}
-}
-
-func (lt *LoadedTask) mergeSessionMetadata(src *LoadedTask) {
-	if src == nil {
-		return
-	}
-	if lt.SessionID == "" {
-		lt.SessionID = src.SessionID
-	}
-	if lt.Model == "" {
-		lt.Model = src.Model
-	}
-	if lt.AgentVersion == "" {
-		lt.AgentVersion = src.AgentVersion
-	}
-}
 
 func applyParsedSessionMetadata(lt *LoadedTask, msgs []agent.ParsedMessage) {
 	for _, parsed := range msgs {
@@ -1527,10 +1637,30 @@ func (s *logTailScan) finish(lt *LoadedTask) {
 	}
 }
 
+// loadLogMetaHeader parses only the leading metadata header of a task log
+// (plain or compressed) into a LoadedTask. It intentionally does not consume
+// the log past the header or validate EOF; it exists so the per-repo cap can
+// attribute a log to its repo without decoding the body.
+func loadLogMetaHeader(path string) (loaded *LoadedTask, retErr error) {
+	retErr = scanPhysicalLog(path, false, func(info os.FileInfo, _ *physicalLogScanner, meta agent.MetaMessage) error {
+		base := trimLogExt(filepath.Base(path))
+		loaded = loadedTaskFromMeta(path, taskIDFromLogBase(base), &meta, info.ModTime().UTC(), info.Size())
+		return nil
+	})
+	if retErr != nil {
+		return nil, retErr
+	}
+	return loaded, nil
+}
+
 // loadLogHeader reads the metadata header and result trailer from a task log.
 // It does NOT parse individual messages — call LoadMessages for that. The path
-// is stored for lazy loading.
-func loadLogHeader(path string) (loaded *LoadedTask, retErr error) {
+// is stored for lazy loading. A header cache matching the log size and mtime
+// skips the full decode; any mismatch falls back to the scan and refreshes it.
+func loadLogHeader(log *slog.Logger, path string, cacheHeader bool) (loaded *LoadedTask, retErr error) {
+	if cached, ok := readHeaderCache(path); ok {
+		return cached, nil
+	}
 	retErr = scanPhysicalLog(path, false, func(info os.FileInfo, scanner *physicalLogScanner, meta agent.MetaMessage) error {
 		base := trimLogExt(filepath.Base(path))
 		loaded = loadedTaskFromMeta(path, taskIDFromLogBase(base), &meta, info.ModTime().UTC(), info.Size())
@@ -1538,6 +1668,17 @@ func loadLogHeader(path string) (loaded *LoadedTask, retErr error) {
 	})
 	if retErr != nil {
 		return nil, retErr
+	}
+	// Cache the header so the next load skips the scan. Only terminal (immutable)
+	// logs are worth caching: they are the compressed, CPU-bound set, while live
+	// logs change on every append and would just invalidate the entry.
+	if cacheHeader && loaded.State.IsTerminal() {
+		if err := writeHeaderCache(path, loaded); err != nil {
+			// Non-fatal: the load succeeded and the next load re-scans. Log it so a
+			// persistent failure (e.g. a read-only cache dir) is visible; it slows
+			// startup but never affects correctness.
+			log.Warn("write task log header cache", "path", path, "err", err)
+		}
 	}
 	return loaded, nil
 }

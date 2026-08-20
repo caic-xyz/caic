@@ -104,8 +104,8 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	if err := os.MkdirAll(cfg.Dirs.CacheDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create cache directory: %w", err)
 	}
-	logDir := filepath.Join(cfg.Dirs.CacheDir, "tasks")
-	if err := cleanupLegacyReplayArtifacts(logDir); err != nil {
+	logStore := taskslog.NewStore(log, filepath.Join(cfg.Dirs.CacheDir, "tasks"))
+	if err := cleanupLegacyReplayArtifacts(logStore.LogDir); err != nil {
 		return nil, fmt.Errorf("remove legacy replay artifacts: %w", err)
 	}
 	absRoot, err := filepath.Abs(rootDir)
@@ -247,7 +247,6 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	}
 
 	checkoutRegistry := repo.NewRegistry()
-	logStore := taskslog.NewStore(logDir)
 	taskMgr, err := taskmgr.New(taskmgr.Config{
 		ServerCtx:           ctx,
 		Log:                 log,
@@ -284,19 +283,16 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		startupCtx, tk := trace.NewTask(ctx, "prepare-purged-task-logs")
 		defer tk.End()
 		start := time.Now()
-		logs, err := logStore.Load()
-		if err != nil {
-			return fmt.Errorf("load logs: %w", err)
-		}
-		appLog.InfoContext(startupCtx, "loaded task log headers", "n", len(logs), "dur", time.Since(start))
-		start = time.Now()
-		if err := logStore.CompressTerminalLogs(logs); err != nil {
+		if err := logStore.SettleTerminal(nil); err != nil {
 			appLog.WarnContext(startupCtx, "compress terminal task logs failed", "err", err)
 		} else {
 			appLog.InfoContext(startupCtx, "compressed terminal task logs", "dur", time.Since(start))
 		}
 		start = time.Now()
-		settled := logStore.Settled(logs, time.Now())
+		settled, err := logStore.LoadSettled()
+		if err != nil {
+			return fmt.Errorf("load settled history: %w", err)
+		}
 		if err := taskMgr.LoadPurgedTasks(settled); err != nil {
 			appLog.ErrorContext(startupCtx, "load purged tasks failed", "err", err)
 		} else {

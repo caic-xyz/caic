@@ -136,7 +136,7 @@ func newTestTaskManager(t testing.TB, cfg taskmgr.Config) *taskmgr.Manager { //n
 		cfg.Log = slog.New(slog.DiscardHandler)
 	}
 	if cfg.LogStore == nil {
-		cfg.LogStore = taskslog.NewStore(filepath.Join(t.TempDir(), "tasks"))
+		cfg.LogStore = taskslog.NewStore(testLogger(), t.TempDir())
 	}
 	if cfg.RuntimeStartTimeout == 0 {
 		cfg.RuntimeStartTimeout = time.Hour
@@ -430,15 +430,27 @@ func testEntries(s *testRouter) []*taskmgr.Entry {
 	return out
 }
 
+// settleLogs compresses the terminal plain logs in logDir, moving them to the
+// settled (compressed) form that the per-repo cap applies to.
+func settleLogs(t *testing.T, logDir string) {
+	if err := taskslog.NewStore(testLogger(), logDir).SettleTerminal(nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // loadPurgedTasksForTest reads logs from disk and registers purged tasks via
 // the manager. Replaces the deleted Server.loadPurgedTasks helper.
 func loadPurgedTasksForTest(s *testRouter, logDir string) error {
-	store := taskslog.NewStore(logDir)
-	logs, err := store.Load()
+	store := taskslog.NewStore(testLogger(), logDir)
+	plain, err := store.LoadUnsettled()
 	if err != nil {
 		return err
 	}
-	return s.taskMgr.LoadPurgedTasks(store.Settled(logs, time.Now()))
+	settled, err := store.LoadSettled()
+	if err != nil {
+		return err
+	}
+	return s.taskMgr.LoadPurgedTasks(append(plain, settled...))
 }
 
 type checkoutConstructionTestFixture struct {
@@ -458,7 +470,7 @@ func newCheckoutConstructionTestServer(t *testing.T, root string) checkoutConstr
 	checkoutRegistry := repo.NewRegistry()
 	taskMgr := newTestTaskManager(t, taskmgr.Config{
 		ServerCtx:  t.Context(),
-		LogStore:   taskslog.NewStore(logDir),
+		LogStore:   taskslog.NewStore(testLogger(), logDir),
 		Runtimes:   runtimeRouter,
 		Backends:   backends,
 		HarnessEnv: harnessEnv,
@@ -1386,6 +1398,8 @@ func TestLoadPurgedTasks(t *testing.T) {
 			writeLogFile(t, logDir, fmt.Sprintf("b-%d.jsonl", i), meta, trailer)
 		}
 
+		settleLogs(t, logDir)
+
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
@@ -1685,7 +1699,20 @@ func TestLoadPurgedTasks(t *testing.T) {
 			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 			name := fmt.Sprintf("%02d.jsonl", i)
 			writeLogFile(t, logDir, name, meta, trailer)
-			if err := os.Chtimes(filepath.Join(logDir, name), stoppedAt, stoppedAt); err != nil {
+		}
+		// Settle the logs (compress terminal plain logs) so the per-repo cap,
+		// which applies to the settled scan, is exercised. Preserve each log's
+		// mtime on the compressed file: the cap orders by mtime.
+		for i := range 12 {
+			name := fmt.Sprintf("%02d.jsonl", i)
+			if err := os.Chtimes(filepath.Join(logDir, name), now.Add(-time.Duration(11-i)*time.Hour), now.Add(-time.Duration(11-i)*time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		settleLogs(t, logDir)
+		for i := range 12 {
+			name := fmt.Sprintf("%02d.jsonl.zst", i)
+			if err := os.Chtimes(filepath.Join(logDir, name), now.Add(-time.Duration(11-i)*time.Hour), now.Add(-time.Duration(11-i)*time.Hour)); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -2050,7 +2077,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 			},
 		})
 		writeLogFile(t, logDir, taskID.String()+".jsonl", meta, diskMsg)
-		logs, err := taskslog.NewStore(logDir).Load()
+		logs, err := taskslog.NewStore(testLogger(), logDir).LoadUnsettled()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2110,7 +2137,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		result := mustJSON(t, agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done"})
 		staleExit := `{"type":"caic_exit","exit_code":2,"error":"stale crash"}`
 		writeLogFile(t, logDir, taskID.String()+".jsonl", meta, initMsg, early, result, staleExit)
-		logs, err := taskslog.NewStore(logDir).Load()
+		logs, err := taskslog.NewStore(testLogger(), logDir).LoadUnsettled()
 		if err != nil {
 			t.Fatal(err)
 		}

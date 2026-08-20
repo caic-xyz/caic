@@ -2496,7 +2496,7 @@ func TestTask(t *testing.T) {
 				ForgeRepo:   "widget",
 				ForgePR:     42,
 			}
-			log, _, err := (&taskslog.Store{LogDir: dir}).Reopen(tk.LogFilename(), tk.LogHeader())
+			log, _, err := (taskslog.NewStore(testLogger(), dir)).Reopen(tk.LogFilename(), tk.LogHeader())
 			if err != nil {
 				t.Fatal(err)
 			}

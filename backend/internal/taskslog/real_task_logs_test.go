@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 const realTaskLogDirEnv = "CAIC_REAL_TASK_LOG_DIR"
@@ -28,11 +29,11 @@ func TestRealTaskLogCorpus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	paths, err := logPaths(dir, nil)
+	paths, err := logPaths(testLogger(), dir, nil, false, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	tasks, err := storeFor(dir).Load()
+	tasks, err := NewStore(testLogger(), dir).LoadUnsettled()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +69,10 @@ func BenchmarkRealTaskLogCorpus(b *testing.B) {
 	b.SetBytes(bytes)
 	b.ResetTimer()
 	for range b.N {
-		if _, err := storeFor(dir).Load(); err != nil {
+		// Clear the header cache each iteration to measure the cold scan, the
+		// same way the synthetic settled benchmarks do.
+		clearHeaderCaches(b, dir)
+		if _, err := NewStore(testLogger(), dir).LoadUnsettled(); err != nil {
 			b.Fatal(err)
 		}
 	}

@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -35,7 +36,7 @@ func BenchmarkTaskAdoption(b *testing.B) {
 	name := id.String() + "-org-repo-caic-0.jsonl"
 	path := filepath.Join(dir, name)
 	writeProductionAdoptionFixture(b, path)
-	store := &taskslog.Store{LogDir: dir}
+	store := taskslog.NewStore(slog.New(slog.DiscardHandler), dir)
 
 	b.ResetTimer()
 	b.StartTimer()

@@ -163,7 +163,7 @@ func newTestAgentRuntime(t *testing.T, checkout *repo.Checkout, logDir string, b
 	}
 	return &AgentRuntime{
 		Backends:            backends,
-		LogStore:            taskslog.NewStore(logDir),
+		LogStore:            taskslog.NewStore(testLogger(), logDir),
 		LogPath:             &taskslog.Path{},
 		Runtimes:            runtimes,
 		Log:                 logtest.Logger(t),
@@ -428,7 +428,7 @@ func TestRunner(t *testing.T) {
 			if _, err := r.Start(t.Context(), tk, ""); err == nil {
 				t.Fatal("want launch error")
 			}
-			logs, err := taskslog.NewStore(logDir).Load()
+			logs, err := taskslog.NewStore(testLogger(), logDir).LoadSettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -628,12 +628,12 @@ func TestRunner(t *testing.T) {
 			}
 
 			// Load the log and verify the trailer was written.
-			lt, err := taskslog.NewStore(logDir).Load()
+			lt, err := taskslog.NewStore(testLogger(), logDir).LoadSettled()
 			if err != nil {
 				t.Fatal(err)
 			}
 			if len(lt) != 1 {
-				t.Fatalf("Store.Load returned %d tasks, want 1", len(lt))
+				t.Fatalf("Store.LoadSettled returned %d tasks, want 1", len(lt))
 			}
 			if lt[0].State != taskslog.StatePurged {
 				t.Errorf("state = %v, want StatePurged", lt[0].State)
@@ -859,7 +859,7 @@ func TestRunner(t *testing.T) {
 					if _, err := r.ReviveTask(t.Context(), tk); err == nil {
 						t.Fatal("ReviveTask succeeded, want failure")
 					}
-					loaded, err := taskslog.NewStore(logDir).Load()
+					loaded, err := taskslog.NewStore(testLogger(), logDir).LoadSettled()
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -1205,7 +1205,7 @@ func testRunnerSessions(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
 			logDir := filepath.Join(dir, "logs")
-			store := &taskslog.Store{LogDir: logDir}
+			store := taskslog.NewStore(testLogger(), logDir)
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "model-1", "high")
 			tk.Repos = []taskslog.RepoMount{{Name: "org/repo", Branch: "caic-0"}}
 			w, err := openTaskLog(store, tk)
@@ -1250,7 +1250,7 @@ func testRunnerSessions(t *testing.T) {
 			// caic_meta header. Otherwise every server restart that re-adopts
 			// a running instance duplicates the header.
 			logDir := filepath.Join(t.TempDir(), "logs")
-			store := &taskslog.Store{LogDir: logDir}
+			store := taskslog.NewStore(testLogger(), logDir)
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.Repos = []taskslog.RepoMount{{Name: "org/repo", Branch: "caic-0"}}
 
@@ -1286,7 +1286,7 @@ func testRunnerSessions(t *testing.T) {
 			t.Parallel()
 			// Reopen must report os.ErrNotExist without creating a replacement
 			// header because a reconnect cannot infer the running relay format.
-			store := &taskslog.Store{LogDir: filepath.Join(t.TempDir(), "logs")}
+			store := taskslog.NewStore(testLogger(), filepath.Join(t.TempDir(), "logs"))
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "")
 			tk.Repos = []taskslog.RepoMount{{Name: "org/repo", Branch: "caic-0"}}
 			if _, err := reopenTaskLog(store, tk, ""); !errors.Is(err, os.ErrNotExist) {
@@ -1638,7 +1638,7 @@ func testRunnerSessions(t *testing.T) {
 
 		// Create an initial session with a log writer by using the backend
 		// directly (Checkout.Start needs a instance backend).
-		logW, err := openTaskLog(taskslog.NewStore(logDir), tk)
+		logW, err := openTaskLog(taskslog.NewStore(testLogger(), logDir), tk)
 		if err != nil {
 			t.Fatal(err)
 		}

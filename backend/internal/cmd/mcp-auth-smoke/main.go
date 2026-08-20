@@ -175,10 +175,11 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 		return "", "", nil, err
 	}
 	checkoutRegistry := repo.NewRegistry()
+	stateLog := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	taskMgr, err := taskmgr.New(taskmgr.Config{
 		ServerCtx:           ctx,
-		Log:                 slog.New(slog.NewTextHandler(os.Stderr, nil)),
-		LogStore:            taskslog.NewStore(filepath.Join(stateDir, "tasks")),
+		Log:                 stateLog,
+		LogStore:            taskslog.NewStore(stateLog, filepath.Join(stateDir, "tasks")),
 		Runtimes:            runtimeRouter,
 		Checkouts:           checkoutRegistry,
 		RuntimeStartTimeout: time.Hour,

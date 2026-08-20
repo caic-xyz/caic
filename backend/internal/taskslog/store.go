@@ -1,4 +1,7 @@
-// Store owns the task-log directory: log segments, metadata headers, trailers, terminal compression, and the startup load recipe.
+// Store owns the task-log directory it is given via NewStore: log segments,
+// sidecar header caches, metadata trailers, terminal compression, and the
+// trimmed startup scans (plain unsettled load, capped settled load, task-ID
+// lookup).
 
 package taskslog
 
@@ -6,10 +9,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/klauspost/compress/zstd"
@@ -18,50 +23,107 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
-// SettledRetention bounds how far back a task log's last state update can be
-// and still reload as a settled (purged) task entry at startup.
+// SettledRetention bounds how far back a task log's mtime can be and still
+// reload at startup. Logs last modified before this are skipped by the scan,
+// so their compressed streams are never opened or decoded. It is the Store's
+// default age cutoff, selected by the constructors.
 const SettledRetention = 14 * 24 * time.Hour
 
-// MaxSettledPerRepo caps how many settled task entries reload per repository,
-// most recently updated first.
+// MaxSettledPerRepo caps how many settled (compressed) task logs load per
+// repository, most recently updated first. The cap is applied in the scan,
+// before a log is fully decoded, so capped logs cost only a header read. It
+// is the Store's default per-repo cap, selected by the constructors.
 const MaxSettledPerRepo = 5
 
-// Store owns one task-log directory and its raw JSONL logs.
+// Store owns one task-log directory and its files: JSONL log segments, their
+// sidecar header caches, metadata trailers, and terminal compression. Every
+// operation on the directory goes through the Store, so the layout stays
+// inside this package.
 type Store struct {
 	LogDir string
+
+	log *slog.Logger
+
+	// cutoff is the mtime cutoff for the LoadUnsettled and LoadSettled
+	// scans: logs last modified before it are skipped before decode; zero
+	// scans all ages. maxSettledPerRepo caps LoadSettled at that many logs
+	// per repository; zero loads every repo's full settled history.
+	cutoff            time.Time
+	maxSettledPerRepo int
+
+	// compressMu serializes compressPath calls, so concurrent settlements of
+	// the same log (the startup pass and a task's own terminal path) cannot
+	// interleave on the shared temp file; the loser deterministically adopts
+	// the winner's compressed log.
+	compressMu sync.Mutex
 }
 
-// NewStore creates a Store rooted at logDir.
-func NewStore(logDir string) *Store {
-	return &Store{LogDir: logDir}
+// NewStore creates a Store that owns logDir and every file under it. logDir
+// is the final task-log directory (for example <cacheDir>/tasks); the caller
+// decides where it sits in the cache layout. The directory is created lazily
+// on first write.
+//
+// The scan fields start at the production configuration — the
+// SettledRetention age cutoff and the MaxSettledPerRepo per-repo cap;
+// in-package tests that probe other scan configurations override them
+// directly.
+func NewStore(log *slog.Logger, logDir string) *Store {
+	return &Store{
+		LogDir:            filepath.Clean(logDir),
+		log:               log,
+		cutoff:            time.Now().UTC().Add(-SettledRetention),
+		maxSettledPerRepo: MaxSettledPerRepo,
+	}
 }
 
-// Load scans LogDir and loads every task log header.
-// Invalid or corrupt logs are skipped so one historical file cannot prevent
-// startup. Only the header and result trailer are parsed; call LoadMessages for
-// full conversation history after supplying a fresh native parser resolver.
-func (s *Store) Load() ([]*LoadedTask, error) {
-	paths, err := logPaths(s.LogDir, nil)
+// LoadUnsettled scans LogDir for plain (uncompressed) task logs and loads
+// every header, uncapped. This set is a superset of the live tasks: a task is
+// compressed only once terminal, so it also includes recently-terminal logs
+// not yet compressed and abandoned logs that were never settled. Only the
+// header and result trailer are parsed; call LoadMessages for full
+// conversation history. Logs last modified before the Store's age cutoff are
+// skipped, and invalid or corrupt logs are skipped so one historical file
+// cannot prevent startup.
+func (s *Store) LoadUnsettled() ([]*LoadedTask, error) {
+	paths, err := logPaths(s.log, s.LogDir, nil, false, s.cutoff)
 	if err != nil {
 		return nil, err
 	}
-	return loadLogsFromPaths(paths, false)
+	return loadLogsFromPaths(s.log, paths, false, true)
 }
 
-// LoadForTaskIDs loads metadata for logs whose parsed filename task ID
+// LoadSettled scans LogDir for compressed (settled) task logs and loads their
+// headers, capping the load at the Store's per-repo limit (MaxSettledPerRepo
+// by default) in the scan before full decode so capped logs cost only a
+// header read. A base that also has a plain source is skipped so the plain
+// source stays authoritative after an interrupted compression. Logs last
+// modified before the Store's age cutoff are skipped before decode, which
+// keeps cold start cheap as terminal history grows.
+func (s *Store) LoadSettled() ([]*LoadedTask, error) {
+	paths, err := logPaths(s.log, s.LogDir, nil, true, s.cutoff)
+	if err != nil {
+		return nil, err
+	}
+	if s.maxSettledPerRepo > 0 {
+		paths = capSettledPaths(s.log, paths, s.maxSettledPerRepo)
+	}
+	return loadLogsFromPaths(s.log, paths, false, true)
+}
+
+// LoadForTaskIDs loads metadata for plain logs whose parsed filename task ID
 // matches one of taskIDs. It avoids parsing unrelated purged task logs during
-// startup import of live runtime instances.
+// startup import of live runtime instances, which always own plain logs.
 func (s *Store) LoadForTaskIDs(taskIDs []string) ([]*LoadedTask, error) {
-	ids := make(map[string]struct{}, len(taskIDs))
+	idSet := make(map[string]struct{}, len(taskIDs))
 	for _, id := range taskIDs {
 		if id != "" {
-			ids[id] = struct{}{}
+			idSet[id] = struct{}{}
 		}
 	}
-	if len(ids) == 0 {
+	if len(idSet) == 0 {
 		return nil, nil
 	}
-	paths, err := logPaths(s.LogDir, ids)
+	paths, err := logPaths(s.log, s.LogDir, idSet, false, time.Time{})
 	if err != nil {
 		return nil, err
 	}
@@ -70,14 +132,14 @@ func (s *Store) LoadForTaskIDs(taskIDs []string) ([]*LoadedTask, error) {
 		found[taskIDFromLogBase(trimLogExt(filepath.Base(path)))] = struct{}{}
 	}
 	missing := make([]string, 0)
-	for id := range ids {
+	for id := range idSet {
 		if _, ok := found[id]; !ok {
 			missing = append(missing, id)
 		}
 	}
 	slices.Sort(missing)
 
-	tasks, loadErr := loadLogsFromPaths(paths, true)
+	tasks, loadErr := loadLogsFromPaths(s.log, paths, true, true)
 	if len(missing) > 0 {
 		loadErr = errors.Join(loadErr, fmt.Errorf("missing task logs for IDs: %s", strings.Join(missing, ", ")))
 	}
@@ -223,14 +285,37 @@ func (s *Store) Compress(path string, log agent.LogSink, state State) (string, e
 	return s.compressPath(path)
 }
 
-// CompressTerminalLogs compresses loaded non-revivable task logs during startup.
-// Plain sources take precedence over interrupted plain-and-compressed pairs, so
-// a retry always compresses the authoritative plain source.
-func (s *Store) CompressTerminalLogs(logs []*LoadedTask) error {
+// SettleTerminal compresses every terminal plain log in LogDir, regardless of
+// age, skipping the paths in exclude. It runs at startup so terminal logs that
+// fall outside the retention cutoff — which only bounds what the scans
+// register — are settled instead of accumulating uncompressed forever.
+// Exclusions keep the owner's compression authoritative: the caller passes
+// the logs owned by live registry entries so the pass yields to the per-task
+// terminal path; compressPath's compression mutex makes concurrent
+// settlement of the same path safe regardless. Exclude keys are
+// filepath.Clean-ed absolute log paths.
+func (s *Store) SettleTerminal(exclude map[string]struct{}) error {
+	paths, err := logPaths(s.log, s.LogDir, nil, false, time.Time{})
+	if err != nil {
+		return err
+	}
+	logs, err := loadLogsFromPaths(s.log, paths, false, false)
+	if err != nil {
+		return err
+	}
+	return s.compressTerminalLogs(logs, exclude)
+}
+
+func (s *Store) compressTerminalLogs(logs []*LoadedTask, exclude map[string]struct{}) error {
 	var errs []error
 	for _, lt := range logs {
 		if lt == nil || !lt.State.IsTerminal() || isLogCompressed(lt.path) {
 			continue
+		}
+		if exclude != nil {
+			if _, ok := exclude[filepath.Clean(lt.path)]; ok {
+				continue
+			}
 		}
 		compressed, err := s.compressPath(lt.path)
 		if err != nil {
@@ -248,35 +333,6 @@ func (s *Store) CompressTerminalLogs(logs []*LoadedTask) error {
 	return errors.Join(errs...)
 }
 
-// Settled selects logs eligible to reload as settled task entries: updated
-// within SettledRetention of now, capped at MaxSettledPerRepo per repository,
-// most recently updated first.
-func (s *Store) Settled(logs []*LoadedTask, now time.Time) []*LoadedTask {
-	eligible := make([]*LoadedTask, 0, len(logs))
-	for _, lt := range logs {
-		if now.Sub(lt.LastStateUpdateAt) > SettledRetention {
-			continue
-		}
-		eligible = append(eligible, lt)
-	}
-	slices.SortFunc(eligible, func(a, b *LoadedTask) int {
-		return b.LastStateUpdateAt.Compare(a.LastStateUpdateAt)
-	})
-	perRepo := make(map[string]int)
-	kept := eligible[:0]
-	for _, lt := range eligible {
-		key := ""
-		if p := lt.Primary(); p != nil {
-			key = p.Name
-		}
-		if perRepo[key] < MaxSettledPerRepo {
-			perRepo[key]++
-			kept = append(kept, lt)
-		}
-	}
-	return kept
-}
-
 // resolveName validates name is a plain task-log filename and joins it under
 // LogDir, denying any path that escapes it (separators, "..", or absolute
 // paths).
@@ -288,8 +344,13 @@ func (s *Store) resolveName(name string) (string, error) {
 }
 
 // compressPath atomically replaces a plain terminal task log with its zstd
-// representation. A failed compression leaves the source log intact.
-func (*Store) compressPath(path string) (string, error) {
+// representation. A failed compression leaves the source log intact. Calls
+// for the same path are serialized by compressMu, so a concurrent compressor
+// either observes the compressed result and returns it, or sees the plain
+// source gone with the compressed sibling present and adopts it.
+func (s *Store) compressPath(path string) (string, error) {
+	s.compressMu.Lock()
+	defer s.compressMu.Unlock()
 	if path == "" || isLogCompressed(path) {
 		return path, nil
 	}
@@ -298,6 +359,15 @@ func (*Store) compressPath(path string) (string, error) {
 	}
 	info, err := os.Stat(filepath.Clean(path))
 	if err != nil {
+		if os.IsNotExist(err) {
+			// The plain source vanished after the scan. If the compressed
+			// sibling exists the log was already settled by its owner (for
+			// example the per-task terminal path); adopt it instead of
+			// reporting a spurious compression failure.
+			if _, statErr := os.Stat(compressedLogPath(path)); statErr == nil {
+				return compressedLogPath(path), nil
+			}
+		}
 		return "", err
 	}
 	tmp := compressedLogTempPath(path)
@@ -322,6 +392,9 @@ func (*Store) compressPath(path string) (string, error) {
 		_ = os.Remove(tmp)
 		return "", err
 	}
+	// Preserve the source mtime: the settled age cutoff and the per-repo
+	// newest-N cap rank by mtime, so the compressed log must measure as old as
+	// its settlement, not as new as its compression.
 	if err := os.Chtimes(tmp, info.ModTime(), info.ModTime()); err != nil {
 		_ = os.Remove(tmp)
 		return "", fmt.Errorf("set compressed log mtime: %w", err)
@@ -332,6 +405,11 @@ func (*Store) compressPath(path string) (string, error) {
 		return "", fmt.Errorf("rename compressed log: %w", err)
 	}
 	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			// The plain source is gone; the compressed log is the settled
+			// result, so report it as success instead of deleting it.
+			return dst, nil
+		}
 		return "", errors.Join(
 			fmt.Errorf("remove plain log after compression: %w", err),
 			os.Remove(dst),

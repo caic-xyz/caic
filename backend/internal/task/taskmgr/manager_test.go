@@ -33,6 +33,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
+func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
+
 type testRuntimeInfo interface {
 	runtime.Monitor
 	runtime.Inventory
@@ -81,7 +83,7 @@ func newTestManager(t testing.TB, cfg Config) *Manager { //nolint:gocritic // Co
 		cfg.Log = slog.New(slog.DiscardHandler)
 	}
 	if cfg.LogStore == nil {
-		cfg.LogStore = taskslog.NewStore(filepath.Join(t.TempDir(), "tasks"))
+		cfg.LogStore = taskslog.NewStore(testLogger(), t.TempDir())
 	}
 	if cfg.Runtimes == nil {
 		cfg.Runtimes = newTestRuntime(t, &runtimetest.FakeBackend{}, nil)
@@ -420,10 +422,10 @@ func TestNew(t *testing.T) {
 		}{
 			{name: "server context", want: "task manager server context is required"},
 			{name: "task log store", cfg: Config{ServerCtx: t.Context()}, want: "task manager task log store is required"},
-			{name: "runtime router", cfg: Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(filepath.Join(cacheDir, "tasks"))}, want: "task manager runtime router is required"},
-			{name: "checkout registry", cfg: Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(filepath.Join(cacheDir, "tasks")), Runtimes: runtimes}, want: "task manager checkout registry is required"},
-			{name: "runtime start timeout", cfg: Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(filepath.Join(cacheDir, "tasks")), Runtimes: runtimes, Checkouts: repo.NewRegistry()}, want: "task manager runtime start timeout is required"},
-			{name: "logger", cfg: Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(filepath.Join(cacheDir, "tasks")), Runtimes: runtimes, Checkouts: repo.NewRegistry(), RuntimeStartTimeout: time.Hour}, want: "task manager logger is required"},
+			{name: "runtime router", cfg: Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(testLogger(), cacheDir)}, want: "task manager runtime router is required"},
+			{name: "checkout registry", cfg: Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(testLogger(), cacheDir), Runtimes: runtimes}, want: "task manager checkout registry is required"},
+			{name: "runtime start timeout", cfg: Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(testLogger(), cacheDir), Runtimes: runtimes, Checkouts: repo.NewRegistry()}, want: "task manager runtime start timeout is required"},
+			{name: "logger", cfg: Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(testLogger(), cacheDir), Runtimes: runtimes, Checkouts: repo.NewRegistry(), RuntimeStartTimeout: time.Hour}, want: "task manager logger is required"},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
@@ -463,7 +465,7 @@ func TestNew(t *testing.T) {
 		cfg := Config{
 			ServerCtx:           t.Context(),
 			Log:                 slog.New(slog.DiscardHandler),
-			LogStore:            taskslog.NewStore(filepath.Join(cacheDir, "tasks")),
+			LogStore:            taskslog.NewStore(testLogger(), filepath.Join(cacheDir, "tasks")),
 			Runtimes:            router,
 			Backends:            map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}},
 			HarnessEnv:          map[string][]string{string(harness.Codex): {"CODEX_HOME=/tmp/codex"}},
@@ -1553,7 +1555,7 @@ func TestManager(t *testing.T) {
 			logDir := filepath.Join(cacheDir, "tasks")
 			m := newTestManager(t, Config{
 				ServerCtx: t.Context(),
-				LogStore:  taskslog.NewStore(filepath.Join(cacheDir, "tasks")),
+				LogStore:  taskslog.NewStore(testLogger(), logDir),
 				Backends:  map[harness.Name]agent.Backend{"reconnect": backend},
 			})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "reconnect", "")
@@ -1577,7 +1579,7 @@ func TestManager(t *testing.T) {
 				},
 				&agent.ResultMessage{MessageType: "result"},
 			})
-			logW, path, err := (&taskslog.Store{LogDir: logDir}).Open(tk.LogFilename(), tk.LogHeader())
+			logW, path, err := (taskslog.NewStore(testLogger(), logDir)).Open(tk.LogFilename(), tk.LogHeader())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1910,7 +1912,7 @@ func TestManager(t *testing.T) {
 			), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			logs, err := taskslog.NewStore(dir).Load()
+			logs, err := taskslog.NewStore(testLogger(), dir).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1946,28 +1948,6 @@ func TestManager(t *testing.T) {
 			}
 			if m.Len() != 0 {
 				t.Errorf("Len() = %d after nil load, want 0", m.Len())
-			}
-		})
-		t.Run("valid_filters_old", func(t *testing.T) {
-			t.Parallel()
-			m := newTestManager(t, Config{ServerCtx: t.Context()})
-			old := time.Now().Add(-30 * 24 * time.Hour).UTC()
-			all := []*taskslog.LoadedTask{
-				{
-					TaskID:            ksid.NewID().String(),
-					Prompt:            "old",
-					Harness:           "claude",
-					LastStateUpdateAt: old,
-					State:             taskslog.StateStopped,
-				},
-			}
-			settled := (&taskslog.Store{}).Settled(all, time.Now())
-			err := m.LoadPurgedTasks(settled)
-			if err != nil {
-				t.Fatalf("LoadPurgedTasks: %v", err)
-			}
-			if m.Len() != 0 {
-				t.Errorf("Len() = %d after loading old task, want 0", m.Len())
 			}
 		})
 		t.Run("valid_creates_entries", func(t *testing.T) {
@@ -2101,7 +2081,7 @@ func TestManager(t *testing.T) {
 			if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			logs, err := taskslog.NewStore(dir).Load()
+			logs, err := taskslog.NewStore(testLogger(), dir).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2148,29 +2128,6 @@ func TestManager(t *testing.T) {
 			e, _ := m.GetEntry(id.String())
 			if got := e.Task().GetState(); got != taskslog.StateFailed {
 				t.Errorf("state = %v, want StateFailed (running→failed)", got)
-			}
-		})
-		t.Run("valid_max_per_repo", func(t *testing.T) {
-			t.Parallel()
-			m := newTestManager(t, Config{ServerCtx: t.Context()})
-			now := time.Now().UTC()
-			all := make([]*taskslog.LoadedTask, 0, 7)
-			for i := range 7 {
-				all = append(all, &taskslog.LoadedTask{
-					TaskID:            ksid.NewID().String(),
-					Prompt:            "task",
-					Repos:             []taskslog.RepoMount{{Name: "repo/a"}},
-					State:             taskslog.StateStopped,
-					LastStateUpdateAt: now.Add(time.Duration(i) * time.Second),
-				})
-			}
-			settled := (&taskslog.Store{}).Settled(all, time.Now())
-			err := m.LoadPurgedTasks(settled)
-			if err != nil {
-				t.Fatalf("LoadPurgedTasks: %v", err)
-			}
-			if got := m.Len(); got != 5 {
-				t.Errorf("Len() = %d, want 5 (maxPurgedPerRepo)", got)
 			}
 		})
 		t.Run("valid_fallback_title", func(t *testing.T) {
@@ -3065,7 +3022,7 @@ func TestManager(t *testing.T) {
 			if err := os.WriteFile(path, data, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			logs, err := m.logStore.Load()
+			logs, err := m.logStore.LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3129,7 +3086,7 @@ func TestManager(t *testing.T) {
 				"restore-config\x00caic.harness": string(harness.Claude),
 			}}
 			cacheDir := t.TempDir()
-			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(filepath.Join(cacheDir, "tasks")), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(testLogger(), filepath.Join(cacheDir, "tasks")), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
 			registerCheckout(t, m.Checkouts, "repo/a", &repo.Checkout{Dir: "/home/user/src/repo/a"})
 
 			logDir := filepath.Join(cacheDir, "tasks")
@@ -3154,7 +3111,7 @@ func TestManager(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(logDir, taskID.String()+"-repo-a-caic-9.jsonl"), append(meta, '\n'), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			logs, err := taskslog.NewStore(logDir).Load()
+			logs, err := taskslog.NewStore(testLogger(), logDir).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3187,7 +3144,7 @@ func TestManager(t *testing.T) {
 				"merge-tail\x00caic.harness": string(harness.Claude),
 			}}
 			cacheDir := t.TempDir()
-			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(filepath.Join(cacheDir, "tasks")), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(testLogger(), filepath.Join(cacheDir, "tasks")), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
 			m.relay = fakeRelayReader{
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 					return true, "alive", nil
@@ -3217,7 +3174,7 @@ func TestManager(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(logDir, taskID.String()+".jsonl"), []byte(string(meta)+"\n"+diskMsg+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			logs, err := taskslog.NewStore(logDir).Load()
+			logs, err := taskslog.NewStore(testLogger(), logDir).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3344,7 +3301,7 @@ func TestManager(t *testing.T) {
 				"dead-relay\x00caic.harness": string(harness.Claude),
 			}}
 			cacheDir := t.TempDir()
-			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(filepath.Join(cacheDir, "tasks")), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(testLogger(), filepath.Join(cacheDir, "tasks")), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
 			registerCheckout(t, m.Checkouts, "caic-xyz/caic", &repo.Checkout{Dir: "/home/user/src/caic-xyz/caic"})
 
 			logDir := filepath.Join(cacheDir, "tasks")
@@ -3366,7 +3323,7 @@ func TestManager(t *testing.T) {
 			if err := os.WriteFile(logPath, []byte(body), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			logs, err := taskslog.NewStore(logDir).Load()
+			logs, err := taskslog.NewStore(testLogger(), logDir).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3524,7 +3481,7 @@ func TestManager(t *testing.T) {
 				"stale-trailer\x00caic.harness": string(harness.Claude),
 			}}
 			cacheDir := t.TempDir()
-			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(filepath.Join(cacheDir, "tasks")), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(testLogger(), filepath.Join(cacheDir, "tasks")), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
 			registerCheckout(t, m.Checkouts, "caic-xyz/caic", &repo.Checkout{Dir: "/home/user/src/caic-xyz/caic"})
 
 			logDir := filepath.Join(cacheDir, "tasks")
@@ -3548,7 +3505,7 @@ func TestManager(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(logDir, taskID.String()+".jsonl"), []byte(logs), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			loaded, err := taskslog.NewStore(logDir).Load()
+			loaded, err := taskslog.NewStore(testLogger(), logDir).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3587,7 +3544,7 @@ func TestManager(t *testing.T) {
 				"md-caic-caic-6\x00caic.harness": string(harness.Codex),
 			}}
 			cacheDir := t.TempDir()
-			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(filepath.Join(cacheDir, "tasks")), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Codex: codex.New("", nil)}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(testLogger(), filepath.Join(cacheDir, "tasks")), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Codex: codex.New("", nil)}})
 			registerCheckout(t, m.Checkouts, "caic-xyz/caic", &repo.Checkout{Dir: "/home/user/src/caic-xyz/caic"})
 
 			logDir := filepath.Join(cacheDir, "tasks")
@@ -3608,7 +3565,7 @@ func TestManager(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(logDir, taskID.String()+".jsonl"), []byte(string(meta)+"\n"+init+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			logs, err := taskslog.NewStore(logDir).Load()
+			logs, err := taskslog.NewStore(testLogger(), logDir).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}

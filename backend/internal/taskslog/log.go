@@ -3,6 +3,7 @@
 package taskslog
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"os"
@@ -124,15 +125,32 @@ func openLogReader(path string) (io.ReadCloser, error) {
 	return os.Open(filepath.Clean(path))
 }
 
-var zstdDecodeDummy = strings.NewReader("")
+// zstdDecodeDummy is a minimal valid zstd frame used only to construct a pooled
+// decoder; pooled decoders are reset to a real log before they are read.
+var zstdDecodeDummy = buildZstdDummyFrame()
 
-var zstdDecoderPool = sync.Pool{New: func() any {
-	decoder, err := zstd.NewReader(zstdDecodeDummy)
-	if err != nil {
-		panic(err)
-	}
-	return decoder
-}}
+// buildZstdDummyFrame builds the tiny frame used to seed pooled decoders.
+func buildZstdDummyFrame() []byte {
+	var buf bytes.Buffer
+	w, _ := zstd.NewWriter(&buf)
+	_, _ = w.Write([]byte("x"))
+	_ = w.Close()
+	return buf.Bytes()
+}
+
+// zstdDecoderPool reuses zstd decoders across log reads. A decoder's window
+// buffer is sized to the log and is otherwise re-allocated (and zeroed) on
+// every open, which dominated cold-start CPU; pooling resets each decoder to
+// the next file instead, so the window is allocated once per worker and reused.
+var zstdDecoderPool = sync.Pool{
+	New: func() any {
+		d, err := zstd.NewReader(bytes.NewReader(zstdDecodeDummy))
+		if err != nil {
+			panic(err)
+		}
+		return d
+	},
+}
 
 type zstdReadCloser struct {
 	dec  *zstd.Decoder
@@ -144,9 +162,12 @@ func (r *zstdReadCloser) Read(p []byte) (int, error) {
 	return r.dec.Read(p)
 }
 
-// Close releases the zstd decoder and closes the backing file.
+// Close detaches the stream and returns the zstd decoder to the shared pool,
+// then closes the backing file. The detach matters: a read that stops before
+// EOF leaves the decoder's async goroutines parked on the stream; Reset(nil)
+// drains them so a pooled (or later GC-dropped) decoder cannot leak
+// goroutines and their window buffers.
 func (r *zstdReadCloser) Close() error {
-	// Reset detaches the file before returning the reusable decoder to the pool.
 	if err := r.dec.Reset(nil); err != nil {
 		return errors.Join(err, r.file.Close())
 	}
@@ -160,12 +181,13 @@ func openCompressedLogReader(path string) (*zstdReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	d, ok := zstdDecoderPool.Get().(*zstd.Decoder)
+	got := zstdDecoderPool.Get()
+	d, ok := got.(*zstd.Decoder)
 	if !ok {
-		panic("taskslog zstd decoder pool contains an invalid value")
+		panic("taskslog: zstdDecoderPool entry is not a zstd.Decoder")
 	}
 	if err := d.Reset(f); err != nil {
-		zstdDecoderPool.Put(d)
+		zstdDecoderPool.Put(got)
 		return nil, errors.Join(err, f.Close())
 	}
 	return &zstdReadCloser{dec: d, file: f}, nil

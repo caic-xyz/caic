@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -71,13 +72,31 @@ type adoptionProcessIO struct {
 func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 	b.StopTimer()
 	fixture := newAdoptionBenchmarkFixture(b)
-	store := &Store{LogDir: fixture.dir}
+	store := NewStore(testLogger(), fixture.dir)
+	bl := testLogger()
 	operations := []adoptionBenchmarkOperation{
 		{
 			name: "LoadLogHeader",
 			prepare: func() func() error {
 				return func() error {
-					if _, err := loadLogHeader(fixture.path); err != nil {
+					if _, err := loadLogHeader(bl, fixture.path, true); err != nil {
+						return err
+					}
+					return nil
+				}
+			},
+		},
+		{
+			// LoadLogHeaderScan measures the full-decode scan path by dropping
+			// the header cache before every iteration, the first-run and
+			// log-changed case.
+			name: "LoadLogHeaderScan",
+			prepare: func() func() error {
+				return func() error {
+					if err := os.Remove(logHeaderCachePath(fixture.path)); err != nil && !errors.Is(err, os.ErrNotExist) {
+						return err
+					}
+					if _, err := loadLogHeader(bl, fixture.path, true); err != nil {
 						return err
 					}
 					return nil
@@ -88,7 +107,7 @@ func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 			name: "StoreLoad",
 			prepare: func() func() error {
 				return func() error {
-					logs, err := storeFor(fixture.dir).Load()
+					logs, err := NewStore(bl, fixture.dir).LoadUnsettled()
 					if err != nil {
 						return err
 					}
@@ -136,7 +155,7 @@ func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 			name: "CombinedLiveAdoption",
 			prepare: func() func() error {
 				return func() error {
-					logs, err := storeFor(fixture.dir).LoadForTaskIDs([]string{fixture.id.String()})
+					logs, err := NewStore(bl, fixture.dir).LoadForTaskIDs([]string{fixture.id.String()})
 					if err != nil {
 						return err
 					}
@@ -268,18 +287,27 @@ func newAdoptionBenchmarkFixture(b *testing.B) *adoptionBenchmarkFixture {
 		written += n
 	}
 	if err == nil {
+		// End the log with a terminal result trailer so the fixture models a
+		// compressed, terminal task log — the set the header cache targets.
+		// Its size is reserved from the padding so the fixture stays exactly
+		// target bytes.
+		result := benchmarkJSONLine(b, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		resultBytes := int64(len(result) + 1)
 		remaining := target - written
 		const prefix = `{"type":"assistant","message":{"content":[{"type":"text","text":"`
 		const suffix = `"}]}}`
-		payloadBytes := remaining - int64(len(prefix)+len(suffix)+1)
+		payloadBytes := remaining - int64(len(prefix)+len(suffix)+1) - resultBytes
 		if payloadBytes < 0 {
-			err = fmt.Errorf("fixture remainder %d cannot hold padding record", remaining)
+			err = fmt.Errorf("fixture remainder %d cannot hold padding and result", remaining)
 		} else {
 			if _, err = bw.WriteString(prefix); err == nil {
 				_, err = bw.Write(bytes.Repeat([]byte{'p'}, int(payloadBytes)))
 			}
 			if err == nil {
 				_, err = bw.WriteString(suffix + "\n")
+			}
+			if err == nil {
+				_, err = writeBenchmarkRecord(bw, result)
 			}
 		}
 	}
@@ -304,6 +332,61 @@ func newAdoptionBenchmarkFixture(b *testing.B) *adoptionBenchmarkFixture {
 	}
 	b.Logf("fixture=%s bytes=%d mix=small-deltas,normal-events,large-tool-output,controls,repeated-segment-headers", path, target)
 	return &adoptionBenchmarkFixture{dir: dir, name: name, path: path, size: target, id: id}
+}
+
+// BenchmarkDecodeDiscriminatorProbe measures per-line discriminator cost over
+// realistic record shapes, dominated by long non-meta records that carry large
+// tool outputs. b/report bytes/sec tracks the line size so shape changes are
+// comparable.
+func BenchmarkDecodeDiscriminatorProbe(b *testing.B) {
+	largeOutput := strings.Repeat("tool output line\\n", 16<<10)
+	cases := []struct {
+		name    string
+		version agent.LogVersion
+		line    string
+	}{
+		{
+			name:    "V1LargeToolResult",
+			version: agent.LogVersionV1,
+			line:    `{"type":"user","parent_tool_use_id":"tool-1","message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","content":"` + largeOutput + `"}]}}`,
+		},
+		{
+			name:    "V1Assistant",
+			version: agent.LogVersionV1,
+			line:    `{"type":"assistant","message":{"content":[{"type":"text","text":"Completed one adoption step."}]}}`,
+		},
+		{
+			name:    "V1Meta",
+			version: agent.LogVersionV1,
+			line:    `{"type":"caic_meta","version":1,"harness":"claude","prompt":"benchmark","repos":[{"name":"org/repo","branch":"caic-0"}]}`,
+		},
+		{
+			name:    "V1MarkerLater",
+			version: agent.LogVersionV1,
+			line:    `{"type":"system","subtype":"init","model":"claude","padding":"` + strings.Repeat("x", 1<<16) + `","t":"caic_meta"}`,
+		},
+		{
+			name:    "V2Agent",
+			version: agent.LogVersionV2,
+			line:    `{"t":"agent","ts":1767225600.5,"message":{"content":[{"type":"text","text":"working"}]}}`,
+		},
+		{
+			name:    "V2LargeToolResult",
+			version: agent.LogVersionV2,
+			line:    `{"t":"user","ts":1767225600.5,"message":{"content":[{"t":"tool_result","tool_use_id":"tool-1","content":"` + largeOutput + `"}]}}`,
+		},
+	}
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			line := []byte(tc.line)
+			b.SetBytes(int64(len(line)))
+			b.ResetTimer()
+			for range b.N {
+				_, _, _ = decodeDiscriminatorProbe(line, tc.version)
+			}
+		})
+	}
 }
 
 func benchmarkAdoptionRecords(header []byte) [][]byte {
@@ -374,4 +457,155 @@ func readAdoptionProcessIO() (adoptionProcessIO, bool) {
 		}
 	}
 	return stats, stats.rchar > 0
+}
+
+// BenchmarkSettledScanAgeFilter measures the cold-start scan of the settled
+// (compressed) log set with and without the mtime retention cutoff. The cutoff
+// is applied before decompression, so old logs are never decoded. The fixture
+// is half recent and half old .zst logs; both variants clear the header cache
+// each iteration to model a cold start, so the timing is dominated by zstd
+// decompression and the ratio shows the cutoff's win.
+func BenchmarkSettledScanAgeFilter(b *testing.B) {
+	b.StopTimer()
+	const nLogs = 16
+	const perLog = 384 << 10 // 384 KiB each -> 6 MiB total
+	dir := b.TempDir()
+	oldTime := time.Now().UTC().Add(-30 * 24 * time.Hour)
+	cutoff := time.Now().UTC().Add(-14 * 24 * time.Hour)
+	for i := range nLogs {
+		name := fmt.Sprintf("%02d.jsonl.zst", i)
+		writeSettledBenchLog(b, dir, name, "org/repo", perLog)
+		if i%2 == 0 {
+			path := filepath.Join(dir, name)
+			if err := os.Chtimes(path, oldTime, oldTime); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+	clearHeaderCaches(b, dir)
+	goruntime.GC()
+
+	for _, tc := range []struct {
+		name   string
+		cutoff time.Time
+	}{
+		{name: "no_age_filter", cutoff: time.Time{}},
+		{name: "with_age_filter", cutoff: cutoff},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.StopTimer()
+			clearHeaderCaches(b, dir)
+			b.StartTimer()
+			for range b.N {
+				b.StopTimer()
+				clearHeaderCaches(b, dir)
+				b.StartTimer()
+				st := NewStore(testLogger(), dir)
+				st.cutoff, st.maxSettledPerRepo = tc.cutoff, 0
+				if _, err := st.LoadSettled(); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// writeSettledBenchLog writes a zstd-compressed terminal task log for repo of
+// roughly size uncompressed bytes (multi-block) so decompressing has a cost.
+func writeSettledBenchLog(b *testing.B, dir, name, repo string, size int) {
+	meta := benchmarkJSONLine(b, agent.MetaMessage{
+		MessageType: "caic_meta", Version: int(agent.LogVersionV1), Prompt: "settled bench",
+		Repos: []agent.MetaRepo{{Name: repo, Branch: "caic-0"}}, Harness: harness.Claude,
+		StartedAt: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+	})
+	trailer := benchmarkJSONLine(b, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+	const prefix = `{"type":"assistant","message":{"content":[{"type":"text","text":"`
+	const suffix = `"}]}}`
+	textLen := max(size-len(meta)-len(trailer)-len(prefix)-len(suffix)-4, 0)
+	lines := [][]byte{meta, []byte(prefix + strings.Repeat("p", textLen) + suffix), trailer}
+
+	path := filepath.Clean(filepath.Join(dir, name))
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		b.Fatal(err)
+	}
+	enc, err := zstd.NewWriter(f)
+	if err != nil {
+		_ = f.Close()
+		b.Fatal(err)
+	}
+	for _, line := range lines {
+		if _, err := enc.Write(line); err != nil {
+			_ = errors.Join(enc.Close(), f.Close())
+			b.Fatal(err)
+		}
+		if _, err := enc.Write([]byte("\n")); err != nil {
+			_ = errors.Join(enc.Close(), f.Close())
+			b.Fatal(err)
+		}
+	}
+	if err := errors.Join(enc.Close(), f.Close()); err != nil {
+		b.Fatal(err)
+	}
+}
+
+// BenchmarkSettledLoadCap compares fully decoding every settled log against the
+// header-only per-repo pre-cap that decodes only the kept survivors. Both runs
+// cap reads at 8 workers (as the real load does). The header cache is cleared
+// each iteration to model a cold start. Files are multi-block so the header
+// read (first block) is meaningfully cheaper than the full decode.
+func BenchmarkSettledLoadCap(b *testing.B) {
+	b.StopTimer()
+	const nRepos = 5
+	const perRepo = 16
+	const perLog = 1 << 20 // 1 MiB each -> 80 MiB total, multi-block
+	dir := b.TempDir()
+	cutoff := time.Now().UTC().Add(-14 * 24 * time.Hour)
+	for r := range nRepos {
+		for i := range perRepo {
+			name := fmt.Sprintf("b%03d-org-repo%02d-caic-0.jsonl.zst", r*perRepo+i, r)
+			writeSettledBenchLog(b, dir, name, fmt.Sprintf("org/repo%02d", r), perLog)
+		}
+	}
+	goruntime.GC()
+
+	for _, tc := range []struct {
+		name         string
+		limitPerRepo int
+	}{
+		{name: "full_decode", limitPerRepo: 0}, // decode every settled log
+		{name: "precap", limitPerRepo: 5},      // decode only the 5/repo survivors
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for range b.N {
+				b.StopTimer()
+				clearHeaderCaches(b, dir)
+				b.StartTimer()
+				st := NewStore(testLogger(), dir)
+				st.cutoff, st.maxSettledPerRepo = cutoff, tc.limitPerRepo
+				if _, err := st.LoadSettled(); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// clearHeaderCaches removes the per-log header cache sidecars so the next scan
+// decodes from the .zst files, modeling a cold start.
+func clearHeaderCaches(b testing.TB, dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		b.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), headerCacheExt) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, e.Name())); err != nil && !errors.Is(err, os.ErrNotExist) {
+			b.Fatal(err)
+		}
+	}
 }
