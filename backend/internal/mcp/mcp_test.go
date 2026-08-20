@@ -233,7 +233,6 @@ func readSSEMessage(t *testing.T, r *bufio.Reader) JSONRPCNotification {
 }
 
 func resourceUpdateURI(t *testing.T, msg JSONRPCNotification) string {
-	t.Helper()
 	params, ok := msg.Params.(map[string]any)
 	if !ok {
 		t.Fatalf("params = %#v, want object", msg.Params)

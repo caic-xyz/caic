@@ -70,7 +70,6 @@ func BenchmarkHandleTaskRawEventsPurgedReplay(b *testing.B) {
 }
 
 func benchmarkPurgedTaskEventServer(b *testing.B, deltaCount int) (string, *testRouter) {
-	b.Helper()
 	logDir := b.TempDir()
 	taskID := ksid.NewID().String()
 	finalText := "final compact response " + strings.Repeat("x", 42<<10)
@@ -133,7 +132,6 @@ func benchmarkPurgedTaskEventServer(b *testing.B, deltaCount int) (string, *test
 }
 
 func benchmarkPurgedPiTaskEventServer(b *testing.B, deltaCount int) (string, *testRouter) {
-	b.Helper()
 	logDir := b.TempDir()
 	taskID := ksid.NewID().String()
 	finalText := "final compact response " + strings.Repeat("x", 42<<10)
@@ -181,7 +179,6 @@ func benchmarkPurgedPiTaskEventServer(b *testing.B, deltaCount int) (string, *te
 }
 
 func benchJSON(b *testing.B, v any) string {
-	b.Helper()
 	data, err := json.Marshal(v)
 	if err != nil {
 		b.Fatal(err)

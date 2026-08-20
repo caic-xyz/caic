@@ -37,7 +37,6 @@ const mcpAuthDefaultScope = mcpScopeRead + " " + mcpScopeTasksRead + " " + mcpSc
 // for routers that build the OAuth server. Production supplies this from
 // persisted settings; the OAuth server requires a key and no longer defaults one.
 func testMCPOAuthSigningKeyPEM(t testing.TB) []byte {
-	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatalf("generate test oauth signing key: %v", err)

@@ -265,7 +265,6 @@ func TestExtractTarGzToFile(t *testing.T) {
 
 // makeTarGz creates a tar.gz archive containing a single file.
 func makeTarGz(t *testing.T, name string, content []byte) []byte {
-	t.Helper()
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)

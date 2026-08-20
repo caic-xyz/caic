@@ -690,7 +690,6 @@ func (c *captureSink) assistantText() string {
 }
 
 func decodeToolCall(t *testing.T, sink *captureSink) voicev1.ToolCall {
-	t.Helper()
 	sink.mu.Lock()
 	defer sink.mu.Unlock()
 	for _, m := range sink.msgs {
@@ -709,7 +708,6 @@ func decodeToolCall(t *testing.T, sink *captureSink) voicev1.ToolCall {
 }
 
 func waitForKind(t *testing.T, sink *captureSink, kind voicev1.MessageKind) {
-	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		if slices.Contains(sink.kinds(), kind) {
@@ -742,14 +740,12 @@ func kindCount(kinds []voicev1.MessageKind, want voicev1.MessageKind) int {
 }
 
 func mustAcceptMic(t *testing.T, sess backendSession, pcm []byte) {
-	t.Helper()
 	if err := sess.acceptMicPCM(t.Context(), pcm); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func mustJSON(t *testing.T, v any) []byte {
-	t.Helper()
 	data, err := json.Marshal(v)
 	if err != nil {
 		t.Fatal(err)

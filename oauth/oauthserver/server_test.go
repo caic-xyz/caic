@@ -2322,7 +2322,6 @@ func TestDPoP(t *testing.T) {
 
 // testDPoPRSAKeyPair generates an RSA key pair for DPoP proof tests.
 func testDPoPRSAKeyPair(t *testing.T) (*rsa.PrivateKey, *oauth.JWK) {
-	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("generate rsa key: %v", err)
@@ -2339,7 +2338,6 @@ func testDPoPRSAKeyPair(t *testing.T) (*rsa.PrivateKey, *oauth.JWK) {
 // makeDPoPProof creates a valid DPoP proof JWT signed with the given RSA key
 // using a fresh random jti.
 func makeDPoPProof(t *testing.T, key *rsa.PrivateKey, jwk *oauth.JWK, htm, htu string, iat time.Time, accessToken, nonce string) string {
-	t.Helper()
 	jti, err := randomToken()
 	if err != nil {
 		t.Fatalf("generate jti: %v", err)
@@ -2350,7 +2348,6 @@ func makeDPoPProof(t *testing.T, key *rsa.PrivateKey, jwk *oauth.JWK, htm, htu s
 // makeDPoPProofWithJTI creates a DPoP proof JWT with an explicit jti (which may
 // be empty to exercise the missing-jti rejection path).
 func makeDPoPProofWithJTI(t *testing.T, key *rsa.PrivateKey, jwk *oauth.JWK, htm, htu string, iat time.Time, accessToken, nonce, jti string) string {
-	t.Helper()
 	header := DPoPHeader{Typ: "dpop+jwt", Alg: "RS256", JWK: *jwk}
 	headerJSON, err := json.Marshal(header)
 	if err != nil {
@@ -2383,7 +2380,6 @@ func makeDPoPProofWithJTI(t *testing.T, key *rsa.PrivateKey, jwk *oauth.JWK, htm
 
 // testDPoPECKeyPair generates an EC key pair and its oauth.JWK for DPoP proof tests.
 func testDPoPECKeyPair(t *testing.T, curve elliptic.Curve, crv string) (*ecdsa.PrivateKey, *oauth.JWK) {
-	t.Helper()
 	key, err := ecdsa.GenerateKey(curve, rand.Reader)
 	if err != nil {
 		t.Fatalf("generate ec key: %v", err)
@@ -2410,7 +2406,6 @@ const dpopTokenURL = testBaseURL + "/oauth/token"
 // makeUnsignedDPoPProof builds a DPoP proof with a bogus signature, for cases
 // rejected before signature verification (e.g. RSA modulus bounds).
 func makeUnsignedDPoPProof(t *testing.T, alg string, jwk *oauth.JWK) string {
-	t.Helper()
 	header := DPoPHeader{Typ: "dpop+jwt", Alg: alg, JWK: *jwk}
 	headerJSON, err := json.Marshal(header)
 	if err != nil {
@@ -2427,7 +2422,6 @@ func makeUnsignedDPoPProof(t *testing.T, alg string, jwk *oauth.JWK) string {
 
 // httpDPoPRequest wraps a proof string in a request carrying the DPoP header.
 func httpDPoPRequest(t *testing.T, proof string) *http.Request {
-	t.Helper()
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, dpopTokenURL, http.NoBody)
 	r.Header.Set("DPoP", proof)
 	addForwardedHeaders(r)
@@ -2437,7 +2431,6 @@ func httpDPoPRequest(t *testing.T, proof string) *http.Request {
 // makeDPoPProofSigned builds a valid DPoP proof with a chosen header alg, signed
 // by signer. RSA and ECDSA sign the SHA-256 digest; Ed25519 signs the raw input.
 func makeDPoPProofSigned(t *testing.T, alg string, signer crypto.Signer, jwk *oauth.JWK) string {
-	t.Helper()
 	jti, err := randomToken()
 	if err != nil {
 		t.Fatalf("generate jti: %v", err)
@@ -2481,7 +2474,6 @@ type dpopTestResources struct {
 // setupDPoPBoundToken creates a server, registers a client, authorizes a code,
 // obtains a DPoP-bound token, and returns the pieces needed for resource tests.
 func setupDPoPBoundToken(t *testing.T) dpopTestResources {
-	t.Helper()
 	user := testUser()
 	s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 	registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
@@ -2818,7 +2810,6 @@ func newTestResourceRequest(t *testing.T) *http.Request {
 
 // readOAuthStateFile returns the raw on-disk OAuth state JSON.
 func readOAuthStateFile(t *testing.T, path string) string {
-	t.Helper()
 	data, err := os.ReadFile(path) //nolint:gosec // test-controlled temp path.
 	if err != nil {
 		t.Fatalf("read oauth state file: %v", err)
@@ -3320,7 +3311,6 @@ func TestEndSession(t *testing.T) {
 
 // newTestServerHandlerOnly creates a server and handler for management tests.
 func newTestServerHandlerOnly(t *testing.T) http.Handler {
-	t.Helper()
 	path := t.TempDir() + "/oauth.json"
 	cfg := &ServerConfig{
 		RefreshTokenStorePath: path,
@@ -3335,7 +3325,6 @@ func newTestServerHandlerOnly(t *testing.T) http.Handler {
 
 // readOAuthTestClient reads client registration via GET.
 func readOAuthTestClient(t *testing.T, h http.Handler, token, clientID string, wantStatus int) oauth.RegisterResponse {
-	t.Helper()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/oauth/register/"+clientID, http.NoBody)
 	req.Header.Set("Authorization", "Bearer "+token)
 	addForwardedHeaders(req)

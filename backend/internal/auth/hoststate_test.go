@@ -13,7 +13,6 @@ import (
 
 // dummyReq returns a request with the given Host and optional X-Forwarded headers.
 func dummyReq(t *testing.T, host, xfh, xfp string) *http.Request {
-	t.Helper()
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r.Host = host
 	if xfh != "" {

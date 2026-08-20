@@ -51,7 +51,6 @@ func BenchmarkParseMessageToolExecEnd(b *testing.B) {
 }
 
 func benchmarkToolExecEndLine(b *testing.B, outputBytes int) []byte {
-	b.Helper()
 	ev := struct {
 		Type       pi.EventType `json:"type"`
 		ToolCallID string       `json:"toolCallId"`
@@ -80,7 +79,6 @@ func benchmarkToolExecEndLine(b *testing.B, outputBytes int) []byte {
 }
 
 func benchmarkMessageUpdateLine(b *testing.B, accumulatedBytes int) []byte {
-	b.Helper()
 	type contentBlock struct {
 		Type string `json:"type"`
 		Text string `json:"text"`

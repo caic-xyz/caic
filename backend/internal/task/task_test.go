@@ -51,8 +51,7 @@ func (*failingConn) Close() error { return nil }
 // fanout performs a synchronous non-blocking send into a buffered channel
 // during addMessage, so a message is available immediately on return; a
 // non-blocking receive is therefore deterministic with no timing dependency.
-func recvType(t *testing.T, ch <-chan agent.Message) string {
-	t.Helper()
+func recvType(ch <-chan agent.Message) string {
 	select {
 	case m, ok := <-ch:
 		if !ok {
@@ -245,11 +244,11 @@ func TestTask(t *testing.T) {
 		tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done"}, false)
 		tk.addMessage(t.Context(), &agent.ExitMessage{ExitCode: -2}, true)
 
-		got := recvType(t, ch)
+		got := recvType(ch)
 		if got != "result" {
 			t.Fatalf("live msg = %q, want %q", got, "result")
 		}
-		if extra := recvType(t, ch); extra != "" {
+		if extra := recvType(ch); extra != "" {
 			t.Fatalf("spurious exit fanned out: got %q, want none", extra)
 		}
 	})
@@ -264,7 +263,7 @@ func TestTask(t *testing.T) {
 
 		tk.addMessage(t.Context(), &agent.ExitMessage{ExitCode: -2}, true)
 
-		if got := recvType(t, ch); got != "caic_exit" {
+		if got := recvType(ch); got != "caic_exit" {
 			t.Fatalf("live msg = %q, want %q", got, "caic_exit")
 		}
 	})

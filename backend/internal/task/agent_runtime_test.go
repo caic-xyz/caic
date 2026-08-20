@@ -197,7 +197,6 @@ func reopenTaskLog(s *taskslog.Store, tk *Task, path string) (agent.LogSink, err
 }
 
 func logLines(t *testing.T, path string) []string {
-	t.Helper()
 	file, err := os.Open(path) //nolint:gosec // path is test-controlled.
 	if err != nil {
 		t.Fatal(err)
@@ -1099,6 +1098,7 @@ func TestRunner(t *testing.T) {
 		})
 	})
 }
+
 func testRunnerSessions(t *testing.T) {
 	t.Run("Reconnect", func(t *testing.T) {
 		t.Parallel()

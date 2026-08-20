@@ -28,7 +28,6 @@ func TestWidgetTrackerBounds(t *testing.T) {
 	t.Parallel()
 
 	stream := func(t *testing.T, wt *WidgetTracker, event map[string]any) {
-		t.Helper()
 		line, err := json.Marshal(map[string]any{"type": "stream_event", "event": event})
 		if err != nil {
 			t.Fatal(err)
@@ -38,7 +37,6 @@ func TestWidgetTrackerBounds(t *testing.T) {
 		}
 	}
 	start := func(t *testing.T, wt *WidgetTracker, index int) {
-		t.Helper()
 		stream(t, wt, map[string]any{
 			"type": "content_block_start", "index": index,
 			"content_block": map[string]any{"type": "tool_use", "id": fmt.Sprintf("widget-%d", index), "name": "show_widget"},
