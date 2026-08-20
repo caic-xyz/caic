@@ -44,6 +44,10 @@
   --color-warning-border: #ffc107;
   --color-warning-text: #856404;
 
+  /* Settled-history status dot. */
+  --color-settled-loading: #fbc02d;
+  --color-settled-error: #ff9800;
+
   /* Gray button variant */
   --color-gray: #6c757d;
   --color-gray-hover: #5a6268;

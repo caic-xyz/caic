@@ -224,6 +224,60 @@ describe("App task list loading state", () => {
 
     await waitFor(() => expect(screen.getByText("No tasks yet.")).toBeInTheDocument());
   });
+
+  it("shows loading (not no tasks) for an empty list while the settled pass is in progress", async () => {
+    renderApp();
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [] });
+    dispatchSSE({ kind: "status", status: { loading: true, error: "" } });
+
+    await waitFor(() => {
+      expect(screen.getByText("Loading...")).toBeInTheDocument();
+      expect(screen.queryByText("No tasks yet.")).not.toBeInTheDocument();
+    });
+  });
+});
+
+describe("App connection dot settled states", () => {
+  const dot = () => screen.getByTestId("connection-dot");
+
+  it("is green (connected) after a clean settled snapshot", async () => {
+    renderApp();
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [] });
+    dispatchSSE({ kind: "status", status: { loading: false, error: "" } });
+
+    await waitFor(() => expect(dot().getAttribute("data-status")).toBe("connected"));
+  });
+
+  it("is yellow (settled-loading) while the pass is in progress and green after a completed status", async () => {
+    renderApp();
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [] });
+    dispatchSSE({ kind: "status", status: { loading: true, error: "" } });
+
+    await waitFor(() => expect(dot().getAttribute("data-status")).toBe("settled-loading"));
+
+    dispatchSSE({ kind: "status", status: { loading: false, error: "" } });
+
+    await waitFor(() => expect(dot().getAttribute("data-status")).toBe("connected"));
+  });
+
+  it("is orange (settled-error) with the error tooltip after a failed status", async () => {
+    renderApp();
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [] });
+    dispatchSSE({ kind: "status", status: { loading: true, error: "" } });
+
+    await waitFor(() => expect(dot().getAttribute("data-status")).toBe("settled-loading"));
+
+    dispatchSSE({ kind: "status", status: { loading: false, error: "load purged tasks: boom" } });
+
+    await waitFor(() => {
+      expect(dot().getAttribute("data-status")).toBe("settled-error");
+      expect(dot().getAttribute("title")).toBe("load purged tasks: boom");
+    });
+  });
 });
 
 describe("App task-list SSE recovery", () => {

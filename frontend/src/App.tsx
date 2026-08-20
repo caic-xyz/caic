@@ -57,11 +57,41 @@ function ErrorFallback(props: { error: unknown; reset: () => void }) {
   );
 }
 
-function ConnectionDot(props: { connected: boolean }) {
+// ConnectionStatus is the worst-wins ordering of the navbar connection dot:
+// disconnected (red) > settled pass failed (orange) > settled pass in progress
+// (yellow) > pass completed (green).
+type ConnectionStatus = "disconnected" | "settled-error" | "settled-loading" | "connected";
+
+function connectionStatus(connected: boolean, settledError: string, settledLoading: boolean): ConnectionStatus {
+  if (!connected) return "disconnected";
+  if (settledError !== "") return "settled-error";
+  if (settledLoading) return "settled-loading";
+  return "connected";
+}
+
+function ConnectionDot(props: { connected: boolean; settledLoading: boolean; settledError: string }) {
+  const status = () => connectionStatus(props.connected, props.settledError, props.settledLoading);
+  const classFor = (s: ConnectionStatus) => {
+    switch (s) {
+      case "disconnected": return styles.dotDisconnected;
+      case "settled-error": return styles.dotSettledError;
+      case "settled-loading": return styles.dotSettledLoading;
+      case "connected": return styles.dotConnected;
+    }
+  };
+  const titleFor = (s: ConnectionStatus) => {
+    switch (s) {
+      case "disconnected": return "Disconnected";
+      case "settled-error": return props.settledError;
+      case "settled-loading": return "Loading history…";
+      case "connected": return "Connected";
+    }
+  };
   return (
     <span
-      class={props.connected ? styles.dotConnected : styles.dotDisconnected}
-      title={props.connected ? "Connected" : "Disconnected"}
+      class={classFor(status())}
+      title={titleFor(status())}
+      data-status={status()}
       data-testid="connection-dot"
     />
   );
@@ -81,7 +111,7 @@ function Shell(props: { children?: JSX.Element }) {
           </h1>
           <span class={styles.subtitle}>Coding Agents in Containers</span>
           <UsageBadges usage={s.usage} now={s.now} />
-          <ConnectionDot connected={s.connected()} />
+          <ConnectionDot connected={s.connected()} settledLoading={s.settledLoading()} settledError={s.settledError()} />
           <AccountMenu />
         </header>
 

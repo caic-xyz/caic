@@ -53,6 +53,9 @@ function createAppStore() {
   const [prompt, setPrompt] = createSignal("");
   const [tasks, setTasks] = createSignal<Task[]>([]);
   const [tasksLoading, setTasksLoading] = createSignal(true);
+  // Settled (compressed) history pass state, driven by the task-list stream.
+  const [settledLoading, setSettledLoading] = createSignal(false);
+  const [settledError, setSettledError] = createSignal("");
   const [submitting, setSubmitting] = createSignal(false);
   const [initializing, setInitializing] = createSignal(true);
   const [repos, setRepos] = createSignal<Repo[]>([]);
@@ -674,6 +677,11 @@ function createAppStore() {
           });
         } else if (event.kind === "warning" && event.warning) {
           showWarning(event.warning);
+        } else if (event.kind === "status") {
+          // Settled-history pass state: emitted on connect and on every
+          // transition (in-progress -> completed | failed).
+          setSettledLoading(!!event.status?.loading);
+          setSettledError(event.status?.error ?? "");
         }
       }, (err) => {
         const msg = err instanceof Error ? err.message : String(err);
@@ -1047,7 +1055,7 @@ function createAppStore() {
     navigate,
     auth,
     // task data + selection
-    tasks, tasksLoading, repos, selectedId, selectedTask, taskById, dismissSelectedTaskOnNotFound,
+    tasks, tasksLoading, settledLoading, settledError, repos, selectedId, selectedTask, taskById, dismissSelectedTaskOnNotFound,
     // new-task form
     prompt, setPrompt, selectedRepos, setSelectedRepos, selectedModel, setSelectedModel: selectModel,
     selectedEffort, setSelectedEffort: selectEffort, selectedHarness, setSelectedHarness: selectHarness, harnesses,

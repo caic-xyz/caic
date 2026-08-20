@@ -53,7 +53,9 @@
 }
 
 .dotConnected,
-.dotDisconnected {
+.dotDisconnected,
+.dotSettledError,
+.dotSettledLoading {
   display: inline-block;
   width: 0.5rem;
   height: 0.5rem;
@@ -68,6 +70,14 @@
 
 .dotDisconnected {
   background: var(--color-danger);
+}
+
+.dotSettledError {
+  background: var(--color-settled-error);
+}
+
+.dotSettledLoading {
+  background: var(--color-settled-loading);
 }
 
 .errorFallback {

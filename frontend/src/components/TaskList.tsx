@@ -16,6 +16,7 @@ import styles from "./TaskList.module.css";
 export interface TaskListProps {
   tasks: Accessor<Task[]>;
   tasksLoading: Accessor<boolean>;
+  settledLoading: Accessor<boolean>;
   repos: Accessor<Repo[]>;
   usage: Accessor<UsageResp | null>;
   selectedId: string | null;
@@ -256,7 +257,7 @@ export default function TaskList(props: TaskListProps) {
           </Show>
         </div>
         <Show when={props.tasks().length === 0}>
-          <p class={styles.placeholder}>{props.tasksLoading() ? "Loading..." : "No tasks yet."}</p>
+          <p class={styles.placeholder}>{props.tasksLoading() || props.settledLoading() ? "Loading..." : "No tasks yet."}</p>
         </Show>
         <For each={grouped()}>
           {(group) => {
