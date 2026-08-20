@@ -121,6 +121,14 @@ type Manager struct {
 	mu      sync.Mutex
 	tasks   map[string]*Entry
 	changed chan struct{} // closed on mutation, replaced under mu
+
+	// Guarded by settledMu. Tracks the background settled-history pass so the
+	// task-list stream can report it (loading -> completed | failed). The zero
+	// value means no pass has completed, so a fresh Manager reports loading
+	// until CompleteSettledLoad runs.
+	settledMu        sync.Mutex
+	settledCompleted bool
+	settledError     string
 }
 
 // New creates a Manager. Register each repo checkout in Checkouts, then Start.
@@ -282,7 +290,7 @@ func (m *Manager) Len() int {
 // NotifyTaskChange signals that task data may have changed.
 func (m *Manager) NotifyTaskChange() {
 	m.mu.Lock()
-	m.taskChanged()
+	m.taskChangedLocked()
 	m.mu.Unlock()
 }
 
@@ -291,6 +299,49 @@ func (m *Manager) Changed() <-chan struct{} {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.changed
+}
+
+// CompleteSettledLoad records the outcome of the settled-history pass and
+// notifies task-list watchers so they can emit the status transition. err is
+// nil on a clean pass; a non-nil err keeps the valid partial subset already
+// registered and surfaces as the pass error. A clean completion clears any
+// previously recorded error so the state always reflects the pass that just
+// ran.
+func (m *Manager) CompleteSettledLoad(err error) {
+	m.settledMu.Lock()
+	m.settledCompleted = true
+	if err != nil {
+		m.settledError = err.Error()
+	} else {
+		m.settledError = ""
+	}
+	m.settledMu.Unlock()
+	m.NotifyTaskChange()
+}
+
+// SettledStatus reports the background task-history load pass state atomically:
+// loading is true until CompleteSettledLoad runs, and error is non-empty only
+// after a failed pass. Both fields are read under one lock so a concurrent
+// CompleteSettledLoad cannot interleave between two separate reads.
+func (m *Manager) SettledStatus() (loading bool, err string) {
+	m.settledMu.Lock()
+	defer m.settledMu.Unlock()
+	return !m.settledCompleted, m.settledError
+}
+
+// RegisteredLogPaths returns the set of cleaned log paths currently owned by
+// registered entries. Maintenance passes use it to exclude logs owned by
+// entries so they yield to the per-task terminal compression path.
+func (m *Manager) RegisteredLogPaths() map[string]struct{} {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	paths := make(map[string]struct{}, len(m.tasks))
+	for _, e := range m.tasks {
+		if p := e.LogPath.Get(); p != "" {
+			paths[filepath.Clean(p)] = struct{}{}
+		}
+	}
+	return paths
 }
 
 // Create handles the HTTP task creation path.
@@ -685,19 +736,70 @@ func lastResultText(t *task.Task) string {
 	return ""
 }
 
-// LoadPurgedTasks registers settled task logs selected by taskslog.Store.Settled.
-func (m *Manager) LoadPurgedTasks(purged []*taskslog.LoadedTask) error {
-	for _, lt := range purged {
-		if lt.Result == nil {
-			lt.Result = &taskslog.Result{State: taskslog.StateFailed}
-		}
+// LoadUnsettledTasks loads plain (uncompressed) task logs into the registry
+// without any per-repo cap. Plain logs are the working set: live tasks, terminal
+// logs not yet compressed, and abandoned logs. The caller scans with the
+// retention cutoff, so only recent logs arrive here.
+func (m *Manager) LoadUnsettledTasks(plain []*taskslog.LoadedTask) error {
+	loaded, err := m.insertLoadedTasks(plain)
+	if err != nil {
+		return err
 	}
+	if loaded > 0 {
+		m.NotifyTaskChange()
+	}
+	m.log.Info("loaded unsettled tasks from logs", "n", loaded, "candidates", len(plain))
+	return nil
+}
+
+// LoadPurgedTasks registers settled task logs selected by the taskslog settled
+// scan, which already caps entries per repo before a full decode.
+func (m *Manager) LoadPurgedTasks(purged []*taskslog.LoadedTask) error {
 	if len(purged) == 0 {
 		m.log.Info("no purged tasks to load")
 		return nil
 	}
 	// Do not scan full logs here. Some compressed histories are multi-GB, and
 	// historical session metadata must not block the task list becoming usable.
+	loaded, err := m.insertLoadedTasks(purged)
+	if err != nil {
+		return err
+	}
+	if loaded > 0 {
+		m.NotifyTaskChange()
+	}
+	m.log.Info("loaded purged tasks from logs", "n", loaded, "candidates", len(purged))
+	return nil
+}
+
+// LoadMessagesOnDemand triggers lazy message loading for purged tasks.
+func (m *Manager) LoadMessagesOnDemand(entry *Entry) {
+	m.loadTaskMessagesOnDemand(entry)
+}
+
+// HistorySource opens a header-only raw-log reader for stopped or terminal history.
+func (m *Manager) HistorySource(entry *Entry) (*taskslog.LoadedTask, error) {
+	if entry == nil {
+		return nil, errors.New("task history entry is nil")
+	}
+	path := entry.LogPath.Get()
+	if path == "" {
+		return entry.LoadedTask(), nil
+	}
+	loaded, err := taskslog.LoadHistorySource(path)
+	if err != nil {
+		return nil, fmt.Errorf("load task history source: %w", err)
+	}
+	loaded.SetNativeParserResolver(m.resolveNativeParser)
+	entry.SetLoadedTask(loaded)
+	return loaded, nil
+}
+
+// insertLoadedTasks inserts loaded task logs into the registry, skipping tasks
+// whose id or repo/branch already exists. It is shared by LoadUnsettledTasks
+// (plain logs, uncapped) and LoadPurgedTasks (settled logs, pre-capped by the
+// scan).
+func (m *Manager) insertLoadedTasks(lts []*taskslog.LoadedTask) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	existingBranches := make(map[string]struct{})
@@ -707,7 +809,10 @@ func (m *Manager) LoadPurgedTasks(purged []*taskslog.LoadedTask) error {
 		}
 	}
 	loaded := 0
-	for _, lt := range purged {
+	for _, lt := range lts {
+		if lt.Result == nil {
+			lt.Result = &taskslog.Result{State: taskslog.StateFailed}
+		}
 		taskID := ksid.NewID()
 		parsedID := false
 		if len(lt.TaskID) >= 9 {
@@ -735,11 +840,12 @@ func (m *Manager) LoadPurgedTasks(purged []*taskslog.LoadedTask) error {
 		}
 		var forkedFromTaskID ksid.ID
 		if lt.ForkedFromTaskID != "" {
-			var err error
-			forkedFromTaskID, err = ksid.Parse(lt.ForkedFromTaskID)
+			parsed, err := ksid.Parse(lt.ForkedFromTaskID)
 			if err != nil {
-				return fmt.Errorf("load purged task %q: invalid forkedFromTaskID %q: %w", lt.TaskID, lt.ForkedFromTaskID, err)
+				m.log.Warn("skipping task with invalid forkedFromTaskID", "task", lt.TaskID, "forkedFromTaskID", lt.ForkedFromTaskID, "err", err)
+				continue
 			}
+			forkedFromTaskID = parsed
 		}
 		t, err := task.NewTask(taskID, agent.Prompt{Text: lt.Prompt}, lt.Harness, lt.Model, lt.Effort, lt.BaseImage, lt.ContainerPlatform, lt.Title)
 		if err != nil {
@@ -773,33 +879,6 @@ func (m *Manager) LoadPurgedTasks(purged []*taskslog.LoadedTask) error {
 		m.tasks[t.ID.String()] = entry
 		loaded++
 	}
-	if loaded > 0 {
-		m.taskChanged()
-	}
-	m.log.Info("loaded purged tasks from logs", "n", loaded, "candidates", len(purged))
-	return nil
-}
-
-// LoadMessagesOnDemand triggers lazy message loading for purged tasks.
-func (m *Manager) LoadMessagesOnDemand(entry *Entry) {
-	m.loadTaskMessagesOnDemand(entry)
-}
-
-// HistorySource opens a header-only raw-log reader for stopped or terminal history.
-func (m *Manager) HistorySource(entry *Entry) (*taskslog.LoadedTask, error) {
-	if entry == nil {
-		return nil, errors.New("task history entry is nil")
-	}
-	path := entry.LogPath.Get()
-	if path == "" {
-		return entry.LoadedTask(), nil
-	}
-	loaded, err := taskslog.LoadHistorySource(path)
-	if err != nil {
-		return nil, fmt.Errorf("load task history source: %w", err)
-	}
-	loaded.SetNativeParserResolver(m.resolveNativeParser)
-	entry.SetLoadedTask(loaded)
 	return loaded, nil
 }
 
@@ -1224,7 +1303,7 @@ func (m *Manager) handleRuntimeStart(instanceID runtime.ID) {
 func (m *Manager) insertEntry(id string, entry *Entry) {
 	m.mu.Lock()
 	m.tasks[id] = entry
-	m.taskChanged()
+	m.taskChangedLocked()
 	m.mu.Unlock()
 	m.watchRateLimitEvents(entry.Task())
 }
@@ -1270,9 +1349,9 @@ func (m *Manager) recordRateLimitMessage(rateLimit *agent.RateLimitMessage) bool
 	})
 }
 
-// taskChanged closes the current changed channel and replaces it.
+// taskChangedLocked closes the current changed channel and replaces it.
 // Must be called while holding m.mu.
-func (m *Manager) taskChanged() {
+func (m *Manager) taskChangedLocked() {
 	close(m.changed)
 	m.changed = make(chan struct{})
 }
@@ -1644,7 +1723,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		}
 	}
 	m.tasks[t.ID.String()] = entry
-	m.taskChanged()
+	m.taskChangedLocked()
 	m.mu.Unlock()
 	m.watchRateLimitEvents(t)
 

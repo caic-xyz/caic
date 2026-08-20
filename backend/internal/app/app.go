@@ -277,33 +277,6 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		instances, err := runtimes.List(ctx)
 		instanceCh <- instanceDiscoveryResult{instances, err}
 	}()
-	// Compression replaces log paths, so finish maintenance before task import can
-	// expose any task to a replay request.
-	err = func() error {
-		startupCtx, tk := trace.NewTask(ctx, "prepare-purged-task-logs")
-		defer tk.End()
-		start := time.Now()
-		if err := logStore.SettleTerminal(nil); err != nil {
-			appLog.WarnContext(startupCtx, "compress terminal task logs failed", "err", err)
-		} else {
-			appLog.InfoContext(startupCtx, "compressed terminal task logs", "dur", time.Since(start))
-		}
-		start = time.Now()
-		settled, err := logStore.LoadSettled()
-		if err != nil {
-			return fmt.Errorf("load settled history: %w", err)
-		}
-		if err := taskMgr.LoadPurgedTasks(settled); err != nil {
-			appLog.ErrorContext(startupCtx, "load purged tasks failed", "err", err)
-		} else {
-			appLog.InfoContext(startupCtx, "loaded purged task entries", "dur", time.Since(start))
-		}
-		return nil
-	}()
-	if err != nil {
-		return nil, err
-	}
-
 	repoRes := <-repoCh
 	if repoRes.err != nil {
 		return nil, fmt.Errorf("discover repos: %w", repoRes.err)
@@ -421,6 +394,26 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	}
 	taskMgr.Start()
 	backgroundTasks := []backgroundTask{}
+	// Task history loads in the background. It is best-effort: it never fails
+	// the server group, only logs its outcome and reports it to the task-list
+	// stream (status event). A pass killed mid-load loses nothing because the
+	// registry is in-memory and a restart rebuilds it.
+	backgroundTasks = append(backgroundTasks, func(ctx context.Context) error {
+		// A real failure is logged and reported to the task-list stream; an
+		// interruption from a shutdown is only logged because the stream is
+		// closing anyway.
+		if err := runSettledHistory(ctx, appLog, logStore, taskMgr); err != nil {
+			if ctx.Err() != nil {
+				appLog.InfoContext(ctx, "settled history pass interrupted by shutdown", "err", err)
+			} else {
+				appLog.ErrorContext(ctx, "settled history pass failed", "err", err)
+			}
+			taskMgr.CompleteSettledLoad(err)
+		} else {
+			taskMgr.CompleteSettledLoad(nil)
+		}
+		return nil
+	})
 	importWiring := &importedTaskWiring{
 		log:       log.With("cmp", "import-ci"),
 		authStore: authStore,
@@ -570,6 +563,65 @@ func initRuntimeSystem(ctx context.Context, log *slog.Logger, cfg *server.Config
 		return nil, nil, fmt.Errorf("init runtime router: %w", err)
 	}
 	return runtimeRouter, mdRuntimes, nil
+}
+
+// runSettledHistory settles and registers task history. It runs in the
+// background after the server is up. First it compresses every terminal plain
+// log (regardless of age) so old logs do not accumulate uncompressed; live
+// entries' logs are excluded because the per-task terminal path owns them.
+// Then it registers the plain working set uncapped, and the compressed history
+// trimmed before decode by the retention cutoff, the per-repo cap, and the
+// header cache. It returns an error only for a pass that could not register
+// its history; the caller logs it and reports it to the task-list stream.
+// Compression failures are logged but non-fatal so a partially compressable
+// set still loads, and a valid partial subset is always kept. It checks ctx
+// between phases, so a shutdown interrupts the pass at the next phase boundary
+// (a phase in flight — the scan or compression loops — still runs to
+// completion).
+func runSettledHistory(ctx context.Context, log *slog.Logger, logStore *taskslog.Store, taskMgr *taskmgr.Manager) error {
+	startupCtx, tk := trace.NewTask(ctx, "prepare-purged-task-logs")
+	defer tk.End()
+	log = log.With("phase", "settled-history")
+
+	// Exclude logs owned by registered entries so the pass yields to the
+	// per-task terminal compression path. The snapshot can be stale — a task
+	// that starts and terminates inside the settle window is not in exclude —
+	// but that is safe: compressPath serializes settlement per log and a
+	// compressor whose plain source was already settled adopts the compressed
+	// sibling, so either order converges.
+	exclude := taskMgr.RegisteredLogPaths()
+	start := time.Now()
+	if err := logStore.SettleTerminal(exclude); err != nil {
+		log.WarnContext(startupCtx, "compress terminal task logs failed", "err", err)
+	} else {
+		log.InfoContext(startupCtx, "compressed terminal task logs", "dur", time.Since(start))
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	start = time.Now()
+	plain, err := logStore.LoadUnsettled()
+	if err != nil {
+		return fmt.Errorf("load unsettled task logs: %w", err)
+	}
+	log.InfoContext(startupCtx, "loaded unsettled task log headers", "n", len(plain), "dur", time.Since(start))
+	if err := taskMgr.LoadUnsettledTasks(plain); err != nil {
+		return fmt.Errorf("load unsettled tasks: %w", err)
+	}
+	log.InfoContext(startupCtx, "loaded unsettled task entries", "dur", time.Since(start))
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	start = time.Now()
+	settled, err := logStore.LoadSettled()
+	if err != nil {
+		return fmt.Errorf("load settled task logs: %w", err)
+	}
+	if err := taskMgr.LoadPurgedTasks(settled); err != nil {
+		return fmt.Errorf("load settled tasks: %w", err)
+	}
+	log.InfoContext(startupCtx, "loaded settled task entries", "n", len(settled), "dur", time.Since(start))
+	return nil
 }
 
 func loadRuntimeTaskLogs(ctx context.Context, logStore *taskslog.Store, inventory *runtime.Router, instances []runtime.Instance) ([]*taskslog.LoadedTask, error) {

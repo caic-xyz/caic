@@ -350,6 +350,17 @@ func shouldReplayHistoryFromDisk(state taskslog.State, lt *taskslog.LoadedTask) 
 	return state == taskslog.StateStopped && lt != nil && lt.LogPath() != ""
 }
 
+// emitSettledStatusEvent sends a kind=="status" event carrying the settled-
+// history pass state (loading flag and error). It is the only event that can
+// carry the status variant, so the initial state and every transition go
+// through it.
+func emitSettledStatusEvent(ctx context.Context, w http.ResponseWriter, controller *http.ResponseController, loading bool, errStr string) error {
+	return emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{
+		Kind:   "status",
+		Status: &v1.TaskListSettledStatus{Loading: loading, Error: errStr},
+	})
+}
+
 // handleTaskListEvents streams patch events for the task list as SSE. On first
 // iteration it sends a full snapshot; thereafter it sends only upsert/delete
 // events for changed or removed tasks. It pushes immediately when a
@@ -395,6 +406,8 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 	prevByID := map[string][]byte{}
 	var prevReposJSON []byte
 	var lastWarnTime time.Time
+	var prevSettledLoading bool
+	var prevSettledError string
 	first := true
 
 	for {
@@ -402,6 +415,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 		// snapshot is being assembled, this channel remains closed and the next
 		// loop emits the newer state instead of missing the transition.
 		ch := h.taskMgr.Changed()
+		settledLoading, settledError := h.taskMgr.SettledStatus()
 		out := h.taskSvc.taskListSnapshot(ctx)
 		repoList := repoListFromSnapshot(h.log, h.checkouts.Checkouts(), h.repoStatus)
 		newWarnings := h.warnings.Since(lastWarnTime)
@@ -413,6 +427,14 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 		}
 
 		if first {
+			// Establish the settled-history pass state before the snapshot so the
+			// client's connection indicator and empty-list handling are correct on
+			// the first paint. The snapshot is a different union variant and cannot
+			// carry the status payload, so it arrives as its own event.
+			if err := emitSettledStatusEvent(ctx, w, controller, settledLoading, settledError); err != nil {
+				h.log.WarnContext(ctx, "marshal settled status", "err", err)
+				return
+			}
 			if err := emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{Kind: "snapshot", Snapshot: out}); err != nil {
 				h.log.WarnContext(ctx, "marshal task list snapshot", "err", err)
 				return
@@ -430,8 +452,20 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 				prevByID[out[i].ID.String()] = data
 			}
 			prevReposJSON = reposJSON
+			prevSettledLoading = settledLoading
+			prevSettledError = settledError
 			first = false
 		} else {
+			// Emit a status event when the settled-history pass transitions
+			// (in-progress -> completed | failed).
+			if settledLoading != prevSettledLoading || settledError != prevSettledError {
+				prevSettledLoading = settledLoading
+				prevSettledError = settledError
+				if err := emitSettledStatusEvent(ctx, w, controller, settledLoading, settledError); err != nil {
+					h.log.WarnContext(ctx, "marshal settled status", "err", err)
+					return
+				}
+			}
 			// Emit upserts/patches for new or changed tasks.
 			currentIDs := make(map[string]struct{}, len(out))
 			for i := range out {

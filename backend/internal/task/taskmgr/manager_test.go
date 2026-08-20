@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -3771,6 +3772,55 @@ func TestManager(t *testing.T) {
 	})
 }
 
+// TestLoadUnsettledTasks covers LoadUnsettledTasks: the plain (uncompressed)
+// scan is loaded uncapped, so live and just-terminal tasks are not lost, and
+// running tasks are coerced to failed.
+func TestLoadUnsettledTasks(t *testing.T) {
+	t.Parallel()
+	t.Run("UncappedPerRepo", func(t *testing.T) {
+		t.Parallel()
+		m := newTestManager(t, Config{ServerCtx: t.Context()})
+		now := time.Now().UTC()
+		all := make([]*taskslog.LoadedTask, 0, 7)
+		for i := range 7 {
+			all = append(all, &taskslog.LoadedTask{
+				TaskID:            ksid.NewID().String(),
+				Prompt:            "unsettled",
+				Repos:             []taskslog.RepoMount{{Name: "repo/a"}},
+				State:             taskslog.StateStopped,
+				LastStateUpdateAt: now.Add(time.Duration(i) * time.Second),
+			})
+		}
+		if err := m.LoadUnsettledTasks(all); err != nil {
+			t.Fatalf("LoadUnsettledTasks: %v", err)
+		}
+		if got := m.Len(); got != 7 {
+			t.Errorf("Len() = %d, want 7 (unsettled is uncapped)", got)
+		}
+	})
+	t.Run("RunningBecomesFailed", func(t *testing.T) {
+		t.Parallel()
+		m := newTestManager(t, Config{ServerCtx: t.Context()})
+		id := ksid.NewID()
+		if err := m.LoadUnsettledTasks([]*taskslog.LoadedTask{{
+			TaskID:            id.String(),
+			Prompt:            "was running",
+			Repos:             []taskslog.RepoMount{{Name: "repo/a"}},
+			State:             taskslog.StateRunning,
+			LastStateUpdateAt: time.Now().UTC(),
+		}}); err != nil {
+			t.Fatalf("LoadUnsettledTasks: %v", err)
+		}
+		e, ok := m.GetEntry(id.String())
+		if !ok {
+			t.Fatal("entry not found")
+		}
+		if got := e.Task().GetState(); got != taskslog.StateFailed {
+			t.Errorf("state = %v, want StateFailed (running coerced)", got)
+		}
+	})
+}
+
 func TestAllocateBranches(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t, Config{ServerCtx: t.Context()})
@@ -3944,4 +3994,143 @@ func TestErrTaskNotFound(t *testing.T) {
 			t.Errorf("Kind = %v, want KindNotFound", te.Kind)
 		}
 	})
+}
+
+// TestSettledLoadState verifies the background settled-history pass state
+// machine exposed to the task-list stream.
+func TestSettledLoadState(t *testing.T) {
+	t.Parallel()
+	m := newTestManager(t, Config{ServerCtx: t.Context()})
+	t.Cleanup(func() { _ = m.Close() })
+
+	// A fresh Manager has not completed a pass, so it reports loading.
+	if loading, err := m.SettledStatus(); !loading || err != "" {
+		t.Fatalf("initial SettledStatus = (%v, %q), want (true, \"\")", loading, err)
+	}
+
+	m.CompleteSettledLoad(errors.New("prior failure"))
+	if loading, _ := m.SettledStatus(); loading {
+		t.Fatal("after CompleteSettledLoad: SettledLoading = true, want false")
+	}
+	if _, got := m.SettledStatus(); got != "prior failure" {
+		t.Fatalf("after CompleteSettledLoad(err): SettledError = %q, want %q", got, "prior failure")
+	}
+
+	m.CompleteSettledLoad(nil)
+	if loading, _ := m.SettledStatus(); loading {
+		t.Fatal("after clean CompleteSettledLoad: SettledLoading = true, want false")
+	}
+	if _, got := m.SettledStatus(); got != "" {
+		t.Fatalf("after clean CompleteSettledLoad: SettledError = %q, want empty", got)
+	}
+
+	// A clean completion clears a prior error, so the state cannot report a
+	// stale failure across a retry or second pass.
+	m.CompleteSettledLoad(errors.New("stale failure"))
+	if _, got := m.SettledStatus(); got != "stale failure" {
+		t.Fatalf("CompleteSettledLoad(err): SettledError = %q, want %q", got, "stale failure")
+	}
+	m.CompleteSettledLoad(nil)
+	if _, got := m.SettledStatus(); got != "" {
+		t.Fatalf("CompleteSettledLoad(nil) after failure: SettledError = %q, want empty", got)
+	}
+}
+
+func TestRegisteredLogPaths(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	logStore := taskslog.NewStore(testLogger(), dir)
+	m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: logStore})
+
+	meta, err := json.Marshal(agent.MetaMessage{
+		MessageType: "caic_meta",
+		Version:     int(agent.LogVersionV1),
+		Harness:     harness.Claude,
+		Prompt:      "history",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trailer, err := json.Marshal(agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "alpha.jsonl")
+	data := make([]byte, 0, len(meta)+len(trailer)+2)
+	data = append(data, meta...)
+	data = append(data, '\n')
+	data = append(data, trailer...)
+	data = append(data, '\n')
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	logs, err := logStore.LoadUnsettled()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("LoadUnsettled = %d logs, want 1", len(logs))
+	}
+	if err := m.LoadUnsettledTasks(logs); err != nil {
+		t.Fatal(err)
+	}
+	if paths := m.RegisteredLogPaths(); len(paths) != 1 {
+		t.Fatalf("RegisteredLogPaths = %v, want exactly %q", paths, path)
+	}
+	if _, ok := m.RegisteredLogPaths()[filepath.Clean(path)]; !ok {
+		t.Errorf("RegisteredLogPaths missing %q: %v", path, m.RegisteredLogPaths())
+	}
+}
+
+// TestLoadersConcurrentWithNotify guards the loader notification path against
+// the data race the background pass would otherwise take: the loaders notify
+// task watchers while the SSE handlers (and other lifecycle code) call
+// NotifyTaskChange/Changed on the running server. Run with -race.
+func TestLoadersConcurrentWithNotify(t *testing.T) {
+	t.Parallel()
+	m := newTestManager(t, Config{ServerCtx: t.Context()})
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			lt := &taskslog.LoadedTask{
+				TaskID: fmt.Sprintf("load-%d", i),
+				State:  taskslog.StatePurged,
+			}
+			if err := m.LoadPurgedTasks([]*taskslog.LoadedTask{lt}); err != nil {
+				t.Error(err)
+				return
+			}
+			if err := m.LoadUnsettledTasks([]*taskslog.LoadedTask{
+				{TaskID: fmt.Sprintf("unsettled-%d", i), State: taskslog.StateRunning},
+			}); err != nil {
+				t.Error(err)
+				return
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			m.NotifyTaskChange()
+			_ = m.Changed()
+		}
+	}()
+	time.Sleep(200 * time.Millisecond)
+	close(stop)
+	wg.Wait()
 }

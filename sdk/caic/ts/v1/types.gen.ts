@@ -1185,13 +1185,25 @@ export interface TaskToolInputResp {
 }
 
 /**
+ * TaskListSettledStatus carries the background task-history load pass state
+ * on kind=="status" events. Loading is true while the pass scans and
+ * compresses logs; Error is non-empty when the pass could not register its
+ * history.
+ */
+export interface TaskListSettledStatus {
+  loading: boolean;
+  error: string;
+}
+
+/**
  * TaskListEvent is a discriminated-union event for the task list SSE stream.
- * kind=="snapshot": Tasks holds the full list on initial connect.
- * kind=="upsert":   Task holds a newly created task.
+ * kind=="snapshot": Snapshot holds the full list on initial connect.
+ * kind=="upsert":   Upsert holds a newly created task.
  * kind=="patch":    Patch holds only the changed fields (always includes "id") for an existing task.
- * kind=="delete":   ID holds the string ID of the removed task.
+ * kind=="delete":   Delete holds the string ID of the removed task.
  * kind=="repos":    Repos holds the updated repo list (emitted when default-branch CI status changes).
  * kind=="warning":  Warning holds a transient server warning message for the user.
+ * kind=="status":   Status holds the settled-history pass state, emitted on connect and again whenever the pass transitions (in-progress -> completed | failed).
  */
 export interface TaskListEvent {
   kind: string;
@@ -1201,6 +1213,7 @@ export interface TaskListEvent {
   delete?: string;
   repos?: Repo[];
   warning?: string;
+  status?: TaskListSettledStatus;
 }
 
 /** QuotaRateLimit is a single rate-limit window snapshot from any provider. */

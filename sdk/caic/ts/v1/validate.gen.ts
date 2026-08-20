@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventRateLimit, EventRateLimitStatus, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderQuota, QuotaBalance, QuotaExtraUsage, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskListEvent, TaskRateLimit, TaskRepo, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
+import type { AskOption, AskQuestion, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventRateLimit, EventRateLimitStatus, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderQuota, QuotaBalance, QuotaExtraUsage, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskListEvent, TaskListSettledStatus, TaskRateLimit, TaskRepo, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
 
 // ---- helpers ----
 
@@ -547,6 +547,14 @@ export function validateRepo(raw: ValidatorInput): Repo {
   };
 }
 
+export function validateTaskListSettledStatus(raw: ValidatorInput): TaskListSettledStatus {
+  const obj = asObject(raw, "TaskListSettledStatus");
+  return {
+    loading: asBoolean(obj["loading"], "TaskListSettledStatus.loading"),
+    error: asString(obj["error"], "TaskListSettledStatus.error"),
+  };
+}
+
 export function validateTaskListEvent(raw: ValidatorInput): TaskListEvent {
   const obj = asObject(raw, "TaskListEvent");
   const result: TaskListEvent = {
@@ -570,6 +578,9 @@ export function validateTaskListEvent(raw: ValidatorInput): TaskListEvent {
       break;
     case "warning":
       result.warning = asString(obj["warning"], "TaskListEvent.warning");
+      break;
+    case "status":
+      result.status = validateTaskListSettledStatus(obj["status"]);
       break;
     // Unknown kinds pass through.
   }
