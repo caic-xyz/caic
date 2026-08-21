@@ -972,7 +972,7 @@ func TestStore(t *testing.T) {
 				t.Run(format, func(t *testing.T) {
 					t.Parallel()
 					path := writePhysicalTestLog(t, compressed, meta, `{"t":"agent","ts":1700000000.123,"msg":{"type":"assistant"} trailing}`)
-					if _, err := loadLogHeader(testLogger(), path, true); err == nil || !strings.Contains(err.Error(), "invalid native JSON value") {
+					if _, err := loadLogHeader(testLogger(), path, true); err == nil || !strings.Contains(err.Error(), "invalid or noncanonical msg envelope") {
 						t.Fatalf("loadLogHeader error = %v, want malformed v2 native message rejection", err)
 					}
 					tasks, err := NewStore(testLogger(), filepath.Dir(path)).LoadUnsettled()
