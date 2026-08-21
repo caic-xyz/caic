@@ -19,7 +19,6 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
@@ -230,13 +229,13 @@ func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.
 	// Pre-populate thread ID from the known session so WritePrompt works
 	// immediately. wireFormat.process() will update it again if thread/started
 	// appears in the replayed output.
-	wire := &wireFormat{threadID: opts.ResumeSessionID, effort: opts.Effort, suppressUserInput: true, fw: &jsonutil.FieldWarner{}}
+	wire := &wireFormat{threadID: opts.ResumeSessionID, effort: opts.Effort, suppressUserInput: true}
 	return agent.AttachRelaySession(ctx, opts, wire, nil)
 }
 
 // NewWire implements agent.Backend.
 func (*Backend) NewWire() agent.WireFormat {
-	// Log replay can parse large histories; skip development-only unknown-field scans.
+	// Schema drift is checked offline by check-agent-logs.
 	return &wireFormat{}
 }
 
@@ -301,7 +300,6 @@ type wireFormat struct {
 	mu                sync.Mutex
 	agentVersion      string
 	totalUsage        agent.Usage // accumulated per-turn from thread/tokenUsage/updated
-	fw                *jsonutil.FieldWarner
 }
 
 // WritePrompt sends a turn/start JSON-RPC request to begin a new turn with
@@ -381,7 +379,7 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 			return nil, fmt.Errorf("tokenUsage/updated: %w", err)
 		}
 		var p codex.ThreadTokenUsageUpdatedNotification
-		if err := unmarshalNotification(msg.Params, &p, "ThreadTokenUsageUpdatedNotification", w.fw); err != nil {
+		if err := json.Unmarshal(msg.Params, &p); err != nil {
 			return nil, fmt.Errorf("tokenUsage/updated params: %w", err)
 		}
 		// Codex reports cached token counts but not cache TTL. OpenAI's
@@ -409,7 +407,7 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		return []agent.Message{usageMsg}, nil
 	}
 
-	msgs, err := parseMessage(line, w.fw)
+	msgs, err := parseMessage(line)
 	if err != nil {
 		return nil, err
 	}
@@ -443,7 +441,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	w := &wireFormat{effort: opts.Effort, fw: &jsonutil.FieldWarner{}}
+	w := &wireFormat{effort: opts.Effort}
 	records, err := agent.NewRelayRecordReader(stdout, opts.Log.LogVersion(), agent.DiscardLogSink{Version: opts.Log.LogVersion()})
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("construct relay reader: %w", err)

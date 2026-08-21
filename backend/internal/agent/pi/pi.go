@@ -32,13 +32,17 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
 // Backend implements agent.Backend for the Pi coding agent.
 type Backend struct {
 	agent.Base
+}
+
+// commandDiscriminator is a Pi command without parameters or a correlation ID.
+type commandDiscriminator struct {
+	Type pi.EventType `json:"type"`
 }
 
 var (
@@ -112,13 +116,13 @@ func (*Backend) AgentArgs(_ agent.HarnessArgs) []string {
 
 // AttachRelay connects to an already-running relay in the container.
 func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	wire := &piWireFormat{fw: &jsonutil.FieldWarner{}}
+	wire := &piWireFormat{}
 	return agent.AttachRelaySession(ctx, opts, wire, nil)
 }
 
 // NewWire implements agent.Backend.
 func (*Backend) NewWire() agent.WireFormat {
-	// Log replay can parse large histories; skip development-only unknown-field scans.
+	// Schema drift is checked offline by check-agent-logs.
 	return &piWireFormat{}
 }
 
@@ -141,7 +145,7 @@ func (*Backend) FetchModelInventory(ctx context.Context, target runtime.Connecti
 }
 
 func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	wire := &piWireFormat{fw: &jsonutil.FieldWarner{}}
+	wire := &piWireFormat{}
 
 	rp, err := agent.PrepareRelay(ctx, opts, b.AgentArgs(agent.HarnessArgs{Model: opts.Model}))
 	if err != nil {
@@ -384,10 +388,10 @@ type piWireFormat struct {
 	// Pi's tool_execution_update events carry the full accumulated output;
 	// we track the previous length to emit only the new portion.
 	toolOutputLen map[string]int
+}
 
-	// fw warns on unknown JSON fields during live parsing; nil for replay
-	// (see NewWire), which skips the scan for large-history performance.
-	fw *jsonutil.FieldWarner
+type agentEndEnvelope struct {
+	WillRetry bool `json:"willRetry"`
 }
 
 // WritePrompt sends a prompt command to Pi's stdin and records the start time
@@ -470,7 +474,7 @@ func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	}
 
 	if typ == pi.EventMessageUpdate {
-		ev, err := decodeMessageUpdateEvent(line, w.fw)
+		ev, err := decodeMessageUpdateEvent(line)
 		if err != nil {
 			return nil, fmt.Errorf("unmarshal message_update: %w", err)
 		}
@@ -484,7 +488,7 @@ func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		}
 	}
 
-	msgs, err := parseMessageTyped(w.fw, typ, line)
+	msgs, err := parseMessageTyped(typ, line)
 	if err != nil {
 		return nil, err
 	}
@@ -549,7 +553,7 @@ func (w *piWireFormat) handleDone(ev *pi.MessageUpdateDeltaEvent) ([]agent.Messa
 // of sending every token fragment back to clients.
 func (w *piWireFormat) handleMessageEnd(line []byte) ([]agent.Message, error) {
 	var ev pi.MessageEndEvent
-	if err := unmarshalEvent(line, &ev, "MessageEndEvent", w.fw); err != nil {
+	if err := json.Unmarshal(line, &ev); err != nil {
 		return nil, fmt.Errorf("unmarshal message_end: %w", err)
 	}
 	if ev.Message.StopReason == pi.StopReasonError {
@@ -585,7 +589,7 @@ func messagesFromAgentMessage(msg *pi.AgentMessage) []agent.Message {
 // the first message_start event that contains a non-empty model field.
 func (w *piWireFormat) handleMessageStart(line []byte) ([]agent.Message, error) {
 	var ev pi.MessageStartEvent
-	if err := unmarshalEvent(line, &ev, "MessageStartEvent", w.fw); err != nil {
+	if err := json.Unmarshal(line, &ev); err != nil {
 		return nil, fmt.Errorf("unmarshal message_start: %w", err)
 	}
 	if ev.Message.Model == "" {
@@ -658,8 +662,16 @@ func isQuotaError(errMsg string) bool {
 // handleAgentEnd extracts final usage from the last assistant message and emits
 // a ResultMessage with usage and duration.
 func (w *piWireFormat) handleAgentEnd(line []byte) ([]agent.Message, error) {
+	var envelope agentEndEnvelope
+	if err := json.Unmarshal(line, &envelope); err != nil {
+		return nil, fmt.Errorf("unmarshal agent_end envelope: %w", err)
+	}
+	if envelope.WillRetry {
+		return nil, nil
+	}
+
 	var ev pi.AgentEndEvent
-	if err := unmarshalEvent(line, &ev, "AgentEndEvent", w.fw); err != nil {
+	if err := json.Unmarshal(line, &ev); err != nil {
 		return nil, fmt.Errorf("unmarshal agent_end: %w", err)
 	}
 
@@ -702,7 +714,7 @@ func (w *piWireFormat) handleAgentEnd(line []byte) ([]agent.Message, error) {
 // increments the turn counter consumed by handleAgentEnd.
 func (w *piWireFormat) handleTurnEnd(line []byte) ([]agent.Message, error) {
 	var ev pi.TurnEndEvent
-	if err := unmarshalEvent(line, &ev, "TurnEndEvent", w.fw); err != nil {
+	if err := json.Unmarshal(line, &ev); err != nil {
 		return nil, fmt.Errorf("unmarshal turn_end: %w", err)
 	}
 	w.mu.Lock()
@@ -750,7 +762,7 @@ func reapPiProcessExit(rp *agent.RelayProcess, err error) error {
 
 // waitForResponse consumes physical records until it receives the requested
 // native Pi response. Relay controls bypass the native response parser.
-func waitForResponse(r *agent.RelayRecordReader, cmd pi.CommandType) (pi.Response, error) {
+func waitForResponse(r *agent.RelayRecordReader, cmd pi.EventType) (pi.Response, error) {
 	for {
 		line, controls, err := r.ReadRecord()
 		if err != nil {
@@ -778,7 +790,7 @@ func waitForResponse(r *agent.RelayRecordReader, cmd pi.CommandType) (pi.Respons
 	}
 }
 
-func waitForResponseContext(ctx context.Context, r *agent.RelayRecordReader, cmd pi.CommandType, onTimeout func()) (pi.Response, error) {
+func waitForResponseContext(ctx context.Context, r *agent.RelayRecordReader, cmd pi.EventType, onTimeout func()) (pi.Response, error) {
 	type result struct {
 		resp pi.Response
 		err  error
@@ -869,10 +881,7 @@ func fetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv 
 	}()
 
 	// Send get_available_models.
-	req := struct {
-		Type pi.CommandType `json:"type"`
-	}{Type: pi.CmdGetModels}
-	data, err := json.Marshal(req)
+	data, err := json.Marshal(commandDiscriminator{Type: pi.CmdGetModels})
 	if err != nil {
 		return nil, err
 	}

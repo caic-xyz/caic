@@ -11,7 +11,6 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
-	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
 func TestParseMessage(t *testing.T) {
@@ -29,7 +28,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, err := parseMessage(input, &jsonutil.FieldWarner{})
+		msgs, err := parseMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -58,7 +57,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, err := parseMessage(input, &jsonutil.FieldWarner{})
+		msgs, err := parseMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -91,7 +90,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, err := parseMessage(input, &jsonutil.FieldWarner{})
+		msgs, err := parseMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -124,7 +123,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, err := parseMessage(input, &jsonutil.FieldWarner{})
+		msgs, err := parseMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -163,7 +162,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, err := parseMessage(input, &jsonutil.FieldWarner{})
+		msgs, err := parseMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -196,7 +195,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, err := parseMessage(input, &jsonutil.FieldWarner{})
+		msgs, err := parseMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -239,7 +238,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, err := parseMessage(input, &jsonutil.FieldWarner{})
+		msgs, err := parseMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -280,7 +279,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, err := parseMessage(input, &jsonutil.FieldWarner{})
+		msgs, err := parseMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -314,7 +313,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, err := parseMessage(input, &jsonutil.FieldWarner{})
+		msgs, err := parseMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -343,7 +342,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, err := parseMessage(input, &jsonutil.FieldWarner{})
+		msgs, err := parseMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -389,7 +388,7 @@ func TestParseMessage(t *testing.T) {
 				map[string]any{"path": "main.go", "added": 10, "deleted": 3},
 			},
 		})
-		msgs, err := parseMessage(input, &jsonutil.FieldWarner{})
+		msgs, err := parseMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -415,7 +414,7 @@ func TestParseMessage(t *testing.T) {
 			"id":      1,
 			"result":  map[string]any{"stopReason": "end_turn"},
 		})
-		msgs, err := parseMessage(input, &jsonutil.FieldWarner{})
+		msgs, err := parseMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -448,7 +447,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, err := parseMessage(input, &jsonutil.FieldWarner{})
+		msgs, err := parseMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -480,7 +479,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, err := parseMessage(input, &jsonutil.FieldWarner{})
+		msgs, err := parseMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -504,7 +503,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, err := parseMessage(input, &jsonutil.FieldWarner{})
+		msgs, err := parseMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -535,7 +534,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, err := parseMessage(input, &jsonutil.FieldWarner{})
+		msgs, err := parseMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -565,7 +564,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, err := parseMessage(input, &jsonutil.FieldWarner{})
+		msgs, err := parseMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -596,7 +595,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, err := parseMessage(input, &jsonutil.FieldWarner{})
+		msgs, err := parseMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1011,7 +1010,7 @@ func mustJSON(t *testing.T, v any) []byte {
 }
 
 func assertInitMessage(t *testing.T, input []byte, wantSessionID, wantModel, wantVersion string) {
-	msgs, err := parseMessage(input, &jsonutil.FieldWarner{})
+	msgs, err := parseMessage(input)
 	if err != nil {
 		t.Fatal(err)
 	}

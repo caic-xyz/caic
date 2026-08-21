@@ -231,6 +231,9 @@ func TestV2AgentRecord(t *testing.T) {
 		if _, err := parseV2Record(p, []byte(`{"t":"caic_meta","type":"caic_meta","version":2,"prompt":"p","repos":[],"harness":"claude"}`)); err == nil {
 			t.Fatal("v2 meta accepted the V1 type field")
 		}
+		if _, err := parseV2Record(p, []byte(`{"t":"caic_meta","version":2,"prompt":"p","repos":[],"harness":"claude","unknown":true}`)); err == nil || !strings.Contains(err.Error(), `json: unknown field "unknown"`) {
+			t.Fatalf("v2 meta error = %v, want strict unknown-field error", err)
+		}
 		if _, err := parseV2Record(p, []byte(`{"t":"model_info","context_window":1000000}`)); err != nil {
 			t.Fatal(err)
 		}
@@ -303,7 +306,7 @@ func TestV2AgentRecord(t *testing.T) {
 		}{
 			{name: "null", line: []byte(`{"t":"agent","ts":1.000,"msg":null}`)},
 			{name: "malformed_utf8", line: invalidUTF8},
-			{name: "malformed_json", line: []byte(`{"t":"agent","ts":1.000,"msg":{"x":}}`), wantCalls: 1},
+			{name: "malformed_json", line: []byte(`{"t":"agent","ts":1.000,"msg":{"x":}}`)},
 			{name: "leading_outer_space", line: []byte(` {"t":"agent","ts":1.000,"msg":{}}`)},
 			{name: "trailing_outer_space", line: []byte(`{"t":"agent","ts":1.000,"msg":{}} `)},
 			{name: "leading_msg_space", line: []byte(`{"t":"agent","ts":1.000,"msg": {}}`)},
@@ -341,8 +344,8 @@ func TestV2AgentRecord(t *testing.T) {
 			{name: "reordered_fields", line: []byte(`{"ts":1.000,"t":"agent","msg":{}}`)},
 			{name: "duplicate_t", line: []byte(`{"t":"agent","t":"agent","ts":1.000,"msg":{}}`)},
 			{name: "duplicate_timestamp", line: []byte(`{"t":"agent","ts":1.000,"ts":1.000,"msg":{}}`)},
-			{name: "duplicate_message", line: []byte(`{"t":"agent","ts":1.000,"msg":{},"msg":{}}`), wantCalls: 1},
-			{name: "extra_field", line: []byte(`{"t":"agent","ts":1.000,"msg":{},"extra":true}`), wantCalls: 1},
+			{name: "duplicate_message", line: []byte(`{"t":"agent","ts":1.000,"msg":{},"msg":{}}`)},
+			{name: "extra_field", line: []byte(`{"t":"agent","ts":1.000,"msg":{},"extra":true}`)},
 			{name: "trailing_data", line: []byte(`{"t":"agent","ts":1.000,"msg":{}}true`)},
 			{name: "delimiter_spoof", line: []byte(`{"t":"agent","ts":"1.000,\"msg\":{}","msg":{}}`)},
 		}
@@ -350,12 +353,8 @@ func TestV2AgentRecord(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				calls := 0
-				p, err := NewLogRecordParser(LogVersionV2, func(msg []byte) ([]Message, error) {
+				p, err := NewLogRecordParser(LogVersionV2, func([]byte) ([]Message, error) {
 					calls++
-					var value any
-					if err := json.Unmarshal(msg, &value); err != nil {
-						return nil, err
-					}
 					return nil, nil
 				})
 				if err != nil {
@@ -371,25 +370,21 @@ func TestV2AgentRecord(t *testing.T) {
 		}
 	})
 
-	t.Run("permissive_callback_does_not_validate_msg", func(t *testing.T) {
+	t.Run("permissive_callback_cannot_accept_malformed_msg", func(t *testing.T) {
 		t.Parallel()
 		calls := 0
-		p, err := NewLogRecordParser(LogVersionV2, func(msg []byte) ([]Message, error) {
+		p, err := NewLogRecordParser(LogVersionV2, func([]byte) ([]Message, error) {
 			calls++
-			if string(msg) != `{"x":}` {
-				return nil, fmt.Errorf("native payload = %q, want malformed object", msg)
-			}
 			return nil, nil
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		msgs, err := parseV2Record(p, []byte(`{"t":"agent","ts":1.000,"msg":{"x":}}`))
-		if err != nil {
-			t.Fatal(err)
+		if _, err := parseV2Record(p, []byte(`{"t":"agent","ts":1.000,"msg":{"x":}}`)); err == nil {
+			t.Fatal("malformed native payload was accepted")
 		}
-		if msgs.Control || calls != 1 || len(msgs.Messages) != 0 {
-			t.Fatalf("calls = %d, record = %#v, want one callback and no messages", calls, msgs)
+		if calls != 0 {
+			t.Fatalf("native callback count = %d, want 0", calls)
 		}
 	})
 

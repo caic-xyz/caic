@@ -12,9 +12,6 @@ JSON-RPC 2.0 over stdin/stdout, analogous to the Codex harness.
 
 Wire types are provided by `github.com/maruel/genai/providers/opencode` (imported as `oc`).
 
-Unknown field detection is centralized in `unmarshalNotification` (parse.go)
-using `sync.Map` caching, matching the pattern used by the Codex harness.
-
 ## Event → agent.Message Mapping
 
 | ACP session/update type | agent.Message type   |
@@ -50,8 +47,6 @@ When updating wire types, update `github.com/maruel/genai` and diff against
 - **Permission auto-approve**: `session/request_permission` requests are passed
   through as RawMessage; permissions should be set to `"always"` in
   `opencode.json` config.
-- **Forward compatibility**: Unknown fields are detected via centralized
-  `unmarshalNotification` (logs warnings, no per-struct `UnmarshalJSON`).
 
 ## References
 

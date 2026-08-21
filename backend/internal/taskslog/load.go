@@ -12,7 +12,6 @@ import (
 	"io"
 	"iter"
 	"log/slog"
-	"maps"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -24,7 +23,6 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
@@ -43,9 +41,6 @@ const maxParallelLogHeaderLoads = 8
 type v1TypeEnvelope struct {
 	Type string `json:"type"`
 }
-
-// metaKnown is the set of JSON field names recognised by agent.MetaMessage.
-var metaKnown = jsonutil.KnownFields(agent.MetaMessage{})
 
 type logAuthority struct {
 	Version agent.LogVersion
@@ -96,7 +91,7 @@ func newPhysicalLogScannerWithBuffer(r io.Reader, src string, initialBuffer int)
 	return &physicalLogScanner{scanner: scanner, src: src}
 }
 
-func (s *physicalLogScanner) ReadHeader(fw *jsonutil.FieldWarner) (agent.MetaMessage, error) {
+func (s *physicalLogScanner) ReadHeader() (agent.MetaMessage, error) {
 	if s.headerSet {
 		return agent.MetaMessage{}, errors.New("task log header already read")
 	}
@@ -105,7 +100,7 @@ func (s *physicalLogScanner) ReadHeader(fw *jsonutil.FieldWarner) (agent.MetaMes
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
-		meta, authority, err := decodeAuthorityMeta(line, fw)
+		meta, authority, err := decodeAuthorityMeta(line)
 		if err != nil {
 			return agent.MetaMessage{}, fmt.Errorf("%s: invalid first log header: %w", s.src, err)
 		}
@@ -210,7 +205,7 @@ func scanPhysicalLog(path string, validateEOF bool, scan func(os.FileInfo, *phys
 	}()
 
 	scanner := newPhysicalLogScanner(r, path)
-	meta, err := scanner.ReadHeader(&jsonutil.FieldWarner{})
+	meta, err := scanner.ReadHeader()
 	if err != nil {
 		return err
 	}
@@ -600,7 +595,8 @@ func skipJSONNumber(line []byte, i int) (int, bool) {
 }
 
 type rawJSONObject struct {
-	fields map[string]json.RawMessage
+	fields     map[string]json.RawMessage
+	duplicates map[string]struct{}
 }
 
 func decodeJSONObject(line []byte) (rawJSONObject, bool, error) {
@@ -622,8 +618,14 @@ func decodeJSONObject(line []byte) (rawJSONObject, bool, error) {
 		if !ok {
 			return rawJSONObject{}, true, errors.New("object field name is not a string")
 		}
-		if _, exists := obj.fields[key]; exists && isAuthorityField(key) {
-			return rawJSONObject{}, true, fmt.Errorf("%w %q", errDuplicateRawKey, key)
+		if _, exists := obj.fields[key]; exists {
+			if isAuthorityField(key) {
+				return rawJSONObject{}, true, fmt.Errorf("%w %q", errDuplicateRawKey, key)
+			}
+			if obj.duplicates == nil {
+				obj.duplicates = make(map[string]struct{})
+			}
+			obj.duplicates[key] = struct{}{}
 		}
 		var value json.RawMessage
 		if err := decoder.Decode(&value); err != nil {
@@ -668,7 +670,7 @@ func stringField(obj rawJSONObject, key string) (string, error) {
 	return value, nil
 }
 
-func decodeAuthorityMeta(line []byte, fw *jsonutil.FieldWarner) (agent.MetaMessage, logAuthority, error) {
+func decodeAuthorityMeta(line []byte) (agent.MetaMessage, logAuthority, error) {
 	if !utf8.Valid(line) {
 		return agent.MetaMessage{}, logAuthority{}, errors.New("invalid UTF-8")
 	}
@@ -690,6 +692,14 @@ func decodeAuthorityMeta(line []byte, fw *jsonutil.FieldWarner) (agent.MetaMessa
 	authority := logAuthority{Version: agent.LogVersion(version)}
 	if err := authority.Version.Validate(); err != nil {
 		return agent.MetaMessage{}, logAuthority{}, err
+	}
+	if authority.Version == agent.LogVersionV2 && len(obj.duplicates) != 0 {
+		duplicates := make([]string, 0, len(obj.duplicates))
+		for key := range obj.duplicates {
+			duplicates = append(duplicates, key)
+		}
+		slices.Sort(duplicates)
+		return agent.MetaMessage{}, logAuthority{}, fmt.Errorf("%w %q", errDuplicateRawKey, duplicates[0])
 	}
 	key := "type"
 	if authority.Version == agent.LogVersionV2 {
@@ -726,18 +736,17 @@ func decodeAuthorityMeta(line []byte, fw *jsonutil.FieldWarner) (agent.MetaMessa
 		}
 	}
 	var meta agent.MetaMessage
-	if err := json.Unmarshal(line, &meta); err != nil {
+	if authority.Version == agent.LogVersionV2 {
+		decoder := json.NewDecoder(bytes.NewReader(line))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&meta); err != nil {
+			return agent.MetaMessage{}, logAuthority{}, err
+		}
+	} else if err := json.Unmarshal(line, &meta); err != nil {
 		return agent.MetaMessage{}, logAuthority{}, err
 	}
 	if err := meta.Validate(); err != nil {
 		return agent.MetaMessage{}, logAuthority{}, err
-	}
-	unknown := jsonutil.CollectUnknown(obj.fields, metaKnown)
-	if authority.Version == agent.LogVersionV2 && len(unknown) > 0 {
-		return agent.MetaMessage{}, logAuthority{}, fmt.Errorf("unknown v2 caic_meta fields: %v", slices.Sorted(maps.Keys(unknown)))
-	}
-	if fw != nil {
-		fw.Warn("caic_meta", unknown)
 	}
 	return meta, authority, nil
 }
@@ -770,7 +779,7 @@ func decodeSegmentMeta(line []byte, version agent.LogVersion) (string, agent.Met
 	if hasKey {
 		var discriminator string
 		if err := json.Unmarshal(value, &discriminator); err == nil && discriminator == "caic_meta" {
-			meta, authority, err := decodeAuthorityMeta(line, nil)
+			meta, authority, err := decodeAuthorityMeta(line)
 			if err != nil {
 				return typ, agent.MetaMessage{}, err
 			}

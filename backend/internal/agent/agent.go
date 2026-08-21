@@ -435,33 +435,17 @@ const (
 )
 
 var v1LogControlKinds = map[string]logControlKind{
-	"caic_meta":                  logControlMeta,
-	"caic_diff_stat":             logControlDiffStat,
-	"caic_exit":                  logControlExit,
-	"caic_stripped_env":          logControlStrippedEnv,
-	"caic_session":               logControlSession,
-	"caic_init":                  logControlLegacyInit,
-	"caic_model_info":            logControlModelInfo,
-	"caic_pr":                    logControlPR,
-	"caic_result":                logControlResult,
-	PendingUserActionMessageType: logControlPendingUserAction,
-	"caic_log":                   logControlProvisioningLog,
-}
-
-var v2LogControlKinds = map[string]logControlKind{
-	"caic_meta":           logControlMeta,
-	"diff_stat":           logControlDiffStat,
-	"exit":                logControlExit,
-	"stripped_env":        logControlStrippedEnv,
-	"session":             logControlSession,
-	"model_info":          logControlModelInfo,
-	"pr":                  logControlPR,
-	"result":              logControlResult,
-	"pending_user_action": logControlPendingUserAction,
-	"log":                 logControlProvisioningLog,
-	"context_cleared":     logControlContextCleared,
-	"text":                logControlText,
-	"user_input":          logControlUserInput,
+	messageTypeMeta:                  logControlMeta,
+	messageTypeDiffStat:              logControlDiffStat,
+	messageTypeExit:                  logControlExit,
+	messageTypeStrippedEnv:           logControlStrippedEnv,
+	messageTypeSession:               logControlSession,
+	messageTypeLegacyInit:            logControlLegacyInit,
+	messageTypeModelInfo:             logControlModelInfo,
+	messageTypePR:                    logControlPR,
+	messageTypeResult:                logControlResult,
+	messageTypePendingUserAction:     logControlPendingUserAction,
+	messageTypeProvisioningLogRecord: logControlProvisioningLog,
 }
 
 type modelInfoLogRecord struct {
@@ -472,15 +456,6 @@ type legacyInitLogRecord struct {
 	SessionID string `json:"session_id"`
 	Model     string `json:"model"`
 	Version   string `json:"version"`
-}
-
-func (p *LogRecordParser) controlKind(token string) (logControlKind, bool) {
-	if p.version == LogVersionV1 {
-		kind, ok := v1LogControlKinds[token]
-		return kind, ok
-	}
-	kind, ok := v2LogControlKinds[token]
-	return kind, ok
 }
 
 func (p *LogRecordParser) parseControl(kind logControlKind, token string, line []byte) ([]Message, error) {
@@ -502,21 +477,21 @@ func (p *LogRecordParser) parseControl(kind logControlKind, token string, line [
 		if err := json.Unmarshal(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
-		m.MessageType = "caic_diff_stat"
+		m.MessageType = messageTypeDiffStat
 		return []Message{&m}, nil
 	case logControlExit:
 		var m ExitMessage
 		if err := json.Unmarshal(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
-		m.MessageType = "caic_exit"
+		m.MessageType = messageTypeExit
 		return []Message{&m}, nil
 	case logControlStrippedEnv:
 		var m StrippedEnvMessage
 		if err := json.Unmarshal(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
-		m.MessageType = "caic_stripped_env"
+		m.MessageType = messageTypeStrippedEnv
 		return []Message{&m}, nil
 	case logControlSession:
 		var m MetaSessionMessage
@@ -544,14 +519,14 @@ func (p *LogRecordParser) parseControl(kind logControlKind, token string, line [
 		if err := json.Unmarshal(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
-		m.MessageType = "caic_pr"
+		m.MessageType = messageTypePR
 		return []Message{&m}, nil
 	case logControlResult:
 		var m MetaResultMessage
 		if err := json.Unmarshal(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
-		m.MessageType = "caic_result"
+		m.MessageType = messageTypeResult
 		return []Message{&m}, nil
 	case logControlPendingUserAction:
 		var m PendingUserActionMessage
@@ -565,7 +540,7 @@ func (p *LogRecordParser) parseControl(kind logControlKind, token string, line [
 		if err := json.Unmarshal(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
-		m.MessageType = "caic_log"
+		m.MessageType = messageTypeProvisioningLogRecord
 		return []Message{&m}, nil
 	case logControlContextCleared:
 		return []Message{ContextCleared()}, nil

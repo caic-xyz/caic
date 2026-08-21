@@ -14,6 +14,25 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
+const (
+	messageTypeSystem                = "system"
+	messageSubtypeContextCleared     = "context_cleared"
+	messageTypeText                  = "text"
+	messageTypeUserInput             = "user_input"
+	messageTypeProvisioningLog       = "log"
+	messageTypeMeta                  = "caic_meta"
+	messageTypeDiffStat              = "caic_diff_stat"
+	messageTypeExit                  = "caic_exit"
+	messageTypeStrippedEnv           = "caic_stripped_env"
+	messageTypeSession               = "caic_session"
+	messageTypeLegacyInit            = "caic_init"
+	messageTypeModelInfo             = "caic_model_info"
+	messageTypePR                    = "caic_pr"
+	messageTypeResult                = "caic_result"
+	messageTypePendingUserAction     = "caic_pending_user_action"
+	messageTypeProvisioningLogRecord = "caic_log"
+)
+
 // DiffFileStat describes changes to a single file.
 type DiffFileStat struct {
 	Path    string `json:"path"`
@@ -62,11 +81,11 @@ type SystemMessage struct {
 }
 
 // Type implements Message.
-func (m *SystemMessage) Type() string { return "system" }
+func (m *SystemMessage) Type() string { return messageTypeSystem }
 
 // ContextCleared creates the persisted context-clear system marker.
 func ContextCleared() *SystemMessage {
-	return &SystemMessage{MessageType: "system", Subtype: "context_cleared"}
+	return &SystemMessage{MessageType: messageTypeSystem, Subtype: messageSubtypeContextCleared}
 }
 
 // TextMessage is emitted when the agent produces text output.
@@ -76,7 +95,7 @@ type TextMessage struct {
 }
 
 // Type implements Message.
-func (m *TextMessage) Type() string { return "text" }
+func (m *TextMessage) Type() string { return messageTypeText }
 
 // ToolUseMessage is emitted when the agent invokes a tool (except
 // AskUserQuestion and TodoWrite which have their own types).
@@ -192,7 +211,7 @@ type AskMessage struct {
 func (m *AskMessage) Type() string { return "ask" }
 
 // PendingUserActionMessageType identifies a persisted pending user action.
-const PendingUserActionMessageType = "caic_pending_user_action"
+const PendingUserActionMessageType = messageTypePendingUserAction
 
 // PendingUserActionKind identifies the user action caic is waiting for.
 type PendingUserActionKind string
@@ -273,7 +292,7 @@ type UserInputMessage struct {
 }
 
 // Type implements Message.
-func (m *UserInputMessage) Type() string { return "user_input" }
+func (m *UserInputMessage) Type() string { return messageTypeUserInput }
 
 // ToolResultMessage is emitted when a tool returns its result.
 type ToolResultMessage struct {
@@ -582,7 +601,7 @@ type LogMessage struct {
 }
 
 // Type implements Message.
-func (m *LogMessage) Type() string { return "log" }
+func (m *LogMessage) Type() string { return messageTypeProvisioningLog }
 
 // StrippedEnvMessage is emitted by the relay when it strips environment
 // variables (e.g. ANTHROPIC_API_KEY) before spawning the agent subprocess.
@@ -593,7 +612,7 @@ type StrippedEnvMessage struct {
 }
 
 // Type implements Message.
-func (m *StrippedEnvMessage) Type() string { return "caic_stripped_env" }
+func (m *StrippedEnvMessage) Type() string { return messageTypeStrippedEnv }
 
 // DiffStatMessage is emitted periodically by the relay's diff watcher thread
 // with the current in-container git diff stats.
@@ -604,7 +623,7 @@ type DiffStatMessage struct {
 }
 
 // Type implements Message.
-func (m *DiffStatMessage) Type() string { return "caic_diff_stat" }
+func (m *DiffStatMessage) Type() string { return messageTypeDiffStat }
 
 // ExitMessage is written by the relay to output.jsonl when the agent
 // subprocess exits, regardless of shutdown reason (crash, sentinel, EOF).
@@ -621,7 +640,7 @@ type ExitMessage struct {
 }
 
 // Type implements Message.
-func (m *ExitMessage) Type() string { return "caic_exit" }
+func (m *ExitMessage) Type() string { return messageTypeExit }
 
 // ExitError returns the user-facing diagnostic for a non-zero process exit.
 func (m *ExitMessage) ExitError() string {
@@ -706,11 +725,11 @@ type MetaMessage struct {
 }
 
 // Type implements Message.
-func (m *MetaMessage) Type() string { return "caic_meta" }
+func (m *MetaMessage) Type() string { return messageTypeMeta }
 
 // Validate checks that all required fields are present and the version is supported.
 func (m *MetaMessage) Validate() error {
-	if m.MessageType != "caic_meta" {
+	if m.MessageType != messageTypeMeta {
 		return fmt.Errorf("unexpected type %q", m.MessageType)
 	}
 	if err := LogVersion(m.Version).Validate(); err != nil {
@@ -735,7 +754,7 @@ type MetaSessionMessage struct {
 }
 
 // Type implements Message.
-func (m *MetaSessionMessage) Type() string { return "caic_session" }
+func (m *MetaSessionMessage) Type() string { return messageTypeSession }
 
 // LogSink appends complete task-log records through the task-owned physical
 // log authority. Native records are already encoded physical records; semantic
@@ -778,7 +797,7 @@ func AppendNativeRecord(log LogSink, version LogVersion, data []byte) error {
 	}
 	if version == LogVersionV2 {
 		ts := time.Now().UTC()
-		data = fmt.Appendf(nil, `{"t":"agent","ts":%d.%03d,"msg":%s}`, ts.Unix(), ts.Nanosecond()/int(time.Millisecond), data)
+		data = fmt.Appendf(nil, `{"t":"%s","ts":%d.%03d,"msg":%s}`, logRecordAgent, ts.Unix(), ts.Nanosecond()/int(time.Millisecond), data)
 		data = append(data, '\n')
 	} else {
 		data = append(data, '\n')
@@ -792,7 +811,7 @@ func WriteMetaSession(log LogSink, init *InitMessage) error {
 		return nil
 	}
 	return log.AppendMessage(&MetaSessionMessage{
-		MessageType:  "caic_session",
+		MessageType:  messageTypeSession,
 		SessionID:    init.SessionID,
 		Model:        init.Model,
 		AgentVersion: init.Version,
@@ -806,7 +825,7 @@ type ModelInfoMessage struct {
 }
 
 // Type implements Message.
-func (m *ModelInfoMessage) Type() string { return "caic_model_info" }
+func (m *ModelInfoMessage) Type() string { return messageTypeModelInfo }
 
 // MetaResultMessage is appended as the last line of a JSONL log file when a
 // task reaches a terminal state.
@@ -828,7 +847,7 @@ type MetaResultMessage struct {
 }
 
 // Type implements Message.
-func (m *MetaResultMessage) Type() string { return "caic_result" }
+func (m *MetaResultMessage) Type() string { return messageTypeResult }
 
 // MetaPRMessage is written to the JSONL log when a PR is created so that the
 // PR number can be restored on server restart.
@@ -840,7 +859,7 @@ type MetaPRMessage struct {
 }
 
 // Type implements Message.
-func (m *MetaPRMessage) Type() string { return "caic_pr" }
+func (m *MetaPRMessage) Type() string { return messageTypePR }
 
 // MarshalMessage serializes a Message to JSON. For RawMessage, returns the
 // original bytes to preserve unknown fields. For typed messages, uses
@@ -880,35 +899,35 @@ func MarshalLogMessage(version LogVersion, m Message) ([]byte, error) {
 	return json.Marshal(fields)
 }
 
-func v2ControlToken(m Message) (string, error) {
+func v2ControlToken(m Message) (logRecordType, error) {
 	switch m.Type() {
-	case "caic_meta":
-		return "caic_meta", nil
-	case "caic_diff_stat":
-		return "diff_stat", nil
-	case "caic_exit":
-		return "exit", nil
-	case "caic_stripped_env":
-		return "stripped_env", nil
-	case "caic_session":
-		return "session", nil
-	case "caic_model_info":
-		return "model_info", nil
-	case "caic_pr":
-		return "pr", nil
-	case "caic_result":
-		return "result", nil
-	case PendingUserActionMessageType:
-		return "pending_user_action", nil
-	case "log":
-		return "log", nil
-	case "text":
-		return "text", nil
-	case "user_input":
-		return "user_input", nil
-	case "system":
-		if m, ok := m.(*SystemMessage); ok && m.Subtype == "context_cleared" {
-			return "context_cleared", nil
+	case messageTypeMeta:
+		return logRecordMeta, nil
+	case messageTypeDiffStat:
+		return logRecordDiffStat, nil
+	case messageTypeExit:
+		return logRecordExit, nil
+	case messageTypeStrippedEnv:
+		return logRecordStrippedEnv, nil
+	case messageTypeSession:
+		return logRecordSession, nil
+	case messageTypeModelInfo:
+		return logRecordModelInfo, nil
+	case messageTypePR:
+		return logRecordPR, nil
+	case messageTypeResult:
+		return logRecordResult, nil
+	case messageTypePendingUserAction:
+		return logRecordPendingUserAction, nil
+	case messageTypeProvisioningLog:
+		return logRecordProvisioningLog, nil
+	case messageTypeText:
+		return logRecordText, nil
+	case messageTypeUserInput:
+		return logRecordUserInput, nil
+	case messageTypeSystem:
+		if m, ok := m.(*SystemMessage); ok && m.Subtype == messageSubtypeContextCleared {
+			return logRecordContextCleared, nil
 		}
 	}
 	return "", fmt.Errorf("message type %q is not a task-log control", m.Type())

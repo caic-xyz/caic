@@ -20,7 +20,6 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
@@ -164,13 +163,13 @@ func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.
 	if opts.ResumeSessionID == "" {
 		return nil, errors.New("opencode: missing session ID for relay attach")
 	}
-	wire := &wireFormat{sessionID: opts.ResumeSessionID, fw: &jsonutil.FieldWarner{}}
+	wire := &wireFormat{sessionID: opts.ResumeSessionID}
 	return agent.AttachRelaySession(ctx, opts, wire, nil)
 }
 
 // NewWire implements agent.Backend.
 func (*Backend) NewWire() agent.WireFormat {
-	// Log replay can parse large histories; skip development-only unknown-field scans.
+	// Schema drift is checked offline by check-agent-logs.
 	return &wireFormat{}
 }
 
@@ -183,9 +182,10 @@ func (*Backend) FetchModelInventory(ctx context.Context, target runtime.Connecti
 	return agent.ModelInventory{Models: models}, nil
 }
 
-// TODO: Trim caicInit after 2026-08 once legacy caic_init logs are old enough to ignore.
-// caicInit is the legacy pre-caic_session metadata record.
-type caicInit struct {
+// CaicInit is the legacy pre-caic_session metadata record.
+//
+// TODO: Trim CaicInit after 2026-08 once legacy caic_init logs are old enough to ignore.
+type CaicInit struct {
 	Type      string `json:"type"` // always "caic_init"
 	SessionID string `json:"session_id"`
 	Model     string `json:"model,omitzero"`
@@ -212,7 +212,6 @@ type wireFormat struct {
 	thinkAccum    strings.Builder // Accumulated text from agent_thought_chunk.
 	textOverflow  bool
 	thinkOverflow bool
-	fw            *jsonutil.FieldWarner
 }
 
 // WritePrompt sends a session/prompt JSON-RPC request to begin a new turn.
@@ -315,7 +314,7 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		}
 	}
 
-	msgs, err := parseMessage(line, w.fw)
+	msgs, err := parseMessage(line)
 	if err != nil {
 		return nil, err
 	}
@@ -443,7 +442,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	w := &wireFormat{fw: &jsonutil.FieldWarner{}}
+	w := &wireFormat{}
 	records, err := agent.NewRelayRecordReader(stdout, opts.Log.LogVersion(), agent.DiscardLogSink{Version: opts.Log.LogVersion()})
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct relay reader: %w", err)

@@ -16,7 +16,6 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
 // Backend implements agent.Backend for Claude Code. It is registered once per
@@ -29,13 +28,12 @@ type Backend struct {
 
 var _ agent.Backend = (*Backend)(nil)
 
-// wireFormat holds per-session Claude Code parsing state: widget tracking,
-// unknown-field warnings, and reasoning-token accounting. A fresh instance is
+// wireFormat holds per-session Claude Code parsing state: widget tracking and
+// reasoning-token accounting. A fresh instance is
 // created for every session so this state can't leak between concurrent
 // Claude Code tasks sharing the registered Backend singleton.
 type wireFormat struct {
 	widgetTracker                *WidgetTracker
-	fieldWarner                  *jsonutil.FieldWarner
 	pendingReasoningOutputTokens int
 	pendingReasoningEstimate     int
 }
@@ -43,13 +41,10 @@ type wireFormat struct {
 var _ agent.WireFormat = (*wireFormat)(nil)
 var _ agent.CompactCommand = (*wireFormat)(nil)
 
-// newWireFormat builds a live wireFormat with a fresh widget tracker and
-// field warner, for use by Start and AttachRelay.
+// newWireFormat builds a live wireFormat with a fresh widget tracker for use
+// by Start and AttachRelay. Schema drift is checked offline by check-agent-logs.
 func newWireFormat() *wireFormat {
-	return &wireFormat{
-		widgetTracker: NewWidgetTracker(),
-		fieldWarner:   &jsonutil.FieldWarner{},
-	}
+	return &wireFormat{widgetTracker: NewWidgetTracker()}
 }
 
 // ParseMessage wraps ParseMessage with widget tracking for streaming deltas.
@@ -57,7 +52,7 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	if estimate, ok := systemThinkingTokenEstimate(line); ok {
 		w.pendingReasoningEstimate += estimate
 	}
-	msgs, err := parseMessageWithTracker(line, w.widgetTracker, w.fieldWarner)
+	msgs, err := parseMessageWithTracker(line, w.widgetTracker)
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +223,7 @@ func (*Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Se
 
 // NewWire implements agent.Backend.
 func (*Backend) NewWire() agent.WireFormat {
-	// Log replay can parse large histories; skip development-only unknown-field scans.
+	// Schema drift is checked offline by check-agent-logs.
 	return &wireFormat{widgetTracker: NewWidgetTracker()}
 }
 

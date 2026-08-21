@@ -10,48 +10,13 @@ import (
 	"fmt"
 	"io"
 	"path"
-	"reflect"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/maruel/genai/providers/pi"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
-
-// eventKnownFields caches the known field sets for Pi wire event types, built
-// on first use. Uses sync.Map: few writes (once per type), many reads.
-var eventKnownFields sync.Map
-
-// unmarshalEvent unmarshals data into v and warns via fw for any unknown JSON
-// fields, so protocol drift in the Pi harness (fields our structs don't know
-// about) surfaces as a log warning instead of silently dropping data. The
-// name identifies the type for logging. Skip call sites whose payload can
-// grow unboundedly across repeated events (message_update's full-history
-// message field, tool_execution_update's accumulated output) — those would
-// turn this scan into a per-event rescan of an ever-growing blob.
-func unmarshalEvent(data []byte, v any, name string, fw *jsonutil.FieldWarner) error {
-	if err := json.Unmarshal(data, v); err != nil {
-		return err
-	}
-	val, ok := eventKnownFields.Load(name)
-	if !ok {
-		val, _ = eventKnownFields.LoadOrStore(name, jsonutil.KnownFields(reflect.ValueOf(v).Elem().Interface()))
-	}
-	known, ok2 := val.(map[string]struct{})
-	if !ok2 {
-		return fmt.Errorf("eventKnownFields stored unexpected type %T", val)
-	}
-	if fw != nil {
-		var raw map[string]json.RawMessage
-		if json.Unmarshal(data, &raw) == nil {
-			fw.Warn(name, jsonutil.CollectUnknown(raw, known))
-		}
-	}
-	return nil
-}
 
 func decodeEventType(line []byte) (pi.EventType, error) {
 	dec := json.NewDecoder(bytes.NewReader(line))
@@ -89,9 +54,8 @@ func decodeEventType(line []byte) (pi.EventType, error) {
 // decodeMessageUpdateEvent decodes only the assistantMessageEvent field,
 // deliberately skipping the line's "message" field: Pi resends the full
 // accumulated assistant message on every delta, and parsing it here would
-// cost O(n²) over a turn's output. fw only scans the small, bounded
-// assistantMessageEvent payload — never the accumulated message.
-func decodeMessageUpdateEvent(line []byte, fw *jsonutil.FieldWarner) (pi.MessageUpdateDeltaEvent, error) {
+// cost O(n²) over a turn's output.
+func decodeMessageUpdateEvent(line []byte) (pi.MessageUpdateDeltaEvent, error) {
 	var ev pi.MessageUpdateDeltaEvent
 	dec := json.NewDecoder(bytes.NewReader(line))
 	if err := consumeObjectStart(dec); err != nil {
@@ -107,7 +71,7 @@ func decodeMessageUpdateEvent(line []byte, fw *jsonutil.FieldWarner) (pi.Message
 			if err := dec.Decode(&raw); err != nil {
 				return ev, err
 			}
-			if err := unmarshalEvent(raw, &ev.AssistantMessageEvent, "MessageUpdateDelta", fw); err != nil {
+			if err := json.Unmarshal(raw, &ev.AssistantMessageEvent); err != nil {
 				return ev, err
 			}
 			return ev, nil
@@ -198,17 +162,17 @@ func validateUnknownEventRemainder(dec *json.Decoder) error {
 //   - DiffStatMessage      — caic_diff_stat injection
 //   - UserInputMessage     — prompt command (stdin logged by relay)
 //   - RawMessage           — unrecognised event types
-func parseMessageTyped(fw *jsonutil.FieldWarner, typ pi.EventType, line []byte) ([]agent.Message, error) {
+func parseMessageTyped(typ pi.EventType, line []byte) ([]agent.Message, error) {
 	// caic-injected lines and stdin commands.
 	switch typ {
-	case "caic_model_info":
+	case pi.EventType("caic_model_info"):
 		// Handled by wireFormat.ParseMessage; skip in stateless replay.
 		return nil, nil
 
-	case pi.EventType(pi.CmdPrompt):
+	case pi.CmdPrompt:
 		// Stdin prompt command logged by relay; convert to UserInputMessage.
 		var cmd pi.PromptCmd
-		if err := unmarshalEvent(line, &cmd, "PromptCmd", fw); err != nil {
+		if err := json.Unmarshal(line, &cmd); err != nil {
 			return nil, fmt.Errorf("unmarshal prompt cmd: %w", err)
 		}
 		ui := &agent.UserInputMessage{Text: cmd.Message}
@@ -220,18 +184,18 @@ func parseMessageTyped(fw *jsonutil.FieldWarner, typ pi.EventType, line []byte) 
 		}
 		return []agent.Message{ui}, nil
 
-	case pi.EventType(pi.CmdCompact):
+	case pi.CmdCompact:
 		// Stdin compact command logged by relay; skip during replay.
 		return nil, nil
 
-	case "caic_diff_stat":
+	case pi.EventType("caic_diff_stat"):
 		var m agent.DiffStatMessage
 		if err := json.Unmarshal(line, &m); err != nil {
 			return nil, err
 		}
 		return []agent.Message{&m}, nil
 
-	case "caic_exit":
+	case pi.EventType("caic_exit"):
 		var m agent.ExitMessage
 		if err := json.Unmarshal(line, &m); err != nil {
 			return nil, err
@@ -239,16 +203,16 @@ func parseMessageTyped(fw *jsonutil.FieldWarner, typ pi.EventType, line []byte) 
 		return []agent.Message{&m}, nil
 
 	case pi.EventMessageUpdate:
-		return parseMessageUpdate(fw, line)
+		return parseMessageUpdate(line)
 
 	case pi.EventToolExecStart:
-		return parseToolExecStart(fw, line)
+		return parseToolExecStart(line)
 
 	case pi.EventToolExecUpdate:
 		return parseToolExecUpdate(line)
 
 	case pi.EventToolExecEnd:
-		return parseToolExecEnd(fw, line)
+		return parseToolExecEnd(line)
 
 	case pi.EventAgentStart, pi.EventMessageStart, pi.EventMessageEnd, pi.EventTurnStart:
 		// Lifecycle events with no semantic content; skip.
@@ -256,7 +220,7 @@ func parseMessageTyped(fw *jsonutil.FieldWarner, typ pi.EventType, line []byte) 
 
 	case pi.EventResponse:
 		// Command responses (e.g. set_model ack); skip unless error.
-		return parseResponse(fw, line)
+		return parseResponse(line)
 
 	case pi.EventExtensionUI:
 		// Extension UI requests are passed through as RawMessage.
@@ -266,27 +230,33 @@ func parseMessageTyped(fw *jsonutil.FieldWarner, typ pi.EventType, line []byte) 
 			Raw:         append([]byte(nil), line...),
 		}}, nil
 
-	case pi.EventAgentEnd, pi.EventTurnEnd:
-		// Handled by wireFormat; if we reach here (stateless replay), pass through.
+	case pi.EventAgentEnd, pi.EventTurnEnd,
+		pi.EventAgentSettled, pi.EventAutoRetryStart, pi.EventAutoRetryEnd,
+		pi.EventCompactionStart, pi.EventCompactionEnd, pi.EventEntryAppended, pi.EventQueueUpdate,
+		pi.EventSummarizationRetryScheduled, pi.EventSummarizationRetryAttemptStart, pi.EventSummarizationRetryFinished,
+		pi.EventThinkingLevelChanged:
+		// These events have no normalized agent.Message representation. Preserve
+		// the raw record, as the default path did before Pi named the event types.
 		return []agent.Message{&agent.RawMessage{
 			MessageType: string(typ),
 			Raw:         append([]byte(nil), line...),
 		}}, nil
-	}
 
-	// Unknown event type.
-	if typ != "" {
+	default:
+		if typ == "" {
+			return nil, nil
+		}
+		// Preserve unrecognized events and logged stdin commands.
 		return []agent.Message{&agent.RawMessage{
 			MessageType: string(typ),
 			Raw:         append([]byte(nil), line...),
 		}}, nil
 	}
-	return nil, nil
 }
 
 // parseMessageUpdate dispatches on the assistantMessageEvent delta type.
-func parseMessageUpdate(fw *jsonutil.FieldWarner, line []byte) ([]agent.Message, error) {
-	ev, err := decodeMessageUpdateEvent(line, fw)
+func parseMessageUpdate(line []byte) ([]agent.Message, error) {
+	ev, err := decodeMessageUpdateEvent(line)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal message_update: %w", err)
 	}
@@ -324,9 +294,9 @@ func messagesFromMessageUpdateDelta(delta *pi.MessageUpdateDelta, line []byte) (
 }
 
 // parseToolExecStart converts a tool_execution_start event.
-func parseToolExecStart(fw *jsonutil.FieldWarner, line []byte) ([]agent.Message, error) {
+func parseToolExecStart(line []byte) ([]agent.Message, error) {
 	var ev pi.ToolExecStartEvent
-	if err := unmarshalEvent(line, &ev, "ToolExecStartEvent", fw); err != nil {
+	if err := json.Unmarshal(line, &ev); err != nil {
 		return nil, fmt.Errorf("unmarshal tool_execution_start: %w", err)
 	}
 	name := normalizeToolName(ev.ToolName)
@@ -361,10 +331,9 @@ func parseToolExecStart(fw *jsonutil.FieldWarner, line []byte) ([]agent.Message,
 }
 
 // parseToolExecUpdate converts a tool_execution_update event to a streaming
-// delta. Unlike the other event parsers, this skips unmarshalEvent: Pi's
-// PartialResult carries the tool's full accumulated output on every update
-// (see the incremental-delta comment in piWireFormat.ParseMessage), so an
-// unknown-field scan here would rescan an ever-growing blob on every chunk.
+// delta. Pi's PartialResult carries the tool's full accumulated output on
+// every update, so decoding it normally would rescan an ever-growing blob on
+// every chunk.
 func parseToolExecUpdate(line []byte) ([]agent.Message, error) {
 	var ev pi.ToolExecUpdateEvent
 	if err := json.Unmarshal(line, &ev); err != nil {
@@ -383,9 +352,9 @@ func parseToolExecUpdate(line []byte) ([]agent.Message, error) {
 // parseToolExecEnd converts a tool_execution_end event. Subagent tool calls also
 // emit a SubagentEndMessage to close out the progress panel, and surface their
 // aggregated result text as tool output so the orchestration outcome is visible.
-func parseToolExecEnd(fw *jsonutil.FieldWarner, line []byte) ([]agent.Message, error) {
+func parseToolExecEnd(line []byte) ([]agent.Message, error) {
 	var ev pi.ToolExecEndEvent
-	if err := unmarshalEvent(line, &ev, "ToolExecEndEvent", fw); err != nil {
+	if err := json.Unmarshal(line, &ev); err != nil {
 		return nil, fmt.Errorf("unmarshal tool_execution_end: %w", err)
 	}
 	resultText := ev.Result.Text()
@@ -416,9 +385,9 @@ func parseToolExecEnd(fw *jsonutil.FieldWarner, line []byte) ([]agent.Message, e
 
 // parseResponse handles response envelopes. A failed prompt is terminal since
 // Pi will never emit agent events; other failures are passed through as raw.
-func parseResponse(fw *jsonutil.FieldWarner, line []byte) ([]agent.Message, error) {
+func parseResponse(line []byte) ([]agent.Message, error) {
 	var resp pi.Response
-	if err := unmarshalEvent(line, &resp, "Response", fw); err != nil {
+	if err := json.Unmarshal(line, &resp); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
 	if !resp.Success && resp.Error != "" {

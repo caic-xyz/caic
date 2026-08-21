@@ -12,18 +12,73 @@ import (
 	"strconv"
 	"time"
 	"unicode/utf8"
-
-	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
-var v2MetaMessageFields = jsonutil.KnownFields(MetaMessage{})
+// logRecordType is the compact top-level "t" discriminator in v2 task-log records.
+type logRecordType string
 
 const (
-	v2AgentRecordPrefix   = `{"t":"agent","ts":`
+	logRecordAgent             logRecordType = "agent"
+	logRecordMeta              logRecordType = "caic_meta"
+	logRecordDiffStat          logRecordType = "diff_stat"
+	logRecordExit              logRecordType = "exit"
+	logRecordStrippedEnv       logRecordType = "stripped_env"
+	logRecordSession           logRecordType = "session"
+	logRecordModelInfo         logRecordType = "model_info"
+	logRecordPR                logRecordType = "pr"
+	logRecordResult            logRecordType = "result"
+	logRecordPendingUserAction logRecordType = "pending_user_action"
+	logRecordProvisioningLog   logRecordType = "log"
+	logRecordContextCleared    logRecordType = "context_cleared"
+	logRecordText              logRecordType = "text"
+	logRecordUserInput         logRecordType = "user_input"
+)
+
+func (t logRecordType) controlKind() (logControlKind, bool) {
+	switch t {
+	case logRecordMeta:
+		return logControlMeta, true
+	case logRecordDiffStat:
+		return logControlDiffStat, true
+	case logRecordExit:
+		return logControlExit, true
+	case logRecordStrippedEnv:
+		return logControlStrippedEnv, true
+	case logRecordSession:
+		return logControlSession, true
+	case logRecordModelInfo:
+		return logControlModelInfo, true
+	case logRecordPR:
+		return logControlPR, true
+	case logRecordResult:
+		return logControlResult, true
+	case logRecordPendingUserAction:
+		return logControlPendingUserAction, true
+	case logRecordProvisioningLog:
+		return logControlProvisioningLog, true
+	case logRecordContextCleared:
+		return logControlContextCleared, true
+	case logRecordText:
+		return logControlText, true
+	case logRecordUserInput:
+		return logControlUserInput, true
+	default:
+		return 0, false
+	}
+}
+
+const (
+	v2AgentRecordPrefix   = `{"t":"` + string(logRecordAgent) + `","ts":`
 	v2AgentMessagePrefix  = `,"msg":`
 	v2MaxEncodedRecordLen = 32 << 20
 	v2MaxUnixSeconds      = int64(^uint64(0)>>1) - 62_135_596_800
 )
+
+type v2MetaEnvelope struct {
+	MetaMessage
+
+	Type logRecordType `json:"t"`
+}
 
 // parseV2Record validates and decodes one canonical v2 physical record.
 // Agent records use the zero-copy fast path; control records use the general
@@ -49,10 +104,10 @@ func parseV2Record(p *LogRecordParser, line []byte) (ParsedRecord, error) {
 		}
 		return ParsedRecord{}, errors.New("corrupt v2 log record: missing top-level t")
 	}
-	if token == "agent" {
+	if token == logRecordAgent {
 		return ParsedRecord{}, errors.New("corrupt v2 agent record: noncanonical envelope")
 	}
-	kind, ok := p.controlKind(token)
+	kind, ok := token.controlKind()
 	if !ok {
 		return ParsedRecord{}, fmt.Errorf("corrupt v2 log record: unknown top-level t %q", token)
 	}
@@ -69,7 +124,7 @@ func parseV2Record(p *LogRecordParser, line []byte) (ParsedRecord, error) {
 	return record, err
 }
 
-func decodeV2ControlFields(line []byte) (token string, fields []string, err error) {
+func decodeV2ControlFields(line []byte) (token logRecordType, fields []string, err error) {
 	decoder := json.NewDecoder(bytes.NewReader(line))
 	opening, err := decoder.Token()
 	if err != nil {
@@ -125,13 +180,15 @@ func containsV2ControlField(fields []string, want string) bool {
 	return slices.Contains(fields, want)
 }
 
-func validateV2ControlFields(kind logControlKind, token string, fields []string) error {
+func validateV2ControlFields(kind logControlKind, token logRecordType, fields []string) error {
 	for _, field := range fields {
-		if v2ControlFieldAllowed(kind, field) {
-			continue
-		}
 		if field == "type" {
 			return errors.New("corrupt v2 log record: unknown top-level field \"type\": top-level type discriminator is not valid in v2")
+		}
+		// The strict decoder in parseV2Control validates caic_meta fields after
+		// this pass has enforced the v2 discriminator and duplicate-key rules.
+		if kind == logControlMeta || v2ControlFieldAllowed(kind, field) {
+			continue
 		}
 		return fmt.Errorf("corrupt v2 %s record: unknown top-level field %q", token, field)
 	}
@@ -144,10 +201,7 @@ func v2ControlFieldAllowed(kind logControlKind, field string) bool {
 	}
 	switch kind {
 	case logControlMeta:
-		// V2 substitutes the canonical t discriminator for MetaMessage's V1
-		// type field; every remaining allowed key comes from MetaMessage itself.
-		_, known := v2MetaMessageFields[field]
-		return field != "type" && known
+		return false
 	case logControlDiffStat:
 		return field == "diff_stat" || field == "ts"
 	case logControlExit:
@@ -196,16 +250,22 @@ func v2ControlFieldAllowed(kind logControlKind, field string) bool {
 	return false
 }
 
-func parseV2Control(p *LogRecordParser, kind logControlKind, token string, line []byte) ([]Message, error) {
+func parseV2Control(p *LogRecordParser, kind logControlKind, token logRecordType, line []byte) ([]Message, error) {
 	if kind != logControlMeta {
-		return p.parseControl(kind, token, line)
+		return p.parseControl(kind, string(token), line)
 	}
 
-	var m MetaMessage
-	if err := json.Unmarshal(line, &m); err != nil {
+	var envelope v2MetaEnvelope
+	decoder := json.NewDecoder(bytes.NewReader(line))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&envelope); err != nil {
 		return nil, fmt.Errorf("decode %s: %w", token, err)
 	}
-	m.MessageType = token
+	if envelope.Type != logRecordMeta {
+		return nil, fmt.Errorf("decode %s: unexpected record type %q", token, envelope.Type)
+	}
+	m := envelope.MetaMessage
+	m.MessageType = messageTypeMeta
 	if err := m.Validate(); err != nil {
 		return nil, fmt.Errorf("decode %s: %w", token, err)
 	}
@@ -260,6 +320,9 @@ func parseV2AgentRecord(p *LogRecordParser, line []byte) ([]ParsedMessage, error
 	}
 	if bytes.Equal(msg, []byte("null")) {
 		return nil, errors.New("corrupt v2 agent record: null msg")
+	}
+	if !json.Valid(msg) {
+		return nil, errors.New("corrupt v2 agent record: invalid or noncanonical msg envelope")
 	}
 	// msg aliases the scanner-owned record and is valid only for this
 	// synchronous callback. The native parser must not retain it.

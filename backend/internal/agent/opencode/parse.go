@@ -6,42 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
-	"reflect"
 	"strings"
-	"sync"
 
 	"github.com/maruel/genai/providers/opencode"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
-
-// notificationKnownFields caches the known field sets for output wire types,
-// built on first use. Uses sync.Map: few writes (once per type), many reads.
-var notificationKnownFields sync.Map
-
-// unmarshalNotification unmarshals data into v and logs a warning for any
-// unknown JSON fields. The name identifies the type for logging.
-func unmarshalNotification(data []byte, v any, name string, fw *jsonutil.FieldWarner) error {
-	if err := json.Unmarshal(data, v); err != nil {
-		return err
-	}
-	val, ok := notificationKnownFields.Load(name)
-	if !ok {
-		val, _ = notificationKnownFields.LoadOrStore(name, jsonutil.KnownFields(reflect.ValueOf(v).Elem().Interface()))
-	}
-	known, ok2 := val.(map[string]struct{})
-	if !ok2 {
-		return fmt.Errorf("notificationKnownFields stored unexpected type %T", val)
-	}
-	if fw != nil {
-		var raw map[string]json.RawMessage
-		if json.Unmarshal(data, &raw) == nil {
-			fw.Warn(name, jsonutil.CollectUnknown(raw, known))
-		}
-	}
-	return nil
-}
 
 // parseMessage decodes a single line from the OpenCode ACP output into one or
 // more typed agent.Messages.
@@ -64,7 +34,7 @@ func unmarshalNotification(data []byte, v any, name string, fw *jsonutil.FieldWa
 //   - SystemMessage        — current_mode_update
 //   - DiffStatMessage      — caic_diff_stat injection
 //   - RawMessage           — unrecognised wire types (preserved verbatim)
-func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
+func parseMessage(line []byte) ([]agent.Message, error) {
 	var probe opencode.MessageProbe
 	if err := json.Unmarshal(line, &probe); err != nil {
 		return nil, fmt.Errorf("unmarshal probe: %w", err)
@@ -84,7 +54,7 @@ func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error
 				Version:   m.AgentVersion,
 			}}, nil
 		case "caic_init":
-			var ci caicInit
+			var ci CaicInit
 			if err := json.Unmarshal(line, &ci); err != nil {
 				return nil, err
 			}
@@ -123,7 +93,7 @@ func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error
 
 	switch msg.Method {
 	case opencode.MethodSessionUpdate:
-		return parseSessionUpdate(msg.Params, line, fw)
+		return parseSessionUpdate(msg.Params, line)
 
 	case opencode.MethodSessionRequestPermission:
 		// Permission requests are handled by wireFormat (auto-approve).
@@ -136,7 +106,7 @@ func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error
 }
 
 // parseSessionUpdate dispatches on the sessionUpdate discriminator.
-func parseSessionUpdate(params json.RawMessage, line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
+func parseSessionUpdate(params json.RawMessage, line []byte) ([]agent.Message, error) {
 	var sup opencode.SessionUpdateParams
 	if err := json.Unmarshal(params, &sup); err != nil {
 		return nil, fmt.Errorf("session/update params: %w", err)
@@ -150,37 +120,37 @@ func parseSessionUpdate(params json.RawMessage, line []byte, fw *jsonutil.FieldW
 	switch probe.SessionUpdate {
 	case opencode.UpdateAgentMessageChunk:
 		var u opencode.AgentMessageChunkUpdate
-		if err := unmarshalNotification(sup.Update, &u, "AgentMessageChunkUpdate", fw); err != nil {
+		if err := json.Unmarshal(sup.Update, &u); err != nil {
 			return nil, fmt.Errorf("agent_message_chunk: %w", err)
 		}
 		return []agent.Message{&agent.TextDeltaMessage{Text: u.Content.Text}}, nil
 
 	case opencode.UpdateAgentThoughtChunk:
 		var u opencode.AgentThoughtChunkUpdate
-		if err := unmarshalNotification(sup.Update, &u, "AgentThoughtChunkUpdate", fw); err != nil {
+		if err := json.Unmarshal(sup.Update, &u); err != nil {
 			return nil, fmt.Errorf("agent_thought_chunk: %w", err)
 		}
 		return []agent.Message{&agent.ThinkingDeltaMessage{Text: u.Content.Text}}, nil
 
 	case opencode.UpdateUserMessageChunk:
 		var u opencode.UserMessageChunkUpdate
-		if err := unmarshalNotification(sup.Update, &u, "UserMessageChunkUpdate", fw); err != nil {
+		if err := json.Unmarshal(sup.Update, &u); err != nil {
 			return nil, fmt.Errorf("user_message_chunk: %w", err)
 		}
 		return []agent.Message{&agent.UserInputMessage{Text: u.Content.Text}}, nil
 
 	case opencode.UpdateToolCall:
-		return parseToolCall(sup.Update, fw)
+		return parseToolCall(sup.Update)
 
 	case opencode.UpdateToolCallUpdate:
-		return parseToolCallUpdate(sup.Update, fw)
+		return parseToolCallUpdate(sup.Update)
 
 	case opencode.UpdatePlan:
-		return parsePlanUpdate(sup.Update, fw)
+		return parsePlanUpdate(sup.Update)
 
 	case opencode.UpdateUsageUpdate:
 		var u opencode.UsageUpdateUpdate
-		if err := unmarshalNotification(sup.Update, &u, "UsageUpdateUpdate", fw); err != nil {
+		if err := json.Unmarshal(sup.Update, &u); err != nil {
 			return nil, fmt.Errorf("usage_update: %w", err)
 		}
 		return []agent.Message{&agent.UsageMessage{
@@ -189,7 +159,7 @@ func parseSessionUpdate(params json.RawMessage, line []byte, fw *jsonutil.FieldW
 
 	case opencode.UpdateCurrentModeUpdate:
 		var u opencode.CurrentModeUpdate
-		if err := unmarshalNotification(sup.Update, &u, "CurrentModeUpdate", fw); err != nil {
+		if err := json.Unmarshal(sup.Update, &u); err != nil {
 			return nil, fmt.Errorf("current_mode_update: %w", err)
 		}
 		detail := u.ModeName
@@ -214,9 +184,9 @@ func parseSessionUpdate(params json.RawMessage, line []byte, fw *jsonutil.FieldW
 }
 
 // parseToolCall handles tool_call session updates (initial tool announcement).
-func parseToolCall(data json.RawMessage, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
+func parseToolCall(data json.RawMessage) ([]agent.Message, error) {
 	var u opencode.ToolCallUpdate
-	if err := unmarshalNotification(data, &u, "ToolCallUpdate", fw); err != nil {
+	if err := json.Unmarshal(data, &u); err != nil {
 		return nil, fmt.Errorf("tool_call: %w", err)
 	}
 
@@ -240,9 +210,9 @@ func parseToolCall(data json.RawMessage, fw *jsonutil.FieldWarner) ([]agent.Mess
 // with the real tool input. This is necessary because the initial tool_call
 // notification has an empty rawInput ({}); the actual arguments only arrive
 // in the tool_call_update.
-func parseToolCallUpdate(data json.RawMessage, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
+func parseToolCallUpdate(data json.RawMessage) ([]agent.Message, error) {
 	var u opencode.ToolCallUpdateUpdate
-	if err := unmarshalNotification(data, &u, "ToolCallUpdateUpdate", fw); err != nil {
+	if err := json.Unmarshal(data, &u); err != nil {
 		return nil, fmt.Errorf("tool_call_update: %w", err)
 	}
 
@@ -329,9 +299,9 @@ func extractToolOutputDelta(u *opencode.ToolCallUpdateUpdate) string {
 }
 
 // parsePlanUpdate converts a plan update to a TodoMessage.
-func parsePlanUpdate(data json.RawMessage, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
+func parsePlanUpdate(data json.RawMessage) ([]agent.Message, error) {
 	var u opencode.PlanUpdate
-	if err := unmarshalNotification(data, &u, "PlanUpdate", fw); err != nil {
+	if err := json.Unmarshal(data, &u); err != nil {
 		return nil, fmt.Errorf("plan: %w", err)
 	}
 	todos := make([]agent.TodoItem, len(u.Entries))

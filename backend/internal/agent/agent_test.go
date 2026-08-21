@@ -987,7 +987,7 @@ func TestLogRecordParser(t *testing.T) {
 			{name: "out_of_range_ts", line: `{"t":"agent","ts":9223372036854775807.000,"msg":{"type":"assistant"}}`, want: "outside the supported Unix time range"},
 			{name: "missing_msg", line: `{"t":"agent","ts":1.000}`, want: "invalid timestamp delimiter"},
 			{name: "null_msg", line: `{"t":"agent","ts":1.000,"msg":null}`, want: "null msg"},
-			{name: "invalid_msg", line: `{"t":"agent","ts":1.000,"msg":{"x":}}`, want: "unmarshal envelope"},
+			{name: "invalid_msg", line: `{"t":"agent","ts":1.000,"msg":{"x":}}`, want: "invalid or noncanonical msg envelope"},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {

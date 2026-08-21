@@ -339,6 +339,15 @@ func TestReadLogAuthority(t *testing.T) {
 			t.Fatalf("readLogAuthority error = %v, want non-authority duplicate accepted", err)
 		}
 	})
+	t.Run("V2RejectsDuplicateNonAuthorityHeaderKey", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "a.jsonl")
+		writeLogFile(t, dir, "a.jsonl", `{"t":"caic_meta","version":2,"prompt":"first","prompt":"last","repos":[],"harness":"codex"}`)
+		if _, err := readLogAuthority(path); !errors.Is(err, errDuplicateRawKey) || !strings.Contains(err.Error(), `"prompt"`) {
+			t.Fatalf("readLogAuthority error = %v, want duplicate prompt error", err)
+		}
+	})
 	t.Run("V2RejectsUnknownHeaderField", func(t *testing.T) {
 		t.Parallel()
 		for _, compressed := range []bool{false, true} {
@@ -368,7 +377,7 @@ func TestReadLogAuthority(t *testing.T) {
 				} else {
 					writeLogFile(t, dir, filepath.Base(path), string(data))
 				}
-				if _, err := readLogAuthority(path); err == nil || !strings.Contains(err.Error(), "unknown v2 caic_meta fields") {
+				if _, err := readLogAuthority(path); err == nil || !strings.Contains(err.Error(), `json: unknown field "bogus"`) {
 					t.Fatalf("readLogAuthority error = %v, want unknown-field error", err)
 				}
 			})

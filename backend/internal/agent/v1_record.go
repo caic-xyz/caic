@@ -17,7 +17,7 @@ func parseV1Record(p *LogRecordParser, line []byte) (ParsedRecord, error) {
 		msgs, parseErr := p.parseAndApplyNative(line)
 		return ParsedRecord{Messages: wrapParsedMessages(msgs, time.Time{})}, parseErr
 	}
-	kind, ok := p.controlKind(envelope.Type)
+	kind, ok := v1LogControlKinds[envelope.Type]
 	if ok {
 		msgs, err := p.parseControl(kind, envelope.Type, line)
 		if err != nil {

@@ -20,7 +20,6 @@ import (
 	"github.com/klauspost/compress/zstd"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
 // SettledRetention bounds how far back a task log's mtime can be and still
@@ -217,7 +216,7 @@ func validateRawLogAppend(f *os.File, path string, header *agent.MetaMessage) (a
 		return 0, err
 	}
 	scanner := newPhysicalLogScanner(f, path)
-	if _, err := scanner.ReadHeader(&jsonutil.FieldWarner{}); err != nil {
+	if _, err := scanner.ReadHeader(); err != nil {
 		return 0, fmt.Errorf("validate task log for append: %w", err)
 	}
 	if scanner.authority.Harness != header.Harness {
