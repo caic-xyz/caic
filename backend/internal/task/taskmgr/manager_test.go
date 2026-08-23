@@ -1966,7 +1966,7 @@ func TestManager(t *testing.T) {
 					RuntimeName:       "docker",
 					Repos:             []taskslog.RepoMount{{Name: "repo/a", Branch: "caic-1"}},
 					State:             taskslog.StateStopped,
-					Result:            &taskslog.Result{State: taskslog.StateStopped},
+					LastTrailer:       &taskslog.Result{State: taskslog.StateStopped},
 					StartedAt:         now.Add(-1 * time.Hour),
 					LastStateUpdateAt: now,
 					Tailscale:         true,
@@ -2043,7 +2043,7 @@ func TestManager(t *testing.T) {
 				Prompt:            "old task",
 				Harness:           "claude",
 				State:             taskslog.StateStopped,
-				Result:            &taskslog.Result{State: taskslog.StateStopped},
+				LastTrailer:       &taskslog.Result{State: taskslog.StateStopped},
 				LastStateUpdateAt: time.Now().UTC(),
 			}}
 			if err := m.LoadPurgedTasks(all); err != nil {

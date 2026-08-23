@@ -102,26 +102,17 @@ type forkLogRuntime struct {
 	capturedRepos []runtime.ForkRepo // opts.Repos seen by Fork.
 }
 
-func (r *forkLogRuntime) Fork(ctx context.Context, id runtime.ID, opts *runtime.ForkOptions) (runtime.ID, runtime.ConnectionInfo, []runtime.Repo, error) {
+func (r *forkLogRuntime) Fork(ctx context.Context, id runtime.ID, opts *runtime.ForkOptions) (runtime.ID, runtime.ConnectionInfo, error) {
 	r.capturedRepos = opts.Repos
 	r.metadata = maps.Clone(opts.Metadata)
 	if _, err := opts.LogWriter.Write([]byte("fork setup complete\nfinal setup line")); err != nil {
-		return "", runtime.ConnectionInfo{}, nil, err
+		return "", runtime.ConnectionInfo{}, err
 	}
 	if r.forkErr != nil {
-		return "", runtime.ConnectionInfo{}, nil, r.forkErr
+		return "", runtime.ConnectionInfo{}, r.forkErr
 	}
-	forkID, conn, _, err := r.FakeBackend.Fork(ctx, id, opts)
-	// Honor the pinned destination branch per repo, like the real runtime.
-	out := make([]runtime.Repo, len(opts.Repos))
-	for i, rp := range opts.Repos {
-		branch := rp.DestPrimary
-		if branch == "" {
-			branch = "caic/fork"
-		}
-		out[i] = runtime.Repo{Branch: branch}
-	}
-	return forkID, conn, out, err
+	// The real runtime creates DestPrimary verbatim; no repo echo is needed.
+	return r.FakeBackend.Fork(ctx, id, opts)
 }
 
 // destPrimary returns the captured destination primary branch for hostPath.
@@ -638,11 +629,11 @@ func TestRunner(t *testing.T) {
 			if lt[0].State != taskslog.StatePurged {
 				t.Errorf("state = %v, want StatePurged", lt[0].State)
 			}
-			if lt[0].Result == nil {
+			if lt[0].LastTrailer == nil {
 				t.Fatal("Result is nil, want caic_result trailer")
 			}
-			if lt[0].Result.State != taskslog.StatePurged {
-				t.Errorf("Result.State = %v, want StatePurged", lt[0].Result.State)
+			if lt[0].LastTrailer.State != taskslog.StatePurged {
+				t.Errorf("Result.State = %v, want StatePurged", lt[0].LastTrailer.State)
 			}
 		})
 
@@ -863,7 +854,7 @@ func TestRunner(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if len(loaded) != 1 || loaded[0].Result == nil || loaded[0].Result.State != taskslog.StateFailed {
+					if len(loaded) != 1 || loaded[0].LastTrailer == nil || loaded[0].LastTrailer.State != taskslog.StateFailed {
 						t.Fatalf("loaded terminal result = %+v, want failed trailer", loaded)
 					}
 					if !strings.HasSuffix(loaded[0].LogPath(), ".zst") {

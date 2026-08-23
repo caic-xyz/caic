@@ -825,7 +825,7 @@ func applyMetaResult(lt *LoadedTask, mr *agent.MetaResultMessage) {
 	if mr.Title != "" {
 		lt.Title = mr.Title
 	}
-	lt.Result = &Result{
+	lt.LastTrailer = &Result{
 		State:    lt.State,
 		CostUSD:  mr.CostUSD,
 		Duration: time.Duration(mr.Duration * float64(time.Second)),
@@ -844,7 +844,7 @@ func applyMetaResult(lt *LoadedTask, mr *agent.MetaResultMessage) {
 		lt.DiffCreated = true
 	}
 	if mr.Error != "" {
-		lt.Result.Err = errors.New(mr.Error)
+		lt.LastTrailer.Err = errors.New(mr.Error)
 	}
 }
 
@@ -883,7 +883,7 @@ type LoadedTask struct {
 	AgentVersion      string               `json:"agent_version"`
 	LogSize           int64                `json:"log_size"`     // Byte size of the log file on disk; populated by Store.Load.
 	DiffCreated       bool                 `json:"diff_created"` // True if any non-empty diff was recorded in the log; sticky across the run.
-	Result            *Result              `json:"result"`
+	LastTrailer       *Result              `json:"result"`       // Completion result parsed from the log trailer at load time; a snapshot of the last recorded run, never live state.
 	Msgs              []agent.Message      `json:"-"`
 
 	path           string               // Absolute path for lazy message loading via LoadMessages.
@@ -1347,9 +1347,9 @@ func applySemanticTask(lt, loaded *LoadedTask, messages bool) {
 	if loaded.Title != "" {
 		lt.Title = loaded.Title
 	}
-	if loaded.Result != nil {
+	if loaded.LastTrailer != nil {
 		lt.State = loaded.State
-		lt.Result = loaded.Result
+		lt.LastTrailer = loaded.LastTrailer
 	}
 	if loaded.LastStateUpdateAt.After(lt.LastStateUpdateAt) {
 		lt.LastStateUpdateAt = loaded.LastStateUpdateAt
@@ -1638,11 +1638,11 @@ func applySessionMetadataMessages(lt *LoadedTask, msgs []agent.Message) {
 }
 
 func (s *logTailScan) finish(lt *LoadedTask) {
-	if lt.Result != nil && lt.Result.CostUSD == 0 && s.lastResultCostUSD > 0 {
-		lt.Result.CostUSD = s.lastResultCostUSD
-		lt.Result.Duration = s.lastResultDuration
-		lt.Result.NumTurns = s.lastResultNumTurns
-		lt.Result.Usage = s.lastResultUsage
+	if lt.LastTrailer != nil && lt.LastTrailer.CostUSD == 0 && s.lastResultCostUSD > 0 {
+		lt.LastTrailer.CostUSD = s.lastResultCostUSD
+		lt.LastTrailer.Duration = s.lastResultDuration
+		lt.LastTrailer.NumTurns = s.lastResultNumTurns
+		lt.LastTrailer.Usage = s.lastResultUsage
 	}
 }
 

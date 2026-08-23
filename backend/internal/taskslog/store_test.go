@@ -833,8 +833,8 @@ func TestStore(t *testing.T) {
 					if !v2.DiffCreated || v2.LastStateUpdateAt != v1.LastStateUpdateAt {
 						t.Fatalf("diff metadata v2 = (%t, %v), v1 = (%t, %v)", v2.DiffCreated, v2.LastStateUpdateAt, v1.DiffCreated, v1.LastStateUpdateAt)
 					}
-					if v2.Result == nil || v1.Result == nil || v2.Result.State != v1.Result.State || v2.Result.CostUSD != v1.Result.CostUSD || v2.Result.Duration != v1.Result.Duration || v2.Result.NumTurns != v1.Result.NumTurns {
-						t.Fatalf("result metadata v2 = %#v, v1 = %#v", v2.Result, v1.Result)
+					if v2.LastTrailer == nil || v1.LastTrailer == nil || v2.LastTrailer.State != v1.LastTrailer.State || v2.LastTrailer.CostUSD != v1.LastTrailer.CostUSD || v2.LastTrailer.Duration != v1.LastTrailer.Duration || v2.LastTrailer.NumTurns != v1.LastTrailer.NumTurns {
+						t.Fatalf("result metadata v2 = %#v, v1 = %#v", v2.LastTrailer, v1.LastTrailer)
 					}
 					for _, loaded := range []*LoadedTask{v1, v2} {
 						if loaded.Msgs != nil {
@@ -861,7 +861,7 @@ func TestStore(t *testing.T) {
 						if err != nil {
 							t.Fatal(err)
 						}
-						if cached.SessionID != v2.SessionID || cached.AgentVersion != v2.AgentVersion || cached.ForgePR != v2.ForgePR || cached.DiffCreated != v2.DiffCreated || cached.Result == nil || cached.Result.State != v2.Result.State {
+						if cached.SessionID != v2.SessionID || cached.AgentVersion != v2.AgentVersion || cached.ForgePR != v2.ForgePR || cached.DiffCreated != v2.DiffCreated || cached.LastTrailer == nil || cached.LastTrailer.State != v2.LastTrailer.State {
 							t.Fatalf("cached v2 control metadata = %#v, want %#v", cached, v2)
 						}
 						if cached.Msgs != nil {
@@ -913,8 +913,8 @@ func TestStore(t *testing.T) {
 					if v2.Model != v1.Model || v2.AgentVersion != v1.AgentVersion {
 						t.Fatalf("native init metadata v2 = (%q, %q), v1 = (%q, %q)", v2.Model, v2.AgentVersion, v1.Model, v1.AgentVersion)
 					}
-					if v2.Result == nil || v1.Result == nil || v2.Result.CostUSD != v1.Result.CostUSD || v2.Result.Duration != v1.Result.Duration || v2.Result.NumTurns != v1.Result.NumTurns || v2.Result.Usage != v1.Result.Usage {
-						t.Fatalf("native result backfill v2 = %#v, v1 = %#v", v2.Result, v1.Result)
+					if v2.LastTrailer == nil || v1.LastTrailer == nil || v2.LastTrailer.CostUSD != v1.LastTrailer.CostUSD || v2.LastTrailer.Duration != v1.LastTrailer.Duration || v2.LastTrailer.NumTurns != v1.LastTrailer.NumTurns || v2.LastTrailer.Usage != v1.LastTrailer.Usage {
+						t.Fatalf("native result backfill v2 = %#v, v1 = %#v", v2.LastTrailer, v1.LastTrailer)
 					}
 					if v2.Msgs != nil {
 						t.Fatalf("inventory messages = %#v, want nil", v2.Msgs)
@@ -1072,11 +1072,11 @@ func TestStore(t *testing.T) {
 			if len(tasks) != 1 {
 				t.Fatalf("len = %d, want 1", len(tasks))
 			}
-			if tasks[0].Result == nil {
+			if tasks[0].LastTrailer == nil {
 				t.Fatal("Result is nil")
 			}
-			if tasks[0].Result.Usage.ReasoningOutputTokens != 123 {
-				t.Errorf("ReasoningOutputTokens = %d, want 123", tasks[0].Result.Usage.ReasoningOutputTokens)
+			if tasks[0].LastTrailer.Usage.ReasoningOutputTokens != 123 {
+				t.Errorf("ReasoningOutputTokens = %d, want 123", tasks[0].LastTrailer.Usage.ReasoningOutputTokens)
 			}
 		})
 		t.Run("ValidCompressed", func(t *testing.T) {

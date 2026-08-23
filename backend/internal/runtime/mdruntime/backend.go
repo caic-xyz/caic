@@ -509,11 +509,11 @@ func (b *Backend) Revive(ctx context.Context, id runtime.ID) error {
 }
 
 // Fork implements runtime.Lifecycle.
-func (b *Backend) Fork(ctx context.Context, id runtime.ID, opts *runtime.ForkOptions) (runtime.ID, runtime.ConnectionInfo, []runtime.Repo, error) {
+func (b *Backend) Fork(ctx context.Context, id runtime.ID, opts *runtime.ForkOptions) (runtime.ID, runtime.ConnectionInfo, error) {
 	defer trace.StartRegion(ctx, "instance.fork").End()
 	localID, err := b.localID(id)
 	if err != nil {
-		return "", runtime.ConnectionInfo{}, nil, err
+		return "", runtime.ConnectionInfo{}, err
 	}
 	name := string(localID)
 	if len(opts.Repos) > 0 {
@@ -525,11 +525,11 @@ func (b *Backend) Fork(ctx context.Context, id runtime.ID, opts *runtime.ForkOpt
 	// USB, and Sudo from the source unless explicitly overridden by opts.
 	ct, err := b.container(ctx, name)
 	if err != nil {
-		return "", runtime.ConnectionInfo{}, nil, fmt.Errorf("source instance %s: %w", name, err)
+		return "", runtime.ConnectionInfo{}, fmt.Errorf("source instance %s: %w", name, err)
 	}
 	mounts, err := mdMounts(ct, opts.Harness, opts.Mounts)
 	if err != nil {
-		return "", runtime.ConnectionInfo{}, nil, err
+		return "", runtime.ConnectionInfo{}, err
 	}
 	b.log.DebugContext(ctx, "building fork options", "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "sudo", opts.Sudo)
 	forkRepos := make([]md.ForkRepo, len(opts.Repos))
@@ -556,12 +556,12 @@ func (b *Backend) Fork(ctx context.Context, id runtime.ID, opts *runtime.ForkOpt
 	forked, err := ct.Fork(ctx, stdout, stderr, forkOpts)
 	if err != nil {
 		b.log.ErrorContext(ctx, "fork failed", "source", name, "err", err)
-		return "", runtime.ConnectionInfo{}, nil, err
+		return "", runtime.ConnectionInfo{}, err
 	}
 	forkName := forked.Name()
 	b.log.DebugContext(ctx, "fork succeeded", "source", name, "fork", forkName)
 	b.rememberContainer(forkName, forked)
-	return runtime.NewID(b.Name(), runtime.InstanceID(forkName)), runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: forkName}}, fromMDRepos(forked.Repos()), nil
+	return runtime.NewID(b.Name(), runtime.InstanceID(forkName)), runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: forkName}}, nil
 }
 
 // VNCPort implements runtime.Lifecycle.

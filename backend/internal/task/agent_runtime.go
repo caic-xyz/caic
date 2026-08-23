@@ -699,7 +699,7 @@ func (r *AgentRuntime) ForkTask(ctx context.Context, source, fork *Task, forkOpt
 	tlog.Debug("checkout", "msg", "calling instance.Fork", "source", sourceInstanceID, "harness", forkOpts.Harness, "tailscale", forkOpts.Tailscale, "usb", forkOpts.USB, "display", forkOpts.Display, "sudo", forkOpts.Sudo, "gitHubToken", fork.GitHubTokenEnabled())
 	provisioningLog := &provisioningWriter{ctx: ctx, t: fork, log: log}
 	forkOpts.LogWriter = provisioningLog
-	forkName, forkConn, forkRepos, err := r.Runtimes.Fork(ctx, sourceInstanceID, forkOpts)
+	forkName, forkConn, err := r.Runtimes.Fork(ctx, sourceInstanceID, forkOpts)
 	if flushErr := provisioningLog.Flush(); flushErr != nil {
 		err = errors.Join(err, flushErr)
 	}
@@ -709,11 +709,9 @@ func (r *AgentRuntime) ForkTask(ctx context.Context, source, fork *Task, forkOpt
 	}
 	tlog.Debug("checkout", "msg", "instance.Fork succeeded", "source", sourceInstanceID, "fork", forkName)
 	fork.SetRuntimeConnectionInfo(forkName, forkConn.AgentTarget, "", "", r.Runtimes.VNCPort(ctx, forkName))
-	for i := range fork.ReposSnapshot() {
-		if i < len(forkRepos) {
-			fork.SetRepoBranch(i, forkRepos[i].Branch)
-		}
-	}
+	// Branch names need no sync from the fork result: the runtime is contracted
+	// to create DestPrimary verbatim, so the reserved names set before the log
+	// opened remain authoritative, matching the launch path.
 	tlog.Info("fork instance ready", "instance", forkName)
 
 	// 2. Clean relay state from the source instance's snapshot so the
@@ -748,9 +746,12 @@ func (r *AgentRuntime) openLog(t *Task) (agent.LogSink, error) {
 }
 
 func (r *AgentRuntime) reopenLog(t *Task) (agent.LogSink, error) {
-	// A tracked path preserves the filename actually on disk (e.g. a fork's
-	// branch may be reassigned after its log was opened); only recompute it
-	// from the task when no log has been opened yet in this process.
+	// A tracked path preserves the filename actually on disk: compression
+	// renames it to .zst, and a path adopted via SetLoadedTask reflects what an
+	// earlier process wrote (possibly under an older naming scheme). Recomputing
+	// t.LogFilename() is only safe for logs this process opened and has not
+	// compressed; branch names cannot be the cause of drift because they are
+	// reserved before any task log opens.
 	name := t.LogFilename()
 	if path := r.LogPath.Get(); path != "" {
 		name = filepath.Base(path)

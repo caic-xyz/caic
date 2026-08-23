@@ -241,8 +241,8 @@ func (r *modelRefreshRuntime) Purge(_ context.Context, id runtime.ID) error {
 
 func (*modelRefreshRuntime) Revive(_ context.Context, _ runtime.ID) error { return nil }
 
-func (*modelRefreshRuntime) Fork(_ context.Context, _ runtime.ID, _ *runtime.ForkOptions) (runtime.ID, runtime.ConnectionInfo, []runtime.Repo, error) {
-	return "", runtime.ConnectionInfo{}, nil, errors.New("fork not implemented")
+func (*modelRefreshRuntime) Fork(_ context.Context, _ runtime.ID, _ *runtime.ForkOptions) (runtime.ID, runtime.ConnectionInfo, error) {
+	return "", runtime.ConnectionInfo{}, errors.New("fork not implemented")
 }
 
 func (*modelRefreshRuntime) VNCPort(_ context.Context, _ runtime.ID) int { return 0 }

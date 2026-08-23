@@ -321,7 +321,7 @@ type Lifecycle interface {
 	// Fork snapshots a running or stopped instance and creates a new one where
 	// each mapped repo is checked out on a new branch. opts.Repos names the full
 	// repo set and each repo's destination primary branch.
-	Fork(ctx context.Context, id ID, opts *ForkOptions) (ID, ConnectionInfo, []Repo, error)
+	Fork(ctx context.Context, id ID, opts *ForkOptions) (ID, ConnectionInfo, error)
 	// VNCPort returns the host port mapped to the runtime instance's VNC port.
 	// Returns 0 when the instance has no display.
 	VNCPort(ctx context.Context, id ID) int

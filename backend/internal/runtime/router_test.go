@@ -102,7 +102,7 @@ func TestRouter(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, _, _, err = router.Fork(t.Context(), "docker:source", &runtime.ForkOptions{RuntimeName: "podman"})
+		_, _, err = router.Fork(t.Context(), "docker:source", &runtime.ForkOptions{RuntimeName: "podman"})
 		if err == nil {
 			t.Fatal("Fork succeeded, want cross-runtime error")
 		}
@@ -183,8 +183,8 @@ func (f *routerFakeBackend) Diff(ctx context.Context, id runtime.ID, repoIdx int
 	return f.FakeBackend.Diff(ctx, id, repoIdx, args...)
 }
 
-func (f *routerFakeBackend) Fork(context.Context, runtime.ID, *runtime.ForkOptions) (runtime.ID, runtime.ConnectionInfo, []runtime.Repo, error) {
-	return runtime.NewID(runtime.Name(f.name), runtime.InstanceID(f.name+"-fork")), runtime.ConnectionInfo{}, nil, nil
+func (f *routerFakeBackend) Fork(context.Context, runtime.ID, *runtime.ForkOptions) (runtime.ID, runtime.ConnectionInfo, error) {
+	return runtime.NewID(runtime.Name(f.name), runtime.InstanceID(f.name+"-fork")), runtime.ConnectionInfo{}, nil
 }
 
 func (f *routerFakeBackend) List(context.Context) ([]runtime.Instance, error) {

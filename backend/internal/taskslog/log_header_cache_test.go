@@ -143,7 +143,7 @@ func pinnedHeaderCacheFixture() *LoadedTask {
 		AgentVersion: "version",
 		LogSize:      1,
 		DiffCreated:  true,
-		Result: &Result{
+		LastTrailer: &Result{
 			State:       StatePurged,
 			DiffStat:    diffStat,
 			CostUSD:     1,

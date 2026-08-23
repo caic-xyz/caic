@@ -38,9 +38,7 @@ type TaskEntry interface {
 	Task() *task.Task
 	MonitorBranch() string
 	SetMonitorBranch(branch string)
-	SetResult(result *taskslog.Result)
 	Result() *taskslog.Result
-	CloseDone()
 }
 
 // Backend is the single dependency the CI service needs from the server.

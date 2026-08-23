@@ -227,8 +227,8 @@ func (m *Manager) NewEntry(t *task.Task, lt *taskslog.LoadedTask) *Entry {
 	e := &Entry{
 		task:       t,
 		loadedTask: lt,
-		done:       make(chan struct{}),
 	}
+	e.term.Store(&entryTerminal{done: make(chan struct{})})
 	if lt != nil {
 		e.LogPath.Set(lt.LogPath())
 	}
@@ -810,8 +810,8 @@ func (m *Manager) insertLoadedTasks(lts []*taskslog.LoadedTask) (int, error) {
 	}
 	loaded := 0
 	for _, lt := range lts {
-		if lt.Result == nil {
-			lt.Result = &taskslog.Result{State: taskslog.StateFailed}
+		if lt.LastTrailer == nil {
+			lt.LastTrailer = &taskslog.Result{State: taskslog.StateFailed}
 		}
 		taskID := ksid.NewID()
 		parsedID := false
@@ -875,7 +875,7 @@ func (m *Manager) insertLoadedTasks(lts []*taskslog.LoadedTask) (int, error) {
 			t.SetPR(lt.ForgeOwner, lt.ForgeRepo, lt.ForgePR)
 		}
 		entry := m.NewEntry(t, lt)
-		entry.Finish(lt.Result)
+		entry.Finish(lt.LastTrailer)
 		m.tasks[t.ID.String()] = entry
 		loaded++
 	}
@@ -972,6 +972,10 @@ func (m *Manager) repoBasenameCollides(relPath string) bool {
 // launch for a fresh task's primary), so they only need a name reserved.
 // mounts[reserveOnly:] are new to the host, so their branch is created here from
 // their own checkout.
+//
+// Reservation happens before any task log opens: the log filename and metadata
+// header embed each repo's final branch name, and md.Fork creates the git
+// branches using these names verbatim (the caller owns their uniqueness).
 func (m *Manager) allocateBranches(ctx context.Context, t *task.Task, mounts []taskslog.RepoMount, reserveOnly int) error {
 	for i := range mounts {
 		ws, ok := m.Checkouts.Checkout(mounts[i].Name)

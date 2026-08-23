@@ -4,35 +4,46 @@ package taskmgr
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
+// entryTerminal is an immutable snapshot of an Entry's terminal state for one
+// incarnation. Snapshots are published atomically before the done channel is
+// closed, so any goroutine that observes done closed is guaranteed to observe
+// a published snapshot (and therefore result) via a later load.
+type entryTerminal struct {
+	done     chan struct{}    // Closed exactly when terminal first becomes true.
+	result   *taskslog.Result // Completion result; non-nil whenever terminal.
+	terminal bool             // True once the entry has reached a terminal state.
+}
+
 // Entry is a single registered task plus its mutable lifecycle state.
 //
 // Concurrency: task and lifecycle are immutable after registration. LogPath
-// manages its own synchronization. loadedTask, result, done, doneClosed,
-// cleanupOnce, and monitorBranch are guarded by mu and must only be accessed
-// through methods.
+// manages its own synchronization. The terminal state is an immutable snapshot
+// published through term; see entryTerminal. loadedTask, monitorBranch, and
+// cleanupOnce are guarded by mu and must only be accessed through methods.
 type Entry struct {
 	// Immutable.
 	Lifecycle *Lifecycle
+
+	// LogPath owns the current physical log path for this entry lifecycle.
+	LogPath taskslog.Path
 
 	task *task.Task
 
 	// Guards lazy message loading for a persisted task.
 	loadedTaskOnce sync.Once
 
-	// Guarded by mu.
-	mu         sync.Mutex
-	loadedTask *taskslog.LoadedTask
-	result     *taskslog.Result
+	// Terminal state of the current incarnation, published as an immutable
+	// snapshot; see entryTerminal.
+	term atomic.Pointer[entryTerminal]
 
-	// LogPath owns the current physical log path for this entry lifecycle.
-	LogPath       taskslog.Path
-	done          chan struct{}
-	doneClosed    bool
+	mu            sync.Mutex
+	loadedTask    *taskslog.LoadedTask
 	monitorBranch string
 	cleanupOnce   sync.Once
 }
@@ -63,23 +74,13 @@ func (e *Entry) SetLoadedTask(lt *taskslog.LoadedTask) {
 // state. After Reset (Revive), this returns a fresh channel; goroutines that
 // captured the previous channel will see a stale (already-closed) reference.
 func (e *Entry) Done() <-chan struct{} {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.done
+	return e.term.Load().done
 }
 
-// Result returns the completion result, or nil if the task hasn't completed.
+// Result returns the completion result of the current incarnation, or nil if
+// the task hasn't completed.
 func (e *Entry) Result() *taskslog.Result {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.result
-}
-
-// SetResult records the completion result.
-func (e *Entry) SetResult(r *taskslog.Result) {
-	e.mu.Lock()
-	e.result = r
-	e.mu.Unlock()
+	return e.term.Load().result
 }
 
 // MonitorBranch returns the branch being monitored for CI, or "".
@@ -96,36 +97,22 @@ func (e *Entry) SetMonitorBranch(b string) {
 	e.mu.Unlock()
 }
 
-// CloseDone closes the done channel if it is still open. Failure paths during
-// task creation call this directly; the normal cleanup path goes through
-// Cleanup which handles it idempotently.
-//
-// Prefer Finish when a result is being recorded at the same time: it sets the
-// result and closes done under a single lock acquisition, so a goroutine that
-// observes Done() closed is guaranteed to also observe Result().
-func (e *Entry) CloseDone() {
-	e.mu.Lock()
-	if !e.doneClosed {
-		close(e.done)
-		e.doneClosed = true
-	}
-	e.mu.Unlock()
-}
-
 // Finish records the completion result and closes the done channel in one
-// step: the result is published before done closes, so any goroutine that
-// observes Done() closed is guaranteed to also observe Result(). This makes the
-// set-result-then-close ordering correct by construction rather than relying on
-// callers sequencing SetResult and CloseDone. If another terminal path already
-// closed done, Finish only refreshes the result.
+// step: the snapshot is stored before done closes, so any goroutine that
+// observes Done() closed is guaranteed to also observe Result(). Concurrent
+// callers race and the last store wins. If the task is already terminal,
+// Finish only refreshes the result.
 func (e *Entry) Finish(r *taskslog.Result) {
-	e.mu.Lock()
-	e.result = r
-	if !e.doneClosed {
-		close(e.done)
-		e.doneClosed = true
+	for {
+		cur := e.term.Load()
+		next := &entryTerminal{done: cur.done, result: r, terminal: true}
+		if e.term.CompareAndSwap(cur, next) {
+			if !cur.terminal {
+				close(cur.done)
+			}
+			return
+		}
 	}
-	e.mu.Unlock()
 }
 
 // Cleanup runs fn exactly once per incarnation. Used to guard checkout.Cleanup
@@ -137,14 +124,13 @@ func (e *Entry) Cleanup(fn func()) {
 	once.Do(fn)
 }
 
-// Reset prepares the entry for Revive: a fresh done channel, cleared result,
-// and a new cleanupOnce. Only safe when the task is in a terminal state and
-// no goroutine is concurrently touching the entry's mutable fields.
+// Reset prepares the entry for Revive: a fresh terminal snapshot with an open
+// done channel and no result, plus a new cleanupOnce. Only safe when the task
+// is in a terminal state and no goroutine is concurrently touching the entry's
+// mutable fields.
 func (e *Entry) Reset() {
+	e.term.Store(&entryTerminal{done: make(chan struct{})})
 	e.mu.Lock()
-	e.done = make(chan struct{})
-	e.doneClosed = false
-	e.result = nil
 	e.cleanupOnce = sync.Once{}
 	e.mu.Unlock()
 }

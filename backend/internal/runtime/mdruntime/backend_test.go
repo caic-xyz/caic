@@ -378,7 +378,7 @@ func TestBackend(t *testing.T) {
 		t.Parallel()
 		src := &fakeMDContainer{forkResult: &fakeMDContainer{name: "fork-1", vncPort: 5902, repo: []md.Repo{{Branches: []string{"caic-2"}}}}}
 		b := newTestBackend(&fakeMDClient{getResult: src})
-		name, conn, repos, err := b.Fork(t.Context(), "docker:src", &runtime.ForkOptions{Harness: harness.Claude})
+		name, conn, err := b.Fork(t.Context(), "docker:src", &runtime.ForkOptions{Harness: harness.Claude})
 		if err != nil {
 			t.Fatalf("Fork: %v", err)
 		}
@@ -387,9 +387,6 @@ func TestBackend(t *testing.T) {
 		}
 		if conn.AgentTarget.SSHHost != "fork-1" {
 			t.Errorf("fork agent target = %q, want fork-1", conn.AgentTarget.SSHHost)
-		}
-		if len(repos) != 1 || repos[0].Branch != "caic-2" {
-			t.Errorf("repos = %+v, want one repo on caic-2", repos)
 		}
 		if b.vncPorts["fork-1"] != 5902 {
 			t.Errorf("fork vncPort = %d, want 5902", b.vncPorts["fork-1"])
@@ -407,7 +404,7 @@ func TestBackend(t *testing.T) {
 		src := &fakeMDContainer{forkResult: &fakeMDContainer{name: "fork-1"}}
 		b := newTestBackend(&fakeMDClient{getResult: src})
 		b.HarnessEnv = map[string][]string{string(harness.Claude): {"FOO=bar"}}
-		_, _, _, err := b.Fork(t.Context(), "docker:src", &runtime.ForkOptions{
+		_, _, err := b.Fork(t.Context(), "docker:src", &runtime.ForkOptions{
 			Harness:  harness.Claude,
 			ExtraEnv: []string{"GITHUB_TOKEN=tok"},
 		})

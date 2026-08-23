@@ -37,16 +37,11 @@ func TestEntry(t *testing.T) {
 	t.Parallel()
 	t.Run("Result", func(t *testing.T) {
 		t.Parallel()
-		t.Run("valid", func(t *testing.T) {
+		t.Run("valid_initially_nil", func(t *testing.T) {
 			t.Parallel()
 			e := newTestEntry(t, mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""))
 			if e.Result() != nil {
 				t.Error("Result() should be nil initially")
-			}
-			r := &taskslog.Result{State: taskslog.StateFailed}
-			e.SetResult(r)
-			if e.Result() != r {
-				t.Error("Result() returned wrong pointer after SetResult")
 			}
 		})
 	})
@@ -68,17 +63,17 @@ func TestEntry(t *testing.T) {
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
 			e := newTestEntry(t, mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""))
-			e.CloseDone()
+			e.Finish(&taskslog.Result{State: taskslog.StateFailed})
 			select {
 			case <-e.Done():
 			default:
-				t.Error("Done() not closed after CloseDone")
+				t.Error("Done() not closed after Finish")
 			}
 		})
 		t.Run("reset_reopens", func(t *testing.T) {
 			t.Parallel()
 			e := newTestEntry(t, mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""))
-			e.CloseDone()
+			e.Finish(&taskslog.Result{State: taskslog.StateFailed})
 			e.Reset()
 			select {
 			case <-e.Done():

@@ -185,8 +185,8 @@ func TestLoadSemanticTail(t *testing.T) {
 			if !ok || !strings.Contains(text.Text, "third") {
 				t.Fatalf("retained message = %#v, want third text", loaded.Msgs[0])
 			}
-			if loaded.State != StatePurged || loaded.Result == nil || loaded.Title != "done" {
-				t.Fatalf("tail metadata = state %q result %#v title %q, want purged result and done", loaded.State, loaded.Result, loaded.Title)
+			if loaded.State != StatePurged || loaded.LastTrailer == nil || loaded.Title != "done" {
+				t.Fatalf("tail metadata = state %q result %#v title %q, want purged result and done", loaded.State, loaded.LastTrailer, loaded.Title)
 			}
 		})
 	}
@@ -569,8 +569,8 @@ func TestLoadLogHeader(t *testing.T) {
 		if first.ForgePR != 7 {
 			t.Fatalf("fixture did not populate ForgePR: %d", first.ForgePR)
 		}
-		if first.Result == nil || len(first.Result.DiffStat) != 1 || first.Result.Usage.InputTokens != 100 {
-			t.Fatalf("fixture did not populate Result projection: %+v", first.Result)
+		if first.LastTrailer == nil || len(first.LastTrailer.DiffStat) != 1 || first.LastTrailer.Usage.InputTokens != 100 {
+			t.Fatalf("fixture did not populate Result projection: %+v", first.LastTrailer)
 		}
 		info, err := os.Stat(path)
 		if err != nil {
@@ -630,8 +630,8 @@ func TestLoadLogHeader(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if loaded.State != StatePurged || loaded.Result == nil || loaded.Result.CostUSD != 9.99 {
-			t.Fatalf("stale cache after log change: state=%v result=%+v", loaded.State, loaded.Result)
+		if loaded.State != StatePurged || loaded.LastTrailer == nil || loaded.LastTrailer.CostUSD != 9.99 {
+			t.Fatalf("stale cache after log change: state=%v result=%+v", loaded.State, loaded.LastTrailer)
 		}
 	})
 
@@ -687,8 +687,8 @@ func TestLoadLogHeader(t *testing.T) {
 		if !ok {
 			t.Fatal("readHeaderCache failed after successful scan")
 		}
-		if cached.Result == nil || cached.Result.Err == nil || cached.Result.Err.Error() != "boom" {
-			t.Fatalf("cache lost result error: %+v", cached.Result)
+		if cached.LastTrailer == nil || cached.LastTrailer.Err == nil || cached.LastTrailer.Err.Error() != "boom" {
+			t.Fatalf("cache lost result error: %+v", cached.LastTrailer)
 		}
 	})
 
