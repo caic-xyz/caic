@@ -11,7 +11,7 @@ require (
 	github.com/invopop/jsonschema v0.14.0
 	github.com/klauspost/compress v1.19.0
 	github.com/lmittmann/tint v1.1.3
-	github.com/maruel/genai v0.7.5
+	github.com/maruel/genai v0.7.6
 	github.com/maruel/gopus v0.0.0-20260506115108-4c6355c2de38
 	github.com/maruel/ksid v0.1.1
 	github.com/maruel/roundtrippers v0.5.0
