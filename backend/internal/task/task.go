@@ -815,7 +815,7 @@ func (t *Task) MarkDiffCreated() {
 }
 
 // SetLiveDiffStat overwrites the live diff stat. Used by task import to set
-// the host-side branch diff after RestoreMessages, because the relay's
+// the host-side branch diff after SeedTimeline, because the relay's
 // diff_watcher only tracks uncommitted changes (git diff HEAD) which
 // becomes empty after the agent commits.
 func (t *Task) SetLiveDiffStat(ds agent.DiffStat) {
@@ -879,7 +879,7 @@ func (t *Task) Title() string {
 
 // Snapshot holds volatile task fields read under the mutex. Used by the
 // server to build API responses without data races on fields that
-// addMessage/RestoreMessages modify concurrently.
+// addMessage/SeedTimeline modify concurrently.
 type Snapshot struct {
 	State              taskslog.State
 	StateUpdatedAt     time.Time
@@ -1010,100 +1010,52 @@ func (t *Task) PendingUserActions() []agent.PendingUserAction {
 	return pendingUserActionsFromMessages(t.msgs)
 }
 
-// RestoreMessages sets the initial message history from previously saved logs.
-// It also extracts metadata from the last InitMessage, if any, and
-// infers the task state from the trailing messages: a trailing unanswered
-// AskMessage means the agent needs input; a trailing ResultMessage means the
-// agent completed its turn (StateWaiting, StateAsking, or StateHasPlan).
-// Metadata-only messages (DiffStatMessage, PendingUserActionMessage, RawMessage) after the
-// ResultMessage are skipped during inference.
+// SeedTimeline fills an empty task with the message history from previously
+// saved logs, then derives session metadata, plan state, live stats and task
+// state from it.
+//
+// It panics if the task already holds messages. Seeding is one-shot
+// initialization, not a merge: replaying a second batch onto an existing
+// timeline would double-count cost, turns and token usage. A live timeline
+// grows through the session message pump instead; the disk-reload callers
+// (task import, Entry.LoadMessagesOnce) run exactly once per task.
 //
 // State inference rules (applied only for non-terminal states):
 //   - Current turn has unanswered AskUserQuestion → StateAsking
 //   - Trailing ResultMessage (no ask) → StateWaiting
 //   - No trailing ResultMessage → state unchanged (agent was mid-output)
 //
-// Called during both log loading (loadPurgedTasks) and instance import
-// (task import). For import, the caller must handle the case where state
-// remains StateRunning with no relay alive.
-func (t *Task) RestoreMessages(msgs []agent.Message) {
+// Metadata-only messages (DiffStatMessage, PendingUserActionMessage,
+// RawMessage) after the ResultMessage are skipped during inference. For
+// import, the caller must handle the case where state remains StateRunning
+// with no relay alive.
+func (t *Task) SeedTimeline(msgs []agent.Message) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if len(t.msgs) > 0 {
+		panic(fmt.Sprintf("task %s: SeedTimeline on a timeline that already holds %d messages", t.ID, len(t.msgs)))
+	}
 	fillEmptyResultMessages(msgs)
 	t.msgs = msgs
-	t.rateLimit = RateLimit{}
-	t.rateLimits = nil
-	// Scan forward so later entries (model_rerouted) override earlier ones.
-	for _, m := range msgs {
-		if meta, ok := m.(*agent.MetaSessionMessage); ok {
-			if meta.SessionID != "" {
-				t.sessionID = meta.SessionID
-			}
-			if meta.AgentVersion != "" {
-				t.agentVersion = meta.AgentVersion
-			}
-			if meta.Model != "" && t.reportedModel == "" {
-				t.reportedModel = meta.Model
-			}
-		}
-		if init, ok := m.(*agent.InitMessage); ok {
-			if init.SessionID != "" {
-				t.sessionID = init.SessionID
-			}
-			if init.Version != "" {
-				t.agentVersion = init.Version
-			}
-			if init.Model != "" {
-				t.reportedModel = init.Model
-			}
-		}
-		if sm, ok := m.(*agent.SystemMessage); ok && sm.Subtype == "model_rerouted" && sm.Model != "" {
-			t.reportedModel = sm.Model
-		}
-		if rateLimit, ok := m.(*agent.RateLimitMessage); ok {
-			t.recordRateLimitLocked(rateLimit)
-		}
-	}
-	// Restore plan state from tool_use events. A context_cleared marker
-	// resets plan state — it means ClearMessages was called (e.g. "Clear
-	// and execute plan"), so plan data before the marker is stale and plan
-	// tracking is suppressed until the next ResultMessage.
+	// One forward pass: the task starts empty, so every field below is derived
+	// from msgs alone and the per-concern handlers touch disjoint fields.
+	// Later entries (model_rerouted) override earlier ones.
 	//
-	// lastExitPlan tracks the most recent ExitPlanMode message. When a new
-	// ExitPlanMode or a context_cleared is encountered, the previous
+	// Plan state: a context_cleared marker resets it — it means ClearMessages
+	// was called (e.g. "Clear and execute plan"), so plan data before the
+	// marker is stale and plan tracking is suppressed until the next
+	// ResultMessage. lastExitPlan tracks the most recent ExitPlanMode message;
+	// when a new ExitPlanMode or a context_cleared is encountered, the previous
 	// ExitPlanMode's PlanContent is erased so only the latest plan is visible.
+	//
+	// Live stats: TotalCostUSD is cumulative per-session (resets on
+	// compact_boundary), so cost uses priorCostUSD + currentSessionTotal.
+	// DurationMs and NumTurns are per-invocation, so they always accumulate.
+	// Token usage is always summed.
 	var lastExitPlan *agent.ToolUseMessage
 	cleanTurnComplete := false
-	for _, m := range msgs {
-		if sm, ok := m.(*agent.SystemMessage); ok && sm.Subtype == "context_cleared" {
-			t.inPlanMode = false
-			t.planFile = ""
-			t.planContent = ""
-			t.planDismissed = true
-			if lastExitPlan != nil {
-				lastExitPlan.PlanContent = ""
-				lastExitPlan = nil
-			}
-		}
-		if tu, ok := m.(*agent.ToolUseMessage); ok {
-			t.trackToolUse(tu)
-			if tu.Name == "ExitPlanMode" {
-				if lastExitPlan != nil {
-					lastExitPlan.PlanContent = ""
-				}
-				lastExitPlan = tu
-			}
-		}
-		if u, ok := m.(*agent.UsageMessage); ok {
-			t.lastAPIUsage = u.Usage
-			if u.Usage.CacheTTLSeconds > 0 {
-				t.cacheExpiresAt = time.Now().Add(time.Duration(u.Usage.CacheTTLSeconds) * time.Second)
-			}
-			if u.ContextWindow > 0 {
-				t.reportedContextWindow = u.ContextWindow
-			}
-		}
-		if exit, ok := m.(*agent.ExitMessage); ok {
+	for _, msg := range msgs {
+		if exit, ok := msg.(*agent.ExitMessage); ok {
 			if exit.ExitCode != 0 && !cleanTurnComplete {
 				t.lastExitError = exit.ExitError()
 			} else {
@@ -1111,35 +1063,98 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 			}
 			continue
 		}
-		if clearsExitError(m) {
+		if clearsExitError(msg) {
 			t.lastExitError = ""
+			if _, ok := msg.(*agent.ResultMessage); !ok {
+				cleanTurnComplete = false
+			}
 		}
-		if rm, ok := m.(*agent.ResultMessage); ok {
-			t.planDismissed = false
-			cleanTurnComplete = !rm.IsError
-		} else if clearsExitError(m) {
-			cleanTurnComplete = false
-		}
-	}
-	// Restore live diff stat from the last DiffStatMessage or ResultMessage,
-	// whichever appears later. ResultMessage carries the authoritative
-	// host-side diff stat but a DiffStatMessage from the relay may follow it.
-	//
-	// diffCreated is sticky: only ever set true here, never cleared. A re-restore
-	// from a truncated or bounded message set (e.g. lazy reload, relay tail) must
-	// not erase a diff that an earlier restore or MarkDiffCreated already recorded.
-	for _, msg := range msgs {
 		switch m := msg.(type) {
+		case *agent.MetaSessionMessage:
+			if m.SessionID != "" {
+				t.sessionID = m.SessionID
+			}
+			if m.AgentVersion != "" {
+				t.agentVersion = m.AgentVersion
+			}
+			if m.Model != "" && t.reportedModel == "" {
+				t.reportedModel = m.Model
+			}
+		case *agent.InitMessage:
+			if m.SessionID != "" {
+				t.sessionID = m.SessionID
+			}
+			if m.Version != "" {
+				t.agentVersion = m.Version
+			}
+			if m.Model != "" {
+				t.reportedModel = m.Model
+			}
+		case *agent.SystemMessage:
+			switch m.Subtype {
+			case "model_rerouted":
+				if m.Model != "" {
+					t.reportedModel = m.Model
+				}
+			case "context_cleared", "compact_boundary":
+				if m.Subtype == "context_cleared" {
+					t.inPlanMode = false
+					t.planFile = ""
+					t.planContent = ""
+					t.planDismissed = true
+					if lastExitPlan != nil {
+						lastExitPlan.PlanContent = ""
+						lastExitPlan = nil
+					}
+				}
+				t.priorCostUSD = t.liveCostUSD
+				t.priorNumTurns = t.liveNumTurns
+				t.priorDuration = t.liveDuration
+			}
+		case *agent.RateLimitMessage:
+			t.recordRateLimitLocked(m)
+		case *agent.ToolUseMessage:
+			t.trackToolUse(m)
+			if m.Name == "ExitPlanMode" {
+				if lastExitPlan != nil {
+					lastExitPlan.PlanContent = ""
+				}
+				lastExitPlan = m
+			}
+		case *agent.UsageMessage:
+			t.lastAPIUsage = m.Usage
+			if m.Usage.CacheTTLSeconds > 0 {
+				t.cacheExpiresAt = time.Now().Add(time.Duration(m.Usage.CacheTTLSeconds) * time.Second)
+			}
+			if m.ContextWindow > 0 {
+				t.reportedContextWindow = m.ContextWindow
+			}
 		case *agent.DiffStatMessage:
 			if len(m.DiffStat) > 0 {
 				t.diffCreated = true
 			}
 		case *agent.ResultMessage:
+			t.planDismissed = false
+			cleanTurnComplete = !m.IsError
 			if len(m.DiffStat) > 0 {
 				t.diffCreated = true
 			}
+			t.liveUsage.InputTokens += m.Usage.InputTokens
+			t.liveUsage.OutputTokens += m.Usage.OutputTokens
+			t.liveUsage.CacheCreationInputTokens += m.Usage.CacheCreationInputTokens
+			t.liveUsage.CacheReadInputTokens += m.Usage.CacheReadInputTokens
+			t.liveUsage.ReasoningOutputTokens += m.Usage.ReasoningOutputTokens
+			t.lastUsage = m.Usage
+			// Compute cost from token counts: TotalCostUSD from Claude Code excludes
+			// cache_read_input_tokens, which are charged but omitted from its total.
+			t.liveCostUSD = t.priorCostUSD + computeCost(m.TotalCostUSD, m.Usage)
+			t.liveNumTurns += m.NumTurns
+			t.liveDuration += time.Duration(m.DurationMs) * time.Millisecond
 		}
 	}
+	// Restore live diff stat from the last DiffStatMessage or ResultMessage,
+	// whichever appears later. ResultMessage carries the authoritative
+	// host-side diff stat but a DiffStatMessage from the relay may follow it.
 	for _, msg := range slices.Backward(msgs) {
 		if ds, ok := msg.(*agent.DiffStatMessage); ok {
 			t.liveDiffStat = ds.DiffStat
@@ -1149,34 +1164,6 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 			t.liveDiffStat = rm.DiffStat
 			break
 		}
-	}
-	// Restore live stats: TotalCostUSD is cumulative per-session (resets on
-	// compact_boundary), so cost uses priorCostUSD + currentSessionTotal.
-	// DurationMs and NumTurns are per-invocation, so they always accumulate (+=).
-	// Token usage is always summed.
-	for _, m := range msgs {
-		if sm, ok := m.(*agent.SystemMessage); ok &&
-			(sm.Subtype == "context_cleared" || sm.Subtype == "compact_boundary") {
-			t.priorCostUSD = t.liveCostUSD
-			t.priorNumTurns = t.liveNumTurns
-			t.priorDuration = t.liveDuration
-			continue
-		}
-		rm, ok := m.(*agent.ResultMessage)
-		if !ok {
-			continue
-		}
-		t.liveUsage.InputTokens += rm.Usage.InputTokens
-		t.liveUsage.OutputTokens += rm.Usage.OutputTokens
-		t.liveUsage.CacheCreationInputTokens += rm.Usage.CacheCreationInputTokens
-		t.liveUsage.CacheReadInputTokens += rm.Usage.CacheReadInputTokens
-		t.liveUsage.ReasoningOutputTokens += rm.Usage.ReasoningOutputTokens
-		t.lastUsage = rm.Usage
-		// Compute cost from token counts: TotalCostUSD from Claude Code excludes
-		// cache_read_input_tokens, which are charged but omitted from its total.
-		t.liveCostUSD = t.priorCostUSD + computeCost(rm.TotalCostUSD, rm.Usage)
-		t.liveNumTurns += rm.NumTurns
-		t.liveDuration += time.Duration(rm.DurationMs) * time.Millisecond
 	}
 	// Infer state: if the last agent-emitted message is a ResultMessage, the
 	// agent finished its turn and is waiting for user input (or asking a
@@ -1735,7 +1722,7 @@ func (t *Task) addParsedMessage(parsed agent.ParsedMessage, skipTitleGen bool) (
 	// Transition to running when the agent starts producing output.
 	// Handles three cases:
 	//   - Normal turn: awaiting user input (Waiting/Asking/HasPlan).
-	//   - Server restart: RestoreMessages inferred a waiting state,
+	//   - Server restart: SeedTimeline inferred a waiting state,
 	//     but the relay already started a new turn before reattach.
 	//   - First turn: the agent may produce output before Checkout.Start
 	//     sets StateRunning (race between backend subprocess and

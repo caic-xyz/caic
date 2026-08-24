@@ -1972,7 +1972,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 
 		// A new incarnation reconnects through the normal live-history path;
 		// it must not be held behind the stopped scan's old parse failure.
-		tk.RestoreMessages([]agent.Message{&agent.TextMessage{Text: "revived live history"}})
+		tk.SeedTimeline([]agent.Message{&agent.TextMessage{Text: "revived live history"}})
 		tk.SetState(taskslog.StateRunning)
 		ctx, cancel := context.WithCancel(t.Context())
 		t.Cleanup(cancel)
@@ -2019,7 +2019,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		w := &reviveDuringStoppedScanWriter{ResponseRecorder: recorder, revive: func() {
 			tk.SetState(taskslog.StateRunning)
-			tk.RestoreMessages([]agent.Message{&agent.TextMessage{Text: "revived live event"}})
+			tk.SeedTimeline([]agent.Message{&agent.TextMessage{Text: "revived live event"}})
 		}}
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
 		req.SetPathValue("id", taskID.String())
@@ -2038,7 +2038,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		t.Parallel()
 		taskID := ksid.NewID()
 		tk := mustNewTask(t, taskID, agent.Prompt{Text: "fix the bug"}, harness.Claude)
-		tk.RestoreMessages([]agent.Message{&agent.TextMessage{Text: "retained in-memory history"}})
+		tk.SeedTimeline([]agent.Message{&agent.TextMessage{Text: "retained in-memory history"}})
 		tk.SetState(taskslog.StateFailed)
 
 		s := newTestRouter(t, nil)
@@ -2089,7 +2089,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		})
 
 		tk := mustNewTask(t, taskID, agent.Prompt{Text: "fix the bug"}, harness.Claude)
-		tk.RestoreMessages([]agent.Message{&agent.TextMessage{Text: "fast in-memory history"}})
+		tk.SeedTimeline([]agent.Message{&agent.TextMessage{Text: "fast in-memory history"}})
 		tk.SetState(taskslog.StateRunning)
 
 		s := newTestRouter(t, nil)
@@ -2150,7 +2150,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 
 		tk := mustNewTask(t, taskID, agent.Prompt{Text: "fix the bug"}, harness.Claude)
 		tk.Repos = []taskslog.RepoMount{{Name: "r", Branch: "caic-0"}}
-		tk.RestoreMessages([]agent.Message{&agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done"}})
+		tk.SeedTimeline([]agent.Message{&agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done"}})
 		tk.SetState(taskslog.StateStopped)
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}})
 		s.taskMgr.Insert(taskID.String(), s.taskMgr.NewEntry(tk, logs[0]))

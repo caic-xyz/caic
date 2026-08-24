@@ -72,6 +72,37 @@ func BenchmarkTaskAdoption(b *testing.B) {
 	}
 }
 
+// BenchmarkSeedTimeline measures the replay pass that turns an adopted log
+// into task state. The message mix mirrors a long session: mostly text and
+// tool traffic punctuated by turn results, diff stats and context boundaries.
+//
+// The seeded messages are shared across iterations. SeedTimeline mutates them
+// (empty results get fallback text, ExitPlanMode gets a plan snapshot), but
+// those writes are idempotent, so only the first iteration sees the extra work.
+func BenchmarkSeedTimeline(b *testing.B) {
+	const turns = 500
+	msgs := make([]agent.Message, 0, turns*8)
+	for turn := range turns {
+		msgs = append(msgs,
+			&agent.TextMessage{Text: "Working on the next step."},
+			&agent.ToolUseMessage{ToolUseID: fmt.Sprintf("tool-%d", turn), Name: "Read", Input: json.RawMessage(`{"file_path":"/src/main.go"}`)},
+			&agent.ToolResultMessage{ToolUseID: fmt.Sprintf("tool-%d", turn)},
+			&agent.DiffStatMessage{MessageType: "diff_stat", DiffStat: agent.DiffStat{{Path: "main.go", Added: 3, Deleted: 1}}},
+			&agent.UsageMessage{Usage: agent.Usage{InputTokens: 900, OutputTokens: 120, CacheTTLSeconds: 300}, ContextWindow: 200000},
+			&agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done", TotalCostUSD: 0.02, NumTurns: 1, DurationMs: 1200,
+				Usage: agent.Usage{InputTokens: 900, OutputTokens: 120, CacheReadInputTokens: 4000}},
+		)
+		if turn%50 == 0 {
+			msgs = append(msgs, &agent.SystemMessage{MessageType: "system", Subtype: "compact_boundary"})
+		}
+	}
+	id := ksid.NewID()
+
+	for b.Loop() {
+		mustNewTask(b, id, agent.Prompt{Text: "benchmark seed"}).SeedTimeline(msgs)
+	}
+}
+
 func writeProductionAdoptionFixture(b *testing.B, path string) {
 	file, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {

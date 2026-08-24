@@ -1006,7 +1006,7 @@ func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent
 	}
 
 	// Close current session and persist a context_cleared marker. The marker
-	// must be written before closing the old log so RestoreMessages can reset
+	// must be written before closing the old log so SeedTimeline can reset
 	// plan state on server restart.
 	oldH := t.CloseAndDetachSession(ctx)
 	if oldH != nil {

@@ -324,7 +324,7 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
 		tk.SetState(taskslog.StatePending)
-		tk.RestoreMessages([]agent.Message{&agent.RateLimitMessage{
+		tk.SeedTimeline([]agent.Message{&agent.RateLimitMessage{
 			Status:         "rejected",
 			ResetsAt:       time.Now().Add(time.Hour),
 			RateLimitType:  "five_hour",
@@ -345,7 +345,7 @@ func TestTask(t *testing.T) {
 		now := time.Now()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
 		tk.SetState(taskslog.StatePending)
-		tk.RestoreMessages([]agent.Message{
+		tk.SeedTimeline([]agent.Message{
 			&agent.RateLimitMessage{
 				Status:        agent.RateLimitStatusRejected,
 				ResetsAt:      now.Add(time.Hour),

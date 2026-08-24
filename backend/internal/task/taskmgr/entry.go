@@ -137,7 +137,7 @@ func (e *Entry) Reset() {
 
 // LoadMessagesOnce runs fn exactly once to lazily load on-disk messages for a
 // purged task. fn must perform the actual load (and any side effect such as
-// RestoreMessages); the once is owned by the Entry.
+// SeedTimeline); the once is owned by the Entry.
 func (e *Entry) LoadMessagesOnce(fn func()) {
 	if e.LoadedTask() == nil {
 		return

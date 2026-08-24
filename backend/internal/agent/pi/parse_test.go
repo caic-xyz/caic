@@ -365,7 +365,7 @@ func TestBackendNewWire(t *testing.T) {
 	msgUpdateWithAccumulatedMessage := `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"hello"},"message":{"role":"assistant","content":[{"type":"text","text":"ignored accumulated text"}]}}`
 	// Regression: replay (relay output during adoption, and on-disk logs) uses
 	// NewWire().ParseMessage. It must use the stateful wire format so agent_end
-	// produces a terminal ResultMessage; without it RestoreMessages cannot infer
+	// produces a terminal ResultMessage; without it SeedTimeline cannot infer
 	// the waiting state and adopted pi tasks stay stuck as "running".
 	t.Run("synthesizes ResultMessage on agent_end", func(t *testing.T) {
 		t.Parallel()

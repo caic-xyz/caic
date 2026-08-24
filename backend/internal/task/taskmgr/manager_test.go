@@ -510,7 +510,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		m := newTestManager(t, Config{ServerCtx: t.Context()})
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-		tk.RestoreMessages([]agent.Message{&agent.RateLimitMessage{
+		tk.SeedTimeline([]agent.Message{&agent.RateLimitMessage{
 			Status:        agent.RateLimitStatusRejected,
 			QuotaProvider: agent.QuotaProviderClaudeCode,
 			QuotaWindow:   "five_hour",
@@ -610,7 +610,7 @@ func TestManager(t *testing.T) {
 		m := newTestManager(t, Config{ServerCtx: t.Context()})
 		now := time.Now().UTC()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-		tk.RestoreMessages([]agent.Message{
+		tk.SeedTimeline([]agent.Message{
 			&agent.RateLimitMessage{
 				Status:        agent.RateLimitStatusRejected,
 				ResetsAt:      now.Add(time.Hour),
@@ -989,7 +989,7 @@ func TestManager(t *testing.T) {
 		t.Run("valid_preserves_live_session", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-			tk.RestoreMessages([]agent.Message{&agent.InitMessage{SessionID: "live"}})
+			tk.SeedTimeline([]agent.Message{&agent.InitMessage{SessionID: "live"}})
 			applyLoadedSessionMetadata(tk, &taskslog.LoadedTask{SessionID: "persisted"})
 			if got := tk.GetSessionID(); got != "live" {
 				t.Errorf("SessionID = %q, want live", got)
@@ -1562,7 +1562,7 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "reconnect", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateRunning)
-			tk.RestoreMessages([]agent.Message{
+			tk.SeedTimeline([]agent.Message{
 				&agent.AskMessage{
 					ToolUseID: "toolu-1",
 					Questions: []agent.AskQuestion{{Question: "Which?"}},
@@ -3886,7 +3886,7 @@ func TestLastResultText(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-		tk.RestoreMessages([]agent.Message{
+		tk.SeedTimeline([]agent.Message{
 			&agent.ResultMessage{MessageType: "result", Result: "first"},
 			&agent.ResultMessage{MessageType: "result", Result: "last"},
 		})
@@ -3926,7 +3926,7 @@ func TestNeedsTitleRegen(t *testing.T) {
 	t.Run("valid_more_results_in_memory", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-		tk.RestoreMessages([]agent.Message{
+		tk.SeedTimeline([]agent.Message{
 			&agent.ResultMessage{MessageType: "result"},
 			&agent.ResultMessage{MessageType: "result"},
 		})
@@ -3944,7 +3944,7 @@ func TestNeedsTitleRegen(t *testing.T) {
 	t.Run("valid_same_count", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-		tk.RestoreMessages([]agent.Message{
+		tk.SeedTimeline([]agent.Message{
 			&agent.ResultMessage{MessageType: "result"},
 		})
 		lt := &taskslog.LoadedTask{

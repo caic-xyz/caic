@@ -93,9 +93,11 @@ func TestTask(t *testing.T) {
 			t.Error("RateLimit.ObservedAt is zero")
 		}
 
-		tk.RestoreMessages([]agent.Message{message})
-		if got := tk.Snapshot().RateLimit; got.Status != "rejected" || !got.ResetsAt.Equal(resetAt) {
-			t.Errorf("restored RateLimit = %+v, want rejected until %v", got, resetAt)
+		// Seeding a fresh task from the same log recovers the rate limit.
+		seeded := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		seeded.SeedTimeline([]agent.Message{message})
+		if got := seeded.Snapshot().RateLimit; got.Status != "rejected" || !got.ResetsAt.Equal(resetAt) {
+			t.Errorf("seeded RateLimit = %+v, want rejected until %v", got, resetAt)
 		}
 
 		tk.addMessage(t.Context(), &agent.RateLimitMessage{
@@ -194,18 +196,18 @@ func TestTask(t *testing.T) {
 			t.Fatal("Snapshot exposed mutable repo storage")
 		}
 	})
-	t.Run("RestoreMessagesCapturesExitError", func(t *testing.T) {
+	t.Run("SeedTimelineCapturesExitError", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-		tk.RestoreMessages([]agent.Message{&agent.ExitMessage{ExitCode: 2, Error: "Unknown option: --approve"}})
+		tk.SeedTimeline([]agent.Message{&agent.ExitMessage{ExitCode: 2, Error: "Unknown option: --approve"}})
 		if got := tk.LastExitError(); got != "Unknown option: --approve" {
 			t.Errorf("LastExitError = %q, want relay stderr", got)
 		}
 	})
-	t.Run("RestoreMessagesClearsStaleExitErrorOnLaterSessionActivity", func(t *testing.T) {
+	t.Run("SeedTimelineClearsStaleExitErrorOnLaterSessionActivity", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-		tk.RestoreMessages([]agent.Message{
+		tk.SeedTimeline([]agent.Message{
 			&agent.ExitMessage{ExitCode: 2, Error: "stale crash"},
 			&agent.InitMessage{SessionID: "new-session"},
 			&agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done"},
@@ -214,11 +216,11 @@ func TestTask(t *testing.T) {
 			t.Errorf("LastExitError = %q, want stale exit error cleared", got)
 		}
 	})
-	t.Run("RestoreMessagesIgnoresTrailingExitAfterSuccessfulTurn", func(t *testing.T) {
+	t.Run("SeedTimelineIgnoresTrailingExitAfterSuccessfulTurn", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		tk.SetState(taskslog.StateRunning)
-		tk.RestoreMessages([]agent.Message{
+		tk.SeedTimeline([]agent.Message{
 			&agent.InitMessage{SessionID: "session"},
 			&agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done"},
 			&agent.ExitMessage{ExitCode: 2, Error: "stale crash"},
@@ -1078,13 +1080,13 @@ func TestTask(t *testing.T) {
 		})
 	})
 
-	t.Run("RestoreMessagesDiffStat", func(t *testing.T) {
+	t.Run("SeedTimelineDiffStat", func(t *testing.T) {
 		t.Parallel()
 		t.Run("DiffStatMessage", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StatePurged)
-			tk.RestoreMessages([]agent.Message{
+			tk.SeedTimeline([]agent.Message{
 				&agent.DiffStatMessage{
 					MessageType: "caic_diff_stat",
 					DiffStat:    agent.DiffStat{{Path: "old.go", Added: 1}},
@@ -1105,7 +1107,7 @@ func TestTask(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StatePurged)
-			tk.RestoreMessages([]agent.Message{
+			tk.SeedTimeline([]agent.Message{
 				&agent.DiffStatMessage{
 					MessageType: "caic_diff_stat",
 					DiffStat:    agent.DiffStat{{Path: "stale.go", Added: 1}},
@@ -1125,7 +1127,7 @@ func TestTask(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StatePurged)
-			tk.RestoreMessages([]agent.Message{
+			tk.SeedTimeline([]agent.Message{
 				&agent.ResultMessage{
 					MessageType: "result",
 					DiffStat:    agent.DiffStat{{Path: "result.go", Added: 5}},
@@ -1145,9 +1147,9 @@ func TestTask(t *testing.T) {
 		// (uncommitted changes). After the agent commits, this is empty.
 		// The ResultMessage.DiffStat (host-side branch diff) is set
 		// in-memory by startMessageDispatch and NOT persisted to the
-		// relay output, so RestoreMessages only sees the empty relay
+		// relay output, so SeedTimeline only sees the empty relay
 		// diff. Runtime import must compute the host-side diff stat
-		// separately after RestoreMessages.
+		// separately after SeedTimeline.
 		t.Run("EmptyRelayDiffAfterCommit", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
@@ -1155,7 +1157,7 @@ func TestTask(t *testing.T) {
 			// Simulate relay output: ResultMessage without DiffStat
 			// (host-side mutation not persisted) followed by an empty
 			// DiffStatMessage (relay sees no uncommitted changes).
-			tk.RestoreMessages([]agent.Message{
+			tk.SeedTimeline([]agent.Message{
 				&agent.DiffStatMessage{
 					MessageType: "caic_diff_stat",
 					DiffStat:    agent.DiffStat{{Path: "main.go", Added: 10, Deleted: 2}},
@@ -1220,11 +1222,11 @@ func TestTask(t *testing.T) {
 		}
 	})
 
-	t.Run("RestoreMessagesUsageCumulative", func(t *testing.T) {
+	t.Run("SeedTimelineUsageCumulative", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		tk.SetState(taskslog.StatePurged)
-		tk.RestoreMessages([]agent.Message{
+		tk.SeedTimeline([]agent.Message{
 			&agent.ResultMessage{
 				MessageType: "result",
 				Usage:       agent.Usage{InputTokens: 100, OutputTokens: 50, ReasoningOutputTokens: 7},
@@ -1360,13 +1362,13 @@ func TestTask(t *testing.T) {
 		}
 	})
 
-	t.Run("RestoreMessagesDurationAccumulatesWithinSession", func(t *testing.T) {
+	t.Run("SeedTimelineDurationAccumulatesWithinSession", func(t *testing.T) {
 		t.Parallel()
-		// RestoreMessages (reloadFromMsgs) must accumulate DurationMs across
+		// SeedTimeline (reloadFromMsgs) must accumulate DurationMs across
 		// multiple result events within a single session.
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		tk.SetState(taskslog.StatePurged)
-		tk.RestoreMessages([]agent.Message{
+		tk.SeedTimeline([]agent.Message{
 			&agent.ResultMessage{MessageType: "result", NumTurns: 1, DurationMs: 946943},
 			&agent.ResultMessage{MessageType: "result", NumTurns: 1, DurationMs: 5278},
 			&agent.ResultMessage{MessageType: "result", NumTurns: 1, DurationMs: 214500},
@@ -1381,13 +1383,13 @@ func TestTask(t *testing.T) {
 		}
 	})
 
-	t.Run("RestoreMessagesCostCumulativeAcrossSessions", func(t *testing.T) {
+	t.Run("SeedTimelineCostCumulativeAcrossSessions", func(t *testing.T) {
 		t.Parallel()
-		// RestoreMessages must sum cost/turns/duration across context_cleared
+		// SeedTimeline must sum cost/turns/duration across context_cleared
 		// boundaries, mirroring the live path.
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		tk.SetState(taskslog.StatePurged)
-		tk.RestoreMessages([]agent.Message{
+		tk.SeedTimeline([]agent.Message{
 			// Session 1: TotalCostUSD = $10.00.
 			&agent.ResultMessage{
 				MessageType:  "result",
@@ -1449,7 +1451,7 @@ func TestTask(t *testing.T) {
 			return tk
 		}
 		// newMsgs returns fresh messages per subtest: addMessage and
-		// RestoreMessages both mutate ResultMessage.Result, so the parallel
+		// SeedTimeline both mutate ResultMessage.Result, so the parallel
 		// subtests must not share the same pointers.
 		newMsgs := func() []agent.Message {
 			return []agent.Message{
@@ -1481,7 +1483,7 @@ func TestTask(t *testing.T) {
 			t.Parallel()
 			tk := newTask()
 			tk.SetState(taskslog.StatePurged)
-			tk.RestoreMessages(newMsgs())
+			tk.SeedTimeline(newMsgs())
 			costUSD, numTurns, duration, _, _ := tk.LiveStats()
 			if costUSD != 15.0 {
 				t.Errorf("costUSD = %v, want 15.0", costUSD)
@@ -1628,8 +1630,19 @@ func TestTask(t *testing.T) {
 		})
 	})
 
-	t.Run("RestoreMessages", func(t *testing.T) {
+	t.Run("SeedTimeline", func(t *testing.T) {
 		t.Parallel()
+		t.Run("PanicsOnNonEmptyTimeline", func(t *testing.T) {
+			t.Parallel()
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+			tk.addMessage(t.Context(), &agent.TextMessage{Text: "live"}, false)
+			defer func() {
+				if recover() == nil {
+					t.Error("SeedTimeline on a task with messages did not panic")
+				}
+			}()
+			tk.SeedTimeline([]agent.Message{&agent.TextMessage{Text: "from log"}})
+		})
 		t.Run("Basic", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
@@ -1639,7 +1652,7 @@ func TestTask(t *testing.T) {
 				&agent.TextMessage{Text: "hello"},
 				&agent.ResultMessage{MessageType: "result"},
 			}
-			tk.RestoreMessages(msgs)
+			tk.SeedTimeline(msgs)
 
 			if len(tk.Messages()) != 3 {
 				t.Fatalf("Messages() len = %d, want 3", len(tk.Messages()))
@@ -1663,7 +1676,7 @@ func TestTask(t *testing.T) {
 				},
 				&agent.ResultMessage{MessageType: "result"},
 			}
-			tk.RestoreMessages(msgs)
+			tk.SeedTimeline(msgs)
 			if tk.GetState() != taskslog.StateAsking {
 				t.Errorf("state = %v, want %v (should infer asking from AskMessage + ResultMessage)", tk.GetState(), taskslog.StateAsking)
 			}
@@ -1679,7 +1692,7 @@ func TestTask(t *testing.T) {
 					Questions: []agent.AskQuestion{{Question: "which?"}},
 				},
 			}
-			tk.RestoreMessages(msgs)
+			tk.SeedTimeline(msgs)
 			if tk.GetState() != taskslog.StateAsking {
 				t.Errorf("state = %v, want %v (should infer asking from trailing AskMessage)", tk.GetState(), taskslog.StateAsking)
 			}
@@ -1696,7 +1709,7 @@ func TestTask(t *testing.T) {
 				&agent.ToolResultMessage{ToolUseID: "ask1"},
 				&agent.ResultMessage{MessageType: "result"},
 			}
-			tk.RestoreMessages(msgs)
+			tk.SeedTimeline(msgs)
 			if tk.GetState() != taskslog.StateWaiting {
 				t.Errorf("state = %v, want %v (answered AskUserQuestion should not remain asking)", tk.GetState(), taskslog.StateWaiting)
 			}
@@ -1713,7 +1726,7 @@ func TestTask(t *testing.T) {
 				&agent.ToolResultMessage{ToolUseID: "ask1", Error: "permission denied"},
 				&agent.ResultMessage{MessageType: "result"},
 			}
-			tk.RestoreMessages(msgs)
+			tk.SeedTimeline(msgs)
 			if tk.GetState() != taskslog.StateAsking {
 				t.Errorf("state = %v, want %v (errored AskUserQuestion result should remain asking)", tk.GetState(), taskslog.StateAsking)
 			}
@@ -1730,7 +1743,7 @@ func TestTask(t *testing.T) {
 				&agent.ToolUseMessage{ToolUseID: "tu2", Name: "ExitPlanMode"},
 				&agent.ResultMessage{MessageType: "result"},
 			}
-			tk.RestoreMessages(msgs)
+			tk.SeedTimeline(msgs)
 			if tk.GetState() != taskslog.StateHasPlan {
 				t.Errorf("state = %v, want %v", tk.GetState(), taskslog.StateHasPlan)
 			}
@@ -1738,7 +1751,7 @@ func TestTask(t *testing.T) {
 		t.Run("SkipsTrailingDiffStat", func(t *testing.T) {
 			t.Parallel()
 			// The relay emits DiffStatMessage after the ResultMessage.
-			// RestoreMessages should skip it and still infer Waiting.
+			// SeedTimeline should skip it and still infer Waiting.
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			msgs := []agent.Message{
@@ -1749,7 +1762,7 @@ func TestTask(t *testing.T) {
 					DiffStat:    agent.DiffStat{{Path: "main.go", Added: 1}},
 				},
 			}
-			tk.RestoreMessages(msgs)
+			tk.SeedTimeline(msgs)
 			if tk.GetState() != taskslog.StateWaiting {
 				t.Errorf("state = %v, want %v (trailing DiffStatMessage should be skipped)", tk.GetState(), taskslog.StateWaiting)
 			}
@@ -1762,7 +1775,7 @@ func TestTask(t *testing.T) {
 				&agent.InitMessage{SessionID: "s1"},
 				&agent.TextMessage{Text: "hello"},
 			}
-			tk.RestoreMessages(msgs)
+			tk.SeedTimeline(msgs)
 			// No trailing ResultMessage → agent was still producing output.
 			if tk.GetState() != taskslog.StateRunning {
 				t.Errorf("state = %v, want %v (no ResultMessage → still running)", tk.GetState(), taskslog.StateRunning)
@@ -1777,7 +1790,7 @@ func TestTask(t *testing.T) {
 					&agent.TextMessage{Text: "hello"},
 					&agent.ResultMessage{MessageType: "result"},
 				}
-				tk.RestoreMessages(msgs)
+				tk.SeedTimeline(msgs)
 				if tk.GetState() != state {
 					t.Errorf("state = %v, want %v (terminal state must not be overridden)", tk.GetState(), state)
 				}
@@ -1791,7 +1804,7 @@ func TestTask(t *testing.T) {
 				&agent.TextMessage{Text: "hello"},
 				&agent.InitMessage{SessionID: "new"},
 			}
-			tk.RestoreMessages(msgs)
+			tk.SeedTimeline(msgs)
 
 			if tk.GetSessionID() != "new" {
 				t.Errorf("SessionID = %q, want %q", tk.GetSessionID(), "new")
@@ -1808,7 +1821,7 @@ func TestTask(t *testing.T) {
 				},
 				&agent.ResultMessage{MessageType: "result"},
 			}
-			tk.RestoreMessages(msgs)
+			tk.SeedTimeline(msgs)
 			if tk.GetPlanFile() != "/home/user/.claude/plans/my-plan.md" {
 				t.Errorf("PlanFile = %q, want %q", tk.GetPlanFile(), "/home/user/.claude/plans/my-plan.md")
 			}
@@ -1826,7 +1839,7 @@ func TestTask(t *testing.T) {
 				&agent.ToolUseMessage{ToolUseID: "tu3", Name: "ExitPlanMode"},
 				&agent.ResultMessage{MessageType: "result"},
 			}
-			tk.RestoreMessages(msgs)
+			tk.SeedTimeline(msgs)
 			if tk.Snapshot().InPlanMode {
 				t.Error("InPlanMode = true, want false (ExitPlanMode should clear it)")
 			}
@@ -1837,7 +1850,7 @@ func TestTask(t *testing.T) {
 			// Without ExitPlanMode, should stay in plan mode.
 			tk2 := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk2.SetState(taskslog.StateRunning)
-			tk2.RestoreMessages(msgs[:1])
+			tk2.SeedTimeline(msgs[:1])
 			if !tk2.Snapshot().InPlanMode {
 				t.Error("InPlanMode = false, want true (only EnterPlanMode seen)")
 			}
@@ -1846,7 +1859,7 @@ func TestTask(t *testing.T) {
 			t.Parallel()
 			// Simulates relay output containing a plan, then a context_cleared
 			// marker (from ClearMessages on restart), then a new session without
-			// a plan. RestoreMessages must not carry over the stale plan.
+			// a plan. SeedTimeline must not carry over the stale plan.
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			msgs := []agent.Message{
@@ -1862,7 +1875,7 @@ func TestTask(t *testing.T) {
 				&agent.TextMessage{Text: "done"},
 				&agent.ResultMessage{MessageType: "result"},
 			}
-			tk.RestoreMessages(msgs)
+			tk.SeedTimeline(msgs)
 			snap := tk.Snapshot()
 			if snap.InPlanMode {
 				t.Error("InPlanMode = true, want false (context_cleared should reset)")
@@ -1900,7 +1913,7 @@ func TestTask(t *testing.T) {
 				&agent.ToolUseMessage{ToolUseID: "tu5", Name: "ExitPlanMode"},
 				&agent.ResultMessage{MessageType: "result"},
 			}
-			tk.RestoreMessages(msgs)
+			tk.SeedTimeline(msgs)
 			snap := tk.Snapshot()
 			if snap.PlanContent != "" {
 				t.Errorf("PlanContent = %q, want empty (plan written after context_cleared should be suppressed)", snap.PlanContent)
@@ -1927,7 +1940,7 @@ func TestTask(t *testing.T) {
 				&agent.TextMessage{Text: "done"},
 				&agent.ResultMessage{MessageType: "result"},
 			}
-			tk.RestoreMessages(msgs)
+			tk.SeedTimeline(msgs)
 			if exitMsg1.PlanContent != "" {
 				t.Errorf("exitMsg1.PlanContent = %q, want empty (context_cleared should clear it)", exitMsg1.PlanContent)
 			}
@@ -1957,7 +1970,7 @@ func TestTask(t *testing.T) {
 				exitMsg2,
 				&agent.ResultMessage{MessageType: "result"},
 			}
-			tk.RestoreMessages(msgs)
+			tk.SeedTimeline(msgs)
 			if exitMsg1.PlanContent != "" {
 				t.Errorf("exitMsg1.PlanContent = %q, want empty (superseded by plan v2)", exitMsg1.PlanContent)
 			}
@@ -1972,7 +1985,7 @@ func TestTask(t *testing.T) {
 				&agent.TextMessage{Text: "msg1"},
 				&agent.TextMessage{Text: "msg2"},
 			}
-			tk.RestoreMessages(msgs)
+			tk.SeedTimeline(msgs)
 
 			// A subscriber should see restored messages in the history snapshot.
 			history, _, unsub := tk.Subscribe(t.Context())
@@ -1996,7 +2009,7 @@ func TestTask(t *testing.T) {
 				&agent.TextMessage{Text: "done"},
 				&agent.ResultMessage{MessageType: "result"},
 			}
-			tk.RestoreMessages(msgs)
+			tk.SeedTimeline(msgs)
 
 			rm, ok := msgs[len(msgs)-1].(*agent.ResultMessage)
 			if !ok {
@@ -2017,7 +2030,7 @@ func TestTask(t *testing.T) {
 				&agent.TextDeltaMessage{Text: "thinking"},
 				&agent.ResultMessage{MessageType: "result"},
 			}
-			tk.RestoreMessages(msgs)
+			tk.SeedTimeline(msgs)
 
 			rm, ok := msgs[len(msgs)-1].(*agent.ResultMessage)
 			if !ok {
@@ -2133,10 +2146,10 @@ func TestTask(t *testing.T) {
 				t.Errorf("AgentVersion = %q, want 1.2.3", snap.AgentVersion)
 			}
 		})
-		t.Run("RestoreMessagesRecordsVersionWithoutSession", func(t *testing.T) {
+		t.Run("SeedTimelineRecordsVersionWithoutSession", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-			tk.RestoreMessages([]agent.Message{&agent.InitMessage{Version: "1.2.3"}})
+			tk.SeedTimeline([]agent.Message{&agent.InitMessage{Version: "1.2.3"}})
 			if snap := tk.Snapshot(); snap.AgentVersion != "1.2.3" {
 				t.Errorf("AgentVersion = %q, want 1.2.3", snap.AgentVersion)
 			}
@@ -2261,7 +2274,7 @@ func TestTask(t *testing.T) {
 		t.Run("RestoresCurrentAsk", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-			tk.RestoreMessages([]agent.Message{
+			tk.SeedTimeline([]agent.Message{
 				&agent.AskMessage{
 					ToolUseID: "toolu-1",
 					Questions: []agent.AskQuestion{{Question: "Which?"}},
@@ -2300,7 +2313,7 @@ func TestTask(t *testing.T) {
 		t.Run("DedupesDuplicatedRestoredAsk", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-			tk.RestoreMessages([]agent.Message{
+			tk.SeedTimeline([]agent.Message{
 				&agent.AskMessage{
 					ToolUseID: "toolu-1",
 					Questions: []agent.AskQuestion{{Question: "Which?"}},
@@ -2348,7 +2361,7 @@ func TestTask(t *testing.T) {
 		t.Run("RestoresMultipleCurrentAsks", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-			tk.RestoreMessages([]agent.Message{
+			tk.SeedTimeline([]agent.Message{
 				&agent.AskMessage{
 					ToolUseID: "toolu-1",
 					Questions: []agent.AskQuestion{{Question: "First?"}},
@@ -2393,7 +2406,7 @@ func TestTask(t *testing.T) {
 		t.Run("AnsweredAskIsClosed", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-			tk.RestoreMessages([]agent.Message{
+			tk.SeedTimeline([]agent.Message{
 				&agent.AskMessage{
 					ToolUseID: "toolu-1",
 					Questions: []agent.AskQuestion{{Question: "Which?"}},
@@ -2420,7 +2433,7 @@ func TestTask(t *testing.T) {
 		t.Run("PreviousTurnAskIsIgnored", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-			tk.RestoreMessages([]agent.Message{
+			tk.SeedTimeline([]agent.Message{
 				&agent.AskMessage{
 					ToolUseID: "toolu-1",
 					Questions: []agent.AskQuestion{{Question: "Which?"}},

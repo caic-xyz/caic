@@ -561,8 +561,8 @@ func TestRunner(t *testing.T) {
 			tk.Repos = []taskslog.RepoMount{{Name: "org/repo", Branch: "main"}}
 			tk.SetState(taskslog.StateRunning)
 
-			// Restore messages with cost info (simulates RestoreMessages from logs).
-			tk.RestoreMessages([]agent.Message{
+			// Restore messages with cost info (simulates SeedTimeline from logs).
+			tk.SeedTimeline([]agent.Message{
 				&agent.ResultMessage{
 					MessageType:  "result",
 					TotalCostUSD: 0.42,
@@ -648,7 +648,7 @@ func TestRunner(t *testing.T) {
 			tk.SetState(taskslog.StateRunning)
 
 			// Restore messages including a DiffStatMessage (simulates relay output).
-			tk.RestoreMessages([]agent.Message{
+			tk.SeedTimeline([]agent.Message{
 				&agent.DiffStatMessage{
 					MessageType: "caic_diff_stat",
 					DiffStat: agent.DiffStat{
@@ -713,7 +713,7 @@ func TestRunner(t *testing.T) {
 			tk.Repos = []taskslog.RepoMount{{Name: "org/repo", Branch: "caic-0", GitRoot: clone}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateStopped)
-			tk.RestoreMessages([]agent.Message{
+			tk.SeedTimeline([]agent.Message{
 				&agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: agent.DiffStat{{Path: "main.go", Added: 1}}},
 				&agent.DiffStatMessage{MessageType: "caic_diff_stat"},
 			})
@@ -1126,7 +1126,7 @@ func testRunnerSessions(t *testing.T) {
 			}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateRunning)
-			tk.RestoreMessages([]agent.Message{
+			tk.SeedTimeline([]agent.Message{
 				&agent.AskMessage{
 					ToolUseID: "toolu-1",
 					Questions: []agent.AskQuestion{{Question: "Which?"}},

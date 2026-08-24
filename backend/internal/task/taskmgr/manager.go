@@ -1631,16 +1631,14 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		if len(lt.Msgs) > 0 {
 			msgs = mergeLogAndRelayMessages(lt.Msgs, relayMsgs)
 		}
-		t.RestoreMessages(msgs)
-		applyLoadedSessionMetadata(t, lt)
+		t.SeedTimeline(msgs)
 		m.log.DebugContext(ctx, "relay", "msg", "restored from", "repo", relPath, "br", branch, "instance", c.ID, "alive", relayAlive, "msgs", len(msgs), "relayMsgs", len(relayRecords))
 	} else if len(lt.Msgs) > 0 {
-		t.RestoreMessages(lt.Msgs)
-		applyLoadedSessionMetadata(t, lt)
+		t.SeedTimeline(lt.Msgs)
 		m.log.WarnContext(ctx, "relay", "msg", "restored from log", "repo", relPath, "br", branch, "instance", c.ID, "msgs", len(lt.Msgs))
 	}
 	applyLoadedSessionMetadata(t, lt)
-	// Restore the persisted diff signal. RestoreMessages recomputes diffCreated
+	// Restore the persisted diff signal. SeedTimeline recomputes diffCreated
 	// from replayed history, but that replay is skipped when neither the relay
 	// tail nor the log messages load; the summary flag (scanned from the log)
 	// carries it through regardless. Sticky: only ever set, never cleared.
@@ -1789,7 +1787,7 @@ func (m *Manager) loadTaskMessagesOnDemand(entry *Entry) {
 			m.log.Warn("lazy load messages failed", "task", entry.Task().ID, "err", err)
 			return
 		}
-		entry.Task().RestoreMessages(lt.Msgs)
+		entry.Task().SeedTimeline(lt.Msgs)
 	})
 }
 

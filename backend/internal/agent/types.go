@@ -451,8 +451,8 @@ const MaxWidgetHTMLBytes = 256 * 1024 // 256 KB
 // Each harness parser checks this set to decide whether a tool_use block
 // should emit WidgetMessage instead of ToolUseMessage.
 var WidgetToolNames = map[string]struct{}{
-	"show_widget":                                 {}, // Direct tool name.
-	"mcp__widget__show_widget":                    {}, // MCP-prefixed (server "widget", tool "show_widget").
+	"show_widget":              {}, // Direct tool name.
+	"mcp__widget__show_widget": {}, // MCP-prefixed (server "widget", tool "show_widget").
 	"mcp__plugin_caic-widget_widget__show_widget": {}, // Plugin MCP-prefixed.
 }
 
