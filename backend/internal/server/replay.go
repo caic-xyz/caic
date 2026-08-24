@@ -4,6 +4,7 @@ package server
 
 import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
 // filterHistoryForReplay removes streaming delta messages that have a
@@ -59,7 +60,7 @@ func filterHistoryForReplay(msgs []agent.Message) []agent.Message {
 			if exit.ExitCode != 0 && cleanTurnComplete {
 				continue
 			}
-		} else if replayClearsExit(msg) {
+		} else if task.ClearsExitError(msg) {
 			cleanTurnComplete = false
 		}
 		if rm, ok := msg.(*agent.ResultMessage); ok {
@@ -68,17 +69,4 @@ func filterHistoryForReplay(msgs []agent.Message) []agent.Message {
 		out = append(out, msg)
 	}
 	return out
-}
-
-func replayClearsExit(msg agent.Message) bool {
-	switch m := msg.(type) {
-	case *agent.ExitMessage, *agent.DiffStatMessage, *agent.RawMessage,
-		*agent.PendingUserActionMessage, *agent.ParseErrorMessage,
-		*agent.LogMessage, *agent.StrippedEnvMessage:
-		return false
-	case *agent.ResultMessage:
-		return !m.IsError
-	default:
-		return true
-	}
 }

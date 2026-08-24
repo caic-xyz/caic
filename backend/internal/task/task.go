@@ -307,7 +307,14 @@ func fallbackBoundary(msg agent.Message) bool {
 	}
 }
 
-func clearsExitError(msg agent.Message) bool {
+// ClearsExitError reports whether a message clears the last exit error from a
+// prior turn. Messages that accompany a turn without starting a new one (exit,
+// diff stat, raw relay lines, pending user actions, parse errors, log output,
+// stripped env) never clear it; a ResultMessage clears it only when the turn
+// succeeded; every other message starts a new turn. The live fold
+// (addParsedMessage), the seed fold (SeedTimeline), and the server SSE replay
+// filter must all agree on this rule, so it lives in one place.
+func ClearsExitError(msg agent.Message) bool {
 	switch m := msg.(type) {
 	case *agent.ExitMessage, *agent.DiffStatMessage, *agent.RawMessage,
 		*agent.PendingUserActionMessage, *agent.ParseErrorMessage,
@@ -1063,7 +1070,7 @@ func (t *Task) SeedTimeline(msgs []agent.Message) {
 			}
 			continue
 		}
-		if clearsExitError(msg) {
+		if ClearsExitError(msg) {
 			t.lastExitError = ""
 			if _, ok := msg.(*agent.ResultMessage); !ok {
 				cleanTurnComplete = false
@@ -1750,7 +1757,7 @@ func (t *Task) addParsedMessage(parsed agent.ParsedMessage, skipTitleGen bool) (
 		} else {
 			t.lastExitError = ""
 		}
-	} else if clearsExitError(m) {
+	} else if ClearsExitError(m) {
 		t.lastExitError = ""
 	}
 	// compact_boundary resets TotalCostUSD in Claude Code's subsequent
