@@ -113,8 +113,8 @@ func TestRouter(t *testing.T) {
 		events := make(chan runtime.Event, 1)
 		ctxDone := make(chan struct{})
 		router, err := runtime.NewRouter(testLogger(), []runtime.System{
-			&routerEventSystem{FakeBackend: runtimetest.FakeBackend{RuntimeName: "docker"}, routerEventMonitor: routerEventMonitor{events: events, ctxDone: ctxDone}},
-			&routerEventSystem{FakeBackend: runtimetest.FakeBackend{RuntimeName: "podman"}, routerEventMonitor: routerEventMonitor{err: errors.New("boom")}},
+			&routerEventSystem{RuntimeName: "docker", events: events, ctxDone: ctxDone},
+			&routerEventSystem{RuntimeName: "podman", err: errors.New("boom")},
 		})
 		if err != nil {
 			t.Fatal(err)

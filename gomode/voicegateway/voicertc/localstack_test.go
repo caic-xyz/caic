@@ -966,7 +966,7 @@ func (p *fakeGenAIProvider) GenStream(_ context.Context, msgs genai.Messages, op
 				}
 			}
 		}, func() (genai.Result, error) {
-			return genai.Result{Message: genai.Message{Replies: replies}}, nil
+			return genai.Result{Replies: replies}, nil
 		}
 }
 
@@ -1015,5 +1015,5 @@ func (p *fakeASRProvider) GenSync(_ context.Context, msgs genai.Messages, _ ...g
 	}
 	p.mimeType = mimeType
 	p.wav = data
-	return genai.Result{Message: genai.Message{Replies: []genai.Reply{{Text: "hello world"}}}}, nil
+	return genai.Result{Replies: []genai.Reply{{Text: "hello world"}}}, nil
 }

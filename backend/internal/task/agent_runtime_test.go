@@ -1114,7 +1114,7 @@ func testRunnerSessions(t *testing.T) {
 		})
 		t.Run("passes_history_to_attach_backend", func(t *testing.T) {
 			t.Parallel()
-			backend := &attachCaptureBackend{testBackend: testBackend{FakeBackend: &agenttest.FakeBackend{}}}
+			backend := &attachCaptureBackend{FakeBackend: &agenttest.FakeBackend{}}
 			r := newTestAgentRuntime(t, nil, filepath.Join(t.TempDir(), "logs"), map[harness.Name]agent.Backend{"test": backend})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
 			logW, err := r.openLog(tk)
@@ -1172,7 +1172,7 @@ func testRunnerSessions(t *testing.T) {
 		})
 		t.Run("missing_log_fails_closed", func(t *testing.T) {
 			t.Parallel()
-			backend := &attachCaptureBackend{testBackend: testBackend{FakeBackend: &agenttest.FakeBackend{}}}
+			backend := &attachCaptureBackend{FakeBackend: &agenttest.FakeBackend{}}
 			r := newTestAgentRuntime(t, nil, filepath.Join(t.TempDir(), "logs"), map[harness.Name]agent.Backend{"test": backend})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)

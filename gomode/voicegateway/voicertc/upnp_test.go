@@ -121,7 +121,7 @@ func TestTryMapUPnPUDP(t *testing.T) {
 
 	t.Run("valid add any", func(t *testing.T) {
 		t.Parallel()
-		client := &upnpWANAnyPortConnectionFake{upnpWANConnectionFake: upnpWANConnectionFake{externalIP: "203.0.113.10", exactErr: errors.New("port in use")}, reservedPort: 40000}
+		client := &upnpWANAnyPortConnectionFake{externalIP: "203.0.113.10", exactErr: errors.New("port in use"), reservedPort: 40000}
 		mapping, err := tryMapUPnPUDP(t.Context(), client, "192.168.1.20", 3478)
 		if err != nil {
 			t.Fatal(err)
