@@ -161,7 +161,7 @@ func (h *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	if isTaskEventTerminal(state) && loadedTask != nil && entry.LogPath.Get() != "" {
-		stream.tracker = apiconv.NewToolTimingTracker(entry.Task().Harness, apiconv.FormatToolOutput)
+		stream.tracker = newHistoryTracker(entry.Task())
 		if err := h.streamHistoryFromDisk(&stream, entry, loadedTask); err != nil {
 			log.WarnContext(r.Context(), "stream terminal SSE history", "err", err)
 			if r.Context().Err() == nil {
@@ -217,7 +217,7 @@ func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.
 	defer unsub()
 	defer statsUnsub()
 
-	stream.tracker = apiconv.NewToolTimingTracker(entry.Task().Harness, apiconv.FormatToolOutput)
+	stream.tracker = newHistoryTracker(entry.Task())
 
 	now := time.Now()
 	if rawHistory {
@@ -286,6 +286,12 @@ func isTaskEventTerminal(state taskslog.State) bool {
 	return state == taskslog.StatePurged || state == taskslog.StateCrashed || state == taskslog.StateFailed
 }
 
+// newHistoryTracker builds the per-stream API conversion tracker with the
+// task's plan-content projection wired in.
+func newHistoryTracker(t *task.Task) *apiconv.ToolTimingTracker {
+	return apiconv.NewToolTimingTracker(t.Harness, t.PlanContentFor)
+}
+
 // streamHistoryFromDisk parses and writes history one message at a time. The
 // parser validates the scan through EOF while the stream emits incremental SSE
 // frames, so task history is never retained as a derived cache or full slice.
@@ -294,7 +300,7 @@ func (h *taskHandlers) streamHistoryFromDisk(stream *taskEventStream, entry *tas
 		return errors.New("task has no replayable log")
 	}
 	if stream.tracker == nil {
-		stream.tracker = apiconv.NewToolTimingTracker(entry.Task().Harness, apiconv.FormatToolOutput)
+		stream.tracker = newHistoryTracker(entry.Task())
 	}
 	const historyFlushBytes = 64 << 10
 	lastFlushBytes := stream.writtenBytes

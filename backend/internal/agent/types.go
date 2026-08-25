@@ -100,12 +100,11 @@ func (m *TextMessage) Type() string { return messageTypeText }
 // ToolUseMessage is emitted when the agent invokes a tool (except
 // AskUserQuestion and TodoWrite which have their own types).
 type ToolUseMessage struct {
-	ToolUseID   string          `json:"id"`
-	Name        string          `json:"name"`
-	Input       json.RawMessage `json:"input,omitempty"`
-	Detail      string          `json:"detail,omitempty"` // Backend-normalized short display detail for tool headers.
-	InputView   ToolInputView   `json:"input_view,omitzero"`
-	PlanContent string          `json:"-"` // Snapshot of plan content; set by task on ExitPlanMode.
+	ToolUseID string          `json:"id"`
+	Name      string          `json:"name"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	Detail    string          `json:"detail,omitempty"` // Backend-normalized short display detail for tool headers.
+	InputView ToolInputView   `json:"input_view,omitzero"`
 }
 
 // ToolInputViewKind identifies a normalized tool input view.

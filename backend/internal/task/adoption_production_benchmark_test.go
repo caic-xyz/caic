@@ -76,9 +76,8 @@ func BenchmarkTaskAdoption(b *testing.B) {
 // into task state. The message mix mirrors a long session: mostly text and
 // tool traffic punctuated by turn results, diff stats and context boundaries.
 //
-// The seeded messages are shared across iterations. SeedTimeline mutates them
-// (empty results get fallback text, ExitPlanMode gets a plan snapshot), but
-// those writes are idempotent, so only the first iteration sees the extra work.
+// The seeded messages are shared across iterations; SeedTimeline only reads
+// the slice, so sharing is safe.
 func BenchmarkSeedTimeline(b *testing.B) {
 	const turns = 500
 	msgs := make([]agent.Message, 0, turns*8)

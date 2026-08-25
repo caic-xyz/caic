@@ -143,6 +143,7 @@ type Task struct {
 	reportedContextWindow int       // Context window size reported by the agent (0 = unknown).
 	planFile              string    // Path to plan file inside instance, captured from Write tool_use.
 	planContent           string    // Content of the plan file, captured from Write tool_use input.
+	planExitID            string    // ToolUseID of the ExitPlanMode carrying planContent; "" after context_cleared.
 	planDismissed         bool      // True after ClearMessages; suppresses plan tracking until the next ResultMessage.
 	inPlanMode            bool      // True while the agent is in plan mode (between EnterPlanMode and ExitPlanMode).
 	title                 string    // LLM-generated short title; set via SetTitle.
@@ -243,58 +244,68 @@ func lastAgentMessage(msgs []agent.Message) *agent.ResultMessage {
 	return nil
 }
 
-// fillEmptyResultMessages fills empty ResultMessage text from visible assistant
-// text in the same turn.
-func fillEmptyResultMessages(msgs []agent.Message) {
-	for i, msg := range msgs {
-		rm, ok := msg.(*agent.ResultMessage)
-		if !ok || rm.Result != "" {
-			continue
+// ResultTextWindow accumulates the visible assistant text of the current
+// turn so a streaming consumer can produce the fallback result text at the
+// point a ResultMessage arrives. Any other message type (a boundary, see
+// fallbackBoundary) resets the window; finalized TextMessages accumulate
+// with consecutive duplicates collapsed, and TextDeltaMessages count only
+// until the first finalized text.
+type ResultTextWindow struct {
+	texts []string
+	delta strings.Builder
+}
+
+// Update folds one message into the window.
+func (w *ResultTextWindow) Update(msg agent.Message) {
+	if fallbackBoundary(msg) {
+		w.reset()
+		return
+	}
+	switch m := msg.(type) {
+	case *agent.TextMessage:
+		text := strings.TrimSpace(m.Text)
+		if text == "" {
+			return
 		}
-		rm.Result = fallbackResultText(msgs[:i+1])
+		if len(w.texts) == 0 || w.texts[len(w.texts)-1] != text {
+			w.texts = append(w.texts, text)
+		}
+	case *agent.TextDeltaMessage:
+		if len(w.texts) == 0 {
+			w.delta.WriteString(m.Text)
+		}
 	}
 }
 
-// fallbackResultText returns visible assistant text from the current turn.
-// The input may include the trailing ResultMessage being filled.
-func fallbackResultText(msgs []agent.Message) string {
-	if len(msgs) == 0 {
-		return ""
+// Value returns the accumulated fallback text: finalized messages joined by
+// blank lines, or the trimmed delta stream when none arrived.
+func (w *ResultTextWindow) Value() string {
+	if len(w.texts) > 0 {
+		return strings.Join(w.texts, "\n\n")
 	}
-	end := len(msgs)
-	if _, ok := msgs[end-1].(*agent.ResultMessage); ok {
-		end--
-	}
-	start := 0
-	for i := end - 1; i >= 0; i-- {
-		if fallbackBoundary(msgs[i]) {
-			start = i + 1
-			break
-		}
-	}
+	return strings.TrimSpace(w.delta.String())
+}
 
-	var texts []string
-	var delta strings.Builder
-	for _, msg := range msgs[start:end] {
-		switch m := msg.(type) {
-		case *agent.TextMessage:
-			text := strings.TrimSpace(m.Text)
-			if text == "" {
-				continue
-			}
-			if len(texts) == 0 || texts[len(texts)-1] != text {
-				texts = append(texts, text)
-			}
-		case *agent.TextDeltaMessage:
-			if len(texts) == 0 {
-				delta.WriteString(m.Text)
-			}
+func (w *ResultTextWindow) reset() {
+	w.texts = nil
+	w.delta.Reset()
+}
+
+// fallbackResultText returns the visible assistant text of the turn preceding
+// the trailing ResultMessage in msgs, using the same window rules as
+// ResultTextWindow. The input may include the trailing ResultMessage.
+func fallbackResultText(msgs []agent.Message) string {
+	end := len(msgs)
+	if end > 0 {
+		if _, ok := msgs[end-1].(*agent.ResultMessage); ok {
+			end--
 		}
 	}
-	if len(texts) > 0 {
-		return strings.Join(texts, "\n\n")
+	var w ResultTextWindow
+	for _, msg := range msgs[:end] {
+		w.Update(msg)
 	}
-	return strings.TrimSpace(delta.String())
+	return w.Value()
 }
 
 func fallbackBoundary(msg agent.Message) bool {
@@ -776,17 +787,36 @@ func (t *Task) LiveStats() (costUSD float64, numTurns int, duration time.Duratio
 }
 
 // LastAgentResult returns the result text from the most recent ResultMessage,
-// or "" if none was received. Used by Cleanup/StopTask for the log trailer.
+// falling back to the visible text of that turn when the agent reported
+// none, or "" if no result was received. Used by Cleanup/StopTask for the
+// log trailer.
 func (t *Task) LastAgentResult() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	// Walk messages in reverse to find the last ResultMessage.
-	for _, msg := range slices.Backward(t.msgs) {
-		if rm, ok := msg.(*agent.ResultMessage); ok {
-			return rm.Result
+	for i, v := range slices.Backward(t.msgs) {
+		if rm, ok := v.(*agent.ResultMessage); ok {
+			if rm.Result != "" {
+				return rm.Result
+			}
+			return fallbackResultText(t.msgs[:i+1])
 		}
 	}
 	return ""
+}
+
+// PlanContentFor returns the plan content to display on an ExitPlanMode
+// message with the given tool use ID: the current plan content when this is
+// the visible plan (most recent ExitPlanMode, not cleared by
+// context_cleared), else "". SSE conversion consumes this projection because
+// the immutable message no longer carries a plan snapshot.
+func (t *Task) PlanContentFor(toolUseID string) string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if toolUseID == "" || toolUseID != t.planExitID {
+		return ""
+	}
+	return t.planContent
 }
 
 // LastExitError returns the most recent non-zero relay exit diagnostic.
@@ -1042,24 +1072,24 @@ func (t *Task) SeedTimeline(msgs []agent.Message) {
 	if len(t.msgs) > 0 {
 		panic(fmt.Sprintf("task %s: SeedTimeline on a timeline that already holds %d messages", t.ID, len(t.msgs)))
 	}
-	fillEmptyResultMessages(msgs)
 	t.msgs = msgs
 	// One forward pass: the task starts empty, so every field below is derived
 	// from msgs alone and the per-concern handlers touch disjoint fields.
-	// Later entries (model_rerouted) override earlier ones.
+	// Later entries (model_rerouted) override earlier ones. The fold only reads
+	// msgs — projections like plan content are resolved later via
+	// PlanContentFor instead of being written into messages.
 	//
 	// Plan state: a context_cleared marker resets it — it means ClearMessages
 	// was called (e.g. "Clear and execute plan"), so plan data before the
 	// marker is stale and plan tracking is suppressed until the next
-	// ResultMessage. lastExitPlan tracks the most recent ExitPlanMode message;
-	// when a new ExitPlanMode or a context_cleared is encountered, the previous
-	// ExitPlanMode's PlanContent is erased so only the latest plan is visible.
+	// ResultMessage. planExitID holds the ToolUseID of the ExitPlanMode that
+	// carries the current plan; a new ExitPlanMode or context_cleared
+	// supersedes it so only the latest plan is visible.
 	//
 	// Live stats: TotalCostUSD is cumulative per-session (resets on
 	// compact_boundary), so cost uses priorCostUSD + currentSessionTotal.
 	// DurationMs and NumTurns are per-invocation, so they always accumulate.
 	// Token usage is always summed.
-	var lastExitPlan *agent.ToolUseMessage
 	cleanTurnComplete := false
 	for _, msg := range msgs {
 		if exit, ok := msg.(*agent.ExitMessage); ok {
@@ -1109,10 +1139,7 @@ func (t *Task) SeedTimeline(msgs []agent.Message) {
 					t.planFile = ""
 					t.planContent = ""
 					t.planDismissed = true
-					if lastExitPlan != nil {
-						lastExitPlan.PlanContent = ""
-						lastExitPlan = nil
-					}
+					t.planExitID = ""
 				}
 				t.priorCostUSD = t.liveCostUSD
 				t.priorNumTurns = t.liveNumTurns
@@ -1122,12 +1149,6 @@ func (t *Task) SeedTimeline(msgs []agent.Message) {
 			t.recordRateLimitLocked(m)
 		case *agent.ToolUseMessage:
 			t.trackToolUse(m)
-			if m.Name == "ExitPlanMode" {
-				if lastExitPlan != nil {
-					lastExitPlan.PlanContent = ""
-				}
-				lastExitPlan = m
-			}
 		case *agent.UsageMessage:
 			t.lastAPIUsage = m.Usage
 			if m.Usage.CacheTTLSeconds > 0 {
@@ -1267,13 +1288,9 @@ func (t *Task) ClearMessages(ctx context.Context) {
 	t.planFile = ""
 	t.planContent = ""
 	t.planDismissed = true
-	// Clear PlanContent on all ExitPlanMode messages so new subscribers
-	// do not see stale plan content after context is cleared.
-	for _, m := range t.msgs {
-		if tu, ok := m.(*agent.ToolUseMessage); ok && tu.Name == "ExitPlanMode" {
-			tu.PlanContent = ""
-		}
-	}
+	// Drop the plan projection: PlanContentFor returns "" until a new plan
+	// is written and exited.
+	t.planExitID = ""
 }
 
 // Subscribe returns a snapshot of all past messages plus a live channel for
@@ -1539,14 +1556,25 @@ func (t *Task) GenerateTitle(ctx context.Context, log *slog.Logger) {
 	}
 	msgs := t.Messages()
 	var b strings.Builder
+	var window ResultTextWindow
 	for _, m := range msgs {
-		if v, ok := m.(*agent.ResultMessage); ok && v.Result != "" {
-			if b.Len() > 0 {
-				b.WriteByte('\n')
+		if v, ok := m.(*agent.ResultMessage); ok {
+			text := v.Result
+			if text == "" {
+				text = window.Value()
 			}
-			b.WriteString("Result: ")
-			b.WriteString(v.Result)
+			if text != "" {
+				if b.Len() > 0 {
+					b.WriteByte('\n')
+				}
+				b.WriteString("Result: ")
+				b.WriteString(text)
+			}
+			// A result is a turn boundary: reset the window for the next turn.
+			window.Update(m)
+			continue
 		}
+		window.Update(m)
 	}
 	// Prepend the original prompt.
 	// TODO: Use the images too.
@@ -1678,9 +1706,7 @@ func (t *Task) addParsedMessage(parsed agent.ParsedMessage, skipTitleGen bool) (
 			sub.ch <- rateLimit
 		}
 	}
-	if rm, ok := m.(*agent.ResultMessage); ok && rm.Result == "" {
-		rm.Result = fallbackResultText(t.msgs)
-	}
+
 	// Capture metadata from the init message.
 	if init, ok := m.(*agent.InitMessage); ok {
 		if init.SessionID != "" {
@@ -1705,15 +1731,6 @@ func (t *Task) addParsedMessage(parsed agent.ParsedMessage, skipTitleGen bool) (
 	// Track plan mode and plan file from tool_use events.
 	if tu, ok := m.(*agent.ToolUseMessage); ok {
 		t.trackToolUse(tu)
-		// When a new ExitPlanMode arrives, clear PlanContent on all prior
-		// ExitPlanMode messages so the frontend only renders the latest plan.
-		if tu.Name == "ExitPlanMode" {
-			for _, prev := range t.msgs[:len(t.msgs)-1] {
-				if pu, ok := prev.(*agent.ToolUseMessage); ok && pu.Name == "ExitPlanMode" {
-					pu.PlanContent = ""
-				}
-			}
-		}
 	}
 	if u, ok := m.(*agent.UsageMessage); ok {
 		t.lastAPIUsage = u.Usage
@@ -1893,14 +1910,15 @@ type editToolInput struct {
 }
 
 // trackToolUse inspects a ToolUseMessage for plan-related tools and updates
-// PlanFile and InPlanMode accordingly. The caller must hold t.mu.
+// PlanFile, InPlanMode, and which ExitPlanMode carries the current plan
+// (planExitID, resolved via PlanContentFor). The caller must hold t.mu.
 func (t *Task) trackToolUse(tu *agent.ToolUseMessage) {
 	switch tu.Name {
 	case "EnterPlanMode":
 		t.inPlanMode = true
 	case "ExitPlanMode":
 		t.inPlanMode = false
-		tu.PlanContent = t.planContent
+		t.planExitID = tu.ToolUseID
 	case "Write":
 		if t.planDismissed {
 			return

@@ -903,36 +903,37 @@ func TestTask(t *testing.T) {
 				t.Errorf("state = %v, want %v", tk.GetState(), taskslog.StateWaiting)
 			}
 		})
-		t.Run("ExitPlanModeSnapshotsPlanContent", func(t *testing.T) {
+		t.Run("ExitPlanModeProjectsPlanContent", func(t *testing.T) {
 			t.Parallel()
-			// trackToolUse must snapshot planContent onto the ExitPlanMode
-			// ToolUseMessage so the SSE converter can include it.
+			// PlanContentFor must resolve plan content for the ExitPlanMode
+			// that exits the current plan, without storing it on the message.
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu1", Name: "Write",
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"plan A"}`),
 			}, false)
-			exitMsg := &agent.ToolUseMessage{ToolUseID: "tu2", Name: "ExitPlanMode"}
-			tk.addMessage(t.Context(), exitMsg, false)
-			if exitMsg.PlanContent != "plan A" {
-				t.Errorf("ExitPlanMode.PlanContent = %q, want %q", exitMsg.PlanContent, "plan A")
+			tk.addMessage(t.Context(), &agent.ToolUseMessage{ToolUseID: "tu2", Name: "ExitPlanMode"}, false)
+			if got := tk.PlanContentFor("tu2"); got != "plan A" {
+				t.Errorf("PlanContentFor(tu2) = %q, want %q", got, "plan A")
+			}
+			if got := tk.PlanContentFor("tu1"); got != "" {
+				t.Errorf("PlanContentFor(tu1) = %q, want empty (not the exiting plan)", got)
 			}
 		})
 		t.Run("NewExitPlanModeClearsPreviousPlanContent", func(t *testing.T) {
 			t.Parallel()
-			// When a second ExitPlanMode arrives, the first one's PlanContent
-			// must be cleared so the frontend doesn't list the stale plan.
+			// When a second ExitPlanMode arrives, the plan projection must
+			// follow only it, so the frontend doesn't list the stale plan.
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu1", Name: "Write",
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"plan v1"}`),
 			}, false)
-			exitMsg1 := &agent.ToolUseMessage{ToolUseID: "tu2", Name: "ExitPlanMode"}
-			tk.addMessage(t.Context(), exitMsg1, false)
-			if exitMsg1.PlanContent != "plan v1" {
-				t.Fatalf("exitMsg1.PlanContent = %q before update, want %q", exitMsg1.PlanContent, "plan v1")
+			tk.addMessage(t.Context(), &agent.ToolUseMessage{ToolUseID: "tu2", Name: "ExitPlanMode"}, false)
+			if got := tk.PlanContentFor("tu2"); got != "plan v1" {
+				t.Fatalf("PlanContentFor(tu2) = %q before update, want %q", got, "plan v1")
 			}
 			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
 
@@ -941,13 +942,12 @@ func TestTask(t *testing.T) {
 				ToolUseID: "tu3", Name: "Write",
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"plan v2"}`),
 			}, false)
-			exitMsg2 := &agent.ToolUseMessage{ToolUseID: "tu4", Name: "ExitPlanMode"}
-			tk.addMessage(t.Context(), exitMsg2, false)
-			if exitMsg1.PlanContent != "" {
-				t.Errorf("exitMsg1.PlanContent = %q, want empty (superseded by plan v2)", exitMsg1.PlanContent)
+			tk.addMessage(t.Context(), &agent.ToolUseMessage{ToolUseID: "tu4", Name: "ExitPlanMode"}, false)
+			if got := tk.PlanContentFor("tu2"); got != "" {
+				t.Errorf("PlanContentFor(tu2) = %q, want empty (superseded by plan v2)", got)
 			}
-			if exitMsg2.PlanContent != "plan v2" {
-				t.Errorf("exitMsg2.PlanContent = %q, want %q", exitMsg2.PlanContent, "plan v2")
+			if got := tk.PlanContentFor("tu4"); got != "plan v2" {
+				t.Errorf("PlanContentFor(tu4) = %q, want %q", got, "plan v2")
 			}
 		})
 		t.Run("HasPlanToRunningOnText", func(t *testing.T) {
@@ -984,11 +984,11 @@ func TestTask(t *testing.T) {
 
 			result := &agent.ResultMessage{MessageType: "result"}
 			tk.addMessage(t.Context(), result, false)
-			if result.Result != "There is nothing to change." {
-				t.Errorf("Result = %q", result.Result)
+			if got := tk.LastAgentResult(); got != "There is nothing to change." {
+				t.Errorf("LastAgentResult = %q, want %q", got, "There is nothing to change.")
 			}
-			if tk.LastAgentResult() != result.Result {
-				t.Errorf("LastAgentResult = %q, want %q", tk.LastAgentResult(), result.Result)
+			if result.Result != "" {
+				t.Errorf("Result = %q, want empty (message must stay immutable)", result.Result)
 			}
 		})
 		t.Run("EmptyResultStopsAtThinking", func(t *testing.T) {
@@ -1001,8 +1001,11 @@ func TestTask(t *testing.T) {
 
 			result := &agent.ResultMessage{MessageType: "result"}
 			tk.addMessage(t.Context(), result, false)
-			if result.Result != "after thinking" {
-				t.Errorf("Result = %q", result.Result)
+			if got := tk.LastAgentResult(); got != "after thinking" {
+				t.Errorf("LastAgentResult = %q, want %q (thinking excluded)", got, "after thinking")
+			}
+			if result.Result != "" {
+				t.Errorf("Result = %q, want empty (message must stay immutable)", result.Result)
 			}
 		})
 		t.Run("NonEmptyResultIsPreserved", func(t *testing.T) {
@@ -1015,6 +1018,9 @@ func TestTask(t *testing.T) {
 			tk.addMessage(t.Context(), result, false)
 			if result.Result != "final" {
 				t.Errorf("Result = %q, want final", result.Result)
+			}
+			if got := tk.LastAgentResult(); got != "final" {
+				t.Errorf("LastAgentResult = %q, want final", got)
 			}
 		})
 		t.Run("NoTransitionForNonActiveStates", func(t *testing.T) {
@@ -1575,25 +1581,25 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("ClearsExitPlanModePlanContent", func(t *testing.T) {
 			t.Parallel()
-			// After ClearMessages the ExitPlanMode message's PlanContent in
-			// history must be erased so new subscribers don't see stale plans.
+			// After ClearMessages the plan projection must be dropped so new
+			// subscribers don't see stale plans; the message itself stays
+			// immutable.
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
-			exitMsg := &agent.ToolUseMessage{ToolUseID: "tu2", Name: "ExitPlanMode"}
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu1", Name: "Write",
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"the plan"}`),
 			}, false)
-			tk.addMessage(t.Context(), exitMsg, false)
+			tk.addMessage(t.Context(), &agent.ToolUseMessage{ToolUseID: "tu2", Name: "ExitPlanMode"}, false)
 			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
-			if exitMsg.PlanContent != "the plan" {
-				t.Fatalf("exitMsg.PlanContent = %q before ClearMessages, want %q", exitMsg.PlanContent, "the plan")
+			if got := tk.PlanContentFor("tu2"); got != "the plan" {
+				t.Fatalf("PlanContentFor(tu2) = %q before ClearMessages, want %q", got, "the plan")
 			}
 
 			tk.ClearMessages(t.Context())
 
-			if exitMsg.PlanContent != "" {
-				t.Errorf("exitMsg.PlanContent = %q after ClearMessages, want empty", exitMsg.PlanContent)
+			if got := tk.PlanContentFor("tu2"); got != "" {
+				t.Errorf("PlanContentFor(tu2) = %q after ClearMessages, want empty", got)
 			}
 		})
 		t.Run("SuppressionLiftsAfterTurn", func(t *testing.T) {
@@ -1924,41 +1930,39 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("ContextClearedClearsExitPlanModePlanContent", func(t *testing.T) {
 			t.Parallel()
-			// context_cleared in history must zero PlanContent on preceding
-			// ExitPlanMode events so new subscribers see no stale plan.
+			// context_cleared in history must clear the plan projection on
+			// preceding ExitPlanMode events so new subscribers see no stale
+			// plan.
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
-			exitMsg1 := &agent.ToolUseMessage{ToolUseID: "tu2", Name: "ExitPlanMode"}
 			msgs := []agent.Message{
 				&agent.ToolUseMessage{
 					ToolUseID: "tu1", Name: "Write",
 					Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"old plan"}`),
 				},
-				exitMsg1,
+				&agent.ToolUseMessage{ToolUseID: "tu2", Name: "ExitPlanMode"},
 				&agent.ResultMessage{MessageType: "result"},
 				&agent.SystemMessage{MessageType: "system", Subtype: "context_cleared"},
 				&agent.TextMessage{Text: "done"},
 				&agent.ResultMessage{MessageType: "result"},
 			}
 			tk.SeedTimeline(msgs)
-			if exitMsg1.PlanContent != "" {
-				t.Errorf("exitMsg1.PlanContent = %q, want empty (context_cleared should clear it)", exitMsg1.PlanContent)
+			if got := tk.PlanContentFor("tu2"); got != "" {
+				t.Errorf("PlanContentFor(tu2) = %q, want empty (context_cleared should clear it)", got)
 			}
 		})
 		t.Run("PlanUpdateClearsPreviousExitPlanModePlanContent", func(t *testing.T) {
 			t.Parallel()
 			// When a plan is updated (two ExitPlanMode without context_cleared),
-			// only the latest ExitPlanMode should retain its PlanContent.
+			// the projection must follow only the latest ExitPlanMode.
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
-			exitMsg1 := &agent.ToolUseMessage{ToolUseID: "tu2", Name: "ExitPlanMode"}
-			exitMsg2 := &agent.ToolUseMessage{ToolUseID: "tu5", Name: "ExitPlanMode"}
 			msgs := []agent.Message{
 				&agent.ToolUseMessage{
 					ToolUseID: "tu1", Name: "Write",
 					Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"plan v1"}`),
 				},
-				exitMsg1,
+				&agent.ToolUseMessage{ToolUseID: "tu2", Name: "ExitPlanMode"},
 				&agent.ResultMessage{MessageType: "result"},
 				&agent.ToolUseMessage{
 					ToolUseID: "tu3", Name: "EnterPlanMode",
@@ -1967,15 +1971,76 @@ func TestTask(t *testing.T) {
 					ToolUseID: "tu4", Name: "Write",
 					Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"plan v2"}`),
 				},
-				exitMsg2,
+				&agent.ToolUseMessage{ToolUseID: "tu5", Name: "ExitPlanMode"},
 				&agent.ResultMessage{MessageType: "result"},
 			}
 			tk.SeedTimeline(msgs)
-			if exitMsg1.PlanContent != "" {
-				t.Errorf("exitMsg1.PlanContent = %q, want empty (superseded by plan v2)", exitMsg1.PlanContent)
+			if got := tk.PlanContentFor("tu2"); got != "" {
+				t.Errorf("PlanContentFor(tu2) = %q, want empty (superseded by plan v2)", got)
 			}
-			if exitMsg2.PlanContent != "plan v2" {
-				t.Errorf("exitMsg2.PlanContent = %q, want %q", exitMsg2.PlanContent, "plan v2")
+			if got := tk.PlanContentFor("tu5"); got != "plan v2" {
+				t.Errorf("PlanContentFor(tu5) = %q, want %q", got, "plan v2")
+			}
+		})
+		t.Run("FoldingTheSameSliceTwiceIsIdempotent", func(t *testing.T) {
+			t.Parallel()
+			// The same slice is folded into two fresh tasks, as restore and a
+			// replay would do. The fold must produce equivalent state and
+			// leave the shared messages unmodified.
+			msgs := []agent.Message{
+				&agent.ToolUseMessage{ToolUseID: "tu1", Name: "Write", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"plan A"}`)},
+				&agent.ToolUseMessage{ToolUseID: "tu2", Name: "ExitPlanMode"},
+				&agent.ResultMessage{MessageType: "result"},
+				&agent.ToolUseMessage{ToolUseID: "tu3", Name: "Write", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"plan B"}`)},
+				&agent.ToolUseMessage{ToolUseID: "tu4", Name: "ExitPlanMode"},
+				&agent.ResultMessage{MessageType: "result", Result: "done"},
+				&agent.SystemMessage{MessageType: "system", Subtype: "context_cleared"},
+				&agent.TextMessage{Text: "after clear"},
+				&agent.ResultMessage{MessageType: "result", Result: "final"},
+			}
+			before, err := json.Marshal(msgs)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			a := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+			b := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+			a.SeedTimeline(msgs)
+			afterFirst, err := json.Marshal(msgs)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			b.SeedTimeline(msgs)
+			afterSecond, err := json.Marshal(msgs)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if !bytes.Equal(before, afterFirst) {
+				t.Errorf("first fold mutated the shared slice")
+			}
+			if !bytes.Equal(before, afterSecond) {
+				t.Errorf("second fold mutated the shared slice")
+			}
+			as, bs := a.Snapshot(), b.Snapshot()
+			if as.State != bs.State {
+				t.Errorf("state = %v after second fold, want %v (first)", bs.State, as.State)
+			}
+			if as.Title != bs.Title {
+				t.Errorf("title = %q after second fold, want %q (first)", bs.Title, as.Title)
+			}
+			if as.InPlanMode != bs.InPlanMode {
+				t.Errorf("InPlanMode = %v after second fold, want %v (first)", bs.InPlanMode, as.InPlanMode)
+			}
+			if as.PlanFile != bs.PlanFile {
+				t.Errorf("PlanFile = %q after second fold, want %q (first)", bs.PlanFile, as.PlanFile)
+			}
+			if as.PlanContent != bs.PlanContent {
+				t.Errorf("PlanContent = %q after second fold, want %q (first)", bs.PlanContent, as.PlanContent)
+			}
+			if a.PlanContentFor("tu2") != b.PlanContentFor("tu2") {
+				t.Errorf("PlanContentFor(tu2) differs between folds: %q vs %q", a.PlanContentFor("tu2"), b.PlanContentFor("tu2"))
+			}
+			if a.PlanContentFor("tu4") != b.PlanContentFor("tu4") {
+				t.Errorf("PlanContentFor(tu4) differs between folds: %q vs %q", a.PlanContentFor("tu4"), b.PlanContentFor("tu4"))
 			}
 		})
 		t.Run("Subscribe", func(t *testing.T) {
@@ -2011,12 +2076,13 @@ func TestTask(t *testing.T) {
 			}
 			tk.SeedTimeline(msgs)
 
-			rm, ok := msgs[len(msgs)-1].(*agent.ResultMessage)
-			if !ok {
-				t.Fatalf("last message type = %T, want *agent.ResultMessage", msgs[len(msgs)-1])
+			if got := tk.LastAgentResult(); got != "done" {
+				t.Errorf("result = %q, want %q", got, "done")
 			}
-			if rm.Result != "done" {
-				t.Errorf("Result = %q", rm.Result)
+			if rm, ok := msgs[len(msgs)-1].(*agent.ResultMessage); !ok {
+				t.Fatalf("last message type = %T, want *agent.ResultMessage", msgs[len(msgs)-1])
+			} else if rm.Result != "" {
+				t.Errorf("restored result = %q, want empty (message must stay immutable)", rm.Result)
 			}
 		})
 		t.Run("EmptyResultStopsAtRestoredThinking", func(t *testing.T) {
@@ -2032,12 +2098,13 @@ func TestTask(t *testing.T) {
 			}
 			tk.SeedTimeline(msgs)
 
-			rm, ok := msgs[len(msgs)-1].(*agent.ResultMessage)
-			if !ok {
-				t.Fatalf("last message type = %T, want *agent.ResultMessage", msgs[len(msgs)-1])
+			if got := tk.LastAgentResult(); got != "after thinking" {
+				t.Errorf("result = %q, want %q (thinking excluded)", got, "after thinking")
 			}
-			if rm.Result != "after thinking" {
-				t.Errorf("Result = %q", rm.Result)
+			if rm, ok := msgs[len(msgs)-1].(*agent.ResultMessage); !ok {
+				t.Fatalf("last message type = %T, want *agent.ResultMessage", msgs[len(msgs)-1])
+			} else if rm.Result != "" {
+				t.Errorf("restored result = %q, want empty (message must stay immutable)", rm.Result)
 			}
 		})
 	})

@@ -3,13 +3,17 @@
 package apiconv
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
 
+	"github.com/maruel/ksid"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
 func TestToolTimingTrackerConvertMessage(t *testing.T) {
@@ -166,6 +170,50 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 		}
 		if events[0].RateLimit == nil || events[0].RateLimit.Status != v1.EventRateLimitStatusAllowedWarning {
 			t.Fatalf("rate limit status = %#v, want %q", events[0].RateLimit, v1.EventRateLimitStatusAllowedWarning)
+		}
+	})
+}
+
+func TestConvertMessagePlanContentProjection(t *testing.T) {
+	t.Parallel()
+
+	t.Run("plan content follows latest ExitPlanMode", func(t *testing.T) {
+		t.Parallel()
+		tk, err := task.NewTask(ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "", "", "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		planWrite := &agent.ToolUseMessage{
+			ToolUseID: "tu-1", Name: "Write",
+			Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"plan A"}`),
+		}
+		exit := &agent.ToolUseMessage{ToolUseID: "tu-2", Name: "ExitPlanMode"}
+		tk.SeedTimeline([]agent.Message{planWrite, exit})
+
+		tt := NewToolTimingTracker(harness.Claude, tk.PlanContentFor)
+		if events := tt.ConvertMessage(planWrite, time.Unix(1, 0)); len(events) != 1 || events[0].ToolUse == nil {
+			t.Fatalf("write events = %#v, want 1 tool_use event", events)
+		} else if events[0].ToolUse.PlanContent != "" {
+			t.Errorf("write PlanContent = %q, want empty (superseded)", events[0].ToolUse.PlanContent)
+		}
+		events := tt.ConvertMessage(exit, time.Unix(2, 0))
+		if len(events) != 1 || events[0].ToolUse == nil {
+			t.Fatalf("exit events = %#v, want 1 tool_use event", events)
+		}
+		if events[0].ToolUse.PlanContent != "plan A" {
+			t.Errorf("exit PlanContent = %q, want %q", events[0].ToolUse.PlanContent, "plan A")
+		}
+	})
+
+	t.Run("nil resolver yields empty plan content", func(t *testing.T) {
+		t.Parallel()
+		tt := NewToolTimingTracker(harness.Claude, nil)
+		events := tt.ConvertMessage(&agent.ToolUseMessage{ToolUseID: "tu-1", Name: "ExitPlanMode"}, time.Unix(1, 0))
+		if len(events) != 1 || events[0].ToolUse == nil {
+			t.Fatalf("events = %#v, want 1 tool_use event", events)
+		}
+		if events[0].ToolUse.PlanContent != "" {
+			t.Errorf("PlanContent = %q, want empty", events[0].ToolUse.PlanContent)
 		}
 	})
 }

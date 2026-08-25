@@ -10,6 +10,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
 // InputTruncateThreshold is the maximum byte length of a tool input JSON before it
@@ -17,36 +18,43 @@ import (
 // GET /api/caic/v1/tasks/{id}/tool/{toolUseID}.
 const InputTruncateThreshold = 4096
 
-// ToolOutputFormatter analyzes a tool output string and returns its content
-// type along with an optional formatted version.
-type ToolOutputFormatter func(raw string) (contentType v1.ToolOutputContentType, formatted string)
-
 // maxPendingToolTimings bounds timing state while converting unbounded task
 // history. When full, the next unseen tool start deterministically resets the
 // map, so older results report zero duration rather than retaining timestamps.
 const maxPendingToolTimings = 1024
 
 // ToolTimingTracker computes per-tool-call duration while converting agent
-// messages to API events.
+// messages to API events. It also projects the immutable message stream into
+// the API view: plan content for ExitPlanMode via a resolver taken at
+// construction, and fallback result text via a turn text window.
+//
+// harness and planContent are fixed at construction; the per-stream state
+// (pending, window) accumulates across ConvertMessage calls.
 type ToolTimingTracker struct {
-	harness          harness.Name
-	formatToolOutput ToolOutputFormatter
-	pending          map[string]time.Time
+	harness     harness.Name
+	pending     map[string]time.Time
+	planContent func(toolUseID string) string
+	window      task.ResultTextWindow
 }
 
 // NewToolTimingTracker creates a tracker for converting agent messages from a
-// harness into API events.
-func NewToolTimingTracker(h harness.Name, f ToolOutputFormatter) *ToolTimingTracker {
+// harness into API events. planContent resolves the plan text to display on
+// an ExitPlanMode event with the given tool use ID; pass nil to disable the
+// projection.
+func NewToolTimingTracker(h harness.Name, planContent func(toolUseID string) string) *ToolTimingTracker {
 	return &ToolTimingTracker{
-		harness:          h,
-		formatToolOutput: f,
-		pending:          make(map[string]time.Time),
+		harness:     h,
+		planContent: planContent,
+		pending:     make(map[string]time.Time),
 	}
 }
 
 // ConvertMessage converts an agent.Message into zero or more EventMessages.
 func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []v1.EventMessage {
 	ts := now.UnixMilli()
+	if _, isResult := msg.(*agent.ResultMessage); !isResult {
+		tt.window.Update(msg)
+	}
 	switch m := msg.(type) {
 	case *agent.InitMessage:
 		return []v1.EventMessage{{
@@ -106,7 +114,7 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 				Input:          input,
 				Detail:         detail,
 				InputView:      inputView,
-				PlanContent:    m.PlanContent,
+				PlanContent:    tt.planFor(m),
 				InputTruncated: truncated,
 				Background:     bg,
 			},
@@ -173,13 +181,20 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 			},
 		}}
 	case *agent.ResultMessage:
+		// A result is a turn boundary: capture the turn's visible text as the
+		// fallback before resetting the window for the next turn.
+		result := m.Result
+		if result == "" {
+			result = tt.window.Value()
+		}
+		tt.window.Update(m)
 		return []v1.EventMessage{{
 			Kind: v1.EventKindResult,
 			Ts:   ts,
 			Result: &v1.EventResult{
 				Subtype:      m.Subtype,
 				IsError:      m.IsError,
-				Result:       m.Result,
+				Result:       result,
 				DiffStat:     DiffStat(m.DiffStat),
 				TotalCostUSD: m.TotalCostUSD,
 				Duration:     float64(m.DurationMs) / 1e3,
@@ -276,14 +291,12 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 				ToolUseID: m.ToolUseID,
 				Delta:     m.Delta,
 			}
-			if tt.formatToolOutput != nil {
-				contentType, formatted := tt.formatToolOutput(m.Delta)
-				if contentType != "" {
-					ev.ContentType = contentType
-				}
-				if formatted != "" {
-					ev.Formatted = formatted
-				}
+			contentType, formatted := FormatToolOutput(m.Delta)
+			if contentType != "" {
+				ev.ContentType = contentType
+			}
+			if formatted != "" {
+				ev.Formatted = formatted
 			}
 			return []v1.EventMessage{{
 				Kind:            v1.EventKindToolOutputDelta,
@@ -331,6 +344,16 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 	default:
 		return nil
 	}
+}
+
+// planFor resolves the plan content projection for a tool use event. The
+// resolver returns content only for the visible ExitPlanMode, so superseded
+// plans and all other tool uses render without a snapshot.
+func (tt *ToolTimingTracker) planFor(m *agent.ToolUseMessage) string {
+	if tt.planContent == nil {
+		return ""
+	}
+	return tt.planContent(m.ToolUseID)
 }
 
 func (tt *ToolTimingTracker) rememberToolStart(toolUseID string, now time.Time) {
