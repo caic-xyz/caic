@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -691,6 +692,86 @@ func testRestart(t *testing.T, state taskslog.State, bodyJSON string, wantStatus
 	if e.Code != wantCode {
 		t.Errorf("code = %q, want %q", e.Code, wantCode)
 	}
+}
+
+func TestTaskHistoryReaders(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid_read_from_log_without_hydrating_task", func(t *testing.T) {
+		t.Parallel()
+		logDir := t.TempDir()
+		taskID := ksid.NewID()
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "inspect history", Harness: harness.Claude,
+			StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		})
+		toolUse := mustJSON(t, map[string]any{
+			"type": "assistant",
+			"message": map[string]any{"content": []any{map[string]any{
+				"type": "tool_use", "id": "tool-1", "name": "Bash", "input": map[string]any{"command": "make check"},
+			}}},
+		})
+		lastMessage := mustJSON(t, map[string]any{
+			"type": "assistant", "message": map[string]any{"content": []any{map[string]any{"type": "text", "text": "history result"}}},
+		})
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		writeLogFile(t, logDir, taskID.String()+".jsonl", meta, toolUse, lastMessage, trailer)
+
+		s := newTestRouter(t, map[harness.Name]agent.Backend{
+			harness.Claude: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire},
+		})
+		if err := loadPurgedTasksForTest(s, logDir); err != nil {
+			t.Fatal(err)
+		}
+		entry, ok := s.taskMgr.GetEntry(taskID.String())
+		if !ok {
+			t.Fatal("loaded task entry not found")
+		}
+
+		resp, err := testTaskHandlers(s).taskSvc.taskToolInput(t.Context(), entry, "tool-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(resp.Input) != `{"command":"make check"}` {
+			t.Fatalf("tool input = %s", resp.Input)
+		}
+
+		registry := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
+		result := registry.handleAgentLastMessage(t.Context(), mcpTaskNumberArgs{TaskNumber: 1})
+		if result.IsError {
+			t.Fatalf("agent_last_message error = %#v", result.Structured)
+		}
+		output, ok := result.Structured.(mcp.TextOutput)
+		if !ok || output.Result != "Last message from task #1: history result" {
+			t.Fatalf("agent_last_message = %#v", result.Structured)
+		}
+
+		history, _, unsubscribe := entry.Task().Subscribe(t.Context())
+		unsubscribe()
+		if len(history) != 0 {
+			t.Fatalf("restored task retained %d history messages", len(history))
+		}
+	})
+
+	t.Run("error_no_log", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "no log"}, harness.Claude)
+		entry := s.taskMgr.NewEntry(tk, nil)
+		s.taskMgr.Insert(tk.ID.String(), entry)
+
+		_, err := testTaskHandlers(s).taskSvc.taskToolInput(t.Context(), entry, "tool-1")
+		apiErr, ok := errors.AsType[*api.Error](err)
+		if !ok || apiErr.Code() != api.CodeInternalError || !strings.Contains(apiErr.Error(), "history unavailable") {
+			t.Fatalf("taskToolInput error = %v, want explicit history-unavailable error", err)
+		}
+
+		registry := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
+		result := registry.handleAgentLastMessage(t.Context(), mcpTaskNumberArgs{TaskNumber: 1})
+		if !result.IsError || !strings.Contains(fmt.Sprint(result.Structured), "history is unavailable") {
+			t.Fatalf("agent_last_message = %#v, want explicit history-unavailable error", result.Structured)
+		}
+	})
 }
 
 func TestHandleRestart(t *testing.T) {
@@ -2034,7 +2115,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		}
 	})
 
-	t.Run("TerminalTaskWithoutLogPathUsesInMemoryHistory", func(t *testing.T) {
+	t.Run("TerminalTaskWithoutLogPathEmitsHistoryError", func(t *testing.T) {
 		t.Parallel()
 		taskID := ksid.NewID()
 		tk := mustNewTask(t, taskID, agent.Prompt{Text: "fix the bug"}, harness.Claude)
@@ -2049,14 +2130,11 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		testTaskHandlers(s).handleTaskEvents(w, req)
 
 		body := w.Body.String()
-		if !strings.Contains(body, "retained in-memory history") {
-			t.Fatalf("history body = %q, want retained in-memory message", body)
+		if !strings.Contains(body, "event: error") || !strings.Contains(body, "task history is unavailable") {
+			t.Fatalf("history body = %q, want explicit history error", body)
 		}
-		if !strings.Contains(body, "event: ready") {
-			t.Fatalf("history body = %q, want ready event", body)
-		}
-		if strings.Contains(body, "event: error") {
-			t.Fatalf("history body = %q, unexpectedly contains error event", body)
+		if strings.Contains(body, "retained in-memory history") || strings.Contains(body, "event: ready") {
+			t.Fatalf("history body = %q, unexpectedly used in-memory history", body)
 		}
 	})
 

@@ -1055,7 +1055,7 @@ func (t *Task) PendingUserActions() []agent.PendingUserAction {
 // initialization, not a merge: replaying a second batch onto an existing
 // timeline would double-count cost, turns and token usage. A live timeline
 // grows through the session message pump instead; the disk-reload callers
-// (task import, Entry.LoadMessagesOnce) run exactly once per task.
+// The task import paths run exactly once per task.
 //
 // State inference rules (applied only for non-terminal states):
 //   - Current turn has unanswered AskUserQuestion → StateAsking

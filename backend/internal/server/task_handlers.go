@@ -193,11 +193,6 @@ func (h *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.Entry, state taskslog.State, loadedTask *taskslog.LoadedTask) error {
-	// Lazily load messages for entries that do not have a disk stream path.
-	if loadedTask == nil {
-		h.taskMgr.LoadMessagesOnDemand(entry)
-	}
-
 	rawHistory := shouldReplayHistoryFromDisk(state, loadedTask)
 	var history []agent.Message
 	var statsHistory []runtime.Stats

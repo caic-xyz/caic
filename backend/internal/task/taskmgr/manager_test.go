@@ -1894,17 +1894,19 @@ func TestManager(t *testing.T) {
 			}
 		})
 	})
-	t.Run("LoadMessagesOnDemand", func(t *testing.T) {
+	t.Run("HistorySource", func(t *testing.T) {
 		t.Parallel()
-		t.Run("valid_no_loaded_task", func(t *testing.T) {
+		t.Run("error_no_log", func(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
-			m.LoadMessagesOnDemand(e)
+			if _, err := m.HistorySource(e); !errors.Is(err, taskslog.ErrNoLog) {
+				t.Fatalf("HistorySource error = %v, want ErrNoLog", err)
+			}
 		})
-		t.Run("uses_header_resolver", func(t *testing.T) {
+		t.Run("valid_uses_header_resolver", func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
 			if err := os.WriteFile(filepath.Join(dir, "task.jsonl"), []byte(
@@ -1929,12 +1931,25 @@ func TestManager(t *testing.T) {
 			})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "task"}, "", "")
 			entry := newTestPurgedEntry(t, tk, &taskslog.Result{State: taskslog.StatePurged}, logs[0])
-			m.LoadMessagesOnDemand(entry)
+			source, err := m.HistorySource(entry)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, found, err := source.FindLastMessage(t.Context(), func(message agent.Message) bool {
+				_, ok := message.(*agent.TextMessage)
+				return ok
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !found {
+				t.Fatal("text message not found")
+			}
 			if wireCalls != 1 {
 				t.Fatalf("NewWire calls = %d, want 1", wireCalls)
 			}
-			if len(logs[0].Msgs) != 1 {
-				t.Fatalf("loaded messages = %d, want 1", len(logs[0].Msgs))
+			if source.Msgs != nil {
+				t.Fatalf("history source retained %d messages", len(source.Msgs))
 			}
 		})
 	})
@@ -2667,20 +2682,6 @@ func TestManager(t *testing.T) {
 			if _, err := m.resolveNativeParser("pi"); err == nil || !strings.Contains(err.Error(), "unknown harness") {
 				t.Fatalf("resolveNativeParser error = %v, want unknown-harness error", err)
 			}
-		})
-	})
-	t.Run("LoadMessagesOnDemand_Purged", func(t *testing.T) {
-		t.Parallel()
-		t.Run("valid_with_loaded_task", func(t *testing.T) {
-			t.Parallel()
-			m := newTestManager(t, Config{ServerCtx: t.Context()})
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
-			lt := &taskslog.LoadedTask{TaskID: tk.ID.String()}
-			e := newTestPurgedEntry(t, tk, &taskslog.Result{State: taskslog.StatePurged}, lt)
-			m.Insert(tk.ID.String(), e)
-			// LoadMessagesOnce triggers the fn but LoadMessages will fail
-			// (no log file); this exercises the LoadMessagesOnce path.
-			m.LoadMessagesOnDemand(e)
 		})
 	})
 	t.Run("Create_Errors", func(t *testing.T) {

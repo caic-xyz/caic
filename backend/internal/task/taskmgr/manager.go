@@ -772,11 +772,6 @@ func (m *Manager) LoadPurgedTasks(purged []*taskslog.LoadedTask) error {
 	return nil
 }
 
-// LoadMessagesOnDemand triggers lazy message loading for purged tasks.
-func (m *Manager) LoadMessagesOnDemand(entry *Entry) {
-	m.loadTaskMessagesOnDemand(entry)
-}
-
 // HistorySource opens a header-only raw-log reader for stopped or terminal history.
 func (m *Manager) HistorySource(entry *Entry) (*taskslog.LoadedTask, error) {
 	if entry == nil {
@@ -784,7 +779,7 @@ func (m *Manager) HistorySource(entry *Entry) (*taskslog.LoadedTask, error) {
 	}
 	path := entry.LogPath.Get()
 	if path == "" {
-		return entry.LoadedTask(), nil
+		return nil, taskslog.ErrNoLog
 	}
 	loaded, err := taskslog.LoadHistorySource(path)
 	if err != nil {
@@ -1777,18 +1772,6 @@ func (m *Manager) resolveNativeParser(h harness.Name) (func([]byte) ([]agent.Mes
 		return nil, fmt.Errorf("unknown harness %q", h)
 	}
 	return backend.NewWire().ParseMessage, nil
-}
-
-// loadTaskMessagesOnDemand triggers lazy message loading for purged tasks.
-func (m *Manager) loadTaskMessagesOnDemand(entry *Entry) {
-	entry.LoadMessagesOnce(func() {
-		lt := entry.LoadedTask()
-		if err := lt.LoadMessagesTailWithResolver(m.resolveNativeParser); err != nil {
-			m.log.Warn("lazy load messages failed", "task", entry.Task().ID, "err", err)
-			return
-		}
-		entry.Task().SeedTimeline(lt.Msgs)
-	})
 }
 
 // logRelayMessageMerger owns the import-time overlap rules for disk-log

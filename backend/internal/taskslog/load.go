@@ -29,10 +29,6 @@ import (
 // errNotLogFile is returned when a file doesn't contain a valid caic_meta header.
 var errNotLogFile = errors.New("not a caic log file")
 
-// maxTailLoadBytes is the maximum retained physical-record suffix for
-// interactive loading of a large task log.
-const maxTailLoadBytes = 64 << 20
-
 // maxParallelLogHeaderLoads bounds the transient memory and file handles
 // needed while scanning a large persisted task-log directory.
 const maxParallelLogHeaderLoads = 8
@@ -61,12 +57,6 @@ type semanticLog struct {
 	authority logAuthority
 	messages  []agent.ParsedMessage
 	records   []semanticRecord
-}
-
-type retainedSemanticRecord struct {
-	bytes  int64
-	record agent.ParsedRecord
-	parsed bool
 }
 
 type physicalLogScanner struct {
@@ -932,23 +922,6 @@ func (lt *LoadedTask) LoadSessionMetadataWithResolver(resolver NativeParserResol
 	return nil
 }
 
-// LoadMessagesTailWithResolver parses the complete source with one ordered
-// parser while retaining only a bounded recent suffix for interactive loading.
-func (lt *LoadedTask) LoadMessagesTailWithResolver(resolver NativeParserResolver) error {
-	if lt.messagesLoaded || lt.Msgs != nil || lt.path == "" {
-		return nil
-	}
-	if !isLogCompressed(lt.path) && lt.LogSize <= maxTailLoadBytes {
-		return lt.LoadMessagesWithResolver(resolver)
-	}
-	loaded, err := loadSemanticTail(lt.path, resolver, maxTailLoadBytes)
-	if err != nil {
-		return err
-	}
-	applySemanticTask(lt, loaded, true)
-	return nil
-}
-
 // SetNativeParserResolver installs the task-owned fresh native parser factory.
 // The factory is called only after a scan has validated its physical header.
 func (lt *LoadedTask) SetNativeParserResolver(resolver NativeParserResolver) {
@@ -957,7 +930,7 @@ func (lt *LoadedTask) SetNativeParserResolver(resolver NativeParserResolver) {
 
 // LoadMessages lazily loads the full conversation messages from the log file.
 // This is an EOF scan of the complete physical log and can be expensive for
-// large historical sessions; use LoadMessagesTail for interactive loading.
+// large historical sessions.
 func (lt *LoadedTask) LoadMessages() error {
 	if lt.Msgs != nil || lt.path == "" {
 		return nil
@@ -977,18 +950,6 @@ func (lt *LoadedTask) LoadSessionMetadata() error {
 		return fmt.Errorf("no parser resolver set for harness %q", lt.Harness)
 	}
 	return lt.LoadSessionMetadataWithResolver(lt.resolver)
-}
-
-// LoadMessagesTail loads a bounded suffix of messages from a large log while
-// still parsing every record in order to preserve parser state.
-func (lt *LoadedTask) LoadMessagesTail() error {
-	if lt.Msgs != nil || lt.path == "" {
-		return nil
-	}
-	if lt.resolver == nil {
-		return fmt.Errorf("no parser resolver set for harness %q", lt.Harness)
-	}
-	return lt.LoadMessagesTailWithResolver(lt.resolver)
 }
 
 // StreamMessages streams parsed task conversation records directly from the
@@ -1041,6 +1002,23 @@ func (lt *LoadedTask) StreamMessages(ctx context.Context) iter.Seq2[agent.Parsed
 			yield(agent.ParsedMessage{}, err)
 		}
 	}
+}
+
+// FindLastMessage returns the last parsed history message accepted by match.
+// The complete log is validated through EOF while retaining only that record.
+func (lt *LoadedTask) FindLastMessage(ctx context.Context, match func(agent.Message) bool) (agent.ParsedMessage, bool, error) {
+	var found agent.ParsedMessage
+	ok := false
+	for parsed, err := range lt.StreamMessages(ctx) {
+		if err != nil {
+			return agent.ParsedMessage{}, false, err
+		}
+		if match(parsed.Message) {
+			found = parsed
+			ok = true
+		}
+	}
+	return found, ok, nil
 }
 
 func (lt *LoadedTask) mergeSessionMetadata(src *LoadedTask) {
@@ -1147,66 +1125,6 @@ func loadSemanticSessionMetadata(path string, resolver NativeParserResolver) (lo
 			}
 		}
 		return scanner.Err()
-	})
-	if retErr != nil {
-		return nil, retErr
-	}
-	return loaded, nil
-}
-
-// loadSemanticTail parses the complete physical log with one ordered parser
-// while retaining only a bounded suffix of semantic records.
-func loadSemanticTail(path string, resolver NativeParserResolver, tailBytes int64) (loaded *LoadedTask, retErr error) {
-	if resolver == nil {
-		return nil, errors.New("native parser resolver is nil")
-	}
-	retErr = scanPhysicalLog(path, true, func(_ os.FileInfo, scanner *physicalLogScanner, _ agent.MetaMessage) error {
-		native, err := resolver(scanner.authority.Harness)
-		if err != nil {
-			return fmt.Errorf("resolve native parser for harness %q: %w", scanner.authority.Harness, err)
-		}
-		parser, err := agent.NewLogRecordParser(scanner.authority.Version, native)
-		if err != nil {
-			return fmt.Errorf("construct log parser: %w", err)
-		}
-		if _, err := parser.ParseRecord(scanner.headerRaw); err != nil {
-			return fmt.Errorf("parse task log bootstrap %s: %w", path, err)
-		}
-
-		var retained []retainedSemanticRecord
-		var retainedBytes int64
-		for scanner.Scan() {
-			record, err := parser.ParseRecord(scanner.Bytes())
-			if err != nil {
-				if record.Control || scanner.authority.Version == agent.LogVersionV2 {
-					return fmt.Errorf("parse task log %s: %w", path, err)
-				}
-			}
-			retained = append(retained, retainedSemanticRecord{
-				bytes:  int64(len(scanner.Bytes()) + 1),
-				record: record,
-				parsed: err == nil,
-			})
-			retainedBytes += int64(len(scanner.Bytes()) + 1)
-			for retainedBytes > tailBytes && len(retained) > 1 {
-				retainedBytes -= retained[0].bytes
-				retained = retained[1:]
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			return err
-		}
-
-		log := &semanticLog{authority: scanner.authority}
-		for _, item := range retained {
-			if !item.parsed || len(item.record.Messages) == 0 {
-				continue
-			}
-			log.messages = append(log.messages, item.record.Messages...)
-			log.records = append(log.records, semanticRecord{end: len(log.messages), control: item.record.Control})
-		}
-		loaded = semanticLoadedTask(log)
-		return nil
 	})
 	if retErr != nil {
 		return nil, retErr

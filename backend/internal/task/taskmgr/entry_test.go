@@ -159,25 +159,4 @@ func TestEntry(t *testing.T) {
 			}
 		})
 	})
-
-	t.Run("LoadMessagesOnce", func(t *testing.T) {
-		t.Parallel()
-		t.Run("valid_no_loaded_task", func(t *testing.T) {
-			t.Parallel()
-			e := newTestEntry(t, mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""))
-			e.LoadMessagesOnce(func() { t.Error("should not be called without LoadedTask") })
-		})
-		t.Run("valid_exactly_once", func(t *testing.T) {
-			t.Parallel()
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-			lt := &taskslog.LoadedTask{TaskID: tk.ID.String()}
-			e := newTestPurgedEntry(t, tk, &taskslog.Result{State: taskslog.StatePurged}, lt)
-			var n int
-			e.LoadMessagesOnce(func() { n++ })
-			e.LoadMessagesOnce(func() { n++ })
-			if n != 1 {
-				t.Errorf("LoadMessagesOnce called %d times, want 1", n)
-			}
-		})
-	})
 }

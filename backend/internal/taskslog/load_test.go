@@ -145,53 +145,6 @@ func claudeInit(t *testing.T, sessionID string) string {
 	return mustJSON(t, msg)
 }
 
-func TestLoadSemanticTail(t *testing.T) {
-	t.Parallel()
-	meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: int(agent.LogVersionV1), Harness: harness.Claude, Prompt: "tail"})
-	lines := []string{
-		`{"type":"assistant","text":"first"}`,
-		`{"type":"assistant","text":"second"}`,
-		`{"type":"assistant","text":"third"}`,
-	}
-	trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged", Title: "done"})
-	for _, compressed := range []bool{false, true} {
-		format := "plain"
-		if compressed {
-			format = "zstd"
-		}
-		t.Run(format, func(t *testing.T) {
-			t.Parallel()
-			path := writePhysicalTestLog(t, compressed, append(append([]string{meta}, lines...), trailer)...)
-			calls := 0
-			loaded, err := loadSemanticTail(path, func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
-				if h != harness.Claude {
-					t.Fatalf("resolver harness = %q, want %q", h, harness.Claude)
-				}
-				return func(raw []byte) ([]agent.Message, error) {
-					calls++
-					return []agent.Message{&agent.TextMessage{Text: string(raw)}}, nil
-				}, nil
-			}, int64(len(lines[2])+len(trailer)+2))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if calls != len(lines) {
-				t.Fatalf("native parser calls = %d, want %d", calls, len(lines))
-			}
-			if len(loaded.Msgs) != 1 {
-				t.Fatalf("retained messages = %#v, want only third", loaded.Msgs)
-			}
-			text, ok := loaded.Msgs[0].(*agent.TextMessage)
-			if !ok || !strings.Contains(text.Text, "third") {
-				t.Fatalf("retained message = %#v, want third text", loaded.Msgs[0])
-			}
-			if loaded.State != StatePurged || loaded.LastTrailer == nil || loaded.Title != "done" {
-				t.Fatalf("tail metadata = state %q result %#v title %q, want purged result and done", loaded.State, loaded.LastTrailer, loaded.Title)
-			}
-		})
-	}
-}
-
 func TestScanPhysicalLogHeaderOnlyAndEOFValidation(t *testing.T) {
 	t.Parallel()
 	path := writePhysicalTestLog(t, false, mustJSON(t, agent.MetaMessage{
@@ -782,6 +735,46 @@ func TestTsToTime(t *testing.T) {
 
 func TestLoadedTask(t *testing.T) {
 	t.Parallel()
+	t.Run("FindLastMessage", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "lookup task", Harness: harness.Claude})
+		first := claudeAssistant(t, map[string]any{"type": "text", "text": "first"})
+		second := claudeAssistant(t, map[string]any{"type": "text", "text": "second"})
+		writeLogFile(t, dir, "t.jsonl", meta, first, second)
+
+		tasks, err := NewStore(testLogger(), dir).LoadUnsettled()
+		if err != nil {
+			t.Fatal(err)
+		}
+		setClaudeParser(tasks)
+
+		got, found, err := tasks[0].FindLastMessage(t.Context(), func(message agent.Message) bool {
+			_, ok := message.(*agent.TextMessage)
+			return ok
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !found {
+			t.Fatal("FindLastMessage did not find a text message")
+		}
+		text, ok := got.Message.(*agent.TextMessage)
+		if !ok || text.Text != "second" {
+			t.Fatalf("message = %#v, want second text message", got.Message)
+		}
+
+		_, found, err = tasks[0].FindLastMessage(t.Context(), func(message agent.Message) bool {
+			_, ok := message.(*agent.ToolUseMessage)
+			return ok
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if found {
+			t.Fatal("FindLastMessage unexpectedly found a tool use")
+		}
+	})
 
 	t.Run("StreamMessages", func(t *testing.T) {
 		t.Parallel()

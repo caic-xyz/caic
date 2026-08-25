@@ -133,10 +133,16 @@ func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 			},
 		},
 		{
-			name: "LoadMessagesTail",
+			name: "FindLastMessage",
 			prepare: func() func() error {
 				lt := fixture.loadedTask()
-				return lt.LoadMessagesTail
+				return func() error {
+					_, _, err := lt.FindLastMessage(b.Context(), func(message agent.Message) bool {
+						_, ok := message.(*agent.TextMessage)
+						return ok
+					})
+					return err
+				}
 			},
 		},
 		{

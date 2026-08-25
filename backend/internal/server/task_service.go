@@ -665,13 +665,23 @@ func (s *taskService) taskToolInput(ctx context.Context, entry *taskmgr.Entry, t
 	if toolUseID == "" {
 		return nil, api.BadRequest("toolUseID required")
 	}
-	s.taskMgr.LoadMessagesOnDemand(entry)
-	history, _, unsub := entry.Task().Subscribe(ctx)
-	unsub()
-	for _, msg := range history {
-		if tu, ok := msg.(*agent.ToolUseMessage); ok && tu.ToolUseID == toolUseID {
-			return &v1.TaskToolInputResp{ToolUseID: tu.ToolUseID, Input: tu.Input}, nil
+	source, err := s.taskMgr.HistorySource(entry)
+	if err != nil {
+		return nil, api.InternalError("task history unavailable: " + err.Error())
+	}
+	parsed, found, err := source.FindLastMessage(ctx, func(message agent.Message) bool {
+		toolUse, ok := message.(*agent.ToolUseMessage)
+		return ok && toolUse.ToolUseID == toolUseID
+	})
+	if err != nil {
+		return nil, api.InternalError("read task history: " + err.Error())
+	}
+	if found {
+		toolUse, ok := parsed.Message.(*agent.ToolUseMessage)
+		if !ok {
+			return nil, api.InternalError("task history lookup returned an unsupported message")
 		}
+		return &v1.TaskToolInputResp{ToolUseID: toolUse.ToolUseID, Input: toolUse.Input}, nil
 	}
 	return nil, api.NotFound("tool use")
 }

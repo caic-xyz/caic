@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"iter"
 	"net/url"
-	"slices"
 	"strings"
 	"time"
 
@@ -691,35 +690,47 @@ func (m *mcpRegistry) handleAgentLastMessage(ctx context.Context, args mcpTaskNu
 	if !ok {
 		return mcp.ToolError[mcp.TextOutput]("Unknown task number")
 	}
-	m.taskSvc.taskMgr.LoadMessagesOnDemand(entry)
-	history, _, unsub := entry.Task().Subscribe(ctx)
-	unsub()
-	for _, msg := range slices.Backward(history) {
-		switch msg := msg.(type) {
-		case *agent.ResultMessage:
-			if msg.Result != "" {
-				return mcp.TextToolResult(fmt.Sprintf("Task #%d result: %s", num, msg.Result))
-			}
-		case *agent.AskMessage:
-			if len(msg.Questions) > 0 {
-				q := msg.Questions[0]
-				options := make([]string, len(q.Options))
-				for i, opt := range q.Options {
-					options[i] = opt.Label
-				}
-				suffix := ""
-				if len(options) > 0 {
-					suffix = " Options: " + strings.Join(options, ", ")
-				}
-				return mcp.TextToolResult(fmt.Sprintf("Task #%d is asking: %s%s", num, q.Question, suffix))
-			}
-		case *agent.TextMessage:
-			if msg.Text != "" {
-				return mcp.TextToolResult(fmt.Sprintf("Last message from task #%d: %s", num, msg.Text))
-			}
-		}
+	source, err := m.taskSvc.taskMgr.HistorySource(entry)
+	if err != nil {
+		return mcp.ToolError[mcp.TextOutput](fmt.Sprintf("Task #%d history is unavailable: %v", num, err))
 	}
-	return mcp.TextToolResult(fmt.Sprintf("No messages from task #%d yet.", num))
+	parsed, found, err := source.FindLastMessage(ctx, func(message agent.Message) bool {
+		switch message := message.(type) {
+		case *agent.ResultMessage:
+			return message.Result != ""
+		case *agent.AskMessage:
+			return len(message.Questions) > 0
+		case *agent.TextMessage:
+			return message.Text != ""
+		default:
+			return false
+		}
+	})
+	if err != nil {
+		return mcp.ToolError[mcp.TextOutput](fmt.Sprintf("Task #%d history is unavailable: %v", num, err))
+	}
+	if !found {
+		return mcp.TextToolResult(fmt.Sprintf("No messages from task #%d yet.", num))
+	}
+	switch message := parsed.Message.(type) {
+	case *agent.ResultMessage:
+		return mcp.TextToolResult(fmt.Sprintf("Task #%d result: %s", num, message.Result))
+	case *agent.AskMessage:
+		q := message.Questions[0]
+		options := make([]string, len(q.Options))
+		for i, opt := range q.Options {
+			options[i] = opt.Label
+		}
+		suffix := ""
+		if len(options) > 0 {
+			suffix = " Options: " + strings.Join(options, ", ")
+		}
+		return mcp.TextToolResult(fmt.Sprintf("Task #%d is asking: %s%s", num, q.Question, suffix))
+	case *agent.TextMessage:
+		return mcp.TextToolResult(fmt.Sprintf("Last message from task #%d: %s", num, message.Text))
+	default:
+		return mcp.ToolError[mcp.TextOutput](fmt.Sprintf("Task #%d history returned an unsupported message", num))
+	}
 }
 
 type mcpTaskFixPRArgs struct {

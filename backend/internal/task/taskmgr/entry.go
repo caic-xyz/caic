@@ -35,9 +35,6 @@ type Entry struct {
 
 	task *task.Task
 
-	// Guards lazy message loading for a persisted task.
-	loadedTaskOnce sync.Once
-
 	// Terminal state of the current incarnation, published as an immutable
 	// snapshot; see entryTerminal.
 	term atomic.Pointer[entryTerminal]
@@ -133,14 +130,4 @@ func (e *Entry) Reset() {
 	e.mu.Lock()
 	e.cleanupOnce = sync.Once{}
 	e.mu.Unlock()
-}
-
-// LoadMessagesOnce runs fn exactly once to lazily load on-disk messages for a
-// purged task. fn must perform the actual load (and any side effect such as
-// SeedTimeline); the once is owned by the Entry.
-func (e *Entry) LoadMessagesOnce(fn func()) {
-	if e.LoadedTask() == nil {
-		return
-	}
-	e.loadedTaskOnce.Do(fn)
 }
