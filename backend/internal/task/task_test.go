@@ -444,6 +444,22 @@ func TestTask(t *testing.T) {
 				t.Fatal("timed out waiting for live message")
 			}
 		})
+		t.Run("TimelinePreservesSuppressedMessageGaps", func(t *testing.T) {
+			t.Parallel()
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+			_, ch, unsub := tk.SubscribeTimeline(t.Context())
+			defer unsub()
+
+			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result", Subtype: "success"}, false)
+			if got := <-ch; got.Sequence != 1 {
+				t.Fatalf("result sequence = %d, want 1", got.Sequence)
+			}
+			tk.addMessage(t.Context(), &agent.ExitMessage{ExitCode: 2, Error: "interrupted"}, false)
+			tk.addMessage(t.Context(), &agent.TextMessage{Text: "next turn"}, false)
+			if got := <-ch; got.Sequence != 3 {
+				t.Fatalf("message sequence = %d, want 3 after suppressed exit", got.Sequence)
+			}
+		})
 		t.Run("LiveOnlyDoesNotReplayHistory", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")

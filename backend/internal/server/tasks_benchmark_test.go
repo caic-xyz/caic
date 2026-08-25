@@ -43,6 +43,40 @@ func BenchmarkHandleTaskRawEventsPurgedReplay(b *testing.B) {
 			if !bytes.Contains(w.Body.Bytes(), []byte("final compact response")) {
 				b.Fatal("SSE body did not contain final response")
 			}
+			b.ReportMetric(float64(w.Body.Len()), "response-B/op")
+		}
+	})
+
+	b.Run("ClaudeResumeAfterAll", func(b *testing.B) {
+		const deltaCount = 10_000
+		taskID, s := benchmarkPurgedTaskEventServer(b, deltaCount)
+		entry, ok := s.taskMgr.GetEntry(taskID)
+		if !ok {
+			b.Fatal("benchmark task disappeared")
+		}
+		lastEventID := taskEventID{
+			timeline: entry.Task().TimelineID(),
+			source:   taskEventSourceDisk,
+			message:  deltaCount + 4,
+		}.String()
+
+		b.ReportAllocs()
+		b.ResetTimer()
+		for range b.N {
+			req := httptest.NewRequestWithContext(b.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID+"/raw_events", http.NoBody)
+			req.SetPathValue("id", taskID)
+			req.Header.Set("Last-Event-ID", lastEventID)
+			w := httptest.NewRecorder()
+
+			testTaskHandlers(s).handleTaskEvents(w, req)
+
+			if w.Code != http.StatusOK {
+				b.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+			}
+			if bytes.Contains(w.Body.Bytes(), []byte("final compact response")) || !bytes.Contains(w.Body.Bytes(), []byte("event: ready")) {
+				b.Fatal("resumed SSE body did not contain only the ready tail")
+			}
+			b.ReportMetric(float64(w.Body.Len()), "response-B/op")
 		}
 	})
 

@@ -1,9 +1,12 @@
-// Tests for task SSE history replay filtering.
+// Tests task SSE history filtering and resumed conversion state.
 
 package server
 
 import (
 	"encoding/json"
+	"errors"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -459,6 +462,45 @@ func TestGenericConvertWidgetDelta(t *testing.T) {
 	if ev.WidgetDelta.Delta != "<h1>Hel" {
 		t.Errorf("delta = %q, want %q", ev.WidgetDelta.Delta, "<h1>Hel")
 	}
+}
+
+func TestTaskEventStreamResume(t *testing.T) {
+	t.Parallel()
+	t.Run("SeedsConverterFromAcknowledgedMessages", func(t *testing.T) {
+		t.Parallel()
+		w := httptest.NewRecorder()
+		stream := taskEventStream{
+			w:           w,
+			tracker:     apiconv.NewToolTimingTracker(harness.Claude, nil),
+			timelineID:  "timeline",
+			source:      taskEventSourceMemory,
+			resumeAfter: taskEventID{timeline: "timeline", source: taskEventSourceMemory, message: 1},
+		}
+		now := time.Now()
+		if err := stream.writeMessage(&agent.TextMessage{Text: "fallback text"}, 1, now, false); err != nil {
+			t.Fatal(err)
+		}
+		if err := stream.writeMessage(&agent.ResultMessage{MessageType: "result"}, 2, now, false); err != nil {
+			t.Fatal(err)
+		}
+		if body := w.Body.String(); !strings.Contains(body, `"result":"fallback text"`) {
+			t.Fatalf("resumed result lost acknowledged converter state: %s", body)
+		}
+	})
+	t.Run("RejectsInvalidEventIndex", func(t *testing.T) {
+		t.Parallel()
+		stream := taskEventStream{
+			w:           httptest.NewRecorder(),
+			tracker:     apiconv.NewToolTimingTracker(harness.Claude, nil),
+			timelineID:  "timeline",
+			source:      taskEventSourceMemory,
+			resumeAfter: taskEventID{timeline: "timeline", source: taskEventSourceMemory, message: 1, event: 1},
+		}
+		err := stream.writeMessage(&agent.TextMessage{Text: "one event"}, 1, time.Now(), false)
+		if !errors.Is(err, errInvalidTaskEventID) {
+			t.Fatalf("error = %v, want invalid task event ID", err)
+		}
+	})
 }
 
 func TestFilterHistoryForReplay(t *testing.T) {

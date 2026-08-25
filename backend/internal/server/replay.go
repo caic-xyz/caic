@@ -13,6 +13,17 @@ import (
 // ThinkingMessage are omitted — the frontend uses only the final message when
 // available, so the deltas are pure waste during history replay.
 func filterHistoryForReplay(msgs []agent.Message) []agent.Message {
+	skip := historyReplaySkip(msgs)
+	out := make([]agent.Message, 0, len(msgs))
+	for i, msg := range msgs {
+		if !skip[i] {
+			out = append(out, msg)
+		}
+	}
+	return out
+}
+
+func historyReplaySkip(msgs []agent.Message) []bool {
 	skip := make([]bool, len(msgs))
 	for i, msg := range msgs {
 		switch m := msg.(type) {
@@ -50,7 +61,6 @@ func filterHistoryForReplay(msgs []agent.Message) []agent.Message {
 			}
 		}
 	}
-	out := make([]agent.Message, 0, len(msgs))
 	cleanTurnComplete := false
 	for i, msg := range msgs {
 		if skip[i] {
@@ -58,6 +68,7 @@ func filterHistoryForReplay(msgs []agent.Message) []agent.Message {
 		}
 		if exit, ok := msg.(*agent.ExitMessage); ok {
 			if exit.ExitCode != 0 && cleanTurnComplete {
+				skip[i] = true
 				continue
 			}
 		} else if task.ClearsExitError(msg) {
@@ -66,7 +77,6 @@ func filterHistoryForReplay(msgs []agent.Message) []agent.Message {
 		if rm, ok := msg.(*agent.ResultMessage); ok {
 			cleanTurnComplete = !rm.IsError
 		}
-		out = append(out, msg)
 	}
-	return out
+	return skip
 }

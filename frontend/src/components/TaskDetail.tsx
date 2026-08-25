@@ -30,11 +30,6 @@ import Dropdown from "./Dropdown";
 import TaskActionsMenu from "./TaskActionsMenu";
 import styles from "./TaskDetail.module.css";
 
-/** Add ±25% jitter to a delay to avoid thundering herd on server restart. */
-function jitteredDelay(base: number): number {
-  return base * (0.75 + Math.random() * 0.5);
-}
-
 // Module-level store for <details> open/closed state (tool calls, thinking blocks).
 // Keys: toolUseID, "group:<firstToolUseID>", "thinking:<firstEventTs>".
 // Survives component remounts on task switching.
@@ -409,8 +404,6 @@ export default function TaskDetail(props: Props) {
     setCompletedMsgs([]);
 
     let es: EventSource | null = null;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let delay = 500;
     let live = false;
     // A named server history error is terminal for this connection lifecycle.
     // Do not replace its explicit error with reconnect churn until this effect resets.
@@ -447,15 +440,8 @@ export default function TaskDetail(props: Props) {
       liveFlushTimer = setTimeout(flushPendingEvents, liveFlushDelayMs);
     }
 
-    function clearReconnectTimer() {
-      if (timer === null) return;
-      clearTimeout(timer);
-      timer = null;
-    }
-
     function closeConnection() {
       connectionGeneration += 1;
-      clearReconnectTimer();
       if (live) flushPendingEvents();
       else {
         clearLiveFlushTimer();
@@ -493,14 +479,11 @@ export default function TaskDetail(props: Props) {
           live = true;
 
         },
-        () => {
-          if (generation === connectionGeneration) delay = 500;
-        },
+        undefined,
         (historyError) => {
           if (generation !== connectionGeneration) return;
           historyFailed = true;
           connectionGeneration += 1;
-          clearReconnectTimer();
           clearLiveFlushTimer();
           pendingEvents = [];
           live = false;
@@ -508,34 +491,32 @@ export default function TaskDetail(props: Props) {
           if (es === startedES) es = null;
           untrack(() => props.onError(`Task history error: ${historyError.message}`));
         },
+        () => {
+          if (generation !== connectionGeneration) return;
+          clearLiveFlushTimer();
+          pendingEvents = [];
+          live = false;
+          replaceOnNextFlush = true;
+        },
       );
       es = startedES;
       startedES.onerror = () => {
         if (generation !== connectionGeneration) return;
+        // Keep nonterminal sources open so the browser reconnects with the
+        // latest SSE event ID in Last-Event-ID instead of replaying all history.
         const wasLive = live;
         if (wasLive) flushPendingEvents();
-        else {
-          clearLiveFlushTimer();
-          pendingEvents = [];
-        }
-        connectionGeneration += 1;
-        startedES.close();
-        es = null;
         live = false;
         const st = props.taskState;
-        if (wasLive && (st === "purged" || st === "crashed" || st === "failed")) {
-          return;
-        }
-        if (document.hidden || !navigator.onLine) return;
-        clearReconnectTimer();
-        timer = setTimeout(connect, jitteredDelay(delay));
-        delay = Math.min(delay * 1.5, 30_000);
+        if (!wasLive || (st !== "purged" && st !== "crashed" && st !== "failed")) return;
+        connectionGeneration += 1;
+        startedES.close();
+        if (es === startedES) es = null;
       };
     }
 
     function reconnectWhenAvailable() {
       if (historyFailed || document.hidden || !navigator.onLine || es !== null) return;
-      delay = 500;
       connect();
     }
 

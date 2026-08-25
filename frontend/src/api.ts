@@ -72,6 +72,7 @@ export function taskEventStream(
   onReady?: () => void,
   onOpen?: () => void,
   onHistoryError?: (error: TaskHistoryStreamError) => void,
+  onReset?: () => void,
 ): EventSource {
   const es = new EventSource(`/api/caic/v1/tasks/${id}/events`);
   es.addEventListener("message", (e) => {
@@ -94,6 +95,9 @@ export function taskEventStream(
   });
   if (onReady) {
     es.addEventListener("ready", onReady);
+  }
+  if (onReset) {
+    es.addEventListener("reset", onReset);
   }
   if (onOpen) {
     es.addEventListener("open", onOpen);

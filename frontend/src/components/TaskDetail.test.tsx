@@ -317,39 +317,72 @@ describe("SSE connection", () => {
     vi.useRealTimers();
   });
 
-  it("duplicate onerror fires schedule only one reconnect", () => {
-    // A second onerror from the same EventSource must be ignored rather than
-    // scheduling another reconnect.
-    // Pin Math.random so jitteredDelay is deterministic (factor = 0.75 + 0.5*0.5 = 1.0).
-    const origRandom = Math.random;
-    Math.random = () => 0.5;
-    try {
-      const created: FakeES[] = [];
-      makeSyncReadyMock(created);
+  it("leaves a nonterminal EventSource open for native Last-Event-ID retry", () => {
+    const created: FakeES[] = [];
+    makeSyncReadyMock(created);
 
-      renderTaskDetail();
+    renderTaskDetail();
 
-      // createEffect runs synchronously during render in SolidJS.
-      expect(created).toHaveLength(1);
-      const es1 = created[0];
+    expect(created).toHaveLength(1);
+    const es = created[0];
+    if (!es.onerror) throw new Error("onerror not set");
+    es.onerror(new Event("error"));
+    es.onerror(new Event("error"));
+    vi.advanceTimersByTime(60_000);
 
-      // The first error schedules a reconnect; the generation guard ignores the duplicate.
-      if (!es1.onerror) throw new Error("onerror not set");
-      es1.onerror(new Event("error"));
-      es1.onerror(new Event("error"));
-
-      vi.advanceTimersByTime(800);
-
-      // Exactly one reconnect: initial connect (1) + one timer-fired connect (2).
-      expect(created).toHaveLength(2);
-    } finally {
-      Math.random = origRandom;
-    }
+    expect(es.close).not.toHaveBeenCalled();
+    expect(created).toHaveLength(1);
   });
 
 
 
 
+
+  it("keeps buffered replay events across a native resume", () => {
+    const created: FakeES[] = [];
+    const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
+    const readyHandler = { value: null as (() => void) | null };
+    makeManualReadyMock(created, capturedCb, readyHandler);
+
+    renderTaskDetail();
+    if (!capturedCb.value || !readyHandler.value || !created[0].onerror) {
+      throw new Error("SSE callbacks not captured");
+    }
+    capturedCb.value({ kind: "text", ts: 1, text: { text: "before disconnect" } });
+    created[0].onerror(new Event("error"));
+    capturedCb.value({ kind: "text", ts: 2, text: { text: "after resume" } });
+    readyHandler.value();
+
+    expect(document.body).toHaveTextContent("before disconnect");
+    expect(document.body).toHaveTextContent("after resume");
+    expect(created[0].close).not.toHaveBeenCalled();
+  });
+
+  it("replaces rendered history after a stale resume cursor reset", () => {
+    const created: FakeES[] = [];
+    let onMessage: ((ev: EventMessage) => void) | undefined;
+    let onReady: (() => void) | undefined;
+    let onReset: (() => void) | undefined;
+    vi.mocked(taskEventStream).mockImplementation((_id, cb, _onError, ready, _onOpen, _onHistoryError, reset) => {
+      onMessage = cb;
+      onReady = ready;
+      onReset = reset;
+      const fakeES: FakeES = { addEventListener: vi.fn(), close: vi.fn(), onerror: null };
+      created.push(fakeES);
+      return fakeES as unknown as EventSource;
+    });
+
+    renderTaskDetail();
+    if (!onMessage || !onReady || !onReset) throw new Error("SSE callbacks not captured");
+    onMessage({ kind: "text", ts: 1, text: { text: "old history" } });
+    onReady();
+    onReset();
+    onMessage({ kind: "text", ts: 2, text: { text: "replacement history" } });
+    onReady();
+
+    expect(document.body).not.toHaveTextContent("old history");
+    expect(document.body).toHaveTextContent("replacement history");
+  });
 
   it("reports terminal history errors and does not retry after the native error", () => {
     const created: FakeES[] = [];
@@ -382,24 +415,18 @@ describe("SSE connection", () => {
     expect(created).toHaveLength(1);
   });
 
-  it("replaces a nonterminal EventSource after an error", () => {
-    const origRandom = Math.random;
-    Math.random = () => 0.5;
-    try {
-      const created: FakeES[] = [];
-      makeSyncReadyMock(created);
+  it("keeps a stopped task EventSource available for native retry", () => {
+    const created: FakeES[] = [];
+    makeSyncReadyMock(created);
 
-      renderTaskDetail({ taskState: "stopped" });
-      const es = created[0];
-      if (!es.onerror) throw new Error("onerror not set");
-      es.onerror(new Event("error"));
+    renderTaskDetail({ taskState: "stopped" });
+    const es = created[0];
+    if (!es.onerror) throw new Error("onerror not set");
+    es.onerror(new Event("error"));
 
-      expect(es.close).toHaveBeenCalledOnce();
-      vi.advanceTimersByTime(800);
-      expect(created).toHaveLength(2);
-    } finally {
-      Math.random = origRandom;
-    }
+    expect(es.close).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(60_000);
+    expect(created).toHaveLength(1);
   });
 
   it("reconnects on mobile resume and replays prompts missed while hidden", () => {

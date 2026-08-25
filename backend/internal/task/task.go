@@ -4,6 +4,7 @@ package task
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -117,6 +118,8 @@ type Task struct {
 	ForkedFromTaskID  ksid.ID              // Parent task ID when created by fork; zero otherwise.
 	Provider          genai.Provider
 
+	timelineID string
+
 	// Mutable task metadata. These fields are populated at construction, setup, or
 	// import. After a task is published in the Manager registry, access them
 	// through Task methods so readers and async lifecycle goroutines synchronize.
@@ -149,7 +152,8 @@ type Task struct {
 	inPlanMode            bool      // True while the agent is in plan mode (between EnterPlanMode and ExitPlanMode).
 	title                 string    // LLM-generated short title; set via SetTitle.
 	msgs                  []agent.Message
-	subs                  []*sub          // active SSE subscribers
+	subs                  []*sub          // active message subscribers
+	timelineSubs          []*timelineSub  // active sequenced SSE subscribers
 	rateLimitSubs         []*rateLimitSub // active lossless quota subscribers
 	handle                *SessionHandle  // current active session; nil when no session is attached
 	priorCostUSD          float64         // accumulated cost from all cleared sessions
@@ -176,6 +180,13 @@ type Task struct {
 	rateLimits            map[quotaWindowKey]RateLimit // Latest quota status for each provider window.
 }
 
+// TimelineMessage is an immutable task message and its stable, one-based
+// position in the task timeline.
+type TimelineMessage struct {
+	Message  agent.Message
+	Sequence uint64
+}
+
 // NewTask creates a task with a valid ID, a pending state, and prompt.
 func NewTask(id ksid.ID, prompt agent.Prompt, h harness.Name, model, effort, baseImage, containerPlatform, title string) (*Task, error) {
 	if id == 0 {
@@ -186,6 +197,7 @@ func NewTask(id ksid.ID, prompt agent.Prompt, h harness.Name, model, effort, bas
 	}
 	t := &Task{
 		ID:                id,
+		timelineID:        rand.Text(),
 		InitialPrompt:     prompt,
 		Harness:           h,
 		Model:             model,
@@ -446,7 +458,7 @@ func lastTurnHasExitPlan(msgs []agent.Message) bool {
 	return false
 }
 
-// sub is an SSE subscriber with a once-guarded close to prevent double-close
+// sub is a message subscriber with a once-guarded close to prevent double-close
 // panics when both the fan-out (slow subscriber drop) and context cancellation
 // race to close the channel.
 type sub struct {
@@ -455,6 +467,15 @@ type sub struct {
 }
 
 func (s *sub) close() {
+	s.once.Do(func() { close(s.ch) })
+}
+
+type timelineSub struct {
+	ch   chan TimelineMessage
+	once sync.Once
+}
+
+func (s *timelineSub) close() {
 	s.once.Do(func() { close(s.ch) })
 }
 
@@ -483,6 +504,11 @@ func computeCost(totalCostUSD float64, u agent.Usage) float64 {
 }
 
 const titleSystemPrompt = "Summarize this coding task conversation in 3-8 words as a short title. Reply with ONLY the title, no quotes."
+
+// TimelineID returns this task object's event-stream incarnation.
+func (t *Task) TimelineID() string {
+	return t.timelineID
+}
 
 // Primary returns a copy of the primary RepoMount (Repos[0]), or nil for no-repo tasks.
 func (t *Task) Primary() *taskslog.RepoMount {
@@ -1341,6 +1367,49 @@ func (t *Task) SubscribeLiveMessages(ctx context.Context) (live <-chan agent.Mes
 	return s.ch, unsubscribeMessages(t, ctx, s)
 }
 
+// SubscribeTimeline returns a sequenced history snapshot and live timeline.
+func (t *Task) SubscribeTimeline(ctx context.Context) (history []TimelineMessage, live <-chan TimelineMessage, unsubFn func()) {
+	s := &timelineSub{ch: make(chan TimelineMessage, 256)}
+	t.mu.Lock()
+	history = make([]TimelineMessage, len(t.msgs))
+	for i, message := range t.msgs {
+		history[i] = TimelineMessage{Message: message, Sequence: uint64(i + 1)}
+	}
+	t.timelineSubs = append(t.timelineSubs, s)
+	t.mu.Unlock()
+	return history, s.ch, unsubscribeTimeline(t, ctx, s)
+}
+
+// SubscribeLiveTimeline returns the current timeline position and sequenced
+// messages produced after subscription without copying retained history.
+func (t *Task) SubscribeLiveTimeline(ctx context.Context) (after uint64, live <-chan TimelineMessage, unsubFn func()) {
+	s := &timelineSub{ch: make(chan TimelineMessage, 256)}
+	t.mu.Lock()
+	after = uint64(len(t.msgs))
+	t.timelineSubs = append(t.timelineSubs, s)
+	t.mu.Unlock()
+	return after, s.ch, unsubscribeTimeline(t, ctx, s)
+}
+
+func unsubscribeTimeline(t *Task, ctx context.Context, s *timelineSub) func() {
+	unsub := func() {
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		for i, ss := range t.timelineSubs {
+			if ss == s {
+				t.timelineSubs = append(t.timelineSubs[:i], t.timelineSubs[i+1:]...)
+				break
+			}
+		}
+	}
+	go func() {
+		<-ctx.Done()
+		unsub()
+		s.close()
+	}()
+	return unsub
+}
+
 func unsubscribeMessages(t *Task, ctx context.Context, s *sub) func() {
 	unsub := func() {
 		t.mu.Lock()
@@ -1862,6 +1931,17 @@ func (t *Task) addParsedMessage(parsed agent.ParsedMessage, skipTitleGen bool) (
 			// Slow subscriber — drop and remove.
 			t.subs[i].close()
 			t.subs = append(t.subs[:i], t.subs[i+1:]...)
+			i--
+		}
+	}
+	event := TimelineMessage{Message: m, Sequence: uint64(len(t.msgs))}
+	for i := 0; i < len(t.timelineSubs); i++ {
+		select {
+		case t.timelineSubs[i].ch <- event:
+		default:
+			timelineSub := t.timelineSubs[i]
+			timelineSub.close()
+			t.timelineSubs = append(t.timelineSubs[:i], t.timelineSubs[i+1:]...)
 			i--
 		}
 	}

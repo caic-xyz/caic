@@ -2009,14 +2009,44 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		// when the events endpoint is accessed. The handler replays the
 		// full message history, then emits "ready" and closes the stream.
 		body := w.Body.String()
+		entry, ok := s.taskMgr.GetEntry(taskID)
+		if !ok {
+			t.Fatal("purged task disappeared")
+		}
+		id1 := taskEventID{timeline: entry.Task().TimelineID(), source: taskEventSourceDisk, message: 1}.String()
+		id2 := taskEventID{timeline: entry.Task().TimelineID(), source: taskEventSourceDisk, message: 2}.String()
+		id3 := taskEventID{timeline: entry.Task().TimelineID(), source: taskEventSourceDisk, message: 3}.String()
 		if !strings.Contains(body, "event: ready") {
 			t.Error("expected 'ready' event for purged task")
 		}
 		if !strings.Contains(body, "I found the bug") {
 			t.Error("expected text message 'I found the bug' to be replayed for purged task")
 		}
-		if strings.Contains(body, "\nid:") {
-			t.Errorf("task SSE body unexpectedly has event IDs:\n%s", body)
+		if !strings.Contains(body, "id: "+id1+"\n") || !strings.Contains(body, "id: "+id2+"\n") {
+			t.Errorf("task SSE body is missing stable event IDs:\n%s", body)
+		}
+
+		resumeReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID+"/raw_events", http.NoBody)
+		resumeReq.SetPathValue("id", taskID)
+		resumeReq.Header.Set("Last-Event-ID", id2)
+		resumeWriter := httptest.NewRecorder()
+		testTaskHandlers(s).handleTaskEvents(resumeWriter, resumeReq)
+		resumedBody := resumeWriter.Body.String()
+		if strings.Contains(resumedBody, "I found the bug") || strings.Contains(resumedBody, "id: "+id1) || strings.Contains(resumedBody, "id: "+id2) {
+			t.Errorf("resumed task SSE replayed acknowledged events:\n%s", resumedBody)
+		}
+		if !strings.Contains(resumedBody, "id: "+id3) || !strings.Contains(resumedBody, "event: ready") {
+			t.Errorf("resumed task SSE omitted unseen history or ready marker:\n%s", resumedBody)
+		}
+
+		staleReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID+"/raw_events", http.NoBody)
+		staleReq.SetPathValue("id", taskID)
+		staleReq.Header.Set("Last-Event-ID", taskEventID{timeline: entry.Task().TimelineID(), source: taskEventSourceDisk, message: 99}.String())
+		staleWriter := httptest.NewRecorder()
+		testTaskHandlers(s).handleTaskEvents(staleWriter, staleReq)
+		staleBody := staleWriter.Body.String()
+		if !strings.Contains(staleBody, "id:\nevent: reset\n") || !strings.Contains(staleBody, "I found the bug") {
+			t.Errorf("stale task SSE cursor did not reset and replay full history:\n%s", staleBody)
 		}
 	})
 
@@ -2195,7 +2225,12 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		})
 
 		tk := mustNewTask(t, taskID, agent.Prompt{Text: "fix the bug"}, harness.Claude)
-		tk.SeedTimeline([]agent.Message{&agent.TextMessage{Text: "fast in-memory history"}})
+		tk.SeedTimeline([]agent.Message{
+			&agent.TextMessage{Text: "fast in-memory history"},
+			&agent.ResultMessage{MessageType: "result", Subtype: "success"},
+			&agent.ExitMessage{ExitCode: 2, Error: "suppressed clean-turn exit"},
+			&agent.TextMessage{Text: "after sequence gap"},
+		})
 		tk.SetState(taskslog.StateRunning)
 
 		s := newTestRouter(t, nil)
@@ -2217,6 +2252,39 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		}
 		if strings.Contains(body, "slow disk replay should not be used") {
 			t.Fatalf("disk history leaked into running task SSE body:\n%s", body)
+		}
+		id1 := taskEventID{timeline: tk.TimelineID(), source: taskEventSourceMemory, message: 1}.String()
+		id2 := taskEventID{timeline: tk.TimelineID(), source: taskEventSourceMemory, message: 2}.String()
+		id4 := taskEventID{timeline: tk.TimelineID(), source: taskEventSourceMemory, message: 4}.String()
+		if !strings.Contains(body, "id: "+id1) || !strings.Contains(body, "id: "+id2) || !strings.Contains(body, "id: "+id4) {
+			t.Fatalf("in-memory SSE IDs did not preserve the suppressed sequence gap:\n%s", body)
+		}
+
+		resumeCtx, resumeCancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+		defer resumeCancel()
+		resumeReq := httptest.NewRequestWithContext(resumeCtx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+		resumeReq.SetPathValue("id", taskID.String())
+		resumeReq.Header.Set("Last-Event-ID", id1)
+		resumeWriter := httptest.NewRecorder()
+		testTaskHandlers(s).handleTaskEvents(resumeWriter, resumeReq)
+		resumedBody := resumeWriter.Body.String()
+		if strings.Contains(resumedBody, "id: "+id1) || !strings.Contains(resumedBody, "id: "+id2) || !strings.Contains(resumedBody, "id: "+id4) {
+			t.Fatalf("in-memory SSE resume did not emit only the unseen suffix:\n%s", resumedBody)
+		}
+		if !strings.Contains(resumedBody, `"result":"fast in-memory history"`) {
+			t.Fatalf("in-memory SSE resume lost converter state:\n%s", resumedBody)
+		}
+
+		resetCtx, resetCancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+		defer resetCancel()
+		resetReq := httptest.NewRequestWithContext(resetCtx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+		resetReq.SetPathValue("id", taskID.String())
+		resetReq.Header.Set("Last-Event-ID", taskEventID{timeline: tk.TimelineID(), source: taskEventSourceDisk, message: 1}.String())
+		resetWriter := httptest.NewRecorder()
+		testTaskHandlers(s).handleTaskEvents(resetWriter, resetReq)
+		resetBody := resetWriter.Body.String()
+		if !strings.Contains(resetBody, "id:\nevent: reset\n") || !strings.Contains(resetBody, "id: "+id1) {
+			t.Fatalf("wrong in-memory SSE authority did not reset and replay:\n%s", resetBody)
 		}
 	})
 
