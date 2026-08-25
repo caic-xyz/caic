@@ -129,7 +129,8 @@ func TestStore(t *testing.T) {
 			t.Fatal(err)
 		}
 		plainPath := log.path
-		compressed, err := store.Compress(log.path, log, StateFailed)
+		summary := &LoadedTask{State: StateFailed, LastTrailer: &Result{State: StateFailed}}
+		compressed, err := store.CompressTerminal(log.path, log, summary)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -139,6 +140,13 @@ func TestStore(t *testing.T) {
 		}
 		if _, err := os.Stat(plainPath); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("plain log stat = %v, want os.ErrNotExist", err)
+		}
+		cached, ok := readHeaderCache(compressed)
+		if !ok {
+			t.Fatal("Compress did not publish a terminal header cache")
+		}
+		if cached.LastTrailer == nil || cached.LastTrailer.State != StateFailed {
+			t.Fatalf("cached result = %#v, want failed", cached.LastTrailer)
 		}
 		if err := log.AppendMessage(&agent.LogMessage{MessageType: "caic_log", Line: "after compression"}); !errors.Is(err, os.ErrClosed) {
 			t.Fatalf("append after compression error = %v, want os.ErrClosed", err)
@@ -458,6 +466,13 @@ func TestStore(t *testing.T) {
 			}
 			if _, err := os.Stat(path); !os.IsNotExist(err) {
 				t.Fatalf("plain log stat = %v, want os.ErrNotExist", err)
+			}
+			cached, ok := readHeaderCache(compressed)
+			if !ok {
+				t.Fatal("SettleTerminal did not publish a terminal header cache")
+			}
+			if cached.LastTrailer == nil || cached.LastTrailer.State != StatePurged {
+				t.Fatalf("cached result = %#v, want purged", cached.LastTrailer)
 			}
 			st := NewStore(testLogger(), dir)
 			st.cutoff, st.maxSettledPerRepo = time.Time{}, 0

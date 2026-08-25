@@ -1935,12 +1935,14 @@ func TestManager(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, found, err := source.FindLastMessage(t.Context(), func(message agent.Message) bool {
-				_, ok := message.(*agent.TextMessage)
-				return ok
-			})
-			if err != nil {
-				t.Fatal(err)
+			found := false
+			for parsed, streamErr := range source.StreamMessages(t.Context()) {
+				if streamErr != nil {
+					t.Fatal(streamErr)
+				}
+				if _, ok := parsed.Message.(*agent.TextMessage); ok {
+					found = true
+				}
 			}
 			if !found {
 				t.Fatal("text message not found")
@@ -1950,6 +1952,74 @@ func TestManager(t *testing.T) {
 			}
 			if source.Msgs != nil {
 				t.Fatalf("history source retained %d messages", len(source.Msgs))
+			}
+		})
+	})
+	t.Run("BackwardMessages", func(t *testing.T) {
+		t.Parallel()
+		t.Run("live_uses_memory_without_log", func(t *testing.T) {
+			t.Parallel()
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "live"}, "", "")
+			want := &agent.TextMessage{Text: "live result"}
+			tk.SeedTimeline([]agent.Message{want})
+			entry := m.NewEntry(tk, nil)
+
+			var got agent.Message
+			for message, err := range m.BackwardMessages(t.Context(), entry) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, ok := message.(*agent.TextMessage); ok {
+					got = message
+					break
+				}
+			}
+			if got != want {
+				t.Fatalf("BackwardMessages match = %#v, want %#v", got, want)
+			}
+		})
+
+		t.Run("restored_uses_disk_without_hydrating_task", func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			path := filepath.Join(dir, "task.jsonl")
+			if err := os.WriteFile(path, []byte(
+				`{"type":"caic_meta","version":1,"prompt":"task","repos":[],"harness":"claude"}`+"\n"+
+					`{"type":"assistant","message":{"content":[{"type":"text","text":"disk result"}]}}`+"\n"+
+					`{"type":"caic_result","state":"purged"}`+"\n",
+			), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			logs, err := taskslog.NewStore(testLogger(), dir).LoadUnsettled()
+			if err != nil {
+				t.Fatal(err)
+			}
+			m := newTestManager(t, Config{
+				ServerCtx: t.Context(),
+				Backends: map[harness.Name]agent.Backend{
+					harness.Claude: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire},
+				},
+			})
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "task"}, "", "")
+			entry := m.NewEntry(tk, logs[0])
+
+			var got agent.Message
+			for message, err := range m.BackwardMessages(t.Context(), entry) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, ok := message.(*agent.TextMessage); ok {
+					got = message
+					break
+				}
+			}
+			text, ok := got.(*agent.TextMessage)
+			if !ok || text.Text != "disk result" {
+				t.Fatalf("BackwardMessages match = %#v, want disk result", got)
+			}
+			if len(tk.Messages()) != 0 {
+				t.Fatalf("restored task retained %d messages", len(tk.Messages()))
 			}
 		})
 	})

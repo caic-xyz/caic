@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"log/slog"
 	"maps"
 	"path/filepath"
@@ -225,8 +226,9 @@ func (m *Manager) Start() {
 // NewEntry creates an unregistered entry with its immutable lifecycle.
 func (m *Manager) NewEntry(t *task.Task, lt *taskslog.LoadedTask) *Entry {
 	e := &Entry{
-		task:       t,
-		loadedTask: lt,
+		task:            t,
+		loadedTask:      lt,
+		historyInMemory: lt == nil,
 	}
 	e.term.Store(&entryTerminal{done: make(chan struct{})})
 	if lt != nil {
@@ -790,6 +792,41 @@ func (m *Manager) HistorySource(entry *Entry) (*taskslog.LoadedTask, error) {
 	loaded.SetNativeParserResolver(m.resolveNativeParser)
 	entry.SetLoadedTask(loaded)
 	return loaded, nil
+}
+
+// BackwardMessages selects the task's authoritative history source and yields
+// messages newest first. Live and adopted tasks read their in-memory snapshot.
+// Restored cold tasks parse through EOF into a bounded-memory temporary spool
+// before yielding, because compressed semantic history cannot be decoded in
+// reverse directly.
+func (m *Manager) BackwardMessages(ctx context.Context, entry *Entry) iter.Seq2[agent.Message, error] {
+	return func(yield func(agent.Message, error) bool) {
+		if entry == nil {
+			yield(nil, errors.New("task history entry is nil"))
+			return
+		}
+		if entry.historyInMemory {
+			for message := range entry.Task().BackwardMessages() {
+				if !yield(message, nil) {
+					return
+				}
+			}
+			return
+		}
+		source, err := m.HistorySource(entry)
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		for parsed, streamErr := range source.BackwardMessages(ctx) {
+			if !yield(parsed.Message, streamErr) {
+				return
+			}
+			if streamErr != nil {
+				return
+			}
+		}
+	}
 }
 
 // insertLoadedTasks inserts loaded task logs into the registry, skipping tasks
@@ -1691,6 +1728,9 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	}
 
 	entry := m.NewEntry(t, lt)
+	// Import reconstructs the full timeline because the task may resume live;
+	// subsequent lookups must use that authoritative in-memory fold.
+	entry.historyInMemory = true
 	if t.GetState() == taskslog.StateCrashed || t.GetState() == taskslog.StateFailed {
 		resultErr := errors.New("agent session failed")
 		if t.GetState() == taskslog.StateCrashed {

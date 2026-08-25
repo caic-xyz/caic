@@ -284,6 +284,38 @@ func (s *Store) Compress(path string, log agent.LogSink, state State) (string, e
 	return s.compressPath(path)
 }
 
+// CompressTerminal closes and compresses a terminal log, then publishes the
+// caller's already-computed task summary beside the immutable compressed file.
+// Cache publication is best-effort: a missing cache only makes the next load
+// fall back to scanning the log, while compression remains authoritative.
+func (s *Store) CompressTerminal(path string, log agent.LogSink, summary *LoadedTask) (string, error) {
+	if summary == nil {
+		return path, errors.New("compress terminal task log: summary is nil")
+	}
+	if !summary.State.IsTerminal() {
+		return path, fmt.Errorf("compress terminal task log: state %q is revivable", summary.State)
+	}
+	if summary.LastTrailer == nil || summary.LastTrailer.State != summary.State {
+		return path, errors.New("compress terminal task log: summary result is missing or inconsistent")
+	}
+	compressed, err := s.Compress(path, log, summary.State)
+	if err != nil {
+		return compressed, err
+	}
+	info, err := os.Stat(filepath.Clean(compressed))
+	if err != nil {
+		return compressed, fmt.Errorf("stat compressed task log: %w", err)
+	}
+	summary.path = compressed
+	summary.LogSize = info.Size()
+	if err := writeHeaderCache(compressed, summary); err != nil {
+		// The immutable log remains the source of truth. Keep completion
+		// successful and make the startup-cost regression visible.
+		s.log.Warn("write compressed task log header cache", "path", compressed, "err", err)
+	}
+	return compressed, nil
+}
+
 // SettleTerminal compresses every terminal plain log in LogDir, regardless of
 // age, skipping the paths in exclude. It runs at startup so terminal logs that
 // fall outside the retention cutoff — which only bounds what the scans
@@ -316,18 +348,12 @@ func (s *Store) compressTerminalLogs(logs []*LoadedTask, exclude map[string]stru
 				continue
 			}
 		}
-		compressed, err := s.compressPath(lt.path)
+		compressed, err := s.CompressTerminal(lt.path, nil, lt)
 		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
 		lt.path = compressed
-		info, err := os.Stat(compressed)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("stat compressed task log: %w", err))
-			continue
-		}
-		lt.LogSize = info.Size()
 	}
 	return errors.Join(errs...)
 }

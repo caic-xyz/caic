@@ -735,47 +735,6 @@ func TestTsToTime(t *testing.T) {
 
 func TestLoadedTask(t *testing.T) {
 	t.Parallel()
-	t.Run("FindLastMessage", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "lookup task", Harness: harness.Claude})
-		first := claudeAssistant(t, map[string]any{"type": "text", "text": "first"})
-		second := claudeAssistant(t, map[string]any{"type": "text", "text": "second"})
-		writeLogFile(t, dir, "t.jsonl", meta, first, second)
-
-		tasks, err := NewStore(testLogger(), dir).LoadUnsettled()
-		if err != nil {
-			t.Fatal(err)
-		}
-		setClaudeParser(tasks)
-
-		got, found, err := tasks[0].FindLastMessage(t.Context(), func(message agent.Message) bool {
-			_, ok := message.(*agent.TextMessage)
-			return ok
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !found {
-			t.Fatal("FindLastMessage did not find a text message")
-		}
-		text, ok := got.Message.(*agent.TextMessage)
-		if !ok || text.Text != "second" {
-			t.Fatalf("message = %#v, want second text message", got.Message)
-		}
-
-		_, found, err = tasks[0].FindLastMessage(t.Context(), func(message agent.Message) bool {
-			_, ok := message.(*agent.ToolUseMessage)
-			return ok
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if found {
-			t.Fatal("FindLastMessage unexpectedly found a tool use")
-		}
-	})
-
 	t.Run("StreamMessages", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
@@ -986,6 +945,160 @@ func TestLoadedTask(t *testing.T) {
 		}
 		if len(streamed) != 2 {
 			t.Fatalf("streamed %d messages, want 2", len(streamed))
+		}
+	})
+
+	t.Run("BackwardMessagesCompressed", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "backward task", Harness: harness.Claude})
+		first := claudeAssistant(t, map[string]any{"type": "text", "text": "first"})
+		second := claudeAssistant(t, map[string]any{"type": "text", "text": "second"})
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		writeCompressedLogFile(t, dir, "t.jsonl.zst", seqOf(meta, first, second, trailer))
+
+		store := NewStore(testLogger(), dir)
+		store.cutoff, store.maxSettledPerRepo = time.Time{}, 0
+		tasks, err := store.LoadSettled()
+		if err != nil {
+			t.Fatal(err)
+		}
+		setClaudeParser(tasks)
+
+		var texts []string
+		for parsed, err := range tasks[0].BackwardMessages(t.Context()) {
+			if err != nil {
+				t.Fatal(err)
+			}
+			text, ok := parsed.Message.(*agent.TextMessage)
+			if ok {
+				texts = append(texts, text.Text)
+			}
+		}
+		if want := []string{"second", "first"}; !slices.Equal(texts, want) {
+			t.Fatalf("backward text messages = %q, want %q", texts, want)
+		}
+	})
+
+	t.Run("BackwardMessagesStopsBeforeOlderTurn", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "backward suffix", Harness: harness.Claude})
+		writeCompressedLogFile(t, dir, "t.jsonl.zst", seqOf(
+			meta,
+			`{"kind":"bad"}`,
+			`{"kind":"result","text":"old result"}`,
+			`{"kind":"text","text":"new text"}`,
+			`{"kind":"result","text":"new result"}`,
+			mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"}),
+		))
+
+		store := NewStore(testLogger(), dir)
+		store.cutoff, store.maxSettledPerRepo = time.Time{}, 0
+		tasks, err := store.LoadSettled()
+		if err != nil {
+			t.Fatal(err)
+		}
+		badParses := 0
+		tasks[0].SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			return func(line []byte) ([]agent.Message, error) {
+				var record struct {
+					Kind string `json:"kind"`
+					Text string `json:"text"`
+				}
+				if err := json.Unmarshal(line, &record); err != nil {
+					return nil, err
+				}
+				switch record.Kind {
+				case "bad":
+					badParses++
+					return nil, errors.New("older turn is invalid")
+				case "result":
+					return []agent.Message{&agent.ResultMessage{Result: record.Text}}, nil
+				case "text":
+					return []agent.Message{&agent.TextMessage{Text: record.Text}}, nil
+				default:
+					return nil, nil
+				}
+			}, nil
+		})
+
+		var got []string
+		for parsed, err := range tasks[0].BackwardMessages(t.Context()) {
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch message := parsed.Message.(type) {
+			case *agent.ResultMessage:
+				got = append(got, message.Result)
+			case *agent.TextMessage:
+				got = append(got, message.Text)
+			}
+			if len(got) == 2 {
+				break
+			}
+		}
+		if want := []string{"new result", "new text"}; !slices.Equal(got, want) {
+			t.Fatalf("backward newest turn = %q, want %q", got, want)
+		}
+		if badParses != 0 {
+			t.Fatalf("older invalid record parsed %d times, want 0", badParses)
+		}
+	})
+
+	t.Run("BackwardMessagesStopsAfterStableRecord", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "backward stable", Harness: harness.Claude})
+		writeCompressedLogFile(t, dir, "t.jsonl.zst", seqOf(
+			meta,
+			`{"kind":"bad"}`,
+			`{"kind":"text","text":"latest"}`,
+			mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"}),
+		))
+
+		store := NewStore(testLogger(), dir)
+		store.cutoff, store.maxSettledPerRepo = time.Time{}, 0
+		tasks, err := store.LoadSettled()
+		if err != nil {
+			t.Fatal(err)
+		}
+		badParses := 0
+		tasks[0].SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			return func(line []byte) ([]agent.Message, error) {
+				var record struct {
+					Kind string `json:"kind"`
+					Text string `json:"text"`
+				}
+				if err := json.Unmarshal(line, &record); err != nil {
+					return nil, err
+				}
+				if record.Kind == "bad" {
+					badParses++
+					return nil, errors.New("older record is invalid")
+				}
+				if record.Kind == "text" {
+					return []agent.Message{&agent.TextMessage{Text: record.Text}}, nil
+				}
+				return nil, nil
+			}, nil
+		})
+
+		var got string
+		for parsed, err := range tasks[0].BackwardMessages(t.Context()) {
+			if err != nil {
+				t.Fatal(err)
+			}
+			if text, ok := parsed.Message.(*agent.TextMessage); ok {
+				got = text.Text
+				break
+			}
+		}
+		if got != "latest" {
+			t.Fatalf("latest stable text = %q, want latest", got)
+		}
+		if badParses != 0 {
+			t.Fatalf("older invalid record parsed %d times, want 0", badParses)
 		}
 	})
 

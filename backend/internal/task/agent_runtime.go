@@ -443,7 +443,7 @@ func (r *AgentRuntime) Cleanup(ctx context.Context, t *Task, reason taskslog.Sta
 			if err := log.Close(); err != nil {
 				tlog.WarnContext(ctx, "close log failed", "err", err)
 			}
-		} else if err := r.compressLog(log, reason); err != nil {
+		} else if err := r.compressLog(log, t, &res); err != nil {
 			tlog.WarnContext(ctx, "compress task log failed", "err", err)
 		} else {
 			tlog.DebugContext(ctx, "cleanup: log trailer written and closed")
@@ -764,8 +764,8 @@ func (r *AgentRuntime) reopenLog(t *Task) (agent.LogSink, error) {
 	return log, nil
 }
 
-func (r *AgentRuntime) compressLog(log agent.LogSink, state taskslog.State) error {
-	path, err := r.LogStore.Compress(r.LogPath.Get(), log, state)
+func (r *AgentRuntime) compressLog(log agent.LogSink, t *Task, res *taskslog.Result) error {
+	path, err := r.LogStore.CompressTerminal(r.LogPath.Get(), log, t.terminalLogSummary(log.LogVersion(), res))
 	if err != nil {
 		return err
 	}
@@ -915,7 +915,7 @@ func (r *AgentRuntime) finishReviveFailure(ctx context.Context, t *Task, reviveE
 	if trailerErr != nil {
 		return errors.Join(reviveErr, trailerErr, log.Close())
 	}
-	return errors.Join(reviveErr, r.compressLog(log, taskslog.StateFailed))
+	return errors.Join(reviveErr, r.compressLog(log, t, &res))
 }
 
 // finishStartupFailure records a startup error in the task log so the failure
@@ -931,7 +931,7 @@ func (r *AgentRuntime) finishStartupFailure(ctx context.Context, t *Task, log ag
 	if writeErr != nil || trailerErr != nil {
 		return errors.Join(startupErr, writeErr, trailerErr, log.Close())
 	}
-	return errors.Join(startupErr, r.compressLog(log, taskslog.StateFailed))
+	return errors.Join(startupErr, r.compressLog(log, t, &res))
 }
 
 // logRelayDiag reads the relay daemon's relay.log from the instance and logs

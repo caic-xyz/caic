@@ -133,15 +133,40 @@ func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 			},
 		},
 		{
-			name: "FindLastMessage",
+			name: "StreamMessagesLatestMatch",
 			prepare: func() func() error {
 				lt := fixture.loadedTask()
 				return func() error {
-					_, _, err := lt.FindLastMessage(b.Context(), func(message agent.Message) bool {
-						_, ok := message.(*agent.TextMessage)
-						return ok
-					})
-					return err
+					var latest *agent.TextMessage
+					for parsed, err := range lt.StreamMessages(b.Context()) {
+						if err != nil {
+							return err
+						}
+						if text, ok := parsed.Message.(*agent.TextMessage); ok {
+							latest = text
+						}
+					}
+					if latest == nil {
+						return errors.New("stream contained no text message")
+					}
+					return nil
+				}
+			},
+		},
+		{
+			name: "BackwardMessagesLatestMatch",
+			prepare: func() func() error {
+				lt := fixture.loadedTask()
+				return func() error {
+					for parsed, err := range lt.BackwardMessages(b.Context()) {
+						if err != nil {
+							return err
+						}
+						if _, ok := parsed.Message.(*agent.TextMessage); ok {
+							return nil
+						}
+					}
+					return errors.New("stream contained no text message")
 				}
 			},
 		},

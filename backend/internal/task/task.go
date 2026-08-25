@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"log/slog"
 	"slices"
 	"strings"
@@ -1038,6 +1039,23 @@ func (t *Task) Messages() []agent.Message {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return append([]agent.Message(nil), t.msgs...)
+}
+
+// BackwardMessages returns the task's messages newest first as a snapshot taken
+// when BackwardMessages is called. Messages appended afterward are excluded.
+// Existing timeline slots are immutable, so iteration needs neither a slice
+// copy nor a lock held across caller code.
+func (t *Task) BackwardMessages() iter.Seq[agent.Message] {
+	t.mu.Lock()
+	messages := t.msgs
+	t.mu.Unlock()
+	return func(yield func(agent.Message) bool) {
+		for _, message := range slices.Backward(messages) {
+			if !yield(message) {
+				return
+			}
+		}
+	}
 }
 
 // PendingUserActions returns current user-facing actions that still need input.

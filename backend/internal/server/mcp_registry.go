@@ -690,29 +690,38 @@ func (m *mcpRegistry) handleAgentLastMessage(ctx context.Context, args mcpTaskNu
 	if !ok {
 		return mcp.ToolError[mcp.TextOutput]("Unknown task number")
 	}
-	source, err := m.taskSvc.taskMgr.HistorySource(entry)
-	if err != nil {
-		return mcp.ToolError[mcp.TextOutput](fmt.Sprintf("Task #%d history is unavailable: %v", num, err))
-	}
-	parsed, found, err := source.FindLastMessage(ctx, func(message agent.Message) bool {
-		switch message := message.(type) {
-		case *agent.ResultMessage:
-			return message.Result != ""
-		case *agent.AskMessage:
-			return len(message.Questions) > 0
-		case *agent.TextMessage:
-			return message.Text != ""
-		default:
-			return false
+	var message agent.Message
+	var historyErr error
+	for candidate, err := range m.taskSvc.taskMgr.BackwardMessages(ctx, entry) {
+		if err != nil {
+			historyErr = err
+			break
 		}
-	})
-	if err != nil {
-		return mcp.ToolError[mcp.TextOutput](fmt.Sprintf("Task #%d history is unavailable: %v", num, err))
+		switch candidate := candidate.(type) {
+		case *agent.ResultMessage:
+			if candidate.Result != "" {
+				message = candidate
+			}
+		case *agent.AskMessage:
+			if len(candidate.Questions) > 0 {
+				message = candidate
+			}
+		case *agent.TextMessage:
+			if candidate.Text != "" {
+				message = candidate
+			}
+		}
+		if message != nil {
+			break
+		}
 	}
-	if !found {
+	if historyErr != nil {
+		return mcp.ToolError[mcp.TextOutput](fmt.Sprintf("Task #%d history is unavailable: %v", num, historyErr))
+	}
+	if message == nil {
 		return mcp.TextToolResult(fmt.Sprintf("No messages from task #%d yet.", num))
 	}
-	switch message := parsed.Message.(type) {
+	switch message := message.(type) {
 	case *agent.ResultMessage:
 		return mcp.TextToolResult(fmt.Sprintf("Task #%d result: %s", num, message.Result))
 	case *agent.AskMessage:

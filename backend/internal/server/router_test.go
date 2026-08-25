@@ -753,11 +753,39 @@ func TestTaskHistoryReaders(t *testing.T) {
 		}
 	})
 
-	t.Run("error_no_log", func(t *testing.T) {
+	t.Run("live_read_without_log", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "no log"}, harness.Claude)
+		tk.SeedTimeline([]agent.Message{
+			&agent.ToolUseMessage{ToolUseID: "tool-1", Input: json.RawMessage(`{"command":"make check"}`)},
+			&agent.TextMessage{Text: "live result"},
+		})
 		entry := s.taskMgr.NewEntry(tk, nil)
+		s.taskMgr.Insert(tk.ID.String(), entry)
+
+		resp, err := testTaskHandlers(s).taskSvc.taskToolInput(t.Context(), entry, "tool-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(resp.Input) != `{"command":"make check"}` {
+			t.Fatalf("tool input = %s", resp.Input)
+		}
+
+		registry := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
+		result := registry.handleAgentLastMessage(t.Context(), mcpTaskNumberArgs{TaskNumber: 1})
+		output, ok := result.Structured.(mcp.TextOutput)
+		if result.IsError || !ok || output.Result != "Last message from task #1: live result" {
+			t.Fatalf("agent_last_message = %#v", result.Structured)
+		}
+	})
+
+	t.Run("restored_error_no_log", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "no log"}, harness.Claude)
+		loaded := &taskslog.LoadedTask{State: taskslog.StatePurged, LastTrailer: &taskslog.Result{State: taskslog.StatePurged}}
+		entry := s.taskMgr.NewEntry(tk, loaded)
 		s.taskMgr.Insert(tk.ID.String(), entry)
 
 		_, err := testTaskHandlers(s).taskSvc.taskToolInput(t.Context(), entry, "tool-1")

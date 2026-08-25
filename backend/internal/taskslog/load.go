@@ -1004,21 +1004,97 @@ func (lt *LoadedTask) StreamMessages(ctx context.Context) iter.Seq2[agent.Parsed
 	}
 }
 
-// FindLastMessage returns the last parsed history message accepted by match.
-// The complete log is validated through EOF while retaining only that record.
-func (lt *LoadedTask) FindLastMessage(ctx context.Context, match func(agent.Message) bool) (agent.ParsedMessage, bool, error) {
-	var found agent.ParsedMessage
-	ok := false
-	for parsed, err := range lt.StreamMessages(ctx) {
-		if err != nil {
-			return agent.ParsedMessage{}, false, err
+// BackwardMessages yields parsed task history newest first. It decompresses
+// the physical NDJSON log into a private seekable temporary file and scans its
+// records backward. Record-local messages are yielded immediately. Records
+// whose values depend on earlier native state trigger ordered reconstruction of
+// only their current turn. The first yield waits for decompression, but semantic
+// parsing stops when the consumer stops; memory is bounded by one turn rather
+// than the complete task history.
+func (lt *LoadedTask) BackwardMessages(ctx context.Context) iter.Seq2[agent.ParsedMessage, error] {
+	return func(yield func(agent.ParsedMessage, error) bool) {
+		if lt.path == "" {
+			yield(agent.ParsedMessage{}, errors.New("task has no log path"))
+			return
 		}
-		if match(parsed.Message) {
-			found = parsed
-			ok = true
+		if lt.resolver == nil {
+			yield(agent.ParsedMessage{}, errors.New("no parser resolver set"))
+			return
+		}
+
+		spool, err := newBackwardHistorySpool(ctx, lt.path)
+		if err != nil {
+			yield(agent.ParsedMessage{}, err)
+			return
+		}
+		defer func() { _ = spool.cleanup() }()
+
+		windowEnd := spool.end
+		for windowEnd > spool.headerEnd {
+			native, err := lt.resolver(spool.authority.Harness)
+			if err != nil {
+				yield(agent.ParsedMessage{}, err)
+				return
+			}
+			parser, err := agent.NewLogRecordParser(spool.authority.Version, native)
+			if err != nil {
+				yield(agent.ParsedMessage{}, err)
+				return
+			}
+			if _, err := parser.ParseRecord(spool.header); err != nil {
+				yield(agent.ParsedMessage{}, err)
+				return
+			}
+
+			reader := backwardRecordReader{file: spool.file, start: spool.headerEnd, pos: windowEnd}
+			for windowEnd > spool.headerEnd {
+				if err := ctx.Err(); err != nil {
+					yield(agent.ParsedMessage{}, err)
+					return
+				}
+				line, lineStart, _, ok, err := reader.previous()
+				if err != nil {
+					yield(agent.ParsedMessage{}, err)
+					return
+				}
+				if !ok {
+					return
+				}
+				record, parseErr := parser.ParseRecord(line)
+				messages, stable := stableBackwardRecord(record, parseErr)
+				if stable {
+					for _, message := range slices.Backward(messages) {
+						if !yield(message, nil) {
+							return
+						}
+					}
+					windowEnd = lineStart
+					continue
+				}
+
+				windowStart, more, err := findBackwardWindow(lt, ctx, spool, windowEnd)
+				if err != nil {
+					yield(agent.ParsedMessage{}, err)
+					return
+				}
+				messages, err = parseBackwardWindow(lt, ctx, spool, windowStart, windowEnd)
+				if err != nil {
+					yield(agent.ParsedMessage{}, err)
+					return
+				}
+				for _, message := range slices.Backward(messages) {
+					if !yield(message, nil) {
+						return
+					}
+				}
+				if !more {
+					return
+				}
+				windowEnd = windowStart
+				break
+			}
 		}
 	}
-	return found, ok, nil
 }
 
 func (lt *LoadedTask) mergeSessionMetadata(src *LoadedTask) {

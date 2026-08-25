@@ -22,10 +22,11 @@ type entryTerminal struct {
 
 // Entry is a single registered task plus its mutable lifecycle state.
 //
-// Concurrency: task and lifecycle are immutable after registration. LogPath
-// manages its own synchronization. The terminal state is an immutable snapshot
-// published through term; see entryTerminal. loadedTask, monitorBranch, and
-// cleanupOnce are guarded by mu and must only be accessed through methods.
+// Concurrency: task, lifecycle, and historyInMemory are immutable after
+// registration. LogPath manages its own synchronization. The terminal state is
+// an immutable snapshot published through term; see entryTerminal. loadedTask,
+// monitorBranch, and cleanupOnce are guarded by mu and must only be accessed
+// through methods.
 type Entry struct {
 	// Immutable.
 	Lifecycle *Lifecycle
@@ -34,6 +35,10 @@ type Entry struct {
 	LogPath taskslog.Path
 
 	task *task.Task
+
+	// New and adopted tasks keep their active timeline in Task. Restored cold
+	// tasks leave it empty and read rare history requests from loadedTask.
+	historyInMemory bool
 
 	// Terminal state of the current incarnation, published as an immutable
 	// snapshot; see entryTerminal.

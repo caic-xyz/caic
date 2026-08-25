@@ -102,6 +102,34 @@ func BenchmarkSeedTimeline(b *testing.B) {
 	}
 }
 
+// BenchmarkBackwardMessagesLatestMatch measures the live request path when a
+// caller searches a long timeline newest first for its latest matching message.
+func BenchmarkBackwardMessagesLatestMatch(b *testing.B) {
+	const messageCount = 4000
+	msgs := make([]agent.Message, 0, messageCount)
+	for i := range messageCount - 1 {
+		msgs = append(msgs, &agent.TextMessage{Text: fmt.Sprintf("message %d", i)})
+	}
+	want := &agent.ToolUseMessage{ToolUseID: "target"}
+	msgs = append(msgs, want)
+	tk := mustNewTask(b, ksid.NewID(), agent.Prompt{Text: "benchmark lookup"})
+	tk.SeedTimeline(msgs)
+	b.ReportAllocs()
+
+	for b.Loop() {
+		var got agent.Message
+		for message := range tk.BackwardMessages() {
+			if toolUse, ok := message.(*agent.ToolUseMessage); ok && toolUse.ToolUseID == "target" {
+				got = toolUse
+				break
+			}
+		}
+		if got != want {
+			b.Fatalf("latest matching message = %#v, want target", got)
+		}
+	}
+}
+
 func writeProductionAdoptionFixture(b *testing.B, path string) {
 	file, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {

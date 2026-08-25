@@ -65,6 +65,45 @@ func recvType(ch <-chan agent.Message) string {
 
 func TestTask(t *testing.T) {
 	t.Parallel()
+	t.Run("BackwardMessages", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		first := &agent.TextMessage{Text: "first"}
+		last := &agent.TextMessage{Text: "last"}
+		tk.SeedTimeline([]agent.Message{first, &agent.LogMessage{Line: "skip"}, last})
+		messages := tk.BackwardMessages()
+		tk.addMessage(t.Context(), &agent.TextMessage{Text: "after snapshot"}, false)
+
+		var got []agent.Message
+		for message := range messages {
+			got = append(got, message)
+		}
+		if len(got) != 3 || got[0] != last || got[2] != first {
+			t.Fatalf("BackwardMessages = %#v, want the backward three-message call-time snapshot", got)
+		}
+	})
+	t.Run("TerminalLogSummary", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "persist me"}, harness.Claude, "requested", "high")
+		tk.BaseImage = "image"
+		tk.ContainerPlatform = "linux/amd64"
+		tk.SetTitle("title")
+		tk.Repos = []taskslog.RepoMount{{Name: "org/repo", Branch: "caic-1", GitRoot: "/host/checkout"}}
+		tk.SetSessionMetadata("session-1", "reported", "1.2.3")
+		tk.SetState(taskslog.StatePurged)
+		result := &taskslog.Result{State: taskslog.StatePurged, AgentResult: "done"}
+
+		summary := tk.terminalLogSummary(agent.LogVersionV1, result)
+		if summary.LogVersion != agent.LogVersionV1 || summary.State != taskslog.StatePurged || summary.LastTrailer != result {
+			t.Fatalf("terminal summary = %#v", summary)
+		}
+		if summary.SessionID != "session-1" || summary.Model != "reported" || summary.AgentVersion != "1.2.3" {
+			t.Errorf("session summary = (%q, %q, %q)", summary.SessionID, summary.Model, summary.AgentVersion)
+		}
+		if len(summary.Repos) != 1 || summary.Repos[0].GitRoot != "" {
+			t.Fatalf("summary repos = %#v, want process-local GitRoot removed", summary.Repos)
+		}
+	})
 	t.Run("RateLimitSnapshot", func(t *testing.T) {
 		t.Parallel()
 		resetAt := time.Now().UTC().Add(time.Hour)
