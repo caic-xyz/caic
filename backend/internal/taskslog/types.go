@@ -74,7 +74,9 @@ func (s State) String() string {
 // IsTerminal reports whether the task cannot be revived.
 func (s State) IsTerminal() bool { return s == StateFailed || s == StatePurged }
 
-// Result holds the outcome of a completed task.
+// Result holds the bounded durable outcome of a completed task. Completed-task
+// restoration should read this summary without decoding message bodies; logs
+// that predate required fields may fall back to a full history fold.
 //
 // Is serialized as task metadata to disk. Is not used for HTTP wire protocol.
 type Result struct {

@@ -1,5 +1,8 @@
-// Package taskslog owns task-log persistence, compression, and replay loading.
-
+// Package taskslog owns durable task-log persistence, compression, and replay loading.
+//
+// Restored completed tasks read history here without materializing a live task
+// timeline. Full scans are acceptable for their rare history reads but must not
+// block startup metadata loading.
 package taskslog
 
 import (

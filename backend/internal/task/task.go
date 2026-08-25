@@ -1051,11 +1051,15 @@ func (t *Task) PendingUserActions() []agent.PendingUserAction {
 // saved logs, then derives session metadata, plan state, live stats and task
 // state from it.
 //
+// Seeding is for an adopted task that will resume live operation. Restored
+// completed tasks intentionally leave the timeline empty and serve rare
+// history reads from taskslog instead.
+//
 // It panics if the task already holds messages. Seeding is one-shot
 // initialization, not a merge: replaying a second batch onto an existing
 // timeline would double-count cost, turns and token usage. A live timeline
-// grows through the session message pump instead; the disk-reload callers
-// The task import paths run exactly once per task.
+// grows through the session message pump instead; task import runs exactly once
+// before registration.
 //
 // State inference rules (applied only for non-terminal states):
 //   - Current turn has unanswered AskUserQuestion → StateAsking

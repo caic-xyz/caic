@@ -772,7 +772,9 @@ func (m *Manager) LoadPurgedTasks(purged []*taskslog.LoadedTask) error {
 	return nil
 }
 
-// HistorySource opens a header-only raw-log reader for stopped or terminal history.
+// HistorySource opens a header-only raw-log reader for stopped or terminal
+// history. It is the cold-history path: live readers should use the Task
+// timeline rather than repeatedly reparsing its growing log.
 func (m *Manager) HistorySource(entry *Entry) (*taskslog.LoadedTask, error) {
 	if entry == nil {
 		return nil, errors.New("task history entry is nil")
@@ -1609,11 +1611,13 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		t.SetPR(checkout.Repository.ForgeOwner, checkout.Repository.ForgeRepo, 0)
 	}
 
-	// Restore messages from both the local log and the relay tail. The local log
-	// has the full pre-restart history; the relay tail has any output produced
-	// while the server was down. Merge them by overlap so the UI does not collapse
-	// to the bounded relay tail after a server restart. Fail closed: a malformed
-	// persistent history must not attach a live task with untrusted state.
+	// Restore messages from both the local log and the relay tail. Unlike a
+	// completed-task restore, adoption needs the full timeline to resume live
+	// operation. The local log has the full pre-restart history; the relay tail
+	// has output produced while the server was down plus some overlap. Merge them
+	// so the UI does not collapse to the bounded relay tail after a server
+	// restart. Fail closed: malformed persistent history must not attach a live
+	// task with untrusted state.
 	if err := lt.LoadMessagesWithResolver(m.resolveNativeParser); err != nil {
 		return nil, fmt.Errorf("load messages for imported task %s: %w", taskID, err)
 	}
