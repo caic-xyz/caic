@@ -1340,8 +1340,8 @@ func testRunnerSessions(t *testing.T) {
 			if err := session.Wait(); err != nil {
 				t.Fatal(err)
 			}
-			if got := <-sub; got != v2Message {
-				t.Fatalf("subscriber message = %T, want original %T", got, v2Message)
+			if got := <-sub; got.Message != v2Message {
+				t.Fatalf("subscriber message = %T, want original %T", got.Message, v2Message)
 			}
 			var v1 agent.ParsedMessage
 			err = agent.DefaultReadMessages(t.Context(), logtest.Logger(t), strings.NewReader(`{"event":"legacy"}`+"\n"), func(parsed agent.ParsedMessage) {
@@ -1385,9 +1385,9 @@ func testRunnerSessions(t *testing.T) {
 			timeout := time.After(time.Second)
 			select {
 			case got := <-ch:
-				rr, ok := got.(*agent.ResultMessage)
+				rr, ok := got.Message.(*agent.ResultMessage)
 				if !ok {
-					t.Fatalf("expected *agent.ResultMessage, got %T", got)
+					t.Fatalf("expected *agent.ResultMessage, got %T", got.Message)
 				}
 				if len(rr.DiffStat) != 1 || rr.DiffStat[0].Path != "main.go" {
 					t.Errorf("DiffStat = %+v, want [{main.go 5 1}]", rr.DiffStat)

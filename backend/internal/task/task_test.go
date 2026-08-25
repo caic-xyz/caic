@@ -51,13 +51,13 @@ func (*failingConn) Close() error { return nil }
 // fanout performs a synchronous non-blocking send into a buffered channel
 // during addMessage, so a message is available immediately on return; a
 // non-blocking receive is therefore deterministic with no timing dependency.
-func recvType(ch <-chan agent.Message) string {
+func recvType(ch <-chan TimelineMessage) string {
 	select {
 	case m, ok := <-ch:
 		if !ok {
 			return ""
 		}
-		return m.Type()
+		return m.Message.Type()
 	default:
 		return ""
 	}
@@ -368,11 +368,11 @@ func TestTask(t *testing.T) {
 			if len(history) != 2 {
 				t.Fatalf("history len = %d, want 2", len(history))
 			}
-			if history[0].Type() != "system" {
-				t.Errorf("history[0].Type() = %q, want %q", history[0].Type(), "system")
+			if history[0].Message.Type() != "system" {
+				t.Errorf("history[0].Message.Type() = %q, want %q", history[0].Message.Type(), "system")
 			}
-			if history[1].Type() != "text" {
-				t.Errorf("history[1].Type() = %q, want %q", history[1].Type(), "text")
+			if history[1].Message.Type() != "text" {
+				t.Errorf("history[1].Message.Type() = %q, want %q", history[1].Message.Type(), "text")
 			}
 		})
 		t.Run("ReplayLargeHistory", func(t *testing.T) {
@@ -412,11 +412,11 @@ func TestTask(t *testing.T) {
 			tk.addMessage(t.Context(), &agent.TextMessage{Text: "live"}, false)
 
 			timeout := time.After(time.Second)
-			for i, ch := range []<-chan agent.Message{ch1, ch2} {
+			for i, ch := range []<-chan TimelineMessage{ch1, ch2} {
 				select {
 				case msg := <-ch:
-					if msg.Type() != "text" {
-						t.Errorf("subscriber %d: type = %q, want %q", i, msg.Type(), "text")
+					if msg.Message.Type() != "text" {
+						t.Errorf("subscriber %d: type = %q, want %q", i, msg.Message.Type(), "text")
 					}
 				case <-timeout:
 					t.Fatalf("subscriber %d: timed out waiting for live message", i)
@@ -437,8 +437,8 @@ func TestTask(t *testing.T) {
 			timeout := time.After(time.Second)
 			select {
 			case got := <-ch:
-				if got.Type() != "text" {
-					t.Errorf("type = %q, want %q", got.Type(), "text")
+				if got.Message.Type() != "text" {
+					t.Errorf("type = %q, want %q", got.Message.Type(), "text")
 				}
 			case <-timeout:
 				t.Fatal("timed out waiting for live message")
@@ -447,7 +447,7 @@ func TestTask(t *testing.T) {
 		t.Run("TimelinePreservesSuppressedMessageGaps", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-			_, ch, unsub := tk.SubscribeTimeline(t.Context())
+			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 
 			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result", Subtype: "success"}, false)
@@ -464,20 +464,20 @@ func TestTask(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.addMessage(t.Context(), &agent.TextMessage{Text: "old"}, false)
-			ch, unsub := tk.SubscribeLiveMessages(t.Context())
+			_, ch, unsub := tk.SubscribeLiveMessages(t.Context())
 			defer unsub()
 
 			select {
 			case got := <-ch:
-				t.Fatalf("unexpected historical message %q", got.Type())
+				t.Fatalf("unexpected historical message %q", got.Message.Type())
 			default:
 			}
 			tk.addMessage(t.Context(), &agent.TextMessage{Text: "new"}, false)
 			select {
 			case got := <-ch:
-				text, ok := got.(*agent.TextMessage)
+				text, ok := got.Message.(*agent.TextMessage)
 				if !ok {
-					t.Fatalf("message = %T, want *agent.TextMessage", got)
+					t.Fatalf("message = %T, want *agent.TextMessage", got.Message)
 				}
 				if text.Text != "new" {
 					t.Fatalf("message = %q, want new", text.Text)

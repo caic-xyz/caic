@@ -152,8 +152,7 @@ type Task struct {
 	inPlanMode            bool      // True while the agent is in plan mode (between EnterPlanMode and ExitPlanMode).
 	title                 string    // LLM-generated short title; set via SetTitle.
 	msgs                  []agent.Message
-	subs                  []*sub          // active message subscribers
-	timelineSubs          []*timelineSub  // active sequenced SSE subscribers
+	subs                  []*sub          // active sequenced message subscribers
 	rateLimitSubs         []*rateLimitSub // active lossless quota subscribers
 	handle                *SessionHandle  // current active session; nil when no session is attached
 	priorCostUSD          float64         // accumulated cost from all cleared sessions
@@ -462,20 +461,11 @@ func lastTurnHasExitPlan(msgs []agent.Message) bool {
 // panics when both the fan-out (slow subscriber drop) and context cancellation
 // race to close the channel.
 type sub struct {
-	ch   chan agent.Message
-	once sync.Once
-}
-
-func (s *sub) close() {
-	s.once.Do(func() { close(s.ch) })
-}
-
-type timelineSub struct {
 	ch   chan TimelineMessage
 	once sync.Once
 }
 
-func (s *timelineSub) close() {
+func (s *sub) close() {
 	s.once.Do(func() { close(s.ch) })
 }
 
@@ -1343,71 +1333,32 @@ func (t *Task) ClearMessages(ctx context.Context) {
 
 // Subscribe returns a snapshot of all past messages plus a live channel for
 // new messages. The caller must call unsubFn when done to release resources.
-func (t *Task) Subscribe(ctx context.Context) (history []agent.Message, live <-chan agent.Message, unsubFn func()) {
-	s := &sub{ch: make(chan agent.Message, 256)}
+func (t *Task) Subscribe(ctx context.Context) (history []TimelineMessage, live <-chan TimelineMessage, unsubFn func()) {
+	s := &sub{ch: make(chan TimelineMessage, 256)}
 
 	t.mu.Lock()
 	// Snapshot history under lock — no channel writes, so no deadlock risk
 	// regardless of history size.
-	history = append([]agent.Message(nil), t.msgs...)
+	history = make([]TimelineMessage, len(t.msgs))
+	for i, message := range t.msgs {
+		history[i] = TimelineMessage{Message: message, Sequence: uint64(i + 1)}
+	}
 	t.subs = append(t.subs, s)
 	t.mu.Unlock()
 
 	return history, s.ch, unsubscribeMessages(t, ctx, s)
 }
 
-// SubscribeLiveMessages returns only messages produced after subscription. It
-// avoids copying retained task history for consumers with another authoritative
-// history source, such as a stopped task's raw log.
-func (t *Task) SubscribeLiveMessages(ctx context.Context) (live <-chan agent.Message, unsubFn func()) {
-	s := &sub{ch: make(chan agent.Message, 256)}
-	t.mu.Lock()
-	t.subs = append(t.subs, s)
-	t.mu.Unlock()
-	return s.ch, unsubscribeMessages(t, ctx, s)
-}
-
-// SubscribeTimeline returns a sequenced history snapshot and live timeline.
-func (t *Task) SubscribeTimeline(ctx context.Context) (history []TimelineMessage, live <-chan TimelineMessage, unsubFn func()) {
-	s := &timelineSub{ch: make(chan TimelineMessage, 256)}
-	t.mu.Lock()
-	history = make([]TimelineMessage, len(t.msgs))
-	for i, message := range t.msgs {
-		history[i] = TimelineMessage{Message: message, Sequence: uint64(i + 1)}
-	}
-	t.timelineSubs = append(t.timelineSubs, s)
-	t.mu.Unlock()
-	return history, s.ch, unsubscribeTimeline(t, ctx, s)
-}
-
-// SubscribeLiveTimeline returns the current timeline position and sequenced
-// messages produced after subscription without copying retained history.
-func (t *Task) SubscribeLiveTimeline(ctx context.Context) (after uint64, live <-chan TimelineMessage, unsubFn func()) {
-	s := &timelineSub{ch: make(chan TimelineMessage, 256)}
+// SubscribeLiveMessages returns the current timeline position and sequenced
+// messages produced after subscription. It avoids copying retained task history
+// for consumers with another authoritative history source.
+func (t *Task) SubscribeLiveMessages(ctx context.Context) (after uint64, live <-chan TimelineMessage, unsubFn func()) {
+	s := &sub{ch: make(chan TimelineMessage, 256)}
 	t.mu.Lock()
 	after = uint64(len(t.msgs))
-	t.timelineSubs = append(t.timelineSubs, s)
+	t.subs = append(t.subs, s)
 	t.mu.Unlock()
-	return after, s.ch, unsubscribeTimeline(t, ctx, s)
-}
-
-func unsubscribeTimeline(t *Task, ctx context.Context, s *timelineSub) func() {
-	unsub := func() {
-		t.mu.Lock()
-		defer t.mu.Unlock()
-		for i, ss := range t.timelineSubs {
-			if ss == s {
-				t.timelineSubs = append(t.timelineSubs[:i], t.timelineSubs[i+1:]...)
-				break
-			}
-		}
-	}
-	go func() {
-		<-ctx.Done()
-		unsub()
-		s.close()
-	}()
-	return unsub
+	return after, s.ch, unsubscribeMessages(t, ctx, s)
 }
 
 func unsubscribeMessages(t *Task, ctx context.Context, s *sub) func() {
@@ -1924,24 +1875,14 @@ func (t *Task) addParsedMessage(parsed agent.ParsedMessage, skipTitleGen bool) (
 	if exit, ok := m.(*agent.ExitMessage); ok && exit.ExitCode != 0 && t.lastExitError == "" {
 		return stateChanged, generateTitle
 	}
+	event := TimelineMessage{Message: m, Sequence: uint64(len(t.msgs))}
 	for i := 0; i < len(t.subs); i++ {
 		select {
-		case t.subs[i].ch <- m:
+		case t.subs[i].ch <- event:
 		default:
 			// Slow subscriber — drop and remove.
 			t.subs[i].close()
 			t.subs = append(t.subs[:i], t.subs[i+1:]...)
-			i--
-		}
-	}
-	event := TimelineMessage{Message: m, Sequence: uint64(len(t.msgs))}
-	for i := 0; i < len(t.timelineSubs); i++ {
-		select {
-		case t.timelineSubs[i].ch <- event:
-		default:
-			timelineSub := t.timelineSubs[i]
-			timelineSub.close()
-			t.timelineSubs = append(t.timelineSubs[:i], t.timelineSubs[i+1:]...)
 			i--
 		}
 	}

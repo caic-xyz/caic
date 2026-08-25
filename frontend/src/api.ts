@@ -65,22 +65,22 @@ function validateTaskHistoryStreamError(value: unknown): TaskHistoryStreamError 
   return { message };
 }
 
-export function taskEventStream(
-  id: string,
-  onMessage: (event: EventMessage) => void,
-  onError: (err: unknown) => void,
-  onReady?: () => void,
-  onOpen?: () => void,
-  onHistoryError?: (error: TaskHistoryStreamError) => void,
-  onReset?: () => void,
-): EventSource {
+export interface TaskEventStreamHandlers {
+  onMessage: (event: EventMessage) => void;
+  onError: (err: unknown) => void;
+  onReady?: () => void;
+  onHistoryError?: (error: TaskHistoryStreamError) => void;
+  onReset?: () => void;
+}
+
+export function taskEventStream(id: string, handlers: TaskEventStreamHandlers): EventSource {
   const es = new EventSource(`/api/caic/v1/tasks/${id}/events`);
   es.addEventListener("message", (e) => {
     const ev = e as MessageEvent<string>;
     try {
-      onMessage(validateEventMessage(JSON.parse(ev.data)));
+      handlers.onMessage(validateEventMessage(JSON.parse(ev.data)));
     } catch (err) {
-      onError(err);
+      handlers.onError(err);
     }
   });
   es.addEventListener("error", (event) => {
@@ -88,19 +88,16 @@ export function taskEventStream(
     // Only the server's named SSE error event carries a JSON history payload.
     if (!(event instanceof MessageEvent) || typeof event.data !== "string") return;
     try {
-      onHistoryError?.(validateTaskHistoryStreamError(JSON.parse(event.data)));
+      handlers.onHistoryError?.(validateTaskHistoryStreamError(JSON.parse(event.data)));
     } catch (err) {
-      onError(err);
+      handlers.onError(err);
     }
   });
-  if (onReady) {
-    es.addEventListener("ready", onReady);
+  if (handlers.onReady) {
+    es.addEventListener("ready", handlers.onReady);
   }
-  if (onReset) {
-    es.addEventListener("reset", onReset);
-  }
-  if (onOpen) {
-    es.addEventListener("open", onOpen);
+  if (handlers.onReset) {
+    es.addEventListener("reset", handlers.onReset);
   }
   return es;
 }

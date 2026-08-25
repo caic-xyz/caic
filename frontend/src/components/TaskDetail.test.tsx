@@ -139,7 +139,7 @@ describe("TaskDetail", () => {
   });
 
   it("renders Codex file-change diffs with colored lines", () => {
-    vi.mocked(taskEventStream).mockImplementationOnce((_id, cb, _onError, onReady) => {
+    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
       const events: EventMessage[] = [
         {
           kind: "toolUse",
@@ -164,8 +164,8 @@ describe("TaskDetail", () => {
           toolResult: { toolUseID: "edit-1", duration: 0.1 },
         },
       ];
-      for (const event of events) cb(event);
-      onReady?.();
+      for (const event of events) handlers.onMessage(event);
+      handlers.onReady?.();
       return {
         addEventListener: vi.fn(),
         close: vi.fn(),
@@ -203,10 +203,10 @@ describe("TaskDetail", () => {
   });
 
   it("keeps the prompt visible when a later input repeats it", () => {
-    vi.mocked(taskEventStream).mockImplementationOnce((_id, cb, _onError, onReady) => {
-      cb({ kind: "text", ts: 1, text: { text: "agent reply" } });
-      cb({ kind: "userInput", ts: 2, userInput: { text: "same prompt" } });
-      onReady?.();
+    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+      handlers.onMessage({ kind: "text", ts: 1, text: { text: "agent reply" } });
+      handlers.onMessage({ kind: "userInput", ts: 2, userInput: { text: "same prompt" } });
+      handlers.onReady?.();
       return {
         addEventListener: vi.fn(),
         close: vi.fn(),
@@ -220,10 +220,10 @@ describe("TaskDetail", () => {
   });
 
   it("shows setup logs inside task details", () => {
-    vi.mocked(taskEventStream).mockImplementationOnce((_id, cb, _onError, onReady) => {
-      cb({ kind: "log", ts: 1, log: { line: "starting runtime" } });
-      cb({ kind: "error", ts: 2, error: { err: "agent extension failed to load", line: "" } });
-      onReady?.();
+    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+      handlers.onMessage({ kind: "log", ts: 1, log: { line: "starting runtime" } });
+      handlers.onMessage({ kind: "error", ts: 2, error: { err: "agent extension failed to load", line: "" } });
+      handlers.onReady?.();
       return {
         addEventListener: vi.fn(),
         close: vi.fn(),
@@ -246,10 +246,10 @@ describe("TaskDetail", () => {
   });
 
   it("collapses setup logs after the agent session starts", () => {
-    vi.mocked(taskEventStream).mockImplementationOnce((_id, cb, _onError, onReady) => {
-      cb({ kind: "log", ts: 1, log: { line: "starting runtime" } });
-      cb({ kind: "init", ts: 2, init: { model: "test", agentVersion: "test", sessionID: "session", cwd: "", harness: "test" } });
-      onReady?.();
+    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+      handlers.onMessage({ kind: "log", ts: 1, log: { line: "starting runtime" } });
+      handlers.onMessage({ kind: "init", ts: 2, init: { model: "test", agentVersion: "test", sessionID: "session", cwd: "", harness: "test" } });
+      handlers.onReady?.();
       return {
         addEventListener: vi.fn(),
         close: vi.fn(),
@@ -276,15 +276,15 @@ function makeSyncReadyMock(
   created: FakeES[],
   capturedCb?: { value: ((ev: EventMessage) => void) | null },
 ) {
-  vi.mocked(taskEventStream).mockImplementation((_id, cb, _onError, onReady) => {
-    if (capturedCb) capturedCb.value = cb as (ev: EventMessage) => void;
+  vi.mocked(taskEventStream).mockImplementation((_id, handlers) => {
+    if (capturedCb) capturedCb.value = handlers.onMessage;
     const fakeES: FakeES = {
       addEventListener: vi.fn(),
       close: vi.fn(),
       onerror: null,
     };
     created.push(fakeES);
-    onReady?.();
+    handlers.onReady?.();
     return fakeES as unknown as EventSource;
   });
 }
@@ -294,9 +294,9 @@ function makeManualReadyMock(
   capturedCb: { value: ((ev: EventMessage) => void) | null },
   readyHandler: { value: (() => void) | null },
 ) {
-  vi.mocked(taskEventStream).mockImplementation((_id, cb, _onError, onReady) => {
-    capturedCb.value = cb as (ev: EventMessage) => void;
-    readyHandler.value = onReady ?? null;
+  vi.mocked(taskEventStream).mockImplementation((_id, handlers) => {
+    capturedCb.value = handlers.onMessage;
+    readyHandler.value = handlers.onReady ?? null;
     const fakeES: FakeES = {
       addEventListener: vi.fn(),
       close: vi.fn(),
@@ -363,10 +363,10 @@ describe("SSE connection", () => {
     let onMessage: ((ev: EventMessage) => void) | undefined;
     let onReady: (() => void) | undefined;
     let onReset: (() => void) | undefined;
-    vi.mocked(taskEventStream).mockImplementation((_id, cb, _onError, ready, _onOpen, _onHistoryError, reset) => {
-      onMessage = cb;
-      onReady = ready;
-      onReset = reset;
+    vi.mocked(taskEventStream).mockImplementation((_id, handlers) => {
+      onMessage = handlers.onMessage;
+      onReady = handlers.onReady;
+      onReset = handlers.onReset;
       const fakeES: FakeES = { addEventListener: vi.fn(), close: vi.fn(), onerror: null };
       created.push(fakeES);
       return fakeES as unknown as EventSource;
@@ -387,8 +387,8 @@ describe("SSE connection", () => {
   it("reports terminal history errors and does not retry after the native error", () => {
     const created: FakeES[] = [];
     let historyError: ((error: { message: string }) => void) | undefined;
-    vi.mocked(taskEventStream).mockImplementation((_id, _cb, _onError, _onReady, _onOpen, onHistoryError) => {
-      historyError = onHistoryError;
+    vi.mocked(taskEventStream).mockImplementation((_id, handlers) => {
+      historyError = handlers.onHistoryError;
       const fakeES: FakeES = {
         addEventListener: vi.fn(),
         close: vi.fn(),
@@ -437,9 +437,9 @@ describe("SSE connection", () => {
     const created: FakeES[] = [];
     const callbacks: Array<(ev: EventMessage) => void> = [];
     const readyHandlers: Array<() => void> = [];
-    vi.mocked(taskEventStream).mockImplementation((_id, cb, _onError, onReady) => {
-      callbacks.push(cb as (ev: EventMessage) => void);
-      if (onReady) readyHandlers.push(onReady);
+    vi.mocked(taskEventStream).mockImplementation((_id, handlers) => {
+      callbacks.push(handlers.onMessage);
+      if (handlers.onReady) readyHandlers.push(handlers.onReady);
       const fakeES: FakeES = {
         addEventListener: vi.fn(),
         close: vi.fn(),

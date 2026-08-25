@@ -159,30 +159,6 @@ func (s *taskEventStream) writeMessage(msg agent.Message, sequence uint64, at ti
 	return nil
 }
 
-func (s *taskEventStream) writeDiskMessage(msg agent.Message, at time.Time) error {
-	s.nextMessage++
-	events := s.tracker.ConvertMessage(msg, at)
-	if s.nextMessage == s.resumeAfter.message {
-		if s.resumeAfter.event >= uint64(len(events)) {
-			return errInvalidTaskEventID
-		}
-		s.resumeCursorSeen = true
-	}
-	if s.nextMessage < s.resumeAfter.message {
-		return nil
-	}
-	for i := range events {
-		id := taskEventID{timeline: s.timelineID, source: s.source, message: s.nextMessage, event: uint64(i)}
-		if id.message == s.resumeAfter.message && id.event <= s.resumeAfter.event {
-			continue
-		}
-		if err := s.writeEvent(&events[i], id); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (s *taskEventStream) writeStats(stats []runtime.Stats) error {
 	for i := range stats {
 		ev := apiconv.StatsEvent(&stats[i])
@@ -328,10 +304,10 @@ func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.
 		// Subscribe before scanning so a revive's new live output is buffered,
 		// but do not copy stale in-memory messages or stats: raw disk is the
 		// authoritative history for this stopped incarnation.
-		liveAfter, live, unsub = entry.Task().SubscribeLiveTimeline(stream.ctx)
+		liveAfter, live, unsub = entry.Task().SubscribeLiveMessages(stream.ctx)
 		statsLive, statsUnsub = entry.Task().SubscribeLiveStats(stream.ctx)
 	} else {
-		history, live, unsub = entry.Task().SubscribeTimeline(stream.ctx)
+		history, live, unsub = entry.Task().Subscribe(stream.ctx)
 		statsHistory, statsLive, statsUnsub = entry.Task().SubscribeStats(stream.ctx)
 	}
 	defer unsub()
@@ -488,7 +464,8 @@ func (h *taskHandlers) streamHistoryFromDisk(stream *taskEventStream, entry *tas
 		if at.IsZero() {
 			at = time.Now()
 		}
-		if err := stream.writeDiskMessage(message, at); err != nil {
+		sequence := stream.nextMessage + 1
+		if err := stream.writeMessage(message, sequence, at, false); err != nil {
 			return err
 		}
 		if stream.writtenBytes-lastFlushBytes >= historyFlushBytes {

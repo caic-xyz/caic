@@ -135,10 +135,10 @@ func (b *fetchRecorder) Fetch(ctx context.Context, id runtime.ID) error {
 
 // recvMsg reads a single message from ch, respecting the test context and a
 // 1-second safety timeout.
-func recvMsg(t *testing.T, ch <-chan agent.Message) agent.Message {
+func recvMsg(t *testing.T, ch <-chan TimelineMessage) agent.Message {
 	select {
 	case m := <-ch:
-		return m
+		return m.Message
 	case <-t.Context().Done():
 		t.Fatal("test context canceled waiting for message")
 		return nil

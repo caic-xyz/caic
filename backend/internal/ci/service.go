@@ -288,7 +288,7 @@ func (svc *Service) waitForAgentResult(ctx context.Context, t *task.Task) bool {
 			if !ok {
 				return false
 			}
-			if _, isResult := msg.(*agent.ResultMessage); isResult {
+			if _, isResult := msg.Message.(*agent.ResultMessage); isResult {
 				return true
 			}
 		}

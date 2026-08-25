@@ -28,7 +28,7 @@ describe("taskEventStream", () => {
   it("ignores native connection failures without error data", () => {
     const onError = vi.fn();
     const onHistoryError = vi.fn();
-    taskEventStream("task", vi.fn(), onError, undefined, undefined, onHistoryError);
+    taskEventStream("task", { onMessage: vi.fn(), onError, onHistoryError });
 
     if (!errorListener) throw new Error("history error listener not registered");
     errorListener(new Event("error"));
@@ -39,7 +39,7 @@ describe("taskEventStream", () => {
 
   it("reports server-requested timeline resets", () => {
     const onReset = vi.fn();
-    taskEventStream("task", vi.fn(), vi.fn(), undefined, undefined, undefined, onReset);
+    taskEventStream("task", { onMessage: vi.fn(), onError: vi.fn(), onReset });
 
     if (!resetListener) throw new Error("reset listener not registered");
     resetListener(new MessageEvent("reset", { data: "{}" }));
@@ -50,7 +50,7 @@ describe("taskEventStream", () => {
   it("validates terminal history error payloads separately from native failures", () => {
     const onError = vi.fn();
     const onHistoryError = vi.fn();
-    taskEventStream("task", vi.fn(), onError, undefined, undefined, onHistoryError);
+    taskEventStream("task", { onMessage: vi.fn(), onError, onHistoryError });
 
     if (!errorListener) throw new Error("history error listener not registered");
     errorListener(new MessageEvent("error", { data: '{"message":"task history is unavailable"}' }));

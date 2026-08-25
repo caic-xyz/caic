@@ -457,30 +457,27 @@ export default function TaskDetail(props: Props) {
       closeConnection();
       replaceOnNextFlush = true;
       const generation = ++connectionGeneration;
-      const startedES = taskEventStream(
-        id,
-        (ev) => {
+      const startedES = taskEventStream(id, {
+        onMessage: (ev) => {
           if (generation !== connectionGeneration) return;
           pendingEvents.push(ev);
           if (!live) return;
           if (shouldFlushBufferedEvent(ev)) flushPendingEvents();
           else scheduleLiveFlush();
         },
-        (err) => {
+        onError: (err) => {
           if (generation !== connectionGeneration) return;
           const msg = err instanceof Error ? err.message : String(err);
           untrack(() => props.onError(`Task event error: ${msg}`));
         },
-        () => {
+        onReady: () => {
           if (generation !== connectionGeneration) return;
           // The server sends a "ready" event after replaying full history.
           // Render replayed history in one pass before switching to live turn-boundary flushing.
           flushPendingEvents();
           live = true;
-
         },
-        undefined,
-        (historyError) => {
+        onHistoryError: (historyError) => {
           if (generation !== connectionGeneration) return;
           historyFailed = true;
           connectionGeneration += 1;
@@ -491,14 +488,14 @@ export default function TaskDetail(props: Props) {
           if (es === startedES) es = null;
           untrack(() => props.onError(`Task history error: ${historyError.message}`));
         },
-        () => {
+        onReset: () => {
           if (generation !== connectionGeneration) return;
           clearLiveFlushTimer();
           pendingEvents = [];
           live = false;
           replaceOnNextFlush = true;
         },
-      );
+      });
       es = startedES;
       startedES.onerror = () => {
         if (generation !== connectionGeneration) return;
