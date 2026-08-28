@@ -1,4 +1,4 @@
-// API route declarations used by the code generator to produce typed TS and Kotlin clients.
+// API route declarations used to generate typed clients and API documentation.
 
 package v1
 
@@ -17,7 +17,15 @@ type Route struct {
 	Resp        reflect.Type // Response body type.
 	IsArray     bool         // response is T[] not T
 	IsSSE       bool         // SSE stream, not JSON
+	SSEEvents   []SSEEvent   // Named events in addition to the primary message event.
 	QueryParams []string     // Query parameter names (GET endpoints only).
+}
+
+// SSEEvent describes a named SSE event. A nil Resp is a payloadless notification.
+type SSEEvent struct {
+	Name    string
+	Handler string
+	Resp    reflect.Type
 }
 
 // ReqName returns the request type name, or "" if Req is nil.
@@ -223,6 +231,11 @@ var Routes = []Route{
 		Path:   "/api/caic/v1/tasks/{id}/events",
 		Resp:   reflect.TypeFor[EventMessage](),
 		IsSSE:  true,
+		SSEEvents: []SSEEvent{
+			{Name: "ready", Handler: "onReady"},
+			{Name: "reset", Handler: "onReset"},
+			{Name: "error", Handler: "onHistoryError", Resp: reflect.TypeFor[TaskHistoryStreamError]()},
+		},
 	},
 	{
 		Name:   "sendInput",

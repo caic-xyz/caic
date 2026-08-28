@@ -26,10 +26,23 @@ type docRegistry struct {
 	aliasNames map[string]struct{}          // set of alias type names for all target languages
 }
 
-// discoverSSEStructs returns the structs reachable from the SSE event types
-// (EventMessage, TaskListEvent, UsageResp) in dependency order.
+// discoverSSEStructs returns structs reachable from SSE route responses and
+// named-event payloads in dependency order.
 func (d *docRegistry) discoverSSEStructs() []sdkType {
-	order := walkSDKTypes(d.cfg, d.cfg.SSESeeds)
+	seeds := make([]reflect.Type, 0, len(d.cfg.Routes))
+	for i := range d.cfg.Routes {
+		r := &d.cfg.Routes[i]
+		if !r.IsSSE {
+			continue
+		}
+		seeds = append(seeds, r.Resp)
+		for j := range r.SSEEvents {
+			if r.SSEEvents[j].Resp != nil {
+				seeds = append(seeds, r.SSEEvents[j].Resp)
+			}
+		}
+	}
+	order := walkSDKTypes(d.cfg, seeds)
 	result := make([]sdkType, len(order))
 	for i, t := range order {
 		result[i] = sdkType{Type: t}
@@ -1010,6 +1023,13 @@ func (d *docRegistry) generateTS(outDir string) error {
 		types[routeRespName(r)] = struct{}{}
 		if r.IsSSE {
 			validators["validate"+routeRespName(r)] = struct{}{}
+			for j := range r.SSEEvents {
+				e := &r.SSEEvents[j]
+				if e.Resp != nil {
+					types[e.Resp.Name()] = struct{}{}
+					validators["validate"+e.Resp.Name()] = struct{}{}
+				}
+			}
 		}
 	}
 	types[errorModel.TypeName] = struct{}{}
@@ -1029,6 +1049,10 @@ func (d *docRegistry) generateTS(outDir string) error {
 		fmt.Fprintf(&b, "import { %s } from \"./validate.gen\";\n", strings.Join(sortedVal, ", "))
 	}
 	b.WriteString("\n")
+
+	for i := range d.cfg.Routes {
+		writeRouteTSSSEHandlers(&d.cfg.Routes[i], &b)
+	}
 
 	// APIError class.
 	b.WriteString(`export class APIError extends Error {
@@ -1404,6 +1428,18 @@ func (d *docRegistry) generateMarkdownDoc(outDir string) error {
 			}
 			if r.IsSSE {
 				resp += " SSE"
+				if len(r.SSEEvents) > 0 {
+					named := make([]string, 0, len(r.SSEEvents))
+					for j := range r.SSEEvents {
+						e := &r.SSEEvents[j]
+						name := "`" + e.Name + "`"
+						if e.Resp != nil {
+							name += " (`" + e.Resp.Name() + "`)"
+						}
+						named = append(named, name)
+					}
+					resp += "<br>Named events: " + strings.Join(named, ", ")
+				}
 			}
 			fmt.Fprintf(&b, "| %s | `%s` | %s | %s | %s |\n", r.Method, r.Path, r.Doc, req, resp)
 		}

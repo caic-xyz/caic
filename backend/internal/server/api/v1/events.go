@@ -43,6 +43,11 @@ const (
 	EventKindStats           EventKind = "stats"
 )
 
+// TaskHistoryStreamError reports that task history could not be replayed.
+type TaskHistoryStreamError struct {
+	Message string `json:"message"`
+}
+
 // EventMessage is a single SSE event in the backend-neutral stream
 // (/api/caic/v1/tasks/{id}/events). All backends produce these events.
 type EventMessage struct {

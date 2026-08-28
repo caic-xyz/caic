@@ -62,41 +62,55 @@ func (e *historyLoadError) Unwrap() error { return e.err }
 
 // taskEventStream writes one task's ordered SSE event stream.
 type taskEventStream struct {
-	ctx              context.Context
-	w                http.ResponseWriter
-	flusher          http.Flusher
-	controller       *http.ResponseController
-	tracker          *apiconv.ToolTimingTracker
-	lastEventID      string
-	timelineID       string
-	source           string
-	resumeAfter      taskEventID
-	resumeCursorSeen bool
-	nextMessage      uint64
-	writtenBytes     int
+	ctx          context.Context
+	w            http.ResponseWriter
+	flusher      http.Flusher
+	controller   *http.ResponseController
+	tracker      *apiconv.ToolTimingTracker
+	resume       taskEventResume
+	nextMessage  uint64
+	writtenBytes int
+	idBuffer     []byte
 }
+
+type taskEventSource string
+
+const (
+	taskEventSourceDisk   taskEventSource = "disk"
+	taskEventSourceMemory taskEventSource = "memory"
+)
 
 type taskEventID struct {
 	timeline string
-	source   string
+	source   taskEventSource
 	message  uint64
 	event    uint64
 }
 
-const (
-	taskEventSourceDisk   = "disk"
-	taskEventSourceMemory = "memory"
-)
+func (id taskEventID) String() string {
+	return string(id.appendTo(nil))
+}
+
+func (id taskEventID) appendTo(dst []byte) []byte {
+	dst = append(dst, "v1/"...)
+	dst = append(dst, id.timeline...)
+	dst = append(dst, '/')
+	dst = append(dst, id.source...)
+	dst = append(dst, '/')
+	dst = strconv.AppendUint(dst, id.message, 10)
+	dst = append(dst, '/')
+	return strconv.AppendUint(dst, id.event, 10)
+}
 
 var errInvalidTaskEventID = errors.New("invalid task SSE event ID")
 
-func (id taskEventID) String() string {
-	return "v1/" + id.timeline + "/" + id.source + "/" + strconv.FormatUint(id.message, 10) + "/" + strconv.FormatUint(id.event, 10)
-}
-
 func parseTaskEventID(value string) (taskEventID, bool) {
 	parts := strings.Split(value, "/")
-	if len(parts) != 5 || parts[0] != "v1" || parts[1] == "" || (parts[2] != "disk" && parts[2] != "memory") {
+	if len(parts) != 5 || parts[0] != "v1" || parts[1] == "" {
+		return taskEventID{}, false
+	}
+	source := taskEventSource(parts[2])
+	if source != taskEventSourceDisk && source != taskEventSourceMemory {
 		return taskEventID{}, false
 	}
 	messageID, err := strconv.ParseUint(parts[3], 10, 64)
@@ -107,49 +121,91 @@ func parseTaskEventID(value string) (taskEventID, bool) {
 	if err != nil {
 		return taskEventID{}, false
 	}
-	return taskEventID{timeline: parts[1], source: parts[2], message: messageID, event: eventID}, true
+	return taskEventID{timeline: parts[1], source: source, message: messageID, event: eventID}, true
 }
 
-func (s *taskEventStream) prepareResume(timelineID, source string) error {
-	s.timelineID = timelineID
-	s.source = source
-	if s.lastEventID == "" {
+type taskEventResume struct {
+	lastEventID string
+	timelineID  string
+	source      taskEventSource
+	after       taskEventID
+	cursorSeen  bool
+}
+
+func (r *taskEventResume) prepare(w io.Writer, timelineID string, source taskEventSource) error {
+	r.timelineID = timelineID
+	r.source = source
+	if r.lastEventID == "" {
 		return nil
 	}
-	id, ok := parseTaskEventID(s.lastEventID)
+	id, ok := parseTaskEventID(r.lastEventID)
 	if !ok || id.timeline != timelineID || id.source != source {
-		return s.resetResume()
+		return r.reset(w)
 	}
-	s.resumeAfter = id
+	r.after = id
 	return nil
 }
 
-func (s *taskEventStream) resetResume() error {
-	if _, err := fmt.Fprint(s.w, "id:\nevent: reset\ndata: {}\n\n"); err != nil {
+func (r *taskEventResume) reset(w io.Writer) error {
+	if _, err := fmt.Fprint(w, "id:\nevent: reset\ndata: {}\n\n"); err != nil {
 		return fmt.Errorf("write SSE reset event: %w", err)
 	}
-	s.lastEventID = ""
-	s.resumeAfter = taskEventID{}
-	s.resumeCursorSeen = false
-	s.nextMessage = 0
+	r.lastEventID = ""
+	r.after = taskEventID{}
+	r.cursorSeen = false
+	return nil
+}
+
+func (r *taskEventResume) observe(sequence uint64, events []v1.EventMessage) error {
+	if sequence != r.after.message {
+		return nil
+	}
+	if r.after.event >= uint64(len(events)) {
+		return errInvalidTaskEventID
+	}
+	r.cursorSeen = true
+	return nil
+}
+
+func (r *taskEventResume) eventID(message, event uint64) taskEventID {
+	return taskEventID{timeline: r.timelineID, source: r.source, message: message, event: event}
+}
+
+func (r *taskEventResume) acknowledged(id taskEventID) bool {
+	return id.message == r.after.message && id.event <= r.after.event
+}
+
+func (r *taskEventResume) precedes(sequence uint64) bool {
+	return sequence < r.after.message
+}
+
+func (r *taskEventResume) beyond(lastSequence uint64) bool {
+	return r.after.message > lastSequence
+}
+
+func (r *taskEventResume) active() bool {
+	return r.after.message != 0
+}
+
+func (r *taskEventResume) complete() error {
+	if r.active() && !r.cursorSeen {
+		return errInvalidTaskEventID
+	}
 	return nil
 }
 
 func (s *taskEventStream) writeMessage(msg agent.Message, sequence uint64, at time.Time, suppress bool) error {
 	s.nextMessage = sequence
 	events := s.tracker.ConvertMessage(msg, at)
-	if sequence == s.resumeAfter.message {
-		if s.resumeAfter.event >= uint64(len(events)) {
-			return errInvalidTaskEventID
-		}
-		s.resumeCursorSeen = true
+	if err := s.resume.observe(sequence, events); err != nil {
+		return err
 	}
-	if suppress || sequence < s.resumeAfter.message {
+	if suppress || s.resume.precedes(sequence) {
 		return nil
 	}
 	for i := range events {
-		id := taskEventID{timeline: s.timelineID, source: s.source, message: sequence, event: uint64(i)}
-		if id.message == s.resumeAfter.message && id.event <= s.resumeAfter.event {
+		id := s.resume.eventID(sequence, uint64(i))
+		if s.resume.acknowledged(id) {
 			continue
 		}
 		if err := s.writeEvent(&events[i], id); err != nil {
@@ -178,7 +234,8 @@ func (s *taskEventStream) writeEvent(ev *v1.EventMessage, id taskEventID) error 
 	if id.message == 0 {
 		n, err = fmt.Fprintf(s.w, "event: message\ndata: %s\n\n", data)
 	} else {
-		n, err = fmt.Fprintf(s.w, "id: v1/%s/%s/%d/%d\nevent: message\ndata: %s\n\n", id.timeline, id.source, id.message, id.event, data)
+		s.idBuffer = id.appendTo(s.idBuffer[:0])
+		n, err = fmt.Fprintf(s.w, "id: %s\nevent: message\ndata: %s\n\n", s.idBuffer, data)
 	}
 	if err != nil {
 		return fmt.Errorf("write SSE event: %w", err)
@@ -219,11 +276,11 @@ func (h *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 	stream := taskEventStream{
-		ctx:         r.Context(),
-		w:           w,
-		flusher:     flusher,
-		controller:  http.NewResponseController(w),
-		lastEventID: r.Header.Get("Last-Event-ID"),
+		ctx:        r.Context(),
+		w:          w,
+		flusher:    flusher,
+		controller: http.NewResponseController(w),
+		resume:     taskEventResume{lastEventID: r.Header.Get("Last-Event-ID")},
 	}
 	if _, err := fmt.Fprint(w, "retry: 500\n\n"); err != nil {
 		log.WarnContext(r.Context(), "write SSE retry interval", "err", err)
@@ -250,7 +307,7 @@ func (h *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	if isTaskEventTerminal(state) && loadedTask != nil && entry.LogPath.Get() != "" {
-		if err := stream.prepareResume(entry.Task().TimelineID(), taskEventSourceDisk); err != nil {
+		if err := stream.resume.prepare(stream.w, entry.Task().TimelineID(), taskEventSourceDisk); err != nil {
 			log.WarnContext(r.Context(), "prepare terminal SSE resume", "err", err)
 			return
 		}
@@ -291,7 +348,7 @@ func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.
 	if rawHistory {
 		source = taskEventSourceDisk
 	}
-	if err := stream.prepareResume(entry.Task().TimelineID(), source); err != nil {
+	if err := stream.resume.prepare(stream.w, entry.Task().TimelineID(), source); err != nil {
 		return err
 	}
 	var history []task.TimelineMessage
@@ -333,7 +390,7 @@ func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.
 			return err
 		}
 	}
-	if stream.resumeAfter.message == 0 {
+	if !stream.resume.active() {
 		if err := stream.writeStats(statsHistory); err != nil {
 			return err
 		}
@@ -401,39 +458,36 @@ func (h *taskHandlers) replayMemoryHistory(stream *taskEventStream, entry *taskm
 		messages[i] = history[i].Message
 	}
 	skip := historyReplaySkip(messages)
-	replay := func() error {
+	return h.replayWithCursorReset(stream, entry, func() error {
+		if stream.resume.beyond(uint64(len(history))) {
+			return errInvalidTaskEventID
+		}
 		for i, message := range history {
 			if err := stream.writeMessage(message.Message, message.Sequence, at, skip[i]); err != nil {
 				return err
 			}
 		}
 		return nil
-	}
-	if stream.resumeAfter.message > uint64(len(history)) {
-		if err := stream.resetResume(); err != nil {
-			return err
-		}
-	}
-	if err := replay(); !errors.Is(err, errInvalidTaskEventID) {
-		return err
-	}
-	if err := stream.resetResume(); err != nil {
-		return err
-	}
-	stream.tracker = newHistoryTracker(entry.Task())
-	return replay()
+	})
 }
 
 func (h *taskHandlers) replayHistoryFromDisk(stream *taskEventStream, entry *taskmgr.Entry, lt *taskslog.LoadedTask) error {
-	err := h.streamHistoryFromDisk(stream, entry, lt)
+	return h.replayWithCursorReset(stream, entry, func() error {
+		return h.streamHistoryFromDisk(stream, entry, lt)
+	})
+}
+
+func (h *taskHandlers) replayWithCursorReset(stream *taskEventStream, entry *taskmgr.Entry, replay func() error) error {
+	err := replay()
 	if !errors.Is(err, errInvalidTaskEventID) {
 		return err
 	}
-	if err := stream.resetResume(); err != nil {
+	if err := stream.resume.reset(stream.w); err != nil {
 		return err
 	}
+	stream.nextMessage = 0
 	stream.tracker = newHistoryTracker(entry.Task())
-	return h.streamHistoryFromDisk(stream, entry, lt)
+	return replay()
 }
 
 // streamHistoryFromDisk parses and writes history one message at a time. The
@@ -484,16 +538,11 @@ func (h *taskHandlers) streamHistoryFromDisk(stream *taskEventStream, entry *tas
 			return err
 		}
 	}
-	if stream.resumeAfter.message != 0 && !stream.resumeCursorSeen {
-		return errInvalidTaskEventID
-	}
-	return nil
+	return stream.resume.complete()
 }
 
 func writeReplayHistoryError(w io.Writer, flusher http.Flusher) {
-	data, err := json.Marshal(struct {
-		Message string `json:"message"`
-	}{Message: "task history is unavailable"})
+	data, err := json.Marshal(v1.TaskHistoryStreamError{Message: "task history is unavailable"})
 	if err != nil {
 		return
 	}

@@ -85,10 +85,10 @@ vi.mock("./api", () => ({
   stopTask: vi.fn(),
   purgeTask: vi.fn(),
   reviveTask: vi.fn(),
-  globalTaskEvents: vi.fn((cb: (e: unknown) => void) => {
+  globalTaskEvents: vi.fn((handlers: { onMessage: (event: unknown) => void }) => {
     const es = new FakeEventSource();
     // Mirror the real client: parse the SSE payload before invoking the handler.
-    es.addEventListener("message", (e: { data: string }) => cb(JSON.parse(e.data)));
+    es.addEventListener("message", (e: { data: string }) => handlers.onMessage(JSON.parse(e.data)));
     return es;
   }),
   globalUsageEvents: vi.fn(() => new FakeEventSource()),

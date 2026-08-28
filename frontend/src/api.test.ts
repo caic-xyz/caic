@@ -58,4 +58,16 @@ describe("taskEventStream", () => {
     expect(onHistoryError).toHaveBeenCalledWith({ message: "task history is unavailable" });
     expect(onError).not.toHaveBeenCalled();
   });
+
+  it("reports malformed named history errors as validation failures", () => {
+    const onError = vi.fn();
+    const onHistoryError = vi.fn();
+    taskEventStream("task", { onMessage: vi.fn(), onError, onHistoryError });
+
+    if (!errorListener) throw new Error("history error listener not registered");
+    errorListener(new MessageEvent("error", { data: '{"message":42}' }));
+
+    expect(onHistoryError).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledOnce();
+  });
 });

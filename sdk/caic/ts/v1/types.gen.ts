@@ -366,6 +366,11 @@ export interface EventMessage {
   stats?: EventStats;
 }
 
+/** TaskHistoryStreamError reports that task history could not be replayed. */
+export interface TaskHistoryStreamError {
+  message: string;
+}
+
 
 //////////
 // source: types.go

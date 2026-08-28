@@ -470,11 +470,13 @@ func TestTaskEventStreamResume(t *testing.T) {
 		t.Parallel()
 		w := httptest.NewRecorder()
 		stream := taskEventStream{
-			w:           w,
-			tracker:     apiconv.NewToolTimingTracker(harness.Claude, nil),
-			timelineID:  "timeline",
-			source:      taskEventSourceMemory,
-			resumeAfter: taskEventID{timeline: "timeline", source: taskEventSourceMemory, message: 1},
+			w:       w,
+			tracker: apiconv.NewToolTimingTracker(harness.Claude, nil),
+			resume: taskEventResume{
+				timelineID: "timeline",
+				source:     taskEventSourceMemory,
+				after:      taskEventID{timeline: "timeline", source: taskEventSourceMemory, message: 1},
+			},
 		}
 		now := time.Now()
 		if err := stream.writeMessage(&agent.TextMessage{Text: "fallback text"}, 1, now, false); err != nil {
@@ -490,11 +492,13 @@ func TestTaskEventStreamResume(t *testing.T) {
 	t.Run("RejectsInvalidEventIndex", func(t *testing.T) {
 		t.Parallel()
 		stream := taskEventStream{
-			w:           httptest.NewRecorder(),
-			tracker:     apiconv.NewToolTimingTracker(harness.Claude, nil),
-			timelineID:  "timeline",
-			source:      taskEventSourceMemory,
-			resumeAfter: taskEventID{timeline: "timeline", source: taskEventSourceMemory, message: 1, event: 1},
+			w:       httptest.NewRecorder(),
+			tracker: apiconv.NewToolTimingTracker(harness.Claude, nil),
+			resume: taskEventResume{
+				timelineID: "timeline",
+				source:     taskEventSourceMemory,
+				after:      taskEventID{timeline: "timeline", source: taskEventSourceMemory, message: 1, event: 1},
+			},
 		}
 		err := stream.writeMessage(&agent.TextMessage{Text: "one event"}, 1, time.Now(), false)
 		if !errors.Is(err, errInvalidTaskEventID) {

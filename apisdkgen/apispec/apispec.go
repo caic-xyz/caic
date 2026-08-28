@@ -35,7 +35,6 @@ type Config struct {
 	MCPProtocolVersion string
 	SectionComments    map[string]string
 	SpecialTypes       []SpecialType
-	SSESeeds           []reflect.Type
 	Discriminated      []string // Type names using kind-based dispatch in TS validators
 	ErrorCodes         []ErrorCode
 }
@@ -57,8 +56,17 @@ type Route struct {
 	Resp        reflect.Type
 	IsArray     bool
 	IsSSE       bool
+	SSEEvents   []SSEEvent
 	QueryParams []string
 	HeadersArg  bool
+}
+
+// SSEEvent describes a named event emitted in addition to an SSE route's
+// primary message event. A nil Resp denotes a payloadless notification.
+type SSEEvent struct {
+	Name    string
+	Handler string
+	Resp    reflect.Type
 }
 
 // SpecialType defines custom mappings for Go types that need non-standard serialization.

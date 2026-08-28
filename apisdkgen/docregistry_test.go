@@ -23,6 +23,10 @@ type TestSDKEvent struct {
 	Text string `json:"text,omitempty"`
 }
 
+type TestSSEError struct {
+	Message string `json:"message"`
+}
+
 type TestPathOnlyRequest struct {
 	ID string `json:"-" path:"id"`
 }
@@ -246,6 +250,70 @@ func TestDocRegistryEmitKotlinStruct(t *testing.T) {
 	})
 }
 
+func TestDocRegistryGenerateTSNamedEvents(t *testing.T) {
+	t.Parallel()
+
+	outDir := t.TempDir()
+	docs := &docRegistry{
+		cfg: &apispec.Config{
+			Routes: []apispec.Route{
+				{
+					Name:  "events",
+					Path:  "/events",
+					Resp:  reflect.TypeFor[TestSDKEvent](),
+					IsSSE: true,
+					SSEEvents: []apispec.SSEEvent{
+						{Name: "ready", Handler: "onReady"},
+						{Name: "reset", Handler: "onReset"},
+						{Name: "error", Handler: "onHistoryError", Resp: reflect.TypeFor[TestSSEError]()},
+					},
+				},
+				{Name: "rawEvents", Path: "/raw-events", Resp: reflect.TypeFor[TestSDKEvent](), IsSSE: true},
+			},
+			ErrorModel: apispec.ClientErrorModel{TypeName: "DifferentError"},
+		},
+	}
+	if err := docs.generateTS(outDir); err != nil {
+		t.Fatal(err)
+	}
+	content, err := fs.ReadFile(os.DirFS(outDir), "api.gen.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(content)
+	for _, want := range []string{
+		"import type { DifferentError, TestSDKEvent, TestSSEError } from \"./types.gen\";",
+		"export interface EventsHandlers {",
+		"export interface RawEventsHandlers {",
+		"onMessage: (event: TestSDKEvent) => void;",
+		"onError: (err: unknown) => void;",
+		"onReady?: () => void;",
+		"onReset?: () => void;",
+		"onHistoryError?: (event: TestSSEError) => void;",
+		"events: (handlers: EventsHandlers): EventSource => {",
+		"rawEvents: (handlers: RawEventsHandlers): EventSource => {",
+		"handlers.onMessage(validateTestSDKEvent(JSON.parse(e.data)));",
+		"if (!(e instanceof MessageEvent) || typeof e.data !== \"string\") return;",
+		"handlers.onHistoryError?.(validateTestSSEError(JSON.parse(e.data)));",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("api.gen.ts does not contain %q:\n%s", want, text)
+		}
+	}
+
+	if err := docs.generateMarkdownDoc(outDir); err != nil {
+		t.Fatal(err)
+	}
+	content, err = fs.ReadFile(os.DirFS(outDir), "API.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "`TestSDKEvent` SSE<br>Named events: `ready`, `reset`, `error` (`TestSSEError`)"
+	if !strings.Contains(string(content), want) {
+		t.Errorf("API.md does not contain %q:\n%s", want, content)
+	}
+}
+
 func TestDocRegistryGenerateTSValidate(t *testing.T) {
 	t.Parallel()
 
@@ -280,7 +348,6 @@ func TestDocRegistryGenerateTSValidate(t *testing.T) {
 				SDKPackagePaths: map[string]struct{}{
 					eventType.PkgPath(): {},
 				},
-				SSESeeds: []reflect.Type{eventType},
 			},
 			aliasNames: map[string]struct{}{},
 		}

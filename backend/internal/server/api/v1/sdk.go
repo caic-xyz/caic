@@ -65,11 +65,6 @@ func SDKAPI() apispec.Config {
 				DocType:   "Record<string, JSONValue>",
 			},
 		},
-		SSESeeds: []reflect.Type{
-			reflect.TypeFor[EventMessage](),
-			reflect.TypeFor[TaskListEvent](),
-			reflect.TypeFor[UsageResp](),
-		},
 		Discriminated: []string{"EventMessage", "TaskListEvent"},
 		ErrorCodes: []apispec.ErrorCode{
 			{Code: string(api.CodeBadRequest), Status: 400},
@@ -84,6 +79,14 @@ func sdkRoutes() []apispec.Route {
 	routes := make([]apispec.Route, len(Routes))
 	for i := range Routes {
 		r := &Routes[i]
+		namedEvents := make([]apispec.SSEEvent, len(r.SSEEvents))
+		for j := range r.SSEEvents {
+			namedEvents[j] = apispec.SSEEvent{
+				Name:    r.SSEEvents[j].Name,
+				Handler: r.SSEEvents[j].Handler,
+				Resp:    r.SSEEvents[j].Resp,
+			}
+		}
 		routes[i] = apispec.Route{
 			Name:        r.Name,
 			Doc:         r.Doc,
@@ -94,6 +97,7 @@ func sdkRoutes() []apispec.Route {
 			Resp:        r.Resp,
 			IsArray:     r.IsArray,
 			IsSSE:       r.IsSSE,
+			SSEEvents:   namedEvents,
 			QueryParams: slices.Clone(r.QueryParams),
 		}
 	}

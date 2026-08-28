@@ -1,8 +1,6 @@
 // Singleton API client for the caic web UI.
 
 import { createApiClient } from "@sdk/api.gen";
-import type { EventMessage } from "@sdk/types.gen";
-import { validateEventMessage } from "@sdk/validate.gen";
 
 export const api = createApiClient();
 
@@ -27,7 +25,7 @@ export const {
   listTasks,
   createTask,
   taskRawEvents,
-  taskEvents,
+  taskEvents: taskEventStream,
   sendInput,
   restartTask,
   clearContext,
@@ -49,55 +47,3 @@ export const {
   getUsage,
   webFetch,
 } = api;
-
-export interface TaskHistoryStreamError {
-  message: string;
-}
-
-function validateTaskHistoryStreamError(value: unknown): TaskHistoryStreamError {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("invalid task history error payload");
-  }
-  const message = (value as Record<string, unknown>).message;
-  if (typeof message !== "string" || message.length === 0) {
-    throw new Error("invalid task history error message");
-  }
-  return { message };
-}
-
-export interface TaskEventStreamHandlers {
-  onMessage: (event: EventMessage) => void;
-  onError: (err: unknown) => void;
-  onReady?: () => void;
-  onHistoryError?: (error: TaskHistoryStreamError) => void;
-  onReset?: () => void;
-}
-
-export function taskEventStream(id: string, handlers: TaskEventStreamHandlers): EventSource {
-  const es = new EventSource(`/api/caic/v1/tasks/${id}/events`);
-  es.addEventListener("message", (e) => {
-    const ev = e as MessageEvent<string>;
-    try {
-      handlers.onMessage(validateEventMessage(JSON.parse(ev.data)));
-    } catch (err) {
-      handlers.onError(err);
-    }
-  });
-  es.addEventListener("error", (event) => {
-    // Native EventSource connection failures are plain Events without data.
-    // Only the server's named SSE error event carries a JSON history payload.
-    if (!(event instanceof MessageEvent) || typeof event.data !== "string") return;
-    try {
-      handlers.onHistoryError?.(validateTaskHistoryStreamError(JSON.parse(event.data)));
-    } catch (err) {
-      handlers.onError(err);
-    }
-  });
-  if (handlers.onReady) {
-    es.addEventListener("ready", handlers.onReady);
-  }
-  if (handlers.onReset) {
-    es.addEventListener("reset", handlers.onReset);
-  }
-  return es;
-}

@@ -75,6 +75,28 @@ func writeRouteTSJSONMethod(r *apispec.Route, b *strings.Builder, params []strin
 	}
 }
 
+func routeTSSSEHandlersName(r *apispec.Route) string {
+	return strings.ToUpper(r.Name[:1]) + r.Name[1:] + "Handlers"
+}
+
+func writeRouteTSSSEHandlers(r *apispec.Route, b *strings.Builder) {
+	if !r.IsSSE {
+		return
+	}
+	fmt.Fprintf(b, "export interface %s {\n", routeTSSSEHandlersName(r))
+	fmt.Fprintf(b, "  onMessage: (event: %s) => void;\n", routeRespName(r))
+	b.WriteString("  onError: (err: unknown) => void;\n")
+	for i := range r.SSEEvents {
+		e := &r.SSEEvents[i]
+		if e.Resp == nil {
+			fmt.Fprintf(b, "  %s?: () => void;\n", e.Handler)
+		} else {
+			fmt.Fprintf(b, "  %s?: (event: %s) => void;\n", e.Handler, e.Resp.Name())
+		}
+	}
+	b.WriteString("}\n\n")
+}
+
 func writeRouteTSSSEMethod(r *apispec.Route, b *strings.Builder, params []string) {
 	if r.Doc != "" {
 		b.WriteString(formatBlockDoc(r.Doc, "    "))
@@ -86,16 +108,33 @@ func writeRouteTSSSEMethod(r *apispec.Route, b *strings.Builder, params []string
 	tsPath := buildTSPath(r.Path, params, nil)
 	respName := routeRespName(r)
 	validatorName := "validate" + respName
-	args = append(args, "onMessage: (event: "+respName+") => void", "onError: (err: unknown) => void")
+	args = append(args, "handlers: "+routeTSSSEHandlersName(r))
 	fmt.Fprintf(b, "    %s: (%s): EventSource => {\n", r.Name, strings.Join(args, ", "))
 	fmt.Fprintf(b, "      const es = new EventSource(%s);\n", tsPath)
 	b.WriteString("      es.addEventListener(\"message\", (e) => {\n")
 	b.WriteString("        try {\n")
-	fmt.Fprintf(b, "          onMessage(%s(JSON.parse(e.data)));\n", validatorName)
+	fmt.Fprintf(b, "          handlers.onMessage(%s(JSON.parse(e.data)));\n", validatorName)
 	b.WriteString("        } catch (err) {\n")
-	b.WriteString("          onError(err);\n")
+	b.WriteString("          handlers.onError(err);\n")
 	b.WriteString("        }\n")
 	b.WriteString("      });\n")
+	for i := range r.SSEEvents {
+		e := &r.SSEEvents[i]
+		if e.Resp == nil {
+			fmt.Fprintf(b, "      if (handlers.%s) {\n", e.Handler)
+			fmt.Fprintf(b, "        es.addEventListener(%q, handlers.%s);\n", e.Name, e.Handler)
+			b.WriteString("      }\n")
+			continue
+		}
+		fmt.Fprintf(b, "      es.addEventListener(%q, (e) => {\n", e.Name)
+		b.WriteString("        if (!(e instanceof MessageEvent) || typeof e.data !== \"string\") return;\n")
+		b.WriteString("        try {\n")
+		fmt.Fprintf(b, "          handlers.%s?.(validate%s(JSON.parse(e.data)));\n", e.Handler, e.Resp.Name())
+		b.WriteString("        } catch (err) {\n")
+		b.WriteString("          handlers.onError(err);\n")
+		b.WriteString("        }\n")
+		b.WriteString("      });\n")
+	}
 	b.WriteString("      return es;\n")
 	b.WriteString("    },\n")
 }

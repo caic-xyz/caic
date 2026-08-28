@@ -1580,6 +1580,10 @@ data class EventMessage(
     val stats: EventStats? = null,
 )
 
+/** TaskHistoryStreamError reports that task history could not be replayed. */
+@Serializable
+data class TaskHistoryStreamError(val message: String)
+
 /** InputReq is the request body for POST /api/caic/v1/tasks/{id}/input. */
 @Serializable
 data class InputReq(val prompt: Prompt)

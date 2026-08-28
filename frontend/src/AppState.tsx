@@ -624,8 +624,8 @@ function createAppStore() {
     }
 
     function connectTasks() {
-      // eslint-disable-next-line solid/reactivity -- globalTaskEvents is an SSE event handler
-      taskES = globalTaskEvents((event) => {
+      taskES = globalTaskEvents({
+        onMessage: (event) => {
         if (event.kind === "snapshot" && event.snapshot) {
           const snapshotByID = new Map(event.snapshot.map((task) => [task.id, task]));
           for (const id of taskRecoveries.keys()) {
@@ -683,9 +683,11 @@ function createAppStore() {
           setSettledLoading(!!event.status?.loading);
           setSettledError(event.status?.error ?? "");
         }
-      }, (err) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        showWarning(`Task list event error: ${msg}`);
+        },
+        onError: (err) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          showWarning(`Task list event error: ${msg}`);
+        },
       });
       taskES.addEventListener("open", () => {
         onOpen();
@@ -716,11 +718,12 @@ function createAppStore() {
     }
 
     function connectUsage() {
-      usageES = globalUsageEvents((event) => {
-        setUsage(event);
-      }, (err) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        showWarning(`Usage event error: ${msg}`);
+      usageES = globalUsageEvents({
+        onMessage: (event) => setUsage(event),
+        onError: (err) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          showWarning(`Usage event error: ${msg}`);
+        },
       });
       usageES.addEventListener("open", () => {
         onOpen();

@@ -29,7 +29,7 @@ vi.mock("@solidjs/router", () => ({
 
 // Mock the API module to stub out EventSource (SSE) and other network calls.
 vi.mock("../api", () => ({
-  taskEventStream: vi.fn((_id: string, _cb: unknown, _onError: unknown, onReady?: () => void) => {
+  taskEventStream: vi.fn((_id: string, handlers: { onReady?: () => void }) => {
     const fakeES = {
       addEventListener: vi.fn((_event: string, _handler: () => void) => {}),
       close: vi.fn(),
@@ -37,7 +37,7 @@ vi.mock("../api", () => ({
     };
     // Fire "ready" asynchronously so the component transitions to live mode.
     setTimeout(() => {
-      onReady?.();
+      handlers.onReady?.();
     }, 0);
     return fakeES;
   }),
@@ -372,16 +372,38 @@ describe("SSE connection", () => {
       return fakeES as unknown as EventSource;
     });
 
-    renderTaskDetail();
+    const { getByRole } = renderTaskDetail();
     if (!onMessage || !onReady || !onReset) throw new Error("SSE callbacks not captured");
-    onMessage({ kind: "text", ts: 1, text: { text: "old history" } });
-    onReady();
-    onReset();
-    onMessage({ kind: "text", ts: 2, text: { text: "replacement history" } });
+    const emitCompletedTurn = (prompt: string, text: string, ts: number) => {
+      onMessage?.({ kind: "userInput", ts, userInput: { text: prompt } });
+      onMessage?.({ kind: "text", ts: ts + 1, text: { text } });
+      onMessage?.(resultEvent(ts + 2));
+    };
+    emitCompletedTurn("old prompt 1", "old history", 1);
+    emitCompletedTurn("old prompt 2", "old reply 2", 4);
+    onMessage({ kind: "textDelta", ts: 7, textDelta: { text: "old live tail" } });
     onReady();
 
-    expect(document.body).not.toHaveTextContent("old history");
-    expect(document.body).toHaveTextContent("replacement history");
+    onReset();
+    emitCompletedTurn("replacement prompt 1", "replacement history", 10);
+    emitCompletedTurn("replacement prompt 2", "replacement reply 2", 13);
+    onMessage({ kind: "textDelta", ts: 16, textDelta: { text: "replacement live a" } });
+    onMessage({ kind: "textDelta", ts: 17, textDelta: { text: " + b" } });
+    onReady();
+
+    expect(document.body).not.toHaveTextContent("old live tail");
+    expect(document.body).toHaveTextContent("replacement live a + b");
+    expect(getByRole("button", { name: /^1 message/ })).toBeInTheDocument();
+
+    onReset();
+    emitCompletedTurn("shorter prompt", "shorter completed reply", 20);
+    for (let i = 1; i <= 5; i++) {
+      onMessage({ kind: "textDelta", ts: 22 + i, textDelta: { text: `lower-split-${i} ` } });
+    }
+    onReady();
+
+    expect(document.body).not.toHaveTextContent("replacement live a");
+    expect(document.body).toHaveTextContent("lower-split-1 lower-split-2 lower-split-3 lower-split-4 lower-split-5");
   });
 
   it("reports terminal history errors and does not retry after the native error", () => {
@@ -429,11 +451,7 @@ describe("SSE connection", () => {
     expect(created).toHaveLength(1);
   });
 
-  it("reconnects on mobile resume and replays prompts missed while hidden", () => {
-    let hidden = false;
-    vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden);
-    vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
-
+  it("keeps the native resumable EventSource across visibility and network changes", () => {
     const created: FakeES[] = [];
     const callbacks: Array<(ev: EventMessage) => void> = [];
     const readyHandlers: Array<() => void> = [];
@@ -452,17 +470,14 @@ describe("SSE connection", () => {
     renderTaskDetail();
     readyHandlers[0]();
 
-    hidden = true;
     document.dispatchEvent(new Event("visibilitychange"));
-    expect(created[0].close).toHaveBeenCalledOnce();
+    window.dispatchEvent(new Event("offline"));
+    window.dispatchEvent(new Event("online"));
 
-    hidden = false;
-    document.dispatchEvent(new Event("visibilitychange"));
-    expect(created).toHaveLength(2);
+    expect(created).toHaveLength(1);
+    expect(created[0].close).not.toHaveBeenCalled();
 
-    callbacks[1]({ kind: "userInput", ts: 1, userInput: { text: "prompt sent before lock" } });
-    readyHandlers[1]();
-
+    callbacks[0]({ kind: "userInput", ts: 1, userInput: { text: "prompt sent before lock" } });
     expect(document.body).toHaveTextContent("prompt sent before lock");
   });
 

@@ -328,9 +328,8 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		t.Run("SlowSubscriberThenCancel", func(t *testing.T) {
 			t.Parallel()
-			// Regression test: if the fan-out drops a slow subscriber
-			// (buffer full) and closes its channel, the context-done
-			// goroutine must not panic on a double close.
+			// Regression test: if fan-out drops and closes a slow subscriber,
+			// later cancellation and explicit cleanup must not double-close it.
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			ctx, cancel := context.WithCancel(t.Context())
 			_, ch, unsub := tk.Subscribe(ctx)
@@ -347,10 +346,19 @@ func TestTask(t *testing.T) {
 			for range ch {
 			}
 
-			// Cancel the context. The goroutine must not panic.
 			cancel()
-			// Give the goroutine time to execute.
-			time.Sleep(50 * time.Millisecond)
+			unsub()
+		})
+		t.Run("ExplicitUnsubscribeClosesChannel", func(t *testing.T) {
+			t.Parallel()
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+			_, ch, unsub := tk.Subscribe(t.Context())
+			unsub()
+			unsub()
+
+			if _, ok := <-ch; ok {
+				t.Fatal("subscriber channel remained open after unsubscribe")
+			}
 		})
 		t.Run("Replay", func(t *testing.T) {
 			t.Parallel()

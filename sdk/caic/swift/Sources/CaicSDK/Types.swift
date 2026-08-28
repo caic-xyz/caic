@@ -1210,6 +1210,11 @@ public struct EventMessage: Codable {
     public let stats: EventStats?
 }
 
+/// TaskHistoryStreamError reports that task history could not be replayed.
+public struct TaskHistoryStreamError: Codable {
+    public let message: String
+}
+
 /// InputReq is the request body for POST /api/caic/v1/tasks/{id}/input.
 public struct InputReq: Codable {
     public let prompt: Prompt

@@ -53,7 +53,7 @@ Type notation: `JSONValue` means any valid JSON value.
 | GET | `/api/caic/v1/tasks/{id}/info` | Returns recorded and observed runtime metadata for a task. |  | `TaskInfo` |
 | POST | `/api/caic/v1/tasks` | Creates and starts a new coding agent task. | `CreateTaskReq` | `Task` |
 | GET | `/api/caic/v1/tasks/{id}/raw_events` | Streams raw backend-specific task events via SSE. |  | `EventMessage` SSE |
-| GET | `/api/caic/v1/tasks/{id}/events` | Streams backend-neutral task events via SSE. |  | `EventMessage` SSE |
+| GET | `/api/caic/v1/tasks/{id}/events` | Streams backend-neutral task events via SSE. |  | `EventMessage` SSE<br>Named events: `ready`, `reset`, `error` (`TaskHistoryStreamError`) |
 | POST | `/api/caic/v1/tasks/{id}/input` | Sends user input to a running task. | `InputReq` | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/restart` | Restarts a completed or errored task with a new prompt. | `RestartReq` | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/clear-context` | Clears context and restarts the agent session without a prompt. |  | `StatusResp` |
@@ -1220,6 +1220,14 @@ EventMessage is a single SSE event in the backend-neutral stream
 | `widgetDelta` | `EventWidgetDelta` |  |  |
 | `rateLimit` | `EventRateLimit` |  |  |
 | `stats` | `EventStats` |  |  |
+
+### TaskHistoryStreamError
+
+TaskHistoryStreamError reports that task history could not be replayed.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `message` | `string` |  | yes |
 
 ### InputReq
 

@@ -1362,23 +1362,25 @@ func (t *Task) SubscribeLiveMessages(ctx context.Context) (after uint64, live <-
 }
 
 func unsubscribeMessages(t *Task, ctx context.Context, s *sub) func() {
-	unsub := func() {
-		t.mu.Lock()
-		defer t.mu.Unlock()
-		for i, ss := range t.subs {
-			if ss == s {
-				t.subs = append(t.subs[:i], t.subs[i+1:]...)
-				break
+	var once sync.Once
+	cleanup := func() {
+		once.Do(func() {
+			t.mu.Lock()
+			for i, ss := range t.subs {
+				if ss == s {
+					t.subs = append(t.subs[:i], t.subs[i+1:]...)
+					break
+				}
 			}
-		}
+			t.mu.Unlock()
+			s.close()
+		})
 	}
-	// Close channel when context is done.
-	go func() {
-		<-ctx.Done()
-		unsub()
-		s.close()
-	}()
-	return unsub
+	stop := context.AfterFunc(ctx, cleanup)
+	return func() {
+		stop()
+		cleanup()
+	}
 }
 
 // SubscribeRateLimits returns historical quota messages and a lossless stream

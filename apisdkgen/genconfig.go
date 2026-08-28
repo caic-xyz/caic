@@ -131,6 +131,11 @@ func routeSeedTypes(c *apispec.Config) []reflect.Type {
 			seeds = append(seeds, r.Req)
 		}
 		seeds = append(seeds, r.Resp)
+		for j := range r.SSEEvents {
+			if r.SSEEvents[j].Resp != nil {
+				seeds = append(seeds, r.SSEEvents[j].Resp)
+			}
+		}
 	}
 	return seeds
 }

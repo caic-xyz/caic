@@ -13,8 +13,9 @@ import { SyncTargetDefault } from "@sdk/types.gen";
 import { useHostMode } from "../gomode/HostMode";
 import { requestNotificationPermission } from "../gomode/notifications";
 
-import { sendInput as apiSendInput, restartTask as apiRestartTask, compactContext as apiCompactContext, syncTask as apiSyncTask, taskEventStream, getTaskToolInput, botFixPR } from "../api";
+import { sendInput as apiSendInput, restartTask as apiRestartTask, compactContext as apiCompactContext, syncTask as apiSyncTask, getTaskToolInput, botFixPR } from "../api";
 import { IncrementalMessageGrouper, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "../grouping";
+import { createTaskEventTimeline } from "../taskEventTimeline";
 import { formatDuration, formatElapsed, formatTokens, toolCallDetail } from "../formatting";
 import type { ToolCall } from "../grouping";
 import { Marked } from "marked";
@@ -128,20 +129,15 @@ function ciActionsURL(remoteURL?: string, forge?: string): string | undefined {
   return forge === "gitlab" ? `${remoteURL}/-/pipelines` : `${remoteURL}/actions`;
 }
 
-const liveFlushDelayMs = 100;
-
-function shouldFlushBufferedEvent(ev: EventMessage): boolean {
-  return ev.kind === "result"
-    || ev.kind === "ask"
-    || ev.kind === "userInput"
-    || ev.kind === "error"
-    || isSessionBoundary(ev);
-}
-
 export default function TaskDetail(props: Props) {
   const hostMode = useHostMode();
   const location = useLocation();
-  const [messages, setMessages] = createSignal<EventMessage[]>([]);
+  const timeline = createTaskEventTimeline({
+    taskId: () => props.taskId,
+    taskState: () => props.taskState,
+    onError: (message) => props.onError(message),
+  });
+  const messages = timeline.messages;
   const [sending, setSending] = createSignal(false);
   const [pendingAction, setPendingAction] = createSignal<"sync" | "restart" | "compact" | null>(null);
   const [actionError, setActionError] = createSignal<string | null>(null);
@@ -251,15 +247,28 @@ export default function TaskDetail(props: Props) {
   // Incremental grouping: cache completed-turn groups so streaming only reprocesses the current turn.
   // splitIdx is the index into messages() where the current (incomplete) turn starts.
   // It advances only when a "result" event arrives, keeping completedMsgs stable during streaming.
+  const messageGrouper = new IncrementalMessageGrouper();
   const [splitIdx, setSplitIdx] = createSignal(0);
   const [completedMsgs, setCompletedMsgs] = createSignal<EventMessage[]>([]);
+  let derivedTaskId = "";
+  let derivedEpoch = -1;
   createEffect(() => {
+    const taskId = props.taskId;
+    const epoch = timeline.epoch();
     const msgs = messages();
-    let idx = untrack(splitIdx);
+    const taskChanged = taskId !== derivedTaskId;
+    const reset = taskChanged || epoch !== derivedEpoch;
+    const previousIdx = untrack(splitIdx);
+    let idx = reset ? 0 : previousIdx;
+    if (reset) {
+      derivedTaskId = taskId;
+      derivedEpoch = epoch;
+      if (taskChanged) userScrolledUp = false;
+    }
     for (let i = idx; i < msgs.length; i++) {
       if (msgs[i].kind === "result") idx = i + 1;
     }
-    if (idx !== untrack(splitIdx)) {
+    if (reset || idx !== previousIdx) {
       setSplitIdx(idx);
       setCompletedMsgs(msgs.slice(0, idx));
     }
@@ -318,10 +327,22 @@ export default function TaskDetail(props: Props) {
   });
 
   // Live groups: recomputes on every message. Session boundary events are excluded —
-  // they become session headers, not message groups.
-  const messageGrouper = new IncrementalMessageGrouper();
+  // they become session headers, not message groups. The memo owns its stateful
+  // grouper reset so Solid cannot evaluate it before a sibling reset effect.
+  let groupedTaskId = "";
+  let groupedEpoch = -1;
+  let groupedSplitIdx = -1;
   const currentGroups = createMemo(() => {
-    const msgs = messages().slice(splitIdx()).filter((ev) => !isSessionBoundary(ev));
+    const taskId = props.taskId;
+    const epoch = timeline.epoch();
+    const start = splitIdx();
+    if (taskId !== groupedTaskId || epoch !== groupedEpoch || start !== groupedSplitIdx) {
+      groupedTaskId = taskId;
+      groupedEpoch = epoch;
+      groupedSplitIdx = start;
+      messageGrouper.reset();
+    }
+    const msgs = messages().slice(start).filter((ev) => !isSessionBoundary(ev));
     return messageGrouper.group(msgs);
   });
 
@@ -393,156 +414,6 @@ export default function TaskDetail(props: Props) {
       if (groups[i].kind === "ask") return groups[i];
     }
     return null;
-  });
-
-  createEffect(() => {
-    const id = props.taskId;
-    userScrolledUp = false;
-    messageGrouper.reset();
-    setMessages([]);
-    setSplitIdx(0);
-    setCompletedMsgs([]);
-
-    let es: EventSource | null = null;
-    let live = false;
-    // A named server history error is terminal for this connection lifecycle.
-    // Do not replace its explicit error with reconnect churn until this effect resets.
-    let historyFailed = false;
-    let replaceOnNextFlush = true;
-    let liveFlushTimer: ReturnType<typeof setTimeout> | null = null;
-    let connectionGeneration = 0;
-    // Keep replay off the DOM until ready. Live deltas are flushed at a short
-    // interval, or immediately on structural boundaries, so initial task output
-    // streams without regrouping the DOM for every token fragment.
-    let pendingEvents: EventMessage[] = [];
-
-    function clearLiveFlushTimer() {
-      if (liveFlushTimer === null) return;
-      clearTimeout(liveFlushTimer);
-      liveFlushTimer = null;
-    }
-
-    function flushPendingEvents() {
-      clearLiveFlushTimer();
-      const evs = pendingEvents;
-      pendingEvents = [];
-      if (replaceOnNextFlush) {
-        setMessages(evs);
-        replaceOnNextFlush = false;
-        return;
-      }
-      if (evs.length === 0) return;
-      setMessages((prev) => [...prev, ...evs]);
-    }
-
-    function scheduleLiveFlush() {
-      if (liveFlushTimer !== null) return;
-      liveFlushTimer = setTimeout(flushPendingEvents, liveFlushDelayMs);
-    }
-
-    function closeConnection() {
-      connectionGeneration += 1;
-      if (live) flushPendingEvents();
-      else {
-        clearLiveFlushTimer();
-        pendingEvents = [];
-      }
-      es?.close();
-      es = null;
-      live = false;
-    }
-
-    function connect() {
-      if (historyFailed) return;
-      closeConnection();
-      replaceOnNextFlush = true;
-      const generation = ++connectionGeneration;
-      const startedES = taskEventStream(id, {
-        onMessage: (ev) => {
-          if (generation !== connectionGeneration) return;
-          pendingEvents.push(ev);
-          if (!live) return;
-          if (shouldFlushBufferedEvent(ev)) flushPendingEvents();
-          else scheduleLiveFlush();
-        },
-        onError: (err) => {
-          if (generation !== connectionGeneration) return;
-          const msg = err instanceof Error ? err.message : String(err);
-          untrack(() => props.onError(`Task event error: ${msg}`));
-        },
-        onReady: () => {
-          if (generation !== connectionGeneration) return;
-          // The server sends a "ready" event after replaying full history.
-          // Render replayed history in one pass before switching to live turn-boundary flushing.
-          flushPendingEvents();
-          live = true;
-        },
-        onHistoryError: (historyError) => {
-          if (generation !== connectionGeneration) return;
-          historyFailed = true;
-          connectionGeneration += 1;
-          clearLiveFlushTimer();
-          pendingEvents = [];
-          live = false;
-          startedES.close();
-          if (es === startedES) es = null;
-          untrack(() => props.onError(`Task history error: ${historyError.message}`));
-        },
-        onReset: () => {
-          if (generation !== connectionGeneration) return;
-          clearLiveFlushTimer();
-          pendingEvents = [];
-          live = false;
-          replaceOnNextFlush = true;
-        },
-      });
-      es = startedES;
-      startedES.onerror = () => {
-        if (generation !== connectionGeneration) return;
-        // Keep nonterminal sources open so the browser reconnects with the
-        // latest SSE event ID in Last-Event-ID instead of replaying all history.
-        const wasLive = live;
-        if (wasLive) flushPendingEvents();
-        live = false;
-        const st = props.taskState;
-        if (!wasLive || (st !== "purged" && st !== "crashed" && st !== "failed")) return;
-        connectionGeneration += 1;
-        startedES.close();
-        if (es === startedES) es = null;
-      };
-    }
-
-    function reconnectWhenAvailable() {
-      if (historyFailed || document.hidden || !navigator.onLine || es !== null) return;
-      connect();
-    }
-
-    function onVisibilityChange() {
-      if (document.hidden) closeConnection();
-      else reconnectWhenAvailable();
-    }
-
-    function onOnline() {
-      reconnectWhenAvailable();
-    }
-
-    function onOffline() {
-      closeConnection();
-    }
-
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    window.addEventListener("online", onOnline);
-    window.addEventListener("offline", onOffline);
-    reconnectWhenAvailable();
-
-    onCleanup(() => {
-      closeConnection();
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-      window.removeEventListener("online", onOnline);
-      window.removeEventListener("offline", onOffline);
-      pendingEvents = [];
-      messageGrouper.reset();
-    });
   });
 
   async function sendInput() {
