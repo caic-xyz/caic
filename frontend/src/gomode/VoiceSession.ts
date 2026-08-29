@@ -102,9 +102,6 @@ export class VoiceSession {
 
   readonly taskNumberMap = new TaskNumberMap();
 
-  /** Task IDs excluded from AI context (pre-purged at session start). */
-  excludedTaskIds: Set<string> = new Set();
-
   private _pc: RTCPeerConnection | null = null;
   private _dc: RTCDataChannel | null = null;
   private _rtcSessionID: string | null = null;
@@ -298,19 +295,6 @@ export class VoiceSession {
       ]);
 
       // Keep local task numbering aligned with the server-provided voice prompt.
-      const prePurged = new Set(
-        tasks
-          .filter(
-            (t) =>
-              t.state === "purged" ||
-              t.state === "failed" ||
-              t.state === "crashed" ||
-              t.state === "stopped" ||
-              t.state === "stopping",
-          )
-          .map((t) => t.id),
-      );
-      this.excludedTaskIds = prePurged;
       this.taskNumberMap.reset();
       this.taskNumberMap.update(tasks);
       this._recoveryServiceContext = taskServiceContext(systemInstruction, tasks);

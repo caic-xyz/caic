@@ -39,9 +39,6 @@ export default function VoiceOverlay(props: Props) {
     onCleanup(() => observer.disconnect());
   });
 
-  // Track pre-purged task IDs to exclude from notifications.
-  const [prePurgedIds, setPreTerminatedIds] = createSignal(new Set<string>());
-
   // Previous task states and CI statuses for detecting transitions.
   let prevStates = new Map<string, string>();
   let prevCIStatuses = new Map<string, string | undefined>();
@@ -53,12 +50,6 @@ export default function VoiceOverlay(props: Props) {
     setVoiceConnected(connected);
     if (connected && !wasConnected) {
       const tasks = untrack(() => props.tasks());
-      const prePurged = new Set(
-        tasks
-          .filter((t) => t.state === "purged" || t.state === "failed" || t.state === "crashed" || t.state === "stopped" || t.state === "stopping")
-          .map((t) => t.id),
-      );
-      setPreTerminatedIds(prePurged);
       setVoiceTaskNumberMap(session.taskNumberMap);
       prevStates = new Map(tasks.map((t) => [t.id, t.state]));
       prevCIStatuses = new Map(tasks.map((t) => [t.id, t.ciStatus]));
@@ -70,8 +61,7 @@ export default function VoiceOverlay(props: Props) {
   createEffect(() => {
     const currentTasks = props.tasks();
     if (session.state.connected) {
-      const excluded = prePurgedIds();
-      session.taskNumberMap.update(currentTasks.filter((t) => !excluded.has(t.id)));
+      session.taskNumberMap.update(currentTasks);
       for (const task of currentTasks) {
         const prev = prevStates.get(task.id);
         if (prev !== undefined && prev !== task.state) {

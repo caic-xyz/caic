@@ -1,4 +1,4 @@
-// Benchmarks for task SSE event replay performance.
+// Benchmarks for task snapshots and SSE event replay performance.
 
 package server
 
@@ -21,7 +21,29 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	capipi "github.com/caic-xyz/caic/backend/internal/agent/pi"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
+
+func BenchmarkTaskListSnapshot(b *testing.B) {
+	s := newTestRouter(b, nil)
+	for i := range 10 {
+		id := ksid.NewID()
+		task := mustNewTask(b, id, agent.Prompt{Text: "benchmark task"}, harness.Claude)
+		if i%2 == 0 {
+			task.SetState(taskslog.StateStopped)
+		}
+		insertTestTask(s, id.String(), task)
+	}
+
+	taskSvc := testTaskHandlers(s).taskSvc
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if got := len(taskSvc.taskListSnapshot(b.Context())); got != 10 {
+			b.Fatalf("task count = %d, want 10", got)
+		}
+	}
+}
 
 func BenchmarkHandleTaskRawEventsPurgedReplay(b *testing.B) {
 	b.Run("ClaudeSmallOutputManyDeltas", func(b *testing.B) {

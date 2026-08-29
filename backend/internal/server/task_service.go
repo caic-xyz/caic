@@ -101,8 +101,29 @@ func (s *taskService) taskListSnapshot(ctx context.Context) []v1.Task {
 		out = append(out, dto)
 		return true
 	})
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	sort.Slice(out, func(i, j int) bool {
+		iActive := taskStateActive(out[i].State)
+		jActive := taskStateActive(out[j].State)
+		if iActive != jActive {
+			return iActive
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out
+}
+
+func taskStateActive(state v1.TaskState) bool {
+	switch state {
+	case v1.TaskStatePending, v1.TaskStateBranching, v1.TaskStateProvisioning,
+		v1.TaskStateStarting, v1.TaskStateRunning, v1.TaskStateWaiting,
+		v1.TaskStateAsking, v1.TaskStateHasPlan, v1.TaskStatePulling,
+		v1.TaskStatePushing:
+		return true
+	case v1.TaskStateStopping, v1.TaskStateStopped, v1.TaskStatePurging,
+		v1.TaskStateCrashed, v1.TaskStateFailed, v1.TaskStatePurged:
+		return false
+	}
+	return false
 }
 
 // taskDTO resolves server-owned task data before projecting it to the API.

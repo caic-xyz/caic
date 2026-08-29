@@ -36,6 +36,31 @@ func mcpRequestJSON(method, paramsFields string) string {
 	return `{"jsonrpc":"2.0","id":1,"method":"` + method + `","params":{` + paramsFields + `"_meta":{"io.modelcontextprotocol/protocolVersion":"` + mcp.ProtocolVersion + `","io.modelcontextprotocol/clientInfo":{"name":"caic-test","version":"1.0.0"},"io.modelcontextprotocol/clientCapabilities":{}}}}`
 }
 
+func TestTaskListSnapshotOrdersActiveTasksFirst(t *testing.T) {
+	t.Parallel()
+
+	s := newTestRouter(t, nil)
+	inactiveID := ksid.NewID()
+	inactive := mustNewTask(t, inactiveID, agent.Prompt{Text: "inactive"}, harness.Claude)
+	inactive.SetState(taskslog.StateStopped)
+	insertTestTask(s, inactiveID.String(), inactive)
+
+	activeID := ksid.NewID()
+	active := mustNewTask(t, activeID, agent.Prompt{Text: "active"}, harness.Claude)
+	insertTestTask(s, activeID.String(), active)
+
+	tasks := testTaskHandlers(s).taskSvc.taskListSnapshot(t.Context())
+	if len(tasks) != 2 {
+		t.Fatalf("task count = %d, want 2", len(tasks))
+	}
+	if got := tasks[0].InitialPrompt; got != "active" {
+		t.Errorf("first task = %q, want active", got)
+	}
+	if got := tasks[1].InitialPrompt; got != "inactive" {
+		t.Errorf("second task = %q, want inactive", got)
+	}
+}
+
 func TestMCPHandlers(t *testing.T) {
 	t.Parallel()
 
