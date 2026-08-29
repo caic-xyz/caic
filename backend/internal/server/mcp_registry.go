@@ -62,7 +62,7 @@ At session start this prompt includes a snapshot of all current tasks. Use it to
 - When creating a task, omit harness, model, and effort unless the user explicitly asks for an override. caic fills an omitted harness from saved preferences; omitted model and effort use the selected harness defaults. Never pair one harness's model or effort with another harness. Confirm repo and prompt before creating.
 - Refer to tasks by title.
 - Proactively notify the user when tasks finish or need input.
-- Free tools: agent_last_message, tasks_list, task_get_detail, get_usage. Call them whenever useful without asking.
+- Free tools: agent_last_message, repos_list, tasks_list, task_get_detail, get_usage. Call them whenever useful without asking.
 - When the user asks for a status update, call agent_last_message for each waiting/asking task to get latest output.
 - For safety issues during sync, describe each issue and ask whether to force.`
 
@@ -276,6 +276,7 @@ func (m *mcpRegistry) specs() []mcp.ToolSpec {
 
 	return []mcp.ToolSpec{
 		annotateTool(mcp.NewToolSpec("tasks_list", "List tasks", "List all current coding tasks with their status, agent configuration, cost, and duration.", m.handleTasksList), mcp.ToolAnnotations{Title: "List tasks", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
+		annotateTool(mcp.NewToolSpec("repos_list", "List repositories", "List all repositories available on the server.", m.handleReposList), mcp.ToolAnnotations{Title: "List repositories", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		createSpec,
 		annotateTool(mcp.NewToolSpec("task_get_detail", "Get task detail", "Get recent activity and status details for a task by its number.", m.handleTaskGetDetail), mcp.ToolAnnotations{Title: "Get task detail", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("task_send_message", "Send task message", "Send a text message to a waiting or asking agent by task number.", m.handleTaskSendMessage), mcp.ToolAnnotations{Title: "Send task message", DestructiveHint: false, OpenWorldHint: false}),
@@ -352,6 +353,15 @@ func (m *mcpRegistry) handleTasksList(ctx context.Context, _ struct{}) mcp.ToolR
 		lines[i] = taskSummaryLine(i+1, &taskList[i])
 	}
 	return mcp.TextToolResult("## Tasks\n\n" + strings.Join(lines, "\n"))
+}
+
+type mcpRepoListOutput struct {
+	Repositories []v1.Repo `json:"repositories" jsonschema_description:"All repositories available on the server"`
+}
+
+func (m *mcpRegistry) handleReposList(_ context.Context, _ struct{}) mcp.ToolResult[mcpRepoListOutput] {
+	repos := repoListFromSnapshot(m.serverConfig.log, m.serverConfig.checkouts.Checkouts(), m.serverConfig.repoStatus)
+	return mcp.TypedToolResult(mcpRepoListOutput{Repositories: *repos})
 }
 
 func domainToolError[T any](err error) mcp.ToolResult[T] {
@@ -970,6 +980,7 @@ func truncate(s string, maxLen int) string {
 }
 
 var mcpToolScopes = map[string]string{
+	"repos_list":                 mcpScopeRead,
 	"tasks_list":                 mcpScopeTasksRead,
 	"task_get_detail":            mcpScopeTasksRead,
 	"agent_last_message":         mcpScopeTasksRead,

@@ -15,6 +15,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/usage"
@@ -84,6 +85,34 @@ func TestVoiceTaskSummaryLineMarksUnspecifiedConfigurationAsDefault(t *testing.T
 	want := "- Task #1: Fix the parser (running, harness: claude, model: default, effort: default)"
 	if got != want {
 		t.Fatalf("voiceTaskSummaryLine() = %q, want %q", got, want)
+	}
+}
+
+func TestCaicToolRegistryHandleReposList(t *testing.T) {
+	t.Parallel()
+
+	s := newTestRouter(t, nil)
+	registerRouterCheckout(t, s.checkouts, "org/repo", newRouterTestCheckout(t.TempDir()))
+	registerRouterCheckout(t, s.checkouts, "repo2", &repo.Checkout{BaseBranch: "develop", Dir: t.TempDir()})
+	c := &mcpRegistry{serverConfig: s.serverHandlers}
+
+	result := c.handleReposList(t.Context(), struct{}{})
+	if result.IsError {
+		t.Fatalf("handleReposList() returned tool error: %+v", result.Structured)
+	}
+	output, ok := result.Structured.(mcpRepoListOutput)
+	if !ok {
+		t.Fatalf("result type = %T, want mcpRepoListOutput", result.Structured)
+	}
+	got := output.Repositories
+	if len(got) != 2 {
+		t.Fatalf("repositories = %+v, want 2 repositories", got)
+	}
+	if got[0].Path != "org/repo" || got[0].BaseBranch.Name != "main" {
+		t.Errorf("repositories[0] = %+v, want org/repo on main", got[0])
+	}
+	if got[1].Path != "repo2" || got[1].BaseBranch.Name != "develop" {
+		t.Errorf("repositories[1] = %+v, want repo2 on develop", got[1])
 	}
 }
 
@@ -175,7 +204,6 @@ func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 
 		s := newMCPTaskCreateTestRouter(t)
 		c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-		createSpec := c.specs()[1]
 		if err := s.prefs.Update(userIDFromCtx(t.Context()), func(p *preferences.Preferences) {
 			p.Harness = string(harness.Pi)
 			p.Models = map[string]string{string(harness.Pi): "pi-default"}
@@ -184,12 +212,23 @@ func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 			t.Fatalf("Update preferences: %v", err)
 		}
 
-		raw, err := createSpec.Handler(t.Context(), json.RawMessage(`{"prompt":"do the task","repos":["myrepo"]}`))
-		if err != nil {
-			t.Fatalf("task_create handler returned error: %v", err)
+		var found bool
+		for _, spec := range c.specs() {
+			if spec.Name != "task_create" {
+				continue
+			}
+			found = true
+			raw, err := spec.Handler(t.Context(), json.RawMessage(`{"prompt":"do the task","repos":["myrepo"]}`))
+			if err != nil {
+				t.Fatalf("task_create handler returned error: %v", err)
+			}
+			if raw.IsError {
+				t.Fatalf("task_create returned tool error: %+v", raw.Structured)
+			}
+			break
 		}
-		if raw.IsError {
-			t.Fatalf("task_create returned tool error: %+v", raw.Structured)
+		if !found {
+			t.Fatal("task_create tool not found")
 		}
 
 		created := singleCreatedTask(t, s)
