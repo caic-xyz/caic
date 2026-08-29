@@ -31,6 +31,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Settings
@@ -45,6 +47,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -215,6 +220,8 @@ private fun ActivePanel(
     onClearTranscript: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
+    var transcriptExpanded by rememberSaveable { mutableStateOf(false) }
+
     Column(
         modifier = Modifier.padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -285,12 +292,28 @@ private fun ActivePanel(
                         modifier = Modifier.size(16.dp),
                     )
                 }
+                IconButton(
+                    onClick = { transcriptExpanded = !transcriptExpanded },
+                    modifier = Modifier
+                        .size(32.dp)
+                        .testTag("gomode-voice-transcript-toggle"),
+                ) {
+                    Icon(
+                        imageVector = if (transcriptExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = if (transcriptExpanded) "Hide transcript" else "Show transcript",
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
             }
         }
-        TranscriptLog(
-            entries = voiceState.transcript,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        if (transcriptExpanded) {
+            TranscriptLog(
+                entries = voiceState.transcript,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("gomode-voice-transcript"),
+            )
+        }
     }
 }
 
@@ -422,5 +445,4 @@ private fun MicLevelIndicator(micLevel: Float = 0f) {
         }
     }
 }
-
 
