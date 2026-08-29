@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { hasHostModeQuery } from "./HostMode";
+import { hasHostModeQuery, nativeVoiceConnected } from "./HostMode";
 
 describe("hasHostModeQuery", () => {
   it("is false in the normal browser path", () => {
@@ -15,5 +15,12 @@ describe("hasHostModeQuery", () => {
 
   it("ignores unrelated query values", () => {
     expect(hasHostModeQuery({ goModeHost: "0" })).toBe(false);
+  });
+
+  it("reads voice state only from the native host bridge", () => {
+    expect(nativeVoiceConnected(undefined)).toBe(false);
+    expect(nativeVoiceConnected({})).toBe(false);
+    expect(nativeVoiceConnected({ isVoiceConnected: () => false })).toBe(false);
+    expect(nativeVoiceConnected({ isVoiceConnected: () => true })).toBe(true);
   });
 });

@@ -1,12 +1,14 @@
-// Default layout: the new-task form, the sidebar task list, and the routed detail pane.
+// Default layout: task creation, sidebar/detail panes, and native voice task-number synchronization.
 
-import { type JSX, For } from "solid-js";
+import { createEffect, onCleanup, type JSX, For } from "solid-js";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
 import SudoIcon from "@material-symbols/svg-400/outlined/shield_person.svg?solid";
 
-import { voiceConnected, getVoiceTaskNumber } from "../gomode/VoiceState";
+import { voiceConnected, getVoiceTaskNumber, setVoiceConnected, setVoiceTaskNumberMap } from "../gomode/VoiceState";
+import { useHostMode } from "../gomode/HostMode";
+import { TaskNumberMap } from "../TaskNumberMap";
 
 import RepoChipStrip from "./RepoChipStrip";
 import PromptInput from "./PromptInput";
@@ -21,6 +23,27 @@ import styles from "./MainLayout.module.css";
 
 export default function MainLayout(props: { children?: JSX.Element }) {
   const s = useAppState();
+  const hostMode = useHostMode();
+  const nativeTaskNumberMap = new TaskNumberMap();
+
+  // Android owns the voice session in host mode. Mirror its connection state
+  // and retain the same active-first numbering as the native voice prompt.
+  createEffect(() => {
+    if (!hostMode.isGoModeHost()) return;
+    const connected = hostMode.nativeVoiceConnected();
+    setVoiceConnected(connected);
+    if (!connected) {
+      setVoiceTaskNumberMap(null);
+      return;
+    }
+    nativeTaskNumberMap.update(s.tasks());
+    setVoiceTaskNumberMap(nativeTaskNumberMap);
+  });
+  onCleanup(() => {
+    if (!hostMode.isGoModeHost()) return;
+    setVoiceConnected(false);
+    setVoiceTaskNumberMap(null);
+  });
 
   return (
     <>

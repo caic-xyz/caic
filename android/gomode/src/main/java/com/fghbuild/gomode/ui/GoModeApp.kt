@@ -227,6 +227,7 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
                     bootstrapState = bootstrapState,
                     onSetNativeScreen = { activeNativeScreen = it },
                     activeNativeScreen = activeNativeScreen,
+                    voiceConnected = voiceState.connected,
                     webReloadToken = webReloadToken,
                     onWebLoadStateChanged = { webLoadState = it },
                     onHostedPageLoaded = {
@@ -313,6 +314,7 @@ private fun GoModeContent(
     bootstrapState: ServiceBootstrapState,
     activeNativeScreen: NativeScreen?,
     onSetNativeScreen: (NativeScreen?) -> Unit,
+    voiceConnected: Boolean,
     webReloadToken: Int,
     onWebLoadStateChanged: (WebShellLoadState) -> Unit,
     onHostedPageLoaded: () -> Unit,
@@ -343,6 +345,7 @@ private fun GoModeContent(
                     // when bootstrap validation completes, which can strand in-flight JavaScript callbacks.
                     WebShellScreen(
                         initialURL = activeURL,
+                        voiceConnected = voiceConnected,
                         reloadToken = webReloadToken,
                         onLoadStateChanged = onWebLoadStateChanged,
                         onHostedPageLoaded = onHostedPageLoaded,

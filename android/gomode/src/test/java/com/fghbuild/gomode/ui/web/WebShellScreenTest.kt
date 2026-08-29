@@ -12,6 +12,16 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class WebShellScreenTest {
     @Test
+    fun hostBridgeExposesNativeVoiceConnectionState() {
+        val bridge = GoModeHostBridge()
+
+        GoModeHostBridge.setVoiceConnected(false)
+        assertEquals(false, bridge.isVoiceConnected())
+        GoModeHostBridge.setVoiceConnected(true)
+        assertEquals(true, bridge.isVoiceConnected())
+    }
+
+    @Test
     fun firstTimeoutIsRetriedSilently() {
         assertEquals(true, shouldAutomaticallyRetryWebLoadError(WebViewClient.ERROR_TIMEOUT, retryAttempts = 0))
         assertEquals(false, shouldAutomaticallyRetryWebLoadError(WebViewClient.ERROR_TIMEOUT, retryAttempts = 1))

@@ -1,4 +1,4 @@
-// WebView shell that reports active backend-hosted frontend load state.
+// WebView shell that reports page load state and native voice state to the hosted frontend.
 package com.fghbuild.gomode.ui.web
 
 import android.Manifest
@@ -52,6 +52,7 @@ import kotlinx.coroutines.delay
 @Composable
 internal fun WebShellScreen(
     initialURL: String,
+    voiceConnected: Boolean,
     reloadToken: Int,
     onLoadStateChanged: (WebShellLoadState) -> Unit,
     onHostedPageLoaded: () -> Unit = {},
@@ -185,6 +186,14 @@ internal fun WebShellScreen(
         loading = true
         currentOnLoadStateChanged(WebShellLoadState.Reconnecting)
         webView.reload()
+    }
+
+    LaunchedEffect(voiceConnected, webView) {
+        GoModeHostBridge.setVoiceConnected(voiceConnected)
+        webView.evaluateJavascript(
+            "window.dispatchEvent(new CustomEvent('gomodevoicechange'))",
+            null,
+        )
     }
 
     LaunchedEffect(hostURL, automaticRetryState.pending) {
@@ -383,8 +392,20 @@ private fun goModeHostURL(url: String): String =
 private const val AUTOMATIC_TIMEOUT_RETRY_DELAY_MILLIS = 1_000L
 private const val TAG = "GoModeWebShell"
 
-private class GoModeHostBridge {
+internal class GoModeHostBridge {
     @JavascriptInterface
     @Suppress("FunctionOnlyReturningConstant")
     fun shellVersion(): String = "1"
+
+    @JavascriptInterface
+    fun isVoiceConnected(): Boolean = voiceConnected
+
+    companion object {
+        @Volatile
+        private var voiceConnected = false
+
+        fun setVoiceConnected(connected: Boolean) {
+            voiceConnected = connected
+        }
+    }
 }

@@ -1,4 +1,4 @@
-// Bidirectional task ID ↔ active-first 1-based number mapping for web voice mode.
+// Bidirectional caic task ID ↔ active-first 1-based voice number mapping.
 
 import type { Task } from "@sdk/types.gen";
 

@@ -62,6 +62,7 @@ export default function VoiceOverlay(props: Props) {
     const currentTasks = props.tasks();
     if (session.state.connected) {
       session.taskNumberMap.update(currentTasks);
+      setVoiceTaskNumberMap(session.taskNumberMap);
       for (const task of currentTasks) {
         const prev = prevStates.get(task.id);
         if (prev !== undefined && prev !== task.state) {

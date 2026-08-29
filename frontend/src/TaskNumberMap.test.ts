@@ -1,4 +1,4 @@
-// Tests task numbering for the Go Mode voice session.
+// Tests caic task numbering for voice-mode task references.
 
 import { describe, expect, it } from "vitest";
 

@@ -666,6 +666,16 @@ describe("App repo chips: No repository", () => {
     expect(screen.queryByTestId("voice-overlay")).not.toBeInTheDocument();
   });
 
+  it("shows task numbers while native Go Mode voice is connected", async () => {
+    window.goModeHost = { isVoiceConnected: () => true };
+    renderApp();
+
+    await waitFor(() => expect(api.listRepos).toHaveBeenCalledOnce());
+    dispatchSSE({ kind: "snapshot", snapshot: [makeTask({ id: "taskX", title: "voice task" })] });
+
+    expect(await screen.findByText("#1")).toBeInTheDocument();
+  });
+
   it("does not mount browser voice when the server disables the voice gateway", async () => {
     vi.mocked(api.getConfig).mockResolvedValue({
       displayName: "test",

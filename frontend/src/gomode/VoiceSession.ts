@@ -30,7 +30,7 @@ import {
   MessageKindTranscriptDelta,
 } from "@voicegateway-sdk/types.gen";
 
-import { TaskNumberMap } from "./TaskNumberMap";
+import { TaskNumberMap } from "../TaskNumberMap";
 import {
   mcpListTools,
   mcpCallTool,
