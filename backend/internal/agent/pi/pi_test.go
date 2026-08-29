@@ -76,15 +76,18 @@ func runPiRelayHelper() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	if len(count) == 0 {
+	failedStartup := len(count) == 0
+	if failedStartup {
 		fmt.Println(`{"type":"caic_exit","exit_code":1,"error":"extension load failure"}`)
-		return
 	}
 
 	s := bufio.NewScanner(os.Stdin)
 	for s.Scan() {
 		if bytes.Equal(s.Bytes(), []byte{0}) {
 			return
+		}
+		if failedStartup {
+			continue
 		}
 		var cmd struct {
 			Type string `json:"type"`
