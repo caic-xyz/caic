@@ -89,14 +89,14 @@ runs collect documentation screenshots.
 
 ## Checks
 
-For Go Mode changes:
+| Change | Required validation |
+| --- | --- |
+| Any Go Mode Android change | `make android-check` |
+| Networking, SSE, service monitoring, WebView loading, settings, host-mode behavior, or native shell routing | `make android-e2e` |
 
-```bash
-make android-check
-```
-
-Also run `python3 scripts/android_e2e.py --module gomode` when WebView loading,
-settings, host-mode behavior, or native shell routing can regress.
+`make android-e2e` starts the emulator before running the Android E2E suite.
+Do not run the Python test command directly unless an emulator is already
+required for another task.
 
 <!-- BEGIN FILE INDEX -->
 ## File Index

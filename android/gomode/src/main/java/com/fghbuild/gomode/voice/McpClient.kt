@@ -24,12 +24,7 @@ import com.fghbuild.mcp.sdk.v1.ToolCallResult
 import com.fghbuild.mcp.sdk.v1.ToolDescriptor
 import com.fghbuild.mcp.sdk.v1.ToolsCallParams
 import com.fghbuild.mcp.sdk.v1.ToolsListResult
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.launch
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -41,18 +36,13 @@ import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import java.io.IOException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 private const val SUBSCRIPTION_READ_TIMEOUT_MILLIS = 45_000L
 
 private val idCounter = AtomicInteger(0)
-private val jsonMediaType = "application/json".toMediaType()
 
 data class McpToolResult(
     val structuredContent: JsonObject,
@@ -66,7 +56,7 @@ class McpClient(
 ) : ServiceResourceClient {
     private val endpointURL = endpointURL.trimEnd('/')
     private val api = ApiClient(this.endpointURL)
-    private val subscriptionHTTPClient = newSubscriptionHTTPClient()
+    private val subscriptionAPI = ApiClient(this.endpointURL, httpClient = newSubscriptionHTTPClient())
     private val json = Json { ignoreUnknownKeys = true }
     private var toolsByName: Map<String, ToolDescriptor> = emptyMap()
 
@@ -198,9 +188,8 @@ class McpClient(
         name = uri,
     )
 
-    override fun listenSubscriptions(notifications: SubscriptionFilter): Flow<JSONRPCNotification> = callbackFlow {
-        val body = json.encodeToString(
-            JSONRPCRequest.serializer(),
+    override fun listenSubscriptions(notifications: SubscriptionFilter): Flow<JSONRPCNotification> =
+        subscriptionAPI.subscriptionsListen(
             JSONRPCRequest(
                 jsonrpc = "2.0",
                 id = JsonPrimitive(idCounter.incrementAndGet()),
@@ -212,53 +201,8 @@ class McpClient(
                     )
                 ),
             ),
+            headers = mcpHeaders(Method.SubscriptionsListen),
         )
-        val request = Request.Builder()
-            .url(endpointURL)
-            .post(body.toRequestBody(jsonMediaType))
-            .header("Accept", "text/event-stream")
-            .apply { mcpHeaders(Method.SubscriptionsListen).forEach { (name, value) -> header(name, value) } }
-            .build()
-        val call = subscriptionHTTPClient.newCall(request)
-        val readerJob = launch(Dispatchers.IO) {
-            try {
-                call.execute().use { response ->
-                    if (!response.isSuccessful) {
-                        close(IOException("MCP subscription request failed: HTTP ${response.code}"))
-                        return@launch
-                    }
-                    val responseBody = response.body ?: run {
-                        close(IOException("MCP subscription response is missing a body"))
-                        return@launch
-                    }
-                    responseBody.charStream().buffered().use { reader ->
-                        val dataLines = mutableListOf<String>()
-                        while (true) {
-                            val line = reader.readLine() ?: break
-                            val eventData = collectSSEData(line, dataLines) ?: continue
-                            val notification = json.decodeFromString(JSONRPCNotification.serializer(), eventData)
-                            if (trySend(notification).isFailure) return@launch
-                        }
-                        flushSSEData(dataLines)?.let { eventData ->
-                            val notification = json.decodeFromString(JSONRPCNotification.serializer(), eventData)
-                            if (trySend(notification).isFailure) return@launch
-                        }
-                    }
-                }
-                close()
-            } catch (e: IOException) {
-                if (call.isCanceled()) {
-                    close()
-                } else {
-                    close(e)
-                }
-            }
-        }
-        awaitClose {
-            call.cancel()
-            readerJob.cancel()
-        }
-    }
 
     private fun mcpHeaders(
         method: Method,
@@ -276,21 +220,6 @@ class McpClient(
 internal fun newSubscriptionHTTPClient(): OkHttpClient = OkHttpClient.Builder()
     .readTimeout(SUBSCRIPTION_READ_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
     .build()
-
-private fun collectSSEData(line: String, dataLines: MutableList<String>): String? {
-    if (line.isEmpty()) return flushSSEData(dataLines)
-    if (line.startsWith("data:")) {
-        dataLines += line.removePrefix("data:").trimStart()
-    }
-    return null
-}
-
-private fun flushSSEData(dataLines: MutableList<String>): String? {
-    if (dataLines.isEmpty()) return null
-    val data = dataLines.joinToString("\n")
-    dataLines.clear()
-    return data
-}
 
 private fun textContentAsStructuredError(result: ToolCallResult): JsonObject {
     val text = result.content.firstNotNullOfOrNull { block ->

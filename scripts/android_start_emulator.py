@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Start the caic_test Android emulator and wait until adb can see it.
+"""Start or reuse the caic_test Android emulator and wait until it has booted.
 
 The make target runs SDK and AVD setup before starting this script.
 Works on Linux and macOS.
@@ -70,6 +70,24 @@ def _find_tool(name: str, sdk_root: str) -> str | None:
         f"Could not find '{name}'. Run 'make android-start-emulator' first.\nSearched PATH and {sdk_root}",
         file=sys.stderr,
     )
+    return None
+
+
+def _running_avd_serial(adb: str) -> str | None:
+    """Return the serial of the running caic_test AVD, if present."""
+    devices = subprocess.run([adb, "devices"], capture_output=True, check=True, text=True)
+    for line in devices.stdout.splitlines()[1:]:
+        serial, separator, state = line.partition("\t")
+        if separator == "" or state != "device" or not serial.startswith("emulator-"):
+            continue
+        avd = subprocess.run(
+            [adb, "-s", serial, "emu", "avd", "name"],
+            capture_output=True,
+            check=True,
+            text=True,
+        )
+        if AVD_NAME in (line.strip() for line in avd.stdout.splitlines()):
+            return serial
     return None
 
 
@@ -146,6 +164,27 @@ def _wait_for_boot(adb: str, emulator_proc: subprocess.Popen, log_path: str, dea
     return 1
 
 
+def _wait_for_existing_boot(adb: str, serial: str, timeout: int = 180) -> int:
+    """Wait for an already-running emulator to finish booting."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            result = subprocess.run(
+                [adb, "-s", serial, "shell", "getprop", "sys.boot_completed"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.stdout.strip() == "1":
+                return 0
+        except subprocess.TimeoutExpired:
+            pass
+        time.sleep(2)
+
+    print(f"Emulator {serial} did not finish booting in time.", file=sys.stderr)
+    return 1
+
+
 def _check_host() -> int:
     """Refuse to start the emulator on unsupported hosts."""
     if platform.system() == "Linux" and platform.machine() == "aarch64":
@@ -158,7 +197,13 @@ def _check_host() -> int:
 
 
 def main() -> int:
-    argparse.ArgumentParser(description=__doc__).parse_args()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--auto-reuse",
+        action="store_true",
+        help="reuse a running caic_test emulator instead of starting another one",
+    )
+    args = parser.parse_args()
 
     if _check_host() != 0:
         return 1
@@ -166,11 +211,17 @@ def main() -> int:
     sdk = _sdk_root()
     if sdk is None:
         return 1
-    emulator = _find_tool("emulator", sdk)
-    if emulator is None:
-        return 1
     adb = _find_tool("adb", sdk)
     if adb is None:
+        return 1
+    if args.auto_reuse:
+        serial = _running_avd_serial(adb)
+        if serial is not None:
+            print(f"Reusing emulator '{AVD_NAME}' ({serial})...", file=sys.stderr)
+            return _wait_for_existing_boot(adb, serial)
+
+    emulator = _find_tool("emulator", sdk)
+    if emulator is None:
         return 1
     log_path = os.path.join(tempfile.gettempdir(), f"{AVD_NAME}-emulator.log")
     log = open(log_path, "w")  # noqa: SIM115

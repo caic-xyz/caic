@@ -197,6 +197,9 @@ func TestDocRegistryGenerateKotlinMCPClient(t *testing.T) {
 	for _, want := range []string{
 		"private val mcpID = java.util.concurrent.atomic.AtomicInteger(0)",
 		"id = kotlinx.serialization.json.JsonPrimitive(mcpID.incrementAndGet())",
+		"fun subscriptionsListen(",
+		"method = \"POST\"",
+		"private val httpClient: OkHttpClient = OkHttpClient()",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("ApiClient.kt does not contain %q:\n%s", want, text)

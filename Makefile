@@ -30,7 +30,7 @@ help:
 	@echo "  make smoke-voice            - Run local voice WebRTC smoke test"
 	@echo "  make refresh-generated      - Regenerate API SDKs, AGENTS indexes, and backend architecture docs"
 	@echo "  make android-check          - Run Android lint, build, unit tests, and coverage"
-	@echo "  make android-e2e            - Run Android instrumented tests and generate screenshots"
+	@echo "  make android-e2e            - Start the emulator and run Android E2E tests"
 	@echo "  make android-push-gomode    - Build, install, and start GoMode APK on connected device"
 	@echo "  make android-start-emulator - Set up and start the headless Android emulator"
 	@echo "  make android-stop-emulator  - Stop the running Android emulator"
@@ -139,7 +139,8 @@ android-push-gomode: android-check
 	done; \
 	wait
 
-android-e2e: android-sdk
+android-e2e: android-setup-emulator
+	@python3 scripts/android_start_emulator.py --auto-reuse
 	@python3 scripts/android_e2e.py
 
 lint-fix: $(FRONTEND_STAMP)

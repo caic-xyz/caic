@@ -100,9 +100,9 @@ class ApiException(
 class ApiClient(
     baseURL: String,
     private val tokenProvider: (() -> String?)? = null,
+    private val httpClient: OkHttpClient = OkHttpClient(),
 ) {
     private val baseURL: String = baseURL.trimEnd('/')
-    private val client = OkHttpClient()
     private val json = Json { ignoreUnknownKeys = true }
     private val jsonMediaType = "application/json".toMediaType()
 `)
@@ -125,7 +125,7 @@ class ApiClient(
             }
             .build()
         return suspendCancellableCoroutine { cont ->
-            val call = client.newCall(request)
+            val call = httpClient.newCall(request)
             cont.invokeOnCancellation { call.cancel() }
             call.enqueue(object : okhttp3.Callback {
                 override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
@@ -211,6 +211,17 @@ class ApiClient(
         return kotlinx.serialization.json.JsonObject(mapOf("_meta" to meta))
     }
 
+    /** Opens a POST-based MCP subscription stream. */
+    fun subscriptionsListen(
+        req: JSONRPCRequest,
+        headers: Map<String, String> = emptyMap(),
+    ): Flow<JSONRPCNotification> = sseFlow(
+        method = "POST",
+        path = "",
+        body = json.encodeToString(req),
+        headers = headers,
+    )
+
 `, d.cfg.MCPProtocolVersion)
 	}
 
@@ -227,24 +238,35 @@ class ApiClient(
 	b.WriteString("\n")
 
 	// sseFlow helper and reconnecting wrappers.
-	b.WriteString(`    private inline fun <reified T> sseFlow(path: String): Flow<T> = callbackFlow {
+	b.WriteString(`    private inline fun <reified T> sseFlow(
+        path: String,
+        method: String = "GET",
+        body: String? = null,
+        headers: Map<String, String> = emptyMap(),
+    ): Flow<T> = callbackFlow {
+        val requestBody = body?.toRequestBody(jsonMediaType)
         val request = Request.Builder()
             .url("$baseURL$path")
             .header("Accept", "text/event-stream")
-            .apply { tokenProvider?.invoke()?.let { header("Authorization", "Bearer $it") } }
+            .apply {
+                if (requestBody != null) header("Content-Type", "application/json")
+                headers.forEach { (name, value) -> header(name, value) }
+                tokenProvider?.invoke()?.let { header("Authorization", "Bearer $it") }
+            }
+            .method(method, requestBody)
             .build()
-        val factory = EventSources.createFactory(client)
+        val factory = EventSources.createFactory(httpClient)
         val source = factory.newEventSource(request, object : EventSourceListener() {
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
                 try {
                     val event = json.decodeFromString<T>(data)
-                    trySend(event)
-                } catch (_: Exception) {
-                    // Skip malformed events.
+                    if (trySend(event).isFailure) eventSource.cancel()
+                } catch (e: Exception) {
+                    close(e)
                 }
             }
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
-                close(t?.let { java.io.IOException("SSE connection failed", it) })
+                close(t ?: java.io.IOException("SSE connection failed: HTTP ${response?.code ?: "unknown"}"))
             }
             override fun onClosed(eventSource: EventSource) {
                 close()
