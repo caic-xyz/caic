@@ -15,6 +15,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
@@ -53,6 +54,36 @@ func TestCaicToolRegistryHandleGetUsage(t *testing.T) {
 	}
 	if !strings.Contains(output.Result, "Anthropic: 5h: 88% remaining") {
 		t.Fatalf("get_usage result = %q, want remaining quota", output.Result)
+	}
+}
+
+func TestVoiceTaskSummaryLineIncludesAgentConfiguration(t *testing.T) {
+	t.Parallel()
+
+	got := voiceTaskSummaryLine(1, &v1.Task{
+		Title:   "Fix the parser",
+		State:   v1.TaskStateRunning,
+		Harness: v1.HarnessCodex,
+		Model:   "gpt-5.4",
+		Effort:  "high",
+	})
+	want := "- Task #1: Fix the parser (running, harness: codex, model: gpt-5.4, effort: high)"
+	if got != want {
+		t.Fatalf("voiceTaskSummaryLine() = %q, want %q", got, want)
+	}
+}
+
+func TestVoiceTaskSummaryLineMarksUnspecifiedConfigurationAsDefault(t *testing.T) {
+	t.Parallel()
+
+	got := voiceTaskSummaryLine(1, &v1.Task{
+		Title:   "Fix the parser",
+		State:   v1.TaskStateRunning,
+		Harness: v1.HarnessClaude,
+	})
+	want := "- Task #1: Fix the parser (running, harness: claude, model: default, effort: default)"
+	if got != want {
+		t.Fatalf("voiceTaskSummaryLine() = %q, want %q", got, want)
 	}
 }
 

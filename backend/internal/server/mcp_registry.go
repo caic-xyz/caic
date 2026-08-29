@@ -255,16 +255,7 @@ func (m *mcpRegistry) voiceSessionContext(ctx context.Context) string {
 	}
 	lines := make([]string, len(taskList))
 	for i := range taskList {
-		t := &taskList[i]
-		lines[i] = fmt.Sprintf(
-			"- Task #%d: %s (%s, %s, %s, %s)",
-			i+1,
-			taskTitle(t),
-			t.State,
-			formatElapsed(time.Duration(t.Duration*float64(time.Second))),
-			formatCost(t.CostUSD),
-			t.Harness,
-		)
+		lines[i] = voiceTaskSummaryLine(i+1, &taskList[i])
 	}
 	parts = append(parts, "[Current tasks at session start]\n"+strings.Join(lines, "\n"))
 	return strings.Join(parts, "\n")
@@ -284,7 +275,7 @@ func (m *mcpRegistry) specs() []mcp.ToolSpec {
 	botFixCISpec.Annotations = &mcp.ToolAnnotations{Title: "Fix repository CI", DestructiveHint: true, OpenWorldHint: false}
 
 	return []mcp.ToolSpec{
-		annotateTool(mcp.NewToolSpec("tasks_list", "List tasks", "List all current coding tasks with their status, cost, and duration.", m.handleTasksList), mcp.ToolAnnotations{Title: "List tasks", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
+		annotateTool(mcp.NewToolSpec("tasks_list", "List tasks", "List all current coding tasks with their status, agent configuration, cost, and duration.", m.handleTasksList), mcp.ToolAnnotations{Title: "List tasks", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		createSpec,
 		annotateTool(mcp.NewToolSpec("task_get_detail", "Get task detail", "Get recent activity and status details for a task by its number.", m.handleTaskGetDetail), mcp.ToolAnnotations{Title: "Get task detail", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("task_send_message", "Send task message", "Send a text message to a waiting or asking agent by task number.", m.handleTaskSendMessage), mcp.ToolAnnotations{Title: "Send task message", DestructiveHint: false, OpenWorldHint: false}),
@@ -874,7 +865,7 @@ func taskSummaryLine(num int, t *v1.Task) string {
 	if len(extras) > 0 {
 		extrasStr = ", " + strings.Join(extras, ", ")
 	}
-	base := fmt.Sprintf("%d. **%s** — %s, %s, %s, %s%s%s", num, taskTitle(t), t.State, formatElapsed(time.Duration(t.Duration*float64(time.Second))), formatCost(t.CostUSD), t.Harness, diffStatSummary(t), extrasStr)
+	base := fmt.Sprintf("%d. **%s** — %s, %s, %s, %s%s%s", num, taskTitle(t), t.State, formatElapsed(time.Duration(t.Duration*float64(time.Second))), formatCost(t.CostUSD), taskAgentConfiguration(t), diffStatSummary(t), extrasStr)
 	if t.State == v1.TaskStatePurged && t.Result != "" {
 		return base + " — " + truncate(t.Result, 120)
 	}
@@ -888,6 +879,21 @@ func taskSummaryLine(num int, t *v1.Task) string {
 		return base + " — " + t.Error
 	}
 	return base
+}
+
+func voiceTaskSummaryLine(num int, t *v1.Task) string {
+	return fmt.Sprintf("- Task #%d: %s (%s, %s)", num, taskTitle(t), t.State, taskAgentConfiguration(t))
+}
+
+func taskAgentConfiguration(t *v1.Task) string {
+	return fmt.Sprintf("harness: %s, model: %s, effort: %s", t.Harness, configuredOrDefault(t.Model), configuredOrDefault(t.Effort))
+}
+
+func configuredOrDefault(value string) string {
+	if value == "" {
+		return "default"
+	}
+	return value
 }
 
 func diffStatSummary(t *v1.Task) string {
