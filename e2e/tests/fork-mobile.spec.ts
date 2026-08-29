@@ -5,13 +5,12 @@ import {
   createTaskAPI,
   waitForTaskState,
   fillContentEditable,
-  createUniquePrompt,
 } from "../helpers";
 
-test("forking from mobile opens only the forked task detail", async ({ page, api }, testInfo) => {
+test("forking from mobile opens only the forked task detail", async ({ page, api, uniquePrompt }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
 
-  const sourcePrompt = createUniquePrompt("e2e fork mobile source");
+  const sourcePrompt = uniquePrompt("e2e fork mobile source");
   const sourceId = await createTaskAPI(api, sourcePrompt);
   await waitForTaskState(api, sourceId, "waiting", 30_000);
 
@@ -23,7 +22,7 @@ test("forking from mobile opens only the forked task detail", async ({ page, api
   await page.getByRole("button", { name: "Fork" }).click();
 
   await expect(page.getByTestId("fork-dialog")).toBeVisible();
-  const forkPrompt = createUniquePrompt("e2e fork mobile child");
+  const forkPrompt = uniquePrompt("e2e fork mobile child");
   await fillContentEditable(page.getByTestId("fork-prompt-input"), forkPrompt);
   await page.getByTestId("fork-submit").click();
 

@@ -5,17 +5,16 @@ import {
   waitForTaskState,
   fillContentEditable,
   createTaskAPI,
-  createUniquePrompt,
 } from "../helpers";
 
-test("create task, verify streaming text and result, then purge", async ({ page, api }) => {
+test("create task, verify streaming text and result, then purge", async ({ page, api, uniquePrompt }) => {
   await page.goto("/");
 
   // Wait for repos to load (a chip appears in the strip).
   await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
 
   // Use a unique prompt to avoid collisions with parallel tests.
-  const prompt = createUniquePrompt("e2e lifecycle");
+  const prompt = uniquePrompt("FAKE_LIFECYCLE e2e lifecycle");
 
   // Fill prompt and submit.
   await fillContentEditable(page.getByTestId("prompt-input"), prompt);
@@ -25,17 +24,11 @@ test("create task, verify streaming text and result, then purge", async ({ page,
   // should render there without requiring a task-list click/reopen.
   await expect(page).toHaveURL(/\/task\//);
 
-  // Wait for the assistant message from the fake agent. The fake backend emits
-  // streaming text deltas followed by the final assistant message containing a
-  // joke. The first joke in the rotation is always the same.
-  await expect(
-    page.getByText("Why do programmers prefer dark mode?").first(),
-  ).toBeVisible({ timeout: 15_000 });
-
-  // Wait for the result message.
-  await expect(page.locator("strong", { hasText: "Done" })).toBeVisible({
-    timeout: 10_000,
-  });
+  // The dedicated scenario emits a stable text-delta marker and success result.
+  // Scope both assertions to this task's detail stream.
+  const messages = page.getByTestId("task-message-area");
+  await expect(messages).toContainText("Lifecycle streaming marker", { timeout: 15_000 });
+  await expect(messages).toContainText("Lifecycle completed", { timeout: 10_000 });
 
   // Resolve the task ID and wait for "waiting" state via API before clicking
   // stop. The UI may show the result message before the SSE delivers the

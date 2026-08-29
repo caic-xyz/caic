@@ -4,7 +4,6 @@ import {
   expect,
   waitForTaskState,
   fillContentEditable,
-  createUniquePrompt,
   type APIClient,
 } from "../helpers";
 
@@ -26,7 +25,7 @@ async function submitAndGetId(
   return taskId;
 }
 
-test("FAKE_PLAN: clear-plan button appears and restarts task", async ({ page, api }) => {
+test("FAKE_PLAN: clear-plan button appears and restarts task", async ({ page, api, uniquePrompt }) => {
   await page.goto("/");
 
   // Wait for repos to load.
@@ -34,7 +33,7 @@ test("FAKE_PLAN: clear-plan button appears and restarts task", async ({ page, ap
     page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
   ).toBeVisible();
 
-  const prompt = createUniquePrompt("FAKE_PLAN e2e");
+  const prompt = uniquePrompt("FAKE_PLAN e2e");
   const taskId = await submitAndGetId(page, api, prompt);
 
   // Wait for the task to reach has_plan state, then load it from the server.
@@ -58,7 +57,7 @@ test("FAKE_PLAN: clear-plan button appears and restarts task", async ({ page, ap
   await waitForTaskState(api, taskId, "waiting", 20_000);
 });
 
-test("FAKE_ASK: AskUserQuestion card renders, accepts answer, submits", async ({ page, api }) => {
+test("FAKE_ASK: AskUserQuestion card renders, accepts answer, submits", async ({ page, api, uniquePrompt }) => {
   await page.goto("/");
 
   // Wait for repos to load.
@@ -66,7 +65,7 @@ test("FAKE_ASK: AskUserQuestion card renders, accepts answer, submits", async ({
     page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
   ).toBeVisible();
 
-  const prompt = createUniquePrompt("FAKE_ASK e2e");
+  const prompt = uniquePrompt("FAKE_ASK e2e");
   const taskId = await submitAndGetId(page, api, prompt);
 
   // Wait for the task to reach asking state, then load it from the server.

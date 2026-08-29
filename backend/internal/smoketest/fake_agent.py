@@ -9,6 +9,7 @@
 # sentinel.  Used by the caic -tags e2e server for e2e testing.
 
 import json
+import re
 import sys
 import time
 
@@ -21,6 +22,13 @@ JOKES = [
     "A programmer puts two glasses on his bedside table before going to sleep."
     " A full one, in case he gets thirsty, and an empty one, in case he does not.",
 ]
+
+NATURAL_ASK_RE = re.compile(r"\b(?:which|should i|choose|prefer)\b")
+NATURAL_DEMO_RE = re.compile(r"\b(?:fix|bug|refactor|update|add|implement)\b")
+NATURAL_PLAN_RE = re.compile(r"\b(?:plan|design|architect|outline)\b")
+
+LIFECYCLE_RESULT = "Lifecycle completed"
+LIFECYCLE_STREAM_MARKER = "Lifecycle streaming marker"
 
 PLAN_CONTENT = """## Fix authentication token validation
 
@@ -517,6 +525,12 @@ def emit_demo_turn(turns: int) -> None:
     emit_result(turns, scenario["result"], scenario.get("cost", 0.01), scenario.get("duration", 500))
 
 
+def emit_lifecycle_turn(turns: int) -> None:
+    """Emit the stable streaming and completion contract for lifecycle tests."""
+    emit_text(LIFECYCLE_STREAM_MARKER)
+    emit_result(turns, LIFECYCLE_RESULT)
+
+
 def main() -> None:
     emit(
         {
@@ -541,6 +555,9 @@ def main() -> None:
         turns += 1
 
         # Exact keyword triggers (for e2e tests).
+        if line == "FAKE_LIFECYCLE" or line.startswith("FAKE_LIFECYCLE "):
+            emit_lifecycle_turn(turns)
+            continue
         if "FAKE_PLAN" in line:
             emit_plan_turn(turns)
             continue
@@ -556,13 +573,13 @@ def main() -> None:
 
         # Natural prompt detection (for screenshots with clean prompts).
         lower = line.lower()
-        if any(w in lower for w in ("plan", "design", "architect", "outline")):
+        if NATURAL_PLAN_RE.search(lower):
             emit_plan_turn(turns)
             continue
-        if any(w in lower for w in ("which", "should i", "choose", "prefer")):
+        if NATURAL_ASK_RE.search(lower):
             emit_ask_turn(turns)
             continue
-        if any(w in lower for w in ("fix", "bug", "refactor", "update", "add", "implement")):
+        if NATURAL_DEMO_RE.search(lower):
             emit_demo_turn(turns)
             continue
 

@@ -2,6 +2,12 @@
 
 import { defineConfig } from "@playwright/test";
 
+const seed = process.env.CAIC_E2E_SEED ?? Date.now().toString(36);
+process.env.CAIC_E2E_SEED = seed;
+if (process.env.TEST_WORKER_INDEX === undefined) {
+  console.log(`E2E seed: ${seed} (replay with CAIC_E2E_SEED=${seed})`);
+}
+
 export default defineConfig({
   testDir: "./tests",
   timeout: 60_000,

@@ -1,6 +1,6 @@
 // Shared e2e test helpers: typed API client and utilities.
 import { test as base, expect, type APIRequestContext } from "@playwright/test";
-import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { createApiClient, APIError, type FetchFn } from "../sdk/caic/ts/v1/api.gen";
 import type { Task } from "../sdk/caic/ts/v1/types.gen";
 
@@ -36,22 +36,27 @@ export type APIClient = ReturnType<typeof createClient>;
 // Fixtures: extends Playwright's base test with an `api` client.
 // ---------------------------------------------------------------------------
 
-export const test = base.extend<{ api: APIClient }>({
+type UniquePrompt = (prefix: string) => string;
+
+export const test = base.extend<{ api: APIClient; uniquePrompt: UniquePrompt }>({
   api: async ({ request }, use) => {
     await use(createClient(request));
+  },
+  // eslint-disable-next-line no-empty-pattern -- this fixture intentionally has no fixture dependencies
+  uniquePrompt: async ({}, use, testInfo) => {
+    const seed = process.env.CAIC_E2E_SEED;
+    if (!seed) throw new Error("CAIC_E2E_SEED is not configured");
+    const testTag = createHash("sha256")
+      .update(`${seed}\0${testInfo.testId}\0${testInfo.repeatEachIndex}\0${testInfo.retry}`)
+      .digest("hex")
+      .slice(0, 12);
+    let sequence = 0;
+    await use((prefix) => `${prefix} ${testTag}-${sequence++}`);
   },
 });
 
 export { expect, APIError };
 export type { Page } from "@playwright/test";
-
-// ---------------------------------------------------------------------------
-// Utility: create a collision-resistant prompt while preserving its test prefix.
-// ---------------------------------------------------------------------------
-
-export function createUniquePrompt(prefix: string): string {
-  return `${prefix} ${randomUUID()}`;
-}
 
 // ---------------------------------------------------------------------------
 // Utility: fill a contenteditable element (Playwright's fill() doesn't

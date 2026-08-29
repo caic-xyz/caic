@@ -1,13 +1,13 @@
 // E2E tests for generative UI widget rendering.
-import { test, expect, fillContentEditable, createUniquePrompt } from "../helpers";
+import { test, expect, fillContentEditable } from "../helpers";
 
-test("FAKE_WIDGET renders a widget card with iframe", async ({ page }) => {
+test("FAKE_WIDGET renders a widget card with iframe", async ({ page, uniquePrompt }) => {
   await page.goto("/");
 
   // Wait for repos to load.
   await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
 
-  const prompt = createUniquePrompt("FAKE_WIDGET");
+  const prompt = uniquePrompt("FAKE_WIDGET");
 
   // Create task.
   await fillContentEditable(page.getByTestId("prompt-input"), prompt);

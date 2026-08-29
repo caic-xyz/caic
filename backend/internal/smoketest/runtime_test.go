@@ -1,17 +1,54 @@
-// Tests for fake runtime and repository fixtures used by smoke and e2e tests.
+// Tests for fake agent, runtime, and repository fixtures used by smoke and e2e tests.
 
 package smoketest
 
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
+
+func TestFakeAgentNaturalPromptMatching(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		prompt string
+		want   string
+	}{
+		{
+			name:   "explicit lifecycle scenario",
+			prompt: "FAKE_LIFECYCLE e2e lifecycle 6487f1ff-2b95-435e-b2c0-27cafedadd0d",
+			want:   "Lifecycle streaming marker",
+		},
+		{
+			name:   "keyword substring in identifier",
+			prompt: "e2e lifecycle 6487f1ff-2b95-435e-b2c0-27cafedadd0d",
+			want:   "Why do programmers prefer dark mode?",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cmd := exec.CommandContext(t.Context(), "python3", "-u", "-c", string(fakeScript)) //nolint:gosec // fakeScript is an embedded constant
+			cmd.Stdin = strings.NewReader(tc.prompt + "\n")
+			out, err := cmd.Output()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(out), tc.want) {
+				t.Fatalf("fake scenario output does not contain %q:\n%s", tc.want, out)
+			}
+		})
+	}
+}
 
 func TestCleanupSmokeRunContainers(t *testing.T) {
 	t.Parallel()
