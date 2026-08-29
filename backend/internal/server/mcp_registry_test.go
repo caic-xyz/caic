@@ -3,7 +3,9 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -11,9 +13,48 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
+	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/usage"
 )
+
+type staticUsageFetcher struct {
+	quota usage.ProviderQuota
+}
+
+func (f *staticUsageFetcher) Provider() agent.QuotaProvider { return f.quota.Provider }
+
+func (f *staticUsageFetcher) Label() string { return f.quota.Label }
+
+func (f *staticUsageFetcher) AuthKind() usage.AuthKind { return f.quota.AuthKind }
+
+func (*staticUsageFetcher) UsageURL() string { return "" }
+
+func (f *staticUsageFetcher) Get(context.Context) *usage.ProviderQuota { return &f.quota }
+
+func TestCaicToolRegistryHandleGetUsage(t *testing.T) {
+	t.Parallel()
+
+	s := newTestRouter(t, nil)
+	s.usageHandlers.fetchers = []usage.ProviderFetcher{&staticUsageFetcher{quota: usage.ProviderQuota{
+		Provider: agent.QuotaProviderAnthropic,
+		Label:    "Anthropic",
+		AuthKind: usage.AuthKindOAuth,
+		RateLimits: []usage.QuotaRateLimit{
+			{Window: "5h", UsedPct: 12},
+		},
+	}}}
+	c := &mcpRegistry{usage: s.usageHandlers}
+	result := c.handleGetUsage(t.Context(), struct{}{})
+	output, ok := result.Structured.(mcp.TextOutput)
+	if !ok {
+		t.Fatalf("get_usage result type = %T, want mcp.TextOutput", result.Structured)
+	}
+	if !strings.Contains(output.Result, "Anthropic: 5h: 88% remaining") {
+		t.Fatalf("get_usage result = %q, want remaining quota", output.Result)
+	}
+}
 
 func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 	t.Parallel()
