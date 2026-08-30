@@ -138,6 +138,31 @@ describe("TaskDetail", () => {
     expect(navigateMock).toHaveBeenCalledWith("/task/@abc+test-task/diff");
   });
 
+  it("collapses current task diff stats into an expandable file summary", async () => {
+    const user = userEvent.setup();
+
+    const { getByText } = renderTaskDetail({
+      diffStat: [
+        { path: "frontend/src/App.tsx", added: 10, deleted: 2 },
+        { path: "frontend/src/App.test.tsx", added: 5, deleted: 1 },
+      ],
+    });
+    const summary = getByText("2 files changed").closest("summary");
+    const details = summary?.closest("details");
+
+    expect(summary).not.toBeNull();
+    expect(details).not.toHaveAttribute("open");
+    if (!(summary instanceof HTMLElement)) throw new Error("diff summary was not rendered");
+    expect(getByText("+15")).toBeInTheDocument();
+    expect(getByText("−3")).toBeInTheDocument();
+
+    await user.click(summary);
+
+    expect(details).toHaveAttribute("open");
+    expect(getByText("frontend/src/App.tsx")).toBeVisible();
+    expect(getByText("frontend/src/App.test.tsx")).toBeVisible();
+  });
+
   it("renders Codex file-change diffs with colored lines", () => {
     vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
       const events: EventMessage[] = [

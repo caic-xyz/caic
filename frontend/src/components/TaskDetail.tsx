@@ -1,7 +1,7 @@
 // TaskDetail renders agent output, task context, and task actions.
 
 import { createSignal, createMemo, createEffect, For, Index, Show, onCleanup, onMount, untrack, Switch, Match, type Accessor } from "solid-js";
-import { A, useNavigate, useLocation } from "@solidjs/router";
+import { A, useLocation } from "@solidjs/router";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 import CopyIcon from "@material-symbols/svg-400/outlined/content_copy.svg?solid";
 import CheckIcon from "@material-symbols/svg-400/outlined/check.svg?solid";
@@ -181,9 +181,13 @@ export default function TaskDetail(props: Props) {
     }
   }
 
-  // Scroll to bottom whenever messages change, if the user hasn't scrolled up.
+  const currentDiffStat = () => props.diffStat?.length ? props.diffStat : undefined;
+
+  // Scroll to bottom whenever messages or current diff stats change, if the
+  // user hasn't scrolled up.
   createEffect(() => {
     messages(); // track dependency
+    currentDiffStat();
     requestAnimationFrame(scrollToBottom);
   });
 
@@ -743,6 +747,9 @@ export default function TaskDetail(props: Props) {
             );
           }}
         </Index>
+        <Show when={currentDiffStat()} keyed>
+          {(files) => <DiffStatBlock files={files} />}
+        </Show>
         <Show when={messages().length === 0}>
           <p class={styles.placeholder}>Waiting for agent output...</p>
         </Show>
@@ -1038,9 +1045,6 @@ function ResultCard(props: { result: EventResult }) {
       <Show when={result().result}>
         <div class={styles.resultText}><Markdown text={result().result} /></div>
       </Show>
-      <Show when={result().diffStat} keyed>
-        {(files) => <DiffStatBlock files={files} />}
-      </Show>
       <div class={styles.resultMeta}>
         <Show when={result().totalCostUSD !== 0}>
           ${result().totalCostUSD.toFixed(4)} &middot;{" "}
@@ -1052,26 +1056,38 @@ function ResultCard(props: { result: EventResult }) {
 }
 
 function DiffStatBlock(props: { files: DiffFileStat[] }) {
-  const navigate = useNavigate();
   const location = useLocation();
+  const added = () => props.files.reduce((total, file) => total + file.added, 0);
+  const deleted = () => props.files.reduce((total, file) => total + file.deleted, 0);
   return (
-    <div class={`${styles.resultDiffStat} ${styles.diffFileClickable}`} role="button" tabIndex={0} onClick={() => navigate(`${location.pathname}/diff`)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); navigate(`${location.pathname}/diff`); } }}>
-      <For each={props.files}>
-        {(f) => (
-          <div class={styles.diffFile}>
-            <span class={styles.diffPath}>{f.path}</span>
-            <Show when={f.binary} fallback={
-              <span class={styles.diffCounts}>
-                <Show when={f.added > 0}><span class={styles.diffAdded}>+{f.added}</span></Show>
-                <Show when={f.deleted > 0}><span class={styles.diffDeleted}>&minus;{f.deleted}</span></Show>
-              </span>
-            }>
-              <span class={styles.diffBinary}>binary</span>
-            </Show>
-          </div>
-        )}
-      </For>
-    </div>
+    <details class={styles.diffStat}>
+      <summary class={styles.diffSummary}>
+        <span class={styles.diffSummaryContent}>
+          <span>{props.files.length} {props.files.length === 1 ? "file" : "files"} changed</span>
+          <span class={styles.diffCounts}>
+            <span class={styles.diffAdded}>+{added()}</span>
+            <span class={styles.diffDeleted}>&minus;{deleted()}</span>
+          </span>
+        </span>
+      </summary>
+      <div class={styles.diffFiles}>
+        <For each={props.files}>
+          {(f) => (
+            <A class={`${styles.diffFile} ${styles.diffFileLink}`} href={`${location.pathname}/diff`}>
+              <span class={styles.diffPath}>{f.path}</span>
+              <Show when={f.binary} fallback={
+                <span class={styles.diffCounts}>
+                  <Show when={f.added > 0}><span class={styles.diffAdded}>+{f.added}</span></Show>
+                  <Show when={f.deleted > 0}><span class={styles.diffDeleted}>&minus;{f.deleted}</span></Show>
+                </span>
+              }>
+                <span class={styles.diffBinary}>binary</span>
+              </Show>
+            </A>
+          )}
+        </For>
+      </div>
+    </details>
   );
 }
 

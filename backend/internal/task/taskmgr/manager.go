@@ -1673,6 +1673,15 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		t.SeedTimeline(lt.Msgs)
 		m.log.WarnContext(ctx, "relay", "msg", "restored from log", "repo", relPath, "br", branch, "instance", c.ID, "msgs", len(lt.Msgs))
 	}
+	// The durable log only retains a sticky diff-created signal, and relay-tail
+	// overlap filtering omits diff-stat controls. Restore the authoritative full
+	// branch diff before publishing the adopted task, including for exited and
+	// mid-turn instances that do not run the post-reconnect refresh below.
+	if checkout != nil {
+		if ds := checkout.BranchDiffStat(ctx, m.log, m.Runtimes, t); len(ds) > 0 {
+			t.SetLiveDiffStat(ds)
+		}
+	}
 	applyLoadedSessionMetadata(t, lt)
 	// Restore the persisted diff signal. SeedTimeline recomputes diffCreated
 	// from replayed history, but that replay is skipped when neither the relay

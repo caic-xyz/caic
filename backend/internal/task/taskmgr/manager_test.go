@@ -3150,6 +3150,44 @@ func TestManager(t *testing.T) {
 				t.Fatalf("primary repo = %#v, want none", adopted[0].Task().Primary())
 			}
 		})
+		t.Run("valid_restores_branch_diff_for_exited_instance", func(t *testing.T) {
+			t.Parallel()
+			taskID := ksid.NewID()
+			instanceID := runtime.NewID("test-runtime", "restore-diff")
+			info := &runtimetest.FakeInfo{Meta: map[string]string{
+				"restore-diff\x00caic.id":      taskID.String(),
+				"restore-diff\x00caic.harness": string(harness.Claude),
+			}}
+			runtimeBackend := &runtimetest.FakeBackend{DiffOutput: "10\t2\tfrontend/src/App.tsx\n5\t1\tfrontend/src/App.test.tsx\n"}
+			m := newTestManager(t, Config{
+				ServerCtx: t.Context(),
+				Runtimes:  newTestRuntime(t, runtimeBackend, info),
+				Backends:  map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire}},
+			})
+			registerCheckout(t, m.Checkouts, "repo/a", &repo.Checkout{Dir: "/home/user/src/repo/a"})
+
+			adopted, err := m.ImportInstances(t.Context(), []runtime.Instance{{
+				ID:    instanceID,
+				State: "exited",
+				Repos: []runtime.Repo{{GitRoot: "/home/user/src/repo/a", Branch: "caic-9", ContainerPath: "/home/user/src/repo/a"}},
+			}}, []*taskslog.LoadedTask{{
+				TaskID: taskID.String(), Harness: harness.Claude, Prompt: "restore diff",
+				Repos: []taskslog.RepoMount{{Name: "repo/a", BaseBranch: "main", Branch: "caic-9"}},
+			}})
+			if err != nil {
+				t.Fatalf("AdoptInstances: %v", err)
+			}
+			if len(adopted) != 1 {
+				t.Fatalf("adopted len = %d, want 1", len(adopted))
+			}
+			want := agent.DiffStat{
+				{Path: "frontend/src/App.tsx", Added: 10, Deleted: 2},
+				{Path: "frontend/src/App.test.tsx", Added: 5, Deleted: 1},
+			}
+			if got := adopted[0].Task().LiveDiffStat(); !slices.Equal(got, want) {
+				t.Fatalf("LiveDiffStat = %+v, want %+v", got, want)
+			}
+		})
 		t.Run("valid_restores_launch_config_from_log", func(t *testing.T) {
 			t.Parallel()
 			taskID := ksid.NewID()
