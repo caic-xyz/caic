@@ -147,6 +147,15 @@ export default function TaskDetail(props: Props) {
 
   let promptRef: HTMLElement | undefined;
 
+  function returnFocusToTaskCard(event: KeyboardEvent) {
+    if (event.key !== "Escape" && !(event.key === "Tab" && event.shiftKey)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const card = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"))
+      .find((candidate) => candidate.dataset.taskId === props.taskId);
+    card?.focus();
+  }
+
   onMount(() => {
     // Skip autofocus on touch-primary devices (mobile) to avoid the soft keyboard
     // taking up half the screen. No reliable way to detect a physical keyboard.
@@ -156,7 +165,10 @@ export default function TaskDetail(props: Props) {
 
     // Escape dismisses the task detail (navigates to /).
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") props.onClose();
+      if (e.key !== "Escape") return;
+      const target = e.target instanceof HTMLElement ? e.target : null;
+      if (target?.closest("[data-testid='task-detail-prompt']")) return;
+      props.onClose();
     };
     document.addEventListener("keydown", onKey);
     onCleanup(() => document.removeEventListener("keydown", onKey));
@@ -764,10 +776,14 @@ export default function TaskDetail(props: Props) {
             value={props.inputDraft}
             onInput={props.onInputDraft}
             onSubmit={sendInput}
+            onKeyDown={returnFocusToTaskCard}
             placeholder={isRecoverable() ? "Revive or fork to continue..." : "Send message to agent..."}
+            title="Focus prompt (/)"
+            ariaKeyShortcuts="/"
             disabled={!canSendInput()}
             class={styles.textInput}
             tabIndex={0}
+            data-testid="task-detail-prompt"
             supportsImages={props.supportsImages}
             images={props.inputImages}
             onImagesChange={props.onInputImages}

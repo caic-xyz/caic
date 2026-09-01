@@ -419,6 +419,203 @@ describe("App task-list SSE recovery", () => {
   });
 });
 
+describe("App keyboard shortcuts", () => {
+  it("goes to the new-task form and opens the repository picker with r", async () => {
+    const user = userEvent.setup();
+    const task = makeTask();
+    vi.mocked(api.getTask).mockResolvedValue(task);
+    const { history } = renderApp("/task/@task1+do-something");
+
+    await waitFor(() => expect(screen.getAllByText("do something").length).toBeGreaterThan(0));
+    await user.keyboard("r");
+
+    await waitFor(() => expect(history.get()).toBe("/"));
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Add a repository" })).toHaveFocus());
+  });
+
+  it("starts a new task and focuses the prompt with n", async () => {
+    const user = userEvent.setup();
+    const task = makeTask();
+    vi.mocked(api.getTask).mockResolvedValue(task);
+    const { history } = renderApp("/task/@task1+do-something");
+
+    await waitFor(() => expect(screen.getAllByText("do something").length).toBeGreaterThan(0));
+    await user.keyboard("n");
+
+    await waitFor(() => expect(history.get()).toBe("/"));
+    await waitFor(() => expect(screen.getByTestId("prompt-input")).toHaveFocus());
+  });
+
+  it("navigates tasks with j and k", async () => {
+    const user = userEvent.setup();
+    const first = makeTask({ id: "first", title: "first task" });
+    const second = makeTask({ id: "second", title: "second task" });
+    const { history } = renderApp();
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [first, second] });
+    const cards = await waitFor(() => {
+      const found = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"));
+      expect(found).toHaveLength(2);
+      return found;
+    });
+
+    await user.keyboard("j");
+    await waitFor(() => expect(history.get()).toContain(`@${cards[0].dataset.taskId}+`));
+    await waitFor(() => expect(document.querySelector(`[data-task-id='${cards[0].dataset.taskId}']`)).toHaveFocus());
+    await user.keyboard("k");
+    await waitFor(() => expect(history.get()).toContain(`@${cards[1].dataset.taskId}+`));
+  });
+
+  it("navigates tasks with Shift+ArrowDown while editing the prompt", async () => {
+    const user = userEvent.setup();
+    const task = makeTask();
+    const { history } = renderApp();
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [task] });
+    const prompt = screen.getByTestId("prompt-input");
+    prompt.focus();
+
+    await user.keyboard("{Shift>}{ArrowDown}{/Shift}");
+
+    await waitFor(() => expect(history.get()).toContain("@task1+"));
+    await waitFor(() => expect(screen.getByTestId("task-detail-prompt")).toHaveFocus());
+  });
+
+  it("moves between a task card and its detail prompt with Tab and Shift+Tab", async () => {
+    const user = userEvent.setup();
+    const task = makeTask();
+    const { history } = renderApp();
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [task] });
+    const card = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>("[data-task-id='task1']");
+      if (!found) throw new Error("Task card was not rendered");
+      return found;
+    });
+    card.focus();
+
+    await user.tab();
+
+    await waitFor(() => expect(history.get()).toContain("@task1+"));
+    const detailPrompt = screen.getByTestId("task-detail-prompt");
+    await waitFor(() => expect(detailPrompt).toHaveFocus());
+
+    await user.tab({ shift: true });
+    await waitFor(() => expect(card).toHaveFocus());
+  });
+
+  it("focuses the active prompt with slash", async () => {
+    const user = userEvent.setup();
+    const task = makeTask();
+    vi.mocked(api.getTask).mockResolvedValue(task);
+    const { history } = renderApp();
+
+    await user.keyboard("/");
+    expect(screen.getByTestId("prompt-input")).toHaveFocus();
+
+    history.set({ value: "/task/@task1+do-something" });
+    await waitFor(() => expect(screen.getByTestId("task-detail-prompt")).toBeInTheDocument());
+    screen.getByTestId("prompt-input").focus();
+    await user.keyboard("/");
+    expect(screen.getByTestId("task-detail-prompt")).toHaveFocus();
+  });
+
+  it("uses Home and End to select the first and last visible task cards", async () => {
+    const user = userEvent.setup();
+    const tasks = [
+      makeTask({ id: "first", title: "first task" }),
+      makeTask({ id: "middle", title: "middle task" }),
+      makeTask({ id: "last", title: "last task" }),
+    ];
+    const { history } = renderApp();
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: tasks });
+    const cards = await waitFor(() => {
+      const found = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"));
+      expect(found).toHaveLength(3);
+      return found;
+    });
+    cards[1].focus();
+
+    await user.keyboard("{End}");
+    await waitFor(() => expect(history.get()).toContain(`@${cards[2].dataset.taskId}+`));
+    await waitFor(() => expect(cards[2]).toHaveFocus());
+    await user.keyboard("{Home}");
+    await waitFor(() => expect(history.get()).toContain(`@${cards[0].dataset.taskId}+`));
+    await waitFor(() => expect(cards[0]).toHaveFocus());
+  });
+
+  it("keeps one visible task card in the Tab order", async () => {
+    const user = userEvent.setup();
+    const first = makeTask({ id: "first", title: "first task" });
+    const second = makeTask({ id: "second", title: "second task" });
+    const { history } = renderApp();
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [first, second] });
+    const cards = await waitFor(() => {
+      const found = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"));
+      expect(found).toHaveLength(2);
+      return found;
+    });
+    expect(cards.map((card) => card.tabIndex)).toEqual([0, -1]);
+
+    history.set({ value: `/task/@${cards[1].dataset.taskId}+selected` });
+    await waitFor(() => expect(cards.map((card) => card.tabIndex)).toEqual([-1, 0]));
+
+    await user.click(screen.getByTitle("Collapse sidebar"));
+    expect(cards.map((card) => card.tabIndex)).toEqual([-1, -1]);
+  });
+
+  it("returns Escape from a detail prompt to its task card before closing the detail", async () => {
+    const user = userEvent.setup();
+    const task = makeTask();
+    vi.mocked(api.getTask).mockResolvedValue(task);
+    const { history } = renderApp("/task/@task1+do-something");
+    const prompt = await screen.findByTestId("task-detail-prompt");
+    prompt.focus();
+
+    await user.keyboard("{Escape}");
+
+    expect(history.get()).toContain("@task1+");
+    await waitFor(() => expect(document.querySelector("[data-task-id='task1']")).toHaveFocus());
+  });
+
+  it("does not navigate tasks while editing the prompt", async () => {
+    const user = userEvent.setup();
+    const task = makeTask();
+    renderApp();
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [task] });
+    const prompt = screen.getByTestId("prompt-input");
+    prompt.focus();
+
+    await user.keyboard("{ArrowDown}jkrn?");
+
+    expect(prompt).toHaveFocus();
+    expect(screen.queryByTestId("keyboard-shortcuts-dialog")).not.toBeInTheDocument();
+  });
+
+  it("opens keyboard shortcut help from F1, question mark, and the account menu", async () => {
+    const user = userEvent.setup();
+    renderApp();
+
+    screen.getByTestId("prompt-input").focus();
+    await user.keyboard("{F1}");
+    expect(screen.getByTestId("keyboard-shortcuts-dialog")).toBeInTheDocument();
+    (screen.getByTestId("keyboard-shortcuts-dialog") as HTMLDialogElement).close();
+    expect(screen.queryByTestId("keyboard-shortcuts-dialog")).not.toBeInTheDocument();
+
+    screen.getByTitle("New task (N)").focus();
+    await user.keyboard("?");
+    expect(screen.getByTestId("keyboard-shortcuts-dialog")).toBeInTheDocument();
+    (screen.getByTestId("keyboard-shortcuts-dialog") as HTMLDialogElement).close();
+
+    await user.click(screen.getByTitle("Menu"));
+    await user.click(screen.getByRole("button", { name: "Keyboard shortcuts" }));
+    expect(screen.getByTestId("keyboard-shortcuts-dialog")).toBeInTheDocument();
+  });
+});
+
 describe("App repo chips: No repository", () => {
   it("notifies when a waiting task's backend rate limit clears", async () => {
     const blockedTask = makeTask({ state: "waiting", rateLimit: { blocked: true } });

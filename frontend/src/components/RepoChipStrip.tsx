@@ -99,6 +99,7 @@ export default function RepoChipStrip(props: Props) {
             class={styles.addRepoBtn}
             menuClass={styles.addRepoDropdown}
             ariaLabel="Add a repository"
+            ariaKeyShortcuts="R"
             value=""
             options={addRepoOptions}
             placeholder="Filter repositories…"
@@ -106,7 +107,7 @@ export default function RepoChipStrip(props: Props) {
             hideCaret
             noOptionsLabel="No matches"
             onChange={props.onAdd}
-            title="Add a repository"
+            title="Add a repository (R)"
             data-testid="add-repo-button"
             menuTestId="add-repo-dropdown"
           />

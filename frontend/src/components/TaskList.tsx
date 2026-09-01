@@ -1,6 +1,6 @@
 // Sidebar task list with collapsible panel, grouped by repo for active tasks.
 
-import { For, Index, Show, createEffect, createSignal } from "solid-js";
+import { For, Index, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { Accessor } from "solid-js";
 import LeftPanelClose from "@material-symbols/svg-400/outlined/left_panel_close.svg?solid";
 import LeftPanelOpen from "@material-symbols/svg-400/outlined/left_panel_open.svg?solid";
@@ -90,6 +90,7 @@ function ciDotURL(repo: Repo): string | undefined {
 
 export default function TaskList(props: TaskListProps) {
   let listRef: HTMLDivElement | undefined;
+  let lastFocusedTaskId: string | undefined;
   const [expanded, setExpanded] = createSignal<Set<string>>(new Set());
   const [scrolledFromTop, setScrolledFromTop] = createSignal(false);
 
@@ -162,6 +163,15 @@ export default function TaskList(props: TaskListProps) {
     return sortedGroups;
   };
 
+  const firstVisibleTaskId = createMemo(() => {
+    for (const group of grouped()) {
+      if (group.active[0]) return group.active[0].id;
+      if (expanded().has(`stopped-${group.repo}`) && group.stopped[0]) return group.stopped[0].id;
+      if (expanded().has(`purged-${group.repo}`) && group.purged[0]) return group.purged[0].id;
+    }
+    return null;
+  });
+
   // Auto-expand the stopped section for a repo when a task newly enters it.
   let prevStoppedIds = new Set<string>();
   createEffect(() => {
@@ -186,11 +196,26 @@ export default function TaskList(props: TaskListProps) {
     }
   });
 
+  onMount(() => {
+    const trackFocusedTask = (event: FocusEvent) => {
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      lastFocusedTaskId = target?.closest<HTMLElement>("[data-task-id]")?.dataset.taskId;
+    };
+    document.addEventListener("focusin", trackFocusedTask);
+    onCleanup(() => document.removeEventListener("focusin", trackFocusedTask));
+  });
+
+  const taskCards = () => Array.from(listRef?.querySelectorAll<HTMLElement>("[data-task-id]") ?? []);
+
   createEffect(() => {
-    void props.tasks().length;
+    void props.tasks();
     void props.selectedId;
     void props.sidebarOpen();
-    requestAnimationFrame(updateScrollFade);
+    requestAnimationFrame(() => {
+      updateScrollFade();
+      if (document.activeElement !== document.body || !lastFocusedTaskId) return;
+      taskCards().find((card) => card.dataset.taskId === lastFocusedTaskId)?.focus();
+    });
   });
 
   const renderTask = (t: () => Task) => (
@@ -228,6 +253,7 @@ export default function TaskList(props: TaskListProps) {
       autoFixPR={props.autoFixPR()}
       rateLimit={t().rateLimit}
       selected={props.selectedId === t().id}
+      tabIndex={props.sidebarOpen() && (props.selectedId === t().id || (props.selectedId === null && firstVisibleTaskId() === t().id)) ? 0 : -1}
       now={props.now}
       onClick={() => props.onSelect(t().id)}
       onStop={() => props.onStop(t().id)}

@@ -122,6 +122,8 @@ export default function MainLayout(props: { children?: JSX.Element }) {
           onInput={s.setPrompt}
           onSubmit={s.submitTask}
           placeholder="Describe a task..."
+          title="Focus prompt (/)"
+          ariaKeyShortcuts="/"
           class={styles.promptInput}
           data-testid="prompt-input"
           supportsImages={s.harnessSupportsImages()}

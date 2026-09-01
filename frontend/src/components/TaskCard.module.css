@@ -12,6 +12,11 @@
   border: 2px solid var(--color-selected);
 }
 
+.card:focus-visible {
+  outline: 3px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 .contextMenu {
   position: fixed;
   z-index: 100;

@@ -20,6 +20,7 @@ interface Props {
   value: string;
   options: () => SearchableOption[];
   ariaLabel: string;
+  ariaKeyShortcuts?: string;
   onChange: (value: string) => void;
   placeholder?: string;
   /** Pinned first option, e.g. "Default". Always shown at the top. */
@@ -162,6 +163,7 @@ export default function SearchableSelect(props: Props) {
         aria-haspopup="listbox"
         aria-expanded={open()}
         aria-label={props.ariaLabel}
+        aria-keyshortcuts={props.ariaKeyShortcuts}
         disabled={props.disabled}
         title={props.title}
         data-testid={props["data-testid"]}

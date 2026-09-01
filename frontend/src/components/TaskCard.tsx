@@ -73,6 +73,7 @@ export interface TaskCardProps {
   autoFixPR?: boolean;
   rateLimit?: TaskRateLimit;
   selected: boolean;
+  tabIndex: number;
   now: Accessor<number>;
   onClick: () => void;
   onStop?: () => void;
@@ -131,6 +132,7 @@ export default function TaskCard(props: TaskCardProps) {
     { x: number; y: number } | undefined
   >();
   const [menuActionPending, setMenuActionPending] = createSignal(false);
+  let cardRef: HTMLDivElement | undefined;
   let titleRef: HTMLElement | undefined; // eslint-disable-line no-unassigned-vars -- assigned by SolidJS ref
   let contextMenuRef: HTMLDivElement | undefined;
 
@@ -141,15 +143,19 @@ export default function TaskCard(props: TaskCardProps) {
       if (!contextMenuRef?.contains(event.target as Node)) close();
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      close();
+      cardRef?.focus();
     };
     document.addEventListener("pointerdown", closeOnOutsidePointer, true);
-    document.addEventListener("keydown", closeOnEscape);
+    document.addEventListener("keydown", closeOnEscape, true);
     window.addEventListener("blur", close);
     window.addEventListener("resize", close);
     onCleanup(() => {
       document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
-      document.removeEventListener("keydown", closeOnEscape);
+      document.removeEventListener("keydown", closeOnEscape, true);
       window.removeEventListener("blur", close);
       window.removeEventListener("resize", close);
     });
@@ -210,9 +216,10 @@ export default function TaskCard(props: TaskCardProps) {
   return (
     <>
     <div
+      ref={(el) => { cardRef = el; }}
       data-task-id={props.id}
       role="button"
-      tabIndex={0}
+      tabIndex={props.tabIndex}
       onClick={() => props.onClick()}
       onContextMenu={(event) => {
         event.preventDefault();

@@ -10,6 +10,7 @@ interface Props {
   onClose: () => void;
   dismissOnBackdrop?: boolean;
   dismissOnEscape?: boolean;
+  restoreFocus?: () => void;
   "data-testid"?: string;
 }
 
@@ -17,9 +18,27 @@ export default function ModalDialog(props: Props) {
   let dialogRef!: HTMLDialogElement;
 
   onMount(() => {
-    const handleClose = () => props.onClose();
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const openerTaskId = opener?.closest<HTMLElement>("[data-task-id]")?.dataset.taskId;
+    let focusRestoreScheduled = false;
+    const restoreFocus = () => {
+      if (focusRestoreScheduled) return;
+      focusRestoreScheduled = true;
+      requestAnimationFrame(() => {
+        const currentTaskCard = openerTaskId
+          ? [...document.querySelectorAll<HTMLElement>("[data-task-id]")].find((card) => card.dataset.taskId === openerTaskId)
+          : undefined;
+        if (props.restoreFocus) props.restoreFocus();
+        else (opener?.isConnected ? opener : currentTaskCard)?.focus();
+      });
+    };
+    const handleClose = () => {
+      props.onClose();
+      restoreFocus();
+    };
     const handleCancel = (event: Event) => {
-      if (props.dismissOnEscape === false) event.preventDefault();
+      event.preventDefault();
+      if (props.dismissOnEscape !== false) dialogRef.close();
     };
     const handleKeydown = (event: KeyboardEvent) => {
       if (event.key === "Escape") event.stopPropagation();
@@ -29,7 +48,7 @@ export default function ModalDialog(props: Props) {
       const bounds = dialogRef.getBoundingClientRect();
       const clickedInsideDialog = event.clientX >= bounds.left && event.clientX <= bounds.right
         && event.clientY >= bounds.top && event.clientY <= bounds.bottom;
-      if (!clickedInsideDialog) props.onClose();
+      if (!clickedInsideDialog) handleClose();
     };
 
     dialogRef.addEventListener("close", handleClose);
@@ -38,6 +57,7 @@ export default function ModalDialog(props: Props) {
     dialogRef.addEventListener("click", handleClick);
     dialogRef.showModal();
     onCleanup(() => {
+      restoreFocus();
       dialogRef.removeEventListener("close", handleClose);
       dialogRef.removeEventListener("cancel", handleCancel);
       dialogRef.removeEventListener("keydown", handleKeydown, true);

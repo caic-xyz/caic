@@ -13,7 +13,10 @@ interface Props {
   value: string;
   onInput: (value: string) => void;
   onSubmit?: () => void;
+  onKeyDown?: (event: KeyboardEvent) => void;
   placeholder?: string;
+  title?: string;
+  ariaKeyShortcuts?: string;
   disabled?: boolean;
   class?: string;
   ref?: (el: HTMLDivElement) => void;
@@ -51,6 +54,8 @@ export default function AutoResizeTextarea(props: Props) {
   }
 
   function handleKeyDown(e: KeyboardEvent) {
+    props.onKeyDown?.(e);
+    if (e.defaultPrevented) return;
     if (e.key === "Enter" && !e.shiftKey && props.onSubmit) {
       e.preventDefault();
       props.onSubmit();
@@ -80,6 +85,8 @@ export default function AutoResizeTextarea(props: Props) {
       aria-label={props.placeholder}
       aria-placeholder={props.placeholder}
       aria-disabled={props.disabled || undefined}
+      aria-keyshortcuts={props.ariaKeyShortcuts}
+      title={props.title}
       data-placeholder={props.placeholder}
       class={`${styles.editable}${props.value ? "" : ` ${emptyClass}`}${props.spacerClass ? ` ${props.spacerClass}` : ""}${props.class ? ` ${props.class}` : ""}`}
       tabIndex={props.tabIndex ?? 0}

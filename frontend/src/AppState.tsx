@@ -11,7 +11,6 @@ import { useHostMode } from "./gomode/HostMode";
 import { getConfig, getPreferences, updatePreferences, listOAuthGrants, revokeOAuthGrant, listHarnesses, listCaches, getCacheSizes, listRepos, createTask, cloneRepo, getUsage, forkTask, stopTask, purgeTask, reviveTask, botFixCI, getTask, globalTaskEvents, globalUsageEvents, getVersion, triggerUpdate } from "./api";
 import type { RepoEntry } from "./components/RepoChipStrip";
 import { useAuth } from "./AuthContext";
-import { confirmTaskAction } from "./components/TaskCard";
 import { requestNotificationPermission, notifyServiceEvent, notifyWaiting, dismissNotification } from "./gomode/notifications";
 import { QuotaRecoveryTracker } from "./quota";
 import { taskPath, taskIdFromPath, taskPathForTask } from "./taskPath";
@@ -336,52 +335,6 @@ function createAppStore() {
     setSelectedEffort(effort);
     setPrefEffort(selectedHarness(), selectedModel(), effort);
   };
-
-  // Global keyboard shortcuts:
-  // - ArrowUp/ArrowDown: switch to previous/next task in sidebar order
-  // - Shift+Delete: purge the currently selected task
-  {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Delete" && e.shiftKey && selectedId() !== null) {
-        const t = selectedTask();
-        if (t) {
-          e.preventDefault();
-          const terminalPurge = new Set(["stopping", "purging", "purged", "failed"]);
-          if (!terminalPurge.has(t.state) && confirmTaskAction("Purge", t.title, t.repos?.[0]?.branch ?? "")) {
-            handlePurge(t.id);
-          }
-        }
-        return;
-      }
-      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
-      // Don't intercept when typing in an input/textarea, or when a combobox
-      // (e.g. the model/branch picker) owns the key — its own handler navigates.
-      const target = e.target as HTMLElement | null;
-      const tag = target?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      if (target?.closest('[aria-haspopup="listbox"], [role="listbox"], [role="option"]')) return;
-      // Query visible task cards in DOM (visual) order to match the grouped sidebar layout.
-      const cards = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"));
-      if (cards.length === 0) return;
-      const curIdx = cards.findIndex((el) => el.dataset.taskId === selectedId());
-      let nextIdx: number;
-      if (e.key === "ArrowUp") {
-        nextIdx = curIdx <= 0 ? cards.length - 1 : curIdx - 1;
-      } else {
-        nextIdx = curIdx === -1 || curIdx >= cards.length - 1 ? 0 : curIdx + 1;
-      }
-      const card = cards[nextIdx];
-      const id = card.dataset.taskId;
-      if (!id) return;
-      const task = tasks().find((t) => t.id === id);
-      if (!task) return;
-      navigate(taskPathForTask(task));
-      card.focus();
-      e.preventDefault();
-    };
-    document.addEventListener("keydown", onKey);
-    onCleanup(() => document.removeEventListener("keydown", onKey));
-  }
 
   // Track previous task states to detect transitions to "waiting".
   let prevStates = new Map<string, string>();

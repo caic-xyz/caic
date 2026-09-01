@@ -9,7 +9,7 @@ import { useAppState } from "../AppState";
 import Dropdown from "./Dropdown";
 import styles from "./AccountMenu.module.css";
 
-export default function AccountMenu() {
+export default function AccountMenu(props: { onKeyboardShortcuts: () => void }) {
   const auth = useAppState().auth;
   const [menuOpen, setMenuOpen] = createSignal(false);
   const hasAuth = () => auth.providers().length > 0;
@@ -29,6 +29,15 @@ export default function AccountMenu() {
             <SettingsIcon width="1em" height="1em" style={{ "vertical-align": "middle", "margin-right": "0.4em" }} />
             Settings
           </A>
+          <button
+            type="button"
+            class={styles.dropdownItem}
+            title="Keyboard shortcuts (? or F1)"
+            aria-keyshortcuts="? F1"
+            onClick={() => { setMenuOpen(false); props.onKeyboardShortcuts(); }}
+          >
+            Keyboard shortcuts
+          </button>
           <Show when={hasAuth() && auth.user()}>
             <button class={styles.dropdownItem} onClick={() => { setMenuOpen(false); void auth.logout(); }}>Sign out</button>
           </Show>

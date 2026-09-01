@@ -11,6 +11,7 @@ import LoginPage from "./pages/LoginPage";
 import AccountMenu from "./components/AccountMenu";
 import Button from "./components/Button";
 import ForkDialog from "./components/ForkDialog";
+import KeyboardShortcuts from "./components/KeyboardShortcuts";
 import Toasts from "./components/Toasts";
 import UsageBadges from "./components/UsageBadges";
 import CloneRepoDialog from "./components/CloneRepoDialog";
@@ -101,18 +102,19 @@ function ConnectionDot(props: { connected: boolean; settledLoading: boolean; set
 function Shell(props: { children?: JSX.Element }) {
   const s = useAppState();
   const auth = s.auth;
+  const [shortcutsOpen, setShortcutsOpen] = createSignal(false);
 
   return (
     <Show when={auth.providers().length === 0 || auth.user()} fallback={<LoginPage />}>
       <div class={styles.app}>
         <header class={styles.navbar}>
           <h1 class={styles.title}>
-            <button class={styles.titleButton} type="button" onClick={() => s.navigate("/")}>caic</button>
+            <button class={styles.titleButton} type="button" onClick={() => s.navigate("/")} title="New task (N)" aria-keyshortcuts="N">caic</button>
           </h1>
           <span class={styles.subtitle}>Coding Agents in Containers</span>
           <UsageBadges usage={s.usage} now={s.now} />
           <ConnectionDot connected={s.connected()} settledLoading={s.settledLoading()} settledError={s.settledError()} />
-          <AccountMenu />
+          <AccountMenu onKeyboardShortcuts={() => setShortcutsOpen(true)} />
         </header>
 
         <ErrorBoundary fallback={(error, reset) => <ErrorFallback error={error} reset={reset} />}>
@@ -129,6 +131,7 @@ function Shell(props: { children?: JSX.Element }) {
         </Show>
 
         <ForkDialog />
+        <KeyboardShortcuts open={shortcutsOpen()} onOpenChange={setShortcutsOpen} />
         <GoModeBrowserShell />
         <Toasts />
       </div>

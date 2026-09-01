@@ -1,4 +1,4 @@
-// Reusable dropdown menu with click-outside dismissal.
+// Reusable dropdown menu with click-outside/Escape dismissal and trigger focus restoration.
 
 import { createEffect, onCleanup, Show, type JSX } from "solid-js";
 
@@ -28,17 +28,24 @@ export default function Dropdown(props: DropdownProps) {
   let containerRef: HTMLDivElement | undefined;
 
   createEffect(() => {
-    const onClickOutside = (e: MouseEvent) => {
-      if (containerRef && !containerRef.contains(e.target as Node)) {
-        props.onOpenChange(false);
-      }
+    if (!props.open) return;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const onClickOutside = (event: MouseEvent) => {
+      if (containerRef && !containerRef.contains(event.target as Node)) props.onOpenChange(false);
     };
-    if (props.open) {
-      document.addEventListener("click", onClickOutside, true);
-    } else {
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      props.onOpenChange(false);
+      opener?.focus();
+    };
+    document.addEventListener("click", onClickOutside, true);
+    document.addEventListener("keydown", onEscape, true);
+    onCleanup(() => {
       document.removeEventListener("click", onClickOutside, true);
-    }
-    onCleanup(() => document.removeEventListener("click", onClickOutside, true));
+      document.removeEventListener("keydown", onEscape, true);
+    });
   });
 
   return (

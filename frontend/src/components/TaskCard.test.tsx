@@ -38,6 +38,7 @@ function props(overrides: Partial<TaskCardProps> = {}): TaskCardProps {
     contextWindowLimit: 200_000,
     runtime: { id: "rt" },
     selected: false,
+    tabIndex: 0,
     now,
     onClick: () => undefined,
     onError: () => undefined,
