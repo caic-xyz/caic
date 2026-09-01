@@ -647,6 +647,22 @@ describe("App keyboard shortcuts", () => {
     expect(screen.queryByTestId("keyboard-shortcuts-dialog")).not.toBeInTheDocument();
   });
 
+  it("navigates the avatar menu with arrow keys", async () => {
+    const user = userEvent.setup();
+    renderApp();
+    const menu = screen.getByTitle("Menu");
+    menu.focus();
+
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "Settings" })).toHaveFocus());
+
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("menuitem", { name: "Keyboard shortcuts" })).toHaveFocus();
+
+    await user.keyboard("{ArrowUp}");
+    expect(screen.getByRole("menuitem", { name: "Settings" })).toHaveFocus();
+  });
+
   it("opens keyboard shortcut help from F1, question mark, and the account menu", async () => {
     const user = userEvent.setup();
     renderApp();
@@ -663,7 +679,7 @@ describe("App keyboard shortcuts", () => {
     (screen.getByTestId("keyboard-shortcuts-dialog") as HTMLDialogElement).close();
 
     await user.click(screen.getByTitle("Menu"));
-    await user.click(screen.getByRole("button", { name: "Keyboard shortcuts" }));
+    await user.click(screen.getByRole("menuitem", { name: "Keyboard shortcuts" }));
     expect(screen.getByTestId("keyboard-shortcuts-dialog")).toBeInTheDocument();
   });
 });
@@ -1010,7 +1026,7 @@ describe("App repo chips: No repository", () => {
     const { history } = renderApp("/");
 
     await user.click(screen.getByRole("button", { name: "Menu" }));
-    const settingsLink = screen.getByRole("link", { name: "Settings" });
+    const settingsLink = screen.getByRole("menuitem", { name: "Settings" });
 
     expect(settingsLink).toHaveAttribute("href", "/settings");
 
@@ -1195,7 +1211,7 @@ describe("App repo chips: No repository", () => {
     });
 
     await user.click(await screen.findByRole("button", { name: "Context actions" }));
-    await user.click(screen.getByRole("button", { name: "Fork" }));
+    await user.click(screen.getByRole("menuitem", { name: "Fork" }));
 
     expect(screen.getByRole("button", { name: "Fork Model" })).toHaveTextContent("openai-codex/gpt-5.6-terra");
   });
@@ -1210,7 +1226,7 @@ describe("App repo chips: No repository", () => {
     });
 
     await user.click(await screen.findByRole("button", { name: "Context actions" }));
-    await user.click(screen.getByRole("button", { name: "Fork" }));
+    await user.click(screen.getByRole("menuitem", { name: "Fork" }));
 
     const dialog = screen.getByTestId("fork-dialog");
     await user.click(dialog);
@@ -1229,7 +1245,7 @@ describe("App repo chips: No repository", () => {
     });
 
     await user.click(await screen.findByRole("button", { name: "Context actions" }));
-    await user.click(screen.getByRole("button", { name: "Fork" }));
+    await user.click(screen.getByRole("menuitem", { name: "Fork" }));
 
     const dialog = screen.getByTestId("fork-dialog");
     vi.spyOn(dialog, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 100, 400, 300));

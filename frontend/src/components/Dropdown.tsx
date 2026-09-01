@@ -1,6 +1,6 @@
-// Reusable dropdown menu with click-outside/Escape dismissal and trigger focus restoration.
+// Reusable dropdown menu with arrow navigation, dismissal, and trigger focus restoration.
 
-import { createEffect, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, onCleanup, onMount, Show, type JSX } from "solid-js";
 
 interface DropdownProps {
   /** Whether the dropdown is open. */
@@ -26,6 +26,41 @@ interface DropdownProps {
 export default function Dropdown(props: DropdownProps) {
   // eslint-disable-next-line no-unassigned-vars -- assigned by SolidJS ref
   let containerRef: HTMLDivElement | undefined;
+
+  const menuItems = (menu: Element) => Array.from(
+    menu.querySelectorAll<HTMLElement>("[role='menuitem']:not([disabled]):not([aria-disabled='true'])"),
+  );
+
+  function handleKeyDown(event: KeyboardEvent) {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    const menu = (event.target as Element).closest("[role='menu']");
+    if (!menu) {
+      props.onOpenChange(true);
+      requestAnimationFrame(() => {
+        const openMenu = containerRef?.querySelector("[role='menu']");
+        if (!openMenu) return;
+        const openItems = menuItems(openMenu);
+        openItems[event.key === "ArrowUp" ? openItems.length - 1 : 0]?.focus();
+      });
+      return;
+    }
+
+    const items = menuItems(menu);
+    const current = items.indexOf(document.activeElement as HTMLElement);
+    const delta = event.key === "ArrowDown" ? 1 : -1;
+    const next = current < 0
+      ? (delta > 0 ? 0 : items.length - 1)
+      : (current + delta + items.length) % items.length;
+    items[next]?.focus();
+  }
+
+  onMount(() => {
+    containerRef?.addEventListener("keydown", handleKeyDown);
+    onCleanup(() => containerRef?.removeEventListener("keydown", handleKeyDown));
+  });
 
   createEffect(() => {
     if (!props.open) return;

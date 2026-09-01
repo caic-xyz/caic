@@ -57,6 +57,15 @@ Type checking catches e2e drift against the generated SDK (wrong field names,
 wrong request shapes), but note that Playwright matchers like `toContain` accept
 `unknown`, so assertion arguments are not type checked.
 
+Run the full frontend E2E suite with `make frontend-e2e`. Do not use bare
+`pnpm playwright test`: it bypasses `e2e/playwright.config.ts` and may look for
+Playwright's bundled Chromium instead of the configured system Chrome. For a
+targeted run, keep the explicit configuration, for example:
+
+```bash
+pnpm exec playwright test --config e2e/playwright.config.ts e2e/tests/account-menu.spec.ts
+```
+
 For Android e2e tests, start the emulator with `make android-start-emulator`, then
 run `make android-e2e`. The start target runs emulator setup first.
 The test script dynamically allocates a port for the fake backend and verifies it

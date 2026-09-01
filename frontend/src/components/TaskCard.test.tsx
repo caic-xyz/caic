@@ -111,15 +111,15 @@ describe("TaskCard", () => {
     fireEvent.contextMenu(card, { clientX: 20, clientY: 30 });
 
     expect(screen.getByRole("menu")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Push" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Push to main" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Purge" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Clear context" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Compact context" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Fork" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Push" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Push to main" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Stop" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Purge" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Clear context" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Compact context" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Fork" })).toBeInTheDocument();
 
-    const stopButton = screen.getByRole("button", { name: "Stop" });
+    const stopButton = screen.getByRole("menuitem", { name: "Stop" });
     fireEvent.pointerDown(stopButton);
     expect(screen.getByRole("menu")).toBeInTheDocument();
     fireEvent.click(stopButton);

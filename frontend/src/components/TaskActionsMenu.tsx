@@ -45,6 +45,7 @@ export default function TaskActionsMenu(props: TaskActionsMenuProps) {
     >
       <button
         type="button"
+        role="menuitem"
         class={`${styles.item} ${props.purging ? styles.disabled : ""}`}
         disabled={props.purging}
         onClick={() => props.onSync()}
@@ -61,6 +62,7 @@ export default function TaskActionsMenu(props: TaskActionsMenuProps) {
       </button>
       <button
         type="button"
+        role="menuitem"
         class={`${styles.item} ${props.purging ? styles.disabled : ""}`}
         disabled={props.purging}
         onClick={() => props.onSyncDefault()}
@@ -71,6 +73,7 @@ export default function TaskActionsMenu(props: TaskActionsMenuProps) {
       <Show when={props.active}>
         <button
           type="button"
+          role="menuitem"
           class={`${styles.item} ${styles.danger}`}
           onClick={() => props.onStop()}
         >
@@ -79,7 +82,7 @@ export default function TaskActionsMenu(props: TaskActionsMenuProps) {
         </button>
       </Show>
       <Show when={props.recoverable}>
-        <button type="button" class={styles.item} onClick={() => props.onRevive()}>
+        <button type="button" role="menuitem" class={styles.item} onClick={() => props.onRevive()}>
           <RestartIcon width="1em" height="1em" />
           Revive
         </button>
@@ -87,6 +90,7 @@ export default function TaskActionsMenu(props: TaskActionsMenuProps) {
       <Show when={props.active || props.recoverable}>
         <button
           type="button"
+          role="menuitem"
           class={`${styles.item} ${styles.danger}`}
           onClick={() => props.onPurge()}
         >
@@ -94,13 +98,14 @@ export default function TaskActionsMenu(props: TaskActionsMenuProps) {
           Purge
         </button>
       </Show>
-      <button type="button" class={`${styles.item} ${styles.disabled}`} disabled>
+      <button type="button" role="menuitem" class={`${styles.item} ${styles.disabled}`} disabled>
         <BlockIcon width="1em" height="1em" />
         Clear context
       </button>
       <Show when={props.supportsCompact}>
         <button
           type="button"
+          role="menuitem"
           class={`${styles.item} ${!props.waiting ? styles.disabled : ""}`}
           disabled={!props.waiting}
           onClick={() => props.onCompact()}
@@ -110,7 +115,7 @@ export default function TaskActionsMenu(props: TaskActionsMenuProps) {
         </button>
       </Show>
       <Show when={props.canFork}>
-        <button type="button" class={styles.item} onClick={() => props.onFork()}>
+        <button type="button" role="menuitem" class={styles.item} onClick={() => props.onFork()}>
           <ForkIcon width="1em" height="1em" />
           Fork
         </button>

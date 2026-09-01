@@ -690,13 +690,17 @@ describe("SSE connection", () => {
     expect(getByTestId("task-detail-form")).toBeInTheDocument();
   });
 
-  it("context menu button is visible in waiting state and opens menu with actions", async () => {
+  it("opens and navigates the context menu with arrow keys", async () => {
     vi.useRealTimers();
     const user = userEvent.setup();
     const created: FakeES[] = [];
     makeSyncReadyMock(created);
 
-    const { getByLabelText, getByText, queryByText } = renderTaskDetail({ taskState: "waiting", supportsCompact: true });
+    const { getByLabelText, getByText, queryByText } = renderTaskDetail({
+      taskState: "waiting",
+      supportsCompact: true,
+      autoFocusPrompt: false,
+    });
 
     // The overflow menu toggle should be present.
     const toggle = getByLabelText("Context actions");
@@ -706,12 +710,21 @@ describe("SSE connection", () => {
     expect(queryByText("Clear context")).not.toBeInTheDocument();
     expect(queryByText("Compact context")).not.toBeInTheDocument();
 
-    // Click the toggle to open the menu.
-    await user.click(toggle);
+    toggle.focus();
+    await user.keyboard("{ArrowDown}");
 
-    // Both menu items should now be visible.
+    await vi.waitFor(() => expect(getByText("Push")).toHaveFocus());
     expect(getByText("Clear context")).toBeInTheDocument();
     expect(getByText("Compact context")).toBeInTheDocument();
+
+    await user.keyboard("{ArrowDown}");
+    expect(getByText("Push to main")).toHaveFocus();
+
+    await user.keyboard("{ArrowDown}");
+    expect(getByText("Stop")).toHaveFocus();
+
+    await user.keyboard("{ArrowDown}{ArrowDown}");
+    expect(getByText("Compact context")).toHaveFocus();
   });
 
   it("context menu is visible but items are disabled when task is running", async () => {

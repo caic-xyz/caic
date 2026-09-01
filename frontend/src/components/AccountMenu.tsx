@@ -15,23 +15,31 @@ export default function AccountMenu(props: { onKeyboardShortcuts: () => void }) 
   const hasAuth = () => auth.providers().length > 0;
   const user = () => auth.user() ?? { username: "", avatarURL: undefined };
   const initials = () => user().username.slice(0, 2).toUpperCase();
+
   return (
     <Dropdown
       open={menuOpen()}
       onOpenChange={setMenuOpen}
       class={styles.userMenu}
       content={
-        <div class={styles.userDropdown} data-testid="account-menu">
+        <div
+          class={styles.userDropdown}
+          role="menu"
+          tabIndex={-1}
+          id="account-menu"
+          data-testid="account-menu"
+        >
           <Show when={hasAuth() && auth.user()}>
             <span class={styles.dropdownUser}>{user().username}</span>
           </Show>
-          <A class={styles.dropdownItem} href="/settings" onClick={() => setMenuOpen(false)}>
+          <A class={styles.dropdownItem} href="/settings" role="menuitem" onClick={() => setMenuOpen(false)}>
             <SettingsIcon width="1em" height="1em" style={{ "vertical-align": "middle", "margin-right": "0.4em" }} />
             Settings
           </A>
           <button
             type="button"
             class={styles.dropdownItem}
+            role="menuitem"
             title="Keyboard shortcuts (? or F1)"
             aria-keyshortcuts="? F1"
             onClick={() => { setMenuOpen(false); props.onKeyboardShortcuts(); }}
@@ -39,7 +47,7 @@ export default function AccountMenu(props: { onKeyboardShortcuts: () => void }) 
             Keyboard shortcuts
           </button>
           <Show when={hasAuth() && auth.user()}>
-            <button class={styles.dropdownItem} onClick={() => { setMenuOpen(false); void auth.logout(); }}>Sign out</button>
+            <button class={styles.dropdownItem} role="menuitem" onClick={() => { setMenuOpen(false); void auth.logout(); }}>Sign out</button>
           </Show>
         </div>
       }
@@ -47,6 +55,9 @@ export default function AccountMenu(props: { onKeyboardShortcuts: () => void }) 
       <button
         class={styles.avatarButton}
         onClick={() => setMenuOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={menuOpen()}
+        aria-controls="account-menu"
         title={hasAuth() && auth.user() ? user().username : "Menu"}
       >
         <Show when={hasAuth() && auth.user()} fallback={

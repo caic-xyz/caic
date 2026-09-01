@@ -4,11 +4,19 @@ import { expect, test } from "../helpers";
 
 test("account-menu highlights stay within the dropdown", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Menu" }).click();
+  const trigger = page.getByRole("button", { name: "Menu" });
+  await trigger.focus();
+  await trigger.press("ArrowDown");
 
   const menu = page.getByTestId("account-menu");
-  const settings = menu.getByRole("link", { name: "Settings" });
+  const settings = menu.getByRole("menuitem", { name: "Settings" });
+  const shortcuts = menu.getByRole("menuitem", { name: "Keyboard shortcuts" });
   await expect(menu).toBeVisible();
+  await expect(settings).toBeFocused();
+  await settings.press("ArrowDown");
+  await expect(shortcuts).toBeFocused();
+  await shortcuts.press("ArrowUp");
+  await expect(settings).toBeFocused();
   await settings.hover();
 
   const menuBox = await menu.boundingBox();
