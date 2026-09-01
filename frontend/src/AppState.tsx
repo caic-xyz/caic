@@ -48,6 +48,14 @@ function createAppStore() {
   const location = useLocation();
   const auth = useAuth();
   const hostMode = useHostMode();
+  const initialTaskId = taskIdFromPath(location.pathname);
+  let initialTaskFocusClaimed = false;
+
+  const claimInitialTaskFocus = (taskId: string): boolean => {
+    if (initialTaskFocusClaimed || taskId !== initialTaskId) return false;
+    initialTaskFocusClaimed = true;
+    return true;
+  };
 
   const [prompt, setPrompt] = createSignal("");
   const [tasks, setTasks] = createSignal<Task[]>([]);
@@ -1012,6 +1020,7 @@ function createAppStore() {
     auth,
     // task data + selection
     tasks, tasksLoading, settledLoading, settledError, repos, selectedId, selectedTask, taskById, dismissSelectedTaskOnNotFound,
+    claimInitialTaskFocus,
     // new-task form
     prompt, setPrompt, selectedRepos, setSelectedRepos, selectedModel, setSelectedModel: selectModel,
     selectedEffort, setSelectedEffort: selectEffort, selectedHarness, setSelectedHarness: selectHarness, harnesses,

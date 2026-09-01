@@ -14,6 +14,7 @@ export interface SearchableOption {
   search?: string;
   /** Optional group label rendered before the first matching option in a group. */
   group?: string;
+  selected?: boolean;
 }
 
 interface Props {
@@ -49,6 +50,7 @@ export default function SearchableSelect(props: Props) {
   const listboxId = `searchable-${++idSeq}`;
   let triggerRef: HTMLButtonElement | undefined;
   let inputRef: HTMLInputElement | undefined;
+  let openerRef: HTMLElement | null = null;
   let menuRef: HTMLDivElement | undefined;
   const optionRefs: (HTMLButtonElement | undefined)[] = [];
 
@@ -69,6 +71,7 @@ export default function SearchableSelect(props: Props) {
 
   function openMenu() {
     if (props.disabled) return;
+    openerRef = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setFilter("");
     const vis = visibleOptions();
     const idx = vis.findIndex((o) => o.value === props.value);
@@ -78,9 +81,10 @@ export default function SearchableSelect(props: Props) {
     requestAnimationFrame(() => inputRef?.focus());
   }
 
-  function closeMenu(focusTrigger = true) {
+  function closeMenu(restoreFocus = true) {
     setOpen(false);
-    if (focusTrigger) triggerRef?.focus();
+    if (restoreFocus) (openerRef?.isConnected ? openerRef : triggerRef)?.focus();
+    openerRef = null;
   }
 
   function commit(value: string) {
@@ -105,7 +109,7 @@ export default function SearchableSelect(props: Props) {
   });
 
   function onDocKey(e: KeyboardEvent) {
-    if (e.key === "Escape") { setOpen(false); e.stopPropagation(); }
+    if (e.key === "Escape") { closeMenu(); e.stopPropagation(); }
   }
   createEffect(() => {
     if (open()) document.addEventListener("keydown", onDocKey, true);
@@ -209,9 +213,9 @@ export default function SearchableSelect(props: Props) {
                     ref={(el) => { optionRefs[i()] = el; }}
                     type="button"
                     id={`${listboxId}-opt-${i()}`}
-                    class={`${styles.option}${i() === active() ? ` ${styles.optionActive}` : ""}${opt.value === props.value ? ` ${styles.optionSelected}` : ""}`}
+                    class={`${styles.option}${i() === active() ? ` ${styles.optionActive}` : ""}${(opt.selected ?? opt.value === props.value) ? ` ${styles.optionSelected}` : ""}`}
                     role="option"
-                    aria-selected={opt.value === props.value}
+                    aria-selected={opt.selected ?? opt.value === props.value}
                     onMouseEnter={() => setActive(i())}
                     onClick={() => commit(opt.value)}
                   >

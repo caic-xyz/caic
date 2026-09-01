@@ -21,8 +21,6 @@ interface Props {
   onSubmit?: () => void;
   onKeyDown?: (event: KeyboardEvent) => void;
   placeholder?: string;
-  title?: string;
-  ariaKeyShortcuts?: string;
   disabled?: boolean;
   class?: string;
   tabIndex?: number;
@@ -131,8 +129,6 @@ export default function PromptInput(props: Props) {
           onSubmit={props.onSubmit}
           onKeyDown={props.onKeyDown}
           placeholder={props.placeholder}
-          title={props.title}
-          ariaKeyShortcuts={props.ariaKeyShortcuts}
           disabled={props.disabled}
           class={props.class}
           tabIndex={props.tabIndex}

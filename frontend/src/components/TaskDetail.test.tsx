@@ -57,6 +57,7 @@ import { HostModeProvider } from "../gomode/HostMode";
 const baseProps = {
   taskId: "abc",
   taskState: "running",
+  autoFocusPrompt: true,
   repo: "my-repo",
   remoteURL: "https://github.com/org/my-repo",
   branch: "feature-branch",

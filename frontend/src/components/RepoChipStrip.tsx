@@ -1,4 +1,4 @@
-// Reusable repo chip strip with branch editing and add-repo dropdown.
+// Reusable repo chip strip with branch editing and repository management.
 
 import { createSignal, For, Show } from "solid-js";
 
@@ -51,14 +51,30 @@ export default function RepoChipStrip(props: Props) {
     }));
   }
 
-  const addRepoOptions = (): SearchableOption[] => {
+  const manageRepoOptions = (): SearchableOption[] => {
+    const selectedPaths = new Set(props.selectedRepos().map((repo) => repo.path));
+    const selected = props.selectedRepos()
+      .map((repo) => ({
+        value: repo.path,
+        label: `✓ ${repo.path}`,
+        search: repo.path,
+        group: "Selected",
+        selected: true,
+      }));
     const recent = [...props.availableRecent()]
+      .filter((repo) => !selectedPaths.has(repo.path))
       .sort((a, b) => a.path < b.path ? -1 : 1)
-      .map((r) => ({ value: r.path, label: r.path, search: r.path, group: "Recent" }));
+      .map((repo) => ({ value: repo.path, label: repo.path, search: repo.path, group: "Recent" }));
     const rest = props.availableRest()
-      .map((r) => ({ value: r.path, label: r.path, search: r.path, group: recent.length > 0 ? "All repositories" : undefined }));
-    return [...recent, ...rest];
+      .filter((repo) => !selectedPaths.has(repo.path))
+      .map((repo) => ({ value: repo.path, label: repo.path, search: repo.path, group: recent.length > 0 ? "All repositories" : undefined }));
+    return [...selected, ...recent, ...rest];
   };
+
+  function toggleRepo(path: string) {
+    if (props.selectedRepos().some((repo) => repo.path === path)) props.onRemove(path);
+    else props.onAdd(path);
+  }
 
   return (
     <div class={styles.repoChips} data-testid={props["data-testid"]}>
@@ -93,21 +109,21 @@ export default function RepoChipStrip(props: Props) {
           </span>
         )}
       </For>
-      <Show when={props.availableRecent().length > 0 || props.availableRest().length > 0}>
+      <Show when={props.selectedRepos().length > 0 || props.availableRecent().length > 0 || props.availableRest().length > 0}>
         <div class={styles.addRepoWrap}>
           <SearchableSelect
             class={styles.addRepoBtn}
             menuClass={styles.addRepoDropdown}
-            ariaLabel="Add a repository"
-            ariaKeyShortcuts="R"
+            ariaLabel="Manage repositories"
+            ariaKeyShortcuts="F2"
             value=""
-            options={addRepoOptions}
+            options={manageRepoOptions}
             placeholder="Filter repositories…"
             triggerLabel="+"
             hideCaret
             noOptionsLabel="No matches"
-            onChange={props.onAdd}
-            title="Add a repository (R)"
+            onChange={toggleRepo}
+            title="Manage repositories (F2)"
             data-testid="add-repo-button"
             menuTestId="add-repo-dropdown"
           />

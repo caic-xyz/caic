@@ -15,7 +15,6 @@
 }
 
 .trigger:focus {
-  outline: none;
   box-shadow: 0 0 0 2px var(--color-primary-ring);
 }
 
@@ -60,7 +59,6 @@
   border-radius: var(--radius-sm);
   font: inherit;
   font-size: 0.85rem;
-  outline: none;
 }
 
 .input:focus {

@@ -6,6 +6,32 @@ import userEvent from "@testing-library/user-event";
 
 import AutoResizeTextarea from "./AutoResizeTextarea";
 
+function selectionOffset(root: HTMLElement): number | undefined {
+  const selection = window.getSelection();
+  const anchor = selection?.anchorNode;
+  if (!anchor || !root.contains(anchor)) return undefined;
+  let offset = 0;
+  const visit = (node: Node): number | undefined => {
+    if (node === anchor) {
+      if (node.nodeType === Node.TEXT_NODE) return offset + (selection?.anchorOffset ?? 0);
+      for (const child of [...node.childNodes].slice(0, selection?.anchorOffset ?? 0)) {
+        offset += child.textContent?.length ?? 0;
+      }
+      return offset;
+    }
+    for (const child of node.childNodes) {
+      if (child === anchor || child.contains(anchor)) {
+        const found = visit(child);
+        if (found !== undefined) return found;
+      } else {
+        offset += child.textContent?.length ?? 0;
+      }
+    }
+    return undefined;
+  };
+  return visit(root);
+}
+
 describe("AutoResizeTextarea", () => {
   it("renders with placeholder", () => {
     const { getByRole } = render(() => (
@@ -73,6 +99,42 @@ describe("AutoResizeTextarea", () => {
     el.innerHTML = "line1<div>line2</div><div>line3</div>";
     el.dispatchEvent(new Event("input", { bubbles: true }));
     expect(onInput).toHaveBeenCalledWith("line1\nline2\nline3");
+  });
+
+  it("places the caret at the end on programmatic focus", async () => {
+    const { getByRole } = render(() => (
+      <AutoResizeTextarea value="hello" onInput={() => {}} />
+    ));
+    const el = getByRole("textbox");
+
+    el.focus();
+    await Promise.resolve();
+
+    expect(selectionOffset(el)).toBe(5);
+  });
+
+  it("restores the last caret position on keyboard focus", async () => {
+    const { getByRole } = render(() => (
+      <AutoResizeTextarea value="hello" onInput={() => {}} />
+    ));
+    const el = getByRole("textbox");
+    el.focus();
+    await Promise.resolve();
+    const text = el.firstChild;
+    if (!text) throw new Error("Editable text was not rendered");
+    const range = document.createRange();
+    range.setStart(text, 2);
+    range.collapse(true);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    document.dispatchEvent(new Event("selectionchange"));
+    el.blur();
+
+    el.focus();
+    await Promise.resolve();
+
+    expect(selectionOffset(el)).toBe(2);
   });
 
   it("is not editable when disabled", () => {

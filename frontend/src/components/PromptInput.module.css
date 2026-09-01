@@ -34,8 +34,12 @@
 }
 
 .row:focus-within {
-  border-color: var(--color-primary-ring);
-  box-shadow: 0 0 0 1px var(--color-primary-ring);
+  border-color: var(--color-focus-border);
+  box-shadow: inset 0 0 0 2px var(--color-focus-border);
+}
+
+.row:focus-within > [contenteditable="true"] {
+  box-shadow: none !important;
 }
 
 /* Anchored to the top so that multiline text can flow beneath the buttons. */

@@ -47,7 +47,7 @@ export default function MainLayout(props: { children?: JSX.Element }) {
 
   return (
     <>
-      <form onSubmit={(e) => { e.preventDefault(); s.submitTask(); }} class={`${styles.submitForm} ${s.selectedId() ? styles.hidden : ""}`}>
+      <form onSubmit={(e) => { e.preventDefault(); s.submitTask(); }} class={`${styles.submitForm} ${s.selectedId() ? styles.hidden : ""}`} data-testid="new-task-form">
         <RepoChipStrip
           repos={s.repos}
           selectedRepos={s.selectedRepos}
@@ -62,9 +62,11 @@ export default function MainLayout(props: { children?: JSX.Element }) {
         <HarnessControls
           harnesses={s.harnesses()}
           harness={s.selectedHarness()}
+          harnessKeyShortcuts="F3"
           model={s.selectedModel()}
           effort={s.selectedEffort()}
           onHarness={s.setSelectedHarness}
+          onHarnessCommit={() => requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-testid='prompt-input']")?.focus())}
           onModel={s.setSelectedModel}
           onEffort={s.setSelectedEffort}
         />
@@ -122,8 +124,6 @@ export default function MainLayout(props: { children?: JSX.Element }) {
           onInput={s.setPrompt}
           onSubmit={s.submitTask}
           placeholder="Describe a task..."
-          title="Focus prompt (/)"
-          ariaKeyShortcuts="/"
           class={styles.promptInput}
           data-testid="prompt-input"
           supportsImages={s.harnessSupportsImages()}

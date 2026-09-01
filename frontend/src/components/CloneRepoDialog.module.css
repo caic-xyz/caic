@@ -41,7 +41,6 @@
 }
 
 .input:focus {
-  outline: none;
   border-color: var(--color-primary);
   box-shadow: 0 0 0 2px var(--color-primary-focus-ring);
 }

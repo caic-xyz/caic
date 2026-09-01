@@ -1,9 +1,9 @@
-// Auto-resizing editable div that starts as a single line and expands vertically.
+// Auto-resizing contenteditable prompt with keyboard submission and caret restoration.
 // Uses contenteditable with an optional CSS ::before float spacer so text wraps
 // around absolutely positioned trailing buttons.
 // Enter submits (via onSubmit), Shift+Enter inserts a newline.
 
-import { createEffect } from "solid-js";
+import { createEffect, onCleanup, onMount } from "solid-js";
 
 import styles from "./AutoResizeTextarea.module.css";
 
@@ -15,8 +15,6 @@ interface Props {
   onSubmit?: () => void;
   onKeyDown?: (event: KeyboardEvent) => void;
   placeholder?: string;
-  title?: string;
-  ariaKeyShortcuts?: string;
   disabled?: boolean;
   class?: string;
   ref?: (el: HTMLDivElement) => void;
@@ -29,6 +27,51 @@ interface Props {
 
 export default function AutoResizeTextarea(props: Props) {
   let editable!: HTMLDivElement;
+  let focusGeneration = 0;
+  let pointerFocus = false;
+  let savedRange: Range | undefined;
+
+  function rememberCaret() {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0);
+    if (editable.contains(range.commonAncestorContainer)) savedRange = range.cloneRange();
+  }
+
+  function restoreCaret() {
+    if (pointerFocus) return;
+    const generation = ++focusGeneration;
+    const previousRange = savedRange && editable.contains(savedRange.commonAncestorContainer)
+      ? savedRange.cloneRange()
+      : undefined;
+    queueMicrotask(() => {
+      if (generation !== focusGeneration || document.activeElement !== editable) return;
+      const selection = window.getSelection();
+      if (!selection) return;
+      const range = previousRange ?? document.createRange();
+      if (!previousRange) {
+        range.selectNodeContents(editable);
+        range.collapse(false);
+      }
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+  }
+
+  function handlePointerDown() {
+    pointerFocus = true;
+    queueMicrotask(() => { pointerFocus = false; });
+  }
+
+  function handleBlur() {
+    focusGeneration++;
+    rememberCaret();
+  }
+
+  onMount(() => {
+    document.addEventListener("selectionchange", rememberCaret);
+    onCleanup(() => document.removeEventListener("selectionchange", rememberCaret));
+  });
 
   // Sync external value changes (e.g. cleared after submit) into the DOM
   // without disrupting in-progress typing.
@@ -85,14 +128,15 @@ export default function AutoResizeTextarea(props: Props) {
       aria-label={props.placeholder}
       aria-placeholder={props.placeholder}
       aria-disabled={props.disabled || undefined}
-      aria-keyshortcuts={props.ariaKeyShortcuts}
-      title={props.title}
       data-placeholder={props.placeholder}
       class={`${styles.editable}${props.value ? "" : ` ${emptyClass}`}${props.spacerClass ? ` ${props.spacerClass}` : ""}${props.class ? ` ${props.class}` : ""}`}
       tabIndex={props.tabIndex ?? 0}
       data-testid={props["data-testid"]}
       onKeyDown={handleKeyDown}
       onPaste={handlePaste}
+      onPointerDown={handlePointerDown}
+      onFocus={restoreCaret}
+      onBlur={handleBlur}
     />
 
   );

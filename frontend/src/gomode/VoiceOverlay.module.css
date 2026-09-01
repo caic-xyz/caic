@@ -78,10 +78,6 @@
   border-color: var(--color-text-muted);
 }
 
-.micButton:focus-visible {
-  outline: 2px solid var(--color-primary-ring);
-  outline-offset: 2px;
-}
 
 /* ---- Status text ---- */
 
@@ -199,10 +195,6 @@
   cursor: pointer;
 }
 
-.deviceSelect:focus-visible {
-  outline: 2px solid var(--color-primary-ring);
-  outline-offset: 1px;
-}
 
 /* ---- Mic level bars ---- */
 

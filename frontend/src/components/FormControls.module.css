@@ -31,7 +31,6 @@
 }
 
 .select:focus {
-  outline: none;
   box-shadow: 0 0 0 2px var(--color-primary-ring);
 }
 
@@ -62,7 +61,6 @@
 }
 
 .selectTrigger:focus {
-  outline: none;
   box-shadow: 0 0 0 2px var(--color-primary-ring);
 }
 
@@ -95,6 +93,10 @@
 .toggleChip:has(input:checked) {
   background: var(--color-primary);
   color: var(--color-on-primary);
+}
+
+.toggleChip:has(input:focus-visible) {
+  box-shadow: 0 0 0 3px var(--color-focus-border);
 }
 
 .toggleChip:has(input:disabled) {

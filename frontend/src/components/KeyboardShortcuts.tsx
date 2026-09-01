@@ -13,29 +13,24 @@ interface Props {
   onOpenChange: (open: boolean) => void;
 }
 
-const globalShortcuts = [
-  { keys: "N", action: "Start a new task" },
-  { keys: "R", action: "Choose a repository" },
-  { keys: "/", action: "Focus the active prompt" },
-  { keys: "J / ↓", action: "Select the next task" },
-  { keys: "K / ↑", action: "Select the previous task" },
-  { keys: "Home / End", action: "Select the first or last task" },
+const navigationShortcuts = [
+  { keys: "F2", action: "Manage repositories for the new task" },
+  { keys: "F3", action: "Choose the harness for the new task" },
+  { keys: "↓ / Shift + ↓", action: "Select the next task" },
+  { keys: "↑ / Shift + ↑", action: "Select the previous task" },
   { keys: "Tab", action: "Move from a task card to its prompt" },
   { keys: "Shift + Tab", action: "Return from a prompt to its task card" },
-  { keys: "Shift + Delete", action: "Purge the selected task" },
+  { keys: "Esc", action: "Close a dialog, otherwise focus the new-task prompt" },
   { keys: "? / F1", action: "Show keyboard shortcuts" },
 ];
 
 const promptShortcuts = [
   { keys: "Shift + ↑ / ↓", action: "Switch tasks and keep typing" },
-  { keys: "Esc", action: "Return to the selected task card" },
+  { keys: "Esc", action: "Focus the new-task prompt" },
 ];
 
-const pickerShortcuts = [
-  { keys: "Type", action: "Filter repositories" },
-  { keys: "↑ / ↓", action: "Move through repositories" },
-  { keys: "Enter", action: "Choose the highlighted repository" },
-  { keys: "Esc", action: "Close the picker or menu first" },
+const taskActionShortcuts = [
+  { keys: "Shift + Delete", action: "Purge the selected task" },
 ];
 
 function isEditing(target: EventTarget | null): boolean {
@@ -83,10 +78,10 @@ export default function KeyboardShortcuts(props: Props) {
 
   const taskCards = () => Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"));
 
-  function navigateTask(delta: number, focusPrompt: boolean) {
+  function navigateTask(delta: number, focusPrompt: boolean, currentTaskId: string | null | undefined = s.selectedId()) {
     const cards = taskCards();
     if (cards.length === 0) return;
-    const current = cards.findIndex((el) => el.dataset.taskId === s.selectedId());
+    const current = cards.findIndex((el) => el.dataset.taskId === currentTaskId);
     const next = current === -1
       ? (delta > 0 ? 0 : cards.length - 1)
       : (current + delta + cards.length) % cards.length;
@@ -105,18 +100,21 @@ export default function KeyboardShortcuts(props: Props) {
       if (document.querySelector("dialog[open]")) return;
 
       const target = event.target instanceof HTMLElement ? event.target : null;
-      const detailPrompt = target?.closest("[data-testid='task-detail-prompt']");
-      const taskPrompt = detailPrompt ?? target?.closest("[data-testid='prompt-input']");
+      const taskPrompt = target?.closest("[data-testid='task-detail-prompt'], [data-testid='prompt-input']");
       const focusedCard = target?.matches("[data-task-id]") ? target : null;
-      const activeDetailPrompt = document.querySelector<HTMLElement>("[data-testid='task-detail-prompt']");
-      const inactiveNewTaskPrompt = target?.closest("[data-testid='prompt-input']") && activeDetailPrompt;
-
-      if (event.key === "/" && !event.shiftKey && inactiveNewTaskPrompt) {
+      if (event.key === "Escape") {
         event.preventDefault();
-        activeDetailPrompt.focus();
+        openNewTaskControl("[data-testid='prompt-input']", false);
         return;
       }
-      if (event.shiftKey && taskPrompt && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+      if (focusedCard && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+        event.preventDefault();
+        navigateTask(event.key === "ArrowDown" ? 1 : -1, false, focusedCard.dataset.taskId);
+        return;
+      }
+      if (event.shiftKey
+        && (taskPrompt || !isEditing(target))
+        && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
         event.preventDefault();
         navigateTask(event.key === "ArrowDown" ? 1 : -1, true);
         return;
@@ -126,18 +124,21 @@ export default function KeyboardShortcuts(props: Props) {
         openTaskFromCard(focusedCard, true);
         return;
       }
-      if ((event.key === "Home" || event.key === "End") && focusedCard) {
-        event.preventDefault();
-        const cards = taskCards();
-        const card = event.key === "Home" ? cards[0] : cards[cards.length - 1];
-        if (card) openTaskFromCard(card, false);
-        return;
-      }
       if (event.key === "F1" || (event.key === "?" && !isEditing(target))) {
         event.preventDefault();
         shortcutOpener = target;
         shortcutOpenerTaskId = target?.closest<HTMLElement>("[data-task-id]")?.dataset.taskId;
         props.onOpenChange(true);
+        return;
+      }
+      if (event.key === "F2") {
+        event.preventDefault();
+        openNewTaskControl("[data-testid='add-repo-button']", true);
+        return;
+      }
+      if (event.key === "F3") {
+        event.preventDefault();
+        openNewTaskControl("[data-testid='harness-select']", false);
         return;
       }
       if (isEditing(target)) return;
@@ -148,22 +149,10 @@ export default function KeyboardShortcuts(props: Props) {
       }
       if (event.shiftKey) return;
 
-      const key = event.key.toLowerCase();
-      if (key === "/") {
-        event.preventDefault();
-        const prompt = document.querySelector<HTMLElement>("[data-testid='task-detail-prompt']")
-          ?? document.querySelector<HTMLElement>("[data-testid='prompt-input']");
-        prompt?.focus();
-      } else if (key === "r") {
-        event.preventDefault();
-        openNewTaskControl("[data-testid='add-repo-button']", true);
-      } else if (key === "n") {
-        event.preventDefault();
-        openNewTaskControl("[data-testid='prompt-input']", false);
-      } else if (key === "j" || event.key === "ArrowDown") {
+      if (event.key === "ArrowDown") {
         event.preventDefault();
         navigateTask(1, false);
-      } else if (key === "k" || event.key === "ArrowUp") {
+      } else if (event.key === "ArrowUp") {
         event.preventDefault();
         navigateTask(-1, false);
       }
@@ -183,9 +172,9 @@ export default function KeyboardShortcuts(props: Props) {
       >
         <h2 class={styles.title}>Keyboard shortcuts</h2>
         <p class={styles.intro}>Move between task cards and prompts without leaving the keyboard. Local menus and dialogs handle Escape first.</p>
-        <ShortcutSection title="Navigation" shortcuts={globalShortcuts} />
+        <ShortcutSection title="Navigation" shortcuts={navigationShortcuts} />
         <ShortcutSection title="While typing" shortcuts={promptShortcuts} />
-        <ShortcutSection title="Repository picker" shortcuts={pickerShortcuts} />
+        <ShortcutSection title="Task actions" shortcuts={taskActionShortcuts} />
         <button type="button" class={styles.closeButton} onClick={() => props.onOpenChange(false)}>Close</button>
       </ModalDialog>
     </Show>

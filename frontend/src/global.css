@@ -11,6 +11,7 @@
   --color-primary-drop-bg: color-mix(in srgb, var(--color-primary) 5%, transparent);
   --color-primary-focus-ring: color-mix(in srgb, var(--color-primary) 20%, transparent);
   --color-primary-ring: rgba(74, 144, 217, 0.3);
+  --color-focus-border: var(--color-primary);
 
   /* Low-emphasis primary containers and their readable foreground. */
   --color-primary-container: #f0f6ff;
@@ -157,6 +158,20 @@
 body {
   margin: 0;
   background: rgb(var(--color-bg-app-rgb));
+}
+
+:where(
+  a[href],
+  button,
+  input,
+  select,
+  textarea,
+  summary,
+  [contenteditable="true"],
+  [tabindex]:not([tabindex="-1"])
+):focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-focus-border) !important;
 }
 
 /* Login page */

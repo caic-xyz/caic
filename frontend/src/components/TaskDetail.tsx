@@ -45,6 +45,7 @@ const expandedSessionsByTask = new Map<string, Set<string>>();
 interface Props {
   taskId: string;
   taskState: string;
+  autoFocusPrompt: boolean;
   title?: string;
   error?: string;
   initialPrompt?: string;
@@ -145,10 +146,31 @@ export default function TaskDetail(props: Props) {
   const [contextMenuOpen, setContextMenuOpen] = createSignal(false);
   const [fixingPR, setFixingPR] = createSignal(false);
 
-  let promptRef: HTMLElement | undefined;
+  // The prompt may appear after the task fetch; defer desktop autofocus until its ref exists.
+  // Touch-primary devices skip this to avoid opening the software keyboard.
+  let initialPromptFocusPending = true;
 
-  function returnFocusToTaskCard(event: KeyboardEvent) {
-    if (event.key !== "Escape" && !(event.key === "Tab" && event.shiftKey)) return;
+  function setPromptRef(element: HTMLElement) {
+    if (!initialPromptFocusPending) return;
+    initialPromptFocusPending = false;
+    if (!props.autoFocusPrompt
+      || window.matchMedia("(hover: none) and (pointer: coarse)").matches) return;
+    requestAnimationFrame(() => {
+      if (element.isConnected) element.focus();
+    });
+  }
+
+  function handlePromptNavigation(event: KeyboardEvent) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      props.onClose();
+      requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>("[data-testid='prompt-input']")?.focus();
+      });
+      return;
+    }
+    if (event.key !== "Tab" || !event.shiftKey) return;
     event.preventDefault();
     event.stopPropagation();
     const card = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"))
@@ -157,12 +179,6 @@ export default function TaskDetail(props: Props) {
   }
 
   onMount(() => {
-    // Skip autofocus on touch-primary devices (mobile) to avoid the soft keyboard
-    // taking up half the screen. No reliable way to detect a physical keyboard.
-    if (!window.matchMedia('(hover: none) and (pointer: coarse)').matches) {
-      promptRef?.focus();
-    }
-
     // Escape dismisses the task detail (navigates to /).
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
@@ -772,14 +788,12 @@ export default function TaskDetail(props: Props) {
       <Show when={isActive() || isRecoverable() || !!pendingAction()}>
         <form onSubmit={(e) => { e.preventDefault(); if (canSendInput()) sendInput(); }} class={styles.inputForm} data-testid="task-detail-form">
           <PromptInput
-            ref={(el) => { promptRef = el; }}
+            ref={setPromptRef}
             value={props.inputDraft}
             onInput={props.onInputDraft}
             onSubmit={sendInput}
-            onKeyDown={returnFocusToTaskCard}
+            onKeyDown={handlePromptNavigation}
             placeholder={isRecoverable() ? "Revive or fork to continue..." : "Send message to agent..."}
-            title="Focus prompt (/)"
-            ariaKeyShortcuts="/"
             disabled={!canSendInput()}
             class={styles.textInput}
             tabIndex={0}

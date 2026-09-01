@@ -39,10 +39,18 @@ export function HarnessControls(props: {
   onHarness: (harness: string) => void;
   onModel: (model: string) => void;
   onEffort: (effort: string) => void;
+  harnessKeyShortcuts?: string;
+  onHarnessCommit?: () => void;
   // Disambiguates aria-labels when two instances coexist, e.g. "Fork ".
   labelPrefix?: string;
 }) {
   const label = (name: string) => `${props.labelPrefix ?? ""}${name}`;
+  const moveHarness = (delta: number) => {
+    const current = props.harnesses.findIndex((candidate) => candidate.name === props.harness);
+    const next = Math.min(props.harnesses.length - 1, Math.max(0, current + delta));
+    const nextHarness = props.harnesses[next];
+    if (nextHarness) props.onHarness(nextHarness.name);
+  };
   const modelOptions = () => (props.harnesses.find((h) => h.name === props.harness)?.models ?? [])
     .map((model) => ({ value: model.id, label: model.id as JSX.Element, search: model.id }));
   const efforts = () => {
@@ -55,8 +63,21 @@ export function HarnessControls(props: {
       <Show when={props.harnesses.length > 1}>
         <ControlSelect
           aria-label={label("Harness")}
+          aria-keyshortcuts={props.harnessKeyShortcuts}
+          data-testid={props.labelPrefix ? "fork-harness-select" : "harness-select"}
+          title={props.harnessKeyShortcuts ? `Choose harness (${props.harnessKeyShortcuts})` : undefined}
           value={props.harness}
           onChange={(e) => props.onHarness(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && props.onHarnessCommit) {
+              e.preventDefault();
+              props.onHarnessCommit();
+              return;
+            }
+            if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+            e.preventDefault();
+            moveHarness(e.key === "ArrowDown" ? 1 : -1);
+          }}
         >
           <For each={props.harnesses}>
             {(h) => <option value={h.name} selected={h.name === props.harness}>{h.name}</option>}
