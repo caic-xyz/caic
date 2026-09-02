@@ -382,20 +382,30 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
 			return nil, fmt.Errorf("tokenUsage/updated params: %w", err)
 		}
-		// Codex reports cached token counts but not cache TTL. OpenAI's
-		// default in-memory prompt cache lasts 5–10 min of inactivity,
-		// up to 1 hour. If Codex starts using
-		// prompt_cache_retention:"24h", set CacheTTLSeconds = 86400.
-		// See https://developers.openai.com/api/docs/guides/prompt-caching
+		// Current Codex sends prompt_cache_key but no prompt_cache_options or
+		// prompt_cache_retention; see its request construction and wire type:
+		// https://github.com/openai/codex/blob/main/codex-rs/core/src/client.rs
+		// https://github.com/openai/codex/blob/main/codex-rs/codex-api/src/common.rs
+		// It therefore inherits OpenAI's defaults: GPT-5.6+ uses a 30-minute
+		// minimum; earlier in-memory caches are typically active for 5-10 minutes
+		// of inactivity (up to one hour), while extended retention can last 24
+		// hours and is the default for eligible non-ZDR organizations. Since the
+		// Codex usage event reports no applied policy or TTL, leave it unknown:
+		// https://developers.openai.com/api/docs/guides/prompt-caching
+		// Wire schema: https://github.com/maruel/genai/blob/main/providers/codex/dto.go
+		cacheWriteInputTokens := p.TokenUsage.Last.CacheWriteInputTokens
+		cacheReadInputTokens := p.TokenUsage.Last.CachedInputTokens
+		inputTokens := max(0, p.TokenUsage.Last.InputTokens-cacheWriteInputTokens-cacheReadInputTokens)
 		incremental := agent.Usage{
-			InputTokens:           int(p.TokenUsage.Last.InputTokens),
-			CacheReadInputTokens:  int(p.TokenUsage.Last.CachedInputTokens),
-			OutputTokens:          int(p.TokenUsage.Last.OutputTokens),
-			ReasoningOutputTokens: int(p.TokenUsage.Last.ReasoningOutputTokens),
-			CacheTTLSeconds:       300,
+			InputTokens:              int(inputTokens),
+			CacheCreationInputTokens: int(cacheWriteInputTokens),
+			CacheReadInputTokens:     int(cacheReadInputTokens),
+			OutputTokens:             int(p.TokenUsage.Last.OutputTokens),
+			ReasoningOutputTokens:    int(p.TokenUsage.Last.ReasoningOutputTokens),
 		}
 		w.mu.Lock()
 		w.totalUsage.InputTokens += incremental.InputTokens
+		w.totalUsage.CacheCreationInputTokens += incremental.CacheCreationInputTokens
 		w.totalUsage.CacheReadInputTokens += incremental.CacheReadInputTokens
 		w.totalUsage.OutputTokens += incremental.OutputTokens
 		w.totalUsage.ReasoningOutputTokens += incremental.ReasoningOutputTokens

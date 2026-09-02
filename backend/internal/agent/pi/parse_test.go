@@ -617,7 +617,7 @@ func TestHandleAgentEnd(t *testing.T) {
 		t.Parallel()
 		w := &piWireFormat{}
 
-		agentEndLine := []byte(`{"type":"agent_end","messages":[{"role":"assistant","content":[],"usage":{"input":100,"output":50}}]}`)
+		agentEndLine := []byte(`{"type":"agent_end","messages":[{"role":"assistant","content":[],"usage":{"input":100,"output":50,"cacheRead":40,"cacheWrite":20,"cacheWrite1h":20,"reasoning":15,"cost":{"input":0.001,"output":0.002,"cacheRead":0.0004,"cacheWrite":0.0002,"total":0.0036}}}]}`)
 		msgs, err := w.ParseMessage(agentEndLine)
 		if err != nil {
 			t.Fatalf("ParseMessage(agent_end): %v", err)
@@ -634,6 +634,15 @@ func TestHandleAgentEnd(t *testing.T) {
 		}
 		if rm.Usage.InputTokens != 100 || rm.Usage.OutputTokens != 50 {
 			t.Errorf("Usage = %+v, want input=100 output=50", rm.Usage)
+		}
+		if rm.Usage.ReasoningOutputTokens != 15 {
+			t.Errorf("ReasoningOutputTokens = %d, want 15", rm.Usage.ReasoningOutputTokens)
+		}
+		if rm.Usage.CacheTTLSeconds != 3600 {
+			t.Errorf("CacheTTLSeconds = %d, want 3600", rm.Usage.CacheTTLSeconds)
+		}
+		if rm.TotalCostUSD != 0.0036 {
+			t.Errorf("TotalCostUSD = %f, want 0.0036", rm.TotalCostUSD)
 		}
 	})
 
@@ -662,6 +671,22 @@ func TestHandleAgentEnd(t *testing.T) {
 		}
 		if result.NumTurns != 2 || result.DurationMs <= 0 {
 			t.Errorf("result = %#v, want retained turns and duration", result)
+		}
+	})
+
+	t.Run("cache write without duration remains unknown", func(t *testing.T) {
+		t.Parallel()
+		w := &piWireFormat{}
+		msgs, err := w.ParseMessage([]byte(`{"type":"agent_end","messages":[{"role":"assistant","content":[],"usage":{"cacheWrite":20}}]}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, ok := msgs[0].(*agent.ResultMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.ResultMessage", msgs[0])
+		}
+		if result.Usage.CacheTTLSeconds != 0 {
+			t.Errorf("CacheTTLSeconds = %d, want unknown", result.Usage.CacheTTLSeconds)
 		}
 	})
 
@@ -732,7 +757,7 @@ func TestCaicModelInfo(t *testing.T) {
 		if _, err := w.ParseMessage([]byte(`{"type":"caic_model_info","context_window":1000000}`)); err != nil {
 			t.Fatal(err)
 		}
-		turnEndLine := []byte(`{"type":"turn_end","message":{"role":"assistant","content":[],"usage":{"input":100,"output":50,"totalTokens":150}}}`)
+		turnEndLine := []byte(`{"type":"turn_end","message":{"role":"assistant","content":[],"usage":{"input":100,"output":50,"cacheWrite":30,"cacheWrite1h":20,"reasoning":20,"totalTokens":180}}}`)
 		msgs, err := w.ParseMessage(turnEndLine)
 		if err != nil {
 			t.Fatal(err)
@@ -746,6 +771,12 @@ func TestCaicModelInfo(t *testing.T) {
 		}
 		if um.ContextWindow != 1000000 {
 			t.Errorf("ContextWindow = %d, want 1000000", um.ContextWindow)
+		}
+		if um.Usage.ReasoningOutputTokens != 20 {
+			t.Errorf("ReasoningOutputTokens = %d, want 20", um.Usage.ReasoningOutputTokens)
+		}
+		if um.Usage.CacheTTLSeconds != 300 {
+			t.Errorf("CacheTTLSeconds = %d, want 300 for mixed five-minute and one-hour writes", um.Usage.CacheTTLSeconds)
 		}
 	})
 

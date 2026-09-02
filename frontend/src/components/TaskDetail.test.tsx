@@ -801,11 +801,23 @@ describe("SSE connection", () => {
         model: "claude",
       },
     });
+    cb({
+      kind: "usage",
+      ts: 4,
+      usage: {
+        inputTokens: 100,
+        outputTokens: 40,
+        cacheCreationInputTokens: 200,
+        cacheReadInputTokens: 700,
+        model: "codex",
+      },
+    });
     vi.advanceTimersByTime(100);
 
     expect(document.body.textContent).not.toContain("0t in + 0t out");
     expect(document.body.textContent).toContain("50t thinking");
     expect(document.body.textContent).not.toContain("claude");
+    expect(document.body.textContent).toContain("codex · 100t new · 200t cache write · 700t cache read · 40t out");
   });
 
   it("replayed textDelta events render once the SSE ready marker arrives", () => {

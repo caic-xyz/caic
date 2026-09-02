@@ -67,9 +67,61 @@ https://github.com/badlogic/pi-mono to find new commands, event types, or fields
 
 Source code:
 - https://github.com/badlogic/pi-mono
+- https://github.com/badlogic/pi-mono/tree/e266507b606b9552fa277252644054afd4384b11: source revision inspected for the prompt-cache behavior below
+- https://github.com/badlogic/pi-mono/blob/e266507b606b9552fa277252644054afd4384b11/packages/ai/src/types.ts: cache-retention and usage types
+- https://github.com/badlogic/pi-mono/blob/e266507b606b9552fa277252644054afd4384b11/packages/ai/src/api/anthropic-messages.ts: Anthropic cache controls and duration buckets
+- https://github.com/badlogic/pi-mono/blob/e266507b606b9552fa277252644054afd4384b11/packages/ai/src/api/openai-responses.ts: OpenAI Responses cache-key and retention mapping
+- https://github.com/badlogic/pi-mono/blob/e266507b606b9552fa277252644054afd4384b11/packages/ai/src/api/bedrock-converse-stream.ts: Bedrock cache-point and retention mapping
 
 npm package:
 - https://www.npmjs.com/package/@mariozechner/pi-coding-agent
+
+Documentation:
+- https://github.com/badlogic/pi-mono/blob/e266507b606b9552fa277252644054afd4384b11/packages/coding-agent/docs/environment-variables.md: Pi and provider environment variables
+- https://github.com/badlogic/pi-mono/blob/e266507b606b9552fa277252644054afd4384b11/packages/coding-agent/docs/providers.md: provider credentials and configuration
+- https://github.com/badlogic/pi-mono/blob/e266507b606b9552fa277252644054afd4384b11/packages/coding-agent/docs/models.md: custom-provider cache compatibility controls
+
+## Prompt Cache Controls
+
+Pi's `CacheRetention` values are `none`, `short`, and `long`, with `short` as
+the normal direct-provider default. The coding-agent CLI exposes one direct
+cache environment control: `PI_CACHE_RETENTION=long`. It maps long retention
+to one hour for Anthropic-style and Bedrock Claude cache markers, and to 24
+hours for supported OpenAI endpoints. Any other environment value follows the
+short default; `short` is a provider preference, not a universal 300-second
+duration. There is no CLI environment value that selects `none`.
+Extensions and Pi's internal calls can pass `cacheRetention` directly, including
+`none`; for example, compaction summary requests disable prompt caching.
+
+The mapping remains provider-specific:
+
+- Anthropic Messages uses `cache_control: {type: "ephemeral"}` for short
+  retention and adds `ttl: "1h"` for long retention when the model's
+  compatibility metadata allows it.
+- Bedrock Claude emits cache points with the default short TTL or an explicit
+  one-hour TTL for long retention when prompt caching is supported.
+- OpenAI Responses and direct OpenAI-compatible Chat Completions use the Pi
+  session ID for cache affinity when caching is enabled. Long retention maps to
+  `prompt_cache_retention: "24h"` only when the endpoint is marked compatible;
+  short retention leaves the service default in effect.
+- Mistral, OpenAI Codex, OpenRouter, Google, custom endpoints, and Pi-hosted
+  providers have adapter- or service-specific behavior. Do not apply an
+  Anthropic or OpenAI duration to them based only on token field names.
+
+`PI_CODING_AGENT_DIR` can select different credentials, model definitions, and
+compatibility flags. Provider credentials, base URLs, and
+`HTTP_PROXY`/`HTTPS_PROXY` can also change which endpoint handles a request and
+whether it honors Pi's cache controls. They are configuration or routing
+inputs, not proof of the applied TTL. Provider-scoped values stored with Pi
+credentials take precedence over the process environment when Pi resolves
+these settings, including `PI_CACHE_RETENTION`.
+
+Pi reports normalized `cacheRead`, `cacheWrite`, and provider-computed cost.
+Only Anthropic additionally reports `cacheWrite1h`, defined as the one-hour
+subset of `cacheWrite`. caic may set `agent.Usage.CacheTTLSeconds` from that
+explicit bucket: all-one-hour writes yield 3600 seconds, and mixed one-hour and
+short writes yield the first expiry of 300 seconds. A cache write without
+`cacheWrite1h` remains unknown because it may come from any provider.
 
 ## Key Design Decisions
 

@@ -70,6 +70,11 @@ interface Props {
   ciChecks?: ForgeCheck[];
   harness: string;
   model?: string;
+  costUSD?: number;
+  cumulativeInputTokens?: number;
+  cumulativeOutputTokens?: number;
+  cumulativeCacheCreationInputTokens?: number;
+  cumulativeCacheReadInputTokens?: number;
   diffStat?: DiffFileStat[];
   vncPort?: number;
   sudoPassword?: string;
@@ -735,7 +740,17 @@ export default function TaskDetail(props: Props) {
         <Show when={props.inPlanMode}>
           <span class={styles.planIndicator} title="Agent is in plan mode">Plan Mode</span>
         </Show>
-        <StatsIcon stats={statsHistory()} turns={taskTimings().turns} />
+        <StatsIcon
+          stats={statsHistory()}
+          turns={taskTimings().turns}
+          usage={{
+            inputTokens: props.cumulativeInputTokens ?? 0,
+            cacheWriteInputTokens: props.cumulativeCacheCreationInputTokens ?? 0,
+            cacheReadInputTokens: props.cumulativeCacheReadInputTokens ?? 0,
+            outputTokens: props.cumulativeOutputTokens ?? 0,
+            costUSD: props.costUSD ?? 0,
+          }}
+        />
       </div>
       <Show when={props.error} keyed>
         {(error) => (
@@ -1069,16 +1084,13 @@ function RateLimitBanner(props: { ev: EventMessage }) {
 }
 
 function usageMetaParts(u: EventUsage): string[] {
-  const inputTokens = u.inputTokens + u.cacheCreationInputTokens + u.cacheReadInputTokens;
   const tokenParts: string[] = [];
-  if (inputTokens > 0 || u.outputTokens > 0) {
-    tokenParts.push(`${formatTokens(inputTokens)} in + ${formatTokens(u.outputTokens)} out`);
-  }
+  if (u.inputTokens > 0) tokenParts.push(`${formatTokens(u.inputTokens)} new`);
+  if (u.cacheCreationInputTokens > 0) tokenParts.push(`${formatTokens(u.cacheCreationInputTokens)} cache write`);
+  if (u.cacheReadInputTokens > 0) tokenParts.push(`${formatTokens(u.cacheReadInputTokens)} cache read`);
+  if (u.outputTokens > 0) tokenParts.push(`${formatTokens(u.outputTokens)} out`);
   if ((u.reasoningOutputTokens ?? 0) > 0) {
     tokenParts.push(`${formatTokens(u.reasoningOutputTokens ?? 0)} thinking`);
-  }
-  if (u.cacheReadInputTokens > 0) {
-    tokenParts.push(`${formatTokens(u.cacheReadInputTokens)} cached`);
   }
   if (tokenParts.length === 0) return [];
   return u.model ? [u.model, ...tokenParts] : tokenParts;

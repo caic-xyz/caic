@@ -41,6 +41,11 @@ export default function TaskDetailPage() {
               ciChecks={t()?.ciChecks}
               harness={t()?.harness ?? ""}
               model={t()?.model}
+              costUSD={t()?.costUSD}
+              cumulativeInputTokens={t()?.cumulativeInputTokens}
+              cumulativeOutputTokens={t()?.cumulativeOutputTokens}
+              cumulativeCacheCreationInputTokens={t()?.cumulativeCacheCreationInputTokens}
+              cumulativeCacheReadInputTokens={t()?.cumulativeCacheReadInputTokens}
               diffStat={t()?.diffStat}
               vncPort={t()?.runtime.vncPort ?? 0}
               sudoPassword={t()?.runtime.sudoPassword}

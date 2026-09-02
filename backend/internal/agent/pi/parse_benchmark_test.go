@@ -50,6 +50,24 @@ func BenchmarkParseMessageToolExecEnd(b *testing.B) {
 	}
 }
 
+func BenchmarkParseTurnEndUsage(b *testing.B) {
+	line := []byte(`{"type":"turn_end","message":{"role":"assistant","content":[],"usage":{"input":100,"output":50,"cacheRead":2000,"cacheWrite":300,"cacheWrite1h":200,"reasoning":20,"totalTokens":2470}}}`)
+	parser := New("", nil).NewWire().ParseMessage
+
+	b.ReportAllocs()
+	b.SetBytes(int64(len(line)))
+	b.ResetTimer()
+	for range b.N {
+		msgs, err := parser(line)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			b.Fatalf("got %d messages, want 1", len(msgs))
+		}
+	}
+}
+
 func benchmarkToolExecEndLine(b *testing.B, outputBytes int) []byte {
 	ev := struct {
 		Type       pi.EventType `json:"type"`

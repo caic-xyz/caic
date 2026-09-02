@@ -44,10 +44,36 @@ the upstream Rust definitions to find new fields, item types, or notification me
 
 Source code:
 - https://github.com/openai/codex
+- https://github.com/openai/codex/blob/main/codex-rs/core/src/client.rs: prompt-cache key construction and Responses request assembly
+- https://github.com/openai/codex/blob/main/codex-rs/codex-api/src/common.rs: serialized Responses request fields
+- https://github.com/openai/codex/tree/50fffd5ed367aa99491d9ec58575626fce4e9dd4: source revision inspected for the prompt-cache controls below
 
 Documentation:
 - https://developers.openai.com/codex/cli: CLI documentation
 - https://developers.openai.com/codex/cli/reference: CLI reference
+- https://developers.openai.com/api/docs/guides/prompt-caching: prompt-cache behavior and retention
+- https://developers.openai.com/api/reference/cli/resources/responses/methods/create: prompt-cache options, retention, and usage fields
+
+## Prompt Cache Controls
+
+Current Codex sends `prompt_cache_key`, but it does not send
+`prompt_cache_options` or `prompt_cache_retention`. Its current source has no
+environment variable that directly controls the model prompt-cache TTL. The
+OpenAI service therefore selects the default from the model, organization, and
+data-retention policy. Authentication and endpoint environment variables may
+change which account or provider handles a request, but they are not TTL
+controls and must not be interpreted as an applied cache duration.
+
+Do not confuse the Codex model-catalog cache with model prompt caching.
+`DEFAULT_MODEL_CACHE_TTL = 300` and the behavior changed by
+https://github.com/openai/codex/commit/7cde2323f3712999e9ab98b16287e08b7735d52f
+apply to Codex's local `/models` metadata cache, not to prompt tokens sent to a
+model.
+
+Codex's `thread/tokenUsage/updated` event reports cached and cache-write token
+counts but not the service's applied retention policy or TTL. Leave
+`agent.Usage.CacheTTLSeconds` unknown unless that wire protocol gains an
+explicit applied-policy or duration field.
 
 ## Key Design Decisions
 

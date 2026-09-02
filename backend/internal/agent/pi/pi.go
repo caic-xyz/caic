@@ -659,6 +659,29 @@ func isQuotaError(errMsg string) bool {
 	return false
 }
 
+func toAgentUsage(u *pi.MessageUsage) agent.Usage {
+	usage := agent.Usage{
+		InputTokens:              int(u.Input),
+		OutputTokens:             int(u.Output),
+		CacheReadInputTokens:     int(u.CacheRead),
+		CacheCreationInputTokens: int(u.CacheWrite),
+		ReasoningOutputTokens:    int(u.Reasoning),
+	}
+	// Pi defines cacheWrite1h as the one-hour subset of cacheWrite and only
+	// Anthropic reports it. A positive remainder is therefore a mixed response
+	// whose first expiry is five minutes. Other providers do not report an
+	// applied duration, so leave their TTL unknown:
+	// https://github.com/badlogic/pi-mono/blob/e266507b606b9552fa277252644054afd4384b11/packages/ai/src/types.ts
+	// https://github.com/badlogic/pi-mono/blob/e266507b606b9552fa277252644054afd4384b11/packages/ai/src/api/anthropic-messages.ts
+	switch {
+	case u.CacheWrite1h > 0 && u.CacheWrite1h == u.CacheWrite:
+		usage.CacheTTLSeconds = 3600
+	case u.CacheWrite1h > 0 && u.CacheWrite1h < u.CacheWrite:
+		usage.CacheTTLSeconds = 300
+	}
+	return usage
+}
+
 // handleAgentEnd extracts final usage from the last assistant message and emits
 // a ResultMessage with usage and duration.
 func (w *piWireFormat) handleAgentEnd(line []byte) ([]agent.Message, error) {
@@ -677,17 +700,14 @@ func (w *piWireFormat) handleAgentEnd(line []byte) ([]agent.Message, error) {
 
 	// Find the last assistant message for usage.
 	var usage agent.Usage
+	var totalCostUSD float64
 	for i := range slices.Backward(ev.Messages) {
 		msg := &ev.Messages[i]
 		if msg.Role != pi.RoleAssistant {
 			continue
 		}
-		usage = agent.Usage{
-			InputTokens:              int(msg.Usage.Input),
-			OutputTokens:             int(msg.Usage.Output),
-			CacheReadInputTokens:     int(msg.Usage.CacheRead),
-			CacheCreationInputTokens: int(msg.Usage.CacheWrite),
-		}
+		usage = toAgentUsage(&msg.Usage)
+		totalCostUSD = msg.Usage.Cost.Total
 		break
 	}
 
@@ -702,11 +722,12 @@ func (w *piWireFormat) handleAgentEnd(line []byte) ([]agent.Message, error) {
 	w.mu.Unlock()
 
 	return []agent.Message{&agent.ResultMessage{
-		MessageType: "result",
-		Subtype:     "result",
-		DurationMs:  durationMs,
-		NumTurns:    numTurns,
-		Usage:       usage,
+		MessageType:  "result",
+		Subtype:      "result",
+		DurationMs:   durationMs,
+		NumTurns:     numTurns,
+		TotalCostUSD: totalCostUSD,
+		Usage:        usage,
 	}}, nil
 }
 
@@ -722,12 +743,7 @@ func (w *piWireFormat) handleTurnEnd(line []byte) ([]agent.Message, error) {
 	w.mu.Unlock()
 	if ev.Message.Role == pi.RoleAssistant && ev.Message.Usage.TotalTokens > 0 {
 		return []agent.Message{&agent.UsageMessage{
-			Usage: agent.Usage{
-				InputTokens:              int(ev.Message.Usage.Input),
-				OutputTokens:             int(ev.Message.Usage.Output),
-				CacheReadInputTokens:     int(ev.Message.Usage.CacheRead),
-				CacheCreationInputTokens: int(ev.Message.Usage.CacheWrite),
-			},
+			Usage:         toAgentUsage(&ev.Message.Usage),
 			ContextWindow: int(w.modelCtxWindow),
 		}}, nil
 	}

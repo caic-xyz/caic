@@ -47,6 +47,18 @@ function props(overrides: Partial<TaskCardProps> = {}): TaskCardProps {
 }
 
 describe("TaskCard", () => {
+  it("does not invent a TTL when only a legacy cache expiry is available", () => {
+    render(() => <TaskCard {...props({
+      state: "waiting",
+      cacheExpiresAt: "2026-07-08T11:55:00Z",
+    })} />);
+
+    fireEvent.focus(screen.getByRole("button", { name: "waiting" }));
+
+    expect(screen.getByText("Prompt cache likely expired — continuing may use more tokens")).toBeInTheDocument();
+    expect(screen.queryByText(/TTL/)).not.toBeInTheDocument();
+  });
+
   it("shows a quota reset countdown in the summary", () => {
     const { getByTestId } = render(() => (
       <TaskCard

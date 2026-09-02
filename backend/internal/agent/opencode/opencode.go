@@ -396,15 +396,19 @@ func (w *wireFormat) handlePromptResponseLocked(line []byte) ([]agent.Message, e
 				rm.IsError = true
 				rm.Result = pr.StopReason
 			}
-			// OpenCode doesn't report cache TTL; default to 5 minutes.
-			if pr.Usage.InputTokens > 0 || pr.Usage.OutputTokens > 0 {
+			if pr.Usage != (opencode.PromptUsage{}) {
+				// ACP reports cache reads and writes but no duration bucket or
+				// applied retention policy. OpenCode supports many providers and
+				// gateways, so leave the cache TTL unknown rather than inferring it
+				// from the selected model or request adapter:
+				// https://github.com/anomalyco/opencode/blob/69c172e8a7c0086887b1f93ed5a162f14b6aa0c5/packages/opencode/src/acp/usage.ts
+				// https://github.com/anomalyco/opencode/blob/69c172e8a7c0086887b1f93ed5a162f14b6aa0c5/packages/opencode/src/provider/transform.ts
 				rm.Usage = agent.Usage{
 					InputTokens:              pr.Usage.InputTokens,
 					OutputTokens:             pr.Usage.OutputTokens,
 					CacheReadInputTokens:     pr.Usage.CachedReadTokens,
 					CacheCreationInputTokens: pr.Usage.CachedWriteTokens,
 					ReasoningOutputTokens:    pr.Usage.ThoughtTokens,
-					CacheTTLSeconds:          300,
 				}
 			}
 		}

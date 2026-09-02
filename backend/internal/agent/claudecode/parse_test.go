@@ -23,6 +23,27 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 	return parseMessageWithTracker(line, nil)
 }
 
+func TestToAgentUsage(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name string
+		in   genclaudecode.MsgUsage
+		want int
+	}{
+		{name: "unknown", in: genclaudecode.MsgUsage{CacheReadInputTokens: 100}},
+		{name: "five minute", in: genclaudecode.MsgUsage{CacheCreation: genclaudecode.CacheCreation{Ephemeral5mInputTokens: 100}}, want: 300},
+		{name: "one hour", in: genclaudecode.MsgUsage{CacheCreation: genclaudecode.CacheCreation{Ephemeral1hInputTokens: 100}}, want: 3600},
+		{name: "mixed uses first expiry", in: genclaudecode.MsgUsage{CacheCreation: genclaudecode.CacheCreation{Ephemeral5mInputTokens: 10, Ephemeral1hInputTokens: 100}}, want: 300},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := toAgentUsage(&tt.in).CacheTTLSeconds; got != tt.want {
+				t.Errorf("CacheTTLSeconds = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestWidgetTrackerBounds(t *testing.T) {
 	t.Parallel()
 

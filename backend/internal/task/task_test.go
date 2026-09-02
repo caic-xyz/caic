@@ -65,6 +65,22 @@ func recvType(ch <-chan TimelineMessage) string {
 
 func TestTask(t *testing.T) {
 	t.Parallel()
+	t.Run("UnknownCacheTTLDoesNotCreateExpiry", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		tk.addParsedMessage(agent.TimedMessage{Message: &agent.UsageMessage{
+			Usage: agent.Usage{CacheReadInputTokens: 100, CacheTTLSeconds: 300},
+		}}, false)
+		if got := tk.Snapshot().CacheExpiresAt; got.IsZero() {
+			t.Fatal("CacheExpiresAt is unknown after an explicitly reported TTL")
+		}
+		tk.addParsedMessage(agent.TimedMessage{Message: &agent.UsageMessage{
+			Usage: agent.Usage{CacheReadInputTokens: 100},
+		}}, false)
+		if got := tk.Snapshot().CacheExpiresAt; !got.IsZero() {
+			t.Errorf("CacheExpiresAt = %s, want unknown", got)
+		}
+	})
 	t.Run("BackwardMessages", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")

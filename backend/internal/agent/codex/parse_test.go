@@ -886,7 +886,7 @@ func TestWireFormat(t *testing.T) {
 	t.Run("TokenUsageUpdatedEmitsUsageMessage", func(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{}
-		const input = `{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"t1","turnId":"turn_1","tokenUsage":{"total":{"totalTokens":1000,"inputTokens":800,"cachedInputTokens":500,"outputTokens":200,"reasoningOutputTokens":0},"last":{"totalTokens":100,"inputTokens":80,"cachedInputTokens":50,"outputTokens":20,"reasoningOutputTokens":5}}}}`
+		const input = `{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"t1","turnId":"turn_1","tokenUsage":{"total":{"totalTokens":1000,"inputTokens":800,"cachedInputTokens":500,"cacheWriteInputTokens":100,"outputTokens":200,"reasoningOutputTokens":0},"last":{"totalTokens":100,"inputTokens":80,"cachedInputTokens":50,"cacheWriteInputTokens":12,"outputTokens":20,"reasoningOutputTokens":5}}}}`
 		msgs, err := w.ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
@@ -898,8 +898,8 @@ func TestWireFormat(t *testing.T) {
 		if !ok {
 			t.Fatalf("type = %T, want *agent.UsageMessage", msgs[0])
 		}
-		if um.Usage.InputTokens != 80 {
-			t.Errorf("InputTokens = %d, want 80", um.Usage.InputTokens)
+		if um.Usage.InputTokens != 18 {
+			t.Errorf("InputTokens = %d, want 18", um.Usage.InputTokens)
 		}
 		if um.Usage.OutputTokens != 20 {
 			t.Errorf("OutputTokens = %d, want 20", um.Usage.OutputTokens)
@@ -907,15 +907,24 @@ func TestWireFormat(t *testing.T) {
 		if um.Usage.CacheReadInputTokens != 50 {
 			t.Errorf("CacheReadInputTokens = %d, want 50", um.Usage.CacheReadInputTokens)
 		}
+		if um.Usage.CacheCreationInputTokens != 12 {
+			t.Errorf("CacheCreationInputTokens = %d, want 12", um.Usage.CacheCreationInputTokens)
+		}
 		if um.Usage.ReasoningOutputTokens != 5 {
 			t.Errorf("ReasoningOutputTokens = %d, want 5", um.Usage.ReasoningOutputTokens)
+		}
+		if um.Usage.CacheTTLSeconds != 0 {
+			t.Errorf("CacheTTLSeconds = %d, want unknown", um.Usage.CacheTTLSeconds)
 		}
 		// incremental is accumulated into totalUsage
 		w.mu.Lock()
 		total := w.totalUsage
 		w.mu.Unlock()
-		if total.InputTokens != 80 {
-			t.Errorf("totalUsage.InputTokens = %d, want 80", total.InputTokens)
+		if total.InputTokens != 18 {
+			t.Errorf("totalUsage.InputTokens = %d, want 18", total.InputTokens)
+		}
+		if total.CacheCreationInputTokens != 12 {
+			t.Errorf("totalUsage.CacheCreationInputTokens = %d, want 12", total.CacheCreationInputTokens)
 		}
 	})
 	t.Run("TokenUsageAccumulates", func(t *testing.T) {
@@ -931,8 +940,8 @@ func TestWireFormat(t *testing.T) {
 		w.mu.Lock()
 		total := w.totalUsage
 		w.mu.Unlock()
-		if total.InputTokens != 110 {
-			t.Errorf("totalUsage.InputTokens = %d, want 110", total.InputTokens)
+		if total.InputTokens != 100 {
+			t.Errorf("totalUsage.InputTokens = %d, want 100", total.InputTokens)
 		}
 		if total.OutputTokens != 40 {
 			t.Errorf("totalUsage.OutputTokens = %d, want 40", total.OutputTokens)

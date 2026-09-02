@@ -693,6 +693,9 @@ func TestWireFormatPromptResponse(t *testing.T) {
 		if rm.Usage.ReasoningOutputTokens != 200 {
 			t.Errorf("ReasoningOutputTokens = %d, want 200", rm.Usage.ReasoningOutputTokens)
 		}
+		if rm.Usage.CacheTTLSeconds != 0 {
+			t.Errorf("CacheTTLSeconds = %d, want unknown", rm.Usage.CacheTTLSeconds)
+		}
 	})
 
 	t.Run("Cancelled", func(t *testing.T) {
@@ -722,6 +725,37 @@ func TestWireFormatPromptResponse(t *testing.T) {
 		}
 		if rm.Result != "cancelled" {
 			t.Errorf("Result = %q, want %q", rm.Result, "cancelled")
+		}
+	})
+
+	t.Run("CacheOnlyUsage", func(t *testing.T) {
+		t.Parallel()
+		w := &wireFormat{sessionID: "ses_1"}
+		w.promptReqID = 8
+		input := mustJSON(t, map[string]any{
+			"jsonrpc": "2.0",
+			"id":      8,
+			"result": map[string]any{
+				"stopReason": "end_turn",
+				"usage": map[string]any{
+					"cachedReadTokens":  8000,
+					"cachedWriteTokens": 1000,
+				},
+			},
+		})
+		msgs, err := w.ParseMessage(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, ok := msgs[0].(*agent.ResultMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.ResultMessage", msgs[0])
+		}
+		if result.Usage.CacheReadInputTokens != 8000 || result.Usage.CacheCreationInputTokens != 1000 {
+			t.Errorf("Usage = %#v, want cache read=8000 and write=1000", result.Usage)
+		}
+		if result.Usage.CacheTTLSeconds != 0 {
+			t.Errorf("CacheTTLSeconds = %d, want unknown", result.Usage.CacheTTLSeconds)
 		}
 	})
 

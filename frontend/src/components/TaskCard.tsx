@@ -127,6 +127,9 @@ export default function TaskCard(props: TaskCardProps) {
     !terminalStates.has(props.state) &&
     props.state !== "running" &&
     isCacheStale(props.now(), props.cacheExpiresAt);
+  const cacheExpiryText = () => props.cacheTTLSeconds
+    ? `Prompt cache likely expired (${formatElapsed(props.cacheTTLSeconds * 1000)} TTL) — continuing may use more tokens`
+    : "Prompt cache likely expired — continuing may use more tokens";
   const [titleTruncated, setTitleTruncated] = createSignal(false);
   const [contextMenuPosition, setContextMenuPosition] = createSignal<
     { x: number; y: number } | undefined
@@ -475,7 +478,7 @@ export default function TaskCard(props: TaskCardProps) {
               )}
             </Show>
             <Tooltip
-              text={`Prompt cache likely expired (${formatElapsed((props.cacheTTLSeconds ?? 3600) * 1000)} TTL) — continuing may use more tokens`}
+              text={cacheExpiryText()}
               disabled={!stale()}
             >
               <span

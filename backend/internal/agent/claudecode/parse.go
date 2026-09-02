@@ -22,11 +22,20 @@ func toAgentUsage(u *claudecode.MsgUsage) agent.Usage {
 		CacheCreationInputTokens: int(u.CacheCreationInputTokens),
 		CacheReadInputTokens:     int(u.CacheReadInputTokens),
 	}
-	// Anthropic prompt cache has a 5-minute TTL by default.
-	// See https://platform.claude.com/docs/en/build-with-claude/prompt-caching
-	usage.CacheTTLSeconds = 300
-	if u.CacheCreation.Ephemeral5mInputTokens > 0 &&
-		u.CacheCreation.Ephemeral5mInputTokens >= u.CacheCreation.Ephemeral1hInputTokens {
+	// Claude Code normally gives a subscription's main conversation a one-hour
+	// cache. Named subagents have separate five-minute caches. A fork can read
+	// the parent's prefix on its first request, but its writes use the auxiliary
+	// five-minute bucket. API-key and cloud main conversations also default to
+	// five minutes. Settings, environment variables, authentication, and
+	// subscription overage can change those choices, so use the response's
+	// duration buckets instead of inferring TTL from the agent role:
+	// https://code.claude.com/docs/en/prompt-caching#subagents-and-the-cache
+	// https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md
+	// Anthropic defines the five-minute and one-hour response buckets here:
+	// https://platform.claude.com/docs/en/build-with-claude/prompt-caching#1-hour-cache-duration
+	// Wire schema: https://github.com/maruel/genai/blob/main/providers/claudecode/dto.go
+	// A mixed response has both durations, so its first expiry is five minutes.
+	if u.CacheCreation.Ephemeral5mInputTokens > 0 {
 		usage.CacheTTLSeconds = 300
 	} else if u.CacheCreation.Ephemeral1hInputTokens > 0 {
 		usage.CacheTTLSeconds = 3600

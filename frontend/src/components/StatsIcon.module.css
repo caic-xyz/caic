@@ -1,4 +1,4 @@
-/* Styles for the StatsIcon component: 2×2 bar chart icon, popup panel, and perf table. */
+/* Styles for compact task usage, container statistics, and per-invocation performance details. */
 
 .wrapper {
   position: relative;
@@ -10,15 +10,27 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
+  min-width: 24px;
   height: 24px;
-  padding: 0;
+  padding: 0 0.25rem;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
   flex-shrink: 0;
+}
+
+.iconSummary {
+  margin-left: 0.3rem;
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.iconSummarySeparator {
+  color: var(--color-text-muted);
 }
 
 .iconBtn:hover {
@@ -34,14 +46,54 @@
   top: calc(100% + 4px);
   right: 0;
   z-index: 100;
-  min-width: 320px;
-  max-width: 480px;
+  width: min(430px, calc(100vw - 1rem));
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border-medium);
   border-radius: var(--radius-lg);
   box-shadow: 0 4px 12px var(--color-shadow-sm);
   padding: 0.5rem 0;
   font-size: 0.8rem;
+}
+
+.usageGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.usageMetric {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.05rem;
+  padding: 0.3rem 0.35rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-surface);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.usageMetric strong {
+  overflow: hidden;
+  font-size: 0.82rem;
+  text-overflow: ellipsis;
+}
+
+.usageLabel {
+  color: var(--color-text-muted);
+  font-size: 0.68rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.efficiencyRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.75rem;
+  margin-top: 0.4rem;
+  color: var(--color-text-secondary);
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .popupSection {
@@ -147,4 +199,39 @@
   color: var(--color-text-secondary);
   padding: 0.1rem 0.3rem 0.1rem 0;
   vertical-align: baseline;
+}
+
+.modelCell {
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.perfSub {
+  display: block;
+  color: var(--color-text-muted);
+  font-size: 0.67rem;
+  white-space: nowrap;
+}
+
+.tokenDetailRow + tr .perfTd {
+  padding-top: 0.3rem;
+}
+
+.tokenDetailCell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.65rem;
+  padding: 0 0.3rem 0.3rem 0;
+  border-bottom: 1px solid var(--color-border-light);
+  color: var(--color-text-muted);
+  font-size: 0.69rem;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 480px) {
+  .usageGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }

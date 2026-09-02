@@ -1,13 +1,57 @@
-// StatsIcon renders a 2×2 bar-chart icon in the task header that opens a popup
-// showing container resource history (CPU, MEM, NET, DISK) and per-turn perf data.
+// StatsIcon surfaces task token volume and cost, with detailed usage, timing, and container resource statistics.
 
-import { createSignal, For, Show } from "solid-js";
+import { createMemo, createSignal, For, Show } from "solid-js";
 
 import type { EventStats } from "@sdk/types.gen";
 
 import { formatDuration, formatTokens } from "../formatting";
 import { formatTimingDuration, type TurnTiming } from "../timing";
 import styles from "./StatsIcon.module.css";
+
+export interface TaskUsageSummary {
+  inputTokens: number;
+  cacheWriteInputTokens: number;
+  cacheReadInputTokens: number;
+  outputTokens: number;
+  costUSD: number;
+}
+
+interface UsageDetails extends TaskUsageSummary {
+  reasoningOutputTokens: number;
+  totalTokens: number;
+}
+
+function formatUsageTokens(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}Mt`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}kt`;
+  return `${tokens}t`;
+}
+
+function formatUSD(usd: number): string {
+  return `$${usd.toFixed(usd < 0.01 ? 4 : 2)}`;
+}
+
+function sumTurnUsage(turns: TurnTiming[]): UsageDetails {
+  return turns.reduce<UsageDetails>((total, turn) => {
+    const u = turn.result.usage;
+    total.inputTokens += u.inputTokens;
+    total.cacheWriteInputTokens += u.cacheCreationInputTokens;
+    total.cacheReadInputTokens += u.cacheReadInputTokens;
+    total.outputTokens += u.outputTokens;
+    total.reasoningOutputTokens += u.reasoningOutputTokens ?? 0;
+    total.totalTokens += u.inputTokens + u.cacheCreationInputTokens + u.cacheReadInputTokens + u.outputTokens;
+    total.costUSD += turn.result.totalCostUSD;
+    return total;
+  }, {
+    inputTokens: 0,
+    cacheWriteInputTokens: 0,
+    cacheReadInputTokens: 0,
+    outputTokens: 0,
+    reasoningOutputTokens: 0,
+    totalTokens: 0,
+    costUSD: 0,
+  });
+}
 
 function formatBytes(bytes: number): string {
   if (bytes <= 0) return "0 B";
@@ -61,7 +105,7 @@ function MiniBarGroup(props: { bars: MiniBar[] }) {
   );
 }
 
-export default function StatsIcon(props: { stats: EventStats[]; turns: TurnTiming[] }) {
+export default function StatsIcon(props: { stats: EventStats[]; turns: TurnTiming[]; usage?: TaskUsageSummary }) {
   const [open, setOpen] = createSignal(false);
 
   // Current stats: last sample.
@@ -91,14 +135,33 @@ export default function StatsIcon(props: { stats: EventStats[]; turns: TurnTimin
   const recentStats = () => props.stats.slice(-5);
 
   const perfs = () => props.turns;
+  const usage = createMemo<UsageDetails>(() => {
+    const fromTurns = sumTurnUsage(props.turns);
+    if (!props.usage) return fromTurns;
+    const u = props.usage;
+    return {
+      ...u,
+      reasoningOutputTokens: fromTurns.reasoningOutputTokens,
+      totalTokens: u.inputTokens + u.cacheWriteInputTokens + u.cacheReadInputTokens + u.outputTokens,
+    };
+  });
+  const cacheHitRate = () => {
+    const u = usage();
+    const input = u.inputTokens + u.cacheWriteInputTokens + u.cacheReadInputTokens;
+    return input > 0 ? u.cacheReadInputTokens / input : 0;
+  };
+  const costPerMillionTokens = () => {
+    const u = usage();
+    return u.totalTokens > 0 ? u.costUSD * 1_000_000 / u.totalTokens : 0;
+  };
 
   return (
     <div class={styles.wrapper}>
       <button
         class={`${styles.iconBtn}${open() ? ` ${styles.iconBtnActive}` : ""}`}
         onClick={() => setOpen((v) => !v)}
-        title="Container resource stats"
-        aria-label="Resource stats"
+        title="Task usage and performance statistics"
+        aria-label="Task statistics"
       >
         <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
           {/* Top-left: CPU */}
@@ -114,9 +177,50 @@ export default function StatsIcon(props: { stats: EventStats[]; turns: TurnTimin
           <rect x="10" y={9 + (8 - Math.round(diskRatio() * 8))} width="6" height={Math.round(diskRatio() * 8)} rx="1"
             fill={hasStats() ? diskColor(latest()?.diskUsed ?? 0) : "var(--color-border)"} />
         </svg>
+        <Show when={usage().totalTokens > 0}>
+          <span class={styles.iconSummary}>
+            {formatTokens(usage().totalTokens)}
+            <Show when={usage().costUSD > 0}><span class={styles.iconSummarySeparator}> · </span>{formatUSD(usage().costUSD)}</Show>
+          </span>
+        </Show>
       </button>
       <Show when={open()}>
         <div class={styles.popup}>
+          <Show when={usage().totalTokens > 0}>
+            <div class={styles.popupSection} data-testid="task-usage-summary">
+              <div class={styles.popupSectionTitle}>Usage</div>
+              <div class={styles.usageGrid}>
+                <div class={styles.usageMetric} title="Input tokens that were neither written to nor read from cache">
+                  <span class={styles.usageLabel}>New input</span>
+                  <strong>{formatUsageTokens(usage().inputTokens)}</strong>
+                </div>
+                <div class={styles.usageMetric} title="Input tokens written to the provider prompt cache">
+                  <span class={styles.usageLabel}>Cache write</span>
+                  <strong>{formatUsageTokens(usage().cacheWriteInputTokens)}</strong>
+                </div>
+                <div class={styles.usageMetric} title="Input tokens served from the provider prompt cache">
+                  <span class={styles.usageLabel}>Cache read</span>
+                  <strong>{formatUsageTokens(usage().cacheReadInputTokens)}</strong>
+                </div>
+                <div class={styles.usageMetric} title="All generated output tokens, including thinking tokens">
+                  <span class={styles.usageLabel}>Output</span>
+                  <strong>{formatUsageTokens(usage().outputTokens)}</strong>
+                </div>
+                <div class={styles.usageMetric} title="Thinking or reasoning tokens; included in output">
+                  <span class={styles.usageLabel}>Thinking</span>
+                  <strong>{usage().reasoningOutputTokens > 0 ? formatUsageTokens(usage().reasoningOutputTokens) : "—"}</strong>
+                </div>
+              </div>
+              <div class={styles.efficiencyRow}>
+                <span><span class={styles.usageLabel}>Total </span>{formatUsageTokens(usage().totalTokens)}</span>
+                <span title="Share of input context served from cache"><span class={styles.usageLabel}>Cache hit </span>{Math.round(cacheHitRate() * 100)}%</span>
+                <Show when={usage().costUSD > 0}>
+                  <span><span class={styles.usageLabel}>Cost </span>{formatUSD(usage().costUSD)}</span>
+                  <span title="Reported cost divided by total token volume"><span class={styles.usageLabel}>Effective </span>{formatUSD(costPerMillionTokens())}/Mt</span>
+                </Show>
+              </div>
+            </div>
+          </Show>
           <div class={styles.popupSection}>
             <div class={styles.popupSectionTitle}>Resources</div>
             <Show when={latest()} keyed fallback={<div class={styles.noData}>No data yet</div>}>
@@ -166,31 +270,43 @@ export default function StatsIcon(props: { stats: EventStats[]; turns: TurnTimin
           <Show when={perfs().length > 0}>
             <div class={styles.popupSection}>
               <div class={styles.popupSectionTitle}>Invocations</div>
-              <table class={styles.perfTable}>
+              <table class={styles.perfTable} data-testid="invocation-usage">
                 <thead>
                   <tr>
                     <th class={styles.perfTh}>#</th>
-                    <th class={styles.perfTh}>Wall</th>
-                    <th class={styles.perfTh}>API</th>
-                    <th class={styles.perfTh}>Wait</th>
+                    <th class={styles.perfTh}>Model</th>
+                    <th class={styles.perfTh}>Timing</th>
                     <th class={styles.perfTh}>Cost</th>
-                    <th class={styles.perfTh}>Tokens</th>
                   </tr>
                 </thead>
                 <tbody>
                   <For each={perfs()}>
                     {(p, index) => {
                       const r = p.result;
-                      const totalTokens = r.usage.inputTokens + r.usage.cacheCreationInputTokens + r.usage.cacheReadInputTokens + r.usage.outputTokens;
                       return (
-                        <tr>
-                          <td class={styles.perfTd}>{index() + 1}</td>
-                          <td class={styles.perfTd}>{r.duration > 0 ? formatDuration(r.duration) : "—"}</td>
-                          <td class={styles.perfTd}>{r.durationAPI > 0 ? formatDuration(r.durationAPI) : "—"}</td>
-                          <td class={styles.perfTd}>{p.waitMs !== null && p.waitMs > 0 ? formatTimingDuration(p.waitMs) : "—"}</td>
-                          <td class={styles.perfTd}>{r.totalCostUSD > 0 ? `$${r.totalCostUSD.toFixed(4)}` : "—"}</td>
-                          <td class={styles.perfTd}>{formatTokens(totalTokens)}</td>
-                        </tr>
+                        <>
+                          <tr>
+                            <td class={styles.perfTd}>{index() + 1}</td>
+                            <td class={`${styles.perfTd} ${styles.modelCell}`}>{r.usage.model || "—"}</td>
+                            <td class={styles.perfTd}>
+                              {r.duration > 0 ? formatDuration(r.duration) : "—"}
+                              <span class={styles.perfSub}> API {r.durationAPI > 0 ? formatDuration(r.durationAPI) : "—"} · wait {p.waitMs !== null && p.waitMs > 0 ? formatTimingDuration(p.waitMs) : "—"}</span>
+                            </td>
+                            <td class={styles.perfTd}>{r.totalCostUSD > 0 ? formatUSD(r.totalCostUSD) : "—"}</td>
+                          </tr>
+                          <tr class={styles.tokenDetailRow}>
+                            <td />
+                            <td colspan={3} class={styles.tokenDetailCell}>
+                              <span title="New input">New {formatUsageTokens(r.usage.inputTokens)}</span>
+                              <span title="Cache write">Write {formatUsageTokens(r.usage.cacheCreationInputTokens)}</span>
+                              <span title="Cache read">Read {formatUsageTokens(r.usage.cacheReadInputTokens)}</span>
+                              <span title="Output">Out {formatUsageTokens(r.usage.outputTokens)}</span>
+                              <Show when={(r.usage.reasoningOutputTokens ?? 0) > 0}>
+                                <span title="Thinking; included in output">Think {formatUsageTokens(r.usage.reasoningOutputTokens ?? 0)}</span>
+                              </Show>
+                            </td>
+                          </tr>
+                        </>
                       );
                     }}
                   </For>
