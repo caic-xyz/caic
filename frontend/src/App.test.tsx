@@ -647,6 +647,21 @@ describe("App keyboard shortcuts", () => {
     expect(screen.queryByTestId("keyboard-shortcuts-dialog")).not.toBeInTheDocument();
   });
 
+  it("purges the selected task with Shift+Delete while editing its prompt", async () => {
+    const user = userEvent.setup();
+    const task = makeTask({ state: "running" });
+    vi.mocked(api.getTask).mockResolvedValue(task);
+    vi.mocked(api.purgeTask).mockResolvedValue({ status: "ok" });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderApp("/task/@task1+do-something");
+
+    const prompt = await screen.findByTestId("task-detail-prompt");
+    await waitFor(() => expect(prompt).toHaveFocus());
+    await user.keyboard("{Shift>}{Delete}{/Shift}");
+
+    expect(api.purgeTask).toHaveBeenCalledWith(task.id);
+  });
+
   it("navigates the avatar menu with arrow keys", async () => {
     const user = userEvent.setup();
     renderApp();

@@ -141,12 +141,12 @@ export default function KeyboardShortcuts(props: Props) {
         openNewTaskControl("[data-testid='harness-select']", false);
         return;
       }
-      if (isEditing(target)) return;
       if (event.key === "Delete" && event.shiftKey) {
         event.preventDefault();
         purgeSelectedTask();
         return;
       }
+      if (isEditing(target)) return;
       if (event.shiftKey) return;
 
       if (event.key === "ArrowDown") {
