@@ -46,7 +46,9 @@
   top: calc(100% + 4px);
   right: 0;
   z-index: 100;
-  width: min(430px, calc(100vw - 1rem));
+  width: min(560px, calc(100vw - 1rem));
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border-medium);
   border-radius: var(--radius-lg);
@@ -199,6 +201,13 @@
   color: var(--color-text-secondary);
   padding: 0.1rem 0.3rem 0.1rem 0;
   vertical-align: baseline;
+}
+
+.coldWarning {
+  margin-left: 0.2rem;
+  color: var(--color-warning-text);
+  cursor: help;
+  font-size: 0.68rem;
 }
 
 .modelCell {

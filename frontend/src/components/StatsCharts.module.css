@@ -1,0 +1,35 @@
+/* Styles for compact task token and tool-time charts. */
+
+.figure + .figure {
+  margin-top: 0.7rem;
+}
+
+.title {
+  margin-bottom: 0.15rem;
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.chart {
+  width: 100%;
+  min-height: 92px;
+  overflow-x: auto;
+}
+
+.chart :global(figure) {
+  margin: 0;
+}
+
+.chart :global(.caic-plot-swatches) {
+  gap: 0.2rem 0.65rem;
+  margin-bottom: 0.15rem;
+  color: var(--color-text-muted);
+  font-size: 0.66rem;
+}
+
+.note {
+  margin-top: 0.1rem;
+  color: var(--color-text-muted);
+  font-size: 0.66rem;
+}

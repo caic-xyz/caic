@@ -741,6 +741,7 @@ export default function TaskDetail(props: Props) {
           <span class={styles.planIndicator} title="Agent is in plan mode">Plan Mode</span>
         </Show>
         <StatsIcon
+          events={messages()}
           stats={statsHistory()}
           turns={taskTimings().turns}
           usage={{

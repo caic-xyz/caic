@@ -2,7 +2,7 @@
 
 import { render } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { TurnTiming } from "../timing";
 import StatsIcon, { type TaskUsageSummary } from "./StatsIcon";
@@ -39,7 +39,7 @@ const turns: TurnTiming[] = [{
 
 describe("StatsIcon", () => {
   it("surfaces task token volume and cost before opening details", () => {
-    const { getByRole } = render(() => <StatsIcon stats={[]} turns={turns} usage={usage} />);
+    const { getByRole } = render(() => <StatsIcon events={[]} stats={[]} turns={turns} usage={usage} />);
 
     const trigger = getByRole("button", { name: "Task statistics" });
     expect(trigger).toHaveTextContent("11kt");
@@ -48,7 +48,13 @@ describe("StatsIcon", () => {
 
   it("separates token categories and reports cache efficiency", async () => {
     const user = userEvent.setup();
-    const { getByRole, getByTestId } = render(() => <StatsIcon stats={[]} turns={turns} usage={usage} />);
+    const events = [
+      { kind: "toolUse", ts: 1_000, toolUse: { toolUseID: "tool-1", name: "Bash", input: {} } },
+      { kind: "toolResult", ts: 2_000, toolResult: { toolUseID: "tool-1", duration: 1 } },
+    ] as const;
+    const { findByTestId, getByLabelText, getByRole, getByTestId } = render(() => (
+      <StatsIcon events={events} stats={[]} turns={turns} usage={usage} />
+    ));
 
     await user.click(getByRole("button", { name: "Task statistics" }));
 
@@ -66,5 +72,23 @@ describe("StatsIcon", () => {
     expect(invocations).toHaveTextContent("2.0kt");
     expect(invocations).toHaveTextContent("7.0kt");
     expect(invocations).toHaveTextContent("200t");
+    expect(getByLabelText("Turn 1 used 1.0kt of uncached input")).toBeInTheDocument();
+    expect(await findByTestId("turn-token-chart")).toBeInTheDocument();
+    expect(await findByTestId("tool-time-chart")).toBeInTheDocument();
+  });
+
+  it("keeps double-digit turns in chronological chart order without Plot warnings", async () => {
+    const user = userEvent.setup();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const manyTurns = Array.from({ length: 12 }, () => turns[0]);
+    const { findByTestId, getByRole } = render(() => (
+      <StatsIcon events={[]} stats={[]} turns={manyTurns} usage={usage} />
+    ));
+
+    await user.click(getByRole("button", { name: "Task statistics" }));
+    const chart = await findByTestId("turn-token-chart");
+    const labels = Array.from(chart.querySelectorAll('[aria-label="x-axis tick label"] text'), (label) => label.textContent);
+    expect(labels).toEqual(Array.from({ length: 12 }, (_, i) => String(i + 1)));
+    expect(warn).not.toHaveBeenCalled();
   });
 });

@@ -1,12 +1,15 @@
-// StatsIcon surfaces task token volume and cost, with detailed usage, timing, and container resource statistics.
+// StatsIcon surfaces task cost, token/cache behavior, tool timing, and container resource statistics.
 
-import { createMemo, createSignal, For, Show } from "solid-js";
+import { createMemo, createSignal, For, lazy, Show, Suspense } from "solid-js";
 
-import type { EventStats } from "@sdk/types.gen";
+import type { EventMessage, EventStats } from "@sdk/types.gen";
 
 import { formatDuration, formatTokens } from "../formatting";
+import { IncrementalToolTimingTracker } from "../taskStats";
 import { formatTimingDuration, type TurnTiming } from "../timing";
 import styles from "./StatsIcon.module.css";
+
+const StatsCharts = lazy(() => import("./StatsCharts"));
 
 export interface TaskUsageSummary {
   inputTokens: number;
@@ -105,7 +108,7 @@ function MiniBarGroup(props: { bars: MiniBar[] }) {
   );
 }
 
-export default function StatsIcon(props: { stats: EventStats[]; turns: TurnTiming[]; usage?: TaskUsageSummary }) {
+export default function StatsIcon(props: { events: readonly EventMessage[]; stats: EventStats[]; turns: TurnTiming[]; usage?: TaskUsageSummary }) {
   const [open, setOpen] = createSignal(false);
 
   // Current stats: last sample.
@@ -135,6 +138,8 @@ export default function StatsIcon(props: { stats: EventStats[]; turns: TurnTimin
   const recentStats = () => props.stats.slice(-5);
 
   const perfs = () => props.turns;
+  const toolTimingTracker = new IncrementalToolTimingTracker();
+  const toolSummaries = createMemo(() => open() ? toolTimingTracker.derive(props.events) : []);
   const usage = createMemo<UsageDetails>(() => {
     const fromTurns = sumTurnUsage(props.turns);
     if (!props.usage) return fromTurns;
@@ -221,6 +226,14 @@ export default function StatsIcon(props: { stats: EventStats[]; turns: TurnTimin
               </div>
             </div>
           </Show>
+          <Show when={perfs().length > 0 || toolSummaries().length > 0}>
+            <div class={styles.popupSection} data-testid="task-analytics-charts">
+              <div class={styles.popupSectionTitle}>Analytics</div>
+              <Suspense fallback={<div class={styles.noData}>Loading charts…</div>}>
+                <StatsCharts turns={perfs()} tools={toolSummaries()} />
+              </Suspense>
+            </div>
+          </Show>
           <div class={styles.popupSection}>
             <div class={styles.popupSectionTitle}>Resources</div>
             <Show when={latest()} keyed fallback={<div class={styles.noData}>No data yet</div>}>
@@ -286,7 +299,17 @@ export default function StatsIcon(props: { stats: EventStats[]; turns: TurnTimin
                       return (
                         <>
                           <tr>
-                            <td class={styles.perfTd}>{index() + 1}</td>
+                            <td class={styles.perfTd}>
+                              {index() + 1}
+                              <Show when={p.result.usage.inputTokens > 0}>
+                                <span
+                                  class={styles.coldWarning}
+                                  title={`${formatUsageTokens(r.usage.inputTokens)} of uncached input on this turn`}
+                                  aria-label={`Turn ${index() + 1} used ${formatUsageTokens(r.usage.inputTokens)} of uncached input`}
+                                  role="img"
+                                >⚠</span>
+                              </Show>
+                            </td>
                             <td class={`${styles.perfTd} ${styles.modelCell}`}>{r.usage.model || "—"}</td>
                             <td class={styles.perfTd}>
                               {r.duration > 0 ? formatDuration(r.duration) : "—"}

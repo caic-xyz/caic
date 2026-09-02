@@ -829,18 +829,23 @@ export function toolCallDurations(events: readonly EventMessage[]): ReadonlyMap<
     }
     const result = event.toolResult;
     if (event.kind !== "toolResult" || !result) continue;
-    if (result.duration > 0) {
-      durations.set(result.toolUseID, result.duration * 1000);
-      continue;
-    }
     const start = starts.get(result.toolUseID) ?? 0;
-    if (start > 0 && event.ts > start) durations.set(result.toolUseID, event.ts - start);
+    const duration = toolResultDurationMs(result, start, event.ts);
+    if (duration !== null) durations.set(result.toolUseID, duration);
   }
   return durations;
 }
 
+export function toolResultDurationMs(result: EventToolResult, startTs: number, resultTs: number): number | null {
+  if (result.duration > 0) return result.duration * 1000;
+  return startTs > 0 && resultTs > startTs ? resultTs - startTs : null;
+}
+
 export function toolCallDurationMs(call: ToolCall, durations: ReadonlyMap<string, number>): number | null {
-  if ((call.result?.duration ?? 0) > 0) return (call.result?.duration ?? 0) * 1000;
+  if (call.result) {
+    const explicit = toolResultDurationMs(call.result, 0, 0);
+    if (explicit !== null) return explicit;
+  }
   return durations.get(call.use.toolUseID) ?? null;
 }
 

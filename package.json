@@ -22,6 +22,7 @@
   "dependencies": {
     "@material-symbols/svg-400": "^0.45.9",
     "@novnc/novnc": "1.7.0",
+    "@observablehq/plot": "^0.6.17",
     "@solidjs/router": "^0.16.2",
     "marked": "^18.0.7",
     "solid-js": "^1.9.14"
