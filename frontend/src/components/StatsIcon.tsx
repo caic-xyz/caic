@@ -5,8 +5,8 @@ import { createSignal, For, Show } from "solid-js";
 
 import type { EventStats } from "@sdk/types.gen";
 
-import type { Session } from "../grouping";
 import { formatDuration, formatTokens } from "../formatting";
+import { formatTimingDuration, type TurnTiming } from "../timing";
 import styles from "./StatsIcon.module.css";
 
 function formatBytes(bytes: number): string {
@@ -61,24 +61,7 @@ function MiniBarGroup(props: { bars: MiniBar[] }) {
   );
 }
 
-interface TurnPerf {
-  index: number;
-  result: NonNullable<Session["turns"][number]["result"]>;
-}
-
-function collectTurnPerfs(sessions: Session[]): TurnPerf[] {
-  const perfs: TurnPerf[] = [];
-  let idx = 0;
-  for (const session of sessions) {
-    for (const turn of session.turns) {
-      if (turn.result) perfs.push({ index: idx, result: turn.result });
-      idx++;
-    }
-  }
-  return perfs;
-}
-
-export default function StatsIcon(props: { stats: EventStats[]; sessions: Session[] }) {
+export default function StatsIcon(props: { stats: EventStats[]; turns: TurnTiming[] }) {
   const [open, setOpen] = createSignal(false);
 
   // Current stats: last sample.
@@ -107,7 +90,7 @@ export default function StatsIcon(props: { stats: EventStats[]; sessions: Sessio
   // Last N samples for history bars (most recent last).
   const recentStats = () => props.stats.slice(-5);
 
-  const perfs = () => collectTurnPerfs(props.sessions);
+  const perfs = () => props.turns;
 
   return (
     <div class={styles.wrapper}>
@@ -189,20 +172,22 @@ export default function StatsIcon(props: { stats: EventStats[]; sessions: Sessio
                     <th class={styles.perfTh}>#</th>
                     <th class={styles.perfTh}>Wall</th>
                     <th class={styles.perfTh}>API</th>
+                    <th class={styles.perfTh}>Wait</th>
                     <th class={styles.perfTh}>Cost</th>
                     <th class={styles.perfTh}>Tokens</th>
                   </tr>
                 </thead>
                 <tbody>
                   <For each={perfs()}>
-                    {(p) => {
+                    {(p, index) => {
                       const r = p.result;
                       const totalTokens = r.usage.inputTokens + r.usage.cacheCreationInputTokens + r.usage.cacheReadInputTokens + r.usage.outputTokens;
                       return (
                         <tr>
-                          <td class={styles.perfTd}>{p.index + 1}</td>
-                          <td class={styles.perfTd}>{formatDuration(r.duration)}</td>
-                          <td class={styles.perfTd}>{formatDuration(r.durationAPI)}</td>
+                          <td class={styles.perfTd}>{index() + 1}</td>
+                          <td class={styles.perfTd}>{r.duration > 0 ? formatDuration(r.duration) : "—"}</td>
+                          <td class={styles.perfTd}>{r.durationAPI > 0 ? formatDuration(r.durationAPI) : "—"}</td>
+                          <td class={styles.perfTd}>{p.waitMs !== null && p.waitMs > 0 ? formatTimingDuration(p.waitMs) : "—"}</td>
                           <td class={styles.perfTd}>{r.totalCostUSD > 0 ? `$${r.totalCostUSD.toFixed(4)}` : "—"}</td>
                           <td class={styles.perfTd}>{formatTokens(totalTokens)}</td>
                         </tr>

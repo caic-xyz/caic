@@ -41,6 +41,12 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 			return nil, err
 		}
 		return []agent.Message{&agent.TextDeltaMessage{Text: m.Text}}, nil
+	case "thinking":
+		var m textDelta
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, err
+		}
+		return []agent.Message{&agent.ThinkingMessage{Text: m.Text}}, nil
 	case "tool_use":
 		var m toolUse
 		if err := json.Unmarshal(line, &m); err != nil {

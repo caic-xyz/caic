@@ -73,6 +73,7 @@ test("setup logs remain visible after task-detail replay", async ({ page, api },
   await expect(setup).toBeVisible();
   await expect(messageArea.getByTestId("task-setup")).toBeVisible();
   await expect(setup).not.toHaveAttribute("open");
+  await expect(setup.locator("summary")).toContainText(/(?:\d+ms|\d+\.\d+s)/);
   await expect(setupLogs).not.toBeVisible();
 
   await setup.getByText("Setup logs").click();

@@ -252,7 +252,7 @@ func TestBackendStart(t *testing.T) {
 	t.Setenv("PATH", dir)
 	t.Setenv("PI_SSH_HELPER_DIR", dir)
 
-	msgs := make(chan agent.ParsedMessage, 1)
+	msgs := make(chan agent.TimedMessage, 1)
 	log := &agenttest.LogSink{Version: agent.LogVersionV1}
 	sess, err := New("", nil).Start(t.Context(), &agent.Options{
 		Logger: slog.New(slog.DiscardHandler),

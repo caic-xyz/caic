@@ -133,8 +133,11 @@ a.headerPR:hover {
 }
 
 .taskSetupTitle {
-  display: block;
+  display: flex;
+  box-sizing: border-box;
   width: 100%;
+  align-items: baseline;
+  gap: 0.5rem;
   padding: 0.25rem 0.5rem;
   color: var(--color-on-primary-container);
   background: var(--color-primary-container);
@@ -187,6 +190,18 @@ a.headerPR:hover {
 
 .placeholder {
   color: var(--color-text-muted);
+}
+
+.timedItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.timedItemContent {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  min-width: 0;
 }
 
 .inputForm {
@@ -278,7 +293,7 @@ a.headerPR:hover {
 
 .userInputMsg {
   margin-bottom: 0.5rem;
-  padding: 0.4rem 0.6rem;
+  padding: 0.4rem 6rem 0.4rem 0.6rem;
   background: var(--color-user-msg-bg);
   border-radius: var(--radius-lg);
   font-size: 0.85rem;
@@ -287,6 +302,7 @@ a.headerPR:hover {
 
 .assistantMsg {
   margin-bottom: 0.5rem;
+  padding-right: 5.5rem;
 }
 
 .markdownWrap {
@@ -302,6 +318,10 @@ a.headerPR:hover {
   opacity: 0;
   transition: opacity 0.15s;
   z-index: 1;
+}
+
+.timedItemContent .rawToolbar {
+  right: 5.5rem;
 }
 
 .markdownWrap:hover .rawToolbar {
@@ -471,7 +491,7 @@ a.headerPR:hover {
 .result {
   margin-top: 0.5rem;
   margin-bottom: 0.5rem;
-  padding: 0.5rem;
+  padding: 0.5rem 6rem 0.5rem 0.5rem;
   border-radius: var(--radius-md);
   font-size: 0.85rem;
 }
@@ -789,7 +809,8 @@ a.ciStatus:hover {
   padding: 0.25rem 0.5rem;
 }
 
-.toolGroup summary {
+.toolGroup > summary {
+  padding-right: 5.5rem;
   cursor: pointer;
   font-size: 0.8rem;
   color: var(--color-text-secondary);
@@ -808,13 +829,14 @@ a.ciStatus:hover {
 }
 
 .thinkingBlock summary {
-  cursor: pointer;
-  font-size: 0.8rem;
-  color: var(--color-text-secondary);
-  font-style: italic;
   display: flex;
+  padding-right: 5.5rem;
   align-items: baseline;
   min-width: 0;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-style: italic;
 }
 
 .thinkingExcerpt {
@@ -846,9 +868,22 @@ a.ciStatus:hover {
 .toolBlock summary {
   cursor: pointer;
   font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.toolSummaryContent {
+  display: inline-flex;
+  width: calc(100% - 1rem);
+  min-width: 0;
+  align-items: baseline;
+  gap: 0.5rem;
+  vertical-align: top;
+}
+
+.toolSummaryMain {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .toolBlockPre {
@@ -940,8 +975,9 @@ a.ciStatus:hover {
 }
 
 .elidedTurn {
-  display: block;
+  display: flex;
   width: 100%;
+  align-items: baseline;
   margin-top: 0.35rem;
   margin-bottom: 0.35rem;
   background: var(--color-primary-container);
@@ -958,6 +994,21 @@ a.ciStatus:hover {
   content: "▶";
   margin-right: 0.4em;
   font-size: 0.7em;
+}
+
+.turnSummaryText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.turnDuration {
+  margin-left: auto;
+  padding-left: 0.75rem;
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .elidedTurn:hover {
@@ -1065,9 +1116,11 @@ a.ciStatus:hover {
 }
 
 .toolDuration {
-  margin-left: 0.5em;
+  margin-left: auto;
+  flex-shrink: 0;
   font-size: 0.75rem;
   color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
 }
 
 .toolError {

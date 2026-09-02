@@ -4,7 +4,7 @@ import { describe, it, expect } from "vitest";
 
 import type { EventMessage, ISOTimestamp } from "@sdk/types.gen";
 
-import { IncrementalMessageGrouper, groupMessages, groupTurns, groupSessions, turnSummary, buildTurnItems, buildPastSessionItems } from "./grouping";
+import { IncrementalMessageGrouper, groupMessages, groupTurns, groupSessions, turnSummary, toolCallDurationMs, toolCallDurations, buildTurnItems, buildPastSessionItems } from "./grouping";
 
 function toolUseEvent(id: string, name: string): EventMessage {
   return { kind: "toolUse", ts: 0, toolUse: { toolUseID: id, name, input: {} } };
@@ -625,6 +625,35 @@ describe("groupTurns", () => {
     expect(turns[0].durationMs).toBe(1000); // resultEvent() has duration: 1.0s
   });
 
+  it("falls back to event timestamps when the harness omits turn duration", () => {
+    const end = resultEvent();
+    end.ts = 6_500;
+    if (end.result) end.result.duration = 0;
+    const events: EventMessage[] = [
+      { kind: "userInput", ts: 1_000, userInput: { text: "start" } },
+      { kind: "text", ts: 2_000, text: { text: "working" } },
+      end,
+    ];
+    const turns = groupTurns(groupMessages(events));
+    expect(turns[0].durationMs).toBe(5_500);
+  });
+
+  it("uses the full timestamp span after groups are reordered", () => {
+    const end = resultEvent();
+    end.ts = 6_500;
+    if (end.result) end.result.duration = 0;
+    const events: EventMessage[] = [
+      { kind: "text", ts: 1_000, text: { text: "working" } },
+      { kind: "toolUse", ts: 2_000, toolUse: { toolUseID: "tool", name: "Read", input: {} } },
+      { kind: "toolResult", ts: 3_000, toolResult: { toolUseID: "tool", duration: 0 } },
+      end,
+    ];
+
+    const turns = groupTurns(groupMessages(events));
+
+    expect(turns[0].durationMs).toBe(5_500);
+  });
+
   it("durationMs uses result.duration directly (per-invocation, not cumulative)", () => {
     // ResultMessage.DurationMs is per-invocation wall-clock time for that turn.
     const makeResult = (duration: number): EventMessage => ({
@@ -649,9 +678,35 @@ describe("groupTurns", () => {
     expect(turns[1].durationMs).toBe(3000); // 3.0s → 3000ms
   });
 
-  it("turnSummary formats correctly", () => {
+  it("turnSummary leaves duration for the dedicated trailing column", () => {
     const turn = { groups: [], toolCount: 3, textCount: 2, durationMs: 5000 };
-    expect(turnSummary(turn)).toBe("2 messages, 3 tool calls · 5s");
+    expect(turnSummary(turn)).toBe("2 messages, 3 tool calls");
+  });
+});
+
+describe("toolCallDurationMs", () => {
+  it("prefers a harness-reported duration", () => {
+    const groups = groupMessages([
+      { kind: "toolUse", ts: 1_000, toolUse: { toolUseID: "t1", name: "Bash", input: {} } },
+      { kind: "toolResult", ts: 2_000, toolResult: { toolUseID: "t1", duration: 0.125 } },
+    ]);
+    expect(toolCallDurationMs(groups[0].toolCalls[0], toolCallDurations(groups[0].events))).toBe(125);
+  });
+
+  it("falls back to event timestamps", () => {
+    const groups = groupMessages([
+      { kind: "toolUse", ts: 1_000, toolUse: { toolUseID: "t1", name: "Read", input: {} } },
+      { kind: "toolResult", ts: 1_037, toolResult: { toolUseID: "t1", duration: 0 } },
+    ]);
+    expect(toolCallDurationMs(groups[0].toolCalls[0], toolCallDurations(groups[0].events))).toBe(37);
+  });
+
+  it("returns no duration when timing metadata is unavailable", () => {
+    const groups = groupMessages([
+      { kind: "toolUse", ts: 0, toolUse: { toolUseID: "t1", name: "Read", input: {} } },
+      { kind: "toolResult", ts: 0, toolResult: { toolUseID: "t1", duration: 0 } },
+    ]);
+    expect(toolCallDurationMs(groups[0].toolCalls[0], toolCallDurations(groups[0].events))).toBeNull();
   });
 });
 

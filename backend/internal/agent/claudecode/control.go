@@ -88,8 +88,8 @@ func (c *controlConn) SendPrompt(p agent.Prompt) error {
 	return nil
 }
 
-func (c *controlConn) ReadMessages(r io.Reader, msgCh chan<- agent.ParsedMessage) error {
-	proxy := make(chan agent.ParsedMessage, 1)
+func (c *controlConn) ReadMessages(r io.Reader, msgCh chan<- agent.TimedMessage) error {
+	proxy := make(chan agent.TimedMessage, 1)
 	errc := make(chan error, 1)
 	go func() {
 		defer close(errc)

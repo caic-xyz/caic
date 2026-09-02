@@ -125,6 +125,13 @@ test("generate documentation screenshots", async ({ page, api }) => {
   const bugFixCard = page.locator(`[data-task-id="${id1}"]`);
   await expect(bugFixCard).toBeVisible({ timeout: 10_000 });
   await bugFixCard.click();
+  await expect(page.getByTestId("task-setup").locator("summary")).toContainText(/(?:\d+ms|\d+\.\d+s)/);
+  const toolSummary = page.getByText("4/4 tools: Read, Edit ×2, Bash");
+  await expect(toolSummary).toBeVisible({ timeout: 10_000 });
+  await toolSummary.click();
+  await expect(page.getByTestId("tool-duration").filter({ hasText: /^180ms$/ })).toBeVisible();
+  await expect(page.getByTestId("tool-duration").filter({ hasText: /^0:01$/ })).toBeVisible();
+  await expect(page.getByTestId("timing-duration").filter({ hasText: /^0:02$/ })).toBeVisible();
   await page.waitForTimeout(500);
   await page.screenshot({
     path: path.join(screenshotDir, "task-detail.png"),

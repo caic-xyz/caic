@@ -23,13 +23,13 @@ const (
 // stableBackwardRecord returns record-local messages whose values do not
 // depend on earlier native records. Stateful records fall back to ordered
 // reconstruction of their turn window.
-func stableBackwardRecord(record agent.ParsedRecord, parseErr error) ([]agent.ParsedMessage, bool) {
+func stableBackwardRecord(record agent.ParsedRecord, parseErr error) ([]agent.TimedMessage, bool) {
 	if parseErr != nil {
 		return nil, false
 	}
 	messages := record.Messages
 	if record.Control {
-		messages = slices.DeleteFunc(slices.Clone(messages), func(message agent.ParsedMessage) bool {
+		messages = slices.DeleteFunc(slices.Clone(messages), func(message agent.TimedMessage) bool {
 			return !isHistoryStreamControlMessage(message.Message)
 		})
 		return messages, true
@@ -102,7 +102,7 @@ func findBackwardWindow(lt *LoadedTask, ctx context.Context, spool *backwardHist
 	}
 }
 
-func parseBackwardWindow(lt *LoadedTask, ctx context.Context, spool *backwardHistorySpool, start, end int64) ([]agent.ParsedMessage, error) {
+func parseBackwardWindow(lt *LoadedTask, ctx context.Context, spool *backwardHistorySpool, start, end int64) ([]agent.TimedMessage, error) {
 	native, err := lt.resolver(spool.authority.Harness)
 	if err != nil {
 		return nil, err
@@ -118,7 +118,7 @@ func parseBackwardWindow(lt *LoadedTask, ctx context.Context, spool *backwardHis
 	scanner := newPhysicalLogScanner(io.NewSectionReader(spool.file, start, end-start), spool.file.Name())
 	scanner.headerSet = true
 	scanner.authority = spool.authority
-	var messages []agent.ParsedMessage
+	var messages []agent.TimedMessage
 	for scanner.Scan() {
 		if err := ctx.Err(); err != nil {
 			return nil, err

@@ -55,7 +55,7 @@ type semanticRecord struct {
 
 type semanticLog struct {
 	authority logAuthority
-	messages  []agent.ParsedMessage
+	messages  []agent.TimedMessage
 	records   []semanticRecord
 }
 
@@ -874,7 +874,7 @@ type LoadedTask struct {
 	LogSize           int64                `json:"log_size"`     // Byte size of the log file on disk; populated by Store.Load.
 	DiffCreated       bool                 `json:"diff_created"` // True if any non-empty diff was recorded in the log; sticky across the run.
 	LastTrailer       *Result              `json:"result"`       // Completion result parsed from the log trailer at load time; a snapshot of the last recorded run, never live state.
-	Msgs              []agent.Message      `json:"-"`
+	Timeline          []agent.TimedMessage `json:"-"`
 
 	path           string               // Absolute path for lazy message loading via LoadMessages.
 	resolver       NativeParserResolver // Fresh parser factory supplied by the task owner.
@@ -897,7 +897,7 @@ func (lt *LoadedTask) LogPath() string {
 // LoadMessagesWithResolver lazily loads full conversation messages with a
 // fresh parser derived from the log header.
 func (lt *LoadedTask) LoadMessagesWithResolver(resolver NativeParserResolver) error {
-	if lt.messagesLoaded || lt.Msgs != nil || lt.path == "" {
+	if lt.messagesLoaded || lt.Timeline != nil || lt.path == "" {
 		return nil
 	}
 	loaded, err := loadSemanticTask(lt.path, resolver)
@@ -932,7 +932,7 @@ func (lt *LoadedTask) SetNativeParserResolver(resolver NativeParserResolver) {
 // This is an EOF scan of the complete physical log and can be expensive for
 // large historical sessions.
 func (lt *LoadedTask) LoadMessages() error {
-	if lt.Msgs != nil || lt.path == "" {
+	if lt.Timeline != nil || lt.path == "" {
 		return nil
 	}
 	if lt.resolver == nil {
@@ -954,14 +954,14 @@ func (lt *LoadedTask) LoadSessionMetadata() error {
 
 // StreamMessages streams parsed task conversation records directly from the
 // log. Cancellation is checked between records and before delivery.
-func (lt *LoadedTask) StreamMessages(ctx context.Context) iter.Seq2[agent.ParsedMessage, error] {
-	return func(yield func(agent.ParsedMessage, error) bool) {
+func (lt *LoadedTask) StreamMessages(ctx context.Context) iter.Seq2[agent.TimedMessage, error] {
+	return func(yield func(agent.TimedMessage, error) bool) {
 		if lt.path == "" {
-			yield(agent.ParsedMessage{}, errors.New("task has no log path"))
+			yield(agent.TimedMessage{}, errors.New("task has no log path"))
 			return
 		}
 		if lt.resolver == nil {
-			yield(agent.ParsedMessage{}, errors.New("no parser resolver set"))
+			yield(agent.TimedMessage{}, errors.New("no parser resolver set"))
 			return
 		}
 		err := scanPhysicalLog(lt.path, true, func(_ os.FileInfo, scanner *physicalLogScanner, _ agent.MetaMessage) error {
@@ -999,7 +999,7 @@ func (lt *LoadedTask) StreamMessages(ctx context.Context) iter.Seq2[agent.Parsed
 			return scanner.Err()
 		})
 		if err != nil && !errors.Is(err, errTaskLogStreamStopped) {
-			yield(agent.ParsedMessage{}, err)
+			yield(agent.TimedMessage{}, err)
 		}
 	}
 }
@@ -1011,20 +1011,20 @@ func (lt *LoadedTask) StreamMessages(ctx context.Context) iter.Seq2[agent.Parsed
 // only their current turn. The first yield waits for decompression, but semantic
 // parsing stops when the consumer stops; memory is bounded by one turn rather
 // than the complete task history.
-func (lt *LoadedTask) BackwardMessages(ctx context.Context) iter.Seq2[agent.ParsedMessage, error] {
-	return func(yield func(agent.ParsedMessage, error) bool) {
+func (lt *LoadedTask) BackwardMessages(ctx context.Context) iter.Seq2[agent.TimedMessage, error] {
+	return func(yield func(agent.TimedMessage, error) bool) {
 		if lt.path == "" {
-			yield(agent.ParsedMessage{}, errors.New("task has no log path"))
+			yield(agent.TimedMessage{}, errors.New("task has no log path"))
 			return
 		}
 		if lt.resolver == nil {
-			yield(agent.ParsedMessage{}, errors.New("no parser resolver set"))
+			yield(agent.TimedMessage{}, errors.New("no parser resolver set"))
 			return
 		}
 
 		spool, err := newBackwardHistorySpool(ctx, lt.path)
 		if err != nil {
-			yield(agent.ParsedMessage{}, err)
+			yield(agent.TimedMessage{}, err)
 			return
 		}
 		defer func() { _ = spool.cleanup() }()
@@ -1033,28 +1033,28 @@ func (lt *LoadedTask) BackwardMessages(ctx context.Context) iter.Seq2[agent.Pars
 		for windowEnd > spool.headerEnd {
 			native, err := lt.resolver(spool.authority.Harness)
 			if err != nil {
-				yield(agent.ParsedMessage{}, err)
+				yield(agent.TimedMessage{}, err)
 				return
 			}
 			parser, err := agent.NewLogRecordParser(spool.authority.Version, native)
 			if err != nil {
-				yield(agent.ParsedMessage{}, err)
+				yield(agent.TimedMessage{}, err)
 				return
 			}
 			if _, err := parser.ParseRecord(spool.header); err != nil {
-				yield(agent.ParsedMessage{}, err)
+				yield(agent.TimedMessage{}, err)
 				return
 			}
 
 			reader := backwardRecordReader{file: spool.file, start: spool.headerEnd, pos: windowEnd}
 			for windowEnd > spool.headerEnd {
 				if err := ctx.Err(); err != nil {
-					yield(agent.ParsedMessage{}, err)
+					yield(agent.TimedMessage{}, err)
 					return
 				}
 				line, lineStart, _, ok, err := reader.previous()
 				if err != nil {
-					yield(agent.ParsedMessage{}, err)
+					yield(agent.TimedMessage{}, err)
 					return
 				}
 				if !ok {
@@ -1074,12 +1074,12 @@ func (lt *LoadedTask) BackwardMessages(ctx context.Context) iter.Seq2[agent.Pars
 
 				windowStart, more, err := findBackwardWindow(lt, ctx, spool, windowEnd)
 				if err != nil {
-					yield(agent.ParsedMessage{}, err)
+					yield(agent.TimedMessage{}, err)
 					return
 				}
 				messages, err = parseBackwardWindow(lt, ctx, spool, windowStart, windowEnd)
 				if err != nil {
-					yield(agent.ParsedMessage{}, err)
+					yield(agent.TimedMessage{}, err)
 					return
 				}
 				for _, message := range slices.Backward(messages) {
@@ -1247,13 +1247,13 @@ func semanticLoadedTask(log *semanticLog) *LoadedTask {
 	return loaded
 }
 
-func semanticLoadedMessages(loaded *LoadedTask, control bool, messages []agent.ParsedMessage) {
+func semanticLoadedMessages(loaded *LoadedTask, control bool, messages []agent.TimedMessage) {
 	applyInventoryMetadata(loaded, nil, messages)
 	for _, parsed := range messages {
 		if control && isInventoryMetadataMessage(parsed.Message) {
 			continue
 		}
-		loaded.Msgs = append(loaded.Msgs, parsed.Message)
+		loaded.Timeline = append(loaded.Timeline, parsed)
 	}
 }
 
@@ -1293,8 +1293,8 @@ func parseInventoryNativeMetadata(raw []byte) ([]agent.Message, error) {
 
 // applyInventoryMetadata updates only task projections available during an
 // inventory scan. It deliberately never appends conversation or control
-// messages, keeping Msgs nil until a later semantic load.
-func applyInventoryMetadata(loaded *LoadedTask, tail *logTailScan, messages []agent.ParsedMessage) {
+// messages, keeping Timeline nil until a later semantic load.
+func applyInventoryMetadata(loaded *LoadedTask, tail *logTailScan, messages []agent.TimedMessage) {
 	for _, parsed := range messages {
 		switch msg := parsed.Message.(type) {
 		case *agent.InitMessage:
@@ -1357,7 +1357,7 @@ func applySemanticTask(lt, loaded *LoadedTask, messages bool) {
 		lt.DiffCreated = true
 	}
 	if messages {
-		lt.Msgs = loaded.Msgs
+		lt.Timeline = loaded.Timeline
 		lt.messagesLoaded = true
 	}
 }
@@ -1593,7 +1593,7 @@ func taskIDFromLogBase(base string) string {
 
 var errTaskLogStreamStopped = errors.New("task log stream consumer stopped")
 
-func applyParsedSessionMetadata(lt *LoadedTask, msgs []agent.ParsedMessage) {
+func applyParsedSessionMetadata(lt *LoadedTask, msgs []agent.TimedMessage) {
 	for _, parsed := range msgs {
 		init, ok := parsed.Message.(*agent.InitMessage)
 		if !ok {

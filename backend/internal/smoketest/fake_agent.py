@@ -27,6 +27,13 @@ NATURAL_ASK_RE = re.compile(r"\b(?:which|should i|choose|prefer)\b")
 NATURAL_DEMO_RE = re.compile(r"\b(?:fix|bug|refactor|update|add|implement)\b")
 NATURAL_PLAN_RE = re.compile(r"\b(?:plan|design|architect|outline)\b")
 
+TOOL_DURATIONS_MS = {
+    "Read": 180,
+    "Edit": 240,
+    "Write": 310,
+    "Bash": 620,
+}
+
 LIFECYCLE_RESULT = "Lifecycle completed"
 LIFECYCLE_STREAM_MARKER = "Lifecycle streaming marker"
 
@@ -264,6 +271,7 @@ ASK_QUESTION = {
 DEMO_SCENARIOS = [
     {
         "steps": [
+            {"thinking": "Inspecting the authentication flow before making changes."},
             {
                 "text": "I'll investigate the authentication issue. Let me read the middleware code first.",
             },
@@ -317,7 +325,7 @@ DEMO_SCENARIOS = [
             " `time.Before` with inverted logic. Added a regression test."
         ),
         "cost": 0.03,
-        "duration": 12400,
+        "duration": 2200,
     },
     {
         "steps": [
@@ -382,7 +390,7 @@ DEMO_SCENARIOS = [
             "Added token bucket rate limiter (100 req/s burst 200 per IP) as HTTP middleware wrapping all API routes."
         ),
         "cost": 0.05,
-        "duration": 18700,
+        "duration": 1900,
     },
     {
         "steps": [
@@ -425,7 +433,7 @@ DEMO_SCENARIOS = [
         ],
         "result": "Parallelized CI pipeline using matrix strategy. Expected speedup: ~8min → ~3min.",
         "cost": 0.02,
-        "duration": 8300,
+        "duration": 1500,
     },
 ]
 
@@ -458,6 +466,10 @@ def emit_text(text: str) -> None:
 
 def emit_tool_use(tool_id: str, name: str, input_obj: dict) -> None:
     emit({"type": "tool_use", "id": tool_id, "name": name, "input": input_obj})
+
+
+def emit_tool_result(tool_id: str, duration_ms: int) -> None:
+    emit({"type": "tool_result", "tool_use_id": tool_id, "duration_ms": duration_ms})
 
 
 def emit_result(turns: int, result: str, cost: float = 0.01, duration: int = 500) -> None:
@@ -515,13 +527,18 @@ def emit_demo_turn(turns: int) -> None:
     """Emit a realistic multi-tool scenario."""
     scenario = DEMO_SCENARIOS[(turns - 1) % len(DEMO_SCENARIOS)]
     for step in scenario["steps"]:
+        if "thinking" in step:
+            emit({"type": "thinking", "text": step["thinking"]})
+            time.sleep(0.1)
         if "text" in step:
             emit_text(step["text"])
             time.sleep(0.1)
         if "tool" in step:
             tool_id, name, input_obj = step["tool"]
             emit_tool_use(tool_id, name, input_obj)
-            time.sleep(0.15)
+            duration_ms = TOOL_DURATIONS_MS.get(name, 200)
+            time.sleep(duration_ms / 1000)
+            emit_tool_result(tool_id, duration_ms)
     emit_result(turns, scenario["result"], scenario.get("cost", 0.01), scenario.get("duration", 500))
 
 
@@ -532,6 +549,8 @@ def emit_lifecycle_turn(turns: int) -> None:
 
 
 def main() -> None:
+    # Model the agent handshake so setup timing is visible and non-zero in e2e.
+    time.sleep(0.12)
     emit(
         {
             "type": "init",

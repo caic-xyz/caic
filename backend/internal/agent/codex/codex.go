@@ -137,7 +137,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	}
 	wire.suppressUserInput = true
 	initMsg := &agent.InitMessage{SessionID: wire.threadID, Model: opts.Model, Version: wire.agentVersion}
-	opts.MsgCh <- agent.ParsedMessage{Message: initMsg}
+	opts.MsgCh <- agent.TimedMessage{Message: initMsg}
 	if err := agent.WriteMetaSession(opts.Log, initMsg); err != nil {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()

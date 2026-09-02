@@ -296,7 +296,7 @@ func validateV2RecordBytes(line []byte) error {
 	return nil
 }
 
-func parseV2AgentRecord(p *LogRecordParser, line []byte) ([]ParsedMessage, error) {
+func parseV2AgentRecord(p *LogRecordParser, line []byte) ([]TimedMessage, error) {
 	rest := line[len(v2AgentRecordPrefix):]
 	delimiter := bytes.IndexByte(rest, ',')
 	if delimiter < 0 || !bytes.HasPrefix(rest[delimiter:], []byte(v2AgentMessagePrefix)) {

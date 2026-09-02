@@ -199,13 +199,125 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    const { getByText } = renderTaskDetail({ harness: "codex" });
+    const { getAllByText, getByText } = renderTaskDetail({ harness: "codex" });
 
+    expect(getAllByText("100ms")).toHaveLength(1);
     expect(getByText("/workspace/main.go")).toBeInTheDocument();
     const added = getByText((_, element) => element?.textContent === "+\tfmt.Println(\"Hi, World!\")");
     const deleted = getByText((_, element) => element?.textContent === "-\tfmt.Println(\"Hello, World!\")");
     expect(added.className).toMatch(/lineAdded/);
     expect(deleted.className).toMatch(/lineDeleted/);
+  });
+
+  it("shows elapsed time on a single-event message block", () => {
+    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+      handlers.onMessage({ kind: "userInput", ts: 1_000, userInput: { text: "prompt" } });
+      handlers.onMessage({ kind: "text", ts: 2_500, text: { text: "response" } });
+      handlers.onReady?.();
+      return {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      } as unknown as EventSource;
+    });
+
+    const { getByText } = renderTaskDetail();
+
+    expect(getByText("0:02")).toBeInTheDocument();
+  });
+
+  it("shows one timing control for a thinking-only block", () => {
+    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+      handlers.onMessage({ kind: "userInput", ts: 1_000, userInput: { text: "prompt" } });
+      handlers.onMessage({ kind: "thinking", ts: 2_000, thinking: { text: "checking the implementation" } });
+      handlers.onReady?.();
+      return {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      } as unknown as EventSource;
+    });
+
+    const { getAllByLabelText } = renderTaskDetail();
+
+    const timing = getAllByLabelText("Timing details");
+    expect(timing).toHaveLength(1);
+    expect(timing[0].querySelector("svg")).toBeNull();
+  });
+
+  it("formats short result durations without misleading zero seconds", () => {
+    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+      const event = resultEvent(2_000);
+      if (!event.result) throw new Error("result fixture is missing payload");
+      event.result.duration = 0.125;
+      handlers.onMessage(event);
+      handlers.onReady?.();
+      return {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      } as unknown as EventSource;
+    });
+
+    const { getByText, queryByText } = renderTaskDetail();
+
+    expect(getByText("125ms")).toBeInTheDocument();
+    expect(getByText("1 turn")).toBeInTheDocument();
+    expect(queryByText("0.0s")).not.toBeInTheDocument();
+  });
+
+  it("right-aligns the duration on collapsed turns", () => {
+    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+      const firstResult = resultEvent(333_000);
+      if (firstResult.result) firstResult.result.duration = 332;
+      const events: EventMessage[] = [
+        { kind: "userInput", ts: 1_000, userInput: { text: "first" } },
+        { kind: "text", ts: 2_000, text: { text: "first response" } },
+        firstResult,
+        { kind: "userInput", ts: 334_000, userInput: { text: "second" } },
+        { kind: "text", ts: 335_000, text: { text: "second response" } },
+        resultEvent(336_000),
+      ];
+      for (const event of events) handlers.onMessage(event);
+      handlers.onReady?.();
+      return {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      } as unknown as EventSource;
+    });
+
+    const { getByText } = renderTaskDetail();
+    const duration = getByText("5:32");
+    expect(duration.className).toMatch(/turnDuration/);
+  });
+
+  it("shows an explicit zero duration on collapsed turns without timing metadata", () => {
+    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+      const firstResult = resultEvent(0);
+      const secondResult = resultEvent(0);
+      if (!firstResult.result || !secondResult.result) throw new Error("result fixture is missing payload");
+      firstResult.result.duration = 0;
+      secondResult.result.duration = 0;
+      const events: EventMessage[] = [
+        { kind: "text", ts: 0, text: { text: "first response" } },
+        firstResult,
+        { kind: "userInput", ts: 0, userInput: { text: "second" } },
+        { kind: "text", ts: 0, text: { text: "second response" } },
+        secondResult,
+      ];
+      for (const event of events) handlers.onMessage(event);
+      handlers.onReady?.();
+      return {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      } as unknown as EventSource;
+    });
+
+    const { getByText } = renderTaskDetail();
+
+    expect(getByText("0s").className).toMatch(/turnDuration/);
   });
 
   it("shows recover actions for crashed tasks", async () => {
@@ -271,10 +383,10 @@ describe("TaskDetail", () => {
     expect(getByTestId("task-message-area")).toHaveTextContent("agent extension failed to load");
   });
 
-  it("collapses setup logs after the agent session starts", () => {
+  it("shows zero instead of an implausible reconstructed setup duration", () => {
     vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
-      handlers.onMessage({ kind: "log", ts: 1, log: { line: "starting runtime" } });
-      handlers.onMessage({ kind: "init", ts: 2, init: { model: "test", agentVersion: "test", sessionID: "session", cwd: "", harness: "test" } });
+      handlers.onMessage({ kind: "log", ts: 1_500, log: { line: "starting runtime" } });
+      handlers.onMessage({ kind: "init", ts: 46 * 60 * 60 * 1000, init: { model: "test", agentVersion: "test", sessionID: "session", cwd: "", harness: "test" } });
       handlers.onReady?.();
       return {
         addEventListener: vi.fn(),
@@ -283,9 +395,27 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    const { getByTestId } = renderTaskDetail();
+    const { getByText } = renderTaskDetail({ startedAt: new Date(1_000).toISOString() });
+
+    expect(getByText("0s")).toBeInTheDocument();
+  });
+
+  it("collapses setup logs after the agent session starts", () => {
+    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+      handlers.onMessage({ kind: "log", ts: 1_500, log: { line: "starting runtime" } });
+      handlers.onMessage({ kind: "init", ts: 6_500, init: { model: "test", agentVersion: "test", sessionID: "session", cwd: "", harness: "test" } });
+      handlers.onReady?.();
+      return {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      } as unknown as EventSource;
+    });
+
+    const { getByTestId, getByText } = renderTaskDetail({ startedAt: new Date(1_000).toISOString() });
 
     expect(getByTestId("task-setup")).not.toHaveAttribute("open");
+    expect(getByText("0:06")).toBeInTheDocument();
   });
 });
 

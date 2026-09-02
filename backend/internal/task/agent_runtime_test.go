@@ -432,13 +432,13 @@ func TestRunner(t *testing.T) {
 			if err := logs[0].LoadMessages(); err != nil {
 				t.Fatal(err)
 			}
-			if len(logs[0].Msgs) != 2 {
-				t.Fatalf("loaded %d messages, want setup log and failure", len(logs[0].Msgs))
+			if len(logs[0].Timeline) != 2 {
+				t.Fatalf("loaded %d messages, want setup log and failure", len(logs[0].Timeline))
 			}
 			for i, want := range []string{"md setup output", "Task startup failed: runtime launch failed"} {
-				log, ok := logs[0].Msgs[i].(*agent.LogMessage)
+				log, ok := logs[0].Timeline[i].Message.(*agent.LogMessage)
 				if !ok || log.Line != want {
-					t.Fatalf("message[%d] = %#v, want log %q", i, logs[0].Msgs[i], want)
+					t.Fatalf("message[%d] = %#v, want log %q", i, logs[0].Timeline[i], want)
 				}
 			}
 		})
@@ -1340,11 +1340,15 @@ func testRunnerSessions(t *testing.T) {
 			if err := session.Wait(); err != nil {
 				t.Fatal(err)
 			}
-			if got := <-sub; got.Message != v2Message {
+			got := <-sub
+			if got.Message != v2Message {
 				t.Fatalf("subscriber message = %T, want original %T", got.Message, v2Message)
 			}
-			var v1 agent.ParsedMessage
-			err = agent.DefaultReadMessages(t.Context(), logtest.Logger(t), strings.NewReader(`{"event":"legacy"}`+"\n"), func(parsed agent.ParsedMessage) {
+			if want := time.Unix(1, 234_000_000); !got.ObservedAt.Equal(want) {
+				t.Fatalf("subscriber observed time = %v, want %v", got.ObservedAt, want)
+			}
+			var v1 agent.TimedMessage
+			err = agent.DefaultReadMessages(t.Context(), logtest.Logger(t), strings.NewReader(`{"event":"legacy"}`+"\n"), func(parsed agent.TimedMessage) {
 				v1 = parsed
 				opts.MsgCh <- parsed
 			}, agent.DiscardLogSink{Version: agent.LogVersionV1}, agent.LogVersionV1, func([]byte) ([]agent.Message, error) {
@@ -1378,7 +1382,7 @@ func testRunnerSessions(t *testing.T) {
 			msgCh, _ := r.startMessageDispatch(t.Context(), tk, false)
 
 			rm := &agent.ResultMessage{MessageType: "result"}
-			msgCh <- agent.ParsedMessage{Message: rm}
+			msgCh <- agent.TimedMessage{Message: rm}
 			close(msgCh)
 
 			// Wait for the dispatched message.
@@ -1427,7 +1431,7 @@ func testRunnerSessions(t *testing.T) {
 
 					// Send a ToolUseMessage with a mutating tool.
 					toolID := "tool_edit_1"
-					msgCh <- agent.ParsedMessage{Message: &agent.ToolUseMessage{
+					msgCh <- agent.TimedMessage{Message: &agent.ToolUseMessage{
 						ToolUseID: toolID,
 						Name:      tool,
 						Input:     json.RawMessage(`{}`),
@@ -1436,7 +1440,7 @@ func testRunnerSessions(t *testing.T) {
 					recvMsg(t, ch)
 
 					// Send the tool result.
-					msgCh <- agent.ParsedMessage{Message: &agent.ToolResultMessage{
+					msgCh <- agent.TimedMessage{Message: &agent.ToolResultMessage{
 						ToolUseID: toolID,
 					}}
 
@@ -1475,14 +1479,14 @@ func testRunnerSessions(t *testing.T) {
 			msgCh, _ := r.startMessageDispatch(t.Context(), tk, false)
 
 			toolID := "tool_read_1"
-			msgCh <- agent.ParsedMessage{Message: &agent.ToolUseMessage{
+			msgCh <- agent.TimedMessage{Message: &agent.ToolUseMessage{
 				ToolUseID: toolID,
 				Name:      "Read",
 				Input:     json.RawMessage(`{}`),
 			}}
 			recvMsg(t, ch) // drain tool_use
 
-			msgCh <- agent.ParsedMessage{Message: &agent.ToolResultMessage{
+			msgCh <- agent.TimedMessage{Message: &agent.ToolResultMessage{
 				ToolUseID: toolID,
 			}}
 			// Only expect the ToolResultMessage, no DiffStatMessage.
@@ -1512,11 +1516,11 @@ func testRunnerSessions(t *testing.T) {
 
 			// Send a mutating tool use + result and a ResultMessage.
 			toolID := "tool_edit_1"
-			msgCh <- agent.ParsedMessage{Message: &agent.ToolUseMessage{ToolUseID: toolID, Name: "Edit", Input: json.RawMessage(`{}`)}}
+			msgCh <- agent.TimedMessage{Message: &agent.ToolUseMessage{ToolUseID: toolID, Name: "Edit", Input: json.RawMessage(`{}`)}}
 			recvMsg(t, ch)
-			msgCh <- agent.ParsedMessage{Message: &agent.ToolResultMessage{ToolUseID: toolID}}
+			msgCh <- agent.TimedMessage{Message: &agent.ToolResultMessage{ToolUseID: toolID}}
 			recvMsg(t, ch)
-			msgCh <- agent.ParsedMessage{Message: &agent.ResultMessage{MessageType: "result"}}
+			msgCh <- agent.TimedMessage{Message: &agent.ResultMessage{MessageType: "result"}}
 			recvMsg(t, ch)
 			close(msgCh)
 			<-done
@@ -1542,7 +1546,7 @@ func testRunnerSessions(t *testing.T) {
 				{Text: "third"},
 			}
 			for _, m := range msgs {
-				msgCh <- agent.ParsedMessage{Message: m}
+				msgCh <- agent.TimedMessage{Message: m}
 			}
 			close(msgCh)
 			<-done
@@ -1633,7 +1637,7 @@ func testRunnerSessions(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		msgCh := make(chan agent.ParsedMessage, 16)
+		msgCh := make(chan agent.TimedMessage, 16)
 		session, err := backend.Start(t.Context(), &agent.Options{Logger: logtest.Logger(t), MsgCh: msgCh, Log: logW})
 		if err != nil {
 			t.Fatal(err)

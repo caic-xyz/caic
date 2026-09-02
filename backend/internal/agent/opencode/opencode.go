@@ -123,7 +123,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		Model:     hs.currentModel,
 		Version:   hs.agentVersion,
 	}
-	opts.MsgCh <- agent.ParsedMessage{Message: initMsg}
+	opts.MsgCh <- agent.TimedMessage{Message: initMsg}
 	if err := agent.WriteMetaSession(opts.Log, initMsg); err != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()

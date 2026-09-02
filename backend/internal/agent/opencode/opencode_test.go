@@ -297,7 +297,7 @@ exit 1
 		Logger: slog.New(slog.DiscardHandler),
 		Target: runtime.ConnectionTarget{SSHHost: "task"},
 		Dir:    "/workspace",
-		MsgCh:  make(chan agent.ParsedMessage, 1),
+		MsgCh:  make(chan agent.TimedMessage, 1),
 		Log:    failingLogSink{},
 	})
 	if err == nil || !strings.Contains(err.Error(), "write session metadata") {

@@ -690,8 +690,8 @@ func TestStore(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			if len(tasks[0].Msgs) != 1 {
-				t.Fatalf("appended semantic messages = %#v, want one message", tasks[0].Msgs)
+			if len(tasks[0].Timeline) != 1 {
+				t.Fatalf("appended semantic messages = %#v, want one message", tasks[0].Timeline)
 			}
 		})
 		t.Run("PhysicalAuthority", func(t *testing.T) {
@@ -852,8 +852,8 @@ func TestStore(t *testing.T) {
 						t.Fatalf("result metadata v2 = %#v, v1 = %#v", v2.LastTrailer, v1.LastTrailer)
 					}
 					for _, loaded := range []*LoadedTask{v1, v2} {
-						if loaded.Msgs != nil {
-							t.Fatalf("inventory messages = %#v, want nil for lazy semantic loading", loaded.Msgs)
+						if loaded.Timeline != nil {
+							t.Fatalf("inventory messages = %#v, want nil for lazy semantic loading", loaded.Timeline)
 						}
 						calls := 0
 						if err := loaded.LoadMessagesWithResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
@@ -867,8 +867,8 @@ func TestStore(t *testing.T) {
 						}); err != nil {
 							t.Fatal(err)
 						}
-						if calls != 1 || len(loaded.Msgs) != 1 {
-							t.Fatalf("lazy semantic load calls/messages = %d/%#v, want 1/one conversation", calls, loaded.Msgs)
+						if calls != 1 || len(loaded.Timeline) != 1 {
+							t.Fatalf("lazy semantic load calls/messages = %d/%#v, want 1/one conversation", calls, loaded.Timeline)
 						}
 					}
 					if compressed {
@@ -879,8 +879,8 @@ func TestStore(t *testing.T) {
 						if cached.SessionID != v2.SessionID || cached.AgentVersion != v2.AgentVersion || cached.ForgePR != v2.ForgePR || cached.DiffCreated != v2.DiffCreated || cached.LastTrailer == nil || cached.LastTrailer.State != v2.LastTrailer.State {
 							t.Fatalf("cached v2 control metadata = %#v, want %#v", cached, v2)
 						}
-						if cached.Msgs != nil {
-							t.Fatalf("cached inventory messages = %#v, want nil", cached.Msgs)
+						if cached.Timeline != nil {
+							t.Fatalf("cached inventory messages = %#v, want nil", cached.Timeline)
 						}
 					}
 				})
@@ -931,8 +931,8 @@ func TestStore(t *testing.T) {
 					if v2.LastTrailer == nil || v1.LastTrailer == nil || v2.LastTrailer.CostUSD != v1.LastTrailer.CostUSD || v2.LastTrailer.Duration != v1.LastTrailer.Duration || v2.LastTrailer.NumTurns != v1.LastTrailer.NumTurns || v2.LastTrailer.Usage != v1.LastTrailer.Usage {
 						t.Fatalf("native result backfill v2 = %#v, v1 = %#v", v2.LastTrailer, v1.LastTrailer)
 					}
-					if v2.Msgs != nil {
-						t.Fatalf("inventory messages = %#v, want nil", v2.Msgs)
+					if v2.Timeline != nil {
+						t.Fatalf("inventory messages = %#v, want nil", v2.Timeline)
 					}
 				})
 			}
@@ -1198,7 +1198,7 @@ func TestStore(t *testing.T) {
 				t.Errorf("tasks[1].Prompt = %q, want %q", tasks[1].Prompt, "second")
 			}
 			// Msgs are nil until LoadMessages is called.
-			if tasks[0].Msgs != nil {
+			if tasks[0].Timeline != nil {
 				t.Error("tasks[0].Msgs should be nil before LoadMessages")
 			}
 			setClaudeParser(tasks)
@@ -1209,12 +1209,12 @@ func TestStore(t *testing.T) {
 			}
 			// Each task has its own messages, not merged.
 			// asst1 produces 1 TextMessage.
-			if len(tasks[0].Msgs) != 1 {
-				t.Errorf("tasks[0].Msgs len = %d, want 1", len(tasks[0].Msgs))
+			if len(tasks[0].Timeline) != 1 {
+				t.Errorf("tasks[0].Msgs len = %d, want 1", len(tasks[0].Timeline))
 			}
 			// init2 produces 1 InitMessage; asst2 produces 1 TextMessage = 2 total.
-			if len(tasks[1].Msgs) != 2 {
-				t.Errorf("tasks[1].Msgs len = %d, want 2", len(tasks[1].Msgs))
+			if len(tasks[1].Timeline) != 2 {
+				t.Errorf("tasks[1].Msgs len = %d, want 2", len(tasks[1].Timeline))
 			}
 		})
 		t.Run("FeatureFlagsAllSet", func(t *testing.T) {
@@ -1590,8 +1590,8 @@ func TestStore(t *testing.T) {
 			}
 			// The context-clear marker remains present for Task to apply during restoration.
 			found := false
-			for _, message := range lt.Msgs {
-				if marker, ok := message.(*agent.SystemMessage); ok && marker.Subtype == "context_cleared" {
+			for _, entry := range lt.Timeline {
+				if marker, ok := entry.Message.(*agent.SystemMessage); ok && marker.Subtype == "context_cleared" {
 					found = true
 				}
 			}

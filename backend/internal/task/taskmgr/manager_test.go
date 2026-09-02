@@ -131,14 +131,14 @@ func newTestRuntime(t testing.TB, lc runtime.Lifecycle, info testRuntimeInfo) *r
 
 type fakeRelayReader struct {
 	statusFn   func(context.Context, runtime.ConnectionTarget) (bool, string, error)
-	readTailFn func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) ([]agent.ParsedMessage, int64, error)
+	readTailFn func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) ([]agent.TimedMessage, int64, error)
 	readLogFn  func(context.Context, runtime.ConnectionTarget, int) string
 }
 
-func relayParsed(msgs ...agent.Message) []agent.ParsedMessage {
-	parsed := make([]agent.ParsedMessage, len(msgs))
+func relayParsed(msgs ...agent.Message) []agent.TimedMessage {
+	parsed := make([]agent.TimedMessage, len(msgs))
 	for i, msg := range msgs {
-		parsed[i] = agent.ParsedMessage{Message: msg}
+		parsed[i] = agent.TimedMessage{Message: msg}
 	}
 	return parsed
 }
@@ -147,7 +147,7 @@ func (f fakeRelayReader) Status(ctx context.Context, target runtime.ConnectionTa
 	return f.statusFn(ctx, target)
 }
 
-func (f fakeRelayReader) ReadTail(ctx context.Context, target runtime.ConnectionTarget, parser *agent.LogRecordParser, maxBytes int64) (msgs []agent.ParsedMessage, size int64, err error) {
+func (f fakeRelayReader) ReadTail(ctx context.Context, target runtime.ConnectionTarget, parser *agent.LogRecordParser, maxBytes int64) (msgs []agent.TimedMessage, size int64, err error) {
 	return f.readTailFn(ctx, target, parser, maxBytes)
 }
 
@@ -276,7 +276,7 @@ func (*reconnectInputConn) SendRaw([]byte) error { return nil }
 
 func (*reconnectInputConn) SendCompact(string) error { return errors.New("compact not supported") }
 
-func (*reconnectInputConn) ReadMessages(r io.Reader, _ chan<- agent.ParsedMessage) error {
+func (*reconnectInputConn) ReadMessages(r io.Reader, _ chan<- agent.TimedMessage) error {
 	_, err := io.Copy(io.Discard, r)
 	return err
 }
@@ -290,6 +290,23 @@ func (c *reconnectInputConn) Close() error {
 	return nil
 }
 
+func mergeLogAndRelayMessages(logMessages, relayMessages []agent.Message) []agent.Message {
+	logEntries := make([]agent.TimedMessage, len(logMessages))
+	for i, message := range logMessages {
+		logEntries[i].Message = message
+	}
+	relayEntries := make([]agent.TimedMessage, len(relayMessages))
+	for i, message := range relayMessages {
+		relayEntries[i].Message = message
+	}
+	merged := mergeLogAndRelayTimeline(logEntries, relayEntries)
+	messages := make([]agent.Message, len(merged))
+	for i, entry := range merged {
+		messages[i] = entry.Message
+	}
+	return messages
+}
+
 func textMessages(msgs []agent.Message) []string {
 	texts := make([]string, 0, len(msgs))
 	for _, msg := range msgs {
@@ -298,6 +315,37 @@ func textMessages(msgs []agent.Message) []string {
 		}
 	}
 	return texts
+}
+
+func BenchmarkMergeLogAndRelayTimeline(b *testing.B) {
+	const logCount = 4_000
+	const overlap = 1_000
+	logEntries := make([]agent.TimedMessage, logCount)
+	for i := range logEntries {
+		logEntries[i] = agent.TimedMessage{
+			Message:      &agent.TextMessage{Text: fmt.Sprintf("message-%d", i)},
+			ProducerTime: time.UnixMilli(int64(i + 1)),
+		}
+	}
+	relayEntries := make([]agent.TimedMessage, overlap+1)
+	for i := range overlap {
+		logEntry := logEntries[logCount-overlap+i]
+		relayEntries[i] = agent.TimedMessage{
+			Message:      &agent.TextMessage{Text: fmt.Sprintf("message-%d", logCount-overlap+i)},
+			ProducerTime: logEntry.ProducerTime,
+		}
+	}
+	relayEntries[overlap] = agent.TimedMessage{
+		Message:      &agent.TextMessage{Text: "new-message"},
+		ProducerTime: time.UnixMilli(logCount + 1),
+	}
+	b.ReportAllocs()
+
+	for b.Loop() {
+		if got := mergeLogAndRelayTimeline(logEntries, relayEntries); len(got) != logCount+1 {
+			b.Fatalf("merged %d entries, want %d", len(got), logCount+1)
+		}
+	}
 }
 
 func TestMergeLogAndRelayMessages(t *testing.T) {
@@ -312,6 +360,38 @@ func TestMergeLogAndRelayMessages(t *testing.T) {
 		want := []string{"before", "overlap", "after"}
 		if !slices.Equal(texts, want) {
 			t.Fatalf("merged texts = %#v, want %#v", texts, want)
+		}
+	})
+	t.Run("valid_overlap_preserves_aligned_times", func(t *testing.T) {
+		t.Parallel()
+		before := &agent.TextMessage{Text: "before"}
+		overlap := &agent.TextMessage{Text: "overlap"}
+		after := &agent.TextMessage{Text: "after"}
+		relayOverlapAt := time.UnixMilli(2_000)
+		relayAfterAt := time.UnixMilli(3_000)
+
+		entries := mergeLogAndRelayTimeline(
+			[]agent.TimedMessage{
+				{Message: before, ProducerTime: time.UnixMilli(1_000)},
+				{Message: overlap, ProducerTime: time.UnixMilli(2_000)},
+			},
+			[]agent.TimedMessage{
+				{Message: &agent.TextMessage{Text: "overlap"}, ProducerTime: relayOverlapAt},
+				{Message: after, ProducerTime: relayAfterAt},
+			},
+		)
+
+		messages := make([]agent.Message, len(entries))
+		for i, entry := range entries {
+			messages[i] = entry.Message
+		}
+		if got := textMessages(messages); !slices.Equal(got, []string{"before", "overlap", "after"}) {
+			t.Fatalf("merged texts = %#v", got)
+		}
+		for i, want := range []int64{1_000, 2_000, 3_000} {
+			if got := entries[i].ProducerTime.UnixMilli(); got != want {
+				t.Fatalf("entry %d time = %d, want %d", i, got, want)
+			}
 		}
 	})
 	t.Run("valid_usage_context_window_mismatch", func(t *testing.T) {
@@ -1636,7 +1716,7 @@ func TestManager(t *testing.T) {
 				t.Fatal(err)
 			}
 			log := slog.New(slog.DiscardHandler)
-			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), log, stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, codex.New("", nil).NewWire()), stdout, make(chan agent.ParsedMessage, 256), log)
+			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), log, stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, codex.New("", nil).NewWire()), stdout, make(chan agent.TimedMessage, 256), log)
 			t.Cleanup(func() {
 				cmdCancel()
 				_ = s.Wait()
@@ -1950,8 +2030,8 @@ func TestManager(t *testing.T) {
 			if wireCalls != 1 {
 				t.Fatalf("NewWire calls = %d, want 1", wireCalls)
 			}
-			if source.Msgs != nil {
-				t.Fatalf("history source retained %d messages", len(source.Msgs))
+			if source.Timeline != nil {
+				t.Fatalf("history source retained %d messages", len(source.Timeline))
 			}
 		})
 	})
@@ -2655,7 +2735,7 @@ func TestManager(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			msgCh := make(chan agent.ParsedMessage, 1)
+			msgCh := make(chan agent.TimedMessage, 1)
 			dispatchDone := make(chan struct{})
 			close(dispatchDone)
 			log := slog.New(slog.DiscardHandler)
@@ -2700,7 +2780,7 @@ func TestManager(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			msgCh := make(chan agent.ParsedMessage, 1)
+			msgCh := make(chan agent.TimedMessage, 1)
 			dispatchDone := make(chan struct{})
 			close(dispatchDone)
 			log := slog.New(slog.DiscardHandler)
@@ -2978,13 +3058,13 @@ func TestManager(t *testing.T) {
 					TaskID:  taskID.String(),
 					Harness: harness.Claude,
 					Repos:   []taskslog.RepoMount{{Name: "caic-xyz/caic", Branch: "caic-5"}},
-					Msgs: []agent.Message{&agent.RateLimitMessage{
+					Timeline: []agent.TimedMessage{{Message: &agent.RateLimitMessage{
 						Status:        agent.RateLimitStatusRejected,
 						ResetsAt:      resetAt,
 						QuotaProvider: agent.QuotaProviderClaudeCode,
 						QuotaWindow:   "five_hour",
 						Utilization:   1,
-					}},
+					}}},
 				}})
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
@@ -3073,7 +3153,7 @@ func TestManager(t *testing.T) {
 			})
 			m.relay = fakeRelayReader{
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) { return true, "alive", nil },
-				readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) ([]agent.ParsedMessage, int64, error) {
+				readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) ([]agent.TimedMessage, int64, error) {
 					return nil, 0, nil
 				},
 				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
@@ -3259,7 +3339,7 @@ func TestManager(t *testing.T) {
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 					return true, "alive", nil
 				},
-				readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) ([]agent.ParsedMessage, int64, error) {
+				readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) ([]agent.TimedMessage, int64, error) {
 					return relayParsed(&agent.TextMessage{Text: "during restart"}), 128, nil
 				},
 				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
@@ -3334,7 +3414,7 @@ func TestManager(t *testing.T) {
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 					return true, "alive", nil
 				},
-				readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) ([]agent.ParsedMessage, int64, error) {
+				readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) ([]agent.TimedMessage, int64, error) {
 					return relayParsed(
 						&agent.AskMessage{
 							ToolUseID: "toolu-1",
@@ -3487,7 +3567,7 @@ func TestManager(t *testing.T) {
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 					return false, "dead", nil
 				},
-				readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) ([]agent.ParsedMessage, int64, error) {
+				readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) ([]agent.TimedMessage, int64, error) {
 					return relayParsed(&agent.ExitMessage{ExitCode: 2, Error: "Unknown option: --approve"}), 128, nil
 				},
 				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "relay exited" },
@@ -3538,7 +3618,7 @@ func TestManager(t *testing.T) {
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 					return false, "dead", nil
 				},
-				readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) ([]agent.ParsedMessage, int64, error) {
+				readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) ([]agent.TimedMessage, int64, error) {
 					return relayParsed(
 						&agent.InitMessage{SessionID: "new-session"},
 						&agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done"},
@@ -4042,8 +4122,8 @@ func TestNeedsTitleRegen(t *testing.T) {
 		lt := &taskslog.LoadedTask{
 			TaskID: "test",
 			Title:  "existing title",
-			Msgs: []agent.Message{
-				&agent.ResultMessage{MessageType: "result"},
+			Timeline: []agent.TimedMessage{
+				{Message: &agent.ResultMessage{MessageType: "result"}},
 			},
 		}
 		if !needsTitleRegen(tk, lt, resolver) {
@@ -4059,8 +4139,8 @@ func TestNeedsTitleRegen(t *testing.T) {
 		lt := &taskslog.LoadedTask{
 			TaskID: "test",
 			Title:  "existing title",
-			Msgs: []agent.Message{
-				&agent.ResultMessage{MessageType: "result"},
+			Timeline: []agent.TimedMessage{
+				{Message: &agent.ResultMessage{MessageType: "result"}},
 			},
 		}
 		if needsTitleRegen(tk, lt, resolver) {

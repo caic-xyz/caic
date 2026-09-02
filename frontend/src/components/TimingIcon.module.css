@@ -1,0 +1,37 @@
+/* Subtle timing-details icon attached to task-detail elements. */
+
+.tooltip {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding-left: 0.2rem;
+  border-radius: var(--radius-sm);
+  background: transparent;
+}
+
+.overlay {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: start;
+  z-index: 2;
+  margin-top: 0.15rem;
+  margin-right: 0.5rem;
+}
+
+.cardInset {
+  margin-top: 0.65rem;
+}
+
+.content {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  color: var(--color-text-muted);
+  cursor: help;
+}
+
+.value {
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.72;
+  white-space: nowrap;
+}

@@ -102,6 +102,10 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
 			return nil, fmt.Errorf("turn/completed params: %w", err)
 		}
+		durationMs := int64(0)
+		if p.Turn.Duration != nil {
+			durationMs = p.Turn.Duration.AsDuration().Milliseconds()
+		}
 		switch p.Turn.Status {
 		case codex.TurnStatusFailed, codex.TurnStatusInterrupted:
 			errMsg := ""
@@ -113,11 +117,13 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 				Subtype:     "result",
 				IsError:     true,
 				Result:      errMsg,
+				DurationMs:  durationMs,
 			}}, nil
 		default: // completed, inProgress
 			return []agent.Message{&agent.ResultMessage{
 				MessageType: "result",
 				Subtype:     "result",
+				DurationMs:  durationMs,
 			}}, nil
 		}
 
@@ -354,7 +360,15 @@ func parseItemCompleted(msg *codex.JSONRPCMessage) ([]agent.Message, error) {
 		return []agent.Message{&agent.TextMessage{Text: item.Text}}, nil
 
 	case codex.ItemTypeCommandExecution:
-		return []agent.Message{&agent.ToolResultMessage{ToolUseID: h.ID}}, nil
+		var item codex.CommandExecutionItem
+		if err := json.Unmarshal(p.Item, &item); err != nil {
+			return nil, fmt.Errorf("item/completed commandExecution: %w", err)
+		}
+		m := &agent.ToolResultMessage{ToolUseID: item.ID}
+		if item.Duration != nil {
+			m.DurationMs = item.Duration.AsDuration().Milliseconds()
+		}
+		return []agent.Message{m}, nil
 
 	case codex.ItemTypeFileChange:
 		var item codex.FileChangeItem

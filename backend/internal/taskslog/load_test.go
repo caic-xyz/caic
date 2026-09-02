@@ -767,8 +767,8 @@ func TestLoadedTask(t *testing.T) {
 		if err := lt.LoadMessages(); err != nil {
 			t.Fatal(err)
 		}
-		if len(streamed) != len(lt.Msgs) {
-			t.Fatalf("streamed %d messages, full load %d", len(streamed), len(lt.Msgs))
+		if len(streamed) != len(lt.Timeline) {
+			t.Fatalf("streamed %d messages, full load %d", len(streamed), len(lt.Timeline))
 		}
 	})
 
@@ -870,12 +870,12 @@ func TestLoadedTask(t *testing.T) {
 		if err := tasks[0].LoadMessages(); err != nil {
 			t.Fatal(err)
 		}
-		if len(tasks[0].Msgs) != 1 {
-			t.Fatalf("loaded %d messages, want 1", len(tasks[0].Msgs))
+		if len(tasks[0].Timeline) != 1 {
+			t.Fatalf("loaded %d messages, want 1", len(tasks[0].Timeline))
 		}
-		loaded, ok := tasks[0].Msgs[0].(*agent.LogMessage)
+		loaded, ok := tasks[0].Timeline[0].Message.(*agent.LogMessage)
 		if !ok || loaded.Line != "creating runtime" {
-			t.Fatalf("loaded message = %#v, want provisioning log", tasks[0].Msgs[0])
+			t.Fatalf("loaded message = %#v, want provisioning log", tasks[0].Timeline[0])
 		}
 	})
 
@@ -909,9 +909,9 @@ func TestLoadedTask(t *testing.T) {
 		if err := lt.LoadMessages(); err != nil {
 			t.Fatal(err)
 		}
-		loaded := make([]string, 0, len(lt.Msgs))
-		for _, message := range lt.Msgs {
-			loaded = append(loaded, message.Type())
+		loaded := make([]string, 0, len(lt.Timeline))
+		for _, entry := range lt.Timeline {
+			loaded = append(loaded, entry.Message.Type())
 		}
 		if !slices.Equal(replayed, loaded) {
 			t.Fatalf("replay controls = %q, live semantic controls = %q", replayed, loaded)
@@ -1176,6 +1176,19 @@ func TestLoadedTask(t *testing.T) {
 		}
 	})
 
+	t.Run("SemanticMessagesPreserveProducerTimes", func(t *testing.T) {
+		t.Parallel()
+		loaded := &LoadedTask{}
+		observedAt := time.Unix(1_788_122_692, 466_000_000)
+		message := &agent.TextMessage{Text: "timed"}
+
+		semanticLoadedMessages(loaded, false, []agent.TimedMessage{{Message: message, ProducerTime: observedAt}})
+
+		if len(loaded.Timeline) != 1 || loaded.Timeline[0].Message != message || !loaded.Timeline[0].ProducerTime.Equal(observedAt) {
+			t.Fatalf("timeline = %#v, want timed message at %v", loaded.Timeline, observedAt)
+		}
+	})
+
 	t.Run("Primary", func(t *testing.T) {
 		t.Parallel()
 		t.Run("NoRepos", func(t *testing.T) {
@@ -1198,11 +1211,11 @@ func TestLoadedTask(t *testing.T) {
 		t.Parallel()
 		t.Run("AlreadyLoaded", func(t *testing.T) {
 			t.Parallel()
-			lt := &LoadedTask{Msgs: []agent.Message{&agent.TextMessage{Text: "cached"}}}
+			lt := &LoadedTask{Timeline: []agent.TimedMessage{{Message: &agent.TextMessage{Text: "cached"}}}}
 			if err := lt.LoadMessages(); err != nil {
 				t.Fatal(err)
 			}
-			if len(lt.Msgs) != 1 {
+			if len(lt.Timeline) != 1 {
 				t.Errorf("Msgs mutated when already loaded")
 			}
 		})

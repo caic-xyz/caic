@@ -222,7 +222,7 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	wire.sessionID = sessionID
 
 	if sessionID != "" {
-		opts.MsgCh <- agent.ParsedMessage{Message: &agent.MetaSessionMessage{MessageType: "caic_session", SessionID: sessionID}}
+		opts.MsgCh <- agent.TimedMessage{Message: &agent.MetaSessionMessage{MessageType: "caic_session", SessionID: sessionID}}
 		if err := agent.WriteMetaSession(opts.Log, &agent.InitMessage{SessionID: sessionID}); err != nil {
 			_ = rp.Cmd.Process.Kill()
 			_ = rp.Cmd.Wait()
@@ -310,8 +310,8 @@ func newPiConn(ctx context.Context, logger *slog.Logger, stdin io.WriteCloser, l
 
 // ReadMessages overrides the default read loop to intercept extension_ui_request
 // messages and auto-respond before forwarding them to the message channel.
-func (c *piConn) ReadMessages(r io.Reader, msgCh chan<- agent.ParsedMessage) error {
-	return agent.DefaultReadMessages(c.ctx, c.logger, r, func(parsed agent.ParsedMessage) {
+func (c *piConn) ReadMessages(r io.Reader, msgCh chan<- agent.TimedMessage) error {
+	return agent.DefaultReadMessages(c.ctx, c.logger, r, func(parsed agent.TimedMessage) {
 		m := parsed.Message
 		// Intercept extension UI requests.
 		if raw, ok := m.(*agent.RawMessage); ok && strings.HasPrefix(raw.MessageType, "response:") {

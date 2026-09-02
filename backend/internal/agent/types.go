@@ -50,11 +50,28 @@ type Message interface {
 	Type() string
 }
 
-// ParsedMessage pairs a semantic message with its producer timestamp. A zero
+// TimedMessage pairs a semantic message with its producer timestamp. A zero
 // ProducerTime means the physical record did not provide producer time.
-type ParsedMessage struct {
+type TimedMessage struct {
 	Message      Message
 	ProducerTime time.Time
+}
+
+// NativeDurationMessage is implemented by messages that carry an authoritative
+// duration reported by the agent or harness.
+type NativeDurationMessage interface {
+	Message
+	NativeDuration() (time.Duration, bool)
+}
+
+// NativeDuration returns a message's authoritative agent- or harness-reported
+// duration. The boolean is false when that message type or record has none.
+func NativeDuration(message Message) (time.Duration, bool) {
+	timed, ok := message.(NativeDurationMessage)
+	if !ok {
+		return 0, false
+	}
+	return timed.NativeDuration()
 }
 
 // InitMessage is emitted when a session starts.
@@ -295,12 +312,18 @@ func (m *UserInputMessage) Type() string { return messageTypeUserInput }
 
 // ToolResultMessage is emitted when a tool returns its result.
 type ToolResultMessage struct {
-	ToolUseID string `json:"tool_use_id"`
-	Error     string `json:"error,omitempty"` // Non-empty when the tool reported an error.
+	ToolUseID  string `json:"tool_use_id"`
+	DurationMs int64  `json:"duration_ms,omitempty"`
+	Error      string `json:"error,omitempty"` // Non-empty when the tool reported an error.
 }
 
 // Type implements Message.
 func (m *ToolResultMessage) Type() string { return "tool_result" }
+
+// NativeDuration returns the tool duration when the harness reported one.
+func (m *ToolResultMessage) NativeDuration() (time.Duration, bool) {
+	return time.Duration(m.DurationMs) * time.Millisecond, m.DurationMs > 0
+}
 
 // UsageMessage reports token consumption for a single API call.
 type UsageMessage struct {
@@ -385,6 +408,11 @@ type ResultMessage struct {
 
 // Type implements Message.
 func (m *ResultMessage) Type() string { return "result" }
+
+// NativeDuration returns the invocation duration when the harness reported one.
+func (m *ResultMessage) NativeDuration() (time.Duration, bool) {
+	return time.Duration(m.DurationMs) * time.Millisecond, m.DurationMs > 0
+}
 
 // TextDeltaMessage is a streaming text fragment, emitted when
 // --include-partial-messages is enabled. Extracted from the nested wire

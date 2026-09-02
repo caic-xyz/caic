@@ -2,8 +2,6 @@
 
 import type { EventMessage, EventToolUse, EventToolResult, EventAsk, EventResult } from "@sdk/types.gen";
 
-import { formatElapsed } from "./formatting";
-
 export interface MessageGroup {
   kind: "text" | "action" | "ask" | "userInput" | "widget" | "other";
   events: EventMessage[];
@@ -626,14 +624,11 @@ export function groupTurns(groups: MessageGroup[]): Turn[] {
   // live incomplete turns, which fall back to ts-based computation.
   // ResultMessage.DurationMs is per-invocation (not cumulative), use directly.
   let resultDurationMs: number | undefined;
-  // True when a result event has been seen for this turn (even if duration == 0).
-  // Completed turns don't fall back to ts-based, which would inflate with idle time.
-  let hasResultEvent = false;
   let resultPayload: EventResult | undefined;
 
   function flush() {
     if (current.length > 0) {
-      const durationMs = hasResultEvent ? (resultDurationMs ?? 0) : Math.max(0, lastTs - firstTs);
+      const durationMs = resultDurationMs ?? Math.max(0, lastTs - firstTs);
       turns.push({ groups: current, toolCount, textCount, durationMs, result: resultPayload });
       current = [];
       toolCount = 0;
@@ -642,7 +637,6 @@ export function groupTurns(groups: MessageGroup[]): Turn[] {
       lastTs = 0;
       hasTs = false;
       resultDurationMs = undefined;
-      hasResultEvent = false;
       resultPayload = undefined;
     }
   }
@@ -655,10 +649,17 @@ export function groupTurns(groups: MessageGroup[]): Turn[] {
       textCount++;
     }
     for (const ev of g.events) {
-      if (!hasTs) { firstTs = ev.ts; hasTs = true; }
-      lastTs = ev.ts;
+      if (ev.ts > 0) {
+        if (!hasTs) {
+          firstTs = ev.ts;
+          lastTs = ev.ts;
+          hasTs = true;
+        } else {
+          firstTs = Math.min(firstTs, ev.ts);
+          lastTs = Math.max(lastTs, ev.ts);
+        }
+      }
       if (ev.kind === "result" && ev.result !== undefined) {
-        hasResultEvent = true;
         resultPayload = ev.result;
         const durationMs = Math.round((ev.result.duration ?? 0) * 1000);
         if (durationMs > 0) {
@@ -794,6 +795,32 @@ export function toolCountSummary(calls: ToolCall[]): string {
     .join(", ");
 }
 
+export function toolCallDurations(events: readonly EventMessage[]): ReadonlyMap<string, number> {
+  const starts = new Map<string, number>();
+  const durations = new Map<string, number>();
+  for (const event of events) {
+    const use = event.toolUse;
+    if (event.kind === "toolUse" && use && event.ts > 0) {
+      starts.set(use.toolUseID, event.ts);
+      continue;
+    }
+    const result = event.toolResult;
+    if (event.kind !== "toolResult" || !result) continue;
+    if (result.duration > 0) {
+      durations.set(result.toolUseID, result.duration * 1000);
+      continue;
+    }
+    const start = starts.get(result.toolUseID) ?? 0;
+    if (start > 0 && event.ts > start) durations.set(result.toolUseID, event.ts - start);
+  }
+  return durations;
+}
+
+export function toolCallDurationMs(call: ToolCall, durations: ReadonlyMap<string, number>): number | null {
+  if ((call.result?.duration ?? 0) > 0) return (call.result?.duration ?? 0) * 1000;
+  return durations.get(call.use.toolUseID) ?? null;
+}
+
 export function turnSummary(turn: Turn): string {
   const parts: string[] = [];
   if (turn.textCount > 0) {
@@ -802,8 +829,7 @@ export function turnSummary(turn: Turn): string {
   if (turn.toolCount > 0) {
     parts.push(turn.toolCount === 1 ? "1 tool call" : `${turn.toolCount} tool calls`);
   }
-  const summary = parts.length > 0 ? parts.join(", ") : "empty turn";
-  return turn.durationMs > 0 ? `${summary} \u00b7 ${formatElapsed(turn.durationMs)}` : summary;
+  return parts.length > 0 ? parts.join(", ") : "empty turn";
 }
 
 export function sessionSummary(session: Session): string {

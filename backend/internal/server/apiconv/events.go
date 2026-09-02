@@ -51,7 +51,10 @@ func NewToolTimingTracker(h harness.Name, planContent func(toolUseID string) str
 
 // ConvertMessage converts an agent.Message into zero or more EventMessages.
 func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []v1.EventMessage {
-	ts := now.UnixMilli()
+	var ts int64
+	if !now.IsZero() {
+		ts = now.UnixMilli()
+	}
 	if _, isResult := msg.(*agent.ResultMessage); !isResult {
 		tt.window.Update(msg)
 	}
@@ -153,9 +156,12 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 			UserInput: &v1.EventUserInput{Text: m.Text, Images: images},
 		}}
 	case *agent.ToolResultMessage:
-		var duration float64
+		nativeDuration, _ := agent.NativeDuration(m)
+		duration := nativeDuration.Seconds()
 		if started, ok := tt.pending[m.ToolUseID]; ok {
-			duration = now.Sub(started).Seconds()
+			if duration <= 0 && !now.IsZero() {
+				duration = now.Sub(started).Seconds()
+			}
 			delete(tt.pending, m.ToolUseID)
 		}
 		return []v1.EventMessage{{
@@ -184,6 +190,7 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 		// A result is a turn boundary: capture the turn's visible text as the
 		// fallback before resetting the window for the next turn.
 		result := m.Result
+		nativeDuration, _ := agent.NativeDuration(m)
 		if result == "" {
 			result = tt.window.Value()
 		}
@@ -197,7 +204,7 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 				Result:       result,
 				DiffStat:     DiffStat(m.DiffStat),
 				TotalCostUSD: m.TotalCostUSD,
-				Duration:     float64(m.DurationMs) / 1e3,
+				Duration:     nativeDuration.Seconds(),
 				DurationAPI:  float64(m.DurationAPIMs) / 1e3,
 				NumTurns:     m.NumTurns,
 				Usage: v1.EventUsage{
@@ -357,6 +364,9 @@ func (tt *ToolTimingTracker) planFor(m *agent.ToolUseMessage) string {
 }
 
 func (tt *ToolTimingTracker) rememberToolStart(toolUseID string, now time.Time) {
+	if now.IsZero() {
+		return
+	}
 	if _, exists := tt.pending[toolUseID]; !exists && len(tt.pending) == maxPendingToolTimings {
 		tt.pending = make(map[string]time.Time)
 	}

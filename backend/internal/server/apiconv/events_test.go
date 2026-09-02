@@ -139,6 +139,27 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 		}
 	})
 
+	t.Run("tool result prefers harness duration", func(t *testing.T) {
+		t.Parallel()
+		tracker := NewToolTimingTracker(harness.Codex, nil)
+		start := time.Unix(1, 0)
+		tracker.ConvertMessage(&agent.ToolUseMessage{ToolUseID: "tool", Name: "Bash"}, start)
+		events := tracker.ConvertMessage(&agent.ToolResultMessage{ToolUseID: "tool", DurationMs: 125}, start.Add(time.Second))
+		if len(events) != 1 || events[0].ToolResult == nil || events[0].ToolResult.Duration != 0.125 {
+			t.Fatalf("tool result = %#v, want 125ms duration", events)
+		}
+	})
+
+	t.Run("missing producer time leaves tool duration unknown", func(t *testing.T) {
+		t.Parallel()
+		tracker := NewToolTimingTracker(harness.Claude, nil)
+		tracker.ConvertMessage(&agent.ToolUseMessage{ToolUseID: "tool", Name: "Read"}, time.Time{})
+		events := tracker.ConvertMessage(&agent.ToolResultMessage{ToolUseID: "tool"}, time.Time{})
+		if len(events) != 1 || events[0].Ts != 0 || events[0].ToolResult == nil || events[0].ToolResult.Duration != 0 {
+			t.Fatalf("tool result = %#v, want unknown timestamps and duration", events)
+		}
+	})
+
 	t.Run("pending tool timings are bounded", func(t *testing.T) {
 		t.Parallel()
 		tracker := NewToolTimingTracker(harness.Claude, nil)

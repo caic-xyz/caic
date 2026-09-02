@@ -420,7 +420,11 @@ func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.
 				sequence = stream.nextMessage + (msg.Sequence - liveAfter)
 				liveAfter = msg.Sequence
 			}
-			if err := stream.writeMessage(msg.Message, sequence, time.Now(), false); err != nil {
+			at := msg.ObservedAt
+			if at.IsZero() {
+				at = time.Now()
+			}
+			if err := stream.writeMessage(msg.Message, sequence, at, false); err != nil {
 				return err
 			}
 			if err := stream.controller.Flush(); err != nil {
@@ -463,7 +467,11 @@ func (h *taskHandlers) replayMemoryHistory(stream *taskEventStream, entry *taskm
 			return errInvalidTaskEventID
 		}
 		for i, message := range history {
-			if err := stream.writeMessage(message.Message, message.Sequence, at, skip[i]); err != nil {
+			messageTime := message.ObservedAt
+			if messageTime.IsZero() {
+				messageTime = at
+			}
+			if err := stream.writeMessage(message.Message, message.Sequence, messageTime, skip[i]); err != nil {
 				return err
 			}
 		}
@@ -503,7 +511,7 @@ func (h *taskHandlers) streamHistoryFromDisk(stream *taskEventStream, entry *tas
 	const historyFlushBytes = 64 << 10
 	lastFlushBytes := stream.writtenBytes
 	cleanTurnComplete := false
-	emit := func(parsed agent.ParsedMessage) error {
+	emit := func(parsed agent.TimedMessage) error {
 		message := parsed.Message
 		if exit, ok := message.(*agent.ExitMessage); ok && exit.ExitCode != 0 && cleanTurnComplete {
 			return nil
@@ -515,9 +523,6 @@ func (h *taskHandlers) streamHistoryFromDisk(stream *taskEventStream, entry *tas
 			cleanTurnComplete = !result.IsError
 		}
 		at := parsed.ProducerTime
-		if at.IsZero() {
-			at = time.Now()
-		}
 		sequence := stream.nextMessage + 1
 		if err := stream.writeMessage(message, sequence, at, false); err != nil {
 			return err

@@ -47,7 +47,7 @@ func (s *statsSub) close() { s.once.Do(func() { close(s.ch) }) }
 // DispatchDone is closed when the dispatch goroutine exits after MsgCh is closed.
 type SessionHandle struct {
 	Session      *agent.Session
-	MsgCh        chan agent.ParsedMessage
+	MsgCh        chan agent.TimedMessage
 	DispatchDone <-chan struct{}
 	Log          agent.LogSink
 	closeMsgCh   sync.Once
@@ -151,39 +151,41 @@ type Task struct {
 	planDismissed         bool      // True after ClearMessages; suppresses plan tracking until the next ResultMessage.
 	inPlanMode            bool      // True while the agent is in plan mode (between EnterPlanMode and ExitPlanMode).
 	title                 string    // LLM-generated short title; set via SetTitle.
-	msgs                  []agent.Message
-	subs                  []*sub          // active sequenced message subscribers
-	rateLimitSubs         []*rateLimitSub // active lossless quota subscribers
-	handle                *SessionHandle  // current active session; nil when no session is attached
-	priorCostUSD          float64         // accumulated cost from all cleared sessions
-	priorNumTurns         int             // accumulated turns from all cleared sessions
-	priorDuration         time.Duration   // accumulated duration from all cleared sessions
-	turnStartedAt         time.Time       // when the current running turn started; zero when not running
-	liveCostUSD           float64
-	liveNumTurns          int
-	liveDuration          time.Duration
-	liveUsage             agent.Usage
-	lastUsage             agent.Usage    // Most recent ResultMessage usage (active context).
-	lastAPIUsage          agent.Usage    // Most recent per-API-call usage from AssistantMessage (context window fill).
-	cacheExpiresAt        time.Time      // When the prompt cache from the last API call expires.
-	liveDiffStat          agent.DiffStat // Updated by DiffStatMessage from relay.
-	diffCreated           bool           // True after any non-empty diff was reported for the task.
-	lastExitError         string         // Most recent non-zero relay exit diagnostic.
-	forgeOwner            string
-	forgeRepo             string
-	forgePR               int
-	forgePRState          forge.PRState // "open", "closed", "merged"; empty when no PR.
-	ciStatus              forge.CIStatus
-	ciChecks              []forge.Check
-	rateLimit             RateLimit                    // Active task quota block resolved across provider windows.
-	rateLimits            map[quotaWindowKey]RateLimit // Latest quota status for each provider window.
+	timeline              []agent.TimedMessage
+
+	subs           []*sub          // active sequenced message subscribers
+	rateLimitSubs  []*rateLimitSub // active lossless quota subscribers
+	handle         *SessionHandle  // current active session; nil when no session is attached
+	priorCostUSD   float64         // accumulated cost from all cleared sessions
+	priorNumTurns  int             // accumulated turns from all cleared sessions
+	priorDuration  time.Duration   // accumulated duration from all cleared sessions
+	turnStartedAt  time.Time       // when the current running turn started; zero when not running
+	liveCostUSD    float64
+	liveNumTurns   int
+	liveDuration   time.Duration
+	liveUsage      agent.Usage
+	lastUsage      agent.Usage    // Most recent ResultMessage usage (active context).
+	lastAPIUsage   agent.Usage    // Most recent per-API-call usage from AssistantMessage (context window fill).
+	cacheExpiresAt time.Time      // When the prompt cache from the last API call expires.
+	liveDiffStat   agent.DiffStat // Updated by DiffStatMessage from relay.
+	diffCreated    bool           // True after any non-empty diff was reported for the task.
+	lastExitError  string         // Most recent non-zero relay exit diagnostic.
+	forgeOwner     string
+	forgeRepo      string
+	forgePR        int
+	forgePRState   forge.PRState // "open", "closed", "merged"; empty when no PR.
+	ciStatus       forge.CIStatus
+	ciChecks       []forge.Check
+	rateLimit      RateLimit                    // Active task quota block resolved across provider windows.
+	rateLimits     map[quotaWindowKey]RateLimit // Latest quota status for each provider window.
 }
 
 // TimelineMessage is an immutable task message and its stable, one-based
 // position in the task timeline.
 type TimelineMessage struct {
-	Message  agent.Message
-	Sequence uint64
+	Message    agent.Message
+	Sequence   uint64
+	ObservedAt time.Time
 }
 
 // NewTask creates a task with a valid ID, a pending state, and prompt.
@@ -232,9 +234,9 @@ func syntheticUserInput(p agent.Prompt) *agent.UserInputMessage {
 // TextDeltaMessage, RawMessage), and returns the trailing ResultMessage if the
 // last semantically meaningful message is a result. Returns nil if it is not a
 // ResultMessage (agent still producing output) or msgs is empty.
-func lastAgentMessage(msgs []agent.Message) *agent.ResultMessage {
-	for _, msg := range slices.Backward(msgs) {
-		switch m := msg.(type) {
+func lastAgentMessage(entries []agent.TimedMessage) *agent.ResultMessage {
+	for _, entry := range slices.Backward(entries) {
+		switch m := entry.Message.(type) {
 		case *agent.DiffStatMessage:
 			continue // Relay metadata; skip.
 		case *agent.ExitMessage:
@@ -306,16 +308,16 @@ func (w *ResultTextWindow) reset() {
 // fallbackResultText returns the visible assistant text of the turn preceding
 // the trailing ResultMessage in msgs, using the same window rules as
 // ResultTextWindow. The input may include the trailing ResultMessage.
-func fallbackResultText(msgs []agent.Message) string {
-	end := len(msgs)
+func fallbackResultText(entries []agent.TimedMessage) string {
+	end := len(entries)
 	if end > 0 {
-		if _, ok := msgs[end-1].(*agent.ResultMessage); ok {
+		if _, ok := entries[end-1].Message.(*agent.ResultMessage); ok {
 			end--
 		}
 	}
 	var w ResultTextWindow
-	for _, msg := range msgs[:end] {
-		w.Update(msg)
+	for _, entry := range entries[:end] {
+		w.Update(entry.Message)
 	}
 	return w.Value()
 }
@@ -355,11 +357,11 @@ func ClearsExitError(msg agent.Message) bool {
 // It scans backwards from the end until it hits the previous turn's
 // ResultMessage boundary. If the current turn's ResultMessage is present, it is
 // skipped as a boundary first.
-func lastTurnHasUnansweredAsk(msgs []agent.Message) bool {
-	skipTrailingResult := lastAgentMessage(msgs) != nil
+func lastTurnHasUnansweredAsk(entries []agent.TimedMessage) bool {
+	skipTrailingResult := lastAgentMessage(entries) != nil
 	answered := map[string]struct{}{}
-	for _, msg := range slices.Backward(msgs) {
-		switch m := msg.(type) {
+	for _, entry := range slices.Backward(entries) {
+		switch m := entry.Message.(type) {
 		case *agent.AskMessage:
 			if m.ToolUseID == "" {
 				return true
@@ -386,14 +388,14 @@ func lastTurnHasUnansweredAsk(msgs []agent.Message) bool {
 // Today AskUserQuestion is the only pending action kind; adding a new kind
 // should add its close condition here instead of preserving provider-specific
 // control messages directly.
-func pendingUserActionsFromMessages(msgs []agent.Message) []agent.PendingUserAction {
-	skipTrailingResult := lastAgentMessage(msgs) != nil
+func pendingUserActionsFromMessages(entries []agent.TimedMessage) []agent.PendingUserAction {
+	skipTrailingResult := lastAgentMessage(entries) != nil
 	answered := map[string]struct{}{}
 	restored := map[string]struct{}{}
 	pending := map[string]agent.PendingUserAction{}
 	var actions []agent.PendingUserAction
-	for _, msg := range slices.Backward(msgs) {
-		switch m := msg.(type) {
+	for _, entry := range slices.Backward(entries) {
+		switch m := entry.Message.(type) {
 		case *agent.AskMessage:
 			if m.ToolUseID == "" {
 				continue
@@ -439,10 +441,10 @@ func pendingUserActionsFromMessages(msgs []agent.Message) []agent.PendingUserAct
 // lastTurnHasExitPlan reports whether the current turn contains an ExitPlanMode
 // tool call. It scans backwards from the end until it hits a previous turn's
 // ResultMessage boundary.
-func lastTurnHasExitPlan(msgs []agent.Message) bool {
+func lastTurnHasExitPlan(entries []agent.TimedMessage) bool {
 	skippedResult := false
-	for _, msg := range slices.Backward(msgs) {
-		switch m := msg.(type) {
+	for _, entry := range slices.Backward(entries) {
+		switch m := entry.Message.(type) {
 		case *agent.ToolUseMessage:
 			if m.Name == "ExitPlanMode" {
 				return true
@@ -811,12 +813,12 @@ func (t *Task) LastAgentResult() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	// Walk messages in reverse to find the last ResultMessage.
-	for i, v := range slices.Backward(t.msgs) {
-		if rm, ok := v.(*agent.ResultMessage); ok {
+	for i, entry := range slices.Backward(t.timeline) {
+		if rm, ok := entry.Message.(*agent.ResultMessage); ok {
 			if rm.Result != "" {
 				return rm.Result
 			}
-			return fallbackResultText(t.msgs[:i+1])
+			return fallbackResultText(t.timeline[:i+1])
 		}
 	}
 	return ""
@@ -1054,7 +1056,11 @@ func (t *Task) Snapshot() Snapshot {
 func (t *Task) Messages() []agent.Message {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return append([]agent.Message(nil), t.msgs...)
+	messages := make([]agent.Message, len(t.timeline))
+	for i, entry := range t.timeline {
+		messages[i] = entry.Message
+	}
+	return messages
 }
 
 // BackwardMessages returns the task's messages newest first as a snapshot taken
@@ -1063,11 +1069,11 @@ func (t *Task) Messages() []agent.Message {
 // copy nor a lock held across caller code.
 func (t *Task) BackwardMessages() iter.Seq[agent.Message] {
 	t.mu.Lock()
-	messages := t.msgs
+	messages := t.timeline
 	t.mu.Unlock()
 	return func(yield func(agent.Message) bool) {
-		for _, message := range slices.Backward(messages) {
-			if !yield(message) {
+		for _, entry := range slices.Backward(messages) {
+			if !yield(entry.Message) {
 				return
 			}
 		}
@@ -1078,7 +1084,7 @@ func (t *Task) BackwardMessages() iter.Seq[agent.Message] {
 func (t *Task) PendingUserActions() []agent.PendingUserAction {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return pendingUserActionsFromMessages(t.msgs)
+	return pendingUserActionsFromMessages(t.timeline)
 }
 
 // SeedTimeline fills an empty task with the message history from previously
@@ -1104,13 +1110,22 @@ func (t *Task) PendingUserActions() []agent.PendingUserAction {
 // RawMessage) after the ResultMessage are skipped during inference. For
 // import, the caller must handle the case where state remains StateRunning
 // with no relay alive.
-func (t *Task) SeedTimeline(msgs []agent.Message) {
+func (t *Task) SeedTimeline(messages []agent.Message) {
+	entries := make([]agent.TimedMessage, len(messages))
+	for i, message := range messages {
+		entries[i].Message = message
+	}
+	t.SeedTimelineEntries(entries)
+}
+
+// SeedTimelineEntries restores an adopted task from timestamped history.
+func (t *Task) SeedTimelineEntries(entries []agent.TimedMessage) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if len(t.msgs) > 0 {
-		panic(fmt.Sprintf("task %s: SeedTimeline on a timeline that already holds %d messages", t.ID, len(t.msgs)))
+	if len(t.timeline) > 0 {
+		panic(fmt.Sprintf("task %s: SeedTimeline on a timeline that already holds %d messages", t.ID, len(t.timeline)))
 	}
-	t.msgs = msgs
+	t.timeline = entries
 	// One forward pass: the task starts empty, so every field below is derived
 	// from msgs alone and the per-concern handlers touch disjoint fields.
 	// Later entries (model_rerouted) override earlier ones. The fold only reads
@@ -1129,7 +1144,8 @@ func (t *Task) SeedTimeline(msgs []agent.Message) {
 	// DurationMs and NumTurns are per-invocation, so they always accumulate.
 	// Token usage is always summed.
 	cleanTurnComplete := false
-	for _, msg := range msgs {
+	for _, entry := range entries {
+		msg := entry.Message
 		if exit, ok := msg.(*agent.ExitMessage); ok {
 			if exit.ExitCode != 0 && !cleanTurnComplete {
 				t.lastExitError = exit.ExitError()
@@ -1221,12 +1237,12 @@ func (t *Task) SeedTimeline(msgs []agent.Message) {
 	// Restore live diff stat from the last DiffStatMessage or ResultMessage,
 	// whichever appears later. ResultMessage carries the authoritative
 	// host-side diff stat but a DiffStatMessage from the relay may follow it.
-	for _, msg := range slices.Backward(msgs) {
-		if ds, ok := msg.(*agent.DiffStatMessage); ok {
+	for _, entry := range slices.Backward(entries) {
+		if ds, ok := entry.Message.(*agent.DiffStatMessage); ok {
 			t.liveDiffStat = ds.DiffStat
 			break
 		}
-		if rm, ok := msg.(*agent.ResultMessage); ok && len(rm.DiffStat) > 0 {
+		if rm, ok := entry.Message.(*agent.ResultMessage); ok && len(rm.DiffStat) > 0 {
 			t.liveDiffStat = rm.DiffStat
 			break
 		}
@@ -1237,17 +1253,17 @@ func (t *Task) SeedTimeline(msgs []agent.Message) {
 	// diff stats that can appear after the ResultMessage.
 	// Only override non-terminal states — purged/crashed/failed tasks loaded
 	// from logs must keep their recorded state.
-	if len(msgs) > 0 && t.state != taskslog.StatePurged && t.state != taskslog.StateCrashed && t.state != taskslog.StateFailed && t.state != taskslog.StatePurging {
-		if lastAgentMessage(msgs) != nil {
+	if len(entries) > 0 && t.state != taskslog.StatePurged && t.state != taskslog.StateCrashed && t.state != taskslog.StateFailed && t.state != taskslog.StatePurging {
+		if lastAgentMessage(entries) != nil {
 			switch {
-			case lastTurnHasUnansweredAsk(msgs):
+			case lastTurnHasUnansweredAsk(entries):
 				t.setState(taskslog.StateAsking)
-			case lastTurnHasExitPlan(msgs) && t.planContent != "":
+			case lastTurnHasExitPlan(entries) && t.planContent != "":
 				t.setState(taskslog.StateHasPlan)
 			default:
 				t.setState(taskslog.StateWaiting)
 			}
-		} else if lastTurnHasUnansweredAsk(msgs) {
+		} else if lastTurnHasUnansweredAsk(entries) {
 			t.setState(taskslog.StateAsking)
 		}
 	}
@@ -1339,9 +1355,9 @@ func (t *Task) Subscribe(ctx context.Context) (history []TimelineMessage, live <
 	t.mu.Lock()
 	// Snapshot history under lock — no channel writes, so no deadlock risk
 	// regardless of history size.
-	history = make([]TimelineMessage, len(t.msgs))
-	for i, message := range t.msgs {
-		history[i] = TimelineMessage{Message: message, Sequence: uint64(i + 1)}
+	history = make([]TimelineMessage, len(t.timeline))
+	for i, entry := range t.timeline {
+		history[i] = TimelineMessage{Message: entry.Message, Sequence: uint64(i + 1), ObservedAt: entry.ProducerTime}
 	}
 	t.subs = append(t.subs, s)
 	t.mu.Unlock()
@@ -1355,7 +1371,7 @@ func (t *Task) Subscribe(ctx context.Context) (history []TimelineMessage, live <
 func (t *Task) SubscribeLiveMessages(ctx context.Context) (after uint64, live <-chan TimelineMessage, unsubFn func()) {
 	s := &sub{ch: make(chan TimelineMessage, 256)}
 	t.mu.Lock()
-	after = uint64(len(t.msgs))
+	after = uint64(len(t.timeline))
 	t.subs = append(t.subs, s)
 	t.mu.Unlock()
 	return after, s.ch, unsubscribeMessages(t, ctx, s)
@@ -1390,8 +1406,8 @@ func (t *Task) SubscribeRateLimits(ctx context.Context) (history []*agent.RateLi
 	s := &rateLimitSub{ch: make(chan *agent.RateLimitMessage, 16)}
 
 	t.mu.Lock()
-	for _, message := range t.msgs {
-		if rateLimit, ok := message.(*agent.RateLimitMessage); ok {
+	for _, entry := range t.timeline {
+		if rateLimit, ok := entry.Message.(*agent.RateLimitMessage); ok {
 			history = append(history, rateLimit)
 		}
 	}
@@ -1718,12 +1734,12 @@ func (t *Task) recordStartupFailure(ctx context.Context, err error) {
 
 // addMessage records a synthetic server message with an explicit zero producer time.
 func (t *Task) addMessage(_ context.Context, m agent.Message, skipTitleGen bool) {
-	t.addParsedMessage(agent.ParsedMessage{Message: m}, skipTitleGen)
+	t.addParsedMessage(agent.TimedMessage{Message: m}, skipTitleGen)
 }
 
 // addParsedMessage records one physical relay record while task state and
 // subscribers consume its Message.
-func (t *Task) addParsedMessage(parsed agent.ParsedMessage, skipTitleGen bool) (stateChanged, generateTitle bool) {
+func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (stateChanged, generateTitle bool) {
 	m := parsed.Message
 	t.mu.Lock()
 	initialState := t.state
@@ -1743,7 +1759,12 @@ func (t *Task) addParsedMessage(parsed agent.ParsedMessage, skipTitleGen bool) (
 		}
 		return stateChanged, generateTitle
 	}
-	t.msgs = append(t.msgs, m)
+	at := parsed.ProducerTime
+	if at.IsZero() {
+		at = time.Now()
+	}
+	parsed.ProducerTime = at
+	t.timeline = append(t.timeline, parsed)
 	if rateLimit, ok := m.(*agent.RateLimitMessage); ok {
 		t.recordRateLimitLocked(rateLimit)
 		for _, sub := range t.rateLimitSubs {
@@ -1802,7 +1823,7 @@ func (t *Task) addParsedMessage(parsed agent.ParsedMessage, skipTitleGen bool) (
 		}
 	case *agent.TextMessage, *agent.ToolUseMessage, *agent.TodoMessage:
 		if t.state == taskslog.StateStarting || t.state == taskslog.StateWaiting || t.state == taskslog.StateAsking || t.state == taskslog.StateHasPlan {
-			if t.state == taskslog.StateAsking && lastTurnHasUnansweredAsk(t.msgs) {
+			if t.state == taskslog.StateAsking && lastTurnHasUnansweredAsk(t.timeline) {
 				break
 			}
 			t.setState(taskslog.StateRunning)
@@ -1813,7 +1834,7 @@ func (t *Task) addParsedMessage(parsed agent.ParsedMessage, skipTitleGen bool) (
 		t.setLiveDiffStatLocked(ds.DiffStat)
 	}
 	if exit, ok := m.(*agent.ExitMessage); ok {
-		if rm := lastAgentMessage(t.msgs); exit.ExitCode != 0 && (rm == nil || rm.IsError) {
+		if rm := lastAgentMessage(t.timeline); exit.ExitCode != 0 && (rm == nil || rm.IsError) {
 			t.lastExitError = exit.ExitError()
 		} else {
 			t.lastExitError = ""
@@ -1857,9 +1878,9 @@ func (t *Task) addParsedMessage(parsed agent.ParsedMessage, skipTitleGen bool) (
 		// produce a result before Checkout.Start calls SetState(Running).
 		if t.state == taskslog.StateRunning || t.state == taskslog.StateStarting || t.state == taskslog.StateWaiting || t.state == taskslog.StateAsking {
 			switch {
-			case lastTurnHasUnansweredAsk(t.msgs):
+			case lastTurnHasUnansweredAsk(t.timeline):
 				t.setState(taskslog.StateAsking)
-			case lastTurnHasExitPlan(t.msgs) && t.planContent != "":
+			case lastTurnHasExitPlan(t.timeline) && t.planContent != "":
 				t.setState(taskslog.StateHasPlan)
 			default:
 				t.setState(taskslog.StateWaiting)
@@ -1877,7 +1898,7 @@ func (t *Task) addParsedMessage(parsed agent.ParsedMessage, skipTitleGen bool) (
 	if exit, ok := m.(*agent.ExitMessage); ok && exit.ExitCode != 0 && t.lastExitError == "" {
 		return stateChanged, generateTitle
 	}
-	event := TimelineMessage{Message: m, Sequence: uint64(len(t.msgs))}
+	event := TimelineMessage{Message: m, Sequence: uint64(len(t.timeline)), ObservedAt: at}
 	for i := 0; i < len(t.subs); i++ {
 		select {
 		case t.subs[i].ch <- event:

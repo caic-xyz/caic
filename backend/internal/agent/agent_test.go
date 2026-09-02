@@ -186,7 +186,7 @@ func TestSession(t *testing.T) {
 
 		go func() {
 			defer close(s.done)
-			if parseErr := DefaultReadMessages(t.Context(), testLogger(), stdoutR, func(m ParsedMessage) { msgCh <- m.Message }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn); parseErr != nil {
+			if parseErr := DefaultReadMessages(t.Context(), testLogger(), stdoutR, func(m TimedMessage) { msgCh <- m.Message }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn); parseErr != nil {
 				s.err = parseErr
 			}
 		}()
@@ -357,7 +357,7 @@ func TestSession(t *testing.T) {
 		var logBuf bytes.Buffer
 		log := slog.New(slog.NewTextHandler(&logBuf, nil))
 
-		msgCh := make(chan ParsedMessage, 16)
+		msgCh := make(chan TimedMessage, 16)
 		s := NewSession(t.Context(), cmd, NewConn(t.Context(), log, stdin, DiscardLogSink{Version: LogVersionV1}, testWire{}), stdout, msgCh, log)
 
 		if err := cmd.Process.Kill(); err != nil {
@@ -440,7 +440,7 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n") + "\n"
 
 		ch := make(chan Message, 16)
-		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(m ParsedMessage) { ch <- m.Message }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn); err != nil {
+		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(m TimedMessage) { ch <- m.Message }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn); err != nil {
 			t.Fatal(err)
 		}
 		close(ch)
@@ -466,7 +466,7 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n") + "\n"
 
 		ch := make(chan Message, 16)
-		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(m ParsedMessage) { ch <- m.Message }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn); err != nil {
+		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(m TimedMessage) { ch <- m.Message }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn); err != nil {
 			t.Fatal(err)
 		}
 		close(ch)
@@ -495,7 +495,7 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n") + "\n"
 
 		buf := &testLogSink{Version: LogVersionV1}
-		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(ParsedMessage) {}, buf, LogVersionV1, testParseFn); err != nil {
+		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(TimedMessage) {}, buf, LogVersionV1, testParseFn); err != nil {
 			t.Fatal(err)
 		}
 
@@ -521,7 +521,7 @@ func TestReadMessages(t *testing.T) {
 				stdinR, stdinW := io.Pipe()
 				t.Cleanup(func() { _ = stdinR.Close() })
 				var log bytes.Buffer
-				got := make(chan ParsedMessage, 1)
+				got := make(chan TimedMessage, 1)
 				conn := NewConn(t.Context(), testLogger(), stdinW, &testLogSink{Version: tc.version}, testWire{})
 				err := conn.ReadMessages(strings.NewReader(tc.input), got)
 				if !errors.Is(err, io.ErrUnexpectedEOF) {
@@ -536,8 +536,8 @@ func TestReadMessages(t *testing.T) {
 	t.Run("v2 structural corruption is not persisted", func(t *testing.T) {
 		t.Parallel()
 		var log bytes.Buffer
-		var got []ParsedMessage
-		err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(`{"t":"agent","time":1.000,"msg":{}}`+"\n"), func(msg ParsedMessage) {
+		var got []TimedMessage
+		err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(`{"t":"agent","time":1.000,"msg":{}}`+"\n"), func(msg TimedMessage) {
 			got = append(got, msg)
 		}, &testLogSink{Version: LogVersionV2}, LogVersionV2, func([]byte) ([]Message, error) {
 			return []Message{&TextMessage{}}, nil
@@ -885,7 +885,7 @@ func TestLogRecordParser(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := []ParsedMessage{{Message: &InitMessage{SessionID: "legacy", Model: "m", Version: "0.9"}}}
+		want := []TimedMessage{{Message: &InitMessage{SessionID: "legacy", Model: "m", Version: "0.9"}}}
 		if !record.Control || !reflect.DeepEqual(record.Messages, want) {
 			t.Fatalf("legacy record = %#v, want messages %#v", record, want)
 		}
@@ -1279,12 +1279,12 @@ func TestLogRecordParser(t *testing.T) {
 			t.Fatalf("empty native record = %#v", empty)
 		}
 
-		parsed := ParsedMessage{Message: &TextMessage{Text: "text"}, ProducerTime: wantTime}
+		parsed := TimedMessage{Message: &TextMessage{Text: "text"}, ProducerTime: wantTime}
 		if _, ok := any(parsed).(Message); ok {
-			t.Fatal("ParsedMessage value implements Message")
+			t.Fatal("TimedMessage value implements Message")
 		}
 		if _, ok := any(&parsed).(Message); ok {
-			t.Fatal("*ParsedMessage implements Message")
+			t.Fatal("*TimedMessage implements Message")
 		}
 	})
 }

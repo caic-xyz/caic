@@ -40,7 +40,7 @@ import (
 
 type relayReader interface {
 	Status(ctx context.Context, target runtime.ConnectionTarget) (bool, string, error)
-	ReadTail(ctx context.Context, target runtime.ConnectionTarget, parser *agent.LogRecordParser, maxBytes int64) ([]agent.ParsedMessage, int64, error)
+	ReadTail(ctx context.Context, target runtime.ConnectionTarget, parser *agent.LogRecordParser, maxBytes int64) ([]agent.TimedMessage, int64, error)
 	ReadLog(ctx context.Context, target runtime.ConnectionTarget, maxBytes int) string
 }
 
@@ -53,7 +53,7 @@ func (agentRelayReader) Status(ctx context.Context, target runtime.ConnectionTar
 	return agent.RelayStatus(ctx, target.SSHHost)
 }
 
-func (agentRelayReader) ReadTail(ctx context.Context, target runtime.ConnectionTarget, parser *agent.LogRecordParser, maxBytes int64) (msgs []agent.ParsedMessage, size int64, err error) {
+func (agentRelayReader) ReadTail(ctx context.Context, target runtime.ConnectionTarget, parser *agent.LogRecordParser, maxBytes int64) (msgs []agent.TimedMessage, size int64, err error) {
 	if target.SSHHost == "" {
 		return nil, 0, errors.New("agent connection target missing SSH host")
 	}
@@ -610,10 +610,20 @@ func needsTitleRegen(t *task.Task, lt *taskslog.LoadedTask, resolver taskslog.Na
 	}
 	logResults := 0
 	if err := lt.LoadMessagesWithResolver(resolver); err == nil {
-		logResults = countResultMessages(lt.Msgs)
+		logResults = countTimelineResults(lt.Timeline)
 	}
 	restoredResults := countResultMessages(t.Messages())
 	return restoredResults > logResults
+}
+
+func countTimelineResults(entries []agent.TimedMessage) int {
+	n := 0
+	for _, entry := range entries {
+		if _, ok := entry.Message.(*agent.ResultMessage); ok {
+			n++
+		}
+	}
+	return n
 }
 
 // countResultMessages counts the number of ResultMessages in msgs.
@@ -1421,8 +1431,8 @@ func applyLoadedSessionMetadata(t *task.Task, lt *taskslog.LoadedTask) {
 // output produced while caic was down, plus some overlapping history. Pi replay
 // can reconstruct the same logical messages with small metadata differences, so
 // overlap matching uses semantic equivalence instead of strict equality.
-func mergeLogAndRelayMessages(logMsgs, relayMsgs []agent.Message) []agent.Message {
-	return newLogRelayMessageMerger(logMsgs).merge(relayMsgs)
+func mergeLogAndRelayTimeline(logEntries, relayEntries []agent.TimedMessage) []agent.TimedMessage {
+	return newLogRelayMessageMerger(logEntries).merge(relayEntries)
 }
 
 // importInstance investigates a single runtime instance and registers it as a task.
@@ -1515,7 +1525,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	lt.SetNativeParserResolver(m.resolveNativeParser)
 	// Check relay liveness.
 	var relayAlive bool
-	var relayRecords []agent.ParsedMessage
+	var relayRecords []agent.TimedMessage
 	var relaySize int64
 	var relayDiag string
 	var relaySnapshotRead bool
@@ -1659,19 +1669,12 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		return nil, fmt.Errorf("load messages for imported task %s: %w", taskID, err)
 	}
 	if len(relayRecords) > 0 {
-		relayMsgs := make([]agent.Message, len(relayRecords))
-		for i, parsed := range relayRecords {
-			relayMsgs[i] = parsed.Message
-		}
-		msgs := relayMsgs
-		if len(lt.Msgs) > 0 {
-			msgs = mergeLogAndRelayMessages(lt.Msgs, relayMsgs)
-		}
-		t.SeedTimeline(msgs)
-		m.log.DebugContext(ctx, "relay", "msg", "restored from", "repo", relPath, "br", branch, "instance", c.ID, "alive", relayAlive, "msgs", len(msgs), "relayMsgs", len(relayRecords))
-	} else if len(lt.Msgs) > 0 {
-		t.SeedTimeline(lt.Msgs)
-		m.log.WarnContext(ctx, "relay", "msg", "restored from log", "repo", relPath, "br", branch, "instance", c.ID, "msgs", len(lt.Msgs))
+		timeline := mergeLogAndRelayTimeline(lt.Timeline, relayRecords)
+		t.SeedTimelineEntries(timeline)
+		m.log.DebugContext(ctx, "relay", "msg", "restored from", "repo", relPath, "br", branch, "instance", c.ID, "alive", relayAlive, "msgs", len(timeline), "relayMsgs", len(relayRecords))
+	} else if len(lt.Timeline) > 0 {
+		t.SeedTimelineEntries(lt.Timeline)
+		m.log.WarnContext(ctx, "relay", "msg", "restored from log", "repo", relPath, "br", branch, "instance", c.ID, "msgs", len(lt.Timeline))
 	}
 	// The durable log only retains a sticky diff-created signal, and relay-tail
 	// overlap filtering omits diff-stat controls. Restore the authoritative full
@@ -1830,52 +1833,53 @@ func (m *Manager) resolveNativeParser(h harness.Name) (func([]byte) ([]agent.Mes
 // logRelayMessageMerger owns the import-time overlap rules for disk-log
 // messages and relay-tail messages.
 type logRelayMessageMerger struct {
-	logMsgs    []agent.Message
+	logEntries []agent.TimedMessage
 	logHasInit bool
 }
 
-func newLogRelayMessageMerger(logMsgs []agent.Message) *logRelayMessageMerger {
-	return &logRelayMessageMerger{
-		logMsgs:    logMsgs,
-		logHasInit: messagesContainInit(logMsgs),
+func newLogRelayMessageMerger(logEntries []agent.TimedMessage) *logRelayMessageMerger {
+	logHasInit := false
+	for _, entry := range logEntries {
+		if _, ok := entry.Message.(*agent.InitMessage); ok {
+			logHasInit = true
+			break
+		}
 	}
+	return &logRelayMessageMerger{logEntries: logEntries, logHasInit: logHasInit}
 }
 
-func (m *logRelayMessageMerger) merge(relayMsgs []agent.Message) []agent.Message {
-	relayMsgs = m.comparableRelayMessages(relayMsgs)
-	if len(m.logMsgs) == 0 {
-		return append([]agent.Message(nil), relayMsgs...)
+func (m *logRelayMessageMerger) merge(relayEntries []agent.TimedMessage) []agent.TimedMessage {
+	relayEntries = m.comparableRelayTimeline(relayEntries)
+	if len(m.logEntries) == 0 {
+		return slices.Clone(relayEntries)
 	}
-	if len(relayMsgs) == 0 {
-		return append([]agent.Message(nil), m.logMsgs...)
+	if len(relayEntries) == 0 {
+		return slices.Clone(m.logEntries)
 	}
-	maxOverlap := min(len(m.logMsgs), len(relayMsgs))
+	maxOverlap := min(len(m.logEntries), len(relayEntries))
 	for n := maxOverlap; n > 0; n-- {
-		if m.messagesEqual(m.logMsgs[len(m.logMsgs)-n:], relayMsgs[:n]) {
-			merged := append([]agent.Message(nil), m.logMsgs...)
-			return append(merged, relayMsgs[n:]...)
+		if m.messagesEqual(m.logEntries[len(m.logEntries)-n:], relayEntries[:n]) {
+			return append(slices.Clone(m.logEntries), relayEntries[n:]...)
 		}
 	}
-	merged := append([]agent.Message(nil), m.logMsgs...)
-	return append(merged, relayMsgs...)
+	return append(slices.Clone(m.logEntries), relayEntries...)
 }
 
-// comparableRelayMessages drops relay-only metadata before overlap matching.
-//
-// The returned slice is either the original relayMsgs slice or a filtered copy.
-func (m *logRelayMessageMerger) comparableRelayMessages(relayMsgs []agent.Message) []agent.Message {
-	for i, msg := range relayMsgs {
-		if !m.relayMessageComparableToLog(msg) {
-			out := append([]agent.Message(nil), relayMsgs[:i]...)
-			for _, msg := range relayMsgs[i+1:] {
-				if m.relayMessageComparableToLog(msg) {
-					out = append(out, msg)
-				}
-			}
-			return out
+// comparableRelayTimeline drops relay-only metadata before overlap matching.
+func (m *logRelayMessageMerger) comparableRelayTimeline(relayEntries []agent.TimedMessage) []agent.TimedMessage {
+	for i, entry := range relayEntries {
+		if m.relayMessageComparableToLog(entry.Message) {
+			continue
 		}
+		entries := slices.Clone(relayEntries[:i])
+		for _, entry := range relayEntries[i+1:] {
+			if m.relayMessageComparableToLog(entry.Message) {
+				entries = append(entries, entry)
+			}
+		}
+		return entries
 	}
-	return relayMsgs
+	return relayEntries
 }
 
 func (m *logRelayMessageMerger) relayMessageComparableToLog(msg agent.Message) bool {
@@ -1894,12 +1898,12 @@ func (m *logRelayMessageMerger) relayMessageComparableToLog(msg agent.Message) b
 	}
 }
 
-func (m *logRelayMessageMerger) messagesEqual(a, b []agent.Message) bool {
+func (m *logRelayMessageMerger) messagesEqual(a, b []agent.TimedMessage) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for i := range a {
-		if !m.messagesEquivalent(a[i], b[i]) {
+		if !m.messagesEquivalent(a[i].Message, b[i].Message) {
 			return false
 		}
 	}
@@ -1936,13 +1940,4 @@ func (m *logRelayMessageMerger) messagesEquivalent(a, b agent.Message) bool {
 	default:
 		return reflect.DeepEqual(a, b)
 	}
-}
-
-func messagesContainInit(msgs []agent.Message) bool {
-	for _, msg := range msgs {
-		if _, ok := msg.(*agent.InitMessage); ok {
-			return true
-		}
-	}
-	return false
 }

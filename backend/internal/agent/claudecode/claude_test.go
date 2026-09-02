@@ -136,9 +136,9 @@ func (f *fakeConn) SendRaw(data []byte) error {
 	return nil
 }
 
-func (f *fakeConn) ReadMessages(_ io.Reader, msgCh chan<- agent.ParsedMessage) error {
+func (f *fakeConn) ReadMessages(_ io.Reader, msgCh chan<- agent.TimedMessage) error {
 	for _, m := range f.messages {
-		msgCh <- agent.ParsedMessage{Message: m}
+		msgCh <- agent.TimedMessage{Message: m}
 	}
 	return nil
 }
@@ -291,7 +291,7 @@ func TestControlConn(t *testing.T) {
 		}
 		c := &controlConn{Conn: inner}
 
-		msgCh := make(chan agent.ParsedMessage, 10)
+		msgCh := make(chan agent.TimedMessage, 10)
 		if err := c.ReadMessages(nil, msgCh); err != nil {
 			t.Fatal(err)
 		}
@@ -360,7 +360,7 @@ func TestControlConn(t *testing.T) {
 		}
 		c := &controlConn{Conn: inner}
 
-		msgCh := make(chan agent.ParsedMessage, 10)
+		msgCh := make(chan agent.TimedMessage, 10)
 		if err := c.ReadMessages(nil, msgCh); err != nil {
 			t.Fatal(err)
 		}

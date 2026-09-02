@@ -50,6 +50,74 @@ func TestFakeAgentNaturalPromptMatching(t *testing.T) {
 	}
 }
 
+func TestFakeAgentDemoIncludesCredibleTiming(t *testing.T) {
+	t.Parallel()
+
+	cmd := exec.CommandContext(t.Context(), "python3", "-u", "-c", string(fakeScript)) //nolint:gosec // fakeScript is an embedded constant
+	cmd.Stdin = strings.NewReader("FAKE_DEMO timing\n")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(out)
+	for _, want := range []string{
+		`"type":"thinking"`,
+		`"type":"tool_result","tool_use_id":"toolu_read_1","duration_ms":180`,
+		`"type":"tool_result","tool_use_id":"toolu_bash_1","duration_ms":620`,
+		`"type":"result","subtype":"success"`,
+		`"duration_ms":2200`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("fake demo output does not contain %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestFakeAgentTimingMessagesParse(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		input string
+		check func(*testing.T, agent.Message)
+	}{
+		{
+			name:  "thinking",
+			input: `{"type":"thinking","text":"checking timing"}`,
+			check: func(t *testing.T, msg agent.Message) {
+				t.Helper()
+				thinking, ok := msg.(*agent.ThinkingMessage)
+				if !ok || thinking.Text != "checking timing" {
+					t.Fatalf("message = %#v, want thinking message", msg)
+				}
+			},
+		},
+		{
+			name:  "tool result duration",
+			input: `{"type":"tool_result","tool_use_id":"tool-1","duration_ms":620}`,
+			check: func(t *testing.T, msg agent.Message) {
+				t.Helper()
+				result, ok := msg.(*agent.ToolResultMessage)
+				if !ok || result.DurationMs != 620 {
+					t.Fatalf("message = %#v, want 620ms tool result", msg)
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			msgs, err := parseMessage([]byte(tc.input))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(msgs) != 1 {
+				t.Fatalf("message count = %d, want 1", len(msgs))
+			}
+			tc.check(t, msgs[0])
+		})
+	}
+}
+
 func TestCleanupSmokeRunContainers(t *testing.T) {
 	t.Parallel()
 

@@ -102,7 +102,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("TurnCompleted", func(t *testing.T) {
 		t.Parallel()
-		const input = `{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"t1","turn":{"id":"turn_1","status":"completed"}}}`
+		const input = `{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"t1","turn":{"id":"turn_1","status":"completed","durationMs":532000}}}`
 		msgs, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
@@ -116,6 +116,9 @@ func TestParseMessage(t *testing.T) {
 		}
 		if rm.IsError {
 			t.Error("IsError should be false")
+		}
+		if rm.DurationMs != 532_000 {
+			t.Errorf("DurationMs = %d, want 532000", rm.DurationMs)
 		}
 	})
 	t.Run("TurnFailed", func(t *testing.T) {
@@ -172,7 +175,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("ItemCompletedCommandExecution", func(t *testing.T) {
 		t.Parallel()
-		const input = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"item_1","type":"commandExecution","command":"bash -lc ls","aggregatedOutput":"docs\nsrc\n","exitCode":0,"status":"completed"},"threadId":"t1","turnId":"turn_1"}}`
+		const input = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"item_1","type":"commandExecution","command":"bash -lc ls","aggregatedOutput":"docs\nsrc\n","exitCode":0,"durationMs":150.5,"status":"completed"},"threadId":"t1","turnId":"turn_1"}}`
 		msgs, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
@@ -186,6 +189,9 @@ func TestParseMessage(t *testing.T) {
 		}
 		if tr.ToolUseID != "item_1" {
 			t.Errorf("ToolUseID = %q", tr.ToolUseID)
+		}
+		if tr.DurationMs != 150 {
+			t.Errorf("DurationMs = %d, want 150", tr.DurationMs)
 		}
 	})
 	t.Run("ItemCompletedAgentMessage", func(t *testing.T) {

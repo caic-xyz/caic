@@ -16,7 +16,8 @@ test("multi-turn: send input cycles to next joke", async ({ page, api }) => {
     page.getByText("Why do programmers prefer dark mode?").first(),
   ).toBeVisible({ timeout: 15_000 });
 
-  // Send input to trigger the second turn.
+  // Send input after a measurable user wait to trigger the second turn.
+  await page.waitForTimeout(1100);
   await api.sendInput(id, { prompt: { text: "tell me another" } });
   await waitForTaskState(api, id, "waiting", 20_000);
 
@@ -24,6 +25,25 @@ test("multi-turn: send input cycles to next joke", async ({ page, api }) => {
   await expect(
     page.getByText("A SQL query walks into a bar").first(),
   ).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("button", { name: /1 message.*0:01$/ })).toBeVisible();
+  await expect(page.getByText(/^wait (?:[1-9]\d*ms|\d+:[0-5]\d(?::[0-5]\d)?)$/)).toBeVisible();
+});
+
+test("fake timing reaches tool rows and collapsed turn summaries", async ({ page, api }) => {
+  const id = await createTaskAPI(api, "FAKE_DEMO timing propagation");
+  await waitForTaskState(api, id, "waiting", 30_000);
+
+  await page.goto(`/task/@${id}`);
+  await expect(page.getByTestId("tool-duration").filter({ hasText: /^180ms$/ })).toHaveCount(1);
+  await expect(page.getByTestId("tool-duration").filter({ hasText: /^0:01$/ })).toHaveCount(1);
+  await expect(page.getByTestId("timing-duration").filter({ hasText: /^0:02$/ })).toBeVisible();
+
+  await page.waitForTimeout(1100);
+  await api.sendInput(id, { prompt: { text: "continue" } });
+  await waitForTaskState(api, id, "waiting", 20_000);
+
+  await expect(page.getByRole("button", { name: /2 messages, 4 tool calls.*0:02$/ })).toBeVisible();
+  await expect(page.getByText(/^wait (?:[1-9]\d*ms|\d+:[0-5]\d(?::[0-5]\d)?)$/)).toBeVisible();
 });
 
 test("concurrent tasks run independently", async ({ api }) => {

@@ -14,9 +14,10 @@ import { useHostMode } from "../gomode/HostMode";
 import { requestNotificationPermission } from "../gomode/notifications";
 
 import { sendInput as apiSendInput, restartTask as apiRestartTask, compactContext as apiCompactContext, syncTask as apiSyncTask, getTaskToolInput, botFixPR } from "../api";
-import { IncrementalMessageGrouper, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "../grouping";
+import { IncrementalMessageGrouper, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, toolCallDurationMs, toolCallDurations, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "../grouping";
 import { createTaskEventTimeline } from "../taskEventTimeline";
-import { formatDuration, formatElapsed, formatTokens, toolCallDetail } from "../formatting";
+import { formatElapsed, formatTokens, toolCallDetail } from "../formatting";
+import { IncrementalTaskTimingTracker, formatTimingDuration } from "../timing";
 import type { ToolCall } from "../grouping";
 import { Marked } from "marked";
 import AutoResizeTextarea from "./AutoResizeTextarea";
@@ -25,6 +26,7 @@ import Button from "./Button";
 import UnifiedDiffBlock from "./UnifiedDiffBlock";
 import ProgressPanel from "./ProgressPanel";
 import StatsIcon from "./StatsIcon";
+import TimingIcon from "./TimingIcon";
 import WidgetCard from "./WidgetCard";
 import { confirmTaskAction } from "./TaskCard";
 import Dropdown from "./Dropdown";
@@ -42,10 +44,15 @@ export const detailsOpenState = new Map<string, boolean>();
 const expandedTurnsByTask = new Map<string, Set<string>>();
 const expandedSessionsByTask = new Map<string, Set<string>>();
 
+// A setup that appears to last longer than this is reconstructed history with
+// unavailable producer timestamps, not a credible container startup duration.
+const maxCredibleSetupDurationMs = 60 * 60 * 1000;
+
 interface Props {
   taskId: string;
   taskState: string;
   autoFocusPrompt: boolean;
+  startedAt?: string;
   title?: string;
   error?: string;
   initialPrompt?: string;
@@ -306,7 +313,18 @@ export default function TaskDetail(props: Props) {
     }
   });
 
-  // Extract stats events from the full message stream for StatsIcon.
+  // Fold task timing incrementally so live flushes process only appended events.
+  const timingTracker = new IncrementalTaskTimingTracker();
+  let timingTaskId = "";
+  let timingEpoch = -1;
+  const taskTimings = createMemo(() => {
+    const taskId = props.taskId;
+    const epoch = timeline.epoch();
+    const reset = taskId !== timingTaskId || epoch !== timingEpoch;
+    timingTaskId = taskId;
+    timingEpoch = epoch;
+    return timingTracker.derive(messages(), reset);
+  });
   const statsHistory = createMemo<EventStats[]>(() => messages().filter((m) => m.kind === "stats" && m.stats !== undefined).map((m) => m.stats as EventStats));
   // The agent normally emits the initial prompt as its first user-input event.
   // Setup can fail before that happens, so retain the recorded prompt as task context.
@@ -318,12 +336,50 @@ export default function TaskDetail(props: Props) {
       event.kind === "text" || event.kind === "textDelta" || event.kind === "thinking" || event.kind === "thinkingDelta" || event.kind === "toolUse" || event.kind === "toolResult" || event.kind === "result",
     );
   });
-  // Runtime setup output precedes the agent conversation. Keep it out of
-  // elided turns so it remains inspectable after replaying a task history.
-  const setupLogLines = createMemo(() => messages().flatMap((event) =>
-    event.kind === "log" && event.log ? [event.log.line] : [],
-  ));
-  const hasSessionStarted = createMemo(() => messages().some((event) => event.kind === "init"));
+  // Fold setup metadata incrementally; large retained histories must not be
+  // rescanned on each live flush.
+  let setupTaskId = "";
+  let setupEpoch = -1;
+  let setupProcessed = 0;
+  let setupLogs: EventMessage[] = [];
+  let firstInit: EventMessage | null = null;
+  let firstSetupEndTs = Number.POSITIVE_INFINITY;
+  const setupInfo = createMemo(() => {
+    const taskId = props.taskId;
+    const epoch = timeline.epoch();
+    const history = messages();
+    if (taskId !== setupTaskId || epoch !== setupEpoch || history.length < setupProcessed) {
+      setupTaskId = taskId;
+      setupEpoch = epoch;
+      setupProcessed = 0;
+      setupLogs = [];
+      firstInit = null;
+      firstSetupEndTs = Number.POSITIVE_INFINITY;
+    }
+    for (let i = setupProcessed; i < history.length; i++) {
+      const event = history[i];
+      if (event.kind === "log" && event.log) setupLogs.push(event);
+      if (firstInit === null && event.kind === "init") firstInit = event;
+      if ((event.kind === "init" || event.kind === "userInput") && event.ts > 0) {
+        firstSetupEndTs = Math.min(firstSetupEndTs, event.ts);
+      }
+    }
+    setupProcessed = history.length;
+
+    const taskStartTs = props.startedAt ? Date.parse(props.startedAt) : 0;
+    const durationMs = firstSetupEndTs - taskStartTs;
+    const range = taskStartTs > 0 && Number.isFinite(durationMs) && durationMs >= 0 && durationMs <= maxCredibleSetupDurationMs
+      ? { start: taskStartTs, end: firstSetupEndTs }
+      : null;
+    return {
+      events: firstInit ? [...setupLogs, firstInit] : [...setupLogs],
+      lines: setupLogs.map((event) => event.log?.line ?? ""),
+      firstInit,
+      range,
+    };
+  });
+  const setupLogLines = () => setupInfo().lines;
+  const hasSessionStarted = () => setupInfo().firstInit !== null;
 
   // Sessions from completed messages: stable during streaming (only updates on turn completion).
   // groupSessions extracts init/compact_boundary events as session headers, not message groups.
@@ -679,7 +735,7 @@ export default function TaskDetail(props: Props) {
         <Show when={props.inPlanMode}>
           <span class={styles.planIndicator} title="Agent is in plan mode">Plan Mode</span>
         </Show>
-        <StatsIcon stats={statsHistory()} sessions={allCompletedSessions()} />
+        <StatsIcon stats={statsHistory()} turns={taskTimings().turns} />
       </div>
       <Show when={props.error} keyed>
         {(error) => (
@@ -700,7 +756,10 @@ export default function TaskDetail(props: Props) {
       <div class={styles.messageArea} ref={messageAreaRef} onScroll={handleScroll} data-testid="task-message-area">
         <Show when={setupLogLines().length > 0}>
           <details class={styles.taskSetup} open={!hasSessionStarted()} data-testid="task-setup">
-            <summary class={styles.taskSetupTitle}>Setup logs</summary>
+            <summary class={styles.taskSetupTitle}>
+              <span>Setup logs</span>
+              <TimingIcon events={setupInfo().events} range={setupInfo().range} showZero />
+            </summary>
             <pre class={styles.taskSetupLogs} data-testid="task-setup-logs">{setupLogLines().join("\n")}</pre>
           </details>
         </Show>
@@ -742,7 +801,10 @@ export default function TaskDetail(props: Props) {
                   {(e) => (
                     <button class={`${styles.elidedTurn}${e.indent === "session" ? ` ${styles.indentSession}` : ""}`} data-anchor-key={`turn:${e.key}`}
                       onClick={(ev) => anchoredToggleTurn(ev, e.key)}>
-                      {turnSummary(e.turn)}
+                      <span class={styles.turnSummaryText}>{turnSummary(e.turn)}</span>
+                      <span class={styles.turnDuration}>
+                        {e.turn.durationMs > 0 ? formatTimingDuration(e.turn.durationMs) : "0s"}
+                      </span>
                     </button>
                   )}
                 </Match>
@@ -751,23 +813,37 @@ export default function TaskDetail(props: Props) {
                   {(h) => (
                     <button class={`${styles.elidedTurn} ${styles.elidedTurnExpanded}${h.indent === "session" ? ` ${styles.indentSession}` : ""}`} data-anchor-key={`turn:${h.turnKey}`}
                       onClick={(ev) => anchoredToggleTurn(ev, h.turnKey)}>
-                      {turnSummary(h.turn)}
+                      <span class={styles.turnSummaryText}>{turnSummary(h.turn)}</span>
+                      <span class={styles.turnDuration}>
+                        {h.turn.durationMs > 0 ? formatTimingDuration(h.turn.durationMs) : "0s"}
+                      </span>
                     </button>
                   )}
                 </Match>
                 {/* Message group: non-keyed to preserve iframe state in WidgetCard. */}
                 <Match when={grpItem()}>
                   {(gi) => (
-                    <div class={gi().indent === "turn" ? styles.indentTurn : undefined}>
-                      <GroupContent
-                        group={() => gi().group}
-                        taskId={props.taskId}
-                        isWaiting={isWaiting}
-                        lastAskGroup={lastAskGroup}
-                        onAskAnswer={sendAskAnswer}
-                        onClearAndExecutePlan={clearAndExecutePlan}
-                        pendingAction={pendingAction}
-                      />
+                    <div class={`${styles.timedItem}${gi().indent === "turn" ? ` ${styles.indentTurn}` : ""}`}>
+                      <div class={styles.timedItemContent}>
+                        <GroupContent
+                          group={() => gi().group}
+                          taskId={props.taskId}
+                          isWaiting={isWaiting}
+                          lastAskGroup={lastAskGroup}
+                          onAskAnswer={sendAskAnswer}
+                          onClearAndExecutePlan={clearAndExecutePlan}
+                          pendingAction={pendingAction}
+                        />
+                      </div>
+                      <Show when={gi().group.kind !== "action" || gi().group.toolCalls.length !== 1}>
+                        <TimingIcon
+                          events={gi().group.events}
+                          userWaitMs={taskTimings().userWaitMs}
+                          previousEventTs={taskTimings().previousEventTs}
+                          overlay
+                          cardInset={gi().group.events.some((event) => event.kind === "result")}
+                        />
+                      </Show>
                     </div>
                   )}
                 </Match>
@@ -1069,18 +1145,22 @@ function MessageItem(props: { ev: EventMessage }) {
 
 function ResultCard(props: { result: EventResult }) {
   const result = () => props.result;
+  const meta = createMemo(() => {
+    const current = result();
+    const parts: string[] = [];
+    if (current.totalCostUSD > 0) parts.push(`$${current.totalCostUSD.toFixed(4)}`);
+    if (current.numTurns > 0) parts.push(`${current.numTurns} ${current.numTurns === 1 ? "turn" : "turns"}`);
+    return parts.join(" · ");
+  });
   return (
     <div class={`${styles.result} ${result().isError ? styles.resultError : styles.resultSuccess}`}>
       <strong>{result().isError ? "Error" : "Done"}</strong>
       <Show when={result().result}>
         <div class={styles.resultText}><Markdown text={result().result} /></div>
       </Show>
-      <div class={styles.resultMeta}>
-        <Show when={result().totalCostUSD !== 0}>
-          ${result().totalCostUSD.toFixed(4)} &middot;{" "}
-        </Show>
-        {result().duration.toFixed(1)}s &middot; {result().numTurns} turns
-      </div>
+      <Show when={meta()} keyed>
+        {(text) => <div class={styles.resultMeta}>{text}</div>}
+      </Show>
     </div>
   );
 }
@@ -1128,6 +1208,7 @@ function ToolMessageGroup(props: { toolCalls: ToolCall[]; taskId: string; events
   const thinkingEvents = () => (props.events ?? []).filter(
     (e) => e.kind === "thinking" || e.kind === "thinkingDelta",
   );
+  const durations = createMemo(() => toolCallDurations(props.events ?? []));
   // Compute accumulated tool output deltas per toolUseID from the group events.
   const outputDeltaEvents = (toolUseID: string) => (props.events ?? []).filter(
     (e) => e.kind === "toolOutputDelta" && e.toolOutputDelta?.toolUseID === toolUseID,
@@ -1136,6 +1217,7 @@ function ToolMessageGroup(props: { toolCalls: ToolCall[]; taskId: string; events
     <Show when={calls().length > 0}>
       <Show when={calls().length > 1} fallback={
         <ToolCallCard call={calls()[0]} taskId={props.taskId}
+          durationMs={toolCallDurationMs(calls()[0], durations())}
           thinkingEvents={thinkingEvents()}
           outputDeltaEvents={outputDeltaEvents(calls()[0].use.toolUseID)}
           open={detailsOpenState.get(calls()[0].use.toolUseID) ?? false}
@@ -1155,6 +1237,7 @@ function ToolMessageGroup(props: { toolCalls: ToolCall[]; taskId: string; events
               </Show>
               <Index each={calls()}>
                 {(call) => <ToolCallCard call={call()} taskId={props.taskId}
+                  durationMs={toolCallDurationMs(call(), durations())}
                   outputDeltaEvents={outputDeltaEvents(call().use.toolUseID)}
                   open={detailsOpenState.get(call().use.toolUseID) ?? false}
                   onToggle={(v) => detailsOpenState.set(call().use.toolUseID, v)}
@@ -1376,11 +1459,11 @@ function SubagentSpawns(props: { spawns: EventSubagentSpawn[] }) {
   );
 }
 
-function ToolCallCard(props: { call: ToolCall; taskId: string; open: boolean; onToggle: (open: boolean) => void; thinkingEvents?: EventMessage[]; outputDeltaEvents?: EventMessage[]; onClearAndExecutePlan?: () => void; pendingAction?: () => string | null; suppressPlanContent?: boolean }) {
+function ToolCallCard(props: { call: ToolCall; taskId: string; durationMs: number | null; open: boolean; onToggle: (open: boolean) => void; thinkingEvents?: EventMessage[]; outputDeltaEvents?: EventMessage[]; onClearAndExecutePlan?: () => void; pendingAction?: () => string | null; suppressPlanContent?: boolean }) {
   const [loadedInput, setLoadedInput] = createSignal<Record<string, unknown> | null>(null);
   const [loading, setLoading] = createSignal(false);
 
-  const duration = () => props.call.result?.duration ?? 0;
+  const durationMs = () => props.durationMs;
   const error = () => props.call.result?.error ?? "";
   const effectiveInput = (): Record<string, unknown> =>
     (loadedInput() ?? props.call.use.input ?? {}) as Record<string, unknown>;
@@ -1402,23 +1485,27 @@ function ToolCallCard(props: { call: ToolCall; taskId: string; open: boolean; on
       <details class={styles.toolBlock} open={props.open}
         onToggle={(e) => props.onToggle(e.currentTarget.open)}>
         <summary>
-          <Show when={!props.call.done} fallback={
-            <Show when={props.call.use.background} fallback={<span class={styles.toolDone}>&#10003;</span>}>
-              <span class={styles.toolBackground} title="Running in background">&#8943;</span>
+          <span class={styles.toolSummaryContent}>
+            <span class={styles.toolSummaryMain}>
+              <Show when={!props.call.done} fallback={
+                <Show when={props.call.use.background} fallback={<span class={styles.toolDone}>&#10003;</span>}>
+                  <span class={styles.toolBackground} title="Running in background">&#8943;</span>
+                </Show>
+              }>
+                <span class={styles.toolPending} />
+              </Show>
+              {props.call.use.name}
+              <Show when={detail()}>
+                <span class={styles.toolDetail}>{detail()}</span>
+              </Show>
+              <Show when={error()}>
+                <span class={styles.toolError}> error</span>
+              </Show>
+            </span>
+            <Show when={durationMs()} keyed>
+              {(duration) => <span class={styles.toolDuration} data-testid="tool-duration">{formatTimingDuration(duration)}</span>}
             </Show>
-          }>
-            <span class={styles.toolPending} />
-          </Show>
-          {props.call.use.name}
-          <Show when={detail()}>
-            <span class={styles.toolDetail}>{detail()}</span>
-          </Show>
-          <Show when={duration() > 0}>
-            <span class={styles.toolDuration}>{formatDuration(duration())}</span>
-          </Show>
-          <Show when={error()}>
-            <span class={styles.toolError}> error</span>
-          </Show>
+          </span>
         </summary>
         <Show when={(props.thinkingEvents?.length ?? 0) > 0}>
           <ThinkingCard events={props.thinkingEvents ?? []} />

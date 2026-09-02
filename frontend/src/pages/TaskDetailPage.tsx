@@ -23,6 +23,7 @@ export default function TaskDetailPage() {
               taskId={taskId}
               taskState={t()?.state ?? "pending"}
               autoFocusPrompt={s.claimInitialTaskFocus(taskId)}
+              startedAt={t()?.startedAt}
               title={t()?.title}
               error={t()?.error}
               initialPrompt={t()?.initialPrompt}

@@ -263,7 +263,7 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 
 	// 2. Start the agent session.
 	t.SetState(taskslog.StateStarting)
-	var msgCh chan agent.ParsedMessage
+	var msgCh chan agent.TimedMessage
 	var dispatchDone <-chan struct{}
 	{
 		region := trace.StartRegion(ctx, "dispatch-init")
@@ -1088,11 +1088,11 @@ func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent
 
 // startMessageDispatch starts a goroutine that reads from msgCh, dispatches to
 // t.addMessage, and reports task state transitions.
-func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipSideEffects bool) (msgCh chan agent.ParsedMessage, dispatchDone <-chan struct{}) {
+func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipSideEffects bool) (msgCh chan agent.TimedMessage, dispatchDone <-chan struct{}) {
 	// Capture all repos outside the goroutine to avoid races.
 	allRepos := t.RuntimeRepos()
 	instanceID := t.RuntimeInstanceID()
-	msgCh = make(chan agent.ParsedMessage, 256)
+	msgCh = make(chan agent.TimedMessage, 256)
 	done := make(chan struct{})
 	dispatchDone = done
 	go func() {
