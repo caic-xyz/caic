@@ -48,6 +48,9 @@ func (h *usageHandlers) handleEvents(w http.ResponseWriter, r *http.Request) {
 	var prev []byte
 
 	for {
+		// Subscribe before building and writing the snapshot so a quota update
+		// during either operation closes this channel and triggers another pass.
+		ch := h.taskMgr.Changed()
 		resp := h.buildResp(r.Context())
 
 		data, err := json.Marshal(resp)
@@ -57,7 +60,6 @@ func (h *usageHandlers) handleEvents(w http.ResponseWriter, r *http.Request) {
 			prev = data
 		}
 
-		ch := h.taskMgr.Changed()
 		select {
 		case <-r.Context().Done():
 			return
