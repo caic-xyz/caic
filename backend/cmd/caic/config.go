@@ -44,10 +44,11 @@ type tomlCore struct {
 }
 
 type tomlServer struct {
-	HTTP         string   `toml:"http"`
-	ExternalURL  string   `toml:"external_url"`
-	GeoDB        string   `toml:"geo_db"`
-	AllowOrigins []string `toml:"allow_origins"`
+	HTTP           string   `toml:"http"`
+	ExternalURL    string   `toml:"external_url"`
+	GeoDB          string   `toml:"geo_db"`
+	AllowOrigins   []string `toml:"allow_origins"`
+	TrustedProxies []string `toml:"trusted_proxies"`
 }
 
 type tomlDebug struct {
@@ -109,9 +110,10 @@ func defaultConfig() tomlConfig {
 	return tomlConfig{
 		Core: tomlCore{Root: "."},
 		Server: tomlServer{
-			HTTP:         ":2242",
-			ExternalURL:  "auto",
-			AllowOrigins: slices.Clone(defaultAllowOrigins),
+			HTTP:           ":2242",
+			ExternalURL:    "auto",
+			AllowOrigins:   slices.Clone(defaultAllowOrigins),
+			TrustedProxies: []string{},
 		},
 		Harness: map[string]tomlHarness{
 			"claude":   {},
@@ -255,7 +257,8 @@ func tomlToServerConfig(ctx context.Context, tc *tomlConfig, cfgDir string) (cfg
 			OAuthAllowedUsers: tc.Google.OAuth.AllowedUsers,
 		},
 		Auth: server.AuthConfig{
-			ExternalURL: tc.Server.ExternalURL,
+			ExternalURL:    tc.Server.ExternalURL,
+			TrustedProxies: tc.Server.TrustedProxies,
 		},
 		Voice: server.VoiceConfig{
 			Gateway: server.VoiceGatewayConfig{

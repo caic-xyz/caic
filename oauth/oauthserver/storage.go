@@ -6,15 +6,47 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/caic-xyz/caic/oauth"
 )
 
 // storeVersion is the on-disk schema version. Codes and Consents are keyed by
 // RefreshTokenKey(secret) so the live code/consent token never lands on disk.
-const storeVersion = 1
+const storeVersion = 2
+
+var storeOwners = struct {
+	sync.Mutex
+
+	paths map[string]struct{}
+}{paths: map[string]struct{}{}}
+
+func claimStore(path string) (func(), error) {
+	if path == "" {
+		return func() {}, nil
+	}
+	canonical, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve oauth state path: %w", err)
+	}
+	storeOwners.Lock()
+	defer storeOwners.Unlock()
+	if _, exists := storeOwners.paths[canonical]; exists {
+		return nil, fmt.Errorf("oauth state path %q already has an owner", canonical)
+	}
+	storeOwners.paths[canonical] = struct{}{}
+	return func() {
+		storeOwners.Lock()
+		delete(storeOwners.paths, canonical)
+		storeOwners.Unlock()
+	}, nil
+}
 
 // Client is a dynamically-registered OAuth client.
 type Client struct {
@@ -58,14 +90,33 @@ type RefreshToken struct {
 
 // DeviceCode holds an in-progress device authorization flow (RFC 8628).
 type DeviceCode struct {
-	DeviceCode string    `json:"-"`
-	UserCode   string    `json:"userCode"`
-	ClientID   string    `json:"clientID"`
-	Scope      string    `json:"scope"`
-	UserID     string    `json:"userID,omitempty"`
-	Status     string    `json:"status"`
-	ExpiresAt  time.Time `json:"expiresAt"`
-	IssuedAt   time.Time `json:"issuedAt"`
+	DeviceCode  string    `json:"-"`
+	UserCode    string    `json:"-"`
+	UserCodeKey string    `json:"userCodeKey,omitempty"`
+	ClientID    string    `json:"clientID"`
+	Scope       string    `json:"scope"`
+	UserID      string    `json:"userID,omitempty"`
+	Status      string    `json:"status"`
+	ExpiresAt   time.Time `json:"expiresAt"`
+	IssuedAt    time.Time `json:"issuedAt"`
+}
+
+// UnmarshalJSON migrates legacy plaintext user codes to digest-only storage.
+func (d *DeviceCode) UnmarshalJSON(data []byte) error {
+	type deviceCode DeviceCode
+	var value struct {
+		deviceCode
+
+		LegacyUserCode string `json:"userCode"`
+	}
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	*d = DeviceCode(value.deviceCode)
+	if d.UserCodeKey == "" && value.LegacyUserCode != "" {
+		d.UserCodeKey = oauth.RefreshTokenKey(value.LegacyUserCode)
+	}
+	return nil
 }
 
 // Grant ties a user authorization grant to a client and token.
@@ -92,6 +143,32 @@ type Store struct {
 	DeviceCodes   map[string]*DeviceCode   `json:"deviceCodes,omitempty"`
 
 	path string
+	io   storeIO
+}
+
+type storeIO interface {
+	CreateTemp(dir, pattern string) (*os.File, error)
+	Open(name string) (storeSyncCloser, error)
+	Rename(oldPath, newPath string) error
+}
+
+type storeSyncCloser interface {
+	Sync() error
+	Close() error
+}
+
+type osStoreIO struct{}
+
+func (osStoreIO) CreateTemp(dir, pattern string) (*os.File, error) {
+	return os.CreateTemp(dir, pattern)
+}
+
+func (osStoreIO) Open(name string) (storeSyncCloser, error) {
+	return os.Open(name) //nolint:gosec // name is the app-controlled OAuth state directory.
+}
+
+func (osStoreIO) Rename(oldPath, newPath string) error {
+	return os.Rename(oldPath, newPath)
 }
 
 type storeFile struct {
@@ -121,6 +198,9 @@ func LoadStore(path string) (*Store, error) {
 	if err := json.Unmarshal(data, &file); err != nil {
 		return nil, fmt.Errorf("parse oauth state: %w", err)
 	}
+	if file.Version > storeVersion {
+		return nil, fmt.Errorf("parse oauth state: unsupported version %d", file.Version)
+	}
 	store.Clients = file.Clients
 	store.RefreshTokens = file.RefreshTokens
 	store.Grants = file.Grants
@@ -134,25 +214,64 @@ func LoadStore(path string) (*Store, error) {
 
 // Save writes the durable OAuth state to its configured path.
 func (s *Store) Save() error {
-	if s.path == "" {
-		return nil
-	}
 	s.ensureMaps()
 	file := storeFile{Version: storeVersion, Clients: s.Clients, RefreshTokens: s.RefreshTokens, Grants: s.Grants, Codes: s.Codes, Consents: s.Consents, DeviceCodes: s.DeviceCodes}
+	_, err := persistStore(s, file)
+	return err
+}
+
+func persistStore(s *Store, file storeFile) (bool, error) {
+	if s.path == "" {
+		return true, nil
+	}
 	data, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal oauth state: %w", err)
+		return false, fmt.Errorf("marshal oauth state: %w", err)
 	}
 	data = append(data, '\n')
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return fmt.Errorf("write oauth state: %w", err)
+	dir := filepath.Dir(s.path)
+	tmp, err := s.io.CreateTemp(dir, ".oauth-state-*")
+	if err != nil {
+		return false, fmt.Errorf("create oauth state temporary file: %w", err)
 	}
-	if err := os.Rename(tmp, s.path); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("rename oauth state: %w", err)
+	tmpPath := tmp.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return false, fmt.Errorf("chmod oauth state temporary file: %w", err)
 	}
-	return nil
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return false, fmt.Errorf("write oauth state: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return false, fmt.Errorf("sync oauth state: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return false, fmt.Errorf("close oauth state: %w", err)
+	}
+	if err := s.io.Rename(tmpPath, s.path); err != nil {
+		return false, fmt.Errorf("rename oauth state: %w", err)
+	}
+	committed = true
+	dirFile, err := s.io.Open(dir)
+	if err != nil {
+		return true, fmt.Errorf("open oauth state directory: %w", err)
+	}
+	if err := dirFile.Sync(); err != nil {
+		_ = dirFile.Close()
+		return true, fmt.Errorf("sync oauth state directory: %w", err)
+	}
+	if err := dirFile.Close(); err != nil {
+		return true, fmt.Errorf("close oauth state directory: %w", err)
+	}
+	return true, nil
 }
 
 // Path returns the durable OAuth state path.
@@ -180,40 +299,101 @@ func (s *Store) ListUserGrants(userID string) []Grant {
 
 // RevokeUserGrant revokes one user's grant and all refresh tokens for it.
 func (s *Store) RevokeUserGrant(userID, grantID string, now time.Time) bool {
-	grant, ok := s.Grants[grantID]
+	file := storeFile{Grants: s.Grants, RefreshTokens: s.RefreshTokens}
+	return revokeUserGrant(&file, userID, grantID, now)
+}
+
+func containResourceState(file *storeFile, resourceURL string, now time.Time) bool {
+	changed := false
+	for key, code := range file.Codes {
+		if code.Resource != resourceURL {
+			delete(file.Codes, key)
+			changed = true
+		}
+	}
+	for key, consent := range file.Consents {
+		if consent.Params["resource"] != resourceURL {
+			delete(file.Consents, key)
+			changed = true
+		}
+	}
+	for grantID := range file.Grants {
+		grant := file.Grants[grantID]
+		if grant.Resource != resourceURL && revokeGrant(file, grantID, now) {
+			changed = true
+		}
+	}
+	for tokenHash := range file.RefreshTokens {
+		entry := file.RefreshTokens[tokenHash]
+		grant, found := file.Grants[entry.GrantID]
+		if entry.Resource == resourceURL && (!found || grant.Resource == resourceURL) {
+			continue
+		}
+		if found {
+			if revokeGrant(file, entry.GrantID, now) {
+				changed = true
+			}
+			continue
+		}
+		if entry.RevokedAt.IsZero() {
+			entry.RevokedAt = now
+			file.RefreshTokens[tokenHash] = entry
+			changed = true
+		}
+	}
+	return changed
+}
+
+func revokeUserGrant(file *storeFile, userID, grantID string, now time.Time) bool {
+	grant, ok := file.Grants[grantID]
 	if !ok || grant.UserID != userID {
 		return false
 	}
-	if grant.RevokedAt.IsZero() {
+	revokeGrant(file, grantID, now)
+	return true
+}
+
+func revokeGrant(file *storeFile, grantID string, now time.Time) bool {
+	changed := false
+	grant, ok := file.Grants[grantID]
+	if ok && grant.RevokedAt.IsZero() {
 		grant.RevokedAt = now
-		s.Grants[grantID] = grant
-		for tokenHash := range s.RefreshTokens {
-			entry := s.RefreshTokens[tokenHash]
-			if entry.GrantID == grantID && entry.RevokedAt.IsZero() {
-				entry.RevokedAt = now
-				s.RefreshTokens[tokenHash] = entry
-			}
+		file.Grants[grantID] = grant
+		changed = true
+	}
+	for tokenHash := range file.RefreshTokens {
+		entry := file.RefreshTokens[tokenHash]
+		if entry.GrantID == grantID && entry.RevokedAt.IsZero() {
+			entry.RevokedAt = now
+			file.RefreshTokens[tokenHash] = entry
+			changed = true
 		}
 	}
-	return true
+	return changed
 }
 
 // RevokeAllUserGrants revokes all grants and refresh tokens for a user.
 // Returns true if any grants were revoked.
 func (s *Store) RevokeAllUserGrants(userID string, now time.Time) bool {
+	file := storeFile{Grants: s.Grants, RefreshTokens: s.RefreshTokens}
+	return revokeAllUserGrants(&file, userID, now)
+}
+
+func revokeAllUserGrants(file *storeFile, userID string, now time.Time) bool {
 	changed := false
-	for id := range s.Grants {
-		if s.Grants[id].UserID == userID && s.Grants[id].RevokedAt.IsZero() {
-			s.Grants[id] = Grant{
-				ID:         s.Grants[id].ID,
-				UserID:     s.Grants[id].UserID,
-				ClientID:   s.Grants[id].ClientID,
-				ClientName: s.Grants[id].ClientName,
-				Resource:   s.Grants[id].Resource,
-				Scope:      s.Grants[id].Scope,
-				CreatedAt:  s.Grants[id].CreatedAt,
-				LastUsedAt: s.Grants[id].LastUsedAt,
-				ExpiresAt:  s.Grants[id].ExpiresAt,
+	for id := range file.Grants {
+		grant := file.Grants[id]
+		if grant.UserID == userID && grant.RevokedAt.IsZero() {
+			file.Grants[id] = Grant{
+				ID:         grant.ID,
+				UserID:     grant.UserID,
+				ClientID:   grant.ClientID,
+				ClientName: grant.ClientName,
+				Resource:   grant.Resource,
+				Scope:      grant.Scope,
+				CreatedAt:  grant.CreatedAt,
+				LastUsedAt: grant.LastUsedAt,
+				ExpiresAt:  grant.ExpiresAt,
 				RevokedAt:  now,
 			}
 			changed = true
@@ -222,17 +402,18 @@ func (s *Store) RevokeAllUserGrants(userID string, now time.Time) bool {
 	if !changed {
 		return false
 	}
-	for tokenHash := range s.RefreshTokens {
-		if s.RefreshTokens[tokenHash].UserID == userID && s.RefreshTokens[tokenHash].RevokedAt.IsZero() {
-			s.RefreshTokens[tokenHash] = RefreshToken{
-				GrantID:   s.RefreshTokens[tokenHash].GrantID,
-				UserID:    s.RefreshTokens[tokenHash].UserID,
-				ClientID:  s.RefreshTokens[tokenHash].ClientID,
-				Resource:  s.RefreshTokens[tokenHash].Resource,
-				Scope:     s.RefreshTokens[tokenHash].Scope,
-				DPoPJKT:   s.RefreshTokens[tokenHash].DPoPJKT,
-				ExpiresAt: s.RefreshTokens[tokenHash].ExpiresAt,
-				UsedAt:    s.RefreshTokens[tokenHash].UsedAt,
+	for tokenHash := range file.RefreshTokens {
+		token := file.RefreshTokens[tokenHash]
+		if token.UserID == userID && token.RevokedAt.IsZero() {
+			file.RefreshTokens[tokenHash] = RefreshToken{
+				GrantID:   token.GrantID,
+				UserID:    token.UserID,
+				ClientID:  token.ClientID,
+				Resource:  token.Resource,
+				Scope:     token.Scope,
+				DPoPJKT:   token.DPoPJKT,
+				ExpiresAt: token.ExpiresAt,
+				UsedAt:    token.UsedAt,
 				RevokedAt: now,
 			}
 		}
@@ -246,9 +427,70 @@ func (s *Store) PruneExpiredRefreshTokens(now time.Time) bool {
 }
 
 func newEmptyStore(path string) *Store {
-	store := &Store{path: path}
+	store := &Store{path: path, io: osStoreIO{}}
 	store.ensureMaps()
 	return store
+}
+
+func (s *Store) transact(update func(*storeFile) bool) error {
+	next := s.snapshot()
+	if !update(&next) {
+		return nil
+	}
+	committed, err := persistStore(s, next)
+	if committed {
+		s.install(next)
+	}
+	return err
+}
+
+func (s *Store) snapshot() storeFile {
+	return storeFile{
+		Version:       storeVersion,
+		Clients:       cloneMap(s.Clients),
+		RefreshTokens: cloneMap(s.RefreshTokens),
+		Grants:        cloneMap(s.Grants),
+		Codes:         cloneMap(s.Codes),
+		Consents:      cloneConsents(s.Consents),
+		DeviceCodes:   cloneDeviceCodes(s.DeviceCodes),
+	}
+}
+
+func (s *Store) install(file storeFile) {
+	s.Clients = file.Clients
+	s.RefreshTokens = file.RefreshTokens
+	s.Grants = file.Grants
+	s.Codes = file.Codes
+	s.Consents = file.Consents
+	s.DeviceCodes = file.DeviceCodes
+}
+
+func cloneMap[K comparable, V any](src map[K]V) map[K]V {
+	dst := make(map[K]V, len(src))
+	maps.Copy(dst, src)
+	return dst
+}
+
+func cloneConsents(src map[string]ConsentParams) map[string]ConsentParams {
+	dst := make(map[string]ConsentParams, len(src))
+	for key, value := range src {
+		value.Params = cloneMap(value.Params)
+		dst[key] = value
+	}
+	return dst
+}
+
+func cloneDeviceCodes(src map[string]*DeviceCode) map[string]*DeviceCode {
+	dst := make(map[string]*DeviceCode, len(src))
+	for key, value := range src {
+		if value == nil {
+			dst[key] = nil
+			continue
+		}
+		entry := *value
+		dst[key] = &entry
+	}
+	return dst
 }
 
 func (s *Store) ensureMaps() {
@@ -273,34 +515,41 @@ func (s *Store) ensureMaps() {
 }
 
 func (s *Store) pruneExpired(now time.Time) bool {
+	file := storeFile{RefreshTokens: s.RefreshTokens, Grants: s.Grants, Codes: s.Codes, Consents: s.Consents, DeviceCodes: s.DeviceCodes}
+	return pruneExpiredStore(&file, now)
+}
+
+func pruneExpiredStore(file *storeFile, now time.Time) bool {
 	changed := false
-	for token := range s.RefreshTokens {
-		if now.After(s.RefreshTokens[token].ExpiresAt) {
-			delete(s.RefreshTokens, token)
+	for token := range file.RefreshTokens {
+		entry := file.RefreshTokens[token]
+		if now.After(entry.ExpiresAt) {
+			delete(file.RefreshTokens, token)
 			changed = true
 		}
 	}
-	for id := range s.Grants {
-		if now.After(s.Grants[id].ExpiresAt) {
-			delete(s.Grants, id)
+	for id := range file.Grants {
+		grant := file.Grants[id]
+		if now.After(grant.ExpiresAt) {
+			delete(file.Grants, id)
 			changed = true
 		}
 	}
-	for code := range s.Codes {
-		if now.After(s.Codes[code].ExpiresAt) {
-			delete(s.Codes, code)
+	for code, entry := range file.Codes {
+		if now.After(entry.ExpiresAt) {
+			delete(file.Codes, code)
 			changed = true
 		}
 	}
-	for consent := range s.Consents {
-		if now.After(s.Consents[consent].ExpiresAt) {
-			delete(s.Consents, consent)
+	for consent, entry := range file.Consents {
+		if now.After(entry.ExpiresAt) {
+			delete(file.Consents, consent)
 			changed = true
 		}
 	}
-	for code := range s.DeviceCodes {
-		if now.After(s.DeviceCodes[code].ExpiresAt) {
-			delete(s.DeviceCodes, code)
+	for code, entry := range file.DeviceCodes {
+		if entry != nil && now.After(entry.ExpiresAt) {
+			delete(file.DeviceCodes, code)
 			changed = true
 		}
 	}

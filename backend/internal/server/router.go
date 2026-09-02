@@ -358,6 +358,7 @@ type Dependencies struct {
 	SessionSecret              []byte
 	OAuthPrivateKeyPEM         []byte
 	OAuthKeyID                 string
+	OAuthIssuer                string
 	OAuthRefreshTokenStorePath string
 	AuditLogPath               string
 	GitHubOAuth                *oauthclient.ProviderConfig
@@ -523,6 +524,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 		s.oauthServer, err = oauthserver.NewServer(oauthserver.ServerConfig{
 			KeyPEM:                  d.OAuthPrivateKeyPEM,
 			KeyID:                   d.OAuthKeyID,
+			Issuer:                  d.OAuthIssuer,
 			AccessTokenTTL:          time.Hour,
 			AuthCodeTTL:             10 * time.Minute,
 			RefreshTokenTTL:         30 * 24 * time.Hour,
@@ -533,7 +535,6 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 			SupportedScopes:         []string{mcpScopeRead, mcpScopeTasksRead, mcpScopeTasksWrite, mcpScopeTasksAdmin, mcpScopeReposWrite},
 			DefaultScopes:           []string{mcpScopeRead, mcpScopeTasksRead},
 			ScopeLabels:             mcpScopeLabels,
-			BaseURL:                 func(r *http.Request) string { return externalBaseURL(s.hostState, r) },
 			Session:                 &caicSessionManager{store: d.AuthStore},
 			UI:                      &caicAuthorizationUI{login: s.authHandlers},
 			Audit:                   audit,

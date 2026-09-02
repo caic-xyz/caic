@@ -217,6 +217,7 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 		CacheSizes:                 NewCacheSizeStore(testLogger()),
 		AuthStore:                  authStore,
 		OAuthPrivateKeyPEM:         testMCPOAuthSigningKeyPEM(t),
+		OAuthIssuer:                "https://caic.example.com",
 		OAuthRefreshTokenStorePath: refreshTokenPath,
 		HostState:                  hostState,
 	})

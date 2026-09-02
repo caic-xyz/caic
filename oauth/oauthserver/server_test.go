@@ -37,6 +37,322 @@ const (
 func TestServer(t *testing.T) {
 	t.Parallel()
 
+	t.Run("issuer and audience ignore request authority headers", func(t *testing.T) {
+		t.Parallel()
+		user := testUser()
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/.well-known/oauth-authorization-server", http.NoBody)
+		req.Host = "poison.example"
+		req.Header.Set("Forwarded", "host=forwarded-poison.example;proto=http")
+		req.Header.Set("X-Forwarded-Host", "x-poison.example")
+		req.Header.Set("X-Forwarded-Proto", "http")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		var metadata oauth.AuthorizationServerMetadata
+		if err := json.NewDecoder(w.Body).Decode(&metadata); err != nil {
+			t.Fatalf("decode metadata: %v", err)
+		}
+		if metadata.Issuer != testBaseURL || metadata.TokenEndpoint != testBaseURL+"/oauth/token" {
+			t.Fatalf("metadata authority was request-derived: %+v", metadata)
+		}
+
+		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://claude.example.com/callback"})
+		token := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"}).AccessToken
+		resourceRequest := newTestResourceRequest(t)
+		resourceRequest.Host = "poison.example"
+		resourceRequest.Header.Set("Forwarded", "host=forwarded-poison.example;proto=http")
+		claims, err := s.verifyBearer(resourceRequest, token)
+		if err != nil {
+			t.Fatalf("verify immutable-audience token: %v", err)
+		}
+		if claims.Issuer != testBaseURL || claims.Audience != testResourceURL {
+			t.Fatalf("claims identity = issuer %q audience %q", claims.Issuer, claims.Audience)
+		}
+	})
+
+	t.Run("issuer configuration validates secure and local origins", func(t *testing.T) {
+		t.Parallel()
+		for _, issuer := range []string{"", "http://public.example", "https://user@example.com", "https://example.com/path", "https://example.com?", "https://example.com?query=1", "https://example.com#"} {
+			cfg := &ServerConfig{Issuer: issuer}
+			applyTestServerDefaults(t, cfg)
+			cfg.Issuer = issuer
+			if _, err := NewServer(*cfg); err == nil {
+				t.Errorf("NewServer Issuer %q error = nil", issuer)
+			}
+		}
+		cfg := &ServerConfig{Issuer: "http://127.0.0.1:2242"}
+		applyTestServerDefaults(t, cfg)
+		s, err := NewServer(*cfg)
+		if err != nil {
+			t.Fatalf("NewServer loopback issuer: %v", err)
+		}
+		s.Close()
+		canonical, err := validateIssuer("HTTPS://Example.COM:443/")
+		if err != nil {
+			t.Fatalf("validate canonical issuer: %v", err)
+		}
+		if canonical != "HTTPS://Example.COM:443" {
+			t.Fatalf("canonical issuer = %q", canonical)
+		}
+	})
+
+	t.Run("legacy foreign-resource authorization state is contained on restart", func(t *testing.T) {
+		t.Parallel()
+		path := t.TempDir() + "/oauth.json"
+		user := testUser()
+		const (
+			clientID     = "legacy-client"
+			code         = "legacy-code"
+			foreignGrant = "legacy-foreign-grant"
+			foreignToken = "legacy-foreign-refresh"
+			mixedGrant   = "legacy-mixed-grant"
+			mixedRefresh = "legacy-mixed-refresh"
+			foreignURL   = "https://poison.example/resource"
+		)
+		now := time.Now()
+		legacy, err := LoadStore(path)
+		if err != nil {
+			t.Fatalf("LoadStore: %v", err)
+		}
+		err = legacy.transact(func(next *storeFile) bool {
+			next.Clients[clientID] = Client{ID: clientID, RedirectURIs: []string{"https://client.example/callback"}}
+			next.Codes[oauth.RefreshTokenKey(code)] = Code{UserID: user.ID, ClientID: clientID, RedirectURI: "https://client.example/callback", CodeChallenge: testCodeChallenge(), Resource: foreignURL, Scope: "read", ExpiresAt: now.Add(time.Hour)}
+			next.Consents[oauth.RefreshTokenKey("legacy-consent")] = ConsentParams{UserID: user.ID, Params: map[string]string{"client_id": clientID, "resource": foreignURL}, ExpiresAt: now.Add(time.Hour)}
+			next.Grants[foreignGrant] = Grant{ID: foreignGrant, UserID: user.ID, ClientID: clientID, Resource: foreignURL, Scope: "read", CreatedAt: now, ExpiresAt: now.Add(time.Hour)}
+			next.RefreshTokens[oauth.RefreshTokenKey(foreignToken)] = RefreshToken{GrantID: foreignGrant, UserID: user.ID, ClientID: clientID, Resource: foreignURL, Scope: "read", ExpiresAt: now.Add(time.Hour)}
+			next.Grants[mixedGrant] = Grant{ID: mixedGrant, UserID: user.ID, ClientID: clientID, Resource: testResourceURL, Scope: "read", CreatedAt: now, ExpiresAt: now.Add(time.Hour)}
+			next.RefreshTokens[oauth.RefreshTokenKey(mixedRefresh)] = RefreshToken{GrantID: mixedGrant, UserID: user.ID, ClientID: clientID, Resource: foreignURL, Scope: "read", ExpiresAt: now.Add(time.Hour)}
+			return true
+		})
+		if err != nil {
+			t.Fatalf("seed legacy state: %v", err)
+		}
+		tokens, err := NewAccessTokenService(testSigningKeyPEM, "test-key", time.Hour)
+		if err != nil {
+			t.Fatalf("NewAccessTokenService: %v", err)
+		}
+		legacyAccessToken, err := tokens.IssueAccessToken(testBaseURL, user, testResourceURL, "read", foreignGrant)
+		if err != nil {
+			t.Fatalf("IssueAccessToken: %v", err)
+		}
+
+		cfg := testFlowServerConfig(path, []oauth.User{user})
+		s, err := NewServer(cfg)
+		if err != nil {
+			t.Fatalf("NewServer: %v", err)
+		}
+		h := newTestServerHandler(s)
+		codeForm := url.Values{"grant_type": {oauth.GrantAuthorizationCode}, "code": {code}, "client_id": {clientID}, "redirect_uri": {"https://client.example/callback"}, "code_verifier": {testVerifier}, "resource": {testResourceURL}}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(codeForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("legacy code status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
+		}
+		refreshOAuthTestToken(t, h, clientID, foreignToken, http.StatusBadRequest)
+		refreshOAuthTestToken(t, h, clientID, mixedRefresh, http.StatusBadRequest)
+		if _, err := s.verifyBearer(newTestResourceRequest(t), legacyAccessToken); err == nil {
+			t.Fatal("legacy access token backed by foreign-resource grant remained valid")
+		}
+		s.Close()
+
+		restarted, err := NewServer(cfg)
+		if err != nil {
+			t.Fatalf("restart NewServer: %v", err)
+		}
+		t.Cleanup(restarted.Close)
+		restarted.mu.Lock()
+		defer restarted.mu.Unlock()
+		if _, found := restarted.state.Codes[oauth.RefreshTokenKey(code)]; found || len(restarted.state.Consents) != 0 {
+			t.Fatalf("foreign transient state survived restart: codes=%d consents=%d", len(restarted.state.Codes), len(restarted.state.Consents))
+		}
+		for _, grantID := range []string{foreignGrant, mixedGrant} {
+			if restarted.state.Grants[grantID].RevokedAt.IsZero() {
+				t.Fatalf("grant %q was not durably revoked", grantID)
+			}
+		}
+		for _, token := range []string{foreignToken, mixedRefresh} {
+			if restarted.state.RefreshTokens[oauth.RefreshTokenKey(token)].RevokedAt.IsZero() {
+				t.Fatalf("refresh token %q was not durably revoked", token)
+			}
+		}
+	})
+
+	t.Run("configured issuer spelling remains compatible across upgrade", func(t *testing.T) {
+		t.Parallel()
+		path := t.TempDir() + "/oauth.json"
+		user := testUser()
+		const (
+			issuer   = "https://Caic.Example.COM"
+			resource = issuer + "/resource"
+			clientID = "case-compatible-client"
+			grantID  = "case-compatible-grant"
+			refresh  = "case-compatible-refresh"
+		)
+		now := time.Now()
+		legacy, err := LoadStore(path)
+		if err != nil {
+			t.Fatalf("LoadStore: %v", err)
+		}
+		err = legacy.transact(func(next *storeFile) bool {
+			next.Clients[clientID] = Client{ID: clientID}
+			next.Grants[grantID] = Grant{ID: grantID, UserID: user.ID, ClientID: clientID, Resource: resource, Scope: "read", CreatedAt: now, ExpiresAt: now.Add(time.Hour)}
+			next.RefreshTokens[oauth.RefreshTokenKey(refresh)] = RefreshToken{GrantID: grantID, UserID: user.ID, ClientID: clientID, Resource: resource, Scope: "read", ExpiresAt: now.Add(time.Hour)}
+			return true
+		})
+		if err != nil {
+			t.Fatalf("seed compatible state: %v", err)
+		}
+		tokens, err := NewAccessTokenService(testSigningKeyPEM, "test-key", time.Hour)
+		if err != nil {
+			t.Fatalf("NewAccessTokenService: %v", err)
+		}
+		accessToken, err := tokens.IssueAccessToken(issuer, user, resource, "read", grantID)
+		if err != nil {
+			t.Fatalf("IssueAccessToken: %v", err)
+		}
+
+		cfg := testFlowServerConfig(path, []oauth.User{user})
+		cfg.Issuer = issuer
+		s, err := NewServer(cfg)
+		if err != nil {
+			t.Fatalf("NewServer: %v", err)
+		}
+		if s.issuer != issuer || s.resourceURL != resource {
+			t.Fatalf("configured identity changed: issuer=%q resource=%q", s.issuer, s.resourceURL)
+		}
+		if _, err := s.verifyBearer(newTestResourceRequest(t), accessToken); err != nil {
+			t.Fatalf("compatible access token rejected: %v", err)
+		}
+		rotated := refreshOAuthTestToken(t, newTestServerHandler(s), clientID, refresh, http.StatusOK)
+		if rotated.RefreshToken == "" {
+			t.Fatal("compatible refresh family did not rotate")
+		}
+		s.Close()
+
+		restarted, err := NewServer(cfg)
+		if err != nil {
+			t.Fatalf("restart NewServer: %v", err)
+		}
+		t.Cleanup(restarted.Close)
+		if _, err := restarted.verifyBearer(newTestResourceRequest(t), accessToken); err != nil {
+			t.Fatalf("compatible access token rejected after restart: %v", err)
+		}
+		restarted.mu.Lock()
+		grant := restarted.state.Grants[grantID]
+		refreshResources := make([]string, 0)
+		for _, entry := range restarted.state.RefreshTokens {
+			if entry.GrantID == grantID {
+				refreshResources = append(refreshResources, entry.Resource)
+			}
+		}
+		restarted.mu.Unlock()
+		if !grant.RevokedAt.IsZero() || grant.Resource != resource {
+			t.Fatalf("compatible grant was changed or revoked: %+v", grant)
+		}
+		for _, refreshResource := range refreshResources {
+			if refreshResource != resource {
+				t.Fatalf("refresh resource was rewritten to %q", refreshResource)
+			}
+		}
+	})
+
+	t.Run("foreign-resource state introduced after startup fails closed", func(t *testing.T) {
+		t.Parallel()
+		user := testUser()
+		s := newTestServer(t, &ServerConfig{Session: &testSessionManager{users: map[string]oauth.User{user.ID: user}}})
+		const (
+			accessGrantID = "foreign-access-grant"
+			clientID      = "foreign-client"
+			grantID       = "foreign-grant"
+			refresh       = "foreign-refresh"
+			foreignURL    = "https://poison.example/resource"
+		)
+		now := time.Now()
+		s.mu.Lock()
+		err := s.state.transact(func(next *storeFile) bool {
+			next.Clients[clientID] = Client{ID: clientID}
+			next.Grants[accessGrantID] = Grant{ID: accessGrantID, UserID: user.ID, ClientID: clientID, Resource: foreignURL, Scope: "read", CreatedAt: now, ExpiresAt: now.Add(time.Hour)}
+			next.Grants[grantID] = Grant{ID: grantID, UserID: user.ID, ClientID: clientID, Resource: foreignURL, Scope: "read", CreatedAt: now, ExpiresAt: now.Add(time.Hour)}
+			next.RefreshTokens[oauth.RefreshTokenKey(refresh)] = RefreshToken{GrantID: grantID, UserID: user.ID, ClientID: clientID, Resource: foreignURL, Scope: "read", ExpiresAt: now.Add(time.Hour)}
+			return true
+		})
+		s.mu.Unlock()
+		if err != nil {
+			t.Fatalf("seed foreign state: %v", err)
+		}
+		if _, err := s.issueTokenResponse(user, foreignURL, "read", grantID, "new-refresh"); err == nil {
+			t.Fatal("issueTokenResponse accepted a foreign resource")
+		}
+		accessToken, err := s.tokens.IssueAccessToken(s.issuer, user, s.resourceURL, "read", accessGrantID)
+		if err != nil {
+			t.Fatalf("IssueAccessToken: %v", err)
+		}
+		if _, err := s.verifyBearer(newTestResourceRequest(t), accessToken); err == nil {
+			t.Fatal("foreign-resource grant remained valid for access")
+		}
+		result, _, err := s.exchangeRefreshToken(refresh, clientID, user.ID, "next-refresh")
+		if err != nil || result != refreshExchangeUnknown {
+			t.Fatalf("exchangeRefreshToken result=%v err=%v", result, err)
+		}
+		s.mu.Lock()
+		accessGrant := s.state.Grants[accessGrantID]
+		grant := s.state.Grants[grantID]
+		entry := s.state.RefreshTokens[oauth.RefreshTokenKey(refresh)]
+		s.mu.Unlock()
+		if accessGrant.RevokedAt.IsZero() || grant.RevokedAt.IsZero() || entry.RevokedAt.IsZero() {
+			t.Fatalf("foreign state was not revoked: accessGrant=%+v grant=%+v refresh=%+v", accessGrant, grant, entry)
+		}
+	})
+
+	t.Run("introspection authenticates and scopes callers", func(t *testing.T) {
+		t.Parallel()
+		user := testUser()
+		cfg := testFlowServerConfig(t.TempDir()+"/oauth.json", []oauth.User{user})
+		cfg.IntrospectionAuth = func(r *http.Request) (IntrospectionPrincipal, bool) {
+			clientID := r.Header.Get("X-Test-Introspection-Client")
+			return IntrospectionPrincipal{ClientID: clientID}, clientID != ""
+		}
+		s, err := NewServer(cfg)
+		if err != nil {
+			t.Fatalf("NewServer: %v", err)
+		}
+		h := newTestServerHandler(s)
+		client := registerOAuthTestClient(t, h, "Authorized", []string{"https://claude.example.com/callback"})
+		wrongClient := registerOAuthTestClient(t, h, "Wrong", []string{"https://claude.example.com/callback"})
+		token := authorizeOAuthTestClient(t, h, user, &client, []string{"read"}).AccessToken
+
+		introspect := func(clientID, rawToken string) (int, string, oauth.IntrospectionResponse) {
+			form := url.Values{"token": {rawToken}}
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/introspect", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			if clientID != "" {
+				req.Header.Set("X-Test-Introspection-Client", clientID)
+			}
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			var response oauth.IntrospectionResponse
+			_ = json.Unmarshal(w.Body.Bytes(), &response)
+			return w.Code, w.Body.String(), response
+		}
+
+		if status, _, response := introspect(client.ClientID, token); status != http.StatusOK || !response.Active {
+			t.Fatalf("authorized introspection = status %d response %+v", status, response)
+		}
+		_, wrongBody, wrongResponse := introspect(wrongClient.ClientID, token)
+		_, invalidBody, invalidResponse := introspect(wrongClient.ClientID, "invalid.token")
+		if wrongResponse.Active || invalidResponse.Active || wrongBody != invalidBody {
+			t.Fatalf("wrong-client response leaked token state: wrong=%q invalid=%q", wrongBody, invalidBody)
+		}
+		anonymousStatus, anonymousBody, _ := introspect("", token)
+		invalidAnonymousStatus, invalidAnonymousBody, _ := introspect("", "invalid.token")
+		if anonymousStatus != http.StatusUnauthorized || invalidAnonymousStatus != http.StatusUnauthorized || anonymousBody != invalidAnonymousBody {
+			t.Fatalf("anonymous response leaked token state: valid=(%d,%q) invalid=(%d,%q)", anonymousStatus, anonymousBody, invalidAnonymousStatus, invalidAnonymousBody)
+		}
+	})
+
 	t.Run("metadata registration jwks and resource metadata", func(t *testing.T) {
 		t.Parallel()
 
@@ -55,6 +371,9 @@ func TestServer(t *testing.T) {
 		}
 		if metadata.Issuer != testBaseURL || metadata.AuthorizationEndpoint != testBaseURL+"/oauth/authorize" || metadata.RegistrationEndpoint != testBaseURL+"/oauth/register" {
 			t.Fatalf("metadata = %+v", metadata)
+		}
+		if metadata.IntrospectionEndpoint != "" || len(metadata.IntrospectionEndpointAuthMethodsSupported) != 0 || len(metadata.DPoPSigningAlgValuesSupported) != 0 {
+			t.Fatalf("metadata advertises disabled OAuth capabilities: %+v", metadata)
 		}
 
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
@@ -128,6 +447,70 @@ func TestServer(t *testing.T) {
 		}
 	})
 
+	t.Run("concurrent authorization code redemption has one durable winner", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		path := t.TempDir() + "/oauth.json"
+		s, h, _ := newTestFlowServer(t, path, []oauth.User{user})
+		clientID := "concurrent-client"
+		code := "concurrent-code-secret"
+		now := time.Now()
+		s.mu.Lock()
+		err := s.state.transact(func(next *storeFile) bool {
+			next.Clients[clientID] = Client{ID: clientID, Name: "Concurrent client", RedirectURIs: []string{"https://client.example/callback"}}
+			next.Codes[oauth.RefreshTokenKey(code)] = Code{UserID: user.ID, ClientID: clientID, RedirectURI: "https://client.example/callback", CodeChallenge: testCodeChallenge(), Resource: testResourceURL, Scope: "read", ExpiresAt: now.Add(time.Minute)}
+			return true
+		})
+		s.mu.Unlock()
+		if err != nil {
+			t.Fatalf("seed authorization code: %v", err)
+		}
+
+		const attempts = 24
+		statuses := make(chan int, attempts)
+		var wg sync.WaitGroup
+		for range attempts {
+			wg.Go(func() {
+				form := url.Values{
+					"grant_type":    {oauth.GrantAuthorizationCode},
+					"client_id":     {clientID},
+					"code":          {code},
+					"code_verifier": {testVerifier},
+					"redirect_uri":  {"https://client.example/callback"},
+					"resource":      {testResourceURL},
+				}
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, req)
+				statuses <- w.Code
+			})
+		}
+		wg.Wait()
+		close(statuses)
+		successes := 0
+		for status := range statuses {
+			if status == http.StatusOK {
+				successes++
+				continue
+			}
+			if status != http.StatusBadRequest {
+				t.Fatalf("redemption status = %d, want 200 or 400", status)
+			}
+		}
+		if successes != 1 {
+			t.Fatalf("successful redemptions = %d, want 1", successes)
+		}
+		reloaded, err := LoadStore(path)
+		if err != nil {
+			t.Fatalf("reload: %v", err)
+		}
+		if _, ok := reloaded.Codes[oauth.RefreshTokenKey(code)]; ok || len(reloaded.Grants) != 1 || len(reloaded.RefreshTokens) != 1 {
+			t.Fatalf("restart state after redemption = codes=%d grants=%d refreshTokens=%d", len(reloaded.Codes), len(reloaded.Grants), len(reloaded.RefreshTokens))
+		}
+	})
+
 	t.Run("authorization code returns refresh token and refresh rotates", func(t *testing.T) {
 		t.Parallel()
 
@@ -192,8 +575,9 @@ func TestServer(t *testing.T) {
 
 		path := t.TempDir() + "/oauth.json"
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, path, []oauth.User{user})
+		original, h, _ := newTestFlowServer(t, path, []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+		original.Close()
 
 		_, restartedHandler, _ := newTestFlowServer(t, path, []oauth.User{user})
 		tokenResp := authorizeOAuthTestClient(t, restartedHandler, user, &registered, []string{"read"})
@@ -207,10 +591,11 @@ func TestServer(t *testing.T) {
 
 		path := t.TempDir() + "/oauth.json"
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, path, []oauth.User{user})
+		original, h, _ := newTestFlowServer(t, path, []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
 
+		original.Close()
 		restarted, restartedHandler, _ := newTestFlowServer(t, path, []oauth.User{user})
 		grants := restarted.ListUserGrants(user.ID)
 		if len(grants) != 1 || grants[0].ClientID != registered.ClientID || grants[0].ClientName != "Claude" {
@@ -227,12 +612,13 @@ func TestServer(t *testing.T) {
 
 		path := t.TempDir() + "/oauth.json"
 		user := testUser()
-		_, h1, _ := newTestFlowServer(t, path, []oauth.User{user})
+		original, h1, _ := newTestFlowServer(t, path, []oauth.User{user})
 		registered := registerOAuthTestClient(t, h1, "Test Client", []string{"https://claude.example.com/callback"})
 
 		// Start the authorize flow to get a consent token.
 		form := authorizationCodeForm(registered.ClientID, "https://claude.example.com/callback", "read write")
 		consentToken := startOAuthTestConsent(t, h1, user, form)
+		original.Close()
 
 		// Create a new server pointing at the same store path.
 		_, h2, _ := newTestFlowServer(t, path, []oauth.User{user})
@@ -359,7 +745,7 @@ func TestServer(t *testing.T) {
 
 		path := t.TempDir() + "/oauth.json"
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, path, []oauth.User{user})
+		original, h, _ := newTestFlowServer(t, path, []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		opaque := "expired-refresh-token"
 		store, err := LoadStore(path)
@@ -371,6 +757,7 @@ func TestServer(t *testing.T) {
 			t.Fatalf("Save: %v", err)
 		}
 
+		original.Close()
 		_, restartedHandler, _ := newTestFlowServer(t, path, []oauth.User{user})
 		refreshOAuthTestToken(t, restartedHandler, registered.ClientID, opaque, http.StatusBadRequest)
 	})
@@ -380,7 +767,7 @@ func TestServer(t *testing.T) {
 
 		path := t.TempDir() + "/oauth.json"
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, path, []oauth.User{user})
+		original, h, _ := newTestFlowServer(t, path, []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		opaque := "missing-user-refresh-token"
 		grantID := "grant-missing-user"
@@ -395,6 +782,7 @@ func TestServer(t *testing.T) {
 			t.Fatalf("Save: %v", err)
 		}
 
+		original.Close()
 		_, restartedHandler, _ := newTestFlowServer(t, path, []oauth.User{user})
 		refreshOAuthTestToken(t, restartedHandler, registered.ClientID, opaque, http.StatusBadRequest)
 	})
@@ -983,6 +1371,68 @@ func TestServer(t *testing.T) {
 		}
 	})
 
+	t.Run("concurrent refresh redemption revokes the raced family", func(t *testing.T) {
+		t.Parallel()
+		user := testUser()
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
+		const attempts = 16
+		statuses := make(chan int, attempts)
+		var wg sync.WaitGroup
+		for range attempts {
+			wg.Go(func() {
+				form := url.Values{"grant_type": {oauth.GrantRefreshToken}, "client_id": {registered.ClientID}, "refresh_token": {tokenResp.RefreshToken}}
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, req)
+				statuses <- w.Code
+			})
+		}
+		wg.Wait()
+		close(statuses)
+		successes := 0
+		for status := range statuses {
+			if status == http.StatusOK {
+				successes++
+			} else if status != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 200 or 400", status)
+			}
+		}
+		if successes != 1 {
+			t.Fatalf("successful redemptions = %d, want 1", successes)
+		}
+		grants := s.ListUserGrants(user.ID)
+		if len(grants) != 1 || grants[0].RevokedAt.IsZero() {
+			t.Fatalf("raced refresh family remained active: %+v", grants)
+		}
+		s.mu.Lock()
+		for digest, token := range s.state.RefreshTokens {
+			if token.GrantID == grants[0].ID && token.RevokedAt.IsZero() {
+				s.mu.Unlock()
+				t.Fatalf("refresh token %q remained active after raced reuse", digest)
+			}
+		}
+		s.mu.Unlock()
+	})
+
+	t.Run("refresh signing failure does not consume token", func(t *testing.T) {
+		t.Parallel()
+		user := testUser()
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
+		currentKID := s.tokens.currentKID
+		s.tokens.currentKID = "missing-signing-key"
+		refreshOAuthTestToken(t, h, registered.ClientID, tokenResp.RefreshToken, http.StatusInternalServerError)
+		s.tokens.currentKID = currentKID
+		rotated := refreshOAuthTestToken(t, h, registered.ClientID, tokenResp.RefreshToken, http.StatusOK)
+		if rotated.RefreshToken == "" {
+			t.Fatal("refresh token was consumed by signing failure")
+		}
+	})
+
 	t.Run("unknown refresh token does not revoke other grants", func(t *testing.T) {
 		t.Parallel()
 
@@ -1019,6 +1469,179 @@ func TestServer(t *testing.T) {
 
 		if !audit.has("deny", "reuse_detected") {
 			t.Fatalf("no reuse_detected audit event recorded: %+v", audit.events())
+		}
+	})
+}
+
+func TestTransactionalOAuthMutations(t *testing.T) {
+	t.Parallel()
+
+	t.Run("configured state path has one server owner", func(t *testing.T) {
+		t.Parallel()
+		path := t.TempDir() + "/oauth.json"
+		cfg := testFlowServerConfig(path, []oauth.User{testUser()})
+		first, err := NewServer(cfg)
+		if err != nil {
+			t.Fatalf("first NewServer: %v", err)
+		}
+		if _, err := NewServer(cfg); err == nil || !strings.Contains(err.Error(), "already has an owner") {
+			t.Fatalf("second NewServer error = %v, want exclusive ownership error", err)
+		}
+		first.Close()
+		second, err := NewServer(cfg)
+		if err != nil {
+			t.Fatalf("NewServer after Close: %v", err)
+		}
+		second.Close()
+	})
+
+	t.Run("authorization code consume failure preserves code across restart", func(t *testing.T) {
+		t.Parallel()
+		user := testUser()
+		path := t.TempDir() + "/oauth.json"
+		s, h, _ := newTestFlowServer(t, path, []oauth.User{user})
+		clientID := "fault-client"
+		code := "fault-code"
+		s.mu.Lock()
+		err := s.state.transact(func(next *storeFile) bool {
+			next.Clients[clientID] = Client{ID: clientID, RedirectURIs: []string{"https://client.example/callback"}}
+			next.Codes[oauth.RefreshTokenKey(code)] = Code{UserID: user.ID, ClientID: clientID, RedirectURI: "https://client.example/callback", CodeChallenge: testCodeChallenge(), Resource: testResourceURL, Scope: "read", ExpiresAt: time.Now().Add(time.Hour)}
+			return true
+		})
+		s.state.io = failingRenameStoreIO{storeIO: osStoreIO{}}
+		s.mu.Unlock()
+		if err != nil {
+			t.Fatalf("seed state: %v", err)
+		}
+		form := url.Values{"grant_type": {oauth.GrantAuthorizationCode}, "client_id": {clientID}, "code": {code}, "code_verifier": {testVerifier}, "redirect_uri": {"https://client.example/callback"}}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusInternalServerError, w.Body.String())
+		}
+		reloaded, err := LoadStore(path)
+		if err != nil {
+			t.Fatalf("reload: %v", err)
+		}
+		if _, ok := reloaded.Codes[oauth.RefreshTokenKey(code)]; !ok || len(reloaded.Grants) != 0 || len(reloaded.RefreshTokens) != 0 {
+			t.Fatalf("failed code exchange changed restart state: codes=%d grants=%d refreshTokens=%d", len(reloaded.Codes), len(reloaded.Grants), len(reloaded.RefreshTokens))
+		}
+		s.state.io = osStoreIO{}
+		currentKID := s.tokens.currentKID
+		s.tokens.currentKID = "missing-signing-key"
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		s.tokens.currentKID = currentKID
+		if w.Code != http.StatusInternalServerError {
+			t.Fatalf("signing failure status = %d, want %d: %s", w.Code, http.StatusInternalServerError, w.Body.String())
+		}
+		reloaded, err = LoadStore(path)
+		if err != nil {
+			t.Fatalf("reload signing failure: %v", err)
+		}
+		if _, ok := reloaded.Codes[oauth.RefreshTokenKey(code)]; !ok || len(reloaded.Grants) != 0 || len(reloaded.RefreshTokens) != 0 {
+			t.Fatal("signing failure consumed authorization code")
+		}
+	})
+
+	t.Run("refresh rotation failure preserves replay state across restart", func(t *testing.T) {
+		t.Parallel()
+		path := t.TempDir() + "/oauth.json"
+		store, err := LoadStore(path)
+		if err != nil {
+			t.Fatalf("LoadStore: %v", err)
+		}
+		now := time.Now()
+		store.Grants["grant"] = Grant{ID: "grant", UserID: "user", ClientID: "client", ExpiresAt: now.Add(time.Hour)}
+		store.RefreshTokens[oauth.RefreshTokenKey("refresh")] = RefreshToken{GrantID: "grant", UserID: "user", ClientID: "client", ExpiresAt: now.Add(time.Hour)}
+		if err := store.Save(); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+		store.io = failingRenameStoreIO{storeIO: osStoreIO{}}
+		server := &Server{state: store, refreshTokenTTL: time.Hour}
+		if result, _, err := server.exchangeRefreshToken("refresh", "client", "user", "next-refresh"); err == nil || result != refreshExchangeRotated {
+			t.Fatalf("exchangeRefreshToken = %d, %v; want rotation persistence failure", result, err)
+		}
+		reloaded, err := LoadStore(path)
+		if err != nil {
+			t.Fatalf("reload: %v", err)
+		}
+		if !reloaded.RefreshTokens[oauth.RefreshTokenKey("refresh")].UsedAt.IsZero() || len(reloaded.RefreshTokens) != 1 {
+			t.Fatalf("failed rotation changed replay state: %+v", reloaded.RefreshTokens)
+		}
+	})
+
+	t.Run("revocation failure leaves grant active across restart", func(t *testing.T) {
+		t.Parallel()
+		path := t.TempDir() + "/oauth.json"
+		store, err := LoadStore(path)
+		if err != nil {
+			t.Fatalf("LoadStore: %v", err)
+		}
+		now := time.Now()
+		store.Grants["grant"] = Grant{ID: "grant", UserID: "user", ClientID: "client", ExpiresAt: now.Add(time.Hour)}
+		store.RefreshTokens["refresh-digest"] = RefreshToken{GrantID: "grant", UserID: "user", ClientID: "client", ExpiresAt: now.Add(time.Hour)}
+		if err := store.Save(); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+		store.io = failingRenameStoreIO{storeIO: osStoreIO{}}
+		server := &Server{state: store}
+		if revoked, err := server.RevokeUserGrant("user", "grant"); err == nil || !revoked {
+			t.Fatalf("RevokeUserGrant = %t, %v; want matched grant and persistence failure", revoked, err)
+		}
+		reloaded, err := LoadStore(path)
+		if err != nil {
+			t.Fatalf("reload: %v", err)
+		}
+		if !reloaded.Grants["grant"].RevokedAt.IsZero() || !reloaded.RefreshTokens["refresh-digest"].RevokedAt.IsZero() {
+			t.Fatal("failed revocation persisted partial state")
+		}
+		store.io = osStoreIO{}
+		if revoked, err := server.RevokeUserGrant("user", "grant"); err != nil || !revoked {
+			t.Fatalf("successful RevokeUserGrant = %t, %v", revoked, err)
+		}
+		reloaded, err = LoadStore(path)
+		if err != nil {
+			t.Fatalf("reload successful revocation: %v", err)
+		}
+		if reloaded.Grants["grant"].RevokedAt.IsZero() || reloaded.RefreshTokens["refresh-digest"].RevokedAt.IsZero() {
+			t.Fatal("successful revocation did not survive restart")
+		}
+	})
+
+	t.Run("client deletion failure preserves client and credentials", func(t *testing.T) {
+		t.Parallel()
+		s := newTestServer(t)
+		h := newTestServerHandler(s)
+		registered := registerOAuthTestClient(t, h, "Fault client", []string{"https://client.example/callback"})
+		s.mu.Lock()
+		err := s.state.transact(func(next *storeFile) bool {
+			next.Grants["grant"] = Grant{ID: "grant", ClientID: registered.ClientID, ExpiresAt: time.Now().Add(time.Hour)}
+			return true
+		})
+		s.state.io = failingRenameStoreIO{storeIO: osStoreIO{}}
+		s.mu.Unlock()
+		if err != nil {
+			t.Fatalf("seed grant: %v", err)
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/oauth/register/"+registered.ClientID, http.NoBody)
+		req.Header.Set("Authorization", "Bearer "+registered.RegistrationAccessToken)
+		addForwardedHeaders(req)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusInternalServerError, w.Body.String())
+		}
+		reloaded, err := LoadStore(s.state.Path())
+		if err != nil {
+			t.Fatalf("reload: %v", err)
+		}
+		if _, ok := reloaded.Clients[registered.ClientID]; !ok || reloaded.Grants["grant"].ClientID != registered.ClientID {
+			t.Fatalf("failed deletion changed restart state: %+v", reloaded)
 		}
 	})
 }
@@ -1347,6 +1970,10 @@ func TestDeviceAuthorization(t *testing.T) {
 		if len(devResp.UserCode) != 8 {
 			t.Fatalf("user_code length = %d, want 8", len(devResp.UserCode))
 		}
+		onDisk := readOAuthStateFile(t, s.state.Path())
+		if strings.Contains(onDisk, devResp.UserCode) || !strings.Contains(onDisk, oauth.RefreshTokenKey(devResp.UserCode)) {
+			t.Fatal("device user code was not persisted exclusively as a digest")
+		}
 
 		// Step 2: Approve the device as authenticated user.
 		approveForm := url.Values{"user_code": {devResp.UserCode}}
@@ -1366,6 +1993,16 @@ func TestDeviceAuthorization(t *testing.T) {
 			"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
 			"device_code": {devResp.DeviceCode},
 			"client_id":   {registered.ClientID},
+		}
+		currentKID := s.tokens.currentKID
+		s.tokens.currentKID = "missing-signing-key"
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(tokenForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		s.tokens.currentKID = currentKID
+		if w.Code != http.StatusInternalServerError {
+			t.Fatalf("device signing failure status = %d, want %d: %s", w.Code, http.StatusInternalServerError, w.Body.String())
 		}
 		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(tokenForm.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -1590,7 +2227,7 @@ func TestDeviceAuthorization(t *testing.T) {
 
 		path := t.TempDir() + "/oauth.json"
 		user := testUser()
-		_, h1, _ := newTestFlowServer(t, path, []oauth.User{user})
+		original, h1, _ := newTestFlowServer(t, path, []oauth.User{user})
 		registered := registerOAuthTestClient(t, h1, "Claude", []string{"https://claude.example.com/callback"})
 
 		// Request device authorization on first server.
@@ -1609,6 +2246,7 @@ func TestDeviceAuthorization(t *testing.T) {
 		if err := json.NewDecoder(w.Body).Decode(&devResp); err != nil {
 			t.Fatalf("decode device_authorization response: %v", err)
 		}
+		original.Close()
 
 		// Restart server.
 		_, h2, _ := newTestFlowServer(t, path, []oauth.User{user})
@@ -1632,6 +2270,21 @@ func TestDeviceAuthorization(t *testing.T) {
 		}
 		if errResp.Error != "authorization_pending" {
 			t.Fatalf("error = %q, want authorization_pending", errResp.Error)
+		}
+		approveForm := url.Values{"user_code": {devResp.UserCode}}
+		req = newOAuthTestRequest(t, http.MethodPost, "/oauth/device", strings.NewReader(approveForm.Encode()), user)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w = httptest.NewRecorder()
+		h2.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("device approval after restart status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(tokenForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w = httptest.NewRecorder()
+		h2.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("device exchange after restart status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
 	})
 
@@ -1657,10 +2310,113 @@ func TestDeviceAuthorization(t *testing.T) {
 	})
 }
 
+func TestOAuthSurfaceContainment(t *testing.T) {
+	t.Parallel()
+
+	t.Run("public introspection route is disabled", func(t *testing.T) {
+		t.Parallel()
+
+		s := newTestServer(t)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/introspect", strings.NewReader("token=secret"))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		s.Routes().ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusNotFound, w.Body.String())
+		}
+	})
+
+	t.Run("token endpoint rejects dpop and preserves bearer exchange", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+		code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
+		form := url.Values{
+			"grant_type":    {oauth.GrantAuthorizationCode},
+			"code":          {code},
+			"client_id":     {registered.ClientID},
+			"redirect_uri":  {"https://claude.example.com/callback"},
+			"code_verifier": {testVerifier},
+			"resource":      {testResourceURL},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("DPoP", "unsupported-proof")
+		addForwardedHeaders(req)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("DPoP token status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
+		}
+		if w.Header().Get("DPoP-Nonce") != "" {
+			t.Fatalf("DPoP-Nonce = %q, want empty", w.Header().Get("DPoP-Nonce"))
+		}
+
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		addForwardedHeaders(req)
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("Bearer token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var token oauth.TokenResponse
+		if err := json.NewDecoder(w.Body).Decode(&token); err != nil {
+			t.Fatalf("decode token response: %v", err)
+		}
+		if token.TokenType != oauth.TokenTypeBearer || token.AccessToken == "" {
+			t.Fatalf("token response = %+v, want Bearer access token", token)
+		}
+		if w.Header().Get("DPoP-Nonce") != "" {
+			t.Fatalf("DPoP-Nonce = %q, want empty", w.Header().Get("DPoP-Nonce"))
+		}
+	})
+
+	t.Run("resource middleware rejects dpop authorization scheme", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+		token := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
+		protected := s.BearerAuth(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		req := newTestResourceRequest(t)
+		req.Header.Set("Authorization", DPoPTokenType+" "+token.AccessToken)
+		w := httptest.NewRecorder()
+		protected.ServeHTTP(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusUnauthorized, w.Body.String())
+		}
+
+		grants := s.ListUserGrants(user.ID)
+		if len(grants) != 1 {
+			t.Fatalf("grants = %+v, want one grant", grants)
+		}
+		legacyToken, err := s.tokens.IssueDPoPAccessToken(testBaseURL, user, testResourceURL, "read", grants[0].ID, "legacy-key-thumbprint")
+		if err != nil {
+			t.Fatalf("issue legacy DPoP access token: %v", err)
+		}
+		for _, scheme := range []string{oauth.TokenTypeBearer, DPoPTokenType} {
+			req = newTestResourceRequest(t)
+			req.Header.Set("Authorization", scheme+" "+legacyToken)
+			w = httptest.NewRecorder()
+			protected.ServeHTTP(w, req)
+			if w.Code != http.StatusUnauthorized {
+				t.Errorf("%s status = %d, want %d: %s", scheme, w.Code, http.StatusUnauthorized, w.Body.String())
+			}
+		}
+	})
+}
+
 func TestDPoP(t *testing.T) {
 	t.Parallel()
 
 	t.Run("token endpoint with dpop proof gets dpop-bound token", func(t *testing.T) {
+		t.Skip("DPoP server support is disabled")
 		t.Parallel()
 
 		user := testUser()
@@ -1719,6 +2475,7 @@ func TestDPoP(t *testing.T) {
 	})
 
 	t.Run("dpop-bound access token accepted by bearer auth", func(t *testing.T) {
+		t.Skip("DPoP server support is disabled")
 		t.Parallel()
 
 		user := testUser()
@@ -1776,6 +2533,7 @@ func TestDPoP(t *testing.T) {
 	})
 
 	t.Run("dpop proof with wrong htm rejected", func(t *testing.T) {
+		t.Skip("DPoP server support is disabled")
 		t.Parallel()
 
 		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
@@ -1815,6 +2573,7 @@ func TestDPoP(t *testing.T) {
 	})
 
 	t.Run("dpop proof with wrong htu rejected", func(t *testing.T) {
+		t.Skip("DPoP server support is disabled")
 		t.Parallel()
 
 		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
@@ -1846,6 +2605,7 @@ func TestDPoP(t *testing.T) {
 	})
 
 	t.Run("dpop proof expired iat rejected", func(t *testing.T) {
+		t.Skip("DPoP server support is disabled")
 		t.Parallel()
 
 		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
@@ -1878,6 +2638,7 @@ func TestDPoP(t *testing.T) {
 	})
 
 	t.Run("dpop proof with invalid ath rejected", func(t *testing.T) {
+		t.Skip("DPoP server support is disabled")
 		t.Parallel()
 
 		testCases := []struct {
@@ -1910,6 +2671,7 @@ func TestDPoP(t *testing.T) {
 	})
 
 	t.Run("dpop proof with wrong key cnf.jkt mismatch rejected", func(t *testing.T) {
+		t.Skip("DPoP server support is disabled")
 		t.Parallel()
 
 		user := testUser()
@@ -1944,7 +2706,7 @@ func TestDPoP(t *testing.T) {
 
 		// Make another key pair and use it to prove possession of the dpop-bound token.
 		wrongKey, wrongJWKObj := testDPoPRSAKeyPair(t)
-		protected := s.BearerAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		protected := s.BearerAuth(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
 		}))
 		resourceProof := makeDPoPProof(t, wrongKey, wrongJWKObj, "POST", testResourceURL, time.Now(), tokenResp.AccessToken, "")
@@ -1960,6 +2722,7 @@ func TestDPoP(t *testing.T) {
 	})
 
 	t.Run("introspection returns cnf.jkt for dpop-bound tokens", func(t *testing.T) {
+		t.Skip("DPoP server support is disabled")
 		t.Parallel()
 
 		user := testUser()
@@ -2021,6 +2784,7 @@ func TestDPoP(t *testing.T) {
 	})
 
 	t.Run("nonce lifecycle request without nonce gets nonce retry succeeds", func(t *testing.T) {
+		t.Skip("DPoP server support is disabled")
 		t.Parallel()
 
 		user := testUser()
@@ -2080,10 +2844,11 @@ func TestDPoP(t *testing.T) {
 	})
 
 	t.Run("replayed resource proof with same jti rejected", func(t *testing.T) {
+		t.Skip("DPoP server support is disabled")
 		t.Parallel()
 
 		res := setupDPoPBoundToken(t)
-		protected := res.server.BearerAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		protected := res.server.BearerAuth(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
 		}))
 
@@ -2112,10 +2877,11 @@ func TestDPoP(t *testing.T) {
 	})
 
 	t.Run("fresh resource proof per request accepted", func(t *testing.T) {
+		t.Skip("DPoP server support is disabled")
 		t.Parallel()
 
 		res := setupDPoPBoundToken(t)
-		protected := res.server.BearerAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		protected := res.server.BearerAuth(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
 		}))
 
@@ -2134,10 +2900,11 @@ func TestDPoP(t *testing.T) {
 	})
 
 	t.Run("resource proof missing jti rejected", func(t *testing.T) {
+		t.Skip("DPoP server support is disabled")
 		t.Parallel()
 
 		res := setupDPoPBoundToken(t)
-		protected := res.server.BearerAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		protected := res.server.BearerAuth(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
 		}))
 
@@ -2154,6 +2921,7 @@ func TestDPoP(t *testing.T) {
 	})
 
 	t.Run("token endpoint unaffected by jti tracking", func(t *testing.T) {
+		t.Skip("DPoP server support is disabled")
 		t.Parallel()
 
 		user := testUser()
@@ -2673,8 +3441,8 @@ func applyTestServerDefaults(t *testing.T, cfg *ServerConfig) {
 	if cfg.DefaultScopes == nil {
 		cfg.DefaultScopes = []string{"read", "write"}
 	}
-	if cfg.BaseURL == nil {
-		cfg.BaseURL = func(*http.Request) string { return testBaseURL }
+	if cfg.Issuer == "" {
+		cfg.Issuer = testBaseURL
 	}
 	if cfg.Session == nil {
 		cfg.Session = &testSessionManager{}
@@ -2682,11 +3450,19 @@ func applyTestServerDefaults(t *testing.T, cfg *ServerConfig) {
 	if cfg.UI == nil {
 		cfg.UI = &testAuthorizationUI{}
 	}
+	if cfg.IntrospectionAuth == nil {
+		cfg.IntrospectionAuth = func(*http.Request) (IntrospectionPrincipal, bool) {
+			return IntrospectionPrincipal{}, true
+		}
+	}
 }
 
 func newTestServerHandler(s *Server) http.Handler {
 	mux := http.NewServeMux()
 	s.RegisterWellKnownRoutes(mux)
+	// Keep the dormant implementation covered until authenticated
+	// introspection is restored in a later hardening phase.
+	mux.HandleFunc("POST /oauth/introspect", s.handleOAuthIntrospect)
 	mux.Handle("/", s.Routes())
 	return mux
 }
@@ -3029,8 +3805,23 @@ func TestRegistrationManagement(t *testing.T) {
 	t.Run("delete client returns 204 and subsequent read returns 404", func(t *testing.T) {
 		t.Parallel()
 
-		h := newTestServerHandlerOnly(t)
+		s := newTestServer(t)
+		h := newTestServerHandler(s)
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
+		now := time.Now()
+		s.mu.Lock()
+		err := s.state.transact(func(next *storeFile) bool {
+			next.Codes[oauth.RefreshTokenKey("client-code")] = Code{ClientID: registered.ClientID, ExpiresAt: now.Add(time.Hour)}
+			next.Consents[oauth.RefreshTokenKey("client-consent")] = ConsentParams{Params: map[string]string{"client_id": registered.ClientID}, ExpiresAt: now.Add(time.Hour)}
+			next.DeviceCodes[oauth.RefreshTokenKey("client-device-code")] = &DeviceCode{ClientID: registered.ClientID, ExpiresAt: now.Add(time.Hour)}
+			next.Grants["client-grant"] = Grant{ID: "client-grant", ClientID: registered.ClientID, ExpiresAt: now.Add(time.Hour)}
+			next.RefreshTokens[oauth.RefreshTokenKey("client-refresh-token")] = RefreshToken{GrantID: "client-grant", ClientID: registered.ClientID, ExpiresAt: now.Add(time.Hour)}
+			return true
+		})
+		s.mu.Unlock()
+		if err != nil {
+			t.Fatalf("seed client credentials: %v", err)
+		}
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/oauth/register/"+registered.ClientID, http.NoBody)
 		req.Header.Set("Authorization", "Bearer "+registered.RegistrationAccessToken)
@@ -3043,6 +3834,13 @@ func TestRegistrationManagement(t *testing.T) {
 
 		// Subsequent read should fail.
 		readOAuthTestClient(t, h, registered.RegistrationAccessToken, registered.ClientID, http.StatusNotFound)
+		reloaded, err := LoadStore(s.state.Path())
+		if err != nil {
+			t.Fatalf("reload deleted client state: %v", err)
+		}
+		if _, ok := reloaded.Clients[registered.ClientID]; ok || len(reloaded.Codes) != 0 || len(reloaded.Consents) != 0 || len(reloaded.DeviceCodes) != 0 || len(reloaded.Grants) != 0 || len(reloaded.RefreshTokens) != 0 {
+			t.Fatalf("client credentials survived atomic deletion: %+v", reloaded)
+		}
 	})
 
 	t.Run("delete with wrong token returns 401", func(t *testing.T) {
@@ -3551,9 +4349,10 @@ func TestRateLimiting(t *testing.T) {
 		path := t.TempDir() + "/oauth.json"
 
 		// First, register a client and authorize a code with a permissive server.
-		_, h, _ := newTestFlowServer(t, path, []oauth.User{user})
+		permissive, h, _ := newTestFlowServer(t, path, []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
+		permissive.Close()
 
 		// Then create a new server from the same store but with a deny limiter.
 		cfg := testFlowServerConfig(path, []oauth.User{user})
@@ -3592,12 +4391,13 @@ func TestRateLimiting(t *testing.T) {
 		path := t.TempDir() + "/oauth.json"
 
 		// Register clients and authorize codes with a permissive server.
-		_, permissiveH, _ := newTestFlowServer(t, path, []oauth.User{user})
+		permissive, permissiveH, _ := newTestFlowServer(t, path, []oauth.User{user})
 		clientA := registerOAuthTestClient(t, permissiveH, "Client A", []string{"https://a.example.com/callback"})
 		clientB := registerOAuthTestClient(t, permissiveH, "Client B", []string{"https://b.example.com/callback"})
 		codeA := authorizeOAuthTestCode(t, permissiveH, user, &clientA, "https://a.example.com/callback", []string{"read"}, "")
 		codeA2 := authorizeOAuthTestCode(t, permissiveH, user, &clientA, "https://a.example.com/callback", []string{"read"}, "")
 		codeB := authorizeOAuthTestCode(t, permissiveH, user, &clientB, "https://b.example.com/callback", []string{"read"}, "")
+		permissive.Close()
 
 		// Create a limited server from the same store: allow only 1 token request per client.
 		lim := &countRateLimiter{max: 1}
@@ -3694,9 +4494,12 @@ func testFlowServerConfig(path string, users []oauth.User) ServerConfig {
 		ClientIDPrefix:          "test_",
 		SupportedScopes:         []string{"read", "write", "admin", "repos"},
 		DefaultScopes:           []string{"read", "write"},
-		BaseURL:                 func(*http.Request) string { return testBaseURL },
+		Issuer:                  testBaseURL,
 		Session:                 &testSessionManager{users: usersByID},
 		UI:                      &captureAuthorizationUI{},
+		IntrospectionAuth: func(*http.Request) (IntrospectionPrincipal, bool) {
+			return IntrospectionPrincipal{}, true
+		},
 	}
 	return cfg
 }

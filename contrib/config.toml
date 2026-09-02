@@ -32,9 +32,15 @@
 # enable MCP off-localhost.
 #http = ":2242"
 
-# Public base URL. "auto" locks the hostname from the first FQDN request. Set an
-# explicit URL for OAuth login and webhooks.
+# Public base URL. "auto" locks the hostname from the first FQDN request when
+# OAuth login is disabled. OAuth login requires an explicit URL. HTTPS is
+# required except for explicit loopback development origins.
 #external_url = "auto"  # e.g. "https://caic.example.com"
+
+# Direct reverse proxies trusted to set Forwarded or X-Forwarded-* origin
+# headers. Leave empty when caic is reached directly. Never include client
+# networks; only include the proxy peers that connect to caic.
+#trusted_proxies = []  # e.g. ["127.0.0.1/32", "::1/128"]
 
 # MaxMind MMDB file for country-code resolution and logging. Relative paths
 # resolve against the config directory. Empty defaults to

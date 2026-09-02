@@ -79,14 +79,14 @@ func TestConfigValidate(t *testing.T) {
 			t.Fatalf("Validate() unexpected error: %v", err)
 		}
 	})
-	t.Run("OAuth with ExternalURL auto is valid", func(t *testing.T) {
+	t.Run("OAuth with ExternalURL auto is invalid", func(t *testing.T) {
 		t.Parallel()
 		c := &Config{
 			GitHub: GitHubConfig{OAuthClientID: "id", OAuthClientSecret: "sec", OAuthAllowedUsers: []string{"alice"}},
 			Auth:   AuthConfig{ExternalURL: "auto"},
 		}
-		if err := c.Validate(); err != nil {
-			t.Fatalf("Validate() unexpected error: %v", err)
+		if err := c.Validate(); err == nil {
+			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("OAuth without ExternalURL is invalid", func(t *testing.T) {
@@ -126,9 +126,26 @@ func TestConfigValidate(t *testing.T) {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
+	t.Run("OAuth with loopback http ExternalURL is valid", func(t *testing.T) {
+		t.Parallel()
+		c := &Config{
+			GitHub: GitHubConfig{OAuthClientID: "id", OAuthClientSecret: "sec"},
+			Auth:   AuthConfig{ExternalURL: "http://127.0.0.1:2242"},
+		}
+		if err := c.Validate(); err != nil {
+			t.Fatalf("Validate() unexpected error: %v", err)
+		}
+	})
 	t.Run("invalid ExternalURL is invalid", func(t *testing.T) {
 		t.Parallel()
 		c := &Config{Auth: AuthConfig{ExternalURL: "not a url"}}
+		if err := c.Validate(); err == nil {
+			t.Fatal("Validate() expected error, got nil")
+		}
+	})
+	t.Run("invalid trusted proxy is invalid", func(t *testing.T) {
+		t.Parallel()
+		c := &Config{Auth: AuthConfig{ExternalURL: "auto", TrustedProxies: []string{"not-a-prefix"}}}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}

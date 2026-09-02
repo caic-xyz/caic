@@ -5,6 +5,7 @@ package server
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"strings"
 
@@ -58,11 +59,11 @@ func (c *Config) Validate() error {
 	if !c.oauthConfigured() {
 		return nil
 	}
-	if c.Auth.ExternalURL == "" {
-		return errors.New("external_url is required when OAuth login is configured")
+	if c.Auth.ExternalURL == "" || strings.EqualFold(c.Auth.ExternalURL, "auto") {
+		return errors.New("an explicit external_url is required when OAuth login is configured")
 	}
-	if !strings.EqualFold(c.Auth.ExternalURL, "auto") && !c.Auth.externalURLUsesHTTPS() {
-		return errors.New("external_url must use https:// when OAuth login is configured")
+	if !c.Auth.externalURLIsSecure() {
+		return errors.New("external_url must use https:// except for loopback development origins")
 	}
 	return nil
 }
@@ -169,10 +170,16 @@ type AuthConfig struct {
 	// ExternalURL is the public base URL (e.g. https://caic.example.com).
 	// "auto" locks the hostname from the first FQDN request.
 	ExternalURL string
+	// TrustedProxies contains direct reverse-proxy address prefixes whose
+	// Forwarded and X-Forwarded-* origin headers may be accepted.
+	TrustedProxies []string
 }
 
 // Validate returns an error if the auth configuration is invalid.
 func (c *AuthConfig) Validate() error {
+	if _, err := c.TrustedProxyPrefixes(); err != nil {
+		return err
+	}
 	if c.ExternalURL == "" || strings.EqualFold(c.ExternalURL, "auto") {
 		return nil
 	}
@@ -183,13 +190,29 @@ func (c *AuthConfig) Validate() error {
 	return nil
 }
 
+// TrustedProxyPrefixes parses the configured trusted reverse-proxy prefixes.
+func (c *AuthConfig) TrustedProxyPrefixes() ([]netip.Prefix, error) {
+	prefixes := make([]netip.Prefix, 0, len(c.TrustedProxies))
+	for _, raw := range c.TrustedProxies {
+		prefix, err := netip.ParsePrefix(raw)
+		if err != nil {
+			return nil, fmt.Errorf("invalid trusted proxy prefix %q: %w", raw, err)
+		}
+		prefixes = append(prefixes, prefix)
+	}
+	return prefixes, nil
+}
+
 func (c *AuthConfig) normalizeExternalURL() {
 	c.ExternalURL = strings.TrimRight(c.ExternalURL, "/")
 }
 
-func (c *AuthConfig) externalURLUsesHTTPS() bool {
+func (c *AuthConfig) externalURLIsSecure() bool {
 	u, err := url.Parse(c.ExternalURL)
-	return err == nil && u.Scheme == "https"
+	if err != nil {
+		return false
+	}
+	return u.Scheme == "https" || (u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1"))
 }
 
 // VoiceConfig configures the WebRTC voice bridge.

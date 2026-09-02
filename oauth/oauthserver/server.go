@@ -10,7 +10,6 @@ package oauthserver
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,8 +26,15 @@ import (
 	"github.com/caic-xyz/caic/oauth"
 )
 
-// BaseURLFunc returns the request's external base URL.
-type BaseURLFunc func(*http.Request) string
+// IntrospectionPrincipal identifies an authenticated introspection caller.
+// ClientID restricts the caller to tokens issued to that OAuth client. An
+// empty ClientID authorizes a trusted protected resource to inspect any token.
+type IntrospectionPrincipal struct {
+	ClientID string
+}
+
+// IntrospectionAuthenticator authenticates an introspection caller.
+type IntrospectionAuthenticator func(*http.Request) (IntrospectionPrincipal, bool)
 
 // SessionManager manages user sessions for the authorization server.
 // The caller implements browser login, user lookup, and session teardown.
@@ -54,8 +60,9 @@ type AuditRecorder interface {
 // RateLimiter allows or rejects a rate-limit key.
 //
 // Keys are opaque strings built by the oauth package: "ip:<addr>" for
-// per-IP limits (register, introspect) and "client:<client_id>" for
-// per-client limits (token, revoke). The implementation chooses the window
+// per-IP limits and "client:<client_id>" for per-client limits. Introspection
+// uses the authenticated client identity when one is scoped and otherwise
+// falls back to the remote address. The implementation chooses the window
 // size and request budget per key.
 type RateLimiter interface {
 	Allow(key string) bool
@@ -88,12 +95,15 @@ type ScopeItem struct {
 // users, audit, rate limiting, base URL discovery, and consent rendering so
 // package oauth never depends on caic auth, MCP, API, or UI packages.
 type ServerConfig struct {
-	KeyPEM                []byte
-	KeyID                 string
-	AccessTokenTTL        time.Duration
-	AuthCodeTTL           time.Duration
-	RefreshTokenTTL       time.Duration
-	DPoPNonceTTL          time.Duration
+	KeyPEM          []byte
+	KeyID           string
+	Issuer          string
+	AccessTokenTTL  time.Duration
+	AuthCodeTTL     time.Duration
+	RefreshTokenTTL time.Duration
+	DPoPNonceTTL    time.Duration
+	// RefreshTokenStorePath is exclusively owned by one Server until Close.
+	// Deployments must not share the same JSON state path across processes.
 	RefreshTokenStorePath string
 
 	ResourceURLPath         string
@@ -103,11 +113,11 @@ type ServerConfig struct {
 	DefaultScopes           []string
 	ScopeLabels             map[string]string
 
-	BaseURL     BaseURLFunc
-	Session     SessionManager
-	UI          AuthorizationUI
-	Audit       AuditRecorder
-	RateLimiter RateLimiter
+	Session           SessionManager
+	UI                AuthorizationUI
+	Audit             AuditRecorder
+	RateLimiter       RateLimiter
+	IntrospectionAuth IntrospectionAuthenticator
 }
 
 // Server stores OAuth state for remote clients.
@@ -134,19 +144,27 @@ type Server struct {
 	resourceURLPath         string
 	resourceMetadataURLPath string
 	clientIDPrefix          string
+	issuer                  string
+	resourceURL             string
 
 	dpopNonces *DPoPNonceManager
 	dpopJTIs   *DPoPJTICache
 
-	baseURL     BaseURLFunc
-	session     SessionManager
-	ui          AuthorizationUI
-	audit       AuditRecorder
-	rateLimiter RateLimiter
+	session           SessionManager
+	ui                AuthorizationUI
+	audit             AuditRecorder
+	rateLimiter       RateLimiter
+	introspectionAuth IntrospectionAuthenticator
+
+	releaseStore func()
 }
 
 // NewServer returns an OAuth authorization server.
 func NewServer(c ServerConfig) (*Server, error) { //nolint:gocritic // ServerConfig is a startup value bag and the public constructor shape is intentional.
+	issuer, err := validateIssuer(c.Issuer)
+	if err != nil {
+		return nil, err
+	}
 	accessTokenTTL := c.AccessTokenTTL
 	if accessTokenTTL == 0 {
 		accessTokenTTL = time.Hour
@@ -173,9 +191,21 @@ func NewServer(c ServerConfig) (*Server, error) { //nolint:gocritic // ServerCon
 	if c.UI == nil {
 		return nil, errors.New("oauth: UI is required")
 	}
-	state, err := LoadStore(c.RefreshTokenStorePath)
+	releaseStore, err := claimStore(c.RefreshTokenStorePath)
 	if err != nil {
 		return nil, err
+	}
+	state, err := LoadStore(c.RefreshTokenStorePath)
+	if err != nil {
+		releaseStore()
+		return nil, err
+	}
+	resourceURL := issuer + c.ResourceURLPath
+	if err := state.transact(func(next *storeFile) bool {
+		return containResourceState(next, resourceURL, time.Now())
+	}); err != nil {
+		releaseStore()
+		return nil, fmt.Errorf("contain oauth resource state: %w", err)
 	}
 	return &Server{
 		state:                   state,
@@ -193,12 +223,26 @@ func NewServer(c ServerConfig) (*Server, error) { //nolint:gocritic // ServerCon
 		resourceURLPath:         c.ResourceURLPath,
 		resourceMetadataURLPath: c.ResourceMetadataURLPath,
 		clientIDPrefix:          c.ClientIDPrefix,
-		baseURL:                 c.BaseURL,
+		issuer:                  issuer,
+		resourceURL:             resourceURL,
 		session:                 c.Session,
 		ui:                      c.UI,
 		audit:                   c.Audit,
 		rateLimiter:             c.RateLimiter,
+		introspectionAuth:       c.IntrospectionAuth,
+		releaseStore:            releaseStore,
 	}, nil
+}
+
+// Close releases exclusive ownership of the configured durable state path.
+func (s *Server) Close() {
+	s.mu.Lock()
+	release := s.releaseStore
+	s.releaseStore = nil
+	s.mu.Unlock()
+	if release != nil {
+		release()
+	}
 }
 
 // RegisterWellKnownRoutes registers OAuth metadata endpoints on mux.
@@ -222,7 +266,6 @@ func (s *Server) Routes() http.Handler {
 	m.HandleFunc("POST /oauth/authorize", s.handleOAuthAuthorizePOST)
 	m.HandleFunc("POST /oauth/token", s.handleOAuthToken)
 	m.HandleFunc("POST /oauth/revoke", s.handleOAuthRevoke)
-	m.HandleFunc("POST /oauth/introspect", s.handleOAuthIntrospect)
 	m.HandleFunc("GET /oauth/end-session", s.handleOAuthEndSession)
 	m.HandleFunc("POST /oauth/device_authorization", s.handleOAuthDeviceAuthorization)
 	m.HandleFunc("GET /oauth/device", s.handleOAuthDevicePage)
@@ -247,7 +290,7 @@ func BearerClaimsFromContext(ctx context.Context) (*oauth.BearerClaims, bool) {
 // verified user are set in the request context using the configured callbacks.
 func (s *Server) BearerAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token, scheme := s.extractAuthToken(r)
+		token := oauth.BearerToken(r)
 		if token == "" {
 			if _, ok := s.currentRequestUser(r.Context()); ok {
 				next.ServeHTTP(w, r)
@@ -261,33 +304,10 @@ func (s *Server) BearerAuth(next http.Handler) http.Handler {
 			s.writeUnauthorized(w, r)
 			return
 		}
-
-		// DPoP scheme: proof validation and key confirmation.
-		if scheme == DPoPTokenType {
-			if claims.Confirmation == nil || claims.Confirmation.JKT == "" {
-				s.writeUnauthorizedDPoP(w, r, "access token not bound to a dpop key")
-				return
-			}
-			proofHeader, proofClaims, err := DPoPProof(r)
-			if err != nil {
-				s.writeUnauthorizedDPoP(w, r, "missing or invalid dpop proof")
-				return
-			}
-			if err := VerifyDPoPProof(r, proofHeader, proofClaims, defaultDPoPMaxAge, token, s.dpopNonces.Validate, s.dpopJTIs.CheckAndStore); err != nil {
-				s.writeUnauthorizedDPoP(w, r, err.Error())
-				return
-			}
-			proofJKT, err := JWKThumbprint(&proofHeader.JWK)
-			if err != nil {
-				s.writeUnauthorizedDPoP(w, r, "invalid dpop proof key")
-				return
-			}
-			if subtle.ConstantTimeCompare([]byte(proofJKT), []byte(claims.Confirmation.JKT)) != 1 {
-				s.writeUnauthorizedDPoP(w, r, "dpop proof key does not match token binding")
-				return
-			}
+		if claims.Confirmation != nil {
+			s.writeUnauthorized(w, r)
+			return
 		}
-
 		ctx := s.newUserContext(r.Context(), claims.User)
 		ctx = NewBearerClaimsContext(ctx, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
@@ -305,23 +325,21 @@ func (s *Server) ListUserGrants(userID string) []Grant {
 func (s *Server) RevokeUserGrant(userID, grantID string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.state.RevokeUserGrant(userID, grantID, time.Now()) {
-		return false, nil
-	}
-	if err := s.state.Save(); err != nil {
-		return true, err
-	}
-	return true, nil
+	revoked := false
+	err := s.state.transact(func(next *storeFile) bool {
+		revoked = revokeUserGrant(next, userID, grantID, time.Now())
+		return revoked
+	})
+	return revoked, err
 }
 
 // RevokeAllUserGrants revokes all grants and refresh tokens for a user, then saves durable state.
 func (s *Server) RevokeAllUserGrants(userID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.state.RevokeAllUserGrants(userID, time.Now()) {
-		return nil
-	}
-	return s.state.Save()
+	return s.state.transact(func(next *storeFile) bool {
+		return revokeAllUserGrants(next, userID, time.Now())
+	})
 }
 
 func (s *Server) currentRequestUser(ctx context.Context) (oauth.User, bool) {
@@ -356,14 +374,6 @@ func (s *Server) scopeItems(scope string) []ScopeItem {
 	return items
 }
 
-func (s *Server) externalBaseURL(r *http.Request) string {
-	if s.baseURL != nil {
-		return s.baseURL(r)
-	}
-	authority, scheme := effectiveRequestHostAndScheme(r)
-	return scheme + "://" + authority
-}
-
 // rateLimit rejects the request with 429 if the limiter is configured and
 // the key is disallowed. Returns true when allowed (or no limiter).
 func (s *Server) rateLimit(w http.ResponseWriter, key string) bool {
@@ -393,24 +403,21 @@ func (s *Server) rateLimitClient(w http.ResponseWriter, r *http.Request, clientI
 }
 
 func (s *Server) handleOAuthMetadata(w http.ResponseWriter, r *http.Request) {
-	issuer := s.externalBaseURL(r)
+	issuer := s.issuer
 	metadata := oauth.AuthorizationServerMetadata{
-		Issuer:                                        issuer,
-		AuthorizationEndpoint:                         issuer + "/oauth/authorize",
-		TokenEndpoint:                                 issuer + "/oauth/token",
-		JWKSURI:                                       issuer + "/oauth/jwks",
-		RegistrationEndpoint:                          issuer + "/oauth/register",
-		RevocationEndpoint:                            issuer + "/oauth/revoke",
-		ResponseTypesSupported:                        []string{oauth.ResponseTypeCode},
-		GrantTypesSupported:                           []string{oauth.GrantAuthorizationCode, oauth.GrantRefreshToken, "urn:ietf:params:oauth:grant-type:device_code"},
-		CodeChallengeMethodsSupported:                 []string{oauth.CodeChallengeS256},
-		TokenEndpointAuthMethodsSupported:             []string{oauth.TokenEndpointAuthNone},
-		RevocationEndpointAuthMethodsSupported:        []string{oauth.TokenEndpointAuthNone},
-		ScopesSupported:                               s.supportedScopes,
-		IntrospectionEndpoint:                         issuer + "/oauth/introspect",
-		IntrospectionEndpointAuthMethodsSupported:     []string{oauth.TokenEndpointAuthNone},
-		DPoPSigningAlgValuesSupported:                 []string{"RS256", "ES256", "EdDSA"},
-		EndSessionEndpoint:                            issuer + "/oauth/end-session",
+		Issuer:                                 issuer,
+		AuthorizationEndpoint:                  issuer + "/oauth/authorize",
+		TokenEndpoint:                          issuer + "/oauth/token",
+		JWKSURI:                                issuer + "/oauth/jwks",
+		RegistrationEndpoint:                   issuer + "/oauth/register",
+		RevocationEndpoint:                     issuer + "/oauth/revoke",
+		ResponseTypesSupported:                 []string{oauth.ResponseTypeCode},
+		GrantTypesSupported:                    []string{oauth.GrantAuthorizationCode, oauth.GrantRefreshToken, "urn:ietf:params:oauth:grant-type:device_code"},
+		CodeChallengeMethodsSupported:          []string{oauth.CodeChallengeS256},
+		TokenEndpointAuthMethodsSupported:      []string{oauth.TokenEndpointAuthNone},
+		RevocationEndpointAuthMethodsSupported: []string{oauth.TokenEndpointAuthNone},
+		ScopesSupported:                        s.supportedScopes,
+		EndSessionEndpoint:                     issuer + "/oauth/end-session",
 		AuthorizationResponseIssuerParameterSupported: true,
 		PushedAuthorizationRequestEndpoint:            issuer + "/oauth/par",
 		RequirePushedAuthorizationRequests:            false,
@@ -454,7 +461,7 @@ func (s *Server) handleOAuthAuthorizeGET(w http.ResponseWriter, r *http.Request)
 		for k, v := range par.Params {
 			values.Set(k, v)
 		}
-		if err := s.validateAuthorizeForm(r, values); err != nil {
+		if err := s.validateAuthorizeForm(values); err != nil {
 			oauth.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
@@ -485,13 +492,18 @@ func (s *Server) renderConsent(w http.ResponseWriter, r *http.Request, user oaut
 			params[k] = vals[0]
 		}
 	}
-	s.state.Consents[oauth.RefreshTokenKey(consentToken)] = ConsentParams{UserID: user.ID, Params: params, ExpiresAt: time.Now().Add(s.authCodeTTL)}
-	if err := s.state.Save(); err != nil {
-		slog.WarnContext(r.Context(), "save oauth consent", "err", err)
-	}
+	err = s.state.transact(func(next *storeFile) bool {
+		next.Consents[oauth.RefreshTokenKey(consentToken)] = ConsentParams{UserID: user.ID, Params: params, ExpiresAt: time.Now().Add(s.authCodeTTL)}
+		return true
+	})
 	s.mu.Unlock()
+	if err != nil {
+		slog.WarnContext(r.Context(), "save oauth consent", "err", err)
+		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not start consent")
+		return
+	}
 	data := ConsentPageData{
-		Action:        s.externalBaseURL(r) + "/oauth/authorize",
+		Action:        s.issuer + "/oauth/authorize",
 		ConsentToken:  consentToken,
 		ClientName:    clientDisplayName(&client),
 		ClientID:      client.ID,
@@ -515,7 +527,7 @@ func (s *Server) handleOAuthPAR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	values := r.PostForm
-	if err := s.validateAuthorizeForm(r, values); err != nil {
+	if err := s.validateAuthorizeForm(values); err != nil {
 		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
@@ -563,15 +575,22 @@ func (s *Server) handleOAuthAuthorizePOST(w http.ResponseWriter, r *http.Request
 	consentToken := r.PostForm.Get("consent_token")
 	consentHash := oauth.RefreshTokenKey(consentToken)
 	s.mu.Lock()
-	c, ok := s.state.Consents[consentHash]
-	if ok {
-		delete(s.state.Consents, consentHash)
-		if err := s.state.Save(); err != nil {
-			slog.WarnContext(r.Context(), "save oauth consent deletion", "err", err)
+	var c ConsentParams
+	var consentFound bool
+	err := s.state.transact(func(next *storeFile) bool {
+		c, consentFound = next.Consents[consentHash]
+		if consentFound {
+			delete(next.Consents, consentHash)
 		}
-	}
+		return consentFound
+	})
 	s.mu.Unlock()
-	if !ok || c.UserID != user.ID || time.Now().After(c.ExpiresAt) {
+	if err != nil {
+		slog.WarnContext(r.Context(), "consume oauth consent", "err", err)
+		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not consume consent")
+		return
+	}
+	if !consentFound || c.UserID != user.ID || time.Now().After(c.ExpiresAt) {
 		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid or expired consent")
 		return
 	}
@@ -579,7 +598,7 @@ func (s *Server) handleOAuthAuthorizePOST(w http.ResponseWriter, r *http.Request
 	for k, v := range c.Params {
 		values.Set(k, v)
 	}
-	if err := s.validateAuthorizeForm(r, values); err != nil {
+	if err := s.validateAuthorizeForm(values); err != nil {
 		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
@@ -610,8 +629,11 @@ func (s *Server) handleOAuthAuthorizePOST(w http.ResponseWriter, r *http.Request
 	}
 	entry := Code{UserID: user.ID, ClientID: values.Get("client_id"), RedirectURI: values.Get("redirect_uri"), CodeChallenge: values.Get("code_challenge"), Resource: values.Get("resource"), Scope: scope, ExpiresAt: time.Now().Add(s.authCodeTTL)}
 	s.mu.Lock()
-	s.state.Codes[oauth.RefreshTokenKey(code)] = entry
-	if err := s.state.Save(); err != nil {
+	err = s.state.transact(func(next *storeFile) bool {
+		next.Codes[oauth.RefreshTokenKey(code)] = entry
+		return true
+	})
+	if err != nil {
 		slog.WarnContext(r.Context(), "save oauth code", "err", err)
 		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not authorize client")
 		s.mu.Unlock()
@@ -628,7 +650,7 @@ func (s *Server) handleOAuthAuthorizePOST(w http.ResponseWriter, r *http.Request
 	if state := values.Get("state"); state != "" {
 		q.Set("state", state)
 	}
-	q.Set("iss", s.externalBaseURL(r))
+	q.Set("iss", s.issuer)
 	redirectURL.RawQuery = q.Encode()
 	s.recordAudit(r, "", "oauth/authorize", entry.ClientID, "allow", "approved", map[string]any{
 		"redirectURI": entry.RedirectURI,
@@ -647,6 +669,10 @@ func (s *Server) handleOAuthToken(w http.ResponseWriter, r *http.Request) {
 	if !s.rateLimitClient(w, r, r.PostForm.Get("client_id")) {
 		return
 	}
+	if r.Header.Get(DPoPTokenType) != "" {
+		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", "DPoP is not supported")
+		return
+	}
 
 	// RFC 8628 device_code grant: handle before pruning so expired entries
 	// are correctly reported as expired_token rather than invalid_grant.
@@ -661,53 +687,43 @@ func (s *Server) handleOAuthToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract and validate DPoP proof if present.
-	dpopJKT := ""
-	if proofHeader, proofClaims, err := DPoPProof(r); err == nil {
-		jkt, err := JWKThumbprint(&proofHeader.JWK)
-		if err != nil {
-			slog.WarnContext(r.Context(), "dpop proof thumbprint", "err", err)
-			oauth.WriteError(w, http.StatusBadRequest, "invalid_dpop_proof", "invalid dpop proof key")
-			return
-		}
-		if err := VerifyDPoPProofTokenEndpoint(r, proofHeader, proofClaims, defaultDPoPMaxAge, s.dpopNonces.Validate); err != nil {
-			slog.WarnContext(r.Context(), "dpop proof validation", "err", err)
-			// Omit the DPoP-Nonce header on RNG failure rather than emit a weak one.
-			if nonce, nonceErr := s.dpopNonces.Issue(); nonceErr != nil {
-				slog.ErrorContext(r.Context(), "issue dpop nonce", "err", nonceErr)
-			} else {
-				w.Header().Set("DPoP-Nonce", nonce)
-			}
-			oauth.WriteError(w, http.StatusBadRequest, "invalid_dpop_proof", err.Error())
-			return
-		}
-		dpopJKT = jkt
-	}
-
 	switch r.PostForm.Get("grant_type") {
 	case oauth.GrantAuthorizationCode:
-		s.handleOAuthAuthorizationCodeToken(w, r, dpopJKT)
+		s.handleOAuthAuthorizationCodeToken(w, r)
 	case oauth.GrantRefreshToken:
-		s.handleOAuthRefreshToken(w, r, dpopJKT)
+		s.handleOAuthRefreshToken(w, r)
 	default:
 		oauth.WriteError(w, http.StatusBadRequest, "unsupported_grant_type", "only authorization_code and refresh_token are supported")
 	}
 }
 
-func (s *Server) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r *http.Request, dpopJKT string) {
+func (s *Server) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r *http.Request) {
 	code := r.PostForm.Get("code")
 	codeHash := oauth.RefreshTokenKey(code)
 	s.mu.Lock()
 	entry, ok := s.state.Codes[codeHash]
-	if ok {
-		delete(s.state.Codes, codeHash)
-		if err := s.state.Save(); err != nil {
-			slog.WarnContext(r.Context(), "save oauth code deletion", "err", err)
-		}
-	}
 	s.mu.Unlock()
 	if !ok || time.Now().After(entry.ExpiresAt) {
 		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "invalid or expired code")
+		return
+	}
+	if entry.Resource != s.resourceURL {
+		s.mu.Lock()
+		err := s.state.transact(func(next *storeFile) bool {
+			current, found := next.Codes[codeHash]
+			if !found || current != entry {
+				return false
+			}
+			delete(next.Codes, codeHash)
+			return true
+		})
+		s.mu.Unlock()
+		if err != nil {
+			slog.WarnContext(r.Context(), "discard oauth code for foreign resource", "err", err)
+			oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not reject authorization code")
+			return
+		}
+		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "authorization code resource is no longer valid")
 		return
 	}
 	if r.PostForm.Get("client_id") != entry.ClientID || r.PostForm.Get("redirect_uri") != entry.RedirectURI {
@@ -727,7 +743,6 @@ func (s *Server) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r *htt
 		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "user no longer exists")
 		return
 	}
-	client := s.oauthClient(entry.ClientID)
 	grantID, err := randomToken()
 	if err != nil {
 		slog.WarnContext(r.Context(), "generate oauth grant id", "err", err)
@@ -735,12 +750,46 @@ func (s *Server) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r *htt
 		return
 	}
 	now := time.Now()
-	grant := Grant{ID: grantID, UserID: entry.UserID, ClientID: entry.ClientID, ClientName: clientDisplayName(&client), Resource: entry.Resource, Scope: entry.Scope, CreatedAt: now, ExpiresAt: now.Add(s.refreshTokenTTL)}
+	grant := Grant{ID: grantID, UserID: entry.UserID, ClientID: entry.ClientID, Resource: entry.Resource, Scope: entry.Scope, CreatedAt: now, ExpiresAt: now.Add(s.refreshTokenTTL)}
 	refreshEntry := RefreshToken{GrantID: grantID, UserID: entry.UserID, ClientID: entry.ClientID, Resource: entry.Resource, Scope: entry.Scope, ExpiresAt: grant.ExpiresAt}
-	refreshToken, err := s.issueGrantRefreshToken(&grant, &refreshEntry)
+	refreshToken, err := randomToken()
 	if err != nil {
-		slog.WarnContext(r.Context(), "issue oauth refresh token", "err", err)
+		slog.WarnContext(r.Context(), "generate oauth refresh token", "err", err)
 		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not issue refresh token")
+		return
+	}
+	response, err := s.issueTokenResponse(user, entry.Resource, entry.Scope, grantID, refreshToken)
+	if err != nil {
+		slog.WarnContext(r.Context(), "sign oauth authorization-code token", "err", err)
+		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not issue access token")
+		return
+	}
+	redeemed := false
+	s.mu.Lock()
+	err = s.state.transact(func(next *storeFile) bool {
+		current, found := next.Codes[codeHash]
+		if !found || current != entry {
+			return false
+		}
+		client, found := next.Clients[entry.ClientID]
+		if !found {
+			return false
+		}
+		grant.ClientName = clientDisplayName(&client)
+		delete(next.Codes, codeHash)
+		next.Grants[grant.ID] = grant
+		next.RefreshTokens[oauth.RefreshTokenKey(refreshToken)] = refreshEntry
+		redeemed = true
+		return true
+	})
+	s.mu.Unlock()
+	if err != nil {
+		slog.WarnContext(r.Context(), "exchange oauth authorization code", "err", err)
+		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not exchange authorization code")
+		return
+	}
+	if !redeemed {
+		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "invalid or expired code")
 		return
 	}
 	s.recordAudit(r, entry.UserID, "oauth/token", entry.ClientID, "allow", "issued", map[string]any{
@@ -748,87 +797,89 @@ func (s *Server) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r *htt
 		"resource": entry.Resource,
 		"scope":    entry.Scope,
 	})
-	s.writeTokenResponse(w, r, user, entry.Resource, entry.Scope, grantID, refreshToken, dpopJKT)
+	s.writeTokenResponse(w, &response)
 }
 
-func (s *Server) handleOAuthRefreshToken(w http.ResponseWriter, r *http.Request, dpopJKT string) {
+func (s *Server) handleOAuthRefreshToken(w http.ResponseWriter, r *http.Request) {
 	refreshToken := r.PostForm.Get("refresh_token")
 	clientID := r.PostForm.Get("client_id")
-	entry, ok := s.validRefreshToken(refreshToken, clientID)
-	if !ok {
-		// RFC 9700 §4.14.2: reuse of an already-rotated or revoked refresh token
-		// is a breach signal. Revoke the whole grant family so both the attacker
-		// and the legitimate client racing it lose access. A token whose hash is
-		// not in the store is simply unknown and triggers no collateral action.
-		if reused, userID, grantID, err := s.detectRefreshTokenReuse(refreshToken); err != nil {
-			slog.WarnContext(r.Context(), "revoke reused oauth refresh token grant", "err", err)
-		} else if reused {
-			s.recordAudit(r, userID, "oauth/token", clientID, "deny", "reuse_detected", map[string]any{
-				"grantID": grantID,
-			})
+	s.mu.Lock()
+	entry, candidate := s.state.RefreshTokens[oauth.RefreshTokenKey(refreshToken)]
+	grant, grantOK := s.state.Grants[entry.GrantID]
+	s.mu.Unlock()
+	candidate = candidate && entry.ClientID == clientID && entry.Resource == s.resourceURL && entry.UsedAt.IsZero() && entry.RevokedAt.IsZero() && time.Now().Before(entry.ExpiresAt) && grantOK && grant.Resource == s.resourceURL && grant.RevokedAt.IsZero() && time.Now().Before(grant.ExpiresAt)
+	var response oauth.TokenResponse
+	nextRefreshToken := ""
+	if candidate {
+		user, found := s.findUserByID(entry.UserID)
+		if !found {
+			oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "user no longer exists")
+			return
 		}
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "invalid refresh token")
-		return
+		var err error
+		nextRefreshToken, err = randomToken()
+		if err == nil {
+			response, err = s.issueTokenResponse(user, entry.Resource, entry.Scope, entry.GrantID, nextRefreshToken)
+		}
+		if err != nil {
+			slog.WarnContext(r.Context(), "prepare oauth refresh response", "err", err)
+			oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not issue access token")
+			return
+		}
 	}
-	user, ok := s.findUserByID(entry.UserID)
-	if !ok {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "user no longer exists")
-		return
-	}
-	nextRefreshToken, entry, ok, err := s.rotateRefreshToken(refreshToken, clientID, entry.UserID)
+	result, exchanged, err := s.exchangeRefreshToken(refreshToken, clientID, entry.UserID, nextRefreshToken)
 	if err != nil {
-		slog.WarnContext(r.Context(), "rotate oauth refresh token", "err", err)
+		slog.WarnContext(r.Context(), "exchange oauth refresh token", "err", err)
 		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not rotate refresh token")
 		return
 	}
-	if !ok {
+	if result == refreshExchangeReused {
+		s.recordAudit(r, exchanged.UserID, "oauth/token", clientID, "deny", "reuse_detected", map[string]any{"grantID": exchanged.GrantID})
+	}
+	if result != refreshExchangeRotated {
 		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "invalid refresh token")
 		return
 	}
-	s.recordAudit(r, entry.UserID, "oauth/token", clientID, "allow", "refreshed", map[string]any{
-		"grantID":  entry.GrantID,
-		"resource": entry.Resource,
-		"scope":    entry.Scope,
+	s.recordAudit(r, exchanged.UserID, "oauth/token", clientID, "allow", "refreshed", map[string]any{
+		"grantID":  exchanged.GrantID,
+		"resource": exchanged.Resource,
+		"scope":    exchanged.Scope,
 	})
-	s.writeTokenResponse(w, r, user, entry.Resource, entry.Scope, entry.GrantID, nextRefreshToken, dpopJKT)
+	s.writeTokenResponse(w, &response)
 }
 
-func (s *Server) writeTokenResponse(w http.ResponseWriter, r *http.Request, user oauth.User, resource, scope, grantID, refreshToken, dpopJKT string) {
-	var accessToken string
-	var err error
-	if dpopJKT != "" {
-		accessToken, err = s.tokens.IssueDPoPAccessToken(s.externalBaseURL(r), user, resource, scope, grantID, dpopJKT)
-	} else {
-		accessToken, err = s.tokens.IssueAccessToken(s.externalBaseURL(r), user, resource, scope, grantID)
+func (s *Server) issueTokenResponse(user oauth.User, resource, scope, grantID, refreshToken string) (oauth.TokenResponse, error) {
+	if resource != s.resourceURL {
+		return oauth.TokenResponse{}, errors.New("oauth: token resource does not match configured protected resource")
 	}
+	accessToken, err := s.tokens.IssueAccessToken(s.issuer, user, resource, scope, grantID)
 	if err != nil {
-		slog.WarnContext(r.Context(), "issue oauth token", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not issue access token")
-		return
+		return oauth.TokenResponse{}, err
 	}
-	tokenType := oauth.TokenTypeBearer
-	if dpopJKT != "" {
-		tokenType = DPoPTokenType
-	}
-	nonce, err := s.dpopNonces.Issue()
-	if err != nil {
-		slog.ErrorContext(r.Context(), "issue dpop nonce", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not issue dpop nonce")
-		return
-	}
+	return oauth.TokenResponse{AccessToken: accessToken, TokenType: oauth.TokenTypeBearer, ExpiresIn: int64(s.accessTokenTTL.Seconds()), RefreshToken: refreshToken, Scope: scope}, nil
+}
+
+func (s *Server) writeTokenResponse(w http.ResponseWriter, response *oauth.TokenResponse) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("DPoP-Nonce", nonce)
-	resp := oauth.TokenResponse{AccessToken: accessToken, TokenType: tokenType, ExpiresIn: int64(s.accessTokenTTL.Seconds()), RefreshToken: refreshToken, Scope: scope}
-	writeJSONResponse(w, &resp)
+	writeJSONResponse(w, response)
 }
 
 func (s *Server) handleOAuthIntrospect(w http.ResponseWriter, r *http.Request) {
-	if !s.rateLimitIP(w, r) {
-		return
-	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
+	if s.introspectionAuth == nil {
+		oauth.WriteError(w, http.StatusUnauthorized, "invalid_client", "introspection authentication required")
+		return
+	}
+	principal, ok := s.introspectionAuth(r)
+	if !ok {
+		oauth.WriteError(w, http.StatusUnauthorized, "invalid_client", "introspection authentication required")
+		return
+	}
+	if !s.rateLimitClient(w, r, principal.ClientID) {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
 	if err := r.ParseForm(); err != nil {
 		writeJSONResponse(w, oauth.IntrospectionResponse{Active: false})
@@ -843,16 +894,16 @@ func (s *Server) handleOAuthIntrospect(w http.ResponseWriter, r *http.Request) {
 
 	switch hint {
 	case "refresh_token":
-		s.introspectRefreshToken(w, token)
+		s.introspectRefreshToken(w, token, principal)
 	default:
-		s.introspectAccessToken(w, r, token)
+		s.introspectAccessToken(w, token, principal)
 	}
 }
 
 // introspectAccessToken introspects a JWT access token.
-func (s *Server) introspectAccessToken(w http.ResponseWriter, r *http.Request, token string) {
-	claims, err := s.tokens.VerifyAccessToken(token, s.externalBaseURL(r), s.externalBaseURL(r)+s.resourceURLPath, time.Now(), s.touchGrant, s.session)
-	if err != nil {
+func (s *Server) introspectAccessToken(w http.ResponseWriter, token string, principal IntrospectionPrincipal) {
+	claims, err := s.tokens.VerifyAccessToken(token, s.issuer, s.resourceURL, time.Now(), s.touchGrant, s.session)
+	if err != nil || (principal.ClientID != "" && claims.ClientID != principal.ClientID) {
 		writeJSONResponse(w, oauth.IntrospectionResponse{Active: false})
 		return
 	}
@@ -873,12 +924,12 @@ func (s *Server) introspectAccessToken(w http.ResponseWriter, r *http.Request, t
 
 // introspectRefreshToken introspects a refresh token by looking it up
 // in the store and returning grant-level information.
-func (s *Server) introspectRefreshToken(w http.ResponseWriter, token string) {
+func (s *Server) introspectRefreshToken(w http.ResponseWriter, token string, principal IntrospectionPrincipal) {
 	now := time.Now()
 	tokenHash := oauth.RefreshTokenKey(token)
 	s.mu.Lock()
 	entry, ok := s.state.RefreshTokens[tokenHash]
-	if !ok || !entry.RevokedAt.IsZero() || !entry.UsedAt.IsZero() || now.After(entry.ExpiresAt) {
+	if !ok || (principal.ClientID != "" && entry.ClientID != principal.ClientID) || !entry.RevokedAt.IsZero() || !entry.UsedAt.IsZero() || now.After(entry.ExpiresAt) {
 		s.mu.Unlock()
 		writeJSONResponse(w, oauth.IntrospectionResponse{Active: false})
 		return
@@ -920,11 +971,11 @@ func (s *Server) handleOAuthRevoke(w http.ResponseWriter, r *http.Request) {
 	case "refresh_token":
 		userID, err = s.revokeRefreshToken(token, clientID)
 	case "access_token":
-		userID = s.revokeAccessToken(token, r)
+		userID, err = s.revokeAccessToken(token)
 	default:
 		userID, err = s.revokeRefreshToken(token, clientID)
-		if userID == "" {
-			userID = s.revokeAccessToken(token, r)
+		if err == nil && userID == "" {
+			userID, err = s.revokeAccessToken(token)
 		}
 	}
 	if err != nil {
@@ -941,32 +992,34 @@ func (s *Server) handleOAuthRevoke(w http.ResponseWriter, r *http.Request) {
 // revokeAccessToken verifies a JWT access token and revokes its grant.
 // Always returns an empty userID on verification failure to avoid leaking
 // token validity — per RFC 7009 the revoke endpoint must always return 200.
-func (s *Server) revokeAccessToken(token string, r *http.Request) (userID string) {
-	claims, verr := s.tokens.verifyClaims(token, s.externalBaseURL(r), s.externalBaseURL(r)+s.resourceURLPath, time.Now())
+func (s *Server) revokeAccessToken(token string) (string, error) {
+	claims, verr := s.tokens.verifyClaims(token, s.issuer, s.resourceURL, time.Now())
 	if verr != nil {
-		return "" // token invalid, but don't leak that
+		return "", nil //nolint:nilerr // RFC 7009 requires the endpoint not to disclose invalid tokens.
 	}
 	if claims.GrantID == "" {
-		return claims.Subject // no grant to revoke
+		return claims.Subject, nil // no grant to revoke
 	}
 	now := time.Now()
 	s.mu.Lock()
-	grant, ok := s.state.Grants[claims.GrantID]
-	if ok && grant.RevokedAt.IsZero() {
+	err := s.state.transact(func(next *storeFile) bool {
+		grant, ok := next.Grants[claims.GrantID]
+		if !ok || !grant.RevokedAt.IsZero() {
+			return false
+		}
 		grant.RevokedAt = now
-		s.state.Grants[claims.GrantID] = grant
-		// Also revoke all refresh tokens for this grant.
-		for tokenHash := range s.state.RefreshTokens {
-			entry := s.state.RefreshTokens[tokenHash]
+		next.Grants[claims.GrantID] = grant
+		for tokenHash := range next.RefreshTokens {
+			entry := next.RefreshTokens[tokenHash]
 			if entry.GrantID == claims.GrantID && entry.RevokedAt.IsZero() {
 				entry.RevokedAt = now
-				s.state.RefreshTokens[tokenHash] = entry
+				next.RefreshTokens[tokenHash] = entry
 			}
 		}
-		_ = s.state.Save()
-	}
+		return true
+	})
 	s.mu.Unlock()
-	return claims.Subject
+	return claims.Subject, err
 }
 
 func (s *Server) recordAudit(r *http.Request, userID, operation, name, decision, status string, args any) {
@@ -990,13 +1043,13 @@ func (s *Server) redirectAuthorizeError(w http.ResponseWriter, r *http.Request, 
 	if state := values.Get("state"); state != "" {
 		q.Set("state", state)
 	}
-	q.Set("iss", s.externalBaseURL(r))
+	q.Set("iss", s.issuer)
 	redirectURL.RawQuery = q.Encode()
 	http.Redirect(w, r, redirectURL.String(), http.StatusSeeOther)
 }
 
 func (s *Server) validateAuthorizeRequest(r *http.Request) error {
-	return s.validateAuthorizeForm(r, r.URL.Query())
+	return s.validateAuthorizeForm(r.URL.Query())
 }
 
 // validateAuthorizeForm validates OAuth authorization request parameters.
@@ -1004,7 +1057,7 @@ func (s *Server) validateAuthorizeRequest(r *http.Request) error {
 // redirect_uri validation uses exact string match per RFC 6819 §4.1.2 and
 // RFC 9700 §4.1.2: redirect URIs must be compared using simple string
 // comparison as defined in [RFC3986] Section 6.2.1.
-func (s *Server) validateAuthorizeForm(r *http.Request, values url.Values) error {
+func (s *Server) validateAuthorizeForm(values url.Values) error {
 	if values.Get("response_type") != oauth.ResponseTypeCode {
 		return errors.New("response_type must be code")
 	}
@@ -1023,7 +1076,7 @@ func (s *Server) validateAuthorizeForm(r *http.Request, values url.Values) error
 	if resource == "" {
 		return errors.New("resource is required")
 	}
-	if resource != s.externalBaseURL(r)+s.resourceURLPath {
+	if resource != s.resourceURL {
 		return errors.New("resource must match the protected resource")
 	}
 	if _, err := s.normalizeScope(values.Get("scope")); err != nil {
@@ -1032,87 +1085,62 @@ func (s *Server) validateAuthorizeForm(r *http.Request, values url.Values) error
 	return nil
 }
 
-func (s *Server) issueGrantRefreshToken(grant *Grant, entry *RefreshToken) (string, error) {
-	token, err := randomToken()
-	if err != nil {
-		return "", err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.state.Grants[grant.ID] = *grant
-	s.state.RefreshTokens[oauth.RefreshTokenKey(token)] = *entry
-	if err := s.state.Save(); err != nil {
-		return "", err
-	}
-	return token, nil
-}
+type refreshExchangeResult uint8
 
-func (s *Server) validRefreshToken(token, clientID string) (RefreshToken, bool) {
-	now := time.Now()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	entry, ok := s.state.RefreshTokens[oauth.RefreshTokenKey(token)]
-	if !ok || entry.ClientID != clientID || !entry.UsedAt.IsZero() || !entry.RevokedAt.IsZero() || now.After(entry.ExpiresAt) {
-		return RefreshToken{}, false
-	}
-	grant, ok := s.state.Grants[entry.GrantID]
-	if !ok || !grant.RevokedAt.IsZero() || now.After(grant.ExpiresAt) {
-		return RefreshToken{}, false
-	}
-	return entry, true
-}
+const (
+	refreshExchangeUnknown refreshExchangeResult = iota
+	refreshExchangeRotated
+	refreshExchangeReused
+)
 
-// detectRefreshTokenReuse reports whether token's hash is present in the store
-// but already used or revoked, and if so revokes its entire grant family.
-//
-// A token whose hash is absent is unknown, not a reuse: reused is false and no
-// grant is touched. On a detected reuse it returns the owning user and grant.
-func (s *Server) detectRefreshTokenReuse(token string) (reused bool, userID, grantID string, err error) {
-	now := time.Now()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	entry, ok := s.state.RefreshTokens[oauth.RefreshTokenKey(token)]
-	if !ok || (entry.UsedAt.IsZero() && entry.RevokedAt.IsZero()) {
-		return false, "", "", nil
-	}
-	if s.state.RevokeUserGrant(entry.UserID, entry.GrantID, now) {
-		if err := s.state.Save(); err != nil {
-			return true, entry.UserID, entry.GrantID, err
-		}
-	}
-	return true, entry.UserID, entry.GrantID, nil
-}
-
-func (s *Server) rotateRefreshToken(token, clientID, userID string) (nextToken string, next RefreshToken, ok bool, err error) {
-	nextToken, err = randomToken()
-	if err != nil {
-		return "", RefreshToken{}, false, err
-	}
+func (s *Server) exchangeRefreshToken(token, clientID, userID, nextToken string) (refreshExchangeResult, RefreshToken, error) {
 	now := time.Now()
 	tokenHash := oauth.RefreshTokenKey(token)
 	nextTokenHash := oauth.RefreshTokenKey(nextToken)
+	result := refreshExchangeUnknown
+	var exchanged RefreshToken
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	entry, ok := s.state.RefreshTokens[tokenHash]
-	if !ok || entry.ClientID != clientID || entry.UserID != userID || !entry.UsedAt.IsZero() || !entry.RevokedAt.IsZero() || now.After(entry.ExpiresAt) {
-		return "", RefreshToken{}, false, nil
-	}
-	grant, ok := s.state.Grants[entry.GrantID]
-	if !ok || !grant.RevokedAt.IsZero() || now.After(grant.ExpiresAt) {
-		return "", RefreshToken{}, false, nil
-	}
-	entry.UsedAt = now
-	s.state.RefreshTokens[tokenHash] = entry
-	nextExpiry := now.Add(s.refreshTokenTTL)
-	next = RefreshToken{GrantID: entry.GrantID, UserID: entry.UserID, ClientID: entry.ClientID, Resource: entry.Resource, Scope: entry.Scope, DPoPJKT: entry.DPoPJKT, ExpiresAt: nextExpiry}
-	s.state.RefreshTokens[nextTokenHash] = next
-	grant.LastUsedAt = now
-	grant.ExpiresAt = nextExpiry
-	s.state.Grants[grant.ID] = grant
-	if err := s.state.Save(); err != nil {
-		return "", RefreshToken{}, false, err
-	}
-	return nextToken, next, true, nil
+	err := s.state.transact(func(state *storeFile) bool {
+		entry, found := state.RefreshTokens[tokenHash]
+		if !found {
+			return false
+		}
+		exchanged = entry
+		grant, grantFound := state.Grants[entry.GrantID]
+		if entry.Resource != s.resourceURL || (grantFound && grant.Resource != s.resourceURL) {
+			if grantFound {
+				return revokeGrant(state, entry.GrantID, now)
+			}
+			if entry.RevokedAt.IsZero() {
+				entry.RevokedAt = now
+				state.RefreshTokens[tokenHash] = entry
+				return true
+			}
+			return false
+		}
+		if entry.ClientID != clientID {
+			return false
+		}
+		if !entry.UsedAt.IsZero() || !entry.RevokedAt.IsZero() {
+			result = refreshExchangeReused
+			return revokeGrant(state, entry.GrantID, now)
+		}
+		if !grantFound || !grant.RevokedAt.IsZero() || now.After(grant.ExpiresAt) || now.After(entry.ExpiresAt) || userID == "" || entry.UserID != userID || nextToken == "" {
+			return false
+		}
+		entry.UsedAt = now
+		state.RefreshTokens[tokenHash] = entry
+		nextExpiry := now.Add(s.refreshTokenTTL)
+		exchanged = RefreshToken{GrantID: entry.GrantID, UserID: entry.UserID, ClientID: entry.ClientID, Resource: entry.Resource, Scope: entry.Scope, DPoPJKT: entry.DPoPJKT, ExpiresAt: nextExpiry}
+		state.RefreshTokens[nextTokenHash] = exchanged
+		grant.LastUsedAt = now
+		grant.ExpiresAt = nextExpiry
+		state.Grants[grant.ID] = grant
+		result = refreshExchangeRotated
+		return true
+	})
+	return result, exchanged, err
 }
 
 func (s *Server) revokeRefreshToken(token, clientID string) (string, error) {
@@ -1120,24 +1148,16 @@ func (s *Server) revokeRefreshToken(token, clientID string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	tokenHash := oauth.RefreshTokenKey(token)
-	entry, ok := s.state.RefreshTokens[tokenHash]
-	if !ok || entry.ClientID != clientID || !entry.RevokedAt.IsZero() {
-		return "", nil
-	}
-	entry.RevokedAt = now
-	s.state.RefreshTokens[tokenHash] = entry
-	if grant, ok := s.state.Grants[entry.GrantID]; ok && grant.RevokedAt.IsZero() {
-		grant.RevokedAt = now
-		s.state.Grants[entry.GrantID] = grant
-		for otherHash := range s.state.RefreshTokens {
-			other := s.state.RefreshTokens[otherHash]
-			if other.GrantID == entry.GrantID && other.RevokedAt.IsZero() {
-				other.RevokedAt = now
-				s.state.RefreshTokens[otherHash] = other
-			}
+	var userID string
+	err := s.state.transact(func(next *storeFile) bool {
+		entry, ok := next.RefreshTokens[tokenHash]
+		if !ok || entry.ClientID != clientID || !entry.RevokedAt.IsZero() {
+			return false
 		}
-	}
-	return entry.UserID, s.state.Save()
+		userID = entry.UserID
+		return revokeGrant(next, entry.GrantID, now)
+	})
+	return userID, err
 }
 
 func (s *Server) touchGrant(grantID string, now time.Time) (active bool, clientID string, err error) {
@@ -1150,21 +1170,24 @@ func (s *Server) touchGrant(grantID string, now time.Time) (active bool, clientI
 	if !ok || !grant.RevokedAt.IsZero() || now.After(grant.ExpiresAt) {
 		return false, "", nil
 	}
-	grant.LastUsedAt = now
-	s.state.Grants[grantID] = grant
-	if err := s.state.Save(); err != nil {
+	if grant.Resource != s.resourceURL {
+		err := s.state.transact(func(next *storeFile) bool {
+			return revokeGrant(next, grantID, now)
+		})
 		return false, "", err
 	}
+	// Bearer validation is deliberately read-only. Refresh rotation records the
+	// durable last-use timestamp without rewriting the complete store on every
+	// protected-resource request.
 	return true, grant.ClientID, nil
 }
 
 func (s *Server) pruneExpiredRefreshTokens(now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.state.PruneExpiredRefreshTokens(now) {
-		return nil
-	}
-	return s.state.Save()
+	return s.state.transact(func(next *storeFile) bool {
+		return pruneExpiredStore(next, now)
+	})
 }
 
 func (s *Server) normalizeScope(scope string) (string, error) {
@@ -1223,8 +1246,10 @@ func (s *Server) oauthClient(id string) Client {
 func (s *Server) registerClient(client *Client) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.state.Clients[client.ID] = *client
-	return s.state.Save()
+	return s.state.transact(func(next *storeFile) bool {
+		next.Clients[client.ID] = *client
+		return true
+	})
 }
 
 func (s *Server) handleOAuthRegister(w http.ResponseWriter, r *http.Request) {
@@ -1268,7 +1293,7 @@ func (s *Server) handleOAuthRegister(w http.ResponseWriter, r *http.Request) {
 		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not register client")
 		return
 	}
-	issuer := s.externalBaseURL(r)
+	issuer := s.issuer
 	regToken, err := s.tokens.IssueRegistrationAccessToken(issuer, client.ID)
 	if err != nil {
 		slog.WarnContext(r.Context(), "issue registration access token", "err", err)
@@ -1298,8 +1323,8 @@ func (s *Server) verifyRegistrationAccessToken(r *http.Request, clientID string)
 	if token == "" {
 		return errors.New("missing registration access token")
 	}
-	audience := s.externalBaseURL(r) + "/oauth/register"
-	tokenClientID, err := s.tokens.VerifyRegistrationAccessToken(token, s.externalBaseURL(r), audience, time.Now())
+	audience := s.issuer + "/oauth/register"
+	tokenClientID, err := s.tokens.VerifyRegistrationAccessToken(token, s.issuer, audience, time.Now())
 	if err != nil {
 		return fmt.Errorf("invalid registration access token: %w", err)
 	}
@@ -1373,8 +1398,11 @@ func (s *Server) handleOAuthRegisterUpdate(w http.ResponseWriter, r *http.Reques
 		}
 		client.TokenEndpointAuthMethod = method
 	}
-	s.state.Clients[clientID] = client
-	if err := s.state.Save(); err != nil {
+	err := s.state.transact(func(next *storeFile) bool {
+		next.Clients[clientID] = client
+		return true
+	})
+	if err != nil {
 		s.mu.Unlock()
 		slog.WarnContext(r.Context(), "save oauth client update", "err", err)
 		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not update client")
@@ -1382,7 +1410,7 @@ func (s *Server) handleOAuthRegisterUpdate(w http.ResponseWriter, r *http.Reques
 	}
 	s.mu.Unlock()
 
-	issuer := s.externalBaseURL(r)
+	issuer := s.issuer
 	regToken, err := s.tokens.IssueRegistrationAccessToken(issuer, clientID)
 	if err != nil {
 		slog.WarnContext(r.Context(), "issue registration access token", "err", err)
@@ -1415,8 +1443,37 @@ func (s *Server) handleOAuthRegisterDelete(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	s.mu.Lock()
-	delete(s.state.Clients, clientID)
-	err := s.state.Save()
+	err := s.state.transact(func(next *storeFile) bool {
+		delete(next.Clients, clientID)
+		for key, code := range next.Codes {
+			if code.ClientID == clientID {
+				delete(next.Codes, key)
+			}
+		}
+		for key, consent := range next.Consents {
+			if consent.Params["client_id"] == clientID {
+				delete(next.Consents, key)
+			}
+		}
+		for key, deviceCode := range next.DeviceCodes {
+			if deviceCode != nil && deviceCode.ClientID == clientID {
+				delete(next.DeviceCodes, key)
+			}
+		}
+		for key := range next.RefreshTokens {
+			token := next.RefreshTokens[key]
+			if token.ClientID == clientID {
+				delete(next.RefreshTokens, key)
+			}
+		}
+		for key := range next.Grants {
+			grant := next.Grants[key]
+			if grant.ClientID == clientID {
+				delete(next.Grants, key)
+			}
+		}
+		return true
+	})
 	s.mu.Unlock()
 	if err != nil {
 		slog.WarnContext(r.Context(), "save oauth client delete", "err", err)
@@ -1436,6 +1493,18 @@ func validRedirectURI(raw string) bool {
 		return true
 	}
 	return u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1")
+}
+
+func validateIssuer(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || u.User != nil || u.ForceQuery || strings.ContainsAny(raw, "?#") || (u.Path != "" && u.Path != "/") {
+		return "", errors.New("oauth: Issuer must be an absolute origin URL")
+	}
+	if u.Scheme != "https" && (u.Scheme != "http" || (u.Hostname() != "localhost" && u.Hostname() != "127.0.0.1" && u.Hostname() != "::1")) {
+		return "", errors.New("oauth: Issuer must use HTTPS except for loopback development origins")
+	}
+	schemeEnd := strings.IndexByte(raw, ':')
+	return raw[:schemeEnd] + "://" + u.Host, nil
 }
 
 func clientDisplayName(client *Client) string {
@@ -1477,8 +1546,8 @@ func (s *Server) handleProtectedResourceMetadata(w http.ResponseWriter, r *http.
 		return
 	}
 	metadata := oauth.ProtectedResourceMetadata{
-		Resource:             s.externalBaseURL(r) + s.resourceURLPath,
-		AuthorizationServers: []string{s.externalBaseURL(r)},
+		Resource:             s.resourceURL,
+		AuthorizationServers: []string{s.issuer},
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(metadata); err != nil {
@@ -1486,39 +1555,13 @@ func (s *Server) handleProtectedResourceMetadata(w http.ResponseWriter, r *http.
 	}
 }
 
-func (s *Server) verifyBearer(r *http.Request, token string) (*oauth.BearerClaims, error) {
-	return s.tokens.VerifyAccessToken(token, s.externalBaseURL(r), s.externalBaseURL(r)+s.resourceURLPath, time.Now(), s.touchGrant, s.session)
-}
-
-// extractAuthToken extracts the access token from an Authorization header,
-// supporting both TokenTypeBearer and DPoPTokenType schemes. Returns the token and scheme.
-func (s *Server) extractAuthToken(r *http.Request) (token, scheme string) {
-	header := r.Header.Get("Authorization")
-	switch {
-	case strings.HasPrefix(header, "DPoP "):
-		return strings.TrimSpace(strings.TrimPrefix(header, "DPoP ")), DPoPTokenType
-	case strings.HasPrefix(header, "Bearer "):
-		return oauth.BearerToken(r), oauth.TokenTypeBearer
-	default:
-		return "", ""
-	}
-}
-
-func (s *Server) writeUnauthorizedDPoP(w http.ResponseWriter, r *http.Request, description string) {
-	// Omit the DPoP-Nonce header on RNG failure rather than emit a weak one.
-	if nonce, err := s.dpopNonces.Issue(); err != nil {
-		slog.ErrorContext(r.Context(), "issue dpop nonce", "err", err)
-	} else {
-		w.Header().Set("DPoP-Nonce", nonce)
-	}
-	// Per RFC 9449 §9.3, include error and error_description with DPoP scheme.
-	w.Header().Set("WWW-Authenticate", fmt.Sprintf(`DPoP error="invalid_token", error_description=%q`, description))
-	writeUnauthorizedJSON(w)
+func (s *Server) verifyBearer(_ *http.Request, token string) (*oauth.BearerClaims, error) {
+	return s.tokens.VerifyAccessToken(token, s.issuer, s.resourceURL, time.Now(), s.touchGrant, s.session)
 }
 
 func (s *Server) writeUnauthorized(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == s.resourceURLPath && s.resourceMetadataURLPath != "" {
-		resourceMetadataURL := s.externalBaseURL(r) + s.resourceMetadataURLPath
+		resourceMetadataURL := s.issuer + s.resourceMetadataURLPath
 		w.Header().Set("WWW-Authenticate", oauth.BearerChallenge(resourceMetadataURL, strings.Join(s.supportedScopes, " ")))
 	}
 	writeUnauthorizedJSON(w)
@@ -1606,17 +1649,21 @@ func (s *Server) handleOAuthDeviceAuthorization(w http.ResponseWriter, r *http.R
 	expiresAt := now.Add(10 * time.Minute)
 
 	dc := &DeviceCode{
-		DeviceCode: deviceCode,
-		UserCode:   userCode,
-		ClientID:   clientID,
-		Scope:      scope,
-		Status:     "pending",
-		ExpiresAt:  expiresAt,
-		IssuedAt:   now,
+		DeviceCode:  deviceCode,
+		UserCode:    userCode,
+		UserCodeKey: oauth.RefreshTokenKey(userCode),
+		ClientID:    clientID,
+		Scope:       scope,
+		Status:      "pending",
+		ExpiresAt:   expiresAt,
+		IssuedAt:    now,
 	}
 	s.mu.Lock()
-	s.state.DeviceCodes[oauth.RefreshTokenKey(deviceCode)] = dc
-	if err := s.state.Save(); err != nil {
+	err = s.state.transact(func(next *storeFile) bool {
+		next.DeviceCodes[oauth.RefreshTokenKey(deviceCode)] = dc
+		return true
+	})
+	if err != nil {
 		s.mu.Unlock()
 		slog.WarnContext(r.Context(), "save device code", "err", err)
 		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not save device code")
@@ -1624,7 +1671,7 @@ func (s *Server) handleOAuthDeviceAuthorization(w http.ResponseWriter, r *http.R
 	}
 	s.mu.Unlock()
 
-	issuer := s.externalBaseURL(r)
+	issuer := s.issuer
 	resp := oauth.DeviceAuthorizationResponse{
 		DeviceCode:              deviceCode,
 		UserCode:                userCode,
@@ -1673,20 +1720,24 @@ func (s *Server) handleOAuthDeviceApprove(w http.ResponseWriter, r *http.Request
 	}
 	s.mu.Lock()
 	var dc *DeviceCode
-	for _, d := range s.state.DeviceCodes {
-		if d.UserCode == userCode && d.Status == "pending" && time.Now().Before(d.ExpiresAt) {
-			dc = d
-			d.Status = "approved"
-			d.UserID = user.ID
-			break
+	userCodeKey := oauth.RefreshTokenKey(userCode)
+	err := s.state.transact(func(next *storeFile) bool {
+		for _, d := range next.DeviceCodes {
+			if d != nil && d.UserCodeKey == userCodeKey && d.Status == "pending" && time.Now().Before(d.ExpiresAt) {
+				dc = d
+				d.Status = "approved"
+				d.UserID = user.ID
+				return true
+			}
 		}
-	}
-	if dc == nil {
+		return false
+	})
+	if dc == nil && err == nil {
 		s.mu.Unlock()
 		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid or expired user code")
 		return
 	}
-	if err := s.state.Save(); err != nil {
+	if err != nil {
 		s.mu.Unlock()
 		slog.WarnContext(r.Context(), "save device approval", "err", err)
 		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not approve device")
@@ -1714,9 +1765,16 @@ func (s *Server) handleOAuthDeviceCodeToken(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if time.Now().After(dc.ExpiresAt) {
-		delete(s.state.DeviceCodes, codeHash)
-		_ = s.state.Save()
+		err := s.state.transact(func(next *storeFile) bool {
+			delete(next.DeviceCodes, codeHash)
+			return true
+		})
 		s.mu.Unlock()
+		if err != nil {
+			slog.WarnContext(r.Context(), "delete expired device code", "err", err)
+			oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not consume device code")
+			return
+		}
 		oauth.WriteError(w, http.StatusBadRequest, "expired_token", "device_code expired")
 		return
 	}
@@ -1726,14 +1784,19 @@ func (s *Server) handleOAuthDeviceCodeToken(w http.ResponseWriter, r *http.Reque
 		oauth.WriteError(w, http.StatusBadRequest, "authorization_pending", "user has not yet authorized the device")
 		return
 	case "denied":
-		delete(s.state.DeviceCodes, codeHash)
-		_ = s.state.Save()
+		err := s.state.transact(func(next *storeFile) bool {
+			delete(next.DeviceCodes, codeHash)
+			return true
+		})
 		s.mu.Unlock()
+		if err != nil {
+			slog.WarnContext(r.Context(), "consume denied device code", "err", err)
+			oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not consume device code")
+			return
+		}
 		oauth.WriteError(w, http.StatusBadRequest, "access_denied", "user denied the authorization request")
 		return
 	case "approved":
-		delete(s.state.DeviceCodes, codeHash)
-		_ = s.state.Save()
 		s.mu.Unlock()
 	default:
 		s.mu.Unlock()
@@ -1753,15 +1816,46 @@ func (s *Server) handleOAuthDeviceCodeToken(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	now := time.Now()
-	grant := Grant{ID: grantID, UserID: dc.UserID, ClientID: dc.ClientID, ClientName: clientDisplayName(&Client{ID: dc.ClientID}), Resource: s.externalBaseURL(r) + s.resourceURLPath, Scope: dc.Scope, CreatedAt: now, ExpiresAt: now.Add(s.refreshTokenTTL)}
-	refreshEntry := RefreshToken{GrantID: grantID, UserID: dc.UserID, ClientID: dc.ClientID, Resource: s.externalBaseURL(r) + s.resourceURLPath, Scope: dc.Scope, ExpiresAt: grant.ExpiresAt}
-	refreshToken, err := s.issueGrantRefreshToken(&grant, &refreshEntry)
+	grant := Grant{ID: grantID, UserID: dc.UserID, ClientID: dc.ClientID, Resource: s.resourceURL, Scope: dc.Scope, CreatedAt: now, ExpiresAt: now.Add(s.refreshTokenTTL)}
+	refreshEntry := RefreshToken{GrantID: grantID, UserID: dc.UserID, ClientID: dc.ClientID, Resource: s.resourceURL, Scope: dc.Scope, ExpiresAt: grant.ExpiresAt}
+	refreshToken, err := randomToken()
 	if err != nil {
-		slog.WarnContext(r.Context(), "issue device refresh token", "err", err)
+		slog.WarnContext(r.Context(), "generate device refresh token", "err", err)
 		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not issue refresh token")
 		return
 	}
-	s.writeTokenResponse(w, r, user, s.externalBaseURL(r)+s.resourceURLPath, dc.Scope, grantID, refreshToken, "")
+	response, err := s.issueTokenResponse(user, grant.Resource, dc.Scope, grantID, refreshToken)
+	if err != nil {
+		slog.WarnContext(r.Context(), "sign device access token", "err", err)
+		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not issue access token")
+		return
+	}
+	consumed := false
+	s.mu.Lock()
+	err = s.state.transact(func(next *storeFile) bool {
+		current, found := next.DeviceCodes[codeHash]
+		client, clientFound := next.Clients[dc.ClientID]
+		if !found || current == nil || current.Status != "approved" || current.UserID != dc.UserID || current.ClientID != dc.ClientID || !clientFound {
+			return false
+		}
+		grant.ClientName = clientDisplayName(&client)
+		delete(next.DeviceCodes, codeHash)
+		next.Grants[grant.ID] = grant
+		next.RefreshTokens[oauth.RefreshTokenKey(refreshToken)] = refreshEntry
+		consumed = true
+		return true
+	})
+	s.mu.Unlock()
+	if err != nil {
+		slog.WarnContext(r.Context(), "exchange device code", "err", err)
+		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not exchange device code")
+		return
+	}
+	if !consumed {
+		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "invalid device_code")
+		return
+	}
+	s.writeTokenResponse(w, &response)
 }
 
 func generateUserCode() string {
