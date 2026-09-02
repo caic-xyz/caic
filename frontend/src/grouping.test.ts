@@ -623,6 +623,20 @@ describe("groupSessions", () => {
 });
 
 describe("groupTurns", () => {
+  it("counts a deduplicated result payload as the turn's assistant message", () => {
+    const completion = resultEvent();
+    if (!completion.result) throw new Error("result fixture is missing payload");
+    completion.result.result = "Finished the requested change.";
+    const turns = groupTurns(groupMessages([
+      { kind: "text", ts: 1, text: { text: "Finished the requested change." } },
+      completion,
+    ]));
+
+    expect(turns).toHaveLength(1);
+    expect(turns[0].textCount).toBe(1);
+    expect(turnSummary(turns[0])).toBe("1 message");
+  });
+
   it("result event splits turns", () => {
     const events: EventMessage[] = [
       textDeltaEvent("first turn"),

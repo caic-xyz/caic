@@ -16,6 +16,8 @@ export interface MessageGroup {
   widgetTitle?: string;
   widgetHTML?: string;
   widgetDone?: boolean;
+  // For result groups whose payload canonically replaces duplicate text.
+  resultReplacesText?: boolean;
 }
 
 // A tool_use event paired with its optional tool_result.
@@ -484,6 +486,7 @@ export function groupMessages(msgs: EventMessage[]): MessageGroup[] {
     const previous = finalGroups[i - 1];
     if (result && !result.isError && result.result.trim() !== "" &&
         previous.kind === "text" && renderedText(previous).trim() === result.result.trim()) {
+      group.resultReplacesText = true;
       finalGroups.splice(i - 1, 1);
       i--;
     }
@@ -660,6 +663,8 @@ export function groupTurns(groups: MessageGroup[]): Turn[] {
     if (g.kind === "action") {
       toolCount += g.toolCalls.length;
     } else if (g.kind === "text") {
+      textCount++;
+    } else if (g.resultReplacesText) {
       textCount++;
     }
     for (const ev of g.events) {
