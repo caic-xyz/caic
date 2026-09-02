@@ -28,6 +28,8 @@
   overflow: hidden;
   margin-bottom: 0;
   pointer-events: none;
+  /* Keep the collapsed controls out of the tab order and the a11y tree. */
+  visibility: hidden;
   transition: none;
 }
 

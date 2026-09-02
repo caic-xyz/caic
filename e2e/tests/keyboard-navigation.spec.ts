@@ -61,8 +61,13 @@ test("completes the primary task flow using only the keyboard", async ({ page, a
   await page.reload();
   await expect(detailPrompt).toBeFocused();
   await expect(detailPrompt.locator("..")).toHaveCSS("box-shadow", /inset/);
+  // The collapsed new-task form must stay out of the tab order.
+  await expect(page.getByTestId("submit-task")).not.toBeVisible();
   await detailPrompt.press("Shift+Tab");
   await expect(taskCard).toBeFocused();
+  await taskCard.press("Shift+Tab");
+  await expect(page.locator("[data-testid='new-task-form'] :focus")).toHaveCount(0);
+  await taskCard.focus();
   await taskCard.press("Tab");
   await expect(detailPrompt).toBeFocused();
   await detailPrompt.press("Escape");

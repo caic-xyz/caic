@@ -51,6 +51,8 @@
   opacity: 0;
   overflow: hidden;
   pointer-events: none;
+  /* Keep the collapsed sidebar out of the tab order and the a11y tree. */
+  visibility: hidden;
   transition: none;
 }
 
@@ -179,6 +181,8 @@
     opacity: 1;
     overflow: revert;
     pointer-events: revert;
+    /* Mobile ignores the collapsed state: the list stays the visible pane. */
+    visibility: visible;
   }
 
   .collapseBtn,
