@@ -2500,6 +2500,101 @@ func TestManager(t *testing.T) {
 	})
 	t.Run("Purge", func(t *testing.T) {
 		t.Parallel()
+		t.Run("uses_requested_recovery_window", func(t *testing.T) {
+			t.Parallel()
+			fake := &runtimetest.FakeBackend{}
+			m := newTestManager(t, Config{
+				ServerCtx: t.Context(),
+				Runtimes:  newTestRuntime(t, fake, nil),
+			})
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetState(taskslog.StateStopped)
+			entry := m.NewEntry(tk, nil)
+			m.Insert(tk.ID.String(), entry)
+
+			if err := entry.Lifecycle.Purge(t.Context(), 50*time.Millisecond); err != nil {
+				t.Fatalf("Purge: %v", err)
+			}
+			time.Sleep(10 * time.Millisecond)
+			if got := tk.GetState(); got != taskslog.StateStopped {
+				t.Fatalf("state during recovery window = %v, want stopped", got)
+			}
+			if got := fake.Status("ctr-1"); got == runtimetest.StatusPurged {
+				t.Fatal("runtime was purged during recovery window")
+			}
+
+			deadline := time.Now().Add(time.Second)
+			for fake.Status("ctr-1") != runtimetest.StatusPurged {
+				if time.Now().After(deadline) {
+					t.Fatal("runtime was not purged after recovery window")
+				}
+				time.Sleep(time.Millisecond)
+			}
+		})
+		t.Run("zero_delay_purges_immediately", func(t *testing.T) {
+			t.Parallel()
+			fake := &runtimetest.FakeBackend{}
+			m := newTestManager(t, Config{
+				ServerCtx: t.Context(),
+				Runtimes:  newTestRuntime(t, fake, nil),
+			})
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetState(taskslog.StateStopped)
+			entry := m.NewEntry(tk, nil)
+			m.Insert(tk.ID.String(), entry)
+
+			if err := entry.Lifecycle.Purge(t.Context(), 0); err != nil {
+				t.Fatalf("Purge: %v", err)
+			}
+			deadline := time.Now().Add(time.Second)
+			for fake.Status("ctr-1") != runtimetest.StatusPurged {
+				if time.Now().After(deadline) {
+					t.Fatal("runtime was not purged immediately")
+				}
+				time.Sleep(time.Millisecond)
+			}
+		})
+		t.Run("revive_cancels_scheduled_purge", func(t *testing.T) {
+			t.Parallel()
+			releaseRevive := make(chan struct{})
+			fake := &blockingReviveBackend{FakeBackend: &runtimetest.FakeBackend{}, release: releaseRevive}
+			m := newTestManager(t, Config{
+				ServerCtx: t.Context(),
+				Runtimes:  newTestRuntime(t, fake, nil),
+			})
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetState(taskslog.StateStopped)
+			entry := m.NewEntry(tk, nil)
+			m.Insert(tk.ID.String(), entry)
+
+			if err := entry.Lifecycle.Purge(t.Context(), 20*time.Millisecond); err != nil {
+				t.Fatalf("Purge: %v", err)
+			}
+			if err := entry.Lifecycle.Revive(); err != nil {
+				t.Fatalf("Revive: %v", err)
+			}
+			time.Sleep(40 * time.Millisecond)
+			if got := fake.Status("ctr-1"); got == runtimetest.StatusPurged {
+				t.Fatal("runtime was purged after revive")
+			}
+			close(releaseRevive)
+		})
+		t.Run("error_negative_delay", func(t *testing.T) {
+			t.Parallel()
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
+			tk.SetState(taskslog.StateStopped)
+			e := m.NewEntry(tk, nil)
+			m.Insert(tk.ID.String(), e)
+			err := e.Lifecycle.Purge(t.Context(), -time.Millisecond)
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindBadRequest {
+				t.Fatalf("err = %v, want KindBadRequest", err)
+			}
+		})
 		t.Run("error_wrong_state", func(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
@@ -2507,7 +2602,7 @@ func TestManager(t *testing.T) {
 			tk.SetState(taskslog.StatePurged)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
-			err := e.Lifecycle.Purge(t.Context())
+			err := e.Lifecycle.Purge(t.Context(), time.Millisecond)
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindConflict {
 				t.Fatalf("err = %v, want KindConflict", err)
@@ -2524,7 +2619,7 @@ func TestManager(t *testing.T) {
 			entry.Finish(&taskslog.Result{State: taskslog.StateCrashed, Err: errors.New("agent crashed")})
 			m.Insert(tk.ID.String(), entry)
 
-			if err := entry.Lifecycle.Purge(t.Context()); err != nil {
+			if err := entry.Lifecycle.Purge(t.Context(), time.Millisecond); err != nil {
 				t.Fatalf("Purge: %v", err)
 			}
 			purgeDeadline := time.Now().Add(time.Second)
@@ -2569,13 +2664,13 @@ func TestManager(t *testing.T) {
 				t.Fatal("StopTask did not reach backend Stop")
 			}
 
-			if err := entry.Lifecycle.Purge(t.Context()); err != nil {
+			if err := entry.Lifecycle.Purge(t.Context(), time.Millisecond); err != nil {
 				t.Fatalf("Purge: %v", err)
 			}
 			select {
 			case <-entry.Done():
-			case <-time.After(time.Second):
-				t.Fatal("purge did not close done")
+				t.Fatal("purge completed before graceful stop")
+			default:
 			}
 			stopDoneChanged := m.Changed()
 			close(fake.release)
@@ -2591,14 +2686,14 @@ func TestManager(t *testing.T) {
 			}
 
 			deadline := time.Now().Add(time.Second)
-			for tk.GetState() != taskslog.StatePurged {
+			for {
+				if result := entry.Result(); result != nil && result.State == taskslog.StatePurged {
+					break
+				}
 				if time.Now().After(deadline) {
-					t.Fatalf("state = %v, want StatePurged after StopTask finishes", tk.GetState())
+					t.Fatalf("state = %v, result = %v, want StatePurged after StopTask finishes", tk.GetState(), entry.Result())
 				}
 				time.Sleep(time.Millisecond)
-			}
-			if result := entry.Result(); result == nil || result.State != taskslog.StatePurged {
-				t.Fatalf("Result = %v, want StatePurged", result)
 			}
 		})
 	})

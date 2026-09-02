@@ -28,7 +28,6 @@ import ProgressPanel from "./ProgressPanel";
 import StatsIcon from "./StatsIcon";
 import TimingIcon from "./TimingIcon";
 import WidgetCard from "./WidgetCard";
-import { confirmTaskAction } from "./TaskCard";
 import Dropdown from "./Dropdown";
 import TaskActionsMenu from "./TaskActionsMenu";
 import styles from "./TaskDetail.module.css";
@@ -924,7 +923,7 @@ export default function TaskDetail(props: Props) {
                 onRevive={() => { setContextMenuOpen(false); props.onRevive(props.taskId); }}
                 onPurge={() => {
                   setContextMenuOpen(false);
-                  if (confirmTaskAction("Purge", props.title ?? "", props.branch)) props.onPurge(props.taskId);
+                  props.onPurge(props.taskId);
                 }}
                 onCompact={() => { setContextMenuOpen(false); doCompact(); }}
                 onFork={() => { setContextMenuOpen(false); props.onFork?.(props.taskId); }}

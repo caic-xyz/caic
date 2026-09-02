@@ -34,6 +34,12 @@ type PurgeFocusTarget =
   | { kind: "task"; task: Task }
   | { kind: "prompt" };
 
+function confirmImmediatePurge(task: Task): boolean {
+  return window.confirm(
+    `Purge runtime instance?\n\n${task.title}\nbranch: ${task.repos?.[0]?.branch ?? ""}`,
+  );
+}
+
 type PendingTaskUpdate =
   | { kind: "patch"; patch: Record<string, unknown> }
   | { kind: "replace" }
@@ -93,6 +99,7 @@ function createAppStore() {
   const [autoFixCI, setAutoFixCI] = createSignal(false);
   const [autoFixPR, setAutoFixPR] = createSignal(false);
   const [maxCPUs, setMaxCPUs] = createSignal(0);
+  const [purgeDelay, setPurgeDelay] = createSignal(0);
   const [containerPlatform, setContainerPlatform] = createSignal("");
   const [wellKnownCaches, setWellKnownCaches] = createSignal<Record<string, boolean | undefined>>({});
   const [wellKnownCachesList, setWellKnownCachesList] = createSignal<WellKnownCachesResp["wellKnown"]>([]);
@@ -126,6 +133,7 @@ function createAppStore() {
       baseImage: selectedImage() || "",
       containerPlatform: (containerPlatform() || "") as Platform,
       maxCPUs: maxCPUs(),
+      purgeDelay: purgeDelay(),
       runtimeName: selectedRuntimeName(),
       wellKnownCaches: wellKnownCaches() as Record<string, boolean>,
       cacheMappings: cacheMappings(),
@@ -175,6 +183,7 @@ function createAppStore() {
     setAutoFixCI(settings.autoFixOnCIFailure);
     setAutoFixPR(settings.autoFixOnPROpen);
     setMaxCPUs(settings.maxCPUs ?? 0);
+    setPurgeDelay(settings.purgeDelay);
     setSelectedRuntimeName(settings.runtimeName ?? selectedRuntimeName());
     setContainerPlatform(settings.containerPlatform ?? "");
     setWellKnownCaches(settings.wellKnownCaches ?? {});
@@ -777,6 +786,10 @@ function createAppStore() {
 
   async function handlePurge(id: string) {
     if (actionId()) return;
+    if (purgeDelay() === 0) {
+      const task = taskById(id);
+      if (!task || !confirmImmediatePurge(task)) return;
+    }
     const target = selectedId() === id ? purgeFocusTarget(id) : null;
     setActionId(id);
     try {
@@ -1051,7 +1064,7 @@ function createAppStore() {
     forkAvailableRecent, forkAvailableRest, submitFork,
     // settings
     selectedImage, setSelectedImage, containerPlatform, setContainerPlatform,
-    maxCPUs, setMaxCPUs, wellKnownCaches, setWellKnownCaches,
+    maxCPUs, setMaxCPUs, purgeDelay, setPurgeDelay, wellKnownCaches, setWellKnownCaches,
     wellKnownCachesList, wellKnownCacheSizes, cacheMappings, setCacheMappings, customMounts, setCustomMounts, settingsError,
     autoFixCI, setAutoFixCI, autoFixPR, setAutoFixPR,
     oauthGrants, oauthGrantError, revokingOAuthGrantID, revokeOAuthClientGrant,

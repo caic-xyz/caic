@@ -860,15 +860,13 @@ func TestHandlePurge(t *testing.T) {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 		}
 
-		// Verify the response reports purging. Don't check tk.State
-		// directly: cleanupTask runs in a goroutine and may have already
-		// transitioned the state to StatePurged by now.
+		// Verify the response reports that delayed purge was scheduled.
 		var resp v1.StatusResp
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
-		if resp.Status != "purging" {
-			t.Errorf("status = %q, want %q", resp.Status, "purging")
+		if resp.Status != "scheduled" {
+			t.Errorf("status = %q, want %q", resp.Status, "scheduled")
 		}
 	})
 

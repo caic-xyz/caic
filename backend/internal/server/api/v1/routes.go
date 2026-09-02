@@ -277,7 +277,7 @@ var Routes = []Route{
 	},
 	{
 		Name:   "purgeTask",
-		Doc:    "Permanently deletes a task and its runtime instance.",
+		Doc:    "Stops a task, then deletes its runtime instance after the configured recovery window unless revived.",
 		Method: "POST",
 		Path:   "/api/caic/v1/tasks/{id}/purge",
 		Resp:   reflect.TypeFor[StatusResp](),

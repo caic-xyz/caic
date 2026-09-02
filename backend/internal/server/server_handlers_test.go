@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
@@ -17,39 +18,66 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 )
 
-func TestServerHandlersListHarnesses(t *testing.T) {
+func TestServerHandlers(t *testing.T) {
 	t.Parallel()
+	t.Run("list_harnesses", func(t *testing.T) {
+		t.Parallel()
 
-	s := newTestRouter(t, map[harness.Name]agent.Backend{
-		harness.Codex: &agenttest.FakeBackend{
-			Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "gpt-5", EffortOptions: []string{"low", "ultra"}}}},
-		},
+		s := newTestRouter(t, map[harness.Name]agent.Backend{
+			harness.Codex: &agenttest.FakeBackend{
+				Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "gpt-5", EffortOptions: []string{"low", "ultra"}}}},
+			},
+		})
+
+		got, err := s.serverHandlers.listHarnesses(t.Context(), &api.EmptyReq{})
+		if err != nil {
+			t.Fatalf("listHarnesses: %v", err)
+		}
+		if len(*got) != 1 {
+			t.Fatalf("len(harnesses) = %d, want 1", len(*got))
+		}
+		models := (*got)[0].Models
+		if len(models) != 1 || models[0].ID != "gpt-5" || len(models[0].EffortOptions) != 2 {
+			t.Fatalf("models = %#v, want gpt-5 with [low ultra]", models)
+		}
+		data, err := json.Marshal(got)
+		if err != nil {
+			t.Fatalf("marshal harnesses: %v", err)
+		}
+		if strings.Contains(string(data), "null") {
+			t.Fatalf("harnesses JSON = %s, want arrays instead of null", data)
+		}
+		if !strings.Contains(string(data), `"models":[{"id":"gpt-5"`) {
+			t.Fatalf("harnesses JSON = %s, want gpt-5 in models", data)
+		}
+		if strings.Contains(string(data), `"modelCapabilities":`) || strings.Contains(string(data), `"modes":`) {
+			t.Fatalf("harnesses JSON = %s, want models as the only model configuration", data)
+		}
 	})
 
-	got, err := s.serverHandlers.listHarnesses(t.Context(), &api.EmptyReq{})
-	if err != nil {
-		t.Fatalf("listHarnesses: %v", err)
-	}
-	if len(*got) != 1 {
-		t.Fatalf("len(harnesses) = %d, want 1", len(*got))
-	}
-	models := (*got)[0].Models
-	if len(models) != 1 || models[0].ID != "gpt-5" || len(models[0].EffortOptions) != 2 {
-		t.Fatalf("models = %#v, want gpt-5 with [low ultra]", models)
-	}
-	data, err := json.Marshal(got)
-	if err != nil {
-		t.Fatalf("marshal harnesses: %v", err)
-	}
-	if strings.Contains(string(data), "null") {
-		t.Fatalf("harnesses JSON = %s, want arrays instead of null", data)
-	}
-	if !strings.Contains(string(data), `"models":[{"id":"gpt-5"`) {
-		t.Fatalf("harnesses JSON = %s, want gpt-5 in models", data)
-	}
-	if strings.Contains(string(data), `"modelCapabilities":`) || strings.Contains(string(data), `"modes":`) {
-		t.Fatalf("harnesses JSON = %s, want models as the only model configuration", data)
-	}
+	t.Run("preferences", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+
+		got, err := s.serverHandlers.getPreferences(t.Context(), &api.EmptyReq{})
+		if err != nil {
+			t.Fatalf("getPreferences: %v", err)
+		}
+		if got.Settings.PurgeDelay != 15*time.Second {
+			t.Fatalf("default purge delay = %s, want %s", got.Settings.PurgeDelay, 15*time.Second)
+		}
+
+		want := 91 * time.Second
+		got, err = s.serverHandlers.updatePreferences(t.Context(), &v1.UpdatePreferencesReq{
+			Settings: v1.UserSettings{PurgeDelay: want},
+		})
+		if err != nil {
+			t.Fatalf("updatePreferences: %v", err)
+		}
+		if got.Settings.PurgeDelay != want {
+			t.Errorf("updated purge delay = %s, want %s", got.Settings.PurgeDelay, want)
+		}
+	})
 }
 
 func TestSettingsMountsResolveContainerPaths(t *testing.T) {

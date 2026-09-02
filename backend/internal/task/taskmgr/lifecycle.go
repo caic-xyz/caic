@@ -28,30 +28,90 @@ type Lifecycle struct {
 	agentRuntime task.AgentRuntime
 	ctx          context.Context
 	wg           sync.WaitGroup
+
+	purgeMu         sync.Mutex
+	purgeCancel     context.CancelFunc
+	purgeGeneration uint64
+	purgeScheduled  bool
 }
 
 var _ io.Closer = (*Lifecycle)(nil)
 
 // Close waits for lifecycle-owned background work to finish.
 func (r *Lifecycle) Close() error {
+	r.cancelScheduledPurge()
 	r.wg.Wait()
 	return nil
 }
 
-// Purge transitions the task to purging and removes its runtime resources.
-func (r *Lifecycle) Purge(ctx context.Context) error {
+// Purge stops the task and schedules removal of its runtime resources after
+// delay. A zero delay removes the task as soon as it stops. Reviving the
+// stopped task cancels removal.
+func (r *Lifecycle) Purge(ctx context.Context, delay time.Duration) error {
 	t := r.entry.Task()
-	state, changed := t.SetStateIfAny(taskslog.StatePurging,
-		taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan,
-		taskslog.StateRunning, taskslog.StateStopping, taskslog.StateStopped, taskslog.StateCrashed)
-	if !changed {
+	if delay < 0 {
+		return badRequestf("purge delay cannot be negative")
+	}
+	r.purgeMu.Lock()
+	defer r.purgeMu.Unlock()
+	if r.purgeScheduled {
+		switch t.GetState() {
+		case taskslog.StateStopping, taskslog.StateStopped:
+			return nil
+		default:
+			return conflict("task is no longer stopped for scheduled purge")
+		}
+	}
+
+	state := t.GetState()
+	switch state {
+	case taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan, taskslog.StateRunning:
+		if _, changed := t.SetStateIfAny(taskslog.StateStopping,
+			taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan, taskslog.StateRunning); !changed {
+			return conflict("task state changed while scheduling purge")
+		}
+	case taskslog.StateStopping, taskslog.StateStopped:
+	case taskslog.StateCrashed:
+		t.SetState(taskslog.StateStopped)
+	default:
 		return conflict("task is not running, waiting, stopped, or crashed")
 	}
+	r.purgeScheduled = true
+	r.purgeGeneration++
+	generation := r.purgeGeneration
+	purgeCtx, purgeCancel := context.WithCancel(context.WithoutCancel(ctx))
+	r.purgeCancel = purgeCancel
 	r.manager.NotifyTaskChange()
-	r.manager.log.InfoContext(ctx, "purge requested", "task", t.ID, "instance", t.RuntimeInstanceID(), "state", state)
+	r.manager.log.InfoContext(ctx, "purge scheduled", "task", t.ID, "instance", t.RuntimeInstanceID(), "state", state, "delay", delay)
 	r.wg.Go(func() {
-		r.cleanup(r.ctx, taskslog.StatePurged)
-		r.manager.log.InfoContext(r.ctx, "purge completed", "task", t.ID, "final_state", t.GetState())
+		defer purgeCancel()
+		defer func() {
+			r.purgeMu.Lock()
+			if r.purgeGeneration == generation {
+				r.purgeCancel = nil
+				r.purgeScheduled = false
+			}
+			r.purgeMu.Unlock()
+		}()
+		if state != taskslog.StateStopping && state != taskslog.StateStopped && state != taskslog.StateCrashed {
+			r.agentRuntime.StopTask(purgeCtx, t)
+			r.manager.NotifyTaskChange()
+		}
+		if !r.waitForStopped(purgeCtx) {
+			return
+		}
+
+		if !r.waitForPurgeDelay(purgeCtx, delay) {
+			return
+		}
+		if !t.SetStateIf(taskslog.StateStopped, taskslog.StatePurging) {
+			r.manager.log.InfoContext(purgeCtx, "scheduled purge cancelled", "task", t.ID, "state", t.GetState())
+			return
+		}
+		r.manager.NotifyTaskChange()
+		cleanupCtx := context.WithoutCancel(purgeCtx)
+		r.cleanup(cleanupCtx, taskslog.StatePurged)
+		r.manager.log.InfoContext(cleanupCtx, "purge completed", "task", t.ID, "final_state", t.GetState())
 	})
 	return nil
 }
@@ -80,6 +140,7 @@ func (r *Lifecycle) Revive() error {
 	if _, changed := t.SetStateIfAny(taskslog.StateProvisioning, taskslog.StateStopped, taskslog.StateCrashed); !changed {
 		return conflict("task is not stopped or crashed")
 	}
+	r.cancelScheduledPurge()
 	r.entry.Reset()
 	r.manager.NotifyTaskChange()
 	r.wg.Go(func() {
@@ -367,6 +428,50 @@ func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*S
 		status = "blocked"
 	}
 	return &SyncResult{Status: status, Branch: branch, DiffStat: ds, SafetyIssues: issues}, nil
+}
+
+func (r *Lifecycle) cancelScheduledPurge() {
+	r.purgeMu.Lock()
+	if r.purgeCancel != nil {
+		r.purgeCancel()
+		r.purgeCancel = nil
+		r.purgeGeneration++
+		r.purgeScheduled = false
+	}
+	r.purgeMu.Unlock()
+}
+
+func (r *Lifecycle) waitForPurgeDelay(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	for {
+		changed := r.manager.Changed()
+		if r.entry.Task().GetState() != taskslog.StateStopped {
+			return false
+		}
+		select {
+		case <-timer.C:
+			return true
+		case <-changed:
+		case <-ctx.Done():
+			return false
+		}
+	}
+}
+
+func (r *Lifecycle) waitForStopped(ctx context.Context) bool {
+	for r.entry.Task().GetState() == taskslog.StateStopping {
+		changed := r.manager.Changed()
+		if r.entry.Task().GetState() != taskslog.StateStopping {
+			continue
+		}
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return false
+		}
+	}
+	return r.entry.Task().GetState() == taskslog.StateStopped
 }
 
 func (r *Lifecycle) reconnectForInput() error {

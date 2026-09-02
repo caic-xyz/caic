@@ -906,6 +906,11 @@ data class UserSettings(
      * Zero means use the system default (max(2, NumCPU-2)).
      */
     @SerialName("maxCPUs") val maxCPUs: Int? = null,
+    /**
+     * PurgeDelay is the recovery window in nanoseconds before a stopped task is
+     * permanently deleted.
+     */
+    val purgeDelay: Long,
     /** RuntimeName is the preferred runtime backend for new tasks. */
     val runtimeName: String? = null,
     /**

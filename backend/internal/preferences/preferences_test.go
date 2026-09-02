@@ -3,17 +3,19 @@
 package preferences
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
 
-func TestValidate(t *testing.T) {
+func TestPreferencesValidate(t *testing.T) {
 	t.Parallel()
 	t.Run("valid_empty", func(t *testing.T) {
 		t.Parallel()
-		p := &Preferences{Version: currentVersion}
+		p := newPreferences()
 		if err := p.Validate(); err != nil {
 			t.Fatal(err)
 		}
@@ -32,6 +34,7 @@ func TestValidate(t *testing.T) {
 			Settings: Settings{
 				BaseImage:         "custom:latest",
 				ContainerPlatform: "linux/amd64",
+				PurgeDelay:        91 * time.Second,
 				CacheMappings: []CacheMapping{
 					{HostPath: "/host/cache", ContainerPath: "/container/cache", Enabled: false},
 				},
@@ -44,6 +47,31 @@ func TestValidate(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+	for _, delay := range []time.Duration{MinPurgeDelay, MaxPurgeDelay} {
+		t.Run("valid_purge_delay_"+delay.String(), func(t *testing.T) {
+			t.Parallel()
+			p := newPreferences()
+			p.Settings.PurgeDelay = delay
+			if err := p.Validate(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name  string
+		delay time.Duration
+	}{
+		{name: "purge_delay_below_minimum", delay: MinPurgeDelay - time.Second},
+		{name: "purge_delay_above_maximum", delay: MaxPurgeDelay + time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			p := &Preferences{Version: currentVersion, Settings: Settings{PurgeDelay: tc.delay}}
+			if err := p.Validate(); err == nil {
+				t.Fatal("expected error for invalid purge delay")
+			}
+		})
+	}
 	t.Run("invalid_container_platform", func(t *testing.T) {
 		t.Parallel()
 		p := &Preferences{Version: currentVersion, Settings: Settings{ContainerPlatform: "linux/386"}}
@@ -83,6 +111,7 @@ func TestValidate(t *testing.T) {
 		p := &Preferences{
 			Version: 1,
 			Settings: Settings{
+				PurgeDelay: MinPurgeDelay,
 				CacheMappings: []CacheMapping{
 					{HostPath: "/host/a", ContainerPath: "/container/a", Enabled: true},
 				},
@@ -97,6 +126,7 @@ func TestValidate(t *testing.T) {
 		p := &Preferences{
 			Version: 1,
 			Settings: Settings{
+				PurgeDelay:    MinPurgeDelay,
 				CacheMappings: []CacheMapping{{HostPath: "~/.cache/tool", Enabled: true}},
 				CustomMounts:  []MountMapping{{HostPath: "~/.claude", Enabled: true}},
 			},
@@ -138,6 +168,7 @@ func TestValidate(t *testing.T) {
 		p := &Preferences{
 			Version: 1,
 			Settings: Settings{
+				PurgeDelay: MinPurgeDelay,
 				CustomMounts: []MountMapping{
 					{HostPath: "/host/a", ContainerPath: "/container/a", Enabled: true},
 				},
@@ -177,6 +208,55 @@ func TestValidate(t *testing.T) {
 	})
 }
 
+func TestSettingsValidate(t *testing.T) {
+	t.Parallel()
+	for _, delay := range []time.Duration{MinPurgeDelay, 91 * time.Second, MaxPurgeDelay} {
+		t.Run("valid_"+delay.String(), func(t *testing.T) {
+			t.Parallel()
+			s := defaultSettings()
+			s.PurgeDelay = delay
+			if err := s.Validate(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name  string
+		delay time.Duration
+	}{
+		{name: "below_minimum", delay: MinPurgeDelay - time.Second},
+		{name: "above_maximum", delay: MaxPurgeDelay + time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s := defaultSettings()
+			s.PurgeDelay = tc.delay
+			if err := s.Validate(); err == nil {
+				t.Fatal("expected error for invalid purge delay")
+			}
+		})
+	}
+}
+
+func TestSettingsUnmarshalJSON(t *testing.T) {
+	t.Parallel()
+	var s Settings
+	if err := json.Unmarshal([]byte(`{}`), &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.PurgeDelay != 15*time.Second {
+		t.Errorf("default purge delay = %s, want %s", s.PurgeDelay, 15*time.Second)
+	}
+
+	want := 91 * time.Second
+	if err := json.Unmarshal(fmt.Appendf(nil, `{"purgeDelay":%d}`, want), &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.PurgeDelay != want {
+		t.Errorf("purge delay = %s, want %s", s.PurgeDelay, want)
+	}
+}
+
 func TestUsersFileValidate(t *testing.T) {
 	t.Parallel()
 	t.Run("valid_empty_map", func(t *testing.T) {
@@ -196,8 +276,8 @@ func TestUsersFileValidate(t *testing.T) {
 	t.Run("valid_users", func(t *testing.T) {
 		t.Parallel()
 		f := &usersFile{Users: map[string]Preferences{
-			"alice": {Version: currentVersion},
-			"bob":   {Version: currentVersion},
+			"alice": *newPreferences(),
+			"bob":   *newPreferences(),
 		}}
 		if err := f.Validate(); err != nil {
 			t.Fatal(err)
@@ -244,6 +324,7 @@ func TestUsers(t *testing.T) {
 			Settings: Settings{
 				BaseImage:         "custom:latest",
 				ContainerPlatform: "linux/amd64",
+				PurgeDelay:        91 * time.Second,
 				WellKnownCaches:   map[string]bool{"go-mod": true, "npm": false},
 				CacheMappings: []CacheMapping{
 					{HostPath: "/host/cache", ContainerPath: "/container/cache", Enabled: false},
@@ -270,6 +351,9 @@ func TestUsers(t *testing.T) {
 		}
 		if got.Settings.ContainerPlatform != want.Settings.ContainerPlatform {
 			t.Errorf("containerPlatform = %q, want %q", got.Settings.ContainerPlatform, want.Settings.ContainerPlatform)
+		}
+		if got.Settings.PurgeDelay != want.Settings.PurgeDelay {
+			t.Errorf("purgeDelay = %s, want %s", got.Settings.PurgeDelay, want.Settings.PurgeDelay)
 		}
 		if len(got.Repositories) != len(want.Repositories) {
 			t.Fatalf("repos len = %d, want %d", len(got.Repositories), len(want.Repositories))
@@ -327,6 +411,9 @@ func TestUsers(t *testing.T) {
 		got := s.Get("anyuser")
 		if got.Version != currentVersion {
 			t.Errorf("version = %d, want %d", got.Version, currentVersion)
+		}
+		if got.Settings.PurgeDelay != 15*time.Second {
+			t.Errorf("purgeDelay = %s, want %s", got.Settings.PurgeDelay, 15*time.Second)
 		}
 	})
 

@@ -214,7 +214,7 @@ public final class ApiClient {
     public func stopTask(id: String) async throws -> StatusResp {
         try await request("POST", path: "/api/caic/v1/tasks/\(id)/stop")
     }
-    /// Permanently deletes a task and its runtime instance.
+    /// Stops a task, then deletes its runtime instance after the configured recovery window unless revived.
     public func purgeTask(id: String) async throws -> StatusResp {
         try await request("POST", path: "/api/caic/v1/tasks/\(id)/purge")
     }

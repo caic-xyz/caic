@@ -4,7 +4,6 @@ import { For, onCleanup, onMount, Show } from "solid-js";
 
 import { useAppState } from "../AppState";
 import { taskPathForTask } from "../taskPath";
-import { confirmTaskAction } from "./TaskCard";
 import ModalDialog from "./ModalDialog";
 import styles from "./KeyboardShortcuts.module.css";
 
@@ -104,7 +103,7 @@ export default function KeyboardShortcuts(props: Props) {
   function purgeSelectedTask() {
     const task = s.selectedTask();
     if (!task || new Set(["failed", "purged", "purging", "stopping"]).has(task.state)) return;
-    if (confirmTaskAction("Purge", task.title, task.repos?.[0]?.branch ?? "")) s.handlePurge(task.id);
+    s.handlePurge(task.id);
   }
 
   onMount(() => {

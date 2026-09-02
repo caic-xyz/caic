@@ -224,7 +224,7 @@ func TestValidate(t *testing.T) {
 		t.Run("Valid", func(t *testing.T) {
 			t.Parallel()
 			var r UpdatePreferencesReq
-			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false}}`), &r); err != nil {
+			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"purgeDelay":91000000000}}`), &r); err != nil {
 				t.Fatalf("Unmarshal: %v", err)
 			}
 			if err := r.Validate(); err != nil {
@@ -242,7 +242,7 @@ func TestValidate(t *testing.T) {
 		t.Run("InvalidPlatform", func(t *testing.T) {
 			t.Parallel()
 			var r UpdatePreferencesReq
-			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"containerPlatform":"linux/386"}}`), &r); err != nil {
+			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"containerPlatform":"linux/386","purgeDelay":91000000000}}`), &r); err != nil {
 				t.Fatalf("Unmarshal: %v", err)
 			}
 			assertBadRequest(t, r.Validate(), `unsupported platform "linux/386"; use linux/amd64 or linux/arm64`)
@@ -250,7 +250,7 @@ func TestValidate(t *testing.T) {
 		t.Run("AllowsUnsetHomeRelativeContainerPaths", func(t *testing.T) {
 			t.Parallel()
 			var r UpdatePreferencesReq
-			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"cacheMappings":[{"hostPath":"~/.claude","containerPath":""}],"customMounts":[{"hostPath":"~/.codex","containerPath":""}]}}`), &r); err != nil {
+			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"purgeDelay":91000000000,"cacheMappings":[{"hostPath":"~/.claude","containerPath":""}],"customMounts":[{"hostPath":"~/.codex","containerPath":""}]}}`), &r); err != nil {
 				t.Fatalf("Unmarshal: %v", err)
 			}
 			if err := r.Validate(); err != nil {
@@ -262,6 +262,14 @@ func TestValidate(t *testing.T) {
 			if got := r.Settings.CustomMounts[0].ContainerPath; got != "" {
 				t.Errorf("mount containerPath = %q, want unset", got)
 			}
+		})
+		t.Run("InvalidPurgeDelay", func(t *testing.T) {
+			t.Parallel()
+			var r UpdatePreferencesReq
+			if err := json.Unmarshal([]byte(`{"settings":{"purgeDelay":9000000000}}`), &r); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			assertBadRequest(t, r.Validate(), "purgeDelay must be between 10s and 24h0m0s")
 		})
 		t.Run("UnknownTopLevelField", func(t *testing.T) {
 			t.Parallel()

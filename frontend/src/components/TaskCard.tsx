@@ -110,14 +110,9 @@ const actionMenuActiveStates = new Set([
 
 const actionMenuWaitingStates = new Set(["waiting", "asking", "has_plan"]);
 
-/** Confirm a destructive task action (purge or stop) with a dialog. */
-export function confirmTaskAction(
-  action: "Purge" | "Stop",
-  title: string,
-  branch: string,
-): boolean {
+function confirmStopTask(title: string, branch: string): boolean {
   return window.confirm(
-    `${action} runtime instance?\n\n${title}\nbranch: ${branch}`,
+    `Stop runtime instance?\n\n${title}\nbranch: ${branch}`,
   );
 }
 
@@ -323,14 +318,7 @@ export default function TaskCard(props: TaskCardProps) {
                   disabled={props.actionLoading}
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (
-                      confirmTaskAction(
-                        "Purge",
-                        props.title,
-                        props.repos?.[0]?.branch ?? "",
-                      )
-                    )
-                      props.onPurge?.();
+                    props.onPurge?.();
                   }}
                   title="Purge"
                   data-testid="purge-task"
@@ -356,18 +344,10 @@ export default function TaskCard(props: TaskCardProps) {
                 onClick={(e) => {
                   e.stopPropagation();
                   if (e.shiftKey && props.onPurge) {
-                    if (
-                      confirmTaskAction(
-                        "Purge",
-                        props.title,
-                        props.repos?.[0]?.branch ?? "",
-                      )
-                    )
-                      props.onPurge();
+                    props.onPurge();
                   } else if (props.state === "running") {
                     if (
-                      confirmTaskAction(
-                        "Stop",
+                      confirmStopTask(
                         props.title,
                         props.repos?.[0]?.branch ?? "",
                       )
@@ -379,15 +359,7 @@ export default function TaskCard(props: TaskCardProps) {
                 }}
                 onDblClick={(e) => {
                   e.stopPropagation();
-                  if (
-                    props.onPurge &&
-                    confirmTaskAction(
-                      "Purge",
-                      props.title,
-                      props.repos?.[0]?.branch ?? "",
-                    )
-                  )
-                    props.onPurge();
+                  props.onPurge?.();
                 }}
                 title="Stop (shift-click or double-click to purge)"
                 data-testid="stop-task"
@@ -687,7 +659,7 @@ export default function TaskCard(props: TaskCardProps) {
             onRevive={() => { setContextMenuPosition(undefined); props.onRevive?.(); }}
             onPurge={() => {
               setContextMenuPosition(undefined);
-              if (confirmTaskAction("Purge", props.title, props.repos?.[0]?.branch ?? "")) props.onPurge?.();
+              props.onPurge?.();
             }}
             onCompact={doCompact}
             onFork={() => { setContextMenuPosition(undefined); props.onFork?.(); }}

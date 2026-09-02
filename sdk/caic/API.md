@@ -59,7 +59,7 @@ Type notation: `JSONValue` means any valid JSON value.
 | POST | `/api/caic/v1/tasks/{id}/clear-context` | Clears context and restarts the agent session without a prompt. |  | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/compact` | Sends a compact command to reduce the agent's context window usage. | `CompactReq` | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/stop` | Requests graceful stop of a running task. |  | `StatusResp` |
-| POST | `/api/caic/v1/tasks/{id}/purge` | Permanently deletes a task and its runtime instance. |  | `StatusResp` |
+| POST | `/api/caic/v1/tasks/{id}/purge` | Stops a task, then deletes its runtime instance after the configured recovery window unless revived. |  | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/revive` | Reconnects to an orphaned task runtime instance. |  | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/sync` | Pushes task changes to the remote repository. | `SyncReq` | `SyncResp` |
 | POST | `/api/caic/v1/tasks/{id}/fork` | Forks a task by snapshotting its runtime instance and creating a new task on a derived branch. | `ForkTaskReq` | `Task` |
@@ -445,6 +445,8 @@ the default. |  |
 the host's native platform. Valid values are linux/amd64 and linux/arm64. |  |
 | `maxCPUs` | `int` | MaxCPUs limits the number of CPU cores the runtime instance may use.
 Zero means use the system default (max(2, NumCPU-2)). |  |
+| `purgeDelay` | `int64` | PurgeDelay is the recovery window in nanoseconds before a stopped task is
+permanently deleted. | yes |
 | `runtimeName` | `string` | RuntimeName is the preferred runtime backend for new tasks. |  |
 | `wellKnownCaches` | `Record<string, boolean>` | WellKnownCaches maps cache name to enabled state. Absent or false means
 disabled, true means enabled. Caches are opt-in. |  |

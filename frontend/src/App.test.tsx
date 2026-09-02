@@ -176,7 +176,7 @@ beforeEach(() => {
     repositories: [{ path: "repos/a" }],
     models: {},
     harness: "",
-    settings: { baseImage: "" },
+    settings: { baseImage: "", purgeDelay: 15_000_000_000 },
   } as unknown as PreferencesResp);
   vi.mocked(api.updatePreferences).mockImplementation(async (request) => ({
     repositories: [{ path: "repos/a" }],
@@ -728,14 +728,38 @@ describe("App keyboard shortcuts", () => {
     const task = makeTask({ state: "running" });
     vi.mocked(api.getTask).mockResolvedValue(task);
     vi.mocked(api.purgeTask).mockResolvedValue({ status: "ok" });
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     renderApp("/task/@task1+do-something");
 
     const prompt = await screen.findByTestId("task-detail-prompt");
+    await waitFor(() => expect(api.getPreferences).toHaveBeenCalledOnce());
     await waitFor(() => expect(prompt).toHaveFocus());
     await user.keyboard("{Shift>}{Delete}{/Shift}");
 
+    expect(confirm).not.toHaveBeenCalled();
     expect(api.purgeTask).toHaveBeenCalledWith(task.id);
+  });
+
+  it("requires confirmation when purging without a recovery delay", async () => {
+    const user = userEvent.setup();
+    const task = makeTask({ state: "running" });
+    vi.mocked(api.getPreferences).mockResolvedValue({
+      repositories: [{ path: "repos/a" }],
+      models: {},
+      harness: "",
+      settings: { baseImage: "", purgeDelay: 0 },
+    } as unknown as PreferencesResp);
+    vi.mocked(api.getTask).mockResolvedValue(task);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderApp("/task/@task1+do-something");
+
+    const prompt = await screen.findByTestId("task-detail-prompt");
+    await waitFor(() => expect(api.getPreferences).toHaveBeenCalledOnce());
+    await waitFor(() => expect(prompt).toHaveFocus());
+    await user.keyboard("{Shift>}{Delete}{/Shift}");
+
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(api.purgeTask).not.toHaveBeenCalled();
   });
 
   it("navigates the avatar menu with arrow keys", async () => {
@@ -1136,6 +1160,24 @@ describe("App repo chips: No repository", () => {
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await waitFor(() => expect(api.getVersion).toHaveBeenCalledOnce());
+  });
+
+  it("saves the task purge delay", async () => {
+    vi.mocked(api.getPreferences).mockResolvedValue({
+      repositories: [],
+      models: {},
+      harness: "",
+      settings: { baseImage: "", purgeDelay: 90_000_000_000 },
+    } as unknown as PreferencesResp);
+    renderApp("/settings");
+
+    const input = await screen.findByRole("textbox", { name: "Purge delay" });
+    await waitFor(() => expect(input).toHaveValue("1m30s"));
+    fireEvent.change(input, { target: { value: "1m31s" } });
+
+    await waitFor(() => expect(api.updatePreferences).toHaveBeenCalledWith({
+      settings: expect.objectContaining({ purgeDelay: 91_000_000_000 }),
+    }));
   });
 
   it("saves read-only custom mounts", async () => {

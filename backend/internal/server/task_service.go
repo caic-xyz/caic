@@ -594,10 +594,10 @@ func (s *taskService) stopTask(ctx context.Context, entry *taskmgr.Entry, _ *api
 }
 
 func (s *taskService) purgeTask(ctx context.Context, entry *taskmgr.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
-	if err := entry.Lifecycle.Purge(ctx); err != nil {
+	if err := entry.Lifecycle.Purge(ctx, taskPurgeDelay(s.prefs, userIDFromCtx(ctx))); err != nil {
 		return nil, toDTO(err)
 	}
-	return &v1.StatusResp{Status: "purging"}, nil
+	return &v1.StatusResp{Status: "scheduled"}, nil
 }
 
 func (s *taskService) reviveTask(ctx context.Context, entry *taskmgr.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {

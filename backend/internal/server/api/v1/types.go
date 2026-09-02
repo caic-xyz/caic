@@ -15,6 +15,7 @@ import (
 
 	"github.com/maruel/ksid"
 
+	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 )
 
@@ -872,6 +873,9 @@ type UserSettings struct {
 	// MaxCPUs limits the number of CPU cores the runtime instance may use.
 	// Zero means use the system default (max(2, NumCPU-2)).
 	MaxCPUs int `json:"maxCPUs,omitempty"`
+	// PurgeDelay is the recovery window in nanoseconds before a stopped task is
+	// permanently deleted.
+	PurgeDelay time.Duration `json:"purgeDelay"`
 	// RuntimeName is the preferred runtime backend for new tasks.
 	RuntimeName string `json:"runtimeName,omitempty"`
 	// WellKnownCaches maps cache name to enabled state. Absent or false means
@@ -928,6 +932,9 @@ func (r *UpdatePreferencesReq) UnmarshalJSON(data []byte) error {
 func (r *UpdatePreferencesReq) Validate() error {
 	if !r.settingsSet {
 		return api.BadRequest("settings is required")
+	}
+	if r.Settings.PurgeDelay < preferences.MinPurgeDelay || r.Settings.PurgeDelay > preferences.MaxPurgeDelay {
+		return api.BadRequest(fmt.Sprintf("purgeDelay must be between %s and %s", preferences.MinPurgeDelay, preferences.MaxPurgeDelay))
 	}
 	if err := validateContainerPlatform(r.Settings.ContainerPlatform); err != nil {
 		return err

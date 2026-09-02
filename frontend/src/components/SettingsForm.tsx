@@ -4,6 +4,8 @@ import { For, Index, Show, type Accessor, type Setter } from "solid-js";
 
 import type { CacheMappingResp, CacheSize, OAuthGrantResp, MountMappingResp, Platform, RuntimeInfo, UpdatePreferencesReq, VersionResp, WellKnownCachesResp } from "@sdk/types.gen";
 
+import { formatDuration, parseDuration } from "../duration";
+
 import styles from "./SettingsForm.module.css";
 
 type SettingsOverrides = Partial<UpdatePreferencesReq["settings"]>;
@@ -21,6 +23,8 @@ interface SettingsFormProps {
   setContainerPlatform: Setter<string>;
   maxCPUs: Accessor<number>;
   setMaxCPUs: Setter<number>;
+  purgeDelay: Accessor<number>;
+  setPurgeDelay: Setter<number>;
   runtimes: Accessor<RuntimeInfo[]>;
   selectedRuntimeName: Accessor<string>;
   setSelectedRuntimeName: (runtimeName: string) => void;
@@ -398,6 +402,30 @@ export default function SettingsForm(props: SettingsFormProps) {
         </Show>
         <div class={styles.settingsSection}>
           <h3 class={styles.settingsSectionTitle}>Automation</h3>
+          <label class={styles.settingsLabel}>
+            Purge delay
+            <input
+              type="text"
+              class={styles.settingsInput}
+              value={formatDuration(props.purgeDelay())}
+              aria-describedby="purge-delay-description"
+              onInput={(e) => {
+                e.currentTarget.setCustomValidity(parseDuration(e.currentTarget.value) === null ? "Enter a duration such as 1m31s." : "");
+              }}
+              onChange={(e) => {
+                const delay = parseDuration(e.currentTarget.value);
+                if (delay === null) {
+                  e.currentTarget.reportValidity();
+                  return;
+                }
+                e.currentTarget.setCustomValidity("");
+                e.currentTarget.value = formatDuration(delay);
+                props.setPurgeDelay(delay);
+                void props.saveSettings({ purgeDelay: delay });
+              }}
+            />
+          </label>
+          <p id="purge-delay-description" class={styles.settingsDescription}>How long a task remains stopped and revivable before deletion. Use duration syntax such as 1m31s; allowed range is 10s–24h.</p>
           <label class={styles.settingsLabel}>
             <input
               type="checkbox"

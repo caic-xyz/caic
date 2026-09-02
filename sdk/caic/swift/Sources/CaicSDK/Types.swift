@@ -567,6 +567,9 @@ public struct UserSettings: Codable {
     /// MaxCPUs limits the number of CPU cores the runtime instance may use.
     /// Zero means use the system default (max(2, NumCPU-2)).
     public let maxCPUs: Int?
+    /// PurgeDelay is the recovery window in nanoseconds before a stopped task is
+    /// permanently deleted.
+    public let purgeDelay: Int
     /// RuntimeName is the preferred runtime backend for new tasks.
     public let runtimeName: String?
     /// WellKnownCaches maps cache name to enabled state. Absent or false means

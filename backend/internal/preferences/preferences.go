@@ -17,6 +17,13 @@ import (
 	"github.com/caic-xyz/md"
 )
 
+const (
+	// MinPurgeDelay is the shortest supported task purge recovery window.
+	MinPurgeDelay time.Duration = 10 * time.Second
+	// MaxPurgeDelay is the longest supported task purge recovery window.
+	MaxPurgeDelay time.Duration = 24 * time.Hour
+)
+
 // CacheMapping maps a host directory to a container path for cache/state sharing.
 type CacheMapping struct {
 	// HostPath is the path on the host filesystem to mount.
@@ -80,20 +87,7 @@ func (p *Preferences) Validate() error {
 		}
 		seen[r.Path] = struct{}{}
 	}
-	for i, m := range p.Settings.CacheMappings {
-		if _, err := md.ResolveMountTarget(m.HostPath, m.ContainerPath); err != nil {
-			return fmt.Errorf("cacheMappings[%d]: %w", i, err)
-		}
-	}
-	for i, m := range p.Settings.CustomMounts {
-		if _, err := md.ResolveMountTarget(m.HostPath, m.ContainerPath); err != nil {
-			return fmt.Errorf("customMounts[%d]: %w", i, err)
-		}
-	}
-	if err := p.Settings.ContainerPlatform.Validate(); err != nil {
-		return fmt.Errorf("unsupported containerPlatform %q", p.Settings.ContainerPlatform)
-	}
-	return nil
+	return p.Settings.Validate()
 }
 
 // TouchRepo moves repo to the front of the MRU list and updates its
@@ -196,6 +190,8 @@ type Settings struct {
 	// MaxCPUs limits the number of CPU cores the container may use.
 	// Passed as --cpus to docker/podman. Zero means use [md.DefaultMaxCPUs].
 	MaxCPUs int `json:"maxCPUs,omitempty"`
+	// PurgeDelay is the recovery window before a stopped task is deleted.
+	PurgeDelay time.Duration `json:"purgeDelay"`
 	// WellKnownCaches maps cache name to enabled state. Absent or false means
 	// disabled, true means enabled. Caches are opt-in.
 	WellKnownCaches map[string]bool `json:"wellKnownCaches,omitempty"`
@@ -205,6 +201,39 @@ type Settings struct {
 	CustomMounts []MountMapping `json:"customMounts,omitempty"`
 	// RuntimeName is the last selected runtime backend for new tasks.
 	RuntimeName string `json:"runtimeName,omitempty"`
+}
+
+// Validate checks that the settings are well-formed.
+func (s *Settings) Validate() error {
+	for i, m := range s.CacheMappings {
+		if _, err := md.ResolveMountTarget(m.HostPath, m.ContainerPath); err != nil {
+			return fmt.Errorf("cacheMappings[%d]: %w", i, err)
+		}
+	}
+	for i, m := range s.CustomMounts {
+		if _, err := md.ResolveMountTarget(m.HostPath, m.ContainerPath); err != nil {
+			return fmt.Errorf("customMounts[%d]: %w", i, err)
+		}
+	}
+	if err := s.ContainerPlatform.Validate(); err != nil {
+		return fmt.Errorf("unsupported containerPlatform %q", s.ContainerPlatform)
+	}
+	if s.PurgeDelay < MinPurgeDelay || s.PurgeDelay > MaxPurgeDelay {
+		return fmt.Errorf("purgeDelay must be between %s and %s", MinPurgeDelay, MaxPurgeDelay)
+	}
+	return nil
+}
+
+// UnmarshalJSON decodes settings, applying defaults to fields omitted from
+// older preference files.
+func (s *Settings) UnmarshalJSON(data []byte) error {
+	type plainSettings Settings
+	*s = defaultSettings()
+	return json.Unmarshal(data, (*plainSettings)(s))
+}
+
+func defaultSettings() Settings {
+	return Settings{PurgeDelay: 15 * time.Second}
 }
 
 // RepoPrefs stores per-repository user preferences. Fields override the
@@ -305,7 +334,7 @@ const recentWindow = 7 * 24 * time.Hour
 const minRecentRepos = 10
 
 func newPreferences() *Preferences {
-	return &Preferences{Version: currentVersion, Settings: Settings{}}
+	return &Preferences{Version: currentVersion, Settings: defaultSettings()}
 }
 
 // usersFile is the on-disk JSON format for the Store.

@@ -677,6 +677,11 @@ export interface UserSettings {
    * Zero means use the system default (max(2, NumCPU-2)).
    */
   maxCPUs?: number /* int */;
+  /**
+   * PurgeDelay is the recovery window in nanoseconds before a stopped task is
+   * permanently deleted.
+   */
+  purgeDelay: number /* int64 */;
   /** RuntimeName is the preferred runtime backend for new tasks. */
   runtimeName?: string;
   /**

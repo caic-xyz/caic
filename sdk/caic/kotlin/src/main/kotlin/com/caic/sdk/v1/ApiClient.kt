@@ -139,7 +139,7 @@ class ApiClient(
     suspend fun compactContext(id: String, req: CompactReq): StatusResp = request("POST", "/api/caic/v1/tasks/$id/compact", json.encodeToString(req))
     /** Requests graceful stop of a running task. */
     suspend fun stopTask(id: String): StatusResp = request("POST", "/api/caic/v1/tasks/$id/stop")
-    /** Permanently deletes a task and its runtime instance. */
+    /** Stops a task, then deletes its runtime instance after the configured recovery window unless revived. */
     suspend fun purgeTask(id: String): StatusResp = request("POST", "/api/caic/v1/tasks/$id/purge")
     /** Reconnects to an orphaned task runtime instance. */
     suspend fun reviveTask(id: String): StatusResp = request("POST", "/api/caic/v1/tasks/$id/revive")

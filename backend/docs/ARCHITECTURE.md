@@ -173,6 +173,7 @@ graph TD
   pkg_internal_server -.-> pkg_internal_mcp_mcptest
   pkg_internal_server -.-> pkg_internal_runtime_mdruntime
   pkg_internal_server -.-> pkg_internal_runtime_runtimetest
+  pkg_internal_server_api_v1 --> pkg_internal_preferences
   pkg_internal_server_api_v1 --> pkg_internal_server_api
   pkg_internal_server_apiconv --> pkg_internal_agent
   pkg_internal_server_apiconv --> pkg_internal_agent_harness
@@ -488,6 +489,7 @@ graph TD
   pkg_internal_server -.-> pkg_internal_mcp_mcptest
   pkg_internal_server -.-> pkg_internal_runtime_mdruntime
   pkg_internal_server -.-> pkg_internal_runtime_runtimetest
+  pkg_internal_server_api_v1 --> pkg_internal_preferences
   pkg_internal_server_api_v1 --> pkg_internal_server_api
   pkg_internal_server_apiconv --> pkg_internal_agent
   pkg_internal_server_apiconv --> pkg_internal_agent_harness
@@ -578,7 +580,7 @@ graph TD
 | `internal/runtime/runtimetest` | `internal/runtime` | None |
 | `internal/server` | `frontend`, `internal/agent`, `internal/agent/harness`, `internal/auth`, `internal/autoupdate`, `internal/bot`, `internal/ci`, `internal/forge`, `internal/forge/forgecache`, `internal/forge/forgemgr`, `internal/forge/github`, `internal/forge/gitlab`, `internal/httplog`, `internal/mcp`, `internal/preferences`, `internal/repo`, `internal/runtime`, `internal/server/api`, `internal/server/api/v1`, `internal/server/apiconv`, `internal/server/ipgeo`, `internal/task`, `internal/task/taskmgr`, `internal/taskslog`, `internal/usage` | `internal/agent/agenttest`, `internal/agent/claudecode`, `internal/agent/pi`, `internal/mcp/mcptest`, `internal/runtime/mdruntime`, `internal/runtime/runtimetest` |
 | `internal/server/api` | None | None |
-| `internal/server/api/v1` | `internal/server/api` | None |
+| `internal/server/api/v1` | `internal/preferences`, `internal/server/api` | None |
 | `internal/server/apiconv` | `internal/agent`, `internal/agent/harness`, `internal/forge`, `internal/repo`, `internal/runtime`, `internal/server/api/v1`, `internal/task`, `internal/taskslog`, `internal/usage` | None |
 | `internal/server/ipgeo` | None | None |
 | `internal/smoketest` | `internal/agent`, `internal/agent/harness`, `internal/forge`, `internal/runtime`, `internal/task`, `internal/taskslog`, `internal/usage` | None |

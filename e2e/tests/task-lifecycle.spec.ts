@@ -57,8 +57,11 @@ test("create task, verify streaming text and result, then purge", async ({ page,
   // Poll API until our task is "stopped".
   await waitForTaskState(api, task!.id, "stopped");
 
-  // Now purge the stopped task via API and verify it reaches "purged".
-  await api.purgeTask(task!.id);
+  // Purging through the UI skips confirmation while the recovery delay is enabled.
+  await taskCard.hover();
+  const purgeButton = taskCard.getByTestId("purge-task");
+  await expect(purgeButton).toBeVisible();
+  await purgeButton.click();
   await waitForTaskState(api, task!.id, "purged");
 });
 

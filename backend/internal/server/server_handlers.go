@@ -194,6 +194,7 @@ func (h *serverHandlers) getPreferences(ctx context.Context, _ *api.EmptyReq) (*
 			BaseImage:          prefs.Settings.BaseImage,
 			ContainerPlatform:  v1.Platform(prefs.Settings.ContainerPlatform),
 			MaxCPUs:            prefs.Settings.MaxCPUs,
+			PurgeDelay:         prefs.Settings.PurgeDelay,
 			RuntimeName:        prefs.Settings.RuntimeName,
 			WellKnownCaches:    prefs.Settings.WellKnownCaches,
 			CacheMappings:      cacheMappings,
@@ -217,6 +218,7 @@ func (h *serverHandlers) updatePreferences(ctx context.Context, req *v1.UpdatePr
 		p.Settings.BaseImage = req.Settings.BaseImage
 		p.Settings.ContainerPlatform = md.Platform(req.Settings.ContainerPlatform)
 		p.Settings.MaxCPUs = req.Settings.MaxCPUs
+		p.Settings.PurgeDelay = req.Settings.PurgeDelay
 		p.Settings.RuntimeName = req.Settings.RuntimeName
 		p.Settings.WellKnownCaches = req.Settings.WellKnownCaches
 		if req.Settings.CacheMappings != nil {

@@ -15,6 +15,8 @@ export default function SettingsPage() {
         setContainerPlatform={s.setContainerPlatform}
         maxCPUs={s.maxCPUs}
         setMaxCPUs={s.setMaxCPUs}
+        purgeDelay={s.purgeDelay}
+        setPurgeDelay={s.setPurgeDelay}
         runtimes={s.runtimes}
         selectedRuntimeName={s.selectedRuntimeName}
         setSelectedRuntimeName={s.setSelectedRuntimeName}

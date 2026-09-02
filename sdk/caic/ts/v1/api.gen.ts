@@ -148,7 +148,7 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     compactContext: (id: string, req: CompactReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${id}/compact`, req),
     /** Requests graceful stop of a running task. */
     stopTask: (id: string): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${id}/stop`),
-    /** Permanently deletes a task and its runtime instance. */
+    /** Stops a task, then deletes its runtime instance after the configured recovery window unless revived. */
     purgeTask: (id: string): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${id}/purge`),
     /** Reconnects to an orphaned task runtime instance. */
     reviveTask: (id: string): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${id}/revive`),

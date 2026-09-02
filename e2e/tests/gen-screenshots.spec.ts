@@ -55,6 +55,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
     settings: {
       autoFixOnCIFailure: false,
       autoFixOnPROpen: false,
+      purgeDelay: 15_000_000_000,
       customMounts: [
         { hostPath: "~/.claude", containerPath: "", enabled: true, readOnly: false },
         { hostPath: "~/.cache/huggingface", containerPath: "", enabled: true, readOnly: false },
