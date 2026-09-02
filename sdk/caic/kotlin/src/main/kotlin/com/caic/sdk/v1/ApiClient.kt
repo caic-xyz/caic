@@ -149,7 +149,7 @@ class ApiClient(
     suspend fun syncTask(id: String, req: SyncReq): SyncResp = request("POST", "/api/caic/v1/tasks/$id/sync", json.encodeToString(req))
     /** Forks a task by snapshotting its runtime instance and creating a new task on a derived branch. */
     suspend fun forkTask(id: String, req: ForkTaskReq): Task = request("POST", "/api/caic/v1/tasks/$id/fork", json.encodeToString(req))
-    /** Returns the unified diff for a task's branch. */
+    /** Returns repository status and the unified diff for a task's branch. */
     suspend fun getTaskDiff(id: String, path: String): DiffResp = request("GET", "/api/caic/v1/tasks/$id/diff?path=$path")
     /** Returns the list of running processes inside the task's runtime instance. */
     suspend fun getTaskProcesses(id: String): ProcessListResp = request("GET", "/api/caic/v1/processes/$id")

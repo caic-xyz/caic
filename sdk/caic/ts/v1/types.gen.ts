@@ -1132,9 +1132,36 @@ export interface ForkTaskReq {
   gitHubToken?: boolean;
 }
 
+/** GitCommit describes one commit ahead of a repository's upstream branch. */
+export interface GitCommit {
+  sha: string;
+  subject: string;
+  stat: DiffStat;
+}
+
+/** GitFileStatus describes one uncommitted repository path. */
+export interface GitFileStatus {
+  path: string;
+  originalPath?: string;
+  indexStatus?: string;
+  worktreeStatus?: string;
+}
+
+/** GitRepositoryStatus describes the checked-out state of one task repository. */
+export interface GitRepositoryStatus {
+  name: string;
+  branch: string;
+  upstream?: string;
+  ahead: number /* int */;
+  behind: number /* int */;
+  commits: GitCommit[];
+  uncommitted: GitFileStatus[];
+}
+
 /** DiffResp is the response for GET /api/caic/v1/tasks/{id}/diff. */
 export interface DiffResp {
   diff: string;
+  repositories: GitRepositoryStatus[];
 }
 
 /** ProcessInfo describes a single process running inside a task runtime instance. */

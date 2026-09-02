@@ -1,4 +1,4 @@
-// Tests for Backend's runtime.Lifecycle logic using fake md seams.
+// Tests for Backend's runtime.System logic using fake md seams.
 
 package mdruntime
 

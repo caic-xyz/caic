@@ -1287,9 +1287,36 @@ public struct ForkTaskReq: Codable {
     public let gitHubToken: Bool?
 }
 
+/// GitCommit describes one commit ahead of a repository's upstream branch.
+public struct GitCommit: Codable {
+    public let sha: String
+    public let subject: String
+    public let stat: DiffStat
+}
+
+/// GitFileStatus describes one uncommitted repository path.
+public struct GitFileStatus: Codable {
+    public let path: String
+    public let originalPath: String?
+    public let indexStatus: String?
+    public let worktreeStatus: String?
+}
+
+/// GitRepositoryStatus describes the checked-out state of one task repository.
+public struct GitRepositoryStatus: Codable {
+    public let name: String
+    public let branch: String
+    public let upstream: String?
+    public let ahead: Int
+    public let behind: Int
+    public let commits: [GitCommit]
+    public let uncommitted: [GitFileStatus]
+}
+
 /// DiffResp is the response for GET /api/caic/v1/tasks/{id}/diff.
 public struct DiffResp: Codable {
     public let diff: String
+    public let repositories: [GitRepositoryStatus]
 }
 
 /// ProcessInfo describes a single process running inside a task runtime instance.

@@ -1654,9 +1654,38 @@ data class ForkTaskReq(
     val gitHubToken: Boolean? = null,
 )
 
+/** GitCommit describes one commit ahead of a repository's upstream branch. */
+@Serializable
+data class GitCommit(
+    val sha: String,
+    val subject: String,
+    val stat: DiffStat,
+)
+
+/** GitFileStatus describes one uncommitted repository path. */
+@Serializable
+data class GitFileStatus(
+    val path: String,
+    val originalPath: String? = null,
+    val indexStatus: String? = null,
+    val worktreeStatus: String? = null,
+)
+
+/** GitRepositoryStatus describes the checked-out state of one task repository. */
+@Serializable
+data class GitRepositoryStatus(
+    val name: String,
+    val branch: String,
+    val upstream: String? = null,
+    val ahead: Int,
+    val behind: Int,
+    val commits: List<GitCommit>,
+    val uncommitted: List<GitFileStatus>,
+)
+
 /** DiffResp is the response for GET /api/caic/v1/tasks/{id}/diff. */
 @Serializable
-data class DiffResp(val diff: String)
+data class DiffResp(val diff: String, val repositories: List<GitRepositoryStatus>)
 
 /** ProcessInfo describes a single process running inside a task runtime instance. */
 @Serializable

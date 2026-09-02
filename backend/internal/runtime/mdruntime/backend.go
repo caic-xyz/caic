@@ -1,4 +1,4 @@
-// Backend adapts md containers to runtime.Lifecycle for launching and managing runtime instances.
+// Backend adapts md containers to runtime.System for launching and managing runtime instances.
 
 package mdruntime
 
@@ -262,7 +262,7 @@ func (a mdContainerAdapter) SSHCommand(opts []string, cmd string) []string {
 	return a.c.SSHCommand(opts, cmd)
 }
 
-// Backend adapts *md.Client to runtime.Lifecycle.
+// Backend adapts *md.Client to runtime.System.
 type Backend struct {
 	Provider   genai.Provider      // nil if LLM not configured
 	HarnessEnv map[string][]string // per-harness KEY=VALUE env vars from config
@@ -386,7 +386,7 @@ func (b *Backend) Connect(ctx context.Context, id runtime.ID, opts *runtime.Star
 	}, nil
 }
 
-// Diff implements runtime.Lifecycle.
+// Diff implements runtime.Repository.
 func (b *Backend) Diff(ctx context.Context, id runtime.ID, repoIdx int, args ...string) (string, error) {
 	defer trace.StartRegion(ctx, "instance.diff").End()
 	localID, err := b.localID(id)
@@ -411,7 +411,32 @@ func (b *Backend) Diff(ctx context.Context, id runtime.ID, repoIdx int, args ...
 	return stdout.String(), nil
 }
 
-// Fetch implements runtime.Lifecycle.
+// RepositoryStatus implements runtime.Repository.
+func (b *Backend) RepositoryStatus(ctx context.Context, id runtime.ID, repoIdx int) (runtime.RepositoryStatus, error) {
+	localID, err := b.localID(id)
+	if err != nil {
+		return runtime.RepositoryStatus{}, err
+	}
+	ct, err := b.container(ctx, string(localID))
+	if err != nil {
+		return runtime.RepositoryStatus{}, err
+	}
+	repos := ct.Repos()
+	if repoIdx < 0 || repoIdx >= len(repos) {
+		return runtime.RepositoryStatus{}, fmt.Errorf("repo index %d out of range for %d repos", repoIdx, len(repos))
+	}
+	out, err := b.commandOutput(ctx, ct, gitStatusCommand(repos[repoIdx].ContainerPath))
+	if err != nil {
+		return runtime.RepositoryStatus{}, fmt.Errorf("git status in container %s: %w (output: %q)", ct.Name(), err, out)
+	}
+	status, err := parseGitStatus(string(out))
+	if err != nil {
+		return runtime.RepositoryStatus{}, fmt.Errorf("parse git status in container %s: %w", ct.Name(), err)
+	}
+	return status, nil
+}
+
+// Fetch implements runtime.Repository.
 func (b *Backend) Fetch(ctx context.Context, id runtime.ID) error {
 	defer trace.StartRegion(ctx, "instance.fetch").End()
 	localID, err := b.localID(id)
@@ -602,10 +627,7 @@ func (b *Backend) Processes(ctx context.Context, id runtime.ID) ([]runtime.Proce
 	if err != nil {
 		return nil, err
 	}
-	sshArgs := ct.SSHCommand(nil, processCommand)
-	b.log.DebugContext(ctx, "ssh", "cmd", sshArgs)
-	cmd := exec.CommandContext(ctx, sshArgs[0], sshArgs[1:]...) //nolint:gosec // SSH target and command are derived from the md container.
-	out, err := cmd.CombinedOutput()
+	out, err := b.commandOutput(ctx, ct, processCommand)
 	if err != nil {
 		return nil, fmt.Errorf("ps in container %s: %w (output: %s)", ct.Name(), err, out)
 	}
@@ -626,10 +648,7 @@ func (b *Backend) Signal(ctx context.Context, id runtime.ID, pid int, sig string
 	if err != nil {
 		return err
 	}
-	sshArgs := ct.SSHCommand(nil, command)
-	b.log.DebugContext(ctx, "ssh", "cmd", sshArgs)
-	cmd := exec.CommandContext(ctx, sshArgs[0], sshArgs[1:]...) //nolint:gosec // SSH target and command are derived from the md container.
-	out, err := cmd.CombinedOutput()
+	out, err := b.commandOutput(ctx, ct, command)
 	if err != nil {
 		return fmt.Errorf("signal %s pid %d in container %s: %w (output: %s)", sig, pid, ct.Name(), err, out)
 	}
@@ -734,6 +753,13 @@ func (b *Backend) WatchEvents(ctx context.Context, filter runtime.EventFilter) (
 		}
 	}()
 	return out, nil
+}
+
+func (b *Backend) commandOutput(ctx context.Context, ct mdContainer, command string) ([]byte, error) {
+	sshArgs := ct.SSHCommand(nil, command)
+	b.log.DebugContext(ctx, "ssh", "cmd", sshArgs)
+	cmd := exec.CommandContext(ctx, sshArgs[0], sshArgs[1:]...) //nolint:gosec // SSH target and command are derived from the md container.
+	return cmd.CombinedOutput()
 }
 
 func (b *Backend) container(ctx context.Context, name string) (mdContainer, error) {

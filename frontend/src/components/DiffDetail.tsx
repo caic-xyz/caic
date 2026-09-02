@@ -1,11 +1,23 @@
-// Full-page diff viewer for a task's file changes.
+// Full-page repository status and unified diff viewer for a task's container changes.
 
-import { createSignal, createEffect, createMemo, For, Show, onMount, onCleanup } from "solid-js";
+import {
+  createSignal,
+  createEffect,
+  createMemo,
+  For,
+  Show,
+  onMount,
+  onCleanup,
+} from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
 import WrapTextIcon from "@material-symbols/svg-400/outlined/wrap_text.svg?solid";
 
-import type { DiffFileStat } from "@sdk/types.gen";
+import type {
+  DiffFileStat,
+  GitFileStatus,
+  GitRepositoryStatus,
+} from "@sdk/types.gen";
 
 import { getTaskDiff } from "../api";
 import { splitDiff } from "./diffLines";
@@ -15,7 +27,6 @@ import styles from "./DiffDetail.module.css";
 interface Props {
   taskId: string;
   diffStat: DiffFileStat[];
-  repos?: { name: string; branch: string }[];
   taskPath: string;
   onTaskRefreshError?: (taskId: string, err: unknown) => boolean;
 }
@@ -23,10 +34,15 @@ interface Props {
 export default function DiffDetail(props: Props) {
   const navigate = useNavigate();
   const [fullDiff, setFullDiff] = createSignal<string | null>(null);
+  const [repositories, setRepositories] = createSignal<GitRepositoryStatus[]>(
+    [],
+  );
   const [error, setError] = createSignal<string | null>(null);
   const [loading, setLoading] = createSignal(true);
   // Collapsed files (all expanded by default).
-  const [collapsedFiles, setCollapsedFiles] = createSignal<Set<string>>(new Set());
+  const [collapsedFiles, setCollapsedFiles] = createSignal<Set<string>>(
+    new Set(),
+  );
   const [lineWrap, setLineWrap] = createSignal(false);
 
   createEffect(() => {
@@ -36,7 +52,10 @@ export default function DiffDetail(props: Props) {
     setError(null);
     setCollapsedFiles(new Set<string>());
     getTaskDiff(id, "")
-      .then((d) => setFullDiff(d.diff))
+      .then((d) => {
+        setFullDiff(d.diff);
+        setRepositories(d.repositories);
+      })
       .catch((e: unknown) => {
         if (onTaskRefreshError?.(id, e)) return;
         setError(e instanceof Error ? e.message : "Unknown error");
@@ -75,23 +94,32 @@ export default function DiffDetail(props: Props) {
     });
   }
 
+  function statusLabels(file: GitFileStatus) {
+    if (file.indexStatus === "?" && file.worktreeStatus === "?") {
+      return [{ scope: "", label: "untracked" }];
+    }
+    const labels: { scope: string; label: string }[] = [];
+    if (file.indexStatus)
+      labels.push({ scope: "staged", label: gitStatusLabel(file.indexStatus) });
+    if (file.worktreeStatus)
+      labels.push({
+        scope: "working tree",
+        label: gitStatusLabel(file.worktreeStatus),
+      });
+    return labels;
+  }
+
   return (
     <div class={styles.container}>
       <div class={styles.header}>
-        <button class={styles.backBtn} onClick={() => navigate(props.taskPath)} title="Back to task">
+        <button
+          class={styles.backBtn}
+          onClick={() => navigate(props.taskPath)}
+          title="Back to task"
+        >
           <ArrowBackIcon width={20} height={20} />
         </button>
-        <span class={styles.headerMeta}>
-          <For each={props.repos ?? []}>
-            {(r, i) => (
-              <>
-                {i() > 0 ? ", " : ""}
-                <span class={styles.headerRepo}>{r.name}</span>
-                <span class={styles.headerBranch}>{r.branch}</span>
-              </>
-            )}
-          </For>
-        </span>
+        <span class={styles.headerMeta}>Repository changes</span>
         <button
           type="button"
           class={`${styles.wrapToggle} ${lineWrap() ? styles.wrapToggleActive : ""}`}
@@ -111,51 +139,220 @@ export default function DiffDetail(props: Props) {
           <div class={styles.diffError}>{error()}</div>
         </Show>
         <Show when={!loading() && !error()}>
-          <For each={fileDiffs()}>
-            {(fd) => {
-              const stat = () => statByPath().get(fd.path);
-              const collapsed = () => collapsedFiles().has(fd.path);
-              return (
-                <>
-                  <div
-                    class={`${styles.fileRow} ${styles.fileRowClickable}`}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => toggleFile(fd.path)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        toggleFile(fd.path);
-                      }
-                    }}
-                  >
-                    <span class={styles.collapseIndicator}>{collapsed() ? "\u25b6" : "\u25bc"}</span>
-                    <span class={styles.filePath}>{fd.path}</span>
+          <div class={styles.statusList}>
+            <For each={repositories()}>
+              {(repo) => (
+                <section class={styles.repoStatus}>
+                  <div class={styles.repoHeading}>
+                    <span class={styles.headerRepo}>{repo.name}</span>
+                    <span class={styles.branchName}>
+                      {repo.branch || "detached HEAD"}
+                    </span>
+                    <span class={styles.branchArrow} aria-hidden="true">
+                      →
+                    </span>
+                    <span class={styles.upstreamName}>
+                      {repo.upstream ?? "no upstream"}
+                    </span>
+                  </div>
+                  <div class={styles.divergence}>
                     <Show
-                      when={stat()?.binary}
-                      fallback={
-                        <span class={styles.fileCounts}>
-                          <Show when={(stat()?.added ?? 0) > 0}>
-                            <span class={styles.added}>+{stat()?.added}</span>
-                          </Show>
-                          <Show when={(stat()?.deleted ?? 0) > 0}>
-                            <span class={styles.deleted}>&minus;{stat()?.deleted}</span>
-                          </Show>
-                        </span>
-                      }
+                      when={repo.upstream}
+                      fallback="No upstream tracking branch configured"
                     >
-                      <span class={styles.binary}>binary</span>
+                      {repo.ahead} {repo.ahead === 1 ? "commit" : "commits"}{" "}
+                      ahead
+                      <Show when={repo.behind > 0}>
+                        {" "}
+                        · {repo.behind} behind
+                      </Show>
                     </Show>
                   </div>
-                  <Show when={!collapsed()}>
-                    <UnifiedDiffBlock lines={fd.lines} lineWrap={lineWrap()} />
-                  </Show>
-                </>
-              );
-            }}
-          </For>
+
+                  <div class={styles.statusGroup}>
+                    <h2>Commits ahead ({repo.commits.length})</h2>
+                    <Show
+                      when={repo.commits.length > 0}
+                      fallback={
+                        <p class={styles.cleanState}>
+                          No commits ahead of upstream
+                        </p>
+                      }
+                    >
+                      <div class={styles.commitList}>
+                        <For each={repo.commits}>
+                          {(commit) => (
+                            <article class={styles.commit}>
+                              <div class={styles.commitHeading}>
+                                <code>{commit.sha.slice(0, 8)}</code>
+                                <span>{commit.subject}</span>
+                              </div>
+                              <Show when={commit.stat.length > 0}>
+                                <div class={styles.commitStat}>
+                                  <For each={commit.stat}>
+                                    {(file) => (
+                                      <div class={styles.commitStatFile}>
+                                        <span class={styles.commitStatPath}>
+                                          {file.path}
+                                        </span>
+                                        <Show
+                                          when={!file.binary}
+                                          fallback={
+                                            <span class={styles.binary}>
+                                              binary
+                                            </span>
+                                          }
+                                        >
+                                          <span class={styles.fileCounts}>
+                                            <Show when={file.added > 0}>
+                                              <span class={styles.added}>
+                                                +{file.added}
+                                              </span>
+                                            </Show>
+                                            <Show when={file.deleted > 0}>
+                                              <span class={styles.deleted}>
+                                                &minus;{file.deleted}
+                                              </span>
+                                            </Show>
+                                          </span>
+                                        </Show>
+                                      </div>
+                                    )}
+                                  </For>
+                                  <div class={styles.commitSummary}>
+                                    {commit.stat.length}{" "}
+                                    {commit.stat.length === 1
+                                      ? "file"
+                                      : "files"}{" "}
+                                    changed
+                                  </div>
+                                </div>
+                              </Show>
+                            </article>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+                  </div>
+
+                  <div class={styles.statusGroup}>
+                    <h2>Uncommitted changes ({repo.uncommitted.length})</h2>
+                    <Show
+                      when={repo.uncommitted.length > 0}
+                      fallback={
+                        <p class={styles.cleanState}>Working tree clean</p>
+                      }
+                    >
+                      <div class={styles.uncommittedList}>
+                        <For each={repo.uncommitted}>
+                          {(file) => (
+                            <div class={styles.uncommittedFile}>
+                              <span class={styles.uncommittedPath}>
+                                <Show when={file.originalPath}>
+                                  <span>{file.originalPath} → </span>
+                                </Show>
+                                {file.path}
+                              </span>
+                              <span class={styles.statusBadges}>
+                                <For each={statusLabels(file)}>
+                                  {(status) => (
+                                    <span class={styles.statusBadge}>
+                                      <Show when={status.scope}>
+                                        {status.scope}:{" "}
+                                      </Show>
+                                      {status.label}
+                                    </span>
+                                  )}
+                                </For>
+                              </span>
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+                  </div>
+                </section>
+              )}
+            </For>
+          </div>
+
+          <section class={styles.combinedDiff}>
+            <h2>Combined diff</h2>
+            <Show
+              when={fileDiffs().length > 0}
+              fallback={
+                <p class={styles.cleanState}>No changes relative to upstream</p>
+              }
+            >
+              <For each={fileDiffs()}>
+                {(fd) => {
+                  const stat = () => statByPath().get(fd.path);
+                  const collapsed = () => collapsedFiles().has(fd.path);
+                  return (
+                    <>
+                      <div
+                        class={`${styles.fileRow} ${styles.fileRowClickable}`}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => toggleFile(fd.path)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            toggleFile(fd.path);
+                          }
+                        }}
+                      >
+                        <span class={styles.collapseIndicator}>
+                          {collapsed() ? "\u25b6" : "\u25bc"}
+                        </span>
+                        <span class={styles.filePath}>{fd.path}</span>
+                        <Show
+                          when={stat()?.binary}
+                          fallback={
+                            <span class={styles.fileCounts}>
+                              <Show when={(stat()?.added ?? 0) > 0}>
+                                <span class={styles.added}>
+                                  +{stat()?.added}
+                                </span>
+                              </Show>
+                              <Show when={(stat()?.deleted ?? 0) > 0}>
+                                <span class={styles.deleted}>
+                                  &minus;{stat()?.deleted}
+                                </span>
+                              </Show>
+                            </span>
+                          }
+                        >
+                          <span class={styles.binary}>binary</span>
+                        </Show>
+                      </div>
+                      <Show when={!collapsed()}>
+                        <UnifiedDiffBlock
+                          lines={fd.lines}
+                          lineWrap={lineWrap()}
+                        />
+                      </Show>
+                    </>
+                  );
+                }}
+              </For>
+            </Show>
+          </section>
         </Show>
       </div>
     </div>
   );
+}
+
+function gitStatusLabel(code: string): string {
+  const labels: Record<string, string> = {
+    A: "added",
+    C: "copied",
+    D: "deleted",
+    M: "modified",
+    R: "renamed",
+    T: "type changed",
+    U: "unmerged",
+  };
+  return labels[code] ?? code;
 }

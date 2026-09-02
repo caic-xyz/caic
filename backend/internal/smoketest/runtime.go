@@ -10,7 +10,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	stdruntime "runtime"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -46,13 +48,16 @@ func InitHarnessCache(cacheDir string) error {
 // process data.
 type RuntimeBackend struct {
 	vncPort int // non-zero when a fake VNC server is running.
+
+	mu    sync.Mutex
+	repos map[runtime.ID][]runtime.Repo
 }
 
 var _ runtime.System = (*RuntimeBackend)(nil)
 
 // NewRuntimeBackend creates a fake runtime backend for smoke and e2e tests.
 func NewRuntimeBackend(vncPort int) *RuntimeBackend {
-	return &RuntimeBackend{vncPort: vncPort}
+	return &RuntimeBackend{vncPort: vncPort, repos: map[runtime.ID][]runtime.Repo{}}
 }
 
 // Name returns the runtime backend name.
@@ -63,10 +68,14 @@ func (b *RuntimeBackend) Launch(_ context.Context, repos []runtime.Repo, opts *r
 	if _, err := opts.LogWriter.Write([]byte("- Fake runtime setup complete\n")); err != nil {
 		return "", err
 	}
-	if len(repos) == 0 {
-		return runtime.NewID(b.Name(), "md-test-no-repo"), nil
+	id := runtime.NewID(b.Name(), "md-test-no-repo")
+	if len(repos) > 0 {
+		id = runtime.NewID(b.Name(), runtime.InstanceID("md-test-"+strings.ReplaceAll(repos[0].Branch, "/", "-")))
 	}
-	return runtime.NewID(b.Name(), runtime.InstanceID("md-test-"+strings.ReplaceAll(repos[0].Branch, "/", "-"))), nil
+	b.mu.Lock()
+	b.repos[id] = slices.Clone(repos)
+	b.mu.Unlock()
+	return id, nil
 }
 
 // Connect implements runtime.Lifecycle.
@@ -74,12 +83,27 @@ func (*RuntimeBackend) Connect(_ context.Context, id runtime.ID, _ *runtime.Star
 	return runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: string(id.InstanceID())}}, nil
 }
 
-// Diff implements runtime.Lifecycle.
+// Diff implements runtime.Repository.
 func (*RuntimeBackend) Diff(_ context.Context, _ runtime.ID, _ int, _ ...string) (string, error) {
 	return "", nil
 }
 
-// Fetch implements runtime.Lifecycle.
+// RepositoryStatus implements runtime.Repository.
+func (b *RuntimeBackend) RepositoryStatus(_ context.Context, id runtime.ID, repoIdx int) (runtime.RepositoryStatus, error) {
+	b.mu.Lock()
+	repos := slices.Clone(b.repos[id])
+	b.mu.Unlock()
+	if repoIdx < 0 || repoIdx >= len(repos) {
+		return runtime.RepositoryStatus{}, fmt.Errorf("repo index %d out of range for %d repos", repoIdx, len(repos))
+	}
+	upstream := "origin/main"
+	if repos[repoIdx].BaseBranch != "" {
+		upstream = "origin/" + repos[repoIdx].BaseBranch
+	}
+	return runtime.RepositoryStatus{Branch: repos[repoIdx].Branch, Upstream: upstream}, nil
+}
+
+// Fetch implements runtime.Repository.
 func (*RuntimeBackend) Fetch(_ context.Context, _ runtime.ID) error { return nil }
 
 // Stop implements runtime.Lifecycle.

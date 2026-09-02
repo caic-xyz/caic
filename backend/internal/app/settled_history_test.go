@@ -59,7 +59,7 @@ func writeSettledHistoryLog(t *testing.T, dir, name, state string, mtime time.Ti
 
 func newSettledHistoryTestManager(t *testing.T, logStore *taskslog.Store) *taskmgr.Manager {
 	router, err := runtime.NewRouter(slog.New(slog.DiscardHandler), []runtime.System{
-		&modelRefreshSystem{Lifecycle: &runtimetest.FakeBackend{}, Inventory: &runtimetest.FakeInventory{}},
+		&modelRefreshSystem{testRuntimeBackend: &runtimetest.FakeBackend{}, Inventory: &runtimetest.FakeInventory{}},
 	})
 	if err != nil {
 		t.Fatal(err)

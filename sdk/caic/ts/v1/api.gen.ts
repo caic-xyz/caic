@@ -158,7 +158,7 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     syncTask: (id: string, req: SyncReq): Promise<SyncResp> => request<SyncResp>("POST", `/api/caic/v1/tasks/${id}/sync`, req),
     /** Forks a task by snapshotting its runtime instance and creating a new task on a derived branch. */
     forkTask: (id: string, req: ForkTaskReq): Promise<Task> => request<Task>("POST", `/api/caic/v1/tasks/${id}/fork`, req),
-    /** Returns the unified diff for a task's branch. */
+    /** Returns repository status and the unified diff for a task's branch. */
     getTaskDiff: (id: string, path: string): Promise<DiffResp> => request<DiffResp>("GET", `/api/caic/v1/tasks/${id}/diff?path=${encodeURIComponent(path)}`),
     /** Returns the list of running processes inside the task's runtime instance. */
     getTaskProcesses: (id: string): Promise<ProcessListResp> => request<ProcessListResp>("GET", `/api/caic/v1/processes/${id}`),

@@ -33,8 +33,13 @@ type fakeTaskView struct {
 }
 
 type testRuntimeSystem struct {
-	runtime.Lifecycle
+	testRuntimeBackend
 	runtimetest.FakeInfo
+}
+
+type testRuntimeBackend interface {
+	runtime.Lifecycle
+	runtime.Repository
 }
 
 func (*testRuntimeSystem) Name() runtime.Name { return "test-runtime" }
@@ -89,8 +94,8 @@ func newTestCheckout(dir string) *Checkout {
 	}
 }
 
-func newTestRuntime(t *testing.T, backend runtime.Lifecycle) *runtime.Router {
-	runtimes, err := runtime.NewRouter(logtest.Logger(t), []runtime.System{&testRuntimeSystem{Lifecycle: backend}})
+func newTestRuntime(t *testing.T, backend testRuntimeBackend) *runtime.Router {
+	runtimes, err := runtime.NewRouter(logtest.Logger(t), []runtime.System{&testRuntimeSystem{testRuntimeBackend: backend}})
 	if err != nil {
 		t.Fatal(err)
 	}

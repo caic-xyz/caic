@@ -50,14 +50,19 @@ func registerCheckout(t testing.TB, registry *repo.Registry, relPath string, che
 }
 
 type testRuntimeSystem struct {
-	runtime.Lifecycle
+	testRuntimeBackend
 	runtimetest.FakeInfo
+}
+
+type testRuntimeBackend interface {
+	runtime.Lifecycle
+	runtime.Repository
 }
 
 func (*testRuntimeSystem) Name() runtime.Name { return "test-runtime" }
 
 type testRuntimeInfoSystem struct {
-	runtime.Lifecycle
+	testRuntimeBackend
 	runtime.Monitor
 	runtime.Inventory
 	runtime.PrivilegeInfo
@@ -117,10 +122,10 @@ func awaitTaskCleanup(t *testing.T, m *Manager, id string) {
 	})
 }
 
-func newTestRuntime(t testing.TB, lc runtime.Lifecycle, info testRuntimeInfo) *runtime.Router {
-	var sys runtime.System = &testRuntimeSystem{Lifecycle: lc}
+func newTestRuntime(t testing.TB, backend testRuntimeBackend, info testRuntimeInfo) *runtime.Router {
+	var sys runtime.System = &testRuntimeSystem{testRuntimeBackend: backend}
 	if info != nil {
-		sys = testRuntimeInfoSystem{Lifecycle: lc, Monitor: info, Inventory: info, PrivilegeInfo: info}
+		sys = testRuntimeInfoSystem{testRuntimeBackend: backend, Monitor: info, Inventory: info, PrivilegeInfo: info}
 	}
 	router, err := runtime.NewRouter(slog.New(slog.DiscardHandler), []runtime.System{sys})
 	if err != nil {
@@ -575,7 +580,7 @@ func TestNew(t *testing.T) {
 	t.Run("no-repo checkout is fully constructed", func(t *testing.T) {
 		t.Parallel()
 		backend := &mdruntime.Backend{}
-		router, err := runtime.NewRouter(slog.New(slog.DiscardHandler), []runtime.System{&testRuntimeSystem{Lifecycle: backend}})
+		router, err := runtime.NewRouter(slog.New(slog.DiscardHandler), []runtime.System{&testRuntimeSystem{testRuntimeBackend: backend}})
 		if err != nil {
 			t.Fatal(err)
 		}

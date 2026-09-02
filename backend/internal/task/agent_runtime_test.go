@@ -64,8 +64,13 @@ func (*reviveFailureRuntime) Revive(context.Context, runtime.ID) error {
 }
 
 type testRuntimeSystem struct {
-	runtime.Lifecycle
+	testRuntimeBackend
 	runtimetest.FakeInfo
+}
+
+type testRuntimeBackend interface {
+	runtime.Lifecycle
+	runtime.Repository
 }
 
 var testCheckoutRuntimes sync.Map
@@ -125,7 +130,7 @@ func (r *forkLogRuntime) destPrimary(hostPath string) (string, bool) {
 	return "", false
 }
 
-func newTestCheckout(t *testing.T, baseBranch, dir string, backend runtime.Lifecycle) *repo.Checkout {
+func newTestCheckout(t *testing.T, baseBranch, dir string, backend testRuntimeBackend) *repo.Checkout {
 	checkout := &repo.Checkout{
 		BaseBranch: baseBranch,
 		Dir:        dir,
@@ -136,11 +141,11 @@ func newTestCheckout(t *testing.T, baseBranch, dir string, backend runtime.Lifec
 	return checkout
 }
 
-func newTestRuntimeRouter(t *testing.T, backend runtime.Lifecycle) *runtime.Router {
+func newTestRuntimeRouter(t *testing.T, backend testRuntimeBackend) *runtime.Router {
 	if backend == nil {
 		return nil
 	}
-	rt, err := runtime.NewRouter(logtest.Logger(t), []runtime.System{&testRuntimeSystem{Lifecycle: backend}})
+	rt, err := runtime.NewRouter(logtest.Logger(t), []runtime.System{&testRuntimeSystem{testRuntimeBackend: backend}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +169,7 @@ func newTestAgentRuntime(t *testing.T, checkout *repo.Checkout, logDir string, b
 	}
 }
 
-func newTestAgentRuntimeWithRuntime(t *testing.T, backend runtime.Lifecycle, backends map[harness.Name]agent.Backend, logDir string) *AgentRuntime {
+func newTestAgentRuntimeWithRuntime(t *testing.T, backend testRuntimeBackend, backends map[harness.Name]agent.Backend, logDir string) *AgentRuntime {
 	r := newTestAgentRuntime(t, nil, logDir, backends)
 	if backend == nil {
 		return r
@@ -808,7 +813,7 @@ func TestRunner(t *testing.T) {
 			t.Parallel()
 			for _, tc := range []struct {
 				name     string
-				runtime  runtime.Lifecycle
+				runtime  testRuntimeBackend
 				backends map[harness.Name]agent.Backend
 			}{
 				{

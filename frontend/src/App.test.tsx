@@ -199,7 +199,7 @@ beforeEach(() => {
   vi.mocked(api.cloneRepo).mockResolvedValue(newRepo);
   vi.mocked(api.createTask).mockResolvedValue(makeTask());
   vi.mocked(api.getTask).mockResolvedValue(makeTask());
-  vi.mocked(api.getTaskDiff).mockResolvedValue({ diff: "" });
+  vi.mocked(api.getTaskDiff).mockResolvedValue({ diff: "", repositories: [] });
   vi.mocked(api.getTaskProcesses).mockResolvedValue({ processes: [] });
   vi.mocked(api.getTaskInfo).mockResolvedValue({
     id: "task1",

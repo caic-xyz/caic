@@ -26,7 +26,6 @@ export default function DiffPage() {
             <DiffDetail
               taskId={taskId}
               diffStat={t()?.diffStat ?? []}
-              repos={(t()?.repos ?? []).map((r) => ({ name: r.name, branch: r.branch }))}
               taskPath={tp()}
               onTaskRefreshError={s.dismissSelectedTaskOnNotFound}
             />

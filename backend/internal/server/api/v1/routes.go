@@ -315,7 +315,7 @@ var Routes = []Route{
 	},
 	{
 		Name:        "getTaskDiff",
-		Doc:         "Returns the unified diff for a task's branch.",
+		Doc:         "Returns repository status and the unified diff for a task's branch.",
 		Method:      "GET",
 		Path:        "/api/caic/v1/tasks/{id}/diff",
 		Resp:        reflect.TypeFor[DiffResp](),

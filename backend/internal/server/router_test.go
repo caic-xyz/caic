@@ -114,8 +114,13 @@ type testRouter struct {
 }
 
 type testRuntimeSystem struct {
-	runtime.Lifecycle
+	testRuntimeBackend
 	runtimetest.FakeInfo
+}
+
+type testRuntimeBackend interface {
+	runtime.Lifecycle
+	runtime.Repository
 }
 
 func (*testRuntimeSystem) Name() runtime.Name { return "test-runtime" }
@@ -124,8 +129,8 @@ func (*testRuntimeSystem) Name() runtime.Name { return "test-runtime" }
 // fields (authStore, sessionSecret, hostState) on the returned Router and then
 // call buildHandler; buildHandler re-syncs hostState into the MCP concern, and
 // the authHandlers copies must be synced by the test if exercised.
-func newTestRuntime(t testing.TB, lifecycle runtime.Lifecycle) *runtime.Router {
-	router, err := runtime.NewRouter(testLogger(), []runtime.System{&testRuntimeSystem{Lifecycle: lifecycle}})
+func newTestRuntime(t testing.TB, backend testRuntimeBackend) *runtime.Router {
+	router, err := runtime.NewRouter(testLogger(), []runtime.System{&testRuntimeSystem{testRuntimeBackend: backend}})
 	if err != nil {
 		t.Fatalf("runtime.NewRouter: %v", err)
 	}

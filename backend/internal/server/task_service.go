@@ -715,7 +715,44 @@ func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, path s
 	if err != nil {
 		return nil, api.InternalError(err.Error())
 	}
-	return &v1.DiffResp{Diff: diff}, nil
+	statuses, err := checkout.RepositoryStatuses(ctx, s.log, s.runtimes, t)
+	if err != nil {
+		return nil, api.InternalError(err.Error())
+	}
+	repos := t.ReposSnapshot()
+	if len(repos) != len(statuses) {
+		return nil, api.InternalError("repository status count mismatch")
+	}
+	repositories := make([]v1.GitRepositoryStatus, len(statuses))
+	for i, status := range statuses {
+		commits := make([]v1.GitCommit, len(status.Commits))
+		for j, commit := range status.Commits {
+			stat := make(v1.DiffStat, len(commit.Stat))
+			for k, file := range commit.Stat {
+				stat[k] = v1.DiffFileStat{Path: file.Path, Added: file.Added, Deleted: file.Deleted, Binary: file.Binary}
+			}
+			commits[j] = v1.GitCommit{SHA: commit.SHA, Subject: commit.Subject, Stat: stat}
+		}
+		uncommitted := make([]v1.GitFileStatus, len(status.Uncommitted))
+		for j, file := range status.Uncommitted {
+			uncommitted[j] = v1.GitFileStatus{
+				Path:           file.Path,
+				OriginalPath:   file.OriginalPath,
+				IndexStatus:    file.IndexStatus,
+				WorktreeStatus: file.WorktreeStatus,
+			}
+		}
+		repositories[i] = v1.GitRepositoryStatus{
+			Name:        repos[i].Name,
+			Branch:      status.Branch,
+			Upstream:    status.Upstream,
+			Ahead:       status.Ahead,
+			Behind:      status.Behind,
+			Commits:     commits,
+			Uncommitted: uncommitted,
+		}
+	}
+	return &v1.DiffResp{Diff: diff, Repositories: repositories}, nil
 }
 
 func (s *taskService) syncTask(ctx context.Context, entry *taskmgr.Entry, req *v1.SyncReq) (*v1.SyncResp, error) {

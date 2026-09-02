@@ -1,4 +1,4 @@
-/* Styles for the full-page DiffView component. */
+/* Styles for the full-page repository status and unified diff view. */
 
 .container {
   display: flex;
@@ -43,16 +43,6 @@
   color: var(--color-link);
 }
 
-.headerBranch {
-  margin-left: 0.4em;
-  color: var(--color-text-tertiary);
-}
-
-.headerBranch::before {
-  content: "·";
-  margin-right: 0.4em;
-}
-
 .wrapToggle {
   display: inline-flex;
   align-items: center;
@@ -84,6 +74,161 @@
   background: var(--color-bg-surface);
   font-size: 0.85rem;
   min-height: 0;
+}
+
+.statusList {
+  display: grid;
+  gap: 1rem;
+}
+
+.repoStatus {
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  padding: 0.75rem;
+  background: var(--color-bg-elevated);
+}
+
+.repoHeading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  min-width: 0;
+  font-weight: 600;
+}
+
+.branchName,
+.upstreamName {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: monospace;
+  font-size: 0.8rem;
+}
+
+.branchArrow {
+  color: var(--color-text-muted);
+}
+
+.upstreamName {
+  color: var(--color-text-secondary);
+}
+
+.divergence {
+  margin-top: 0.2rem;
+  color: var(--color-text-tertiary);
+  font-size: 0.75rem;
+}
+
+.statusGroup {
+  margin-top: 0.9rem;
+}
+
+.statusGroup h2,
+.combinedDiff h2 {
+  margin: 0 0 0.4rem;
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.commitList,
+.uncommittedList {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.commit {
+  min-width: 0;
+  border-left: 2px solid var(--color-border);
+  padding-left: 0.6rem;
+}
+
+.commitHeading {
+  display: flex;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.commitHeading code {
+  flex-shrink: 0;
+  color: var(--color-text-tertiary);
+}
+
+.commitHeading span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.commitStat {
+  margin: 0.3rem 0 0;
+  color: var(--color-text-tertiary);
+  font-family: monospace;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.commitStatFile {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.commitStatPath {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.commitSummary {
+  margin-top: 0.15rem;
+  color: var(--color-text-muted);
+}
+
+.uncommittedFile {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.uncommittedPath {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: monospace;
+  font-size: 0.78rem;
+}
+
+.uncommittedPath > span {
+  color: var(--color-text-tertiary);
+}
+
+.statusBadges {
+  display: flex;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.statusBadge {
+  border-radius: var(--radius-sm);
+  padding: 0.1rem 0.35rem;
+  background: var(--color-bg-surface);
+  color: var(--color-text-secondary);
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+.cleanState {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+
+.combinedDiff {
+  margin-top: 1rem;
 }
 
 .fileRow {
@@ -166,5 +311,19 @@
     border-radius: 0;
     border-left: none;
     border-right: none;
+  }
+
+  .repoHeading {
+    flex-wrap: wrap;
+  }
+
+  .headerRepo {
+    flex-basis: 100%;
+  }
+
+  .uncommittedFile {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.25rem;
   }
 }

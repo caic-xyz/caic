@@ -1,4 +1,4 @@
-// API-only tests for the task lifecycle (no browser UI).
+// API-only tests for task lifecycle and repository status endpoints (no browser UI).
 import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
 
 test("create task and reach waiting state via API", async ({ api }) => {
@@ -8,6 +8,24 @@ test("create task and reach waiting state via API", async ({ api }) => {
   const task = await waitForTaskState(api, id, "waiting");
   expect(task.harness).toBe("claude");
   expect(task.numTurns).toBeGreaterThanOrEqual(1);
+});
+
+test("task diff reports repository git status", async ({ api }) => {
+  const id = await createTaskAPI(api, "api git status test");
+  const task = await waitForTaskState(api, id, "waiting");
+
+  const diff = await api.getTaskDiff(id, "");
+  expect(diff.diff).toBe("");
+  expect(diff.repositories).toHaveLength(1);
+  expect(diff.repositories[0]).toEqual({
+    name: task.repos![0].name,
+    branch: task.repos![0].branch,
+    upstream: "origin/main",
+    ahead: 0,
+    behind: 0,
+    commits: [],
+    uncommitted: [],
+  });
 });
 
 test("purge a waiting task via API", async ({ api }) => {

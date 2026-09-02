@@ -103,6 +103,16 @@ func (r *Router) Diff(ctx context.Context, id ID, repoIdx int, args ...string) (
 	return rt.Diff(ctx, id, repoIdx, args...)
 }
 
+// RepositoryStatus returns git branch, commit, and working-tree state from the
+// owning backend.
+func (r *Router) RepositoryStatus(ctx context.Context, id ID, repoIdx int) (RepositoryStatus, error) {
+	rt, err := r.runtimeForInstance(id)
+	if err != nil {
+		return RepositoryStatus{}, err
+	}
+	return rt.RepositoryStatus(ctx, id, repoIdx)
+}
+
 // Fetch fetches task repository changes from the owning backend.
 func (r *Router) Fetch(ctx context.Context, id ID) error {
 	rt, err := r.runtimeForInstance(id)

@@ -163,8 +163,8 @@ func newModelRefreshTestManager(t testing.TB, router *runtime.Router, backends m
 	return m
 }
 
-func newModelRefreshRouter(t *testing.T, runtimeBackend runtime.Lifecycle, inventory runtime.Inventory) *runtime.Router {
-	router, err := runtime.NewRouter(slog.New(slog.DiscardHandler), []runtime.System{&modelRefreshSystem{Lifecycle: runtimeBackend, Inventory: inventory}})
+func newModelRefreshRouter(t *testing.T, runtimeBackend testRuntimeBackend, inventory runtime.Inventory) *runtime.Router {
+	router, err := runtime.NewRouter(slog.New(slog.DiscardHandler), []runtime.System{&modelRefreshSystem{testRuntimeBackend: runtimeBackend, Inventory: inventory}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,10 +172,15 @@ func newModelRefreshRouter(t *testing.T, runtimeBackend runtime.Lifecycle, inven
 }
 
 type modelRefreshSystem struct {
-	runtime.Lifecycle
+	testRuntimeBackend
 	runtimetest.FakeMonitor
 	runtime.Inventory
 	runtimetest.FakePrivilegeInfo
+}
+
+type testRuntimeBackend interface {
+	runtime.Lifecycle
+	runtime.Repository
 }
 
 func (*modelRefreshSystem) Name() runtime.Name { return "test-runtime" }
@@ -211,7 +216,7 @@ type modelRefreshRuntime struct {
 	purgedIDs   []runtime.ID
 }
 
-var _ runtime.Lifecycle = (*modelRefreshRuntime)(nil)
+var _ testRuntimeBackend = (*modelRefreshRuntime)(nil)
 
 func (r *modelRefreshRuntime) Launch(_ context.Context, _ []runtime.Repo, opts *runtime.StartOptions) (runtime.ID, error) {
 	r.launches++
@@ -227,6 +232,10 @@ func (r *modelRefreshRuntime) Connect(_ context.Context, id runtime.ID, _ *runti
 
 func (*modelRefreshRuntime) Diff(_ context.Context, _ runtime.ID, _ int, _ ...string) (string, error) {
 	return "", nil
+}
+
+func (*modelRefreshRuntime) RepositoryStatus(_ context.Context, _ runtime.ID, _ int) (runtime.RepositoryStatus, error) {
+	return runtime.RepositoryStatus{}, nil
 }
 
 func (*modelRefreshRuntime) Fetch(_ context.Context, _ runtime.ID) error { return nil }

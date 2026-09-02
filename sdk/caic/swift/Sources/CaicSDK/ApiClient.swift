@@ -234,7 +234,7 @@ public final class ApiClient {
     public func forkTask(id: String, req: ForkTaskReq) async throws -> Task {
         try await request("POST", path: "/api/caic/v1/tasks/\(id)/fork", body: try encoder.encode(req))
     }
-    /// Returns the unified diff for a task's branch.
+    /// Returns repository status and the unified diff for a task's branch.
     public func getTaskDiff(id: String, path: String) async throws -> DiffResp {
         try await request("GET", path: "/api/caic/v1/tasks/\(id)/diff?path=\(path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path)")
     }

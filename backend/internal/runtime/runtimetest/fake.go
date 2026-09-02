@@ -44,10 +44,10 @@ type SignalDelivery struct {
 	Signal string
 }
 
-// FakeBackend is an in-memory runtime.Lifecycle. It models each instance's
-// lifecycle so tests assert on the resulting state (Status, LastSignal) rather
-// than on which methods were called. The zero value is usable and every method
-// is safe for concurrent use.
+// FakeBackend is an in-memory runtime lifecycle and repository backend. It
+// models each instance's lifecycle so tests assert on the resulting state
+// (Status, LastSignal) rather than on which methods were called. The zero value
+// is usable and every method is safe for concurrent use.
 //
 // Configure returned data through the exported fields. To inject latency or a
 // failure, embed it and override the method, calling the embedded method when
@@ -63,6 +63,8 @@ type FakeBackend struct {
 	RuntimeName runtime.Name
 	// DiffOutput is returned verbatim by Diff.
 	DiffOutput string
+	// RepositoryStatusValue is returned by RepositoryStatus.
+	RepositoryStatusValue runtime.RepositoryStatus
 	// LaunchErr, when set, is returned by Launch.
 	LaunchErr error
 	// FetchErr, when set, is returned by Fetch.
@@ -75,6 +77,7 @@ type FakeBackend struct {
 
 // Ensure the fake satisfies the interface at compile time.
 var _ runtime.Lifecycle = (*FakeBackend)(nil)
+var _ runtime.Repository = (*FakeBackend)(nil)
 
 // Name returns the runtime backend name.
 func (f *FakeBackend) Name() runtime.Name {
@@ -114,12 +117,17 @@ func (f *FakeBackend) Connect(ctx context.Context, id runtime.ID, opts *runtime.
 	return runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: string(id.InstanceID())}}, nil
 }
 
-// Diff implements runtime.Lifecycle.
+// Diff implements runtime.Repository.
 func (f *FakeBackend) Diff(ctx context.Context, id runtime.ID, repoIdx int, args ...string) (string, error) {
 	return f.DiffOutput, nil
 }
 
-// Fetch implements runtime.Lifecycle.
+// RepositoryStatus implements runtime.Repository.
+func (f *FakeBackend) RepositoryStatus(context.Context, runtime.ID, int) (runtime.RepositoryStatus, error) {
+	return f.RepositoryStatusValue, nil
+}
+
+// Fetch implements runtime.Repository.
 func (f *FakeBackend) Fetch(ctx context.Context, id runtime.ID) error { return f.FetchErr }
 
 // Stop implements runtime.Lifecycle.

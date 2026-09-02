@@ -63,7 +63,7 @@ Type notation: `JSONValue` means any valid JSON value.
 | POST | `/api/caic/v1/tasks/{id}/revive` | Reconnects to an orphaned task runtime instance. |  | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/sync` | Pushes task changes to the remote repository. | `SyncReq` | `SyncResp` |
 | POST | `/api/caic/v1/tasks/{id}/fork` | Forks a task by snapshotting its runtime instance and creating a new task on a derived branch. | `ForkTaskReq` | `Task` |
-| GET | `/api/caic/v1/tasks/{id}/diff` | Returns the unified diff for a task's branch. |  | `DiffResp` |
+| GET | `/api/caic/v1/tasks/{id}/diff` | Returns repository status and the unified diff for a task's branch. |  | `DiffResp` |
 | GET | `/api/caic/v1/tasks/{id}/tool/{toolUseID}` | Returns the full (untruncated) input for a tool call. |  | `TaskToolInputResp` |
 | GET | `/api/caic/v1/tasks/events` | Streams task list updates for all tasks via SSE. |  | `TaskListEvent` SSE |
 
@@ -1311,6 +1311,41 @@ ForkTaskReq is the request body for POST /api/caic/v1/tasks/{id}/fork.
 | `sudo` | `boolean` | Override sudo; nil means inherit from source. |  |
 | `gitHubToken` | `boolean` | Override gitHubToken; nil means inherit from source. |  |
 
+### GitCommit
+
+GitCommit describes one commit ahead of a repository's upstream branch.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `sha` | `string` |  | yes |
+| `subject` | `string` |  | yes |
+| `stat` | `DiffStat` |  | yes |
+
+### GitFileStatus
+
+GitFileStatus describes one uncommitted repository path.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `path` | `string` |  | yes |
+| `originalPath` | `string` |  |  |
+| `indexStatus` | `string` |  |  |
+| `worktreeStatus` | `string` |  |  |
+
+### GitRepositoryStatus
+
+GitRepositoryStatus describes the checked-out state of one task repository.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `name` | `string` |  | yes |
+| `branch` | `string` |  | yes |
+| `upstream` | `string` |  |  |
+| `ahead` | `int` |  | yes |
+| `behind` | `int` |  | yes |
+| `commits` | `GitCommit[]` |  | yes |
+| `uncommitted` | `GitFileStatus[]` |  | yes |
+
 ### DiffResp
 
 DiffResp is the response for GET /api/caic/v1/tasks/{id}/diff.
@@ -1318,6 +1353,7 @@ DiffResp is the response for GET /api/caic/v1/tasks/{id}/diff.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `diff` | `string` |  | yes |
+| `repositories` | `GitRepositoryStatus[]` |  | yes |
 
 ### ProcessInfo
 

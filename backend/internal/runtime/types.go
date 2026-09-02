@@ -101,6 +101,40 @@ type Repo struct {
 	Remote        string
 }
 
+// RepositoryStatus describes the checked-out branch and its changes relative
+// to the branch's configured upstream.
+type RepositoryStatus struct {
+	Branch      string
+	Upstream    string
+	Ahead       int
+	Behind      int
+	Commits     []GitCommit
+	Uncommitted []GitFileStatus
+}
+
+// GitCommit describes one commit that is ahead of the configured upstream.
+type GitCommit struct {
+	SHA     string
+	Subject string
+	Stat    []GitFileStat
+}
+
+// GitFileStat describes one path's changes in a commit.
+type GitFileStat struct {
+	Path    string
+	Added   int
+	Deleted int
+	Binary  bool
+}
+
+// GitFileStatus describes one uncommitted path from git status porcelain v2.
+type GitFileStatus struct {
+	Path           string
+	OriginalPath   string
+	IndexStatus    string
+	WorktreeStatus string
+}
+
 // CacheMount describes a host cache directory made available to a runtime.
 //
 // Is serialized as task metadata to disk. Is not used for HTTP wire protocol.
@@ -295,6 +329,7 @@ type ForkOptions struct {
 type System interface {
 	Name() Name
 	Lifecycle
+	Repository
 	Monitor
 	Inventory
 	PrivilegeInfo
@@ -308,8 +343,6 @@ type Lifecycle interface {
 	// Connect waits for transport readiness and completes provisioning for the
 	// runtime instance identified by id. It returns optional connection details.
 	Connect(ctx context.Context, id ID, opts *StartOptions) (ConnectionInfo, error)
-	Diff(ctx context.Context, id ID, repoIdx int, args ...string) (string, error)
-	Fetch(ctx context.Context, id ID) error
 	// Stop gracefully stops the runtime instance without removing it. The
 	// instance can be restarted later with Revive.
 	Stop(ctx context.Context, id ID) error
@@ -329,6 +362,13 @@ type Lifecycle interface {
 	Processes(ctx context.Context, id ID) ([]ProcessInfo, error)
 	// Signal sends a signal to a process inside the runtime instance.
 	Signal(ctx context.Context, id ID, pid int, sig string) error
+}
+
+// Repository provides repository operations inside runtime instances.
+type Repository interface {
+	Diff(ctx context.Context, id ID, repoIdx int, args ...string) (string, error)
+	Fetch(ctx context.Context, id ID) error
+	RepositoryStatus(ctx context.Context, id ID, repoIdx int) (RepositoryStatus, error)
 }
 
 // Monitor reads resource usage and lifecycle events.

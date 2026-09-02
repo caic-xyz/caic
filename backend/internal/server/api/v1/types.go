@@ -736,9 +736,37 @@ type UsageResp struct {
 	Local     LocalUsage      `json:"local"`
 }
 
+// GitCommit describes one commit ahead of a repository's upstream branch.
+type GitCommit struct {
+	SHA     string   `json:"sha"`
+	Subject string   `json:"subject"`
+	Stat    DiffStat `json:"stat"`
+}
+
+// GitFileStatus describes one uncommitted repository path.
+type GitFileStatus struct {
+	Path           string `json:"path"`
+	OriginalPath   string `json:"originalPath,omitempty"`
+	IndexStatus    string `json:"indexStatus,omitempty"`
+	WorktreeStatus string `json:"worktreeStatus,omitempty"`
+}
+
+// GitRepositoryStatus describes the checked-out state of one task repository.
+type GitRepositoryStatus struct {
+	Name     string `json:"name"`
+	Branch   string `json:"branch"`
+	Upstream string `json:"upstream,omitempty"`
+	Ahead    int    `json:"ahead"`
+	Behind   int    `json:"behind"`
+
+	Commits     []GitCommit     `json:"commits"`
+	Uncommitted []GitFileStatus `json:"uncommitted"`
+}
+
 // DiffResp is the response for GET /api/caic/v1/tasks/{id}/diff.
 type DiffResp struct {
-	Diff string `json:"diff"`
+	Diff         string                `json:"diff"`
+	Repositories []GitRepositoryStatus `json:"repositories"`
 }
 
 // ProcessInfo describes a single process running inside a task runtime instance.

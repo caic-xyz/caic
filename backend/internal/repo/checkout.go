@@ -286,6 +286,27 @@ func (w *Checkout) DiffContent(ctx context.Context, log *slog.Logger, runtimes *
 	return buf.String(), nil
 }
 
+// RepositoryStatuses returns branch, upstream commit, and working-tree status
+// for every repository in the task runtime.
+func (w *Checkout) RepositoryStatuses(ctx context.Context, _ *slog.Logger, runtimes *runtime.Router, t TaskView) ([]runtime.RepositoryStatus, error) {
+	id, repos, err := w.taskRuntime(t)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
+	defer cancel()
+	w.branchMu.Lock()
+	defer w.branchMu.Unlock()
+	statuses := make([]runtime.RepositoryStatus, len(repos))
+	for i := range repos {
+		statuses[i], err = runtimes.RepositoryStatus(ctx, id, i)
+		if err != nil {
+			return nil, fmt.Errorf("git status for %s: %w", repos[i].ContainerPath, err)
+		}
+	}
+	return statuses, nil
+}
+
 // BranchDiffStat returns the per-repo branch diff stat (md diff --numstat)
 // computed in the instance. Unlike the relay's diff_watcher which only tracks
 // uncommitted changes, this captures the full branch diff relative to the
