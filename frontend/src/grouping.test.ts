@@ -38,6 +38,28 @@ function resultEvent(): EventMessage {
 }
 
 describe("groupMessages", () => {
+  it("keeps a successful result payload instead of duplicate preceding text", () => {
+    const completion = resultEvent();
+    if (!completion.result) throw new Error("result fixture is missing payload");
+    completion.result.result = "Finished the requested change.";
+    const groups = groupMessages([
+      { kind: "text", ts: 1, text: { text: "Finished the requested change." } },
+      completion,
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].events[0].kind).toBe("result");
+  });
+
+  it("keeps preceding assistant text when the result payload differs", () => {
+    const groups = groupMessages([
+      { kind: "text", ts: 1, text: { text: "A useful explanation." } },
+      resultEvent(),
+    ]);
+
+    expect(groups.map((group) => group.kind)).toEqual(["text", "other"]);
+  });
+
   it("consecutive tool uses form one group", () => {
     const groups = groupMessages([toolUseEvent("t1", "Read"), toolUseEvent("t2", "Bash")]);
     expect(groups).toHaveLength(1);

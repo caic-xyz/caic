@@ -266,6 +266,47 @@ describe("TaskDetail", () => {
     expect(queryByText("0.0s")).not.toBeInTheDocument();
   });
 
+  it("does not repeat a successful assistant response from the result payload", () => {
+    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+      handlers.onMessage({ kind: "text", ts: 1_000, text: { text: "Finished the requested change." } });
+      const event = resultEvent(2_000);
+      if (!event.result) throw new Error("result fixture is missing payload");
+      event.result.result = "Finished the requested change.";
+      handlers.onMessage(event);
+      handlers.onReady?.();
+      return {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      } as unknown as EventSource;
+    });
+
+    const { getByText, getAllByText } = renderTaskDetail();
+
+    expect(getAllByText("Finished the requested change.")).toHaveLength(1);
+    expect(getByText("Done").closest("div")).toContainElement(getByText("Finished the requested change."));
+  });
+
+  it("keeps result payload text for failed turns", () => {
+    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+      const event = resultEvent(2_000);
+      if (!event.result) throw new Error("result fixture is missing payload");
+      event.result.isError = true;
+      event.result.result = "Provider request failed.";
+      handlers.onMessage(event);
+      handlers.onReady?.();
+      return {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      } as unknown as EventSource;
+    });
+
+    const { getByText } = renderTaskDetail();
+
+    expect(getByText("Provider request failed.")).toBeInTheDocument();
+  });
+
   it("right-aligns the duration on collapsed turns", () => {
     vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
       const firstResult = resultEvent(333_000);

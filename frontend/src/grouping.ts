@@ -475,6 +475,20 @@ export function groupMessages(msgs: EventMessage[]): MessageGroup[] {
     if (hasRealText) resetRun();
   }
 
+  // Claude Code emits the final assistant response twice: once as assistant
+  // text and again as the successful result payload. Keep the result group as
+  // the canonical completion card, but retain preceding text when it differs.
+  for (let i = 1; i < finalGroups.length; i++) {
+    const group = finalGroups[i];
+    const result = group.events.find((event) => event.kind === "result")?.result;
+    const previous = finalGroups[i - 1];
+    if (result && !result.isError && result.result.trim() !== "" &&
+        previous.kind === "text" && renderedText(previous).trim() === result.result.trim()) {
+      finalGroups.splice(i - 1, 1);
+      i--;
+    }
+  }
+
   // Mark tool calls as implicitly done when later events prove completion.
   // Within a group, every non-last non-background call is done (the agent
   // moved on to the next call). Entire non-last groups are fully done.
