@@ -154,6 +154,28 @@ describe("IncrementalTaskTimingTracker", () => {
     expect(timings.turns[0].waitMs).toBeNull();
     expect(timings.userWaitMs.size).toBe(0);
   });
+
+  it("processes only appended messages in a large replay", () => {
+    const tracker = new IncrementalTaskTimingTracker();
+    const messages = Array.from({ length: 65_000 }, (_, index): EventMessage => ({
+      kind: "system",
+      ts: index + 1,
+      system: { subtype: "idle" },
+    }));
+    messages[0] = input(1, "prompt");
+    messages[32_000] = result(32_001, 1);
+    messages[64_999] = input(65_000, "continue");
+
+    expect(tracker.derive(messages, false).turns[0].waitMs).toBe(32_999);
+
+    Object.defineProperty(messages[0], "ts", {
+      configurable: true,
+      get: () => { throw new Error("retained message was rescanned"); },
+    });
+    messages.push(input(70_000, "again"));
+
+    expect(tracker.derive(messages, false).turns).toHaveLength(1);
+  });
 });
 
 describe("formatTimingDuration", () => {
@@ -166,24 +188,5 @@ describe("formatTimingDuration", () => {
     expect(formatTimingDuration(65_000)).toBe("1:05");
     expect(formatTimingDuration(3_599_500)).toBe("1:00:00");
     expect(formatTimingDuration(7_260_000)).toBe("2:01:00");
-  });
-});
-
-describe("timing derivation performance", () => {
-  it("scans a large replay within one frame budget", () => {
-    const messages = Array.from({ length: 65_000 }, (_, index): EventMessage => ({
-      kind: "system",
-      ts: index + 1,
-      system: { subtype: "idle" },
-    }));
-    messages[32_000] = result(32_001, 1);
-    messages[64_999] = input(65_000, "continue");
-
-    const start = performance.now();
-    const timings = deriveTaskTimings(messages);
-    const elapsed = performance.now() - start;
-
-    expect(timings.turns[0].waitMs).toBe(32_999);
-    expect(elapsed).toBeLessThan(16);
   });
 });

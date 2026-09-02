@@ -25,6 +25,11 @@ export default function ModalDialog(props: Props) {
       if (focusRestoreScheduled) return;
       focusRestoreScheduled = true;
       requestAnimationFrame(() => {
+        // Closing the dialog drops focus to <body>. Any other active element
+        // means focus moved on while the frame was pending: leave it there
+        // instead of pulling the user back to the opener.
+        const active = document.activeElement;
+        if (active !== null && active !== document.body && !dialogRef.contains(active)) return;
         const currentTaskCard = openerTaskId
           ? [...document.querySelectorAll<HTMLElement>("[data-task-id]")].find((card) => card.dataset.taskId === openerTaskId)
           : undefined;

@@ -95,6 +95,35 @@ describe("ModalDialog", () => {
     await waitFor(() => expect(replacement).toHaveFocus());
   });
 
+  it("keeps focus where it moved while the restore frame was pending", async () => {
+    const user = userEvent.setup();
+    function DialogHost() {
+      const [open, setOpen] = createSignal(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>Open dialog</button>
+          <button type="button">Elsewhere</button>
+          <Show when={open()}>
+            <ModalDialog onClose={() => setOpen(false)} data-testid="modal-dialog">
+              <p>Dialog content</p>
+            </ModalDialog>
+          </Show>
+        </>
+      );
+    }
+    render(() => <DialogHost />);
+    const opener = screen.getByRole("button", { name: "Open dialog" });
+    const elsewhere = screen.getByRole("button", { name: "Elsewhere" });
+
+    await user.click(opener);
+    (screen.getByTestId("modal-dialog") as HTMLDialogElement).close();
+    elsewhere.focus();
+
+    await waitFor(() => expect(screen.queryByTestId("modal-dialog")).not.toBeInTheDocument());
+    await new Promise((resolve) => { requestAnimationFrame(resolve); });
+    expect(elsewhere).toHaveFocus();
+  });
+
   it("closes explicitly after an allowed native cancel", () => {
     const { dialog, onClose } = renderDialog();
     const cancel = new Event("cancel", { cancelable: true });
