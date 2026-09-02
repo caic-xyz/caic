@@ -14,7 +14,8 @@
   padding: 0;
 }
 
-.trigger:focus {
+.trigger:focus,
+.trigger[aria-expanded="true"] {
   box-shadow: 0 0 0 2px var(--color-primary-ring);
 }
 

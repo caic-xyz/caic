@@ -420,6 +420,67 @@ describe("App task-list SSE recovery", () => {
 });
 
 describe("App keyboard shortcuts", () => {
+  it.each([
+    {
+      harnesses: [
+        { name: "claude", models: [], supportsImages: false, supportsCompact: false },
+        { name: "codex", models: [], supportsImages: false, supportsCompact: false },
+      ],
+      targetTestId: "harness-select",
+      help: "Focus harness for the new task",
+    },
+    {
+      harnesses: [
+        { name: "codex", models: [{ id: "gpt-5", effortOptions: [] }], supportsImages: false, supportsCompact: false },
+      ],
+      targetTestId: "model-select",
+      help: "Focus model for the new task",
+    },
+  ])("describes the visible $targetTestId as the F3 target", async ({ harnesses, targetTestId, help }) => {
+    const user = userEvent.setup();
+    vi.mocked(api.listHarnesses).mockResolvedValue(harnesses as unknown as HarnessInfo[]);
+    renderApp();
+    await screen.findByTestId(targetTestId);
+
+    await user.keyboard("{F1}");
+
+    expect(screen.getByText(help)).toBeInTheDocument();
+  });
+
+  it("omits F3 from help when there is no dropdown to focus", async () => {
+    const user = userEvent.setup();
+    renderApp();
+    await waitFor(() => expect(api.listHarnesses).toHaveBeenCalledOnce());
+
+    await user.keyboard("{F1}");
+
+    expect(screen.queryByText("F3", { selector: "kbd" })).not.toBeInTheDocument();
+  });
+
+  it("uses runtime as the F3 target when no harness or model selector is visible", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getConfig).mockResolvedValue({
+      displayName: "test",
+      tailscaleAvailable: false,
+      usbAvailable: false,
+      displayAvailable: false,
+      sudoAvailable: false,
+      gitHubTokenAvailable: false,
+      voiceGateway: { mode: "disabled" },
+      runtimes: [{ name: "docker" }, { name: "podman" }],
+    });
+    renderApp();
+    const runtime = await screen.findByRole("combobox", { name: "Runtime" });
+
+    await user.keyboard("{F1}");
+    expect(screen.getByText("Focus runtime for the new task")).toBeInTheDocument();
+    (screen.getByTestId("keyboard-shortcuts-dialog") as HTMLDialogElement).close();
+    await waitFor(() => expect(screen.queryByTestId("keyboard-shortcuts-dialog")).not.toBeInTheDocument());
+
+    await user.keyboard("{F3}");
+    await waitFor(() => expect(runtime).toHaveFocus());
+  });
+
   it("focuses a delayed task-detail prompt on desktop", async () => {
     const taskLoad = deferred<Task>();
     vi.mocked(api.getTask).mockReturnValue(taskLoad.promise);
@@ -446,25 +507,28 @@ describe("App keyboard shortcuts", () => {
     expect(prompt).not.toHaveFocus();
   });
 
-  it("manages repositories with F2 and returns focus to the prompt", async () => {
+  it("focuses the first selected repository with F2", async () => {
     const user = userEvent.setup();
     renderApp();
     const prompt = screen.getByTestId("prompt-input");
     prompt.focus();
 
     await user.keyboard("{F2}");
-    await screen.findByRole("combobox", { name: "Manage repositories" });
-    await user.keyboard("{ArrowDown}{Enter}");
 
-    await waitFor(() => expect(screen.getByTestId("chip-label-repos/b")).toBeInTheDocument());
-    expect(prompt).toHaveFocus();
+    await waitFor(() => expect(screen.getByTestId("chip-label-repos/a")).toHaveFocus());
+    expect(screen.queryByRole("combobox", { name: "Manage repositories" })).not.toBeInTheDocument();
+  });
+
+  it("focuses the repository add button with F2 when none are selected", async () => {
+    const user = userEvent.setup();
+    renderApp();
+    await user.click(await screen.findByTestId("chip-remove-repos/a"));
+    screen.getByTestId("prompt-input").focus();
 
     await user.keyboard("{F2}");
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Manage repositories" })).toHaveFocus());
-    await user.keyboard("{ArrowDown}{Enter}");
 
-    await waitFor(() => expect(screen.queryByTestId("chip-label-repos/b")).not.toBeInTheDocument());
-    expect(prompt).toHaveFocus();
+    await waitFor(() => expect(screen.getByTestId("add-repo-button")).toHaveFocus());
+    expect(screen.queryByRole("combobox", { name: "Manage repositories" })).not.toBeInTheDocument();
   });
 
   it("changes harness with F3 and returns focus to the prompt", async () => {
@@ -483,6 +547,18 @@ describe("App keyboard shortcuts", () => {
 
     await waitFor(() => expect(screen.getByRole("combobox", { name: "Harness" })).toHaveValue("codex"));
     await waitFor(() => expect(prompt).toHaveFocus());
+  });
+
+  it("focuses the model with F3 when the harness is fixed", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.listHarnesses).mockResolvedValue([
+      { name: "codex", models: [{ id: "gpt-5", effortOptions: [] }], supportsImages: false, supportsCompact: false },
+    ] as unknown as HarnessInfo[]);
+    renderApp();
+
+    await user.keyboard("{F3}");
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Model" })).toHaveFocus());
   });
 
   it("navigates tasks with Shift+ArrowDown while editing the prompt", async () => {

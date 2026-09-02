@@ -37,6 +37,7 @@ describe("SearchableSelect", () => {
     const trigger = screen.getByRole("button", { name: "Pick" });
     expect(trigger).toHaveTextContent("Alpha");
     await user.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("combobox", { name: "Pick" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Alpha" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Default" })).toBeInTheDocument();

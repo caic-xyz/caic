@@ -25,6 +25,8 @@ export default function MainLayout(props: { children?: JSX.Element }) {
   const s = useAppState();
   const hostMode = useHostMode();
   const nativeTaskNumberMap = new TaskNumberMap();
+  const modelSettingVisible = () => s.harnesses().length > 1
+    || (s.harnesses().find((harness) => harness.name === s.selectedHarness())?.models.length ?? 0) > 0;
 
   // Android owns the voice session in host mode. Mirror its connection state
   // and retain the same active-first numbering as the native voice prompt.
@@ -73,6 +75,9 @@ export default function MainLayout(props: { children?: JSX.Element }) {
         {s.runtimes().length > 1 && (
           <ControlSelect
             aria-label="Runtime"
+            aria-keyshortcuts={modelSettingVisible() ? undefined : "F3"}
+            data-testid="runtime-select"
+            title={modelSettingVisible() ? undefined : "Choose runtime (F3)"}
             value={s.selectedRuntimeName()}
             onChange={(e) => s.setSelectedRuntimeName(e.currentTarget.value)}
           >

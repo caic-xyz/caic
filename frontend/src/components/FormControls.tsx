@@ -88,6 +88,7 @@ export function HarnessControls(props: {
         <SearchableSelect
           class={styles.selectTrigger}
           ariaLabel={label("Model")}
+          ariaKeyShortcuts={props.harnesses.length > 1 ? undefined : props.harnessKeyShortcuts}
           value={props.model}
           options={modelOptions}
           placeholder="Search models…"
@@ -99,6 +100,7 @@ export function HarnessControls(props: {
       <Show when={efforts().length > 0}>
         <ControlSelect
           aria-label={label("Effort")}
+          data-testid={`${props.labelPrefix ? "fork-" : ""}effort-select`}
           value={props.effort}
           onChange={(e) => props.onEffort(e.currentTarget.value)}
         >

@@ -21,14 +21,24 @@ test("completes the primary task flow using only the keyboard", async ({ page, a
   await expect(newTaskPrompt).toBeFocused();
 
   await newTaskPrompt.press("F2");
+  await expect(repoLabel).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(repoRemove).toBeFocused();
+  await page.keyboard.press("Tab");
+  const addRepository = page.getByTestId("add-repo-button");
+  await expect(addRepository).toBeFocused();
+  await page.keyboard.press("Enter");
   const repositoryFilter = page.getByRole("combobox", { name: "Manage repositories" });
   await expect(repositoryFilter).toBeFocused();
+  await expect(addRepository).toHaveCSS("box-shadow", /rgb/);
   const repository = page.getByRole("option", { selected: false }).first();
   const repositoryName = await repository.textContent();
   if (!repositoryName) throw new Error("Repository option has no label");
   await page.keyboard.type(repositoryName);
   await page.keyboard.press("Enter");
   await expect(repositoryFilter).not.toBeVisible();
+  await expect(addRepository).toBeFocused();
+  await page.keyboard.press("Escape");
   await expect(newTaskPrompt).toBeFocused();
   const promptRow = newTaskPrompt.locator("..");
   await expect(promptRow).toHaveCSS("box-shadow", /inset/);
