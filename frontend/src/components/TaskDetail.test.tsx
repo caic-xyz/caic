@@ -361,6 +361,38 @@ describe("TaskDetail", () => {
     expect(getByText("0s").className).toMatch(/turnDuration/);
   });
 
+  it("shows total work duration on a section collapsed after compaction", () => {
+    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+      const firstResult = resultEvent(3_000);
+      const secondResult = resultEvent(65_000);
+      if (!firstResult.result || !secondResult.result) throw new Error("result fixture is missing payload");
+      firstResult.result.duration = 2;
+      secondResult.result.duration = 3;
+      const events: EventMessage[] = [
+        { kind: "init", ts: 1_000, init: { model: "test", agentVersion: "test", sessionID: "session-one", tools: [], cwd: "", harness: "test" } },
+        { kind: "text", ts: 2_000, text: { text: "first response" } },
+        firstResult,
+        { kind: "userInput", ts: 62_000, userInput: { text: "continue" } },
+        { kind: "text", ts: 63_000, text: { text: "second response" } },
+        secondResult,
+        { kind: "system", ts: 66_000, system: { subtype: "compact_boundary" } },
+        { kind: "text", ts: 67_000, text: { text: "response after compaction" } },
+        resultEvent(68_000),
+      ];
+      for (const event of events) handlers.onMessage(event);
+      handlers.onReady?.();
+      return {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      } as unknown as EventSource;
+    });
+
+    const { getByText } = renderTaskDetail();
+
+    expect(getByText("0:05").className).toMatch(/sessionDuration/);
+  });
+
   it("shows recover actions for crashed tasks", async () => {
     const user = userEvent.setup();
     const onRevive = vi.fn();

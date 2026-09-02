@@ -51,6 +51,8 @@ export interface Session {
   turns: Turn[];
   toolCount: number;
   textCount: number;
+  // Sum of turn runtimes, excluding time between a result and the next user input.
+  durationMs: number;
 }
 
 
@@ -713,11 +715,13 @@ export function groupSessions(msgs: EventMessage[]): Session[] {
     const turns = groupTurns(groups);
     let toolCount = 0;
     let textCount = 0;
+    let durationMs = 0;
     for (const t of turns) {
       toolCount += t.toolCount;
       textCount += t.textCount;
+      durationMs += t.durationMs;
     }
-    sessions.push({ boundaryEvent, turns, toolCount, textCount });
+    sessions.push({ boundaryEvent, turns, toolCount, textCount, durationMs });
     boundaryEvent = undefined;
     segment = [];
   }

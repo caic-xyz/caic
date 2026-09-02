@@ -620,6 +620,27 @@ describe("groupSessions", () => {
     expect(sessions[0].toolCount).toBe(1);
     expect(sessions[0].textCount).toBe(1);
   });
+
+  it("session duration sums turn runtimes instead of elapsed wall time", () => {
+    const firstResult = resultEvent();
+    const secondResult = resultEvent();
+    if (!firstResult.result || !secondResult.result) throw new Error("result fixture is missing payload");
+    firstResult.ts = 3_000;
+    firstResult.result.duration = 2;
+    secondResult.ts = 65_000;
+    secondResult.result.duration = 3;
+
+    const sessions = groupSessions([
+      { kind: "init", ts: 1_000, init: { model: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      textDeltaEvent("first response"),
+      firstResult,
+      { kind: "userInput", ts: 62_000, userInput: { text: "continue" } },
+      textDeltaEvent("second response"),
+      secondResult,
+    ]);
+
+    expect(sessions[0].durationMs).toBe(5_000);
+  });
 });
 
 describe("groupTurns", () => {

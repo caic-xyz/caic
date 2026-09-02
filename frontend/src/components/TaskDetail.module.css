@@ -1046,8 +1046,9 @@ a.ciStatus:hover {
 
 /* Session-level eliding: visually heavier than turn eliding to reflect the hierarchy. */
 .sessionElided {
-  display: block;
+  display: flex;
   width: 100%;
+  align-items: baseline;
   margin-bottom: 0.4rem;
   background: var(--color-session-bg);
   border: none;
@@ -1058,6 +1059,14 @@ a.ciStatus:hover {
   font-weight: 500;
   color: var(--color-on-primary-container);
   text-align: left;
+}
+
+.sessionDuration {
+  margin-left: auto;
+  padding-left: 0.75rem;
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .sessionElided::before {

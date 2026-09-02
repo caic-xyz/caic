@@ -779,7 +779,10 @@ export default function TaskDetail(props: Props) {
                   {(se) => (
                     <button class={styles.sessionElided} data-anchor-key={`session:${se.sessionKey}`}
                       onClick={(e) => anchoredToggleSession(e, se.sessionKey)}>
-                      {sessionSummary(se.session)}
+                      <span class={styles.turnSummaryText}>{sessionSummary(se.session)}</span>
+                      <span class={styles.sessionDuration}>
+                        {se.session.durationMs > 0 ? formatTimingDuration(se.session.durationMs) : "0s"}
+                      </span>
                     </button>
                   )}
                 </Match>
@@ -788,7 +791,10 @@ export default function TaskDetail(props: Props) {
                   {(sh) => (
                     <button class={`${styles.sessionElided} ${styles.sessionElidedExpanded}`} data-anchor-key={`session:${sh.sessionKey}`}
                       onClick={(e) => anchoredToggleSession(e, sh.sessionKey)}>
-                      {sessionSummary(sh.session)}
+                      <span class={styles.turnSummaryText}>{sessionSummary(sh.session)}</span>
+                      <span class={styles.sessionDuration}>
+                        {sh.session.durationMs > 0 ? formatTimingDuration(sh.session.durationMs) : "0s"}
+                      </span>
                     </button>
                   )}
                 </Match>
