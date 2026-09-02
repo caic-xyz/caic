@@ -273,6 +273,33 @@ describe("groupMessages", () => {
     expect(groups[2].kind).toBe("other");
   });
 
+  it("coalesces Codex thinking without leaving timing-only blank groups", () => {
+    const usage = (ts: number): EventMessage => ({
+      ...usageEvent(),
+      ts,
+    });
+    const groups = groupMessages([
+      { kind: "thinkingDelta", ts: 1_000, thinkingDelta: { text: "first thought" } },
+      { kind: "textDelta", ts: 2_000, textDelta: { text: "\n" } },
+      { kind: "thinking", ts: 3_000, thinking: { text: "FIRST THOUGHT" } },
+      { kind: "text", ts: 4_000, text: { text: "\n" } },
+      usage(4_000),
+      { kind: "thinkingDelta", ts: 5_000, thinkingDelta: { text: "second thought" } },
+      { kind: "textDelta", ts: 6_000, textDelta: { text: "\n" } },
+      { kind: "thinking", ts: 7_000, thinking: { text: "SECOND THOUGHT" } },
+      { kind: "text", ts: 8_000, text: { text: "\n" } },
+      usage(8_000),
+      { kind: "text", ts: 9_000, text: { text: "done" } },
+    ]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups[0].kind).toBe("action");
+    expect(groups[0].toolCalls).toHaveLength(0);
+    expect(groups[0].timingSegments).toHaveLength(2);
+    expect(groups[0].timingSegments?.flat().filter((event) => event.kind === "usage")).toHaveLength(1);
+    expect(groups[1].kind).toBe("text");
+  });
+
   it("real text breaks the thinking coalescing chain", () => {
     // Thinking separated only by tool calls coalesces; a group with real model
     // text ends the chain, and thinking after it starts a fresh group. A run

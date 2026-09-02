@@ -245,6 +245,43 @@ describe("TaskDetail", () => {
     expect(timing[0].querySelector("svg")).toBeNull();
   });
 
+  it("shows one summed timing control for collapsed Codex thinking", () => {
+    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+      const usage = (ts: number): EventMessage => ({
+        kind: "usage",
+        ts,
+        usage: { inputTokens: 10, outputTokens: 5, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, model: "test" },
+      });
+      const events: EventMessage[] = [
+        { kind: "thinkingDelta", ts: 1_000, thinkingDelta: { text: "first thought" } },
+        { kind: "textDelta", ts: 2_000, textDelta: { text: "\n" } },
+        { kind: "thinking", ts: 3_000, thinking: { text: "FIRST THOUGHT" } },
+        { kind: "text", ts: 4_000, text: { text: "\n" } },
+        usage(4_000),
+        { kind: "thinkingDelta", ts: 5_000, thinkingDelta: { text: "second thought" } },
+        { kind: "textDelta", ts: 6_000, textDelta: { text: "\n" } },
+        { kind: "thinking", ts: 7_000, thinking: { text: "SECOND THOUGHT" } },
+        { kind: "text", ts: 8_000, text: { text: "\n" } },
+        usage(8_000),
+        { kind: "text", ts: 9_000, text: { text: "done" } },
+      ];
+      for (const event of events) handlers.onMessage(event);
+      handlers.onReady?.();
+      return {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      } as unknown as EventSource;
+    });
+
+    const { getAllByLabelText } = renderTaskDetail({ harness: "codex" });
+
+    const timings = getAllByLabelText("Timing details");
+    expect(timings).toHaveLength(2);
+    expect(timings[0]).toHaveTextContent("0:05");
+    expect(timings[1]).toHaveTextContent("0:03");
+  });
+
   it("formats short result durations without misleading zero seconds", () => {
     vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
       const event = resultEvent(2_000);
@@ -818,6 +855,7 @@ describe("SSE connection", () => {
     expect(document.body.textContent).toContain("50t thinking");
     expect(document.body.textContent).not.toContain("claude");
     expect(document.body.textContent).toContain("codex · 100t new · 200t cache write · 700t cache read · 40t out");
+    expect(document.querySelectorAll('[aria-label="Timing details"]')).toHaveLength(0);
   });
 
   it("replayed textDelta events render once the SSE ready marker arrives", () => {

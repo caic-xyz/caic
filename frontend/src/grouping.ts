@@ -18,6 +18,9 @@ export interface MessageGroup {
   widgetDone?: boolean;
   // For result groups whose payload canonically replaces duplicate text.
   resultReplacesText?: boolean;
+  // Thinking event segments whose durations are summed when several Codex
+  // thinking blocks collapse into one visual group.
+  timingSegments?: EventMessage[][];
 }
 
 // A tool_use event paired with its optional tool_result.
@@ -421,9 +424,12 @@ export function groupMessages(msgs: EventMessage[]): MessageGroup[] {
     if (final) return final.text?.text ?? "";
     return g.events.filter((e) => e.kind === "textDelta").map((e) => e.textDelta?.text ?? "").join("");
   };
-  const droppableText = (g: MessageGroup) =>
-    g.kind === "text" && renderedText(g).trim() === "" &&
-    g.events.every((e) => e.kind === "text" || e.kind === "textDelta" || isThinkingEv(e));
+  const isBlankTextEv = (e: EventMessage) =>
+    (e.kind === "text" && (e.text?.text ?? "").trim() === "") ||
+    (e.kind === "textDelta" && (e.textDelta?.text ?? "").trim() === "");
+  const droppableEmptyGroup = (g: MessageGroup, events: EventMessage[]) =>
+    (g.kind === "text" || (g.kind === "action" && g.toolCalls.length === 0)) &&
+    events.length > 0 && events.every((e) => e.kind === "usage" || isBlankTextEv(e));
 
   const finalGroups: MessageGroup[] = [];
   let holder: MessageGroup | undefined;
@@ -438,18 +444,21 @@ export function groupMessages(msgs: EventMessage[]): MessageGroup[] {
     }
     const think = g.events.filter(isThinkingEv);
     if (think.length === 0) {
-      if (droppableText(g)) continue;
+      if (droppableEmptyGroup(g, g.events)) continue;
       if (g.kind === "text" && renderedText(g).trim() !== "") resetRun();
       finalGroups.push(g);
       continue;
     }
     const hasRealText = g.kind === "text" && renderedText(g).trim() !== "";
     const rest = g.events.filter((e) => !isThinkingEv(e));
+    const dropRest = droppableEmptyGroup(g, rest);
+    const timingSegment = dropRest ? g.events : think;
     const pushRest = () => {
-      if (rest.length > 0 && !droppableText(g)) finalGroups.push({ ...g, events: rest });
+      if (rest.length > 0 && !dropRest) finalGroups.push({ ...g, events: rest });
     };
     if (holder) {
       holder.events.push(...think);
+      holder.timingSegments?.push(timingSegment);
       pushRest();
     } else if (pendingIdx >= 0) {
       // Second thinking group in the run: promote the first group's thinking
@@ -458,15 +467,17 @@ export function groupMessages(msgs: EventMessage[]): MessageGroup[] {
       const firstIdx = pendingIdx;
       const first = finalGroups[firstIdx];
       const fRest = first.events.filter((e) => !isThinkingEv(e));
+      const dropFirstRest = droppableEmptyGroup(first, fRest);
       const h: MessageGroup = {
         kind: "action",
         events: [...first.events.filter(isThinkingEv), ...think],
         toolCalls: [],
+        timingSegments: [dropFirstRest ? first.events : first.events.filter(isThinkingEv), timingSegment],
       };
       finalGroups[firstIdx] = h;
       holder = h;
       pendingIdx = -1;
-      if (fRest.length > 0 && !droppableText(first)) {
+      if (fRest.length > 0 && !dropFirstRest) {
         finalGroups.splice(firstIdx + 1, 0, { ...first, events: fRest });
       }
       pushRest();

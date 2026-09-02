@@ -847,10 +847,11 @@ export default function TaskDetail(props: Props) {
                   {(gi) => (
                     <div class={gi().indent === "turn" ? styles.indentTurn : undefined}>
                       <div class={styles.timedItemContent}>
-                        <Show when={gi().group.kind !== "action" || gi().group.toolCalls.length !== 1}>
+                        <Show when={hasGroupTiming(gi().group) && (gi().group.kind !== "action" || gi().group.toolCalls.length !== 1)}>
                           <span class={`${styles.messageTiming}${gi().group.events.some((event) => event.kind === "result") ? ` ${styles.messageTimingCardInset}` : ""}`}>
                             <TimingIcon
                               events={gi().group.events}
+                              segments={gi().group.timingSegments}
                               userWaitMs={taskTimings().userWaitMs}
                               previousEventTs={taskTimings().previousEventTs}
                             />
@@ -1013,6 +1014,26 @@ function GroupContent(props: {
         </For>
       </Match>
     </Switch>
+  );
+}
+
+function hasGroupTiming(group: MessageGroup): boolean {
+  if (group.kind === "action") {
+    return group.toolCalls.length > 0 || group.events.some((event) =>
+      (event.kind === "thinking" && (event.thinking?.text ?? "").trim() !== "") ||
+      (event.kind === "thinkingDelta" && (event.thinkingDelta?.text ?? "").trim() !== ""),
+    );
+  }
+  if (group.kind === "text") {
+    return group.events.some((event) =>
+      (event.kind === "text" && (event.text?.text ?? "").trim() !== "") ||
+      (event.kind === "textDelta" && (event.textDelta?.text ?? "").trim() !== "") ||
+      (event.kind === "thinking" && (event.thinking?.text ?? "").trim() !== "") ||
+      (event.kind === "thinkingDelta" && (event.thinkingDelta?.text ?? "").trim() !== ""),
+    );
+  }
+  return group.kind !== "other" || group.events.some((event) =>
+    event.kind !== "usage" && event.system?.subtype !== "step_start",
   );
 }
 

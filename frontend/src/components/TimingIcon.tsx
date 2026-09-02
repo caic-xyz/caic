@@ -10,6 +10,7 @@ import styles from "./TimingIcon.module.css";
 
 interface Props {
   events: readonly EventMessage[];
+  segments?: readonly (readonly EventMessage[])[];
   userWaitMs?: ReadonlyMap<EventMessage, number>;
   previousEventTs?: ReadonlyMap<EventMessage, number>;
   range?: { start: number; end: number } | null;
@@ -31,6 +32,36 @@ export default function TimingIcon(props: Props) {
       ? { start: previousTs, end: range.end }
       : range;
   });
+  const combinedDurationMs = createMemo(() => {
+    if (props.segments === undefined) return null;
+    let total = 0;
+    let timedSegments = 0;
+    for (const events of props.segments) {
+      let start = Number.POSITIVE_INFINITY;
+      let end = 0;
+      let firstEvent: EventMessage | undefined;
+      for (const event of events) {
+        if (event.ts <= 0) continue;
+        if (event.ts < start) {
+          start = event.ts;
+          firstEvent = event;
+        }
+        end = Math.max(end, event.ts);
+      }
+      if (!Number.isFinite(start)) continue;
+      if (end > start) {
+        total += end - start;
+        timedSegments++;
+        continue;
+      }
+      const previousTs = firstEvent ? props.previousEventTs?.get(firstEvent) : undefined;
+      if (previousTs !== undefined && previousTs < start) {
+        total += start - previousTs;
+        timedSegments++;
+      }
+    }
+    return timedSegments > 0 ? total : null;
+  });
   const details = createMemo(() => {
     const lines: string[] = [];
     const timing = eventTiming();
@@ -43,7 +74,10 @@ export default function TimingIcon(props: Props) {
     const hasRange = start !== null && end !== null && end > start;
     const hasWait = waitMs !== undefined && waitMs > 0;
 
-    if (result && result.duration > 0) {
+    const combinedMs = combinedDurationMs();
+    if (combinedMs !== null) {
+      lines.push(`Combined elements: ${formatTimingDuration(combinedMs)}`);
+    } else if (result && result.duration > 0) {
       lines.push(`Turn: ${formatTimingDuration(result.duration * 1000)}`);
       if (result.durationAPI > 0) lines.push(`API: ${formatTimingDuration(result.durationAPI * 1000)}`);
     } else if (hasRange && !hasWait) {
@@ -60,6 +94,8 @@ export default function TimingIcon(props: Props) {
     return lines.join("\n");
   });
   const displayedDuration = createMemo(() => {
+    const combinedMs = combinedDurationMs();
+    if (combinedMs !== null) return { ms: combinedMs, prefix: "" };
     const timing = eventTiming();
     const result = timing.resultEvent?.result;
     if (result && result.duration > 0) return { ms: result.duration * 1000, prefix: "" };
