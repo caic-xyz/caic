@@ -8,19 +8,6 @@
   background: transparent;
 }
 
-.overlay {
-  grid-column: 2;
-  grid-row: 1;
-  align-self: start;
-  z-index: 2;
-  margin-top: 0.15rem;
-  margin-right: 0.5rem;
-}
-
-.cardInset {
-  margin-top: 0.65rem;
-}
-
 .content {
   display: inline-flex;
   align-items: center;

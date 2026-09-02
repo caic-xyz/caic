@@ -14,8 +14,6 @@ interface Props {
   previousEventTs?: ReadonlyMap<EventMessage, number>;
   range?: { start: number; end: number } | null;
   showZero?: boolean;
-  overlay?: boolean;
-  cardInset?: boolean;
 }
 
 export default function TimingIcon(props: Props) {
@@ -76,7 +74,7 @@ export default function TimingIcon(props: Props) {
   return (
     <Show when={details()} keyed>
       {(text) => (
-        <Tooltip text={text} class={`${styles.tooltip}${props.overlay ? ` ${styles.overlay}` : ""}${props.cardInset ? ` ${styles.cardInset}` : ""}`}>
+        <Tooltip text={text} class={styles.tooltip}>
           <span class={styles.content} aria-label="Timing details" data-testid="timing-duration">
             <Show when={displayedDuration()} keyed>
               {(duration) => <span class={styles.value}>{duration.prefix}{duration.ms === 0 ? "0s" : formatTimingDuration(duration.ms)}</span>}

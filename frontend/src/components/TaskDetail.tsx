@@ -823,8 +823,17 @@ export default function TaskDetail(props: Props) {
                 {/* Message group: non-keyed to preserve iframe state in WidgetCard. */}
                 <Match when={grpItem()}>
                   {(gi) => (
-                    <div class={`${styles.timedItem}${gi().indent === "turn" ? ` ${styles.indentTurn}` : ""}`}>
+                    <div class={gi().indent === "turn" ? styles.indentTurn : undefined}>
                       <div class={styles.timedItemContent}>
+                        <Show when={gi().group.kind !== "action" || gi().group.toolCalls.length !== 1}>
+                          <span class={`${styles.messageTiming}${gi().group.events.some((event) => event.kind === "result") ? ` ${styles.messageTimingCardInset}` : ""}`}>
+                            <TimingIcon
+                              events={gi().group.events}
+                              userWaitMs={taskTimings().userWaitMs}
+                              previousEventTs={taskTimings().previousEventTs}
+                            />
+                          </span>
+                        </Show>
                         <GroupContent
                           group={() => gi().group}
                           taskId={props.taskId}
@@ -835,15 +844,6 @@ export default function TaskDetail(props: Props) {
                           pendingAction={pendingAction}
                         />
                       </div>
-                      <Show when={gi().group.kind !== "action" || gi().group.toolCalls.length !== 1}>
-                        <TimingIcon
-                          events={gi().group.events}
-                          userWaitMs={taskTimings().userWaitMs}
-                          previousEventTs={taskTimings().previousEventTs}
-                          overlay
-                          cardInset={gi().group.events.some((event) => event.kind === "result")}
-                        />
-                      </Show>
                     </div>
                   )}
                 </Match>
