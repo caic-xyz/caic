@@ -682,16 +682,19 @@ describe("App keyboard shortcuts", () => {
     const user = userEvent.setup();
     renderApp();
 
-    screen.getByTestId("prompt-input").focus();
+    const prompt = screen.getByTestId("prompt-input");
+    prompt.focus();
     await user.keyboard("{F1}");
     expect(screen.getByTestId("keyboard-shortcuts-dialog")).toBeInTheDocument();
     (screen.getByTestId("keyboard-shortcuts-dialog") as HTMLDialogElement).close();
-    expect(screen.queryByTestId("keyboard-shortcuts-dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(prompt).toHaveFocus());
 
-    screen.getByTestId("new-task-button").focus();
+    const newTaskButton = screen.getByTestId("new-task-button");
+    newTaskButton.focus();
     await user.keyboard("?");
     expect(screen.getByTestId("keyboard-shortcuts-dialog")).toBeInTheDocument();
     (screen.getByTestId("keyboard-shortcuts-dialog") as HTMLDialogElement).close();
+    await waitFor(() => expect(newTaskButton).toHaveFocus());
 
     await user.click(screen.getByTitle("Menu"));
     await user.click(screen.getByRole("menuitem", { name: "Keyboard shortcuts" }));
