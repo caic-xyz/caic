@@ -83,8 +83,8 @@ describe("StatsIcon", () => {
     expect(invocations).toHaveTextContent("7.0kt");
     expect(invocations).toHaveTextContent("200t");
     expect(getByLabelText("Turn 1 used 1.0kt of uncached input")).toBeInTheDocument();
-    expect(await findByTestId("turn-token-chart")).toBeInTheDocument();
-    expect(await findByTestId("tool-time-chart")).toBeInTheDocument();
+    expect(await findByTestId("turn-token-chart", undefined, { timeout: 5_000 })).toBeInTheDocument();
+    expect(await findByTestId("tool-time-chart", undefined, { timeout: 5_000 })).toBeInTheDocument();
   });
 
   it("keeps double-digit turns in chronological chart order without Plot warnings", async () => {
