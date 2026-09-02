@@ -109,6 +109,7 @@ type Config struct {
 	VoiceGateway         VoiceGatewayMetadata `json:"voiceGateway"`
 	GitHubAppEnabled     bool                 `json:"gitHubAppEnabled,omitempty"`
 	AuthProviders        []string             `json:"authProviders,omitempty"` // e.g. ["github","gitlab"]
+	MCPOAuthAvailable    bool                 `json:"mcpOAuthAvailable"`
 	Runtimes             []RuntimeInfo        `json:"runtimes,omitempty"`
 }
 

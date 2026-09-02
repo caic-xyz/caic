@@ -50,6 +50,7 @@ type serverHandlers struct {
 	githubOAuth        *oauthclient.ProviderConfig
 	gitlabOAuth        *oauthclient.ProviderConfig
 	googleOAuth        *oauthclient.ProviderConfig
+	mcpOAuthAvailable  bool
 	voiceGateway       v1.VoiceGatewayMetadata
 }
 
@@ -69,6 +70,7 @@ func (h *serverHandlers) getConfig(ctx context.Context, _ *api.EmptyReq) (*v1.Co
 		GitHubTokenAvailable: h.forgeMgr.GitHubToken() != "" || h.githubOAuth != nil,
 		VoiceGateway:         h.voiceGateway,
 		GitHubAppEnabled:     h.forgeMgr.GitHubApp() != nil,
+		MCPOAuthAvailable:    h.mcpOAuthAvailable,
 	}
 	if h.authStore != nil {
 		cfg.AuthProviders = h.authProviders()

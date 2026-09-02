@@ -41,7 +41,7 @@ interface SettingsFormProps {
   setAutoFixCI: Setter<boolean>;
   autoFixPR: Accessor<boolean>;
   setAutoFixPR: Setter<boolean>;
-  authProviders: Accessor<string[]>;
+  mcpOAuthAvailable: Accessor<boolean>;
   oauthGrants: Accessor<OAuthGrantResp[]>;
   oauthGrantError: Accessor<string>;
   revokingOAuthGrantID: Accessor<string | null>;
@@ -352,7 +352,7 @@ export default function SettingsForm(props: SettingsFormProps) {
             + Add mount
           </button>
         </div>
-        <Show when={props.authProviders().length > 0}>
+        <Show when={props.mcpOAuthAvailable()}>
           <div class={styles.settingsSection}>
             <h3 class={styles.settingsSectionTitle}>MCP clients</h3>
             <p class={styles.settingsDescription}>Remote clients authorized to access caic through MCP OAuth.</p>

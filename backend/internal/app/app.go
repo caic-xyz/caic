@@ -138,11 +138,13 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	}
 
 	var hostState *auth.HostState
+	var oauthIssuer string
 	isAuto := strings.EqualFold(cfg.Auth.ExternalURL, "auto")
 	if isAuto {
-		hostState = auth.NewHostStateWithTrustedProxies("", trustedProxies)
+		hostState = auth.NewHostState("", trustedProxies)
 	} else if cfg.Auth.ExternalURL != "" {
-		hostState = auth.NewHostStateWithTrustedProxies(cfg.Auth.ExternalURL, trustedProxies)
+		hostState = auth.NewHostState(cfg.Auth.ExternalURL, trustedProxies)
+		oauthIssuer = cfg.Auth.ExternalURL
 	}
 
 	appLog.InfoContext(ctx, "github", "pat", auth.MaskedToken(cfg.GitHub.Token), "oauth", auth.MaskedToken(cfg.GitHub.OAuthClientID))
@@ -326,7 +328,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		SessionSecret:              sessionSecret,
 		OAuthPrivateKeyPEM:         []byte(settings.OAuthPrivateKeyPEM),
 		OAuthKeyID:                 settings.OAuthKeyID,
-		OAuthIssuer:                cfg.Auth.ExternalURL,
+		OAuthIssuer:                oauthIssuer,
 		OAuthRefreshTokenStorePath: filepath.Join(cfg.Dirs.ConfigDir, "oauth_refresh_tokens.json"),
 		AuditLogPath:               filepath.Join(cfg.Dirs.CacheDir, "oauth_audit.jsonl"),
 		GitHubOAuth:                githubOAuth,

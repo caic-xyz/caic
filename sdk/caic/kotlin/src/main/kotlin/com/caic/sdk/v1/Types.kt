@@ -808,6 +808,7 @@ data class Config(
     val gitHubAppEnabled: Boolean? = null,
     /** e.g. ["github","gitlab"] */
     val authProviders: List<String>? = null,
+    @SerialName("mcpOAuthAvailable") val mcpOAuthAvailable: Boolean,
     val runtimes: List<RuntimeInfo>? = null,
 )
 

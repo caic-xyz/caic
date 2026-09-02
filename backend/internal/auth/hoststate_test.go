@@ -49,7 +49,7 @@ func TestHostState(t *testing.T) {
 			t.Parallel()
 			state := &auth.HostState{}
 			if tc.trusted {
-				state = auth.NewHostStateWithTrustedProxies("", []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")})
+				state = auth.NewHostState("", []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")})
 			}
 			r := dummyReq(t, tc.host, tc.xfh, tc.xfp)
 			if got := state.ExternalURL(r); got != tc.want {
@@ -98,7 +98,7 @@ func TestHostState(t *testing.T) {
 
 	t.Run("static host state", func(t *testing.T) {
 		t.Parallel()
-		host := auth.NewHostState("https://caic.example.com:8443")
+		host := auth.NewHostState("https://caic.example.com:8443", nil)
 		r := dummyReq(t, "caic.example.com:8443", "", "https")
 		if got := host.ExternalURL(r); got != "https://caic.example.com:8443" {
 			t.Errorf("ExternalURL = %q, want %q", got, "https://caic.example.com:8443")
@@ -117,7 +117,7 @@ func TestHostState(t *testing.T) {
 
 	t.Run("trusted standardized Forwarded uses nearest proxy value", func(t *testing.T) {
 		t.Parallel()
-		state := auth.NewHostStateWithTrustedProxies("", []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")})
+		state := auth.NewHostState("", []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")})
 		r := dummyReq(t, "127.0.0.1:2242", "", "")
 		r.Header.Set("Forwarded", `for=198.51.100.1;host=poison.example;proto=http, for=203.0.113.2;host=caic.example.com;proto=https`)
 		if got := state.ExternalURL(r); got != "https://caic.example.com" {
@@ -127,7 +127,7 @@ func TestHostState(t *testing.T) {
 
 	t.Run("trusted repeated Forwarded fields use final proxy field", func(t *testing.T) {
 		t.Parallel()
-		state := auth.NewHostStateWithTrustedProxies("", []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")})
+		state := auth.NewHostState("", []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")})
 		r := dummyReq(t, "127.0.0.1:2242", "", "")
 		r.Header.Add("Forwarded", "host=poison.example;proto=http")
 		r.Header.Add("Forwarded", "for=203.0.113.2;host=caic.example.com;proto=https")
@@ -138,7 +138,7 @@ func TestHostState(t *testing.T) {
 
 	t.Run("trusted repeated X-Forwarded fields use final proxy values", func(t *testing.T) {
 		t.Parallel()
-		state := auth.NewHostStateWithTrustedProxies("", []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")})
+		state := auth.NewHostState("", []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")})
 		r := dummyReq(t, "127.0.0.1:2242", "", "")
 		r.Header.Add("X-Forwarded-Host", "poison.example")
 		r.Header.Add("X-Forwarded-Host", "old.example, caic.example.com")
@@ -151,7 +151,7 @@ func TestHostState(t *testing.T) {
 
 	t.Run("trusted inconsistent forwarding header sets are rejected", func(t *testing.T) {
 		t.Parallel()
-		state := auth.NewHostStateWithTrustedProxies("", []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")})
+		state := auth.NewHostState("", []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")})
 		h := state.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 		r := dummyReq(t, "127.0.0.1:2242", "poison.example", "https")
 		r.Header.Set("Forwarded", "host=caic.example.com;proto=https")
@@ -164,7 +164,7 @@ func TestHostState(t *testing.T) {
 
 	t.Run("trusted malformed final forwarding value is rejected", func(t *testing.T) {
 		t.Parallel()
-		state := auth.NewHostStateWithTrustedProxies("", []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")})
+		state := auth.NewHostState("", []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")})
 		h := state.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 		r := dummyReq(t, "127.0.0.1:2242", "", "")
 		r.Header.Add("Forwarded", "host=caic.example.com;proto=https")
@@ -182,7 +182,7 @@ func TestHostState(t *testing.T) {
 			"host=;host=caic.example.com;proto=https",
 			"host=caic.example.com;proto=;proto=https",
 		} {
-			state := auth.NewHostStateWithTrustedProxies("", []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")})
+			state := auth.NewHostState("", []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")})
 			h := state.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 			r := dummyReq(t, "127.0.0.1:2242", "", "")
 			r.Header.Set("Forwarded", forwarded)
@@ -207,7 +207,7 @@ func TestHostState(t *testing.T) {
 			"[2001:db8::10]",
 			"[2001:db8::10]:notaport",
 		} {
-			state := auth.NewHostStateWithTrustedProxies("", trusted)
+			state := auth.NewHostState("", trusted)
 			r := dummyReq(t, "direct.example.com", "poison.example.com", "https")
 			r.RemoteAddr = remoteAddr
 			if got := state.ExternalURL(r); got != "http://direct.example.com" {
@@ -218,7 +218,7 @@ func TestHostState(t *testing.T) {
 
 	t.Run("untrusted Forwarded cannot satisfy static host check", func(t *testing.T) {
 		t.Parallel()
-		state := auth.NewHostState("https://caic.example.com")
+		state := auth.NewHostState("https://caic.example.com", nil)
 		h := state.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 		r := dummyReq(t, "evil.example.com", "caic.example.com", "https")
 		r.Header.Set("Forwarded", "host=caic.example.com;proto=https")
@@ -298,12 +298,12 @@ func BenchmarkHostStateMiddleware(b *testing.B) {
 	}{
 		{
 			name:  "direct",
-			state: auth.NewHostState("https://caic.example.com"),
+			state: auth.NewHostState("https://caic.example.com", nil),
 			req:   httptest.NewRequestWithContext(b.Context(), http.MethodGet, "https://caic.example.com/", http.NoBody),
 		},
 		{
 			name:  "trusted forwarded",
-			state: auth.NewHostStateWithTrustedProxies("https://caic.example.com", []netip.Prefix{trustedPrefix}),
+			state: auth.NewHostState("https://caic.example.com", []netip.Prefix{trustedPrefix}),
 			req:   httptest.NewRequestWithContext(b.Context(), http.MethodGet, "http://127.0.0.1:2242/", http.NoBody),
 		},
 	} {

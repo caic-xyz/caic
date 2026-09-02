@@ -32,9 +32,11 @@
 # enable MCP off-localhost.
 #http = ":2242"
 
-# Public base URL. "auto" locks the hostname from the first FQDN request when
-# OAuth login is disabled. OAuth login requires an explicit URL. HTTPS is
-# required except for explicit loopback development origins.
+# Public base URL. "auto" locks the hostname from the first FQDN request and
+# supports browser OAuth login plus same-origin, session-authenticated MCP (Go
+# Mode), but disables remote MCP OAuth because it cannot provide an immutable
+# issuer. Set an explicit URL for remote MCP clients. HTTPS is required except
+# for explicit loopback development origins.
 #external_url = "auto"  # e.g. "https://caic.example.com"
 
 # Direct reverse proxies trusted to set Forwarded or X-Forwarded-* origin

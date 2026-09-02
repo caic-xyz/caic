@@ -92,6 +92,7 @@ function createAppStore() {
   const [sudoEnabled, setSudoEnabled] = createSignal(false);
   const [gitHubTokenAvailable, setGitHubTokenAvailable] = createSignal(false);
   const [gitHubTokenEnabled, setGitHubTokenEnabled] = createSignal(false);
+  const [mcpOAuthAvailable, setMCPOAuthAvailable] = createSignal(false);
   const [voiceGatewayAvailable, setVoiceGatewayAvailable] = createSignal(false);
   const [recentCount, setRecentCount] = createSignal(0);
   const [actionId, setActionId] = createSignal<string | null>(null);
@@ -219,6 +220,7 @@ function createAppStore() {
     setDisplayAvailable(config.displayAvailable);
     setSudoAvailable(config.sudoAvailable);
     setGitHubTokenAvailable(config.gitHubTokenAvailable);
+    setMCPOAuthAvailable(config.mcpOAuthAvailable);
     setVoiceGatewayAvailable(config.voiceGateway.mode !== "disabled");
     const displayName = config.displayName || window.location.hostname.split('.')[0];
     document.title = `${displayName} — caic`;
@@ -409,7 +411,7 @@ function createAppStore() {
         const [v, sizes, grants] = await Promise.all([
           getVersion(),
           getCacheSizes().catch(() => null),
-          auth.providers().length > 0 ? listOAuthGrants().catch((e: unknown) => {
+          mcpOAuthAvailable() ? listOAuthGrants().catch((e: unknown) => {
             setOAuthGrantError(e instanceof Error ? e.message : "Could not load MCP clients");
             return null;
           }) : Promise.resolve(null),
@@ -1067,7 +1069,7 @@ function createAppStore() {
     maxCPUs, setMaxCPUs, purgeDelay, setPurgeDelay, wellKnownCaches, setWellKnownCaches,
     wellKnownCachesList, wellKnownCacheSizes, cacheMappings, setCacheMappings, customMounts, setCustomMounts, settingsError,
     autoFixCI, setAutoFixCI, autoFixPR, setAutoFixPR,
-    oauthGrants, oauthGrantError, revokingOAuthGrantID, revokeOAuthClientGrant,
+    mcpOAuthAvailable, oauthGrants, oauthGrantError, revokingOAuthGrantID, revokeOAuthClientGrant,
     versionInfo, versionCheckError, checkingUpdate, updating, updateStatus, saveSettings, triggerServerUpdate,
     // usage + connection
     usage, connected,

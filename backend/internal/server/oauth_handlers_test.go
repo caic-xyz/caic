@@ -57,7 +57,7 @@ func TestOAuthServer(t *testing.T) {
 			tokenResp := authorizeMCPClient(t, mustBuildMCPOAuthLifecycleHandler(t, s), &user, &registered)
 			s.oauthServer.Close()
 
-			restarted := newTestRouterWithAuthHost(t, s.authStore, s.oauthRefreshTokenPath, auth.NewHostState("https://caic.example.com"))
+			restarted := newTestRouterWithAuthHost(t, s.authStore, s.oauthRefreshTokenPath, auth.NewHostState("https://caic.example.com", nil))
 			restarted.sessionSecret = []byte("0123456789abcdef0123456789abcdef")
 			h := mustBuildMCPOAuthLifecycleHandler(t, restarted)
 
@@ -431,7 +431,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 		CacheSizes:                 NewCacheSizeStore(testLogger()),
 		AuthStore:                  store,
 		SessionSecret:              []byte("0123456789abcdef0123456789abcdef"),
-		HostState:                  auth.NewHostState("https://caic.example.com"),
+		HostState:                  auth.NewHostState("https://caic.example.com", nil),
 		OAuthPrivateKeyPEM:         testMCPOAuthSigningKeyPEM(t),
 		OAuthIssuer:                "https://caic.example.com",
 		OAuthRefreshTokenStorePath: refreshTokenPath,

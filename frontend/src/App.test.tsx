@@ -75,6 +75,8 @@ vi.mock("./api", () => ({
   getConfig: vi.fn(),
   getVersion: vi.fn(),
   triggerUpdate: vi.fn(),
+  listOAuthGrants: vi.fn(),
+  revokeOAuthGrant: vi.fn(),
   getUsage: vi.fn(),
   listRepoBranches: vi.fn(),
   cloneRepo: vi.fn(),
@@ -194,6 +196,7 @@ beforeEach(() => {
     updateAvailable: false,
     autoUpdateEnabled: false,
   });
+  vi.mocked(api.listOAuthGrants).mockResolvedValue({ grants: [] });
   vi.mocked(api.getUsage).mockRejectedValue(new Error("no usage"));
   vi.mocked(api.listRepoBranches).mockResolvedValue({ branches: [{ name: "main" }, { name: "dev", remote: "origin" }] });
   vi.mocked(api.cloneRepo).mockResolvedValue(newRepo);
@@ -466,6 +469,7 @@ describe("App keyboard shortcuts", () => {
       displayAvailable: false,
       sudoAvailable: false,
       gitHubTokenAvailable: false,
+      mcpOAuthAvailable: false,
       voiceGateway: { mode: "disabled" },
       runtimes: [{ name: "docker" }, { name: "podman" }],
     });
@@ -1079,6 +1083,7 @@ describe("App repo chips: No repository", () => {
       displayAvailable: false,
       sudoAvailable: false,
       gitHubTokenAvailable: false,
+      mcpOAuthAvailable: false,
       voiceGateway: { mode: "disabled" },
     });
 
@@ -1096,6 +1101,7 @@ describe("App repo chips: No repository", () => {
       displayAvailable: false,
       sudoAvailable: false,
       gitHubTokenAvailable: false,
+      mcpOAuthAvailable: false,
       voiceGateway: { mode: "disabled" as const },
     };
     const enabledConfig = { ...disabledConfig, voiceGateway: { mode: "embedded" as const } };
@@ -1122,6 +1128,7 @@ describe("App repo chips: No repository", () => {
       displayAvailable: false,
       sudoAvailable: false,
       gitHubTokenAvailable: false,
+      mcpOAuthAvailable: false,
       voiceGateway: { mode: "embedded" },
     });
 
@@ -1178,6 +1185,43 @@ describe("App repo chips: No repository", () => {
     await waitFor(() => expect(api.updatePreferences).toHaveBeenCalledWith({
       settings: expect.objectContaining({ purgeDelay: 91_000_000_000 }),
     }));
+  });
+
+  it("does not request or show remote MCP grants when MCP OAuth is unavailable", async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      displayName: "test",
+      tailscaleAvailable: false,
+      usbAvailable: false,
+      displayAvailable: false,
+      sudoAvailable: false,
+      gitHubTokenAvailable: false,
+      mcpOAuthAvailable: false,
+      voiceGateway: { mode: "disabled" },
+    });
+
+    renderApp("/settings");
+
+    await waitFor(() => expect(api.getConfig).toHaveBeenCalledOnce());
+    expect(api.listOAuthGrants).not.toHaveBeenCalled();
+    expect(screen.queryByRole("heading", { name: "MCP clients" })).not.toBeInTheDocument();
+  });
+
+  it("loads and shows remote MCP grants when MCP OAuth is available", async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      displayName: "test",
+      tailscaleAvailable: false,
+      usbAvailable: false,
+      displayAvailable: false,
+      sudoAvailable: false,
+      gitHubTokenAvailable: false,
+      mcpOAuthAvailable: true,
+      voiceGateway: { mode: "disabled" },
+    });
+
+    renderApp("/settings");
+
+    await waitFor(() => expect(api.listOAuthGrants).toHaveBeenCalledOnce());
+    expect(screen.getByRole("heading", { name: "MCP clients" })).toBeInTheDocument();
   });
 
   it("saves read-only custom mounts", async () => {

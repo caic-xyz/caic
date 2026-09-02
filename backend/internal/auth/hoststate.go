@@ -25,14 +25,10 @@ type HostState struct {
 	externalURL string // e.g. "https://caic.example.com", empty until locked
 }
 
-// NewHostState returns a pre-locked HostState for a known external URL.
-func NewHostState(externalURL string) *HostState {
-	return NewHostStateWithTrustedProxies(externalURL, nil)
-}
-
-// NewHostStateWithTrustedProxies returns host state that accepts forwarding
-// headers only when the direct network peer belongs to trustedProxies.
-func NewHostStateWithTrustedProxies(externalURL string, trustedProxies []netip.Prefix) *HostState {
+// NewHostState returns host state that accepts forwarding headers only when
+// the direct network peer belongs to trustedProxies. A non-empty externalURL
+// pre-locks the state; an empty value enables first-FQDN auto-locking.
+func NewHostState(externalURL string, trustedProxies []netip.Prefix) *HostState {
 	u, _ := url.Parse(externalURL)
 	host := ""
 	if u != nil {

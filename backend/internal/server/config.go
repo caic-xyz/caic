@@ -59,8 +59,11 @@ func (c *Config) Validate() error {
 	if !c.oauthConfigured() {
 		return nil
 	}
-	if c.Auth.ExternalURL == "" || strings.EqualFold(c.Auth.ExternalURL, "auto") {
-		return errors.New("an explicit external_url is required when OAuth login is configured")
+	if c.Auth.ExternalURL == "" {
+		return errors.New("external_url must be set when OAuth login is configured")
+	}
+	if strings.EqualFold(c.Auth.ExternalURL, "auto") {
+		return nil
 	}
 	if !c.Auth.externalURLIsSecure() {
 		return errors.New("external_url must use https:// except for loopback development origins")

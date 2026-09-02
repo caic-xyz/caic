@@ -585,6 +585,7 @@ export interface Config {
   gitHubAppEnabled?: boolean;
   /** e.g. ["github","gitlab"] */
   authProviders?: string[];
+  mcpOAuthAvailable: boolean;
   runtimes?: RuntimeInfo[];
 }
 

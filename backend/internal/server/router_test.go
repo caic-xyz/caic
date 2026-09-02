@@ -230,7 +230,7 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 // newTestOAuthRouter creates a Router configured with OAuth host state and a
 // session secret, suitable for tests that hit OAuth endpoints or issue tokens.
 func newTestOAuthRouter(t testing.TB, authStore *auth.Store) *testRouter {
-	s := newTestRouterWithAuthHost(t, authStore, "", auth.NewHostState("https://caic.example.com"))
+	s := newTestRouterWithAuthHost(t, authStore, "", auth.NewHostState("https://caic.example.com", nil))
 	s.sessionSecret = []byte("0123456789abcdef0123456789abcdef")
 	return s
 }
@@ -325,6 +325,52 @@ func TestNew(t *testing.T) {
 		d.CacheSizes = nil
 		if _, err := New(t.Context(), testLogger(), d); err == nil || err.Error() != "cache size store is required" {
 			t.Fatalf("New() error = %v, want cache size store required", err)
+		}
+	})
+
+	t.Run("automatic external URL keeps session MCP without remote OAuth", func(t *testing.T) {
+		t.Parallel()
+		d := validDependencies(t)
+		store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"))
+		if err != nil {
+			t.Fatalf("auth.Open: %v", err)
+		}
+		d.AuthStore = store
+		d.SessionSecret = []byte("0123456789abcdef0123456789abcdef")
+		d.HostState = auth.NewHostState("", nil)
+		d.GitHubOAuth = oauthclient.NewGitHubConfig("client-id", "client-secret", func(*http.Request) string {
+			return "https://caic.example.com/auth/github/callback"
+		})
+		s, err := New(t.Context(), testLogger(), d)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		if s.oauthServer != nil {
+			t.Error("oauthServer is non-nil without an immutable issuer")
+		}
+		if s.mcpDisabled {
+			t.Error("MCP is disabled without an OAuth issuer")
+		}
+		if s.serverHandlers.mcpOAuthAvailable {
+			t.Error("mcpOAuthAvailable is true without an immutable issuer")
+		}
+
+		h, err := s.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler: %v", err)
+		}
+		loginReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://caic.example.com/auth/github/start", http.NoBody)
+		loginW := httptest.NewRecorder()
+		h.ServeHTTP(loginW, loginReq)
+		if loginW.Code != http.StatusFound {
+			t.Errorf("OAuth login status = %d, want %d", loginW.Code, http.StatusFound)
+		}
+
+		mcpReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://caic.example.com/api/caic/v1/mcp", strings.NewReader(`{}`))
+		mcpW := httptest.NewRecorder()
+		h.ServeHTTP(mcpW, mcpReq)
+		if mcpW.Code != http.StatusUnauthorized {
+			t.Errorf("unauthenticated MCP status = %d, want %d", mcpW.Code, http.StatusUnauthorized)
 		}
 	})
 }
@@ -2709,7 +2755,7 @@ func TestBuildHandler(t *testing.T) {
 	t.Run("MCP rate limiter rejects excess requests", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		s.hostState = auth.NewHostState("https://caic.example.com")
+		s.hostState = auth.NewHostState("https://caic.example.com", nil)
 		s.mcpHandlers.rateLimiter = newRateLimiter(1, time.Minute)
 		h, err := s.buildHandler()
 		if err != nil {
@@ -2825,7 +2871,7 @@ func TestBuildHandler(t *testing.T) {
 	t.Run("static host check rejects wrong host", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		s.hostState = auth.NewHostState("https://caic.example.com")
+		s.hostState = auth.NewHostState("https://caic.example.com", nil)
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -2843,7 +2889,7 @@ func TestBuildHandler(t *testing.T) {
 	t.Run("static host check allows matching host", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		s.hostState = auth.NewHostState("https://caic.example.com")
+		s.hostState = auth.NewHostState("https://caic.example.com", nil)
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -2861,7 +2907,7 @@ func TestBuildHandler(t *testing.T) {
 	t.Run("static host check is case insensitive", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		s.hostState = auth.NewHostState("https://caic.example.com")
+		s.hostState = auth.NewHostState("https://caic.example.com", nil)
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -3068,7 +3114,7 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 		t.Fatalf("open auth store: %v", err)
 	}
 
-	host := auth.NewHostState("http://localhost")
+	host := auth.NewHostState("http://localhost", nil)
 	s := newTestRouter(t, nil)
 	s.sessionSecret = secret
 	s.authStore = store

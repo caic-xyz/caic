@@ -485,6 +485,7 @@ public struct Config: Codable {
     public let gitHubAppEnabled: Bool?
     /// e.g. ["github","gitlab"]
     public let authProviders: [String]?
+    public let mcpOAuthAvailable: Bool
     public let runtimes: [RuntimeInfo]?
 }
 

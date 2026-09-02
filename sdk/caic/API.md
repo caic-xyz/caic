@@ -353,6 +353,7 @@ Config reports server capabilities to the frontend.
 | `voiceGateway` | `VoiceGatewayMetadata` |  | yes |
 | `gitHubAppEnabled` | `boolean` |  |  |
 | `authProviders` | `string[]` | e.g. ["github","gitlab"] |  |
+| `mcpOAuthAvailable` | `boolean` |  | yes |
 | `runtimes` | `RuntimeInfo[]` |  |  |
 
 ### VersionResp

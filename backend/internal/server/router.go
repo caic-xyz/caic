@@ -65,9 +65,9 @@ type Router struct {
 	sessionSecret []byte          // nil when auth disabled
 	hostState     *auth.HostState // non-nil when ExternalURL is set (static or auto)
 
-	// mcpDisabled refuses all MCP endpoint requests. Set by Serve when auth is
-	// disabled and the listener binds a non-loopback address, so an exposed
-	// server never serves MCP without authentication.
+	// mcpDisabled refuses all MCP endpoint requests. Serve sets it when auth is
+	// disabled on a non-loopback listener, so an exposed server never serves MCP
+	// without authentication.
 	mcpDisabled bool
 
 	// IP geolocation.
@@ -157,7 +157,8 @@ func (r *Router) buildHandler() (http.Handler, error) {
 	// RequireUser.
 	//
 	// Invariant: every route under /api/ requires a credential.
-	//   - /api/caic/v1/mcp is bearer-authenticated (MCP token), not session.
+	//   - /api/caic/v1/mcp accepts an MCP bearer token when remote OAuth is
+	//     configured, or an authenticated browser session otherwise.
 	//   - /api/caic/v1/server/{config,version} are mirrored at /server-info/
 	//     for pre-login access; the /api/ variants are session-gated.
 	mux := http.NewServeMux()
@@ -179,6 +180,8 @@ func (r *Router) buildHandler() (http.Handler, error) {
 		mcpHandler := r.mcpHandlers.endpointRoutes()
 		if r.oauthServer != nil {
 			mcpHandler = r.oauthServer.BearerAuth(mcpHandler)
+		} else if r.authStore != nil {
+			mcpHandler = auth.RequireUser(mcpHandler)
 		}
 		mountPrefix(mux, "", "/api/caic/v1/mcp", mcpHandler)
 	}
@@ -518,8 +521,8 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 	}
 	svc.log = s.log.With("handler", "tasks")
 
-	// OAuth server — only when auth is configured.
-	if d.AuthStore != nil {
+	// OAuth server — only when auth and an immutable issuer are configured.
+	if d.AuthStore != nil && d.OAuthIssuer != "" {
 		var err error
 		s.oauthServer, err = oauthserver.NewServer(oauthserver.ServerConfig{
 			KeyPEM:                  d.OAuthPrivateKeyPEM,
@@ -543,7 +546,10 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 		if err != nil {
 			return nil, err
 		}
+	} else if d.AuthStore != nil {
+		log.WarnContext(ctx, "remote MCP OAuth disabled: configure an explicit external_url to provide a stable issuer; MCP remains available to signed-in browser sessions")
 	}
+	s.serverHandlers.mcpOAuthAvailable = s.oauthServer != nil
 
 	s.mcpHandlers = &mcpHandlers{
 		rateLimiter: rateLimiter,

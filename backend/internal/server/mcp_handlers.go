@@ -17,8 +17,8 @@ import (
 )
 
 // mcpHandlers owns the MCP HTTP endpoint: protocol dispatch, rate limiting, and
-// origin validation. OAuth authorization is handled by the separate oauthserver.Server
-// peer, which provides a BearerAuth middleware applied by the Router.
+// origin validation. The Router applies remote bearer-token authorization,
+// browser-session authorization, or direct loopback access as configured.
 type mcpHandlers struct {
 	protocol    *mcp.Handler
 	rateLimiter *rateLimiter
@@ -28,8 +28,8 @@ type mcpHandlers struct {
 }
 
 // handleMCP is the MCP endpoint handler. Origin validation and rate limiting
-// are applied here; bearer authentication is applied upstream by the Router via
-// oauthserver.Server.BearerAuth middleware.
+// are applied here; configured bearer or session authentication is applied
+// upstream by the Router.
 func (h *mcpHandlers) handleMCP(w http.ResponseWriter, r *http.Request) {
 	r = requestWithMCPPrincipal(r)
 	if err := h.validateMCPOrigin(r); err != nil {
@@ -107,9 +107,9 @@ func (h *mcpHandlers) mcpRateKey(r *http.Request) string {
 }
 
 // endpointRoutes returns an http.Handler with the JSON-RPC endpoint at
-// /api/caic/v1/mcp. Bearer authentication is applied by the Router via
-// oauthserver.Server.BearerAuth middleware; when auth is disabled the handler is
-// mounted directly.
+// /api/caic/v1/mcp. The Router applies remote bearer authentication when MCP
+// OAuth is enabled, browser-session authentication when login uses an automatic
+// external URL, or direct mounting for an auth-disabled loopback server.
 func (h *mcpHandlers) endpointRoutes() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("POST /api/caic/v1/mcp", h.handleMCP)

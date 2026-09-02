@@ -79,14 +79,14 @@ func TestConfigValidate(t *testing.T) {
 			t.Fatalf("Validate() unexpected error: %v", err)
 		}
 	})
-	t.Run("OAuth with ExternalURL auto is invalid", func(t *testing.T) {
+	t.Run("OAuth with ExternalURL auto is valid", func(t *testing.T) {
 		t.Parallel()
 		c := &Config{
 			GitHub: GitHubConfig{OAuthClientID: "id", OAuthClientSecret: "sec", OAuthAllowedUsers: []string{"alice"}},
 			Auth:   AuthConfig{ExternalURL: "auto"},
 		}
-		if err := c.Validate(); err == nil {
-			t.Fatal("Validate() expected error, got nil")
+		if err := c.Validate(); err != nil {
+			t.Fatalf("Validate() unexpected error: %v", err)
 		}
 	})
 	t.Run("OAuth without ExternalURL is invalid", func(t *testing.T) {
