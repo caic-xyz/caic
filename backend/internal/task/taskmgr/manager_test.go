@@ -290,7 +290,7 @@ func (c *reconnectInputConn) Close() error {
 	return nil
 }
 
-func mergeLogAndRelayMessages(logMessages, relayMessages []agent.Message) []agent.Message {
+func mergeLogAndRelayMessages(h harness.Name, logMessages, relayMessages []agent.Message) []agent.Message {
 	logEntries := make([]agent.TimedMessage, len(logMessages))
 	for i, message := range logMessages {
 		logEntries[i].Message = message
@@ -299,7 +299,7 @@ func mergeLogAndRelayMessages(logMessages, relayMessages []agent.Message) []agen
 	for i, message := range relayMessages {
 		relayEntries[i].Message = message
 	}
-	merged := mergeLogAndRelayTimeline(logEntries, relayEntries)
+	merged := newLogRelayMessageMerger(logEntries, h).merge(relayEntries)
 	messages := make([]agent.Message, len(merged))
 	for i, entry := range merged {
 		messages[i] = entry.Message
@@ -342,7 +342,7 @@ func BenchmarkMergeLogAndRelayTimeline(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		if got := mergeLogAndRelayTimeline(logEntries, relayEntries); len(got) != logCount+1 {
+		if got := newLogRelayMessageMerger(logEntries, harness.Codex).merge(relayEntries); len(got) != logCount+1 {
 			b.Fatalf("merged %d entries, want %d", len(got), logCount+1)
 		}
 	}
@@ -353,6 +353,7 @@ func TestMergeLogAndRelayMessages(t *testing.T) {
 	t.Run("valid_exact_overlap", func(t *testing.T) {
 		t.Parallel()
 		merged := mergeLogAndRelayMessages(
+			harness.Codex,
 			[]agent.Message{&agent.TextMessage{Text: "before"}, &agent.TextMessage{Text: "overlap"}},
 			[]agent.Message{&agent.TextMessage{Text: "overlap"}, &agent.TextMessage{Text: "after"}},
 		)
@@ -360,6 +361,36 @@ func TestMergeLogAndRelayMessages(t *testing.T) {
 		want := []string{"before", "overlap", "after"}
 		if !slices.Equal(texts, want) {
 			t.Fatalf("merged texts = %#v, want %#v", texts, want)
+		}
+	})
+	t.Run("valid_codex_overlap_with_init", func(t *testing.T) {
+		t.Parallel()
+		startupA := &agent.RawMessage{MessageType: "startup_a", Raw: []byte(`{"startup":"a"}`)}
+		startupB := &agent.RawMessage{MessageType: "startup_b", Raw: []byte(`{"startup":"b"}`)}
+		init := &agent.InitMessage{SessionID: "session", Model: "gpt-5.6-sol"}
+		prompt := &agent.UserInputMessage{Text: "repair the pull request"}
+		thinking := &agent.ThinkingMessage{Text: "Inspecting repository"}
+		status := &agent.TextMessage{Text: "The pull request contains a binary."}
+		after := &agent.ToolUseMessage{ToolUseID: "tool", Name: "Bash"}
+		merged := mergeLogAndRelayMessages(
+			harness.Codex,
+			[]agent.Message{
+				&agent.LogMessage{Line: "starting container"},
+				startupA,
+				startupB,
+				init,
+				prompt,
+				thinking,
+				status,
+			},
+			[]agent.Message{startupA, startupB, init, prompt, thinking, status, after},
+		)
+
+		if len(merged) != 8 {
+			t.Fatalf("merged %d messages, want 8: %#v", len(merged), merged)
+		}
+		if merged[7] != after {
+			t.Fatalf("last merged message = %#v, want %#v", merged[7], after)
 		}
 	})
 	t.Run("valid_overlap_preserves_aligned_times", func(t *testing.T) {
@@ -370,11 +401,13 @@ func TestMergeLogAndRelayMessages(t *testing.T) {
 		relayOverlapAt := time.UnixMilli(2_000)
 		relayAfterAt := time.UnixMilli(3_000)
 
-		entries := mergeLogAndRelayTimeline(
+		entries := newLogRelayMessageMerger(
 			[]agent.TimedMessage{
 				{Message: before, ProducerTime: time.UnixMilli(1_000)},
 				{Message: overlap, ProducerTime: time.UnixMilli(2_000)},
 			},
+			harness.Codex,
+		).merge(
 			[]agent.TimedMessage{
 				{Message: &agent.TextMessage{Text: "overlap"}, ProducerTime: relayOverlapAt},
 				{Message: after, ProducerTime: relayAfterAt},
@@ -397,6 +430,7 @@ func TestMergeLogAndRelayMessages(t *testing.T) {
 	t.Run("valid_usage_context_window_mismatch", func(t *testing.T) {
 		t.Parallel()
 		merged := mergeLogAndRelayMessages(
+			harness.Codex,
 			[]agent.Message{
 				&agent.TextMessage{Text: "before"},
 				&agent.UsageMessage{Usage: agent.Usage{InputTokens: 1}, ContextWindow: 272000},
@@ -421,6 +455,7 @@ func TestMergeLogAndRelayMessages(t *testing.T) {
 	t.Run("valid_result_turn_count_mismatch", func(t *testing.T) {
 		t.Parallel()
 		merged := mergeLogAndRelayMessages(
+			harness.Codex,
 			[]agent.Message{
 				&agent.TextMessage{Text: "before"},
 				&agent.ResultMessage{MessageType: "result", Subtype: "result", NumTurns: 16, Usage: agent.Usage{InputTokens: 1}},
@@ -448,6 +483,7 @@ func TestMergeLogAndRelayMessages(t *testing.T) {
 	t.Run("valid_ignores_relay_diff_stat", func(t *testing.T) {
 		t.Parallel()
 		merged := mergeLogAndRelayMessages(
+			harness.Codex,
 			[]agent.Message{&agent.TextMessage{Text: "before"}, &agent.TextMessage{Text: "overlap"}},
 			[]agent.Message{&agent.DiffStatMessage{MessageType: "caic_diff_stat"}, &agent.TextMessage{Text: "overlap"}, &agent.TextMessage{Text: "after"}},
 		)
@@ -460,6 +496,7 @@ func TestMergeLogAndRelayMessages(t *testing.T) {
 	t.Run("valid_ignores_artificial_relay_init", func(t *testing.T) {
 		t.Parallel()
 		merged := mergeLogAndRelayMessages(
+			harness.Pi,
 			[]agent.Message{
 				&agent.InitMessage{Model: "openai-codex/gpt-5.5"},
 				&agent.TextMessage{Text: "before"},

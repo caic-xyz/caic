@@ -1424,17 +1424,6 @@ func applyLoadedSessionMetadata(t *task.Task, lt *taskslog.LoadedTask) {
 	t.SetSessionMetadata(sessionID, lt.Model, lt.AgentVersion)
 }
 
-// mergeLogAndRelayMessages joins durable log history with the relay tail read
-// during import.
-//
-// The durable log contains the full pre-restart history. The relay tail contains
-// output produced while caic was down, plus some overlapping history. Pi replay
-// can reconstruct the same logical messages with small metadata differences, so
-// overlap matching uses semantic equivalence instead of strict equality.
-func mergeLogAndRelayTimeline(logEntries, relayEntries []agent.TimedMessage) []agent.TimedMessage {
-	return newLogRelayMessageMerger(logEntries).merge(relayEntries)
-}
-
 // importInstance investigates a single runtime instance and registers it as a task.
 func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c *runtime.Instance, branch, taskIDVal string, metadataResolved bool, branchIDs map[string][]string, allLogs []*taskslog.LoadedTask) (*Entry, error) {
 	ctx, importTask := trace.NewTask(ctx, "import-instance")
@@ -1669,7 +1658,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		return nil, fmt.Errorf("load messages for imported task %s: %w", taskID, err)
 	}
 	if len(relayRecords) > 0 {
-		timeline := mergeLogAndRelayTimeline(lt.Timeline, relayRecords)
+		timeline := newLogRelayMessageMerger(lt.Timeline, lt.Harness).merge(relayRecords)
 		t.SeedTimelineEntries(timeline)
 		m.log.DebugContext(ctx, "relay", "msg", "restored from", "repo", relPath, "br", branch, "instance", c.ID, "alive", relayAlive, "msgs", len(timeline), "relayMsgs", len(relayRecords))
 	} else if len(lt.Timeline) > 0 {
@@ -1831,21 +1820,27 @@ func (m *Manager) resolveNativeParser(h harness.Name) (func([]byte) ([]agent.Mes
 }
 
 // logRelayMessageMerger owns the import-time overlap rules for disk-log
-// messages and relay-tail messages.
+// messages and relay-tail messages. The durable log contains the full
+// pre-restart history, while the relay tail contains output produced while caic
+// was down plus some overlapping history. Pi replay can reconstruct the same
+// logical messages with small metadata differences, so overlap matching uses
+// semantic equivalence instead of strict equality.
 type logRelayMessageMerger struct {
-	logEntries []agent.TimedMessage
-	logHasInit bool
+	logEntries      []agent.TimedMessage
+	ignoreRelayInit bool
 }
 
-func newLogRelayMessageMerger(logEntries []agent.TimedMessage) *logRelayMessageMerger {
+func newLogRelayMessageMerger(logEntries []agent.TimedMessage, h harness.Name) *logRelayMessageMerger {
 	logHasInit := false
-	for _, entry := range logEntries {
-		if _, ok := entry.Message.(*agent.InitMessage); ok {
-			logHasInit = true
-			break
+	if h == harness.Pi {
+		for _, entry := range logEntries {
+			if _, ok := entry.Message.(*agent.InitMessage); ok {
+				logHasInit = true
+				break
+			}
 		}
 	}
-	return &logRelayMessageMerger{logEntries: logEntries, logHasInit: logHasInit}
+	return &logRelayMessageMerger{logEntries: logEntries, ignoreRelayInit: logHasInit}
 }
 
 func (m *logRelayMessageMerger) merge(relayEntries []agent.TimedMessage) []agent.TimedMessage {
@@ -1891,8 +1886,9 @@ func (m *logRelayMessageMerger) relayMessageComparableToLog(msg agent.Message) b
 	case *agent.InitMessage:
 		// Pi can synthesize an init from message_start during relay-tail parsing. If
 		// the durable log already has an init, keep the log's session boundary and
-		// ignore the relay one for overlap matching.
-		return !m.logHasInit
+		// ignore the relay one for overlap matching. Other harnesses emit genuine
+		// init records that must remain as overlap anchors.
+		return !m.ignoreRelayInit
 	default:
 		return true
 	}
