@@ -85,7 +85,9 @@ creation, hosted content visibility, navigation/back handling, screenshot
 capture, and shell capabilities. Tests must drive the hosted frontend as a black
 box through WebView DOM or platform interactions; they must not seed state
 through caic task APIs or assert caic task lifecycle details. Focused Go Mode
-runs collect documentation screenshots.
+runs exclude documentation screenshot generation. Run `make screenshots-check`
+to verify deterministic visuals or `make screenshots-update` to replace their
+tracked baselines explicitly.
 
 ## Checks
 

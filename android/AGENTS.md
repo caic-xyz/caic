@@ -48,7 +48,8 @@ make android-check
 ```
 
 Use `make check` for non-Android repo validation. Use `make android-e2e` for
-instrumented Android flows.
+instrumented Android flows. Use `make screenshots-check` for deterministic visual
+coverage and `make screenshots-update` to accept intentional baseline changes.
 
 For module-focused Android e2e:
 

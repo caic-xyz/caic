@@ -40,8 +40,12 @@ export default function CIDot(props: CIDotProps) {
   const tip = () => checkSummary(props.status, props.checks);
   return (
     <Tooltip text={tip()}>
-      <Show when={props.href} keyed fallback={<span class={cls()} />}>
-        {(url) => <a class={cls()} href={url} target="_blank" rel="noopener" aria-label="CI status" onClick={(e) => e.stopPropagation()} />}
+      <Show
+        when={props.href}
+        keyed
+        fallback={<span class={cls()} data-status={props.status} data-testid="ci-status" />}
+      >
+        {(url) => <a class={cls()} href={url} target="_blank" rel="noopener" aria-label="CI status" data-status={props.status} data-testid="ci-status" onClick={(e) => e.stopPropagation()} />}
       </Show>
     </Tooltip>
   );

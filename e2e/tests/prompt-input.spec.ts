@@ -1,19 +1,12 @@
 // Screenshots of the prompt input with short and long text to verify button layout.
 import { test, expect, fillContentEditable, createTaskAPI, waitForTaskState, convertPngsToWebp } from "../helpers";
-import path from "path";
-import { fileURLToPath } from "url";
-
-const screenshotDir = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "screenshots",
-  "frontend",
-);
+import { captureScreenshot, prepareVisualPage, screenshotDir } from "../visual";
 
 test.describe.configure({ mode: "serial" });
 
 test("prompt input layout screenshots", async ({ page, api }) => {
   test.setTimeout(60_000);
+  await prepareVisualPage(page);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/");
 
@@ -28,10 +21,8 @@ test("prompt input layout screenshots", async ({ page, api }) => {
 
   // Screenshot 1: main prompt with two words.
   await fillContentEditable(prompt, "hello world");
-  await page.waitForTimeout(200);
-  await page.screenshot({
-    path: path.join(screenshotDir, "prompt-short.png"),
-  });
+  await expect(prompt).toContainText("hello world");
+  await captureScreenshot(page, "prompt-short.png");
 
   // Screenshot 2: main prompt with long text.
   const longText =
@@ -43,10 +34,8 @@ test("prompt input layout screenshots", async ({ page, api }) => {
     "new authentication flow diagrams, and ensure backwards compatibility with existing " +
     "client applications that still use the legacy session-based authentication mechanism";
   await fillContentEditable(prompt, longText);
-  await page.waitForTimeout(200);
-  await page.screenshot({
-    path: path.join(screenshotDir, "prompt-long.png"),
-  });
+  await expect(prompt).toContainText(longText);
+  await captureScreenshot(page, "prompt-long.png");
 
   // Clear and create a task for detail view.
   await fillContentEditable(prompt, "");
@@ -57,24 +46,19 @@ test("prompt input layout screenshots", async ({ page, api }) => {
   const taskCard = page.locator(`[data-task-id="${id}"]`);
   await expect(taskCard).toBeVisible({ timeout: 10_000 });
   await taskCard.click();
-  await page.waitForTimeout(500);
 
   const detailInput = page.getByTestId("task-detail-form").locator("[role='textbox']");
   await expect(detailInput).toBeVisible();
 
   // Screenshot 3: task detail input with two words.
   await fillContentEditable(detailInput, "looks good");
-  await page.waitForTimeout(200);
-  await page.screenshot({
-    path: path.join(screenshotDir, "prompt-detail-short.png"),
-  });
+  await expect(detailInput).toContainText("looks good");
+  await captureScreenshot(page, "prompt-detail-short.png");
 
   // Screenshot 4: task detail input with long text.
   await fillContentEditable(detailInput, longText);
-  await page.waitForTimeout(200);
-  await page.screenshot({
-    path: path.join(screenshotDir, "prompt-detail-long.png"),
-  });
+  await expect(detailInput).toContainText(longText);
+  await captureScreenshot(page, "prompt-detail-long.png");
 
   await convertPngsToWebp(screenshotDir);
 });

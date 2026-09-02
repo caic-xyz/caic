@@ -178,7 +178,9 @@ export default function SettingsForm(props: SettingsFormProps) {
                       }}
                     />
                     <span class={styles.cacheName}>{cache.name}</span>
-                    <span class={styles.cacheSize}>{cacheSizeLabel(cache.name)}</span>
+                    <span class={styles.cacheSize} data-testid="cache-size">
+                      {cacheSizeLabel(cache.name)}
+                    </span>
                   </label>
                 );
               }}

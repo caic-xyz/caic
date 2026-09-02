@@ -3,6 +3,7 @@
 import { defineConfig } from "@playwright/test";
 
 const seed = process.env.CAIC_E2E_SEED ?? Date.now().toString(36);
+const includeVisuals = process.env.CAIC_E2E_VISUALS === "1";
 process.env.CAIC_E2E_SEED = seed;
 if (process.env.TEST_WORKER_INDEX === undefined) {
   console.log(`E2E seed: ${seed} (replay with CAIC_E2E_SEED=${seed})`);
@@ -10,6 +11,9 @@ if (process.env.TEST_WORKER_INDEX === undefined) {
 
 export default defineConfig({
   testDir: "./tests",
+  testIgnore: includeVisuals
+    ? []
+    : ["**/gen-screenshots.spec.ts", "**/prompt-input.spec.ts"],
   timeout: 60_000,
   webServer: {
     command: "../scripts/run-dev.py --http :8090 --fake",
@@ -19,7 +23,20 @@ export default defineConfig({
   },
   use: {
     baseURL: "http://localhost:8090",
+    colorScheme: "light",
+    deviceScaleFactor: 1,
+    launchOptions: includeVisuals
+      ? {
+          args: [
+            "--disable-gpu",
+            "--disable-gpu-rasterization",
+            "--num-raster-threads=1",
+          ],
+        }
+      : undefined,
+    locale: "en-US",
+    timezoneId: "UTC",
     trace: "retain-on-failure",
   },
-  projects: [{ name: "chromium", use: { channel: "chrome" } }],
+  projects: [{ name: "chromium" }],
 });

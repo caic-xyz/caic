@@ -59,7 +59,7 @@ function RateLimitBadge(props: { rl: QuotaRateLimit; now: Accessor<number>; labe
   };
   return (
     <Tooltip text={tip()}>
-      <span class={`${styles.badge} ${pctColor(props.rl.usedPct)}`}>
+      <span class={`${styles.badge} ${pctColor(props.rl.usedPct)}`} data-testid="usage-badge">
         {props.rl.window} {Math.round(props.rl.usedPct)}%
       </span>
     </Tooltip>
@@ -86,7 +86,7 @@ function ProviderPill(props: { pq: ProviderQuota; now: Accessor<number> }) {
       <Show when={props.pq.balance}>
         {(bal) => (
           <Tooltip text={`${props.pq.label}: ${formatBalance(bal().currency, bal().total)}`}>
-            <span class={balanceClass(bal())}>
+            <span class={balanceClass(bal())} data-testid="usage-badge">
               {formatBalance(bal().currency, bal().total)}
             </span>
           </Tooltip>
@@ -96,7 +96,7 @@ function ProviderPill(props: { pq: ProviderQuota; now: Accessor<number> }) {
         {(extra) => (
           <Show when={extra().usedCredits !== 0 || extra().monthlyLimit !== 0}>
             <Tooltip text={`${props.pq.label}: ${extraTooltip(extra())}`}>
-              <span class={extraClass(extra())}>
+              <span class={extraClass(extra())} data-testid="usage-badge">
                 {extraLabel(extra())}
               </span>
             </Tooltip>
@@ -116,12 +116,20 @@ function ProviderPill(props: { pq: ProviderQuota; now: Accessor<number> }) {
   return (
     <Switch>
       <Match when={!!props.pq.usageUrl}>
-        <a class={styles.providerPill} href={props.pq.usageUrl} target="_blank" rel="noopener noreferrer">
+        <a
+          class={styles.providerPill}
+          data-testid="provider-usage"
+          href={props.pq.usageUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
           {content}
         </a>
       </Match>
       <Match when={!props.pq.usageUrl}>
-        <span class={styles.providerPill}>{content}</span>
+        <span class={styles.providerPill} data-testid="provider-usage">
+          {content}
+        </span>
       </Match>
     </Switch>
   );

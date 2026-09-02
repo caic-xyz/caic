@@ -1,18 +1,11 @@
 // Generate screenshots for the documentation site.
 //
-// Run with: pnpm exec playwright test --config e2e/playwright.config.ts gen-screenshots
+// Run with: make screenshots-check (or make screenshots-update to accept changes)
 // Output: e2e/screenshots/frontend/
 import { test, expect, createTaskAPI, waitForTaskState, convertPngsToWebp } from "../helpers";
+import { captureScreenshot, prepareVisualPage, screenshotDir } from "../visual";
 import type { Locator } from "@playwright/test";
 import path from "path";
-import { fileURLToPath } from "url";
-
-const screenshotDir = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "screenshots",
-  "frontend",
-);
 
 async function requiredBox(locator: Locator) {
   const box = await locator.boundingBox();
@@ -20,11 +13,32 @@ async function requiredBox(locator: Locator) {
   return box;
 }
 
+async function stabilizeWidget(locator: Locator) {
+  await locator.evaluate(async (body) => {
+    const style = document.createElement("style");
+    style.textContent = `
+      *, *::before, *::after {
+        animation: none !important;
+        transition: none !important;
+      }
+      svg line, svg path, svg polygon {
+        shape-rendering: crispEdges;
+      }
+    `;
+    body.append(style);
+    await document.fonts.ready;
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+  });
+}
+
 test.describe.configure({ mode: "serial" });
 
 test("generate documentation screenshots", async ({ page, api }) => {
   // AVIF encoding via ffmpeg is slow; the default 60s is too tight.
   test.setTimeout(120_000);
+  await prepareVisualPage(page);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/");
 
@@ -66,9 +80,10 @@ test("generate documentation screenshots", async ({ page, api }) => {
     expect(Math.abs(arrow.y + arrow.height / 2 - (containerInput.y + containerInput.height / 2))).toBeLessThanOrEqual(1);
     expect(Math.abs(readOnly.y + readOnly.height / 2 - (containerInput.y + containerInput.height / 2))).toBeLessThanOrEqual(1);
   }
-  await page.screenshot({
-    path: path.join(screenshotDir, "settings-mounts.png"),
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   });
+  await captureScreenshot(page, "settings-mounts.png");
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/");
   await expect(
@@ -132,104 +147,129 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await expect(page.getByTestId("tool-duration").filter({ hasText: /^180ms$/ })).toBeVisible();
   await expect(page.getByTestId("tool-duration").filter({ hasText: /^0:01$/ })).toBeVisible();
   await expect(page.getByTestId("timing-duration").filter({ hasText: /^0:02$/ })).toBeVisible();
-  await page.waitForTimeout(500);
-  await page.screenshot({
-    path: path.join(screenshotDir, "task-detail.png"),
-  });
+  await captureScreenshot(page, "task-detail.png");
 
   // Screenshot 3: Plan mode.
   const planCard = page.locator(`[data-task-id="${id2}"]`);
   if ((await planCard.count()) > 0) {
     await planCard.click();
-    await page.waitForTimeout(500);
-    await page.screenshot({
-      path: path.join(screenshotDir, "task-plan.png"),
-    });
+    await expect(page.getByTestId("plan-content")).toBeVisible();
+    await captureScreenshot(page, "task-plan.png");
   }
 
   // Screenshot 4: Ask mode.
   const askCard = page.locator(`[data-task-id="${id3}"]`);
   if ((await askCard.count()) > 0) {
     await askCard.click();
-    await page.waitForTimeout(500);
-    await page.screenshot({
-      path: path.join(screenshotDir, "task-ask.png"),
-    });
+    await expect(page.getByTestId("ask-option-In-memory (sync.Map)")).toBeVisible();
+    await captureScreenshot(page, "task-ask.png");
   }
 
   // Screenshot 5: Widget — generative UI with interactive SVG diagram.
   const widgetCard = page.locator(`[data-task-id="${id4}"]`);
   if ((await widgetCard.count()) > 0) {
     await widgetCard.click();
+    await expect(page.getByText("CI: passed", { exact: true })).toBeVisible({
+      timeout: 30_000,
+    });
     const iframe = page.locator("iframe[title='light_refraction_in_water']");
     await expect(iframe).toBeVisible({ timeout: 10_000 });
-    // Wait for iframe content to render (scripts run after widgetDone).
-    await page.waitForTimeout(1500);
-    await page.screenshot({
-      path: path.join(screenshotDir, "task-widget.png"),
-    });
 
-    // Animate the angle slider and capture frames for AVIF animation.
     const frame = page.frameLocator(
       "iframe[title='light_refraction_in_water']",
     );
+    const widgetBody = frame.locator("body");
     const slider = frame.locator("#slider");
+    await expect(slider).toBeVisible();
+    await stabilizeWidget(widgetBody);
+    const messageArea = page.getByTestId("task-message-area");
+    await messageArea.evaluate((el) => {
+      el.scrollTop = 0;
+    });
+    await expect.poll(() => messageArea.evaluate((el) => el.scrollTop)).toBe(0);
+    await captureScreenshot(page, "task-widget.png");
+
+    // Animate the angle slider and capture frames for AVIF animation.
     if ((await slider.count()) > 0) {
       const fs = await import("fs");
       const tmpDir = path.join(screenshotDir, ".widget-frames");
       fs.mkdirSync(tmpDir, { recursive: true });
 
+      // Rasterize the animation in a fixed top-level viewport. Capturing the
+      // iframe in place makes text rasterization depend on its outer-page
+      // subpixel position.
+      const widgetHTML = await frame.locator("html").evaluate((html) => html.outerHTML);
+      const animationPage = await page.context().newPage();
+      await prepareVisualPage(animationPage);
+      await animationPage.setViewportSize({ width: 640, height: 800 });
+      await animationPage.setContent(`<!doctype html>${widgetHTML}`);
+      const animationBody = animationPage.locator("body");
+      const animationSlider = animationPage.locator("#slider");
+      await expect(animationSlider).toBeVisible();
+      await stabilizeWidget(animationBody);
+
       // Sweep angle from 5° to 85° in steps, capturing each frame.
       const angles = [
         5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85,
       ];
+      const settleWidgetFrame = () =>
+        animationBody.evaluate(
+          () =>
+            new Promise<void>((resolve) => {
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+            }),
+        );
       for (let i = 0; i < angles.length; i++) {
-        await slider.fill(String(angles[i]));
-        await page.waitForTimeout(80);
-        await page.screenshot({
+        await animationSlider.fill(String(angles[i]));
+        await settleWidgetFrame();
+        await animationBody.screenshot({
+          caret: "hide",
           path: path.join(tmpDir, `frame-${String(i).padStart(3, "0")}.png`),
         });
       }
       // Reverse sweep for smooth loop.
       for (let i = angles.length - 2; i > 0; i--) {
-        await slider.fill(String(angles[i]));
-        await page.waitForTimeout(80);
-        await page.screenshot({
+        await animationSlider.fill(String(angles[i]));
+        await settleWidgetFrame();
+        await animationBody.screenshot({
+          caret: "hide",
           path: path.join(
             tmpDir,
             `frame-${String(angles.length + (angles.length - 2 - i)).padStart(3, "0")}.png`,
           ),
         });
       }
+      await animationPage.close();
 
-      // AVIF encoding is for documentation assets and can be too slow for CI.
-      if (!process.env.CI) {
-        const { execFileSync } = await import("child_process");
-        try {
-          execFileSync(
-            "ffmpeg",
-            [
-              "-y",
-              "-framerate",
-              "10",
-              "-i",
-              `${tmpDir}/frame-%03d.png`,
-              "-c:v",
-              "libaom-av1",
-              "-crf",
-              "30",
-              "-b:v",
-              "0",
-              "-pix_fmt",
-              "yuv420p",
-              path.join(screenshotDir, "task-widget.avif"),
-            ],
-            { stdio: "pipe", timeout: 60_000 },
-          );
-        } catch (e) {
-          console.error("AVIF encoding failed:", (e as Error).message);
-        }
-      }
+      const { execFileSync } = await import("child_process");
+      execFileSync(
+        "ffmpeg",
+        [
+          "-y",
+          "-framerate",
+          "10",
+          "-i",
+          `${tmpDir}/frame-%03d.png`,
+          "-c:v",
+          "libaom-av1",
+          "-crf",
+          "30",
+          "-b:v",
+          "0",
+          "-pix_fmt",
+          "yuv420p",
+          "-threads",
+          "1",
+          "-row-mt",
+          "0",
+          "-tiles",
+          "1x1",
+          "-f",
+          "avif",
+          path.join(screenshotDir, "task-widget.avif"),
+        ],
+        { stdio: "pipe", timeout: 60_000 },
+      );
       // Clean up frames.
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -263,7 +303,6 @@ test("generate documentation screenshots", async ({ page, api }) => {
   const vncCard = page.locator(`[data-task-id="${vncTask!.id}"]`);
   await expect(vncCard).toBeVisible({ timeout: 10_000 });
   await vncCard.click();
-  await page.waitForTimeout(500);
 
   // Click the VNC link to open the viewer.
   const vncLink = page.getByRole("link", { name: "VNC" });
@@ -271,12 +310,19 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await vncLink.click();
 
   // Wait for noVNC canvas to appear and render the fake screenshot.
-  await expect(page.locator("canvas")).toBeVisible({ timeout: 15_000 });
-  // Give noVNC time to complete the RFB handshake and render the framebuffer.
-  await page.waitForTimeout(2000);
-  await page.screenshot({
-    path: path.join(screenshotDir, "task-vnc.png"),
-  });
+  const canvas = page.locator("canvas");
+  await expect(canvas).toBeVisible({ timeout: 15_000 });
+  await expect
+    .poll(() =>
+      canvas.evaluate((el) => {
+        if (!(el instanceof HTMLCanvasElement)) return false;
+        const context = el.getContext("2d");
+        if (!context || el.width === 0 || el.height === 0) return false;
+        return context.getImageData(0, 0, el.width, el.height).data.some((v) => v !== 0);
+      }),
+    )
+    .toBe(true);
+  await captureScreenshot(page, "task-vnc.png");
 
   // Screenshot 7: Mobile — task detail at phone viewport.
   await page.goto("/");
@@ -289,15 +335,11 @@ test("generate documentation screenshots", async ({ page, api }) => {
   const bugFixCard2 = page.locator(`[data-task-id="${id1}"]`);
   await expect(bugFixCard2).toBeVisible({ timeout: 10_000 });
   await bugFixCard2.click();
-  await page.waitForTimeout(500);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.waitForTimeout(300);
   // Verify the context menu toggle is visible at mobile width.
   const contextToggle = page.locator("[aria-label='Context actions']");
   await expect(contextToggle).toBeVisible({ timeout: 3_000 });
-  await page.screenshot({
-    path: path.join(screenshotDir, "task-detail-mobile.png"),
-  });
+  await captureScreenshot(page, "task-detail-mobile.png");
   // Restore desktop viewport.
   await page.setViewportSize({ width: 1280, height: 800 });
 
@@ -324,6 +366,12 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await expect(page.locator("[data-task-id]").first()).toBeVisible({
     timeout: 10_000,
   });
+  await expect.poll(async () => {
+    const statuses = await page.getByTestId("ci-status").evaluateAll((nodes) =>
+      nodes.map((node) => (node as HTMLElement).dataset.status)
+    );
+    return statuses.length > 0 && statuses.every((status) => status === "success");
+  }, { timeout: 15_000 }).toBe(true);
   const taskList = page.getByTestId("task-list");
   await expect.poll(async () =>
     taskList.evaluate((el) => el.scrollHeight - el.clientHeight),
@@ -338,9 +386,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await expect.poll(async () =>
     taskList.evaluate((el) => getComputedStyle(el, "::before").opacity),
   ).toBe("1");
-  await page.screenshot({
-    path: path.join(screenshotDir, "task-list-scrolled.png"),
-  });
+  await captureScreenshot(page, "task-list-scrolled.png");
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
@@ -364,9 +410,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await expect.poll(async () =>
     mobileTaskList.evaluate((el) => getComputedStyle(el, "::before").opacity),
   ).toBe("1");
-  await page.screenshot({
-    path: path.join(screenshotDir, "task-list-scrolled-mobile.png"),
-  });
+  await captureScreenshot(page, "task-list-scrolled-mobile.png");
 
   await convertPngsToWebp(screenshotDir);
 });

@@ -120,40 +120,17 @@ export async function waitForTaskState(
 
 export async function convertPngsToWebp(dir: string): Promise<void> {
   const fs = await import("fs");
-  const { spawnSync, execFileSync } = await import("child_process");
+  const { execFileSync } = await import("child_process");
   const path = await import("path");
-
-  // Return the identity score (1.0 = identical) between two image files using
-  // ffmpeg's identity filter.
-  const identity = (a: string, b: string): number => {
-    const r = spawnSync("ffmpeg", ["-i", a, "-i", b, "-lavfi", "identity", "-f", "null", "-"], { timeout: 60_000 });
-    // stderr contains: [Parsed_identity_0 ...] identity ... average:0.808866 ...
-    const m = r.stderr?.toString().match(/average:([\d.]+)/);
-    if (!m) return 0;
-    return parseFloat(m[1]);
-  };
 
   const pngs = fs.readdirSync(dir).filter((f: string) => f.endsWith(".png"));
   for (const png of pngs) {
     const src = path.join(dir, png);
     const dst = path.join(dir, png.replace(/\.png$/, ".webp"));
-    try {
-      // Lossless encoding preserves pixels exactly, so we can compare the
-      // source PNG against the existing webp without creating a temp file.
-      if (fs.existsSync(dst)) {
-        const score = identity(src, dst);
-        const pct = (1 - score) * 100;
-        if (pct < 1) {
-          console.log(`${png}: ${pct.toFixed(1)}% different, keeping`);
-          fs.unlinkSync(src);
-          continue;
-        }
-        console.log(`${png}: ${pct.toFixed(1)}% different, updating`);
-      }
-      execFileSync("ffmpeg", ["-y", "-i", src, "-lossless", "1", dst], { stdio: "pipe", timeout: 60_000 });
-      fs.unlinkSync(src);
-    } catch (e) {
-      console.error(`WebP conversion failed for ${png}:`, (e as Error).message);
-    }
+    execFileSync("ffmpeg", ["-y", "-i", src, "-lossless", "1", dst], {
+      stdio: "pipe",
+      timeout: 60_000,
+    });
+    fs.unlinkSync(src);
   }
 }
