@@ -129,6 +129,11 @@ export function ToggleChip(props: {
         disabled={props.disabled}
         aria-label={props.title}
         onChange={(e) => props.onChange(e.currentTarget.checked)}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter") return;
+          e.preventDefault();
+          props.onChange(!props.checked);
+        }}
       />
       {props.children}
     </label>
