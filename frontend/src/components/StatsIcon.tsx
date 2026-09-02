@@ -5,11 +5,14 @@ import { createMemo, createSignal, For, lazy, Show, Suspense } from "solid-js";
 import type { EventMessage, EventStats } from "@sdk/types.gen";
 
 import { formatDuration, formatTokens } from "../formatting";
-import { IncrementalToolTimingTracker } from "../taskStats";
+import { IncrementalToolTimingTracker, type ToolTimingSummary } from "../taskStats";
 import { formatTimingDuration, type TurnTiming } from "../timing";
 import styles from "./StatsIcon.module.css";
 
 const StatsCharts = lazy(() => import("./StatsCharts"));
+const noStats: readonly EventStats[] = [];
+const noTools: readonly ToolTimingSummary[] = [];
+const noTurns: readonly TurnTiming[] = [];
 
 export interface TaskUsageSummary {
   inputTokens: number;
@@ -56,14 +59,6 @@ function sumTurnUsage(turns: TurnTiming[]): UsageDetails {
   });
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.min(Math.floor(Math.log2(bytes) / 10), units.length - 1);
-  const val = bytes / Math.pow(1024, i);
-  return `${val < 10 ? val.toFixed(1) : Math.round(val)} ${units[i]}`;
-}
-
 // Color for CPU/MEM bars: ratio is 0–1 of a hard limit.
 function barColor(ratio: number): string {
   if (ratio >= 0.85) return "var(--color-danger)";
@@ -83,29 +78,6 @@ function diskColor(bytes: number): string {
   if (bytes >= 10e9) return "var(--color-danger)";       // ≥ 10 GB
   if (bytes >= 5e9) return "var(--color-warning-text)";  // ≥ 5 GB
   return "var(--color-success)";
-}
-
-interface MiniBar {
-  ratio: number;
-  label: string;
-  color?: string;
-}
-
-function MiniBarGroup(props: { bars: MiniBar[] }) {
-  return (
-    <div class={styles.miniBarGroup}>
-      <For each={props.bars}>
-        {(b) => (
-          <div class={styles.miniBar} title={b.label}>
-            <div
-              class={styles.miniBarFill}
-              style={{ height: `${Math.round(b.ratio * 100)}%`, background: b.color ?? barColor(b.ratio) }}
-            />
-          </div>
-        )}
-      </For>
-    </div>
-  );
 }
 
 export default function StatsIcon(props: { events: readonly EventMessage[]; stats: EventStats[]; turns: TurnTiming[]; usage?: TaskUsageSummary }) {
@@ -133,9 +105,6 @@ export default function StatsIcon(props: { events: readonly EventMessage[]; stat
   };
 
   const hasStats = () => props.stats.length > 0;
-
-  // Last N samples for history bars (most recent last).
-  const recentStats = () => props.stats.slice(-5);
 
   const perfs = () => props.turns;
   const toolTimingTracker = new IncrementalToolTimingTracker();
@@ -230,54 +199,16 @@ export default function StatsIcon(props: { events: readonly EventMessage[]; stat
             <div class={styles.popupSection} data-testid="task-analytics-charts">
               <div class={styles.popupSectionTitle}>Analytics</div>
               <Suspense fallback={<div class={styles.noData}>Loading charts…</div>}>
-                <StatsCharts turns={perfs()} tools={toolSummaries()} />
+                <StatsCharts stats={noStats} turns={perfs()} tools={toolSummaries()} />
               </Suspense>
             </div>
           </Show>
           <div class={styles.popupSection}>
             <div class={styles.popupSectionTitle}>Resources</div>
-            <Show when={latest()} keyed fallback={<div class={styles.noData}>No data yet</div>}>
-              {(s) => {
-                const recent = recentStats();
-                return (
-                  <table class={styles.statsTable}>
-                    <tbody>
-                      <tr>
-                        <td class={styles.statLabel}>CPU</td>
-                        <td class={styles.statValue}>{s.cpuPerc.toFixed(1)}%</td>
-                        <td class={styles.statBars}>
-                          <MiniBarGroup bars={recent.map((r) => ({ ratio: Math.min(1, r.cpuPerc / 100), label: `${r.cpuPerc.toFixed(1)}%` }))} />
-                        </td>
-                      </tr>
-                      <tr>
-                        <td class={styles.statLabel}>MEM</td>
-                        <td class={styles.statValue}>{formatBytes(s.memUsed)}<span class={styles.statSub}>/{formatBytes(s.memLimit)}</span></td>
-                        <td class={styles.statBars}>
-                          <MiniBarGroup bars={recent.map((r) => ({ ratio: Math.min(1, r.memPerc / 100), label: `${r.memPerc.toFixed(1)}%` }))} />
-                        </td>
-                      </tr>
-                      <tr>
-                        <td class={styles.statLabel}>NET</td>
-                        <td class={styles.statValue}>
-                          <span title="Received">{formatBytes(s.netRx)}</span>
-                          <span class={styles.statSub}> / </span>
-                          <span title="Transmitted">{formatBytes(s.netTx)}</span>
-                        </td>
-                        <td class={styles.statBars}>
-                          <MiniBarGroup bars={recent.map((r) => ({ ratio: Math.min(1, (r.netRx + r.netTx) / maxNet()), label: formatBytes(r.netRx + r.netTx), color: netColor(r.netRx + r.netTx) }))} />
-                        </td>
-                      </tr>
-                      <tr>
-                        <td class={styles.statLabel}>DISK</td>
-                        <td class={styles.statValue}>{s.diskUsed >= 0 ? formatBytes(s.diskUsed) : "—"}</td>
-                        <td class={styles.statBars}>
-                          <MiniBarGroup bars={recent.map((r) => ({ ratio: Math.min(1, Math.max(0, r.diskUsed) / maxDisk()), label: r.diskUsed >= 0 ? formatBytes(r.diskUsed) : "—", color: diskColor(Math.max(0, r.diskUsed)) }))} />
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                );
-              }}
+            <Show when={props.stats.length > 0} fallback={<div class={styles.noData}>No data yet</div>}>
+              <Suspense fallback={<div class={styles.noData}>Loading resource history…</div>}>
+                <StatsCharts stats={props.stats} turns={noTurns} tools={noTools} />
+              </Suspense>
             </Show>
           </div>
           <Show when={perfs().length > 0}>

@@ -1,6 +1,6 @@
-// Task analytics derivation for tool timing and cold-input attribution.
+// Task analytics derivation for tool timing and resource-counter rates.
 
-import type { EventMessage } from "@sdk/types.gen";
+import type { EventMessage, EventStats } from "@sdk/types.gen";
 
 import { toolResultDurationMs } from "./grouping";
 
@@ -13,6 +13,28 @@ export interface ToolTimingSummary {
 interface ToolStart {
   name: string;
   ts: number;
+}
+
+export interface NetworkRateSample {
+  ts: number;
+  rxBytesPerSecond: number | null;
+  txBytesPerSecond: number | null;
+}
+
+export function deriveNetworkRates(stats: readonly EventStats[]): NetworkRateSample[] {
+  return stats.map((sample, i) => {
+    const previous = stats[i - 1];
+    const elapsedSeconds = previous ? (sample.ts - previous.ts) / 1000 : 0;
+    return {
+      ts: sample.ts,
+      rxBytesPerSecond: previous && elapsedSeconds > 0 && sample.netRx >= previous.netRx
+        ? (sample.netRx - previous.netRx) / elapsedSeconds
+        : null,
+      txBytesPerSecond: previous && elapsedSeconds > 0 && sample.netTx >= previous.netTx
+        ? (sample.netTx - previous.netTx) / elapsedSeconds
+        : null,
+    };
+  });
 }
 
 export class IncrementalToolTimingTracker {

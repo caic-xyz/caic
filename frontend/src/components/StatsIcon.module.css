@@ -120,64 +120,6 @@
   font-size: 0.78rem;
 }
 
-/* Resource stats table */
-.statsTable {
-  border-collapse: collapse;
-  width: 100%;
-}
-
-.statsTable tr {
-  vertical-align: middle;
-}
-
-.statLabel {
-  font-size: 0.72rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--color-text-tertiary);
-  padding: 0.15rem 0.4rem 0.15rem 0;
-  width: 2.5rem;
-}
-
-.statValue {
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-secondary);
-  padding: 0.15rem 0.5rem 0.15rem 0;
-  white-space: nowrap;
-}
-
-.statSub {
-  color: var(--color-text-muted);
-}
-
-.statBars {
-  width: 5rem;
-  padding-left: 0.25rem;
-}
-
-.miniBarGroup {
-  display: flex;
-  align-items: flex-end;
-  gap: 2px;
-  height: 16px;
-}
-
-.miniBar {
-  flex: 1;
-  height: 100%;
-  background: var(--color-border-light);
-  border-radius: 1px;
-  display: flex;
-  align-items: flex-end;
-}
-
-.miniBarFill {
-  width: 100%;
-  border-radius: 1px;
-  transition: height 0.15s ease;
-}
-
 /* Perf table */
 .perfTable {
   border-collapse: collapse;

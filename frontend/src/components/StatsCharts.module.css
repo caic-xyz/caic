@@ -1,4 +1,145 @@
-/* Styles for compact task token and tool-time charts. */
+/* Styles for compact task resource, token, and tool-time charts. */
+
+.resourceGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem 0.75rem;
+}
+
+.resourceRow {
+  min-width: 0;
+}
+
+.resourceHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem;
+  margin-bottom: 0.1rem;
+  color: var(--color-text-secondary);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.resourceHeader strong {
+  color: var(--color-text-tertiary);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+}
+
+.resourceHeader span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resourceHeader .networkRx {
+  color: var(--color-primary);
+}
+
+.resourceHeader .networkTx {
+  color: var(--color-plan);
+}
+
+.networkCharts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.networkSeries {
+  min-width: 0;
+}
+
+.networkSeriesHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  color: var(--color-text-muted);
+  font-size: 0.64rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.networkSeriesHeaderTx {
+  flex-direction: row-reverse;
+}
+
+.networkSeriesHeader strong {
+  font-size: 0.64rem;
+}
+
+.networkSeriesHeader .networkRx {
+  color: var(--color-primary);
+}
+
+.networkSeriesHeader .networkTx {
+  color: var(--color-plan);
+}
+
+.resourceRange {
+  grid-column: 1 / -1;
+  color: var(--color-text-muted);
+  font-size: 0.64rem;
+}
+
+.sampleDetails {
+  grid-column: 1 / -1;
+  color: var(--color-text-secondary);
+  font-size: 0.68rem;
+}
+
+.sampleDetails summary {
+  width: fit-content;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.sampleTableWrap {
+  max-height: 12rem;
+  margin-top: 0.3rem;
+  overflow: auto;
+}
+
+.sampleTableWrap:focus-visible {
+  outline: 2px solid var(--color-focus-border);
+  outline-offset: -2px;
+}
+
+.sampleTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.sampleTable th,
+.sampleTable td {
+  padding: 0.2rem 0.45rem 0.2rem 0;
+  border-bottom: 1px solid var(--color-border-light);
+  text-align: right;
+}
+
+.sampleTable th:first-child,
+.sampleTable td:first-child {
+  text-align: left;
+}
+
+.sampleTable th {
+  position: sticky;
+  top: 0;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-tertiary);
+  font-size: 0.64rem;
+}
+
+.resourceUnavailable {
+  display: flex;
+  height: 58px;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  font-size: 0.66rem;
+}
 
 .figure + .figure {
   margin-top: 0.7rem;
@@ -13,7 +154,6 @@
 
 .chart {
   width: 100%;
-  min-height: 92px;
   overflow-x: auto;
 }
 
@@ -32,4 +172,10 @@
   margin-top: 0.1rem;
   color: var(--color-text-muted);
   font-size: 0.66rem;
+}
+
+@media (max-width: 480px) {
+  .resourceGrid {
+    grid-template-columns: 1fr;
+  }
 }
