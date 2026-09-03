@@ -34,6 +34,15 @@ Object.defineProperty(window, "scrollTo", {
   value: () => {},
 });
 
+// jsdom does not implement element scrolling; components may use it to keep a
+// selected item visible without needing browser layout in unit tests.
+if (!HTMLElement.prototype.scrollIntoView) {
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+    configurable: true,
+    value: () => {},
+  });
+}
+
 // jsdom does not implement HTMLDialogElement.showModal / close; stub them so
 // components using native <dialog> (CloneRepoDialog, CameraCapture) don't
 // throw when calling showModal in onMount.

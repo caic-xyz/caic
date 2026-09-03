@@ -139,4 +139,23 @@ describe("TaskCard", () => {
     expect(onStop).toHaveBeenCalledOnce();
     expect(onClick).not.toHaveBeenCalled();
   });
+
+  it("does not repeat stop and confirms before purging from a double-click", () => {
+    const onStop = vi.fn();
+    const onPurge = vi.fn();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const { getByTestId } = render(() => (
+      <TaskCard {...props({ state: "waiting", onStop, onPurge })} />
+    ));
+    const stopButton = getByTestId("stop-task");
+
+    fireEvent.click(stopButton, { detail: 1 });
+    fireEvent.click(stopButton, { detail: 2 });
+    expect(onStop).toHaveBeenCalledOnce();
+
+    fireEvent.dblClick(stopButton);
+
+    expect(confirm).toHaveBeenCalledWith("Purge runtime instance?\n\nTask\nbranch: task-branch");
+    expect(onPurge).not.toHaveBeenCalled();
+  });
 });

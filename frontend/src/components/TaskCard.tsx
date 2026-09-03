@@ -116,6 +116,12 @@ function confirmStopTask(title: string, branch: string): boolean {
   );
 }
 
+function confirmDirectPurge(title: string, branch: string): boolean {
+  return window.confirm(
+    `Purge runtime instance?\n\n${title}\nbranch: ${branch}`,
+  );
+}
+
 export default function TaskCard(props: TaskCardProps) {
   const isTerminal = () => terminalStates.has(props.state);
   const stale = () =>
@@ -343,6 +349,7 @@ export default function TaskCard(props: TaskCardProps) {
                 disabled={props.actionLoading}
                 onClick={(e) => {
                   e.stopPropagation();
+                  if (e.detail > 1) return;
                   if (e.shiftKey && props.onPurge) {
                     props.onPurge();
                   } else if (props.state === "running") {
@@ -359,7 +366,9 @@ export default function TaskCard(props: TaskCardProps) {
                 }}
                 onDblClick={(e) => {
                   e.stopPropagation();
-                  props.onPurge?.();
+                  if (props.onPurge && confirmDirectPurge(props.title, props.repos?.[0]?.branch ?? "")) {
+                    props.onPurge();
+                  }
                 }}
                 title="Stop (shift-click or double-click to purge)"
                 data-testid="stop-task"

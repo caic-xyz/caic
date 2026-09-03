@@ -30,7 +30,7 @@ const otherAliveTaskStates = new Set<TaskState>([
   "pushing",
 ]);
 
-type PurgeFocusTarget =
+type AliveFocusTarget =
   | { kind: "task"; task: Task }
   | { kind: "prompt" };
 
@@ -250,7 +250,7 @@ function createAppStore() {
     return ordered.length > 0 ? ordered : tasks();
   }
 
-  function purgeFocusTarget(id: string): PurgeFocusTarget {
+  function nextAliveFocusTarget(id: string): AliveFocusTarget {
     const ordered = tasksInSidebarOrder();
     const currentIdx = ordered.findIndex((t) => t.id === id);
     const rotated = currentIdx === -1
@@ -277,7 +277,7 @@ function createAppStore() {
     });
   }
 
-  function navigateToPurgeFocusTarget(target: PurgeFocusTarget) {
+  function navigateToAliveFocusTarget(target: AliveFocusTarget) {
     if (target.kind === "task") {
       navigate(taskPathForTask(target.task), { replace: true });
       focusTaskCard(target.task.id);
@@ -778,9 +778,11 @@ function createAppStore() {
 
   async function handleStop(id: string) {
     if (actionId()) return;
+    const target = selectedId() === id ? nextAliveFocusTarget(id) : null;
     setActionId(id);
     try {
       await stopTask(id);
+      if (target && selectedId() === id) navigateToAliveFocusTarget(target);
     } catch {
       setActionId(null);
     }
@@ -792,11 +794,11 @@ function createAppStore() {
       const task = taskById(id);
       if (!task || !confirmImmediatePurge(task)) return;
     }
-    const target = selectedId() === id ? purgeFocusTarget(id) : null;
+    const target = selectedId() === id ? nextAliveFocusTarget(id) : null;
     setActionId(id);
     try {
       await purgeTask(id);
-      if (target && selectedId() === id) navigateToPurgeFocusTarget(target);
+      if (target && selectedId() === id) navigateToAliveFocusTarget(target);
     } catch {
       setActionId(null);
     }

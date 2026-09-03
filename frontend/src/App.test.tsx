@@ -873,6 +873,28 @@ describe("App repo chips: No repository", () => {
     await waitFor(() => expect(document.querySelector("[data-task-id='a1']")).toHaveFocus());
   });
 
+  it("moves from a stopped selected task to the next alive task", async () => {
+    const killed = makeTask({ id: "a3", title: "stop me", state: "waiting", repos: [{ name: "repos/a", branch: "main" }] });
+    const next = makeTask({ id: "a2", title: "next task", state: "running", repos: [{ name: "repos/a", branch: "main" }] });
+    vi.mocked(api.getTask).mockResolvedValue(killed);
+    vi.mocked(api.stopTask).mockResolvedValue({ status: "stopping" });
+    const { history } = renderApp("/task/@a3+stop-me");
+
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [killed, next] });
+    const stopButton = await waitFor(() => {
+      const button = document.querySelector<HTMLButtonElement>("[data-task-id='a3'] [data-testid='stop-task']");
+      if (!button) throw new Error("selected task stop button was not rendered");
+      return button;
+    });
+
+    await userEvent.setup().click(stopButton);
+
+    expect(api.stopTask).toHaveBeenCalledWith("a3");
+    await waitFor(() => expect(history.get()).toContain("/task/@a2+"));
+    await waitFor(() => expect(document.querySelector("[data-task-id='a2']")).toHaveFocus());
+  });
+
   it("returns to the new-task prompt after purging the last alive selected task", async () => {
     const user = userEvent.setup();
     vi.spyOn(window, "confirm").mockReturnValue(true);
