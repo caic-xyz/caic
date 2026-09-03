@@ -10,6 +10,7 @@ import styles from "./KeyboardShortcuts.module.css";
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  voiceAvailable: boolean;
 }
 
 const navigationShortcutsAfterModelSettings = [
@@ -52,6 +53,7 @@ export default function KeyboardShortcuts(props: Props) {
     return [
       { keys: "F2", action: "Focus repositories for the new task" },
       ...(f3 ? [f3] : []),
+      ...(props.voiceAvailable ? [{ keys: "F4", action: "Toggle voice mode" }] : []),
       ...navigationShortcutsAfterModelSettings,
     ];
   };

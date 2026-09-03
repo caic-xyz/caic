@@ -423,6 +423,27 @@ describe("App task-list SSE recovery", () => {
 });
 
 describe("App keyboard shortcuts", () => {
+  it("describes F4 when browser voice mode is available", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getConfig).mockResolvedValue({
+      displayName: "test",
+      tailscaleAvailable: false,
+      usbAvailable: false,
+      displayAvailable: false,
+      sudoAvailable: false,
+      gitHubTokenAvailable: false,
+      mcpOAuthAvailable: false,
+      voiceGateway: { mode: "embedded" },
+    });
+    renderApp();
+    await screen.findByTestId("voice-overlay");
+
+    await user.keyboard("{F1}");
+
+    expect(screen.getByText("F4", { selector: "kbd" })).toBeInTheDocument();
+    expect(screen.getByText("Toggle voice mode")).toBeInTheDocument();
+  });
+
   it.each([
     {
       harnesses: [

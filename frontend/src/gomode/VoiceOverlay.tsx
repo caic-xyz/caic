@@ -112,6 +112,26 @@ export default function VoiceOverlay(props: Props) {
     }
   };
 
+  onMount(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented
+        || event.repeat
+        || event.ctrlKey
+        || event.metaKey
+        || event.altKey
+        || event.key !== "F4"
+        || document.querySelector("dialog[open]")
+      ) return;
+
+      event.preventDefault();
+      void handleMicClick();
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+    onCleanup(() => document.removeEventListener("keydown", onKeyDown));
+  });
+
   // -----------------------------------------------------------------------
   // Render
   // -----------------------------------------------------------------------

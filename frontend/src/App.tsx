@@ -3,7 +3,7 @@
 import { createEffect, createMemo, createSignal, ErrorBoundary, Show, type JSX } from "solid-js";
 
 import GoModeBrowserShell from "./gomode/BrowserShell";
-import { HostModeProvider } from "./gomode/HostMode";
+import { HostModeProvider, useHostMode } from "./gomode/HostMode";
 
 import { currentErrorReport } from "./errorReport";
 import { AppStateProvider, useAppState } from "./AppState";
@@ -101,6 +101,7 @@ function ConnectionDot(props: { connected: boolean; settledLoading: boolean; set
 /** Top-level chrome: navbar, modals, overlays, and the routed detail panes. */
 function Shell(props: { children?: JSX.Element }) {
   const s = useAppState();
+  const hostMode = useHostMode();
   const auth = s.auth;
   const [shortcutsOpen, setShortcutsOpen] = createSignal(false);
 
@@ -131,7 +132,11 @@ function Shell(props: { children?: JSX.Element }) {
         </Show>
 
         <ForkDialog />
-        <KeyboardShortcuts open={shortcutsOpen()} onOpenChange={setShortcutsOpen} />
+        <KeyboardShortcuts
+          open={shortcutsOpen()}
+          onOpenChange={setShortcutsOpen}
+          voiceAvailable={hostMode.browserVoiceEnabled() && s.voiceGatewayAvailable()}
+        />
         <GoModeBrowserShell />
         <Toasts />
       </div>
