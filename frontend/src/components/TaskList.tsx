@@ -218,6 +218,16 @@ export default function TaskList(props: TaskListProps) {
     });
   });
 
+  // Keep the selected task summary visible when navigation changes the detail pane.
+  createEffect(() => {
+    const selectedId = props.selectedId;
+    if (!selectedId || !props.sidebarOpen()) return;
+    requestAnimationFrame(() => {
+      taskCards().find((card) => card.dataset.taskId === selectedId)
+        ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+  });
+
   const renderTask = (t: () => Task) => (
     <TaskCard
       id={t().id}
