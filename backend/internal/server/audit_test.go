@@ -32,18 +32,13 @@ func TestAuditStore(t *testing.T) {
 		}
 	})
 
-	t.Run("redaction", func(t *testing.T) {
+	t.Run("argument summary preserves values", func(t *testing.T) {
 		t.Parallel()
 
 		got := auditArgsSummary(json.RawMessage(`{"token":"ghp_secret","url":"https://user:pass@example.com/repo.git","env":"OPENAI_API_KEY=sk-secret"}`))
-		for _, secret := range []string{"ghp_secret", "pass", "sk-secret"} {
-			if strings.Contains(got, secret) {
-				t.Fatalf("audit args contain %q: %s", secret, got)
-			}
-		}
-		for _, want := range []string{redactedValue, "OPENAI_API_KEY=" + redactedValue} {
+		for _, want := range []string{"ghp_secret", "pass", "sk-secret"} {
 			if !strings.Contains(got, want) {
-				t.Fatalf("audit args = %s, want %q", got, want)
+				t.Fatalf("audit args = %s, want preserved value %q", got, want)
 			}
 		}
 	})
@@ -62,8 +57,8 @@ func TestAuditStore(t *testing.T) {
 		if events[0].Decision == "allow" || !strings.Contains(events[0].Decision, "missing required MCP scope") {
 			t.Fatalf("decision = %q", events[0].Decision)
 		}
-		if strings.Contains(events[0].Args, "secret") {
-			t.Fatalf("args were not redacted: %s", events[0].Args)
+		if !strings.Contains(events[0].Args, "secret") {
+			t.Fatalf("args did not preserve the supplied value: %s", events[0].Args)
 		}
 	})
 

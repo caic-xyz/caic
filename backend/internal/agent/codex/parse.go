@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"strconv"
 	"strings"
+	"time"
 
+	"github.com/maruel/genai/base"
 	"github.com/maruel/genai/providers/codex"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -155,6 +158,12 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 			Result:      p.Error.Message,
 		}}, nil
 
+	case codex.MethodAccountRateLimitsUpdated:
+		return parseAccountRateLimitsUpdated(msg.Params)
+
+	case codex.MethodThreadGoalUpdated:
+		return parseThreadGoalUpdated(msg.Params)
+
 	case codex.MethodReasoningSummaryTextDelta:
 		var p codex.ReasoningSummaryTextDeltaNotification
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
@@ -204,6 +213,179 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 
 	default:
 		return []agent.Message{&agent.RawMessage{MessageType: string(msg.Method), Raw: append([]byte(nil), line...)}}, nil
+	}
+}
+
+func parseAccountRateLimitsUpdated(params json.RawMessage) ([]agent.Message, error) {
+	var p codexRateLimitsUpdatedNotification
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("account/rateLimits/updated params: %w", err)
+	}
+	return codexRateLimitMessages(&p.RateLimits.RateLimitSnapshot, p.RateLimits.SpendControlReached), nil
+}
+
+// codexRateLimitsUpdatedNotification preserves whether a sparse notification
+// explicitly set spendControlReached. The upstream DTO uses bool, which cannot
+// distinguish a false recovery update from an omitted field.
+type codexRateLimitsUpdatedNotification struct {
+	RateLimits codexRateLimitSnapshot `json:"rateLimits"`
+}
+
+type codexRateLimitSnapshot struct {
+	codex.RateLimitSnapshot
+
+	SpendControlReached *bool `json:"spendControlReached"`
+}
+
+func parseThreadGoalUpdated(params json.RawMessage) ([]agent.Message, error) {
+	var p codex.ThreadGoalUpdatedNotification
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("thread/goal/updated params: %w", err)
+	}
+	if p.Goal.Status != codex.ThreadGoalStatusUsageLimited {
+		return nil, nil
+	}
+	return []agent.Message{newCodexRateLimitMessage(agent.RateLimitStatusRejected, "thread_goal", "thread_goal", 1, time.Time{})}, nil
+}
+
+func codexRateLimitMessages(s *codex.RateLimitSnapshot, spendControlReached *bool) []agent.Message {
+	msgs := make([]agent.Message, 0, 4)
+	if s.Primary != nil {
+		msgs = append(msgs, codexWindowRateLimitMessage(s.Primary, "primary", "5h"))
+	}
+	if s.Secondary != nil {
+		msgs = append(msgs, codexWindowRateLimitMessage(s.Secondary, "secondary", "7d"))
+	}
+	if s.IndividualLimit != nil {
+		usedPercent := 100 - s.IndividualLimit.RemainingPercent
+		status := codexRateLimitStatus(usedPercent)
+		if spendControlReached != nil && *spendControlReached {
+			status = agent.RateLimitStatusRejected
+		}
+		msgs = append(msgs, newCodexRateLimitMessage(
+			status,
+			"individual",
+			"individual",
+			codexUtilization(usedPercent),
+			codexResetTime(s.IndividualLimit.ResetsAt),
+		))
+	} else if spendControlReached != nil {
+		status := agent.RateLimitStatusAllowed
+		utilization := 0.0
+		if *spendControlReached {
+			status = agent.RateLimitStatusRejected
+			utilization = 1
+		}
+		msgs = append(msgs, newCodexRateLimitMessage(status, "individual", "individual", utilization, time.Time{}))
+	}
+
+	switch s.RateLimitReachedType {
+	case "":
+		return msgs
+	case codex.RateLimitReachedTypeRateLimitReached:
+		rejected := false
+		for _, msg := range msgs {
+			rateLimit, ok := msg.(*agent.RateLimitMessage)
+			if ok && rateLimit.RateLimitType != "individual" && rateLimit.Utilization >= 1 {
+				rateLimit.Status = agent.RateLimitStatusRejected
+				rejected = true
+			}
+		}
+		if rejected {
+			return msgs
+		}
+	case codex.RateLimitReachedTypeWorkspaceOwnerUsageLimitReached,
+		codex.RateLimitReachedTypeWorkspaceMemberUsageLimitReached:
+		for _, msg := range msgs {
+			rateLimit, ok := msg.(*agent.RateLimitMessage)
+			if ok && rateLimit.RateLimitType == "individual" {
+				rateLimit.Status = agent.RateLimitStatusRejected
+				return msgs
+			}
+		}
+	case codex.RateLimitReachedTypeWorkspaceOwnerCreditsDepleted,
+		codex.RateLimitReachedTypeWorkspaceMemberCreditsDepleted:
+		// Credit depletion is independent from rolling rate-limit windows and
+		// is appended below as its own canonical quota update.
+	}
+
+	window := codexReachedQuotaWindow(s.RateLimitReachedType)
+	return append(msgs, newCodexRateLimitMessage(
+		agent.RateLimitStatusRejected,
+		string(s.RateLimitReachedType),
+		window,
+		1,
+		time.Time{},
+	))
+}
+
+func codexWindowRateLimitMessage(w *codex.RateLimitWindow, rateLimitType, fallbackWindow string) *agent.RateLimitMessage {
+	return newCodexRateLimitMessage(
+		codexRateLimitStatus(w.UsedPercent),
+		rateLimitType,
+		codexQuotaWindow(w.WindowDurationMins, fallbackWindow),
+		codexUtilization(w.UsedPercent),
+		codexResetTime(w.ResetsAt),
+	)
+}
+
+func newCodexRateLimitMessage(status agent.RateLimitStatus, rateLimitType, window string, utilization float64, resetsAt time.Time) *agent.RateLimitMessage {
+	return &agent.RateLimitMessage{
+		Status:        status,
+		ResetsAt:      resetsAt,
+		RateLimitType: rateLimitType,
+		Utilization:   utilization,
+		QuotaProvider: agent.QuotaProviderCodex,
+		QuotaLabel:    "Codex",
+		QuotaWindow:   window,
+	}
+}
+
+func codexRateLimitStatus(usedPercent int) agent.RateLimitStatus {
+	if usedPercent >= 80 {
+		return agent.RateLimitStatusAllowedWarning
+	}
+	return agent.RateLimitStatusAllowed
+}
+
+func codexUtilization(usedPercent int) float64 {
+	return float64(min(max(usedPercent, 0), 100)) / 100
+}
+
+func codexQuotaWindow(minutes int64, fallback string) string {
+	const (
+		minutesPerHour = 60
+		minutesPerDay  = 24 * minutesPerHour
+	)
+	switch {
+	case minutes <= 0:
+		return fallback
+	case minutes%minutesPerDay == 0:
+		return strconv.FormatInt(minutes/minutesPerDay, 10) + "d"
+	case minutes%minutesPerHour == 0:
+		return strconv.FormatInt(minutes/minutesPerHour, 10) + "h"
+	default:
+		return strconv.FormatInt(minutes, 10) + "m"
+	}
+}
+
+func codexResetTime(ts base.TimeS) time.Time {
+	if ts.IsZero() {
+		return time.Time{}
+	}
+	return ts.AsTime()
+}
+
+func codexReachedQuotaWindow(reason codex.RateLimitReachedType) string {
+	switch reason {
+	case codex.RateLimitReachedTypeWorkspaceOwnerCreditsDepleted,
+		codex.RateLimitReachedTypeWorkspaceMemberCreditsDepleted:
+		return "credits"
+	case codex.RateLimitReachedTypeWorkspaceOwnerUsageLimitReached,
+		codex.RateLimitReachedTypeWorkspaceMemberUsageLimitReached:
+		return "individual"
+	default:
+		return "rate_limit"
 	}
 }
 

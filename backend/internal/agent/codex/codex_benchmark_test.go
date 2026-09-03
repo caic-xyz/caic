@@ -15,3 +15,14 @@ func BenchmarkWireFormatTokenUsageUpdated(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkParseAccountRateLimitsUpdated(b *testing.B) {
+	line := []byte(`{"jsonrpc":"2.0","method":"account/rateLimits/updated","params":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1735689720.5},"secondary":{"usedPercent":85,"windowDurationMins":10080,"resetsAt":1736294520},"rateLimitReachedType":"rate_limit_reached"}}}`)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, err := parseMessage(line); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

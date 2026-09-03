@@ -1024,8 +1024,8 @@ func (h *Handler) handleSubscription(ctx context.Context, w http.ResponseWriter,
 //
 // The draft schema's acknowledged and resources/updated notifications carry no
 // content, so re-read — not an embedded baseline payload — is the spec-conformant
-// way to deliver initial state. Re-reading also keeps redaction and authorization
-// on the normal ReadResource path rather than a divergent snapshot.
+// way to deliver initial state. Re-reading also keeps authorization on the
+// normal ReadResource path rather than a divergent snapshot.
 func (h *Handler) writeInitialSubscriptionState(ctx context.Context, w subscriptionStreamWriter, subID string, filter SubscriptionFilter) bool {
 	if filter.ResourcesListChanged {
 		if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesListChanged, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID)}}); err != nil {

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
@@ -689,6 +690,152 @@ func TestParseMessage(t *testing.T) {
 		}
 		if rm.Result != "out of quota" {
 			t.Errorf("Result = %q, want %q", rm.Result, "out of quota")
+		}
+	})
+	t.Run("AccountRateLimitsUpdated", func(t *testing.T) {
+		t.Parallel()
+		const input = `{"jsonrpc":"2.0","method":"account/rateLimits/updated","params":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1735689720.5},"secondary":{"usedPercent":85,"windowDurationMins":10080,"resetsAt":1736294520},"rateLimitReachedType":"rate_limit_reached"}}}`
+		msgs, err := parseMessage([]byte(input))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 2 {
+			t.Fatalf("msgs = %d, want 2", len(msgs))
+		}
+		primary, ok := msgs[0].(*agent.RateLimitMessage)
+		if !ok {
+			t.Fatalf("msgs[0] type = %T, want *agent.RateLimitMessage", msgs[0])
+		}
+		if primary.Status != agent.RateLimitStatusRejected || primary.RateLimitType != "primary" || primary.QuotaWindow != "5h" || primary.Utilization != 1 {
+			t.Errorf("primary = %+v, want rejected 5h primary window", primary)
+		}
+		if primary.QuotaProvider != agent.QuotaProviderCodex || primary.QuotaLabel != "Codex" {
+			t.Errorf("primary quota identity = (%q, %q), want (%q, Codex)", primary.QuotaProvider, primary.QuotaLabel, agent.QuotaProviderCodex)
+		}
+		if want := time.UnixMilli(1735689720500).UTC(); !primary.ResetsAt.Equal(want) {
+			t.Errorf("primary.ResetsAt = %s, want %s", primary.ResetsAt, want)
+		}
+		secondary, ok := msgs[1].(*agent.RateLimitMessage)
+		if !ok {
+			t.Fatalf("msgs[1] type = %T, want *agent.RateLimitMessage", msgs[1])
+		}
+		if secondary.Status != agent.RateLimitStatusAllowedWarning || secondary.RateLimitType != "secondary" || secondary.QuotaWindow != "7d" || secondary.Utilization != 0.85 {
+			t.Errorf("secondary = %+v, want warning 7d secondary window", secondary)
+		}
+	})
+	t.Run("AccountCreditsDepleted", func(t *testing.T) {
+		t.Parallel()
+		const input = `{"jsonrpc":"2.0","method":"account/rateLimits/updated","params":{"rateLimits":{"primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1735689720},"rateLimitReachedType":"workspace_owner_credits_depleted"}}}`
+		msgs, err := parseMessage([]byte(input))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 2 {
+			t.Fatalf("msgs = %d, want 2", len(msgs))
+		}
+		primary, ok := msgs[0].(*agent.RateLimitMessage)
+		if !ok {
+			t.Fatalf("msgs[0] type = %T, want *agent.RateLimitMessage", msgs[0])
+		}
+		if primary.Status != agent.RateLimitStatusAllowedWarning {
+			t.Errorf("primary.Status = %q, want %q without a formal window rejection", primary.Status, agent.RateLimitStatusAllowedWarning)
+		}
+		credits, ok := msgs[1].(*agent.RateLimitMessage)
+		if !ok {
+			t.Fatalf("msgs[1] type = %T, want *agent.RateLimitMessage", msgs[1])
+		}
+		if credits.Status != agent.RateLimitStatusRejected || credits.RateLimitType != "workspace_owner_credits_depleted" || credits.QuotaWindow != "credits" {
+			t.Errorf("credits = %+v, want rejected credits quota", credits)
+		}
+	})
+	t.Run("ThreadGoalUsageLimited", func(t *testing.T) {
+		t.Parallel()
+		const input = `{"jsonrpc":"2.0","method":"thread/goal/updated","params":{"threadId":"t1","goal":{"threadId":"t1","objective":"work","status":"usageLimited","tokensUsed":1,"timeUsedSeconds":2,"createdAt":3,"updatedAt":4}}}`
+		msgs, err := parseMessage([]byte(input))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		rl, ok := msgs[0].(*agent.RateLimitMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.RateLimitMessage", msgs[0])
+		}
+		if rl.Status != agent.RateLimitStatusRejected || rl.QuotaProvider != agent.QuotaProviderCodex || rl.QuotaWindow != "thread_goal" || !rl.ResetsAt.IsZero() {
+			t.Errorf("RateLimitMessage = %+v, want rejected Codex thread goal without reset", rl)
+		}
+	})
+	t.Run("ThreadGoalActive", func(t *testing.T) {
+		t.Parallel()
+		const input = `{"jsonrpc":"2.0","method":"thread/goal/updated","params":{"threadId":"t1","goal":{"threadId":"t1","objective":"work","status":"active","tokensUsed":1,"timeUsedSeconds":2,"createdAt":3,"updatedAt":4}}}`
+		msgs, err := parseMessage([]byte(input))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 0 {
+			t.Fatalf("msgs = %d, want no quota event for an active goal", len(msgs))
+		}
+	})
+	t.Run("AccountIndividualLimit", func(t *testing.T) {
+		t.Parallel()
+		const input = `{"jsonrpc":"2.0","method":"account/rateLimits/updated","params":{"rateLimits":{"individualLimit":{"limit":"100","used":"100","remainingPercent":0,"resetsAt":1735689720},"spendControlReached":true}}}`
+		msgs, err := parseMessage([]byte(input))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		limit, ok := msgs[0].(*agent.RateLimitMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.RateLimitMessage", msgs[0])
+		}
+		if limit.Status != agent.RateLimitStatusRejected || limit.RateLimitType != "individual" || limit.QuotaWindow != "individual" || limit.Utilization != 1 {
+			t.Errorf("individual limit = %+v, want rejected individual quota", limit)
+		}
+	})
+	t.Run("AccountSpendControlReached", func(t *testing.T) {
+		t.Parallel()
+		const input = `{"jsonrpc":"2.0","method":"account/rateLimits/updated","params":{"rateLimits":{"spendControlReached":true}}}`
+		msgs, err := parseMessage([]byte(input))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		limit, ok := msgs[0].(*agent.RateLimitMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.RateLimitMessage", msgs[0])
+		}
+		if limit.Status != agent.RateLimitStatusRejected || limit.RateLimitType != "individual" || limit.QuotaWindow != "individual" {
+			t.Errorf("spend control = %+v, want rejected individual quota", limit)
+		}
+	})
+	t.Run("AccountSpendControlRecovered", func(t *testing.T) {
+		t.Parallel()
+		const input = `{"jsonrpc":"2.0","method":"account/rateLimits/updated","params":{"rateLimits":{"spendControlReached":false}}}`
+		msgs, err := parseMessage([]byte(input))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		limit, ok := msgs[0].(*agent.RateLimitMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.RateLimitMessage", msgs[0])
+		}
+		if limit.Status != agent.RateLimitStatusAllowed || limit.RateLimitType != "individual" || limit.Utilization != 0 {
+			t.Errorf("spend control = %+v, want allowed individual quota recovery", limit)
+		}
+	})
+	t.Run("MalformedRateLimits", func(t *testing.T) {
+		t.Parallel()
+		const input = `{"jsonrpc":"2.0","method":"account/rateLimits/updated","params":{"rateLimits":[]}}`
+		if _, err := parseMessage([]byte(input)); err == nil {
+			t.Fatal("parseMessage succeeded, want malformed params error")
 		}
 	})
 	t.Run("UnknownMethod", func(t *testing.T) {

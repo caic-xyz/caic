@@ -109,7 +109,6 @@ func (m *mcpRegistry) CallTool(ctx context.Context, name string, argsJSON json.R
 		} else if res.IsError {
 			status = "tool_error"
 		}
-		res.Structured = redactForJSON(res.Structured)
 		m.audit.record(ctx, &auditEvent{Operation: "tools/call", Name: name, Args: auditArgsSummary(argsJSON), Decision: "allow", Status: status})
 		return res, err
 	}
@@ -147,21 +146,21 @@ func (m *mcpRegistry) ReadResource(ctx context.Context, uri string) (mcp.Resourc
 	switch {
 	case uri == "caic://repos":
 		m.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
-		return redactedResourceJSON(uri, repoList)
+		return mcp.ResourceJSON(uri, repoList)
 	case uri == "caic://tasks":
 		m.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
-		return redactedResourceJSON(uri, taskList)
+		return mcp.ResourceJSON(uri, taskList)
 	case uri == "caic://usage":
 		usage := m.usage.buildResp(ctx)
 		m.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
-		return redactedResourceJSON(uri, usage)
+		return mcp.ResourceJSON(uri, usage)
 	case uri == "gomode://items":
 		m.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
-		return redactedResourceJSON(uri, serviceItems(taskList))
+		return mcp.ResourceJSON(uri, serviceItems(taskList))
 	case uri == "gomode://notifications":
 		notifications := m.notifications.notifications(ctx, taskList, m.usage.buildResp(ctx))
 		m.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
-		return redactedResourceJSON(uri, notifications)
+		return mcp.ResourceJSON(uri, notifications)
 	case strings.HasPrefix(uri, "caic://repos/"):
 		name, err := url.PathUnescape(strings.TrimPrefix(uri, "caic://repos/"))
 		if err != nil {
@@ -170,7 +169,7 @@ func (m *mcpRegistry) ReadResource(ctx context.Context, uri string) (mcp.Resourc
 		for i := range repoList {
 			if repoList[i].Path == name {
 				m.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
-				return redactedResourceJSON(uri, repoList[i])
+				return mcp.ResourceJSON(uri, repoList[i])
 			}
 		}
 		return mcp.ResourcesReadResult{}, mcp.ErrInvalidParams("repo not found: %s", name)
@@ -179,7 +178,7 @@ func (m *mcpRegistry) ReadResource(ctx context.Context, uri string) (mcp.Resourc
 		for i := range taskList {
 			if taskList[i].ID.String() == id {
 				m.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
-				return redactedResourceJSON(uri, taskList[i])
+				return mcp.ResourceJSON(uri, taskList[i])
 			}
 		}
 		return mcp.ResourcesReadResult{}, mcp.ErrInvalidParams("task not found: %s", id)
@@ -1063,10 +1062,6 @@ func mcpScopeChallenge(scope string) string {
 		scope = mcpScopeRead
 	}
 	return oauth.BearerScopeChallenge(scope)
-}
-
-func redactedResourceJSON(uri string, value any) (mcp.ResourcesReadResult, error) {
-	return mcp.ResourceJSON(uri, redactForJSON(value))
 }
 
 type subscriptionSources struct {

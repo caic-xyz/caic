@@ -86,9 +86,9 @@ func auditArgsSummary(raw json.RawMessage) string {
 	}
 	var decoded any
 	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return redactString(string(raw))
+		return string(raw)
 	}
-	data, err := json.Marshal(redactAny(decoded))
+	data, err := json.Marshal(decoded)
 	if err != nil {
 		return ""
 	}

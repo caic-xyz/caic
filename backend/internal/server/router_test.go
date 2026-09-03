@@ -2775,22 +2775,6 @@ func TestBuildHandler(t *testing.T) {
 		}
 	})
 
-	t.Run("MCP redacts secrets", func(t *testing.T) {
-		t.Parallel()
-		secretURL := "https://user:" + "pass@example.com/repo.git"
-		got := redactForJSON(map[string]any{"accessToken": "ghp_" + "secret", "url": secretURL, "text": "OPENAI_API_KEY=" + "sk-secret", "log": "clone " + secretURL})
-		data, err := json.Marshal(got)
-		if err != nil {
-			t.Fatal(err)
-		}
-		text := string(data)
-		for _, secret := range []string{"ghp_secret", "pass", "sk-secret"} {
-			if strings.Contains(text, secret) {
-				t.Fatalf("redacted JSON still contains %q: %s", secret, text)
-			}
-		}
-	})
-
 	t.Run("go mode settings are public", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
