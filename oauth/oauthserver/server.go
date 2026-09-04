@@ -1444,9 +1444,18 @@ func (s *Server) handleOAuthRegister(w http.ResponseWriter, r *http.Request) {
 		oauth.WriteError(w, http.StatusBadRequest, "invalid_client_metadata", "invalid registration JSON")
 		return
 	}
+	_, clientNamePresent := fields["client_name"]
+	if clientNamePresent && req.ClientName == "" {
+		oauth.WriteError(w, http.StatusBadRequest, "invalid_client_metadata", "client_name must not be null or empty")
+		return
+	}
 	method := req.TokenEndpointAuthMethod
-	if method == "" {
+	_, authMethodPresent := fields["token_endpoint_auth_method"]
+	if !authMethodPresent {
 		method = oauth.TokenEndpointAuthNone
+	} else if method == "" {
+		oauth.WriteError(w, http.StatusBadRequest, "invalid_client_metadata", "token_endpoint_auth_method must not be null or empty")
+		return
 	}
 	requestedGrantTypes := req.GrantTypes
 	if _, present := fields["grant_types"]; !present {
@@ -1698,7 +1707,7 @@ func (s *Server) handleOAuthRegisterDelete(w http.ResponseWriter, r *http.Reques
 
 func validRedirectURI(raw string) bool {
 	u, err := url.Parse(raw)
-	if err != nil || len(raw) > maxOAuthParameterBytes || strings.Contains(raw, "#") || u.Host == "" || u.Hostname() == "" || u.User != nil {
+	if err != nil || len(raw) > maxOAuthParameterBytes || strings.Contains(raw, "#") || u.String() != raw || u.Host == "" || u.Hostname() == "" || u.User != nil {
 		return false
 	}
 	if u.Scheme == "https" {
@@ -1715,11 +1724,14 @@ func validRedirectURI(raw string) bool {
 }
 
 func redirectURIRegistered(registered []string, requested string) bool {
+	if strings.Contains(requested, "#") {
+		return false
+	}
 	if slices.Contains(registered, requested) {
 		return true
 	}
 	requestedURL, err := url.Parse(requested)
-	if err != nil || requestedURL.Scheme != "http" || requestedURL.User != nil || requestedURL.Fragment != "" {
+	if err != nil || requestedURL.String() != requested || requestedURL.Scheme != "http" || requestedURL.User != nil || requestedURL.Fragment != "" {
 		return false
 	}
 	requestedIP := net.ParseIP(requestedURL.Hostname())

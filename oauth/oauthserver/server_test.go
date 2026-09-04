@@ -4296,6 +4296,7 @@ func TestClientLifecyclePolicy(t *testing.T) {
 			{name: "redirect fragment", mutate: func(r *oauth.RegisterRequest) { r.RedirectURIs = []string{"https://example.com/callback#fragment"} }},
 			{name: "empty redirect fragment", mutate: func(r *oauth.RegisterRequest) { r.RedirectURIs = []string{"https://example.com/callback#"} }},
 			{name: "empty redirect hostname", mutate: func(r *oauth.RegisterRequest) { r.RedirectURIs = []string{"https://:443/callback"} }},
+			{name: "unescaped redirect space", mutate: func(r *oauth.RegisterRequest) { r.RedirectURIs = []string{"https://example.com/call back"} }},
 			{name: "redirect credentials", mutate: func(r *oauth.RegisterRequest) { r.RedirectURIs = []string{"https://user:pass@example.com/callback"} }},
 			{name: "non-loopback HTTP", mutate: func(r *oauth.RegisterRequest) { r.RedirectURIs = []string{"http://example.com/callback"} }},
 			{name: "unsupported grant", mutate: func(r *oauth.RegisterRequest) { r.GrantTypes = []string{"client_credentials"} }},
@@ -4323,6 +4324,10 @@ func TestClientLifecyclePolicy(t *testing.T) {
 			`{"client_name":"a","redirect_uris":["https://example.com/callback"]} {}`,
 			`{"client_name":"a","redirect_uris":["https://example.com/callback"],"grant_types":null}`,
 			`{"client_name":"a","redirect_uris":["https://example.com/callback"],"grant_types":[]}`,
+			`{"client_name":null,"redirect_uris":["https://example.com/callback"]}`,
+			`{"client_name":"","redirect_uris":["https://example.com/callback"]}`,
+			`{"client_name":"a","redirect_uris":["https://example.com/callback"],"token_endpoint_auth_method":null}`,
+			`{"client_name":"a","redirect_uris":["https://example.com/callback"],"token_endpoint_auth_method":""}`,
 		}
 		for _, body := range bodies {
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/register", strings.NewReader(body))
@@ -4332,6 +4337,26 @@ func TestClientLifecyclePolicy(t *testing.T) {
 			if w.Code != http.StatusBadRequest {
 				t.Fatalf("body %q status = %d, want %d", body, w.Code, http.StatusBadRequest)
 			}
+		}
+	})
+
+	t.Run("omitted optional strings retain their defaults", func(t *testing.T) {
+		t.Parallel()
+		handler := newTestServerHandlerOnly(t)
+		body := `{"redirect_uris":["https://example.com/callback"]}`
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/register", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("omitted defaults status = %d: %s", w.Code, w.Body.String())
+		}
+		var registered oauth.RegisterResponse
+		if err := json.NewDecoder(w.Body).Decode(&registered); err != nil {
+			t.Fatalf("decode registration: %v", err)
+		}
+		if registered.ClientName != "" || registered.TokenEndpointAuthMethod != oauth.TokenEndpointAuthNone {
+			t.Fatalf("omitted defaults = name %q, auth %q", registered.ClientName, registered.TokenEndpointAuthMethod)
 		}
 	})
 
@@ -4429,6 +4454,23 @@ func TestClientLifecyclePolicy(t *testing.T) {
 		handler.ServeHTTP(w, req)
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("alternate IPv6 text status = %d, want %d", w.Code, http.StatusBadRequest)
+		}
+		registered = registerOAuthTestClient(t, handler, "Empty fragment", []string{"http://127.0.0.1:1000/callback"})
+		form = authorizationCodeForm(registered.ClientID, "http://127.0.0.1:2000/callback#", "read")
+		if redirectURIRegistered([]string{"http://127.0.0.1:1000/callback"}, form.Get("redirect_uri")) {
+			t.Fatal("dynamic loopback matcher accepted an empty fragment")
+		}
+		if redirectURIRegistered([]string{"http://127.0.0.1:1000/callback#"}, "http://127.0.0.1:1000/callback#") {
+			t.Fatal("exact loopback matcher accepted an empty fragment")
+		}
+		req = newOAuthTestRequest(t, http.MethodGet, "/oauth/authorize?"+form.Encode(), http.NoBody, user)
+		w = httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("empty-fragment authorization status = %d, want %d", w.Code, http.StatusBadRequest)
+		}
+		if redirectURIRegistered([]string{"http://127.0.0.1:1000/call%20back"}, "http://127.0.0.1:2000/call back") {
+			t.Fatal("dynamic loopback matcher normalized a non-identical path")
 		}
 	})
 
