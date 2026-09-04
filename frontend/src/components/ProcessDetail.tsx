@@ -113,7 +113,6 @@ function ProcessRow(props: RowProps) {
           </div>
         </td>
         <td class={styles.td}>{props.node.pid}</td>
-        <td class={styles.td}>{props.node.ppid}</td>
         <td class={styles.td}>{props.node.pgrp}</td>
         <td class={styles.td}>{props.node.user}</td>
         <td class={styles.td}>
@@ -252,7 +251,6 @@ export default function ProcessDetail(props: Props) {
                     <tr>
                       <th class={`${styles.th} ${styles.actionsHdr}`}>ACTIONS</th>
                       <th class={styles.th}>PID</th>
-                      <th class={styles.th}>PPID</th>
                       <th class={styles.th}>PGRP</th>
                       <th class={styles.th}>USER</th>
                       <th class={styles.th}>S</th>
