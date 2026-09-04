@@ -1343,6 +1343,8 @@ public struct ProcessInfo: Codable {
     public let nice: Int
     /// Threads is the number of threads in the process.
     public let threads: Int
+    /// OpenFDs is the number of open file descriptors, if available.
+    public let openFDs: Int?
     /// CPU is the percentage of CPU capacity used at the time of inspection.
     public let cpu: Double
     /// Mem is the percentage of physical memory used at the time of inspection.

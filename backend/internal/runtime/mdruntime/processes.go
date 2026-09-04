@@ -1,8 +1,9 @@
-// Process inspection executes ps in md containers and parses the results into runtime process snapshots.
+// Process inspection combines ps output with Linux procfs descriptor counts into runtime process snapshots.
 
 package mdruntime
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -12,7 +13,12 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
-const processCommand = "LC_ALL=C TZ=UTC ps -eo pid,ppid,pgrp,user,stat,pri,ni,nlwp,%cpu,%mem,rss,cputimes,lstart,args --no-headers"
+const (
+	fdCountsMarker = "--caic-open-fds--"
+	processCommand = "find /proc/[0-9]*/fd -mindepth 1 -maxdepth 1 -printf '%h\\n' 2>/dev/null | sort | uniq -c" +
+		" && printf '%s\\n' '" + fdCountsMarker + "'" +
+		" && exec env LC_ALL=C TZ=UTC ps -eo pid,ppid,pgrp,user,stat,pri,ni,nlwp,%cpu,%mem,rss,cputimes,lstart,args --no-headers"
+)
 
 func signalCommand(pid int, sig string) (string, error) {
 	if pid < 1 {
@@ -90,4 +96,62 @@ func parsePSOutput(out string) ([]runtime.ProcessInfo, error) {
 	return slices.DeleteFunc(procs, func(p runtime.ProcessInfo) bool {
 		return strings.HasPrefix(p.Command, "ps ")
 	}), nil
+}
+
+func parseProcessOutput(out string) ([]runtime.ProcessInfo, error) {
+	fdOutput, psOutput, ok := strings.Cut(out, fdCountsMarker+"\n")
+	if !ok {
+		return nil, errors.New("process output is missing file descriptor counts")
+	}
+	procs, err := parsePSOutput(psOutput)
+	if err != nil {
+		return nil, err
+	}
+	counts, err := parseFDCounts(fdOutput)
+	if err != nil {
+		return nil, err
+	}
+	for i := range procs {
+		if count, found := counts[procs[i].PID]; found {
+			procs[i].OpenFDs = new(count)
+		}
+	}
+	return procs, nil
+}
+
+func parseFDCounts(out string) (map[int]int, error) {
+	counts := make(map[int]int)
+	for line := range strings.SplitSeq(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if len(fields) != 2 {
+			return nil, fmt.Errorf("parse file descriptor count line %q", line)
+		}
+		count, err := strconv.Atoi(fields[0])
+		if err != nil {
+			return nil, fmt.Errorf("parse file descriptor count %q: %w", fields[0], err)
+		}
+		if count < 0 {
+			return nil, fmt.Errorf("file descriptor count must not be negative, got %d", count)
+		}
+		pidText, ok := strings.CutPrefix(fields[1], "/proc/")
+		if !ok {
+			return nil, fmt.Errorf("parse file descriptor path %q", fields[1])
+		}
+		pidText, ok = strings.CutSuffix(pidText, "/fd")
+		if !ok {
+			return nil, fmt.Errorf("parse file descriptor path %q", fields[1])
+		}
+		pid, err := strconv.Atoi(pidText)
+		if err != nil {
+			return nil, fmt.Errorf("parse file descriptor PID %q: %w", pidText, err)
+		}
+		if pid < 1 {
+			return nil, fmt.Errorf("file descriptor PID must be positive, got %d", pid)
+		}
+		counts[pid] = count
+	}
+	return counts, nil
 }

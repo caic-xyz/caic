@@ -1714,6 +1714,8 @@ data class ProcessInfo(
     val nice: Int,
     /** Threads is the number of threads in the process. */
     val threads: Int,
+    /** OpenFDs is the number of open file descriptors, if available. */
+    @SerialName("openFDs") val openFDs: Int? = null,
     /** CPU is the percentage of CPU capacity used at the time of inspection. */
     val cpu: Double,
     /** Mem is the percentage of physical memory used at the time of inspection. */

@@ -1374,6 +1374,7 @@ ProcessInfo describes a single process running inside a task runtime instance.
 | `priority` | `int` | Priority is the kernel scheduling priority. | yes |
 | `nice` | `int` | Nice is the process niceness value. | yes |
 | `threads` | `int` | Threads is the number of threads in the process. | yes |
+| `openFDs` | `int` | OpenFDs is the number of open file descriptors, if available. |  |
 | `cpu` | `float64` | CPU is the percentage of CPU capacity used at the time of inspection. | yes |
 | `mem` | `float64` | Mem is the percentage of physical memory used at the time of inspection. | yes |
 | `rssBytes` | `uint64` | RSSBytes is the resident set size in bytes. | yes |

@@ -1190,6 +1190,8 @@ export interface ProcessInfo {
   nice: number /* int */;
   /** Threads is the number of threads in the process. */
   threads: number /* int */;
+  /** OpenFDs is the number of open file descriptors, if available. */
+  openFDs?: number /* int */;
   /** CPU is the percentage of CPU capacity used at the time of inspection. */
   cpu: number /* float64 */;
   /** Mem is the percentage of physical memory used at the time of inspection. */

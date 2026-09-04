@@ -632,7 +632,7 @@ func (b *Backend) Processes(ctx context.Context, id runtime.ID) ([]runtime.Proce
 	if err != nil {
 		return nil, fmt.Errorf("ps in container %s: %w (output: %s)", ct.Name(), err, out)
 	}
-	return parsePSOutput(string(out))
+	return parseProcessOutput(string(out))
 }
 
 // Signal sends a signal to a process inside the runtime instance.

@@ -333,6 +333,7 @@ func ProcessInfos(procs []runtime.ProcessInfo) []v1.ProcessInfo {
 			Priority:  p.Priority,
 			Nice:      p.Nice,
 			Threads:   p.Threads,
+			OpenFDs:   p.OpenFDs,
 			CPU:       p.CPU,
 			Mem:       p.Mem,
 			RSSBytes:  p.RSSBytes,

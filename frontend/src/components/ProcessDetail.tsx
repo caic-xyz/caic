@@ -121,6 +121,7 @@ function ProcessRow(props: RowProps) {
         <td class={styles.td}>{props.node.priority}</td>
         <td class={styles.td}>{props.node.nice}</td>
         <td class={styles.td}>{props.node.threads}</td>
+        <td class={styles.td}>{props.node.openFDs ?? "—"}</td>
         <td class={styles.td}>{props.node.cpu.toFixed(1)}</td>
         <td class={styles.td}>{props.node.mem.toFixed(1)}</td>
         <td class={styles.td}>{formatBytes(props.node.rssBytes)}</td>
@@ -257,6 +258,7 @@ export default function ProcessDetail(props: Props) {
                       <th class={styles.th}>PRI</th>
                       <th class={styles.th}>NI</th>
                       <th class={styles.th}>THREADS</th>
+                      <th class={styles.th}>FDS</th>
                       <th class={styles.th}>CPU</th>
                       <th class={styles.th}>MEM</th>
                       <th class={styles.th}>RSS</th>

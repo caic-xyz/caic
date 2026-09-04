@@ -211,6 +211,8 @@ type ProcessInfo struct {
 	Nice int
 	// Threads is the number of threads in the process.
 	Threads int
+	// OpenFDs is the number of open file descriptors, or nil when unavailable.
+	OpenFDs *int
 	// CPU is the percentage of CPU capacity used at the time of inspection.
 	CPU float64
 	// Mem is the percentage of physical memory used at the time of inspection.

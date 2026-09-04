@@ -47,14 +47,16 @@ function flattenTree(roots: ProcessNode[], depth = 0): { pid: number; depth: num
 }
 
 describe("ProcessDetail", () => {
-  it("renders each process age", async () => {
+  it("renders process metrics", async () => {
     const process = p(1, 0, "bash");
+    process.openFDs = 17;
     process.startedAt = new Date(Date.now() - 90_000).toISOString() as ISOTimestamp;
     vi.mocked(getTaskProcesses).mockResolvedValue({ processes: [process] });
 
     render(() => <ProcessDetail taskId="task-1" repo="repo" branch="main" taskPath="/task/task-1" />);
 
     expect(await screen.findByText("1m 30s")).toBeInTheDocument();
+    expect(screen.getByText("17")).toBeInTheDocument();
   });
 });
 

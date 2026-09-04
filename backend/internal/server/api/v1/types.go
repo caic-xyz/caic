@@ -791,6 +791,8 @@ type ProcessInfo struct {
 	Nice int `json:"nice"`
 	// Threads is the number of threads in the process.
 	Threads int `json:"threads"`
+	// OpenFDs is the number of open file descriptors, if available.
+	OpenFDs *int `json:"openFDs,omitempty"`
 	// CPU is the percentage of CPU capacity used at the time of inspection.
 	CPU float64 `json:"cpu"`
 	// Mem is the percentage of physical memory used at the time of inspection.
