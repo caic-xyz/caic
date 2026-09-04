@@ -82,6 +82,17 @@ func DPoPProof(r *http.Request) (*DPoPHeader, *DPoPClaims, error) {
 	if err := json.Unmarshal(headerJSON, &header); err != nil {
 		return nil, nil, fmt.Errorf("parse dpop proof header: %w", err)
 	}
+	var rawHeader struct {
+		JWK map[string]json.RawMessage `json:"jwk"`
+	}
+	if err := json.Unmarshal(headerJSON, &rawHeader); err != nil {
+		return nil, nil, fmt.Errorf("inspect dpop proof jwk: %w", err)
+	}
+	for _, privateMember := range []string{"d", "p", "q", "dp", "dq", "qi", "oth", "k"} {
+		if _, present := rawHeader.JWK[privateMember]; present {
+			return nil, nil, fmt.Errorf("dpop proof jwk contains private member %q", privateMember)
+		}
+	}
 
 	payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
@@ -116,7 +127,7 @@ func DPoPProof(r *http.Request) (*DPoPHeader, *DPoPClaims, error) {
 // jtiCheck, when non-nil, records the proof's jti and returns false on a replay;
 // it is supplied only on the resource-server path, where a non-empty jti is also
 // required. This function is called for resource-server side proof validation.
-func VerifyDPoPProof(r *http.Request, header *DPoPHeader, claims *DPoPClaims, maxAgeDur time.Duration, accessToken string, nonceCheck, jtiCheck func(string) bool) error {
+func VerifyDPoPProof(r *http.Request, expectedHTU string, header *DPoPHeader, claims *DPoPClaims, maxAgeDur time.Duration, accessToken string, nonceCheck, jtiCheck func(string) bool) error {
 	if header.Typ != "dpop+jwt" {
 		return errors.New("dpop proof typ must be dpop+jwt")
 	}
@@ -127,8 +138,6 @@ func VerifyDPoPProof(r *http.Request, header *DPoPHeader, claims *DPoPClaims, ma
 		return fmt.Errorf("dpop proof htm %q does not match request method %q", claims.HTM, r.Method)
 	}
 
-	authority, scheme := effectiveRequestHostAndScheme(r)
-	expectedHTU := scheme + "://" + authority + r.URL.Path
 	if claims.HTU != expectedHTU {
 		return fmt.Errorf("dpop proof htu %q does not match request URL %q", claims.HTU, expectedHTU)
 	}
@@ -173,8 +182,8 @@ func VerifyDPoPProof(r *http.Request, header *DPoPHeader, claims *DPoPClaims, ma
 // is being created), and nonce is validated if a nonce manager is available.
 // jti replay tracking is deliberately omitted: single-use codes and refresh
 // tokens already bound the token endpoint against replay.
-func VerifyDPoPProofTokenEndpoint(r *http.Request, header *DPoPHeader, claims *DPoPClaims, maxAgeDur time.Duration, nonceCheck func(string) bool) error {
-	return VerifyDPoPProof(r, header, claims, maxAgeDur, "", nonceCheck, nil)
+func VerifyDPoPProofTokenEndpoint(r *http.Request, expectedHTU string, header *DPoPHeader, claims *DPoPClaims, maxAgeDur time.Duration, nonceCheck func(string) bool) error {
+	return VerifyDPoPProof(r, expectedHTU, header, claims, maxAgeDur, "", nonceCheck, nil)
 }
 
 // DPoPAccessTokenHash computes the DPoP ath claim (SHA-256 hash of access token base64url).

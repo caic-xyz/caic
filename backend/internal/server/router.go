@@ -535,7 +535,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 			ResourceURLPath:         "/api/caic/v1/mcp",
 			ResourceMetadataURLPath: "/.well-known/oauth-protected-resource/api/caic/v1/mcp",
 			ClientIDPrefix:          "caic_",
-			SupportedScopes:         []string{mcpScopeRead, mcpScopeTasksRead, mcpScopeTasksWrite, mcpScopeTasksAdmin, mcpScopeReposWrite},
+			SupportedScopes:         []string{mcpScopeRead, mcpScopeTasksRead, mcpScopeTasksCreate, mcpScopeTasksWrite, mcpScopeTasksAdmin, mcpScopeReposWrite},
 			DefaultScopes:           []string{mcpScopeRead, mcpScopeTasksRead},
 			ScopeLabels:             mcpScopeLabels,
 			Session:                 &caicSessionManager{store: d.AuthStore},

@@ -48,7 +48,7 @@ func TestAuditStore(t *testing.T) {
 
 		path := filepath.Join(t.TempDir(), "mcp_audit.jsonl")
 		store := &auditStore{log: testLogger(), path: path}
-		store.record(t.Context(), &auditEvent{Operation: "tools/call", Name: "task_create", Args: auditArgsSummary(json.RawMessage(`{"prompt":"TOKEN=secret"}`)), Decision: "missing required MCP scope: caic:tasks.write", Status: "blocked"})
+		store.record(t.Context(), &auditEvent{Operation: "tools/call", Name: "task_create", Args: auditArgsSummary(json.RawMessage(`{"prompt":"TOKEN=secret"}`)), Decision: "missing required MCP scope: caic:tasks.create", Status: "blocked"})
 
 		events := readAuditEvents(t, path)
 		if len(events) != 1 {

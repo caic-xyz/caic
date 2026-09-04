@@ -2654,6 +2654,87 @@ func TestBuildHandler(t *testing.T) {
 		}
 	})
 
+	t.Run("MCP bearer scopes filter native and released tool lists", func(t *testing.T) {
+		t.Parallel()
+		_, h, user, registered := newMCPOAuthLifecycleRouter(t)
+		tokenResp := authorizeMCPClient(t, h, &user, &registered)
+
+		for _, native := range []bool{false, true} {
+			name := "released"
+			if native {
+				name = "native"
+			}
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(mcpRequestJSON("tools/list", `{}`)))
+				req.Host = "caic.example.com"
+				req.Header.Set("Authorization", "Bearer "+tokenResp.AccessToken)
+				if native {
+					req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
+					req.Header.Set("Mcp-Method", "tools/list")
+				}
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, req)
+				if w.Code != http.StatusOK {
+					t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+				}
+				var raw struct {
+					Result struct {
+						Tools []mcp.ToolDescriptor `json:"tools"`
+					} `json:"result"`
+				}
+				if err := json.NewDecoder(w.Body).Decode(&raw); err != nil {
+					t.Fatal(err)
+				}
+				assertMCPToolVisibility(t, raw.Result.Tools, "tasks_list", true)
+				assertMCPToolVisibility(t, raw.Result.Tools, "task_create", false)
+			})
+		}
+	})
+
+	t.Run("MCP bearer scopes filter native and released resource lists", func(t *testing.T) {
+		t.Parallel()
+		_, h, user, registered := newMCPOAuthLifecycleRouter(t)
+		tokenResp := authorizeMCPClientWithScopes(t, h, &user, &registered, "https://claude.ai/api/mcp/auth_callback", []string{mcpScopeTasksCreate})
+
+		for _, native := range []bool{false, true} {
+			name := "released"
+			if native {
+				name = "native"
+			}
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(mcpRequestJSON("resources/list", `{}`)))
+				req.Host = "caic.example.com"
+				req.Header.Set("Authorization", "Bearer "+tokenResp.AccessToken)
+				if native {
+					req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
+					req.Header.Set("Mcp-Method", "resources/list")
+				}
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, req)
+				if w.Code != http.StatusOK {
+					t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+				}
+				var raw struct {
+					Result struct {
+						Resources []mcp.ResourceDescriptor `json:"resources"`
+					} `json:"result"`
+				}
+				if err := json.NewDecoder(w.Body).Decode(&raw); err != nil {
+					t.Fatal(err)
+				}
+				for _, resource := range raw.Result.Resources {
+					if strings.HasPrefix(resource.URI, "caic://tasks") || resource.URI == "gomode://items" || resource.URI == "gomode://notifications" {
+						t.Fatalf("resource %q is visible without %s", resource.URI, mcpScopeTasksRead)
+					}
+				}
+			})
+		}
+	})
+
 	t.Run("MCP rejects caic session JWT in authorization header", func(t *testing.T) {
 		t.Parallel()
 		usersPath := filepath.Join(t.TempDir(), "users.json")

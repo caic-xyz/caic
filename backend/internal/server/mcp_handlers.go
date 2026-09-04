@@ -119,21 +119,23 @@ func (h *mcpHandlers) endpointRoutes() http.Handler {
 
 // MCP OAuth scope constants define the authorization scopes for MCP clients.
 const (
-	mcpScopeRead       = "caic:mcp.read"
-	mcpScopeTasksRead  = "caic:tasks.read"
-	mcpScopeTasksWrite = "caic:tasks.write"
-	mcpScopeTasksAdmin = "caic:tasks.admin"
-	mcpScopeReposWrite = "caic:repos.write"
+	mcpScopeRead        = "caic:mcp.read"
+	mcpScopeTasksRead   = "caic:tasks.read"
+	mcpScopeTasksCreate = "caic:tasks.create"
+	mcpScopeTasksWrite  = "caic:tasks.write"
+	mcpScopeTasksAdmin  = "caic:tasks.admin"
+	mcpScopeReposWrite  = "caic:repos.write"
 )
 
 // mcpScopeLabels maps MCP scope identifiers to human-readable labels
 // shown on the OAuth consent form.
 var mcpScopeLabels = map[string]string{
-	mcpScopeRead:       "Use basic MCP tools including usage and non-task resources",
-	mcpScopeTasksRead:  "Read task information",
-	mcpScopeTasksWrite: "Create and manage tasks",
-	mcpScopeTasksAdmin: "Administer tasks (cancel, delete)",
-	mcpScopeReposWrite: "Manage repositories",
+	mcpScopeRead:        "Use basic MCP tools including usage and non-task resources",
+	mcpScopeTasksRead:   "Read task information",
+	mcpScopeTasksCreate: "Create coding tasks",
+	mcpScopeTasksWrite:  "Interact with and manage existing tasks",
+	mcpScopeTasksAdmin:  "Administer tasks (cancel, delete)",
+	mcpScopeReposWrite:  "Manage repositories",
 }
 
 type mcpPrincipalContextKey struct{}

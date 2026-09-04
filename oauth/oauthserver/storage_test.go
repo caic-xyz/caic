@@ -328,7 +328,7 @@ func TestStoreTransactions(t *testing.T) {
 					winners <- "error: " + err.Error()
 					return
 				}
-				result, _, err := server.exchangeRefreshToken("refresh-secret", "client", "user", next)
+				result, _, err := server.exchangeRefreshToken("refresh-secret", "client", "user", next, dpopBinding{})
 				if err != nil {
 					winners <- "error: " + err.Error()
 					return

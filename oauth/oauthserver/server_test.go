@@ -40,7 +40,8 @@ func TestServer(t *testing.T) {
 	t.Run("issuer and audience ignore request authority headers", func(t *testing.T) {
 		t.Parallel()
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		statePath := t.TempDir() + "/oauth.json"
+		s, h, _ := newTestFlowServer(t, statePath, []oauth.User{user})
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/.well-known/oauth-authorization-server", http.NoBody)
 		req.Host = "poison.example"
@@ -283,7 +284,7 @@ func TestServer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("seed foreign state: %v", err)
 		}
-		if _, err := s.issueTokenResponse(user, foreignURL, "read", grantID, "new-refresh"); err == nil {
+		if _, err := s.issueTokenResponse(user, foreignURL, "read", grantID, "new-refresh", ""); err == nil {
 			t.Fatal("issueTokenResponse accepted a foreign resource")
 		}
 		accessToken, err := s.tokens.IssueAccessToken(s.issuer, user, s.resourceURL, "read", accessGrantID)
@@ -293,7 +294,7 @@ func TestServer(t *testing.T) {
 		if _, err := s.verifyBearer(newTestResourceRequest(t), accessToken); err == nil {
 			t.Fatal("foreign-resource grant remained valid for access")
 		}
-		result, _, err := s.exchangeRefreshToken(refresh, clientID, user.ID, "next-refresh")
+		result, _, err := s.exchangeRefreshToken(refresh, clientID, user.ID, "next-refresh", dpopBinding{})
 		if err != nil || result != refreshExchangeUnknown {
 			t.Fatalf("exchangeRefreshToken result=%v err=%v", result, err)
 		}
@@ -372,8 +373,11 @@ func TestServer(t *testing.T) {
 		if metadata.Issuer != testBaseURL || metadata.AuthorizationEndpoint != testBaseURL+"/oauth/authorize" || metadata.RegistrationEndpoint != testBaseURL+"/oauth/register" {
 			t.Fatalf("metadata = %+v", metadata)
 		}
-		if metadata.IntrospectionEndpoint != "" || len(metadata.IntrospectionEndpointAuthMethodsSupported) != 0 || len(metadata.DPoPSigningAlgValuesSupported) != 0 {
+		if metadata.IntrospectionEndpoint != "" || len(metadata.IntrospectionEndpointAuthMethodsSupported) != 0 {
 			t.Fatalf("metadata advertises disabled OAuth capabilities: %+v", metadata)
+		}
+		if !slices.Equal(metadata.DPoPSigningAlgValuesSupported, []string{"RS256", "ES256", "EdDSA"}) {
+			t.Fatalf("dpop algorithms = %v", metadata.DPoPSigningAlgValuesSupported)
 		}
 
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
@@ -1563,7 +1567,7 @@ func TestTransactionalOAuthMutations(t *testing.T) {
 		}
 		store.io = failingRenameStoreIO{storeIO: osStoreIO{}}
 		server := &Server{state: store, refreshTokenTTL: time.Hour}
-		if result, _, err := server.exchangeRefreshToken("refresh", "client", "user", "next-refresh"); err == nil || result != refreshExchangeRotated {
+		if result, _, err := server.exchangeRefreshToken("refresh", "client", "user", "next-refresh", dpopBinding{}); err == nil || result != refreshExchangeRotated {
 			t.Fatalf("exchangeRefreshToken = %d, %v; want rotation persistence failure", result, err)
 		}
 		reloaded, err := LoadStore(path)
@@ -2069,6 +2073,48 @@ func TestDeviceAuthorization(t *testing.T) {
 		}
 	})
 
+	t.Run("pending device poll reserves dpop proof", func(t *testing.T) {
+		t.Parallel()
+		user := testUser()
+		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/device_authorization", strings.NewReader(url.Values{"client_id": {registered.ClientID}}.Encode()))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, request)
+		if w.Code != http.StatusOK {
+			t.Fatalf("device authorization status = %d: %s", w.Code, w.Body.String())
+		}
+		var device oauth.DeviceAuthorizationResponse
+		if err := json.NewDecoder(w.Body).Decode(&device); err != nil {
+			t.Fatalf("decode device authorization: %v", err)
+		}
+		key, jwk := testDPoPRSAKeyPair(t)
+		proof := makeDPoPProof(t, key, jwk, http.MethodPost, dpopTokenURL, time.Now(), "", "")
+		tokenForm := url.Values{"grant_type": {"urn:ietf:params:oauth:grant-type:device_code"}, "device_code": {device.DeviceCode}, "client_id": {registered.ClientID}}
+		poll := func() *httptest.ResponseRecorder {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(tokenForm.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.Header.Set("DPoP", proof)
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			return w
+		}
+		if w := poll(); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "authorization_pending") {
+			t.Fatalf("pending poll status = %d: %s", w.Code, w.Body.String())
+		}
+		approve := newOAuthTestRequest(t, http.MethodPost, "/oauth/device", strings.NewReader(url.Values{"user_code": {device.UserCode}}.Encode()), user)
+		approve.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, approve)
+		if w.Code != http.StatusOK {
+			t.Fatalf("approve status = %d: %s", w.Code, w.Body.String())
+		}
+		if w := poll(); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "invalid_dpop_proof") {
+			t.Fatalf("replayed poll status = %d: %s", w.Code, w.Body.String())
+		}
+	})
+
 	t.Run("expired device_code", func(t *testing.T) {
 		t.Parallel()
 
@@ -2326,7 +2372,7 @@ func TestOAuthSurfaceContainment(t *testing.T) {
 		}
 	})
 
-	t.Run("token endpoint rejects dpop and preserves bearer exchange", func(t *testing.T) {
+	t.Run("token endpoint rejects malformed dpop and preserves bearer exchange", func(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
@@ -2350,8 +2396,8 @@ func TestOAuthSurfaceContainment(t *testing.T) {
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("DPoP token status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
 		}
-		if w.Header().Get("DPoP-Nonce") != "" {
-			t.Fatalf("DPoP-Nonce = %q, want empty", w.Header().Get("DPoP-Nonce"))
+		if w.Header().Get("DPoP-Nonce") == "" {
+			t.Fatal("DPoP-Nonce is empty, want retry nonce")
 		}
 
 		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
@@ -2416,7 +2462,6 @@ func TestDPoP(t *testing.T) {
 	t.Parallel()
 
 	t.Run("token endpoint with dpop proof gets dpop-bound token", func(t *testing.T) {
-		t.Skip("DPoP server support is disabled")
 		t.Parallel()
 
 		user := testUser()
@@ -2474,8 +2519,90 @@ func TestDPoP(t *testing.T) {
 		}
 	})
 
+	t.Run("ec and ed25519 token flows get dpop-bound tokens", func(t *testing.T) {
+		t.Parallel()
+		ecKey, ecJWK := testDPoPECKeyPair(t, elliptic.P256(), "P-256")
+		edPublic, edPrivate, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatalf("generate ed25519 key: %v", err)
+		}
+		edJWK := &oauth.JWK{Kty: "OKP", Crv: "Ed25519", X: base64.RawURLEncoding.EncodeToString(edPublic)}
+		for _, tc := range []struct {
+			name   string
+			alg    string
+			signer crypto.Signer
+			jwk    *oauth.JWK
+		}{
+			{name: "ec", alg: "ES256", signer: ecKey, jwk: ecJWK},
+			{name: "ed25519", alg: "EdDSA", signer: edPrivate, jwk: edJWK},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				user := testUser()
+				s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+				registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+				code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
+				form := url.Values{
+					"grant_type":    {oauth.GrantAuthorizationCode},
+					"code":          {code},
+					"client_id":     {registered.ClientID},
+					"redirect_uri":  {"https://claude.example.com/callback"},
+					"code_verifier": {testVerifier},
+					"resource":      {testResourceURL},
+				}
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				req.Header.Set("DPoP", makeDPoPProofSigned(t, tc.alg, tc.signer, tc.jwk))
+				addForwardedHeaders(req)
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, req)
+				if w.Code != http.StatusOK {
+					t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+				}
+				var token oauth.TokenResponse
+				if err := json.NewDecoder(w.Body).Decode(&token); err != nil {
+					t.Fatalf("decode token: %v", err)
+				}
+				claims, err := s.tokens.VerifyAccessToken(token.AccessToken, testBaseURL, testResourceURL, time.Now(), s.touchGrant, s.session)
+				if err != nil {
+					t.Fatalf("verify token: %v", err)
+				}
+				wantJKT, err := JWKThumbprint(tc.jwk)
+				if err != nil {
+					t.Fatalf("thumbprint: %v", err)
+				}
+				if token.TokenType != DPoPTokenType || claims.Confirmation == nil || claims.Confirmation.JKT != wantJKT {
+					t.Fatalf("token = %+v, claims = %+v", token, claims)
+				}
+				protected := s.BearerAuth(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+				resourceRequest := newTestResourceRequest(t)
+				resourceRequest.Header.Set("Authorization", DPoPTokenType+" "+token.AccessToken)
+				resourceRequest.Header.Set("DPoP", makeDPoPRequestProofSigned(t, tc.alg, tc.signer, tc.jwk, http.MethodPost, testResourceURL, token.AccessToken, ""))
+				w = httptest.NewRecorder()
+				protected.ServeHTTP(w, resourceRequest)
+				if w.Code != http.StatusNoContent {
+					t.Fatalf("resource status = %d, want %d: %s", w.Code, http.StatusNoContent, w.Body.String())
+				}
+				for refreshNumber := range 2 {
+					refreshForm := url.Values{"grant_type": {oauth.GrantRefreshToken}, "refresh_token": {token.RefreshToken}, "client_id": {registered.ClientID}}
+					refreshRequest := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(refreshForm.Encode()))
+					refreshRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+					refreshRequest.Header.Set("DPoP", makeDPoPRequestProofSigned(t, tc.alg, tc.signer, tc.jwk, http.MethodPost, dpopTokenURL, "", ""))
+					addForwardedHeaders(refreshRequest)
+					w = httptest.NewRecorder()
+					h.ServeHTTP(w, refreshRequest)
+					if w.Code != http.StatusOK {
+						t.Fatalf("refresh %d status = %d, want %d: %s", refreshNumber, w.Code, http.StatusOK, w.Body.String())
+					}
+					if err := json.NewDecoder(w.Body).Decode(&token); err != nil {
+						t.Fatalf("decode refresh %d: %v", refreshNumber, err)
+					}
+				}
+			})
+		}
+	})
+
 	t.Run("dpop-bound access token accepted by bearer auth", func(t *testing.T) {
-		t.Skip("DPoP server support is disabled")
 		t.Parallel()
 
 		user := testUser()
@@ -2533,7 +2660,6 @@ func TestDPoP(t *testing.T) {
 	})
 
 	t.Run("dpop proof with wrong htm rejected", func(t *testing.T) {
-		t.Skip("DPoP server support is disabled")
 		t.Parallel()
 
 		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
@@ -2573,7 +2699,6 @@ func TestDPoP(t *testing.T) {
 	})
 
 	t.Run("dpop proof with wrong htu rejected", func(t *testing.T) {
-		t.Skip("DPoP server support is disabled")
 		t.Parallel()
 
 		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
@@ -2605,7 +2730,6 @@ func TestDPoP(t *testing.T) {
 	})
 
 	t.Run("dpop proof expired iat rejected", func(t *testing.T) {
-		t.Skip("DPoP server support is disabled")
 		t.Parallel()
 
 		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
@@ -2638,7 +2762,6 @@ func TestDPoP(t *testing.T) {
 	})
 
 	t.Run("dpop proof with invalid ath rejected", func(t *testing.T) {
-		t.Skip("DPoP server support is disabled")
 		t.Parallel()
 
 		testCases := []struct {
@@ -2671,7 +2794,6 @@ func TestDPoP(t *testing.T) {
 	})
 
 	t.Run("dpop proof with wrong key cnf.jkt mismatch rejected", func(t *testing.T) {
-		t.Skip("DPoP server support is disabled")
 		t.Parallel()
 
 		user := testUser()
@@ -2722,7 +2844,6 @@ func TestDPoP(t *testing.T) {
 	})
 
 	t.Run("introspection returns cnf.jkt for dpop-bound tokens", func(t *testing.T) {
-		t.Skip("DPoP server support is disabled")
 		t.Parallel()
 
 		user := testUser()
@@ -2784,11 +2905,11 @@ func TestDPoP(t *testing.T) {
 	})
 
 	t.Run("nonce lifecycle request without nonce gets nonce retry succeeds", func(t *testing.T) {
-		t.Skip("DPoP server support is disabled")
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		statePath := t.TempDir() + "/oauth.json"
+		s, h, _ := newTestFlowServer(t, statePath, []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
 		code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
@@ -2816,7 +2937,7 @@ func TestDPoP(t *testing.T) {
 		}
 
 		// Issue a nonce and then use it in a subsequent proof.
-		nonce, err := s.dpopNonces.Issue()
+		nonce, err := s.issueDPoPNonce()
 		if err != nil {
 			t.Fatalf("Issue nonce: %v", err)
 		}
@@ -2841,10 +2962,23 @@ func TestDPoP(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("second request with nonce status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
+
+		s.Close()
+		_, restartedHandler, _ := newTestFlowServer(t, statePath, []oauth.User{user})
+		code3 := authorizeOAuthTestCode(t, restartedHandler, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
+		form2.Set("code", code3)
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form2.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("DPoP", makeDPoPProof(t, dpopKey, dpopJWKObj, "POST", tokenURL, time.Now(), "", nonce))
+		addForwardedHeaders(req)
+		w = httptest.NewRecorder()
+		restartedHandler.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("reused nonce after restart status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
+		}
 	})
 
 	t.Run("replayed resource proof with same jti rejected", func(t *testing.T) {
-		t.Skip("DPoP server support is disabled")
 		t.Parallel()
 
 		res := setupDPoPBoundToken(t)
@@ -2876,8 +3010,120 @@ func TestDPoP(t *testing.T) {
 		}
 	})
 
+	t.Run("resource proof replay remains rejected after restart", func(t *testing.T) {
+		t.Parallel()
+		statePath := t.TempDir() + "/oauth.json"
+		user := testUser()
+		s, h, _ := newTestFlowServer(t, statePath, []oauth.User{user})
+		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
+		dpopKey, dpopJWK := testDPoPRSAKeyPair(t)
+		code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
+		proof := makeDPoPProof(t, dpopKey, dpopJWK, http.MethodPost, dpopTokenURL, time.Now(), "", "")
+		form := url.Values{
+			"grant_type":    {oauth.GrantAuthorizationCode},
+			"code":          {code},
+			"client_id":     {registered.ClientID},
+			"redirect_uri":  {"https://claude.example.com/callback"},
+			"code_verifier": {testVerifier},
+			"resource":      {testResourceURL},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("DPoP", proof)
+		addForwardedHeaders(req)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("token status = %d: %s", w.Code, w.Body.String())
+		}
+		var token oauth.TokenResponse
+		if err := json.NewDecoder(w.Body).Decode(&token); err != nil {
+			t.Fatalf("decode token: %v", err)
+		}
+
+		resourceProof := makeDPoPProof(t, dpopKey, dpopJWK, http.MethodPost, testResourceURL, time.Now(), token.AccessToken, "")
+		protected := s.BearerAuth(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+		resourceRequest := newTestResourceRequest(t)
+		resourceRequest.Header.Set("Authorization", DPoPTokenType+" "+token.AccessToken)
+		resourceRequest.Header.Set("DPoP", resourceProof)
+		addForwardedHeaders(resourceRequest)
+		w = httptest.NewRecorder()
+		protected.ServeHTTP(w, resourceRequest)
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("initial resource status = %d: %s", w.Code, w.Body.String())
+		}
+
+		s.Close()
+		restarted, _, _ := newTestFlowServer(t, statePath, []oauth.User{user})
+		protected = restarted.BearerAuth(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+		resourceRequest = newTestResourceRequest(t)
+		resourceRequest.Header.Set("Authorization", DPoPTokenType+" "+token.AccessToken)
+		resourceRequest.Header.Set("DPoP", resourceProof)
+		addForwardedHeaders(resourceRequest)
+		w = httptest.NewRecorder()
+		protected.ServeHTTP(w, resourceRequest)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("replayed resource status = %d, want %d: %s", w.Code, http.StatusUnauthorized, w.Body.String())
+		}
+	})
+
+	t.Run("refresh token remains bound to its original key", func(t *testing.T) {
+		t.Parallel()
+		res := setupDPoPBoundToken(t)
+		wrongKey, wrongJWK := testDPoPRSAKeyPair(t)
+		form := url.Values{
+			"grant_type":    {oauth.GrantRefreshToken},
+			"refresh_token": {res.token.RefreshToken},
+			"client_id":     {res.registered.ClientID},
+		}
+		exchange := func(key *rsa.PrivateKey, jwk *oauth.JWK) *httptest.ResponseRecorder {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.Header.Set("DPoP", makeDPoPProof(t, key, jwk, http.MethodPost, dpopTokenURL, time.Now(), "", ""))
+			addForwardedHeaders(req)
+			w := httptest.NewRecorder()
+			res.handler.ServeHTTP(w, req)
+			return w
+		}
+		if w := exchange(wrongKey, wrongJWK); w.Code != http.StatusBadRequest {
+			t.Fatalf("wrong-key refresh status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
+		}
+		w := exchange(res.dpopKey, res.dpopJWK)
+		if w.Code != http.StatusOK {
+			t.Fatalf("original-key refresh status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var token oauth.TokenResponse
+		if err := json.NewDecoder(w.Body).Decode(&token); err != nil {
+			t.Fatalf("decode refreshed token: %v", err)
+		}
+		if token.TokenType != DPoPTokenType {
+			t.Fatalf("token type = %q, want %q", token.TokenType, DPoPTokenType)
+		}
+		if w := exchange(wrongKey, wrongJWK); w.Code != http.StatusBadRequest {
+			t.Fatalf("used-token wrong-key status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
+		}
+		form.Set("refresh_token", token.RefreshToken)
+		if w := exchange(res.dpopKey, res.dpopJWK); w.Code != http.StatusOK {
+			t.Fatalf("family refresh after attack status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+	})
+
+	t.Run("resource proof is bound to the requested path", func(t *testing.T) {
+		t.Parallel()
+		res := setupDPoPBoundToken(t)
+		protected := res.server.BearerAuth(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+		proof := makeDPoPProof(t, res.dpopKey, res.dpopJWK, http.MethodPost, testResourceURL, time.Now(), res.token.AccessToken, "")
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, testBaseURL+"/different", http.NoBody)
+		req.Header.Set("Authorization", DPoPTokenType+" "+res.token.AccessToken)
+		req.Header.Set("DPoP", proof)
+		w := httptest.NewRecorder()
+		protected.ServeHTTP(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusUnauthorized, w.Body.String())
+		}
+	})
+
 	t.Run("fresh resource proof per request accepted", func(t *testing.T) {
-		t.Skip("DPoP server support is disabled")
 		t.Parallel()
 
 		res := setupDPoPBoundToken(t)
@@ -2900,7 +3146,6 @@ func TestDPoP(t *testing.T) {
 	})
 
 	t.Run("resource proof missing jti rejected", func(t *testing.T) {
-		t.Skip("DPoP server support is disabled")
 		t.Parallel()
 
 		res := setupDPoPBoundToken(t)
@@ -2920,8 +3165,7 @@ func TestDPoP(t *testing.T) {
 		}
 	})
 
-	t.Run("token endpoint unaffected by jti tracking", func(t *testing.T) {
-		t.Skip("DPoP server support is disabled")
+	t.Run("token endpoint rejects a repeated jti", func(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
@@ -2930,8 +3174,8 @@ func TestDPoP(t *testing.T) {
 		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
 		tokenURL := testBaseURL + "/oauth/token"
 
-		// Two distinct token exchanges that reuse the same jti must both succeed:
-		// the token endpoint does not track jti (single-use codes bound it).
+		// Two distinct token exchanges that reuse the same jti demonstrate proof
+		// replay even though the authorization codes themselves differ.
 		jti, err := randomToken()
 		if err != nil {
 			t.Fatalf("generate jti: %v", err)
@@ -2953,8 +3197,12 @@ func TestDPoP(t *testing.T) {
 			addForwardedHeaders(req)
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, req)
-			if w.Code != http.StatusOK {
-				t.Fatalf("token exchange %d status = %d, want %d: %s", i, w.Code, http.StatusOK, w.Body.String())
+			want := http.StatusOK
+			if i == 1 {
+				want = http.StatusBadRequest
+			}
+			if w.Code != want {
+				t.Fatalf("token exchange %d status = %d, want %d: %s", i, w.Code, want, w.Body.String())
 			}
 		}
 	})
@@ -2974,6 +3222,28 @@ func TestDPoP(t *testing.T) {
 		proof = makeDPoPProofSigned(t, "RS256", rsaKey, ecJWK)
 		if _, _, err := DPoPProof(httpDPoPRequest(t, proof)); err == nil {
 			t.Fatal("RS256 header with EC jwk: want error, got nil")
+		}
+	})
+
+	t.Run("embedded private jwk member is rejected", func(t *testing.T) {
+		t.Parallel()
+		key, jwk := testDPoPRSAKeyPair(t)
+		header := map[string]any{"typ": "dpop+jwt", "alg": "RS256", "jwk": map[string]any{"kty": jwk.Kty, "n": jwk.N, "e": jwk.E, "d": "private"}}
+		headerJSON, err := json.Marshal(header)
+		if err != nil {
+			t.Fatalf("marshal header: %v", err)
+		}
+		claimsJSON, err := json.Marshal(DPoPClaims{JTI: "private-jwk", HTM: http.MethodPost, HTU: dpopTokenURL, IAT: time.Now().Unix()})
+		if err != nil {
+			t.Fatalf("marshal claims: %v", err)
+		}
+		input := base64.RawURLEncoding.EncodeToString(headerJSON) + "." + base64.RawURLEncoding.EncodeToString(claimsJSON)
+		signature, err := signJWS("RS256", key, []byte(input))
+		if err != nil {
+			t.Fatalf("sign proof: %v", err)
+		}
+		if _, _, err := DPoPProof(httpDPoPRequest(t, input+"."+base64.RawURLEncoding.EncodeToString(signature))); err == nil {
+			t.Fatal("DPoPProof accepted a private JWK member")
 		}
 	})
 
@@ -3199,6 +3469,10 @@ func httpDPoPRequest(t *testing.T, proof string) *http.Request {
 // makeDPoPProofSigned builds a valid DPoP proof with a chosen header alg, signed
 // by signer. RSA and ECDSA sign the SHA-256 digest; Ed25519 signs the raw input.
 func makeDPoPProofSigned(t *testing.T, alg string, signer crypto.Signer, jwk *oauth.JWK) string {
+	return makeDPoPRequestProofSigned(t, alg, signer, jwk, http.MethodPost, dpopTokenURL, "", "")
+}
+
+func makeDPoPRequestProofSigned(t *testing.T, alg string, signer crypto.Signer, jwk *oauth.JWK, method, requestURL, accessToken, nonce string) string {
 	jti, err := randomToken()
 	if err != nil {
 		t.Fatalf("generate jti: %v", err)
@@ -3208,7 +3482,10 @@ func makeDPoPProofSigned(t *testing.T, alg string, signer crypto.Signer, jwk *oa
 	if err != nil {
 		t.Fatalf("marshal dpop header: %v", err)
 	}
-	claims := DPoPClaims{JTI: jti, HTM: http.MethodPost, HTU: dpopTokenURL, IAT: time.Now().Unix()}
+	claims := DPoPClaims{JTI: jti, HTM: method, HTU: requestURL, IAT: time.Now().Unix(), Nonce: nonce}
+	if accessToken != "" {
+		claims.ATH = DPoPAccessTokenHash(accessToken)
+	}
 	claimsJSON, err := json.Marshal(claims)
 	if err != nil {
 		t.Fatalf("marshal dpop claims: %v", err)

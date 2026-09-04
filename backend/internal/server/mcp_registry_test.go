@@ -375,4 +375,98 @@ func TestCaicToolRegistryAuthorizeTool(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("task creation requires its independent scope", func(t *testing.T) {
+		t.Parallel()
+
+		c := &mcpRegistry{}
+		ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{Scopes: []string{mcpScopeTasksWrite}, Remote: true})
+		ctx = auth.NewContext(ctx, &auth.User{ID: "user-1"})
+		reason, ok := c.authorizeTool(ctx, "task_create")
+		if ok {
+			t.Fatal("authorizeTool(task_create) ok = true, want false")
+		}
+		if reason != "missing required MCP scope: "+mcpScopeTasksCreate {
+			t.Fatalf("authorizeTool(task_create) reason = %q", reason)
+		}
+
+		ctx = newMCPPrincipalContext(ctx, &mcpPrincipal{Scopes: []string{mcpScopeTasksCreate}, Remote: true})
+		reason, ok = c.authorizeTool(ctx, "task_create")
+		if !ok || reason != "allow" {
+			t.Fatalf("authorizeTool(task_create) = (%q, %t), want (allow, true)", reason, ok)
+		}
+	})
+}
+
+func TestCaicToolRegistryTools(t *testing.T) {
+	t.Parallel()
+
+	registry := &mcpRegistry{}
+	user := &auth.User{ID: "user-1", Provider: auth.ProviderGitHub, Username: "alice"}
+
+	t.Run("read grant hides task creation", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{Scopes: []string{mcpScopeRead}, Remote: true})
+		ctx = auth.NewContext(ctx, user)
+		tools, err := registry.Tools(ctx)
+		if err != nil {
+			t.Fatalf("Tools() error: %v", err)
+		}
+		assertMCPToolVisibility(t, tools, "repos_list", true)
+		assertMCPToolVisibility(t, tools, "task_create", false)
+		assertMCPToolVisibility(t, tools, "tasks_list", false)
+	})
+
+	t.Run("task creation grant exposes only task creation", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{Scopes: []string{mcpScopeTasksCreate}, Remote: true})
+		ctx = auth.NewContext(ctx, user)
+		tools, err := registry.Tools(ctx)
+		if err != nil {
+			t.Fatalf("Tools() error: %v", err)
+		}
+		assertMCPToolVisibility(t, tools, "repos_list", false)
+		assertMCPToolVisibility(t, tools, "task_create", true)
+		assertMCPToolVisibility(t, tools, "task_fork", false)
+	})
+
+	t.Run("local clients retain the complete catalog", func(t *testing.T) {
+		t.Parallel()
+
+		tools, err := registry.Tools(t.Context())
+		if err != nil {
+			t.Fatalf("Tools() error: %v", err)
+		}
+		if len(tools) != len(registry.specs()) {
+			t.Fatalf("Tools() returned %d tools, want %d", len(tools), len(registry.specs()))
+		}
+	})
+
+	t.Run("scope visibility does not depend on forge linkage", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{Scopes: []string{mcpScopeReposWrite}, Remote: true})
+		ctx = auth.NewContext(ctx, &auth.User{Provider: auth.ProviderGitLab, Username: "alice"})
+		tools, err := registry.Tools(ctx)
+		if err != nil {
+			t.Fatalf("Tools() error: %v", err)
+		}
+		assertMCPToolVisibility(t, tools, "task_push_branch_to_remote", true)
+	})
+}
+
+func assertMCPToolVisibility(t *testing.T, tools []mcp.ToolDescriptor, name string, want bool) {
+	for _, tool := range tools {
+		if tool.Name == name {
+			if !want {
+				t.Fatalf("tool %q is visible, want hidden", name)
+			}
+			return
+		}
+	}
+	if want {
+		t.Fatalf("tool %q is hidden, want visible", name)
+	}
 }

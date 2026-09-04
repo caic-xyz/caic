@@ -213,6 +213,30 @@ func TestMCPHandlers(t *testing.T) {
 		}
 	})
 
+	t.Run("serverDiscoverInstructionsHideTaskSnapshotWithoutScope", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		id := ksid.NewID()
+		tk := mustNewTask(t, id, agent.Prompt{Text: "private task prompt"}, harness.Claude)
+		insertTestTask(s, id.String(), tk)
+		registry, ok := s.mcpHandlers.protocol.Registry.(*mcpRegistry)
+		if !ok {
+			t.Fatalf("registry type = %T", s.mcpHandlers.protocol.Registry)
+		}
+		ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{Scopes: []string{mcpScopeRead}, Remote: true})
+		ctx = auth.NewContext(ctx, &auth.User{ID: "user-1"})
+		instructions, err := registry.Instructions(ctx)
+		if err != nil {
+			t.Fatalf("Instructions() error: %v", err)
+		}
+		if strings.Contains(instructions, "private task prompt") || strings.Contains(instructions, "[Current tasks at session start]") {
+			t.Fatalf("instructions disclose task snapshot: %q", instructions)
+		}
+		if !strings.Contains(instructions, "[Task information unavailable: missing scope]") {
+			t.Fatalf("instructions = %q, want unavailable marker", instructions)
+		}
+	})
+
 	t.Run("toolsList", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)

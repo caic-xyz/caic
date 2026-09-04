@@ -84,11 +84,14 @@ func (m *mcpRegistry) Instructions(ctx context.Context) (string, error) {
 	return strings.Join(parts, "\n\n"), nil
 }
 
-func (m *mcpRegistry) Tools(context.Context) ([]mcp.ToolDescriptor, error) {
+func (m *mcpRegistry) Tools(ctx context.Context) ([]mcp.ToolDescriptor, error) {
 	specs := m.specs()
-	tools := make([]mcp.ToolDescriptor, len(specs))
-	for i, s := range specs {
-		tools[i] = mcp.ToolDescriptor{Name: s.Name, Title: s.Title, Description: s.Description, InputSchema: s.InputSchema, OutputSchema: s.OutputSchema, Annotations: s.Annotations}
+	tools := make([]mcp.ToolDescriptor, 0, len(specs))
+	for _, s := range specs {
+		if _, ok := authorizeToolScope(ctx, s.Name); !ok {
+			continue
+		}
+		tools = append(tools, mcp.ToolDescriptor{Name: s.Name, Title: s.Title, Description: s.Description, InputSchema: s.InputSchema, OutputSchema: s.OutputSchema, Annotations: s.Annotations})
 	}
 	return tools, nil
 }
@@ -116,23 +119,34 @@ func (m *mcpRegistry) CallTool(ctx context.Context, name string, argsJSON json.R
 }
 
 func (m *mcpRegistry) ListResources(ctx context.Context) mcp.ResourcesListResult {
-	taskList, repoList := m.currentTasksAndRepos(ctx)
-	resources := make([]mcp.ResourceDescriptor, 0, 3+len(repoList)+len(taskList))
-	resources = append(resources,
-		mcp.ResourceDescriptor{URI: "caic://repos", Name: "repos", Title: "Repositories", Description: "Managed repository summary", MimeType: "application/json"},
-		mcp.ResourceDescriptor{URI: "caic://tasks", Name: "tasks", Title: "Tasks", Description: "Coding task summary", MimeType: "application/json"},
-		mcp.ResourceDescriptor{URI: "caic://usage", Name: "usage", Title: "Usage", Description: "Local and provider usage", MimeType: "application/json"},
-		mcp.ResourceDescriptor{URI: "gomode://items", Name: "items", Title: "Items", Description: "Generic service item status for native clients", MimeType: "application/json"},
-		mcp.ResourceDescriptor{URI: "gomode://notifications", Name: "notifications", Title: "Notifications", Description: "Service notifications for native clients", MimeType: "application/json"},
-	)
-	for i := range repoList {
-		repo := &repoList[i]
-		resources = append(resources, mcp.ResourceDescriptor{URI: "caic://repos/" + url.PathEscape(repo.Path), Name: "repo " + repo.Path, Title: repo.Path, MimeType: "application/json"})
+	staticResources := []mcp.ResourceDescriptor{
+		{URI: "caic://repos", Name: "repos", Title: "Repositories", Description: "Managed repository summary", MimeType: "application/json"},
+		{URI: "caic://tasks", Name: "tasks", Title: "Tasks", Description: "Coding task summary", MimeType: "application/json"},
+		{URI: "caic://usage", Name: "usage", Title: "Usage", Description: "Local and provider usage", MimeType: "application/json"},
+		{URI: "gomode://items", Name: "items", Title: "Items", Description: "Generic service item status for native clients", MimeType: "application/json"},
+		{URI: "gomode://notifications", Name: "notifications", Title: "Notifications", Description: "Service notifications for native clients", MimeType: "application/json"},
 	}
-	for i := range taskList {
-		task := &taskList[i]
-		id := task.ID.String()
-		resources = append(resources, mcp.ResourceDescriptor{URI: "caic://tasks/" + id, Name: "task " + id, Title: task.Title, MimeType: "application/json"})
+	resources := make([]mcp.ResourceDescriptor, 0, len(staticResources))
+	for i := range staticResources {
+		resource := &staticResources[i]
+		if _, ok := authorizeResource(ctx, resource.URI); ok {
+			resources = append(resources, *resource)
+		}
+	}
+	if mcpHasScope(ctx, mcpScopeRead) {
+		repoList := repoListFromSnapshot(m.serverConfig.log, m.serverConfig.checkouts.Checkouts(), m.serverConfig.repoStatus)
+		for i := range *repoList {
+			repo := &(*repoList)[i]
+			resources = append(resources, mcp.ResourceDescriptor{URI: "caic://repos/" + url.PathEscape(repo.Path), Name: "repo " + repo.Path, Title: repo.Path, MimeType: "application/json"})
+		}
+	}
+	if mcpHasScope(ctx, mcpScopeTasksRead) {
+		taskList := m.taskSvc.taskListSnapshot(ctx)
+		for i := range taskList {
+			task := &taskList[i]
+			id := task.ID.String()
+			resources = append(resources, mcp.ResourceDescriptor{URI: "caic://tasks/" + id, Name: "task " + id, Title: task.Title, MimeType: "application/json"})
+		}
 	}
 	return mcp.ResourcesListResult{ResultType: mcp.ResultTypeComplete, Resources: resources, TTLMS: mcp.DefaultTTLMS, CacheScope: mcp.CacheScopePrivate}
 }
@@ -244,6 +258,12 @@ func (m *mcpRegistry) voiceSessionContext(ctx context.Context) string {
 	}
 	if prefs.Harness != "" {
 		parts = append(parts, "[Default harness: "+prefs.Harness+"]")
+	}
+	if !mcpHasScope(ctx, mcpScopeTasksRead) {
+		if len(parts) == 0 {
+			return "[Task information unavailable: missing scope]"
+		}
+		return strings.Join(parts, "\n")
 	}
 	taskList := m.taskSvc.taskListSnapshot(ctx)
 	if len(taskList) == 0 {
@@ -986,7 +1006,7 @@ var mcpToolScopes = map[string]string{
 	"get_usage":                  mcpScopeRead,
 	"task_send_message":          mcpScopeTasksWrite,
 	"task_answer_question":       mcpScopeTasksWrite,
-	"task_create":                mcpScopeTasksWrite,
+	"task_create":                mcpScopeTasksCreate,
 	"task_fork":                  mcpScopeTasksWrite,
 	"task_stop":                  mcpScopeTasksWrite,
 	"task_revive":                mcpScopeTasksWrite,
@@ -1010,6 +1030,16 @@ var mcpForgeTools = map[string]struct{}{
 // MCP users require a user token until there is an explicit server-side GitLab
 // authority policy.
 func (m *mcpRegistry) authorizeTool(ctx context.Context, name string) (string, bool) {
+	if reason, ok := authorizeToolScope(ctx, name); !ok {
+		return reason, false
+	}
+	if _, needsForge := mcpForgeTools[name]; needsForge && isRemoteMCP(ctx) && !userHasForgeAuthority(ctx) {
+		return "linked GitHub identity or GitLab token is required for forge MCP tools", false
+	}
+	return "allow", true
+}
+
+func authorizeToolScope(ctx context.Context, name string) (string, bool) {
 	required := requiredScopeForTool(name)
 	if required == "" {
 		if isRemoteMCP(ctx) {
@@ -1020,15 +1050,12 @@ func (m *mcpRegistry) authorizeTool(ctx context.Context, name string) (string, b
 	if !mcpHasScope(ctx, required) {
 		return "missing required MCP scope: " + required, false
 	}
-	if _, needsForge := mcpForgeTools[name]; needsForge && isRemoteMCP(ctx) && !userHasForgeAuthority(ctx) {
-		return "linked GitHub identity or GitLab token is required for forge MCP tools", false
-	}
 	return "allow", true
 }
 
 func authorizeResource(ctx context.Context, uri string) (string, bool) {
 	required := mcpScopeRead
-	if uri == "caic://tasks" || strings.HasPrefix(uri, "caic://tasks/") || uri == "gomode://items" {
+	if uri == "caic://tasks" || strings.HasPrefix(uri, "caic://tasks/") || uri == "gomode://items" || uri == "gomode://notifications" {
 		required = mcpScopeTasksRead
 	}
 	if !mcpHasScope(ctx, required) {

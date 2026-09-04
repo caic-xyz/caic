@@ -1,4 +1,4 @@
-// OAuth durable authorization state storage.
+// OAuth durable authorization, token-family, and DPoP replay state storage.
 
 package oauthserver
 
@@ -19,7 +19,7 @@ import (
 
 // storeVersion is the on-disk schema version. Codes and Consents are keyed by
 // RefreshTokenKey(secret) so the live code/consent token never lands on disk.
-const storeVersion = 2
+const storeVersion = 3
 
 var storeOwners = struct {
 	sync.Mutex
@@ -141,6 +141,8 @@ type Store struct {
 	Codes         map[string]Code          `json:"codes,omitempty"`
 	Consents      map[string]ConsentParams `json:"consents,omitempty"`
 	DeviceCodes   map[string]*DeviceCode   `json:"deviceCodes,omitempty"`
+	DPoPProofs    map[string]time.Time     `json:"dpopProofs,omitempty"`
+	DPoPNonces    map[string]time.Time     `json:"dpopNonces,omitempty"`
 
 	path string
 	io   storeIO
@@ -179,6 +181,8 @@ type storeFile struct {
 	Codes         map[string]Code          `json:"codes,omitempty"`
 	Consents      map[string]ConsentParams `json:"consents,omitempty"`
 	DeviceCodes   map[string]*DeviceCode   `json:"deviceCodes,omitempty"`
+	DPoPProofs    map[string]time.Time     `json:"dpopProofs,omitempty"`
+	DPoPNonces    map[string]time.Time     `json:"dpopNonces,omitempty"`
 }
 
 // LoadStore loads durable OAuth state from path.
@@ -207,6 +211,8 @@ func LoadStore(path string) (*Store, error) {
 	store.Codes = file.Codes
 	store.Consents = file.Consents
 	store.DeviceCodes = file.DeviceCodes
+	store.DPoPProofs = file.DPoPProofs
+	store.DPoPNonces = file.DPoPNonces
 	store.ensureMaps()
 	store.pruneExpired(time.Now())
 	return store, nil
@@ -215,7 +221,7 @@ func LoadStore(path string) (*Store, error) {
 // Save writes the durable OAuth state to its configured path.
 func (s *Store) Save() error {
 	s.ensureMaps()
-	file := storeFile{Version: storeVersion, Clients: s.Clients, RefreshTokens: s.RefreshTokens, Grants: s.Grants, Codes: s.Codes, Consents: s.Consents, DeviceCodes: s.DeviceCodes}
+	file := storeFile{Version: storeVersion, Clients: s.Clients, RefreshTokens: s.RefreshTokens, Grants: s.Grants, Codes: s.Codes, Consents: s.Consents, DeviceCodes: s.DeviceCodes, DPoPProofs: s.DPoPProofs, DPoPNonces: s.DPoPNonces}
 	_, err := persistStore(s, file)
 	return err
 }
@@ -453,6 +459,8 @@ func (s *Store) snapshot() storeFile {
 		Codes:         cloneMap(s.Codes),
 		Consents:      cloneConsents(s.Consents),
 		DeviceCodes:   cloneDeviceCodes(s.DeviceCodes),
+		DPoPProofs:    cloneMap(s.DPoPProofs),
+		DPoPNonces:    cloneMap(s.DPoPNonces),
 	}
 }
 
@@ -463,6 +471,8 @@ func (s *Store) install(file storeFile) {
 	s.Codes = file.Codes
 	s.Consents = file.Consents
 	s.DeviceCodes = file.DeviceCodes
+	s.DPoPProofs = file.DPoPProofs
+	s.DPoPNonces = file.DPoPNonces
 }
 
 func cloneMap[K comparable, V any](src map[K]V) map[K]V {
@@ -512,10 +522,16 @@ func (s *Store) ensureMaps() {
 	if s.DeviceCodes == nil {
 		s.DeviceCodes = map[string]*DeviceCode{}
 	}
+	if s.DPoPProofs == nil {
+		s.DPoPProofs = map[string]time.Time{}
+	}
+	if s.DPoPNonces == nil {
+		s.DPoPNonces = map[string]time.Time{}
+	}
 }
 
 func (s *Store) pruneExpired(now time.Time) bool {
-	file := storeFile{RefreshTokens: s.RefreshTokens, Grants: s.Grants, Codes: s.Codes, Consents: s.Consents, DeviceCodes: s.DeviceCodes}
+	file := storeFile{RefreshTokens: s.RefreshTokens, Grants: s.Grants, Codes: s.Codes, Consents: s.Consents, DeviceCodes: s.DeviceCodes, DPoPProofs: s.DPoPProofs, DPoPNonces: s.DPoPNonces}
 	return pruneExpiredStore(&file, now)
 }
 
@@ -550,6 +566,18 @@ func pruneExpiredStore(file *storeFile, now time.Time) bool {
 	for code, entry := range file.DeviceCodes {
 		if entry != nil && now.After(entry.ExpiresAt) {
 			delete(file.DeviceCodes, code)
+			changed = true
+		}
+	}
+	for key, expiresAt := range file.DPoPProofs {
+		if !now.Before(expiresAt) {
+			delete(file.DPoPProofs, key)
+			changed = true
+		}
+	}
+	for key, expiresAt := range file.DPoPNonces {
+		if !now.Before(expiresAt) {
+			delete(file.DPoPNonces, key)
 			changed = true
 		}
 	}

@@ -31,7 +31,7 @@ import (
 	"github.com/caic-xyz/caic/oauth/oauthclient"
 )
 
-const mcpAuthDefaultScope = mcpScopeRead + " " + mcpScopeTasksRead + " " + mcpScopeTasksWrite + " " + mcpScopeTasksAdmin + " " + mcpScopeReposWrite
+const mcpAuthDefaultScope = mcpScopeRead + " " + mcpScopeTasksRead + " " + mcpScopeTasksCreate + " " + mcpScopeTasksWrite + " " + mcpScopeTasksAdmin + " " + mcpScopeReposWrite
 
 // testMCPOAuthSigningKeyPEM returns a fresh EC P-256 signing key, PEM-encoded,
 // for routers that build the OAuth server. Production supplies this from
@@ -267,6 +267,9 @@ func TestOAuthServer(t *testing.T) {
 			if !strings.Contains(body, "Read task information") {
 				t.Error("body missing scope description for caic:tasks.read")
 			}
+			if !strings.Contains(body, `type="checkbox" name="scope" value="caic:tasks.create" form="consent-form"`) {
+				t.Error("body missing selectable task creation scope attached to consent form")
+			}
 			if !strings.Contains(body, `type="checkbox" name="scope" value="caic:tasks.write" form="consent-form"`) {
 				t.Error("body missing selectable write scope attached to consent form")
 			}
@@ -478,10 +481,14 @@ func mustBuildMCPOAuthLifecycleHandler(t *testing.T, s *testRouter) http.Handler
 }
 
 func authorizeMCPClient(t *testing.T, h http.Handler, user *auth.User, registered *oauth.RegisterResponse) oauth.TokenResponse {
-	return authorizeMCPClientWithRedirect(t, h, user, registered, "https://claude.ai/api/mcp/auth_callback")
+	return authorizeMCPClientWithScopes(t, h, user, registered, "https://claude.ai/api/mcp/auth_callback", []string{mcpScopeRead, mcpScopeTasksRead})
 }
 
 func authorizeMCPClientWithRedirect(t *testing.T, h http.Handler, user *auth.User, registered *oauth.RegisterResponse, redirectURI string) oauth.TokenResponse {
+	return authorizeMCPClientWithScopes(t, h, user, registered, redirectURI, []string{mcpScopeRead, mcpScopeTasksRead})
+}
+
+func authorizeMCPClientWithScopes(t *testing.T, h http.Handler, user *auth.User, registered *oauth.RegisterResponse, redirectURI string, scopes []string) oauth.TokenResponse {
 	verifier := "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 	digest := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(digest[:])
@@ -519,7 +526,7 @@ func authorizeMCPClientWithRedirect(t *testing.T, h http.Handler, user *auth.Use
 	consentForm := url.Values{
 		"consent_token": {consentToken},
 		"scope_form":    {"1"},
-		"scope":         {mcpScopeRead, mcpScopeTasksRead},
+		"scope":         scopes,
 	}
 	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/authorize", strings.NewReader(consentForm.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
