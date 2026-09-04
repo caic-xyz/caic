@@ -42,6 +42,7 @@ export interface RegisterRequest {
   client_name: string;
   redirect_uris: string[];
   token_endpoint_auth_method: string;
+  grant_types?: string[];
 }
 
 /** RegisterResponse is a dynamic client registration response (RFC 7592). */
@@ -51,6 +52,7 @@ export interface RegisterResponse {
   client_name?: string;
   redirect_uris: string[];
   token_endpoint_auth_method: string;
+  grant_types?: string[];
   registration_access_token?: string;
   registration_client_uri?: string;
 }
@@ -63,6 +65,7 @@ export interface UpdateClientRequest {
   client_name?: string;
   redirect_uris?: string[];
   token_endpoint_auth_method?: string;
+  grant_types?: string[];
 }
 
 /** Token holds an OAuth 2.0 access token and associated metadata. */

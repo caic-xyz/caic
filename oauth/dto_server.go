@@ -79,6 +79,7 @@ type RegisterRequest struct {
 	ClientName              string   `json:"client_name"`
 	RedirectURIs            []string `json:"redirect_uris"`
 	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
+	GrantTypes              []string `json:"grant_types,omitempty"`
 }
 
 // RegisterResponse is a dynamic client registration response (RFC 7592).
@@ -88,6 +89,7 @@ type RegisterResponse struct {
 	ClientName              string   `json:"client_name,omitempty"`
 	RedirectURIs            []string `json:"redirect_uris"`
 	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
+	GrantTypes              []string `json:"grant_types,omitempty"`
 	RegistrationAccessToken string   `json:"registration_access_token,omitempty"`
 	RegistrationClientURI   string   `json:"registration_client_uri,omitempty"`
 }
@@ -120,6 +122,7 @@ type UpdateClientRequest struct {
 	ClientName              *string   `json:"client_name,omitempty"`
 	RedirectURIs            *[]string `json:"redirect_uris,omitempty"`
 	TokenEndpointAuthMethod *string   `json:"token_endpoint_auth_method,omitempty"`
+	GrantTypes              *[]string `json:"grant_types,omitempty"`
 }
 
 // TokenResponse is an OAuth token endpoint response.

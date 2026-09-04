@@ -625,7 +625,7 @@ func newAuthEnabledRouter(t *testing.T) (*Router, auth.User) {
 }
 
 func registerTestClient(t *testing.T, h http.Handler, clientName string, redirectURIs []string) oauth.RegisterResponse {
-	body := strings.NewReader(`{"client_name":"` + clientName + `","redirect_uris":["` + strings.Join(redirectURIs, `","`) + `"],"token_endpoint_auth_method":"none"}`)
+	body := strings.NewReader(`{"client_name":"` + clientName + `","redirect_uris":["` + strings.Join(redirectURIs, `","`) + `"],"token_endpoint_auth_method":"none","grant_types":["authorization_code","refresh_token"]}`)
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/register", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.Host = "caic.example.com"

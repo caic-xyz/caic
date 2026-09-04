@@ -82,6 +82,7 @@ public struct RegisterRequest: Codable {
     public let client_name: String
     public let redirect_uris: [String]
     public let token_endpoint_auth_method: String
+    public let grant_types: [String]?
 }
 
 // OAuth 2.0 Dynamic Client Registration response (RFC 7591, 7592)
@@ -93,6 +94,7 @@ public struct RegisterResponse: Codable {
     public let client_name: String?
     public let redirect_uris: [String]
     public let token_endpoint_auth_method: String
+    public let grant_types: [String]?
     public let registration_access_token: String?
     public let registration_client_uri: String?
 }
@@ -105,6 +107,7 @@ public struct UpdateClientRequest: Codable {
     public let client_name: String?
     public let redirect_uris: [String]?
     public let token_endpoint_auth_method: String?
+    public let grant_types: [String]?
 }
 
 // OAuth 2.0 client-side access token (RFC 6749)

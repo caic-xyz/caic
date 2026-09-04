@@ -1,4 +1,4 @@
-// Fixed-window request rate limiting.
+// Bounded fixed-window request rate limiting with expired-bucket cleanup.
 
 package server
 
@@ -7,11 +7,14 @@ import (
 	"time"
 )
 
+const maxRateLimitBuckets = 100_000
+
 type rateLimiter struct {
-	mu      sync.Mutex
-	limit   int
-	window  time.Duration
-	buckets map[string]rateBucket
+	mu        sync.Mutex
+	limit     int
+	window    time.Duration
+	buckets   map[string]rateBucket
+	nextPrune time.Time
 }
 
 type rateBucket struct {
@@ -31,8 +34,19 @@ func (r *rateLimiter) Allow(key string) bool {
 	now := time.Now()
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	bucket := r.buckets[key]
+	if r.nextPrune.IsZero() || !now.Before(r.nextPrune) {
+		for bucketKey, bucket := range r.buckets {
+			if now.Sub(bucket.Start) >= r.window {
+				delete(r.buckets, bucketKey)
+			}
+		}
+		r.nextPrune = now.Add(r.window)
+	}
+	bucket, found := r.buckets[key]
 	if bucket.Start.IsZero() || now.Sub(bucket.Start) >= r.window {
+		if !found && len(r.buckets) >= maxRateLimitBuckets {
+			return false
+		}
 		r.buckets[key] = rateBucket{Start: now, Count: 1}
 		return true
 	}

@@ -3,6 +3,7 @@
 package oauthserver
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"crypto/ecdsa"
@@ -13,6 +14,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math/big"
 	"net/http"
@@ -20,6 +22,7 @@ import (
 	"net/url"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1560,6 +1563,7 @@ func TestTransactionalOAuthMutations(t *testing.T) {
 			t.Fatalf("LoadStore: %v", err)
 		}
 		now := time.Now()
+		store.Clients["client"] = Client{ID: "client", RedirectURIs: []string{"https://client.example/callback"}}
 		store.Grants["grant"] = Grant{ID: "grant", UserID: "user", ClientID: "client", ExpiresAt: now.Add(time.Hour)}
 		store.RefreshTokens[oauth.RefreshTokenKey("refresh")] = RefreshToken{GrantID: "grant", UserID: "user", ClientID: "client", ExpiresAt: now.Add(time.Hour)}
 		if err := store.Save(); err != nil {
@@ -2112,6 +2116,18 @@ func TestDeviceAuthorization(t *testing.T) {
 		}
 		if w := poll(); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "invalid_dpop_proof") {
 			t.Fatalf("replayed poll status = %d: %s", w.Code, w.Body.String())
+		}
+		proof = makeDPoPProof(t, key, jwk, http.MethodPost, dpopTokenURL, time.Now(), "", "")
+		w = poll()
+		if w.Code != http.StatusOK {
+			t.Fatalf("approved dpop poll status = %d: %s", w.Code, w.Body.String())
+		}
+		var token oauth.TokenResponse
+		if err := json.NewDecoder(w.Body).Decode(&token); err != nil {
+			t.Fatalf("decode dpop device token: %v", err)
+		}
+		if token.TokenType != DPoPTokenType {
+			t.Fatalf("device token type = %q, want %q", token.TokenType, DPoPTokenType)
 		}
 	})
 
@@ -3076,19 +3092,20 @@ func TestDPoP(t *testing.T) {
 			"refresh_token": {res.token.RefreshToken},
 			"client_id":     {res.registered.ClientID},
 		}
-		exchange := func(key *rsa.PrivateKey, jwk *oauth.JWK) *httptest.ResponseRecorder {
+		exchange := func(proof string) *httptest.ResponseRecorder {
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-			req.Header.Set("DPoP", makeDPoPProof(t, key, jwk, http.MethodPost, dpopTokenURL, time.Now(), "", ""))
+			req.Header.Set("DPoP", proof)
 			addForwardedHeaders(req)
 			w := httptest.NewRecorder()
 			res.handler.ServeHTTP(w, req)
 			return w
 		}
-		if w := exchange(wrongKey, wrongJWK); w.Code != http.StatusBadRequest {
+		if w := exchange(makeDPoPProof(t, wrongKey, wrongJWK, http.MethodPost, dpopTokenURL, time.Now(), "", "")); w.Code != http.StatusBadRequest {
 			t.Fatalf("wrong-key refresh status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
 		}
-		w := exchange(res.dpopKey, res.dpopJWK)
+		acceptedProof := makeDPoPProof(t, res.dpopKey, res.dpopJWK, http.MethodPost, dpopTokenURL, time.Now(), "", "")
+		w := exchange(acceptedProof)
 		if w.Code != http.StatusOK {
 			t.Fatalf("original-key refresh status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
@@ -3099,11 +3116,14 @@ func TestDPoP(t *testing.T) {
 		if token.TokenType != DPoPTokenType {
 			t.Fatalf("token type = %q, want %q", token.TokenType, DPoPTokenType)
 		}
-		if w := exchange(wrongKey, wrongJWK); w.Code != http.StatusBadRequest {
+		if w := exchange(makeDPoPProof(t, wrongKey, wrongJWK, http.MethodPost, dpopTokenURL, time.Now(), "", "")); w.Code != http.StatusBadRequest {
 			t.Fatalf("used-token wrong-key status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
 		}
+		if w := exchange(acceptedProof); w.Code != http.StatusBadRequest {
+			t.Fatalf("exact refresh replay status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
+		}
 		form.Set("refresh_token", token.RefreshToken)
-		if w := exchange(res.dpopKey, res.dpopJWK); w.Code != http.StatusOK {
+		if w := exchange(makeDPoPProof(t, res.dpopKey, res.dpopJWK, http.MethodPost, dpopTokenURL, time.Now(), "", "")); w.Code != http.StatusOK {
 			t.Fatalf("family refresh after attack status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
 	})
@@ -3358,8 +3378,57 @@ func TestDPoP(t *testing.T) {
 	})
 }
 
+func TestDPoPReplayState(t *testing.T) {
+	t.Parallel()
+
+	t.Run("lower integer-second boundary remains reserved", func(t *testing.T) {
+		t.Parallel()
+		now := time.Unix(1_000, int64(500*time.Millisecond))
+		binding := dpopBinding{jkt: "key", jti: "boundary", iat: now.Unix() - int64(defaultDPoPMaxAge/time.Second)}
+		state := newEmptyStore("").snapshot()
+		if !reserveDPoPBinding(&state, binding, now) {
+			t.Fatal("lower-bound proof was not reserved through the remainder of its acceptance second")
+		}
+		if reserveDPoPBinding(&state, binding, now) {
+			t.Fatal("lower-bound proof replay was accepted")
+		}
+	})
+
+	t.Run("active proof capacity fails closed", func(t *testing.T) {
+		t.Parallel()
+		now := time.Now()
+		state := newEmptyStore("").snapshot()
+		for i := range maxDPoPJTIEntries {
+			state.DPoPProofs[strconv.Itoa(i)] = now.Add(time.Minute)
+		}
+		binding := dpopBinding{jkt: "key", jti: "overflow", iat: now.Unix()}
+		if reserveDPoPBinding(&state, binding, now) {
+			t.Fatal("proof was reserved beyond active capacity")
+		}
+		if len(state.DPoPProofs) != maxDPoPJTIEntries {
+			t.Fatalf("proof entries = %d, want %d without eviction", len(state.DPoPProofs), maxDPoPJTIEntries)
+		}
+	})
+
+	t.Run("active nonce capacity fails closed", func(t *testing.T) {
+		t.Parallel()
+		now := time.Now()
+		state := newEmptyStore("").snapshot()
+		for i := range maxDPoPJTIEntries {
+			state.DPoPNonces[strconv.Itoa(i)] = now.Add(time.Minute)
+		}
+		binding := dpopBinding{jkt: "key", jti: "nonce-overflow", iat: now.Unix(), nonce: "nonce", nonceExpiresAt: now.Add(time.Minute)}
+		if reserveDPoPBinding(&state, binding, now) {
+			t.Fatal("nonce was reserved beyond active capacity")
+		}
+		if len(state.DPoPNonces) != maxDPoPJTIEntries {
+			t.Fatalf("nonce entries = %d, want %d without eviction", len(state.DPoPNonces), maxDPoPJTIEntries)
+		}
+	})
+}
+
 // testDPoPRSAKeyPair generates an RSA key pair for DPoP proof tests.
-func testDPoPRSAKeyPair(t *testing.T) (*rsa.PrivateKey, *oauth.JWK) {
+func testDPoPRSAKeyPair(t testing.TB) (*rsa.PrivateKey, *oauth.JWK) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("generate rsa key: %v", err)
@@ -3375,7 +3444,7 @@ func testDPoPRSAKeyPair(t *testing.T) (*rsa.PrivateKey, *oauth.JWK) {
 
 // makeDPoPProof creates a valid DPoP proof JWT signed with the given RSA key
 // using a fresh random jti.
-func makeDPoPProof(t *testing.T, key *rsa.PrivateKey, jwk *oauth.JWK, htm, htu string, iat time.Time, accessToken, nonce string) string {
+func makeDPoPProof(t testing.TB, key *rsa.PrivateKey, jwk *oauth.JWK, htm, htu string, iat time.Time, accessToken, nonce string) string {
 	jti, err := randomToken()
 	if err != nil {
 		t.Fatalf("generate jti: %v", err)
@@ -3385,7 +3454,7 @@ func makeDPoPProof(t *testing.T, key *rsa.PrivateKey, jwk *oauth.JWK, htm, htu s
 
 // makeDPoPProofWithJTI creates a DPoP proof JWT with an explicit jti (which may
 // be empty to exercise the missing-jti rejection path).
-func makeDPoPProofWithJTI(t *testing.T, key *rsa.PrivateKey, jwk *oauth.JWK, htm, htu string, iat time.Time, accessToken, nonce, jti string) string {
+func makeDPoPProofWithJTI(t testing.TB, key *rsa.PrivateKey, jwk *oauth.JWK, htm, htu string, iat time.Time, accessToken, nonce, jti string) string {
 	header := DPoPHeader{Typ: "dpop+jwt", Alg: "RS256", JWK: *jwk}
 	headerJSON, err := json.Marshal(header)
 	if err != nil {
@@ -3745,7 +3814,16 @@ func newTestServerHandler(s *Server) http.Handler {
 }
 
 func registerOAuthTestClient(t *testing.T, h http.Handler, clientName string, redirectURIs []string) oauth.RegisterResponse {
-	body, err := json.Marshal(oauth.RegisterRequest{ClientName: clientName, RedirectURIs: redirectURIs, TokenEndpointAuthMethod: oauth.TokenEndpointAuthNone})
+	return registerOAuthTestClientRequest(t, h, &oauth.RegisterRequest{
+		ClientName:              clientName,
+		RedirectURIs:            redirectURIs,
+		TokenEndpointAuthMethod: oauth.TokenEndpointAuthNone,
+		GrantTypes:              []string{oauth.GrantAuthorizationCode, oauth.GrantRefreshToken, oauth.GrantDeviceCode},
+	}, http.StatusCreated)
+}
+
+func registerOAuthTestClientRequest(t *testing.T, h http.Handler, registration *oauth.RegisterRequest, wantStatus int) oauth.RegisterResponse {
+	body, err := json.Marshal(registration)
 	if err != nil {
 		t.Fatalf("Marshal oauth.RegisterRequest: %v", err)
 	}
@@ -3753,12 +3831,14 @@ func registerOAuthTestClient(t *testing.T, h http.Handler, clientName string, re
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("register status = %d, want %d: %s", w.Code, http.StatusCreated, w.Body.String())
+	if w.Code != wantStatus {
+		t.Fatalf("register status = %d, want %d: %s", w.Code, wantStatus, w.Body.String())
 	}
 	var registered oauth.RegisterResponse
-	if err := json.NewDecoder(w.Body).Decode(&registered); err != nil {
-		t.Fatalf("decode register response: %v", err)
+	if w.Code == http.StatusCreated {
+		if err := json.NewDecoder(w.Body).Decode(&registered); err != nil {
+			t.Fatalf("decode register response: %v", err)
+		}
 	}
 	return registered
 }
@@ -4185,6 +4265,314 @@ func TestRegistrationManagement(t *testing.T) {
 	})
 }
 
+func TestClientLifecyclePolicy(t *testing.T) {
+	t.Parallel()
+
+	validRegistration := func() oauth.RegisterRequest {
+		return oauth.RegisterRequest{
+			ClientName:              "Client",
+			RedirectURIs:            []string{"https://example.com/callback"},
+			TokenEndpointAuthMethod: oauth.TokenEndpointAuthNone,
+			GrantTypes:              []string{oauth.GrantAuthorizationCode},
+		}
+	}
+
+	t.Run("registration metadata boundaries", func(t *testing.T) {
+		t.Parallel()
+		tooManyRedirects := make([]string, maxOAuthRedirectURIs+1)
+		for i := range tooManyRedirects {
+			tooManyRedirects[i] = fmt.Sprintf("https://example.com/callback/%d", i)
+		}
+		tests := []struct {
+			name   string
+			mutate func(*oauth.RegisterRequest)
+		}{
+			{name: "long client name", mutate: func(r *oauth.RegisterRequest) { r.ClientName = strings.Repeat("x", maxOAuthClientName+1) }},
+			{name: "control in client name", mutate: func(r *oauth.RegisterRequest) { r.ClientName = "bad\nname" }},
+			{name: "too many redirects", mutate: func(r *oauth.RegisterRequest) { r.RedirectURIs = tooManyRedirects }},
+			{name: "duplicate redirect", mutate: func(r *oauth.RegisterRequest) {
+				r.RedirectURIs = []string{"https://example.com/callback", "https://example.com/callback"}
+			}},
+			{name: "redirect fragment", mutate: func(r *oauth.RegisterRequest) { r.RedirectURIs = []string{"https://example.com/callback#fragment"} }},
+			{name: "empty redirect fragment", mutate: func(r *oauth.RegisterRequest) { r.RedirectURIs = []string{"https://example.com/callback#"} }},
+			{name: "empty redirect hostname", mutate: func(r *oauth.RegisterRequest) { r.RedirectURIs = []string{"https://:443/callback"} }},
+			{name: "redirect credentials", mutate: func(r *oauth.RegisterRequest) { r.RedirectURIs = []string{"https://user:pass@example.com/callback"} }},
+			{name: "non-loopback HTTP", mutate: func(r *oauth.RegisterRequest) { r.RedirectURIs = []string{"http://example.com/callback"} }},
+			{name: "unsupported grant", mutate: func(r *oauth.RegisterRequest) { r.GrantTypes = []string{"client_credentials"} }},
+			{name: "duplicate grant", mutate: func(r *oauth.RegisterRequest) {
+				r.GrantTypes = []string{oauth.GrantAuthorizationCode, oauth.GrantAuthorizationCode}
+			}},
+			{name: "refresh without issuing grant", mutate: func(r *oauth.RegisterRequest) { r.GrantTypes = []string{oauth.GrantRefreshToken} }},
+		}
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				t.Parallel()
+				registration := validRegistration()
+				test.mutate(&registration)
+				registerOAuthTestClientRequest(t, newTestServerHandlerOnly(t), &registration, http.StatusBadRequest)
+			})
+		}
+	})
+
+	t.Run("registration JSON rejects duplicate unknown and trailing fields", func(t *testing.T) {
+		t.Parallel()
+		handler := newTestServerHandlerOnly(t)
+		bodies := []string{
+			`{"client_name":"a","client_name":"b","redirect_uris":["https://example.com/callback"]}`,
+			`{"client_name":"a","redirect_uris":["https://example.com/callback"],"unknown":true}`,
+			`{"client_name":"a","redirect_uris":["https://example.com/callback"]} {}`,
+			`{"client_name":"a","redirect_uris":["https://example.com/callback"],"grant_types":null}`,
+			`{"client_name":"a","redirect_uris":["https://example.com/callback"],"grant_types":[]}`,
+		}
+		for _, body := range bodies {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/register", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("body %q status = %d, want %d", body, w.Code, http.StatusBadRequest)
+			}
+		}
+	})
+
+	t.Run("registration JSON rejects malformed Unicode", func(t *testing.T) {
+		t.Parallel()
+		handler := newTestServerHandlerOnly(t)
+		bodies := [][]byte{
+			[]byte(`{"client_name":"\uD800","redirect_uris":["https://example.com/callback"]}`),
+			append([]byte(`{"client_name":"`), append([]byte{0xff}, []byte(`","redirect_uris":["https://example.com/callback"]}`)...)...),
+		}
+		for _, body := range bodies {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/register", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("body %q status = %d, want %d", body, w.Code, http.StatusBadRequest)
+			}
+		}
+	})
+
+	t.Run("refresh token requires requested grant", func(t *testing.T) {
+		t.Parallel()
+		user := testUser()
+		_, handler, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		registered := registerOAuthTestClientRequest(t, handler, &oauth.RegisterRequest{
+			ClientName:              "Access only",
+			RedirectURIs:            []string{"https://claude.example.com/callback"},
+			TokenEndpointAuthMethod: oauth.TokenEndpointAuthNone,
+			GrantTypes:              []string{oauth.GrantAuthorizationCode},
+		}, http.StatusCreated)
+		if !slices.Equal(registered.GrantTypes, []string{oauth.GrantAuthorizationCode}) {
+			t.Fatalf("grant_types = %v", registered.GrantTypes)
+		}
+		token := authorizeOAuthTestClient(t, handler, user, &registered, []string{"read"})
+		if token.AccessToken == "" || token.RefreshToken != "" {
+			t.Fatalf("access/refresh tokens = %q/%q, want access only", token.AccessToken, token.RefreshToken)
+		}
+	})
+
+	t.Run("refresh eligibility is rechecked inside rotation", func(t *testing.T) {
+		t.Parallel()
+		server := newTestServer(t)
+		now := time.Now()
+		server.state.Clients["client"] = Client{ID: "client", RedirectURIs: []string{"https://example.com/callback"}, GrantTypes: []string{oauth.GrantAuthorizationCode}}
+		server.state.Grants["grant"] = Grant{ID: "grant", UserID: "user", ClientID: "client", Resource: testResourceURL, ExpiresAt: now.Add(time.Hour)}
+		server.state.RefreshTokens[oauth.RefreshTokenKey("refresh")] = RefreshToken{GrantID: "grant", UserID: "user", ClientID: "client", Resource: testResourceURL, ExpiresAt: now.Add(time.Hour)}
+		result, _, err := server.exchangeRefreshToken("refresh", "client", "user", "next", dpopBinding{})
+		if err != nil || result != refreshExchangeUnknown {
+			t.Fatalf("refresh rotation = %v, %v; want ineligible", result, err)
+		}
+		if !server.state.RefreshTokens[oauth.RefreshTokenKey("refresh")].UsedAt.IsZero() {
+			t.Fatal("ineligible refresh token was consumed")
+		}
+	})
+
+	t.Run("omitted grants default to authorization code", func(t *testing.T) {
+		t.Parallel()
+		registration := validRegistration()
+		registration.GrantTypes = nil
+		registered := registerOAuthTestClientRequest(t, newTestServerHandlerOnly(t), &registration, http.StatusCreated)
+		if !slices.Equal(registered.GrantTypes, []string{oauth.GrantAuthorizationCode}) {
+			t.Fatalf("grant_types = %v, want authorization_code", registered.GrantTypes)
+		}
+	})
+
+	t.Run("loopback IP ports are dynamic but localhost is exact", func(t *testing.T) {
+		t.Parallel()
+		user := testUser()
+		_, handler, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		for _, test := range []struct {
+			registered string
+			requested  string
+		}{
+			{registered: "http://127.0.0.1:1000/callback?flow=1", requested: "http://127.0.0.1:2000/callback?flow=1"},
+			{registered: "http://[::1]:1000/callback", requested: "http://[::1]:2000/callback"},
+		} {
+			registered := registerOAuthTestClient(t, handler, "Native", []string{test.registered})
+			if code := authorizeOAuthTestCode(t, handler, user, &registered, test.requested, []string{"read"}, ""); code == "" {
+				t.Fatal("dynamic loopback authorization code is empty")
+			}
+		}
+		registered := registerOAuthTestClient(t, handler, "Localhost", []string{"http://localhost:1000/callback"})
+		form := authorizationCodeForm(registered.ClientID, "http://localhost:2000/callback", "read")
+		req := newOAuthTestRequest(t, http.MethodGet, "/oauth/authorize?"+form.Encode(), http.NoBody, user)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("localhost dynamic port status = %d, want %d", w.Code, http.StatusBadRequest)
+		}
+		registered = registerOAuthTestClient(t, handler, "IPv6 text", []string{"http://[::1]:1000/callback"})
+		form = authorizationCodeForm(registered.ClientID, "http://[0:0:0:0:0:0:0:1]:2000/callback", "read")
+		req = newOAuthTestRequest(t, http.MethodGet, "/oauth/authorize?"+form.Encode(), http.NoBody, user)
+		w = httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("alternate IPv6 text status = %d, want %d", w.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("PKCE syntax fails before code consumption", func(t *testing.T) {
+		t.Parallel()
+		user := testUser()
+		_, handler, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		registered := registerOAuthTestClient(t, handler, "Client", []string{"https://claude.example.com/callback"})
+		badChallenge := authorizationCodeForm(registered.ClientID, "https://claude.example.com/callback", "read")
+		badChallenge.Set("code_challenge", "too-short")
+		req := newOAuthTestRequest(t, http.MethodGet, "/oauth/authorize?"+badChallenge.Encode(), http.NoBody, user)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("bad challenge status = %d, want %d", w.Code, http.StatusBadRequest)
+		}
+		badChallenge.Set("code_challenge", strings.Repeat("a", 42)+".")
+		req = newOAuthTestRequest(t, http.MethodGet, "/oauth/authorize?"+badChallenge.Encode(), http.NoBody, user)
+		w = httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("non-base64url challenge status = %d, want %d", w.Code, http.StatusBadRequest)
+		}
+		badChallenge.Set("code_challenge", strings.Repeat("A", 42)+"B")
+		req = newOAuthTestRequest(t, http.MethodGet, "/oauth/authorize?"+badChallenge.Encode(), http.NoBody, user)
+		w = httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("noncanonical challenge status = %d, want %d", w.Code, http.StatusBadRequest)
+		}
+
+		code := authorizeOAuthTestCode(t, handler, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
+		form := url.Values{
+			"grant_type":    {oauth.GrantAuthorizationCode},
+			"code":          {code},
+			"client_id":     {registered.ClientID},
+			"redirect_uri":  {"https://claude.example.com/callback"},
+			"code_verifier": {strings.Repeat("a", 42)},
+			"resource":      {testResourceURL},
+		}
+		exchange := func() int {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+			return w.Code
+		}
+		if got := exchange(); got != http.StatusBadRequest {
+			t.Fatalf("bad verifier status = %d, want %d", got, http.StatusBadRequest)
+		}
+		form.Set("code_verifier", testVerifier)
+		if got := exchange(); got != http.StatusOK {
+			t.Fatalf("valid verifier retry status = %d, want %d", got, http.StatusOK)
+		}
+	})
+
+	t.Run("client registrations are capped", func(t *testing.T) {
+		t.Parallel()
+		server := newTestServer(t)
+		handler := newTestServerHandler(server)
+		for i := range maxOAuthClients {
+			id := strconv.Itoa(i)
+			server.state.Clients[id] = Client{ID: id, RedirectURIs: []string{"https://example.com/callback"}}
+		}
+		registration := validRegistration()
+		registerOAuthTestClientRequest(t, handler, &registration, http.StatusServiceUnavailable)
+		if len(server.state.Clients) != maxOAuthClients {
+			t.Fatalf("clients = %d, want %d", len(server.state.Clients), maxOAuthClients)
+		}
+	})
+
+	t.Run("legacy grants survive unrelated update", func(t *testing.T) {
+		t.Parallel()
+		server := newTestServer(t)
+		handler := newTestServerHandler(server)
+		registered := registerOAuthTestClient(t, handler, "Legacy", []string{"https://example.com/callback"})
+		server.mu.Lock()
+		client := server.state.Clients[registered.ClientID]
+		client.GrantTypes = nil
+		err := server.state.transact(func(next *storeFile) bool {
+			next.Clients[registered.ClientID] = client
+			return true
+		})
+		server.mu.Unlock()
+		if err != nil {
+			t.Fatalf("seed legacy client: %v", err)
+		}
+		body := `{"client_name":"Renamed"}`
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/oauth/register/"+registered.ClientID, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+registered.RegistrationAccessToken)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("legacy update status = %d: %s", w.Code, w.Body.String())
+		}
+		if stored := server.state.Clients[registered.ClientID]; stored.GrantTypes != nil {
+			t.Fatalf("legacy grant sentinel = %v, want nil", stored.GrantTypes)
+		}
+	})
+
+	t.Run("update rejects null and empty grants", func(t *testing.T) {
+		t.Parallel()
+		handler := newTestServerHandlerOnly(t)
+		registered := registerOAuthTestClient(t, handler, "Client", []string{"https://example.com/callback"})
+		for _, body := range []string{`{"grant_types":null}`, `{"grant_types":[]}`} {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/oauth/register/"+registered.ClientID, strings.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+registered.RegistrationAccessToken)
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("update %s status = %d, want %d", body, w.Code, http.StatusBadRequest)
+			}
+		}
+	})
+
+	t.Run("device authorization requires requested grant", func(t *testing.T) {
+		t.Parallel()
+		handler := newTestServerHandlerOnly(t)
+		registration := validRegistration()
+		registered := registerOAuthTestClientRequest(t, handler, &registration, http.StatusCreated)
+		form := url.Values{"client_id": {registered.ClientID}, "scope": {"read"}}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/device_authorization", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "unauthorized_client") {
+			t.Fatalf("device status = %d, want unauthorized_client: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("registration management token survives access-token windows", func(t *testing.T) {
+		t.Parallel()
+		server := newTestServer(t)
+		handler := newTestServerHandler(server)
+		registered := registerOAuthTestClient(t, handler, "Managed", []string{"https://example.com/callback"})
+		clientID, err := server.tokens.VerifyRegistrationAccessToken(registered.RegistrationAccessToken, server.issuer, server.issuer+"/oauth/register", time.Now().Add(10*365*24*time.Hour))
+		if err != nil || clientID != registered.ClientID {
+			t.Fatalf("long-lived registration token = %q, %v", clientID, err)
+		}
+	})
+}
+
 func TestEndSession(t *testing.T) {
 	t.Parallel()
 
@@ -4432,6 +4820,144 @@ func revokeOAuthTestToken(t *testing.T, h http.Handler, clientID, refreshToken s
 	}
 }
 
+func TestOAuthInputBounds(t *testing.T) {
+	t.Parallel()
+
+	t.Run("repeated consent scopes remain valid", func(t *testing.T) {
+		t.Parallel()
+		user := testUser()
+		server, handler, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		registered := registerOAuthTestClient(t, handler, "Claude", []string{"https://claude.example.com/callback"})
+		code := authorizeOAuthTestCode(t, handler, user, &registered, "https://claude.example.com/callback", []string{"read", "write"}, "")
+		entry, found := server.state.Codes[oauth.RefreshTokenKey(code)]
+		if !found {
+			t.Fatal("authorization code was not stored")
+		}
+		if entry.Scope != "read write" {
+			t.Fatalf("scope = %q, want %q", entry.Scope, "read write")
+		}
+	})
+
+	t.Run("duplicate token parameter is rejected before code consumption", func(t *testing.T) {
+		t.Parallel()
+		user := testUser()
+		_, handler, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		registered := registerOAuthTestClient(t, handler, "Claude", []string{"https://claude.example.com/callback"})
+		code := authorizeOAuthTestCode(t, handler, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
+		form := url.Values{
+			"grant_type":    {oauth.GrantAuthorizationCode},
+			"code":          {code},
+			"client_id":     {registered.ClientID, registered.ClientID},
+			"redirect_uri":  {"https://claude.example.com/callback"},
+			"code_verifier": {testVerifier},
+			"resource":      {testResourceURL},
+		}
+		exchange := func() *httptest.ResponseRecorder {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+			return w
+		}
+		if w := exchange(); w.Code != http.StatusBadRequest {
+			t.Fatalf("duplicate status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
+		}
+		form.Set("client_id", registered.ClientID)
+		if w := exchange(); w.Code != http.StatusOK {
+			t.Fatalf("valid retry status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+	})
+
+	t.Run("oversized parameter is rejected", func(t *testing.T) {
+		t.Parallel()
+		_, handler, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
+		form := url.Values{"grant_type": {oauth.GrantAuthorizationCode}, "code": {strings.Repeat("x", maxOAuthParameterBytes+1)}}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "too long") {
+			t.Fatalf("status = %d, want oversized rejection: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("pushed authorization requests are pruned and capped", func(t *testing.T) {
+		t.Parallel()
+		user := testUser()
+		server, handler, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		registered := registerOAuthTestClient(t, handler, "Claude", []string{"https://claude.example.com/callback"})
+		now := time.Now()
+		for i := range maxPendingPARRequests {
+			server.parRequests[strconv.Itoa(i)] = ConsentParams{ExpiresAt: now.Add(time.Minute)}
+		}
+		form := authorizationCodeForm(registered.ClientID, "https://claude.example.com/callback", "read")
+		push := func() *httptest.ResponseRecorder {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/par", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+			return w
+		}
+		if w := push(); w.Code != http.StatusServiceUnavailable {
+			t.Fatalf("full PAR status = %d, want %d: %s", w.Code, http.StatusServiceUnavailable, w.Body.String())
+		}
+		server.parRequests["0"] = ConsentParams{ExpiresAt: now.Add(-time.Second)}
+		if w := push(); w.Code != http.StatusCreated {
+			t.Fatalf("pruned PAR status = %d, want %d: %s", w.Code, http.StatusCreated, w.Body.String())
+		}
+		if len(server.parRequests) != maxPendingPARRequests {
+			t.Fatalf("PAR requests = %d, want %d", len(server.parRequests), maxPendingPARRequests)
+		}
+	})
+
+	t.Run("pending consents are pruned and capped", func(t *testing.T) {
+		t.Parallel()
+		user := testUser()
+		server, handler, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		registered := registerOAuthTestClient(t, handler, "Claude", []string{"https://claude.example.com/callback"})
+		now := time.Now()
+		for i := range maxPendingConsents {
+			server.state.Consents[strconv.Itoa(i)] = ConsentParams{ExpiresAt: now.Add(time.Minute)}
+		}
+		form := authorizationCodeForm(registered.ClientID, "https://claude.example.com/callback", "read")
+		start := func() *httptest.ResponseRecorder {
+			req := newOAuthTestRequest(t, http.MethodGet, "/oauth/authorize?"+form.Encode(), http.NoBody, user)
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+			return w
+		}
+		if w := start(); w.Code != http.StatusServiceUnavailable {
+			t.Fatalf("full consent status = %d, want %d: %s", w.Code, http.StatusServiceUnavailable, w.Body.String())
+		}
+		server.state.Consents["0"] = ConsentParams{ExpiresAt: now.Add(-time.Second)}
+		if w := start(); w.Code != http.StatusOK {
+			t.Fatalf("pruned consent status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		if len(server.state.Consents) != maxPendingConsents {
+			t.Fatalf("consents = %d, want %d", len(server.state.Consents), maxPendingConsents)
+		}
+	})
+
+	t.Run("pending device authorizations are capped", func(t *testing.T) {
+		t.Parallel()
+		user := testUser()
+		server, handler, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		registered := registerOAuthTestClient(t, handler, "Claude", []string{"https://claude.example.com/callback"})
+		now := time.Now()
+		for i := range maxPendingDeviceCodes {
+			server.state.DeviceCodes[strconv.Itoa(i)] = &DeviceCode{ClientID: registered.ClientID, Status: "pending", ExpiresAt: now.Add(time.Minute)}
+		}
+		form := url.Values{"client_id": {registered.ClientID}, "scope": {"read"}}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/device_authorization", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusServiceUnavailable {
+			t.Fatalf("device status = %d, want %d: %s", w.Code, http.StatusServiceUnavailable, w.Body.String())
+		}
+	})
+}
+
 func TestRateLimiting(t *testing.T) {
 	t.Parallel()
 
@@ -4449,7 +4975,7 @@ func TestRateLimiting(t *testing.T) {
 		}
 	})
 
-	t.Run("token endpoint uses per-client rate limit key", func(t *testing.T) {
+	t.Run("token endpoint uses per-IP and per-client rate limit keys", func(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
@@ -4464,7 +4990,8 @@ func TestRateLimiting(t *testing.T) {
 		h := newTestServerHandler(s)
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 
-		// Token request should use "client:<client_id>" key.
+		// Token requests charge both the source IP and the registered client
+		// within that IP.
 		code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
 		form := url.Values{
 			"grant_type":    {oauth.GrantAuthorizationCode},
@@ -4481,8 +5008,11 @@ func TestRateLimiting(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		if !lim.sawKey("client:" + registered.ClientID) {
-			t.Fatalf("rate limiter did not see per-client key: keys=%v", lim.keys)
+		if !lim.sawKey("client_ip:192.0.2.1:" + registered.ClientID) {
+			t.Fatalf("rate limiter did not see per-IP-client key: keys=%v", lim.keys)
+		}
+		if !lim.sawKey("ip:192.0.2.1") {
+			t.Fatalf("rate limiter did not see per-IP key: keys=%v", lim.keys)
 		}
 	})
 
@@ -4522,8 +5052,67 @@ func TestRateLimiting(t *testing.T) {
 			// But the rate limiter should have been asked for an IP key.
 			_ = w.Code
 		}
-		if !lim.sawKey("ip:10.0.0.1:12345") {
+		if !lim.sawKey("ip:10.0.0.1") {
 			t.Fatalf("rate limiter did not see per-IP fallback key: keys=%v", lim.keys)
+		}
+	})
+
+	t.Run("unknown client IDs share a port-independent IP key", func(t *testing.T) {
+		t.Parallel()
+		lim := &inspectRateLimiter{}
+		cfg := testFlowServerConfig(t.TempDir()+"/oauth.json", []oauth.User{testUser()})
+		cfg.RateLimiter = lim
+		s, err := NewServer(cfg)
+		if err != nil {
+			t.Fatalf("NewServer: %v", err)
+		}
+		h := newTestServerHandler(s)
+		for i, clientID := range []string{"attacker-a", "attacker-b"} {
+			form := url.Values{"grant_type": {oauth.GrantAuthorizationCode}, "client_id": {clientID}}
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.RemoteAddr = fmt.Sprintf("10.0.0.9:%d", 2000+i)
+			h.ServeHTTP(httptest.NewRecorder(), req)
+		}
+		for _, key := range lim.keys {
+			if strings.HasPrefix(key, "client_ip:") {
+				t.Fatalf("unknown client IDs created client keys: %v", lim.keys)
+			}
+		}
+		for _, key := range lim.keys {
+			if key != "ip:10.0.0.9" {
+				t.Fatalf("rate-limit key = %q, want stable IP key", key)
+			}
+		}
+	})
+
+	t.Run("registered client keys ignore source ports", func(t *testing.T) {
+		t.Parallel()
+		limiter := &inspectRateLimiter{}
+		cfg := testFlowServerConfig(t.TempDir()+"/oauth.json", []oauth.User{testUser()})
+		cfg.RateLimiter = limiter
+		server, err := NewServer(cfg)
+		if err != nil {
+			t.Fatalf("NewServer: %v", err)
+		}
+		handler := newTestServerHandler(server)
+		registered := registerOAuthTestClient(t, handler, "Client", []string{"https://example.com/callback"})
+		limiter.keys = nil
+		for _, port := range []string{"1001", "2002"} {
+			form := url.Values{"grant_type": {oauth.GrantAuthorizationCode}, "client_id": {registered.ClientID}, "code": {"missing"}}
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.RemoteAddr = "10.0.0.8:" + port
+			handler.ServeHTTP(httptest.NewRecorder(), req)
+		}
+		wantKeys := []string{
+			"ip:10.0.0.8",
+			"client_ip:10.0.0.8:" + registered.ClientID,
+			"ip:10.0.0.8",
+			"client_ip:10.0.0.8:" + registered.ClientID,
+		}
+		if !slices.Equal(limiter.keys, wantKeys) {
+			t.Fatalf("rate-limit keys = %v, want %v", limiter.keys, wantKeys)
 		}
 	})
 
@@ -4551,7 +5140,7 @@ func TestRateLimiting(t *testing.T) {
 		if w.Code != http.StatusCreated {
 			t.Fatalf("register status = %d, want %d: %s", w.Code, http.StatusCreated, w.Body.String())
 		}
-		if !lim.sawKey("ip:10.0.0.5:9999") {
+		if !lim.sawKey("ip:10.0.0.5") {
 			t.Fatalf("rate limiter did not see per-IP key: keys=%v", lim.keys)
 		}
 	})
@@ -4581,7 +5170,7 @@ func TestRateLimiting(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("introspect status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		if !lim.sawKey("ip:10.0.0.7:7777") {
+		if !lim.sawKey("ip:10.0.0.7") {
 			t.Fatalf("rate limiter did not see per-IP key: keys=%v", lim.keys)
 		}
 	})
@@ -4614,8 +5203,80 @@ func TestRateLimiting(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("revoke status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
-		if !lim.sawKey("client:" + registered.ClientID) {
-			t.Fatalf("rate limiter did not see per-client key: keys=%v", lim.keys)
+		if !lim.sawKey("client_ip:192.0.2.1:" + registered.ClientID) {
+			t.Fatalf("rate limiter did not see per-IP-client key: keys=%v", lim.keys)
+		}
+	})
+
+	t.Run("registered clients share an aggregate IP limit but have isolated secondary limits", func(t *testing.T) {
+		t.Parallel()
+		user := testUser()
+		path := t.TempDir() + "/oauth.json"
+		permissive, permissiveHandler, _ := newTestFlowServer(t, path, []oauth.User{user})
+		clientA := registerOAuthTestClient(t, permissiveHandler, "Client A", []string{"https://a.example.com/callback"})
+		clientB := registerOAuthTestClient(t, permissiveHandler, "Client B", []string{"https://b.example.com/callback"})
+		permissive.Close()
+
+		limiter := &tieredCountRateLimiter{ipMax: 3, clientMax: 1}
+		cfg := testFlowServerConfig(path, []oauth.User{user})
+		cfg.RateLimiter = limiter
+		server, err := NewServer(cfg)
+		if err != nil {
+			t.Fatalf("NewServer: %v", err)
+		}
+		handler := newTestServerHandler(server)
+		request := func(clientID string) int {
+			form := url.Values{"grant_type": {oauth.GrantAuthorizationCode}, "client_id": {clientID}, "code": {"missing"}}
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.RemoteAddr = "10.0.0.1:1234"
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+			return w.Code
+		}
+		if got := request(clientA.ClientID); got == http.StatusTooManyRequests {
+			t.Fatalf("client A first request = %d, want non-rate-limit response", got)
+		}
+		if got := request(clientA.ClientID); got != http.StatusTooManyRequests {
+			t.Fatalf("client A secondary-limit response = %d, want %d", got, http.StatusTooManyRequests)
+		}
+		if got := request(clientB.ClientID); got == http.StatusTooManyRequests {
+			t.Fatalf("client B isolated allowance response = %d, want non-rate-limit response", got)
+		}
+		if got := request(clientB.ClientID); got != http.StatusTooManyRequests {
+			t.Fatalf("aggregate IP-limit response = %d, want %d", got, http.StatusTooManyRequests)
+		}
+	})
+
+	t.Run("one source cannot exhaust another source's client allowance", func(t *testing.T) {
+		t.Parallel()
+		user := testUser()
+		path := t.TempDir() + "/oauth.json"
+		permissive, permissiveHandler, _ := newTestFlowServer(t, path, []oauth.User{user})
+		registered := registerOAuthTestClient(t, permissiveHandler, "Client", []string{"https://example.com/callback"})
+		permissive.Close()
+
+		cfg := testFlowServerConfig(path, []oauth.User{user})
+		cfg.RateLimiter = &countRateLimiter{max: 1}
+		server, err := NewServer(cfg)
+		if err != nil {
+			t.Fatalf("NewServer: %v", err)
+		}
+		handler := newTestServerHandler(server)
+		request := func(remoteAddr string) int {
+			form := url.Values{"grant_type": {oauth.GrantAuthorizationCode}, "client_id": {registered.ClientID}, "code": {"missing"}}
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.RemoteAddr = remoteAddr
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+			return w.Code
+		}
+		if got := request("10.0.0.1:1001"); got == http.StatusTooManyRequests {
+			t.Fatalf("source A response = %d, want non-rate-limit response", got)
+		}
+		if got := request("10.0.0.2:1001"); got == http.StatusTooManyRequests {
+			t.Fatalf("source B response = %d, want independent allowance", got)
 		}
 	})
 
@@ -4661,7 +5322,7 @@ func TestRateLimiting(t *testing.T) {
 		}
 	})
 
-	t.Run("client a hits limit client b still succeeds", func(t *testing.T) {
+	t.Run("client rotation cannot bypass IP limit", func(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
@@ -4676,7 +5337,8 @@ func TestRateLimiting(t *testing.T) {
 		codeB := authorizeOAuthTestCode(t, permissiveH, user, &clientB, "https://b.example.com/callback", []string{"read"}, "")
 		permissive.Close()
 
-		// Create a limited server from the same store: allow only 1 token request per client.
+		// Create a limited server from the same store: allow only one token
+		// request per source IP and registered client.
 		lim := &countRateLimiter{max: 1}
 		cfg := testFlowServerConfig(path, []oauth.User{user})
 		cfg.RateLimiter = lim
@@ -4686,7 +5348,7 @@ func TestRateLimiting(t *testing.T) {
 		}
 		h := newTestServerHandler(s)
 
-		exchange := func(cid, code, redirectURI string) int {
+		exchange := func(cid, code, redirectURI, remoteAddr string) int {
 			form := url.Values{
 				"grant_type":    {oauth.GrantAuthorizationCode},
 				"code":          {code},
@@ -4697,24 +5359,29 @@ func TestRateLimiting(t *testing.T) {
 			}
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.RemoteAddr = remoteAddr
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, req)
 			return w.Code
 		}
 
 		// First request from client A: succeeds.
-		if got := exchange(clientA.ClientID, codeA, "https://a.example.com/callback"); got != http.StatusOK {
+		if got := exchange(clientA.ClientID, codeA, "https://a.example.com/callback", "10.0.0.1:1001"); got != http.StatusOK {
 			t.Fatalf("client A first request = %d, want %d", got, http.StatusOK)
 		}
 
-		// Second request from client A: denied (max=1 per client).
-		if got := exchange(clientA.ClientID, codeA2, "https://a.example.com/callback"); got != http.StatusTooManyRequests {
+		// Second request from client A: denied by the source-IP quota.
+		if got := exchange(clientA.ClientID, codeA2, "https://a.example.com/callback", "10.0.0.1:1002"); got != http.StatusTooManyRequests {
 			t.Fatalf("client A second request = %d, want %d", got, http.StatusTooManyRequests)
 		}
 
-		// Client B still succeeds (different key, fresh count).
-		if got := exchange(clientB.ClientID, codeB, "https://b.example.com/callback"); got != http.StatusOK {
-			t.Fatalf("client B request = %d, want %d", got, http.StatusOK)
+		// Rotating to client B from the same source is still denied by the IP
+		// quota, while a different source gets an independent allowance.
+		if got := exchange(clientB.ClientID, codeB, "https://b.example.com/callback", "10.0.0.1:1003"); got != http.StatusTooManyRequests {
+			t.Fatalf("same-IP client B request = %d, want %d", got, http.StatusTooManyRequests)
+		}
+		if got := exchange(clientB.ClientID, codeB, "https://b.example.com/callback", "10.0.0.2:1001"); got != http.StatusOK {
+			t.Fatalf("different-IP client B request = %d, want %d", got, http.StatusOK)
 		}
 	})
 }
@@ -4753,6 +5420,29 @@ func (l *countRateLimiter) Allow(key string) bool {
 	}
 	l.counts[key]++
 	return l.counts[key] <= l.max
+}
+
+// tieredCountRateLimiter gives aggregate IP and per-IP-client keys independent
+// limits so tests can observe both server-side dimensions.
+type tieredCountRateLimiter struct {
+	mu        sync.Mutex
+	ipMax     int
+	clientMax int
+	counts    map[string]int
+}
+
+func (l *tieredCountRateLimiter) Allow(key string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.counts == nil {
+		l.counts = map[string]int{}
+	}
+	l.counts[key]++
+	limit := l.clientMax
+	if strings.HasPrefix(key, "ip:") {
+		limit = l.ipMax
+	}
+	return l.counts[key] <= limit
 }
 
 // testFlowServerConfig returns a ServerConfig pre-populated with test defaults,

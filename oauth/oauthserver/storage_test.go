@@ -312,6 +312,7 @@ func TestStoreTransactions(t *testing.T) {
 			t.Fatalf("LoadStore: %v", err)
 		}
 		now := time.Now().UTC()
+		store.Clients["client"] = Client{ID: "client", RedirectURIs: []string{"https://client.example/callback"}}
 		store.Grants["grant"] = Grant{ID: "grant", UserID: "user", ClientID: "client", ExpiresAt: now.Add(time.Hour)}
 		store.RefreshTokens[oauth.RefreshTokenKey("refresh-secret")] = RefreshToken{GrantID: "grant", UserID: "user", ClientID: "client", ExpiresAt: now.Add(time.Hour)}
 		if err := store.Save(); err != nil {

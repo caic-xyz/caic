@@ -162,8 +162,9 @@ func (s *AccessTokenService) IssueDPoPAccessToken(issuer string, user oauth.User
 	}, now, now.Add(s.ttl))
 }
 
-// IssueRegistrationAccessToken issues a short-lived JWT for client registration management (RFC 7592).
-// The subject is the client ID and the audience scopes it to the registration endpoint.
+// IssueRegistrationAccessToken issues a JWT for client registration management (RFC 7592).
+// It remains valid for the durable registration's practical lifetime; deleting
+// the registration or retiring the signing key ends its authority.
 func (s *AccessTokenService) IssueRegistrationAccessToken(issuer, clientID string) (string, error) {
 	now := time.Now()
 	return s.issueAccessTokenAt(&oauth.AccessTokenClaims{
@@ -172,7 +173,7 @@ func (s *AccessTokenService) IssueRegistrationAccessToken(issuer, clientID strin
 		Audience: issuer + "/oauth/register",
 		Scope:    "client:manage",
 		Type:     "registration_access_token",
-	}, now, now.Add(time.Hour))
+	}, now, time.Unix(1<<62, 0))
 }
 
 // VerifyRegistrationAccessToken validates a registration access token and returns the client ID from the subject claim.

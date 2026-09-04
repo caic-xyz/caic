@@ -68,6 +68,7 @@ RegisterRequest is a dynamic client registration request.
 | `client_name` | `string` |  | yes |
 | `redirect_uris` | `string[]` |  | yes |
 | `token_endpoint_auth_method` | `string` |  | yes |
+| `grant_types` | `string[]` |  |  |
 
 ### RegisterResponse
 
@@ -80,6 +81,7 @@ RegisterResponse is a dynamic client registration response (RFC 7592).
 | `client_name` | `string` |  |  |
 | `redirect_uris` | `string[]` |  | yes |
 | `token_endpoint_auth_method` | `string` |  | yes |
+| `grant_types` | `string[]` |  |  |
 | `registration_access_token` | `string` |  |  |
 | `registration_client_uri` | `string` |  |  |
 
@@ -93,6 +95,7 @@ Nil pointer fields leave the corresponding client field unchanged.
 | `client_name` | `string` |  |  |
 | `redirect_uris` | `string[]` |  |  |
 | `token_endpoint_auth_method` | `string` |  |  |
+| `grant_types` | `string[]` |  |  |
 
 ### Token
 

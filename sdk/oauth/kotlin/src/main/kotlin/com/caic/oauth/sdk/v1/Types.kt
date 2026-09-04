@@ -69,6 +69,7 @@ data class RegisterRequest(
     val client_name: String,
     val redirect_uris: List<String>,
     val token_endpoint_auth_method: String,
+    val grant_types: List<String>? = null,
 )
 
 // OAuth 2.0 Dynamic Client Registration response (RFC 7591, 7592)
@@ -81,6 +82,7 @@ data class RegisterResponse(
     val client_name: String? = null,
     val redirect_uris: List<String>,
     val token_endpoint_auth_method: String,
+    val grant_types: List<String>? = null,
     val registration_access_token: String? = null,
     val registration_client_uri: String? = null,
 )
@@ -96,6 +98,7 @@ data class UpdateClientRequest(
     val client_name: String? = null,
     val redirect_uris: List<String>? = null,
     val token_endpoint_auth_method: String? = null,
+    val grant_types: List<String>? = null,
 )
 
 // OAuth 2.0 client-side access token (RFC 6749)

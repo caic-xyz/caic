@@ -31,6 +31,8 @@ const (
 	GrantAuthorizationCode = "authorization_code"
 	// GrantRefreshToken is the OAuth refresh-token grant type.
 	GrantRefreshToken = "refresh_token"
+	// GrantDeviceCode is the OAuth device authorization grant type.
+	GrantDeviceCode = "urn:ietf:params:oauth:grant-type:device_code"
 	// CodeChallengeS256 is the PKCE S256 code challenge method.
 	CodeChallengeS256 = "S256"
 	// ResponseTypeCode is the authorization-code response type.

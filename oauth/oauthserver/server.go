@@ -8,6 +8,7 @@
 package oauthserver
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -18,8 +19,10 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"io"
 	"log/slog"
 	"math/big"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -27,8 +30,23 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/caic-xyz/caic/oauth"
+)
+
+const (
+	maxOAuthBodyBytes      = 64 * 1024
+	maxOAuthParameterCount = 64
+	maxOAuthParameterBytes = 4 * 1024
+	maxOAuthParameterName  = 128
+	maxOAuthClients        = 1_024
+	maxOAuthClientName     = 200
+	maxOAuthRedirectURIs   = 20
+	maxPendingConsents     = 1_024
+	maxPendingPARRequests  = 1_024
+	maxPendingDeviceCodes  = 1_024
 )
 
 // IntrospectionPrincipal identifies an authenticated introspection caller.
@@ -444,16 +462,29 @@ func (s *Server) rateLimit(w http.ResponseWriter, key string) bool {
 
 // rateLimitIP rate-limits the request by remote IP.
 func (s *Server) rateLimitIP(w http.ResponseWriter, r *http.Request) bool {
-	return s.rateLimit(w, "ip:"+r.RemoteAddr)
+	return s.rateLimit(w, "ip:"+remoteIP(r))
 }
 
-// rateLimitClient rate-limits the request by client_id, falling back to
-// remote IP when clientID is empty.
+// rateLimitClient always rate-limits the remote IP, then additionally limits a
+// registered client within that IP. This prevents client rotation from
+// multiplying one source's allowance without allowing another source to
+// exhaust a public client's global quota.
 func (s *Server) rateLimitClient(w http.ResponseWriter, r *http.Request, clientID string) bool {
-	if clientID != "" {
-		return s.rateLimit(w, "client:"+clientID)
+	if !s.rateLimitIP(w, r) {
+		return false
 	}
-	return s.rateLimitIP(w, r)
+	if clientID != "" && s.oauthClient(clientID).ID != "" {
+		return s.rateLimit(w, "client_ip:"+remoteIP(r)+":"+clientID)
+	}
+	return true
+}
+
+func remoteIP(r *http.Request) string {
+	host := r.RemoteAddr
+	if parsedHost, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		host = parsedHost
+	}
+	return host
 }
 
 func (s *Server) handleOAuthMetadata(w http.ResponseWriter, r *http.Request) {
@@ -466,7 +497,7 @@ func (s *Server) handleOAuthMetadata(w http.ResponseWriter, r *http.Request) {
 		RegistrationEndpoint:                   issuer + "/oauth/register",
 		RevocationEndpoint:                     issuer + "/oauth/revoke",
 		ResponseTypesSupported:                 []string{oauth.ResponseTypeCode},
-		GrantTypesSupported:                    []string{oauth.GrantAuthorizationCode, oauth.GrantRefreshToken, "urn:ietf:params:oauth:grant-type:device_code"},
+		GrantTypesSupported:                    []string{oauth.GrantAuthorizationCode, oauth.GrantRefreshToken, oauth.GrantDeviceCode},
 		CodeChallengeMethodsSupported:          []string{oauth.CodeChallengeS256},
 		TokenEndpointAuthMethodsSupported:      []string{oauth.TokenEndpointAuthNone},
 		RevocationEndpointAuthMethodsSupported: []string{oauth.TokenEndpointAuthNone},
@@ -498,6 +529,10 @@ func (s *Server) handleOAuthAuthorizeGET(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		oauth.WriteError(w, http.StatusUnauthorized, "login_required", "log in before authorizing protected resource access")
+		return
+	}
+	if err := validateOAuthParameters(r.URL.Query(), nil); err != nil {
+		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	// Check for RFC 9126 pushed authorization request.
@@ -547,14 +582,25 @@ func (s *Server) renderConsent(w http.ResponseWriter, r *http.Request, user oaut
 			params[k] = vals[0]
 		}
 	}
+	now := time.Now()
+	capacityExceeded := false
 	err = s.state.transact(func(next *storeFile) bool {
-		next.Consents[oauth.RefreshTokenKey(consentToken)] = ConsentParams{UserID: user.ID, Params: params, ExpiresAt: time.Now().Add(s.authCodeTTL)}
+		changed := pruneExpiredStore(next, now)
+		if len(next.Consents) >= maxPendingConsents {
+			capacityExceeded = true
+			return changed
+		}
+		next.Consents[oauth.RefreshTokenKey(consentToken)] = ConsentParams{UserID: user.ID, Params: params, ExpiresAt: now.Add(s.authCodeTTL)}
 		return true
 	})
 	s.mu.Unlock()
 	if err != nil {
 		slog.WarnContext(r.Context(), "save oauth consent", "err", err)
 		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not start consent")
+		return
+	}
+	if capacityExceeded {
+		oauth.WriteError(w, http.StatusServiceUnavailable, "temporarily_unavailable", "too many pending authorization consents")
 		return
 	}
 	data := ConsentPageData{
@@ -576,12 +622,13 @@ func (s *Server) renderConsent(w http.ResponseWriter, r *http.Request, user oaut
 
 // handleOAuthPAR handles RFC 9126 pushed authorization requests.
 func (s *Server) handleOAuthPAR(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
-	if err := r.ParseForm(); err != nil {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid form")
+	if !parseOAuthForm(w, r, nil) {
 		return
 	}
 	values := r.PostForm
+	if !s.rateLimitClient(w, r, values.Get("client_id")) {
+		return
+	}
 	if err := s.validateAuthorizeForm(values); err != nil {
 		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
@@ -600,6 +647,17 @@ func (s *Server) handleOAuthPAR(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.mu.Lock()
+	now := time.Now()
+	for key, request := range s.parRequests {
+		if !now.Before(request.ExpiresAt) {
+			delete(s.parRequests, key)
+		}
+	}
+	if len(s.parRequests) >= maxPendingPARRequests {
+		s.mu.Unlock()
+		oauth.WriteError(w, http.StatusServiceUnavailable, "temporarily_unavailable", "too many pending pushed authorization requests")
+		return
+	}
 	s.parRequests[requestURI] = ConsentParams{
 		Params:    params,
 		ExpiresAt: time.Now().Add(90 * time.Second),
@@ -622,9 +680,7 @@ func (s *Server) handleOAuthAuthorizePOST(w http.ResponseWriter, r *http.Request
 		oauth.WriteError(w, http.StatusUnauthorized, "login_required", "log in before authorizing protected resource access")
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
-	if err := r.ParseForm(); err != nil {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid form")
+	if !parseOAuthForm(w, r, []string{"scope"}) {
 		return
 	}
 	consentToken := r.PostForm.Get("consent_token")
@@ -716,9 +772,7 @@ func (s *Server) handleOAuthAuthorizePOST(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleOAuthToken(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
-	if err := r.ParseForm(); err != nil {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid form")
+	if !parseOAuthForm(w, r, nil) {
 		return
 	}
 	if !s.rateLimitClient(w, r, r.PostForm.Get("client_id")) {
@@ -807,7 +861,8 @@ func (s *Server) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r *htt
 		oauth.WriteError(w, http.StatusBadRequest, "invalid_target", "resource mismatch")
 		return
 	}
-	if !oauth.VerifyPKCES256(entry.CodeChallenge, r.PostForm.Get("code_verifier")) {
+	codeVerifier := r.PostForm.Get("code_verifier")
+	if !validPKCEValue(codeVerifier, 43, 128) || !oauth.VerifyPKCES256(entry.CodeChallenge, codeVerifier) {
 		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "PKCE verification failed")
 		return
 	}
@@ -824,12 +879,17 @@ func (s *Server) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r *htt
 	}
 	now := time.Now()
 	grant := Grant{ID: grantID, UserID: entry.UserID, ClientID: entry.ClientID, Resource: entry.Resource, Scope: entry.Scope, CreatedAt: now, ExpiresAt: now.Add(s.refreshTokenTTL)}
-	refreshEntry := RefreshToken{GrantID: grantID, UserID: entry.UserID, ClientID: entry.ClientID, Resource: entry.Resource, Scope: entry.Scope, DPoPJKT: dpopJKT, ExpiresAt: grant.ExpiresAt}
-	refreshToken, err := randomToken()
-	if err != nil {
-		slog.WarnContext(r.Context(), "generate oauth refresh token", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not issue refresh token")
-		return
+	refreshToken := ""
+	refreshEntry := RefreshToken{}
+	client := s.oauthClient(entry.ClientID)
+	if clientSupportsGrant(&client, oauth.GrantRefreshToken) {
+		refreshEntry = RefreshToken{GrantID: grantID, UserID: entry.UserID, ClientID: entry.ClientID, Resource: entry.Resource, Scope: entry.Scope, DPoPJKT: dpopJKT, ExpiresAt: grant.ExpiresAt}
+		refreshToken, err = randomToken()
+		if err != nil {
+			slog.WarnContext(r.Context(), "generate oauth refresh token", "err", err)
+			oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not issue refresh token")
+			return
+		}
 	}
 	response, err := s.issueTokenResponse(user, entry.Resource, entry.Scope, grantID, refreshToken, dpopJKT)
 	if err != nil {
@@ -846,7 +906,7 @@ func (s *Server) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r *htt
 			return false
 		}
 		client, found := next.Clients[entry.ClientID]
-		if !found {
+		if !found || !clientSupportsGrant(&client, oauth.GrantAuthorizationCode) || !redirectURIRegistered(client.RedirectURIs, entry.RedirectURI) {
 			return false
 		}
 		if !reserveDPoPBinding(next, binding, time.Now()) {
@@ -856,7 +916,12 @@ func (s *Server) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r *htt
 		grant.ClientName = clientDisplayName(&client)
 		delete(next.Codes, codeHash)
 		next.Grants[grant.ID] = grant
-		next.RefreshTokens[oauth.RefreshTokenKey(refreshToken)] = refreshEntry
+		if refreshToken != "" && clientSupportsGrant(&client, oauth.GrantRefreshToken) {
+			next.RefreshTokens[oauth.RefreshTokenKey(refreshToken)] = refreshEntry
+		} else {
+			refreshToken = ""
+			response.RefreshToken = ""
+		}
 		redeemed = true
 		return true
 	})
@@ -889,12 +954,13 @@ func (s *Server) handleOAuthRefreshToken(w http.ResponseWriter, r *http.Request,
 	s.mu.Lock()
 	entry, candidate := s.state.RefreshTokens[oauth.RefreshTokenKey(refreshToken)]
 	grant, grantOK := s.state.Grants[entry.GrantID]
+	client, clientOK := s.state.Clients[clientID]
 	s.mu.Unlock()
 	if candidate && subtle.ConstantTimeCompare([]byte(entry.DPoPJKT), []byte(dpopJKT)) != 1 {
 		s.writeInvalidDPoPProof(w, r, "dpop proof key does not match refresh token binding")
 		return
 	}
-	candidate = candidate && entry.ClientID == clientID && entry.Resource == s.resourceURL && entry.UsedAt.IsZero() && entry.RevokedAt.IsZero() && time.Now().Before(entry.ExpiresAt) && grantOK && grant.Resource == s.resourceURL && grant.RevokedAt.IsZero() && time.Now().Before(grant.ExpiresAt)
+	candidate = candidate && entry.ClientID == clientID && clientOK && clientSupportsGrant(&client, oauth.GrantRefreshToken) && entry.Resource == s.resourceURL && entry.UsedAt.IsZero() && entry.RevokedAt.IsZero() && time.Now().Before(entry.ExpiresAt) && grantOK && grant.Resource == s.resourceURL && grant.RevokedAt.IsZero() && time.Now().Before(grant.ExpiresAt)
 	var response oauth.TokenResponse
 	nextRefreshToken := ""
 	if candidate {
@@ -981,9 +1047,7 @@ func (s *Server) handleOAuthIntrospect(w http.ResponseWriter, r *http.Request) {
 	if !s.rateLimitClient(w, r, principal.ClientID) {
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
-	if err := r.ParseForm(); err != nil {
-		writeJSONResponse(w, oauth.IntrospectionResponse{Active: false})
+	if !parseOAuthForm(w, r, nil) {
 		return
 	}
 	token := r.PostForm.Get("token")
@@ -1053,9 +1117,7 @@ func (s *Server) introspectRefreshToken(w http.ResponseWriter, token string, pri
 }
 
 func (s *Server) handleOAuthRevoke(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
-	if err := r.ParseForm(); err != nil {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid form")
+	if !parseOAuthForm(w, r, nil) {
 		return
 	}
 	if !s.rateLimitClient(w, r, r.PostForm.Get("client_id")) {
@@ -1166,11 +1228,14 @@ func (s *Server) validateAuthorizeForm(values url.Values) error {
 	if client.ID == "" {
 		return errors.New("unknown client_id")
 	}
+	if !clientSupportsGrant(&client, oauth.GrantAuthorizationCode) {
+		return errors.New("client is not registered for the authorization_code grant")
+	}
 	redirectURI := values.Get("redirect_uri")
-	if !slices.Contains(client.RedirectURIs, redirectURI) {
+	if !redirectURIRegistered(client.RedirectURIs, redirectURI) {
 		return errors.New("redirect_uri is not registered")
 	}
-	if values.Get("code_challenge_method") != oauth.CodeChallengeS256 || values.Get("code_challenge") == "" {
+	if values.Get("code_challenge_method") != oauth.CodeChallengeS256 || !validS256Challenge(values.Get("code_challenge")) {
 		return errors.New("S256 PKCE is required")
 	}
 	resource := values.Get("resource")
@@ -1224,15 +1289,19 @@ func (s *Server) exchangeRefreshToken(token, clientID, userID, nextToken string,
 		if entry.ClientID != clientID {
 			return false
 		}
+		client, clientFound := state.Clients[clientID]
+		if !clientFound || !clientSupportsGrant(&client, oauth.GrantRefreshToken) {
+			return false
+		}
+		if !reserveDPoPBinding(state, binding, now) {
+			result = refreshExchangeDPoPRejected
+			return false
+		}
 		if !entry.UsedAt.IsZero() || !entry.RevokedAt.IsZero() {
 			result = refreshExchangeReused
 			return revokeGrant(state, entry.GrantID, now)
 		}
 		if !grantFound || !grant.RevokedAt.IsZero() || now.After(grant.ExpiresAt) || now.After(entry.ExpiresAt) || userID == "" || entry.UserID != userID || nextToken == "" {
-			return false
-		}
-		if !reserveDPoPBinding(state, binding, now) {
-			result = refreshExchangeDPoPRejected
 			return false
 		}
 		entry.UsedAt = now
@@ -1349,22 +1418,29 @@ func (s *Server) oauthClient(id string) Client {
 	return s.state.Clients[id]
 }
 
-func (s *Server) registerClient(client *Client) error {
+func (s *Server) registerClient(client *Client) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.state.transact(func(next *storeFile) bool {
+	capacityExceeded := false
+	err := s.state.transact(func(next *storeFile) bool {
+		if len(next.Clients) >= maxOAuthClients {
+			capacityExceeded = true
+			return false
+		}
 		next.Clients[client.ID] = *client
 		return true
 	})
+	return capacityExceeded, err
 }
 
 func (s *Server) handleOAuthRegister(w http.ResponseWriter, r *http.Request) {
 	if !s.rateLimitIP(w, r) {
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
+	r.Body = http.MaxBytesReader(w, r.Body, maxOAuthBodyBytes)
 	var req oauth.RegisterRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	fields, err := decodeRegistrationJSON(r.Body, []string{"client_name", "redirect_uris", "token_endpoint_auth_method", "grant_types"}, &req)
+	if err != nil {
 		oauth.WriteError(w, http.StatusBadRequest, "invalid_client_metadata", "invalid registration JSON")
 		return
 	}
@@ -1372,19 +1448,14 @@ func (s *Server) handleOAuthRegister(w http.ResponseWriter, r *http.Request) {
 	if method == "" {
 		method = oauth.TokenEndpointAuthNone
 	}
-	if method != oauth.TokenEndpointAuthNone {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_client_metadata", "only public clients are supported")
-		return
+	requestedGrantTypes := req.GrantTypes
+	if _, present := fields["grant_types"]; !present {
+		requestedGrantTypes = []string{oauth.GrantAuthorizationCode}
 	}
-	if len(req.RedirectURIs) == 0 {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_redirect_uri", "redirect_uris is required")
+	grantTypes, errorCode, err := validateClientMetadata(req.ClientName, req.RedirectURIs, method, requestedGrantTypes, false)
+	if err != nil {
+		oauth.WriteError(w, http.StatusBadRequest, errorCode, err.Error())
 		return
-	}
-	for _, redirectURI := range req.RedirectURIs {
-		if !validRedirectURI(redirectURI) {
-			oauth.WriteError(w, http.StatusBadRequest, "invalid_redirect_uri", "redirect URI must be https or localhost http")
-			return
-		}
 	}
 	clientID, err := randomToken()
 	if err != nil {
@@ -1393,10 +1464,15 @@ func (s *Server) handleOAuthRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now()
-	client := Client{ID: s.clientIDPrefix + clientID, Name: req.ClientName, RedirectURIs: req.RedirectURIs, TokenEndpointAuthMethod: method, CreatedAt: now}
-	if err := s.registerClient(&client); err != nil {
+	client := Client{ID: s.clientIDPrefix + clientID, Name: req.ClientName, RedirectURIs: slices.Clone(req.RedirectURIs), TokenEndpointAuthMethod: method, GrantTypes: grantTypes, CreatedAt: now}
+	capacityExceeded, err := s.registerClient(&client)
+	if err != nil {
 		slog.WarnContext(r.Context(), "save oauth client registration", "err", err)
 		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not register client")
+		return
+	}
+	if capacityExceeded {
+		oauth.WriteError(w, http.StatusServiceUnavailable, "temporarily_unavailable", "too many registered clients")
 		return
 	}
 	issuer := s.issuer
@@ -1412,6 +1488,7 @@ func (s *Server) handleOAuthRegister(w http.ResponseWriter, r *http.Request) {
 		ClientName:              client.Name,
 		RedirectURIs:            client.RedirectURIs,
 		TokenEndpointAuthMethod: method,
+		GrantTypes:              clientGrantTypes(&client),
 		RegistrationAccessToken: regToken,
 		RegistrationClientURI:   issuer + "/oauth/register/" + client.ID,
 	}
@@ -1458,6 +1535,7 @@ func (s *Server) handleOAuthRegisterRead(w http.ResponseWriter, r *http.Request)
 		ClientName:              client.Name,
 		RedirectURIs:            client.RedirectURIs,
 		TokenEndpointAuthMethod: client.TokenEndpointAuthMethod,
+		GrantTypes:              clientGrantTypes(&client),
 	}
 	writeJSONResponse(w, &resp)
 }
@@ -1469,9 +1547,10 @@ func (s *Server) handleOAuthRegisterUpdate(w http.ResponseWriter, r *http.Reques
 		oauth.WriteError(w, http.StatusUnauthorized, "invalid_token", err.Error())
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
+	r.Body = http.MaxBytesReader(w, r.Body, maxOAuthBodyBytes)
 	var req oauth.UpdateClientRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	fields, err := decodeRegistrationJSON(r.Body, []string{"client_name", "redirect_uris", "token_endpoint_auth_method", "grant_types"}, &req)
+	if err != nil {
 		oauth.WriteError(w, http.StatusBadRequest, "invalid_client_metadata", "invalid registration JSON")
 		return
 	}
@@ -1480,6 +1559,26 @@ func (s *Server) handleOAuthRegisterUpdate(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		s.mu.Unlock()
 		oauth.WriteError(w, http.StatusNotFound, "invalid_client", "client not found")
+		return
+	}
+	if _, present := fields["client_name"]; present && req.ClientName == nil {
+		s.mu.Unlock()
+		oauth.WriteError(w, http.StatusBadRequest, "invalid_client_metadata", "client_name must not be null")
+		return
+	}
+	if _, present := fields["redirect_uris"]; present && req.RedirectURIs == nil {
+		s.mu.Unlock()
+		oauth.WriteError(w, http.StatusBadRequest, "invalid_redirect_uri", "redirect_uris must not be null")
+		return
+	}
+	if _, present := fields["token_endpoint_auth_method"]; present && req.TokenEndpointAuthMethod == nil {
+		s.mu.Unlock()
+		oauth.WriteError(w, http.StatusBadRequest, "invalid_client_metadata", "token_endpoint_auth_method must not be null")
+		return
+	}
+	if _, present := fields["grant_types"]; present && req.GrantTypes == nil {
+		s.mu.Unlock()
+		oauth.WriteError(w, http.StatusBadRequest, "invalid_client_metadata", "grant_types must not be null")
 		return
 	}
 	if req.ClientName != nil {
@@ -1496,15 +1595,21 @@ func (s *Server) handleOAuthRegisterUpdate(w http.ResponseWriter, r *http.Reques
 		client.RedirectURIs = *req.RedirectURIs
 	}
 	if req.TokenEndpointAuthMethod != nil {
-		method := *req.TokenEndpointAuthMethod
-		if method != oauth.TokenEndpointAuthNone {
-			s.mu.Unlock()
-			oauth.WriteError(w, http.StatusBadRequest, "invalid_client_metadata", "only public clients are supported")
-			return
-		}
-		client.TokenEndpointAuthMethod = method
+		client.TokenEndpointAuthMethod = *req.TokenEndpointAuthMethod
 	}
-	err := s.state.transact(func(next *storeFile) bool {
+	if req.GrantTypes != nil {
+		client.GrantTypes = *req.GrantTypes
+	}
+	_, grantsUpdated := fields["grant_types"]
+	legacyGrantSentinel := !grantsUpdated && len(client.GrantTypes) == 0
+	grantTypes, errorCode, validationErr := validateClientMetadata(client.Name, client.RedirectURIs, client.TokenEndpointAuthMethod, client.GrantTypes, legacyGrantSentinel)
+	if validationErr != nil {
+		s.mu.Unlock()
+		oauth.WriteError(w, http.StatusBadRequest, errorCode, validationErr.Error())
+		return
+	}
+	client.GrantTypes = grantTypes
+	err = s.state.transact(func(next *storeFile) bool {
 		next.Clients[clientID] = client
 		return true
 	})
@@ -1529,6 +1634,7 @@ func (s *Server) handleOAuthRegisterUpdate(w http.ResponseWriter, r *http.Reques
 		ClientName:              client.Name,
 		RedirectURIs:            client.RedirectURIs,
 		TokenEndpointAuthMethod: client.TokenEndpointAuthMethod,
+		GrantTypes:              clientGrantTypes(&client),
 		RegistrationAccessToken: regToken,
 		RegistrationClientURI:   issuer + "/oauth/register/" + clientID,
 	}
@@ -1592,13 +1698,256 @@ func (s *Server) handleOAuthRegisterDelete(w http.ResponseWriter, r *http.Reques
 
 func validRedirectURI(raw string) bool {
 	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" || u.Fragment != "" {
+	if err != nil || len(raw) > maxOAuthParameterBytes || strings.Contains(raw, "#") || u.Host == "" || u.Hostname() == "" || u.User != nil {
 		return false
 	}
 	if u.Scheme == "https" {
 		return true
 	}
-	return u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1")
+	if u.Scheme != "http" {
+		return false
+	}
+	if u.Hostname() == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(u.Hostname())
+	return ip != nil && ip.IsLoopback()
+}
+
+func redirectURIRegistered(registered []string, requested string) bool {
+	if slices.Contains(registered, requested) {
+		return true
+	}
+	requestedURL, err := url.Parse(requested)
+	if err != nil || requestedURL.Scheme != "http" || requestedURL.User != nil || requestedURL.Fragment != "" {
+		return false
+	}
+	requestedIP := net.ParseIP(requestedURL.Hostname())
+	if requestedIP == nil || !requestedIP.IsLoopback() {
+		return false
+	}
+	for _, raw := range registered {
+		registeredURL, parseErr := url.Parse(raw)
+		if parseErr != nil || registeredURL.Scheme != requestedURL.Scheme || registeredURL.User != nil {
+			continue
+		}
+		registeredIP := net.ParseIP(registeredURL.Hostname())
+		if registeredIP != nil && registeredIP.IsLoopback() && registeredURL.Hostname() == requestedURL.Hostname() &&
+			registeredURL.EscapedPath() == requestedURL.EscapedPath() &&
+			registeredURL.RawQuery == requestedURL.RawQuery &&
+			registeredURL.ForceQuery == requestedURL.ForceQuery {
+			return true
+		}
+	}
+	return false
+}
+
+func validateClientMetadata(name string, redirectURIs []string, authMethod string, requestedGrantTypes []string, allowLegacyGrantSentinel bool) (grantTypes []string, errorCode string, err error) {
+	if !utf8.ValidString(name) || len(name) > maxOAuthClientName || strings.IndexFunc(name, unicode.IsControl) >= 0 {
+		return nil, "invalid_client_metadata", errors.New("client_name is invalid or too long")
+	}
+	if authMethod != oauth.TokenEndpointAuthNone {
+		return nil, "invalid_client_metadata", errors.New("only public clients are supported")
+	}
+	if len(redirectURIs) == 0 || len(redirectURIs) > maxOAuthRedirectURIs {
+		return nil, "invalid_redirect_uri", fmt.Errorf("redirect_uris must contain between 1 and %d entries", maxOAuthRedirectURIs)
+	}
+	seenRedirects := make(map[string]struct{}, len(redirectURIs))
+	for _, redirectURI := range redirectURIs {
+		if !validRedirectURI(redirectURI) {
+			return nil, "invalid_redirect_uri", errors.New("redirect URI must be credential-free HTTPS or loopback HTTP without a fragment")
+		}
+		if _, found := seenRedirects[redirectURI]; found {
+			return nil, "invalid_redirect_uri", errors.New("redirect_uris must not contain duplicates")
+		}
+		seenRedirects[redirectURI] = struct{}{}
+	}
+	grantTypes = slices.Clone(requestedGrantTypes)
+	if len(grantTypes) == 0 {
+		if allowLegacyGrantSentinel {
+			return grantTypes, "", nil
+		}
+		return nil, "invalid_client_metadata", errors.New("grant_types must not be null or empty")
+	}
+	seenGrants := make(map[string]struct{}, len(grantTypes))
+	for _, grantType := range grantTypes {
+		switch grantType {
+		case oauth.GrantAuthorizationCode, oauth.GrantRefreshToken, oauth.GrantDeviceCode:
+		default:
+			return nil, "invalid_client_metadata", fmt.Errorf("unsupported grant_type: %s", grantType)
+		}
+		if _, found := seenGrants[grantType]; found {
+			return nil, "invalid_client_metadata", errors.New("grant_types must not contain duplicates")
+		}
+		seenGrants[grantType] = struct{}{}
+	}
+	if _, refresh := seenGrants[oauth.GrantRefreshToken]; refresh {
+		_, authorizationCode := seenGrants[oauth.GrantAuthorizationCode]
+		_, deviceCode := seenGrants[oauth.GrantDeviceCode]
+		if !authorizationCode && !deviceCode {
+			return nil, "invalid_client_metadata", errors.New("refresh_token requires authorization_code or device_code")
+		}
+	}
+	return grantTypes, "", nil
+}
+
+func clientGrantTypes(client *Client) []string {
+	if len(client.GrantTypes) == 0 {
+		return []string{oauth.GrantAuthorizationCode, oauth.GrantRefreshToken, oauth.GrantDeviceCode}
+	}
+	return slices.Clone(client.GrantTypes)
+}
+
+func clientSupportsGrant(client *Client, grantType string) bool {
+	return slices.Contains(clientGrantTypes(client), grantType)
+}
+
+func validS256Challenge(value string) bool {
+	if len(value) != 43 {
+		return false
+	}
+	digest, err := base64.RawURLEncoding.Strict().DecodeString(value)
+	return err == nil && len(digest) == sha256.Size
+}
+
+func validPKCEValue(value string, minLength, maxLength int) bool {
+	if len(value) < minLength || len(value) > maxLength {
+		return false
+	}
+	for _, c := range []byte(value) {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '.' || c == '_' || c == '~' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func decodeRegistrationJSON(body io.Reader, allowedFields []string, dst any) (map[string]struct{}, error) {
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return nil, err
+	}
+	if !utf8.Valid(data) || !validJSONSurrogates(data) {
+		return nil, errors.New("registration metadata contains invalid Unicode")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('{') {
+		return nil, errors.New("registration metadata must be an object")
+	}
+	seen := make(map[string]struct{}, len(allowedFields))
+	for decoder.More() {
+		fieldToken, tokenErr := decoder.Token()
+		if tokenErr != nil {
+			return nil, tokenErr
+		}
+		field, ok := fieldToken.(string)
+		if !ok || !slices.Contains(allowedFields, field) {
+			return nil, errors.New("unknown registration metadata field")
+		}
+		if _, found := seen[field]; found {
+			return nil, errors.New("duplicate registration metadata field")
+		}
+		seen[field] = struct{}{}
+		if err := decodeRegistrationField(decoder, field, dst); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := decoder.Token(); err != nil {
+		return nil, err
+	}
+	if token, err := decoder.Token(); err != io.EOF || token != nil {
+		return nil, errors.New("unexpected trailing registration JSON")
+	}
+	return seen, nil
+}
+
+func validJSONSurrogates(data []byte) bool {
+	inString := false
+	for i := 0; i < len(data); i++ {
+		switch data[i] {
+		case '"':
+			inString = !inString
+		case '\\':
+			if !inString || i+1 >= len(data) {
+				continue
+			}
+			i++
+			if data[i] != 'u' || i+4 >= len(data) {
+				continue
+			}
+			codePoint, ok := parseJSONHex4(data[i+1 : i+5])
+			if !ok {
+				continue
+			}
+			i += 4
+			if codePoint >= 0xDC00 && codePoint <= 0xDFFF {
+				return false
+			}
+			if codePoint < 0xD800 || codePoint > 0xDBFF {
+				continue
+			}
+			if i+6 >= len(data) || data[i+1] != '\\' || data[i+2] != 'u' {
+				return false
+			}
+			low, validLow := parseJSONHex4(data[i+3 : i+7])
+			if !validLow || low < 0xDC00 || low > 0xDFFF {
+				return false
+			}
+			i += 6
+		}
+	}
+	return true
+}
+
+func parseJSONHex4(value []byte) (uint16, bool) {
+	if len(value) != 4 {
+		return 0, false
+	}
+	var result uint16
+	for _, c := range value {
+		result <<= 4
+		switch {
+		case c >= '0' && c <= '9':
+			result += uint16(c - '0')
+		case c >= 'a' && c <= 'f':
+			result += uint16(c-'a') + 10
+		case c >= 'A' && c <= 'F':
+			result += uint16(c-'A') + 10
+		default:
+			return 0, false
+		}
+	}
+	return result, true
+}
+
+func decodeRegistrationField(decoder *json.Decoder, field string, dst any) error {
+	switch value := dst.(type) {
+	case *oauth.RegisterRequest:
+		switch field {
+		case "client_name":
+			return decoder.Decode(&value.ClientName)
+		case "redirect_uris":
+			return decoder.Decode(&value.RedirectURIs)
+		case "token_endpoint_auth_method":
+			return decoder.Decode(&value.TokenEndpointAuthMethod)
+		case "grant_types":
+			return decoder.Decode(&value.GrantTypes)
+		}
+	case *oauth.UpdateClientRequest:
+		switch field {
+		case "client_name":
+			return decoder.Decode(&value.ClientName)
+		case "redirect_uris":
+			return decoder.Decode(&value.RedirectURIs)
+		case "token_endpoint_auth_method":
+			return decoder.Decode(&value.TokenEndpointAuthMethod)
+		case "grant_types":
+			return decoder.Decode(&value.GrantTypes)
+		}
+	}
+	return errors.New("unsupported registration metadata target")
 }
 
 func validateIssuer(raw string) (string, error) {
@@ -1643,6 +1992,41 @@ func writeJSONResponse(w http.ResponseWriter, output any) {
 	if err := json.NewEncoder(w).Encode(output); err != nil {
 		slog.Warn("failed to encode JSON response", "err", err)
 	}
+}
+
+func parseOAuthForm(w http.ResponseWriter, r *http.Request, repeatedParameters []string) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxOAuthBodyBytes)
+	if err := r.ParseForm(); err != nil {
+		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid form")
+		return false
+	}
+	if err := validateOAuthParameters(r.PostForm, repeatedParameters); err != nil {
+		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return false
+	}
+	return true
+}
+
+func validateOAuthParameters(values url.Values, repeatedParameters []string) error {
+	count := 0
+	for name, entries := range values {
+		count += len(entries)
+		if len(name) > maxOAuthParameterName {
+			return errors.New("parameter name is too long")
+		}
+		if len(entries) != 1 && !slices.Contains(repeatedParameters, name) {
+			return fmt.Errorf("parameter %q must occur exactly once", name)
+		}
+		for _, value := range entries {
+			if len(value) > maxOAuthParameterBytes {
+				return fmt.Errorf("parameter %q is too long", name)
+			}
+		}
+	}
+	if count > maxOAuthParameterCount {
+		return errors.New("too many parameters")
+	}
+	return nil
 }
 
 func (s *Server) handleProtectedResourceMetadata(w http.ResponseWriter, r *http.Request) {
@@ -1823,12 +2207,13 @@ func (s *Server) handleOAuthEndSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleOAuthDeviceAuthorization(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
-	if err := r.ParseForm(); err != nil {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid form")
+	if !parseOAuthForm(w, r, nil) {
 		return
 	}
 	clientID := r.PostForm.Get("client_id")
+	if !s.rateLimitClient(w, r, clientID) {
+		return
+	}
 	if clientID == "" {
 		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", "missing client_id")
 		return
@@ -1836,6 +2221,10 @@ func (s *Server) handleOAuthDeviceAuthorization(w http.ResponseWriter, r *http.R
 	client := s.oauthClient(clientID)
 	if client.ID == "" {
 		oauth.WriteError(w, http.StatusBadRequest, "invalid_client", "unknown client")
+		return
+	}
+	if !clientSupportsGrant(&client, oauth.GrantDeviceCode) {
+		oauth.WriteError(w, http.StatusBadRequest, "unauthorized_client", "client is not registered for the device_code grant")
 		return
 	}
 	scope, err := s.normalizeScope(r.PostForm.Get("scope"))
@@ -1864,7 +2253,13 @@ func (s *Server) handleOAuthDeviceAuthorization(w http.ResponseWriter, r *http.R
 		IssuedAt:    now,
 	}
 	s.mu.Lock()
+	capacityExceeded := false
 	err = s.state.transact(func(next *storeFile) bool {
+		changed := pruneExpiredStore(next, now)
+		if len(next.DeviceCodes) >= maxPendingDeviceCodes {
+			capacityExceeded = true
+			return changed
+		}
 		next.DeviceCodes[oauth.RefreshTokenKey(deviceCode)] = dc
 		return true
 	})
@@ -1875,6 +2270,10 @@ func (s *Server) handleOAuthDeviceAuthorization(w http.ResponseWriter, r *http.R
 		return
 	}
 	s.mu.Unlock()
+	if capacityExceeded {
+		oauth.WriteError(w, http.StatusServiceUnavailable, "temporarily_unavailable", "too many pending device authorizations")
+		return
+	}
 
 	issuer := s.issuer
 	resp := oauth.DeviceAuthorizationResponse{
@@ -1913,9 +2312,7 @@ func (s *Server) handleOAuthDeviceApprove(w http.ResponseWriter, r *http.Request
 		oauth.WriteError(w, http.StatusUnauthorized, "login_required", "log in before authorizing device")
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
-	if err := r.ParseForm(); err != nil {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid form")
+	if !parseOAuthForm(w, r, nil) {
 		return
 	}
 	userCode := r.PostForm.Get("user_code")
@@ -2041,12 +2438,17 @@ func (s *Server) handleOAuthDeviceCodeToken(w http.ResponseWriter, r *http.Reque
 	}
 	now := time.Now()
 	grant := Grant{ID: grantID, UserID: dc.UserID, ClientID: dc.ClientID, Resource: s.resourceURL, Scope: dc.Scope, CreatedAt: now, ExpiresAt: now.Add(s.refreshTokenTTL)}
-	refreshEntry := RefreshToken{GrantID: grantID, UserID: dc.UserID, ClientID: dc.ClientID, Resource: s.resourceURL, Scope: dc.Scope, DPoPJKT: dpopJKT, ExpiresAt: grant.ExpiresAt}
-	refreshToken, err := randomToken()
-	if err != nil {
-		slog.WarnContext(r.Context(), "generate device refresh token", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not issue refresh token")
-		return
+	refreshToken := ""
+	refreshEntry := RefreshToken{}
+	client := s.oauthClient(dc.ClientID)
+	if clientSupportsGrant(&client, oauth.GrantRefreshToken) {
+		refreshEntry = RefreshToken{GrantID: grantID, UserID: dc.UserID, ClientID: dc.ClientID, Resource: s.resourceURL, Scope: dc.Scope, DPoPJKT: dpopJKT, ExpiresAt: grant.ExpiresAt}
+		refreshToken, err = randomToken()
+		if err != nil {
+			slog.WarnContext(r.Context(), "generate device refresh token", "err", err)
+			oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not issue refresh token")
+			return
+		}
 	}
 	response, err := s.issueTokenResponse(user, grant.Resource, dc.Scope, grantID, refreshToken, dpopJKT)
 	if err != nil {
@@ -2059,13 +2461,18 @@ func (s *Server) handleOAuthDeviceCodeToken(w http.ResponseWriter, r *http.Reque
 	err = s.state.transact(func(next *storeFile) bool {
 		current, found := next.DeviceCodes[codeHash]
 		client, clientFound := next.Clients[dc.ClientID]
-		if !found || current == nil || current.Status != "approved" || current.UserID != dc.UserID || current.ClientID != dc.ClientID || !clientFound {
+		if !found || current == nil || current.Status != "approved" || current.UserID != dc.UserID || current.ClientID != dc.ClientID || !clientFound || !clientSupportsGrant(&client, oauth.GrantDeviceCode) {
 			return false
 		}
 		grant.ClientName = clientDisplayName(&client)
 		delete(next.DeviceCodes, codeHash)
 		next.Grants[grant.ID] = grant
-		next.RefreshTokens[oauth.RefreshTokenKey(refreshToken)] = refreshEntry
+		if refreshToken != "" && clientSupportsGrant(&client, oauth.GrantRefreshToken) {
+			next.RefreshTokens[oauth.RefreshTokenKey(refreshToken)] = refreshEntry
+		} else {
+			refreshToken = ""
+			response.RefreshToken = ""
+		}
 		consumed = true
 		return true
 	})

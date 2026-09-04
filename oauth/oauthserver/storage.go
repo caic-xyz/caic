@@ -54,6 +54,7 @@ type Client struct {
 	Name                    string    `json:"name"`
 	RedirectURIs            []string  `json:"redirectURIs"`
 	TokenEndpointAuthMethod string    `json:"tokenEndpointAuthMethod"`
+	GrantTypes              []string  `json:"grantTypes,omitempty"`
 	CreatedAt               time.Time `json:"createdAt"`
 }
 
