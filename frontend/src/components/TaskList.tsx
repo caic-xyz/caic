@@ -207,6 +207,23 @@ export default function TaskList(props: TaskListProps) {
 
   const taskCards = () => Array.from(listRef?.querySelectorAll<HTMLElement>("[data-task-id]") ?? []);
 
+  const scrollSelectedTaskIntoView = () => {
+    const selectedId = props.selectedId;
+    if (!selectedId || !props.sidebarOpen()) return;
+    requestAnimationFrame(() => {
+      if (props.selectedId !== selectedId || !props.sidebarOpen()) return;
+      taskCards().find((card) => card.dataset.taskId === selectedId)
+        ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+  };
+
+  onMount(() => {
+    if (!listRef) return;
+    const observer = new ResizeObserver(scrollSelectedTaskIntoView);
+    observer.observe(listRef);
+    onCleanup(() => observer.disconnect());
+  });
+
   createEffect(() => {
     void props.tasks();
     void props.selectedId;
@@ -220,12 +237,7 @@ export default function TaskList(props: TaskListProps) {
 
   // Keep the selected task summary visible when navigation changes the detail pane.
   createEffect(() => {
-    const selectedId = props.selectedId;
-    if (!selectedId || !props.sidebarOpen()) return;
-    requestAnimationFrame(() => {
-      taskCards().find((card) => card.dataset.taskId === selectedId)
-        ?.scrollIntoView({ block: "nearest", inline: "nearest" });
-    });
+    scrollSelectedTaskIntoView();
   });
 
   const renderTask = (t: () => Task) => (

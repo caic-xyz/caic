@@ -62,8 +62,18 @@ function taskListProps(tasks: Task[]): Omit<TaskListProps, "selectedId"> {
 describe("TaskList", () => {
   const scrollIntoView = vi.fn();
   const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+  let resize: ResizeObserverCallback;
 
   beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", class ResizeObserverMock {
+      constructor(callback: ResizeObserverCallback) {
+        resize = callback;
+      }
+
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    });
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
       callback(0);
       return 0;
@@ -104,6 +114,18 @@ describe("TaskList", () => {
     selectTask("2");
 
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" }));
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(document.querySelector("[data-task-id='2']"));
+  });
+
+  it("keeps the selected task visible when the open sidebar resizes", async () => {
+    render(() => <TaskList {...taskListProps([task("1"), task("2")])} selectedId="2" />);
+
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
+    scrollIntoView.mockClear();
+
+    resize([], {} as ResizeObserver);
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" });
     expect(scrollIntoView.mock.contexts.at(-1)).toBe(document.querySelector("[data-task-id='2']"));
   });
 });
