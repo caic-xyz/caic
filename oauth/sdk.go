@@ -22,6 +22,7 @@ func SDKAPI() apispec.Config {
 			// Discovery
 			reflect.TypeFor[AuthorizationServerMetadata](),
 			reflect.TypeFor[ProtectedResourceMetadata](),
+			reflect.TypeFor[ClientIDMetadataDocument](),
 			// Client registration
 			reflect.TypeFor[RegisterRequest](),
 			reflect.TypeFor[RegisterResponse](),
@@ -65,6 +66,7 @@ func SDKAPI() apispec.Config {
 		SectionComments: map[string]string{
 			"AuthorizationServerMetadata": "OAuth 2.0 Authorization Server Metadata (RFC 8414)",
 			"ProtectedResourceMetadata":   "OAuth 2.0 Protected Resource Metadata (RFC 9728)",
+			"ClientIDMetadataDocument":    "OAuth Client ID Metadata Document",
 			"RegisterRequest":             "OAuth 2.0 Dynamic Client Registration request (RFC 7591)",
 			"RegisterResponse":            "OAuth 2.0 Dynamic Client Registration response (RFC 7591, 7592)",
 			"UpdateClientRequest":         "OAuth 2.0 Dynamic Client Registration update (RFC 7592)",

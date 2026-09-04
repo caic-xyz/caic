@@ -48,6 +48,7 @@ data class AuthorizationServerMetadata(
     val authorization_response_iss_parameter_supported: Boolean,
     val pushed_authorization_request_endpoint: String? = null,
     val require_pushed_authorization_requests: Boolean,
+    val client_id_metadata_document_supported: Boolean? = null,
 )
 
 // OAuth 2.0 Protected Resource Metadata (RFC 9728)
@@ -59,6 +60,47 @@ data class ProtectedResourceMetadata(
     val authorization_servers: List<String>,
     val scopes_supported: List<String>? = null,
     val resource_documentation: String? = null,
+)
+
+// JSON Web Key (RFC 7517)
+
+/**
+ * JWK is a JSON Web Key.  For server keys (RSA), only kty/n/e/kid/use/alg
+ * are populated.  For client DPoP keys, crv/x/y may also be set.
+ */
+@Serializable
+data class JWK(
+    val kty: String,
+    val use: String? = null,
+    val alg: String? = null,
+    val kid: String? = null,
+    val n: String? = null,
+    val e: String? = null,
+    val crv: String? = null,
+    val x: String? = null,
+    val y: String? = null,
+    val key_ops: List<String>? = null,
+)
+
+// JSON Web Key Set (RFC 7517)
+
+/** JWKSet is a JSON Web Key Set response. */
+@Serializable
+data class JWKSet(val keys: List<JWK>)
+
+// OAuth Client ID Metadata Document
+
+/** ClientIDMetadataDocument describes an OAuth client identified by its HTTPS metadata URL. */
+@Serializable
+data class ClientIDMetadataDocument(
+    val client_id: String,
+    val client_name: String,
+    val redirect_uris: List<String>,
+    val token_endpoint_auth_method: String? = null,
+    val grant_types: List<String>? = null,
+    val response_types: List<String>? = null,
+    val jwks: JWKSet? = null,
+    val jwks_uri: String? = null,
 )
 
 // OAuth 2.0 Dynamic Client Registration request (RFC 7591)
@@ -161,31 +203,6 @@ data class IntrospectionResponse(
 /** ErrorResponse is an OAuth error response body. */
 @Serializable
 data class ErrorResponse(val error: String, val error_description: String? = null)
-
-// JSON Web Key (RFC 7517)
-
-/**
- * JWK is a JSON Web Key.  For server keys (RSA), only kty/n/e/kid/use/alg
- * are populated.  For client DPoP keys, crv/x/y may also be set.
- */
-@Serializable
-data class JWK(
-    val kty: String,
-    val use: String? = null,
-    val alg: String? = null,
-    val kid: String? = null,
-    val n: String? = null,
-    val e: String? = null,
-    val crv: String? = null,
-    val x: String? = null,
-    val y: String? = null,
-)
-
-// JSON Web Key Set (RFC 7517)
-
-/** JWKSet is a JSON Web Key Set response. */
-@Serializable
-data class JWKSet(val keys: List<JWK>)
 
 // OAuth 2.0 Pushed Authorization Request response (RFC 9126)
 

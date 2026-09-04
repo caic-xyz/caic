@@ -192,11 +192,20 @@
         <span>caic</span>
       </div>
       <h1>Authorize MCP access</h1>
+      {{if .ClientMetadataDocument}}
+      <p class="subtitle">The client {{.ClientName}} wants to connect to caic MCP.</p>
+      {{else}}
       <p class="subtitle">A client self-identifying as {{.ClientName}} wants to connect to caic MCP.</p>
+      {{end}}
 
       <div class="section">
         <p class="section-label">Client</p>
+        {{if .ClientMetadataDocument}}
+        <div>{{.ClientName}} <span class="user-provider">(metadata fetched from {{.ClientHostname}})</span></div>
+        {{else}}
         <div>{{.ClientName}} <span class="user-provider">(self-declared, unverified)</span></div>
+        {{end}}
+        <div class="user-provider">Redirect URI:</div>
         <code class="resource-url">{{.RedirectURI}}</code>
         <div class="user-provider">Client ID: {{.ClientID}}</div>
       </div>

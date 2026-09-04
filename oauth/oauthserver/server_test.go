@@ -99,6 +99,12 @@ func TestServer(t *testing.T) {
 		if canonical != "HTTPS://Example.COM:443" {
 			t.Fatalf("canonical issuer = %q", canonical)
 		}
+		invalidPrefix := &ServerConfig{ClientIDPrefix: "https://issued.example/"}
+		applyTestServerDefaults(t, invalidPrefix)
+		invalidPrefix.ClientIDPrefix = "https://issued.example/"
+		if _, err := NewServer(*invalidPrefix); err == nil {
+			t.Fatal("NewServer accepted a dynamic client prefix in the CIMD namespace")
+		}
 	})
 
 	t.Run("legacy foreign-resource authorization state is contained on restart", func(t *testing.T) {
@@ -297,7 +303,7 @@ func TestServer(t *testing.T) {
 		if _, err := s.verifyBearer(newTestResourceRequest(t), accessToken); err == nil {
 			t.Fatal("foreign-resource grant remained valid for access")
 		}
-		result, _, err := s.exchangeRefreshToken(refresh, clientID, user.ID, "next-refresh", dpopBinding{})
+		result, _, err := s.exchangeRefreshToken(refresh, Client{ID: clientID}, user.ID, "next-refresh", dpopBinding{})
 		if err != nil || result != refreshExchangeUnknown {
 			t.Fatalf("exchangeRefreshToken result=%v err=%v", result, err)
 		}
@@ -378,6 +384,9 @@ func TestServer(t *testing.T) {
 		}
 		if metadata.IntrospectionEndpoint != "" || len(metadata.IntrospectionEndpointAuthMethodsSupported) != 0 {
 			t.Fatalf("metadata advertises disabled OAuth capabilities: %+v", metadata)
+		}
+		if !metadata.ClientIDMetadataDocumentSupported || !slices.Contains(metadata.TokenEndpointAuthMethodsSupported, oauth.TokenEndpointAuthPrivateKeyJWT) || !slices.Contains(metadata.RevocationEndpointAuthMethodsSupported, oauth.TokenEndpointAuthPrivateKeyJWT) {
+			t.Fatalf("metadata does not advertise CIMD/private_key_jwt: %+v", metadata)
 		}
 		if !slices.Equal(metadata.DPoPSigningAlgValuesSupported, []string{"RS256", "ES256", "EdDSA"}) {
 			t.Fatalf("dpop algorithms = %v", metadata.DPoPSigningAlgValuesSupported)
@@ -1230,6 +1239,32 @@ func TestServer(t *testing.T) {
 		}
 	})
 
+	t.Run("client cannot revoke another client's access token", func(t *testing.T) {
+		t.Parallel()
+
+		user := testUser()
+		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		owner := registerOAuthTestClient(t, h, "Token Owner", []string{"https://claude.example.com/callback"})
+		other := registerOAuthTestClient(t, h, "Other Client", []string{"https://other.example/callback"})
+		tokenResponse := authorizeOAuthTestClient(t, h, user, &owner, []string{"read"})
+
+		form := url.Values{
+			"client_id":       {other.ClientID},
+			"token":           {tokenResponse.AccessToken},
+			"token_type_hint": {"access_token"},
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/revoke", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("cross-client revoke status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		if _, err := s.verifyBearer(newTestResourceRequest(t), tokenResponse.AccessToken); err != nil {
+			t.Fatalf("owner token invalid after cross-client revoke no-op: %v", err)
+		}
+	})
+
 	t.Run("revoke no hint with access token only", func(t *testing.T) {
 		t.Parallel()
 
@@ -1571,7 +1606,7 @@ func TestTransactionalOAuthMutations(t *testing.T) {
 		}
 		store.io = failingRenameStoreIO{storeIO: osStoreIO{}}
 		server := &Server{state: store, refreshTokenTTL: time.Hour}
-		if result, _, err := server.exchangeRefreshToken("refresh", "client", "user", "next-refresh", dpopBinding{}); err == nil || result != refreshExchangeRotated {
+		if result, _, err := server.exchangeRefreshToken("refresh", Client{ID: "client"}, "user", "next-refresh", dpopBinding{}); err == nil || result != refreshExchangeRotated {
 			t.Fatalf("exchangeRefreshToken = %d, %v; want rotation persistence failure", result, err)
 		}
 		reloaded, err := LoadStore(path)
@@ -4404,7 +4439,7 @@ func TestClientLifecyclePolicy(t *testing.T) {
 		server.state.Clients["client"] = Client{ID: "client", RedirectURIs: []string{"https://example.com/callback"}, GrantTypes: []string{oauth.GrantAuthorizationCode}}
 		server.state.Grants["grant"] = Grant{ID: "grant", UserID: "user", ClientID: "client", Resource: testResourceURL, ExpiresAt: now.Add(time.Hour)}
 		server.state.RefreshTokens[oauth.RefreshTokenKey("refresh")] = RefreshToken{GrantID: "grant", UserID: "user", ClientID: "client", Resource: testResourceURL, ExpiresAt: now.Add(time.Hour)}
-		result, _, err := server.exchangeRefreshToken("refresh", "client", "user", "next", dpopBinding{})
+		result, _, err := server.exchangeRefreshToken("refresh", Client{ID: "client"}, "user", "next", dpopBinding{})
 		if err != nil || result != refreshExchangeUnknown {
 			t.Fatalf("refresh rotation = %v, %v; want ineligible", result, err)
 		}

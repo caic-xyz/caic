@@ -39,7 +39,7 @@ func BenchmarkOAuthTokenInputValidation(b *testing.B) {
 		request := requests[i]
 		response := responses[i]
 		handler.ServeHTTP(response, request)
-		if response.Code != http.StatusBadRequest {
+		if response.Code != http.StatusUnauthorized {
 			b.Fatalf("status = %d: %s", response.Code, response.Body.String())
 		}
 	}

@@ -211,32 +211,36 @@ func jwkPublicKey(jwk *oauth.JWK, alg string) (crypto.PublicKey, error) {
 	}
 	switch jwk.Kty {
 	case "RSA":
-		n, err := base64.RawURLEncoding.DecodeString(jwk.N)
+		n, err := base64.RawURLEncoding.Strict().DecodeString(jwk.N)
 		if err != nil {
 			return nil, fmt.Errorf("decode rsa n: %w", err)
 		}
-		e, err := base64.RawURLEncoding.DecodeString(jwk.E)
+		e, err := base64.RawURLEncoding.Strict().DecodeString(jwk.E)
 		if err != nil {
 			return nil, fmt.Errorf("decode rsa e: %w", err)
+		}
+		if len(n) == 0 || n[0] == 0 || len(e) == 0 || e[0] == 0 {
+			return nil, errors.New("rsa n and e must use minimal base64url-unsigned encoding")
 		}
 		modulus := new(big.Int).SetBytes(n)
 		if bits := modulus.BitLen(); bits < minRSAModulusBits || bits > maxRSAModulusBits {
 			return nil, fmt.Errorf("rsa modulus %d bits is outside allowed range [%d, %d]", bits, minRSAModulusBits, maxRSAModulusBits)
 		}
-		pub := &rsa.PublicKey{
-			N: modulus,
-			E: int(new(big.Int).SetBytes(e).Int64()),
+		exponent := new(big.Int).SetBytes(e)
+		if !exponent.IsInt64() || exponent.Int64() < 3 || exponent.Int64()%2 == 0 || int64(int(exponent.Int64())) != exponent.Int64() {
+			return nil, errors.New("rsa exponent must be an odd positive machine-sized integer")
 		}
+		pub := &rsa.PublicKey{N: modulus, E: int(exponent.Int64())}
 		return pub, nil
 	case "EC":
 		if jwk.X == "" || jwk.Y == "" || jwk.Crv == "" {
 			return nil, errors.New("ec jwk missing x, y, or crv")
 		}
-		x, err := base64.RawURLEncoding.DecodeString(jwk.X)
+		x, err := base64.RawURLEncoding.Strict().DecodeString(jwk.X)
 		if err != nil {
 			return nil, fmt.Errorf("decode ec x: %w", err)
 		}
-		y, err := base64.RawURLEncoding.DecodeString(jwk.Y)
+		y, err := base64.RawURLEncoding.Strict().DecodeString(jwk.Y)
 		if err != nil {
 			return nil, fmt.Errorf("decode ec y: %w", err)
 		}
@@ -268,7 +272,7 @@ func jwkPublicKey(jwk *oauth.JWK, alg string) (crypto.PublicKey, error) {
 		if jwk.X == "" {
 			return nil, errors.New("okp jwk missing x")
 		}
-		x, err := base64.RawURLEncoding.DecodeString(jwk.X)
+		x, err := base64.RawURLEncoding.Strict().DecodeString(jwk.X)
 		if err != nil {
 			return nil, fmt.Errorf("decode okp x: %w", err)
 		}

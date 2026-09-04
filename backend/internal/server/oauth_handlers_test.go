@@ -29,9 +29,36 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/oauth"
 	"github.com/caic-xyz/caic/oauth/oauthclient"
+	"github.com/caic-xyz/caic/oauth/oauthserver"
 )
 
 const mcpAuthDefaultScope = mcpScopeRead + " " + mcpScopeTasksRead + " " + mcpScopeTasksCreate + " " + mcpScopeTasksWrite + " " + mcpScopeTasksAdmin + " " + mcpScopeReposWrite
+
+func TestOAuthConsentIdentityProvenance(t *testing.T) {
+	t.Parallel()
+
+	render := func(data oauthserver.ConsentPageData) string {
+		var body strings.Builder
+		if err := oauthConsentTemplate.Execute(&body, &data); err != nil {
+			t.Fatalf("render consent: %v", err)
+		}
+		return body.String()
+	}
+	metadataBody := render(oauthserver.ConsentPageData{
+		ClientName:             "Verified Client",
+		ClientID:               "https://client.example/client.json",
+		ClientHostname:         "client.example",
+		ClientMetadataDocument: true,
+		RedirectURI:            "https://client.example/callback",
+	})
+	if !strings.Contains(metadataBody, "metadata fetched from client.example") || strings.Contains(metadataBody, "self-declared, unverified") {
+		t.Fatalf("CIMD consent identity is ambiguous: %s", metadataBody)
+	}
+	dynamicBody := render(oauthserver.ConsentPageData{ClientName: "Dynamic Client", ClientID: "caic_dynamic", RedirectURI: "https://client.example/callback"})
+	if !strings.Contains(dynamicBody, "self-declared, unverified") || strings.Contains(dynamicBody, "metadata fetched from") {
+		t.Fatalf("DCR consent identity is ambiguous: %s", dynamicBody)
+	}
+}
 
 // testMCPOAuthSigningKeyPEM returns a fresh EC P-256 signing key, PEM-encoded,
 // for routers that build the OAuth server. Production supplies this from

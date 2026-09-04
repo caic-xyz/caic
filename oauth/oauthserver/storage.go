@@ -19,7 +19,17 @@ import (
 
 // storeVersion is the on-disk schema version. Codes and Consents are keyed by
 // RefreshTokenKey(secret) so the live code/consent token never lands on disk.
-const storeVersion = 3
+const storeVersion = 4
+
+// ClientProvenance records how the authorization server established a client identity.
+type ClientProvenance string
+
+const (
+	// ClientProvenanceDynamic identifies a locally persisted RFC 7591 registration.
+	ClientProvenanceDynamic ClientProvenance = "dynamic_registration"
+	// ClientProvenanceMetadata identifies a remotely verified Client ID Metadata Document.
+	ClientProvenanceMetadata ClientProvenance = "client_id_metadata_document"
+)
 
 var storeOwners = struct {
 	sync.Mutex
@@ -48,14 +58,17 @@ func claimStore(path string) (func(), error) {
 	}, nil
 }
 
-// Client is a dynamically-registered OAuth client.
+// Client is an OAuth client established by dynamic registration or verified metadata.
 type Client struct {
-	ID                      string    `json:"id"`
-	Name                    string    `json:"name"`
-	RedirectURIs            []string  `json:"redirectURIs"`
-	TokenEndpointAuthMethod string    `json:"tokenEndpointAuthMethod"`
-	GrantTypes              []string  `json:"grantTypes,omitempty"`
-	CreatedAt               time.Time `json:"createdAt"`
+	ID                      string           `json:"id"`
+	Name                    string           `json:"name"`
+	RedirectURIs            []string         `json:"redirectURIs"`
+	TokenEndpointAuthMethod string           `json:"tokenEndpointAuthMethod"`
+	GrantTypes              []string         `json:"grantTypes,omitempty"`
+	CreatedAt               time.Time        `json:"createdAt"`
+	Provenance              ClientProvenance `json:"provenance,omitempty"`
+	JWKS                    []oauth.JWK      `json:"-"`
+	JWKSURI                 string           `json:"-"`
 }
 
 // Code is an issued authorization code with PKCE binding.
@@ -136,14 +149,15 @@ type Grant struct {
 
 // Store holds durable OAuth clients, refresh tokens, grants, authorization codes, and consents.
 type Store struct {
-	Clients       map[string]Client        `json:"clients,omitempty"`
-	RefreshTokens map[string]RefreshToken  `json:"refreshTokens,omitempty"`
-	Grants        map[string]Grant         `json:"grants,omitempty"`
-	Codes         map[string]Code          `json:"codes,omitempty"`
-	Consents      map[string]ConsentParams `json:"consents,omitempty"`
-	DeviceCodes   map[string]*DeviceCode   `json:"deviceCodes,omitempty"`
-	DPoPProofs    map[string]time.Time     `json:"dpopProofs,omitempty"`
-	DPoPNonces    map[string]time.Time     `json:"dpopNonces,omitempty"`
+	Clients             map[string]Client        `json:"clients,omitempty"`
+	RefreshTokens       map[string]RefreshToken  `json:"refreshTokens,omitempty"`
+	Grants              map[string]Grant         `json:"grants,omitempty"`
+	Codes               map[string]Code          `json:"codes,omitempty"`
+	Consents            map[string]ConsentParams `json:"consents,omitempty"`
+	DeviceCodes         map[string]*DeviceCode   `json:"deviceCodes,omitempty"`
+	DPoPProofs          map[string]time.Time     `json:"dpopProofs,omitempty"`
+	DPoPNonces          map[string]time.Time     `json:"dpopNonces,omitempty"`
+	ClientAssertionJTIs map[string]time.Time     `json:"clientAssertionJTIs,omitempty"`
 
 	path string
 	io   storeIO
@@ -175,15 +189,16 @@ func (osStoreIO) Rename(oldPath, newPath string) error {
 }
 
 type storeFile struct {
-	Version       int                      `json:"version"`
-	Clients       map[string]Client        `json:"clients,omitempty"`
-	RefreshTokens map[string]RefreshToken  `json:"refreshTokens,omitempty"`
-	Grants        map[string]Grant         `json:"grants,omitempty"`
-	Codes         map[string]Code          `json:"codes,omitempty"`
-	Consents      map[string]ConsentParams `json:"consents,omitempty"`
-	DeviceCodes   map[string]*DeviceCode   `json:"deviceCodes,omitempty"`
-	DPoPProofs    map[string]time.Time     `json:"dpopProofs,omitempty"`
-	DPoPNonces    map[string]time.Time     `json:"dpopNonces,omitempty"`
+	Version             int                      `json:"version"`
+	Clients             map[string]Client        `json:"clients,omitempty"`
+	RefreshTokens       map[string]RefreshToken  `json:"refreshTokens,omitempty"`
+	Grants              map[string]Grant         `json:"grants,omitempty"`
+	Codes               map[string]Code          `json:"codes,omitempty"`
+	Consents            map[string]ConsentParams `json:"consents,omitempty"`
+	DeviceCodes         map[string]*DeviceCode   `json:"deviceCodes,omitempty"`
+	DPoPProofs          map[string]time.Time     `json:"dpopProofs,omitempty"`
+	DPoPNonces          map[string]time.Time     `json:"dpopNonces,omitempty"`
+	ClientAssertionJTIs map[string]time.Time     `json:"clientAssertionJTIs,omitempty"`
 }
 
 // LoadStore loads durable OAuth state from path.
@@ -214,6 +229,7 @@ func LoadStore(path string) (*Store, error) {
 	store.DeviceCodes = file.DeviceCodes
 	store.DPoPProofs = file.DPoPProofs
 	store.DPoPNonces = file.DPoPNonces
+	store.ClientAssertionJTIs = file.ClientAssertionJTIs
 	store.ensureMaps()
 	store.pruneExpired(time.Now())
 	return store, nil
@@ -222,12 +238,12 @@ func LoadStore(path string) (*Store, error) {
 // Save writes the durable OAuth state to its configured path.
 func (s *Store) Save() error {
 	s.ensureMaps()
-	file := storeFile{Version: storeVersion, Clients: s.Clients, RefreshTokens: s.RefreshTokens, Grants: s.Grants, Codes: s.Codes, Consents: s.Consents, DeviceCodes: s.DeviceCodes, DPoPProofs: s.DPoPProofs, DPoPNonces: s.DPoPNonces}
-	_, err := persistStore(s, file)
+	file := storeFile{Version: storeVersion, Clients: s.Clients, RefreshTokens: s.RefreshTokens, Grants: s.Grants, Codes: s.Codes, Consents: s.Consents, DeviceCodes: s.DeviceCodes, DPoPProofs: s.DPoPProofs, DPoPNonces: s.DPoPNonces, ClientAssertionJTIs: s.ClientAssertionJTIs}
+	_, err := persistStore(s, &file)
 	return err
 }
 
-func persistStore(s *Store, file storeFile) (bool, error) {
+func persistStore(s *Store, file *storeFile) (bool, error) {
 	if s.path == "" {
 		return true, nil
 	}
@@ -444,28 +460,29 @@ func (s *Store) transact(update func(*storeFile) bool) error {
 	if !update(&next) {
 		return nil
 	}
-	committed, err := persistStore(s, next)
+	committed, err := persistStore(s, &next)
 	if committed {
-		s.install(next)
+		s.install(&next)
 	}
 	return err
 }
 
 func (s *Store) snapshot() storeFile {
 	return storeFile{
-		Version:       storeVersion,
-		Clients:       cloneMap(s.Clients),
-		RefreshTokens: cloneMap(s.RefreshTokens),
-		Grants:        cloneMap(s.Grants),
-		Codes:         cloneMap(s.Codes),
-		Consents:      cloneConsents(s.Consents),
-		DeviceCodes:   cloneDeviceCodes(s.DeviceCodes),
-		DPoPProofs:    cloneMap(s.DPoPProofs),
-		DPoPNonces:    cloneMap(s.DPoPNonces),
+		Version:             storeVersion,
+		Clients:             cloneMap(s.Clients),
+		RefreshTokens:       cloneMap(s.RefreshTokens),
+		Grants:              cloneMap(s.Grants),
+		Codes:               cloneMap(s.Codes),
+		Consents:            cloneConsents(s.Consents),
+		DeviceCodes:         cloneDeviceCodes(s.DeviceCodes),
+		DPoPProofs:          cloneMap(s.DPoPProofs),
+		DPoPNonces:          cloneMap(s.DPoPNonces),
+		ClientAssertionJTIs: cloneMap(s.ClientAssertionJTIs),
 	}
 }
 
-func (s *Store) install(file storeFile) {
+func (s *Store) install(file *storeFile) {
 	s.Clients = file.Clients
 	s.RefreshTokens = file.RefreshTokens
 	s.Grants = file.Grants
@@ -474,6 +491,7 @@ func (s *Store) install(file storeFile) {
 	s.DeviceCodes = file.DeviceCodes
 	s.DPoPProofs = file.DPoPProofs
 	s.DPoPNonces = file.DPoPNonces
+	s.ClientAssertionJTIs = file.ClientAssertionJTIs
 }
 
 func cloneMap[K comparable, V any](src map[K]V) map[K]V {
@@ -529,10 +547,13 @@ func (s *Store) ensureMaps() {
 	if s.DPoPNonces == nil {
 		s.DPoPNonces = map[string]time.Time{}
 	}
+	if s.ClientAssertionJTIs == nil {
+		s.ClientAssertionJTIs = map[string]time.Time{}
+	}
 }
 
 func (s *Store) pruneExpired(now time.Time) bool {
-	file := storeFile{RefreshTokens: s.RefreshTokens, Grants: s.Grants, Codes: s.Codes, Consents: s.Consents, DeviceCodes: s.DeviceCodes, DPoPProofs: s.DPoPProofs, DPoPNonces: s.DPoPNonces}
+	file := storeFile{RefreshTokens: s.RefreshTokens, Grants: s.Grants, Codes: s.Codes, Consents: s.Consents, DeviceCodes: s.DeviceCodes, DPoPProofs: s.DPoPProofs, DPoPNonces: s.DPoPNonces, ClientAssertionJTIs: s.ClientAssertionJTIs}
 	return pruneExpiredStore(&file, now)
 }
 
@@ -579,6 +600,12 @@ func pruneExpiredStore(file *storeFile, now time.Time) bool {
 	for key, expiresAt := range file.DPoPNonces {
 		if !now.Before(expiresAt) {
 			delete(file.DPoPNonces, key)
+			changed = true
+		}
+	}
+	for key, expiresAt := range file.ClientAssertionJTIs {
+		if !now.Before(expiresAt) {
+			delete(file.ClientAssertionJTIs, key)
 			changed = true
 		}
 	}

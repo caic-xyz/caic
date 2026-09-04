@@ -14,6 +14,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -93,16 +94,18 @@ type RateLimiter interface {
 
 // ConsentPageData is the server-rendered OAuth consent page model.
 type ConsentPageData struct {
-	Action        string
-	ConsentToken  string
-	ClientName    string
-	ClientID      string
-	RedirectURI   string
-	Username      string
-	UserInitial   string
-	ProviderLabel string
-	Resource      string
-	ScopeItems    []ScopeItem
+	Action                 string
+	ConsentToken           string
+	ClientName             string
+	ClientID               string
+	ClientHostname         string
+	ClientMetadataDocument bool
+	RedirectURI            string
+	Username               string
+	UserInitial            string
+	ProviderLabel          string
+	Resource               string
+	ScopeItems             []ScopeItem
 }
 
 // ScopeItem holds a scope identifier and its human-readable label.
@@ -136,11 +139,13 @@ type ServerConfig struct {
 	DefaultScopes           []string
 	ScopeLabels             map[string]string
 
-	Session           SessionManager
-	UI                AuthorizationUI
-	Audit             AuditRecorder
-	RateLimiter       RateLimiter
-	IntrospectionAuth IntrospectionAuthenticator
+	Session               SessionManager
+	UI                    AuthorizationUI
+	Audit                 AuditRecorder
+	RateLimiter           RateLimiter
+	IntrospectionAuth     IntrospectionAuthenticator
+	ClientMetadataNetwork ClientMetadataNetwork
+	ClientMetadataRootCAs *x509.CertPool
 }
 
 // Server stores OAuth state for remote clients.
@@ -176,6 +181,7 @@ type Server struct {
 	audit             AuditRecorder
 	rateLimiter       RateLimiter
 	introspectionAuth IntrospectionAuthenticator
+	clientMetadata    *clientMetadataResolver
 
 	releaseStore func()
 }
@@ -193,6 +199,9 @@ func NewServer(c ServerConfig) (*Server, error) { //nolint:gocritic // ServerCon
 	issuer, err := validateIssuer(c.Issuer)
 	if err != nil {
 		return nil, err
+	}
+	if strings.HasPrefix(c.ClientIDPrefix, "https://") {
+		return nil, errors.New("oauth: ClientIDPrefix must not use the CIMD https:// namespace")
 	}
 	accessTokenTTL := c.AccessTokenTTL
 	if accessTokenTTL == 0 {
@@ -237,6 +246,10 @@ func NewServer(c ServerConfig) (*Server, error) { //nolint:gocritic // ServerCon
 		releaseStore()
 		return nil, fmt.Errorf("contain oauth resource state: %w", err)
 	}
+	var clientMetadata *clientMetadataResolver
+	if c.RefreshTokenStorePath != "" {
+		clientMetadata = newClientMetadataResolver(c.ClientMetadataNetwork, c.ClientMetadataRootCAs)
+	}
 	return &Server{
 		state:                   state,
 		parRequests:             map[string]ConsentParams{},
@@ -259,6 +272,7 @@ func NewServer(c ServerConfig) (*Server, error) { //nolint:gocritic // ServerCon
 		audit:                   c.Audit,
 		rateLimiter:             c.RateLimiter,
 		introspectionAuth:       c.IntrospectionAuth,
+		clientMetadata:          clientMetadata,
 		releaseStore:            releaseStore,
 	}, nil
 }
@@ -479,6 +493,13 @@ func (s *Server) rateLimitClient(w http.ResponseWriter, r *http.Request, clientI
 	return true
 }
 
+func (s *Server) rateLimitResolvedClient(w http.ResponseWriter, r *http.Request, client *Client) bool {
+	if client.ID == "" {
+		return true
+	}
+	return s.rateLimit(w, "client_ip:"+remoteIP(r)+":"+client.ID)
+}
+
 func remoteIP(r *http.Request) string {
 	host := r.RemoteAddr
 	if parsedHost, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
@@ -507,6 +528,11 @@ func (s *Server) handleOAuthMetadata(w http.ResponseWriter, r *http.Request) {
 		PushedAuthorizationRequestEndpoint:            issuer + "/oauth/par",
 		RequirePushedAuthorizationRequests:            false,
 		DPoPSigningAlgValuesSupported:                 []string{"RS256", "ES256", "EdDSA"},
+		ClientIDMetadataDocumentSupported:             s.clientMetadata != nil,
+	}
+	if s.clientMetadata != nil {
+		metadata.TokenEndpointAuthMethodsSupported = append(metadata.TokenEndpointAuthMethodsSupported, oauth.TokenEndpointAuthPrivateKeyJWT)
+		metadata.RevocationEndpointAuthMethodsSupported = append(metadata.RevocationEndpointAuthMethodsSupported, oauth.TokenEndpointAuthPrivateKeyJWT)
 	}
 	writeJSONResponse(w, &metadata)
 }
@@ -535,6 +561,9 @@ func (s *Server) handleOAuthAuthorizeGET(w http.ResponseWriter, r *http.Request)
 		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
+	if !s.rateLimitIP(w, r) {
+		return
+	}
 	// Check for RFC 9126 pushed authorization request.
 	if requestURI := r.URL.Query().Get("request_uri"); requestURI != "" {
 		s.mu.Lock()
@@ -551,23 +580,24 @@ func (s *Server) handleOAuthAuthorizeGET(w http.ResponseWriter, r *http.Request)
 		for k, v := range par.Params {
 			values.Set(k, v)
 		}
-		if err := s.validateAuthorizeForm(values); err != nil {
+		client, err := s.validateAuthorizeForm(r.Context(), values)
+		if err != nil {
 			oauth.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
-		s.renderConsent(w, r, user, values)
+		s.renderConsent(w, r, user, values, &client)
 		return
 	}
-	if err := s.validateAuthorizeRequest(r); err != nil {
+	client, err := s.validateAuthorizeRequest(r)
+	if err != nil {
 		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
-	s.renderConsent(w, r, user, cloneURLValues(r.URL.Query()))
+	s.renderConsent(w, r, user, cloneURLValues(r.URL.Query()), &client)
 }
 
 // renderConsent stores consent parameters and renders the consent page.
-func (s *Server) renderConsent(w http.ResponseWriter, r *http.Request, user oauth.User, values url.Values) {
-	client := s.oauthClient(values.Get("client_id"))
+func (s *Server) renderConsent(w http.ResponseWriter, r *http.Request, user oauth.User, values url.Values, client *Client) {
 	scope, _ := s.normalizeScope(values.Get("scope"))
 	consentToken, err := randomToken()
 	if err != nil {
@@ -604,16 +634,18 @@ func (s *Server) renderConsent(w http.ResponseWriter, r *http.Request, user oaut
 		return
 	}
 	data := ConsentPageData{
-		Action:        s.issuer + "/oauth/authorize",
-		ConsentToken:  consentToken,
-		ClientName:    clientDisplayName(&client),
-		ClientID:      client.ID,
-		RedirectURI:   values.Get("redirect_uri"),
-		Username:      user.Username,
-		UserInitial:   userInitial(user.Username),
-		ProviderLabel: s.providerLabel(user.Provider),
-		Resource:      values.Get("resource"),
-		ScopeItems:    s.scopeItems(scope),
+		Action:                 s.issuer + "/oauth/authorize",
+		ConsentToken:           consentToken,
+		ClientName:             clientDisplayName(client),
+		ClientID:               client.ID,
+		ClientHostname:         clientHostname(client),
+		ClientMetadataDocument: client.Provenance == ClientProvenanceMetadata,
+		RedirectURI:            values.Get("redirect_uri"),
+		Username:               user.Username,
+		UserInitial:            userInitial(user.Username),
+		ProviderLabel:          s.providerLabel(user.Provider),
+		Resource:               values.Get("resource"),
+		ScopeItems:             s.scopeItems(scope),
 	}
 	if err := s.ui.RenderOAuthConsent(w, &data); err != nil {
 		slog.WarnContext(r.Context(), "render oauth consent", "err", err)
@@ -626,11 +658,19 @@ func (s *Server) handleOAuthPAR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	values := r.PostForm
-	if !s.rateLimitClient(w, r, values.Get("client_id")) {
+	if !s.rateLimitIP(w, r) {
 		return
 	}
-	if err := s.validateAuthorizeForm(values); err != nil {
+	client, err := s.validateAuthorizeForm(r.Context(), values)
+	if err != nil {
 		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	if !s.rateLimitResolvedClient(w, r, &client) {
+		return
+	}
+	if err := s.authenticateResolvedOAuthClient(r, &client, s.issuer+"/oauth/par"); err != nil {
+		oauth.WriteError(w, http.StatusUnauthorized, "invalid_client", "client authentication failed")
 		return
 	}
 	requestURI, err := randomToken()
@@ -642,6 +682,9 @@ func (s *Server) handleOAuthPAR(w http.ResponseWriter, r *http.Request) {
 	requestURI = "urn:ietf:params:oauth:request_uri:" + requestURI
 	params := make(map[string]string)
 	for k, vals := range values {
+		if k == "client_assertion" || k == "client_assertion_type" {
+			continue
+		}
 		if len(vals) > 0 {
 			params[k] = vals[0]
 		}
@@ -683,6 +726,9 @@ func (s *Server) handleOAuthAuthorizePOST(w http.ResponseWriter, r *http.Request
 	if !parseOAuthForm(w, r, []string{"scope"}) {
 		return
 	}
+	if !s.rateLimitIP(w, r) {
+		return
+	}
 	consentToken := r.PostForm.Get("consent_token")
 	consentHash := oauth.RefreshTokenKey(consentToken)
 	s.mu.Lock()
@@ -709,7 +755,7 @@ func (s *Server) handleOAuthAuthorizePOST(w http.ResponseWriter, r *http.Request
 	for k, v := range c.Params {
 		values.Set(k, v)
 	}
-	if err := s.validateAuthorizeForm(values); err != nil {
+	if _, err := s.validateAuthorizeForm(r.Context(), values); err != nil {
 		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
@@ -775,7 +821,15 @@ func (s *Server) handleOAuthToken(w http.ResponseWriter, r *http.Request) {
 	if !parseOAuthForm(w, r, nil) {
 		return
 	}
-	if !s.rateLimitClient(w, r, r.PostForm.Get("client_id")) {
+	if !s.rateLimitIP(w, r) {
+		return
+	}
+	client, err := s.authenticateOAuthClient(r, s.issuer+"/oauth/token")
+	if err != nil {
+		oauth.WriteError(w, http.StatusUnauthorized, "invalid_client", "client authentication failed")
+		return
+	}
+	if !s.rateLimitResolvedClient(w, r, &client) {
 		return
 	}
 	binding := dpopBinding{}
@@ -803,7 +857,7 @@ func (s *Server) handleOAuthToken(w http.ResponseWriter, r *http.Request) {
 	// RFC 8628 device_code grant: handle before pruning so expired entries
 	// are correctly reported as expired_token rather than invalid_grant.
 	if r.PostForm.Get("grant_type") == "urn:ietf:params:oauth:grant-type:device_code" {
-		s.handleOAuthDeviceCodeToken(w, r, binding)
+		s.handleOAuthDeviceCodeToken(w, r, binding, client)
 		return
 	}
 
@@ -815,15 +869,15 @@ func (s *Server) handleOAuthToken(w http.ResponseWriter, r *http.Request) {
 
 	switch r.PostForm.Get("grant_type") {
 	case oauth.GrantAuthorizationCode:
-		s.handleOAuthAuthorizationCodeToken(w, r, binding)
+		s.handleOAuthAuthorizationCodeToken(w, r, binding, client)
 	case oauth.GrantRefreshToken:
-		s.handleOAuthRefreshToken(w, r, binding)
+		s.handleOAuthRefreshToken(w, r, binding, client)
 	default:
 		oauth.WriteError(w, http.StatusBadRequest, "unsupported_grant_type", "only authorization_code and refresh_token are supported")
 	}
 }
 
-func (s *Server) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r *http.Request, binding dpopBinding) { //nolint:gocritic // Immutable proof values are passed together to preserve their binding.
+func (s *Server) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r *http.Request, binding dpopBinding, client Client) { //nolint:gocritic // Immutable proof values are passed together to preserve their binding.
 	dpopJKT := binding.jkt
 	code := r.PostForm.Get("code")
 	codeHash := oauth.RefreshTokenKey(code)
@@ -881,7 +935,6 @@ func (s *Server) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r *htt
 	grant := Grant{ID: grantID, UserID: entry.UserID, ClientID: entry.ClientID, Resource: entry.Resource, Scope: entry.Scope, CreatedAt: now, ExpiresAt: now.Add(s.refreshTokenTTL)}
 	refreshToken := ""
 	refreshEntry := RefreshToken{}
-	client := s.oauthClient(entry.ClientID)
 	if clientSupportsGrant(&client, oauth.GrantRefreshToken) {
 		refreshEntry = RefreshToken{GrantID: grantID, UserID: entry.UserID, ClientID: entry.ClientID, Resource: entry.Resource, Scope: entry.Scope, DPoPJKT: dpopJKT, ExpiresAt: grant.ExpiresAt}
 		refreshToken, err = randomToken()
@@ -905,18 +958,25 @@ func (s *Server) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r *htt
 		if !found || current != entry {
 			return false
 		}
-		client, found := next.Clients[entry.ClientID]
-		if !found || !clientSupportsGrant(&client, oauth.GrantAuthorizationCode) || !redirectURIRegistered(client.RedirectURIs, entry.RedirectURI) {
+		currentClient := client
+		if client.Provenance != ClientProvenanceMetadata {
+			var found bool
+			currentClient, found = next.Clients[entry.ClientID]
+			if !found {
+				return false
+			}
+		}
+		if currentClient.ID != entry.ClientID || !clientSupportsGrant(&currentClient, oauth.GrantAuthorizationCode) || !clientRedirectURIRegistered(&currentClient, entry.RedirectURI) {
 			return false
 		}
 		if !reserveDPoPBinding(next, binding, time.Now()) {
 			proofRejected = true
 			return false
 		}
-		grant.ClientName = clientDisplayName(&client)
+		grant.ClientName = clientDisplayName(&currentClient)
 		delete(next.Codes, codeHash)
 		next.Grants[grant.ID] = grant
-		if refreshToken != "" && clientSupportsGrant(&client, oauth.GrantRefreshToken) {
+		if refreshToken != "" && clientSupportsGrant(&currentClient, oauth.GrantRefreshToken) {
 			next.RefreshTokens[oauth.RefreshTokenKey(refreshToken)] = refreshEntry
 		} else {
 			refreshToken = ""
@@ -947,20 +1007,19 @@ func (s *Server) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r *htt
 	s.writeTokenResponse(w, &response)
 }
 
-func (s *Server) handleOAuthRefreshToken(w http.ResponseWriter, r *http.Request, binding dpopBinding) { //nolint:gocritic // Immutable proof values are passed together to preserve their binding.
+func (s *Server) handleOAuthRefreshToken(w http.ResponseWriter, r *http.Request, binding dpopBinding, client Client) { //nolint:gocritic // Immutable proof values are passed together to preserve their binding.
 	dpopJKT := binding.jkt
 	refreshToken := r.PostForm.Get("refresh_token")
 	clientID := r.PostForm.Get("client_id")
 	s.mu.Lock()
 	entry, candidate := s.state.RefreshTokens[oauth.RefreshTokenKey(refreshToken)]
 	grant, grantOK := s.state.Grants[entry.GrantID]
-	client, clientOK := s.state.Clients[clientID]
 	s.mu.Unlock()
 	if candidate && subtle.ConstantTimeCompare([]byte(entry.DPoPJKT), []byte(dpopJKT)) != 1 {
 		s.writeInvalidDPoPProof(w, r, "dpop proof key does not match refresh token binding")
 		return
 	}
-	candidate = candidate && entry.ClientID == clientID && clientOK && clientSupportsGrant(&client, oauth.GrantRefreshToken) && entry.Resource == s.resourceURL && entry.UsedAt.IsZero() && entry.RevokedAt.IsZero() && time.Now().Before(entry.ExpiresAt) && grantOK && grant.Resource == s.resourceURL && grant.RevokedAt.IsZero() && time.Now().Before(grant.ExpiresAt)
+	candidate = candidate && entry.ClientID == clientID && client.ID == clientID && clientSupportsGrant(&client, oauth.GrantRefreshToken) && entry.Resource == s.resourceURL && entry.UsedAt.IsZero() && entry.RevokedAt.IsZero() && time.Now().Before(entry.ExpiresAt) && grantOK && grant.Resource == s.resourceURL && grant.RevokedAt.IsZero() && time.Now().Before(grant.ExpiresAt)
 	var response oauth.TokenResponse
 	nextRefreshToken := ""
 	if candidate {
@@ -980,7 +1039,7 @@ func (s *Server) handleOAuthRefreshToken(w http.ResponseWriter, r *http.Request,
 			return
 		}
 	}
-	result, exchanged, err := s.exchangeRefreshToken(refreshToken, clientID, entry.UserID, nextRefreshToken, binding)
+	result, exchanged, err := s.exchangeRefreshToken(refreshToken, client, entry.UserID, nextRefreshToken, binding)
 	if err != nil {
 		slog.WarnContext(r.Context(), "exchange oauth refresh token", "err", err)
 		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not rotate refresh token")
@@ -1120,25 +1179,31 @@ func (s *Server) handleOAuthRevoke(w http.ResponseWriter, r *http.Request) {
 	if !parseOAuthForm(w, r, nil) {
 		return
 	}
-	if !s.rateLimitClient(w, r, r.PostForm.Get("client_id")) {
+	if !s.rateLimitIP(w, r) {
+		return
+	}
+	client, err := s.authenticateOAuthClient(r, s.issuer+"/oauth/revoke")
+	if err != nil {
+		oauth.WriteError(w, http.StatusUnauthorized, "invalid_client", "client authentication failed")
+		return
+	}
+	if !s.rateLimitResolvedClient(w, r, &client) {
 		return
 	}
 	token := r.PostForm.Get("token")
-	clientID := r.PostForm.Get("client_id")
+	clientID := client.ID
 	hint := r.PostForm.Get("token_type_hint")
 
 	var userID string
-	var err error
-
 	switch hint {
 	case "refresh_token":
 		userID, err = s.revokeRefreshToken(token, clientID)
 	case "access_token":
-		userID, err = s.revokeAccessToken(token)
+		userID, err = s.revokeAccessToken(token, clientID)
 	default:
 		userID, err = s.revokeRefreshToken(token, clientID)
 		if err == nil && userID == "" {
-			userID, err = s.revokeAccessToken(token)
+			userID, err = s.revokeAccessToken(token, clientID)
 		}
 	}
 	if err != nil {
@@ -1155,19 +1220,19 @@ func (s *Server) handleOAuthRevoke(w http.ResponseWriter, r *http.Request) {
 // revokeAccessToken verifies a JWT access token and revokes its grant.
 // Always returns an empty userID on verification failure to avoid leaking
 // token validity — per RFC 7009 the revoke endpoint must always return 200.
-func (s *Server) revokeAccessToken(token string) (string, error) {
+func (s *Server) revokeAccessToken(token, clientID string) (string, error) {
 	claims, verr := s.tokens.verifyClaims(token, s.issuer, s.resourceURL, time.Now())
 	if verr != nil {
 		return "", nil //nolint:nilerr // RFC 7009 requires the endpoint not to disclose invalid tokens.
 	}
 	if claims.GrantID == "" {
-		return claims.Subject, nil // no grant to revoke
+		return "", nil // no grant means there is no durable client binding to authorize against
 	}
 	now := time.Now()
 	s.mu.Lock()
 	err := s.state.transact(func(next *storeFile) bool {
 		grant, ok := next.Grants[claims.GrantID]
-		if !ok || !grant.RevokedAt.IsZero() {
+		if !ok || grant.ClientID != clientID || !grant.RevokedAt.IsZero() {
 			return false
 		}
 		grant.RevokedAt = now
@@ -1211,8 +1276,8 @@ func (s *Server) redirectAuthorizeError(w http.ResponseWriter, r *http.Request, 
 	http.Redirect(w, r, redirectURL.String(), http.StatusSeeOther)
 }
 
-func (s *Server) validateAuthorizeRequest(r *http.Request) error {
-	return s.validateAuthorizeForm(r.URL.Query())
+func (s *Server) validateAuthorizeRequest(r *http.Request) (Client, error) {
+	return s.validateAuthorizeForm(r.Context(), r.URL.Query())
 }
 
 // validateAuthorizeForm validates OAuth authorization request parameters.
@@ -1220,35 +1285,35 @@ func (s *Server) validateAuthorizeRequest(r *http.Request) error {
 // redirect_uri validation uses exact string match per RFC 6819 §4.1.2 and
 // RFC 9700 §4.1.2: redirect URIs must be compared using simple string
 // comparison as defined in [RFC3986] Section 6.2.1.
-func (s *Server) validateAuthorizeForm(values url.Values) error {
+func (s *Server) validateAuthorizeForm(ctx context.Context, values url.Values) (Client, error) {
 	if values.Get("response_type") != oauth.ResponseTypeCode {
-		return errors.New("response_type must be code")
+		return Client{}, errors.New("response_type must be code")
 	}
-	client := s.oauthClient(values.Get("client_id"))
-	if client.ID == "" {
-		return errors.New("unknown client_id")
+	client, err := s.resolveOAuthClient(ctx, values.Get("client_id"))
+	if err != nil {
+		return Client{}, errors.New("unknown client_id")
 	}
 	if !clientSupportsGrant(&client, oauth.GrantAuthorizationCode) {
-		return errors.New("client is not registered for the authorization_code grant")
+		return Client{}, errors.New("client is not registered for the authorization_code grant")
 	}
 	redirectURI := values.Get("redirect_uri")
-	if !redirectURIRegistered(client.RedirectURIs, redirectURI) {
-		return errors.New("redirect_uri is not registered")
+	if !clientRedirectURIRegistered(&client, redirectURI) {
+		return Client{}, errors.New("redirect_uri is not registered")
 	}
 	if values.Get("code_challenge_method") != oauth.CodeChallengeS256 || !validS256Challenge(values.Get("code_challenge")) {
-		return errors.New("S256 PKCE is required")
+		return Client{}, errors.New("S256 PKCE is required")
 	}
 	resource := values.Get("resource")
 	if resource == "" {
-		return errors.New("resource is required")
+		return Client{}, errors.New("resource is required")
 	}
 	if resource != s.resourceURL {
-		return errors.New("resource must match the protected resource")
+		return Client{}, errors.New("resource must match the protected resource")
 	}
 	if _, err := s.normalizeScope(values.Get("scope")); err != nil {
-		return err
+		return Client{}, err
 	}
-	return nil
+	return client, nil
 }
 
 type refreshExchangeResult uint8
@@ -1260,8 +1325,9 @@ const (
 	refreshExchangeDPoPRejected
 )
 
-func (s *Server) exchangeRefreshToken(token, clientID, userID, nextToken string, binding dpopBinding) (refreshExchangeResult, RefreshToken, error) { //nolint:gocritic // Immutable proof values are passed together to preserve their binding.
+func (s *Server) exchangeRefreshToken(token string, client Client, userID, nextToken string, binding dpopBinding) (refreshExchangeResult, RefreshToken, error) { //nolint:gocritic // Immutable proof values are passed together to preserve their binding.
 	now := time.Now()
+	clientID := client.ID
 	tokenHash := oauth.RefreshTokenKey(token)
 	nextTokenHash := oauth.RefreshTokenKey(nextToken)
 	result := refreshExchangeUnknown
@@ -1289,8 +1355,15 @@ func (s *Server) exchangeRefreshToken(token, clientID, userID, nextToken string,
 		if entry.ClientID != clientID {
 			return false
 		}
-		client, clientFound := state.Clients[clientID]
-		if !clientFound || !clientSupportsGrant(&client, oauth.GrantRefreshToken) {
+		currentClient := client
+		if client.Provenance != ClientProvenanceMetadata {
+			var found bool
+			currentClient, found = state.Clients[clientID]
+			if !found {
+				return false
+			}
+		}
+		if !clientSupportsGrant(&currentClient, oauth.GrantRefreshToken) {
 			return false
 		}
 		if !reserveDPoPBinding(state, binding, now) {
@@ -1415,7 +1488,24 @@ func (s *Server) approveScope(requested string, form url.Values) (string, error)
 func (s *Server) oauthClient(id string) Client {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.state.Clients[id]
+	client := s.state.Clients[id]
+	if client.ID != "" && client.Provenance == "" {
+		client.Provenance = ClientProvenanceDynamic
+	}
+	if client.ID != "" && client.TokenEndpointAuthMethod == "" {
+		client.TokenEndpointAuthMethod = oauth.TokenEndpointAuthNone
+	}
+	return client
+}
+
+func (s *Server) resolveOAuthClient(ctx context.Context, id string) (Client, error) {
+	if client := s.oauthClient(id); client.ID != "" {
+		return client, nil
+	}
+	if s.clientMetadata == nil {
+		return Client{}, errors.New("client ID metadata documents require durable OAuth storage")
+	}
+	return s.clientMetadata.resolve(ctx, id)
 }
 
 func (s *Server) registerClient(client *Client) (bool, error) {
@@ -1473,7 +1563,7 @@ func (s *Server) handleOAuthRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now()
-	client := Client{ID: s.clientIDPrefix + clientID, Name: req.ClientName, RedirectURIs: slices.Clone(req.RedirectURIs), TokenEndpointAuthMethod: method, GrantTypes: grantTypes, CreatedAt: now}
+	client := Client{ID: s.clientIDPrefix + clientID, Name: req.ClientName, RedirectURIs: slices.Clone(req.RedirectURIs), TokenEndpointAuthMethod: method, GrantTypes: grantTypes, CreatedAt: now, Provenance: ClientProvenanceDynamic}
 	capacityExceeded, err := s.registerClient(&client)
 	if err != nil {
 		slog.WarnContext(r.Context(), "save oauth client registration", "err", err)
@@ -1754,6 +1844,13 @@ func redirectURIRegistered(registered []string, requested string) bool {
 	return false
 }
 
+func clientRedirectURIRegistered(client *Client, requested string) bool {
+	if client.Provenance == ClientProvenanceMetadata {
+		return !strings.Contains(requested, "#") && slices.Contains(client.RedirectURIs, requested)
+	}
+	return redirectURIRegistered(client.RedirectURIs, requested)
+}
+
 func validateClientMetadata(name string, redirectURIs []string, authMethod string, requestedGrantTypes []string, allowLegacyGrantSentinel bool) (grantTypes []string, errorCode string, err error) {
 	if !utf8.ValidString(name) || len(name) > maxOAuthClientName || strings.IndexFunc(name, unicode.IsControl) >= 0 {
 		return nil, "invalid_client_metadata", errors.New("client_name is invalid or too long")
@@ -1984,6 +2081,17 @@ func clientDisplayName(client *Client) string {
 	return "remote OAuth client"
 }
 
+func clientHostname(client *Client) string {
+	if client.Provenance != ClientProvenanceMetadata {
+		return ""
+	}
+	u, err := url.Parse(client.ID)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
+}
+
 func userInitial(username string) string {
 	for _, r := range strings.TrimSpace(username) {
 		return strings.ToUpper(string(r))
@@ -2187,8 +2295,8 @@ func (s *Server) handleOAuthEndSession(w http.ResponseWriter, r *http.Request) {
 	postLogoutRedirectURI := r.URL.Query().Get("post_logout_redirect_uri")
 	clientID := r.URL.Query().Get("client_id")
 	if postLogoutRedirectURI != "" && clientID != "" {
-		client := s.oauthClient(clientID)
-		if client.ID != "" && slices.Contains(client.RedirectURIs, postLogoutRedirectURI) {
+		client, err := s.resolveOAuthClient(r.Context(), clientID)
+		if err == nil && clientRedirectURIRegistered(&client, postLogoutRedirectURI) {
 			// Valid — will redirect after session teardown.
 		} else {
 			postLogoutRedirectURI = ""
@@ -2223,16 +2331,19 @@ func (s *Server) handleOAuthDeviceAuthorization(w http.ResponseWriter, r *http.R
 		return
 	}
 	clientID := r.PostForm.Get("client_id")
-	if !s.rateLimitClient(w, r, clientID) {
+	if !s.rateLimitIP(w, r) {
 		return
 	}
 	if clientID == "" {
 		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", "missing client_id")
 		return
 	}
-	client := s.oauthClient(clientID)
-	if client.ID == "" {
+	client, err := s.authenticateOAuthClient(r, s.issuer+"/oauth/device_authorization")
+	if err != nil {
 		oauth.WriteError(w, http.StatusBadRequest, "invalid_client", "unknown client")
+		return
+	}
+	if !s.rateLimitResolvedClient(w, r, &client) {
 		return
 	}
 	if !clientSupportsGrant(&client, oauth.GrantDeviceCode) {
@@ -2363,7 +2474,7 @@ func (s *Server) handleOAuthDeviceApprove(w http.ResponseWriter, r *http.Request
 	_, _ = w.Write([]byte(`<html><body><p>Device authorized. You may close this page.</p></body></html>`))
 }
 
-func (s *Server) handleOAuthDeviceCodeToken(w http.ResponseWriter, r *http.Request, binding dpopBinding) { //nolint:gocritic // Immutable proof values are passed together to preserve their binding.
+func (s *Server) handleOAuthDeviceCodeToken(w http.ResponseWriter, r *http.Request, binding dpopBinding, client Client) { //nolint:gocritic // Immutable proof values are passed together to preserve their binding.
 	dpopJKT := binding.jkt
 	deviceCode := r.PostForm.Get("device_code")
 	clientID := r.PostForm.Get("client_id")
@@ -2452,7 +2563,6 @@ func (s *Server) handleOAuthDeviceCodeToken(w http.ResponseWriter, r *http.Reque
 	grant := Grant{ID: grantID, UserID: dc.UserID, ClientID: dc.ClientID, Resource: s.resourceURL, Scope: dc.Scope, CreatedAt: now, ExpiresAt: now.Add(s.refreshTokenTTL)}
 	refreshToken := ""
 	refreshEntry := RefreshToken{}
-	client := s.oauthClient(dc.ClientID)
 	if clientSupportsGrant(&client, oauth.GrantRefreshToken) {
 		refreshEntry = RefreshToken{GrantID: grantID, UserID: dc.UserID, ClientID: dc.ClientID, Resource: s.resourceURL, Scope: dc.Scope, DPoPJKT: dpopJKT, ExpiresAt: grant.ExpiresAt}
 		refreshToken, err = randomToken()
@@ -2472,14 +2582,18 @@ func (s *Server) handleOAuthDeviceCodeToken(w http.ResponseWriter, r *http.Reque
 	s.mu.Lock()
 	err = s.state.transact(func(next *storeFile) bool {
 		current, found := next.DeviceCodes[codeHash]
-		client, clientFound := next.Clients[dc.ClientID]
-		if !found || current == nil || current.Status != "approved" || current.UserID != dc.UserID || current.ClientID != dc.ClientID || !clientFound || !clientSupportsGrant(&client, oauth.GrantDeviceCode) {
+		currentClient := client
+		clientFound := currentClient.ID == dc.ClientID
+		if client.Provenance != ClientProvenanceMetadata {
+			currentClient, clientFound = next.Clients[dc.ClientID]
+		}
+		if !found || current == nil || current.Status != "approved" || current.UserID != dc.UserID || current.ClientID != dc.ClientID || !clientFound || !clientSupportsGrant(&currentClient, oauth.GrantDeviceCode) {
 			return false
 		}
-		grant.ClientName = clientDisplayName(&client)
+		grant.ClientName = clientDisplayName(&currentClient)
 		delete(next.DeviceCodes, codeHash)
 		next.Grants[grant.ID] = grant
-		if refreshToken != "" && clientSupportsGrant(&client, oauth.GrantRefreshToken) {
+		if refreshToken != "" && clientSupportsGrant(&currentClient, oauth.GrantRefreshToken) {
 			next.RefreshTokens[oauth.RefreshTokenKey(refreshToken)] = refreshEntry
 		} else {
 			refreshToken = ""
@@ -2499,6 +2613,72 @@ func (s *Server) handleOAuthDeviceCodeToken(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	s.writeTokenResponse(w, &response)
+}
+
+func (s *Server) authenticateOAuthClient(r *http.Request, audience string) (Client, error) {
+	client, err := s.resolveOAuthClient(r.Context(), r.PostForm.Get("client_id"))
+	if err != nil {
+		return Client{}, err
+	}
+	if err := s.authenticateResolvedOAuthClient(r, &client, audience); err != nil {
+		return Client{}, err
+	}
+	return client, nil
+}
+
+func (s *Server) authenticateResolvedOAuthClient(r *http.Request, client *Client, audience string) error {
+	assertionType := r.PostForm.Get("client_assertion_type")
+	assertion := r.PostForm.Get("client_assertion")
+	if client.TokenEndpointAuthMethod == oauth.TokenEndpointAuthNone {
+		_, assertionTypePresent := r.PostForm["client_assertion_type"]
+		_, assertionPresent := r.PostForm["client_assertion"]
+		if assertionTypePresent || assertionPresent || assertionType != "" || assertion != "" {
+			return errors.New("public client must not send client authentication")
+		}
+		return nil
+	}
+	if client.TokenEndpointAuthMethod != oauth.TokenEndpointAuthPrivateKeyJWT || assertionType != clientAssertionType || assertion == "" {
+		return errors.New("private_key_jwt client authentication is required")
+	}
+	keys, err := s.clientMetadata.keys(r.Context(), client)
+	if err != nil {
+		return err
+	}
+	claims, err := verifyClientAssertion(assertion, client.ID, audience, keys, time.Now())
+	if err != nil {
+		return err
+	}
+	return s.reserveClientAssertion(client.ID, claims.JWTID, time.Unix(claims.Expiry, 0).Add(time.Minute))
+}
+
+func (s *Server) reserveClientAssertion(clientID, jti string, expiresAt time.Time) error {
+	key := oauth.RefreshTokenKey(clientID + "\x00" + jti)
+	now := time.Now()
+	reserved := false
+	s.mu.Lock()
+	err := s.state.transact(func(next *storeFile) bool {
+		changed := false
+		for storedKey, expiry := range next.ClientAssertionJTIs {
+			if !now.Before(expiry) {
+				delete(next.ClientAssertionJTIs, storedKey)
+				changed = true
+			}
+		}
+		if _, replay := next.ClientAssertionJTIs[key]; replay || len(next.ClientAssertionJTIs) >= clientAssertionJTILimit {
+			return changed
+		}
+		next.ClientAssertionJTIs[key] = expiresAt
+		reserved = true
+		return true
+	})
+	s.mu.Unlock()
+	if err != nil {
+		return fmt.Errorf("persist client assertion replay state: %w", err)
+	}
+	if !reserved {
+		return errors.New("client assertion jti was replayed or capacity is exhausted")
+	}
+	return nil
 }
 
 func generateUserCode() string {

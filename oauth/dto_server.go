@@ -72,6 +72,19 @@ type AuthorizationServerMetadata struct {
 	AuthorizationResponseIssuerParameterSupported bool     `json:"authorization_response_iss_parameter_supported"`
 	PushedAuthorizationRequestEndpoint            string   `json:"pushed_authorization_request_endpoint,omitempty"`
 	RequirePushedAuthorizationRequests            bool     `json:"require_pushed_authorization_requests"`
+	ClientIDMetadataDocumentSupported             bool     `json:"client_id_metadata_document_supported,omitempty"`
+}
+
+// ClientIDMetadataDocument describes an OAuth client identified by its HTTPS metadata URL.
+type ClientIDMetadataDocument struct {
+	ClientID                string   `json:"client_id"`
+	ClientName              string   `json:"client_name"`
+	RedirectURIs            []string `json:"redirect_uris"`
+	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method,omitempty"`
+	GrantTypes              []string `json:"grant_types,omitempty"`
+	ResponseTypes           []string `json:"response_types,omitempty"`
+	JWKS                    *JWKSet  `json:"jwks,omitempty"`
+	JWKSURI                 string   `json:"jwks_uri,omitempty"`
 }
 
 // RegisterRequest is a dynamic client registration request.
@@ -169,15 +182,16 @@ type JWKSet struct {
 // JWK is a JSON Web Key.  For server keys (RSA), only kty/n/e/kid/use/alg
 // are populated.  For client DPoP keys, crv/x/y may also be set.
 type JWK struct {
-	Kty string `json:"kty"`
-	Use string `json:"use,omitempty"`
-	Alg string `json:"alg,omitempty"`
-	Kid string `json:"kid,omitempty"`
-	N   string `json:"n,omitempty"`
-	E   string `json:"e,omitempty"`
-	Crv string `json:"crv,omitempty"`
-	X   string `json:"x,omitempty"`
-	Y   string `json:"y,omitempty"`
+	Kty    string   `json:"kty"`
+	Use    string   `json:"use,omitempty"`
+	Alg    string   `json:"alg,omitempty"`
+	Kid    string   `json:"kid,omitempty"`
+	N      string   `json:"n,omitempty"`
+	E      string   `json:"e,omitempty"`
+	Crv    string   `json:"crv,omitempty"`
+	X      string   `json:"x,omitempty"`
+	Y      string   `json:"y,omitempty"`
+	KeyOps []string `json:"key_ops,omitempty"`
 }
 
 // JWTHeader is the JOSE header for a JWT access token.

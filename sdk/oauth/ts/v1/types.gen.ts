@@ -27,6 +27,7 @@ export interface AuthorizationServerMetadata {
   authorization_response_iss_parameter_supported: boolean;
   pushed_authorization_request_endpoint?: string;
   require_pushed_authorization_requests: boolean;
+  client_id_metadata_document_supported?: boolean;
 }
 
 /** ProtectedResourceMetadata is OAuth 2.0 Protected Resource Metadata. */
@@ -35,6 +36,40 @@ export interface ProtectedResourceMetadata {
   authorization_servers: string[];
   scopes_supported?: string[];
   resource_documentation?: string;
+}
+
+/**
+ * JWK is a JSON Web Key.  For server keys (RSA), only kty/n/e/kid/use/alg
+ * are populated.  For client DPoP keys, crv/x/y may also be set.
+ */
+export interface JWK {
+  kty: string;
+  use?: string;
+  alg?: string;
+  kid?: string;
+  n?: string;
+  e?: string;
+  crv?: string;
+  x?: string;
+  y?: string;
+  key_ops?: string[];
+}
+
+/** JWKSet is a JSON Web Key Set response. */
+export interface JWKSet {
+  keys: JWK[];
+}
+
+/** ClientIDMetadataDocument describes an OAuth client identified by its HTTPS metadata URL. */
+export interface ClientIDMetadataDocument {
+  client_id: string;
+  client_name: string;
+  redirect_uris: string[];
+  token_endpoint_auth_method?: string;
+  grant_types?: string[];
+  response_types?: string[];
+  jwks?: JWKSet;
+  jwks_uri?: string;
 }
 
 /** RegisterRequest is a dynamic client registration request. */
@@ -117,27 +152,6 @@ export interface IntrospectionResponse {
 export interface ErrorResponse {
   error: string;
   error_description?: string;
-}
-
-/**
- * JWK is a JSON Web Key.  For server keys (RSA), only kty/n/e/kid/use/alg
- * are populated.  For client DPoP keys, crv/x/y may also be set.
- */
-export interface JWK {
-  kty: string;
-  use?: string;
-  alg?: string;
-  kid?: string;
-  n?: string;
-  e?: string;
-  crv?: string;
-  x?: string;
-  y?: string;
-}
-
-/** JWKSet is a JSON Web Key Set response. */
-export interface JWKSet {
-  keys: JWK[];
 }
 
 /** PARResponse is an RFC 9126 pushed authorization request response. */

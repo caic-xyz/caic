@@ -47,6 +47,7 @@ AuthorizationServerMetadata is OAuth/OIDC discovery metadata.
 | `authorization_response_iss_parameter_supported` | `boolean` |  | yes |
 | `pushed_authorization_request_endpoint` | `string` |  |  |
 | `require_pushed_authorization_requests` | `boolean` |  | yes |
+| `client_id_metadata_document_supported` | `boolean` |  |  |
 
 ### ProtectedResourceMetadata
 
@@ -58,6 +59,47 @@ ProtectedResourceMetadata is OAuth 2.0 Protected Resource Metadata.
 | `authorization_servers` | `string[]` |  | yes |
 | `scopes_supported` | `string[]` |  |  |
 | `resource_documentation` | `string` |  |  |
+
+### JWK
+
+JWK is a JSON Web Key.  For server keys (RSA), only kty/n/e/kid/use/alg
+are populated.  For client DPoP keys, crv/x/y may also be set.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `kty` | `string` |  | yes |
+| `use` | `string` |  |  |
+| `alg` | `string` |  |  |
+| `kid` | `string` |  |  |
+| `n` | `string` |  |  |
+| `e` | `string` |  |  |
+| `crv` | `string` |  |  |
+| `x` | `string` |  |  |
+| `y` | `string` |  |  |
+| `key_ops` | `string[]` |  |  |
+
+### JWKSet
+
+JWKSet is a JSON Web Key Set response.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `keys` | `JWK[]` |  | yes |
+
+### ClientIDMetadataDocument
+
+ClientIDMetadataDocument describes an OAuth client identified by its HTTPS metadata URL.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `client_id` | `string` |  | yes |
+| `client_name` | `string` |  | yes |
+| `redirect_uris` | `string[]` |  | yes |
+| `token_endpoint_auth_method` | `string` |  |  |
+| `grant_types` | `string[]` |  |  |
+| `response_types` | `string[]` |  |  |
+| `jwks` | `JWKSet` |  |  |
+| `jwks_uri` | `string` |  |  |
 
 ### RegisterRequest
 
@@ -163,31 +205,6 @@ ErrorResponse is an OAuth error response body.
 |-------|------|-------------|----------|
 | `error` | `string` |  | yes |
 | `error_description` | `string` |  |  |
-
-### JWK
-
-JWK is a JSON Web Key.  For server keys (RSA), only kty/n/e/kid/use/alg
-are populated.  For client DPoP keys, crv/x/y may also be set.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `kty` | `string` |  | yes |
-| `use` | `string` |  |  |
-| `alg` | `string` |  |  |
-| `kid` | `string` |  |  |
-| `n` | `string` |  |  |
-| `e` | `string` |  |  |
-| `crv` | `string` |  |  |
-| `x` | `string` |  |  |
-| `y` | `string` |  |  |
-
-### JWKSet
-
-JWKSet is a JSON Web Key Set response.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `keys` | `JWK[]` |  | yes |
 
 ### PARResponse
 

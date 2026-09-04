@@ -63,6 +63,7 @@ public struct AuthorizationServerMetadata: Codable {
     public let authorization_response_iss_parameter_supported: Bool
     public let pushed_authorization_request_endpoint: String?
     public let require_pushed_authorization_requests: Bool
+    public let client_id_metadata_document_supported: Bool?
 }
 
 // OAuth 2.0 Protected Resource Metadata (RFC 9728)
@@ -73,6 +74,44 @@ public struct ProtectedResourceMetadata: Codable {
     public let authorization_servers: [String]
     public let scopes_supported: [String]?
     public let resource_documentation: String?
+}
+
+// JSON Web Key (RFC 7517)
+
+/// JWK is a JSON Web Key.  For server keys (RSA), only kty/n/e/kid/use/alg
+/// are populated.  For client DPoP keys, crv/x/y may also be set.
+public struct JWK: Codable {
+    public let kty: String
+    public let use: String?
+    public let alg: String?
+    public let kid: String?
+    public let n: String?
+    public let e: String?
+    public let crv: String?
+    public let x: String?
+    public let y: String?
+    public let key_ops: [String]?
+}
+
+// JSON Web Key Set (RFC 7517)
+
+/// JWKSet is a JSON Web Key Set response.
+public struct JWKSet: Codable {
+    public let keys: [JWK]
+}
+
+// OAuth Client ID Metadata Document
+
+/// ClientIDMetadataDocument describes an OAuth client identified by its HTTPS metadata URL.
+public struct ClientIDMetadataDocument: Codable {
+    public let client_id: String
+    public let client_name: String
+    public let redirect_uris: [String]
+    public let token_endpoint_auth_method: String?
+    public let grant_types: [String]?
+    public let response_types: [String]?
+    public let jwks: JWKSet?
+    public let jwks_uri: String?
 }
 
 // OAuth 2.0 Dynamic Client Registration request (RFC 7591)
@@ -171,29 +210,6 @@ public struct IntrospectionResponse: Codable {
 public struct ErrorResponse: Codable {
     public let error: String
     public let error_description: String?
-}
-
-// JSON Web Key (RFC 7517)
-
-/// JWK is a JSON Web Key.  For server keys (RSA), only kty/n/e/kid/use/alg
-/// are populated.  For client DPoP keys, crv/x/y may also be set.
-public struct JWK: Codable {
-    public let kty: String
-    public let use: String?
-    public let alg: String?
-    public let kid: String?
-    public let n: String?
-    public let e: String?
-    public let crv: String?
-    public let x: String?
-    public let y: String?
-}
-
-// JSON Web Key Set (RFC 7517)
-
-/// JWKSet is a JSON Web Key Set response.
-public struct JWKSet: Codable {
-    public let keys: [JWK]
 }
 
 // OAuth 2.0 Pushed Authorization Request response (RFC 9126)

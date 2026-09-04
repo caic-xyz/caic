@@ -21,6 +21,7 @@
 // 7592 (Client Registration Management), 8628 (Device Authorization
 // Grant), 9126 (Pushed Authorization Requests), 9207 (Issuer
 // Identification), 9449 (DPoP), and 9700 (OAuth Security BCP).
+// Client ID Metadata Documents are implemented from the current IETF draft.
 //
 // Not implemented: 8693 (Token Exchange). Issue audience-scoped tokens at
 // the authorization endpoint via the resource parameter (RFC 8707) instead.
@@ -41,6 +42,8 @@ const (
 	TokenTypeBearer = "Bearer"
 	// TokenEndpointAuthNone is the public-client token endpoint auth method.
 	TokenEndpointAuthNone = "none"
+	// TokenEndpointAuthPrivateKeyJWT authenticates a client with an asymmetric JWT assertion.
+	TokenEndpointAuthPrivateKeyJWT = "private_key_jwt" //nolint:gosec // Standard OAuth authentication method identifier, not a credential.
 	// JWTAlgRS256 is the RSASSA-PKCS1-v1_5 SHA-256 JWT algorithm.
 	JWTAlgRS256 = "RS256"
 )
