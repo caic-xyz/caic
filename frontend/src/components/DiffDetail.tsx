@@ -103,7 +103,7 @@ export default function DiffDetail(props: Props) {
       labels.push({ scope: "staged", label: gitStatusLabel(file.indexStatus) });
     if (file.worktreeStatus)
       labels.push({
-        scope: "working tree",
+        scope: "",
         label: gitStatusLabel(file.worktreeStatus),
       });
     return labels;
@@ -183,9 +183,27 @@ export default function DiffDetail(props: Props) {
                         <For each={repo.commits}>
                           {(commit) => (
                             <article class={styles.commit}>
+                              <span class={styles.commitGraph} aria-hidden="true">
+                                <span />
+                              </span>
                               <div class={styles.commitHeading}>
-                                <code>{commit.sha.slice(0, 8)}</code>
-                                <span>{commit.subject}</span>
+                                <code class={styles.commitSha}>
+                                  {commit.sha.slice(0, 8)}
+                                </code>
+                                <Show when={commit.decorations}>
+                                  <span class={styles.commitDecorations}>
+                                    {commit.decorations}
+                                  </span>
+                                </Show>
+                                <time
+                                  class={styles.commitDate}
+                                  dateTime={commit.authoredDate}
+                                >
+                                  {commit.authoredDate}
+                                </time>
+                                <span class={styles.commitSubject}>
+                                  {commit.subject}
+                                </span>
                               </div>
                               <Show when={commit.stat.length > 0}>
                                 <div class={styles.commitStat}>

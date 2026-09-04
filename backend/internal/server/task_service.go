@@ -731,7 +731,13 @@ func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, path s
 			for k, file := range commit.Stat {
 				stat[k] = v1.DiffFileStat{Path: file.Path, Added: file.Added, Deleted: file.Deleted, Binary: file.Binary}
 			}
-			commits[j] = v1.GitCommit{SHA: commit.SHA, Subject: commit.Subject, Stat: stat}
+			commits[j] = v1.GitCommit{
+				SHA:          commit.SHA,
+				Subject:      commit.Subject,
+				Decorations:  commit.Decorations,
+				AuthoredDate: commit.AuthoredDate,
+				Stat:         stat,
+			}
 		}
 		uncommitted := make([]v1.GitFileStatus, len(status.Uncommitted))
 		for j, file := range status.Uncommitted {

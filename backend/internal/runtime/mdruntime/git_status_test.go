@@ -20,23 +20,29 @@ func TestParseGitStatus(t *testing.T) {
 		out := strings.Join([]string{
 			"# branch.oid 0123456789abcdef",
 			"# branch.head caic-42",
-			"# branch.upstream origin/main",
-			"# branch.ab +2 -1",
+			"# branch.upstream host/caic-42",
+			"# branch.ab +0 -0",
 			"1 M. N... 100644 100644 100644 abc def src/staged.go",
 			"1 .M N... 100644 100644 100644 abc def src/working.go",
 			"2 R. N... 100644 100644 100644 abc def R100 src/new name.go",
 			"src/old name.go",
 			"? notes/new.txt",
+			gitComparisonMarker + "origin/main",
+			gitDivergenceMarker + "1\t2",
 			gitLogMarker,
 			"",
 			gitCommitMarker,
 			"1111111111111111111111111111111111111111",
+			"2026-08-30",
+			"tag: v1.2.3",
 			"Add status summary",
 			"",
 			"\n12\t0\tsrc/status.go",
 			"-\t-\tassets/logo.png",
 			gitCommitMarker,
 			"2222222222222222222222222222222222222222",
+			"2026-09-01",
+			"HEAD -> caic-42",
 			"Polish the UI",
 			"",
 			"\n2\t2\tfrontend/view.tsx",
@@ -56,16 +62,20 @@ func TestParseGitStatus(t *testing.T) {
 			Behind:   1,
 			Commits: []runtime.GitCommit{
 				{
-					SHA:     "1111111111111111111111111111111111111111",
-					Subject: "Add status summary",
+					SHA:          "1111111111111111111111111111111111111111",
+					Subject:      "Add status summary",
+					Decorations:  "tag: v1.2.3",
+					AuthoredDate: "2026-08-30",
 					Stat: []runtime.GitFileStat{
 						{Path: "src/status.go", Added: 12},
 						{Path: "assets/logo.png", Binary: true},
 					},
 				},
 				{
-					SHA:     "2222222222222222222222222222222222222222",
-					Subject: "Polish the UI",
+					SHA:          "2222222222222222222222222222222222222222",
+					Subject:      "Polish the UI",
+					Decorations:  "HEAD -> caic-42",
+					AuthoredDate: "2026-09-01",
 					Stat: []runtime.GitFileStat{
 						{Path: "frontend/view.tsx", Added: 2, Deleted: 2},
 						{Path: "frontend/new.tsx", Added: 1, Deleted: 1},
@@ -89,15 +99,16 @@ func TestParseGitStatus(t *testing.T) {
 		for name, out := range map[string]string{
 			"missing marker":    "# branch.head main\x00",
 			"bad divergence":    "# branch.ab ahead\x00" + gitLogMarker + "\x00",
+			"bad comparison":    gitDivergenceMarker + "ahead\x00" + gitLogMarker + "\x00",
 			"bad ordinary":      "1 M. short\x00" + gitLogMarker + "\x00",
 			"bad rename":        "2 R. short\x00" + gitLogMarker + "\x00",
 			"bad unmerged":      "u UU short\x00" + gitLogMarker + "\x00",
 			"unknown record":    "x surprise\x00" + gitLogMarker + "\x00",
 			"incomplete commit": gitLogMarker + "\x00" + gitCommitMarker + "\x00sha",
-			"bad numstat":       gitLogMarker + "\x00" + gitCommitMarker + "\x00sha\x00subject\x00words",
-			"bad rename stat":   gitLogMarker + "\x00" + gitCommitMarker + "\x00sha\x00subject\x001\t1\t",
-			"bad additions":     gitLogMarker + "\x00" + gitCommitMarker + "\x00sha\x00subject\x00many\t1\tfile",
-			"bad deletions":     gitLogMarker + "\x00" + gitCommitMarker + "\x00sha\x00subject\x001\tmany\tfile",
+			"bad numstat":       gitLogMarker + "\x00" + gitCommitMarker + "\x00sha\x002026-09-01\x00\x00subject\x00words",
+			"bad rename stat":   gitLogMarker + "\x00" + gitCommitMarker + "\x00sha\x002026-09-01\x00\x00subject\x001\t1\t",
+			"bad additions":     gitLogMarker + "\x00" + gitCommitMarker + "\x00sha\x002026-09-01\x00\x00subject\x00many\t1\tfile",
+			"bad deletions":     gitLogMarker + "\x00" + gitCommitMarker + "\x00sha\x002026-09-01\x00\x00subject\x001\tmany\tfile",
 		} {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
@@ -113,11 +124,11 @@ func TestGitStatusCommand(t *testing.T) {
 	t.Parallel()
 	t.Run("quotes repository and includes protocol", func(t *testing.T) {
 		t.Parallel()
-		cmd := gitStatusCommand("/work/repo's copy")
+		cmd := gitStatusCommand("/work/repo's copy", "upstream", "trunk")
 		if !strings.HasPrefix(cmd, `cd '/work/repo'"'"'s copy'`) {
 			t.Errorf("gitStatusCommand() does not safely quote repo: %q", cmd)
 		}
-		for _, fragment := range []string{"git status --porcelain=v2", "@{upstream}", "$upstream..HEAD", "--numstat -z", gitLogMarker, gitCommitMarker} {
+		for _, fragment := range []string{"git status --porcelain=v2", "@{upstream}", "upstream/trunk", "$comparison..HEAD", "--left-right", "--date-order", "--decorate=short", "%as", "%D", "--numstat -z", gitComparisonMarker, gitDivergenceMarker, gitLogMarker, gitCommitMarker} {
 			if !strings.Contains(cmd, fragment) {
 				t.Errorf("gitStatusCommand() missing %q", fragment)
 			}
@@ -135,13 +146,15 @@ func TestGitStatusCommand(t *testing.T) {
 		}
 		runTestGit(t, dir, "add", "tracked.txt")
 		runTestGit(t, dir, "commit", "-m", "base")
-		runTestGit(t, dir, "branch", "upstream")
-		runTestGit(t, dir, "branch", "--set-upstream-to=upstream", "main")
+		runTestGit(t, dir, "update-ref", "refs/remotes/origin/main", "HEAD")
 		if err := os.WriteFile(filepath.Join(dir, "committed.txt"), []byte("committed\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		runTestGit(t, dir, "add", "committed.txt")
 		runTestGit(t, dir, "commit", "-m", "one ahead")
+		runTestGit(t, dir, "remote", "add", "host", ".")
+		runTestGit(t, dir, "update-ref", "refs/remotes/host/caic-42", "HEAD")
+		runTestGit(t, dir, "branch", "--set-upstream-to=host/caic-42", "main")
 		if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("changed\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -149,7 +162,7 @@ func TestGitStatusCommand(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		out, err := exec.CommandContext(t.Context(), "sh", "-c", gitStatusCommand(dir)).Output() //nolint:gosec // command and temporary repository are test-owned.
+		out, err := exec.CommandContext(t.Context(), "sh", "-c", gitStatusCommand(dir, "origin", "main")).Output() //nolint:gosec // command and temporary repository are test-owned.
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -157,14 +170,26 @@ func TestGitStatusCommand(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if status.Branch != "main" || status.Upstream != "upstream" || status.Ahead != 1 || status.Behind != 0 {
+		if status.Branch != "main" || status.Upstream != "origin/main" || status.Ahead != 1 || status.Behind != 0 {
 			t.Errorf("branch status = %+v", status)
 		}
-		if len(status.Commits) != 1 || status.Commits[0].Subject != "one ahead" || len(status.Commits[0].Stat) != 1 || status.Commits[0].Stat[0] != (runtime.GitFileStat{Path: "committed.txt", Added: 1}) {
+		if len(status.Commits) != 1 || status.Commits[0].Subject != "one ahead" || status.Commits[0].AuthoredDate == "" || status.Commits[0].Decorations != "HEAD -> main, host/caic-42" || len(status.Commits[0].Stat) != 1 || status.Commits[0].Stat[0] != (runtime.GitFileStat{Path: "committed.txt", Added: 1}) {
 			t.Errorf("commits = %+v", status.Commits)
 		}
 		if len(status.Uncommitted) != 2 {
 			t.Errorf("uncommitted = %+v", status.Uncommitted)
+		}
+
+		out, err = exec.CommandContext(t.Context(), "sh", "-c", gitStatusCommand(dir, "missing", "branch")).Output() //nolint:gosec // command and temporary repository are test-owned.
+		if err != nil {
+			t.Fatal(err)
+		}
+		status, err = parseGitStatus(string(out))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status.Upstream != "host/caic-42" || status.Ahead != 0 || status.Behind != 0 || len(status.Commits) != 0 {
+			t.Errorf("fallback branch status = %+v", status)
 		}
 	})
 }

@@ -1291,10 +1291,12 @@ public struct ForkTaskReq: Codable {
     public let gitHubToken: Bool?
 }
 
-/// GitCommit describes one commit ahead of a repository's upstream branch.
+/// GitCommit describes one commit ahead of a repository's original tracking branch.
 public struct GitCommit: Codable {
     public let sha: String
     public let subject: String
+    public let decorations: String?
+    public let authoredDate: String
     public let stat: DiffStat
 }
 

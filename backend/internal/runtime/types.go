@@ -102,7 +102,7 @@ type Repo struct {
 }
 
 // RepositoryStatus describes the checked-out branch and its changes relative
-// to the branch's configured upstream.
+// to the host checkout's original tracking branch.
 type RepositoryStatus struct {
 	Branch      string
 	Upstream    string
@@ -112,11 +112,13 @@ type RepositoryStatus struct {
 	Uncommitted []GitFileStatus
 }
 
-// GitCommit describes one commit that is ahead of the configured upstream.
+// GitCommit describes one commit that is ahead of the comparison branch.
 type GitCommit struct {
-	SHA     string
-	Subject string
-	Stat    []GitFileStat
+	SHA          string
+	Subject      string
+	Decorations  string
+	AuthoredDate string
+	Stat         []GitFileStat
 }
 
 // GitFileStat describes one path's changes in a commit.

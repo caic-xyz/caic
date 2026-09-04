@@ -24,6 +24,8 @@ func BenchmarkParseGitStatus(b *testing.B) {
 		records = append(records,
 			gitCommitMarker,
 			fmt.Sprintf("%040x", i),
+			"2026-09-01",
+			"",
 			fmt.Sprintf("Commit description %d", i),
 			"",
 			fmt.Sprintf("\n5\t5\tsrc/file-%02d.go", i),

@@ -1138,10 +1138,12 @@ export interface ForkTaskReq {
   gitHubToken?: boolean;
 }
 
-/** GitCommit describes one commit ahead of a repository's upstream branch. */
+/** GitCommit describes one commit ahead of a repository's original tracking branch. */
 export interface GitCommit {
   sha: string;
   subject: string;
+  decorations?: string;
+  authoredDate: string;
   stat: DiffStat;
 }
 

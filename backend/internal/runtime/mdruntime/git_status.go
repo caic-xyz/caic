@@ -1,4 +1,4 @@
-// Git status inspection reports branch, upstream commits, and uncommitted files from md containers.
+// Git status inspection compares md container branches with their host checkout's original tracking refs.
 
 package mdruntime
 
@@ -12,17 +12,28 @@ import (
 )
 
 const (
-	gitLogMarker    = "caic-git-log"
-	gitCommitMarker = "caic-git-commit"
+	gitLogMarker        = "caic-git-log"
+	gitCommitMarker     = "caic-git-commit"
+	gitComparisonMarker = "# caic.branch.upstream "
+	gitDivergenceMarker = "# caic.branch.ab "
 )
 
-func gitStatusCommand(repo string) string {
+func gitStatusCommand(repo, defaultRemote, defaultBranch string) string {
+	comparison := ""
+	if defaultRemote != "" && defaultBranch != "" {
+		comparison = defaultRemote + "/" + defaultBranch
+	}
 	return "cd " + shellQuote(repo) + ` && export GIT_OPTIONAL_LOCKS=0 LC_ALL=C && ` +
 		`git status --porcelain=v2 --branch -z --untracked-files=all && ` +
-		`printf '\0` + gitLogMarker + `\0' && ` +
 		`upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true) && ` +
-		`if [ -n "$upstream" ]; then git log --reverse --no-color ` +
-		`--format='%x00` + gitCommitMarker + `%x00%H%x00%s%x00' --numstat -z "$upstream..HEAD"; fi`
+		`comparison=` + shellQuote(comparison) + ` && ` +
+		`if ! git rev-parse --verify --quiet "$comparison^{commit}" >/dev/null; then comparison=$upstream; fi && ` +
+		`if [ -n "$comparison" ]; then ` +
+		`divergence=$(git rev-list --left-right --count "$comparison...HEAD") && ` +
+		`printf '` + gitComparisonMarker + `%s\0` + gitDivergenceMarker + `%s\0' "$comparison" "$divergence"; ` +
+		`fi && printf '` + gitLogMarker + `\0' && ` +
+		`if [ -n "$comparison" ]; then git log --date-order --decorate=short --no-color ` +
+		`--format='%x00` + gitCommitMarker + `%x00%H%x00%as%x00%D%x00%s%x00' --numstat -z "$comparison..HEAD"; fi`
 }
 
 func shellQuote(s string) string {
@@ -56,11 +67,16 @@ func parseGitStatus(out string) (runtime.RepositoryStatus, error) {
 		if records[i] != gitCommitMarker {
 			return runtime.RepositoryStatus{}, fmt.Errorf("unknown git log record %q", records[i])
 		}
-		if i+3 >= len(records) {
+		if i+5 >= len(records) {
 			return runtime.RepositoryStatus{}, errors.New("incomplete git commit record")
 		}
-		commit := runtime.GitCommit{SHA: records[i+1], Subject: records[i+2]}
-		i += 3
+		commit := runtime.GitCommit{
+			SHA:          records[i+1],
+			AuthoredDate: records[i+2],
+			Decorations:  records[i+3],
+			Subject:      records[i+4],
+		}
+		i += 5
 		for i < len(records) && records[i] != gitCommitMarker {
 			record := strings.TrimPrefix(records[i], "\n")
 			if record == "" {
@@ -118,6 +134,12 @@ func parseGitStatusRecord(status *runtime.RepositoryStatus, records []string) (i
 	case strings.HasPrefix(record, "# branch.ab "):
 		if _, err := fmt.Sscanf(strings.TrimPrefix(record, "# branch.ab "), "+%d -%d", &status.Ahead, &status.Behind); err != nil {
 			return 0, fmt.Errorf("parse branch divergence %q: %w", record, err)
+		}
+	case strings.HasPrefix(record, gitComparisonMarker):
+		status.Upstream = strings.TrimPrefix(record, gitComparisonMarker)
+	case strings.HasPrefix(record, gitDivergenceMarker):
+		if _, err := fmt.Sscanf(strings.TrimPrefix(record, gitDivergenceMarker), "%d %d", &status.Behind, &status.Ahead); err != nil {
+			return 0, fmt.Errorf("parse comparison divergence %q: %w", record, err)
 		}
 	case strings.HasPrefix(record, "1 "):
 		fields := strings.SplitN(record, " ", 9)

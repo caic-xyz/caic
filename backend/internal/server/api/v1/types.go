@@ -738,11 +738,13 @@ type UsageResp struct {
 	Local     LocalUsage      `json:"local"`
 }
 
-// GitCommit describes one commit ahead of a repository's upstream branch.
+// GitCommit describes one commit ahead of a repository's original tracking branch.
 type GitCommit struct {
-	SHA     string   `json:"sha"`
-	Subject string   `json:"subject"`
-	Stat    DiffStat `json:"stat"`
+	SHA          string   `json:"sha"`
+	Subject      string   `json:"subject"`
+	Decorations  string   `json:"decorations,omitempty"`
+	AuthoredDate string   `json:"authoredDate"`
+	Stat         DiffStat `json:"stat"`
 }
 
 // GitFileStatus describes one uncommitted repository path.

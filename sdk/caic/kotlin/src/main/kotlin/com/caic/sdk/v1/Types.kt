@@ -1660,11 +1660,13 @@ data class ForkTaskReq(
     val gitHubToken: Boolean? = null,
 )
 
-/** GitCommit describes one commit ahead of a repository's upstream branch. */
+/** GitCommit describes one commit ahead of a repository's original tracking branch. */
 @Serializable
 data class GitCommit(
     val sha: String,
     val subject: String,
+    val decorations: String? = null,
+    val authoredDate: String,
     val stat: DiffStat,
 )
 

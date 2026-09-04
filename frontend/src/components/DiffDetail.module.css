@@ -1,6 +1,11 @@
 /* Styles for the full-page repository status and unified diff view. */
 
 .container {
+  --color-commit-date: #a40e26;
+  --color-commit-decoration: #6639ba;
+  --color-commit-graph: #1a7f37;
+  --color-commit-sha: #1a7f37;
+
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -136,33 +141,84 @@
 .commitList,
 .uncommittedList {
   display: grid;
-  gap: 0.4rem;
 }
 
 .commit {
+  display: grid;
+  grid-template-columns: 1.1rem minmax(0, 1fr);
   min-width: 0;
-  border-left: 2px solid var(--color-border);
-  padding-left: 0.6rem;
+}
+
+.commitGraph {
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+.commitGraph::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  border-left: 2px solid var(--color-commit-graph);
+  content: "";
+}
+
+.commit:first-child .commitGraph::before {
+  top: 0.65rem;
+}
+
+.commit:last-child .commitGraph::before {
+  bottom: calc(100% - 0.65rem);
+}
+
+.commitGraph > span {
+  z-index: 1;
+  width: 0.55rem;
+  height: 0.55rem;
+  margin-top: 0.39rem;
+  border: 2px solid var(--color-commit-graph);
+  border-radius: 50%;
+  background: var(--color-bg-elevated);
 }
 
 .commitHeading {
   display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
   gap: 0.55rem;
   min-width: 0;
+  padding: 0.15rem 0 0.25rem;
+  font-family: monospace;
 }
 
-.commitHeading code {
+.commitSha {
   flex-shrink: 0;
-  color: var(--color-text-tertiary);
+  color: var(--color-commit-sha);
 }
 
-.commitHeading span {
+.commitDecorations {
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+  padding: 0 0.3rem;
+  background: var(--color-bg-surface);
+  color: var(--color-commit-decoration);
+  overflow-wrap: anywhere;
+}
+
+.commitDate {
+  flex-shrink: 0;
+  color: var(--color-commit-date);
+}
+
+.commitSubject {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
 .commitStat {
-  margin: 0.3rem 0 0;
+  grid-column: 2;
+  margin: 0 0 0.55rem;
   color: var(--color-text-tertiary);
   font-family: monospace;
   font-size: 0.72rem;
@@ -325,5 +381,9 @@
     align-items: flex-start;
     flex-direction: column;
     gap: 0.25rem;
+  }
+
+  .commitSubject {
+    flex-basis: 100%;
   }
 }

@@ -35,6 +35,8 @@ describe("DiffDetail", () => {
           commits: [
             {
               sha: "1234567890abcdef",
+              authoredDate: "2026-09-03",
+              decorations: "HEAD -> caic-42, host/caic-42, tag: v1.2.3",
               subject: "Surface git status",
               stat: [
                 {
@@ -47,6 +49,7 @@ describe("DiffDetail", () => {
             },
             {
               sha: "abcdef1234567890",
+              authoredDate: "2026-09-02",
               subject: "Add status tests",
               stat: [
                 {
@@ -75,12 +78,20 @@ describe("DiffDetail", () => {
       "2 commits ahead · 1 behind",
     );
     expect(screen.getByText("Commits ahead (2)")).toBeInTheDocument();
+    expect(screen.getByText("12345678")).toHaveClass(styles.commitSha);
+    expect(screen.getByText("2026-09-03")).toHaveAttribute(
+      "datetime",
+      "2026-09-03",
+    );
+    expect(
+      screen.getByText("HEAD -> caic-42, host/caic-42, tag: v1.2.3"),
+    ).toHaveClass(styles.commitDecorations);
     expect(screen.getByText("Surface git status")).toBeInTheDocument();
     expect(screen.getByText("frontend/view.tsx")).toBeInTheDocument();
     expect(screen.getByText("+10")).toHaveClass(styles.added);
     expect(screen.getAllByText("1 file changed")).toHaveLength(2);
     expect(screen.getByText("Uncommitted changes (2)")).toBeInTheDocument();
-    expect(screen.getByText("working tree: modified")).toBeInTheDocument();
+    expect(screen.getByText("modified")).toBeInTheDocument();
     expect(screen.getByText("staged: added")).toBeInTheDocument();
     expect(
       screen.getByText("No changes relative to upstream"),
@@ -110,6 +121,7 @@ describe("DiffDetail", () => {
           commits: [
             {
               sha: "1234567890abcdef",
+              authoredDate: "2026-09-03",
               subject,
               stat: [
                 {

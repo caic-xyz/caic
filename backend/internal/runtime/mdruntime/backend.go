@@ -425,7 +425,8 @@ func (b *Backend) RepositoryStatus(ctx context.Context, id runtime.ID, repoIdx i
 	if repoIdx < 0 || repoIdx >= len(repos) {
 		return runtime.RepositoryStatus{}, fmt.Errorf("repo index %d out of range for %d repos", repoIdx, len(repos))
 	}
-	out, err := b.commandOutput(ctx, ct, gitStatusCommand(repos[repoIdx].ContainerPath))
+	repo := &repos[repoIdx]
+	out, err := b.commandOutput(ctx, ct, gitStatusCommand(repo.ContainerPath, repo.DefaultRemote, repo.DefaultBranch))
 	if err != nil {
 		return runtime.RepositoryStatus{}, fmt.Errorf("git status in container %s: %w (output: %q)", ct.Name(), err, out)
 	}

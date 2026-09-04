@@ -1316,12 +1316,14 @@ ForkTaskReq is the request body for POST /api/caic/v1/tasks/{id}/fork.
 
 ### GitCommit
 
-GitCommit describes one commit ahead of a repository's upstream branch.
+GitCommit describes one commit ahead of a repository's original tracking branch.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `sha` | `string` |  | yes |
 | `subject` | `string` |  | yes |
+| `decorations` | `string` |  |  |
+| `authoredDate` | `string` |  | yes |
 | `stat` | `DiffStat` |  | yes |
 
 ### GitFileStatus
