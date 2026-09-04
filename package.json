@@ -4,7 +4,7 @@
   "type": "module",
   "packageManager": "pnpm@11.18.0",
   "engines": {
-    "node": ">=24",
+    "node": ">=26",
     "pnpm": ">=11.0.0"
   },
   "scripts": {
@@ -33,7 +33,7 @@
     "@solidjs/testing-library": "^0.8.10",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/user-event": "^14.6.6",
-    "@types/node": "^24.13.3",
+    "@types/node": "^26.4.0",
     "@vitest/coverage-v8": "^4.1.11",
     "eslint": "^10.9.1",
     "eslint-plugin-jsx-a11y": "^6.10.2",
