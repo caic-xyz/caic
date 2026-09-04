@@ -11,9 +11,9 @@ export default defineConfig({
   plugins: [solidPlugin(), solidSVG()],
   resolve: {
     alias: {
-      "@mcp-sdk": resolve(__dirname, "sdk/mcp/ts/v1"),
-      "@sdk": resolve(__dirname, "sdk/caic/ts/v1"),
-      "@voicegateway-sdk": resolve(__dirname, "sdk/voicegateway/ts/v1"),
+      "@mcp-sdk": resolve(import.meta.dirname, "sdk/mcp/ts/v1"),
+      "@sdk": resolve(import.meta.dirname, "sdk/caic/ts/v1"),
+      "@voicegateway-sdk": resolve(import.meta.dirname, "sdk/voicegateway/ts/v1"),
     },
   },
   build: {

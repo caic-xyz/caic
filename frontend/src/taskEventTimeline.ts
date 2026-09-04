@@ -40,7 +40,7 @@ export function createTaskEventTimeline(options: TaskEventTimelineOptions): Task
 
   createEffect(() => {
     const id = options.taskId();
-    const taskIsTerminal = terminal();
+    const initialTaskIsTerminal = terminal();
     if (id !== renderedTaskId) {
       renderedTaskId = id;
       setMessages([]);
@@ -122,7 +122,7 @@ export function createTaskEventTimeline(options: TaskEventTimelineOptions): Task
       const wasLive = live;
       if (wasLive) flushPendingEvents();
       live = false;
-      if (!wasLive || !taskIsTerminal) return;
+      if (!wasLive || !initialTaskIsTerminal) return;
       active = false;
       connected.close();
       if (source === connected) source = null;

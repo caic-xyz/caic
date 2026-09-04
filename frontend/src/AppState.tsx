@@ -403,6 +403,7 @@ function createAppStore() {
   // Fetch version, MCP grant, and cache size info when the settings page opens.
   createEffect(() => {
     if (location.pathname !== "/settings") return;
+    const initialMcpOAuthAvailable = mcpOAuthAvailable();
     void (async () => {
       setCheckingUpdate(true);
       setVersionCheckError("");
@@ -411,7 +412,7 @@ function createAppStore() {
         const [v, sizes, grants] = await Promise.all([
           getVersion(),
           getCacheSizes().catch(() => null),
-          mcpOAuthAvailable() ? listOAuthGrants().catch((e: unknown) => {
+          initialMcpOAuthAvailable ? listOAuthGrants().catch((e: unknown) => {
             setOAuthGrantError(e instanceof Error ? e.message : "Could not load MCP clients");
             return null;
           }) : Promise.resolve(null),
@@ -768,9 +769,9 @@ function createAppStore() {
 
   // Clear stale actionId once the server state reflects the transition.
   createEffect(() => {
-    const tid = actionId();
-    if (!tid) return;
-    const t = tasks().find((task) => task.id === tid);
+    const initialActionId = actionId();
+    if (!initialActionId) return;
+    const t = tasks().find((task) => task.id === initialActionId);
     if (t && (t.state === "purging" || t.state === "purged" || t.state === "failed" || t.state === "crashed" || t.state === "stopping" || t.state === "stopped" || t.state === "provisioning")) {
       setActionId(null);
     }
@@ -845,9 +846,9 @@ function createAppStore() {
 
   // Repos available to add in the fork dialog (exclude already-selected extras and source task repos).
   const forkSourceRepoPaths = () => {
-    const id = forkTaskId();
-    if (!id) return new Set<string>();
-    const task = tasks().find((t) => t.id === id);
+    const initialForkTaskId = forkTaskId();
+    if (!initialForkTaskId) return new Set<string>();
+    const task = tasks().find((t) => t.id === initialForkTaskId);
     return new Set((task?.repos ?? []).map((r) => r.name));
   };
   const forkAvailableRecent = () => repos().slice(0, recentCount()).filter((r) => !forkSourceRepoPaths().has(r.path) && !forkExtraRepos().some((s) => s.path === r.path));

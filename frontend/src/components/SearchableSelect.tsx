@@ -55,11 +55,11 @@ export default function SearchableSelect(props: Props) {
   const optionRefs: (HTMLButtonElement | undefined)[] = [];
 
   const visibleOptions = createMemo(() => {
-    const f = filter().toLowerCase();
-    const opts = f
-      ? props.options().filter((o) => (o.search ?? String(o.label)).toLowerCase().includes(f))
+    const initialFilter = filter().toLowerCase();
+    const opts = initialFilter
+      ? props.options().filter((o) => (o.search ?? String(o.label)).toLowerCase().includes(initialFilter))
       : props.options();
-    const base = (!f && props.emptyOption) ? [props.emptyOption] : [];
+    const base = (!initialFilter && props.emptyOption) ? [props.emptyOption] : [];
     return [...base, ...opts];
   });
 

@@ -466,8 +466,8 @@ export default function TaskDetail(props: Props) {
     // Match Android's keyPrefix strategy: when a live turn exists, use "lg" to avoid
     // key collisions with live items. When idle, use "g" so the LazyColumn can reuse
     // composables if the same turn transitions between live and last-expanded states.
-    const keyPrefix = hasLiveTurn() ? "lg" : "g";
-    return last.groups.map((g, j) => ({ kind: "group" as const, group: g, isLive: false, key: `${keyPrefix}:${j}` }));
+    const initialKeyPrefix = hasLiveTurn() ? "lg" : "g";
+    return last.groups.map((g, j) => ({ kind: "group" as const, group: g, isLive: false, key: `${initialKeyPrefix}:${j}` }));
   });
   // Session boundary item for the current session.
   const sessionBoundaryItems = createMemo((): MsgItem[] => {
