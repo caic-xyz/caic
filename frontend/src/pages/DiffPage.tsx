@@ -25,7 +25,6 @@ export default function DiffPage() {
           <DetailPane>
             <DiffDetail
               taskId={taskId}
-              diffStat={t()?.diffStat ?? []}
               taskPath={tp()}
               onTaskRefreshError={s.dismissSelectedTaskOnNotFound}
             />

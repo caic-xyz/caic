@@ -53,6 +53,11 @@ checks both the root project (`frontend/src`, `sdk/`) and `e2e/`. Run
 `make frontend-e2e` to actually execute the tests; it starts the fake backend
 server and runs Playwright.
 
+Do not run E2E or screenshot targets concurrently with each other or with
+commands such as `make build` or `make check` that build the frontend. These
+targets share `backend/frontend/dist`, so simultaneous builds can delete or
+replace one another's generated assets.
+
 Type checking catches e2e drift against the generated SDK (wrong field names,
 wrong request shapes), but note that Playwright matchers like `toContain` accept
 `unknown`, so assertion arguments are not type checked.

@@ -103,6 +103,15 @@ func (r *Router) Diff(ctx context.Context, id ID, repoIdx int, args ...string) (
 	return rt.Diff(ctx, id, repoIdx, args...)
 }
 
+// FileDiff returns one committed or uncommitted file patch from the owning backend.
+func (r *Router) FileDiff(ctx context.Context, id ID, repoIdx int, commit, path, originalPath string) (string, error) {
+	rt, err := r.runtimeForInstance(id)
+	if err != nil {
+		return "", err
+	}
+	return rt.FileDiff(ctx, id, repoIdx, commit, path, originalPath)
+}
+
 // RepositoryStatus returns git branch, commit, and working-tree state from the
 // owning backend.
 func (r *Router) RepositoryStatus(ctx context.Context, id ID, repoIdx int) (RepositoryStatus, error) {

@@ -654,6 +654,7 @@ DiffFileStat describes changes to a single file.
 | `added` | `int` |  | yes |
 | `deleted` | `int` |  | yes |
 | `binary` | `boolean` |  |  |
+| `diff` | `string` |  |  |
 
 ### RuntimeInstance
 
@@ -1336,6 +1337,10 @@ GitFileStatus describes one uncommitted repository path.
 | `originalPath` | `string` |  |  |
 | `indexStatus` | `string` |  |  |
 | `worktreeStatus` | `string` |  |  |
+| `added` | `int` |  | yes |
+| `deleted` | `int` |  | yes |
+| `binary` | `boolean` |  | yes |
+| `diff` | `string` |  | yes |
 
 ### GitRepositoryStatus
 

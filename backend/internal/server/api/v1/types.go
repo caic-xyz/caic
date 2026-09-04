@@ -627,6 +627,7 @@ type DiffFileStat struct {
 	Added   int    `json:"added"`
 	Deleted int    `json:"deleted"`
 	Binary  bool   `json:"binary,omitempty"`
+	Diff    string `json:"diff,omitempty"`
 }
 
 // DiffStat summarises the changes in a branch relative to its base.
@@ -753,6 +754,10 @@ type GitFileStatus struct {
 	OriginalPath   string `json:"originalPath,omitempty"`
 	IndexStatus    string `json:"indexStatus,omitempty"`
 	WorktreeStatus string `json:"worktreeStatus,omitempty"`
+	Added          int    `json:"added"`
+	Deleted        int    `json:"deleted"`
+	Binary         bool   `json:"binary"`
+	Diff           string `json:"diff"`
 }
 
 // GitRepositoryStatus describes the checked-out state of one task repository.

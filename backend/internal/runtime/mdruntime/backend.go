@@ -411,6 +411,31 @@ func (b *Backend) Diff(ctx context.Context, id runtime.ID, repoIdx int, args ...
 	return stdout.String(), nil
 }
 
+// FileDiff implements runtime.Repository.
+func (b *Backend) FileDiff(ctx context.Context, id runtime.ID, repoIdx int, commit, path, originalPath string) (string, error) {
+	localID, err := b.localID(id)
+	if err != nil {
+		return "", err
+	}
+	ct, err := b.container(ctx, string(localID))
+	if err != nil {
+		return "", err
+	}
+	repos := ct.Repos()
+	if repoIdx < 0 || repoIdx >= len(repos) {
+		return "", fmt.Errorf("repo index %d out of range for %d repos", repoIdx, len(repos))
+	}
+	cmd, err := gitFileDiffCommand(repos[repoIdx].ContainerPath, commit, path, originalPath)
+	if err != nil {
+		return "", err
+	}
+	out, err := b.commandOutput(ctx, ct, cmd)
+	if err != nil {
+		return "", fmt.Errorf("git file diff in container %s: %w (output: %q)", ct.Name(), err, out)
+	}
+	return string(out), nil
+}
+
 // RepositoryStatus implements runtime.Repository.
 func (b *Backend) RepositoryStatus(ctx context.Context, id runtime.ID, repoIdx int) (runtime.RepositoryStatus, error) {
 	localID, err := b.localID(id)

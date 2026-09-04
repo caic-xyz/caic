@@ -9,7 +9,7 @@ import (
 )
 
 func BenchmarkParseGitStatus(b *testing.B) {
-	records := make([]string, 0, 66)
+	records := make([]string, 0, 88)
 	records = append(records,
 		"# branch.oid 0123456789abcdef",
 		"# branch.head caic-42",
@@ -18,6 +18,10 @@ func BenchmarkParseGitStatus(b *testing.B) {
 	)
 	for i := range 20 {
 		records = append(records, fmt.Sprintf("1 .M N... 100644 100644 100644 abc def src/file-%02d.go", i))
+	}
+	records = append(records, gitWorktreeStatMarker)
+	for i := range 20 {
+		records = append(records, fmt.Sprintf("5\t5\tsrc/file-%02d.go", i))
 	}
 	records = append(records, gitLogMarker, "")
 	for i := range 10 {

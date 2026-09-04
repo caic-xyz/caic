@@ -128,8 +128,7 @@
   margin-top: 0.9rem;
 }
 
-.statusGroup h2,
-.combinedDiff h2 {
+.statusGroup h2 {
   margin: 0 0 0.4rem;
   color: var(--color-text-secondary);
   font-size: 0.75rem;
@@ -225,14 +224,31 @@
   line-height: 1.45;
 }
 
-.commitStatFile {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
+.fileChange {
   min-width: 0;
 }
 
-.commitStatPath {
+.fileChangeButton {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 0.15rem 0.2rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fileChangeButton:hover {
+  background: var(--color-bg-hover);
+}
+
+.fileChangePath {
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
@@ -243,23 +259,19 @@
   color: var(--color-text-muted);
 }
 
-.uncommittedFile {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.75rem;
-  min-width: 0;
-}
-
-.uncommittedPath {
-  flex: 1;
-  min-width: 0;
-  overflow-wrap: anywhere;
+.uncommittedFileChange {
   font-family: monospace;
   font-size: 0.78rem;
 }
 
-.uncommittedPath > span {
+.originalPath {
   color: var(--color-text-tertiary);
+}
+
+.fileDiff {
+  min-width: 0;
+  margin: 0.2rem 0 0.5rem 1.3rem;
+  font-size: 0.78rem;
 }
 
 .statusBadges {
@@ -283,42 +295,11 @@
   font-size: 0.75rem;
 }
 
-.combinedDiff {
-  margin-top: 1rem;
-}
-
-.fileRow {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.3rem 0;
-  border-top: 1px solid var(--color-border-light);
-  margin-top: 0.25rem;
-}
-
 .collapseIndicator {
   font-size: 0.6rem;
   color: var(--color-text-muted);
   flex-shrink: 0;
   width: 0.8em;
-}
-
-.fileRowClickable {
-  cursor: pointer;
-}
-
-.fileRowClickable:hover .filePath {
-  text-decoration: underline;
-}
-
-.filePath {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  direction: rtl;
-  text-align: left;
 }
 
 .fileCounts {
@@ -377,10 +358,12 @@
     flex-basis: 100%;
   }
 
-  .uncommittedFile {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 0.25rem;
+  .fileChangeButton {
+    flex-wrap: wrap;
+  }
+
+  .fileChangePath {
+    min-width: calc(100% - 1.3rem);
   }
 
   .commitSubject {

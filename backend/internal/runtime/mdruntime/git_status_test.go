@@ -29,6 +29,10 @@ func TestParseGitStatus(t *testing.T) {
 			"? notes/new.txt",
 			gitComparisonMarker + "origin/main",
 			gitDivergenceMarker + "1\t2",
+			gitWorktreeStatMarker,
+			"2\t0\tsrc/staged.go",
+			"1\t1\tsrc/working.go",
+			"3\t0\tnotes/new.txt",
 			gitLogMarker,
 			"",
 			gitCommitMarker,
@@ -83,10 +87,10 @@ func TestParseGitStatus(t *testing.T) {
 				},
 			},
 			Uncommitted: []runtime.GitFileStatus{
-				{Path: "src/staged.go", IndexStatus: "M"},
-				{Path: "src/working.go", WorktreeStatus: "M"},
+				{Path: "src/staged.go", IndexStatus: "M", Added: 2},
+				{Path: "src/working.go", WorktreeStatus: "M", Added: 1, Deleted: 1},
 				{Path: "src/new name.go", OriginalPath: "src/old name.go", IndexStatus: "R"},
-				{Path: "notes/new.txt", IndexStatus: "?", WorktreeStatus: "?"},
+				{Path: "notes/new.txt", IndexStatus: "?", WorktreeStatus: "?", Added: 3},
 			},
 		}
 		if !reflect.DeepEqual(got, want) {
@@ -100,6 +104,7 @@ func TestParseGitStatus(t *testing.T) {
 			"missing marker":    "# branch.head main\x00",
 			"bad divergence":    "# branch.ab ahead\x00" + gitLogMarker + "\x00",
 			"bad comparison":    gitDivergenceMarker + "ahead\x00" + gitLogMarker + "\x00",
+			"bad worktree stat": gitWorktreeStatMarker + "\x00words\x00" + gitLogMarker + "\x00",
 			"bad ordinary":      "1 M. short\x00" + gitLogMarker + "\x00",
 			"bad rename":        "2 R. short\x00" + gitLogMarker + "\x00",
 			"bad unmerged":      "u UU short\x00" + gitLogMarker + "\x00",
@@ -128,7 +133,7 @@ func TestGitStatusCommand(t *testing.T) {
 		if !strings.HasPrefix(cmd, `cd '/work/repo'"'"'s copy'`) {
 			t.Errorf("gitStatusCommand() does not safely quote repo: %q", cmd)
 		}
-		for _, fragment := range []string{"git status --porcelain=v2", "@{upstream}", "upstream/trunk", "$comparison..HEAD", "--left-right", "--date-order", "--decorate=short", "%as", "%D", "--numstat -z", gitComparisonMarker, gitDivergenceMarker, gitLogMarker, gitCommitMarker} {
+		for _, fragment := range []string{"git status --porcelain=v2", "@{upstream}", "upstream/trunk", "$comparison..HEAD", "--left-right", "--date-order", "--decorate=short", "%as", "%D", "GIT_INDEX_FILE", "git add -N", "git diff HEAD --numstat -z", gitComparisonMarker, gitDivergenceMarker, gitWorktreeStatMarker, gitLogMarker, gitCommitMarker} {
 			if !strings.Contains(cmd, fragment) {
 				t.Errorf("gitStatusCommand() missing %q", fragment)
 			}
@@ -142,6 +147,9 @@ func TestGitStatusCommand(t *testing.T) {
 		runTestGit(t, dir, "config", "user.email", "caic@example.com")
 		runTestGit(t, dir, "config", "user.name", "caic test")
 		if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("base\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "staged.txt"), []byte("base\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		runTestGit(t, dir, "add", "tracked.txt")
@@ -158,11 +166,15 @@ func TestGitStatusCommand(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("changed\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
+		if err := os.WriteFile(filepath.Join(dir, "staged.txt"), []byte("staged\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		runTestGit(t, dir, "add", "staged.txt")
 		if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("new\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 
-		out, err := exec.CommandContext(t.Context(), "sh", "-c", gitStatusCommand(dir, "origin", "main")).Output() //nolint:gosec // command and temporary repository are test-owned.
+		out, err := exec.CommandContext(t.Context(), "bash", "-c", gitStatusCommand(dir, "origin", "main")).Output() //nolint:gosec // command and temporary repository are test-owned.
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -176,11 +188,17 @@ func TestGitStatusCommand(t *testing.T) {
 		if len(status.Commits) != 1 || status.Commits[0].Subject != "one ahead" || status.Commits[0].AuthoredDate == "" || status.Commits[0].Decorations != "HEAD -> main, host/caic-42" || len(status.Commits[0].Stat) != 1 || status.Commits[0].Stat[0] != (runtime.GitFileStat{Path: "committed.txt", Added: 1}) {
 			t.Errorf("commits = %+v", status.Commits)
 		}
-		if len(status.Uncommitted) != 2 {
+		if len(status.Uncommitted) != 3 {
 			t.Errorf("uncommitted = %+v", status.Uncommitted)
 		}
+		if status.Uncommitted[0].Added != 1 || status.Uncommitted[0].Deleted != 0 || status.Uncommitted[1].Added != 1 || status.Uncommitted[1].Deleted != 1 || status.Uncommitted[2].Added != 1 {
+			t.Errorf("uncommitted stats = %+v", status.Uncommitted)
+		}
+		if cached := runTestGitOutput(t, dir, "diff", "--cached", "--name-only"); cached != "staged.txt" {
+			t.Errorf("cached diff after status = %q, want staged.txt", cached)
+		}
 
-		out, err = exec.CommandContext(t.Context(), "sh", "-c", gitStatusCommand(dir, "missing", "branch")).Output() //nolint:gosec // command and temporary repository are test-owned.
+		out, err = exec.CommandContext(t.Context(), "bash", "-c", gitStatusCommand(dir, "missing", "branch")).Output() //nolint:gosec // command and temporary repository are test-owned.
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -194,10 +212,213 @@ func TestGitStatusCommand(t *testing.T) {
 	})
 }
 
+func TestGitFileDiffCommand(t *testing.T) {
+	t.Parallel()
+	t.Run("normalizes configurable output", func(t *testing.T) {
+		t.Parallel()
+		dir := initFileDiffRepo(t)
+		runTestGit(t, dir, "config", "core.quotePath", "false")
+		runTestGit(t, dir, "config", "diff.algorithm", "histogram")
+		runTestGit(t, dir, "config", "diff.mnemonicPrefix", "true")
+		runTestGit(t, dir, "config", "diff.noprefix", "true")
+		runTestGit(t, dir, "config", "diff.renames", "false")
+		if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("changed\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		cmd, err := gitFileDiffCommand(dir, "", "tracked.txt", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := runFileDiffCommand(t, cmd)
+		for _, header := range []string{
+			"diff --git a/tracked.txt b/tracked.txt",
+			"--- a/tracked.txt",
+			"+++ b/tracked.txt",
+		} {
+			if !strings.Contains(out, header) {
+				t.Errorf("normalized diff missing %q: %q", header, out)
+			}
+		}
+	})
+
+	t.Run("committed file", func(t *testing.T) {
+		t.Parallel()
+		dir := initFileDiffRepo(t)
+		path := filepath.Join(dir, "tracked.txt")
+		if err := os.WriteFile(path, []byte("committed\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		runTestGit(t, dir, "add", "tracked.txt")
+		runTestGit(t, dir, "commit", "-m", "change tracked")
+		commit := runTestGitOutput(t, dir, "rev-parse", "HEAD")
+		if err := os.WriteFile(path, []byte("working\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		cmd, err := gitFileDiffCommand(dir, commit, "tracked.txt", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := runFileDiffCommand(t, cmd)
+		if !strings.Contains(out, "+committed") || strings.Contains(out, "+working") {
+			t.Errorf("committed diff = %q", out)
+		}
+	})
+
+	t.Run("retains file metadata", func(t *testing.T) {
+		t.Parallel()
+		t.Run("new", func(t *testing.T) {
+			t.Parallel()
+			dir := initFileDiffRepo(t)
+			if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("new\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			runTestGit(t, dir, "add", "new.txt")
+			runTestGit(t, dir, "commit", "-m", "add file")
+			assertFileDiffContains(t, dir, runTestGitOutput(t, dir, "rev-parse", "HEAD"), "new.txt", "new file mode 100644")
+		})
+
+		t.Run("deleted", func(t *testing.T) {
+			t.Parallel()
+			dir := initFileDiffRepo(t)
+			runTestGit(t, dir, "rm", "tracked.txt")
+			runTestGit(t, dir, "commit", "-m", "delete file")
+			assertFileDiffContains(t, dir, runTestGitOutput(t, dir, "rev-parse", "HEAD"), "tracked.txt", "deleted file mode 100644")
+		})
+
+		t.Run("renamed and mode changed", func(t *testing.T) {
+			t.Parallel()
+			dir := initFileDiffRepo(t)
+			runTestGit(t, dir, "mv", "tracked.txt", "moved.txt")
+			if err := os.Chmod(filepath.Join(dir, "moved.txt"), 0o700); err != nil { //nolint:gosec // The executable mode change is the behavior under test.
+				t.Fatal(err)
+			}
+			runTestGit(t, dir, "add", "moved.txt")
+			runTestGit(t, dir, "commit", "-m", "move file")
+			assertFileDiffContains(
+				t,
+				dir,
+				runTestGitOutput(t, dir, "rev-parse", "HEAD"),
+				"moved.txt",
+				"old mode 100644",
+				"new mode 100755",
+				"similarity index 100%",
+				"rename from tracked.txt",
+				"rename to moved.txt",
+			)
+		})
+	})
+
+	t.Run("uncommitted files preserve index", func(t *testing.T) {
+		t.Parallel()
+		dir := initFileDiffRepo(t)
+		if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("staged\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		runTestGit(t, dir, "add", "tracked.txt")
+		if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("new\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		cases := []struct {
+			path  string
+			added string
+		}{
+			{path: "tracked.txt", added: "+staged"},
+			{path: "untracked.txt", added: "+new"},
+		}
+		for _, tc := range cases {
+			cmd, err := gitFileDiffCommand(dir, "", tc.path, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out := runFileDiffCommand(t, cmd); !strings.Contains(out, tc.added) {
+				t.Errorf("uncommitted diff for %s = %q", tc.path, out)
+			}
+		}
+		if cached := runTestGitOutput(t, dir, "diff", "--cached", "--name-only"); cached != "tracked.txt" {
+			t.Errorf("cached diff = %q, want tracked.txt", cached)
+		}
+	})
+
+	t.Run("uncommitted rename", func(t *testing.T) {
+		t.Parallel()
+		dir := initFileDiffRepo(t)
+		runTestGit(t, dir, "mv", "tracked.txt", "moved.txt")
+		cmd, err := gitFileDiffCommand(dir, "", "moved.txt", "tracked.txt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := runFileDiffCommand(t, cmd)
+		for _, metadata := range []string{
+			"similarity index 100%",
+			"rename from tracked.txt",
+			"rename to moved.txt",
+		} {
+			if !strings.Contains(out, metadata) {
+				t.Errorf("renamed diff missing %q: %q", metadata, out)
+			}
+		}
+	})
+
+	t.Run("invalid input", func(t *testing.T) {
+		t.Parallel()
+		if _, err := gitFileDiffCommand("/repo", "", "", ""); err == nil {
+			t.Fatal("empty path succeeded")
+		}
+		if _, err := gitFileDiffCommand("/repo", "--all", "file.txt", ""); err == nil {
+			t.Fatal("invalid commit succeeded")
+		}
+	})
+}
+
+func assertFileDiffContains(t *testing.T, dir, commit, path string, want ...string) {
+	cmd, err := gitFileDiffCommand(dir, commit, path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := runFileDiffCommand(t, cmd)
+	for _, fragment := range want {
+		if !strings.Contains(out, fragment) {
+			t.Errorf("file diff missing %q: %q", fragment, out)
+		}
+	}
+}
+
+func initFileDiffRepo(t *testing.T) string {
+	dir := t.TempDir()
+	runTestGit(t, dir, "init", "-b", "main")
+	runTestGit(t, dir, "config", "user.email", "caic@example.com")
+	runTestGit(t, dir, "config", "user.name", "caic test")
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("base\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, dir, "add", "tracked.txt")
+	runTestGit(t, dir, "commit", "-m", "base")
+	return dir
+}
+
+func runFileDiffCommand(t *testing.T, command string) string {
+	cmd := exec.CommandContext(t.Context(), "bash", "-c", command) //nolint:gosec // command is built from test-owned paths and refs.
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("file diff command: %v: %s", err, out)
+	}
+	return string(out)
+}
+
 func runTestGit(t *testing.T, dir string, args ...string) {
+	_ = runTestGitOutput(t, dir, args...)
+}
+
+func runTestGitOutput(t *testing.T, dir string, args ...string) string {
 	cmd := exec.CommandContext(t.Context(), "git", args...) //nolint:gosec // arguments are hardcoded test fixtures.
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v: %s", args, err, out)
+	} else {
+		return strings.TrimSpace(string(out))
 	}
+	return ""
 }

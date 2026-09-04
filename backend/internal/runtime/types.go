@@ -135,6 +135,9 @@ type GitFileStatus struct {
 	OriginalPath   string
 	IndexStatus    string
 	WorktreeStatus string
+	Added          int
+	Deleted        int
+	Binary         bool
 }
 
 // CacheMount describes a host cache directory made available to a runtime.
@@ -372,6 +375,7 @@ type Lifecycle interface {
 type Repository interface {
 	Diff(ctx context.Context, id ID, repoIdx int, args ...string) (string, error)
 	Fetch(ctx context.Context, id ID) error
+	FileDiff(ctx context.Context, id ID, repoIdx int, commit, path, originalPath string) (string, error)
 	RepositoryStatus(ctx context.Context, id ID, repoIdx int) (RepositoryStatus, error)
 }
 

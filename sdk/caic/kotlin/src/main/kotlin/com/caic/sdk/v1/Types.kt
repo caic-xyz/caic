@@ -1084,6 +1084,7 @@ data class DiffFileStat(
     val added: Int,
     val deleted: Int,
     val binary: Boolean? = null,
+    val diff: String? = null,
 )
 
 /** RuntimeInstance holds per-task runtime metadata. */
@@ -1677,6 +1678,10 @@ data class GitFileStatus(
     val originalPath: String? = null,
     val indexStatus: String? = null,
     val worktreeStatus: String? = null,
+    val added: Int,
+    val deleted: Int,
+    val binary: Boolean,
+    val diff: String,
 )
 
 /** GitRepositoryStatus describes the checked-out state of one task repository. */

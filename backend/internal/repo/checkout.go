@@ -286,6 +286,22 @@ func (w *Checkout) DiffContent(ctx context.Context, log *slog.Logger, runtimes *
 	return buf.String(), nil
 }
 
+// FileDiff returns one committed or uncommitted file patch from a task repository.
+func (w *Checkout) FileDiff(ctx context.Context, runtimes *runtime.Router, t TaskView, repoIdx int, commit, path, originalPath string) (string, error) {
+	id, repos, err := w.taskRuntime(t)
+	if err != nil {
+		return "", err
+	}
+	if repoIdx < 0 || repoIdx >= len(repos) {
+		return "", fmt.Errorf("repo index %d out of range for %d repos", repoIdx, len(repos))
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
+	defer cancel()
+	w.branchMu.Lock()
+	defer w.branchMu.Unlock()
+	return runtimes.FileDiff(ctx, id, repoIdx, commit, path, originalPath)
+}
+
 // RepositoryStatuses returns branch, upstream commit, and working-tree status
 // for every repository in the task runtime.
 func (w *Checkout) RepositoryStatuses(ctx context.Context, _ *slog.Logger, runtimes *runtime.Router, t TaskView) ([]runtime.RepositoryStatus, error) {

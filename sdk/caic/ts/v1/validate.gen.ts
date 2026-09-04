@@ -180,6 +180,7 @@ export function validateDiffFileStat(raw: ValidatorInput): DiffFileStat {
     added: asNumber(obj["added"], "DiffFileStat.added"),
     deleted: asNumber(obj["deleted"], "DiffFileStat.deleted"),
     binary: (obj["binary"] === undefined || obj["binary"] === null ? undefined : asBoolean(obj["binary"], "DiffFileStat.binary")),
+    diff: (obj["diff"] === undefined || obj["diff"] === null ? undefined : asString(obj["diff"], "DiffFileStat.diff")),
   };
 }
 

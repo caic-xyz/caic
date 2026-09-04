@@ -737,6 +737,7 @@ public struct DiffFileStat: Codable {
     public let added: Int
     public let deleted: Int
     public let binary: Bool?
+    public let diff: String?
 }
 
 /// RuntimeInstance holds per-task runtime metadata.
@@ -1306,6 +1307,10 @@ public struct GitFileStatus: Codable {
     public let originalPath: String?
     public let indexStatus: String?
     public let worktreeStatus: String?
+    public let added: Int
+    public let deleted: Int
+    public let binary: Bool
+    public let diff: String
 }
 
 /// GitRepositoryStatus describes the checked-out state of one task repository.

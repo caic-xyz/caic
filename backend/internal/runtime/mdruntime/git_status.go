@@ -1,4 +1,4 @@
-// Git status inspection compares md container branches with their host checkout's original tracking refs.
+// Git inspection reports status, comparison history, stats, and isolated file patches.
 
 package mdruntime
 
@@ -12,10 +12,11 @@ import (
 )
 
 const (
-	gitLogMarker        = "caic-git-log"
-	gitCommitMarker     = "caic-git-commit"
-	gitComparisonMarker = "# caic.branch.upstream "
-	gitDivergenceMarker = "# caic.branch.ab "
+	gitLogMarker          = "caic-git-log"
+	gitCommitMarker       = "caic-git-commit"
+	gitComparisonMarker   = "# caic.branch.upstream "
+	gitDivergenceMarker   = "# caic.branch.ab "
+	gitWorktreeStatMarker = "caic-git-worktree-stat"
 )
 
 func gitStatusCommand(repo, defaultRemote, defaultBranch string) string {
@@ -31,13 +32,61 @@ func gitStatusCommand(repo, defaultRemote, defaultBranch string) string {
 		`if [ -n "$comparison" ]; then ` +
 		`divergence=$(git rev-list --left-right --count "$comparison...HEAD") && ` +
 		`printf '` + gitComparisonMarker + `%s\0` + gitDivergenceMarker + `%s\0' "$comparison" "$divergence"; ` +
-		`fi && printf '` + gitLogMarker + `\0' && ` +
+		`fi && printf '` + gitWorktreeStatMarker + `\0' && ` +
+		alternateIndexDiffCommand("git diff HEAD --numstat -z -- .") + ` && ` +
+		`printf '` + gitLogMarker + `\0' && ` +
 		`if [ -n "$comparison" ]; then git log --date-order --decorate=short --no-color ` +
 		`--format='%x00` + gitCommitMarker + `%x00%H%x00%as%x00%D%x00%s%x00' --numstat -z "$comparison..HEAD"; fi`
 }
 
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
+}
+
+func gitFileDiffCommand(repo, commit, path, originalPath string) (string, error) {
+	if path == "" {
+		return "", errors.New("git file diff path is required")
+	}
+	if commit != "" && !isGitObjectID(commit) {
+		return "", errors.New("git file diff commit must be a full object ID")
+	}
+	commands := []string{
+		"cd " + shellQuote(repo),
+		"export GIT_OPTIONAL_LOCKS=0 LC_ALL=C",
+	}
+	if commit == "" {
+		pathspec := shellQuote(path)
+		if originalPath != "" && originalPath != path {
+			pathspec = shellQuote(originalPath) + " " + pathspec
+		}
+		commands = append(commands, alternateIndexDiffCommand(gitPatchCommand("diff")+" HEAD -- "+pathspec))
+	} else {
+		commands = append(commands, gitPatchCommand("show")+" --format= --diff-merges=first-parent --follow "+shellQuote(commit)+" -- "+shellQuote(path))
+	}
+	return strings.Join(commands, " && "), nil
+}
+
+func gitPatchCommand(subcommand string) string {
+	return "git -c core.quotePath=true -c diff.mnemonicPrefix=false -c diff.noprefix=false " + subcommand +
+		" --patch --diff-algorithm=myers --no-indent-heuristic --unified=3 --inter-hunk-context=0" +
+		" --src-prefix=a/ --dst-prefix=b/ --output-indicator-new=+ --output-indicator-old=-" +
+		" --output-indicator-context=" + shellQuote(" ") +
+		" --no-color --no-ext-diff --no-relative --no-textconv --find-renames=50% --full-index" +
+		" --ita-visible-in-index" +
+		" --ignore-submodules=none --submodule=short"
+}
+
+func isGitObjectID(s string) bool {
+	if len(s) != 40 && len(s) != 64 {
+		return false
+	}
+	for i := range len(s) {
+		c := s[i]
+		if ('0' > c || c > '9') && ('a' > c || c > 'f') && ('A' > c || c > 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 func parseGitStatus(out string) (runtime.RepositoryStatus, error) {
@@ -49,6 +98,14 @@ func parseGitStatus(out string) (runtime.RepositoryStatus, error) {
 		if record == gitLogMarker {
 			logStart = i + 1
 			break
+		}
+		if record == gitWorktreeStatMarker {
+			consumed, err := parseGitWorktreeStats(&status, records[i+1:])
+			if err != nil {
+				return runtime.RepositoryStatus{}, err
+			}
+			i += consumed + 1
+			continue
 		}
 		consumed, err := parseGitStatusRecord(&status, records[i:])
 		if err != nil {
@@ -93,6 +150,45 @@ func parseGitStatus(out string) (runtime.RepositoryStatus, error) {
 		status.Commits = append(status.Commits, commit)
 	}
 	return status, nil
+}
+
+func alternateIndexDiffCommand(diffCommand string) string {
+	return strings.Join([]string{
+		`index_path=$(git rev-parse --git-path index)`,
+		`tmp_index=$(mktemp)`,
+		`untracked_paths=$(mktemp)`,
+		`cp -p "$index_path" "$tmp_index"`,
+		`trap 'rm -f "$tmp_index" "$untracked_paths"' EXIT`,
+		`git ls-files -z --others --exclude-standard -- . > "$untracked_paths"`,
+		`while IFS= read -r -d '' path; do GIT_INDEX_FILE="$tmp_index" git add -N -- "$path" || exit $?; done < "$untracked_paths"`,
+		`GIT_INDEX_FILE="$tmp_index" ` + diffCommand,
+	}, " && ")
+}
+
+func parseGitWorktreeStats(status *runtime.RepositoryStatus, records []string) (int, error) {
+	for i := 0; i < len(records); {
+		if records[i] == gitLogMarker {
+			return i, nil
+		}
+		if records[i] == "" {
+			i++
+			continue
+		}
+		stat, consumed, err := parseGitNumstatRecord(records[i:])
+		if err != nil {
+			return 0, err
+		}
+		for j := range status.Uncommitted {
+			if status.Uncommitted[j].Path == stat.Path {
+				status.Uncommitted[j].Added = stat.Added
+				status.Uncommitted[j].Deleted = stat.Deleted
+				status.Uncommitted[j].Binary = stat.Binary
+				break
+			}
+		}
+		i += consumed
+	}
+	return len(records), nil
 }
 
 func parseGitNumstatRecord(records []string) (runtime.GitFileStat, int, error) {

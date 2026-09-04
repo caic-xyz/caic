@@ -711,9 +711,13 @@ func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, path s
 	if !ok {
 		return nil, api.InternalError("unknown repo")
 	}
-	diff, err := checkout.DiffContent(ctx, s.log, s.runtimes, t, path)
-	if err != nil {
-		return nil, api.InternalError(err.Error())
+	diff := ""
+	if path != "" {
+		var err error
+		diff, err = checkout.DiffContent(ctx, s.log, s.runtimes, t, path)
+		if err != nil {
+			return nil, api.InternalError(err.Error())
+		}
 	}
 	statuses, err := checkout.RepositoryStatuses(ctx, s.log, s.runtimes, t)
 	if err != nil {
@@ -729,7 +733,11 @@ func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, path s
 		for j, commit := range status.Commits {
 			stat := make(v1.DiffStat, len(commit.Stat))
 			for k, file := range commit.Stat {
-				stat[k] = v1.DiffFileStat{Path: file.Path, Added: file.Added, Deleted: file.Deleted, Binary: file.Binary}
+				fileDiff, err := checkout.FileDiff(ctx, s.runtimes, t, i, commit.SHA, file.Path, "")
+				if err != nil {
+					return nil, api.InternalError(err.Error())
+				}
+				stat[k] = v1.DiffFileStat{Path: file.Path, Added: file.Added, Deleted: file.Deleted, Binary: file.Binary, Diff: fileDiff}
 			}
 			commits[j] = v1.GitCommit{
 				SHA:          commit.SHA,
@@ -741,11 +749,19 @@ func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, path s
 		}
 		uncommitted := make([]v1.GitFileStatus, len(status.Uncommitted))
 		for j, file := range status.Uncommitted {
+			fileDiff, err := checkout.FileDiff(ctx, s.runtimes, t, i, "", file.Path, file.OriginalPath)
+			if err != nil {
+				return nil, api.InternalError(err.Error())
+			}
 			uncommitted[j] = v1.GitFileStatus{
 				Path:           file.Path,
 				OriginalPath:   file.OriginalPath,
 				IndexStatus:    file.IndexStatus,
 				WorktreeStatus: file.WorktreeStatus,
+				Added:          file.Added,
+				Deleted:        file.Deleted,
+				Binary:         file.Binary,
+				Diff:           fileDiff,
 			}
 		}
 		repositories[i] = v1.GitRepositoryStatus{

@@ -234,6 +234,10 @@ func (*modelRefreshRuntime) Diff(_ context.Context, _ runtime.ID, _ int, _ ...st
 	return "", nil
 }
 
+func (*modelRefreshRuntime) FileDiff(_ context.Context, _ runtime.ID, _ int, _, _, _ string) (string, error) {
+	return "", nil
+}
+
 func (*modelRefreshRuntime) RepositoryStatus(_ context.Context, _ runtime.ID, _ int) (runtime.RepositoryStatus, error) {
 	return runtime.RepositoryStatus{}, nil
 }

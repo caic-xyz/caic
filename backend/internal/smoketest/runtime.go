@@ -88,6 +88,11 @@ func (*RuntimeBackend) Diff(_ context.Context, _ runtime.ID, _ int, _ ...string)
 	return "", nil
 }
 
+// FileDiff implements runtime.Repository.
+func (*RuntimeBackend) FileDiff(_ context.Context, _ runtime.ID, _ int, _, _, _ string) (string, error) {
+	return "", nil
+}
+
 // RepositoryStatus implements runtime.Repository.
 func (b *RuntimeBackend) RepositoryStatus(_ context.Context, id runtime.ID, repoIdx int) (runtime.RepositoryStatus, error) {
 	b.mu.Lock()

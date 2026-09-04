@@ -1,9 +1,8 @@
-// Full-page repository status and unified diff viewer for a task's container changes.
+// Full-page repository status with collapsible per-file commit and uncommitted diffs.
 
 import {
   createSignal,
   createEffect,
-  createMemo,
   For,
   Show,
   onMount,
@@ -13,36 +12,25 @@ import { useNavigate } from "@solidjs/router";
 import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
 import WrapTextIcon from "@material-symbols/svg-400/outlined/wrap_text.svg?solid";
 
-import type {
-  DiffFileStat,
-  GitFileStatus,
-  GitRepositoryStatus,
-} from "@sdk/types.gen";
+import type { GitFileStatus, GitRepositoryStatus } from "@sdk/types.gen";
 
 import { getTaskDiff } from "../api";
-import { splitDiff } from "./diffLines";
 import UnifiedDiffBlock from "./UnifiedDiffBlock";
 import styles from "./DiffDetail.module.css";
 
 interface Props {
   taskId: string;
-  diffStat: DiffFileStat[];
   taskPath: string;
   onTaskRefreshError?: (taskId: string, err: unknown) => boolean;
 }
 
 export default function DiffDetail(props: Props) {
   const navigate = useNavigate();
-  const [fullDiff, setFullDiff] = createSignal<string | null>(null);
   const [repositories, setRepositories] = createSignal<GitRepositoryStatus[]>(
     [],
   );
   const [error, setError] = createSignal<string | null>(null);
   const [loading, setLoading] = createSignal(true);
-  // Collapsed files (all expanded by default).
-  const [collapsedFiles, setCollapsedFiles] = createSignal<Set<string>>(
-    new Set(),
-  );
   const [lineWrap, setLineWrap] = createSignal(false);
 
   createEffect(() => {
@@ -50,10 +38,8 @@ export default function DiffDetail(props: Props) {
     const onTaskRefreshError = props.onTaskRefreshError;
     setLoading(true);
     setError(null);
-    setCollapsedFiles(new Set<string>());
     getTaskDiff(id, "")
       .then((d) => {
-        setFullDiff(d.diff);
         setRepositories(d.repositories);
       })
       .catch((e: unknown) => {
@@ -72,36 +58,14 @@ export default function DiffDetail(props: Props) {
     onCleanup(() => document.removeEventListener("keydown", onKey));
   });
 
-  const fileDiffs = createMemo(() => {
-    const raw = fullDiff();
-    if (!raw) return [];
-    return splitDiff(raw);
-  });
-
-  // Build a lookup from diffStat for +/- counts.
-  const statByPath = createMemo(() => {
-    const m = new Map<string, DiffFileStat>();
-    for (const f of props.diffStat) m.set(f.path, f);
-    return m;
-  });
-
-  function toggleFile(path: string) {
-    setCollapsedFiles((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
-  }
-
   function statusLabels(file: GitFileStatus) {
     if (file.indexStatus === "?" && file.worktreeStatus === "?") {
       return [{ scope: "", label: "untracked" }];
     }
     const labels: { scope: string; label: string }[] = [];
-    if (file.indexStatus)
+    if (file.indexStatus && file.indexStatus !== "M")
       labels.push({ scope: "staged", label: gitStatusLabel(file.indexStatus) });
-    if (file.worktreeStatus)
+    if (file.worktreeStatus && file.worktreeStatus !== "M")
       labels.push({
         scope: "",
         label: gitStatusLabel(file.worktreeStatus),
@@ -183,7 +147,10 @@ export default function DiffDetail(props: Props) {
                         <For each={repo.commits}>
                           {(commit) => (
                             <article class={styles.commit}>
-                              <span class={styles.commitGraph} aria-hidden="true">
+                              <span
+                                class={styles.commitGraph}
+                                aria-hidden="true"
+                              >
                                 <span />
                               </span>
                               <div class={styles.commitHeading}>
@@ -209,32 +176,15 @@ export default function DiffDetail(props: Props) {
                                 <div class={styles.commitStat}>
                                   <For each={commit.stat}>
                                     {(file) => (
-                                      <div class={styles.commitStatFile}>
-                                        <span class={styles.commitStatPath}>
-                                          {file.path}
-                                        </span>
-                                        <Show
-                                          when={!file.binary}
-                                          fallback={
-                                            <span class={styles.binary}>
-                                              binary
-                                            </span>
-                                          }
-                                        >
-                                          <span class={styles.fileCounts}>
-                                            <Show when={file.added > 0}>
-                                              <span class={styles.added}>
-                                                +{file.added}
-                                              </span>
-                                            </Show>
-                                            <Show when={file.deleted > 0}>
-                                              <span class={styles.deleted}>
-                                                &minus;{file.deleted}
-                                              </span>
-                                            </Show>
-                                          </span>
-                                        </Show>
-                                      </div>
+                                      <FileDiffRow
+                                        path={file.path}
+                                        added={file.added}
+                                        deleted={file.deleted}
+                                        binary={file.binary ?? false}
+                                        diff={file.diff ?? ""}
+                                        lineWrap={lineWrap()}
+                                        variant="commit"
+                                      />
                                     )}
                                   </For>
                                   <div class={styles.commitSummary}>
@@ -264,26 +214,17 @@ export default function DiffDetail(props: Props) {
                       <div class={styles.uncommittedList}>
                         <For each={repo.uncommitted}>
                           {(file) => (
-                            <div class={styles.uncommittedFile}>
-                              <span class={styles.uncommittedPath}>
-                                <Show when={file.originalPath}>
-                                  <span>{file.originalPath} → </span>
-                                </Show>
-                                {file.path}
-                              </span>
-                              <span class={styles.statusBadges}>
-                                <For each={statusLabels(file)}>
-                                  {(status) => (
-                                    <span class={styles.statusBadge}>
-                                      <Show when={status.scope}>
-                                        {status.scope}:{" "}
-                                      </Show>
-                                      {status.label}
-                                    </span>
-                                  )}
-                                </For>
-                              </span>
-                            </div>
+                            <FileDiffRow
+                              path={file.path}
+                              originalPath={file.originalPath}
+                              added={file.added}
+                              deleted={file.deleted}
+                              binary={file.binary}
+                              diff={file.diff}
+                              statuses={statusLabels(file)}
+                              lineWrap={lineWrap()}
+                              variant="uncommitted"
+                            />
                           )}
                         </For>
                       </div>
@@ -293,72 +234,104 @@ export default function DiffDetail(props: Props) {
               )}
             </For>
           </div>
-
-          <section class={styles.combinedDiff}>
-            <h2>Combined diff</h2>
-            <Show
-              when={fileDiffs().length > 0}
-              fallback={
-                <p class={styles.cleanState}>No changes relative to upstream</p>
-              }
-            >
-              <For each={fileDiffs()}>
-                {(fd) => {
-                  const stat = () => statByPath().get(fd.path);
-                  const collapsed = () => collapsedFiles().has(fd.path);
-                  return (
-                    <>
-                      <div
-                        class={`${styles.fileRow} ${styles.fileRowClickable}`}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => toggleFile(fd.path)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            toggleFile(fd.path);
-                          }
-                        }}
-                      >
-                        <span class={styles.collapseIndicator}>
-                          {collapsed() ? "\u25b6" : "\u25bc"}
-                        </span>
-                        <span class={styles.filePath}>{fd.path}</span>
-                        <Show
-                          when={stat()?.binary}
-                          fallback={
-                            <span class={styles.fileCounts}>
-                              <Show when={(stat()?.added ?? 0) > 0}>
-                                <span class={styles.added}>
-                                  +{stat()?.added}
-                                </span>
-                              </Show>
-                              <Show when={(stat()?.deleted ?? 0) > 0}>
-                                <span class={styles.deleted}>
-                                  &minus;{stat()?.deleted}
-                                </span>
-                              </Show>
-                            </span>
-                          }
-                        >
-                          <span class={styles.binary}>binary</span>
-                        </Show>
-                      </div>
-                      <Show when={!collapsed()}>
-                        <UnifiedDiffBlock
-                          lines={fd.lines}
-                          lineWrap={lineWrap()}
-                        />
-                      </Show>
-                    </>
-                  );
-                }}
-              </For>
-            </Show>
-          </section>
         </Show>
       </div>
     </div>
+  );
+}
+
+interface FileDiffRowProps {
+  path: string;
+  originalPath?: string;
+  added: number;
+  deleted: number;
+  binary: boolean;
+  diff: string;
+  statuses?: { scope: string; label: string }[];
+  lineWrap: boolean;
+  variant: "commit" | "uncommitted";
+}
+
+function FileDiffRow(props: FileDiffRowProps) {
+  const [expanded, setExpanded] = createSignal(false);
+
+  return (
+    <div
+      class={styles.fileChange}
+      classList={{
+        [styles.uncommittedFileChange]: props.variant === "uncommitted",
+      }}
+    >
+      <button
+        type="button"
+        class={styles.fileChangeButton}
+        aria-expanded={expanded()}
+        onClick={() => setExpanded((value) => !value)}
+      >
+        <span class={styles.collapseIndicator} aria-hidden="true">
+          {expanded() ? "\u25bc" : "\u25b6"}
+        </span>
+        <span class={styles.fileChangePath}>
+          <Show when={props.originalPath}>
+            <span class={styles.originalPath}>{props.originalPath} → </span>
+          </Show>
+          {props.path}
+        </span>
+        <Show when={props.statuses}>
+          <span class={styles.statusBadges}>
+            <For each={props.statuses}>
+              {(status) => (
+                <span class={styles.statusBadge}>
+                  <Show when={status.scope}>{status.scope}: </Show>
+                  {status.label}
+                </span>
+              )}
+            </For>
+          </span>
+        </Show>
+        <FileCounts
+          added={props.added}
+          deleted={props.deleted}
+          binary={props.binary}
+        />
+      </button>
+      <Show when={expanded()}>
+        <div class={styles.fileDiff}>
+          <Show
+            when={props.diff}
+            fallback={<p class={styles.cleanState}>No textual diff</p>}
+          >
+            <UnifiedDiffBlock
+              diff={props.diff}
+              hideFileHeader
+              lineWrap={props.lineWrap}
+            />
+          </Show>
+        </div>
+      </Show>
+    </div>
+  );
+}
+
+function FileCounts(props: {
+  added: number;
+  deleted: number;
+  binary: boolean;
+}) {
+  return (
+    <Show
+      when={!props.binary}
+      fallback={<span class={styles.binary}>binary</span>}
+    >
+      <span class={styles.fileCounts}>
+        <Show when={props.added > 0}>
+          <span class={styles.added}>+{props.added}</span>
+        </Show>
+        <Show when={props.deleted > 0}>
+          <span class={styles.deleted}>&minus;{props.deleted}</span>
+        </Show>
+      </span>
+    </Show>
   );
 }
 

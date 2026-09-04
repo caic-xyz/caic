@@ -853,6 +853,7 @@ export interface DiffFileStat {
   added: number /* int */;
   deleted: number /* int */;
   binary?: boolean;
+  diff?: string;
 }
 
 /** RuntimeInstance holds per-task runtime metadata. */
@@ -1153,6 +1154,10 @@ export interface GitFileStatus {
   originalPath?: string;
   indexStatus?: string;
   worktreeStatus?: string;
+  added: number /* int */;
+  deleted: number /* int */;
+  binary: boolean;
+  diff: string;
 }
 
 /** GitRepositoryStatus describes the checked-out state of one task repository. */

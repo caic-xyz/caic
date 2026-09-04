@@ -1,6 +1,6 @@
 // Tests for DiffDetail repository status rendering and diff parsing utilities.
 
-import { render, screen } from "@solidjs/testing-library";
+import { fireEvent, render, screen } from "@solidjs/testing-library";
 import { describe, it, expect, vi } from "vitest";
 
 import type { DiffResp } from "@sdk/types.gen";
@@ -44,6 +44,7 @@ describe("DiffDetail", () => {
                   added: 10,
                   deleted: 0,
                   binary: false,
+                  diff: "@@ -1 +1 @@\n-old view\n+new view",
                 },
               ],
             },
@@ -57,21 +58,43 @@ describe("DiffDetail", () => {
                   added: 8,
                   deleted: 0,
                   binary: false,
+                  diff: "@@ -0,0 +1 @@\n+new test",
                 },
               ],
             },
           ],
           uncommitted: [
-            { path: "frontend/working.tsx", worktreeStatus: "M" },
-            { path: "frontend/new.tsx", indexStatus: "A" },
+            {
+              path: "frontend/working.tsx",
+              worktreeStatus: "M",
+              added: 2,
+              deleted: 1,
+              binary: false,
+              diff: "@@ -1 +1,2 @@\n-old working\n+new working\n+line",
+            },
+            {
+              path: "frontend/new.tsx",
+              indexStatus: "A",
+              added: 1,
+              deleted: 0,
+              binary: false,
+              diff: "@@ -0,0 +1 @@\n+new file",
+            },
+            {
+              path: "frontend/untracked.tsx",
+              indexStatus: "?",
+              worktreeStatus: "?",
+              added: 1,
+              deleted: 0,
+              binary: false,
+              diff: "@@ -0,0 +1 @@\n+untracked file",
+            },
           ],
         },
       ],
     });
 
-    render(() => (
-      <DiffDetail taskId="task-1" diffStat={[]} taskPath="/task/task-1" />
-    ));
+    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
 
     expect(await screen.findByText("origin/main")).toBeInTheDocument();
     expect(screen.getByText(/2 commits ahead/)).toHaveTextContent(
@@ -90,12 +113,26 @@ describe("DiffDetail", () => {
     expect(screen.getByText("frontend/view.tsx")).toBeInTheDocument();
     expect(screen.getByText("+10")).toHaveClass(styles.added);
     expect(screen.getAllByText("1 file changed")).toHaveLength(2);
-    expect(screen.getByText("Uncommitted changes (2)")).toBeInTheDocument();
-    expect(screen.getByText("modified")).toBeInTheDocument();
+    expect(screen.getByText("Uncommitted changes (3)")).toBeInTheDocument();
     expect(screen.getByText("staged: added")).toBeInTheDocument();
-    expect(
-      screen.getByText("No changes relative to upstream"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("untracked")).toBeInTheDocument();
+    expect(screen.getByText("+2")).toHaveClass(styles.added);
+    expect(screen.getByText("−1")).toHaveClass(styles.deleted);
+
+    const committedFile = screen.getByRole("button", {
+      name: /frontend\/view\.tsx/,
+    });
+    expect(committedFile).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(committedFile);
+    expect(committedFile).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("+new view")).toBeInTheDocument();
+
+    const workingFile = screen.getByRole("button", {
+      name: /frontend\/working\.tsx/,
+    });
+    expect(workingFile).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(workingFile);
+    expect(screen.getByText("+new working")).toBeInTheDocument();
   });
 
   it("retains complete long repository values", async () => {
@@ -129,6 +166,7 @@ describe("DiffDetail", () => {
                   added: 1,
                   deleted: 0,
                   binary: false,
+                  diff: "@@ -0,0 +1 @@\n+content",
                 },
               ],
             },
@@ -138,15 +176,17 @@ describe("DiffDetail", () => {
               path: uncommittedPath,
               originalPath,
               worktreeStatus: "R",
+              added: 0,
+              deleted: 0,
+              binary: false,
+              diff: "",
             },
           ],
         },
       ],
     });
 
-    render(() => (
-      <DiffDetail taskId="task-1" diffStat={[]} taskPath="/task/task-1" />
-    ));
+    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
 
     expect(await screen.findByText(branch)).toBeInTheDocument();
     expect(screen.getByText(upstream)).toBeInTheDocument();
@@ -155,7 +195,7 @@ describe("DiffDetail", () => {
     expect(
       screen.getByText(
         (_content, element) =>
-          element?.classList.contains(styles.uncommittedPath) === true &&
+          element?.classList.contains(styles.fileChangePath) === true &&
           element.textContent === `${originalPath} → ${uncommittedPath}`,
       ),
     ).toBeInTheDocument();
