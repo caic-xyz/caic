@@ -367,11 +367,21 @@ type geminiGenerationConfig struct {
 	// MediaResolution controls input media sampling for token usage and detail.
 	MediaResolution string `json:"mediaResolution,omitzero"`
 	// Seed asks Gemini to make repeated requests more reproducible.
-	Seed                  *int32             `json:"seed,omitempty"`
-	SpeechConfig          geminiSpeechConfig `json:"speechConfig,omitzero"`
-	ThinkingConfig        json.RawMessage    `json:"thinkingConfig,omitempty"`
-	EnableAffectiveDialog *bool              `json:"enableAffectiveDialog,omitempty"`
-	TranslationConfig     json.RawMessage    `json:"translationConfig,omitempty"`
+	Seed                  *int32                `json:"seed,omitempty"`
+	SpeechConfig          geminiSpeechConfig    `json:"speechConfig,omitzero"`
+	ThinkingConfig        *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
+	EnableAffectiveDialog *bool                 `json:"enableAffectiveDialog,omitempty"`
+	TranslationConfig     json.RawMessage       `json:"translationConfig,omitempty"`
+}
+
+// geminiThinkingLevel controls the amount of Gemini reasoning before a response.
+type geminiThinkingLevel string
+
+const geminiThinkingLevelLow geminiThinkingLevel = "LOW"
+
+// geminiThinkingConfig controls Gemini reasoning features for a live session.
+type geminiThinkingConfig struct {
+	ThinkingLevel geminiThinkingLevel `json:"thinkingLevel,omitempty"`
 }
 
 // geminiSpeechConfig controls generated speech and transcription behavior.

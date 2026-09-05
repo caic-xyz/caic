@@ -93,6 +93,9 @@ func buildGeminiSetup(msg *voicev1.SessionSetup) ([]byte, error) {
 			Model: geminiModelName,
 			GenerationConfig: geminiGenerationConfig{
 				ResponseModalities: []string{"AUDIO"},
+				ThinkingConfig: &geminiThinkingConfig{
+					ThinkingLevel: geminiThinkingLevelLow,
+				},
 				SpeechConfig: geminiSpeechConfig{
 					VoiceConfig: geminiVoiceConfig{
 						PrebuiltVoiceConfig: geminiPrebuiltVoiceConfig{

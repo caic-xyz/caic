@@ -92,6 +92,9 @@ func TestTranslateGatewayClientMessage(t *testing.T) {
 		if msg.Setup.Model != geminiModelName {
 			t.Errorf("model = %q, want %q", msg.Setup.Model, geminiModelName)
 		}
+		if msg.Setup.GenerationConfig.ThinkingConfig == nil || msg.Setup.GenerationConfig.ThinkingConfig.ThinkingLevel != geminiThinkingLevelLow {
+			t.Errorf("thinking config = %#v, want low", msg.Setup.GenerationConfig.ThinkingConfig)
+		}
 		if len(msg.Setup.SystemInstruction.Parts) != 1 || msg.Setup.SystemInstruction.Parts[0].Text != "system prompt" {
 			t.Errorf("system instruction = %#v, want system prompt", msg.Setup.SystemInstruction)
 		}
