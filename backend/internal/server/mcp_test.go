@@ -213,6 +213,30 @@ func TestMCPHandlers(t *testing.T) {
 		}
 	})
 
+	t.Run("serverDiscoverInstructionsKeepVoiceRepliesBriefAndReactive", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		registry, ok := s.mcpHandlers.protocol.Registry.(*mcpRegistry)
+		if !ok {
+			t.Fatalf("registry type = %T", s.mcpHandlers.protocol.Registry)
+		}
+		instructions, err := registry.Instructions(t.Context())
+		if err != nil {
+			t.Fatalf("Instructions() error: %v", err)
+		}
+		for _, want := range []string{
+			"one or two short sentences",
+			"Never ask a follow-up or confirmation",
+			"Do not volunteer ideas, next steps, related actions, or offers",
+			"Notify the user only when an agent enters the waiting or asking state",
+			"Do not notify on any other state transition, including waiting to running",
+		} {
+			if !strings.Contains(instructions, want) {
+				t.Errorf("instructions missing %q: %q", want, instructions)
+			}
+		}
+	})
+
 	t.Run("serverDiscoverInstructionsHideTaskSnapshotWithoutScope", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)

@@ -85,47 +85,25 @@ func TestTranslateGatewayClientMessage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var msg map[string]any
+		var msg geminiSetupMessage
 		if err := json.Unmarshal(got, &msg); err != nil {
 			t.Fatal(err)
 		}
-		setup, ok := msg["setup"].(map[string]any)
-		if !ok {
-			t.Fatalf("setup = %T, want object", msg["setup"])
+		if msg.Setup.Model != geminiModelName {
+			t.Errorf("model = %q, want %q", msg.Setup.Model, geminiModelName)
 		}
-		if setup["model"] != geminiModelName {
-			t.Errorf("model = %q, want %q", setup["model"], geminiModelName)
+		if len(msg.Setup.SystemInstruction.Parts) != 1 || msg.Setup.SystemInstruction.Parts[0].Text != "system prompt" {
+			t.Errorf("system instruction = %#v, want system prompt", msg.Setup.SystemInstruction)
 		}
-		if _, ok := setup["systemInstruction"]; !ok {
-			t.Fatal("missing systemInstruction")
+		if len(msg.Setup.Tools) != 1 || len(msg.Setup.Tools[0].FunctionDeclarations) != 1 {
+			t.Fatalf("tools = %#v, want one declaration", msg.Setup.Tools)
 		}
-		if _, ok := setup["inputAudioTranscription"].(map[string]any); !ok {
-			t.Fatalf("inputAudioTranscription = %T, want object", setup["inputAudioTranscription"])
+		decl := msg.Setup.Tools[0].FunctionDeclarations[0]
+		if decl.Name != "tasks_list" {
+			t.Errorf("declaration name = %q, want tasks_list", decl.Name)
 		}
-		if _, ok := setup["outputAudioTranscription"].(map[string]any); !ok {
-			t.Fatalf("outputAudioTranscription = %T, want object", setup["outputAudioTranscription"])
-		}
-		tools, ok := setup["tools"].([]any)
-		if !ok || len(tools) != 1 {
-			t.Fatalf("tools = %T len %d, want one tool", setup["tools"], len(tools))
-		}
-		tool, ok := tools[0].(map[string]any)
-		if !ok {
-			t.Fatalf("tool = %T, want object", tools[0])
-		}
-		decls, ok := tool["functionDeclarations"].([]any)
-		if !ok || len(decls) != 1 {
-			t.Fatalf("functionDeclarations = %T len %d, want one declaration", tool["functionDeclarations"], len(decls))
-		}
-		decl, ok := decls[0].(map[string]any)
-		if !ok {
-			t.Fatalf("declaration = %T, want object", decls[0])
-		}
-		if _, ok := decl["parameters"]; ok {
-			t.Fatal("provider declaration used parameters, want parametersJsonSchema")
-		}
-		if _, ok := decl["parametersJsonSchema"]; !ok {
-			t.Fatal("missing parametersJsonSchema")
+		if string(decl.ParametersJsonSchema) != `{"type":"object","properties":{}}` {
+			t.Errorf("parametersJsonSchema = %s, want empty object schema", decl.ParametersJsonSchema)
 		}
 	})
 
@@ -135,16 +113,12 @@ func TestTranslateGatewayClientMessage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var msg map[string]any
+		var msg geminiRealtimeText
 		if err := json.Unmarshal(got, &msg); err != nil {
 			t.Fatal(err)
 		}
-		realtimeInput, ok := msg["realtimeInput"].(map[string]any)
-		if !ok {
-			t.Fatalf("realtimeInput = %T, want object", msg["realtimeInput"])
-		}
-		if realtimeInput["text"] != "status update" {
-			t.Fatalf("realtimeInput.text = %q, want status update", realtimeInput["text"])
+		if msg.RealtimeInput.Text != "status update" {
+			t.Fatalf("realtimeInput.text = %q, want status update", msg.RealtimeInput.Text)
 		}
 	})
 
@@ -154,16 +128,12 @@ func TestTranslateGatewayClientMessage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var msg map[string]any
+		var msg geminiClientContentMessage
 		if err := json.Unmarshal(got, &msg); err != nil {
 			t.Fatal(err)
 		}
-		clientContent, ok := msg["clientContent"].(map[string]any)
-		if !ok {
-			t.Fatalf("clientContent = %T, want object", msg["clientContent"])
-		}
-		if clientContent["turnComplete"] != true {
-			t.Fatalf("turnComplete = %v, want true", clientContent["turnComplete"])
+		if !msg.ClientContent.TurnComplete {
+			t.Fatal("turnComplete = false, want true")
 		}
 	})
 
@@ -173,12 +143,12 @@ func TestTranslateGatewayClientMessage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var msg map[string]any
+		var msg geminiToolResponseMessage
 		if err := json.Unmarshal(got, &msg); err != nil {
 			t.Fatal(err)
 		}
-		if _, ok := msg["toolResponse"]; !ok {
-			t.Fatal("missing toolResponse")
+		if len(msg.ToolResponse.FunctionResponses) != 1 || msg.ToolResponse.FunctionResponses[0].ID != "call-1" {
+			t.Fatalf("tool response = %#v, want call-1", msg.ToolResponse)
 		}
 	})
 
@@ -205,38 +175,22 @@ func TestBuildGeminiClientContentText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var msg map[string]any
+	var msg geminiClientContentMessage
 	if err := json.Unmarshal(got, &msg); err != nil {
 		t.Fatal(err)
 	}
-	clientContent, ok := msg["clientContent"].(map[string]any)
-	if !ok {
-		t.Fatalf("clientContent = %T, want object", msg["clientContent"])
+	if !msg.ClientContent.TurnComplete {
+		t.Fatal("turnComplete = false, want true")
 	}
-	if clientContent["turnComplete"] != true {
-		t.Fatalf("turnComplete = %v, want true", clientContent["turnComplete"])
+	if len(msg.ClientContent.Turns) != 1 {
+		t.Fatalf("turns = %d, want one turn", len(msg.ClientContent.Turns))
 	}
-	turns, ok := clientContent["turns"].([]any)
-	if !ok || len(turns) != 1 {
-		t.Fatalf("turns = %T len %d, want one turn", clientContent["turns"], len(turns))
+	turn := msg.ClientContent.Turns[0]
+	if turn.Role != "user" {
+		t.Fatalf("role = %q, want user", turn.Role)
 	}
-	turn, ok := turns[0].(map[string]any)
-	if !ok {
-		t.Fatalf("turn = %T, want object", turns[0])
-	}
-	if turn["role"] != "user" {
-		t.Fatalf("role = %q, want user", turn["role"])
-	}
-	parts, ok := turn["parts"].([]any)
-	if !ok || len(parts) != 1 {
-		t.Fatalf("parts = %T len %d, want one part", turn["parts"], len(parts))
-	}
-	part, ok := parts[0].(map[string]any)
-	if !ok {
-		t.Fatalf("part = %T, want object", parts[0])
-	}
-	if part["text"] != "Say exactly one word: Ready" {
-		t.Fatalf("text = %q, want user message", part["text"])
+	if len(turn.Parts) != 1 || turn.Parts[0].Text != "Say exactly one word: Ready" {
+		t.Fatalf("parts = %#v, want user message", turn.Parts)
 	}
 }
 
