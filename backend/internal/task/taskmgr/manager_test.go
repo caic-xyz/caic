@@ -1495,6 +1495,9 @@ func TestManager(t *testing.T) {
 			if tk.ForkedFromTaskID != src.Task().ID {
 				t.Errorf("ForkedFromTaskID = %s, want %s", tk.ForkedFromTaskID, src.Task().ID)
 			}
+			if tk.ParentTaskID != 0 {
+				t.Errorf("ParentTaskID = %s, want ordinary fork to remain a root task", tk.ParentTaskID)
+			}
 		})
 		t.Run("does_not_corrupt_source_log_path", func(t *testing.T) {
 			// Regression test: the fork goroutine must open and track its own
@@ -3408,6 +3411,7 @@ func TestManager(t *testing.T) {
 		t.Run("valid_restores_launch_config_from_log", func(t *testing.T) {
 			t.Parallel()
 			taskID := ksid.NewID()
+			parentTaskID := ksid.NewID()
 			fake := &runtimetest.FakeInfo{Meta: map[string]string{
 				"restore-config\x00caic.id":      taskID.String(),
 				"restore-config\x00caic.harness": string(harness.Claude),
@@ -3431,6 +3435,7 @@ func TestManager(t *testing.T) {
 				MaxCPUs:           5,
 				CacheMounts:       []agent.MetaCacheMount{{Name: "npm", HostPath: "~/.npm", ContainerPath: "/home/user/.npm", ReadOnly: true}},
 				Mounts:            []agent.MetaMount{{HostPath: "/host/work", ContainerPath: "/workspace/work", ReadOnly: true}},
+				ParentTaskID:      parentTaskID.String(),
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -3461,6 +3466,9 @@ func TestManager(t *testing.T) {
 			}
 			if len(got.Mounts) != 1 || got.Mounts[0].HostPath != "/host/work" || !got.Mounts[0].ReadOnly {
 				t.Errorf("Mounts = %+v", got.Mounts)
+			}
+			if got.ParentTaskID != parentTaskID {
+				t.Errorf("ParentTaskID = %s, want %s", got.ParentTaskID, parentTaskID)
 			}
 		})
 		t.Run("valid_merges_local_log_with_relay_tail", func(t *testing.T) {
@@ -4143,6 +4151,29 @@ func TestLoadUnsettledTasks(t *testing.T) {
 		}
 		if got := e.Task().GetState(); got != taskslog.StateFailed {
 			t.Errorf("state = %v, want StateFailed (running coerced)", got)
+		}
+	})
+	t.Run("RestoresParentTaskID", func(t *testing.T) {
+		t.Parallel()
+		m := newTestManager(t, Config{ServerCtx: t.Context()})
+		id := ksid.NewID()
+		parentID := ksid.NewID()
+		if err := m.LoadUnsettledTasks([]*taskslog.LoadedTask{{
+			TaskID:            id.String(),
+			ParentTaskID:      parentID.String(),
+			Prompt:            "delegated work",
+			Repos:             []taskslog.RepoMount{{Name: "repo/a"}},
+			State:             taskslog.StateStopped,
+			LastStateUpdateAt: time.Now().UTC(),
+		}}); err != nil {
+			t.Fatalf("LoadUnsettledTasks: %v", err)
+		}
+		e, ok := m.GetEntry(id.String())
+		if !ok {
+			t.Fatal("entry not found")
+		}
+		if got := e.Task().ParentTaskID; got != parentID {
+			t.Errorf("ParentTaskID = %s, want %s", got, parentID)
 		}
 	})
 }

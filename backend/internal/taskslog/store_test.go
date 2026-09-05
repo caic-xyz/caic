@@ -639,12 +639,39 @@ func TestStore(t *testing.T) {
 
 	t.Run("LoadUnsettled", func(t *testing.T) {
 		t.Parallel()
-		t.Run("ForkedFromTaskIDMetadata", func(t *testing.T) {
+		t.Run("RelationshipMetadata", func(t *testing.T) {
 			t.Parallel()
 			path := writePhysicalTestLog(t, false, mustJSON(t, agent.MetaMessage{
 				MessageType:      "caic_meta",
 				Version:          1,
 				Prompt:           "forked task",
+				Repos:            []agent.MetaRepo{{Name: "r", Branch: "caic-1"}},
+				Harness:          harness.Claude,
+				ForkedFromTaskID: "3BL0EKDTO000",
+				ParentTaskID:     "3BL0EKDTO001",
+			}))
+
+			tasks, err := NewStore(testLogger(), filepath.Dir(path)).LoadUnsettled()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(tasks) != 1 {
+				t.Fatalf("len(tasks) = %d, want 1", len(tasks))
+			}
+			if tasks[0].ForkedFromTaskID != "3BL0EKDTO000" {
+				t.Fatalf("ForkedFromTaskID = %q, want 3BL0EKDTO000", tasks[0].ForkedFromTaskID)
+			}
+			if tasks[0].ParentTaskID != "3BL0EKDTO001" {
+				t.Fatalf("ParentTaskID = %q, want 3BL0EKDTO001", tasks[0].ParentTaskID)
+			}
+		})
+
+		t.Run("LegacyMetadataIsRoot", func(t *testing.T) {
+			t.Parallel()
+			path := writePhysicalTestLog(t, false, mustJSON(t, agent.MetaMessage{
+				MessageType:      "caic_meta",
+				Version:          1,
+				Prompt:           "ordinary fork",
 				Repos:            []agent.MetaRepo{{Name: "r", Branch: "caic-1"}},
 				Harness:          harness.Claude,
 				ForkedFromTaskID: "3BL0EKDTO000",
@@ -657,8 +684,8 @@ func TestStore(t *testing.T) {
 			if len(tasks) != 1 {
 				t.Fatalf("len(tasks) = %d, want 1", len(tasks))
 			}
-			if tasks[0].ForkedFromTaskID != "3BL0EKDTO000" {
-				t.Fatalf("ForkedFromTaskID = %q, want 3BL0EKDTO000", tasks[0].ForkedFromTaskID)
+			if got := tasks[0].ParentTaskID; got != "" {
+				t.Errorf("ParentTaskID = %q, want root task", got)
 			}
 		})
 

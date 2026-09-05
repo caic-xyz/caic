@@ -43,7 +43,7 @@ const (
 	// headerCacheVersion guards the marshaled shape. Bump it whenever the
 	// LoadedTask fields that survive JSON marshaling change, so entries written
 	// by older binaries fall back to a full scan instead of misreading.
-	headerCacheVersion = 1
+	headerCacheVersion = 2
 
 	// headerCacheMaxBytes is the largest entry the reader will accept. A valid
 	// entry is a few kilobytes; anything larger is treated as corrupt.

@@ -71,6 +71,7 @@ func Task(in *TaskInput) (v1.Task, error) {
 		InitialPrompt:    t.InitialPrompt.Text,
 		Title:            snap.Title,
 		ForkedFromTaskID: t.ForkedFromTaskID,
+		ParentTaskID:     t.ParentTaskID,
 		Repos:            in.Repos,
 		Runtime: v1.RuntimeInstance{
 			ID:           string(snap.RuntimeInstanceID),

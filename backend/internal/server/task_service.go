@@ -235,6 +235,7 @@ func (s *taskService) getTaskInfo(ctx context.Context, entry *taskmgr.Entry, _ *
 		Recorded: v1.TaskInfoRecorded{
 			State:                    state,
 			ForkedFromTaskID:         t.ForkedFromTaskID,
+			ParentTaskID:             t.ParentTaskID,
 			StartedAt:                t.StartedAt,
 			StateUpdatedAt:           snap.StateUpdatedAt,
 			Harness:                  harnessName,

@@ -116,6 +116,7 @@ type Task struct {
 	OwnerID           string               // Internal user ID of the creator; empty in no-auth mode.
 	ForgeIssue        int                  // Originating issue number for bot comment callbacks; 0 = none.
 	ForkedFromTaskID  ksid.ID              // Parent task ID when created by fork; zero otherwise.
+	ParentTaskID      ksid.ID              // Delegating task ID for a child task; zero for root tasks and ordinary forks.
 	Provider          genai.Provider
 
 	timelineID string
@@ -619,6 +620,10 @@ func (t *Task) LogHeader() *agent.MetaMessage {
 	for i, r := range repos {
 		metaRepos[i] = agent.MetaRepo{Name: r.Name, BaseBranch: r.BaseBranch, Branch: r.Branch, ContainerPath: r.ContainerPath}
 	}
+	parentTaskID := ""
+	if t.ParentTaskID != 0 {
+		parentTaskID = t.ParentTaskID.String()
+	}
 	return &agent.MetaMessage{
 		MessageType:       "caic_meta",
 		Prompt:            t.InitialPrompt.Text,
@@ -630,6 +635,7 @@ func (t *Task) LogHeader() *agent.MetaMessage {
 		StartedAt:         t.StartedAt,
 		ForgeIssue:        t.ForgeIssue,
 		ForkedFromTaskID:  t.ForkedFromTaskID.String(),
+		ParentTaskID:      parentTaskID,
 		Tailscale:         t.Tailscale,
 		USB:               t.USB,
 		Display:           t.Display,
@@ -2006,5 +2012,57 @@ func (t *Task) trackToolUse(tu *agent.ToolUseMessage) {
 				t.planContent = strings.Replace(t.planContent, input.OldString, input.NewString, 1)
 			}
 		}
+	}
+}
+
+// terminalLogSummary projects the live task and its bounded terminal result
+// into the same LoadedTask shape used by startup. Completion already has these
+// values in memory, so persisting this projection avoids decoding the newly
+// compressed message body on the next process start.
+func (t *Task) terminalLogSummary(version agent.LogVersion, res *taskslog.Result) *taskslog.LoadedTask {
+	snapshot := t.Snapshot()
+	// GitRoot is process-local checkout state and is absent from the durable
+	// log header. Do not let the fast completion path persist a stale host path
+	// that a normal log scan would never reconstruct.
+	for i := range snapshot.Repos {
+		snapshot.Repos[i].GitRoot = ""
+	}
+	parentTaskID := ""
+	if t.ParentTaskID != 0 {
+		parentTaskID = t.ParentTaskID.String()
+	}
+	return &taskslog.LoadedTask{
+		TaskID:            t.ID.String(),
+		Prompt:            t.InitialPrompt.Text,
+		Title:             snapshot.Title,
+		Repos:             snapshot.Repos,
+		LogVersion:        version,
+		Harness:           t.Harness,
+		StartedAt:         t.StartedAt,
+		LastStateUpdateAt: snapshot.StateUpdatedAt,
+		State:             res.State,
+		ForgeIssue:        snapshot.ForgeIssue,
+		ForkedFromTaskID:  t.ForkedFromTaskID.String(),
+		ParentTaskID:      parentTaskID,
+		ForgeOwner:        snapshot.ForgeOwner,
+		ForgeRepo:         snapshot.ForgeRepo,
+		ForgePR:           snapshot.ForgePR,
+		Tailscale:         snapshot.Tailscale,
+		USB:               snapshot.USB,
+		Display:           snapshot.Display,
+		Sudo:              snapshot.Sudo,
+		GitHubToken:       snapshot.GitHubToken,
+		RuntimeName:       snapshot.RuntimeName,
+		BaseImage:         t.BaseImage,
+		ContainerPlatform: t.ContainerPlatform,
+		MaxCPUs:           t.MaxCPUs,
+		CacheMounts:       slices.Clone(t.CacheMounts),
+		Mounts:            slices.Clone(t.Mounts),
+		Model:             snapshot.Model,
+		Effort:            t.Effort,
+		SessionID:         snapshot.SessionID,
+		AgentVersion:      snapshot.AgentVersion,
+		DiffCreated:       t.DiffCreated(),
+		LastTrailer:       res,
 	}
 }

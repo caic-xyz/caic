@@ -301,6 +301,7 @@ type Task struct {
 	CIChecks                           []ForgeCheck `json:"ciChecks,omitempty"`
 	Owner                              string       `json:"owner,omitempty"` // username of creator; omitted in no-auth mode
 	ForkedFromTaskID                   ksid.ID      `json:"forkedFromTaskID,omitempty"`
+	ParentTaskID                       ksid.ID      `json:"parentTaskID,omitempty"`
 	// Per-task harness/agent metadata.
 	Harness       Harness         `json:"harness"`
 	Model         string          `json:"model,omitempty"`
@@ -336,6 +337,7 @@ type TaskInfo struct {
 type TaskInfoRecorded struct {
 	State                    TaskState            `json:"state"`
 	ForkedFromTaskID         ksid.ID              `json:"forkedFromTaskID,omitempty"`
+	ParentTaskID             ksid.ID              `json:"parentTaskID,omitempty"`
 	StartedAt                time.Time            `json:"startedAt,omitzero"`
 	StateUpdatedAt           time.Time            `json:"stateUpdatedAt,omitzero"`
 	Harness                  Harness              `json:"harness"`

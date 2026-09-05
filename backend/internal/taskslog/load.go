@@ -853,6 +853,7 @@ type LoadedTask struct {
 	State             State                `json:"state"`
 	ForgeIssue        int                  `json:"forge_issue"` // Originating issue number for bot comment callbacks.
 	ForkedFromTaskID  string               `json:"forked_from_task_id"`
+	ParentTaskID      string               `json:"parent_task_id"`
 	ForgeOwner        string               `json:"forge_owner"`
 	ForgeRepo         string               `json:"forge_repo"`
 	ForgePR           int                  `json:"forge_pr"` // PR number created during the task; 0 if none.
@@ -1382,6 +1383,7 @@ func loadedTaskFromMeta(path, taskID string, meta *agent.MetaMessage, modified t
 		State:             StateRunning,
 		ForgeIssue:        meta.ForgeIssue,
 		ForkedFromTaskID:  meta.ForkedFromTaskID,
+		ParentTaskID:      meta.ParentTaskID,
 		Tailscale:         meta.Tailscale,
 		USB:               meta.USB,
 		Display:           meta.Display,

@@ -1153,6 +1153,7 @@ data class Task(
     /** username of creator; omitted in no-auth mode */
     val owner: String? = null,
     @SerialName("forkedFromTaskID") val forkedFromTaskID: String? = null,
+    @SerialName("parentTaskID") val parentTaskID: String? = null,
     /** Per-task harness/agent metadata. */
     val harness: Harness,
     val model: String? = null,
@@ -1226,6 +1227,7 @@ data class TaskInfoMount(
 data class TaskInfoRecorded(
     val state: TaskState,
     @SerialName("forkedFromTaskID") val forkedFromTaskID: String? = null,
+    @SerialName("parentTaskID") val parentTaskID: String? = null,
     val startedAt: Instant? = null,
     val stateUpdatedAt: Instant? = null,
     val harness: Harness,

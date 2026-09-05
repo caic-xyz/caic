@@ -65,6 +65,25 @@ func recvType(ch <-chan TimelineMessage) string {
 
 func TestTask(t *testing.T) {
 	t.Parallel()
+	t.Run("RootTaskHasNoParent", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		if tk.ParentTaskID != 0 {
+			t.Errorf("ParentTaskID = %s, want root task", tk.ParentTaskID)
+		}
+		if got := tk.LogHeader().ParentTaskID; got != "" {
+			t.Errorf("LogHeader().ParentTaskID = %q, want empty", got)
+		}
+	})
+	t.Run("ChildTaskPersistsParent", func(t *testing.T) {
+		t.Parallel()
+		parentID := ksid.NewID()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		tk.ParentTaskID = parentID
+		if got := tk.LogHeader().ParentTaskID; got != parentID.String() {
+			t.Errorf("LogHeader().ParentTaskID = %q, want %q", got, parentID)
+		}
+	})
 	t.Run("UnknownCacheTTLDoesNotCreateExpiry", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
@@ -121,6 +140,8 @@ func TestTask(t *testing.T) {
 		tk.SetSessionMetadata("session-1", "reported", "1.2.3")
 		tk.SetState(taskslog.StatePurged)
 		result := &taskslog.Result{State: taskslog.StatePurged, AgentResult: "done"}
+		parentID := ksid.NewID()
+		tk.ParentTaskID = parentID
 
 		summary := tk.terminalLogSummary(agent.LogVersionV1, result)
 		if summary.LogVersion != agent.LogVersionV1 || summary.State != taskslog.StatePurged || summary.LastTrailer != result {
@@ -128,6 +149,9 @@ func TestTask(t *testing.T) {
 		}
 		if summary.SessionID != "session-1" || summary.Model != "reported" || summary.AgentVersion != "1.2.3" {
 			t.Errorf("session summary = (%q, %q, %q)", summary.SessionID, summary.Model, summary.AgentVersion)
+		}
+		if got := summary.ParentTaskID; got != parentID.String() {
+			t.Errorf("ParentTaskID = %q, want %q", got, parentID)
 		}
 		if len(summary.Repos) != 1 || summary.Repos[0].GitRoot != "" {
 			t.Fatalf("summary repos = %#v, want process-local GitRoot removed", summary.Repos)

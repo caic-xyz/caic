@@ -919,6 +919,7 @@ export interface Task {
   /** username of creator; omitted in no-auth mode */
   owner?: string;
   forkedFromTaskID?: string;
+  parentTaskID?: string;
   /** Per-task harness/agent metadata. */
   harness: Harness;
   model?: string;
@@ -988,6 +989,7 @@ export interface TaskInfoMount {
 export interface TaskInfoRecorded {
   state: TaskState;
   forkedFromTaskID?: string;
+  parentTaskID?: string;
   startedAt?: ISOTimestamp;
   stateUpdatedAt?: ISOTimestamp;
   harness: Harness;

@@ -891,6 +891,15 @@ func (m *Manager) insertLoadedTasks(lts []*taskslog.LoadedTask) (int, error) {
 			}
 			forkedFromTaskID = parsed
 		}
+		var parentTaskID ksid.ID
+		if lt.ParentTaskID != "" {
+			parsed, err := ksid.Parse(lt.ParentTaskID)
+			if err != nil {
+				m.log.Warn("skipping task with invalid parentTaskID", "task", lt.TaskID, "parentTaskID", lt.ParentTaskID, "err", err)
+				continue
+			}
+			parentTaskID = parsed
+		}
 		t, err := task.NewTask(taskID, agent.Prompt{Text: lt.Prompt}, lt.Harness, lt.Model, lt.Effort, lt.BaseImage, lt.ContainerPlatform, lt.Title)
 		if err != nil {
 			m.log.Warn("skipping purged task with invalid metadata", "task", lt.TaskID, "err", err)
@@ -903,6 +912,7 @@ func (m *Manager) insertLoadedTasks(lts []*taskslog.LoadedTask) (int, error) {
 		t.Mounts = slices.Clone(lt.Mounts)
 		t.StartedAt = lt.StartedAt
 		t.ForkedFromTaskID = forkedFromTaskID
+		t.ParentTaskID = parentTaskID
 		t.Tailscale = lt.Tailscale
 		t.USB = lt.USB
 		t.Display = lt.Display
@@ -1589,7 +1599,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 
 	forgeIssue := lt.ForgeIssue
 	rt := m.Runtimes.Runtimes[0].Name()
-	var forkedFromTaskID ksid.ID
+	var forkedFromTaskID, parentTaskID ksid.ID
 	if lt.RuntimeName != "" {
 		rt = lt.RuntimeName
 	} else {
@@ -1599,6 +1609,12 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		forkedFromTaskID, err = ksid.Parse(lt.ForkedFromTaskID)
 		if err != nil {
 			return nil, fmt.Errorf("import task %q: invalid forkedFromTaskID %q: %w", taskID.String(), lt.ForkedFromTaskID, err)
+		}
+	}
+	if lt.ParentTaskID != "" {
+		parentTaskID, err = ksid.Parse(lt.ParentTaskID)
+		if err != nil {
+			return nil, fmt.Errorf("import task %q: invalid parentTaskID %q: %w", taskID.String(), lt.ParentTaskID, err)
 		}
 	}
 	if c.ID.RuntimeName() != "" {
@@ -1616,6 +1632,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	t.Mounts = lt.Mounts
 	t.StartedAt = startedAt
 	t.ForkedFromTaskID = forkedFromTaskID
+	t.ParentTaskID = parentTaskID
 	t.Tailscale = c.Tailscale
 	t.TailscaleFQDN = c.TailscaleFQDN
 	t.USB = c.USB

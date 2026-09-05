@@ -717,6 +717,7 @@ Task is the JSON representation sent to the frontend.
 | `ciChecks` | `ForgeCheck[]` |  |  |
 | `owner` | `string` | username of creator; omitted in no-auth mode |  |
 | `forkedFromTaskID` | `string` |  |  |
+| `parentTaskID` | `string` |  |  |
 | `harness` | `Harness` | Per-task harness/agent metadata. | yes |
 | `model` | `string` |  |  |
 | `effort` | `string` | Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default. |  |
@@ -796,6 +797,7 @@ TaskInfoRecorded holds caic-recorded task launch configuration and metadata.
 |-------|------|-------------|----------|
 | `state` | `TaskState` |  | yes |
 | `forkedFromTaskID` | `string` |  |  |
+| `parentTaskID` | `string` |  |  |
 | `startedAt` | `ISOTimestamp` |  |  |
 | `stateUpdatedAt` | `ISOTimestamp` |  |  |
 | `harness` | `Harness` |  | yes |

@@ -369,19 +369,24 @@ func TestTask(t *testing.T) {
 			t.Errorf("RateLimit = %#v, want active 5h block", got)
 		}
 	})
-	t.Run("IncludesForkOrigin", func(t *testing.T) {
+	t.Run("IncludesForkAndDelegationOrigins", func(t *testing.T) {
 		t.Parallel()
-		parentID := ksid.NewID()
+		forkedFromTaskID := ksid.NewID()
+		parentTaskID := ksid.NewID()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
-		tk.ForkedFromTaskID = parentID
+		tk.ForkedFromTaskID = forkedFromTaskID
+		tk.ParentTaskID = parentTaskID
 		tk.SetState(taskslog.StatePending)
 
 		got, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.ForkedFromTaskID != parentID {
-			t.Errorf("ForkedFromTaskID = %s, want %s", got.ForkedFromTaskID, parentID)
+		if got.ForkedFromTaskID != forkedFromTaskID {
+			t.Errorf("ForkedFromTaskID = %s, want %s", got.ForkedFromTaskID, forkedFromTaskID)
+		}
+		if got.ParentTaskID != parentTaskID {
+			t.Errorf("ParentTaskID = %s, want %s", got.ParentTaskID, parentTaskID)
 		}
 	})
 }
