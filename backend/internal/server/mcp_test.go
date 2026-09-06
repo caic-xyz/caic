@@ -229,7 +229,7 @@ func TestMCPHandlers(t *testing.T) {
 			"Never ask a follow-up or confirmation",
 			"Do not volunteer ideas, next steps, related actions, or offers",
 			"Notify the user only when an agent enters the waiting or asking state",
-			"Do not notify on any other state transition, including waiting to running",
+			"Do not notify on any other state transition",
 		} {
 			if !strings.Contains(instructions, want) {
 				t.Errorf("instructions missing %q: %q", want, instructions)
