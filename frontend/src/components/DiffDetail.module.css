@@ -254,6 +254,11 @@
   overflow-wrap: anywhere;
 }
 
+.pathValue {
+  min-width: 0;
+  white-space: nowrap;
+}
+
 .commitSummary {
   margin-top: 0.15rem;
   color: var(--color-text-muted);
@@ -266,6 +271,10 @@
 
 .originalPath {
   color: var(--color-text-tertiary);
+}
+
+.renameArrow {
+  margin: 0 0.35em;
 }
 
 .fileDiff {
@@ -303,13 +312,14 @@
 }
 
 .fileCounts {
+  display: inline-flex;
+  gap: 0.3em;
   white-space: nowrap;
   flex-shrink: 0;
 }
 
 .added {
   color: var(--color-diff-added);
-  margin-right: 0.3em;
 }
 
 .deleted {
@@ -359,11 +369,25 @@
   }
 
   .fileChangeButton {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
   }
 
   .fileChangePath {
-    min-width: calc(100% - 1.3rem);
+    display: flex;
+    align-items: baseline;
+    min-width: 0;
+    overflow: hidden;
+    overflow-wrap: normal;
+    white-space: nowrap;
+  }
+
+  .pathValue {
+    flex: 1 1 0;
+  }
+
+  .renameArrow {
+    flex-shrink: 0;
+    margin: 0;
   }
 
   .commitSubject {

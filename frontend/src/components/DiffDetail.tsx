@@ -254,6 +254,8 @@ interface FileDiffRowProps {
 
 function FileDiffRow(props: FileDiffRowProps) {
   const [expanded, setExpanded] = createSignal(false);
+  const pathLabel = () =>
+    props.originalPath ? `${props.originalPath} → ${props.path}` : props.path;
 
   return (
     <div
@@ -266,16 +268,23 @@ function FileDiffRow(props: FileDiffRowProps) {
         type="button"
         class={styles.fileChangeButton}
         aria-expanded={expanded()}
+        aria-label={pathLabel()}
+        title={pathLabel()}
         onClick={() => setExpanded((value) => !value)}
       >
         <span class={styles.collapseIndicator} aria-hidden="true">
           {expanded() ? "\u25bc" : "\u25b6"}
         </span>
-        <span class={styles.fileChangePath}>
+        <span class={styles.fileChangePath} data-testid="diff-file-path">
           <Show when={props.originalPath}>
-            <span class={styles.originalPath}>{props.originalPath} → </span>
+            {(originalPath) => (
+              <>
+                <FilePath path={originalPath()} class={styles.originalPath} />
+                <span class={styles.renameArrow}>{" → "}</span>
+              </>
+            )}
           </Show>
-          {props.path}
+          <FilePath path={props.path} />
         </span>
         <Show when={props.statuses}>
           <span class={styles.statusBadges}>
@@ -311,6 +320,82 @@ function FileDiffRow(props: FileDiffRowProps) {
       </Show>
     </div>
   );
+}
+
+function FilePath(props: { path: string; class?: string }) {
+  let pathEl: HTMLSpanElement | undefined;
+  const [displayPath, setDisplayPath] = createSignal("");
+
+  const updateDisplayPath = (path: string) => {
+    if (
+      !pathEl ||
+      typeof window.matchMedia !== "function" ||
+      !window.matchMedia("(max-width: 768px)").matches
+    ) {
+      setDisplayPath(path);
+      return;
+    }
+
+    const context = document.createElement("canvas").getContext("2d");
+    if (!context) return;
+    const style = getComputedStyle(pathEl);
+    context.font = style.font;
+    const letterSpacing = Number.parseFloat(style.letterSpacing);
+    const measureText = (text: string) =>
+      context.measureText(text).width +
+      (Number.isFinite(letterSpacing) ? letterSpacing * (text.length - 1) : 0);
+    setDisplayPath(elidePathAtBoundary(path, pathEl.clientWidth, measureText));
+  };
+
+  createEffect(() => {
+    updateDisplayPath(props.path);
+  });
+
+  onMount(() => {
+    if (!pathEl) return;
+    updateDisplayPath(props.path);
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => updateDisplayPath(props.path));
+    observer.observe(pathEl);
+    onCleanup(() => observer.disconnect());
+  });
+
+  return (
+    <span
+      class={`${styles.pathValue} ${props.class ?? ""}`}
+      data-testid="diff-path-value"
+      ref={(el) => {
+        pathEl = el;
+      }}
+    >
+      {displayPath()}
+    </span>
+  );
+}
+
+export function elidePathAtBoundary(
+  path: string,
+  availableWidth: number,
+  measureText: (text: string) => number,
+): string {
+  if (measureText(path) <= availableWidth) return path;
+
+  const parts = path.split("/");
+  const filename = parts.at(-1) ?? path;
+  const directories = parts.slice(0, -1);
+  if (directories.length === 0) return filename;
+
+  const firstDirectory = directories[0];
+  for (let kept = directories.length - 2; kept >= 0; kept -= 1) {
+    const suffix = directories.slice(directories.length - kept);
+    const candidate = [firstDirectory, "…", ...suffix, filename].join("/");
+    if (measureText(candidate) <= availableWidth) return candidate;
+  }
+
+  const filenameWithEllipsis = `…/${filename}`;
+  return measureText(filenameWithEllipsis) <= availableWidth
+    ? filenameWithEllipsis
+    : filename;
 }
 
 function FileCounts(props: {

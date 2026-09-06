@@ -18,7 +18,7 @@ vi.mock("../api", () => ({
 }));
 
 import { annotateDiffLines, extractDiffPath, splitDiff } from "./diffLines";
-import DiffDetail from "./DiffDetail";
+import DiffDetail, { elidePathAtBoundary } from "./DiffDetail";
 import styles from "./DiffDetail.module.css";
 
 describe("DiffDetail", () => {
@@ -110,7 +110,6 @@ describe("DiffDetail", () => {
       screen.getByText("HEAD -> caic-42, host/caic-42, tag: v1.2.3"),
     ).toHaveClass(styles.commitDecorations);
     expect(screen.getByText("Surface git status")).toBeInTheDocument();
-    expect(screen.getByText("frontend/view.tsx")).toBeInTheDocument();
     expect(screen.getByText("+10")).toHaveClass(styles.added);
     expect(screen.getAllByText("1 file changed")).toHaveLength(2);
     expect(screen.getByText("Uncommitted changes (3)")).toBeInTheDocument();
@@ -191,14 +190,57 @@ describe("DiffDetail", () => {
     expect(await screen.findByText(branch)).toBeInTheDocument();
     expect(screen.getByText(upstream)).toBeInTheDocument();
     expect(screen.getByText(subject)).toBeInTheDocument();
-    expect(screen.getByText(committedPath)).toBeInTheDocument();
+    const committedFile = screen.getByTitle(committedPath);
+    expect(committedFile).toHaveAttribute("title", committedPath);
+    expect(committedFile).toHaveAccessibleName(committedPath);
     expect(
-      screen.getByText(
-        (_content, element) =>
-          element?.classList.contains(styles.fileChangePath) === true &&
-          element.textContent === `${originalPath} → ${uncommittedPath}`,
+      committedFile.querySelector(`.${styles.pathValue}`),
+    ).toHaveTextContent(committedPath);
+    const renamedFile = screen.getByTitle(
+      `${originalPath} → ${uncommittedPath}`,
+    );
+    expect(renamedFile).toHaveAttribute(
+      "title",
+      `${originalPath} → ${uncommittedPath}`,
+    );
+    expect(renamedFile.querySelectorAll(`.${styles.pathValue}`)).toHaveLength(2);
+    expect(renamedFile).toHaveTextContent(
+      `${originalPath} → ${uncommittedPath}`,
+    );
+  });
+});
+
+describe("elidePathAtBoundary", () => {
+  const measureCharacters = (text: string) => text.length;
+
+  it("removes complete directory segments before touching the filename", () => {
+    expect(
+      elidePathAtBoundary(
+        "backend/internal/server/apiconv/oauth_handlers_test.go",
+        33,
+        measureCharacters,
       ),
-    ).toBeInTheDocument();
+    ).toBe("backend/…/oauth_handlers_test.go");
+  });
+
+  it("keeps the complete path when it fits", () => {
+    expect(
+      elidePathAtBoundary(
+        "backend/internal/types.go",
+        40,
+        measureCharacters,
+      ),
+    ).toBe("backend/internal/types.go");
+  });
+
+  it("keeps the complete basename when only the basename fits", () => {
+    expect(
+      elidePathAtBoundary(
+        "backend/internal/server/oauth_handlers_test.go",
+        22,
+        measureCharacters,
+      ),
+    ).toBe("oauth_handlers_test.go");
   });
 });
 
