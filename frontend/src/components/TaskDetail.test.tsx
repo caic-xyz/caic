@@ -1,7 +1,7 @@
 // Tests for TaskDetail navigation, prompts, and SSE connection behaviour.
 
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { render } from "@solidjs/testing-library";
+import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { type JSX } from "solid-js";
 
@@ -67,6 +67,7 @@ const baseProps = {
   onStop: () => {},
   onPurge: () => {},
   onRevive: () => {},
+  childTasks: [],
   inputDraft: "",
   onInputDraft: () => {},
   inputImages: [],
@@ -124,6 +125,23 @@ describe("TaskDetail", () => {
   it("hides Diff link when diffStat is undefined", () => {
     const { queryByText } = renderTaskDetail({ diffStat: undefined });
     expect(queryByText("Diff")).not.toBeInTheDocument();
+  });
+
+  it("renders parent and child task navigation", () => {
+    renderTaskDetail({
+      parentTaskID: "parent",
+      childTasks: [{ id: "child", title: "Review tests" }],
+    });
+
+    expect(screen.getByRole("navigation", { name: "Task hierarchy" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Parent task" })).toHaveAttribute("href", "/task/@parent");
+    expect(screen.getByRole("link", { name: "Child: Review tests" })).toHaveAttribute("href", "/task/@child");
+  });
+
+  it("uses a child ID when its title is empty", () => {
+    renderTaskDetail({ childTasks: [{ id: "untitled-child", title: "" }] });
+
+    expect(screen.getByRole("link", { name: "Child: untitled-child" })).toHaveAttribute("href", "/task/@untitled-child");
   });
 
   it("diff link href ends with /diff", () => {

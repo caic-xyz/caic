@@ -18,6 +18,23 @@
   margin: 0;
 }
 
+.hierarchy {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: -0.2rem 0 0.5rem;
+  font-size: 0.8rem;
+}
+
+.hierarchyLink {
+  color: var(--color-link);
+  text-decoration: none;
+}
+
+.hierarchyLink:hover {
+  text-decoration: underline;
+}
+
 .closeBtn {
   border: none;
   background: none;

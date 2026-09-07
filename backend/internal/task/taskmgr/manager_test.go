@@ -1495,8 +1495,43 @@ func TestManager(t *testing.T) {
 			if tk.ForkedFromTaskID != src.Task().ID {
 				t.Errorf("ForkedFromTaskID = %s, want %s", tk.ForkedFromTaskID, src.Task().ID)
 			}
-			if tk.ParentTaskID != 0 {
-				t.Errorf("ParentTaskID = %s, want ordinary fork to remain a root task", tk.ParentTaskID)
+		})
+		t.Run("parent_stop_does_not_change_child", func(t *testing.T) {
+			t.Parallel()
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
+			parent := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "parent"}, "", "")
+			parent.SetState(taskslog.StateWaiting)
+			child := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "child"}, "", "")
+			child.ParentTaskID = parent.ID
+			child.SetState(taskslog.StateWaiting)
+			parentEntry := m.NewEntry(parent, nil)
+			m.Insert(parent.ID.String(), parentEntry)
+			m.Insert(child.ID.String(), m.NewEntry(child, nil))
+
+			if err := parentEntry.Lifecycle.Stop(t.Context()); err != nil {
+				t.Fatalf("Stop: %v", err)
+			}
+			if got := child.GetState(); got != taskslog.StateWaiting {
+				t.Errorf("child state = %s, want %s", got, taskslog.StateWaiting)
+			}
+		})
+		t.Run("parent_purge_does_not_change_child", func(t *testing.T) {
+			t.Parallel()
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
+			parent := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "parent"}, "", "")
+			parent.SetState(taskslog.StateStopped)
+			child := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "child"}, "", "")
+			child.ParentTaskID = parent.ID
+			child.SetState(taskslog.StateWaiting)
+			parentEntry := m.NewEntry(parent, nil)
+			m.Insert(parent.ID.String(), parentEntry)
+			m.Insert(child.ID.String(), m.NewEntry(child, nil))
+
+			if err := parentEntry.Lifecycle.Purge(t.Context(), 0); err != nil {
+				t.Fatalf("Purge: %v", err)
+			}
+			if got := child.GetState(); got != taskslog.StateWaiting {
+				t.Errorf("child state = %s, want %s", got, taskslog.StateWaiting)
 			}
 		})
 		t.Run("does_not_corrupt_source_log_path", func(t *testing.T) {

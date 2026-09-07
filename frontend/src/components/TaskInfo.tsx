@@ -95,6 +95,16 @@ function TaskLink(props: { id: string }) {
   );
 }
 
+function LineageRow(props: { label: string; id: string }) {
+  return (
+    <div class={styles.lineage}>
+      <span class={styles.lineageGlyph} aria-hidden="true">↳</span>
+      <span>{props.label}</span>
+      <TaskLink id={props.id} />
+    </div>
+  );
+}
+
 function MountTable(props: { mounts?: TaskInfoMount[]; empty: string }) {
   return (
     <Show when={(props.mounts?.length ?? 0) > 0} fallback={<div class={styles.empty}>{props.empty}</div>}>
@@ -239,16 +249,15 @@ export default function TaskInfo(props: Props) {
                 </div>
               </Section>
 
-              <Show when={data.recorded.forkedFromTaskID} keyed>
-                {(parentID) => (
-                  <Section title="Lineage">
-                    <div class={styles.lineage}>
-                      <span class={styles.lineageGlyph} aria-hidden="true">↳</span>
-                      <span>Forked from</span>
-                      <TaskLink id={parentID} />
-                    </div>
-                  </Section>
-                )}
+              <Show when={data.recorded.parentTaskID || data.recorded.forkedFromTaskID}>
+                <Section title="Lineage">
+                  <Show when={data.recorded.forkedFromTaskID !== data.recorded.parentTaskID ? data.recorded.forkedFromTaskID : undefined} keyed>
+                    {(sourceID) => <LineageRow label="Forked from" id={sourceID} />}
+                  </Show>
+                  <Show when={data.recorded.parentTaskID} keyed>
+                    {(parentID) => <LineageRow label="Child of" id={parentID} />}
+                  </Show>
+                </Section>
               </Show>
 
               <Section title="Runtime">

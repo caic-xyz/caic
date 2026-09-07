@@ -43,6 +43,7 @@ export interface TaskCardProps {
   id: string;
   title: string;
   forkedFromTaskID?: string;
+  parentTaskID?: string;
   state: TaskState;
   stateUpdatedAt: string;
   repos?: TaskRepo[];
@@ -390,7 +391,7 @@ export default function TaskCard(props: TaskCardProps) {
         </span>
       </div>
 
-      <Show when={props.forkedFromTaskID} keyed>
+      <Show when={props.forkedFromTaskID !== props.parentTaskID ? props.forkedFromTaskID : undefined} keyed>
         {(parentID) => (
           <div class={styles.originRow}>
             <span class={styles.originGlyph} aria-hidden="true">↳</span>
@@ -399,6 +400,22 @@ export default function TaskCard(props: TaskCardProps) {
               class={styles.originLink}
               href={`/task/@${parentID}`}
               title={`Open origin task ${parentID}`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {parentID}
+            </A>
+          </div>
+        )}
+      </Show>
+      <Show when={props.parentTaskID} keyed>
+        {(parentID) => (
+          <div class={styles.originRow}>
+            <span class={styles.originGlyph} aria-hidden="true">↳</span>
+            <span>child of</span>
+            <A
+              class={styles.originLink}
+              href={`/task/@${parentID}`}
+              title={`Open parent task ${parentID}`}
               onClick={(event) => event.stopPropagation()}
             >
               {parentID}

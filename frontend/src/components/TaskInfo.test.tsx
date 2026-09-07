@@ -91,4 +91,48 @@ describe("TaskInfo", () => {
     const link = await findByRole("link", { name: "3BL0EKDTO000" });
     expect(link).toHaveAttribute("href", "/task/@3BL0EKDTO000");
   });
+
+  it("shows a child origin instead of a duplicate fork origin", async () => {
+    getTaskInfoMock.mockResolvedValueOnce({
+      id: "child",
+      recorded: {
+        state: "running",
+        harness: "claude",
+        capabilities: {},
+        runtime: { id: "md-test" },
+        forkedFromTaskID: "parent",
+        parentTaskID: "parent",
+      },
+    });
+
+    const { findByText, queryByText } = render(() => (
+      <TaskInfo taskId="child" repo="repo" branch="branch" taskPath="/task/child" />
+    ));
+
+    expect(await findByText("Child of")).toBeInTheDocument();
+    expect(queryByText("Forked from")).not.toBeInTheDocument();
+  });
+
+  it("shows distinct fork and child origins", async () => {
+    getTaskInfoMock.mockResolvedValueOnce({
+      id: "child",
+      recorded: {
+        state: "running",
+        harness: "claude",
+        capabilities: {},
+        runtime: { id: "md-test" },
+        forkedFromTaskID: "snapshot-source",
+        parentTaskID: "parent",
+      },
+    });
+
+    const { findByText, findByRole } = render(() => (
+      <TaskInfo taskId="child" repo="repo" branch="branch" taskPath="/task/child" />
+    ));
+
+    expect(await findByText("Forked from")).toBeInTheDocument();
+    expect(await findByText("Child of")).toBeInTheDocument();
+    expect(await findByRole("link", { name: "snapshot-source" })).toHaveAttribute("href", "/task/@snapshot-source");
+    expect(await findByRole("link", { name: "parent" })).toHaveAttribute("href", "/task/@parent");
+  });
 });

@@ -24,11 +24,12 @@ logical parent.
 
 The hierarchy is a directed tree. The intended contract is that a child has
 one immutable parent, selected by the server—not a client-provided argument—
-for task-initiated creation. Phase 1 represents `ParentTaskID` as immutable
-creation metadata by convention: task creation and loading set it once, and
-no operation changes it. Creation-time enforcement of single assignment and
-tree validity begins in Phase 2. A root task is identified by following
-`ParentTaskID`; it need not be stored separately in the initial design.
+for task-initiated creation. Phase 1 restores `ParentTaskID` from logs and
+imports it as immutable metadata; task-scoped creation will set it once in
+Phase 2. No operation changes it. Creation-time enforcement of single
+assignment and tree validity begins in Phase 2. A root task is identified by
+following `ParentTaskID`; it need not be stored separately in the initial
+design.
 
 Each child is an ordinary isolated task with its own branch, runtime instance,
 session, logs, result, and lifecycle. Parent state never cascades: stopping,
@@ -38,7 +39,8 @@ settled.
 
 ## Delegated-child behavior
 
-The first child-creation implementation uses the existing runtime fork path:
+The future task-initiated child-creation implementation uses the existing
+runtime fork path:
 the child starts from the parent task's current container and repository
 snapshot, receives a new branch and clean agent session, and runs its own
 prompt. An agent cannot choose a different source task, owner, repository set,
@@ -95,35 +97,21 @@ delegation separately. Task-list responses should expose enough parent data to
 render a tree without per-task requests; detailed child summaries and
 aggregated cost or status can be added without changing the base relation.
 
+There is no child-specific creation route or user-facing “create child”
+control. `POST /tasks` remains the creation route. When its caller is a
+task-scoped client, the server reconciles the trusted client properties with
+the request and derives the logical parent and permitted source snapshot. The
+request body never selects a parent, and a task does not need to know its own
+parent ID. Human clients continue to create root tasks unless the server has a
+separate trusted reason to derive a relationship.
+
 Existing `ForkedFromTaskID` data remains readable and unchanged. Old task logs
 that do not contain hierarchy data represent root tasks.
 
 ## Delivery plan
 
-### Phase 1 — hierarchy-contract: Define durable hierarchy semantics
+### Phase 1 — task-mcp-identity: Provision a narrow MCP identity to enabled tasks
 
-- **Scope:** architecture decision, task/log/API contract.
-- **Preserve:** existing `ForkedFromTaskID` meaning and existing fork API
-  behavior.
-- **Verify:** task-log headers, terminal summaries, and header-cache entries
-  preserve `ParentTaskID`; settled loading and runtime import restore it; old
-  logs default to root tasks; ordinary forks retain zero `ParentTaskID`; and
-  the v1 API and generated SDKs expose the relation.
-
-### Phase 2 — user-managed-children: Make hierarchy real without agent access
-
-- **Depends on:** hierarchy-contract
-- **Scope:** task manager, persistence, API/SDK, task detail/list UI.
-- **Preserve:** a regular fork remains a fork, not automatically a delegated
-  child.
-- **Verify:** a user can create and browse a child; a parent cannot be
-  reassigned after creation; reload/import retains the tree; direct-child and
-  no-cycle rules are enforced; parent stop/purge leaves children intact; API
-  generation, frontend lint/E2E, and repository checks pass.
-
-### Phase 3 — task-mcp-identity: Provision a narrow MCP identity to enabled tasks
-
-- **Depends on:** user-managed-children
 - **Scope:** task launch configuration, MCP authentication and authorization,
   first supported harness adapter.
 - **Preserve:** no task receives the general MCP endpoint, a user OAuth token,
@@ -132,7 +120,7 @@ that do not contain hierarchy data represent root tasks.
   disabled, expired, or revoked identities fail closed; secrets are absent from
   logs, task history, runtime labels, and command arguments.
 
-### Phase 4 — delegated-children: Expose bounded child creation
+### Phase 2 — delegated-children: Expose bounded child creation
 
 - **Depends on:** task-mcp-identity
 - **Scope:** task-facing child tools, server-side policy enforcement, auditing.
@@ -143,7 +131,7 @@ that do not contain hierarchy data represent root tasks.
   root limits are atomic; audit records tie each child to its caller and
   policy decision.
 
-### Phase 5 — hierarchy-operations: Make supervision useful
+### Phase 3 — hierarchy-operations: Make supervision useful
 
 - **Depends on:** delegated-children
 - **Scope:** hierarchy views, parent/child status, budget rollups,

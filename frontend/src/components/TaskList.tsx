@@ -245,6 +245,7 @@ export default function TaskList(props: TaskListProps) {
       id={t().id}
       title={t().title}
       forkedFromTaskID={t().forkedFromTaskID}
+      parentTaskID={t().parentTaskID}
       state={t().state}
       stateUpdatedAt={t().stateUpdatedAt}
       repos={t().repos}

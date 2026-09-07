@@ -83,6 +83,8 @@ interface Props {
   onPurge: (id: string) => void;
   onRevive: (id: string) => void;
   onFork?: (id: string) => void;
+  parentTaskID?: string;
+  childTasks: { id: string; title: string }[];
   onClose: () => void;
   onError: (message: string) => void;
   inputDraft: string;
@@ -752,6 +754,16 @@ export default function TaskDetail(props: Props) {
           }}
         />
       </div>
+      <Show when={props.parentTaskID || props.childTasks.length > 0}>
+        <nav class={styles.hierarchy} aria-label="Task hierarchy">
+          <Show when={props.parentTaskID} keyed>
+            {(parentID) => <A class={styles.hierarchyLink} href={`/task/@${parentID}`}>Parent task</A>}
+          </Show>
+          <For each={props.childTasks}>
+            {(child) => <A class={styles.hierarchyLink} href={`/task/@${child.id}`}>Child: {child.title || child.id}</A>}
+          </For>
+        </nav>
+      </Show>
       <Show when={props.error} keyed>
         {(error) => (
           <section class={styles.taskError} aria-labelledby="task-error-title">

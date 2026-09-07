@@ -55,6 +55,10 @@ export default function TaskDetailPage() {
               onPurge={s.handlePurge}
               onRevive={s.handleRevive}
               onFork={s.handleFork}
+              parentTaskID={t()?.parentTaskID}
+              childTasks={s.tasks()
+                .filter((candidate) => candidate.parentTaskID === taskId)
+                .map((candidate) => ({ id: candidate.id, title: candidate.title }))}
               onClose={() => s.navigate("/")}
               inputDraft={s.inputDraft(taskId)}
               onInputDraft={(v) => s.setInputDraft(taskId, v)}

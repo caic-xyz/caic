@@ -94,6 +94,25 @@ describe("TaskCard", () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 
+  it("renders a clickable parent task without selecting the child", () => {
+    const onClick = vi.fn();
+    const { getByRole } = render(() => (
+      <TaskCard {...props({ parentTaskID: "3BL0EKDTO001", onClick })} />
+    ));
+
+    const link = getByRole("link", { name: "3BL0EKDTO001" });
+    expect(link).toHaveAttribute("href", "/task/@3BL0EKDTO001");
+    fireEvent.click(link);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it("shows a child origin once when it matches the fork source", () => {
+    render(() => <TaskCard {...props({ forkedFromTaskID: "parent", parentTaskID: "parent" })} />);
+
+    expect(screen.getByText("child of")).toBeInTheDocument();
+    expect(screen.queryByText("forked from")).not.toBeInTheDocument();
+  });
+
   it("opens the task actions menu on right click", () => {
     const onClick = vi.fn();
     const onStop = vi.fn();
