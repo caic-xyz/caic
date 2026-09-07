@@ -18,6 +18,8 @@ ExecStart=%h/.local/bin/caic
 WorkingDirectory=%h
 # The Podman CLI becomes a remote client; the separate podman.service owns containers.
 Environment=CONTAINER_HOST=unix://%t/podman/podman.sock
+# Create an environment file for custom configuration. For example if you want PATH to include ~/.local/bin.
+EnvironmentFile=caic.env
 Restart=always
 RestartSec=1s
 
