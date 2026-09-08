@@ -22,6 +22,6 @@ go install github.com/caic-xyz/caic/backend/cmd/caic@latest
 
 ## Contributing
 
-Development requires Node.js 26 and pnpm 11 or newer. See [DEV.md](DEV.md).
+Development requires Node.js 26 and pnpm 12.4.0. See [DEV.md](DEV.md).
 
 Made with ❤️  by [Marc-Antoine Ruel](https://maruel.ca). Contributions are very appreciated! Thanks in advance! 🙏

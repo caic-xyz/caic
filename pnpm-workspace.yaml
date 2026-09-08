@@ -1,6 +1,9 @@
 # pnpm configuration
 engineStrict: true
 minimumReleaseAge: 10080
+minimumReleaseAgeExclude:
+  - '@pnpm/*'
+  - pnpm
 
 allowBuilds:
   # pnpm v11 returns exit code 1 for unapproved builds, which killed the .stamp target in the Makefile. Set it to true.
