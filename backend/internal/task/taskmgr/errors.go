@@ -125,11 +125,6 @@ func badRequestf(format string, args ...any) *Error {
 	return &Error{Kind: KindBadRequest, Msg: fmt.Sprintf(format, args...)}
 }
 
-// badRequestCodef builds a classified KindBadRequest error.
-func badRequestCodef(code Code, format string, args ...any) *Error {
-	return &Error{Kind: KindBadRequest, Code: code, Msg: fmt.Sprintf(format, args...)}
-}
-
 // internalErr builds a KindInternal error wrapping err. The wrapped error
 // remains reachable via errors.Is/As. It mirrors conflictErr; the trailing
 // "Err" marks that a cause is required (use a dedicated no-cause constructor

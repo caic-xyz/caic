@@ -317,7 +317,7 @@ func (r *Lifecycle) Fork(ctx context.Context, p ForkParams) (string, error) { //
 		}
 		checkout, ok := r.manager.Checkouts.Checkout(rs.Name)
 		if !ok {
-			return "", badRequestCodef(CodeUnknownRepository, "unknown extra repo: %s", rs.Name)
+			return "", &Error{Kind: KindBadRequest, Code: CodeUnknownRepository, Msg: "unknown extra repo: " + rs.Name}
 		}
 		extraMounts = append(extraMounts, taskslog.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: checkout.Dir, ContainerPath: r.manager.containerPathForRepo(rs.Name)})
 	}
