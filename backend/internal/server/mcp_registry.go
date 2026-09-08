@@ -388,8 +388,8 @@ func domainToolError[T any](err error) mcp.ToolResult[T] {
 	if err == nil {
 		return mcp.ToolResult[T]{}
 	}
-	if ews, ok := errors.AsType[api.ErrorWithStatus](err); ok {
-		return mcp.ToolError[T](ews.Error())
+	if apiErr, ok := errors.AsType[*api.Error](err); ok {
+		return mcp.ToolError[T](apiErr.Error())
 	}
 	return mcp.ToolError[T](err.Error())
 }
@@ -397,11 +397,11 @@ func domainToolError[T any](err error) mcp.ToolResult[T] {
 // taskCreateToolError adds an actionable recovery step when a task-creation
 // request names an unknown repository and the caller may list repositories.
 func taskCreateToolError(ctx context.Context, err error) mcp.ToolResult[mcpTaskCreatedOutput] {
-	ews, ok := errors.AsType[api.ErrorWithStatus](err)
-	if !ok || ews.Code() != api.CodeUnknownRepository {
+	apiErr, ok := errors.AsType[*api.Error](err)
+	if !ok || apiErr.Code != api.CodeUnknownRepository {
 		return domainToolError[mcpTaskCreatedOutput](err)
 	}
-	message := ews.Error()
+	message := apiErr.Error()
 	if mcpHasScope(ctx, mcpScopeRead) {
 		message += ". Call repos_list, use an exact returned path, then retry task_create."
 	} else {

@@ -1,10 +1,9 @@
-// Structured API error types and constructors shared across all API versions.
+// Structured API error types and HTTP response envelope shared across all API versions.
 
 package api
 
 import (
 	"fmt"
-	"net/http"
 )
 
 // ErrorCode is a machine-readable error identifier.
@@ -21,107 +20,32 @@ const (
 	CodeInternalError     ErrorCode = "INTERNAL_ERROR"
 )
 
-// ErrorWithStatus is an error that carries an HTTP status code and error code.
-type ErrorWithStatus interface {
-	error
-	StatusCode() int
-	Code() ErrorCode
-}
-
-// ErrorWithDetails is an API error with optional unstructured diagnostics.
-type ErrorWithDetails interface {
-	ErrorWithStatus
-	Details() map[string]any
-}
-
 // Error is a concrete error type with status code, error code, optional
 // details, and optional wrapped error.
 type Error struct {
-	statusCode int
-	code       ErrorCode
-	message    string
-	details    map[string]any
-	wrappedErr error
+	// Status is the HTTP status code.
+	Status int
+	// Code is the machine-readable error code.
+	Code ErrorCode
+	// Message is the client-facing error message.
+	Message string
+	// Details holds optional unstructured diagnostics.
+	Details map[string]any
+	// Cause is the optional underlying error.
+	Cause error
 }
 
 // Error returns the error message, including any wrapped error.
 func (e *Error) Error() string {
-	if e.wrappedErr != nil {
-		return fmt.Sprintf("%s: %v", e.message, e.wrappedErr)
+	if e.Cause != nil {
+		return fmt.Sprintf("%s: %v", e.Message, e.Cause)
 	}
-	return e.message
-}
-
-// StatusCode returns the HTTP status code.
-func (e *Error) StatusCode() int {
-	return e.statusCode
-}
-
-// Code returns the machine-readable error code.
-func (e *Error) Code() ErrorCode {
-	return e.code
-}
-
-// Details returns the optional details map.
-func (e *Error) Details() map[string]any {
-	return e.details
+	return e.Message
 }
 
 // Unwrap returns the wrapped error.
 func (e *Error) Unwrap() error {
-	return e.wrappedErr
-}
-
-// WithDetail adds a single key/value to the error details.
-func (e *Error) WithDetail(key string, value any) *Error {
-	if e.details == nil {
-		e.details = make(map[string]any)
-	}
-	e.details[key] = value
-	return e
-}
-
-// Wrap wraps an underlying error.
-func (e *Error) Wrap(err error) *Error {
-	e.wrappedErr = err
-	return e
-}
-
-// Constructors.
-
-// BadRequest creates a 400 error.
-func BadRequest(msg string) *Error {
-	return &Error{statusCode: http.StatusBadRequest, code: CodeBadRequest, message: msg}
-}
-
-// BadRequestWithCode creates a 400 error with a semantic error code.
-func BadRequestWithCode(code ErrorCode, msg string) *Error {
-	return &Error{statusCode: http.StatusBadRequest, code: code, message: msg}
-}
-
-// Unauthorized creates a 401 error.
-func Unauthorized(msg string) *Error {
-	return &Error{statusCode: http.StatusUnauthorized, code: CodeUnauthorized, message: msg}
-}
-
-// NotFound creates a 404 error.
-func NotFound(resource string) *Error {
-	return &Error{statusCode: http.StatusNotFound, code: CodeNotFound, message: resource + " not found"}
-}
-
-// Forbidden creates a 403 error.
-func Forbidden(resource string) *Error {
-	return &Error{statusCode: http.StatusForbidden, code: CodeForbidden, message: resource + " access denied"}
-}
-
-// Conflict creates a 409 error.
-func Conflict(msg string) *Error {
-	return &Error{statusCode: http.StatusConflict, code: CodeConflict, message: msg}
-}
-
-// InternalError creates a 500 error.
-func InternalError(msg string) *Error {
-	return &Error{statusCode: http.StatusInternalServerError, code: CodeInternalError, message: msg}
+	return e.Cause
 }
 
 // ErrorResponse is the JSON envelope for error responses.

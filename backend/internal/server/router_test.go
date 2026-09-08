@@ -842,7 +842,7 @@ func TestTaskHistoryReaders(t *testing.T) {
 
 		_, err := testTaskHandlers(s).taskSvc.taskToolInput(t.Context(), entry, "tool-1")
 		apiErr, ok := errors.AsType[*api.Error](err)
-		if !ok || apiErr.Code() != api.CodeInternalError || !strings.Contains(apiErr.Error(), "history unavailable") {
+		if !ok || apiErr.Code != api.CodeInternalError || !strings.Contains(apiErr.Error(), "history unavailable") {
 			t.Fatalf("taskToolInput error = %v, want explicit history-unavailable error", err)
 		}
 

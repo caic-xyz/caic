@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"reflect"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
@@ -85,7 +84,7 @@ func handleWithTask[In any, PtrIn interface {
 
 // toDTO maps a taskmgr.Error to the matching API error so the HTTP layer can
 // emit the correct status code. A nil error returns nil. An error that is
-// already an API error (ErrorWithStatus) is returned unchanged. Any other error
+// already an API error is returned unchanged. Any other error
 // falls back to a 500.
 func toDTO(err error) error {
 	if err == nil {
@@ -97,26 +96,24 @@ func toDTO(err error) error {
 		// the message. Error() == Msg when there is no wrapped error.
 		switch te.Kind {
 		case taskmgr.KindNotFound:
-			// api.NotFound appends " not found"; trim it from the manager's
-			// message (e.g. "task X not found") to avoid a doubled suffix.
-			return api.NotFound(strings.TrimSuffix(te.Error(), " not found"))
+			return &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: te.Error()}
 		case taskmgr.KindConflict:
-			return api.Conflict(te.Error())
+			return &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: te.Error()}
 		case taskmgr.KindBadRequest:
 			if te.Code == taskmgr.CodeUnknownRepository {
-				return api.BadRequestWithCode(api.CodeUnknownRepository, te.Error())
+				return &api.Error{Status: http.StatusBadRequest, Code: api.CodeUnknownRepository, Message: te.Error()}
 			}
-			return api.BadRequest(te.Error())
+			return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: te.Error()}
 		case taskmgr.KindInternal:
-			return api.InternalError(te.Error())
+			return &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: te.Error()}
 		default:
-			return api.InternalError(te.Error())
+			return &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: te.Error()}
 		}
 	}
-	if _, ok := errors.AsType[api.ErrorWithStatus](err); ok {
+	if _, ok := errors.AsType[*api.Error](err); ok {
 		return err
 	}
-	return api.InternalError(err.Error())
+	return &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 }
 
 // readAndDecodeBody reads the request body and decodes JSON into input. It
@@ -131,7 +128,7 @@ func readAndDecodeBody[In any](w http.ResponseWriter, r *http.Request, input *In
 		err = err2
 	}
 	if err != nil {
-		writeError(r.Context(), w, api.BadRequest("failed to read request body"))
+		writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "failed to read request body"})
 		return false
 	}
 	if len(body) == 0 {
@@ -141,7 +138,7 @@ func readAndDecodeBody[In any](w http.ResponseWriter, r *http.Request, input *In
 	d.DisallowUnknownFields()
 	if err := d.Decode(input); err != nil {
 		httpLogger(r.Context()).ErrorContext(r.Context(), "failed to decode request body", "err", err)
-		writeError(r.Context(), w, api.BadRequest("invalid request body"))
+		writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "invalid request body"})
 		return false
 	}
 	return true
@@ -181,20 +178,17 @@ func populatePathParams(r *http.Request, input any) {
 	}
 }
 
-// writeError writes a structured JSON error response. If err implements
-// api.ErrorWithStatus, the HTTP status, error code and details are taken from
-// it; otherwise 500 is used.
+// writeError writes a structured JSON error response. If err is an api.Error,
+// its HTTP status, error code, and details are used; otherwise 500 is used.
 func writeError(ctx context.Context, w http.ResponseWriter, err error) {
 	statusCode := http.StatusInternalServerError
 	code := api.CodeInternalError
 	var details map[string]any
 
-	if ews, ok := errors.AsType[api.ErrorWithStatus](err); ok {
-		statusCode = ews.StatusCode()
-		code = ews.Code()
-	}
-	if ewd, ok := errors.AsType[api.ErrorWithDetails](err); ok {
-		details = ewd.Details()
+	if apiErr, ok := errors.AsType[*api.Error](err); ok {
+		statusCode = apiErr.Status
+		code = apiErr.Code
+		details = apiErr.Details
 	}
 	if voiceEWS, ok := errors.AsType[voiceapi.ErrorWithStatus](err); ok {
 		statusCode = voiceEWS.StatusCode()

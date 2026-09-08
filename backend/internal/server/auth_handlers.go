@@ -75,28 +75,28 @@ func (h *authHandlers) handleStart(provider string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg := h.oauthFor(provider)
 		if cfg == nil || cfg.RedirectURI(r) == "" {
-			writeError(r.Context(), w, api.NotFound("provider"))
+			writeError(r.Context(), w, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "provider" + " not found"})
 			return
 		}
 		returnMode := r.URL.Query().Get("return")
 		next := r.URL.Query().Get("next")
 		if returnMode != "" && returnMode != "app" {
-			writeError(r.Context(), w, api.BadRequest("return must be empty or \"app\""))
+			writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "return must be empty or \"app\""})
 			return
 		}
 		if returnMode == "app" && next != "" {
-			writeError(r.Context(), w, api.BadRequest("next is only valid for web login"))
+			writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "next is only valid for web login"})
 			return
 		}
 		if next != "" && !validWebRedirectPath(next) {
-			writeError(r.Context(), w, api.BadRequest("next must be a same-origin absolute path"))
+			writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "next must be a same-origin absolute path"})
 			return
 		}
 
 		state, err := oauthserver.GenerateState()
 		if err != nil {
 			h.log.WarnContext(r.Context(), "generate oauth state", "err", err)
-			writeError(r.Context(), w, api.InternalError("generate state"))
+			writeError(r.Context(), w, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "generate state"})
 			return
 		}
 		// Prefix state with redirect target so the callback knows where to go.
@@ -127,7 +127,7 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg := h.oauthFor(provider)
 		if cfg == nil || cfg.RedirectURI(r) == "" {
-			writeError(r.Context(), w, api.NotFound("provider"))
+			writeError(r.Context(), w, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "provider" + " not found"})
 			return
 		}
 
@@ -145,12 +145,12 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 		// Validate state cookie.
 		stateCookie, err := r.Cookie(auth.StateCookieName)
 		if err != nil {
-			writeError(r.Context(), w, api.BadRequest("missing state cookie"))
+			writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "missing state cookie"})
 			return
 		}
 		fullState, ok := oauthserver.ValidateState(stateCookie.Value, h.sessionSecret)
 		if !ok {
-			writeError(r.Context(), w, api.BadRequest("invalid state"))
+			writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "invalid state"})
 			return
 		}
 
@@ -162,19 +162,19 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 		// we originally sent in AuthURL, so compare against fullState directly.
 		qState := r.URL.Query().Get("state")
 		if qState != fullState {
-			writeError(r.Context(), w, api.BadRequest("state mismatch"))
+			writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "state mismatch"})
 			return
 		}
 
 		// Check for error from provider.
 		if oauthErr := r.URL.Query().Get("error"); oauthErr != "" {
-			writeError(r.Context(), w, api.BadRequest("oauth error: "+oauthErr))
+			writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "oauth error: " + oauthErr})
 			return
 		}
 
 		code := r.URL.Query().Get("code")
 		if code == "" {
-			writeError(r.Context(), w, api.BadRequest("missing code"))
+			writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "missing code"})
 			return
 		}
 
@@ -184,7 +184,7 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 		token, err := oauthclient.ExchangeCode(r.Context(), cfg.OAuthClientConfig(r), code, "")
 		if err != nil {
 			h.log.WarnContext(r.Context(), "oauth exchange", "provider", provider, "err", err)
-			writeError(r.Context(), w, api.InternalError("token exchange failed"))
+			writeError(r.Context(), w, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "token exchange failed"})
 			return
 		}
 
@@ -192,7 +192,7 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 		providerID, username, avatarURL, err := cfg.FetchUser(r.Context(), token.AccessToken)
 		if err != nil {
 			h.log.WarnContext(r.Context(), "oauth userinfo", "provider", provider, "err", err)
-			writeError(r.Context(), w, api.InternalError("userinfo failed"))
+			writeError(r.Context(), w, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "userinfo failed"})
 			return
 		}
 
@@ -200,7 +200,7 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 		if allowed := h.allowedUsersFor(provider); allowed != nil {
 			if !slices.Contains(allowed, strings.ToLower(username)) {
 				h.log.WarnContext(r.Context(), "user not in allowlist", "provider", provider, "username", username)
-				writeError(r.Context(), w, api.Forbidden("user "+username+" is not in the "+provider+" allowlist"))
+				writeError(r.Context(), w, &api.Error{Status: http.StatusForbidden, Code: api.CodeForbidden, Message: "user " + username + " is not in the " + provider + " allowlist" + " access denied"})
 				return
 			}
 		}
@@ -217,7 +217,7 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 		})
 		if err != nil {
 			h.log.WarnContext(r.Context(), "upsert user", "err", err)
-			writeError(r.Context(), w, api.InternalError("save user"))
+			writeError(r.Context(), w, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "save user"})
 			return
 		}
 
@@ -225,7 +225,7 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 		jwt, err := auth.IssueToken(&u, h.sessionSecret, sessionTTL)
 		if err != nil {
 			h.log.WarnContext(r.Context(), "issue token", "err", err)
-			writeError(r.Context(), w, api.InternalError("issue token"))
+			writeError(r.Context(), w, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "issue token"})
 			return
 		}
 
@@ -256,7 +256,7 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 func (h *authHandlers) handleGetMe(w http.ResponseWriter, r *http.Request) {
 	u, ok := auth.UserFromContext(r.Context())
 	if !ok {
-		writeError(r.Context(), w, api.NotFound("user"))
+		writeError(r.Context(), w, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "user" + " not found"})
 		return
 	}
 	writeJSONResponse(r.Context(), w, &v1.UserResp{

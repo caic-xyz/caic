@@ -290,11 +290,11 @@ func assertBadRequest(t *testing.T, err error, wantMsg string) {
 	if !ok {
 		t.Fatalf("expected *api.Error, got %T", err)
 	}
-	if apiErr.StatusCode() != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d", apiErr.StatusCode(), http.StatusBadRequest)
+	if apiErr.Status != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", apiErr.Status, http.StatusBadRequest)
 	}
-	if apiErr.Code() != api.CodeBadRequest {
-		t.Errorf("code = %q, want %q", apiErr.Code(), api.CodeBadRequest)
+	if apiErr.Code != api.CodeBadRequest {
+		t.Errorf("code = %q, want %q", apiErr.Code, api.CodeBadRequest)
 	}
 	if apiErr.Error() != wantMsg {
 		t.Errorf("message = %q, want %q", apiErr.Error(), wantMsg)

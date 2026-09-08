@@ -32,7 +32,7 @@ type usageHandlers struct {
 func (h *usageHandlers) handleEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		writeError(r.Context(), w, api.InternalError("streaming not supported"))
+		writeError(r.Context(), w, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "streaming not supported"})
 		return
 	}
 

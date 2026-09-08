@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"sort"
 	"strings"
@@ -189,7 +190,7 @@ func taskDTO(ctx context.Context, entry *taskmgr.Entry, taskMgr *taskmgr.Manager
 func (s *taskService) getTask(ctx context.Context, entry *taskmgr.Entry, _ *api.EmptyReq) (*v1.Task, error) {
 	dto, err := taskDTO(ctx, entry, s.taskMgr, s.checkouts, s.authStore)
 	if err != nil {
-		return nil, api.InternalError(err.Error())
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 	}
 	return &dto, nil
 }
@@ -207,7 +208,7 @@ func (s *taskService) getTaskInfo(ctx context.Context, entry *taskmgr.Entry, _ *
 			var err error
 			forgeKind, err = apiconv.RepoForge(checkout.Repository.ForgeKind)
 			if err != nil {
-				return nil, api.InternalError(err.Error())
+				return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 			}
 		}
 		taskRepos = append(taskRepos, v1.TaskInfoRepo{
@@ -223,11 +224,11 @@ func (s *taskService) getTaskInfo(ctx context.Context, entry *taskmgr.Entry, _ *
 
 	state, err := apiconv.TaskState(snap.State)
 	if err != nil {
-		return nil, api.InternalError(err.Error())
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 	}
 	harnessName, err := apiconv.Harness(t.Harness)
 	if err != nil {
-		return nil, api.InternalError(err.Error())
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 	}
 	containerOS, containerCPUArchitecture := taskInfoOSArch(t.ContainerPlatform)
 	info := &v1.TaskInfo{
@@ -412,16 +413,16 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v
 	runtimeName := s.runtimeNameForCreate(req.RuntimeName, &prefs.Settings)
 	cacheMounts, err := cacheMountsFromSettings(&prefs.Settings)
 	if err != nil {
-		return nil, api.InternalError("resolve cache mappings: " + err.Error())
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "resolve cache mappings: " + err.Error()}
 	}
 	mounts, err := mountsFromSettings(&prefs.Settings)
 	if err != nil {
-		return nil, api.InternalError("resolve custom mounts: " + err.Error())
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "resolve custom mounts: " + err.Error()}
 	}
 
 	harnessName, err := apiconv.AgentHarness(req.Harness)
 	if err != nil {
-		return nil, api.BadRequest(err.Error())
+		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: err.Error()}
 	}
 	id, err := s.taskMgr.Create(ctx, taskmgr.CreateParams{
 		OwnerID:             ownerID,
@@ -449,7 +450,7 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v
 
 	entry, ok := s.taskMgr.GetEntry(id)
 	if !ok {
-		return nil, api.InternalError("created task not found")
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "created task not found"}
 	}
 
 	go s.maybeFakeCI(entry.Task())
@@ -484,14 +485,14 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v
 			}
 		}
 	}); err != nil {
-		return nil, api.InternalError("save preferences: " + err.Error())
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "save preferences: " + err.Error()}
 	}
 
 	// Return the full task so clients can seed their store and render the detail
 	// view immediately, without waiting for the SSE upsert to deliver it.
 	dto, err := taskDTO(ctx, entry, s.taskMgr, s.checkouts, s.authStore)
 	if err != nil {
-		return nil, api.InternalError(err.Error())
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 	}
 	return &dto, nil
 }
@@ -561,9 +562,15 @@ func (s *taskService) sendInput(ctx context.Context, entry *taskmgr.Entry, req *
 		"state", taskState,
 		"relay", rs,
 	)
-	return nil, api.Conflict(err.Error()).
-		WithDetail("state", taskState.String()).
-		WithDetail("relay", string(rs))
+	return nil, &api.Error{
+		Status:  http.StatusConflict,
+		Code:    api.CodeConflict,
+		Message: err.Error(),
+		Details: map[string]any{
+			"state": taskState.String(),
+			"relay": string(rs),
+		},
+	}
 }
 
 func (s *taskService) restartTask(ctx context.Context, entry *taskmgr.Entry, req *v1.RestartReq) (*v1.StatusResp, error) {
@@ -623,7 +630,7 @@ func (s *taskService) forkTask(ctx context.Context, entry *taskmgr.Entry, req *v
 	if req.Harness != "" {
 		selectedHarness, err = apiconv.AgentHarness(req.Harness)
 		if err != nil {
-			return nil, api.BadRequest(err.Error())
+			return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: err.Error()}
 		}
 	}
 
@@ -674,35 +681,35 @@ func (s *taskService) forkTask(ctx context.Context, entry *taskmgr.Entry, req *v
 
 	forkEntry, ok := s.taskMgr.GetEntry(newID)
 	if !ok {
-		return nil, api.InternalError("forked task not found")
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "forked task not found"}
 	}
 	dto, err := taskDTO(ctx, forkEntry, s.taskMgr, s.checkouts, s.authStore)
 	if err != nil {
-		return nil, api.InternalError(err.Error())
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 	}
 	return &dto, nil
 }
 
 func (s *taskService) taskToolInput(ctx context.Context, entry *taskmgr.Entry, toolUseID string) (*v1.TaskToolInputResp, error) {
 	if toolUseID == "" {
-		return nil, api.BadRequest("toolUseID required")
+		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "toolUseID required"}
 	}
 	for message, err := range s.taskMgr.BackwardMessages(ctx, entry) {
 		if err != nil {
-			return nil, api.InternalError("task history unavailable: " + err.Error())
+			return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "task history unavailable: " + err.Error()}
 		}
 		toolUse, ok := message.(*agent.ToolUseMessage)
 		if ok && toolUse.ToolUseID == toolUseID {
 			return &v1.TaskToolInputResp{ToolUseID: toolUse.ToolUseID, Input: toolUse.Input}, nil
 		}
 	}
-	return nil, api.NotFound("tool use")
+	return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "tool use" + " not found"}
 }
 
 func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, path string) (*v1.DiffResp, error) {
 	t := entry.Task()
 	if t.RuntimeInstanceID() == "" {
-		return nil, api.Conflict("task has no instance")
+		return nil, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "task has no instance"}
 	}
 	diffPrimaryName := ""
 	if p := t.Primary(); p != nil {
@@ -710,23 +717,23 @@ func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, path s
 	}
 	checkout, ok := s.taskMgr.Checkouts.Checkout(diffPrimaryName)
 	if !ok {
-		return nil, api.InternalError("unknown repo")
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "unknown repo"}
 	}
 	diff := ""
 	if path != "" {
 		var err error
 		diff, err = checkout.DiffContent(ctx, s.log, s.runtimes, t, path)
 		if err != nil {
-			return nil, api.InternalError(err.Error())
+			return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 		}
 	}
 	statuses, err := checkout.RepositoryStatuses(ctx, s.log, s.runtimes, t)
 	if err != nil {
-		return nil, api.InternalError(err.Error())
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 	}
 	repos := t.ReposSnapshot()
 	if len(repos) != len(statuses) {
-		return nil, api.InternalError("repository status count mismatch")
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "repository status count mismatch"}
 	}
 	repositories := make([]v1.GitRepositoryStatus, len(statuses))
 	for i, status := range statuses {
@@ -736,7 +743,7 @@ func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, path s
 			for k, file := range commit.Stat {
 				fileDiff, err := checkout.FileDiff(ctx, s.runtimes, t, i, commit.SHA, file.Path, "")
 				if err != nil {
-					return nil, api.InternalError(err.Error())
+					return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 				}
 				stat[k] = v1.DiffFileStat{Path: file.Path, Added: file.Added, Deleted: file.Deleted, Binary: file.Binary, Diff: fileDiff}
 			}
@@ -752,7 +759,7 @@ func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, path s
 		for j, file := range status.Uncommitted {
 			fileDiff, err := checkout.FileDiff(ctx, s.runtimes, t, i, "", file.Path, file.OriginalPath)
 			if err != nil {
-				return nil, api.InternalError(err.Error())
+				return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 			}
 			uncommitted[j] = v1.GitFileStatus{
 				Path:           file.Path,

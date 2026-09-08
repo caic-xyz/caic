@@ -34,12 +34,12 @@ func (h *runtimeProcessHandlers) HandleGetProcesses(w http.ResponseWriter, r *ht
 	t := entry.Task()
 	instanceID := t.RuntimeInstanceID()
 	if instanceID == "" {
-		writeError(r.Context(), w, api.Conflict("task has no instance"))
+		writeError(r.Context(), w, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "task has no instance"})
 		return
 	}
 	procs, err := h.runtimes.Processes(r.Context(), instanceID)
 	if err != nil {
-		writeError(r.Context(), w, api.InternalError(err.Error()))
+		writeError(r.Context(), w, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()})
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -75,10 +75,10 @@ func (h *runtimeProcessHandlers) signalProcess(ctx context.Context, entry *taskm
 	t := entry.Task()
 	instanceID := t.RuntimeInstanceID()
 	if instanceID == "" {
-		return nil, api.Conflict("task has no instance")
+		return nil, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "task has no instance"}
 	}
 	if err := h.runtimes.Signal(ctx, instanceID, req.PID, req.Signal); err != nil {
-		return nil, api.InternalError(err.Error())
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 	}
 	h.log.InfoContext(ctx, "signal sent", "task", t.ID, "instance", instanceID, "pid", req.PID, "signal", req.Signal)
 	return &v1.StatusResp{Status: "signalled"}, nil
@@ -88,12 +88,12 @@ func (h *runtimeProcessHandlers) getTask(r *http.Request) (*taskmgr.Entry, error
 	id := r.PathValue("id")
 	entry, ok := h.taskMgr.GetEntry(id)
 	if !ok {
-		return nil, api.NotFound("task")
+		return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "task" + " not found"}
 	}
 	if h.authEnabled {
 		if u, ok := auth.UserFromContext(r.Context()); ok {
 			if owner := entry.Task().OwnerID; owner != "" && owner != u.ID {
-				return nil, api.Forbidden("task")
+				return nil, &api.Error{Status: http.StatusForbidden, Code: api.CodeForbidden, Message: "task" + " access denied"}
 			}
 		}
 	}

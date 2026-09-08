@@ -28,13 +28,13 @@ func TestWriteError(t *testing.T) {
 		wantStatus int
 		wantCode   api.ErrorCode
 	}{
-		{name: "bad request", err: api.BadRequest("invalid request"), wantStatus: http.StatusBadRequest, wantCode: api.CodeBadRequest},
-		{name: "unknown repository", err: api.BadRequestWithCode(api.CodeUnknownRepository, "unknown repo: mistyped"), wantStatus: http.StatusBadRequest, wantCode: api.CodeUnknownRepository},
-		{name: "unauthorized", err: api.Unauthorized("authentication required"), wantStatus: http.StatusUnauthorized, wantCode: api.CodeUnauthorized},
-		{name: "forbidden", err: api.Forbidden("task"), wantStatus: http.StatusForbidden, wantCode: api.CodeForbidden},
-		{name: "not found", err: api.NotFound("task"), wantStatus: http.StatusNotFound, wantCode: api.CodeNotFound},
-		{name: "conflict", err: api.Conflict("task is not waiting"), wantStatus: http.StatusConflict, wantCode: api.CodeConflict},
-		{name: "internal", err: api.InternalError("backend unavailable"), wantStatus: http.StatusInternalServerError, wantCode: api.CodeInternalError},
+		{name: "bad request", err: &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "invalid request"}, wantStatus: http.StatusBadRequest, wantCode: api.CodeBadRequest},
+		{name: "unknown repository", err: &api.Error{Status: http.StatusBadRequest, Code: api.CodeUnknownRepository, Message: "unknown repo: mistyped"}, wantStatus: http.StatusBadRequest, wantCode: api.CodeUnknownRepository},
+		{name: "unauthorized", err: &api.Error{Status: http.StatusUnauthorized, Code: api.CodeUnauthorized, Message: "authentication required"}, wantStatus: http.StatusUnauthorized, wantCode: api.CodeUnauthorized},
+		{name: "forbidden", err: &api.Error{Status: http.StatusForbidden, Code: api.CodeForbidden, Message: "task" + " access denied"}, wantStatus: http.StatusForbidden, wantCode: api.CodeForbidden},
+		{name: "not found", err: &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "task" + " not found"}, wantStatus: http.StatusNotFound, wantCode: api.CodeNotFound},
+		{name: "conflict", err: &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "task is not waiting"}, wantStatus: http.StatusConflict, wantCode: api.CodeConflict},
+		{name: "internal", err: &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "backend unavailable"}, wantStatus: http.StatusInternalServerError, wantCode: api.CodeInternalError},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -253,15 +253,15 @@ func TestToDTO(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				got := toDTO(&taskmgr.Error{Kind: tc.kind, Msg: "boom"})
-				ews, ok := errors.AsType[api.ErrorWithStatus](got)
+				apiErr, ok := errors.AsType[*api.Error](got)
 				if !ok {
-					t.Fatalf("toDTO returned %T, want api.ErrorWithStatus", got)
+					t.Fatalf("toDTO returned %T, want *api.Error", got)
 				}
-				if ews.StatusCode() != tc.wantStatus {
-					t.Errorf("StatusCode() = %d, want %d", ews.StatusCode(), tc.wantStatus)
+				if apiErr.Status != tc.wantStatus {
+					t.Errorf("Status = %d, want %d", apiErr.Status, tc.wantStatus)
 				}
-				if ews.Code() != tc.wantCode {
-					t.Errorf("Code() = %q, want %q", ews.Code(), tc.wantCode)
+				if apiErr.Code != tc.wantCode {
+					t.Errorf("Code = %q, want %q", apiErr.Code, tc.wantCode)
 				}
 			})
 		}
@@ -279,15 +279,15 @@ func TestToDTO(t *testing.T) {
 		t.Parallel()
 
 		got := toDTO(&taskmgr.Error{Kind: taskmgr.KindBadRequest, Code: taskmgr.CodeUnknownRepository, Msg: "unknown repo: mistyped"})
-		ews, ok := errors.AsType[api.ErrorWithStatus](got)
+		apiErr, ok := errors.AsType[*api.Error](got)
 		if !ok {
-			t.Fatalf("toDTO returned %T, want api.ErrorWithStatus", got)
+			t.Fatalf("toDTO returned %T, want *api.Error", got)
 		}
-		if ews.Code() != api.CodeUnknownRepository {
-			t.Errorf("Code() = %q, want %q", ews.Code(), api.CodeUnknownRepository)
+		if apiErr.Code != api.CodeUnknownRepository {
+			t.Errorf("Code = %q, want %q", apiErr.Code, api.CodeUnknownRepository)
 		}
-		if ews.StatusCode() != http.StatusBadRequest {
-			t.Errorf("StatusCode() = %d, want %d", ews.StatusCode(), http.StatusBadRequest)
+		if apiErr.Status != http.StatusBadRequest {
+			t.Errorf("Status = %d, want %d", apiErr.Status, http.StatusBadRequest)
 		}
 	})
 
@@ -302,7 +302,7 @@ func TestToDTO(t *testing.T) {
 
 	t.Run("already_api", func(t *testing.T) {
 		t.Parallel()
-		orig := api.BadRequest("invalid input")
+		orig := &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "invalid input"}
 		got := toDTO(orig)
 		if !errors.Is(got, orig) {
 			t.Errorf("toDTO should return the API error unchanged, got %v", got)
@@ -312,12 +312,12 @@ func TestToDTO(t *testing.T) {
 	t.Run("fallback_plain_error", func(t *testing.T) {
 		t.Parallel()
 		got := toDTO(errors.New("random failure"))
-		ews, ok := errors.AsType[api.ErrorWithStatus](got)
+		apiErr, ok := errors.AsType[*api.Error](got)
 		if !ok {
-			t.Fatalf("toDTO returned %T, want api.ErrorWithStatus", got)
+			t.Fatalf("toDTO returned %T, want *api.Error", got)
 		}
-		if ews.StatusCode() != http.StatusInternalServerError {
-			t.Errorf("StatusCode() = %d, want 500", ews.StatusCode())
+		if apiErr.Status != http.StatusInternalServerError {
+			t.Errorf("Status = %d, want 500", apiErr.Status)
 		}
 		if got.Error() != "random failure" {
 			t.Errorf("Error() = %q, want %q", got.Error(), "random failure")

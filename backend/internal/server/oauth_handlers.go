@@ -105,10 +105,10 @@ func (h *oauthGrantHandlers) listOAuthGrants(ctx context.Context, _ *api.EmptyRe
 func (h *oauthGrantHandlers) revokeOAuthGrant(ctx context.Context, req *v1.RevokeOAuthGrantReq) (*v1.StatusResp, error) {
 	revoked, err := h.oauthServer.RevokeUserGrant(userIDFromCtx(ctx), req.GrantID)
 	if err != nil {
-		return nil, api.InternalError("save OAuth grant revocation: " + err.Error())
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "save OAuth grant revocation: " + err.Error()}
 	}
 	if !revoked {
-		return nil, api.NotFound("OAuth grant")
+		return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "OAuth grant" + " not found"}
 	}
 	return &v1.StatusResp{Status: "ok"}, nil
 }

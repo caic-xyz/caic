@@ -60,23 +60,23 @@ func (h *ciHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 	}
 	checkout, ok := h.checkouts.Checkout(ciPrimaryName)
 	if !ok || checkout.Repository == nil {
-		writeError(r.Context(), w, api.BadRequest("no repo info found"))
+		writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "no repo info found"})
 		return
 	}
 	f := h.forgeMgr.ForgeForInfo(r.Context(), checkout.Repository)
 	if f == nil {
-		writeError(r.Context(), w, api.BadRequest("no forge token configured for this repo"))
+		writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "no forge token configured for this repo"})
 		return
 	}
 
 	jobIDStr := r.URL.Query().Get("jobID")
 	if jobIDStr == "" {
-		writeError(r.Context(), w, api.BadRequest("jobID query parameter is required"))
+		writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "jobID query parameter is required"})
 		return
 	}
 	var jobID int64
 	if _, scanErr := fmt.Sscanf(jobIDStr, "%d", &jobID); scanErr != nil || jobID <= 0 {
-		writeError(r.Context(), w, api.BadRequest("invalid jobID"))
+		writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "invalid jobID"})
 		return
 	}
 
@@ -89,7 +89,7 @@ func (h *ciHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if check == nil {
-		writeError(r.Context(), w, api.NotFound("no CI check with that jobID"))
+		writeError(r.Context(), w, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "no CI check with that jobID" + " not found"})
 		return
 	}
 
@@ -113,16 +113,16 @@ func (h *ciHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Task, error) {
 	checkout, ok := h.checkouts.Checkout(req.Repo)
 	if !ok || checkout.Repository == nil {
-		return nil, api.BadRequest("repo not found")
+		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "repo not found"}
 	}
 	f := h.forgeMgr.ForgeForInfo(ctx, checkout.Repository)
 	if f == nil {
-		return nil, api.BadRequest("no forge token configured for this repo")
+		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "no forge token configured for this repo"}
 	}
 
 	state, ok := h.repoStatus.StatusFor(req.Repo)
 	if !ok || state.Status != forge.CIStatusFailure {
-		return nil, api.BadRequest("no CI failure on default branch")
+		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "no CI failure on default branch"}
 	}
 
 	// Convert stored DTO checks back to forge.Check for ci.FailureSummary.
@@ -155,11 +155,11 @@ func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Task, 
 	}
 	entry, ok := h.taskMgr.GetEntry(taskIDStr)
 	if !ok {
-		return nil, api.InternalError("created task not found")
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "created task not found"}
 	}
 	dto, err := taskDTO(ctx, entry, h.taskMgr, h.checkouts, h.authStore)
 	if err != nil {
-		return nil, api.InternalError(err.Error())
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 	}
 	return &dto, nil
 }
@@ -170,24 +170,24 @@ func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Task, 
 func (h *ciHandlers) fixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.StatusResp, error) {
 	entry, ok := h.taskMgr.GetEntry(req.TaskID)
 	if !ok {
-		return nil, api.NotFound("task")
+		return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "task" + " not found"}
 	}
 	t := entry.Task()
 	snap := t.Snapshot()
 	if snap.ForgePR == 0 {
-		return nil, api.BadRequest("task has no associated PR")
+		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "task has no associated PR"}
 	}
 	primary := t.Primary()
 	if primary == nil {
-		return nil, api.BadRequest("task has no primary repo")
+		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "task has no primary repo"}
 	}
 	checkout, ok := h.checkouts.Checkout(primary.Name)
 	if !ok || checkout.Repository == nil {
-		return nil, api.BadRequest("repo not found")
+		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "repo not found"}
 	}
 	f := h.forgeMgr.ForgeForInfo(ctx, checkout.Repository)
 	if f == nil {
-		return nil, api.BadRequest("no forge token configured for this repo")
+		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "no forge token configured for this repo"}
 	}
 
 	checks := snap.CIChecks

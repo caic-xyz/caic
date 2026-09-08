@@ -121,12 +121,12 @@ func (h *serverHandlers) getVersion(ctx context.Context, _ *api.EmptyReq) (*v1.V
 func (h *serverHandlers) triggerUpdate(ctx context.Context, _ *api.EmptyReq) (*v1.UpdateResp, error) {
 	gh := h.forgeMgr.GitHubClient()
 	if gh == nil {
-		return nil, api.InternalError("GitHub token not configured; cannot check for updates")
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "GitHub token not configured; cannot check for updates"}
 	}
 	current := autoupdate.Version
 	latest, err := autoupdate.CheckLatest(ctx, gh)
 	if err != nil {
-		return nil, api.InternalError("check latest version: " + err.Error())
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "check latest version: " + err.Error()}
 	}
 	if !autoupdate.IsNewer(latest, current) {
 		return &v1.UpdateResp{Status: "already_up_to_date"}, nil
@@ -211,7 +211,7 @@ func (h *serverHandlers) updatePreferences(ctx context.Context, req *v1.UpdatePr
 	}
 	if req.Settings.RuntimeName != "" {
 		if _, ok := h.runtimes.ByName[caicruntime.Name(req.Settings.RuntimeName)]; !ok {
-			return nil, api.BadRequest(fmt.Sprintf("unknown runtime %q", req.Settings.RuntimeName))
+			return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: fmt.Sprintf("unknown runtime %q", req.Settings.RuntimeName)}
 		}
 	}
 	if err := h.prefs.Update(userIDFromCtx(ctx), func(p *preferences.Preferences) {
@@ -245,7 +245,7 @@ func (h *serverHandlers) updatePreferences(ctx context.Context, req *v1.UpdatePr
 			}
 		}
 	}); err != nil {
-		return nil, api.InternalError("save preferences: " + err.Error())
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "save preferences: " + err.Error()}
 	}
 	// Return the updated preferences.
 	return h.getPreferences(ctx, nil)
@@ -255,17 +255,17 @@ func (h *serverHandlers) updatePreferences(ctx context.Context, req *v1.UpdatePr
 func validatePreferenceSettings(settings *v1.UserSettings) error {
 	for name := range settings.WellKnownCaches {
 		if _, ok := md.WellKnownCaches[name]; !ok {
-			return api.BadRequest("unknown cache: " + name)
+			return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "unknown cache: " + name}
 		}
 	}
 	for i, m := range settings.CacheMappings {
 		if _, err := md.ResolveMountTarget(m.HostPath, m.ContainerPath); err != nil {
-			return api.BadRequest(fmt.Sprintf("cacheMappings[%d]: %s", i, err))
+			return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: fmt.Sprintf("cacheMappings[%d]: %s", i, err)}
 		}
 	}
 	for i, m := range settings.CustomMounts {
 		if _, err := md.ResolveMountTarget(m.HostPath, m.ContainerPath); err != nil {
-			return api.BadRequest(fmt.Sprintf("customMounts[%d]: %s", i, err))
+			return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: fmt.Sprintf("customMounts[%d]: %s", i, err)}
 		}
 	}
 	return nil
@@ -404,12 +404,12 @@ func (h *serverHandlers) listRepos(_ context.Context, _ *api.EmptyReq) (*[]v1.Re
 func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.Request) {
 	repoPath := r.URL.Query().Get("repo")
 	if repoPath == "" {
-		writeError(r.Context(), w, api.BadRequest("repo is required"))
+		writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "repo is required"})
 		return
 	}
 	info, ok := h.checkouts.Checkout(repoPath)
 	if !ok {
-		writeError(r.Context(), w, api.NotFound("repo not found"))
+		writeError(r.Context(), w, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "repo not found" + " not found"})
 		return
 	}
 	absPath := info.Dir
@@ -457,14 +457,14 @@ func (h *serverHandlers) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*
 	}
 	info, err := repo.Clone(ctx, h.log.With("repo", target.relPath), req.URL, target.dir, req.Depth)
 	if err != nil {
-		return nil, api.InternalError(err.Error())
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 	}
 	info.RelPath = target.relPath
 	if err := h.checkouts.RegisterCheckout(info); err != nil {
 		if removeErr := os.RemoveAll(target.dir); removeErr != nil {
-			return nil, api.InternalError(fmt.Sprintf("register checkout: %v; remove checkout: %v", err, removeErr))
+			return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: fmt.Sprintf("register checkout: %v; remove checkout: %v", err, removeErr)}
 		}
-		return nil, api.Conflict(err.Error())
+		return nil, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: err.Error()}
 	}
 	h.log.InfoContext(ctx, "cloned repo", "url", req.URL, "path", target.relPath)
 	var remote string
@@ -475,7 +475,7 @@ func (h *serverHandlers) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*
 	}
 	forgeKind, err := apiconv.RepoForge(kind)
 	if err != nil {
-		return nil, api.InternalError(err.Error())
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 	}
 	return &v1.Repo{
 		Path:       info.RelPath,
@@ -493,31 +493,31 @@ type cloneTargetPath struct {
 
 func cloneTarget(root, url, path string, checkouts *repo.Registry) (cloneTargetPath, error) {
 	if root == "" {
-		return cloneTargetPath{}, api.InternalError("checkout root is not configured")
+		return cloneTargetPath{}, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "checkout root is not configured"}
 	}
 	if path == "" {
 		path = strings.TrimSuffix(filepath.Base(url), ".git")
 		if path == "" || path == "." || path == string(filepath.Separator) {
-			return cloneTargetPath{}, api.BadRequest("cannot derive repo name from URL; specify path explicitly")
+			return cloneTargetPath{}, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "cannot derive repo name from URL; specify path explicitly"}
 		}
 	}
 	dir := filepath.Join(root, path)
 	relPath, err := filepath.Rel(root, dir)
 	if err != nil || relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) {
-		return cloneTargetPath{}, api.BadRequest("path escapes root directory")
+		return cloneTargetPath{}, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "path escapes root directory"}
 	}
 	if _, err := os.Stat(dir); err == nil {
-		return cloneTargetPath{}, api.Conflict("directory already exists: " + relPath)
+		return cloneTargetPath{}, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "directory already exists: " + relPath}
 	} else if !os.IsNotExist(err) {
-		return cloneTargetPath{}, api.InternalError("stat clone directory: " + err.Error())
+		return cloneTargetPath{}, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "stat clone directory: " + err.Error()}
 	}
 	if _, ok := checkouts.Checkout(relPath); ok {
-		return cloneTargetPath{}, api.Conflict("repo already registered: " + relPath)
+		return cloneTargetPath{}, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "repo already registered: " + relPath}
 	}
 	base := filepath.Base(relPath)
 	for checkout := range checkouts.Checkouts() {
 		if checkout.RelPath != "" && filepath.Base(checkout.RelPath) == base && checkout.RelPath != relPath {
-			return cloneTargetPath{}, api.Conflict("repo basename conflicts with existing: " + checkout.RelPath)
+			return cloneTargetPath{}, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "repo basename conflicts with existing: " + checkout.RelPath}
 		}
 	}
 	return cloneTargetPath{relPath: relPath, dir: dir}, nil

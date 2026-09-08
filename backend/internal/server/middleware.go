@@ -157,7 +157,7 @@ func decompressMiddleware(next http.Handler) http.Handler {
 		case "zstd":
 			dec, err := zstd.NewReader(r.Body, zstd.WithDecoderMaxMemory(10<<20))
 			if err != nil {
-				writeError(r.Context(), w, api.BadRequest("invalid zstd body"))
+				writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "invalid zstd body"})
 				return
 			}
 			reader = dec.IOReadCloser()
@@ -166,12 +166,12 @@ func decompressMiddleware(next http.Handler) http.Handler {
 		case "gzip":
 			gr, err := gzip.NewReader(r.Body)
 			if err != nil {
-				writeError(r.Context(), w, api.BadRequest("invalid gzip body"))
+				writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "invalid gzip body"})
 				return
 			}
 			reader = gr
 		default:
-			writeError(r.Context(), w, api.BadRequest("unsupported Content-Encoding: "+ce))
+			writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "unsupported Content-Encoding: " + ce})
 			return
 		}
 

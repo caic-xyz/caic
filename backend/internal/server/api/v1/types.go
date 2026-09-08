@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"net/http"
 	"net/url"
 	"path/filepath"
 	"slices"
@@ -499,7 +500,7 @@ type RevokeOAuthGrantReq struct {
 // Validate checks that the OAuth grant path parameter is present.
 func (r *RevokeOAuthGrantReq) Validate() error {
 	if r.GrantID == "" {
-		return api.BadRequest("grantID is required")
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "grantID is required"}
 	}
 	return nil
 }
@@ -530,10 +531,10 @@ type CreateTaskReq struct {
 // means no git repository is associated with the task).
 func (r *CreateTaskReq) Validate() error {
 	if r.InitialPrompt.Text == "" && len(r.InitialPrompt.Images) == 0 {
-		return api.BadRequest("prompt or images required")
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "prompt or images required"}
 	}
 	if r.Harness == "" {
-		return api.BadRequest("harness is required")
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "harness is required"}
 	}
 	if err := validateRepoSpecs(r.Repos, "repos"); err != nil {
 		return err
@@ -558,7 +559,7 @@ type ForkTaskReq struct {
 // Validate checks that a prompt is provided, images are valid, and extra repos have no duplicates.
 func (r *ForkTaskReq) Validate() error {
 	if r.Prompt.Text == "" && len(r.Prompt.Images) == 0 {
-		return api.BadRequest("prompt or images required")
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "prompt or images required"}
 	}
 	if err := validateRepoSpecs(r.ExtraRepos, "extraRepos"); err != nil {
 		return err
@@ -575,7 +576,7 @@ type BotFixCIReq struct {
 // Validate checks that the repo field is provided.
 func (r *BotFixCIReq) Validate() error {
 	if r.Repo == "" {
-		return api.BadRequest("repo is required")
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "repo is required"}
 	}
 	return nil
 }
@@ -589,7 +590,7 @@ type BotFixPRReq struct {
 // Validate checks that the taskId field is provided.
 func (r *BotFixPRReq) Validate() error {
 	if r.TaskID == "" {
-		return api.BadRequest("taskId is required")
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "taskId is required"}
 	}
 	return nil
 }
@@ -602,7 +603,7 @@ type InputReq struct {
 // Validate checks that prompt or images are provided.
 func (r *InputReq) Validate() error {
 	if r.Prompt.Text == "" && len(r.Prompt.Images) == 0 {
-		return api.BadRequest("prompt or images required")
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "prompt or images required"}
 	}
 	return validateImages(r.Prompt.Images)
 }
@@ -663,7 +664,7 @@ func (r SyncReq) Validate() error {
 	case "", SyncTargetBranch, SyncTargetDefault:
 		return nil
 	default:
-		return api.BadRequest("invalid sync target: " + string(r.Target))
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "invalid sync target: " + string(r.Target)}
 	}
 }
 
@@ -828,13 +829,13 @@ type SignalProcessReq struct {
 // Validate checks that the signal is SIGTERM or SIGKILL.
 func (r *SignalProcessReq) Validate() error {
 	if r.PID < 1 {
-		return api.BadRequest("invalid pid")
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "invalid pid"}
 	}
 	switch r.Signal {
 	case "SIGTERM", "SIGKILL":
 		return nil
 	default:
-		return api.BadRequest("signal must be SIGTERM or SIGKILL")
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "signal must be SIGTERM or SIGKILL"}
 	}
 }
 
@@ -943,10 +944,10 @@ func (r *UpdatePreferencesReq) UnmarshalJSON(data []byte) error {
 // Validate checks that the complete settings object is present and has a supported platform.
 func (r *UpdatePreferencesReq) Validate() error {
 	if !r.settingsSet {
-		return api.BadRequest("settings is required")
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "settings is required"}
 	}
 	if r.Settings.PurgeDelay < preferences.MinPurgeDelay || r.Settings.PurgeDelay > preferences.MaxPurgeDelay {
-		return api.BadRequest(fmt.Sprintf("purgeDelay must be between %s and %s", preferences.MinPurgeDelay, preferences.MaxPurgeDelay))
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: fmt.Sprintf("purgeDelay must be between %s and %s", preferences.MinPurgeDelay, preferences.MaxPurgeDelay)}
 	}
 	if err := validateContainerPlatform(r.Settings.ContainerPlatform); err != nil {
 		return err
@@ -964,32 +965,32 @@ type CloneRepoReq struct {
 // Validate checks that the clone URL is provided and the optional path is safe.
 func (r *CloneRepoReq) Validate() error {
 	if r.URL == "" {
-		return api.BadRequest("url is required")
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "url is required"}
 	}
 	if r.Depth < 0 {
-		return api.BadRequest("depth must be non-negative")
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "depth must be non-negative"}
 	}
 	if r.Path != "" {
 		if filepath.IsAbs(r.Path) {
-			return api.BadRequest("path must be relative")
+			return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "path must be relative"}
 		}
 		cleaned := filepath.Clean(r.Path)
 		if cleaned != r.Path {
-			return api.BadRequest("path must be clean (use filepath.Clean form)")
+			return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "path must be clean (use filepath.Clean form)"}
 		}
 		if strings.Contains(cleaned, "..") {
-			return api.BadRequest("path must not contain '..' segments")
+			return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "path must not contain '..' segments"}
 		}
 		if len(r.Path) > 255 {
-			return api.BadRequest("path too long (max 255 characters)")
+			return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "path too long (max 255 characters)"}
 		}
 		segments := strings.Split(cleaned, string(filepath.Separator))
 		if len(segments) > 3 {
-			return api.BadRequest("path too deep (max 3 segments)")
+			return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "path too deep (max 3 segments)"}
 		}
 		for _, seg := range segments {
 			if !pathSegmentRe.MatchString(seg) {
-				return api.BadRequest("path segment contains invalid characters: " + seg)
+				return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "path segment contains invalid characters: " + seg}
 			}
 		}
 	}
@@ -1004,14 +1005,14 @@ type WebFetchReq struct {
 // Validate checks that the URL is non-empty and has an http or https scheme.
 func (r *WebFetchReq) Validate() error {
 	if r.URL == "" {
-		return api.BadRequest("url is required")
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "url is required"}
 	}
 	u, err := url.Parse(r.URL)
 	if err != nil {
-		return api.BadRequest("invalid url")
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "invalid url"}
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return api.BadRequest("url must have http or https scheme")
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "url must have http or https scheme"}
 	}
 	return nil
 }

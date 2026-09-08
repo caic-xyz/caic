@@ -267,7 +267,7 @@ func (h *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) 
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		writeError(r.Context(), w, api.InternalError("streaming not supported"))
+		writeError(r.Context(), w, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "streaming not supported"})
 		return
 	}
 
@@ -584,7 +584,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("X-Accel-Buffering", "no")
 	if err := controller.Flush(); err != nil {
 		if errors.Is(err, http.ErrNotSupported) {
-			writeError(r.Context(), w, api.InternalError("streaming not supported"))
+			writeError(r.Context(), w, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "streaming not supported"})
 			return
 		}
 		h.log.WarnContext(r.Context(), "start task-list SSE stream", "err", err)
@@ -783,7 +783,7 @@ func (h *taskHandlers) handleVNCWebSocket(w http.ResponseWriter, r *http.Request
 	log := h.log.With("task", t.ID)
 	snap := t.Snapshot()
 	if snap.RuntimeInstanceID == "" || snap.VNCPort == 0 {
-		writeError(r.Context(), w, api.BadRequest("task has no VNC display"))
+		writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "task has no VNC display"})
 		return
 	}
 	log.InfoContext(r.Context(), "VNC proxy start", "instance", snap.RuntimeInstanceID, "port", snap.VNCPort)
@@ -794,7 +794,7 @@ func (h *taskHandlers) handleVNCWebSocket(w http.ResponseWriter, r *http.Request
 	vncConn, err := d.DialContext(r.Context(), "tcp", vncAddr)
 	if err != nil {
 		log.ErrorContext(r.Context(), "dial VNC websocket", "addr", vncAddr, "err", err)
-		writeError(r.Context(), w, api.InternalError("cannot reach instance VNC"))
+		writeError(r.Context(), w, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "cannot reach instance VNC"})
 		return
 	}
 	defer func() { _ = vncConn.Close() }()
@@ -845,12 +845,12 @@ func taskEntryFromRequest(r *http.Request, taskMgr *taskmgr.Manager, authStore *
 	id := r.PathValue("id")
 	entry, ok := taskMgr.GetEntry(id)
 	if !ok {
-		return nil, api.NotFound("task")
+		return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "task" + " not found"}
 	}
 	if authStore != nil {
 		if u, ok := auth.UserFromContext(r.Context()); ok {
 			if owner := entry.Task().OwnerID; owner != "" && owner != u.ID {
-				return nil, api.Forbidden("task")
+				return nil, &api.Error{Status: http.StatusForbidden, Code: api.CodeForbidden, Message: "task" + " access denied"}
 			}
 		}
 	}
