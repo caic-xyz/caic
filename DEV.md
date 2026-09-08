@@ -5,12 +5,14 @@ Dependencies to build locally from scratch including the frontend:
 - Go
 - brotli
 - make
-- node
+- Node.js 26 (via nvm)
 - pnpm 11 or newer
 
 Then run:
 
-```
+```bash
+nvm install
+nvm use
 make build
 ```
 

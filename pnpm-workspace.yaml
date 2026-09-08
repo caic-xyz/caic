@@ -1,4 +1,5 @@
 # pnpm configuration
+engineStrict: true
 minimumReleaseAge: 10080
 
 allowBuilds:
