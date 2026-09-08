@@ -3,7 +3,6 @@ package api
 
 import (
 	"fmt"
-	"net/http"
 )
 
 // Validatable is implemented by request types that can validate their fields.
@@ -30,61 +29,32 @@ const (
 	CodeInternalError ErrorCode = "INTERNAL_ERROR"
 )
 
-// ErrorWithStatus is an error that carries an HTTP status code, error code,
-// and optional details map.
-type ErrorWithStatus interface {
-	error
-	StatusCode() int
-	Code() ErrorCode
-	Details() map[string]any
-}
-
 // Error is a concrete error type with status code, error code, optional
 // details, and optional wrapped error.
 type Error struct {
-	statusCode int
-	code       ErrorCode
-	message    string
-	details    map[string]any
-	wrappedErr error
+	// Status is the HTTP status code.
+	Status int
+	// Code is the machine-readable error code.
+	Code ErrorCode
+	// Message is the client-facing error message.
+	Message string
+	// Details holds optional unstructured diagnostics.
+	Details map[string]any
+	// Cause is the optional underlying error.
+	Cause error
 }
 
+// Error returns the error message, including any wrapped error.
 func (e *Error) Error() string {
-	if e.wrappedErr != nil {
-		return fmt.Sprintf("%s: %v", e.message, e.wrappedErr)
+	if e.Cause != nil {
+		return fmt.Sprintf("%s: %v", e.Message, e.Cause)
 	}
-	return e.message
-}
-
-// StatusCode returns the HTTP status code.
-func (e *Error) StatusCode() int {
-	return e.statusCode
-}
-
-// Code returns the machine-readable error code.
-func (e *Error) Code() ErrorCode {
-	return e.code
-}
-
-// Details returns the optional details map.
-func (e *Error) Details() map[string]any {
-	return e.details
+	return e.Message
 }
 
 // Unwrap returns the wrapped error.
 func (e *Error) Unwrap() error {
-	return e.wrappedErr
-}
-
-// Wrap wraps an underlying error.
-func (e *Error) Wrap(err error) *Error {
-	e.wrappedErr = err
-	return e
-}
-
-// BadRequest creates a 400 error.
-func BadRequest(msg string) *Error {
-	return &Error{statusCode: http.StatusBadRequest, code: CodeBadRequest, message: msg}
+	return e.Cause
 }
 
 // ErrorResponse is the JSON envelope for error responses.

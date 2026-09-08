@@ -190,10 +190,10 @@ func writeError(ctx context.Context, w http.ResponseWriter, err error) {
 		code = apiErr.Code
 		details = apiErr.Details
 	}
-	if voiceEWS, ok := errors.AsType[voiceapi.ErrorWithStatus](err); ok {
-		statusCode = voiceEWS.StatusCode()
-		code = api.ErrorCode(voiceEWS.Code())
-		details = voiceEWS.Details()
+	if voiceErr, ok := errors.AsType[*voiceapi.Error](err); ok {
+		statusCode = voiceErr.Status
+		code = api.ErrorCode(voiceErr.Code)
+		details = voiceErr.Details
 	}
 
 	httpLogger(ctx).ErrorContext(ctx, "handler error", "err", err, "status_code", statusCode, "code", code)
