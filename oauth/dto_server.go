@@ -206,6 +206,8 @@ type AccessTokenClaims struct {
 	Issuer       string             `json:"iss"`
 	Subject      string             `json:"sub"`
 	Audience     string             `json:"aud"`
+	ClientID     string             `json:"client_id,omitempty"`
+	JWTID        string             `json:"jti,omitempty"`
 	Username     string             `json:"username"`
 	Scope        string             `json:"scope"`
 	GrantID      string             `json:"grant_id,omitempty"`

@@ -34,7 +34,7 @@ func TestAccessTokenService(t *testing.T) {
 	t.Run("valid issue and verify", func(t *testing.T) {
 		t.Parallel()
 		svc := newTestAccessTokenService(t, "kid-valid")
-		token, err := svc.IssueAccessToken(issuer, user, audience, scope, "grant-1")
+		token, err := svc.IssueAccessToken(issuer, user, audience, scope, "grant-1", "test-client-1")
 		if err != nil {
 			t.Fatalf("IssueAccessToken: %v", err)
 		}
@@ -62,10 +62,55 @@ func TestAccessTokenService(t *testing.T) {
 		}
 	})
 
+	t.Run("rejects client that differs from durable grant", func(t *testing.T) {
+		t.Parallel()
+		svc := newTestAccessTokenService(t, "kid-client-binding")
+		token, err := svc.IssueAccessToken(issuer, user, audience, scope, "grant-1", "token-client")
+		if err != nil {
+			t.Fatalf("IssueAccessToken: %v", err)
+		}
+		_, err = svc.VerifyAccessToken(token, issuer, audience, time.Now(), activeGrant("grant-client"), &tokenTestSession{user: user})
+		if err == nil || !strings.Contains(err.Error(), "token client does not match") {
+			t.Fatalf("VerifyAccessToken error = %v", err)
+		}
+	})
+
+	t.Run("rejects access token without required RFC 9068 claims", func(t *testing.T) {
+		t.Parallel()
+		svc := newTestAccessTokenService(t, "kid-required-claims")
+		now := time.Now()
+		token, err := svc.issueAccessTokenAt(&oauth.AccessTokenClaims{
+			Issuer: issuer, Subject: user.ID, Audience: audience, Type: accessTokenType,
+		}, now, now.Add(time.Hour))
+		if err != nil {
+			t.Fatalf("issueAccessTokenAt: %v", err)
+		}
+		_, err = svc.VerifyAccessToken(token, issuer, audience, now, nil, &tokenTestSession{user: user})
+		if err == nil || !strings.Contains(err.Error(), "missing required claims") {
+			t.Fatalf("VerifyAccessToken error = %v", err)
+		}
+	})
+
+	t.Run("rejects generic JWT header type for access token", func(t *testing.T) {
+		t.Parallel()
+		svc := newTestAccessTokenService(t, "kid-header-type")
+		now := time.Now()
+		token, err := svc.issueTokenAt(&oauth.AccessTokenClaims{
+			Issuer: issuer, Subject: user.ID, Audience: audience, ClientID: "test-client-1", JWTID: "test-jti", Type: accessTokenType,
+		}, now, now.Add(time.Hour), "JWT")
+		if err != nil {
+			t.Fatalf("issueTokenAt: %v", err)
+		}
+		_, err = svc.VerifyAccessToken(token, issuer, audience, now, nil, &tokenTestSession{user: user})
+		if err == nil || !strings.Contains(err.Error(), "invalid token header type") {
+			t.Fatalf("VerifyAccessToken error = %v", err)
+		}
+	})
+
 	t.Run("error invalid signature", func(t *testing.T) {
 		t.Parallel()
 		svc := newTestAccessTokenService(t, "kid-signature")
-		token, err := svc.IssueAccessToken(issuer, user, audience, scope, "")
+		token, err := svc.IssueAccessToken(issuer, user, audience, scope, "", "test-client-1")
 		if err != nil {
 			t.Fatalf("IssueAccessToken: %v", err)
 		}
@@ -85,7 +130,7 @@ func TestAccessTokenService(t *testing.T) {
 		t.Parallel()
 		issuerSvc := newTestAccessTokenService(t, "kid-issuer")
 		verifierSvc := newTestAccessTokenService(t, "kid-verifier")
-		token, err := issuerSvc.IssueAccessToken(issuer, user, audience, scope, "")
+		token, err := issuerSvc.IssueAccessToken(issuer, user, audience, scope, "", "test-client-1")
 		if err != nil {
 			t.Fatalf("IssueAccessToken: %v", err)
 		}
@@ -97,7 +142,7 @@ func TestAccessTokenService(t *testing.T) {
 	t.Run("error wrong alg in header", func(t *testing.T) {
 		t.Parallel()
 		svc := newTestAccessTokenService(t, "kid-wrong-alg")
-		token, err := svc.IssueAccessToken(issuer, user, audience, scope, "")
+		token, err := svc.IssueAccessToken(issuer, user, audience, scope, "", "test-client-1")
 		if err != nil {
 			t.Fatalf("IssueAccessToken: %v", err)
 		}
@@ -118,7 +163,7 @@ func TestAccessTokenService(t *testing.T) {
 	t.Run("error wrong issuer", func(t *testing.T) {
 		t.Parallel()
 		svc := newTestAccessTokenService(t, "kid-issuer-check")
-		token, err := svc.IssueAccessToken(issuer, user, audience, scope, "")
+		token, err := svc.IssueAccessToken(issuer, user, audience, scope, "", "test-client-1")
 		if err != nil {
 			t.Fatalf("IssueAccessToken: %v", err)
 		}
@@ -130,7 +175,7 @@ func TestAccessTokenService(t *testing.T) {
 	t.Run("error wrong audience", func(t *testing.T) {
 		t.Parallel()
 		svc := newTestAccessTokenService(t, "kid-audience-check")
-		token, err := svc.IssueAccessToken(issuer, user, audience, scope, "")
+		token, err := svc.IssueAccessToken(issuer, user, audience, scope, "", "test-client-1")
 		if err != nil {
 			t.Fatalf("IssueAccessToken: %v", err)
 		}
@@ -147,6 +192,8 @@ func TestAccessTokenService(t *testing.T) {
 			Issuer:   issuer,
 			Subject:  user.ID,
 			Audience: audience,
+			ClientID: "test-client-1",
+			JWTID:    "test-jti",
 			Username: user.Username,
 			Scope:    scope,
 			Type:     accessTokenType,
@@ -167,6 +214,8 @@ func TestAccessTokenService(t *testing.T) {
 			Issuer:   issuer,
 			Subject:  user.ID,
 			Audience: audience,
+			ClientID: "test-client-1",
+			JWTID:    "test-jti",
 			Username: user.Username,
 			Scope:    scope,
 			Type:     accessTokenType,
@@ -187,6 +236,8 @@ func TestAccessTokenService(t *testing.T) {
 			Issuer:   issuer,
 			Subject:  user.ID,
 			Audience: audience,
+			ClientID: "test-client-1",
+			JWTID:    "test-jti",
 			Username: user.Username,
 			Scope:    scope,
 			Type:     accessTokenType,
@@ -207,6 +258,8 @@ func TestAccessTokenService(t *testing.T) {
 			Issuer:   issuer,
 			Subject:  user.ID,
 			Audience: audience,
+			ClientID: "test-client-1",
+			JWTID:    "test-jti",
 			Username: user.Username,
 			Scope:    scope,
 			Type:     accessTokenType,
@@ -227,6 +280,8 @@ func TestAccessTokenService(t *testing.T) {
 			Issuer:   issuer,
 			Subject:  user.ID,
 			Audience: audience,
+			ClientID: "test-client-1",
+			JWTID:    "test-jti",
 			Username: user.Username,
 			Scope:    scope,
 			Type:     accessTokenType,
@@ -242,7 +297,7 @@ func TestAccessTokenService(t *testing.T) {
 	t.Run("error inactive grant", func(t *testing.T) {
 		t.Parallel()
 		svc := newTestAccessTokenService(t, "kid-inactive-grant")
-		token, err := svc.IssueAccessToken(issuer, user, audience, scope, "grant-1")
+		token, err := svc.IssueAccessToken(issuer, user, audience, scope, "grant-1", "test-client-1")
 		if err != nil {
 			t.Fatalf("IssueAccessToken: %v", err)
 		}
@@ -258,7 +313,7 @@ func TestAccessTokenService(t *testing.T) {
 		oldKID := svc.currentKID
 
 		// Issue token with the initial key.
-		tokenOld, err := svc.IssueAccessToken(issuer, user, audience, scope, "grant-1")
+		tokenOld, err := svc.IssueAccessToken(issuer, user, audience, scope, "grant-1", "test-client-1")
 		if err != nil {
 			t.Fatalf("IssueAccessToken (old): %v", err)
 		}
@@ -321,7 +376,7 @@ func TestAccessTokenService(t *testing.T) {
 		}
 
 		// New token should use the rotated key (ES256).
-		tokenNew, err := svc.IssueAccessToken(issuer, user, audience, scope, "grant-2")
+		tokenNew, err := svc.IssueAccessToken(issuer, user, audience, scope, "grant-2", "test-client-1")
 		if err != nil {
 			t.Fatalf("IssueAccessToken (new): %v", err)
 		}
@@ -372,7 +427,7 @@ func TestAccessTokenService(t *testing.T) {
 		}
 
 		// Issue and verify with the RSA key.
-		token, err := svc.IssueAccessToken(issuer, user, audience, scope, "grant-rsa")
+		token, err := svc.IssueAccessToken(issuer, user, audience, scope, "grant-rsa", "test-client-1")
 		if err != nil {
 			t.Fatalf("IssueAccessToken (RSA): %v", err)
 		}
@@ -472,7 +527,7 @@ func TestAccessTokenService(t *testing.T) {
 			t.Fatalf("EC PEM key alg = %q, want ES256", svc.keys["pem-ec-kid"].alg)
 		}
 
-		token, err := svc.IssueAccessToken(issuer, user, audience, scope, "grant-ec-pem")
+		token, err := svc.IssueAccessToken(issuer, user, audience, scope, "grant-ec-pem", "test-client-1")
 		if err != nil {
 			t.Fatalf("IssueAccessToken (EC PEM): %v", err)
 		}
@@ -503,7 +558,7 @@ func TestAccessTokenService(t *testing.T) {
 			t.Fatalf("RSA PEM key alg = %q, want RS256", svc.keys["pem-rsa-kid"].alg)
 		}
 
-		token, err := svc.IssueAccessToken(issuer, user, audience, scope, "grant-rsa-pem")
+		token, err := svc.IssueAccessToken(issuer, user, audience, scope, "grant-rsa-pem", "test-client-1")
 		if err != nil {
 			t.Fatalf("IssueAccessToken (RSA PEM): %v", err)
 		}
@@ -544,7 +599,7 @@ func TestAccessTokenService(t *testing.T) {
 			if err != nil {
 				t.Fatalf("RotateKeyWithAlg(%s): %v", tc.alg, err)
 			}
-			token, err := svc.IssueAccessToken(issuer, user, audience, scope, "grant-"+tc.alg)
+			token, err := svc.IssueAccessToken(issuer, user, audience, scope, "grant-"+tc.alg, "test-client-1")
 			if err != nil {
 				t.Fatalf("IssueAccessToken(%s): %v", tc.alg, err)
 			}

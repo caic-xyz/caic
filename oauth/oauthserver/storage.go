@@ -1,4 +1,4 @@
-// OAuth durable authorization, token-family, and DPoP replay state storage.
+// OAuth durable authorization, signing-key, token-family, and replay state storage.
 
 package oauthserver
 
@@ -19,7 +19,19 @@ import (
 
 // storeVersion is the on-disk schema version. Codes and Consents are keyed by
 // RefreshTokenKey(secret) so the live code/consent token never lands on disk.
-const storeVersion = 4
+const storeVersion = 5
+
+// maxAccessTokenSigningKeys allows normal overlap during key rotation while
+// bounding persisted private-key material, startup parsing, and JWKS output.
+// Rotation fails at capacity instead of evicting an unexpired verification key
+// and invalidating otherwise-valid access tokens.
+const maxAccessTokenSigningKeys = 20
+
+type storedSigningKey struct {
+	KID           string    `json:"kid"`
+	PrivateKeyPEM string    `json:"privateKeyPEM"`
+	VerifyUntil   time.Time `json:"verifyUntil,omitzero"`
+}
 
 // ClientProvenance records how the authorization server established a client identity.
 type ClientProvenance string
@@ -159,6 +171,9 @@ type Store struct {
 	DPoPNonces          map[string]time.Time     `json:"dpopNonces,omitempty"`
 	ClientAssertionJTIs map[string]time.Time     `json:"clientAssertionJTIs,omitempty"`
 
+	accessTokenSigningKeys []storedSigningKey
+	currentSigningKID      string
+
 	path string
 	io   storeIO
 }
@@ -189,16 +204,18 @@ func (osStoreIO) Rename(oldPath, newPath string) error {
 }
 
 type storeFile struct {
-	Version             int                      `json:"version"`
-	Clients             map[string]Client        `json:"clients,omitempty"`
-	RefreshTokens       map[string]RefreshToken  `json:"refreshTokens,omitempty"`
-	Grants              map[string]Grant         `json:"grants,omitempty"`
-	Codes               map[string]Code          `json:"codes,omitempty"`
-	Consents            map[string]ConsentParams `json:"consents,omitempty"`
-	DeviceCodes         map[string]*DeviceCode   `json:"deviceCodes,omitempty"`
-	DPoPProofs          map[string]time.Time     `json:"dpopProofs,omitempty"`
-	DPoPNonces          map[string]time.Time     `json:"dpopNonces,omitempty"`
-	ClientAssertionJTIs map[string]time.Time     `json:"clientAssertionJTIs,omitempty"`
+	Version                int                      `json:"version"`
+	Clients                map[string]Client        `json:"clients,omitempty"`
+	RefreshTokens          map[string]RefreshToken  `json:"refreshTokens,omitempty"`
+	Grants                 map[string]Grant         `json:"grants,omitempty"`
+	Codes                  map[string]Code          `json:"codes,omitempty"`
+	Consents               map[string]ConsentParams `json:"consents,omitempty"`
+	DeviceCodes            map[string]*DeviceCode   `json:"deviceCodes,omitempty"`
+	DPoPProofs             map[string]time.Time     `json:"dpopProofs,omitempty"`
+	DPoPNonces             map[string]time.Time     `json:"dpopNonces,omitempty"`
+	ClientAssertionJTIs    map[string]time.Time     `json:"clientAssertionJTIs,omitempty"`
+	AccessTokenSigningKeys []storedSigningKey       `json:"accessTokenSigningKeys,omitempty"`
+	CurrentSigningKID      string                   `json:"currentSigningKID,omitempty"`
 }
 
 // LoadStore loads durable OAuth state from path.
@@ -221,6 +238,15 @@ func LoadStore(path string) (*Store, error) {
 	if file.Version > storeVersion {
 		return nil, fmt.Errorf("parse oauth state: unsupported version %d", file.Version)
 	}
+	if len(file.AccessTokenSigningKeys) > 0 {
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			return nil, fmt.Errorf("stat oauth state: %w", statErr)
+		}
+		if info.Mode().Perm()&0o077 != 0 {
+			return nil, errors.New("oauth state containing signing keys must not be accessible by group or others")
+		}
+	}
 	store.Clients = file.Clients
 	store.RefreshTokens = file.RefreshTokens
 	store.Grants = file.Grants
@@ -230,6 +256,8 @@ func LoadStore(path string) (*Store, error) {
 	store.DPoPProofs = file.DPoPProofs
 	store.DPoPNonces = file.DPoPNonces
 	store.ClientAssertionJTIs = file.ClientAssertionJTIs
+	store.accessTokenSigningKeys = slices.Clone(file.AccessTokenSigningKeys)
+	store.currentSigningKID = file.CurrentSigningKID
 	store.ensureMaps()
 	store.pruneExpired(time.Now())
 	return store, nil
@@ -238,7 +266,7 @@ func LoadStore(path string) (*Store, error) {
 // Save writes the durable OAuth state to its configured path.
 func (s *Store) Save() error {
 	s.ensureMaps()
-	file := storeFile{Version: storeVersion, Clients: s.Clients, RefreshTokens: s.RefreshTokens, Grants: s.Grants, Codes: s.Codes, Consents: s.Consents, DeviceCodes: s.DeviceCodes, DPoPProofs: s.DPoPProofs, DPoPNonces: s.DPoPNonces, ClientAssertionJTIs: s.ClientAssertionJTIs}
+	file := s.snapshot()
 	_, err := persistStore(s, &file)
 	return err
 }
@@ -469,16 +497,18 @@ func (s *Store) transact(update func(*storeFile) bool) error {
 
 func (s *Store) snapshot() storeFile {
 	return storeFile{
-		Version:             storeVersion,
-		Clients:             cloneMap(s.Clients),
-		RefreshTokens:       cloneMap(s.RefreshTokens),
-		Grants:              cloneMap(s.Grants),
-		Codes:               cloneMap(s.Codes),
-		Consents:            cloneConsents(s.Consents),
-		DeviceCodes:         cloneDeviceCodes(s.DeviceCodes),
-		DPoPProofs:          cloneMap(s.DPoPProofs),
-		DPoPNonces:          cloneMap(s.DPoPNonces),
-		ClientAssertionJTIs: cloneMap(s.ClientAssertionJTIs),
+		Version:                storeVersion,
+		Clients:                cloneMap(s.Clients),
+		RefreshTokens:          cloneMap(s.RefreshTokens),
+		Grants:                 cloneMap(s.Grants),
+		Codes:                  cloneMap(s.Codes),
+		Consents:               cloneConsents(s.Consents),
+		DeviceCodes:            cloneDeviceCodes(s.DeviceCodes),
+		DPoPProofs:             cloneMap(s.DPoPProofs),
+		DPoPNonces:             cloneMap(s.DPoPNonces),
+		ClientAssertionJTIs:    cloneMap(s.ClientAssertionJTIs),
+		AccessTokenSigningKeys: slices.Clone(s.accessTokenSigningKeys),
+		CurrentSigningKID:      s.currentSigningKID,
 	}
 }
 
@@ -492,6 +522,8 @@ func (s *Store) install(file *storeFile) {
 	s.DPoPProofs = file.DPoPProofs
 	s.DPoPNonces = file.DPoPNonces
 	s.ClientAssertionJTIs = file.ClientAssertionJTIs
+	s.accessTokenSigningKeys = slices.Clone(file.AccessTokenSigningKeys)
+	s.currentSigningKID = file.CurrentSigningKID
 }
 
 func cloneMap[K comparable, V any](src map[K]V) map[K]V {

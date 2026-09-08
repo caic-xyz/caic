@@ -39,7 +39,7 @@ func BenchmarkDPoPBearerAuth(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	accessToken, err := server.tokens.IssueDPoPAccessToken(testBaseURL, user, testResourceURL, "read", grantID, jkt)
+	accessToken, err := server.tokens.IssueDPoPAccessToken(testBaseURL, user, testResourceURL, "read", grantID, jkt, "benchmark-client")
 	if err != nil {
 		b.Fatal(err)
 	}

@@ -142,7 +142,7 @@ func TestServer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewAccessTokenService: %v", err)
 		}
-		legacyAccessToken, err := tokens.IssueAccessToken(testBaseURL, user, testResourceURL, "read", foreignGrant)
+		legacyAccessToken, err := tokens.IssueAccessToken(testBaseURL, user, testResourceURL, "read", foreignGrant, clientID)
 		if err != nil {
 			t.Fatalf("IssueAccessToken: %v", err)
 		}
@@ -219,7 +219,7 @@ func TestServer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewAccessTokenService: %v", err)
 		}
-		accessToken, err := tokens.IssueAccessToken(issuer, user, resource, "read", grantID)
+		accessToken, err := tokens.IssueAccessToken(issuer, user, resource, "read", grantID, clientID)
 		if err != nil {
 			t.Fatalf("IssueAccessToken: %v", err)
 		}
@@ -293,10 +293,10 @@ func TestServer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("seed foreign state: %v", err)
 		}
-		if _, err := s.issueTokenResponse(user, foreignURL, "read", grantID, "new-refresh", ""); err == nil {
+		if _, err := s.issueTokenResponse(user, foreignURL, "read", grantID, "new-refresh", "", clientID); err == nil {
 			t.Fatal("issueTokenResponse accepted a foreign resource")
 		}
-		accessToken, err := s.tokens.IssueAccessToken(s.issuer, user, s.resourceURL, "read", accessGrantID)
+		accessToken, err := s.tokens.IssueAccessToken(s.issuer, user, s.resourceURL, "read", accessGrantID, clientID)
 		if err != nil {
 			t.Fatalf("IssueAccessToken: %v", err)
 		}
@@ -2493,7 +2493,7 @@ func TestOAuthSurfaceContainment(t *testing.T) {
 		if len(grants) != 1 {
 			t.Fatalf("grants = %+v, want one grant", grants)
 		}
-		legacyToken, err := s.tokens.IssueDPoPAccessToken(testBaseURL, user, testResourceURL, "read", grants[0].ID, "legacy-key-thumbprint")
+		legacyToken, err := s.tokens.IssueDPoPAccessToken(testBaseURL, user, testResourceURL, "read", grants[0].ID, "legacy-key-thumbprint", grants[0].ClientID)
 		if err != nil {
 			t.Fatalf("issue legacy DPoP access token: %v", err)
 		}

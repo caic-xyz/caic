@@ -3,6 +3,7 @@
 package oauthserver
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -14,18 +15,156 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/caic-xyz/caic/oauth"
 )
 
-const accessTokenType = "access_token"
+const (
+	accessTokenType      = "access_token"
+	accessTokenHeaderTyp = "at+jwt"
+	tokenClockSkew       = time.Minute
+)
 
 // signingKey holds a private key and its JWS algorithm identifier.
 type signingKey struct {
-	key crypto.Signer
-	alg string // "RS256" or "ES256"
+	key         crypto.Signer
+	alg         string // "RS256" or "ES256"
+	verifyUntil time.Time
+}
+
+func configureAccessTokenService(state *Store, keyPEM []byte, kid string, ttl time.Duration, now time.Time) (*AccessTokenService, error) {
+	configuredKey, configuredAlg, err := accessTokenKey(keyPEM)
+	if err != nil {
+		return nil, err
+	}
+	if kid == "" && state.currentSigningKID != "" {
+		for _, stored := range state.accessTokenSigningKeys {
+			if stored.KID != state.currentSigningKID {
+				continue
+			}
+			storedKey, _, parseErr := accessTokenKey([]byte(stored.PrivateKeyPEM))
+			if parseErr == nil && samePublicKey(storedKey, configuredKey) {
+				kid = stored.KID
+			}
+			break
+		}
+	}
+	if kid == "" {
+		kid, err = randomToken()
+		if err != nil {
+			return nil, fmt.Errorf("generate oauth key id: %w", err)
+		}
+	}
+	next := state.snapshot()
+	changed, err := reconcileSigningKeys(&next, string(keyPEM), kid, ttl, now)
+	if err != nil {
+		return nil, err
+	}
+	if changed {
+		err = state.transact(func(file *storeFile) bool {
+			file.AccessTokenSigningKeys = slices.Clone(next.AccessTokenSigningKeys)
+			file.CurrentSigningKID = next.CurrentSigningKID
+			return true
+		})
+	}
+	if err != nil {
+		return nil, fmt.Errorf("persist oauth signing keys: %w", err)
+	}
+	keys := make(map[string]signingKey, len(state.accessTokenSigningKeys))
+	for _, stored := range state.accessTokenSigningKeys {
+		key, alg, parseErr := accessTokenKey([]byte(stored.PrivateKeyPEM))
+		if parseErr != nil {
+			return nil, fmt.Errorf("parse stored oauth signing key %q: %w", stored.KID, parseErr)
+		}
+		keys[stored.KID] = signingKey{key: key, alg: alg, verifyUntil: stored.VerifyUntil}
+	}
+	current := keys[state.currentSigningKID]
+	if !samePublicKey(current.key, configuredKey) || current.alg != configuredAlg {
+		return nil, errors.New("oauth: configured signing key does not match durable current key")
+	}
+	return &AccessTokenService{keys: keys, currentKID: state.currentSigningKID, ttl: ttl}, nil
+}
+
+func reconcileSigningKeys(file *storeFile, keyPEM, kid string, ttl time.Duration, now time.Time) (bool, error) {
+	if ttl <= 0 {
+		return false, errors.New("oauth: access token TTL must be positive")
+	}
+	configuredKey, _, err := accessTokenKey([]byte(keyPEM))
+	if err != nil {
+		return false, err
+	}
+	seen := make(map[string]struct{}, len(file.AccessTokenSigningKeys))
+	currentCount := 0
+	for _, stored := range file.AccessTokenSigningKeys {
+		if stored.KID == "" || stored.PrivateKeyPEM == "" {
+			return false, errors.New("oauth: durable signing key is incomplete")
+		}
+		if _, duplicate := seen[stored.KID]; duplicate {
+			return false, fmt.Errorf("oauth: duplicate durable signing key ID %q", stored.KID)
+		}
+		seen[stored.KID] = struct{}{}
+		if _, _, parseErr := accessTokenKey([]byte(stored.PrivateKeyPEM)); parseErr != nil {
+			return false, fmt.Errorf("oauth: parse durable signing key %q: %w", stored.KID, parseErr)
+		}
+		if stored.VerifyUntil.IsZero() {
+			currentCount++
+			if stored.KID != file.CurrentSigningKID {
+				return false, errors.New("oauth: durable signing key ring has an unexpected active key")
+			}
+		}
+	}
+	if len(file.AccessTokenSigningKeys) > 0 && currentCount != 1 {
+		return false, errors.New("oauth: durable signing key ring must have exactly one active key")
+	}
+	changed := false
+	retained := file.AccessTokenSigningKeys[:0]
+	for _, key := range file.AccessTokenSigningKeys {
+		if !key.VerifyUntil.IsZero() && !now.Before(key.VerifyUntil) {
+			changed = true
+			continue
+		}
+		retained = append(retained, key)
+	}
+	file.AccessTokenSigningKeys = retained
+	if len(retained) == 0 {
+		file.AccessTokenSigningKeys = []storedSigningKey{{KID: kid, PrivateKeyPEM: keyPEM}}
+		file.CurrentSigningKID = kid
+		return true, nil
+	}
+	for i := range retained {
+		if retained[i].KID != kid {
+			continue
+		}
+		storedKey, _, parseErr := accessTokenKey([]byte(retained[i].PrivateKeyPEM))
+		if parseErr != nil {
+			return false, parseErr
+		}
+		if retained[i].VerifyUntil.IsZero() && file.CurrentSigningKID == kid && samePublicKey(storedKey, configuredKey) {
+			return changed, nil
+		}
+		// A retired KID is never reusable, and a KID never changes key material.
+		return false, fmt.Errorf("oauth: signing key ID %q was already used", kid)
+	}
+	if len(retained) >= maxAccessTokenSigningKeys {
+		return false, fmt.Errorf("oauth: signing key ring reached its %d-key limit", maxAccessTokenSigningKeys)
+	}
+	for i := range retained {
+		if retained[i].KID == file.CurrentSigningKID && retained[i].VerifyUntil.IsZero() {
+			retained[i].VerifyUntil = now.Add(ttl + tokenClockSkew)
+		}
+	}
+	file.AccessTokenSigningKeys = append(file.AccessTokenSigningKeys, storedSigningKey{KID: kid, PrivateKeyPEM: keyPEM})
+	file.CurrentSigningKID = kid
+	return true, nil
+}
+
+func samePublicKey(a, b crypto.Signer) bool {
+	aDER, aErr := x509.MarshalPKIXPublicKey(a.Public())
+	bDER, bErr := x509.MarshalPKIXPublicKey(b.Public())
+	return aErr == nil && bErr == nil && bytes.Equal(aDER, bDER)
 }
 
 // parsedToken holds the decoded header and payload of a verified JWT.
@@ -79,8 +218,12 @@ func newAccessTokenService(key crypto.Signer, alg, kid string, ttl time.Duration
 
 // JWK returns all active public signing keys as JWKs.
 func (s *AccessTokenService) JWK() []oauth.JWK {
+	now := time.Now()
 	jwks := make([]oauth.JWK, 0, len(s.keys))
 	for kid, sk := range s.keys {
+		if !sk.verifyUntil.IsZero() && !now.Before(sk.verifyUntil) {
+			continue
+		}
 		switch pub := sk.key.Public().(type) {
 		case *rsa.PublicKey:
 			jwks = append(jwks, oauth.RSAJWK(kid, pub))
@@ -88,19 +231,29 @@ func (s *AccessTokenService) JWK() []oauth.JWK {
 			jwks = append(jwks, oauth.ECJWK(kid, pub))
 		}
 	}
+	slices.SortFunc(jwks, func(a, b oauth.JWK) int { return strings.Compare(a.Kid, b.Kid) })
 	return jwks
 }
 
-// RotateKey generates a new ECDSA P-256 key with a new KID, adds it to the
-// active set, and makes it the current signing key. Returns the new KID.
+// RotateKey rotates a standalone, in-memory service to a new ECDSA P-256 key.
+// Server instances instead reconcile configured keys through the durable store.
 func (s *AccessTokenService) RotateKey() (string, error) {
 	return s.RotateKeyWithAlg("ES256")
 }
 
-// RotateKeyWithAlg generates a new key for the specified algorithm ("RS256",
-// "ES256", "ES384" or "ES512") in the active set and makes it the current
-// signing key. Returns the new KID.
+// RotateKeyWithAlg rotates a standalone, in-memory service to a new key for
+// alg. Previous keys remain available only for the access-token validation
+// window; server instances use the durable store-backed lifecycle instead.
 func (s *AccessTokenService) RotateKeyWithAlg(alg string) (string, error) {
+	now := time.Now()
+	for kid, key := range s.keys {
+		if !key.verifyUntil.IsZero() && !now.Before(key.verifyUntil) {
+			delete(s.keys, kid)
+		}
+	}
+	if len(s.keys) >= maxAccessTokenSigningKeys {
+		return "", fmt.Errorf("oauth: signing key ring reached its %d-key limit", maxAccessTokenSigningKeys)
+	}
 	var sk signingKey
 	switch alg {
 	case "RS256":
@@ -129,17 +282,26 @@ func (s *AccessTokenService) RotateKeyWithAlg(alg string) (string, error) {
 		return "", fmt.Errorf("generate oauth rotate key id: %w", err)
 	}
 	s.keys[kid] = sk
+	current := s.keys[s.currentKID]
+	current.verifyUntil = now.Add(s.ttl + tokenClockSkew)
+	s.keys[s.currentKID] = current
 	s.currentKID = kid
 	return kid, nil
 }
 
 // IssueAccessToken signs a JWT access token for user.
-func (s *AccessTokenService) IssueAccessToken(issuer string, user oauth.User, audience, scope, grantID string) (string, error) {
+func (s *AccessTokenService) IssueAccessToken(issuer string, user oauth.User, audience, scope, grantID, clientID string) (string, error) {
 	now := time.Now()
+	jti, err := randomToken()
+	if err != nil {
+		return "", fmt.Errorf("generate access token ID: %w", err)
+	}
 	return s.issueAccessTokenAt(&oauth.AccessTokenClaims{
 		Issuer:   issuer,
 		Subject:  user.ID,
 		Audience: audience,
+		ClientID: clientID,
+		JWTID:    jti,
 		Username: user.Username,
 		Scope:    scope,
 		GrantID:  grantID,
@@ -148,12 +310,18 @@ func (s *AccessTokenService) IssueAccessToken(issuer string, user oauth.User, au
 }
 
 // IssueDPoPAccessToken signs a DPoP-bound JWT access token with cnf.jkt.
-func (s *AccessTokenService) IssueDPoPAccessToken(issuer string, user oauth.User, audience, scope, grantID, dpopJKT string) (string, error) {
+func (s *AccessTokenService) IssueDPoPAccessToken(issuer string, user oauth.User, audience, scope, grantID, dpopJKT, clientID string) (string, error) {
 	now := time.Now()
+	jti, err := randomToken()
+	if err != nil {
+		return "", fmt.Errorf("generate access token ID: %w", err)
+	}
 	return s.issueAccessTokenAt(&oauth.AccessTokenClaims{
 		Issuer:       issuer,
 		Subject:      user.ID,
 		Audience:     audience,
+		ClientID:     clientID,
+		JWTID:        jti,
 		Username:     user.Username,
 		Scope:        scope,
 		GrantID:      grantID,
@@ -167,13 +335,13 @@ func (s *AccessTokenService) IssueDPoPAccessToken(issuer string, user oauth.User
 // the registration or retiring the signing key ends its authority.
 func (s *AccessTokenService) IssueRegistrationAccessToken(issuer, clientID string) (string, error) {
 	now := time.Now()
-	return s.issueAccessTokenAt(&oauth.AccessTokenClaims{
+	return s.issueTokenAt(&oauth.AccessTokenClaims{
 		Issuer:   issuer,
 		Subject:  clientID,
 		Audience: issuer + "/oauth/register",
 		Scope:    "client:manage",
 		Type:     "registration_access_token",
-	}, now, time.Unix(1<<62, 0))
+	}, now, time.Unix(1<<62, 0), "JWT")
 }
 
 // VerifyRegistrationAccessToken validates a registration access token and returns the client ID from the subject claim.
@@ -203,7 +371,12 @@ func (s *AccessTokenService) VerifyAccessToken(token, issuer, audience string, n
 		if !active {
 			return nil, errors.New("token grant is not active")
 		}
+		if cid != claims.ClientID {
+			return nil, errors.New("token client does not match its grant")
+		}
 		clientID = cid
+	} else {
+		clientID = claims.ClientID
 	}
 	if session == nil {
 		return nil, errors.New("user lookup callback is required")
@@ -227,8 +400,12 @@ func (s *AccessTokenService) VerifyAccessToken(token, issuer, audience string, n
 }
 
 func (s *AccessTokenService) issueAccessTokenAt(claims *oauth.AccessTokenClaims, issuedAt, expiresAt time.Time) (string, error) {
+	return s.issueTokenAt(claims, issuedAt, expiresAt, accessTokenHeaderTyp)
+}
+
+func (s *AccessTokenService) issueTokenAt(claims *oauth.AccessTokenClaims, issuedAt, expiresAt time.Time, headerTyp string) (string, error) {
 	alg := s.keys[s.currentKID].alg
-	headerJSON, err := json.Marshal(oauth.JWTHeader{Alg: alg, Typ: "JWT", KID: s.currentKID})
+	headerJSON, err := json.Marshal(oauth.JWTHeader{Alg: alg, Typ: headerTyp, KID: s.currentKID})
 	if err != nil {
 		return "", err
 	}
@@ -251,24 +428,27 @@ func (s *AccessTokenService) issueAccessTokenAt(claims *oauth.AccessTokenClaims,
 // parseAndVerifyJWT splits a JWT, decodes header and payload, verifies the
 // signature against the key identified by KID in the JWT header, and returns
 // the raw header and payload JSON.
-func (s *AccessTokenService) parseAndVerifyJWT(raw string) (parsedToken, error) {
+func (s *AccessTokenService) parseAndVerifyJWT(raw string, now time.Time) (parsedToken, error) {
 	parts := strings.Split(raw, ".")
 	if len(parts) != 3 {
 		return parsedToken{}, errors.New("invalid bearer token format")
 	}
-	headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
+	headerJSON, err := base64.RawURLEncoding.Strict().DecodeString(parts[0])
 	if err != nil {
 		return parsedToken{}, fmt.Errorf("decode token header: %w", err)
+	}
+	if _, err := decodeUniqueJSONObject(headerJSON); err != nil {
+		return parsedToken{}, fmt.Errorf("parse token header: %w", err)
 	}
 	var header oauth.JWTHeader
 	if err := json.Unmarshal(headerJSON, &header); err != nil {
 		return parsedToken{}, fmt.Errorf("parse token header: %w", err)
 	}
 	keyInfo, ok := s.keys[header.KID]
-	if !ok || header.Alg != keyInfo.alg {
+	if !ok || header.Alg != keyInfo.alg || (!keyInfo.verifyUntil.IsZero() && !now.Before(keyInfo.verifyUntil)) {
 		return parsedToken{}, errors.New("unsupported token header")
 	}
-	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+	signature, err := base64.RawURLEncoding.Strict().DecodeString(parts[2])
 	if err != nil {
 		return parsedToken{}, fmt.Errorf("decode token signature: %w", err)
 	}
@@ -276,15 +456,18 @@ func (s *AccessTokenService) parseAndVerifyJWT(raw string) (parsedToken, error) 
 	if err := verifyJWS(keyInfo.key.Public(), keyInfo.alg, []byte(signingInput), signature); err != nil {
 		return parsedToken{}, errors.New("invalid token signature")
 	}
-	payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
+	payloadJSON, err := base64.RawURLEncoding.Strict().DecodeString(parts[1])
 	if err != nil {
 		return parsedToken{}, fmt.Errorf("decode token payload: %w", err)
+	}
+	if _, err := decodeUniqueJSONObject(payloadJSON); err != nil {
+		return parsedToken{}, fmt.Errorf("parse token claims: %w", err)
 	}
 	return parsedToken{header: headerJSON, payload: payloadJSON}, nil
 }
 
 func (s *AccessTokenService) verifyClaims(token, issuer, audience string, now time.Time) (*oauth.AccessTokenClaims, error) {
-	parsed, err := s.parseAndVerifyJWT(token)
+	parsed, err := s.parseAndVerifyJWT(token, now)
 	if err != nil {
 		return nil, err
 	}
@@ -301,16 +484,23 @@ func (s *AccessTokenService) verifyClaims(token, issuer, audience string, now ti
 	if claims.Type != accessTokenType {
 		return nil, errors.New("invalid token type")
 	}
+	if claims.Subject == "" || claims.ClientID == "" || claims.JWTID == "" || claims.IssuedAt == 0 || claims.Expiry <= claims.IssuedAt {
+		return nil, errors.New("token is missing required claims")
+	}
+	var header oauth.JWTHeader
+	if err := json.Unmarshal(parsed.header, &header); err != nil || (!strings.EqualFold(header.Typ, "at+jwt") && !strings.EqualFold(header.Typ, "application/at+jwt")) {
+		return nil, errors.New("invalid token header type")
+	}
 	nowUnix := now.Unix()
-	clockSkew := int64(60) // ±1 minute per RFC 9068 §2.1
-	if claims.NotBefore > nowUnix+clockSkew || claims.Expiry <= nowUnix-clockSkew {
+	clockSkew := int64(tokenClockSkew / time.Second)
+	if claims.IssuedAt > nowUnix+clockSkew || claims.NotBefore > nowUnix+clockSkew || claims.Expiry <= nowUnix-clockSkew {
 		return nil, errors.New("token is not valid now")
 	}
 	return &claims, nil
 }
 
 func (s *AccessTokenService) verifyRegistrationClaims(token, issuer, audience string, now time.Time) (*oauth.AccessTokenClaims, error) {
-	parsed, err := s.parseAndVerifyJWT(token)
+	parsed, err := s.parseAndVerifyJWT(token, now)
 	if err != nil {
 		return nil, err
 	}

@@ -220,10 +220,6 @@ func NewServer(c ServerConfig) (*Server, error) { //nolint:gocritic // ServerCon
 		dpopNonceTTL = defaultDPoPNonceTTL
 	}
 	dpopNonceKey := sha256.Sum256(append([]byte("caic oauth dpop nonce\x00"), c.KeyPEM...))
-	tokens, err := NewAccessTokenService(c.KeyPEM, c.KeyID, accessTokenTTL)
-	if err != nil {
-		return nil, err
-	}
 	if c.Session == nil {
 		return nil, errors.New("oauth: Session is required")
 	}
@@ -235,6 +231,11 @@ func NewServer(c ServerConfig) (*Server, error) { //nolint:gocritic // ServerCon
 		return nil, err
 	}
 	state, err := LoadStore(c.RefreshTokenStorePath)
+	if err != nil {
+		releaseStore()
+		return nil, err
+	}
+	tokens, err := configureAccessTokenService(state, c.KeyPEM, c.KeyID, accessTokenTTL, time.Now())
 	if err != nil {
 		releaseStore()
 		return nil, err
@@ -944,7 +945,7 @@ func (s *Server) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r *htt
 			return
 		}
 	}
-	response, err := s.issueTokenResponse(user, entry.Resource, entry.Scope, grantID, refreshToken, dpopJKT)
+	response, err := s.issueTokenResponse(user, entry.Resource, entry.Scope, grantID, refreshToken, dpopJKT, entry.ClientID)
 	if err != nil {
 		slog.WarnContext(r.Context(), "sign oauth authorization-code token", "err", err)
 		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not issue access token")
@@ -1031,7 +1032,7 @@ func (s *Server) handleOAuthRefreshToken(w http.ResponseWriter, r *http.Request,
 		var err error
 		nextRefreshToken, err = randomToken()
 		if err == nil {
-			response, err = s.issueTokenResponse(user, entry.Resource, entry.Scope, entry.GrantID, nextRefreshToken, entry.DPoPJKT)
+			response, err = s.issueTokenResponse(user, entry.Resource, entry.Scope, entry.GrantID, nextRefreshToken, entry.DPoPJKT, entry.ClientID)
 		}
 		if err != nil {
 			slog.WarnContext(r.Context(), "prepare oauth refresh response", "err", err)
@@ -1064,16 +1065,16 @@ func (s *Server) handleOAuthRefreshToken(w http.ResponseWriter, r *http.Request,
 	s.writeTokenResponse(w, &response)
 }
 
-func (s *Server) issueTokenResponse(user oauth.User, resource, scope, grantID, refreshToken, dpopJKT string) (oauth.TokenResponse, error) {
+func (s *Server) issueTokenResponse(user oauth.User, resource, scope, grantID, refreshToken, dpopJKT, clientID string) (oauth.TokenResponse, error) {
 	if resource != s.resourceURL {
 		return oauth.TokenResponse{}, errors.New("oauth: token resource does not match configured protected resource")
 	}
 	var accessToken string
 	var err error
 	if dpopJKT == "" {
-		accessToken, err = s.tokens.IssueAccessToken(s.issuer, user, resource, scope, grantID)
+		accessToken, err = s.tokens.IssueAccessToken(s.issuer, user, resource, scope, grantID, clientID)
 	} else {
-		accessToken, err = s.tokens.IssueDPoPAccessToken(s.issuer, user, resource, scope, grantID, dpopJKT)
+		accessToken, err = s.tokens.IssueDPoPAccessToken(s.issuer, user, resource, scope, grantID, dpopJKT, clientID)
 	}
 	if err != nil {
 		return oauth.TokenResponse{}, err
@@ -2572,7 +2573,7 @@ func (s *Server) handleOAuthDeviceCodeToken(w http.ResponseWriter, r *http.Reque
 			return
 		}
 	}
-	response, err := s.issueTokenResponse(user, grant.Resource, dc.Scope, grantID, refreshToken, dpopJKT)
+	response, err := s.issueTokenResponse(user, grant.Resource, dc.Scope, grantID, refreshToken, dpopJKT, dc.ClientID)
 	if err != nil {
 		slog.WarnContext(r.Context(), "sign device access token", "err", err)
 		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not issue access token")
