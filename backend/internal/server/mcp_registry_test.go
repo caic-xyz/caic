@@ -278,6 +278,49 @@ func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 	})
 }
 
+func TestCaicToolRegistryHandleTaskCreateUnknownRepository(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		scopes []string
+		want   string
+	}{
+		{
+			name:   "with repository read access",
+			scopes: []string{mcpScopeRead, mcpScopeTasksCreate},
+			want:   "unknown repo: mistyped. Call repos_list, use an exact returned path, then retry task_create.",
+		},
+		{
+			name:   "without repository read access",
+			scopes: []string{mcpScopeTasksCreate},
+			want:   "unknown repo: mistyped. The path must exactly match a configured repository.",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := newMCPTaskCreateTestRouter(t)
+			c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
+			ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{Scopes: tt.scopes, Remote: true})
+			ctx = auth.NewContext(ctx, &auth.User{ID: "user-1"})
+
+			result := c.handleTaskCreate(ctx, mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"mistyped"}})
+			if !result.IsError {
+				t.Fatal("handleTaskCreate() did not return a tool error")
+			}
+			output, ok := result.Structured.(mcp.ErrorOutput)
+			if !ok {
+				t.Fatalf("result type = %T, want mcp.ErrorOutput", result.Structured)
+			}
+			if output.Error != tt.want {
+				t.Errorf("error = %q, want %q", output.Error, tt.want)
+			}
+		})
+	}
+}
+
 func newMCPTaskCreateTestRouter(t *testing.T) *testRouter {
 	s := newTestRouter(t, map[harness.Name]agent.Backend{
 		harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "claude-default"}}}, WireFactory: claudecode.New().NewWire},

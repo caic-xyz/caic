@@ -774,6 +774,7 @@ object VoiceGatewayModeSerializer : KSerializer<VoiceGatewayMode> {
 
 object ErrorCodes {
     const val BadRequest = "BAD_REQUEST"
+    const val UnknownRepository = "UNKNOWN_REPOSITORY"
     const val NotFound = "NOT_FOUND"
     const val Conflict = "CONFLICT"
     const val InternalError = "INTERNAL_ERROR"

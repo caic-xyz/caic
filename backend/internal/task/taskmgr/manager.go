@@ -352,7 +352,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 	if len(p.Repos) > 0 {
 		_, ok := m.Checkouts.Checkout(p.Repos[0].Name)
 		if !ok {
-			return "", badRequestf("unknown repo: %s", p.Repos[0].Name)
+			return "", badRequestCodef(CodeUnknownRepository, "unknown repo: %s", p.Repos[0].Name)
 		}
 	}
 
@@ -360,7 +360,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 	// allocated later, in one pass, by allocateBranches).
 	for _, rs := range p.Repos[min(1, len(p.Repos)):] {
 		if _, ok := m.Checkouts.Checkout(rs.Name); !ok {
-			return "", badRequestf("unknown extra repo: %s", rs.Name)
+			return "", badRequestCodef(CodeUnknownRepository, "unknown extra repo: %s", rs.Name)
 		}
 	}
 

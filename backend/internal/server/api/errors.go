@@ -10,22 +10,27 @@ import (
 // ErrorCode is a machine-readable error identifier.
 type ErrorCode string
 
-// Standard error codes.
+// Error codes.
 const (
-	CodeBadRequest    ErrorCode = "BAD_REQUEST"
-	CodeUnauthorized  ErrorCode = "UNAUTHORIZED"
-	CodeForbidden     ErrorCode = "FORBIDDEN"
-	CodeNotFound      ErrorCode = "NOT_FOUND"
-	CodeConflict      ErrorCode = "CONFLICT"
-	CodeInternalError ErrorCode = "INTERNAL_ERROR"
+	CodeBadRequest        ErrorCode = "BAD_REQUEST"
+	CodeUnknownRepository ErrorCode = "UNKNOWN_REPOSITORY"
+	CodeUnauthorized      ErrorCode = "UNAUTHORIZED"
+	CodeForbidden         ErrorCode = "FORBIDDEN"
+	CodeNotFound          ErrorCode = "NOT_FOUND"
+	CodeConflict          ErrorCode = "CONFLICT"
+	CodeInternalError     ErrorCode = "INTERNAL_ERROR"
 )
 
-// ErrorWithStatus is an error that carries an HTTP status code, error code,
-// and optional details map.
+// ErrorWithStatus is an error that carries an HTTP status code and error code.
 type ErrorWithStatus interface {
 	error
 	StatusCode() int
 	Code() ErrorCode
+}
+
+// ErrorWithDetails is an API error with optional unstructured diagnostics.
+type ErrorWithDetails interface {
+	ErrorWithStatus
 	Details() map[string]any
 }
 
@@ -87,6 +92,11 @@ func (e *Error) Wrap(err error) *Error {
 // BadRequest creates a 400 error.
 func BadRequest(msg string) *Error {
 	return &Error{statusCode: http.StatusBadRequest, code: CodeBadRequest, message: msg}
+}
+
+// BadRequestWithCode creates a 400 error with a semantic error code.
+func BadRequestWithCode(code ErrorCode, msg string) *Error {
+	return &Error{statusCode: http.StatusBadRequest, code: code, message: msg}
 }
 
 // NotFound creates a 404 error.

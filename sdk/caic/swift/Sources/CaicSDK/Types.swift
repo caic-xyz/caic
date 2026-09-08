@@ -451,6 +451,7 @@ public struct VoiceGatewayMode: Codable, Equatable, Hashable {
 
 public enum ErrorCodes {
     public static let badRequest = "BAD_REQUEST"
+    public static let unknownRepository = "UNKNOWN_REPOSITORY"
     public static let notFound = "NOT_FOUND"
     public static let conflict = "CONFLICT"
     public static let internalError = "INTERNAL_ERROR"

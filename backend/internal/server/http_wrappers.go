@@ -103,6 +103,9 @@ func toDTO(err error) error {
 		case taskmgr.KindConflict:
 			return api.Conflict(te.Error())
 		case taskmgr.KindBadRequest:
+			if te.Code == taskmgr.CodeUnknownRepository {
+				return api.BadRequestWithCode(api.CodeUnknownRepository, te.Error())
+			}
 			return api.BadRequest(te.Error())
 		case taskmgr.KindInternal:
 			return api.InternalError(te.Error())
@@ -189,7 +192,9 @@ func writeError(ctx context.Context, w http.ResponseWriter, err error) {
 	if ews, ok := errors.AsType[api.ErrorWithStatus](err); ok {
 		statusCode = ews.StatusCode()
 		code = ews.Code()
-		details = ews.Details()
+	}
+	if ewd, ok := errors.AsType[api.ErrorWithDetails](err); ok {
+		details = ewd.Details()
 	}
 	if voiceEWS, ok := errors.AsType[voiceapi.ErrorWithStatus](err); ok {
 		statusCode = voiceEWS.StatusCode()

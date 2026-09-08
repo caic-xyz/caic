@@ -101,6 +101,7 @@ All errors return:
 | HTTP | Code |
 |------|------|
 | 400 | `BAD_REQUEST` |
+| 400 | `UNKNOWN_REPOSITORY` |
 | 404 | `NOT_FOUND` |
 | 409 | `CONFLICT` |
 | 500 | `INTERNAL_ERROR` |

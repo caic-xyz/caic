@@ -394,6 +394,22 @@ func domainToolError[T any](err error) mcp.ToolResult[T] {
 	return mcp.ToolError[T](err.Error())
 }
 
+// taskCreateToolError adds an actionable recovery step when a task-creation
+// request names an unknown repository and the caller may list repositories.
+func taskCreateToolError(ctx context.Context, err error) mcp.ToolResult[mcpTaskCreatedOutput] {
+	ews, ok := errors.AsType[api.ErrorWithStatus](err)
+	if !ok || ews.Code() != api.CodeUnknownRepository {
+		return domainToolError[mcpTaskCreatedOutput](err)
+	}
+	message := ews.Error()
+	if mcpHasScope(ctx, mcpScopeRead) {
+		message += ". Call repos_list, use an exact returned path, then retry task_create."
+	} else {
+		message += ". The path must exactly match a configured repository."
+	}
+	return mcp.ToolError[mcpTaskCreatedOutput](message)
+}
+
 type mcpTaskCreatedOutput struct {
 	Result     string `json:"result"               jsonschema_description:"Human-readable task creation result"`
 	TaskNumber int    `json:"taskNumber,omitempty" jsonschema_description:"Current session task number"`
@@ -446,7 +462,7 @@ func (m *mcpRegistry) handleTaskCreate(ctx context.Context, args mcpTaskCreateAr
 	}
 	resp, err := m.taskSvc.createTask(ctx, req)
 	if err != nil {
-		return domainToolError[mcpTaskCreatedOutput](err)
+		return taskCreateToolError(ctx, err)
 	}
 	taskList := m.taskSvc.taskListSnapshot(ctx)
 	num := taskNumberForID(taskList, resp.ID.String())

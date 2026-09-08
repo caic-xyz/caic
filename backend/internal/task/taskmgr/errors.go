@@ -7,6 +7,14 @@ import (
 	"fmt"
 )
 
+// Code identifies a specific task-manager error within its broader ErrorKind.
+type Code string
+
+const (
+	// CodeUnknownRepository reports a repository that is not registered with caic.
+	CodeUnknownRepository Code = "UNKNOWN_REPOSITORY"
+)
+
 // ErrNoSession is a sentinel reported by Manager.SendInput when the task has no
 // active agent session to forward input to.
 //
@@ -78,6 +86,7 @@ func (k ErrorKind) String() string {
 // error is preserved for errors.Is/errors.As.
 type Error struct {
 	Kind ErrorKind
+	Code Code
 	Msg  string
 	Err  error // wrapped underlying error, if any
 }
@@ -114,6 +123,11 @@ func conflictErr(err error, msg string) *Error {
 // badRequestf builds a KindBadRequest error with a formatted message.
 func badRequestf(format string, args ...any) *Error {
 	return &Error{Kind: KindBadRequest, Msg: fmt.Sprintf(format, args...)}
+}
+
+// badRequestCodef builds a classified KindBadRequest error.
+func badRequestCodef(code Code, format string, args ...any) *Error {
+	return &Error{Kind: KindBadRequest, Code: code, Msg: fmt.Sprintf(format, args...)}
 }
 
 // internalErr builds a KindInternal error wrapping err. The wrapped error

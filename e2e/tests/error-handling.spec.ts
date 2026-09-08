@@ -17,6 +17,7 @@ test("POST /api/caic/v1/tasks with unknown repo returns 400", async ({ api }) =>
     .catch((e: unknown) => e);
   expect(err).toBeInstanceOf(APIError);
   expect((err as APIError).status).toBe(400);
+  expect((err as APIError).code).toBe("UNKNOWN_REPOSITORY");
 });
 
 test("POST /api/caic/v1/tasks with unknown harness returns 400", async ({ api }) => {

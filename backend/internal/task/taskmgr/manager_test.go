@@ -1433,6 +1433,9 @@ func TestManager(t *testing.T) {
 			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
 			}
+			if te.Code != CodeUnknownRepository {
+				t.Errorf("Code = %q, want %q", te.Code, CodeUnknownRepository)
+			}
 		})
 		t.Run("error_images_unsupported", func(t *testing.T) {
 			t.Parallel()

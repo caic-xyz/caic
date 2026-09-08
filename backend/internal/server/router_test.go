@@ -1001,8 +1001,8 @@ func TestHandleCreateTask(t *testing.T) {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
 		}
 		e := decodeError(t, w)
-		if e.Code != api.CodeBadRequest {
-			t.Errorf("code = %q, want %q", e.Code, api.CodeBadRequest)
+		if e.Code != api.CodeUnknownRepository {
+			t.Errorf("code = %q, want %q", e.Code, api.CodeUnknownRepository)
 		}
 	})
 

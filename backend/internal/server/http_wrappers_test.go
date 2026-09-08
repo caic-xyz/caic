@@ -237,6 +237,22 @@ func TestToDTO(t *testing.T) {
 		}
 	})
 
+	t.Run("unknown_repository", func(t *testing.T) {
+		t.Parallel()
+
+		got := toDTO(&taskmgr.Error{Kind: taskmgr.KindBadRequest, Code: taskmgr.CodeUnknownRepository, Msg: "unknown repo: mistyped"})
+		ews, ok := errors.AsType[api.ErrorWithStatus](got)
+		if !ok {
+			t.Fatalf("toDTO returned %T, want api.ErrorWithStatus", got)
+		}
+		if ews.Code() != api.CodeUnknownRepository {
+			t.Errorf("Code() = %q, want %q", ews.Code(), api.CodeUnknownRepository)
+		}
+		if ews.StatusCode() != http.StatusBadRequest {
+			t.Errorf("StatusCode() = %d, want %d", ews.StatusCode(), http.StatusBadRequest)
+		}
+	})
+
 	t.Run("internal_preserves_wrapped", func(t *testing.T) {
 		t.Parallel()
 		inner := errors.New("connection refused")
