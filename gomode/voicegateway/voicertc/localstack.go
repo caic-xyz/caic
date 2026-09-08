@@ -326,6 +326,9 @@ func (s *localStackSession) handleLLMStep(ctx context.Context, conv llmConversat
 		if reply.toolCall == nil {
 			return
 		}
+		if !speech.flush(ctx) {
+			return
+		}
 		s.emit(&voicev1.ToolCall{
 			Kind: voicev1.MessageKindToolCall,
 			ID:   reply.toolCall.id,
@@ -390,11 +393,11 @@ func (s *localStackSession) speak(ctx context.Context, text string) {
 
 func (s *localStackSession) startSpeechQueue(ctx context.Context) *assistantSpeechQueue {
 	q := &assistantSpeechQueue{
-		textCh: make(chan string, 4),
-		done:   make(chan struct{}),
+		items: make(chan assistantSpeechQueueItem, 4),
+		done:  make(chan struct{}),
 	}
 	go func() {
-		s.speakFragments(ctx, channelTextFragments(q.textCh))
+		s.speakFragments(ctx, queuedTextFragments(q.items))
 		close(q.done)
 	}()
 	return q
@@ -469,11 +472,14 @@ func (s *localStackSession) speakFragments(ctx context.Context, fragments iter.S
 	s.emit(&voicev1.SpeechEnded{Kind: voicev1.MessageKindSpeechEnded, Speaker: voicev1.SpeakerAssistant})
 }
 
-func channelTextFragments(ch <-chan string) iter.Seq[string] {
+func queuedTextFragments(ch <-chan assistantSpeechQueueItem) iter.Seq[string] {
 	return func(yield func(string) bool) {
-		for fragment := range ch {
-			if !yield(fragment) {
+		for item := range ch {
+			if item.text != "" && !yield(item.text) {
 				return
+			}
+			if item.processed != nil {
+				close(item.processed)
 			}
 		}
 	}
@@ -670,8 +676,13 @@ func (placeholderTTS) synthesize(_ context.Context, text string) iter.Seq2[[]byt
 }
 
 type assistantSpeechQueue struct {
-	textCh chan string
-	done   chan struct{}
+	items chan assistantSpeechQueueItem
+	done  chan struct{}
+}
+
+type assistantSpeechQueueItem struct {
+	text      string
+	processed chan struct{}
 }
 
 func (q *assistantSpeechQueue) send(ctx context.Context, text string) bool {
@@ -679,7 +690,26 @@ func (q *assistantSpeechQueue) send(ctx context.Context, text string) bool {
 		return true
 	}
 	select {
-	case q.textCh <- text:
+	case q.items <- assistantSpeechQueueItem{text: text}:
+		return true
+	case <-q.done:
+		return false
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func (q *assistantSpeechQueue) flush(ctx context.Context) bool {
+	processed := make(chan struct{})
+	select {
+	case q.items <- assistantSpeechQueueItem{processed: processed}:
+	case <-q.done:
+		return false
+	case <-ctx.Done():
+		return false
+	}
+	select {
+	case <-processed:
 		return true
 	case <-q.done:
 		return false
@@ -689,7 +719,7 @@ func (q *assistantSpeechQueue) send(ctx context.Context, text string) bool {
 }
 
 func (q *assistantSpeechQueue) close(ctx context.Context) {
-	close(q.textCh)
+	close(q.items)
 	select {
 	case <-q.done:
 	case <-ctx.Done():
