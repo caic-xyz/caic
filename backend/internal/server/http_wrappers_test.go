@@ -4,6 +4,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net"
@@ -17,6 +18,43 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
+
+func TestWriteError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantCode   api.ErrorCode
+	}{
+		{name: "bad request", err: api.BadRequest("invalid request"), wantStatus: http.StatusBadRequest, wantCode: api.CodeBadRequest},
+		{name: "unknown repository", err: api.BadRequestWithCode(api.CodeUnknownRepository, "unknown repo: mistyped"), wantStatus: http.StatusBadRequest, wantCode: api.CodeUnknownRepository},
+		{name: "unauthorized", err: api.Unauthorized("authentication required"), wantStatus: http.StatusUnauthorized, wantCode: api.CodeUnauthorized},
+		{name: "forbidden", err: api.Forbidden("task"), wantStatus: http.StatusForbidden, wantCode: api.CodeForbidden},
+		{name: "not found", err: api.NotFound("task"), wantStatus: http.StatusNotFound, wantCode: api.CodeNotFound},
+		{name: "conflict", err: api.Conflict("task is not waiting"), wantStatus: http.StatusConflict, wantCode: api.CodeConflict},
+		{name: "internal", err: api.InternalError("backend unavailable"), wantStatus: http.StatusInternalServerError, wantCode: api.CodeInternalError},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			w := httptest.NewRecorder()
+			writeError(testHTTPContext(t), w, tt.err)
+			if w.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d", w.Code, tt.wantStatus)
+			}
+			var response api.ErrorResponse
+			if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+				t.Fatalf("decode error response: %v", err)
+			}
+			if response.Error.Code != tt.wantCode {
+				t.Errorf("code = %q, want %q", response.Error.Code, tt.wantCode)
+			}
+		})
+	}
+}
 
 func testHTTPContext(t *testing.T) context.Context {
 	return context.WithValue(t.Context(), httpLoggerKey{}, slog.New(slog.DiscardHandler))

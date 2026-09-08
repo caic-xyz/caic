@@ -102,6 +102,8 @@ All errors return:
 |------|------|
 | 400 | `BAD_REQUEST` |
 | 400 | `UNKNOWN_REPOSITORY` |
+| 401 | `UNAUTHORIZED` |
+| 403 | `FORBIDDEN` |
 | 404 | `NOT_FOUND` |
 | 409 | `CONFLICT` |
 | 500 | `INTERNAL_ERROR` |

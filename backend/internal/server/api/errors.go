@@ -99,6 +99,11 @@ func BadRequestWithCode(code ErrorCode, msg string) *Error {
 	return &Error{statusCode: http.StatusBadRequest, code: code, message: msg}
 }
 
+// Unauthorized creates a 401 error.
+func Unauthorized(msg string) *Error {
+	return &Error{statusCode: http.StatusUnauthorized, code: CodeUnauthorized, message: msg}
+}
+
 // NotFound creates a 404 error.
 func NotFound(resource string) *Error {
 	return &Error{statusCode: http.StatusNotFound, code: CodeNotFound, message: resource + " not found"}
