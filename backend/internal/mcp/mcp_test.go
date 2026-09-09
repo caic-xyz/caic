@@ -24,6 +24,63 @@ import (
 //
 //nolint:paralleltest // mutates the global slog default; see doc comment.
 func TestHandlerHandleMCP(t *testing.T) {
+	t.Run("successful tool result omits metadata", func(t *testing.T) {
+		registry := &subscriptionTestRegistry{callResult: RawToolResult{Structured: TextOutput{Result: "ok"}}}
+		h := &Handler{Registry: registry}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(nativeMCPRequestJSON("tools/call", `"name":"echo","arguments":{}`)))
+		req.Header.Set("Mcp-Protocol-Version", ProtocolVersion)
+		req.Header.Set("Mcp-Method", string(MethodToolsCall))
+		req.Header.Set("Mcp-Name", "echo")
+		w := httptest.NewRecorder()
+		h.HandleMCP(w, req)
+		var response JSONRPCResponse
+		if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+			t.Fatal(err)
+		}
+		result, ok := response.Result.(map[string]any)
+		if !ok {
+			t.Fatalf("result = %T, want object", response.Result)
+		}
+		if _, ok := result["_meta"]; ok {
+			t.Fatalf("successful tools/call result has metadata: %#v", result)
+		}
+	})
+
+	t.Run("tool error metadata", func(t *testing.T) {
+		result := RawToolResult{
+			Meta:       MetaObject{ToolErrorCodeMetaKey: "UNKNOWN_REPOSITORY"},
+			Structured: ErrorOutput{Error: "unknown repository"},
+			IsError:    true,
+		}
+		registry := &subscriptionTestRegistry{}
+		registry.callResult = result
+		h := &Handler{Registry: registry}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(nativeMCPRequestJSON("tools/call", `"name":"echo","arguments":{}`)))
+		req.Header.Set("Mcp-Protocol-Version", ProtocolVersion)
+		req.Header.Set("Mcp-Method", string(MethodToolsCall))
+		req.Header.Set("Mcp-Name", "echo")
+		w := httptest.NewRecorder()
+		h.HandleMCP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", w.Code)
+		}
+		var response JSONRPCResponse
+		if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+			t.Fatal(err)
+		}
+		toolResult, ok := response.Result.(map[string]any)
+		if !ok {
+			t.Fatalf("result = %T, want object", response.Result)
+		}
+		meta, _ := toolResult["_meta"].(map[string]any)
+		if code := meta[ToolErrorCodeMetaKey]; code != "UNKNOWN_REPOSITORY" {
+			t.Fatalf("error code metadata = %#v, want UNKNOWN_REPOSITORY", code)
+		}
+		if _, ok := toolResult["structuredContent"]; ok {
+			t.Fatalf("structuredContent present on tool error: %#v", toolResult)
+		}
+	})
+
 	//nolint:paralleltest // parent runs serially on purpose; see doc comment.
 	t.Run("error logs failure", func(t *testing.T) {
 		var logBuf bytes.Buffer
@@ -136,6 +193,7 @@ type subscriptionTestRegistry struct {
 	resource   string
 	changes    chan struct{}
 	heartbeats chan struct{}
+	callResult RawToolResult
 }
 
 func newSubscriptionTestRegistry() *subscriptionTestRegistry {
@@ -155,7 +213,7 @@ func (r *subscriptionTestRegistry) Tools(context.Context) ([]ToolDescriptor, err
 }
 
 func (r *subscriptionTestRegistry) CallTool(context.Context, string, json.RawMessage) (RawToolResult, error) {
-	return RawToolResult{}, nil
+	return r.callResult, nil
 }
 
 func (r *subscriptionTestRegistry) ListResources(context.Context) ResourcesListResult {

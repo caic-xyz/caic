@@ -104,7 +104,10 @@ func (m *mcpRegistry) CallTool(ctx context.Context, name string, argsJSON json.R
 		}
 		if authResult, ok := m.authorizeTool(ctx, name); !ok {
 			m.audit.record(ctx, &auditEvent{Operation: "tools/call", Name: name, Args: auditArgsSummary(argsJSON), Decision: authResult})
-			return mcp.RawToolResult{Meta: mcp.MetaObject{"mcp/www_authenticate": []string{mcpScopeChallenge(requiredScopeForTool(name))}}, Structured: mcp.ErrorOutput{Error: authResult}, IsError: true}, nil
+			return mcp.RawToolResult{Meta: mcp.MetaObject{
+				"mcp/www_authenticate":   []string{mcpScopeChallenge(requiredScopeForTool(name))},
+				mcp.ToolErrorCodeMetaKey: string(api.CodeUnauthorized),
+			}, Structured: mcp.ErrorOutput{Error: authResult}, IsError: true}, nil
 		}
 		res, err := s.Handler(ctx, argsJSON)
 		status := "ok"
@@ -389,7 +392,7 @@ func domainToolError[T any](err error) mcp.ToolResult[T] {
 		return mcp.ToolResult[T]{}
 	}
 	if apiErr, ok := errors.AsType[*api.Error](err); ok {
-		return mcp.ToolError[T](apiErr.Error())
+		return mcp.ToolErrorWithMeta[T](apiErr.Error(), mcp.MetaObject{mcp.ToolErrorCodeMetaKey: string(apiErr.Code)})
 	}
 	return mcp.ToolError[T](err.Error())
 }
@@ -407,7 +410,7 @@ func taskCreateToolError(ctx context.Context, err error) mcp.ToolResult[mcpTaskC
 	} else {
 		message += ". The path must exactly match a configured repository."
 	}
-	return mcp.ToolError[mcpTaskCreatedOutput](message)
+	return mcp.ToolErrorWithMeta[mcpTaskCreatedOutput](message, mcp.MetaObject{mcp.ToolErrorCodeMetaKey: string(apiErr.Code)})
 }
 
 type mcpTaskCreatedOutput struct {

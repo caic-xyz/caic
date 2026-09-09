@@ -14,7 +14,7 @@ Type notation: `JSONValue` means any valid JSON value.
 
 ## Errors
 
-MCP errors are JSON-RPC error objects in `JSONRPCResponse.error`. Transport-layer validation failures may use non-2xx HTTP statuses; method-level JSON-RPC errors can still use HTTP 200.
+MCP errors are JSON-RPC error objects in `JSONRPCResponse.error`. Transport-layer validation failures may use non-2xx HTTP statuses; method-level JSON-RPC errors can still use HTTP 200. Tool execution errors preserve their human-readable content and expose a caic semantic code in `result._meta["xyz.caic/errorCode"]` when one is available.
 
 | HTTP | Code |
 |------|------|

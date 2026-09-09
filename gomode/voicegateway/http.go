@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/caic-xyz/caic/gomode"
+	voiceapi "github.com/caic-xyz/caic/gomode/voicegateway/api"
 	voicev1 "github.com/caic-xyz/caic/gomode/voicegateway/api/v1"
 )
 
@@ -91,18 +92,6 @@ type CloseSessionResp struct {
 	Status string `json:"status"`
 }
 
-// ErrorResponse is the JSON envelope for voice gateway error responses.
-type ErrorResponse struct {
-	Error   ErrorDetails   `json:"error"`
-	Details map[string]any `json:"details,omitempty"`
-}
-
-// ErrorDetails holds the code and message within an error response.
-type ErrorDetails struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
 // ServiceAuthorization authorizes one service-bound voice session.
 type ServiceAuthorization struct {
 	Kind       string `json:"kind"`
@@ -118,32 +107,32 @@ func (h *handler) handleHealth(w http.ResponseWriter, _ *http.Request) {
 func (h *handler) handleOffer(w http.ResponseWriter, r *http.Request) {
 	var req OfferReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+		writeError(w, http.StatusBadRequest, voiceapi.CodeBadRequest, "invalid request body")
 		return
 	}
 	if req.SDP == "" {
-		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "sdp is required")
+		writeError(w, http.StatusBadRequest, voiceapi.CodeBadRequest, "sdp is required")
 		return
 	}
 	if h.requireServiceAuth {
 		if err := validateServiceAuthorization(req.Service); err != nil {
-			writeError(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+			writeError(w, http.StatusBadRequest, voiceapi.CodeBadRequest, err.Error())
 			return
 		}
 		if err := verifyServiceToken(h.cfg, req.Service); err != nil {
-			writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", err.Error())
+			writeError(w, http.StatusUnauthorized, voiceapi.CodeUnauthorized, err.Error())
 			return
 		}
 	}
 	bridge := h.mediaBridge()
 	if bridge == nil {
-		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "voice bridge unavailable")
+		writeError(w, http.StatusBadRequest, voiceapi.CodeVoiceBridgeUnavailable, "voice bridge unavailable")
 		return
 	}
 	sdpAnswer, sessionID, err := bridge.HandleOffer(r.Context(), req.SDP)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "offer failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "offer failed")
+		writeError(w, http.StatusInternalServerError, voiceapi.CodeVoiceOfferFailed, "offer failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, OfferResp{SDP: sdpAnswer, SessionID: sessionID})
@@ -152,12 +141,12 @@ func (h *handler) handleOffer(w http.ResponseWriter, r *http.Request) {
 func (h *handler) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("sessionID")
 	if sessionID == "" {
-		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "sessionID is required")
+		writeError(w, http.StatusBadRequest, voiceapi.CodeBadRequest, "sessionID is required")
 		return
 	}
 	var req voicev1.VoiceRTCDiagnosticsReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+		writeError(w, http.StatusBadRequest, voiceapi.CodeBadRequest, "invalid request body")
 		return
 	}
 	bridge := h.mediaBridge()
@@ -172,12 +161,12 @@ func (h *handler) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 func (h *handler) handleClose(w http.ResponseWriter, r *http.Request) {
 	bridge := h.mediaBridge()
 	if bridge == nil {
-		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "voice bridge unavailable")
+		writeError(w, http.StatusBadRequest, voiceapi.CodeVoiceBridgeUnavailable, "voice bridge unavailable")
 		return
 	}
 	sessionID := r.PathValue("sessionID")
 	if sessionID == "" {
-		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "sessionID is required")
+		writeError(w, http.StatusBadRequest, voiceapi.CodeBadRequest, "sessionID is required")
 		return
 	}
 	bridge.Close(sessionID)
@@ -279,9 +268,9 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	}
 }
 
-func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, ErrorResponse{
-		Error: ErrorDetails{
+func writeError(w http.ResponseWriter, status int, code voiceapi.ErrorCode, message string) {
+	writeJSON(w, status, voiceapi.ErrorResponse{
+		Error: voiceapi.ErrorDetails{
 			Code:    code,
 			Message: message,
 		},

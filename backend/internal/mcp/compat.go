@@ -86,6 +86,7 @@ type compatListToolsResult struct {
 // compatCallToolResult is the 2025-06-18/2025-11-25 tools/call envelope.
 // Native 2026-07-28 uses ToolsCallResult with resultType.
 type compatCallToolResult struct {
+	Meta              MetaObject     `json:"_meta,omitempty"`
 	Content           []ContentBlock `json:"content"`
 	StructuredContent any            `json:"structuredContent,omitempty"`
 	IsError           bool           `json:"isError,omitempty"`

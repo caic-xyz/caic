@@ -139,6 +139,31 @@ func TestCompatHandler(t *testing.T) {
 		if _, ok := result["resultType"]; ok {
 			t.Fatalf("released tools/call result leaked resultType: %#v", result)
 		}
+		if _, ok := result["_meta"]; ok {
+			t.Fatalf("successful tools/call result has metadata: %#v", result)
+		}
+	})
+
+	t.Run("tool_error_metadata", func(t *testing.T) {
+		t.Parallel()
+		result := mcp.RawToolResult{
+			Meta:       mcp.MetaObject{mcp.ToolErrorCodeMetaKey: "UNKNOWN_REPOSITORY"},
+			Structured: mcp.ErrorOutput{Error: "unknown repository"},
+			IsError:    true,
+		}
+		h := &mcp.Handler{Registry: mcptest.FakeRegistry{CallResult: &result}, ServerInfo: mcp.Implementation{Name: "caic", Version: "test"}}
+		_, resp := postCompat(t, h, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"echo","arguments":{}}}`)
+		if resp.Error != nil {
+			t.Fatalf("unexpected error: %#v", resp.Error)
+		}
+		got, _ := resp.Result.(map[string]any)
+		meta, _ := got["_meta"].(map[string]any)
+		if code := meta[mcp.ToolErrorCodeMetaKey]; code != "UNKNOWN_REPOSITORY" {
+			t.Fatalf("error code metadata = %#v, want UNKNOWN_REPOSITORY", code)
+		}
+		if _, ok := got["structuredContent"]; ok {
+			t.Fatalf("structuredContent present on tool error: %#v", got)
+		}
 	})
 
 	// Claude Code calls resources/list during its handshake (Codex does not),

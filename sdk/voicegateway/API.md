@@ -28,8 +28,9 @@ All errors return:
 | HTTP | Code |
 |------|------|
 | 400 | `BAD_REQUEST` |
+| 400 | `VOICE_BRIDGE_UNAVAILABLE` |
 | 401 | `UNAUTHORIZED` |
-| 500 | `INTERNAL_ERROR` |
+| 500 | `VOICE_OFFER_FAILED` |
 
 ## Types
 

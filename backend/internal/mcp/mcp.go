@@ -174,6 +174,13 @@ type unsupportedProtocolVersionData struct {
 // reverse-DNS keys for their own metadata.
 type MetaObject map[string]any
 
+// ToolErrorCodeMetaKey identifies a caic semantic error code on a tool result.
+//
+// The value is a string from caic's REST error-code catalog. It is carried in
+// _meta so tool execution errors retain their established content and
+// structuredContent envelopes.
+const ToolErrorCodeMetaKey = "xyz.caic/errorCode"
+
 // RequestMeta is the metadata object required in MCP request params.
 type RequestMeta struct {
 	// ProtocolVersion is the MCP protocol version used for this request.
@@ -1302,6 +1309,7 @@ func (h *Handler) dispatchCompat(ctx context.Context, method Method, params json
 			return nil, registryError(err)
 		}
 		out := compatCallToolResult{
+			Meta:    res.Meta,
 			Content: []ContentBlock{{Type: ContentTypeText, Text: toolResultText(res.Structured)}},
 			IsError: res.IsError,
 		}
@@ -1797,9 +1805,9 @@ func ToolError[T any](message string) ToolResult[T] {
 	return ToolResult[T]{Structured: ErrorOutput{Error: message}, IsError: true}
 }
 
-// ToolAuthError returns an MCP tool error result with a WWW-Authenticate hint.
-func ToolAuthError[T any](message, challenge string) ToolResult[T] {
-	return ToolResult[T]{Meta: MetaObject{"mcp/www_authenticate": []string{challenge}}, Structured: ErrorOutput{Error: message}, IsError: true}
+// ToolErrorWithMeta returns an MCP tool error result with metadata.
+func ToolErrorWithMeta[T any](message string, meta MetaObject) ToolResult[T] {
+	return ToolResult[T]{Meta: meta, Structured: ErrorOutput{Error: message}, IsError: true}
 }
 
 // TextOutput is the standard human-readable successful tool payload.

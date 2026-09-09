@@ -47,7 +47,7 @@ func SDKAPI() apispec.Config {
 		KotlinPackage:      "com.fghbuild.mcp.sdk.v1",
 		APIDocTitle:        "MCP API Reference",
 		APIDocIntro:        "JSON-RPC MCP endpoint client. Construct clients with the MCP endpoint URL advertised by the service. Requests must include MCP transport headers such as `Mcp-Protocol-Version` and `Mcp-Method`; method-specific requests may also require `Mcp-Name` and `Mcp-Param-*` headers.",
-		ErrorDoc:           "MCP errors are JSON-RPC error objects in `JSONRPCResponse.error`. Transport-layer validation failures may use non-2xx HTTP statuses; method-level JSON-RPC errors can still use HTTP 200.",
+		ErrorDoc:           "MCP errors are JSON-RPC error objects in `JSONRPCResponse.error`. Transport-layer validation failures may use non-2xx HTTP statuses; method-level JSON-RPC errors can still use HTTP 200. Tool execution errors preserve their human-readable content and expose a caic semantic code in `result._meta[\"xyz.caic/errorCode\"]` when one is available.",
 		MCPProtocolVersion: ProtocolVersion,
 		SpecialTypes: []apispec.SpecialType{
 			{

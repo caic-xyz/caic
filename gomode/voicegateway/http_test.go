@@ -7,6 +7,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/gomode"
+	voiceapi "github.com/caic-xyz/caic/gomode/voicegateway/api"
 	voicev1 "github.com/caic-xyz/caic/gomode/voicegateway/api/v1"
 )
 
@@ -25,6 +27,12 @@ func (f *fakeMediaBridge) HandleOffer(context.Context, string) (sdpAnswer, sessi
 }
 
 func (f *fakeMediaBridge) Close(string) {}
+
+type failingMediaBridge struct{ fakeMediaBridge }
+
+func (f *failingMediaBridge) HandleOffer(context.Context, string) (sdpAnswer, sessionID string, err error) {
+	return "", "", errors.New("offer failed")
+}
 
 func (f *fakeMediaBridge) DiagnoseVoiceRTC(_ context.Context, sessionID string, client *voicev1.VoiceRTCClientDiagnostics) voicev1.VoiceRTCDiagnosticsResp {
 	return voicev1.VoiceRTCDiagnosticsResp{
@@ -74,7 +82,7 @@ func TestNewHandler(t *testing.T) {
 			t.Fatal(err)
 		}
 		handler.ServeHTTP(w, req)
-		assertErrorResponse(t, w, http.StatusBadRequest, "BAD_REQUEST", "sdp is required")
+		assertErrorResponse(t, w, http.StatusBadRequest, voiceapi.CodeBadRequest, "sdp is required")
 	})
 
 	t.Run("offer requires service identity", func(t *testing.T) {
@@ -87,7 +95,7 @@ func TestNewHandler(t *testing.T) {
 			t.Fatal(err)
 		}
 		handler.ServeHTTP(w, req)
-		assertErrorResponse(t, w, http.StatusBadRequest, "BAD_REQUEST", "service.kind is required")
+		assertErrorResponse(t, w, http.StatusBadRequest, voiceapi.CodeBadRequest, "service.kind is required")
 	})
 
 	t.Run("offer reports unavailable bridge after valid request", func(t *testing.T) {
@@ -126,7 +134,7 @@ func TestNewHandler(t *testing.T) {
 			t.Fatal(err)
 		}
 		handler.ServeHTTP(w, req)
-		assertErrorResponse(t, w, http.StatusBadRequest, "BAD_REQUEST", "voice bridge unavailable")
+		assertErrorResponse(t, w, http.StatusBadRequest, voiceapi.CodeVoiceBridgeUnavailable, "voice bridge unavailable")
 	})
 
 	t.Run("offer reports unavailable typed nil bridge", func(t *testing.T) {
@@ -141,7 +149,7 @@ func TestNewHandler(t *testing.T) {
 		body := `{"sdp":"offer","service":` + service + `}`
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/voicegateway/v1/voice/rtc/offer", strings.NewReader(body))
 		handler.ServeHTTP(w, req)
-		assertErrorResponse(t, w, http.StatusBadRequest, "BAD_REQUEST", "voice bridge unavailable")
+		assertErrorResponse(t, w, http.StatusBadRequest, voiceapi.CodeVoiceBridgeUnavailable, "voice bridge unavailable")
 	})
 
 	t.Run("offer succeeds with trusted service", func(t *testing.T) {
@@ -167,6 +175,19 @@ func TestNewHandler(t *testing.T) {
 		}
 	})
 
+	t.Run("offer reports a semantic backend failure", func(t *testing.T) {
+		t.Parallel()
+		cfg, service := testServiceAuth(t)
+		handler, err := NewHandler(&cfg, &failingMediaBridge{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		w := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/voicegateway/v1/voice/rtc/offer", strings.NewReader(`{"sdp":"offer","service":`+service+`}`))
+		handler.ServeHTTP(w, req)
+		assertErrorResponse(t, w, http.StatusInternalServerError, voiceapi.CodeVoiceOfferFailed, "offer failed")
+	})
+
 	t.Run("offer rejects untrusted service", func(t *testing.T) {
 		t.Parallel()
 		cfg := DefaultConfig()
@@ -178,7 +199,7 @@ func TestNewHandler(t *testing.T) {
 		body := `{"sdp":"offer","service":{"kind":"caic","instanceID":"home","baseURL":"https://caic.example.com","token":"dummy"}}`
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/voicegateway/v1/voice/rtc/offer", strings.NewReader(body))
 		handler.ServeHTTP(w, req)
-		assertErrorResponse(t, w, http.StatusUnauthorized, "UNAUTHORIZED", "no trusted issuer configured for service")
+		assertErrorResponse(t, w, http.StatusUnauthorized, voiceapi.CodeUnauthorized, "no trusted issuer configured for service")
 	})
 }
 
@@ -286,11 +307,11 @@ func testServiceAuth(t *testing.T) (cfg Config, service string) {
 	return cfg, service
 }
 
-func assertErrorResponse(t *testing.T, w *httptest.ResponseRecorder, status int, code, message string) {
+func assertErrorResponse(t *testing.T, w *httptest.ResponseRecorder, status int, code voiceapi.ErrorCode, message string) {
 	if w.Code != status {
 		t.Fatalf("status = %d, want %d", w.Code, status)
 	}
-	var resp ErrorResponse
+	var resp voiceapi.ErrorResponse
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}

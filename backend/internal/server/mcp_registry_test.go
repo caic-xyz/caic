@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
+	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/usage"
@@ -317,6 +319,9 @@ func TestCaicToolRegistryHandleTaskCreateUnknownRepository(t *testing.T) {
 			if output.Error != tt.want {
 				t.Errorf("error = %q, want %q", output.Error, tt.want)
 			}
+			if got := result.Meta[mcp.ToolErrorCodeMetaKey]; got != string(api.CodeUnknownRepository) {
+				t.Errorf("error code metadata = %q, want %q", got, api.CodeUnknownRepository)
+			}
 		})
 	}
 }
@@ -340,6 +345,28 @@ func singleCreatedTask(t *testing.T, s *testRouter) *task.Task {
 
 func TestCaicToolRegistryAuthorizeTool(t *testing.T) {
 	t.Parallel()
+
+	t.Run("scope denial supplies an authentication challenge and code", func(t *testing.T) {
+		t.Parallel()
+
+		c := &mcpRegistry{}
+		ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{Remote: true})
+		ctx = auth.NewContext(ctx, &auth.User{ID: "user-1"})
+		result, err := c.CallTool(ctx, "task_create", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.IsError {
+			t.Fatal("CallTool() did not return a tool error")
+		}
+		if got := result.Meta[mcp.ToolErrorCodeMetaKey]; got != string(api.CodeUnauthorized) {
+			t.Errorf("error code metadata = %q, want %q", got, api.CodeUnauthorized)
+		}
+		wantChallenge := mcpScopeChallenge(mcpScopeTasksCreate)
+		if got := result.Meta["mcp/www_authenticate"]; !reflect.DeepEqual(got, []string{wantChallenge}) {
+			t.Errorf("authentication challenge = %#v, want %#v", got, []string{wantChallenge})
+		}
+	})
 
 	t.Run("remote forge tools require linked forge identity", func(t *testing.T) {
 		t.Parallel()

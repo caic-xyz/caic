@@ -27,6 +27,9 @@ const (
 	CodeNotFound      ErrorCode = "NOT_FOUND"
 	CodeConflict      ErrorCode = "CONFLICT"
 	CodeInternalError ErrorCode = "INTERNAL_ERROR"
+
+	CodeVoiceBridgeUnavailable ErrorCode = "VOICE_BRIDGE_UNAVAILABLE"
+	CodeVoiceOfferFailed       ErrorCode = "VOICE_OFFER_FAILED"
 )
 
 // Error is a concrete error type with status code, error code, optional

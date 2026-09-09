@@ -498,8 +498,9 @@ object VoiceRTCSignalingStateSerializer : KSerializer<VoiceRTCSignalingState> {
 
 object ErrorCodes {
     const val BadRequest = "BAD_REQUEST"
+    const val VoiceBridgeUnavailable = "VOICE_BRIDGE_UNAVAILABLE"
     const val Unauthorized = "UNAUTHORIZED"
-    const val InternalError = "INTERNAL_ERROR"
+    const val VoiceOfferFailed = "VOICE_OFFER_FAILED"
 }
 
 /** VoiceRTCOfferReq is the request body for POST /api/voicegateway/v1/voice/rtc/offer. */

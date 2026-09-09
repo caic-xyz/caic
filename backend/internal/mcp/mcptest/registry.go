@@ -12,11 +12,12 @@ import (
 )
 
 // FakeRegistry is a minimal mcp.Registry: it advertises one "echo" tool and one
-// "caic://tasks" resource, enough to exercise protocol envelopes. Set CallErr
-// or ReadErr to make CallTool or ReadResource return a canned failure.
+// "caic://tasks" resource, enough to exercise protocol envelopes. Set CallErr,
+// CallResult, or ReadErr to customize a tool or resource response.
 type FakeRegistry struct {
-	CallErr error
-	ReadErr error
+	CallErr    error
+	CallResult *mcp.RawToolResult
+	ReadErr    error
 }
 
 // Ensure the fake satisfies the interface at compile time.
@@ -41,6 +42,9 @@ func (f FakeRegistry) CallTool(_ context.Context, name string, _ json.RawMessage
 	}
 	if name != "echo" {
 		return mcp.RawToolResult{}, mcp.ErrInvalidParams("unknown tool: %s", name)
+	}
+	if f.CallResult != nil {
+		return *f.CallResult, nil
 	}
 	return mcp.RawToolResult{Structured: mcp.TextOutput{Result: "ok"}}, nil
 }

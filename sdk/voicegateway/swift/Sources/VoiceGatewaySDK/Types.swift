@@ -288,8 +288,9 @@ public struct VoiceRTCSignalingState: Codable, Equatable, Hashable {
 
 public enum ErrorCodes {
     public static let badRequest = "BAD_REQUEST"
+    public static let voiceBridgeUnavailable = "VOICE_BRIDGE_UNAVAILABLE"
     public static let unauthorized = "UNAUTHORIZED"
-    public static let internalError = "INTERNAL_ERROR"
+    public static let voiceOfferFailed = "VOICE_OFFER_FAILED"
 }
 
 /// VoiceRTCOfferReq is the request body for POST /api/voicegateway/v1/voice/rtc/offer.

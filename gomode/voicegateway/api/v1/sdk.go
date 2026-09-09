@@ -60,8 +60,9 @@ func SDKAPI() apispec.Config {
 		},
 		ErrorCodes: []apispec.ErrorCode{
 			{Code: "BAD_REQUEST", Status: 400},
+			{Code: "VOICE_BRIDGE_UNAVAILABLE", Status: 400},
 			{Code: "UNAUTHORIZED", Status: 401},
-			{Code: "INTERNAL_ERROR", Status: 500},
+			{Code: "VOICE_OFFER_FAILED", Status: 500},
 		},
 	}
 }
