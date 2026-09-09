@@ -4,6 +4,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"iter"
 	"log/slog"
@@ -462,9 +463,10 @@ func (h *serverHandlers) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*
 	info.RelPath = target.relPath
 	if err := h.checkouts.RegisterCheckout(info); err != nil {
 		if removeErr := os.RemoveAll(target.dir); removeErr != nil {
-			return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: fmt.Sprintf("register checkout: %v; remove checkout: %v", err, removeErr)}
+			h.log.ErrorContext(ctx, "clean up clone after registration conflict", "repo", target.relPath, "err", errors.Join(err, removeErr))
+			return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "clean up failed clone: " + target.relPath}
 		}
-		return nil, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: err.Error()}
+		return nil, &api.Error{Status: http.StatusConflict, Code: api.CodeRepositoryPathConflict, Message: "repository path conflict: " + target.relPath}
 	}
 	h.log.InfoContext(ctx, "cloned repo", "url", req.URL, "path", target.relPath)
 	var remote string
@@ -507,17 +509,17 @@ func cloneTarget(root, url, path string, checkouts *repo.Registry) (cloneTargetP
 		return cloneTargetPath{}, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "path escapes root directory"}
 	}
 	if _, err := os.Stat(dir); err == nil {
-		return cloneTargetPath{}, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "directory already exists: " + relPath}
+		return cloneTargetPath{}, &api.Error{Status: http.StatusConflict, Code: api.CodeRepositoryPathConflict, Message: "directory already exists: " + relPath}
 	} else if !os.IsNotExist(err) {
 		return cloneTargetPath{}, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "stat clone directory: " + err.Error()}
 	}
 	if _, ok := checkouts.Checkout(relPath); ok {
-		return cloneTargetPath{}, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "repo already registered: " + relPath}
+		return cloneTargetPath{}, &api.Error{Status: http.StatusConflict, Code: api.CodeRepositoryPathConflict, Message: "repo already registered: " + relPath}
 	}
 	base := filepath.Base(relPath)
 	for checkout := range checkouts.Checkouts() {
 		if checkout.RelPath != "" && filepath.Base(checkout.RelPath) == base && checkout.RelPath != relPath {
-			return cloneTargetPath{}, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "repo basename conflicts with existing: " + checkout.RelPath}
+			return cloneTargetPath{}, &api.Error{Status: http.StatusConflict, Code: api.CodeRepositoryPathConflict, Message: "repo basename conflicts with existing: " + checkout.RelPath}
 		}
 	}
 	return cloneTargetPath{relPath: relPath, dir: dir}, nil

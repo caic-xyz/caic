@@ -461,6 +461,7 @@ public enum ErrorCodes {
     public static let oauthGrantNotFound = "OAUTH_GRANT_NOT_FOUND"
     public static let oauthProviderUnavailable = "OAUTH_PROVIDER_UNAVAILABLE"
     public static let conflict = "CONFLICT"
+    public static let repositoryPathConflict = "REPOSITORY_PATH_CONFLICT"
     public static let internalError = "INTERNAL_ERROR"
     public static let updateCheckFailed = "UPDATE_CHECK_FAILED"
     public static let updateUnavailable = "UPDATE_UNAVAILABLE"

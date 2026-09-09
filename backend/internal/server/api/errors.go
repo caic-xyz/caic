@@ -16,6 +16,7 @@ const (
 	CodeInvalidOAuthState        ErrorCode = "INVALID_OAUTH_STATE"
 	CodeOAuthGrantNotFound       ErrorCode = "OAUTH_GRANT_NOT_FOUND"
 	CodeOAuthProviderUnavailable ErrorCode = "OAUTH_PROVIDER_UNAVAILABLE"
+	CodeRepositoryPathConflict   ErrorCode = "REPOSITORY_PATH_CONFLICT"
 	CodeUnknownCache             ErrorCode = "UNKNOWN_CACHE"
 	CodeUnknownRuntime           ErrorCode = "UNKNOWN_RUNTIME"
 	CodeUpdateCheckFailed        ErrorCode = "UPDATE_CHECK_FAILED"

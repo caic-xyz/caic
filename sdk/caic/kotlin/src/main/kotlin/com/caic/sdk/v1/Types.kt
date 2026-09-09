@@ -784,6 +784,7 @@ object ErrorCodes {
     const val OauthGrantNotFound = "OAUTH_GRANT_NOT_FOUND"
     const val OauthProviderUnavailable = "OAUTH_PROVIDER_UNAVAILABLE"
     const val Conflict = "CONFLICT"
+    const val RepositoryPathConflict = "REPOSITORY_PATH_CONFLICT"
     const val InternalError = "INTERNAL_ERROR"
     const val UpdateCheckFailed = "UPDATE_CHECK_FAILED"
     const val UpdateUnavailable = "UPDATE_UNAVAILABLE"

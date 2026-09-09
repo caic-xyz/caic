@@ -647,6 +647,54 @@ func TestCloneRepo(t *testing.T) {
 			t.Fatal("failed clone registered an checkout")
 		}
 	})
+
+	t.Run("path conflicts have a retryable error code", func(t *testing.T) {
+		tests := []struct {
+			name  string
+			setup func(*testing.T, *testRouter, string)
+		}{
+			{
+				name: "existing directory",
+				setup: func(t *testing.T, _ *testRouter, root string) {
+					if err := os.Mkdir(filepath.Join(root, "taken"), 0o750); err != nil {
+						t.Fatalf("make existing clone directory: %v", err)
+					}
+				},
+			},
+			{
+				name: "registered relative path",
+				setup: func(t *testing.T, s *testRouter, root string) {
+					registerRouterCheckout(t, s.checkouts, "taken", &repo.Checkout{Dir: filepath.Join(root, "other")})
+				},
+			},
+			{
+				name: "basename collision",
+				setup: func(t *testing.T, s *testRouter, root string) {
+					registerRouterCheckout(t, s.checkouts, "other/taken", &repo.Checkout{Dir: filepath.Join(root, "other")})
+				},
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
+				root := t.TempDir()
+				s := newCheckoutConstructionTestServer(t, root).server
+				tt.setup(t, s, root)
+
+				_, err := s.serverHandlers.cloneRepo(t.Context(), &v1.CloneRepoReq{URL: "https://example.com/repo.git", Path: "taken"})
+				apiErr, ok := errors.AsType[*api.Error](err)
+				if !ok {
+					t.Fatalf("error = %v, want *api.Error", err)
+				}
+				if apiErr.Status != http.StatusConflict {
+					t.Errorf("status = %d, want %d", apiErr.Status, http.StatusConflict)
+				}
+				if apiErr.Code != api.CodeRepositoryPathConflict {
+					t.Errorf("code = %q, want %q", apiErr.Code, api.CodeRepositoryPathConflict)
+				}
+			})
+		}
+	})
 }
 
 func TestHandleTaskEvents(t *testing.T) {

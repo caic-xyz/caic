@@ -5,6 +5,8 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -323,6 +325,32 @@ func TestCaicToolRegistryHandleTaskCreateUnknownRepository(t *testing.T) {
 				t.Errorf("error code metadata = %q, want %q", got, api.CodeUnknownRepository)
 			}
 		})
+	}
+}
+
+func TestCaicToolRegistryHandleCloneRepoPathConflict(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "taken"), 0o750); err != nil {
+		t.Fatalf("make existing clone directory: %v", err)
+	}
+	s := newCheckoutConstructionTestServer(t, root).server
+	registry := &mcpRegistry{serverConfig: s.serverHandlers}
+
+	result := registry.handleCloneRepo(t.Context(), mcpCloneRepoArgs{URL: "https://example.com/repo.git", Path: "taken"})
+	if !result.IsError {
+		t.Fatal("handleCloneRepo() did not return a tool error")
+	}
+	output, ok := result.Structured.(mcp.ErrorOutput)
+	if !ok {
+		t.Fatalf("result type = %T, want mcp.ErrorOutput", result.Structured)
+	}
+	if want := "directory already exists: taken. Choose a different path and retry clone_repo."; output.Error != want {
+		t.Errorf("error = %q, want %q", output.Error, want)
+	}
+	if got := result.Meta[mcp.ToolErrorCodeMetaKey]; got != string(api.CodeRepositoryPathConflict) {
+		t.Errorf("error code metadata = %q, want %q", got, api.CodeRepositoryPathConflict)
 	}
 }
 

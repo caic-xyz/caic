@@ -78,6 +78,7 @@ func SDKAPI() apispec.Config {
 			{Code: string(api.CodeOAuthGrantNotFound), Status: 404},
 			{Code: string(api.CodeOAuthProviderUnavailable), Status: 404},
 			{Code: string(api.CodeConflict), Status: 409},
+			{Code: string(api.CodeRepositoryPathConflict), Status: 409},
 			{Code: string(api.CodeInternalError), Status: 500},
 			{Code: string(api.CodeUpdateCheckFailed), Status: 500},
 			{Code: string(api.CodeUpdateUnavailable), Status: 500},

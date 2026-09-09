@@ -716,6 +716,9 @@ func (m *mcpRegistry) handleCloneRepo(ctx context.Context, args mcpCloneRepoArgs
 	}
 	repo, err := m.serverConfig.cloneRepo(ctx, req)
 	if err != nil {
+		if apiErr, ok := errors.AsType[*api.Error](err); ok && apiErr.Code == api.CodeRepositoryPathConflict {
+			return mcp.ToolErrorWithMeta[mcp.TextOutput](apiErr.Error()+". Choose a different path and retry clone_repo.", mcp.MetaObject{mcp.ToolErrorCodeMetaKey: string(apiErr.Code)})
+		}
 		return domainToolError[mcp.TextOutput](err)
 	}
 	base := repo.BaseBranch.Name
