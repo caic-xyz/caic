@@ -241,6 +241,7 @@ func (s *taskService) getTaskInfo(ctx context.Context, entry *taskmgr.Entry, _ *
 			State:                    state,
 			ForkedFromTaskID:         t.ForkedFromTaskID,
 			ParentTaskID:             t.ParentTaskID,
+			CaicMCPEnabled:           t.CaicMCPEnabled,
 			StartedAt:                t.StartedAt,
 			StateUpdatedAt:           snap.StateUpdatedAt,
 			Harness:                  harnessName,
@@ -402,6 +403,12 @@ func taskInfoTailscaleURL(s *task.Snapshot) string {
 }
 
 func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Task, error) {
+	if sourceID, ok := taskMCPTaskID(ctx); ok {
+		return s.createDelegatedTask(ctx, sourceID.String(), req)
+	}
+	if req.CaicMCPEnabled && !s.taskMgr.TaskMCPAvailable() {
+		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "task-scoped MCP requires an explicit external_url"}
+	}
 	var ownerID string
 	if u, ok := auth.UserFromContext(ctx); ok {
 		ownerID = u.ID
@@ -442,6 +449,7 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v
 		Display:             req.Display,
 		Sudo:                req.Sudo,
 		GitHubToken:         req.GitHubToken,
+		CaicMCPEnabled:      req.CaicMCPEnabled,
 		RuntimeName:         runtimeName,
 		ResolvedGitHubToken: s.resolveGitHubContainerToken(ctx, req.GitHubToken),
 		BaseImage:           prefs.Settings.BaseImage,
@@ -496,6 +504,48 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v
 
 	// Return the full task so clients can seed their store and render the detail
 	// view immediately, without waiting for the SSE upsert to deliver it.
+	dto, err := taskDTO(ctx, entry, s.taskMgr, s.checkouts, s.authStore)
+	if err != nil {
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
+	}
+	return &dto, nil
+}
+
+// createDelegatedTask reconciles a task-scoped MCP principal into server-owned
+// parent and source settings. The client can provide only the child prompt.
+func (s *taskService) createDelegatedTask(ctx context.Context, sourceID string, req *v1.CreateTaskReq) (*v1.Task, error) {
+	if req.InitialPrompt.Text == "" || len(req.InitialPrompt.Images) > 0 {
+		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "delegated task requires a text prompt"}
+	}
+	if len(req.Repos) != 0 || req.Harness != "" || req.Model != "" || req.Effort != "" || req.RuntimeName != "" || req.Tailscale || req.USB || req.Display || req.Sudo || req.GitHubToken || req.CaicMCPEnabled {
+		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "delegated task may only set initialPrompt"}
+	}
+	sourceEntry, ok := s.taskMgr.GetEntry(sourceID)
+	if !ok {
+		return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "delegating task not found"}
+	}
+	source := sourceEntry.Task()
+	if !source.CaicMCPEnabled || !taskMCPStateActive(source.GetState()) {
+		return nil, &api.Error{Status: http.StatusForbidden, Code: api.CodeForbidden, Message: "delegating task is not active"}
+	}
+	githubToken := source.GitHubTokenEnabled()
+	newID, err := sourceEntry.Lifecycle.ForkDelegated(ctx, &taskmgr.ForkParams{
+		OwnerID:             source.OwnerID,
+		Prompt:              apiconv.PromptToAgent(req.InitialPrompt),
+		GitHubToken:         githubToken,
+		ResolvedGitHubToken: s.resolveGitHubTokenForOwner(source.OwnerID, githubToken),
+		Tailscale:           source.Tailscale,
+		USB:                 source.USB,
+		Display:             source.Display,
+		Sudo:                source.Sudo,
+	})
+	if err != nil {
+		return nil, toDTO(err)
+	}
+	entry, ok := s.taskMgr.GetEntry(newID)
+	if !ok {
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "created delegated task not found"}
+	}
 	dto, err := taskDTO(ctx, entry, s.taskMgr, s.checkouts, s.authStore)
 	if err != nil {
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
@@ -671,7 +721,7 @@ func (s *taskService) forkTask(ctx context.Context, entry *taskmgr.Entry, req *v
 		sudo = *req.Sudo
 	}
 
-	newID, err := entry.Lifecycle.Fork(ctx, taskmgr.ForkParams{
+	newID, err := entry.Lifecycle.Fork(ctx, &taskmgr.ForkParams{
 		OwnerID:             ownerID,
 		Prompt:              apiconv.PromptToAgent(req.Prompt),
 		Harness:             selectedHarness,
@@ -859,6 +909,18 @@ func (s *taskService) resolveGitHubContainerToken(ctx context.Context, enabled b
 	// the server-level PAT.
 	if u, ok := auth.UserFromContext(ctx); ok && u.Provider == auth.ProviderGitHub && u.AccessToken != "" {
 		return u.AccessToken
+	}
+	return s.forgeMgr.GitHubToken()
+}
+
+func (s *taskService) resolveGitHubTokenForOwner(ownerID string, enabled bool) string {
+	if !enabled {
+		return ""
+	}
+	if s.authStore != nil && ownerID != "" {
+		if u, ok := s.authStore.FindByID(ownerID); ok && u.Provider == auth.ProviderGitHub && u.AccessToken != "" {
+			return u.AccessToken
+		}
 	}
 	return s.forgeMgr.GitHubToken()
 }

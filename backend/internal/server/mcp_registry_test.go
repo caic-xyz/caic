@@ -937,6 +937,79 @@ func TestCaicToolRegistryTools(t *testing.T) {
 		}
 		assertMCPToolVisibility(t, tools, "task_push_branch_to_remote", true)
 	})
+
+	t.Run("task scoped client exposes only prompt-only creation", func(t *testing.T) {
+		t.Parallel()
+		t.Run("valid_schema", func(t *testing.T) {
+			t.Parallel()
+			registry := &mcpRegistry{}
+			ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{TaskID: ksid.NewID(), Remote: true})
+			tools, err := registry.Tools(ctx)
+			if err != nil {
+				t.Fatalf("Tools() error: %v", err)
+			}
+			if len(tools) != 1 || tools[0].Name != "task_create" {
+				t.Fatalf("Tools() = %#v, want only task_create", tools)
+			}
+			schema, err := json.Marshal(tools[0].InputSchema)
+			if err != nil {
+				t.Fatalf("marshal delegated schema: %v", err)
+			}
+			var decoded struct {
+				Properties map[string]json.RawMessage `json:"properties"`
+			}
+			if err := json.Unmarshal(schema, &decoded); err != nil {
+				t.Fatalf("decode delegated schema: %v", err)
+			}
+			if len(decoded.Properties) != 1 || decoded.Properties["prompt"] == nil {
+				t.Fatalf("delegated input schema = %s, want prompt only", schema)
+			}
+		})
+		t.Run("error_extra_task_properties", func(t *testing.T) {
+			t.Parallel()
+			registry := &mcpRegistry{}
+			ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{TaskID: ksid.NewID(), Remote: true})
+			result := registry.handleTaskCreate(ctx, mcpTaskCreateArgs{Prompt: "child", Repos: []string{"repo"}})
+			if !result.IsError {
+				t.Fatal("task-scoped create with repos succeeded, want rejection")
+			}
+		})
+	})
+
+	t.Run("task scoped client cannot read or subscribe", func(t *testing.T) {
+		t.Parallel()
+		ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{TaskID: ksid.NewID(), Remote: true})
+		registry := &mcpRegistry{}
+		t.Run("error", func(t *testing.T) {
+			t.Parallel()
+			t.Run("task_context", func(t *testing.T) {
+				t.Parallel()
+				if got := registry.voiceSessionContext(ctx); got != "[Task information unavailable: missing scope]" {
+					t.Fatalf("voiceSessionContext() = %q", got)
+				}
+			})
+			t.Run("resource_subscription", func(t *testing.T) {
+				t.Parallel()
+				if _, err := registry.subscriptionSources(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{"caic://tasks"}}); err == nil {
+					t.Fatal("task-scoped subscription succeeded")
+				}
+			})
+		})
+	})
+
+	t.Run("read scope subscribes to resource-list changes", func(t *testing.T) {
+		t.Parallel()
+		t.Run("valid", func(t *testing.T) {
+			t.Parallel()
+			s := newTestRouter(t, nil)
+			registry := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
+			ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{Scopes: []string{mcpScopeRead}, Remote: true})
+			ctx = auth.NewContext(ctx, &auth.User{ID: "user-1"})
+			if _, err := registry.subscriptionSources(ctx, mcp.SubscriptionFilter{ResourcesListChanged: true}); err != nil {
+				t.Fatalf("subscriptionSources() error: %v", err)
+			}
+		})
+	})
 }
 
 func assertMCPToolVisibility(t *testing.T, tools []mcp.ToolDescriptor, name string, want bool) {

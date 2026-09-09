@@ -72,6 +72,7 @@ func Task(in *TaskInput) (v1.Task, error) {
 		Title:            snap.Title,
 		ForkedFromTaskID: t.ForkedFromTaskID,
 		ParentTaskID:     t.ParentTaskID,
+		CaicMCPEnabled:   t.CaicMCPEnabled,
 		Repos:            in.Repos,
 		Runtime: v1.RuntimeInstance{
 			ID:           string(snap.RuntimeInstanceID),

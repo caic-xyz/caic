@@ -35,6 +35,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/gomode/voicegateway"
@@ -132,6 +133,14 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	if err != nil {
 		return nil, fmt.Errorf("load settings: %w", err)
 	}
+	sessionSecret, err := hex.DecodeString(settings.SessionSecret)
+	if err != nil {
+		return nil, fmt.Errorf("decode session secret: %w", err)
+	}
+	taskMCPTokenIssuer, err := auth.NewTaskMCPTokenIssuer(sessionSecret)
+	if err != nil {
+		return nil, fmt.Errorf("task MCP credentials: %w", err)
+	}
 	trustedProxies, err := cfg.Auth.TrustedProxyPrefixes()
 	if err != nil {
 		return nil, err
@@ -152,17 +161,11 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	appLog.InfoContext(ctx, "google", "oauth", auth.MaskedToken(cfg.Google.OAuthClientID))
 
 	var authStore *auth.Store
-	var sessionSecret []byte
 	var githubOAuth *oauthclient.ProviderConfig
 	var gitlabOAuth *oauthclient.ProviderConfig
 	var googleOAuth *oauthclient.ProviderConfig
 	oauthConfigured := cfg.GitHub.OAuthClientID != "" || cfg.GitLab.OAuthClientID != "" || cfg.Google.OAuthClientID != ""
 	if oauthConfigured {
-		secret, err := hex.DecodeString(settings.SessionSecret)
-		if err != nil {
-			return nil, fmt.Errorf("decode session secret: %w", err)
-		}
-		sessionSecret = secret
 		store, err := auth.Open(filepath.Join(cfg.Dirs.ConfigDir, "users.json"))
 		if err != nil {
 			return nil, fmt.Errorf("open users store: %w", err)
@@ -253,6 +256,13 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	}
 
 	checkoutRegistry := repo.NewRegistry()
+	var taskMCP task.MCPConfig
+	if oauthConfigured && cfg.Auth.ExternalURL != "" && !isAuto {
+		taskMCP = task.MCPConfig{
+			EndpointURL:  strings.TrimRight(cfg.Auth.ExternalURL, "/") + "/api/caic/v1/mcp",
+			TokenForTask: taskMCPTokenIssuer.Issue,
+		}
+	}
 	taskMgr, err := taskmgr.New(taskmgr.Config{
 		ServerCtx:           ctx,
 		Log:                 log,
@@ -264,6 +274,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		RuntimeMetadata:     cfg.Runtime.Metadata,
 		RuntimeStartTimeout: time.Hour,
 		Provider:            provider,
+		TaskMCP:             taskMCP,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("task manager: %w", err)
@@ -326,6 +337,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		Preferences:                prefsStore,
 		AuthStore:                  authStore,
 		SessionSecret:              sessionSecret,
+		TaskMCPTokenIssuer:         taskMCPTokenIssuer,
 		OAuthPrivateKeyPEM:         []byte(settings.OAuthPrivateKeyPEM),
 		OAuthKeyID:                 settings.OAuthKeyID,
 		OAuthIssuer:                oauthIssuer,

@@ -64,6 +64,7 @@ type AgentRuntime struct {
 	Checkout            *repo.Checkout // nil for no-repository tasks
 	RuntimeMetadata     runtime.Metadata
 	RuntimeStartTimeout time.Duration // Timeout for instance start (image pull). Must be non-zero.
+	TaskMCP             MCPConfig
 }
 
 // Reconnect reattaches to a running relay, or starts a new agent session
@@ -274,7 +275,7 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 	tlog.Info("starting session", "hns", t.Harness)
 	region = trace.StartRegion(ctx, "agent-session")
 	target := sr.AgentTarget
-	session, err := r.Backends[t.Harness].Start(ctx, &agent.Options{
+	opts := &agent.Options{
 		Logger:        r.Log,
 		Target:        target,
 		Dir:           r.runtimeDir(t),
@@ -283,7 +284,13 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 		InitialPrompt: t.InitialPrompt,
 		MsgCh:         msgCh,
 		Log:           log,
-	})
+	}
+	if err := r.configureTaskMCP(t, opts); err != nil {
+		close(msgCh)
+		<-dispatchDone
+		return nil, r.finishStartupFailure(ctx, t, log, err)
+	}
+	session, err := r.Backends[t.Harness].Start(ctx, opts)
 	region.End()
 	if err != nil {
 		close(msgCh)
@@ -592,7 +599,7 @@ func (r *AgentRuntime) ReviveTask(ctx context.Context, t *Task) (*SessionHandle,
 
 	t.SetState(taskslog.StateRunning)
 	target := t.RuntimeConnectionTarget()
-	session, err := r.Backends[t.Harness].Start(ctx, &agent.Options{
+	opts := &agent.Options{
 		Logger:          r.Log,
 		Target:          target,
 		Dir:             r.runtimeDir(t),
@@ -601,7 +608,13 @@ func (r *AgentRuntime) ReviveTask(ctx context.Context, t *Task) (*SessionHandle,
 		ResumeSessionID: t.GetSessionID(),
 		MsgCh:           msgCh,
 		Log:             log,
-	})
+	}
+	if err := r.configureTaskMCP(t, opts); err != nil {
+		close(msgCh)
+		<-dispatchDone
+		return nil, r.finishReviveFailure(ctx, t, err, log)
+	}
+	session, err := r.Backends[t.Harness].Start(ctx, opts)
 	if err != nil {
 		close(msgCh)
 		<-dispatchDone
@@ -734,6 +747,16 @@ func (r *AgentRuntime) ForkTask(ctx context.Context, source, fork *Task, forkOpt
 	return h, nil
 }
 
+// TaskMCPEnv returns the CAIC MCP connection settings injected into its runtime.
+// The credential is deliberately not exposed through runtime metadata or agent args.
+func (r *AgentRuntime) TaskMCPEnv(t *Task) ([]string, error) {
+	endpoint, token, err := r.mcpCredentials(t)
+	if err != nil || token == "" {
+		return nil, err
+	}
+	return []string{"CAIC_MCP_URL=" + endpoint, "CAIC_MCP_TOKEN=" + token}, nil
+}
+
 func (r *AgentRuntime) openLog(t *Task) (agent.LogSink, error) {
 	log, path, err := r.LogStore.Open(t.LogFilename(), t.LogHeader())
 	if err != nil {
@@ -823,6 +846,11 @@ func (r *AgentRuntime) setup(ctx context.Context, t *Task, metadata runtime.Meta
 		GitHubToken:       resolvedGitHubToken,
 		LogWriter:         provisioningLog,
 	}
+	if mcpEnv, err := r.TaskMCPEnv(t); err != nil {
+		return setupResult{}, err
+	} else if len(mcpEnv) > 0 {
+		opts.ExtraEnv = mcpEnv
+	}
 
 	var repos []runtime.Repo
 	if r.Checkout != nil {
@@ -867,6 +895,27 @@ func (r *AgentRuntime) setup(ctx context.Context, t *Task, metadata runtime.Meta
 		TailscaleFQDN:    conn.TailscaleFQDN,
 		TailscaleAuthURL: conn.TailscaleAuthURL,
 	}, nil
+}
+
+func (r *AgentRuntime) mcpCredentials(t *Task) (endpoint, token string, err error) {
+	if !t.CaicMCPEnabled {
+		return "", "", nil
+	}
+	if r.TaskMCP.EndpointURL == "" || r.TaskMCP.TokenForTask == nil {
+		return "", "", errors.New("task-scoped MCP is unavailable")
+	}
+	return r.TaskMCP.EndpointURL, r.TaskMCP.TokenForTask(t.ID.String()), nil
+}
+
+func (r *AgentRuntime) configureTaskMCP(t *Task, opts *agent.Options) error {
+	if !t.CaicMCPEnabled {
+		return nil
+	}
+	if _, _, err := r.mcpCredentials(t); err != nil {
+		return err
+	}
+	opts.CaicMCPEnabled = true
+	return nil
 }
 
 // finishReviveFailure records a failed revive result in the task log. A revive
@@ -946,7 +995,7 @@ func (r *AgentRuntime) startSessionWithLog(ctx context.Context, t *Task, prompt 
 	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false)
 	tlog.Info("starting session", "hns", t.Harness)
 	target := t.RuntimeConnectionTarget()
-	session, err := r.Backends[t.Harness].Start(ctx, &agent.Options{
+	opts := &agent.Options{
 		Logger:        r.Log,
 		Target:        target,
 		Dir:           r.runtimeDir(t),
@@ -955,7 +1004,13 @@ func (r *AgentRuntime) startSessionWithLog(ctx context.Context, t *Task, prompt 
 		InitialPrompt: prompt,
 		MsgCh:         msgCh,
 		Log:           log,
-	})
+	}
+	if err := r.configureTaskMCP(t, opts); err != nil {
+		close(msgCh)
+		<-dispatchDone
+		return nil, err
+	}
+	session, err := r.Backends[t.Harness].Start(ctx, opts)
 	if err != nil {
 		close(msgCh)
 		<-dispatchDone
@@ -1035,6 +1090,13 @@ func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent
 	}
 	if mode == replaceSessionRestart {
 		opts.InitialPrompt = prompt
+	}
+	if err := r.configureTaskMCP(t, opts); err != nil {
+		_ = log.Close()
+		close(msgCh)
+		<-dispatchDone
+		t.SetStateUnless(taskslog.StateFailed, taskslog.StatePurging, taskslog.StatePurged, taskslog.StateStopping, taskslog.StateStopped)
+		return nil, err
 	}
 	backend := r.Backends[t.Harness]
 	if backend == nil {

@@ -291,6 +291,9 @@ type StartOptions struct {
 	// GitHubToken is the resolved GitHub token to inject into the runtime
 	// environment. Empty means no token is injected.
 	GitHubToken string
+	// ExtraEnv contains additional KEY=VALUE pairs injected into the runtime
+	// environment without being represented in runtime metadata.
+	ExtraEnv []string
 	// LogWriter receives provisioning log lines from the runtime backend.
 	// Must not be nil.
 	LogWriter io.Writer

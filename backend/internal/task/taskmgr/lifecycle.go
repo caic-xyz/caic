@@ -270,7 +270,9 @@ func (r *Lifecycle) Start(ctx context.Context, resolvedGitHubToken string) error
 }
 
 // Fork creates a new task from this task's retained runtime instance.
-func (r *Lifecycle) Fork(ctx context.Context, p ForkParams) (string, error) { //nolint:gocritic // ForkParams is a request-shaped value bag
+//
+// p must be non-nil.
+func (r *Lifecycle) Fork(ctx context.Context, p *ForkParams) (string, error) {
 	source := r.entry.Task()
 	state := source.GetState()
 	switch state {
@@ -353,6 +355,7 @@ func (r *Lifecycle) Fork(ctx context.Context, p ForkParams) (string, error) { //
 	t.Sudo = p.Sudo
 	t.OwnerID = p.OwnerID
 	t.ForkedFromTaskID = source.ID
+	t.ParentTaskID = p.parentTaskID
 	t.Provider = r.manager.provider
 	forkEntry := r.manager.NewEntry(t, nil)
 	r.manager.insertEntry(t.ID.String(), forkEntry)
@@ -388,6 +391,13 @@ func (r *Lifecycle) Fork(ctx context.Context, p ForkParams) (string, error) { //
 		forkEntry.Lifecycle.watchSession(h)
 	})
 	return t.ID.String(), nil
+}
+
+// ForkDelegated creates a child from this task's server-owned runtime snapshot.
+// The source task is recorded as the child's parent; callers cannot choose it.
+func (r *Lifecycle) ForkDelegated(ctx context.Context, p *ForkParams) (string, error) {
+	p.parentTaskID = r.entry.Task().ID
+	return r.Fork(ctx, p)
 }
 
 // Sync pushes the task branch to its configured origin or default branch.

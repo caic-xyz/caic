@@ -83,6 +83,8 @@ func (b *Backend) RecordHandshake(ctx context.Context, stdin io.Writer, stdout i
 // given container. It performs the JSON-RPC handshake (initialize →
 // initialized → thread/start) before returning a Session.
 func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	// TODO: Add task-scoped CAIC MCP support with Codex's native per-task
+	// configuration, enabling only mcp__caic__task_create without persisting the credential.
 	if opts.Dir == "" {
 		return nil, errors.New("opts.Dir is required")
 	}

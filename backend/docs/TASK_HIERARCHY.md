@@ -2,7 +2,7 @@
 
 ## Goal
 
-Allow an explicitly enabled CAIC task to delegate bounded work to child tasks
+Allow a CAIC-MCP-enabled task to delegate bounded work to child tasks
 through a task-scoped MCP connection, without granting it the user's general
 MCP authority or access to unrelated tasks.
 
@@ -17,19 +17,15 @@ A task has two independent relationships:
   responsibility for this task. It is absent for root tasks and ordinary
   user-created forks.
 
-A delegated child initially has both values set to its source parent. The
+A delegated child currently has both values set to its source parent. The
 fields must not be conflated: a user may fork a task without creating a child,
 and future creation modes may create a child from a source other than its
 logical parent.
 
-The hierarchy is a directed tree. The intended contract is that a child has
-one immutable parent, selected by the server—not a client-provided argument—
-for task-initiated creation. Phase 1 restores `ParentTaskID` from logs and
-imports it as immutable metadata; task-scoped creation will set it once in
-Phase 2. No operation changes it. Creation-time enforcement of single
-assignment and tree validity begins in Phase 2. A root task is identified by
-following `ParentTaskID`; it need not be stored separately in the initial
-design.
+The hierarchy is a directed tree. A child has one immutable parent, selected
+by the server—not a client-provided argument—for task-initiated creation.
+No operation changes it. A root task is identified by following
+`ParentTaskID`; it need not be stored separately.
 
 Each child is an ordinary isolated task with its own branch, runtime instance,
 session, logs, result, and lifecycle. Parent state never cascades: stopping,
@@ -46,22 +42,23 @@ snapshot, receives a new branch and clean agent session, and runs its own
 prompt. An agent cannot choose a different source task, owner, repository set,
 harness, model, resource limits, mounts, or privileged capabilities.
 
-Tasks may create children only under an explicit delegation policy, disabled
-by default. The policy has server-enforced limits for maximum depth, total
-children per root, and concurrent children per root. Limits are checked
-atomically, including concurrent tool calls. A child's ability to delegate is
-derived from the remaining depth; at depth zero it receives no delegation
-capability.
+Tasks may create children only when `CaicMCPEnabled` is true, and the
+capability is disabled by default. The name means the task may connect to the
+CAIC MCP server; the server separately authorizes each exposed tool. Phase 1
+exposes only `task_create` and deliberately does not propagate the capability:
+each created child has `CaicMCPEnabled` false. Depth, child-count, concurrency,
+and budget policies will be added before recursive delegation is enabled.
 
-Child creation is idempotent. Each request supplies a caller-generated
-`idempotencyKey`; the server durably associates that key with the parent and
-resulting child so retried MCP calls cannot create duplicate work.
+Phase 1 does not yet provide durable idempotency keys. A subsequent policy
+phase will associate a caller-generated key with the parent and resulting
+child so retried MCP calls cannot create duplicate work.
 
-The initial task-facing tool set is intentionally narrow:
+The initial task-facing tool set is intentionally one generic tool:
 
-- `task_create_child(prompt, idempotencyKey)`
-- `task_children_list()`
-- `task_child_get_detail(childID)`
+- `task_create(prompt)`
+
+For a task-scoped client, its schema has only `prompt`. It cannot provide a
+repository, source, parent, harness, runtime, capability, or CAIC MCP flag.
 
 It does not include arbitrary task creation, arbitrary task fork, stopping or
 messaging other tasks, repository cloning, branch pushing, privilege
@@ -71,11 +68,11 @@ out of scope for the first release.
 
 ## MCP trust boundary
 
-Task containers use a separate task-scoped MCP endpoint, not CAIC's existing
-human/client MCP endpoint. A task credential identifies one calling task and
-is valid only while that task remains enabled by its delegation policy. The
-endpoint binds the credential's task ID to the route and derives the parent
-from that identity; it never accepts a caller-selected parent ID.
+Task containers use the existing MCP endpoint with a separate server-issued
+task credential, not a human OAuth credential. A credential identifies one
+calling task and is valid only while that task has `CaicMCPEnabled` and is
+active. The MCP authorization layer derives the parent from that identity; it
+never accepts a caller-selected parent ID.
 
 The credential must be scoped to the task, revocable when delegation is
 disabled or the task becomes terminal, and unavailable in logs, task history,
@@ -84,13 +81,13 @@ only into a server-controlled MCP client configuration. Harness adapters are
 introduced one at a time; unsupported harnesses fail closed and do not receive
 the endpoint or credential.
 
-Every delegated action is audited with caller task ID, parent ID, child ID,
-idempotency key, policy decision, and outcome. Task-scoped reads are restricted
-to the caller and its descendants.
+Phase 1 allows no task-scoped reads: the credential exposes only `task_create`.
+Audit records include the ordinary MCP tool call; dedicated delegation audit
+fields and subtree reads are follow-up work.
 
 ## API and persistence contract
 
-`ParentTaskID`, delegation policy, and child-creation idempotency metadata are
+`ParentTaskID`, `CaicMCPEnabled`, and child-creation idempotency metadata are
 durable task metadata. They are restored from task logs and are exposed through
 the versioned API and generated SDKs. The API presents both fork lineage and
 delegation separately. Task-list responses should expose enough parent data to
@@ -112,18 +109,21 @@ that do not contain hierarchy data represent root tasks.
 
 ### Phase 1 — task-mcp-identity: Provision a narrow MCP identity to enabled tasks
 
-- **Scope:** task launch configuration, MCP authentication and authorization,
-  first supported harness adapter.
+- **Scope:** server-signed task credential, task runtime launch configuration,
+  MCP authentication and authorization, Claude Code adapter, and reconciliation
+  of task-scoped `task_create` into a server-derived child fork.
 - **Preserve:** no task receives the general MCP endpoint, a user OAuth token,
   or global task permissions.
-- **Verify:** an enabled task reaches only its task-specific endpoint;
-  disabled, expired, or revoked identities fail closed; secrets are absent from
-  logs, task history, runtime labels, and command arguments.
+- **Verify:** an enabled Claude task reaches only prompt-only `task_create`;
+  disabled or terminal identities fail closed; the server derives the parent
+  and snapshot; secrets are absent from logs, task history, runtime labels,
+  and command arguments.
 
-### Phase 2 — delegated-children: Expose bounded child creation
+### Phase 2 — delegation-policy: Bound and account for child creation
 
 - **Depends on:** task-mcp-identity
-- **Scope:** task-facing child tools, server-side policy enforcement, auditing.
+- **Scope:** durable idempotency, server-side depth/count/concurrency/budget
+  enforcement, delegation audit fields, and opt-in recursive delegation.
 - **Preserve:** children inherit the source snapshot and only approved
   capabilities; agents cannot select an arbitrary parent or alter inherited
   execution authority.

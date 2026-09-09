@@ -520,6 +520,7 @@ export function validateTask(raw: ValidatorInput): Task {
     owner: (obj["owner"] === undefined || obj["owner"] === null ? undefined : asString(obj["owner"], "Task.owner")),
     forkedFromTaskID: (obj["forkedFromTaskID"] === undefined || obj["forkedFromTaskID"] === null ? undefined : asString(obj["forkedFromTaskID"], "Task.forkedFromTaskID")),
     parentTaskID: (obj["parentTaskID"] === undefined || obj["parentTaskID"] === null ? undefined : asString(obj["parentTaskID"], "Task.parentTaskID")),
+    caicMCPEnabled: (obj["caicMCPEnabled"] === undefined || obj["caicMCPEnabled"] === null ? undefined : asBoolean(obj["caicMCPEnabled"], "Task.caicMCPEnabled")),
     harness: (asString(obj["harness"], "Task.harness") as Harness),
     requestedModel: (obj["requestedModel"] === undefined || obj["requestedModel"] === null ? undefined : asString(obj["requestedModel"], "Task.requestedModel")),
     requestedEffort: (obj["requestedEffort"] === undefined || obj["requestedEffort"] === null ? undefined : asString(obj["requestedEffort"], "Task.requestedEffort")),

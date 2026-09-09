@@ -84,6 +84,7 @@ type Config struct {
 	RuntimeStartTimeout time.Duration
 	Provider            genai.Provider // nil-safe
 	Checkouts           *repo.Registry
+	TaskMCP             task.MCPConfig
 }
 
 // Manager owns task lifecycle state, runtime import, session watching, and
@@ -103,6 +104,7 @@ type Manager struct {
 	runtimeMetadata     runtime.Metadata
 	runtimeStartTimeout time.Duration
 	provider            genai.Provider
+	taskMCP             task.MCPConfig
 	relay               relayReader
 
 	// Guarded by eventMu.
@@ -165,6 +167,7 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 		runtimeMetadata:     maps.Clone(cfg.RuntimeMetadata),
 		runtimeStartTimeout: cfg.RuntimeStartTimeout,
 		provider:            cfg.Provider,
+		taskMCP:             cfg.TaskMCP,
 		Checkouts:           cfg.Checkouts,
 		relay:               agentRelayReader{},
 		tasks:               make(map[string]*Entry),
@@ -248,6 +251,7 @@ func (m *Manager) NewEntry(t *task.Task, lt *taskslog.LoadedTask) *Entry {
 			Checkout:            m.resolveCheckout(t),
 			RuntimeMetadata:     m.runtimeMetadata,
 			RuntimeStartTimeout: m.runtimeStartTimeout,
+			TaskMCP:             m.taskMCP,
 		},
 	}
 	return e
@@ -287,6 +291,11 @@ func (m *Manager) Len() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.tasks)
+}
+
+// TaskMCPAvailable reports whether new tasks can receive the bounded MCP capability.
+func (m *Manager) TaskMCPAvailable() bool {
+	return m.taskMCP.EndpointURL != "" && m.taskMCP.TokenForTask != nil
 }
 
 // NotifyTaskChange signals that task data may have changed.
@@ -373,6 +382,9 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 	if !ok {
 		return "", &Error{Kind: KindBadRequest, Code: CodeUnknownHarness, Msg: "unknown harness: " + string(p.Harness)}
 	}
+	if p.CaicMCPEnabled && (p.Harness != harness.Claude || m.taskMCP.EndpointURL == "" || m.taskMCP.TokenForTask == nil) {
+		return "", badRequestf("task-scoped MCP requires the Claude harness and a configured external MCP endpoint")
+	}
 
 	if p.Model != "" && !slices.Contains(backend.ModelInventory().IDs(), p.Model) {
 		return "", &Error{Kind: KindBadRequest, Code: CodeUnsupportedModel, Msg: "unsupported model for " + string(p.Harness) + ": " + p.Model}
@@ -407,6 +419,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 	t.Sudo = p.Sudo
 	t.OwnerID = p.OwnerID
 	t.Provider = m.provider
+	t.CaicMCPEnabled = p.CaicMCPEnabled
 	t.ForgeIssue = p.ForgeIssue
 	if p.ForgeOwner != "" {
 		// Set forge owner/repo so ListPendingBotTasks can resolve the commenter.
@@ -911,8 +924,10 @@ func (m *Manager) insertLoadedTasks(lts []*taskslog.LoadedTask) (int, error) {
 		t.CacheMounts = slices.Clone(lt.CacheMounts)
 		t.Mounts = slices.Clone(lt.Mounts)
 		t.StartedAt = lt.StartedAt
+		t.OwnerID = lt.OwnerID
 		t.ForkedFromTaskID = forkedFromTaskID
 		t.ParentTaskID = parentTaskID
+		t.CaicMCPEnabled = lt.CaicMCPEnabled
 		t.Tailscale = lt.Tailscale
 		t.USB = lt.USB
 		t.Display = lt.Display
@@ -1631,8 +1646,10 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	t.CacheMounts = lt.CacheMounts
 	t.Mounts = lt.Mounts
 	t.StartedAt = startedAt
+	t.OwnerID = lt.OwnerID
 	t.ForkedFromTaskID = forkedFromTaskID
 	t.ParentTaskID = parentTaskID
+	t.CaicMCPEnabled = lt.CaicMCPEnabled
 	t.Tailscale = c.Tailscale
 	t.TailscaleFQDN = c.TailscaleFQDN
 	t.USB = c.USB

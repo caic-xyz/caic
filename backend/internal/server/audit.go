@@ -57,7 +57,11 @@ func (a *auditStore) record(ctx context.Context, e *auditEvent) {
 		e.UserID = u.ID
 	}
 	if p, ok := mcpPrincipalFromContext(ctx); ok {
-		e.Subject = p.Subject
+		if p.TaskID != 0 {
+			e.Subject = "task:" + p.TaskID.String()
+		} else {
+			e.Subject = p.Subject
+		}
 		e.Scopes = slices.Clone(p.Scopes)
 	}
 	a.mu.Lock()

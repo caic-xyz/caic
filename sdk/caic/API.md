@@ -770,6 +770,7 @@ Task is the JSON representation sent to the frontend.
 | `owner` | `string` | username of creator; omitted in no-auth mode |  |
 | `forkedFromTaskID` | `string` |  |  |
 | `parentTaskID` | `string` |  |  |
+| `caicMCPEnabled` | `boolean` |  |  |
 | `harness` | `Harness` | Per-task harness/agent metadata. | yes |
 | `requestedModel` | `string` |  |  |
 | `requestedEffort` | `string` |  |  |
@@ -852,6 +853,7 @@ TaskInfoRecorded holds caic-recorded task launch configuration and metadata.
 | `state` | `TaskState` |  | yes |
 | `forkedFromTaskID` | `string` |  |  |
 | `parentTaskID` | `string` |  |  |
+| `caicMCPEnabled` | `boolean` |  |  |
 | `startedAt` | `ISOTimestamp` |  |  |
 | `stateUpdatedAt` | `ISOTimestamp` |  |  |
 | `harness` | `Harness` |  | yes |
@@ -944,6 +946,7 @@ CreateTaskReq is the request body for POST /api/caic/v1/tasks.
 | `display` | `boolean` |  |  |
 | `sudo` | `boolean` |  |  |
 | `gitHubToken` | `boolean` |  |  |
+| `caicMCPEnabled` | `boolean` | Enables task-scoped CAIC MCP; each tool remains server-authorized. |  |
 
 ### EventInit
 

@@ -3,6 +3,8 @@
 package taskmgr
 
 import (
+	"github.com/maruel/ksid"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/repo"
@@ -30,6 +32,7 @@ type CreateParams struct {
 	MaxCPUs           int                  // max CPU cores; 0 means use the default
 	CacheMounts       []runtime.CacheMount // resolved build cache mounts
 	Mounts            []runtime.Mount      // resolved runtime bind mounts
+	CaicMCPEnabled    bool                 // grant this task its task-scoped CAIC MCP capability
 
 	// ResolvedGitHubToken is the actual token string, resolved by the caller in
 	// the request ctx; passed to checkout.Start. The caller resolves it (preferring
@@ -57,17 +60,18 @@ type CreateRepo struct {
 // booleans: the HTTP handler dereferences the request's *bool overrides
 // (falling back to the source task's value when nil) before calling Fork.
 type ForkParams struct {
-	OwnerID     string
-	Prompt      agent.Prompt
-	Harness     harness.Name // empty = use source's harness
-	Model       string       // empty = use source's model
-	Effort      string
-	ExtraRepos  []ForkRepo
-	GitHubToken bool // resolved override (handler derefs *bool, defaults to source)
-	Tailscale   bool // resolved override (handler derefs *bool, defaults to source)
-	USB         bool // resolved override
-	Display     bool // resolved override
-	Sudo        bool // resolved override
+	parentTaskID ksid.ID // set only by ForkDelegated; never client-supplied
+	OwnerID      string
+	Prompt       agent.Prompt
+	Harness      harness.Name // empty = use source's harness
+	Model        string       // empty = use source's model
+	Effort       string
+	ExtraRepos   []ForkRepo
+	GitHubToken  bool // resolved override (handler derefs *bool, defaults to source)
+	Tailscale    bool // resolved override (handler derefs *bool, defaults to source)
+	USB          bool // resolved override
+	Display      bool // resolved override
+	Sudo         bool // resolved override
 
 	// ResolvedGitHubToken is the actual token string, resolved by the caller in
 	// the request ctx; passed to checkout.ForkTask. The caller resolves it

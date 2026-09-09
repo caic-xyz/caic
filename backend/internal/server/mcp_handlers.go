@@ -11,8 +11,12 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/maruel/ksid"
+
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/oauth/oauthserver"
 )
 
@@ -24,7 +28,9 @@ type mcpHandlers struct {
 	rateLimiter *rateLimiter
 
 	// Shared, injected reference (not owned).
-	hostState *auth.HostState
+	hostState          *auth.HostState
+	taskMgr            *taskmgr.Manager
+	taskMCPTokenIssuer *auth.TaskMCPTokenIssuer
 }
 
 // handleMCP is the MCP endpoint handler. Origin validation and rate limiting
@@ -40,6 +46,63 @@ func (h *mcpHandlers) handleMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.protocol.HandleMCP(w, r)
+}
+
+// withTaskMCPAuth accepts server-issued task credentials before normal browser
+// or OAuth authentication. All non-task requests use normalAuth unchanged.
+func (h *mcpHandlers) withTaskMCPAuth(normalAuth func(http.Handler) http.Handler, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if token, ok := taskMCPBearerToken(r); ok {
+			principal, valid := h.taskMCPPrincipal(token)
+			if !valid {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(newMCPPrincipalContext(r.Context(), principal)))
+			return
+		}
+		normalAuth(next).ServeHTTP(w, r)
+	})
+}
+
+func taskMCPBearerToken(r *http.Request) (string, bool) {
+	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	return token, ok && strings.HasPrefix(token, auth.TaskMCPTokenPrefix)
+}
+
+func (h *mcpHandlers) taskMCPPrincipal(token string) (*mcpPrincipal, bool) {
+	if h.taskMCPTokenIssuer == nil || h.taskMgr == nil {
+		return nil, false
+	}
+	taskID, ok := h.taskMCPTokenIssuer.Verify(token)
+	if !ok {
+		return nil, false
+	}
+	id, err := ksid.Parse(taskID)
+	if err != nil || id == 0 {
+		return nil, false
+	}
+	entry, ok := h.taskMgr.GetEntry(taskID)
+	if !ok {
+		return nil, false
+	}
+	t := entry.Task()
+	if !t.CaicMCPEnabled || !taskMCPStateActive(t.GetState()) {
+		return nil, false
+	}
+	return &mcpPrincipal{TaskID: id, Remote: true}, true
+}
+
+func taskMCPStateActive(state taskslog.State) bool {
+	switch state {
+	case taskslog.StatePending, taskslog.StateBranching, taskslog.StateProvisioning,
+		taskslog.StateStarting, taskslog.StateRunning, taskslog.StateWaiting,
+		taskslog.StateAsking, taskslog.StateHasPlan, taskslog.StatePulling,
+		taskslog.StatePushing:
+		return true
+	default:
+		return false
+	}
 }
 
 func requestWithMCPPrincipal(r *http.Request) *http.Request {
@@ -93,6 +156,9 @@ func (h *mcpHandlers) validateMCPOrigin(r *http.Request) error {
 }
 
 func (h *mcpHandlers) mcpRateKey(r *http.Request) string {
+	if p, ok := mcpPrincipalFromContext(r.Context()); ok && p.TaskID != 0 {
+		return "task:" + p.TaskID.String()
+	}
 	if p, ok := mcpPrincipalFromContext(r.Context()); ok && p.Subject != "" {
 		return "sub:" + p.Subject
 	}
@@ -144,6 +210,7 @@ type mcpPrincipalContextKey struct{}
 // adapts OAuth bearer claims) and mcpRegistry (which checks scopes on
 // tool/resource access).
 type mcpPrincipal struct {
+	TaskID   ksid.ID
 	Subject  string
 	Username string
 	Issuer   string
@@ -161,7 +228,18 @@ func mcpPrincipalFromContext(ctx context.Context) (*mcpPrincipal, bool) {
 	return p, ok && p != nil
 }
 
+func taskMCPTaskID(ctx context.Context) (ksid.ID, bool) {
+	p, ok := mcpPrincipalFromContext(ctx)
+	if !ok || p.TaskID == 0 {
+		return 0, false
+	}
+	return p.TaskID, true
+}
+
 func mcpHasScope(ctx context.Context, scope string) bool {
+	if p, ok := mcpPrincipalFromContext(ctx); ok && p.TaskID != 0 {
+		return scope == mcpScopeTasksCreate
+	}
 	if _, ok := auth.UserFromContext(ctx); !ok {
 		return true
 	}

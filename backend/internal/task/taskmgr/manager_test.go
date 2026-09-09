@@ -1279,7 +1279,7 @@ func TestManager(t *testing.T) {
 			return err
 		}
 		fork := func(m *Manager, e *Entry) error {
-			_, err := e.Lifecycle.Fork(t.Context(), ForkParams{})
+			_, err := e.Lifecycle.Fork(t.Context(), &ForkParams{})
 			return err
 		}
 		cases := []tc{
@@ -1494,7 +1494,7 @@ func TestManager(t *testing.T) {
 		t.Run("valid_resolved_overrides_and_max_cpus", func(t *testing.T) {
 			t.Parallel()
 			m, src := newForkManager(t)
-			id, err := src.Lifecycle.Fork(t.Context(), ForkParams{
+			id, err := src.Lifecycle.Fork(t.Context(), &ForkParams{
 				Prompt:    agent.Prompt{Text: "fork"},
 				Tailscale: true,
 				USB:       true,
@@ -1519,6 +1519,27 @@ func TestManager(t *testing.T) {
 			}
 			if tk.ForkedFromTaskID != src.Task().ID {
 				t.Errorf("ForkedFromTaskID = %s, want %s", tk.ForkedFromTaskID, src.Task().ID)
+			}
+		})
+		t.Run("valid_delegated_fork_sets_parent_without_propagating_delegation", func(t *testing.T) {
+			t.Parallel()
+			m, src := newForkManager(t)
+			src.Task().CaicMCPEnabled = true
+			id, err := src.Lifecycle.ForkDelegated(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "child"}})
+			if err != nil {
+				t.Fatalf("ForkDelegated: %v", err)
+			}
+			awaitTaskCleanup(t, m, id)
+			entry, ok := m.GetEntry(id)
+			if !ok {
+				t.Fatal("child entry not found")
+			}
+			child := entry.Task()
+			if child.ParentTaskID != src.Task().ID {
+				t.Errorf("ParentTaskID = %s, want %s", child.ParentTaskID, src.Task().ID)
+			}
+			if child.CaicMCPEnabled {
+				t.Error("delegated child inherited delegation capability")
 			}
 		})
 		t.Run("parent_stop_does_not_change_child", func(t *testing.T) {
@@ -1571,7 +1592,7 @@ func TestManager(t *testing.T) {
 			if got := src.LogPath.Get(); got != "" {
 				t.Fatalf("source log path = %q before fork, want empty", got)
 			}
-			id, err := src.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}})
+			id, err := src.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}})
 			if err != nil {
 				t.Fatalf("Fork: %v", err)
 			}
@@ -1592,7 +1613,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m, src := newForkManager(t)
 			src.Task().SetState(taskslog.StateStopped)
-			id, err := src.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}})
+			id, err := src.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}})
 			if err != nil {
 				t.Fatalf("Fork: %v", err)
 			}
@@ -1613,7 +1634,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m, src := newForkManager(t)
 			src.Task().SetState(taskslog.StateCrashed)
-			id, err := src.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}})
+			id, err := src.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}})
 			if err != nil {
 				t.Fatalf("Fork: %v", err)
 			}
@@ -1633,7 +1654,7 @@ func TestManager(t *testing.T) {
 		t.Run("valid_metadata_matches_task", func(t *testing.T) {
 			t.Parallel()
 			m, src := newForkManager(t)
-			id, err := src.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}})
+			id, err := src.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}})
 			if err != nil {
 				t.Fatalf("Fork: %v", err)
 			}
@@ -1647,7 +1668,7 @@ func TestManager(t *testing.T) {
 		t.Run("error_extra_repo_overlap", func(t *testing.T) {
 			t.Parallel()
 			_, src := newForkManager(t)
-			_, err := src.Lifecycle.Fork(t.Context(), ForkParams{
+			_, err := src.Lifecycle.Fork(t.Context(), &ForkParams{
 				Prompt:     agent.Prompt{Text: "fork"},
 				ExtraRepos: []ForkRepo{{Name: "my/repo"}},
 			})
@@ -1667,7 +1688,7 @@ func TestManager(t *testing.T) {
 			src.SetState(taskslog.StateWaiting)
 			e := m.NewEntry(src, nil)
 			m.Insert(src.ID.String(), e)
-			_, err := e.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}})
+			_, err := e.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
@@ -3108,7 +3129,7 @@ func TestManager(t *testing.T) {
 		t.Run("error_unknown_harness", func(t *testing.T) {
 			t.Parallel()
 			e := forkSetup(t, "fake", defaultBackends)
-			_, err := e.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}, Harness: "bogus"})
+			_, err := e.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}, Harness: "bogus"})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
@@ -3120,7 +3141,7 @@ func TestManager(t *testing.T) {
 		t.Run("error_unsupported_model", func(t *testing.T) {
 			t.Parallel()
 			e := forkSetup(t, "fake", defaultBackends)
-			_, err := e.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}, Model: "unsupported"})
+			_, err := e.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}, Model: "unsupported"})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
@@ -3136,7 +3157,7 @@ func TestManager(t *testing.T) {
 				"fake2": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m2"}}}, WireFactory: claudecode.New().NewWire},
 			}
 			e := forkSetup(t, "fake", backends)
-			_, err := e.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}, Harness: "fake2", Model: "unsupported"})
+			_, err := e.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}, Harness: "fake2", Model: "unsupported"})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
@@ -3153,7 +3174,7 @@ func TestManager(t *testing.T) {
 			}
 			e := forkSetup(t, "fake", backends)
 			e.Task().RequestedModel = "m1"
-			_, err := e.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}, Harness: "fake2"})
+			_, err := e.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}, Harness: "fake2"})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
@@ -3170,7 +3191,7 @@ func TestManager(t *testing.T) {
 			}
 			e := forkSetup(t, "fake", backends)
 			e.Task().RequestedModel = "m1"
-			id, err := e.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}, Harness: "fake2"})
+			id, err := e.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}, Harness: "fake2"})
 			if err != nil {
 				t.Fatalf("Fork: %v", err)
 			}
@@ -3187,7 +3208,7 @@ func TestManager(t *testing.T) {
 			e := forkSetup(t, "fake", defaultBackends)
 			// Overwrite the instance to empty.
 			e.Task().SetRuntimeConnectionInfo("", runtime.ConnectionTarget{SSHHost: ""}, "", "", 0)
-			_, err := e.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}})
+			_, err := e.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindConflict {
 				t.Fatalf("err = %v, want KindConflict", err)
@@ -3197,7 +3218,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			e := forkSetup(t, "fake", defaultBackends)
 			e.Task().SetState(taskslog.StateProvisioning)
-			_, err := e.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}})
+			_, err := e.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindConflict {
 				t.Fatalf("err = %v, want KindConflict", err)
@@ -3206,7 +3227,7 @@ func TestManager(t *testing.T) {
 		t.Run("error_unknown_extra_repo", func(t *testing.T) {
 			t.Parallel()
 			e := forkSetup(t, "fake", defaultBackends)
-			_, err := e.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}, ExtraRepos: []ForkRepo{{Name: "ghost"}}})
+			_, err := e.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}, ExtraRepos: []ForkRepo{{Name: "ghost"}}})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
@@ -3215,7 +3236,7 @@ func TestManager(t *testing.T) {
 		t.Run("error_unavailable_source_harness_has_code", func(t *testing.T) {
 			t.Parallel()
 			e := forkSetup(t, "bogus", defaultBackends)
-			_, err := e.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}, Model: "m1"})
+			_, err := e.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}, Model: "m1"})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)

@@ -91,6 +91,7 @@ type Options struct {
 	MsgCh              chan<- TimedMessage // Receives parsed physical records from the agent.
 	Log                LogSink             // Non-nil task-owned physical task-log authority; use DiscardLogSink{Version: version} when persistence is unnecessary.
 	StripEnv           []string            // Env var names for relay to strip from subprocess and emit as caic_stripped_env.
+	CaicMCPEnabled     bool                // Starts the harness with CAIC's task-scoped MCP configuration.
 }
 
 // WireFormat defines the wire protocol for a backend's stdin/stdout
@@ -675,11 +676,12 @@ func DefaultReadMessages(ctx context.Context, log *slog.Logger, r io.Reader, dis
 
 // Relay paths inside the container.
 const (
-	RelayDir        = "/tmp/caic-relay"
-	RelayScriptPath = RelayDir + "/relay.py"
-	RelaySockPath   = RelayDir + "/relay.sock"
-	RelayOutputPath = RelayDir + "/output.jsonl"
-	RelayLogPath    = RelayDir + "/relay.log"
+	RelayDir                    = "/tmp/caic-relay"
+	RelayScriptPath             = RelayDir + "/relay.py"
+	RelaySockPath               = RelayDir + "/relay.sock"
+	RelayOutputPath             = RelayDir + "/output.jsonl"
+	RelayLogPath                = RelayDir + "/relay.log"
+	ClaudeCodeCaicMCPConfigPath = RelayDir + "/caic-mcp.json"
 )
 
 // RelayScript selects the embedded script for a validated log version.
@@ -893,8 +895,10 @@ type RelayProcess struct {
 }
 
 // PrepareRelay deploys the relay script and starts the SSH serve-attach
-// process. The caller creates a Conn and Session from the returned process.
-func PrepareRelay(ctx context.Context, opts *Options, agentArgs []string) (*RelayProcess, error) {
+// process. relayArgs configure the relay; agentArgs start the harness after
+// the relay's command separator. The caller creates a Conn and Session from
+// the returned process.
+func PrepareRelay(ctx context.Context, opts *Options, relayArgs, agentArgs []string) (*RelayProcess, error) {
 	if opts.Logger == nil {
 		return nil, errors.New("opts.Logger is required")
 	}
@@ -915,8 +919,9 @@ func PrepareRelay(ctx context.Context, opts *Options, agentArgs []string) (*Rela
 	}
 	opts.Logger.DebugContext(ctx, "startup", "phase", "deploy_relay", "target", sshHost, "dur", time.Since(tStart))
 
-	sshArgs := make([]string, 0, 8+2*len(opts.StripEnv)+len(agentArgs))
+	sshArgs := make([]string, 0, 9+len(relayArgs)+2*len(opts.StripEnv)+len(agentArgs))
 	sshArgs = append(sshArgs, sshHost, "python3", RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--no-log-stdin")
+	sshArgs = append(sshArgs, relayArgs...)
 	for _, key := range opts.StripEnv {
 		sshArgs = append(sshArgs, "--strip-env", key)
 	}
@@ -944,7 +949,7 @@ func PrepareRelay(ctx context.Context, opts *Options, agentArgs []string) (*Rela
 // StartRelay is a convenience that calls PrepareRelay, creates a default Conn,
 // and sends the initial prompt.
 func StartRelay(ctx context.Context, opts *Options, agentArgs []string, wire WireFormat) (*Session, error) {
-	rp, err := PrepareRelay(ctx, opts, agentArgs)
+	rp, err := PrepareRelay(ctx, opts, nil, agentArgs)
 	if err != nil {
 		return nil, err
 	}

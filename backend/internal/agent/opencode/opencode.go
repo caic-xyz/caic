@@ -72,6 +72,8 @@ func (b *Backend) SetModelInventory(inventory agent.ModelInventory) {
 // container. It performs the JSON-RPC handshake (initialize → session/new)
 // before returning a Session.
 func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	// TODO: Add task-scoped CAIC MCP support with OpenCode's native per-task
+	// configuration, enabling only task_create without persisting the credential.
 	if opts.Dir == "" {
 		return nil, errors.New("opts.Dir is required")
 	}

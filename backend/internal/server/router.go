@@ -179,9 +179,9 @@ func (r *Router) buildHandler() (http.Handler, error) {
 	if !r.mcpDisabled {
 		mcpHandler := r.mcpHandlers.endpointRoutes()
 		if r.oauthServer != nil {
-			mcpHandler = r.oauthServer.BearerAuth(mcpHandler)
+			mcpHandler = r.mcpHandlers.withTaskMCPAuth(r.oauthServer.BearerAuth, mcpHandler)
 		} else if r.authStore != nil {
-			mcpHandler = auth.RequireUser(mcpHandler)
+			mcpHandler = r.mcpHandlers.withTaskMCPAuth(auth.RequireUser, mcpHandler)
 		}
 		mountPrefix(mux, "", "/api/caic/v1/mcp", mcpHandler)
 	}
@@ -377,6 +377,7 @@ type Dependencies struct {
 	TaskMgr                    *taskmgr.Manager
 	Provider                   genai.Provider
 	IPGeoChecker               *ipgeo.Checker
+	TaskMCPTokenIssuer         *auth.TaskMCPTokenIssuer
 
 	// App-owned automation services, routed to by HTTP handlers and webhooks.
 	Bot        *bot.Bot
@@ -552,8 +553,10 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 	s.serverHandlers.mcpOAuthAvailable = s.oauthServer != nil
 
 	s.mcpHandlers = &mcpHandlers{
-		rateLimiter: rateLimiter,
-		hostState:   d.HostState,
+		rateLimiter:        rateLimiter,
+		hostState:          d.HostState,
+		taskMgr:            d.TaskMgr,
+		taskMCPTokenIssuer: d.TaskMCPTokenIssuer,
 	}
 	registry := &mcpRegistry{
 		serverConfig:  s.serverHandlers,

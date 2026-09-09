@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/maruel/ksid"
+
 	"github.com/caic-xyz/caic/backend/internal/auth"
 )
 
@@ -79,6 +81,19 @@ func TestAuditStore(t *testing.T) {
 		}
 		if events[0].UserID != user.ID {
 			t.Fatalf("userID = %q, want %q", events[0].UserID, user.ID)
+		}
+	})
+
+	t.Run("valid task principal is attributed", func(t *testing.T) {
+		t.Parallel()
+
+		store := &auditStore{log: testLogger()}
+		id := ksid.NewID()
+		ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{TaskID: id, Remote: true})
+		store.record(ctx, &auditEvent{Operation: "tools/call", Name: "task_create", Decision: "allow"})
+		events := store.snapshot()
+		if len(events) != 1 || events[0].Subject != "task:"+id.String() {
+			t.Fatalf("audit events = %+v", events)
 		}
 	})
 }

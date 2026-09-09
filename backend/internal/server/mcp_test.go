@@ -23,6 +23,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/mcp/mcptest"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/oauth"
 )
@@ -108,6 +109,37 @@ func TestMCPHandlers(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatal("repository registration did not notify MCP subscribers")
 		}
+	})
+
+	t.Run("taskScopedCredential", func(t *testing.T) {
+		t.Parallel()
+		t.Run("valid", func(t *testing.T) {
+			t.Parallel()
+			h, source, token := newTaskMCPPrincipalTest(t)
+			principal, ok := h.taskMCPPrincipal(token)
+			if !ok || principal.TaskID != source.ID {
+				t.Fatalf("taskMCPPrincipal() = %#v, %v; want source task", principal, ok)
+			}
+		})
+		t.Run("error", func(t *testing.T) {
+			t.Parallel()
+			t.Run("terminal_task", func(t *testing.T) {
+				t.Parallel()
+				h, source, token := newTaskMCPPrincipalTest(t)
+				source.SetState(taskslog.StateStopped)
+				if _, ok := h.taskMCPPrincipal(token); ok {
+					t.Fatal("stopped task credential was accepted")
+				}
+			})
+			t.Run("disabled_task", func(t *testing.T) {
+				t.Parallel()
+				h, source, token := newTaskMCPPrincipalTest(t)
+				source.CaicMCPEnabled = false
+				if _, ok := h.taskMCPPrincipal(token); ok {
+					t.Fatal("disabled task credential was accepted")
+				}
+			})
+		})
 	})
 
 	t.Run("disabledLeavesEndpointUnregistered", func(t *testing.T) {
@@ -626,6 +658,21 @@ func TestMCPHandlers(t *testing.T) {
 			t.Fatalf("error = %#v, want invalid params", resp.Error)
 		}
 	})
+}
+
+func newTaskMCPPrincipalTest(t *testing.T) (*mcpHandlers, *task.Task, string) {
+	s := newTestRouter(t, nil)
+	issuer, err := auth.NewTaskMCPTokenIssuer([]byte("01234567890123456789012345678901"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := task.NewTask(ksid.NewID(), agent.Prompt{Text: "source"}, harness.Claude, "", "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source.CaicMCPEnabled = true
+	s.taskMgr.Insert(source.ID.String(), s.taskMgr.NewEntry(source, nil))
+	return &mcpHandlers{taskMgr: s.taskMgr, taskMCPTokenIssuer: issuer}, source, issuer.Issue(source.ID.String())
 }
 
 func newAuthEnabledRouter(t *testing.T) (*Router, auth.User) {

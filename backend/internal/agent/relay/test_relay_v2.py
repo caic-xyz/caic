@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the v2-only relay's canonical framing and v1 lifecycle semantics."""
+"""Tests for the v2-only relay's canonical framing, lifecycle, and MCP configuration."""
 
 from __future__ import annotations
 
@@ -254,6 +254,66 @@ def _cleanup(relay_dir: str) -> None:
         except (OSError, ValueError):
             pass
     shutil.rmtree(relay_dir, ignore_errors=True)
+
+
+def test_claude_code_caic_mcp_config() -> None:
+    """The v2 relay writes a private Claude Code MCP config from runtime env."""
+    relay_dir = tempfile.mkdtemp(prefix="caic-relay-test-")
+    config_path = os.path.join(relay_dir, "caic-mcp.json")
+    env = _make_env(relay_dir)
+    env["CAIC_MCP_URL"] = "https://caic.example/api/caic/v1/mcp"
+    env["CAIC_MCP_TOKEN"] = "task-token"
+
+    try:
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                str(RELAY_PY),
+                "serve-attach",
+                "--dir",
+                relay_dir,
+                "--claude-code-caic-mcp-config",
+                "--",
+                "cat",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+        )
+
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if os.path.exists(config_path):
+                break
+            time.sleep(0.05)
+        else:
+            raise AssertionError("relay did not write CAIC MCP config")
+
+        with open(config_path, encoding="utf-8") as config_file:
+            config = json.load(config_file)
+        assert config == {
+            "mcpServers": {
+                "caic": {
+                    "type": "http",
+                    "url": "https://caic.example/api/caic/v1/mcp",
+                    "headers": {"Authorization": "Bearer ${CAIC_MCP_TOKEN}"},
+                }
+            }
+        }
+        assert os.stat(config_path).st_mode & 0o777 == 0o600
+
+        assert proc.stdin is not None
+        proc.stdin.write(b"\x00\n")
+        proc.stdin.flush()
+        proc.stdin.close()
+        proc.wait(timeout=15)
+    finally:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+        _cleanup(relay_dir)
 
 
 def _new_daemon(relay: ModuleType, *, chunks: tuple[bytes, ...] = (), log_stdin: bool = True):

@@ -81,6 +81,8 @@ func (b *Backend) SetModelInventory(inventory agent.ModelInventory) {
 // Start launches a Pi RPC process via the relay daemon. If Pi exits while
 // starting, it updates Pi once and retries the launch.
 func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	// TODO: Add task-scoped CAIC MCP support with Pi's native per-task
+	// configuration, enabling only task_create without persisting the credential.
 	if opts.Logger == nil {
 		return nil, errors.New("opts.Logger is required")
 	}
@@ -147,7 +149,7 @@ func (*Backend) FetchModelInventory(ctx context.Context, target runtime.Connecti
 func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	wire := &piWireFormat{}
 
-	rp, err := agent.PrepareRelay(ctx, opts, b.AgentArgs(agent.HarnessArgs{Model: opts.Model}))
+	rp, err := agent.PrepareRelay(ctx, opts, nil, b.AgentArgs(agent.HarnessArgs{Model: opts.Model}))
 	if err != nil {
 		return nil, err
 	}

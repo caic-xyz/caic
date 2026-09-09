@@ -96,7 +96,15 @@ func (m *mcpRegistry) Tools(ctx context.Context) ([]mcp.ToolDescriptor, error) {
 		if _, ok := authorizeToolScope(ctx, s.Name); !ok {
 			continue
 		}
-		tools = append(tools, mcp.ToolDescriptor{Name: s.Name, Title: s.Title, Description: s.Description, InputSchema: s.InputSchema, OutputSchema: s.OutputSchema, Annotations: s.Annotations})
+		inputSchema := s.InputSchema
+		description := s.Description
+		if s.Name == "task_create" {
+			if _, ok := taskMCPTaskID(ctx); ok {
+				inputSchema = buildDelegatedTaskCreateSchema()
+				description = "Create a child task from this task's snapshot. Provide only the child prompt; caic derives the repository, runtime, and parent from this task."
+			}
+		}
+		tools = append(tools, mcp.ToolDescriptor{Name: s.Name, Title: s.Title, Description: description, InputSchema: inputSchema, OutputSchema: s.OutputSchema, Annotations: s.Annotations})
 	}
 	return tools, nil
 }
@@ -210,7 +218,7 @@ func (m *mcpRegistry) ReadResource(ctx context.Context, uri string) (mcp.Resourc
 }
 
 func (m *mcpRegistry) SubscribeResourceUpdates(ctx context.Context, filter mcp.SubscriptionFilter) (iter.Seq2[mcp.ResourceUpdate, error], error) {
-	sources, err := m.subscriptionSources(filter)
+	sources, err := m.subscriptionSources(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -259,6 +267,9 @@ func (m *mcpRegistry) SubscribeResourceUpdates(ctx context.Context, filter mcp.S
 }
 
 func (m *mcpRegistry) voiceSessionContext(ctx context.Context) string {
+	if !mcpHasScope(ctx, mcpScopeTasksRead) {
+		return "[Task information unavailable: missing scope]"
+	}
 	parts := make([]string, 0, 3)
 	prefs := m.serverConfig.prefs.Get(userIDFromCtx(ctx))
 	if len(prefs.Repositories) > 0 {
@@ -266,12 +277,6 @@ func (m *mcpRegistry) voiceSessionContext(ctx context.Context) string {
 	}
 	if prefs.Harness != "" {
 		parts = append(parts, "[Default harness: "+prefs.Harness+"]")
-	}
-	if !mcpHasScope(ctx, mcpScopeTasksRead) {
-		if len(parts) == 0 {
-			return "[Task information unavailable: missing scope]"
-		}
-		return strings.Join(parts, "\n")
 	}
 	taskList := m.taskSvc.taskListSnapshot(ctx)
 	if len(taskList) == 0 {
@@ -332,10 +337,13 @@ func (m *mcpRegistry) currentTasksAndRepos(ctx context.Context) ([]v1.Task, []v1
 	return taskList, *repoList
 }
 
-func (m *mcpRegistry) subscriptionSources(filter mcp.SubscriptionFilter) (subscriptionSources, error) {
+func (m *mcpRegistry) subscriptionSources(ctx context.Context, filter mcp.SubscriptionFilter) (subscriptionSources, error) {
 	var sources subscriptionSources
 	hasFilter := false
 	for _, uri := range filter.ResourceSubscriptions {
+		if decision, ok := authorizeResource(ctx, uri); !ok {
+			return subscriptionSources{}, mcp.ErrInvalidParams("%s", decision)
+		}
 		hasFilter = true
 		switch {
 		case uri == "caic://tasks" || strings.HasPrefix(uri, "caic://tasks/"):
@@ -358,6 +366,9 @@ func (m *mcpRegistry) subscriptionSources(filter mcp.SubscriptionFilter) (subscr
 		}
 	}
 	if filter.ResourcesListChanged {
+		if !mcpHasScope(ctx, mcpScopeRead) {
+			return subscriptionSources{}, mcp.ErrInvalidParams("missing required MCP scope: %s", mcpScopeRead)
+		}
 		hasFilter = true
 		sources.taskC = m.taskSvc.taskMgr.Changed()
 		sources.repoC = m.serverConfig.checkouts.Changed()
@@ -500,6 +511,16 @@ type mcpTaskCreateArgs struct {
 func (m *mcpRegistry) handleTaskCreate(ctx context.Context, args mcpTaskCreateArgs) mcp.ToolResult[mcpTaskCreatedOutput] { //nolint:gocritic // MCP tool handlers receive decoded argument values by API contract.
 	if args.Prompt == "" {
 		return domainToolError[mcpTaskCreatedOutput](&api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "Missing required parameter: prompt"})
+	}
+	if _, ok := taskMCPTaskID(ctx); ok {
+		if len(args.Repos) != 0 || args.Harness != "" || args.Model != "" || args.Effort != "" || args.RuntimeName != "" || args.Display || args.Tailscale || args.USB || args.Sudo || args.GitHubToken {
+			return mcp.ToolError[mcpTaskCreatedOutput]("Task-scoped MCP may only set prompt")
+		}
+		resp, err := m.taskSvc.createTask(ctx, &v1.CreateTaskReq{InitialPrompt: v1.Prompt{Text: args.Prompt}})
+		if err != nil {
+			return domainToolError[mcpTaskCreatedOutput](err)
+		}
+		return mcp.TypedToolResult(mcpTaskCreatedOutput{Result: "Created child task: " + resp.ID.String(), TaskID: resp.ID.String()})
 	}
 	if len(args.Repos) == 0 {
 		return domainToolError[mcpTaskCreatedOutput](&api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "Missing required parameter: repos"})
@@ -1014,6 +1035,12 @@ func buildTaskCreateSchema() *jsonschema.Schema {
 	props.Set("sudo", &jsonschema.Schema{Type: "boolean", Description: "Enable root access via sudo with a random password"})
 	props.Set("gitHubToken", &jsonschema.Schema{Type: "boolean", Description: "Enable GitHub token injection for this task"})
 	return &jsonschema.Schema{Type: "object", Properties: props, Required: []string{"prompt", "repos"}}
+}
+
+func buildDelegatedTaskCreateSchema() *jsonschema.Schema {
+	props := orderedmap.New[string, *jsonschema.Schema]()
+	props.Set("prompt", &jsonschema.Schema{Type: "string", Description: "The child task prompt. Its parent, repository, and runtime are derived from this task."})
+	return &jsonschema.Schema{Type: "object", Properties: props, Required: []string{"prompt"}}
 }
 
 func buildTaskForkSchema() *jsonschema.Schema {

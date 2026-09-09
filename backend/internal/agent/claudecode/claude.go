@@ -177,7 +177,12 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		opts.StripEnv = []string{"ANTHROPIC_API_KEY"}
 	}
 	args := b.AgentArgs(agent.HarnessArgs{Model: opts.Model, Effort: opts.Effort, ResumeSessionID: opts.ResumeSessionID})
-	rp, err := agent.PrepareRelay(ctx, opts, args)
+	var relayArgs []string
+	if opts.CaicMCPEnabled {
+		args = append(args, "--mcp-config", agent.ClaudeCodeCaicMCPConfigPath, "--allowedTools", "mcp__caic__task_create")
+		relayArgs = append(relayArgs, "--claude-code-caic-mcp-config")
+	}
+	rp, err := agent.PrepareRelay(ctx, opts, relayArgs, args)
 	if err != nil {
 		return nil, err
 	}

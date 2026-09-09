@@ -33,6 +33,12 @@ type CreateRequest struct {
 	ForgeIssue int
 }
 
+// MCPConfig provisions the bounded CAIC MCP capability for enabled tasks.
+type MCPConfig struct {
+	EndpointURL  string
+	TokenForTask func(taskID string) string
+}
+
 const statsRingSize = 60
 
 type statsSub struct {
@@ -113,10 +119,11 @@ type Task struct {
 	Display           bool                 // Enable Xvfb display in the instance.
 	Sudo              bool                 // Enable root access (password-based sudo) in the instance.
 	StartedAt         time.Time            // When the task was created.
-	OwnerID           string               // Internal user ID of the creator; empty in no-auth mode.
+	OwnerID           string               // Human authorization principal; distinct from the delegating task's identity.
 	ForgeIssue        int                  // Originating issue number for bot comment callbacks; 0 = none.
 	ForkedFromTaskID  ksid.ID              // Parent task ID when created by fork; zero otherwise.
 	ParentTaskID      ksid.ID              // Delegating task ID for a child task; zero for root tasks and ordinary forks.
+	CaicMCPEnabled    bool                 // Grants the task-scoped CAIC MCP credential.
 	Provider          genai.Provider
 
 	timelineID string
@@ -635,8 +642,10 @@ func (t *Task) LogHeader() *agent.MetaMessage {
 		RequestedEffort:   t.RequestedEffort,
 		StartedAt:         t.StartedAt,
 		ForgeIssue:        t.ForgeIssue,
+		OwnerID:           t.OwnerID,
 		ForkedFromTaskID:  t.ForkedFromTaskID.String(),
 		ParentTaskID:      parentTaskID,
+		CaicMCPEnabled:    t.CaicMCPEnabled,
 		Tailscale:         t.Tailscale,
 		USB:               t.USB,
 		Display:           t.Display,
@@ -2050,8 +2059,10 @@ func (t *Task) terminalLogSummary(version agent.LogVersion, res *taskslog.Result
 		LastStateUpdateAt: snapshot.StateUpdatedAt,
 		State:             res.State,
 		ForgeIssue:        snapshot.ForgeIssue,
+		OwnerID:           t.OwnerID,
 		ForkedFromTaskID:  t.ForkedFromTaskID.String(),
 		ParentTaskID:      parentTaskID,
+		CaicMCPEnabled:    t.CaicMCPEnabled,
 		ForgeOwner:        snapshot.ForgeOwner,
 		ForgeRepo:         snapshot.ForgeRepo,
 		ForgePR:           snapshot.ForgePR,

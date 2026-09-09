@@ -304,6 +304,7 @@ type Task struct {
 	Owner                              string       `json:"owner,omitempty"` // username of creator; omitted in no-auth mode
 	ForkedFromTaskID                   ksid.ID      `json:"forkedFromTaskID,omitempty"`
 	ParentTaskID                       ksid.ID      `json:"parentTaskID,omitempty"`
+	CaicMCPEnabled                     bool         `json:"caicMCPEnabled,omitempty"`
 	// Per-task harness/agent metadata.
 	Harness         Harness         `json:"harness"`
 	RequestedModel  string          `json:"requestedModel,omitempty"`
@@ -343,6 +344,7 @@ type TaskInfoRecorded struct {
 	State                    TaskState            `json:"state"`
 	ForkedFromTaskID         ksid.ID              `json:"forkedFromTaskID,omitempty"`
 	ParentTaskID             ksid.ID              `json:"parentTaskID,omitempty"`
+	CaicMCPEnabled           bool                 `json:"caicMCPEnabled,omitempty"`
 	StartedAt                time.Time            `json:"startedAt,omitzero"`
 	StateUpdatedAt           time.Time            `json:"stateUpdatedAt,omitzero"`
 	Harness                  Harness              `json:"harness"`
@@ -520,17 +522,18 @@ type CILogResp struct {
 
 // CreateTaskReq is the request body for POST /api/caic/v1/tasks.
 type CreateTaskReq struct {
-	InitialPrompt Prompt     `json:"initialPrompt"`
-	Repos         []RepoSpec `json:"repos,omitempty"`
-	Model         string     `json:"model,omitempty"`
-	Effort        string     `json:"effort,omitempty"` // Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default.
-	Harness       Harness    `json:"harness"`
-	RuntimeName   string     `json:"runtimeName,omitempty"`
-	Tailscale     bool       `json:"tailscale,omitempty"`
-	USB           bool       `json:"usb,omitempty"`
-	Display       bool       `json:"display,omitempty"`
-	Sudo          bool       `json:"sudo,omitempty"`
-	GitHubToken   bool       `json:"gitHubToken,omitempty"`
+	InitialPrompt  Prompt     `json:"initialPrompt"`
+	Repos          []RepoSpec `json:"repos,omitempty"`
+	Model          string     `json:"model,omitempty"`
+	Effort         string     `json:"effort,omitempty"` // Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default.
+	Harness        Harness    `json:"harness"`
+	RuntimeName    string     `json:"runtimeName,omitempty"`
+	Tailscale      bool       `json:"tailscale,omitempty"`
+	USB            bool       `json:"usb,omitempty"`
+	Display        bool       `json:"display,omitempty"`
+	Sudo           bool       `json:"sudo,omitempty"`
+	GitHubToken    bool       `json:"gitHubToken,omitempty"`
+	CaicMCPEnabled bool       `json:"caicMCPEnabled,omitempty"` // Enables task-scoped CAIC MCP; each tool remains server-authorized.
 }
 
 // Validate checks that prompt and harness are valid. Repos is optional (empty

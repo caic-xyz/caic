@@ -867,6 +867,7 @@ func (b *Backend) mdStartOpts(c mdContainer, opts *runtime.StartOptions) (*md.St
 	if opts.GitHubToken != "" {
 		extraEnv = append(extraEnv, "GITHUB_TOKEN="+opts.GitHubToken)
 	}
+	extraEnv = append(extraEnv, opts.ExtraEnv...)
 	return &md.StartOpts{
 		BaseImage: image,
 		Platform:  opts.ContainerPlatform,

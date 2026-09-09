@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# V2-only persistent relay with canonical agent framing inside caic containers.
+# V2-only persistent relay with canonical framing and Claude Code task-scoped MCP configuration.
 #
 # Modes:
 #   serve-attach --dir <path> -- <cmd...>   Start relay daemon + attach as first client.
@@ -56,6 +56,7 @@ RELAY_DIR = os.environ.get("CAIC_RELAY_DIR", "/tmp/caic-relay")
 SOCK_PATH = os.path.join(RELAY_DIR, "relay.sock")
 OUTPUT_PATH = os.path.join(RELAY_DIR, "output.jsonl")
 PID_PATH = os.path.join(RELAY_DIR, "pid")
+CLAUDE_CODE_CAIC_MCP_CONFIG_PATH = os.path.join(RELAY_DIR, "caic-mcp.json")
 
 # Max size of a single read from subprocess stdout.
 BUF_SIZE = 65536
@@ -67,6 +68,31 @@ _DIFF_DEBOUNCE = 2  # seconds of quiet before running diff
 # Default grace period (seconds) after SIGINT before escalating to
 # SIGTERM/SIGKILL. Overridable via --shutdown-grace.
 _DEFAULT_SHUTDOWN_GRACE = 10
+
+
+def _write_claude_code_caic_mcp_config(env: dict[str, str]) -> None:
+    """Write Claude Code's task-scoped CAIC MCP configuration atomically."""
+    endpoint = env.get("CAIC_MCP_URL")
+    token = env.get("CAIC_MCP_TOKEN")
+    if not endpoint or not token:
+        raise ValueError("CAIC MCP configuration requires CAIC_MCP_URL and CAIC_MCP_TOKEN")
+
+    config = {
+        "mcpServers": {
+            "caic": {
+                "type": "http",
+                "url": endpoint,
+                "headers": {"Authorization": "Bearer ${CAIC_MCP_TOKEN}"},
+            }
+        }
+    }
+    temp_path = CLAUDE_CODE_CAIC_MCP_CONFIG_PATH + ".tmp"
+    with open(temp_path, "w", encoding="utf-8") as f:
+        os.fchmod(f.fileno(), 0o600)
+        json.dump(config, f)
+        f.write("\n")
+    os.replace(temp_path, CLAUDE_CODE_CAIC_MCP_CONFIG_PATH)
+
 
 # The backend scanners reject a physical record whose size including LF is not
 # strictly smaller than 32 MiB.
@@ -556,7 +582,7 @@ class _Daemon:
         self.shutdown_event.set()
 
 
-def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace):
+def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace, claude_code_caic_mcp_config):
     """Start the relay server as a daemon, then attach as the first client.
 
     Architecture:
@@ -580,6 +606,8 @@ def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace):
         a stripped_env event after the first subprocess output.
       shutdown_grace: Seconds to wait after SIGINT before escalating to
         SIGTERM, then SIGKILL.
+      claude_code_caic_mcp_config: Write Claude Code's task-scoped CAIC MCP
+        configuration before starting the harness subprocess.
 
     Failure modes handled:
       - SSH drops: client disconnects, subprocess keeps running. Next
@@ -697,6 +725,8 @@ def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace):
     threading.Thread(target=d.accept_thread, args=(srv,), daemon=True).start()
 
     try:
+        if claude_code_caic_mcp_config:
+            _write_claude_code_caic_mcp_config(env)
         proc = subprocess.Popen(
             cmd_args,
             cwd=work_dir,
@@ -923,6 +953,7 @@ def main() -> int:
     sa = sub.add_parser("serve-attach")
     sa.add_argument("--dir", required=True, dest="work_dir")
     sa.add_argument("--no-log-stdin", action="store_true")
+    sa.add_argument("--claude-code-caic-mcp-config", action="store_true")
     sa.add_argument("--strip-env", action="append", default=[], metavar="KEY")
     sa.add_argument(
         "--shutdown-grace",
@@ -947,6 +978,7 @@ def main() -> int:
             log_stdin=not args.no_log_stdin,
             strip_env=args.strip_env,
             shutdown_grace=args.shutdown_grace,
+            claude_code_caic_mcp_config=args.claude_code_caic_mcp_config,
         )
     elif args.mode == "attach":
         attach_client(args.offset)

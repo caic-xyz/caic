@@ -842,8 +842,10 @@ type LoadedTask struct {
 	LastStateUpdateAt time.Time            `json:"last_state_update_at"` // Latest relay ts from caic_diff_stat records, falling back to log file mtime.
 	State             State                `json:"state"`
 	ForgeIssue        int                  `json:"forge_issue"` // Originating issue number for bot comment callbacks.
+	OwnerID           string               `json:"owner_id"`
 	ForkedFromTaskID  string               `json:"forked_from_task_id"`
 	ParentTaskID      string               `json:"parent_task_id"`
+	CaicMCPEnabled    bool                 `json:"caic_mcp_enabled"`
 	ForgeOwner        string               `json:"forge_owner"`
 	ForgeRepo         string               `json:"forge_repo"`
 	ForgePR           int                  `json:"forge_pr"` // PR number created during the task; 0 if none.
@@ -1377,8 +1379,10 @@ func loadedTaskFromMeta(path, taskID string, meta *agent.MetaMessage, modified t
 		LastStateUpdateAt: modified,
 		State:             StateRunning,
 		ForgeIssue:        meta.ForgeIssue,
+		OwnerID:           meta.OwnerID,
 		ForkedFromTaskID:  meta.ForkedFromTaskID,
 		ParentTaskID:      meta.ParentTaskID,
+		CaicMCPEnabled:    meta.CaicMCPEnabled,
 		Tailscale:         meta.Tailscale,
 		USB:               meta.USB,
 		Display:           meta.Display,

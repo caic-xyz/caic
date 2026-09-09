@@ -80,6 +80,8 @@ func TestTask(t *testing.T) {
 		parentID := ksid.NewID()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		tk.ParentTaskID = parentID
+		tk.OwnerID = "user-1"
+		tk.CaicMCPEnabled = true
 		if got := tk.LogHeader().ParentTaskID; got != parentID.String() {
 			t.Errorf("LogHeader().ParentTaskID = %q, want %q", got, parentID)
 		}
@@ -142,6 +144,8 @@ func TestTask(t *testing.T) {
 		result := &taskslog.Result{State: taskslog.StatePurged, AgentResult: "done"}
 		parentID := ksid.NewID()
 		tk.ParentTaskID = parentID
+		tk.OwnerID = "user-1"
+		tk.CaicMCPEnabled = true
 
 		summary := tk.terminalLogSummary(agent.LogVersionV1, result)
 		if summary.LogVersion != agent.LogVersionV1 || summary.State != taskslog.StatePurged || summary.LastTrailer != result {
@@ -152,6 +156,9 @@ func TestTask(t *testing.T) {
 		}
 		if got := summary.ParentTaskID; got != parentID.String() {
 			t.Errorf("ParentTaskID = %q, want %q", got, parentID)
+		}
+		if summary.OwnerID != "user-1" || !summary.CaicMCPEnabled {
+			t.Errorf("terminal CAIC MCP metadata = owner %q, enabled %v", summary.OwnerID, summary.CaicMCPEnabled)
 		}
 		if len(summary.Repos) != 1 || summary.Repos[0].GitRoot != "" {
 			t.Fatalf("summary repos = %#v, want process-local GitRoot removed", summary.Repos)
