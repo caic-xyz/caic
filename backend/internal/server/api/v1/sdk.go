@@ -69,11 +69,18 @@ func SDKAPI() apispec.Config {
 		ErrorCodes: []apispec.ErrorCode{
 			{Code: string(api.CodeBadRequest), Status: 400},
 			{Code: string(api.CodeUnknownRepository), Status: 400},
+			{Code: string(api.CodeInvalidOAuthState), Status: 400},
+			{Code: string(api.CodeUnknownCache), Status: 400},
+			{Code: string(api.CodeUnknownRuntime), Status: 400},
 			{Code: string(api.CodeUnauthorized), Status: 401},
 			{Code: string(api.CodeForbidden), Status: 403},
 			{Code: string(api.CodeNotFound), Status: 404},
+			{Code: string(api.CodeOAuthGrantNotFound), Status: 404},
+			{Code: string(api.CodeOAuthProviderUnavailable), Status: 404},
 			{Code: string(api.CodeConflict), Status: 409},
 			{Code: string(api.CodeInternalError), Status: 500},
+			{Code: string(api.CodeUpdateCheckFailed), Status: 500},
+			{Code: string(api.CodeUpdateUnavailable), Status: 500},
 		},
 	}
 }

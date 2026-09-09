@@ -775,11 +775,18 @@ object VoiceGatewayModeSerializer : KSerializer<VoiceGatewayMode> {
 object ErrorCodes {
     const val BadRequest = "BAD_REQUEST"
     const val UnknownRepository = "UNKNOWN_REPOSITORY"
+    const val InvalidOauthState = "INVALID_OAUTH_STATE"
+    const val UnknownCache = "UNKNOWN_CACHE"
+    const val UnknownRuntime = "UNKNOWN_RUNTIME"
     const val Unauthorized = "UNAUTHORIZED"
     const val Forbidden = "FORBIDDEN"
     const val NotFound = "NOT_FOUND"
+    const val OauthGrantNotFound = "OAUTH_GRANT_NOT_FOUND"
+    const val OauthProviderUnavailable = "OAUTH_PROVIDER_UNAVAILABLE"
     const val Conflict = "CONFLICT"
     const val InternalError = "INTERNAL_ERROR"
+    const val UpdateCheckFailed = "UPDATE_CHECK_FAILED"
+    const val UpdateUnavailable = "UPDATE_UNAVAILABLE"
 }
 
 typealias DiffStat = List<DiffFileStat>

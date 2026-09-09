@@ -452,11 +452,18 @@ public struct VoiceGatewayMode: Codable, Equatable, Hashable {
 public enum ErrorCodes {
     public static let badRequest = "BAD_REQUEST"
     public static let unknownRepository = "UNKNOWN_REPOSITORY"
+    public static let invalidOauthState = "INVALID_OAUTH_STATE"
+    public static let unknownCache = "UNKNOWN_CACHE"
+    public static let unknownRuntime = "UNKNOWN_RUNTIME"
     public static let unauthorized = "UNAUTHORIZED"
     public static let forbidden = "FORBIDDEN"
     public static let notFound = "NOT_FOUND"
+    public static let oauthGrantNotFound = "OAUTH_GRANT_NOT_FOUND"
+    public static let oauthProviderUnavailable = "OAUTH_PROVIDER_UNAVAILABLE"
     public static let conflict = "CONFLICT"
     public static let internalError = "INTERNAL_ERROR"
+    public static let updateCheckFailed = "UPDATE_CHECK_FAILED"
+    public static let updateUnavailable = "UPDATE_UNAVAILABLE"
 }
 
 /// DiffStat summarises the changes in a branch relative to its base.

@@ -24,6 +24,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
+	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
@@ -200,10 +201,10 @@ func TestOAuthServer(t *testing.T) {
 			if err != nil {
 				t.Fatalf("upsert bob: %v", err)
 			}
-			revokeOAuthGrant(t, h, &bob, firstGrantID, http.StatusNotFound)
+			revokeOAuthGrant(t, h, &bob, firstGrantID, http.StatusNotFound, api.CodeOAuthGrantNotFound)
 			first = refreshMCPToken(t, h, registered.ClientID, first.RefreshToken, http.StatusOK)
 
-			revokeOAuthGrant(t, h, &user, firstGrantID, http.StatusOK)
+			revokeOAuthGrant(t, h, &user, firstGrantID, http.StatusOK, "")
 			refreshMCPToken(t, h, registered.ClientID, first.RefreshToken, http.StatusBadRequest)
 			refreshMCPToken(t, h, secondClient.ClientID, second.RefreshToken, http.StatusOK)
 		})
@@ -612,7 +613,7 @@ func listOAuthGrants(t *testing.T, h http.Handler, user *auth.User) v1.OAuthGran
 	return grants
 }
 
-func revokeOAuthGrant(t *testing.T, h http.Handler, user *auth.User, grantID string, wantStatus int) {
+func revokeOAuthGrant(t *testing.T, h http.Handler, user *auth.User, grantID string, wantStatus int, wantCode api.ErrorCode) {
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/oauth/grants/"+grantID+"/revoke", http.NoBody)
 	req.Host = "caic.example.com"
 	addTestSessionCookie(t, req, user)
@@ -620,6 +621,15 @@ func revokeOAuthGrant(t *testing.T, h http.Handler, user *auth.User, grantID str
 	h.ServeHTTP(w, req)
 	if w.Code != wantStatus {
 		t.Fatalf("revoke MCP grant status = %d, want %d: %s", w.Code, wantStatus, w.Body.String())
+	}
+	if wantCode != "" {
+		var response api.ErrorResponse
+		if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+			t.Fatalf("decode revoke MCP grant error: %v", err)
+		}
+		if response.Error.Code != wantCode {
+			t.Errorf("revoke MCP grant error code = %q, want %q", response.Error.Code, wantCode)
+		}
 	}
 }
 

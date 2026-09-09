@@ -75,7 +75,7 @@ func (h *authHandlers) handleStart(provider string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg := h.oauthFor(provider)
 		if cfg == nil || cfg.RedirectURI(r) == "" {
-			writeError(r.Context(), w, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "provider" + " not found"})
+			writeError(r.Context(), w, &api.Error{Status: http.StatusNotFound, Code: api.CodeOAuthProviderUnavailable, Message: "provider not found"})
 			return
 		}
 		returnMode := r.URL.Query().Get("return")
@@ -127,7 +127,7 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg := h.oauthFor(provider)
 		if cfg == nil || cfg.RedirectURI(r) == "" {
-			writeError(r.Context(), w, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "provider" + " not found"})
+			writeError(r.Context(), w, &api.Error{Status: http.StatusNotFound, Code: api.CodeOAuthProviderUnavailable, Message: "provider not found"})
 			return
 		}
 
@@ -145,12 +145,12 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 		// Validate state cookie.
 		stateCookie, err := r.Cookie(auth.StateCookieName)
 		if err != nil {
-			writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "missing state cookie"})
+			writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeInvalidOAuthState, Message: "missing state cookie"})
 			return
 		}
 		fullState, ok := oauthserver.ValidateState(stateCookie.Value, h.sessionSecret)
 		if !ok {
-			writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "invalid state"})
+			writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeInvalidOAuthState, Message: "invalid state"})
 			return
 		}
 
@@ -162,7 +162,7 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 		// we originally sent in AuthURL, so compare against fullState directly.
 		qState := r.URL.Query().Get("state")
 		if qState != fullState {
-			writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "state mismatch"})
+			writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeInvalidOAuthState, Message: "state mismatch"})
 			return
 		}
 

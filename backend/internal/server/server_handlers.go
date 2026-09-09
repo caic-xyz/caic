@@ -121,12 +121,12 @@ func (h *serverHandlers) getVersion(ctx context.Context, _ *api.EmptyReq) (*v1.V
 func (h *serverHandlers) triggerUpdate(ctx context.Context, _ *api.EmptyReq) (*v1.UpdateResp, error) {
 	gh := h.forgeMgr.GitHubClient()
 	if gh == nil {
-		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "GitHub token not configured; cannot check for updates"}
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeUpdateUnavailable, Message: "GitHub token not configured; cannot check for updates"}
 	}
 	current := autoupdate.Version
 	latest, err := autoupdate.CheckLatest(ctx, gh)
 	if err != nil {
-		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "check latest version: " + err.Error()}
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeUpdateCheckFailed, Message: "check latest version: " + err.Error()}
 	}
 	if !autoupdate.IsNewer(latest, current) {
 		return &v1.UpdateResp{Status: "already_up_to_date"}, nil
@@ -211,7 +211,7 @@ func (h *serverHandlers) updatePreferences(ctx context.Context, req *v1.UpdatePr
 	}
 	if req.Settings.RuntimeName != "" {
 		if _, ok := h.runtimes.ByName[caicruntime.Name(req.Settings.RuntimeName)]; !ok {
-			return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: fmt.Sprintf("unknown runtime %q", req.Settings.RuntimeName)}
+			return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeUnknownRuntime, Message: fmt.Sprintf("unknown runtime %q", req.Settings.RuntimeName)}
 		}
 	}
 	if err := h.prefs.Update(userIDFromCtx(ctx), func(p *preferences.Preferences) {
@@ -255,7 +255,7 @@ func (h *serverHandlers) updatePreferences(ctx context.Context, req *v1.UpdatePr
 func validatePreferenceSettings(settings *v1.UserSettings) error {
 	for name := range settings.WellKnownCaches {
 		if _, ok := md.WellKnownCaches[name]; !ok {
-			return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "unknown cache: " + name}
+			return &api.Error{Status: http.StatusBadRequest, Code: api.CodeUnknownCache, Message: "unknown cache: " + name}
 		}
 	}
 	for i, m := range settings.CacheMappings {

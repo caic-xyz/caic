@@ -11,13 +11,20 @@ type ErrorCode string
 
 // Error codes.
 const (
-	CodeBadRequest        ErrorCode = "BAD_REQUEST"
-	CodeUnknownRepository ErrorCode = "UNKNOWN_REPOSITORY"
-	CodeUnauthorized      ErrorCode = "UNAUTHORIZED"
-	CodeForbidden         ErrorCode = "FORBIDDEN"
-	CodeNotFound          ErrorCode = "NOT_FOUND"
-	CodeConflict          ErrorCode = "CONFLICT"
-	CodeInternalError     ErrorCode = "INTERNAL_ERROR"
+	CodeBadRequest               ErrorCode = "BAD_REQUEST"
+	CodeUnknownRepository        ErrorCode = "UNKNOWN_REPOSITORY"
+	CodeInvalidOAuthState        ErrorCode = "INVALID_OAUTH_STATE"
+	CodeOAuthGrantNotFound       ErrorCode = "OAUTH_GRANT_NOT_FOUND"
+	CodeOAuthProviderUnavailable ErrorCode = "OAUTH_PROVIDER_UNAVAILABLE"
+	CodeUnknownCache             ErrorCode = "UNKNOWN_CACHE"
+	CodeUnknownRuntime           ErrorCode = "UNKNOWN_RUNTIME"
+	CodeUpdateCheckFailed        ErrorCode = "UPDATE_CHECK_FAILED"
+	CodeUpdateUnavailable        ErrorCode = "UPDATE_UNAVAILABLE"
+	CodeUnauthorized             ErrorCode = "UNAUTHORIZED"
+	CodeForbidden                ErrorCode = "FORBIDDEN"
+	CodeNotFound                 ErrorCode = "NOT_FOUND"
+	CodeConflict                 ErrorCode = "CONFLICT"
+	CodeInternalError            ErrorCode = "INTERNAL_ERROR"
 )
 
 // Error is a concrete error type with status code, error code, optional

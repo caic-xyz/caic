@@ -448,6 +448,9 @@ func TestLoginCallbackPublic(t *testing.T) {
 			if w.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want %d (missing state cookie)", w.Code, http.StatusBadRequest)
 			}
+			if got := decodeError(t, w).Code; got != api.CodeInvalidOAuthState {
+				t.Errorf("error code = %q, want %q", got, api.CodeInvalidOAuthState)
+			}
 		})
 	}
 }
@@ -2593,11 +2596,14 @@ func TestBuildHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
 		}
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/server/preferences", strings.NewReader(`{"settings":{"runtimeName":"ghost"}}`))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/server/preferences", strings.NewReader(`{"settings":{"purgeDelay":10000000000,"runtimeName":"ghost"}}`))
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
+		}
+		if got := decodeError(t, w).Code; got != api.CodeUnknownRuntime {
+			t.Errorf("error code = %q, want %q", got, api.CodeUnknownRuntime)
 		}
 		prefs := s.prefs.Get("default")
 		if prefs.Settings.RuntimeName != "" {

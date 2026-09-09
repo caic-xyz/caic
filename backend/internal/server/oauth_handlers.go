@@ -108,7 +108,7 @@ func (h *oauthGrantHandlers) revokeOAuthGrant(ctx context.Context, req *v1.Revok
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "save OAuth grant revocation: " + err.Error()}
 	}
 	if !revoked {
-		return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "OAuth grant" + " not found"}
+		return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeOAuthGrantNotFound, Message: "OAuth grant not found"}
 	}
 	return &v1.StatusResp{Status: "ok"}, nil
 }
