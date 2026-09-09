@@ -92,6 +92,7 @@ export default function TaskList(props: TaskListProps) {
   let listRef: HTMLDivElement | undefined;
   let lastFocusedTaskId: string | undefined;
   const [expanded, setExpanded] = createSignal<Set<string>>(new Set());
+  const [purgeModifierActive, setPurgeModifierActive] = createSignal(false);
   const [scrolledFromTop, setScrolledFromTop] = createSignal(false);
 
   const updateScrollFade = () => {
@@ -105,7 +106,7 @@ export default function TaskList(props: TaskListProps) {
     setExpanded(next);
   };
 
-  const grouped = () => {
+  const grouped = createMemo(() => {
     const all = [...props.tasks()];
 
     const groups: Record<string, RepoGroup> = {};
@@ -161,7 +162,9 @@ export default function TaskList(props: TaskListProps) {
     }
 
     return sortedGroups;
-  };
+  });
+
+  const groupRepos = createMemo(() => grouped().map((group) => group.repo));
 
   const firstVisibleTaskId = createMemo(() => {
     for (const group of grouped()) {
@@ -194,6 +197,26 @@ export default function TaskList(props: TaskListProps) {
         return next;
       });
     }
+  });
+
+  onMount(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Shift") return;
+      setPurgeModifierActive(true);
+    };
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.key !== "Shift") return;
+      setPurgeModifierActive(false);
+    };
+    const handleBlur = () => setPurgeModifierActive(false);
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", handleBlur);
+    onCleanup(() => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", handleBlur);
+    });
   });
 
   onMount(() => {
@@ -282,6 +305,7 @@ export default function TaskList(props: TaskListProps) {
       onStop={() => props.onStop(t().id)}
       onPurge={() => props.onPurge(t().id)}
       onRevive={() => props.onRevive(t().id)}
+      purgeModifierActive={purgeModifierActive()}
       onFork={() => props.onFork(t().id)}
       onError={props.onError}
       supportsCompact={props.supportsCompact(t().harness)}
@@ -308,17 +332,22 @@ export default function TaskList(props: TaskListProps) {
         <Show when={props.tasks().length === 0}>
           <p class={styles.placeholder}>{props.tasksLoading() || props.settledLoading() ? "Loading..." : "No tasks yet."}</p>
         </Show>
-        <For each={grouped()}>
-          {(group) => {
-            const repoMeta = () => props.repos().find((r) => r.path === group.repo);
-            const stoppedKey = `stopped-${group.repo}`;
-            const purgedKey = `purged-${group.repo}`;
-            const selectedInStopped = () => !!props.selectedId && group.stopped.some((t) => t.id === props.selectedId);
-            const selectedInPurged = () => !!props.selectedId && group.purged.some((t) => t.id === props.selectedId);
+        <For each={groupRepos()}>
+          {(repo) => {
+            const group = createMemo(() => {
+              const match = grouped().find((candidate) => candidate.repo === repo);
+              if (!match) throw new Error(`Missing task group for ${repo || "Other"}`);
+              return match;
+            });
+            const repoMeta = () => props.repos().find((r) => r.path === repo);
+            const stoppedKey = `stopped-${repo}`;
+            const purgedKey = `purged-${repo}`;
+            const selectedInStopped = () => !!props.selectedId && group().stopped.some((t) => t.id === props.selectedId);
+            const selectedInPurged = () => !!props.selectedId && group().purged.some((t) => t.id === props.selectedId);
             return (
             <div class={styles.repoGroup}>
               <div class={styles.repoGroupHeader}>
-                {group.repo || "Other"}
+                {repo || "Other"}
                 <Show when={repoMeta()} keyed>
                   {(meta) => (
                     <Show when={meta.ci} keyed>
@@ -328,32 +357,32 @@ export default function TaskList(props: TaskListProps) {
                           <span class={styles.autoBadge} title="Auto-fix CI enabled">auto</span>
                         </Show>
                         <Show when={status === "failure" && !props.autoFixCI() && props.onFixCI}>
-                          <button class={styles.fixCIBtn} title="Fix CI" onClick={(e) => { e.stopPropagation(); props.onFixCI?.(group.repo); }}>Fix CI</button>
+                          <button class={styles.fixCIBtn} title="Fix CI" onClick={(e) => { e.stopPropagation(); props.onFixCI?.(repo); }}>Fix CI</button>
                         </Show>
                       </>}
                     </Show>
                   )}
                 </Show>
               </div>
-              <Index each={group.active}>{renderTask}</Index>
+              <Index each={group().active}>{renderTask}</Index>
               
-              <Show when={group.stopped.length > 0}>
+              <Show when={group().stopped.length > 0}>
                 <button class={styles.subGroupHeader} onClick={() => toggleExpanded(stoppedKey)}>
                   {expanded().has(stoppedKey) || selectedInStopped() ? <ArrowDropDown width={18} height={18} /> : <ArrowRight width={18} height={18} />}
-                  Stopped ({group.stopped.length})
+                  Stopped ({group().stopped.length})
                 </button>
                 <Show when={expanded().has(stoppedKey) || selectedInStopped()}>
-                  <Index each={group.stopped}>{renderTask}</Index>
+                  <Index each={group().stopped}>{renderTask}</Index>
                 </Show>
               </Show>
 
-              <Show when={group.purged.length > 0}>
+              <Show when={group().purged.length > 0}>
                 <button class={styles.subGroupHeader} onClick={() => toggleExpanded(purgedKey)}>
                   {expanded().has(purgedKey) || selectedInPurged() ? <ArrowDropDown width={18} height={18} /> : <ArrowRight width={18} height={18} />}
-                  Purged ({group.purged.length})
+                  Purged ({group().purged.length})
                 </button>
                 <Show when={expanded().has(purgedKey) || selectedInPurged()}>
-                  <Index each={group.purged}>{renderTask}</Index>
+                  <Index each={group().purged}>{renderTask}</Index>
                 </Show>
               </Show>
             </div>

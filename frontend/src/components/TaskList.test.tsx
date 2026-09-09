@@ -1,6 +1,6 @@
 // Tests for task-list selection visibility and navigation behavior.
 
-import { render, waitFor } from "@solidjs/testing-library";
+import { fireEvent, render, waitFor } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -9,7 +9,9 @@ import type { Task } from "@sdk/types.gen";
 import TaskList, { type TaskListProps } from "./TaskList";
 
 vi.mock("./TaskCard", () => ({
-  default: (props: { id: string }) => <div data-task-id={props.id} />,
+  default: (props: { id: string; purgeModifierActive: boolean }) => (
+    <div data-task-id={props.id} data-purge-modifier={String(props.purgeModifierActive)} />
+  ),
 }));
 
 function task(id: string): Task {
@@ -127,5 +129,41 @@ describe("TaskList", () => {
 
     expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" });
     expect(scrollIntoView.mock.contexts.at(-1)).toBe(document.querySelector("[data-task-id='2']"));
+  });
+
+  it("preserves task card DOM identity across live task updates", () => {
+    let updateTasks: (tasks: Task[]) => void = () => undefined;
+    render(() => {
+      const [tasks, setTasks] = createSignal([task("1")]);
+      updateTasks = setTasks;
+      return <TaskList {...taskListProps([])} tasks={tasks} selectedId="1" />;
+    });
+    const card = document.querySelector("[data-task-id='1']");
+    if (!card) throw new Error("task card not rendered");
+
+    updateTasks([{ ...task("1"), duration: 1 }]);
+
+    expect(document.querySelector("[data-task-id='1']")).toBe(card);
+  });
+
+  it("previews purge while Shift is held, including in an editing control", () => {
+    const { getByTestId } = render(() => (
+      <>
+        <textarea data-testid="editor" />
+        <TaskList {...taskListProps([task("1")])} selectedId="1" />
+      </>
+    ));
+    const card = document.querySelector("[data-task-id='1']");
+    if (!card) throw new Error("task card not rendered");
+
+    fireEvent.keyDown(document.body, { key: "Shift" });
+    expect(card).toHaveAttribute("data-purge-modifier", "true");
+    fireEvent.keyUp(document.body, { key: "Shift" });
+    expect(card).toHaveAttribute("data-purge-modifier", "false");
+
+    const editor = getByTestId("editor");
+    editor.focus();
+    fireEvent.keyDown(editor, { key: "Shift" });
+    expect(card).toHaveAttribute("data-purge-modifier", "true");
   });
 });

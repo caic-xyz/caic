@@ -82,6 +82,16 @@
   color: var(--color-feature-badge-fg);
   flex-shrink: 0;
   text-decoration: none;
+  transition: background 0.15s;
+}
+
+a.featureIconBadge:hover {
+  background: var(--color-bg-input-hover);
+}
+
+a.featureIconBadge:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-primary-ring);
 }
 
 .featureBadge {
@@ -238,6 +248,8 @@
   cursor: pointer;
   padding: 0.1rem;
   line-height: 1;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s, color 0.15s;
 }
 
 .purgeIcon {
@@ -249,11 +261,18 @@
 }
 
 .purgeIcon:hover:not(:disabled) {
+  background: var(--color-bg-input-hover);
   color: var(--color-danger-hover);
 }
 
 .reviveIcon:hover:not(:disabled) {
+  background: var(--color-bg-input-hover);
   color: var(--color-success-hover);
+}
+
+.purgeIcon:focus-visible,
+.reviveIcon:focus-visible {
+  box-shadow: 0 0 0 2px var(--color-primary-ring);
 }
 
 .purgeIcon:disabled,

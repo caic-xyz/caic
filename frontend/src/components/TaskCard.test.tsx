@@ -42,6 +42,7 @@ function props(overrides: Partial<TaskCardProps> = {}): TaskCardProps {
     now,
     onClick: () => undefined,
     onError: () => undefined,
+    purgeModifierActive: false,
     ...overrides,
   };
 }
@@ -176,5 +177,29 @@ describe("TaskCard", () => {
 
     expect(confirm).toHaveBeenCalledWith("Purge runtime instance?\n\nTask\nbranch: task-branch");
     expect(onPurge).not.toHaveBeenCalled();
+  });
+
+  it("shows the stop icon normally and the purge icon for the Shift modifier", () => {
+    const { getByRole, getByTestId, queryByTestId, unmount } = render(() => (
+      <TaskCard {...props({ state: "waiting", onStop: vi.fn(), onPurge: vi.fn() })} />
+    ));
+
+    expect(getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    expect(getByTestId("stop-task-icon")).toBeInTheDocument();
+    expect(queryByTestId("purge-task-icon")).not.toBeInTheDocument();
+    unmount();
+
+    render(() => (
+      <TaskCard {...props({
+        state: "waiting",
+        onStop: vi.fn(),
+        onPurge: vi.fn(),
+        purgeModifierActive: true,
+      })} />
+    ));
+
+    expect(screen.getByRole("button", { name: "Purge" })).toBeInTheDocument();
+    expect(screen.getByTestId("purge-task-icon")).toBeInTheDocument();
+    expect(screen.queryByTestId("stop-task-icon")).not.toBeInTheDocument();
   });
 });

@@ -8,6 +8,7 @@ import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?
 import SudoIcon from "@material-symbols/svg-400/outlined/shield_person.svg?solid";
 import DeleteIcon from "@material-symbols/svg-400/outlined/delete.svg?solid";
 import RestoreIcon from "@material-symbols/svg-400/outlined/restart_alt.svg?solid";
+import StopIcon from "@material-symbols/svg-400/outlined/stop_circle.svg?solid";
 import TimerIcon from "@material-symbols/svg-400/outlined/timer.svg?solid";
 
 import type {
@@ -80,6 +81,7 @@ export interface TaskCardProps {
   onStop?: () => void;
   onPurge?: () => void;
   onRevive?: () => void;
+  purgeModifierActive: boolean;
   actionLoading?: boolean;
   onDiffClick?: () => void;
   supportsCompact?: boolean;
@@ -335,7 +337,7 @@ export default function TaskCard(props: TaskCardProps) {
               </span>
             </Show>
           </Show>
-          {/* Active states: stop button (trash can). Shift-click or double-click/tap skips stop and goes straight to purge. */}
+          {/* Active states: stop button. Shift-click or double-click/tap skips stop and goes straight to purge. */}
           <Show
             when={
               props.state !== "stopped" &&
@@ -371,12 +373,15 @@ export default function TaskCard(props: TaskCardProps) {
                     props.onPurge();
                   }
                 }}
-                title="Stop (shift-click or double-click to purge)"
+                aria-label={props.purgeModifierActive ? "Purge" : "Stop"}
+                title={props.purgeModifierActive ? "Purge" : "Stop (hold Shift or double-click to purge)"}
                 data-testid="stop-task"
               >
                 <Show
                   when={props.actionLoading}
-                  fallback={<DeleteIcon width="0.85rem" height="0.85rem" />}
+                  fallback={props.purgeModifierActive
+                    ? <DeleteIcon width="0.85rem" height="0.85rem" data-testid="purge-task-icon" aria-hidden="true" />
+                    : <StopIcon width="0.85rem" height="0.85rem" data-testid="stop-task-icon" aria-hidden="true" />}
                 >
                   <span class={styles.purgeSpinner} />
                 </Show>

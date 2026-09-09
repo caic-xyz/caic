@@ -83,7 +83,7 @@
   align-items: center;
   padding: 0.4rem 0.55rem;
   border-radius: var(--radius-md);
-  background: var(--color-surface-variant);
+  background: var(--color-bg-input);
   color: var(--color-text-secondary);
   cursor: pointer;
   user-select: none;
@@ -93,6 +93,14 @@
 .toggleChip:has(input:checked) {
   background: var(--color-primary);
   color: var(--color-on-primary);
+}
+
+.toggleChip:hover:not(:has(input:disabled)) {
+  background: var(--color-bg-input-hover);
+}
+
+.toggleChip:has(input:checked):hover:not(:has(input:disabled)) {
+  background: var(--color-primary-hover);
 }
 
 .toggleChip:has(input:focus-visible) {
