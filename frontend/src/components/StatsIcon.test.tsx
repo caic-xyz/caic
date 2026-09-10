@@ -56,6 +56,20 @@ describe("StatsIcon", () => {
     expect(trigger).toHaveTextContent("$0.13");
   });
 
+  it("renders a day-scale resource history without spreading it into Math.max", () => {
+    // V8 limits the number of arguments passed to a function. Long-running
+    // tasks can retain more samples than Math.max(...samples) accepts.
+    const longHistory = Array.from({ length: 150_000 }, (_, i) => ({
+      ...stats[0],
+      diskUsed: i,
+      netRx: i,
+      netTx: i,
+      ts: i,
+    }));
+
+    expect(() => render(() => <StatsIcon events={[]} stats={longHistory} turns={[]} usage={usage} />)).not.toThrow();
+  });
+
   it("separates token categories and reports cache efficiency", async () => {
     const user = userEvent.setup();
     const events = [

@@ -87,9 +87,17 @@ export default function StatsIcon(props: { events: readonly EventMessage[]; stat
   const latest = () => props.stats[props.stats.length - 1];
 
   // Normalize NET: max bytes/s across all samples.
-  const maxNet = () => Math.max(1, ...props.stats.map((s) => s.netRx + s.netTx));
+  const maxNet = createMemo(() => {
+    let max = 1;
+    for (const stat of props.stats) max = Math.max(max, stat.netRx + stat.netTx);
+    return max;
+  });
   // Normalize DISK: max DiskUsed across all samples.
-  const maxDisk = () => Math.max(1, ...props.stats.map((s) => Math.max(0, s.diskUsed)));
+  const maxDisk = createMemo(() => {
+    let max = 1;
+    for (const stat of props.stats) max = Math.max(max, stat.diskUsed);
+    return max;
+  });
 
   const cpuRatio = () => Math.min(1, (latest()?.cpuPerc ?? 0) / 100);
   const memRatio = () => { const l = latest(); return l ? Math.min(1, l.memPerc / 100) : 0; };
