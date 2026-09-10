@@ -15,7 +15,10 @@
 	<body>
 		<div id="app"></div>
 		<script type="module" src="/src/index.tsx"></script>
-		<script>navigator.serviceWorker?.register("/sw.js")</script>
+		<script>
+			const entry = document.querySelector('script[type="module"][src]')?.getAttribute("src") ?? "";
+			navigator.serviceWorker?.register(`/sw.js?build=${encodeURIComponent(entry)}`);
+		</script>
 	</body>
 
 </html>

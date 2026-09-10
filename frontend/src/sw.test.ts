@@ -15,26 +15,27 @@ type CacheMock = {
   put: ReturnType<typeof vi.fn>;
 };
 
-function loadFetchHandler(cache: CacheMock, fetchMock: typeof fetch): FetchHandler {
+function loadFetchHandler(cache: CacheMock, fetchMock: typeof fetch, workerURL = "https://quick.caic.xyz/sw.js?build=%2Fassets%2Findex-new.js") {
   const listeners = new Map<string, unknown>();
+  const open = vi.fn(async () => cache);
   vm.runInNewContext(workerSource, {
     URL,
     caches: {
       delete: vi.fn(),
       keys: vi.fn(),
-      open: vi.fn(async () => cache),
+      open,
     },
     console: { warn: vi.fn() },
     fetch: fetchMock,
     self: {
       addEventListener: (type: string, listener: unknown) => listeners.set(type, listener),
-      location: { origin: "https://quick.caic.xyz" },
+      location: { href: workerURL, origin: "https://quick.caic.xyz" },
       skipWaiting: vi.fn(),
     },
   });
   const handler = listeners.get("fetch");
   if (typeof handler !== "function") throw new Error("service worker did not register a fetch handler");
-  return handler as FetchHandler;
+  return { handler: handler as FetchHandler, open };
 }
 
 function fetchEvent(request: Request) {
@@ -52,7 +53,7 @@ describe("service worker", () => {
   it("does not intercept personalized SPA documents", () => {
     const cache: CacheMock = { match: vi.fn(), put: vi.fn() };
     const fetchMock = vi.fn<typeof fetch>();
-    const handler = loadFetchHandler(cache, fetchMock);
+    const { handler } = loadFetchHandler(cache, fetchMock);
     const request = fetchEvent(new Request("https://quick.caic.xyz/task/@task-123"));
 
     handler(request.event);
@@ -68,7 +69,7 @@ describe("service worker", () => {
       put: vi.fn(async () => undefined),
     };
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("asset", { status: 200 }));
-    const handler = loadFetchHandler(cache, fetchMock);
+    const { handler, open } = loadFetchHandler(cache, fetchMock);
     const request = fetchEvent(new Request("https://quick.caic.xyz/assets/index-abc123.js"));
 
     handler(request.event);
@@ -76,5 +77,6 @@ describe("service worker", () => {
     await expect(request.response()).resolves.toHaveProperty("status", 200);
     expect(fetchMock).toHaveBeenCalledWith(request.event.request);
     expect(cache.put).toHaveBeenCalledOnce();
+    expect(open).toHaveBeenCalledWith("caic-assets-/assets/index-new.js");
   });
 });

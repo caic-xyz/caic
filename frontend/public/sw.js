@@ -1,7 +1,8 @@
 // Service worker for caic PWA: caches only immutable hashed assets.
 // SPA documents are personalized and must always come from the network.
 
-const CACHE = "caic-assets-v2";
+const entryAsset = new URL(self.location.href).searchParams.get("build") || "development";
+const CACHE = `caic-assets-${entryAsset}`;
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (e) => {

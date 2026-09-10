@@ -164,6 +164,21 @@ function createAppStore() {
   // Per-task image drafts survive task switching.
   const [inputImageDrafts, setInputImageDrafts] = createSignal<Map<string, APIImageData[]>>(new Map());
 
+  function removeTaskDrafts(id: string) {
+    setInputDrafts((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
+    setInputImageDrafts((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
+  }
+
   // Transient server warnings shown as auto-dismissing toasts.
   const [warnings, setWarnings] = createSignal<{ id: number; message: string }[]>([]);
   let nextWarningId = 0;
@@ -639,6 +654,7 @@ function createAppStore() {
           if (event.delete === selectedId()) navigate("/", { replace: true });
           if (taskRecoveries.has(event.delete)) queueTaskUpdate(event.delete, { kind: "delete" });
           prevStates.delete(event.delete);
+          removeTaskDrafts(event.delete);
           setTasks((prev) => prev.filter((t) => t.id !== event.delete));
           notifyQuotaRecoveries(tasks());
         } else if (event.kind === "repos" && event.repos) {
@@ -1029,9 +1045,29 @@ function createAppStore() {
 
   // Per-task input/image drafts, keyed by task ID.
   const inputDraft = (id: string) => inputDrafts().get(id) ?? "";
-  const setInputDraft = (id: string, v: string) => setInputDrafts((prev) => { const next = new Map(prev); next.set(id, v); return next; });
+  const setInputDraft = (id: string, v: string) => setInputDrafts((prev) => {
+    if (v === "") {
+      if (!prev.has(id)) return prev;
+      const withoutDraft = new Map(prev);
+      withoutDraft.delete(id);
+      return withoutDraft;
+    }
+    const next = new Map(prev);
+    next.set(id, v);
+    return next;
+  });
   const inputImages = (id: string) => inputImageDrafts().get(id) ?? [];
-  const setInputImages = (id: string, imgs: APIImageData[]) => setInputImageDrafts((prev) => { const next = new Map(prev); next.set(id, imgs); return next; });
+  const setInputImages = (id: string, imgs: APIImageData[]) => setInputImageDrafts((prev) => {
+    if (imgs.length === 0) {
+      if (!prev.has(id)) return prev;
+      const withoutDraft = new Map(prev);
+      withoutDraft.delete(id);
+      return withoutDraft;
+    }
+    const next = new Map(prev);
+    next.set(id, imgs);
+    return next;
+  });
 
   return {
     navigate,

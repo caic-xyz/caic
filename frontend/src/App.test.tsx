@@ -765,6 +765,29 @@ describe("App keyboard shortcuts", () => {
     expect(api.purgeTask).toHaveBeenCalledWith(task.id);
   });
 
+  it("drops a deleted task's draft before that ID is shown again", async () => {
+    const user = userEvent.setup();
+    renderApp("/task/@task1+do-something");
+
+    const prompt = await screen.findByTestId("task-detail-prompt");
+    await user.type(prompt, "draft that must not survive deletion");
+    expect(prompt).toHaveTextContent("draft that must not survive deletion");
+
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "delete", delete: "task1" });
+    await waitFor(() => expect(screen.getByTestId("prompt-input")).toBeInTheDocument());
+
+    dispatchSSE({ kind: "upsert", upsert: makeTask() });
+    const card = await waitFor(() => {
+      const next = document.querySelector<HTMLElement>("[data-task-id='task1']");
+      if (!next) throw new Error("recreated task card was not rendered");
+      return next;
+    });
+    await user.click(card);
+
+    expect(await screen.findByTestId("task-detail-prompt")).toBeEmptyDOMElement();
+  });
+
   it("requires confirmation when purging without a recovery delay", async () => {
     const user = userEvent.setup();
     const task = makeTask({ state: "running" });
