@@ -75,9 +75,37 @@ private const val SETUP_TIMEOUT_MS = 15_000L
 private const val ICE_GATHERING_TIMEOUT_MS = 10_000L
 private const val ICE_DISCONNECTED_GRACE_MS = 5_000L
 private const val MAX_RECONNECT_ATTEMPTS = 3
+private const val HANG_UP_TOOL_NAME = "hang_up"
 /** Conservative data-channel/model-safe bound for a recovery context update. */
 internal const val MAX_RECOVERY_CONTEXT_CHARS = 8_000
 private val sdpWhitespaceRegex = Regex("\\s+")
+
+/**
+ * Voice-local tool declarations, kept outside the service MCP tool set.
+ * Keep this list and its dispatcher in sync with frontend/src/gomode/VoiceSession.ts.
+ */
+internal fun voiceToolDeclarations(mcpTools: List<ToolDescriptor>): List<ToolDeclaration> = buildList {
+    require(mcpTools.none { it.name == HANG_UP_TOOL_NAME }) {
+        "MCP tool \"$HANG_UP_TOOL_NAME\" conflicts with the reserved voice command."
+    }
+    add(
+        ToolDeclaration(
+            name = HANG_UP_TOOL_NAME,
+            description = "End the current voice conversation immediately when the user asks to hang up, " +
+                "end the call, or stop voice mode.",
+            parameters = JsonObject(emptyMap()),
+        ),
+    )
+    mcpTools.forEach { tool ->
+        add(
+            ToolDeclaration(
+                name = tool.name,
+                description = tool.description.orEmpty(),
+                parameters = tool.inputSchema as? JsonObject ?: JsonObject(emptyMap()),
+            ),
+        )
+    }
+}
 
 internal fun isUsableICECandidate(candidate: String): Boolean {
     val fields = candidate.trim().split(sdpWhitespaceRegex)
@@ -764,14 +792,7 @@ class VoiceSession(
     }
 
     private fun sendSetupMessage(systemInstruction: String) {
-        val tools = mcpTools.map { d ->
-            ToolDeclaration(
-                name = d.name,
-                description = d.description.orEmpty(),
-                parameters = d.inputSchema as? JsonObject ?: JsonObject(emptyMap()),
-            )
-        }
-        val setup = gatewaySessionSetup(tools, systemInstruction)
+        val setup = gatewaySessionSetup(voiceToolDeclarations(mcpTools), systemInstruction)
         Log.i(TAG, "sending setup message")
         send(json.encodeToString(SessionSetup.serializer(), setup))
     }
@@ -853,6 +874,11 @@ class VoiceSession(
     private suspend fun handleToolCall(msg: ToolCall) {
         val id = msg.id
         val name = msg.name
+        if (name == HANG_UP_TOOL_NAME) {
+            Log.i(TAG, "Voice hang-up requested")
+            disconnect()
+            return
+        }
         try {
             _state.update { it.copy(activeTool = name) }
             val args = msg.args as? JsonObject ?: JsonObject(emptyMap())

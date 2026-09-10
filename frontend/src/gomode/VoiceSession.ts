@@ -46,6 +46,7 @@ const ICE_GATHERING_TIMEOUT_MS = 10000;
 const ICE_HOST_CANDIDATE_GRACE_MS = 1000;
 const ICE_DISCONNECTED_GRACE_MS = 5000;
 const MAX_RECONNECT_ATTEMPTS = 3;
+const HANG_UP_TOOL_NAME = "hang_up";
 /** Conservative data-channel/model-safe bound for a recovery context update. */
 export const MAX_RECOVERY_CONTEXT_CHARS = 8000;
 
@@ -56,6 +57,32 @@ export const {
   diagnoseVoiceRTC,
   closeVoiceRTC,
 } = voiceGatewayApi;
+
+/**
+ * Voice-local tool declarations, kept outside the service MCP tool set.
+ * Keep this list and its dispatcher in sync with android/gomode/voice/VoiceSession.kt.
+ */
+export function voiceToolDeclarations(
+  mcpTools: McpToolDescriptor[],
+): SessionSetup["tools"] {
+  if (mcpTools.some((tool) => tool.name === HANG_UP_TOOL_NAME)) {
+    throw new Error(
+      `MCP tool "${HANG_UP_TOOL_NAME}" conflicts with the reserved voice command.`,
+    );
+  }
+  return [
+    {
+      name: HANG_UP_TOOL_NAME,
+      description: "End the current voice conversation immediately when the user asks to hang up, end the call, or stop voice mode.",
+      parameters: { type: "object", properties: {} },
+    },
+    ...mcpTools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.inputSchema,
+    })),
+  ];
+}
 
 // State types
 
@@ -629,11 +656,7 @@ export class VoiceSession {
     systemInstruction: string,
   ): void {
     const setup = gatewaySessionSetup(
-      tools.map((d) => ({
-        name: d.name,
-        description: d.description,
-        parameters: d.inputSchema,
-      })),
+      voiceToolDeclarations(tools),
       systemInstruction,
     );
     this._send(JSON.stringify(setup));
@@ -729,6 +752,10 @@ export class VoiceSession {
 
   private async _handleToolCall(msg: ToolCall): Promise<void> {
     if (!msg.id || !msg.name) return;
+    if (msg.name === HANG_UP_TOOL_NAME) {
+      this.disconnect();
+      return;
+    }
 
     try {
       this._update((s) => {

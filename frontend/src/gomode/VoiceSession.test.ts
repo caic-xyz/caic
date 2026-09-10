@@ -8,14 +8,20 @@ const sdkMocks = vi.hoisted(() => ({
   voiceRTCOffer: vi.fn(async () => ({ sdp: "answer-sdp", sessionID: "session-1" })),
 }));
 
+const mcpMocks = vi.hoisted(() => ({
+  mcpCallTool: vi.fn(),
+  mcpListTools: vi.fn(async () => []),
+  mcpServerInstructions: vi.fn(async () => "instructions"),
+}));
+
 vi.mock("@voicegateway-sdk/api.gen", () => ({
   createApiClient: () => sdkMocks,
 }));
 
 vi.mock("./McpClient", () => ({
-  mcpCallTool: vi.fn(),
-  mcpListTools: vi.fn(async () => []),
-  mcpServerInstructions: vi.fn(async () => "instructions"),
+  mcpCallTool: mcpMocks.mcpCallTool,
+  mcpListTools: mcpMocks.mcpListTools,
+  mcpServerInstructions: mcpMocks.mcpServerInstructions,
 }));
 
 import {
@@ -24,12 +30,19 @@ import {
   MAX_RECOVERY_CONTEXT_CHARS,
   summarizeSDPCandidates,
   VoiceSession,
+  voiceToolDeclarations,
 } from "./VoiceSession";
 import {
+  MessageKindToolCall,
+  type ToolCall,
   VoiceRTCConnectivityIssueUDPUnreachable,
   VoiceRTCConnectivitySideNetwork,
   type VoiceRTCDiagnosticsResp,
 } from "@voicegateway-sdk/types.gen";
+
+type VoiceSessionToolCallHandler = {
+  _handleToolCall(msg: ToolCall): Promise<void>;
+};
 
 class FakePeerConnection extends EventTarget {
   static completeICE = true;
@@ -110,6 +123,7 @@ beforeEach(() => {
   sdkMocks.diagnoseVoiceRTC.mockReset();
   sdkMocks.voiceRTCOffer.mockReset();
   sdkMocks.voiceRTCOffer.mockResolvedValue({ sdp: "answer-sdp", sessionID: "session-1" });
+  mcpMocks.mcpCallTool.mockReset();
   vi.stubGlobal("RTCPeerConnection", FakePeerConnection as unknown as typeof RTCPeerConnection);
   vi.stubGlobal("AudioContext", FakeAudioContext as unknown as typeof AudioContext);
   vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
@@ -143,6 +157,36 @@ class FakeAudioContext {
 }
 
 describe("VoiceSession", () => {
+  it("keeps hang_up local to voice and rejects MCP name conflicts", async () => {
+    const tools = voiceToolDeclarations([
+      {
+        name: "tasks_list",
+        description: "List tasks",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ]);
+    expect(tools.map((tool) => tool.name)).toEqual(["hang_up", "tasks_list"]);
+
+    expect(() => voiceToolDeclarations([
+      {
+        name: "hang_up",
+        description: "Unexpected MCP tool",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ])).toThrow('MCP tool "hang_up" conflicts with the reserved voice command.');
+
+    const session = new VoiceSession();
+    await (session as unknown as VoiceSessionToolCallHandler)._handleToolCall({
+      kind: MessageKindToolCall,
+      id: "hang-up-1",
+      name: "hang_up",
+      args: {},
+    });
+
+    expect(mcpMocks.mcpCallTool).not.toHaveBeenCalled();
+    expect(session.state.connected).toBe(false);
+  });
+
   it("sends the complete local SDP after ICE gathering", async () => {
     const session = new VoiceSession();
 
