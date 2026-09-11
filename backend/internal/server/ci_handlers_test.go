@@ -12,6 +12,8 @@ import (
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/forge"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
@@ -157,6 +159,36 @@ func TestCIHandlers(t *testing.T) {
 			}
 			if err.Message != "no forge token configured for this repo" {
 				t.Errorf("message = %q, want forge access guidance", err.Message)
+			}
+		})
+
+		t.Run("missing check", func(t *testing.T) {
+			t.Parallel()
+
+			s := newTestRouter(t, nil)
+			forgeManager := forgemgr.New(testLogger(), "test-token", "", nil, forgemgr.NoOAuthTokenSource())
+			s.forgeMgr = forgeManager
+			s.ciHandlers.forgeMgr = forgeManager
+			checkout := newRouterTestCheckout(t.TempDir())
+			checkout.Repository = &repo.Repository{ForgeKind: forge.KindGitHub, ForgeOwner: "acme", ForgeRepo: "project"}
+			registerRouterCheckout(t, s.checkouts, "project", checkout)
+			task := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
+			task.Repos = []taskslog.RepoMount{{Name: "project"}}
+			insertTestTask(s, "t1", task)
+			w := httptest.NewRecorder()
+			r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/ci/log/t1?jobID=1", nil)
+			r.SetPathValue("id", "t1")
+			s.ciHandlers.handleGetCILog(w, r)
+
+			if w.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want %d", w.Code, http.StatusNotFound)
+			}
+			err := decodeError(t, w)
+			if err.Code != api.CodeNotFound {
+				t.Errorf("code = %q, want %q", err.Code, api.CodeNotFound)
+			}
+			if err.Message != "CI check not found" {
+				t.Errorf("message = %q, want CI check not found", err.Message)
 			}
 		})
 	})

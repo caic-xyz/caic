@@ -5,6 +5,8 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +22,26 @@ import (
 
 func TestServerHandlers(t *testing.T) {
 	t.Parallel()
+	t.Run("repo branches unknown repository", func(t *testing.T) {
+		t.Parallel()
+
+		s := newTestRouter(t, nil)
+		w := httptest.NewRecorder()
+		r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/server/repos/branches?repo=mistyped", nil)
+		s.serverHandlers.handleListRepoBranches(w, r)
+
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusNotFound)
+		}
+		err := decodeError(t, w)
+		if err.Code != api.CodeNotFound {
+			t.Errorf("code = %q, want %q", err.Code, api.CodeNotFound)
+		}
+		if err.Message != "repository not found" {
+			t.Errorf("message = %q, want repository not found", err.Message)
+		}
+	})
+
 	t.Run("list_harnesses", func(t *testing.T) {
 		t.Parallel()
 

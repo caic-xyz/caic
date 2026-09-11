@@ -410,7 +410,7 @@ func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.R
 	}
 	info, ok := h.checkouts.Checkout(repoPath)
 	if !ok {
-		writeError(r.Context(), w, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "repo not found" + " not found"})
+		writeError(r.Context(), w, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "repository not found"})
 		return
 	}
 	absPath := info.Dir
