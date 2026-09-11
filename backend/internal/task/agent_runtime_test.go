@@ -1,5 +1,4 @@
-// Tests for AgentRuntime: task runtime and agent-session operations through
-// Start, Cleanup, StopTask, ReviveTask, and ForkTask.
+// Tests and benchmarks for AgentRuntime task setup, sessions, and lifecycle.
 
 package task
 
@@ -8,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"os"
@@ -83,6 +83,26 @@ type metadataRuntime struct {
 	metadata runtime.Metadata
 }
 
+type branchCheckingRuntime struct {
+	*runtimetest.FakeBackend
+
+	dir     string
+	checked bool
+}
+
+func (r *branchCheckingRuntime) Launch(ctx context.Context, repos []runtime.Repo, opts *runtime.StartOptions) (runtime.ID, error) {
+	if len(repos) != 1 {
+		return "", fmt.Errorf("launch received %d repos, want 1", len(repos))
+	}
+	branch := repos[0].Branch
+	cmd := exec.CommandContext(ctx, "git", "-C", r.dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch) //nolint:gosec // controlled test arguments
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("mapped branch %q did not exist at launch: %w: %s", branch, err, out)
+	}
+	r.checked = true
+	return r.FakeBackend.Launch(ctx, repos, opts)
+}
+
 func (r *metadataRuntime) Launch(ctx context.Context, repos []runtime.Repo, opts *runtime.StartOptions) (runtime.ID, error) {
 	r.metadata = maps.Clone(opts.Metadata)
 	return r.FakeBackend.Launch(ctx, repos, opts)
@@ -130,7 +150,7 @@ func (r *forkLogRuntime) destPrimary(hostPath string) (string, bool) {
 	return "", false
 }
 
-func newTestCheckout(t *testing.T, baseBranch, dir string, backend testRuntimeBackend) *repo.Checkout {
+func newTestCheckout(t testing.TB, baseBranch, dir string, backend testRuntimeBackend) *repo.Checkout {
 	checkout := &repo.Checkout{
 		BaseBranch: baseBranch,
 		Dir:        dir,
@@ -141,7 +161,7 @@ func newTestCheckout(t *testing.T, baseBranch, dir string, backend testRuntimeBa
 	return checkout
 }
 
-func newTestRuntimeRouter(t *testing.T, backend testRuntimeBackend) *runtime.Router {
+func newTestRuntimeRouter(t testing.TB, backend testRuntimeBackend) *runtime.Router {
 	if backend == nil {
 		return nil
 	}
@@ -152,7 +172,7 @@ func newTestRuntimeRouter(t *testing.T, backend testRuntimeBackend) *runtime.Rou
 	return rt
 }
 
-func newTestAgentRuntime(t *testing.T, checkout *repo.Checkout, logDir string, backends map[harness.Name]agent.Backend) *AgentRuntime {
+func newTestAgentRuntime(t testing.TB, checkout *repo.Checkout, logDir string, backends map[harness.Name]agent.Backend) *AgentRuntime {
 	var runtimes *runtime.Router
 	if value, ok := testCheckoutRuntimes.Load(checkout); ok {
 		runtimes, _ = value.(*runtime.Router)
@@ -169,7 +189,7 @@ func newTestAgentRuntime(t *testing.T, checkout *repo.Checkout, logDir string, b
 	}
 }
 
-func newTestAgentRuntimeWithRuntime(t *testing.T, backend testRuntimeBackend, backends map[harness.Name]agent.Backend, logDir string) *AgentRuntime {
+func newTestAgentRuntimeWithRuntime(t testing.TB, backend testRuntimeBackend, backends map[harness.Name]agent.Backend, logDir string) *AgentRuntime {
 	r := newTestAgentRuntime(t, nil, logDir, backends)
 	if backend == nil {
 		return r
@@ -476,6 +496,41 @@ func TestRunner(t *testing.T) {
 
 	t.Run("Setup", func(t *testing.T) {
 		t.Parallel()
+		t.Run("CreatesBranchBeforeLaunch", func(t *testing.T) {
+			t.Parallel()
+			clone := initTestRepo(t, "main")
+			runtimeBackend := &branchCheckingRuntime{FakeBackend: testContainer(), dir: clone}
+			checkout := newTestCheckout(t, "main", clone, runtimeBackend)
+			r := newTestAgentRuntime(t, checkout, t.TempDir(), nil)
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "")
+			tk.Repos = []taskslog.RepoMount{{Name: "org/repo", GitRoot: clone}}
+
+			tk.SetRepoBranch(0, checkout.ReserveBranchName())
+			if _, err := r.setup(t.Context(), tk, nil, "", nil); err != nil {
+				t.Fatal(err)
+			}
+			if !runtimeBackend.checked {
+				t.Fatal("runtime launch did not validate the mapped branch")
+			}
+		})
+		t.Run("BranchFailurePreventsLaunch", func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			runtimeBackend := testContainer()
+			checkout := newTestCheckout(t, "main", dir, runtimeBackend)
+			r := newTestAgentRuntime(t, checkout, t.TempDir(), nil)
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "")
+			tk.Repos = []taskslog.RepoMount{{Name: "org/repo", GitRoot: dir}}
+
+			tk.SetRepoBranch(0, checkout.ReserveBranchName())
+			if _, err := r.setup(t.Context(), tk, nil, "", nil); err == nil {
+				t.Fatal("setup succeeded for a directory that is not a git repository")
+			}
+			instanceID := runtime.NewID(runtimeBackend.Name(), "fake-container")
+			if got := runtimeBackend.Status(instanceID); got != runtimetest.StatusAbsent {
+				t.Fatalf("runtime status = %s, want absent", got)
+			}
+		})
 		t.Run("CustomBaseBranch", func(t *testing.T) {
 			t.Parallel()
 			// Verify that setup creates the task branch from t.BaseBranch
@@ -1093,6 +1148,32 @@ func TestRunner(t *testing.T) {
 			fork.CloseAndDetachSession(t.Context())
 		})
 	})
+}
+
+func BenchmarkAgentRuntimeSetup(b *testing.B) {
+	clone := initTestRepo(b, "main")
+	runtimeBackend := testContainer()
+	checkout := newTestCheckout(b, "main", clone, runtimeBackend)
+	r := newTestAgentRuntime(b, checkout, b.TempDir(), nil)
+	r.Log = testLogger()
+
+	b.ResetTimer()
+	for range b.N {
+		b.StopTimer()
+		tk := mustNewTask(b, ksid.NewID(), agent.Prompt{Text: "benchmark"}, harness.Claude, "", "")
+		tk.Repos = []taskslog.RepoMount{{Name: "org/repo", GitRoot: clone}}
+		branch := checkout.ReserveBranchName()
+		tk.SetRepoBranch(0, branch)
+		b.StartTimer()
+
+		if _, err := r.setup(b.Context(), tk, nil, "", nil); err != nil {
+			b.Fatal(err)
+		}
+
+		b.StopTimer()
+		runGit(b, clone, "branch", "-D", branch)
+		b.StartTimer()
+	}
 }
 
 func testRunnerSessions(t *testing.T) {

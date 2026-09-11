@@ -419,8 +419,8 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 
 	// Run setup under the lifecycle context.
 	entry.Lifecycle.wg.Go(func() {
-		// The primary's branch is created by the agent runtime concurrently with instance
-		// launch, so it only needs a name reserved; extras are created here.
+		// The primary's branch is created by the agent runtime before instance launch,
+		// so it only needs a name reserved; extras are created here.
 		if err := m.allocateBranches(entry.Lifecycle.ctx, t, mounts, 1); err != nil {
 			entry.Finish(&taskslog.Result{State: taskslog.StateFailed, Err: internalErr(err, "allocate branch")})
 			m.NotifyTaskChange()
@@ -1022,8 +1022,8 @@ func (m *Manager) repoBasenameCollides(relPath string) bool {
 // allocateBranches assigns every repo of a task its own branch name, uniformly —
 // the Manager owns branch-name allocation for all repos, with no special case for
 // the primary. mounts[:reserveOnly] are repos whose branch is created elsewhere
-// (by md.Fork for a fork's source repos, or by the agent runtime concurrently with
-// launch for a fresh task's primary), so they only need a name reserved.
+// (by md.Fork for a fork's source repos, or by the agent runtime before launch for
+// a fresh task's primary), so they only need a name reserved.
 // mounts[reserveOnly:] are new to the host, so their branch is created here from
 // their own checkout.
 //

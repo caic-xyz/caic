@@ -15,8 +15,6 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/sync/errgroup"
-
 	"github.com/caic-xyz/md"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -231,9 +229,9 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 	if r.Checkout != nil {
 		t.SetState(taskslog.StateBranching)
 	}
-	// The Manager has already assigned every repo's branch name (the branch itself
-	// is created below, concurrently with launch), so the log can open with the
-	// durable, branch-derived filename and persist output from its first line.
+	// The Manager has already assigned every repo's branch name. The branch is
+	// created during setup, so the log can open with the durable, branch-derived
+	// filename and persist output from its first line.
 	log, err := r.openLog(t)
 	if err != nil {
 		t.recordStartupFailure(ctx, err)
@@ -241,7 +239,7 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 	}
 
 	tStart := time.Now()
-	// 1. Create branch (serialized) + start instance (concurrent).
+	// 1. Create the branch, then start the instance.
 	r.Log.Info("setup task")
 	region := trace.StartRegion(ctx, "setup")
 	metadata := maps.Clone(r.RuntimeMetadata)
@@ -789,10 +787,9 @@ func (r *AgentRuntime) branchDiffStat(ctx context.Context, t *Task) (agent.DiffS
 	return r.Checkout.DiffStat(ctx, r.Log, r.Runtimes, id, repos)
 }
 
-// setup reserves a branch name, starts the instance (Phase A) and creates the
-// git branch concurrently, then completes instance startup (Phase B).
-// Phase A (runtime launch) and git fetch+branch-create overlap, cutting the
-// branch-allocation time off the critical path.
+// setup creates the reserved task branch before launching the runtime, then
+// connects to the instance. The ordering ensures runtimes never receive a
+// mapped branch that does not exist yet.
 func (r *AgentRuntime) setup(ctx context.Context, t *Task, metadata runtime.Metadata, resolvedGitHubToken string, log agent.LogSink) (setupResult, error) {
 	t.SetState(taskslog.StateProvisioning)
 	detached := context.WithoutCancel(ctx)
@@ -827,51 +824,34 @@ func (r *AgentRuntime) setup(ctx context.Context, t *Task, metadata runtime.Meta
 		LogWriter:         provisioningLog,
 	}
 
-	// Phase A: runtime launch + connection config. Branch creation runs concurrently so
-	// git fetch overlaps with instance connection startup.
 	var repos []runtime.Repo
 	if r.Checkout != nil {
 		repos = t.RuntimeRepos()
-	}
-	var instanceID runtime.ID
-	r.Log.Debug("checkout", "msg", "provisioning phase A: launching instance and creating branch", "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "sudo", opts.Sudo, "repos_count", len(repos))
-	eg, egCtx := errgroup.WithContext(startCtx)
-	eg.Go(func() error {
-		defer trace.StartRegion(egCtx, "instance-launch").End()
-		r.Log.Debug("checkout", "msg", "calling instance.Launch", "branch", primaryBranch)
-		id, err := r.Runtimes.Launch(egCtx, repos, opts)
+		r.Log.Debug("checkout", "msg", "fetching and creating branch", "branch", primaryBranch)
+		region := trace.StartRegion(startCtx, "branch-create")
+		err := r.Checkout.FetchAndCreateBranch(startCtx, r.Log, t, primaryBranch)
+		region.End()
 		if err != nil {
-			r.Log.Error("checkout", "msg", "instance.Launch failed", "branch", primaryBranch, "err", err)
-			return err
+			r.Log.Error("checkout", "msg", "fetchAndCreateBranch failed", "branch", primaryBranch, "err", err)
+			return setupResult{}, errors.Join(err, provisioningLog.Flush())
 		}
-		r.Log.Debug("checkout", "msg", "instance.Launch succeeded", "instance", id)
-		instanceID = id
-		return nil
-	})
-	if r.Checkout != nil {
-		eg.Go(func() error {
-			defer trace.StartRegion(egCtx, "branch-create").End()
-			r.Log.Debug("checkout", "msg", "fetching and creating branch", "branch", primaryBranch)
-			err := r.Checkout.FetchAndCreateBranch(egCtx, r.Log, t, primaryBranch)
-			if err != nil {
-				r.Log.Error("checkout", "msg", "fetchAndCreateBranch failed", "branch", primaryBranch, "err", err)
-			} else {
-				r.Log.Debug("checkout", "msg", "fetchAndCreateBranch succeeded", "branch", primaryBranch)
-			}
-			return err
-		})
+		r.Log.Debug("checkout", "msg", "fetchAndCreateBranch succeeded", "branch", primaryBranch)
 	}
-	r.Log.Debug("checkout", "msg", "waiting for phase A errgroup")
-	if err := eg.Wait(); err != nil {
+
+	r.Log.Debug("checkout", "msg", "calling instance.Launch", "branch", primaryBranch, "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "sudo", opts.Sudo, "repos_count", len(repos))
+	region := trace.StartRegion(startCtx, "instance-launch")
+	instanceID, err := r.Runtimes.Launch(startCtx, repos, opts)
+	region.End()
+	if err != nil {
+		r.Log.Error("checkout", "msg", "instance.Launch failed", "branch", primaryBranch, "err", err)
 		return setupResult{}, errors.Join(err, provisioningLog.Flush())
 	}
+	r.Log.Debug("checkout", "msg", "instance.Launch succeeded", "instance", instanceID)
 	if err := provisioningLog.Flush(); err != nil {
 		return setupResult{}, err
 	}
-	r.Log.Debug("checkout", "msg", "phase A complete", "instance", instanceID)
 
-	// Phase B: wait for runtime connection + push (branch now exists locally).
-	r.Log.Debug("checkout", "msg", "provisioning phase B: connecting to instance", "instance", instanceID)
+	r.Log.Debug("checkout", "msg", "connecting to instance", "instance", instanceID)
 	conn, err := r.Runtimes.Connect(startCtx, instanceID, opts)
 	if err != nil {
 		r.Log.Error("checkout", "msg", "instance.Connect failed", "instance", instanceID, "err", err)
