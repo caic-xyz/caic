@@ -4,6 +4,7 @@
 
 - **Prompt**: Before editing any files, call AskUserQuestion with one question. The header must be "Greeting", the question must be "Which greeting should main.go print?", and the options must be "Hello" and "Hi". After I answer, update main.go to print that greeting, then run cat main.go.
 - **Harness**: claude
+- **Model**: claude-haiku-4-5-20251001
 - **Started**: 2026-06-24 18:03:43
 - **State**: completed
 

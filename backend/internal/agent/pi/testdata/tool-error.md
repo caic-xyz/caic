@@ -4,6 +4,7 @@
 
 - **Prompt**: Read the file nonexistent_file.txt
 - **Harness**: pi
+- **Model**: xiaomi/mimo-v2.5
 - **Started**: 2026-05-28 22:47:50
 - **State**: completed
 

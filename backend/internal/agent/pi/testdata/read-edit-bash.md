@@ -4,6 +4,7 @@
 
 - **Prompt**: Read main.go, edit the greeting on line 3 from "Hello" to "Hi", then run cat main.go.
 - **Harness**: pi
+- **Model**: xiaomi/mimo-v2.5-pro
 - **Started**: 2026-05-28 21:16:02
 - **State**: completed
 

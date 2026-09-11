@@ -4,6 +4,7 @@
 
 - **Prompt**: Read the file nonexistent_file.txt
 - **Harness**: claude
+- **Model**: claude-haiku-4-5-20251001
 - **Started**: 2026-06-24 18:04:25
 - **State**: completed
 

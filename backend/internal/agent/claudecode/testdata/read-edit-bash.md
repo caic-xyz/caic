@@ -4,6 +4,7 @@
 
 - **Prompt**: Read main.go, edit the greeting on line 3 from "Hello" to "Hi", then run cat main.go.
 - **Harness**: claude
+- **Model**: claude-haiku-4-5-20251001
 - **Started**: 2026-06-24 18:04:05
 - **State**: completed
 
