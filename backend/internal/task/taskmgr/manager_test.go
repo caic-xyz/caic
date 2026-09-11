@@ -3030,6 +3030,9 @@ func TestManager(t *testing.T) {
 			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
 			}
+			if te.Code != CodeUnknownHarness {
+				t.Errorf("Code = %q, want %q", te.Code, CodeUnknownHarness)
+			}
 		})
 		t.Run("error_unsupported_model", func(t *testing.T) {
 			t.Parallel()
@@ -3044,6 +3047,9 @@ func TestManager(t *testing.T) {
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
+			}
+			if te.Code != CodeUnsupportedModel {
+				t.Errorf("Code = %q, want %q", te.Code, CodeUnsupportedModel)
 			}
 		})
 		t.Run("error_unknown_extra_repo", func(t *testing.T) {
@@ -3089,6 +3095,9 @@ func TestManager(t *testing.T) {
 			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
 			}
+			if te.Code != CodeUnknownHarness {
+				t.Errorf("Code = %q, want %q", te.Code, CodeUnknownHarness)
+			}
 		})
 		t.Run("error_unsupported_model", func(t *testing.T) {
 			t.Parallel()
@@ -3097,6 +3106,9 @@ func TestManager(t *testing.T) {
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
+			}
+			if te.Code != CodeUnsupportedModel {
+				t.Errorf("Code = %q, want %q", te.Code, CodeUnsupportedModel)
 			}
 		})
 		t.Run("error_model_with_new_harness", func(t *testing.T) {
@@ -3110,6 +3122,46 @@ func TestManager(t *testing.T) {
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
+			}
+			if te.Code != CodeUnsupportedModel {
+				t.Errorf("Code = %q, want %q", te.Code, CodeUnsupportedModel)
+			}
+		})
+		t.Run("error_inherited_model_with_new_harness", func(t *testing.T) {
+			t.Parallel()
+			backends := map[harness.Name]agent.Backend{
+				"fake":  &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire},
+				"fake2": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m2"}}}, WireFactory: claudecode.New().NewWire},
+			}
+			e := forkSetup(t, "fake", backends)
+			e.Task().RequestedModel = "m1"
+			_, err := e.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}, Harness: "fake2"})
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindBadRequest {
+				t.Fatalf("err = %v, want KindBadRequest", err)
+			}
+			if te.Code != CodeUnsupportedModel {
+				t.Errorf("Code = %q, want %q", te.Code, CodeUnsupportedModel)
+			}
+		})
+		t.Run("new_harness_preserves_inherited_model", func(t *testing.T) {
+			t.Parallel()
+			backends := map[harness.Name]agent.Backend{
+				"fake":  &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire},
+				"fake2": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire},
+			}
+			e := forkSetup(t, "fake", backends)
+			e.Task().RequestedModel = "m1"
+			id, err := e.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}, Harness: "fake2"})
+			if err != nil {
+				t.Fatalf("Fork: %v", err)
+			}
+			fork, ok := e.Lifecycle.manager.GetEntry(id)
+			if !ok {
+				t.Fatalf("forked task %q not found", id)
+			}
+			if got := fork.Task().RequestedModel; got != "m1" {
+				t.Errorf("forked model = %q, want inherited m1", got)
 			}
 		})
 		t.Run("error_no_container", func(t *testing.T) {
@@ -3142,13 +3194,16 @@ func TestManager(t *testing.T) {
 				t.Fatalf("err = %v, want KindBadRequest", err)
 			}
 		})
-		t.Run("error_unknown_harness_when_model_set", func(t *testing.T) {
+		t.Run("error_unavailable_source_harness_is_generic", func(t *testing.T) {
 			t.Parallel()
 			e := forkSetup(t, "bogus", defaultBackends)
 			_, err := e.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}, Model: "m1"})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
+			}
+			if te.Code != "" {
+				t.Errorf("Code = %q, want generic bad request", te.Code)
 			}
 		})
 	})

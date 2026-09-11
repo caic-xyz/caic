@@ -12,7 +12,9 @@ type ErrorCode string
 // Error codes.
 const (
 	CodeBadRequest               ErrorCode = "BAD_REQUEST"
+	CodeUnknownHarness           ErrorCode = "UNKNOWN_HARNESS"
 	CodeUnknownRepository        ErrorCode = "UNKNOWN_REPOSITORY"
+	CodeUnsupportedModel         ErrorCode = "UNSUPPORTED_MODEL"
 	CodeInvalidOAuthState        ErrorCode = "INVALID_OAUTH_STATE"
 	CodeOAuthGrantNotFound       ErrorCode = "OAUTH_GRANT_NOT_FOUND"
 	CodeOAuthProviderUnavailable ErrorCode = "OAUTH_PROVIDER_UNAVAILABLE"

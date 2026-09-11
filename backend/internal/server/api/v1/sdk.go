@@ -68,7 +68,9 @@ func SDKAPI() apispec.Config {
 		Discriminated: []string{"EventMessage", "TaskListEvent"},
 		ErrorCodes: []apispec.ErrorCode{
 			{Code: string(api.CodeBadRequest), Status: 400},
+			{Code: string(api.CodeUnknownHarness), Status: 400},
 			{Code: string(api.CodeUnknownRepository), Status: 400},
+			{Code: string(api.CodeUnsupportedModel), Status: 400},
 			{Code: string(api.CodeInvalidOAuthState), Status: 400},
 			{Code: string(api.CodeUnknownCache), Status: 400},
 			{Code: string(api.CodeUnknownRuntime), Status: 400},

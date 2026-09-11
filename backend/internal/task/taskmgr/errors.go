@@ -11,8 +11,14 @@ import (
 type Code string
 
 const (
+	// CodeUnknownHarness reports a coding agent harness that is unavailable.
+	CodeUnknownHarness Code = "UNKNOWN_HARNESS"
 	// CodeUnknownRepository reports a repository that is not registered with caic.
 	CodeUnknownRepository Code = "UNKNOWN_REPOSITORY"
+	// CodeUnsupportedModel reports a model unavailable from the selected harness.
+	CodeUnsupportedModel Code = "UNSUPPORTED_MODEL"
+	// CodeUnknownRuntime reports a runtime that is unavailable.
+	CodeUnknownRuntime Code = "UNKNOWN_RUNTIME"
 )
 
 // ErrNoSession is a sentinel reported by Manager.SendInput when the task has no

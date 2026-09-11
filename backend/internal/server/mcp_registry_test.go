@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/maruel/ksid"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
@@ -19,9 +21,11 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
 
@@ -325,6 +329,295 @@ func TestCaicToolRegistryHandleTaskCreateUnknownRepository(t *testing.T) {
 				t.Errorf("error code metadata = %q, want %q", got, api.CodeUnknownRepository)
 			}
 		})
+	}
+}
+
+func TestCaicToolRegistryHandleTaskCreateSelectionErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		args     mcpTaskCreateArgs
+		want     string
+		wantCode api.ErrorCode
+	}{
+		{
+			name:     "unknown harness",
+			args:     mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}, Harness: "mistyped"},
+			want:     `unsupported harness "mistyped". Omit harness to use caic's default harness, then retry task_create.`,
+			wantCode: api.CodeUnknownHarness,
+		},
+		{
+			name:     "unsupported model",
+			args:     mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}, Harness: "claude", Model: "mistyped"},
+			want:     "unsupported model for claude: mistyped. Omit model to use the selected harness's default model, then retry task_create.",
+			wantCode: api.CodeUnsupportedModel,
+		},
+		{
+			name:     "unknown runtime",
+			args:     mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}, Harness: "claude", RuntimeName: "mistyped"},
+			want:     "unknown runtime: mistyped. Omit runtimeName to use caic's default runtime, then retry task_create.",
+			wantCode: api.CodeUnknownRuntime,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := newMCPTaskCreateTestRouter(t)
+			c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
+			result := c.handleTaskCreate(t.Context(), tt.args)
+			if !result.IsError {
+				t.Fatal("handleTaskCreate() did not return a tool error")
+			}
+			output, ok := result.Structured.(mcp.ErrorOutput)
+			if !ok {
+				t.Fatalf("result type = %T, want mcp.ErrorOutput", result.Structured)
+			}
+			if output.Error != tt.want {
+				t.Errorf("error = %q, want %q", output.Error, tt.want)
+			}
+			if got := result.Meta[mcp.ToolErrorCodeMetaKey]; got != string(tt.wantCode) {
+				t.Errorf("error code metadata = %q, want %q", got, tt.wantCode)
+			}
+		})
+	}
+}
+
+func TestCaicToolRegistryHandleTaskCreateDoesNotSuggestUnsafeRecovery(t *testing.T) {
+	t.Parallel()
+
+	s := newMCPTaskCreateTestRouter(t)
+	c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
+	result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{
+		Prompt:  "do the task",
+		Repos:   []string{"myrepo"},
+		Harness: "mistyped",
+		Model:   "pi-default",
+	})
+	if !result.IsError {
+		t.Fatal("handleTaskCreate() did not return a tool error")
+	}
+	output, ok := result.Structured.(mcp.ErrorOutput)
+	if !ok {
+		t.Fatalf("result type = %T, want mcp.ErrorOutput", result.Structured)
+	}
+	if output.Error != `unsupported harness "mistyped"` {
+		t.Errorf("error = %q, want unadvised unknown-harness error", output.Error)
+	}
+	if got := result.Meta[mcp.ToolErrorCodeMetaKey]; got != string(api.CodeUnknownHarness) {
+		t.Errorf("error code metadata = %q, want %q", got, api.CodeUnknownHarness)
+	}
+}
+
+func TestCaicToolRegistryHandleTaskCreateDoesNotSuggestRuntimeRecoveryWithoutDefault(t *testing.T) {
+	t.Parallel()
+
+	s := newMCPTaskCreateTestRouter(t)
+	s.taskMgr.Runtimes = &runtime.Router{}
+	c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
+	result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{
+		Prompt:      "do the task",
+		Repos:       []string{"myrepo"},
+		Harness:     "claude",
+		RuntimeName: "mistyped",
+	})
+	if !result.IsError {
+		t.Fatal("handleTaskCreate() did not return a tool error")
+	}
+	output, ok := result.Structured.(mcp.ErrorOutput)
+	if !ok {
+		t.Fatalf("result type = %T, want mcp.ErrorOutput", result.Structured)
+	}
+	if output.Error != "unknown runtime: mistyped" {
+		t.Errorf("error = %q, want unadvised unknown-runtime error", output.Error)
+	}
+	if got := result.Meta[mcp.ToolErrorCodeMetaKey]; got != string(api.CodeUnknownRuntime) {
+		t.Errorf("error code metadata = %q, want %q", got, api.CodeUnknownRuntime)
+	}
+}
+
+func TestCaicToolRegistryHandleTaskCreateDefaultResolutionFailureIsGeneric(t *testing.T) {
+	t.Parallel()
+
+	s := newMCPTaskCreateTestRouter(t)
+	if err := s.prefs.Update("default", func(p *preferences.Preferences) {
+		p.Harness = "mistyped"
+	}); err != nil {
+		t.Fatal(err)
+	}
+	c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
+	result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}})
+	if !result.IsError {
+		t.Fatal("handleTaskCreate() did not return a tool error")
+	}
+	output, ok := result.Structured.(mcp.ErrorOutput)
+	if !ok {
+		t.Fatalf("result type = %T, want mcp.ErrorOutput", result.Structured)
+	}
+	if output.Error != `unsupported harness "mistyped"` {
+		t.Errorf("error = %q, want generic default-resolution error", output.Error)
+	}
+	if result.Meta != nil {
+		t.Errorf("metadata = %#v, want no selection-code metadata", result.Meta)
+	}
+}
+
+func TestCaicToolRegistryHandleTaskCreateUnavailableDefaultHarnessIsGeneric(t *testing.T) {
+	t.Parallel()
+
+	s := newMCPTaskCreateTestRouter(t)
+	if err := s.prefs.Update("default", func(p *preferences.Preferences) {
+		p.Harness = string(harness.Codex)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
+	result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}})
+	if !result.IsError {
+		t.Fatal("handleTaskCreate() did not return a tool error")
+	}
+	output, ok := result.Structured.(mcp.ErrorOutput)
+	if !ok {
+		t.Fatalf("result type = %T, want mcp.ErrorOutput", result.Structured)
+	}
+	if output.Error != "unknown harness: codex" {
+		t.Errorf("error = %q, want generic unavailable-default error", output.Error)
+	}
+	if result.Meta != nil {
+		t.Errorf("metadata = %#v, want no selection-code metadata", result.Meta)
+	}
+}
+
+func TestCaicToolRegistryHandleTaskForkSelectionErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		args     mcpTaskForkArgs
+		want     string
+		wantCode api.ErrorCode
+	}{
+		{
+			name:     "unknown override harness",
+			args:     mcpTaskForkArgs{TaskNumber: 1, Prompt: "fork", Harness: "mistyped"},
+			want:     `unsupported harness "mistyped". Omit harness to inherit the source task's harness, then retry task_fork.`,
+			wantCode: api.CodeUnknownHarness,
+		},
+		{
+			name:     "unsupported override model",
+			args:     mcpTaskForkArgs{TaskNumber: 1, Prompt: "fork", Harness: "claude", Model: "mistyped"},
+			want:     "unsupported model for claude: mistyped. Omit model to inherit the source task's model, then retry task_fork.",
+			wantCode: api.CodeUnsupportedModel,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := newMCPTaskCreateTestRouter(t)
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "source"}, harness.Claude)
+			tk.Repos = []taskslog.RepoMount{{Name: "myrepo", Branch: "main"}}
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "source"), runtime.ConnectionTarget{}, "", "", 0)
+			tk.SetState(taskslog.StateWaiting)
+			insertTestTask(s, tk.ID.String(), tk)
+			c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
+
+			result := c.handleTaskFork(t.Context(), tt.args)
+			if !result.IsError {
+				t.Fatal("handleTaskFork() did not return a tool error")
+			}
+			output, ok := result.Structured.(mcp.ErrorOutput)
+			if !ok {
+				t.Fatalf("result type = %T, want mcp.ErrorOutput", result.Structured)
+			}
+			if output.Error != tt.want {
+				t.Errorf("error = %q, want %q", output.Error, tt.want)
+			}
+			if got := result.Meta[mcp.ToolErrorCodeMetaKey]; got != string(tt.wantCode) {
+				t.Errorf("error code metadata = %q, want %q", got, tt.wantCode)
+			}
+		})
+	}
+}
+
+func TestCaicToolRegistryHandleTaskForkDoesNotSuggestUnsafeRecovery(t *testing.T) {
+	t.Parallel()
+
+	s := newMCPTaskCreateTestRouter(t)
+	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "source"}, harness.Claude)
+	tk.Repos = []taskslog.RepoMount{{Name: "myrepo", Branch: "main"}}
+	tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "source"), runtime.ConnectionTarget{}, "", "", 0)
+	tk.SetState(taskslog.StateWaiting)
+	insertTestTask(s, tk.ID.String(), tk)
+	c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
+	result := c.handleTaskFork(t.Context(), mcpTaskForkArgs{TaskNumber: 1, Prompt: "fork", Harness: "mistyped", Model: "pi-default"})
+	if !result.IsError {
+		t.Fatal("handleTaskFork() did not return a tool error")
+	}
+	output, ok := result.Structured.(mcp.ErrorOutput)
+	if !ok {
+		t.Fatalf("result type = %T, want mcp.ErrorOutput", result.Structured)
+	}
+	if output.Error != `unsupported harness "mistyped"` {
+		t.Errorf("error = %q, want unadvised unknown-harness error", output.Error)
+	}
+	if got := result.Meta[mcp.ToolErrorCodeMetaKey]; got != string(api.CodeUnknownHarness) {
+		t.Errorf("error code metadata = %q, want %q", got, api.CodeUnknownHarness)
+	}
+}
+
+func TestCaicToolRegistryHandleTaskForkDoesNotSuggestRecoveryForRetiredSourceModel(t *testing.T) {
+	t.Parallel()
+
+	s := newMCPTaskCreateTestRouter(t)
+	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "source"}, harness.Claude)
+	tk.RequestedModel = "retired-model"
+	tk.Repos = []taskslog.RepoMount{{Name: "myrepo", Branch: "main"}}
+	tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "source"), runtime.ConnectionTarget{}, "", "", 0)
+	tk.SetState(taskslog.StateWaiting)
+	insertTestTask(s, tk.ID.String(), tk)
+	c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
+	result := c.handleTaskFork(t.Context(), mcpTaskForkArgs{TaskNumber: 1, Prompt: "fork", Harness: "mistyped"})
+	if !result.IsError {
+		t.Fatal("handleTaskFork() did not return a tool error")
+	}
+	output, ok := result.Structured.(mcp.ErrorOutput)
+	if !ok {
+		t.Fatalf("result type = %T, want mcp.ErrorOutput", result.Structured)
+	}
+	if output.Error != `unsupported harness "mistyped"` {
+		t.Errorf("error = %q, want unadvised unknown-harness error", output.Error)
+	}
+	if got := result.Meta[mcp.ToolErrorCodeMetaKey]; got != string(api.CodeUnknownHarness) {
+		t.Errorf("error code metadata = %q, want %q", got, api.CodeUnknownHarness)
+	}
+}
+
+func TestCaicToolRegistryHandleTaskForkDoesNotSuggestUnsafeModelRecovery(t *testing.T) {
+	t.Parallel()
+
+	s := newMCPTaskCreateTestRouter(t)
+	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "source"}, harness.Claude)
+	tk.RequestedModel = "claude-default"
+	tk.Repos = []taskslog.RepoMount{{Name: "myrepo", Branch: "main"}}
+	tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "source"), runtime.ConnectionTarget{}, "", "", 0)
+	tk.SetState(taskslog.StateWaiting)
+	insertTestTask(s, tk.ID.String(), tk)
+	c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
+	result := c.handleTaskFork(t.Context(), mcpTaskForkArgs{TaskNumber: 1, Prompt: "fork", Harness: "pi", Model: "mistyped"})
+	if !result.IsError {
+		t.Fatal("handleTaskFork() did not return a tool error")
+	}
+	output, ok := result.Structured.(mcp.ErrorOutput)
+	if !ok {
+		t.Fatalf("result type = %T, want mcp.ErrorOutput", result.Structured)
+	}
+	if output.Error != "unsupported model for pi: mistyped" {
+		t.Errorf("error = %q, want unadvised unsupported-model error", output.Error)
+	}
+	if got := result.Meta[mcp.ToolErrorCodeMetaKey]; got != string(api.CodeUnsupportedModel) {
+		t.Errorf("error code metadata = %q, want %q", got, api.CodeUnsupportedModel)
 	}
 }
 

@@ -451,7 +451,9 @@ public struct VoiceGatewayMode: Codable, Equatable, Hashable {
 
 public enum ErrorCodes {
     public static let badRequest = "BAD_REQUEST"
+    public static let unknownHarness = "UNKNOWN_HARNESS"
     public static let unknownRepository = "UNKNOWN_REPOSITORY"
+    public static let unsupportedModel = "UNSUPPORTED_MODEL"
     public static let invalidOauthState = "INVALID_OAUTH_STATE"
     public static let unknownCache = "UNKNOWN_CACHE"
     public static let unknownRuntime = "UNKNOWN_RUNTIME"

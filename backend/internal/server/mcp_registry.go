@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,9 +20,11 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
+	taskpkg "github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	providerusage "github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/oauth"
@@ -397,20 +401,75 @@ func domainToolError[T any](err error) mcp.ToolResult[T] {
 	return mcp.ToolError[T](err.Error())
 }
 
-// taskCreateToolError adds an actionable recovery step when a task-creation
-// request names an unknown repository and the caller may list repositories.
-func taskCreateToolError(ctx context.Context, err error) mcp.ToolResult[mcpTaskCreatedOutput] {
+// taskCreateToolError adds a recovery step only when the rejected task-create
+// override can be safely omitted or the caller can list available repositories.
+func (m *mcpRegistry) taskCreateToolError(ctx context.Context, args mcpTaskCreateArgs, err error) mcp.ToolResult[mcpTaskCreatedOutput] { //nolint:gocritic // Recovery depends on request-shaped arguments.
 	apiErr, ok := errors.AsType[*api.Error](err)
-	if !ok || apiErr.Code != api.CodeUnknownRepository {
+	if !ok {
 		return domainToolError[mcpTaskCreatedOutput](err)
 	}
 	message := apiErr.Error()
-	if mcpHasScope(ctx, mcpScopeRead) {
-		message += ". Call repos_list, use an exact returned path, then retry task_create."
-	} else {
-		message += ". The path must exactly match a configured repository."
+	switch apiErr.Code {
+	case api.CodeUnknownRepository:
+		if !m.taskCreateConfigurationValid(ctx, args) {
+			return domainToolError[mcpTaskCreatedOutput](err)
+		}
+		if mcpHasScope(ctx, mcpScopeRead) {
+			message += ". Call repos_list, use an exact returned path, then retry task_create."
+		} else {
+			message += ". The path must exactly match a configured repository."
+		}
+	case api.CodeUnknownHarness:
+		if args.Harness == "" {
+			return mcp.ToolError[mcpTaskCreatedOutput](apiErr.Error())
+		}
+		args.Harness = ""
+		message += ". Omit harness to use caic's default harness, then retry task_create."
+	case api.CodeUnsupportedModel:
+		if args.Model == "" {
+			return domainToolError[mcpTaskCreatedOutput](err)
+		}
+		args.Model = ""
+		message += ". Omit model to use the selected harness's default model, then retry task_create."
+	case api.CodeUnknownRuntime:
+		if args.RuntimeName == "" {
+			return domainToolError[mcpTaskCreatedOutput](err)
+		}
+		args.RuntimeName = ""
+		message += ". Omit runtimeName to use caic's default runtime, then retry task_create."
+	default:
+		return domainToolError[mcpTaskCreatedOutput](err)
+	}
+	if !m.taskCreateConfigurationValid(ctx, args) {
+		return domainToolError[mcpTaskCreatedOutput](err)
 	}
 	return mcp.ToolErrorWithMeta[mcpTaskCreatedOutput](message, mcp.MetaObject{mcp.ToolErrorCodeMetaKey: string(apiErr.Code)})
+}
+
+// taskCreateConfigurationValid reports whether the effective harness, model,
+// and runtime selections are valid after a rejected override is removed.
+func (m *mcpRegistry) taskCreateConfigurationValid(ctx context.Context, args mcpTaskCreateArgs) bool { //nolint:gocritic // Validation consumes request-shaped arguments.
+	apiHarness, err := m.resolveTaskCreateHarness(ctx, args.Harness)
+	if err != nil {
+		return false
+	}
+	harnessName, err := apiconv.AgentHarness(apiHarness)
+	if err != nil {
+		return false
+	}
+	backend, ok := m.serverConfig.taskMgr.Backends[harnessName]
+	if !ok || (args.Model != "" && !slices.Contains(backend.ModelInventory().IDs(), args.Model)) {
+		return false
+	}
+	runtimes := m.taskSvc.taskMgr.Runtimes
+	if runtimes == nil {
+		return false
+	}
+	if args.RuntimeName == "" {
+		return len(runtimes.Runtimes) > 0
+	}
+	_, ok = runtimes.ByName[runtime.Name(args.RuntimeName)]
+	return ok
 }
 
 type mcpTaskCreatedOutput struct {
@@ -442,7 +501,10 @@ func (m *mcpRegistry) handleTaskCreate(ctx context.Context, args mcpTaskCreateAr
 	}
 	apiHarness, err := m.resolveTaskCreateHarness(ctx, args.Harness)
 	if err != nil {
-		return mcp.ToolError[mcpTaskCreatedOutput](err.Error())
+		if args.Harness == "" {
+			return mcp.ToolError[mcpTaskCreatedOutput](err.Error())
+		}
+		return m.taskCreateToolError(ctx, args, &api.Error{Status: http.StatusBadRequest, Code: api.CodeUnknownHarness, Message: err.Error()})
 	}
 	req := &v1.CreateTaskReq{
 		InitialPrompt: v1.Prompt{Text: args.Prompt},
@@ -465,7 +527,7 @@ func (m *mcpRegistry) handleTaskCreate(ctx context.Context, args mcpTaskCreateAr
 	}
 	resp, err := m.taskSvc.createTask(ctx, req)
 	if err != nil {
-		return taskCreateToolError(ctx, err)
+		return m.taskCreateToolError(ctx, args, err)
 	}
 	taskList := m.taskSvc.taskListSnapshot(ctx)
 	num := taskNumberForID(taskList, resp.ID.String())
@@ -649,6 +711,59 @@ type mcpTaskForkArgs struct {
 	Model      string `json:"model,omitempty"   jsonschema_description:"Model override (optional, inherits from source if omitted)"`
 }
 
+// taskForkToolError adds a recovery step only when the rejected override can
+// be omitted to inherit the source task's configuration.
+func (m *mcpRegistry) taskForkToolError(args mcpTaskForkArgs, source *taskpkg.Task, err error) mcp.ToolResult[mcpTaskForkOutput] {
+	apiErr, ok := errors.AsType[*api.Error](err)
+	if !ok {
+		return domainToolError[mcpTaskForkOutput](err)
+	}
+	message := apiErr.Error()
+	switch apiErr.Code {
+	case api.CodeUnknownHarness:
+		if args.Harness == "" || !m.forkWithoutHarnessValid(source, args.Model) {
+			return domainToolError[mcpTaskForkOutput](err)
+		}
+		message += ". Omit harness to inherit the source task's harness, then retry task_fork."
+	case api.CodeUnsupportedModel:
+		if args.Model == "" || !m.forkWithoutModelValid(source, args.Harness) {
+			return domainToolError[mcpTaskForkOutput](err)
+		}
+		message += ". Omit model to inherit the source task's model, then retry task_fork."
+	default:
+		return domainToolError[mcpTaskForkOutput](err)
+	}
+	return mcp.ToolErrorWithMeta[mcpTaskForkOutput](message, mcp.MetaObject{mcp.ToolErrorCodeMetaKey: string(apiErr.Code)})
+}
+
+func (m *mcpRegistry) forkWithoutHarnessValid(source *taskpkg.Task, modelOverride string) bool {
+	backend, ok := m.taskSvc.taskMgr.Backends[source.Harness]
+	model := modelOverride
+	if model == "" {
+		model = source.RequestedModel
+	}
+	return ok && (model == "" || slices.Contains(backend.ModelInventory().IDs(), model))
+}
+
+// forkWithoutModelValid reports whether the effective harness can accept the
+// source model after an explicit model override is omitted.
+func (m *mcpRegistry) forkWithoutModelValid(source *taskpkg.Task, harnessOverride string) bool {
+	harnessName := source.Harness
+	if harnessOverride != "" {
+		apiHarness, err := apiconv.ParseHarness(harnessOverride)
+		if err != nil {
+			return false
+		}
+		var conversionErr error
+		harnessName, conversionErr = apiconv.AgentHarness(apiHarness)
+		if conversionErr != nil {
+			return false
+		}
+	}
+	backend, ok := m.taskSvc.taskMgr.Backends[harnessName]
+	return ok && (source.RequestedModel == "" || slices.Contains(backend.ModelInventory().IDs(), source.RequestedModel))
+}
+
 func (m *mcpRegistry) handleTaskFork(ctx context.Context, args mcpTaskForkArgs) mcp.ToolResult[mcpTaskForkOutput] {
 	num, entry, ok := m.entryByNumber(ctx, args.TaskNumber)
 	if !ok {
@@ -662,7 +777,7 @@ func (m *mcpRegistry) handleTaskFork(ctx context.Context, args mcpTaskForkArgs) 
 		var err error
 		harness, err = apiconv.ParseHarness(args.Harness)
 		if err != nil {
-			return mcp.ToolError[mcpTaskForkOutput](err.Error())
+			return m.taskForkToolError(args, entry.Task(), &api.Error{Status: http.StatusBadRequest, Code: api.CodeUnknownHarness, Message: err.Error()})
 		}
 	}
 	req := &v1.ForkTaskReq{Prompt: v1.Prompt{Text: args.Prompt}, Harness: harness, Model: args.Model}
@@ -671,7 +786,7 @@ func (m *mcpRegistry) handleTaskFork(ctx context.Context, args mcpTaskForkArgs) 
 	}
 	resp, err := m.taskSvc.forkTask(ctx, entry, req)
 	if err != nil {
-		return domainToolError[mcpTaskForkOutput](err)
+		return m.taskForkToolError(args, entry.Task(), err)
 	}
 	return mcp.TypedToolResult(mcpTaskForkOutput{Result: fmt.Sprintf("Forked task #%d. New task ID: %s", num, resp.ID.String()), TaskID: resp.ID.String()})
 }

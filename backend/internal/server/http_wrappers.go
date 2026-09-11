@@ -100,8 +100,15 @@ func toDTO(err error) error {
 		case taskmgr.KindConflict:
 			return &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: te.Error()}
 		case taskmgr.KindBadRequest:
-			if te.Code == taskmgr.CodeUnknownRepository {
+			switch te.Code {
+			case taskmgr.CodeUnknownHarness:
+				return &api.Error{Status: http.StatusBadRequest, Code: api.CodeUnknownHarness, Message: te.Error()}
+			case taskmgr.CodeUnknownRepository:
 				return &api.Error{Status: http.StatusBadRequest, Code: api.CodeUnknownRepository, Message: te.Error()}
+			case taskmgr.CodeUnsupportedModel:
+				return &api.Error{Status: http.StatusBadRequest, Code: api.CodeUnsupportedModel, Message: te.Error()}
+			case taskmgr.CodeUnknownRuntime:
+				return &api.Error{Status: http.StatusBadRequest, Code: api.CodeUnknownRuntime, Message: te.Error()}
 			}
 			return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: te.Error()}
 		case taskmgr.KindInternal:

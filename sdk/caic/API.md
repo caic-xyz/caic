@@ -101,7 +101,9 @@ All errors return:
 | HTTP | Code |
 |------|------|
 | 400 | `BAD_REQUEST` |
+| 400 | `UNKNOWN_HARNESS` |
 | 400 | `UNKNOWN_REPOSITORY` |
+| 400 | `UNSUPPORTED_MODEL` |
 | 400 | `INVALID_OAUTH_STATE` |
 | 400 | `UNKNOWN_CACHE` |
 | 400 | `UNKNOWN_RUNTIME` |

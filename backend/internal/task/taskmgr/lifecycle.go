@@ -283,24 +283,30 @@ func (r *Lifecycle) Fork(ctx context.Context, p ForkParams) (string, error) { //
 	forkHarness := source.Harness
 	forkModel := source.RequestedModel
 	forkEffort := source.RequestedEffort
+	sourceBackend, sourceHarnessAvailable := r.manager.Backends[forkHarness]
+	if p.Harness == "" && !sourceHarnessAvailable {
+		return "", badRequestf("unknown harness: %s", string(source.Harness))
+	}
 	if p.Harness != "" {
 		forkHarness = p.Harness
 		backend, ok := r.manager.Backends[forkHarness]
 		if !ok {
-			return "", badRequestf("unknown harness: %s", string(p.Harness))
+			return "", &Error{Kind: KindBadRequest, Code: CodeUnknownHarness, Msg: "unknown harness: " + string(p.Harness)}
 		}
 		if p.Model != "" && !slices.Contains(backend.ModelInventory().IDs(), p.Model) {
-			return "", badRequestf("unsupported model for %s: %s", string(p.Harness), p.Model)
+			return "", &Error{Kind: KindBadRequest, Code: CodeUnsupportedModel, Msg: "unsupported model for " + string(p.Harness) + ": " + p.Model}
 		}
-		forkModel = p.Model
-		forkEffort = p.Effort
+		if p.Model == "" {
+			if forkModel != "" && !slices.Contains(backend.ModelInventory().IDs(), forkModel) {
+				return "", &Error{Kind: KindBadRequest, Code: CodeUnsupportedModel, Msg: "unsupported model for " + string(p.Harness) + ": " + forkModel}
+			}
+		} else {
+			forkModel = p.Model
+			forkEffort = p.Effort
+		}
 	} else if p.Model != "" {
-		backend, ok := r.manager.Backends[forkHarness]
-		if !ok {
-			return "", badRequestf("unknown harness: %s", string(source.Harness))
-		}
-		if !slices.Contains(backend.ModelInventory().IDs(), p.Model) {
-			return "", badRequestf("unsupported model for %s: %s", string(source.Harness), p.Model)
+		if !slices.Contains(sourceBackend.ModelInventory().IDs(), p.Model) {
+			return "", &Error{Kind: KindBadRequest, Code: CodeUnsupportedModel, Msg: "unsupported model for " + string(source.Harness) + ": " + p.Model}
 		}
 		forkModel = p.Model
 		forkEffort = p.Effort

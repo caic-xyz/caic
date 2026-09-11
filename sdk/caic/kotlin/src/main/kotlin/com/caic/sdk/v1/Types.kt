@@ -774,7 +774,9 @@ object VoiceGatewayModeSerializer : KSerializer<VoiceGatewayMode> {
 
 object ErrorCodes {
     const val BadRequest = "BAD_REQUEST"
+    const val UnknownHarness = "UNKNOWN_HARNESS"
     const val UnknownRepository = "UNKNOWN_REPOSITORY"
+    const val UnsupportedModel = "UNSUPPORTED_MODEL"
     const val InvalidOauthState = "INVALID_OAUTH_STATE"
     const val UnknownCache = "UNKNOWN_CACHE"
     const val UnknownRuntime = "UNKNOWN_RUNTIME"

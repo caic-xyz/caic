@@ -1072,8 +1072,8 @@ func TestHandleCreateTask(t *testing.T) {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
 		}
 		e := decodeError(t, w)
-		if e.Code != api.CodeBadRequest {
-			t.Errorf("code = %q, want %q", e.Code, api.CodeBadRequest)
+		if e.Code != api.CodeUnknownHarness {
+			t.Errorf("code = %q, want %q", e.Code, api.CodeUnknownHarness)
 		}
 		if !strings.Contains(e.Message, "nonexistent") {
 			t.Errorf("message = %q, want it to mention the unknown harness", e.Message)
@@ -1095,11 +1095,34 @@ func TestHandleCreateTask(t *testing.T) {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
 		}
 		e := decodeError(t, w)
-		if e.Code != api.CodeBadRequest {
-			t.Errorf("code = %q, want %q", e.Code, api.CodeBadRequest)
+		if e.Code != api.CodeUnsupportedModel {
+			t.Errorf("code = %q, want %q", e.Code, api.CodeUnsupportedModel)
 		}
 		if !strings.Contains(e.Message, "nonexistent") {
 			t.Errorf("message = %q, want it to mention the invalid model", e.Message)
+		}
+	})
+
+	t.Run("UnknownRuntime", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}})
+		registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
+		handler := handle(testTaskHandlers(s).taskSvc.createTask)
+
+		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"claude","runtimeName":"nonexistent"}`)
+		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks", body)
+		w := httptest.NewRecorder()
+		handler(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+		}
+		e := decodeError(t, w)
+		if e.Code != api.CodeUnknownRuntime {
+			t.Errorf("code = %q, want %q", e.Code, api.CodeUnknownRuntime)
+		}
+		if !strings.Contains(e.Message, "nonexistent") {
+			t.Errorf("message = %q, want it to mention the unknown runtime", e.Message)
 		}
 	})
 

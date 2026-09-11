@@ -371,11 +371,11 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 
 	backend, ok := m.Backends[p.Harness]
 	if !ok {
-		return "", badRequestf("unknown harness: %s", string(p.Harness))
+		return "", &Error{Kind: KindBadRequest, Code: CodeUnknownHarness, Msg: "unknown harness: " + string(p.Harness)}
 	}
 
 	if p.Model != "" && !slices.Contains(backend.ModelInventory().IDs(), p.Model) {
-		return "", badRequestf("unsupported model for %s: %s", string(p.Harness), p.Model)
+		return "", &Error{Kind: KindBadRequest, Code: CodeUnsupportedModel, Msg: "unsupported model for " + string(p.Harness) + ": " + p.Model}
 	}
 
 	if len(p.Prompt.Images) > 0 && !backend.SupportsImages() {
@@ -1123,7 +1123,7 @@ func resolveRuntimeName(router *runtime.Router, id runtime.Name) (runtime.Name, 
 		return router.Runtimes[0].Name(), nil
 	}
 	if _, ok := router.ByName[id]; !ok {
-		return "", badRequestf("unknown runtime: %s", id)
+		return "", &Error{Kind: KindBadRequest, Code: CodeUnknownRuntime, Msg: "unknown runtime: " + string(id)}
 	}
 	return id, nil
 }
