@@ -481,6 +481,42 @@ describe("groupMessages", () => {
     expect(groups[0].kind).toBe("other");
   });
 
+  it("filters repeated rateLimit warnings with the same displayed percentage", () => {
+    const groups = groupMessages([
+      { kind: "rateLimit", ts: 1, rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.8 } },
+      { kind: "text", ts: 1.5, text: { text: "working" } },
+      { kind: "rateLimit", ts: 2, rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.804 } },
+      { kind: "rateLimit", ts: 3, rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.81 } },
+    ]);
+
+    expect(groups.filter((group) => group.events.some((event) => event.kind === "rateLimit"))).toHaveLength(2);
+  });
+
+  it("keeps matching rateLimit warning percentages for different quota windows", () => {
+    const groups = groupMessages([
+      { kind: "rateLimit", ts: 1, rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.8 } },
+      { kind: "rateLimit", ts: 2, rateLimit: { status: "allowed_warning", rateLimitType: "seven_day", utilization: 0.8 } },
+    ]);
+
+    expect(groups).toHaveLength(2);
+  });
+
+  it("filters a live warning that repeats the previous completed turn", () => {
+    const grouper = new IncrementalMessageGrouper();
+    grouper.resetAfter([
+      { kind: "rateLimit", ts: 1, rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.8 } },
+      resultEvent(),
+    ]);
+
+    expect(grouper.group([
+      { kind: "rateLimit", ts: 2, rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.804 } },
+    ])).toHaveLength(0);
+    expect(grouper.group([
+      { kind: "rateLimit", ts: 2, rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.804 } },
+      { kind: "rateLimit", ts: 3, rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.81 } },
+    ])).toHaveLength(1);
+  });
+
   it("rateLimit allowed is filtered out", () => {
     const groups = groupMessages([
       { kind: "rateLimit", ts: 1, rateLimit: { status: "allowed", rateLimitType: "five_hour", utilization: 0.3 } },

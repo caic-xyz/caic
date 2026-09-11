@@ -64,11 +64,36 @@ export function isSessionBoundary(ev: EventMessage): boolean {
   return ev.kind === "init" || (ev.kind === "system" && ev.system?.subtype === "compact_boundary");
 }
 
+export function rateLimitPercentage(utilization: number): number {
+  return Math.round(utilization * 100);
+}
+
+function rateLimitWarningPercentagesAfter(msgs: ReadonlyArray<EventMessage>): Map<string, number> {
+  const percentages = new Map<string, number>();
+  for (const ev of msgs) {
+    const rl = ev.rateLimit;
+    if (ev.kind !== "rateLimit" || !rl) continue;
+    if (rl.status === "allowed_warning") {
+      percentages.set(rl.rateLimitType, rateLimitPercentage(rl.utilization));
+    } else {
+      percentages.delete(rl.rateLimitType);
+    }
+  }
+  return percentages;
+}
+
 // Groups consecutive events for cohesive rendering.
 //
 // IncrementalMessageGrouper uses this for cold starts and structural changes,
 // then extends pure streaming-delta batches without regrouping the full turn.
 export function groupMessages(msgs: EventMessage[]): MessageGroup[] {
+  return groupMessagesAfter(msgs, new Map());
+}
+
+function groupMessagesAfter(
+  msgs: EventMessage[],
+  priorWarningPercentages: ReadonlyMap<string, number>,
+): MessageGroup[] {
   const groups: MessageGroup[] = [];
 
   function lastGroup(): MessageGroup | undefined {
@@ -76,6 +101,7 @@ export function groupMessages(msgs: EventMessage[]): MessageGroup[] {
   }
 
   let usageSinceLastTool = false;
+  const previousWarningPercentages = new Map(priorWarningPercentages);
 
   for (const ev of msgs) {
     switch (ev.kind) {
@@ -326,12 +352,23 @@ export function groupMessages(msgs: EventMessage[]): MessageGroup[] {
         }
         break;
       }
-      case "rateLimit":
-        // Only surface warning/rejected statuses; "allowed" is not interesting.
-        if (ev.rateLimit && ev.rateLimit.status !== "allowed") {
+      case "rateLimit": {
+        const rl = ev.rateLimit;
+        if (!rl) break;
+        if (rl.status === "allowed_warning") {
+          const percentage = rateLimitPercentage(rl.utilization);
+          if (previousWarningPercentages.get(rl.rateLimitType) === percentage) break;
+          previousWarningPercentages.set(rl.rateLimitType, percentage);
           groups.push({ kind: "other", events: [ev], toolCalls: [] });
+        } else {
+          previousWarningPercentages.delete(rl.rateLimitType);
+          // Rejections remain visible; "allowed" is not interesting.
+          if (rl.status === "rejected") {
+            groups.push({ kind: "other", events: [ev], toolCalls: [] });
+          }
         }
         break;
+      }
       case "subagentStart":
       case "subagentEnd":
         // Skip: subagent lifecycle events are not rendered yet. Explicitly
@@ -531,10 +568,18 @@ export function groupMessages(msgs: EventMessage[]): MessageGroup[] {
 // streaming batch through reference changes.
 export class IncrementalMessageGrouper {
   private previousLength = 0;
+  private previousWarningPercentages = new Map<string, number>();
   private result: MessageGroup[] | null = null;
 
   reset(): void {
     this.previousLength = 0;
+    this.previousWarningPercentages.clear();
+    this.result = null;
+  }
+
+  resetAfter(msgs: ReadonlyArray<EventMessage>): void {
+    this.previousLength = 0;
+    this.previousWarningPercentages = rateLimitWarningPercentagesAfter(msgs);
     this.result = null;
   }
 
@@ -635,7 +680,7 @@ export class IncrementalMessageGrouper {
   }
 
   private regroup(msgs: EventMessage[]): MessageGroup[] {
-    this.result = groupMessages(msgs);
+    this.result = groupMessagesAfter(msgs, this.previousWarningPercentages);
     this.previousLength = msgs.length;
     return this.result;
   }

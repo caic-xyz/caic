@@ -14,7 +14,7 @@ import { useHostMode } from "../gomode/HostMode";
 import { requestNotificationPermission } from "../gomode/notifications";
 
 import { sendInput as apiSendInput, restartTask as apiRestartTask, compactContext as apiCompactContext, syncTask as apiSyncTask, getTaskToolInput, botFixPR } from "../api";
-import { IncrementalMessageGrouper, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, toolCallDurationMs, toolCallDurations, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "../grouping";
+import { IncrementalMessageGrouper, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, rateLimitPercentage, toolCallDurationMs, toolCallDurations, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "../grouping";
 import { createTaskEventTimeline } from "../taskEventTimeline";
 import { formatElapsed, formatTokens, toolCallDetail } from "../formatting";
 import { IncrementalTaskTimingTracker, formatTimingDuration } from "../timing";
@@ -434,7 +434,7 @@ export default function TaskDetail(props: Props) {
       groupedTaskId = taskId;
       groupedEpoch = epoch;
       groupedSplitIdx = start;
-      messageGrouper.reset();
+      messageGrouper.resetAfter(completedMsgs());
     }
     const msgs = messages().slice(start).filter((ev) => !isSessionBoundary(ev));
     return messageGrouper.group(msgs);
@@ -1109,7 +1109,7 @@ function RateLimitBanner(props: { ev: EventMessage }) {
       </Match>
       <Match when={rl()?.status === "allowed_warning"}>
         <div class={styles.rateLimitWarning}>
-          Rate limit warning: {Math.round((rl()?.utilization ?? 0) * 100)}% of {rateLimitLabel(rl()?.rateLimitType)} used{resetsLabel()}
+          Rate limit warning: {rateLimitPercentage(rl()?.utilization ?? 0)}% of {rateLimitLabel(rl()?.rateLimitType)} used{resetsLabel()}
         </div>
       </Match>
     </Switch>
