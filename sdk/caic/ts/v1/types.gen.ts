@@ -1144,6 +1144,14 @@ export interface ForkTaskReq {
   gitHubToken?: boolean;
 }
 
+/**
+ * TaskHandoffResp contains an editable prompt for continuing a source task in
+ * a fresh agent session.
+ */
+export interface TaskHandoffResp {
+  prompt: string;
+}
+
 /** GitCommit describes one commit ahead of a repository's original tracking branch. */
 export interface GitCommit {
   sha: string;

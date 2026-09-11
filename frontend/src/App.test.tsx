@@ -81,6 +81,7 @@ vi.mock("./api", () => ({
   listRepoBranches: vi.fn(),
   cloneRepo: vi.fn(),
   createTask: vi.fn(),
+  getTaskHandoff: vi.fn(),
   forkTask: vi.fn(),
   getTask: vi.fn(),
   botFixCI: vi.fn(),
@@ -201,6 +202,7 @@ beforeEach(() => {
   vi.mocked(api.listRepoBranches).mockResolvedValue({ branches: [{ name: "main" }, { name: "dev", remote: "origin" }] });
   vi.mocked(api.cloneRepo).mockResolvedValue(newRepo);
   vi.mocked(api.createTask).mockResolvedValue(makeTask());
+  vi.mocked(api.getTaskHandoff).mockResolvedValue({ prompt: "Generated handoff prompt" });
   vi.mocked(api.getTask).mockResolvedValue(makeTask());
   vi.mocked(api.getTaskDiff).mockResolvedValue({ diff: "", repositories: [] });
   vi.mocked(api.getTaskProcesses).mockResolvedValue({ processes: [] });
@@ -1460,6 +1462,26 @@ describe("App repo chips: No repository", () => {
     await user.click(screen.getByRole("menuitem", { name: "Fork" }));
 
     expect(screen.getByRole("button", { name: "Fork Model" })).toHaveTextContent("openai-codex/gpt-5.6-terra");
+  });
+
+  it("generates an editable handoff prompt for a fork", async () => {
+    const user = userEvent.setup();
+    renderApp("/task/@task1");
+    await waitForTaskEventsSubscription();
+    dispatchSSE({
+      kind: "snapshot",
+      snapshot: [makeTask({ repos: [{ name: "repos/a", branch: "fork-source" }] })],
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Context actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Fork" }));
+    await user.click(screen.getByTestId("generate-handoff"));
+
+    expect(api.getTaskHandoff).toHaveBeenCalledWith("task1");
+    await waitFor(() => expect(screen.getByTestId("fork-prompt-input")).toHaveTextContent("Generated handoff prompt"));
+    await user.clear(screen.getByTestId("fork-prompt-input"));
+    await user.type(screen.getByTestId("fork-prompt-input"), "Edited handoff prompt");
+    expect(screen.getByTestId("fork-prompt-input")).toHaveTextContent("Edited handoff prompt");
   });
 
   it("does not dismiss the fork dialog when it is clicked", async () => {

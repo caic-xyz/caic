@@ -30,10 +30,26 @@ export default function ForkDialog() {
           onInput={s.setForkPrompt}
           onSubmit={s.submitFork}
           placeholder="Prompt for forked task"
+          disabled={s.forkHandoffLoading()}
           class={styles.forkInput}
           tabIndex={0}
           data-testid="fork-prompt-input"
         />
+        <div class={styles.handoffRow}>
+          <Button
+            type="button"
+            variant="gray"
+            loading={s.forkHandoffLoading()}
+            onClick={s.generateForkHandoff}
+            data-testid="generate-handoff"
+          >
+            {s.forkPrompt().trim() ? "Replace with handoff" : "Generate handoff"}
+          </Button>
+          <span class={styles.handoffHint}>Creates an editable summary for the new agent.</span>
+        </div>
+        <Show when={s.forkHandoffError()}>
+          <p class={styles.handoffError} role="alert">{s.forkHandoffError()}</p>
+        </Show>
         <Show when={s.forkAvailableRecent().length > 0 || s.forkAvailableRest().length > 0 || s.forkExtraRepos().length > 0}>
           <RepoChipStrip
             repos={s.repos}

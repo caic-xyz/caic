@@ -234,6 +234,10 @@ public final class ApiClient {
     public func forkTask(id: String, req: ForkTaskReq) async throws -> Task {
         try await request("POST", path: "/api/caic/v1/tasks/\(id)/fork", body: try encoder.encode(req))
     }
+    /// Builds an editable handoff prompt for continuing a task in a fresh agent session.
+    public func getTaskHandoff(id: String) async throws -> TaskHandoffResp {
+        try await request("GET", path: "/api/caic/v1/tasks/\(id)/handoff")
+    }
     /// Returns repository status and the unified diff for a task's branch.
     public func getTaskDiff(id: String, path: String) async throws -> DiffResp {
         try await request("GET", path: "/api/caic/v1/tasks/\(id)/diff?path=\(path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path)")

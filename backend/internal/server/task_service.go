@@ -621,6 +621,10 @@ func (s *taskService) reviveTask(ctx context.Context, entry *taskmgr.Entry, _ *a
 	return &v1.StatusResp{Status: "provisioning"}, nil
 }
 
+func (s *taskService) getTaskHandoff(_ context.Context, entry *taskmgr.Entry, _ *api.EmptyReq) (*v1.TaskHandoffResp, error) {
+	return &v1.TaskHandoffResp{Prompt: task.BuildHandoffPrompt(entry.Task(), 0)}, nil
+}
+
 func (s *taskService) forkTask(ctx context.Context, entry *taskmgr.Entry, req *v1.ForkTaskReq) (*v1.Task, error) {
 	source := entry.Task()
 

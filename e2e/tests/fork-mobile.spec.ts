@@ -22,6 +22,8 @@ test("forking from mobile opens only the forked task detail", async ({ page, api
   await page.getByRole("menuitem", { name: "Fork" }).click();
 
   await expect(page.getByTestId("fork-dialog")).toBeVisible();
+  await page.getByTestId("generate-handoff").click();
+  await expect(page.getByTestId("fork-prompt-input")).toContainText("Continue this task in a new agent");
   const forkPrompt = uniquePrompt("e2e fork mobile child");
   await fillContentEditable(page.getByTestId("fork-prompt-input"), forkPrompt);
   await page.getByTestId("fork-submit").click();

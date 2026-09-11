@@ -8,7 +8,7 @@ import type { Config, Harness, HarnessInfo, Repo, Task, TaskState, UsageResp, Im
 
 import { useHostMode } from "./gomode/HostMode";
 
-import { getConfig, getPreferences, updatePreferences, listOAuthGrants, revokeOAuthGrant, listHarnesses, listCaches, getCacheSizes, listRepos, createTask, cloneRepo, getUsage, forkTask, stopTask, purgeTask, reviveTask, botFixCI, getTask, globalTaskEvents, globalUsageEvents, getVersion, triggerUpdate } from "./api";
+import { getConfig, getPreferences, updatePreferences, listOAuthGrants, revokeOAuthGrant, listHarnesses, listCaches, getCacheSizes, listRepos, createTask, cloneRepo, getUsage, getTaskHandoff, forkTask, stopTask, purgeTask, reviveTask, botFixCI, getTask, globalTaskEvents, globalUsageEvents, getVersion, triggerUpdate } from "./api";
 import type { RepoEntry } from "./components/RepoChipStrip";
 import { useAuth } from "./AuthContext";
 import { requestNotificationPermission, notifyServiceEvent, notifyWaiting, dismissNotification } from "./gomode/notifications";
@@ -834,6 +834,8 @@ function createAppStore() {
   // Fork dialog state.
   const [forkTaskId, setForkTaskId] = createSignal<string | null>(null);
   const [forkPrompt, setForkPrompt] = createSignal("");
+  const [forkHandoffLoading, setForkHandoffLoading] = createSignal(false);
+  const [forkHandoffError, setForkHandoffError] = createSignal("");
   const [forkHarness, setForkHarness] = createSignal("");
   const [forkModel, setForkModel] = createSignal("");
   const [forkEffort, setForkEffort] = createSignal("");
@@ -876,6 +878,8 @@ function createAppStore() {
     const model = selectedModelForHarness(harness);
     setForkTaskId(id);
     setForkPrompt("");
+    setForkHandoffLoading(false);
+    setForkHandoffError("");
     setForkHarness(harness);
     setForkModel(model);
     setForkEffort(selectedEffortForModel(harness, model));
@@ -885,6 +889,21 @@ function createAppStore() {
     setForkDisplay(task?.runtime?.display ?? false);
     setForkSudo(task?.runtime?.sudo ?? false);
     setForkGitHubToken(task?.gitHubToken ?? false);
+  }
+
+  async function generateForkHandoff() {
+    const id = forkTaskId();
+    if (!id || forkHandoffLoading()) return;
+    setForkHandoffLoading(true);
+    setForkHandoffError("");
+    try {
+      const resp = await getTaskHandoff(id);
+      if (forkTaskId() === id) setForkPrompt(resp.prompt);
+    } catch (e) {
+      if (forkTaskId() === id) setForkHandoffError(e instanceof Error ? e.message : "Could not generate handoff");
+    } finally {
+      if (forkTaskId() === id) setForkHandoffLoading(false);
+    }
   }
 
   async function submitFork() {
@@ -1098,7 +1117,8 @@ function createAppStore() {
     // clone dialog
     cloneOpen, setCloneOpen, cloning, cloneError, setCloneError, submitClone,
     // fork dialog
-    forkTaskId, setForkTaskId, forkPrompt, setForkPrompt, forkHarness, setForkHarness: selectForkHarness,
+    forkTaskId, setForkTaskId, forkPrompt, setForkPrompt, forkHandoffLoading, forkHandoffError, generateForkHandoff,
+    forkHarness, setForkHarness: selectForkHarness,
     forkModel, setForkModel: selectForkModel, forkEffort, setForkEffort: selectForkEffort, forkExtraRepos, setForkExtraRepos,
     forkTailscale, setForkTailscale, forkUSB, setForkUSB, forkDisplay, setForkDisplay,
     forkSudo, setForkSudo, forkGitHubToken, setForkGitHubToken,

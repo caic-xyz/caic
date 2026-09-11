@@ -571,6 +571,12 @@ func (r *ForkTaskReq) Validate() error {
 	return validateImages(r.Prompt.Images)
 }
 
+// TaskHandoffResp contains an editable prompt for continuing a source task in
+// a fresh agent session.
+type TaskHandoffResp struct {
+	Prompt string `json:"prompt"`
+}
+
 // BotFixCIReq is the request body for POST /api/caic/v1/bot/fix-ci.
 // The server fetches CI logs, builds a prompt, and creates a fix task.
 type BotFixCIReq struct {

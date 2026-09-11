@@ -1679,6 +1679,13 @@ data class ForkTaskReq(
     val gitHubToken: Boolean? = null,
 )
 
+/**
+ * TaskHandoffResp contains an editable prompt for continuing a source task in
+ * a fresh agent session.
+ */
+@Serializable
+data class TaskHandoffResp(val prompt: String)
+
 /** GitCommit describes one commit ahead of a repository's original tracking branch. */
 @Serializable
 data class GitCommit(

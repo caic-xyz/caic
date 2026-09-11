@@ -314,6 +314,13 @@ var Routes = []Route{
 		Resp:   reflect.TypeFor[Task](),
 	},
 	{
+		Name:   "getTaskHandoff",
+		Doc:    "Builds an editable handoff prompt for continuing a task in a fresh agent session.",
+		Method: "GET",
+		Path:   "/api/caic/v1/tasks/{id}/handoff",
+		Resp:   reflect.TypeFor[TaskHandoffResp](),
+	},
+	{
 		Name:        "getTaskDiff",
 		Doc:         "Returns repository status and the unified diff for a task's branch.",
 		Method:      "GET",

@@ -37,8 +37,13 @@ func BuildHandoffPrompt(source *Task, maxBytes int) string {
 	}
 
 	var b strings.Builder
-	b.WriteString("# Continue this task after quota exhaustion\n\n")
-	b.WriteString("The previous coding harness could not continue because its quota was exhausted. Inspect the repository and current filesystem state before changing files, then continue the task from where it stopped.\n\n")
+	if input.rateLimit.Status == agent.RateLimitStatusRejected {
+		b.WriteString("# Continue this task after quota exhaustion\n\n")
+		b.WriteString("The previous coding harness could not continue because its quota was exhausted. Inspect the repository and current filesystem state before changing files, then continue the task from where it stopped.\n\n")
+	} else {
+		b.WriteString("# Continue this task in a new agent\n\n")
+		b.WriteString("Continue the task in a fresh coding-agent session. Inspect the repository and current filesystem state before changing files, then continue from where the previous agent stopped.\n\n")
+	}
 	b.WriteString("## Source task\n\n")
 	fmt.Fprintf(&b, "- Title: %s\n", oneLine(input.title))
 	fmt.Fprintf(&b, "- Harness: %s\n", input.harness)

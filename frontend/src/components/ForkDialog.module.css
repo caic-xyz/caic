@@ -50,6 +50,24 @@
   box-shadow: 0 0 0 2px var(--color-primary-focus-ring);
 }
 
+.handoffRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.handoffHint {
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+}
+
+.handoffError {
+  color: var(--color-danger);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
 .forkActions {
   display: flex;
   justify-content: flex-end;

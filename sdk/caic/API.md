@@ -63,6 +63,7 @@ Type notation: `JSONValue` means any valid JSON value.
 | POST | `/api/caic/v1/tasks/{id}/revive` | Reconnects to an orphaned task runtime instance. |  | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/sync` | Pushes task changes to the remote repository. | `SyncReq` | `SyncResp` |
 | POST | `/api/caic/v1/tasks/{id}/fork` | Forks a task by snapshotting its runtime instance and creating a new task on a derived branch. | `ForkTaskReq` | `Task` |
+| GET | `/api/caic/v1/tasks/{id}/handoff` | Builds an editable handoff prompt for continuing a task in a fresh agent session. |  | `TaskHandoffResp` |
 | GET | `/api/caic/v1/tasks/{id}/diff` | Returns repository status and the unified diff for a task's branch. |  | `DiffResp` |
 | GET | `/api/caic/v1/tasks/{id}/tool/{toolUseID}` | Returns the full (untruncated) input for a tool call. |  | `TaskToolInputResp` |
 | GET | `/api/caic/v1/tasks/events` | Streams task list updates for all tasks via SSE. |  | `TaskListEvent` SSE |
@@ -1333,6 +1334,15 @@ ForkTaskReq is the request body for POST /api/caic/v1/tasks/{id}/fork.
 | `display` | `boolean` | Override virtual display; nil means inherit from source. |  |
 | `sudo` | `boolean` | Override sudo; nil means inherit from source. |  |
 | `gitHubToken` | `boolean` | Override gitHubToken; nil means inherit from source. |  |
+
+### TaskHandoffResp
+
+TaskHandoffResp contains an editable prompt for continuing a source task in
+a fresh agent session.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `prompt` | `string` |  | yes |
 
 ### GitCommit
 

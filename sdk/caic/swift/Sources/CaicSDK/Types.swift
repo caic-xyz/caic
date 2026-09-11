@@ -1310,6 +1310,12 @@ public struct ForkTaskReq: Codable {
     public let gitHubToken: Bool?
 }
 
+/// TaskHandoffResp contains an editable prompt for continuing a source task in
+/// a fresh agent session.
+public struct TaskHandoffResp: Codable {
+    public let prompt: String
+}
+
 /// GitCommit describes one commit ahead of a repository's original tracking branch.
 public struct GitCommit: Codable {
     public let sha: String

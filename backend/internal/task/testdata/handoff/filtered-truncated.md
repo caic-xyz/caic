@@ -1,6 +1,6 @@
-# Continue this task after quota exhaustion
+# Continue this task in a new agent
 
-The previous coding harness could not continue because its quota was exhausted. Inspect the repository and current filesystem state before changing files, then continue the task from where it stopped.
+Continue the task in a fresh coding-agent session. Inspect the repository and current filesystem state before changing files, then continue from where the previous agent stopped.
 
 ## Source task
 
@@ -24,6 +24,6 @@ The previous coding harness could not continue because its quota was exhausted. 
 
 ### Assistant
 
-> I used sk-assistant-secret while investigating. 界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界
+> I used sk-assistant-secret while investigating. 界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界
 
 [Handoff prompt truncated to fit the configured size limit.]

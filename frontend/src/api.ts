@@ -30,6 +30,7 @@ export const {
   restartTask,
   clearContext,
   compactContext,
+  getTaskHandoff,
   forkTask,
   stopTask,
   purgeTask,

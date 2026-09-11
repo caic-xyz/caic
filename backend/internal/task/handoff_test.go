@@ -198,8 +198,14 @@ func TestBuildHandoffPrompt(t *testing.T) {
 
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "Inspect the failing build."}, harness.OpenCode, "", "")
 		got := BuildHandoffPrompt(tk, 0)
+		if !strings.Contains(got, "# Continue this task in a new agent") {
+			t.Errorf("prompt does not describe a normal agent handoff:\n%s", got)
+		}
 		if !strings.Contains(got, "Inspect the failing build.") {
 			t.Errorf("prompt does not contain original request:\n%s", got)
+		}
+		if strings.Contains(got, "quota was exhausted") {
+			t.Errorf("prompt claims a quota failure without a rejected quota event:\n%s", got)
 		}
 		if strings.Contains(got, "## Recent conversation") {
 			t.Errorf("prompt contains an empty conversation section:\n%s", got)
