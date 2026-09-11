@@ -196,6 +196,25 @@ func (b *blockingStopBackend) Stop(ctx context.Context, id runtime.ID) error {
 	}
 }
 
+// blockingPurgeBackend reports when Purge starts and blocks until release is
+// closed, allowing tests to observe the task while cleanup is in progress.
+type blockingPurgeBackend struct {
+	*runtimetest.FakeBackend
+
+	started chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingPurgeBackend) Purge(ctx context.Context, id runtime.ID) error {
+	close(b.started)
+	select {
+	case <-b.release:
+		return b.FakeBackend.Purge(ctx, id)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // blockingReviveBackend blocks in Revive until release is closed, then fails
 // without advancing the instance state.
 type blockingReviveBackend struct {
@@ -2544,36 +2563,34 @@ func TestManager(t *testing.T) {
 	})
 	t.Run("Purge", func(t *testing.T) {
 		t.Parallel()
-		t.Run("uses_requested_recovery_window", func(t *testing.T) {
+		t.Run("stopped_task_skips_recovery_window", func(t *testing.T) {
 			t.Parallel()
-			fake := &runtimetest.FakeBackend{}
+			fake := &blockingPurgeBackend{
+				FakeBackend: &runtimetest.FakeBackend{},
+				started:     make(chan struct{}),
+				release:     make(chan struct{}),
+			}
 			m := newTestManager(t, Config{
 				ServerCtx: t.Context(),
 				Runtimes:  newTestRuntime(t, fake, nil),
 			})
+			t.Cleanup(func() { close(fake.release) })
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateStopped)
 			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), entry)
 
-			if err := entry.Lifecycle.Purge(t.Context(), 50*time.Millisecond); err != nil {
+			if err := entry.Lifecycle.Purge(t.Context(), time.Hour); err != nil {
 				t.Fatalf("Purge: %v", err)
 			}
-			time.Sleep(10 * time.Millisecond)
-			if got := tk.GetState(); got != taskslog.StateStopped {
-				t.Fatalf("state during recovery window = %v, want stopped", got)
+			if got := tk.GetState(); got != taskslog.StatePurging {
+				t.Fatalf("state after Purge returns = %v, want purging", got)
 			}
-			if got := fake.Status("ctr-1"); got == runtimetest.StatusPurged {
-				t.Fatal("runtime was purged during recovery window")
-			}
-
-			deadline := time.Now().Add(time.Second)
-			for fake.Status("ctr-1") != runtimetest.StatusPurged {
-				if time.Now().After(deadline) {
-					t.Fatal("runtime was not purged after recovery window")
-				}
-				time.Sleep(time.Millisecond)
+			select {
+			case <-fake.started:
+			case <-time.After(time.Second):
+				t.Fatal("backend Purge did not start immediately")
 			}
 		})
 		t.Run("zero_delay_purges_immediately", func(t *testing.T) {
@@ -2600,7 +2617,7 @@ func TestManager(t *testing.T) {
 				time.Sleep(time.Millisecond)
 			}
 		})
-		t.Run("revive_cancels_scheduled_purge", func(t *testing.T) {
+		t.Run("revive_cancels_crashed_task_recovery_window", func(t *testing.T) {
 			t.Parallel()
 			releaseRevive := make(chan struct{})
 			fake := &blockingReviveBackend{FakeBackend: &runtimetest.FakeBackend{}, release: releaseRevive}
@@ -2610,7 +2627,7 @@ func TestManager(t *testing.T) {
 			})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(taskslog.StateStopped)
+			tk.SetState(taskslog.StateCrashed)
 			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), entry)
 

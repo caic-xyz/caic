@@ -131,7 +131,7 @@ describe("TaskList", () => {
     expect(scrollIntoView.mock.contexts.at(-1)).toBe(document.querySelector("[data-task-id='2']"));
   });
 
-  it("preserves task card DOM identity across live task updates", () => {
+  it("preserves task card DOM identity across live task updates and insertions", () => {
     let updateTasks: (tasks: Task[]) => void = () => undefined;
     render(() => {
       const [tasks, setTasks] = createSignal([task("1")]);
@@ -142,6 +142,10 @@ describe("TaskList", () => {
     if (!card) throw new Error("task card not rendered");
 
     updateTasks([{ ...task("1"), duration: 1 }]);
+
+    expect(document.querySelector("[data-task-id='1']")).toBe(card);
+
+    updateTasks([task("1"), task("2")]);
 
     expect(document.querySelector("[data-task-id='1']")).toBe(card);
   });

@@ -1,6 +1,6 @@
 // Sidebar task list with collapsible panel, grouped by repo for active tasks.
 
-import { For, Index, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { Accessor } from "solid-js";
 import LeftPanelClose from "@material-symbols/svg-400/outlined/left_panel_close.svg?solid";
 import LeftPanelOpen from "@material-symbols/svg-400/outlined/left_panel_open.svg?solid";
@@ -164,6 +164,7 @@ export default function TaskList(props: TaskListProps) {
     return sortedGroups;
   });
 
+  const tasksById = createMemo(() => new Map(props.tasks().map((task) => [task.id, task])));
   const groupRepos = createMemo(() => grouped().map((group) => group.repo));
 
   const firstVisibleTaskId = createMemo(() => {
@@ -263,8 +264,13 @@ export default function TaskList(props: TaskListProps) {
     scrollSelectedTaskIntoView();
   });
 
-  const renderTask = (t: () => Task) => (
-    <TaskCard
+  const renderTask = (id: string) => {
+    const t = createMemo(() => {
+      const task = tasksById().get(id);
+      if (!task) throw new Error(`Missing task ${id}`);
+      return task;
+    });
+    return <TaskCard
       id={t().id}
       title={t().title}
       forkedFromTaskID={t().forkedFromTaskID}
@@ -312,8 +318,8 @@ export default function TaskList(props: TaskListProps) {
       actionLoading={props.actionId() === t().id}
       onDiffClick={props.onDiffClick ? () => { const fn = props.onDiffClick; if (fn) fn(t().id); } : undefined}
       voiceNumber={props.voiceConnected() ? props.getTaskNumber(t().id) : undefined}
-    />
-  );
+    />;
+  };
 
   return (
     <>
@@ -364,7 +370,7 @@ export default function TaskList(props: TaskListProps) {
                   )}
                 </Show>
               </div>
-              <Index each={group().active}>{renderTask}</Index>
+              <For each={group().active.map((task) => task.id)}>{renderTask}</For>
               
               <Show when={group().stopped.length > 0}>
                 <button class={styles.subGroupHeader} onClick={() => toggleExpanded(stoppedKey)}>
@@ -372,7 +378,7 @@ export default function TaskList(props: TaskListProps) {
                   Stopped ({group().stopped.length})
                 </button>
                 <Show when={expanded().has(stoppedKey) || selectedInStopped()}>
-                  <Index each={group().stopped}>{renderTask}</Index>
+                  <For each={group().stopped.map((task) => task.id)}>{renderTask}</For>
                 </Show>
               </Show>
 
@@ -382,7 +388,7 @@ export default function TaskList(props: TaskListProps) {
                   Purged ({group().purged.length})
                 </button>
                 <Show when={expanded().has(purgedKey) || selectedInPurged()}>
-                  <Index each={group().purged}>{renderTask}</Index>
+                  <For each={group().purged.map((task) => task.id)}>{renderTask}</For>
                 </Show>
               </Show>
             </div>

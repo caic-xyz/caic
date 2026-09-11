@@ -44,9 +44,8 @@ func (r *Lifecycle) Close() error {
 	return nil
 }
 
-// Purge stops the task and schedules removal of its runtime resources after
-// delay. A zero delay removes the task as soon as it stops. Reviving the
-// stopped task cancels removal.
+// Purge removes a stopped task immediately. Active tasks are stopped first and
+// retain their runtime resources for delay so they can be revived.
 func (r *Lifecycle) Purge(ctx context.Context, delay time.Duration) error {
 	t := r.entry.Task()
 	if delay < 0 {
@@ -56,7 +55,7 @@ func (r *Lifecycle) Purge(ctx context.Context, delay time.Duration) error {
 	defer r.purgeMu.Unlock()
 	if r.purgeScheduled {
 		switch t.GetState() {
-		case taskslog.StateStopping, taskslog.StateStopped:
+		case taskslog.StateStopping, taskslog.StateStopped, taskslog.StatePurging:
 			return nil
 		default:
 			return conflict("task is no longer stopped for scheduled purge")
@@ -64,13 +63,18 @@ func (r *Lifecycle) Purge(ctx context.Context, delay time.Duration) error {
 	}
 
 	state := t.GetState()
+	purgeStoppedImmediately := state == taskslog.StateStopped
 	switch state {
 	case taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan, taskslog.StateRunning:
 		if _, changed := t.SetStateIfAny(taskslog.StateStopping,
 			taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan, taskslog.StateRunning); !changed {
 			return conflict("task state changed while scheduling purge")
 		}
-	case taskslog.StateStopping, taskslog.StateStopped:
+	case taskslog.StateStopping:
+	case taskslog.StateStopped:
+		if !t.SetStateIf(taskslog.StateStopped, taskslog.StatePurging) {
+			return conflict("task state changed while starting purge")
+		}
 	case taskslog.StateCrashed:
 		t.SetState(taskslog.StateStopped)
 	default:
@@ -93,22 +97,24 @@ func (r *Lifecycle) Purge(ctx context.Context, delay time.Duration) error {
 			}
 			r.purgeMu.Unlock()
 		}()
-		if state != taskslog.StateStopping && state != taskslog.StateStopped && state != taskslog.StateCrashed {
-			r.agentRuntime.StopTask(purgeCtx, t)
+		if !purgeStoppedImmediately {
+			if state != taskslog.StateStopping && state != taskslog.StateCrashed {
+				r.agentRuntime.StopTask(purgeCtx, t)
+				r.manager.NotifyTaskChange()
+			}
+			if !r.waitForStopped(purgeCtx) {
+				return
+			}
+
+			if !r.waitForPurgeDelay(purgeCtx, delay) {
+				return
+			}
+			if !t.SetStateIf(taskslog.StateStopped, taskslog.StatePurging) {
+				r.manager.log.InfoContext(purgeCtx, "scheduled purge cancelled", "task", t.ID, "state", t.GetState())
+				return
+			}
 			r.manager.NotifyTaskChange()
 		}
-		if !r.waitForStopped(purgeCtx) {
-			return
-		}
-
-		if !r.waitForPurgeDelay(purgeCtx, delay) {
-			return
-		}
-		if !t.SetStateIf(taskslog.StateStopped, taskslog.StatePurging) {
-			r.manager.log.InfoContext(purgeCtx, "scheduled purge cancelled", "task", t.ID, "state", t.GetState())
-			return
-		}
-		r.manager.NotifyTaskChange()
 		cleanupCtx := context.WithoutCancel(purgeCtx)
 		r.cleanup(cleanupCtx, taskslog.StatePurged)
 		r.manager.log.InfoContext(cleanupCtx, "purge completed", "task", t.ID, "final_state", t.GetState())

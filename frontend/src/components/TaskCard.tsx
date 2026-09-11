@@ -297,8 +297,8 @@ export default function TaskCard(props: TaskCardProps) {
               <TokenIcon width="0.7rem" height="0.7rem" />
             </span>
           </Show>
-          {/* Stopped/crashed: revive + purge buttons */}
-          <Show when={props.state === "stopped" || props.state === "crashed"}>
+          {/* Stopped/crashed: expose revive + purge only after selecting the card. */}
+          <Show when={props.selected && (props.state === "stopped" || props.state === "crashed")}>
             <Show when={props.onRevive}>
               <span class={styles.reviveBtn}>
                 <button

@@ -114,6 +114,32 @@ describe("TaskCard", () => {
     expect(screen.queryByText("forked from")).not.toBeInTheDocument();
   });
 
+  it("selects a stopped task before exposing its inline actions", () => {
+    const onClick = vi.fn();
+    const onPurge = vi.fn();
+    const { container, unmount } = render(() => (
+      <TaskCard {...props({ state: "stopped", onClick, onPurge, onRevive: vi.fn() })} />
+    ));
+    const card = container.querySelector("[data-task-id='1']");
+    if (!card) throw new Error("task card not rendered");
+
+    expect(screen.queryByTestId("purge-task")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("revive-task")).not.toBeInTheDocument();
+
+    fireEvent.click(card);
+
+    expect(onClick).toHaveBeenCalledOnce();
+    expect(onPurge).not.toHaveBeenCalled();
+
+    unmount();
+    render(() => (
+      <TaskCard {...props({ state: "stopped", selected: true, onPurge, onRevive: vi.fn() })} />
+    ));
+
+    expect(screen.getByTestId("purge-task")).toBeInTheDocument();
+    expect(screen.getByTestId("revive-task")).toBeInTheDocument();
+  });
+
   it("opens the task actions menu on right click", () => {
     const onClick = vi.fn();
     const onStop = vi.fn();
