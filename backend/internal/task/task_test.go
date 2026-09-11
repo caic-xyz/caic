@@ -2319,6 +2319,49 @@ func TestTask(t *testing.T) {
 				t.Errorf("settings = (%q, %q), want (gpt-4, claude-3-opus)", snap.RequestedModel, snap.ReportedModel)
 			}
 		})
+		t.Run("UsageReportedModel", func(t *testing.T) {
+			t.Parallel()
+			for _, tc := range []struct {
+				name  string
+				apply func(*Task)
+			}{
+				{"live", func(tk *Task) {
+					tk.addMessage(t.Context(), &agent.UsageMessage{ReportedModel: "claude-opus-4-6"}, false)
+				}},
+				{"replay", func(tk *Task) {
+					tk.SeedTimeline([]agent.Message{&agent.UsageMessage{ReportedModel: "claude-opus-4-6"}})
+				}},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "requested", "")
+					tc.apply(tk)
+					if got := tk.Snapshot().ReportedModel; got != "claude-opus-4-6" {
+						t.Errorf("ReportedModel = %q, want claude-opus-4-6", got)
+					}
+				})
+			}
+		})
+	})
+
+	t.Run("ReportedEffort", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Codex, "gpt-5", "high")
+		tk.addMessage(t.Context(), &agent.InitMessage{SessionID: "s1", ReportedEffort: "medium"}, false)
+		snap := tk.Snapshot()
+		if snap.RequestedEffort != "high" || snap.ReportedEffort != "medium" {
+			t.Errorf("settings = (%q, %q), want (high, medium)", snap.RequestedEffort, snap.ReportedEffort)
+		}
+	})
+
+	t.Run("UnreportedEffortIsNotAddedToInit", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Codex, "gpt-5", "high")
+		init := &agent.InitMessage{SessionID: "s1"}
+		tk.addMessage(t.Context(), init, false)
+		if init.ReportedEffort != "" {
+			t.Errorf("InitMessage.Effort = %q, want empty", init.ReportedEffort)
+		}
 	})
 
 	t.Run("ReportedEffort", func(t *testing.T) {

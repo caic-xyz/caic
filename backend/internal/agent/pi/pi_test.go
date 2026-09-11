@@ -100,7 +100,7 @@ func runPiRelayHelper() {
 		case "set_model":
 			fmt.Println(`{"type":"response","command":"set_model","success":true,"data":{}}`)
 		case "get_state":
-			fmt.Println(`{"type":"response","command":"get_state","success":true,"data":{"sessionId":"ses-1"}}`)
+			fmt.Println(`{"type":"response","command":"get_state","success":true,"data":{"sessionId":"ses-1","model":{"provider":"openai-codex","id":"gpt-5.6-terra"},"thinkingLevel":"high"}}`)
 		}
 	}
 	if err := s.Err(); err != nil {
@@ -292,6 +292,14 @@ func TestBackendStart(t *testing.T) {
 	if string(count) != "11" {
 		t.Errorf("Pi relay launches = %d, want 2", len(count))
 	}
+	msg := <-msgs
+	meta, ok := msg.Message.(*agent.MetaSessionMessage)
+	if !ok {
+		t.Fatalf("startup message = %T, want *agent.MetaSessionMessage", msg.Message)
+	}
+	if meta.ReportedModel != "openai-codex/gpt-5.6-terra" || meta.ReportedEffort != "high" {
+		t.Fatalf("reported settings = %q/%q, want openai-codex/gpt-5.6-terra/high", meta.ReportedModel, meta.ReportedEffort)
+	}
 
 	stopCtx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
@@ -305,7 +313,7 @@ func TestPiWireFormat(t *testing.T) {
 	t.Run("MessageStartIncludesSessionMetadata", func(t *testing.T) {
 		t.Parallel()
 		w := &piWireFormat{sessionID: "ses-1"}
-		msgs, err := w.ParseMessage([]byte(`{"type":"message_start","message":{"role":"assistant","provider":"openai","model":"gpt-5"}}`))
+		msgs, err := w.ParseMessage([]byte(`{"type":"message_start","message":{"role":"assistant","provider":"openrouter","model":"auto","responseModel":"anthropic/claude-opus-4-6"}}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -316,7 +324,7 @@ func TestPiWireFormat(t *testing.T) {
 		if !ok {
 			t.Fatalf("message type = %T, want *agent.InitMessage", msgs[0])
 		}
-		if init.SessionID != "ses-1" || init.ReportedModel != "openai/gpt-5" || init.Version != "" {
+		if init.SessionID != "ses-1" || init.ReportedModel != "openrouter/anthropic/claude-opus-4-6" || init.Version != "" {
 			t.Fatalf("InitMessage = %+v", init)
 		}
 	})

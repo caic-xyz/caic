@@ -1212,6 +1212,9 @@ func (t *Task) SeedTimelineEntries(entries []agent.TimedMessage) {
 			t.trackToolUse(m)
 		case *agent.UsageMessage:
 			t.lastAPIUsage = m.Usage
+			if m.ReportedModel != "" {
+				t.reportedModel = m.ReportedModel
+			}
 			t.cacheExpiresAt = time.Time{}
 			if m.Usage.CacheTTLSeconds > 0 {
 				t.cacheExpiresAt = time.Now().Add(time.Duration(m.Usage.CacheTTLSeconds) * time.Second)
@@ -1808,6 +1811,9 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (s
 	}
 	if u, ok := m.(*agent.UsageMessage); ok {
 		t.lastAPIUsage = u.Usage
+		if u.ReportedModel != "" {
+			t.reportedModel = u.ReportedModel
+		}
 		t.cacheExpiresAt = time.Time{}
 		if u.Usage.CacheTTLSeconds > 0 {
 			t.cacheExpiresAt = time.Now().Add(time.Duration(u.Usage.CacheTTLSeconds) * time.Second)

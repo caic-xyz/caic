@@ -192,6 +192,8 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	}
 
 	sessionID := ""
+	reportedModel := ""
+	reportedEffort := ""
 	if err := writeGetState(rp.Stdin, opts.Log); err != nil {
 		opts.Logger.WarnContext(ctx, "pi: write get_state failed", "err", err)
 	} else {
@@ -215,6 +217,10 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 				opts.Logger.WarnContext(ctx, "pi: parse get_state failed", "err", err)
 			} else {
 				sessionID = state.SessionID
+				if state.Model != nil {
+					reportedModel = resolvedModel(state.Model.Provider, "", state.Model.ID)
+				}
+				reportedEffort = string(state.ThinkingLevel)
 			}
 		}
 	}
@@ -222,8 +228,14 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	wire.sessionID = sessionID
 
 	if sessionID != "" {
-		opts.MsgCh <- agent.TimedMessage{Message: &agent.MetaSessionMessage{MessageType: "caic_session", SessionID: sessionID}}
-		if err := agent.WriteMetaSession(opts.Log, &agent.InitMessage{SessionID: sessionID}); err != nil {
+		initMsg := &agent.InitMessage{SessionID: sessionID, ReportedModel: reportedModel, ReportedEffort: reportedEffort}
+		opts.MsgCh <- agent.TimedMessage{Message: &agent.MetaSessionMessage{
+			MessageType:    "caic_session",
+			SessionID:      initMsg.SessionID,
+			ReportedModel:  initMsg.ReportedModel,
+			ReportedEffort: initMsg.ReportedEffort,
+		}}
+		if err := agent.WriteMetaSession(opts.Log, initMsg); err != nil {
 			_ = rp.Cmd.Process.Kill()
 			_ = rp.Cmd.Wait()
 			return nil, fmt.Errorf("write session metadata: %w", err)
@@ -586,13 +598,13 @@ func messagesFromAgentMessage(msg *pi.AgentMessage) []agent.Message {
 }
 
 // handleMessageStart emits a one-shot InitMessage carrying the model name on
-// the first message_start event that contains a non-empty model field.
+// the first message_start event that reports a configured or served model.
 func (w *piWireFormat) handleMessageStart(line []byte) ([]agent.Message, error) {
 	var ev pi.MessageStartEvent
 	if err := json.Unmarshal(line, &ev); err != nil {
 		return nil, fmt.Errorf("unmarshal message_start: %w", err)
 	}
-	if ev.Message.Model == "" {
+	if ev.Message.Model == "" && ev.Message.ResponseModel == "" {
 		return nil, nil
 	}
 	w.mu.Lock()
@@ -601,11 +613,21 @@ func (w *piWireFormat) handleMessageStart(line []byte) ([]agent.Message, error) 
 		return nil, nil
 	}
 	w.initSent = true
-	model := ev.Message.Model
-	if ev.Message.Provider != "" {
-		model = ev.Message.Provider + "/" + model
-	}
+	model := resolvedModel(ev.Message.Provider, ev.Message.ResponseModel, ev.Message.Model)
 	return []agent.Message{&agent.InitMessage{SessionID: w.sessionID, ReportedModel: model}}, nil
+}
+
+// resolvedModel returns the provider-served model when available, otherwise
+// the configured model. Pi reports responseModel when a router resolves an
+// alias to a concrete model.
+func resolvedModel(provider, responseModel, model string) string {
+	if responseModel != "" {
+		model = responseModel
+	}
+	if provider == "" || model == "" {
+		return model
+	}
+	return provider + "/" + model
 }
 
 // handleError converts an error delta into a ResultMessage.
@@ -744,6 +766,7 @@ func (w *piWireFormat) handleTurnEnd(line []byte) ([]agent.Message, error) {
 	if ev.Message.Role == pi.RoleAssistant && ev.Message.Usage.TotalTokens > 0 {
 		return []agent.Message{&agent.UsageMessage{
 			Usage:         toAgentUsage(&ev.Message.Usage),
+			ReportedModel: resolvedModel(ev.Message.Provider, ev.Message.ResponseModel, ev.Message.Model),
 			ContextWindow: int(w.modelCtxWindow),
 		}}, nil
 	}

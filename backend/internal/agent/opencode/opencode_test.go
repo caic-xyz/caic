@@ -100,8 +100,8 @@ func TestHandshake(t *testing.T) {
 		if err != nil {
 			t.Fatalf("handshake: %v", err)
 		}
-		if hs.currentModel != selectedModel {
-			t.Fatalf("current model = %q, want %q", hs.currentModel, selectedModel)
+		if hs.currentModel != selectedModel || hs.currentEffort != "high" {
+			t.Fatalf("reported settings = %q/%q, want %q/high", hs.currentModel, hs.currentEffort, selectedModel)
 		}
 		lines := strings.Fields(stdin.String())
 		if len(lines) != 4 {
@@ -229,13 +229,14 @@ func TestHandshakeResultSetConfigOptions(t *testing.T) {
 			Options:      []genaiopencode.ConfigOptionValue{{Value: "openai/gpt-5"}, {Value: "anthropic/claude-sonnet-4"}},
 		},
 		{
-			ID:      genaiopencode.ConfigOptionEffort,
-			Type:    genaiopencode.ConfigOptionTypeSelect,
-			Options: []genaiopencode.ConfigOptionValue{{Value: "minimal"}, {Value: "high"}},
+			ID:           genaiopencode.ConfigOptionEffort,
+			Type:         genaiopencode.ConfigOptionTypeSelect,
+			CurrentValue: "high",
+			Options:      []genaiopencode.ConfigOptionValue{{Value: "minimal"}, {Value: "high"}},
 		},
 	})
-	if res.currentModel != "openai/gpt-5" {
-		t.Fatalf("current model = %q, want openai/gpt-5", res.currentModel)
+	if res.currentModel != "openai/gpt-5" || res.currentEffort != "high" {
+		t.Fatalf("reported settings = %q/%q, want openai/gpt-5/high", res.currentModel, res.currentEffort)
 	}
 	if got := res.configOption(genaiopencode.ConfigOptionEffort); got == nil || len(got.Options) != 2 || got.Options[0].Value != "minimal" || got.Options[1].Value != "high" {
 		t.Fatalf("effort option = %#v, want minimal and high", got)

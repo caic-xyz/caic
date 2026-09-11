@@ -119,9 +119,10 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	}
 	// Emit InitMessage so the task captures session ID, model, and version.
 	initMsg := &agent.InitMessage{
-		SessionID:     hs.wire.sessionID,
-		ReportedModel: hs.currentModel,
-		Version:       hs.agentVersion,
+		SessionID:      hs.wire.sessionID,
+		ReportedModel:  hs.currentModel,
+		ReportedEffort: hs.currentEffort,
+		Version:        hs.agentVersion,
 	}
 	opts.MsgCh <- agent.TimedMessage{Message: initMsg}
 	if err := agent.WriteMetaSession(opts.Log, initMsg); err != nil {
@@ -436,6 +437,7 @@ func (w *wireFormat) handlePromptResponseLocked(line []byte) ([]agent.Message, e
 type handshakeResult struct {
 	wire          *wireFormat
 	currentModel  string // Model ID the session is using.
+	currentEffort string // Reasoning effort the session is using.
 	agentVersion  string // Agent version string from initialize.
 	configOptions []opencode.SessionConfigOption
 }
@@ -576,6 +578,9 @@ func (res *handshakeResult) setConfigOptions(options []opencode.SessionConfigOpt
 	res.configOptions = options
 	if model := res.configOption(opencode.ConfigOptionModel); model != nil {
 		res.currentModel = model.CurrentValue
+	}
+	if effort := res.configOption(opencode.ConfigOptionEffort); effort != nil {
+		res.currentEffort = effort.CurrentValue
 	}
 }
 

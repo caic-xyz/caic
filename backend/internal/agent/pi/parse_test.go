@@ -757,7 +757,7 @@ func TestCaicModelInfo(t *testing.T) {
 		if _, err := w.ParseMessage([]byte(`{"type":"caic_model_info","context_window":1000000}`)); err != nil {
 			t.Fatal(err)
 		}
-		turnEndLine := []byte(`{"type":"turn_end","message":{"role":"assistant","content":[],"usage":{"input":100,"output":50,"cacheWrite":30,"cacheWrite1h":20,"reasoning":20,"totalTokens":180}}}`)
+		turnEndLine := []byte(`{"type":"turn_end","message":{"role":"assistant","provider":"openrouter","model":"auto","responseModel":"anthropic/claude-opus-4-6","content":[],"usage":{"input":100,"output":50,"cacheWrite":30,"cacheWrite1h":20,"reasoning":20,"totalTokens":180}}}`)
 		msgs, err := w.ParseMessage(turnEndLine)
 		if err != nil {
 			t.Fatal(err)
@@ -777,6 +777,9 @@ func TestCaicModelInfo(t *testing.T) {
 		}
 		if um.Usage.CacheTTLSeconds != 300 {
 			t.Errorf("CacheTTLSeconds = %d, want 300 for mixed five-minute and one-hour writes", um.Usage.CacheTTLSeconds)
+		}
+		if um.ReportedModel != "openrouter/anthropic/claude-opus-4-6" {
+			t.Errorf("ReportedModel = %q, want openrouter/anthropic/claude-opus-4-6", um.ReportedModel)
 		}
 	})
 
