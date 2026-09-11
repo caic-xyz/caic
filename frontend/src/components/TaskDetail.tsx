@@ -1095,8 +1095,13 @@ function RateLimitBanner(props: { ev: EventMessage }) {
     if (!r) return "";
     const resetMS = Date.parse(r);
     if (!Number.isFinite(resetMS) || resetMS <= 0) return "";
+    const remainingMS = resetMS - Date.now();
+    const dayMS = 24 * 60 * 60 * 1000;
     const d = new Date(resetMS);
-    return ` · resets ${d.toLocaleTimeString()}`;
+    if (remainingMS > dayMS) {
+      return ` · resets in ${Math.ceil(remainingMS / dayMS)} days at ${d.toLocaleTimeString()}`;
+    }
+    return ` · resets at ${d.toLocaleTimeString()}`;
   };
   const rejectedLabel = () => {
     const r = rl();

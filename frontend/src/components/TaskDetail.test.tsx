@@ -809,8 +809,32 @@ describe("SSE connection", () => {
     });
     vi.advanceTimersByTime(100);
 
-    expect(document.body.textContent).toContain("5-hour quota reached; using extra usage");
+    expect(document.body.textContent).toContain("5-hour quota reached; using extra usage · resets at 4:26:40 AM");
     expect(document.body.textContent).not.toContain("monthly");
+  });
+
+  it("shows quota resets more than 24 hours away in days", () => {
+    vi.setSystemTime(new Date("2026-07-08T12:00:00Z"));
+    const created: FakeES[] = [];
+    const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
+    makeSyncReadyMock(created, capturedCb);
+
+    renderTaskDetail();
+    if (!capturedCb.value) throw new Error("taskEvents callback not captured");
+
+    capturedCb.value({
+      kind: "rateLimit",
+      ts: 1,
+      rateLimit: {
+        status: "rejected",
+        rateLimitType: "seven_day",
+        utilization: 1,
+        resetsAt: "2026-07-10T13:00:00Z" as ISOTimestamp,
+      },
+    });
+    vi.advanceTimersByTime(100);
+
+    expect(document.body.textContent).toContain("resets in 3 days at 1:00:00 PM");
   });
 
   it("does not render empty usage metadata", () => {
