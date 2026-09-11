@@ -414,11 +414,7 @@ func (m *mcpRegistry) taskCreateToolError(ctx context.Context, args mcpTaskCreat
 		if !m.taskCreateConfigurationValid(ctx, args) {
 			return domainToolError[mcpTaskCreatedOutput](err)
 		}
-		if mcpHasScope(ctx, mcpScopeRead) {
-			message += ". Call repos_list, use an exact returned path, then retry task_create."
-		} else {
-			message += ". The path must exactly match a configured repository."
-		}
+		message = repositoryRecoveryMessage(ctx, message, "task_create")
 	case api.CodeUnknownHarness:
 		if args.Harness == "" {
 			return mcp.ToolError[mcpTaskCreatedOutput](apiErr.Error())
@@ -444,6 +440,15 @@ func (m *mcpRegistry) taskCreateToolError(ctx context.Context, args mcpTaskCreat
 		return domainToolError[mcpTaskCreatedOutput](err)
 	}
 	return mcp.ToolErrorWithMeta[mcpTaskCreatedOutput](message, mcp.MetaObject{mcp.ToolErrorCodeMetaKey: string(apiErr.Code)})
+}
+
+// repositoryRecoveryMessage adds a safe retry instruction for a rejected
+// repository path. It only refers to repos_list when the caller can use it.
+func repositoryRecoveryMessage(ctx context.Context, message, operation string) string {
+	if mcpHasScope(ctx, mcpScopeRead) {
+		return message + ". Call repos_list, use an exact returned path, then retry " + operation + "."
+	}
+	return message + ". The path must exactly match a configured repository."
 }
 
 // taskCreateConfigurationValid reports whether the effective harness, model,
@@ -926,6 +931,10 @@ func (m *mcpRegistry) handleBotFixCI(ctx context.Context, args mcpBotFixCIArgs) 
 	}
 	resp, err := m.ci.fixCI(ctx, &v1.BotFixCIReq{Repo: args.Repo})
 	if err != nil {
+		if apiErr, ok := errors.AsType[*api.Error](err); ok && apiErr.Code == api.CodeUnknownRepository {
+			message := repositoryRecoveryMessage(ctx, apiErr.Error(), "bot_fix_ci")
+			return mcp.ToolErrorWithMeta[mcpTaskCreatedOutput](message, mcp.MetaObject{mcp.ToolErrorCodeMetaKey: string(apiErr.Code)})
+		}
 		return domainToolError[mcpTaskCreatedOutput](err)
 	}
 	taskList := m.taskSvc.taskListSnapshot(ctx)

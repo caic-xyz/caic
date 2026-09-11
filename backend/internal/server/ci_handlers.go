@@ -112,8 +112,11 @@ func (h *ciHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 // and creates a new agent task — the same path as the automated maybeAutoFix.
 func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Task, error) {
 	checkout, ok := h.checkouts.Checkout(req.Repo)
-	if !ok || checkout.Repository == nil {
-		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "repo not found"}
+	if !ok {
+		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeUnknownRepository, Message: "unknown repository: " + req.Repo}
+	}
+	if checkout.Repository == nil {
+		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "no repository metadata configured for this path"}
 	}
 	f := h.forgeMgr.ForgeForInfo(ctx, checkout.Repository)
 	if f == nil {

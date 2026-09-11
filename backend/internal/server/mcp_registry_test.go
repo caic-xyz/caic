@@ -332,6 +332,52 @@ func TestCaicToolRegistryHandleTaskCreateUnknownRepository(t *testing.T) {
 	}
 }
 
+func TestCaicToolRegistryHandleBotFixCIUnknownRepository(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		scopes []string
+		want   string
+	}{
+		{
+			name:   "with repository read access",
+			scopes: []string{mcpScopeRead, mcpScopeReposWrite},
+			want:   "unknown repository: mistyped. Call repos_list, use an exact returned path, then retry bot_fix_ci.",
+		},
+		{
+			name:   "without repository read access",
+			scopes: []string{mcpScopeReposWrite},
+			want:   "unknown repository: mistyped. The path must exactly match a configured repository.",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := newTestRouter(t, nil)
+			c := &mcpRegistry{ci: s.ciHandlers}
+			ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{Scopes: tt.scopes, Remote: true})
+			ctx = auth.NewContext(ctx, &auth.User{ID: "user-1"})
+
+			result := c.handleBotFixCI(ctx, mcpBotFixCIArgs{Repo: "mistyped"})
+			if !result.IsError {
+				t.Fatal("handleBotFixCI() did not return a tool error")
+			}
+			output, ok := result.Structured.(mcp.ErrorOutput)
+			if !ok {
+				t.Fatalf("result type = %T, want mcp.ErrorOutput", result.Structured)
+			}
+			if output.Error != tt.want {
+				t.Errorf("error = %q, want %q", output.Error, tt.want)
+			}
+			if got := result.Meta[mcp.ToolErrorCodeMetaKey]; got != string(api.CodeUnknownRepository) {
+				t.Errorf("error code metadata = %q, want %q", got, api.CodeUnknownRepository)
+			}
+		})
+	}
+}
+
 func TestCaicToolRegistryHandleTaskCreateSelectionErrors(t *testing.T) {
 	t.Parallel()
 

@@ -783,7 +783,7 @@ func (h *taskHandlers) handleVNCWebSocket(w http.ResponseWriter, r *http.Request
 	log := h.log.With("task", t.ID)
 	snap := t.Snapshot()
 	if snap.RuntimeInstanceID == "" || snap.VNCPort == 0 {
-		writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "task has no VNC display"})
+		writeError(r.Context(), w, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "task has no VNC display"})
 		return
 	}
 	log.InfoContext(r.Context(), "VNC proxy start", "instance", snap.RuntimeInstanceID, "port", snap.VNCPort)
